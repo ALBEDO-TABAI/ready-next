@@ -47,6 +47,13 @@ import { IconButton } from '../ui/IconButton'
 import {
   buildTaskCardViewModel,
   createDefaultTaskDisclosureState,
+  formatTaskUserFacingText,
+  formatTaskProgressLabel,
+  formatTaskStepDisplayTitle,
+  getTaskRunDisplayKey,
+  getTaskStartModeLabel,
+  hasTaskRunResumeIdentity,
+  isInternalAgentHandoffTask,
   type TaskCardRunLike,
   type TaskSectionKey
 } from '../../modules/agent/taskCardViewModel'
@@ -162,10 +169,22 @@ function resolveProjectionForTaskRun(
   persistedRun?: Pick<PersistedScopeRunSummary, 'taskId' | 'taskContinuation'> | null,
 ): PersistedTaskProjection | null {
   const items = projections || []
+  const continuationCandidateIds = (continuation: ScopeRunState['taskContinuation'] | undefined) => {
+    if (!continuation) return []
+    return [
+      continuation.taskId,
+      continuation.childRunId ? `skill-child:${continuation.childRunId}` : null,
+      continuation.detachedTaskId ? `detached:${continuation.detachedTaskId}` : null,
+      continuation.taskRunId,
+      continuation.jobId,
+    ]
+  }
   const candidateIds = [
     run.taskId,
     run.taskContinuation?.taskId,
     persistedRun?.taskId,
+    ...continuationCandidateIds(run.taskContinuation),
+    ...continuationCandidateIds(persistedRun?.taskContinuation),
   ]
     .map((item) => String(item || '').trim())
     .filter(Boolean)
@@ -254,7 +273,7 @@ function childRunActions(row: ActiveChildRunSummaryData): ScopeRunState['resumab
 }
 
 function childRunTaskSummary(row: ActiveChildRunSummaryData): string {
-  const progress = formatTaskProgress(row.progress)
+  const progress = formatTaskProgressLabel(row.progress)
   const status = childRunProjectionStatus(row)
   if (status === 'done') return progress ? `后台任务已完成 · ${progress}` : '后台任务已完成'
   if (status === 'failed') return row.blockedReason || '后台任务失败'
@@ -615,20 +634,11 @@ function budgetWarningBadgeLabel(level: TaskProjectionRecordData['budgetWarningL
   }
 }
 
-function formatTaskProgress(progress: ScopeRunState['progress'] | undefined | null): string | null {
-  if (!progress) return null
-  const stage = progress.stage || '当前阶段'
-  if (progress.completed != null && progress.total != null) {
-    return `${stage} · ${progress.completed}/${progress.total}`
-  }
-  if (progress.coverage != null) {
-    return `${stage} · ${Math.round(progress.coverage * 100)}%`
-  }
-  return progress.stage || null
-}
-
 function progressPercent(progress: ScopeRunState['progress'] | undefined | null): number | null {
   if (!progress) return null
+  if (progress.overallCoverage != null) {
+    return Math.max(0, Math.min(100, Math.round(progress.overallCoverage * 100)))
+  }
   if (progress.total && progress.total > 0 && progress.completed != null) {
     return Math.max(0, Math.min(100, Math.round((progress.completed / progress.total) * 100)))
   }
@@ -644,6 +654,26 @@ function isTaskVisible(run: TaskCardRun | null | undefined): boolean {
     run.progress ||
     (run.steps && run.steps.length > 0) ||
     (run.memoryCapture && run.memoryCapture.status !== 'dismissed')
+  )
+}
+
+function isBackgroundTaskRun(run: TaskCardRun | null | undefined): boolean {
+  if (!run) return false
+  const taskId = String(run.taskId || run.taskContinuation?.taskId || '').trim()
+  const blockerType = run.taskContinuation?.blockerType
+  const childOrDetachedIdentity = Boolean(
+    run.taskContinuation?.childRunId ||
+    run.taskContinuation?.detachedTaskId ||
+    taskId.startsWith('skill-child:') ||
+    taskId.startsWith('detached:')
+  )
+  return Boolean(
+    run.waitingFor === 'background' ||
+    run.terminalReason === 'checkpoint_background' ||
+    run.terminalReason === 'checkpoint_budget' ||
+    blockerType === 'background_running' ||
+    blockerType === 'budget_paused' ||
+    (childOrDetachedIdentity && hasTaskRunResumeIdentity(run))
   )
 }
 
@@ -704,13 +734,15 @@ function TaskCard({
   const recentArtifacts = run.recentArtifacts || []
   const isDetachedTask = typeof run.taskId === 'string' && run.taskId.startsWith('detached:')
   const childRunId = run.taskContinuation?.childRunId || null
-  const progressLabel = formatTaskProgress(run.progress)
+  const isAgentHandoff = isInternalAgentHandoffTask(run)
+  const progressLabel = formatTaskProgressLabel(run.progress)
   const progressValue = progressPercent(run.progress)
+  const progressLastError = run.progress?.lastError ? formatTaskUserFacingText(run.progress.lastError) : null
   const visibleMemoryCapture =
     run.memoryCapture && run.memoryCapture.status === 'ready' ? run.memoryCapture : null
   const summaryPreview = formatSingleLinePreview(vm.summary)
   const metaBadges = [
-    run.taskType ? taskTypeBadgeLabel(run.taskType) : null,
+    getTaskStartModeLabel(run) || (run.taskType ? taskTypeBadgeLabel(run.taskType) : null),
     run.interactionState && run.interactionState !== 'running'
       ? interactionStateBadgeLabel(run.interactionState)
       : null,
@@ -872,9 +904,9 @@ function TaskCard({
                   />
                 </div>
               )}
-              {run.progress?.lastError && expanded && (
+              {progressLastError && expanded && (
                 <div style={{ fontSize: 10.5, color: 'var(--text-light)', marginTop: 4 }}>
-                  最近阻塞：{run.progress.lastError}
+                  当前状态：{progressLastError}
                 </div>
               )}
             </div>
@@ -924,10 +956,12 @@ function TaskCard({
                     }}
                   />
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: 11.5, color: 'var(--text-body)' }}>{step.title}</div>
+                    <div style={{ fontSize: 11.5, color: 'var(--text-body)' }}>
+                      {formatTaskStepDisplayTitle(step.title, run.progress)}
+                    </div>
                     {step.detail && (
                       <div style={{ fontSize: 10.5, color: 'var(--text-light)', marginTop: 1 }}>
-                        {step.detail}
+                        {formatTaskUserFacingText(step.detail)}
                       </div>
                     )}
                   </div>
@@ -1120,7 +1154,7 @@ function TaskCard({
                 onClick={() => onContinueChildRun?.(run.scopeId, childRunId)}
                 style={{ ...TASK_ACTION_BUTTON_STYLE }}
               >
-                继续处理
+                {isAgentHandoff ? '继续生成报告' : '继续处理'}
               </button>
             )}
             {childRunId && (run.resumableActions || []).includes('cancel') && (
@@ -1141,7 +1175,7 @@ function TaskCard({
                 继续运行
               </button>
             )}
-            {(run.waitingFor === 'input' || run.waitingFor === 'clarification') && (
+            {!isAgentHandoff && (run.waitingFor === 'input' || run.waitingFor === 'clarification') && (
               <button
                 type="button"
                 onClick={() => onContinueInput?.(run.scopeId)}
@@ -2360,12 +2394,31 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     )
   }, [activeChildRuns, currentScopeId, inMemoryTaskRuns, persistedScopeRuns, persistedTaskProjections])
 
-  const currentTaskRun = useMemo(() => {
-    const currentRun = currentScopeId
-      ? mergedTaskRuns.find((item) => item.scopeId === currentScopeId) || null
-      : null
-    return currentRun && isTaskVisible(currentRun) ? currentRun : null
+  const currentScopeTaskRuns = useMemo(() => {
+    if (!currentScopeId) return []
+    return mergedTaskRuns.filter((item) => item.scopeId === currentScopeId && isTaskVisible(item))
   }, [currentScopeId, mergedTaskRuns])
+
+  const currentTaskRun = useMemo(() => {
+    return currentScopeTaskRuns.find((item) => !isBackgroundTaskRun(item)) || null
+  }, [currentScopeTaskRuns])
+
+  const backgroundTaskRuns = useMemo(() => {
+    const foregroundKey = currentTaskRun ? getTaskRunDisplayKey(currentTaskRun) : null
+    const byKey = new Map<string, TaskCardRun>()
+    for (const run of currentScopeTaskRuns) {
+      if (!isBackgroundTaskRun(run)) continue
+      const key = getTaskRunDisplayKey(run)
+      if (key === foregroundKey) continue
+      const existing = byKey.get(key)
+      if (!existing || new Date(run.updatedAt).getTime() >= new Date(existing.updatedAt).getTime()) {
+        byKey.set(key, run)
+      }
+    }
+    return Array.from(byKey.values()).sort(
+      (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+    )
+  }, [currentScopeTaskRuns, currentTaskRun])
 
   const showToolTraceCapsule =
     !currentTaskRun &&
@@ -2879,7 +2932,17 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     const run =
       mergedTaskRuns.find((item) => item.scopeId === scopeId && item.taskContinuation?.childRunId === childRunId) ||
       mergedTaskRuns.find((item) => item.scopeId === scopeId && item.taskId === `skill-child:${childRunId}`)
-    setComposerDraft(`继续后台任务 ${childRunId}`, buildRunContinuationIntent(run) || null)
+    const continuationRun: Pick<ScopeRunState, 'taskId' | 'taskContinuation' | 'blockedReason'> = run || {
+      taskId: `skill-child:${childRunId}`,
+      blockedReason: '后台任务仍在运行',
+      taskContinuation: {
+        taskId: `skill-child:${childRunId}`,
+        childRunId,
+        pauseReason: 'background_running',
+        blockerType: 'background_running',
+      },
+    }
+    setComposerDraft(`继续后台任务 ${childRunId}`, buildRunContinuationIntent(continuationRun) || null)
     focusInputWithResize()
   }, [buildRunContinuationIntent, currentScopeId, focusInputWithResize, loadConversation, mergedTaskRuns, setComposerDraft])
 
@@ -3154,20 +3217,54 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
   ])
 
   const bottomTaskCard = useMemo<React.ReactNode | null>(() => {
-    if (!currentTaskRun) return null
-    const hasBackgroundTask =
-      currentTaskRun.waitingFor === 'background' ||
-      Boolean(currentTaskRun.taskContinuation?.childRunId) ||
-      Boolean(currentTaskRun.progress) ||
-      currentTaskRun.status === 'running' ||
-      currentTaskRun.status === 'blocked'
-    if (!hasBackgroundTask) return null
-    return renderTaskSnapshotCard(
-      currentTaskRun,
-      `bottom-task-${currentTaskRun.taskId || currentTaskRun.scopeId}`,
-      true,
+    const foregroundActive = Boolean(
+      currentTaskRun &&
+      (
+        isStreaming ||
+        currentTaskRun.phase === 'queued' ||
+        currentTaskRun.phase === 'planning' ||
+        currentTaskRun.phase === 'tool_running' ||
+        currentTaskRun.phase === 'takeover' ||
+        currentTaskRun.phase === 'resuming' ||
+        currentTaskRun.phase === 'responding'
+      )
     )
-  }, [currentTaskRun, renderTaskSnapshotCard])
+    if (!foregroundActive && backgroundTaskRuns.length === 0) return null
+    return (
+      <div className="flex flex-col" style={{ gap: 6 }}>
+        {foregroundActive && currentTaskRun
+          ? renderTaskSnapshotCard(
+              currentTaskRun,
+              `bottom-task-${getTaskRunDisplayKey(currentTaskRun)}`,
+              true,
+            )
+          : null}
+        {backgroundTaskRuns.length > 0 && (
+          <div className="flex flex-col" style={{ gap: 6 }}>
+            {(foregroundActive || backgroundTaskRuns.length > 1) && (
+              <div
+                style={{
+                  fontSize: 10.5,
+                  fontWeight: 600,
+                  color: 'var(--text-light)',
+                  padding: '0 2px',
+                }}
+              >
+                后台任务
+              </div>
+            )}
+            {backgroundTaskRuns.map((run) =>
+              renderTaskSnapshotCard(
+                run,
+                `bottom-task-${getTaskRunDisplayKey(run)}`,
+                true,
+              ),
+            )}
+          </div>
+        )}
+      </div>
+    )
+  }, [backgroundTaskRuns, currentTaskRun, isStreaming, renderTaskSnapshotCard])
 
   // W3: Drag & drop support (app-internal + OS files)
   const [isDragOver, setIsDragOver] = useState(false)

@@ -11,6 +11,7 @@ export interface RunStateCandidate {
   path: string
   mtimeMs: number
   taskId: string | null
+  childRunId: string | null
   status: string | null
   currentStage: string | null
   activeOutputDir: string | null
@@ -67,6 +68,7 @@ function readRunStateCandidate(path: string, fileName: string): RunStateCandidat
     path,
     mtimeMs: stat.mtimeMs,
     taskId: nonEmptyString(rec.task_id) || nonEmptyString(rec.taskId),
+    childRunId: nonEmptyString(rec.child_run_id) || nonEmptyString(rec.childRunId),
     status: nonEmptyString(rec.status),
     currentStage: nonEmptyString(rec.current_stage)
       || nonEmptyString(rec.currentStage)
@@ -89,15 +91,26 @@ function followsExpectedTask(candidate: RunStateCandidate, expectedTaskId: strin
   return !expectedTaskId || !candidate.taskId || candidate.taskId === expectedTaskId
 }
 
+function followsExpectedChildRun(candidate: RunStateCandidate, expectedChildRunId: string | null): boolean {
+  return !expectedChildRunId || candidate.childRunId === expectedChildRunId
+}
+
 function resolveActiveCandidate(
   candidate: RunStateCandidate,
   fileName: string,
   expectedTaskId: string | null,
+  expectedChildRunId: string | null = null,
 ): RunStateCandidate {
   const activeRunStatePath = resolveActiveOutputPath(candidate, fileName)
   if (!activeRunStatePath || activeRunStatePath === candidate.path) return candidate
   const activeCandidate = readRunStateCandidate(activeRunStatePath, fileName)
-  if (!activeCandidate || !followsExpectedTask(activeCandidate, expectedTaskId)) return candidate
+  if (
+    !activeCandidate
+    || !followsExpectedTask(activeCandidate, expectedTaskId)
+    || !followsExpectedChildRun(activeCandidate, expectedChildRunId)
+  ) {
+    return candidate
+  }
   return activeCandidate
 }
 
@@ -166,17 +179,19 @@ export function selectRunStateCandidate(params: {
   explicitRunStatePath?: string | null
   trustExplicitRunStatePath?: boolean
   expectedTaskId?: string | null
+  expectedChildRunId?: string | null
   fileName?: string
   searchDepth?: number
 }): RunStateSelection {
   const fileName = params.fileName || DEFAULT_RUN_STATE_FILENAME
   const expectedTaskId = nonEmptyString(params.expectedTaskId)
+  const expectedChildRunId = nonEmptyString(params.expectedChildRunId)
   const explicitRunStatePath = nonEmptyString(params.explicitRunStatePath)
   if (explicitRunStatePath && existsSync(explicitRunStatePath) && statFile(explicitRunStatePath)?.isFile) {
     const explicitCandidate = readRunStateCandidate(explicitRunStatePath, fileName)
-    if (params.trustExplicitRunStatePath || !expectedTaskId) {
+    if (params.trustExplicitRunStatePath || (!expectedTaskId && !expectedChildRunId)) {
       const resolved = explicitCandidate
-        ? resolveActiveCandidate(explicitCandidate, fileName, expectedTaskId)
+        ? resolveActiveCandidate(explicitCandidate, fileName, expectedTaskId, expectedChildRunId)
         : null
       return {
         path: resolved?.path || explicitRunStatePath,
@@ -184,8 +199,12 @@ export function selectRunStateCandidate(params: {
         candidates: resolved && explicitCandidate ? dedupeCandidatesByPath([explicitCandidate, resolved]) : [],
       }
     }
-    if (explicitCandidate && (!explicitCandidate.taskId || explicitCandidate.taskId === expectedTaskId)) {
-      const resolved = resolveActiveCandidate(explicitCandidate, fileName, expectedTaskId)
+    if (
+      explicitCandidate
+      && (!expectedTaskId || !explicitCandidate.taskId || explicitCandidate.taskId === expectedTaskId)
+      && followsExpectedChildRun(explicitCandidate, expectedChildRunId)
+    ) {
+      const resolved = resolveActiveCandidate(explicitCandidate, fileName, expectedTaskId, expectedChildRunId)
       return { path: resolved.path, ambiguous: false, candidates: dedupeCandidatesByPath([explicitCandidate, resolved]) }
     }
   }
@@ -196,8 +215,14 @@ export function selectRunStateCandidate(params: {
     rootDir,
     fileName,
     searchDepth: params.searchDepth,
-  }).map((candidate) => resolveActiveCandidate(candidate, fileName, expectedTaskId)))
+  }).map((candidate) => resolveActiveCandidate(candidate, fileName, expectedTaskId, expectedChildRunId)))
   if (candidates.length === 0) return { path: null, ambiguous: false, candidates }
+
+  if (expectedChildRunId) {
+    const matches = candidates.filter((candidate) => candidate.childRunId === expectedChildRunId)
+    if (matches.length > 0) return { path: matches[0].path, ambiguous: false, candidates }
+    return { path: null, ambiguous: candidates.length > 1, candidates }
+  }
 
   if (expectedTaskId) {
     const matches = candidates.filter((candidate) => candidate.taskId === expectedTaskId)

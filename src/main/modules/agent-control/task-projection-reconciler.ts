@@ -1,0 +1,481 @@
+import { readFileSync, statSync } from 'node:fs'
+import { dirname, isAbsolute, join, resolve } from 'node:path'
+
+import type { TaskProjectionRecord, TaskProjectionStore } from './run-contracts'
+import type { ScopeRunResumableAction } from './types'
+import type { SkillTaskRunRecord } from '../repositories/skill-task-run-repository'
+import { inspectSkillProgressArtifacts } from './skill-progress-artifacts'
+
+const RECONCILABLE_STATUSES = new Set<TaskProjectionRecord['status']>(['running', 'queued', 'blocked'])
+const STALE_WITHOUT_HANDLE_MS = 30 * 60 * 1000
+const REQUIRED_VEA_OUTPUT_KEYS = ['storyboard_md', 'storyboard_pdf', 'audiovisual_md', 'audiovisual_pdf']
+
+interface ReconcileTaskProjectionsParams {
+  store: Pick<TaskProjectionStore, 'update'>
+  records: TaskProjectionRecord[]
+  taskRuns?: SkillTaskRunRecord[]
+  now: string | Date | number
+}
+
+interface ProjectionHandles {
+  childRunId: string | null
+  skillId: string | null
+  action: string | null
+  taskRunId: string | null
+  outputDir: string | null
+  runStatePath: string | null
+  deliveryReportPath: string | null
+  eventLogPath: string | null
+}
+
+type JsonRecord = Record<string, unknown>
+
+function asRecord(value: unknown): JsonRecord | null {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value as JsonRecord : null
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function readJson(path: string | null): JsonRecord | null {
+  if (!path) return null
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown
+    return asRecord(parsed)
+  } catch {
+    return null
+  }
+}
+
+function nonEmptyFile(path: string | null): boolean {
+  if (!path) return false
+  try {
+    const stat = statSync(path)
+    return stat.isFile() && stat.size > 0
+  } catch {
+    return false
+  }
+}
+
+function normalizePath(path: string | null): string | null {
+  return path ? path.replace(/[\\/]+$/, '') : null
+}
+
+function pathFromArtifactMeta(meta: JsonRecord | null, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = stringValue(meta?.[key])
+    if (value) return value
+  }
+  return null
+}
+
+function childRunIdForRecord(record: TaskProjectionRecord): string | null {
+  const continuation = asRecord(record.continuationRef)
+  return stringValue(continuation?.childRunId)
+    || (record.taskId.startsWith('skill-child:') ? record.taskId.slice('skill-child:'.length) : null)
+}
+
+function childRunPayload(record: SkillTaskRunRecord | null | undefined): JsonRecord | null {
+  const payload = asRecord(record?.resumePayload)
+  return asRecord(payload?.childRun)
+}
+
+function findTaskRunForProjection(
+  record: TaskProjectionRecord,
+  taskRuns: SkillTaskRunRecord[],
+): SkillTaskRunRecord | null {
+  const childRunId = childRunIdForRecord(record)
+  if (childRunId) {
+    const exact = taskRuns.find((run) => run.id === childRunId)
+      || taskRuns.find((run) => stringValue(childRunPayload(run)?.childRunId) === childRunId)
+    if (exact) return exact
+  }
+  const continuation = asRecord(record.continuationRef)
+  const taskRunId = stringValue(continuation?.taskRunId)
+  if (taskRunId) {
+    const exact = taskRuns.find((run) => run.id === taskRunId)
+    if (exact) return exact
+  }
+  return null
+}
+
+function readChildRunLogHandles(eventLogPath: string | null): Partial<ProjectionHandles> {
+  if (!eventLogPath) return {}
+  let outputDir: string | null = null
+  let runStatePath: string | null = null
+  let deliveryReportPath: string | null = null
+  try {
+    const raw = readFileSync(eventLogPath, 'utf8')
+    for (const line of raw.split('\n')) {
+      if (!line.trim()) continue
+      let event: JsonRecord | null
+      try {
+        event = asRecord(JSON.parse(line) as unknown)
+      } catch {
+        continue
+      }
+      if (!event) continue
+      if (event.type === 'state_observed') {
+        runStatePath = stringValue(event.runStatePath) ?? runStatePath
+        const state = asRecord(event.state)
+        outputDir = stringValue(state?.outputDir)
+          ?? stringValue(state?.output_dir)
+          ?? stringValue(state?.active_output_dir)
+          ?? outputDir
+      }
+      if (event.type === 'close') {
+        const close = asRecord(event.close)
+        outputDir = stringValue(close?.outputDir) ?? outputDir
+        runStatePath = stringValue(close?.runStatePath) ?? runStatePath
+        deliveryReportPath = stringValue(close?.deliveryReportPath) ?? deliveryReportPath
+      }
+    }
+  } catch {
+    return {}
+  }
+  return { outputDir, runStatePath, deliveryReportPath }
+}
+
+function enrichHandlesFromRunState(handles: ProjectionHandles): ProjectionHandles {
+  const runStatePath = handles.runStatePath || (handles.outputDir ? join(handles.outputDir, 'run_state.json') : null)
+  const runState = readJson(runStatePath)
+  const outputDir = handles.outputDir
+    || stringValue(runState?.active_output_dir)
+    || stringValue(runState?.output_dir)
+    || stringValue(runState?.outputDir)
+    || (runStatePath ? dirname(runStatePath) : null)
+  const deliveryReportPath = handles.deliveryReportPath
+    || stringValue(runState?.delivery_report_path)
+    || stringValue(runState?.deliveryReportPath)
+    || (outputDir ? join(outputDir, 'delivery_report.json') : null)
+  return {
+    ...handles,
+    outputDir: normalizePath(outputDir),
+    runStatePath,
+    deliveryReportPath,
+  }
+}
+
+function deriveHandles(record: TaskProjectionRecord, taskRun?: SkillTaskRunRecord | null): ProjectionHandles {
+  const continuation = asRecord(record.continuationRef)
+  const payload = childRunPayload(taskRun)
+  let childRunId = stringValue(continuation?.childRunId)
+    || childRunIdForRecord(record)
+    || stringValue(payload?.childRunId)
+    || taskRun?.id
+    || null
+  let skillId = stringValue(continuation?.skillId)
+    || stringValue(payload?.skillId)
+    || taskRun?.skillId
+    || null
+  let action = stringValue(continuation?.action)
+    || stringValue(payload?.requestedAction)
+    || taskRun?.action
+    || null
+  let taskRunId = stringValue(continuation?.taskRunId)
+    || taskRun?.id
+    || null
+  let outputDir = stringValue(continuation?.outputDir)
+    || taskRun?.outputDir
+    || stringValue(payload?.outputDir)
+  let runStatePath = stringValue(continuation?.runStatePath)
+    || taskRun?.runStatePath
+    || stringValue(payload?.runStatePath)
+  let deliveryReportPath = pathFromArtifactMeta(continuation, ['deliveryReportPath', 'delivery_report_path'])
+    || taskRun?.deliveryReportPath
+  let eventLogPath = stringValue(payload?.eventLogPath)
+
+  for (const artifact of record.recentArtifacts || []) {
+    const artifactRecord = asRecord(artifact)
+    if (!artifactRecord) continue
+    const artifactPath = stringValue(artifactRecord.path)
+    const meta = asRecord(artifactRecord.meta)
+
+    childRunId ||= pathFromArtifactMeta(meta, ['childRunId', 'child_run_id'])
+    skillId ||= pathFromArtifactMeta(meta, ['skillId', 'skill_id'])
+    action ||= pathFromArtifactMeta(meta, ['action'])
+    outputDir ||= pathFromArtifactMeta(meta, ['outputDir', 'output_dir'])
+    runStatePath ||= pathFromArtifactMeta(meta, ['runStatePath', 'run_state_path'])
+    deliveryReportPath ||= pathFromArtifactMeta(meta, ['deliveryReportPath', 'delivery_report_path'])
+    eventLogPath ||= pathFromArtifactMeta(meta, ['eventLogPath', 'event_log_path'])
+
+    if (artifactPath?.endsWith('/run_state.json') || artifactPath?.endsWith('\\run_state.json')) {
+      runStatePath ||= artifactPath
+      outputDir ||= dirname(artifactPath)
+    }
+    if (artifactPath?.endsWith('/delivery_report.json') || artifactPath?.endsWith('\\delivery_report.json')) {
+      deliveryReportPath ||= artifactPath
+      outputDir ||= dirname(artifactPath)
+    }
+  }
+
+  if (!runStatePath && outputDir) runStatePath = join(outputDir, 'run_state.json')
+  if (!deliveryReportPath && outputDir) deliveryReportPath = join(outputDir, 'delivery_report.json')
+  if (!outputDir && runStatePath) outputDir = dirname(runStatePath)
+  if (!outputDir && deliveryReportPath) outputDir = dirname(deliveryReportPath)
+
+  const logHandles = readChildRunLogHandles(eventLogPath)
+  outputDir ||= logHandles.outputDir ?? null
+  runStatePath ||= logHandles.runStatePath ?? null
+  deliveryReportPath ||= logHandles.deliveryReportPath ?? null
+
+  return enrichHandlesFromRunState({
+    childRunId,
+    skillId,
+    action,
+    taskRunId,
+    outputDir: normalizePath(outputDir),
+    runStatePath,
+    deliveryReportPath,
+    eventLogPath,
+  })
+}
+
+function hasDurableHandle(handles: ProjectionHandles): boolean {
+  return Boolean(handles.outputDir || handles.runStatePath)
+}
+
+function isCompleteStatus(value: unknown): boolean {
+  const status = String(value || '').trim().toLowerCase()
+  return status === 'completed' || status === 'complete' || status === 'success' || status === 'done'
+}
+
+function runStateIsCompleted(runState: JsonRecord | null): boolean {
+  if (!runState) return false
+  return isCompleteStatus(runState.status)
+    || isCompleteStatus(runState.current_stage)
+    || isCompleteStatus(runState.currentStage)
+    || isCompleteStatus(runState.stage)
+}
+
+function listIsEmptyOrMissing(value: unknown): boolean {
+  return !Array.isArray(value) || value.length === 0
+}
+
+function hasCleanDeliveryBlockers(delivery: JsonRecord): boolean {
+  for (const key of [
+    'missing_outputs',
+    'blocked_batches',
+    'incomplete_scene_numbers',
+    'missing_screenshot_scenes',
+    'missing_sample_scenes',
+    'blockers',
+  ]) {
+    if (!listIsEmptyOrMissing(delivery[key])) return false
+  }
+  if (stringValue(delivery.last_error)) return false
+  const verification = asRecord(delivery.verification)
+  if (verification && verification.passed === false) return false
+  return true
+}
+
+function requiredOutputPath(outputDir: string | null, entry: unknown): string | null {
+  if (typeof entry === 'string' && entry.trim()) {
+    const value = entry.trim()
+    return isAbsolute(value) ? value : outputDir ? resolve(outputDir, value) : value
+  }
+  const record = asRecord(entry)
+  const value = stringValue(record?.path)
+  if (!value) return null
+  return isAbsolute(value) ? value : outputDir ? resolve(outputDir, value) : value
+}
+
+function requiredOutputsAreComplete(delivery: JsonRecord, outputDir: string | null): boolean {
+  const requiredOutputs = asRecord(delivery.required_outputs)
+  if (!requiredOutputs) return false
+  for (const key of REQUIRED_VEA_OUTPUT_KEYS) {
+    if (!(key in requiredOutputs)) return false
+    const entry = requiredOutputs[key]
+    const record = asRecord(entry)
+    if (record && record.ok === false) return false
+    if (!nonEmptyFile(requiredOutputPath(outputDir, entry))) return false
+  }
+  return true
+}
+
+function veaProjectionIsDone(
+  handles: ProjectionHandles,
+  runState: JsonRecord | null,
+  delivery: JsonRecord | null,
+): boolean {
+  if (!runStateIsCompleted(runState)) return false
+  if (!delivery || !isCompleteStatus(delivery.status)) return false
+  if (!hasCleanDeliveryBlockers(delivery)) return false
+  if (!requiredOutputsAreComplete(delivery, handles.outputDir)) return false
+  const progress = inspectSkillProgressArtifacts({
+    outputDir: handles.outputDir,
+    sceneScoresPath: handles.outputDir ? join(handles.outputDir, 'scene_scores.json') : null,
+  })
+  if (
+    progress.totalScenes !== null
+    && progress.completedScenes !== null
+    && progress.completedScenes < progress.totalScenes
+  ) {
+    return false
+  }
+  return true
+}
+
+function projectionIsDone(handles: ProjectionHandles): boolean {
+  const outputDir = handles.outputDir
+  const runStatePath = handles.runStatePath || (outputDir ? join(outputDir, 'run_state.json') : null)
+  const deliveryReportPath = handles.deliveryReportPath || (outputDir ? join(outputDir, 'delivery_report.json') : null)
+  const runState = readJson(runStatePath)
+  const delivery = readJson(deliveryReportPath)
+
+  if (handles.skillId === 'video-expert-analyzer') {
+    return veaProjectionIsDone(handles, runState, delivery)
+  }
+  if (!runStateIsCompleted(runState)) return false
+  if (!delivery) return true
+  return isCompleteStatus(delivery.status) && hasCleanDeliveryBlockers(delivery)
+}
+
+function timestampMs(value: string | Date | number): number {
+  const ms = value instanceof Date ? value.getTime() : typeof value === 'number' ? value : Date.parse(value)
+  return Number.isFinite(ms) ? ms : Date.now()
+}
+
+function arraysEqual(left: readonly unknown[] | undefined, right: readonly unknown[] | undefined): boolean {
+  const a = left || []
+  const b = right || []
+  return a.length === b.length && JSON.stringify(a) === JSON.stringify(b)
+}
+
+function appendMissingActions(
+  actions: ScopeRunResumableAction[] | undefined,
+  required: ScopeRunResumableAction[],
+): ScopeRunResumableAction[] {
+  const result: ScopeRunResumableAction[] = [...(actions || []).filter((action) => action !== 'none')]
+  for (const action of required) {
+    if (!result.includes(action)) result.push(action)
+  }
+  return result
+}
+
+function mergeContinuationRef(
+  record: TaskProjectionRecord,
+  handles: ProjectionHandles,
+): TaskProjectionRecord['continuationRef'] {
+  if (
+    !handles.childRunId
+    && !handles.skillId
+    && !handles.action
+    && !handles.taskRunId
+    && !handles.outputDir
+    && !handles.runStatePath
+  ) {
+    return record.continuationRef ?? null
+  }
+  return {
+    ...(record.continuationRef || {}),
+    taskId: record.taskId,
+    childRunId: handles.childRunId,
+    taskRunId: handles.taskRunId,
+    skillId: handles.skillId,
+    action: handles.action,
+    outputDir: handles.outputDir,
+    runStatePath: handles.runStatePath,
+  }
+}
+
+function patchSteps(
+  record: TaskProjectionRecord,
+  status: 'blocked' | 'done' | 'cancelled',
+  now: string,
+): TaskProjectionRecord['steps'] {
+  const stepStatus = status === 'done' ? 'done' : status === 'cancelled' ? 'error' : 'blocked'
+  const fallbackTitle = status === 'done' ? '任务已完成' : status === 'cancelled' ? '任务状态已过期' : '等待继续'
+  const sourceSteps = record.steps && record.steps.length > 0
+    ? record.steps
+    : [{ id: record.currentStepId || 'projection-reconcile', title: fallbackTitle, status: 'pending' as const, updatedAt: record.updatedAt }]
+  return sourceSteps.map((step, index) => {
+    if (record.currentStepId && step.id !== record.currentStepId) return step
+    if (!record.currentStepId && index < sourceSteps.length - 1) return step
+    if (step.status === stepStatus) return step
+    return {
+      ...step,
+      status: stepStatus,
+      updatedAt: now,
+    }
+  })
+}
+
+function buildPatch(
+  record: TaskProjectionRecord,
+  now: string,
+  target: Partial<TaskProjectionRecord>,
+): Partial<TaskProjectionRecord> | null {
+  const patch: Partial<TaskProjectionRecord> = {}
+  const assign = <K extends keyof TaskProjectionRecord>(key: K, value: TaskProjectionRecord[K]): void => {
+    const current = record[key]
+    const changed = Array.isArray(current) || Array.isArray(value)
+      ? !arraysEqual(current as unknown[] | undefined, value as unknown[] | undefined)
+      : current && value && typeof current === 'object' && typeof value === 'object'
+        ? JSON.stringify(current) !== JSON.stringify(value)
+      : current !== value
+    if (changed) patch[key] = value
+  }
+
+  for (const [key, value] of Object.entries(target) as Array<[keyof TaskProjectionRecord, TaskProjectionRecord[keyof TaskProjectionRecord]]>) {
+    assign(key, value)
+  }
+  if (Object.keys(patch).length === 0) return null
+  patch.updatedAt = now
+  return patch
+}
+
+export function reconcileTaskProjections(params: ReconcileTaskProjectionsParams): number {
+  const now = typeof params.now === 'string' ? params.now : new Date(timestampMs(params.now)).toISOString()
+  const nowMs = timestampMs(now)
+  let changed = 0
+
+  for (const record of params.records) {
+    if (!RECONCILABLE_STATUSES.has(record.status)) continue
+    const taskRun = findTaskRunForProjection(record, params.taskRuns || [])
+    const handles = deriveHandles(record, taskRun)
+
+    let target: Partial<TaskProjectionRecord> | null = null
+    if (projectionIsDone(handles)) {
+      target = {
+        status: 'done',
+        interactionState: 'suspended',
+        waitingFor: 'none',
+        blockedReason: null,
+        degradationReason: null,
+        resumableActions: ['open_artifact'],
+        continuationRef: mergeContinuationRef(record, handles),
+        steps: patchSteps(record, 'done', now),
+      }
+    } else if (hasDurableHandle(handles)) {
+      target = {
+        status: 'blocked',
+        interactionState: 'suspended',
+        waitingFor: 'background',
+        blockedReason: '任务产物尚未完成，可从已保存的进度继续',
+        resumableActions: appendMissingActions(record.resumableActions, ['continue', 'cancel']),
+        continuationRef: mergeContinuationRef(record, handles),
+        steps: patchSteps(record, 'blocked', now),
+      }
+    } else if (!hasDurableHandle(handles) && nowMs - timestampMs(record.updatedAt) > STALE_WITHOUT_HANDLE_MS) {
+      target = {
+        status: 'blocked',
+        interactionState: 'suspended',
+        waitingFor: 'none',
+        degradationReason: 'stale_paused',
+        blockedReason: '任务状态已过期，缺少可续跑句柄',
+        resumableActions: ['none'],
+        steps: patchSteps(record, 'blocked', now),
+      }
+    }
+
+    if (!target) continue
+    const patch = buildPatch(record, now, target)
+    if (!patch) continue
+    void params.store.update(record.taskId, patch)
+    changed += 1
+  }
+
+  return changed
+}

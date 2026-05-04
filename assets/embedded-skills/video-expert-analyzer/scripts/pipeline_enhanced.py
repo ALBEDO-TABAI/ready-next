@@ -62,10 +62,10 @@ except ImportError:
     from storyboard_generator import scene_has_complete_analysis
 
 try:
-    from run_state import mark_stage
+    from run_state import mark_stage, reset_run_state
 except ImportError:
     sys.path.insert(0, str(Path(__file__).parent))
-    from run_state import mark_stage
+    from run_state import mark_stage, reset_run_state
 
 try:
     from logger import get_logger
@@ -1007,11 +1007,10 @@ class VideoAnalysisPipeline:
         self.run_state_path = self.video_output_dir / "run_state.json"
         self.report_path = self.video_output_dir / f"{self.video_id}_analysis_report.md"
         self.detailed_report_path = self.video_output_dir / f"{self.video_id}_detailed_analysis.md"
+        self._reset_fresh_pipeline_outputs()
         self.analysis_state = load_analysis_state(self.state_path)
-        mark_stage(
+        reset_run_state(
             self.run_state_path,
-            stage="prepare",
-            status="running",
             scores_path=str(self.scores_path),
             video_dir=str(self.video_output_dir),
             active_output_dir=str(self.video_output_dir),
@@ -1032,6 +1031,24 @@ class VideoAnalysisPipeline:
             "scene_analysis": [],
             "overall_assessment": {}
         }
+
+    def _reset_fresh_pipeline_outputs(self) -> None:
+        for path in (
+            self.scores_path,
+            self.video_output_dir / "delivery_report.json",
+            self.video_output_dir / "auto_scoring_validation.json",
+            self.video_output_dir / "classification_result.json",
+            self.video_output_dir / f"{self.video_id}_complete_analysis.md",
+            self.video_output_dir / f"{self.video_id}_detailed_analysis.md",
+            self.video_output_dir / f"{self.video_id}_classification_summary.md",
+            self.video_output_dir / f"{self.video_id}_classification_summary.json",
+        ):
+            try:
+                if path.exists() and path.is_file():
+                    path.unlink()
+            except OSError:
+                pass
+        save_analysis_state(self.state_path, {"status": "initialized", "steps": {}})
 
     def _mark_step_complete(self, step_name: str, **extra):
         self.analysis_state.setdefault("steps", {})[step_name] = {

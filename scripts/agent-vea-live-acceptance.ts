@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
-import { dirname, isAbsolute, join, resolve } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { createRequire, registerHooks } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { markSkillHandoffOutputCompleted } from '../src/main/modules/agent-control/skill-agent-handoff'
@@ -55,6 +55,8 @@ registerHooks({
 type Mode = 'resume' | 'fresh' | 'both' | 'fresh-resume'
 type HandoffMode = 'observe' | 'complete'
 type Phase = 'resume' | 'fresh'
+type OutputLayout = 'exact' | 'root'
+type CleanupTestOutputMode = 'before' | 'after' | 'both' | 'dry-run' | 'off'
 
 interface AgentSpawnContextLike {
   provider: string
@@ -75,8 +77,11 @@ interface Options {
   runtimeRoot: string
   modelsJsonPath: string
   preferredModel: string
+  outputLayout: OutputLayout
+  allowConfigFallbacks: boolean
   json: boolean
   cleanBeforeFresh: boolean
+  cleanupTestOutput: CleanupTestOutputMode
   maxRounds: number
   waitMs: number
 }
@@ -94,6 +99,7 @@ interface ChildRunSummary {
   closeStatus: string | null
   terminalReason: string | null
   errorMessage: string | null
+  handleProblems?: string[]
   pendingHandoffs?: string[]
   handoffCompletions?: HandoffCompletionSummary[]
 }
@@ -113,6 +119,7 @@ interface HandoffCompletionSummary {
   bytesWritten: number
   model: string
   repairedValidation?: boolean
+  reusedExisting?: boolean
 }
 
 interface ArtifactSummary {
@@ -192,6 +199,37 @@ interface AcceptanceReport {
   debug: Record<string, unknown>
 }
 
+interface VeaTestManifestRecord {
+  outputDir: string
+  url: string
+  videoId?: string
+  runStatePath?: string
+  deliveryReportPath?: string
+  createdAt: string
+  updatedAt: string
+}
+
+interface VeaTestManifest {
+  version: 1
+  testRoot: string
+  records: VeaTestManifestRecord[]
+}
+
+interface CleanupSkippedEntry {
+  outputDir: string
+  reason: string
+}
+
+interface CleanupTestOutputReport {
+  phase: 'before' | 'after'
+  mode: CleanupTestOutputMode
+  manifestPath: string
+  testRoot: string
+  deleted: string[]
+  wouldDelete: string[]
+  skipped: CleanupSkippedEntry[]
+}
+
 interface AcceptanceDeps {
   makeAgentContext: (opts: Options) => AgentSpawnContextLike
   createRunner: (opts: Options) => Promise<Awaited<ReturnType<typeof createRunner>>>
@@ -200,8 +238,8 @@ interface AcceptanceDeps {
   cleanOutputDir: (outputDir: string) => void
 }
 
-const DEFAULT_URL = 'https://www.youtube.com/watch?v=4qkyxm4jppc'
-const DEFAULT_OUTPUT_DIR = `${homedir()}/Documents/实验田/测试/4qkyxm4jppc`
+const DEFAULT_URL = ''
+const DEFAULT_OUTPUT_DIR = `${homedir()}/Documents/实验田/测试/ready-vea-live-acceptance`
 const DEFAULT_RUNTIME_ROOT = `${homedir()}/Library/Application Support/ready/skill-runtime`
 const DEFAULT_MODELS_JSON = `${homedir()}/.config/video-expert-analyzer-vnext/models.multi.json`
 const DEFAULT_CONFIG = `${homedir()}/.config/video-expert-analyzer-vnext/config.json`
@@ -234,8 +272,11 @@ export function parseArgs(argv: string[]): Options {
     runtimeRoot: DEFAULT_RUNTIME_ROOT,
     modelsJsonPath: stringValue(autoScoring?.models_json_path) || DEFAULT_MODELS_JSON,
     preferredModel: stringValue(autoScoring?.preferred_model) || 'xiaomi/mimo-v2.5',
+    outputLayout: 'exact',
+    allowConfigFallbacks: false,
     json: false,
     cleanBeforeFresh: false,
+    cleanupTestOutput: 'off',
     maxRounds: 8,
     waitMs: 45 * 60_000,
   }
@@ -286,6 +327,19 @@ export function parseArgs(argv: string[]): Options {
       index += 1
       continue
     }
+    if (arg === '--output-layout') {
+      const outputLayout = argv[index + 1] as OutputLayout | undefined
+      if (outputLayout !== 'exact' && outputLayout !== 'root') {
+        throw new Error(`Invalid --output-layout: ${outputLayout}`)
+      }
+      opts.outputLayout = outputLayout
+      index += 1
+      continue
+    }
+    if (arg === '--allow-config-fallbacks') {
+      opts.allowConfigFallbacks = true
+      continue
+    }
     if (arg === '--runtime-root') {
       opts.runtimeRoot = argv[index + 1] || opts.runtimeRoot
       index += 1
@@ -303,6 +357,15 @@ export function parseArgs(argv: string[]): Options {
     }
     if (arg === '--clean-before-fresh') {
       opts.cleanBeforeFresh = true
+      continue
+    }
+    if (arg === '--cleanup-test-output') {
+      const mode = argv[index + 1] as CleanupTestOutputMode | undefined
+      if (mode !== 'before' && mode !== 'after' && mode !== 'both' && mode !== 'dry-run' && mode !== 'off') {
+        throw new Error(`Invalid --cleanup-test-output: ${mode}`)
+      }
+      opts.cleanupTestOutput = mode
+      index += 1
       continue
     }
     if (arg === '--json') {
@@ -327,13 +390,17 @@ function printHelp(): void {
   console.log([
     'Usage:',
     '  npm run agent:acceptance:vea-live -- --mode resume --run-state /abs/run_state.json',
-    '  npm run agent:acceptance:vea-live -- --mode fresh --clean-before-fresh --url https://www.youtube.com/watch?v=4qkyxm4jppc --output-dir /abs/output',
-    '  npm run agent:acceptance:vea-live -- --mode fresh-resume --url https://www.youtube.com/watch?v=4qkyxm4jppc --output-dir /abs/output',
+    '  npm run agent:acceptance:vea-live -- --mode fresh --clean-before-fresh --url <youtube-url> --output-dir /abs/output',
+    '  npm run agent:acceptance:vea-live -- --mode fresh-resume --url <youtube-url> --output-dir /abs/output',
     '  npm run agent:acceptance:vea-live -- --mode both --clean-before-fresh',
     '',
     'Options:',
     '  --handoff observe   Report pending audiovisual handoffs without completing them.',
     '  --handoff complete  Complete pending handoffs before continuing artifact validation. (default)',
+    '  --output-layout exact  Treat --output-dir as the task directory. (default)',
+    '  --output-layout root   Treat --output-dir as an output root; the skill may create one child directory.',
+    '  --allow-config-fallbacks  Allow local auto_scoring.fallback_models. Default is no fallbacks.',
+    '  --cleanup-test-output before|after|both|dry-run|off  Safely clean manifest-tracked test outputs. (default off)',
     '',
     'Runs the real Ready agent child-runner + skill runtime and validates VEA artifacts.',
   ].join('\n'))
@@ -362,7 +429,7 @@ function readJson(path: string): Record<string, unknown> | null {
   }
 }
 
-function makeAgentContext(opts: Options): AgentSpawnContextLike {
+export function makeAgentContext(opts: Options): AgentSpawnContextLike {
   const catalog = readJson(opts.modelsJsonPath)
   const providers = objectValue(catalog?.providers)
   if (!providers) throw new Error(`models catalog has no providers: ${opts.modelsJsonPath}`)
@@ -387,7 +454,9 @@ function makeAgentContext(opts: Options): AgentSpawnContextLike {
   }
   const config = readJson(DEFAULT_CONFIG)
   const autoScoring = objectValue(config?.auto_scoring)
-  const fallbackRaw = Array.isArray(autoScoring?.fallback_models) ? autoScoring.fallback_models : []
+  const fallbackRaw = opts.allowConfigFallbacks && Array.isArray(autoScoring?.fallback_models)
+    ? autoScoring.fallback_models
+    : []
   return {
     provider: providerName,
     model_id: modelId,
@@ -492,17 +561,7 @@ function inspectHostBatches(outputDir: string): ArtifactSummary['hostBatches'] {
 }
 
 function inspectPendingAudiovisualHandoffs(outputDir: string): string[] {
-  const receiptPath = join(outputDir, 'audiovisual_handoff', 'receipt.json')
-  const receipt = readJson(receiptPath)
-  const tasks = objectValue(receipt?.tasks)
-  if (!tasks) return []
-  const pending: string[] = []
-  for (const [name, rawTask] of Object.entries(tasks)) {
-    const task = objectValue(rawTask)
-    if (stringValue(task?.status) !== 'pending') continue
-    pending.push(name)
-  }
-  return pending
+  return listPendingHandoffTasks(outputDir).map((task) => task.name)
 }
 
 function isSafeRelativePath(path: string): boolean {
@@ -519,7 +578,8 @@ function listPendingHandoffTasks(outputDir: string): HandoffTask[] {
   const pending: HandoffTask[] = []
   for (const [name, rawTask] of Object.entries(tasks)) {
     const task = objectValue(rawTask)
-    if (stringValue(task?.status).toLowerCase() !== 'pending') continue
+    const status = stringValue(task?.status).toLowerCase()
+    if (status !== 'pending' && status !== 'completed') continue
     const taskRel = stringValue(task?.task) || `audiovisual_handoff/${name}/task.md`
     const outputRelRaw = stringValue(task?.output)
     if (!isSafeRelativePath(taskRel) || !isSafeRelativePath(outputRelRaw)) continue
@@ -532,6 +592,9 @@ function listPendingHandoffTasks(outputDir: string): HandoffTask[] {
       outputPath: join(outputDir, outputRel),
       receiptPath: join(handoffDir, 'receipt.json'),
     })
+    if (status === 'completed' && isReusableExistingHandoffOutput(pending[pending.length - 1])) {
+      pending.pop()
+    }
   }
   return pending
 }
@@ -568,6 +631,64 @@ function listHandoffValidationRepairTasks(outputDir: string): HandoffTask[] {
     })
   }
   return repairs
+}
+
+function isReusableExistingHandoffOutput(task: HandoffTask): boolean {
+  if (!existsSync(task.outputPath)) return false
+  let text = ''
+  try {
+    const stat = statSync(task.outputPath)
+    if (!stat.isFile() || stat.size <= 0) return false
+    text = readFileSync(task.outputPath, 'utf8').trim()
+  } catch {
+    return false
+  }
+  if (!text) return false
+  if (task.outputPath.toLowerCase().endsWith('.svg')) {
+    return isValidHandoffOutput(task.outputPath, text)
+  }
+  return true
+}
+
+function isValidHandoffOutput(outputPath: string, text: string): boolean {
+  const trimmed = text.trim()
+  if (!trimmed) return false
+  if (outputPath.toLowerCase().endsWith('.svg')) {
+    return /<svg\b[\s\S]*<\/svg>/i.test(trimmed)
+  }
+  return true
+}
+
+async function requestValidHandoffCompletion(
+  agentContext: AgentSpawnContextLike,
+  task: HandoffTask,
+  taskText: string,
+): Promise<string> {
+  let lastOutput = ''
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const prompt = attempt === 1
+      ? taskText
+      : [
+          taskText,
+          '',
+          '--- Previous invalid output ---',
+          lastOutput,
+          '',
+          'Repair instructions:',
+          '- Return the complete requested output file, not a patch.',
+          '- If the output is SVG, it must contain one complete <svg>...</svg> document with a closing </svg> tag.',
+        ].join('\n')
+    let output = ''
+    try {
+      output = await requestHandoffCompletion(agentContext, prompt, task.name)
+    } catch (error) {
+      lastOutput = error instanceof Error ? error.message : String(error)
+      continue
+    }
+    if (isValidHandoffOutput(task.outputPath, output)) return output
+    lastOutput = output
+  }
+  throw new Error(`handoff ${task.name} returned invalid output for ${task.outputPath}`)
 }
 
 function stripCodeFence(text: string): string {
@@ -787,13 +908,29 @@ async function requestHandoffRepair(agentContext: AgentSpawnContextLike, task: H
   )
 }
 
-async function completePendingHandoffs(outputDir: string, agentContext: AgentSpawnContextLike): Promise<HandoffCompletionSummary[]> {
+export async function completePendingHandoffs(outputDir: string, agentContext: AgentSpawnContextLike): Promise<HandoffCompletionSummary[]> {
   const tasks = listPendingHandoffTasks(outputDir)
   const completed: HandoffCompletionSummary[] = []
   for (const task of tasks) {
+    if (isReusableExistingHandoffOutput(task)) {
+      markSkillHandoffOutputCompleted({
+        receiptPath: task.receiptPath,
+        taskName: task.name,
+        outputPath: task.outputPath,
+      })
+      completed.push({
+        name: task.name,
+        taskPath: task.taskPath,
+        outputPath: task.outputPath,
+        bytesWritten: statSync(task.outputPath).size,
+        model: 'existing-output',
+        reusedExisting: true,
+      })
+      continue
+    }
     console.error(`[vea-live] completing handoff ${task.name}`)
     const taskText = readFileSync(task.taskPath, 'utf8')
-    const output = await requestHandoffCompletion(agentContext, taskText, task.name)
+    const output = await requestValidHandoffCompletion(agentContext, task, taskText)
     mkdirSync(dirname(task.outputPath), { recursive: true })
     await writeFile(task.outputPath, output, 'utf8')
     markSkillHandoffOutputCompleted({
@@ -859,6 +996,30 @@ function findUniqueNestedRunStateDir(outputDir: string): string | null {
 function resolveEffectiveOutputDir(outputDir: string): string {
   if (existsSync(join(outputDir, 'run_state.json'))) return outputDir
   return findUniqueNestedRunStateDir(outputDir) || outputDir
+}
+
+function inspectFreshChildRunHandle(run: ChildRunSummary): string[] {
+  if (run.action !== 'video_expert_pipeline') return []
+  const problems: string[] = []
+  if (!run.outputDir) {
+    problems.push('fresh pipeline close did not return outputDir')
+    return problems
+  }
+  const runStatePath = run.runStatePath || join(run.outputDir, 'run_state.json')
+  const runState = readJson(runStatePath)
+  if (!runState) {
+    problems.push(`fresh pipeline run_state missing or invalid: ${runStatePath}`)
+    return problems
+  }
+  const childRunId = stringValue(runState.child_run_id || runState.childRunId)
+  if (childRunId !== run.childRunId) {
+    problems.push(`fresh pipeline child_run_id mismatch: expected ${run.childRunId}, got ${childRunId || '(missing)'}`)
+  }
+  const activeOutputDir = stringValue(runState.active_output_dir || runState.activeOutputDir)
+  if (activeOutputDir && resolve(activeOutputDir) !== resolve(run.outputDir)) {
+    problems.push(`fresh pipeline active_output_dir mismatch: ${activeOutputDir} != ${run.outputDir}`)
+  }
+  return problems
 }
 
 function mapChildStatusToRowStatus(status: string): string {
@@ -1052,7 +1213,7 @@ async function runPhase(args: {
       ? 'video_expert_pipeline'
       : 'video_expert_ai_analyze'
     const input = action === 'video_expert_pipeline'
-      ? { url: args.opts.url, outputDir: args.opts.outputDir, exactOutputDir: true }
+      ? { url: args.opts.url, outputDir: args.opts.outputDir, ...(args.opts.outputLayout === 'exact' ? { exactOutputDir: true } : {}) }
       : { sceneScoresPath, outputDir: args.opts.outputDir }
     const run = await runOneChildAction({
       runnerApi: args.runnerApi,
@@ -1063,6 +1224,8 @@ async function runPhase(args: {
       input,
     })
     const afterOutputDir = run.outputDir || resolveEffectiveOutputDir(args.opts.outputDir)
+    const handleProblems = inspectFreshChildRunHandle({ ...run, outputDir: afterOutputDir })
+    if (handleProblems.length > 0) run.handleProblems = handleProblems
     const pendingHandoffs = inspectPendingAudiovisualHandoffs(afterOutputDir)
     if (pendingHandoffs.length > 0) run.pendingHandoffs = pendingHandoffs
     const handoffCompletions: HandoffCompletionSummary[] = []
@@ -1084,6 +1247,11 @@ async function runPhase(args: {
     if (handoffCompletions.length > 0) run.handoffCompletions = handoffCompletions
     runs.push(run)
     const after = inspectArtifacts(afterOutputDir)
+    if (handleProblems.length > 0) {
+      after.problems.push(...handleProblems)
+      after.complete = false
+      return { phase: args.phase, success: false, runs, artifacts: after }
+    }
     if (after.complete) return { phase: args.phase, success: true, runs, artifacts: after }
     if (run.waitKind !== 'closed') return { phase: args.phase, success: false, runs, artifacts: after }
     if (run.closeStatus === 'completed' && before.completeScenes === after.completeScenes && round > 1) {
@@ -1140,6 +1308,173 @@ function shouldCleanBeforePhase(opts: Options, phase: Phase): boolean {
   return phase === 'fresh' && (opts.cleanBeforeFresh || opts.mode === 'fresh-resume')
 }
 
+const VEA_TEST_MANIFEST_FILE = '.ready-vea-test-manifest.json'
+const VEA_MARKER_FILES = ['run_state.json', 'delivery_report.json', 'scene_scores.json'] as const
+
+function getTestRoot(opts: Options): string {
+  return resolve(opts.outputDir)
+}
+
+function getTestManifestPath(opts: Options): string {
+  return join(getTestRoot(opts), VEA_TEST_MANIFEST_FILE)
+}
+
+function isStrictChildPath(parent: string, child: string): boolean {
+  const rel = relative(resolve(parent), resolve(child))
+  return Boolean(rel) && !rel.startsWith('..') && !isAbsolute(rel)
+}
+
+function isChildPathOrSelf(parent: string, child: string): boolean {
+  return resolve(parent) === resolve(child) || isStrictChildPath(parent, child)
+}
+
+function readTestManifest(opts: Options): VeaTestManifest {
+  const testRoot = getTestRoot(opts)
+  const manifestPath = getTestManifestPath(opts)
+  const parsed = readJson(manifestPath)
+  const recordsRaw = Array.isArray(parsed?.records) ? parsed.records : []
+  return {
+    version: 1,
+    testRoot,
+    records: recordsRaw
+      .map(objectValue)
+      .filter(Boolean)
+      .map((record) => ({
+        outputDir: resolve(expandHome(stringValue(record?.outputDir))),
+        url: stringValue(record?.url),
+        videoId: stringValue(record?.videoId) || undefined,
+        runStatePath: stringValue(record?.runStatePath) ? resolve(expandHome(stringValue(record?.runStatePath))) : undefined,
+        deliveryReportPath: stringValue(record?.deliveryReportPath) ? resolve(expandHome(stringValue(record?.deliveryReportPath))) : undefined,
+        createdAt: stringValue(record?.createdAt) || new Date().toISOString(),
+        updatedAt: stringValue(record?.updatedAt) || new Date().toISOString(),
+      })),
+  }
+}
+
+function writeTestManifest(opts: Options, manifest: VeaTestManifest): void {
+  const manifestPath = getTestManifestPath(opts)
+  mkdirSync(dirname(manifestPath), { recursive: true })
+  writeFileSync(manifestPath, JSON.stringify({
+    version: 1,
+    testRoot: getTestRoot(opts),
+    records: manifest.records,
+  }, null, 2), 'utf8')
+}
+
+function hasVeaMarker(outputDir: string): boolean {
+  return VEA_MARKER_FILES.some((name) => {
+    try {
+      return statSync(join(outputDir, name)).isFile()
+    } catch {
+      return false
+    }
+  })
+}
+
+function readVideoId(outputDir: string): string {
+  const sceneScores = readJson(join(outputDir, 'scene_scores.json'))
+  const deliveryReport = readJson(join(outputDir, 'delivery_report.json'))
+  return stringValue(sceneScores?.video_id) || stringValue(deliveryReport?.video_id)
+}
+
+function recordManifestOutputs(opts: Options, results: PhaseResult[]): void {
+  const manifest = readTestManifest(opts)
+  const now = new Date().toISOString()
+  const byOutputDir = new Map(manifest.records.map((record) => [resolve(record.outputDir), record]))
+  for (const result of results) {
+    const outputDir = resolve(result.artifacts.outputDir || opts.outputDir)
+    if (!isChildPathOrSelf(getTestRoot(opts), outputDir)) continue
+    const existing = byOutputDir.get(outputDir)
+    const record: VeaTestManifestRecord = {
+      outputDir,
+      url: opts.url,
+      videoId: readVideoId(outputDir) || existing?.videoId,
+      runStatePath: join(outputDir, 'run_state.json'),
+      deliveryReportPath: join(outputDir, 'delivery_report.json'),
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+    }
+    byOutputDir.set(outputDir, record)
+  }
+  manifest.records = [...byOutputDir.values()].sort((a, b) => a.outputDir.localeCompare(b.outputDir))
+  writeTestManifest(opts, manifest)
+}
+
+function shouldRunCleanup(opts: Options, phase: 'before' | 'after'): boolean {
+  if (opts.cleanupTestOutput === 'off') return false
+  if (opts.cleanupTestOutput === 'dry-run') return true
+  return opts.cleanupTestOutput === phase || opts.cleanupTestOutput === 'both'
+}
+
+export function cleanupTestOutput(opts: Options, phase: 'before' | 'after'): CleanupTestOutputReport {
+  const manifest = readTestManifest(opts)
+  const testRoot = getTestRoot(opts)
+  const manifestPath = getTestManifestPath(opts)
+  const dryRun = opts.cleanupTestOutput === 'dry-run'
+  const report: CleanupTestOutputReport = {
+    phase,
+    mode: opts.cleanupTestOutput,
+    manifestPath,
+    testRoot,
+    deleted: [],
+    wouldDelete: [],
+    skipped: [],
+  }
+  const manifestDirs = new Set(manifest.records.map((record) => resolve(record.outputDir)))
+
+  for (const record of manifest.records) {
+    const outputDir = resolve(record.outputDir)
+    if (!isStrictChildPath(testRoot, outputDir)) {
+      report.skipped.push({
+        outputDir,
+        reason: resolve(outputDir) === resolve(testRoot) ? 'is_test_root' : 'outside_test_root',
+      })
+      continue
+    }
+    if (!existsSync(outputDir)) {
+      report.skipped.push({ outputDir, reason: 'missing_directory' })
+      continue
+    }
+    try {
+      if (!statSync(outputDir).isDirectory()) {
+        report.skipped.push({ outputDir, reason: 'not_directory' })
+        continue
+      }
+    } catch {
+      report.skipped.push({ outputDir, reason: 'missing_directory' })
+      continue
+    }
+    if (!hasVeaMarker(outputDir)) {
+      report.skipped.push({ outputDir, reason: 'missing_vea_marker' })
+      continue
+    }
+    if (dryRun) {
+      report.wouldDelete.push(outputDir)
+    } else {
+      rmSync(outputDir, { recursive: true, force: true })
+      report.deleted.push(outputDir)
+    }
+  }
+
+  try {
+    for (const name of readdirSync(testRoot)) {
+      const outputDir = join(testRoot, name)
+      if (outputDir === manifestPath || manifestDirs.has(resolve(outputDir))) continue
+      try {
+        if (statSync(outputDir).isDirectory() && hasVeaMarker(outputDir)) {
+          report.skipped.push({ outputDir: resolve(outputDir), reason: 'not_in_manifest' })
+        }
+      } catch {
+        continue
+      }
+    }
+  } catch {
+    // Missing test roots are valid before the first live run.
+  }
+
+  return report
+}
+
 function buildFreshResumeCheck(opts: Options, results: PhaseResult[]): AcceptanceReport['freshResume'] {
   if (opts.mode !== 'fresh-resume') return undefined
   const fresh = results.find((result) => result.phase === 'fresh')
@@ -1160,6 +1495,10 @@ export async function runAcceptance(
   depsInput: Partial<AcceptanceDeps> = {},
 ): Promise<{ report: AcceptanceReport; reportPath: string }> {
   const deps = resolveDeps(depsInput)
+  const cleanupReports: CleanupTestOutputReport[] = []
+  if (shouldRunCleanup(opts, 'before')) {
+    cleanupReports.push(cleanupTestOutput(opts, 'before'))
+  }
   const agentContext = deps.makeAgentContext(opts)
   const runnerApi = await deps.createRunner(opts)
   const startedAt = new Date().toISOString()
@@ -1174,6 +1513,10 @@ export async function runAcceptance(
   }
 
   const freshResume = buildFreshResumeCheck(opts, results)
+  recordManifestOutputs(opts, results)
+  if (shouldRunCleanup(opts, 'after')) {
+    cleanupReports.push(cleanupTestOutput(opts, 'after'))
+  }
   const report: AcceptanceReport = {
     success: results.length === phases.length
       && results.every((result) => result.success)
@@ -1193,6 +1536,7 @@ export async function runAcceptance(
       toolsLog: '/tmp/ready-tools.log',
       runtimeChildRunLogDir: join(opts.runtimeRoot, '.ready', 'child-runs'),
       latestRuntimeChildRunLogs: latestFiles(join(opts.runtimeRoot, '.ready', 'child-runs'), 8),
+      cleanupTestOutput: cleanupReports,
     },
   }
 

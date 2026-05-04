@@ -447,10 +447,10 @@ test('recoverable_paused child resumes through TurnEngine without sleeping in te
   assert.match(result.finalText, /同一个 child run/)
 })
 
-test('blocked child is not directly resumable', async () => {
+test('blocked_config child is not directly resumable', async () => {
   const engine = new TurnEngine()
   let resumeCalls = 0
-  const close = makeChildCloseEvent('blocked', 'blocked_external')
+  const close = makeChildCloseEvent('blocked', 'blocked_config')
   const { request } = createRequest({
     userText: '继续',
     host: {
@@ -469,7 +469,43 @@ test('blocked child is not directly resumable', async () => {
   assert.equal(resumeCalls, 0)
   assert.equal(result.status, 'checkpoint')
   assert.match(result.finalText, /不能直接继续/)
-  assert.equal(result.terminalReason, 'blocked_external')
+  assert.equal(result.terminalReason, 'blocked_config')
+})
+
+test('blocked_external child resume is delegated to runner with agent context', async () => {
+  const engine = new TurnEngine()
+  let resumeCalls = 0
+  let capturedAgentContext: unknown = null
+  const close = makeChildCloseEvent('blocked', 'blocked_external')
+  const { request } = createRequest({
+    userText: '继续',
+    host: {
+      skillTaskSupervisor: {
+        inspectLatestSkillTask: () => makeChildOwnedSnapshot({ status: 'blocked', closeEvent: close }),
+      },
+      resumeSkillChildRun: async (_childRunId: string, options?: { agentContext?: unknown }) => {
+        resumeCalls += 1
+        capturedAgentContext = options?.agentContext ?? null
+        return {
+          childRunId: 'vchild001',
+          status: 'completed',
+          outputDir: '/tmp/ready/output',
+          runStatePath: '/tmp/ready/output/run_state.json',
+          eventLogPath: '/tmp/ready/output/child-run.jsonl',
+          parentNextHint: 'wait_for_close_event',
+          freshContractFields: null,
+          closeEvent: makeChildCloseEvent('completed', 'completed'),
+        }
+      },
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.equal(resumeCalls, 1)
+  assert.equal((capturedAgentContext as { model_id?: string } | null)?.model_id, 'gpt-test')
+  assert.equal(result.status, 'done')
+  assert.equal(result.terminalReason, 'done')
 })
 
 test('running child self-await uses injectable wait and preserves blocked terminal reason', async () => {
@@ -2380,6 +2416,229 @@ test('TurnEngine treats an explicit skill URL request as a fresh start instead o
       event.metric === 'explicit_skill_fresh_start_detected'
       && event.skillId === 'video-expert-analyzer'
       && event.action === 'video_expert_pipeline',
+    ))
+  } finally {
+    restorePipelineToolDefinition()
+    restoreAiAnalyzeToolDefinition()
+    __setMetricSinkForTests(null)
+    _resetLastReferenceSkillHintsForTests()
+  }
+})
+
+test('TurnEngine lets an explicit advisory skill override stale supervisor and continuation context', async () => {
+  const engine = new TurnEngine()
+  const metrics: AgentMetricEvent[] = []
+  let capturedAllowedToolNames: string[] = []
+  let armedHint: { id: string; name: string } | null = null
+  const videoCopySkill = {
+    id: 'video-copy-analyzer',
+    name: 'Video Copy Analyzer',
+    actions: [
+      {
+        name: 'read_skill',
+        visibility: 'internal',
+        runtime: 'reference',
+        params: [],
+      },
+      {
+        name: 'video_copy_analyze',
+        visibility: 'internal',
+        params: [{ name: 'input', required: true }],
+      },
+    ],
+    hostRequirements: {},
+  }
+
+  __setMetricSinkForTests((event) => metrics.push(event))
+  _resetLastReferenceSkillHintsForTests()
+  try {
+    const { request } = createRequest({
+      userText: '@[Video Copy Analyzer] 分析https://www.youtube.com/watch?v=4OOYrelo12w 输出到 @[测试]',
+      intentClassification: createIntent({ primaryDomain: 'skill', confidence: 'high' }),
+      host: {
+        providerContext: {
+          config: {
+            provider: 'openai',
+            model: 'gpt-test',
+            apiKey: 'test',
+            baseUrl: 'https://api.openai.com/v1',
+          },
+          baseUrl: 'https://api.openai.com/v1',
+          provider: undefined,
+          isKimi: false,
+          isKimiCoding: false,
+          useAnthropicProtocol: false,
+          supportsToolCalls: true,
+          supportsVideoBlock: true,
+          hasRawVideoInIncoming: false,
+        },
+        skillTaskSupervisor: {
+          inspectLatestSkillTask: () => makeSkillSnapshot({
+            skillId: 'video-expert-analyzer',
+            outputDir: '/tmp/ready/old-4qkyxm4jppc',
+            runStatePath: '/tmp/ready/old-4qkyxm4jppc/run_state.json',
+            sceneScoresPath: '/tmp/ready/old-4qkyxm4jppc/scene_scores.json',
+            hasLiveWork: true,
+            hasRecentProgress: true,
+          }),
+        },
+        skillContextOrchestrator: {
+          shouldKeepToolsWithVideo: () => true,
+          findExplicitlyRequestedSkills: (text: string) =>
+            /video[-_\s]?copy|Video Copy Analyzer/i.test(text)
+              ? [videoCopySkill]
+              : [],
+          hasActiveSkillExecution: () => false,
+          getCurrentReferenceSkillHint: () => armedHint,
+          rememberExplicitReferenceSkillHint: () => {
+            armedHint = { id: 'video-copy-analyzer', name: 'Video Copy Analyzer' }
+            rememberLastReferenceSkill('scope-test', armedHint)
+            return true
+          },
+          buildPreferredSkillToolNames: () => [
+            'skill_ask_user',
+            'skill_run_shell',
+            'skill_write_artifact',
+            'skill_read_artifact',
+            'skill_start_detached',
+            'skill_inspect_detached',
+            'skill_cancel_detached',
+          ],
+          maybeInjectExplicitSkillContext: async () => {},
+          listRegisteredSkillTokens: () => ['video-copy-analyzer', 'Video Copy Analyzer'],
+        },
+        requestToolLoopResponse: async (params: { allowedToolNames?: string[] }) => {
+          capturedAllowedToolNames = params.allowedToolNames || []
+          return {
+            text: '准备按 Video Copy Analyzer 执行',
+            toolCalls: [],
+            stopReason: 'stop',
+          }
+        },
+      },
+    })
+    ;(request as unknown as { continuationState?: Record<string, unknown> }).continuationState = {
+      taskId: 'old-vea-task',
+      skillId: 'video-expert-analyzer',
+      outputDir: '/tmp/ready/old-4qkyxm4jppc',
+    }
+
+    const result = await engine.execute(request)
+
+    assert.equal(result.taskType, 'multi_step_task')
+    assert.ok(capturedAllowedToolNames.includes('skill_run_shell'))
+    assert.ok(!capturedAllowedToolNames.includes('skill_video_expert_pipeline'))
+    assert.ok(!capturedAllowedToolNames.includes('skill_video_expert_ai_analyze'))
+    assert.ok(metrics.some((event) =>
+      event.metric === 'turn_frame_resolved'
+      && event.mode === 'skill_start'
+      && event.source === 'explicit'
+      && event.skillId === 'video-copy-analyzer',
+    ))
+  } finally {
+    __setMetricSinkForTests(null)
+    _resetLastReferenceSkillHintsForTests()
+  }
+})
+
+test('TurnEngine does not infer VEA from a fresh URL just because VEA is active in the background', async () => {
+  const engine = new TurnEngine()
+  const metrics: AgentMetricEvent[] = []
+  let capturedAllowedToolNames: string[] = []
+  let armedHint: { id: string; name: string } | null = null
+  const veaSkill = {
+    id: 'video-expert-analyzer',
+    name: 'Video Expert Analyzer (VNext)',
+    actions: [
+      {
+        name: 'video_expert_pipeline',
+        visibility: 'internal',
+        params: [{ name: 'url', required: true }],
+      },
+      {
+        name: 'video_expert_ai_analyze',
+        visibility: 'internal',
+        params: [{ name: 'sceneScoresPath', required: true }],
+      },
+    ],
+    hostRequirements: {
+      expose_when_hint_armed: ['video_expert_pipeline', 'video_expert_ai_analyze'],
+    },
+  }
+
+  __setMetricSinkForTests((event) => metrics.push(event))
+  _resetLastReferenceSkillHintsForTests()
+  const restorePipelineToolDefinition = installLongSkillToolDefinitionForTest('skill_video_expert_pipeline')
+  const restoreAiAnalyzeToolDefinition = installLongSkillToolDefinitionForTest('skill_video_expert_ai_analyze')
+  try {
+    const { request } = createRequest({
+      userText: 'https://www.youtube.com/watch?v=p4ahGSFTY-c',
+      intentClassification: createIntent({ primaryDomain: 'browser', confidence: 'medium' }),
+      host: {
+        providerContext: {
+          config: {
+            provider: 'openai',
+            model: 'gpt-test',
+            apiKey: 'test',
+            baseUrl: 'https://api.openai.com/v1',
+          },
+          baseUrl: 'https://api.openai.com/v1',
+          provider: undefined,
+          isKimi: false,
+          isKimiCoding: false,
+          useAnthropicProtocol: false,
+          supportsToolCalls: true,
+          supportsVideoBlock: true,
+          hasRawVideoInIncoming: false,
+        },
+        skillTaskSupervisor: {
+          inspectLatestSkillTask: () => makeSkillSnapshot({
+            outputDir: '/tmp/ready/old-4qkyxm4jppc',
+            runStatePath: '/tmp/ready/old-4qkyxm4jppc/run_state.json',
+            sceneScoresPath: '/tmp/ready/old-4qkyxm4jppc/scene_scores.json',
+            hasLiveWork: true,
+            hasRecentProgress: true,
+          }),
+        },
+        skillContextOrchestrator: {
+          shouldKeepToolsWithVideo: () => true,
+          findExplicitlyRequestedSkills: (text: string) =>
+            /video-expert-analyzer|Video Expert Analyzer/i.test(text)
+              ? [veaSkill]
+              : [],
+          hasActiveSkillExecution: () => false,
+          getCurrentReferenceSkillHint: () => armedHint,
+          rememberExplicitReferenceSkillHint: (text: string) => {
+            if (!/video-expert-analyzer|Video Expert Analyzer/i.test(text)) return false
+            armedHint = { id: 'video-expert-analyzer', name: 'Video Expert Analyzer (VNext)' }
+            rememberLastReferenceSkill('scope-test', armedHint)
+            return true
+          },
+          buildPreferredSkillToolNames: () => armedHint?.id === 'video-expert-analyzer'
+            ? ['skill_video_expert_pipeline', 'skill_video_expert_ai_analyze']
+            : [],
+          maybeInjectExplicitSkillContext: async () => {},
+          listRegisteredSkillTokens: () => ['video-expert-analyzer', 'Video Expert Analyzer'],
+        },
+        requestToolLoopResponse: async (params: { allowedToolNames?: string[] }) => {
+          capturedAllowedToolNames = params.allowedToolNames || []
+          return {
+            text: '准备开始新任务',
+            toolCalls: [],
+            stopReason: 'stop',
+          }
+        },
+      },
+    })
+
+    const result = await engine.execute(request)
+
+    assert.ok(result)
+    assert.ok(!capturedAllowedToolNames.some((name) => name.startsWith('skill_')))
+    assert.ok(!metrics.some((event) =>
+      event.metric === 'turn_frame_resolved'
+      && event.mode === 'skill_start'
+      && event.skillId === 'video-expert-analyzer',
     ))
   } finally {
     restorePipelineToolDefinition()

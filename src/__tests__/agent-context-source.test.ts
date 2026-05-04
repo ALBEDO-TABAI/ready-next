@@ -88,6 +88,35 @@ test('buildAgentSpawnContextFromAIConfig uses shared runtime vision truth for ex
   assert.deepEqual(ctx!.input_modes, ['text', 'image'])
 })
 
+test('buildAgentSpawnContextFromAIConfig treats Xiaomi mimo-v2.5 as image-capable in auto mode', () => {
+  const ctx = buildAgentSpawnContextFromAIConfig(makeConfig({
+    provider: 'xiaomi',
+    baseUrl: 'https://token-plan-cn.xiaomimimo.com/anthropic',
+    model: 'mimo-v2.5',
+    agentProtocol: 'anthropic',
+    visionMode: 'auto',
+  }))
+
+  assert.ok(ctx)
+  assert.equal(ctx!.provider, 'xiaomi')
+  assert.equal(ctx!.model_id, 'mimo-v2.5')
+  assert.equal(ctx!.api_kind, 'anthropic-messages')
+  assert.deepEqual(ctx!.input_modes, ['text', 'image'])
+})
+
+test('buildAgentSpawnContextFromAIConfig keeps Xiaomi spawn fallback chain empty', () => {
+  const ctx = buildAgentSpawnContextFromAIConfig(makeConfig({
+    provider: 'xiaomi',
+    baseUrl: 'https://token-plan-cn.xiaomimimo.com/anthropic',
+    model: 'mimo-v2.5',
+    agentProtocol: 'anthropic',
+    visionMode: 'auto',
+  }))
+
+  assert.ok(ctx)
+  assert.deepEqual(ctx!.fallback_chain, [])
+})
+
 test('buildAgentSpawnContextFromAIConfig treats unverified custom vision auto as text-only', () => {
   const ctx = buildAgentSpawnContextFromAIConfig(makeConfig({
     provider: 'openai-compatible',

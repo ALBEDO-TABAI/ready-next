@@ -1642,6 +1642,7 @@ export async function executeSkillTool(
       try {
         const output = await executeInspectRunState({
           outputDir: typeof args.outputDir === 'string' ? args.outputDir : undefined,
+          runStatePath: typeof args.runStatePath === 'string' ? args.runStatePath : undefined,
           taskId: typeof args.taskId === 'string' ? args.taskId : undefined,
           expectedTaskId: typeof args.expectedTaskId === 'string' ? args.expectedTaskId : undefined,
           maxRawBytes: typeof args.maxRawBytes === 'number' ? args.maxRawBytes : undefined,

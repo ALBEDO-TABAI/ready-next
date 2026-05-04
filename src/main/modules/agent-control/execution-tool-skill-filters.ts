@@ -6,7 +6,6 @@ export function filterPreferredSkillAnthropicTools(
   tools: Array<Record<string, unknown>>,
   preferredSkillToolNames: string[],
 ): Array<Record<string, unknown>> {
-  if (preferredSkillToolNames.length === 0) return tools
   const allowed = new Set(preferredSkillToolNames)
   return tools.filter((tool) => {
     const name = typeof tool.name === 'string' ? tool.name : ''
@@ -19,7 +18,6 @@ export function filterPreferredSkillOpenAITools(
   tools: Array<Record<string, unknown>>,
   preferredSkillToolNames: string[],
 ): Array<Record<string, unknown>> {
-  if (preferredSkillToolNames.length === 0) return tools
   const allowed = new Set(preferredSkillToolNames)
   return tools.filter((tool) => {
     const fn = (tool.function as { name?: unknown } | undefined)?.name

@@ -244,7 +244,8 @@ function statusToStepStatus(status: SkillTaskEventStatus): SkillTaskRunStep['sta
 
 function interactionStateFor(status: SkillTaskEventStatus): SkillTaskRunRecord['interactionState'] {
   if (status === 'blocked') return 'awaiting_clarification'
-  return 'running'
+  if (status === 'running') return 'running'
+  return 'suspended'
 }
 
 function lifecycleRunStatus(state: SkillParentTaskLifecycleState): SkillTaskRunStatus {
@@ -276,7 +277,7 @@ function lifecycleResumableActions(state: SkillParentTaskLifecycleState): ScopeR
 function lifecycleInteractionState(state: SkillParentTaskLifecycleState): SkillTaskRunRecord['interactionState'] {
   if (state === 'background_running' || state === 'budget_paused') return 'suspended'
   if (state === 'blocked') return 'awaiting_clarification'
-  return 'running'
+  return 'suspended'
 }
 
 function lifecycleProjectionStatus(state: SkillParentTaskLifecycleState): SkillTaskProjectionStatus {
@@ -989,7 +990,7 @@ export function upsertDetachedSkillTaskRun(record: {
       }
       : null
   const finishedAt = isDetachedTerminalStatus(effectiveStatus) ? record.finishedAt ?? null : null
-  const interactionState = effectiveStatus === 'running' || effectiveStatus === 'blocked' ? 'suspended' : 'running'
+  const interactionState = 'suspended'
   if (!existing) {
     try {
       repository.create({

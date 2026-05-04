@@ -86,6 +86,7 @@ export interface SubAgentProgress {
   readonly totalUnits?: number | null
   readonly completedUnits?: number | null
   readonly coverageRatio?: number | null
+  readonly overallCoverageRatio?: number | null
   readonly fingerprint?: string | null
 }
 

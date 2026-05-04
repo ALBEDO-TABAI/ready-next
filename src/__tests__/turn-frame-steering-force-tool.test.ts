@@ -143,6 +143,32 @@ test('buildTurnFrameSteering: force_tool sets requiredToolName to typed action',
   )
 })
 
+test('buildTurnFrameSteering: fresh skill start does not expose diagnostic primitives before launch', () => {
+  const frame = makeFrame({
+    mode: 'skill_start',
+    userIntent: 'start',
+    liveness: 'unknown',
+    skill: {
+      ...makeFrame().skill!,
+      source: 'explicit',
+      status: 'unknown',
+      runContract: makeContract({
+        status: 'unknown',
+        liveness: 'unknown',
+        sourceUrl: 'https://example.com/new-video.mp4',
+      }),
+    },
+  })
+  const steering = buildTurnFrameSteering(frame)
+
+  assert.equal(steering.mode, 'ask_model')
+  assert.ok(steering.preferredToolNames.includes('skill_video_expert_pipeline'))
+  assert.ok(steering.preferredToolNames.includes('skill_ask_user'))
+  assert.ok(!steering.preferredToolNames.includes('skill_inspect_run_state'))
+  assert.ok(!steering.preferredToolNames.includes('skill_read_artifact'))
+  assert.ok(!steering.preferredToolNames.includes('skill_start_detached'))
+})
+
 test('selectSteeringMode: skill_repair + ready_to_resume → force_tool', () => {
   const frame = makeFrame({
     mode: 'skill_repair',

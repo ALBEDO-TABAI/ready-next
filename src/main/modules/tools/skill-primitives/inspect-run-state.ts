@@ -24,7 +24,7 @@
  */
 
 import { existsSync, readFileSync, statSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { basename, dirname } from 'node:path'
 
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent-control/tool-result-types'
 import { ToolDomainError } from '../tool-errors'
@@ -48,6 +48,7 @@ const SUBDIR_DEPTH_LIMIT = 1 // search at root then one level deep
 
 export interface InspectRunStateArgs {
   outputDir?: string
+  runStatePath?: string
   taskId?: string
   expectedTaskId?: string
   maxRawBytes?: number
@@ -153,6 +154,34 @@ function selectRunStateFile(params: {
     fileName: RUN_STATE_FILENAME,
     searchDepth: SUBDIR_DEPTH_LIMIT,
   })
+}
+
+function createMissingRunStateOutput(params: {
+  outputDir: string
+  resolvedFromTaskId: string | null
+  expectedTaskId: string | null
+  errorKind: 'not_found' | 'outputdir_not_found'
+  message: string
+}): ToolExecutionOutput {
+  return createToolExecutionOutput(
+    params.message,
+    {
+      shape: 'json',
+      data: {
+        outputDir: params.outputDir,
+        resolvedFromTaskId: params.resolvedFromTaskId,
+        expectedTaskId: params.expectedTaskId,
+        found: false,
+        ambiguous: false,
+        identityMismatch: false,
+        errorKind: params.errorKind,
+        runStatePath: null,
+        candidates: [],
+        summary: null,
+        raw: null,
+      },
+    },
+  )
 }
 
 function normalizeStatus(value: unknown): string | null {
@@ -434,6 +463,16 @@ export async function executeInspectRunState(
     outputDir = record.outputDir || (record.runStatePath ? dirname(record.runStatePath) : null)
     explicitRunStatePath = record.runStatePath || null
     resolvedFromTaskId = args.taskId
+  } else if (args.runStatePath) {
+    explicitRunStatePath = args.runStatePath
+    if (basename(args.runStatePath) !== RUN_STATE_FILENAME) {
+      throw new ToolDomainError(
+        'input_validation',
+        `runStatePath must point to ${RUN_STATE_FILENAME}.`,
+        { runStatePath: args.runStatePath },
+      )
+    }
+    outputDir = dirname(args.runStatePath)
   } else if (args.outputDir) {
     outputDir = args.outputDir
   }
@@ -457,11 +496,15 @@ export async function executeInspectRunState(
       reason: 'outputdir_not_found',
       outputDir,
     })
-    throw new ToolDomainError(
-      'not_found',
-      `outputDir does not exist or is not a directory: ${outputDir}`,
-      { outputDir, resolvedFromTaskId },
-    )
+    return createMissingRunStateOutput({
+      outputDir,
+      resolvedFromTaskId,
+      expectedTaskId: args.expectedTaskId || resolvedFromTaskId || null,
+      errorKind: explicitRunStatePath ? 'not_found' : 'outputdir_not_found',
+      message: explicitRunStatePath
+        ? `No run_state.json found at ${explicitRunStatePath}.`
+        : `outputDir does not exist or is not a directory: ${outputDir}`,
+    })
   }
 
   const effectiveExpectedTaskId = args.expectedTaskId || resolvedFromTaskId || null

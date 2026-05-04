@@ -65,9 +65,9 @@ export function buildSkillDetectionInputs(params: {
   previousAssistantSkillToolUses?: string[] | null
 }): string[] {
   const currentInputs = uniqueNonEmpty([
-    params.contextualUserInput,
     params.primaryInstruction,
     params.pureUserText,
+    params.contextualUserInput,
   ])
   // Phase 2.3 — detect retry-only on the SHORT primary+pure pair, not on
   // contextualUserInput. contextualUserInput often inherits a previous turn's

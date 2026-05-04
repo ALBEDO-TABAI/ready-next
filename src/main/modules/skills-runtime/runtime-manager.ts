@@ -816,6 +816,12 @@ export class SkillsRuntimeManager {
       const actionParams = preparedOutputDir && action.inputMode === 'json' && !requestedOutputDir
         ? { ...(request.params || {}), outputDir: preparedOutputDir }
         : (request.params || {})
+      const childRunContext = request.params?.__childRunContext && typeof request.params.__childRunContext === 'object'
+        ? request.params.__childRunContext as Record<string, unknown>
+        : null
+      const childRunId = typeof childRunContext?.childRunId === 'string' && childRunContext.childRunId.trim()
+        ? childRunContext.childRunId.trim()
+        : ''
       if (hostRequirements) {
         spawnHandle = await controller.prepareSpawnContext(
           resolved.definition.id,
@@ -831,6 +837,7 @@ export class SkillsRuntimeManager {
       const mergedEnv = {
         ...(spawnHandle?.envOverrides || {}),
         READY_SKILL_TASK_ID: jobId,
+        ...(childRunId ? { READY_SKILL_CHILD_RUN_ID: childRunId } : {}),
         ...(request.env || {}),
       }
 

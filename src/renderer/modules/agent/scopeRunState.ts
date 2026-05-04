@@ -63,6 +63,17 @@ function isDetachedSkillJob(run: ScopeRunState): boolean {
   )
 }
 
+function hasChildRunIdentity(run: ScopeRunState): boolean {
+  const taskId = typeof run.taskId === 'string' ? run.taskId.trim() : ''
+  const continuationTaskId =
+    typeof run.taskContinuation?.taskId === 'string' ? run.taskContinuation.taskId.trim() : ''
+  return Boolean(
+    (typeof run.taskContinuation?.childRunId === 'string' && run.taskContinuation.childRunId.trim()) ||
+    taskId.startsWith('skill-child:') ||
+    continuationTaskId.startsWith('skill-child:')
+  )
+}
+
 function hasForegroundReleaseSignal(run: ScopeRunState): boolean {
   const blockerType = run.taskContinuation?.blockerType
   return (
@@ -71,6 +82,7 @@ function hasForegroundReleaseSignal(run: ScopeRunState): boolean {
     run.waitingFor === 'background' ||
     blockerType === 'background_running' ||
     blockerType === 'budget_paused' ||
+    hasChildRunIdentity(run) ||
     isDetachedSkillJob(run)
   )
 }
@@ -510,14 +522,55 @@ function parseSkillProgress(input: unknown): ScopeRunSkillProgress | null {
     const value = Number(record[key])
     return Number.isFinite(value) ? value : null
   }
+  const handoffRecord = record.handoff && typeof record.handoff === 'object' && !Array.isArray(record.handoff)
+    ? record.handoff as Record<string, unknown>
+    : null
+  const readHandoffString = (key: string): string | null => {
+    const value = handoffRecord?.[key]
+    return typeof value === 'string' && value.trim() ? value.trim() : null
+  }
+  const readHandoffNumber = (key: string): number => {
+    const value = Number(handoffRecord?.[key])
+    return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0
+  }
+  const handoffStatus = readHandoffString('status')
+  const handoffKind = readHandoffString('kind')
+  const handoff = handoffRecord
+    && (
+      handoffStatus === 'pending'
+      || handoffStatus === 'in_progress'
+      || handoffStatus === 'pending_retry'
+      || handoffStatus === 'blocked'
+      || handoffStatus === 'failed'
+      || handoffStatus === 'completed'
+    )
+    && (handoffKind === 'audiovisual_report' || handoffKind === 'generic')
+    ? {
+      status: handoffStatus,
+      kind: handoffKind,
+      taskName: readHandoffString('taskName') || 'handoff',
+      userMessage: readHandoffString('userMessage') || '',
+      actionLabel: readHandoffString('actionLabel') || '继续处理',
+      attemptCount: readHandoffNumber('attemptCount'),
+      lastErrorKind: readHandoffString('lastErrorKind'),
+      lastErrorMessage: readHandoffString('lastErrorMessage'),
+      taskPath: readHandoffString('taskPath'),
+      outputPath: readHandoffString('outputPath'),
+      updatedAt: readHandoffString('updatedAt'),
+    } satisfies ScopeRunSkillProgress['handoff']
+    : null
   return {
     stage: readString('stage'),
     completed: readNumber('completed'),
     total: readNumber('total'),
     coverage: readNumber('coverage'),
+    overallCoverage: readNumber('overallCoverage'),
     fingerprint: readString('fingerprint'),
     updatedAt: readString('updatedAt'),
     lastError: readString('lastError'),
+    detail: readString('detail'),
+    activityUpdatedAt: readString('activityUpdatedAt'),
+    ...(handoff ? { handoff } : {}),
   }
 }
 

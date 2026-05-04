@@ -46,6 +46,10 @@ def _ready_task_id() -> str:
     return os.environ.get("READY_SKILL_TASK_ID", "").strip()
 
 
+def _ready_child_run_id() -> str:
+    return os.environ.get("READY_SKILL_CHILD_RUN_ID", "").strip()
+
+
 def _normalize_video_dir(value: str) -> str:
     """Make video_dir absolute + strip `.`/`..`, but skip symlink resolution.
 
@@ -102,6 +106,7 @@ def default_run_state() -> Dict:
         "schema_version": 1,
         "version": "vnext",
         "task_id": _ready_task_id(),
+        "child_run_id": _ready_child_run_id(),
         "pid": os.getpid(),
         "started_at": now,
         "active_output_dir": "",
@@ -151,6 +156,8 @@ def save_run_state(path: Path, state: Dict) -> None:
     payload["pid"] = os.getpid()
     if not payload.get("task_id"):
         payload["task_id"] = _ready_task_id()
+    if not payload.get("child_run_id"):
+        payload["child_run_id"] = _ready_child_run_id()
     if not payload.get("started_at"):
         payload["started_at"] = _timestamp()
     if payload.get("active_output_dir"):
@@ -161,6 +168,24 @@ def save_run_state(path: Path, state: Dict) -> None:
     }
     payload["updated_at"] = _timestamp()
     _atomic_write_text(path, json.dumps(payload, indent=2, ensure_ascii=False))
+
+
+def reset_run_state(
+    path: Path,
+    *,
+    scores_path: Optional[str] = None,
+    video_dir: Optional[str] = None,
+    active_output_dir: Optional[str] = None,
+) -> Dict:
+    state = default_run_state()
+    if scores_path is not None:
+        state["scores_path"] = _normalize_scores_path(scores_path, str(video_dir or ""))
+    if video_dir is not None:
+        state["video_dir"] = _normalize_video_dir(video_dir)
+    if active_output_dir is not None:
+        state["active_output_dir"] = _normalize_active_output_dir(active_output_dir)
+    save_run_state(path, state)
+    return state
 
 
 def mark_stage(

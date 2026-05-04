@@ -160,6 +160,44 @@ test('run_state selection accepts explicit legacy blank task id paths', () => {
   }
 })
 
+test('run_state selection uses childRunId to claim the active output under a shared root', () => {
+  const root = mkdtempSync(join(tmpdir(), 'ready-run-state-child-id-'))
+  try {
+    const targetDir = join(root, 'target-output')
+    const staleDir = join(root, 'stale-output')
+    mkdirSync(targetDir)
+    mkdirSync(staleDir)
+    const targetRunState = join(targetDir, 'run_state.json')
+    writeFileSync(join(root, 'run_state.json'), JSON.stringify({
+      status: 'completed',
+      current_stage: 'completed',
+    }), 'utf8')
+    writeFileSync(join(staleDir, 'run_state.json'), JSON.stringify({
+      child_run_id: 'other-child',
+      status: 'completed',
+      current_stage: 'completed',
+    }), 'utf8')
+    writeFileSync(targetRunState, JSON.stringify({
+      child_run_id: 'vqfy70dlv',
+      status: 'running',
+      current_stage: 'prepare',
+      active_output_dir: targetDir,
+    }), 'utf8')
+
+    const selected = selectRunStateCandidate({
+      rootDir: root,
+      explicitRunStatePath: join(root, 'run_state.json'),
+      expectedChildRunId: 'vqfy70dlv',
+    })
+
+    assert.equal(selected.path, targetRunState)
+    assert.equal(selected.ambiguous, false)
+    assert.equal(selected.candidates[0]?.childRunId, 'vqfy70dlv')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('run_state selection emits a metric when directory traversal is skipped', () => {
   const root = mkdtempSync(join(tmpdir(), 'ready-run-state-skipped-dir-'))
   const events: AgentMetricEvent[] = []

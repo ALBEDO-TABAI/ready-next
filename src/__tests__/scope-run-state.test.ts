@@ -212,6 +212,27 @@ describe('scope run state helpers', () => {
     }
   })
 
+  it('does not let a child-run handle lock the foreground composer', () => {
+    const run = {
+      scopeId: 'scope-child-background',
+      agent: 'assistant',
+      requestId: 'run-child-background',
+      phase: 'tool_running' as const,
+      module: 'skill' as const,
+      taskId: 'skill-child:child-bg-1',
+      taskContinuation: {
+        taskId: 'skill-child:child-bg-1',
+        childRunId: 'child-bg-1',
+      },
+      toolTrace: [],
+      startedAt: '2026-05-04T00:00:00.000Z',
+      updatedAt: '2026-05-04T00:00:01.000Z',
+    }
+
+    assert.strictEqual(isForegroundBusyScopeRunState(run), false)
+    assert.strictEqual(isStreamingScopeRunState(run), false)
+  })
+
   it('treats any active phase with a terminal reason as non-streaming', () => {
     for (const phase of ['queued', 'planning', 'tool_running', 'checkpoint', 'takeover', 'resuming', 'responding'] as const) {
       assert.strictEqual(isStreamingScopeRunState({
@@ -406,6 +427,42 @@ describe('scope run state helpers', () => {
       runStatePath: '/tmp/ready/output/run_state.json',
       pauseReason: 'budget_exhausted',
       progressFingerprint: 'fp-1',
+    })
+  })
+
+  it('preserves skill activity progress detail from structured events', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        phase: 'checkpoint',
+        module: 'skill',
+        timestamp: '2026-05-04T06:00:00.000Z',
+        progress: {
+          stage: 'score_batches',
+          completed: 0,
+          total: 39,
+          coverage: 0,
+          overallCoverage: 0.42,
+          fingerprint: 'batch-fp-1',
+          updatedAt: '2026-05-04T06:00:00.000Z',
+          lastError: null,
+          detail: '评分批次 2/7，约 12/39 场景',
+          activityUpdatedAt: '2026-05-04T06:00:00.000Z',
+        },
+      },
+      null,
+    )
+
+    assert.deepStrictEqual(patch.progress, {
+      stage: 'score_batches',
+      completed: 0,
+      total: 39,
+      coverage: 0,
+      overallCoverage: 0.42,
+      fingerprint: 'batch-fp-1',
+      updatedAt: '2026-05-04T06:00:00.000Z',
+      lastError: null,
+      detail: '评分批次 2/7，约 12/39 场景',
+      activityUpdatedAt: '2026-05-04T06:00:00.000Z',
     })
   })
 

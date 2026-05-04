@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import test from 'node:test'
 
 import { executeSkillTool } from '../main/modules/tools/skills-tools'
@@ -41,6 +41,64 @@ test('skill_inspect_run_state extracts VEA stage and scene progress fields', asy
     assert.equal(data.summary.status, 'running')
     assert.equal(data.summary.updatedAt, '2026-04-28T01:00:00Z')
     assert.ok(data.summary.knownKeysFound.includes('currentStage'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('skill_inspect_run_state accepts explicit runStatePath and derives outputDir', async () => {
+  const dir = makeTempDir()
+  try {
+    const runStatePath = join(dir, 'run_state.json')
+    writeFileSync(runStatePath, JSON.stringify({
+      version: 'vnext',
+      status: 'running',
+      current_stage: 'score_batches',
+      total_scenes: 12,
+      completed_scenes: 3,
+    }), 'utf-8')
+
+    const data = outputData(await executeInspectRunState({ runStatePath } as any))
+
+    assert.equal(data.found, true)
+    assert.equal(data.outputDir, dirname(runStatePath))
+    assert.equal(data.runStatePath, runStatePath)
+    assert.equal(data.summary.currentStage, 'score_batches')
+    assert.equal(data.summary.totalScenes, 12)
+    assert.equal(data.summary.completedScenes, 3)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('skill_inspect_run_state reports missing explicit runStatePath without throwing', async () => {
+  const dir = makeTempDir()
+  try {
+    const runStatePath = join(dir, 'new-task', 'run_state.json')
+
+    const data = outputData(await executeInspectRunState({ runStatePath } as any))
+
+    assert.equal(data.found, false)
+    assert.equal(data.errorKind, 'not_found')
+    assert.equal(data.runStatePath, null)
+    assert.equal(data.outputDir, dirname(runStatePath))
+    assert.equal(data.summary, null)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('skill_inspect_run_state reports missing outputDir without throwing', async () => {
+  const dir = makeTempDir()
+  const outputDir = join(dir, 'does-not-exist')
+  try {
+    const data = outputData(await executeInspectRunState({ outputDir }))
+
+    assert.equal(data.found, false)
+    assert.equal(data.errorKind, 'outputdir_not_found')
+    assert.equal(data.outputDir, outputDir)
+    assert.equal(data.runStatePath, null)
+    assert.equal(data.summary, null)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -344,6 +402,34 @@ test('skill_inspect_run_state dispatch forwards expectedTaskId to select the mat
     const data = outputData(output)
     assert.equal(data.runStatePath, targetRunState)
     assert.equal(data.expectedTaskId, 'target')
+    assert.equal(data.summary.taskId, 'target')
+    assert.equal(data.summary.currentStage, 'score_batches')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('skill_inspect_run_state dispatch forwards runStatePath instead of forcing read_artifact fallback', async () => {
+  const root = makeTempDir()
+  try {
+    const runStatePath = join(root, 'run_state.json')
+    writeFileSync(runStatePath, JSON.stringify({
+      task_id: 'target',
+      current_stage: 'score_batches',
+      status: 'running',
+    }), 'utf-8')
+
+    const output = await executeSkillTool(
+      'skill_inspect_run_state',
+      { runStatePath },
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { frameSkillId: 'video-expert-analyzer' },
+    )
+    const data = outputData(output)
+    assert.equal(data.runStatePath, runStatePath)
     assert.equal(data.summary.taskId, 'target')
     assert.equal(data.summary.currentStage, 'score_batches')
   } finally {

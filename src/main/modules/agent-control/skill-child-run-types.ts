@@ -78,6 +78,7 @@ export interface MutableSkillChildCloseEvent {
     totalUnits: number | null
     completedUnits: number | null
     coverageRatio: number | null
+    overallCoverageRatio?: number | null
     fingerprint: string | null
   }
   framePatch: TurnFramePatch | null

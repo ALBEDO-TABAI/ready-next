@@ -269,6 +269,7 @@ function makeCloseEvent(args: {
       totalUnits: null,
       completedUnits: null,
       coverageRatio: null,
+      overallCoverageRatio: null,
       fingerprint: null,
     },
     framePatch: null,

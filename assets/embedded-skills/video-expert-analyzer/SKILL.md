@@ -14,12 +14,15 @@ when-to-use: |
 
 ## 工具调用规约（必读 — 不照做会卡 10 分钟超时）
 
-下面 "主流程" 给的 `python3 scripts/...` 是脚本层入口；**typed action 已经把它们包好了，30 分钟超时 + `run_state.json` 状态追踪都已接好**。LLM 看到工具名时按下表对应：
+下面 "主流程" 给的 `python3 scripts/...` 是脚本层入口；**Ready typed action 已经把输出准备、spawn 配置、30 分钟超时、`run_state.json` 状态追踪和任务投影都接好**。用户显式选择 VEA，或技能身份已高置信命中时，冷启动直接调用选定 typed action，不要先扫历史目录、`vnext_config.json` 或旧 `run_state.json`。
+
+LLM 看到工具名时按下表对应：
 
 - **跑长链路（prepare / score_batches / finalize / 重跑 pipeline）→ 必须优先 typed action**
   - `skill_video_expert_pipeline({url, outputDir?, sceneThreshold?, bestThreshold?})` — 包了 `pipeline_enhanced.py` / `orchestrate_vnext.py`，30 min 超时
   - `skill_video_expert_ai_analyze({sceneScoresPath, mode?})` — 包了 `ai_analyzer.py --mode score_batches/merge_validate`，30 min 超时
-- **查看进度 → 优先 `skill_inspect_run_state`**
+- **续跑 / 查看进度 / 诊断 → 优先 `skill_inspect_run_state`**
+  - 只在有显式句柄时使用：用户给了 `run_state.json` / `scene_scores.json` / 输出目录、点了任务卡继续、给了 childRunId，或明确要求查进度/历史。
   - 传 `runStatePath` 或 `outputDir`，让 Ready 判断 running / background_running / budget_paused / done，不要先绕 shell。
 - **低级诊断 → `skill_read_artifact` 或 `skill_run_shell`**
   - 只在 inspect 不够用时 fallback；不是长链路 fallback。shell 默认 60 秒，硬上限 10 分钟。
@@ -30,6 +33,7 @@ when-to-use: |
 - ❌ `skill_run_shell({"command": "cd <dir> && python3 scripts/orchestrate_vnext.py ..."})` — 同上
 - ❌ typed action 失败后立刻改用 shell 重跑长链路 — 会丢失结构化状态与 30 分钟动作契约
 - ❌ 看进度先 `cat run_state.json` 或 tail 日志 — 易错过 detached / projection / lease 状态
+- ❌ 新视频冷启动前先扫描旧输出目录或旧 `run_state.json` — 会把历史任务误当续跑
 - ✅ `skill_video_expert_pipeline({"url": "<url>", "outputDir": "<dir>"})`
 - ✅ 想看进度：`skill_inspect_run_state({"runStatePath": "<outputDir>/run_state.json"})`
 
@@ -54,40 +58,12 @@ when-to-use: |
 
 **默认行为是一口气自动做完**，不是人工逐批填表。接力模式只在 OpenClaw 场景下启用。
 
-## 首次使用引导
+## 冷启动、续跑与历史目录
 
-只要这次任务是"新视频"（用户给的是视频链接或本地视频文件，而不是已有的 `scene_scores.json` / 已有视频子目录的续跑），在调用任何脚本之前，先按这三步确认：
-
-**先找 `vnext_config.json`，有就直接用。**
-- 查找顺序：用户在对话里显式点名的输出根目录 → `~/.config/video-expert-analyzer-vnext/config.json` 的 `output_base_dir`。
-- 在候选根目录下若能找到 `vnext_config.json`，直接读出 `output_root` / `primary_language` / `model_preferences`，跳过下面的提问。
-- 续跑场景（用户给的是 `scene_scores.json` 或已有视频子目录）也按上一级目录找 `vnext_config.json`；找不到不要硬问，沿用现有配置继续跑即可。
-
-**找不到就顺序问这三件事（一次问完，不要一问一等）：**
-
-1. **分析结果主目录**：告诉用户"之后每个视频会在这个目录下按视频名建子目录，形如 `<主目录>/<视频名>/scene_scores.json …`"，要一个绝对路径。拿到后同时做两件事：写进 `<主目录>/vnext_config.json`；并把 `~/.config/video-expert-analyzer-vnext/config.json` 的 `output_base_dir` 改成这个路径（或在之后每次脚本调用显式带 `-o <主目录>`，两种任选其一，别混用）。
-2. **四类最终报告的主语言**：范围只包含 `*_storyboard.*`、`*_audiovisual_analysis.*`、`*_detailed_analysis.md`、`*_complete_analysis.md` 这四类；其它中间产物（`scene_reports/`、`brief.md`、分类摘要、`delivery_report.json`）保持原样。让用户给一个语言（示例：中文 / English / 日本語），用 ISO 码存 `primary_language`（例如 `zh-CN`、`en-US`、`ja-JP`）。**如果选的不是中文**：脚本仍先产中文版本，你必须在 `finalize` 全部跑完、`delivery_report.json` 落盘之后，逐个把上面四类文件重写为目标语言并覆盖原文件 —— 文件名、章节结构、Scene 编号、截图路径、SVG/JSON 字段名保持不变，只重写自然语言文本；没翻完不算交付完成。
-3. **视觉分析 / 报告生成的模型偏好**：问清楚有没有特殊要求，并主动帮用户落盘：
-   - 有 OpenClaw：看 `~/.openclaw/agents/main/agent/models.json` 列出可用模型让用户挑，把选中的写进 `~/.config/video-expert-analyzer-vnext/config.json` 的 `auto_scoring.preferred_model` 和 `auto_scoring.fallback_models`（按优先级顺序）。
-   - 只有自己的 API key：帮用户把 `OPENAI_API_KEY + OPENAI_MODEL` 或 `ANTHROPIC_API_KEY + ANTHROPIC_MODEL` 以 `export` 形式给出（由用户自己在终端里执行，不要替他 `echo` 进 shell profile）；在 `vnext_config.json` 里只留 `model_preferences.preferred_model` 等**模型名**备忘，**绝不把 API key 明文写进任何 json**。
-   - 说"不需要特殊配置"：什么都不改，继续走默认发现链（先 OpenClaw 再环境变量），并在 `vnext_config.json` 里把 `model_preferences` 记为 `{"source": "auto"}`。
-
-**落盘格式**（写到 `<主目录>/vnext_config.json`）：
-
-```json
-{
-  "output_root": "/Users/.../测试",
-  "primary_language": "zh-CN",
-  "model_preferences": {
-    "source": "openclaw" ,
-    "preferred_model": "...",
-    "fallback_models": ["..."]
-  },
-  "created_at": "2026-04-21T..."
-}
-```
-
-用户拒绝回答或说"按你默认来"时：该项取默认值（主目录 `~/Downloads/video-analysis`、语言 `zh-CN`、模型 `{"source": "auto"}`），仍然把这个默认决定写进 `vnext_config.json`，不要下次又来问一遍。
+- **新视频冷启动**：用户给的是视频链接或本地视频文件，且没有显式续跑句柄。Ready 中直接调用 `skill_video_expert_pipeline`；runtime 负责输出准备和状态追踪。不要为了冷启动先扫 `vnext_config.json`、旧输出目录或旧 `run_state.json`。
+- **续跑 / 观察 / 诊断**：只有用户给出 `run_state.json`、`scene_scores.json`、输出目录、任务卡继续、childRunId，或明确要求查进度/历史时，才 inspect/read 对应状态和 artifact。
+- **历史目录**：如果偶然发现历史任务，但用户没有要求续跑，表述为“检测到历史任务；它不影响这次新的分析”，继续按新分析推进，不要暗示正在恢复旧任务。
+- **配置**：只有用户主动要求改输出根目录、报告语言或模型偏好时才讨论配置；不要把配置扫描当作新分析前置步骤。API key 只让用户自己设置环境变量，绝不写进 JSON。
 
 ## 默认执行模式
 
@@ -105,8 +81,8 @@ when-to-use: |
 
 1. 不允许抽样、跳过，或对没看过的画面做判断。
 2. 每个 scene 都必须有独立结果，并及时写回文件。
-3. 如果已有 `scene_scores.json`、`run_state.json`、`host_batches/` 或批次 output，优先续跑，不重做已完成阶段。
-4. 每次开始前先读 `run_state.json`；只做当前阶段允许的动作，不自己跳步。
+3. 如果用户给出明确续跑句柄，或任务卡/childRunId 指向已有任务，优先续跑，不重做已完成阶段。
+4. 续跑、观察、诊断时先 inspect 当前任务的 `run_state.json`；新视频冷启动不要先读旧状态。
 5. `score_batches` 的正常路径是自动并行评分，不要再把“当前 agent 自己逐批看图填 JSON”当成默认方案。
 6. OpenClaw 子代理接手当前批次后，必须先更新 `receipt.status = "in_progress"`，并写 `started_at`、`updated_at`。
 7. 当前批次完成后，必须把 `receipt.status = "completed"`、`has_todo = false`、`worker_summary`、`updated_at`、`completed_at` 写回。
@@ -125,7 +101,7 @@ when-to-use: |
 只有宿主明确是 OpenClaw 并且走接力模式时，才适用以下原则：
 
 1. 跑总控入口
-2. 读 `run_state.json`
+2. 读当前任务的 `run_state.json`
 3. 优先直接跑 `python3 scripts/orchestrate_vnext.py /path/to/scene_scores.json --dispatch-json`
 4. 如果确实只想单独取派单包，再跑 `python3 scripts/openclaw_dispatch.py /path/to/scene_scores.json`
 5. 只把当前批次四件套交给一个短生命周期 worker
@@ -139,7 +115,7 @@ when-to-use: |
 
 ### 0. 总控入口
 
-新视频任务在跑这一步之前，先过一遍上面的"首次使用引导"（有 `vnext_config.json` 就直接读，没有就问用户并落盘）。
+新视频任务在 Ready 中优先走 typed action；下面命令是脚本层入口，仅用于非 Ready 宿主、诊断或说明脚本能力。
 
 优先使用：
 
@@ -173,7 +149,7 @@ python3 scripts/ai_analyzer.py /path/to/scene_scores.json --mode score_batches
 
 这一阶段会自动处理批次分析：
 
-- 先读 `run_state.json`
+- 读当前任务的 `run_state.json`
 - 自动发现可用模型配置
 - 并行读取每个 scene 的 `primary / start / mid / end` 帧
 - 直接写回对应的 `batch-XXX-output.json`

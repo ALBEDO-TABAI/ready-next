@@ -104,6 +104,168 @@ export interface TaskDisplayItem {
 
 export type TaskDisplayEntry = TaskDisplayItem | TaskDisplayGroup
 
+function stableString(value: string | null | undefined): string | null {
+  const normalized = String(value || '').trim()
+  return normalized || null
+}
+
+export function getTaskRunDisplayKey(run: TaskCardRunLike): string {
+  const childRunId = stableString(run.taskContinuation?.childRunId)
+  if (childRunId) return `child-run:${childRunId}`
+
+  const taskId = stableString(run.taskId) || stableString(run.taskContinuation?.taskId)
+  if (taskId) return `task:${taskId}`
+
+  const detachedTaskId = stableString(run.taskContinuation?.detachedTaskId)
+  if (detachedTaskId) return `detached:${detachedTaskId}`
+
+  const taskRunId = stableString(run.taskContinuation?.taskRunId)
+  if (taskRunId) return `task-run:${taskRunId}`
+
+  const jobId = stableString(run.taskContinuation?.jobId)
+  if (jobId) return `job:${jobId}`
+
+  return `scope:${run.scopeId}`
+}
+
+export function hasTaskRunResumeIdentity(run: TaskCardRunLike): boolean {
+  const taskId = stableString(run.taskId) || stableString(run.taskContinuation?.taskId)
+  return Boolean(
+    stableString(run.taskContinuation?.childRunId) ||
+    stableString(run.taskContinuation?.detachedTaskId) ||
+    stableString(run.taskContinuation?.taskRunId) ||
+    (taskId && (taskId.startsWith('skill-child:') || taskId.startsWith('detached:')))
+  )
+}
+
+export function getTaskStartModeLabel(run: TaskCardRunLike): string | null {
+  if (hasTaskRunResumeIdentity(run)) return '继续任务'
+  if (run.taskType === 'continuation') return '新任务'
+  return null
+}
+
+type ProgressWithActivity = ScopeRunState['progress'] & {
+  detail?: string | null
+  activityUpdatedAt?: string | null
+  activityStale?: boolean | null
+}
+
+interface InternalAgentHandoffInfo {
+  taskName: string
+  summary: string
+  progressLabel: string
+}
+
+const VEA_AUDIOVISUAL_HANDOFF_LABELS: Record<string, InternalAgentHandoffInfo> = {
+  body: {
+    taskName: 'body',
+    summary: '视听报告正文还需要继续生成。点击“继续处理”即可，系统会接上剩余步骤。',
+    progressLabel: '生成视听报告',
+  },
+  diagram: {
+    taskName: 'diagram',
+    summary: '视听报告图表还需要继续生成。点击“继续处理”即可，系统会接上剩余步骤。',
+    progressLabel: '生成报告图表',
+  },
+  illustrate: {
+    taskName: 'illustrate',
+    summary: '视听报告插图说明还需要继续生成。点击“继续处理”即可，系统会接上剩余步骤。',
+    progressLabel: '生成报告插图说明',
+  },
+}
+
+function classifyInternalAgentHandoffText(text: string | null | undefined): InternalAgentHandoffInfo | null {
+  const raw = String(text || '').trim()
+  if (!raw) return null
+  const pathMatch = raw.match(/audiovisual_handoff\/([^/\s`"'）)]+)\/task\.md/i)
+  const subtaskMatch = raw.match(/视听剖析子任务\s*[`'“”"]?([^`'“”"\s；;]+)[`'“”"]?\s*待\s*agent\s*处理/i)
+  if (!pathMatch && !subtaskMatch && !raw.includes('audiovisual_handoff')) return null
+  const taskName = String(pathMatch?.[1] || subtaskMatch?.[1] || '').trim().toLowerCase()
+  return VEA_AUDIOVISUAL_HANDOFF_LABELS[taskName] || {
+    taskName: taskName || 'handoff',
+    summary: '视听报告还有收尾内容需要继续生成。点击“继续处理”即可，系统会接上剩余步骤。',
+    progressLabel: '生成视听报告',
+  }
+}
+
+function classifyStructuredHandoff(progress: ProgressWithActivity | undefined | null): InternalAgentHandoffInfo | null {
+  const handoff = progress?.handoff
+  if (!handoff) return null
+  return {
+    taskName: handoff.taskName || 'handoff',
+    summary: handoff.userMessage || '任务还有收尾内容需要继续处理。',
+    progressLabel: VEA_AUDIOVISUAL_HANDOFF_LABELS[handoff.taskName || '']?.progressLabel || '处理收尾内容',
+  }
+}
+
+export function formatTaskUserFacingText(text: string | null | undefined): string {
+  const handoff = classifyInternalAgentHandoffText(text)
+  return handoff?.summary || String(text || '').trim()
+}
+
+export function isInternalAgentHandoffTask(run: TaskCardRunLike): boolean {
+  if (run.progress?.handoff) return true
+  return [
+    run.taskSummary,
+    run.blockedReason,
+    run.error,
+    run.progress?.lastError,
+    run.taskContinuation?.pauseReason,
+  ].some((text) => classifyInternalAgentHandoffText(text))
+}
+
+function formatTaskStageLabel(stage: string | null | undefined, progress?: ProgressWithActivity | null): string {
+  const structuredHandoff = classifyStructuredHandoff(progress)
+  if (structuredHandoff && (!stage || stage === 'finalize')) return structuredHandoff.progressLabel
+  const handoff = classifyInternalAgentHandoffText(progress?.lastError)
+  if (handoff && (!stage || stage === 'finalize')) return handoff.progressLabel
+  if (stage === 'prepare') return '准备素材'
+  if (stage === 'score_batches') return 'AI 评分'
+  if (stage === 'merge_validate') return '合并校验'
+  if (stage === 'finalize') return '生成报告'
+  return stage || '当前阶段'
+}
+
+export function formatTaskStepDisplayTitle(title: string | null | undefined, progress?: ProgressWithActivity | null): string {
+  return formatTaskStageLabel(title, progress)
+}
+
+function clampPercent(value: number): number {
+  return Math.max(0, Math.min(100, Math.round(value * 100)))
+}
+
+function formatActivityAge(updatedAt: string | null | undefined, now: Date): string | null {
+  if (!updatedAt) return null
+  const updatedMs = new Date(updatedAt).getTime()
+  const nowMs = now.getTime()
+  if (!Number.isFinite(updatedMs) || !Number.isFinite(nowMs)) return null
+  const elapsedSeconds = Math.max(0, Math.floor((nowMs - updatedMs) / 1000))
+  if (elapsedSeconds < 60) return `最近更新 ${elapsedSeconds} 秒前`
+  return `最近更新 ${Math.floor(elapsedSeconds / 60)} 分钟前`
+}
+
+export function formatTaskProgressLabel(
+  progress: ProgressWithActivity | undefined | null,
+  now = new Date(),
+): string | null {
+  if (!progress) return null
+  const detail = progress.detail?.trim() ? formatTaskStageLabel(progress.detail, progress) : null
+  const structuredHandoff = classifyStructuredHandoff(progress)
+  const stage = structuredHandoff?.progressLabel || formatTaskStageLabel(progress.stage, progress)
+  const overall = progress.overallCoverage != null
+    ? `总进度 ${clampPercent(progress.overallCoverage)}%`
+    : null
+  const activity = formatActivityAge(progress.activityUpdatedAt, now)
+
+  if (progress.completed != null && progress.total != null) {
+    return [detail || stage, `${progress.completed}/${progress.total}`, overall, activity].filter(Boolean).join(' · ')
+  }
+  if (progress.coverage != null) {
+    return [detail || stage, `${clampPercent(progress.coverage)}%`, overall, activity].filter(Boolean).join(' · ')
+  }
+  return [detail || progress.stage || null, overall, activity].filter(Boolean).join(' · ') || null
+}
+
 function taskPhaseLabel(phase: ScopeRunState['phase']): string {
   if (phase === 'planning') return '规划中'
   if (phase === 'tool_running' || phase === 'responding' || phase === 'resuming') return '进行中'
@@ -204,6 +366,7 @@ function hasBlockedTerminalReason(run: TaskCardRunLike): boolean {
 export function deriveTaskCardRuntimeState(run: TaskCardRunLike): TaskCardRuntimeState {
   const hasLiveBackground = hasBackgroundSignal(run)
   const hasBudgetPaused = hasBudgetPausedSignal(run)
+  const isAgentHandoff = isInternalAgentHandoffTask(run)
   const isFailed = (run.phase === 'error' || run.status === 'failed') && !hasLiveBackground && !hasBudgetPaused
   if (isFailed) {
     return { visualState: 'failed', statusLabel: '失败', actionSet: ['retry', 'cancel', 'open_artifact'] }
@@ -228,7 +391,7 @@ export function deriveTaskCardRuntimeState(run: TaskCardRunLike): TaskCardRuntim
     )
     return {
       visualState: 'waiting',
-      statusLabel: '等待补充',
+      statusLabel: isAgentHandoff ? '等待继续' : '等待补充',
       actionSet: actions.length > 0 ? actions : ['continue', 'cancel'],
     }
   }
@@ -272,16 +435,20 @@ export function buildTaskCardViewModel(
     ...(disclosure || {}),
   }
   const steps = run.steps || []
-  const currentStep = steps.find((step) => step.id === run.currentStepId) || steps.find((step) => step.status === 'running') || null
+  const rawCurrentStep = steps.find((step) => step.id === run.currentStepId) || steps.find((step) => step.status === 'running') || null
+  const currentStep = rawCurrentStep
+    ? { ...rawCurrentStep, title: formatTaskStepDisplayTitle(rawCurrentStep.title, run.progress) }
+    : null
   const detailGroups = buildDetailGroups(run.toolTrace || [])
   const recentArtifacts = run.recentArtifacts || []
   const memoryItems = run.memoryCapture?.items || []
-  const summary = run.taskSummary || run.blockedReason || run.error || taskPhaseLabel(run.phase)
+  const summary = run.progress?.handoff?.userMessage
+    || formatTaskUserFacingText(run.taskSummary || run.blockedReason || run.error || taskPhaseLabel(run.phase))
   const runtimeState = deriveTaskCardRuntimeState(run)
   const statusLabel = run.phase === 'cancelled' ? taskPhaseLabel(run.phase) : runtimeState.statusLabel
 
   return {
-    key: run.scopeId,
+    key: getTaskRunDisplayKey(run),
     title: run.taskTitle || run.title || '任务',
     phase: run.phase,
     statusLabel,
@@ -346,13 +513,13 @@ export function groupTaskRunsForDisplay(
       activeFamilies.set(family, existing)
       continue
     }
-    singles.push({ kind: 'task', key: run.scopeId, run })
+    singles.push({ kind: 'task', key: getTaskRunDisplayKey(run), run })
   }
 
   const groupedEntries: TaskDisplayEntry[] = []
   for (const [family, items] of activeFamilies.entries()) {
     if (items.length === 1) {
-      groupedEntries.push({ kind: 'task', key: items[0].scopeId, run: items[0] })
+      groupedEntries.push({ kind: 'task', key: getTaskRunDisplayKey(items[0]), run: items[0] })
       continue
     }
     const latest = items

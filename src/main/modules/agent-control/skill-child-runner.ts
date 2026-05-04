@@ -36,7 +36,8 @@ import type {
 } from '../skills-runtime/runtime-manager'
 import type { SkillTaskRunRepository } from '../repositories/skill-task-run-repository'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
-import type { ScopeRunSkillProgress } from './types'
+import type { ScopeRunResumableAction, ScopeRunSkillProgress } from './types'
+import type { TaskProjectionRecord, TaskProjectionStore, TaskStep } from './run-contracts'
 
 import { logAgentMetric } from './metrics'
 import { TOOL_ERROR_METRICS } from './tool-error-metrics'
@@ -49,7 +50,13 @@ import {
 } from './skill-child-run-log'
 import { writeLifecycle } from './output-dir-lifecycle'
 import { inspectSkillProgressArtifacts } from './skill-progress-artifacts'
-import { recordSkillParentTaskLifecycleEvent } from './skill-task-tracker'
+import { completePendingSkillHandoffs, listPendingSkillHandoffTasks } from './skill-handoff-completion'
+import { selectRunStateCandidate } from './run-state-selection'
+import {
+  recordSkillParentTaskLifecycleEvent,
+  type SkillParentTaskLifecycleReason,
+  type SkillParentTaskLifecycleState,
+} from './skill-task-tracker'
 import {
   ChildRunCircuitBreaker,
   shouldCountChildRunCircuitBreakerFailure,
@@ -108,6 +115,7 @@ export const MAX_ACTIONS_PER_CHILD_RUN = 24
  *  installs aren't misclassified — but tight enough that a wedged spawn
  *  is caught within a turn. */
 export const LAUNCH_STUCK_GUARD_MS = 30_000
+const PROGRESS_POLL_INTERVAL_MS = 5_000
 
 // =====================================================================
 // Public API
@@ -156,6 +164,10 @@ export interface WaitForSkillChildRunCloseOptions {
   signal?: AbortSignal
 }
 
+export interface ResumeSkillChildRunOptions {
+  agentContext?: AgentSpawnContext | null
+}
+
 export type CancelSkillChildRunSource = 'nlp' | 'ui_button'
 
 export interface CancelSkillChildRunOptions {
@@ -170,6 +182,7 @@ export interface CancelSkillChildRunOptions {
 export interface SkillChildRunnerConfig {
   runtimeManager: SkillsRuntimeManager
   repository: SkillTaskRunRepository
+  taskProjectionStore?: TaskProjectionStore | null
   /** Optional override for the launch-stuck guard. Defaults to the
    *  module-level constant. */
   launchStuckGuardMs?: number
@@ -179,6 +192,8 @@ export interface SkillChildRunnerConfig {
   maxActiveVeaRuns?: number
   /** Sleep helper — only overridden in tests. */
   sleep?: (ms: number) => Promise<void>
+  /** Background artifact polling cadence. Tests may lower this. */
+  progressPollIntervalMs?: number
 }
 
 interface ActiveRun {
@@ -238,10 +253,12 @@ class SkillChildRunner {
     this.config = {
       runtimeManager: config.runtimeManager,
       repository: config.repository,
+      taskProjectionStore: config.taskProjectionStore ?? null,
       launchStuckGuardMs: config.launchStuckGuardMs ?? LAUNCH_STUCK_GUARD_MS,
       maxActionsPerRun: config.maxActionsPerRun ?? MAX_ACTIONS_PER_CHILD_RUN,
       maxActiveVeaRuns: config.maxActiveVeaRuns ?? MAX_ACTIVE_VEA_CHILD_RUNS,
       sleep: config.sleep ?? defaultSleep,
+      progressPollIntervalMs: config.progressPollIntervalMs ?? PROGRESS_POLL_INTERVAL_MS,
     }
     this.circuitBreaker = new ChildRunCircuitBreaker({
       enabled: snapshotTurnFeatureFlags().childRunCircuitBreakerEnabled,
@@ -453,7 +470,10 @@ class SkillChildRunner {
     })
   }
 
-  async resumeSkillChildRun(childRunId: string): Promise<StartSkillChildRunResult> {
+  async resumeSkillChildRun(
+    childRunId: string,
+    options: ResumeSkillChildRunOptions = {},
+  ): Promise<StartSkillChildRunResult> {
     const record = this.config.repository.get(childRunId)
     if (!record) {
       return makePausedOnLaunchResult({
@@ -491,6 +511,34 @@ class SkillChildRunner {
         }
       }
       const storedClose = payload.closeEvent ? decodeStoredSkillChildCloseEvent(payload.closeEvent) : null
+      const completedArtifactClose = this.resolveCompletedArtifactClose(childRunId, payload, storedClose)
+      if (completedArtifactClose) {
+        await this.persistResolvedCloseFromArtifacts({
+          record,
+          payload,
+          close: completedArtifactClose,
+        })
+        return {
+          childRunId,
+          status: 'completed',
+          outputDir: completedArtifactClose.outputDir ?? payload.outputDir,
+          runStatePath: completedArtifactClose.runStatePath ?? payload.runStatePath,
+          eventLogPath: this.deriveEventLogPathFromRecord(record),
+          parentNextHint: payload.parentNextHint,
+          freshContractFields: null,
+          closeEvent: completedArtifactClose,
+        }
+      }
+      const blockedHandoffResume = this.resolveBlockedHandoffResume(payload, storedClose, options)
+      if (blockedHandoffResume) {
+        return this.resumePayloadChildRun({
+          childRunId,
+          record,
+          payload,
+          agentContext: blockedHandoffResume.agentContext,
+          completePendingHandoffsBeforePlan: true,
+        })
+      }
       return makeResumeRefusalResult({
         childRunId,
         skillId: payload.skillId,
@@ -506,6 +554,128 @@ class SkillChildRunner {
         parentNextHint: payload.parentNextHint,
       })
     }
+    return this.resumePayloadChildRun({
+      childRunId,
+      record,
+      payload,
+      agentContext: options.agentContext ?? null,
+    })
+  }
+
+  private resolveCompletedArtifactClose(
+    childRunId: string,
+    payload: SkillChildRunPayload,
+    storedClose: SkillChildCloseEvent | null,
+  ): SkillChildCloseEvent | null {
+    if (payload.skillId !== 'video-expert-analyzer') return null
+    if (payload.status !== 'blocked') return null
+    if (storedClose?.terminalReason !== 'blocked_external') return null
+    if (!payload.outputDir) return null
+    if (!isVeaDeliveryComplete(payload.outputDir)) return null
+    const artifactProgress = inspectSkillProgressArtifacts({
+      outputDir: payload.outputDir,
+      sceneScoresPath: join(payload.outputDir, 'scene_scores.json'),
+    })
+    if (!artifactProgress.sceneScoresPath) return null
+    if (artifactProgress.totalScenes === null || artifactProgress.totalScenes <= 0) return null
+    if (artifactProgress.completedScenes !== artifactProgress.totalScenes) return null
+    const deliveryReportPath = join(payload.outputDir, 'delivery_report.json')
+    if (!existsSync(deliveryReportPath)) return null
+    const completed = artifactProgress.completedScenes
+    const total = artifactProgress.totalScenes
+    const fingerprint = buildChildProgressFingerprint({
+      stage: 'completed',
+      completed,
+      total,
+      coverage: 1,
+      overallCoverage: 1,
+      updatedAt: new Date().toISOString(),
+    })
+    return freezeSkillChildCloseEvent({
+      childRunId,
+      skillId: payload.skillId,
+      status: 'completed',
+      terminalReason: 'completed',
+      outputDir: payload.outputDir,
+      runStatePath: payload.runStatePath || join(payload.outputDir, 'run_state.json'),
+      sceneScoresPath: artifactProgress.sceneScoresPath,
+      deliveryReportPath,
+      progress: {
+        stage: 'completed',
+        totalUnits: total,
+        completedUnits: completed,
+        coverageRatio: 1,
+        overallCoverageRatio: 1,
+        fingerprint,
+      },
+      framePatch: null,
+      projectionPatch: null,
+      error: null,
+    })
+  }
+
+  private async persistResolvedCloseFromArtifacts(args: {
+    record: NonNullable<ReturnType<SkillTaskRunRepository['get']>>
+    payload: SkillChildRunPayload
+    close: SkillChildCloseEvent
+  }): Promise<void> {
+    const eventLogPath = this.deriveEventLogPathFromRecord(args.record)
+    if (eventLogPath) {
+      await appendChildRunEvent({
+        logPath: eventLogPath,
+        event: {
+          type: 'close',
+          at: new Date().toISOString(),
+          close: args.close,
+        },
+      })
+    }
+    this.persistTerminalClose(args.payload.childRunId, args.close)
+    recordSkillParentTaskLifecycleEvent({
+      scopeId: args.payload.parentScopeId ?? undefined,
+      sessionId: args.payload.parentSessionId ?? undefined,
+      skillId: args.payload.skillId,
+      action: args.payload.requestedAction,
+      state: lifecycleStateForChildClose(args.close),
+      reason: lifecycleReasonForChildClose(args.close),
+      message: closeMessage(args.close),
+      stepId: childProjectionStepId(args.payload.childRunId),
+      outputDir: args.close.outputDir ?? args.payload.outputDir,
+      runStatePath: args.close.runStatePath ?? args.payload.runStatePath,
+      sceneScoresPath: args.close.sceneScoresPath,
+      deliveryReportPath: args.close.deliveryReportPath,
+      childRunId: args.payload.childRunId,
+      progressFingerprint: args.close.progress.fingerprint,
+      progress: mergeProgressFromClose(emptyChildProgress(), args.close.progress),
+    })
+  }
+
+  private resolveBlockedHandoffResume(
+    payload: SkillChildRunPayload,
+    storedClose: SkillChildCloseEvent | null,
+    options: ResumeSkillChildRunOptions,
+  ): { agentContext: AgentSpawnContext } | null {
+    if (payload.status !== 'blocked') return null
+    if (storedClose?.terminalReason !== 'blocked_external') return null
+    const agentContext = options.agentContext ?? null
+    if (!agentContext) return null
+    if (!payload.outputDir) return null
+    try {
+      if (listPendingSkillHandoffTasks(payload.outputDir).length === 0) return null
+    } catch {
+      return null
+    }
+    return { agentContext }
+  }
+
+  private async resumePayloadChildRun(args: {
+    childRunId: string
+    record: NonNullable<ReturnType<SkillTaskRunRepository['get']>>
+    payload: SkillChildRunPayload
+    agentContext: AgentSpawnContext | null
+    completePendingHandoffsBeforePlan?: boolean
+  }): Promise<StartSkillChildRunResult> {
+    const { childRunId, record, payload } = args
     const params: StartSkillChildRunParams = {
       scopeId: payload.parentScopeId ?? record.scopeId ?? null,
       sessionId: payload.parentSessionId ?? record.sessionId ?? null,
@@ -513,6 +683,7 @@ class SkillChildRunner {
       action: payload.requestedAction,
       requestedInput: payload.requestedInput,
       parentNextHint: payload.parentNextHint,
+      agentContext: args.agentContext,
     }
     const launchParams: SkillChildLaunchParams = {
       skillId: payload.skillId,
@@ -521,6 +692,7 @@ class SkillChildRunner {
       sessionId: params.sessionId,
       requestedInput: payload.requestedInput,
       parentNextHint: payload.parentNextHint,
+      agentContext: args.agentContext,
       outputDir: payload.outputDir,
     }
     const eventLogPath = this.deriveEventLogPathFromRecord(record)
@@ -546,6 +718,7 @@ class SkillChildRunner {
       eventLogPath,
       singleFlightKey: payload.singleFlightKey,
       resume: true,
+      completePendingHandoffsBeforePlan: args.completePendingHandoffsBeforePlan === true,
     })
   }
 
@@ -602,6 +775,7 @@ class SkillChildRunner {
           status: 'killed',
           closeEvent: synth,
         })
+        this.markChildRunInteractionSuspended(childRunId)
       } catch {
         // already gone — ignore.
       }
@@ -874,6 +1048,7 @@ class SkillChildRunner {
     eventLogPath: string
     singleFlightKey: string
     resume?: boolean
+    completePendingHandoffsBeforePlan?: boolean
   }): Promise<StartSkillChildRunResult> {
     const { childRunId, launchParams, outputDir, runStatePath, eventLogPath } = params
     const driver = getSkillChildDriver(params.params.skillId)
@@ -936,7 +1111,10 @@ class SkillChildRunner {
     // Kick off async loop. The promise we return resolves AFTER the
     // close event is recorded so callers can `await` either the result
     // or `getCloseEvent` to get the same shape.
-    void this.runLoop(active, driver, launchParams, params.resume === true).catch((error) => {
+    void this.runLoop(active, driver, launchParams, {
+      resume: params.resume === true,
+      completePendingHandoffsBeforePlan: params.completePendingHandoffsBeforePlan === true,
+    }).catch((error) => {
       // Last-ditch — runLoop is supposed to surface its own close via
       // `finalizeRun`. If it throws past that, synthesize a failure.
       const close = makeCloseEvent({
@@ -974,7 +1152,10 @@ class SkillChildRunner {
     active: ActiveRun,
     driver: ReturnType<typeof getSkillChildDriver>,
     launchParams: SkillChildLaunchParams,
-    resume: boolean,
+    options: {
+      resume: boolean
+      completePendingHandoffsBeforePlan?: boolean
+    },
   ): Promise<void> {
     if (!driver) return // typescript narrowing; checked at caller
     let firstActionStartedAt: string | null = null
@@ -1000,11 +1181,15 @@ class SkillChildRunner {
       type: 'started',
       at: active.startedAt,
       childRunId: active.childRunId,
-      input: { ...launchParams.requestedInput, __resume: resume || undefined },
+      input: { ...launchParams.requestedInput, __resume: options.resume || undefined },
     })
 
+    if (options.completePendingHandoffsBeforePlan === true) {
+      const handoffReady = await this.completePendingHandoffsBeforePlan(active)
+      if (!handoffReady) return
+    }
+
     let isLaunchStuckFired = false
-    let actionsStarted = 0
     const actionResults: SkillRunResult[] = []
 
     // Launch-stuck guard: schedule a timer that synthesizes a close if
@@ -1032,6 +1217,8 @@ class SkillChildRunner {
     cleanup.register(() => clearTimeout(launchStuckTimer))
     const parentAbortLink = linkParentAbort(this.getParentAbortSignal(active), active.controller)
     cleanup.register(() => parentAbortLink.dispose())
+    const stopProgressPoll = this.startProgressPoll(active)
+    if (stopProgressPoll) cleanup.register(stopProgressPoll)
     const subagent = createSkillChildSubAgent({
       childRunId: active.childRunId,
       outputDir: active.outputDir,
@@ -1069,8 +1256,9 @@ class SkillChildRunner {
           if (!result) {
             throw makeGatewayExecutionError(gatewayResult)
           }
-          actionResults.push(result)
-          return result
+          const recoveredResult = await this.completePendingHandoffsAfterBlockedAction(active, result)
+          actionResults.push(recoveredResult)
+          return recoveredResult
         } catch (error) {
           throw makeSkillActionExecutionError(error, active.controller.signal)
         }
@@ -1090,7 +1278,6 @@ class SkillChildRunner {
       if (event.type === 'progress' && isSkillChildProgressPayload(event.payload)) {
         if (event.payload.kind === 'action_started') {
           const actionStartedAt = new Date().toISOString()
-          actionsStarted = event.payload.actionIndex
           if (firstActionStartedAt === null) {
             firstActionStartedAt = actionStartedAt
           }
@@ -1117,36 +1304,16 @@ class SkillChildRunner {
               durationMs: event.payload.durationMs,
             },
           })
+          await this.refreshActiveProgress(active, {
+            appendEvent: false,
+          })
           continue
         }
 
-        const observedAt = new Date().toISOString()
-        const progress = readChildProgressSnapshot({
-          outputDir: active.outputDir,
-          runStatePath: active.runStatePath,
+        await this.refreshActiveProgress(active, {
           payloadStage: event.payload.stage,
           payloadFingerprint: event.payload.fingerprint,
-          observedAt,
-          previous: active.progress,
-        })
-        active.progress = progress
-        active.blockedReason = progress.lastError
-        this.rememberChildRunSummary(this.summaryFromActive(active))
-        this.publishProjectionProgress(active)
-        await this.appendEvent(active, {
-          type: 'state_observed',
-          at: observedAt,
-          runStatePath: active.runStatePath,
-          state: {
-            actionsPlanned: actionsStarted,
-            stage: progress.stage,
-            completed: progress.completed,
-            total: progress.total,
-            coverage: progress.coverage,
-            fingerprint: progress.fingerprint,
-            updatedAt: progress.updatedAt,
-            lastError: progress.lastError,
-          },
+          appendEvent: true,
         })
         continue
       }
@@ -1181,6 +1348,116 @@ class SkillChildRunner {
     }
   }
 
+  private async completePendingHandoffsAfterBlockedAction(
+    active: ActiveRun,
+    result: SkillRunResult,
+  ): Promise<SkillRunResult> {
+    if (result.success || result.status !== 'blocked' || !active.agentContext) return result
+    const outputs = result.outputs ?? {}
+    const outputDir = pickString(result.outputDir)
+      ?? pickString(outputs.outputDir)
+      ?? pickString(outputs.output_dir)
+      ?? active.outputDir
+    if (!outputDir) return result
+    try {
+      const completed = await completePendingSkillHandoffs({
+        outputDir,
+        agentContext: active.agentContext,
+      })
+      if (completed.length === 0) return result
+      logAgentMetric('skill_child_handoff_completed', {
+        childRunId: active.childRunId,
+        skillId: active.skillId,
+        action: result.action,
+        outputDir,
+        tasks: completed.map((item) => item.name),
+      })
+      return {
+        ...result,
+        success: true,
+        status: 'done',
+        outputDir,
+        error: undefined,
+        stdout: [
+          result.stdout,
+          `completed handoff tasks: ${completed.map((item) => item.name).join(', ')}`,
+        ].filter(Boolean).join('\n'),
+      }
+    } catch (error) {
+      logAgentMetric('skill_child_handoff_completion_failed', {
+        childRunId: active.childRunId,
+        skillId: active.skillId,
+        action: result.action,
+        outputDir,
+        error: errorMessage(error),
+      })
+      return result
+    }
+  }
+
+  private async completePendingHandoffsBeforePlan(active: ActiveRun): Promise<boolean> {
+    if (!active.agentContext) {
+      const close = makeCloseEvent({
+        childRunId: active.childRunId,
+        skillId: active.skillId,
+        status: 'blocked',
+        terminalReason: 'blocked_external',
+        outputDir: active.outputDir,
+        runStatePath: active.runStatePath,
+        errorKind: 'handoff_agent_context_missing',
+        message: 'Pending skill handoff requires the active agent context before resume.',
+      })
+      this.finalizeRun(active, close)
+      return false
+    }
+    try {
+      const completed = await completePendingSkillHandoffs({
+        outputDir: active.outputDir,
+        agentContext: active.agentContext,
+      })
+      if (completed.length > 0) {
+        await this.appendEvent(active, {
+          type: 'checkpoint',
+          at: new Date().toISOString(),
+          reason: 'handoff_completed_before_resume',
+          state: {
+            tasks: completed.map((item) => item.name),
+          },
+        })
+        logAgentMetric('skill_child_handoff_completed', {
+          childRunId: active.childRunId,
+          skillId: active.skillId,
+          action: active.action,
+          outputDir: active.outputDir,
+          tasks: completed.map((item) => item.name),
+          phase: 'resume',
+        })
+      }
+      return true
+    } catch (error) {
+      logAgentMetric('skill_child_handoff_completion_failed', {
+        childRunId: active.childRunId,
+        skillId: active.skillId,
+        action: active.action,
+        outputDir: active.outputDir,
+        error: errorMessage(error),
+        phase: 'resume',
+      })
+      const close = makeCloseEvent({
+        childRunId: active.childRunId,
+        skillId: active.skillId,
+        status: 'blocked',
+        terminalReason: 'blocked_external',
+        outputDir: active.outputDir,
+        runStatePath: active.runStatePath,
+        errorKind: 'handoff_completion_failed',
+        message: errorMessage(error),
+      })
+      this.finalizeRun(active, close)
+      return false
+    }
+  }
+
   private getParentAbortSignal(active: ActiveRun): AbortSignal | null {
     const repository = this.config.repository as SkillTaskRunRepository & {
       getSessionAbortSignal?: (scopeId: string | null, sessionId: string | null) => AbortSignal | null
@@ -1202,6 +1479,97 @@ class SkillChildRunner {
     }
   }
 
+  private startProgressPoll(active: ActiveRun): (() => void) | null {
+    const intervalMs = Math.max(0, this.config.progressPollIntervalMs)
+    if (intervalMs <= 0) return null
+    const maxIntervalMs = Math.max(intervalMs, 10_000)
+    let stopped = false
+    let nextDelayMs = intervalMs
+    let timer: NodeJS.Timeout | null = null
+    const schedule = (delayMs: number) => {
+      timer = setTimeout(async () => {
+        timer = null
+        if (stopped || this.active.get(active.childRunId) !== active) return
+        const changed = await this.refreshActiveProgress(active, { appendEvent: false })
+        if (stopped || this.active.get(active.childRunId) !== active) return
+        nextDelayMs = changed ? intervalMs : Math.min(maxIntervalMs, Math.max(intervalMs, nextDelayMs * 2))
+        schedule(nextDelayMs)
+      }, delayMs)
+      if (typeof timer.unref === 'function') timer.unref()
+    }
+    schedule(intervalMs)
+    return () => {
+      stopped = true
+      if (timer) clearTimeout(timer)
+    }
+  }
+
+  private async refreshActiveProgress(
+    active: ActiveRun,
+    options: {
+      payloadStage?: string | null
+      payloadFingerprint?: string | null
+      appendEvent: boolean
+    },
+  ): Promise<boolean> {
+    const observedAt = new Date().toISOString()
+    const snapshot = readChildProgressSnapshot({
+      skillId: active.skillId,
+      childRunId: active.childRunId,
+      strictChildRunId: requiresChildOwnedRunState(active.skillId, active.action),
+      outputDir: active.outputDir,
+      runStatePath: active.runStatePath,
+      payloadStage: options.payloadStage ?? null,
+      payloadFingerprint: options.payloadFingerprint ?? null,
+      observedAt,
+      previous: active.progress,
+    })
+    const handleChanged = Boolean(
+      snapshot.outputDir && snapshot.outputDir !== active.outputDir
+      || snapshot.runStatePath && snapshot.runStatePath !== active.runStatePath,
+    )
+    const progressChanged = !sameProgress(active.progress, snapshot.progress)
+    if (!handleChanged && !progressChanged) return false
+
+    if (snapshot.outputDir) active.outputDir = snapshot.outputDir
+    if (snapshot.runStatePath) active.runStatePath = snapshot.runStatePath
+    active.progress = snapshot.progress
+    active.blockedReason = snapshot.progress.lastError
+    try {
+      this.config.repository.updateChildRun(active.childRunId, {
+        outputDir: active.outputDir,
+        runStatePath: active.runStatePath,
+      })
+    } catch (error) {
+      logAgentMetric('skill_child_runner_progress_handle_update_failed', {
+        childRunId: active.childRunId,
+        error: errorMessage(error),
+      })
+    }
+    this.rememberChildRunSummary(this.summaryFromActive(active))
+    this.publishProjectionProgress(active)
+    if (options.appendEvent || handleChanged) {
+      await this.appendEvent(active, {
+        type: 'state_observed',
+        at: observedAt,
+        runStatePath: active.runStatePath,
+        state: {
+          stage: snapshot.progress.stage,
+          completed: snapshot.progress.completed,
+          total: snapshot.progress.total,
+          coverage: snapshot.progress.coverage,
+          overallCoverage: snapshot.progress.overallCoverage ?? null,
+          fingerprint: snapshot.progress.fingerprint,
+          updatedAt: snapshot.progress.updatedAt,
+          lastError: snapshot.progress.lastError,
+          detail: snapshot.progress.detail,
+          activityUpdatedAt: snapshot.progress.activityUpdatedAt,
+        },
+      })
+    }
+    return true
+  }
+
   private publishProjectionLaunch(active: ActiveRun): void {
     recordSkillParentTaskLifecycleEvent({
       scopeId: active.scopeId ?? undefined,
@@ -1215,6 +1583,13 @@ class SkillChildRunner {
       outputDir: active.outputDir,
       runStatePath: active.runStatePath,
       childRunId: active.childRunId,
+      progress: active.progress,
+    })
+    this.upsertChildTaskProjection({
+      active,
+      state: 'background_running',
+      reason: 'background_running',
+      message: '技能任务已在后台启动',
       progress: active.progress,
     })
   }
@@ -1233,6 +1608,13 @@ class SkillChildRunner {
       runStatePath: active.runStatePath,
       childRunId: active.childRunId,
       progressFingerprint: active.progress.fingerprint,
+      progress: active.progress,
+    })
+    this.upsertChildTaskProjection({
+      active,
+      state: 'background_running',
+      reason: 'background_running',
+      message: progressMessage(active.progress),
       progress: active.progress,
     })
   }
@@ -1257,6 +1639,138 @@ class SkillChildRunner {
       childRunId: active.childRunId,
       progressFingerprint: progress.fingerprint,
       progress,
+    })
+    this.upsertChildTaskProjection({
+      active,
+      state,
+      reason,
+      message: close.error?.message || closeMessage(close),
+      progress,
+      close,
+    })
+  }
+
+  private upsertChildTaskProjection(args: {
+    active: ActiveRun
+    state: SkillParentTaskLifecycleState
+    reason: SkillParentTaskLifecycleReason
+    message: string
+    progress: ScopeRunSkillProgress
+    close?: SkillChildCloseEvent | null
+  }): void {
+    const store = this.config.taskProjectionStore
+    if (!store) return
+    const scopeId = args.active.scopeId || args.active.sessionId
+    if (!scopeId) return
+    const taskId = childTaskProjectionTaskId(args.active.childRunId)
+    const now = new Date().toISOString()
+    const apply = (previous: TaskProjectionRecord | null): void => {
+      const next = buildChildTaskProjectionRecord({
+        active: args.active,
+        state: args.state,
+        reason: args.reason,
+        message: args.message,
+        progress: args.progress,
+        close: args.close ?? null,
+        scopeId,
+        taskId,
+        previous,
+        now,
+      })
+      try {
+        if (previous) {
+          const result = store.update(taskId, next)
+          if (isPromiseLike(result)) {
+            result.catch((error) => this.logChildProjectionError('update', args.active.childRunId, error))
+          }
+          return
+        }
+        const result = store.create(next)
+        if (isPromiseLike(result)) {
+          result.catch(async (error) => {
+            if (!isTaskProjectionUniqueRace(error)) {
+              this.logChildProjectionError('create', args.active.childRunId, error)
+              return
+            }
+            const raced = await store.get(taskId)
+            if (!raced) return
+            await store.update(taskId, buildChildTaskProjectionRecord({
+              active: args.active,
+              state: args.state,
+              reason: args.reason,
+              message: args.message,
+              progress: args.progress,
+              close: args.close ?? null,
+              scopeId,
+              taskId,
+              previous: raced,
+              now,
+            }))
+          })
+        }
+      } catch (error) {
+        if (!previous && isTaskProjectionUniqueRace(error)) {
+          const raced = store.get(taskId)
+          if (isPromiseLike(raced)) {
+            void raced.then((record) => {
+              if (!record) return
+              return store.update(taskId, buildChildTaskProjectionRecord({
+                active: args.active,
+                state: args.state,
+                reason: args.reason,
+                message: args.message,
+                progress: args.progress,
+                close: args.close ?? null,
+                scopeId,
+                taskId,
+                previous: record,
+                now,
+              }))
+            }).catch((raceError) => this.logChildProjectionError('race_update', args.active.childRunId, raceError))
+          } else if (raced) {
+            try {
+              const result = store.update(taskId, buildChildTaskProjectionRecord({
+                active: args.active,
+                state: args.state,
+                reason: args.reason,
+                message: args.message,
+                progress: args.progress,
+                close: args.close ?? null,
+                scopeId,
+                taskId,
+                previous: raced,
+                now,
+              }))
+              if (isPromiseLike(result)) {
+                result.catch((raceError) => this.logChildProjectionError('race_update', args.active.childRunId, raceError))
+              }
+            } catch (raceError) {
+              this.logChildProjectionError('race_update', args.active.childRunId, raceError)
+            }
+          }
+          return
+        }
+        this.logChildProjectionError(previous ? 'update' : 'create', args.active.childRunId, error)
+      }
+    }
+
+    try {
+      const previous = store.get(taskId)
+      if (isPromiseLike(previous)) {
+        void previous.then(apply).catch((error) => this.logChildProjectionError('get', args.active.childRunId, error))
+      } else {
+        apply(previous)
+      }
+    } catch (error) {
+      this.logChildProjectionError('get', args.active.childRunId, error)
+    }
+  }
+
+  private logChildProjectionError(phase: string, childRunId: string, error: unknown): void {
+    logAgentMetric('skill_child_projection_persist_failed', {
+      phase,
+      childRunId,
+      error: errorMessage(error),
     })
   }
 
@@ -1328,6 +1842,7 @@ class SkillChildRunner {
         status: frozenClose.status,
         closeEvent: frozenClose,
       })
+      this.markChildRunInteractionSuspended(active.childRunId)
     } catch (error) {
       logAgentMetric('skill_child_runner_finalize_failed', {
         childRunId: active.childRunId,
@@ -1372,10 +1887,21 @@ class SkillChildRunner {
         status: frozenClose.status,
         closeEvent: frozenClose,
       })
+      this.markChildRunInteractionSuspended(childRunId)
     } catch {
       // best effort
     }
     this.recentCloses.set(childRunId, frozenClose)
+  }
+
+  private markChildRunInteractionSuspended(childRunId: string): void {
+    try {
+      this.config.repository.update(childRunId, {
+        interactionState: 'suspended',
+      })
+    } catch {
+      // The close payload is the source of truth; interaction state cleanup is best effort.
+    }
   }
 
   private countActiveVeaRuns(): number {
@@ -1466,9 +1992,10 @@ export async function startSkillChildRun(
 
 export async function resumeSkillChildRun(
   childRunId: string,
+  options?: ResumeSkillChildRunOptions,
 ): Promise<StartSkillChildRunResult> {
   const runner = ensureRunner()
-  return runner.resumeSkillChildRun(childRunId)
+  return runner.resumeSkillChildRun(childRunId, options)
 }
 
 export async function cancelSkillChildRun(
@@ -1518,6 +2045,7 @@ function emptyChildProgress(): ScopeRunSkillProgress {
     completed: null,
     total: null,
     coverage: null,
+    overallCoverage: null,
     fingerprint: null,
     updatedAt: null,
     lastError: null,
@@ -1528,12 +2056,198 @@ function childProjectionStepId(childRunId: string): string {
   return `child_run:${childRunId}`
 }
 
+function childTaskProjectionTaskId(childRunId: string): string {
+  return `skill-child:${childRunId}`
+}
+
+function isPromiseLike<T>(value: unknown): value is Promise<T> {
+  return Boolean(value && typeof (value as { then?: unknown }).then === 'function')
+}
+
+function isTaskProjectionUniqueRace(error: unknown): boolean {
+  const record = error as { code?: unknown; message?: unknown } | null | undefined
+  const code = typeof record?.code === 'string' ? record.code : ''
+  const message = typeof record?.message === 'string' ? record.message : ''
+  return code === 'SQLITE_CONSTRAINT_PRIMARYKEY'
+    || code === 'SQLITE_CONSTRAINT'
+    || /UNIQUE constraint failed: task_projections\.task_id/.test(message)
+}
+
+function childProjectionStatusForState(
+  state: SkillParentTaskLifecycleState,
+): TaskProjectionRecord['status'] {
+  if (state === 'background_running') return 'running'
+  if (state === 'budget_paused' || state === 'blocked') return 'blocked'
+  if (state === 'failed') return 'failed'
+  if (state === 'cancelled') return 'cancelled'
+  return 'done'
+}
+
+function childProjectionStepStatusForState(state: SkillParentTaskLifecycleState): TaskStep['status'] {
+  if (state === 'background_running') return 'running'
+  if (state === 'budget_paused' || state === 'blocked') return 'blocked'
+  if (state === 'failed' || state === 'cancelled') return 'error'
+  return 'done'
+}
+
+function childProjectionWaitingForState(state: SkillParentTaskLifecycleState): TaskProjectionRecord['waitingFor'] {
+  if (state === 'background_running' || state === 'budget_paused' || state === 'blocked') return 'background'
+  return 'none'
+}
+
+function childProjectionActionsForStatus(
+  status: TaskProjectionRecord['status'],
+): ScopeRunResumableAction[] {
+  if (status === 'running' || status === 'blocked') return ['continue', 'cancel']
+  if (status === 'failed') return ['retry', 'cancel']
+  if (status === 'done') return ['open_artifact']
+  return ['none']
+}
+
+function childProjectionArtifacts(args: {
+  active: ActiveRun
+  close?: SkillChildCloseEvent | null
+  now: string
+}): NonNullable<TaskProjectionRecord['recentArtifacts']> {
+  const outputDir = args.close?.outputDir ?? args.active.outputDir
+  const runStatePath = args.close?.runStatePath ?? args.active.runStatePath
+  const sceneScoresPath = args.close?.sceneScoresPath ?? null
+  const deliveryReportPath = args.close?.deliveryReportPath ?? null
+  const items = [
+    outputDir
+      ? { key: 'outputDir', path: outputDir, label: '输出目录', kind: 'output_dir' }
+      : null,
+    runStatePath
+      ? { key: 'runStatePath', path: runStatePath, label: 'run_state.json', kind: 'run_state' }
+      : null,
+    sceneScoresPath
+      ? { key: 'sceneScoresPath', path: sceneScoresPath, label: 'scene_scores.json', kind: 'scene_scores' }
+      : null,
+    deliveryReportPath
+      ? { key: 'deliveryReportPath', path: deliveryReportPath, label: 'delivery_report.json', kind: 'delivery_report' }
+      : null,
+  ].filter((item): item is { key: string; path: string; label: string; kind: string } => Boolean(item))
+
+  return items.map((item) => ({
+    id: `${args.active.childRunId}:${item.key}`,
+    module: 'skill',
+    kind: item.kind,
+    label: item.label,
+    path: item.path,
+    createdAt: args.now,
+    meta: {
+      outputKey: item.key,
+      childRunId: args.active.childRunId,
+      skillId: args.active.skillId,
+      action: args.active.action,
+      outputDir,
+      runStatePath,
+      ...(deliveryReportPath ? { deliveryReportPath } : {}),
+    },
+  }))
+}
+
+function buildChildTaskProjectionRecord(args: {
+  active: ActiveRun
+  state: SkillParentTaskLifecycleState
+  reason: SkillParentTaskLifecycleReason
+  message: string
+  progress: ScopeRunSkillProgress
+  close: SkillChildCloseEvent | null
+  scopeId: string
+  taskId: string
+  previous: TaskProjectionRecord | null
+  now: string
+}): TaskProjectionRecord {
+  const status = childProjectionStatusForState(args.state)
+  const stepId = childProjectionStepId(args.active.childRunId)
+  const outputDir = args.close?.outputDir ?? args.active.outputDir
+  const runStatePath = args.close?.runStatePath ?? args.active.runStatePath
+  const step: TaskStep = {
+    id: stepId,
+    title: '技能子任务',
+    description: args.message,
+    status: childProjectionStepStatusForState(args.state),
+    detail: args.message,
+    updatedAt: args.now,
+  }
+  const previousSteps = (args.previous?.steps || []).filter((item) => item.id !== stepId)
+  return {
+    taskId: args.taskId,
+    scopeId: args.scopeId,
+    runId: args.active.childRunId,
+    parentTaskId: args.previous?.parentTaskId ?? null,
+    parentStepId: args.previous?.parentStepId ?? null,
+    taskType: args.previous?.taskType ?? 'short_task',
+    module: 'skill',
+    taskTitle: args.previous?.taskTitle ?? `技能子任务 · ${args.active.skillId}`,
+    taskSummary: args.message,
+    status,
+    interactionState: 'suspended',
+    waitingFor: childProjectionWaitingForState(args.state),
+    steps: [...previousSteps, step],
+    currentStepId: stepId,
+    budget: args.previous?.budget ?? null,
+    budgetUsagePercent: args.previous?.budgetUsagePercent ?? null,
+    budgetWarningLevel: args.previous?.budgetWarningLevel ?? null,
+    recoveryHistory: args.previous?.recoveryHistory ?? [],
+    degradationReason: args.previous?.degradationReason ?? null,
+    blockedReason: status === 'blocked' || status === 'failed' ? args.message : null,
+    resumableActions: childProjectionActionsForStatus(status),
+    continuationRef: {
+      ...(args.previous?.continuationRef || {}),
+      taskId: args.taskId,
+      stepId,
+      blockerType: args.reason,
+      todoId: stepId,
+      todoTitle: '技能子任务',
+      pauseReason: args.reason,
+      childRunId: args.active.childRunId,
+      skillId: args.active.skillId,
+      action: args.active.action,
+      outputDir,
+      runStatePath,
+      progressFingerprint: args.progress.fingerprint,
+      progress: { ...args.progress },
+    } as TaskProjectionRecord['continuationRef'] & { progress: ScopeRunSkillProgress },
+    progress: { ...args.progress },
+    recentArtifacts: childProjectionArtifacts({
+      active: args.active,
+      close: args.close,
+      now: args.now,
+    }),
+    createdAt: args.previous?.createdAt ?? args.active.startedAt ?? args.now,
+    updatedAt: args.now,
+  }
+}
+
 function progressMessage(progress: ScopeRunSkillProgress): string {
+  if (progress.detail) {
+    return `技能任务进行中 · ${progress.detail}`
+  }
   if (progress.stage && progress.completed !== null && progress.total !== null) {
     return `技能任务进行中 · ${progress.stage} · ${progress.completed}/${progress.total}`
   }
   if (progress.stage) return `技能任务进行中 · ${progress.stage}`
   return '技能任务进行中'
+}
+
+function sameProgress(left: ScopeRunSkillProgress, right: ScopeRunSkillProgress): boolean {
+  return left.stage === right.stage
+    && left.completed === right.completed
+    && left.total === right.total
+    && left.coverage === right.coverage
+    && (left.overallCoverage ?? null) === (right.overallCoverage ?? null)
+    && left.fingerprint === right.fingerprint
+    && left.updatedAt === right.updatedAt
+    && left.lastError === right.lastError
+    && (left.detail ?? null) === (right.detail ?? null)
+    && (left.activityUpdatedAt ?? null) === (right.activityUpdatedAt ?? null)
+    && JSON.stringify(left.handoff ?? null) === JSON.stringify(right.handoff ?? null)
+}
+
+function requiresChildOwnedRunState(skillId: string, action: string): boolean {
+  return skillId === 'video-expert-analyzer' && action === 'video_expert_pipeline'
 }
 
 function closeMessage(close: SkillChildCloseEvent): string {
@@ -1590,36 +2304,222 @@ function lifecycleReasonForChildClose(
 }
 
 function readChildProgressSnapshot(args: {
+  skillId: string
+  childRunId: string
+  strictChildRunId: boolean
   outputDir: string
   runStatePath: string
   payloadStage: string | null
   payloadFingerprint: string | null
   observedAt: string
   previous: ScopeRunSkillProgress
-}): ScopeRunSkillProgress {
-  const runState = readProgressRunState(args.runStatePath)
-  const artifactProgress = inspectSkillProgressArtifacts({
-    outputDir: args.outputDir,
-    sceneScoresPath: args.outputDir ? join(args.outputDir, 'scene_scores.json') : null,
+}): {
+  outputDir: string
+  runStatePath: string
+  progress: ScopeRunSkillProgress
+} {
+  const selected = selectRunStateCandidate({
+    explicitRunStatePath: args.runStatePath,
+    rootDir: args.outputDir,
+    expectedChildRunId: args.strictChildRunId ? args.childRunId : null,
+    fileName: 'run_state.json',
+    searchDepth: 1,
   })
+  const selectedRunStatePath = selected.path || (args.strictChildRunId ? '' : args.runStatePath)
+  const selectedOutputDir = selectedRunStatePath ? dirname(selectedRunStatePath) : args.outputDir
+  const runState = readProgressRunState(selectedRunStatePath)
+  const artifactProgress = inspectSkillProgressArtifacts({
+    outputDir: selectedOutputDir,
+    sceneScoresPath: selectedOutputDir ? join(selectedOutputDir, 'scene_scores.json') : null,
+  })
+  const stage = runState.stage ?? args.payloadStage ?? args.previous.stage
+  const completed = artifactProgress.completedScenes ?? runState.completed ?? args.previous.completed
+  const total = artifactProgress.totalScenes ?? runState.total ?? args.previous.total
+  const coverage = artifactProgress.coverageRatio ?? runState.coverage ?? args.previous.coverage
+  const activity = artifactProgress.activity
+  const handoff = artifactProgress.handoff ?? null
+  const activityCoverage = activityCoverageRatio(activity)
+  const shouldUseActivityDetail = !stage || String(stage).toLowerCase() === 'score_batches'
+  const detail = shouldUseActivityDetail
+    ? formatArtifactActivityDetail(activity)
+    : null
+  const activityUpdatedAt = activity?.updatedAt ?? args.previous.activityUpdatedAt ?? null
+  const overallCoverage = deriveOverallCoverage({
+    skillId: args.skillId,
+    outputDir: selectedOutputDir,
+    status: runState.status,
+    stage,
+    completed,
+    total,
+    coverage,
+    activityCoverage,
+    previous: args.previous.overallCoverage ?? null,
+  })
+  const updatedAt = latestIso(runState.updatedAt, activityUpdatedAt) ?? args.previous.updatedAt ?? args.observedAt
+  const fingerprint = args.payloadFingerprint
+    ?? activity?.fingerprint
+    ?? runState.fingerprint
+    ?? buildChildProgressFingerprint({ stage, completed, total, coverage, overallCoverage, updatedAt, detail, activityUpdatedAt })
+    ?? args.previous.fingerprint
   return {
-    stage: runState.stage ?? args.payloadStage ?? args.previous.stage,
-    completed: artifactProgress.completedScenes ?? runState.completed ?? args.previous.completed,
-    total: artifactProgress.totalScenes ?? runState.total ?? args.previous.total,
-    coverage: artifactProgress.coverageRatio ?? runState.coverage ?? args.previous.coverage,
-    fingerprint: args.payloadFingerprint ?? runState.fingerprint ?? args.previous.fingerprint,
-    updatedAt: runState.updatedAt ?? args.previous.updatedAt ?? args.observedAt,
-    lastError: runState.lastError ?? args.previous.lastError,
+    outputDir: selectedOutputDir,
+    runStatePath: selectedRunStatePath,
+    progress: {
+      stage,
+      completed,
+      total,
+      coverage,
+      overallCoverage,
+      fingerprint,
+      updatedAt,
+      lastError: runState.lastError ?? args.previous.lastError,
+      ...(detail ? { detail } : {}),
+      ...(activityUpdatedAt ? { activityUpdatedAt } : {}),
+      handoff,
+    },
   }
 }
 
-function readProgressRunState(runStatePath: string | null): Partial<ScopeRunSkillProgress> {
+function buildChildProgressFingerprint(args: {
+  stage: string | null
+  completed: number | null
+  total: number | null
+  coverage: number | null
+  overallCoverage?: number | null
+  updatedAt: string | null
+  detail?: string | null
+  activityUpdatedAt?: string | null
+}): string | null {
+  if (
+    !args.stage
+    && args.completed === null
+    && args.total === null
+    && args.coverage === null
+    && args.overallCoverage === null
+    && !args.updatedAt
+    && !args.detail
+    && !args.activityUpdatedAt
+  ) {
+    return null
+  }
+  const parts = [
+    args.stage ?? '',
+    args.completed ?? '',
+    args.total ?? '',
+    args.coverage ?? '',
+    args.overallCoverage ?? '',
+    args.updatedAt ?? '',
+  ]
+  if (args.detail || args.activityUpdatedAt) {
+    parts.push(args.detail ?? '', args.activityUpdatedAt ?? '')
+  }
+  return parts.join('|')
+}
+
+function clampRatio(value: number | null | undefined): number | null {
+  if (!Number.isFinite(Number(value))) return null
+  return Math.max(0, Math.min(1, Number(value)))
+}
+
+function stageRatio(args: {
+  completed: number | null
+  total: number | null
+  coverage: number | null
+  activityCoverage?: number | null
+}): number | null {
+  const coverage = clampRatio(args.coverage)
+  const activityCoverage = clampRatio(args.activityCoverage)
+  if (coverage !== null || activityCoverage !== null) {
+    return Math.max(coverage ?? 0, activityCoverage ?? 0)
+  }
+  if (args.total && args.total > 0 && args.completed !== null) {
+    return clampRatio(args.completed / args.total)
+  }
+  return null
+}
+
+function readObjectJson(path: string): Record<string, unknown> | null {
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null
+  } catch {
+    return null
+  }
+}
+
+function isVeaDeliveryComplete(outputDir: string): boolean {
+  const report = readObjectJson(join(outputDir, 'delivery_report.json'))
+  const status = String(report?.status || '').toLowerCase()
+  if (status !== 'completed' && status !== 'complete' && status !== 'success') return false
+  const requiredOutputs = report?.required_outputs
+  if (!requiredOutputs || typeof requiredOutputs !== 'object' || Array.isArray(requiredOutputs)) return true
+  for (const value of Object.values(requiredOutputs as Record<string, unknown>)) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) continue
+    if ((value as Record<string, unknown>).ok === false) return false
+  }
+  return true
+}
+
+function deriveVeaOverallCoverage(args: {
+  outputDir: string
+  status: string | null | undefined
+  stage: string | null
+  completed: number | null
+  total: number | null
+  coverage: number | null
+  activityCoverage?: number | null
+  previous: number | null
+}): number | null {
+  const status = String(args.status || '').toLowerCase()
+  const stage = String(args.stage || '').toLowerCase()
+  if (status === 'completed' || stage === 'completed' || isVeaDeliveryComplete(args.outputDir)) return 1
+  const ratio = stage === 'prepare' && args.total && args.total > 0 && args.completed !== null
+    ? clampRatio(args.completed / args.total) ?? 0
+    : stageRatio(args) ?? 0
+  let overall: number | null = null
+  if (stage === 'prepare') {
+    overall = ratio * 0.2
+  } else if (stage === 'score_batches') {
+    overall = 0.2 + ratio * 0.65
+  } else if (stage === 'merge_validate') {
+    overall = 0.85 + ratio * 0.05
+  } else if (stage === 'finalize') {
+    overall = listPendingSkillHandoffTasks(args.outputDir).length > 0
+      ? 0.92
+      : Math.min(0.98, 0.9 + ratio * 0.08)
+  }
+  if (overall === null) return args.previous
+  const clamped = Math.round(Math.max(0, Math.min(1, overall)) * 10_000) / 10_000
+  return args.previous === null ? clamped : Math.max(args.previous, clamped)
+}
+
+function deriveOverallCoverage(args: {
+  skillId: string
+  outputDir: string
+  status: string | null | undefined
+  stage: string | null
+  completed: number | null
+  total: number | null
+  coverage: number | null
+  activityCoverage?: number | null
+  previous: number | null
+}): number | null {
+  if (args.skillId === 'video-expert-analyzer') {
+    return deriveVeaOverallCoverage(args)
+  }
+  return args.previous ?? stageRatio(args)
+}
+
+function readProgressRunState(runStatePath: string | null): Partial<ScopeRunSkillProgress> & { status?: string | null } {
   if (!runStatePath) return {}
   try {
     const parsed = JSON.parse(readFileSync(runStatePath, 'utf8')) as unknown
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
     const rec = parsed as Record<string, unknown>
     return {
+      status: pickString(rec.status),
       stage: pickString(rec.current_stage)
         ?? pickString(rec.currentStage)
         ?? pickString(rec.current_step)
@@ -1636,12 +2536,39 @@ function readProgressRunState(runStatePath: string | null): Partial<ScopeRunSkil
   }
 }
 
+function latestIso(left: string | null | undefined, right: string | null | undefined): string | null {
+  if (!left) return right ?? null
+  if (!right) return left
+  const leftMs = Date.parse(left)
+  const rightMs = Date.parse(right)
+  if (!Number.isFinite(leftMs)) return right
+  if (!Number.isFinite(rightMs)) return left
+  return rightMs > leftMs ? right : left
+}
+
+function activityCoverageRatio(activity: ReturnType<typeof inspectSkillProgressArtifacts>['activity']): number | null {
+  if (!activity || activity.totalUnits <= 0) return null
+  return clampRatio(activity.completedUnits / activity.totalUnits)
+}
+
+function formatArtifactActivityDetail(activity: ReturnType<typeof inspectSkillProgressArtifacts>['activity']): string | null {
+  if (!activity) return null
+  if (activity.unitLabel === 'batch') {
+    const sceneText = activity.estimatedCompletedScenes !== undefined && activity.totalScenes !== undefined
+      ? `，约 ${activity.estimatedCompletedScenes}/${activity.totalScenes} 场景`
+      : ''
+    return `评分批次 ${activity.completedUnits}/${activity.totalUnits}${sceneText}`
+  }
+  return activity.summary || `${activity.completedUnits}/${activity.totalUnits} ${activity.unitLabel}`
+}
+
 function toCloseProgress(progress: ScopeRunSkillProgress): SkillChildCloseEvent['progress'] {
   return {
     stage: progress.stage,
     completedUnits: progress.completed,
     totalUnits: progress.total,
     coverageRatio: progress.coverage,
+    overallCoverageRatio: progress.overallCoverage ?? null,
     fingerprint: progress.fingerprint,
   }
 }
@@ -1655,9 +2582,12 @@ function mergeProgressFromClose(
     completed: closeProgress.completedUnits ?? previous.completed,
     total: closeProgress.totalUnits ?? previous.total,
     coverage: closeProgress.coverageRatio ?? previous.coverage,
+    overallCoverage: closeProgress.overallCoverageRatio ?? previous.overallCoverage ?? null,
     fingerprint: closeProgress.fingerprint ?? previous.fingerprint,
     updatedAt: previous.updatedAt,
     lastError: previous.lastError,
+    ...(previous.detail ? { detail: previous.detail } : {}),
+    ...(previous.activityUpdatedAt ? { activityUpdatedAt: previous.activityUpdatedAt } : {}),
   }
 }
 
@@ -2037,6 +2967,7 @@ function makeCloseEvent(args: MakeCloseArgs): SkillChildCloseEvent {
       totalUnits: null,
       completedUnits: null,
       coverageRatio: null,
+      overallCoverageRatio: null,
       fingerprint: null,
     },
     framePatch: null,

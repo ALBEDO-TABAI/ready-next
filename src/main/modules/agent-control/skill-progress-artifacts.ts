@@ -1,5 +1,8 @@
+import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import type { ScopeRunSkillHandoff } from './types'
+import { readSkillHandoffStates } from './skill-agent-handoff'
 
 const REQUIRED_SCORE_KEYS = [
   'aesthetic_beauty',
@@ -24,6 +27,17 @@ export interface SkillHostBatchProgress {
   receiptStatusCounts: Record<string, number>
 }
 
+export interface SkillActivityProgress {
+  completedUnits: number
+  totalUnits: number
+  unitLabel: string
+  summary: string
+  updatedAt: string
+  fingerprint: string
+  estimatedCompletedScenes?: number
+  totalScenes?: number
+}
+
 export interface SkillProgressArtifacts {
   sceneScoresPath: string | null
   hostBatchesIndexPath: string | null
@@ -31,6 +45,8 @@ export interface SkillProgressArtifacts {
   completedScenes: number | null
   coverageRatio: number | null
   hostBatches: SkillHostBatchProgress | null
+  activity: SkillActivityProgress | null
+  handoff: ScopeRunSkillHandoff | null
   hasEvidence: boolean
 }
 
@@ -55,6 +71,11 @@ function readJson(path: string): Record<string, unknown> | null {
   } catch {
     return null
   }
+}
+
+function firstHandoffTask(outputDir: string | null): ScopeRunSkillHandoff | null {
+  if (!outputDir) return null
+  return readSkillHandoffStates(outputDir).find((state) => state.status !== 'completed') || null
 }
 
 function fileExists(path: string | null): path is string {
@@ -116,6 +137,16 @@ function increment(map: Record<string, number>, key: string): void {
   map[key] = (map[key] || 0) + 1
 }
 
+function fileStamp(path: string | null): { mtimeMs: number, size: number } | null {
+  if (!path) return null
+  try {
+    const stat = statSync(path)
+    return stat.isFile() ? { mtimeMs: stat.mtimeMs, size: stat.size } : null
+  } catch {
+    return null
+  }
+}
+
 function collectSceneProgress(sceneScoresPath: string | null): {
   totalScenes: number | null
   completedScenes: number | null
@@ -156,6 +187,7 @@ function deriveBatchStatus(params: {
 
 function collectHostBatchProgress(outputDir: string | null): {
   progress: SkillHostBatchProgress | null
+  activity: SkillActivityProgress | null
   completedSceneNumbers: Set<number>
   totalScenes: number | null
   indexPath: string | null
@@ -163,7 +195,7 @@ function collectHostBatchProgress(outputDir: string | null): {
   const hostDir = outputDir ? join(outputDir, 'host_batches') : null
   const indexPath = hostDir ? join(hostDir, 'index.json') : null
   if (!indexPath || !existsSync(indexPath)) {
-    return { progress: null, completedSceneNumbers: new Set(), totalScenes: null, indexPath: null }
+    return { progress: null, activity: null, completedSceneNumbers: new Set(), totalScenes: null, indexPath: null }
   }
 
   const indexPayload = readJson(indexPath)
@@ -171,7 +203,14 @@ function collectHostBatchProgress(outputDir: string | null): {
   const statusCounts: Record<string, number> = {}
   const receiptStatusCounts: Record<string, number> = {}
   const completedSceneNumbers = new Set<number>()
+  const observedCompleteSceneNumbers = new Set<number>()
+  const fingerprintInput: unknown[] = []
+  const indexStamp = fileStamp(indexPath)
+  let latestMtimeMs = indexStamp?.mtimeMs || 0
+  let activityCompletedUnits = 0
+  let estimatedCompletedScenes = 0
   let completedBatches = 0
+  const totalScenes = numberValue(indexPayload?.total_scenes ?? indexPayload?.totalScenes)
 
   for (const batch of batches) {
     if (!batch || typeof batch !== 'object') continue
@@ -179,15 +218,35 @@ function collectHostBatchProgress(outputDir: string | null): {
     const outputName = nonEmpty(rec.output)
     const outputPath = outputName && hostDir ? join(hostDir, outputName) : null
     const outputPayload = outputPath && existsSync(outputPath) ? readJson(outputPath) : null
+    const outputStamp = fileStamp(outputPath)
+    if (outputStamp) latestMtimeMs = Math.max(latestMtimeMs, outputStamp.mtimeMs)
     const receipt = outputPayload?.receipt && typeof outputPayload.receipt === 'object'
       ? outputPayload.receipt as Record<string, unknown>
       : {}
     const receiptStatus = nonEmpty(receipt.status) || 'pending'
     increment(receiptStatusCounts, receiptStatus)
+    if (receiptStatus === 'completed') {
+      activityCompletedUnits += 1
+      estimatedCompletedScenes += Array.isArray(rec.scene_numbers) ? rec.scene_numbers.length : 0
+    }
     const receiptBlocked = Array.isArray(receipt.needs_review) && receipt.needs_review.length > 0
     const scenes = Array.isArray(outputPayload?.scenes) ? outputPayload.scenes : []
+    for (const scene of scenes) {
+      if (!isVeaSceneComplete(scene)) continue
+      const sceneNumber = numberValue((scene as Record<string, unknown>)?.scene_number)
+      if (sceneNumber !== null) observedCompleteSceneNumbers.add(sceneNumber)
+    }
     const derivedStatus = deriveBatchStatus({ receiptStatus, receiptBlocked, scenes })
     increment(statusCounts, derivedStatus)
+    fingerprintInput.push({
+      batchId: rec.batch_id,
+      output: outputName,
+      receiptStatus,
+      derivedStatus,
+      sceneNumbers: rec.scene_numbers,
+      outputMtimeMs: outputStamp?.mtimeMs ?? null,
+      outputSize: outputStamp?.size ?? null,
+    })
     if (derivedStatus !== 'completed') continue
     completedBatches += 1
     for (const scene of scenes) {
@@ -196,6 +255,30 @@ function collectHostBatchProgress(outputDir: string | null): {
     }
   }
 
+  const inProgressUnits = receiptStatusCounts.in_progress || 0
+  const hasSceneActivity = totalScenes !== null && observedCompleteSceneNumbers.size > 0
+  const summaryParts = hasSceneActivity
+    ? [`评分场景 ${observedCompleteSceneNumbers.size}/${totalScenes}`]
+    : [`${activityCompletedUnits}/${batches.length} batches completed`]
+  if (!hasSceneActivity && inProgressUnits > 0) summaryParts.push(`${inProgressUnits} in progress`)
+  const activity = batches.length > 0 && latestMtimeMs > 0
+    ? {
+        completedUnits: hasSceneActivity ? observedCompleteSceneNumbers.size : activityCompletedUnits,
+        totalUnits: hasSceneActivity ? totalScenes : batches.length,
+        unitLabel: hasSceneActivity ? 'scene' : 'batch',
+        summary: summaryParts.join('; '),
+        updatedAt: new Date(latestMtimeMs).toISOString(),
+        fingerprint: createHash('sha256').update(JSON.stringify({
+          indexMtimeMs: indexStamp?.mtimeMs ?? null,
+          indexSize: indexStamp?.size ?? null,
+          observedCompleteScenes: observedCompleteSceneNumbers.size,
+          batches: fingerprintInput,
+        })).digest('hex'),
+        ...(!hasSceneActivity && estimatedCompletedScenes > 0 ? { estimatedCompletedScenes } : {}),
+        ...(totalScenes !== null ? { totalScenes } : {}),
+      }
+    : null
+
   return {
     progress: {
       totalBatches: batches.length,
@@ -203,8 +286,11 @@ function collectHostBatchProgress(outputDir: string | null): {
       statusCounts,
       receiptStatusCounts,
     },
-    completedSceneNumbers,
-    totalScenes: numberValue(indexPayload?.total_scenes ?? indexPayload?.totalScenes),
+    activity,
+    completedSceneNumbers: observedCompleteSceneNumbers.size > 0
+      ? observedCompleteSceneNumbers
+      : completedSceneNumbers,
+    totalScenes,
     indexPath,
   }
 }
@@ -214,7 +300,8 @@ export function inspectSkillProgressArtifacts(params: InspectSkillProgressArtifa
   const sceneScoresPath = sceneScoresPathFor(params)
   const sceneProgress = collectSceneProgress(sceneScoresPath)
   const hostBatchProgress = collectHostBatchProgress(outputDir)
-  const completedSceneNumbers = new Set([
+  const handoff = firstHandoffTask(outputDir)
+  const completedSceneNumbers = new Set<number>([
     ...sceneProgress.completedSceneNumbers,
     ...hostBatchProgress.completedSceneNumbers,
   ])
@@ -235,6 +322,8 @@ export function inspectSkillProgressArtifacts(params: InspectSkillProgressArtifa
     completedScenes,
     coverageRatio,
     hostBatches: hostBatchProgress.progress,
-    hasEvidence: Boolean(sceneScoresPath || hostBatchProgress.indexPath),
+    activity: hostBatchProgress.activity,
+    handoff,
+    hasEvidence: Boolean(sceneScoresPath || hostBatchProgress.indexPath || handoff),
   }
 }

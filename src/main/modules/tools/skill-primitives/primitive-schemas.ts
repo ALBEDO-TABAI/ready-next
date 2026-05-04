@@ -100,12 +100,18 @@ export const SKILL_PRIMITIVE_SCHEMAS = {
       .min(1)
       .optional()
       .describe('要检查 run_state.json 所在目录。绝对或相对都可；与 taskId 二选一。'),
+    runStatePath: z
+      .string()
+      .trim()
+      .min(1)
+      .optional()
+      .describe('显式 run_state.json 路径；用于用户引用了具体 run_state.json 文件时避免退到 read_artifact。'),
     taskId: z
       .string()
       .trim()
       .min(1)
       .optional()
-      .describe('detached task id；从该任务的 outputDir 解析 run_state.json，与 outputDir 二选一。'),
+      .describe('detached task id；从该任务的 outputDir 解析 run_state.json，与 outputDir/runStatePath 三选一。'),
     expectedTaskId: z
       .string()
       .trim()

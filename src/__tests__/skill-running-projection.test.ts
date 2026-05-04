@@ -146,6 +146,87 @@ test('long skill running projection selects matching run_state when task identit
   }
 })
 
+test('long skill running projection selects child-owned run_state under a shared output root', () => {
+  const root = mkdtempSync(join(tmpdir(), 'skill-running-projection-child-'))
+  try {
+    const targetDir = join(root, 'target-task')
+    const otherDir = join(root, 'other-task')
+    mkdirSync(targetDir, { recursive: true })
+    mkdirSync(otherDir, { recursive: true })
+    writeFileSync(join(targetDir, 'run_state.json'), JSON.stringify({
+      child_run_id: 'vqfy70dlv',
+      current_stage: 'prepare',
+      total_scenes: 90,
+      completed_scenes: 20,
+      coverage_ratio: 0.2222,
+      status: 'running',
+    }), 'utf8')
+    writeFileSync(join(otherDir, 'run_state.json'), JSON.stringify({
+      child_run_id: 'other-child',
+      current_stage: 'completed',
+      status: 'completed',
+    }), 'utf8')
+
+    const projection = buildLongSkillRunningProjection({
+      sessionId: 's1',
+      toolName: 'skill_video_expert_pipeline',
+      toolInput: {
+        outputDir: root,
+        __childRunContext: { childRunId: 'vqfy70dlv' },
+      },
+      startedAt: 0,
+      now: 65_000,
+    })
+
+    assert.match(String(projection.taskSummary), /prepare/)
+    assert.match(String(projection.taskSummary), /20\/90/)
+    assert.doesNotMatch(String(projection.taskSummary), /多个 run_state/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('long skill running projection carries structured handoff progress', () => {
+  const root = mkdtempSync(join(tmpdir(), 'skill-running-projection-handoff-'))
+  try {
+    mkdirSync(join(root, 'audiovisual_handoff', 'body'), { recursive: true })
+    writeFileSync(join(root, 'run_state.json'), JSON.stringify({
+      current_stage: 'finalize',
+      total_scenes: 3,
+      completed_scenes: 3,
+      status: 'blocked',
+    }), 'utf8')
+    writeFileSync(join(root, 'scene_scores.json'), JSON.stringify({
+      scenes: [],
+      total_scenes: 3,
+    }), 'utf8')
+    writeFileSync(join(root, 'audiovisual_handoff', 'receipt.json'), JSON.stringify({
+      tasks: {
+        body: {
+          status: 'pending',
+          task: 'audiovisual_handoff/body/task.md',
+          output: 'audiovisual_handoff/body/output.md',
+        },
+      },
+    }), 'utf8')
+    writeFileSync(join(root, 'audiovisual_handoff', 'body', 'task.md'), 'write body', 'utf8')
+
+    const projection = buildLongSkillRunningProjection({
+      sessionId: 's1',
+      toolName: 'skill_video_expert_pipeline',
+      toolInput: { outputDir: root },
+      startedAt: 0,
+      now: 65_000,
+    })
+
+    const progress = projection.progress as { handoff?: { userMessage?: string; taskPath?: string } } | undefined
+    assert.equal(progress?.handoff?.userMessage, '视听报告正文还需要继续生成。')
+    assert.ok(String(progress?.handoff?.taskPath || '').endsWith('audiovisual_handoff/body/task.md'))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('long skill running projection skips mismatched root run_state when task identity is present', () => {
   const root = mkdtempSync(join(tmpdir(), 'skill-running-projection-'))
   try {

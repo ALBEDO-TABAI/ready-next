@@ -317,5 +317,5 @@ test('Phase 2 wiring — buildSkillDetectionInputs probes retry on primary+pure 
     source,
     /probesForRetryCheck\s*=\s*retryProbes\.length\s*>\s*0\s*\?\s*retryProbes\s*:\s*currentInputs/,
   )
-  assert.match(source, /probesForRetryCheck\.some\(isRetryOnlyTurn\)/)
+  assert.match(source, /probesForRetryCheck\.some\(\(text\)\s*=>\s*\n\s*isRetryOnlyTurn\(text\)\s*\|\|\s*isConfigRepairTurn\(text\)/)
 })

@@ -194,6 +194,7 @@ function normalizeProgress(
     totalUnits: progress.totalUnits ?? null,
     completedUnits: progress.completedUnits ?? null,
     coverageRatio: progress.coverageRatio ?? null,
+    overallCoverageRatio: progress.overallCoverageRatio ?? null,
     fingerprint: progress.fingerprint ?? null,
   }
 }
@@ -204,6 +205,7 @@ function emptyProgress(): SkillChildCloseEvent['progress'] {
     totalUnits: null,
     completedUnits: null,
     coverageRatio: null,
+    overallCoverageRatio: null,
     fingerprint: null,
   }
 }

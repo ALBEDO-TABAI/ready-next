@@ -109,6 +109,85 @@ test('reconcileAfterBrowserDecision re-resolves browser capabilities without reb
   assert.ok(!reconciled.allowedToolNames.includes('browser_extract_structured'))
 })
 
+test('prepareInitialRun suppresses skill tools unless the turn selected a skill', () => {
+  const requestEnvelope = buildRequestEnvelope({
+    userText: '顺便帮我查查未来 3 天广州天气',
+  })
+  const prepared = prepareInitialRun({
+    config: BASE_CONFIG,
+    capabilityProfile: 'local_chat',
+    supportsToolCalls: true,
+    hasVideoInputs: false,
+    hasIncomingVideo: false,
+    keepToolsWithVideo: false,
+    preferredSkillToolNames: null,
+    executionIntentContext: {
+      requestEnvelope,
+      intentClassification: classifyIntent(requestEnvelope),
+      contextualUserInput: '顺便帮我查查未来 3 天广州天气',
+      userInstructionText: '顺便帮我查查未来 3 天广州天气',
+      hasDocumentEnvironment: false,
+      hasWidgetTargetContext: false,
+      explicitWidgetCreateIntent: false,
+      documentWidgetTaskKind: null,
+      documentWidgetProfile: null,
+    },
+    browserDecisionMode: 'browser_workflow',
+    runtimeAvailability: {
+      browserHostAvailable: true,
+      feishuConnected: true,
+    },
+    hostContext: {
+      userText: '顺便帮我查查未来 3 天广州天气',
+    },
+  })
+
+  assert.ok(!prepared.capabilityResolution.visibleCapabilityGroupIds.includes('skills'))
+  assert.ok(prepared.capabilityResolution.suppressedCapabilityGroupIds.includes('skills'))
+  assert.equal(prepared.capabilityResolution.groupStates.skills.reason, 'run_intent_suppressed')
+  assert.ok(!prepared.allowedToolNames.some((name) => name.startsWith('skill_')))
+})
+
+test('prepareInitialRun exposes only selected skill tools when a skill is selected', () => {
+  const requestEnvelope = buildRequestEnvelope({
+    userText: '@[Video Copy Analyzer] 分析这个视频文案',
+  })
+  const prepared = prepareInitialRun({
+    config: BASE_CONFIG,
+    capabilityProfile: 'local_chat',
+    supportsToolCalls: true,
+    hasVideoInputs: false,
+    hasIncomingVideo: false,
+    keepToolsWithVideo: false,
+    preferredSkillToolNames: ['skill_ask_user'],
+    executionIntentContext: {
+      requestEnvelope,
+      intentClassification: classifyIntent(requestEnvelope),
+      contextualUserInput: '@[Video Copy Analyzer] 分析这个视频文案',
+      userInstructionText: '@[Video Copy Analyzer] 分析这个视频文案',
+      hasDocumentEnvironment: false,
+      hasWidgetTargetContext: false,
+      explicitWidgetCreateIntent: false,
+      documentWidgetTaskKind: null,
+      documentWidgetProfile: null,
+    },
+    browserDecisionMode: 'free_tool_loop',
+    runtimeAvailability: {
+      browserHostAvailable: true,
+      feishuConnected: true,
+    },
+    hostContext: {
+      userText: '@[Video Copy Analyzer] 分析这个视频文案',
+    },
+  })
+
+  assert.ok(prepared.capabilityResolution.visibleCapabilityGroupIds.includes('skills'))
+  assert.deepEqual(
+    prepared.allowedToolNames.filter((name) => name.startsWith('skill_')),
+    ['skill_ask_user'],
+  )
+})
+
 test('prepareInitialRun only grants openclaw shortcut to explicit command messages', () => {
   const explicitEnvelope = buildRequestEnvelope({
     userText: 'openclaw pairing approve feishu FNXQH9PN',

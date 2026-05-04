@@ -50,6 +50,7 @@ state = mark_stage(
 
 assert state["schema_version"] == 1
 assert state["task_id"] == "task-from-ready"
+assert state["child_run_id"] == "child-from-ready"
 assert state["pid"] == os.getpid()
 assert state["started_at"] == started_at
 assert state["active_output_dir"] == os.path.normpath(os.path.abspath(active_dir))
@@ -65,10 +66,12 @@ print(json.dumps(state, ensure_ascii=False))
         ...process.env,
         PYTHONPATH: RUN_STATE_SCRIPT_DIR,
         READY_SKILL_TASK_ID: 'task-from-ready',
+        READY_SKILL_CHILD_RUN_ID: 'child-from-ready',
       },
     })
     const state = JSON.parse(output)
     assert.equal(state.task_id, 'task-from-ready')
+    assert.equal(state.child_run_id, 'child-from-ready')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

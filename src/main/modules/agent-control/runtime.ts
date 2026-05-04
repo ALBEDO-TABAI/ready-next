@@ -49,6 +49,7 @@ import {
 import './video-expert-child-driver'
 import { RunProjection } from './run-projection'
 import { syncTaskProjection } from './task-projection-sync'
+import { reconcileTaskProjections } from './task-projection-reconciler'
 import type { ProjectionTruthSnapshot, TaskProjectionRecord } from './run-contracts'
 import { getBudgetUsagePercent, restoreContinuationTaskBudgetRuntime } from './run-budget-policy'
 import { normalizeContinuationIntent, type ContinuationIntent } from './continuation-state'
@@ -94,6 +95,7 @@ import type {
   HeartbeatSnapshot,
   ScopeRunMemoryCapture,
   ScopeRunEventPayload,
+  ScopeRunSkillProgress,
   ScopeRunSummary
 } from './types'
 import type { SessionRecallCapsule, SessionRecallHit } from '../../../shared/session-recall'
@@ -114,6 +116,103 @@ export interface UpsertSchedulePayload {
   channelId?: string | null
   enabled?: boolean
   payload?: Record<string, unknown>
+}
+
+type ActiveChildRunSummaryForRuntime = {
+  childRunId: string
+  skillId: string
+  sessionId: string | null
+  scopeId: string | null
+  status: string
+  startedAt: string
+  outputDir: string
+  runStatePath: string
+  progress?: ScopeRunSkillProgress
+  blockedReason?: string | null
+  liveness?: 'background' | null
+  closeStatus?: string | null
+}
+
+interface TaskProjectionChildSummaryRow {
+  task_id: string
+  scope_id: string
+  status: string
+  blocked_reason: string | null
+  continuation_ref_json: string | null
+  recent_artifacts_json: string | null
+  created_at: string
+  updated_at: string
+}
+
+function parseRecordJson(value: string | null | undefined): Record<string, unknown> | null {
+  if (!value) return null
+  try {
+    const parsed = JSON.parse(value) as unknown
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null
+  } catch {
+    return null
+  }
+}
+
+function parseArrayJson(value: string | null | undefined): Array<Record<string, unknown>> {
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value) as unknown
+    return Array.isArray(parsed)
+      ? parsed.filter((item): item is Record<string, unknown> =>
+          Boolean(item && typeof item === 'object' && !Array.isArray(item)),
+        )
+      : []
+  } catch {
+    return []
+  }
+}
+
+function stringFromUnknown(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
+}
+
+function progressFromUnknown(value: unknown): ScopeRunSkillProgress | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined
+  const record = value as Partial<ScopeRunSkillProgress>
+  return {
+    stage: record.stage ?? null,
+    completed: record.completed ?? null,
+    total: record.total ?? null,
+    coverage: record.coverage ?? null,
+    overallCoverage: record.overallCoverage ?? null,
+    fingerprint: record.fingerprint ?? null,
+    updatedAt: record.updatedAt ?? null,
+    lastError: record.lastError ?? null,
+    ...(record.detail ? { detail: record.detail } : {}),
+    ...(record.activityUpdatedAt ? { activityUpdatedAt: record.activityUpdatedAt } : {}),
+    ...(record.handoff ? { handoff: record.handoff } : {}),
+  }
+}
+
+function artifactMetaString(
+  artifacts: Array<Record<string, unknown>>,
+  key: string,
+): string | null {
+  for (const artifact of artifacts) {
+    const meta = artifact.meta && typeof artifact.meta === 'object' && !Array.isArray(artifact.meta)
+      ? artifact.meta as Record<string, unknown>
+      : null
+    const value = stringFromUnknown(meta?.[key])
+    if (value) return value
+  }
+  return null
+}
+
+function childRunSummaryStatusFromProjection(status: string): string {
+  if (status === 'queued') return 'queued'
+  if (status === 'failed') return 'failed'
+  if (status === 'cancelled') return 'killed'
+  if (status === 'done') return 'completed'
+  if (status === 'blocked') return 'blocked'
+  return 'running'
 }
 
 export class AgentControlRuntime extends EventEmitter {
@@ -257,6 +356,7 @@ export class AgentControlRuntime extends EventEmitter {
       configureSkillChildRunner({
         runtimeManager: getSkillsRuntimeManager(),
         repository: this.skillTaskRunRepository,
+        taskProjectionStore: this.taskProjectionStore,
       })
     } catch (error) {
       // Boot-time wiring failure is best-effort logged; the parent loop
@@ -488,6 +588,18 @@ export class AgentControlRuntime extends EventEmitter {
   listTaskProjections(scopeId: string): TaskProjectionRecord[] {
     const normalizedScopeId = String(scopeId || '').trim()
     if (!normalizedScopeId) return []
+    const records = this.taskProjectionStore.listByScope(normalizedScopeId) as TaskProjectionRecord[]
+    try {
+      const taskRuns = this.skillTaskRunRepository.listByScope(normalizedScopeId, 100)
+      reconcileTaskProjections({
+        store: this.taskProjectionStore,
+        records,
+        taskRuns,
+        now: new Date().toISOString(),
+      })
+    } catch (error) {
+      console.warn(`[task-projection-reconciler] failed: ${error instanceof Error ? error.message : String(error)}`)
+    }
     return this.taskProjectionStore.listByScope(normalizedScopeId) as TaskProjectionRecord[]
   }
 
@@ -624,17 +736,67 @@ export class AgentControlRuntime extends EventEmitter {
     return this.detachedSkillTasks.cancel(taskId)
   }
 
-  listActiveChildRuns(): Array<{
-    childRunId: string
-    skillId: string
-    sessionId: string | null
-    scopeId: string | null
-    status: string
-    startedAt: string
-    outputDir: string
-    runStatePath: string
-  }> {
-    return getSkillChildRunner()?.listActiveRuns() ?? []
+  listActiveChildRuns(): ActiveChildRunSummaryForRuntime[] {
+    const rows = new Map<string, ActiveChildRunSummaryForRuntime>()
+    for (const row of this.listProjectionBackedChildRunSummaries()) {
+      rows.set(row.childRunId, row)
+    }
+    for (const row of getSkillChildRunner()?.listActiveRuns() ?? []) {
+      rows.set(row.childRunId, row)
+    }
+    return Array.from(rows.values())
+      .sort((left, right) => String(right.startedAt || '').localeCompare(String(left.startedAt || '')))
+  }
+
+  private listProjectionBackedChildRunSummaries(): ActiveChildRunSummaryForRuntime[] {
+    const rawDb = this.db.getRawDb()
+    if (!rawDb) return []
+    let rows: TaskProjectionChildSummaryRow[] = []
+    try {
+      rows = rawDb.prepare(`
+        SELECT task_id, scope_id, status, blocked_reason, continuation_ref_json,
+               recent_artifacts_json, created_at, updated_at
+        FROM task_projections
+        WHERE task_id LIKE 'skill-child:%'
+          AND status IN ('queued', 'running', 'blocked', 'failed')
+        ORDER BY updated_at DESC
+        LIMIT 100
+      `).all<TaskProjectionChildSummaryRow>()
+    } catch {
+      return []
+    }
+
+    return rows.map((row) => {
+      const continuation = parseRecordJson(row.continuation_ref_json)
+      const artifacts = parseArrayJson(row.recent_artifacts_json)
+      const childRunId = stringFromUnknown(continuation?.childRunId)
+        || row.task_id.replace(/^skill-child:/, '')
+      const skillId = stringFromUnknown(continuation?.skillId)
+        || artifactMetaString(artifacts, 'skillId')
+        || 'unknown'
+      const outputDir = stringFromUnknown(continuation?.outputDir)
+        || artifactMetaString(artifacts, 'outputDir')
+        || ''
+      const runStatePath = stringFromUnknown(continuation?.runStatePath)
+        || artifactMetaString(artifacts, 'runStatePath')
+        || ''
+      return {
+        childRunId,
+        skillId,
+        sessionId: null,
+        scopeId: row.scope_id,
+        status: childRunSummaryStatusFromProjection(row.status),
+        startedAt: row.created_at || row.updated_at,
+        outputDir,
+        runStatePath,
+        progress: progressFromUnknown(continuation?.progress),
+        blockedReason: row.blocked_reason,
+        liveness: row.status === 'queued' || row.status === 'running' || row.status === 'blocked'
+          ? 'background' as const
+          : null,
+        closeStatus: row.status === 'failed' ? 'failed' : null,
+      }
+    }).filter((row) => Boolean(row.childRunId))
   }
 
   async cancelChildRun(childRunId: string, options: { source: 'ui_button' }): Promise<unknown> {

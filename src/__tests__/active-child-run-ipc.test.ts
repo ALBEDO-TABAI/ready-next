@@ -11,6 +11,10 @@ test('listActiveChildRunsForIpc returns active child run summaries with projecti
     childRunId: 'vcr_1',
     status: 'running',
     startedAt: '2026-05-02T00:00:00.000Z',
+    progress: {
+      detail: '评分批次 2/7，约 12/39 场景',
+      activityUpdatedAt: '2026-05-04T06:00:00.000Z',
+    },
   }]
   const runtime = {
     listActiveChildRuns: () => rows,
@@ -29,9 +33,13 @@ test('listActiveChildRunsForIpc returns active child run summaries with projecti
         completed: null,
         total: null,
         coverage: null,
+        overallCoverage: null,
         fingerprint: null,
         updatedAt: null,
         lastError: null,
+        detail: '评分批次 2/7，约 12/39 场景',
+        activityUpdatedAt: '2026-05-04T06:00:00.000Z',
+        handoff: null,
       },
       blockedReason: null,
       liveness: 'background',

@@ -1,6 +1,6 @@
 const assert = require('node:assert/strict')
 const { execFileSync } = require('node:child_process')
-const { mkdtempSync, realpathSync, rmSync } = require('node:fs')
+const { existsSync, mkdtempSync, realpathSync, readFileSync, rmSync } = require('node:fs')
 const { tmpdir } = require('node:os')
 const path = require('node:path')
 const test = require('node:test')
@@ -98,4 +98,69 @@ print(json.dumps(calls, ensure_ascii=False))
       coverage_ratio: 0.4,
     },
   })
+})
+
+test('VEA fresh pipeline resets stale completion artifacts in the selected output directory', () => {
+  const tempDir = mkdtempSync(path.join(tmpdir(), 'ready-vea-fresh-reset-'))
+  try {
+    const python = `
+from pathlib import Path
+import json
+import os
+import sys
+
+sys.path.insert(0, ${JSON.stringify(scriptsRoot)})
+import pipeline_enhanced
+
+pipeline_enhanced.get_video_info = lambda url: {
+    "success": True,
+    "title": "Fresh Reset Clip",
+    "uploader": "Uploader",
+}
+
+root = Path(${JSON.stringify(tempDir)})
+video_dir = root / "[Uploader] Fresh Reset Clip"
+video_dir.mkdir(parents=True, exist_ok=True)
+(video_dir / "run_state.json").write_text(json.dumps({
+    "task_id": "old-task",
+    "child_run_id": "old-child",
+    "status": "completed",
+    "current_stage": "completed",
+    "completed_stages": ["completed"],
+    "completed_scenes": 99,
+    "coverage_ratio": 1.0,
+}, ensure_ascii=False), encoding="utf-8")
+(video_dir / "scene_scores.json").write_text("{}", encoding="utf-8")
+(video_dir / "delivery_report.json").write_text("{}", encoding="utf-8")
+
+pipeline = pipeline_enhanced.VideoAnalysisPipeline(
+    "https://www.youtube.com/watch?v=4qkyxm4jppc",
+    str(root),
+)
+print(pipeline.run_state_path)
+print(pipeline.scores_path)
+print(video_dir / "delivery_report.json")
+`
+    const env = {
+      ...process.env,
+      READY_SKILL_TASK_ID: 'new-task',
+      READY_SKILL_CHILD_RUN_ID: 'new-child',
+    }
+    const [runStatePath, scoresPath, deliveryReportPath] = execFileSync('python3', ['-c', python], {
+      encoding: 'utf8',
+      env,
+    }).trim().split('\n').slice(-3)
+    const state = JSON.parse(readFileSync(runStatePath, 'utf8'))
+    assert.equal(state.task_id, 'new-task')
+    assert.equal(state.child_run_id, 'new-child')
+    assert.equal(state.status, 'running')
+    assert.equal(state.current_stage, 'prepare')
+    assert.deepEqual(state.completed_stages, [])
+    assert.equal(state.completed_scenes, 0)
+    assert.equal(state.coverage_ratio, 0)
+    assert.equal(existsSync(scoresPath), false)
+    assert.equal(existsSync(deliveryReportPath), false)
+  } finally {
+    rmSync(tempDir, { recursive: true, force: true })
+  }
 })

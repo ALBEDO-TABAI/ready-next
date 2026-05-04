@@ -137,6 +137,9 @@ function reconcileAllowedToolNamesWithPreferredSkillTools(
 
 function shouldAdoptTurnFramePreferredSkillTools(frame: TurnFrame | null): boolean {
   if (!frame?.skill) return false
+  if (frame.mode === 'skill_start' && !frame.skill.action && frame.liveness === 'unknown') {
+    return false
+  }
   if (frame.skill.source === 'reference_hint') {
     return hasLongTypedSkillAction(frame.steering.preferredToolNames)
   }
@@ -144,7 +147,9 @@ function shouldAdoptTurnFramePreferredSkillTools(frame: TurnFrame | null): boole
 }
 
 function matchesSkillProgressFollowupIntent(text: string): boolean {
-  const normalized = String(text || '').trim()
+  const normalized = String(text || '')
+    .replace(/\bhttps?:\/\/[^\s"'`<>,，。)）]+/gi, ' ')
+    .trim()
   if (!normalized) return false
   return /(?:跟进|追踪|进度|状态|汇报|持续|一直|直到(?:跑|做|执行|完成|结束)|跑完整个任务|monitor|progress|status|watch)/i.test(normalized)
 }
@@ -1138,6 +1143,10 @@ export class TurnEngine {
     }
     let turnFrame: TurnFrame | null = null
 
+    const buildAgentContextForSkillSpawn = () => buildAgentSpawnContextFromAIConfig(host.providerContext.config, {
+      baseUrl: host.providerContext.baseUrl,
+    })
+
     const buildHostToolContext = (allowedToolNames: string[] | null | undefined, scope?: unknown) => buildToolRuntimeContext({
       browserController: host.browserController as any,
       sidecarManager: host.sidecarManager as any,
@@ -1158,9 +1167,7 @@ export class TurnEngine {
       registerRunCleanup: (cleanup) => {
         host.registerRunCleanup?.(cleanup)
       },
-      agentContext: buildAgentSpawnContextFromAIConfig(host.providerContext.config, {
-        baseUrl: host.providerContext.baseUrl,
-      }),
+      agentContext: buildAgentContextForSkillSpawn(),
       turnFeatureFlags,
       // Phase 3 (Team T7) — seed `activeFrame` from the live `TurnFrame`
       // snapshot BEFORE any same-batch `contextModifier` runs. The first
@@ -1395,22 +1402,26 @@ export class TurnEngine {
           candidateCount: 'candidateCount' in runStateResourceResolution ? runStateResourceResolution.candidateCount : null,
         })
       }
-      const explicitSkillForFreshStart = firstSkillMatch?.skills[0] || null
-      const explicitFreshSkillStart = Boolean(
+      let freshSkillForStart = firstSkillMatch?.skills[0] || null
+      let freshSkillStartSkillId = firstExplicitSkillId
+      const providedContinuationStateForInitialExplicitSkill = hasExplicitSkill
+        ? null
+        : providedContinuationState
+      let explicitFreshSkillStart = Boolean(
         hasExplicitSkill
-        && explicitSkillForFreshStart
-        && !providedContinuationState
+        && freshSkillForStart
+        && !providedContinuationStateForInitialExplicitSkill
         && !isSkillResumeTurnDetected
         && !explicitRunStateResourceForTurn
         && skillDetectionInputs.some((text) => hasUrlSourceSignal(text)),
       )
-      const explicitFreshStartAction = explicitFreshSkillStart
-        ? inferExplicitSkillStartAction(explicitSkillForFreshStart, skillDetectionInputs)
+      let explicitFreshStartAction = explicitFreshSkillStart
+        ? inferExplicitSkillStartAction(freshSkillForStart, skillDetectionInputs)
         : null
       if (explicitFreshSkillStart) {
         logAgentMetric('explicit_skill_fresh_start_detected', {
           sessionId: request.sessionId,
-          skillId: firstExplicitSkillId,
+          skillId: freshSkillStartSkillId,
           action: explicitFreshStartAction,
         })
       }
@@ -1692,6 +1703,14 @@ export class TurnEngine {
           && activeSkillContextForTurn.source !== 'reference_hint'
         ),
       )
+      const explicitSkillIdForFrame = explicitRunStateResourceForTurn?.skillId
+        || (explicitFreshSkillStart ? freshSkillStartSkillId : null)
+        || (hasExplicitSkill ? firstExplicitSkillId : null)
+      const explicitSkillNameForFrame = explicitRunStateResourceForTurn?.skillName
+        || (explicitFreshSkillStart ? (freshSkillForStart?.name || freshSkillStartSkillId) : null)
+        || (hasExplicitSkill && firstSkillMatch?.skills[0]
+          ? (firstSkillMatch.skills[0].name || firstExplicitSkillId)
+          : null)
       turnFrame = resolveTurnFrame({
         sessionId: request.sessionId,
         requestId: request.runId,
@@ -1705,8 +1724,8 @@ export class TurnEngine {
           )
             ? 'continue'
             : 'unknown',
-        explicitSkillId: explicitRunStateResourceForTurn?.skillId || (explicitFreshSkillStart ? firstExplicitSkillId : null),
-        explicitSkillName: explicitRunStateResourceForTurn?.skillName || (explicitFreshSkillStart ? (firstSkillMatch?.skills[0]?.name || firstExplicitSkillId) : null),
+        explicitSkillId: explicitSkillIdForFrame,
+        explicitSkillName: explicitSkillNameForFrame,
         explicitAction: explicitRunStateResourceForTurn?.explicitAction || (explicitFreshSkillStart ? explicitFreshStartAction : null),
         explicitOutputDir: explicitRunStateResourceForTurn?.outputDir || null,
         explicitRunStatePath: explicitRunStateResourceForTurn?.runStatePath || null,
@@ -1906,7 +1925,9 @@ export class TurnEngine {
           // Intentional fallthrough — do NOT call finish() here.
         } else {
           const childStatus = childCommand.closeEvent.status
-          if (!isDirectlyResumableChildStatus(childStatus)) {
+          const canDelegateBlockedResume = childStatus === 'blocked'
+            && childCommand.closeEvent.terminalReason === 'blocked_external'
+          if (!isDirectlyResumableChildStatus(childStatus) && !canDelegateBlockedResume) {
             const detail = childCommand.closeEvent.error?.message
               || childCommand.closeEvent.terminalReason
               || 'child run blocked'
@@ -1929,7 +1950,9 @@ export class TurnEngine {
           const resumeChild = (host as unknown as {
             resumeSkillChildRun?: typeof resumeSkillChildRun
           }).resumeSkillChildRun || resumeSkillChildRun
-          const resumed = await resumeChild(childCommand.childRunId)
+          const resumed = await resumeChild(childCommand.childRunId, {
+            agentContext: buildAgentContextForSkillSpawn(),
+          })
           if (turnFrame?.skill?.runContract && resumed.freshContractFields) {
             Object.assign(turnFrame.skill.runContract, resumed.freshContractFields)
           }
@@ -2158,11 +2181,16 @@ export class TurnEngine {
         turnFrame?.mode === 'skill_resume'
         && Boolean(turnFrame.skill)
         && turnFrame.liveness !== 'unknown'
+      const shouldUseActiveSkillStartRoute =
+        turnFrame?.mode === 'skill_start'
+        && Boolean(turnFrame.skill)
+        && hasLongTypedSkillAction(preferredSkillToolNames)
       const shouldForceRunStateSkillResume =
         Boolean(explicitRunStateResourceForTurn) && shouldUseLongSkillResumeBudget
-      const taskTypeResolution = (shouldUseLongSkillResumeBudget || shouldUseActiveSkillResumeRoute) && (
+      const taskTypeResolution = (shouldUseLongSkillResumeBudget || shouldUseActiveSkillResumeRoute || shouldUseActiveSkillStartRoute) && (
         resolvedTaskTypeForEffectiveRun.executionChain === 'direct'
         || shouldForceRunStateSkillResume
+        || shouldUseActiveSkillStartRoute
       )
         ? {
           ...resolvedTaskTypeForEffectiveRun,

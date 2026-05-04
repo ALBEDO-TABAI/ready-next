@@ -34,6 +34,21 @@ test('skill detection does not reuse stale goals for unrelated new turns', () =>
   assert.deepEqual(inputs, ['帮我看看今天的天气'])
 })
 
+test('skill detection prioritizes the current instruction over stale contextual skill text', () => {
+  const inputs = buildSkillDetectionInputs({
+    contextualUserInput: [
+      '## L1 会话上下文',
+      '技能上下文 Video Expert Analyzer (VNext) 已启用',
+      '用户历史任务还在后台运行',
+    ].join('\n'),
+    primaryInstruction: '使用 Video Copy Analyzer 分析 https://www.youtube.com/watch?v=400Yrelo12w 输出到测试',
+    pureUserText: '使用 Video Copy Analyzer 分析 https://www.youtube.com/watch?v=400Yrelo12w 输出到测试',
+  })
+
+  assert.equal(inputs[0], '使用 Video Copy Analyzer 分析 https://www.youtube.com/watch?v=400Yrelo12w 输出到测试')
+  assert.equal(inputs[1], '## L1 会话上下文\n技能上下文 Video Expert Analyzer (VNext) 已启用\n用户历史任务还在后台运行')
+})
+
 test('isRetryOnlyTurn — strict short forms (historical contract)', () => {
   // These shapes were already supported and must keep working.
   assert.equal(isRetryOnlyTurn('继续'), true)

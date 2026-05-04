@@ -145,6 +145,17 @@ function collectExpectedTaskId(toolInput?: Record<string, unknown>): string | nu
     || asNonEmptyString(toolInput?.detached_task_id)
 }
 
+function collectExpectedChildRunId(toolInput?: Record<string, unknown>): string | null {
+  const childContext = toolInput?.__childRunContext
+  const rec = childContext && typeof childContext === 'object' && !Array.isArray(childContext)
+    ? childContext as Record<string, unknown>
+    : null
+  return asNonEmptyString(toolInput?.childRunId)
+    || asNonEmptyString(toolInput?.child_run_id)
+    || asNonEmptyString(rec?.childRunId)
+    || asNonEmptyString(rec?.child_run_id)
+}
+
 function isInterestingArtifactName(name: string): boolean {
   if (name === RUN_STATE_FILENAME) return true
   if (name === 'scene_scores.json') return true
@@ -249,9 +260,11 @@ export function buildLongSkillRunningProjection(params: {
   const updatedAt = new Date(params.now).toISOString()
   const probeDirs = collectProbeDirs(params.toolInput)
   const expectedTaskId = collectExpectedTaskId(params.toolInput)
+  const expectedChildRunId = collectExpectedChildRunId(params.toolInput)
   const selections = probeDirs.map((dir) => selectRunStateCandidate({
     rootDir: dir,
     expectedTaskId,
+    expectedChildRunId,
     fileName: RUN_STATE_FILENAME,
     searchDepth: SEARCH_DEPTH_LIMIT,
   }))
@@ -264,12 +277,25 @@ export function buildLongSkillRunningProjection(params: {
   const totalScenes = artifactProgress.totalScenes ?? (runState?.totalScenes ? Number(runState.totalScenes) : null)
   const completedScenes = artifactProgress.completedScenes ?? (runState?.completedScenes ? Number(runState.completedScenes) : null)
   const coverageRatio = artifactProgress.coverageRatio ?? (runState?.coverageRatio ? Number(runState.coverageRatio) : null)
+  const stageText = runState?.currentStage || runState?.currentStep || null
+  const progress = {
+    stage: stageText,
+    completed: completedScenes,
+    total: totalScenes,
+    coverage: coverageRatio,
+    overallCoverage: null,
+    fingerprint: artifactProgress.activity?.fingerprint ?? runState?.updatedAt ?? null,
+    updatedAt: artifactProgress.activity?.updatedAt ?? runState?.updatedAt ?? updatedAt,
+    lastError: runState?.lastError ?? null,
+    detail: artifactProgress.activity?.summary ?? null,
+    activityUpdatedAt: artifactProgress.activity?.updatedAt ?? null,
+    handoff: artifactProgress.handoff,
+  }
   const progressText = totalScenes !== null && completedScenes !== null
     ? `${completedScenes}/${totalScenes}`
     : coverageRatio !== null
       ? `${Math.round(coverageRatio * 100)}%`
       : null
-  const stageText = runState?.currentStage || runState?.currentStep || null
   const artifacts = collectArtifacts({
     probeDirs: runStatePath
       ? [dirname(runStatePath), ...probeDirs]
@@ -310,6 +336,9 @@ export function buildLongSkillRunningProjection(params: {
     resumableActions: artifacts.length > 0 ? ['open_artifact'] : ['none'],
     blockedReason: null,
     taskContinuation: null,
+  }
+  if (artifactProgress.hasEvidence || runState) {
+    projection.progress = progress
   }
   if (artifacts.length > 0) {
     projection.recentArtifacts = artifacts

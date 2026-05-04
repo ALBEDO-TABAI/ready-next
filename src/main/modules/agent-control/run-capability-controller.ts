@@ -115,7 +115,7 @@ function buildCapabilityLogLine(params: {
     `preferFormatOnly=${params.toolPolicy.preferFormatOnly}`,
     `documentWidgetTaskKind=${params.toolPolicy.documentWidgetTaskKind || 'none'}`,
     `allowBrowserTools=${params.toolPolicy.allowBrowserTools}`,
-    `preferredSkillTools=${params.toolPolicy.preferredSkillToolNames?.join('|') || 'all'}`,
+    `preferredSkillTools=${params.toolPolicy.preferredSkillToolNames?.join('|') || 'none'}`,
     `visibleCapabilityGroups=${params.visibilityPlan.visibleCapabilityGroupIds?.join('|') || 'none'}`,
     `suppressedCapabilityGroups=${params.visibilityPlan.suppressedCapabilityGroupIds?.join('|') || 'none'}`,
     `hasVideoInputs=${params.hasVideoInputs}`,
@@ -216,6 +216,7 @@ function resolveRunCapabilities(
     runtimeAvailability: baseParams.runtimeAvailability,
     intentGroupModes: {
       document: toolPolicy.allowDocumentTools,
+      skills: Boolean(toolPolicy.preferredSkillToolNames?.length),
     },
     enabledChannelTypes: baseParams.hostContext.enabledChannelTypes,
     connectedChannelTypes: baseParams.hostContext.connectedChannelTypes,

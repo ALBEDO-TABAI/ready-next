@@ -24,6 +24,10 @@ const CHILD_FRAME_STEERING_PRIMITIVE_TOOL_NAMES = [
   'skill_ask_user',
 ] as const
 
+const SKILL_START_PRIMITIVE_TOOL_NAMES = [
+  'skill_ask_user',
+] as const
+
 // Phase 6 — VEA's `video_expert_pipeline` was the legacy parent-force
 // fallback action for `mode='skill_resume'` frames missing an explicit
 // action. The child-loop runner now owns VEA execution, so the parent
@@ -357,6 +361,11 @@ function shouldPreferTypedAction(frame: TurnFrame): boolean {
     || frame.liveness === 'unknown'
 }
 
+function preferredPrimitiveToolNamesForFrame(frame: TurnFrame): ReadonlyArray<string> {
+  if (frame.mode === 'skill_start') return SKILL_START_PRIMITIVE_TOOL_NAMES
+  return FRAME_STEERING_PRIMITIVE_TOOL_NAMES
+}
+
 const FORCE_TOOL_LIVENESS_MODES: ReadonlyArray<TurnFrameMode> = [
   'skill_resume',
   'skill_repair',
@@ -474,7 +483,7 @@ export function buildTurnFrameSteering(
 
   if (!typedToolName) {
     const preferredToolNames = frame.skill
-      ? [...FRAME_STEERING_PRIMITIVE_TOOL_NAMES]
+      ? [...preferredPrimitiveToolNamesForFrame(frame)]
       : []
     return {
       ...frame.steering,
@@ -488,7 +497,7 @@ export function buildTurnFrameSteering(
 
   const preferredToolNames = Array.from(new Set([
     typedToolName,
-    ...FRAME_STEERING_PRIMITIVE_TOOL_NAMES,
+    ...preferredPrimitiveToolNamesForFrame(frame),
   ]))
   const handleText = [
     frame.skill?.outputDir ? `outputDir=${frame.skill.outputDir}` : '',

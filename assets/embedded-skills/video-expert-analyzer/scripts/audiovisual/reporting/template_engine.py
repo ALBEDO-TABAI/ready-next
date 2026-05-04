@@ -109,7 +109,7 @@ _FIGURE_RE = re.compile(r"<!--\s*FIGURE:([a-zA-Z0-9_\-]+)\s*-->")
 _UNRESOLVED_PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
 _REQUIRED_SECTION_RE = re.compile(r"^##\s+.+$", re.MULTILINE)
 _SCENE_EVIDENCE_RE = re.compile(
-    r"Scene\s+\d{3}|(?:\d{2}:)?\d{2}:\d{2}(?:[,.:]\d{2,3})?(?:\s*[–-]\s*(?:\d{2}:)?\d{2}:\d{2}(?:[,.:]\d{2,3})?)?"
+    r"(?:Scene|场景)\s*\d{3}|(?:\d{2}:)?\d{2}:\d{2}(?:[,.:]\d{2,3})?(?:\s*[–-]\s*(?:\d{2}:)?\d{2}:\d{2}(?:[,.:]\d{2,3})?)?"
 )
 _FIGURE_MARKER_RATIONALES = {
     "opening": "对应开场入口的关键镜头，用来钉住后文分析的观看起点。",
@@ -1483,7 +1483,7 @@ def _extract_required_sections(tasks_text: str) -> List[str]:
     return required
 
 
-_SCENE_NUMBER_RE = re.compile(r"Scene\s+(\d{2,4})")
+_SCENE_NUMBER_RE = re.compile(r"(?:Scene|场景)\s*(\d{2,4})")
 
 
 def _split_body_sections(text: str) -> Dict[str, str]:

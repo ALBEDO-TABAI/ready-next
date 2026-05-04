@@ -252,9 +252,27 @@ export interface ScopeRunSkillProgress {
   completed: number | null
   total: number | null
   coverage: number | null
+  overallCoverage?: number | null
   fingerprint: string | null
   updatedAt: string | null
   lastError: string | null
+  detail?: string | null
+  activityUpdatedAt?: string | null
+  handoff?: ScopeRunSkillHandoff | null
+}
+
+export interface ScopeRunSkillHandoff {
+  status: 'pending' | 'in_progress' | 'pending_retry' | 'blocked' | 'failed' | 'completed'
+  kind: 'audiovisual_report' | 'generic'
+  taskName: string
+  userMessage: string
+  actionLabel: string
+  attemptCount: number
+  lastErrorKind: string | null
+  lastErrorMessage: string | null
+  taskPath: string | null
+  outputPath: string | null
+  updatedAt: string | null
 }
 
 export interface ScopeRunMemoryCaptureItem {

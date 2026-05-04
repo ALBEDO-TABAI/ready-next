@@ -223,6 +223,9 @@ export function buildExecutionToolState(params: {
     params.capabilityProfile === 'remote_channel' ||
     hasFeishuIntent
   )
+  const allowSkillTools = baseVisibilityPlan.hasTools
+    && Array.isArray(params.preferredSkillToolNames)
+    && params.preferredSkillToolNames.length > 0
   const capabilityResolution = resolveCapabilityResolution({
     config: params.config || getDefaultConfig(),
     profile: params.capabilityProfile || 'local_chat',
@@ -237,6 +240,7 @@ export function buildExecutionToolState(params: {
       rss: allowRSSTools,
       calendar: allowCalendarTools,
       channel_feishu: allowFeishuTools,
+      skills: allowSkillTools,
     },
   })
   const allowBrowserTools = capabilityResolution.visibleCapabilityGroupIds.includes('browser_interaction')
