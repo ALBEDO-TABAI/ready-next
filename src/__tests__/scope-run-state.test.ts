@@ -902,4 +902,185 @@ describe('scope run state helpers', () => {
       ]
     )
   })
+
+  /**
+   * Stage 3 W5 — probes for stale carry-forward after terminal phase
+   * (same-run tail) and across new-run boundary. The reducer previously
+   * preserved progress / waitingFor / resumableActions / steps via
+   * `previous?.X || ...` chains, letting a finished or replaced run keep
+   * "looking like it's still running" in the task card.
+   */
+
+  it('clears stale progress when a same-run event arrives after terminal done', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        runId: 'run-tail',
+        phase: 'done',
+        timestamp: '2026-05-05T00:00:01.000Z'
+      } as any,
+      {
+        scopeId: 'scope-tail',
+        agent: 'assistant',
+        requestId: 'run-tail',
+        phase: 'done',
+        terminalReason: 'completed',
+        progress: { stage: 'finalize', detail: '剩余 3 项' },
+        toolTrace: [],
+        startedAt: '2026-05-05T00:00:00.000Z',
+        updatedAt: '2026-05-05T00:00:00.500Z',
+        responseBuffer: '',
+        stepMetrics: { toolCalls: 0, toolResults: 0, lastToolAt: null }
+      }
+    )
+    assert.strictEqual(patch.progress, null)
+  })
+
+  it('clears stale waitingFor when a same-run event arrives after terminal cancelled', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        runId: 'run-tail',
+        phase: 'cancelled',
+        timestamp: '2026-05-05T00:00:01.000Z'
+      } as any,
+      {
+        scopeId: 'scope-tail',
+        agent: 'assistant',
+        requestId: 'run-tail',
+        phase: 'cancelled',
+        terminalReason: 'cancelled_user',
+        waitingFor: 'user_input',
+        toolTrace: [],
+        startedAt: '2026-05-05T00:00:00.000Z',
+        updatedAt: '2026-05-05T00:00:00.500Z',
+        responseBuffer: '',
+        stepMetrics: { toolCalls: 0, toolResults: 0, lastToolAt: null }
+      }
+    )
+    assert.strictEqual(patch.waitingFor, 'none')
+  })
+
+  it('clears stale progress when a new run starts in the same scope', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        runId: 'run-new',
+        phase: 'planning',
+        timestamp: '2026-05-05T00:01:00.000Z'
+      } as any,
+      {
+        scopeId: 'scope-tail',
+        agent: 'assistant',
+        requestId: 'run-old',
+        phase: 'tool_running',
+        progress: { stage: 'analyzing', detail: '12/30' },
+        toolTrace: [],
+        startedAt: '2026-05-05T00:00:00.000Z',
+        updatedAt: '2026-05-05T00:00:00.500Z',
+        responseBuffer: '',
+        stepMetrics: { toolCalls: 0, toolResults: 0, lastToolAt: null }
+      }
+    )
+    assert.strictEqual(patch.progress, null)
+  })
+
+  it('does not inherit stale resumableActions on new-run', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        runId: 'run-new',
+        phase: 'planning',
+        timestamp: '2026-05-05T00:01:00.000Z'
+      } as any,
+      {
+        scopeId: 'scope-tail',
+        agent: 'assistant',
+        requestId: 'run-old',
+        phase: 'checkpoint',
+        resumableActions: ['continue', 'cancel'],
+        toolTrace: [],
+        startedAt: '2026-05-05T00:00:00.000Z',
+        updatedAt: '2026-05-05T00:00:00.500Z',
+        responseBuffer: '',
+        stepMetrics: { toolCalls: 0, toolResults: 0, lastToolAt: null }
+      }
+    )
+    assert.deepStrictEqual(patch.resumableActions, [])
+  })
+
+  it('does not inherit stale currentStepId on new-run', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        runId: 'run-new',
+        phase: 'planning',
+        timestamp: '2026-05-05T00:01:00.000Z'
+      } as any,
+      {
+        scopeId: 'scope-tail',
+        agent: 'assistant',
+        requestId: 'run-old',
+        phase: 'tool_running',
+        currentStepId: 's1',
+        toolTrace: [],
+        startedAt: '2026-05-05T00:00:00.000Z',
+        updatedAt: '2026-05-05T00:00:00.500Z',
+        responseBuffer: '',
+        stepMetrics: { toolCalls: 0, toolResults: 0, lastToolAt: null }
+      }
+    )
+    assert.strictEqual(patch.currentStepId, null)
+  })
+
+  it('preserves progress when same-run terminal tail event provides own progress', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        runId: 'run-tail',
+        phase: 'done',
+        timestamp: '2026-05-05T00:00:01.000Z',
+        progress: { stage: 'finalize', completed: 30, total: 30 }
+      } as any,
+      {
+        scopeId: 'scope-tail',
+        agent: 'assistant',
+        requestId: 'run-tail',
+        phase: 'done',
+        terminalReason: 'completed',
+        progress: { stage: 'old', completed: 12, total: 30 },
+        toolTrace: [],
+        startedAt: '2026-05-05T00:00:00.000Z',
+        updatedAt: '2026-05-05T00:00:00.500Z',
+        responseBuffer: '',
+        stepMetrics: { toolCalls: 0, toolResults: 0, lastToolAt: null }
+      }
+    )
+    // Event-provided structured progress wins; clearing only fires when event omits it.
+    assert.strictEqual(patch.progress?.stage, 'finalize')
+    assert.strictEqual(patch.progress?.completed, 30)
+  })
+
+  it('preserves taskContinuation across same-run terminal tail', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        runId: 'run-tail',
+        phase: 'done',
+        timestamp: '2026-05-05T00:00:01.000Z'
+      } as any,
+      {
+        scopeId: 'scope-tail',
+        agent: 'assistant',
+        requestId: 'run-tail',
+        phase: 'done',
+        terminalReason: 'completed',
+        taskContinuation: {
+          detachedTaskId: 'dst-skill',
+          taskRunId: 'tr-1',
+          jobId: null
+        } as any,
+        toolTrace: [],
+        startedAt: '2026-05-05T00:00:00.000Z',
+        updatedAt: '2026-05-05T00:00:00.500Z',
+        responseBuffer: '',
+        stepMetrics: { toolCalls: 0, toolResults: 0, lastToolAt: null }
+      }
+    )
+    // taskContinuation is excluded from the W5 clear set; it persists across terminals.
+    assert.strictEqual(patch.taskContinuation?.detachedTaskId, 'dst-skill')
+  })
 })

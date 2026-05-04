@@ -784,6 +784,21 @@ export function deriveScopeRunStatePatch(
     ? event.runId.trim()
     : null
   const isNewRun = Boolean(previous?.requestId && eventRunId && previous.requestId !== eventRunId)
+  // Stage 3 W5 — clear stale progress / waitingFor / resumableActions /
+  // currentStepId on either a new-run boundary OR a same-run terminal tail
+  // (a follow-up event arriving after previous.phase ∈ {done, error,
+  // cancelled} on the same runId). Background child resume, structured
+  // event-level overrides, taskContinuation, memoryCapture, and
+  // executionDiagnostics are NOT affected — those legitimately survive.
+  const isPreviousTerminal =
+    previous?.phase === 'done'
+    || previous?.phase === 'error'
+    || previous?.phase === 'cancelled'
+  const isSameRunTail =
+    !isNewRun
+    && Boolean(previous?.requestId && eventRunId && previous?.requestId === eventRunId)
+  const sameRunTerminalTail = isPreviousTerminal && isSameRunTail
+  const shouldClearStaleProgress = isNewRun || sameRunTerminalTail
   const patch: Partial<ScopeRunState> = {
     phase: event.phase,
     terminalReason: terminalReason || (isNewRun ? null : previous?.terminalReason || null),
@@ -834,7 +849,7 @@ export function deriveScopeRunStatePatch(
     taskSummary:
       structuredTaskSummary ?? null,
     steps: mergeTaskSteps(
-      previous?.steps,
+      shouldClearStaleProgress ? undefined : previous?.steps,
       structuredSteps.length > 0
         ? structuredSteps
         : undefined
@@ -843,13 +858,18 @@ export function deriveScopeRunStatePatch(
       (typeof event.currentStepId === 'string'
         ? event.currentStepId
         : null) ||
-      previous?.currentStepId ||
-      null,
-    waitingFor: structuredWaitingFor || previous?.waitingFor || 'none',
+      (shouldClearStaleProgress ? null : previous?.currentStepId || null),
+    waitingFor: structuredWaitingFor
+      ? structuredWaitingFor
+      : shouldClearStaleProgress
+        ? 'none'
+        : previous?.waitingFor || 'none',
     resumableActions:
       structuredResumableActions.length > 0
         ? structuredResumableActions
-        : previous?.resumableActions ||
+        : shouldClearStaleProgress
+          ? []
+          : previous?.resumableActions ||
           [],
     recentArtifacts: buildRecentArtifacts(
       mergeArtifacts(previous?.recentArtifacts, structuredArtifacts)
@@ -858,7 +878,11 @@ export function deriveScopeRunStatePatch(
       structuredContinuation ||
       previous?.taskContinuation ||
       null,
-    progress: structuredProgress || previous?.progress || null,
+    progress: structuredProgress
+      ? structuredProgress
+      : shouldClearStaleProgress
+        ? null
+        : previous?.progress || null,
     memoryCapture: structuredMemoryCapture || previous?.memoryCapture || null,
     executionDiagnostics: structuredExecutionDiagnostics || previous?.executionDiagnostics || null
   }
