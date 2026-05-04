@@ -29,6 +29,20 @@ export const PROJECTION_OBSERVABILITY_METRICS = {
    * a single child-run keeps producing a malformed file.
    */
   taskProjectionJsonReadFailed: 'task_projection_json_read_failed',
+  /**
+   * Stage 3 W3 — `deriveHandlesWithOrigins` had to fall back to either
+   * `artifact_path` regex inference (parsing handles out of an artifact's
+   * filename) or `run_state_enrichment` (reading run_state.json and
+   * promoting its fields to handles). Healthy origins (continuationRef,
+   * skill_task_run, child_payload, artifact_meta) are NOT emitted.
+   *
+   * Throttled by `taskId × field × origin` at 5min — reconciler runs on
+   * every projection batch, so a single chronically late-fallback record
+   * would otherwise dominate the dashboard. Out-of-the-box behavior of
+   * the function itself is byte-identical to the legacy chain; this is
+   * pure observability.
+   */
+  projectionHandleLegacyOriginUsed: 'projection_handle_legacy_origin_used',
 } as const
 
 export type ProjectionObservabilityMetricName =

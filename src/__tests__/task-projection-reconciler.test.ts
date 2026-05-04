@@ -5,7 +5,9 @@ import { join } from 'node:path'
 import { afterEach, test } from 'node:test'
 
 import {
+  __resetProjectionHandleLegacyOriginThrottleForTests,
   __resetTaskProjectionJsonReadThrottleForTests,
+  deriveHandlesWithOrigins,
   reconcileTaskProjections,
 } from '../main/modules/agent-control/task-projection-reconciler'
 import type { TaskProjectionRecord, TaskProjectionStore } from '../main/modules/agent-control/run-contracts'
@@ -463,6 +465,114 @@ test('reconcileTaskProjections does not emit metric when run_state.json is missi
 
     const readFailed = events.filter((e) => e.metric === 'task_projection_json_read_failed')
     assert.equal(readFailed.length, 0, 'missing run_state.json must not emit task_projection_json_read_failed')
+  } finally {
+    restore()
+  }
+})
+
+/**
+ * Stage 3 W3 — handle origin tracking. The 5 byte-identical regression
+ * tests above guard behavior; the tests below assert that origins are
+ * correctly stamped and that the legacy-origin metric only fires for
+ * late fallbacks.
+ */
+
+test('deriveHandlesWithOrigins stamps continuation_ref when continuationRef provides outputDir', () => {
+  const { handles, origins } = deriveHandlesWithOrigins(
+    baseProjection({
+      taskId: 'skill:origins:continuation',
+      continuationRef: {
+        skillId: 'video-expert-analyzer',
+        action: 'video_expert_pipeline',
+        outputDir: '/tmp/some/output',
+        runStatePath: '/tmp/some/output/run_state.json',
+      },
+    }),
+    null,
+  )
+  assert.equal(handles.outputDir, '/tmp/some/output')
+  assert.equal(origins.outputDir, 'continuation_ref')
+  assert.equal(origins.runStatePath, 'continuation_ref')
+  assert.equal(origins.skillId, 'continuation_ref')
+  assert.equal(origins.action, 'continuation_ref')
+})
+
+test('deriveHandlesWithOrigins stamps artifact_path when only artifact path provides runStatePath', () => {
+  const outputDir = createRoot('w3-artifact-path')
+  const runStatePath = join(outputDir, 'run_state.json')
+  writeFileSync(runStatePath, '{"status":"running"}', 'utf8')
+  const { handles, origins } = deriveHandlesWithOrigins(
+    baseProjection({
+      taskId: 'skill:origins:artifact-path',
+      continuationRef: null,
+      recentArtifacts: [{
+        id: 'run-state',
+        module: 'skill',
+        kind: 'artifact',
+        label: 'run_state.json',
+        path: runStatePath,
+        createdAt: OLD,
+        meta: {},
+      }],
+    }),
+    null,
+  )
+  assert.equal(handles.runStatePath, runStatePath)
+  assert.equal(origins.runStatePath, 'artifact_path')
+  assert.equal(origins.outputDir, 'artifact_path')
+})
+
+test('deriveHandlesWithOrigins finalizes missing origin for absent fields', () => {
+  const { handles, origins } = deriveHandlesWithOrigins(
+    baseProjection({
+      taskId: 'skill:origins:missing',
+      continuationRef: null,
+      recentArtifacts: [],
+    }),
+    null,
+  )
+  assert.equal(handles.childRunId, null)
+  assert.equal(origins.childRunId, 'missing')
+  assert.equal(origins.skillId, 'missing')
+  assert.equal(origins.taskRunId, 'missing')
+  assert.equal(origins.outputDir, 'missing')
+})
+
+test('reconcileTaskProjections emits legacy origin metric when artifact_path origin fires', async () => {
+  const outputDir = createRoot('w3-legacy-origin-emit')
+  const runStatePath = join(outputDir, 'run_state.json')
+  writeFileSync(runStatePath, '{"status":"running"}', 'utf8')
+  __resetProjectionHandleLegacyOriginThrottleForTests()
+  __resetTaskProjectionJsonReadThrottleForTests()
+  const { events, restore } = captureMetrics()
+  try {
+    const { store, records } = createStore([
+      baseProjection({
+        taskId: 'skill:origins:legacy-emit',
+        status: 'blocked',
+        continuationRef: null,
+        recentArtifacts: [{
+          id: 'run-state',
+          module: 'skill',
+          kind: 'artifact',
+          label: 'run_state.json',
+          path: runStatePath,
+          createdAt: OLD,
+          meta: {},
+        }],
+      }),
+    ])
+
+    await reconcileTaskProjections({ store, records: Array.from(records.values()), now: NOW })
+
+    const legacy = events.filter((e) => e.metric === 'projection_handle_legacy_origin_used')
+    assert.ok(legacy.length >= 1, 'late artifact_path origin must emit legacy metric')
+    const fields = legacy.map((e) => e.field)
+    assert.ok(fields.includes('runStatePath') || fields.includes('outputDir'))
+    for (const event of legacy) {
+      assert.equal(event.taskId, 'skill:origins:legacy-emit')
+      assert.equal(event.origin, 'artifact_path')
+    }
   } finally {
     restore()
   }

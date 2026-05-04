@@ -102,6 +102,44 @@ export function __resetTaskProjectionJsonReadThrottleForTests(): void {
   taskProjectionJsonReadEmitMs.clear()
 }
 
+/**
+ * Stage 3 W3 — emit `projection_handle_legacy_origin_used` only for late
+ * fallback origins (`artifact_path`, `run_state_enrichment`). Healthy
+ * origins are silent. Throttled by `taskId × field × origin` at 5min.
+ */
+const PROJECTION_HANDLE_LEGACY_THROTTLE_MS = 5 * 60 * 1000
+const projectionHandleLegacyEmitMs = new Map<string, number>()
+
+const PROJECTION_HANDLE_LEGACY_ORIGINS = new Set<ProjectionHandleOrigin>([
+  'artifact_path',
+  'run_state_enrichment',
+])
+
+function emitProjectionHandleLegacyOriginMetrics(
+  taskId: string,
+  origins: HandleOriginMap,
+): void {
+  const now = Date.now()
+  for (const field of PROJECTION_HANDLE_FIELDS) {
+    const origin = origins[field]
+    if (!PROJECTION_HANDLE_LEGACY_ORIGINS.has(origin)) continue
+    const key = `${taskId}|${field}|${origin}`
+    const last = projectionHandleLegacyEmitMs.get(key) ?? 0
+    if (now - last < PROJECTION_HANDLE_LEGACY_THROTTLE_MS) continue
+    projectionHandleLegacyEmitMs.set(key, now)
+    logAgentMetric(PROJECTION_OBSERVABILITY_METRICS.projectionHandleLegacyOriginUsed, {
+      taskId,
+      field,
+      origin,
+    })
+  }
+}
+
+/** Test-only: clears the 5min legacy origin throttle. */
+export function __resetProjectionHandleLegacyOriginThrottleForTests(): void {
+  projectionHandleLegacyEmitMs.clear()
+}
+
 export function readProjectionJsonClassified(path: string | null): ProjectionJsonRead {
   if (!path) return { ok: false, reason: 'missing' }
   let raw: string
@@ -246,34 +284,113 @@ function enrichHandlesFromRunState(handles: ProjectionHandles): ProjectionHandle
   }
 }
 
-function deriveHandles(record: TaskProjectionRecord, taskRun?: SkillTaskRunRecord | null): ProjectionHandles {
+/**
+ * Stage 3 W3 — origin tracking for the 8-field × 6-source handle resolution.
+ *
+ * `deriveHandles` retains its existing public signature; `deriveHandlesWithOrigins`
+ * exposes a per-field origin map alongside the same handles, used by the
+ * reconciler to emit `projection_handle_legacy_origin_used` when a late
+ * fallback fired. The `||` chains below are byte-identical to the previous
+ * implementation: each successful step is mirrored with a `Partial<HandleOriginMap>`
+ * stamp, and `finalizeOriginMap` fills any unset field with `'missing'` —
+ * critical because pre-filled `'missing'` would defeat `??=` short-circuit
+ * semantics elsewhere.
+ */
+export type ProjectionHandleOrigin =
+  | 'continuation_ref'
+  | 'skill_task_run'
+  | 'child_payload'
+  | 'artifact_meta'
+  | 'artifact_path'
+  | 'run_state_enrichment'
+  | 'event_log'
+  | 'missing'
+
+export type HandleOriginMap = Record<keyof ProjectionHandles, ProjectionHandleOrigin>
+
+const PROJECTION_HANDLE_FIELDS: Array<keyof ProjectionHandles> = [
+  'childRunId',
+  'skillId',
+  'action',
+  'taskRunId',
+  'outputDir',
+  'runStatePath',
+  'deliveryReportPath',
+  'eventLogPath',
+]
+
+function finalizeOriginMap(partial: Partial<HandleOriginMap>): HandleOriginMap {
+  const result = {} as HandleOriginMap
+  for (const field of PROJECTION_HANDLE_FIELDS) {
+    result[field] = partial[field] ?? 'missing'
+  }
+  return result
+}
+
+export function deriveHandlesWithOrigins(
+  record: TaskProjectionRecord,
+  taskRun?: SkillTaskRunRecord | null,
+): { handles: ProjectionHandles; origins: HandleOriginMap } {
   const continuation = asRecord(record.continuationRef)
   const payload = childRunPayload(taskRun)
+  const origins: Partial<HandleOriginMap> = {}
+
   let childRunId = stringValue(continuation?.childRunId)
     || childRunIdForRecord(record)
     || stringValue(payload?.childRunId)
     || taskRun?.id
     || null
+  if (stringValue(continuation?.childRunId)) origins.childRunId = 'continuation_ref'
+  else if (childRunIdForRecord(record)) origins.childRunId = 'continuation_ref'
+  else if (stringValue(payload?.childRunId)) origins.childRunId = 'child_payload'
+  else if (taskRun?.id) origins.childRunId = 'skill_task_run'
+
   let skillId = stringValue(continuation?.skillId)
     || stringValue(payload?.skillId)
     || taskRun?.skillId
     || null
+  if (stringValue(continuation?.skillId)) origins.skillId = 'continuation_ref'
+  else if (stringValue(payload?.skillId)) origins.skillId = 'child_payload'
+  else if (taskRun?.skillId) origins.skillId = 'skill_task_run'
+
   let action = stringValue(continuation?.action)
     || stringValue(payload?.requestedAction)
     || taskRun?.action
     || null
+  if (stringValue(continuation?.action)) origins.action = 'continuation_ref'
+  else if (stringValue(payload?.requestedAction)) origins.action = 'child_payload'
+  else if (taskRun?.action) origins.action = 'skill_task_run'
+
   let taskRunId = stringValue(continuation?.taskRunId)
     || taskRun?.id
     || null
+  if (stringValue(continuation?.taskRunId)) origins.taskRunId = 'continuation_ref'
+  else if (taskRun?.id) origins.taskRunId = 'skill_task_run'
+
   let outputDir = stringValue(continuation?.outputDir)
     || taskRun?.outputDir
     || stringValue(payload?.outputDir)
+  if (stringValue(continuation?.outputDir)) origins.outputDir = 'continuation_ref'
+  else if (taskRun?.outputDir) origins.outputDir = 'skill_task_run'
+  else if (stringValue(payload?.outputDir)) origins.outputDir = 'child_payload'
+
   let runStatePath = stringValue(continuation?.runStatePath)
     || taskRun?.runStatePath
     || stringValue(payload?.runStatePath)
+  if (stringValue(continuation?.runStatePath)) origins.runStatePath = 'continuation_ref'
+  else if (taskRun?.runStatePath) origins.runStatePath = 'skill_task_run'
+  else if (stringValue(payload?.runStatePath)) origins.runStatePath = 'child_payload'
+
   let deliveryReportPath = pathFromArtifactMeta(continuation, ['deliveryReportPath', 'delivery_report_path'])
     || taskRun?.deliveryReportPath
+  if (pathFromArtifactMeta(continuation, ['deliveryReportPath', 'delivery_report_path'])) {
+    origins.deliveryReportPath = 'continuation_ref'
+  } else if (taskRun?.deliveryReportPath) {
+    origins.deliveryReportPath = 'skill_task_run'
+  }
+
   let eventLogPath = stringValue(payload?.eventLogPath)
+  if (stringValue(payload?.eventLogPath)) origins.eventLogPath = 'child_payload'
 
   for (const artifact of record.recentArtifacts || []) {
     const artifactRecord = asRecord(artifact)
@@ -281,44 +398,99 @@ function deriveHandles(record: TaskProjectionRecord, taskRun?: SkillTaskRunRecor
     const artifactPath = stringValue(artifactRecord.path)
     const meta = asRecord(artifactRecord.meta)
 
-    childRunId ||= pathFromArtifactMeta(meta, ['childRunId', 'child_run_id'])
-    skillId ||= pathFromArtifactMeta(meta, ['skillId', 'skill_id'])
-    action ||= pathFromArtifactMeta(meta, ['action'])
-    outputDir ||= pathFromArtifactMeta(meta, ['outputDir', 'output_dir'])
-    runStatePath ||= pathFromArtifactMeta(meta, ['runStatePath', 'run_state_path'])
-    deliveryReportPath ||= pathFromArtifactMeta(meta, ['deliveryReportPath', 'delivery_report_path'])
-    eventLogPath ||= pathFromArtifactMeta(meta, ['eventLogPath', 'event_log_path'])
+    if (!childRunId) {
+      const v = pathFromArtifactMeta(meta, ['childRunId', 'child_run_id'])
+      if (v) { childRunId = v; origins.childRunId = 'artifact_meta' }
+    }
+    if (!skillId) {
+      const v = pathFromArtifactMeta(meta, ['skillId', 'skill_id'])
+      if (v) { skillId = v; origins.skillId = 'artifact_meta' }
+    }
+    if (!action) {
+      const v = pathFromArtifactMeta(meta, ['action'])
+      if (v) { action = v; origins.action = 'artifact_meta' }
+    }
+    if (!outputDir) {
+      const v = pathFromArtifactMeta(meta, ['outputDir', 'output_dir'])
+      if (v) { outputDir = v; origins.outputDir = 'artifact_meta' }
+    }
+    if (!runStatePath) {
+      const v = pathFromArtifactMeta(meta, ['runStatePath', 'run_state_path'])
+      if (v) { runStatePath = v; origins.runStatePath = 'artifact_meta' }
+    }
+    if (!deliveryReportPath) {
+      const v = pathFromArtifactMeta(meta, ['deliveryReportPath', 'delivery_report_path'])
+      if (v) { deliveryReportPath = v; origins.deliveryReportPath = 'artifact_meta' }
+    }
+    if (!eventLogPath) {
+      const v = pathFromArtifactMeta(meta, ['eventLogPath', 'event_log_path'])
+      if (v) { eventLogPath = v; origins.eventLogPath = 'artifact_meta' }
+    }
 
     if (artifactPath?.endsWith('/run_state.json') || artifactPath?.endsWith('\\run_state.json')) {
-      runStatePath ||= artifactPath
-      outputDir ||= dirname(artifactPath)
+      if (!runStatePath) { runStatePath = artifactPath; origins.runStatePath = 'artifact_path' }
+      if (!outputDir) { outputDir = dirname(artifactPath); origins.outputDir = 'artifact_path' }
     }
     if (artifactPath?.endsWith('/delivery_report.json') || artifactPath?.endsWith('\\delivery_report.json')) {
-      deliveryReportPath ||= artifactPath
-      outputDir ||= dirname(artifactPath)
+      if (!deliveryReportPath) { deliveryReportPath = artifactPath; origins.deliveryReportPath = 'artifact_path' }
+      if (!outputDir) { outputDir = dirname(artifactPath); origins.outputDir = 'artifact_path' }
     }
   }
 
-  if (!runStatePath && outputDir) runStatePath = join(outputDir, 'run_state.json')
-  if (!deliveryReportPath && outputDir) deliveryReportPath = join(outputDir, 'delivery_report.json')
-  if (!outputDir && runStatePath) outputDir = dirname(runStatePath)
-  if (!outputDir && deliveryReportPath) outputDir = dirname(deliveryReportPath)
+  if (!runStatePath && outputDir) {
+    runStatePath = join(outputDir, 'run_state.json')
+    origins.runStatePath = 'artifact_path'
+  }
+  if (!deliveryReportPath && outputDir) {
+    deliveryReportPath = join(outputDir, 'delivery_report.json')
+    origins.deliveryReportPath = 'artifact_path'
+  }
+  if (!outputDir && runStatePath) {
+    outputDir = dirname(runStatePath)
+    origins.outputDir = 'artifact_path'
+  }
+  if (!outputDir && deliveryReportPath) {
+    outputDir = dirname(deliveryReportPath)
+    origins.outputDir = 'artifact_path'
+  }
 
   const logHandles = readChildRunLogHandles(eventLogPath)
-  outputDir ||= logHandles.outputDir ?? null
-  runStatePath ||= logHandles.runStatePath ?? null
-  deliveryReportPath ||= logHandles.deliveryReportPath ?? null
+  if (!outputDir && logHandles.outputDir) {
+    outputDir = logHandles.outputDir
+    origins.outputDir = 'event_log'
+  }
+  if (!runStatePath && logHandles.runStatePath) {
+    runStatePath = logHandles.runStatePath
+    origins.runStatePath = 'event_log'
+  }
+  if (!deliveryReportPath && logHandles.deliveryReportPath) {
+    deliveryReportPath = logHandles.deliveryReportPath
+    origins.deliveryReportPath = 'event_log'
+  }
 
-  return enrichHandlesFromRunState({
+  const before: ProjectionHandles = {
     childRunId,
     skillId,
     action,
     taskRunId,
-    outputDir: normalizePath(outputDir),
-    runStatePath,
-    deliveryReportPath,
-    eventLogPath,
-  })
+    outputDir: normalizePath(outputDir ?? null),
+    runStatePath: runStatePath ?? null,
+    deliveryReportPath: deliveryReportPath ?? null,
+    eventLogPath: eventLogPath ?? null,
+  }
+  const enriched = enrichHandlesFromRunState(before)
+
+  // run_state enrichment can promote outputDir / runStatePath / deliveryReportPath;
+  // stamp the new origin only when enrichment actually filled a previously-empty field.
+  if (!before.outputDir && enriched.outputDir) origins.outputDir = 'run_state_enrichment'
+  if (!before.runStatePath && enriched.runStatePath) origins.runStatePath = 'run_state_enrichment'
+  if (!before.deliveryReportPath && enriched.deliveryReportPath) origins.deliveryReportPath = 'run_state_enrichment'
+
+  return { handles: enriched, origins: finalizeOriginMap(origins) }
+}
+
+function deriveHandles(record: TaskProjectionRecord, taskRun?: SkillTaskRunRecord | null): ProjectionHandles {
+  return deriveHandlesWithOrigins(record, taskRun).handles
 }
 
 function hasDurableHandle(handles: ProjectionHandles): boolean {
@@ -523,7 +695,8 @@ export function reconcileTaskProjections(params: ReconcileTaskProjectionsParams)
   for (const record of params.records) {
     if (!RECONCILABLE_STATUSES.has(record.status)) continue
     const taskRun = findTaskRunForProjection(record, params.taskRuns || [])
-    const handles = deriveHandles(record, taskRun)
+    const { handles, origins } = deriveHandlesWithOrigins(record, taskRun)
+    emitProjectionHandleLegacyOriginMetrics(record.taskId, origins)
 
     let target: Partial<TaskProjectionRecord> | null = null
     if (projectionIsDone(handles)) {
