@@ -19,6 +19,10 @@ export interface BrowserTaskAttachmentResource {
   createdAt?: string
 }
 
+export type AttachmentResourceList =
+  | { ok: true; resources: BrowserTaskAttachmentResource[] }
+  | { ok: false; reason: 'db_error' | 'fs_error'; message: string }
+
 export interface BrowserTaskLinkResource {
   url: string
   order: number

@@ -45,7 +45,7 @@ export class AttachmentLoadFailureThrottle {
    */
   maybeEmit(
     sessionId: string | undefined,
-    reason: 'db_error',
+    reason: 'db_error' | 'fs_error',
     extra: Record<string, unknown> = {},
   ): boolean {
     const key = `${sessionId || '<no-session>'}|${reason}`

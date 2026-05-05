@@ -84,6 +84,7 @@ import type {
 } from '../agent-control/run-contracts'
 import type { TurnTerminalReason } from '../agent-control/turn-frame'
 import type {
+  AttachmentResourceList,
   BrowserTaskAttachmentResource,
   BrowserTaskDecision,
   BrowserTaskPlan,
@@ -298,6 +299,7 @@ export class DirectChatEngine extends EventEmitter {
     super()
     const browserTaskPlanner = new BrowserTaskPlanner({
       getSessionAttachmentHints: (sessionId) => this.getSessionAttachmentHints(sessionId),
+      getSessionAttachmentResourceList: (sessionId) => this.getSessionAttachmentResourceList(sessionId),
       getSessionAttachmentResources: (sessionId) => this.getSessionAttachmentResources(sessionId),
       getIncomingAttachmentHints: (userText) => this.getIncomingAttachmentHints(userText),
       getActiveTab: () => {
@@ -599,44 +601,59 @@ export class DirectChatEngine extends EventEmitter {
 
   private getSessionAttachmentHints(sessionId?: string): { count: number; latestName?: string } {
     if (!sessionId) return { count: 0 }
-    try {
-      const visible = this.getSessionAttachmentResources(sessionId)
-      return {
-        count: visible.length,
-        latestName: visible[0]?.name || undefined,
-      }
-    } catch {
-      return { count: 0 }
+    const visible = this.getSessionAttachmentResourceList(sessionId)
+    if (!visible.ok) return { count: 0 }
+    return {
+      count: visible.resources.length,
+      latestName: visible.resources[0]?.name || undefined,
     }
   }
 
-  private getSessionAttachmentResources(sessionId?: string): BrowserTaskAttachmentResource[] {
-    if (!sessionId) return []
+  private getSessionAttachmentResourceList(sessionId?: string): AttachmentResourceList {
+    if (!sessionId) return { ok: true, resources: [] }
     try {
-      return chatRepository
-        .listConversationAttachments(sessionId)
-        .filter((item) => item.path && existsSync(item.path))
-        .map((item) => ({
+      const resources: BrowserTaskAttachmentResource[] = []
+      for (const item of chatRepository.listConversationAttachments(sessionId)) {
+        if (!item.path) continue
+        try {
+          if (!existsSync(item.path)) continue
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          this.attachmentLoadFailureThrottle.maybeEmit(sessionId, 'fs_error', {
+            message: message.slice(0, 200),
+          })
+          return { ok: false, reason: 'fs_error', message: message.slice(0, 200) }
+        }
+        const resource = {
           attachmentId: String(item.attachment_id || '').trim(),
           name: String(item.name || '').trim(),
           type: String(item.type || 'other'),
           mimeType: item.mime_type || undefined,
           path: item.path,
           createdAt: item.created_at,
-        }))
-        .filter((item) => item.attachmentId && item.name && item.path)
+        }
+        if (resource.attachmentId && resource.name && resource.path) {
+          resources.push(resource)
+        }
+      }
+      return { ok: true, resources }
     } catch (error) {
       // Stage 2.2: previously this catch silently returned `[]`, making DB
       // load failures indistinguishable from "user has no attachments" for
-      // operators. Caller contract stays the same (`[]` on failure) so
-      // BrowserTaskPlanner is unaffected; the throttle ensures a polling
-      // renderer cannot flood the metric log on a persistent DB outage.
+      // operators. The legacy array API still returns `[]` on failure, while
+      // BrowserTaskPlanner now consumes this detailed result so upload turns
+      // can clarify instead of treating DB/FS failure as a true empty state.
       const message = error instanceof Error ? error.message : String(error)
       this.attachmentLoadFailureThrottle.maybeEmit(sessionId, 'db_error', {
         message: message.slice(0, 200),
       })
-      return []
+      return { ok: false, reason: 'db_error', message: message.slice(0, 200) }
     }
+  }
+
+  private getSessionAttachmentResources(sessionId?: string): BrowserTaskAttachmentResource[] {
+    const result = this.getSessionAttachmentResourceList(sessionId)
+    return result.ok ? result.resources : []
   }
 
   private getIncomingAttachmentHints(content: RunMessage): { count: number; latestName?: string } {

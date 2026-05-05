@@ -56,6 +56,17 @@ function createPlanner() {
   })
 }
 
+function plannerAttachmentResource(name = 'poster.png') {
+  return {
+    attachmentId: `att-${name}`,
+    name,
+    type: 'image',
+    mimeType: 'image/png',
+    path: `/tmp/${name}`,
+    createdAt: '2026-05-05T09:00:00.000Z',
+  }
+}
+
 describe('BrowserTaskPlanner', () => {
   it('chooses upload workflow when attachment-based generation intent is present', () => {
     const planner = createPlanner()
@@ -85,6 +96,96 @@ describe('BrowserTaskPlanner', () => {
     })
 
     assert.equal(decision.mode, 'clarify_first')
+  })
+
+  it('reads the detailed attachment resource list when building upload plans', () => {
+    const planner = new BrowserTaskPlanner({
+      getSessionAttachmentHints: () => ({ count: 0 }),
+      getSessionAttachmentResourceList: () => ({
+        ok: true,
+        resources: [plannerAttachmentResource('detailed-poster.png')],
+      }),
+      getIncomingAttachmentHints: () => ({ count: 0 }),
+      getActiveTab: () => undefined,
+      getTabContext: async () => null,
+    })
+
+    const decision = planner.decideTask({
+      userText: '把刚发的图上传到即梦，提示词是“做一张温暖的美食海报”',
+      sessionMessages: [],
+      sessionId: 'scope-detailed-attachments',
+    })
+
+    assert.equal(decision.mode, 'browser_upload_workflow')
+    assert.equal(decision.attachmentSelection?.latestName, 'detailed-poster.png')
+    assert.equal(decision.plan?.resources.attachments[0]?.attachmentId, 'att-detailed-poster.png')
+  })
+
+  it('does not treat db_error attachment resource failures as zero attachments', () => {
+    const planner = new BrowserTaskPlanner({
+      getSessionAttachmentHints: () => ({ count: 1, latestName: 'stale-hint.png' }),
+      getSessionAttachmentResourceList: () => ({
+        ok: false,
+        reason: 'db_error',
+        message: 'database unavailable',
+      }),
+      getIncomingAttachmentHints: () => ({ count: 0 }),
+      getActiveTab: () => undefined,
+      getTabContext: async () => null,
+    })
+
+    const decision = planner.decideTask({
+      userText: '把刚发的图上传到即梦',
+      sessionMessages: [],
+      sessionId: 'scope-db-error',
+    })
+
+    assert.equal(decision.mode, 'clarify_first')
+    assert.equal(decision.reason, 'attachment_resources_unavailable')
+    assert.equal(decision.plan?.taskKind, 'clarify')
+    assert.match(planner.buildClarifyMessage(decision), /附件资源暂时无法读取/)
+  })
+
+  it('does not treat fs_error attachment resource failures as zero attachments', () => {
+    const planner = new BrowserTaskPlanner({
+      getSessionAttachmentHints: () => ({ count: 1, latestName: 'stale-hint.png' }),
+      getSessionAttachmentResourceList: () => ({
+        ok: false,
+        reason: 'fs_error',
+        message: 'file unavailable',
+      }),
+      getIncomingAttachmentHints: () => ({ count: 0 }),
+      getActiveTab: () => undefined,
+      getTabContext: async () => null,
+    })
+
+    const decision = planner.decideTask({
+      userText: '用刚发的图继续生成图片',
+      sessionMessages: [],
+      sessionId: 'scope-fs-error',
+    })
+
+    assert.equal(decision.mode, 'clarify_first')
+    assert.equal(decision.reason, 'attachment_resources_unavailable')
+  })
+
+  it('preserves the legacy array attachment resource contract when detailed API is absent', () => {
+    const planner = new BrowserTaskPlanner({
+      getSessionAttachmentHints: () => ({ count: 1, latestName: 'legacy-poster.png' }),
+      getSessionAttachmentResources: () => [plannerAttachmentResource('legacy-poster.png')],
+      getIncomingAttachmentHints: () => ({ count: 0 }),
+      getActiveTab: () => undefined,
+      getTabContext: async () => null,
+    })
+
+    const decision = planner.decideTask({
+      userText: '把刚发的图上传到即梦，提示词是“做一张温暖的美食海报”',
+      sessionMessages: [],
+      sessionId: 'scope-legacy-attachments',
+    })
+
+    assert.equal(decision.mode, 'browser_upload_workflow')
+    assert.equal(decision.plan?.resources.attachments[0]?.name, 'legacy-poster.png')
   })
 
   it('reuses the current page when continuity says the current tab already matches the workflow target', async () => {

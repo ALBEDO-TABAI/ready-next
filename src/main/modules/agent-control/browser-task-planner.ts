@@ -1,5 +1,5 @@
 import { domainsLikelyMatch, getBrowserWorkflowState, getLatestSkillRun, getRecentBrowserActions } from './session-continuity'
-import type { BrowserTaskAttachmentResource, BrowserTaskDecision, BrowserTaskPlan, BrowserTaskPlanContinuity } from '../../../shared/browser-agent-task'
+import type { AttachmentResourceList, BrowserTaskAttachmentResource, BrowserTaskDecision, BrowserTaskPlan, BrowserTaskPlanContinuity } from '../../../shared/browser-agent-task'
 import { detectLiveInfoIntent } from './live-info-intent'
 
 interface PlannerTabLike {
@@ -48,12 +48,23 @@ const NAMED_BROWSER_SITES: NamedBrowserSite[] = [
 export class BrowserTaskPlanner {
   constructor(private readonly deps: {
     getSessionAttachmentHints: (sessionId?: string) => { count: number; latestName?: string }
+    getSessionAttachmentResourceList?: (sessionId?: string) => AttachmentResourceList
     getSessionAttachmentResources?: (sessionId?: string) => BrowserTaskAttachmentResource[]
     getIncomingAttachmentHints: (userText: string) => { count: number; latestName?: string }
     getActiveTab: () => PlannerTabLike | undefined
     getTabContext: (tabId?: string | null) => Promise<PlannerTabContextLike | null>
     extractPrimaryUserInstruction?: (raw: string) => string
   }) {}
+
+  private getSessionAttachmentResourceList(sessionId?: string): AttachmentResourceList | null {
+    if (this.deps.getSessionAttachmentResourceList) {
+      return this.deps.getSessionAttachmentResourceList(sessionId)
+    }
+    if (this.deps.getSessionAttachmentResources) {
+      return { ok: true, resources: this.deps.getSessionAttachmentResources(sessionId) }
+    }
+    return null
+  }
 
   private looksLikeBrowserPromptNoise(value: string): boolean {
     const text = String(value || '').replace(/\s+/g, ' ').trim()
@@ -204,10 +215,17 @@ export class BrowserTaskPlanner {
     return modeSignals.test(normalized) && !actionableSignals.test(normalized)
   }
 
-  rebuildPlan(decision: BrowserTaskDecision, context?: { sessionId?: string; userText?: string }): BrowserTaskPlan {
+  rebuildPlan(decision: BrowserTaskDecision, context?: {
+    sessionId?: string
+    userText?: string
+    attachmentResourceList?: AttachmentResourceList
+  }): BrowserTaskPlan {
     const liveInfoIntent = detectLiveInfoIntent(String(context?.userText || decision.promptIntent?.raw || ''))
     const links = this.extractLinks(String(context?.userText || decision.promptIntent?.raw || ''))
-    const persistedAttachments = (this.deps.getSessionAttachmentResources || (() => []))(context?.sessionId)
+    const attachmentResourceList = context?.attachmentResourceList ?? this.getSessionAttachmentResourceList(context?.sessionId)
+    const persistedAttachments = attachmentResourceList
+      ? attachmentResourceList.ok ? attachmentResourceList.resources : []
+      : []
     const attachmentResources = persistedAttachments.length > 0
       ? persistedAttachments
       : decision.attachmentSelection?.latestName
@@ -401,12 +419,7 @@ export class BrowserTaskPlanner {
     const text = String(params.userText || '').trim()
     if (!text) return { mode: 'free_tool_loop', reason: 'empty_user_text' }
 
-    const persistedAttachments = this.deps.getSessionAttachmentHints(params.sessionId)
     const incomingAttachments = this.deps.getIncomingAttachmentHints(text)
-    const attachments = {
-      count: Math.max(persistedAttachments.count, incomingAttachments.count),
-      latestName: persistedAttachments.latestName || incomingAttachments.latestName,
-    }
     const directPromptIntent = this.extractPromptIntent(text)
     const sessionPromptIntent = this.extractSessionPromptIntent(params.sessionMessages)
     const promptIntent = directPromptIntent?.refined
@@ -415,6 +428,19 @@ export class BrowserTaskPlanner {
     const links = this.extractLinks(text)
     const hasUploadIntent = /(上传|附件|刚发的图|这张图|图片附件|用这张图|用刚发的图)/i.test(text)
     const hasGenerationIntent = /(生成图片|生成新图|生图|图生图|文生图|做图|继续生成|开始生成)/i.test(text)
+    const sessionAttachmentResourceList = this.getSessionAttachmentResourceList(params.sessionId)
+    const persistedAttachments = sessionAttachmentResourceList
+      ? sessionAttachmentResourceList.ok
+        ? {
+          count: sessionAttachmentResourceList.resources.length,
+          latestName: sessionAttachmentResourceList.resources[0]?.name,
+        }
+        : { count: 0 }
+      : this.deps.getSessionAttachmentHints(params.sessionId)
+    const attachments = {
+      count: Math.max(persistedAttachments.count, incomingAttachments.count),
+      latestName: persistedAttachments.latestName || incomingAttachments.latestName,
+    }
     const hasExplicitBrowserAction = /(打开|访问|进入|网页|网站|页面|浏览器|即梦|jimeng)/i.test(text)
     const hasContinuationIntent = /^(继续|接着|下一步|继续在)/i.test(text)
     const requestedSite = this.resolveRequestedBrowserSite(text)
@@ -430,6 +456,21 @@ export class BrowserTaskPlanner {
     const activeTab = this.deps.getActiveTab()
     const activeContext = `${activeTab?.title || ''} ${activeTab?.url || ''}`.toLowerCase()
     const activeTabLooksCreative = /(jimeng|即梦|创作|生成|image|图像)/.test(activeContext)
+
+    if (sessionAttachmentResourceList && !sessionAttachmentResourceList.ok && hasUploadIntent) {
+      const decision: BrowserTaskDecision = {
+        mode: 'clarify_first',
+        reason: 'attachment_resources_unavailable',
+        attachmentSelection: attachments,
+        promptIntent,
+      }
+      decision.plan = this.rebuildPlan(decision, {
+        sessionId: params.sessionId,
+        userText: text,
+        attachmentResourceList: sessionAttachmentResourceList,
+      })
+      return decision
+    }
 
     if (attachments.count <= 0 && hasUploadIntent) {
       const decision: BrowserTaskDecision = {
@@ -458,7 +499,11 @@ export class BrowserTaskPlanner {
         attachmentSelection: attachments,
         promptIntent,
       }
-      decision.plan = this.rebuildPlan(decision, { sessionId: params.sessionId, userText: text })
+      decision.plan = this.rebuildPlan(decision, {
+        sessionId: params.sessionId,
+        userText: text,
+        attachmentResourceList: sessionAttachmentResourceList ?? undefined,
+      })
       return decision
     }
 
@@ -468,7 +513,11 @@ export class BrowserTaskPlanner {
       attachmentSelection: attachments.count > 0 ? attachments : undefined,
       promptIntent,
     }
-    decision.plan = this.rebuildPlan(decision, { sessionId: params.sessionId, userText: text })
+    decision.plan = this.rebuildPlan(decision, {
+      sessionId: params.sessionId,
+      userText: text,
+      attachmentResourceList: sessionAttachmentResourceList ?? undefined,
+    })
     return decision
   }
 
@@ -685,6 +734,9 @@ export class BrowserTaskPlanner {
   }
 
   buildClarifyMessage(decision: BrowserTaskDecision): string {
+    if (decision.reason === 'attachment_resources_unavailable') {
+      return '当前页面任务提到了上传附件，但当前会话附件资源暂时无法读取。请稍后重试，或重新发送要使用的附件。'
+    }
     return decision.attachmentSelection?.count
       ? '当前页面任务提到了上传附件，但我还无法确定要用哪一个附件。请补充附件名称，或直接说“用最新那张图”。'
       : '当前页面任务提到了上传附件，但当前会话里还没有可用附件。请先把图片或文件发到当前会话，再让我继续。'
