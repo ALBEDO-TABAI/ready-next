@@ -302,6 +302,7 @@ export function useBrowserViewBounds({
     sidebarVisible,
     sidePanelVariant,
     skillsSplitRatio,
+    stopDragBoundsSync,
   ])
 
   useEffect(() => {

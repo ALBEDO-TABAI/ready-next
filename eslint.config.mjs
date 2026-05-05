@@ -8,7 +8,7 @@ import readyPlugin from './eslint-rules/index.mjs'
 
 export default [
   {
-    ignores: ['out/**', 'dist/**', 'node_modules/**', '.claude/codex-audit/**', '.worktrees/**']
+    ignores: ['out/**', 'dist/**', 'node_modules/**', '.claude/codex-audit/**', '.claude/worktrees/**', '.worktrees/**']
   },
   js.configs.recommended,
   {

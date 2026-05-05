@@ -11,7 +11,7 @@ export async function executePetTool(toolName: string, args: Record<string, unkn
   const manager = getActivePetWindowManager()
   if (!manager) {
     return JSON.stringify({ success: false, error: 'Pet window manager is not available' })
-    }
+  }
 
   switch (toolName) {
     case 'pet_show_sticky_note': {

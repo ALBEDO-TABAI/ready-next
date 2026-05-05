@@ -104,6 +104,24 @@ interface ChildRunSummary {
   handoffCompletions?: HandoffCompletionSummary[]
 }
 
+interface ChildRunnerLaunchResult {
+  childRunId: string
+  status: string
+  closeEvent?: Record<string, unknown> | null
+  eventLogPath: string
+  outputDir?: unknown
+}
+
+interface ChildRunnerWaitResult {
+  kind: string
+  closeEvent?: Record<string, unknown>
+}
+
+interface ChildRunnerApi {
+  startSkillChildRun(input: Record<string, unknown>): Promise<ChildRunnerLaunchResult>
+  waitForSkillChildRunClose(childRunId: string, options: { timeoutMs: number }): Promise<ChildRunnerWaitResult>
+}
+
 interface HandoffTask {
   name: string
   taskPath: string
@@ -1149,9 +1167,9 @@ async function createRunner(opts: Options) {
     repository: new MemoryChildRunRepository() as never,
   })
   return {
-    startSkillChildRun: runner.startSkillChildRun as Function,
-    waitForSkillChildRunClose: runner.waitForSkillChildRunClose as Function,
-  }
+    startSkillChildRun: runner.startSkillChildRun,
+    waitForSkillChildRunClose: runner.waitForSkillChildRunClose,
+  } as ChildRunnerApi
 }
 
 async function runOneChildAction(args: {
