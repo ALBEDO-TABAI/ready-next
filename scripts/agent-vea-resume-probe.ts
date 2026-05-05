@@ -304,6 +304,17 @@ export async function runAgentVeaResumeProbe(options: ProbeOptions): Promise<Pro
   _resetLastReferenceSkillHintsForTests()
   installProbeSkillContext(engine)
   engine.getAIConfig = () => buildAIConfig()
+  // Commit cfb4369 added DirectChat.getAIConfigDetailed which bypasses the
+  // legacy getAIConfig() path inside sendMessage() (direct-chat.ts:856). The
+  // probe must override it too — otherwise the detailed call falls through
+  // to settingsRepository.getSetting → database.ts which uses CommonJS
+  // require('electron') and bypasses the ESM electron stub registered above,
+  // surfacing as `ai_config_db_error: app.getPath is unavailable`.
+  engine.getAIConfigDetailed = () => ({
+    ok: true,
+    config: buildAIConfig(),
+    reason: 'present',
+  })
   engine.requestSimpleText = async () => {
     throw new Error('probe expected tool-loop path, but DirectChat requested simple text')
   }
