@@ -130,3 +130,46 @@ test('tool-executor runs Zod validator for every tool domain via the unified reg
   // On success, parsed data replaces raw args so coercion takes effect.
   assert.match(source, /args = outcome\.data/)
 })
+
+// =============================================================================
+// Stage 4 W0 — Contract pinning for authorization layer (W3 protection)
+// =============================================================================
+// W3 will add `authorization_denied` errorKind for skill_* tools where
+// SkillToolAuthorization rejects them in admission. The new errorKind is
+// distinct from `tool_not_registered` (fabricated tool name; registry signal)
+// and `tool_restricted_this_turn` (preflight allowedToolNames signal).
+// These tests pin the existing two-channel structure so W3's third channel
+// is purely additive — no errorKind reuse / no contract collapse.
+
+test('Stage 4 W0: tool-executor returns errorKind:host_unavailable + reason:tool_not_registered for unregistered tool name (W3 will add authorization_denied as a SEPARATE errorKind)', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: per v6 plan §1 Context, tool-executor.ts:114-118 already explicitly documents "Check registration BEFORE admission so the model can distinguish 'fabricated tool name' from 'real tool but not allowed this turn'". W3 must NOT collapse these into one errorKind.
+  const source = readWorkspaceFile('src/main/modules/tools/tool-executor.ts')
+  // tool_not_registered = fabricated tool name (registry doesn't know about it).
+  // This errorKind must remain distinct from W3's incoming authorization_denied.
+  assert.match(
+    source,
+    /reason: 'tool_not_registered'/,
+    'tool_not_registered errorKind must remain for fabricated tool names — W3 must not collapse it into authorization_denied',
+  )
+  // The registration check ordering comment must remain (it documents the contract).
+  assert.match(
+    source,
+    /Check registration BEFORE admission/,
+    'Registration-before-admission ordering documentation must remain — W3 must preserve this invariant',
+  )
+})
+
+test('Stage 4 W0: tool-runtime preflight rejects unallowed tools as tool_restricted_this_turn — W3 will skip skill_* but keep this for non-skill', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: per v6 plan v5→v6 修订表 #2, ToolRuntime preflight (tool-runtime.ts:485-497) currently rejects via tool_restricted_this_turn for any tool not in allowedToolNames. W3 will let preflight skip skill_* (transferring rejection responsibility to admission's authorization_denied), but non-skill tools must continue going through this path.
+  const source = readWorkspaceFile('src/main/modules/agent-control/tool-runtime.ts')
+  assert.match(
+    source,
+    /reason: 'tool_restricted_this_turn'/,
+    'tool-runtime preflight must keep tool_restricted_this_turn errorKind for non-skill tools after W3',
+  )
+  assert.match(
+    source,
+    /allowedToolNames\?\.has\(toolName\)/,
+    'preflight allowedToolNames check must remain — W3 will only change its applicability scope (skip skill_* prefix)',
+  )
+})

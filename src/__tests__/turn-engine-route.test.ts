@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
 import { RunCoordinator } from '../main/modules/agent-control/run-coordinator'
 import { RunProjection } from '../main/modules/agent-control/run-projection'
@@ -4616,4 +4616,46 @@ test('resume disabled by flag does not call resumeSkillChildRun and emits metric
       process.env.READY_SKILL_CHILD_RESUME_ENABLED = previousFlag
     }
   }
+})
+
+// =============================================================================
+// Stage 4 W0 — Contract pinning (test-only, current-behavior baseline)
+// =============================================================================
+// These tests pin the CURRENT shape of turn-engine.ts so Stage 4 W2 cannot
+// silently drift while collapsing the 6 parallel skill rearm sections into
+// SkillTurnIdentity. Each test names exactly what later W must change.
+// Behavioral contracts (e.g. preferred_skill_tools metric emission for explicit
+// skill mention) are already pinned by existing route tests above.
+
+test('Stage 4 W0: turn-engine.ts has 5 inline "用户希望继续使用 skill" rearm injection sites — W2 will collapse to 0 via SkillTurnIdentity.contextText', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: Stage 4 W2 collapses N parallel rearm sections through identity layer; this pins the actual count so W2 cannot leave one behind. Verified: lines 1468/1484/1497/1587/1598 (5 inline). Plan v6 §9 mentioned "6 处" but actual head count is 5; this test reflects ground truth.
+  const source = readFileSync(resolve(process.cwd(), 'src/main/modules/agent-control/turn-engine.ts'), 'utf8')
+  const matches = source.match(/用户希望继续使用 skill/g) || []
+  assert.equal(matches.length, 5, `expected 5 "用户希望继续使用 skill" inline sites currently; W2 will reduce this to 0. Found ${matches.length}.`)
+})
+
+test('Stage 4 W0: turn-engine.ts gates clearLastReferenceSkill on !shouldBindSkillContextForTurn — W2 applySkillTurnIdentity must preserve this predicate (NOT simplify mode:none → clear)', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: per v6 plan v3→v4 修订表 #4, the actual hint clear predicate is !shouldBindSkillContextForTurn (turn-engine.ts:1628-1640), NOT identity.mode === 'none'. applySkillTurnIdentity must preserve this verbatim.
+  const source = readFileSync(resolve(process.cwd(), 'src/main/modules/agent-control/turn-engine.ts'), 'utf8')
+  assert.match(source, /const shouldBindSkillContextForTurn = Boolean\(/, 'shouldBindSkillContextForTurn predicate must remain — Stage 4 W2 must preserve verbatim, not simplify')
+  assert.match(
+    source,
+    /if \(!shouldBindSkillContextForTurn && request\.sessionId\) \{\s*clearLastReferenceSkill\(request\.sessionId\)/,
+    'clearLastReferenceSkill must remain gated on !shouldBindSkillContextForTurn (NOT on identity.mode === none)',
+  )
+})
+
+test('Stage 4 W0: turn-engine.ts has buildSkillResumeContextPrompt + force_tool checkpoint inline reminders — W2 will route through SystemReminderRegistry', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: per v6 plan §4 W2, these two specific reminders migrate to SystemReminderRegistry topics skill_resume_context_prompt + force_tool_checkpoint_blocked. This pins their inline form now so W2's migration is verifiable.
+  const source = readFileSync(resolve(process.cwd(), 'src/main/modules/agent-control/turn-engine.ts'), 'utf8')
+  assert.match(
+    source,
+    /系统补充：这是一次 skill 恢复请求/,
+    'buildSkillResumeContextPrompt currently builds reminder inline (turn-engine.ts:~873) — W2 will route through SystemReminderRegistry topic skill_resume_context_prompt',
+  )
+  assert.match(
+    source,
+    /系统补充：本轮 force_tool 已挡板/,
+    'force_tool checkpoint currently builds reminder inline (turn-engine.ts:~3192) — W2 will route through SystemReminderRegistry topic force_tool_checkpoint_blocked',
+  )
 })
