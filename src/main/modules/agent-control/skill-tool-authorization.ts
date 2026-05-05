@@ -101,6 +101,64 @@ export function buildExplicitNoSkillAuthorization(
 }
 
 /**
+ * Stage 4 W3b — derive authorization from a `SkillTurnIdentity` (the
+ * pure-read decision computed by `resolveSkillTurnIdentity`).
+ *
+ * Mapping:
+ *   - `identity.mode === 'skill'` → `mode:'selected'` with skillId,
+ *     allowedTypedActions (from `preferredSkillToolNames`), and
+ *     allowedPrimitives (the full primitive set when a skill is
+ *     selected — primitive admission is bounded by skill selection,
+ *     not by individual primitive allowlisting).
+ *   - `identity.mode === 'none'` → `mode:'none'` with the corresponding
+ *     reason. Distinct from the `'not_set'` default so admission
+ *     enforces denial (W3b cutover).
+ *
+ * `identity.source` maps to `authorization.source`:
+ *   - 'explicit_user_mention' → 'explicit'
+ *   - 'run_state_resource' → 'trusted_resume'
+ *   - other (lookback / hint / history) → 'active_task'
+ */
+export function buildAuthorizationFromIdentity(
+  identity:
+    | { mode: 'skill'; skillId: string; source: string }
+    | { mode: 'none'; reason: string },
+  options: {
+    preferredSkillToolNames: ReadonlyArray<string>
+    allPrimitiveToolNames: ReadonlyArray<string>
+  },
+): SkillToolAuthorization {
+  if (identity.mode === 'none') {
+    const reason = identity.reason
+    if (
+      reason === 'no_skill_signal'
+      || reason === 'turn_not_skill_resume'
+      || reason === 'config_repair_no_recoverable_task'
+    ) {
+      return buildExplicitNoSkillAuthorization(reason)
+    }
+    // Unknown identity reason — fall back to a neutral explicit no-skill
+    // (still denies, but with a generic reason). Better to deny than to
+    // leak `'not_set'` short-circuit when identity already concluded
+    // mode:'none'.
+    return buildExplicitNoSkillAuthorization('no_skill_signal')
+  }
+  const source: SkillToolAuthorizationSource =
+    identity.source === 'explicit_user_mention'
+      ? 'explicit'
+      : identity.source === 'run_state_resource'
+        ? 'trusted_resume'
+        : 'active_task'
+  return buildSelectedSkillToolAuthorization({
+    skillId: identity.skillId,
+    allowedTypedActions: options.preferredSkillToolNames,
+    allowedPrimitives: options.allPrimitiveToolNames,
+    source,
+    reason: identity.source,
+  })
+}
+
+/**
  * Authorization-driven admission decision for a single tool name. Only
  * called by `tool-executor` for `invoker === 'model'` skill_* tools.
  * Returns `null` when admission passes; returns a denial reason when

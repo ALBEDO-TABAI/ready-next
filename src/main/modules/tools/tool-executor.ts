@@ -304,6 +304,11 @@ export async function executeToolCall(
             // dispatcher (`skill_read_artifact`) can prefer fresh artifact
             // roots emitted by earlier tools in the same batch.
             activeFrame: context.activeFrame ?? null,
+            // Stage 4 W3b — forward per-turn skill tool authorization so
+            // `resolvePrimitiveSkillId` can derive primitive skillId from
+            // the identity-driven `authorization.skillId` instead of the
+            // legacy hint / active context / task run chain.
+            authorization: context.authorization ?? SKILL_TOOL_AUTHORIZATION_NOT_SET,
           })
 
         case 'system':

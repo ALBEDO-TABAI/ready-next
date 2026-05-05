@@ -306,6 +306,13 @@ import { recordSkillParentTaskLifecycleEvent } from './skill-task-tracker'
 import { collectIdentityReadSnapshot } from './skill-turn-identity-snapshot'
 import { applySkillTurnIdentity, resolveSkillTurnIdentity } from './skill-turn-identity'
 import { SKILL_TURN_IDENTITY_METRICS } from './skill-turn-identity-metrics'
+// Stage 4 W3b — derive per-turn skill tool authorization from identity.
+import {
+  SKILL_TOOL_AUTHORIZATION_NOT_SET,
+  buildAuthorizationFromIdentity,
+  type SkillToolAuthorization,
+} from './skill-tool-authorization'
+import { PRIMITIVE_TOOL_DEFS } from '../tools/skill-primitives/tool-defs'
 import {
   createSkillBudgetLeaseState,
   evaluateSkillBudgetLease,
@@ -1164,6 +1171,16 @@ export class TurnEngine {
       baseUrl: host.providerContext.baseUrl,
     })
 
+    // Stage 4 W3b — per-turn skill tool authorization. Initialized to the
+    // back-compat NOT_SET sentinel; overwritten below once identity has
+    // been resolved + applied. The closure `buildHostToolContext` captures
+    // this `let` binding by reference, so the 3 call sites later in the
+    // turn body (preparedToolContext / hostToolContext / toolContext) see
+    // the post-cutover value when invoked. Pre-applier callers (currently
+    // none — the closure is only invoked AFTER the rearm phase) would
+    // observe NOT_SET and the legacy admission path applies.
+    let __authorization: SkillToolAuthorization = SKILL_TOOL_AUTHORIZATION_NOT_SET
+
     const buildHostToolContext = (allowedToolNames: string[] | null | undefined, scope?: unknown) => buildToolRuntimeContext({
       browserController: host.browserController as any,
       sidecarManager: host.sidecarManager as any,
@@ -1195,6 +1212,12 @@ export class TurnEngine {
       // this seed — `applyContextModifier` unions roots + last-write-wins
       // the contract, so freshly-discovered state always wins on overlap.
       activeFrame: buildActiveFrameContextFromTurnFrame(turnFrame),
+      // Stage 4 W3b — captures the outer `__authorization` binding by
+      // reference so the value at call time is the cutover-computed
+      // authorization (post-applier). The 3 invocation sites
+      // (preparedToolContext / hostToolContext / toolContext) all run
+      // AFTER `__authorization` is assigned from `__identity`.
+      authorization: __authorization,
     })
 
     const finish = (params: {
@@ -1717,6 +1740,24 @@ export class TurnEngine {
         turnFrame.mode === 'skill_resume'
         && hasLongTypedSkillAction(preferredSkillToolNames)
       ) || isLongSkillResumeTurn
+
+      // Stage 4 W3b — derive per-turn skill tool authorization from the
+      // resolver's identity. Mirrors `preferredSkillToolNames`: when the
+      // turn binds skill context (mode:'skill' from identity), authorization
+      // is `mode:'selected'` with the same typed-action allowlist; otherwise
+      // it's `mode:'none'` with the identity reason. The closure
+      // `buildHostToolContext` (declared above) captures `__authorization`
+      // by reference, so the cutover takes effect at the next call site.
+      __authorization = buildAuthorizationFromIdentity(
+        __identity.mode === 'skill'
+          ? { mode: 'skill', skillId: __identity.skillId, source: __identity.source }
+          : { mode: 'none', reason: __identity.reason },
+        {
+          preferredSkillToolNames: preferredSkillToolNames || [],
+          allPrimitiveToolNames: PRIMITIVE_TOOL_DEFS.map((d) => d.name),
+        },
+      )
+
       if (referenceSkillHintArmed) {
         logAgentMetric('skill_reference_hint_armed', {
           via: referenceSkillHintVia || 'explicit',
@@ -2360,6 +2401,18 @@ export class TurnEngine {
         }
         routedAllowedToolNames = nextAllowedToolNames
         turnSummaryAllowedToolNames = [...routedAllowedToolNames]
+        // Stage 4 W3b — keep authorization in sync with the refreshed
+        // preferredSkillToolNames so subsequent buildHostToolContext
+        // calls in this iteration see the post-refresh allowlist.
+        __authorization = buildAuthorizationFromIdentity(
+          __identity.mode === 'skill'
+            ? { mode: 'skill', skillId: __identity.skillId, source: __identity.source }
+            : { mode: 'none', reason: __identity.reason },
+          {
+            preferredSkillToolNames: preferredSkillToolNames || [],
+            allPrimitiveToolNames: PRIMITIVE_TOOL_DEFS.map((d) => d.name),
+          },
+        )
         logAgentMetric('turn_frame_tool_policy_refreshed', {
           sessionId: request.sessionId,
           reason,

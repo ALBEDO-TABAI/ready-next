@@ -37,6 +37,11 @@ import type {
 } from '../../../shared/skill-execution-types'
 import { STATIC_SKILL_TOOL_NAMES as STATIC_SKILL_TOOL_NAMES_PURE } from './skills-tools-static'
 import { getLastReferenceSkill } from '../agent-control/skill-reference-hints'
+// Stage 4 W3b — authorization-driven primitive skillId resolution.
+import {
+  SKILL_TOOL_AUTHORIZATION_NOT_SET,
+  type SkillToolAuthorization,
+} from '../agent-control/skill-tool-authorization'
 import { resolvePendingSkillHandoffWriteTargets } from '../agent-control/skill-agent-handoff'
 import { isChildLoopSkillAction } from './child-loop-skill-actions'
 import { choosePrimitiveSkillId, filterSkillPrimitivesBySession } from './skill-tool-session-gate'
@@ -73,6 +78,15 @@ interface SkillToolRuntimeContext {
   taskProjectionId?: string
   frameSkillId?: string | null
   agent?: string | null
+  /**
+   * Stage 4 W3b — per-turn skill tool authorization. Used by
+   * `resolvePrimitiveSkillId` to derive the primitive's skillId from the
+   * single-source-of-truth identity instead of the legacy hint / active
+   * context / task run chain. The `'not_set'` default falls back to the
+   * legacy chain for back-compat (W3a invokers that haven't been wired
+   * through the cutover).
+   */
+  authorization?: SkillToolAuthorization
   /**
    * Phase 3 (skill-child-loop) — same-turn live frame slot forwarded from
    * the runtime. `skill_read_artifact` prefers `activeFrame.activeArtifactRoots`
@@ -358,6 +372,27 @@ function asString(value: unknown): string {
  * structured `primitive_no_skill_context` errorKind.
  */
 function resolvePrimitiveSkillId(sessionId?: string, runtimeContext?: SkillToolRuntimeContext): string | null {
+  // Stage 4 W3b — authorization is the single source of truth for the
+  // primitive's skillId once the W3 cutover wires it through. Three cases:
+  //
+  //   - `mode:'selected'` → use `authorization.skillId`. Identity already
+  //     decided which skill this turn is bound to; the primitive runs in
+  //     that skill's context.
+  //   - `mode:'none' && reason !== 'not_set'` → return null. Identity
+  //     concluded no skill applies; admission would have already rejected
+  //     a model-issued primitive (`authorization_denied`), so this branch
+  //     is only reachable from invoker:'host' / 'child_runner' bypass.
+  //     Returning null surfaces `primitive_no_skill_context` to the
+  //     handler, matching legacy "no signal" semantics.
+  //   - `mode:'none' && reason === 'not_set'` (W3a back-compat default) →
+  //     fall through to the legacy chain so callers that haven't been
+  //     migrated through `ToolPolicy` / `ToolRuntimeContext` keep the
+  //     pre-cutover skillId resolution.
+  const authorization = runtimeContext?.authorization ?? SKILL_TOOL_AUTHORIZATION_NOT_SET
+  if (authorization.mode === 'selected') return authorization.skillId
+  if (authorization.mode === 'none' && authorization.reason !== 'not_set') return null
+
+  // Legacy chain (W3a back-compat fallthrough).
   if (!sessionId && !runtimeContext?.frameSkillId) return null
   const activeContext = sessionId ? resolveActiveSkillContext({ sessionId }) : null
   const hint = sessionId ? getLastReferenceSkill(sessionId) : null
