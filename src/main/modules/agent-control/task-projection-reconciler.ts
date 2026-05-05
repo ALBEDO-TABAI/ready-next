@@ -79,21 +79,43 @@ function pathTagFor(path: string): string {
   return match ? match[0] : 'unknown.json'
 }
 
+/**
+ * Strip absolute path-like substrings from an error message so the metric
+ * payload doesn't leak the full child-run outputDir into operator logs.
+ *
+ * Node fs error messages typically embed the path inside quotes, e.g.
+ *   `EACCES: permission denied, open '/tmp/ready/.../run_state.json'`
+ *   `ENOENT: no such file or directory, open "C:\Users\...\run_state.json"`
+ * We replace any quoted path that looks absolute (starts with `/` or
+ * `<letter>:[\\/]`) with `<file>` and also collapse bare absolute paths.
+ */
+export function scrubAbsolutePathFromMessage(message: string): string {
+  return message
+    .replace(/(['"`])(?:\/|[A-Za-z]:[\\/])[^'"`\n]+\1/g, "'<file>'")
+    // Bare absolute paths only: not preceded by `.`, `/`, or word char,
+    // so `./foo`, `//foo`, and `xyz/foo` are left alone (relative or
+    // already part of a longer token).
+    .replace(/(?<![./\w])(?:\/|[A-Za-z]:[\\/])[^\s'"`,;:)]+/g, '<file>')
+}
+
 function maybeEmitTaskProjectionJsonReadFailed(
   path: string,
   reason: 'corrupt' | 'denied' | 'not_object',
   message?: string,
 ): void {
-  const tag = pathTagFor(path)
-  const key = `${tag}|${reason}`
+  // Throttle key uses the full path so a single bad file in one child-run
+  // does not silence reports of the same reason from another child-run's
+  // file. The path is purely an in-memory map key — never logged.
+  const key = `${path}|${reason}`
   const now = Date.now()
   const last = taskProjectionJsonReadEmitMs.get(key) ?? 0
   if (now - last < TASK_PROJECTION_JSON_READ_THROTTLE_MS) return
   taskProjectionJsonReadEmitMs.set(key, now)
+  const scrubbed = message ? scrubAbsolutePathFromMessage(message).slice(0, 200) : undefined
   logAgentMetric(PROJECTION_OBSERVABILITY_METRICS.taskProjectionJsonReadFailed, {
-    pathTag: tag,
+    pathTag: pathTagFor(path),
     reason,
-    ...(message ? { message: message.slice(0, 200) } : {}),
+    ...(scrubbed ? { message: scrubbed } : {}),
   })
 }
 

@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   classifyJsonReadError,
   classifyJsonReadValue,
+  scrubAbsolutePathFromMessage,
 } from '../main/modules/agent-control/task-projection-reconciler'
 
 /**
@@ -72,4 +73,44 @@ test('classifyJsonReadValue accepts plain object', () => {
   const result = classifyJsonReadValue(obj)
   assert.equal(result.ok, true)
   if (result.ok) assert.equal(result.value, obj)
+})
+
+/**
+ * Stage 3 W2 follow-up — the metric payload's `message` field must not leak
+ * absolute paths. Node fs error messages embed the path inside quotes; we
+ * scrub both quoted and bare absolute path forms so operator dashboards
+ * and log archives can't reconstruct child-run output directories.
+ */
+
+test('scrubAbsolutePathFromMessage replaces quoted POSIX absolute path', () => {
+  const input = "EACCES: permission denied, open '/tmp/ready/run-A/run_state.json'"
+  const result = scrubAbsolutePathFromMessage(input)
+  assert.equal(result.includes('/tmp/ready'), false)
+  assert.equal(result.includes('<file>'), true)
+})
+
+test('scrubAbsolutePathFromMessage replaces quoted Windows absolute path', () => {
+  const input = `ENOENT: no such file or directory, open "C:\\Users\\me\\.ready\\run_state.json"`
+  const result = scrubAbsolutePathFromMessage(input)
+  assert.equal(result.includes('C:\\Users'), false)
+  assert.equal(result.includes('<file>'), true)
+})
+
+test('scrubAbsolutePathFromMessage replaces bare POSIX absolute path', () => {
+  const input = 'failed reading /var/lib/ready/outputs/x/run_state.json: invalid'
+  const result = scrubAbsolutePathFromMessage(input)
+  assert.equal(result.includes('/var/lib'), false)
+  assert.equal(result.includes('<file>'), true)
+})
+
+test('scrubAbsolutePathFromMessage leaves JSON parse messages untouched', () => {
+  // JSON.parse errors do not embed paths; ensure we don't garble them.
+  const input = 'Unexpected token } in JSON at position 5'
+  assert.equal(scrubAbsolutePathFromMessage(input), input)
+})
+
+test('scrubAbsolutePathFromMessage leaves relative path-like substrings alone', () => {
+  const input = 'failed: see ./run_state.json'
+  // Leading `.` makes it relative, not absolute; should not be scrubbed.
+  assert.equal(scrubAbsolutePathFromMessage(input), input)
 })

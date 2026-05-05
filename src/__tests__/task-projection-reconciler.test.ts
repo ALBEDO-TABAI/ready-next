@@ -441,6 +441,59 @@ test('reconcileTaskProjections emits not_object metric when delivery_report.json
   }
 })
 
+test('reconcileTaskProjections emits independent corrupt metrics for distinct child-run paths within 60s', async () => {
+  const outputDirA = createRoot('w2-corrupt-a')
+  const outputDirB = createRoot('w2-corrupt-b')
+  const runStatePathA = join(outputDirA, 'run_state.json')
+  const runStatePathB = join(outputDirB, 'run_state.json')
+  writeFileSync(runStatePathA, '{not json A', 'utf8')
+  writeFileSync(runStatePathB, '{not json B', 'utf8')
+  __resetTaskProjectionJsonReadThrottleForTests()
+  const { events, restore } = captureMetrics()
+  try {
+    const { store, records } = createStore([
+      baseProjection({
+        taskId: 'skill:run_state:w2-corrupt-a',
+        status: 'blocked',
+        continuationRef: {
+          skillId: 'video-expert-analyzer',
+          action: 'video_expert_pipeline',
+          outputDir: outputDirA,
+          runStatePath: runStatePathA,
+        },
+      }),
+      baseProjection({
+        taskId: 'skill:run_state:w2-corrupt-b',
+        status: 'blocked',
+        continuationRef: {
+          skillId: 'video-expert-analyzer',
+          action: 'video_expert_pipeline',
+          outputDir: outputDirB,
+          runStatePath: runStatePathB,
+        },
+      }),
+    ])
+
+    await reconcileTaskProjections({ store, records: Array.from(records.values()), now: NOW })
+
+    const corruptPathTags = new Set(
+      events
+        .filter((e) => e.metric === 'task_projection_json_read_failed' && e.reason === 'corrupt')
+        .map((e) => e.pathTag),
+    )
+    assert.equal(corruptPathTags.has('run_state.json'), true)
+    // Both child-run paths should each emit; the two corrupt run_state.json files
+    // share the same pathTag but have distinct full-path throttle keys, so the
+    // metric fires once per path within the 60s window.
+    const corruptCount = events.filter(
+      (e) => e.metric === 'task_projection_json_read_failed' && e.reason === 'corrupt',
+    ).length
+    assert.ok(corruptCount >= 2, `expected at least 2 corrupt emits across distinct paths, got ${corruptCount}`)
+  } finally {
+    restore()
+  }
+})
+
 test('reconcileTaskProjections does not emit metric when run_state.json is missing', async () => {
   const outputDir = createRoot('w2-missing')
   // Note: no run_state.json written; outputDir is empty.
