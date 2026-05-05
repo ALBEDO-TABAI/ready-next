@@ -650,6 +650,7 @@ export const useAgent = create<AgentState>((set, get) => ({
       let scopes: ConversationScope[] = result.success && Array.isArray(result.data)
         ? result.data as unknown as ConversationScope[]
         : []
+      const fallbackReason = result.success ? 'empty_scopes' : 'scope_list_failed'
       if (
         scopes.length === 0 &&
         typeof window !== 'undefined' &&
@@ -657,6 +658,11 @@ export const useAgent = create<AgentState>((set, get) => ({
       ) {
         const fallback = await window.electronAPI.chat.getConversations(currentAgent).catch(() => null)
         if (fallback?.success && Array.isArray(fallback.data)) {
+          emitRendererAgentMetric('legacy_conversations_fallback_used', {
+            agent: currentAgent,
+            reason: fallbackReason,
+            returnedCount: fallback.data.length,
+          })
           scopes = fallback.data.map((conversation) => ({
             id: conversation.id,
             agent: conversation.agent,
