@@ -571,11 +571,9 @@ function resolveSkillToolDefinitionForExecution(toolName: string): ToolDefinitio
     // "dispatch can execute it."
     return buildStaticSkillToolDefinition(toolName)
   } catch {
-    fallbackThrottle.emit({
-      entry: 'execution',
-      reason: 'manager_throw',
-      toolName,
-    })
+    // Dynamic lookup emits at the innermost layer. This catch preserves the
+    // execution fallback contract for unexpected resolver errors without
+    // reporting a second lookup-failure metric.
     return buildStaticSkillToolDefinition(toolName)
   }
 }
@@ -1043,15 +1041,11 @@ export function resolveToolInputSchemaForExecution(
       const dynamicSchema = dynamicSchemas[toolName]
       if (dynamicSchema) return dynamicSchema
     } catch {
-      fallbackThrottle.emit({
-        entry: 'input_schema',
-        reason: 'manager_throw',
-        toolName,
-      })
       // Same defensive posture as `getSkillActionSchemas` itself: when the
       // runtime manager is unavailable (boot ordering, test contexts), we
-      // fall through to null rather than crashing the resolver. The static
-      // manifest fallback above already handles the boot-time path.
+      // fall through to null rather than crashing the resolver. Dynamic schema
+      // lookup emits at the innermost layer, so this outer catch must not
+      // duplicate the metric.
     }
   }
   return null

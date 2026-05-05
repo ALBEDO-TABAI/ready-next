@@ -993,6 +993,8 @@ export type SkillToolLookupDetailedResult =
   | { ok: true; def: SkillToolDef }
   | { ok: false; reason: SkillToolFallbackReason }
 
+// Execution-time registry lookup needs the same innermost resolver semantics as
+// find_by_name, but reports the entry that actually consumed the fallback.
 export function findSkillToolByNameForExecutionDetailedWithEntry(
   toolName: string,
   fallbackEntry: SkillToolFallbackEntry,

@@ -1839,6 +1839,96 @@ test('TurnEngine does not inject provider corrupt args reminder when parse error
   )
 })
 
+test('TurnEngine injects provider corrupt args reminder after executing mixed valid and corrupt tool calls', async () => {
+  const engine = new TurnEngine()
+  let toolLoopRequests = 0
+  let executedBatches = 0
+  const { request } = createRequest({
+    userText: '帮我修改这段文档',
+    intentClassification: createIntent({
+      primaryDomain: 'document',
+      mentionedDomains: ['document'],
+      objectSignals: ['document-object'],
+      actionSignals: ['document-action'],
+      confidence: 'high',
+    }),
+    host: {
+      providerContext: {
+        config: {
+          provider: 'openai',
+          model: 'gpt-test',
+          apiKey: 'test',
+          baseUrl: 'https://api.openai.com/v1',
+        },
+        baseUrl: 'https://api.openai.com/v1',
+        provider: undefined,
+        isKimi: false,
+        isKimiCoding: false,
+        useAnthropicProtocol: false,
+        supportsToolCalls: true,
+        supportsVideoBlock: true,
+        hasRawVideoInIncoming: false,
+      },
+      requestToolLoopResponse: async () => {
+        toolLoopRequests += 1
+        if (toolLoopRequests === 1) {
+          return {
+            text: '',
+            toolCalls: [{ id: 'tool-1', name: 'document_replace_text', input: { text: 'valid tool' } }],
+            stopReason: 'tool_calls',
+            toolCallParseErrors: [
+              {
+                route: 'responses',
+                toolName: 'browser_search',
+                callId: 'call_bad_1',
+                reason: 'corrupt',
+              },
+              {
+                route: 'responses',
+                toolName: 'browser_read_page',
+                callId: 'call_bad_2',
+                reason: 'corrupt',
+              },
+            ],
+          }
+        }
+        return {
+          text: 'mixed recovered',
+          toolCalls: [],
+          stopReason: 'stop',
+        }
+      },
+      executeToolBatch: async () => {
+        executedBatches += 1
+        return {
+          results: [{
+            id: 'tool-1',
+            name: 'document_replace_text',
+            input: { text: 'valid tool' },
+            result: { text: 'saved' },
+          }],
+          budgetLimited: false,
+          recoveryHistory: [],
+        }
+      },
+    },
+  })
+
+  const result = await engine.execute(request)
+  const reminderMessages = request.session.messages
+    .filter((message) =>
+      message.role === 'user'
+      && String(message.content).includes('工具调用因参数损坏被丢弃'))
+    .map((message) => String(message.content))
+
+  assert.equal(executedBatches, 1)
+  assert.equal(toolLoopRequests, 2)
+  assert.equal(result.finalText, 'mixed recovered')
+  assert.equal(reminderMessages.length, 1)
+  assert.match(reminderMessages[0], /上一轮有 2 个工具调用因参数损坏被丢弃/)
+  assert.doesNotMatch(reminderMessages[0], /rawSample|arguments|callId/)
+})
+
 test('TurnEngine records tool snapshots and clears browser text-bridge nudges after one request', async () => {
   const engine = new TurnEngine()
   const preferTextBridgeFlags: boolean[] = []
