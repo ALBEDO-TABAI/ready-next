@@ -2046,6 +2046,12 @@ export class TurnEngine {
         allowedToolNames: preparedRunCapabilities.allowedToolNames,
       })
       let toolPolicy = preparedRunCapabilities.toolPolicy
+      // Stage 4 W3b.2 — sync per-turn authorization onto ToolPolicy so
+      // `getPolicyAnthropicTools` / `getPolicyOpenAIToolBundle` thread it
+      // through gateway → registry's 4 model-visible list resolvers.
+      // Mutating the local toolPolicy is intentional and safe — the
+      // object is local turn state and not retained beyond this turn.
+      toolPolicy.authorization = __authorization
       const initialCoordinatorArbitrations = domainAdapters
         .map((adapter) => adapter.arbitrateRunCapabilities?.({
           route: null,
@@ -2122,6 +2128,8 @@ export class TurnEngine {
         browserDecisionMode: browserDecision.mode as any,
       })
       toolPolicy = reconciledRunCapabilities.toolPolicy
+      // W3b.2 — re-sync after reconcile (toolPolicy reference may differ).
+      toolPolicy.authorization = __authorization
       appendLoggedToolSnapshot(state, host, buildHostToolSnapshot({
         stage: 'host_effective',
         iteration: 0,
@@ -2257,6 +2265,8 @@ export class TurnEngine {
           browserDecisionMode: browserDecision.mode as any,
         })
         toolPolicy = reconciledRunCapabilities.toolPolicy
+        // W3b.2 — re-sync after second reconcile.
+        toolPolicy.authorization = __authorization
         appendLoggedToolResolution({
           state,
           host,
@@ -2394,6 +2404,8 @@ export class TurnEngine {
         if (!preferredChanged && !allowedChanged) return
         preferredSkillToolNames = nextPreferredSkillToolNames
         toolPolicy = nextToolPolicy
+        // W3b.2 — re-sync after frame patch refresh; __authorization is
+        // recomputed below from the new preferredSkillToolNames.
         reconciledRunCapabilities = {
           ...reconciledRunCapabilities,
           toolPolicy,
@@ -2413,6 +2425,10 @@ export class TurnEngine {
             allPrimitiveToolNames: PRIMITIVE_TOOL_DEFS.map((d) => d.name),
           },
         )
+        // W3b.2 — keep ToolPolicy.authorization synchronized with
+        // __authorization so the next requestToolLoopResponse sees the
+        // refreshed allowlist when building the model-visible tool list.
+        toolPolicy.authorization = __authorization
         logAgentMetric('turn_frame_tool_policy_refreshed', {
           sessionId: request.sessionId,
           reason,

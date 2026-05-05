@@ -3,6 +3,10 @@ import { join } from 'path'
 import type { ZodObject, ZodRawShape } from 'zod'
 import type { CapabilityGroupId } from '../../../shared/ai-capability-groups'
 import { getToolResourceTag } from './tool-parallelism-policy'
+import {
+  filterToolsByAuthorization,
+  type SkillToolAuthorization,
+} from './skill-tool-authorization'
 import type {
   ToolConcurrency,
   ToolDefinition,
@@ -109,11 +113,16 @@ export interface ToolRegistryReader {
   getToolDefinition(toolName: string): ToolDefinition | null
   getToolDefinitionForExecution(toolName: string): ToolDefinition | null
   listToolDefinitions(): ToolDefinition[]
-  getToolDefinitionsForGroup(groupId: CapabilityGroupId, sessionId?: string): ToolDefinition[]
+  getToolDefinitionsForGroup(
+    groupId: CapabilityGroupId,
+    sessionId?: string,
+    authorization?: SkillToolAuthorization | null,
+  ): ToolDefinition[]
   getToolSchemasForGroup(
     groupId: CapabilityGroupId,
     format: ToolSchemaFormat,
     sessionId?: string,
+    authorization?: SkillToolAuthorization | null,
   ): Array<Record<string, unknown>>
 }
 
@@ -760,63 +769,94 @@ export class ToolRegistry implements ToolRegistryReader {
   getToolDefinitionsResolutionForGroup(
     groupId: CapabilityGroupId,
     sessionId?: string,
+    authorization?: SkillToolAuthorization | null,
   ): ToolDefinitionResolution {
     const provider = this.groupProviders[groupId]
     if (!provider) {
       return { definitions: [] }
     }
+    let resolution: ToolDefinitionResolution
     if (provider.getToolDefinitionsDetailed) {
-      return this.enrichToolDefinitions(groupId, provider.getToolDefinitionsDetailed(sessionId), sessionId)
-    }
-    if (provider.getToolDefinitions) {
+      resolution = this.enrichToolDefinitions(groupId, provider.getToolDefinitionsDetailed(sessionId), sessionId)
+    } else if (provider.getToolDefinitions) {
       try {
-        return this.enrichToolDefinitions(groupId, { definitions: provider.getToolDefinitions() }, sessionId)
+        resolution = this.enrichToolDefinitions(groupId, { definitions: provider.getToolDefinitions() }, sessionId)
       } catch (error) {
-        return this.enrichToolDefinitions(groupId, {
+        resolution = this.enrichToolDefinitions(groupId, {
           definitions: buildToolDefinitions(groupId, provider.staticToolNames || []),
           error: getErrorMessage(error),
           usedStaticFallback: Boolean(provider.staticToolNames && provider.staticToolNames.length > 0),
         }, sessionId)
       }
+    } else {
+      resolution = this.enrichToolDefinitions(groupId, {
+        definitions: buildToolDefinitions(groupId, provider.staticToolNames || []),
+        usedStaticFallback: Boolean(provider.staticToolNames && provider.staticToolNames.length > 0),
+      }, sessionId)
     }
-    return this.enrichToolDefinitions(groupId, {
-      definitions: buildToolDefinitions(groupId, provider.staticToolNames || []),
-      usedStaticFallback: Boolean(provider.staticToolNames && provider.staticToolNames.length > 0),
-    }, sessionId)
+    // Stage 4 W3b.2 — apply authorization filter to the model-visible
+    // definitions list. Defense-in-depth alongside ToolPolicy's
+    // preferredSkillToolNames filter; here we also strip primitives in
+    // mode:'none' turns.
+    return {
+      ...resolution,
+      definitions: filterToolsByAuthorization(
+        resolution.definitions,
+        authorization ?? undefined,
+        (def) => def.name,
+      ),
+    }
   }
 
   getToolSchemasResolutionForGroup(
     groupId: CapabilityGroupId,
     format: ToolSchemaFormat,
     sessionId?: string,
+    authorization?: SkillToolAuthorization | null,
   ): ToolSchemaResolution {
     const provider = this.groupProviders[groupId]
     const staticToolNames = provider?.staticToolNames || []
 
+    let resolution: ToolSchemaResolution
     const detailedResolver = format === 'anthropic'
       ? provider?.getAnthropicToolsDetailed
       : provider?.getOpenAIToolsDetailed
     if (detailedResolver) {
-      return detailedResolver(sessionId)
-    }
-
-    const directResolver = format === 'anthropic'
-      ? provider?.getAnthropicTools
-      : provider?.getOpenAITools
-    if (directResolver) {
-      try {
-        return { tools: directResolver() }
-      } catch (error) {
-        return {
-          tools: [],
-          error: getErrorMessage(error),
+      resolution = detailedResolver(sessionId)
+    } else {
+      const directResolver = format === 'anthropic'
+        ? provider?.getAnthropicTools
+        : provider?.getOpenAITools
+      if (directResolver) {
+        try {
+          resolution = { tools: directResolver() }
+        } catch (error) {
+          resolution = {
+            tools: [],
+            error: getErrorMessage(error),
+          }
+        }
+      } else {
+        resolution = {
+          tools: staticToolNames.map((toolName) => createStaticFallbackSchema(toolName, format)),
+          usedStaticFallback: staticToolNames.length > 0,
         }
       }
     }
-
+    // Stage 4 W3b.2 — apply authorization filter to the model-visible
+    // schemas list. Tool name extraction adapts to both anthropic
+    // (`tool.name`) and openai (`tool.function.name`) shapes.
     return {
-      tools: staticToolNames.map((toolName) => createStaticFallbackSchema(toolName, format)),
-      usedStaticFallback: staticToolNames.length > 0,
+      ...resolution,
+      tools: filterToolsByAuthorization(
+        resolution.tools,
+        authorization ?? undefined,
+        (tool) => format === 'anthropic'
+          ? (typeof (tool as { name?: unknown }).name === 'string' ? ((tool as { name: string }).name) : null)
+          : (typeof ((tool as { function?: { name?: unknown } }).function?.name) === 'string'
+              ? ((tool as { function: { name: string } }).function.name)
+              : null),
+      ),
     }
   }
 
@@ -832,16 +872,21 @@ export class ToolRegistry implements ToolRegistryReader {
     return Array.from(tools.values())
   }
 
-  getToolDefinitionsForGroup(groupId: CapabilityGroupId, sessionId?: string): ToolDefinition[] {
-    return this.getToolDefinitionsResolutionForGroup(groupId, sessionId).definitions
+  getToolDefinitionsForGroup(
+    groupId: CapabilityGroupId,
+    sessionId?: string,
+    authorization?: SkillToolAuthorization | null,
+  ): ToolDefinition[] {
+    return this.getToolDefinitionsResolutionForGroup(groupId, sessionId, authorization).definitions
   }
 
   getToolSchemasForGroup(
     groupId: CapabilityGroupId,
     format: ToolSchemaFormat,
     sessionId?: string,
+    authorization?: SkillToolAuthorization | null,
   ): Array<Record<string, unknown>> {
-    return this.getToolSchemasResolutionForGroup(groupId, format, sessionId).tools
+    return this.getToolSchemasResolutionForGroup(groupId, format, sessionId, authorization).tools
   }
 
   private enrichToolDefinitions(

@@ -19,6 +19,7 @@ import {
   filterPreferredSkillOpenAITools as _filterPreferredSkillOpenAI,
   mergeForceDocumentAllowedNames as _mergeForceDocumentAllowedNames,
 } from './execution-tool-skill-filters'
+import type { SkillToolAuthorization } from './skill-tool-authorization'
 
 export interface ToolPolicy {
   forceDocumentTool: boolean
@@ -41,6 +42,16 @@ export interface ToolPolicy {
   // tools (submit/restart/cancel) if this session has no active execution.
   // See skills-tools.ts::getSkillToolDefs (B plan Phase 0).
   sessionId?: string
+  /**
+   * Stage 4 W3b.2 — per-turn skill tool authorization. When populated by
+   * turn-engine (post-W3b.1 cutover), `getPolicyAnthropicTools` /
+   * `getPolicyOpenAITools` / `getPolicyOpenAIToolBundle` thread it through
+   * the gateway and registry's 4 model-visible list resolvers, where
+   * `filterToolsByAuthorization` strips skill_* tools that aren't in the
+   * allowed sets. Defense-in-depth alongside the existing
+   * `preferredSkillToolNames` filter.
+   */
+  authorization?: SkillToolAuthorization | null
 }
 
 export interface PolicyOpenAIToolBundle {
@@ -229,7 +240,7 @@ export function buildToolGuidance(policy: ToolPolicy): string {
 export function getPolicyAnthropicTools(policy?: ToolPolicy): Array<Record<string, unknown>> {
   const visibleGroupIds = resolveVisibleGroupIds(policy)
 
-  let tools = defaultToolGateway.getAnthropicToolsForGroups(visibleGroupIds, policy?.sessionId)
+  let tools = defaultToolGateway.getAnthropicToolsForGroups(visibleGroupIds, policy?.sessionId, policy?.authorization ?? null)
   if (policy?.forceDocumentTool) {
     const baseAllowed = policy.documentWidgetTaskKind === 'create'
       ? DOCUMENT_WIDGET_CREATE_TOOL_NAMES
@@ -276,6 +287,7 @@ export function getPolicyOpenAIToolBundle(policy?: ToolPolicy): PolicyOpenAITool
     visibleGroupIds,
     'openai',
     policy?.sessionId,
+    policy?.authorization ?? null,
   )
   let tools = resolution.tools
   if (policy?.forceDocumentTool) {

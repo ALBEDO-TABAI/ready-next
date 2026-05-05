@@ -159,6 +159,48 @@ export function buildAuthorizationFromIdentity(
 }
 
 /**
+ * Stage 4 W3b.2 — filter a tool list (defs / schemas) by authorization.
+ * Applied at the registry's 4 model-visible list resolvers as
+ * defense-in-depth: ToolPolicy already filters typed actions via
+ * `preferredSkillToolNames`, but this filter also strips primitives in
+ * `mode:'none'` turns (which preferredSkillToolNames does not, since
+ * primitives are gated separately by `filterSkillPrimitivesBySession`).
+ *
+ * Semantics:
+ *   - `'not_set'` default → no filter (back-compat for non-migrated
+ *     callers; ToolPolicy still applies its sessionId-based gating)
+ *   - `mode:'none'` (any non-'not_set' reason) → strip ALL skill_* tools
+ *   - `mode:'selected'` → keep skill_* tools whose name is in
+ *     `allowedTypedActions ∪ allowedPrimitives`; non-skill tools pass
+ *     through unchanged (authorization is skill-scoped)
+ *
+ * The `getName` callback adapts to both ToolDefinition shape (`tool.name`)
+ * and OpenAI tool schema shape (`tool.function.name`).
+ */
+export function filterToolsByAuthorization<T>(
+  tools: ReadonlyArray<T>,
+  authorization: SkillToolAuthorization | undefined,
+  getName: (tool: T) => string | null,
+): T[] {
+  if (!authorization || (authorization.mode === 'none' && authorization.reason === 'not_set')) {
+    return [...tools]
+  }
+  if (authorization.mode === 'none') {
+    return tools.filter((tool) => {
+      const name = getName(tool)
+      return !name || !name.startsWith('skill_')
+    })
+  }
+  // mode === 'selected'
+  return tools.filter((tool) => {
+    const name = getName(tool)
+    if (!name) return true
+    if (!name.startsWith('skill_')) return true
+    return authorization.allowedTypedActions.has(name) || authorization.allowedPrimitives.has(name)
+  })
+}
+
+/**
  * Authorization-driven admission decision for a single tool name. Only
  * called by `tool-executor` for `invoker === 'model'` skill_* tools.
  * Returns `null` when admission passes; returns a denial reason when
