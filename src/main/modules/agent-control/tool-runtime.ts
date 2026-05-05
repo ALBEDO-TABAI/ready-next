@@ -11,6 +11,10 @@ import type { ToolDefinition } from './tool-definition'
 import { defaultToolRegistry } from './tool-registry'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 import type { TurnFeatureFlags } from './turn-feature-flags'
+import {
+  SKILL_TOOL_AUTHORIZATION_NOT_SET,
+  type SkillToolAuthorization,
+} from './skill-tool-authorization'
 import type { RecoveryRecord, RunBudgetSeed, RunBudgetUsage, SkillRunContract } from './run-contracts'
 import { groupParallelSafeToolCalls, type ParallelToolCall } from './tool-parallelism-policy'
 import {
@@ -87,6 +91,17 @@ export interface ToolRuntimeContext {
    * batch. The end-of-turn persistence path (frame patch) is unchanged.
    */
   activeFrame: ToolRuntimeActiveFrameContext
+  /**
+   * Stage 4 W3 — per-turn skill tool authorization. The default value
+   * (`SKILL_TOOL_AUTHORIZATION_NOT_SET`, i.e. `mode:'none', reason:'not_set'`)
+   * is treated as a back-compat short-circuit by `tool-executor` admission
+   * and `tool-runtime` preflight: skill_* admission passes through, and
+   * the new `authorization_denied` errorKind is never emitted. Once W3b
+   * cutover wires `turn-engine` and `ToolPolicy` to populate real
+   * authorization, the default is no longer reached for model turns and
+   * the cutover becomes live.
+   */
+  authorization: SkillToolAuthorization
 }
 
 /**
@@ -482,26 +497,35 @@ export class ToolRuntime {
       })
     }
 
-    const allowedToolNames = normalizeAllowedToolSet(options?.context?.allowedToolNames)
-    if (defaultToolRegistry.getToolDefinitionForExecution(toolName)?.requiresExplicitAllowlist && !allowedToolNames?.has(toolName)) {
-      return createToolExecutionOutput(buildToolNotAllowedMessage(toolName, allowedToolNames || new Set()), {
-        shape: 'json',
-        data: {
-          errorKind: 'host_unavailable',
-          reason: 'tool_restricted_this_turn',
-          toolName,
-        },
-      })
-    }
-    if (allowedToolNames && !allowedToolNames.has(toolName)) {
-      return createToolExecutionOutput(buildToolNotAllowedMessage(toolName, allowedToolNames), {
-        shape: 'json',
-        data: {
-          errorKind: 'host_unavailable',
-          reason: 'tool_restricted_this_turn',
-          toolName,
-        },
-      })
+    // Stage 4 W3 — preflight skips `skill_*` allowedToolNames checks so
+    // `authorization_denied` from `tool-executor` admission becomes the
+    // canonical denial signal for skill tools (per v6 plan §10 互斥语义:
+    // 非 skill 工具 → tool_restricted_this_turn; skill 工具 → authorization_denied).
+    // Non-skill tools continue to go through the preflight allowedToolNames
+    // checks below — preserving the legacy errorKind for everything else.
+    const isSkillTool = toolName.startsWith('skill_')
+    if (!isSkillTool) {
+      const allowedToolNames = normalizeAllowedToolSet(options?.context?.allowedToolNames)
+      if (defaultToolRegistry.getToolDefinitionForExecution(toolName)?.requiresExplicitAllowlist && !allowedToolNames?.has(toolName)) {
+        return createToolExecutionOutput(buildToolNotAllowedMessage(toolName, allowedToolNames || new Set()), {
+          shape: 'json',
+          data: {
+            errorKind: 'host_unavailable',
+            reason: 'tool_restricted_this_turn',
+            toolName,
+          },
+        })
+      }
+      if (allowedToolNames && !allowedToolNames.has(toolName)) {
+        return createToolExecutionOutput(buildToolNotAllowedMessage(toolName, allowedToolNames), {
+          shape: 'json',
+          data: {
+            errorKind: 'host_unavailable',
+            reason: 'tool_restricted_this_turn',
+            toolName,
+          },
+        })
+      }
     }
 
     return null
@@ -537,6 +561,9 @@ export class ToolRuntime {
       // attempt context inherits the live slot if present and falls back to
       // an empty default for legacy callers that didn't seed one.
       activeFrame: context?.activeFrame ?? createEmptyActiveFrameContext(),
+      // Stage 4 W3 — `authorization` is non-optional on `ToolRuntimeContext`;
+      // attempt context inherits or falls back to the not-set default.
+      authorization: context?.authorization ?? SKILL_TOOL_AUTHORIZATION_NOT_SET,
       registerRunCleanup: (cleanup) => {
         const trackedCleanup = this.trackCleanup(cleanup)
         trackedCleanups.push(trackedCleanup)

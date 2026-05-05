@@ -18,6 +18,7 @@ import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-met
 test('registry exposes documented tool-error metric keys', () => {
   const keys = Object.keys(TOOL_ERROR_METRICS).sort()
   assert.deepEqual(keys, [
+    'authorizationDenied',
     'childResumeDisabledByFlag',
     'childRunCircuitBreak',
     'childRunLogGc',
@@ -31,6 +32,7 @@ test('registry exposes documented tool-error metric keys', () => {
     'metaParseCorrupted',
     'outputDirGc',
     'outputDirSweepFailed',
+    'providerArgumentsCorrupt',
     'resolutionViolation',
     'runStateSelectionDirSkipped',
     'secretDecryptFailed',
@@ -86,6 +88,10 @@ test('historical metric strings are preserved (log-compat contract)', () => {
   assert.equal(TOOL_ERROR_METRICS.sessionRecallAutoAttached, 'session_recall_auto_attached')
   // skill-resume G4 — last-recourse hint recovery from auto-attached capsule text
   assert.equal(TOOL_ERROR_METRICS.skillReferenceHintRecoveredFromCapsule, 'skill_reference_hint_recovered_from_capsule')
+  // Stage 2.1a — provider-side malformed tool_calls.arguments
+  assert.equal(TOOL_ERROR_METRICS.providerArgumentsCorrupt, 'provider_arguments_corrupt')
+  // Stage 4 W3 — model-issued skill_* tool blocked by per-turn authorization
+  assert.equal(TOOL_ERROR_METRICS.authorizationDenied, 'authorization_denied')
   // A1 SubAgent skeleton — lifecycle cleanup drain failure observability
   assert.equal(TOOL_ERROR_METRICS.subagentCleanupDrainFailed, 'subagent_cleanup_drain_failed')
   // H1 — previously silent fallback paths now emit observability.

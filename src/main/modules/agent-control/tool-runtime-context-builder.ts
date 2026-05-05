@@ -14,6 +14,10 @@ import {
   snapshotTurnFeatureFlags,
   type TurnFeatureFlags,
 } from './turn-feature-flags'
+import {
+  SKILL_TOOL_AUTHORIZATION_NOT_SET,
+  type SkillToolAuthorization,
+} from './skill-tool-authorization'
 
 /**
  * Phase 3 (Team T7) — derive the initial `ToolRuntimeActiveFrameContext`
@@ -71,6 +75,15 @@ export function buildToolRuntimeContext(params: {
    * is never undefined.
    */
   activeFrame?: ToolRuntimeActiveFrameContext | null
+  /**
+   * Stage 4 W3 — per-turn skill tool authorization. When omitted, the
+   * default (`SKILL_TOOL_AUTHORIZATION_NOT_SET`) is used; this is a
+   * back-compat short-circuit that admission treats as "skip skill_*
+   * authorization check". Once W3b cutover wires `turn-engine` to
+   * compute and pass real authorization, the default is no longer used
+   * for model-driven turns.
+   */
+  authorization?: SkillToolAuthorization | null
 }): ToolRuntimeContext {
   const scopeId = params.scopeId || params.scope?.id || params.sessionId
   return {
@@ -94,6 +107,7 @@ export function buildToolRuntimeContext(params: {
     agentContext: params.agentContext ?? null,
     turnFeatureFlags: params.turnFeatureFlags ?? snapshotTurnFeatureFlags(),
     activeFrame: params.activeFrame ?? createEmptyActiveFrameContext(),
+    authorization: params.authorization ?? SKILL_TOOL_AUTHORIZATION_NOT_SET,
   }
 }
 
@@ -121,5 +135,9 @@ export function toToolExecutorContext(context: ToolRuntimeContext): ToolContext 
     // Phase 3 — forward the live active-frame slot so dispatched tools
     // (skills-tools.ts read-artifact, etc.) can read fresh artifact roots.
     activeFrame: context.activeFrame ?? createEmptyActiveFrameContext(),
+    // Stage 4 W3 — forward the per-turn skill tool authorization so
+    // tool-executor admission can enforce it for model-issued skill_*
+    // tool calls.
+    authorization: context.authorization ?? SKILL_TOOL_AUTHORIZATION_NOT_SET,
   }
 }

@@ -17,6 +17,18 @@
  *     of this registry.
  */
 export const TOOL_ERROR_METRICS = {
+  /**
+   * Stage 4 W3 — model-issued skill_* tool was rejected by per-turn
+   * `SkillToolAuthorization`. Distinct from `tool_not_registered`
+   * (fabricated name; registry layer signal) and from
+   * `tool_restricted_this_turn` (preflight allowedToolNames signal):
+   * this errorKind means "the tool exists, but THIS turn's identity
+   * did not authorize the model to invoke it". Emit payload includes
+   * `{ toolName, reason, mode, source }` so operators can see whether
+   * the deny was due to no-skill identity, wrong skill selected, or
+   * tool-not-in-allowed-set.
+   */
+  authorizationDenied: 'authorization_denied',
   /** dispatch 层把 handler 抛错吞成结构化 ToolExecutionOutput（Phase 1） */
   surfaced: 'tool_error_surfaced',
   /** tool-runtime 捕到 unknown-kind 错误，仍然 surface 给模型（Phase 1） */

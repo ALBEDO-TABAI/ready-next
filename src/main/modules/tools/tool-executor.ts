@@ -17,6 +17,12 @@ import type { ConversationScope } from '../agent-control/types'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 import type { ToolRuntimeActiveFrameContext } from '../agent-control/tool-runtime'
 import type { TurnFeatureFlags } from '../agent-control/turn-feature-flags'
+import {
+  SKILL_TOOL_AUTHORIZATION_NOT_SET,
+  checkSkillToolAuthorization,
+  type SkillToolAuthorization,
+} from '../agent-control/skill-tool-authorization'
+import { PRIMITIVE_TOOL_DEFS } from './skill-primitives/tool-defs'
 import type {
   SkillRunRequest,
   SkillRunResult,
@@ -89,6 +95,16 @@ export interface ToolContext {
     outputDir: string | null
     runStatePath: string | null
   } | null
+  /**
+   * Stage 4 W3 — per-turn skill tool authorization. The default value
+   * (`SKILL_TOOL_AUTHORIZATION_NOT_SET`, i.e. `mode:'none', reason:'not_set'`)
+   * is treated as a back-compat short-circuit by admission below: skill_*
+   * tools pass through, and the new `authorization_denied` errorKind is
+   * never emitted. Once W3b cutover wires `turn-engine` and `ToolPolicy`
+   * to populate real authorization, the default is no longer reached for
+   * model turns and the cutover becomes live.
+   */
+  authorization?: SkillToolAuthorization
 }
 
 function isFrameScopedInternalSkillActionAllowed(
@@ -169,6 +185,40 @@ export async function executeToolCall(
         toolName,
       },
     })
+  }
+
+  // Stage 4 W3 — per-turn skill tool authorization. Only enforced for
+  // model-issued tool calls (invoker:'model' or undefined). child_runner /
+  // host invokers continue through their own admission paths
+  // (tool-executor.ts:131 child-internal admission, host calls bypass).
+  // The `'not_set'` default (W3a) short-circuits to allow, preserving
+  // pre-cutover behavior until W3b wires real authorization through
+  // `ToolPolicy` → `ToolRuntimeContext` → here.
+  const invoker = context.invoker ?? 'model'
+  const authorization = context.authorization ?? SKILL_TOOL_AUTHORIZATION_NOT_SET
+  if (invoker === 'model' && toolName.startsWith('skill_')) {
+    const isPrimitive = PRIMITIVE_TOOL_DEFS.some((d) => d.name === toolName)
+    const decision = checkSkillToolAuthorization(toolName, authorization, isPrimitive)
+    if (!decision.allowed) {
+      logAgentMetric(TOOL_ERROR_METRICS.authorizationDenied, {
+        toolName,
+        reason: decision.reason,
+        mode: authorization.mode,
+        source: authorization.mode === 'selected' ? authorization.source : null,
+        sessionId: context.sessionId || null,
+      })
+      return createToolExecutionOutput(
+        `Tool ${toolName} is not authorized for this turn (${decision.reason}).`,
+        {
+          shape: 'json',
+          data: {
+            errorKind: 'authorization_denied',
+            reason: decision.reason,
+            toolName,
+          },
+        },
+      )
+    }
   }
 
   if (context.abortSignal?.aborted) {
