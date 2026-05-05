@@ -591,6 +591,23 @@ test('deriveHandlesWithOrigins finalizes missing origin for absent fields', () =
   assert.equal(origins.outputDir, 'missing')
 })
 
+test('deriveHandlesWithOrigins stamps projection_task_id when only taskId prefix provides childRunId', () => {
+  const { handles, origins } = deriveHandlesWithOrigins(
+    baseProjection({
+      taskId: 'skill-child:vcr_from_taskid',
+      continuationRef: null,
+      recentArtifacts: [],
+    }),
+    null,
+  )
+  assert.equal(handles.childRunId, 'vcr_from_taskid')
+  assert.equal(
+    origins.childRunId,
+    'projection_task_id',
+    'taskId-prefix fallback must not be mislabeled as continuation_ref',
+  )
+})
+
 test('reconcileTaskProjections emits legacy origin metric when artifact_path origin fires', async () => {
   const outputDir = createRoot('w3-legacy-origin-emit')
   const runStatePath = join(outputDir, 'run_state.json')

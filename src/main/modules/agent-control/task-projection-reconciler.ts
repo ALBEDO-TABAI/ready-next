@@ -140,6 +140,7 @@ const projectionHandleLegacyEmitMs = new Map<string, number>()
 const PROJECTION_HANDLE_LEGACY_ORIGINS = new Set<ProjectionHandleOrigin>([
   'artifact_path',
   'run_state_enrichment',
+  'projection_task_id',
 ])
 
 function emitProjectionHandleLegacyOriginMetrics(
@@ -331,6 +332,15 @@ export type ProjectionHandleOrigin =
   | 'artifact_path'
   | 'run_state_enrichment'
   | 'event_log'
+  /**
+   * Stage 3 W3 follow-up — only the `childRunId` field uses this origin.
+   * It fires when `record.taskId` carried the `skill-child:` prefix and we
+   * extracted the id from there (i.e. neither `continuationRef.childRunId`
+   * nor `payload.childRunId` was present). Healthy upstream paths persist
+   * `childRunId` in `continuationRef`, so this origin is observability for
+   * "DB row exists but its continuation lost the handle."
+   */
+  | 'projection_task_id'
   | 'missing'
 
 export type HandleOriginMap = Record<keyof ProjectionHandles, ProjectionHandleOrigin>
@@ -368,7 +378,11 @@ export function deriveHandlesWithOrigins(
     || taskRun?.id
     || null
   if (stringValue(continuation?.childRunId)) origins.childRunId = 'continuation_ref'
-  else if (childRunIdForRecord(record)) origins.childRunId = 'continuation_ref'
+  // childRunIdForRecord falls through to taskId prefix extraction when
+  // continuation.childRunId is absent — the first branch above already
+  // captured the continuation case, so reaching here is unambiguously
+  // the taskId-prefix fallback.
+  else if (childRunIdForRecord(record)) origins.childRunId = 'projection_task_id'
   else if (stringValue(payload?.childRunId)) origins.childRunId = 'child_payload'
   else if (taskRun?.id) origins.childRunId = 'skill_task_run'
 
