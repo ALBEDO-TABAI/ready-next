@@ -37,7 +37,6 @@ import {
   type ReconciledRunCapabilities,
 } from '../main/modules/agent-control/run-capability-controller'
 import {
-  getPolicyAnthropicTools,
   getPolicyOpenAIToolBundle,
   type ToolPolicy,
 } from '../main/modules/agent-control/execution-tool-config'
@@ -48,6 +47,8 @@ import {
   buildSelectedSkillToolAuthorization,
   filterToolsByAuthorization,
 } from '../main/modules/agent-control/skill-tool-authorization'
+import { ToolGateway } from '../main/modules/agent-control/tool-gateway'
+import type { ToolDefinition } from '../main/modules/agent-control/tool-definition'
 
 const BASE_CONFIG: AIModelConfig = {
   provider: 'openai',
@@ -222,7 +223,14 @@ test('buildAuthorizationFromIdentity: unknown identity reason → fall back to n
 })
 
 // ---------------------------------------------------------------------------
-// (3) getPolicyAnthropicTools / getPolicyOpenAIToolBundle — visible list
+// (3) ToolGateway → registry chain — direct fixture tests
+//
+// These tests inject TWO real skill tools via `__testGroupProviders` so the
+// gateway/registry chain has something to filter. Pinning behavior through
+// the singleton `defaultToolGateway` is not enough: under host-Node tests
+// the skills group can be empty (no live skills runtime), making
+// "no skill_* leaked" assertions vacuously true. Direct ToolGateway with
+// a fake provider proves the filter actually filters.
 // ---------------------------------------------------------------------------
 
 function makeBasePolicy(overrides: Partial<ToolPolicy> = {}): ToolPolicy {
@@ -240,54 +248,117 @@ function makeBasePolicy(overrides: Partial<ToolPolicy> = {}): ToolPolicy {
   }
 }
 
-test('getPolicyOpenAIToolBundle: ToolPolicy.authorization=mode:none → ZERO skill_* tools in visible list', () => {
-  const policy = makeBasePolicy({
-    authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
+function makeFixtureSkillToolDefinition(name: string): ToolDefinition {
+  return {
+    name,
+    groupId: 'skills',
+    domain: 'skill',
+    kind: 'interactive',
+    concurrency: 'serialized',
+    interruptBehavior: 'host_managed',
+    timeoutProfile: 'skill',
+    supportsTextBridge: true,
+    projectionHint: { emitsProjectionPatch: true },
+    description: name,
+    schema: null,
+    resultShape: 'projection_patch',
+  }
+}
+
+function makeFixtureGateway(): ToolGateway {
+  // Inject two skill tools via __testGroupProviders so the chain has real
+  // tools to filter. `getToolDefinitions` returns the pair; the gateway
+  // path goes provider → registry → filterToolsByAuthorization.
+  return new ToolGateway({
+    __testGroupProviders: {
+      skills: {
+        staticToolNames: ['skill_video_expert_pipeline', 'skill_run_shell'],
+        getToolDefinitions: () => [
+          makeFixtureSkillToolDefinition('skill_video_expert_pipeline'),
+          makeFixtureSkillToolDefinition('skill_run_shell'),
+        ],
+      },
+    },
   })
-  const bundle = getPolicyOpenAIToolBundle(policy)
-  const skillTools = bundle.toolNames.filter((n) => n.startsWith('skill_'))
-  assert.equal(skillTools.length, 0, `mode:none must strip all skill_* — got ${skillTools.join(', ')}`)
-  // Non-skill tools should still appear (subject to capability profile).
-  assert.ok(bundle.toolNames.some((n) => !n.startsWith('skill_')), 'non-skill tools must remain visible')
+}
+
+test('ToolGateway chain: authorization=mode:none → BOTH fixture skill tools stripped (allowed_skill is also gone)', () => {
+  const gateway = makeFixtureGateway()
+  const tools = gateway.getOpenAIToolsForGroups(
+    ['skills'],
+    'session-test',
+    buildExplicitNoSkillAuthorization('no_skill_signal'),
+  )
+  const skillNames = tools
+    .map((t) => {
+      const fn = (t.function as { name?: unknown } | undefined)?.name
+      return typeof fn === 'string' ? fn : null
+    })
+    .filter((n): n is string => Boolean(n) && n.startsWith('skill_'))
+  assert.deepEqual(skillNames, [], 'mode:none must strip ALL skill_* — both fixture tools should be gone')
 })
 
-test('getPolicyAnthropicTools: ToolPolicy.authorization=mode:none → ZERO skill_* tools', () => {
-  const policy = makeBasePolicy({
-    authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
+test('ToolGateway chain: authorization=mode:selected → AUTHORIZED tool kept, UNAUTHORIZED tool stripped', () => {
+  const gateway = makeFixtureGateway()
+  const auth = buildSelectedSkillToolAuthorization({
+    skillId: 'video-expert-analyzer',
+    allowedTypedActions: ['skill_video_expert_pipeline'], // authorized
+    allowedPrimitives: [], // skill_run_shell intentionally NOT here
+    source: 'explicit',
+    reason: 'user_named_skill',
   })
-  const tools = getPolicyAnthropicTools(policy)
-  const skillTools = tools
-    .map((t) => (typeof t.name === 'string' ? t.name : ''))
-    .filter((n) => n.startsWith('skill_'))
-  assert.equal(skillTools.length, 0, 'mode:none must strip all skill_* in anthropic format too')
+  const tools = gateway.getOpenAIToolsForGroups(['skills'], 'session-test', auth)
+  const skillNames = tools
+    .map((t) => {
+      const fn = (t.function as { name?: unknown } | undefined)?.name
+      return typeof fn === 'string' ? fn : null
+    })
+    .filter((n): n is string => Boolean(n) && n.startsWith('skill_'))
+  assert.ok(
+    skillNames.includes('skill_video_expert_pipeline'),
+    'authorized typed action MUST remain in visible list',
+  )
+  assert.ok(
+    !skillNames.includes('skill_run_shell'),
+    'unauthorized primitive MUST be filtered out — got: ' + skillNames.join(', '),
+  )
 })
 
-test('getPolicyOpenAIToolBundle: ToolPolicy.authorization=mode:selected → only allowed skill_* retained', () => {
+test('ToolGateway chain: anthropic format also filters by authorization', () => {
+  const gateway = makeFixtureGateway()
   const auth = buildSelectedSkillToolAuthorization({
     skillId: 'video-expert-analyzer',
     allowedTypedActions: ['skill_video_expert_pipeline'],
-    // Empty primitives — no primitive should appear.
     allowedPrimitives: [],
     source: 'explicit',
     reason: 'user_named_skill',
   })
-  const policy = makeBasePolicy({
-    authorization: auth,
-    preferredSkillToolNames: ['skill_video_expert_pipeline', 'skill_video_expert_ai_analyze'],
-  })
-  const bundle = getPolicyOpenAIToolBundle(policy)
-  const skillTools = bundle.toolNames.filter((n) => n.startsWith('skill_'))
-  // Only skill_video_expert_pipeline is in allowedTypedActions; ai_analyze
-  // is filtered out by authorization even though preferredSkillToolNames
-  // includes it. Primitives are also filtered out.
-  for (const name of skillTools) {
-    assert.equal(name, 'skill_video_expert_pipeline', `unauthorized skill tool leaked: ${name}`)
-  }
+  const tools = gateway.getAnthropicToolsForGroups(['skills'], 'session-test', auth)
+  const skillNames = tools
+    .map((t) => (typeof t.name === 'string' ? t.name : null))
+    .filter((n): n is string => Boolean(n) && n.startsWith('skill_'))
+  assert.ok(skillNames.includes('skill_video_expert_pipeline'))
+  assert.ok(!skillNames.includes('skill_run_shell'))
+})
+
+test('ToolGateway chain: no authorization (back-compat) → both fixture skills retained', () => {
+  const gateway = makeFixtureGateway()
+  // Pass `null` to exercise the back-compat path explicitly.
+  const tools = gateway.getOpenAIToolsForGroups(['skills'], 'session-test', null)
+  const skillNames = tools
+    .map((t) => {
+      const fn = (t.function as { name?: unknown } | undefined)?.name
+      return typeof fn === 'string' ? fn : null
+    })
+    .filter((n): n is string => Boolean(n) && n.startsWith('skill_'))
+  assert.ok(skillNames.includes('skill_video_expert_pipeline'))
+  assert.ok(skillNames.includes('skill_run_shell'))
 })
 
 test('getPolicyOpenAIToolBundle: no ToolPolicy.authorization (legacy callers) → behaves as before W3b.2', () => {
-  // Back-compat: if authorization is undefined, the filter does nothing.
-  // ToolPolicy still applies its existing preferredSkillToolNames filter.
+  // Back-compat smoke: if authorization is undefined on the policy, the
+  // filter does nothing in the singleton-gateway path. ToolPolicy still
+  // applies its existing preferredSkillToolNames filter.
   const policy = makeBasePolicy()
   const bundle = getPolicyOpenAIToolBundle(policy)
   // Just verify no crash and bundle is non-empty.
@@ -299,8 +370,24 @@ test('getPolicyOpenAIToolBundle: no ToolPolicy.authorization (legacy callers) �
 //     are computed with authorization filter in place.
 // ---------------------------------------------------------------------------
 
-function buildPreparedInputs(authorization: ReconciledRunCapabilities['toolPolicy']['authorization']) {
-  const requestEnvelope = buildRequestEnvelope({ userText: '帮我看一下天气' })
+// Build inputs that ACTUALLY make the skills group visible by mimicking
+// the `@[<skill name>]` mention pattern the run-capability-controller
+// existing tests use (`prepareInitialRun exposes only selected skill
+// tools when a skill is selected`). With `preferredSkillToolNames`
+// non-empty AND user text containing an explicit skill mention, the
+// capability layer enables the skills group; the registry then
+// returns `skill_ask_user` (a real primitive) plus anything in
+// `preferredSkillToolNames` that resolves through the live registry.
+//
+// The userText input is DELIBERATELY one the existing test fixture
+// already verifies makes skills group visible (see
+// run-capability-controller.test.ts:151-189).
+function buildSkillVisibleInputs(
+  authorization: ReconciledRunCapabilities['toolPolicy']['authorization'],
+  preferredSkillToolNames: string[] | null = ['skill_ask_user'],
+) {
+  const userText = '@[Video Copy Analyzer] 分析这个视频文案'
+  const requestEnvelope = buildRequestEnvelope({ userText })
   return {
     config: BASE_CONFIG,
     capabilityProfile: 'local_chat' as const,
@@ -308,12 +395,12 @@ function buildPreparedInputs(authorization: ReconciledRunCapabilities['toolPolic
     hasVideoInputs: false,
     hasIncomingVideo: false,
     keepToolsWithVideo: false,
-    preferredSkillToolNames: null,
+    preferredSkillToolNames,
     executionIntentContext: {
       requestEnvelope,
       intentClassification: classifyIntent(requestEnvelope),
-      contextualUserInput: '帮我看一下天气',
-      userInstructionText: '帮我看一下天气',
+      contextualUserInput: userText,
+      userInstructionText: userText,
       hasDocumentEnvironment: false,
       hasWidgetTargetContext: false,
       explicitWidgetCreateIntent: false,
@@ -323,38 +410,85 @@ function buildPreparedInputs(authorization: ReconciledRunCapabilities['toolPolic
     browserDecisionMode: 'free_tool_loop' as const,
     runtimeAvailability: {
       browserHostAvailable: true,
-      feishuConnected: false,
+      feishuConnected: true,
     },
-    hostContext: { userText: '帮我看一下天气' },
-    sessionId: 'scope-test',
+    hostContext: { userText },
+    // Intentionally NO sessionId — `filterSkillPrimitivesBySession`'s
+    // `shouldExposeSkillPrimitive` falls back to "show all primitives" when
+    // sessionId is undefined, which keeps `skill_ask_user` in the visible
+    // skills list. Mirrors the run-capability-controller test fixture at
+    // `prepareInitialRun exposes only selected skill tools when a skill is
+    // selected` (line 151-189).
     authorization,
   }
 }
 
-test('prepareInitialRun: authorization=mode:none → allowedToolNames excludes ALL skill_*', () => {
-  const prepared = prepareInitialRun(
-    buildPreparedInputs(buildExplicitNoSkillAuthorization('no_skill_signal')),
+test('prepareInitialRun: skills group visible + no authorization → baseline contains skill_ask_user (sanity for the next two tests)', () => {
+  // Sanity: without this baseline succeeding, the next two tests' skill_*
+  // assertions would be vacuously true. This baseline proves the fixture
+  // actually puts skill_ask_user in allowedToolNames absent authorization.
+  const inputs = buildSkillVisibleInputs(undefined)
+  delete (inputs as { authorization?: unknown }).authorization
+  const prepared = prepareInitialRun(inputs)
+  assert.ok(
+    prepared.capabilityResolution.visibleCapabilityGroupIds.includes('skills'),
+    'skills group MUST be visible in this fixture (else later assertions are vacuous)',
   )
-  const skillNames = prepared.allowedToolNames.filter((n) => n.startsWith('skill_'))
-  assert.equal(
-    skillNames.length,
-    0,
-    `prepareInitialRun must apply authorization filter BEFORE bundling — got skill_* in allowedToolNames: ${skillNames.join(', ')}`,
+  assert.ok(
+    prepared.allowedToolNames.includes('skill_ask_user'),
+    `baseline allowedToolNames must include skill_ask_user; got: ${prepared.allowedToolNames.join(', ')}`,
   )
 })
 
-test('prepareInitialRun: authorization=mode:none → toolPolicy.authorization is set on the returned policy', () => {
+test('prepareInitialRun: skills group visible + authorization=mode:none → skill_ask_user STRIPPED from allowedToolNames', () => {
+  // Real W3b.2 fix coverage: skills group is visible AND a skill tool is
+  // present in the baseline. With mode:none authorization, the registry
+  // filter MUST strip it from prepared.allowedToolNames (which is built
+  // from `getPolicyOpenAIToolBundle` BEFORE turn-engine's post-call
+  // mutation — the W3b.2.1 fix is what makes this consistent).
   const auth = buildExplicitNoSkillAuthorization('no_skill_signal')
-  const prepared = prepareInitialRun(buildPreparedInputs(auth))
-  assert.equal(prepared.toolPolicy.authorization, auth)
+  const prepared = prepareInitialRun(buildSkillVisibleInputs(auth))
+  const skillNames = prepared.allowedToolNames.filter((n) => n.startsWith('skill_'))
+  assert.deepEqual(
+    skillNames,
+    [],
+    `mode:none must strip ALL skill_* in allowedToolNames; got: ${skillNames.join(', ')}`,
+  )
+  assert.equal(prepared.toolPolicy.authorization, auth, 'toolPolicy.authorization carried through')
+})
+
+test('prepareInitialRun: skills group visible + authorization=mode:selected (allowed=skill_ask_user) → skill_ask_user RETAINED, others not added', () => {
+  // mode:selected with allowedPrimitives=['skill_ask_user'] retains the
+  // authorized primitive in allowedToolNames. The fixture has nothing
+  // else to leak (no extra skill tools beyond ask_user), but the
+  // assertion proves the filter doesn't false-positive strip authorized
+  // tools.
+  const auth = buildSelectedSkillToolAuthorization({
+    skillId: 'video-copy-analyzer',
+    allowedTypedActions: [],
+    allowedPrimitives: ['skill_ask_user'],
+    source: 'explicit',
+    reason: 'user_named_skill',
+  })
+  const prepared = prepareInitialRun(buildSkillVisibleInputs(auth, ['skill_ask_user']))
+  assert.ok(
+    prepared.allowedToolNames.includes('skill_ask_user'),
+    `authorized primitive MUST remain in allowedToolNames; got: ${prepared.allowedToolNames.join(', ')}`,
+  )
+  // Any other skill_* tools that registered themselves but aren't in
+  // allowedTypedActions/allowedPrimitives must not appear.
+  const otherSkillNames = prepared.allowedToolNames.filter((n) => n.startsWith('skill_') && n !== 'skill_ask_user')
+  assert.deepEqual(
+    otherSkillNames,
+    [],
+    `unauthorized skill_* leaked: ${otherSkillNames.join(', ')}`,
+  )
 })
 
 test('prepareInitialRun: no authorization passed → toolPolicy.authorization stays undefined (legacy back-compat)', () => {
-  const inputs = buildPreparedInputs(undefined)
+  const inputs = buildSkillVisibleInputs(undefined)
   delete (inputs as { authorization?: unknown }).authorization
   const prepared = prepareInitialRun(inputs)
-  // Either undefined or unset — what we care about is that the snapshot
-  // doesn't accidentally introduce a `'not_set'` short-circuit value.
   assert.ok(
     prepared.toolPolicy.authorization === undefined
     || prepared.toolPolicy.authorization === null,
