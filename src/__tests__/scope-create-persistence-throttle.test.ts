@@ -78,8 +78,8 @@ test('ScopeCreatePersistenceMetricThrottle keys throttle bucket by agent × scop
   // Different reason
   assert.equal(throttle.maybeEmit('newSession', 'result_failure', 'scope-A', 'assistant'), true)
   // null scopeId collapses with another null scopeId for same agent+site+reason
-  assert.equal(throttle.maybeEmit('newSession', 'ipc_unavailable', null, 'assistant'), true)
-  assert.equal(throttle.maybeEmit('newSession', 'ipc_unavailable', null, 'assistant'), false, 'null scopeId shares one bucket')
+  assert.equal(throttle.maybeEmit('newSession', 'result_failure', null, 'assistant'), true)
+  assert.equal(throttle.maybeEmit('newSession', 'result_failure', null, 'assistant'), false, 'null scopeId shares one bucket')
   assert.equal(payloads.length, 6)
 })
 

@@ -22,9 +22,15 @@ export type ScopeCreatePersistenceSite =
   | 'sendMessage_agent_mismatch'
   | 'sendMessage_ensure'
 
+/**
+ * Production emit sites: `'ipc_rejected'` for thrown IPC errors,
+ * `'result_failure'` for `{ success: false }` or null data. The previous
+ * `'ipc_unavailable'` reason was never emitted (every call site gates on
+ * `createLocalScope !== undefined` before invoking) and was removed in
+ * the W4 follow-up to keep the type union honest.
+ */
 export type ScopeCreatePersistenceReason =
   | 'ipc_rejected'
-  | 'ipc_unavailable'
   | 'result_failure'
 
 export interface ScopeCreatePersistencePayload {
