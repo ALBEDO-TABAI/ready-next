@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "frozenAt": "B-stage W0a (2026-05-01)",
+  "frozenAt": "Stage 4 W1.7 (2026-05-05) — added ResumeSkillChildRunOptions for agentContext propagation; turn-engine.ts:2030-2032 production caller passes the options",
   "source": "src/main/modules/agent-control/skill-child-runner.ts",
   "exports": [
     {
@@ -33,6 +33,10 @@
     {
       "kind": "interface",
       "name": "WaitForSkillChildRunCloseOptions"
+    },
+    {
+      "kind": "interface",
+      "name": "ResumeSkillChildRunOptions"
     },
     {
       "kind": "type",
@@ -69,7 +73,7 @@
     {
       "kind": "function",
       "name": "resumeSkillChildRun",
-      "signature": "(childRunId: string): Promise<StartSkillChildRunResult>"
+      "signature": "(childRunId: string, options?: ResumeSkillChildRunOptions): Promise<StartSkillChildRunResult>"
     },
     {
       "kind": "function",
