@@ -302,6 +302,10 @@ import { buildSkillTaskLifecycleSignal } from './skill-task-lifecycle'
 import { inspectLatestSkillTask } from './skill-task-supervisor'
 import type { SkillTaskSupervisorSnapshot } from './skill-task-supervisor'
 import { recordSkillParentTaskLifecycleEvent } from './skill-task-tracker'
+// Stage 4 W1 — pure-read SkillTurnIdentity shadow.
+import { collectIdentityReadSnapshot } from './skill-turn-identity-snapshot'
+import { projectIdentityToLegacyShape, resolveSkillTurnIdentity } from './skill-turn-identity'
+import { SKILL_TURN_IDENTITY_METRICS } from './skill-turn-identity-metrics'
 import {
   createSkillBudgetLeaseState,
   evaluateSkillBudgetLease,
@@ -1444,6 +1448,40 @@ export class TurnEngine {
           return false
         }
       }
+      // Stage 4 W1 — pure-read SkillTurnIdentity shadow. Collect snapshot
+      // BEFORE the legacy A-F rearm sections call `rememberReferenceSkillFrom*`
+      // / `rememberActiveSkillContext`, so the shadow sees the same input
+      // state legacy will process. Resolver runs over the frozen snapshot.
+      // W2 deletes this shadow + the legacy A-F sections in one commit.
+      const __identityShadowSnapshot = collectIdentityReadSnapshot({
+        request: {
+          sessionId: request.sessionId,
+          primaryInstruction: requestEnvelope.primaryInstruction,
+          pureUserText: requestEnvelope.pureUserText,
+        },
+        contextualUserInput,
+        currentTurnResumeText: currentTurnResumeText || '',
+        explicitRunStateResourceForTurn,
+        providedContinuationState,
+        isSkillResumeTurnDetected,
+        isConfigRepairTurnDetected,
+        previousAssistantSkillToolUses,
+        firstSkillMatch,
+        firstExplicitSkillId,
+        runStateResourceVia,
+        skillContextOrchestrator,
+        inspectLatestSkillTask: (params) =>
+          host.skillTaskSupervisor?.inspectLatestSkillTask
+            ? host.skillTaskSupervisor.inspectLatestSkillTask(params)
+            : inspectLatestSkillTask(params),
+        resolveRecentSkillRun: host.resolveRecentSkillRun,
+        resolveRecentSkillTaskRun: (host as unknown as {
+          resolveRecentSkillTaskRun?: (sessionId: string | undefined) => RecentSkillRunForResume | null
+        }).resolveRecentSkillTaskRun,
+        getLatestSkillRun,
+      })
+      const __identityShadow = resolveSkillTurnIdentity(__identityShadowSnapshot)
+
       // skill-resume G2/G3 — when the user fired a bare retry intent and the
       // substring-based skill match failed but the assistant recently used a
       // skill_* tool_use, reverse-resolve the tool name back to its skill and
@@ -1625,6 +1663,44 @@ export class TurnEngine {
             : null
         referenceSkillHintVia = 'explicit'
       }
+      // Stage 4 W1 — shadow comparison. After legacy A-F has finalized the
+      // hasExplicitSkill / lookbackRearmedSkill / referenceSkillHintVia
+      // locals, project the shadow identity into the same shape and emit a
+      // mismatch metric on any divergence. W2 deletes this entire block.
+      {
+        const __identityLegacyShape = {
+          hasExplicitSkill,
+          lookbackRearmedSkillId: lookbackRearmedSkill?.skillId || null,
+          referenceSkillHintVia,
+        }
+        const __identityShadowShape = projectIdentityToLegacyShape(
+          __identityShadow,
+          runStateResourceVia,
+        )
+        const __mismatchedFields: string[] = []
+        if (__identityLegacyShape.hasExplicitSkill !== __identityShadowShape.hasExplicitSkill) {
+          __mismatchedFields.push('hasExplicitSkill')
+        }
+        if (__identityLegacyShape.lookbackRearmedSkillId !== __identityShadowShape.lookbackRearmedSkillId) {
+          __mismatchedFields.push('lookbackRearmedSkillId')
+        }
+        if (__identityLegacyShape.referenceSkillHintVia !== __identityShadowShape.referenceSkillHintVia) {
+          __mismatchedFields.push('referenceSkillHintVia')
+        }
+        if (__mismatchedFields.length > 0) {
+          logAgentMetric(SKILL_TURN_IDENTITY_METRICS.shadowMismatch, {
+            sessionId: request.sessionId,
+            fields: __mismatchedFields,
+            expectedFromLegacy: __identityLegacyShape,
+            actualFromResolver: __identityShadowShape,
+            shadowMode: __identityShadow.mode,
+            shadowSource: __identityShadow.mode === 'skill'
+              ? __identityShadow.source
+              : __identityShadow.reason,
+          })
+        }
+      }
+
       const shouldBindSkillContextForTurn = Boolean(
         hasExplicitSkill
         || explicitFreshSkillStart

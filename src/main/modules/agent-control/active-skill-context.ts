@@ -323,6 +323,21 @@ function rememberedContext(sessionId: string | null): ActiveSkillContext | null 
   return context
 }
 
+// Stage 4 W1 — pure-read variant. Same logic as `rememberedContext` but does
+// NOT delete expired entries. Used by the shadow `SkillTurnIdentity` resolver
+// snapshot collector so shadow reads cannot mutate the legacy state under
+// inspection. Treat expired-as-invisible exactly like `rememberedContext`
+// would, just without the side-effect.
+function peekRememberedContext(sessionId: string | null): ActiveSkillContext | null {
+  if (!sessionId) return null
+  const context = rememberedContexts.get(sessionId) || null
+  if (!context) return null
+  if (Date.now() - parseTime(context.observedAt) > ACTIVE_CONTEXT_TTL_MS) {
+    return null
+  }
+  return context
+}
+
 export function getRememberedActiveSkillContext(sessionId?: string | null): ActiveSkillContext | null {
   return rememberedContext(sessionKey(sessionId))
 }
@@ -410,6 +425,57 @@ export function resolveActiveSkillContext(inputs: ResolveActiveSkillContextInput
   if (remembered) return remembered
 
   return contextFromReferenceHint(inputs.referenceHint ?? (sessionId ? getLastReferenceSkill(sessionId) : null))
+}
+
+// Stage 4 W1 — pure-read variant of `resolveActiveSkillContext` for the
+// shadow `SkillTurnIdentity` resolver snapshot. Same composite logic as
+// `resolveActiveSkillContext` (supervisor → projection → taskRun → remembered
+// → reference hint) but:
+//   1. Uses `peekRememberedContext` instead of `rememberedContext` so expired
+//      remembered entries are NOT deleted while the shadow inspects them.
+//   2. Does NOT fall through to `getLastReferenceSkill(sessionId)` — caller
+//      MUST pass `inputs.referenceHint` explicitly (collector reads it once
+//      via the orchestrator's read API, accepting that single TTL bump).
+//   3. Does NOT call `inspectLatestSkillTask` itself — caller MUST pass
+//      `inputs.supervisorSnapshot` explicitly (already collected once).
+//
+// Sub-task of W1 per v6 plan §4 — guarantees the shadow resolver's read
+// surface is bounded by the snapshot, not by extra orchestrator calls.
+export function resolveActiveSkillContextReadOnly(
+  inputs: ResolveActiveSkillContextInputs = {},
+): ActiveSkillContext | null {
+  const sessionId = sessionKey(inputs.sessionId)
+
+  const explicitOrProvidedContext = resolveActiveSkillContextFromInputs({
+    ...inputs,
+    sessionId: null,
+    referenceHint: null,
+  })
+  if (explicitOrProvidedContext) return explicitOrProvidedContext
+
+  // Pure-read: NO `inspectLatestSkillTask` call here. Caller must supply
+  // `supervisorSnapshot` if it has one (collected once at snapshot time).
+  const supervisor = contextFromSupervisor(inputs.supervisorSnapshot)
+  if (supervisor) return supervisor
+
+  const projection = newestContext([
+    ...(inputs.projections || []).map(contextFromProjection),
+    ...readProjectionContexts(sessionId),
+  ])
+  if (projection) return projection
+
+  const taskRun = newestContext([
+    ...(inputs.taskRuns || []).map(contextFromTaskRun),
+    ...readTaskRunContexts(sessionId),
+  ])
+  if (taskRun) return taskRun
+
+  const remembered = peekRememberedContext(sessionId)
+  if (remembered) return remembered
+
+  // Pure-read: only use the reference hint the caller already collected.
+  // Do NOT call getLastReferenceSkill (which would bump TTL).
+  return contextFromReferenceHint(inputs.referenceHint ?? null)
 }
 
 export function hasActiveSkillContext(sessionId?: string | null, skillId?: string | null): boolean {
