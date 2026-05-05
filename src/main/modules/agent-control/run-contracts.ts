@@ -708,6 +708,13 @@ export interface TurnToolBatchResult {
   recoveryHistory: RecoveryRecord[]
 }
 
+export interface TurnToolCallParseError {
+  route: 'chat_completions' | 'responses'
+  toolName?: string
+  callId?: string
+  reason: 'corrupt'
+}
+
 export interface TurnModelResponse extends TurnSimpleResponse {
   toolCalls: TurnToolCall[]
   stopReason: string
@@ -715,6 +722,7 @@ export interface TurnModelResponse extends TurnSimpleResponse {
   providerResponseId?: string
   rawText?: string
   toolTransport?: 'native' | 'text'
+  toolCallParseErrors?: TurnToolCallParseError[]
   toolSnapshots?: ToolSnapshot[]
   recoveryHistory?: RecoveryRecord[]
 }

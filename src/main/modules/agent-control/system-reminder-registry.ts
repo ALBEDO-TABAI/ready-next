@@ -8,6 +8,7 @@ export type ReminderTopic =
   | 'force-tool-locked'
   | 'force-tool-missing'
   | 'typed-action-preferred'
+  | 'provider-tool-arguments-corrupt'
   // Stage 4 W2 — dedicated topics that previously lived as inline strings
   // in turn-engine.ts. Routing through the registry lets conflict resolution
   // and ordering apply, and keeps the topic taxonomy honest about which

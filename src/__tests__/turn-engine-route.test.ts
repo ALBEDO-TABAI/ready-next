@@ -1709,6 +1709,134 @@ test('TurnEngine enters the model tool-loop path when route and capability polic
 
   assert.equal(toolLoopRequests, 1)
   assert.equal(result.finalText, 'tool loop finished')
+  assert.equal(
+    request.session.messages.some((message) =>
+      message.role === 'user'
+      && String(message.content).includes('工具调用因参数损坏被丢弃')),
+    false,
+  )
+})
+
+test('TurnEngine injects provider corrupt args reminder and retries without leaking raw details', async () => {
+  const engine = new TurnEngine()
+  let toolLoopRequests = 0
+  const { request } = createRequest({
+    userText: '帮我修改这段文档',
+    intentClassification: createIntent({
+      primaryDomain: 'document',
+      mentionedDomains: ['document'],
+      objectSignals: ['document-object'],
+      actionSignals: ['document-action'],
+      confidence: 'high',
+    }),
+    host: {
+      providerContext: {
+        config: {
+          provider: 'openai',
+          model: 'gpt-test',
+          apiKey: 'test',
+          baseUrl: 'https://api.openai.com/v1',
+        },
+        baseUrl: 'https://api.openai.com/v1',
+        provider: undefined,
+        isKimi: false,
+        isKimiCoding: false,
+        useAnthropicProtocol: false,
+        supportsToolCalls: true,
+        supportsVideoBlock: true,
+        hasRawVideoInIncoming: false,
+      },
+      requestToolLoopResponse: async () => {
+        toolLoopRequests += 1
+        if (toolLoopRequests === 1) {
+          return {
+            text: '',
+            toolCalls: [],
+            stopReason: 'tool_calls',
+            toolCallParseErrors: [
+              {
+                route: 'chat_completions',
+                toolName: 'browser_search',
+                callId: 'call_bad',
+                reason: 'corrupt',
+              },
+            ],
+          }
+        }
+        return {
+          text: 'recovered final',
+          toolCalls: [],
+          stopReason: 'stop',
+        }
+      },
+    },
+  })
+
+  const result = await engine.execute(request)
+  const reminderMessages = request.session.messages
+    .filter((message) =>
+      message.role === 'user'
+      && String(message.content).includes('工具调用因参数损坏被丢弃'))
+    .map((message) => String(message.content))
+
+  assert.equal(toolLoopRequests, 2)
+  assert.equal(result.finalText, 'recovered final')
+  assert.equal(reminderMessages.length, 1)
+  assert.match(reminderMessages[0], /上一轮有 1 个工具调用因参数损坏被丢弃/)
+  assert.doesNotMatch(reminderMessages[0], /rawSample|arguments|callId/)
+})
+
+test('TurnEngine does not inject provider corrupt args reminder when parse errors are empty', async () => {
+  const engine = new TurnEngine()
+  let toolLoopRequests = 0
+  const { request } = createRequest({
+    userText: '帮我修改这段文档',
+    intentClassification: createIntent({
+      primaryDomain: 'document',
+      mentionedDomains: ['document'],
+      objectSignals: ['document-object'],
+      actionSignals: ['document-action'],
+      confidence: 'high',
+    }),
+    host: {
+      providerContext: {
+        config: {
+          provider: 'openai',
+          model: 'gpt-test',
+          apiKey: 'test',
+          baseUrl: 'https://api.openai.com/v1',
+        },
+        baseUrl: 'https://api.openai.com/v1',
+        provider: undefined,
+        isKimi: false,
+        isKimiCoding: false,
+        useAnthropicProtocol: false,
+        supportsToolCalls: true,
+        supportsVideoBlock: true,
+        hasRawVideoInIncoming: false,
+      },
+      requestToolLoopResponse: async () => {
+        toolLoopRequests += 1
+        return {
+          text: 'tool loop finished',
+          toolCalls: [],
+          stopReason: 'stop',
+          toolCallParseErrors: [],
+        }
+      },
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.equal(toolLoopRequests, 1)
+  assert.equal(result.finalText, 'tool loop finished')
+  assert.equal(
+    request.session.messages.some((message) =>
+      message.role === 'user'
+      && String(message.content).includes('工具调用因参数损坏被丢弃')),
+    false,
+  )
 })
 
 test('TurnEngine records tool snapshots and clears browser text-bridge nudges after one request', async () => {

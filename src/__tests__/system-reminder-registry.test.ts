@@ -89,3 +89,15 @@ test('register same topic twice uses the last registration', () => {
 
   assert.equal(registry.compose(), 'new budget')
 })
+
+test('provider corrupt arguments topic composes without default suppression', () => {
+  const text = composeSystemReminder([
+    {
+      topic: 'provider-tool-arguments-corrupt',
+      priority: 82,
+      text: '系统补充：上一轮有 2 个工具调用因参数损坏被丢弃，请重新调用并使用合法 JSON 参数。',
+    },
+  ])
+
+  assert.equal(text, '系统补充：上一轮有 2 个工具调用因参数损坏被丢弃，请重新调用并使用合法 JSON 参数。')
+})

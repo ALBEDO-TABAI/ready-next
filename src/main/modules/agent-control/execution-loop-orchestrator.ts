@@ -2,7 +2,7 @@ import type { ExecutionFallbackInfo } from '../claude-bridge/execution-fallback-
 import { annotateFallbackResult, resolveFallbackPlan } from '../claude-bridge/execution-fallback-policy'
 import { classifyExecutionError, type ErrorClassifierResult } from '../claude-bridge/error-classifier'
 import { buildRecoveryPlan } from '../claude-bridge/recovery-router'
-import type { RecoveryRecord, RunBudgetSeed, RunBudgetUsage, ToolSnapshot } from './run-contracts'
+import type { RecoveryRecord, RunBudgetSeed, RunBudgetUsage, ToolSnapshot, TurnToolCallParseError } from './run-contracts'
 import type { ParallelToolCall } from './tool-parallelism-policy'
 import { ToolRuntime, type ToolRuntimeBatchResult, type ToolRuntimeContext } from './tool-runtime'
 import type { ToolExecutionHooks } from './tool-execution-hooks'
@@ -17,6 +17,7 @@ interface APIResponseLike {
   rawText?: string
   toolTransport?: 'native' | 'text'
   fallback?: ExecutionFallbackInfo
+  toolCallParseErrors?: TurnToolCallParseError[]
   toolSnapshots?: ToolSnapshot[]
 }
 

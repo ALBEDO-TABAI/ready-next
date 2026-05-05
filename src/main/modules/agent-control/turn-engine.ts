@@ -780,6 +780,20 @@ function composeSystemReminderText(entry: ReminderEntry): string | null {
   return registry.compose()
 }
 
+function pushProviderToolArgumentsCorruptReminder<TSession extends TurnEngineSession>(
+  session: TSession,
+  response: Pick<TurnModelResponse, 'toolCallParseErrors'>,
+): boolean {
+  const count = response.toolCallParseErrors?.length ?? 0
+  if (count <= 0) return false
+  pushSystemReminderMessage(session, {
+    topic: 'provider-tool-arguments-corrupt',
+    priority: 82,
+    text: `系统补充：上一轮有 ${count} 个工具调用因参数损坏被丢弃，请重新调用并使用合法 JSON 参数。`,
+  })
+  return true
+}
+
 async function fireUserPromptSubmitHook(
   registry: Pick<HookRegistry, 'fire'>,
   payload: { userText: string; sessionId: string | null; timestamp: number },
@@ -3429,6 +3443,18 @@ export class TurnEngine {
         }
 
         if (response.toolCalls.length === 0) {
+          if (response.toolCallParseErrors && response.toolCallParseErrors.length > 0) {
+            const assistantHistoryText = response.rawText || response.text
+            if (assistantHistoryText) {
+              pushAssistantTextSafely(session, assistantHistoryText, {
+                sessionId: request.sessionId,
+                iteration: iterations,
+                toolTransport: response.toolTransport,
+              })
+            }
+            pushProviderToolArgumentsCorruptReminder(session, response)
+            continue
+          }
           const petToolRetryNeeded = shouldEnforcePetToolRetry({
             intent: executionIntentContext.intentClassification,
             allowedToolNames: routedAllowedToolNames,
@@ -4069,6 +4095,8 @@ export class TurnEngine {
           if (childRouteResult) return childRouteResult
           state.syncBudgetWarning()
         }
+
+        pushProviderToolArgumentsCorruptReminder(session, response)
 
         if (response.text) {
           const plannerStepCompleted = detectTaskStepCompletionCue(

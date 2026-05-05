@@ -9,6 +9,7 @@ const DEFAULT_CONFLICTS: Record<ReminderTopic, ReadonlyArray<ReminderTopic>> = {
   'force-tool-missing': ['typed-action-preferred', 'force-tool-locked'],
   budget: [],
   'missing-input': [],
+  'provider-tool-arguments-corrupt': [],
   'typed-action-preferred': [],
   // Stage 4 W2 — no implicit conflicts. The skill-resume reminder is a
   // synthetic skill-detection input the rest of the turn consumes, and the

@@ -242,6 +242,15 @@ test('OpenAIExecutionClient drops corrupt chat_completions tool_calls.arguments 
 
     assert.equal(result.toolCalls.length, 1, 'corrupt call should be dropped')
     assert.equal(result.toolCalls[0].id, 'call_good')
+    assert.deepEqual(result.toolCallParseErrors, [
+      {
+        route: 'chat_completions',
+        toolName: 'shell',
+        callId: 'call_bad',
+        reason: 'corrupt',
+      },
+    ])
+    assert.equal('rawSample' in (result.toolCallParseErrors?.[0] || {}), false)
     const corruptEvents = events.filter((e) => e.metric === 'provider_arguments_corrupt')
     assert.equal(corruptEvents.length, 1)
     assert.equal(corruptEvents[0].route, 'chat_completions')
@@ -292,6 +301,15 @@ test('OpenAIExecutionClient drops corrupt responses output[].arguments and emits
 
     assert.equal(result.toolCalls.length, 1, 'corrupt call should be dropped')
     assert.equal(result.toolCalls[0].id, 'rc_good')
+    assert.deepEqual(result.toolCallParseErrors, [
+      {
+        route: 'responses',
+        toolName: 'arr_arg',
+        callId: 'rc_bad',
+        reason: 'corrupt',
+      },
+    ])
+    assert.equal('rawSample' in (result.toolCallParseErrors?.[0] || {}), false)
     const corruptEvents = events.filter((e) => e.metric === 'provider_arguments_corrupt')
     assert.equal(corruptEvents.length, 1)
     assert.equal(corruptEvents[0].route, 'responses')

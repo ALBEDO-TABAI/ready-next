@@ -7,7 +7,7 @@ import { getPolicyOpenAITools, buildTextToolBridgeSystemPrompt, collectToolNames
 import { logAgentMetric } from '../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../agent-control/tool-error-metrics'
 import { resolveOpenAIProviderRuntime } from '../agent-control/provider-runtime-resolver'
-import type { ToolSnapshot } from '../agent-control/run-contracts'
+import type { ToolSnapshot, TurnToolCallParseError } from '../agent-control/run-contracts'
 import type { ExecutionFallbackInfo } from './execution-fallback-policy'
 import { annotateFallbackResult, resolveFallbackPlan } from './execution-fallback-policy'
 import { sanitizeOpenAICompatibleMessageHistory } from './openai-history-sanitization'
@@ -18,6 +18,7 @@ import { buildTextToolResultMessage, parseTextToolBridgeResponse } from './tool-
 import {
   buildChatCompletionsToolCalls,
   buildResponsesToolCalls,
+  type ProviderToolCallFailure,
 } from './provider-tool-arguments'
 
 export interface OpenAIChatMessage {
@@ -49,6 +50,7 @@ export interface OpenAIExecutionResponse {
   providerResponseId?: string
   rawText?: string
   toolTransport?: 'native' | 'text'
+  toolCallParseErrors?: TurnToolCallParseError[]
   fallback?: ExecutionFallbackInfo
   toolSnapshots?: ToolSnapshot[]
 }
@@ -610,13 +612,17 @@ export class OpenAIExecutionClient {
     }
 
     const json = await parseJsonOrEventStreamResponse(resp, { requestUrl: url }) as Record<string, unknown>
+    const responsesToolCallResult = this.extractResponsesToolCalls(json)
     const responsesNative: OpenAIExecutionResponse = {
       text: this.extractResponsesText(json),
-      toolCalls: this.extractResponsesToolCalls(json),
+      toolCalls: responsesToolCallResult.toolCalls,
       stopReason: String(json.status || 'completed'),
       reasoningContent: (json as { reasoning?: unknown }).reasoning,
       providerResponseId: typeof json.id === 'string' ? json.id : undefined,
       toolTransport: 'native',
+      toolCallParseErrors: responsesToolCallResult.toolCallParseErrors.length > 0
+        ? responsesToolCallResult.toolCallParseErrors
+        : undefined,
     }
     // Screenshot-bug ROOT FIX — recover XML tool_calls leaked into text.
     return this.recoverXmlToolCallsFromNative(responsesNative, 'responses')
@@ -685,6 +691,9 @@ export class OpenAIExecutionClient {
       stopReason: choice?.finish_reason || 'stop',
       reasoningContent: choice?.message?.reasoning_content,
       toolTransport: 'native',
+      toolCallParseErrors: built.failures.length > 0
+        ? this.buildToolCallParseErrors('chat_completions', built.failures)
+        : undefined,
     }
     this.deps.log(`OpenAI response: text=${nativeResponse.text.length}chars, toolCalls=${nativeResponse.toolCalls.length}, reasoning=${nativeResponse.reasoningContent !== undefined}, finish=${choice?.finish_reason}`)
     // Screenshot-bug ROOT FIX — recover XML tool_calls leaked into text.
@@ -848,8 +857,13 @@ export class OpenAIExecutionClient {
     return texts.join('')
   }
 
-  private extractResponsesToolCalls(payload: unknown): OpenAIToolCall[] {
-    if (!payload || typeof payload !== 'object') return []
+  private extractResponsesToolCalls(payload: unknown): {
+    toolCalls: OpenAIToolCall[]
+    toolCallParseErrors: TurnToolCallParseError[]
+  } {
+    if (!payload || typeof payload !== 'object') {
+      return { toolCalls: [], toolCallParseErrors: [] }
+    }
     const output = Array.isArray((payload as { output?: unknown[] }).output)
       ? (payload as { output?: unknown[] }).output as Array<Record<string, unknown>>
       : []
@@ -869,7 +883,22 @@ export class OpenAIExecutionClient {
         rawSample: failure.rawSample,
       })
     }
-    return built.toolCalls
+    return {
+      toolCalls: built.toolCalls,
+      toolCallParseErrors: this.buildToolCallParseErrors('responses', built.failures),
+    }
+  }
+
+  private buildToolCallParseErrors(
+    route: TurnToolCallParseError['route'],
+    failures: ReadonlyArray<ProviderToolCallFailure>,
+  ): TurnToolCallParseError[] {
+    return failures.map((failure) => ({
+      route,
+      ...(failure.toolName ? { toolName: failure.toolName } : {}),
+      ...(failure.callId ? { callId: failure.callId } : {}),
+      reason: 'corrupt' as const,
+    }))
   }
 
   private getResponsesContinuationState(session: OpenAISessionLike): {
