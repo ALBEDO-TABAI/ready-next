@@ -2011,6 +2011,10 @@ export class TurnEngine {
             || userText,
         },
         sessionId: request.sessionId,
+        // Stage 4 W3b.2 fix — thread authorization into the capability
+        // controller so allowedToolNames + toolResolution snapshot are
+        // computed with the same filter the model-visible list uses.
+        authorization: __authorization,
       })
       const hasTools = preparedRunCapabilities.visibilityPlan.hasTools
       appendLoggedToolSnapshot(state, host, buildHostToolSnapshot({
@@ -2385,9 +2389,23 @@ export class TurnEngine {
         const nextPreferredSkillToolNames = shouldAdoptTurnFramePreferredSkillTools(turnFrame)
           ? [...turnFrame.steering.preferredToolNames]
           : [...(preferredSkillToolNames || [])]
+        // Stage 4 W3b.2 fix — recompute authorization with the refreshed
+        // preferredSkillToolNames BEFORE building nextToolPolicy, so
+        // `collectAllowedToolNames(nextToolPolicy)` sees the same filter
+        // the model-visible list will use.
+        const nextAuthorization = buildAuthorizationFromIdentity(
+          __identity.mode === 'skill'
+            ? { mode: 'skill', skillId: __identity.skillId, source: __identity.source }
+            : { mode: 'none', reason: __identity.reason },
+          {
+            preferredSkillToolNames: nextPreferredSkillToolNames,
+            allPrimitiveToolNames: PRIMITIVE_TOOL_DEFS.map((d) => d.name),
+          },
+        )
         const nextToolPolicy: ToolPolicy = {
           ...toolPolicy,
           preferredSkillToolNames: nextPreferredSkillToolNames,
+          authorization: nextAuthorization,
         }
         const policyAllowedToolNames = reconcileAllowedToolNamesWithPreferredSkillTools(
           collectAllowedToolNames(nextToolPolicy),
@@ -2404,8 +2422,7 @@ export class TurnEngine {
         if (!preferredChanged && !allowedChanged) return
         preferredSkillToolNames = nextPreferredSkillToolNames
         toolPolicy = nextToolPolicy
-        // W3b.2 — re-sync after frame patch refresh; __authorization is
-        // recomputed below from the new preferredSkillToolNames.
+        __authorization = nextAuthorization
         reconciledRunCapabilities = {
           ...reconciledRunCapabilities,
           toolPolicy,
@@ -2413,22 +2430,6 @@ export class TurnEngine {
         }
         routedAllowedToolNames = nextAllowedToolNames
         turnSummaryAllowedToolNames = [...routedAllowedToolNames]
-        // Stage 4 W3b — keep authorization in sync with the refreshed
-        // preferredSkillToolNames so subsequent buildHostToolContext
-        // calls in this iteration see the post-refresh allowlist.
-        __authorization = buildAuthorizationFromIdentity(
-          __identity.mode === 'skill'
-            ? { mode: 'skill', skillId: __identity.skillId, source: __identity.source }
-            : { mode: 'none', reason: __identity.reason },
-          {
-            preferredSkillToolNames: preferredSkillToolNames || [],
-            allPrimitiveToolNames: PRIMITIVE_TOOL_DEFS.map((d) => d.name),
-          },
-        )
-        // W3b.2 — keep ToolPolicy.authorization synchronized with
-        // __authorization so the next requestToolLoopResponse sees the
-        // refreshed allowlist when building the model-visible tool list.
-        toolPolicy.authorization = __authorization
         logAgentMetric('turn_frame_tool_policy_refreshed', {
           sessionId: request.sessionId,
           reason,

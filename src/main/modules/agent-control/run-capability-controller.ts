@@ -3,6 +3,7 @@ import type { BrowserTaskDecisionMode } from '../../../shared/browser-agent-task
 import type { CapabilityProfileId } from '../../../shared/ai-capability-groups'
 import type { CapabilityRuntimeSnapshot } from '../../../shared/ai-capability-runtime'
 import type { ToolPolicy } from './execution-tool-config'
+import type { SkillToolAuthorization } from './skill-tool-authorization'
 import { getPolicyOpenAIToolBundle } from './execution-tool-config'
 import type { ToolVisibilityPlan } from './run-contracts'
 import type { CapabilityResolution, CapabilityRuntimeAvailability } from './capability-resolver'
@@ -42,6 +43,18 @@ interface RunCapabilityBaseParams {
     connectedChannelTypes?: string[]
   }
   sessionId?: string
+  /**
+   * Stage 4 W3b.2 fix — per-turn skill tool authorization. Threaded
+   * through `resolveRunCapabilities` so it's already on `toolPolicy`
+   * BEFORE `getPolicyOpenAIToolBundle` computes `allowedToolNames` and
+   * `toolResolution`. Without this, the prepared snapshot would carry
+   * pre-cutover `allowedToolNames` while the post-cutover mutation in
+   * turn-engine only fixed the policy used for subsequent LLM calls —
+   * leaving the diagnostic snapshot and text-tool-bridge allowed-name
+   * list out of sync. `_baseParams` retains it so
+   * `reconcileAfterBrowserDecision` continues with the same value.
+   */
+  authorization?: SkillToolAuthorization | null
 }
 
 export interface PreparedRunCapabilities {
@@ -221,6 +234,15 @@ function resolveRunCapabilities(
     enabledChannelTypes: baseParams.hostContext.enabledChannelTypes,
     connectedChannelTypes: baseParams.hostContext.connectedChannelTypes,
   })
+
+  // Stage 4 W3b.2 fix — set authorization on toolPolicy BEFORE bundling
+  // so allowedToolNames + toolResolution are computed with the same
+  // skill-list filter the model will see. Without this, the diagnostic
+  // snapshot and the text-tool-bridge allowed-name list drift from the
+  // post-cutover policy applied later in turn-engine.
+  if (baseParams.authorization !== undefined) {
+    toolPolicy.authorization = baseParams.authorization
+  }
 
   const toolBundle = getPolicyOpenAIToolBundle(toolPolicy)
 
