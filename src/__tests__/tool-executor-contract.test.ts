@@ -107,19 +107,38 @@ test('tool-runtime no longer rethrows on unknown-kind errors', () => {
 test('tool-executor runs Zod validator for every tool domain via the unified registry', () => {
   const source = readWorkspaceFile('src/main/modules/tools/tool-executor.ts')
 
-  // Imports wired to the unified registry accessor, not the skill-only map.
-  assert.match(source, /from ['"]\.\/schemas['"]/)
-  assert.match(source, /getToolInputSchemas/)
+  // Validator wiring — `validateToolInput` is the unified entry.
   assert.match(source, /from ['"]\.\/tool-input-validator['"]/)
+
+  // Schema source — `resolveToolInputSchemaForExecution` is the registry's
+  // unified per-tool resolver. It internally consults `getToolInputSchemas()`
+  // (static) and falls back to the dynamic skill-action cache, so this single
+  // entry preserves the "unified registry, not skill-only map" invariant
+  // even after the pet feature switched from a wholesale `getToolInputSchemas()`
+  // map import to per-tool resolution.
+  assert.match(
+    source,
+    /resolveToolInputSchemaForExecution[\s\S]*from ['"]\.\.\/agent-control\/tool-registry['"]/,
+    'tool-executor must import resolveToolInputSchemaForExecution from the unified registry',
+  )
+  assert.match(
+    source,
+    /resolveToolInputSchemaForExecution\(toolName\)/,
+    'tool-executor must resolve schema per-tool via the unified registry resolver',
+  )
 
   // Phase 2.5: gate is domain-agnostic. The old skill-only guard must be gone
   // so other domains don't silently skip validation.
   assert.doesNotMatch(source, /if \(definition\.domain === ['"]skill['"]\) \{\s*const outcome = validateToolInput/)
-  // PR 12 merges getToolInputSchemas() with the dynamic skill-action cache.
-  // Either call shape is acceptable for this assertion — we just need to see
-  // validateToolInput is invoked with a schema map sourced from getToolInputSchemas.
-  assert.match(source, /validateToolInput\(toolName, args,\s*(?:getToolInputSchemas\(\)|mergedSchemas)\)/)
-  assert.match(source, /getToolInputSchemas\(\)/)
+
+  // validateToolInput is invoked with a per-tool schema map. Either the
+  // historical wholesale form (`getToolInputSchemas()`) or the per-tool
+  // form built from `resolveToolInputSchemaForExecution` is acceptable —
+  // both preserve the unified-registry invariant.
+  assert.match(
+    source,
+    /validateToolInput\(toolName, args,\s*(?:getToolInputSchemas\(\)|mergedSchemas|schemas)\)/,
+  )
 
   // Metric payload carries the domain so per-domain failure rates can be split.
   // Phase 4 swapped the literal for TOOL_ERROR_METRICS.inputValidation; accept either.

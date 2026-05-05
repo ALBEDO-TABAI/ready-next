@@ -447,7 +447,13 @@ test('recoverable_paused child resumes through TurnEngine', async () => {
   assert.equal(result.terminalReason, 'checkpoint_background')
 })
 
-test('blocked child is not directly resumable through TurnEngine', async () => {
+test('blocked child with blocked_config is not directly resumable through TurnEngine', async () => {
+  // Commit `7c62ab3 Stabilize agent skill background tasks` carved out
+  // `blocked + blocked_external` for runner delegation (see
+  // `canDelegateBlockedResume` at turn-engine.ts:2005-2007). The "blocked is
+  // not directly resumable" contract still applies for every OTHER blocked
+  // terminalReason — this test pins that invariant via `blocked_config`,
+  // which is NOT in the carve-out.
   const engine = new TurnEngine()
   let resumeCalls = 0
   const childRunId = 'vblocked1'
@@ -458,12 +464,12 @@ test('blocked child is not directly resumable through TurnEngine', async () => {
         inspectLatestSkillTask: () => makeChildOwnedSnapshot({
           childRunId,
           status: 'blocked',
-          terminalReason: 'blocked_external',
+          terminalReason: 'blocked_config',
         }),
       },
       resumeSkillChildRun: async () => {
         resumeCalls += 1
-        throw new Error('blocked child must not resume')
+        throw new Error('blocked child with blocked_config must not resume')
       },
     },
   })
@@ -472,9 +478,53 @@ test('blocked child is not directly resumable through TurnEngine', async () => {
 
   assert.equal(resumeCalls, 0)
   assert.equal(result.status, 'checkpoint')
-  assert.equal(result.terminalReason, 'blocked_external')
+  assert.equal(result.terminalReason, 'blocked_config')
   assert.equal(events.some((event) =>
     event.kind === 'output' && String(event.chunk).includes('不能直接继续')), true)
+})
+
+test('blocked child with blocked_external delegates resume to runner (per 7c62ab3 carve-out)', async () => {
+  // Counterpart to the test above. Commit `7c62ab3` introduced the
+  // `canDelegateBlockedResume` carve-out so `blocked + blocked_external`
+  // delegates to the runner (which handles the block externally). Resume IS
+  // called; the parent loop does not emit "不能直接继续".
+  const engine = new TurnEngine()
+  let resumeCalls = 0
+  const childRunId = 'vblockedext1'
+  const { request, events } = createRequest({
+    userText: '继续',
+    host: {
+      skillTaskSupervisor: {
+        inspectLatestSkillTask: () => makeChildOwnedSnapshot({
+          childRunId,
+          status: 'blocked',
+          terminalReason: 'blocked_external',
+        }),
+      },
+      resumeSkillChildRun: async (id: string) => {
+        resumeCalls += 1
+        return {
+          childRunId: id,
+          status: 'running',
+          closeEvent: null,
+          parentNextHint: 'wait_for_close_event',
+          outputDir: '/tmp/vea-blocked/output',
+          runStatePath: '/tmp/vea-blocked/output/run_state.json',
+        }
+      },
+      waitForSkillChildCloseEvent: async () => null,
+    },
+  })
+
+  const result = await engine.execute(request)
+
+  assert.equal(resumeCalls, 1, 'blocked_external must delegate to runner per 7c62ab3 carve-out')
+  assert.equal(
+    events.some((event) => event.kind === 'output' && String(event.chunk).includes('不能直接继续')),
+    false,
+    'blocked_external delegation path must NOT emit the "不能直接继续" rejection message',
+  )
+  assert.equal(result.status, 'checkpoint')
 })
 
 test('child cancel from TurnEngine writes cancelled_user only for explicit user cancel', async () => {
