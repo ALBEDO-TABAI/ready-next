@@ -46,10 +46,11 @@ export const STATIC_SKILL_ACTIONS_BY_TOOL_NAME: Record<string, { skillId: string
   }),
 )
 
-// B Phase 1 — skill primitives names. Session-gated at runtime via
-// `filterSkillPrimitivesBySession` (only exposed when a reference-skill hint
-// is armed). Names included here so static-fallback tool enumeration still
-// lists them when the runtime manager isn't ready yet (boot path).
+// B Phase 1 — skill primitive names. Session gating can still prefilter the
+// candidate list, but Stage 4 W3 SkillToolAuthorization is the final authority
+// for model-visible exposure and execution admission. Names are included here
+// so static-fallback tool enumeration still lists them when the runtime manager
+// isn't ready yet (boot path).
 const PRIMITIVE_TOOL_NAMES: string[] = [
   'skill_ask_user',
   'skill_run_shell',
@@ -65,8 +66,8 @@ const PRIMITIVE_TOOL_NAMES: string[] = [
 
 /**
  * Full static tool list — skill_action + primitives. Boot-path callers
- * (ToolRegistry static fallback) use this unchanged; session-aware filtering
- * runs at dispatch time through filterSkillPrimitivesBySession.
+ * (ToolRegistry static fallback) use this unchanged; Stage 4 W3 authorization
+ * filters model-visible and execution paths later in the chain.
  */
 export const STATIC_SKILL_TOOL_NAMES: string[] = [
   ...Object.values(STATIC_SKILL_TOOL_NAMES_BY_ACTION),

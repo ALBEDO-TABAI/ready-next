@@ -271,9 +271,9 @@ export function getSkillActionSchemas(): Record<string, ZodObject<ZodRawShape>> 
 /**
  * Phase 4: skill_executions state machine retired. The 6 execution-control
  * tools (skill_get_state / skill_submit_* / skill_restart_from_step /
- * skill_cancel_execution) no longer exist. The LLM-facing tool list is now
- * just skill_action tools + skill primitives (gated by reference-skill
- * hint presence or live task projection).
+ * skill_cancel_execution) no longer exist. This builds the legacy candidate
+ * list of skill_action tools + primitives; Stage 4 W3 authorization performs
+ * the final model-visible filtering and primitive skillId selection.
  */
 function getSkillToolDefs(sessionId?: string): SkillToolDef[] {
   const hasReferenceHint = (sid: string) => getLastReferenceSkill(sid) !== null

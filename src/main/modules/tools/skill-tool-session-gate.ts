@@ -2,9 +2,9 @@
  * Pure gating logic for skill_* tools.
  *
  * Phase 4: the 6 execution-control tools retired along with the
- * skill_executions state machine. Only skill primitives need
- * session-aware gating now — they're exposed only when the session has a
- * reference-skill hint armed by the orchestrator.
+ * skill_executions state machine. This helper is now a legacy / boot-safe
+ * candidate-list prefilter; Stage 4 W3's SkillToolAuthorization remains the
+ * final model-visible and execution admission authority.
  *
  * Separate from `skills-tools.ts` so that:
  *   - Tests can import this without pulling in electron / runtime-manager via
@@ -17,11 +17,12 @@
  * B Phase 1 — skill primitives gating.
  *
  * Primitives (`skill_ask_user` / `skill_run_shell` / artifact I/O /
- * detached-task controls) are only exposed to the LLM when the session has a
- * reference-skill hint registered by the orchestrator (i.e. a reference skill
- * was inlined in this session recently). Legacy sessionId-less callers
- * (boot-time introspection, static fallback) keep the full list so the tool
- * surface inventory stays stable.
+ * detached-task controls) can enter the candidate list when the legacy
+ * session signal says a skill is in play. The final model-facing list is still
+ * filtered by SkillToolAuthorization, so a hint or task run no longer opens
+ * primitives by itself. Legacy sessionId-less callers (boot-time introspection,
+ * static fallback) keep the full list so the tool surface inventory stays
+ * stable.
  *
  * Phase 4 simplification: `hasActiveExecution` is permanently false since
  * skill_executions no longer exists, so the primitive gate is driven entirely

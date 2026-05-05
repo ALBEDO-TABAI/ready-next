@@ -162,9 +162,9 @@ export function buildAuthorizationFromIdentity(
  * Stage 4 W3b.2 — filter a tool list (defs / schemas) by authorization.
  * Applied at the registry's 4 model-visible list resolvers as
  * defense-in-depth: ToolPolicy already filters typed actions via
- * `preferredSkillToolNames`, but this filter also strips primitives in
- * `mode:'none'` turns (which preferredSkillToolNames does not, since
- * primitives are gated separately by `filterSkillPrimitivesBySession`).
+ * `preferredSkillToolNames`, and this filter also strips primitives in
+ * `mode:'none'` turns so the legacy session prefilter cannot open primitives
+ * by itself.
  *
  * Semantics:
  *   - `'not_set'` default → no filter (back-compat for non-migrated
