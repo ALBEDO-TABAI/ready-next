@@ -166,34 +166,23 @@ export async function executeToolCall(
     })
   }
 
-  if (definition.requiresExplicitAllowlist && !allowedToolNames?.has(toolName)) {
-    return createToolExecutionOutput(buildToolNotAllowedMessage(toolName, allowedToolNames || new Set()), {
-      shape: 'json',
-      data: {
-        errorKind: 'host_unavailable',
-        reason: 'tool_restricted_this_turn',
-        toolName,
-      },
-    })
-  }
-  if (allowedToolNames && !allowedToolNames.has(toolName)) {
-    return createToolExecutionOutput(buildToolNotAllowedMessage(toolName, allowedToolNames), {
-      shape: 'json',
-      data: {
-        errorKind: 'host_unavailable',
-        reason: 'tool_restricted_this_turn',
-        toolName,
-      },
-    })
-  }
-
-  // Stage 4 W3 — per-turn skill tool authorization. Only enforced for
-  // model-issued tool calls (invoker:'model' or undefined). child_runner /
-  // host invokers continue through their own admission paths
-  // (tool-executor.ts:131 child-internal admission, host calls bypass).
+  // Stage 4 W3 — per-turn skill tool authorization MUST run BEFORE the
+  // legacy allowedToolNames checks below, otherwise a model-issued
+  // skill_* tool that's both unauthorized AND missing from this turn's
+  // allowedToolNames would be intercepted as `tool_restricted_this_turn`
+  // (legacy errorKind) instead of the canonical `authorization_denied`
+  // (per v6 plan §10 互斥语义: skill 工具被 admission 拒 → authorization_denied).
+  //
+  // Only enforced for model-issued calls (invoker:'model' or undefined).
+  // child_runner / host invokers continue through their own admission
+  // paths (the child-internal admission above for child_runner, and the
+  // legacy allowedToolNames gate below for host).
+  //
   // The `'not_set'` default (W3a) short-circuits to allow, preserving
-  // pre-cutover behavior until W3b wires real authorization through
-  // `ToolPolicy` → `ToolRuntimeContext` → here.
+  // pre-cutover behavior — the legacy allowedToolNames check below
+  // still runs for skill_* tools, so models hitting unallowed skills
+  // still see `tool_restricted_this_turn` until W3b switches the
+  // default away from `not_set` for model turns.
   const invoker = context.invoker ?? 'model'
   const authorization = context.authorization ?? SKILL_TOOL_AUTHORIZATION_NOT_SET
   if (invoker === 'model' && toolName.startsWith('skill_')) {
@@ -219,6 +208,27 @@ export async function executeToolCall(
         },
       )
     }
+  }
+
+  if (definition.requiresExplicitAllowlist && !allowedToolNames?.has(toolName)) {
+    return createToolExecutionOutput(buildToolNotAllowedMessage(toolName, allowedToolNames || new Set()), {
+      shape: 'json',
+      data: {
+        errorKind: 'host_unavailable',
+        reason: 'tool_restricted_this_turn',
+        toolName,
+      },
+    })
+  }
+  if (allowedToolNames && !allowedToolNames.has(toolName)) {
+    return createToolExecutionOutput(buildToolNotAllowedMessage(toolName, allowedToolNames), {
+      shape: 'json',
+      data: {
+        errorKind: 'host_unavailable',
+        reason: 'tool_restricted_this_turn',
+        toolName,
+      },
+    })
   }
 
   if (context.abortSignal?.aborted) {
