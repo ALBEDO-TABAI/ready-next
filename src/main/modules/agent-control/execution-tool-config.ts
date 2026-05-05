@@ -255,7 +255,11 @@ export function getPolicyAnthropicTools(policy?: ToolPolicy): Array<Record<strin
               : policy.preferFormatOnly
                 ? FORMAT_SECTION_DOCUMENT_TOOL_NAMES
                 : FORCE_DOCUMENT_TOOL_NAMES
-    const allowedNames = _mergeForceDocumentAllowedNames(baseAllowed, policy.preferredSkillToolNames)
+    const allowedNames = _mergeForceDocumentAllowedNames(
+      baseAllowed,
+      policy.preferredSkillToolNames,
+      policy.authorization ?? null,
+    )
     tools = filterAnthropicToolsByAllowedNames(tools, allowedNames)
   }
   if (policy?.allowDocumentTools === false) {
@@ -273,7 +277,11 @@ export function getPolicyAnthropicTools(policy?: ToolPolicy): Array<Record<strin
       return !name.startsWith('browser_')
     })
   }
-  tools = _filterPreferredSkillAnthropic(tools, policy?.preferredSkillToolNames || [])
+  tools = _filterPreferredSkillAnthropic(
+    tools,
+    policy?.preferredSkillToolNames || [],
+    policy?.authorization ?? null,
+  )
   return tools
 }
 
@@ -304,7 +312,11 @@ export function getPolicyOpenAIToolBundle(policy?: ToolPolicy): PolicyOpenAITool
               : policy.preferFormatOnly
                 ? FORMAT_SECTION_DOCUMENT_TOOL_NAMES
                 : FORCE_DOCUMENT_TOOL_NAMES
-    const allowedNames = _mergeForceDocumentAllowedNames(baseAllowed, policy.preferredSkillToolNames)
+    const allowedNames = _mergeForceDocumentAllowedNames(
+      baseAllowed,
+      policy.preferredSkillToolNames,
+      policy.authorization ?? null,
+    )
     tools = filterOpenAIToolsByAllowedNames(tools, allowedNames)
   }
   if (policy?.allowDocumentTools === false) {
@@ -322,7 +334,11 @@ export function getPolicyOpenAIToolBundle(policy?: ToolPolicy): PolicyOpenAITool
       return typeof fn === 'string' ? !fn.startsWith('browser_') : true
     })
   }
-  tools = _filterPreferredSkillOpenAI(tools, policy?.preferredSkillToolNames || [])
+  tools = _filterPreferredSkillOpenAI(
+    tools,
+    policy?.preferredSkillToolNames || [],
+    policy?.authorization ?? null,
+  )
   const normalizedTools = tools.map((tool) => normalizeOpenAIToolSchema(tool))
   const toolNames = collectToolNames(normalizedTools, 'openai')
   return {

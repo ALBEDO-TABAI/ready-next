@@ -1,36 +1,87 @@
+/**
+ * Stage 4 W3b.3 — 4 skill filter helpers used by `ToolPolicy.getPolicy*`.
+ *
+ * `preferredSkillToolNames` remains the primary filter source — it's
+ * what turn-engine computes per-turn from `buildPreferredSkillToolNames`
+ * and the legacy callers expect. The optional `authorization?` parameter
+ * is the W3b.3 cutover: when callers pass authorization, the filter
+ * additionally enforces it (defense-in-depth alongside the W3b.2
+ * registry-layer filter — if a name slips past one layer it gets caught
+ * at the other).
+ *
+ * Behavior summary for the filter helpers (`filterPreferredSkill*Tools`):
+ *   - `authorization` undefined or mode:none reason='not_set' → preserve
+ *     legacy `preferredSkillToolNames` filter
+ *   - `authorization.mode==='none'` non-'not_set' → strip ALL skill_*
+ *     (overrides preferredSkillToolNames; identity says no skill applies)
+ *   - `authorization.mode==='selected'` → keep skill_* only if name is in
+ *     `allowedTypedActions ∪ allowedPrimitives` AND in
+ *     `preferredSkillToolNames` (intersection — the more restrictive one)
+ *
+ * For `mergeForceDocumentAllowedNames`: when authorization is mode:none,
+ * skill names from `preferredSkillToolNames` are NOT merged into the
+ * forced-document allowlist (they shouldn't be reachable that turn). When
+ * mode:selected, only authorized skill names merge.
+ *
+ * `isSkillToolName` is a pure name-shape check; authorization is not
+ * relevant.
+ */
+import type { SkillToolAuthorization } from './skill-tool-authorization'
+
 export function isSkillToolName(name: string): boolean {
   return name.startsWith('skill_') || name === 'system_run_embedded_python'
+}
+
+function isSkillNameAuthorizedInAuthorization(
+  name: string,
+  authorization: SkillToolAuthorization | null | undefined,
+): boolean {
+  if (!authorization) return true
+  if (authorization.mode === 'none') {
+    return authorization.reason === 'not_set'
+  }
+  return authorization.allowedTypedActions.has(name)
+    || authorization.allowedPrimitives.has(name)
 }
 
 export function filterPreferredSkillAnthropicTools(
   tools: Array<Record<string, unknown>>,
   preferredSkillToolNames: string[],
+  authorization?: SkillToolAuthorization | null,
 ): Array<Record<string, unknown>> {
   const allowed = new Set(preferredSkillToolNames)
   return tools.filter((tool) => {
     const name = typeof tool.name === 'string' ? tool.name : ''
     if (!isSkillToolName(name)) return true
-    return allowed.has(name)
+    if (!allowed.has(name)) return false
+    return isSkillNameAuthorizedInAuthorization(name, authorization)
   })
 }
 
 export function filterPreferredSkillOpenAITools(
   tools: Array<Record<string, unknown>>,
   preferredSkillToolNames: string[],
+  authorization?: SkillToolAuthorization | null,
 ): Array<Record<string, unknown>> {
   const allowed = new Set(preferredSkillToolNames)
   return tools.filter((tool) => {
     const fn = (tool.function as { name?: unknown } | undefined)?.name
     if (typeof fn !== 'string') return false
     if (!isSkillToolName(fn)) return true
-    return allowed.has(fn)
+    if (!allowed.has(fn)) return false
+    return isSkillNameAuthorizedInAuthorization(fn, authorization)
   })
 }
 
 export function mergeForceDocumentAllowedNames(
   baseAllowed: Set<string>,
   preferredSkillToolNames: string[] | null | undefined,
+  authorization?: SkillToolAuthorization | null,
 ): Set<string> {
   if (!preferredSkillToolNames || preferredSkillToolNames.length === 0) return baseAllowed
-  return new Set<string>([...baseAllowed, ...preferredSkillToolNames])
+  const filteredSkillNames = preferredSkillToolNames.filter(
+    (name) => isSkillNameAuthorizedInAuthorization(name, authorization),
+  )
+  if (filteredSkillNames.length === 0) return baseAllowed
+  return new Set<string>([...baseAllowed, ...filteredSkillNames])
 }

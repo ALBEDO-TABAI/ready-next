@@ -495,3 +495,170 @@ test('prepareInitialRun: no authorization passed → toolPolicy.authorization st
     `unexpected authorization value: ${JSON.stringify(prepared.toolPolicy.authorization)}`,
   )
 })
+
+// ---------------------------------------------------------------------------
+// (5) Stage 4 W3b.3 — `filterPreferredSkill*Tools` and
+//     `mergeForceDocumentAllowedNames` accept authorization as a defense-
+//     in-depth layer alongside the existing `preferredSkillToolNames` filter.
+//     If the registry filter is bypassed for any reason, these helpers still
+//     enforce authorization at the policy layer (and, for force-document
+//     mode, at the merge step). Direct unit coverage is required because
+//     the prepareInitialRun chain has both layers active simultaneously —
+//     stripping at gateway leaves nothing for these helpers to strip.
+// ---------------------------------------------------------------------------
+
+test('filterPreferredSkillAnthropicTools: authorization=mode:none non-not_set → strips skill_* even if in preferredSkillToolNames', async () => {
+  const { filterPreferredSkillAnthropicTools } = await import(
+    '../main/modules/agent-control/execution-tool-skill-filters'
+  )
+  const tools: Array<Record<string, unknown>> = [
+    { name: 'document_open_tab' },
+    { name: 'skill_video_expert_pipeline' },
+    { name: 'skill_run_shell' },
+  ]
+  const filtered = filterPreferredSkillAnthropicTools(
+    tools,
+    ['skill_video_expert_pipeline', 'skill_run_shell'],
+    buildExplicitNoSkillAuthorization('no_skill_signal'),
+  )
+  assert.deepEqual(
+    filtered.map((t) => t.name),
+    ['document_open_tab'],
+    'mode:none must strip skill_* even when listed in preferredSkillToolNames',
+  )
+})
+
+test('filterPreferredSkillAnthropicTools: authorization=not_set short-circuit → behavior identical to legacy preferredSkillToolNames-only filter', async () => {
+  const { filterPreferredSkillAnthropicTools } = await import(
+    '../main/modules/agent-control/execution-tool-skill-filters'
+  )
+  const tools: Array<Record<string, unknown>> = [
+    { name: 'document_open_tab' },
+    { name: 'skill_video_expert_pipeline' },
+    { name: 'skill_run_shell' },
+  ]
+  // 'not_set' must behave the same as no authorization (back-compat).
+  const withNotSet = filterPreferredSkillAnthropicTools(
+    tools,
+    ['skill_video_expert_pipeline'],
+    SKILL_TOOL_AUTHORIZATION_NOT_SET,
+  )
+  const withoutAuth = filterPreferredSkillAnthropicTools(
+    tools,
+    ['skill_video_expert_pipeline'],
+  )
+  assert.deepEqual(
+    withNotSet.map((t) => t.name).sort(),
+    withoutAuth.map((t) => t.name).sort(),
+    'not_set must behave identically to no-authorization (back-compat)',
+  )
+  // And the legacy preferredSkillToolNames filter still applies.
+  assert.ok(withNotSet.some((t) => t.name === 'skill_video_expert_pipeline'))
+  assert.ok(!withNotSet.some((t) => t.name === 'skill_run_shell'),
+    'skill_run_shell NOT in preferredSkillToolNames must be filtered (legacy path preserved)')
+})
+
+test('filterPreferredSkillAnthropicTools: authorization=mode:selected → keeps skill_* only when in preferredSkillToolNames AND authorized (intersection)', async () => {
+  const { filterPreferredSkillAnthropicTools } = await import(
+    '../main/modules/agent-control/execution-tool-skill-filters'
+  )
+  const tools: Array<Record<string, unknown>> = [
+    { name: 'document_open_tab' },
+    { name: 'skill_video_expert_pipeline' }, // in both sets
+    { name: 'skill_run_shell' }, // in preferred, NOT in allowed
+    { name: 'skill_read_artifact' }, // in allowed, NOT in preferred
+  ]
+  const auth = buildSelectedSkillToolAuthorization({
+    skillId: 'video-expert-analyzer',
+    allowedTypedActions: ['skill_video_expert_pipeline'],
+    allowedPrimitives: ['skill_read_artifact'],
+    source: 'explicit',
+    reason: 'user_named_skill',
+  })
+  const filtered = filterPreferredSkillAnthropicTools(
+    tools,
+    ['skill_video_expert_pipeline', 'skill_run_shell'],
+    auth,
+  )
+  const names = filtered.map((t) => t.name).sort()
+  assert.deepEqual(names, ['document_open_tab', 'skill_video_expert_pipeline'].sort(),
+    `expected intersection of preferred ∩ authorized only; got: ${names.join(', ')}`)
+})
+
+test('filterPreferredSkillOpenAITools: authorization=mode:none → strips skill_* under OpenAI tool shape', async () => {
+  const { filterPreferredSkillOpenAITools } = await import(
+    '../main/modules/agent-control/execution-tool-skill-filters'
+  )
+  const tools: Array<Record<string, unknown>> = [
+    { function: { name: 'document_open_tab' } },
+    { function: { name: 'skill_video_expert_pipeline' } },
+    { function: { name: 'skill_run_shell' } },
+  ]
+  const filtered = filterPreferredSkillOpenAITools(
+    tools,
+    ['skill_video_expert_pipeline', 'skill_run_shell'],
+    buildExplicitNoSkillAuthorization('no_skill_signal'),
+  )
+  const names = filtered
+    .map((t) => (t.function as { name?: unknown } | undefined)?.name)
+    .filter((n): n is string => typeof n === 'string')
+  assert.deepEqual(names, ['document_open_tab'])
+})
+
+test('mergeForceDocumentAllowedNames: authorization=mode:none → does NOT merge skill names into forced-document allowlist', async () => {
+  const { mergeForceDocumentAllowedNames } = await import(
+    '../main/modules/agent-control/execution-tool-skill-filters'
+  )
+  const baseAllowed = new Set(['document_open_tab', 'document_save_tab'])
+  const merged = mergeForceDocumentAllowedNames(
+    baseAllowed,
+    ['skill_video_expert_pipeline', 'skill_run_shell'],
+    buildExplicitNoSkillAuthorization('no_skill_signal'),
+  )
+  assert.deepEqual(
+    Array.from(merged).sort(),
+    ['document_open_tab', 'document_save_tab'].sort(),
+    'mode:none must NOT merge skill_* into the force-document allowlist',
+  )
+})
+
+test('mergeForceDocumentAllowedNames: authorization=mode:selected → merges only authorized skill names', async () => {
+  const { mergeForceDocumentAllowedNames } = await import(
+    '../main/modules/agent-control/execution-tool-skill-filters'
+  )
+  const baseAllowed = new Set(['document_open_tab'])
+  const auth = buildSelectedSkillToolAuthorization({
+    skillId: 'video-expert-analyzer',
+    allowedTypedActions: ['skill_video_expert_pipeline'],
+    allowedPrimitives: [],
+    source: 'explicit',
+    reason: 'user_named_skill',
+  })
+  const merged = mergeForceDocumentAllowedNames(
+    baseAllowed,
+    ['skill_video_expert_pipeline', 'skill_run_shell'], // skill_run_shell NOT authorized
+    auth,
+  )
+  assert.deepEqual(
+    Array.from(merged).sort(),
+    ['document_open_tab', 'skill_video_expert_pipeline'].sort(),
+    'only authorized skill names should be merged into force-document allowlist',
+  )
+})
+
+test('mergeForceDocumentAllowedNames: authorization=not_set → preserves legacy behavior (all preferred skill names merged)', async () => {
+  const { mergeForceDocumentAllowedNames } = await import(
+    '../main/modules/agent-control/execution-tool-skill-filters'
+  )
+  const baseAllowed = new Set(['document_open_tab'])
+  const merged = mergeForceDocumentAllowedNames(
+    baseAllowed,
+    ['skill_video_expert_pipeline', 'skill_run_shell'],
+    SKILL_TOOL_AUTHORIZATION_NOT_SET,
+  )
+  assert.deepEqual(
+    Array.from(merged).sort(),
+    ['document_open_tab', 'skill_video_expert_pipeline', 'skill_run_shell'].sort(),
+    'not_set short-circuit must merge all preferred skill names (back-compat)',
+  )
+})
