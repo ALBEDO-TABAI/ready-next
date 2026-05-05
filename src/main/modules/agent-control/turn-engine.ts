@@ -873,13 +873,25 @@ function buildSkillResumeContextPrompt(params: {
   summary?: string | null
   userText: string
 }): string {
-  return [
+  // Stage 4 W2 — route through SystemReminderRegistry topic
+  // `skill-resume-context-prompt`. The registry is a no-op pass-through
+  // when called via `composeSystemReminderText` with a single entry (the
+  // assembler joins entry texts with '\n' and adds no envelope), so the
+  // produced string is byte-identical to the legacy inline form. The
+  // routing exists so the topic taxonomy includes this reminder and
+  // future conflict resolution can apply if other topics are added.
+  const text = [
     `系统补充：这是一次 skill 恢复请求。优先恢复 skill "${params.skillName}" (${params.skillId})。`,
     params.action ? `上一轮技能动作：${params.action}` : '',
     params.summary ? `上次摘要/目标、输出目录或 artifact、失败原因：${params.summary}` : '',
     `用户本轮补充内容：${params.userText || '继续当前任务。'}`,
     '请沿用上次目标继续，不要把这轮补充当成新的普通问答。',
   ].filter(Boolean).join('\n')
+  return composeSystemReminderText({
+    topic: 'skill-resume-context-prompt',
+    priority: 90,
+    text,
+  }) ?? text
 }
 
 function buildProjectionTruthSnapshot(
@@ -3156,8 +3168,12 @@ export class TurnEngine {
             reminderTokens.push('上一轮已用相同输入强制调用过同一工具，避免死循环，请变更输入或换工具。')
           }
           reminderTokens.push('请补齐参数或换路径，再继续。')
+          // Stage 4 W2 — dedicated topic for the force_tool mid-loop
+          // checkpoint, distinct from generic 'missing-input'. Lets the
+          // taxonomy distinguish "force_tool was blocked this iteration"
+          // from "user message lacked required inputs".
           pushSystemReminderMessage(session, {
-            topic: 'missing-input',
+            topic: 'force-tool-checkpoint-blocked',
             priority: 90,
             text: reminderTokens.join('\n'),
           })

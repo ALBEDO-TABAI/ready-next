@@ -10,6 +10,12 @@ const DEFAULT_CONFLICTS: Record<ReminderTopic, ReadonlyArray<ReminderTopic>> = {
   budget: [],
   'missing-input': [],
   'typed-action-preferred': [],
+  // Stage 4 W2 — no implicit conflicts. The skill-resume reminder is a
+  // synthetic skill-detection input the rest of the turn consumes, and the
+  // force-tool checkpoint is a per-iteration mid-loop guard. They don't
+  // suppress or conflict with the other topics.
+  'skill-resume-context-prompt': [],
+  'force-tool-checkpoint-blocked': [],
 }
 
 export function composeSystemReminder(

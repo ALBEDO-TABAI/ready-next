@@ -4645,17 +4645,36 @@ test('Stage 4 W0: turn-engine.ts gates clearLastReferenceSkill on !shouldBindSki
   )
 })
 
-test('Stage 4 W0: turn-engine.ts has buildSkillResumeContextPrompt + force_tool checkpoint inline reminders — W2 will route through SystemReminderRegistry', () => {
-  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: per v6 plan §4 W2, these two specific reminders migrate to SystemReminderRegistry topics skill_resume_context_prompt + force_tool_checkpoint_blocked. This pins their inline form now so W2's migration is verifiable.
+test('Stage 4 W2: skill resume + force_tool checkpoint reminders route through SystemReminderRegistry topics', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: per v6 plan §4 W2, two specific reminders that previously lived as raw inline strings are now routed through SystemReminderRegistry with dedicated topics. This test pins the post-W2 invariant that future refactors must preserve the registry routing (changing the topic name without updating both ends would silently break taxonomy).
   const source = readFileSync(resolve(process.cwd(), 'src/main/modules/agent-control/turn-engine.ts'), 'utf8')
+
+  // buildSkillResumeContextPrompt must call composeSystemReminderText with
+  // the dedicated topic. Strings still appear inline because the function
+  // body assembles the text — the routing happens at the return statement.
   assert.match(
     source,
-    /系统补充：这是一次 skill 恢复请求/,
-    'buildSkillResumeContextPrompt currently builds reminder inline (turn-engine.ts:~873) — W2 will route through SystemReminderRegistry topic skill_resume_context_prompt',
+    /composeSystemReminderText\(\{\s*topic:\s*['"]skill-resume-context-prompt['"]/,
+    'buildSkillResumeContextPrompt must route through SystemReminderRegistry topic skill-resume-context-prompt',
   )
+
+  // force_tool checkpoint must use the dedicated topic, not generic 'missing-input'.
   assert.match(
     source,
-    /系统补充：本轮 force_tool 已挡板/,
-    'force_tool checkpoint currently builds reminder inline (turn-engine.ts:~3192) — W2 will route through SystemReminderRegistry topic force_tool_checkpoint_blocked',
+    /pushSystemReminderMessage\([\s\S]*?topic:\s*['"]force-tool-checkpoint-blocked['"]/,
+    'force_tool checkpoint must use SystemReminderRegistry topic force-tool-checkpoint-blocked (not generic missing-input)',
   )
+})
+
+test('Stage 4 W2: SystemReminderRegistry exposes the two new topics', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: the topics added in W2 must be present in both the ReminderTopic union and the DEFAULT_CONFLICTS map. Without both, registration would either fail to typecheck or silently bypass conflict resolution.
+  const registrySource = readFileSync(resolve(process.cwd(), 'src/main/modules/agent-control/system-reminder-registry.ts'), 'utf8')
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: see comment above; the assembly module's DEFAULT_CONFLICTS map is the second half of the topic registration that must stay in lock-step with the union.
+  const assemblySource = readFileSync(resolve(process.cwd(), 'src/main/modules/agent-control/system-reminder-assembly.ts'), 'utf8')
+
+  assert.match(registrySource, /'skill-resume-context-prompt'/, 'ReminderTopic union must include skill-resume-context-prompt')
+  assert.match(registrySource, /'force-tool-checkpoint-blocked'/, 'ReminderTopic union must include force-tool-checkpoint-blocked')
+
+  assert.match(assemblySource, /'skill-resume-context-prompt':\s*\[/, 'DEFAULT_CONFLICTS must list skill-resume-context-prompt entry')
+  assert.match(assemblySource, /'force-tool-checkpoint-blocked':\s*\[/, 'DEFAULT_CONFLICTS must list force-tool-checkpoint-blocked entry')
 })
