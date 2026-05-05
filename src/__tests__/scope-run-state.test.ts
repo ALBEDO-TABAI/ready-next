@@ -1005,6 +1005,29 @@ describe('scope run state helpers', () => {
     assert.deepStrictEqual(patch.resumableActions, [])
   })
 
+  it('does not inherit stale blockedReason on new-run', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        runId: 'run-new',
+        phase: 'planning',
+        timestamp: '2026-05-05T00:01:00.000Z'
+      } as any,
+      {
+        scopeId: 'scope-tail',
+        agent: 'assistant',
+        requestId: 'run-old',
+        phase: 'checkpoint',
+        blockedReason: '等待用户继续',
+        toolTrace: [],
+        startedAt: '2026-05-05T00:00:00.000Z',
+        updatedAt: '2026-05-05T00:00:00.500Z',
+        responseBuffer: '',
+        stepMetrics: { toolCalls: 0, toolResults: 0, lastToolAt: null }
+      }
+    )
+    assert.strictEqual(patch.blockedReason, null)
+  })
+
   it('does not inherit stale currentStepId on new-run', () => {
     const patch = deriveScopeRunStatePatch(
       {

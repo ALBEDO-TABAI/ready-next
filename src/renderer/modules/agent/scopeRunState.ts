@@ -822,7 +822,9 @@ export function deriveScopeRunStatePatch(
     blockedReason:
       'blockedReason' in event
         ? event.blockedReason ?? null
-        : previous?.blockedReason ?? null,
+        : shouldClearStaleProgress
+          ? null
+          : previous?.blockedReason ?? null,
     controllerId: previous?.controllerId ?? null,
     ownerTabId: previous?.ownerTabId ?? null,
     checkpointExpiresAt: previous?.checkpointExpiresAt ?? null,
