@@ -26,7 +26,12 @@ test('tool executor rejects tool calls outside the current allowlist', () => {
   assert.match(builder, /allowedToolNames\?: Set<string> \| string\[\] \| null/)
   assert.match(builder, /allowedToolNames:\s*params\.allowedToolNames \|\| null/)
   assert.match(turnEngine, /const preparedToolContext = buildHostToolContext\(preparedRunCapabilities\.allowedToolNames\)/)
-  assert.match(turnEngine, /const routedAllowedToolNames = selectedDomainPrepareResult\?\.allowedToolNames \|\| reconciledRunCapabilities\.allowedToolNames/)
+  // `15a29c5 fix(agent): refresh skill tool policy after frame patches`
+  // changed `const` → `let` so the policy refresh path can rebind
+  // routedAllowedToolNames after a TurnFrame patch. Accept both forms —
+  // what we actually pin is the right-hand source (selectedDomain
+  // fallback to reconciledRunCapabilities), not the binding kind.
+  assert.match(turnEngine, /(?:const|let) routedAllowedToolNames = selectedDomainPrepareResult\?\.allowedToolNames \|\| reconciledRunCapabilities\.allowedToolNames/)
   assert.match(turnEngine, /const hostToolContext = buildHostToolContext\(routedAllowedToolNames\)/)
   assert.match(turnEngine, /const toolContext = buildHostToolContext\(routedAllowedToolNames, scope\)/)
   assert.doesNotMatch(turnEngine, /const allowedToolNamesForPolicy = new Set\(/)

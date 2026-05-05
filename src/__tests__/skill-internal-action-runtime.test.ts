@@ -85,10 +85,23 @@ test('ToolRuntime does not reject an allowed VEA typed action as unregistered', 
   assert.equal(result.results[0]?.result.text, 'vea:ok')
 })
 
-test('ToolRuntime still requires explicit allowlist for internal VEA typed actions', async () => {
+test('ToolRuntime preflight bypasses skill_* allowedToolNames check (W3a — executor admission is canonical)', async () => {
+  // Pre-W3a: this test pinned ToolRuntime's own allowedToolNames preflight
+  // for `skill_*` tools, expecting `tool_restricted_this_turn` from runtime.
+  // W3a moved the canonical denial signal for skill_* to tool-executor's
+  // admission (`authorization_denied` for unauthorized model calls,
+  // `tool_restricted_this_turn` from executor's own allowedToolNames gate
+  // for back-compat). ToolRuntime preflight now passes skill_* through to
+  // the executor — verified here by injecting a fake executor and
+  // observing it's actually called even when the runtime's allowedToolNames
+  // is empty.
+  let executorCalls = 0
   const runtime = new ToolRuntime({
     log: () => {},
-    executeToolCall: async () => 'vea:ok',
+    executeToolCall: async () => {
+      executorCalls += 1
+      return 'vea:ok'
+    },
   })
 
   const result = await runtime.executeBatch({
@@ -98,8 +111,36 @@ test('ToolRuntime still requires explicit allowlist for internal VEA typed actio
     context: {},
   })
 
+  assert.equal(executorCalls, 1, 'runtime preflight must NOT pre-reject skill_* — executor admission is the canonical gate')
+  assert.equal(result.results[0]?.result.text, 'vea:ok')
+  assert.equal(result.results[0]?.result.data?.reason, undefined)
+})
+
+test('ToolRuntime preflight still rejects non-skill tools missing from allowedToolNames', async () => {
+  // The W3a preflight bypass is scoped to `skill_*` tools — non-skill
+  // tools continue to receive `tool_restricted_this_turn` from runtime
+  // preflight. Pinned here so a future refactor can't accidentally widen
+  // the bypass and silently change errorKind for browser_/document_/etc.
+  let executorCalls = 0
+  const runtime = new ToolRuntime({
+    log: () => {},
+    executeToolCall: async () => {
+      executorCalls += 1
+      return 'doc:ok'
+    },
+  })
+
+  const result = await runtime.executeBatch({
+    toolCalls: [
+      { id: 'doc-1', name: 'document_open_tab', input: { url: 'https://example.test' } },
+    ],
+    context: {
+      allowedToolNames: new Set<string>(),
+    },
+  })
+
+  assert.equal(executorCalls, 0, 'runtime preflight must reject non-skill tool BEFORE the executor is invoked')
   assert.equal(result.results[0]?.result.data?.reason, 'tool_restricted_this_turn')
-  assert.notEqual(result.results[0]?.result.text, 'vea:ok')
 })
 
 test('tool executor admits frame-scoped internal VEA actions after explicit allowlist', async () => {
@@ -157,7 +198,10 @@ test('ToolRuntime uses the VEA typed action timeout instead of the generic skill
     },
   })
 
-  assert.equal(resolvedTimeoutMs, 30 * 60 * 1000)
+  // Synced to manifest's current `default_action_timeout_ms: 3600000` (60min)
+  // per commit `99fc70b Fix VEA live acceptance resume loop`. The action
+  // descriptions in ready-skill.json were updated alongside.
+  assert.equal(resolvedTimeoutMs, 60 * 60 * 1000)
 })
 
 test('skill action timeout falls back to host default action timeout', () => {
