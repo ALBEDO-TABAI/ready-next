@@ -4627,11 +4627,11 @@ test('resume disabled by flag does not call resumeSkillChildRun and emits metric
 // Behavioral contracts (e.g. preferred_skill_tools metric emission for explicit
 // skill mention) are already pinned by existing route tests above.
 
-test('Stage 4 W0: turn-engine.ts has 5 inline "用户希望继续使用 skill" rearm injection sites — W2 will collapse to 0 via SkillTurnIdentity.contextText', () => {
-  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: Stage 4 W2 collapses N parallel rearm sections through identity layer; this pins the actual count so W2 cannot leave one behind. Verified: lines 1468/1484/1497/1587/1598 (5 inline). Plan v6 §9 mentioned "6 处" but actual head count is 5; this test reflects ground truth.
+test('Stage 4 W2: turn-engine.ts has 0 inline "用户希望继续使用 skill" rearm injection sites — collapsed into applySkillTurnIdentity', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: W2 collapsed the 5 parallel rearm sections (legacy lines 1468/1484/1497/1587/1598) through `applySkillTurnIdentity` in skill-turn-identity.ts. This pin guards against any regression that re-introduces inline rearm in turn-engine.ts.
   const source = readFileSync(resolve(process.cwd(), 'src/main/modules/agent-control/turn-engine.ts'), 'utf8')
   const matches = source.match(/用户希望继续使用 skill/g) || []
-  assert.equal(matches.length, 5, `expected 5 "用户希望继续使用 skill" inline sites currently; W2 will reduce this to 0. Found ${matches.length}.`)
+  assert.equal(matches.length, 0, `turn-engine.ts must not contain inline "用户希望继续使用 skill" rearm strings post-W2. Found ${matches.length}; the canonical home is skill-turn-identity.ts:applySkillTurnIdentity.`)
 })
 
 test('Stage 4 W0: turn-engine.ts gates clearLastReferenceSkill on !shouldBindSkillContextForTurn — W2 applySkillTurnIdentity must preserve this predicate (NOT simplify mode:none → clear)', () => {

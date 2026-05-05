@@ -304,7 +304,7 @@ import type { SkillTaskSupervisorSnapshot } from './skill-task-supervisor'
 import { recordSkillParentTaskLifecycleEvent } from './skill-task-tracker'
 // Stage 4 W1 — pure-read SkillTurnIdentity shadow.
 import { collectIdentityReadSnapshot } from './skill-turn-identity-snapshot'
-import { projectIdentityToLegacyShape, resolveSkillTurnIdentity } from './skill-turn-identity'
+import { applySkillTurnIdentity, resolveSkillTurnIdentity } from './skill-turn-identity'
 import { SKILL_TURN_IDENTITY_METRICS } from './skill-turn-identity-metrics'
 import {
   createSkillBudgetLeaseState,
@@ -1448,12 +1448,31 @@ export class TurnEngine {
           return false
         }
       }
-      // Stage 4 W1 — pure-read SkillTurnIdentity shadow. Collect snapshot
-      // BEFORE the legacy A-F rearm sections call `rememberReferenceSkillFrom*`
-      // / `rememberActiveSkillContext`, so the shadow sees the same input
-      // state legacy will process. Resolver runs over the frozen snapshot.
-      // W2 deletes this shadow + the legacy A-F sections in one commit.
-      const __identityShadowSnapshot = collectIdentityReadSnapshot({
+      // Stage 4 W2 — single mutator entry. The 5 parallel rearm sections
+      // (Points B-E per v6 plan §9) and the config-repair fallback that
+      // previously lived inline at turn-engine.ts:1453-1646 are collapsed
+      // into `applySkillTurnIdentity`. The resolver's identity is the
+      // priority hint; the applier internally honours legacy cascade
+      // order so a resolver branch that can't actually arm falls
+      // through to the next legacy candidate.
+      //
+      // `shouldBindSkillContextForTurn` predicate (turn-engine.ts:~1716
+      // post-edit) and the `clearLastReferenceSkill` gate stay below in
+      // turn-engine — Point F's `rememberExplicitReferenceSkillHint` and
+      // the hint-clear conditions still depend on local turn state that
+      // the applier doesn't see.
+      const inspectLatestSkillTaskForHost = (params: {
+        sessionId?: string | null
+        scopeId?: string | null
+        skillId?: string | null
+      }): SkillTaskSupervisorSnapshot => {
+        if (host.skillTaskSupervisor?.inspectLatestSkillTask) {
+          return host.skillTaskSupervisor.inspectLatestSkillTask(params)
+        }
+        return inspectLatestSkillTask(params)
+      }
+
+      const __identitySnapshot = collectIdentityReadSnapshot({
         request: {
           sessionId: request.sessionId,
           primaryInstruction: requestEnvelope.primaryInstruction,
@@ -1480,174 +1499,71 @@ export class TurnEngine {
         }).resolveRecentSkillTaskRun,
         getLatestSkillRun,
       })
-      const __identityShadow = resolveSkillTurnIdentity(__identityShadowSnapshot)
+      const __identity = resolveSkillTurnIdentity(__identitySnapshot)
 
-      // skill-resume G2/G3 — when the user fired a bare retry intent and the
-      // substring-based skill match failed but the assistant recently used a
-      // skill_* tool_use, reverse-resolve the tool name back to its skill and
-      // re-arm the reference-skill hint. We then synthesize a context text so
-      // the rest of the turn (preferredSkillToolNames, maybeInjectExplicitSkillContext)
-      // flows naturally as if the user had named the skill.
-      let lookbackRearmedSkill: { skillId?: string; skillName?: string } | null = null
-      if (explicitRunStateResourceForTurn && !providedContinuationState && isSkillResumeTurnDetected) {
-        const shouldArmFromResource = !hasExplicitSkill
-          || firstExplicitSkillId === explicitRunStateResourceForTurn.skillId
-        const rearmed = shouldArmFromResource
-          ? skillContextOrchestrator.rememberReferenceSkillFromRunStateResource?.(
-            explicitRunStateResourceForTurn.skillId,
-            request.sessionId,
-          )
-          : null
-        if (rearmed?.armed) {
-          const skillName = rearmed.skillName || explicitRunStateResourceForTurn.skillName
-          lookbackRearmedSkill = { skillId: rearmed.skillId, skillName }
-          referenceSkillForMetrics = { id: rearmed.skillId, name: skillName }
-          referenceSkillHintVia = runStateResourceVia === 'resource_history' ? 'resource_history' : 'resource'
-          skillContextInjectionText = `用户希望继续使用 skill "${skillName}"`
-          hasExplicitSkill = true
-          host.log(
-            `[skill_detection] reference_skill_rearmed_from_run_state_resource skillId=${rearmed.skillId || ''} skillName=${skillName}`,
-          )
-        }
-      }
-      if (!hasExplicitSkill && !providedContinuationState && isSkillResumeTurnDetected && !isConfigRepairTurnDetected && previousAssistantSkillToolUses.length > 0 && !hasStrongActiveSkillContext()) {
-        const rearmed = skillContextOrchestrator.rememberReferenceSkillFromPriorToolUses?.(
-          previousAssistantSkillToolUses,
-          request.sessionId,
-        )
-        if (rearmed?.armed && rearmed.skillName) {
-          lookbackRearmedSkill = { skillId: rearmed.skillId, skillName: rearmed.skillName }
-          referenceSkillForMetrics = { id: rearmed.skillId, name: rearmed.skillName }
-          referenceSkillHintVia = 'lookback'
-          skillContextInjectionText = `用户希望继续使用 skill "${rearmed.skillName}"`
-          hasExplicitSkill = true
-          host.log(
-            `[skill_detection] reference_skill_rearmed_from_lookback skillId=${rearmed.skillId || ''} skillName=${rearmed.skillName}`,
-          )
-        }
-      }
-      if (!hasExplicitSkill && !providedContinuationState && isSkillResumeTurnDetected && !isConfigRepairTurnDetected && !hasStrongActiveSkillContext()) {
-        const armedHint = skillContextOrchestrator.getCurrentReferenceSkillHint?.(request.sessionId)
-        if (armedHint) {
-          lookbackRearmedSkill = { skillId: armedHint.id, skillName: armedHint.name }
-          referenceSkillForMetrics = { id: armedHint.id, name: armedHint.name }
-          referenceSkillHintVia = 'current'
-          skillContextInjectionText = `用户希望继续使用 skill "${armedHint.name}"`
-          hasExplicitSkill = true
-          host.log(
-            `[skill_detection] reference_skill_rearmed_from_current_hint skillId=${armedHint.id} skillName=${armedHint.name}`,
-          )
-        }
-      }
-      const inspectLatestSkillTaskForHost = (params: {
-        sessionId?: string | null
-        scopeId?: string | null
-        skillId?: string | null
-      }): SkillTaskSupervisorSnapshot => {
-        if (host.skillTaskSupervisor?.inspectLatestSkillTask) {
-          return host.skillTaskSupervisor.inspectLatestSkillTask(params)
-        }
-        return inspectLatestSkillTask(params)
-      }
-
-      if (!hasExplicitSkill && !providedContinuationState && isSkillResumeTurnDetected) {
-        const continuitySkillRun = getLatestSkillRun(request.sessionId)
-        const supervisorSnapshot = inspectLatestSkillTaskForHost({
-          sessionId: request.sessionId,
-          scopeId: request.sessionId,
-        })
-        const supervisorSkillRun = skillRunFromSupervisorSnapshot(supervisorSnapshot)
-        const activeSkillContext = resolveActiveSkillContext({
-          sessionId: request.sessionId,
-          supervisorSnapshot,
-          inspectSupervisor: false,
-        })
-        const activeContextSkillRun = skillRunFromActiveSkillContext(activeSkillContext)
-        const projectionSkillRun = host.resolveRecentSkillRun?.(request.sessionId) || null
-        const taskRunSkillRun = (host as unknown as {
+      const __applied = applySkillTurnIdentity(__identity, {
+        sessionId: request.sessionId,
+        providedContinuationState,
+        isSkillResumeTurnDetected,
+        isConfigRepairTurnDetected,
+        previousAssistantSkillToolUses,
+        explicitRunStateResourceForTurn,
+        runStateResourceVia,
+        firstExplicitSkillId,
+        contextualUserInput,
+        currentTurnResumeText: currentTurnResumeText || '',
+        initialHasExplicitSkill: hasExplicitSkill,
+        initialSkillContextInjectionText: skillContextInjectionText,
+        skillContextOrchestrator,
+        inspectLatestSkillTaskForHost,
+        resolveActiveSkillContextLive: resolveActiveSkillContext,
+        rememberActiveSkillContext,
+        getLatestSkillRun,
+        resolveSkillRunForResume,
+        skillRunFromSupervisorSnapshot,
+        skillRunFromActiveSkillContext,
+        isSameSkillRunForResume,
+        extractTaskIdFromText,
+        buildSkillResumeContextPrompt,
+        resolveRecentSkillRun: host.resolveRecentSkillRun,
+        resolveRecentSkillTaskRun: (host as unknown as {
           resolveRecentSkillTaskRun?: (sessionId: string | undefined) => RecentSkillRunForResume | null
-        }).resolveRecentSkillTaskRun?.(request.sessionId) || null
-        const latestSkillRun = resolveSkillRunForResume({
-          sessionId: request.sessionId,
-          expectedTaskId: extractTaskIdFromText(currentTurnResumeText || contextualUserInput),
-          candidates: [
-            supervisorSkillRun,
-            activeContextSkillRun,
-            taskRunSkillRun,
-            projectionSkillRun as RecentSkillRunForResume | null,
-            continuitySkillRun,
-          ],
-        })
-        const latestSkillRunSource = isSameSkillRunForResume(supervisorSkillRun, latestSkillRun)
-          ? 'supervisor'
-          : isSameSkillRunForResume(activeContextSkillRun, latestSkillRun)
-          ? activeSkillContext?.source || 'active_context'
-          : isSameSkillRunForResume(continuitySkillRun, latestSkillRun)
-          ? 'session_continuity'
-          : isSameSkillRunForResume(taskRunSkillRun, latestSkillRun)
-            ? 'skill_task_run'
-            : isSameSkillRunForResume(projectionSkillRun as RecentSkillRunForResume | null, latestSkillRun)
-              ? 'task_projection'
-              : 'none'
-        if (latestSkillRun?.skillId) {
-          const recoveredSkill = skillContextOrchestrator
-            .findExplicitlyRequestedSkills(`skill ${latestSkillRun.skillId}`)
-            .find((skill) => skill.id === latestSkillRun.skillId)
-          const skillName = recoveredSkill?.name || latestSkillRun.skillId
-          lookbackRearmedSkill = { skillId: latestSkillRun.skillId, skillName }
-          referenceSkillForMetrics = { id: latestSkillRun.skillId, name: skillName }
-          referenceSkillHintVia = 'history'
-          skillContextInjectionText = buildSkillResumeContextPrompt({
-            skillName,
-            skillId: latestSkillRun.skillId,
-            action: latestSkillRun.action,
-            summary: latestSkillRun.summary,
-            userText: currentTurnResumeText || contextualUserInput,
-          })
-          hasExplicitSkill = true
-          if (activeSkillContext && isSameSkillRunForResume(activeContextSkillRun, latestSkillRun)) {
-            rememberActiveSkillContext(request.sessionId, activeSkillContext)
-          }
-          host.log(
-            `[skill_detection] reference_skill_rearmed_from_skill_history source=${latestSkillRunSource} skillId=${latestSkillRun.skillId} skillName=${skillName}`,
-          )
-        } else if (isConfigRepairTurnDetected) {
-          const rearmed = previousAssistantSkillToolUses.length > 0
-            ? skillContextOrchestrator.rememberReferenceSkillFromPriorToolUses?.(
-              previousAssistantSkillToolUses,
-              request.sessionId,
-            )
-            : null
-          if (rearmed?.armed && rearmed.skillName) {
-            lookbackRearmedSkill = { skillId: rearmed.skillId, skillName: rearmed.skillName }
-            referenceSkillForMetrics = { id: rearmed.skillId, name: rearmed.skillName }
-            referenceSkillHintVia = 'lookback'
-            skillContextInjectionText = `用户希望继续使用 skill "${rearmed.skillName}"`
-            hasExplicitSkill = true
-            host.log(
-              `[skill_detection] reference_skill_rearmed_from_lookback skillId=${rearmed.skillId || ''} skillName=${rearmed.skillName}`,
-            )
-          } else {
-            const armedHint = skillContextOrchestrator.getCurrentReferenceSkillHint?.(request.sessionId)
-            if (armedHint) {
-              lookbackRearmedSkill = { skillId: armedHint.id, skillName: armedHint.name }
-              referenceSkillForMetrics = { id: armedHint.id, name: armedHint.name }
-              referenceSkillHintVia = 'current'
-              skillContextInjectionText = `用户希望继续使用 skill "${armedHint.name}"`
-              hasExplicitSkill = true
-              host.log(
-                `[skill_detection] reference_skill_rearmed_from_current_hint skillId=${armedHint.id} skillName=${armedHint.name}`,
-              )
-            } else {
-              const clarification = '我看到了你更新配置，但这里没有可恢复的 skill 任务。请告诉我要继续哪一个技能任务。'
-              host.log('[skill_detection] No recent skill task is available to resume after config repair turn')
-              transcript.emitOutput(clarification, 'text')
-              pushAssistantTextSafely(session, clarification, { sessionId: request.sessionId })
-              return finish({ success: true, status: 'done' })
-            }
-          }
-        }
+        }).resolveRecentSkillTaskRun,
+        log: (line) => host.log(line),
+      })
+
+      hasExplicitSkill = __applied.hasExplicitSkill
+      skillContextInjectionText = __applied.skillContextInjectionText
+      const lookbackRearmedSkill = __applied.lookbackRearmedSkill
+      referenceSkillForMetrics = __applied.referenceSkillForMetrics
+      referenceSkillHintVia = __applied.referenceSkillHintVia
+
+      // Config-repair clarification finish (legacy turn-engine.ts:1641-1647).
+      // The resolver flags `mode:'none' / reason:'config_repair_no_recoverable_task'`
+      // for this case but does not own turn termination; the applier sets
+      // `shouldFinishWithClarification` and turn-engine performs the legacy
+      // emit + finish here.
+      if (__applied.shouldFinishWithClarification && __applied.clarificationText) {
+        transcript.emitOutput(__applied.clarificationText, 'text')
+        pushAssistantTextSafely(session, __applied.clarificationText, { sessionId: request.sessionId })
+        return finish({ success: true, status: 'done' })
       }
+
+      // Stage 4 W2 observability — record applied identity. The W1
+      // shadow-mismatch metric is removed in this commit because the
+      // legacy A-F cascade is no longer running side-by-side; mismatch
+      // is undefined post-cutover. `modeApplied` is the post-W2 signal
+      // for operators auditing identity decisions.
+      logAgentMetric(SKILL_TURN_IDENTITY_METRICS.modeApplied, {
+        sessionId: request.sessionId,
+        mode: __identity.mode,
+        source: __identity.mode === 'skill' ? __identity.source : __identity.reason,
+        appliedReferenceSkillHintVia: __applied.referenceSkillHintVia,
+      })
+
+      // Point F (legacy turn-engine.ts:1651-1665) — explicit reference hint
+      // registration. Stays inline because it depends on `firstSkillMatch`
+      // (Point A) and the applied locals.
       const referenceSkillHintArmed = hasExplicitSkill
         ? Boolean(skillContextOrchestrator.rememberExplicitReferenceSkillHint?.(
           skillContextInjectionText,
@@ -1662,43 +1578,6 @@ export class TurnEngine {
             ? { id: firstSkillMatch.skills[0].skillId, name: firstSkillMatch.skills[0].skillId }
             : null
         referenceSkillHintVia = 'explicit'
-      }
-      // Stage 4 W1 — shadow comparison. After legacy A-F has finalized the
-      // hasExplicitSkill / lookbackRearmedSkill / referenceSkillHintVia
-      // locals, project the shadow identity into the same shape and emit a
-      // mismatch metric on any divergence. W2 deletes this entire block.
-      {
-        const __identityLegacyShape = {
-          hasExplicitSkill,
-          lookbackRearmedSkillId: lookbackRearmedSkill?.skillId || null,
-          referenceSkillHintVia,
-        }
-        const __identityShadowShape = projectIdentityToLegacyShape(
-          __identityShadow,
-          runStateResourceVia,
-        )
-        const __mismatchedFields: string[] = []
-        if (__identityLegacyShape.hasExplicitSkill !== __identityShadowShape.hasExplicitSkill) {
-          __mismatchedFields.push('hasExplicitSkill')
-        }
-        if (__identityLegacyShape.lookbackRearmedSkillId !== __identityShadowShape.lookbackRearmedSkillId) {
-          __mismatchedFields.push('lookbackRearmedSkillId')
-        }
-        if (__identityLegacyShape.referenceSkillHintVia !== __identityShadowShape.referenceSkillHintVia) {
-          __mismatchedFields.push('referenceSkillHintVia')
-        }
-        if (__mismatchedFields.length > 0) {
-          logAgentMetric(SKILL_TURN_IDENTITY_METRICS.shadowMismatch, {
-            sessionId: request.sessionId,
-            fields: __mismatchedFields,
-            expectedFromLegacy: __identityLegacyShape,
-            actualFromResolver: __identityShadowShape,
-            shadowMode: __identityShadow.mode,
-            shadowSource: __identityShadow.mode === 'skill'
-              ? __identityShadow.source
-              : __identityShadow.reason,
-          })
-        }
       }
 
       const shouldBindSkillContextForTurn = Boolean(

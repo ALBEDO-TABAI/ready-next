@@ -13,9 +13,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
-  projectIdentityToLegacyShape,
   resolveSkillTurnIdentity,
-  type SkillTurnIdentity,
 } from '../main/modules/agent-control/skill-turn-identity'
 import type {
   ReferenceHintSnapshot,
@@ -95,11 +93,6 @@ test('shadow resolver matches legacy on explicit skill mention', () => {
     assert.equal(identity.source, 'explicit_user_mention')
     assert.equal(identity.contextText, 'use video-expert-analyzer')
   }
-
-  const projected = projectIdentityToLegacyShape(identity, null)
-  assert.equal(projected.hasExplicitSkill, true)
-  assert.equal(projected.lookbackRearmedSkillId, null) // explicit mention is NOT lookback origin
-  assert.equal(projected.referenceSkillHintVia, 'explicit')
 })
 
 test('shadow resolver matches legacy on run_state resource resume', () => {
@@ -126,11 +119,6 @@ test('shadow resolver matches legacy on run_state resource resume', () => {
     assert.equal(identity.resumeHandle?.runStatePath, '/tmp/run_state.json')
     assert.equal(identity.resumeHandle?.outputDir, '/tmp/out')
   }
-
-  const projected = projectIdentityToLegacyShape(identity, 'resource')
-  assert.equal(projected.hasExplicitSkill, true)
-  assert.equal(projected.lookbackRearmedSkillId, 'video-expert-analyzer')
-  assert.equal(projected.referenceSkillHintVia, 'resource')
 })
 
 test('shadow resolver matches legacy on no-skill turn', () => {
@@ -143,11 +131,6 @@ test('shadow resolver matches legacy on no-skill turn', () => {
   if (identity.mode === 'none') {
     assert.equal(identity.reason, 'turn_not_skill_resume')
   }
-
-  const projected = projectIdentityToLegacyShape(identity, null)
-  assert.equal(projected.hasExplicitSkill, false)
-  assert.equal(projected.lookbackRearmedSkillId, null)
-  assert.equal(projected.referenceSkillHintVia, null)
 })
 
 test('shadow resolver matches legacy on config-repair no-recoverable-task path', () => {
@@ -266,36 +249,7 @@ test('resolver respects hasStrongActiveSkillContext gate (skips Point D when act
   }
 })
 
-// ---------------------------------------------------------------------------
-// Projection helper — explicit invariant
-// ---------------------------------------------------------------------------
-
-test('projectIdentityToLegacyShape: lookbackRearmedSkillId is null for explicit_user_mention', () => {
-  // Legacy A doesn't set lookbackRearmedSkill (only B/C/D/E do).
-  const identity: SkillTurnIdentity = {
-    mode: 'skill',
-    relation: 'new',
-    skillId: 'foo',
-    skillName: 'Foo',
-    confidence: 'explicit',
-    source: 'explicit_user_mention',
-    contextText: 'use foo',
-  }
-  const projected = projectIdentityToLegacyShape(identity, null)
-  assert.equal(projected.lookbackRearmedSkillId, null)
-  assert.equal(projected.referenceSkillHintVia, 'explicit')
-})
-
-test('projectIdentityToLegacyShape: resource_history uses resource_history via', () => {
-  const identity: SkillTurnIdentity = {
-    mode: 'skill',
-    relation: 'resume',
-    skillId: 'vea',
-    skillName: 'VEA',
-    confidence: 'trusted_handle',
-    source: 'run_state_resource',
-    contextText: '...',
-  }
-  const projected = projectIdentityToLegacyShape(identity, 'resource_history')
-  assert.equal(projected.referenceSkillHintVia, 'resource_history')
-})
+// `projectIdentityToLegacyShape` test cases were removed in W2: the helper
+// only existed to support the W1 shadow-mismatch metric, and W2 deleted
+// both the metric and the projection helper since the legacy A-F cascade
+// no longer runs side-by-side with the resolver.

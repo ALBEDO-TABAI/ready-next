@@ -1,36 +1,43 @@
 /**
- * Stage 4 W1 — pure-read SkillTurnIdentity resolver.
+ * Stage 4 SkillTurnIdentity — single decision point for "what skill (if
+ * any) does this turn want to use, and why" plus the single mutator entry
+ * that writes the corresponding state.
  *
- * Single source of truth for "what skill (if any) does this turn want to
- * use, and why". Replaces the 6 parallel rearm decision points in
- * turn-engine.ts:1340-1626 (Points A-F per v6 plan §9). W1 commit only
- * runs this in shadow mode — legacy A-F segments still mutate state and
- * decide observable behavior. W2 deletes the shadow comparison and lets
- * `applySkillTurnIdentity(identity, ctx)` (added in W2 same file) drive
- * mutation.
+ * Two phases:
  *
- * IMPORTANT — pure-read invariant. The CI gate
- * `scripts/check-identity-resolver-pure-read.cjs` enforces that this file
- * MUST NOT import any of:
+ *   - `resolveSkillTurnIdentity(snapshot)` (W1) — pure-read decision based
+ *     on a frozen `SkillTurnIdentitySnapshot`. The CI gate
+ *     `scripts/check-identity-resolver-pure-read.cjs` enforces that this
+ *     file MUST NOT import any `remember*` / `clear*` / `getLast*` /
+ *     `peek*` mutator or TTL-bumping read.
  *
- *   - rememberLastReferenceSkill / clearLastReferenceSkill /
- *     getLastReferenceSkill / peekLastReferenceSkill (the resolver uses
- *     `snapshot.referenceHintSnapshot`, never the live API)
- *   - rememberActiveSkillContext / clearActiveSkillContext /
- *     resolveActiveSkillContext (the resolver uses
- *     `snapshot.activeSkillContextSnapshot`, never live resolution)
- *   - inspectLatestSkillTask (the resolver uses `snapshot.supervisorSnapshot`)
- *   - getLatestSkillRun / resolveSkillRunForResume (snapshot has
- *     `latestSkillRunSnapshot` and `resumeCandidatesSnapshot`)
+ *   - `applySkillTurnIdentity(identity, ctx)` (W2) — dispatches on
+ *     `identity.source` and calls the corresponding mutator. NO fall-
+ *     through cascade between branches: each branch is the only place
+ *     the resolver authorized; if its mutator can't persist, we keep the
+ *     Point A initial state (matching legacy "rearmed.armed === false →
+ *     no override") rather than silently re-trying a different source.
  *
- * If you need a new read in the resolver, add it to the snapshot collector
- * (`skill-turn-identity-snapshot.ts`) — never import a runtime read here.
+ *     The W1 shadow comparator (`projectIdentityToLegacyShape` +
+ *     `shadowMismatch` metric) was removed in W2 because the legacy A-F
+ *     cascade is no longer running side-by-side, so mismatch is undefined
+ *     post-cutover.
+ *
+ * The `shouldBindSkillContextForTurn` predicate (turn-engine.ts:~1716)
+ * and Point F's `rememberExplicitReferenceSkillHint` stay in turn-engine
+ * because they need locals (firstSkillMatch, hasActiveSkill, child cancel
+ * intent) that the applier doesn't see.
  */
 
-import type {
-  RecentSkillRunForResume,
-  SkillTurnIdentitySnapshot,
-} from './skill-turn-identity-snapshot'
+import type { ActiveSkillContext, ResolveActiveSkillContextInputs } from './active-skill-context'
+import type { ExplicitRunStateResourceCandidate } from './run-state-resource-resolver'
+import type { SkillRunRecord } from './session-continuity'
+import type { SkillTaskSupervisorSnapshot } from './skill-task-supervisor'
+import type { SkillTurnIdentitySnapshot } from './skill-turn-identity-snapshot'
+
+// =============================================================================
+// Public types
+// =============================================================================
 
 export type SkillTurnIdentityRelation = 'new' | 'resume' | 'observe' | 'repair' | 'cancel'
 
@@ -79,8 +86,51 @@ export type SkillTurnIdentity =
       contextText: string
     }
 
+export type ReferenceSkillHintVia =
+  | 'explicit'
+  | 'lookback'
+  | 'current'
+  | 'history'
+  | 'resource'
+  | 'resource_history'
+
+// =============================================================================
+// resolveSkillTurnIdentity — pure-read decision over a frozen snapshot
+// =============================================================================
+
 /**
  * Pure logic. Determines identity from a frozen snapshot. No side effects.
+ *
+ * Branch precedence (matches legacy A-F semantics from
+ * turn-engine.ts:1342-1626):
+ *
+ *   1. `run_state_resource` — fires when (a) explicit run_state resource
+ *      is present, (b) resume intent detected, (c) no providedContinuationState,
+ *      AND (d) either no explicit user mention OR mention matches resource
+ *      skillId. This precedes Point A because legacy Point B's
+ *      `shouldArmFromResource` re-fired even after Point A had set
+ *      hasExplicitSkill, as long as the skill IDs matched.
+ *
+ *   2. `explicit_user_mention` — fires when user explicitly named a skill
+ *      and run_state did not arm above.
+ *
+ *   3. `prior_tool_use_lookback` — fires for non-config-repair resume
+ *      intent with prior assistant skill tool uses and no strong active
+ *      context.
+ *
+ *   4. `reference_hint` — fires for non-config-repair resume intent with
+ *      a reference hint and no strong active context.
+ *
+ *   5. `skill_history` — fires for resume intent with a recoverable skill
+ *      run (active context / continuity / projection / supervisor / task
+ *      run).
+ *
+ *   6. config-repair fallback — when (5) returns nothing AND
+ *      isConfigRepairTurnDetected, retry (3) → (4) → mode:'none' /
+ *      reason:'config_repair_no_recoverable_task'. Mirrors legacy
+ *      turn-engine.ts:1614-1647 inner fallback.
+ *
+ *   7. default — `mode:'none'`.
  */
 export function resolveSkillTurnIdentity(snapshot: SkillTurnIdentitySnapshot): SkillTurnIdentity {
   const {
@@ -96,15 +146,45 @@ export function resolveSkillTurnIdentity(snapshot: SkillTurnIdentitySnapshot): S
     referenceHintSnapshot,
     hasStrongActiveSkillContext,
     latestSkillRunSnapshot,
+    activeSkillContextSnapshot,
     explicitlyRequestedSkillsBySkillIdProbe,
   } = snapshot
+  void contextualUserInput
+  void runStateResourceVia
 
-  // Mirror legacy line 1346: `let hasExplicitSkill = Boolean(firstSkillMatch)`.
-  // We start with the same default the legacy initial state uses; subsequent
-  // branches re-shape mode/relation as the rearm fallbacks would.
   const hasExplicitMention = Boolean(firstSkillMatch && firstExplicitSkillId)
 
-  // Point A — explicit user mention (turn-engine.ts:1346-1351 → continues to F).
+  // Branch 1 — run_state resource (legacy Point B; precedes Point A when
+  // resource skillId matches user explicit, per legacy
+  // `shouldArmFromResource` rule).
+  if (
+    explicitRunStateResourceForTurn
+    && !providedContinuationState
+    && isSkillResumeTurnDetected
+  ) {
+    const shouldArmFromResource = !hasExplicitMention
+      || firstExplicitSkillId === explicitRunStateResourceForTurn.skillId
+    if (shouldArmFromResource) {
+      const skillId = explicitRunStateResourceForTurn.skillId
+      const skillName = String(explicitRunStateResourceForTurn.skillName || skillId)
+      return {
+        mode: 'skill',
+        relation: 'resume',
+        skillId,
+        skillName,
+        confidence: 'trusted_handle',
+        source: 'run_state_resource',
+        resumeHandle: {
+          outputDir: explicitRunStateResourceForTurn.outputDir ?? null,
+          runStatePath: explicitRunStateResourceForTurn.runStatePath ?? null,
+        },
+        contextText: `用户希望继续使用 skill "${skillName}"`,
+      }
+    }
+  }
+
+  // Branch 2 — explicit user mention (legacy Point A's residual case
+  // when run_state resource didn't arm).
   if (hasExplicitMention && firstSkillMatch && firstExplicitSkillId) {
     const skillName = String(firstSkillMatch.skills[0]?.name || firstExplicitSkillId)
     const relation: SkillTurnIdentityRelation = providedContinuationState
@@ -123,47 +203,15 @@ export function resolveSkillTurnIdentity(snapshot: SkillTurnIdentitySnapshot): S
     }
   }
 
-  // Point B — run_state resource rearm (turn-engine.ts:1454-1474).
-  if (
-    explicitRunStateResourceForTurn
-    && !providedContinuationState
-    && isSkillResumeTurnDetected
-  ) {
-    const skillId = explicitRunStateResourceForTurn.skillId
-    const skillName = explicitRunStateResourceForTurn.skillName || skillId
-    return {
-      mode: 'skill',
-      relation: 'resume',
-      skillId,
-      skillName,
-      confidence: 'trusted_handle',
-      source: 'run_state_resource',
-      resumeHandle: {
-        outputDir: explicitRunStateResourceForTurn.outputDir ?? null,
-        runStatePath: explicitRunStateResourceForTurn.runStatePath ?? null,
-      },
-      contextText: `用户希望继续使用 skill "${skillName}"`,
-    }
-  }
+  // Common gate for branches 3/4/5 — legacy `eligibleForRearm` predicate.
+  const eligibleForRearm = !providedContinuationState && isSkillResumeTurnDetected
 
-  // Guards shared by Points C, D, E (turn-engine.ts:1475/1491/1515).
-  const eligibleForRearm =
-    !hasExplicitMention
-    && !providedContinuationState
-    && isSkillResumeTurnDetected
-
-  // Point C — prior tool use lookback (turn-engine.ts:1475-1490).
-  // Mirrors legacy guard: `previousAssistantSkillToolUses.length > 0 && !hasStrongActiveSkillContext()`
-  // Note: legacy calls `rememberReferenceSkillFromPriorToolUses` (mutator)
-  // which can armSkillId / armSkillName. Pure resolver cannot call it; W2's
-  // applySkillTurnIdentity will. Resolver instead reports `confidence:'history'`
-  // with the most recent skill_* tool name's skillId as best-effort signal.
-  // The legacy mutator's return value is opaque from outside, so we can only
-  // approximate; the precise shape will be reconciled in W2.
+  // Branch 3 — prior tool use lookback (legacy Point C, NOT in config-repair).
   if (
     eligibleForRearm
     && !isConfigRepairTurnDetected
     && previousAssistantSkillToolUses.length > 0
+    && !hasStrongActiveSkillContext
   ) {
     const inferred = inferSkillFromToolNames(previousAssistantSkillToolUses)
     if (inferred) {
@@ -179,7 +227,7 @@ export function resolveSkillTurnIdentity(snapshot: SkillTurnIdentitySnapshot): S
     }
   }
 
-  // Point D — current reference hint (turn-engine.ts:1491-1503).
+  // Branch 4 — current reference hint (legacy Point D, NOT in config-repair).
   if (
     eligibleForRearm
     && !isConfigRepairTurnDetected
@@ -197,7 +245,7 @@ export function resolveSkillTurnIdentity(snapshot: SkillTurnIdentitySnapshot): S
     }
   }
 
-  // Point E — skill history (turn-engine.ts:1515-1612).
+  // Branch 5 — skill history (legacy Point E).
   if (eligibleForRearm) {
     const historicalSkill = pickHistoricalSkillRun(snapshot)
     if (historicalSkill?.skillId) {
@@ -210,46 +258,72 @@ export function resolveSkillTurnIdentity(snapshot: SkillTurnIdentitySnapshot): S
         relation: 'resume',
         skillId: historicalSkill.skillId,
         skillName,
-        confidence: 'history',
+        confidence: activeSkillContextSnapshot ? 'active_task' : 'history',
         source: 'skill_history',
+        resumeHandle: {
+          outputDir: historicalSkill.outputDir ?? null,
+          runStatePath: historicalSkill.runStatePath ?? null,
+          taskRunId: historicalSkill.taskRunId ?? null,
+          childRunId: historicalSkill.childRunId ?? null,
+        },
         contextText: `用户希望继续使用 skill "${skillName}"`,
       }
     }
 
-    // Config-repair clarification path (turn-engine.ts:1576-1610). When the
-    // user submitted a config-repair turn but no recoverable history exists,
-    // legacy emits a clarification and finishes the turn early. We surface
-    // this state via mode:'none' + reason:'config_repair_no_recoverable_task'
-    // so the W2 applier can preserve the legacy `finish(...)` behavior.
+    // Branch 6 — config-repair inner fallback (legacy
+    // turn-engine.ts:1614-1647): try priorToolUses → hint → clarification.
     if (isConfigRepairTurnDetected) {
-      return {
-        mode: 'none',
-        reason: 'config_repair_no_recoverable_task',
+      if (previousAssistantSkillToolUses.length > 0) {
+        const inferred = inferSkillFromToolNames(previousAssistantSkillToolUses)
+        if (inferred) {
+          return {
+            mode: 'skill',
+            relation: 'repair',
+            skillId: inferred.skillId,
+            skillName: inferred.skillName,
+            confidence: 'history',
+            source: 'prior_tool_use_lookback',
+            contextText: `用户希望继续使用 skill "${inferred.skillName}"`,
+          }
+        }
       }
+      if (referenceHintSnapshot) {
+        return {
+          mode: 'skill',
+          relation: 'repair',
+          skillId: referenceHintSnapshot.id,
+          skillName: referenceHintSnapshot.name,
+          confidence: 'hint',
+          source: 'reference_hint',
+          contextText: `用户希望继续使用 skill "${referenceHintSnapshot.name}"`,
+        }
+      }
+      return { mode: 'none', reason: 'config_repair_no_recoverable_task' }
     }
   }
 
-  // Default — no skill in this turn.
   return {
     mode: 'none',
     reason: isSkillResumeTurnDetected ? 'no_skill_signal' : 'turn_not_skill_resume',
   }
 }
 
+// =============================================================================
+// Internal helpers
+// =============================================================================
+
 /**
  * Best-effort skillId/skillName recovery from a list of `skill_<id>_<action>`
- * tool names. Mirrors legacy `rememberReferenceSkillFromPriorToolUses` shape
- * but pure — it can only see the tool name string, so it derives skillId by
- * pattern. The W2 applier is the canonical source for the actual rearm
- * (it calls the orchestrator's mutating implementation which has access to
- * the full skill registry).
+ * tool names. The W2 applier consults the orchestrator's mutator (which
+ * has access to the full skill registry) to recover the proper skill name
+ * — this helper is only used by the resolver to pick a branch, with the
+ * applier overriding `skillName` on success.
  */
 function inferSkillFromToolNames(
   toolNames: ReadonlyArray<string>,
 ): { skillId: string; skillName: string } | null {
   for (let i = toolNames.length - 1; i >= 0; i -= 1) {
     const name = toolNames[i]
-    // skill_<id-with-underscores>_<action>
     const match = /^skill_([a-z0-9][a-z0-9_-]*)_[a-z0-9_]+$/i.exec(name)
     if (!match) continue
     const skillId = match[1]
@@ -258,76 +332,357 @@ function inferSkillFromToolNames(
   return null
 }
 
-function pickHistoricalSkillRun(snapshot: SkillTurnIdentitySnapshot): RecentSkillRunForResume | null {
-  // Legacy at turn-engine.ts:1532 uses resolveSkillRunForResume to pick the
-  // best candidate. Resolver cannot call that (it's not pure-read in the
-  // strictest sense); instead we approximate with snapshot's pre-computed
-  // `latestSkillRunSnapshot` (from getLatestSkillRun) which mirrors the
-  // continuity branch — the most common historical signal. Active context
-  // already provides skillId via `activeSkillContextSnapshot`. Multiple
-  // sources are merged: prefer activeSkillContextSnapshot when present.
+interface PickedHistoricalSkillRun {
+  skillId: string
+  outputDir?: string | null
+  runStatePath?: string | null
+  taskRunId?: string | null
+  childRunId?: string | null
+  action?: string | null
+  summary?: string | null
+}
+
+function pickHistoricalSkillRun(snapshot: SkillTurnIdentitySnapshot): PickedHistoricalSkillRun | null {
+  // Prefer `activeSkillContextSnapshot` since legacy Point E used the
+  // composite `resolveSkillRunForResume` and `activeContextSkillRun` was
+  // a primary candidate. Fall back to `latestSkillRunSnapshot` (continuity).
   if (snapshot.activeSkillContextSnapshot?.skillId) {
-    return Object.freeze({
-      skillId: snapshot.activeSkillContextSnapshot.skillId,
-      action: snapshot.activeSkillContextSnapshot.action || undefined,
-    } as RecentSkillRunForResume)
+    const ctx = snapshot.activeSkillContextSnapshot
+    return {
+      skillId: ctx.skillId,
+      outputDir: ctx.outputDir ?? null,
+      runStatePath: ctx.runStatePath ?? null,
+      taskRunId: ctx.taskRunId ?? null,
+      action: ctx.action ?? null,
+    }
   }
-  return snapshot.latestSkillRunSnapshot
+  if (snapshot.latestSkillRunSnapshot) {
+    const run = snapshot.latestSkillRunSnapshot
+    return {
+      skillId: run.skillId,
+      action: run.action ?? null,
+      summary: run.summary ?? null,
+    }
+  }
+  return null
 }
 
-/**
- * Project a `SkillTurnIdentity` into the legacy turn-engine local fields
- * for the W1 shadow comparator. Used by the shadow-mismatch metric to
- * report mismatches in the same language as the legacy code.
- */
-export interface ProjectedLegacyShape {
+// =============================================================================
+// applySkillTurnIdentity — W2 mutator phase
+// =============================================================================
+//
+// Single function that takes the resolver's identity decision plus a
+// context bundle and produces the legacy turn-engine derived locals
+// (`hasExplicitSkill`, `skillContextInjectionText`, `lookbackRearmedSkill`,
+// `referenceSkillForMetrics`, `referenceSkillHintVia`). This is the ONLY
+// place that calls reference-skill / active-context mutators after W2.
+//
+// Identity-driven dispatch (no fall-through cascade): the applier reads
+// `identity.source` and calls exactly the corresponding mutator. If that
+// mutator returns `armed: false`, the applier KEEPS Point A's initial
+// state — it does NOT silently retry the next legacy branch. This
+// matches legacy "rearmed.armed === false → no override" while ensuring
+// that what the resolver decided is what the apply phase executes.
+
+export interface ApplySkillTurnIdentityContext {
+  // Turn locals already computed by turn-engine before the rearm phase.
+  sessionId: string | undefined
+  providedContinuationState: unknown
+  isSkillResumeTurnDetected: boolean
+  isConfigRepairTurnDetected: boolean
+  previousAssistantSkillToolUses: ReadonlyArray<string>
+  explicitRunStateResourceForTurn: ExplicitRunStateResourceCandidate | null
+  runStateResourceVia: 'resource' | 'resource_history' | null
+  firstExplicitSkillId: string | null
+  contextualUserInput: string
+  currentTurnResumeText: string
+
+  // Initial state from Point A (turn-engine.ts:1346-1351).
+  initialHasExplicitSkill: boolean
+  initialSkillContextInjectionText: string
+
+  // Mutator + read surface — orchestrator-style.
+  skillContextOrchestrator: {
+    findExplicitlyRequestedSkills(text: string): ReadonlyArray<{
+      skillId?: string
+      id?: string
+      name?: string
+    }>
+    rememberReferenceSkillFromRunStateResource?(
+      skillId: string,
+      sessionId?: string,
+    ): { armed: boolean; skillId?: string; skillName?: string }
+    rememberReferenceSkillFromPriorToolUses?(
+      toolNames: ReadonlyArray<string>,
+      sessionId?: string,
+    ): { armed: boolean; skillId?: string; skillName?: string }
+    getCurrentReferenceSkillHint?(
+      sessionId?: string,
+    ): { id: string; name: string } | null
+  }
+
+  // Helpers passed from turn-engine (private file-scope helpers cannot be
+  // imported here without circular deps). Real types from the underlying
+  // modules — no `unknown` placeholders.
+  inspectLatestSkillTaskForHost: (params: {
+    sessionId?: string | null
+    scopeId?: string | null
+    skillId?: string | null
+  }) => SkillTaskSupervisorSnapshot
+  resolveActiveSkillContextLive: (
+    inputs?: ResolveActiveSkillContextInputs,
+  ) => ActiveSkillContext | null
+  rememberActiveSkillContext: (
+    sessionId: string | null | undefined,
+    context: ActiveSkillContext | null,
+  ) => void
+  getLatestSkillRun: (sessionId: string | undefined) => SkillRunRecord | null
+  resolveSkillRunForResume: (params: {
+    sessionId?: string
+    expectedTaskId?: string | null
+    candidates?: Array<SkillRunRecord | null | undefined>
+  }) => SkillRunRecord | null
+  skillRunFromSupervisorSnapshot: (
+    snapshot: SkillTaskSupervisorSnapshot | null | undefined,
+  ) => SkillRunRecord | null
+  skillRunFromActiveSkillContext: (
+    context: ActiveSkillContext | null | undefined,
+  ) => SkillRunRecord | null
+  isSameSkillRunForResume: (
+    left: SkillRunRecord | null | undefined,
+    right: SkillRunRecord | null | undefined,
+  ) => boolean
+  extractTaskIdFromText: (text: string) => string | null
+  buildSkillResumeContextPrompt: (params: {
+    skillName: string
+    skillId: string
+    action?: string | null
+    summary?: string | null
+    userText: string
+  }) => string
+  resolveRecentSkillRun?: (sessionId: string | undefined) => SkillRunRecord | null
+  resolveRecentSkillTaskRun?: (sessionId: string | undefined) => SkillRunRecord | null
+
+  log: (line: string) => void
+}
+
+export interface ApplySkillTurnIdentityResult {
   hasExplicitSkill: boolean
-  lookbackRearmedSkillId: string | null
-  referenceSkillHintVia:
-    | 'explicit'
-    | 'lookback'
-    | 'current'
-    | 'history'
-    | 'resource'
-    | 'resource_history'
-    | null
+  skillContextInjectionText: string
+  lookbackRearmedSkill: { skillId?: string; skillName?: string } | null
+  referenceSkillForMetrics: { id?: string; name?: string } | null
+  referenceSkillHintVia: ReferenceSkillHintVia | null
+  /**
+   * Legacy Point E inner branch (turn-engine.ts:1576-1610): when a config-
+   * repair turn has no recoverable skill task. Turn-engine consumes this
+   * flag to emit the clarification text and `finish({success:true,
+   * status:'done'})`. Resolver sets identity.mode='none' +
+   * reason='config_repair_no_recoverable_task' for the same case but the
+   * actual finish is the caller's responsibility.
+   */
+  shouldFinishWithClarification: boolean
+  clarificationText: string | null
 }
 
-export function projectIdentityToLegacyShape(
+export function applySkillTurnIdentity(
   identity: SkillTurnIdentity,
-  runStateResourceVia: 'resource' | 'resource_history' | null,
-): ProjectedLegacyShape {
+  ctx: ApplySkillTurnIdentityContext,
+): ApplySkillTurnIdentityResult {
+  // Default to Point A's initial state. Each `case` overrides only on
+  // mutator success — preserves legacy "rearmed.armed === false → no
+  // override" semantics without falling through to other branches.
+  const baseResult: ApplySkillTurnIdentityResult = {
+    hasExplicitSkill: ctx.initialHasExplicitSkill,
+    skillContextInjectionText: ctx.initialSkillContextInjectionText,
+    lookbackRearmedSkill: null,
+    referenceSkillForMetrics: null,
+    referenceSkillHintVia: null,
+    shouldFinishWithClarification: false,
+    clarificationText: null,
+  }
+
   if (identity.mode === 'none') {
-    return { hasExplicitSkill: false, lookbackRearmedSkillId: null, referenceSkillHintVia: null }
+    if (identity.reason === 'config_repair_no_recoverable_task') {
+      ctx.log('[skill_detection] No recent skill task is available to resume after config repair turn')
+      return {
+        ...baseResult,
+        shouldFinishWithClarification: true,
+        clarificationText: '我看到了你更新配置，但这里没有可恢复的 skill 任务。请告诉我要继续哪一个技能任务。',
+      }
+    }
+    return baseResult
   }
-  let via: ProjectedLegacyShape['referenceSkillHintVia'] = null
+
   switch (identity.source) {
-    case 'explicit_user_mention':
-      via = 'explicit'
-      break
-    case 'run_state_resource':
-      via = runStateResourceVia === 'resource_history' ? 'resource_history' : 'resource'
-      break
-    case 'prior_tool_use_lookback':
-      via = 'lookback'
-      break
-    case 'reference_hint':
-      via = 'current'
-      break
-    case 'skill_history':
-      via = 'history'
-      break
-    default:
-      via = null
-  }
-  const isLookbackOrigin =
-    identity.source === 'run_state_resource'
-    || identity.source === 'prior_tool_use_lookback'
-    || identity.source === 'reference_hint'
-    || identity.source === 'skill_history'
-  return {
-    hasExplicitSkill: true,
-    lookbackRearmedSkillId: isLookbackOrigin ? identity.skillId : null,
-    referenceSkillHintVia: via,
+    case 'explicit_user_mention': {
+      // Point A already populated initial state via firstSkillMatch.text.
+      // No mutator call here — Point F (in turn-engine) will register the
+      // explicit hint via rememberExplicitReferenceSkillHint.
+      return {
+        ...baseResult,
+        hasExplicitSkill: true,
+      }
+    }
+
+    case 'run_state_resource': {
+      const rearmed = ctx.skillContextOrchestrator.rememberReferenceSkillFromRunStateResource?.(
+        identity.skillId,
+        ctx.sessionId,
+      )
+      if (!rearmed?.armed) {
+        // Mutator failed to arm — keep initial state (legacy semantics:
+        // `rearmed.armed === false` left state at Point A's values).
+        return baseResult
+      }
+      const skillId = rearmed.skillId || identity.skillId
+      const skillName = rearmed.skillName || identity.skillName
+      ctx.log(
+        `[skill_detection] reference_skill_rearmed_from_run_state_resource skillId=${skillId} skillName=${skillName}`,
+      )
+      return {
+        ...baseResult,
+        hasExplicitSkill: true,
+        skillContextInjectionText: `用户希望继续使用 skill "${skillName}"`,
+        lookbackRearmedSkill: { skillId, skillName },
+        referenceSkillForMetrics: { id: skillId, name: skillName },
+        referenceSkillHintVia:
+          ctx.runStateResourceVia === 'resource_history' ? 'resource_history' : 'resource',
+      }
+    }
+
+    case 'prior_tool_use_lookback': {
+      const rearmed = ctx.skillContextOrchestrator.rememberReferenceSkillFromPriorToolUses?.(
+        ctx.previousAssistantSkillToolUses,
+        ctx.sessionId,
+      )
+      if (!rearmed?.armed || !rearmed.skillName) {
+        return baseResult
+      }
+      const skillId = rearmed.skillId || identity.skillId
+      const skillName = rearmed.skillName
+      ctx.log(
+        `[skill_detection] reference_skill_rearmed_from_lookback skillId=${skillId} skillName=${skillName}`,
+      )
+      return {
+        ...baseResult,
+        hasExplicitSkill: true,
+        skillContextInjectionText: `用户希望继续使用 skill "${skillName}"`,
+        lookbackRearmedSkill: { skillId, skillName },
+        referenceSkillForMetrics: { id: skillId, name: skillName },
+        referenceSkillHintVia: 'lookback',
+      }
+    }
+
+    case 'reference_hint': {
+      // No mutator — the hint is already armed in the snapshot. The
+      // resolver only picks this branch when `referenceHintSnapshot` is
+      // populated, so we trust identity's skillId/skillName.
+      const skillId = identity.skillId
+      const skillName = identity.skillName
+      ctx.log(
+        `[skill_detection] reference_skill_rearmed_from_current_hint skillId=${skillId} skillName=${skillName}`,
+      )
+      return {
+        ...baseResult,
+        hasExplicitSkill: true,
+        skillContextInjectionText: `用户希望继续使用 skill "${skillName}"`,
+        lookbackRearmedSkill: { skillId, skillName },
+        referenceSkillForMetrics: { id: skillId, name: skillName },
+        referenceSkillHintVia: 'current',
+      }
+    }
+
+    case 'skill_history': {
+      // Re-resolve the live skill run record. The resolver picked
+      // skill_history because the snapshot contained at least one of
+      // (active context | continuity | projection | task run | supervisor),
+      // but legacy used the composite `resolveSkillRunForResume` to merge
+      // candidates and pick the canonical record. We recompute that here
+      // so the prompt builder has the freshest action/summary.
+      const continuitySkillRun = ctx.getLatestSkillRun(ctx.sessionId)
+      const supervisorSnapshot = ctx.inspectLatestSkillTaskForHost({
+        sessionId: ctx.sessionId,
+        scopeId: ctx.sessionId,
+      })
+      const supervisorSkillRun = ctx.skillRunFromSupervisorSnapshot(supervisorSnapshot)
+      const activeSkillContext = ctx.resolveActiveSkillContextLive({
+        sessionId: ctx.sessionId,
+        supervisorSnapshot,
+        inspectSupervisor: false,
+      })
+      const activeContextSkillRun = ctx.skillRunFromActiveSkillContext(activeSkillContext)
+      const projectionSkillRun = ctx.resolveRecentSkillRun?.(ctx.sessionId) || null
+      const taskRunSkillRun = ctx.resolveRecentSkillTaskRun?.(ctx.sessionId) || null
+      const latestSkillRun = ctx.resolveSkillRunForResume({
+        sessionId: ctx.sessionId,
+        expectedTaskId: ctx.extractTaskIdFromText(ctx.currentTurnResumeText || ctx.contextualUserInput),
+        candidates: [
+          supervisorSkillRun,
+          activeContextSkillRun,
+          taskRunSkillRun,
+          projectionSkillRun,
+          continuitySkillRun,
+        ],
+      })
+
+      if (!latestSkillRun?.skillId) {
+        // Re-resolve disagreed with snapshot — keep initial state. This
+        // is a corner case (snapshot took a stale view). The legacy code
+        // would have fallen through to config-repair / clarification but
+        // identity already accounted for those cases via the resolver's
+        // own snapshot pass; if the live re-fetch is null and config-
+        // repair was already considered, just honour the resolver.
+        return baseResult
+      }
+
+      const latestSkillRunSource = ctx.isSameSkillRunForResume(supervisorSkillRun, latestSkillRun)
+        ? 'supervisor'
+        : ctx.isSameSkillRunForResume(activeContextSkillRun, latestSkillRun)
+          ? activeSkillContext?.source || 'active_context'
+          : ctx.isSameSkillRunForResume(continuitySkillRun, latestSkillRun)
+            ? 'session_continuity'
+            : ctx.isSameSkillRunForResume(taskRunSkillRun, latestSkillRun)
+              ? 'skill_task_run'
+              : ctx.isSameSkillRunForResume(projectionSkillRun, latestSkillRun)
+                ? 'task_projection'
+                : 'none'
+
+      const skillId = latestSkillRun.skillId
+      const recoveredSkill = ctx.skillContextOrchestrator
+        .findExplicitlyRequestedSkills(`skill ${skillId}`)
+        .find((skill) => skill.id === skillId)
+      const skillName = String(recoveredSkill?.name || identity.skillName || skillId)
+      const skillContextInjectionText = ctx.buildSkillResumeContextPrompt({
+        skillName,
+        skillId,
+        action: latestSkillRun.action ?? null,
+        summary: latestSkillRun.summary ?? null,
+        userText: ctx.currentTurnResumeText || ctx.contextualUserInput,
+      })
+      if (
+        activeSkillContext
+        && ctx.isSameSkillRunForResume(activeContextSkillRun, latestSkillRun)
+      ) {
+        ctx.rememberActiveSkillContext(ctx.sessionId, activeSkillContext)
+      }
+      ctx.log(
+        `[skill_detection] reference_skill_rearmed_from_skill_history source=${latestSkillRunSource} skillId=${skillId} skillName=${skillName}`,
+      )
+      return {
+        ...baseResult,
+        hasExplicitSkill: true,
+        skillContextInjectionText,
+        lookbackRearmedSkill: { skillId, skillName },
+        referenceSkillForMetrics: { id: skillId, name: skillName },
+        referenceSkillHintVia: 'history',
+      }
+    }
+
+    default: {
+      ctx.log(
+        `[skill_detection] applySkillTurnIdentity unknown source=${identity.source}`,
+      )
+      return baseResult
+    }
   }
 }
