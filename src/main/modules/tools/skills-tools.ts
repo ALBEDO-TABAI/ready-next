@@ -35,8 +35,16 @@ import type {
   SkillActionDefinition,
   SkillInputValue,
 } from '../../../shared/skill-execution-types'
-import { STATIC_SKILL_TOOL_NAMES as STATIC_SKILL_TOOL_NAMES_PURE } from './skills-tools-static'
+import {
+  STATIC_SKILL_TOOL_NAMES as STATIC_SKILL_TOOL_NAMES_PURE,
+  STATIC_SKILL_TOOL_NAMES_BOOT_SAFE,
+} from './skills-tools-static'
 import { getLastReferenceSkill } from '../agent-control/skill-reference-hints'
+import {
+  fallbackThrottle,
+  type SkillToolFallbackEntry,
+  type SkillToolFallbackReason,
+} from '../agent-control/skill-tool-fallback-throttle'
 // Stage 4 W3b — authorization-driven primitive skillId resolution.
 import {
   SKILL_TOOL_AUTHORIZATION_NOT_SET,
@@ -156,6 +164,14 @@ export function resolveSkillActionTimeoutMs(skill: Pick<SkillState, 'hostRequire
     : undefined
 }
 
+let skillActionToolDefsOverrideForTests: (() => SkillToolDef[]) | null = null
+
+export function __setSkillActionToolDefsForTests(resolver: (() => SkillToolDef[]) | null): void {
+  skillActionToolDefsOverrideForTests = resolver
+  skillActionSchemaCache = {}
+  skillActionSchemaSignature = ''
+}
+
 /**
  * skill-resume B2 — pure predicate for the visibility filter exception.
  * Exported for direct unit testing without mocking the runtime manager.
@@ -199,6 +215,9 @@ function getSkillActionToolDefs(opts?: {
   activeSkillId?: string | null
   includeInternal?: boolean
 }): SkillToolDef[] {
+  if (skillActionToolDefsOverrideForTests) {
+    return skillActionToolDefsOverrideForTests()
+  }
   const manager = getSkillsRuntimeManager()
   const hintSkillId = opts?.referenceHintSkillId ?? null
   const activeSkillId = opts?.activeSkillId ?? null
@@ -242,7 +261,10 @@ function computeSkillActionSignature(defs: SkillToolDef[]): string {
     .join('|')
 }
 
-export function getSkillActionSchemas(): Record<string, ZodObject<ZodRawShape>> {
+export function getSkillActionSchemas(
+  fallbackEntry: SkillToolFallbackEntry = 'action_schemas_map',
+  toolName?: string,
+): Record<string, ZodObject<ZodRawShape>> {
   try {
     const defs = getSkillActionToolDefs({ includeInternal: true })
     const sig = computeSkillActionSignature(defs)
@@ -262,6 +284,11 @@ export function getSkillActionSchemas(): Record<string, ZodObject<ZodRawShape>> 
     }
     return skillActionSchemaCache
   } catch {
+    fallbackThrottle.emit({
+      entry: fallbackEntry,
+      reason: 'manager_throw',
+      ...(toolName ? { toolName } : {}),
+    })
     // Runtime manager unavailable (e.g. boot ordering) — return empty so the
     // registry falls through to static schemas only.
     return {}
@@ -962,16 +989,51 @@ export function findSkillToolByName(toolName: string): SkillToolDef | null {
     || findSkillToolByNameForExecution(toolName)
 }
 
-export function findSkillToolByNameForExecution(toolName: string): SkillToolDef | null {
+export type SkillToolLookupDetailedResult =
+  | { ok: true; def: SkillToolDef }
+  | { ok: false; reason: SkillToolFallbackReason }
+
+export function findSkillToolByNameForExecutionDetailedWithEntry(
+  toolName: string,
+  fallbackEntry: SkillToolFallbackEntry,
+): SkillToolLookupDetailedResult {
   let actionTool: SkillToolDef | null = null
+  let managerFailed = false
   try {
     actionTool = getSkillActionToolDefs({ includeInternal: true })
       .find((item) => item.name === toolName) || null
   } catch {
+    managerFailed = true
+    fallbackThrottle.emit({
+      entry: fallbackEntry,
+      reason: 'manager_throw',
+      toolName,
+    })
     actionTool = null
   }
-  if (actionTool) return actionTool
-  return PRIMITIVE_TOOL_DEFS.find((item) => item.name === toolName) || null
+  if (actionTool) return { ok: true, def: actionTool }
+
+  const primitiveTool = PRIMITIVE_TOOL_DEFS.find((item) => item.name === toolName) || null
+  if (primitiveTool) return { ok: true, def: primitiveTool }
+  if (managerFailed) return { ok: false, reason: 'manager_throw' }
+
+  if (STATIC_SKILL_TOOL_NAMES_BOOT_SAFE.includes(toolName)) {
+    fallbackThrottle.emit({
+      entry: fallbackEntry,
+      reason: 'manifest_miss',
+      toolName,
+    })
+  }
+  return { ok: false, reason: 'manifest_miss' }
+}
+
+export function findSkillToolByNameForExecutionDetailed(toolName: string): SkillToolLookupDetailedResult {
+  return findSkillToolByNameForExecutionDetailedWithEntry(toolName, 'find_by_name')
+}
+
+export function findSkillToolByNameForExecution(toolName: string): SkillToolDef | null {
+  const result = findSkillToolByNameForExecutionDetailed(toolName)
+  return result.ok ? result.def : null
 }
 
 export function findSkillToolBySkillAction(skillId: string, actionName?: string): SkillToolDef | null {
@@ -979,6 +1041,12 @@ export function findSkillToolBySkillAction(skillId: string, actionName?: string)
   try {
     defs = getSkillActionToolDefs({ includeInternal: true }).filter((item) => item.skillId === skillId)
   } catch {
+    fallbackThrottle.emit({
+      entry: 'find_by_skill_action',
+      reason: 'manager_throw',
+      skillId,
+      ...(actionName ? { action: actionName } : {}),
+    })
     defs = []
   }
   if (!actionName) return defs[0] || null

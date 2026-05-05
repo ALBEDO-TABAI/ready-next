@@ -43,6 +43,14 @@ export const PROJECTION_OBSERVABILITY_METRICS = {
    * pure observability.
    */
   projectionHandleLegacyOriginUsed: 'projection_handle_legacy_origin_used',
+  /**
+   * Stage 4 W4 — dynamic skill-tool lookup fell back because the runtime
+   * manager threw or a boot-safe static tool was absent from dynamic
+   * manifests. Payloads are deliberately tiny and keyed by the concrete
+   * lookup target so forged tool names do not become high-cardinality metric
+   * labels.
+   */
+  skillToolDynamicLookupFailed: 'skill_tool_dynamic_lookup_failed',
 } as const
 
 export type ProjectionObservabilityMetricName =

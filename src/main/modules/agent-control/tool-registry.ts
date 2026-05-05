@@ -54,7 +54,7 @@ import { shouldExposeSkillPrimitive } from '../tools/skill-tool-session-gate'
 import { normalizeToolJsonSchema } from '../tools/tool-schema'
 import {
   buildSkillToolName,
-  findSkillToolByNameForExecution,
+  findSkillToolByNameForExecutionDetailedWithEntry,
   getSkillActionSchemas,
   getSkillAnthropicTools,
   getSkillOpenAITools,
@@ -75,6 +75,7 @@ import type {
 } from '../skills-runtime/runtime-manager'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 import { snapshotTurnFeatureFlags } from './turn-feature-flags'
+import { fallbackThrottle } from './skill-tool-fallback-throttle'
 
 // skills-tools / system-tools transitively import SkillsRuntimeManager (which
 // imports `electron`). Top-level imports are required here because electron-vite
@@ -550,14 +551,14 @@ function buildStaticSkillToolDefinition(toolName: string): ToolDefinition | null
 
 function resolveSkillToolDefinitionForExecution(toolName: string): ToolDefinition | null {
   try {
-    const def = findSkillToolByNameForExecution(toolName)
-    if (def) {
-      return buildToolDefinition('skills', def.name, {
-        description: def.description,
+    const result = findSkillToolByNameForExecutionDetailedWithEntry(toolName, 'execution')
+    if (result.ok) {
+      return buildToolDefinition('skills', result.def.name, {
+        description: result.def.description,
         schema: null,
-        executionTimeoutMs: def.timeoutMs,
-        executionVisibility: def.visibility === 'internal' ? 'internal' : 'model',
-        requiresExplicitAllowlist: def.visibility === 'internal',
+        executionTimeoutMs: result.def.timeoutMs,
+        executionVisibility: result.def.visibility === 'internal' ? 'internal' : 'model',
+        requiresExplicitAllowlist: result.def.visibility === 'internal',
       })
     }
     // B1 — when the runtime-manager lookup returns null (e.g. boot ordering
@@ -570,6 +571,11 @@ function resolveSkillToolDefinitionForExecution(toolName: string): ToolDefinitio
     // "dispatch can execute it."
     return buildStaticSkillToolDefinition(toolName)
   } catch {
+    fallbackThrottle.emit({
+      entry: 'execution',
+      reason: 'manager_throw',
+      toolName,
+    })
     return buildStaticSkillToolDefinition(toolName)
   }
 }
@@ -617,6 +623,10 @@ function resolveSkillToolSchemas(format: ToolSchemaFormat, sessionId?: string): 
         : getSkillOpenAITools(sessionId),
     }
   } catch (error) {
+    fallbackThrottle.emit({
+      entry: 'schema_list',
+      reason: 'manager_throw',
+    })
     return {
       tools: staticTools,
       error: getErrorMessage(error),
@@ -643,6 +653,10 @@ function resolveSkillToolDefinitions(sessionId?: string): ToolDefinitionResoluti
       definitions: buildToolDefinitions('skills', defs.map((def) => def.name), metadata),
     }
   } catch (error) {
+    fallbackThrottle.emit({
+      entry: 'definition_list',
+      reason: 'manager_throw',
+    })
     return {
       definitions: buildToolDefinitions('skills', staticToolNames, buildStaticSkillMetadata(staticToolNames)),
       error: getErrorMessage(error),
@@ -762,8 +776,11 @@ export class ToolRegistry implements ToolRegistryReader {
   }
 
   getToolDefinitionForExecution(toolName: string): ToolDefinition | null {
+    if (toolName.startsWith('skill_')) {
+      return resolveSkillToolDefinitionForExecution(toolName)
+        || this.getToolDefinition(toolName)
+    }
     return this.getToolDefinition(toolName)
-      || (toolName.startsWith('skill_') ? resolveSkillToolDefinitionForExecution(toolName) : null)
   }
 
   getToolDefinitionsResolutionForGroup(
@@ -777,11 +794,31 @@ export class ToolRegistry implements ToolRegistryReader {
     }
     let resolution: ToolDefinitionResolution
     if (provider.getToolDefinitionsDetailed) {
-      resolution = this.enrichToolDefinitions(groupId, provider.getToolDefinitionsDetailed(sessionId), sessionId)
+      try {
+        resolution = this.enrichToolDefinitions(groupId, provider.getToolDefinitionsDetailed(sessionId), sessionId)
+      } catch (error) {
+        if (groupId === 'skills') {
+          fallbackThrottle.emit({
+            entry: 'group_definitions',
+            reason: 'manager_throw',
+          })
+        }
+        resolution = this.enrichToolDefinitions(groupId, {
+          definitions: buildToolDefinitions(groupId, provider.staticToolNames || []),
+          error: getErrorMessage(error),
+          usedStaticFallback: Boolean(provider.staticToolNames && provider.staticToolNames.length > 0),
+        }, sessionId)
+      }
     } else if (provider.getToolDefinitions) {
       try {
         resolution = this.enrichToolDefinitions(groupId, { definitions: provider.getToolDefinitions() }, sessionId)
       } catch (error) {
+        if (groupId === 'skills') {
+          fallbackThrottle.emit({
+            entry: 'group_definitions',
+            reason: 'manager_throw',
+          })
+        }
         resolution = this.enrichToolDefinitions(groupId, {
           definitions: buildToolDefinitions(groupId, provider.staticToolNames || []),
           error: getErrorMessage(error),
@@ -822,7 +859,21 @@ export class ToolRegistry implements ToolRegistryReader {
       ? provider?.getAnthropicToolsDetailed
       : provider?.getOpenAIToolsDetailed
     if (detailedResolver) {
-      resolution = detailedResolver(sessionId)
+      try {
+        resolution = detailedResolver(sessionId)
+      } catch (error) {
+        if (groupId === 'skills') {
+          fallbackThrottle.emit({
+            entry: 'group_schemas',
+            reason: 'manager_throw',
+          })
+        }
+        resolution = {
+          tools: staticToolNames.map((toolName) => createStaticFallbackSchema(toolName, format)),
+          error: getErrorMessage(error),
+          usedStaticFallback: staticToolNames.length > 0,
+        }
+      }
     } else {
       const directResolver = format === 'anthropic'
         ? provider?.getAnthropicTools
@@ -831,6 +882,12 @@ export class ToolRegistry implements ToolRegistryReader {
         try {
           resolution = { tools: directResolver() }
         } catch (error) {
+          if (groupId === 'skills') {
+            fallbackThrottle.emit({
+              entry: 'group_schemas',
+              reason: 'manager_throw',
+            })
+          }
           resolution = {
             tools: [],
             error: getErrorMessage(error),
@@ -982,10 +1039,15 @@ export function resolveToolInputSchemaForExecution(
   if (staticSchema) return staticSchema
   if (toolName.startsWith('skill_')) {
     try {
-      const dynamicSchemas = getSkillActionSchemas()
+      const dynamicSchemas = getSkillActionSchemas('input_schema', toolName)
       const dynamicSchema = dynamicSchemas[toolName]
       if (dynamicSchema) return dynamicSchema
     } catch {
+      fallbackThrottle.emit({
+        entry: 'input_schema',
+        reason: 'manager_throw',
+        toolName,
+      })
       // Same defensive posture as `getSkillActionSchemas` itself: when the
       // runtime manager is unavailable (boot ordering, test contexts), we
       // fall through to null rather than crashing the resolver. The static
