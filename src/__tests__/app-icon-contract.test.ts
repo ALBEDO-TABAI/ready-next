@@ -26,8 +26,16 @@ test('main process applies the project-owned icon during development instead of 
   assert.match(mainIndex, /nativeImage/)
   assert.match(mainIndex, /function resolveAppIconPath\(\)/)
   assert.match(mainIndex, /build\/icon\.png/)
+  assert.match(mainIndex, /const READY_APP_NAME = 'Ready'/)
+  assert.match(mainIndex, /app\.setName\(READY_APP_NAME\)/)
+  assert.match(mainIndex, /function ensureRegularDockApp\(\): void/)
+  assert.match(mainIndex, /ensureRegularDockApp\(\)/)
   assert.match(mainIndex, /app\.dock\.setIcon\(/)
   assert.match(mainIndex, /icon:\s*resolveAppIconPath\(\)/)
+  assert.ok(
+    mainIndex.indexOf('ensureRegularDockApp()') < mainIndex.indexOf('app.whenReady()'),
+    'Ready must opt into a regular Dock app before app.whenReady() registers with LaunchServices',
+  )
   assert.equal(
     packageJson.scripts.dev,
     'node ./scripts/sync-dev-icon.mjs && npm run rebuild:native && npm run native:check && electron-vite dev',
@@ -38,6 +46,12 @@ test('main process applies the project-owned icon during development instead of 
   )
   assert.equal(packageJson.scripts['native:check'], 'node scripts/check-better-sqlite3-electron-abi.cjs')
   assert.match(syncScript, /node_modules\/electron\/dist\/Electron\.app\/Contents\/Resources\/electron\.icns/)
+  assert.match(syncScript, /node_modules\/electron\/dist\/Electron\.app\/Contents\/Info\.plist/)
+  assert.match(syncScript, /CFBundleDisplayName/)
+  assert.match(syncScript, /CFBundleName/)
+  assert.match(syncScript, /CFBundleIdentifier/)
+  assert.match(syncScript, /com\.ready\.app\.dev/)
+  assert.match(syncScript, /plutil/)
   assert.match(syncScript, /copyFileSync/)
   assert.match(syncScript, /process\.platform !== 'darwin'/)
 })

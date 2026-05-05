@@ -259,6 +259,7 @@ import {
 } from './run-budget-policy'
 import { resolveTaskExecutionRoute } from './task-execution-router'
 import { resolveTaskType } from './task-type-resolver'
+import { shouldEnforcePetToolRetry } from './pet-tool-loop-policy'
 import {
   buildActiveFrameContextFromTurnFrame,
   buildToolRuntimeContext,
@@ -3387,6 +3388,34 @@ export class TurnEngine {
         }
 
         if (response.toolCalls.length === 0) {
+          const petToolRetryNeeded = shouldEnforcePetToolRetry({
+            intent: executionIntentContext.intentClassification,
+            allowedToolNames: routedAllowedToolNames,
+            toolCallsCount: response.toolCalls.length,
+          })
+          if (petToolRetryNeeded && textToolBridgeNudges < 2) {
+            textToolBridgeNudges += 1
+            const assistantHistoryText = response.rawText || response.text
+            if (assistantHistoryText) {
+              pushAssistantTextSafely(session, assistantHistoryText, {
+                sessionId: request.sessionId,
+                iteration: iterations,
+                toolTransport: response.toolTransport,
+              })
+            }
+            preferTextToolBridgeOnce = true
+            const reminderText = composeSystemReminderText({
+              topic: 'checkpoint',
+              priority: 80,
+              text: '系统补充：当前任务是宠物便利贴任务，必须调用 pet_show_sticky_note 把内容贴到猫猫旁边；不要写入文档，也不要只用文字说“贴好了”。',
+            })
+            const correctionText = [
+              buildTextToolBridgeCorrectionMessage(toolPolicy as any),
+              reminderText,
+            ].filter(Boolean).join('\n')
+            session.messages.push({ role: 'user', content: correctionText })
+            continue
+          }
           const activeBrowserToolLoopState = (activeDomainState as { browserToolLoopState?: { isBrowserTask?: boolean } } | null | undefined)
             ?.browserToolLoopState
           const browserToolRetryNeeded = shouldEnforceBrowserToolRetry({

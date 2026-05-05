@@ -209,12 +209,18 @@ export function buildExecutionToolState(params: {
   const hasRSSIntent = positiveDomains.has('rss') && !excludedDomains.has('rss')
   const hasCalendarIntent = positiveDomains.has('calendar') && !excludedDomains.has('calendar')
   const hasFeishuIntent = positiveDomains.has('feishu') && !excludedDomains.has('feishu')
+  const hasPetIntent = positiveDomains.has('pet') && !excludedDomains.has('pet')
+  const isPetDominantIntent = params.intentClassification.primaryDomain === 'pet' && hasPetIntent
+  const hasExplicitDocumentSurface =
+    /(文档|文稿|原文|文章|段落|章节|docx?|markdown|\.md\b|widget|show-widget|图表|趋势图|卡片|信息卡|提示块|表格|对比卡|进度卡|保存|写入|追加|替换|编辑|改写|润色|排版|格式)/i
+      .test(params.userInstructionText)
   const allowDocumentTools = baseVisibilityPlan.hasTools && (
-    (params.hasDocumentEnvironment && hasDocumentKeyword) ||
+    (!isPetDominantIntent && hasDocumentKeyword) ||
+    (params.hasDocumentEnvironment && (hasDocumentKeyword || hasExplicitDocumentSurface)) ||
     params.hasWidgetTargetContext ||
     Boolean(params.documentWidgetTaskKind) ||
     shouldForceDocumentToolCall(params.contextualUserInput) ||
-    hasDocumentKeyword ||
+    hasExplicitDocumentSurface ||
     hasDocumentIntent
   )
   const allowRSSTools = baseVisibilityPlan.hasTools && hasRSSIntent
@@ -223,6 +229,7 @@ export function buildExecutionToolState(params: {
     params.capabilityProfile === 'remote_channel' ||
     hasFeishuIntent
   )
+  const allowPetTools = baseVisibilityPlan.hasTools && hasPetIntent
   const allowSkillTools = baseVisibilityPlan.hasTools
     && Array.isArray(params.preferredSkillToolNames)
     && params.preferredSkillToolNames.length > 0
@@ -240,6 +247,7 @@ export function buildExecutionToolState(params: {
       rss: allowRSSTools,
       calendar: allowCalendarTools,
       channel_feishu: allowFeishuTools,
+      pet: allowPetTools,
       skills: allowSkillTools,
     },
   })

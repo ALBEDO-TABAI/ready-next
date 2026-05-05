@@ -1,7 +1,7 @@
 import type { RequestEnvelope } from './request-envelope'
 import { detectLiveInfoIntent } from './live-info-intent'
 
-export type IntentDomain = 'browser' | 'document' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'generic'
+export type IntentDomain = 'browser' | 'document' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'pet' | 'generic'
 export type IntentConfidence = 'high' | 'medium' | 'low'
 
 export interface IntentClassification {
@@ -39,6 +39,9 @@ const DOMAIN_OBJECT_PATTERNS: Record<Exclude<IntentDomain, 'generic'>, Array<[Re
     [/(^|[^a-z])(skill|skills|workflow)([^a-z]|$)/i, 'skill-object', 4],
     [/(技能|技能流|工作流|blocker|阻塞器|执行器)/i, 'skill-workflow', 3],
   ],
+  pet: [
+    [/(宠物|猫猫|桌面猫|宠物气泡|信息气泡|便利贴|便签|贴纸|pet)/i, 'pet-object', 5],
+  ],
   browser: [
     [/(浏览器|网页|网站|打开页面|打开网页|上传图片|提交到网页|prompt 输入区)/i, 'browser-object', 4],
     [/(https?:\/\/\S+)/i, 'browser-url', 2],
@@ -60,6 +63,9 @@ const DOMAIN_ACTION_PATTERNS: Record<Exclude<IntentDomain, 'generic'>, Array<[Re
   ],
   skill: [
     [/(继续执行|继续跑|恢复执行|处理 blocker|提交结果|确认继续|workflow)/i, 'skill-action', 2],
+  ],
+  pet: [
+    [/(贴到|贴上|贴|放到|放上|新增|添加|显示|关闭|删除|清空|移除)/i, 'pet-action', 2],
   ],
   browser: [
     [/(打开|进入|上传|提交|点击|填写|发送)/i, 'browser-action', 2],
@@ -177,7 +183,7 @@ function resolveExcludedDomains(
 ): Array<Exclude<IntentDomain, 'generic'>> {
   const positive = new Set(signals.map((item) => item.domain))
   if (primaryDomain === 'generic') return []
-  return (['browser', 'document', 'rss', 'calendar', 'feishu', 'skill'] as Array<Exclude<IntentDomain, 'generic'>>)
+  return (['browser', 'document', 'rss', 'calendar', 'feishu', 'skill', 'pet'] as Array<Exclude<IntentDomain, 'generic'>>)
     .filter((domain) => domain !== primaryDomain && !positive.has(domain))
 }
 

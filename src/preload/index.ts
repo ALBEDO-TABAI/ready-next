@@ -1,7 +1,8 @@
-import { contextBridge, ipcRenderer, webUtils } from 'electron'
+import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import type { BrowserBoundsSyncMode } from '../shared/browser-view-layout'
 import type { BrowserUtilityMenuRequest } from '../shared/browser-utility-menu'
 import type { RendererAgentMetricName } from '../shared/renderer-agent-metrics'
+import type { PetActivitySnapshot, PetSettings, PetStickyNoteInput, PetWindowSnapshot } from '../shared/pet'
 
 type ContinuationIntentPayload = {
   taskId: string
@@ -582,6 +583,13 @@ const windowAPI = {
 const themeAPI = {
   set: (theme: string) => ipcRenderer.invoke('theme:set', theme),
   get: () => ipcRenderer.invoke('theme:get'),
+  onChanged: (listener: (snapshot: { option: string; resolved: 'light' | 'dark' }) => void) => {
+    const handler = (_event: IpcRendererEvent, snapshot: { option: string; resolved: 'light' | 'dark' }) => {
+      listener(snapshot)
+    }
+    ipcRenderer.on('theme:changed', handler)
+    return () => ipcRenderer.removeListener('theme:changed', handler)
+  },
 }
 
 // Settings API
@@ -594,6 +602,27 @@ const settingsAPI = {
   getAIWorkspace: () => ipcRenderer.invoke('settings:getAIWorkspace'),
   setAIWorkspace: (workspace: unknown) => ipcRenderer.invoke('settings:setAIWorkspace', workspace),
   testAIConnection: (config: unknown) => ipcRenderer.invoke('settings:testAIConnection', config),
+}
+
+const petAPI = {
+  getSettings: () => ipcRenderer.invoke('pet:getSettings'),
+  updateSettings: (patch: Partial<PetSettings>) => ipcRenderer.invoke('pet:updateSettings', patch),
+  listPets: () => ipcRenderer.invoke('pet:listPets'),
+  getSnapshot: () => ipcRenderer.invoke('pet:getSnapshot'),
+  show: () => ipcRenderer.invoke('pet:show'),
+  hide: () => ipcRenderer.invoke('pet:hide'),
+  setPet: (petId: string) => ipcRenderer.invoke('pet:setPet', petId),
+  updateActivity: (snapshot: PetActivitySnapshot) => ipcRenderer.invoke('pet:updateActivity', snapshot),
+  resetPosition: () => ipcRenderer.invoke('pet:resetPosition'),
+  moveBy: (delta: { dx: number; dy: number }) => ipcRenderer.invoke('pet:moveBy', delta),
+  pushStickyNote: (note: PetStickyNoteInput) => ipcRenderer.invoke('pet:pushStickyNote', note),
+  dismissStickyNote: (id: string) => ipcRenderer.invoke('pet:dismissStickyNote', id),
+  clearStickyNotes: () => ipcRenderer.invoke('pet:clearStickyNotes'),
+  onSnapshot: (callback: (snapshot: PetWindowSnapshot) => void) => {
+    const handler = (_: unknown, snapshot: PetWindowSnapshot) => callback(snapshot)
+    ipcRenderer.on('pet:snapshot', handler)
+    return () => { ipcRenderer.removeListener('pet:snapshot', handler) }
+  },
 }
 
 // Chat History + File API
@@ -675,6 +704,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   window: windowAPI,
   theme: themeAPI,
   settings: settingsAPI,
+  pet: petAPI,
   chat: chatAPI,
   userProfile: userProfileAPI,
   agentPersonality: agentPersonalityAPI,
@@ -701,6 +731,7 @@ declare global {
       window: typeof windowAPI
       theme: typeof themeAPI
       settings: typeof settingsAPI
+      pet: typeof petAPI
       chat: typeof chatAPI
       userProfile: typeof userProfileAPI
       agentPersonality: typeof agentPersonalityAPI

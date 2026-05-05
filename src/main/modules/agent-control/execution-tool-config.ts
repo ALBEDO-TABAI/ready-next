@@ -355,7 +355,7 @@ export function buildTextToolBridgeCorrectionMessage(policy?: ToolPolicy): strin
   return [
     '系统纠正：当前会话已经启用文本工具桥接，下面这些 Ready 工具都可以真实执行。',
     `可用工具：${toolNames.join(', ') || '无'}`,
-    '如果你需要浏览器/技能/文档操作，请直接输出 :::tool_call JSON ::: 块，不要再回答“当前通道没有工具”。',
+    '如果你需要浏览器/技能/文档/宠物操作，请直接输出 :::tool_call JSON ::: 块，不要再回答“当前通道没有工具”。',
     '如果你不确定该用哪个浏览器动作，优先先读页、定位输入框、定位按钮或读取 skill 说明，再继续。',
     '如果信息确实不足，可以提一个澄清问题，但不要伪造工具不可用。',
   ].join('\n')

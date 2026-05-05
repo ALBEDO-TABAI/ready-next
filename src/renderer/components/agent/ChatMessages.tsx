@@ -19,6 +19,7 @@ interface ChatMessagesProps {
   onSetInputSuggestion: (value: string) => void
   onToggleToolTrace: () => void
   onCopyMessage: (id: string, content: string) => void | Promise<void>
+  onAgentSelectionContextMenu?: (event: React.MouseEvent, selectedText: string) => void
   onAttachmentPreview: (attachment: ChatAttachment) => void | Promise<void>
   onRevealDocumentQuote: (attachment: ChatAttachment) => void
   getDocumentQuoteTooltip: (attachment: ChatAttachment) => string
@@ -44,6 +45,7 @@ export default function ChatMessages({
   onSetInputSuggestion,
   onToggleToolTrace,
   onCopyMessage,
+  onAgentSelectionContextMenu,
   onAttachmentPreview,
   onRevealDocumentQuote,
   getDocumentQuoteTooltip,
@@ -258,6 +260,13 @@ export default function ChatMessages({
                 <div
                   className="group/agentmsg relative max-w-[90%] text-[13px] leading-relaxed"
                   style={{ color: 'var(--text-body)', paddingRight: 18 }}
+                  onContextMenu={(event) => {
+                    const selectedText = window.getSelection()?.toString()?.trim() || ''
+                    if (!selectedText) return
+                    event.preventDefault()
+                    event.stopPropagation()
+                    onAgentSelectionContextMenu?.(event, selectedText)
+                  }}
                 >
                   <div style={{ fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
                     {renderMarkdown(msg.content)}

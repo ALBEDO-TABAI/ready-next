@@ -6,6 +6,7 @@ import type {
 } from './types'
 import type { RecoveryRecordData, TaskProjectionRecordData } from '../../types/electron'
 import { phaseToUserLabel, projectionStatusToUserLabel } from './task-status-vocabulary'
+import { filterUserVisibleToolTraceEvents, sanitizeInternalAgentDisplayText } from './toolTraceVisibility'
 
 export type TaskSectionKey = 'overview' | 'plan' | 'details' | 'artifacts' | 'memory'
 
@@ -209,7 +210,7 @@ function classifyStructuredHandoff(progress: ProgressWithActivity | undefined | 
 
 export function formatTaskUserFacingText(text: string | null | undefined): string {
   const handoff = classifyInternalAgentHandoffText(text)
-  return handoff?.summary || String(text || '').trim()
+  return handoff?.summary || sanitizeInternalAgentDisplayText(text, '正在继续处理')
 }
 
 export function isInternalAgentHandoffTask(run: TaskCardRunLike): boolean {
@@ -290,12 +291,20 @@ function normalizeTaskFamily(title: string): string {
   return first.toLowerCase()
 }
 
+function formatTaskTitleForUser(title: string | null | undefined): string {
+  const raw = String(title || '').trim()
+  if (!raw) return '任务'
+  if (/^(后台)?技能(任务|执行)\s*[·:：-]?/i.test(raw)) return '正在处理任务'
+  return sanitizeInternalAgentDisplayText(raw, '正在处理任务')
+}
+
 function buildDetailGroups(toolTrace: ToolTraceEvent[]): TaskEventGroupViewModel[] {
-  if (!Array.isArray(toolTrace) || toolTrace.length === 0) return []
+  const visibleToolTrace = filterUserVisibleToolTraceEvents(toolTrace)
+  if (!Array.isArray(visibleToolTrace) || visibleToolTrace.length === 0) return []
   const groups: TaskEventGroupViewModel[] = []
   let current: TaskEventGroupViewModel | null = null
 
-  for (const event of toolTrace) {
+  for (const event of visibleToolTrace) {
     const text = String(event.text || '').trim()
     const stageMatch = text.match(/^\[阶段\]\s*步骤\s*\d+\/\d+\s*([^：:]+)[：:]\s*(.+)$/)
     if (stageMatch) {
@@ -451,7 +460,7 @@ export function buildTaskCardViewModel(
 
   return {
     key: getTaskRunDisplayKey(run),
-    title: run.taskTitle || run.title || '任务',
+    title: formatTaskTitleForUser(run.taskTitle || run.title),
     phase: run.phase,
     statusLabel,
     summary,

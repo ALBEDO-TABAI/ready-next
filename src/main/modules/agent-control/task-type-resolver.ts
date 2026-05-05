@@ -75,6 +75,15 @@ export function resolveTaskType(params: {
     }
   }
 
+  if (params.intent.primaryDomain === 'pet') {
+    return {
+      taskType: 'short_task',
+      executionChain: 'tool_loop',
+      requiresPlanner: false,
+      preferredExecutor: 'none',
+    }
+  }
+
   if (params.intent.crossDomain) {
     return {
       taskType: 'multi_step_task',

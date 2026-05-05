@@ -56,7 +56,7 @@ export interface ParallelToolGroup {
 }
 
 export interface ToolResourceTag {
-  domain: 'browser' | 'document' | 'file' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'memory' | 'session' | 'system'
+  domain: 'browser' | 'document' | 'file' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'memory' | 'session' | 'pet' | 'system'
   accessMode: 'read' | 'write' | 'interactive'
 }
 
@@ -157,6 +157,9 @@ export function getToolResourceTag(toolName: string): ToolResourceTag {
   }
   if (normalized.startsWith('session_')) {
     return { domain: 'session', accessMode: 'read' }
+  }
+  if (normalized.startsWith('pet_')) {
+    return { domain: 'pet', accessMode: 'write' }
   }
   if (normalized.startsWith('skill_')) {
     // Stage D9 — explicit `READ_ONLY_SKILL_TOOL_NAMES` is the authoritative

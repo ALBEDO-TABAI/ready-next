@@ -20,6 +20,7 @@ import {
   executeFeishuTool,
 } from './feishu-tools'
 import { executeMemoryTool } from './memory-tools'
+import { executePetTool } from './pet-tools'
 import {
   executeSessionRecallTool,
 } from './session-recall-tools'
@@ -32,7 +33,7 @@ export function getOpenAITools(): Array<Record<string, unknown>> {
   return defaultToolGateway.getOpenAIToolsForGroups(defaultToolGateway.listCapabilityGroups().map((group) => group.id))
 }
 
-export { executeBrowserTool, executeSkillTool, executeFeishuTool, executeMemoryTool, executeSessionRecallTool }
+export { executeBrowserTool, executeSkillTool, executeFeishuTool, executeMemoryTool, executePetTool, executeSessionRecallTool }
 export { executeDocumentTool }
 export { executeRSSTool }
 export { executeCalendarTool }

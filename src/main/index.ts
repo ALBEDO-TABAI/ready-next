@@ -18,6 +18,8 @@ import { setupSearchIPC, shutdownFileWatchers } from './modules/search-engine/ip
 import { setupRSSIPC, setRSSBrowserController } from './modules/rss-engine/ipc-handler'
 import { setupCalendarIPC } from './modules/calendar-engine/ipc-handler'
 import { setupSettingsIPC } from './modules/settings-engine/ipc-handler'
+import { setupPetIPC } from './modules/pet/ipc-handler'
+import type { PetWindowManager } from './modules/pet/pet-window-manager'
 import { applyBundledAISettingsSeed } from './modules/settings-engine/seed-loader'
 import { setupAppCacheIPC } from './modules/app-control/cache-stats-ipc'
 import { setupSkillsIPC } from './modules/skills-runtime/ipc-handler'
@@ -37,6 +39,15 @@ const { autoUpdater } = pkg
 // Document operations (local fs) are always real — no external dependencies.
 // All environments: opt-in only via ENABLE_MOCK_SERVICES=true
 const ENABLE_MOCK_SERVICES = process.env.ENABLE_MOCK_SERVICES === 'true'
+const READY_APP_NAME = 'Ready'
+app.setName(READY_APP_NAME)
+
+function ensureRegularDockApp(): void {
+  if (process.platform !== 'darwin') return
+  app.setActivationPolicy('regular')
+}
+
+ensureRegularDockApp()
 
 // Document engine always uses real fs, regardless of mock setting
 const DOCUMENT_USE_MOCK = false
@@ -50,9 +61,15 @@ const agentManager = new AgentManager(ENABLE_MOCK_SERVICES)
 // Track the current main window for window-state IPC handlers
 let mainWindow: BrowserWindow | null = null
 let browserController: BrowserController | null = null
+let petWindowManager: PetWindowManager | null = null
 // Guard to prevent re-registering window-dependent IPC handlers on macOS dock re-open
 let windowIPCRegistered = false
 const THEME_SETTING_KEY = 'ui_theme_option'
+
+type ThemeSnapshot = {
+  option: 'light' | 'dark' | 'system'
+  resolved: 'light' | 'dark'
+}
 
 function resolveStoredThemeSource(): 'light' | 'dark' | 'system' {
   try {
@@ -64,13 +81,38 @@ function resolveStoredThemeSource(): 'light' | 'dark' | 'system' {
   return 'light'
 }
 
+function getThemeSnapshot(): ThemeSnapshot {
+  return {
+    option: resolveStoredThemeSource(),
+    resolved: nativeTheme.shouldUseDarkColors ? 'dark' : 'light',
+  }
+}
+
+function broadcastThemeChanged(): void {
+  const snapshot = getThemeSnapshot()
+  for (const window of BrowserWindow.getAllWindows()) {
+    if (!window.isDestroyed()) {
+      window.webContents.send('theme:changed', snapshot)
+    }
+  }
+}
+
 function resolveAppIconPath(): string {
   return app.isPackaged
     ? join(process.resourcesPath, 'icon.icns')
     : resolve(__dirname, '../../build/icon.png')
 }
 
+function ensureDockIconVisible(): void {
+  if (process.platform !== 'darwin') return
+  ensureRegularDockApp()
+  void app.dock.show().catch((error) => {
+    console.warn('[app] Failed to show dock icon:', error instanceof Error ? error.message : String(error))
+  })
+}
+
 function applyAppIcon(): void {
+  ensureDockIconVisible()
   const icon = nativeImage.createFromPath(resolveAppIconPath())
   if (icon.isEmpty()) return
 
@@ -207,8 +249,24 @@ function stopBootForDatabaseFailure(error: unknown): void {
   app.exit(1)
 }
 
+async function showMainWindow(): Promise<void> {
+  ensureDockIconVisible()
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    await createWindow()
+    return
+  }
+  if (mainWindow.isMinimized()) {
+    mainWindow.restore()
+  }
+  if (!mainWindow.isVisible()) {
+    mainWindow.show()
+  }
+  mainWindow.focus()
+}
+
 async function createWindow(): Promise<void> {
   nativeTheme.themeSource = resolveStoredThemeSource()
+  ensureDockIconVisible()
   // Pick a first-frame background that matches the resolved theme so non-macOS platforms don't flash white.
   const nonMacFirstFrameBg = nativeTheme.shouldUseDarkColors ? '#1A1B1E' : '#F7F9FC'
   // Create the browser window.
@@ -297,6 +355,13 @@ function setupGlobalIPC(): void {
   setupRSSIPC(RSS_USE_MOCK)
   setupCalendarIPC(CALENDAR_USE_MOCK)
   setupSettingsIPC()
+  petWindowManager = setupPetIPC({
+    preloadPath: join(__dirname, '../preload/index.mjs'),
+      rendererFile: join(__dirname, '../renderer/index.html'),
+      packaged: app.isPackaged,
+      resourcesPath: process.resourcesPath,
+      ensureDockApp: ensureDockIconVisible,
+    })
   setupAppCacheIPC()
   setupSkillsIPC()
   setupMemoryManagementIPC()
@@ -325,16 +390,13 @@ function setupGlobalIPC(): void {
     } catch {
       // ignore persistence failures
     }
+    broadcastThemeChanged()
   })
   ipcMain.handle('theme:get', () => {
     try {
-      const option = resolveStoredThemeSource()
       return {
         success: true,
-        data: {
-          option,
-          resolved: nativeTheme.shouldUseDarkColors ? 'dark' : 'light',
-        },
+        data: getThemeSnapshot(),
       }
     } catch (error) {
       return {
@@ -501,6 +563,8 @@ app.whenReady().then(() => {
     return
   }
 
+  nativeTheme.on('updated', broadcastThemeChanged)
+
   console.log('[Main] App ready, registering protocol handler...')
 
   // Register local-file:// protocol handler for serving local files to the renderer
@@ -640,12 +704,11 @@ app.whenReady().then(() => {
   setupGlobalIPC()
   applyBundledAISettingsSeed()
 
-  void createWindow()
+  void createWindow().then(() => petWindowManager?.restoreIfEnabled())
 
   app.on('activate', function () {
-    // On macOS it's common to re-create a window in the app when the
-    // dock icon is clicked and there are no other windows open.
-    if (BrowserWindow.getAllWindows().length === 0) void createWindow()
+    // Pet windows are separate BrowserWindows; Dock activation should restore the main app window.
+    void showMainWindow()
   })
 })
 

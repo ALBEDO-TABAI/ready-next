@@ -46,7 +46,7 @@ test('browser startup gates chrome until host restoration completes and main pro
   assert.match(runtimeHook, /const hydrationPromiseRef = useRef<Promise<boolean> \| null>\(null\)/)
   assert.match(runtimeHook, /const ensureBrowserRuntime = useCallback\(async \(\) => \{/)
   assert.match(runtimeHook, /void ensureBrowserRuntime\(\)/)
-  assert.match(runtimeHook, /const hasTabs = await ensureBrowserRuntime\(\)/)
+  assert.match(runtimeHook, /let hasTabs = await ensureBrowserRuntime\(\)/)
   assert.match(runtimeHook, /isAddressEditingRef: RefObject<boolean>/)
   assert.match(runtimeHook, /!isAddressEditingRef\.current/)
   assert.match(runtimeHook, /if \(!isActive\) \{[\s\S]*setBrowserRuntimeReady\(Boolean\(hasHydratedRuntimeRef\.current\)\)/)

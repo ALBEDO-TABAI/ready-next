@@ -4,6 +4,14 @@ import type { BrowserBoundsSyncMode } from '../../shared/browser-view-layout'
 import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runtime'
 import type { RendererAgentMetricName } from '../../shared/renderer-agent-metrics'
 import type {
+  PetActivitySnapshot,
+  PetDefinition,
+  PetSettings,
+  PetStickyNote,
+  PetStickyNoteInput,
+  PetWindowSnapshot,
+} from '../../shared/pet'
+import type {
   RSSBenchmarkResultData,
   RSSDiagnosticsData,
   RSSHubChromiumStatusData,
@@ -2006,6 +2014,7 @@ interface ElectronWindowAPI {
 interface ElectronThemeAPI {
   set: (theme: string) => Promise<void>
   get: () => Promise<{ success: boolean; data?: { option: ThemeOption; resolved: ResolvedTheme }; error?: string }>
+  onChanged: (listener: (snapshot: { option: ThemeOption; resolved: ResolvedTheme }) => void) => () => void
 }
 
 // =============================================================================
@@ -2106,6 +2115,23 @@ interface ElectronSettingsAPI {
   testAIConnection: (
     config: AIModelConfigData
   ) => Promise<{ success: boolean; data?: SettingsTestResult; error?: string }>
+}
+
+interface ElectronPetAPI {
+  getSettings: () => Promise<IPCResponse<PetSettings>>
+  updateSettings: (patch: Partial<PetSettings>) => Promise<IPCResponse<PetSettings>>
+  listPets: () => Promise<IPCResponse<PetDefinition[]>>
+  getSnapshot: () => Promise<IPCResponse<PetWindowSnapshot>>
+  show: () => Promise<IPCResponse<PetWindowSnapshot>>
+  hide: () => Promise<IPCResponse<boolean>>
+  setPet: (petId: string) => Promise<IPCResponse<PetSettings>>
+  updateActivity: (snapshot: PetActivitySnapshot) => Promise<IPCResponse<boolean>>
+  resetPosition: () => Promise<IPCResponse<PetSettings>>
+  moveBy: (delta: { dx: number; dy: number }) => Promise<IPCResponse<boolean>>
+  pushStickyNote: (note: PetStickyNoteInput) => Promise<IPCResponse<PetStickyNote>>
+  dismissStickyNote: (id: string) => Promise<IPCResponse<boolean>>
+  clearStickyNotes: () => Promise<IPCResponse<boolean>>
+  onSnapshot: (callback: (snapshot: PetWindowSnapshot) => void) => () => void
 }
 
 // =============================================================================
@@ -2408,6 +2434,7 @@ interface ElectronAPI {
   window: ElectronWindowAPI
   theme: ElectronThemeAPI
   settings: ElectronSettingsAPI
+  pet: ElectronPetAPI
   chat: ElectronChatAPI
   userProfile: ElectronUserProfileAPI
   agentPersonality: ElectronAgentPersonalityAPI

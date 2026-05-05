@@ -36,6 +36,7 @@ import { executeSkillTool, findSkillToolByNameForExecution } from './skills-tool
 import { executeSystemTool } from './system-tools'
 import { executeFeishuTool } from './feishu-tools'
 import { executeMemoryTool } from './memory-tools'
+import { executePetTool } from './pet-tools'
 import { executeSessionRecallTool } from './session-recall-tools'
 import {
   ToolDomainError,
@@ -256,6 +257,9 @@ export async function executeToolCall(
 
         case 'session':
           return executeSessionRecallTool(toolName, args, context)
+
+        case 'pet':
+          return executePetTool(toolName, args)
 
         default:
           return `Unknown tool: ${toolName}`

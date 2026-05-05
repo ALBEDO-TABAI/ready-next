@@ -11,6 +11,7 @@ export type ToolDomain =
   | 'skill'
   | 'memory'
   | 'session'
+  | 'pet'
   | 'system'
 
 export type ToolKind = 'read' | 'write' | 'interactive' | 'job'

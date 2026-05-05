@@ -8,6 +8,7 @@ export type CapabilityGroupId =
   | 'skills'
   | 'memory'
   | 'session_recall'
+  | 'pet'
   | 'channel_feishu'
   | 'system_host'
   | 'design_reserved'
@@ -133,6 +134,17 @@ export const CAPABILITY_GROUPS: CapabilityGroupDefinition[] = [
     defaultProfiles: ['local_chat', 'remote_channel', 'scheduled_run'],
     executionKinds: ['deterministic'],
     settingsVisible: true,
+  },
+  {
+    id: 'pet',
+    label: '宠物便利贴',
+    description: '把简短信息贴到桌面宠物旁边，或清理宠物便利贴。',
+    exposure: 'model_visible',
+    availability: 'active',
+    defaultMode: 'auto',
+    defaultProfiles: ['local_chat'],
+    executionKinds: ['deterministic'],
+    settingsVisible: false,
   },
   {
     id: 'channel_feishu',

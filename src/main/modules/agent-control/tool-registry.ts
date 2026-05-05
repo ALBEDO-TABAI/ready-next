@@ -38,6 +38,7 @@ import {
 } from '../tools/file-management-tool-defs'
 import { getFeishuAnthropicTools, getFeishuOpenAITools } from '../tools/feishu-tools'
 import { getMemoryAnthropicTools, getMemoryOpenAITools } from '../tools/memory-tools'
+import { getPetAnthropicTools, getPetOpenAITools } from '../tools/pet-tools'
 import { getRSSAnthropicTools, getRSSOpenAITools } from '../tools/rss-tools'
 import { getSessionRecallAnthropicTools, getSessionRecallOpenAITools } from '../tools/session-recall-tools'
 import {
@@ -189,6 +190,7 @@ const MEMORY_TOOL_NAMES = [
 ]
 
 const SESSION_RECALL_TOOL_NAMES = ['session_search']
+const PET_TOOL_NAMES = ['pet_show_sticky_note', 'pet_dismiss_sticky_note', 'pet_clear_sticky_notes']
 const SYSTEM_TOOL_NAMES = ['system_run_embedded_python', 'system_run_openclaw']
 
 interface StaticSkillActionMeta {
@@ -695,6 +697,12 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
     getToolDefinitions: () => buildToolDefinitions('session_recall', SESSION_RECALL_TOOL_NAMES),
     getAnthropicTools: () => getSessionRecallAnthropicTools(),
     getOpenAITools: () => getSessionRecallOpenAITools(),
+  },
+  pet: {
+    staticToolNames: PET_TOOL_NAMES,
+    getToolDefinitions: () => buildToolDefinitions('pet', PET_TOOL_NAMES),
+    getAnthropicTools: () => getPetAnthropicTools(),
+    getOpenAITools: () => getPetOpenAITools(),
   },
   channel_feishu: {
     staticToolNames: FEISHU_TOOL_NAMES,

@@ -1,8 +1,9 @@
 import { Suspense, lazy, useEffect } from 'react'
-import { Routes, Route, Navigate } from 'react-router-dom'
+import { Routes, Route, Navigate, useLocation } from 'react-router-dom'
 import WorkbenchMode from './pages/WorkbenchMode'
 import ReadyMode from './pages/ReadyMode'
 import Settings from './pages/Settings'
+import PetWindow from './pages/PetWindow'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import RitualOverlay from './components/overlay/RitualOverlay'
@@ -10,6 +11,7 @@ import SkillAskUserPrompt from './components/skill/SkillAskUserPrompt'
 import SkillInlinedToast from './components/skill/SkillInlinedToast'
 import { useTheme } from './stores/useTheme'
 import { initAgentListeners } from './stores/useAgent'
+import { usePetActivityBridge } from './modules/pet/usePetActivityBridge'
 import { fetchRSSWarmSnapshot } from './modules/rss/rssWarmLoader'
 import { primeRSSWarmCache } from './modules/rss/rssWarmCache'
 
@@ -17,8 +19,9 @@ const LiquidTest = lazy(() => import('./LiquidTest'))
 
 void primeRSSWarmCache(fetchRSSWarmSnapshot).catch(() => undefined)
 
-function App() {
+function MainAppShell() {
   useKeyboardShortcuts()
+  usePetActivityBridge()
 
   // `data-theme` is owned exclusively by useTheme (sync for bypass/system/init paths,
   // deferred to the ritual overlay's holding phase for user-driven toggles). Subscribing
@@ -51,6 +54,7 @@ function App() {
             <Route path="/workbench" element={<WorkbenchMode />} />
             <Route path="/ready" element={<ReadyMode />} />
             <Route path="/settings" element={<Settings />} />
+            <Route path="/pet-window" element={<PetWindow />} />
             <Route
               path="/liquid-test"
               element={(
@@ -68,6 +72,19 @@ function App() {
       <SkillInlinedToast />
     </ErrorBoundary>
   )
+}
+
+function App() {
+  const location = useLocation()
+  if (location.pathname === '/pet-window') {
+    return (
+      <ErrorBoundary>
+        <PetWindow />
+      </ErrorBoundary>
+    )
+  }
+
+  return <MainAppShell />
 }
 
 export default App

@@ -18,6 +18,10 @@ extraResources:
     to: embedded-skills
     filter:
       - "**/*"
+  - from: assets/pets
+    to: pets
+    filter:
+      - "**/*"
   - from: src/main/modules/rss-engine/rsshub-worker.mjs
     to: rsshub-worker.mjs
   - from: src/python

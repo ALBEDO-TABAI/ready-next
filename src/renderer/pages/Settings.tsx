@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } fro
 import {
   ChevronLeft, User, Bell, Shield, Database,
   Palette, Keyboard, Globe, Info, Moon, Sun, Bot, Monitor, Droplets,
-  ChevronRight, ExternalLink, HardDrive, Trash2, CheckCircle2, XCircle, Loader2, MessageSquare, Brain, Users, Sparkles
+  ChevronRight, ExternalLink, HardDrive, Trash2, CheckCircle2, XCircle, Loader2, MessageSquare, Brain, Users, Sparkles, Cat
 } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useTheme, type ThemeSkin } from '../stores/useTheme'
@@ -12,6 +12,7 @@ import { listSettingsCapabilityGroups, type CapabilityGroupId } from '../../shar
 import { useSettings, getProviderDef } from '../stores/useSettings'
 import type { AIProviderCategory } from '../stores/useSettings'
 import RemoteIMSettingsPanel from '../components/settings/RemoteIMSettingsPanel'
+import PetSettingsPanel from '../components/settings/PetSettingsPanel'
 import {
   SETTINGS_CARD_STYLE,
   SETTINGS_DANGER_BUTTON_STYLE,
@@ -118,6 +119,13 @@ const settingsData: SettingSection[] = [
     icon: Users,
     description: '管理用户偏好和个性化设置',
     settings: [] // Rendered dynamically via UserProfileEditor
+  },
+  {
+    id: 'pet',
+    title: '宠物',
+    icon: Cat,
+    description: '管理桌面悬浮宠物和工作气泡',
+    settings: []
   },
   {
     id: 'rss-storage',
@@ -2044,7 +2052,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
   }
 
   const isDynamicSection = currentSection
-    ? ['ai', 'remote-im', 'memory', 'personalities', 'user-profiles', 'rss-storage', 'storage'].includes(currentSection.id)
+    ? ['ai', 'remote-im', 'memory', 'personalities', 'user-profiles', 'pet', 'rss-storage', 'storage'].includes(currentSection.id)
     : false
 
   return (
@@ -2175,6 +2183,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                 {currentSection.id === 'rss-storage' && <RSSDraftStoreSettingsPanel />}
                 {currentSection.id === 'storage' && <StorageSettingsPanel />}
                 {currentSection.id === 'remote-im' && <RemoteIMSettingsPanel />}
+                {currentSection.id === 'pet' && <PetSettingsPanel />}
                 {currentSection.id === 'memory' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
                     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 360px) minmax(0, 1fr)', gap: 24, alignItems: 'start' }}>

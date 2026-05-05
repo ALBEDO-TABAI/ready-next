@@ -57,6 +57,7 @@ export function useBrowserViewBounds({
 }: UseBrowserViewBoundsParams) {
   const frameSyncRafRef = useRef<number | null>(null)
   const frameSyncRequestRef = useRef<PendingBoundsSyncRequest | null>(null)
+  const dragBoundsSyncRafRef = useRef<number | null>(null)
   const settleSyncTimeoutRef = useRef<number | null>(null)
   const lastBoundsKeyRef = useRef('')
   const overlayLockCountRef = useRef(0)
@@ -112,6 +113,34 @@ export function useBrowserViewBounds({
     lastBoundsKeyRef.current = boundsKey
     await window.electronAPI?.browser?.updateBounds({ ...bounds, syncMode: resolvedSyncMode })
   }, [measureBounds])
+
+  const stopDragBoundsSync = useCallback(() => {
+    if (dragBoundsSyncRafRef.current !== null) {
+      window.cancelAnimationFrame(dragBoundsSyncRafRef.current)
+      dragBoundsSyncRafRef.current = null
+    }
+  }, [])
+
+  const startDragBoundsSync = useCallback(() => {
+    if (!isElectron || dragBoundsSyncRafRef.current !== null) return
+
+    const tick = () => {
+      dragBoundsSyncRafRef.current = null
+      if (
+        !panelResizingRef.current ||
+        panelResizeReasonRef.current !== 'drag' ||
+        !isActiveRef.current ||
+        !isVisibleAllowedRef.current
+      ) {
+        return
+      }
+
+      void sendBoundsImmediate({ syncMode: 'transient' })
+      dragBoundsSyncRafRef.current = window.requestAnimationFrame(tick)
+    }
+
+    dragBoundsSyncRafRef.current = window.requestAnimationFrame(tick)
+  }, [isElectron, sendBoundsImmediate])
 
   const scheduleBoundsSync = useCallback((syncMode: BrowserBoundsSyncMode = 'settled', options?: {
     force?: boolean
@@ -246,14 +275,16 @@ export function useBrowserViewBounds({
       unsubscribeWindowResize()
       clearFrameSync()
       clearSettleSyncTimeout()
+      stopDragBoundsSync()
     }
-  }, [clearFrameSync, clearSettleSyncTimeout, contentRef, sendBounds, sendBoundsImmediate])
+  }, [clearFrameSync, clearSettleSyncTimeout, contentRef, sendBounds, sendBoundsImmediate, stopDragBoundsSync])
 
   useEffect(() => {
     if (!isActive) {
       panelResizeReasonRef.current = null
       clearFrameSync()
       clearSettleSyncTimeout()
+      stopDragBoundsSync()
       return
     }
 
@@ -284,6 +315,7 @@ export function useBrowserViewBounds({
         clearSettleSyncTimeout()
         if (detail.reason === 'drag') {
           clearFrameSync()
+          startDragBoundsSync()
           return
         }
         void scheduleBoundsSync('transient', { force: true })
@@ -292,6 +324,7 @@ export function useBrowserViewBounds({
 
       panelResizingRef.current = false
       panelResizeReasonRef.current = null
+      stopDragBoundsSync()
       clearFrameSync()
       clearSettleSyncTimeout()
       void scheduleBoundsSync('settled', { force: true })
@@ -300,8 +333,9 @@ export function useBrowserViewBounds({
     window.addEventListener(PANEL_RESIZE_STATE_EVENT, handlePanelResizeState as EventListener)
     return () => {
       window.removeEventListener(PANEL_RESIZE_STATE_EVENT, handlePanelResizeState as EventListener)
+      stopDragBoundsSync()
     }
-  }, [clearFrameSync, clearSettleSyncTimeout, scheduleBoundsSync])
+  }, [clearFrameSync, clearSettleSyncTimeout, scheduleBoundsSync, startDragBoundsSync, stopDragBoundsSync])
 
   useEffect(() => {
     void syncBrowserVisibility({ forceExact: true })

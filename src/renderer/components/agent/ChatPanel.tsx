@@ -15,7 +15,9 @@ import {
   PanelLeftClose,
   History,
   Plus,
-  Wrench
+  Wrench,
+  Copy,
+  StickyNote
 } from 'lucide-react'
 import {
   useAgent,
@@ -64,6 +66,7 @@ import {
   childRunToWaitingFor as childRunWaitingFor,
 } from '../../modules/agent/task-status-vocabulary'
 import { formatSingleLinePreview, formatToolTracePreview } from '../../modules/agent/toolTracePreview'
+import { filterUserVisibleToolTraceEvents } from '../../modules/agent/toolTraceVisibility'
 import { emitRendererAgentMetric } from '../../modules/agent/rendererMetrics'
 import type { SessionRecallCapsule, SessionRecallHit } from '../../../shared/session-recall'
 import type {
@@ -77,6 +80,7 @@ import ChatMessages from './ChatMessages'
 import ChatInput, { ChatInputHandle } from './ChatInput'
 import { SoftFailureCapsule } from './SoftFailureCapsule'
 import ChatAttachments from './ChatAttachments'
+import ContextMenu from '../layout/ContextMenu'
 
 // ---------------------------------------------------------------------------
 // Lightweight Markdown renderer (no external deps)
@@ -1963,6 +1967,12 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
 
   const [toolTraceExpanded, setToolTraceExpanded] = useState(false)
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null)
+  const [agentSelectionMenu, setAgentSelectionMenu] = useState<{
+    x: number
+    y: number
+    text: string
+    boundary: { left: number; top: number; right: number; bottom: number }
+  } | null>(null)
   const [selectedChannelKey, setSelectedChannelKey] = useState('local:app')
   const [pendingSendCountdown, setPendingSendCountdown] = useState(0)
   const [attachmentPreviewLoading, setAttachmentPreviewLoading] = useState(false)
@@ -2400,10 +2410,12 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     )
   }, [currentScopeTaskRuns, currentTaskRun])
 
+  const userVisibleToolTrace = useMemo(() => filterUserVisibleToolTraceEvents(toolTrace), [toolTrace])
+
   const showToolTraceCapsule =
     !currentTaskRun &&
+    userVisibleToolTrace.length > 0 &&
     (toolTrace.length > 0 ||
-      isStreaming ||
       toolTraceStatus === 'error' ||
       toolTraceStatus === 'cancelled')
   const shouldRenderGlobalToolTraceCapsule = !currentTaskRun
@@ -2479,14 +2491,15 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     return () => window.clearInterval(timer)
   }, [pendingSendCount, pendingSendFlushAt])
 
-  const handleCopyAgentMessage = useCallback(async (messageId: string, content: string) => {
-    if (!content?.trim()) return
+  const copyTextToClipboard = useCallback(async (content: string) => {
+    const value = content?.trim()
+    if (!value) return false
     try {
       if (navigator?.clipboard?.writeText) {
-        await navigator.clipboard.writeText(content)
+        await navigator.clipboard.writeText(value)
       } else {
         const textarea = document.createElement('textarea')
-        textarea.value = content
+        textarea.value = value
         textarea.style.position = 'fixed'
         textarea.style.opacity = '0'
         document.body.appendChild(textarea)
@@ -2495,17 +2508,51 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         document.execCommand('copy')
         document.body.removeChild(textarea)
       }
-
-      setCopiedMessageId(messageId)
-      if (copyFeedbackTimerRef.current) clearTimeout(copyFeedbackTimerRef.current)
-      copyFeedbackTimerRef.current = setTimeout(() => {
-        setCopiedMessageId((current) => (current === messageId ? null : current))
-        copyFeedbackTimerRef.current = null
-      }, 1500)
+      return true
     } catch {
-      // Keep silent; copy failure shouldn't break chat interactions.
+      return false
     }
   }, [])
+
+  const handleCopyAgentMessage = useCallback(async (messageId: string, content: string) => {
+    const copied = await copyTextToClipboard(content)
+    if (!copied) return
+
+    setCopiedMessageId(messageId)
+    if (copyFeedbackTimerRef.current) clearTimeout(copyFeedbackTimerRef.current)
+    copyFeedbackTimerRef.current = setTimeout(() => {
+      setCopiedMessageId((current) => (current === messageId ? null : current))
+      copyFeedbackTimerRef.current = null
+    }, 1500)
+  }, [copyTextToClipboard])
+
+  const handleAgentSelectionContextMenu = useCallback((event: React.MouseEvent, selectedText: string) => {
+    const text = selectedText.trim()
+    if (!text) return
+    const root = (event.currentTarget as HTMLElement).closest('[data-chat-panel-root="true"]')
+    const rect = root?.getBoundingClientRect()
+    setAgentSelectionMenu({
+      x: event.clientX,
+      y: event.clientY,
+      text,
+      boundary: rect
+        ? { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom }
+        : { left: 8, top: 8, right: window.innerWidth - 8, bottom: window.innerHeight - 8 },
+    })
+  }, [])
+
+  const handlePasteSelectionToPet = useCallback(async () => {
+    const text = agentSelectionMenu?.text.trim()
+    if (!text) return
+    await window.electronAPI.pet.updateSettings({ enabled: true }).catch(() => null)
+    await window.electronAPI.pet.pushStickyNote({
+      title: '便利贴',
+      body: text,
+      tone: 'default',
+    }).catch(() => null)
+    await window.electronAPI.pet.show().catch(() => null)
+    setAgentSelectionMenu(null)
+  }, [agentSelectionMenu])
 
   const handleAttachmentPreview = useCallback(
     async (attachment: ChatAttachment) => {
@@ -3116,18 +3163,24 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     return (currentTaskRun.toolTrace || []).slice(startIndex)
   }, [currentTaskRun])
 
+  const currentVisibleToolTraceSegment = useMemo(
+    () => filterUserVisibleToolTraceEvents(currentToolTraceSegment),
+    [currentToolTraceSegment],
+  )
+
   const messageToolTraceSnapshots = useMemo<Record<string, React.ReactNode>>(() => {
     const nextSnapshots: Record<string, React.ReactNode> = {}
     for (const message of messages) {
       if (message.type !== 'agent') continue
       const events = parseSerializedToolTraceSnapshot(message.meta?.toolTraceSnapshot)
-      if (events.length === 0) continue
+      const visibleEvents = filterUserVisibleToolTraceEvents(events)
+      if (visibleEvents.length === 0) continue
       const toolKey = `message-tool-${message.id}`
       const expanded = Boolean(taskDisclosureState[toolKey]?.overview)
       nextSnapshots[message.id] = (
         <ToolTraceCard
           key={toolKey}
-          events={events}
+          events={visibleEvents}
           expanded={expanded}
           onToggleExpanded={() => setTaskSectionExpanded(toolKey, 'overview', !expanded)}
         />
@@ -3139,14 +3192,14 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
       currentTaskRun.responseMessageId &&
       messages.find((message) => message.id === currentTaskRun.responseMessageId)?.content.trim() &&
       !nextSnapshots[currentTaskRun.responseMessageId] &&
-      currentToolTraceSegment.length > 0
+      currentVisibleToolTraceSegment.length > 0
     ) {
       const toolKey = `live-tool-${currentTaskRun.responseMessageId}`
       const expanded = Boolean(taskDisclosureState[toolKey]?.overview)
       nextSnapshots[currentTaskRun.responseMessageId] = (
         <ToolTraceCard
           key={toolKey}
-          events={currentToolTraceSegment}
+          events={currentVisibleToolTraceSegment}
           expanded={expanded}
           onToggleExpanded={() => setTaskSectionExpanded(toolKey, 'overview', !expanded)}
         />
@@ -3156,7 +3209,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     return nextSnapshots
   }, [
     currentTaskRun,
-    currentToolTraceSegment,
+    currentVisibleToolTraceSegment,
     messages,
     parseSerializedToolTraceSnapshot,
     setTaskSectionExpanded,
@@ -3174,13 +3227,13 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     const streamMessage = messages.find((message) => message.id === streamingMessageId)
     if (!currentTaskRun || !isStreaming || !streamingMessageId) return null
     if (streamMessage && streamMessage.content.length > 0) return null
-    if (currentToolTraceSegment.length === 0) return null
+    if (currentVisibleToolTraceSegment.length === 0) return null
     const toolKey = `pending-tool-${currentTaskRun.scopeId}`
     const expanded = Boolean(taskDisclosureState[toolKey]?.overview)
     return (
       <ToolTraceCard
         key={toolKey}
-        events={currentToolTraceSegment}
+        events={currentVisibleToolTraceSegment}
         pending
         expanded={expanded}
         onToggleExpanded={() => setTaskSectionExpanded(toolKey, 'overview', !expanded)}
@@ -3188,7 +3241,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     )
   }, [
     currentTaskRun,
-    currentToolTraceSegment,
+    currentVisibleToolTraceSegment,
     isStreaming,
     messages,
     setTaskSectionExpanded,
@@ -3596,7 +3649,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         pendingToolTrace={pendingToolTrace}
         isStreaming={isStreaming}
         streamingMessageId={streamingMessageId}
-        toolTrace={toolTrace}
+        toolTrace={userVisibleToolTrace}
         toolTraceStatus={toolTraceStatus}
         toolTraceExpanded={toolTraceExpanded}
         copiedMessageId={copiedMessageId}
@@ -3604,6 +3657,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         onSetInputSuggestion={setInputValue}
         onToggleToolTrace={() => setToolTraceExpanded((value) => !value)}
         onCopyMessage={handleCopyAgentMessage}
+        onAgentSelectionContextMenu={handleAgentSelectionContextMenu}
         onAttachmentPreview={handleAttachmentPreview}
         onRevealDocumentQuote={revealDocumentQuoteAttachment}
         getDocumentQuoteTooltip={getDocumentQuoteTooltip}
@@ -3614,6 +3668,35 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         )}
         renderMarkdown={(content) => <MarkdownContent content={content} />}
       />
+
+      {agentSelectionMenu && (
+        <ContextMenu
+          x={agentSelectionMenu.x}
+          y={agentSelectionMenu.y}
+          boundary={agentSelectionMenu.boundary}
+          lockBrowserView={false}
+          portal
+          onClose={() => setAgentSelectionMenu(null)}
+          items={[
+            {
+              id: 'copy-selection',
+              label: '复制',
+              icon: <Copy style={{ width: 15, height: 15 }} strokeWidth={2} />,
+              onClick: () => {
+                void copyTextToClipboard(agentSelectionMenu.text)
+              },
+            },
+            {
+              id: 'pin-selection-to-pet',
+              label: '贴到便利贴',
+              icon: <StickyNote style={{ width: 15, height: 15 }} strokeWidth={2} />,
+              onClick: () => {
+                void handlePasteSelectionToPet()
+              },
+            },
+          ]}
+        />
+      )}
 
       {(() => {
         const scopedRun = currentScopeId ? scopeRunStates[currentScopeId] : null
