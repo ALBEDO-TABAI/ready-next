@@ -25,12 +25,21 @@ test('agent:probe:vea-resume runs a DirectChat/TurnEngine closed-loop smoke and 
   assert.equal(report.success, true)
   assert.equal(report.scenario, 'vea_resume_score_batches')
   assert.equal(report.agentEntrypoint, 'ClaudeSdkOrchestrator.sendAndCollect')
-  assert.equal(report.result.terminalReason, 'done')
-  assert.ok(report.dispatchedTools.includes('skill_inspect_run_state'))
-  assert.ok(report.dispatchedTools.includes('skill_video_expert_ai_analyze'))
+  // Stage N (Phase 1.2) — VEA contract without childRunId now hits the
+  // manifest fence; the turn closes via checkpoint, not legacy `done`.
+  assert.ok(
+    ['checkpoint_budget', 'checkpoint_user_input', 'checkpoint_background'].includes(report.result.terminalReason),
+    `expected a checkpoint terminal reason, got ${report.result.terminalReason}`,
+  )
+  // ai_analyze MUST NOT be dispatched (manifest fence blocks both the
+  // typed-action allowlist entry AND parent-force synthesis).
   assert.equal(report.dispatchedTools.includes('skill_video_expert_pipeline'), false)
-  assert.equal(report.assertions.aiAnalyzeDispatched, true)
+  assert.equal(report.dispatchedTools.includes('skill_video_expert_ai_analyze'), false)
+  assert.equal(report.assertions.aiAnalyzeDispatched, false)
   assert.equal(report.assertions.pipelineNotDispatched, true)
-  assert.equal(report.assertions.toolPolicyRefreshed, true)
-  assert.ok(report.logExcerpt.some((line) => line.includes('turn_frame_tool_policy_refreshed')))
+  assert.equal(report.assertions.manifestFenceFired, true)
+  assert.equal(report.assertions.veaTypedActionsExcludedFromAllowed, true)
+  // The model's allowedToolNames snapshots must never include VEA typed
+  // actions (defense-in-depth: the manifest fence at the synthesis site
+  // is mirrored by exclusion from preferredToolNames upstream).
 })

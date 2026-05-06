@@ -530,6 +530,42 @@
       "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
       "since": "2026-05-06",
       "owner": "stage5-bulk-import"
+    },
+    {
+      "path": "src/__tests__/skill-child-budget-warning-no-suppression.test.ts",
+      "reason": "Stage N Phase 3 fence test — imports STATIC_SKILL_ACTIONS_BY_TOOL_NAME and isConfiguredChildLoopSkillAction; the latter transitively reaches runtime-manager → database via skill-compiler fallback, but the test only exercises pure helper logic on string arguments (no DB call). Verified passing on host-Node.",
+      "since": "2026-05-07",
+      "owner": "stage-n-parent-force-fence"
+    },
+    {
+      "path": "src/__tests__/skill-child-parent-force-blocked.test.ts",
+      "reason": "Stage N Phase 1.4 fence test — imports isParentForceForbiddenByManifest from run-contracts.ts which now statically imports the static-name table + child-loop predicate; transitive value-import reaches native-backed runtime-manager but only via the embedded-skills fallback (filesystem JSON read), never opens better-sqlite3.",
+      "since": "2026-05-07",
+      "owner": "stage-n-parent-force-fence"
+    },
+    {
+      "path": "src/__tests__/skill-run-contract-continuation.test.ts",
+      "reason": "Stage N transitive: run-contracts.ts now statically imports child-loop-skill-actions which loads runtime-manager (native-backed wrapper); existing test exercises contract continuation logic with synthetic fixtures only — no DB call.",
+      "since": "2026-05-07",
+      "owner": "stage-n-parent-force-fence"
+    },
+    {
+      "path": "src/__tests__/skill-run-contract-shape.test.ts",
+      "reason": "Stage N transitive: run-contracts.ts now statically imports child-loop-skill-actions which loads runtime-manager (native-backed wrapper); existing test asserts contract type shape with synthetic data only — no DB call.",
+      "since": "2026-05-07",
+      "owner": "stage-n-parent-force-fence"
+    },
+    {
+      "path": "src/__tests__/task-projection-supersede.test.ts",
+      "reason": "Stage N transitive: run-contracts.ts now statically imports child-loop-skill-actions which loads runtime-manager (native-backed wrapper); existing test exercises projection supersede logic with fakes — no DB call.",
+      "since": "2026-05-07",
+      "owner": "stage-n-parent-force-fence"
+    },
+    {
+      "path": "src/__tests__/turn-frame-patch.test.ts",
+      "reason": "Stage N transitive: turn-frame.ts imports run-contracts.ts which now statically imports child-loop-skill-actions / runtime-manager; existing test exercises pure patch helpers with synthetic frames — no DB call.",
+      "since": "2026-05-07",
+      "owner": "stage-n-parent-force-fence"
     }
   ]
 }

@@ -3023,23 +3023,32 @@ test('TurnEngine refreshes skill tool policy after run_state patch changes VEA s
 
     await engine.execute(request)
 
-    assert.ok(
+    // Stage N (Phase 1.2) — VEA without childRunId is now blocked by the
+    // manifest fence. ai_analyze MUST NOT execute; pipeline MUST NOT
+    // execute. The legacy "refresh forces ai_analyze" contract is retired.
+    assert.equal(
       executedToolNames.includes('skill_video_expert_ai_analyze'),
-      `expected refreshed TurnFrame to force ai_analyze after inspect, executed: ${executedToolNames.join(',')}; model allowed snapshots: ${JSON.stringify(requestedModelAllowedToolNames)}`,
+      false,
+      `Stage N: VEA ai_analyze must NOT be parent-forced (manifest fence active); executed: ${executedToolNames.join(',')}; model allowed snapshots: ${JSON.stringify(requestedModelAllowedToolNames)}`,
     )
     assert.equal(
       executedToolNames.includes('skill_video_expert_pipeline'),
       false,
-      `pipeline must not remain executable after score_batches maps to ai_analyze; executed: ${executedToolNames.join(',')}`,
+      `Stage N: VEA pipeline must NOT be parent-forced (manifest fence active); executed: ${executedToolNames.join(',')}`,
     )
-    assert.ok(metrics.some((event) =>
-      event.metric === 'turn_frame_tool_policy_refreshed'
-      && Array.isArray(event.preferredToolNames)
-      && event.preferredToolNames.includes('skill_video_expert_ai_analyze')
-      && Array.isArray(event.allowedToolNames)
-      && event.allowedToolNames.includes('skill_video_expert_ai_analyze')
-      && !event.allowedToolNames.includes('skill_video_expert_pipeline'),
-    ))
+    // Stage N — at least one manifest-fence metric must fire (the
+    // refresh after inspect would have surfaced ai_analyze as
+    // requiredToolName, then the manifest fence catches it). VEA tool
+    // names must never appear in the model's allowed list during this
+    // run, because steering removes them when the manifest fence is in
+    // play.
+    const blockedMetrics = metrics.filter((event) =>
+      event.metric === 'turn_force_tool_blocked_child_owned',
+    )
+    assert.ok(
+      blockedMetrics.length >= 1,
+      `Stage N: expected at least one turn_force_tool_blocked_child_owned metric; metrics seen: ${metrics.map((m) => m.metric).join(',')}`,
+    )
   } finally {
     restoreAiAnalyzeToolDefinition()
     restorePipelineToolDefinition()

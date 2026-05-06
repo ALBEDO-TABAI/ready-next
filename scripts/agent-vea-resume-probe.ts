@@ -489,25 +489,51 @@ export async function runAgentVeaResumeProbe(options: ProbeOptions): Promise<Pro
         confidence: 'high',
       },
     )
+    // Stage N (Phase 1.2) — VEA actions are now manifest-fenced. The probe
+    // contract has no `childRunId`, so the manifest fence catches both
+    // `skill_video_expert_pipeline` AND `skill_video_expert_ai_analyze`
+    // before parent-force synthesis can fire. The expected steady state:
+    //   - inspect/read/ask primitives stay allowed (model can probe state).
+    //   - VEA typed actions are NOT in allowedToolNames or preferredToolNames.
+    //   - `skill_video_expert_pipeline` AND `skill_video_expert_ai_analyze`
+    //     are both NOT dispatched (no parent force; no model selection
+    //     because they're not in allowedToolNames).
+    //   - Turn closes with a checkpoint terminal reason. When the model
+    //     uses inspect primitives without making progress, budget exhausts
+    //     first → `checkpoint_budget` (Stage M priority rank 20 dominates
+    //     `checkpoint_user_input` rank 10).
+    //   - At least one `turn_force_tool_blocked_child_owned` metric fires
+    //     for whichever VEA action steering tried to surface (typically
+    //     ai_analyze for the score_batches resume scenario).
+    const aiAnalyzeBlocked = metrics.some((event) =>
+      event.metric === 'turn_force_tool_blocked_child_owned'
+      && (event as { toolName?: string }).toolName === 'skill_video_expert_ai_analyze',
+    )
+    const pipelineBlocked = metrics.some((event) =>
+      event.metric === 'turn_force_tool_blocked_child_owned'
+      && (event as { toolName?: string }).toolName === 'skill_video_expert_pipeline',
+    )
     const assertions = {
       inspectDispatched: dispatchedTools.includes('skill_inspect_run_state'),
       aiAnalyzeDispatched: dispatchedTools.includes('skill_video_expert_ai_analyze'),
       pipelineNotDispatched: !dispatchedTools.includes('skill_video_expert_pipeline'),
-      toolPolicyRefreshed: metrics.some((event) =>
-        event.metric === 'turn_frame_tool_policy_refreshed'
-        && Array.isArray(event.preferredToolNames)
-        && event.preferredToolNames.includes('skill_video_expert_ai_analyze')
-        && Array.isArray(event.allowedToolNames)
-        && event.allowedToolNames.includes('skill_video_expert_ai_analyze')
-        && !event.allowedToolNames.includes('skill_video_expert_pipeline'),
+      manifestFenceFired: aiAnalyzeBlocked || pipelineBlocked,
+      veaTypedActionsExcludedFromAllowed: modelAllowedToolSnapshots.every((snapshot) =>
+        !snapshot.includes('skill_video_expert_pipeline')
+        && !snapshot.includes('skill_video_expert_ai_analyze'),
       ),
     }
+    // Stage N — success means the manifest fence held and VEA never
+    // reached parent-force dispatch. ai_analyze MUST NOT be dispatched
+    // (legacy probe asserted the opposite — that contract is retired).
     const success = result.success
-      && result.terminalReason === 'done'
-      && assertions.inspectDispatched
-      && assertions.aiAnalyzeDispatched
+      && (result.terminalReason === 'checkpoint_budget'
+        || result.terminalReason === 'checkpoint_user_input'
+        || result.terminalReason === 'checkpoint_background')
       && assertions.pipelineNotDispatched
-      && assertions.toolPolicyRefreshed
+      && !assertions.aiAnalyzeDispatched
+      && assertions.manifestFenceFired
+      && assertions.veaTypedActionsExcludedFromAllowed
 
     return {
       success,
