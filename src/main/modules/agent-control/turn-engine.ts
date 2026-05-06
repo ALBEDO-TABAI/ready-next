@@ -3851,12 +3851,16 @@ export class TurnEngine {
           longTypedSkillActionHeartbeatTimers.clear()
         }
 
-        // TODO(skill-child-loop): the long-typed-skill heartbeat + duration
-        // bookkeeping below is the parent loop watching the child's progress
-        // through the keyhole of one tool batch. When the child-loop runner
-        // lands, heartbeat + duration are the child's internal concern; the
-        // parent only observes one structured close event and applies its
-        // framePatch. See docs/architecture/skill-child-loop-boundary.md §5.1.
+        // Stage N (2026-05-07) — heartbeat + duration bookkeeping below
+        // remains for legacy non-child-loop typed actions. Child-loop skills
+        // (VEA today) launch via `dispatchChildLoopSkillAction` and emit
+        // their own heartbeat / duration through the child runner; the
+        // parent only sees the `child_launched` envelope and the eventual
+        // close event. The Phase 3 fence at the
+        // `lastLongTypedSkillActionIteration` write site (below) skips the
+        // budget-warning suppression for child-loop names so this code path
+        // stays correct for both worlds. See
+        // `docs/architecture/skill-child-loop-boundary.md` §5.1.
         const executeBatch = async () => {
           try {
             return normalizeToolBatchResult(await host.executeToolBatch({

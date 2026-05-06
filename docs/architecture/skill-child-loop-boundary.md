@@ -76,10 +76,11 @@ line — our skill runtime is host-managed, not SDK-spawned, and our budget
 policy is different. We borrow the **boundary** only: the parent observes one
 event, the child owns its own loop.
 
-## 2. What the child loop will own
+## 2. What the child loop owns
 
-When the child-loop runner lands, it will own all of the following inside its
-own process / async lifetime:
+The child-loop runner owns all of the following inside its own process /
+async lifetime (this list described future state pre-Stage N; Stage N
+closes the parent retirement so the runner is now the sole owner):
 
 | Concern | Owned by child | Notes |
 | --- | --- | --- |
@@ -100,10 +101,9 @@ What the child does **not** own:
 - The IPC contract with the renderer. The child speaks to the host runtime,
   which speaks to the parent, which speaks to the renderer.
 
-## 3. What the parent will own
+## 3. What the parent owns
 
-After the child-loop runner lands, the parent's job around long skills
-shrinks to:
+After Stage N (2026-05-07) the parent's job around long skills is:
 
 1. **Decide to launch.** Read the `SkillRunContract`, derive the action input,
    validate it against the registry (same code path as today's force-tool
@@ -294,53 +294,59 @@ mappers (`statusFromTaskRun`, `statusFromDetached`, `statusFromRunState`)
 keep the legacy raw vocabulary; normalization happens once at the end
 of `inspectSkillTask` via `normalizeSkillStatus(...)`.
 
-## 6. Historical TODO marker locations (anchor reference)
+## 6. Pre-Stage-N migration anchors (historical)
 
 Below are the boundaries that carried `// TODO(skill-child-loop):`
 comments before the migration. They remain in the source as comments but
-are no longer aspirational — Phase 1–7 implemented them.
+are no longer aspirational — Phases 1–7 implemented them, and Stage N
+(2026-05-07) closed the parent retirement at each anchor.
 
 ### 5.1 `src/main/modules/agent-control/turn-engine.ts`
 
-- **Force-tool dispatch boundary** (around lines 2050–2095). The parent reads
+- **Force-tool dispatch boundary**. Pre-migration: parent reads
   `turnFrame.steering.action`, validates input via the registry + Zod path,
-  and synthesises a `tool_use`. In the child-loop world the parent will
-  instead call `launchChildRun(contract, action.input)` and wait for the close
-  event. The synthesised `tool_use`, the per-turn `forceToolDispatchedThisTurn`
-  cap, and the cross-turn `forceLoopGuard` all become child-owned: the child
-  decides whether and when to repeat its own action; the parent only decides
-  whether to launch a new child run.
-- **Typed-action result handling** (around `consumeExecutedToolBatch` for long
-  typed skill actions, near the heartbeat timers and
-  `lastLongTypedSkillActionIteration` bookkeeping). Today the parent watches
-  the typed action's heartbeat, applies its `framePatch`, and re-runs steering
-  on every batch. In the child-loop world the heartbeat is the child's
-  internal concern; the parent only sees the close event's framePatch.
+  and synthesises a `tool_use`. **Post-Stage-N**: child-loop skills never
+  reach this branch — the candidate-vs-blocked split + manifest fence at
+  the synthesis site early-break with `turn_force_tool_blocked_child_owned`
+  (see §0 + §5.4). The synthesized `tool_use`, the per-turn
+  `forceToolDispatchedThisTurn` cap, and the cross-turn `forceLoopGuard`
+  are now reserved for non-child-loop migration paths only; the
+  invariant belt at the `forceLoopGuard` write site fails closed if a
+  future refactor reaches it for a child-loop tool.
+- **Typed-action result handling**. Pre-migration: the parent watched
+  the typed action's heartbeat, applied its `framePatch`, and re-ran
+  steering on every batch. **Post-Stage-N**: heartbeat / progress is the
+  child runner's concern. The parent's `consumeExecutedToolBatch`
+  consumes the `child_launched` envelope (and subsequent close events)
+  as ordinary tool results; the Phase 3 fence at the
+  `lastLongTypedSkillActionIteration` write site keeps child-loop
+  launches from muting the next iteration's budget warning.
 
 ### 5.2 `src/main/modules/tools/skills-tools.ts`
 
-- **Typed-action wrapper await** (around the `await getManager().runSkill(...)`
-  call for typed actions). Today this `await` blocks the parent's tool-batch
-  promise on the entire skill run. In the child-loop world the wrapper will
-  return immediately with a launch acknowledgement; the close event arrives
-  via a separate channel.
-- **Typed-action completion / framePatch emission** (the `loadSkillRunContract`
-  + `buildContractFramePatch` block at the bottom of the typed-action wrapper).
-  Today this builds the contract from the just-completed `result`. In the
-  child-loop world the same construction runs at the child's close event, not
-  inline in the parent's tool batch.
+- **Typed-action wrapper await**. Pre-migration: `await getManager().runSkill(...)`
+  blocked the parent's tool-batch promise on the entire skill run.
+  **Post-Stage-N**: child-loop typed actions route through
+  `dispatchChildLoopSkillAction(...)` which returns the `child_launched`
+  envelope immediately; the close event arrives via the runner's
+  separate channel.
+- **Typed-action completion / framePatch emission**. Pre-migration:
+  `loadSkillRunContract` + `buildContractFramePatch` ran inline at the
+  bottom of the typed-action wrapper. **Post-Stage-N**: child-loop
+  skills emit the contract patch at the runner's close event; the
+  parent only consumes that patch through the normal post-batch
+  framePatch pipeline.
 
 ### 5.3 `src/main/modules/agent-control/skill-task-supervisor.ts`
 
-- **Reconciliation boundary** (`inspectSkillTask` / `inspectLatestSkillTask` —
-  the spot that fuses detached task store, task-run store, and `run_state.json`
-  into a single supervisor snapshot). Today this is the parent's
-  out-of-band probe to answer "is something running and how far has it got?"
-  without reading the child transcript. In the child-loop world the
-  supervisor stays — it is how the parent observes liveness without
-  inspecting the transcript — but its consumers shrink: only the parent's
-  next-turn resolver reads it, and only to choose between "resume", "wait
-  for blocker", and "give up".
+- **Reconciliation boundary**. Pre-migration: `inspectSkillTask` /
+  `inspectLatestSkillTask` fused detached task store, task-run store,
+  and `run_state.json` into a supervisor snapshot the parent used to
+  probe "is something running and how far has it got?" without reading
+  the child transcript. **Post-Stage-N**: the supervisor stays — it is
+  how the parent observes liveness without inspecting the transcript —
+  but its consumers have shrunk to the parent's next-turn resolver
+  choosing between "resume", "wait for blocker", and "give up".
 
 ## 6. Migration history (closed in Stage N)
 

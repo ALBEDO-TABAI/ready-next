@@ -1892,11 +1892,14 @@ export async function executeSkillTool(
     })
   }
 
-  // TODO(skill-child-loop): this awaited runSkill call blocks the parent's
-  // tool batch on the entire long-skill run. When the child-loop runner
-  // lands, this becomes a launch-and-acknowledge call; the structured close
-  // event arrives via a separate channel and only then do we build the
-  // framePatch below. See docs/architecture/skill-child-loop-boundary.md §5.2.
+  // Stage N (2026-05-07) — this awaited runSkill call is the legacy
+  // path for non-child-loop typed actions only. Child-loop skills
+  // (VEA today) route through `dispatchChildLoopSkillAction` above
+  // (`isChildLoopSkillAction` branch), which returns the
+  // `child_launched` envelope without awaiting the long run. The await
+  // here only fires for non-child-loop typed actions whose manifest
+  // declares no `child_loop.actions[]`. See
+  // `docs/architecture/skill-child-loop-boundary.md` §5.2.
   const result = await getManager().runSkill({
     skillId: tool.skillId || '',
     action: tool.action || '',
@@ -2002,12 +2005,13 @@ export async function executeSkillTool(
   // deliveryReportPath, more so than the file-system probe a primitive
   // would have to do. Liveness derived from the runStatus enum.
   //
-  // TODO(skill-child-loop): this contract construction runs inline inside
-  // the parent's tool batch because the parent-only loop has no other place
-  // to fold the close into. When the child-loop runner lands, the same
-  // construction runs at the child's structured close event — the typed
-  // action wrapper returns immediately on launch, and the close event
-  // produces the framePatch. See docs/architecture/skill-child-loop-boundary.md §5.2.
+  // Stage N (2026-05-07) — this inline contract construction stays for
+  // the legacy non-child-loop path. Child-loop skills emit their
+  // contract patch at the child runner's close event; the parent only
+  // consumes that patch through the normal post-batch framePatch
+  // pipeline (no inline construction needed). The path below only
+  // fires for non-child-loop typed actions. See
+  // `docs/architecture/skill-child-loop-boundary.md` §5.2.
   const supervisorStatusForContract: SkillTaskSupervisorSnapshot['status'] = (() => {
     if (runStatus === 'done') return 'completed'
     if (runStatus === 'error') return 'failed'
