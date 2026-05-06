@@ -43,10 +43,12 @@ import {
   configureSkillChildRunner,
   getSkillChildRunner,
 } from './skill-child-runner'
+import { listRegisteredSkillChildDrivers } from './skill-child-drivers'
 // Importing the VEA driver triggers its module-load-time
 // `registerSkillChildDriver(...)` side-effect. The runner relies on the
 // registry being primed before any `startSkillChildRun` call.
 import './video-expert-child-driver'
+import { assertStageNChildLoopInvariants } from './stage-n-boot-assertion'
 import { RunProjection } from './run-projection'
 import { syncTaskProjection } from './task-projection-sync'
 import { reconcileTaskProjections } from './task-projection-reconciler'
@@ -367,6 +369,24 @@ export class AgentControlRuntime extends EventEmitter {
         error instanceof Error ? error.message : String(error),
       )
     }
+
+    // Stage N (Phase 0.3) — manifest⇔driver + manifest⇔static-name boot
+    // invariants. Runs OUTSIDE the configureSkillChildRunner try/catch so a
+    // violation throws uncaught and aborts boot via the global
+    // unhandledRejection handler (process-handlers.ts:141-145). Static gate
+    // `scripts/check-manifest-vs-static-tool-name.cjs` is the build-time
+    // peer; this assertion is the runtime mirror that catches refactors
+    // landing without `verify:n`. Pure-helper extracted to
+    // `stage-n-boot-assertion.ts` so unit tests can verify the throw
+    // shape without constructing a full AgentControlRuntime.
+    assertStageNChildLoopInvariants({
+      skills: getSkillsRuntimeManager().listSkills().map((s) => ({
+        id: s.id,
+        source: s.source,
+        childLoop: s.childLoop,
+      })),
+      registeredDriverSkillIds: listRegisteredSkillChildDrivers(),
+    })
   }
 
   getOrchestrator(): ClaudeSdkOrchestrator {
