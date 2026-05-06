@@ -17,6 +17,10 @@ const DEFAULT_CONFLICTS: Record<ReminderTopic, ReadonlyArray<ReminderTopic>> = {
   // suppress or conflict with the other topics.
   'skill-resume-context-prompt': [],
   'force-tool-checkpoint-blocked': [],
+  // Stage N — see system-reminder-registry.ts; no conflicts. Fires only
+  // when the manifest fence early-breaks the force-tool synthesis path,
+  // disjoint from `force-tool-checkpoint-blocked` (post-preflight checkpoint).
+  'force-tool-blocked-child-owned': [],
 }
 
 export function composeSystemReminder(

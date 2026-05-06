@@ -15,6 +15,13 @@ export type ReminderTopic =
   // reminders the engine emits.
   | 'skill-resume-context-prompt'
   | 'force-tool-checkpoint-blocked'
+  // Stage N — fired when the parent's force-tool synthesis is blocked
+  // because the action belongs to a manifest-declared `child_loop` skill.
+  // Coexists with `force-tool-checkpoint-blocked`: Phase 1.2 fires the two
+  // on disjoint branches (the manifest fence's early-break short-circuits
+  // before the checkpoint-instead-of-force logic can run), so default
+  // conflicts table lists none.
+  | 'force-tool-blocked-child-owned'
 
 export interface ReminderEntry {
   readonly topic: ReminderTopic

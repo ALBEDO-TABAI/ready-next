@@ -322,7 +322,12 @@ import { scoreSkillProgress, type SkillProgressScore } from './progress-scorer'
 import { scoreSkillWaste, type SkillWasteScore } from './waste-scorer'
 import { buildAgentSpawnContextFromAIConfig } from '../skills-runtime/agent-context-source'
 import type { SkillState } from '../skills-runtime/runtime-manager'
-import { shouldParentForceLongSkillTool } from './run-contracts'
+import {
+  shouldParentForceLongSkillTool,
+  isParentForceForbiddenByManifest,
+} from './run-contracts'
+import { STATIC_SKILL_ACTIONS_BY_TOOL_NAME } from '../tools/skills-tools-static'
+import { isConfiguredChildLoopSkillAction } from '../tools/child-loop-skill-actions'
 import {
   cancelSkillChildRun,
   getSkillChildRunCloseEvent,
@@ -3245,13 +3250,15 @@ export class TurnEngine {
         // long-skill execution. The parent MUST NOT synthesize a typed
         // `tool_use` for it (e.g. `skill_video_expert_pipeline` with `{}`),
         // and the cross-turn `forceLoopGuard` is fenced for the same reason.
-        // The single source of truth for "is this skill child-owned?" is
-        // `shouldParentForceLongSkillTool(contract)` — keeps the engine
-        // free of skill-id string matching.
-        const childOwnedSkill = !shouldParentForceLongSkillTool(turnFrame?.skill?.runContract || null)
-        const forceToolName = (
-          !childOwnedSkill
-            && turnFrame
+        // Stage N (Phase 1.2) — the contract fence is one of two independent
+        // gates. The other is the manifest fence: any tool name that
+        // resolves to a `child_loop.actions[]` entry of an embedded skill
+        // must NEVER be force-synthesized, regardless of contract state.
+        // Both gates must be consulted. We split "candidate" from
+        // "actual force tool" so the manifest fence has a non-null tool
+        // name to emit metrics against.
+        const candidateForceToolName = (
+          turnFrame
             && turnFrame.steering?.mode === 'force_tool'
             && !forceToolDispatchedThisTurn
             && typeof turnFrame.steering.requiredToolName === 'string'
@@ -3259,6 +3266,47 @@ export class TurnEngine {
             && Array.isArray(routedAllowedToolNames)
             && routedAllowedToolNames.includes(turnFrame.steering.requiredToolName)
         ) ? turnFrame.steering.requiredToolName : null
+
+        const childOwnedByContract = !shouldParentForceLongSkillTool(turnFrame?.skill?.runContract || null)
+        const childOwnedByManifest = isParentForceForbiddenByManifest(candidateForceToolName)
+        const childOwnedSkill = childOwnedByContract || childOwnedByManifest
+        const forceToolName = (!childOwnedSkill) ? candidateForceToolName : null
+
+        // Stage N (Phase 1.2) — manifest fence early-break. When the contract
+        // fence does not fire (no `childRunId` yet) but the manifest says the
+        // tool is child-owned, surface a checkpoint instead of falling
+        // through to the model. Catches the adoption-state case where a
+        // contract has not yet been stamped with `childRunId`.
+        if (
+          candidateForceToolName
+          && !childOwnedByContract
+          && childOwnedByManifest
+        ) {
+          logAgentMetric('turn_force_tool_blocked_child_owned', {
+            sessionId: request.sessionId,
+            skillId: turnFrame?.skill?.skillId || null,
+            toolName: candidateForceToolName,
+            reason: 'manifest_child_loop',
+            iteration: iterations,
+          })
+          pushSystemReminderMessage(session, {
+            topic: 'force-tool-blocked-child-owned',
+            priority: 92,
+            text: [
+              `系统补充：本轮 force_tool 已被 child-loop 边界挡板（tool=${candidateForceToolName}）。`,
+              '该 skill 的长任务由 child runner 拥有，父循环不再合成 typed tool_use。',
+              '请等待 child 运行的 close event 或在下一轮明确指示 cancel/resume。',
+            ].join('\n'),
+          })
+          host.log(
+            `[turn_force_tool_blocked_child_owned] tool=${candidateForceToolName} skillId=${turnFrame?.skill?.skillId || 'null'} iteration=${iterations}`,
+          )
+          budgetLimitedBeforeCompletion = true
+          if (turnFrame) {
+            turnFrame = applyTurnFramePatch(turnFrame, { terminalReason: 'checkpoint_user_input' })
+          }
+          break
+        }
         // Cross-turn force-loop guard: when `runContract.forceLoopGuard`
         // recorded the same `(toolName, inputDigest)` from a prior turn AND
         // we are about to dispatch the same `(toolName, inputDigest)` again,
@@ -3403,6 +3451,27 @@ export class TurnEngine {
           // merge this with whatever framePatch the typed action returns,
           // and `applyTurnFramePatch` persists it on `frame.skill.runContract`.
           if (turnFrame && turnFrame.skill) {
+            // Stage N (Phase 1.3) — invariant belt. Phase 1.2's manifest
+            // fence early-breaks before reaching this branch for child-loop
+            // skills, so this branch should NEVER run with a forceToolName
+            // that maps to a manifest-declared child_loop action. If a
+            // future refactor regresses, fail closed: skip the guard write
+            // and route to checkpoint via `budgetLimitedBeforeCompletion`.
+            if (isParentForceForbiddenByManifest(forceToolName)) {
+              logAgentMetric('turn_force_tool_invariant_violation', {
+                sessionId: request.sessionId,
+                skillId: turnFrame.skill.skillId,
+                toolName: forceToolName,
+                reason: 'guard_write_for_child_owned',
+                iteration: iterations,
+              })
+              host.log(
+                `[turn_force_tool_invariant_violation] tool=${forceToolName} skillId=${turnFrame.skill.skillId} iteration=${iterations}`,
+              )
+              budgetLimitedBeforeCompletion = true
+              turnFrame = applyTurnFramePatch(turnFrame, { terminalReason: 'checkpoint_user_input' })
+              break
+            }
             const dispatchedAt = new Date().toISOString()
             const newDigest = steeringAction?.inputDigest || null
             const sameAsPrior = Boolean(
@@ -3868,7 +3937,20 @@ export class TurnEngine {
             const serializedResult = serializeToolExecutionOutput(result)
             const toolName = executedTool.name
             if (isLongTypedSkillActionName(toolName)) {
-              lastLongTypedSkillActionIteration = iterations
+              // Stage N (Phase 3) — child-loop typed actions launch a child
+              // run via dispatchChildLoopSkillAction; the typed-action result
+              // is a `child_launched` placeholder, NOT a real long-action
+              // completion. Treating them as "long-skill-completed" silences
+              // the next iteration's budget-warning suppression
+              // (`shouldInjectBudgetWarning` consults
+              // `lastLongTypedSkillActionIteration`), which would mute a
+              // legitimate budget warning during a child-owned run. Fence.
+              const childLoopEntry = STATIC_SKILL_ACTIONS_BY_TOOL_NAME[toolName] || null
+              const isChildLoopExecution = !!childLoopEntry
+                && isConfiguredChildLoopSkillAction(childLoopEntry.skillId, childLoopEntry.actionName)
+              if (!isChildLoopExecution) {
+                lastLongTypedSkillActionIteration = iterations
+              }
             }
             executedToolsThisIteration.push({
               id: executedTool.id,

@@ -27,6 +27,8 @@ import type {
   SkillChildRunStatus,
 } from './skill-child-run-types'
 import { decodeStoredSkillChildCloseEvent } from './skill-child-state-machine'
+import { STATIC_SKILL_ACTIONS_BY_TOOL_NAME } from '../tools/skills-tools-static'
+import { isConfiguredChildLoopSkillAction } from '../tools/child-loop-skill-actions'
 import type { SkillTaskRunRepository } from '../repositories/skill-task-run-repository'
 import type { CapabilityGroupId } from '../../../shared/ai-capability-groups'
 import type { AIModelConfig } from '../../../shared/ai-providers'
@@ -1040,6 +1042,30 @@ export function shouldParentForceLongSkillTool(contract: unknown): boolean {
   const candidate = (contract as { childRunId?: unknown }).childRunId
   if (typeof candidate === 'string' && candidate.trim().length > 0) return false
   return true
+}
+
+/**
+ * Stage N — manifest-aware fence. True when the supplied tool name maps to
+ * a `child_loop.actions[]` entry of the owning skill (manifest-based, NOT
+ * driver-registry based — the Phase 0.3 boot assertion ensures the two
+ * agree, but this fence is intentionally manifest-only so a mis-registered
+ * driver cannot accidentally re-open the parent-force path).
+ *
+ * Tool-name → (skillId, action) lookup uses
+ * `STATIC_SKILL_ACTIONS_BY_TOOL_NAME` (`skills-tools-static.ts:42-47`) — the
+ * computed reverse map of the canonical `STATIC_SKILL_TOOL_NAMES_BY_ACTION`
+ * forward literal. For dynamic skill tool names that are not in the static
+ * map, this returns `false` — Phase 0.4 ensures custom skills don't reach
+ * this fence, and Phase 0.2 + Phase 0.3 keep embedded manifests'
+ * child_loop actions in the static map.
+ */
+export function isParentForceForbiddenByManifest(
+  toolName: string | null | undefined,
+): boolean {
+  if (typeof toolName !== 'string' || !toolName) return false
+  const entry = STATIC_SKILL_ACTIONS_BY_TOOL_NAME[toolName]
+  if (!entry) return false
+  return isConfiguredChildLoopSkillAction(entry.skillId, entry.actionName)
 }
 
 /**
