@@ -1,5 +1,11 @@
+import { dirname } from 'node:path'
+
 import type { ReferenceSkillHint } from './skill-reference-hints'
-import { loadSkillRunContract, type TaskProjectionRecord } from './run-contracts'
+import {
+  loadSkillRunContract,
+  type SkillRunContract,
+  type TaskProjectionRecord,
+} from './run-contracts'
 import type { SkillTaskRunRecord } from '../repositories/skill-task-run-repository'
 import type { SkillTaskSupervisorSnapshot } from './skill-task-supervisor'
 import {
@@ -9,6 +15,51 @@ import {
 } from './active-skill-context'
 import { applySteeringToTurnFrame } from './turn-frame-steering'
 import type { TurnFrame, TurnFrameLiveness, TurnFrameMode, TurnUserIntent } from './turn-frame'
+
+/**
+ * Stage M (M0a) — seed `frame.activeArtifactRoots` from the resolved
+ * `ActiveSkillContext` and `SkillRunContract` so cold-session reads via
+ * `skill_read_artifact` succeed without needing a prior `skill_inspect_run_state`.
+ *
+ * Mirrors the legacy fallback list in `skills-tools.ts:1689-1695` so removing
+ * that fallback (M4+M5) does not regress reads of frame-known directories.
+ *
+ * Pure helper. The primary load-bearing source is `ActiveSkillContext` —
+ * `runContract.artifactRoots` is currently `[outputDir]` (run-contracts.ts:1407)
+ * so it is additive and harmless when redundant.
+ */
+export function deriveSeedArtifactRoots(args: {
+  context: ActiveSkillContext | null
+  runContract: SkillRunContract | null
+}): string[] {
+  const seen = new Set<string>()
+  const roots: string[] = []
+  const push = (path?: string | null): void => {
+    if (typeof path !== 'string') return
+    const trimmed = path.trim()
+    if (!trimmed || seen.has(trimmed)) return
+    seen.add(trimmed)
+    roots.push(trimmed)
+  }
+  if (args.context) {
+    push(args.context.outputDir)
+    if (args.context.runStatePath) push(dirname(args.context.runStatePath))
+    if (args.context.sceneScoresPath) push(dirname(args.context.sceneScoresPath))
+    if (args.context.deliveryReportPath) push(dirname(args.context.deliveryReportPath))
+  }
+  if (args.runContract) {
+    push(args.runContract.outputDir)
+    if (args.runContract.runStatePath) push(dirname(args.runContract.runStatePath))
+    for (const root of args.runContract.artifactRoots || []) push(root)
+    if (args.runContract.artifactPaths?.sceneScoresPath) {
+      push(dirname(args.runContract.artifactPaths.sceneScoresPath))
+    }
+    if (args.runContract.artifactPaths?.deliveryReportPath) {
+      push(dirname(args.runContract.artifactPaths.deliveryReportPath))
+    }
+  }
+  return roots
+}
 
 export interface ResolveTurnFrameInputs {
   sessionId?: string | null
@@ -225,7 +276,11 @@ export function resolveTurnFrame(inputs: ResolveTurnFrameInputs): TurnFrame {
       hardCapIteration: null,
       exhausted: false,
     },
-    activeArtifactRoots: [],
+    // Stage M (M0a) — seed read-sandbox roots from the resolved context +
+    // run contract so cold-session reads via `skill_read_artifact` succeed
+    // without a prior `skill_inspect_run_state`. Mirrors the legacy fallback
+    // list in skills-tools.ts:1689-1695, which M4+M5 will then remove.
+    activeArtifactRoots: deriveSeedArtifactRoots({ context, runContract }),
     configValidation: null,
     terminalReason: null,
   }

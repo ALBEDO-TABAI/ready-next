@@ -3,7 +3,11 @@ import { createHash } from 'node:crypto'
 import test from 'node:test'
 
 import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
-import { TurnEngine } from '../main/modules/agent-control/turn-engine'
+import {
+  TurnEngine,
+  applyChildResumeFreshContractFields,
+} from '../main/modules/agent-control/turn-engine'
+import { resolveTurnFrame } from '../main/modules/agent-control/turn-frame-resolver'
 import {
   configureSkillChildRunner,
   __resetSkillChildRunnerForTests,
@@ -495,47 +499,41 @@ test('TurnEngine applies resumed freshContractFields wholesale', async () => {
     childStatus: 'running' as const,
     parentNextHint: 'wait_for_close_event' as const,
   }
-  const originalAssign = Object.assign
-  let capturedContract: Record<string, unknown> | null = null
-  Object.assign = ((target: object, ...sources: object[]) => {
-    if (sources.includes(freshContractFields)) {
-      capturedContract = target as Record<string, unknown>
-    }
-    return originalAssign(target, ...sources)
-  }) as ObjectConstructor['assign']
-  try {
-    const { request } = createRequest({
-      userText: '继续',
-      host: {
-        skillTaskSupervisor: {
-          inspectLatestSkillTask: () => makeSkillSnapshot(),
-        },
-        resumeSkillChildRun: async (childRunId: string) => ({
-          childRunId,
-          status: 'running',
-          outputDir: '/tmp/ready/output',
-          runStatePath: '/tmp/ready/output/run_state.json',
-          eventLogPath: '/tmp/ready/output/child-run.jsonl',
-          parentNextHint: 'continue_other_work',
-          closeEvent: null,
-          freshContractFields,
-        }),
+  const frame = resolveTurnFrame({
+    sessionId: 'scope-test',
+    requestId: 'run-test',
+    supervisorSnapshot: makeSkillSnapshot(),
+  })
+  const patchedFrame = applyChildResumeFreshContractFields(frame, freshContractFields)
+  assert.equal(patchedFrame?.skill?.runContract?.childCloseEvent, null)
+  assert.equal(patchedFrame?.skill?.runContract?.childStatus, 'running')
+  assert.equal(patchedFrame?.skill?.runContract?.parentNextHint, 'wait_for_close_event')
+
+  const { request } = createRequest({
+    userText: '继续',
+    host: {
+      skillTaskSupervisor: {
+        inspectLatestSkillTask: () => makeSkillSnapshot(),
       },
-    })
+      resumeSkillChildRun: async (childRunId: string) => ({
+        childRunId,
+        status: 'running',
+        outputDir: '/tmp/ready/output',
+        runStatePath: '/tmp/ready/output/run_state.json',
+        eventLogPath: '/tmp/ready/output/child-run.jsonl',
+        parentNextHint: 'continue_other_work',
+        closeEvent: null,
+        freshContractFields,
+      }),
+    },
+  })
 
-    const result = await engine.execute(request)
+  const result = await engine.execute(request)
 
-    // freshContractFields force `parentNextHint: 'wait_for_close_event'`,
-    // which the engine interprets as "park the parent and wait for the
-    // child close event". The terminal IPC status is therefore 'checkpoint'
-    // (the parent is in a wait state, not finished). The earlier
-    // expectation of 'done' was written before this contract solidified.
-    assert.equal(result.status, 'checkpoint')
-    assert.ok(capturedContract, 'resume branch must apply freshContractFields via Object.assign')
-    assert.equal(capturedContract.childCloseEvent, null)
-    assert.equal(capturedContract.childStatus, 'running')
-    assert.equal(capturedContract.parentNextHint, 'wait_for_close_event')
-  } finally {
-    Object.assign = originalAssign
-  }
+  // freshContractFields force `parentNextHint: 'wait_for_close_event'`,
+  // which the engine interprets as "park the parent and wait for the
+  // child close event". The terminal IPC status is therefore 'checkpoint'
+  // (the parent is in a wait state, not finished). The earlier
+  // expectation of 'done' was written before this contract solidified.
+  assert.equal(result.status, 'checkpoint')
 })

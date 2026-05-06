@@ -6,6 +6,41 @@ import type {
 import type { SkillProgressScore } from './progress-scorer'
 import type { SkillWasteScore } from './waste-scorer'
 import type { SkillTaskSupervisorSnapshot } from './skill-task-supervisor'
+import type { TurnFramePatch } from './turn-frame'
+
+/**
+ * Stage M (M2b) — `produceBudgetPatch` is the named producer that emits a
+ * `TurnFramePatch.budget` reflecting the current lease state. Steering and
+ * dispatch read `frame.budget` only; this helper is the ONLY non-merge path
+ * by which `frame.budget` changes (M3 gate enforces).
+ *
+ * `exhausted` is derived from external scalars — `SkillBudgetLeaseState`
+ * itself has no `exhausted` field. Callers pass the two budget signals they
+ * already track:
+ *   - `budgetWarningLevel`: from `ChatTurnState.budgetWarningLevel`
+ *     ('exhausted' is the terminal level).
+ *   - `stepBudgetRemainingIterations`: from
+ *     `ChatTurnState.stepBudgetState?.remainingIterations`. When ≤ 0, the
+ *     step budget is also exhausted.
+ *
+ * If both are null/undefined the helper assumes not exhausted.
+ */
+export function produceBudgetPatch(args: {
+  lease: SkillBudgetLeaseState | null
+  budgetWarningLevel?: 'none' | 'warning' | 'converge' | 'exhausted' | null
+  stepBudgetRemainingIterations?: number | null
+}): TurnFramePatch {
+  const exhausted =
+    args.budgetWarningLevel === 'exhausted'
+    || (typeof args.stepBudgetRemainingIterations === 'number' && args.stepBudgetRemainingIterations <= 0)
+  return {
+    budget: {
+      leaseEndIteration: args.lease?.currentLeaseEndIteration ?? null,
+      hardCapIteration: args.lease?.hardCapIteration ?? null,
+      exhausted,
+    },
+  }
+}
 
 export const DEFAULT_SKILL_LEASE_SIZE_ITERATIONS = 20
 export const DEFAULT_SKILL_LEASE_MAX_RENEWALS = 10

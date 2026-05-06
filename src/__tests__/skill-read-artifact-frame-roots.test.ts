@@ -146,7 +146,7 @@ test('skill_read_artifact resolves relative path against primary artifactRoot fi
  * the dispatcher's job is to source them from the active-frame slot first;
  * the primitive's job is to honor whatever the dispatcher passes.
  */
-test('Phase 3: source-level proof — skill_read_artifact dispatch prefers activeFrame.activeArtifactRoots over the legacy fallback', () => {
+test('Stage M (M4+M5): source-level proof — skill_read_artifact dispatch reads ONLY activeFrame.activeArtifactRoots', () => {
   // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: full executeSkillTool dispatch needs Electron-backed skill root lookup in tests; primitive behavior below covers root acceptance while this pins the dispatch source.
   const source = readFileSync(
     new URL('../main/modules/tools/skills-tools.ts', import.meta.url),
@@ -157,19 +157,24 @@ test('Phase 3: source-level proof — skill_read_artifact dispatch prefers activ
   const branchEnd = readArtifactRegion.indexOf("if (tool.name === 'skill_inspect_run_state')")
   const branch = branchEnd > 0 ? readArtifactRegion.slice(0, branchEnd) : readArtifactRegion
 
-  // The dispatch must consult runtimeContext.activeFrame.activeArtifactRoots
-  // first.
+  // The dispatch must consult runtimeContext.activeFrame.activeArtifactRoots.
   assert.match(
     branch,
     /runtimeContext\?\.activeFrame\?\.activeArtifactRoots/,
-    'Phase 3 regression: skill_read_artifact dispatch must read runtimeContext.activeFrame.activeArtifactRoots',
+    'skill_read_artifact dispatch must read runtimeContext.activeFrame.activeArtifactRoots',
   )
-  // The fallback to resolveActiveSkillContext must remain (per spec) AND
-  // must carry the TODO marker so Phase 5/6 knows to drop it.
-  assert.match(
+  // Stage M (M4+M5) — the legacy fallback is REMOVED. The TODO marker is
+  // also gone. Re-introducing either is a regression — see plan §3.2 and
+  // the dedicated check-read-artifact-no-active-context.cjs gate.
+  assert.doesNotMatch(
     branch,
-    /TODO\(skill-child-loop\): drop fallback after child-run path is stable/,
-    'Phase 3 regression: legacy resolveActiveSkillContext fallback must carry TODO marker',
+    /resolveActiveSkillContext\b/,
+    'Stage M removed the legacy active-context fallback. Re-introducing it breaks I4. See plan §3.2.',
+  )
+  assert.doesNotMatch(
+    branch,
+    /TODO\(skill-child-loop\)/,
+    'Stage M removed the TODO marker along with the fallback.',
   )
 })
 

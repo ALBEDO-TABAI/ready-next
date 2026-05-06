@@ -228,6 +228,27 @@ export interface TurnFramePatch {
    * before next-turn steering reads it.
    */
   runContract?: Partial<SkillRunContract>
+  /**
+   * Stage M — durable budget update emitted by the lease controller after
+   * each scoring window. `applyTurnFramePatch` writes the values into
+   * `frame.budget`. Steering and dispatch must read `frame.budget` only;
+   * `skillBudgetLeaseState` is the producer side and is not consulted by
+   * any read path. Last-write-wins per scalar; explicit `null` resets.
+   */
+  budget?: {
+    leaseEndIteration?: number | null
+    hardCapIteration?: number | null
+    exhausted?: boolean
+  }
+  /**
+   * Stage M — terminal classification of the current turn. The turn engine
+   * emits this once a terminal branch is decided. Patches with higher
+   * priority override patches with lower or equal priority — see
+   * `TURN_TERMINAL_REASON_RANK` and `shouldApplyTerminalReason`. This is
+   * how the engine prevents a provisional `checkpoint_user_input` from
+   * silently winning over a later real `checkpoint_budget` close.
+   */
+  terminalReason?: TurnTerminalReason
 }
 
 const TURN_FRAME_LIVENESS_RANK: Record<TurnFrameLiveness, number> = {
@@ -240,6 +261,52 @@ const TURN_FRAME_LIVENESS_RANK: Record<TurnFrameLiveness, number> = {
   done: 9,
   failed: 9,
 }
+
+/**
+ * Stage M — priority ranks for `TurnTerminalReason`. Higher rank wins.
+ *
+ * Rationale:
+ *   - `cancelled_user` always wins (user-initiated cancel is final).
+ *   - `failed_skill` > `done`: a failure observed after a provisional `done`
+ *     surfaces as failure (defensive — see plan §9.Q1).
+ *   - `done` > all checkpoints: a child resume that completes must not be
+ *     overwritten by a later iteration's budget/background marker.
+ *   - `checkpoint_budget` > `checkpoint_user_input`: the real terminal cause
+ *     (budget close) overrides a provisional user-input checkpoint marker.
+ *   - `checkpoint_background` > `checkpoint_budget`: when a live worker exists,
+ *     `turn-engine.ts:4239-4246` already prefers `checkpoint_background`.
+ */
+const TURN_TERMINAL_REASON_RANK: Record<TurnTerminalReason, number> = {
+  cancelled_user: 100,
+  cancelled_runtime: 90,
+  failed_skill: 80,
+  persistence_failed: 75,
+  blocked_config: 70,
+  blocked_external: 65,
+  blocked_tool_error: 60,
+  resume_launch_failed: 55,
+  done: 50,
+  checkpoint_background: 30,
+  checkpoint_budget: 20,
+  checkpoint_user_input: 10,
+}
+
+/**
+ * Stage M — should the patch's `terminalReason` replace the current frame
+ * value? Returns true when there is no current value, when the new rank is
+ * strictly higher, OR when ranks are equal (idempotent re-emits stay benign).
+ * Returns false when the new rank is strictly lower (silent-drop guard).
+ */
+function shouldApplyTerminalReason(
+  current: TurnTerminalReason | null,
+  next: TurnTerminalReason,
+): boolean {
+  if (current == null) return true
+  const currentRank = TURN_TERMINAL_REASON_RANK[current] ?? 0
+  const nextRank = TURN_TERMINAL_REASON_RANK[next] ?? 0
+  return nextRank >= currentRank
+}
+
 const VEA_SKILL_ID = 'video-expert-analyzer'
 
 function isTerminalLiveness(value: TurnFrameLiveness): boolean {
@@ -434,6 +501,19 @@ export function mergeTurnFramePatches(patches: TurnFramePatch[]): TurnFramePatch
     if (patch.runContract && typeof patch.runContract === 'object') {
       merged.runContract = mergeRunContractPartials(merged.runContract, patch.runContract)
     }
+    // Stage M — budget merge (last-write-wins per scalar; explicit `null`
+    // values are preserved so callers can intentionally reset a field).
+    if (patch.budget && typeof patch.budget === 'object') {
+      merged.budget = { ...(merged.budget || {}), ...patch.budget }
+    }
+    // Stage M — terminalReason merge with priority ranking. A patch's
+    // `terminalReason` only sticks if its rank is >= the currently merged
+    // value. This is the silent-drop guard — see TURN_TERMINAL_REASON_RANK.
+    if (typeof patch.terminalReason === 'string') {
+      if (shouldApplyTerminalReason(merged.terminalReason ?? null, patch.terminalReason)) {
+        merged.terminalReason = patch.terminalReason
+      }
+    }
   }
   if (allRoots.length > 0) {
     merged.activeArtifactRoots = dedupePreservingOrder(allRoots)
@@ -470,6 +550,10 @@ export function applyTurnFramePatch(frame: TurnFrame, patch: TurnFramePatch): Tu
   const hasActiveRoots = Boolean(patch.activeArtifactRoots && patch.activeArtifactRoots.length > 0)
   const hasConfig = Boolean(patch.configValidation)
   const hasContract = Boolean(patch.runContract && Object.keys(patch.runContract).length > 0)
+  // Stage M — track new write surfaces so the no-op guard at the bottom
+  // skips construction of a new frame when nothing changed.
+  const hasBudget = Boolean(patch.budget && Object.keys(patch.budget).length > 0)
+  const hasTerminalReason = typeof patch.terminalReason === 'string'
   const hasAnything =
     hasActiveRoots
     || hasConfig
@@ -477,6 +561,8 @@ export function applyTurnFramePatch(frame: TurnFrame, patch: TurnFramePatch): Tu
     || Boolean(patch.discoveredHandles && Object.keys(patch.discoveredHandles).length > 0)
     || Boolean(patch.skillStatusUpdates && Object.keys(patch.skillStatusUpdates).length > 0)
     || typeof patch.livenessHint === 'string'
+    || hasBudget
+    || hasTerminalReason
   if (!hasAnything) return frame
 
   let nextSkill: TurnFrame['skill'] = frame.skill
@@ -615,11 +701,49 @@ export function applyTurnFramePatch(frame: TurnFrame, patch: TurnFramePatch): Tu
     }
   }
 
+  // Stage M — budget update. Last-write-wins per scalar; explicit `null`
+  // values are preserved so callers can intentionally reset a field. The
+  // current frame.budget shape requires `leaseEndIteration: number | null`,
+  // `hardCapIteration: number | null`, `exhausted: boolean` — keep the
+  // contract by coalescing missing patch fields back to current frame values.
+  let nextBudget: TurnFrame['budget'] = frame.budget
+  if (hasBudget && patch.budget) {
+    const incoming = patch.budget
+    const candidateBudget: TurnFrame['budget'] = {
+      leaseEndIteration: 'leaseEndIteration' in incoming
+        ? (incoming.leaseEndIteration ?? null)
+        : frame.budget.leaseEndIteration,
+      hardCapIteration: 'hardCapIteration' in incoming
+        ? (incoming.hardCapIteration ?? null)
+        : frame.budget.hardCapIteration,
+      exhausted: 'exhausted' in incoming
+        ? Boolean(incoming.exhausted)
+        : frame.budget.exhausted,
+    }
+    if (
+      candidateBudget.leaseEndIteration !== frame.budget.leaseEndIteration
+      || candidateBudget.hardCapIteration !== frame.budget.hardCapIteration
+      || candidateBudget.exhausted !== frame.budget.exhausted
+    ) {
+      nextBudget = candidateBudget
+    }
+  }
+
+  // Stage M — terminalReason update with priority ranking (silent-drop guard).
+  let nextTerminalReason: TurnTerminalReason | null = frame.terminalReason
+  if (hasTerminalReason && patch.terminalReason) {
+    if (shouldApplyTerminalReason(frame.terminalReason, patch.terminalReason)) {
+      nextTerminalReason = patch.terminalReason
+    }
+  }
+
   if (
     nextSkill === frame.skill
     && nextLiveness === frame.liveness
     && nextActiveArtifactRoots === frame.activeArtifactRoots
     && nextConfigValidation === frame.configValidation
+    && nextBudget === frame.budget
+    && nextTerminalReason === frame.terminalReason
   ) {
     return frame
   }
@@ -630,5 +754,11 @@ export function applyTurnFramePatch(frame: TurnFrame, patch: TurnFramePatch): Tu
     liveness: nextLiveness,
     activeArtifactRoots: nextActiveArtifactRoots,
     configValidation: nextConfigValidation,
+    budget: nextBudget,
+    terminalReason: nextTerminalReason,
   }
 }
+
+// Stage M — exported helper rank table + predicate so tests and gate
+// scripts can assert priority semantics without redefining them.
+export { TURN_TERMINAL_REASON_RANK, shouldApplyTerminalReason }

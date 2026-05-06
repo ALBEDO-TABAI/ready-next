@@ -230,6 +230,17 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - `READY_LOG_MAX_BYTES` / `READY_LOG_MAX_FILES` 是支持的日志轮转阈值；默认 50MB、保留 5 个历史文件。`scripts/check-log-rotation.cjs` 必须阻止新增未轮转的 `ready-*.log` 写入。
 - `npm run verify:j` 必须内嵌 `verify:i`，并覆盖 process handler gate、log rotation gate、J gates/focus。
 
+### 6.20 Frame Update 唯一事实源（M 阶段）
+- **`TurnFrame` 是模型循环内唯一的 frame-state 读源**：artifact roots、run-state 派生 progress、liveness、budget、terminalReason、runContract handles 都只能从 `frame` 读。**身份解析读** (`resolvePrimitiveSkillId` / `getSkillToolDefs` / `isStaticSkillToolVisible` / `skill_run_shell` shell allowlist / `skill_start_detached` admission / `buildSkillProjectionPatch`) 显式不在此约束内——它们回答"哪个 skill"，与"runtime state"正交。
+- **两条声明的写通道，没有第三条**：
+  - **I2a (post-batch)**：`TurnFrame` 只能通过 `turnFrame = applyTurnFramePatch(turnFrame, patch)` 重赋值。`applyTurnFramePatch` 是 pure（返回新 frame，不变更入参）。所有 `turn-engine.ts` 直写位（terminalReason × 8 / budget × 1 / contract.* × 5 cluster / `Object.assign` × 1 — 共 15 个位点）已在 M2a 迁移完毕。
+  - **I2b (intra-batch)**：`ToolRuntimeContext.activeFrame` 只能由 `applyContextModifier(context, output)` 在批内原地修改。这是同批 fast-path，让 tool B 立刻看到 tool A 的 contextModifier 产物。
+- **两条通道在 `activeArtifactRoots` 与 `runContract` 上对称**：任何 framePatch 携带 `activeArtifactRoots` 的位点必须同步发出匹配的 contextModifier。`attachContractFramePatch` 是受信助手（自动派生 contextModifier）；其他位点（`inspect-run-state` / typed-action 直返）必须显式同时发出两侧。`discoveredHandles` 对称延后到 Stage M+1（目前没有同批读者）。
+- **`frame.budget` 是 steering / dispatch 的唯一读源**：`skillBudgetLeaseState` 是生产者侧。`produceBudgetPatch`（`skill-budget-lease-controller.ts`）是唯一发射函数；steering 不再访问 `currentLeaseEndIteration` / `hardCapIteration`。`exhausted` 由 `state.budgetWarningLevel === 'exhausted'` 或 `stepBudgetState.remainingIterations <= 0` 派生（`SkillBudgetLeaseState` 本身没有 `exhausted` 字段）。
+- **`terminalReason` 优先级**：`TURN_TERMINAL_REASON_RANK` 决定多 patch 之间的胜负（cancelled_user=100 ≫ failed_skill=80 ≫ done=50 ≫ checkpoint_background=30 ≫ checkpoint_budget=20 ≫ checkpoint_user_input=10）。修了 v2 silent-drop case：provisional `checkpoint_user_input` 不会盖掉后到的 `checkpoint_budget`。`cancel-after-done` audit-loss 是 known edge，按当前行为保留，留作 Stage M+1。
+- **`skill_read_artifact` 不再有 active-context fallback**：`turn-frame-resolver.deriveSeedArtifactRoots` 在 frame 构建时把 `outputDir / dirname(runStatePath)` 等 cold-session 来源种到 `frame.activeArtifactRoots`；M5a 三条款保证同批 emitter 发对称 contextModifier；之后 M4+M5 删了 `skills-tools.ts` 内旧的 `else { resolveActiveSkillContext... }` 分支。
+- **CI 强制四个新 gate**：`scripts/check-frame-write-single-source.cjs`（Scope A 工具 + Scope B turn-engine）、`scripts/check-budget-single-source.cjs`（生产者位置 + 邻接 `produceBudgetPatch`）、`scripts/check-read-artifact-no-active-context.cjs`（read-artifact 分支严格不含 legacy 符号）、`scripts/check-context-modifier-shape.cjs`（framePatch.activeArtifactRoots ↔ contextModifier 对称）。`npm run verify:m` 必须内嵌 `verify:l`，并覆盖四个 gate + `test:m:gates` + `test:m:focus`。
+
 ## 7. 新功能开发最小闭环
 新增跨进程功能时，至少同步修改：
 1. Main IPC handler

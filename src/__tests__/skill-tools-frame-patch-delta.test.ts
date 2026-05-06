@@ -16,8 +16,9 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-import { executeSkillTool } from '../main/modules/tools/skills-tools'
+import { buildTypedActionContextModifier, executeSkillTool } from '../main/modules/tools/skills-tools'
 import { registerDetachedSkillTaskTracker } from '../main/modules/agent-control/detached-skill-task-tracker'
+import type { SkillRunContract } from '../main/modules/agent-control/run-contracts'
 import {
   rememberLastReferenceSkill,
   _resetLastReferenceSkillHintsForTests,
@@ -564,29 +565,49 @@ test('T7: same-batch contextModifier from tool-A unions onto the seeded roots so
   )
 })
 
-test('Phase 3: source-level proof — VEA typed-action wrapper emits contextModifier when outputDir is present', () => {
-  // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: VEA contextModifier emission is coupled to typed-action wrapper integration
-  const source = readFileSync(
-    new URL('../main/modules/tools/skills-tools.ts', import.meta.url),
-    'utf-8',
+test('Stage M (M5a-typed-gate): typed-action wrapper emits contextModifier whenever outputDir is set (no VEA-name allowlist)', () => {
+  const contract: SkillRunContract = {
+    skillId: 'lets-go-rss',
+    skillName: 'lets-go-rss',
+    toolName: 'skill_rss_status',
+    action: 'rss_status',
+    actionInput: {},
+    originalInput: {},
+    sourceUrl: null,
+    taskRunId: 'task-stage-m',
+    detachedTaskId: null,
+    jobId: null,
+    outputDir: '/tmp/stage-m-rss-output',
+    runStatePath: '/tmp/stage-m-rss-output/run_state.json',
+    artifactRoots: ['/tmp/stage-m-rss-output'],
+    artifactPaths: { sceneScoresPath: null, deliveryReportPath: null },
+    status: 'running',
+    liveness: 'running_process',
+    progress: { stage: null, totalUnits: null, completedUnits: null, coverageRatio: null, fingerprint: null },
+    blocker: { reason: null, stale: false },
+    projectionIdentity: { stableKey: null, supersedesProjectionIds: [] },
+    forceLoopGuard: {
+      lastForceToolName: null,
+      lastForceInputDigest: null,
+      lastForceToolDispatchedAt: null,
+      consecutiveForceCount: 0,
+    },
+    updatedAt: '2026-05-06T00:00:00.000Z',
+  }
+
+  const contextModifier = buildTypedActionContextModifier({
+    outputDir: contract.outputDir,
+    contract,
+  })
+
+  assert.deepEqual(
+    contextModifier?.activeFrame?.activeArtifactRoots,
+    ['/tmp/stage-m-rss-output'],
+    'Stage M: typed-action wrapper must emit contextModifier.activeArtifactRoots whenever outputDir is set.',
   )
-  // The typed-action branch must scope contextModifier emission to the
-  // VEA pipeline + analyze tool names AND only when outputDir is set.
-  assert.match(
-    source,
-    /VEA_CONTEXT_MUTATING_TOOL_NAMES = new Set\(\[[\s\S]+?'skill_video_expert_pipeline',[\s\S]+?'skill_video_expert_ai_analyze',[\s\S]+?\]\)/,
-    'Phase 3 regression: typed-action wrapper must declare a VEA tool-name set for contextModifier emission.',
-  )
-  assert.match(
-    source,
-    /contextModifier = \(outputDir && VEA_CONTEXT_MUTATING_TOOL_NAMES\.has\(toolName\)\)[\s\S]+?activeArtifactRoots: \[outputDir\]/,
-    'Phase 3 regression: typed-action wrapper must emit contextModifier.activeFrame.activeArtifactRoots=[outputDir] for VEA tools.',
-  )
-  // The framePatch path MUST coexist — context modifier is additive, not
-  // a replacement for the durable end-of-turn frame patch.
-  assert.match(
-    source,
-    /createToolExecutionOutput\(formatted, \{[\s\S]+?framePatch,[\s\S]+?contextModifier,[\s\S]+?\}\)/,
-    'Phase 3 regression: typed-action wrapper must keep framePatch alongside contextModifier.',
+  assert.equal(
+    contextModifier?.activeFrame?.runContract,
+    contract,
+    'Stage M: typed-action wrapper must carry the full contract in contextModifier, even for non-VEA skills.',
   )
 })

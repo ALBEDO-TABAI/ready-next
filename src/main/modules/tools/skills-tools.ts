@@ -7,6 +7,7 @@ import { resolveActiveSkillContext } from '../agent-control/active-skill-context
 import {
   createToolExecutionOutput,
   normalizeToolExecutionOutput,
+  type ToolExecutionContextModifier,
   type ToolExecutionOutput,
 } from '../agent-control/tool-result-types'
 import {
@@ -162,6 +163,22 @@ export function resolveSkillActionTimeoutMs(skill: Pick<SkillState, 'hostRequire
   return typeof declared === 'number' && Number.isFinite(declared) && declared > 0
     ? declared
     : undefined
+}
+
+export function buildTypedActionContextModifier(args: {
+  outputDir: string | null | undefined
+  contract: SkillRunContract | null
+}): ToolExecutionContextModifier | null {
+  const outputDir = typeof args.outputDir === 'string' && args.outputDir.trim()
+    ? args.outputDir.trim()
+    : null
+  if (!outputDir) return null
+  return {
+    activeFrame: {
+      activeArtifactRoots: [outputDir],
+      runContract: args.contract ?? null,
+    },
+  }
 }
 
 let skillActionToolDefsOverrideForTests: (() => SkillToolDef[]) | null = null
@@ -726,8 +743,16 @@ function detachedStatusToLiveness(
  * output preserving any existing projectionPatch / interactionHint / data /
  * shape so downstream consumers (projection sync, capsule render) keep
  * their existing behaviour.
+ *
+ * Stage M (M5a-helper) — also auto-emits a matching `contextModifier` so
+ * same-batch dependent tools see freshly-discovered artifact roots without
+ * waiting for the post-batch frame merge.
+ *
+ * Exported for unit testing the contextModifier symmetry in
+ * `attach-contract-framepatch-symmetry.test.ts`. Non-test callers should use
+ * the symbol via the same import path.
  */
-function attachContractFramePatch(
+export function attachContractFramePatch(
   output: ToolExecutionOutput,
   loaderParams: Parameters<typeof loadSkillRunContract>[0],
   patchOverrides?: {
@@ -757,15 +782,48 @@ function attachContractFramePatch(
   if (existing?.runContract && framePatch.runContract) {
     merged.runContract = { ...existing.runContract, ...framePatch.runContract }
   }
+
+  // Stage M (M5a-helper) — auto-emit a matching `contextModifier` whenever
+  // the framePatch we just built carries `activeArtifactRoots`. This lets
+  // same-batch dependent tools (e.g. `skill_read_artifact run_state.json`
+  // following a `skill_inspect_detached` or `skill_start_detached`) see the
+  // freshly-discovered roots through `ToolRuntimeContext.activeFrame` before
+  // the post-batch frame merge runs.
+  //
+  // Type-shape note: `merged.runContract` is `Partial<SkillRunContract>` and
+  // CANNOT be assigned to `contextModifier.activeFrame.runContract` (which
+  // requires `SkillRunContract | null`). We use the full `contract` returned
+  // by `loadSkillRunContract` directly — same source the framePatch was
+  // built from.
+  const mergedRoots = merged.activeArtifactRoots ?? []
+  const existingModifier = output.contextModifier
+  const existingModifierRoots = existingModifier?.activeFrame?.activeArtifactRoots ?? []
+  const unionRoots = (() => {
+    if (mergedRoots.length === 0) return existingModifierRoots
+    const seen = new Set(existingModifierRoots)
+    const out = [...existingModifierRoots]
+    for (const root of mergedRoots) {
+      if (!seen.has(root)) { seen.add(root); out.push(root) }
+    }
+    return out
+  })()
+  const nextContextModifier = unionRoots.length > 0
+    ? {
+      activeFrame: {
+        activeArtifactRoots: unionRoots,
+        runContract: existingModifier?.activeFrame?.runContract ?? contract ?? null,
+        discoveredHandles: existingModifier?.activeFrame?.discoveredHandles ?? [],
+      },
+    }
+    : (existingModifier ?? null)
+
   return createToolExecutionOutput(output.text, {
     shape: output.shape,
     data: output.data,
     projectionPatch: output.projectionPatch,
     interactionHint: output.interactionHint,
     framePatch: merged,
-    // Phase 3 — preserve any same-turn `contextModifier` the upstream
-    // handler attached so the runtime-level live-frame mutation still fires.
-    contextModifier: output.contextModifier ?? null,
+    contextModifier: nextContextModifier,
   })
 }
 
@@ -1332,7 +1390,17 @@ export async function executeSkillTool(
       })
       try {
         const skillDef = listSkillsSafely().find((skill) => skill.id === skillId)
-        const activeSkillContext = resolveActiveSkillContext({ sessionId })
+        // Stage M (M6) — patch-config activeContext is sourced from the
+        // per-turn frame's runContract only. Missing frame context leaves
+        // stale-blocker clearing unavailable for this call; it must not
+        // re-open the retired active-context fallback.
+        const frameContract = runtimeContext?.activeFrame?.runContract as SkillRunContract | null | undefined
+        const patchActiveContext = frameContract && (frameContract.runStatePath || frameContract.outputDir)
+          ? {
+            runStatePath: frameContract.runStatePath ?? null,
+            outputDir: frameContract.outputDir ?? null,
+          }
+          : null
         const output = await executePatchConfig({
           target: maskedParams.target,
           operations: Array.isArray(args.operations)
@@ -1341,12 +1409,7 @@ export async function executeSkillTool(
         }, {
           skillId,
           hostRequirements: skillDef?.hostRequirements ?? null,
-          activeContext: activeSkillContext
-            ? {
-              runStatePath: activeSkillContext.runStatePath,
-              outputDir: activeSkillContext.outputDir,
-            }
-            : null,
+          activeContext: patchActiveContext,
         })
         const validationOk = Boolean((output.data?.validation as { ok?: unknown } | undefined)?.ok)
         recordPrimitiveOutcome({
@@ -1665,13 +1728,19 @@ export async function executeSkillTool(
         status: 'running',
       })
       try {
-        // Phase 3 (skill-child-loop) — prefer the same-turn live
-        // `activeFrame.activeArtifactRoots` slot when populated so artifact
-        // roots emitted by an earlier tool in this batch (e.g. VEA's
-        // outputDir surfaced via `contextModifier`) are immediately readable
-        // without waiting for the next turn's frame rebuild. The legacy
-        // `resolveActiveSkillContext` path remains as fallback for cold
-        // sessions where the active-frame slot is empty.
+        // Stage M (M4+M5) — read sandbox roots come from
+        // `activeFrame.activeArtifactRoots` only. The legacy active-skill-
+        // context fallback that used to sit in this branch was paid off in
+        // Stage M by:
+        //   - M0a: turn-frame-resolver seeds `frame.activeArtifactRoots`
+        //     from the same context paths the legacy fallback consulted, so
+        //     cold-session reads continue to succeed.
+        //   - M5a-helper / M5a-inspect / M5a-typed-gate: every framePatch
+        //     emitter that carries `activeArtifactRoots` also emits a
+        //     matching `contextModifier`, so same-batch reads see fresh
+        //     roots without waiting for the post-batch merge.
+        // After these three M5a slices landed, the legacy fallback became
+        // strictly redundant. Removing it is the user-visible payoff of M.
         const additionalRootCandidates: string[] = []
         const seenRoots = new Set<string>()
         const pushRoot = (path: string | null | undefined) => {
@@ -1682,17 +1751,8 @@ export async function executeSkillTool(
           additionalRootCandidates.push(trimmed)
         }
         const liveFrameRoots = runtimeContext?.activeFrame?.activeArtifactRoots
-        if (Array.isArray(liveFrameRoots) && liveFrameRoots.length > 0) {
+        if (Array.isArray(liveFrameRoots)) {
           for (const root of liveFrameRoots) pushRoot(root)
-        } else {
-          // TODO(skill-child-loop): drop fallback after child-run path is stable
-          const activeContextForRoots = sessionId ? resolveActiveSkillContext({ sessionId }) : null
-          if (activeContextForRoots) {
-            pushRoot(activeContextForRoots.outputDir)
-            if (activeContextForRoots.runStatePath) pushRoot(dirname(activeContextForRoots.runStatePath))
-            if (activeContextForRoots.sceneScoresPath) pushRoot(dirname(activeContextForRoots.sceneScoresPath))
-            if (activeContextForRoots.deliveryReportPath) pushRoot(dirname(activeContextForRoots.deliveryReportPath))
-          }
         }
         const output = await executeReadArtifact(
           {
@@ -2014,19 +2074,18 @@ export async function executeSkillTool(
     livenessHint: livenessHintForContract,
   })
 
-  // Phase 3 (skill-child-loop) — emit a same-turn `contextModifier` for the
-  // VEA typed-action wrappers so dependent later tools in this batch (e.g.
-  // a follow-up `skill_read_artifact run_state.json`) immediately see the
-  // freshly-produced output directory as an additional allowed read root.
-  // The framePatch above remains the durable end-of-turn signal; this
-  // contextModifier is strictly additive for live intra-turn visibility.
-  const VEA_CONTEXT_MUTATING_TOOL_NAMES = new Set([
-    'skill_video_expert_pipeline',
-    'skill_video_expert_ai_analyze',
-  ])
-  const contextModifier = (outputDir && VEA_CONTEXT_MUTATING_TOOL_NAMES.has(toolName))
-    ? { activeFrame: { activeArtifactRoots: [outputDir] } }
-    : null
+  // Stage M (M5a-typed-gate) — emit a same-turn `contextModifier` for ANY
+  // typed action whose framePatch carries `activeArtifactRoots`. Previously
+  // gated to VEA tool names only, which broke same-batch
+  // `skill_inspect_detached → skill_read_artifact` and any other non-VEA
+  // typed action's downstream reads. Mirrors the framePatch's roots AND
+  // emits the FULL `contract` (not `framePatch.runContract` which is
+  // `Partial<SkillRunContract>`) into `contextModifier.activeFrame.runContract`
+  // (which requires `SkillRunContract | null`).
+  const contextModifier = buildTypedActionContextModifier({
+    outputDir,
+    contract,
+  })
 
   return createToolExecutionOutput(formatted, {
     projectionPatch,

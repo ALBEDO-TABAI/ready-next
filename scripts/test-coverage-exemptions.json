@@ -322,6 +322,36 @@
       "owner": "stage5-bulk-import"
     },
     {
+      "path": "src/__tests__/attach-contract-framepatch-symmetry.test.ts",
+      "reason": "Stage M frame contract test imports tool modules that transitively reach native-backed modules but exercises helper behavior with synthetic snapshots only; no test path opens better-sqlite3 under host Node",
+      "since": "2026-05-06",
+      "owner": "stage-m-frame"
+    },
+    {
+      "path": "src/__tests__/frame-resolver-seed.test.ts",
+      "reason": "Stage M frame resolver test imports agent modules that transitively reach native-backed modules but uses injected snapshots only; no test path opens better-sqlite3 under host Node",
+      "since": "2026-05-06",
+      "owner": "stage-m-frame"
+    },
+    {
+      "path": "src/__tests__/read-artifact-no-fallback-empty.test.ts",
+      "reason": "Stage M read-artifact fallback test imports primitive/tool modules that transitively reach native-backed modules but exercises filesystem roots only; no test path opens better-sqlite3 under host Node",
+      "since": "2026-05-06",
+      "owner": "stage-m-frame"
+    },
+    {
+      "path": "src/__tests__/read-artifact-no-fallback.test.ts",
+      "reason": "Stage M read-artifact fallback test imports primitive/tool modules that transitively reach native-backed modules but exercises filesystem roots only; no test path opens better-sqlite3 under host Node",
+      "since": "2026-05-06",
+      "owner": "stage-m-frame"
+    },
+    {
+      "path": "src/__tests__/typed-action-context-modifier-no-vea-gate.test.ts",
+      "reason": "Stage M typed-action context test imports tool modules that transitively reach native-backed modules but exercises a pure context-modifier helper only; no test path opens better-sqlite3 under host Node",
+      "since": "2026-05-06",
+      "owner": "stage-m-frame"
+    },
+    {
       "path": "src/__tests__/skill-reference-hint-sweep-independent.test.ts",
       "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
       "since": "2026-05-06",

@@ -33,11 +33,13 @@ export interface ReadArtifactHandlerDeps {
    * back to `skill_run_shell cat`. The primary artifact root is always tried
    * first so existing relative-path semantics are preserved.
    *
-   * Phase 3 (skill-child-loop) — the dispatcher in `skills-tools.ts` now
-   * sources this list from `ToolRuntimeContext.activeFrame.activeArtifactRoots`
-   * first (same-turn live signal), falling back to `resolveActiveSkillContext`.
-   * This parameter remains the legacy plumbing surface — keep it.
-   * TODO(skill-child-loop): drop fallback after child-run path is stable.
+   * Stage M (M4+M5) — the dispatcher in `skills-tools.ts` sources this list
+   * **only** from `ToolRuntimeContext.activeFrame.activeArtifactRoots`. The
+   * legacy `resolveActiveSkillContext` fallback was retired after the
+   * resolver seeded `frame.activeArtifactRoots` from the same paths (M0a)
+   * and every framePatch emitter that carries roots also emits a matching
+   * contextModifier (M5a). This parameter remains the legacy plumbing
+   * surface so handlers don't need to re-resolve roots themselves.
    */
   additionalAllowedReadRoots?: string[]
 }

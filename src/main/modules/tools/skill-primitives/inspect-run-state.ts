@@ -269,7 +269,19 @@ interface InspectContractInputs {
  *     reason derived from `summary.lastError` (kept independent of the
  *     contract status so producers can clear it explicitly later).
  */
-function buildInspectFramePatch(inputs: InspectContractInputs): TurnFramePatch | null {
+/**
+ * Stage M (M5a-inspect) return shape — caller needs the full
+ * `SkillRunContract` (not the partial inside framePatch.runContract) to
+ * populate `contextModifier.activeFrame.runContract`, which is typed
+ * `SkillRunContract | null`. Returning `{ framePatch, contract }` lets the
+ * wrapper pass the full object directly.
+ */
+export interface InspectFramePatchResult {
+  framePatch: TurnFramePatch | null
+  contract: SkillRunContract | null
+}
+
+function buildInspectFramePatch(inputs: InspectContractInputs): InspectFramePatchResult {
   const {
     outputDir,
     runStatePath,
@@ -423,7 +435,11 @@ function buildInspectFramePatch(inputs: InspectContractInputs): TurnFramePatch |
     ...(action ? { action } : {}),
   }
 
-  return patch
+  // Stage M (M5a-inspect) — return both `framePatch` AND the full
+  // `contract` so the caller can populate `contextModifier.activeFrame.
+  // runContract` (which requires `SkillRunContract | null`, not the
+  // `Partial<SkillRunContract>` inside `framePatch.runContract`).
+  return { framePatch: patch, contract }
 }
 
 export async function executeInspectRunState(
@@ -623,7 +639,14 @@ export async function executeInspectRunState(
   // without re-resolving from summary text. Beta's `applyTurnFramePatch`
   // persists the durable slots (`activeArtifactRoots`, `runContract`,
   // `configValidation`) into the next frame.
-  const framePatch = buildInspectFramePatch({
+  //
+  // Stage M (M5a-inspect) — buildInspectFramePatch now returns both the
+  // framePatch AND the full SkillRunContract (or null) so we can also emit
+  // a matching contextModifier. Same-batch dependent tools (e.g. an
+  // immediately-following `skill_read_artifact run_state.json`) see the
+  // freshly-discovered outputDir through `ToolRuntimeContext.activeFrame`
+  // before the post-batch frame merge runs.
+  const { framePatch, contract: inspectedContract } = buildInspectFramePatch({
     outputDir,
     runStatePath,
     effectiveExpectedTaskId,
@@ -636,6 +659,20 @@ export async function executeInspectRunState(
       ? args.skillId.trim()
       : null,
   })
+
+  const inspectedRoots = framePatch?.activeArtifactRoots ?? []
+  const inspectContextModifier = inspectedRoots.length > 0
+    ? {
+      activeFrame: {
+        activeArtifactRoots: inspectedRoots,
+        // Use the FULL `contract` (SkillRunContract | null), not the
+        // `framePatch.runContract` which is `Partial<SkillRunContract>`.
+        // Plan v8 fix.
+        runContract: inspectedContract ?? null,
+        discoveredHandles: [],
+      },
+    }
+    : null
 
   return createToolExecutionOutput(
     `Inspected run_state at ${runStatePath}. Found keys: ${summary.knownKeysFound.join(', ') || '(none of the known keys)'}.`,
@@ -658,6 +695,7 @@ export async function executeInspectRunState(
         truncated,
       },
       framePatch,
+      contextModifier: inspectContextModifier,
     },
   )
 }

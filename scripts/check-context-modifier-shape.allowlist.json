@@ -1,0 +1,4 @@
+{
+  "$comment": "Stage M (M8) — explicit allowlist of sites that emit framePatch.activeArtifactRoots WITHOUT an accompanying contextModifier. Each entry needs file/lineStart/lineEnd/reason (≥20 chars)/addedBy/addedAt. Optional enclosingFunction stabilizes matching across refactors. Empty by default — every framePatch site that carries activeArtifactRoots must also emit contextModifier per plan §3.4.",
+  "entries": []
+}

@@ -316,6 +316,7 @@ import { PRIMITIVE_TOOL_DEFS } from '../tools/skill-primitives/tool-defs'
 import {
   createSkillBudgetLeaseState,
   evaluateSkillBudgetLease,
+  produceBudgetPatch,
 } from './skill-budget-lease-controller'
 import { scoreSkillProgress, type SkillProgressScore } from './progress-scorer'
 import { scoreSkillWaste, type SkillWasteScore } from './waste-scorer'
@@ -326,6 +327,7 @@ import {
   cancelSkillChildRun,
   getSkillChildRunCloseEvent,
   resumeSkillChildRun,
+  type StartSkillChildRunResult,
 } from './skill-child-runner'
 import {
   isBlockedChildCloseStatus,
@@ -503,6 +505,19 @@ export function computeChildContinuationDecision(
     return { kind: 'checkpoint_paused', childRunId, closeEvent: live }
   }
   return { kind: 'wait', childRunId }
+}
+
+export function applyChildResumeFreshContractFields(
+  frame: TurnFrame | null,
+  freshContractFields: StartSkillChildRunResult['freshContractFields'],
+): TurnFrame | null {
+  if (!frame?.skill?.runContract || !freshContractFields) return frame
+  return applyTurnFramePatch(frame, {
+    runContract: {
+      skillId: frame.skill.runContract.skillId,
+      ...freshContractFields,
+    },
+  })
 }
 
 function matchesChildCancelIntent(...texts: Array<string | null | undefined>): boolean {
@@ -1255,7 +1270,11 @@ export class TurnEngine {
               ? 'cancelled_runtime'
               : 'persistence_failed')
       if (turnFrame) {
-        turnFrame.terminalReason = terminalReason
+        // Stage M (M2a) — terminalReason now flows through the framePatch
+        // contract (priority-ranked merge in `applyTurnFramePatch`). No
+        // steering refresh needed — this site runs at terminal exit, the
+        // turn is returning. See plan §2.3 for the migration manifest.
+        turnFrame = applyTurnFramePatch(turnFrame, { terminalReason })
       }
       // Stage 7 — single per-turn diagnostic. Emit exactly once per turn at
       // closure so logs carry one structured row that explains the whole
@@ -1831,13 +1850,26 @@ export class TurnEngine {
         }
       }
       if (turnFrame?.skill?.runContract && childCommand.kind !== 'none') {
-        const contract = turnFrame.skill.runContract
+        // Stage M (M2a) — child-command resolution patch (first cluster).
+        // Anchored on the existing contract.skillId so applyTurnFramePatch
+        // routes through the merge-partials path. See plan §2.3.
+        const anchorSkillId = turnFrame.skill.runContract.skillId
         if (childCommand.kind === 'terminal' || childCommand.kind === 'checkpoint_paused') {
-          contract.childCloseEvent = childCommand.closeEvent
-          contract.childStatus = childCommand.closeEvent.status
-          contract.parentNextHint = 'continue_other_work'
+          turnFrame = applyTurnFramePatch(turnFrame, {
+            runContract: {
+              skillId: anchorSkillId,
+              childCloseEvent: childCommand.closeEvent,
+              childStatus: childCommand.closeEvent.status,
+              parentNextHint: 'continue_other_work',
+            },
+          })
         } else if (childCommand.kind === 'wait') {
-          contract.parentNextHint = 'wait_for_close_event'
+          turnFrame = applyTurnFramePatch(turnFrame, {
+            runContract: {
+              skillId: anchorSkillId,
+              parentNextHint: 'wait_for_close_event',
+            },
+          })
         }
       }
       if (isChildCancelTurn && childRunIdForCommand) {
@@ -1846,11 +1878,24 @@ export class TurnEngine {
         }).cancelSkillChildRun || cancelSkillChildRun
         const close = await cancelChild(childRunIdForCommand, { reason: 'cancelled_user', source: 'nlp' })
         if (turnFrame?.skill?.runContract) {
-          turnFrame.skill.runContract.childCloseEvent = close
-          turnFrame.skill.runContract.childStatus = close.status
-          turnFrame.skill.runContract.parentNextHint = 'continue_other_work'
+          // Stage M (M2a) — cancel-branch contract update (second cluster).
+          // Followed by the terminalReason patch below; we keep them as two
+          // separate calls so the "cancelled_user > anything" priority in
+          // applyTurnFramePatch fires correctly even if a prior patch in
+          // this turn had already set terminalReason.
+          const anchorSkillId = turnFrame.skill.runContract.skillId
+          turnFrame = applyTurnFramePatch(turnFrame, {
+            runContract: {
+              skillId: anchorSkillId,
+              childCloseEvent: close,
+              childStatus: close.status,
+              parentNextHint: 'continue_other_work',
+            },
+          })
         }
-        if (turnFrame) turnFrame.terminalReason = 'cancelled_user'
+        if (turnFrame) {
+          turnFrame = applyTurnFramePatch(turnFrame, { terminalReason: 'cancelled_user' })
+        }
         const outcome = renderChildCommandOutcome({
           childRunId: childRunIdForCommand,
           command: 'cancel',
@@ -1977,9 +2022,9 @@ export class TurnEngine {
           const resumed = await resumeChild(childCommand.childRunId, {
             agentContext: buildAgentContextForSkillSpawn(),
           })
-          if (turnFrame?.skill?.runContract && resumed.freshContractFields) {
-            Object.assign(turnFrame.skill.runContract, resumed.freshContractFields)
-          }
+          // Stage M (M2a) — resume's freshContractFields are applied through
+          // the framePatch contract, not by mutating the live contract object.
+          turnFrame = applyChildResumeFreshContractFields(turnFrame, resumed.freshContractFields)
           const resumedClose = resumed.closeEvent
             || await waitForChildCloseEvent(resumed.childRunId, CHILD_SELF_AWAIT_TIMEOUT_MS)
           const outcome = renderChildCommandOutcome({
@@ -2815,9 +2860,26 @@ export class TurnEngine {
         }
         state.syncBudgetWarning()
       }
+      // Stage M (M2b) — sync `frame.budget` with the current lease state
+      // after every lease mutation. Uses the named `produceBudgetPatch`
+      // producer (skill-budget-lease-controller.ts) so the M3 gate's "every
+      // lease mutation must be followed by produceBudgetPatch" rule is
+      // satisfied by symbol-name match. Also see plan §2.4.
+      const syncBudgetPatchToFrame = (): void => {
+        if (!turnFrame) return
+        const patch = produceBudgetPatch({
+          lease: skillBudgetLeaseState,
+          budgetWarningLevel: state.budgetWarningLevel ?? null,
+          stepBudgetRemainingIterations: state.stepBudgetState?.remainingIterations ?? null,
+        })
+        turnFrame = applyTurnFramePatch(turnFrame, patch)
+      }
       const ensureSkillBudgetLease = (reason: 'planned' | 'observed_long_skill_action' | 'observed_supervisor_snapshot'): void => {
         if (skillBudgetLeaseState) return
         skillBudgetLeaseState = createSkillBudgetLeaseState({ iteration: iterations })
+        // Stage M (M2b) — emit the budget patch immediately after lease
+        // creation so the next steering read sees the new lease window.
+        syncBudgetPatchToFrame()
         logAgentMetric('skill_budget_lease_created', {
           sessionId: request.sessionId,
           leaseId: skillBudgetLeaseState.leaseId,
@@ -2899,6 +2961,8 @@ export class TurnEngine {
             snapshot: lastLeaseSnapshot || sampleSkillLeaseSnapshot(),
           })
           skillBudgetLeaseState = evaluation.state
+          // Stage M (M2b) — sync after lease replacement.
+          syncBudgetPatchToFrame()
           publishSkillBudgetLease()
           logAgentMetric('skill_budget_lease_decision', {
             sessionId: request.sessionId,
@@ -2989,14 +3053,25 @@ export class TurnEngine {
           getSkillChildRunCloseEvent,
         )
         if (turnFrame?.skill?.runContract && childContinuation.kind !== 'none') {
-          const contract = turnFrame.skill.runContract
+          // Stage M (M2a) — child-continuation contract patch (third cluster).
+          const anchorSkillId = turnFrame.skill.runContract.skillId
           if (childContinuation.kind === 'terminal'
               || childContinuation.kind === 'checkpoint_paused') {
-            contract.childCloseEvent = childContinuation.closeEvent
-            contract.childStatus = childContinuation.closeEvent.status
-            contract.parentNextHint = 'continue_other_work'
+            turnFrame = applyTurnFramePatch(turnFrame, {
+              runContract: {
+                skillId: anchorSkillId,
+                childCloseEvent: childContinuation.closeEvent,
+                childStatus: childContinuation.closeEvent.status,
+                parentNextHint: 'continue_other_work',
+              },
+            })
           } else if (childContinuation.kind === 'wait') {
-            contract.parentNextHint = 'wait_for_close_event'
+            turnFrame = applyTurnFramePatch(turnFrame, {
+              runContract: {
+                skillId: anchorSkillId,
+                parentNextHint: 'wait_for_close_event',
+              },
+            })
           }
         }
         if (childContinuation.kind === 'terminal') {
@@ -3007,7 +3082,8 @@ export class TurnEngine {
           const turnTerminalReason = mapChildCloseToTurnTerminalReason(childContinuation.closeEvent)
           const status = statusFromTerminalReason(turnTerminalReason)
           if (turnFrame) {
-            turnFrame.terminalReason = turnTerminalReason
+            // Stage M (M2a) — terminal site, no steering refresh needed.
+            turnFrame = applyTurnFramePatch(turnFrame, { terminalReason: turnTerminalReason })
           }
           logAgentMetric('turn_child_run_terminal_routed', {
             sessionId: request.sessionId,
@@ -3026,7 +3102,8 @@ export class TurnEngine {
         if (childContinuation.kind === 'checkpoint_paused') {
           const turnTerminalReason = mapChildCloseToTurnTerminalReason(childContinuation.closeEvent)
           if (turnFrame) {
-            turnFrame.terminalReason = turnTerminalReason
+            // Stage M (M2a) — terminal site, no steering refresh needed.
+            turnFrame = applyTurnFramePatch(turnFrame, { terminalReason: turnTerminalReason })
           }
           logAgentMetric('turn_child_run_checkpoint_routed', {
             sessionId: request.sessionId,
@@ -3044,13 +3121,24 @@ export class TurnEngine {
         if (childContinuation.kind === 'wait') {
           const close = await waitForChildCloseEvent(childContinuation.childRunId, CHILD_SELF_AWAIT_TIMEOUT_MS)
           if (turnFrame?.skill?.runContract) {
-            const contract = turnFrame.skill.runContract
+            // Stage M (M2a) — child-wait contract patch (fourth cluster).
+            const anchorSkillId = turnFrame.skill.runContract.skillId
             if (close) {
-              contract.childCloseEvent = close
-              contract.childStatus = close.status
-              contract.parentNextHint = 'continue_other_work'
+              turnFrame = applyTurnFramePatch(turnFrame, {
+                runContract: {
+                  skillId: anchorSkillId,
+                  childCloseEvent: close,
+                  childStatus: close.status,
+                  parentNextHint: 'continue_other_work',
+                },
+              })
             } else {
-              contract.parentNextHint = 'wait_for_close_event'
+              turnFrame = applyTurnFramePatch(turnFrame, {
+                runContract: {
+                  skillId: anchorSkillId,
+                  parentNextHint: 'wait_for_close_event',
+                },
+              })
             }
           }
           const outcome = renderChildCommandOutcome({
@@ -3059,7 +3147,8 @@ export class TurnEngine {
             close,
           })
           if (turnFrame) {
-            turnFrame.terminalReason = outcome.terminalReason
+            // Stage M (M2a) — terminal site (just before finish()).
+            turnFrame = applyTurnFramePatch(turnFrame, { terminalReason: outcome.terminalReason })
           }
           transcript.emitOutput(outcome.message, 'text')
           pushAssistantTextSafely(session, outcome.message, {
@@ -3280,7 +3369,11 @@ export class TurnEngine {
           // event. Counts as a single close — never an unresolved tool_use.
           budgetLimitedBeforeCompletion = true
           if (turnFrame) {
-            turnFrame.terminalReason = 'checkpoint_user_input'
+            // Stage M (M2a) — provisional checkpoint marker. Plan §2.2:
+            // priority rank 10 (lowest among checkpoints) so a later
+            // budget-close patch (rank 20) correctly overrides this.
+            // Fixes the v2-flagged silent-drop case.
+            turnFrame = applyTurnFramePatch(turnFrame, { terminalReason: 'checkpoint_user_input' })
           }
           break
         } else if (forceToolName) {
@@ -3921,6 +4014,8 @@ export class TurnEngine {
                 snapshot: currentSnapshot || lastLeaseSnapshot || sampleSkillLeaseSnapshot(),
               })
               skillBudgetLeaseState = evaluation.state
+              // Stage M (M2b) — sync after lease replacement (post-batch).
+              syncBudgetPatchToFrame()
               publishSkillBudgetLease()
               logAgentMetric('skill_budget_lease_decision', {
                 sessionId: request.sessionId,
@@ -3961,13 +4056,24 @@ export class TurnEngine {
           }
 
           if (turnFrame?.skill?.runContract) {
-            const contract = turnFrame.skill.runContract
+            // Stage M (M2a) — child-decision contract patch (fifth cluster).
+            const anchorSkillId = turnFrame.skill.runContract.skillId
             if (childDecision.kind === 'terminal' || childDecision.kind === 'checkpoint_paused') {
-              contract.childCloseEvent = childDecision.closeEvent
-              contract.childStatus = childDecision.closeEvent.status
-              contract.parentNextHint = 'continue_other_work'
+              turnFrame = applyTurnFramePatch(turnFrame, {
+                runContract: {
+                  skillId: anchorSkillId,
+                  childCloseEvent: childDecision.closeEvent,
+                  childStatus: childDecision.closeEvent.status,
+                  parentNextHint: 'continue_other_work',
+                },
+              })
             } else if (childDecision.kind === 'wait') {
-              contract.parentNextHint = 'wait_for_close_event'
+              turnFrame = applyTurnFramePatch(turnFrame, {
+                runContract: {
+                  skillId: anchorSkillId,
+                  parentNextHint: 'wait_for_close_event',
+                },
+              })
             }
           }
 
@@ -3980,7 +4086,8 @@ export class TurnEngine {
             close,
           })
           if (turnFrame) {
-            turnFrame.terminalReason = outcome.terminalReason
+            // Stage M (M2a) — terminal site (just before finish()).
+            turnFrame = applyTurnFramePatch(turnFrame, { terminalReason: outcome.terminalReason })
           }
           transcript.emitOutput(outcome.message, 'text')
           pushAssistantTextSafely(session, outcome.message, {
@@ -4245,11 +4352,18 @@ export class TurnEngine {
             ? 'checkpoint_background'
             : 'checkpoint_budget'
         if (turnFrame) {
-          turnFrame.budget = {
-            ...turnFrame.budget,
-            exhausted: true,
-          }
-          turnFrame.terminalReason = budgetTerminalReason
+          // Stage M (M2a + M2b) — budget exhaustion + terminal reason
+          // routed through one applyTurnFramePatch call. Preserves the
+          // existing leaseEndIteration / hardCapIteration scalars
+          // because applyTurnFramePatch's budget merge coalesces missing
+          // patch fields with current frame values. M2b's
+          // produceBudgetPatch can replace this with the helper if a
+          // lease snapshot is available; for now the inline patch is
+          // correct because we're at terminal exit.
+          turnFrame = applyTurnFramePatch(turnFrame, {
+            budget: { exhausted: true },
+            terminalReason: budgetTerminalReason,
+          })
         }
         logAgentMetric('turn_terminal_reason', {
           sessionId: request.sessionId,
