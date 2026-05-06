@@ -937,13 +937,16 @@ test('legacy force-tool: TurnEngine force_tool caps at one dispatch per turn (no
  * the parent emitting a `turn_frame_summary` for a turn whose synthesized
  * tool_use never received a result.
  *
- * Why this matters for the child-loop migration: today the parent's
- * force-tool block synthesises a `tool_use`, awaits `executeToolBatch`, and
- * lets the post-batch pipeline apply the framePatch. If abort fires after the
- * synth but before the result is consumed, an orphan `tool_use` would mean
- * the parent claims it dispatched a child run that has no recorded close.
- * The child-loop runner inherits this invariant: one launch -> one close
- * event, no orphans. See docs/architecture/skill-child-loop-boundary.md §4.
+ * Why this matters across both worlds: the parent's force-tool block
+ * synthesises a `tool_use`, awaits `executeToolBatch`, and lets the
+ * post-batch pipeline apply the framePatch. If abort fires after the
+ * synth but before the result is consumed, an orphan `tool_use` would
+ * mean the parent claims it dispatched a child run that has no recorded
+ * close. The child-loop runner respects the same invariant: one launch
+ * -> one close event, no orphans. After Stage N (2026-05-07) the
+ * non-child-loop force path (this fixture) and the child-loop path
+ * (`dispatchChildLoopSkillAction`) both surface exactly one close.
+ * See docs/architecture/skill-child-loop-boundary.md §4.
  */
 test('legacy force-tool: TurnEngine force_tool aborted mid-dispatch closes the turn with one terminal event and no orphan tool_use (non-child-loop fixture)', async () => {
   // Stage N (Phase 1.5) — re-targeted to non-child-loop legacy fixture.

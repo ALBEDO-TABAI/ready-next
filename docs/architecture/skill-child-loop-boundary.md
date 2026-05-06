@@ -36,35 +36,34 @@ When `frame.skill?.runContract?.childRunId` is set:
 
 ## 1. Why this document exists
 
-Today the parent turn loop in `turn-engine.ts` calls a single validated typed
-skill action per turn, observes its result, then checkpoints the turn. That is
-fine for short-to-medium skill work (one shell call, one config patch, one
-batch). It is **not** fine for the long-skill route the run-contract chain was
-built for: a skill like `video-expert-analyzer` legitimately wants to run dozens
-of internal steps with its own budget, its own retries, and its own progress
-log before it has anything terminal to report. When that work tries to run
-inside the parent loop today we paper over the mismatch with three things —
-all of which are temporary and all of which need to migrate to a child-owned
-runner:
+Pre-Stage-N the parent turn loop in `turn-engine.ts` could only call one
+validated typed skill action per turn, observe the result, then
+checkpoint the turn. That model fit short-to-medium skill work (one shell
+call, one config patch, one batch) but did not fit the long-skill route a
+skill like `video-expert-analyzer` needs — dozens of internal steps with
+its own budget, retries, and progress log before anything terminal lands.
+The pre-migration parent papered over the mismatch with three things,
+each of which has now been **closed by Stage N (2026-05-07)**:
 
-1. **Force-tool dispatch** in `turn-engine.ts` synthesises one typed-action
-   `tool_use`, dispatches it, and waits for the result.
-2. **Typed-action wrapper** in `skills-tools.ts` wraps the runtime call,
-   reports outputs back as a `framePatch`, and lets the parent decide what to
-   do next.
-3. **Supervisor reconciliation** in `skill-task-supervisor.ts` post-hoc
-   reconciles detached/run-state/task-run signals into a single liveness +
-   progress snapshot the parent contract loader can read.
+1. **Force-tool dispatch** in `turn-engine.ts`. Pre-Stage-N: synthesised
+   one typed-action `tool_use`, dispatched it, waited for the result.
+   Post-Stage-N: child-loop skills never reach this branch — the manifest
+   fence at the synthesis site early-breaks. The branch survives only
+   for non-child-loop typed actions.
+2. **Typed-action wrapper** in `skills-tools.ts`. Pre-Stage-N: wrapped
+   the runtime call, reported outputs as a `framePatch`, let the parent
+   decide what to do next. Post-Stage-N: child-loop typed actions route
+   through `dispatchChildLoopSkillAction` and return the `child_launched`
+   envelope; the close event arrives separately.
+3. **Supervisor reconciliation** in `skill-task-supervisor.ts`. Stays as
+   the parent's out-of-band liveness probe; consumer set has shrunk to
+   the next-turn resolver only.
 
-This works because every long-skill iteration we do today is "one-shot from
-the parent's view" — the parent dispatches a typed action, the action does
-its slice, returns, and the next user turn (or steering decision) drives the
-next slice. The parent never owns the long-skill loop; it owns one slice and
-checkpoints. The chain is correct, but the parent is doing two jobs that
-should not be co-located: **outer agent loop** (which converses with the user,
-chooses tools, decides terminal reasons) and **inner skill loop** (which knows
-its own budget, its own checkpoints, its own retries, and its own internal
-tool admission rules).
+The core architectural principle that Stage N lands: the parent loop is
+the **outer agent loop** (converses with the user, chooses tools,
+decides terminal reasons) and the child runner is the **inner skill
+loop** (knows its own budget, checkpoints, retries, and internal tool
+admission rules). The two no longer share a process or a loop body.
 
 The Anthropic public reference for this split is the `runAgent` pattern in CC
 ("Claude Code") — the parent SDK loop launches a sub-agent, the sub-agent
@@ -395,19 +394,26 @@ boundary statement.
 
 - `docs/superpowers/plans/2026-04-29-skill-run-contract-implementation-plan-claude.md`
   — the plan that introduced `SkillRunContract` + `FrameAction`. The
-  child-loop migration will consume the same contract type as its launch
-  payload; no new types are required.
+  child-loop runner consumes the same contract type as its launch
+  payload; no new types were required at the migration boundary.
 - `docs/superpowers/plans/2026-04-29-skill-run-contract-long-skill-ownership-route.md`
   — Stages A–G. Stage G4 (this document) and Stage G1 (the TODO markers)
-  are the last items in Wave 4.
+  were the last items in Wave 4; Stage N (2026-05-07) closed the
+  parent-force retirement on top.
+- `docs/superpowers/plans/2026-05-06-N-parent-loop-retire-force-typed-action-implementation.md`
+  — the Stage N plan (v9 GREEN). Cross-reference for the manifest fence,
+  invariant belt, boot assertion, and CI gate landed in this stage.
 - `src/main/modules/agent-control/run-contracts.ts` — `SkillRunContract`,
-  `loadSkillRunContract`, `buildContractFramePatch`. The child-loop runner
-  will build on these without modification.
+  `loadSkillRunContract`, `buildContractFramePatch`,
+  `isParentForceForbiddenByManifest`. The child-loop runner builds on
+  these without modification; Stage N added the manifest-fence helper.
 - `src/__tests__/turn-engine-force-tool-dispatch.test.ts` — orphan-result
-  regression. The post-migration child runner must keep this test green:
-  one close event per dispatch, no orphan `tool_use`.
+  regression. The child runner keeps this test green: one close event
+  per dispatch, no orphan `tool_use`. Stage N re-targeted the legacy
+  fixture cases off VEA, but the orphan-result invariant continues to
+  hold across both worlds.
 - `src/__tests__/turn-frame-summary-log.test.ts` — single per-turn
-  `turn_frame_summary` invariant. The child-loop migration must not break
-  this; the child's internal iterations are NOT counted as parent
-  iterations, but the parent's close-event handling still emits one
-  summary per parent turn.
+  `turn_frame_summary` invariant. The child runner respects this: the
+  child's internal iterations are NOT counted as parent iterations, and
+  the parent's close-event handling emits exactly one summary per
+  parent turn.
