@@ -241,6 +241,49 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - **`skill_read_artifact` 不再有 active-context fallback**：`turn-frame-resolver.deriveSeedArtifactRoots` 在 frame 构建时把 `outputDir / dirname(runStatePath)` 等 cold-session 来源种到 `frame.activeArtifactRoots`；M5a 三条款保证同批 emitter 发对称 contextModifier；之后 M4+M5 删了 `skills-tools.ts` 内旧的 `else { resolveActiveSkillContext... }` 分支。
 - **CI 强制四个新 gate**：`scripts/check-frame-write-single-source.cjs`（Scope A 工具 + Scope B turn-engine）、`scripts/check-budget-single-source.cjs`（生产者位置 + 邻接 `produceBudgetPatch`）、`scripts/check-read-artifact-no-active-context.cjs`（read-artifact 分支严格不含 legacy 符号）、`scripts/check-context-modifier-shape.cjs`（framePatch.activeArtifactRoots ↔ contextModifier 对称）。`npm run verify:m` 必须内嵌 `verify:l`，并覆盖四个 gate + `test:m:gates` + `test:m:focus`。
 
+### 6.21 父循环长任务退出与 child loop 接管（N / Stage 8）
+- Stage N (Stage 8) 起 parent loop 不再为 manifest-declared `child_loop.actions[]`
+  合成 typed `tool_use`。判定包含两条独立 fence：契约级
+  `shouldParentForceLongSkillTool(contract)`（看 `childRunId`）+ manifest 级
+  `isParentForceForbiddenByManifest(toolName)`（用
+  `STATIC_SKILL_ACTIONS_BY_TOOL_NAME` 反查 +
+  `isConfiguredChildLoopSkillAction`）。两条均独立生效，缺一不可。
+- N2 invariant：每个声明 `child_loop.actions[]` 的 **embedded** manifest 必须
+  有匹配的 `registerSkillChildDriver` 注册。`AgentControlRuntime` 构造函数
+  里的 boot assertion `assertStageNChildLoopInvariants`（位于
+  `src/main/modules/agent-control/stage-n-boot-assertion.ts`）会在
+  manifest⇔driver 不一致或 manifest⇔静态名映射缺失时直接 throw，进程通过全局
+  unhandledRejection handler 退出。
+- N2b invariant：每个 embedded manifest 的 `child_loop.actions[]` 都必须在
+  `STATIC_SKILL_TOOL_NAMES_BY_ACTION`（forward literal，位于
+  `src/main/modules/tools/skills-tools-static.ts`）里有对应的
+  `<skillId>:<action>` 条目。
+  `scripts/check-manifest-vs-static-tool-name.cjs` 是硬门；boot assertion 是
+  runtime 镜像。
+- Custom（非 embedded）skill 在 `skill-compiler.ts` 编译期被剥除 `child_loop`
+  字段（console.warn 提示），所以编译产物的 `definition.childLoop` 永远是
+  undefined。这意味着自定义 skill 的动态 typed-action **不会** 被 N3 manifest
+  fence 接管（动态 tool 名也不在 `STATIC_SKILL_TOOL_NAMES_BY_ACTION` 里），但
+  也不会进入 child-loop 路径——它们走 legacy `runSkill`，与今日普通 custom
+  skill 一致。如果未来需要 custom skill 走 child-loop，必须先升级到 embedded
+  source 并补齐 driver 注册 + 静态名映射。
+- 运行时挡板触发 `turn_force_tool_blocked_child_owned`（local string metric，
+  不在 `TOOL_ERROR_METRICS`），同时 push system reminder topic
+  `force-tool-blocked-child-owned`（priority 92，不与
+  `force-tool-checkpoint-blocked` 冲突 — 两者在不同分支独立触发）。
+  `scripts/check-no-parent-force-for-child-loop.cjs` 是源头硬门，阻止：
+  (1) child-loop action 进入 `DEFAULT_RESUME_ACTION_BY_SKILL_ID`；
+  (2) `turn-engine.ts` 中 force_tool 合成位缺少两条 fence predicate；
+  (3) `forceLoopGuard` 写入位缺少 invariant belt。
+- `lastLongTypedSkillActionIteration` 的预算警告抑制对 child-loop 类型动作
+  整体禁用（`turn-engine.ts` 的 `consumeExecutedToolBatch` 内多了一道
+  `isConfiguredChildLoopSkillAction` fence），避免在 child-owned 期间误吃
+  后续迭代的预算告警。
+- `npm run verify:n` 必须内嵌 `verify:m`，并覆盖：
+  `check-manifest-vs-static-tool-name.cjs`、
+  `check-no-parent-force-for-child-loop.cjs`、`test:n:gates`、`test:n:focus`。
+  顶层 `verify` 与 `verify:cloud` 起步链已切到 `verify:n`。
+
 ## 7. 新功能开发最小闭环
 新增跨进程功能时，至少同步修改：
 1. Main IPC handler
