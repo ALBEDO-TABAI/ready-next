@@ -1205,31 +1205,32 @@ test('A1+A2: skill_video_expert_ai_analyze empty input fails as input_validation
 })
 
 // ---------------------------------------------------------------------------
-// Phase 1 (Team 1) — appended red acceptance scaffolding.
+// Phase 6 (landed) + Stage N (closed) — child-owned VEA contract fence.
 //
 // describe('child-owned VEA must not be parent-forced'): when the loaded
-// SkillRunContract for a turn already carries a `childRunId`, the
-// turn-engine force-dispatch path must NOT synthesize
-// `skill_video_expert_pipeline` with `{}`. The contract's
-// `parentNextHint='wait_for_close_event'` should drive a checkpoint
-// instead. Phase 6 turns this green; Phase 1 ships it RED.
+// SkillRunContract for a turn carries a `childRunId`, the turn-engine
+// force-dispatch path MUST NOT synthesize `skill_video_expert_pipeline`
+// with `{}`. The contract's `parentNextHint='wait_for_close_event'`
+// drives a checkpoint instead.
+//
+// Stage N (2026-05-07) added a second independent fence (manifest-level)
+// so the same outcome holds even when the contract has no `childRunId`
+// yet (adoption case). Both cases are pinned below.
 // ---------------------------------------------------------------------------
 
 import { describe } from 'node:test'
 
 describe('child-owned VEA must not be parent-forced', () => {
-  test('RED (pending Phase 6): turn-engine must not synthesize skill_video_expert_pipeline with {} when contract.childRunId is set', async () => {
-    // The Phase 6 wiring: `loadSkillRunContract` populates `childRunId`
+  test('Phase 6 (contract fence): turn-engine must not synthesize skill_video_expert_pipeline with {} when contract.childRunId is set', async () => {
+    // Phase 6 wiring: `loadSkillRunContract` populates `childRunId`
     // (and `parentNextHint`) on the contract once the child runner has
-    // launched a run. The turn-engine force-dispatch path must read those
-    // fields and short-circuit — emitting a checkpoint or wait, not a
+    // launched a run. The turn-engine force-dispatch path reads those
+    // fields and short-circuits — emitting a checkpoint or wait, not a
     // synthesized parent-side typed call.
     //
-    // Today, no field on `SkillRunContract` carries `childRunId`. Phase 6
-    // adds `childRunId` and `parentNextHint` to the contract and exports
-    // `shouldParentForceLongSkillTool(contract)` from `run-contracts.ts`
-    // so the turn-engine can detect child ownership without string-
-    // matching skill ids.
+    // `shouldParentForceLongSkillTool(contract)` exported from
+    // `run-contracts.ts` is the single gate the engine consults so it
+    // never has to string-match skill ids.
     const ContractModule = (await import(
       '../main/modules/agent-control/run-contracts'
     )) as {
