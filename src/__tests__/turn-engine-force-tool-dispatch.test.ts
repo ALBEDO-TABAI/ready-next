@@ -127,6 +127,84 @@ function installLongSkillToolDefinitionForTest(toolName = 'skill_video_expert_pi
   }
 }
 
+/**
+ * Stage N (Phase 1.5) — non-child-loop legacy fixture. We re-use the real
+ * embedded `lets-go-rss` skill's typed actions because:
+ *   1. Its tool names live in `STATIC_SKILL_TOOL_NAMES_BY_ACTION`, so the
+ *      bulk skills capability group enumeration includes them — the same
+ *      reason the original VEA tests "just worked" without registry hacks.
+ *   2. Its manifest does NOT declare `child_loop.actions[]`, so the
+ *      Stage N manifest fence (`isParentForceForbiddenByManifest`) returns
+ *      false and the legacy parent-force regression still fires.
+ *
+ * No mutation of any shared static data is needed; only the per-test
+ * tool definition is augmented to long-skill timeout via
+ * `installLongSkillToolDefinitionForTest`.
+ */
+const LEGACY_SKILL_ID = 'lets-go-rss'
+const LEGACY_SKILL_NAME = 'Lets Go RSS'
+const LEGACY_ACTION_A = 'rss_update'
+const LEGACY_TOOL_A = 'skill_rss_update'
+const LEGACY_ACTION_B = 'rss_status'
+const LEGACY_TOOL_B = 'skill_rss_status'
+
+function makeLegacyRecoverableSnapshot(action: string = LEGACY_ACTION_A): SkillTaskSupervisorSnapshot {
+  return {
+    taskRunId: 'str-legacy-force',
+    detachedTaskId: 'dst-legacy-force',
+    skillId: LEGACY_SKILL_ID,
+    scopeId: 'scope-force',
+    sessionId: 'scope-force',
+    action,
+    status: 'recoverable_paused',
+    hasLiveWork: false,
+    hasRecentProgress: false,
+    closeAllowed: false,
+    ambiguous: false,
+    stale: false,
+    outputDir: '/tmp/legacy-force/output',
+    runStatePath: '/tmp/legacy-force/output/run_state.json',
+    sceneScoresPath: '/tmp/legacy-force/output/scene_scores.json',
+    deliveryReportPath: '/tmp/legacy-force/output/delivery_report.json',
+    progress: {
+      currentStage: 'score_batches',
+      totalScenes: 97,
+      completedScenes: 0,
+      coverageRatio: 0,
+      updatedAt: '2026-04-29T01:00:00.000Z',
+    },
+    blockers: [],
+    pauseReason: 'budget_exhausted',
+    resumePayload: {
+      taskRunId: 'str-legacy-force',
+      detachedTaskId: 'dst-legacy-force',
+      outputDir: '/tmp/legacy-force/output',
+      runStatePath: '/tmp/legacy-force/output/run_state.json',
+      sourceUrl: 'https://example.com/legacy.bin',
+      url: 'https://example.com/legacy.bin',
+      originalInput: { url: 'https://example.com/legacy.bin', outputDir: '/tmp/legacy-force/output' },
+      actionInput: { url: 'https://example.com/legacy.bin', outputDir: '/tmp/legacy-force/output' },
+    },
+    sourceObservations: [],
+    progressFingerprint: 'score_batches:0/97',
+    observedAt: '2026-04-29T01:00:00.000Z',
+    lastProgressAt: '2026-04-29T01:00:00.000Z',
+  }
+}
+
+function legacySkillContextOrchestratorOverride(toolNames: string[] = [LEGACY_TOOL_A, LEGACY_TOOL_B]) {
+  return {
+    shouldKeepToolsWithVideo: () => false,
+    findExplicitlyRequestedSkills: () => [],
+    hasActiveSkillExecution: () => false,
+    getCurrentReferenceSkillHint: () => ({ id: LEGACY_SKILL_ID, name: LEGACY_SKILL_NAME }),
+    rememberExplicitReferenceSkillHint: () => true,
+    buildPreferredSkillToolNames: () => toolNames,
+    maybeInjectExplicitSkillContext: async () => {},
+    listRegisteredSkillTokens: () => [LEGACY_SKILL_ID],
+  }
+}
+
 function makeRecoverableSnapshot(): SkillTaskSupervisorSnapshot {
   return {
     taskRunId: 'str-vea-force',
@@ -602,7 +680,14 @@ function createRequest(params: {
   return { request, events: events.events }
 }
 
-test('legacy force-tool: TurnEngine force_tool dispatch synthesizes typed action and skips the model call', async () => {
+test('legacy force-tool: TurnEngine force_tool dispatch synthesizes typed action and skips the model call (non-child-loop fixture)', async () => {
+  // Stage N (Phase 1.5) — re-targeted from VEA to a non-child-loop legacy
+  // fixture. The manifest fence in turn-engine.ts blocks force-synthesis
+  // for any tool name registered in `STATIC_SKILL_TOOL_NAMES_BY_ACTION`
+  // whose owning manifest declares `child_loop.actions[]`. The legacy
+  // tool name `skill_legacy_typed_action_a` is NOT in the static map, so
+  // the manifest fence returns false and the legacy regression behavior
+  // is still exercised here.
   const engine = new TurnEngine()
   const metrics: AgentMetricEvent[] = []
   const logs: string[] = []
@@ -612,18 +697,20 @@ test('legacy force-tool: TurnEngine force_tool dispatch synthesizes typed action
 
   __setMetricSinkForTests((event) => metrics.push(event))
   _resetLastReferenceSkillHintsForTests()
-  rememberLastReferenceSkill('scope-force', { id: 'video-expert-analyzer', name: 'Video Expert Analyzer' })
-  const restoreLongToolDefinition = installLongSkillToolDefinitionForTest()
+  rememberLastReferenceSkill('scope-force', { id: LEGACY_SKILL_ID, name: LEGACY_SKILL_NAME })
+  const restoreLongToolDefinition = installLongSkillToolDefinitionForTest(LEGACY_TOOL_A)
 
   try {
-    const { request } = createRequest({
-      userText: '继续视频分析',
+    const { request, events } = createRequest({
+      userText: '继续遗留任务',
       host: {
         log: (message: string) => { logs.push(message) },
+        skillTaskSupervisor: {
+          inspectLatestSkillTask: () => makeLegacyRecoverableSnapshot(LEGACY_ACTION_A),
+        },
+        skillContextOrchestrator: legacySkillContextOrchestratorOverride([LEGACY_TOOL_A]),
         requestToolLoopResponse: async () => {
           modelCalls += 1
-          // If the model is ever called, return tool calls so the test can
-          // distinguish a failure mode where force_tool didn't bypass.
           return {
             text: 'should not be called for force_tool',
             toolCalls: [],
@@ -651,26 +738,23 @@ test('legacy force-tool: TurnEngine force_tool dispatch synthesizes typed action
     void logs
     void modelCalls
 
-    // Force-tool dispatch metric must fire exactly once with the typed
-    // skill action.
+    void events
+    void logs
+
     const forceDispatched = metrics.filter((event) => event.metric === 'turn_force_tool_dispatched')
     assert.equal(forceDispatched.length, 1, `expected exactly one force-tool dispatch metric, got ${forceDispatched.length}`)
-    assert.equal(forceDispatched[0].toolName, 'skill_video_expert_pipeline')
+    assert.equal(forceDispatched[0].toolName, LEGACY_TOOL_A)
 
-    // The model call must be SKIPPED for the iteration that force_tool
-    // dispatched. The engine may still call the model in a subsequent
-    // iteration when steering falls back to ask_model — but the synthesized
-    // batch executed at least once.
     assert.equal(executedBatches >= 1, true, 'expected executeToolBatch to run at least once')
     assert.ok(
-      dispatchedToolNames.includes('skill_video_expert_pipeline'),
-      `expected synthesized batch to include skill_video_expert_pipeline, got: ${dispatchedToolNames.join(',')}`,
+      dispatchedToolNames.includes(LEGACY_TOOL_A),
+      `expected synthesized batch to include ${LEGACY_TOOL_A}, got: ${dispatchedToolNames.join(',')}`,
     )
 
-    // After the force_tool dispatch, recentForceToolDispatched downgrades
-    // the next iteration to ask_model — so any subsequent loop iteration
-    // calls the model normally. We do NOT assert modelCalls === 0 because
-    // the loop may continue past the synthesized iteration.
+    // Stage N — assert the manifest fence did NOT fire (legacy fixture is
+    // not a child-loop skill).
+    const blockedMetrics = metrics.filter((event) => event.metric === 'turn_force_tool_blocked_child_owned')
+    assert.equal(blockedMetrics.length, 0, 'manifest fence must not fire for non-child-loop legacy fixture')
   } finally {
     restoreLongToolDefinition()
     __setMetricSinkForTests(null)
@@ -678,36 +762,39 @@ test('legacy force-tool: TurnEngine force_tool dispatch synthesizes typed action
   }
 })
 
-test('blocked VEA score-batch resume dispatches ai_analyze before model can burn budget', async () => {
+test('legacy force-tool: blocked non-child-loop typed-action b dispatches before model can burn budget', async () => {
+  // Stage N (Phase 1.5) — re-targeted from VEA score-batch fixture. Same
+  // legacy regression shape (forced typed action B fires once before the
+  // model burns budget) but with a non-child-loop tool name so the
+  // manifest fence stays out of the way.
   const engine = new TurnEngine()
   const metrics: AgentMetricEvent[] = []
   let modelCalls = 0
   let executedBatches = 0
   let dispatchedToolNames: string[] = []
   let dispatchedInput: Record<string, unknown> | null = null
-  const sceneScoresPath = '/tmp/vea-force/output/scene_scores.json'
+  const sceneScoresPath = '/tmp/legacy-force/output/scene_scores.json'
 
   __setMetricSinkForTests((event) => metrics.push(event))
   _resetLastReferenceSkillHintsForTests()
-  rememberLastReferenceSkill('scope-force', { id: 'video-expert-analyzer', name: 'Video Expert Analyzer' })
-  const restoreAiAnalyzeToolDefinition = installLongSkillToolDefinitionForTest('skill_video_expert_ai_analyze')
+  rememberLastReferenceSkill('scope-force', { id: LEGACY_SKILL_ID, name: LEGACY_SKILL_NAME })
+  const restoreToolDefinition = installLongSkillToolDefinitionForTest(LEGACY_TOOL_B)
 
   try {
     const blockedSnapshot: SkillTaskSupervisorSnapshot = {
-      ...makeRecoverableSnapshot(),
-      action: 'video_expert_ai_analyze',
+      ...makeLegacyRecoverableSnapshot(LEGACY_ACTION_B),
       status: 'blocked',
       hasLiveWork: false,
       hasRecentProgress: false,
       sceneScoresPath,
       pauseReason: 'budget_exhausted',
       resumePayload: {
-        taskRunId: 'str-vea-force',
-        detachedTaskId: 'dst-vea-force',
-        outputDir: '/tmp/vea-force/output',
-        runStatePath: '/tmp/vea-force/output/run_state.json',
-        actionInput: { sceneScoresPath, outputDir: '/tmp/vea-force/output' },
-        originalInput: { sceneScoresPath, outputDir: '/tmp/vea-force/output' },
+        taskRunId: 'str-legacy-force',
+        detachedTaskId: 'dst-legacy-force',
+        outputDir: '/tmp/legacy-force/output',
+        runStatePath: '/tmp/legacy-force/output/run_state.json',
+        actionInput: { sceneScoresPath, outputDir: '/tmp/legacy-force/output' },
+        originalInput: { sceneScoresPath, outputDir: '/tmp/legacy-force/output' },
       },
     }
     const { request } = createRequest({
@@ -716,20 +803,11 @@ test('blocked VEA score-batch resume dispatches ai_analyze before model can burn
         skillTaskSupervisor: {
           inspectLatestSkillTask: () => blockedSnapshot,
         },
-        skillContextOrchestrator: {
-          shouldKeepToolsWithVideo: () => false,
-          findExplicitlyRequestedSkills: () => [],
-          hasActiveSkillExecution: () => false,
-          getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'Video Expert Analyzer' }),
-          rememberExplicitReferenceSkillHint: () => true,
-          buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline', 'skill_video_expert_ai_analyze'],
-          maybeInjectExplicitSkillContext: async () => {},
-          listRegisteredSkillTokens: () => ['video-expert-analyzer', 'VEA'],
-        },
+        skillContextOrchestrator: legacySkillContextOrchestratorOverride([LEGACY_TOOL_A, LEGACY_TOOL_B]),
         requestToolLoopResponse: async () => {
           modelCalls += 1
           return {
-            text: 'model should only be reached after forced ai_analyze dispatch',
+            text: 'model should only be reached after forced typed-action-b dispatch',
             toolCalls: [],
             stopReason: 'stop',
           }
@@ -740,10 +818,10 @@ test('blocked VEA score-batch resume dispatches ai_analyze before model can burn
           dispatchedInput = params.toolCalls[0]?.input || null
           return {
             results: params.toolCalls.map((toolCall) => ({
-              id: 'force-ai-result-1',
+              id: 'force-action-b-result-1',
               name: toolCall.name,
               input: toolCall.input || {},
-              result: { text: 'forced ai_analyze ran' },
+              result: { text: 'forced typed-action-b ran' },
             })),
             budgetLimited: false,
             recoveryHistory: [],
@@ -756,22 +834,31 @@ test('blocked VEA score-batch resume dispatches ai_analyze before model can burn
 
     assert.equal(executedBatches >= 1, true, 'expected executeToolBatch to run at least once')
     assert.ok(
-      dispatchedToolNames.includes('skill_video_expert_ai_analyze'),
-      `expected synthesized batch to include skill_video_expert_ai_analyze, got: ${dispatchedToolNames.join(',')}`,
+      dispatchedToolNames.includes(LEGACY_TOOL_B),
+      `expected synthesized batch to include ${LEGACY_TOOL_B}, got: ${dispatchedToolNames.join(',')}`,
     )
-    assert.equal(dispatchedInput?.sceneScoresPath, sceneScoresPath)
+    // Stage N (Phase 1.5) — the original VEA test asserted
+    // `dispatchedInput.sceneScoresPath` because `video_expert_ai_analyze`
+    // accepts that param. The re-targeted `rss_status` action declares no
+    // params, so the validated input is `{}` (extra fields stripped). This
+    // assertion is dropped — the legacy regression we still pin is "the
+    // forced dispatch fires once with the typed name", not the schema
+    // shape.
+    void sceneScoresPath
+    void dispatchedInput
     assert.equal(modelCalls <= 1, true, `expected at most one model call after forced dispatch, got ${modelCalls}`)
     const forceDispatched = metrics.filter((event) => event.metric === 'turn_force_tool_dispatched')
     assert.equal(forceDispatched.length, 1, `expected exactly one force-tool dispatch metric, got ${forceDispatched.length}`)
-    assert.equal(forceDispatched[0].toolName, 'skill_video_expert_ai_analyze')
+    assert.equal(forceDispatched[0].toolName, LEGACY_TOOL_B)
   } finally {
-    restoreAiAnalyzeToolDefinition()
+    restoreToolDefinition()
     __setMetricSinkForTests(null)
     _resetLastReferenceSkillHintsForTests()
   }
 })
 
-test('legacy force-tool: TurnEngine force_tool caps at one dispatch per turn (no chain-resume in same turn)', async () => {
+test('legacy force-tool: TurnEngine force_tool caps at one dispatch per turn (no chain-resume in same turn) (non-child-loop fixture)', async () => {
+  // Stage N (Phase 1.5) — re-targeted to non-child-loop legacy fixture.
   const engine = new TurnEngine()
   const metrics: AgentMetricEvent[] = []
   let executedBatches = 0
@@ -779,13 +866,17 @@ test('legacy force-tool: TurnEngine force_tool caps at one dispatch per turn (no
 
   __setMetricSinkForTests((event) => metrics.push(event))
   _resetLastReferenceSkillHintsForTests()
-  rememberLastReferenceSkill('scope-force', { id: 'video-expert-analyzer', name: 'Video Expert Analyzer' })
-  const restoreLongToolDefinition = installLongSkillToolDefinitionForTest()
+  rememberLastReferenceSkill('scope-force', { id: LEGACY_SKILL_ID, name: LEGACY_SKILL_NAME })
+  const restoreLongToolDefinition = installLongSkillToolDefinitionForTest(LEGACY_TOOL_A)
 
   try {
     const { request } = createRequest({
-      userText: '继续视频分析',
+      userText: '继续遗留任务',
       host: {
+        skillTaskSupervisor: {
+          inspectLatestSkillTask: () => makeLegacyRecoverableSnapshot(LEGACY_ACTION_A),
+        },
+        skillContextOrchestrator: legacySkillContextOrchestratorOverride([LEGACY_TOOL_A]),
         requestToolLoopResponse: async () => {
           modelCalls += 1
           // Return empty tool_calls so the iteration loop ends cleanly after
@@ -854,7 +945,8 @@ test('legacy force-tool: TurnEngine force_tool caps at one dispatch per turn (no
  * The child-loop runner inherits this invariant: one launch -> one close
  * event, no orphans. See docs/architecture/skill-child-loop-boundary.md §4.
  */
-test('legacy force-tool: TurnEngine force_tool aborted mid-dispatch closes the turn with one terminal event and no orphan tool_use', async () => {
+test('legacy force-tool: TurnEngine force_tool aborted mid-dispatch closes the turn with one terminal event and no orphan tool_use (non-child-loop fixture)', async () => {
+  // Stage N (Phase 1.5) — re-targeted to non-child-loop legacy fixture.
   const engine = new TurnEngine()
   const metrics: AgentMetricEvent[] = []
   let executedBatches = 0
@@ -863,8 +955,8 @@ test('legacy force-tool: TurnEngine force_tool aborted mid-dispatch closes the t
 
   __setMetricSinkForTests((event) => metrics.push(event))
   _resetLastReferenceSkillHintsForTests()
-  rememberLastReferenceSkill('scope-force', { id: 'video-expert-analyzer', name: 'Video Expert Analyzer' })
-  const restoreLongToolDefinition = installLongSkillToolDefinitionForTest()
+  rememberLastReferenceSkill('scope-force', { id: LEGACY_SKILL_ID, name: LEGACY_SKILL_NAME })
+  const restoreLongToolDefinition = installLongSkillToolDefinitionForTest(LEGACY_TOOL_A)
 
   // The abort controller is shared between the request and the
   // executeToolBatch override below so abort can fire mid-dispatch (after
@@ -880,8 +972,8 @@ test('legacy force-tool: TurnEngine force_tool aborted mid-dispatch closes the t
       agentName: 'agent-test',
       sessionId: 'scope-force',
       session: createSession('继续视频分析'),
-      content: '继续视频分析',
-      requestEnvelope: buildRequestEnvelope({ userText: '继续视频分析' }),
+      content: '继续遗留任务',
+      requestEnvelope: buildRequestEnvelope({ userText: '继续遗留任务' }),
       intentClassification: createIntent(),
       taskBudgetRuntime: null,
       abortSignal: abortController.signal,
@@ -894,6 +986,10 @@ test('legacy force-tool: TurnEngine force_tool aborted mid-dispatch closes the t
       },
       emitters: events.emitters,
       host: createForceToolHost({
+        skillTaskSupervisor: {
+          inspectLatestSkillTask: () => makeLegacyRecoverableSnapshot(LEGACY_ACTION_A),
+        },
+        skillContextOrchestrator: legacySkillContextOrchestratorOverride([LEGACY_TOOL_A]),
         requestToolLoopResponse: async () => {
           modelCalls += 1
           return {
@@ -907,10 +1003,7 @@ test('legacy force-tool: TurnEngine force_tool aborted mid-dispatch closes the t
           dispatchedToolNames = params.toolCalls.map((toolCall) => toolCall.name)
           // Mid-flight abort: the parent has already synthesised the
           // force-tool tool_use and dispatched it; before any result can
-          // be folded back into the frame, abort fires. The host honours
-          // the signal by throwing AbortError (this is what the production
-          // tool executor does when the abort signal fires during a long
-          // skill run).
+          // be folded back into the frame, abort fires.
           abortController.abort()
           const error = new Error('aborted mid-dispatch')
           error.name = 'AbortError'
@@ -926,7 +1019,7 @@ test('legacy force-tool: TurnEngine force_tool aborted mid-dispatch closes the t
     //    aborted mid-flight, not pre-dispatch.
     assert.equal(executedBatches, 1, `expected exactly one executeToolBatch invocation, got ${executedBatches}`)
     assert.ok(
-      dispatchedToolNames.includes('skill_video_expert_pipeline'),
+      dispatchedToolNames.includes(LEGACY_TOOL_A),
       `expected the aborted batch to carry the synthesised force-tool name, got: ${dispatchedToolNames.join(',')}`,
     )
 
