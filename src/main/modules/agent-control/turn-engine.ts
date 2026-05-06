@@ -3232,24 +3232,24 @@ export class TurnEngine {
         // one force_tool dispatch per turn — chaining a second resume must
         // come from the model in the next user turn.
         //
-        // TODO(skill-child-loop): the force-tool dispatch + force-loop guard
-        // here is the parent loop pretending to be the child runner. When the
-        // child-loop runner lands, the parent will instead call
-        // `launchChildRun(contract, action.input)` and wait for one structured
-        // close event; the synthesized `tool_use`, the per-turn cap, and the
-        // cross-turn `forceLoopGuard` all move into the child. See
-        // docs/architecture/skill-child-loop-boundary.md §5.1.
         // Stage E — force-tool dispatch decision. The steering layer publishes
         // an explicit `FrameAction` carrying tool name, validated input, and
         // an `inputDigest` keyed for cross-turn dedup. We never dispatch
         // `{}`: missing required fields surface in `action.missingInputs[]`
         // and route to a checkpoint instead.
+        //
+        // Stage N (2026-05-07) closed the parent-loop ownership retirement
+        // for child-loop skills. The legacy "parent pretends to be the child
+        // runner via forced typed-action synthesis" path is now fenced by
+        // two independent gates (contract + manifest) and an invariant belt
+        // at the `forceLoopGuard` write site. The dispatch path below still
+        // exists for non-child-loop skills (lets-go-rss, future skills
+        // without a `child_loop` declaration). Child-loop skills (VEA today)
+        // never reach the synthesis branch — they go through
+        // `dispatchChildLoopSkillAction` in `skills-tools.ts` instead. See
+        // `docs/architecture/skill-child-loop-boundary.md` §0 + §5.4 +
+        // §6 for the migration history and the closure table.
         const steeringAction = turnFrame?.steering?.action || null
-        // Phase 6 — child-loop short-circuit. When the durable
-        // `runContract.childRunId` is set, the child runner now owns the
-        // long-skill execution. The parent MUST NOT synthesize a typed
-        // `tool_use` for it (e.g. `skill_video_expert_pipeline` with `{}`),
-        // and the cross-turn `forceLoopGuard` is fenced for the same reason.
         // Stage N (Phase 1.2) — the contract fence is one of two independent
         // gates. The other is the manifest fence: any tool name that
         // resolves to a `child_loop.actions[]` entry of an embedded skill

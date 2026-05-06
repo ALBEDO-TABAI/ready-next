@@ -1,26 +1,24 @@
 /**
- * Stage N (Phase 1.4) — negative coverage for the manifest fence.
+ * Stage N (Phase 1.4) — predicate-level coverage for the manifest fence.
  *
- * The manifest fence (`isParentForceForbiddenByManifest`) blocks parent-side
- * force-tool synthesis for any tool name whose owning skill manifest declares
- * `child_loop.actions[]`. We verify three scenarios:
+ * Scope: this file covers the **pure helper** `isParentForceForbiddenByManifest`
+ * directly. We verify the helper's truth table for VEA (child-loop), lets-go-rss
+ * (non-child-loop, real static map entry), and unmapped names. We do NOT test
+ * the engine integration path (metric emission, system reminder push,
+ * checkpoint terminal) here — that is owned by:
+ *   - `turn-engine-force-tool-dispatch.test.ts` (Phase 1.5 re-target):
+ *     the legacy regression with non-child-loop fixtures, asserting
+ *     `turn_force_tool_dispatched` still fires AND
+ *     `turn_force_tool_blocked_child_owned` does NOT.
+ *   - `turn-engine-route.test.ts` (Stage N regression update):
+ *     the refresh-after-inspect path, asserting at least one
+ *     `turn_force_tool_blocked_child_owned` fires for VEA without childRunId.
+ *   - `agent-vea-resume-probe.test.cjs`:
+ *     the closed-loop smoke that exercises the full steering → engine
+ *     → checkpoint path under the manifest fence.
  *
- *   Case A — manifest fence (no childRunId on contract): VEA tool name fed
- *     to the synthesis site MUST emit `turn_force_tool_blocked_child_owned`,
- *     no `turn_force_tool_dispatched`, and the turn closes via checkpoint.
- *
- *   Case B — contract fence (childRunId set): the existing contract fence
- *     short-circuits before the manifest fence is reached. No metric of
- *     either kind fires for this iteration.
- *
- *   Case C — non-child-loop legacy path lives: a non-child-loop skill
- *     (lets-go-rss/rss_update) with no childRunId still flows through the
- *     legacy force-tool path; manifest fence does not fire.
- *
- * Pure unit tests via the live `isParentForceForbiddenByManifest`. Covering
- * the integration path (steering ↔ engine ↔ executor) is the job of the
- * existing `turn-engine-force-tool-dispatch.test.ts` (which Phase 1.5
- * re-targeted to use the legacy fixture).
+ * Splitting predicate vs. integration coverage keeps each test focused and
+ * lets the predicate test stay pure-helper (no DB, no full engine spin-up).
  */
 
 import test from 'node:test'

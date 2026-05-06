@@ -1,7 +1,7 @@
 # Skill Child-Loop Boundary
 
-> Status: implemented boundary as of 2026-04-30 (remediation series).
-> Last updated 2026-04-30.
+> Status: implemented boundary as of 2026-05-07 (Stage N closes the
+> parent-loop force-typed-action retirement). Last updated 2026-05-07.
 >
 > The Phase 1–7 child-loop *shape* landed at commit `452f01a`
 > (`feat(skill): introduce child-owned long-skill runtime architecture`).
@@ -342,30 +342,43 @@ are no longer aspirational — Phase 1–7 implemented them.
   next-turn resolver reads it, and only to choose between "resume", "wait
   for blocker", and "give up".
 
-## 6. Migration sketch (not in scope for Wave 4)
+## 6. Migration history (closed in Stage N)
 
-When the child-loop runner is built it will need (at least):
+Wave 4 (2026-04-30) marked the child-loop boundaries; Phases 1–7 of the
+child-loop architecture plan landed the runtime; the remediation series
+closed the ownership gaps. **Stage N (2026-05-07)** retired the parent's
+last legacy lever — force-typed-action synthesis for VEA — and replaced it
+with manifest + contract fences plus boot-time invariants. The original
+"future migration sketch" listed five items:
 
-1. A child runtime entry point that takes `(contract, abortSignal)` and
-   returns a promise of a structured close event.
-2. A child-side budget engine. Likely a thin re-use of `RunBudgetSeed` /
-   `consumeToolCallBudget`, but scoped to the child's own counters.
-3. A child-side abort drain that translates a parent abort into a clean
-   close event (cancelled), not a thrown `AbortError` that the parent has
-   to catch.
-4. A close-event channel that flows back to the parent's
-   `consumeExecutedToolBatch` equivalent. The simplest fit is to keep the
-   typed action's `tool_use` shape: the parent dispatches, the child runs
-   internally, the close event is the tool result. That preserves
-   `framePatch` plumbing as-is; only the inside of the typed action gets
-   re-implemented.
-5. A regression suite that proves: parent never reads the child transcript;
-   abort always produces one close event; resume always reads child state
-   from disk; the parent's `forceLoopGuard` migrates into the child's own
-   "did I just retry the same input" guard.
+1. **Child runtime entry point** — landed as `startSkillChildRun /
+   resumeSkillChildRun / cancelSkillChildRun` in
+   `src/main/modules/agent-control/skill-child-runner.ts`.
+2. **Child-side budget engine** — landed as the runner's per-run budget
+   scoped via `SkillChildRunner` (independent of the parent turn budget).
+3. **Child-side abort drain** — landed: parent abort flows through the
+   runner's `AbortController`, producing a structured close event with
+   `terminalReason: 'cancelled_user'`.
+4. **Close-event channel** — landed: `dispatchChildLoopSkillAction` returns
+   the `child_launched` envelope; subsequent close events flow back as
+   `framePatch` via `consumeExecutedToolBatch` and the runner's lookup
+   API.
+5. **Regression suite** — landed: parent never reads the child transcript
+   (asserted in `skill-child-run-end-to-end.test.ts`), abort produces one
+   close (asserted in the orphan-result test), resume reads child state
+   from disk (`skill-child-runner-resume-lifecycle.test.ts`), and the
+   `forceLoopGuard` field is now unreachable for child-loop skills via
+   the Stage N invariant belt at the write site.
 
-None of this lands in Wave 4. Wave 4's job is to mark the boundaries cleanly
-so the future migration has stable anchors.
+Stage N specifically retires the "parent synthesizes the next VEA action"
+path. After Stage N, `forceLoopGuard` writes are statically unreachable
+for any embedded skill that declares `child_loop.actions[]` in its
+manifest, the boot assertion enforces manifest⇔driver consistency, and
+the source gate
+(`scripts/check-no-parent-force-for-child-loop.cjs`) prevents a regression
+from re-introducing parent-side typed-action synthesis for child-loop
+actions. See §5.4 for the closure table and §0 for the authoritative
+boundary statement.
 
 ## 7. Cross-references
 

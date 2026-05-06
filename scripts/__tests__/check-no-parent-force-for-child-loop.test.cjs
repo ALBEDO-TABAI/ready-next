@@ -1,7 +1,7 @@
 'use strict'
 
 const assert = require('node:assert/strict')
-const { mkdtempSync, mkdirSync, rmSync, writeFileSync, copyFileSync, readFileSync } = require('node:fs')
+const { mkdtempSync, mkdirSync, rmSync, writeFileSync } = require('node:fs')
 const { tmpdir } = require('node:os')
 const { join } = require('node:path')
 const test = require('node:test')
