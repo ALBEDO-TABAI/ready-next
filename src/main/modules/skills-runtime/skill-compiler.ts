@@ -460,7 +460,21 @@ export function compileSkillDefinition(options: SkillCompilerOptions): SkillDefi
     }
     hostRequirements = parsed.data
   }
-  const childLoop = normalizeChildLoop(manifest?.child_loop ?? manifest?.childLoop, actions, id)
+  // Stage N (Phase 0.4) — only embedded skills may opt into the child-loop
+  // runtime. Custom user-installed skills shipping `child_loop` would slip
+  // past the parent-force fence (their dynamic tool name is not in
+  // `STATIC_SKILL_TOOL_NAMES_BY_ACTION`, so the manifest predicate cannot
+  // reverse-look-up to fence them). We strip the field at compile and warn
+  // so the operator notices.
+  const rawChildLoop = manifest?.child_loop ?? manifest?.childLoop
+  const childLoop = (rawChildLoop !== undefined && rawChildLoop !== null && source !== 'embedded')
+    ? (() => {
+        console.warn(
+          `[skill-compiler] custom skill ${id} declares child_loop; dropping (Stage N: only embedded skills may opt into child-loop runtime).`,
+        )
+        return undefined
+      })()
+    : normalizeChildLoop(rawChildLoop, actions, id)
 
   return {
     id,
