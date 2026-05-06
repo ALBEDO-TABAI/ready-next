@@ -29,6 +29,7 @@ import {
   type CreateChildRunInput,
 } from '../main/modules/repositories/skill-task-run-repository'
 import { createSkillChildRunId } from '../main/modules/agent-control/skill-child-run-id'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 const requireFromHere = createRequire(import.meta.url)
 
@@ -94,14 +95,11 @@ function makeChildInput(overrides: Partial<CreateChildRunInput> = {}): CreateChi
   }
 }
 
-test('Phase 4: createChildRun round-trips through findLatestChildRunByKey', () => {
+test('Phase 4: createChildRun round-trips through findLatestChildRunByKey', (t) => {
+  if (skipIfSqliteUnavailable(t, 'skill-child-runner: createChildRun round-trip')) return
   const setup = setupRepository()
-  if (!setup) {
-    // SQLite-backed test infra missing — see CLAUDE.md §6.13. Tests labelled
-    // "DB path not proven" rather than auto-pass.
-    console.warn('[skill-child-runner] better-sqlite3 unavailable; skipping')
-    return
-  }
+  if (!setup) return
+
   try {
     const input = makeChildInput()
     const created = setup.repo.createChildRun(input)
@@ -129,12 +127,11 @@ test('Phase 4: createChildRun round-trips through findLatestChildRunByKey', () =
   }
 })
 
-test('Phase 4: updateChildRun patches the payload through status transitions', () => {
+test('Phase 4: updateChildRun patches the payload through status transitions', (t) => {
+  if (skipIfSqliteUnavailable(t, 'skill-child-runner: updateChildRun')) return
   const setup = setupRepository()
-  if (!setup) {
-    console.warn('[skill-child-runner] better-sqlite3 unavailable; skipping')
-    return
-  }
+  if (!setup) return
+
   try {
     const input = makeChildInput()
     setup.repo.createChildRun(input)
@@ -177,12 +174,11 @@ test('Phase 4: updateChildRun patches the payload through status transitions', (
   }
 })
 
-test('Phase 4: findLatestChildRunBySkill only returns active rows', () => {
+test('Phase 4: findLatestChildRunBySkill only returns active rows', (t) => {
+  if (skipIfSqliteUnavailable(t, 'skill-child-runner: findLatestChildRunBySkill')) return
   const setup = setupRepository()
-  if (!setup) {
-    console.warn('[skill-child-runner] better-sqlite3 unavailable; skipping')
-    return
-  }
+  if (!setup) return
+
   try {
     const completedInput = makeChildInput({
       childRunId: createSkillChildRunId('vea'),

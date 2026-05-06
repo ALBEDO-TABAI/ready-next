@@ -31,6 +31,7 @@ import { runMigrations, type MigrationDatabase } from '../main/modules/migration
 import type { DatabaseConnection } from '../main/modules/database'
 import { SearchRepository } from '../main/modules/search-engine/repository'
 import { SearchEngine } from '../main/modules/search-engine/indexer'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 // ----- Sqlite loader (skip when native binding unavailable) -----------------
 
@@ -128,11 +129,8 @@ function ensureWorkspace(db: DatabaseConnection, root: string): number {
 // ----- Tests ----------------------------------------------------------------
 
 test('seed: doc A with [[B]] before B exists is a ghost link', (t) => {
-  const Sqlite = loadSqliteCtor()
-  if (!Sqlite) {
-    t.skip('better-sqlite3 native binding unavailable (likely ABI mismatch with system Node; runs under Electron)')
-    return
-  }
+  if (skipIfSqliteUnavailable(t, 'single-file-link-resolve: ghost link seed')) return
+  const Sqlite = loadSqliteCtor()!
   const db = openSchemaDb(Sqlite)
   try {
     const repo = new SearchRepository(db, false /* fts5 not needed */)
@@ -154,11 +152,8 @@ test('seed: doc A with [[B]] before B exists is a ghost link', (t) => {
 })
 
 test('per-doc resolver: indexing B retroactively binds A→B (incoming pass)', (t) => {
-  const Sqlite = loadSqliteCtor()
-  if (!Sqlite) {
-    t.skip('better-sqlite3 native binding unavailable')
-    return
-  }
+  if (skipIfSqliteUnavailable(t, "single-file-link-resolve: legacy-probe path")) return
+  const Sqlite = loadSqliteCtor()!
   const db = openSchemaDb(Sqlite)
   try {
     const repo = new SearchRepository(db, false)
@@ -187,11 +182,8 @@ test('per-doc resolver: indexing B retroactively binds A→B (incoming pass)', (
 })
 
 test('per-doc resolver: indexing C with [[A]] [[B]] only touches C\'s links', (t) => {
-  const Sqlite = loadSqliteCtor()
-  if (!Sqlite) {
-    t.skip('better-sqlite3 native binding unavailable')
-    return
-  }
+  if (skipIfSqliteUnavailable(t, "single-file-link-resolve: legacy-probe path")) return
+  const Sqlite = loadSqliteCtor()!
   const db = openSchemaDb(Sqlite)
   try {
     const repo = new SearchRepository(db, false)
@@ -235,11 +227,8 @@ test('per-doc resolver: indexing C with [[A]] [[B]] only touches C\'s links', (t
 })
 
 test('per-doc resolver: handles .md suffix variants (incoming match)', (t) => {
-  const Sqlite = loadSqliteCtor()
-  if (!Sqlite) {
-    t.skip('better-sqlite3 native binding unavailable')
-    return
-  }
+  if (skipIfSqliteUnavailable(t, "single-file-link-resolve: legacy-probe path")) return
+  const Sqlite = loadSqliteCtor()!
   const db = openSchemaDb(Sqlite)
   try {
     const repo = new SearchRepository(db, false)
@@ -265,11 +254,8 @@ test('per-doc resolver: handles .md suffix variants (incoming match)', (t) => {
 })
 
 test('per-doc resolver: skips already-resolved incoming links (no overwrite)', (t) => {
-  const Sqlite = loadSqliteCtor()
-  if (!Sqlite) {
-    t.skip('better-sqlite3 native binding unavailable')
-    return
-  }
+  if (skipIfSqliteUnavailable(t, "single-file-link-resolve: legacy-probe path")) return
+  const Sqlite = loadSqliteCtor()!
   const db = openSchemaDb(Sqlite)
   try {
     const repo = new SearchRepository(db, false)
@@ -301,11 +287,8 @@ test('per-doc resolver: skips already-resolved incoming links (no overwrite)', (
 })
 
 test('SearchEngine.scheduleWorkspaceLinkResolve fires after debounce window', async (t) => {
-  const Sqlite = loadSqliteCtor()
-  if (!Sqlite) {
-    t.skip('better-sqlite3 native binding unavailable')
-    return
-  }
+  if (skipIfSqliteUnavailable(t, "single-file-link-resolve: legacy-probe path")) return
+  const Sqlite = loadSqliteCtor()!
   const db = openSchemaDb(Sqlite)
   try {
     const engine = new SearchEngine(db, {
@@ -342,11 +325,8 @@ test('SearchEngine.scheduleWorkspaceLinkResolve fires after debounce window', as
 })
 
 test('SearchEngine.scheduleWorkspaceLinkResolve coalesces N saves into 1 pass', async (t) => {
-  const Sqlite = loadSqliteCtor()
-  if (!Sqlite) {
-    t.skip('better-sqlite3 native binding unavailable')
-    return
-  }
+  if (skipIfSqliteUnavailable(t, "single-file-link-resolve: legacy-probe path")) return
+  const Sqlite = loadSqliteCtor()!
   const db = openSchemaDb(Sqlite)
   try {
     let resolveCallCount = 0
@@ -377,11 +357,8 @@ test('SearchEngine.scheduleWorkspaceLinkResolve coalesces N saves into 1 pass', 
 })
 
 test('SearchEngine.cancelPendingWorkspaceResolves prevents the deferred pass', async (t) => {
-  const Sqlite = loadSqliteCtor()
-  if (!Sqlite) {
-    t.skip('better-sqlite3 native binding unavailable')
-    return
-  }
+  if (skipIfSqliteUnavailable(t, "single-file-link-resolve: legacy-probe path")) return
+  const Sqlite = loadSqliteCtor()!
   const db = openSchemaDb(Sqlite)
   try {
     let resolveCallCount = 0
@@ -412,11 +389,8 @@ test('SearchEngine.cancelPendingWorkspaceResolves prevents the deferred pass', a
 })
 
 test('SearchEngine.scheduleWorkspaceLinkResolve respects AbortController on the returned signal', async (t) => {
-  const Sqlite = loadSqliteCtor()
-  if (!Sqlite) {
-    t.skip('better-sqlite3 native binding unavailable')
-    return
-  }
+  if (skipIfSqliteUnavailable(t, "single-file-link-resolve: legacy-probe path")) return
+  const Sqlite = loadSqliteCtor()!
   const db = openSchemaDb(Sqlite)
   try {
     let resolveCallCount = 0
@@ -447,11 +421,8 @@ test('SearchEngine.scheduleWorkspaceLinkResolve respects AbortController on the 
 })
 
 test('end-to-end via indexDocument: per-doc resolve + debounced backup', async (t) => {
-  const Sqlite = loadSqliteCtor()
-  if (!Sqlite) {
-    t.skip('better-sqlite3 native binding unavailable')
-    return
-  }
+  if (skipIfSqliteUnavailable(t, "single-file-link-resolve: legacy-probe path")) return
+  const Sqlite = loadSqliteCtor()!
   const db = openSchemaDb(Sqlite)
   try {
     const engine = new SearchEngine(db, {

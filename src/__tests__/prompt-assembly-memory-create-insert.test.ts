@@ -4,6 +4,8 @@ import { mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
 // skill-resume G7 — agent_knowledge has `id PRIMARY KEY` + `agent_name NOT NULL`
 // (migration 003); the legacy 3-column INSERT
 //   `INSERT INTO agent_knowledge (key, value, created_at) VALUES (?, ?, ?)`
@@ -47,8 +49,8 @@ function setupSchema(db: ReturnType<SqliteModule>) {
 describe('skill-resume G7 — agent_knowledge INSERT covers all NOT NULL columns', () => {
   const Sqlite = loadSqlite()
   if (!Sqlite) {
-    it('skipped — better-sqlite3 unavailable in this environment', () => {
-      assert.ok(true)
+    it('skill-resume G7: agent_knowledge INSERT (sqlite unavailable)', (t) => {
+      skipIfSqliteUnavailable(t, 'prompt-assembly-memory-create-insert: bootstrap')
     })
     return
   }
@@ -62,7 +64,8 @@ describe('skill-resume G7 — agent_knowledge INSERT covers all NOT NULL columns
     rmSync(dir, { recursive: true, force: true })
   })
 
-  it('legacy 3-column INSERT throws NOT NULL constraint error (the bug)', () => {
+  it('legacy 3-column INSERT throws NOT NULL constraint error (the bug)', (t) => {
+    if (skipIfSqliteUnavailable(t, 'prompt-assembly-memory-create-insert: legacy INSERT bug')) return
     assert.throws(
       () => {
         db.prepare('INSERT INTO agent_knowledge (key, value, created_at) VALUES (?, ?, ?)').run(
@@ -76,7 +79,8 @@ describe('skill-resume G7 — agent_knowledge INSERT covers all NOT NULL columns
     )
   })
 
-  it('new 6-column INSERT with id + agent_name succeeds', () => {
+  it('new 6-column INSERT with id + agent_name succeeds', (t) => {
+    if (skipIfSqliteUnavailable(t, 'prompt-assembly-memory-create-insert: 6-column INSERT')) return
     const stmt = db.prepare(
       `INSERT INTO agent_knowledge (id, agent_name, key, value, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)
@@ -93,7 +97,8 @@ describe('skill-resume G7 — agent_knowledge INSERT covers all NOT NULL columns
     assert.equal(row.value, 'content body')
   })
 
-  it('ON CONFLICT path updates value when (agent_name, key) collides', () => {
+  it('ON CONFLICT path updates value when (agent_name, key) collides', (t) => {
+    if (skipIfSqliteUnavailable(t, 'prompt-assembly-memory-create-insert: ON CONFLICT path')) return
     const stmt = db.prepare(
       `INSERT INTO agent_knowledge (id, agent_name, key, value, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?)

@@ -95,3 +95,43 @@ e2e 默认 opt-in，使用 `READY_E2E=1` 单独运行；默认 `npm test` 和常
 | `READY_E2E=1 npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/e2e/*.e2e.ts` | opt-in 真链路 e2e | 专门验证子进程或真实依赖 |
 
 普通 Node 下的 SQLite 相关测试允许因 ABI 不匹配而 skip，但这些 skip 不能作为 SQLite-backed 验收通过的证据。涉及真实 DB、设置持久化、搜索索引或 skill task persistence 的验收必须跑 Electron native gate；`npm run dev` 和 `npm run build` 也必须在进入应用/构建前先通过该 gate。
+
+## Stage 5 covenants — test 归属与 sqlite skip 纪律
+
+Stage 5 把"哪些测试在哪条 verify 入口跑"与"sqlite 相关测试如何 skip"做成 CI 强制：
+
+- **C1 orphan-coverage**：`src/__tests__/**/*.test.ts` / `src/__tests__/**/*.e2e.ts` / `eslint-rules/__tests__/**/*.test.{mjs,ts}` / `scripts/__tests__/**/*.test.cjs` 的每个文件，必须被某个 `verify:*` / `test:*` 脚本（含 glob、跨脚本 `npm run X` 递归展开）引用，否则要在 `scripts/test-coverage-exemptions.json` 的 `exempt[]` 中显式登记 `path / reason (≥ 10 字符) / since (ISO) / owner`。
+- **C2 no-silent-failures**：`npm run test` 退出码 0 的同时 fail 计数必须为 0；由现有 `test` 链承担。
+- **C3 sqlite-direct-skip**：测试文件命中以下 load 形态之一时，必须导入并使用 `src/__tests__/utils/sqlite-skip.ts` 提供的 `skipIfSqliteUnavailable(t, label)`：
+  - `require('better-sqlite3')`
+  - `await import('better-sqlite3')`
+  - `import 'better-sqlite3'` (副作用)
+  - `import ... from 'better-sqlite3'` 的 value import (`import type` 与"整组 type-only 命名 import"被排除)
+- **C4 sqlite-transitive-skip**：测试文件**直接** value-import 任一 `nativeBackedModule` (gate 启动时由 `grep better-sqlite3 src/main src/shared src/preload` + `database.ts` / `db-worker.ts` seed 合成) 时，同样要用 helper；如果该测试只用 fake 注入、不会触发 native 加载，可在 `scripts/test-coverage-exemptions.json` 的 `c4Exempt[]` 登记。
+- **C5 CI 强制**：`scripts/check-test-coverage-by-verify.cjs` (C1) 与 `scripts/check-sqlite-test-skip-pattern.cjs` (C3+C4) 都进 `verify:k`、本机 `verify`、`verify:cloud` 三个入口；`verify:j` 不变。
+
+### canonical skip token schema
+
+`skipIfSqliteUnavailable` 在 host Node 失败路径上向 `t.skip()` 传入：
+
+```
+[ABI-SKIP][<reason>] <label>: <error.message>; covered by npm run verify:native
+```
+
+`<reason>` 取值固定为：
+- `native_abi_host_mismatch` (error.code === `ERR_DLOPEN_FAILED`)
+- `binding_missing` (error.code === `MODULE_NOT_FOUND`)
+- `sqlite_runtime_error` (其他)
+
+这套 token 让外部审计可以静态判定 "这次 skip 是 ABI 不匹配（合规）" 还是 "测试自己 t.skip 了别的东西（不一定合规）"。
+
+### Stage 5 wiring DAG
+
+```
+verify (本机日常)   ─→ verify:native (rebuild + native:check) ─→ typecheck ─→ lint ─→ orphan gate ─→ sqlite-skip gate ─→ npm run test
+verify:cloud (CI)   ─→ rebuild:native (无 native:check)        ─→ typecheck ─→ lint ─→ orphan gate ─→ sqlite-skip gate ─→ npm run test
+verify:k (stage)    ─→ verify:j (静态链)                                              ─→ orphan gate ─→ sqlite-skip gate ─→ test:k:gates
+verify:j → ... → verify:b: 全部静态检查；不含 native runtime 验证。
+```
+
+`verify:cloud` 故意不跑 `native:check` —— cloud CI 通常没有 Electron runtime；sqlite-backed 真值验收由本机 `verify` 承担，与 §6.13 "Electron native gate 限本机" 约定一致。

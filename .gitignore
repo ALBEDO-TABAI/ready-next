@@ -49,6 +49,8 @@ build/runtime-seeds/
 # Local scratch / generated artifacts
 .superpowers/
 .claude/codex-audit/
+.claude/scheduled_tasks.lock
+.claude/worktrees/
 index-*.css
 index-*.js
 index-*.html

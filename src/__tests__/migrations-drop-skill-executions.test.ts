@@ -16,6 +16,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { runMigrations, type MigrationDatabase } from '../main/modules/migrations'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 type SqliteModule = new (path: string, options?: { readonly?: boolean }) => {
   exec: (sql: string) => void
@@ -37,10 +38,7 @@ function loadSqlite(): SqliteModule | null {
 }
 
 function openInMemory(): MigrationDatabase {
-  const Sqlite = loadSqlite()
-  if (!Sqlite) {
-    throw new Error('better-sqlite3 unavailable in this environment')
-  }
+  const Sqlite = loadSqlite()!
   const db = new Sqlite(':memory:')
   return db as unknown as MigrationDatabase
 }
@@ -82,7 +80,8 @@ const SKILL_INDEXES = [
   'idx_skill_execution_artifacts_artifact_id',
 ]
 
-test('fresh DB — migration 029 drops all 3 skill_executions tables and their indexes', () => {
+test('fresh DB — migration 029 drops all 3 skill_executions tables and their indexes', (t) => {
+  if (skipIfSqliteUnavailable(t, 'migrations-drop-skill-executions: fresh DB')) return
   if (!loadSqlite()) return
   const db = openInMemory()
   try {
@@ -105,7 +104,8 @@ test('fresh DB — migration 029 drops all 3 skill_executions tables and their i
   }
 })
 
-test('idempotent — re-running migrations after 029 is a no-op (no re-applied rows, no thrown errors)', () => {
+test('idempotent — re-running migrations after 029 is a no-op (no re-applied rows, no thrown errors)', (t) => {
+  if (skipIfSqliteUnavailable(t, 'migrations-drop-skill-executions: idempotent')) return
   if (!loadSqlite()) return
   const db = openInMemory()
   try {
@@ -121,7 +121,8 @@ test('idempotent — re-running migrations after 029 is a no-op (no re-applied r
   }
 })
 
-test('never-built DB — skipping 018 and jumping straight to 029 still succeeds (all statements are IF EXISTS)', () => {
+test('never-built DB — skipping 018 and jumping straight to 029 still succeeds (all statements are IF EXISTS)', (t) => {
+  if (skipIfSqliteUnavailable(t, 'migrations-drop-skill-executions: never-built DB')) return
   if (!loadSqlite()) return
   const db = openInMemory()
   try {
@@ -159,7 +160,8 @@ test('never-built DB — skipping 018 and jumping straight to 029 still succeeds
   }
 })
 
-test('migration 030 upgrades the broad RSS analysis trigger pattern in existing databases', () => {
+test('migration 030 upgrades the broad RSS analysis trigger pattern in existing databases', (t) => {
+  if (skipIfSqliteUnavailable(t, 'migrations-drop-skill-executions: migration 030')) return
   if (!loadSqlite()) return
   const db = openInMemory()
   try {

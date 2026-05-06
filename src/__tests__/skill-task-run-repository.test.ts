@@ -11,6 +11,7 @@ import {
   type CreateChildRunInput,
   type SkillTaskRunRecord,
 } from '../main/modules/repositories/skill-task-run-repository'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 const requireFromHere = createRequire(import.meta.url)
 
@@ -396,12 +397,11 @@ test('SkillTaskRunRepository finds detached task archive rows', () => {
   assert.equal(byDetached?.id, 'str-detached')
 })
 
-test('terminal child lookup by outputDir still returns childRunId and close event', () => {
+test('terminal child lookup by outputDir still returns childRunId and close event', (t) => {
+  if (skipIfSqliteUnavailable(t, 'skill-task-run-repository: outputDir lookup')) return
   const setup = createSqliteRepositoryHarness()
-  if (!setup) {
-    console.warn('[skill-task-run-repository] better-sqlite3 unavailable; skipping')
-    return
-  }
+  if (!setup) return
+
   try {
     const { input, closeEvent } = createTerminalChildRun(setup.repository)
 
@@ -419,12 +419,11 @@ test('terminal child lookup by outputDir still returns childRunId and close even
   }
 })
 
-test('terminal child lookup by runStatePath still returns childRunId and close event', () => {
+test('terminal child lookup by runStatePath still returns childRunId and close event', (t) => {
+  if (skipIfSqliteUnavailable(t, 'skill-task-run-repository: runStatePath lookup')) return
   const setup = createSqliteRepositoryHarness()
-  if (!setup) {
-    console.warn('[skill-task-run-repository] better-sqlite3 unavailable; skipping')
-    return
-  }
+  if (!setup) return
+
   try {
     const { input, closeEvent } = createTerminalChildRun(setup.repository)
 
@@ -442,12 +441,11 @@ test('terminal child lookup by runStatePath still returns childRunId and close e
   }
 })
 
-test('terminal child lookup by singleFlightKey still returns childRunId and close event', () => {
+test('terminal child lookup by singleFlightKey still returns childRunId and close event', (t) => {
+  if (skipIfSqliteUnavailable(t, 'skill-task-run-repository: singleFlightKey lookup')) return
   const setup = createSqliteRepositoryHarness()
-  if (!setup) {
-    console.warn('[skill-task-run-repository] better-sqlite3 unavailable; skipping')
-    return
-  }
+  if (!setup) return
+
   try {
     const { input, closeEvent } = createTerminalChildRun(setup.repository)
 
@@ -465,12 +463,11 @@ test('terminal child lookup by singleFlightKey still returns childRunId and clos
   }
 })
 
-test('findLatestChildRunByKey remains active-only after terminal', () => {
+test('findLatestChildRunByKey remains active-only after terminal', (t) => {
+  if (skipIfSqliteUnavailable(t, 'skill-task-run-repository: findLatestChildRunByKey')) return
   const setup = createSqliteRepositoryHarness()
-  if (!setup) {
-    console.warn('[skill-task-run-repository] better-sqlite3 unavailable; skipping')
-    return
-  }
+  if (!setup) return
+
   try {
     const { input } = createTerminalChildRun(setup.repository)
 
@@ -482,12 +479,11 @@ test('findLatestChildRunByKey remains active-only after terminal', () => {
   }
 })
 
-test('exact child lookup by outputDir still narrows terminal rows by skillId', () => {
+test('exact child lookup by outputDir still narrows terminal rows by skillId', (t) => {
+  if (skipIfSqliteUnavailable(t, 'skill-task-run-repository: exact outputDir lookup')) return
   const setup = createSqliteRepositoryHarness()
-  if (!setup) {
-    console.warn('[skill-task-run-repository] better-sqlite3 unavailable; skipping')
-    return
-  }
+  if (!setup) return
+
   try {
     const sharedOutputDir = '/tmp/shared-output'
     const sharedRunStatePath = '/tmp/shared-output/run_state.json'

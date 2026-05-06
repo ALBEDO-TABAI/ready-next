@@ -1,9 +1,11 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 import type { DatabaseManager as DatabaseManagerInstance } from '../main/modules/database'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 describe('chat message persistence', () => {
   it('updates duplicate message ids instead of failing final assistant snapshots', async (t) => {
+    if (skipIfSqliteUnavailable(t, 'chat-message-persistence: duplicate id update')) return
     const { DatabaseManager, DatabaseUnavailableError } = await import('../main/modules/database')
     let db: DatabaseManagerInstance | null = null
 

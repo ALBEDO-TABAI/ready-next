@@ -10,31 +10,22 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { applyPerformancePragmas, type DatabaseConnection } from '../main/modules/database'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 type SqliteCtor = new (path: string) => DatabaseConnection & {
   pragma(source: string, options?: { simple?: boolean }): unknown
 }
 
-function openInMemoryDb(): InstanceType<SqliteCtor> | null {
-  // The native binding is built against Electron's Node ABI. When running this
-  // test under system Node (npm run test / tsx --test), require() succeeds but
-  // `new Sqlite()` throws ERR_DLOPEN_FAILED. Probe by actually constructing.
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const mod = require('better-sqlite3') as SqliteCtor & { default?: SqliteCtor }
-    const Sqlite = mod.default || mod
-    return new Sqlite(':memory:')
-  } catch {
-    return null
-  }
+function openInMemoryDb(): InstanceType<SqliteCtor> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const mod = require('better-sqlite3') as SqliteCtor & { default?: SqliteCtor }
+  const Sqlite = mod.default || mod
+  return new Sqlite(':memory:')
 }
 
 test('applyPerformancePragmas tunes journal/sync/cache/mmap/temp_store', (t) => {
+  if (skipIfSqliteUnavailable(t, 'database-pragmas: applyPerformancePragmas')) return
   const db = openInMemoryDb()
-  if (!db) {
-    t.skip('better-sqlite3 native binding unavailable (likely ABI mismatch with system Node; runs under Electron)')
-    return
-  }
   try {
     applyPerformancePragmas(db)
 
@@ -77,7 +68,8 @@ test('applyPerformancePragmas tunes journal/sync/cache/mmap/temp_store', (t) => 
   }
 })
 
-test('applyPerformancePragmas no-ops when pragma() is missing', () => {
+test('applyPerformancePragmas no-ops when pragma() is missing', (t) => {
+  if (skipIfSqliteUnavailable(t, 'database-pragmas: no-op fake')) return
   // Mimics the in-memory mock fallback path where pragma is not implemented.
   const fakeDb: DatabaseConnection = {
     exec: () => {},
@@ -88,7 +80,8 @@ test('applyPerformancePragmas no-ops when pragma() is missing', () => {
   assert.doesNotThrow(() => applyPerformancePragmas(fakeDb))
 })
 
-test('applyPerformancePragmas swallows per-pragma failures and continues', () => {
+test('applyPerformancePragmas swallows per-pragma failures and continues', (t) => {
+  if (skipIfSqliteUnavailable(t, 'database-pragmas: swallows per-pragma failure')) return
   // Simulate a platform where one pragma fails (e.g. WAL on a Windows network
   // drive). The helper must continue applying the rest, not bail.
   const applied: string[] = []

@@ -35,12 +35,12 @@
     "test:a0:gates": "node --test eslint-rules/__tests__/*.test.mjs scripts/__tests__/*.test.cjs",
     "test:a0:focus": "npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/skill-child-state-machine.test.ts src/__tests__/skill-child-runtime-decisions.test.ts src/__tests__/skill-child-runner.test.ts src/__tests__/skill-child-runner-resume-lifecycle.test.ts src/__tests__/skill-child-run-end-to-end.test.ts src/__tests__/turn-engine-route.test.ts src/__tests__/turn-engine-force-tool-dispatch.test.ts src/__tests__/skill-task-run-repository.test.ts src/__tests__/tool-internal-admission.test.ts",
     "generate:document-widget-openui": "npx tsx@^4.19.2 ./scripts/generate-document-widget-openui-artifacts.ts",
-    "verify": "npm run verify:native && npm run typecheck && npm run lint:check && npm run test",
+    "verify": "npm run verify:native && npm run typecheck && npm run lint:check && node scripts/check-test-coverage-by-verify.cjs && node scripts/check-sqlite-test-skip-pattern.cjs && npm run test",
     "verify:a0": "npm run typecheck && npm run lint:check && node scripts/check-eslint-baseline.cjs && node scripts/check-plan-pairing.cjs --all && node scripts/check-commit-message.cjs --message \"feat(agent): implement A0 strategic foundation\" && npm run test:a0:gates && npm run test:a0:focus",
     "verify:a05": "node scripts/check-eslint-baseline.cjs --area a1-gate --max 0",
     "verify:a1": "npm run typecheck && npm run lint:check && node scripts/check-eslint-baseline.cjs && node scripts/check-eslint-baseline.cjs --area a1-gate --max 0 && node scripts/check-subagent-isolation.cjs && node scripts/check-skill-child-runner-api.cjs && npm run test:a0:gates && npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/sub-agent-contract.test.ts src/__tests__/sub-agent-runner.test.ts",
     "verify:b": "npm run typecheck && npm run lint:check && node scripts/check-eslint-baseline.cjs && node scripts/check-eslint-baseline.cjs --area a1-gate --max 0 && node scripts/check-subagent-isolation.cjs && node scripts/check-skill-child-runner-api.cjs && npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/skill-child-*.test.ts src/__tests__/sub-agent-contract.test.ts src/__tests__/sub-agent-runner.test.ts && npm run test:a0:gates && npm run verify:a0 && npm run verify:a05 && npm run verify:a1",
-    "verify:cloud": "npm run rebuild:native && npm run typecheck && npm run lint:check && npm run test",
+    "verify:cloud": "npm run rebuild:native && npm run typecheck && npm run lint:check && node scripts/check-test-coverage-by-verify.cjs && node scripts/check-sqlite-test-skip-pattern.cjs && npm run test",
     "postinstall": "electron-builder install-app-deps",
     "test:c:gates": "node --test eslint-rules/__tests__/*.test.mjs scripts/__tests__/*.test.cjs",
     "test:c:focus": "npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/coordinator-contract.test.ts src/__tests__/turn-engine-route.test.ts src/__tests__/prompt-assembly.test.ts src/__tests__/run-capability-controller.test.ts src/__tests__/run-capability-controller-arbitration.test.ts src/__tests__/browser-task-planner.test.ts src/__tests__/browser-domain-orchestrator.test.ts",
@@ -64,7 +64,9 @@
     "verify:i": "npm run verify:i1 && npm run test:i:gates && npm run test:i:focus",
     "test:j:gates": "node --test scripts/__tests__/check-process-handlers.test.cjs scripts/__tests__/check-log-rotation.test.cjs scripts/__tests__/check-terminal-reason-propagation.test.cjs scripts/__tests__/check-child-run-output-dir-fallback.test.cjs scripts/__tests__/check-emit-output-done-event-type.test.cjs",
     "test:j:focus": "npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/process-handlers.test.ts src/__tests__/rotating-logger.test.ts",
-    "verify:j": "npm run verify:i && node scripts/check-process-handlers.cjs && node scripts/check-log-rotation.cjs && node scripts/check-terminal-reason-propagation.cjs && node scripts/check-child-run-output-dir-fallback.cjs && node scripts/check-emit-output-done-event-type.cjs && npm run test:j:gates && npm run test:j:focus"
+    "verify:j": "npm run verify:i && node scripts/check-process-handlers.cjs && node scripts/check-log-rotation.cjs && node scripts/check-terminal-reason-propagation.cjs && node scripts/check-child-run-output-dir-fallback.cjs && node scripts/check-emit-output-done-event-type.cjs && npm run test:j:gates && npm run test:j:focus",
+    "test:k:gates": "node --test scripts/__tests__/check-test-coverage-by-verify.test.cjs scripts/__tests__/check-sqlite-test-skip-pattern.test.cjs",
+    "verify:k": "npm run verify:j && node scripts/check-test-coverage-by-verify.cjs && node scripts/check-sqlite-test-skip-pattern.cjs && npm run test:k:gates"
   },
   "dependencies": {
     "@electron-toolkit/utils": "^4.0.0",

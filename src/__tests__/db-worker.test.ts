@@ -22,18 +22,7 @@ import {
   WorkerDbBridgeImpl,
   type WorkerFactory,
 } from '../main/modules/database/worker-bridge'
-
-function probeBetterSqlite3(): boolean {
-  try {
-    const mod = require('better-sqlite3') as (new (path: string) => { close: () => void }) & { default?: new (path: string) => { close: () => void } }
-    const Sqlite = (mod as { default?: new (path: string) => { close: () => void } }).default || mod
-    const db = new (Sqlite as new (path: string) => { close: () => void })(':memory:')
-    db.close()
-    return true
-  } catch {
-    return false
-  }
-}
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 function resolveWorkerEntry(): string | null {
   // 1) bundled output (real production layout)
@@ -46,10 +35,7 @@ function resolveWorkerEntry(): string | null {
 }
 
 test('db-worker integration: end-to-end query/response', async (t) => {
-  if (!probeBetterSqlite3()) {
-    t.skip('better-sqlite3 native binding unavailable (ABI mismatch with system Node; runs under Electron)')
-    return
-  }
+  if (skipIfSqliteUnavailable(t, 'db-worker: end-to-end')) return
   const workerEntry = resolveWorkerEntry()
   if (!workerEntry) {
     t.skip('bundled db-worker.js not found at out/main/db-worker.js (run `npm run build` first)')
