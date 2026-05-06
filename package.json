@@ -24,7 +24,10 @@
     "typecheck:clean": "rm -rf node_modules/.cache/tsc",
     "lint": "eslint . --ext .js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix",
     "lint:check": "eslint . --ext .js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts",
-    "test": "npx tsx@^4.19.2 --test --test-concurrency=10 src/__tests__/*.test.ts",
+    "test": "npm run test:parallel && npm run test:serial-skill-child",
+    "test:parallel": "node scripts/run-parallel-tests.cjs src/__tests__/*.test.ts",
+    "test:serial-skill-child": "npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/skill-child-*.test.ts",
+    "test:ui-contracts": "npx tsx@^4.19.2 --test --test-concurrency=10 src/__tests__/ui-contracts/*.test.ts",
     "agent:probe:vea-resume": "npx tsx@^4.19.2 scripts/agent-vea-resume-probe.ts",
     "agent:acceptance:vea-live": "npx tsx@^4.19.2 scripts/agent-vea-live-acceptance.ts",
     "agent:acceptance:vea-artifacts": "node scripts/vea-assert-artifacts.cjs",
@@ -66,7 +69,11 @@
     "test:j:focus": "npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/process-handlers.test.ts src/__tests__/rotating-logger.test.ts",
     "verify:j": "npm run verify:i && node scripts/check-process-handlers.cjs && node scripts/check-log-rotation.cjs && node scripts/check-terminal-reason-propagation.cjs && node scripts/check-child-run-output-dir-fallback.cjs && node scripts/check-emit-output-done-event-type.cjs && npm run test:j:gates && npm run test:j:focus",
     "test:k:gates": "node --test scripts/__tests__/check-test-coverage-by-verify.test.cjs scripts/__tests__/check-sqlite-test-skip-pattern.test.cjs",
-    "verify:k": "npm run verify:j && node scripts/check-test-coverage-by-verify.cjs && node scripts/check-sqlite-test-skip-pattern.cjs && npm run test:k:gates"
+    "verify:k": "npm run verify:j && node scripts/check-test-coverage-by-verify.cjs && node scripts/check-sqlite-test-skip-pattern.cjs && npm run test:k:gates",
+    "test:l:gates": "node --test scripts/__tests__/check-ledger-writer-funnel.test.cjs scripts/__tests__/check-close-event-factory.test.cjs scripts/__tests__/check-projection-is-view-only.test.cjs scripts/__tests__/check-continuation-context-shape.test.cjs scripts/__tests__/check-status-vocabulary-single-source.test.cjs scripts/__tests__/check-task-card-single-source.test.cjs",
+    "test:l:focus": "npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/skill-child-close-event-invariant.test.ts",
+    "verify:l:gates": "node scripts/check-ledger-writer-funnel.cjs && node scripts/check-close-event-factory.cjs && node scripts/check-projection-is-view-only.cjs && node scripts/check-continuation-context-shape.cjs && node scripts/check-status-vocabulary-single-source.cjs && node scripts/check-task-card-single-source.cjs && npm run test:l:gates && npm run test:l:focus",
+    "verify:l": "npm run verify:k && npm run verify:l:gates"
   },
   "dependencies": {
     "@electron-toolkit/utils": "^4.0.0",

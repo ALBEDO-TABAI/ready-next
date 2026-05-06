@@ -102,14 +102,19 @@ export function resolveTaskExecutionRoute(params: {
   resolution: TaskTypeResolution
   envelope: RequestEnvelope
   capabilities: CapabilityRuntimeSnapshot
-  currentTaskContext?: {
-    continuationTaskId?: string | null
-    continuationProjection?: TaskProjectionRecord | null
-    continuationState?: import('./continuation-state').ContinuationState | null
+  /**
+   * Stage 6 L4 contract: callers pass `continuationContext` with **both**
+   * `state` and `projection` together (either non-null or null), so the
+   * router never has to guess which side of the pair is fresh. Pass
+   * `continuationContext: null` when no continuation is in flight.
+   */
+  continuationContext: {
+    state: import('./continuation-state').ContinuationState | null
+    projection: TaskProjectionRecord | null
   } | null
 }): TaskExecutionRoute {
-  const continuationProjection = params.currentTaskContext?.continuationProjection || null
-  const continuationState = params.currentTaskContext?.continuationState
+  const continuationProjection = params.continuationContext?.projection || null
+  const continuationState = params.continuationContext?.state
     || (continuationProjection ? buildContinuationStateFromProjection(continuationProjection) : null)
   const executor = resolveExecutor({
     chain: params.resolution.executionChain,
@@ -122,6 +127,8 @@ export function resolveTaskExecutionRoute(params: {
     if (continuationState) {
       const restoredBudget = restoreContinuationTaskBudgetRuntime({
         taskType: 'continuation',
+        projectionBudget: continuationProjection?.budget || null,
+        projectionBudgetRuntime: null,
         continuationState,
       })
       return {

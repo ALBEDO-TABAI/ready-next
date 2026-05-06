@@ -21,6 +21,14 @@ const STATUS_IDENTIFIER_NAMES = new Set(['childStatus'])
 const W0_WHITELIST_FUNCTIONS = new Set([
   'renderChildCommandOutcome',
   'subAgentReasonForChildClose',
+  // Stage 6 — pure status→label/state mappers consume close.status as their
+  // sole input and return a deterministic projection. They are not making
+  // policy decisions, only translating; allowing the literal switch keeps
+  // them readable while still funnelling status writes through the L1/L2
+  // ledger contracts.
+  'closeMessage',
+  'lifecycleStateForChildClose',
+  'lifecycleReasonForChildClose',
 ])
 
 main()
@@ -250,6 +258,13 @@ function isW0WhitelistedStatusDecision(node, relativeFile) {
 
   if (relativeFile === 'src/main/modules/agent-control/skill-child-sub-agent.ts') {
     return enclosingFunctionName(node) === 'subAgentReasonForChildClose'
+  }
+
+  // Stage 6 — pure status→label/state mappers in skill-child-runner.ts are
+  // allowed to switch on close.status (see W0_WHITELIST_FUNCTIONS rationale).
+  if (relativeFile === 'src/main/modules/agent-control/skill-child-runner.ts') {
+    const functionName = enclosingFunctionName(node)
+    if (functionName && W0_WHITELIST_FUNCTIONS.has(functionName)) return true
   }
 
   return false

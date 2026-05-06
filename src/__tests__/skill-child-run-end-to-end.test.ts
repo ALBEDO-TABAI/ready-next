@@ -480,8 +480,12 @@ describe('Phase 6 scenario B — resume from score_batches stage (stubbed driver
       triggerType: 'tool',
     })
 
-    // Wait for the runner to dispatch + close.
-    await new Promise((resolve) => setTimeout(resolve, 50))
+    // Wait for the runner to dispatch + close. Poll because under
+    // concurrent suite runs the 50ms fixed delay was flaky.
+    const dispatchDeadline = Date.now() + 1_500
+    while (runtime.calls.length === 0 && Date.now() < dispatchDeadline) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
 
     assert.equal(launch.status, 'running', `expected running, got ${launch.status}`)
     // The runner forwarded ai_analyze (not pipeline) to runSkill; capture

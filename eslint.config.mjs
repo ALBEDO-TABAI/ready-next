@@ -61,7 +61,8 @@ export default [
       'ready/no-migration-todo': 'error',
       'ready/no-subagent-leak': 'error',
       'ready/no-coordinator-id-leak': 'error',
-      'ready/no-inline-system-reminder-write': 'error'
+      'ready/no-inline-system-reminder-write': 'error',
+      'ready/no-task-card-run-cast': 'error'
     }
   },
   {

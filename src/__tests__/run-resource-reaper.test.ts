@@ -33,9 +33,15 @@ test('orchestrator cancellation path and tool contexts are wired to the run clea
   assert.match(orchestrator, /registerRunCleanup\(runId: string, cleanup: RunCleanupCallback\)/)
   assert.match(orchestrator, /void this\.drainRunCleanup\(runId\)/)
   assert.match(directChat, /setRunCleanupRegistry\(/)
-  assert.match(directChat, /registerRunCleanup: \(cleanup\) => \{/)
+  // Production now annotates the cleanup parameter type inline; both shapes
+  // (with and without the annotation) are accepted to make this gate
+  // resilient against the upcoming type-only refactor.
+  assert.match(directChat, /registerRunCleanup: \(cleanup(?:\s*:\s*\(\)\s*=>\s*void\s*\|\s*Promise<void>)?\) => \{/)
   assert.match(toolContextBuilder, /registerRunCleanup\?: \(cleanup: \(\) => void \| Promise<void>\) => void/)
-  assert.match(toolExecutor, /executeSkillTool\(toolName, args, context\.sessionId, context\.registerRunCleanup\)/)
+  // executeSkillTool now also threads abortSignal + agentContext (extra
+  // trailing args). Pin the registerRunCleanup arg position rather than the
+  // closing paren; the cleanup registry hand-off is the actual contract.
+  assert.match(toolExecutor, /executeSkillTool\(toolName, args, context\.sessionId, context\.registerRunCleanup,/)
   assert.match(skillTools, /registerRunCleanup\?: \(cleanup: \(\) => void \| Promise<void>\) => void/)
   // Phase 4: the `registerRunCleanup(() => manager.cancelExecution(...))`
   // pattern was removed when the skill_executions state machine was retired.

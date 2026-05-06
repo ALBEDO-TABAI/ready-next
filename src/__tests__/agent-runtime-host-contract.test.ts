@@ -160,8 +160,8 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.match(runtime, /import \{ RunProjection \} from '\.\/run-projection'/)
   assert.match(runtime, /private readonly runCoordinator: RunCoordinator/)
   assert.match(runtime, /private readonly runProjection: RunProjection/)
-  assert.match(runtime, /return this\.runCoordinator\.runScoped\(/)
-  assert.match(runtime, /await this\.runCoordinator\.runInboundChannel\(/)
+  assert.match(runtime, /(?:return|const\s+\w+\s*=\s*await)\s+this\.runCoordinator\.runScoped\(/)
+  assert.match(runtime, /(?:return\s+|const\s+\w+\s*=\s*)?await\s+this\.runCoordinator\.runInboundChannel\(/)
   assert.match(runtime, /return this\.runProjection\.recordEvent\(/)
   assert.doesNotMatch(runtime, /const promptAssembly = await this\.promptAssembly\.buildForScopedRun\(/)
   assert.doesNotMatch(runtime, /const result = await this\.orchestrator\.sendAndCollect\(agent, promptPayload, scope\.id, requestId\)/)
@@ -319,20 +319,25 @@ test('phase3 moves execution-host responsibilities from DirectChatEngine into Tu
       pattern: /const preparedRunCapabilities = prepareInitialRun\(/,
     },
     {
-      label: 'phase3 should move initial route resolution into TurnEngine',
-      pattern: /const initialTaskExecutionRoute = resolveTaskExecutionRoute\(/,
-    },
-    {
-      label: 'phase4 should prepare browser routing through the domain adapter contract',
-      pattern: /const browserPrepareResult = browserDomainAdapter/,
-    },
-    {
-      label: 'phase3 should move capability reconciliation into TurnEngine',
-      pattern: /const reconciledRunCapabilities = reconcileAfterBrowserDecision\(/,
-    },
-    {
-      label: 'phase3 should move final execution route ownership into TurnEngine',
+      // Stage 4 W3 simplified the phase-3 dual-resolution to a single
+      // `taskExecutionRoute` call; pin the canonical resolve site.
+      label: 'phase3 should move route resolution into TurnEngine',
       pattern: /const taskExecutionRoute = resolveTaskExecutionRoute\(/,
+    },
+    {
+      // Stage 4 W3: browser preparation moved entirely into the
+      // BrowserDomainAdapter; turn-engine now only selects the adapter and
+      // invokes its prepare() lifecycle hook. The post-W3 contract is
+      // expressed as `selectedDomainAdapter.prepare(...)` against the
+      // domain-adapter contract.
+      label: 'phase4 routes browser preparation through the domain adapter contract',
+      pattern: /selectedDomainAdapter(?:\.prepare\(|\?\.prepare\()/,
+    },
+    {
+      // production now uses `let reconciledRunCapabilities = ...` because
+      // it is later reassigned for budget-warning recomputation.
+      label: 'phase3 should move capability reconciliation into TurnEngine',
+      pattern: /(?:let|const)\s+reconciledRunCapabilities\s*=\s*reconcileAfterBrowserDecision\(/,
     },
     {
       label: 'phase3 should move host shortcut dispatch into TurnEngine',

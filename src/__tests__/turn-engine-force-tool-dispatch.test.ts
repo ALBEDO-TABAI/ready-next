@@ -174,6 +174,19 @@ function makeRecoverableSnapshot(): SkillTaskSupervisorSnapshot {
   }
 }
 
+function defaultTerminalReasonForTest(
+  status: SkillChildCloseEvent['status'],
+): SkillChildCloseEvent['terminalReason'] {
+  switch (status) {
+    case 'completed': return 'completed'
+    case 'killed': return 'cancelled_user'
+    case 'blocked': return 'blocked_external'
+    case 'failed': return 'failed_skill'
+    case 'budget_paused': return 'checkpoint_budget'
+    case 'recoverable_paused': return 'checkpoint_background'
+  }
+}
+
 function makeChildCloseEvent(
   childRunId: string,
   status: SkillChildCloseEvent['status'],
@@ -220,7 +233,7 @@ function makeChildOwnedSnapshot(params: {
           ? makeChildCloseEvent(
             params.childRunId,
             params.status,
-            params.terminalReason || 'checkpoint_budget',
+            params.terminalReason || defaultTerminalReasonForTest(params.status),
           )
           : params.closeEvent,
       },
@@ -418,7 +431,7 @@ test('recoverable_paused child resumes through TurnEngine', async () => {
         inspectLatestSkillTask: () => makeChildOwnedSnapshot({
           childRunId,
           status: 'recoverable_paused',
-          terminalReason: 'checkpoint_budget',
+          terminalReason: 'checkpoint_background',
         }),
       },
       resumeSkillChildRun: async (id: string) => {

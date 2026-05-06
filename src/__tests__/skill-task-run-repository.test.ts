@@ -323,7 +323,9 @@ test('SkillTaskRunRepository persists and updates recoverable skill task runs', 
   const { repository } = createRepositoryHarness()
   repository.create(makeRun())
 
-  repository.update('str-test001', {
+  // Stage 6 L1: status writes go through updateRowSync (test exercises the
+  // sanctioned tracker-style status write path).
+  repository.updateRowSync('str-test001', {
     status: 'failed',
     interactionState: 'running',
     failureKind: 'auth_invalid',

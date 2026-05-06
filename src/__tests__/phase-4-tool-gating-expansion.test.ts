@@ -154,9 +154,13 @@ test('Phase 4.3 wiring — getSkillToolDefs passes hasActiveSkillTaskProjection 
     source,
     /hasActiveSkillTaskProjection\s*=\s*\(sid:\s*string\)\s*=>\s*\n?\s*isSkillTaskProjectionLive\(readSkillTaskProjection\(\{\s*sessionId:\s*sid\s*\}\)\)/,
   )
+  // Production now passes additional projection signals after
+  // `hasActiveSkillTaskProjection` (e.g. `hasActiveSkillTaskRun`); only pin
+  // that the projection-coverage signal is in the call-site argument list,
+  // not that it's the last arg.
   assert.match(
     source,
-    /filterSkillPrimitivesBySession\([\s\S]*?hasReferenceHint,[\s\S]*?hasActiveSkillTaskProjection,?\s*\)/,
+    /filterSkillPrimitivesBySession\([\s\S]*?hasReferenceHint,[\s\S]*?hasActiveSkillTaskProjection[\s\S]*?\)/,
   )
 })
 

@@ -126,6 +126,12 @@ export function isKilledChildCloseStatus(
   return status === 'killed'
 }
 
+export function isBlockedChildCloseStatus(
+  status: SkillChildCloseEvent['status'],
+): status is 'blocked' {
+  return status === 'blocked'
+}
+
 export function isRetainedLifecycleChildCloseStatus(
   status: SkillChildCloseEvent['status'],
 ): boolean {

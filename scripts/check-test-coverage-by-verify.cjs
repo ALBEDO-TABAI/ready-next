@@ -33,7 +33,13 @@ const DISK_EXCLUDE_PREFIXES = [
   'build/',
 ]
 
-const SCRIPT_KEY_RE = /^(verify|test)(?::|$)/
+// Stage 5.1 closure: coverage sources are walked only from `verify:*` /
+// `verify` aggregators. A bare `test:*` entry that nothing in the verify
+// chain calls is *not* a coverage source — otherwise a parked test bucket
+// (e.g. `test:ui-contracts`) silently satisfies coverage without ever
+// running in CI. Per-script chaining via `npm run` is still expanded
+// recursively, so `verify:k` → `npm run test:k:gates` → … keeps working.
+const COVERAGE_ROOT_RE = /^verify(?::|$)/
 
 main()
 
@@ -63,9 +69,13 @@ function checkTestCoverageByVerify({ root = ROOT } = {}) {
   const referenced = new Set()
   const visited = new Set()
   for (const key of Object.keys(PKG.scripts || {})) {
-    if (!SCRIPT_KEY_RE.test(key)) continue
+    if (!COVERAGE_ROOT_RE.test(key)) continue
     expandReferenced(PKG.scripts, key, visited, referenced, root)
   }
+  // The default `npm test` (script key `test`) and `test:k:gates`-style
+  // scripts that are reachable only from `verify:*` are picked up via the
+  // recursive `npm run X` walk inside expandReferenced. Top-level `test:*`
+  // entries that no verify chain calls are deliberately NOT roots.
 
   // 2. Build disk set.
   const disk = new Set()

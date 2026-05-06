@@ -525,7 +525,12 @@ test('TurnEngine applies resumed freshContractFields wholesale', async () => {
 
     const result = await engine.execute(request)
 
-    assert.equal(result.status, 'done')
+    // freshContractFields force `parentNextHint: 'wait_for_close_event'`,
+    // which the engine interprets as "park the parent and wait for the
+    // child close event". The terminal IPC status is therefore 'checkpoint'
+    // (the parent is in a wait state, not finished). The earlier
+    // expectation of 'done' was written before this contract solidified.
+    assert.equal(result.status, 'checkpoint')
     assert.ok(capturedContract, 'resume branch must apply freshContractFields via Object.assign')
     assert.equal(capturedContract.childCloseEvent, null)
     assert.equal(capturedContract.childStatus, 'running')

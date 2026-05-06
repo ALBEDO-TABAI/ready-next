@@ -5,7 +5,7 @@ import type {
   ToolTraceEvent,
 } from './types'
 import type { RecoveryRecordData, TaskProjectionRecordData } from '../../types/electron'
-import { phaseToUserLabel, projectionStatusToUserLabel } from './task-status-vocabulary'
+import { phaseToUserLabel, projectionStatusToUserLabel, taskCardVisualStateLabel } from './task-status-vocabulary'
 import { filterUserVisibleToolTraceEvents, sanitizeInternalAgentDisplayText } from './toolTraceVisibility'
 
 export type TaskSectionKey = 'overview' | 'plan' | 'details' | 'artifacts' | 'memory'
@@ -375,13 +375,13 @@ export function deriveTaskCardRuntimeState(run: TaskCardRunLike): TaskCardRuntim
   const isAgentHandoff = isInternalAgentHandoffTask(run)
   const isFailed = (run.phase === 'error' || run.status === 'failed') && !hasLiveBackground && !hasBudgetPaused
   if (isFailed) {
-    return { visualState: 'failed', statusLabel: '失败', actionSet: ['retry', 'cancel', 'open_artifact'] }
+    return { visualState: 'failed', statusLabel: taskCardVisualStateLabel('failed'), actionSet: ['retry', 'cancel', 'open_artifact'] }
   }
   if (hasBudgetPaused) {
-    return { visualState: 'budget_paused', statusLabel: '预算已暂停', actionSet: ['continue', 'retry', 'cancel'] }
+    return { visualState: 'budget_paused', statusLabel: taskCardVisualStateLabel('budget_paused'), actionSet: ['continue', 'retry', 'cancel'] }
   }
   if (hasLiveBackground) {
-    return { visualState: 'background_running', statusLabel: '后台运行中', actionSet: ['continue', 'open_artifact', 'cancel'] }
+    return { visualState: 'background_running', statusLabel: taskCardVisualStateLabel('background_running'), actionSet: ['continue', 'open_artifact', 'cancel'] }
   }
   if (
     (run.waitingFor && run.waitingFor !== 'none')
@@ -397,14 +397,14 @@ export function deriveTaskCardRuntimeState(run: TaskCardRunLike): TaskCardRuntim
     )
     return {
       visualState: 'waiting',
-      statusLabel: isAgentHandoff ? '等待继续' : '等待补充',
+      statusLabel: isAgentHandoff ? taskCardVisualStateLabel('waiting_handoff') : taskCardVisualStateLabel('waiting_input'),
       actionSet: actions.length > 0 ? actions : ['continue', 'cancel'],
     }
   }
   if (run.phase === 'done' || run.status === 'done') {
     return {
       visualState: 'done',
-      statusLabel: '已完成',
+      statusLabel: taskCardVisualStateLabel('done'),
       actionSet: hasRecentArtifact(run) ? ['open_artifact'] : [],
     }
   }

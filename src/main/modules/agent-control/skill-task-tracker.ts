@@ -576,7 +576,7 @@ function recordTaskRunEvent(event: SkillTaskEvent, stepId: string, nowIso: strin
     ? current.resumePayload ?? null
     : buildResumePayload(event, stepId)
   try {
-    repository.update(current.id, {
+    repository.updateRowSync(current.id, {
       scopeId: event.scopeId || current.scopeId,
       sessionId: event.sessionId || current.sessionId,
       agent: event.agent ?? current.agent,
@@ -656,7 +656,7 @@ function recordLifecycleTaskRunEvent(
     ? current.steps.map((item, index) => (index === existingStepIndex ? runStep : item))
     : [...current.steps, runStep]
   try {
-    repository.update(current.id, {
+    repository.updateRowSync(current.id, {
       scopeId: event.scopeId || current.scopeId,
       sessionId: event.sessionId || current.sessionId,
       agent: event.agent ?? current.agent,
@@ -1032,7 +1032,7 @@ export function upsertDetachedSkillTaskRun(record: {
     return
   }
   try {
-    repository.update(existing.id, {
+    repository.updateRowSync(existing.id, {
     scopeId: record.scopeId ?? existing.scopeId,
     sessionId: record.sessionId ?? existing.sessionId,
     agent: record.agent ?? existing.agent,

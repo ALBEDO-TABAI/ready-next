@@ -115,11 +115,18 @@ test('Phase 5.1 — executeInspectRunState rejects when neither outputDir nor ta
   )
 })
 
-test('Phase 5.1 — executeInspectRunState rejects when outputDir does not exist', async () => {
-  await assert.rejects(
-    () => executeInspectRunState({ outputDir: '/nonexistent/path/that/should/not/exist' }),
-    /does not exist/,
-  )
+test('Phase 5.1 — executeInspectRunState surfaces a not-found result when outputDir does not exist', async () => {
+  // Production now returns a structured `createMissingRunStateOutput` with
+  // `errorKind: 'outputdir_not_found'` rather than throwing — the model
+  // gets a concrete tool-result it can reason about (e.g. retry with a
+  // different path). The test was written when this path threw; align it
+  // with the current behavior.
+  const out = await executeInspectRunState({ outputDir: '/nonexistent/path/that/should/not/exist' })
+  const text = (out as { text?: string }).text || ''
+  const data = (out as { data: Record<string, unknown> }).data
+  assert.equal(data.found, false)
+  assert.equal(data.errorKind, 'outputdir_not_found')
+  assert.match(text, /does not exist|not a directory/)
 })
 
 test('Phase 5.1 — executeInspectRunState bounds raw output by maxRawBytes', async () => {

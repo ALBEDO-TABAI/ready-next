@@ -1120,6 +1120,8 @@ export class AgentControlRuntime extends EventEmitter {
 
     const restored = restoreContinuationTaskBudgetRuntime({
       taskType: target.projection?.taskType || 'short_task',
+      projectionBudget: target.projection?.budget || null,
+      projectionBudgetRuntime: null,
       budget: target.projection?.budget || null,
     })
     const runtime = restored.runtime

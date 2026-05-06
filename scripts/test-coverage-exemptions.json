@@ -1,6 +1,79 @@
 {
   "schemaVersion": 1,
-  "exempt": [],
+  "exempt": [
+    {
+      "path": "src/__tests__/ui-contracts/document-widget-authoring.test.ts",
+      "reason": "Stage 6 §0.2 bucket-B: ui-contracts drift parked; run on demand via npm run test:ui-contracts (not in verify chain). Workbench-shell-rework is the owning track.",
+      "since": "2026-05-06",
+      "owner": "stage6-ui-contracts-park"
+    },
+    {
+      "path": "src/__tests__/ui-contracts/document-widget-patch-target-resolution.test.ts",
+      "reason": "Stage 6 §0.2 bucket-B: ui-contracts drift parked; run on demand via npm run test:ui-contracts (not in verify chain). Workbench-shell-rework is the owning track.",
+      "since": "2026-05-06",
+      "owner": "stage6-ui-contracts-park"
+    },
+    {
+      "path": "src/__tests__/ui-contracts/icon-rail-resting-thumb-contract.test.ts",
+      "reason": "Stage 6 §0.2 bucket-B: ui-contracts drift parked; run on demand via npm run test:ui-contracts (not in verify chain). Workbench-shell-rework is the owning track.",
+      "since": "2026-05-06",
+      "owner": "stage6-ui-contracts-park"
+    },
+    {
+      "path": "src/__tests__/ui-contracts/rss-list-row-style-contract.test.ts",
+      "reason": "Stage 6 §0.2 bucket-B: ui-contracts drift parked; run on demand via npm run test:ui-contracts (not in verify chain). Workbench-shell-rework is the owning track.",
+      "since": "2026-05-06",
+      "owner": "stage6-ui-contracts-park"
+    },
+    {
+      "path": "src/__tests__/ui-contracts/ui-browser-hook-split-contract.test.ts",
+      "reason": "Stage 6 §0.2 bucket-B: ui-contracts drift parked; run on demand via npm run test:ui-contracts (not in verify chain). Workbench-shell-rework is the owning track.",
+      "since": "2026-05-06",
+      "owner": "stage6-ui-contracts-park"
+    },
+    {
+      "path": "src/__tests__/ui-contracts/ui-partial-failure-contract.test.ts",
+      "reason": "Stage 6 §0.2 bucket-B: ui-contracts drift parked; run on demand via npm run test:ui-contracts (not in verify chain). Workbench-shell-rework is the owning track.",
+      "since": "2026-05-06",
+      "owner": "stage6-ui-contracts-park"
+    },
+    {
+      "path": "src/__tests__/ui-contracts/workbench-icon-alignment-contract.test.ts",
+      "reason": "Stage 6 §0.2 bucket-B: ui-contracts drift parked; run on demand via npm run test:ui-contracts (not in verify chain). Workbench-shell-rework is the owning track.",
+      "since": "2026-05-06",
+      "owner": "stage6-ui-contracts-park"
+    },
+    {
+      "path": "src/__tests__/ui-contracts/workbench-keep-alive-contract.test.ts",
+      "reason": "Stage 6 §0.2 bucket-B: ui-contracts drift parked; run on demand via npm run test:ui-contracts (not in verify chain). Workbench-shell-rework is the owning track.",
+      "since": "2026-05-06",
+      "owner": "stage6-ui-contracts-park"
+    },
+    {
+      "path": "src/__tests__/ui-contracts/workbench-mode-and-rail-slider-contract.test.ts",
+      "reason": "Stage 6 §0.2 bucket-B: ui-contracts drift parked; run on demand via npm run test:ui-contracts (not in verify chain). Workbench-shell-rework is the owning track.",
+      "since": "2026-05-06",
+      "owner": "stage6-ui-contracts-park"
+    },
+    {
+      "path": "src/__tests__/ui-contracts/workbench-mode-switch-ritual-contract.test.ts",
+      "reason": "Stage 6 §0.2 bucket-B: ui-contracts drift parked; run on demand via npm run test:ui-contracts (not in verify chain). Workbench-shell-rework is the owning track.",
+      "since": "2026-05-06",
+      "owner": "stage6-ui-contracts-park"
+    },
+    {
+      "path": "src/__tests__/ui-contracts/workbench-shell-alignment-contract.test.ts",
+      "reason": "Stage 6 §0.2 bucket-B: ui-contracts drift parked; run on demand via npm run test:ui-contracts (not in verify chain). Workbench-shell-rework is the owning track.",
+      "since": "2026-05-06",
+      "owner": "stage6-ui-contracts-park"
+    },
+    {
+      "path": "src/__tests__/ui-contracts/workbench-slider-motion-contract.test.ts",
+      "reason": "Stage 6 §0.2 bucket-B: ui-contracts drift parked; run on demand via npm run test:ui-contracts (not in verify chain). Workbench-shell-rework is the owning track.",
+      "since": "2026-05-06",
+      "owner": "stage6-ui-contracts-park"
+    }
+  ],
   "c4Exempt": [
     {
       "path": "src/__tests__/active-skill-context.test.ts",
@@ -238,12 +311,6 @@
     },
     {
       "path": "src/__tests__/skill-primitive-write-artifact.test.ts",
-      "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
-      "since": "2026-05-06",
-      "owner": "stage5-bulk-import"
-    },
-    {
-      "path": "src/__tests__/skill-projection-patch-todo-based.test.ts",
       "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
       "since": "2026-05-06",
       "owner": "stage5-bulk-import"

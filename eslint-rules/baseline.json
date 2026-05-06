@@ -512,14 +512,6 @@
       "area": "ui-history"
     },
     {
-      "file": "src/__tests__/document-widget-patch-target-resolution.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "1245bcd9633e3b98",
-      "line": 94,
-      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
-      "area": "ui-history"
-    },
-    {
       "file": "src/__tests__/document-widget-system.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "690df9eb6c8e13d8",
@@ -728,14 +720,6 @@
       "area": "ui-history"
     },
     {
-      "file": "src/__tests__/icon-rail-resting-thumb-contract.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "7f3301d56a2f8e40",
-      "line": 7,
-      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
-      "area": "ui-history"
-    },
-    {
       "file": "src/__tests__/input-slot-inset-contract.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "52cbbeee8dab60b4",
@@ -888,14 +872,6 @@
       "area": "ui-history"
     },
     {
-      "file": "src/__tests__/rss-list-row-style-contract.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "ebfde5ac80cefce9",
-      "line": 7,
-      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
-      "area": "ui-history"
-    },
-    {
       "file": "src/__tests__/settings-ai-layout-contract.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "d4267527f5e2ac67",
@@ -968,9 +944,89 @@
       "area": "ui-history"
     },
     {
-      "file": "src/__tests__/ui-browser-hook-split-contract.test.ts",
+      "file": "src/__tests__/ui-contracts/document-widget-patch-target-resolution.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "1245bcd9633e3b98",
+      "line": 94,
+      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/ui-contracts/icon-rail-resting-thumb-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "7f3301d56a2f8e40",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/ui-contracts/rss-list-row-style-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "ebfde5ac80cefce9",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/ui-contracts/ui-browser-hook-split-contract.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "f4ff028fcdbe49b3",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/ui-contracts/ui-partial-failure-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "69d60bdbf7bc320a",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/ui-contracts/workbench-icon-alignment-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "ee6c9840327aaba6",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/ui-contracts/workbench-keep-alive-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "032683f5e0155fa6",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/ui-contracts/workbench-mode-and-rail-slider-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "35c356a211dd7d66",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/ui-contracts/workbench-mode-switch-ritual-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "2ac56d8cc9238cf0",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/ui-contracts/workbench-shell-alignment-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "6bf104fc37e4d6c8",
+      "line": 7,
+      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
+      "area": "ui-history"
+    },
+    {
+      "file": "src/__tests__/ui-contracts/workbench-slider-motion-contract.test.ts",
+      "rule": "ready/no-source-grep-test",
+      "snippetHash": "55cea58f21edfe60",
       "line": 7,
       "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
       "area": "ui-history"
@@ -987,14 +1043,6 @@
       "file": "src/__tests__/ui-mode-split-contract.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "4d49c9149b707862",
-      "line": 7,
-      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
-      "area": "ui-history"
-    },
-    {
-      "file": "src/__tests__/ui-partial-failure-contract.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "69d60bdbf7bc320a",
       "line": 7,
       "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
       "area": "ui-history"
@@ -1048,41 +1096,9 @@
       "area": "ui-history"
     },
     {
-      "file": "src/__tests__/workbench-icon-alignment-contract.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "ee6c9840327aaba6",
-      "line": 7,
-      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
-      "area": "ui-history"
-    },
-    {
-      "file": "src/__tests__/workbench-keep-alive-contract.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "032683f5e0155fa6",
-      "line": 7,
-      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
-      "area": "ui-history"
-    },
-    {
       "file": "src/__tests__/workbench-liquid-shell-contract.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "fb6ccb6352fd72de",
-      "line": 7,
-      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
-      "area": "ui-history"
-    },
-    {
-      "file": "src/__tests__/workbench-mode-and-rail-slider-contract.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "35c356a211dd7d66",
-      "line": 7,
-      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
-      "area": "ui-history"
-    },
-    {
-      "file": "src/__tests__/workbench-mode-switch-ritual-contract.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "2ac56d8cc9238cf0",
       "line": 7,
       "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
       "area": "ui-history"
@@ -1120,22 +1136,6 @@
       "area": "ui-history"
     },
     {
-      "file": "src/__tests__/workbench-shell-alignment-contract.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "6bf104fc37e4d6c8",
-      "line": 7,
-      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
-      "area": "ui-history"
-    },
-    {
-      "file": "src/__tests__/workbench-slider-motion-contract.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "55cea58f21edfe60",
-      "line": 7,
-      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
-      "area": "ui-history"
-    },
-    {
       "file": "src/__tests__/workbench-window-resize-contract.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "dcdc14e1429b0deb",
@@ -1147,7 +1147,7 @@
       "file": "src/main/modules/agent-control/skill-child-run-types.ts",
       "rule": "ready/no-legacy-backdoor",
       "snippetHash": "37d79b230c69107f",
-      "line": 134,
+      "line": 179,
       "snippet": "legacy: {",
       "area": "other-a0"
     }

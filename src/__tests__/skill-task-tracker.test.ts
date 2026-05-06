@@ -31,6 +31,16 @@ function createTaskRunRepositoryHarness() {
         artifacts: patch.artifacts ? patch.artifacts.map((artifact) => ({ ...artifact })) : current.artifacts,
       })
     },
+    updateRowSync(id: string, patch: Partial<SkillTaskRunRecord>) {
+      const current = rows.get(id)
+      if (!current) return
+      rows.set(id, {
+        ...current,
+        ...patch,
+        steps: patch.steps ? patch.steps.map((step) => ({ ...step })) : current.steps,
+        artifacts: patch.artifacts ? patch.artifacts.map((artifact) => ({ ...artifact })) : current.artifacts,
+      })
+    },
     listActiveBySession(sessionId: string) {
       return Array.from(rows.values()).filter((row) =>
         row.sessionId === sessionId && (row.status === 'running' || row.status === 'blocked'),

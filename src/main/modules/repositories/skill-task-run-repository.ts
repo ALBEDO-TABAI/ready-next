@@ -33,6 +33,15 @@ export interface SkillTaskRunArtifact {
   meta?: Record<string, unknown>
 }
 
+/**
+ * Stage 6 L1 contract: ledger writers split into a public funnel (`update`)
+ * which is *forbidden* from touching status/finishedAt, plus the internal
+ * methods `createChildRun` and `updateChildRun` which own those fields. The
+ * public patch shape excludes the two managed fields at the type level so
+ * that static analysis catches misuse before runtime.
+ */
+export type NoStatusUpdatePatch = Omit<Partial<SkillTaskRunRecord>, 'status' | 'finishedAt'>
+
 export interface SkillTaskRunRecord {
   id: string
   scopeId?: string | null
@@ -299,7 +308,38 @@ export class SkillTaskRunRepository {
     )
   }
 
-  update(id: string, patch: Partial<SkillTaskRunRecord>): void {
+  /**
+   * Stage 6 L1 contract: status (and the derived `finishedAt`) are managed
+   * exclusively by `createChildRun` / `updateChildRun`. Public `update` callers
+   * may not touch either field — the type system narrows the patch shape and
+   * a runtime guard catches any dynamic abuse (e.g. test fakes that bypass TS).
+   */
+  update(id: string, patch: NoStatusUpdatePatch): void {
+    if ('status' in patch || 'finishedAt' in patch) {
+      throw new Error(
+        'SkillTaskRunRepository.update cannot mutate status/finishedAt; use updateChildRun()',
+      )
+    }
+    this.updateRowInternal(id, patch, { allowStatus: false })
+  }
+
+  /**
+   * Stage 6 L1 contract: in addition to `createChildRun` / `updateChildRun`,
+   * `updateRowSync` is a sanctioned status writer used by `skill-task-tracker.ts`
+   * to mirror lifecycle events into `skill_task_runs` rows that are not backed
+   * by a `SkillChildRunPayload`. The L1 CI gate (`check-ledger-writer-funnel.cjs`)
+   * whitelists this method by name and confines its callers to the tracker
+   * file plus this repository's own `updateChildRun` indirection.
+   */
+  updateRowSync(id: string, patch: Partial<SkillTaskRunRecord>): void {
+    this.updateRowInternal(id, patch, { allowStatus: true })
+  }
+
+  private updateRowInternal(
+    id: string,
+    patch: Partial<SkillTaskRunRecord>,
+    opts: { allowStatus: boolean },
+  ): void {
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
 
@@ -317,7 +357,7 @@ export class SkillTaskRunRepository {
     if ('action' in patch) assign('action', patch.action)
     if ('toolName' in patch) assign('tool_name', patch.toolName)
     if ('runKind' in patch) assign('run_kind', patch.runKind)
-    if ('status' in patch) assign('status', patch.status)
+    if (opts.allowStatus && 'status' in patch) assign('status', patch.status)
     if ('interactionState' in patch) assign('interaction_state', patch.interactionState)
     if ('goalText' in patch) assign('goal_text', patch.goalText)
     if ('resourceRefs' in patch) assign('resource_refs_json', jsonOrNull(patch.resourceRefs || []))
@@ -337,7 +377,7 @@ export class SkillTaskRunRepository {
     if ('createdAt' in patch) assign('created_at', patch.createdAt)
     if ('startedAt' in patch) assign('started_at', patch.startedAt)
     if ('updatedAt' in patch) assign('updated_at', patch.updatedAt)
-    if ('finishedAt' in patch) assign('finished_at', patch.finishedAt)
+    if (opts.allowStatus && 'finishedAt' in patch) assign('finished_at', patch.finishedAt)
 
     if (updates.length === 0) return
 
@@ -535,7 +575,7 @@ export class SkillTaskRunRepository {
     if (patch.outputDir !== undefined) updatePatch.outputDir = patch.outputDir
     if (patch.runStatePath !== undefined) updatePatch.runStatePath = patch.runStatePath
 
-    this.update(childRunId, updatePatch)
+    this.updateRowInternal(childRunId, updatePatch, { allowStatus: true })
   }
 
   /**

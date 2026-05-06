@@ -1458,6 +1458,8 @@ export class DirectChatEngine extends EventEmitter {
       })
       const restoredBudget = restoreContinuationTaskBudgetRuntime({
         taskType: 'continuation',
+        projectionBudget: projection.budget || null,
+        projectionBudgetRuntime: null,
         continuationState: baseState,
       })
       const resolvedState: ContinuationState = {
@@ -1482,6 +1484,8 @@ export class DirectChatEngine extends EventEmitter {
 
     const restoredBudget = restoreContinuationTaskBudgetRuntime({
       taskType: 'continuation',
+      projectionBudget: null,
+      projectionBudgetRuntime: null,
       continuationState: {
         ...persistedState,
         currentStepId: parsedControl.stepId || persistedState.currentStepId || null,
@@ -1538,6 +1542,8 @@ export class DirectChatEngine extends EventEmitter {
       const intentState = applyContinuationIntentToState(baseState, normalizedIntent)
       const restoredBudget = restoreContinuationTaskBudgetRuntime({
         taskType: 'continuation',
+        projectionBudget: projection.budget || null,
+        projectionBudgetRuntime: null,
         continuationState: intentState,
       })
       const resolvedState: ContinuationState = {
@@ -1559,6 +1565,8 @@ export class DirectChatEngine extends EventEmitter {
     const intentState = applyContinuationIntentToState(persistedState, normalizedIntent)
     const restoredBudget = restoreContinuationTaskBudgetRuntime({
       taskType: 'continuation',
+      projectionBudget: null,
+      projectionBudgetRuntime: null,
       continuationState: intentState,
     })
     const resolvedState: ContinuationState = {

@@ -56,14 +56,14 @@ import {
   getTaskStartModeLabel,
   hasTaskRunResumeIdentity,
   isInternalAgentHandoffTask,
-  type TaskCardRunLike,
-  type TaskSectionKey
+  type TaskSectionKey,
 } from '../../modules/agent/taskCardViewModel'
 import {
   childRunToPhase as childRunPhase,
   childRunToProjectionStatus as childRunProjectionStatus,
   childRunToTaskActions as childRunActions,
   childRunToWaitingFor as childRunWaitingFor,
+  interactionStateToBadgeLabel,
 } from '../../modules/agent/task-status-vocabulary'
 import { formatSingleLinePreview, formatToolTracePreview } from '../../modules/agent/toolTracePreview'
 import { filterUserVisibleToolTraceEvents } from '../../modules/agent/toolTraceVisibility'
@@ -122,10 +122,13 @@ interface PersistedScopeRunSummary {
 
 type PersistedTaskProjection = TaskProjectionRecordData
 
-interface TaskCardRun extends TaskCardRunLike {
-  responseMessageId?: string | null
-  responseSegmentToolTraceStart?: number | null
-}
+// Stage 6 L6: TaskCardRun type lives in task-card-from-projection.ts with a
+// module-private brand symbol; constructors are the only legitimate path.
+import type { TaskCardRun } from './task-card-from-projection'
+import {
+  buildPlaceholderProjectionFromActiveChildRun,
+  taskProjectionToTaskCardRun,
+} from './task-card-from-projection'
 
 interface SerializedTaskSnapshot {
   scopeId: string
@@ -276,7 +279,23 @@ function artifactFromPath(kind: string, label: string, path: string | null | und
   }
 }
 
-function activeChildRunToTaskRun(row: ActiveChildRunSummaryData, fallbackScopeId: string | null): TaskCardRun | null {
+/**
+ * Stage 6 L6 contract: this function synthesizes a `TaskCardRun` from the
+ * `agent:listActiveChildRuns` polling feed and is the renderer's last-resort
+ * fallback when the persisted `task_projections` table has not yet caught up.
+ *
+ * It must remain a debug/control-only path; do not promote it to the primary
+ * task-card source. The canonical view truth is `taskProjectionsForScope(...)`,
+ * fed by main-side projection write-back. When projections cover all
+ * scopes/tasks, this synthesis can be removed entirely (Stage 7+ scope).
+ *
+ * The L6 CI gate (`scripts/check-task-card-single-source.cjs`) enforces:
+ *  - The legacy synthesis name (the pre-Stage-6 form of this function) does
+ *    not appear anywhere; only the debug-named form is allowed.
+ *  - This function continues to live in `ChatPanel.tsx` (or `active-child-run-debug.ts`
+ *    after the Stage 7 file split).
+ */
+function activeChildRunDebugRow(row: ActiveChildRunSummaryData, fallbackScopeId: string | null): TaskCardRun | null {
   const scopeId = row.scopeId || fallbackScopeId
   if (!scopeId) return null
   const status = childRunProjectionStatus(row)
@@ -284,8 +303,8 @@ function activeChildRunToTaskRun(row: ActiveChildRunSummaryData, fallbackScopeId
   const artifacts = [
     artifactFromPath('folder', '输出目录', row.outputDir, row.childRunId),
     artifactFromPath('run_state', 'run_state.json', row.runStatePath, row.childRunId),
-  ].filter(Boolean) as NonNullable<ScopeRunState['recentArtifacts']>
-  return {
+  ].filter((value): value is NonNullable<ScopeRunState['recentArtifacts']>[number] => value !== null)
+  return buildPlaceholderProjectionFromActiveChildRun({
     scopeId,
     taskId: `skill-child:${row.childRunId}`,
     phase: childRunPhase(row),
@@ -326,7 +345,7 @@ function activeChildRunToTaskRun(row: ActiveChildRunSummaryData, fallbackScopeId
     blockedReason: row.blockedReason,
     updatedAt,
     toolTrace: [],
-  }
+  }, row)
 }
 
 function memoryCaptureSourceLabel(
@@ -551,22 +570,7 @@ function taskTypeBadgeLabel(taskType: TaskCardRun['taskType'] | undefined): stri
 function interactionStateBadgeLabel(
   interactionState: TaskCardRun['interactionState'] | undefined
 ): string {
-  switch (interactionState) {
-    case 'awaiting_clarification':
-      return '等补充'
-    case 'awaiting_confirmation':
-      return '等确认'
-    case 'human_takeover':
-      return '人工接手'
-    case 'suspended':
-      return '已暂停'
-    case 'resuming':
-      return '恢复中'
-    case 'running':
-      return '执行中'
-    default:
-      return '进行中'
-  }
+  return interactionStateToBadgeLabel(interactionState)
 }
 
 function recoveryBadgeLabel(recoveryHistory: RecoveryRecordData[]): string {
@@ -617,7 +621,7 @@ function progressPercent(progress: ScopeRunState['progress'] | undefined | null)
   return null
 }
 
-function isTaskVisible(run: TaskCardRun | null | undefined): boolean {
+function isTaskVisible(run: Omit<TaskCardRun, '__brand'> | null | undefined): boolean {
   if (!run) return false
   return Boolean(
     run.taskTitle ||
@@ -2255,7 +2259,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         ) {
           return null
         }
-        return {
+        return taskProjectionToTaskCardRun({
           scopeId: scope.id,
           taskId: run.taskId || run.taskContinuation?.taskId || null,
           phase: run.phase,
@@ -2275,10 +2279,10 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
           updatedAt: run.updatedAt || scope.updatedAt,
           toolTrace: run.toolTrace,
           responseMessageId: run.responseMessageId || null,
-          responseSegmentToolTraceStart: run.responseSegmentToolTraceStart ?? 0
-        } satisfies TaskCardRun
+          responseSegmentToolTraceStart: run.responseSegmentToolTraceStart ?? 0,
+        })
       })
-      .filter(Boolean) as TaskCardRun[]
+      .filter((value): value is TaskCardRun => value !== null)
   }, [filteredScopes, scopeRunStates])
 
   const mergedTaskRuns = useMemo<TaskCardRun[]>(() => {
@@ -2291,7 +2295,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         run,
         run,
       )
-      return {
+      return taskProjectionToTaskCardRun({
         scopeId: run.scopeId,
         taskId: projection?.taskId || run.taskId || run.taskContinuation?.taskId || null,
         phase: run.phase,
@@ -2328,8 +2332,8 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         blockedReason: resolveProjectionBlockedReason(projection, run.blockedReason),
         error: run.error,
         updatedAt: run.updatedAt,
-        toolTrace: []
-      }
+        toolTrace: [],
+      }, projection)
     })
     const merged = new Map<string, TaskCardRun>()
     for (const run of mappedPersisted) merged.set(run.scopeId, run)
@@ -2340,7 +2344,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         run,
         persistedRun,
       )
-      merged.set(run.scopeId, {
+      merged.set(run.scopeId, taskProjectionToTaskCardRun({
         ...run,
         taskId: projection?.taskId || run.taskId || persistedRun?.taskId || run.taskContinuation?.taskId || null,
         status: projection?.status,
@@ -2371,11 +2375,33 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         budgetWarningLevel: projection?.budgetWarningLevel,
         degradationReason: projection?.degradationReason,
         recoveryHistory: projection?.recoveryHistory,
-        blockedReason: resolveProjectionBlockedReason(projection, run.blockedReason)
-      })
+        blockedReason: resolveProjectionBlockedReason(projection, run.blockedReason),
+      }, projection, persistedRun))
+    }
+    // Stage 6 L6: only inject synthesized active-child-run rows when the
+    // persisted projection table has no record covering this child run yet
+    // (boot-time fallback). Once the main-side ledger backfills a
+    // projection for the same childRunId, we drop the synthesized row to
+    // avoid double-rendering. The synthesis remains available for the
+    // debug surface (`activeChildRunDebugRow`).
+    // Stage 6 L6: a projection covers a child-run if either
+    //   (a) the projection's `continuationRef.childRunId` matches, or
+    //   (b) the projection's taskId follows the `skill-child:<id>` form
+    //       (the reconciler at task-projection-reconciler.ts uses this shape).
+    const projectionsCoverChildRunId = (childRunId: string): boolean => {
+      const skillChildTaskId = `skill-child:${childRunId}`
+      for (const list of Object.values(persistedTaskProjections)) {
+        if (!Array.isArray(list)) continue
+        for (const projection of list) {
+          if (projection?.continuationRef?.childRunId === childRunId) return true
+          if (projection?.taskId === skillChildTaskId) return true
+        }
+      }
+      return false
     }
     for (const row of activeChildRuns) {
-      const childRun = activeChildRunToTaskRun(row, currentScopeId)
+      if (projectionsCoverChildRunId(row.childRunId)) continue
+      const childRun = activeChildRunDebugRow(row, currentScopeId)
       if (!childRun) continue
       merged.set(`${childRun.scopeId}:${childRun.taskId}`, childRun)
     }
@@ -2424,7 +2450,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     if (!raw || typeof raw !== 'object') return null
     const snapshot = raw as SerializedTaskSnapshot
     if (!snapshot.scopeId || !snapshot.updatedAt) return null
-    return {
+    return taskProjectionToTaskCardRun({
       scopeId: snapshot.scopeId,
       taskId: snapshot.taskId || snapshot.taskContinuation?.taskId || null,
       phase: snapshot.phase,
@@ -2446,10 +2472,10 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         id: event.id,
         kind: event.kind,
         text: event.text,
-        timestamp: new Date(event.timestamp)
+        timestamp: new Date(event.timestamp),
       })),
-      responseMessageId: snapshot.responseMessageId || null
-    } as TaskCardRun
+      responseMessageId: snapshot.responseMessageId || null,
+    })
   }, [])
 
   const parseSerializedToolTraceSnapshot = useCallback((raw: unknown) => {

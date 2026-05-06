@@ -47,6 +47,7 @@ export function cancelAllPendingWidgetWrites(): void {
 
 function emitWidgetCommitted(tabId: string, widgetId: string | null | undefined): void {
   if (!tabId || !widgetId) return
+  if (typeof window === 'undefined') return
   const api = (window as unknown as { electronAPI?: { document?: { notifyWidgetCommitted?: (payload: {
     tabId: string; widgetId: string; requestId?: string; committedAt: number
   }) => void } } }).electronAPI

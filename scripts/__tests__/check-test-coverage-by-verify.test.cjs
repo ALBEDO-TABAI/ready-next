@@ -151,3 +151,34 @@ test('integration: nested orphan is detected against the live repo (uses real pa
   assert.ok(result.diskCount > 0, 'disk scan must find at least one test file')
   assert.ok(result.referencedCount > 0, 'reference scan must find at least one referenced file')
 })
+
+test('Stage 5.1 hardening: a `test:*` script not chained from any `verify:*` does NOT count as coverage', () => {
+  // Build a synthetic package.json fixture in-memory by walking expandReferenced
+  // directly. We construct two scripts: `verify:k` (a coverage root) and
+  // `test:ui-contracts` (an isolated bucket). The walker, when seeded only
+  // with `verify:k`, must NOT include the test file referenced by
+  // `test:ui-contracts`.
+  const fx = makeFixtureRepo()
+  try {
+    fx.write('src/__tests__/keep.test.ts', 'export {}')
+    fx.write('src/__tests__/ui-contracts/parked.test.ts', 'export {}')
+    const scripts = {
+      'verify:k': 'npm run test:k',
+      'test:k': 'npx tsx --test src/__tests__/keep.test.ts',
+      'test:ui-contracts': 'npx tsx --test src/__tests__/ui-contracts/parked.test.ts',
+    }
+    const visited = new Set()
+    const referenced = new Set()
+    expandReferenced(scripts, 'verify:k', visited, referenced, fx.root)
+    assert.ok(
+      referenced.has('src/__tests__/keep.test.ts'),
+      'verify:k transitively references keep.test.ts via npm run test:k',
+    )
+    assert.ok(
+      !referenced.has('src/__tests__/ui-contracts/parked.test.ts'),
+      'test:ui-contracts is not on a verify chain, so its tests must not count',
+    )
+  } finally {
+    fx.cleanup()
+  }
+})

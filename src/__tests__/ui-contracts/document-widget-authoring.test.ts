@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { performDocAction } from '../renderer/modules/agent/documentActions'
-import { useDocTabs } from '../renderer/stores/useDocTabs'
+import { performDocAction } from '../../renderer/modules/agent/documentActions'
+import { useDocTabs } from '../../renderer/stores/useDocTabs'
 
 describe('document_insert_widget action', () => {
   it('appends a widget fence to the active document', async () => {

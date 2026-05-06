@@ -322,6 +322,14 @@ export function rebindTaskBudgetRuntime(
 
 export function restoreContinuationTaskBudgetRuntime(params: {
   taskType: TaskType
+  /**
+   * Stage 6 L4 contract: callers MUST pass `projectionBudget` so the helper
+   * sees the freshest persisted ledger truth (`null` = explicit absence).
+   * This shadows the legacy `params.budget` seed and the older
+   * `continuationState.budget` cache, in that priority order.
+   */
+  projectionBudget: TaskBudget | null
+  projectionBudgetRuntime: TaskBudgetRuntime | null
   budget?: TaskBudget | null
   continuationState?: ContinuationState | null
   minimumRemainingIterations?: number
@@ -338,8 +346,9 @@ export function restoreContinuationTaskBudgetRuntime(params: {
     grantedStepBudgetSafetyFloor: false,
   }
   const continuationState = params.continuationState || null
-  const budget = continuationState?.budget || params.budget
-  const runtimeBudget = continuationState?.budgetRuntime || null
+  // Priority: explicit projection input > explicit params.budget seed > legacy continuationState cache.
+  const budget = params.projectionBudget ?? params.budget ?? continuationState?.budget ?? null
+  const runtimeBudget = params.projectionBudgetRuntime ?? continuationState?.budgetRuntime ?? null
 
   const hasBudgetSeed = runtimeBudget
     ? (

@@ -531,6 +531,115 @@ function isSubagentPath(path) {
     || path.startsWith('src/main/modules/agent-control/sub-agent/')
 }
 
+/**
+ * Stage 6 L6 — `ready/no-task-card-run-cast`.
+ *
+ * Forbids cast/local-decl forms that bypass the `TaskCardRun` brand-protected
+ * factory. Caught patterns:
+ *   - `as TaskCardRun`, `<TaskCardRun>x` (direct/identifier)
+ *   - `as Foo.TaskCardRun` (namespace qualifier)
+ *   - `as TaskCardRun[]`, `as Array<TaskCardRun>`, `as ReadonlyArray<TaskCardRun>`,
+ *     `as readonly TaskCardRun[]`, `as Set/Map/Promise<TaskCardRun>`,
+ *     `as [TaskCardRun, ...]` (array/container/tuple)
+ *   - `as import('...').TaskCardRun` (inline import type)
+ *   - `import { TaskCardRun as TCR }` (aliased import)
+ *   - `type X = TaskCardRun`, `interface TaskCardRun {}`, `type TaskCardRun = ...`
+ *     outside the helper file (local-decl bypass)
+ *
+ * Helper file allowlist: `src/renderer/components/agent/task-card-from-projection.ts`.
+ *
+ * Acknowledged remaining gaps (deliberate laundering, out of scope):
+ *   `Pick<TaskCardRun, 'taskId'>`, `TaskCardRun & {}`, `TaskCardRun | null`,
+ *   `as any as TaskCardRun`. These require active intent to bypass.
+ */
+const TASK_CARD_HELPER_PATH = 'src/renderer/components/agent/task-card-from-projection.ts'
+const CONTAINER_TYPE_NAMES = new Set([
+  'Array', 'ReadonlyArray', 'Set', 'ReadonlySet', 'Map', 'ReadonlyMap', 'Promise',
+])
+
+function createNoTaskCardRunCastRule() {
+  return {
+    meta: {
+      type: 'problem',
+      docs: { description: 'forbid cast/local-decl bypass of the TaskCardRun brand-protected factory' },
+      schema: [],
+      messages: {
+        cast: 'TaskCardRun cast bypasses the sealed factory; use taskProjectionToTaskCardRun()',
+        aliasImport: 'Import TaskCardRun without renaming; alias bypass forbidden outside helper',
+        localAlias: 'Local type alias of TaskCardRun is forbidden outside helper file',
+        importType: 'Inline import type referencing TaskCardRun is forbidden outside helper',
+        localInterface: 'Local declaration of TaskCardRun is forbidden outside helper file; import the brand-protected type from task-card-from-projection.ts',
+      },
+    },
+    create(context) {
+      const filename = (context.getFilename ? context.getFilename() : '').replace(/\\/g, '/')
+      if (filename.endsWith(`/${TASK_CARD_HELPER_PATH}`) || filename === TASK_CARD_HELPER_PATH) return {}
+
+      function isTaskCardRef(typeNode) {
+        if (!typeNode) return false
+        if (typeNode.type === 'TSTypeOperator') return isTaskCardRef(typeNode.typeAnnotation)
+        if (typeNode.type === 'TSRestType') return isTaskCardRef(typeNode.typeAnnotation)
+        if (typeNode.type === 'TSArrayType') return isTaskCardRef(typeNode.elementType)
+        if (typeNode.type === 'TSTupleType') return (typeNode.elementTypes || []).some(isTaskCardRef)
+        if (typeNode.type === 'TSTypeReference') {
+          const tn = typeNode.typeName
+          if (tn?.type === 'Identifier' && tn.name === 'TaskCardRun') return true
+          if (tn?.type === 'TSQualifiedName' && tn.right?.name === 'TaskCardRun') return true
+          if (tn?.type === 'Identifier' && CONTAINER_TYPE_NAMES.has(tn.name)) {
+            const args = typeNode.typeArguments?.params || typeNode.typeParameters?.params || []
+            return args.some(isTaskCardRef)
+          }
+        }
+        if (typeNode.type === 'TSImportType') {
+          const q = typeNode.qualifier
+          if (q?.type === 'Identifier' && q.name === 'TaskCardRun') return true
+          if (q?.type === 'TSQualifiedName' && q.right?.name === 'TaskCardRun') return true
+        }
+        return false
+      }
+
+      return {
+        TSInterfaceDeclaration(node) {
+          if (node.id?.name === 'TaskCardRun') {
+            context.report({ node, messageId: 'localInterface' })
+          }
+        },
+        TSTypeAliasDeclaration(node) {
+          if (node.id?.name === 'TaskCardRun') {
+            context.report({ node, messageId: 'localInterface' })
+            return
+          }
+          if (isTaskCardRef(node.typeAnnotation)) {
+            context.report({ node, messageId: 'localAlias' })
+          }
+        },
+        ImportDeclaration(node) {
+          for (const spec of node.specifiers || []) {
+            if (spec.type !== 'ImportSpecifier') continue
+            const imported = spec.imported?.name
+            const local = spec.local?.name
+            if (imported === 'TaskCardRun' && local && local !== imported) {
+              context.report({ node: spec, messageId: 'aliasImport' })
+            }
+          }
+        },
+        TSAsExpression(node) {
+          if (isTaskCardRef(node.typeAnnotation)) {
+            const messageId = node.typeAnnotation?.type === 'TSImportType' ? 'importType' : 'cast'
+            context.report({ node, messageId })
+          }
+        },
+        TSTypeAssertion(node) {
+          if (isTaskCardRef(node.typeAnnotation)) {
+            const messageId = node.typeAnnotation?.type === 'TSImportType' ? 'importType' : 'cast'
+            context.report({ node, messageId })
+          }
+        },
+      }
+    },
+  }
+}
+
 const rules = {
   'no-source-grep-test': createBaselineAwareRule(RULE_IDS.sourceGrep, {
     description: 'disallow readFileSync source-grep assertions in tests',
@@ -550,6 +659,7 @@ const rules = {
   'no-subagent-leak': createNoSubagentLeakRule(),
   'no-coordinator-id-leak': createNoCoordinatorIdLeakRule(),
   'no-inline-system-reminder-write': createNoInlineSystemReminderWriteRule(),
+  'no-task-card-run-cast': createNoTaskCardRunCastRule(),
   'test-helper-must-declare-invariant-breach': createTestHelperMustDeclareInvariantBreachRule(),
 }
 

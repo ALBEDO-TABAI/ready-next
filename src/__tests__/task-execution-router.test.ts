@@ -83,9 +83,9 @@ test('task execution router restores continuation from projection state when ava
     resolution,
     envelope,
     capabilities,
-    currentTaskContext: {
-      continuationTaskId: 'task-3',
-      continuationProjection: {
+    continuationContext: {
+      state: null,
+      projection: {
         taskId: 'task-3',
         scopeId: 'scope-1',
         runId: 'run-1',

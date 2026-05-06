@@ -328,6 +328,7 @@ import {
   resumeSkillChildRun,
 } from './skill-child-runner'
 import {
+  isBlockedChildCloseStatus,
   isCompletedChildCloseStatus,
   isFailedChildCloseStatus,
   isKilledChildCloseStatus,
@@ -1948,7 +1949,7 @@ export class TurnEngine {
           // Intentional fallthrough — do NOT call finish() here.
         } else {
           const childStatus = childCommand.closeEvent.status
-          const canDelegateBlockedResume = childStatus === 'blocked'
+          const canDelegateBlockedResume = isBlockedChildCloseStatus(childStatus)
             && childCommand.closeEvent.terminalReason === 'blocked_external'
           if (!isDirectlyResumableChildStatus(childStatus) && !canDelegateBlockedResume) {
             const detail = childCommand.closeEvent.error?.message
@@ -2240,11 +2241,10 @@ export class TurnEngine {
         resolution: taskTypeResolution,
         envelope: executionIntentContext.requestEnvelope,
         capabilities: reconciledRunCapabilities.runtimeSnapshot,
-        currentTaskContext: continuationTaskId
+        continuationContext: continuationTaskId
           ? {
-            continuationTaskId,
-            continuationProjection,
-            continuationState,
+            state: continuationState ?? null,
+            projection: continuationProjection ?? null,
           }
           : null,
       })

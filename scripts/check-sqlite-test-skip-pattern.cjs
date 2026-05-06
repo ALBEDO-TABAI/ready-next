@@ -252,7 +252,7 @@ function reachesNativeBackedModule(testAbs, root, nativeBackedModules) {
   return false
 }
 
-function extractValueRelativeImports(src, fromFile) {
+function extractValueRelativeImports(src, _fromFile) {
   const out = new Set()
   // strip `import type ... from '...'` lines first
   const stripped = src
@@ -284,7 +284,7 @@ function extractValueRelativeImports(src, fromFile) {
   return out
 }
 
-function resolveLocalImport(spec, fromFile, root) {
+function resolveLocalImport(spec, fromFile, _root) {
   const dir = path.dirname(fromFile)
   const candidates = [
     path.resolve(dir, spec),

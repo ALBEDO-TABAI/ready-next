@@ -3,10 +3,10 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, it } from 'node:test'
 
-import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
-import { collectDocumentWidgets } from '../shared/document-widget-parse'
-import { performDocAction } from '../renderer/modules/agent/documentActions'
-import { useDocTabs } from '../renderer/stores/useDocTabs'
+import { buildRequestEnvelope } from '../../main/modules/agent-control/request-envelope'
+import { collectDocumentWidgets } from '../../shared/document-widget-parse'
+import { performDocAction } from '../../renderer/modules/agent/documentActions'
+import { useDocTabs } from '../../renderer/stores/useDocTabs'
 
 const EXECUTOR_PATH = resolve(
   process.cwd(),

@@ -35,6 +35,7 @@ import { shouldExposeSkillAction } from '../main/modules/tools/skills-tools'
 
 const TURN_ENGINE_PATH = new URL('../main/modules/agent-control/turn-engine.ts', import.meta.url)
 const DIRECT_CHAT_PATH = new URL('../main/modules/claude-bridge/direct-chat.ts', import.meta.url)
+const SKILL_TURN_IDENTITY_PATH = new URL('../main/modules/agent-control/skill-turn-identity.ts', import.meta.url)
 
 // skill-resume F1 — narrative integration test that walks the full chain a
 // resume bug walked in production:
@@ -149,9 +150,15 @@ describe('skill-resume end-to-end (F1)', () => {
       assert.equal(latest?.success, false)
 
       const turnEngineSource = readFileSync(TURN_ENGINE_PATH, 'utf8')
-      assert.match(turnEngineSource, /getLatestSkillRun\(request\.sessionId\)/)
+      const skillTurnIdentitySource = readFileSync(SKILL_TURN_IDENTITY_PATH, 'utf8')
+      // Stage 4 W3 cutover: the skill-history rearm call site and the
+      // diagnostic emission moved out of turn-engine.ts into the
+      // SkillTurnIdentity resolver. resolveRecentSkillTaskRun is still wired
+      // through turn-engine as a host capability (lines 1547/1579) so we
+      // keep that pin on the engine.
       assert.match(turnEngineSource, /resolveRecentSkillTaskRun/)
-      assert.match(turnEngineSource, /reference_skill_rearmed_from_skill_history/)
+      assert.match(skillTurnIdentitySource, /getLatestSkillRun\(\s*ctx\.sessionId\s*\)/)
+      assert.match(skillTurnIdentitySource, /reference_skill_rearmed_from_skill_history/)
 
       const directChatSource = readFileSync(DIRECT_CHAT_PATH, 'utf8')
       assert.match(directChatSource, /resolveRecentSkillTaskRun/)

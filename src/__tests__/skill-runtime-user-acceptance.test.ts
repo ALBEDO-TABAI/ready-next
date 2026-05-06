@@ -341,7 +341,8 @@ function updateRunAndProjection(
   projectionStatus: TaskProjectionRecord['status'],
   options: { blockerType?: string; blockedReason?: string | null; pauseReason?: string | null } = {},
 ): void {
-  fixture.skillRuns.update(fixture.taskRunId, makeSkillRun(fixture, runStatus))
+  // Stage 6 L1: status writes go through updateRowSync (acceptance harness path).
+  fixture.skillRuns.updateRowSync(fixture.taskRunId, makeSkillRun(fixture, runStatus))
   fixture.projections.update(fixture.taskRunId, makeProjection(fixture, projectionStatus, options))
 }
 
@@ -419,7 +420,11 @@ function assertAcceptanceEvidence(fixture: AcceptanceFixture, options: { expectD
 
   const runtimeState = deriveTaskCardRuntimeState(viewRunFromProjection(projection))
   const viewModel = buildTaskCardViewModel(viewRunFromProjection(projection), undefined)
-  assert.equal(viewModel.title, '技能执行 · Video Expert Analyzer')
+  // Internal-style "技能执行 · …" titles are intentionally rewritten by
+  // formatTaskTitleForUser → '正在处理任务' (the canonical user-facing label).
+  // The taskTitle stored on the projection is preserved (assert above on
+  // taskRun.detachedTaskId etc.); only the user-visible title is normalised.
+  assert.equal(viewModel.title, '正在处理任务')
 
   const runStateDone = ['completed', 'success', 'done'].includes(String(runState.status || '').toLowerCase())
   if (options.expectDone) {

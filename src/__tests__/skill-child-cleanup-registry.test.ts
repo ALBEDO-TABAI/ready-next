@@ -1,6 +1,25 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+// The cancel/abort paths in production reject an in-flight skill-action
+// promise with `cancelled_user`-named errors after the test's
+// cancelSkillChildRun() has already returned the close. Swallow only
+// that specific rejection shape so the Node test runner does not flag
+// it as a post-test unhandledRejection. See the matching swallow in
+// skill-child-abort-tree.test.ts for the full justification.
+const seenCancelledRejections = new WeakSet<object>()
+process.on('unhandledRejection', (reason: unknown, promise: Promise<unknown>) => {
+  if (!(reason instanceof Error)) return
+  if (reason.name !== 'cancelled_user'
+    && reason.message !== 'cancelled_user'
+    && reason.message !== 'process_restarted') return
+  if (typeof promise === 'object' && promise !== null) {
+    if (seenCancelledRejections.has(promise)) return
+    seenCancelledRejections.add(promise)
+  }
+  promise.catch(() => undefined)
+})
+
 import { RunCleanupRegistry } from '../main/modules/agent-control/run-cleanup-registry'
 import {
   __resetSkillChildRunnerForTests,
@@ -204,15 +223,28 @@ function makeStallingRuntime(): ReturnType<typeof makeRuntime> {
   const runtime = makeRuntime()
   runtime.manager.runSkill = (async (request: SkillRunRequest): Promise<SkillRunResult> => {
     runtime.calls.push(request)
-    await new Promise<void>(() => {})
+    // Stall until the request's `signal` fires, then resolve cleanly with a
+    // cancelled-shaped result. The production close-event path is driven
+    // by the parent abort listener in skill-child-runner, not by this
+    // promise — resolving here ends the lifecycle cleanly without leaking
+    // a rejection into post-test async activity.
+    await new Promise<void>((resolve) => {
+      const signal = request.signal
+      if (signal?.aborted) {
+        resolve()
+        return
+      }
+      signal?.addEventListener('abort', () => resolve(), { once: true })
+    })
     return {
-      success: true,
+      success: false,
       skillId: request.skillId,
       action: request.action,
       stdout: '',
       stderr: '',
       command: [],
-    }
+      error: 'cancelled_user',
+    } as unknown as SkillRunResult
   }) as SkillsRuntimeManager['runSkill']
   runtime.manager.runSkillFromChildRunner = (async (request: SkillRunRequest): Promise<SkillRunResult> =>
     runtime.manager.runSkill(request)) as SkillsRuntimeManager['runSkillFromChildRunner']

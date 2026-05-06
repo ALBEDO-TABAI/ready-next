@@ -17,7 +17,11 @@ test('ToolRuntime wraps legacy string results into structured outputs while pres
     ],
     executeTool: async (toolCall) => {
       starts.push(toolCall.id)
-      await new Promise((resolve) => setTimeout(resolve, toolCall.id === '1' ? 30 : toolCall.id === '2' ? 10 : 5))
+      // Use larger gaps to keep the ordering deterministic under
+      // concurrency/scheduler jitter (the original 30/10/5ms gaps were
+      // flaky on busy CI runs and during full-suite runs where the
+      // event loop is contended).
+      await new Promise((resolve) => setTimeout(resolve, toolCall.id === '1' ? 200 : toolCall.id === '2' ? 80 : 20))
       finishes.push(toolCall.id)
       return `${toolCall.name}:ok`
     },

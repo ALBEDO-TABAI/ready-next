@@ -164,8 +164,12 @@ test('phase2 promotes structured tool execution into ToolRuntime', () => {
       pattern: /const groups = groupParallelSafeToolCalls\(params\.toolCalls\)/,
     },
     {
+      // The lookup helper was renamed from `getToolDefinition` to
+      // `getToolDefinitionForExecution` (the registry now distinguishes
+      // execution-shape vs schema-shape definitions). Pin the post-rename
+      // shape against the runtime's default-executor path.
       label: 'tool runtime should only require registered tool definitions on the default executor path during phase2',
-      pattern: /requireRegisteredTool:\s*!params\.executeTool[\s\S]*if \(options\?\.requireRegisteredTool && !defaultToolGateway\.getToolDefinition\(toolName\)\)/,
+      pattern: /requireRegisteredTool:\s*!params\.executeTool[\s\S]*if \(options\?\.requireRegisteredTool && !defaultToolRegistry\.getToolDefinitionForExecution\(toolName\)\)/,
     },
     {
       label: 'tool runtime should recover timeout and host failures into structured results during phase2',
@@ -206,8 +210,10 @@ test('phase2 promotes structured tool execution into ToolRuntime', () => {
       pattern: /export async function executeToolCall\([\s\S]*\): Promise<ToolExecutionOutput>/,
     },
     {
+      // The lookup helper was renamed to `getToolDefinitionForExecution` and
+      // moved off the gateway onto the `defaultToolRegistry` directly.
       label: 'tool executor should still resolve formal tool definitions during phase2',
-      pattern: /const definition = defaultToolGateway\.getToolDefinition\(toolName\)/,
+      pattern: /const definition = defaultToolRegistry\.getToolDefinitionForExecution\(toolName\)/,
     },
     {
       label: 'tool executor should dispatch through the definition domain during phase2',

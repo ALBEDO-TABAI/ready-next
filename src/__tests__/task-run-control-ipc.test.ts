@@ -52,7 +52,11 @@ test('task run control actions are exposed through runtime, IPC, preload, render
   assert.match(agentStore, /continuationIntent:\s*pendingContinuationIntent \|\| undefined/)
   assert.match(ipcHandler, /agent\?: string/)
   assert.match(runtime, /agent\?: string/)
-  assert.match(runtime, /this\.createLocalScope\(payload\.agent,\s*payload\.scopeId\)/)
+  // The recoverable-scope wiring extracts agent/scopeId from the inbound
+  // payload and forwards them to createLocalScope. Production now reads via
+  // local arrow params (`(agent, scopeId) => this.createLocalScope(agent, scopeId)`)
+  // — pin both shapes so a regression that drops the wiring still trips.
+  assert.match(runtime, /this\.createLocalScope\((?:payload\.agent,\s*payload\.scopeId|agent,\s*scopeId)\)/)
 
   assert.match(taskPanel, /window\.electronAPI\.agent\.suspendRun\(/)
   assert.match(taskPanel, /window\.electronAPI\.agent\.resumeRun\(/)

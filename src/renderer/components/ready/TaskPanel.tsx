@@ -8,7 +8,12 @@ import {
 } from '../../stores/useAgent'
 import type { RecoveryRecordData, TaskProjectionRecordData } from '../../types/electron'
 import { deriveTaskCardRuntimeState } from '../../modules/agent/taskCardViewModel'
-import { phaseToUserLabel, projectionStatusToUserLabel } from '../../modules/agent/task-status-vocabulary'
+import {
+  interactionStateToUserLabel,
+  phaseToUserLabel,
+  projectionStatusToUserLabel,
+  taskStepStatusToUserLabel,
+} from '../../modules/agent/task-status-vocabulary'
 import { isForegroundBusyScopeRunState } from '../../modules/agent/scopeRunState'
 import AgentSelector from './AgentSelector'
 import AgentTagRow from './AgentTagRow'
@@ -164,26 +169,13 @@ function taskTypeLabel(taskType: TaskProjectionRecordData['taskType'] | undefine
 function interactionStateLabel(
   interactionState: TaskProjectionRecordData['interactionState'] | undefined,
 ): string {
-  switch (interactionState) {
-    case 'awaiting_clarification':
-      return '等待补充'
-    case 'awaiting_confirmation':
-      return '等待确认'
-    case 'human_takeover':
-      return '人工接手'
-    case 'suspended':
-      return '已暂停'
-    case 'resuming':
-      return '恢复中'
-    case 'running':
-      return '执行中'
-    default:
-      return '进行中'
-  }
+  return interactionStateToUserLabel(interactionState)
 }
 
 function projectionStatusLabel(status: TaskProjectionRecordData['status'] | undefined): string {
-  return projectionStatusToUserLabel(status, 'taskPanel') ?? '待命'
+  // `taskPanel` surface always returns a non-null label; fall back to phase
+  // helper rather than inlining a canonical label string.
+  return projectionStatusToUserLabel(status, 'taskPanel') ?? phaseToUserLabel(undefined, 'taskPanel')
 }
 
 function projectionStatusTone(
@@ -943,15 +935,7 @@ export default function TaskPanel() {
                               : 'var(--text-light)'
                       }}
                     >
-                      {step.status === 'done'
-                        ? '已完成'
-                        : step.status === 'running'
-                          ? '进行中'
-                          : step.status === 'blocked'
-                            ? '待继续'
-                            : step.status === 'error'
-                              ? '失败'
-                              : '待执行'}
+                      {taskStepStatusToUserLabel(step.status)}
                     </span>
                     {step.updatedAt && (
                       <span className="text-[9px]" style={{ color: 'var(--text-light)' }}>

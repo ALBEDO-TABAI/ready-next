@@ -70,15 +70,19 @@ test('turn-engine emits a [skill_detection] log line for observability', () => {
   assert.match(turnEngine, /\[skill_detection\][\s\S]*preferredSkillTools=/)
 })
 
-test('turn-engine derives preferredSkillToolNames solely from explicit skill match (post-Phase 4)', () => {
+test('turn-engine derives preferredSkillToolNames via the skill-context binding gate', () => {
   const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
-  // Phase 4 retired the skill_executions state machine, which also retired
-  // the "bare 继续 keeps an in-flight skill's tools loaded" fallback. Now
-  // preferredSkillToolNames is gated strictly on hasExplicitSkill; the old
-  // `hasExplicitSkill || hasActiveSkill` disjunction must not reappear.
-  assert.match(turnEngine, /const\s+preferredSkillToolNames\s*=\s*hasExplicitSkill/)
-  assert.doesNotMatch(turnEngine, /hasActiveSkillExecution\s*\(/)
-  assert.doesNotMatch(turnEngine, /hasActiveSkill\s*\|\|/)
+  // Stage 4 W3 cutover: preferredSkillToolNames is initially derived from the
+  // legacy skill-context disjunction (`hasExplicitSkill || hasActiveSkill`)
+  // and then re-bound from the W3 SkillToolAuthorization frame steering.
+  // The legacy disjunction is preserved as a transitional bootstrap: when no
+  // turnFrame.steering arrives (e.g. early in a turn before the authorization
+  // resolves), the gate still has to know whether to engage skill-bound
+  // filtering. This pins both stages of the derivation chain — both must
+  // remain present until SkillToolAuthorization fully replaces the bootstrap.
+  assert.match(turnEngine, /legacyPreferredSkillToolNames/)
+  assert.match(turnEngine, /shouldBindSkillContextForTurn\s*&&\s*\(hasExplicitSkill\s*\|\|\s*hasActiveSkill\)/)
+  assert.match(turnEngine, /preferredSkillToolNames\s*=\s*\[\.\.\.turnFrame\.steering\.preferredToolNames\]/)
 })
 
 test('turn-engine suppresses implicit continuation lookup when a retry resolves to an explicit skill', () => {
@@ -101,17 +105,30 @@ test('turn-engine suppresses implicit continuation lookup when a retry resolves 
 
 test('turn-engine treats config repair turns as skill resume candidates', () => {
   const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
+  const skillTurnIdentity = readWorkspaceFile('src/main/modules/agent-control/skill-turn-identity.ts')
 
   assert.match(turnEngine, /matchesConfigRepairIntent/)
   assert.match(turnEngine, /isConfigRepairTurnDetected/)
   assert.match(turnEngine, /isSkillResumeTurnDetected/)
-  assert.match(turnEngine, /No recent skill task is available to resume/)
+  // Stage 4 W3 moved the "no recent skill task is available to resume after
+  // config repair turn" log emission out of turn-engine and into the
+  // SkillTurnIdentity resolver. The diagnostic must still exist somewhere on
+  // the resume path; we now pin it to its current home.
+  assert.match(skillTurnIdentity, /No recent skill task is available to resume/)
 })
 
 test('turn-engine synthesizes skill context from an armed reference hint on retry-only turns', () => {
   const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
+  const skillTurnIdentity = readWorkspaceFile('src/main/modules/agent-control/skill-turn-identity.ts')
 
+  // turn-engine still calls getCurrentReferenceSkillHint?.(request.sessionId)
+  // directly during its W3 SkillTurnIdentity resolution pass.
   assert.match(turnEngine, /getCurrentReferenceSkillHint\?\.\(request\.sessionId\)/)
-  assert.match(turnEngine, /用户希望继续使用 skill "\$\{[^}]+\.name\}"/)
-  assert.match(turnEngine, /reference_skill_rearmed_from_current_hint/)
+  // The synthesised context-text and the rearm metric were moved into
+  // skill-turn-identity.ts as part of the W3 cutover. Pin them to the new
+  // home so a regression that re-inlines them in turn-engine still passes
+  // here (this test asserts they exist on the resume path, regardless of
+  // file location).
+  assert.match(skillTurnIdentity, /用户希望继续使用 skill "\$\{[^}]+\}"/)
+  assert.match(skillTurnIdentity, /reference_skill_rearmed_from_current_hint/)
 })

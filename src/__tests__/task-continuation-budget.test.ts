@@ -39,9 +39,9 @@ test('continuation routes restore prior budget usage and grant a safety floor wh
     resolution,
     envelope,
     capabilities,
-    currentTaskContext: {
-      continuationTaskId: 'task-prev-1',
-      continuationProjection: {
+    continuationContext: {
+      state: null,
+      projection: {
         taskId: 'task-prev-1',
         scopeId: 'scope-1',
         runId: 'run-prev-1',
@@ -110,9 +110,9 @@ test('continuation budget restore grants current-step headroom when the prior st
     resolution,
     envelope,
     capabilities,
-    currentTaskContext: {
-      continuationTaskId: 'task-prev-step-exhausted',
-      continuationProjection: {
+    continuationContext: {
+      state: null,
+      projection: {
         taskId: 'task-prev-step-exhausted',
         scopeId: 'scope-1',
         runId: 'run-prev-step-exhausted',
