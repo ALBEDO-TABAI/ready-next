@@ -124,15 +124,16 @@ contract says about output paths, run-state path, and progress fingerprint.
 
 ## 4. Resume semantics
 
-Long skills resume across turns. Today the resume payload travels through
+Long skills resume across turns. The resume payload travels through
 `buildContinuityResumePayload` and lands in `rememberSkillRun`, which the
-supervisor reads back next turn. After the child-loop migration:
+supervisor reads back next turn. The child-loop runtime owns resume:
 
 - **Child reads its own state on resume.** The child re-opens
   `<outputDir>/run_state.json` (and any sibling artefacts the manifest
-  declares) and rebuilds its internal loop position. Parent provides the
-  paths via `SkillRunContract.runStatePath` / `outputDir` / `artifactPaths`,
-  but does **not** parse the file content for resume-position logic.
+  declares) and rebuilds its internal loop position. The parent provides
+  the paths via `SkillRunContract.runStatePath` / `outputDir` /
+  `artifactPaths`, but does **not** parse the file content for
+  resume-position logic.
 - **Parent carries a summary only.** The parent's contract carries
   `progressFingerprint`, `liveness`, `status`, `blockers`, and the durable
   handles (`taskRunId`, `detachedTaskId`, `jobId`). That is enough for the
@@ -140,16 +141,17 @@ supervisor reads back next turn. After the child-loop migration:
   the blocker first". The parent never reconstructs internal step state.
 - **Single close event.** When a child run ends — for any reason: completion,
   budget exhaustion, blocker, cancellation, infra error — the child emits one
-  structured close event. The parent's `consumeExecutedToolBatch` (today) /
-  `onChildClose` (future) consumes that one event, applies a `framePatch`,
-  and lets the next-turn resolver decide what to do.
+  structured close event. The parent's `consumeExecutedToolBatch` consumes
+  that one event, applies a `framePatch`, and lets the next-turn resolver
+  decide what to do.
 
-The orphan-result regression test added in this wave (`turn-engine-force-tool-
-dispatch.test.ts`) is the most concrete expression of this rule for the
-present-day parent-only world: when the parent's force-tool dispatch is
-interrupted mid-flight, exactly one terminal close event must surface. The
-same invariant will continue to hold for the child-loop runner: a cancelled
-child surfaces one close event, never an orphan tool_use.
+The orphan-result regression test (`turn-engine-force-tool-dispatch.test.ts`)
+is the most concrete expression of this invariant: when a forced dispatch
+is interrupted mid-flight, exactly one terminal close event must surface,
+never an orphan `tool_use`. After Stage N the same invariant holds for
+both the legacy non-child-loop force path AND the child-loop runner —
+a cancelled child surfaces one close event with
+`terminalReason='cancelled_user'`.
 
 ## 5. Where the boundary lives in the source (Phase 1–7 landed)
 
@@ -297,9 +299,12 @@ of `inspectSkillTask` via `normalizeSkillStatus(...)`.
 ## 6. Pre-Stage-N migration anchors (historical)
 
 Below are the boundaries that carried `// TODO(skill-child-loop):`
-comments before the migration. They remain in the source as comments but
-are no longer aspirational — Phases 1–7 implemented them, and Stage N
-(2026-05-07) closed the parent retirement at each anchor.
+comments before the migration. Phases 1–7 implemented them, and Stage N
+(2026-05-07) closed the parent retirement at each anchor; the bulk of
+the TODO markers have been replaced with Stage-N-landing comments.
+Only the supervisor reconciliation in §5.3 still carries a Stage-N-stamp
+comment (no TODO) because its semantics did not change — it remains the
+parent's out-of-band liveness probe with a shrunken consumer set.
 
 ### 5.1 `src/main/modules/agent-control/turn-engine.ts`
 
