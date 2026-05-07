@@ -27,6 +27,7 @@ import { logAgentMetric } from '../agent-control/metrics'
 import { isRendererAgentMetricName } from '../../../shared/renderer-agent-metrics'
 import type { SendScopedUserMessage } from '../agent-control/send-scoped-confirmation'
 import type { ScopeRunEventPayload } from '../agent-control/types'
+import type { TaskProjectionChangeEvent } from '../agent-control/run-contracts'
 
 let mammothLib: typeof import('mammoth') | null = null
 let xlsxLib: typeof import('xlsx') | null = null
@@ -137,6 +138,16 @@ export interface IPCResponse<T = unknown> {
 let runtime: AgentControlRuntime | null = null
 const chatRepository = new ChatRepository()
 
+/**
+ * Stage O — module-scoped slot holding the unsubscribe function returned
+ * when `setupAgentIPC` subscribes to `taskProjectionStore.on('change')`.
+ * Dev-reload re-runs `setupAgentIPC`; we call this slot before re-binding
+ * to prevent listener leaks. `cleanupAgentRuntime` also drains it ahead
+ * of `await runtime.stop()` so a trailing emit during stop doesn't fire
+ * into a destroyed mainWindow.
+ */
+let currentTaskProjectionsChangeOff: (() => void) | null = null
+
 function cleanupSkillSessionState(sessionId?: string, reason = 'Skill session state cleared'): void {
   if (sessionId) {
     clearLastReferenceSkill(sessionId)
@@ -158,6 +169,13 @@ function cancelSkillSessionPendingInteractions(sessionId?: string, reason = 'Ski
 }
 
 export async function cleanupAgentRuntime(): Promise<void> {
+  // Stage O — drop the projection-change subscription BEFORE stopping the
+  // runtime so any trailing emit during stop() doesn't reach a destroyed
+  // mainWindow. Idempotent: the slot is null on first call.
+  if (currentTaskProjectionsChangeOff) {
+    try { currentTaskProjectionsChangeOff() } catch { /* ignore */ }
+    currentTaskProjectionsChangeOff = null
+  }
   if (runtime) {
     await runtime.stop()
     runtime = null
@@ -201,6 +219,23 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     if (mainWindow.isDestroyed()) return
     mainWindow.webContents.send('agent:referenceSkillHintChanged', { scopeId, change })
   })
+  // Stage O §0.3 — push `agent:taskProjectionsChanged` to the renderer on
+  // every successful create/update/delete in the task-projection store.
+  // dev-reload re-runs setupAgentIPC; first drain any prior subscription
+  // so we don't leak listeners and double-send.
+  if (currentTaskProjectionsChangeOff) {
+    try { currentTaskProjectionsChangeOff() } catch { /* ignore */ }
+    currentTaskProjectionsChangeOff = null
+  }
+  const projectionStore = runtime.getTaskProjectionStore()
+  const onProjectionChange = (event: TaskProjectionChangeEvent): void => {
+    if (mainWindow.isDestroyed()) return
+    mainWindow.webContents.send('agent:taskProjectionsChanged', event)
+  }
+  projectionStore.on('change', onProjectionChange)
+  currentTaskProjectionsChangeOff = () => {
+    try { projectionStore.off('change', onProjectionChange) } catch { /* ignore */ }
+  }
   // setupAgentIPC runs on every dev reload; strip any prior handler so
   // `ipcMain.handle` doesn't throw on the second registration.
   try { ipcMain.removeHandler('skills:askUser:submit') } catch { /* ignore */ }

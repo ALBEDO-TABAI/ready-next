@@ -949,6 +949,23 @@ interface ElectronAgentAPI {
   // Phase 5.3 — push-based reference-skill hint state changes. Renderer uses
   // this to refresh the "上下文已启用" badge immediately on arm/clear/sweep.
   onReferenceSkillHintChanged: (callback: (data: { scopeId: string; change: 'armed' | 'cleared' }) => void) => () => void
+  // Stage O §0.4 — push notification on `task_projections` mutation. The
+  // renderer uses scopeId to decide whether to refetch projections; the
+  // 2-second `agent:listActiveChildRuns` polling timer is retired.
+  onTaskProjectionsChanged: (
+    callback: (data: TaskProjectionChangeEventData) => void,
+  ) => () => void
+}
+
+/**
+ * Stage O — payload of `agent:taskProjectionsChanged`. Mirrors the
+ * main-side `TaskProjectionChangeEvent` interface; defined here too so
+ * the renderer doesn't import from a `src/main/...` module.
+ */
+export interface TaskProjectionChangeEventData {
+  scopeId: string
+  changedTaskIds: string[]
+  reason: 'create' | 'update' | 'delete' | 'supersede'
 }
 
 // =============================================================================

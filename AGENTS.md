@@ -282,7 +282,50 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - `npm run verify:n` 必须内嵌 `verify:m`，并覆盖：
   `check-manifest-vs-static-tool-name.cjs`、
   `check-no-parent-force-for-child-loop.cjs`、`test:n:gates`、`test:n:focus`。
-  顶层 `verify` 与 `verify:cloud` 起步链已切到 `verify:n`。
+
+### 6.22 UI 与投影收口（O / Stage 9）
+- TaskCardRun 的 18 个"状态 + 行动 + 标题"字段（`status / interactionState
+  / waitingFor / blockedReason / resumableActions / taskContinuation /
+  recentArtifacts / progress / budget* / degradationReason /
+  recoveryHistory / taskType / currentStepId / steps / taskTitle /
+  taskSummary`）只能来自 projection。`taskProjectionToTaskCardRun({...})`
+  调用对象字面量内禁止 `...identifier` spread；blacklist 字段 RHS 必须
+  匹配下列 4 类形态之一：(1) `projection.X` / `projection?.X`，
+  (2) `(1) ?? <literal>` 或 `(1) || <literal>`，(3) 命名 helper
+  （`resolveProjectionWaitingFor(projection)` /
+  `resolveProjectionBlockedReason(projection)` /
+  `normalizeProjectionSteps(projection?.steps)`，可加 literal 收尾），
+  (4) bare literal（`null / undefined / [] / {} / 'none' / …`）。
+  `parseSerializedTaskSnapshot` 把局部变量从 `snapshot` 改名 `projection`
+  以适配同一规则——`SerializedTaskSnapshot` 与 `TaskProjectionRecordData`
+  形状重叠但不等价，rename 是 deliberate 的 gate-vocabulary 选择，maintainer
+  承担"这是 frozen projection-shape-compatible 历史记录"的语义责任。
+- `TaskProjectionRepository.create / update / deleteByScope` 成功提交后
+  emit `change`；除 `task-projection-reconciler.ts` 内联 reconcile 因为
+  自身就是 renderer-fetch 触发，必须传 `{ silent: true }` 防止
+  fetch→reconcile→push→fetch 循环。`supersedeLegacySiblings`
+  传 `{ reasonHint: 'supersede' }` 让 emit 的 reason 区分。`ipc-handler`
+  把 emit 转发为 `agent:taskProjectionsChanged`，preload 暴露
+  `onTaskProjectionsChanged`，renderer 用 100ms debounce 合并 burst。
+- `agent:listActiveChildRuns` 的 2 秒 polling timer 退役。renderer 仅
+  在 mount / scope 变化时单次 fetch，作为 `activeChildRunDebugRow` 的
+  projection-空白 fallback 数据源；新 child run 通过 push 通道感知。
+- `deriveTaskCardRuntimeState` 优先级按 §6.13 物理化为
+  `failed_no_background_alive (rank 100) > background_running (rank 90)
+  > budget_paused (rank 80) > waiting_handoff/input (rank 70) >
+  done (rank 50) > running (rank 10)`。`isBackgroundTaskRun` 改为消费
+  该函数 + 显式 `childOrDetachedIdentity` 子句，避免 visualState 与
+  分组逻辑分叉。`TaskCardVisualState` enum 单源（来自
+  `task-status-vocabulary.ts`），不允许 `'waiting'` 单成员的本地拷贝。
+- 4 条新 gate + 1 条扩展现有 gate：`check-task-card-projection-only.cjs` /
+  `check-renderer-no-status-text-guess.cjs` /
+  `check-projection-push-event-wired.cjs` /
+  `check-no-active-child-run-polling.cjs` 是新增；
+  `check-status-vocabulary-single-source.cjs` 同时校验
+  `DEBUG_PLACEHOLDER_TASK_SUMMARY` 字面量单源。
+- `npm run verify:o` 必须内嵌 `verify:n`，并覆盖以上 4 + 1 个 gate
+  以及 `test:o:gates` / `test:o:focus`。顶层 `verify` 与 `verify:cloud`
+  起步链已切到 `verify:o`。
 
 ## 7. 新功能开发最小闭环
 新增跨进程功能时，至少同步修改：

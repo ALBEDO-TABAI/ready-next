@@ -776,7 +776,13 @@ export function reconcileTaskProjections(params: ReconcileTaskProjectionsParams)
     if (!target) continue
     const patch = buildPatch(record, now, target)
     if (!patch) continue
-    void params.store.update(record.taskId, patch)
+    // Stage O §0.2 / O2.1 — reconciler writes are themselves driven by a
+    // renderer fetch (`runtime.listTaskProjections` calls reconcileTaskProjections
+    // in-line). Emitting `change` here would loop fetch → reconcile → push
+    // → fetch. `silent: true` breaks the cycle while keeping the SQL
+    // commit; the renderer will see the reconciled value on the next
+    // genuine event-driven fetch.
+    void params.store.update(record.taskId, patch, { silent: true })
     changed += 1
   }
 

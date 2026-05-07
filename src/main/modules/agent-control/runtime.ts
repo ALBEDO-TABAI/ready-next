@@ -605,6 +605,17 @@ export class AgentControlRuntime extends EventEmitter {
       .slice(0, limit)
   }
 
+  /**
+   * Stage O — exposes the repository so `setupAgentIPC` can subscribe to
+   * the `change` event and forward it as `agent:taskProjectionsChanged`.
+   * Read-only by intent: callers must not mutate; writes still go through
+   * `recordScopeRunEvent` / `syncTaskProjection` / `skill-child-runner` so
+   * the emit contract is preserved.
+   */
+  getTaskProjectionStore(): TaskProjectionRepository {
+    return this.taskProjectionStore
+  }
+
   listTaskProjections(scopeId: string): TaskProjectionRecord[] {
     const normalizedScopeId = String(scopeId || '').trim()
     if (!normalizedScopeId) return []

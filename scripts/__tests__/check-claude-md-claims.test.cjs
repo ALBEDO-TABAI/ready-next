@@ -35,6 +35,22 @@ test('accepts section 6.12-6.18 claims that exist in code', () => {
   )
 })
 
+test('accepts checked claims that point at renderer code', () => {
+  withFixture(
+    {
+      'CLAUDE.md': docWithClaims([
+        '- `RendererOnlyFunction` 是 UI 收口合同的一部分。',
+      ]),
+      'AGENTS.md': docWithClaims([]),
+      'src/renderer/example.ts': 'export function RendererOnlyFunction() {}\n',
+    },
+    (root) => {
+      const result = checkClaudeMdClaims({ root })
+      assert.equal(result.ok, true, result.errors.join('\n'))
+    },
+  )
+})
+
 test('rejects a fake code claim inside section 6.12-6.18', () => {
   withFixture(
     {

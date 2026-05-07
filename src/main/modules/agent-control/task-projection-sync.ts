@@ -244,17 +244,21 @@ async function supersedeLegacySiblings(
     if (sibling.taskId === next.taskId) continue
     if (sibling.status === 'cancelled' || sibling.status === 'done') continue
     try {
-      await store.update(sibling.taskId, {
-        status: 'cancelled',
-        interactionState: 'suspended',
-        waitingFor: 'none',
-        blockedReason: null,
-        continuationRef: {
-          taskId: next.taskId,
-          blockerType: 'superseded',
+      await store.update(
+        sibling.taskId,
+        {
+          status: 'cancelled',
+          interactionState: 'suspended',
+          waitingFor: 'none',
+          blockedReason: null,
+          continuationRef: {
+            taskId: next.taskId,
+            blockerType: 'superseded',
+          },
+          updatedAt: next.updatedAt,
         },
-        updatedAt: next.updatedAt,
-      })
+        { reasonHint: 'supersede' },
+      )
     } catch (error) {
       // Race recovery — sibling may have been concurrently mutated/deleted.
       console.warn(
@@ -349,6 +353,14 @@ function resolveResumableActions(
   if (status === 'blocked') {
     if (previous?.resumableActions && previous.resumableActions.length > 0) return previous.resumableActions
     if (summary.taskContinuation || previous?.continuationRef) return ['continue', 'cancel']
+  }
+  // Stage O §2.1 — when the renderer's TaskCardRun reads `resumableActions`
+  // exclusively from projection (`?? []`), a running task with a known
+  // continuation must surface a non-empty default; otherwise the
+  // foreground card has zero actionable buttons. Failure / blocked /
+  // queued branches above already produce sensible defaults.
+  if (status === 'running' && (summary.taskContinuation || previous?.continuationRef)) {
+    return ['cancel']
   }
   return []
 }
@@ -642,7 +654,27 @@ export function buildTaskProjectionRecord(
       || payload.module
       || previous?.module
       || 'system',
-    taskTitle: effectiveSummary.taskTitle ?? previous?.taskTitle ?? null,
+    // Stage O §2.3 — projection is the only renderer source for taskTitle
+    // (the renderer no longer falls back to `run.taskTitle`). When the
+    // first event for a queued / running task arrives without any title,
+    // ship a placeholder so the renderer's `isTaskVisible` doesn't filter
+    // the card out and the foreground UI doesn't briefly go blank.
+    // Subsequent writes with a real title overwrite this placeholder
+    // (last-write-wins). Empty strings are treated as "no title yet" so
+    // a truth patch carrying `''` still gets the placeholder applied —
+    // `??` alone wouldn't replace an empty string.
+    taskTitle: (() => {
+      const effective = typeof effectiveSummary.taskTitle === 'string' && effectiveSummary.taskTitle.trim()
+        ? effectiveSummary.taskTitle
+        : null
+      const prior = typeof previous?.taskTitle === 'string' && previous.taskTitle.trim()
+        ? previous.taskTitle
+        : null
+      if (effective) return effective
+      if (prior) return prior
+      if (status === 'queued' || status === 'running') return '正在生成…'
+      return null
+    })(),
     taskSummary: effectiveSummary.taskSummary ?? previous?.taskSummary ?? null,
     status,
     interactionState: resolveRecordInteractionState(effectiveSummary, status),

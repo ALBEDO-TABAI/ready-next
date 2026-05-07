@@ -98,6 +98,21 @@ function readCanonicalLabels() {
   return labels
 }
 
+/**
+ * Stage O §3.5 — read the `DEBUG_PLACEHOLDER_TASK_SUMMARY` literal value
+ * from the vocabulary file. Renderer task-card surfaces must reference
+ * the symbol; the literal string itself is allowed only inside the
+ * vocabulary file. Drift-resistant: the gate parses the live constant.
+ */
+function readDebugPlaceholder() {
+  const abs = path.join(ROOT, VOCAB_REL)
+  if (!fs.existsSync(abs)) return null
+  const text = fs.readFileSync(abs, 'utf8')
+  const re = /export\s+const\s+DEBUG_PLACEHOLDER_TASK_SUMMARY\s*=\s*['"]([^'"]+)['"]/m
+  const m = re.exec(text)
+  return m ? m[1] : null
+}
+
 function importsTrigger(text) {
   // Coarse: any import line mentions any trigger name. We don't need to
   // distinguish import type vs value; if a renderer file *types* against
@@ -123,6 +138,7 @@ function main() {
     process.exit(1)
   }
   const labelSet = new Set(canonicalLabels)
+  const debugPlaceholder = readDebugPlaceholder()
 
   const dir = path.join(ROOT, SCAN_ROOT)
   if (!fs.existsSync(dir)) {
@@ -149,6 +165,15 @@ function main() {
           line: lineOf(text, m.index),
           kind: 'inline_canonical_label',
           detail: `inline label "${literal}" — must call task-status-vocabulary helper`,
+        })
+      }
+      // Stage O §3.5 — the debug placeholder string is single-sourced.
+      if (debugPlaceholder && literal === debugPlaceholder) {
+        violations.push({
+          file: rel,
+          line: lineOf(text, m.index),
+          kind: 'inline_debug_placeholder',
+          detail: `inline DEBUG_PLACEHOLDER_TASK_SUMMARY literal — import the symbol instead`,
         })
       }
     }

@@ -234,6 +234,19 @@ const agentAPI = {
     ipcRenderer.on('agent:referenceSkillHintChanged', handler)
     return () => { ipcRenderer.removeListener('agent:referenceSkillHintChanged', handler) }
   },
+  // Stage O §0.4 — push notification when the main-side
+  // `task_projections` table mutates. Renderer subscribes once per scope
+  // window and uses the payload's scopeId to decide whether to refetch
+  // projections via `agent:listTaskProjections`. The 2-second
+  // `agent:listActiveChildRuns` polling timer is retired in §1.1.
+  onTaskProjectionsChanged: (
+    callback: (data: { scopeId: string; changedTaskIds: string[]; reason: 'create' | 'update' | 'delete' | 'supersede' }) => void,
+  ) => {
+    const handler = (_: unknown, data: unknown) =>
+      callback(data as { scopeId: string; changedTaskIds: string[]; reason: 'create' | 'update' | 'delete' | 'supersede' })
+    ipcRenderer.on('agent:taskProjectionsChanged', handler)
+    return () => { ipcRenderer.removeListener('agent:taskProjectionsChanged', handler) }
+  },
 }
 
 // Memory API

@@ -1,4 +1,10 @@
-import type { TaskProjectionRecord, TaskProjectionStore } from '../agent-control/run-contracts'
+import { EventEmitter } from 'node:events'
+import type {
+  TaskProjectionChangeEvent,
+  TaskProjectionRecord,
+  TaskProjectionStore,
+  TaskProjectionWriteOptions,
+} from '../agent-control/run-contracts'
 
 interface TaskProjectionStatement {
   run(...params: unknown[]): unknown
@@ -106,9 +112,43 @@ function artifactSiblingSkillId(
 }
 
 export class TaskProjectionRepository implements TaskProjectionStore {
-  constructor(private readonly dbManager: TaskProjectionDatabaseAccessor) {}
+  /**
+   * Stage O — `change` listeners are notified after every successful
+   * create/update/delete (unless the writer passes `{ silent: true }`).
+   * The IPC bridge subscribes here and forwards as
+   * `agent:taskProjectionsChanged` to the renderer; the renderer drops
+   * the 2-second `agent:listActiveChildRuns` polling timer and reacts
+   * to the push event instead. See plan §0.2 for the wiring contract.
+   */
+  private readonly emitter = new EventEmitter()
 
-  create(record: TaskProjectionRecord): void {
+  constructor(private readonly dbManager: TaskProjectionDatabaseAccessor) {
+    this.emitter.setMaxListeners(0)
+  }
+
+  on(event: 'change', listener: (payload: TaskProjectionChangeEvent) => void): this {
+    this.emitter.on(event, listener)
+    return this
+  }
+
+  off(event: 'change', listener: (payload: TaskProjectionChangeEvent) => void): this {
+    this.emitter.off(event, listener)
+    return this
+  }
+
+  private emitChange(event: TaskProjectionChangeEvent, options?: TaskProjectionWriteOptions): void {
+    if (options?.silent) return
+    try {
+      this.emitter.emit('change', event)
+    } catch (error) {
+      console.warn(
+        '[task-projection-repository] change emit failed:',
+        error instanceof Error ? error.message : String(error),
+      )
+    }
+  }
+
+  create(record: TaskProjectionRecord, options?: TaskProjectionWriteOptions): void {
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
 
@@ -146,9 +186,29 @@ export class TaskProjectionRepository implements TaskProjectionStore {
       record.createdAt,
       record.updatedAt,
     )
+    this.emitChange(
+      {
+        scopeId: record.scopeId,
+        changedTaskIds: [record.taskId],
+        reason: options?.reasonHint ?? 'create',
+      },
+      options,
+    )
   }
 
-  update(taskId: string, patch: Partial<TaskProjectionRecord>): void {
+  update(taskId: string, patch: Partial<TaskProjectionRecord>, options?: TaskProjectionWriteOptions): void {
+    // Stage O — capture the OLD scopeId before the SQL UPDATE so a
+    // cross-scope move can notify both scopes. Reading post-update
+    // would only return the new scope; the old scope's renderer would
+    // never refetch. Errors here fall back to null (we still emit for
+    // the new scope).
+    let priorScopeId: string | null = null
+    try {
+      const prior = this.get(taskId)
+      priorScopeId = prior?.scopeId || null
+    } catch {
+      priorScopeId = null
+    }
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
 
@@ -189,6 +249,43 @@ export class TaskProjectionRepository implements TaskProjectionStore {
       ...updates.map(([, value]) => value),
       taskId,
     )
+    // Stage O — emit after successful SQL execution. We resolve scopeId
+    // from the patch first (covers callers that move a row across scopes),
+    // and fall back to a re-read so the renderer can still scope its
+    // refetch. If scopeId can't be determined, skip emit (no consumer
+    // could have used it anyway).
+    let emitScopeId = typeof patch.scopeId === 'string' && patch.scopeId.trim() ? patch.scopeId.trim() : null
+    if (!emitScopeId) {
+      try {
+        const refreshed = this.get(taskId)
+        emitScopeId = refreshed?.scopeId || null
+      } catch {
+        emitScopeId = null
+      }
+    }
+    if (emitScopeId) {
+      this.emitChange(
+        {
+          scopeId: emitScopeId,
+          changedTaskIds: [taskId],
+          reason: options?.reasonHint ?? 'update',
+        },
+        options,
+      )
+      // Stage O — cross-scope move: emit a second event for the prior
+      // scope so its renderer also refetches and removes the row.
+      // Skipped when prior is missing or identical.
+      if (priorScopeId && priorScopeId !== emitScopeId) {
+        this.emitChange(
+          {
+            scopeId: priorScopeId,
+            changedTaskIds: [taskId],
+            reason: options?.reasonHint ?? 'update',
+          },
+          options,
+        )
+      }
+    }
   }
 
   get(taskId: string): TaskProjectionRecord | null {
@@ -216,10 +313,27 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     ).all<TaskProjectionRow>(parentTaskId).map((row) => this.mapRow(row))
   }
 
-  deleteByScope(scopeId: string): void {
+  deleteByScope(scopeId: string, options?: TaskProjectionWriteOptions): void {
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
+    // Stage O — collect taskIds *before* delete so the change event can
+    // describe what was removed. listByScope is the same path the
+    // renderer uses, so it tolerates the same DB shapes.
+    let removedTaskIds: string[] = []
+    try {
+      removedTaskIds = this.listByScope(scopeId).map((record) => record.taskId)
+    } catch {
+      removedTaskIds = []
+    }
     db.prepare('DELETE FROM task_projections WHERE scope_id = ?').run(scopeId)
+    this.emitChange(
+      {
+        scopeId,
+        changedTaskIds: removedTaskIds,
+        reason: options?.reasonHint ?? 'delete',
+      },
+      options,
+    )
   }
 
   /**

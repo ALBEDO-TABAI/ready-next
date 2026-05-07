@@ -218,7 +218,7 @@ test('task card runtime state distinguishes background running, budget paused, d
     phase: 'checkpoint',
     status: 'blocked',
     title: '视频分析',
-    waitingFor: 'background',
+    waitingFor: 'none',
     taskContinuation: {
       taskId: 'task-budget',
       blockerType: 'budget_paused',
@@ -242,7 +242,7 @@ test('task card runtime state distinguishes background running, budget paused, d
     resumableActions: ['continue', 'cancel'],
     updatedAt: '2026-04-28T01:00:00.000Z',
   }), {
-    visualState: 'waiting',
+    visualState: 'waiting_input',
     statusLabel: '等待补充',
     actionSet: ['continue', 'cancel'],
   })
@@ -296,7 +296,7 @@ test('blocked terminal reasons show waiting instead of completed', () => {
     } as any)
 
     assert.deepEqual(state, {
-      visualState: 'waiting',
+      visualState: 'waiting_input',
       statusLabel: '等待补充',
       actionSet: ['continue', 'cancel'],
     })
@@ -312,7 +312,7 @@ test('budget exhausted pause uses the same terminal checkpoint truth for task ca
     terminalReason: 'checkpoint_budget' as const,
     status: 'blocked' as const,
     title: '视频分析',
-    waitingFor: 'background' as const,
+    waitingFor: 'none' as const,
     taskContinuation: {
       taskId: 'task-budget-truth',
       blockerType: 'budget_paused',

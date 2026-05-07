@@ -345,9 +345,35 @@ export interface TaskProjectionRecord {
   updatedAt: string
 }
 
+/**
+ * Stage O — payload of the renderer-facing `agent:taskProjectionsChanged`
+ * push event. The store wrapper (`TaskProjectionRepository`) emits this on
+ * every successful create/update/delete; the IPC bridge forwards it
+ * verbatim to the renderer. The renderer uses only `scopeId` to decide
+ * whether to refetch projections; `changedTaskIds` and `reason` are
+ * observability fields kept for future fine-grained patching.
+ */
+export interface TaskProjectionChangeEvent {
+  scopeId: string
+  changedTaskIds: string[]
+  reason: 'create' | 'update' | 'delete' | 'supersede'
+}
+
+/**
+ * Stage O — write options. `silent: true` suppresses the change event;
+ * used by `task-projection-reconciler.ts` whose writes are themselves
+ * driven by a renderer fetch (without `silent` we'd loop fetch → reconcile
+ * → push → fetch). `reasonHint` lets the caller upgrade the emit reason
+ * (default reason is derived from operation type).
+ */
+export interface TaskProjectionWriteOptions {
+  silent?: boolean
+  reasonHint?: TaskProjectionChangeEvent['reason']
+}
+
 export interface TaskProjectionStore {
-  create(record: TaskProjectionRecord): void | Promise<void>
-  update(taskId: string, patch: Partial<TaskProjectionRecord>): void | Promise<void>
+  create(record: TaskProjectionRecord, options?: TaskProjectionWriteOptions): void | Promise<void>
+  update(taskId: string, patch: Partial<TaskProjectionRecord>, options?: TaskProjectionWriteOptions): void | Promise<void>
   get(taskId: string): TaskProjectionRecord | null | Promise<TaskProjectionRecord | null>
   listByScope(scopeId: string): TaskProjectionRecord[] | Promise<TaskProjectionRecord[]>
   listByParentTask(parentTaskId: string): TaskProjectionRecord[] | Promise<TaskProjectionRecord[]>

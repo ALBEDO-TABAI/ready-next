@@ -7,6 +7,7 @@ const DOCS = ['CLAUDE.md', 'AGENTS.md']
 const SEARCH_ROOTS = [
   'src/main/modules',
   'src/main/utils',
+  'src/renderer',
   'src/shared',
   'src/preload',
   'scripts',

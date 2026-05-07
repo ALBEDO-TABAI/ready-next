@@ -41,6 +41,17 @@ export const __GATE_CANONICAL_LABELS: ReadonlyArray<string> = Object.freeze([
   '等补充', '等确认',
 ])
 
+/**
+ * Stage O §1.4 / §3.5 — fallback placeholder used by
+ * `activeChildRunDebugRow` when the persisted `task_projections` table
+ * has not yet caught up with an active child run. The literal must live
+ * here (single source) so the status-vocabulary gate can prevent
+ * renderer files from inlining a status-flavored Chinese string. The
+ * `(projection 暂未覆盖)` clause makes the user-visible state honest:
+ * the UI is not pretending to know the task's current real state.
+ */
+export const DEBUG_PLACEHOLDER_TASK_SUMMARY = '后台任务（projection 暂未覆盖）'
+
 export type TaskCardVisualState =
   | 'failed'
   | 'budget_paused'

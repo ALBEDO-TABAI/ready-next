@@ -5,7 +5,12 @@ import type {
   ToolTraceEvent,
 } from './types'
 import type { RecoveryRecordData, TaskProjectionRecordData } from '../../types/electron'
-import { phaseToUserLabel, projectionStatusToUserLabel, taskCardVisualStateLabel } from './task-status-vocabulary'
+import {
+  phaseToUserLabel,
+  projectionStatusToUserLabel,
+  taskCardVisualStateLabel,
+} from './task-status-vocabulary'
+import type { TaskCardVisualState } from './task-status-vocabulary'
 import { filterUserVisibleToolTraceEvents, sanitizeInternalAgentDisplayText } from './toolTraceVisibility'
 
 export type TaskSectionKey = 'overview' | 'plan' | 'details' | 'artifacts' | 'memory'
@@ -74,13 +79,11 @@ export interface TaskCardViewModel {
   legacyHandoffHit?: 'pathMatch' | 'subtaskMatch' | 'rawIncludes'
 }
 
-export type TaskCardVisualState =
-  | 'background_running'
-  | 'budget_paused'
-  | 'waiting'
-  | 'done'
-  | 'failed'
-  | 'running'
+// Stage O §1.4 — `TaskCardVisualState` is now a single source: imported
+// from `task-status-vocabulary.ts`. The legacy local `'waiting'` member is
+// retired in favor of `'waiting_input' | 'waiting_handoff'`, which match
+// the canonical labels at `task-status-vocabulary.ts:44`. Reuse via
+// `import type { TaskCardVisualState }` above; no local re-declaration.
 
 export type TaskCardAction = 'continue' | 'retry' | 'open_artifact' | 'cancel'
 
@@ -370,18 +373,29 @@ function hasBlockedTerminalReason(run: TaskCardRunLike): boolean {
 }
 
 export function deriveTaskCardRuntimeState(run: TaskCardRunLike): TaskCardRuntimeState {
+  // Stage O §1.4 / O4 — priority follows CLAUDE.md §6.13:
+  //   failed_no_background_alive (rank 100, = `failed` && !hasBackground)
+  //   > background_running        (rank 90)
+  //   > budget_paused             (rank 80)
+  //   > waiting (handoff/input)   (rank 70)
+  //   > done                      (rank 50)
+  //   > running                   (rank 10)
+  // The earlier order (`failed` requiring `!hasBudgetPaused`, then
+  // budget before background) contradicted the spec; the new order
+  // makes `background_running` outrank `budget_paused`, and `failed`
+  // depends only on background liveness.
   const hasLiveBackground = hasBackgroundSignal(run)
   const hasBudgetPaused = hasBudgetPausedSignal(run)
   const isAgentHandoff = isInternalAgentHandoffTask(run)
-  const isFailed = (run.phase === 'error' || run.status === 'failed') && !hasLiveBackground && !hasBudgetPaused
-  if (isFailed) {
+
+  if ((run.phase === 'error' || run.status === 'failed') && !hasLiveBackground) {
     return { visualState: 'failed', statusLabel: taskCardVisualStateLabel('failed'), actionSet: ['retry', 'cancel', 'open_artifact'] }
-  }
-  if (hasBudgetPaused) {
-    return { visualState: 'budget_paused', statusLabel: taskCardVisualStateLabel('budget_paused'), actionSet: ['continue', 'retry', 'cancel'] }
   }
   if (hasLiveBackground) {
     return { visualState: 'background_running', statusLabel: taskCardVisualStateLabel('background_running'), actionSet: ['continue', 'open_artifact', 'cancel'] }
+  }
+  if (hasBudgetPaused) {
+    return { visualState: 'budget_paused', statusLabel: taskCardVisualStateLabel('budget_paused'), actionSet: ['continue', 'retry', 'cancel'] }
   }
   if (
     (run.waitingFor && run.waitingFor !== 'none')
@@ -392,12 +406,13 @@ export function deriveTaskCardRuntimeState(run: TaskCardRunLike): TaskCardRuntim
     || run.interactionState === 'awaiting_confirmation'
     || run.interactionState === 'human_takeover'
   ) {
+    const visualState: TaskCardVisualState = isAgentHandoff ? 'waiting_handoff' : 'waiting_input'
     const actions = (run.resumableActions || []).filter((action): action is TaskCardAction =>
       action === 'continue' || action === 'retry' || action === 'open_artifact' || action === 'cancel',
     )
     return {
-      visualState: 'waiting',
-      statusLabel: isAgentHandoff ? taskCardVisualStateLabel('waiting_handoff') : taskCardVisualStateLabel('waiting_input'),
+      visualState,
+      statusLabel: taskCardVisualStateLabel(visualState),
       actionSet: actions.length > 0 ? actions : ['continue', 'cancel'],
     }
   }
