@@ -47,9 +47,52 @@ export type SkillToolAuthorization =
     }
 
 /**
+ * Stage 10 final-review tightening — the type already declares
+ * `ReadonlySet<string>` for `allowedTypedActions` / `allowedPrimitives`,
+ * but `Object.freeze` on the authorization does NOT prevent mutation of
+ * the underlying Set. A contributor could `as unknown as Set<string>`
+ * past the type and silently expand the allow-set at runtime, broadening
+ * authorization without it appearing in any policy decision. To make the
+ * allow-sets truly immutable, override the mutator methods on the Set
+ * itself so any mutation attempt throws.
+ */
+function freezeSet<T>(values: Iterable<T>): ReadonlySet<T> {
+  const set = new Set(values)
+  // Override mutators to throw — the type already says ReadonlySet, but
+  // a runtime guard catches `as any` / `as unknown as Set<T>` casts that
+  // try to expand authorization at runtime.
+  Object.defineProperty(set, 'add', {
+    value: () => {
+      throw new Error('SkillToolAuthorization allow-set is immutable')
+    },
+    writable: false,
+    configurable: false,
+  })
+  Object.defineProperty(set, 'delete', {
+    value: () => {
+      throw new Error('SkillToolAuthorization allow-set is immutable')
+    },
+    writable: false,
+    configurable: false,
+  })
+  Object.defineProperty(set, 'clear', {
+    value: () => {
+      throw new Error('SkillToolAuthorization allow-set is immutable')
+    },
+    writable: false,
+    configurable: false,
+  })
+  return Object.freeze(set)
+}
+
+/**
  * Build a `mode: 'selected'` authorization. The caller is responsible
  * for passing pre-validated typed-action / primitive name sets — this
  * factory does NOT consult any registry; it only freezes the inputs.
+ *
+ * The returned authorization is `Object.freeze`'d, AND the underlying
+ * `allowedTypedActions` / `allowedPrimitives` Sets are wrapped in
+ * `freezeSet` so their mutator methods throw — see `freezeSet` doc-comment.
  */
 export function buildSelectedSkillToolAuthorization(params: {
   skillId: string
@@ -61,8 +104,8 @@ export function buildSelectedSkillToolAuthorization(params: {
   return Object.freeze({
     mode: 'selected',
     skillId: params.skillId,
-    allowedTypedActions: new Set(params.allowedTypedActions),
-    allowedPrimitives: new Set(params.allowedPrimitives),
+    allowedTypedActions: freezeSet(params.allowedTypedActions),
+    allowedPrimitives: freezeSet(params.allowedPrimitives),
     source: params.source,
     reason: params.reason,
   }) as SkillToolAuthorization

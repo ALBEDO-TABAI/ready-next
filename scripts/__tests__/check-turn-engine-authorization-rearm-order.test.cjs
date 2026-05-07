@@ -104,3 +104,50 @@ test('negative: rearm AFTER first call fails', () => {
     assert.match(result.stderr, /precedes or equals/)
   })
 })
+
+test('negative: null-check + throw OUTSIDE buildHostToolContext closure fails (Stage 10 tightening)', () => {
+  // Stage 10 final-review tightening: the null-check must live INSIDE
+  // the closure body. A pre-call null-check sitting at the module level
+  // does not enforce the invariant per call (the closure can still be
+  // invoked later when __authorization happens to be null).
+  const body = [
+    'let __authorization: SkillToolAuthorization | null = null',
+    '// pre-call null-check OUTSIDE the closure — this should NOT count',
+    'if (!__authorization) { throw new Error("module-level guard") }',
+    'const buildHostToolContext = (a) => {',
+    '  return { authorization: __authorization }',
+    '}',
+    '__authorization = buildAuthorizationFromIdentity(i)',
+    'buildHostToolContext([])',
+    '',
+  ].join('\n')
+  withFixture(body, (root) => {
+    const result = run(['--root', root])
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /INSIDE buildHostToolContext closure/)
+  })
+})
+
+test('negative: null-check INSIDE the closure but throw is OUTSIDE the closure fails', () => {
+  // Edge case: the null-check sits inside the closure body but the
+  // matching throw escapes the closure (e.g. after a stray `}`). The
+  // gate must catch the missing throw within the closure body.
+  const body = [
+    'let __authorization: SkillToolAuthorization | null = null',
+    'const buildHostToolContext = (a) => {',
+    '  if (!__authorization) {',
+    '    return null',
+    '  }',
+    '  return { authorization: __authorization }',
+    '}',
+    'throw new Error("escaped")',
+    '__authorization = buildAuthorizationFromIdentity(i)',
+    'buildHostToolContext([])',
+    '',
+  ].join('\n')
+  withFixture(body, (root) => {
+    const result = run(['--root', root])
+    assert.equal(result.status, 1)
+    assert.match(result.stderr, /not followed by `throw new Error`/)
+  })
+})

@@ -2,6 +2,10 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { ToolRuntime } from '../main/modules/agent-control/tool-runtime'
+import {
+  buildExplicitNoSkillAuthorization,
+  buildSelectedSkillToolAuthorization,
+} from '../main/modules/agent-control/skill-tool-authorization'
 import { createToolExecutionOutput } from '../main/modules/agent-control/tool-result-types'
 
 test('ToolRuntime wraps legacy string results into structured outputs while preserving order', async () => {
@@ -50,6 +54,23 @@ test('ToolRuntime converts runtime-recoverable tool failures into structured out
     ],
     context: {
       allowedToolNames: new Set(['skill_video_expert_ai_analyze', 'memory_search']),
+      authorization: buildSelectedSkillToolAuthorization({
+        skillId: 'video-expert-analyzer',
+        allowedTypedActions: ['skill_video_expert_ai_analyze'],
+        allowedPrimitives: [
+          'skill_ask_user',
+          'skill_run_shell',
+          'skill_write_artifact',
+          'skill_read_artifact',
+          'skill_patch_config',
+          'skill_start_detached',
+          'skill_inspect_detached',
+          'skill_cancel_detached',
+          'skill_inspect_run_state',
+        ],
+        source: 'explicit',
+        reason: 'test_setup',
+      }),
     },
     executeTool: async (toolCall) => {
       if (toolCall.id === '1') {
@@ -92,7 +113,9 @@ test('ToolRuntime uses timeout profiles on the default execution path', async ()
     toolCalls: [
       { id: '1', name: 'document_update_widget', input: {} },
     ],
-    context: {},
+    context: {
+      authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
+    },
   })
 
   assert.equal(result.results.length, 1)

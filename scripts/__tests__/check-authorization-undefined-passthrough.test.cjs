@@ -139,3 +139,102 @@ test('negative: comment containing the bad shape does NOT fail (comments strippe
     },
   )
 })
+
+// ---------------------------------------------------------------------------
+// Stage 10 final-review extension: `as unknown as Skill*` cast and multiline
+// `filterToolsByAuthorization` are also rejected; the legitimate helper-based
+// fallback `?? buildExplicitNoSkillAuthorization(...)` is allowed.
+// ---------------------------------------------------------------------------
+
+test('negative: authorization as unknown as SkillToolAuthorization fails', () => {
+  withFixture(
+    {
+      'src/main/modules/agent-control/tool-runtime.ts': [
+        'function f(authorization) {',
+        '  return doSomething(authorization as unknown as SkillToolAuthorization)',
+        '}',
+        '',
+      ].join('\n'),
+    },
+    (root) => {
+      const result = run(['--root', root])
+      assert.equal(result.status, 1)
+      assert.match(result.stderr, /as unknown as Skill\*/)
+    },
+  )
+})
+
+test('negative: multiline filterToolsByAuthorization with undefined fails', () => {
+  withFixture(
+    {
+      'src/main/modules/tools/index.ts': [
+        'function f(tools, getName) {',
+        '  return filterToolsByAuthorization(',
+        '    tools,',
+        '    undefined,',
+        '    getName,',
+        '  )',
+        '}',
+        '',
+      ].join('\n'),
+    },
+    (root) => {
+      const result = run(['--root', root])
+      assert.equal(result.status, 1)
+      assert.match(result.stderr, /filterToolsByAuthorization/)
+    },
+  )
+})
+
+test('positive: ?? buildExplicitNoSkillAuthorization(...) helper fallback is allowed', () => {
+  withFixture(
+    {
+      'src/main/modules/agent-control/tool-runtime.ts': [
+        "function f(context) {",
+        "  return context?.authorization ?? buildExplicitNoSkillAuthorization('no_skill_signal')",
+        '}',
+        '',
+      ].join('\n'),
+    },
+    (root) => {
+      const result = run(['--root', root])
+      assert.equal(result.status, 0, result.stderr)
+    },
+  )
+})
+
+test('negative: extended scope — `as any` in tool-executor.ts fails', () => {
+  withFixture(
+    {
+      'src/main/modules/tools/tool-executor.ts': [
+        'function f(authorization) {',
+        '  return doSomething(authorization as any)',
+        '}',
+        '',
+      ].join('\n'),
+    },
+    (root) => {
+      const result = run(['--root', root])
+      assert.equal(result.status, 1)
+      assert.match(result.stderr, /as any/)
+    },
+  )
+})
+
+test('negative: extended scope — `as any` in execution-loop-orchestrator.ts fails', () => {
+  withFixture(
+    {
+      'src/main/modules/agent-control/execution-loop-orchestrator.ts': [
+        'function f(authorization) {',
+        '  return doSomething(authorization as any)',
+        '}',
+        '',
+      ].join('\n'),
+    },
+    (root) => {
+      const result = run(['--root', root])
+      assert.equal(result.status, 1)
+      assert.match(result.stderr, /as any/)
+    },
+  )
+})

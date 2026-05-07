@@ -547,6 +547,14 @@ export class ToolRuntime {
   ): ToolRuntimeAttemptContext {
     const trackedCleanups: TrackedCleanup[] = []
 
+    // Stage 10 invariant — if context is provided, authorization MUST be
+    // present. Typecheck enforces this for production callers; this throw
+    // catches `as any` / partial-context bypass paths (e.g. tests that
+    // forgot to migrate post-Stage 10).
+    if (context && !context.authorization) {
+      throw new Error('Stage 10 invariant: ToolRuntimeContext provided to ToolRuntime.executeBatch without authorization — caller must populate authorization explicitly')
+    }
+
     return {
       ...(context || {}),
       abortSignal,
@@ -554,10 +562,10 @@ export class ToolRuntime {
       // attempt context inherits the live slot if present and falls back to
       // an empty default for legacy callers that didn't seed one.
       activeFrame: context?.activeFrame ?? createEmptyActiveFrameContext(),
-      // Stage 4 W3 — `authorization` is non-optional on `ToolRuntimeContext`;
-      // attempt context inherits when context is supplied. Legacy callers
-      // (`executeBatch` invoked without a runtime context) fall back to an
-      // explicit `no_skill_signal` authorization.
+      // When context is provided, authorization is guaranteed by the
+      // invariant above. When context is undefined (cold path: executeBatch
+      // invoked without a runtime context), synthesize explicit no-skill
+      // authorization so admission has a determinate value.
       authorization: context?.authorization ?? buildExplicitNoSkillAuthorization('no_skill_signal'),
       registerRunCleanup: (cleanup) => {
         const trackedCleanup = this.trackCleanup(cleanup)

@@ -3,6 +3,10 @@ import test from 'node:test'
 
 import { ExecutionLoopOrchestrator } from '../main/modules/agent-control/execution-loop-orchestrator'
 import {
+  buildExplicitNoSkillAuthorization,
+  buildSelectedSkillToolAuthorization,
+} from '../main/modules/agent-control/skill-tool-authorization'
+import {
   getToolResourceTag,
   groupParallelSafeToolCalls,
   isParallelSafeTool,
@@ -171,7 +175,9 @@ test('ExecutionLoopOrchestrator uses ToolRuntime default execution with context 
       { id: '1', name: 'memory_search', input: { q: 'ready' } },
       { id: '2', name: 'document_list_widgets', input: { tabId: 'tab-1' } },
     ],
-    context: {},
+    context: {
+      authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
+    },
     hooks: {
       onToolStart: ({ toolCall }) => {
         starts.push(toolCall.name)
@@ -361,6 +367,23 @@ test('ExecutionLoopOrchestrator converts tool timeouts into tool results instead
     ],
     context: {
       allowedToolNames: ['skill_video_expert_ai_analyze', 'memory_search'],
+      authorization: buildSelectedSkillToolAuthorization({
+        skillId: 'video-expert-analyzer',
+        allowedTypedActions: ['skill_video_expert_ai_analyze'],
+        allowedPrimitives: [
+          'skill_ask_user',
+          'skill_run_shell',
+          'skill_write_artifact',
+          'skill_read_artifact',
+          'skill_patch_config',
+          'skill_start_detached',
+          'skill_inspect_detached',
+          'skill_cancel_detached',
+          'skill_inspect_run_state',
+        ],
+        source: 'explicit',
+        reason: 'test_setup',
+      }),
     },
     executeTool: async (toolCall) => {
       if (toolCall.id === '1') {

@@ -324,7 +324,8 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
   `DEBUG_PLACEHOLDER_TASK_SUMMARY` 字面量单源。
 - `npm run verify:o` 必须内嵌 `verify:n`，并覆盖以上 4 + 1 个 gate
   以及 `test:o:gates` / `test:o:focus`。顶层 `verify` 与 `verify:cloud`
-  起步链已切到 `verify:o`。
+  起步链 Stage O 时切到 `verify:o`；Stage 10 (P) 起切到 `verify:p`
+  （详见 §6.23）。
 
 ### 6.23 Skill 工具 authorization 收口（P / Stage 10）
 - Stage 10 (P) 已退役 `'not_set'` 兼容短路。`SkillToolAuthorization` 的

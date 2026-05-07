@@ -6,26 +6,45 @@
  * `authorization: SkillToolAuthorization` as a required, non-nullable
  * field. The W3a-era `?? null` / `?? undefined` filler patterns no longer
  * compile — but a contributor could still squeak by with `authorization
- * as any` or with a `?? buildExplicitNoSkillAuthorization(...)` filler
- * that hides a missing decision. This gate forbids the former (any-cast)
- * and the legacy `?? null|undefined` shapes; the legitimate helper-based
- * fallback in `execution-tool-config.ts::resolvePolicyAuthorization` is
- * not flagged because its RHS is a named function call, not `null` or
- * `undefined`.
+ * as any` (or `as unknown as SkillToolAuthorization`) or with a
+ * `?? buildExplicitNoSkillAuthorization(...)` filler that hides a missing
+ * decision. This gate forbids the former (any-cast / unknown-cast) and
+ * the legacy `?? null|undefined` shapes; the legitimate helper-based
+ * fallback (`?? buildExplicitNoSkillAuthorization(...)`) is allowed
+ * because its RHS is a named function call producing a real
+ * `SkillToolAuthorization`, not `null` or `undefined`.
  *
- * Scope (4 files, per plan §3.8.3):
+ * Stage 10 final-review extension: scope broadened to also cover the
+ * runtime / orchestrator / executor admission surfaces (so an `as any`
+ * bypass anywhere on the model→tool path is caught), and the gate now
+ * scans both line-by-line and on a whitespace-collapsed view (so
+ * multiline `filterToolsByAuthorization(\n  tools,\n  undefined,\n  …)`
+ * is flagged just like the single-line form).
+ *
+ * Scope (extended in Stage 10 final review):
  *   - src/main/modules/agent-control/tool-registry.ts
  *   - src/main/modules/agent-control/tool-gateway.ts
  *   - src/main/modules/agent-control/execution-tool-config.ts
  *   - src/main/modules/tools/index.ts
+ *   - src/main/modules/agent-control/tool-runtime.ts
+ *   - src/main/modules/agent-control/execution-loop-orchestrator.ts
+ *   - src/main/modules/tools/tool-executor.ts
  *
  * Forbidden patterns (line comments / block comments / string literals
  * are stripped first):
  *   - `authorization ?? undefined` / `authorization ?? null`
  *   - `authorization || undefined` / `authorization || null`
  *   - `authorization as any`
+ *   - `authorization as unknown as SkillToolAuthorization` (and any
+ *     `as unknown as Skill*` cast applied to authorization)
  *   - `<expr>.authorization ?? undefined|null` / `|| undefined|null`
- *   - `filterToolsByAuthorization(<arg>, undefined|null|… ?? …|… || …|… as any, …)`
+ *   - `filterToolsByAuthorization(<arg>, undefined|null|<as any>|<?? null/undefined>|<|| null/undefined>, …)`
+ *     — including the multiline form (whitespace collapsed before match)
+ *
+ * Allowed (NOT flagged):
+ *   - `context?.authorization ?? buildExplicitNoSkillAuthorization(...)`
+ *     and similar named-helper fallbacks that produce a real
+ *     `SkillToolAuthorization`.
  */
 
 'use strict'
@@ -40,9 +59,15 @@ const TARGET_REL_FILES = [
   'src/main/modules/agent-control/tool-gateway.ts',
   'src/main/modules/agent-control/execution-tool-config.ts',
   'src/main/modules/tools/index.ts',
+  'src/main/modules/agent-control/tool-runtime.ts',
+  'src/main/modules/agent-control/execution-loop-orchestrator.ts',
+  'src/main/modules/tools/tool-executor.ts',
 ]
 
-const FORBIDDEN_PATTERNS = [
+// Per-line patterns: each is matched against a single (comments-stripped)
+// line. The `as unknown as Skill*` pattern catches casts that bypass the
+// runtime invariant in `createAttemptContext` / `executeToolCall`.
+const LINE_FORBIDDEN_PATTERNS = [
   {
     name: 'authorization ?? null|undefined',
     regex: /\bauthorization\s*\?\?\s*(?:undefined|null)\b/,
@@ -56,6 +81,12 @@ const FORBIDDEN_PATTERNS = [
     regex: /\bauthorization\s+as\s+any\b/,
   },
   {
+    // `authorization as unknown as SkillToolAuthorization` (or any
+    // `as unknown as Skill*` re-cast applied to authorization).
+    name: 'authorization as unknown as Skill*',
+    regex: /\bauthorization\s+as\s+unknown\s+as\s+Skill\w*/,
+  },
+  {
     name: '.authorization ?? null|undefined',
     regex: /\.authorization\s*\?\?\s*(?:undefined|null)\b/,
   },
@@ -63,13 +94,21 @@ const FORBIDDEN_PATTERNS = [
     name: '.authorization || null|undefined',
     regex: /\.authorization\s*\|\|\s*(?:undefined|null)\b/,
   },
+]
+
+// Whole-file patterns: matched against a whitespace-collapsed view of the
+// file (stripped of comments and string literals first). Used to catch
+// multiline forms like `filterToolsByAuthorization(\n  tools,\n  undefined,
+// \n  getName)`.
+const WHOLE_FILE_FORBIDDEN_PATTERNS = [
   {
-    // filterToolsByAuthorization(_, <bad>, ...) where <bad> is null,
-    // undefined, an `as any` cast, or a `?? null|undefined` / `||
-    // null|undefined` expression.
-    name: 'filterToolsByAuthorization with undefined/null/any second arg',
+    // filterToolsByAuthorization(<arg>, <bad>, …) where <bad> is null,
+    // undefined, an `as any` / `as unknown as Skill*` cast, or a
+    // `?? null|undefined` / `|| null|undefined` expression. Matched on
+    // the whitespace-collapsed view so multiline calls are flagged too.
+    name: 'filterToolsByAuthorization with undefined/null/any second arg (incl. multiline)',
     regex:
-      /\bfilterToolsByAuthorization\s*\(\s*[^,)]+,\s*(?:undefined|null|[^,)]*\bas\s+any\b|[^,)]*\?\?\s*(?:undefined|null)\b|[^,)]*\|\|\s*(?:undefined|null)\b)/,
+      /\bfilterToolsByAuthorization\s*\(\s*[^,)]+,\s*(?:undefined|null|[^,)]*\bas\s+any\b|[^,)]*\bas\s+unknown\s+as\s+Skill\w*|[^,)]*\?\?\s*(?:undefined|null)\b|[^,)]*\|\|\s*(?:undefined|null)\b)/,
   },
 ]
 
@@ -99,8 +138,10 @@ function checkAuthorizationUndefinedPassthrough({ root = REPO } = {}) {
     const stripped = stripCommentsAndStrings(raw)
     const lines = stripped.split('\n')
     const rawLines = raw.split('\n')
+
+    // Pass 1 — per-line patterns.
     for (let i = 0; i < lines.length; i++) {
-      for (const { name, regex } of FORBIDDEN_PATTERNS) {
+      for (const { name, regex } of LINE_FORBIDDEN_PATTERNS) {
         if (regex.test(lines[i])) {
           violations.push({
             file,
@@ -109,6 +150,64 @@ function checkAuthorizationUndefinedPassthrough({ root = REPO } = {}) {
             code: rawLines[i].trim(),
           })
         }
+      }
+    }
+
+    // Pass 2 — whole-file (whitespace-collapsed) patterns. Build a
+    // single line where every run of whitespace becomes a single space,
+    // and produce a parallel offset map so we can recover the original
+    // line number when a match lands.
+    const collapsed = []
+    const offsetMap = [] // offsetMap[i] = original line index for collapsed char i
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i]
+      for (let j = 0; j < line.length; j++) {
+        collapsed.push(line[j])
+        offsetMap.push(i)
+      }
+      // Newline becomes a single space in the collapsed view.
+      collapsed.push(' ')
+      offsetMap.push(i)
+    }
+    const collapsedSource = collapsed.join('').replace(/\s+/g, (m, idx) => {
+      // Keep one space; trim subsequent offsetMap entries to align with
+      // the collapsed character count.
+      const keepIdx = idx
+      // Mark the offsets to drop by setting them to -1; the final
+      // alignment happens just below.
+      void keepIdx
+      return ' '
+    })
+    // Build a properly-aligned offsetMap for the collapsed source where
+    // every character is a non-whitespace char or a single space.
+    const alignedOffsetMap = []
+    let prevWasSpace = false
+    for (let i = 0; i < collapsed.length; i++) {
+      const ch = collapsed[i]
+      const isSpace = /\s/.test(ch)
+      if (isSpace) {
+        if (prevWasSpace) continue
+        alignedOffsetMap.push(offsetMap[i])
+        prevWasSpace = true
+      } else {
+        alignedOffsetMap.push(offsetMap[i])
+        prevWasSpace = false
+      }
+    }
+
+    for (const { name, regex } of WHOLE_FILE_FORBIDDEN_PATTERNS) {
+      const globalRe = new RegExp(regex.source, regex.flags.includes('g') ? regex.flags : regex.flags + 'g')
+      let m
+      while ((m = globalRe.exec(collapsedSource)) !== null) {
+        const charIndex = m.index
+        const lineIndex = alignedOffsetMap[charIndex] ?? 0
+        violations.push({
+          file,
+          line: lineIndex + 1,
+          pattern: name,
+          code: rawLines[lineIndex]?.trim() || '<multiline>',
+        })
+        if (m.index === globalRe.lastIndex) globalRe.lastIndex += 1
       }
     }
   }

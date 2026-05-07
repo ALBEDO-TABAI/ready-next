@@ -43,6 +43,66 @@ const RE_REARM = /\b__authorization\s*=\s*buildAuthorizationFromIdentity\s*\(/
 const RE_CALL_OR_DEF = /\bbuildHostToolContext\s*[(=]/
 const RE_DEFINITION = /\bbuildHostToolContext\s*=\s*\(/
 
+/**
+ * Find the [start, end] line range (0-indexed inclusive) of the body of
+ * the first `buildHostToolContext = (...) => { ... }` arrow-function
+ * definition in the comments-stripped source.
+ *
+ * Returns null if no definition is found, or if brace-matching fails
+ * (e.g. malformed source).
+ *
+ * Implementation: locates `buildHostToolContext\s*=\s*\(`; then walks
+ * forward to the first `{` after the `)`; then counts `{` / `}` until
+ * the matching close-brace.
+ */
+function findBuildHostToolContextBody(stripped) {
+  const defRe = /\bbuildHostToolContext\s*=\s*\(/g
+  const m = defRe.exec(stripped)
+  if (!m) return null
+  const defStart = m.index
+
+  // Walk forward to the matching `)` of the parameter list.
+  let i = defRe.lastIndex
+  let parenDepth = 1
+  while (i < stripped.length && parenDepth > 0) {
+    const ch = stripped[i]
+    if (ch === '(') parenDepth += 1
+    else if (ch === ')') parenDepth -= 1
+    i += 1
+  }
+  if (parenDepth !== 0) return null
+
+  // Walk forward through `=>` whitespace to the first `{`.
+  while (i < stripped.length) {
+    const ch = stripped[i]
+    if (ch === '{') break
+    if (ch === ';' || ch === '\n' || ch === '=' || ch === '>' || /\s/.test(ch)) {
+      i += 1
+      continue
+    }
+    // Anything else means this isn't a block-body arrow function.
+    return null
+  }
+  if (i >= stripped.length) return null
+  const openBraceOffset = i
+  let braceDepth = 1
+  i += 1
+  while (i < stripped.length && braceDepth > 0) {
+    const ch = stripped[i]
+    if (ch === '{') braceDepth += 1
+    else if (ch === '}') braceDepth -= 1
+    i += 1
+  }
+  if (braceDepth !== 0) return null
+  const closeBraceOffset = i - 1
+
+  // Convert character offsets to line indexes.
+  const startLine = stripped.slice(0, openBraceOffset).split('\n').length - 1
+  const endLine = stripped.slice(0, closeBraceOffset).split('\n').length - 1
+  const defLine = stripped.slice(0, defStart).split('\n').length - 1
+  return { defLine, startLine, endLine }
+}
+
 function checkTurnEngineAuthorizationRearmOrder({ root = REPO } = {}) {
   const file = path.join(root, TARGET_REL)
   let raw
@@ -69,29 +129,52 @@ function checkTurnEngineAuthorizationRearmOrder({ root = REPO } = {}) {
     })
   }
 
-  // Check 2: null-check + throw.
-  const nullCheckLine = lines.findIndex((line) => RE_NULL_CHECK.test(line))
-  if (nullCheckLine === -1) {
+  // Check 2: null-check + throw, scoped to inside `buildHostToolContext`.
+  // Stage 10 final-review tightening: previously the null-check + throw
+  // could appear ANYWHERE in the file. Now the gate parses the closure
+  // body and requires the `if (!__authorization) throw new Error(...)`
+  // invariant to live INSIDE `buildHostToolContext` — otherwise a
+  // contributor could move the null-check outside the closure and the
+  // gate would no longer prove the rearm-order invariant.
+  const closure = findBuildHostToolContextBody(stripped)
+  if (!closure) {
     violations.push({
       file,
       line: 0,
-      message: 'missing `if (!__authorization)` invariant check inside buildHostToolContext',
+      message: 'cannot locate `buildHostToolContext = (...) => { ... }` arrow-function body — closure may have been inlined; rewrite this gate',
     })
   } else {
-    // Look for `throw new Error` within ~5 lines of the check.
-    let foundThrow = false
-    for (let i = nullCheckLine; i < Math.min(nullCheckLine + 6, lines.length); i++) {
-      if (RE_THROW.test(lines[i])) {
-        foundThrow = true
+    let nullCheckLine = -1
+    for (let i = closure.startLine; i <= closure.endLine && i < lines.length; i++) {
+      if (RE_NULL_CHECK.test(lines[i])) {
+        nullCheckLine = i
         break
       }
     }
-    if (!foundThrow) {
+    if (nullCheckLine === -1) {
       violations.push({
         file,
-        line: nullCheckLine + 1,
-        message: 'invariant check `if (!__authorization)` is not followed by `throw new Error` within 5 lines',
+        line: closure.defLine + 1,
+        message: 'missing `if (!__authorization)` invariant check INSIDE buildHostToolContext closure body',
       })
+    } else {
+      // Look for `throw new Error` within ~5 lines of the check, still
+      // inside the closure body.
+      let foundThrow = false
+      const limit = Math.min(nullCheckLine + 6, closure.endLine + 1, lines.length)
+      for (let i = nullCheckLine; i < limit; i++) {
+        if (RE_THROW.test(lines[i])) {
+          foundThrow = true
+          break
+        }
+      }
+      if (!foundThrow) {
+        violations.push({
+          file,
+          line: nullCheckLine + 1,
+          message: 'invariant check `if (!__authorization)` is not followed by `throw new Error` within 5 lines (still inside closure)',
+        })
+      }
     }
   }
 

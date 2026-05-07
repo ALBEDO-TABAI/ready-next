@@ -112,6 +112,13 @@ test('ToolRuntime does not reject an allowed VEA typed action as unregistered', 
     ],
     context: {
       allowedToolNames: new Set(['skill_video_expert_pipeline']),
+      authorization: buildSelectedSkillToolAuthorization({
+        skillId: 'video-expert-analyzer',
+        allowedTypedActions: ['skill_video_expert_pipeline'],
+        allowedPrimitives: STANDARD_PRIMITIVES,
+        source: 'explicit',
+        reason: 'test_setup',
+      }),
     },
   })
 
@@ -142,7 +149,15 @@ test('ToolRuntime preflight bypasses skill_* allowedToolNames check (W3a — exe
     toolCalls: [
       { id: 'vea-1', name: 'skill_video_expert_pipeline', input: {} },
     ],
-    context: {},
+    context: {
+      authorization: buildSelectedSkillToolAuthorization({
+        skillId: 'video-expert-analyzer',
+        allowedTypedActions: ['skill_video_expert_pipeline'],
+        allowedPrimitives: STANDARD_PRIMITIVES,
+        source: 'explicit',
+        reason: 'test_setup',
+      }),
+    },
   })
 
   assert.equal(executorCalls, 1, 'runtime preflight must NOT pre-reject skill_* — executor admission is the canonical gate')
@@ -170,6 +185,7 @@ test('ToolRuntime preflight still rejects non-skill tools missing from allowedTo
     ],
     context: {
       allowedToolNames: new Set<string>(),
+      authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
     },
   })
 
@@ -243,6 +259,13 @@ test('ToolRuntime uses the VEA typed action timeout instead of the generic skill
     ],
     context: {
       allowedToolNames: new Set(['skill_video_expert_pipeline']),
+      authorization: buildSelectedSkillToolAuthorization({
+        skillId: 'video-expert-analyzer',
+        allowedTypedActions: ['skill_video_expert_pipeline'],
+        allowedPrimitives: STANDARD_PRIMITIVES,
+        source: 'explicit',
+        reason: 'test_setup',
+      }),
     },
   })
 

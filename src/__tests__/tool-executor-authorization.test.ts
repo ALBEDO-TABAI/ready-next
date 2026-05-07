@@ -133,3 +133,27 @@ test('source: authorization check appears in tool-executor.ts BEFORE the allowed
     `authorization check (${authIdx}) must precede allowedToolNames gate (${allowlistIdx}) — see W3 plan §10 互斥 on canonical signals`,
   )
 })
+
+// ---------------------------------------------------------------------------
+// Stage 10 belt-and-suspenders: missing-authorization on model-issued skill_*
+// ---------------------------------------------------------------------------
+
+test('Stage 10 invariant: model-issued skill_* call missing authorization → throws (catches as-any bypass)', async () => {
+  // The ToolContext type requires authorization, but `as any` / `as unknown as`
+  // bypasses it. The runtime invariant in tool-executor admission must throw
+  // to prevent silently allowing through a missing-authorization model-issued
+  // call. See `tool-executor.ts:184` (the Stage 10 belt-and-suspenders assert).
+  await assert.rejects(
+    () => executeToolCall(
+      'skill_run_shell',
+      { command: 'echo' },
+      {
+        invoker: 'model',
+        allowedToolNames: new Set(['skill_run_shell']),
+        sessionId: 'scope-test',
+      } as unknown as ToolContext,
+    ),
+    /Stage 10 invariant.*authorization/i,
+    'missing authorization on model-issued skill_* must throw, not silently pass',
+  )
+})

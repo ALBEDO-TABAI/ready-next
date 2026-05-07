@@ -159,3 +159,35 @@ test('buildSelectedSkillToolAuthorization — sets are populated from iterable i
     assert.equal(auth.allowedPrimitives.has('x'), true)
   }
 })
+
+test('buildSelectedSkillToolAuthorization — allow-sets are immutable (cannot expand authorization via mutation)', () => {
+  // Stage 10 final-review tightening: the type already declares
+  // `ReadonlySet<string>`, but `Object.freeze` on the authorization does
+  // NOT prevent mutation of the underlying Set. A contributor could
+  // `as unknown as Set<string>` past the type and silently expand the
+  // allow-set at runtime. The factory now wraps the Sets in `freezeSet`
+  // so mutation attempts throw.
+  const auth = buildSelectedSkillToolAuthorization({
+    skillId: 'video-expert-analyzer',
+    allowedTypedActions: ['skill_video_expert_pipeline'],
+    allowedPrimitives: ['skill_run_shell'],
+    source: 'explicit',
+    reason: 'test_setup',
+  })
+  if (auth.mode !== 'selected') {
+    assert.fail('expected selected')
+  }
+  assert.throws(
+    () => (auth.allowedTypedActions as unknown as Set<string>).add('skill_evil'),
+    /immutable/i,
+    'mutation of allowedTypedActions must throw',
+  )
+  assert.throws(
+    () => (auth.allowedPrimitives as unknown as Set<string>).delete('skill_run_shell'),
+    /immutable/i,
+  )
+  assert.throws(
+    () => (auth.allowedPrimitives as unknown as Set<string>).clear(),
+    /immutable/i,
+  )
+})
