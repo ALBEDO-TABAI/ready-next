@@ -238,3 +238,42 @@ test('negative: extended scope — `as any` in execution-loop-orchestrator.ts fa
     },
   )
 })
+
+test('negative: skill filter helper optional authorization parameter fails', () => {
+  withFixture(
+    {
+      'src/main/modules/agent-control/execution-tool-skill-filters.ts': [
+        'function f(',
+        '  authorization?: SkillToolAuthorization | null,',
+        ') {',
+        '  return authorization',
+        '}',
+        '',
+      ].join('\n'),
+    },
+    (root) => {
+      const result = run(['--root', root])
+      assert.equal(result.status, 1)
+      assert.match(result.stderr, /optional authorization parameter/)
+    },
+  )
+})
+
+test('negative: skill filter helper missing authorization passthrough fails', () => {
+  withFixture(
+    {
+      'src/main/modules/agent-control/execution-tool-skill-filters.ts': [
+        'function f(authorization: SkillToolAuthorization) {',
+        '  if (!authorization) return true',
+        '  return false',
+        '}',
+        '',
+      ].join('\n'),
+    },
+    (root) => {
+      const result = run(['--root', root])
+      assert.equal(result.status, 1)
+      assert.match(result.stderr, /missing authorization passthrough/)
+    },
+  )
+})

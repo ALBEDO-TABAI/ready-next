@@ -25,6 +25,7 @@
  *   - src/main/modules/agent-control/tool-registry.ts
  *   - src/main/modules/agent-control/tool-gateway.ts
  *   - src/main/modules/agent-control/execution-tool-config.ts
+ *   - src/main/modules/agent-control/execution-tool-skill-filters.ts
  *   - src/main/modules/tools/index.ts
  *   - src/main/modules/agent-control/tool-runtime.ts
  *   - src/main/modules/agent-control/execution-loop-orchestrator.ts
@@ -40,6 +41,8 @@
  *   - `<expr>.authorization ?? undefined|null` / `|| undefined|null`
  *   - `filterToolsByAuthorization(<arg>, undefined|null|<as any>|<?? null/undefined>|<|| null/undefined>, …)`
  *     — including the multiline form (whitespace collapsed before match)
+ *   - in execution-tool-skill-filters.ts only: optional/nullable helper
+ *     authorization parameters or `if (!authorization)` passthrough
  *
  * Allowed (NOT flagged):
  *   - `context?.authorization ?? buildExplicitNoSkillAuthorization(...)`
@@ -58,6 +61,7 @@ const TARGET_REL_FILES = [
   'src/main/modules/agent-control/tool-registry.ts',
   'src/main/modules/agent-control/tool-gateway.ts',
   'src/main/modules/agent-control/execution-tool-config.ts',
+  'src/main/modules/agent-control/execution-tool-skill-filters.ts',
   'src/main/modules/tools/index.ts',
   'src/main/modules/agent-control/tool-runtime.ts',
   'src/main/modules/agent-control/execution-loop-orchestrator.ts',
@@ -109,6 +113,22 @@ const WHOLE_FILE_FORBIDDEN_PATTERNS = [
     name: 'filterToolsByAuthorization with undefined/null/any second arg (incl. multiline)',
     regex:
       /\bfilterToolsByAuthorization\s*\(\s*[^,)]+,\s*(?:undefined|null|[^,)]*\bas\s+any\b|[^,)]*\bas\s+unknown\s+as\s+Skill\w*|[^,)]*\?\?\s*(?:undefined|null)\b|[^,)]*\|\|\s*(?:undefined|null)\b)/,
+  },
+]
+
+const SKILL_FILTERS_REL = 'src/main/modules/agent-control/execution-tool-skill-filters.ts'
+const SKILL_FILTERS_FORBIDDEN_PATTERNS = [
+  {
+    name: 'skill filter helper optional authorization parameter',
+    regex: /\bauthorization\s*\?:/,
+  },
+  {
+    name: 'skill filter helper nullable authorization parameter',
+    regex: /\bauthorization\s*:\s*SkillToolAuthorization\s*\|\s*(?:null|undefined)\b/,
+  },
+  {
+    name: 'skill filter helper missing authorization passthrough',
+    regex: /\bif\s*\(\s*!authorization\s*\)\s*return\s+true\b/,
   },
 ]
 
@@ -208,6 +228,21 @@ function checkAuthorizationUndefinedPassthrough({ root = REPO } = {}) {
           code: rawLines[lineIndex]?.trim() || '<multiline>',
         })
         if (m.index === globalRe.lastIndex) globalRe.lastIndex += 1
+      }
+    }
+
+    if (rel === SKILL_FILTERS_REL) {
+      for (let i = 0; i < lines.length; i++) {
+        for (const { name, regex } of SKILL_FILTERS_FORBIDDEN_PATTERNS) {
+          if (regex.test(lines[i])) {
+            violations.push({
+              file,
+              line: i + 1,
+              pattern: name,
+              code: rawLines[i].trim(),
+            })
+          }
+        }
       }
     }
   }

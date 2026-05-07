@@ -6,6 +6,8 @@
  * The `authorization` parameter is the W3b.3 cutover: the filter also
  * enforces it (defense-in-depth alongside the W3b.2 registry-layer
  * filter — if a name slips past one layer it gets caught at the other).
+ * Stage 10 makes this authorization required; callers that do not have a
+ * selected skill must pass `buildExplicitNoSkillAuthorization(...)`.
  *
  * Behavior summary for the filter helpers (`filterPreferredSkill*Tools`):
  *   - `authorization.mode==='none'` (any reason) → strip ALL skill_*
@@ -30,9 +32,8 @@ export function isSkillToolName(name: string): boolean {
 
 function isSkillNameAuthorizedInAuthorization(
   name: string,
-  authorization: SkillToolAuthorization | null | undefined,
+  authorization: SkillToolAuthorization,
 ): boolean {
-  if (!authorization) return true
   if (authorization.mode === 'none') {
     return false
   }
@@ -43,7 +44,7 @@ function isSkillNameAuthorizedInAuthorization(
 export function filterPreferredSkillAnthropicTools(
   tools: Array<Record<string, unknown>>,
   preferredSkillToolNames: string[],
-  authorization?: SkillToolAuthorization | null,
+  authorization: SkillToolAuthorization,
 ): Array<Record<string, unknown>> {
   const allowed = new Set(preferredSkillToolNames)
   return tools.filter((tool) => {
@@ -57,7 +58,7 @@ export function filterPreferredSkillAnthropicTools(
 export function filterPreferredSkillOpenAITools(
   tools: Array<Record<string, unknown>>,
   preferredSkillToolNames: string[],
-  authorization?: SkillToolAuthorization | null,
+  authorization: SkillToolAuthorization,
 ): Array<Record<string, unknown>> {
   const allowed = new Set(preferredSkillToolNames)
   return tools.filter((tool) => {
@@ -72,7 +73,7 @@ export function filterPreferredSkillOpenAITools(
 export function mergeForceDocumentAllowedNames(
   baseAllowed: Set<string>,
   preferredSkillToolNames: string[] | null | undefined,
-  authorization?: SkillToolAuthorization | null,
+  authorization: SkillToolAuthorization,
 ): Set<string> {
   if (!preferredSkillToolNames || preferredSkillToolNames.length === 0) return baseAllowed
   const filteredSkillNames = preferredSkillToolNames.filter(
