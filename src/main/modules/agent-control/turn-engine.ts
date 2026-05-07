@@ -1205,12 +1205,12 @@ export class TurnEngine {
       baseUrl: host.providerContext.baseUrl,
     })
 
-    // Stage 4 W3b — per-turn skill tool authorization. Initialized to
-    // null; assigned below once identity has been resolved + applied.
-    // The closure `buildHostToolContext` captures this `let` binding by
-    // reference and asserts non-null on entry, so any unexpected pre-
-    // rearm invocation throws a structural invariant error rather than
-    // silently passing the legacy `not_set` sentinel.
+    // Per-turn skill tool authorization. Initialized to null; assigned
+    // below once identity has been resolved + applied. The closure
+    // `buildHostToolContext` captures this `let` binding by reference and
+    // asserts non-null on entry, so any unexpected pre-rearm invocation
+    // throws a structural invariant error rather than silently passing
+    // an indeterminate authorization to downstream filters.
     let __authorization: SkillToolAuthorization | null = null
 
     const buildHostToolContext = (allowedToolNames: string[] | null | undefined, scope?: unknown) => {

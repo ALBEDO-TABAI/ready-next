@@ -441,7 +441,7 @@ test('prepareInitialRun: skills group visible + authorization=mode:selected (all
 //     stripping at gateway leaves nothing for these helpers to strip.
 // ---------------------------------------------------------------------------
 
-test('filterPreferredSkillAnthropicTools: authorization=mode:none non-not_set → strips skill_* even if in preferredSkillToolNames', async () => {
+test('filterPreferredSkillAnthropicTools: authorization=mode:none → strips skill_* even if in preferredSkillToolNames', async () => {
   const { filterPreferredSkillAnthropicTools } = await import(
     '../main/modules/agent-control/execution-tool-skill-filters'
   )

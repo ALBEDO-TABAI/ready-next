@@ -15,10 +15,10 @@
  *     name) from `authorization_denied` (real tool, not allowed this
  *     turn).
  *
- * Stage 10 (P) — the back-compat `'not_set'` reason has been retired.
- * Every model-visible call site now computes a determinate authorization
- * (either `mode:'selected'` or `mode:'none'` with an explicit reason)
- * before consulting the model. Child-runner / host invokers
+ * Stage 10 (P) — every model-visible call site supplies an explicit
+ * `SkillToolAuthorization`. The reason union encodes either a selected
+ * skill or one of three explicit no-skill reasons; there is no
+ * implicit-skip default. Child-runner / host invokers
  * (`invoker !== 'model'`) continue to bypass authorization regardless of
  * mode — admission only enforces authorization for model-issued tool
  * calls. Child-internal tools have their own admission gate at

@@ -73,9 +73,8 @@ export function buildToolRuntimeContext(params: {
    */
   activeFrame?: ToolRuntimeActiveFrameContext | null
   /**
-   * Stage 4 W3 — per-turn skill tool authorization. Required: every
-   * caller must compute a determinate authorization (Stage 10 retired
-   * the `'not_set'` back-compat shortcut).
+   * Per-turn skill tool authorization. Required field; turn-engine
+   * populates it after identity rearm.
    */
   authorization: SkillToolAuthorization
 }): ToolRuntimeContext {

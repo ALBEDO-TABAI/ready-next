@@ -298,6 +298,12 @@
       "owner": "stage5-bulk-import"
     },
     {
+      "path": "src/__tests__/skill-primitive-skill-id-resolution.test.ts",
+      "reason": "Stage 10 (P) — imports executeSkillTool to verify resolvePrimitiveSkillId routing across mode:'selected' / mode:'none' / no-context inputs; transitive value-import reaches native-backed modules but the test exercises dispatch surfaces with synthetic SkillToolAuthorization values only and never opens better-sqlite3 under host Node",
+      "since": "2026-05-07",
+      "owner": "stage-10-not-set-retirement"
+    },
+    {
       "path": "src/__tests__/skill-primitive-read-artifact.test.ts",
       "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
       "since": "2026-05-06",

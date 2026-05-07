@@ -92,11 +92,7 @@ export interface ToolRuntimeContext {
    */
   activeFrame: ToolRuntimeActiveFrameContext
   /**
-   * Stage 4 W3 — per-turn skill tool authorization. Stage 10 retired
-   * the back-compat `'not_set'` shortcut: every model-visible call site
-   * computes a determinate authorization (`mode:'selected'` or
-   * `mode:'none'` with an explicit reason) before consulting the model,
-   * so admission decisions are always live.
+   * Per-turn skill tool authorization (required).
    */
   authorization: SkillToolAuthorization
 }
@@ -559,9 +555,9 @@ export class ToolRuntime {
       // an empty default for legacy callers that didn't seed one.
       activeFrame: context?.activeFrame ?? createEmptyActiveFrameContext(),
       // Stage 4 W3 — `authorization` is non-optional on `ToolRuntimeContext`;
-      // attempt context inherits when context is supplied. Stage 10 retired
-      // the legacy `'not_set'` sentinel, so legacy callers (`executeBatch`
-      // invoked without a runtime context) get an explicit no-skill auth.
+      // attempt context inherits when context is supplied. Legacy callers
+      // (`executeBatch` invoked without a runtime context) fall back to an
+      // explicit `no_skill_signal` authorization.
       authorization: context?.authorization ?? buildExplicitNoSkillAuthorization('no_skill_signal'),
       registerRunCleanup: (cleanup) => {
         const trackedCleanup = this.trackCleanup(cleanup)

@@ -1,6 +1,16 @@
 # Ready V5 - 更新日志
 
-## [Unreleased] - 2026-04-28
+## [Unreleased] - 2026-05-07
+
+### Stage 10 (P) — `'not_set'` authorization 兼容短路退役
+
+- **Reason union 收紧**：删除 `SkillToolAuthorization` 的 `'not_set'` reason member 与 `SKILL_TOOL_AUTHORIZATION_NOT_SET` 常量；`mode:'none'` 的 reason 现在只能是 `'no_skill_signal' | 'turn_not_skill_resume' | 'config_repair_no_recoverable_task'`。
+- **公共方法签名收紧**：`tool-registry.ts` / `tool-gateway.ts` / `tools/index.ts` 的模型可见入口（`getToolDefinitionsForGroup` / `getToolSchemasResolutionForGroup` 等）以及 `RunCapabilityBaseParams.authorization` / `prepareInitialRun` 的 authorization 参数收紧为必填、非可空 `SkillToolAuthorization`。
+- **`resolvePrimitiveSkillId` cascade 死代码删除**：W3a-era 的 active-context / reference-skill hint / latest-active-task-run / chooser 兜底链已物理删除，函数体只读 `runtimeContext.authorization`。
+- **turn-engine invariant**：`__authorization` 改 `SkillToolAuthorization | null`，`buildHostToolContext` 闭包入口的 `if (!__authorization) throw new Error(...)` 强制 rearm-before-call。
+- **4 条新 CI gate**：`scripts/check-no-not-set-authorization.cjs`（含注释 / 字面量 / 标识符的全文本扫描）、`scripts/check-resolve-primitive-skill-id-shape.cjs`、`scripts/check-authorization-undefined-passthrough.cjs`、`scripts/check-turn-engine-authorization-rearm-order.cjs`。
+- **`verify:p` 链**：新增 `npm run verify:p` 与 `test:p:gates` / `test:p:focus`；顶层 `verify` 与 `verify:cloud` 起步链已切到 `verify:p`，`verify:o` 不再是顶层入口。
+- **详细计划**：`docs/superpowers/plans/2026-05-07-P-stage-10-transitional-bridge-retirement-implementation.md`（v8 approved）。
 
 ### Skill Runtime E — W2 outputDir lifecycle + child-run log GC
 

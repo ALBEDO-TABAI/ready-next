@@ -92,8 +92,7 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - LLM-facing 的 skill_* 工具现在只剩：动态 `skill_<id>_<action>`（来自 manifest）+ primitive（`skill_ask_user / skill_run_shell / skill_write_artifact / skill_read_artifact / skill_patch_config / skill_start_detached / skill_inspect_detached / skill_cancel_detached / skill_inspect_run_state`）。Stage 4 W3 起 primitive 不再由 session hint / running task run 直接打开，而是统一由本轮 `SkillToolAuthorization` 决定；静态 fallback 与 dispatch 必须使用同一判定，避免“列表可见但执行拒绝”
 - **Stage 4 W3 起 skill 工具的曝光与执行由本轮 `SkillTurnIdentity` + `SkillToolAuthorization` 共同决定**：
   - **Identity 层**（`skill-turn-identity.ts`，pure read 冻结快照）决定本轮意图——`mode:'skill'` 时给出 `skillId / source` (`explicit_user_mention / run_state_resource / prior_tool_use_lookback / reference_hint / skill_history`) / `relation`；`mode:'none'` 时给出 `reason`（`no_skill_signal / config_repair_no_recoverable_task / …`）
-  - **Authorization 层**（`skill-tool-authorization.ts`）由 `buildAuthorizationFromIdentity` 转译 identity 为 `mode:'selected'` (`skillId + allowedTypedActions + allowedPrimitives + source: 'explicit'/'trusted_resume'/'active_task'`) 或 `mode:'none' + reason`。它**只**作用于三处：(1) 模型可见 tool list（`tool-gateway` → registry 4 个 list resolver 通过 `filterToolsByAuthorization` 过滤）；(2) `tool-executor` admission（`invoker:'model'` 调用未授权 skill_* → 返 `errorKind:'authorization_denied'`，与 `tool_not_registered` 互斥）；(3) primitive 的 `resolvePrimitiveSkillId`（mode:'selected' → `authorization.skillId` 是最高优先级，mode:'none' 非 not_set → 直接 null，不走 frameSkillId 兜底）
-  - **`'not_set'` 短路**：`SKILL_TOOL_AUTHORIZATION_NOT_SET = { mode:'none', reason:'not_set' }` 是默认填充值，**所有**层（filter / admission / primitive resolver）遇到它都视同"没填 authorization"走 legacy 行为，保证 W3a 透传 plumbing 不改变可观察行为
+  - **Authorization 层**（`skill-tool-authorization.ts`）由 `buildAuthorizationFromIdentity` 转译 identity 为 `mode:'selected'` (`skillId + allowedTypedActions + allowedPrimitives + source: 'explicit'/'trusted_resume'/'active_task'`) 或 `mode:'none' + reason`（reason 三选一：`no_skill_signal / turn_not_skill_resume / config_repair_no_recoverable_task`）。它**只**作用于三处：(1) 模型可见 tool list（`tool-gateway` → registry 4 个 list resolver 通过 `filterToolsByAuthorization` 过滤）；(2) `tool-executor` admission（`invoker:'model'` 调用未授权 skill_* → 返 `errorKind:'authorization_denied'`，与 `tool_not_registered` 互斥）；(3) primitive 的 `resolvePrimitiveSkillId`（mode:'selected' → `authorization.skillId` 是最高优先级，mode:'none' → 直接 null，不走 frameSkillId 兜底）
   - **三层分离硬约束**：authorization **不进** registry/schema execution 路径——`resolveSkillToolDefinitionForExecution` / `resolveToolInputSchemaForExecution` 不接 authorization 参数；这样 `tool_not_registered` 仍然纯粹表达"工具不存在"，不被 authorization 污染
   - **invoker 豁免**：admission 的 authorization 检查仅作用于 `invoker === 'model'`；child runner 通过 `executeSkillActionViaToolGateway` (`invoker:'child_runner' + allowInternal:true`) / host 内部调用走原有 child-internal admission 路径，不被 authorization 拦截
   - **defense-in-depth**：模型可见 tool list 在两层独立过滤：(a) gateway → registry 的 `filterToolsByAuthorization`（W3b.2）；(b) `execution-tool-config.ts` 的 `filterPreferredSkill*Tools` / `mergeForceDocumentAllowedNames`（W3b.3 接 ToolPolicy.authorization）。即使一层被绕开，另一层仍然拦下未授权 skill_* 名进入模型上下文
@@ -144,7 +143,7 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - 所有工具 dispatch 入口都走 Zod `safeParse`；失败返回 `errorKind: 'input_validation'` 结构化结果，不进 handler。静态 schema 注册在 `src/main/modules/tools/schemas/index.ts`，动态 skill-action schema 在 `skills-tools.ts` 按签名缓存并合并
 - 主→渲染 `agent:error` IPC 必须带 `{ errorKind, recoverable, toolName? }`；`recoverable === true` 走软失败胶囊（`SoftFailureCapsule`），其他走系统消息；`errorKind === 'aborted'` 在 runtimeDriver 入口早返
 - 新增 tool-error metric 必须先登记在 `TOOL_ERROR_METRICS`（`src/main/modules/agent-control/tool-error-metrics.ts`），再在 emit 点引用；其他 observability metric（`tool_group_blocked_rate` / `policy_conflict_resolved` / `task_title_correction_rate` …）留在自己模块内，**不**并入此 registry
-- **`tool_not_registered` vs `authorization_denied` 互斥语义**（Stage 4 W3 起）：`errorKind: 'tool_not_registered'` 表示模型调了一个不存在的工具名（例如伪造 `skill_xxx`）；`errorKind: 'authorization_denied'` 表示工具真实存在并已注册，但本轮 `SkillToolAuthorization` 不允许（mode:'none' 非 not_set，或 mode:'selected' 但名字不在 `allowedTypedActions ∪ allowedPrimitives`）。两者互斥不可合并。`tool-executor.ts` 的 admission 顺序是：先 registration check（不存在 → `tool_not_registered`），再 authorization check（仅 `invoker:'model'` 且 skill_* → 不通过返 `authorization_denied`），最后 allowedToolNames preflight（其他工具 → `tool_restricted_this_turn`）；skill_* 在 `tool-runtime.ts` preflight 阶段被故意跳过 allowedToolNames 检查，转交 admission 唯一负责
+- **`tool_not_registered` vs `authorization_denied` 互斥语义**（Stage 4 W3 起）：`errorKind: 'tool_not_registered'` 表示模型调了一个不存在的工具名（例如伪造 `skill_xxx`）；`errorKind: 'authorization_denied'` 表示工具真实存在并已注册，但本轮 `SkillToolAuthorization` 不允许（`mode:'none'`，或 `mode:'selected'` 但名字不在 `allowedTypedActions ∪ allowedPrimitives`）。两者互斥不可合并。`tool-executor.ts` 的 admission 顺序是：先 registration check（不存在 → `tool_not_registered`），再 authorization check（仅 `invoker:'model'` 且 skill_* → 不通过返 `authorization_denied`），最后 allowedToolNames preflight（其他工具 → `tool_restricted_this_turn`）；skill_* 在 `tool-runtime.ts` preflight 阶段被故意跳过 allowedToolNames 检查，转交 admission 唯一负责
 - Phase 4 起 `skill_executions` 表和 `ttlSwept = 'skill_executions_ttl_swept'` 指标都已退役。仍需要 TTL 的只剩 reference-skill hints（in-memory Map）：`skillReferenceHintTtlSwept = 'skill_reference_hint_ttl_swept'` 由 `SkillsRuntimeManager.startReferenceHintSweep` 驱动，启动后 30s 首跑、之后每小时跑一次，30 分钟 idle 的 hint 被淘汰。ephemeral ask_user 记录（`eau-<8hex>`）继续用 `EphemeralExecutionStore`，完全独立于 SQLite
 
 ### 6.12 Skill 原语沙箱边界（B Phase 1）
@@ -326,6 +325,41 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - `npm run verify:o` 必须内嵌 `verify:n`，并覆盖以上 4 + 1 个 gate
   以及 `test:o:gates` / `test:o:focus`。顶层 `verify` 与 `verify:cloud`
   起步链已切到 `verify:o`。
+
+### 6.23 Skill 工具 authorization 收口（P / Stage 10）
+- Stage 10 (P) 已退役 `'not_set'` 兼容短路。`SkillToolAuthorization` 的
+  reason union 只剩 `mode:'selected'` 或 `mode:'none' + reason ∈
+  { 'no_skill_signal' | 'turn_not_skill_resume' |
+  'config_repair_no_recoverable_task' }`；不再有 implicit-skip 默认值，也
+  不再导出 `SKILL_TOOL_AUTHORIZATION_NOT_SET` 常量。identity `mode:'none'`
+  直接经 `buildAuthorizationFromIdentity` 翻译为 `mode:'none'`
+  authorization。
+- 模型可见的公共方法（`tool-registry.ts` 与 `tool-gateway.ts` 的
+  `getToolDefinitionsForGroup` / `getToolDefinitionsResolutionForGroup` /
+  `getToolSchemasForGroup` / `getToolSchemasResolutionForGroup`，以及
+  `tools/index.ts` 的两个 list helper）签名收紧为 `authorization:
+  SkillToolAuthorization`（必填、非可空）。非模型路径走私有 metadata /
+  execution-lookup resolver
+  （`getToolDefinitionsResolutionForGroupForInternalLookup` /
+  `getToolSchemasResolutionForGroupForInternalMetadata`），或公共 unfiltered
+  API（`gateway.listToolDefinitions` / `getToolDefinition` /
+  `collectToolNamesForGroups`），不再使用 authorization。
+- `resolvePrimitiveSkillId` 只读
+  `runtimeContext.authorization`：`mode:'selected'` 返
+  `authorization.skillId`，否则返 `null`。W3a-era 的 active-context /
+  reference-skill hint / latest-active-task-run / chooser 兜底链已物理删除。
+- `turn-engine.ts` 的 `__authorization` 改为 `SkillToolAuthorization | null`
+  并在 `null` 状态由 `buildHostToolContext` 闭包入口的 invariant
+  `if (!__authorization) throw new Error(...)` 拦截：第一次
+  `buildAuthorizationFromIdentity` rearm 必须先于第一次
+  `buildHostToolContext` 调用，否则触发结构性错误。
+- 4 条新 gate：`check-no-not-set-authorization.cjs` /
+  `check-resolve-primitive-skill-id-shape.cjs` /
+  `check-authorization-undefined-passthrough.cjs` /
+  `check-turn-engine-authorization-rearm-order.cjs`。`npm run verify:p`
+  必须内嵌 `verify:o`，并覆盖以上 4 个 gate 与
+  `test:p:gates` / `test:p:focus`。顶层 `verify` 与 `verify:cloud`
+  起步链已切到 `verify:p`。
 
 ## 7. 新功能开发最小闭环
 新增跨进程功能时，至少同步修改：

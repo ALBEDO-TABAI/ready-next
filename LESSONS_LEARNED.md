@@ -1,6 +1,17 @@
 # Ready 经验文档
 
-> 更新时间: 2026-04-28
+> 更新时间: 2026-05-07
+
+## -2. Stage 10 (P) — Transitional bridge retirement (2026-05-07)
+
+Stage 4 W3 引入 `SkillToolAuthorization` 三层分离时，留了一个显式的退场条件：当所有 caller 都迁移到 `buildAuthorizationFromIdentity` 计算 authorization 之后，`'not_set'` 兼容短路（`SKILL_TOOL_AUTHORIZATION_NOT_SET` 常量 + reason union 中的 `'not_set'` 字面量）必须被删除。Stage 10 在 5 个 commit 内兑现了这个退场条件：
+
+- **Commit 1（Step B'-1，refactor）**：把 `tool-registry.ts` / `tool-gateway.ts` / `tools/index.ts` 内"模型可见 + 非模型可见"两条调用路径拆开——内部 metadata / execution-lookup 改走私有 `getToolDefinitionsResolutionForGroupForInternalLookup` / `getToolSchemasResolutionForGroupForInternalMetadata` 与公共 unfiltered API（`gateway.listToolDefinitions / getToolDefinition / collectToolNamesForGroups`），公共 model-visible 入口的 authorization 进入"必填"准备态。
+- **Commit 2（Step D，测试迁移）**：把所有 `src/__tests__/` 内引用 `'not_set'` / `SKILL_TOOL_AUTHORIZATION_NOT_SET` / `?? null` 默认 authorization 的测试，改为显式 `buildExplicitNoSkillAuthorization('no_skill_signal')` / `buildSelectedSkillToolAuthorization(...)`。
+- **Commit 3（Step A + B + B'-2 + C，type tightening）**：删掉 `'not_set'` reason union member、删掉 `SKILL_TOOL_AUTHORIZATION_NOT_SET` 常量、6 个 `?? SKILL_TOOL_AUTHORIZATION_NOT_SET` filler 全部退役、`__authorization` 改 `SkillToolAuthorization | null` + invariant assert、`resolvePrimitiveSkillId` cascade 死代码删，`RunCapabilityBaseParams.authorization` / `prepareInitialRun` 入参收紧为必填。
+- **Commit 4（Step E + G + H，cleanup + CI gates + docs）**：移除 5 个 src/main/modules 文件内的 `'not_set'` 注释残留；新增 4 条 CI gate 把"无 `'not_set'` 文本（含注释）/ `resolvePrimitiveSkillId` 不再 cascade / 4 个文件无 authorization passthrough / turn-engine rearm-order"固化下来；新增 `verify:p` 链并把顶层 `verify` / `verify:cloud` 切到 `verify:p`。
+
+8 轮 Codex 计划评审在动手之前就抓出至少 22 个具体问题，包括 9 个被遗漏的测试调用方、4 个错分类的测试、6 个 `?? null` filler / passthrough 漏点。这印证了 §0.5 P5 "CI 强制 > 文档约束 > 人审" —— 哪怕 5 commit、4 步，凭"我会注意"无法保证不复发，必须在 PR 合并那一刻把"不允许字面量 `'not_set'` 出现在 `src/main/modules/`"变成机器拒绝条件，而不是 review 备忘。
 
 ## -1. 工具错误契约：stale executionId 引发架构翻新 (2026-04-22)
 

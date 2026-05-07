@@ -26,10 +26,9 @@ import {
 
 /**
  * Stage 10 — when caller has a `ToolPolicy` but no authorization, build
- * an explicit `mode:'none', reason:'no_skill_signal'` authorization
- * rather than passing `null`. Stage 10 retired the back-compat 'not_set'
- * shortcut, so model-visible tool list construction must always have a
- * determinate authorization to filter against.
+ * an explicit `mode:'none', reason:'no_skill_signal'` rather than `null`.
+ * Model-visible tool list construction must always have a determinate
+ * authorization to filter against.
  */
 function resolvePolicyAuthorization(policy?: ToolPolicy): SkillToolAuthorization {
   return policy?.authorization ?? buildExplicitNoSkillAuthorization('no_skill_signal')
