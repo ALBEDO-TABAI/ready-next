@@ -52,37 +52,38 @@ export type SkillToolAuthorization =
  * but `Object.freeze` on the authorization does NOT prevent mutation of
  * the underlying Set. A contributor could `as unknown as Set<string>`
  * past the type and silently expand the allow-set at runtime, broadening
- * authorization without it appearing in any policy decision. To make the
- * allow-sets truly immutable, override the mutator methods on the Set
- * itself so any mutation attempt throws.
+ * authorization without it appearing in any policy decision.
+ *
+ * Returning a real `Set` with overridden mutators is insufficient because
+ * `Set.prototype.add.call(set, 'x')` would still mutate it (the prototype
+ * method bypasses own-property overrides). To truly prevent mutation we
+ * return a closure-backed facade that satisfies `ReadonlySet<T>` but is
+ * NOT a Set instance — calling `Set.prototype.add` on it throws because
+ * the receiver lacks Set internal slots.
  */
 function freezeSet<T>(values: Iterable<T>): ReadonlySet<T> {
-  const set = new Set(values)
-  // Override mutators to throw — the type already says ReadonlySet, but
-  // a runtime guard catches `as any` / `as unknown as Set<T>` casts that
-  // try to expand authorization at runtime.
-  Object.defineProperty(set, 'add', {
-    value: () => {
-      throw new Error('SkillToolAuthorization allow-set is immutable')
+  const internal = new Set(values)
+  // Closure-backed facade. Object.freeze + `as ReadonlySet<T>` gives a
+  // type-correct immutable view; `Set.prototype.<mutator>.call(facade, ...)`
+  // throws TypeError "Method Set.prototype.<mutator> called on incompatible
+  // receiver" because the facade is a plain object, not a Set instance.
+  const facade = Object.freeze({
+    get size(): number { return internal.size },
+    has: (value: T): boolean => internal.has(value),
+    forEach: (
+      callbackfn: (value: T, value2: T, set: ReadonlySet<T>) => void,
+      thisArg?: unknown,
+    ): void => {
+      internal.forEach((value, key) => {
+        callbackfn.call(thisArg, value, key, facade as ReadonlySet<T>)
+      })
     },
-    writable: false,
-    configurable: false,
+    entries: (): IterableIterator<[T, T]> => internal.entries(),
+    keys: (): IterableIterator<T> => internal.keys(),
+    values: (): IterableIterator<T> => internal.values(),
+    [Symbol.iterator]: (): IterableIterator<T> => internal[Symbol.iterator](),
   })
-  Object.defineProperty(set, 'delete', {
-    value: () => {
-      throw new Error('SkillToolAuthorization allow-set is immutable')
-    },
-    writable: false,
-    configurable: false,
-  })
-  Object.defineProperty(set, 'clear', {
-    value: () => {
-      throw new Error('SkillToolAuthorization allow-set is immutable')
-    },
-    writable: false,
-    configurable: false,
-  })
-  return Object.freeze(set)
+  return facade as ReadonlySet<T>
 }
 
 /**

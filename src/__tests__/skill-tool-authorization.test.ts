@@ -163,10 +163,12 @@ test('buildSelectedSkillToolAuthorization — sets are populated from iterable i
 test('buildSelectedSkillToolAuthorization — allow-sets are immutable (cannot expand authorization via mutation)', () => {
   // Stage 10 final-review tightening: the type already declares
   // `ReadonlySet<string>`, but `Object.freeze` on the authorization does
-  // NOT prevent mutation of the underlying Set. A contributor could
+  // NOT prevent mutation of an underlying Set. A contributor could
   // `as unknown as Set<string>` past the type and silently expand the
-  // allow-set at runtime. The factory now wraps the Sets in `freezeSet`
-  // so mutation attempts throw.
+  // allow-set at runtime. The factory wraps the Sets in `freezeSet` which
+  // returns a closure-backed facade — not a Set instance — so neither
+  // direct mutator calls NOR `Set.prototype.<mutator>.call(facade, ...)`
+  // can mutate the authorization.
   const auth = buildSelectedSkillToolAuthorization({
     skillId: 'video-expert-analyzer',
     allowedTypedActions: ['skill_video_expert_pipeline'],
@@ -177,17 +179,63 @@ test('buildSelectedSkillToolAuthorization — allow-sets are immutable (cannot e
   if (auth.mode !== 'selected') {
     assert.fail('expected selected')
   }
+
+  // (a) Direct mutator method call — facade has no `.add` property at all,
+  // so `(auth.allowedTypedActions as Set).add` is undefined; calling it
+  // throws TypeError "is not a function".
   assert.throws(
     () => (auth.allowedTypedActions as unknown as Set<string>).add('skill_evil'),
-    /immutable/i,
-    'mutation of allowedTypedActions must throw',
+    'direct .add() call must throw on the facade',
   )
   assert.throws(
     () => (auth.allowedPrimitives as unknown as Set<string>).delete('skill_run_shell'),
-    /immutable/i,
+    'direct .delete() call must throw on the facade',
   )
   assert.throws(
     () => (auth.allowedPrimitives as unknown as Set<string>).clear(),
-    /immutable/i,
+    'direct .clear() call must throw on the facade',
   )
+
+  // (b) Prototype-method bypass — Set.prototype.add.call(facade, ...) must
+  // also throw because the facade lacks Set internal slots. This is the
+  // attack Codex round 2 found uncovered in the original freezeSet impl.
+  assert.throws(
+    () => Set.prototype.add.call(
+      auth.allowedTypedActions as unknown as Set<string>,
+      'skill_evil',
+    ),
+    /Method.*Set.*called on (incompatible|non-object|.* with no \[\[SetData\]\])/i,
+    'Set.prototype.add.call(facade, ...) must throw — facade is not a Set instance',
+  )
+  assert.throws(
+    () => Set.prototype.delete.call(
+      auth.allowedPrimitives as unknown as Set<string>,
+      'skill_run_shell',
+    ),
+    /Method.*Set.*called on/i,
+    'Set.prototype.delete.call(facade, ...) must throw',
+  )
+  assert.throws(
+    () => Set.prototype.clear.call(
+      auth.allowedPrimitives as unknown as Set<string>,
+    ),
+    /Method.*Set.*called on/i,
+    'Set.prototype.clear.call(facade, ...) must throw',
+  )
+
+  // (c) The allow-set must NOT be a Set instance (so `instanceof Set` is
+  // false and Set-specific methods aren't reachable through the prototype
+  // chain). This is the structural invariant that backs (a) and (b).
+  assert.equal(
+    auth.allowedTypedActions instanceof Set,
+    false,
+    'allow-set must be a closure-backed facade, not a Set instance',
+  )
+
+  // (d) Read methods still work — has/values/iteration must function so
+  // policy decisions can read membership.
+  assert.equal(auth.allowedTypedActions.has('skill_video_expert_pipeline'), true)
+  assert.equal(auth.allowedTypedActions.has('skill_unknown'), false)
+  assert.equal(auth.allowedTypedActions.size, 1)
+  assert.deepEqual(Array.from(auth.allowedTypedActions), ['skill_video_expert_pipeline'])
 })
