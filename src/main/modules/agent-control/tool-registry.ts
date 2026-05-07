@@ -781,19 +781,31 @@ export class ToolRegistry implements ToolRegistryReader {
     return this.getToolDefinition(toolName)
   }
 
-  getToolDefinitionsResolutionForGroup(
+  /**
+   * Stage 10 (P) Phase B'-1 — internal-lookup definitions resolver.
+   *
+   * Returns the unfiltered definition resolution for a group. Used by:
+   *   - `enrichToolDefinitions` (metadata aggregation; needs ALL tools).
+   *   - `listToolDefinitions` (execution-lookup / metadata listing).
+   *   - `getToolDefinitionsResolutionForGroup` (the model-visible public
+   *     resolver, which then applies `filterToolsByAuthorization`).
+   *
+   * **Never use for model-visible tool lists.** The public model-visible
+   * resolver `getToolDefinitionsResolutionForGroup` MUST be used to
+   * surface tools to the model, so that authorization filtering is
+   * applied as defense-in-depth.
+   */
+  getToolDefinitionsResolutionForGroupForInternalLookup(
     groupId: CapabilityGroupId,
     sessionId?: string,
-    authorization?: SkillToolAuthorization | null,
   ): ToolDefinitionResolution {
     const provider = this.groupProviders[groupId]
     if (!provider) {
       return { definitions: [] }
     }
-    let resolution: ToolDefinitionResolution
     if (provider.getToolDefinitionsDetailed) {
       try {
-        resolution = this.enrichToolDefinitions(groupId, provider.getToolDefinitionsDetailed(sessionId), sessionId)
+        return this.enrichToolDefinitions(groupId, provider.getToolDefinitionsDetailed(sessionId), sessionId)
       } catch (error) {
         if (groupId === 'skills') {
           fallbackThrottle.emit({
@@ -801,34 +813,42 @@ export class ToolRegistry implements ToolRegistryReader {
             reason: 'manager_throw',
           })
         }
-        resolution = this.enrichToolDefinitions(groupId, {
+        return this.enrichToolDefinitions(groupId, {
           definitions: buildToolDefinitions(groupId, provider.staticToolNames || []),
           error: getErrorMessage(error),
           usedStaticFallback: Boolean(provider.staticToolNames && provider.staticToolNames.length > 0),
         }, sessionId)
       }
-    } else if (provider.getToolDefinitions) {
-      try {
-        resolution = this.enrichToolDefinitions(groupId, { definitions: provider.getToolDefinitions() }, sessionId)
-      } catch (error) {
-        if (groupId === 'skills') {
-          fallbackThrottle.emit({
-            entry: 'group_definitions',
-            reason: 'manager_throw',
-          })
-        }
-        resolution = this.enrichToolDefinitions(groupId, {
-          definitions: buildToolDefinitions(groupId, provider.staticToolNames || []),
-          error: getErrorMessage(error),
-          usedStaticFallback: Boolean(provider.staticToolNames && provider.staticToolNames.length > 0),
-        }, sessionId)
-      }
-    } else {
-      resolution = this.enrichToolDefinitions(groupId, {
-        definitions: buildToolDefinitions(groupId, provider.staticToolNames || []),
-        usedStaticFallback: Boolean(provider.staticToolNames && provider.staticToolNames.length > 0),
-      }, sessionId)
     }
+    if (provider.getToolDefinitions) {
+      try {
+        return this.enrichToolDefinitions(groupId, { definitions: provider.getToolDefinitions() }, sessionId)
+      } catch (error) {
+        if (groupId === 'skills') {
+          fallbackThrottle.emit({
+            entry: 'group_definitions',
+            reason: 'manager_throw',
+          })
+        }
+        return this.enrichToolDefinitions(groupId, {
+          definitions: buildToolDefinitions(groupId, provider.staticToolNames || []),
+          error: getErrorMessage(error),
+          usedStaticFallback: Boolean(provider.staticToolNames && provider.staticToolNames.length > 0),
+        }, sessionId)
+      }
+    }
+    return this.enrichToolDefinitions(groupId, {
+      definitions: buildToolDefinitions(groupId, provider.staticToolNames || []),
+      usedStaticFallback: Boolean(provider.staticToolNames && provider.staticToolNames.length > 0),
+    }, sessionId)
+  }
+
+  getToolDefinitionsResolutionForGroup(
+    groupId: CapabilityGroupId,
+    sessionId?: string,
+    authorization?: SkillToolAuthorization | null,
+  ): ToolDefinitionResolution {
+    const resolution = this.getToolDefinitionsResolutionForGroupForInternalLookup(groupId, sessionId)
     // Stage 4 W3b.2 — apply authorization filter to the model-visible
     // definitions list. Defense-in-depth alongside ToolPolicy's
     // preferredSkillToolNames filter; here we also strip primitives in
@@ -843,22 +863,30 @@ export class ToolRegistry implements ToolRegistryReader {
     }
   }
 
-  getToolSchemasResolutionForGroup(
+  /**
+   * Stage 10 (P) Phase B'-1 — internal-metadata schemas resolver.
+   *
+   * Returns the unfiltered schemas resolution for a group. Used by:
+   *   - `enrichToolDefinitions` (metadata aggregation; needs ALL tools).
+   *   - `getToolSchemasResolutionForGroup` (the model-visible public
+   *     resolver, which then applies `filterToolsByAuthorization`).
+   *
+   * **Never use for model-visible tool lists.**
+   */
+  getToolSchemasResolutionForGroupForInternalMetadata(
     groupId: CapabilityGroupId,
     format: ToolSchemaFormat,
     sessionId?: string,
-    authorization?: SkillToolAuthorization | null,
   ): ToolSchemaResolution {
     const provider = this.groupProviders[groupId]
     const staticToolNames = provider?.staticToolNames || []
 
-    let resolution: ToolSchemaResolution
     const detailedResolver = format === 'anthropic'
       ? provider?.getAnthropicToolsDetailed
       : provider?.getOpenAIToolsDetailed
     if (detailedResolver) {
       try {
-        resolution = detailedResolver(sessionId)
+        return detailedResolver(sessionId)
       } catch (error) {
         if (groupId === 'skills') {
           fallbackThrottle.emit({
@@ -866,38 +894,45 @@ export class ToolRegistry implements ToolRegistryReader {
             reason: 'manager_throw',
           })
         }
-        resolution = {
+        return {
           tools: staticToolNames.map((toolName) => createStaticFallbackSchema(toolName, format)),
           error: getErrorMessage(error),
           usedStaticFallback: staticToolNames.length > 0,
         }
       }
-    } else {
-      const directResolver = format === 'anthropic'
-        ? provider?.getAnthropicTools
-        : provider?.getOpenAITools
-      if (directResolver) {
-        try {
-          resolution = { tools: directResolver() }
-        } catch (error) {
-          if (groupId === 'skills') {
-            fallbackThrottle.emit({
-              entry: 'group_schemas',
-              reason: 'manager_throw',
-            })
-          }
-          resolution = {
-            tools: [],
-            error: getErrorMessage(error),
-          }
+    }
+    const directResolver = format === 'anthropic'
+      ? provider?.getAnthropicTools
+      : provider?.getOpenAITools
+    if (directResolver) {
+      try {
+        return { tools: directResolver() }
+      } catch (error) {
+        if (groupId === 'skills') {
+          fallbackThrottle.emit({
+            entry: 'group_schemas',
+            reason: 'manager_throw',
+          })
         }
-      } else {
-        resolution = {
-          tools: staticToolNames.map((toolName) => createStaticFallbackSchema(toolName, format)),
-          usedStaticFallback: staticToolNames.length > 0,
+        return {
+          tools: [],
+          error: getErrorMessage(error),
         }
       }
     }
+    return {
+      tools: staticToolNames.map((toolName) => createStaticFallbackSchema(toolName, format)),
+      usedStaticFallback: staticToolNames.length > 0,
+    }
+  }
+
+  getToolSchemasResolutionForGroup(
+    groupId: CapabilityGroupId,
+    format: ToolSchemaFormat,
+    sessionId?: string,
+    authorization?: SkillToolAuthorization | null,
+  ): ToolSchemaResolution {
+    const resolution = this.getToolSchemasResolutionForGroupForInternalMetadata(groupId, format, sessionId)
     // Stage 4 W3b.2 — apply authorization filter to the model-visible
     // schemas list. Tool name extraction adapts to both anthropic
     // (`tool.name`) and openai (`tool.function.name`) shapes.
@@ -916,9 +951,12 @@ export class ToolRegistry implements ToolRegistryReader {
   }
 
   listToolDefinitions(): ToolDefinition[] {
+    // Stage 10 (P) Phase B'-1 — execution-lookup path. Uses the unfiltered
+    // internal resolver so callers (e.g. `getToolDefinition` for execution
+    // dispatch) see ALL tools, never a model-visible filtered subset.
     const tools = new Map<string, ToolDefinition>()
     for (const groupId of Object.keys(this.groupProviders) as CapabilityGroupId[]) {
-      for (const tool of this.getToolDefinitionsForGroup(groupId)) {
+      for (const tool of this.getToolDefinitionsResolutionForGroupForInternalLookup(groupId).definitions) {
         if (!tools.has(tool.name)) {
           tools.set(tool.name, tool)
         }
@@ -953,9 +991,12 @@ export class ToolRegistry implements ToolRegistryReader {
       return resolution
     }
 
+    // Stage 10 (P) Phase B'-1 — metadata aggregation needs ALL tools, not
+    // the model-visible filtered subset. Use the unfiltered internal
+    // resolver to avoid applying authorization to metadata enrichment.
     const metadata = mergeToolMetadata(
-      buildToolMetadataMap(this.getToolSchemasResolutionForGroup(groupId, 'openai', sessionId).tools, 'openai'),
-      buildToolMetadataMap(this.getToolSchemasResolutionForGroup(groupId, 'anthropic', sessionId).tools, 'anthropic'),
+      buildToolMetadataMap(this.getToolSchemasResolutionForGroupForInternalMetadata(groupId, 'openai', sessionId).tools, 'openai'),
+      buildToolMetadataMap(this.getToolSchemasResolutionForGroupForInternalMetadata(groupId, 'anthropic', sessionId).tools, 'anthropic'),
     )
 
     return {

@@ -114,12 +114,21 @@ export class ToolGateway {
     return this.resolveGroupToolSchemasDetailed(groupId, format, sessionId, authorization).tools
   }
 
+  // Stage 10 (P) Phase B'-1 — capability metadata path. The previous
+  // implementation accepted `authorization` and routed through the
+  // model-visible `resolveGroupToolDefinitions` wrapper, but every
+  // in-class caller (`buildCapabilityGroupEntry`, `collectToolNamesForGroups`)
+  // already passes no authorization. Tool-name aggregation for capability
+  // metadata must see ALL tools (not the model-visible filtered subset),
+  // so this method now routes through the registry's unfiltered
+  // internal-lookup resolver.
   private resolveGroupToolNames(
     groupId: CapabilityGroupId,
     sessionId?: string,
-    authorization?: SkillToolAuthorization | null,
   ): string[] {
-    return this.resolveGroupToolDefinitions(groupId, sessionId, authorization).map((tool) => tool.name)
+    return this.registry
+      .getToolDefinitionsResolutionForGroupForInternalLookup(groupId, sessionId)
+      .definitions.map((tool) => tool.name)
   }
 
   private buildCapabilityGroupEntry(groupId: CapabilityGroupId): CapabilityGroupRegistryEntry {
