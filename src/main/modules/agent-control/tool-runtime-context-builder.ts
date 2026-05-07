@@ -14,10 +14,7 @@ import {
   snapshotTurnFeatureFlags,
   type TurnFeatureFlags,
 } from './turn-feature-flags'
-import {
-  SKILL_TOOL_AUTHORIZATION_NOT_SET,
-  type SkillToolAuthorization,
-} from './skill-tool-authorization'
+import type { SkillToolAuthorization } from './skill-tool-authorization'
 
 /**
  * Phase 3 (Team T7) — derive the initial `ToolRuntimeActiveFrameContext`
@@ -76,14 +73,11 @@ export function buildToolRuntimeContext(params: {
    */
   activeFrame?: ToolRuntimeActiveFrameContext | null
   /**
-   * Stage 4 W3 — per-turn skill tool authorization. When omitted, the
-   * default (`SKILL_TOOL_AUTHORIZATION_NOT_SET`) is used; this is a
-   * back-compat short-circuit that admission treats as "skip skill_*
-   * authorization check". Once W3b cutover wires `turn-engine` to
-   * compute and pass real authorization, the default is no longer used
-   * for model-driven turns.
+   * Stage 4 W3 — per-turn skill tool authorization. Required: every
+   * caller must compute a determinate authorization (Stage 10 retired
+   * the `'not_set'` back-compat shortcut).
    */
-  authorization?: SkillToolAuthorization | null
+  authorization: SkillToolAuthorization
 }): ToolRuntimeContext {
   const scopeId = params.scopeId || params.scope?.id || params.sessionId
   return {
@@ -107,7 +101,7 @@ export function buildToolRuntimeContext(params: {
     agentContext: params.agentContext ?? null,
     turnFeatureFlags: params.turnFeatureFlags ?? snapshotTurnFeatureFlags(),
     activeFrame: params.activeFrame ?? createEmptyActiveFrameContext(),
-    authorization: params.authorization ?? SKILL_TOOL_AUTHORIZATION_NOT_SET,
+    authorization: params.authorization,
   }
 }
 
@@ -138,6 +132,6 @@ export function toToolExecutorContext(context: ToolRuntimeContext): ToolContext 
     // Stage 4 W3 — forward the per-turn skill tool authorization so
     // tool-executor admission can enforce it for model-issued skill_*
     // tool calls.
-    authorization: context.authorization ?? SKILL_TOOL_AUTHORIZATION_NOT_SET,
+    authorization: context.authorization,
   }
 }

@@ -53,8 +53,10 @@ interface RunCapabilityBaseParams {
    * leaving the diagnostic snapshot and text-tool-bridge allowed-name
    * list out of sync. `_baseParams` retains it so
    * `reconcileAfterBrowserDecision` continues with the same value.
+   * Stage 10 — required: every model-visible call site computes a
+   * determinate authorization before invoking the controller.
    */
-  authorization?: SkillToolAuthorization | null
+  authorization: SkillToolAuthorization
 }
 
 export interface PreparedRunCapabilities {
@@ -240,9 +242,7 @@ function resolveRunCapabilities(
   // skill-list filter the model will see. Without this, the diagnostic
   // snapshot and the text-tool-bridge allowed-name list drift from the
   // post-cutover policy applied later in turn-engine.
-  if (baseParams.authorization !== undefined) {
-    toolPolicy.authorization = baseParams.authorization
-  }
+  toolPolicy.authorization = baseParams.authorization
 
   const toolBundle = getPolicyOpenAIToolBundle(toolPolicy)
 

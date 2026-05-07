@@ -19,7 +19,21 @@ import {
   filterPreferredSkillOpenAITools as _filterPreferredSkillOpenAI,
   mergeForceDocumentAllowedNames as _mergeForceDocumentAllowedNames,
 } from './execution-tool-skill-filters'
-import type { SkillToolAuthorization } from './skill-tool-authorization'
+import {
+  buildExplicitNoSkillAuthorization,
+  type SkillToolAuthorization,
+} from './skill-tool-authorization'
+
+/**
+ * Stage 10 — when caller has a `ToolPolicy` but no authorization, build
+ * an explicit `mode:'none', reason:'no_skill_signal'` authorization
+ * rather than passing `null`. Stage 10 retired the back-compat 'not_set'
+ * shortcut, so model-visible tool list construction must always have a
+ * determinate authorization to filter against.
+ */
+function resolvePolicyAuthorization(policy?: ToolPolicy): SkillToolAuthorization {
+  return policy?.authorization ?? buildExplicitNoSkillAuthorization('no_skill_signal')
+}
 
 export interface ToolPolicy {
   forceDocumentTool: boolean
@@ -240,7 +254,7 @@ export function buildToolGuidance(policy: ToolPolicy): string {
 export function getPolicyAnthropicTools(policy?: ToolPolicy): Array<Record<string, unknown>> {
   const visibleGroupIds = resolveVisibleGroupIds(policy)
 
-  let tools = defaultToolGateway.getAnthropicToolsForGroups(visibleGroupIds, policy?.sessionId, policy?.authorization ?? null)
+  let tools = defaultToolGateway.getAnthropicToolsForGroups(visibleGroupIds, policy?.sessionId, resolvePolicyAuthorization(policy))
   if (policy?.forceDocumentTool) {
     const baseAllowed = policy.documentWidgetTaskKind === 'create'
       ? DOCUMENT_WIDGET_CREATE_TOOL_NAMES
@@ -258,7 +272,7 @@ export function getPolicyAnthropicTools(policy?: ToolPolicy): Array<Record<strin
     const allowedNames = _mergeForceDocumentAllowedNames(
       baseAllowed,
       policy.preferredSkillToolNames,
-      policy.authorization ?? null,
+      resolvePolicyAuthorization(policy),
     )
     tools = filterAnthropicToolsByAllowedNames(tools, allowedNames)
   }
@@ -280,7 +294,7 @@ export function getPolicyAnthropicTools(policy?: ToolPolicy): Array<Record<strin
   tools = _filterPreferredSkillAnthropic(
     tools,
     policy?.preferredSkillToolNames || [],
-    policy?.authorization ?? null,
+    resolvePolicyAuthorization(policy),
   )
   return tools
 }
@@ -295,7 +309,7 @@ export function getPolicyOpenAIToolBundle(policy?: ToolPolicy): PolicyOpenAITool
     visibleGroupIds,
     'openai',
     policy?.sessionId,
-    policy?.authorization ?? null,
+    resolvePolicyAuthorization(policy),
   )
   let tools = resolution.tools
   if (policy?.forceDocumentTool) {
@@ -315,7 +329,7 @@ export function getPolicyOpenAIToolBundle(policy?: ToolPolicy): PolicyOpenAITool
     const allowedNames = _mergeForceDocumentAllowedNames(
       baseAllowed,
       policy.preferredSkillToolNames,
-      policy.authorization ?? null,
+      resolvePolicyAuthorization(policy),
     )
     tools = filterOpenAIToolsByAllowedNames(tools, allowedNames)
   }
@@ -337,7 +351,7 @@ export function getPolicyOpenAIToolBundle(policy?: ToolPolicy): PolicyOpenAITool
   tools = _filterPreferredSkillOpenAI(
     tools,
     policy?.preferredSkillToolNames || [],
-    policy?.authorization ?? null,
+    resolvePolicyAuthorization(policy),
   )
   const normalizedTools = tools.map((tool) => normalizeOpenAIToolSchema(tool))
   const toolNames = collectToolNames(normalizedTools, 'openai')

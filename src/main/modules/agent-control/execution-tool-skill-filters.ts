@@ -2,17 +2,13 @@
  * Stage 4 W3b.3 — 4 skill filter helpers used by `ToolPolicy.getPolicy*`.
  *
  * `preferredSkillToolNames` remains the primary filter source — it's
- * what turn-engine computes per-turn from `buildPreferredSkillToolNames`
- * and the legacy callers expect. The optional `authorization?` parameter
- * is the W3b.3 cutover: when callers pass authorization, the filter
- * additionally enforces it (defense-in-depth alongside the W3b.2
- * registry-layer filter — if a name slips past one layer it gets caught
- * at the other).
+ * what turn-engine computes per-turn from `buildPreferredSkillToolNames`.
+ * The `authorization` parameter is the W3b.3 cutover: the filter also
+ * enforces it (defense-in-depth alongside the W3b.2 registry-layer
+ * filter — if a name slips past one layer it gets caught at the other).
  *
  * Behavior summary for the filter helpers (`filterPreferredSkill*Tools`):
- *   - `authorization` undefined or mode:none reason='not_set' → preserve
- *     legacy `preferredSkillToolNames` filter
- *   - `authorization.mode==='none'` non-'not_set' → strip ALL skill_*
+ *   - `authorization.mode==='none'` (any reason) → strip ALL skill_*
  *     (overrides preferredSkillToolNames; identity says no skill applies)
  *   - `authorization.mode==='selected'` → keep skill_* only if name is in
  *     `allowedTypedActions ∪ allowedPrimitives` AND in
@@ -38,7 +34,7 @@ function isSkillNameAuthorizedInAuthorization(
 ): boolean {
   if (!authorization) return true
   if (authorization.mode === 'none') {
-    return authorization.reason === 'not_set'
+    return false
   }
   return authorization.allowedTypedActions.has(name)
     || authorization.allowedPrimitives.has(name)

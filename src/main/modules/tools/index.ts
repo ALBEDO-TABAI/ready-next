@@ -1,5 +1,6 @@
 import { defaultToolGateway } from '../agent-control/tool-gateway'
 import type { ToolRegistryReader } from '../agent-control/tool-registry'
+import type { SkillToolAuthorization } from '../agent-control/skill-tool-authorization'
 import { executeBrowserTool } from './browser-tools'
 import {
   executeCalendarTool,
@@ -25,12 +26,26 @@ import {
   executeSessionRecallTool,
 } from './session-recall-tools'
 
-export function getAnthropicTools(): Array<Record<string, unknown>> {
-  return defaultToolGateway.getAnthropicToolsForGroups(defaultToolGateway.listCapabilityGroups().map((group) => group.id))
+export function getAnthropicTools(
+  authorization: SkillToolAuthorization,
+  sessionId?: string,
+): Array<Record<string, unknown>> {
+  return defaultToolGateway.getAnthropicToolsForGroups(
+    defaultToolGateway.listCapabilityGroups().map((group) => group.id),
+    sessionId,
+    authorization,
+  )
 }
 
-export function getOpenAITools(): Array<Record<string, unknown>> {
-  return defaultToolGateway.getOpenAIToolsForGroups(defaultToolGateway.listCapabilityGroups().map((group) => group.id))
+export function getOpenAITools(
+  authorization: SkillToolAuthorization,
+  sessionId?: string,
+): Array<Record<string, unknown>> {
+  return defaultToolGateway.getOpenAIToolsForGroups(
+    defaultToolGateway.listCapabilityGroups().map((group) => group.id),
+    sessionId,
+    authorization,
+  )
 }
 
 export { executeBrowserTool, executeSkillTool, executeFeishuTool, executeMemoryTool, executePetTool, executeSessionRecallTool }

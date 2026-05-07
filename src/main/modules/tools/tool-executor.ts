@@ -18,7 +18,6 @@ import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 import type { ToolRuntimeActiveFrameContext } from '../agent-control/tool-runtime'
 import type { TurnFeatureFlags } from '../agent-control/turn-feature-flags'
 import {
-  SKILL_TOOL_AUTHORIZATION_NOT_SET,
   checkSkillToolAuthorization,
   type SkillToolAuthorization,
 } from '../agent-control/skill-tool-authorization'
@@ -96,15 +95,15 @@ export interface ToolContext {
     runStatePath: string | null
   } | null
   /**
-   * Stage 4 W3 — per-turn skill tool authorization. The default value
-   * (`SKILL_TOOL_AUTHORIZATION_NOT_SET`, i.e. `mode:'none', reason:'not_set'`)
-   * is treated as a back-compat short-circuit by admission below: skill_*
-   * tools pass through, and the new `authorization_denied` errorKind is
-   * never emitted. Once W3b cutover wires `turn-engine` and `ToolPolicy`
-   * to populate real authorization, the default is no longer reached for
-   * model turns and the cutover becomes live.
+   * Stage 4 W3 — per-turn skill tool authorization. Stage 10 made this
+   * field required in production: every model-visible call site computes
+   * a determinate authorization (`mode:'selected'` or `mode:'none'` with
+   * an explicit reason) before consulting the model, and admission
+   * decisions are always live. A runtime invariant in `executeToolCall`
+   * additionally asserts authorization is present for model-issued
+   * skill_* calls — defense against `as any` bypasses.
    */
-  authorization?: SkillToolAuthorization
+  authorization: SkillToolAuthorization
 }
 
 function isFrameScopedInternalSkillActionAllowed(
@@ -178,13 +177,14 @@ export async function executeToolCall(
   // paths (the child-internal admission above for child_runner, and the
   // legacy allowedToolNames gate below for host).
   //
-  // The `'not_set'` default (W3a) short-circuits to allow, preserving
-  // pre-cutover behavior — the legacy allowedToolNames check below
-  // still runs for skill_* tools, so models hitting unallowed skills
-  // still see `tool_restricted_this_turn` until W3b switches the
-  // default away from `not_set` for model turns.
+  // Stage 10 — `context.authorization` is required by the type. The
+  // belt-and-suspenders runtime assert below catches any `as any`
+  // bypass that smuggles a missing authorization past typecheck.
   const invoker = context.invoker ?? 'model'
-  const authorization = context.authorization ?? SKILL_TOOL_AUTHORIZATION_NOT_SET
+  if (invoker === 'model' && toolName.startsWith('skill_') && !context.authorization) {
+    throw new Error('Stage 10 invariant: model-issued skill_* tool call missing authorization')
+  }
+  const authorization = context.authorization
   if (invoker === 'model' && toolName.startsWith('skill_')) {
     const isPrimitive = PRIMITIVE_TOOL_DEFS.some((d) => d.name === toolName)
     const decision = checkSkillToolAuthorization(toolName, authorization, isPrimitive)
@@ -306,9 +306,8 @@ export async function executeToolCall(
             activeFrame: context.activeFrame ?? null,
             // Stage 4 W3b — forward per-turn skill tool authorization so
             // `resolvePrimitiveSkillId` can derive primitive skillId from
-            // the identity-driven `authorization.skillId` instead of the
-            // legacy hint / active context / task run chain.
-            authorization: context.authorization ?? SKILL_TOOL_AUTHORIZATION_NOT_SET,
+            // the identity-driven `authorization.skillId`.
+            authorization: context.authorization,
           })
 
         case 'system':

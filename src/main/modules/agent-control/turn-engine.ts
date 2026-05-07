@@ -308,7 +308,6 @@ import { applySkillTurnIdentity, resolveSkillTurnIdentity } from './skill-turn-i
 import { SKILL_TURN_IDENTITY_METRICS } from './skill-turn-identity-metrics'
 // Stage 4 W3b — derive per-turn skill tool authorization from identity.
 import {
-  SKILL_TOOL_AUTHORIZATION_NOT_SET,
   buildAuthorizationFromIdentity,
   type SkillToolAuthorization,
 } from './skill-tool-authorization'
@@ -1206,54 +1205,57 @@ export class TurnEngine {
       baseUrl: host.providerContext.baseUrl,
     })
 
-    // Stage 4 W3b — per-turn skill tool authorization. Initialized to the
-    // back-compat NOT_SET sentinel; overwritten below once identity has
-    // been resolved + applied. The closure `buildHostToolContext` captures
-    // this `let` binding by reference, so the 3 call sites later in the
-    // turn body (preparedToolContext / hostToolContext / toolContext) see
-    // the post-cutover value when invoked. Pre-applier callers (currently
-    // none — the closure is only invoked AFTER the rearm phase) would
-    // observe NOT_SET and the legacy admission path applies.
-    let __authorization: SkillToolAuthorization = SKILL_TOOL_AUTHORIZATION_NOT_SET
+    // Stage 4 W3b — per-turn skill tool authorization. Initialized to
+    // null; assigned below once identity has been resolved + applied.
+    // The closure `buildHostToolContext` captures this `let` binding by
+    // reference and asserts non-null on entry, so any unexpected pre-
+    // rearm invocation throws a structural invariant error rather than
+    // silently passing the legacy `not_set` sentinel.
+    let __authorization: SkillToolAuthorization | null = null
 
-    const buildHostToolContext = (allowedToolNames: string[] | null | undefined, scope?: unknown) => buildToolRuntimeContext({
-      browserController: host.browserController as any,
-      sidecarManager: host.sidecarManager as any,
-      runtime: host.runtime as any,
-      scope: scope as any,
-      allowedToolNames: allowedToolNames || undefined,
-      emitToolAction: (tool, args) => {
-        transcript.emitToolAction(tool, args)
-      },
-      requestModuleToolAction: host.requestModuleToolAction,
-      abortSignal: request.abortSignal,
-      sessionId: request.sessionId,
-      taskId: request.taskId,
-      parentTaskId: request.taskId,
-      parentStepId: request.parentStepId,
-      taskProjectionId: request.taskId,
-      frameSkillId: turnFrame?.skill?.skillId || null,
-      registerRunCleanup: (cleanup) => {
-        host.registerRunCleanup?.(cleanup)
-      },
-      agentContext: buildAgentContextForSkillSpawn(),
-      turnFeatureFlags,
-      // Phase 3 (Team T7) — seed `activeFrame` from the live `TurnFrame`
-      // snapshot BEFORE any same-batch `contextModifier` runs. The first
-      // tool dispatched in this turn must already see the frame's durable
-      // active artifact roots and `runContract` (without needing an
-      // earlier tool to publish them via contextModifier first). Earlier
-      // same-batch tools' contextModifier patches still apply on TOP of
-      // this seed — `applyContextModifier` unions roots + last-write-wins
-      // the contract, so freshly-discovered state always wins on overlap.
-      activeFrame: buildActiveFrameContextFromTurnFrame(turnFrame),
-      // Stage 4 W3b — captures the outer `__authorization` binding by
-      // reference so the value at call time is the cutover-computed
-      // authorization (post-applier). The 3 invocation sites
-      // (preparedToolContext / hostToolContext / toolContext) all run
-      // AFTER `__authorization` is assigned from `__identity`.
-      authorization: __authorization,
-    })
+    const buildHostToolContext = (allowedToolNames: string[] | null | undefined, scope?: unknown) => {
+      if (!__authorization) {
+        throw new Error('Stage 10 invariant: authorization read before identity rearm — buildHostToolContext called pre-rearm')
+      }
+      return buildToolRuntimeContext({
+        browserController: host.browserController as any,
+        sidecarManager: host.sidecarManager as any,
+        runtime: host.runtime as any,
+        scope: scope as any,
+        allowedToolNames: allowedToolNames || undefined,
+        emitToolAction: (tool, args) => {
+          transcript.emitToolAction(tool, args)
+        },
+        requestModuleToolAction: host.requestModuleToolAction,
+        abortSignal: request.abortSignal,
+        sessionId: request.sessionId,
+        taskId: request.taskId,
+        parentTaskId: request.taskId,
+        parentStepId: request.parentStepId,
+        taskProjectionId: request.taskId,
+        frameSkillId: turnFrame?.skill?.skillId || null,
+        registerRunCleanup: (cleanup) => {
+          host.registerRunCleanup?.(cleanup)
+        },
+        agentContext: buildAgentContextForSkillSpawn(),
+        turnFeatureFlags,
+        // Phase 3 (Team T7) — seed `activeFrame` from the live `TurnFrame`
+        // snapshot BEFORE any same-batch `contextModifier` runs. The first
+        // tool dispatched in this turn must already see the frame's durable
+        // active artifact roots and `runContract` (without needing an
+        // earlier tool to publish them via contextModifier first). Earlier
+        // same-batch tools' contextModifier patches still apply on TOP of
+        // this seed — `applyContextModifier` unions roots + last-write-wins
+        // the contract, so freshly-discovered state always wins on overlap.
+        activeFrame: buildActiveFrameContextFromTurnFrame(turnFrame),
+        // Stage 4 W3b — captures the outer `__authorization` binding by
+        // reference so the value at call time is the cutover-computed
+        // authorization (post-applier). All invocation sites run AFTER
+        // `__authorization` is assigned from `__identity` (invariant
+        // checked above).
+        authorization: __authorization,
+      })
+    }
 
     const finish = (params: {
       success: boolean
@@ -2079,7 +2081,10 @@ export class TurnEngine {
         // Stage 4 W3b.2 fix — thread authorization into the capability
         // controller so allowedToolNames + toolResolution snapshot are
         // computed with the same filter the model-visible list uses.
-        authorization: __authorization,
+        // Stage 10 — non-null assertion: `__authorization` is unconditionally
+        // assigned by `buildAuthorizationFromIdentity` above (line ~1792)
+        // before this consumer runs.
+        authorization: __authorization!,
       })
       const hasTools = preparedRunCapabilities.visibilityPlan.hasTools
       appendLoggedToolSnapshot(state, host, buildHostToolSnapshot({

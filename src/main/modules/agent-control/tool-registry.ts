@@ -4,6 +4,7 @@ import type { ZodObject, ZodRawShape } from 'zod'
 import type { CapabilityGroupId } from '../../../shared/ai-capability-groups'
 import { getToolResourceTag } from './tool-parallelism-policy'
 import {
+  buildExplicitNoSkillAuthorization,
   filterToolsByAuthorization,
   type SkillToolAuthorization,
 } from './skill-tool-authorization'
@@ -116,14 +117,14 @@ export interface ToolRegistryReader {
   listToolDefinitions(): ToolDefinition[]
   getToolDefinitionsForGroup(
     groupId: CapabilityGroupId,
-    sessionId?: string,
-    authorization?: SkillToolAuthorization | null,
+    sessionId: string | undefined,
+    authorization: SkillToolAuthorization,
   ): ToolDefinition[]
   getToolSchemasForGroup(
     groupId: CapabilityGroupId,
     format: ToolSchemaFormat,
-    sessionId?: string,
-    authorization?: SkillToolAuthorization | null,
+    sessionId: string | undefined,
+    authorization: SkillToolAuthorization,
   ): Array<Record<string, unknown>>
 }
 
@@ -845,8 +846,8 @@ export class ToolRegistry implements ToolRegistryReader {
 
   getToolDefinitionsResolutionForGroup(
     groupId: CapabilityGroupId,
-    sessionId?: string,
-    authorization?: SkillToolAuthorization | null,
+    sessionId: string | undefined,
+    authorization: SkillToolAuthorization,
   ): ToolDefinitionResolution {
     const resolution = this.getToolDefinitionsResolutionForGroupForInternalLookup(groupId, sessionId)
     // Stage 4 W3b.2 — apply authorization filter to the model-visible
@@ -857,7 +858,7 @@ export class ToolRegistry implements ToolRegistryReader {
       ...resolution,
       definitions: filterToolsByAuthorization(
         resolution.definitions,
-        authorization ?? undefined,
+        authorization,
         (def) => def.name,
       ),
     }
@@ -929,8 +930,8 @@ export class ToolRegistry implements ToolRegistryReader {
   getToolSchemasResolutionForGroup(
     groupId: CapabilityGroupId,
     format: ToolSchemaFormat,
-    sessionId?: string,
-    authorization?: SkillToolAuthorization | null,
+    sessionId: string | undefined,
+    authorization: SkillToolAuthorization,
   ): ToolSchemaResolution {
     const resolution = this.getToolSchemasResolutionForGroupForInternalMetadata(groupId, format, sessionId)
     // Stage 4 W3b.2 — apply authorization filter to the model-visible
@@ -940,7 +941,7 @@ export class ToolRegistry implements ToolRegistryReader {
       ...resolution,
       tools: filterToolsByAuthorization(
         resolution.tools,
-        authorization ?? undefined,
+        authorization,
         (tool) => format === 'anthropic'
           ? (typeof (tool as { name?: unknown }).name === 'string' ? ((tool as { name: string }).name) : null)
           : (typeof ((tool as { function?: { name?: unknown } }).function?.name) === 'string'
@@ -967,8 +968,8 @@ export class ToolRegistry implements ToolRegistryReader {
 
   getToolDefinitionsForGroup(
     groupId: CapabilityGroupId,
-    sessionId?: string,
-    authorization?: SkillToolAuthorization | null,
+    sessionId: string | undefined,
+    authorization: SkillToolAuthorization,
   ): ToolDefinition[] {
     return this.getToolDefinitionsResolutionForGroup(groupId, sessionId, authorization).definitions
   }
@@ -976,8 +977,8 @@ export class ToolRegistry implements ToolRegistryReader {
   getToolSchemasForGroup(
     groupId: CapabilityGroupId,
     format: ToolSchemaFormat,
-    sessionId?: string,
-    authorization?: SkillToolAuthorization | null,
+    sessionId: string | undefined,
+    authorization: SkillToolAuthorization,
   ): Array<Record<string, unknown>> {
     return this.getToolSchemasResolutionForGroup(groupId, format, sessionId, authorization).tools
   }
@@ -1189,6 +1190,10 @@ export async function executeSkillActionViaToolGateway(
         outputDir,
         runStatePath,
       },
+      // Stage 10 — `ToolContext.authorization` is required. Child-runner
+      // invokers bypass model-issued admission, so the value here only
+      // satisfies typecheck; admission inspects `invoker` first.
+      authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
     })
     const skillRunResult = (output.data && typeof output.data === 'object')
       ? ((output.data as { skillRunResult?: SkillRunResult }).skillRunResult ?? null)

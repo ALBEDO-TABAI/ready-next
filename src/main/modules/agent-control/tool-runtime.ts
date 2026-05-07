@@ -12,7 +12,7 @@ import { defaultToolRegistry } from './tool-registry'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 import type { TurnFeatureFlags } from './turn-feature-flags'
 import {
-  SKILL_TOOL_AUTHORIZATION_NOT_SET,
+  buildExplicitNoSkillAuthorization,
   type SkillToolAuthorization,
 } from './skill-tool-authorization'
 import type { RecoveryRecord, RunBudgetSeed, RunBudgetUsage, SkillRunContract } from './run-contracts'
@@ -92,14 +92,11 @@ export interface ToolRuntimeContext {
    */
   activeFrame: ToolRuntimeActiveFrameContext
   /**
-   * Stage 4 W3 — per-turn skill tool authorization. The default value
-   * (`SKILL_TOOL_AUTHORIZATION_NOT_SET`, i.e. `mode:'none', reason:'not_set'`)
-   * is treated as a back-compat short-circuit by `tool-executor` admission
-   * and `tool-runtime` preflight: skill_* admission passes through, and
-   * the new `authorization_denied` errorKind is never emitted. Once W3b
-   * cutover wires `turn-engine` and `ToolPolicy` to populate real
-   * authorization, the default is no longer reached for model turns and
-   * the cutover becomes live.
+   * Stage 4 W3 — per-turn skill tool authorization. Stage 10 retired
+   * the back-compat `'not_set'` shortcut: every model-visible call site
+   * computes a determinate authorization (`mode:'selected'` or
+   * `mode:'none'` with an explicit reason) before consulting the model,
+   * so admission decisions are always live.
    */
   authorization: SkillToolAuthorization
 }
@@ -562,8 +559,10 @@ export class ToolRuntime {
       // an empty default for legacy callers that didn't seed one.
       activeFrame: context?.activeFrame ?? createEmptyActiveFrameContext(),
       // Stage 4 W3 — `authorization` is non-optional on `ToolRuntimeContext`;
-      // attempt context inherits or falls back to the not-set default.
-      authorization: context?.authorization ?? SKILL_TOOL_AUTHORIZATION_NOT_SET,
+      // attempt context inherits when context is supplied. Stage 10 retired
+      // the legacy `'not_set'` sentinel, so legacy callers (`executeBatch`
+      // invoked without a runtime context) get an explicit no-skill auth.
+      authorization: context?.authorization ?? buildExplicitNoSkillAuthorization('no_skill_signal'),
       registerRunCleanup: (cleanup) => {
         const trackedCleanup = this.trackCleanup(cleanup)
         trackedCleanups.push(trackedCleanup)
