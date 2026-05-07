@@ -7,6 +7,7 @@ import test from 'node:test'
 import { executeSkillTool } from '../main/modules/tools/skills-tools'
 import { executeInspectRunState } from '../main/modules/tools/skill-primitives/inspect-run-state'
 import { executeReadArtifact } from '../main/modules/tools/skill-primitives/read-artifact'
+import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skill-tool-authorization'
 
 function makeTempDir(): string {
   return mkdtempSync(join(tmpdir(), 'ready-vea-run-state-'))
@@ -397,7 +398,16 @@ test('skill_inspect_run_state dispatch forwards expectedTaskId to select the mat
       undefined,
       undefined,
       undefined,
-      { frameSkillId: 'video-expert-analyzer' },
+      {
+        frameSkillId: 'video-expert-analyzer',
+        authorization: buildSelectedSkillToolAuthorization({
+          skillId: 'video-expert-analyzer',
+          allowedTypedActions: [],
+          allowedPrimitives: ['skill_inspect_run_state'],
+          source: 'explicit',
+          reason: 'test_setup',
+        }),
+      },
     )
     const data = outputData(output)
     assert.equal(data.runStatePath, targetRunState)
@@ -426,7 +436,16 @@ test('skill_inspect_run_state dispatch forwards runStatePath instead of forcing 
       undefined,
       undefined,
       undefined,
-      { frameSkillId: 'video-expert-analyzer' },
+      {
+        frameSkillId: 'video-expert-analyzer',
+        authorization: buildSelectedSkillToolAuthorization({
+          skillId: 'video-expert-analyzer',
+          allowedTypedActions: [],
+          allowedPrimitives: ['skill_inspect_run_state'],
+          source: 'explicit',
+          reason: 'test_setup',
+        }),
+      },
     )
     const data = outputData(output)
     assert.equal(data.runStatePath, runStatePath)

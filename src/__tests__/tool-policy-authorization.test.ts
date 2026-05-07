@@ -1,12 +1,12 @@
 /**
- * Stage 4 W3b.2 — end-to-end coverage for the
+ * End-to-end coverage for the
  * `ToolPolicy → gateway → registry list filter` plumbing.
  *
- * Tests the W3b.2 chain at three levels:
+ * Tests the chain at three levels:
  *
- *   1. `filterToolsByAuthorization` helper — direct behavior across the
- *      three authorization shapes (`'not_set'` short-circuit, `mode:'none'`
- *      with explicit reason, `mode:'selected'` with allowed sets).
+ *   1. `filterToolsByAuthorization` helper — direct behavior for
+ *      `mode:'none'` with explicit reason and `mode:'selected'` with
+ *      allowed sets.
  *
  *   2. `buildAuthorizationFromIdentity` helper — identity.source / reason
  *      mapping into authorization.source / authorization.reason. Without
@@ -14,16 +14,16 @@
  *      flip authorization.source from 'explicit'/'trusted_resume'/'active_task'.
  *
  *   3. `getPolicyAnthropicTools` / `getPolicyOpenAIToolBundle` — the
- *      visible tool list construction must respect ToolPolicy.authorization
- *      (the W3b.2 cutover). Tests both `mode:'none'` (skill_* removed) and
- *      `mode:'selected'` (only allowed skill_* retained), with non-skill
- *      tools always passing through.
+ *      visible tool list construction must respect ToolPolicy.authorization.
+ *      Tests both `mode:'none'` (skill_* removed) and `mode:'selected'`
+ *      (only allowed skill_* retained), with non-skill tools always
+ *      passing through.
  *
- *   4. `prepareInitialRun` (W3b.2 fix) — when authorization is threaded
- *      through `RunCapabilityBaseParams`, the resulting `allowedToolNames`
- *      and `toolResolution` snapshot are computed with the filter in
- *      place. Without the fix, the diagnostic snapshot drifts from the
- *      post-cutover policy applied later in turn-engine.
+ *   4. `prepareInitialRun` — when authorization is threaded through
+ *      `RunCapabilityBaseParams`, the resulting `allowedToolNames` and
+ *      `toolResolution` snapshot are computed with the filter in place.
+ *      Without that, the diagnostic snapshot drifts from the policy
+ *      applied later in turn-engine.
  */
 
 import assert from 'node:assert/strict'
@@ -41,7 +41,6 @@ import {
   type ToolPolicy,
 } from '../main/modules/agent-control/execution-tool-config'
 import {
-  SKILL_TOOL_AUTHORIZATION_NOT_SET,
   buildAuthorizationFromIdentity,
   buildExplicitNoSkillAuthorization,
   buildSelectedSkillToolAuthorization,
@@ -66,17 +65,7 @@ const BASE_CONFIG: AIModelConfig = {
 
 type NamedTool = { name: string }
 
-test('filterToolsByAuthorization: not_set default → no filter (back-compat)', () => {
-  const tools: NamedTool[] = [
-    { name: 'document_open_tab' },
-    { name: 'skill_video_expert_pipeline' },
-    { name: 'skill_run_shell' },
-  ]
-  const filtered = filterToolsByAuthorization(tools, SKILL_TOOL_AUTHORIZATION_NOT_SET, (t) => t.name)
-  assert.deepEqual(filtered.map((t) => t.name), tools.map((t) => t.name))
-})
-
-test('filterToolsByAuthorization: mode:none non-not_set → strip ALL skill_* tools', () => {
+test('filterToolsByAuthorization: mode:none → strip ALL skill_* tools', () => {
   const tools: NamedTool[] = [
     { name: 'document_open_tab' },
     { name: 'browser_click' },
@@ -183,7 +172,7 @@ test('buildAuthorizationFromIdentity: source=reference_hint / skill_history → 
   }
 })
 
-test('buildAuthorizationFromIdentity: identity.mode=none reason=no_skill_signal → mode:none with same reason (NOT not_set)', () => {
+test('buildAuthorizationFromIdentity: identity.mode=none reason=no_skill_signal → mode:none with same reason', () => {
   const auth = buildAuthorizationFromIdentity(
     { mode: 'none', reason: 'no_skill_signal' },
     { preferredSkillToolNames: [], allPrimitiveToolNames: [] },
@@ -191,7 +180,6 @@ test('buildAuthorizationFromIdentity: identity.mode=none reason=no_skill_signal 
   assert.equal(auth.mode, 'none')
   if (auth.mode === 'none') {
     assert.equal(auth.reason, 'no_skill_signal')
-    assert.notEqual(auth.reason, 'not_set', 'must NOT collapse to not_set — that would short-circuit admission')
   }
 })
 
@@ -208,14 +196,11 @@ test('buildAuthorizationFromIdentity: identity.mode=none reason=config_repair_no
 })
 
 test('buildAuthorizationFromIdentity: unknown identity reason → fall back to no_skill_signal (still denies)', () => {
-  // Defensive — unknown identity.reason still produces a denying
-  // authorization, never `'not_set'` (which would short-circuit).
   const auth = buildAuthorizationFromIdentity(
     { mode: 'none', reason: 'made_up_reason' as never },
     { preferredSkillToolNames: [], allPrimitiveToolNames: [] },
   )
   if (auth.mode === 'none') {
-    assert.notEqual(auth.reason, 'not_set')
     assert.equal(auth.reason, 'no_skill_signal')
   } else {
     assert.fail('expected none')
@@ -341,29 +326,6 @@ test('ToolGateway chain: anthropic format also filters by authorization', () => 
   assert.ok(!skillNames.includes('skill_run_shell'))
 })
 
-test('ToolGateway chain: no authorization (back-compat) → both fixture skills retained', () => {
-  const gateway = makeFixtureGateway()
-  // Pass `null` to exercise the back-compat path explicitly.
-  const tools = gateway.getOpenAIToolsForGroups(['skills'], 'session-test', null)
-  const skillNames = tools
-    .map((t) => {
-      const fn = (t.function as { name?: unknown } | undefined)?.name
-      return typeof fn === 'string' ? fn : null
-    })
-    .filter((n): n is string => Boolean(n) && n.startsWith('skill_'))
-  assert.ok(skillNames.includes('skill_video_expert_pipeline'))
-  assert.ok(skillNames.includes('skill_run_shell'))
-})
-
-test('getPolicyOpenAIToolBundle: no ToolPolicy.authorization (legacy callers) → behaves as before W3b.2', () => {
-  // Back-compat smoke: if authorization is undefined on the policy, the
-  // filter does nothing in the singleton-gateway path. ToolPolicy still
-  // applies its existing preferredSkillToolNames filter.
-  const policy = makeBasePolicy()
-  const bundle = getPolicyOpenAIToolBundle(policy)
-  // Just verify no crash and bundle is non-empty.
-  assert.ok(bundle.toolNames.length >= 0)
-})
 
 // ---------------------------------------------------------------------------
 // (4) prepareInitialRun (W3b.2 fix) — allowedToolNames and toolResolution
@@ -423,23 +385,6 @@ function buildSkillVisibleInputs(
   }
 }
 
-test('prepareInitialRun: skills group visible + no authorization → baseline contains skill_ask_user (sanity for the next two tests)', () => {
-  // Sanity: without this baseline succeeding, the next two tests' skill_*
-  // assertions would be vacuously true. This baseline proves the fixture
-  // actually puts skill_ask_user in allowedToolNames absent authorization.
-  const inputs = buildSkillVisibleInputs(undefined)
-  delete (inputs as { authorization?: unknown }).authorization
-  const prepared = prepareInitialRun(inputs)
-  assert.ok(
-    prepared.capabilityResolution.visibleCapabilityGroupIds.includes('skills'),
-    'skills group MUST be visible in this fixture (else later assertions are vacuous)',
-  )
-  assert.ok(
-    prepared.allowedToolNames.includes('skill_ask_user'),
-    `baseline allowedToolNames must include skill_ask_user; got: ${prepared.allowedToolNames.join(', ')}`,
-  )
-})
-
 test('prepareInitialRun: skills group visible + authorization=mode:none → skill_ask_user STRIPPED from allowedToolNames', () => {
   // Real W3b.2 fix coverage: skills group is visible AND a skill tool is
   // present in the baseline. With mode:none authorization, the registry
@@ -485,17 +430,6 @@ test('prepareInitialRun: skills group visible + authorization=mode:selected (all
   )
 })
 
-test('prepareInitialRun: no authorization passed → toolPolicy.authorization stays undefined (legacy back-compat)', () => {
-  const inputs = buildSkillVisibleInputs(undefined)
-  delete (inputs as { authorization?: unknown }).authorization
-  const prepared = prepareInitialRun(inputs)
-  assert.ok(
-    prepared.toolPolicy.authorization === undefined
-    || prepared.toolPolicy.authorization === null,
-    `unexpected authorization value: ${JSON.stringify(prepared.toolPolicy.authorization)}`,
-  )
-})
-
 // ---------------------------------------------------------------------------
 // (5) Stage 4 W3b.3 — `filterPreferredSkill*Tools` and
 //     `mergeForceDocumentAllowedNames` accept authorization as a defense-
@@ -526,36 +460,6 @@ test('filterPreferredSkillAnthropicTools: authorization=mode:none non-not_set �
     ['document_open_tab'],
     'mode:none must strip skill_* even when listed in preferredSkillToolNames',
   )
-})
-
-test('filterPreferredSkillAnthropicTools: authorization=not_set short-circuit → behavior identical to legacy preferredSkillToolNames-only filter', async () => {
-  const { filterPreferredSkillAnthropicTools } = await import(
-    '../main/modules/agent-control/execution-tool-skill-filters'
-  )
-  const tools: Array<Record<string, unknown>> = [
-    { name: 'document_open_tab' },
-    { name: 'skill_video_expert_pipeline' },
-    { name: 'skill_run_shell' },
-  ]
-  // 'not_set' must behave the same as no authorization (back-compat).
-  const withNotSet = filterPreferredSkillAnthropicTools(
-    tools,
-    ['skill_video_expert_pipeline'],
-    SKILL_TOOL_AUTHORIZATION_NOT_SET,
-  )
-  const withoutAuth = filterPreferredSkillAnthropicTools(
-    tools,
-    ['skill_video_expert_pipeline'],
-  )
-  assert.deepEqual(
-    withNotSet.map((t) => t.name).sort(),
-    withoutAuth.map((t) => t.name).sort(),
-    'not_set must behave identically to no-authorization (back-compat)',
-  )
-  // And the legacy preferredSkillToolNames filter still applies.
-  assert.ok(withNotSet.some((t) => t.name === 'skill_video_expert_pipeline'))
-  assert.ok(!withNotSet.some((t) => t.name === 'skill_run_shell'),
-    'skill_run_shell NOT in preferredSkillToolNames must be filtered (legacy path preserved)')
 })
 
 test('filterPreferredSkillAnthropicTools: authorization=mode:selected → keeps skill_* only when in preferredSkillToolNames AND authorized (intersection)', async () => {
@@ -646,19 +550,3 @@ test('mergeForceDocumentAllowedNames: authorization=mode:selected → merges onl
   )
 })
 
-test('mergeForceDocumentAllowedNames: authorization=not_set → preserves legacy behavior (all preferred skill names merged)', async () => {
-  const { mergeForceDocumentAllowedNames } = await import(
-    '../main/modules/agent-control/execution-tool-skill-filters'
-  )
-  const baseAllowed = new Set(['document_open_tab'])
-  const merged = mergeForceDocumentAllowedNames(
-    baseAllowed,
-    ['skill_video_expert_pipeline', 'skill_run_shell'],
-    SKILL_TOOL_AUTHORIZATION_NOT_SET,
-  )
-  assert.deepEqual(
-    Array.from(merged).sort(),
-    ['document_open_tab', 'skill_video_expert_pipeline', 'skill_run_shell'].sort(),
-    'not_set short-circuit must merge all preferred skill names (back-compat)',
-  )
-})

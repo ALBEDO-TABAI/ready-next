@@ -13,6 +13,7 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 
 import { ToolGateway } from '../main/modules/agent-control/tool-gateway'
+import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skill-tool-authorization'
 import { SkillsRuntimeManager } from '../main/modules/skills-runtime/runtime-manager'
 import {
   STATIC_SKILL_TOOL_NAMES,
@@ -23,6 +24,18 @@ import {
   filterSkillPrimitivesBySession,
   shouldExposeSkillPrimitive,
 } from '../main/modules/tools/skill-tool-session-gate'
+
+const STANDARD_PRIMITIVES = [
+  'skill_ask_user',
+  'skill_run_shell',
+  'skill_write_artifact',
+  'skill_read_artifact',
+  'skill_patch_config',
+  'skill_start_detached',
+  'skill_inspect_detached',
+  'skill_cancel_detached',
+  'skill_inspect_run_state',
+]
 
 const RETIRED_NAMES = [
   'skill_get_state',
@@ -70,7 +83,14 @@ test('filterSkillPrimitivesBySession never leaks retired names back (even if def
 
 test('ToolGateway public skills list contains current primitives and excludes retired names', () => {
   const gateway = new ToolGateway()
-  const names = gateway.getOpenAIToolsForGroups(['skills'])
+  const auth = buildSelectedSkillToolAuthorization({
+    skillId: 'video-expert-analyzer',
+    allowedTypedActions: [],
+    allowedPrimitives: STANDARD_PRIMITIVES,
+    source: 'explicit',
+    reason: 'test_setup',
+  })
+  const names = gateway.getOpenAIToolsForGroups(['skills'], undefined, auth)
     .map((tool) => (tool.function as { name?: string } | undefined)?.name || '')
     .filter(Boolean)
 

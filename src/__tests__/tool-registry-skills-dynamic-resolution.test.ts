@@ -32,8 +32,29 @@ import {
   SKILL_TOOL_FALLBACK_ENTRIES,
 } from '../main/modules/agent-control/skill-tool-fallback-throttle'
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
+import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skill-tool-authorization'
 import { ToolRegistry } from '../main/modules/agent-control/tool-registry'
 import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-metrics'
+
+const STANDARD_PRIMITIVES = [
+  'skill_ask_user',
+  'skill_run_shell',
+  'skill_write_artifact',
+  'skill_read_artifact',
+  'skill_patch_config',
+  'skill_start_detached',
+  'skill_inspect_detached',
+  'skill_cancel_detached',
+  'skill_inspect_run_state',
+]
+
+const SELECTED_AUTH = buildSelectedSkillToolAuthorization({
+  skillId: 'video-expert-analyzer',
+  allowedTypedActions: ['skill_video_expert_pipeline', 'skill_static_fallback_read_skill'],
+  allowedPrimitives: STANDARD_PRIMITIVES,
+  source: 'explicit',
+  reason: 'test_setup',
+})
 import {
   __setSkillActionToolDefsForTests,
   findSkillToolByNameForExecution,
@@ -140,12 +161,12 @@ test('tool-registry falls back to static skills definitions and schemas when dyn
     },
   })
 
-  const definitions = registry.getToolDefinitionsResolutionForGroup('skills')
+  const definitions = registry.getToolDefinitionsResolutionForGroup('skills', undefined, SELECTED_AUTH)
   assert.equal(definitions.usedStaticFallback, true)
   assert.equal(definitions.error, 'dynamic definitions unavailable')
   assert.deepEqual(definitions.definitions.map((tool) => tool.name), ['skill_static_fallback_read_skill'])
 
-  const schemas = registry.getToolSchemasResolutionForGroup('skills', 'openai')
+  const schemas = registry.getToolSchemasResolutionForGroup('skills', 'openai', undefined, SELECTED_AUTH)
   assert.equal(schemas.usedStaticFallback, true)
   assert.deepEqual(schemas.tools.map((tool) => (tool.function as { name: string }).name), [
     'skill_static_fallback_read_skill',
@@ -266,8 +287,8 @@ test('Stage 4 W4: tool-registry emits definition_list and schema_list from dynam
   try {
     withSkillActionLookupThrowing(() => {
       const registry = new ToolRegistry()
-      assert.equal(registry.getToolDefinitionsResolutionForGroup('skills').usedStaticFallback, true)
-      assert.equal(registry.getToolSchemasResolutionForGroup('skills', 'openai').usedStaticFallback, true)
+      assert.equal(registry.getToolDefinitionsResolutionForGroup('skills', undefined, SELECTED_AUTH).usedStaticFallback, true)
+      assert.equal(registry.getToolSchemasResolutionForGroup('skills', 'openai', undefined, SELECTED_AUTH).usedStaticFallback, true)
     })
     const lookup = lookupEvents(events)
     assert.equal(lookup.length, 2)
@@ -338,9 +359,9 @@ test('Stage 4 W4: tool-registry emits group_definitions and group_schemas from o
         },
       },
     })
-    const definitions = registry.getToolDefinitionsResolutionForGroup('skills')
+    const definitions = registry.getToolDefinitionsResolutionForGroup('skills', undefined, SELECTED_AUTH)
     assert.equal(definitions.usedStaticFallback, true)
-    const schemas = registry.getToolSchemasResolutionForGroup('skills', 'openai')
+    const schemas = registry.getToolSchemasResolutionForGroup('skills', 'openai', undefined, SELECTED_AUTH)
     assert.deepEqual(schemas.tools, [])
 
     const lookup = lookupEvents(events)

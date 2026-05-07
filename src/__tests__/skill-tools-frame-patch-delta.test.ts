@@ -23,6 +23,7 @@ import {
   rememberLastReferenceSkill,
   _resetLastReferenceSkillHintsForTests,
 } from '../main/modules/agent-control/skill-reference-hints'
+import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skill-tool-authorization'
 
 const SESSION_ID = 'scope-delta-detached'
 const SKILL_ID = 'video-expert-analyzer'
@@ -427,6 +428,7 @@ test('T7: ToolRuntimeContext.activeFrame is seeded from TurnFrame BEFORE any sam
     emitToolAction: () => {},
     abortSignal: new AbortController().signal,
     activeFrame: buildActiveFrameContextFromTurnFrame(seededFrame),
+    authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
   })
 
   assert.deepEqual(
@@ -533,6 +535,7 @@ test('T7: same-batch contextModifier from tool-A unions onto the seeded roots so
     emitToolAction: () => {},
     abortSignal: new AbortController().signal,
     activeFrame: buildActiveFrameContextFromTurnFrame(seededFrame),
+    authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
   })
 
   // Pre-condition: only the seed is visible before any contextModifier ran.

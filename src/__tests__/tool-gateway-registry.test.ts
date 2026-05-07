@@ -8,6 +8,10 @@ import {
   rememberLastReferenceSkill,
   _resetLastReferenceSkillHintsForTests,
 } from '../main/modules/agent-control/skill-reference-hints'
+import {
+  buildExplicitNoSkillAuthorization,
+  buildSelectedSkillToolAuthorization,
+} from '../main/modules/agent-control/skill-tool-authorization'
 
 test('tool gateway exposes formal capability groups and resolves grouped tools', () => {
   const gateway = new ToolGateway()
@@ -27,10 +31,27 @@ test('tool gateway exposes formal capability groups and resolves grouped tools',
   const skillsGroup = gateway.getCapabilityGroup('skills')
   _resetLastReferenceSkillHintsForTests()
   rememberLastReferenceSkill(sessionId, { id: 'video-expert-analyzer', name: 'VEA' })
-  const hintedSkillSchemaNames = gateway.getOpenAIToolsForGroups(['skills'], sessionId)
+  const veaAuth = buildSelectedSkillToolAuthorization({
+    skillId: 'video-expert-analyzer',
+    allowedTypedActions: ['skill_video_expert_pipeline'],
+    allowedPrimitives: [
+      'skill_ask_user',
+      'skill_run_shell',
+      'skill_write_artifact',
+      'skill_read_artifact',
+      'skill_patch_config',
+      'skill_start_detached',
+      'skill_inspect_detached',
+      'skill_cancel_detached',
+      'skill_inspect_run_state',
+    ],
+    source: 'explicit',
+    reason: 'test_setup',
+  })
+  const hintedSkillSchemaNames = gateway.getOpenAIToolsForGroups(['skills'], sessionId, veaAuth)
     .map((tool) => (tool.function as { name?: string } | undefined)?.name || '')
     .filter(Boolean)
-  const systemOpenAISchemas = gateway.getToolSchemasForGroup('system_host', 'openai')
+  const systemOpenAISchemas = gateway.getToolSchemasForGroup('system_host', 'openai', undefined, buildExplicitNoSkillAuthorization('no_skill_signal'))
   const browserNavigate = gateway.getToolDefinition('browser_navigate')
   const documentSave = gateway.getToolDefinition('document_save_tab')
   const documentInsertWidget = gateway.getToolDefinition('document_insert_widget')
@@ -101,7 +122,7 @@ test('tool gateway does not expose empty fallback schemas when a group provider 
     },
   })
 
-  const systemOpenAISchemas = gateway.getToolSchemasForGroup('system_host', 'openai')
+  const systemOpenAISchemas = gateway.getToolSchemasForGroup('system_host', 'openai', undefined, buildExplicitNoSkillAuthorization('no_skill_signal'))
 
   assert.deepEqual(systemOpenAISchemas, [])
   assert.match(gateway.getLastSchemaResolutionError('system_host', 'openai') || '', /broken provider/)
@@ -111,7 +132,7 @@ test('browser tool schemas stay available after the browser executor module load
   await import('../main/modules/tools/browser-tools')
 
   const gateway = new ToolGateway()
-  const browserOpenAISchemas = gateway.getToolSchemasForGroup('browser_interaction', 'openai')
+  const browserOpenAISchemas = gateway.getToolSchemasForGroup('browser_interaction', 'openai', undefined, buildExplicitNoSkillAuthorization('no_skill_signal'))
   const browserToolNames = browserOpenAISchemas
     .map((tool) => (tool.function as { name?: string } | undefined)?.name || '')
     .filter(Boolean)
@@ -147,7 +168,14 @@ test('tool gateway reports grouped schema diagnostics and static fallback usage'
     },
   })
 
-  const resolution = gateway.getToolSchemaResolutionForGroups(['skills'], 'openai')
+  const skillGetStateAuth = buildSelectedSkillToolAuthorization({
+    skillId: 'fixture-skill',
+    allowedTypedActions: ['skill_get_state'],
+    allowedPrimitives: [],
+    source: 'explicit',
+    reason: 'test_setup',
+  })
+  const resolution = gateway.getToolSchemaResolutionForGroups(['skills'], 'openai', undefined, skillGetStateAuth)
 
   assert.equal(resolution.groupResolutions[0]?.toolCount, 1)
   assert.equal(resolution.groupResolutions[0]?.usedStaticFallback, true)

@@ -1,15 +1,12 @@
 /**
- * Stage 4 W3 — SkillToolAuthorization unit tests for the W3a installation
- * step (type + admission seam + preflight skill_* skip).
+ * SkillToolAuthorization unit tests.
  *
  * Verifies:
  *   - `checkSkillToolAuthorization` decision logic for each (mode, reason,
  *     isPrimitive) combination
- *   - The `'not_set'` default short-circuits to allow (back-compat with
- *     pre-cutover callers)
  *   - `mode:'selected'` filters typed actions and primitives by the
  *     allowed sets
- *   - `mode:'none'` with an explicit reason denies (post-cutover signal)
+ *   - `mode:'none'` with an explicit reason denies
  *
  * Admission integration (tool-executor) and preflight integration
  * (tool-runtime) are tested separately via their existing test surfaces;
@@ -21,51 +18,13 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
-  SKILL_TOOL_AUTHORIZATION_NOT_SET,
   buildExplicitNoSkillAuthorization,
   buildSelectedSkillToolAuthorization,
   checkSkillToolAuthorization,
 } from '../main/modules/agent-control/skill-tool-authorization'
 
 // ---------------------------------------------------------------------------
-// Default value
-// ---------------------------------------------------------------------------
-
-test('SKILL_TOOL_AUTHORIZATION_NOT_SET has mode:none reason:not_set', () => {
-  assert.equal(SKILL_TOOL_AUTHORIZATION_NOT_SET.mode, 'none')
-  if (SKILL_TOOL_AUTHORIZATION_NOT_SET.mode === 'none') {
-    assert.equal(SKILL_TOOL_AUTHORIZATION_NOT_SET.reason, 'not_set')
-  }
-})
-
-test('SKILL_TOOL_AUTHORIZATION_NOT_SET is frozen (immutable shared value)', () => {
-  assert.equal(Object.isFrozen(SKILL_TOOL_AUTHORIZATION_NOT_SET), true)
-})
-
-// ---------------------------------------------------------------------------
-// W3a back-compat short-circuit — `'not_set'` always allows
-// ---------------------------------------------------------------------------
-
-test('checkSkillToolAuthorization with not_set default → allows any skill_* tool (W3a back-compat)', () => {
-  const decision = checkSkillToolAuthorization(
-    'skill_video_expert_pipeline',
-    SKILL_TOOL_AUTHORIZATION_NOT_SET,
-    /* isPrimitive */ false,
-  )
-  assert.equal(decision.allowed, true)
-})
-
-test('checkSkillToolAuthorization with not_set default → allows primitive too', () => {
-  const decision = checkSkillToolAuthorization(
-    'skill_run_shell',
-    SKILL_TOOL_AUTHORIZATION_NOT_SET,
-    /* isPrimitive */ true,
-  )
-  assert.equal(decision.allowed, true)
-})
-
-// ---------------------------------------------------------------------------
-// Explicit mode:'none' with non-not_set reason → denies (post-cutover)
+// Explicit mode:'none' → denies
 // ---------------------------------------------------------------------------
 
 test('checkSkillToolAuthorization with mode:none reason:no_skill_signal → denies', () => {

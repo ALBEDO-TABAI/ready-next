@@ -8,6 +8,7 @@ import {
 import {
   registerSkillTaskRunRepository,
 } from '../main/modules/agent-control/skill-task-tracker'
+import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skill-tool-authorization'
 import type { SkillTaskRunRecord, SkillTaskRunRepository } from '../main/modules/repositories/skill-task-run-repository'
 
 function makeRepositoryWithActiveRun(): SkillTaskRunRepository {
@@ -85,13 +86,25 @@ test('primitive blocked/error or durable handles remain resumable continuity', (
   }), true)
 })
 
-test('primitive dispatch accepts active blocked skill task context without a reference hint', async () => {
+test('primitive dispatch with explicit selected authorization succeeds for blocked skill task', async () => {
   registerSkillTaskRunRepository(makeRepositoryWithActiveRun())
   try {
     const result = await executeSkillTool(
       'skill_start_detached',
       { action: 'missing_action_for_test' },
       'session-active-vea',
+      undefined,
+      undefined,
+      undefined,
+      {
+        authorization: buildSelectedSkillToolAuthorization({
+          skillId: 'video-expert-analyzer',
+          allowedTypedActions: [],
+          allowedPrimitives: ['skill_start_detached'],
+          source: 'explicit',
+          reason: 'test_setup',
+        }),
+      },
     )
     const text = typeof result === 'string' ? result : result.text
     assert.doesNotMatch(text, /no active skill execution or reference-skill hint/)

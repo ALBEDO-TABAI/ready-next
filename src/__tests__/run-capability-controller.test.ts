@@ -8,6 +8,10 @@ import {
   prepareInitialRun,
   reconcileAfterBrowserDecision,
 } from '../main/modules/agent-control/run-capability-controller'
+import {
+  buildExplicitNoSkillAuthorization,
+  buildSelectedSkillToolAuthorization,
+} from '../main/modules/agent-control/skill-tool-authorization'
 
 const BASE_CONFIG: AIModelConfig = {
   provider: 'openai',
@@ -31,6 +35,7 @@ test('prepareInitialRun centralizes initial capability resolution, allowlist, an
     hasIncomingVideo: false,
     keepToolsWithVideo: false,
     preferredSkillToolNames: null,
+    authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
     executionIntentContext: {
       requestEnvelope,
       intentClassification: classifyIntent(requestEnvelope),
@@ -75,6 +80,7 @@ test('reconcileAfterBrowserDecision re-resolves browser capabilities without reb
     hasIncomingVideo: false,
     keepToolsWithVideo: false,
     preferredSkillToolNames: null,
+    authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
     executionIntentContext: {
       requestEnvelope,
       intentClassification: classifyIntent(requestEnvelope),
@@ -121,6 +127,7 @@ test('prepareInitialRun suppresses skill tools unless the turn selected a skill'
     hasIncomingVideo: false,
     keepToolsWithVideo: false,
     preferredSkillToolNames: null,
+    authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
     executionIntentContext: {
       requestEnvelope,
       intentClassification: classifyIntent(requestEnvelope),
@@ -160,6 +167,13 @@ test('prepareInitialRun exposes only selected skill tools when a skill is select
     hasIncomingVideo: false,
     keepToolsWithVideo: false,
     preferredSkillToolNames: ['skill_ask_user'],
+    authorization: buildSelectedSkillToolAuthorization({
+      skillId: 'video-copy-analyzer',
+      allowedTypedActions: [],
+      allowedPrimitives: ['skill_ask_user'],
+      source: 'explicit',
+      reason: 'test_setup',
+    }),
     executionIntentContext: {
       requestEnvelope,
       intentClassification: classifyIntent(requestEnvelope),
@@ -200,6 +214,7 @@ test('prepareInitialRun only grants openclaw shortcut to explicit command messag
     hasIncomingVideo: false,
     keepToolsWithVideo: false,
     preferredSkillToolNames: null,
+    authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
     executionIntentContext: {
       requestEnvelope: explicitEnvelope,
       intentClassification: classifyIntent(explicitEnvelope),
@@ -232,6 +247,7 @@ test('prepareInitialRun only grants openclaw shortcut to explicit command messag
     hasIncomingVideo: false,
     keepToolsWithVideo: false,
     preferredSkillToolNames: null,
+    authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
     executionIntentContext: {
       requestEnvelope: embeddedEnvelope,
       intentClassification: classifyIntent(embeddedEnvelope),

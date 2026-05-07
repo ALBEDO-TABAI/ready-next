@@ -23,7 +23,6 @@ import test from 'node:test'
 
 import { executeToolCall, type ToolContext } from '../main/modules/tools/tool-executor'
 import {
-  SKILL_TOOL_AUTHORIZATION_NOT_SET,
   buildExplicitNoSkillAuthorization,
   buildSelectedSkillToolAuthorization,
 } from '../main/modules/agent-control/skill-tool-authorization'
@@ -71,27 +70,6 @@ test('mode:selected with primitive NOT in allowedPrimitives → authorization_de
   const data = output.data || {}
   assert.equal(data.errorKind, 'authorization_denied')
   assert.equal(data.reason, 'tool_not_in_allowed_primitives')
-})
-
-// ---------------------------------------------------------------------------
-// W3a back-compat: not_set default keeps legacy behavior
-// ---------------------------------------------------------------------------
-
-test('authorization not_set + skill_* missing from allowedToolNames → falls through to tool_restricted_this_turn (W3a back-compat)', async () => {
-  // When authorization is at the W3a default (`not_set`), the legacy
-  // allowedToolNames gate must still fire. This preserves pre-W3a
-  // behavior until W3b switches the default away from `not_set` for
-  // model turns.
-  const context: Partial<ToolContext> = {
-    allowedToolNames: new Set<string>(),
-    invoker: 'model',
-    authorization: SKILL_TOOL_AUTHORIZATION_NOT_SET,
-    sessionId: 'scope-test',
-  }
-  const output = await executeToolCall('skill_run_shell', { command: 'echo' }, context as ToolContext)
-  const data = output.data || {}
-  assert.equal(data.errorKind, 'host_unavailable')
-  assert.equal(data.reason, 'tool_restricted_this_turn', 'W3a default short-circuits to legacy gate')
 })
 
 // ---------------------------------------------------------------------------

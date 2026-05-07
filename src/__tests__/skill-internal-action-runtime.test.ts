@@ -4,6 +4,11 @@ import test, { beforeEach } from 'node:test'
 import { ToolGateway } from '../main/modules/agent-control/tool-gateway'
 import { ToolRuntime } from '../main/modules/agent-control/tool-runtime'
 import { resolveToolInputSchemaForExecution } from '../main/modules/agent-control/tool-registry'
+import {
+  buildExplicitNoSkillAuthorization,
+  buildSelectedSkillToolAuthorization,
+  type SkillToolAuthorization,
+} from '../main/modules/agent-control/skill-tool-authorization'
 import { executeToolCall } from '../main/modules/tools/tool-executor'
 import {
   resolveSkillActionTimeoutMs,
@@ -14,8 +19,24 @@ import {
   _resetLastReferenceSkillHintsForTests,
 } from '../main/modules/agent-control/skill-reference-hints'
 
-function openAIToolNames(gateway: ToolGateway, sessionId?: string): string[] {
-  return gateway.getOpenAIToolsForGroups(['skills'], sessionId)
+const STANDARD_PRIMITIVES = [
+  'skill_ask_user',
+  'skill_run_shell',
+  'skill_write_artifact',
+  'skill_read_artifact',
+  'skill_patch_config',
+  'skill_start_detached',
+  'skill_inspect_detached',
+  'skill_cancel_detached',
+  'skill_inspect_run_state',
+]
+
+function openAIToolNames(
+  gateway: ToolGateway,
+  sessionId: string | undefined,
+  authorization: SkillToolAuthorization,
+): string[] {
+  return gateway.getOpenAIToolsForGroups(['skills'], sessionId, authorization)
     .map((tool) => (tool.function as { name?: string } | undefined)?.name || '')
     .filter(Boolean)
 }
@@ -29,7 +50,8 @@ test('VEA internal typed actions are LLM-visible only when its reference hint is
   const sessionId = 'session-vea-runtime'
 
   assert.ok(
-    !openAIToolNames(gateway, sessionId).includes('skill_video_expert_pipeline'),
+    !openAIToolNames(gateway, sessionId, buildExplicitNoSkillAuthorization('no_skill_signal'))
+      .includes('skill_video_expert_pipeline'),
     'without a VEA hint, internal VEA actions stay hidden from LLM schemas',
   )
 
@@ -39,7 +61,13 @@ test('VEA internal typed actions are LLM-visible only when its reference hint is
   })
 
   assert.ok(
-    openAIToolNames(gateway, sessionId).includes('skill_video_expert_pipeline'),
+    openAIToolNames(gateway, sessionId, buildSelectedSkillToolAuthorization({
+      skillId: 'video-expert-analyzer',
+      allowedTypedActions: ['skill_video_expert_pipeline'],
+      allowedPrimitives: STANDARD_PRIMITIVES,
+      source: 'explicit',
+      reason: 'test_setup',
+    })).includes('skill_video_expert_pipeline'),
     'with a VEA hint, whitelisted internal VEA action is visible',
   )
 })
@@ -53,7 +81,13 @@ test('resume hint exposes only the current skill internal actions', () => {
     name: 'Lets Go RSS',
   })
 
-  const names = openAIToolNames(gateway, sessionId)
+  const names = openAIToolNames(gateway, sessionId, buildSelectedSkillToolAuthorization({
+    skillId: 'lets-go-rss',
+    allowedTypedActions: [],
+    allowedPrimitives: STANDARD_PRIMITIVES,
+    source: 'explicit',
+    reason: 'test_setup',
+  }))
   assert.equal(
     names.includes('skill_video_expert_pipeline'),
     false,
@@ -155,6 +189,13 @@ test('tool executor admits frame-scoped internal VEA actions after explicit allo
         allowedToolNames: new Set(['skill_video_expert_ai_analyze']),
         frameSkillId: 'video-expert-analyzer',
         abortSignal: abortController.signal,
+        authorization: buildSelectedSkillToolAuthorization({
+          skillId: 'video-expert-analyzer',
+          allowedTypedActions: ['skill_video_expert_ai_analyze'],
+          allowedPrimitives: [],
+          source: 'explicit',
+          reason: 'test_setup',
+        }),
       },
     ),
     (error: unknown) => error instanceof Error && error.name === 'AbortError',
@@ -172,6 +213,13 @@ test('tool executor rejects internal VEA actions when the active frame belongs t
       allowedToolNames: new Set(['skill_video_expert_ai_analyze']),
       frameSkillId: 'lets-go-rss',
       abortSignal: abortController.signal,
+      authorization: buildSelectedSkillToolAuthorization({
+        skillId: 'lets-go-rss',
+        allowedTypedActions: [],
+        allowedPrimitives: [],
+        source: 'explicit',
+        reason: 'test_setup',
+      }),
     },
   )
 

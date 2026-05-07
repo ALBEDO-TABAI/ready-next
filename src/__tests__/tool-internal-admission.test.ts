@@ -8,6 +8,10 @@ import {
 import {
   isChildInternalStrictAdmissionEnabled,
 } from '../main/modules/agent-control/tool-definition'
+import {
+  buildExplicitNoSkillAuthorization,
+  buildSelectedSkillToolAuthorization,
+} from '../main/modules/agent-control/skill-tool-authorization'
 import { executeToolCall } from '../main/modules/tools/tool-executor'
 import type {
   SkillRunRequest,
@@ -182,6 +186,13 @@ test('executeToolCall rejects internal tools unless child internal context is al
   const result = await executeToolCall('skill_video_expert_pipeline', { url: 'https://example.test/video' }, {
     allowedToolNames: new Set(['skill_video_expert_pipeline']),
     invoker: 'model',
+    authorization: buildSelectedSkillToolAuthorization({
+      skillId: 'video-expert-analyzer',
+      allowedTypedActions: ['skill_video_expert_pipeline'],
+      allowedPrimitives: [],
+      source: 'explicit',
+      reason: 'test_setup',
+    }),
   })
 
   assert.equal(result.data?.errorKind, 'host_unavailable')
@@ -190,7 +201,7 @@ test('executeToolCall rejects internal tools unless child internal context is al
 
 test('public model surface does not expose internal VEA actions without hint', () => {
   const gateway = new ToolGateway()
-  const names = gateway.getOpenAIToolsForGroups(['skills'], 'no-vea-hint')
+  const names = gateway.getOpenAIToolsForGroups(['skills'], 'no-vea-hint', buildExplicitNoSkillAuthorization('no_skill_signal'))
     .map((tool) => (tool.function as { name?: string } | undefined)?.name || '')
     .filter(Boolean)
 

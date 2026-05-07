@@ -5,6 +5,7 @@ import {
   snapshotTurnFeatureFlags,
   type TurnFeatureFlags,
 } from '../main/modules/agent-control/turn-feature-flags'
+import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skill-tool-authorization'
 import { executeToolCall } from '../main/modules/tools/tool-executor'
 
 test('snapshotTurnFeatureFlags returns a frozen stable snapshot', () => {
@@ -38,6 +39,13 @@ test('executeToolCall strict admission follows context snapshot after env mutati
       allowedToolNames: new Set(['skill_video_expert_pipeline']),
       invoker: 'model',
       turnFeatureFlags,
+      authorization: buildSelectedSkillToolAuthorization({
+        skillId: 'video-expert-analyzer',
+        allowedTypedActions: ['skill_video_expert_pipeline'],
+        allowedPrimitives: [],
+        source: 'explicit',
+        reason: 'test_setup',
+      }),
     })
 
     assert.notEqual(result.data?.reason, 'internal_tool_not_allowed')

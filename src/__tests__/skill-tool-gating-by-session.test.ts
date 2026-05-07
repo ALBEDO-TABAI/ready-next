@@ -17,10 +17,23 @@ import {
 } from '../main/modules/tools/skill-tool-session-gate'
 import { shouldExposeSkillAction } from '../main/modules/tools/skills-tools'
 import { ToolRegistry } from '../main/modules/agent-control/tool-registry'
+import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skill-tool-authorization'
 import {
   clearActiveSkillContext,
   rememberActiveSkillContext,
 } from '../main/modules/agent-control/active-skill-context'
+
+const STANDARD_PRIMITIVES = [
+  'skill_ask_user',
+  'skill_run_shell',
+  'skill_write_artifact',
+  'skill_read_artifact',
+  'skill_patch_config',
+  'skill_start_detached',
+  'skill_inspect_detached',
+  'skill_cancel_detached',
+  'skill_inspect_run_state',
+]
 
 const ALL_PRIMITIVE_TOOLS = [
   { name: 'skill_ask_user' },
@@ -190,7 +203,13 @@ test('registry exposes primitives and VEA typed actions from active context alon
   })
 
   const names = new ToolRegistry()
-    .getToolDefinitionsForGroup('skills', 'session-with-vea-context')
+    .getToolDefinitionsForGroup('skills', 'session-with-vea-context', buildSelectedSkillToolAuthorization({
+      skillId: 'video-expert-analyzer',
+      allowedTypedActions: ['skill_video_expert_pipeline'],
+      allowedPrimitives: STANDARD_PRIMITIVES,
+      source: 'explicit',
+      reason: 'test_setup',
+    }))
     .map((tool) => tool.name)
 
   assert.ok(names.includes('skill_run_shell'))
