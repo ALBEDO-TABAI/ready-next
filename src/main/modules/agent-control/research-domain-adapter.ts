@@ -1,0 +1,136 @@
+/**
+ * Stage R W1.6 — Research domain adapter.
+ *
+ * Trigger: intent-classifier sets primaryDomain === 'research'; task-type-resolver
+ * returns { taskType: 'research', executionChain: 'domain_executor',
+ * preferredExecutor: 'research' }; turn-engine selects this adapter via
+ * shouldHandle(taskType === 'research').
+ *
+ * Tool routing (落点 17, plan §3.1.12):
+ *   - browser-mode      → ['browser_research_topic', 'present_file']
+ *   - non-browser-mode  → ['web_search', 'web_fetch', 'present_file']
+ * Both modes include `present_file` so the agent can present produced
+ * artifacts regardless of which research backend ran (capability group
+ * `general_research` exposure is profile-level only; mode-specific prefix
+ * narrowing is the final gate).
+ *
+ * Per plan §3.1.12 R3-D1: filterAllowedToolNamesByPrefixes returns null when
+ * no tool matches; turn-engine.ts:2543 then interprets null as
+ * "unrestricted_passthrough". To prevent research routing from collapsing
+ * back to all tools, we explicitly narrow null → [] (empty array means
+ * "no tools allowed", which is what we want when the upstream allow-list
+ * has nothing in our prefix set).
+ */
+
+import {
+  filterAllowedToolNamesByPrefixes,
+  type DomainAdapter,
+  type DomainAdapterSelectionContext,
+  type DomainAdapterPrepareParams,
+  type DomainAdapterPrepareResult,
+  type DomainAdapterDispatchParams,
+  type DomainAdapterDispatchResult,
+  type DomainAdapterApplyParams,
+  type DomainAdapterApplyResult,
+  type DomainAdapterProjectionParams,
+  type CoordinatorPromptFragment,
+  type CoordinatorCapabilityArbitration,
+  type CoordinatorTextDecorationPhase,
+} from './domain-adapter'
+
+/**
+ * Internal research planning shape — explicitly NOT a DocumentTaskPlan.
+ *
+ * Stage R chose to keep research planning separate from document planning
+ * because the two domains have different lifecycle semantics:
+ *   - DocumentTaskPlan models discrete edit jobs against an existing target
+ *     document with primary/secondary source bindings.
+ *   - ResearchPlan models open-ended dimensional decomposition + multi-source
+ *     synthesis, with no "target document" until presentation time.
+ *
+ * Cross-importing DocumentTaskPlan would smuggle document-domain coupling
+ * into research routing. Gate `check-research-plan-not-document-task-plan.cjs`
+ * is the source-level fence.
+ */
+export interface ResearchPlan {
+  objective: string
+  dimensions: string[]
+  queries: string[]
+  sources: string[]
+  synthesisSteps: string[]
+}
+
+export class ResearchDomainAdapter implements DomainAdapter {
+  readonly id = 'research' as const
+
+  shouldHandle(params: DomainAdapterSelectionContext): boolean {
+    return params.route?.taskType === 'research'
+  }
+
+  contributePromptFragment(): CoordinatorPromptFragment[] | null {
+    // deep-research SKILL is injected via reference inline (W1.4) — no
+    // hard-coded fragment here.
+    return null
+  }
+
+  arbitrateRunCapabilities(
+    _params: DomainAdapterPrepareParams,
+  ): CoordinatorCapabilityArbitration | null {
+    // CoordinatorCapabilityArbitration only carries forceTool /
+    // hideAssistantProcessText / budgetMultiplier; tool-set narrowing happens
+    // in `prepare()`, not here. See plan §3.1.12 R2 fix.
+    return null
+  }
+
+  decorateUserText(
+    text: string,
+    _params: { phase: CoordinatorTextDecorationPhase },
+  ): string {
+    return text
+  }
+
+  prepare(params: DomainAdapterPrepareParams): DomainAdapterPrepareResult {
+    const isBrowserMode = this.detectBrowserMode(params)
+    const inputAllowed = params.allowedToolNames ?? null
+    const prefixes = isBrowserMode
+      ? ['browser_research_topic', 'present_file']
+      : ['web_search', 'web_fetch', 'present_file']
+    const filtered = filterAllowedToolNamesByPrefixes(inputAllowed, prefixes)
+    return {
+      // R3-D1: filtered === null means either input was empty OR no prefix
+      // matched. Returning null lets turn-engine.ts:2543 interpret it as
+      // "unrestricted passthrough" which would defeat research narrowing.
+      // Force empty-array narrowing so the model sees ONLY the prefix tools
+      // (or nothing) when this adapter is in charge.
+      allowedToolNames: filtered ?? [],
+    }
+  }
+
+  dispatch(_params: DomainAdapterDispatchParams): DomainAdapterDispatchResult {
+    // Default tool_loop drive — let turn-engine handle the LLM iteration.
+    return {}
+  }
+
+  applyResult(_params: DomainAdapterApplyParams): DomainAdapterApplyResult {
+    return {}
+  }
+
+  buildProjectionPatch(
+    _params: DomainAdapterProjectionParams,
+  ): Record<string, unknown> | null {
+    return null
+  }
+
+  /**
+   * Detects whether the current run is operating in browser-capable mode.
+   *
+   * TODO(stage-r-followup): wire this to read `params.toolPolicy` and
+   * `params.executionIntentContext.capabilityProfile` to determine if the
+   * `browser_interaction` capability group is exposed. For now, defaults
+   * to non-browser-mode (web_search / web_fetch / present_file), which
+   * matches the most common research surface.
+   */
+  private detectBrowserMode(_params: DomainAdapterPrepareParams): boolean {
+    return false
+  }
+}
