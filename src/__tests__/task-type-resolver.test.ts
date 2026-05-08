@@ -71,6 +71,19 @@ test('task type resolver routes live external info lookups into the browser tool
   assert.equal(result.preferredExecutor, 'browser')
 })
 
+test('task type resolver routes platform public-ranking lookups into the browser tool loop', () => {
+  const envelope = buildRequestEnvelope({ userText: 'youtube 上面 aespa 播放量最高的视频是什么？' })
+  const result = resolveTaskType({
+    intent: classifyIntent(envelope),
+    envelope,
+    capabilities: createCapabilities(),
+  })
+
+  assert.equal(result.taskType, 'short_task')
+  assert.equal(result.executionChain, 'tool_loop')
+  assert.equal(result.preferredExecutor, 'browser')
+})
+
 test('task type resolver routes pet sticky note requests into the tool loop', () => {
   const envelope = buildRequestEnvelope({ userText: '贴到便利贴里面' })
   const result = resolveTaskType({

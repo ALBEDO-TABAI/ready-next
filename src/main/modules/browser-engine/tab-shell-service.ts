@@ -1,10 +1,12 @@
 import type { BrowserBoundsSyncMode, BrowserHostView, BrowserRect, BrowserViewBoundsUpdate } from './host-types'
+import { isReadyBrowserBlankUrl } from '../../../shared/browser-defaults'
 
 interface BrowserShellNavigationHistory {
   canGoBack(): boolean
   canGoForward(): boolean
   goBack(): void
   goForward(): void
+  clear?: () => void
 }
 
 interface BrowserShellWebContents {
@@ -95,7 +97,11 @@ export class BrowserTabShellService {
     const tab = this.host.tabs.get(resolvedTabId)
     if (!tab?.view) return { success: false, error: 'Tab not found' }
 
+    const shouldClearBlankHistory = isReadyBrowserBlankUrl(tab.url) && !isReadyBrowserBlankUrl(url)
     await tab.view.webContents.loadURL(url)
+    if (shouldClearBlankHistory) {
+      tab.view.webContents.navigationHistory.clear?.()
+    }
     return { success: true }
   }
 

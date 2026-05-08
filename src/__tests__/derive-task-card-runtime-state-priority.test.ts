@@ -29,6 +29,7 @@ test('rank-100 — failed without background → visualState=failed', () => {
   const state = deriveTaskCardRuntimeState(makeRun({
     phase: 'error',
     status: 'failed',
+    canResume: true,
   }))
   assert.equal(state.visualState, 'failed')
   assert.deepEqual(state.actionSet, ['retry', 'cancel', 'open_artifact'])
@@ -75,6 +76,7 @@ test('rank-90 — background + budget_paused → background_running (Stage O fix
 test('rank-80 — budget_paused without background → budget_paused', () => {
   const state = deriveTaskCardRuntimeState(makeRun({
     terminalReason: 'checkpoint_budget',
+    canResume: true,
   }))
   assert.equal(state.visualState, 'budget_paused')
   assert.deepEqual(state.actionSet, ['continue', 'retry', 'cancel'])

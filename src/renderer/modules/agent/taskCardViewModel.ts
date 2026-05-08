@@ -12,6 +12,7 @@ import {
 } from './task-status-vocabulary'
 import type { TaskCardVisualState } from './task-status-vocabulary'
 import { filterUserVisibleToolTraceEvents, sanitizeInternalAgentDisplayText } from './toolTraceVisibility'
+import { isAwaitingUserInteractionState } from '../../../shared/task-interaction-state'
 
 export type TaskSectionKey = 'overview' | 'plan' | 'details' | 'artifacts' | 'memory'
 
@@ -397,9 +398,12 @@ function hasBlockedTerminalReason(run: TaskCardRunLike): boolean {
 function gateActionsByCanResume(
   actions: TaskCardAction[],
   canResume: boolean | undefined,
+  options?: { allowUserInteractionContinue?: boolean },
 ): TaskCardAction[] {
   if (canResume === true) return actions
-  return actions.filter((action) => action !== 'continue' && action !== 'retry')
+  return actions.filter((action) =>
+    action !== 'retry'
+    && (action !== 'continue' || options?.allowUserInteractionContinue === true))
 }
 
 export function deriveTaskCardRuntimeState(run: TaskCardRunLike): TaskCardRuntimeState {
@@ -456,7 +460,9 @@ export function deriveTaskCardRuntimeState(run: TaskCardRunLike): TaskCardRuntim
     return {
       visualState,
       statusLabel: taskCardVisualStateLabel(visualState),
-      actionSet: gateActionsByCanResume(baseActions, run.canResume),
+      actionSet: gateActionsByCanResume(baseActions, run.canResume, {
+        allowUserInteractionContinue: isAwaitingUserInteractionState(run),
+      }),
     }
   }
   if (run.phase === 'done' || run.status === 'done') {

@@ -53,6 +53,7 @@ import { RunProjection } from './run-projection'
 import { syncTaskProjection } from './task-projection-sync'
 import { reconcileTaskProjections } from './task-projection-reconciler'
 import { canResumeShape, canResumeWithFs, type ResumeHandle } from './resume-handle'
+import { isAwaitingUserInteractionState } from '../../../shared/task-interaction-state'
 import { assertSkillTaskRunInvariantConsistency } from './skill-task-tracker'
 import type { ProjectionTruthSnapshot, TaskProjectionRecord } from './run-contracts'
 import { getBudgetUsagePercent, restoreContinuationTaskBudgetRuntime } from './run-budget-policy'
@@ -242,6 +243,14 @@ function deriveTaskProjectionCanResume(record: TaskProjectionRecord): TaskProjec
     runStatePath: ref?.runStatePath || null,
   }
   return { ...record, canResume: canResumeWithFs(handle) }
+}
+
+function canRespondToUserInteractionWithoutResumeHandle(params: {
+  projection: TaskProjectionRecord | null
+  scopeRunSummary: ScopeRunSummary | null
+}): boolean {
+  return isAwaitingUserInteractionState(params.projection)
+    || isAwaitingUserInteractionState(params.scopeRunSummary)
 }
 
 export class AgentControlRuntime extends EventEmitter {
@@ -1317,12 +1326,11 @@ export class AgentControlRuntime extends EventEmitter {
       incoming: payload.continuationIntent || null,
       responseText,
     })
-    // Stage Q (Stage 11) — same not_resumable refusal as resumeRun.
-    // respondToInteraction is the other public IPC entry that drives a
-    // resume-shaped flow; if the projection's continuationRef has no
-    // durable handle, refuse rather than silently downgrade to "fresh
-    // message" semantics.
-    if (builtIntent === null) {
+    const canRespondWithoutResumeHandle = canRespondToUserInteractionWithoutResumeHandle({
+      projection: target.projection,
+      scopeRunSummary: target.scopeRunSummary,
+    })
+    if (builtIntent === null && !canRespondWithoutResumeHandle) {
       logAgentMetric('runtime_respond_to_interaction_rejected_not_resumable', {
         scopeId: target.scope.id,
         taskId: payload.taskId || null,
@@ -1336,6 +1344,7 @@ export class AgentControlRuntime extends EventEmitter {
     return this.sendScoped({
       scopeId: target.scope.id,
       requestId: payload.requestId,
+      taskId: target.projection?.taskId || target.scopeRunSummary?.taskId || payload.taskId,
       message: responseText,
       continuationIntent: builtIntent,
     })

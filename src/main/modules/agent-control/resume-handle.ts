@@ -32,6 +32,7 @@ export const defaultFsExistenceProbe: FsExistenceProbe = {
     try {
       return statSync(path).isFile()
     } catch {
+      // silent-catch: missing or inaccessible path means this handle is not resumable.
       return false
     }
   },
@@ -39,6 +40,7 @@ export const defaultFsExistenceProbe: FsExistenceProbe = {
     try {
       return statSync(path).isDirectory()
     } catch {
+      // silent-catch: missing or inaccessible path means this handle is not resumable.
       return false
     }
   },

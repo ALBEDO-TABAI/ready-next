@@ -58,6 +58,26 @@ test('intent classifier recognizes live external info lookups as browser intent'
   assert.ok(result.objectSignals.some((item) => /browser-live-info/.test(item)))
 })
 
+test('intent classifier recognizes platform public-ranking lookups as browser intent', () => {
+  const result = classifyIntent(buildRequestEnvelope({
+    userText: 'youtube 上面 aespa 播放量最高的视频是什么？',
+  }))
+
+  assert.equal(result.primaryDomain, 'browser')
+  assert.equal(result.crossDomain, false)
+  assert.ok(result.objectSignals.some((item) => /browser-live-info/.test(item)))
+  assert.ok(result.objectSignals.some((item) => /dynamic-public-ranking/.test(item)))
+})
+
+test('intent classifier does not treat local media adjustment superlatives as live info', () => {
+  const result = classifyIntent(buildRequestEnvelope({
+    userText: '把这个视频音量调到最高',
+  }))
+
+  assert.ok(!result.objectSignals.some((item) => /browser-live-info/.test(item)))
+  assert.ok(!result.objectSignals.some((item) => /dynamic-public-ranking/.test(item)))
+})
+
 test('live-info detection is suppressed when the envelope carries an explicit Widget 更新上下文', () => {
   // The user is modifying a specific widget and their own words happen to
   // include a live-info topic keyword (温度/最新). The run must stay on the

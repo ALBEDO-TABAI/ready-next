@@ -138,6 +138,12 @@ export const TOOL_ERROR_METRICS = {
    */
   toolCallTextIntercepted: 'tool_call_text_intercepted',
   /**
+   * Direct-answer path saw a text-only tool call and would otherwise sanitize
+   * it to an empty successful turn. The engine surfaces a short fallback
+   * answer instead of silently finishing with no assistant message.
+   */
+  directToolCallTextBlocked: 'direct_tool_call_text_blocked',
+  /**
    * Screenshot-bug ROOT FIX — openai-execution-client 在 native 路径检测到
    * 模型 text 含 `<tool_call>` XML 但 provider 返回 toolCalls=[] 的协议
    * mismatch（mimo / qwen 等 OpenAI 兼容方常见），用 parseTextToolBridgeResponse

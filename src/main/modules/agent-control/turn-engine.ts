@@ -159,7 +159,8 @@ function choosePreferredSkillToolNamesFromFrame(
   const framePreferred = [...(frame?.steering.preferredToolNames || [])]
   const frameHasAction = framePreferred.some(isPreferredSkillActionToolName)
   const currentHasAction = (currentPreferredToolNames || []).some(isPreferredSkillActionToolName)
-  if (currentHasAction && !frameHasAction) return currentPreferredToolNames || null
+  const currentHasParentForceForbiddenAction = (currentPreferredToolNames || []).some(isParentForceForbiddenByManifest)
+  if (currentHasAction && !frameHasAction && !currentHasParentForceForbiddenAction) return currentPreferredToolNames || null
   return framePreferred
 }
 
@@ -1725,33 +1726,10 @@ export class TurnEngine {
         providedContinuationState,
         continuationRef: null,
       })
-      // Stage Q — split the legacy `shouldBindSkillContextForTurn` into
-      // two sub-predicates so the supervisor snapshot path is gated by
-      // restartIntentClass:
-      //   - shouldBindForResume: legacy resume path, loads supervisor
-      //   - shouldBindForRestart: 'restart_from_existing' path, loads
-      //     EXPLICIT handle inputs only (NOT the supervisor snapshot)
-      // The combined predicate `shouldBindSkillContextForTurn` is kept
-      // for backward compat with downstream code that uses it for
-      // non-supervisor purposes (preferred tool name selection, etc).
-      const shouldBindForResume = Boolean(
-        restartIntentClass === 'resume'
-        && (
-          hasExplicitSkill
-          || explicitRunStateResourceForTurn
-          || isSkillResumeTurnDetected
-          || isSkillProgressFollowupTurnDetected
-          || matchesChildCancelIntent(
-            requestEnvelope.primaryInstruction,
-            requestEnvelope.pureUserText,
-            requestEnvelope.rawUserText,
-          )
-        ),
-      )
-      const shouldBindForRestart = Boolean(
-        restartIntentClass === 'restart_from_existing'
-        && (explicitRunStateResourceForTurn || providedContinuationState),
-      )
+      // Stage Q — this predicate is the remaining skill-context binding
+      // gate for preferred tool selection, active-context lookup, and frame
+      // identity. Fresh/restart liveness suppression is handled in
+      // `resolveTurnFrame` via `restartIntentClass`.
       const shouldBindSkillContextForTurn = Boolean(
         hasExplicitSkill
         || explicitFreshSkillStart

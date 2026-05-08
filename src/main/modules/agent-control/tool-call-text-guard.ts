@@ -39,7 +39,7 @@ import { parseTextToolBridgeResponse } from '../claude-bridge/tool-bridge'
  * surfaces every interception with `cleanedLen` so a regression to noisy
  * false-positive rate is observable.
  */
-export const TOOL_CALL_TEXT_PATTERN = /<tool_call>|<function=|<parameter=|:::tool_call/i
+export const TOOL_CALL_TEXT_PATTERN = /<tool_calls?>|<function=|<parameter=|:::tool_call/i
 
 export interface SanitizeAssistantTextOptions {
   sessionId?: string
@@ -68,17 +68,53 @@ export function sanitizeAssistantText(
 ): string {
   if (!text || !TOOL_CALL_TEXT_PATTERN.test(text)) return text
   const parsed = parseTextToolBridgeResponse(text)
+  const visibleText = TOOL_CALL_TEXT_PATTERN.test(parsed.visibleText)
+    ? stripMalformedToolCallText(parsed.visibleText)
+    : parsed.visibleText
   logAgentMetric(TOOL_ERROR_METRICS.toolCallTextIntercepted, {
     sessionId: options.sessionId ?? null,
     iteration: options.iteration ?? null,
     transport: options.toolTransport ?? 'unknown',
     source: options.source ?? 'unknown',
     originalLen: text.length,
-    cleanedLen: parsed.visibleText.length,
+    cleanedLen: visibleText.length,
     extractedToolCalls: parsed.toolCalls.length,
     extractedToolNames: parsed.toolCalls.map((call) => call.name).slice(0, 5),
   })
-  return parsed.visibleText
+  return visibleText
+}
+
+function stripMalformedToolCallText(text: string): string {
+  const markerIndex = text.search(TOOL_CALL_TEXT_PATTERN)
+  if (markerIndex < 0) return text
+  return text.slice(0, markerIndex).replace(/\n{2,}/g, '\n').trim()
+}
+
+export interface ToolCallOnlyFallback {
+  text: string
+  toolNames: string[]
+}
+
+export function buildToolCallOnlyFallbackText(text: string): ToolCallOnlyFallback | null {
+  if (!text || !TOOL_CALL_TEXT_PATTERN.test(text)) return null
+  const parsed = parseTextToolBridgeResponse(text)
+  if (parsed.toolCalls.length === 0) return null
+  if (parsed.visibleText.trim()) return null
+
+  const toolNames = Array.from(new Set(
+    parsed.toolCalls
+      .map((call) => call.name)
+      .filter(Boolean),
+  ))
+  const isBrowserLookup = toolNames.some((name) => name.startsWith('browser_'))
+  const fallbackText = isBrowserLookup
+    ? '这个问题需要网页查询来确认，但当前回合没有打开网页查询能力，所以没有拿到可信结果。'
+    : '这轮需要调用工具继续处理，但当前回合没有进入对应的工具执行链路，所以没有拿到结果。'
+
+  return {
+    text: fallbackText,
+    toolNames,
+  }
 }
 
 /**

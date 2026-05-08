@@ -279,12 +279,14 @@ export async function runAgentVeaResumeProbe(options: ProbeOptions): Promise<Pro
     { __setMetricSinkForTests },
     { _resetLastReferenceSkillHintsForTests },
     { defaultToolRegistry },
+    { __setSkillsRuntimeManagerForTests },
   ] = await Promise.all([
     import('../src/main/modules/agent-control/orchestrator'),
     import('../src/main/modules/agent-control/request-envelope'),
     import('../src/main/modules/agent-control/metrics'),
     import('../src/main/modules/agent-control/skill-reference-hints'),
     import('../src/main/modules/agent-control/tool-registry'),
+    import('../src/main/modules/skills-runtime/runtime-manager'),
   ])
   const fixture = options.fixture || !options.runStatePath
     ? createFixture()
@@ -302,6 +304,44 @@ export async function runAgentVeaResumeProbe(options: ProbeOptions): Promise<Pro
 
   __setMetricSinkForTests((event) => metrics.push(event))
   _resetLastReferenceSkillHintsForTests()
+  __setSkillsRuntimeManagerForTests({
+    listSkills: () => [{
+      id: 'video-expert-analyzer',
+      name: 'Video Expert Analyzer (VNext)',
+      description: 'Probe skill runtime fixture',
+      executionMode: 'advisory',
+      hostRequirements: {
+        default_action_timeout_ms: 60 * 60 * 1000,
+        expose_when_hint_armed: ['video_expert_pipeline', 'video_expert_ai_analyze'],
+      },
+      childLoop: {
+        version: 1,
+        actions: ['video_expert_pipeline', 'video_expert_ai_analyze'],
+      },
+      actions: [
+        {
+          name: 'video_expert_pipeline',
+          description: 'Probe pipeline action',
+          runtime: 'python',
+          visibility: 'internal',
+          params: [
+            { name: 'url', type: 'string', description: 'Video URL', required: true },
+            { name: 'outputDir', type: 'string', description: 'Output directory', required: false },
+          ],
+        },
+        {
+          name: 'video_expert_ai_analyze',
+          description: 'Probe scoring action',
+          runtime: 'python',
+          visibility: 'internal',
+          params: [
+            { name: 'sceneScoresPath', type: 'string', description: 'scene_scores.json path', required: true },
+            { name: 'outputDir', type: 'string', description: 'Output directory', required: false },
+          ],
+        },
+      ],
+    }],
+  })
   installProbeSkillContext(engine)
   engine.getAIConfig = () => buildAIConfig()
   // Commit cfb4369 added DirectChat.getAIConfigDetailed which bypasses the
@@ -567,6 +607,7 @@ export async function runAgentVeaResumeProbe(options: ProbeOptions): Promise<Pro
     restoreToolDefinitions()
     __setMetricSinkForTests(null)
     _resetLastReferenceSkillHintsForTests()
+    __setSkillsRuntimeManagerForTests(null)
   }
 }
 

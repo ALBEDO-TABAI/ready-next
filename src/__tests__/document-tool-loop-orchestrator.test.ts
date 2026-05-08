@@ -178,3 +178,42 @@ test('DocumentToolLoopOrchestrator does not regress to "no mutation" after a sav
   )
   assert.equal(result.finish, true)
 })
+
+test('DocumentToolLoopOrchestrator keeps save guard active after no-change follow-up iterations', () => {
+  const orchestrator = new DocumentToolLoopOrchestrator()
+  const state = orchestrator.createState({
+    documentToolProgress: {
+      executedMutatingDocActionCount: 1,
+      executedSaveDocActionCount: 0,
+      toolResults: [
+        '已追加内容到：humanizer_work',
+        '内容未变化，已跳过写入：humanizer_work',
+      ],
+    },
+    documentToolTaskCompleted: true,
+    forceDocSaveNudges: 2,
+  })
+
+  const iterationResult = orchestrator.handleIterationResult({
+    state,
+    forceDocumentTool: true,
+    documentWidgetTaskKind: null,
+    executedDocActionCount: 1,
+    executedMutatingDocActionCount: 0,
+    executedInspectionDocActionCount: 0,
+    executedSaveDocActionCount: 0,
+    documentToolResultsThisIteration: ['内容未变化，已跳过写入：humanizer_work'],
+  })
+
+  assert.match(iterationResult.nextUserMessage || '', /document_save_tab/)
+
+  const noToolCallResult = orchestrator.handleNoToolCall({
+    state: iterationResult.state,
+    forceDocumentTool: true,
+    responseText: '文档写入受限，我直接把完整内容发在聊天里。',
+    toolTransport: 'native',
+  })
+
+  assert.match(noToolCallResult.nextUserMessage || '', /document_save_tab/)
+  assert.equal(noToolCallResult.preserveAssistantText, true)
+})

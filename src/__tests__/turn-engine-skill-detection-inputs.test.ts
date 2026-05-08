@@ -74,15 +74,18 @@ test('turn-engine derives preferredSkillToolNames via the skill-context binding 
   const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
   // Stage 4 W3 cutover: preferredSkillToolNames is initially derived from the
   // legacy skill-context disjunction (`hasExplicitSkill || hasActiveSkill`)
-  // and then re-bound from the W3 SkillToolAuthorization frame steering.
+  // and then reconciled with the W3 SkillToolAuthorization frame steering.
   // The legacy disjunction is preserved as a transitional bootstrap: when no
   // turnFrame.steering arrives (e.g. early in a turn before the authorization
   // resolves), the gate still has to know whether to engage skill-bound
-  // filtering. This pins both stages of the derivation chain — both must
-  // remain present until SkillToolAuthorization fully replaces the bootstrap.
+  // filtering. The frame must not blindly overwrite a typed skill action with
+  // primitive-only steering, or a restart turn can lose the real skill action.
+  // This pins both stages of the derivation chain — both must remain present
+  // until SkillToolAuthorization fully replaces the bootstrap.
   assert.match(turnEngine, /legacyPreferredSkillToolNames/)
-  assert.match(turnEngine, /shouldBindSkillContextForTurn\s*&&\s*\(hasExplicitSkill\s*\|\|\s*hasActiveSkill\)/)
-  assert.match(turnEngine, /preferredSkillToolNames\s*=\s*\[\.\.\.turnFrame\.steering\.preferredToolNames\]/)
+  assert.match(turnEngine, /shouldBindSkillContextForTurn\s*&&\s*hasExplicitSkill/)
+  assert.match(turnEngine, /choosePreferredSkillToolNamesFromFrame/)
+  assert.match(turnEngine, /preferredSkillToolNames\s*=\s*choosePreferredSkillToolNamesFromFrame\(\s*turnFrame,\s*preferredSkillToolNames\s*\)/)
 })
 
 test('turn-engine suppresses implicit continuation lookup when a retry resolves to an explicit skill', () => {

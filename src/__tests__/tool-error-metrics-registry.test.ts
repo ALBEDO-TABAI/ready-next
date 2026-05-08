@@ -25,6 +25,7 @@ test('registry exposes documented tool-error metric keys', () => {
     'childRunnerLifecycleWriteFailed',
     'compactionCircuitBreak',
     'compactionL2Failed',
+    'directToolCallTextBlocked',
     'domainToolNarrowingApplied',
     'hookHandlerFailed',
     'hookHandlerTimeout',
@@ -90,6 +91,7 @@ test('historical metric strings are preserved (log-compat contract)', () => {
   assert.equal(TOOL_ERROR_METRICS.skillReferenceHintRecoveredFromCapsule, 'skill_reference_hint_recovered_from_capsule')
   // Stage 2.1a — provider-side malformed tool_calls.arguments
   assert.equal(TOOL_ERROR_METRICS.providerArgumentsCorrupt, 'provider_arguments_corrupt')
+  assert.equal(TOOL_ERROR_METRICS.directToolCallTextBlocked, 'direct_tool_call_text_blocked')
   // Stage 4 W3 — model-issued skill_* tool blocked by per-turn authorization
   assert.equal(TOOL_ERROR_METRICS.authorizationDenied, 'authorization_denied')
   // A1 SubAgent skeleton — lifecycle cleanup drain failure observability

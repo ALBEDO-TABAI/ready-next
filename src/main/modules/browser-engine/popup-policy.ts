@@ -1,3 +1,5 @@
+import { isReadyBrowserBlankUrl } from '../../../shared/browser-defaults'
+
 export interface PopupRequestContext {
   url: string
   frameName?: string
@@ -55,6 +57,7 @@ function looksPopupSized(features: Record<string, string>): boolean {
 }
 
 export function isAllowedBrowserURL(url: string): boolean {
+  if (isReadyBrowserBlankUrl(url)) return true
   try {
     const parsed = new URL(url)
     return parsed.protocol === 'http:' || parsed.protocol === 'https:'

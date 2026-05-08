@@ -562,6 +562,7 @@ export function assertSkillTaskRunInvariantConsistency(params: {
   try {
     sql = params.getCheckEnforcedSql()
   } catch {
+    // silent-catch: boot/test schema inspection is best-effort; unknown lets callers fail closed.
     return 'unknown'
   }
   if (sql == null) return 'unknown'

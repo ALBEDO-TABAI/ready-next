@@ -4,6 +4,7 @@ import test from 'node:test'
 
 import { TurnTranscript } from '../main/modules/agent-control/turn-transcript'
 import {
+  buildToolCallOnlyFallbackText,
   TOOL_CALL_TEXT_PATTERN,
   sanitizeAssistantText,
 } from '../main/modules/agent-control/tool-call-text-guard'
@@ -39,6 +40,17 @@ const SCREENSHOT_LEAK_TEXT = [
   '<parameter=command>cat /Users/user/Documents/实验田/测试/vnext_config.json 2>/dev/null || echo "No config"</parameter>',
   '</function>',
   '</tool_call>',
+].join('\n')
+
+const MALFORMED_PLURAL_TOOL_CALLS_TEXT = [
+  '好，文档标签页写入受限。我直接用 artifact 输出处理后的完整文档。',
+  '<tool_calls>',
+  '<function=skill_write_artifact>',
+  '<parameter=content># 视听剖析报告',
+  '',
+  '## aespa LEMONADE Complexity Trailer',
+  '',
+  '这段内容不应该进入聊天正文。',
 ].join('\n')
 
 function makeTranscript() {
@@ -119,6 +131,44 @@ test('SCREENSHOT BUG — sanitizeAssistantText alone correctly strips the screen
   })
   assert.equal(TOOL_CALL_TEXT_PATTERN.test(cleaned), false)
   assert.match(cleaned, /好，从头来/)
+})
+
+test('SCREENSHOT BUG — malformed plural tool_calls block does not leak parameter body', () => {
+  const cleaned = sanitizeAssistantText(MALFORMED_PLURAL_TOOL_CALLS_TEXT, {
+    sessionId: 'sess-malformed',
+    source: 'chat_save_message',
+  })
+
+  assert.equal(TOOL_CALL_TEXT_PATTERN.test(cleaned), false)
+  assert.match(cleaned, /文档标签页写入受限/)
+  assert.doesNotMatch(cleaned, /# 视听剖析报告/)
+  assert.doesNotMatch(cleaned, /这段内容不应该进入聊天正文/)
+})
+
+test('SCREENSHOT BUG — TurnTranscript strips malformed plural tool_calls before renderer emit', () => {
+  const { transcript, emittedChunks } = makeTranscript()
+  transcript.emitOutput(MALFORMED_PLURAL_TOOL_CALLS_TEXT, 'text')
+
+  assert.equal(emittedChunks.length, 1)
+  const emitted = emittedChunks[0]
+  assert.equal(emitted.type, 'text')
+  assert.equal(TOOL_CALL_TEXT_PATTERN.test(emitted.chunk), false)
+  assert.match(emitted.chunk, /文档标签页写入受限/)
+  assert.doesNotMatch(emitted.chunk, /# 视听剖析报告/)
+})
+
+test('DIRECT PATH GUARD — tool-call-only text gets a visible fallback instead of empty success', () => {
+  const fallback = buildToolCallOnlyFallbackText([
+    '<tool_call>',
+    '<function=browser_search>',
+    '<parameter=query>youtube aespa most viewed video</parameter>',
+    '</function>',
+    '</tool_call>',
+  ].join('\n'))
+
+  assert.ok(fallback)
+  assert.deepEqual(fallback!.toolNames, ['browser_search'])
+  assert.match(fallback!.text, /网页查询/)
 })
 
 test('SCREENSHOT BUG wiring — chat:saveMessage IPC uses sanitizeAssistantText for assistant rows', () => {

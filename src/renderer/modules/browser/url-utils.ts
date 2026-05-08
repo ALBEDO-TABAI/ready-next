@@ -1,4 +1,7 @@
-export const DEFAULT_BROWSER_URL = 'https://gemini.google.com'
+import { DEFAULT_BROWSER_URL, isReadyBrowserBlankUrl } from '../../../shared/browser-defaults'
+
+export { DEFAULT_BROWSER_URL, READY_BROWSER_BLANK_URL, isReadyBrowserBlankUrl } from '../../../shared/browser-defaults'
+
 export const SEARCH_URL = 'https://www.google.com/search?q='
 
 export const LOGIN_DOMAINS = [
@@ -46,5 +49,6 @@ export function normalizeBrowserUrlInput(
 }
 
 export function isSupportedBrowserNavigationUrl(url: string): boolean {
-  return /^https?:\/\//i.test(String(url || '').trim())
+  const normalized = String(url || '').trim()
+  return isReadyBrowserBlankUrl(normalized) || /^https?:\/\//i.test(normalized)
 }

@@ -3,8 +3,10 @@ import test from 'node:test'
 
 import {
   DEFAULT_BROWSER_URL,
+  READY_BROWSER_BLANK_URL,
   SEARCH_URL,
   extractBrowserDomain,
+  isReadyBrowserBlankUrl,
   isSupportedBrowserNavigationUrl,
   isLikelyAbsolutePath,
   normalizeBrowserUrlInput,
@@ -26,15 +28,19 @@ test('normalizeBrowserUrlInput preserves urls, maps paths, and falls back to sea
   const toFileUrl = (path: string) => `file://${path}`
 
   assert.equal(normalizeBrowserUrlInput('', toFileUrl), DEFAULT_BROWSER_URL)
+  assert.equal(DEFAULT_BROWSER_URL, READY_BROWSER_BLANK_URL)
+  assert.equal(isReadyBrowserBlankUrl(DEFAULT_BROWSER_URL), true)
   assert.equal(normalizeBrowserUrlInput('https://openai.com', toFileUrl), 'https://openai.com')
   assert.equal(normalizeBrowserUrlInput('/tmp/demo.txt', toFileUrl), 'file:///tmp/demo.txt')
   assert.equal(normalizeBrowserUrlInput('example.com', toFileUrl), 'https://example.com')
   assert.equal(normalizeBrowserUrlInput('hello world', toFileUrl), `${SEARCH_URL}hello%20world`)
 })
 
-test('isSupportedBrowserNavigationUrl only allows web urls', () => {
+test('isSupportedBrowserNavigationUrl allows web urls and the Ready blank page only', () => {
+  assert.equal(isSupportedBrowserNavigationUrl(READY_BROWSER_BLANK_URL), true)
   assert.equal(isSupportedBrowserNavigationUrl('https://openai.com'), true)
   assert.equal(isSupportedBrowserNavigationUrl('http://example.com'), true)
+  assert.equal(isSupportedBrowserNavigationUrl('data:text/html,external'), false)
   assert.equal(isSupportedBrowserNavigationUrl('file:///tmp/demo.txt'), false)
   assert.equal(isSupportedBrowserNavigationUrl('local-file:///tmp/demo.txt'), false)
 })

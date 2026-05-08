@@ -42,6 +42,7 @@ test('projection.status=failed wins over phase=tool_running (no live background)
     waitingFor: 'none',
     terminalReason: undefined,
     taskContinuation: null,
+    canResume: true,
   })
   const state = deriveTaskCardRuntimeState(run)
   assert.equal(state.visualState, 'failed', 'projection-driven failed must beat scope-run phase')

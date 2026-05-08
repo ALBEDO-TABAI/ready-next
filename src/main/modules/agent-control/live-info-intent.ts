@@ -22,6 +22,9 @@ const FINANCE_PATTERNS = /(股价|币价|汇率|现价|价格|油价|金价|盘�
 const SPORTS_PATTERNS = /(比分|赛程|战绩|排名|结果|战报|几比几|谁赢了|第几名)/i
 const TRANSPORT_PATTERNS = /(航班|高铁|列车|火车|路况|堵车|地铁|延误|票价|余票)/i
 const EXTERNAL_SOURCE_HINTS = /(官网|官方网站|官方|网站|网页|页面|气象台|中国天气网|中央气象台)/i
+const MEDIA_PLATFORM_PATTERNS = /(youtube|youtu\.be|b站|bilibili|小红书|抖音|douyin|tiktok|微博|weibo|快手|spotify|网易云|qq音乐|instagram|twitter|x\.com)/i
+const PUBLIC_RANKING_PATTERNS = /(播放量|播放数|播放次数|浏览量|观看量|views?\b|点赞数?|转发数?|评论数?|订阅数?|粉丝数?|排名|榜单|最火|热门|爆款|\btop\s*\d*\b|most\s+(viewed|popular|liked))/i
+const MEDIA_OBJECT_PATTERNS = /(视频|影片|短视频|mv|音乐视频|歌曲|单曲|专辑|频道|账号|博主|up主|艺人|artist|idol|女团|男团)/i
 const KNOWLEDGE_STYLE_QUESTIONS = /(是什么意思|怎么翻译|英文|英语|定义|原理|为什么|区别|是什么|啥意思|如何理解)/i
 const LOCAL_DOMAIN_HINTS = /(文档|文稿|widget|show-widget|rss|日历|calendar|飞书|feishu|skill|workflow|blocker|信息卡|卡片|图表|趋势图|波动图|折线图|柱状图|统计图|走势图|价格图|股价图|收益图|对比图|对比卡|进度卡|日程卡|待办|习惯|计划板|计算器|小工具|提示块|表格|超特殊卡片|交互式信息卡|交互式数据图|透明背景|A4|4:3|骨架|skeleton)/i
 
@@ -55,7 +58,12 @@ export function detectLiveInfoIntent(rawText: string): LiveInfoIntent {
     }
   }
 
-  if (LOCAL_DOMAIN_HINTS.test(text) || KNOWLEDGE_STYLE_QUESTIONS.test(text)) {
+  const hasMediaPlatformHint = MEDIA_PLATFORM_PATTERNS.test(text)
+  const hasPublicRankingCue = PUBLIC_RANKING_PATTERNS.test(text)
+  const hasMediaObjectHint = MEDIA_OBJECT_PATTERNS.test(text)
+  const hasDynamicPublicRanking = hasPublicRankingCue && (hasMediaPlatformHint || hasMediaObjectHint)
+
+  if (LOCAL_DOMAIN_HINTS.test(text) || (KNOWLEDGE_STYLE_QUESTIONS.test(text) && !hasDynamicPublicRanking)) {
     return {
       needsLiveInfo: false,
       confidence: 'low',
@@ -107,15 +115,18 @@ export function detectLiveInfoIntent(rawText: string): LiveInfoIntent {
   if (hasLookupVerb) signals.push('lookup-verb')
   if (hasFreshnessCue) signals.push('freshness-cue')
   if (hasSourceHint) signals.push('source-hint')
+  if (hasMediaPlatformHint) signals.push('source-media-platform')
+  if (hasDynamicPublicRanking) signals.push('dynamic-public-ranking-object')
 
   const shouldUseLiveInfo =
     (topicMatched && (hasLookupVerb || hasFreshnessCue || hasSourceHint))
     || (topicMatched && topic === 'weather')
     || (hasSourceHint && hasLookupVerb)
+    || hasDynamicPublicRanking
 
   const confidence: LiveInfoIntent['confidence'] =
     shouldUseLiveInfo
-      ? (topicMatched && (hasLookupVerb || hasFreshnessCue || hasSourceHint)) || (hasSourceHint && hasLookupVerb)
+      ? (topicMatched && (hasLookupVerb || hasFreshnessCue || hasSourceHint)) || (hasSourceHint && hasLookupVerb) || hasDynamicPublicRanking
         ? 'high'
         : 'medium'
       : 'low'

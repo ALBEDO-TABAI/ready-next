@@ -145,6 +145,19 @@ export class DocumentToolLoopOrchestrator {
       }
     }
 
+    const cumulativeMutatingDocActionCount = params.state.documentToolProgress?.executedMutatingDocActionCount || 0
+    const cumulativeSaveDocActionCount = params.state.documentToolProgress?.executedSaveDocActionCount || 0
+    if (cumulativeMutatingDocActionCount > 0 && cumulativeSaveDocActionCount === 0) {
+      return {
+        state: {
+          ...params.state,
+          forceDocSaveNudges: params.state.forceDocSaveNudges + 1,
+        },
+        nextUserMessage: '系统检查：你已执行内容修改但尚未保存。请调用 document_save_tab 完成保存，再给出最终结论。',
+        preserveAssistantText: params.toolTransport !== 'text',
+      }
+    }
+
     if (!params.state.documentToolTaskCompleted && params.state.forceDocNudges < 2) {
       return {
         state: {
@@ -223,8 +236,7 @@ export class DocumentToolLoopOrchestrator {
     if (
       cumulativeMutatingDocActionCount > 0 &&
       cumulativeSaveDocActionCount === 0 &&
-      params.executedSaveDocActionCount === 0 &&
-      nextState.forceDocSaveNudges < 2
+      params.executedSaveDocActionCount === 0
     ) {
       return {
         state: {

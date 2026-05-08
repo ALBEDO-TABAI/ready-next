@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert'
-import { decidePopupPolicy, shouldAllowBrowserPermission } from '../main/modules/browser-engine/popup-policy'
+import { READY_BROWSER_BLANK_URL } from '../shared/browser-defaults'
+import { decidePopupPolicy, isAllowedBrowserURL, shouldAllowBrowserPermission } from '../main/modules/browser-engine/popup-policy'
 
 describe('browser popup policy', () => {
   it('should allow auth bootstrap popup', () => {
@@ -32,6 +33,11 @@ describe('browser popup policy', () => {
       disposition: 'new-window',
     })
     assert.strictEqual(decision.mode, 'external')
+  })
+
+  it('should allow only the Ready blank data page as an internal browser URL', () => {
+    assert.strictEqual(isAllowedBrowserURL(READY_BROWSER_BLANK_URL), true)
+    assert.strictEqual(isAllowedBrowserURL('data:text/html,external'), false)
   })
 
   it('should enforce media permission only on secure origin', () => {

@@ -317,6 +317,25 @@ describe('BrowserTaskPlanner', () => {
     assert.equal(decision.plan?.targetSearchQuery, '今天广州天气怎么样')
   })
 
+  it('treats platform public-ranking requests as live info browser workflows', () => {
+    const planner = new BrowserTaskPlanner({
+      getSessionAttachmentHints: () => ({ count: 0 }),
+      getIncomingAttachmentHints: () => ({ count: 0 }),
+      getActiveTab: () => undefined,
+      getTabContext: async () => null,
+    })
+
+    const decision = planner.decideTask({
+      userText: 'youtube 上面 aespa 播放量最高的视频是什么？',
+      sessionMessages: [],
+      sessionId: 'scope-youtube-ranking',
+    })
+
+    assert.equal(decision.mode, 'browser_workflow')
+    assert.equal(decision.reason, 'live_information_lookup')
+    assert.equal(decision.plan?.targetSearchQuery, 'youtube 上面 aespa 播放量最高的视频是什么')
+  })
+
   it('normalizes official-source follow-up phrasing into a cleaner search query', () => {
     const planner = new BrowserTaskPlanner({
       getSessionAttachmentHints: () => ({ count: 0 }),

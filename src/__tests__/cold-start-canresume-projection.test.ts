@@ -26,9 +26,9 @@ test('cold-start canResume=false: continue/retry actions are stripped', () => {
     phase: 'checkpoint',
     title: 'humanizer-zh',
     status: 'blocked',
-    waitingFor: 'input',
+    waitingFor: 'none',
     resumableActions: ['continue', 'retry', 'cancel'],
-    interactionState: 'awaiting_clarification',
+    interactionState: 'suspended',
     canResume: false,
     updatedAt: '2026-05-08T00:00:00.000Z',
   })
@@ -43,9 +43,9 @@ test('cold-start canResume=true: continue/retry actions are preserved', () => {
     phase: 'checkpoint',
     title: 'video-expert-analyzer',
     status: 'blocked',
-    waitingFor: 'input',
+    waitingFor: 'none',
     resumableActions: ['continue', 'retry', 'cancel'],
-    interactionState: 'awaiting_clarification',
+    interactionState: 'suspended',
     canResume: true,
     updatedAt: '2026-05-08T00:00:00.000Z',
   })
@@ -61,9 +61,9 @@ test('cold-start canResume=undefined: defensive default — continue/retry strip
     phase: 'checkpoint',
     title: 'some-skill',
     status: 'blocked',
-    waitingFor: 'input',
+    waitingFor: 'none',
     resumableActions: ['continue', 'retry', 'cancel'],
-    interactionState: 'awaiting_clarification',
+    interactionState: 'suspended',
     // canResume omitted
     updatedAt: '2026-05-08T00:00:00.000Z',
   })

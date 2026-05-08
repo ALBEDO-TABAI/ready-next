@@ -4,10 +4,11 @@ import { describe, it } from 'node:test'
 
 import { BrowserAutomationService } from '../main/modules/browser-engine/automation-service'
 import { BrowserPreviewService } from '../main/modules/browser-engine/preview-service'
-import { BrowserTabLifecycleService } from '../main/modules/browser-engine/tab-lifecycle-service'
+import { BrowserTabLifecycleService, type BrowserLifecycleTabRecord } from '../main/modules/browser-engine/tab-lifecycle-service'
 import { BrowserTabMetaService } from '../main/modules/browser-engine/tab-meta-service'
-import { BrowserTabShellService } from '../main/modules/browser-engine/tab-shell-service'
+import { BrowserTabShellService, type BrowserShellTabRecord } from '../main/modules/browser-engine/tab-shell-service'
 import { BrowserWindowOpenService } from '../main/modules/browser-engine/window-open-service'
+import { READY_BROWSER_BLANK_URL } from '../shared/browser-defaults'
 
 function createMockView(options?: {
   canGoBack?: boolean
@@ -35,8 +36,10 @@ function createMockView(options?: {
   const state = {
     attached: false,
     lastLoadedUrl: '',
+    loadedUrls: [] as string[],
     goBackCalls: 0,
     goForwardCalls: 0,
+    clearHistoryCalls: 0,
     reloadCalls: 0,
     insertedTexts: [] as string[],
     mouseCommands: [] as unknown[],
@@ -48,6 +51,7 @@ function createMockView(options?: {
     webContents: {
       loadURL: async (url: string) => {
         state.lastLoadedUrl = url
+        state.loadedUrls.push(url)
       },
       reload: () => {
         state.reloadCalls += 1
@@ -106,6 +110,9 @@ function createMockView(options?: {
         goForward: () => {
           state.goForwardCalls += 1
         },
+        clear: () => {
+          state.clearHistoryCalls += 1
+        },
       },
     },
   }
@@ -140,6 +147,50 @@ describe('BrowserTabShellService', () => {
 
     assert.deepStrictEqual(result, { success: true, tabId: 'tab-1' })
     assert.deepStrictEqual(calls, ['https://example.com'])
+  })
+
+  it('clears the Ready blank history entry when a blank tab first navigates to a page', async () => {
+    const mock = createMockView()
+    const tabs = new Map<string, BrowserShellTabRecord>([
+      ['tab-1', {
+        id: 'tab-1',
+        url: READY_BROWSER_BLANK_URL,
+        title: 'New Tab',
+        domain: '',
+        favicon: null,
+        owner: 'manual',
+        required: false,
+        activity: 'idle',
+        lastAuditedAt: null,
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+        error: null,
+        view: mock.view,
+      }],
+    ])
+    const service = new BrowserTabShellService({
+      tabs,
+      getActiveTabId: () => 'tab-1',
+      setActiveTabId: () => undefined,
+      getViewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
+      setViewBounds: () => undefined,
+      shouldPresentHosts: () => true,
+      isAllowedUrl: () => true,
+      createTab: async () => ({ success: false }),
+      detachHost: () => undefined,
+      showHost: () => undefined,
+      applyBounds: () => undefined,
+      hideHost: () => undefined,
+      detachPreviewView: () => undefined,
+      restoreActiveTabHost: () => undefined,
+    })
+
+    const result = await service.navigate('tab-1', 'https://example.com')
+
+    assert.deepStrictEqual(result, { success: true })
+    assert.strictEqual(mock.state.lastLoadedUrl, 'https://example.com')
+    assert.strictEqual(mock.state.clearHistoryCalls, 1)
   })
 
   it('switches tabs by showing the new host before detaching the old host', () => {
@@ -423,7 +474,10 @@ describe('BrowserTabLifecycleService', () => {
     assert.deepStrictEqual(result, { success: true, tabId: 'tab-1' })
     assert.strictEqual(activeTabId, 'tab-1')
     assert.strictEqual(next.state.lastLoadedUrl, 'https://example.com')
+    assert.deepStrictEqual(next.state.loadedUrls, [READY_BROWSER_BLANK_URL, 'https://example.com'])
     assert.deepStrictEqual(events, ['apply', 'detach-previous', 'show:960x640'])
+    next.state.emit('did-stop-loading')
+    assert.strictEqual(next.state.clearHistoryCalls, 1)
   })
 
   it('ignores subresource did-fail-load events when updating tab error state', async () => {
@@ -432,7 +486,7 @@ describe('BrowserTabLifecycleService', () => {
     const diagMessages: string[] = []
     let activeTabId: string | null = null
     const service = new BrowserTabLifecycleService({
-      tabs: new Map() as any,
+      tabs: new Map<string, BrowserLifecycleTabRecord>(),
       getActiveTabId: () => activeTabId,
       setActiveTabId: (tabId) => {
         activeTabId = tabId
@@ -442,7 +496,7 @@ describe('BrowserTabLifecycleService', () => {
       shouldPresentHosts: () => true,
       isAllowedUrl: () => true,
       extractDomain: (url) => new URL(url).hostname,
-      createHost: () => next.view as any,
+      createHost: () => next.view,
       applyBounds: () => undefined,
       detachHost: () => undefined,
       showHost: () => undefined,
@@ -468,6 +522,46 @@ describe('BrowserTabLifecycleService', () => {
 
     assert.deepStrictEqual(rendererEvents.filter((event) => event.channel === 'browser:tabUpdate' && (event.data as { type?: string }).type === 'error'), [])
     assert.deepStrictEqual(diagMessages, [])
+  })
+
+  it('does not write Ready blank tabs into browser history', async () => {
+    const next = createMockView()
+    const historyEntries: string[] = []
+    let activeTabId: string | null = null
+    const service = new BrowserTabLifecycleService({
+      tabs: new Map<string, BrowserLifecycleTabRecord>(),
+      getActiveTabId: () => activeTabId,
+      setActiveTabId: (tabId) => {
+        activeTabId = tabId
+      },
+      getNextTabId: () => 'tab-1',
+      getViewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
+      shouldPresentHosts: () => true,
+      isAllowedUrl: () => true,
+      extractDomain: () => '',
+      createHost: () => next.view,
+      applyBounds: () => undefined,
+      detachHost: () => undefined,
+      showHost: () => undefined,
+      sendToRenderer: () => undefined,
+      emitTabMeta: () => undefined,
+      logBrowserDiag: () => undefined,
+      bindPopup: () => undefined,
+      bindAppShortcutBridge: () => undefined,
+      installContextMenu: () => undefined,
+      handleWindowOpen: () => ({ action: 'deny' }),
+      ensureDownloadSession: () => undefined,
+      addHistoryEntry: (url) => {
+        historyEntries.push(url)
+      },
+      browserUserAgent: 'test-agent',
+      useMock: false,
+    })
+
+    await service.createTab(READY_BROWSER_BLANK_URL)
+    next.state.emit('did-navigate', {}, READY_BROWSER_BLANK_URL)
+
+    assert.deepStrictEqual(historyEntries, [])
   })
 })
 

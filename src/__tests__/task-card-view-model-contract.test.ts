@@ -205,6 +205,7 @@ test('task card runtime state distinguishes background running, budget paused, d
       blockerType: 'background_running',
       detachedTaskId: 'dst-1234',
     },
+    canResume: true,
     resumableActions: ['continue', 'cancel'],
     updatedAt: '2026-04-28T01:00:00.000Z',
   }), {
@@ -223,8 +224,10 @@ test('task card runtime state distinguishes background running, budget paused, d
       taskId: 'task-budget',
       blockerType: 'budget_paused',
       pauseReason: 'budget_exhausted',
+      outputDir: '/tmp/vea',
       runStatePath: '/tmp/vea/run_state.json',
     },
+    canResume: true,
     resumableActions: ['continue', 'retry', 'cancel'],
     updatedAt: '2026-04-28T01:00:00.000Z',
   }), {
@@ -274,6 +277,7 @@ test('task card runtime state distinguishes background running, budget paused, d
     status: 'failed',
     title: '失败',
     error: 'API key invalid',
+    canResume: true,
     updatedAt: '2026-04-28T01:00:00.000Z',
   }), {
     visualState: 'failed',
@@ -317,8 +321,10 @@ test('budget exhausted pause uses the same terminal checkpoint truth for task ca
       taskId: 'task-budget-truth',
       blockerType: 'budget_paused',
       pauseReason: 'budget_exhausted',
+      outputDir: '/tmp/vea',
       runStatePath: '/tmp/vea/run_state.json',
     },
+    canResume: true,
     resumableActions: ['continue', 'retry', 'cancel'] as const,
     toolTrace: [],
     startedAt: '2026-04-29T00:00:00.000Z',

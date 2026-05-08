@@ -49,7 +49,7 @@ export function resolveTaskType(params: {
       }
     }
     const looksLikeMediaTask = params.envelope.environmentHints.hasAttachments
-      || /(上传|图片|图像|视频|提交)/.test(userText)
+      || /(上传|图片|图像|提交)/.test(userText)
     if (!browserAvailable) {
       return {
         taskType: 'direct_answer',

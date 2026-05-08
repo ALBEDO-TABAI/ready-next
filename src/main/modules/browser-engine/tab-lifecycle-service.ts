@@ -1,5 +1,6 @@
 import type { Session, WebContents } from 'electron'
 import type { BrowserHostView, BrowserRect } from './host-types'
+import { READY_BROWSER_BLANK_URL, isReadyBrowserBlankUrl } from '../../../shared/browser-defaults'
 
 function applyRoundedViewport(_view: BrowserHostView): void {
   // Rounded clipping is handled at the native host view layer.
@@ -106,6 +107,14 @@ export class BrowserTabLifecycleService {
     }
 
     this.host.applyBounds(view)
+    const primesWithReadyBlank = !isReadyBrowserBlankUrl(url)
+    if (primesWithReadyBlank) {
+      try {
+        await view.webContents.loadURL(READY_BROWSER_BLANK_URL)
+      } catch {
+        // If the local blank primer ever fails, continue with the requested page.
+      }
+    }
 
     const tab: BrowserLifecycleTabRecord = {
       id: tabId,
@@ -151,6 +160,9 @@ export class BrowserTabLifecycleService {
     }
 
     view.webContents.once('did-stop-loading', () => {
+      if (primesWithReadyBlank) {
+        view.webContents.navigationHistory.clear()
+      }
       finalizeSwap(true)
     })
     view.webContents.once('did-fail-load', () => {
@@ -190,14 +202,16 @@ export class BrowserTabLifecycleService {
       tab.canGoBack = view.webContents.navigationHistory.canGoBack()
       tab.canGoForward = view.webContents.navigationHistory.canGoForward()
       tab.error = null
-      try {
-        this.host.addHistoryEntry(newUrl, tab.title, {
-          favicon: tab.favicon,
-          transition: 'navigate',
-          sessionId: tabId,
-        })
-      } catch {
-        // ignore history write failures
+      if (!isReadyBrowserBlankUrl(newUrl)) {
+        try {
+          this.host.addHistoryEntry(newUrl, tab.title, {
+            favicon: tab.favicon,
+            transition: 'navigate',
+            sessionId: tabId,
+          })
+        } catch {
+          // ignore history write failures
+        }
       }
       this.emitNavigationState(tabId, tab, view, newUrl)
     })

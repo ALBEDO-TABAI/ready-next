@@ -10,6 +10,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { canResumeShape } from '../main/modules/agent-control/resume-handle'
+import { isAwaitingUserInteractionState } from '../shared/task-interaction-state'
 
 // `buildContinuationIntent` is a private method on AgentControlRuntime
 // (not exported). The behavior we need to pin is the canResumeShape gate
@@ -89,5 +90,25 @@ test('buildContinuationIntent gate: runStatePath without outputDir rejected', ()
     detachedTaskId: null,
     outputDir: null,
     runStatePath: '/tmp/run-1/run_state.json',
+  }), false)
+})
+
+test('interaction response gate: user-waiting projections do not need a durable resume handle', () => {
+  assert.equal(canResumeShape({
+    childRunId: null,
+    detachedTaskId: null,
+    outputDir: null,
+    runStatePath: null,
+  }), false)
+  assert.equal(isAwaitingUserInteractionState({
+    waitingFor: 'confirmation',
+    interactionState: 'awaiting_confirmation',
+  }), true)
+})
+
+test('interaction response gate: background resume still requires a durable handle', () => {
+  assert.equal(isAwaitingUserInteractionState({
+    waitingFor: 'background',
+    interactionState: 'suspended',
   }), false)
 })
