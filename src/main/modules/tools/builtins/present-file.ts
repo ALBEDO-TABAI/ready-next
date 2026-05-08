@@ -62,7 +62,16 @@ export async function executePresentFile(
         requestedPath: args.path,
       })
     }
-    throw error
+    // R1-M02: wrap any non-PathSandboxError (e.g. fs.realpath failures, ENOENT)
+    // in a structured ToolDomainError so dispatch never sees a bare throw.
+    throw new ToolDomainError(
+      'present_file_failed',
+      error instanceof Error ? error.message : String(error),
+      {
+        outputsRoot: ctx.outputsRoot,
+        requestedPath: args.path,
+      },
+    )
   }
 
   if (!ctx.requestModuleToolAction) {

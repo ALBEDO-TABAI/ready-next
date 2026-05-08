@@ -169,6 +169,51 @@ export async function executeModuleToolAction(
     }
   }
 
+  if (tool === 'renderer:present-file') {
+    // Stage R PR-R3 — present_file delivers an artifact reference (path inside
+    // <outputsRoot>) to the user. Path was already sandbox-validated by main
+    // (`resolveReadableWithinRoot` in present-file.ts). Here we just publish
+    // a recentArtifacts entry so the file shows up in ChatPanel and emit a
+    // result trace so the user sees the present action.
+    const path = typeof args.path === 'string' ? args.path : ''
+    const reason = typeof args.reason === 'string' && args.reason ? args.reason : null
+    if (!path) {
+      return {
+        handled: true,
+        payload: {
+          intent: 'renderer:present-file',
+          status: 'failed',
+          summary: 'present_file 缺少 path。',
+        },
+      }
+    }
+    const fileLabel = path.split(/[/\\]/).pop() || path
+    const artifact = createAgentArtifact(
+      { kind: 'present-file', label: fileLabel, path },
+      'research',
+      runId,
+    )
+    const summary = reason ? `已呈现文件 ${fileLabel}：${reason}` : `已呈现文件 ${fileLabel}`
+    pushTrace('result', summary, 'tool_running', {
+      module: 'research',
+      intent: 'renderer:present-file',
+      executionKind: 'deterministic',
+      ownerResourceId: path,
+      artifactRefs: artifact ? [artifact] : [],
+      recentArtifacts: artifact ? [artifact] : [],
+      lastEvidenceAt: new Date().toISOString(),
+    })
+    return {
+      handled: true,
+      payload: {
+        intent: 'renderer:present-file',
+        status: 'presented',
+        summary,
+        path,
+      },
+    }
+  }
+
   if (tool === 'document.writeFile') {
     const path = typeof args.path === 'string' ? args.path : ''
     const content = typeof args.content === 'string' ? args.content : ''

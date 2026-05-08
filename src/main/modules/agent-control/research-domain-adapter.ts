@@ -124,13 +124,19 @@ export class ResearchDomainAdapter implements DomainAdapter {
   /**
    * Detects whether the current run is operating in browser-capable mode.
    *
-   * TODO(stage-r-followup): wire this to read `params.toolPolicy` and
-   * `params.executionIntentContext.capabilityProfile` to determine if the
-   * `browser_interaction` capability group is exposed. For now, defaults
-   * to non-browser-mode (web_search / web_fetch / present_file), which
-   * matches the most common research surface.
+   * R1-C02 fix: derive from upstream `allowedToolNames` (capability resolver
+   * already collected the available tool surface for this turn). When
+   * `browser_research_topic` is allowed, the host's capability profile
+   * exposes a browser backend → use the browser-mode prefix set; otherwise
+   * fall back to the web_search / web_fetch surface.
+   *
+   * Note: `null` means "no narrowing yet" (unrestricted passthrough); we
+   * treat that as non-browser-mode so research stays on the safe default
+   * web tool surface unless browser capability was explicitly admitted.
    */
-  private detectBrowserMode(_params: DomainAdapterPrepareParams): boolean {
-    return false
+  private detectBrowserMode(params: DomainAdapterPrepareParams): boolean {
+    const allowed = params.allowedToolNames
+    if (!allowed || allowed.length === 0) return false
+    return allowed.some((name) => name === 'browser_research_topic')
   }
 }

@@ -2506,6 +2506,7 @@ export class TurnEngine {
         && (
           continuationProjection?.taskType === 'multi_step_task'
           || continuationProjection?.taskType === 'media_task'
+          || continuationProjection?.taskType === 'research'
         )
       ) {
         const inheritedSeed = createContinuationRunBudgetSeed(continuationProjection.taskType)
