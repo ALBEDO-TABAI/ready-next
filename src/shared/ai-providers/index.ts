@@ -22,4 +22,6 @@ export type { PatchContext } from './apply-provider-patch'
 
 export { resolveProviderPatchProfile } from './resolve-provider-patch-profile'
 
+export { resolveProviderDefaultPatchers } from './resolve-provider-default-patchers'
+
 export type { ProviderCapabilityClass, PatchProfile } from './types'

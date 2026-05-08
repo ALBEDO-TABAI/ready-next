@@ -1,6 +1,13 @@
 import { randomUUID } from 'crypto'
 import type { AIModelConfig } from '../../../shared/ai-providers'
 import { getProviderDef } from '../../../shared/ai-providers'
+import {
+  applyProviderRequestPatch,
+  applyProviderResponsePatch,
+  resolveProviderDefaultPatchers,
+  resolveProviderPatchProfile,
+  type PatchContext,
+} from '../../../shared/ai-providers/index'
 import { getPolicyAnthropicTools, collectToolNames, type ToolPolicy } from '../agent-control/execution-tool-config'
 import { logAgentMetric } from '../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../agent-control/tool-error-metrics'
@@ -95,15 +102,24 @@ export class AnthropicExecutionClient {
     const url = `${params.baseUrl}/v1/messages`
     this.deps.log(`POST ${url}, model=${model}, stream=false (simple)`)
 
+    // Stage S (PR-S4 / W3.5) — extract inline body so the patcher can
+    // mutate it before serialization.
+    const reqBody: Record<string, unknown> = {
+      model,
+      max_tokens: 4096,
+      system: params.session.systemPrompt,
+      messages: this.deps.serializeMessages(params.messagesOverride ?? params.session.messages, 'anthropic'),
+    }
+    const patchCtx = this.buildPatchContext({
+      config: params.config,
+      baseUrl: params.baseUrl,
+      model,
+    })
+    applyProviderRequestPatch(reqBody, patchCtx)
     const resp = await this.deps.fetchWithTimeout(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        model,
-        max_tokens: 4096,
-        system: params.session.systemPrompt,
-        messages: this.deps.serializeMessages(params.messagesOverride ?? params.session.messages, 'anthropic'),
-      }),
+      body: JSON.stringify(reqBody),
       signal: params.signal,
     }, params.signal, 'anthropic simple', params.timeoutMs)
 
@@ -115,6 +131,7 @@ export class AnthropicExecutionClient {
     const json = await parseJsonResponse(resp, { requestUrl: url }) as {
       content?: Array<{ type: string; text?: string }>
     }
+    applyProviderResponsePatch(json, patchCtx)
     return json.content?.filter((block) => block.type === 'text').map((block) => block.text).join('') || ''
   }
 
@@ -167,16 +184,25 @@ export class AnthropicExecutionClient {
 
     const url = `${params.baseUrl}/v1/messages`
     this.deps.log(`POST ${url}, model=${model}, with tools, timeout=${timeoutMs}`)
+    // Stage S (PR-S4 / W3.5) — extract inline body so the patcher can
+    // mutate it before serialization.
+    const reqBody: Record<string, unknown> = {
+      model,
+      max_tokens: 4096,
+      system: params.session.systemPrompt,
+      messages: this.deps.serializeMessages(params.session.messages, 'anthropic'),
+      tools,
+    }
+    const patchCtx = this.buildPatchContext({
+      config: params.config,
+      baseUrl: params.baseUrl,
+      model,
+    })
+    applyProviderRequestPatch(reqBody, patchCtx)
     const resp = await this.deps.fetchWithTimeout(url, {
       method: 'POST',
       headers,
-      body: JSON.stringify({
-        model,
-        max_tokens: 4096,
-        system: params.session.systemPrompt,
-        messages: this.deps.serializeMessages(params.session.messages, 'anthropic'),
-        tools,
-      }),
+      body: JSON.stringify(reqBody),
       signal: params.signal,
     }, params.signal, 'anthropic tools', timeoutMs)
 
@@ -189,6 +215,7 @@ export class AnthropicExecutionClient {
       content?: Array<{ type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }>
       stop_reason?: string
     }
+    applyProviderResponsePatch(json, patchCtx)
     const nativeResponse: AnthropicExecutionResponse = {
       text: json.content?.filter((block) => block.type === 'text').map((block) => block.text).join('') || '',
       toolCalls: (json.content || [])
@@ -242,6 +269,28 @@ export class AnthropicExecutionClient {
       return 'kimi-for-coding'
     }
     return 'claude-haiku-3-5-20241022'
+  }
+
+  /**
+   * Stage S (PR-S4 / W3.5) — Anthropic patch-context builder. Mirrors
+   * the OpenAI-execution-client helper so request/response patchers
+   * see the same shape regardless of wire protocol.
+   */
+  private buildPatchContext(params: {
+    config: AIModelConfig
+    baseUrl: string
+    model: string
+  }): PatchContext {
+    const defaults = resolveProviderDefaultPatchers(params.config.provider)
+    const profile = resolveProviderPatchProfile(params.config, params.baseUrl, params.model)
+    return {
+      config: params.config,
+      baseUrl: params.baseUrl,
+      model: params.model,
+      profile,
+      providerDefaultRequestPatcher: defaults.defaultRequestPatcher,
+      providerDefaultResponsePatcher: defaults.defaultResponsePatcher,
+    }
   }
 
   buildHeaders(config: AIModelConfig, baseUrl: string): Record<string, string> {

@@ -15,10 +15,11 @@
  * Allowed non-provider files (PR-S3+):
  *   - index.ts                          (barrel + re-exports)
  *   - types.ts                          (sub-module local types)
- *   - apply-provider-patch.ts           (request/response patcher entry)
- *   - resolve-provider-patch-profile.ts (profile picker)
- *   - model-capability-resolver.ts      (PR-S5 three-layer merge)
- *   - patch-profiles/*.ts               (excluded via prefix filter)
+ *   - apply-provider-patch.ts             (request/response patcher entry)
+ *   - resolve-provider-patch-profile.ts   (profile picker)
+ *   - resolve-provider-default-patchers.ts (PR-S4 sub-module patcher lookup)
+ *   - model-capability-resolver.ts        (PR-S5 three-layer merge)
+ *   - patch-profiles/*.ts                 (excluded via prefix filter)
  */
 
 'use strict'
@@ -43,6 +44,7 @@ const ALLOWED_EXTRA = [
   'types',
   'apply-provider-patch',
   'resolve-provider-patch-profile',
+  'resolve-provider-default-patchers',
   'model-capability-resolver',
 ]
 
