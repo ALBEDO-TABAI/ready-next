@@ -1,0 +1,15 @@
+{
+  "id": "web-design-guidelines",
+  "name": "web-design-guidelines",
+  "displayName": "Web Design Guidelines",
+  "description": "网页设计调研方法论：sitemap + typography + palette + interaction patterns",
+  "version": "0.1.0",
+  "runtime": "reference",
+  "execution": { "mode": "advisory" },
+  "actions": {
+    "read_skill": {
+      "runtime": "reference",
+      "visibility": "internal"
+    }
+  }
+}

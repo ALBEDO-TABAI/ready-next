@@ -1,0 +1,15 @@
+{
+  "id": "academic-paper-review",
+  "name": "academic-paper-review",
+  "displayName": "Academic Paper Review",
+  "description": "论文审稿方法论：method + experiment + claim + threat-to-validity",
+  "version": "0.1.0",
+  "runtime": "reference",
+  "execution": { "mode": "advisory" },
+  "actions": {
+    "read_skill": {
+      "runtime": "reference",
+      "visibility": "internal"
+    }
+  }
+}

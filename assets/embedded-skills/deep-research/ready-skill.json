@@ -1,0 +1,15 @@
+{
+  "id": "deep-research",
+  "name": "deep-research",
+  "displayName": "Deep Research",
+  "description": "系统化多源研究方法论：维度拆解 + 多查询 + 全文 fetch + 引用追踪",
+  "version": "0.1.0",
+  "runtime": "reference",
+  "execution": { "mode": "advisory" },
+  "actions": {
+    "read_skill": {
+      "runtime": "reference",
+      "visibility": "internal"
+    }
+  }
+}
