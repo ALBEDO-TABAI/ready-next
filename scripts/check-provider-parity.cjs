@@ -14,6 +14,7 @@
  *
  * Allowed non-provider files (PR-S3+):
  *   - index.ts                          (barrel + re-exports)
+ *   - types.ts                          (sub-module local types)
  *   - apply-provider-patch.ts           (request/response patcher entry)
  *   - resolve-provider-patch-profile.ts (profile picker)
  *   - model-capability-resolver.ts      (PR-S5 three-layer merge)
@@ -39,6 +40,7 @@ const PROVIDER_IDS = [
 
 const ALLOWED_EXTRA = [
   'index',
+  'types',
   'apply-provider-patch',
   'resolve-provider-patch-profile',
   'model-capability-resolver',
