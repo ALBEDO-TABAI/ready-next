@@ -7,6 +7,7 @@ import type {
   TaskStep,
   TaskType,
 } from './run-contracts'
+import { isTaskType } from '../../../shared/task-types'
 import { buildRequestEnvelope, type RequestEnvelope } from './request-envelope'
 import { logAgentMetric } from './metrics'
 import { matchesResumeIntent } from './resume-lexicon'
@@ -119,16 +120,7 @@ function cloneBudgetRuntime(runtime: TaskBudgetRuntime | null | undefined): Task
 }
 
 function normalizeTaskType(value: unknown): TaskType {
-  if (
-    value === 'direct_answer'
-    || value === 'short_task'
-    || value === 'multi_step_task'
-    || value === 'media_task'
-    || value === 'continuation'
-  ) {
-    return value
-  }
-  return 'short_task'
+  return isTaskType(value) ? value : 'short_task'
 }
 
 function normalizeInteractionState(value: unknown): TaskInteractionState {

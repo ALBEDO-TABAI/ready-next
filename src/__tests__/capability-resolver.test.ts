@@ -33,6 +33,7 @@ test('capability groups define required reserved and host-only entries', () => {
     'session_recall',
     'pet',
     'channel_feishu',
+    'general_research',
     'system_host',
     'design_reserved',
   ])

@@ -531,6 +531,18 @@ export function installSettingsPreviewMocks(): void {
               hasDynamicSource: false,
               toolCount: 16,
             },
+            general_research: {
+              id: 'general_research',
+              label: '研究工具',
+              description: '网络搜索、网页抓取、产物呈现等系统化研究工具。',
+              exposure: 'model_visible',
+              mode: 'auto',
+              status: 'available',
+              reason: 'enabled',
+              settingsVisible: true,
+              hasDynamicSource: false,
+              toolCount: 0,
+            },
             system_host: {
               id: 'system_host',
               label: '宿主内部',

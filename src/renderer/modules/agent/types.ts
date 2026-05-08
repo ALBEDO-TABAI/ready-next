@@ -109,6 +109,7 @@ export type AgentModuleKind =
   | 'rss'
   | 'calendar'
   | 'feishu'
+  | 'research'
   | 'system'
 export type ModuleExecutionKind = 'deterministic' | 'interactive' | 'job' | 'pipeline'
 export type AgentMemoryLayer = 'l0' | 'l1' | 'l2' | 'recall'

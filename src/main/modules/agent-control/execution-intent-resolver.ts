@@ -233,6 +233,8 @@ export function buildExecutionToolState(params: {
   const allowSkillTools = baseVisibilityPlan.hasTools
     && Array.isArray(params.preferredSkillToolNames)
     && params.preferredSkillToolNames.length > 0
+  const hasResearchIntent = positiveDomains.has('research') && !excludedDomains.has('research')
+  const allowResearchTools = baseVisibilityPlan.hasTools && hasResearchIntent
   const capabilityResolution = resolveCapabilityResolution({
     config: params.config || getDefaultConfig(),
     profile: params.capabilityProfile || 'local_chat',
@@ -249,6 +251,7 @@ export function buildExecutionToolState(params: {
       channel_feishu: allowFeishuTools,
       pet: allowPetTools,
       skills: allowSkillTools,
+      general_research: allowResearchTools,
     },
   })
   const allowBrowserTools = capabilityResolution.visibleCapabilityGroupIds.includes('browser_interaction')

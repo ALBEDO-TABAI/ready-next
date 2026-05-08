@@ -750,6 +750,10 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
       }
     },
   },
+  general_research: {
+    staticToolNames: [],
+    getToolDefinitions: () => [],
+  },
   design_reserved: {
     staticToolNames: [],
     getToolDefinitions: () => [],

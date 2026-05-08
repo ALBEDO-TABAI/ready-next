@@ -1,4 +1,5 @@
 import type { TurnTerminalReason } from './turn-frame'
+import type { TaskType } from '../../../shared/task-types'
 
 export type ChannelAdapterType =
   | 'local-debug'
@@ -196,6 +197,7 @@ export interface ScopeRunTriggerHit {
     | 'rss'
     | 'calendar'
     | 'feishu'
+    | 'research'
     | 'system'
   blocking: boolean
   refs: string[]
@@ -364,7 +366,7 @@ export interface ScopeRunSummary {
   parentStepId?: string | null
   taskTitle?: string | null
   taskSummary?: string | null
-  taskType?: 'direct_answer' | 'short_task' | 'multi_step_task' | 'media_task' | 'continuation'
+  taskType?: TaskType
   interactionState?:
     | 'running'
     | 'awaiting_clarification'
@@ -423,6 +425,7 @@ export interface ScopeRunEventPayload {
     | 'rss'
     | 'calendar'
     | 'feishu'
+    | 'research'
     | 'system'
   intent?: string
   executionKind?: 'deterministic' | 'interactive' | 'job' | 'pipeline'
@@ -458,7 +461,7 @@ export interface ScopeRunEventPayload {
   checkpointExpiresAt?: number
   taskTitle?: string
   taskSummary?: string
-  taskType?: 'direct_answer' | 'short_task' | 'multi_step_task' | 'media_task' | 'continuation'
+  taskType?: TaskType
   interactionState?:
     | 'running'
     | 'awaiting_clarification'

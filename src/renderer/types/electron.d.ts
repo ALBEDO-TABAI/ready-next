@@ -20,6 +20,7 @@ import type {
   RSSUpdateTaskStatusData
 } from '../modules/rss/types'
 import type { ThemeOption, ResolvedTheme } from '../stores/useTheme'
+import type { TaskType } from '../../shared/task-types'
 
 // Type declarations for window.electronAPI exposed by preload
 
@@ -232,6 +233,7 @@ interface ScopeRunTriggerHitData {
     | 'rss'
     | 'calendar'
     | 'feishu'
+    | 'research'
     | 'system'
   blocking: boolean
   refs: string[]
@@ -400,12 +402,7 @@ interface ScopeRunExecutionDiagnosticsData {
   } | null
 }
 
-type TaskTypeData =
-  | 'direct_answer'
-  | 'short_task'
-  | 'multi_step_task'
-  | 'media_task'
-  | 'continuation'
+type TaskTypeData = TaskType
 
 type TaskInteractionStateData =
   | 'running'
@@ -650,6 +647,7 @@ interface ScopeRunEventData {
     | 'rss'
     | 'calendar'
     | 'feishu'
+    | 'research'
     | 'system'
   intent?: string
   executionKind?: 'deterministic' | 'interactive' | 'job' | 'pipeline'
@@ -665,6 +663,7 @@ interface ScopeRunEventData {
       | 'rss'
       | 'calendar'
       | 'feishu'
+      | 'research'
       | 'system'
     kind: string
     label: string

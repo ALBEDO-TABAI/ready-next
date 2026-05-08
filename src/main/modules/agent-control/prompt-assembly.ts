@@ -35,7 +35,7 @@ export interface PromptMemoryRef {
 export interface PromptTriggerHit {
   id: string
   label: string
-  module?: 'browser' | 'document' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'system'
+  module?: 'browser' | 'document' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'research' | 'system'
   blocking: boolean
   refs: string[]
 }
@@ -104,6 +104,7 @@ function normalizeCoordinatorModule(id: string): PromptTriggerHit['module'] | un
     || id === 'calendar'
     || id === 'feishu'
     || id === 'skill'
+    || id === 'research'
     ? id
     : undefined
 }

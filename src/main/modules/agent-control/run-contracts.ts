@@ -101,12 +101,8 @@ export interface TurnTranscriptEvent {
   projectionPatch?: Record<string, unknown> | null
 }
 
-export type TaskType =
-  | 'direct_answer'
-  | 'short_task'
-  | 'multi_step_task'
-  | 'media_task'
-  | 'continuation'
+import type { TaskType } from '../../../shared/task-types'
+export type { TaskType }
 
 export type TaskInteractionState =
   | 'running'
@@ -279,14 +275,14 @@ export interface TaskTypeResolution {
   executionChain: 'direct' | 'tool_loop' | 'planner' | 'domain_executor' | 'continuation'
   degradationReason?: string | null
   requiresPlanner: boolean
-  preferredExecutor?: 'browser' | 'document' | 'skill' | 'rss' | 'calendar' | 'feishu' | 'none'
+  preferredExecutor?: 'browser' | 'document' | 'skill' | 'rss' | 'calendar' | 'feishu' | 'research' | 'none'
 }
 
 export interface TaskExecutionRoute {
   taskId: string
   taskType: TaskType
   chain: TaskTypeResolution['executionChain']
-  executor: 'direct' | 'tool_loop' | 'planner' | 'browser' | 'document' | 'skill' | 'rss' | 'calendar' | 'feishu'
+  executor: 'direct' | 'tool_loop' | 'planner' | 'browser' | 'document' | 'skill' | 'rss' | 'calendar' | 'feishu' | 'research'
   steps: TaskStep[]
   currentStepId?: string | null
   degradationReason?: string | null

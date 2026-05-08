@@ -10,6 +10,7 @@ export type CapabilityGroupId =
   | 'session_recall'
   | 'pet'
   | 'channel_feishu'
+  | 'general_research'
   | 'system_host'
   | 'design_reserved'
 
@@ -155,6 +156,17 @@ export const CAPABILITY_GROUPS: CapabilityGroupDefinition[] = [
     defaultMode: 'auto',
     defaultProfiles: ['local_chat', 'remote_channel'],
     executionKinds: ['deterministic', 'interactive'],
+    settingsVisible: true,
+  },
+  {
+    id: 'general_research',
+    label: '研究工具',
+    description: '网络搜索、网页抓取、产物呈现等系统化研究工具。',
+    exposure: 'model_visible',
+    availability: 'active',
+    defaultMode: 'auto',
+    defaultProfiles: ['local_chat', 'scheduled_run'],
+    executionKinds: ['deterministic'],
     settingsVisible: true,
   },
   {
