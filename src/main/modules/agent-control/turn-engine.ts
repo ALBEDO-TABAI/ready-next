@@ -1372,13 +1372,36 @@ export class TurnEngine {
       const activeWidgetEditLease = host.resolveActiveWidgetEditLease?.() || null
       const registeredSkillTokens = skillContextOrchestrator.listRegisteredSkillTokens?.() || []
       const previousPureUserInputs = host.collectRecentPureUserInputs(session.messages.slice(0, -1), 40)
+      // Stage R W1.6 (Codex round 3 fix) — bare-continue research re-entry must
+      // re-bind ResearchDomainAdapter AND keep general_research capability.
+      // Without this override, prepareInitialRun (line ~2153) computes
+      // capability before continuationProjection (line ~2268) is resolved,
+      // so allowResearchTools=false and prepare narrows tools to []. Force
+      // primaryDomain='research' early when the request carries continuation
+      // state pointing at a research task.
+      const baseIntentClassification = request.intentClassification || classifyIntent(requestEnvelope, {
+        registeredSkillTokens,
+      })
+      const continuationResearchHint = Boolean(
+        request.continuationState
+          && (request.continuationState.taskType === 'research'
+            || request.continuationState.module === 'research'),
+      )
+      const effectiveIntentClassification = (continuationResearchHint && baseIntentClassification.primaryDomain !== 'research')
+        ? {
+            ...baseIntentClassification,
+            primaryDomain: 'research' as const,
+            mentionedDomains: Array.from(new Set([
+              ...(baseIntentClassification.mentionedDomains || []),
+              'research' as const,
+            ])),
+          }
+        : baseIntentClassification
       const executionIntentContext = resolveExecutionIntentContext({
         requestEnvelope,
         previousInputs: previousPureUserInputs,
         lastDocumentContextInput: session.lastDocumentContextInput,
-        intentClassification: request.intentClassification || classifyIntent(requestEnvelope, {
-          registeredSkillTokens,
-        }),
+        intentClassification: effectiveIntentClassification,
         activeWidgetEditLease,
         refreshWidgetEditLease: host.refreshActiveWidgetEditLease
           ? () => host.refreshActiveWidgetEditLease?.() || null
