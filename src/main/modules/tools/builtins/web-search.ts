@@ -99,6 +99,7 @@ function decodeDdgRedirect(rawHref: string): string {
     if (uddg) return decodeURIComponent(uddg)
     return url.href
   } catch {
+    // silent-catch: malformed redirect href → return raw URL unchanged for downstream
     return rawHref
   }
 }
@@ -165,6 +166,7 @@ export async function executeWebSearch(
       // is no better than DDG for the model's purposes.
       tavilyError = new Error('tavily_empty_results')
     } catch (error) {
+      // silent-catch: capture for fallback handoff; metric is logged below before DDG try
       tavilyError = error
     }
     logAgentMetric(WEB_TOOL_FALLBACK_METRICS.WEB_SEARCH_TAVILY_TO_DDG, {
@@ -178,6 +180,7 @@ export async function executeWebSearch(
     if (results.length > 0) return { results }
     ddgError = new Error('ddg_empty_results')
   } catch (error) {
+    // silent-catch: capture for ToolDomainError aggregation thrown immediately below
     ddgError = error
   }
 

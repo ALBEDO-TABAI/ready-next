@@ -31,7 +31,7 @@ export async function generateTaskTitle(
         return trimmed.slice(0, TARGET_MAX_CHARS)
       }
     } catch {
-      // fallthrough to local fallback
+      // silent-catch: title generation is best-effort; fall through to local fallback
     }
   }
   return localFallbackTitle(firstUserMessage)

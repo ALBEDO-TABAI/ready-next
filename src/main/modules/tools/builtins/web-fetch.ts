@@ -144,6 +144,7 @@ export async function executeWebFetch(
   try {
     return await fetchViaJina(args, ctx)
   } catch (error) {
+    // silent-catch: capture for fallback handoff; metric is logged below before Tavily try
     jinaError = error
   }
   logAgentMetric(WEB_TOOL_FALLBACK_METRICS.WEB_FETCH_JINA_TO_TAVILY, {
@@ -154,6 +155,7 @@ export async function executeWebFetch(
   try {
     return await fetchViaTavilyExtract(args, ctx)
   } catch (error) {
+    // silent-catch: capture for ToolDomainError aggregation thrown immediately below
     tavilyError = error
   }
 

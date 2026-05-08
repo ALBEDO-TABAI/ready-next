@@ -763,6 +763,7 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
       try {
         return getGeneralResearchAnthropicTools()
       } catch {
+        // silent-catch: schema build failure → use static fallback so registry still resolves
         return GENERAL_RESEARCH_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'anthropic'))
       }
     },
@@ -770,6 +771,7 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
       try {
         return getGeneralResearchOpenAITools()
       } catch {
+        // silent-catch: schema build failure → use static fallback so registry still resolves
         return GENERAL_RESEARCH_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'openai'))
       }
     },
