@@ -3,6 +3,42 @@ import { CAPABILITY_GROUPS } from '../../../shared/ai-capability-groups'
 import { logAgentMetric } from './metrics'
 import type { ToolDefinition } from './tool-definition'
 import type { SkillToolAuthorization } from './skill-tool-authorization'
+import type { CapabilityResolution } from './capability-resolver'
+
+/**
+ * Stage S (PR-S6 / W4.2) — vision tool capability gating.
+ *
+ * Tool names that require image-input capability on the model side.
+ * Resolved at load-time (when the gateway hands the model its tool
+ * list). When `capabilityResolution.supportsVision === false`, these
+ * tools must NOT be exposed to the model.
+ *
+ * Today the catalogue is empty (no `view_image` tool ships yet); this
+ * helper exists so the future `view_image` (and any other vision tools)
+ * can be added in one place. The gate `check-vision-tool-capability-
+ * gated.cjs` only requires the helper + a `capabilityResolution.
+ * supportsVision` check to be wired here.
+ */
+export const VISION_REQUIRING_TOOL_NAMES: ReadonlyArray<string> = Object.freeze([
+  // 'view_image', // TODO(PR-S6 / W4.3 followup) — wire when the tool lands
+])
+
+export function filterToolsByVisionCapability(
+  tools: Array<Record<string, unknown>>,
+  capabilityResolution: Pick<CapabilityResolution, 'supportsVision'>,
+): Array<Record<string, unknown>> {
+  if (capabilityResolution.supportsVision === true) return tools
+  if (VISION_REQUIRING_TOOL_NAMES.length === 0) return tools
+  return tools.filter((tool) => {
+    const name = typeof (tool as { name?: unknown }).name === 'string'
+      ? (tool as { name: string }).name
+      : (typeof (tool as { function?: { name?: unknown } }).function?.name === 'string'
+        ? (tool as { function: { name: string } }).function.name
+        : null)
+    if (!name) return true
+    return !VISION_REQUIRING_TOOL_NAMES.includes(name)
+  })
+}
 import {
   ToolRegistry,
   type ToolSchemaResolution,

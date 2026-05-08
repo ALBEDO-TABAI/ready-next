@@ -40,7 +40,7 @@ export const capabilityClass: ProviderCapabilityClass = {
   supportsLongContext: false,
 }
 
-export const defaultRequestPatcher = (body: any): any => {
+export const defaultRequestPatcher = (body: any, ctx?: any): any => {
   if (!body || typeof body !== 'object') return body
   if (body.stream_options && typeof body.stream_options === 'object') {
     if (body.stream_options.include_usage === undefined) {
@@ -50,6 +50,53 @@ export const defaultRequestPatcher = (body: any): any => {
     body.stream_options = { include_usage: true }
   }
   if (body.stream_usage === undefined) body.stream_usage = true
+
+  // Stage S (PR-S6 / W4.4) — reasoning_effort routing.
+  //
+  // Provider patcher gates `reasoning_effort` (in either the chat/completions
+  // top-level form or the responses-API `reasoning.effort` nested form) on
+  // the resolved capability `supportsThinking`. When the model does not
+  // support thinking, strip the field from the wire payload — many
+  // OpenAI-compatible relays will 400 on it. When the model does support
+  // thinking, leave the caller-injected value alone (priority contract:
+  // user > runtime resolver > patcher; patcher only fills `undefined`).
+  //
+  // Gate `check-reasoning-effort-routing.cjs` requires:
+  //   (a) literal `reasoning_effort`
+  //   (b) `supportsThinking` reference
+  // both present in at least one provider patcher.
+  //
+  // Resolution avoids importing `../ai-providers` (circular) by reading
+  // the merge layers directly: model.capabilityOverrides → provider
+  // capabilityClass (this module) → conservative `false` default. The
+  // `openai-compatible` provider's `capabilityClass.supportsThinking`
+  // is `false` so by default we strip; users can opt-in per-model via
+  // `capabilityOverrides.supportsThinking = true`.
+  if (ctx && ctx.config) {
+    const cfg = ctx.config as { model?: string; thinkingMode?: 'auto' | 'on' | 'off' }
+    const userMode = cfg.thinkingMode
+    const providerSupportsThinking = capabilityClass.supportsThinking === true
+    // Walk the model overrides to mirror PR-S5's three-layer merge.
+    const modelDef = def.models.find((m) => m.id === cfg.model)
+    const modelOverride = modelDef?.capabilityOverrides?.supportsThinking
+    const supportsThinking = userMode === 'on'
+      ? true
+      : userMode === 'off'
+        ? false
+        : (modelOverride ?? providerSupportsThinking)
+    if (supportsThinking !== true) {
+      if ('reasoning_effort' in body) {
+        delete body.reasoning_effort
+      }
+      if (body.reasoning && typeof body.reasoning === 'object' && 'effort' in body.reasoning) {
+        delete body.reasoning.effort
+        if (Object.keys(body.reasoning).length === 0) {
+          delete body.reasoning
+        }
+      }
+    }
+  }
+
   return body
 }
 

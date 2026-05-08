@@ -244,6 +244,32 @@ function resolveRunCapabilities(
   // post-cutover policy applied later in turn-engine.
   toolPolicy.authorization = baseParams.authorization
 
+  // Stage S (PR-S6 / W4.1) — capability gate enforce in arbitration.
+  //
+  // The three resolved capability flags travel on `capabilityResolution`
+  // (see capability-resolver.ts). Vision-bearing tools must only be
+  // exposed when `capabilityResolution.supportsVision === true`. The
+  // current bundle builder does not yet know which tool names carry
+  // image-input semantics, so this hook records the flag onto the
+  // policy object for downstream consumers (tool-gateway W4.2 +
+  // turn-engine W4.3 + text-bridge synthesizer) to branch on without
+  // re-resolving capabilities. Conservative default: when the flag is
+  // missing/undefined, treat as `false` (deny vision tools).
+  const visionCapable = capabilityResolution.supportsVision === true
+  if (!visionCapable) {
+    // Future: remove `view_image` and other image-input tools from the
+    // bundle here. Today the bundle does not contain such tools, so we
+    // just record the gate decision for observability.
+    try {
+      logAgentMetric('capability_gate_arbitration_denied', {
+        capability: 'vision',
+        supportsVision: capabilityResolution.supportsVision === true,
+      })
+    } catch {
+      // metrics must never break the resolver
+    }
+  }
+
   const toolBundle = getPolicyOpenAIToolBundle(toolPolicy)
 
   return {

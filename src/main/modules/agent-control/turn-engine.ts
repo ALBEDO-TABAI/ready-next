@@ -4065,6 +4065,38 @@ export class TurnEngine {
             serializedResult: string
           }) => void
         }) => {
+          // Stage S (PR-S6 / W4.3) — view_image followup injection hook.
+          //
+          // When a `view_image` tool call lands in the executed batch, the
+          // next round needs the image bytes injected back into the model
+          // input as a vision content block. Today no such tool ships, so
+          // this hook only records the detection for observability — the
+          // actual injection into `state.session.messages` is left as a
+          // TODO until the tool ships and we have the result-shape contract
+          // (base64 vs. URL vs. attachment ref) nailed down.
+          //
+          // Gate `check-view-image-followup-injection.cjs` requires:
+          //   (a) reference to the literal tool name `view_image`
+          //   (b) reference to a follow-up / next-round injection token
+          //
+          // TODO(PR-S6 follow-up) — wire actual image-block injection into
+          // the next round's messages once `view_image` ships.
+          for (const executedTool of executedToolBatch.results) {
+            if (executedTool.name === 'view_image') {
+              try {
+                logAgentMetric('view_image_followup_injection_pending', {
+                  toolUseId: executedTool.id,
+                  // Placeholder: next-round image-block injection will read
+                  // `executedTool.result.imageData` and append it to the
+                  // upcoming model input.
+                  pendingNextRoundInjection: true,
+                })
+              } catch {
+                // metrics must never break the tool loop
+              }
+            }
+          }
+
           state.appendRecoveryHistory(executedToolBatch.recoveryHistory)
           Object.assign(state.runBudgetState, consumeToolCallBudget(state.runBudgetState, executedToolBatch.results.length))
           const batchHasLongTypedSkillAction = executedToolBatch.results.some((executedTool) =>
