@@ -1,5 +1,6 @@
-import { createHash, randomUUID } from 'crypto'
+import { randomUUID } from 'crypto'
 import { buildRequestEnvelope } from './request-envelope'
+import { hashToolCallArgs } from './tool-call-args-hash'
 
 /**
  * skill-resume C1 — pure helper for tool-repetition detection.
@@ -3894,7 +3895,10 @@ export class TurnEngine {
         const recentToolCallsBeforeIteration = [...recentToolCalls]
         const recordRecentToolCallsForIteration = (): void => {
           for (const toolCall of toolCallsForIteration) {
-            const argsHash = createHash('sha1').update(JSON.stringify(toolCall.input ?? null)).digest('hex').slice(0, 16)
+            // Stage R W2.1 — stable args hash via shared helper (sorts object keys
+            // recursively before JSON stringify so semantically-identical args with
+            // different key order compare equal in the repetition ring buffer).
+            const argsHash = hashToolCallArgs(toolCall.input)
             recentToolCalls.push({ name: toolCall.name, argsHash })
             if (recentToolCalls.length > RECENT_TOOL_CALLS_RING_SIZE) recentToolCalls.shift()
           }

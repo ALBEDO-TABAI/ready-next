@@ -75,6 +75,7 @@ import {
   createToolExecutionOutput,
   type ToolExecutionOutput,
 } from './tool-result-types'
+import { ToolNameCollisionError, type ToolNameCollision } from './tool-registry-errors'
 import type {
   SkillRunResult,
   SkillsRuntimeManager,
@@ -978,15 +979,31 @@ export class ToolRegistry implements ToolRegistryReader {
     // Stage 10 (P) Phase B'-1 — execution-lookup path. Uses the unfiltered
     // internal resolver so callers (e.g. `getToolDefinition` for execution
     // dispatch) see ALL tools, never a model-visible filtered subset.
-    const tools = new Map<string, ToolDefinition>()
+    //
+    // Stage R W2.3 — collect across groups and throw on inter-group name
+    // collisions. Same-group repeats (e.g. a dynamic skill action that also
+    // appears in a static fallback list) are still silently deduped, since
+    // those represent the same logical tool. Cross-group clashes always
+    // indicate a registration bug and must fail boot loudly via the boot
+    // assertion in `runtime.ts`.
+    const tools = new Map<string, { def: ToolDefinition; group: CapabilityGroupId }>()
+    const collisions: ToolNameCollision[] = []
     for (const groupId of Object.keys(this.groupProviders) as CapabilityGroupId[]) {
       for (const tool of this.getToolDefinitionsResolutionForGroupForInternalLookup(groupId).definitions) {
-        if (!tools.has(tool.name)) {
-          tools.set(tool.name, tool)
+        const existing = tools.get(tool.name)
+        if (existing) {
+          if (existing.group !== groupId) {
+            collisions.push({ name: tool.name, existingGroup: existing.group, incomingGroup: groupId })
+          }
+          continue
         }
+        tools.set(tool.name, { def: tool, group: groupId })
       }
     }
-    return Array.from(tools.values())
+    if (collisions.length > 0) {
+      throw new ToolNameCollisionError(collisions)
+    }
+    return Array.from(tools.values()).map((entry) => entry.def)
   }
 
   getToolDefinitionsForGroup(

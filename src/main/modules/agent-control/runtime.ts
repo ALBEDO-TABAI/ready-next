@@ -49,6 +49,8 @@ import { listRegisteredSkillChildDrivers } from './skill-child-drivers'
 // registry being primed before any `startSkillChildRun` call.
 import './video-expert-child-driver'
 import { assertStageNChildLoopInvariants } from './stage-n-boot-assertion'
+import { defaultToolRegistry } from './tool-registry'
+import { ToolNameCollisionError } from './tool-registry-errors'
 import { RunProjection } from './run-projection'
 import { syncTaskProjection } from './task-projection-sync'
 import { reconcileTaskProjections } from './task-projection-reconciler'
@@ -434,6 +436,23 @@ export class AgentControlRuntime extends EventEmitter {
       })),
       registeredDriverSkillIds: listRegisteredSkillChildDrivers(),
     })
+
+    // Stage R W2.3 — tool-name uniqueness invariant. Eagerly walk the
+    // full registry so any inter-group name collision (e.g. a static
+    // tool sharing a name with a dynamic skill action in another group)
+    // surfaces here at boot rather than as a wrong-handler dispatch
+    // later. Same-group repeats are deduped silently inside
+    // `listToolDefinitions()`. On violation we log + rethrow so the
+    // global unhandledRejection handler aborts the process, mirroring
+    // the Stage N assertion above.
+    try {
+      defaultToolRegistry.listToolDefinitions()
+    } catch (error) {
+      if (error instanceof ToolNameCollisionError) {
+        console.error('[boot] ToolNameCollisionError detected:', error.collisions)
+      }
+      throw error
+    }
   }
 
   getOrchestrator(): ClaudeSdkOrchestrator {
