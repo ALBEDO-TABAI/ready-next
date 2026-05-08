@@ -24,4 +24,9 @@ export { resolveProviderPatchProfile } from './resolve-provider-patch-profile'
 
 export { resolveProviderDefaultPatchers } from './resolve-provider-default-patchers'
 
+export {
+  resolveModelCapabilities,
+} from './model-capability-resolver'
+export type { ResolvedModelCapabilities } from './model-capability-resolver'
+
 export type { ProviderCapabilityClass, PatchProfile } from './types'

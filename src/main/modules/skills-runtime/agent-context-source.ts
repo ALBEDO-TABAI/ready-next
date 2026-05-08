@@ -22,7 +22,12 @@
  */
 
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
-import { resolveAIConfigCapabilities, type AIModelConfig } from '../../../shared/ai-providers'
+import {
+  getProviderDef,
+  resolveAIConfigCapabilities,
+  type AIModelConfig,
+} from '../../../shared/ai-providers'
+import { resolveModelCapabilities } from '../../../shared/ai-providers/model-capability-resolver'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 
 export interface AgentContextSourceOptions {
@@ -89,9 +94,22 @@ function isKnownTextOnlyModel(provider: string, model: string): boolean {
   if (m.includes('codex')) return true
   if (m.includes('kimi-for-coding')) return true
   if (m.startsWith('moonshot-v1')) return true
-  if (m === 'o3-mini') return true
   if (m.startsWith('doubao-')) return true
   if (m.startsWith('seedream-') || m.startsWith('seedance-')) return true
+  // Stage S (PR-S7 / W4.5): per-model capability table replaces zero-off
+  // literal special cases (legacy `m === '<text-only-id>'` branches). Any
+  // built-in model with `capabilityOverrides.supportsVision === false` is
+  // treated as text-only here; provider-class fallthrough is intentionally
+  // not consulted because the broad provider-level `p === '<id>'` clauses
+  // above already cover that layer.
+  const providerDef = getProviderDef(provider)
+  if (providerDef) {
+    const caps = resolveModelCapabilities(providerDef, model)
+    const modelDef = providerDef.models.find((entry) => entry.id === model)
+    if (modelDef?.capabilityOverrides?.supportsVision === false && caps.supportsVision === false) {
+      return true
+    }
+  }
   return false
 }
 
