@@ -21,6 +21,11 @@ import type {
 } from './tool-definition'
 import { getCalendarAnthropicTools, getCalendarOpenAITools } from '../tools/calendar-tools'
 import {
+  GENERAL_RESEARCH_TOOL_NAMES,
+  getGeneralResearchAnthropicTools,
+  getGeneralResearchOpenAITools,
+} from '../tools/general-research-tool-defs'
+import {
   BROWSER_CONTENT_TASK_TOOL_NAMES,
   BROWSER_INTERACTION_TOOL_NAMES,
   getBrowserAnthropicTools,
@@ -751,8 +756,22 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
     },
   },
   general_research: {
-    staticToolNames: [],
-    getToolDefinitions: () => [],
+    staticToolNames: GENERAL_RESEARCH_TOOL_NAMES,
+    getToolDefinitions: () => buildToolDefinitions('general_research', GENERAL_RESEARCH_TOOL_NAMES),
+    getAnthropicTools: () => {
+      try {
+        return getGeneralResearchAnthropicTools()
+      } catch {
+        return GENERAL_RESEARCH_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'anthropic'))
+      }
+    },
+    getOpenAITools: () => {
+      try {
+        return getGeneralResearchOpenAITools()
+      } catch {
+        return GENERAL_RESEARCH_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'openai'))
+      }
+    },
   },
   design_reserved: {
     staticToolNames: [],

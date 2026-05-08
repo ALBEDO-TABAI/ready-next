@@ -56,7 +56,7 @@ export interface ParallelToolGroup {
 }
 
 export interface ToolResourceTag {
-  domain: 'browser' | 'document' | 'file' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'memory' | 'session' | 'pet' | 'system'
+  domain: 'browser' | 'document' | 'file' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'memory' | 'session' | 'pet' | 'system' | 'general_research'
   accessMode: 'read' | 'write' | 'interactive'
 }
 
@@ -180,6 +180,12 @@ export function getToolResourceTag(toolName: string): ToolResourceTag {
     }
     return { domain: 'skill', accessMode: 'interactive' }
   }
+  // Stage R W1.1/W1.2/W6.4 — `general_research` group tools. Read-safe HTTP
+  // calls (`web_search` / `web_fetch`) join parallel groups; `present_file`
+  // is interactive (renderer IPC) so it serializes.
+  if (normalized === 'web_search') return { domain: 'general_research', accessMode: 'read' }
+  if (normalized === 'web_fetch') return { domain: 'general_research', accessMode: 'read' }
+  if (normalized === 'present_file') return { domain: 'general_research', accessMode: 'interactive' }
   return { domain: 'system', accessMode: 'interactive' }
 }
 

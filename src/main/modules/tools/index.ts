@@ -53,6 +53,7 @@ export { executeDocumentTool }
 export { executeRSSTool }
 export { executeCalendarTool }
 export { executeSystemTool }
+export { executeGeneralResearchTool } from './general-research-tools'
 export { executeToolCall } from './tool-executor'
 export type { ToolContext } from './tool-executor'
 export type {

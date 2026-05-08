@@ -36,6 +36,7 @@ import {
 import { executeBrowserTool } from './browser-tools'
 import { executeCalendarTool } from './calendar-tools'
 import { executeDocumentTool } from './document-tools'
+import { executeGeneralResearchTool } from './general-research-tools'
 import { executeRSSTool } from './rss-tools'
 import { executeSkillTool, findSkillToolByNameForExecution } from './skills-tools'
 import { executeSystemTool } from './system-tools'
@@ -43,6 +44,7 @@ import { executeFeishuTool } from './feishu-tools'
 import { executeMemoryTool } from './memory-tools'
 import { executePetTool } from './pet-tools'
 import { executeSessionRecallTool } from './session-recall-tools'
+import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
 import {
   ToolDomainError,
   errorKindFor,
@@ -329,6 +331,21 @@ export async function executeToolCall(
 
         case 'pet':
           return executePetTool(toolName, args)
+
+        case 'general_research': {
+          // Stage R W1.1/W1.2/W6.4 — `outputsRoot` is the single sandbox
+          // root for `present_file`. Derived from the skills runtime so we
+          // do not leak SkillsRuntimeManager handles into ToolContext;
+          // child-runner / model invokers all converge here.
+          const runtimeInfo = getSkillsRuntimeManager().getRuntimeInfo()
+          return executeGeneralResearchTool(toolName, args as Record<string, unknown>, {
+            abortSignal: context.abortSignal,
+            sessionId: context.sessionId,
+            outputsRoot: runtimeInfo.outputsRoot,
+            requestModuleToolAction: context.requestModuleToolAction,
+            scope: context.scope,
+          })
+        }
 
         default:
           return `Unknown tool: ${toolName}`
