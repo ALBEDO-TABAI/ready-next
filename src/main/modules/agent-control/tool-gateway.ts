@@ -20,7 +20,12 @@ import type { CapabilityResolution } from './capability-resolver'
  * supportsVision` check to be wired here.
  */
 export const VISION_REQUIRING_TOOL_NAMES: ReadonlyArray<string> = Object.freeze([
-  // 'view_image', // TODO(PR-S6 / W4.3 followup) — wire when the tool lands
+  // The `view_image` tool is the canonical vision-bearing tool name. It
+  // does not yet ship as a registered tool; listing it here pre-arms the
+  // allowlist so the gateway is ready the moment the handler lands. The
+  // filter is a no-op for non-vision models even with this entry, since
+  // `view_image` won't appear in the input `tools` array until then.
+  'view_image',
 ])
 
 export function filterToolsByVisionCapability(
@@ -39,6 +44,33 @@ export function filterToolsByVisionCapability(
     return !VISION_REQUIRING_TOOL_NAMES.includes(name)
   })
 }
+
+/**
+ * Stage S (PR-S12 / W11.1 followup) — manifest `allowed_tools` runtime
+ * filter. When a skill manifest declares `allowed_tools: string[]`, the
+ * compiler attaches the normalised array onto `SkillDefinition.allowedTools`
+ * (see `skill-compiler.validateAllowedTools`). This helper applies that
+ * allowlist at the gateway boundary so future integration into
+ * `getToolDefinitionsForGroup`'s skills branch is a single call site.
+ *
+ * Contract:
+ *   - `null` / `undefined` / empty array → identity (no filtering)
+ *   - otherwise → tools whose `name` (or `function.name`) is in the set
+ *   - tools without a resolvable name pass through (defensive)
+ */
+export function filterToolsByAllowedTools<T extends { name?: string; function?: { name?: string } }>(
+  tools: ReadonlyArray<T>,
+  allowedTools: ReadonlyArray<string> | null | undefined,
+): T[] {
+  if (!allowedTools || allowedTools.length === 0) return tools.slice()
+  const allowed = new Set(allowedTools)
+  return tools.filter((tool) => {
+    const name = (typeof tool.name === 'string' && tool.name)
+      || (tool.function && typeof tool.function.name === 'string' ? tool.function.name : null)
+    return name ? allowed.has(name) : true
+  })
+}
+
 import {
   ToolRegistry,
   type ToolSchemaResolution,

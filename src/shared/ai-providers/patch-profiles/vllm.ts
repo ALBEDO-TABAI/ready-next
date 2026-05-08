@@ -2,7 +2,8 @@
  * Stage S (PR-S4 / W3.5) — vLLM patch profile.
  *
  * Match contract (defensive — rejects all official providers):
- *   - if `config.id` is `'openai' | 'anthropic' | 'gemini'` → never match
+ *   - if `config.provider` is `'openai' | 'anthropic' | 'gemini'` → never match
+ *     (the runtime `AIModelConfig` field is `provider`, not `id`)
  *   - baseUrl must end with `/v1` or `/v1/`
  *   - model must `startsWith('vllm/')` OR match
  *     `/llm-|qwen-|baichuan-|chatglm-|deepseek-r1/i`
@@ -28,9 +29,11 @@ export const matchPredicate = (
   model: string,
 ): boolean => {
   // Defensive: explicit official-provider exclusion comes first.
+  // NB: AIModelConfig's runtime field is `provider`, not `id`; we read both
+  // to stay defensive against shape drift from older callers.
   if (config && typeof config === 'object') {
-    const id = (config as any).id
-    if (id === 'openai' || id === 'anthropic' || id === 'gemini') return false
+    const provider = (config as any).provider ?? (config as any).id
+    if (provider === 'openai' || provider === 'anthropic' || provider === 'gemini') return false
   }
   if (!baseUrl || typeof model !== 'string' || model.length === 0) return false
   if (!/\/v1\/?$/.test(baseUrl)) return false

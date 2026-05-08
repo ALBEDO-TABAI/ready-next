@@ -122,6 +122,27 @@
         "baseUrl": "https://my-vllm.example.com",
         "model": "qwen-2.5-32b-instruct",
         "expectsMatch": false
+      },
+      {
+        "name": "no_match_official_openai_by_provider_field",
+        "config": { "provider": "openai" },
+        "baseUrl": "https://my-vllm.example.com/v1",
+        "model": "qwen-2.5-32b-instruct",
+        "expectsMatch": false
+      },
+      {
+        "name": "no_match_official_anthropic_by_provider_field",
+        "config": { "provider": "anthropic" },
+        "baseUrl": "https://my-vllm.example.com/v1",
+        "model": "qwen-2.5-32b-instruct",
+        "expectsMatch": false
+      },
+      {
+        "name": "no_match_official_gemini_by_provider_field",
+        "config": { "provider": "gemini" },
+        "baseUrl": "https://my-vllm.example.com/v1",
+        "model": "qwen-2.5-32b-instruct",
+        "expectsMatch": false
       }
     ]
   }

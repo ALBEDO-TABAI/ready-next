@@ -206,6 +206,7 @@ export class AnthropicExecutionClient {
       model,
     })
     applyProviderRequestPatch(reqBody, patchCtx)
+    // TODO(stage-s-followup): wrap with withRetryBackoff
     const resp = await this.deps.fetchWithTimeout(url, {
       method: 'POST',
       headers,

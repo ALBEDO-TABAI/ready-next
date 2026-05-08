@@ -127,6 +127,7 @@ export class OpenAIExecutionClient {
       // before serialization (priority enforced inside helper).
       const patchCtx = this.buildPatchContext({ config: params.config, baseUrl: params.baseUrl, model })
       applyProviderRequestPatch(reqBody, patchCtx)
+      // TODO(stage-s-followup): wrap with withRetryBackoff
       const resp = await this.deps.fetchWithTimeout(url, {
         method: 'POST',
         headers,
@@ -224,6 +225,7 @@ export class OpenAIExecutionClient {
       // Stage S (PR-S4 / W3.5) — provider-default + profile patcher.
       const patchCtx = this.buildPatchContext({ config: params.config, baseUrl: params.baseUrl, model })
       applyProviderRequestPatch(reqBody, patchCtx)
+      // TODO(stage-s-followup): wrap with withRetryBackoff
       const resp = await this.deps.fetchWithTimeout(url, {
         method: 'POST',
         headers,
@@ -257,6 +259,7 @@ export class OpenAIExecutionClient {
     const reqBody: Record<string, unknown> = { model, messages }
     const patchCtx = this.buildPatchContext({ config: params.config, baseUrl: params.baseUrl, model })
     applyProviderRequestPatch(reqBody, patchCtx)
+    // TODO(stage-s-followup): wrap with withRetryBackoff
     const resp = await this.deps.fetchWithTimeout(url, {
       method: 'POST',
       headers,
@@ -671,6 +674,7 @@ export class OpenAIExecutionClient {
       model: params.model,
     })
     applyProviderRequestPatch(reqBody, patchCtx)
+    // TODO(stage-s-followup): wrap with withRetryBackoff
     const resp = await this.deps.fetchWithTimeout(url, {
       method: 'POST',
       headers: params.headers,
@@ -728,6 +732,7 @@ export class OpenAIExecutionClient {
       model: params.model,
     })
     applyProviderRequestPatch(reqBody, patchCtx)
+    // TODO(stage-s-followup): wrap with withRetryBackoff
     const resp = await this.deps.fetchWithTimeout(url, {
       method: 'POST',
       headers: params.headers,
