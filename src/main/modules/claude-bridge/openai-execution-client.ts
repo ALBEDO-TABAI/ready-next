@@ -17,6 +17,7 @@ import { resolveOpenAIProviderRuntime } from '../agent-control/provider-runtime-
 import type { ToolSnapshot, TurnToolCallParseError } from '../agent-control/run-contracts'
 import type { ExecutionFallbackInfo } from './execution-fallback-policy'
 import { annotateFallbackResult, resolveFallbackPlan } from './execution-fallback-policy'
+import { withRetryBackoff } from './llm-resilience'
 import { sanitizeOpenAICompatibleMessageHistory } from './openai-history-sanitization'
 import { resolveRegisteredToolNamesLazily } from './tool-registry-bridge'
 import { extractOpenAIMessageText } from './openai-message-text'
@@ -161,17 +162,23 @@ export class OpenAIExecutionClient {
     // Stage S (PR-S4 / W3.5) — provider-default + profile patcher.
     const patchCtx = this.buildPatchContext({ config: params.config, baseUrl: params.baseUrl, model })
     applyProviderRequestPatch(reqBody, patchCtx)
-    const resp = await this.deps.fetchWithTimeout(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(reqBody),
-      signal: params.signal,
-    }, params.signal, 'openai simple', params.timeoutMs)
-
-    if (!resp.ok) {
-      const errBody = await resp.text().catch(() => '')
-      throw new Error(`HTTP ${resp.status}: ${errBody.slice(0, 300)}`)
-    }
+    // Stage S W8.2 — wrap fetch in withRetryBackoff so transient 408/409/425/429/5xx
+    // and "server busy" responses are retried with exponential backoff before bubbling.
+    const resp = await withRetryBackoff(async () => {
+      const r = await this.deps.fetchWithTimeout(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(reqBody),
+        signal: params.signal,
+      }, params.signal, 'openai simple', params.timeoutMs)
+      if (!r.ok) {
+        const errBody = await r.text().catch(() => '')
+        const err = new Error(`HTTP ${r.status}: ${errBody.slice(0, 300)}`) as Error & { status?: number }
+        err.status = r.status
+        throw err
+      }
+      return r
+    })
 
     const json = await parseJsonResponse(resp, { requestUrl: url }) as {
       choices?: Array<{ message?: { content?: string } }>
