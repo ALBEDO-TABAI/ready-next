@@ -142,7 +142,6 @@ function createHost(overrides?: Record<string, unknown>) {
     sessionHasVideoInputs: () => false,
     domainAdapters: [] as DomainAdapter[],
     skillContextOrchestrator: {
-      hasActiveSkillExecution: () => false,
       shouldKeepToolsWithVideo: () => false,
       findExplicitlyRequestedSkills: () => [],
       buildPreferredSkillToolNames: () => null,
@@ -634,7 +633,6 @@ test('TurnEngine self-awaits a same-turn launched child before asking the model 
           shouldKeepToolsWithVideo: () => true,
           findExplicitlyRequestedSkills: (text: string) =>
             /video[-_\s]?expert|Video Expert Analyzer/i.test(text) ? [veaSkill] : [],
-          hasActiveSkillExecution: () => false,
           getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'Video Expert Analyzer (VNext)' }),
           rememberExplicitReferenceSkillHint: () => {
             rememberLastReferenceSkill('scope-test', { id: 'video-expert-analyzer', name: 'Video Expert Analyzer (VNext)' })
@@ -1235,7 +1233,6 @@ test('TurnEngine does not carry stale skill context into unrelated browser turns
       skillContextOrchestrator: {
         shouldKeepToolsWithVideo: () => false,
         findExplicitlyRequestedSkills: () => [],
-        hasActiveSkillExecution: () => false,
         getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'Video Expert Analyzer (VNext)' }),
         rememberExplicitReferenceSkillHint: () => false,
         buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline', 'skill_video_expert_ai_analyze'],
@@ -2134,7 +2131,6 @@ test('TurnEngine treats retry-only armed long skill resumes as tool-loop runs wi
         skillContextOrchestrator: {
           shouldKeepToolsWithVideo: () => false,
           findExplicitlyRequestedSkills: () => [],
-          hasActiveSkillExecution: () => false,
           getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
           rememberExplicitReferenceSkillHint: () => true,
           buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline', 'skill_video_expert_ai_analyze'],
@@ -2252,7 +2248,6 @@ test('TurnEngine arms VEA continuation from an explicit run_state resource witho
             /video[-_\s]?expert|Video Expert Analyzer/i.test(text)
               ? [{ id: 'video-expert-analyzer', name: 'Video Expert Analyzer (VNext)' }]
               : [],
-          hasActiveSkillExecution: () => false,
           getCurrentReferenceSkillHint: () => armedHint,
           rememberReferenceSkillFromRunStateResource: (skillId: string) => {
             if (skillId !== 'video-expert-analyzer') return { armed: false }
@@ -2370,7 +2365,6 @@ test('TurnEngine arms VEA continuation when the active document is run_state.jso
         skillContextOrchestrator: {
           shouldKeepToolsWithVideo: () => false,
           findExplicitlyRequestedSkills: () => [],
-          hasActiveSkillExecution: () => false,
           getCurrentReferenceSkillHint: () => armedHint,
           rememberReferenceSkillFromRunStateResource: (skillId: string) => {
             if (skillId !== 'video-expert-analyzer') return { armed: false }
@@ -2468,7 +2462,6 @@ test('TurnEngine arms VEA continuation from prior run_state path when user says 
         skillContextOrchestrator: {
           shouldKeepToolsWithVideo: () => false,
           findExplicitlyRequestedSkills: () => [],
-          hasActiveSkillExecution: () => false,
           getCurrentReferenceSkillHint: () => armedHint,
           rememberReferenceSkillFromRunStateResource: (skillId: string) => {
             if (skillId !== 'video-expert-analyzer') return { armed: false }
@@ -2592,7 +2585,6 @@ test('TurnEngine treats an explicit skill URL request as a fresh start instead o
             /video[-_\s]?expert|Video Expert Analyzer/i.test(text)
               ? [veaSkill]
               : [],
-          hasActiveSkillExecution: () => false,
           getCurrentReferenceSkillHint: () => armedHint,
           rememberExplicitReferenceSkillHint: () => {
             armedHint = { id: 'video-expert-analyzer', name: 'Video Expert Analyzer (VNext)' }
@@ -2640,6 +2632,127 @@ test('TurnEngine treats an explicit skill URL request as a fresh start instead o
     restoreAiAnalyzeToolDefinition()
     __setMetricSinkForTests(null)
     _resetLastReferenceSkillHintsForTests()
+  }
+})
+
+test('TurnEngine treats restart-same-goal text as a skill start instead of resuming live supervisor context', async () => {
+  const engine = new TurnEngine()
+  const metrics: AgentMetricEvent[] = []
+  let toolLoopRequests = 0
+  let resumeCalls = 0
+  let capturedAllowedToolNames: string[] = []
+  const humanizerSkill = {
+    id: 'humanizer-zh',
+    name: 'Humanizer',
+    actions: [
+      {
+        name: 'humanize',
+        visibility: 'internal',
+        params: [{ name: 'input', required: true }],
+      },
+    ],
+    hostRequirements: {
+      expose_when_hint_armed: ['humanize'],
+    },
+  }
+
+  __setMetricSinkForTests((event) => metrics.push(event))
+  const restoreToolDefinition = installLongSkillToolDefinitionForTest('skill_humanizer_zh_humanize')
+  try {
+    const { request } = createRequest({
+      userText: '从头来过，再跑一遍这次任务',
+      intentClassification: createIntent({ primaryDomain: 'document', confidence: 'medium' }),
+      host: {
+        providerContext: {
+          config: {
+            provider: 'openai',
+            model: 'gpt-test',
+            apiKey: 'test',
+            baseUrl: 'https://api.openai.com/v1',
+          },
+          baseUrl: 'https://api.openai.com/v1',
+          provider: undefined,
+          isKimi: false,
+          isKimiCoding: false,
+          useAnthropicProtocol: false,
+          supportsToolCalls: true,
+          supportsVideoBlock: true,
+          hasRawVideoInIncoming: false,
+        },
+        skillTaskSupervisor: {
+          inspectLatestSkillTask: () => makeSkillSnapshot({
+            skillId: 'humanizer-zh',
+            action: 'humanize',
+            taskRunId: 'str-humanizer',
+            detachedTaskId: null,
+            outputDir: null,
+            runStatePath: null,
+            sceneScoresPath: null,
+            deliveryReportPath: null,
+            resumePayload: null,
+            hasLiveWork: true,
+            hasRecentProgress: false,
+          }),
+        },
+        resumeSkillChildRun: async () => {
+          resumeCalls += 1
+          throw new Error('restart-same-goal must not resume the old child')
+        },
+        skillContextOrchestrator: {
+          shouldKeepToolsWithVideo: () => false,
+          findExplicitlyRequestedSkills: (text: string) =>
+            /humanizer[-_\s]?zh|Humanizer/i.test(text)
+              ? [humanizerSkill]
+              : [],
+          getCurrentReferenceSkillHint: () => null,
+          rememberExplicitReferenceSkillHint: () => false,
+          buildPreferredSkillToolNames: (text: string) =>
+            /humanizer|Humanizer/i.test(text)
+              ? ['skill_humanizer_zh_humanize']
+              : [],
+          maybeInjectExplicitSkillContext: async () => {},
+          listRegisteredSkillTokens: () => ['humanizer-zh', 'Humanizer'],
+        },
+        requestToolLoopResponse: async (params: { allowedToolNames?: string[] }) => {
+          toolLoopRequests += 1
+          capturedAllowedToolNames = params.allowedToolNames || []
+          return {
+            text: '准备从头重新执行',
+            toolCalls: [],
+            stopReason: 'stop',
+          }
+        },
+      },
+    })
+
+    const result = await engine.execute(request)
+
+    assert.equal(resumeCalls, 0)
+    assert.equal(toolLoopRequests, 1)
+    assert.notEqual(result.taskType, 'continuation')
+    assert.notEqual(result.terminalReason, 'checkpoint_background')
+    // Stage Q (Stage 11) — skill identity is preserved across restart
+    // (the `skill_history` source path still fires for relation='new'),
+    // so `skill_humanizer_zh_humanize` is still in `allowedToolNames`.
+    // The Q.5 fix targets LIVENESS, not tool exposure: stale supervisor
+    // status / liveness no longer leaks into `frame.liveness` for
+    // userIntent='start' (see `restart-frame-no-stale-liveness.test.ts`).
+    assert.ok(capturedAllowedToolNames.includes('skill_humanizer_zh_humanize'))
+    assert.ok(metrics.some((event) =>
+      event.metric === 'turn_frame_resolved'
+      && event.mode === 'skill_start'
+      && event.skillId === 'humanizer-zh'
+      && event.hasRunState === false
+      && event.hasOutputDir === false,
+    ))
+    assert.ok(!metrics.some((event) =>
+      event.metric === 'turn_frame_resolved'
+      && event.mode === 'skill_resume'
+      && event.skillId === 'humanizer-zh',
+    ))
+  } finally {
+    restoreToolDefinition()
+    __setMetricSinkForTests(null)
   }
 })
 
@@ -2706,7 +2819,6 @@ test('TurnEngine lets an explicit advisory skill override stale supervisor and c
             /video[-_\s]?copy|Video Copy Analyzer/i.test(text)
               ? [videoCopySkill]
               : [],
-          hasActiveSkillExecution: () => false,
           getCurrentReferenceSkillHint: () => armedHint,
           rememberExplicitReferenceSkillHint: () => {
             armedHint = { id: 'video-copy-analyzer', name: 'Video Copy Analyzer' }
@@ -2824,7 +2936,6 @@ test('TurnEngine does not infer VEA from a fresh URL just because VEA is active 
             /video-expert-analyzer|Video Expert Analyzer/i.test(text)
               ? [veaSkill]
               : [],
-          hasActiveSkillExecution: () => false,
           getCurrentReferenceSkillHint: () => armedHint,
           rememberExplicitReferenceSkillHint: (text: string) => {
             if (!/video-expert-analyzer|Video Expert Analyzer/i.test(text)) return false
@@ -2903,7 +3014,6 @@ test('TurnEngine refreshes skill tool policy after run_state patch changes VEA s
         skillContextOrchestrator: {
           shouldKeepToolsWithVideo: () => false,
           findExplicitlyRequestedSkills: () => [],
-          hasActiveSkillExecution: () => false,
           getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
           rememberExplicitReferenceSkillHint: () => true,
           buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline'],
@@ -3096,7 +3206,6 @@ test('TurnEngine routes active skill progress-followup turns through the skill l
         skillContextOrchestrator: {
           shouldKeepToolsWithVideo: () => false,
           findExplicitlyRequestedSkills: () => [],
-          hasActiveSkillExecution: () => false,
           getCurrentReferenceSkillHint: () => null,
           rememberExplicitReferenceSkillHint: () => false,
           buildPreferredSkillToolNames: () => [],
@@ -3235,7 +3344,6 @@ test('RunCoordinator drives TurnEngine budget lifecycle through scope event and 
         skillContextOrchestrator: {
           shouldKeepToolsWithVideo: () => false,
           findExplicitlyRequestedSkills: () => [{ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }],
-          hasActiveSkillExecution: () => false,
           getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
           rememberExplicitReferenceSkillHint: () => true,
           buildPreferredSkillToolNames: () => ['skill_get_state'],
@@ -3352,7 +3460,6 @@ test('TurnEngine emits a typed skill action duration metric from tool hooks', as
         skillContextOrchestrator: {
           shouldKeepToolsWithVideo: () => false,
           findExplicitlyRequestedSkills: () => [],
-          hasActiveSkillExecution: () => false,
           getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
           rememberExplicitReferenceSkillHint: () => true,
           buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline'],
@@ -3463,7 +3570,6 @@ test('TurnEngine emits a generic running projection as soon as a long skill acti
         skillContextOrchestrator: {
           shouldKeepToolsWithVideo: () => false,
           findExplicitlyRequestedSkills: () => [],
-          hasActiveSkillExecution: () => false,
           getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
           rememberExplicitReferenceSkillHint: () => true,
           buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline'],
@@ -3548,7 +3654,6 @@ test('TurnEngine gives long typed skill results enough follow-up budget to summa
         skillContextOrchestrator: {
           shouldKeepToolsWithVideo: () => false,
           findExplicitlyRequestedSkills: () => [],
-          hasActiveSkillExecution: () => false,
           getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
           rememberExplicitReferenceSkillHint: () => true,
           buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline'],
@@ -3696,7 +3801,6 @@ test('TurnEngine emits budget warning and exhaustion metrics with skill context 
         skillContextOrchestrator: {
           shouldKeepToolsWithVideo: () => false,
           findExplicitlyRequestedSkills: () => [],
-          hasActiveSkillExecution: () => false,
           getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
           rememberExplicitReferenceSkillHint: () => true,
           buildPreferredSkillToolNames: () => ['skill_run_shell'],
@@ -3776,7 +3880,6 @@ test('TurnEngine keeps a live skill task as checkpoint when tool budget is exhau
       skillContextOrchestrator: {
         shouldKeepToolsWithVideo: () => false,
         findExplicitlyRequestedSkills: () => [],
-        hasActiveSkillExecution: () => false,
         getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
         rememberExplicitReferenceSkillHint: () => true,
         buildPreferredSkillToolNames: () => ['skill_run_shell'],
@@ -3880,7 +3983,6 @@ test('TurnEngine routes failed close-allowed skill snapshots to lifecycle error 
         skillContextOrchestrator: {
           shouldKeepToolsWithVideo: () => false,
           findExplicitlyRequestedSkills: () => [],
-          hasActiveSkillExecution: () => false,
           getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
           rememberExplicitReferenceSkillHint: () => true,
           buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline'],
@@ -3964,7 +4066,6 @@ test('TurnEngine creates a skill lease from a recoverable supervisor snapshot ev
         skillContextOrchestrator: {
           shouldKeepToolsWithVideo: () => false,
           findExplicitlyRequestedSkills: () => [],
-          hasActiveSkillExecution: () => false,
           getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
           rememberExplicitReferenceSkillHint: () => true,
           buildPreferredSkillToolNames: () => ['skill_get_state'],
@@ -4065,7 +4166,6 @@ test('TurnEngine binds config repair turns to the blocked supervisor skill befor
           shouldKeepToolsWithVideo: () => false,
           findExplicitlyRequestedSkills: (text: string) =>
             text.includes('video-expert-analyzer') ? [veaSkill] : [],
-          hasActiveSkillExecution: () => false,
           getCurrentReferenceSkillHint: () => ({ id: 'novel-writer-system', name: 'novel_writer_system' }),
           rememberExplicitReferenceSkillHint: (text: string) => {
             if (!text.includes('video-expert-analyzer')) return false
@@ -4211,7 +4311,6 @@ test('TurnEngine proves executeToolBatch budgetLimited through real run_state su
         skillContextOrchestrator: {
           shouldKeepToolsWithVideo: () => false,
           findExplicitlyRequestedSkills: () => [],
-          hasActiveSkillExecution: () => false,
           getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
           rememberExplicitReferenceSkillHint: () => true,
           buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline'],
@@ -4284,7 +4383,6 @@ test('TurnEngine evaluates skill budget leases two iterations before lease end',
         skillContextOrchestrator: {
           shouldKeepToolsWithVideo: () => false,
           findExplicitlyRequestedSkills: () => [],
-          hasActiveSkillExecution: () => false,
           getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
           rememberExplicitReferenceSkillHint: () => true,
           buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline'],
@@ -4371,7 +4469,6 @@ test('TurnEngine renews a progressing long skill lease and closes only when supe
         skillContextOrchestrator: {
           shouldKeepToolsWithVideo: () => false,
           findExplicitlyRequestedSkills: () => [],
-          hasActiveSkillExecution: () => false,
           getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
           rememberExplicitReferenceSkillHint: () => true,
           buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline'],
@@ -4479,7 +4576,6 @@ test('TurnEngine pauses a stalled long skill lease before the hard cap', async (
         skillContextOrchestrator: {
           shouldKeepToolsWithVideo: () => false,
           findExplicitlyRequestedSkills: () => [],
-          hasActiveSkillExecution: () => false,
           getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
           rememberExplicitReferenceSkillHint: () => true,
           buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline'],
@@ -4581,7 +4677,6 @@ test('TurnEngine keeps skill budget exhaustion as checkpoint when supervisor thr
       skillContextOrchestrator: {
         shouldKeepToolsWithVideo: () => false,
         findExplicitlyRequestedSkills: () => [],
-        hasActiveSkillExecution: () => false,
         getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
         rememberExplicitReferenceSkillHint: () => true,
         buildPreferredSkillToolNames: () => ['skill_run_shell'],

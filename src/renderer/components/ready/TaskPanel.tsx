@@ -348,6 +348,10 @@ export default function TaskPanel() {
       interactionState: activeProjection.interactionState,
       degradationReason: activeProjection.degradationReason,
       blockedReason: activeProjection.blockedReason,
+      // Stage Q (Stage 11) — propagate main-derived canResume so
+      // `deriveTaskCardRuntimeState` correctly gates continue/retry
+      // actions through the same single-source truth.
+      canResume: activeProjection.canResume,
       updatedAt: activeProjection.updatedAt,
     })
   }, [activeProjection])
@@ -364,6 +368,11 @@ export default function TaskPanel() {
 
   const handleResumeProjection = useCallback(async () => {
     if (!activeProjection?.scopeId) return
+    // Stage Q (Stage 11) — gate resume by canResume. Even if a stale
+    // projection has resumableActions=['continue'], we refuse to fire
+    // the IPC if main-side canResume is not true. Belt-and-braces:
+    // main also rejects empty-shell intents in `buildContinuationIntent`.
+    if (activeProjection.canResume !== true) return
     await window.electronAPI.agent.resumeRun({
       scopeId: activeProjection.scopeId,
       taskId: activeProjection.taskId || undefined,
@@ -392,6 +401,10 @@ export default function TaskPanel() {
   }, [activeProjection])
 
   const handleRetryProjection = useCallback(() => {
+    // Stage Q (Stage 11) — gate retry by canResume in addition to the
+    // resumableActions list. Empty-shell projections can have stale
+    // 'retry' in resumableActions but canResume === false; refuse.
+    if (activeProjection?.canResume !== true) return
     if (!(activeProjection?.resumableActions || []).includes('retry')) return
     setComposerDraft(
       '请重试刚才的任务，并在开始前先说明你准备怎么继续。',

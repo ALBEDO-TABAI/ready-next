@@ -40,7 +40,7 @@ export interface SkillContextOrchestratorReadApi {
     text: string,
     sessionId?: string,
   ): string[] | null
-  hasActiveSkillExecution?(sessionId?: string): boolean
+  // Stage Q (Stage 11) — `hasActiveSkillExecution?` removed from interface.
 }
 
 /**
@@ -64,6 +64,7 @@ export interface SkillTurnIdentitySnapshot {
   readonly explicitRunStateResourceForTurn: ExplicitRunStateResourceCandidate | null
   readonly providedContinuationState: ContinuationState | null
   readonly isSkillResumeTurnDetected: boolean
+  readonly isSkillRestartTurnDetected: boolean
   readonly isConfigRepairTurnDetected: boolean
   readonly previousAssistantSkillToolUses: ReadonlyArray<string>
   readonly firstSkillMatch: { readonly text: string; readonly skills: ReadonlyArray<{ skillId?: string; id?: string; name?: string }> } | null
@@ -73,7 +74,7 @@ export interface SkillTurnIdentitySnapshot {
   // Frozen reads from the orchestrator + read-only context resolvers.
   readonly explicitlyRequestedSkillsBySkillIdProbe: ReadonlyArray<{ skillId?: string; id?: string; name?: string }>
   readonly referenceHintSnapshot: ReferenceHintSnapshot
-  readonly hasActiveSkillExecutionSnapshot: boolean
+  // Stage Q (Stage 11) — `hasActiveSkillExecutionSnapshot` removed.
   readonly activeSkillContextSnapshot: Readonly<ActiveSkillContext> | null
   readonly hasStrongActiveSkillContext: boolean
   readonly latestSkillRunSnapshot: Readonly<RecentSkillRunForResume> | null
@@ -89,6 +90,7 @@ export interface CollectIdentityReadSnapshotDeps {
   explicitRunStateResourceForTurn: ExplicitRunStateResourceCandidate | null
   providedContinuationState: ContinuationState | null
   isSkillResumeTurnDetected: boolean
+  isSkillRestartTurnDetected?: boolean
   isConfigRepairTurnDetected: boolean
   previousAssistantSkillToolUses: ReadonlyArray<string>
   firstSkillMatch: { text: string; skills: ReadonlyArray<{ skillId?: string; id?: string; name?: string }> } | null
@@ -136,7 +138,7 @@ export function collectIdentityReadSnapshot(
   const eligibleForExtraReads = Boolean(
     !hasExplicitMention
     && !deps.providedContinuationState
-    && deps.isSkillResumeTurnDetected,
+    && (deps.isSkillResumeTurnDetected || deps.isSkillRestartTurnDetected),
   )
 
   // Mirror legacy `hasStrongActiveSkillContext()` (turn-engine.ts:1430-1445)
@@ -219,6 +221,7 @@ export function collectIdentityReadSnapshot(
     explicitRunStateResourceForTurn: deps.explicitRunStateResourceForTurn,
     providedContinuationState: deps.providedContinuationState,
     isSkillResumeTurnDetected: deps.isSkillResumeTurnDetected,
+    isSkillRestartTurnDetected: Boolean(deps.isSkillRestartTurnDetected),
     isConfigRepairTurnDetected: deps.isConfigRepairTurnDetected,
     previousAssistantSkillToolUses: Object.freeze([...deps.previousAssistantSkillToolUses]),
     firstSkillMatch: deps.firstSkillMatch
@@ -232,7 +235,6 @@ export function collectIdentityReadSnapshot(
 
     explicitlyRequestedSkillsBySkillIdProbe: Object.freeze([...explicitlyRequestedSkillsBySkillIdProbe]),
     referenceHintSnapshot,
-    hasActiveSkillExecutionSnapshot: Boolean(deps.skillContextOrchestrator.hasActiveSkillExecution?.(sessionId)),
     activeSkillContextSnapshot,
     hasStrongActiveSkillContext,
     latestSkillRunSnapshot: continuitySkillRun ? Object.freeze({ ...continuitySkillRun }) : null,

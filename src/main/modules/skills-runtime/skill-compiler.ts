@@ -422,10 +422,16 @@ export function compileSkillDefinition(options: SkillCompilerOptions): SkillDefi
 
   const executionObj = asObject(manifest?.execution)
   const declaredExecutionMode = coerceExecutionMode(executionObj?.mode)
-  const workflowFile = asString(executionObj?.workflowFile) || asString(executionObj?.workflow_file) || 'skill.workflow.json'
-  const workflowPath = join(folderPath, workflowFile)
-  const workflow = declaredExecutionMode === 'workflow' || existsSync(workflowPath)
-    ? normalizeWorkflow(existsSync(workflowPath) ? readJson(workflowPath) : null)
+  // Stage Q (Stage 11) — `skill.workflow.json` default-probe retired.
+  // §6.7 Phase 3 says the file no longer exists in any embedded skill;
+  // the runtime workflow-start branch was retired in Phase 4 (see
+  // `runtime-manager.ts:784-788`). Only an EXPLICIT `executionObj.workflowFile`
+  // / `workflow_file` field still triggers a probe; otherwise no probe
+  // is performed (avoids spurious fs reads on every skill load).
+  const workflowFile = asString(executionObj?.workflowFile) || asString(executionObj?.workflow_file)
+  const workflowPath = workflowFile ? join(folderPath, workflowFile) : null
+  const workflow = (declaredExecutionMode === 'workflow' || (workflowPath && existsSync(workflowPath)))
+    ? normalizeWorkflow(workflowPath && existsSync(workflowPath) ? readJson(workflowPath) : null)
     : undefined
 
   if (declaredExecutionMode === 'workflow' && !workflow) {

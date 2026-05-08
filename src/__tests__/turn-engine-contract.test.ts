@@ -91,7 +91,6 @@ function createContractTurnRequest(userText: string) {
         sessionHasVideoInputs: () => false,
         domainAdapters: [],
         skillContextOrchestrator: {
-          hasActiveSkillExecution: () => false,
           shouldKeepToolsWithVideo: () => false,
           findExplicitlyRequestedSkills: () => [],
           buildPreferredSkillToolNames: () => null,

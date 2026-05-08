@@ -138,9 +138,9 @@ export class SkillContextOrchestrator {
 
   shouldKeepToolsWithVideo(userText: string, _sessionId?: string): boolean {
     const primary = this.deps.extractPrimaryUserInstruction(userText)
-    // Phase 4: no active skill execution concept — callers previously got
-    // `this.hasActiveSkillExecution(sessionId)` as the fallback; now fall
-    // back to false when no textual signal matches.
+    // Stage Q (Stage 11) — Phase 4 retired skill_executions state
+    // machine; the `hasActiveSkillExecution` shim was deleted entirely.
+    // Falls back to false when no textual signal matches.
     if (!primary) return false
     const normalized = primary.toLowerCase()
     if (normalized.includes('/skill')) return true
@@ -259,12 +259,10 @@ export class SkillContextOrchestrator {
     return { armed: false }
   }
 
-  hasActiveSkillExecution(_sessionId?: string): boolean {
-    // Phase 4: skill_executions state machine is being retired; there is no
-    // notion of an "active execution" anymore. Kept as a no-op for callers
-    // still reading the signal; will be removed in PR1 main body.
-    return false
-  }
+  // Stage Q (Stage 11) — `hasActiveSkillExecution()` shim retired.
+  // Was a permanent `return false` after Phase 4 (skill_executions state
+  // machine retirement). All callers now consume `restartIntentClass`
+  // (turn-engine) or no-op (tests).
 
   async maybeInjectExplicitSkillContext(params: {
     userText: string

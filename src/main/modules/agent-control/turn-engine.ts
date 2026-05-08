@@ -61,6 +61,7 @@ export type {
   SanitizeAssistantTextOptions as PushAssistantTextSafelyOptions,
 } from './tool-call-text-guard'
 import {
+  buildToolCallOnlyFallbackText,
   pushAssistantTextSafely,
   sanitizeAssistantText,
 } from './tool-call-text-guard'
@@ -146,6 +147,22 @@ function shouldAdoptTurnFramePreferredSkillTools(frame: TurnFrame | null): boole
   return frame.steering.preferredToolNames.length > 0
 }
 
+function isPreferredSkillActionToolName(name: string): boolean {
+  return name.startsWith('skill_') && !SKILL_PRIMITIVE_TOOL_NAMES.has(name)
+}
+
+function choosePreferredSkillToolNamesFromFrame(
+  frame: TurnFrame | null,
+  currentPreferredToolNames: string[] | null | undefined,
+): string[] | null {
+  if (!shouldAdoptTurnFramePreferredSkillTools(frame)) return currentPreferredToolNames || null
+  const framePreferred = [...(frame?.steering.preferredToolNames || [])]
+  const frameHasAction = framePreferred.some(isPreferredSkillActionToolName)
+  const currentHasAction = (currentPreferredToolNames || []).some(isPreferredSkillActionToolName)
+  if (currentHasAction && !frameHasAction) return currentPreferredToolNames || null
+  return framePreferred
+}
+
 function matchesSkillProgressFollowupIntent(text: string): boolean {
   const normalized = String(text || '')
     .replace(/\bhttps?:\/\/[^\s"'`<>,，。)）]+/gi, ' ')
@@ -203,6 +220,7 @@ import { classifyIntent, type IntentClassification } from './intent-classifier'
 import { logAgentMetric } from './metrics'
 import { TOOL_ERROR_METRICS } from './tool-error-metrics'
 import { snapshotTurnFeatureFlags } from './turn-feature-flags'
+import { classifyRestartIntent, type RestartIntentClass } from './restart-intent-classifier'
 import {
   rememberActiveSkillContext,
   resolveActiveSkillContext,
@@ -258,6 +276,7 @@ import {
   getRemainingToolCallBudget,
 } from './run-budget-policy'
 import { resolveTaskExecutionRoute } from './task-execution-router'
+import { resolveTaskOperationIntent } from './task-operation-intent'
 import { resolveTaskType } from './task-type-resolver'
 import { shouldEnforcePetToolRetry } from './pet-tool-loop-policy'
 import {
@@ -379,6 +398,7 @@ const layeredCompactor = createLayeredCompactor({
 const NOOP_HOOK_REGISTRY: Pick<HookRegistry, 'fire'> = {
   fire: async () => {},
 }
+const SKILL_PRIMITIVE_TOOL_NAMES = new Set(PRIMITIVE_TOOL_DEFS.map((definition) => definition.name))
 
 export function isLongTypedSkillActionName(toolName: string): boolean {
   if (!toolName.startsWith('skill_')) return false
@@ -632,7 +652,7 @@ export function renderChildCommandOutcome(args: {
 interface SkillContextOrchestratorLike {
   shouldKeepToolsWithVideo: (userText: string, sessionId?: string) => boolean
   findExplicitlyRequestedSkills: (userText: string) => Array<Partial<SkillState> & { skillId?: string; id?: string; name?: string }>
-  hasActiveSkillExecution: (sessionId?: string) => boolean
+  // Stage Q (Stage 11) — `hasActiveSkillExecution` removed from interface.
   buildPreferredSkillToolNames: (userText: string, sessionId?: string) => string[] | null
   getCurrentReferenceSkillHint?: (sessionId?: string) => { id: string; name: string } | null
   rememberExplicitReferenceSkillHint?: (userText: string, sessionId?: string) => boolean
@@ -1419,12 +1439,29 @@ export class TurnEngine {
         requestEnvelope.pureUserText,
         contextualUserInput,
       ].some((text) => matchesSkillProgressFollowupIntent(String(text || '')))
-      const isSkillResumeTurnDetected = isRetryOnlyTurnDetected || isConfigRepairTurnDetected
+      const taskOperationIntent = resolveTaskOperationIntent({
+        texts: [
+          requestEnvelope.primaryInstruction,
+          requestEnvelope.pureUserText,
+          contextualUserInput,
+        ],
+        retryOnlyTurnDetected: isRetryOnlyTurnDetected,
+        configRepairTurnDetected: isConfigRepairTurnDetected,
+        progressFollowupTurnDetected: isSkillProgressFollowupTurnDetected,
+      })
+      const isSkillRestartTurnDetected = taskOperationIntent.kind === 'restart_same_goal'
+      const isSkillResumeTurnDetected = (isRetryOnlyTurnDetected && !isSkillRestartTurnDetected) || isConfigRepairTurnDetected
+      // Stage Q (Stage 11) — `restartIntentClass` is computed below, AFTER
+      // `explicitRunStateResourceForTurn` is resolved. See comment near
+      // its definition for the contract.
       const explicitSkillMatches = skillDetectionInputs
         .map((text) => ({ text, skills: skillContextOrchestrator.findExplicitlyRequestedSkills(text) }))
       const firstSkillMatch = explicitSkillMatches.find((entry) => entry.skills.length > 0) || null
       let hasExplicitSkill = Boolean(firstSkillMatch)
-      const hasActiveSkill = skillContextOrchestrator.hasActiveSkillExecution(request.sessionId)
+      // Stage Q (Stage 11) — the legacy active-execution boolean is
+      // gone (Phase 4 retired the upstream signal entirely). Downstream
+      // consumers have been folded: `(... || activeExecution)` collapsed
+      // to its left operand, and the log field hardcoded to `false`.
       let skillContextInjectionText = firstSkillMatch ? firstSkillMatch.text : contextualUserInput
       let referenceSkillForMetrics: { id?: string; name?: string } | null = null
       let referenceSkillHintVia: 'explicit' | 'lookback' | 'current' | 'history' | 'resource' | 'resource_history' | null = null
@@ -1559,6 +1596,7 @@ export class TurnEngine {
         explicitRunStateResourceForTurn,
         providedContinuationState,
         isSkillResumeTurnDetected,
+        isSkillRestartTurnDetected,
         isConfigRepairTurnDetected,
         previousAssistantSkillToolUses,
         firstSkillMatch,
@@ -1570,9 +1608,11 @@ export class TurnEngine {
             ? host.skillTaskSupervisor.inspectLatestSkillTask(params)
             : inspectLatestSkillTask(params),
         resolveRecentSkillRun: host.resolveRecentSkillRun,
-        resolveRecentSkillTaskRun: (host as unknown as {
-          resolveRecentSkillTaskRun?: (sessionId: string | undefined) => RecentSkillRunForResume | null
-        }).resolveRecentSkillTaskRun,
+        // Stage Q (Stage 11) — `resolveRecentSkillTaskRun` is now a
+        // formal field on `TurnEngineHost` (run-contracts.ts:805+).
+        // The earlier `(host as unknown as { ... })` puncture is
+        // retired.
+        resolveRecentSkillTaskRun: host.resolveRecentSkillTaskRun,
         getLatestSkillRun,
       })
       const __identity = resolveSkillTurnIdentity(__identitySnapshot)
@@ -1592,7 +1632,11 @@ export class TurnEngine {
         initialSkillContextInjectionText: skillContextInjectionText,
         skillContextOrchestrator,
         inspectLatestSkillTaskForHost,
-        resolveActiveSkillContextLive: resolveActiveSkillContext,
+        // Stage Q (Stage 11) — `resolveActiveSkillContextLive` field
+        // renamed to `resolveActiveSkillContext` (the misleading `Live`
+        // suffix suggested host-injectable; in fact it's a direct
+        // function reference passed through to the apply phase).
+        resolveActiveSkillContext,
         rememberActiveSkillContext,
         getLatestSkillRun,
         resolveSkillRunForResume,
@@ -1602,9 +1646,10 @@ export class TurnEngine {
         extractTaskIdFromText,
         buildSkillResumeContextPrompt,
         resolveRecentSkillRun: host.resolveRecentSkillRun,
-        resolveRecentSkillTaskRun: (host as unknown as {
-          resolveRecentSkillTaskRun?: (sessionId: string | undefined) => RecentSkillRunForResume | null
-        }).resolveRecentSkillTaskRun,
+        // Stage Q (Stage 11) — second of two former type punctures
+        // replaced by formal field; see comment at the first call site
+        // for the run-contracts.ts:805+ field declaration.
+        resolveRecentSkillTaskRun: host.resolveRecentSkillTaskRun,
         log: (line) => host.log(line),
       })
 
@@ -1656,11 +1701,63 @@ export class TurnEngine {
         referenceSkillHintVia = 'explicit'
       }
 
+      // Stage Q (Stage 11) — classify the restart intent into one of three
+      // mutually-exclusive classes BEFORE the structure layer loads any
+      // supervisor snapshot. `fresh` and `restart_from_existing` both
+      // suppress stale-supervisor liveness in the frame; only `resume`
+      // walks the legacy path. Audit §C-9 / plan §3.6 contract C8+C9.
+      // `continuationRef: null` here because we don't have a projection
+      // loaded yet — `restart_from_existing` is determined by EXPLICIT
+      // user input (run-state resource or provided continuation state),
+      // NOT by the projection's stale continuationRef (which is the
+      // exact thing the bug case showed we should ignore).
+      const restartIntentClass: RestartIntentClass = classifyRestartIntent({
+        userIntent: isSkillRestartTurnDetected
+          ? 'start'
+          : isSkillResumeTurnDetected
+            ? 'continue'
+            : isConfigRepairTurnDetected
+              ? 'repair_config'
+              : isRetryOnlyTurnDetected
+                ? 'continue'
+                : 'unknown',
+        explicitRunStateResource: explicitRunStateResourceForTurn,
+        providedContinuationState,
+        continuationRef: null,
+      })
+      // Stage Q — split the legacy `shouldBindSkillContextForTurn` into
+      // two sub-predicates so the supervisor snapshot path is gated by
+      // restartIntentClass:
+      //   - shouldBindForResume: legacy resume path, loads supervisor
+      //   - shouldBindForRestart: 'restart_from_existing' path, loads
+      //     EXPLICIT handle inputs only (NOT the supervisor snapshot)
+      // The combined predicate `shouldBindSkillContextForTurn` is kept
+      // for backward compat with downstream code that uses it for
+      // non-supervisor purposes (preferred tool name selection, etc).
+      const shouldBindForResume = Boolean(
+        restartIntentClass === 'resume'
+        && (
+          hasExplicitSkill
+          || explicitRunStateResourceForTurn
+          || isSkillResumeTurnDetected
+          || isSkillProgressFollowupTurnDetected
+          || matchesChildCancelIntent(
+            requestEnvelope.primaryInstruction,
+            requestEnvelope.pureUserText,
+            requestEnvelope.rawUserText,
+          )
+        ),
+      )
+      const shouldBindForRestart = Boolean(
+        restartIntentClass === 'restart_from_existing'
+        && (explicitRunStateResourceForTurn || providedContinuationState),
+      )
       const shouldBindSkillContextForTurn = Boolean(
         hasExplicitSkill
         || explicitFreshSkillStart
         || explicitRunStateResourceForTurn
         || isSkillResumeTurnDetected
+        || isSkillRestartTurnDetected
         || isSkillProgressFollowupTurnDetected
         || matchesChildCancelIntent(
           requestEnvelope.primaryInstruction,
@@ -1675,7 +1772,7 @@ export class TurnEngine {
           primaryDomain: executionIntentContext.intentClassification.primaryDomain,
         })
       }
-      const legacyPreferredSkillToolNames = (shouldBindSkillContextForTurn && (hasExplicitSkill || hasActiveSkill))
+      const legacyPreferredSkillToolNames = (shouldBindSkillContextForTurn && hasExplicitSkill)
         ? skillContextOrchestrator.buildPreferredSkillToolNames(
           skillContextInjectionText,
           request.sessionId,
@@ -1702,10 +1799,15 @@ export class TurnEngine {
         }
       }
       if (activeSkillContextForTurn && activeSkillContextForTurn.source !== 'reference_hint') {
-        if (!explicitFreshSkillStart) {
+        // Stage Q (Stage 11) — only `resume` class re-remembers active
+        // context. `fresh` and `restart_from_existing` must not pin the
+        // stale context onto the session (audit §E / plan §3.6 contract C9).
+        // `explicitFreshSkillStart` retains its pre-Q behavior (URL-bearing
+        // explicit fresh start also doesn't remember).
+        if (!explicitFreshSkillStart && restartIntentClass === 'resume') {
           rememberActiveSkillContext(request.sessionId, activeSkillContextForTurn)
         }
-        if (!referenceSkillForMetrics && !explicitFreshSkillStart) {
+        if (!referenceSkillForMetrics && !explicitFreshSkillStart && restartIntentClass === 'resume') {
           referenceSkillForMetrics = {
             id: activeSkillContextForTurn.skillId,
             name: activeSkillContextForTurn.skillName || activeSkillContextForTurn.skillId,
@@ -1716,6 +1818,14 @@ export class TurnEngine {
       // `loadSkillRunContract`. Without this the contract's `actionInput` /
       // `originalInput` (read from snapshot.resumePayload) stay null and
       // forced-action input synthesis can't dispatch with valid input.
+      //
+      // Stage Q (Stage 11) — supervisor snapshot is still loaded for
+      // ALL restart classes so frame.skill carries identity (skillId /
+      // skillName) for the model. The fix for the "重新开始 / immediate
+      // checkpoint_budget" bug is at the LIVENESS layer:
+      // `turn-frame-resolver.inferLiveness` early-returns 'unknown' on
+      // userIntent='start', so stale liveness/status from the snapshot
+      // does NOT leak into the frame. Audit §E / plan §3.6 contract C9.
       let supervisorSnapshotForFrame: SkillTaskSupervisorSnapshot | null = null
       if (shouldBindSkillContextForTurn) {
         try {
@@ -1748,6 +1858,8 @@ export class TurnEngine {
         requestId: request.runId,
         userIntent: explicitFreshSkillStart
           ? 'start'
+          : isSkillRestartTurnDetected
+            ? 'start'
           : isConfigRepairTurnDetected
           ? 'repair_config'
           : isRetryOnlyTurnDetected || (
@@ -1774,9 +1886,7 @@ export class TurnEngine {
           name: turnFrame.skill.skillName || turnFrame.skill.skillId,
         }
       }
-      if (shouldAdoptTurnFramePreferredSkillTools(turnFrame)) {
-        preferredSkillToolNames = [...turnFrame.steering.preferredToolNames]
-      }
+      preferredSkillToolNames = choosePreferredSkillToolNamesFromFrame(turnFrame, preferredSkillToolNames)
       isLongSkillResumeTurn = (
         turnFrame.mode === 'skill_resume'
         && hasLongTypedSkillAction(preferredSkillToolNames)
@@ -1838,7 +1948,7 @@ export class TurnEngine {
         } pureMatched=${
           explicitSkillMatches.find((entry) => entry.text === requestEnvelope.pureUserText)?.skills.length
             ? 'true' : 'false'
-        } activeExecution=${hasActiveSkill} referenceSkillHintArmed=${referenceSkillHintArmed} preferredSkillToolCount=${preferredSkillToolNames?.length || 0} preferredSkillTools=${preferredSkillToolNames?.join('|') || 'none'}`,
+        } activeExecution=false referenceSkillHintArmed=${referenceSkillHintArmed} preferredSkillToolCount=${preferredSkillToolNames?.length || 0} preferredSkillTools=${preferredSkillToolNames?.join('|') || 'none'}`,
       )
       let childCommand = computeChildContinuationDecision(
         turnFrame,
@@ -2169,7 +2279,7 @@ export class TurnEngine {
         // recognized. Audit Phase 2 §B1/B2 — the previous inline regex
         // dropped these phrases on the floor, falling through to plain-
         // answer where the model could leak `<tool_call>` text into chat.
-        || (!shouldSuppressImplicitContinuation && (
+        || (!isSkillRestartTurnDetected && !shouldSuppressImplicitContinuation && (
           matchesResumeIntent(continuationHintText, 'anywhere')
           || isConfigRepairTurnDetected
         ))
@@ -2455,9 +2565,7 @@ export class TurnEngine {
       let routedAllowedToolNames = selectedDomainPrepareResult?.allowedToolNames || reconciledRunCapabilities.allowedToolNames
       const refreshToolPolicyFromTurnFrame = (reason: string) => {
         if (!turnFrame?.skill) return
-        const nextPreferredSkillToolNames = shouldAdoptTurnFramePreferredSkillTools(turnFrame)
-          ? [...turnFrame.steering.preferredToolNames]
-          : [...(preferredSkillToolNames || [])]
+        const nextPreferredSkillToolNames = choosePreferredSkillToolNamesFromFrame(turnFrame, preferredSkillToolNames) || []
         // Stage 4 W3b.2 fix — recompute authorization with the refreshed
         // preferredSkillToolNames BEFORE building nextToolPolicy, so
         // `collectAllowedToolNames(nextToolPolicy)` sees the same filter
@@ -2720,6 +2828,17 @@ export class TurnEngine {
           state.latestFallback = simpleResponse.fallback
         }
         if (simpleResponse.text) {
+          const toolCallOnlyFallback = buildToolCallOnlyFallbackText(simpleResponse.text)
+          if (toolCallOnlyFallback) {
+            logAgentMetric(TOOL_ERROR_METRICS.directToolCallTextBlocked, {
+              sessionId: request.sessionId,
+              toolNames: toolCallOnlyFallback.toolNames.slice(0, 5),
+              originalLen: simpleResponse.text.length,
+            })
+            transcript.emitOutput(toolCallOnlyFallback.text, 'text')
+            pushAssistantTextSafely(session, toolCallOnlyFallback.text, { sessionId: request.sessionId })
+            return finish({ success: true, status: 'done' })
+          }
           syncInteractionStateFromAssistantText(simpleResponse.text)
           if (taskExecutionRoute.chain === 'planner' && detectTaskStepCompletionCue(simpleResponse.text, state.runtimeTaskSteps.find((step) => step.id === state.runtimeCurrentStepId))) {
             advancePlannerStep(simpleResponse.text)
@@ -2814,6 +2933,15 @@ export class TurnEngine {
         shouldUseLongSkillResumeBudget
         || hasLongTypedSkillAction(preferredSkillToolNames)
       const sampleSkillLeaseSnapshot = (force = false): SkillTaskSupervisorSnapshot | null => {
+        // Stage Q (Stage 11) — Codex round 1 ❌#2/4: even when the
+        // initial frame liveness is suppressed via `inferLiveness`
+        // (userIntent='start' → 'unknown'), the lease-sampling path
+        // would still reload supervisor and re-apply its liveness via
+        // `applySupervisorRuntimeToTurnFrame` (turn-frame-resolver.ts:
+        // 212-221), undoing the suppression. Gate this sampler by
+        // `restartIntentClass === 'resume'` so `fresh` and
+        // `restart_from_existing` turns never observe stale liveness.
+        if (restartIntentClass !== 'resume') return null
         if (!shouldBindSkillContextForTurn) return null
         if (!force && !hasPlannedLeaseTrigger && !skillBudgetLeaseState) return null
         try {

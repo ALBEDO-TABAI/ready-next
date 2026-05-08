@@ -308,6 +308,11 @@ export async function executeToolCall(
             // `resolvePrimitiveSkillId` can derive primitive skillId from
             // the identity-driven `authorization.skillId`.
             authorization: context.authorization,
+            // Stage Q (Stage 11) — forward per-turn feature flag snapshot
+            // so `recordPrimitiveOutcome` can apply the selected-skill
+            // primitive fence (referencePrimitiveLifecycleFence) without
+            // reading process.env in the hot path.
+            turnFeatureFlags: context.turnFeatureFlags,
           })
 
         case 'system':

@@ -47,6 +47,8 @@ import {
 } from '../agent-control/skill-tool-fallback-throttle'
 // Stage 4 W3b — authorization-driven primitive skillId resolution.
 import type { SkillToolAuthorization } from '../agent-control/skill-tool-authorization'
+import type { TurnFeatureFlags } from '../agent-control/turn-feature-flags'
+import { logAgentMetric } from '../agent-control/metrics'
 import { resolvePendingSkillHandoffWriteTargets } from '../agent-control/skill-agent-handoff'
 import { isChildLoopSkillAction } from './child-loop-skill-actions'
 import { filterSkillPrimitivesBySession } from './skill-tool-session-gate'
@@ -102,6 +104,14 @@ interface SkillToolRuntimeContext {
     runContract: unknown
     discoveredHandles: Record<string, unknown>[]
   } | null
+  /**
+   * Stage Q (Stage 11) — per-turn feature flag snapshot. Required so
+   * `recordPrimitiveOutcome` can apply `referencePrimitiveLifecycleFence`
+   * without reading `process.env` in the hot path. Caller (turn-engine)
+   * snapshots flags once via `snapshotTurnFeatureFlags()` and passes
+   * the frozen object through.
+   */
+  turnFeatureFlags?: TurnFeatureFlags
 }
 
 const STATIC_TOOL_NAMES: Record<string, string> = {
@@ -808,7 +818,15 @@ export function shouldRememberPrimitiveOutcomeForContinuity(params: {
   toolName: string
   status: SkillTaskEventStatus
   hasDurableHandle: boolean
+  /**
+   * Stage Q (Stage 11) — belt-and-braces. Even if the recordPrimitiveOutcome
+   * fence is bypassed (flag off, etc.), session continuity for
+   * reference/advisory skills is still pointless and only creates ghost
+   * resume payloads. Default `false` for back-compat with existing callers.
+   */
+  isReferenceOrAdvisory?: boolean
 }): boolean {
+  if (params.isReferenceOrAdvisory) return false
   if (params.status === 'running') return false
   if (
     params.status === 'done'
@@ -943,7 +961,41 @@ function recordPrimitiveOutcome(params: {
   message?: string
   output?: ToolExecutionOutput
   params?: Record<string, unknown> | null
+  /**
+   * Stage Q (Stage 11) — selected-skill primitive fence input. When
+   * `isReferenceOrAdvisory === true` AND
+   * `featureFlags.referencePrimitiveLifecycleFence !== false`, this
+   * function returns early without writing SkillTaskRun / continuity.
+   * Caller (`executeSkillTool`) computes `skillKind` once at the top
+   * and shares it across all primitive-branch invocations.
+   */
+  skillKind?: { isReferenceOrAdvisory: boolean }
+  /**
+   * Stage Q (Stage 11) — per-turn feature flag snapshot. When undefined,
+   * the fence falls back to "enabled" (defensive default).
+   */
+  featureFlags?: TurnFeatureFlags
 }): { stepId: string } {
+  // Stage Q (Stage 11) — selected-skill primitive fence.
+  const fenceEnabled = params.featureFlags?.referencePrimitiveLifecycleFence !== false
+  if (params.skillKind?.isReferenceOrAdvisory && fenceEnabled) {
+    logAgentMetric('reference_primitive_lifecycle_skipped', {
+      sessionId: params.sessionId,
+      scopeId: params.scopeId,
+      skillId: params.skillId || null,
+      toolName: params.toolName,
+      status: params.status,
+    })
+    return { stepId: params.stepId || 'reference-noop' }
+  }
+  if (params.skillKind?.isReferenceOrAdvisory && !fenceEnabled) {
+    logAgentMetric('reference_primitive_lifecycle_fence_disabled', {
+      sessionId: params.sessionId,
+      scopeId: params.scopeId,
+      skillId: params.skillId || null,
+      toolName: params.toolName,
+    })
+  }
   const data = params.output?.data || {}
   const paths = outputPathsFromToolOutput(params.output)
   const hasDurableHandle = Boolean(paths.outputDir || paths.runStatePath || paths.sceneScoresPath || paths.deliveryReportPath)
@@ -978,7 +1030,20 @@ function recordPrimitiveOutcome(params: {
     toolName: params.toolName,
     status: params.status,
     hasDurableHandle,
+    isReferenceOrAdvisory: params.skillKind?.isReferenceOrAdvisory ?? false,
   })) {
+    // Stage Q (Stage 11) — Audit ➕3 found `taskId: params.skillId` made
+    // the skillId pretend to be a task handle in `session-continuity`'s
+    // identity matching (see `session-continuity.ts:378-394`). Build a
+    // path-prefixed pseudo-id when we have a real durable handle; null
+    // (i.e. omit) otherwise so continuity falls back to other identity
+    // tokens (taskRunId / detachedTaskId / jobId) but never mistakes the
+    // skill name for a task identifier.
+    const continuityTaskId = paths.outputDir
+      ? `primitive-output:${paths.outputDir}`
+      : paths.runStatePath
+        ? `primitive-run-state:${paths.runStatePath}`
+        : null
     rememberSkillRun(params.sessionId, {
       toolName: params.toolName,
       skillId: params.skillId,
@@ -990,7 +1055,7 @@ function recordPrimitiveOutcome(params: {
       runStatePath: paths.runStatePath || undefined,
       pauseReason: params.status === 'blocked' ? 'blocked' : undefined,
       resumePayload: buildContinuityResumePayload({
-        taskId: params.skillId,
+        taskId: continuityTaskId,
         stepId: recorded.stepId,
         blockerType: params.status === 'blocked' ? 'blocked' : params.status === 'error' ? 'error' : null,
         outputDir: paths.outputDir,
@@ -1147,8 +1212,38 @@ export async function executeSkillTool(
   if (tool.kind === 'primitive') {
     const skillId = resolvePrimitiveSkillId(sessionId, runtimeContext)
     const skillName = findSkillNameSafely(skillId)
+    // Stage Q (Stage 11) — selected-skill primitive fence: hoist skill kind
+    // once so all 18 recordPrimitiveOutcome callers below share it. The
+    // SkillToolAuthorization does not carry per-action context (it grants
+    // the whole primitive set when a skill is `selected`), so the fence
+    // is per-skill: if the resolved skillId is `executionMode==='advisory'`
+    // OR has any `runtime:'reference'` action, the entire skill's primitive
+    // calls bypass DB persistence. Mixed skills (e.g. lets-go-rss) are not
+    // misjudged because their non-reference actions go through typed_action
+    // path, never reaching primitives.
+    let skillKind: { isReferenceOrAdvisory: boolean } = { isReferenceOrAdvisory: false }
+    if (skillId) {
+      const skillDef = listSkillsSafely().find((s) => s.id === skillId)
+      const isAdvisorySkill = skillDef?.executionMode === 'advisory'
+      const hasReferenceAction = Boolean(
+        skillDef?.actions?.some((a) => a.runtime === 'reference'),
+      )
+      skillKind = { isReferenceOrAdvisory: isAdvisorySkill || hasReferenceAction }
+    }
+    const featureFlags = runtimeContext?.turnFeatureFlags
+    // Stage Q (Stage 11) — local closure injects skillKind + featureFlags
+    // into all 18 primitive recordPrimitiveOutcome call sites below so
+    // the fence is uniformly applied. The closure is intentionally typed
+    // identically to the underlying function: callers may still pass an
+    // explicit `skillKind` / `featureFlags` to override (none currently do).
+    const recordPrimitive: typeof recordPrimitiveOutcome = (p) =>
+      recordPrimitiveOutcome({
+        ...p,
+        skillKind: p.skillKind ?? skillKind,
+        featureFlags: p.featureFlags ?? featureFlags,
+      })
     if (tool.name === 'skill_ask_user') {
-      const started = recordPrimitiveOutcome({
+      const started = recordPrimitive({
         scopeId: runtimeContext?.scopeId,
         sessionId,
         runId: runtimeContext?.runId,
@@ -1175,7 +1270,7 @@ export async function executeSkillTool(
             emitAskUserQuestion: getAskUserQuestionEmitter(),
           },
         )
-        recordPrimitiveOutcome({
+        recordPrimitive({
           scopeId: runtimeContext?.scopeId,
           sessionId,
           runId: runtimeContext?.runId,
@@ -1190,7 +1285,7 @@ export async function executeSkillTool(
         })
         return attachSkillProjection(output, { sessionId, skillId: skillId || undefined })
       } catch (error) {
-        recordPrimitiveOutcome({
+        recordPrimitive({
           scopeId: runtimeContext?.scopeId,
           sessionId,
           runId: runtimeContext?.runId,
@@ -1346,7 +1441,7 @@ export async function executeSkillTool(
           })
           : [],
       }
-      const started = recordPrimitiveOutcome({
+      const started = recordPrimitive({
         scopeId: runtimeContext?.scopeId,
         sessionId,
         runId: runtimeContext?.runId,
@@ -1382,7 +1477,7 @@ export async function executeSkillTool(
           activeContext: patchActiveContext,
         })
         const validationOk = Boolean((output.data?.validation as { ok?: unknown } | undefined)?.ok)
-        recordPrimitiveOutcome({
+        recordPrimitive({
           scopeId: runtimeContext?.scopeId,
           sessionId,
           runId: runtimeContext?.runId,
@@ -1398,7 +1493,7 @@ export async function executeSkillTool(
         })
         return attachSkillProjection(output, { sessionId, skillId })
       } catch (error) {
-        recordPrimitiveOutcome({
+        recordPrimitive({
           scopeId: runtimeContext?.scopeId,
           sessionId,
           runId: runtimeContext?.runId,
@@ -1558,7 +1653,7 @@ export async function executeSkillTool(
       }
     }
     if (tool.name === 'skill_run_shell') {
-      const started = recordPrimitiveOutcome({
+      const started = recordPrimitive({
         scopeId: runtimeContext?.scopeId,
         sessionId,
         runId: runtimeContext?.runId,
@@ -1601,7 +1696,7 @@ export async function executeSkillTool(
           },
         )
         const status = inferSkillRunStatusFromOutput(output)
-        recordPrimitiveOutcome({
+        recordPrimitive({
           scopeId: runtimeContext?.scopeId,
           sessionId,
           runId: runtimeContext?.runId,
@@ -1616,7 +1711,7 @@ export async function executeSkillTool(
         })
         return attachSkillProjection(output, { sessionId, skillId })
       } catch (error) {
-        recordPrimitiveOutcome({
+        recordPrimitive({
           scopeId: runtimeContext?.scopeId,
           sessionId,
           runId: runtimeContext?.runId,
@@ -1633,7 +1728,7 @@ export async function executeSkillTool(
       }
     }
     if (tool.name === 'skill_write_artifact') {
-      const started = recordPrimitiveOutcome({
+      const started = recordPrimitive({
         scopeId: runtimeContext?.scopeId,
         sessionId,
         runId: runtimeContext?.runId,
@@ -1657,7 +1752,7 @@ export async function executeSkillTool(
             ),
           },
         )
-        recordPrimitiveOutcome({
+        recordPrimitive({
           scopeId: runtimeContext?.scopeId,
           sessionId,
           runId: runtimeContext?.runId,
@@ -1671,7 +1766,7 @@ export async function executeSkillTool(
         })
         return attachSkillProjection(output, { sessionId, skillId })
       } catch (error) {
-        recordPrimitiveOutcome({
+        recordPrimitive({
           scopeId: runtimeContext?.scopeId,
           sessionId,
           runId: runtimeContext?.runId,
@@ -1687,7 +1782,7 @@ export async function executeSkillTool(
       }
     }
     if (tool.name === 'skill_read_artifact') {
-      const started = recordPrimitiveOutcome({
+      const started = recordPrimitive({
         scopeId: runtimeContext?.scopeId,
         sessionId,
         runId: runtimeContext?.runId,
@@ -1734,7 +1829,7 @@ export async function executeSkillTool(
             additionalAllowedReadRoots: additionalRootCandidates,
           },
         )
-        recordPrimitiveOutcome({
+        recordPrimitive({
           scopeId: runtimeContext?.scopeId,
           sessionId,
           runId: runtimeContext?.runId,
@@ -1748,7 +1843,7 @@ export async function executeSkillTool(
         })
         return attachSkillProjection(output, { sessionId, skillId })
       } catch (error) {
-        recordPrimitiveOutcome({
+        recordPrimitive({
           scopeId: runtimeContext?.scopeId,
           sessionId,
           runId: runtimeContext?.runId,
@@ -1764,7 +1859,7 @@ export async function executeSkillTool(
       }
     }
     if (tool.name === 'skill_inspect_run_state') {
-      const started = recordPrimitiveOutcome({
+      const started = recordPrimitive({
         scopeId: runtimeContext?.scopeId,
         sessionId,
         runId: runtimeContext?.runId,
@@ -1788,7 +1883,7 @@ export async function executeSkillTool(
           skillId: typeof skillId === 'string' && skillId.length > 0 ? skillId : undefined,
         })
         const status = inferSkillRunStatusFromOutput(output)
-        recordPrimitiveOutcome({
+        recordPrimitive({
           scopeId: runtimeContext?.scopeId,
           sessionId,
           runId: runtimeContext?.runId,
@@ -1802,7 +1897,7 @@ export async function executeSkillTool(
         })
         return attachSkillProjection(output, { sessionId, skillId })
       } catch (error) {
-        recordPrimitiveOutcome({
+        recordPrimitive({
           scopeId: runtimeContext?.scopeId,
           sessionId,
           runId: runtimeContext?.runId,

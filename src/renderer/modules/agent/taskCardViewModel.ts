@@ -30,6 +30,13 @@ export interface TaskCardRunLike {
   currentStepId?: string | null
   waitingFor?: ScopeRunState['waitingFor']
   resumableActions?: ScopeRunState['resumableActions']
+  /**
+   * Stage Q (Stage 11) — pre-computed by main side. Renderer must use
+   * this instead of recomputing from `resumableActions / taskRunId /
+   * interactionState`. Defensive default: when undefined or false, the
+   * task is NOT resumable (Stage Q audit §C-9 / contract C7).
+   */
+  canResume?: boolean
   recentArtifacts?: AgentArtifact[]
   taskContinuation?: ScopeRunState['taskContinuation']
   progress?: ScopeRunState['progress']
@@ -372,6 +379,29 @@ function hasBlockedTerminalReason(run: TaskCardRunLike): boolean {
     || run.terminalReason === 'blocked_external'
 }
 
+/**
+ * Stage Q (Stage 11) — gate `continue` / `retry` actions through
+ * `run.canResume`. The audit found that the renderer was happily
+ * rendering "继续" / "重试" buttons for empty-shell projections
+ * (no real durable handle), and clicking them led to immediate
+ * `checkpoint_budget`. Main side now derives `canResume` per record;
+ * renderer simply gates the actions through it.
+ *
+ * Rules (Stage Q audit §C-9 / contract C7):
+ *   - `continue` / `retry` require `canResume === true`
+ *   - `cancel` / `open_artifact` are NOT gated (can always cancel an
+ *     in-flight or stale task; can always open existing artifacts)
+ *   - `canResume === undefined` defaults to `false` (defensive — break
+ *     loudly when main forgot to derive)
+ */
+function gateActionsByCanResume(
+  actions: TaskCardAction[],
+  canResume: boolean | undefined,
+): TaskCardAction[] {
+  if (canResume === true) return actions
+  return actions.filter((action) => action !== 'continue' && action !== 'retry')
+}
+
 export function deriveTaskCardRuntimeState(run: TaskCardRunLike): TaskCardRuntimeState {
   // Stage O §1.4 / O4 — priority follows CLAUDE.md §6.13:
   //   failed_no_background_alive (rank 100, = `failed` && !hasBackground)
@@ -389,13 +419,25 @@ export function deriveTaskCardRuntimeState(run: TaskCardRunLike): TaskCardRuntim
   const isAgentHandoff = isInternalAgentHandoffTask(run)
 
   if ((run.phase === 'error' || run.status === 'failed') && !hasLiveBackground) {
-    return { visualState: 'failed', statusLabel: taskCardVisualStateLabel('failed'), actionSet: ['retry', 'cancel', 'open_artifact'] }
+    return {
+      visualState: 'failed',
+      statusLabel: taskCardVisualStateLabel('failed'),
+      actionSet: gateActionsByCanResume(['retry', 'cancel', 'open_artifact'], run.canResume),
+    }
   }
   if (hasLiveBackground) {
-    return { visualState: 'background_running', statusLabel: taskCardVisualStateLabel('background_running'), actionSet: ['continue', 'open_artifact', 'cancel'] }
+    return {
+      visualState: 'background_running',
+      statusLabel: taskCardVisualStateLabel('background_running'),
+      actionSet: gateActionsByCanResume(['continue', 'open_artifact', 'cancel'], run.canResume),
+    }
   }
   if (hasBudgetPaused) {
-    return { visualState: 'budget_paused', statusLabel: taskCardVisualStateLabel('budget_paused'), actionSet: ['continue', 'retry', 'cancel'] }
+    return {
+      visualState: 'budget_paused',
+      statusLabel: taskCardVisualStateLabel('budget_paused'),
+      actionSet: gateActionsByCanResume(['continue', 'retry', 'cancel'], run.canResume),
+    }
   }
   if (
     (run.waitingFor && run.waitingFor !== 'none')
@@ -410,10 +452,11 @@ export function deriveTaskCardRuntimeState(run: TaskCardRunLike): TaskCardRuntim
     const actions = (run.resumableActions || []).filter((action): action is TaskCardAction =>
       action === 'continue' || action === 'retry' || action === 'open_artifact' || action === 'cancel',
     )
+    const baseActions: TaskCardAction[] = actions.length > 0 ? actions : ['continue', 'cancel']
     return {
       visualState,
       statusLabel: taskCardVisualStateLabel(visualState),
-      actionSet: actions.length > 0 ? actions : ['continue', 'cancel'],
+      actionSet: gateActionsByCanResume(baseActions, run.canResume),
     }
   }
   if (run.phase === 'done' || run.status === 'done') {

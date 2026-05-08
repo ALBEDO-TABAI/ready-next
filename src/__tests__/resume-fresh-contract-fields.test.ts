@@ -332,7 +332,6 @@ function createHost(overrides?: Record<string, unknown>) {
     skillContextOrchestrator: {
       shouldKeepToolsWithVideo: () => false,
       findExplicitlyRequestedSkills: () => [],
-      hasActiveSkillExecution: () => false,
       buildPreferredSkillToolNames: () => null,
       maybeInjectExplicitSkillContext: async () => {},
     },

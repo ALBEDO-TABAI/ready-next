@@ -15,6 +15,7 @@ import {
 import { selectRunStateCandidate, type RunStateCandidate, type RunStateSelection } from './run-state-selection'
 import { inspectSkillProgressArtifacts } from './skill-progress-artifacts'
 import { isConfiguredChildLoopSkillAction } from '../tools/child-loop-skill-actions'
+import { canResumeShape } from './resume-handle'
 
 const RUN_STATE_FILENAME = 'run_state.json'
 const RUN_STATE_SEARCH_DEPTH = 1
@@ -369,13 +370,35 @@ function isOrphanedChildLoopLauncher(taskRun: SkillTaskRunRecord | null | undefi
 }
 
 function snapshotHasDurableHandle(snapshot: SkillTaskSupervisorSnapshot): boolean {
-  return Boolean(
-    snapshot.resumePayload
-      || snapshot.runStatePath
-      || snapshot.outputDir
-      || snapshot.detachedTaskId
-      || snapshot.taskRunId,
-  )
+  // Stage Q (Stage 11) — single-source via `canResumeShape`. Audit §3.1
+  // ➕4 found that the prior heuristic ("any non-null resumePayload" or
+  // "any taskRunId") let empty-shell rows score +30 in `scoreLatestSnapshot`,
+  // pushing them ahead of real durable runs. We now require an actual
+  // durable handle: childRunId, detachedTaskId, or (outputDir AND
+  // runStatePath). `taskRunId` and bare `resumePayload` no longer qualify.
+  //
+  // childRunId may live inside `snapshot.resumePayload.childRun.childRunId`
+  // (parent-of-child-run shape) or directly on `resumePayload.childRunId`.
+  // Both forms are extracted here so a snapshot whose ONLY durable signal
+  // is a childRunId still scores correctly.
+  return canResumeShape({
+    childRunId: extractChildRunId(snapshot.resumePayload),
+    detachedTaskId: snapshot.detachedTaskId,
+    outputDir: snapshot.outputDir,
+    runStatePath: snapshot.runStatePath,
+  })
+}
+
+function extractChildRunId(resumePayload: Record<string, unknown> | null | undefined): string | null {
+  if (!resumePayload) return null
+  const direct = resumePayload.childRunId
+  if (typeof direct === 'string' && direct.trim()) return direct.trim()
+  const childRun = resumePayload.childRun as Record<string, unknown> | undefined
+  if (childRun && typeof childRun === 'object' && !Array.isArray(childRun)) {
+    const nested = childRun.childRunId
+    if (typeof nested === 'string' && nested.trim()) return nested.trim()
+  }
+  return null
 }
 
 function scoreLatestSnapshot(snapshot: SkillTaskSupervisorSnapshot): number {
@@ -589,14 +612,18 @@ export class SkillTaskSupervisor {
         }
         : null)
     const runStateNonTerminal = Boolean(runStateStatus && !isTerminalInternal(runStateStatus))
-    const hasDurableResumeHandle = Boolean(
-      resolvedRunStatePath
-        || resolvedOutputDir
-        || resumePayload
-        || lifecycleTaskRun?.resumePayload
-        || detached?.id
-        || lifecycleTaskRun?.detachedTaskId,
-    )
+    // Stage Q (Stage 11) — match `snapshotHasDurableHandle` semantics so
+    // the supervisor's two durable-handle gates agree. `resumePayload`
+    // and bare `taskRunId` no longer qualify; require true handle.
+    // childRunId is extracted from resumePayload (either direct or
+    // nested under `.childRun.childRunId`) so child-run-only shapes
+    // still count.
+    const hasDurableResumeHandle = canResumeShape({
+      childRunId: extractChildRunId(resumePayload as Record<string, unknown> | null),
+      detachedTaskId: detached?.id || lifecycleTaskRun?.detachedTaskId || null,
+      outputDir: resolvedOutputDir,
+      runStatePath: resolvedRunStatePath,
+    })
     const terminalOnlyByStore = Boolean(
       isTerminalInternal(internalStatus)
         && (taskRunStatus || detachedStatus)

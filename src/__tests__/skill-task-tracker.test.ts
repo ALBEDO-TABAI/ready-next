@@ -432,6 +432,10 @@ test('SkillTaskTracker updates ask_user blocked step to done in the same task ru
 })
 
 test('SkillTaskTracker records primitive monitor success without closing a running typed parent task', () => {
+  // Stage Q (Stage 11) — runKind partition: primitive event no longer
+  // appends to typed_action parent's row; instead it creates its own
+  // primitive-runKind row. The typed parent stays running with only
+  // its own steps; the primitive completes 'done' on a separate row.
   const { repository, rows } = createTaskRunRepositoryHarness()
   registerSkillTaskRunRepository(repository)
   clearSkillTaskProjection('scope-skill-monitor')
@@ -456,14 +460,22 @@ test('SkillTaskTracker records primitive monitor success without closing a runni
       message: 'monitor saw status: running',
     })
 
-    const stored = Array.from(rows.values())[0]
-    assert.equal(stored?.status, 'running')
+    // After Q.3a: 2 separate rows, partitioned by runKind.
+    const allRows = Array.from(rows.values())
+    assert.equal(allRows.length, 2)
+    const typedRow = allRows.find((r) => r.runKind === 'typed_action')
+    const primRow = allRows.find((r) => r.runKind === 'primitive')
+    assert.ok(typedRow, 'expected a typed_action row')
+    assert.ok(primRow, 'expected a primitive row')
+    assert.equal(typedRow!.status, 'running')
+    assert.equal(primRow!.status, 'done')
     assert.deepEqual(
-      stored?.steps.map((step) => ({ id: step.id, status: step.status })),
-      [
-        { id: 'skill_video_expert_pipeline#1', status: 'running' },
-        { id: 'skill_run_shell#1', status: 'done' },
-      ],
+      typedRow!.steps.map((step) => ({ id: step.id, status: step.status })),
+      [{ id: 'skill_video_expert_pipeline#1', status: 'running' }],
+    )
+    assert.deepEqual(
+      primRow!.steps.map((step) => ({ id: step.id, status: step.status })),
+      [{ id: 'skill_run_shell#1', status: 'done' }],
     )
   } finally {
     registerSkillTaskRunRepository(null)
@@ -572,30 +584,48 @@ test('SkillTaskTracker keeps background parent state when primitive monitor exit
       message: 'monitor exit 0: status=running',
     })
 
+    // Stage Q (Stage 11) — runKind partition: typed_action + lifecycle
+    // remain on the same row (both runKind='typed_action' compatible —
+    // lifecycle reuses the typed parent row), but the primitive event
+    // creates a separate primitive-runKind row.
+    const allRows = Array.from(rows.values())
+    assert.equal(allRows.length, 2)
+    const stored = allRows.find((r) => r.runKind === 'typed_action')
+    const primRow = allRows.find((r) => r.runKind === 'primitive')
+    assert.ok(stored, 'expected typed_action+lifecycle row')
+    assert.ok(primRow, 'expected primitive row')
+
     const projection = readSkillTaskProjection({
       sessionId: 'scope-skill-background-observation',
       skillId: 'video-expert-analyzer',
     })
-    const stored = Array.from(rows.values())[0]
 
+    // Projection still aggregates events by sessionId+skillId in PR-3
+    // (key stays `skill:S:K` for backward compat; key partition lands in
+    // a later PR). The lifecycle waiting/resume metadata is preserved.
     assert.equal(projection?.waitingFor, 'background')
     assert.deepEqual(projection?.resumableActions, ['continue', 'cancel'])
     assert.equal(projection?.blockedReason, '本轮预算已用完，但技能任务仍在后台运行')
     assert.equal(projection?.taskContinuation?.blockerType, 'budget_exhausted')
-    assert.equal(projection?.currentStepId, 'skill_lifecycle#1')
+
+    // typed_action row carries typed step + lifecycle step (both pre-Q
+    // and post-Q.3a). primitive row carries primitive step only.
+    assert.equal(stored!.status, 'running')
+    assert.equal(stored!.interactionState, 'suspended')
+    assert.equal(stored!.currentStepId, 'skill_lifecycle#1')
+    assert.equal(stored!.resumePayload?.blockerType, 'budget_exhausted')
+    assert.equal(stored!.finishedAt, null)
     assert.deepEqual(
-      projection?.steps.map((step) => ({ id: step.id, status: step.status })),
+      stored!.steps.map((step) => ({ id: step.id, status: step.status })),
       [
         { id: 'skill_video_expert_pipeline#1', status: 'running' },
         { id: 'skill_lifecycle#1', status: 'running' },
-        { id: 'skill_run_shell#1', status: 'running' },
       ],
     )
-    assert.equal(stored?.status, 'running')
-    assert.equal(stored?.interactionState, 'suspended')
-    assert.equal(stored?.currentStepId, 'skill_lifecycle#1')
-    assert.equal(stored?.resumePayload?.blockerType, 'budget_exhausted')
-    assert.equal(stored?.finishedAt, null)
+    assert.deepEqual(
+      primRow!.steps.map((step) => ({ id: step.id, status: step.status })),
+      [{ id: 'skill_run_shell#1', status: 'running' }],
+    )
   } finally {
     registerSkillTaskRunRepository(null)
   }

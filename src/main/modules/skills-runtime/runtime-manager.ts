@@ -2067,6 +2067,18 @@ export function getSkillsRuntimeManager(): SkillsRuntimeManager {
   return runtimeManager
 }
 
+/**
+ * Stage Q (Stage 11) — test-only: override the singleton so integration
+ * tests can drive `executeSkillTool` against synthetic skills without
+ * needing a real skills tree on disk. Production code MUST NOT call this.
+ * Pass `null` to restore lazy-init behavior.
+ */
+export function __setSkillsRuntimeManagerForTests(
+  override: SkillsRuntimeManager | Pick<SkillsRuntimeManager, 'listSkills'> | null,
+): void {
+  runtimeManager = (override as SkillsRuntimeManager | null)
+}
+
 // ────────────────────────────────────────────────────────────────────────
 // Phase 7 — `startSkillChildRunAndWait` compatibility helper.
 //

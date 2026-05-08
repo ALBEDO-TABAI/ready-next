@@ -828,11 +828,28 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
       responseText?: string
       todoId?: string
       todoTitle?: string
+      // Stage Q (Stage 11) — durable handle fields propagated through IPC
+      // so `runtime.buildContinuationIntent`'s canResumeShape gate can see
+      // them. Without these on the IPC payload type, TS strips them at
+      // the boundary and `incoming?.childRunId` reads as undefined.
+      childRunId?: string
+      detachedTaskId?: string
+      taskRunId?: string
+      jobId?: string
+      skillId?: string
+      action?: string
+      runStatePath?: string
+      outputDir?: string
+      progressFingerprint?: string
+      pauseReason?: string
     } | null
   }): Promise<IPCResponse> => {
     try {
       const result = await runtime!.resumeRun(payload)
-      return { success: result.success, error: result.error }
+      // Stage Q (Stage 11) — forward errorKind so renderer can distinguish
+      // 'not_resumable' from other failures (e.g. show a different
+      // toast / disable the button).
+      return { success: result.success, error: result.error, errorKind: result.errorKind }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
@@ -851,11 +868,22 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
       responseText?: string
       todoId?: string
       todoTitle?: string
+      // Stage Q (Stage 11) — durable handle fields (see resumeRun).
+      childRunId?: string
+      detachedTaskId?: string
+      taskRunId?: string
+      jobId?: string
+      skillId?: string
+      action?: string
+      runStatePath?: string
+      outputDir?: string
+      progressFingerprint?: string
+      pauseReason?: string
     } | null
   }): Promise<IPCResponse> => {
     try {
       const result = await runtime!.respondToInteraction(payload)
-      return { success: result.success, error: result.error }
+      return { success: result.success, error: result.error, errorKind: result.errorKind }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }

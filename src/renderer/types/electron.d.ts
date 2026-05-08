@@ -490,6 +490,13 @@ interface TaskProjectionRecordData {
   continuationRef?: ScopeRunTaskContinuationData | null
   progress?: ScopeRunSkillProgressData | null
   recentArtifacts?: ScopeRunEventData['artifactRefs']
+  /**
+   * Stage Q (Stage 11) — derived-at-read truth from main side. Renderer
+   * must consume this directly and NOT recompute from `resumableActions`
+   * / `taskRunId` / `interactionState` (Stage Q audit §C-9 / contract C7).
+   * Defensive default: when undefined or false, treat as not resumable.
+   */
+  canResume?: boolean
   createdAt: string
   updatedAt: string
 }

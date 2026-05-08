@@ -1495,6 +1495,157 @@ const migrations: Migration[] = [
         // column already exists
       }
     }
+  },
+  // ------------------------------------------------------------------ 033
+  // Stage Q (Stage 11) — schema CHECK invariant for skill_task_runs.
+  //
+  // PR-3 (Q.3a) shipped the runtime invariant: primitive events do not
+  // reuse typed_action/lifecycle rows and vice versa. PR-5 (Q.3b) lands
+  // the matching schema constraint:
+  //   `CHECK (NOT (run_kind = 'primitive' AND tool_name = 'skill_lifecycle'))`
+  //
+  // This is the first migration to use the CREATE-INSERT-DROP-RENAME
+  // pattern (existing migrations all use ALTER TABLE). Each migration
+  // is already wrapped in a transaction by `runMigrations()`, so atomicity
+  // across the 4 statements is guaranteed.
+  //
+  // Backfill rules for violator rows (run_kind='primitive' AND
+  // tool_name='skill_lifecycle' — the bug shape Stage Q audit identified):
+  //   - tool_name → CASE: `action` if it looks like a primitive name
+  //     (`skill_*` prefix and not 'skill_lifecycle'); else
+  //     'skill_unknown_primitive_cleanup'
+  //   - status → 'cancelled' (so listActiveBySession / findLatestRecoverable
+  //     don't surface them)
+  //   - failure_kind → 'stage_q_invariant_cleanup' (audit trail)
+  //
+  // Companion task_projections cleanup (same migration):
+  //   - Only one branch: status='blocked' AND no durable handle in
+  //     continuationRef → resumable_actions=['none'],
+  //     degradation_reason='stage_q_invariant_cleanup'.
+  //
+  //   The earlier draft also had a "legacy 2-colon key" branch that
+  //   marked rows with `stage_q_runkind_key_legacy`. Codex review round 1
+  //   ❌#6 dropped it: production writer `buildLongSkillRunningProjection`
+  //   (`skill-running-projection.ts:322`) still emits 2-colon keys for
+  //   legitimate live tasks, so blanket-marking them would misfire.
+  //   Stale projections (regardless of key form) are caught by the
+  //   no-handle branch above.
+  {
+    name: '033_skill_task_runs_invariant_check',
+    up: (db) => {
+      // 1. Create new table with CHECK.
+      db.exec(`
+        CREATE TABLE skill_task_runs_q (
+          id TEXT PRIMARY KEY,
+          scope_id TEXT,
+          session_id TEXT,
+          agent TEXT,
+          run_id TEXT,
+          skill_id TEXT NOT NULL,
+          skill_name TEXT,
+          action TEXT NOT NULL,
+          tool_name TEXT,
+          run_kind TEXT NOT NULL,
+          status TEXT NOT NULL,
+          interaction_state TEXT NOT NULL,
+          goal_text TEXT,
+          resource_refs_json TEXT,
+          params_json TEXT,
+          steps_json TEXT NOT NULL DEFAULT '[]',
+          current_step_id TEXT,
+          artifacts_json TEXT NOT NULL DEFAULT '[]',
+          output_dir TEXT,
+          run_state_path TEXT,
+          scene_scores_path TEXT,
+          delivery_report_path TEXT,
+          failure_kind TEXT,
+          failure_detail TEXT,
+          job_id TEXT,
+          detached_task_id TEXT,
+          resume_payload_json TEXT,
+          created_at TEXT NOT NULL,
+          started_at TEXT,
+          updated_at TEXT NOT NULL,
+          finished_at TEXT,
+          CHECK (NOT (run_kind = 'primitive' AND tool_name = 'skill_lifecycle'))
+        )
+      `)
+      // 2. Copy rows with violator backfill.
+      db.exec(`
+        INSERT INTO skill_task_runs_q
+        SELECT
+          id, scope_id, session_id, agent, run_id, skill_id, skill_name, action,
+          CASE
+            WHEN run_kind = 'primitive' AND tool_name = 'skill_lifecycle' THEN
+              CASE
+                WHEN action IS NULL OR trim(action) = '' THEN 'skill_unknown_primitive_cleanup'
+                WHEN action = 'skill_lifecycle' THEN 'skill_unknown_primitive_cleanup'
+                WHEN action NOT LIKE 'skill\\_%' ESCAPE '\\' THEN 'skill_unknown_primitive_cleanup'
+                ELSE action
+              END
+            ELSE tool_name
+          END AS tool_name,
+          run_kind,
+          CASE
+            WHEN run_kind = 'primitive' AND tool_name = 'skill_lifecycle' THEN 'cancelled'
+            ELSE status
+          END AS status,
+          interaction_state, goal_text, resource_refs_json, params_json, steps_json,
+          current_step_id, artifacts_json, output_dir, run_state_path, scene_scores_path,
+          delivery_report_path,
+          CASE
+            WHEN run_kind = 'primitive' AND tool_name = 'skill_lifecycle' THEN 'stage_q_invariant_cleanup'
+            ELSE failure_kind
+          END AS failure_kind,
+          failure_detail, job_id, detached_task_id, resume_payload_json,
+          created_at, started_at, updated_at, finished_at
+        FROM skill_task_runs
+      `)
+      // 3. Clean stale task_projections — companion to schema fix.
+      //    Stale projection cleanup: status='blocked' AND no durable
+      //    handle. The "legacy 2-colon key" branch from earlier drafts
+      //    was DROPPED (Codex review round 1 ❌#6): the production writer
+      //    `buildLongSkillRunningProjection` (`skill-running-projection.ts:322`)
+      //    still emits 2-colon keys for legitimate live tasks, so blanket-
+      //    marking 2-colon-keyed rows as "legacy" would falsely retire
+      //    live tasks. The single-pass below catches genuinely stale
+      //    projections (no handle) regardless of key form.
+      db.exec(`
+        UPDATE task_projections
+        SET
+          resumable_actions_json = '["none"]',
+          degradation_reason = 'stage_q_invariant_cleanup',
+          updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        WHERE
+          status = 'blocked'
+          AND (
+            continuation_ref_json IS NULL
+            OR (
+              json_extract(continuation_ref_json, '$.outputDir') IS NULL
+              AND json_extract(continuation_ref_json, '$.runStatePath') IS NULL
+              AND json_extract(continuation_ref_json, '$.childRunId') IS NULL
+              AND json_extract(continuation_ref_json, '$.detachedTaskId') IS NULL
+            )
+          )
+          AND (degradation_reason IS NULL OR degradation_reason != 'stage_q_invariant_cleanup')
+      `)
+      // 4. Swap tables.
+      db.exec('DROP TABLE skill_task_runs')
+      db.exec('ALTER TABLE skill_task_runs_q RENAME TO skill_task_runs')
+      // 5. Recreate indexes (identical to migration 031).
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_skill_task_runs_scope_updated
+          ON skill_task_runs(scope_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_skill_task_runs_session_status_updated
+          ON skill_task_runs(session_id, status, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_skill_task_runs_skill_updated
+          ON skill_task_runs(skill_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_skill_task_runs_job_id
+          ON skill_task_runs(job_id);
+        CREATE INDEX IF NOT EXISTS idx_skill_task_runs_detached_task_id
+          ON skill_task_runs(detached_task_id);
+      `)
+    }
   }
 ]
 
@@ -1504,6 +1655,17 @@ const migrations: Migration[] = [
  * Safe to call multiple times -- already-applied migrations are skipped.
  * Each migration is wrapped in its own transaction.
  */
+/**
+ * Stage Q (Stage 11) — list all migration names. Test-only helper used
+ * by `migration-033-invariant.test.ts` to mark migrations 001-032 as
+ * applied in a fresh in-memory DB so only 033 runs. Production code
+ * MUST NOT call this — schema reasoning belongs in the migration
+ * definitions.
+ */
+export function __getMigrationNamesForTests(): string[] {
+  return migrations.map((m) => m.name)
+}
+
 export function runMigrations(db: MigrationDatabase): void {
   // Ensure the migrations tracking table exists
   db.exec(`

@@ -192,6 +192,32 @@ test('normalizeContinuationIntent trims values and requires a task id', () => {
   assert.equal(normalizeContinuationIntent({ taskId: '   ' }), null)
 })
 
+test('Stage Q: normalizeContinuationIntent preserves childRunId', () => {
+  // Audit §F-6 / Stage Q PR-4: childRunId must survive
+  // `normalizeContinuationIntent`, otherwise `runtime.buildContinuationIntent`
+  // sees an empty handle and refuses (false negative).
+  const normalized = normalizeContinuationIntent({
+    taskId: 'task-123',
+    childRunId: 'cr-q-test',
+  })
+  assert.ok(normalized)
+  assert.equal(normalized!.childRunId, 'cr-q-test')
+})
+
+test('Stage Q: normalizeContinuationRef-via-applyContinuationIntent preserves childRunId-only handle', () => {
+  // Pin: a childRunId-only intent does NOT collapse to null at the
+  // continuationRef layer. Without this fix Codex round 2 found that
+  // `applyContinuationIntentToState` discarded childRunId because the
+  // condition didn't include it.
+  const baseState = buildContinuationStateFromProjection(createProjection(), {})
+  const applied = applyContinuationIntentToState(baseState, {
+    taskId: baseState.taskId,
+    childRunId: 'cr-q-only',
+  })
+  assert.ok(applied.continuationRef, 'childRunId alone must trigger continuationRef')
+  assert.equal(applied.continuationRef!.childRunId, 'cr-q-only')
+})
+
 test('applyContinuationIntentToState keeps task identity while applying explicit continuation overrides', () => {
   const baseState = buildContinuationStateFromProjection(createProjection(), {
     executionId: 'exec-prev',

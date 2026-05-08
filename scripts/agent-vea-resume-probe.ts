@@ -227,7 +227,7 @@ function installProbeSkillContext(engine: Record<string, unknown>): void {
   engine.skillContextOrchestrator = {
     shouldKeepToolsWithVideo: () => false,
     findExplicitlyRequestedSkills: () => [],
-    hasActiveSkillExecution: () => false,
+    // Stage Q (Stage 11) — `hasActiveSkillExecution` retired.
     getCurrentReferenceSkillHint: () => armedHint,
     rememberReferenceSkillFromRunStateResource: (skillId: string) => {
       if (skillId !== 'video-expert-analyzer') return { armed: false }

@@ -12,6 +12,8 @@ import type {
 } from './types'
 import type { IntentClassification } from './intent-classifier'
 import type { PromptAssemblyResult } from './prompt-assembly'
+import { canResumeShape } from './resume-handle'
+import type { RecentSkillRunForResume } from './skill-turn-identity-snapshot'
 import type { RequestEnvelope } from './request-envelope'
 import type { ContinuationIntent, ContinuationState } from './continuation-state'
 import type { DomainAdapter } from './domain-adapter'
@@ -341,6 +343,18 @@ export interface TaskProjectionRecord {
   continuationRef?: ScopeRunTaskContinuation | null
   progress?: ScopeRunSkillProgress | null
   recentArtifacts?: ScopeRunEventPayload['artifactRefs']
+  /**
+   * Stage Q (Stage 11) — derived-at-read truth of "is this projection
+   * actually resumable?" Computed by `runtime.listTaskProjections()` /
+   * `runtime.getTaskProjection()` via `canResumeWithFs(continuationRef)`
+   * before returning to renderer. NOT persisted; main re-derives on each
+   * fetch so disk-state changes (deleted output dir, etc) are reflected.
+   *
+   * Renderer must consume this field directly and NOT recompute from
+   * `resumableActions` / `taskRunId` / `interactionState` in isolation
+   * (Stage Q audit §C-9 / plan §3.4 / contract C7).
+   */
+  canResume?: boolean
   createdAt: string
   updatedAt: string
 }
@@ -789,6 +803,15 @@ export interface TurnEngineHost<TSession extends TurnEngineSession = TurnEngineS
     summary: string
     updatedAt: number
   } | null
+  /**
+   * Stage Q (Stage 11) — formal interface declaration for what was
+   * previously two `(host as unknown as ...)` type punctures in
+   * `turn-engine.ts:1612, 1644`. Resolves the most-recent skill task
+   * run from the SQLite repository when `resolveRecentSkillRun` is
+   * insufficient (the latter projects from the in-memory ledger; this
+   * one queries the durable run row).
+   */
+  resolveRecentSkillTaskRun?: (sessionId: string | undefined) => RecentSkillRunForResume | null
   skillTaskSupervisor?: {
     inspectLatestSkillTask: (params: {
       sessionId?: string | null
@@ -1419,10 +1442,23 @@ export function loadSkillRunContract(
   const runStatePathInitial = trimmed(params.runStatePath) || trimmed(snapshot?.runStatePath)
   const taskRunId = trimmed(snapshot?.taskRunId)
   const detachedTaskId = trimmed(snapshot?.detachedTaskId)
+  // Stage Q (Stage 11) — Audit §F-7 found the prior anchor predicate was
+  // too low: `taskRunId` alone (a stale row id) made `loadSkillRunContract`
+  // produce a "ghost" contract (empty artifactRoots + null actionInput)
+  // that downstream steering then chased into checkpoint_budget. New
+  // contract: anchor must be either a true durable handle (canResumeShape
+  // includes childRunId / detachedTaskId / both outputDir+runStatePath)
+  // OR a skillId — but skillId alone produces a meta-only contract and
+  // the steering layer treats it as inert.
+  const anchorIsDurable = canResumeShape({
+    detachedTaskId,
+    outputDir,
+    runStatePath: runStatePathInitial,
+  })
 
-  // Minimum anchoring signal: need at least one durable handle OR a
-  // skillId + outputDir pair to build a meaningful contract.
-  if (!skillId && !outputDir && !taskRunId && !detachedTaskId) {
+  // Minimum anchoring signal: need a durable handle OR a skillId.
+  // Bare `taskRunId` no longer qualifies.
+  if (!skillId && !anchorIsDurable) {
     return null
   }
 

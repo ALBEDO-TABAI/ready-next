@@ -52,6 +52,8 @@ import { assertStageNChildLoopInvariants } from './stage-n-boot-assertion'
 import { RunProjection } from './run-projection'
 import { syncTaskProjection } from './task-projection-sync'
 import { reconcileTaskProjections } from './task-projection-reconciler'
+import { canResumeShape, canResumeWithFs, type ResumeHandle } from './resume-handle'
+import { assertSkillTaskRunInvariantConsistency } from './skill-task-tracker'
 import type { ProjectionTruthSnapshot, TaskProjectionRecord } from './run-contracts'
 import { getBudgetUsagePercent, restoreContinuationTaskBudgetRuntime } from './run-budget-policy'
 import { normalizeContinuationIntent, type ContinuationIntent } from './continuation-state'
@@ -217,6 +219,31 @@ function childRunSummaryStatusFromProjection(status: string): string {
   return 'running'
 }
 
+/**
+ * Stage Q (Stage 11) — derive `canResume` for a TaskProjectionRecord.
+ *
+ * Pure helper used by `runtime.listTaskProjections` /
+ * `runtime.getTaskProjection`. Reads `continuationRef` and computes
+ * fs-aware truth (`canResumeWithFs`) so renderer can consume one
+ * boolean instead of recomputing across `resumableActions / taskRunId /
+ * interactionState`.
+ *
+ * NOTE: this is read-only — it returns a NEW record with `canResume`
+ * appended; the underlying store is not mutated.
+ */
+function deriveTaskProjectionCanResume(record: TaskProjectionRecord): TaskProjectionRecord {
+  const ref = record.continuationRef || null
+  const handle: ResumeHandle = {
+    childRunId:
+      (ref as { childRunId?: string | null } | null)?.childRunId
+      || null,
+    detachedTaskId: ref?.detachedTaskId || null,
+    outputDir: ref?.outputDir || null,
+    runStatePath: ref?.runStatePath || null,
+  }
+  return { ...record, canResume: canResumeWithFs(handle) }
+}
+
 export class AgentControlRuntime extends EventEmitter {
   private readonly db = getDatabase()
   private readonly settingsRepository = new AppSettingsRepository()
@@ -321,6 +348,17 @@ export class AgentControlRuntime extends EventEmitter {
   constructor(agentManager: AgentManager, browserController?: BrowserController) {
     super()
     this.agentManager = agentManager
+    // Stage Q (Stage 11) — boot fence: detect the incompatible
+    // combination of `READY_SKILL_TASK_RUN_INVARIANT_ENFORCED='0'` AND
+    // a migrated CHECK constraint on `skill_task_runs`. PR-3 shipped
+    // the `assertSkillTaskRunInvariantConsistency()` helper body; PR-5
+    // wires it into the constructor here, immediately after the
+    // database accessor is ready and before any code path that could
+    // attempt to write a violator row. If the schema is fresh (no
+    // CHECK yet) or the flag is on (default), this is a no-op. If
+    // both conditions diverge, throw early so the user sees the error
+    // at startup rather than mid-session.
+    this.maybeAssertSkillTaskRunInvariant()
     this.orchestrator = new ClaudeSdkOrchestrator({
       browserController,
       sidecarManager: this.sidecar
@@ -631,13 +669,22 @@ export class AgentControlRuntime extends EventEmitter {
     } catch (error) {
       console.warn(`[task-projection-reconciler] failed: ${error instanceof Error ? error.message : String(error)}`)
     }
-    return this.taskProjectionStore.listByScope(normalizedScopeId) as TaskProjectionRecord[]
+    const refreshed = this.taskProjectionStore.listByScope(normalizedScopeId) as TaskProjectionRecord[]
+    // Stage Q (Stage 11) — derive canResume per record before returning.
+    // See `TaskProjectionRecord.canResume` doc comment for rationale.
+    return refreshed.map((record) => deriveTaskProjectionCanResume(record))
   }
 
   getTaskProjection(taskId: string): TaskProjectionRecord | null {
     const normalizedTaskId = String(taskId || '').trim()
     if (!normalizedTaskId) return null
-    return this.taskProjectionStore.get(normalizedTaskId) as TaskProjectionRecord | null
+    const record = this.taskProjectionStore.get(normalizedTaskId) as TaskProjectionRecord | null
+    if (!record) return null
+    // Stage Q (Stage 11) — derive canResume on the single-record path too,
+    // so direct fetches (renderer cold-start, IPC `getTaskProjection`)
+    // see the same truth as `listTaskProjections`. Stage Q plan §3.4
+    // contract C10.
+    return deriveTaskProjectionCanResume(record)
   }
 
   searchSessionRecall(payload?: {
@@ -1212,21 +1259,40 @@ export class AgentControlRuntime extends EventEmitter {
     requestId?: string
     responseText?: string
     continuationIntent?: ContinuationIntent | null
-  }): Promise<{ success: boolean; error?: string }> {
+  }): Promise<{ success: boolean; error?: string; errorKind?: string }> {
     const target = this.resolveTaskControlTarget(payload.scopeId, payload.taskId)
     if (!target) {
       return { success: false, error: 'Conversation scope not found' }
+    }
+    const builtIntent = this.buildContinuationIntent({
+      projection: target.projection,
+      scopeRunSummary: target.scopeRunSummary,
+      incoming: payload.continuationIntent || null,
+      responseText: payload.responseText,
+    })
+    // Stage Q (Stage 11) — Audit §F-6 / plan §3.4 contract C6+C7:
+    // refuse to fire `sendScoped` with an empty-shell intent. The
+    // `buildContinuationIntent` gate (canResumeShape) returns null
+    // when no real durable handle is present; the renderer button
+    // double-gates via `canResume`, but main MUST also refuse so
+    // direct IPC calls (programmatic resumes, future agents) cannot
+    // bypass the contract.
+    if (builtIntent === null) {
+      logAgentMetric('runtime_resume_run_rejected_not_resumable', {
+        scopeId: target.scope.id,
+        taskId: payload.taskId || null,
+      })
+      return {
+        success: false,
+        error: 'Task is not resumable: no durable handle (childRunId, detachedTaskId, or outputDir+runStatePath).',
+        errorKind: 'not_resumable',
+      }
     }
     return this.sendScoped({
       scopeId: target.scope.id,
       requestId: payload.requestId,
       message: String(payload.responseText || '').trim() || '继续当前任务。',
-      continuationIntent: this.buildContinuationIntent({
-        projection: target.projection,
-        scopeRunSummary: target.scopeRunSummary,
-        incoming: payload.continuationIntent || null,
-        responseText: payload.responseText,
-      }),
+      continuationIntent: builtIntent,
     })
   }
 
@@ -1236,7 +1302,7 @@ export class AgentControlRuntime extends EventEmitter {
     requestId?: string
     responseText: string
     continuationIntent?: ContinuationIntent | null
-  }): Promise<{ success: boolean; error?: string }> {
+  }): Promise<{ success: boolean; error?: string; errorKind?: string }> {
     const responseText = String(payload.responseText || '').trim()
     if (!responseText) {
       return { success: false, error: 'Interaction response is required' }
@@ -1245,16 +1311,33 @@ export class AgentControlRuntime extends EventEmitter {
     if (!target) {
       return { success: false, error: 'Conversation scope not found' }
     }
+    const builtIntent = this.buildContinuationIntent({
+      projection: target.projection,
+      scopeRunSummary: target.scopeRunSummary,
+      incoming: payload.continuationIntent || null,
+      responseText,
+    })
+    // Stage Q (Stage 11) — same not_resumable refusal as resumeRun.
+    // respondToInteraction is the other public IPC entry that drives a
+    // resume-shaped flow; if the projection's continuationRef has no
+    // durable handle, refuse rather than silently downgrade to "fresh
+    // message" semantics.
+    if (builtIntent === null) {
+      logAgentMetric('runtime_respond_to_interaction_rejected_not_resumable', {
+        scopeId: target.scope.id,
+        taskId: payload.taskId || null,
+      })
+      return {
+        success: false,
+        error: 'Task is not resumable: no durable handle (childRunId, detachedTaskId, or outputDir+runStatePath).',
+        errorKind: 'not_resumable',
+      }
+    }
     return this.sendScoped({
       scopeId: target.scope.id,
       requestId: payload.requestId,
       message: responseText,
-      continuationIntent: this.buildContinuationIntent({
-        projection: target.projection,
-        scopeRunSummary: target.scopeRunSummary,
-        incoming: payload.continuationIntent || null,
-        responseText,
-      }),
+      continuationIntent: builtIntent,
     })
   }
 
@@ -2191,6 +2274,49 @@ export class AgentControlRuntime extends EventEmitter {
     return this.runProjection.recordEvent(payload, projectionTruth)
   }
 
+  /**
+   * Stage Q (Stage 11) — boot-fence helper. Reads the `skill_task_runs`
+   * table SQL from sqlite_master and compares against the
+   * `READY_SKILL_TASK_RUN_INVARIANT_ENFORCED` flag. Throws when the
+   * combination is incompatible:
+   *
+   *   - flag=false + migrated CHECK present  →  hard fail
+   *
+   * All other combinations (flag=true regardless of schema, flag=false
+   * with no CHECK yet) are no-ops.
+   *
+   * On host-Node where better-sqlite3 may not be loaded yet (test
+   * harnesses, dev launcher), the underlying `getRawDb()` returns null
+   * and `getCheckEnforcedSql` returns null → `assertSkillTaskRunInvariantConsistency`
+   * returns 'unknown', which we treat as no-op.
+   */
+  private maybeAssertSkillTaskRunInvariant(): void {
+    const rawFlag = (process.env.READY_SKILL_TASK_RUN_INVARIANT_ENFORCED ?? '').trim().toLowerCase()
+    const invariantEnforced = !(rawFlag === '0' || rawFlag === 'false' || rawFlag === 'off')
+    const result = assertSkillTaskRunInvariantConsistency({
+      getCheckEnforcedSql: () => {
+        try {
+          const rawDb = this.db.getRawDb()
+          if (!rawDb) return null
+          const row = rawDb
+            .prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='skill_task_runs'")
+            .get() as { sql?: string } | undefined
+          return row?.sql ?? null
+        } catch {
+          return null
+        }
+      },
+      invariantEnforced,
+    })
+    if (result === 'incompatible') {
+      throw new Error(
+        'READY_SKILL_TASK_RUN_INVARIANT_ENFORCED=0 is incompatible with a migrated CHECK '
+          + 'constraint on skill_task_runs. To restore legacy matching, write a forward-fix '
+          + 'migration that drops the CHECK before disabling the flag.',
+      )
+    }
+  }
+
   private resolveTaskControlTarget(
     scopeId: string,
     taskId?: string,
@@ -2245,8 +2371,34 @@ export class AgentControlRuntime extends EventEmitter {
     if (!taskId) return null
 
     const continuationRef = params.projection?.continuationRef || params.scopeRunSummary?.taskContinuation || null
+
+    // Stage Q (Stage 11) — Audit §F-6 found this builder was the main-side
+    // empty-shell escape route: any taskId would pass, regardless of
+    // whether the merged intent carried a real durable handle. Stage Q
+    // contract C6 routes the resume gate through `canResumeShape` here.
+    // When the resulting intent has no real handle (no childRunId, no
+    // detachedTaskId, no outputDir+runStatePath pair), return null so
+    // `runtime.resumeRun` can emit `agent:error{errorKind:'not_resumable'}`.
+    const incomingChildRunId = incoming?.childRunId
+    const continuationRefChildRunId =
+      (continuationRef as { childRunId?: string | null } | null)?.childRunId || null
+    const mergedChildRunId = incomingChildRunId || continuationRefChildRunId || null
+    const intentHandle: ResumeHandle = {
+      childRunId: mergedChildRunId,
+      detachedTaskId: incoming?.detachedTaskId || continuationRef?.detachedTaskId || null,
+      outputDir: incoming?.outputDir || continuationRef?.outputDir || null,
+      runStatePath: incoming?.runStatePath || continuationRef?.runStatePath || null,
+    }
+    if (!canResumeShape(intentHandle)) {
+      return null
+    }
+
     return normalizeContinuationIntent({
       taskId,
+      // Stage Q (Stage 11) — propagate childRunId through the
+      // normalize step so downstream consumers (resumeRun, IPC,
+      // child runner) see the fresh handle.
+      childRunId: mergedChildRunId || undefined,
       executionId: incoming?.executionId || continuationRef?.executionId || undefined,
       stepId:
         incoming?.stepId

@@ -145,8 +145,19 @@ function chooseContext(inputs: ResolveTurnFrameInputs): ActiveSkillContext | nul
   return getRememberedActiveSkillContext(inputs.sessionId)
 }
 
-function inferLiveness(context: ActiveSkillContext | null, snapshot?: SkillTaskSupervisorSnapshot | null): TurnFrameLiveness {
+function inferLiveness(
+  context: ActiveSkillContext | null,
+  snapshot?: SkillTaskSupervisorSnapshot | null,
+  userIntent?: TurnUserIntent,
+): TurnFrameLiveness {
   if (!context) return 'unknown'
+  // Stage Q (Stage 11) — when the user said "start" (fresh /
+  // restart_from_existing intent), do NOT borrow stale supervisor or
+  // context liveness. Even if a supervisor snapshot was loaded, treat
+  // the frame as having unknown liveness so steering doesn't checkpoint
+  // the new turn into the old run's blocked/budget_paused state.
+  // Audit §C-9 / §E / plan §3.6 contract C9.
+  if (userIntent === 'start') return 'unknown'
   if (snapshot && context.source === 'supervisor') {
     if (snapshot.status === 'completed') return 'done'
     if (snapshot.status === 'failed') return 'failed'
@@ -262,7 +273,7 @@ export function resolveTurnFrame(inputs: ResolveTurnFrameInputs): TurnFrame {
         runContract,
       }
       : null,
-    liveness: inferLiveness(context, supervisorForContext),
+    liveness: inferLiveness(context, supervisorForContext, userIntent),
     progress: progressFromSnapshot(supervisorForContext),
     steering: {
       mode: 'ask_model',

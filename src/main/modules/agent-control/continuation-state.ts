@@ -46,6 +46,14 @@ export interface ContinuationIntent {
   runStatePath?: string
   outputDir?: string
   progressFingerprint?: string
+  /**
+   * Stage Q (Stage 11) — child run identifier. Required for Stage Q's
+   * canResumeShape gate at `runtime.buildContinuationIntent` to reject
+   * empty-shell intents. Without this field on the type, an incoming
+   * intent's childRunId would be silently dropped by
+   * `normalizeContinuationIntent`, leaving the resume gate blind.
+   */
+  childRunId?: string
 }
 
 export interface ParsedContinuationControlText {
@@ -161,6 +169,10 @@ function normalizeContinuationRef(value: unknown, taskId: string, currentStepId?
   const runStatePath = String(record.runStatePath || '').trim()
   const outputDir = String(record.outputDir || '').trim()
   const progressFingerprint = String(record.progressFingerprint || '').trim()
+  // Stage Q (Stage 11) — childRunId is a real durable handle (Stage Q
+  // contract). It must participate in non-empty detection so a
+  // `childRunId`-only projection's continuationRef survives normalization.
+  const childRunId = String(record.childRunId || '').trim()
   if (
     !executionId &&
     !todoId &&
@@ -171,7 +183,8 @@ function normalizeContinuationRef(value: unknown, taskId: string, currentStepId?
     !action &&
     !runStatePath &&
     !outputDir &&
-    !progressFingerprint
+    !progressFingerprint &&
+    !childRunId
   ) {
     return null
   }
@@ -192,6 +205,7 @@ function normalizeContinuationRef(value: unknown, taskId: string, currentStepId?
     runStatePath: runStatePath || null,
     outputDir: outputDir || null,
     progressFingerprint: progressFingerprint || null,
+    childRunId: childRunId || null,
   }
 }
 
@@ -224,6 +238,9 @@ export function normalizeContinuationIntent(value: Partial<ContinuationIntent> |
   copy('runStatePath')
   copy('outputDir')
   copy('progressFingerprint')
+  // Stage Q (Stage 11) — preserve childRunId so canResumeShape can use it
+  // at `runtime.buildContinuationIntent`.
+  copy('childRunId')
   return normalized
 }
 
@@ -247,6 +264,8 @@ export function applyContinuationIntentToState(
     || normalizedIntent.skillId
     || normalizedIntent.runStatePath
     || normalizedIntent.outputDir
+    // Stage Q (Stage 11) — childRunId triggers continuationRef construction.
+    || normalizedIntent.childRunId
   )
     ? normalizeContinuationRef({
       ...(baseState.continuationRef || {}),
@@ -264,6 +283,8 @@ export function applyContinuationIntentToState(
       runStatePath: normalizedIntent.runStatePath || baseState.continuationRef?.runStatePath,
       outputDir: normalizedIntent.outputDir || baseState.continuationRef?.outputDir,
       progressFingerprint: normalizedIntent.progressFingerprint || baseState.continuationRef?.progressFingerprint,
+      // Stage Q (Stage 11) — propagate childRunId through the merge.
+      childRunId: normalizedIntent.childRunId || baseState.continuationRef?.childRunId,
     }, baseState.taskId, currentStepId)
     : null
 

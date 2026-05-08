@@ -448,6 +448,18 @@ function createRunFromLifecycleEvent(
   }
 }
 
+// Stage Q (Stage 11) — module-load snapshot of the runKind invariant flag.
+// Tests can override via env before importing this module. PR-3 ships the
+// code-level partition; PR-5 adds the boot CHECK constraint that makes
+// flag=false incompatible with the schema (see assertSkillTaskRunInvariantConsistency).
+// Parsing aligned with `turn-feature-flags.ts` `isFlagEnabled()` style:
+// trim + lower-case, accept ('0' | 'false' | 'off') as disable.
+const SKILL_TASK_RUN_INVARIANT_ENFORCED = (() => {
+  const raw = (process.env.READY_SKILL_TASK_RUN_INVARIANT_ENFORCED ?? '').trim().toLowerCase()
+  if (raw === '') return true // default enabled (matches turn-feature-flags default)
+  return !(raw === '0' || raw === 'false' || raw === 'off')
+})()
+
 function findTaskRunForEvent(repository: SkillTaskRunRepository, event: SkillTaskEvent): SkillTaskRunRecord | null {
   if (event.detachedTaskId) {
     const detached = repository.findByDetachedTaskId(event.detachedTaskId)
@@ -455,8 +467,16 @@ function findTaskRunForEvent(repository: SkillTaskRunRepository, event: SkillTas
   }
   const sessionId = event.sessionId || event.scopeId
   if (!sessionId || !event.skillId) return null
+  // Stage Q.3a — partition active row matching by runKind so a primitive
+  // event does not reuse a typed_action parent's row (and vice versa).
+  // Normalize undefined event.runKind to 'primitive' to match
+  // `createRunFromEvent`'s default (`event.runKind || 'primitive'`).
+  // Falls back to legacy match when flag disabled.
+  const eventRunKind = event.runKind || 'primitive'
   const active = repository.listActiveBySession(sessionId, 20)
-    .find((run) => run.skillId === event.skillId && !isChildRunRecord(run))
+    .find((run) => run.skillId === event.skillId
+      && !isChildRunRecord(run)
+      && (!SKILL_TASK_RUN_INVARIANT_ENFORCED || run.runKind === eventRunKind))
   if (active) return active
   if (event.runKind === 'typed_action' && event.status === 'running') return null
   const latest = repository.findLatestRecoverable({
@@ -464,32 +484,91 @@ function findTaskRunForEvent(repository: SkillTaskRunRepository, event: SkillTas
     skillId: event.skillId,
     includeDone: true,
   })
-  return isChildRunRecord(latest) ? null : latest
+  if (!latest || isChildRunRecord(latest)) return null
+  // Stage Q.3a — same partition rule on the latest-recoverable fallback.
+  if (SKILL_TASK_RUN_INVARIANT_ENFORCED && latest.runKind !== eventRunKind) return null
+  return latest
 }
 
 function findTaskRunForLifecycleEvent(
   repository: SkillTaskRunRepository,
   event: SkillParentTaskLifecycleEvent,
 ): SkillTaskRunRecord | null {
+  // Stage Q.3a — exact-handle lookups must also refuse primitive rows.
+  // Otherwise lifecycle could mutate a primitive row's `tool_name` to
+  // 'skill_lifecycle', producing the very `run_kind='primitive' AND
+  // tool_name='skill_lifecycle'` violation Stage Q schema CHECK forbids.
   if (event.taskRunId) {
     const exact = repository.get(event.taskRunId)
-    if (exact && !isChildRunRecord(exact)) return exact
+    if (exact && !isChildRunRecord(exact)) {
+      if (SKILL_TASK_RUN_INVARIANT_ENFORCED && exact.runKind === 'primitive') {
+        // fall through; lifecycle should NOT reuse a primitive row.
+      } else {
+        return exact
+      }
+    }
   }
   if (event.detachedTaskId) {
     const detached = repository.findByDetachedTaskId(event.detachedTaskId)
-    if (detached && !isChildRunRecord(detached)) return detached
+    if (detached && !isChildRunRecord(detached)) {
+      if (SKILL_TASK_RUN_INVARIANT_ENFORCED && detached.runKind === 'primitive') {
+        // fall through.
+      } else {
+        return detached
+      }
+    }
   }
   const sessionId = event.sessionId || event.scopeId
   if (!sessionId || !event.skillId) return null
+  // Stage Q.3a — lifecycle events MUST NOT reuse a primitive row. Lifecycle
+  // mutates `tool_name` to 'skill_lifecycle' which, on a primitive row,
+  // would create the very contradiction Stage Q schema CHECK forbids
+  // (`run_kind='primitive' AND tool_name='skill_lifecycle'`). Restrict the
+  // active fallback to typed_action rows when the flag is on.
   const active = repository.listActiveBySession(sessionId, 20)
-    .find((run) => run.skillId === event.skillId && !isChildRunRecord(run))
+    .find((run) => run.skillId === event.skillId
+      && !isChildRunRecord(run)
+      && (!SKILL_TASK_RUN_INVARIANT_ENFORCED || run.runKind === 'typed_action'))
   if (active) return active
   const latest = repository.findLatestRecoverable({
     sessionId,
     skillId: event.skillId,
     includeDone: true,
   })
-  return isChildRunRecord(latest) ? null : latest
+  if (!latest || isChildRunRecord(latest)) return null
+  if (SKILL_TASK_RUN_INVARIANT_ENFORCED && latest.runKind !== 'typed_action') return null
+  return latest
+}
+
+/**
+ * Stage Q (Stage 11) — boot-time fence: detect the incompatible
+ * combination of `flag=false` AND a migrated CHECK constraint on
+ * `skill_task_runs`. PR-3 lands the function body only; PR-5 wires it
+ * into the runtime boot path immediately after `AgentControlRuntime`
+ * construction at `runtime.ts:220-238` style position. Test-only callers
+ * may invoke this directly with a synthetic database.
+ *
+ * Returns:
+ *   - 'ok' when the schema and flag are mutually consistent
+ *   - 'incompatible' when CHECK is enforced but the flag is OFF (caller
+ *     should throw before any DB write so the user sees the error early)
+ *   - 'unknown' when the schema cannot be inspected (no DB available)
+ */
+export function assertSkillTaskRunInvariantConsistency(params: {
+  getCheckEnforcedSql: () => string | null
+  invariantEnforced: boolean
+}): 'ok' | 'incompatible' | 'unknown' {
+  let sql: string | null
+  try {
+    sql = params.getCheckEnforcedSql()
+  } catch {
+    return 'unknown'
+  }
+  if (sql == null) return 'unknown'
+  // Look for the literal CHECK clause emitted by Stage Q PR-5 migration 033.
+  const hasCheck = /CHECK\s*\(\s*NOT\s*\(\s*run_kind\s*=\s*'primitive'\s+AND\s+tool_name\s*=\s*'skill_lifecycle'\s*\)\s*\)/i.test(sql)
+  if (hasCheck && !params.invariantEnforced) return 'incompatible'
+  return 'ok'
 }
 
 function buildRunArtifacts(event: SkillTaskEvent, stepId: string, nowIso: string): SkillTaskRunArtifact[] {

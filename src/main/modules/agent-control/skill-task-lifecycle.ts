@@ -2,6 +2,7 @@ import type {
   ScopeRunResumableAction,
   ScopeRunTaskContinuation,
 } from './types'
+import { canResumeShape } from './resume-handle'
 import type {
   SkillTaskLifecycleReason,
   SkillTaskLifecycleSignal,
@@ -63,14 +64,23 @@ function buildTaskContinuation(
 }
 
 function hasContinuationHandle(continuation: ScopeRunTaskContinuation): boolean {
-  return Boolean(
-    continuation.taskId
-      || continuation.taskRunId
-      || continuation.detachedTaskId
-      || continuation.runStatePath
-      || continuation.outputDir
-      || continuation.skillId,
-  )
+  // Stage Q (Stage 11) — single-source via `canResumeShape`. Audit §F-1 /
+  // §3.1 found that the prior wide predicate (taskId / taskRunId / skillId
+  // alone) treated empty shells as resumable, so a humanizer-zh blocked
+  // row with only `skillId + taskRunId` produced a "可继续" task card. The
+  // helper now requires childRunId, detachedTaskId, or both outputDir AND
+  // runStatePath. Empty shells are correctly rejected.
+  //
+  // `continuation.childRunId` is read from `continuation` directly rather
+  // than from the typed `ResumeHandle` interface because
+  // `ScopeRunTaskContinuation` is the wider per-step shape; if the field
+  // happens to be present it is treated identically.
+  return canResumeShape({
+    childRunId: (continuation as { childRunId?: string | null }).childRunId ?? null,
+    detachedTaskId: continuation.detachedTaskId ?? null,
+    outputDir: continuation.outputDir ?? null,
+    runStatePath: continuation.runStatePath ?? null,
+  })
 }
 
 function buildBlockedReason(snapshot: SkillTaskSupervisorSnapshot, fallback: string): string {

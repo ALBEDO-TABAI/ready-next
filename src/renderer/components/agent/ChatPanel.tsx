@@ -1131,7 +1131,11 @@ function TaskCard({
                 取消后台任务
               </button>
             )}
-            {isDetachedTask && (run.resumableActions || []).includes('continue') && (
+            {/* Stage Q (Stage 11) — `continue` and `retry` actions are
+                gated by `run.canResume` (main-derived truth). `cancel`
+                stays ungated (always allowed). Audit §C-9 / §D / contract C7.
+                Defensive default: undefined canResume treated as false. */}
+            {isDetachedTask && run.canResume === true && (run.resumableActions || []).includes('continue') && (
               <button
                 type="button"
                 onClick={() => onContinueDetachedTask?.(run.scopeId, run.taskId || null)}
@@ -1140,7 +1144,7 @@ function TaskCard({
                 继续后台任务
               </button>
             )}
-            {childRunId && (run.resumableActions || []).includes('continue') && (
+            {childRunId && run.canResume === true && (run.resumableActions || []).includes('continue') && (
               <button
                 type="button"
                 onClick={() => onContinueChildRun?.(run.scopeId, childRunId)}
@@ -1158,7 +1162,10 @@ function TaskCard({
                 取消
               </button>
             )}
-            {run.interactionState === 'suspended' && (
+            {/* Stage Q — generic 继续运行 button: previously triggered on
+                `interactionState === 'suspended'` alone; now also gated
+                by `canResume === true`. */}
+            {run.interactionState === 'suspended' && run.canResume === true && (
               <button
                 type="button"
                 onClick={() => onResumeRun?.(run.scopeId)}
@@ -1203,7 +1210,11 @@ function TaskCard({
                 补交结果
               </button>
             )}
-            {(run.resumableActions || []).includes('retry') && (
+            {/* Stage Q (Stage 11) — retry gate: empty-shell projections
+                can have stale 'retry' in resumableActions but
+                canResume=false; we refuse to render the button.
+                Defensive default applies (undefined → not resumable). */}
+            {run.canResume === true && (run.resumableActions || []).includes('retry') && (
               <button
                 type="button"
                 onClick={() => onRetry?.(run.scopeId)}
@@ -2351,6 +2362,10 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         degradationReason: projection?.degradationReason,
         recoveryHistory: projection?.recoveryHistory,
         blockedReason: projection?.blockedReason ?? null,
+        // Stage Q (Stage 11) — propagate main-derived canResume so the
+        // mainline persisted-scope synthesis carries the same truth as
+        // cold-start path. Audit §C-9 / contract C7.
+        canResume: projection?.canResume,
       }, projection)
     })
     const merged = new Map<string, TaskCardRun>()
@@ -2395,6 +2410,8 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         degradationReason: projection?.degradationReason,
         recoveryHistory: projection?.recoveryHistory,
         blockedReason: projection?.blockedReason ?? null,
+        // Stage Q (Stage 11) — propagate main-derived canResume.
+        canResume: projection?.canResume,
       }, projection, persistedRun))
     }
     // Stage 6 L6: only inject synthesized active-child-run rows when the
@@ -2486,6 +2503,10 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         degradationReason: projection.degradationReason,
         recoveryHistory: projection.recoveryHistory,
         blockedReason: projection.blockedReason ?? null,
+        // Stage Q (Stage 11) — propagate main-derived canResume so cold-
+        // start TaskCardRun synthesis carries the same truth as the live
+        // scopeRunStates path.
+        canResume: projection.canResume,
       }, projection))
     }
     return Array.from(merged.values()).sort(

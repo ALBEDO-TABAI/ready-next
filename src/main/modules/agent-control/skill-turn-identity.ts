@@ -141,6 +141,7 @@ export function resolveSkillTurnIdentity(snapshot: SkillTurnIdentitySnapshot): S
     runStateResourceVia,
     providedContinuationState,
     isSkillResumeTurnDetected,
+    isSkillRestartTurnDetected,
     isConfigRepairTurnDetected,
     previousAssistantSkillToolUses,
     referenceHintSnapshot,
@@ -200,6 +201,31 @@ export function resolveSkillTurnIdentity(snapshot: SkillTurnIdentitySnapshot): S
       confidence: 'explicit',
       source: 'explicit_user_mention',
       contextText: firstSkillMatch.text,
+    }
+  }
+
+  if (!providedContinuationState && isSkillRestartTurnDetected) {
+    const historicalSkill = pickHistoricalSkillRun(snapshot)
+    if (historicalSkill?.skillId) {
+      const recovered = explicitlyRequestedSkillsBySkillIdProbe.find(
+        (s) => s.id === historicalSkill.skillId || s.skillId === historicalSkill.skillId,
+      )
+      const skillName = String(recovered?.name || historicalSkill.skillId)
+      return {
+        mode: 'skill',
+        relation: 'new',
+        skillId: historicalSkill.skillId,
+        skillName,
+        confidence: activeSkillContextSnapshot ? 'active_task' : 'history',
+        source: 'skill_history',
+        resumeHandle: {
+          outputDir: historicalSkill.outputDir ?? null,
+          runStatePath: historicalSkill.runStatePath ?? null,
+          taskRunId: historicalSkill.taskRunId ?? null,
+          childRunId: historicalSkill.childRunId ?? null,
+        },
+        contextText: `用户希望重新开始使用 skill "${skillName}"`,
+      }
     }
   }
 
@@ -429,7 +455,7 @@ export interface ApplySkillTurnIdentityContext {
     scopeId?: string | null
     skillId?: string | null
   }) => SkillTaskSupervisorSnapshot
-  resolveActiveSkillContextLive: (
+  resolveActiveSkillContext: (
     inputs?: ResolveActiveSkillContextInputs,
   ) => ActiveSkillContext | null
   rememberActiveSkillContext: (
@@ -605,7 +631,7 @@ export function applySkillTurnIdentity(
         scopeId: ctx.sessionId,
       })
       const supervisorSkillRun = ctx.skillRunFromSupervisorSnapshot(supervisorSnapshot)
-      const activeSkillContext = ctx.resolveActiveSkillContextLive({
+      const activeSkillContext = ctx.resolveActiveSkillContext({
         sessionId: ctx.sessionId,
         supervisorSnapshot,
         inspectSupervisor: false,
@@ -652,16 +678,30 @@ export function applySkillTurnIdentity(
         .findExplicitlyRequestedSkills(`skill ${skillId}`)
         .find((skill) => skill.id === skillId)
       const skillName = String(recoveredSkill?.name || identity.skillName || skillId)
-      const skillContextInjectionText = ctx.buildSkillResumeContextPrompt({
-        skillName,
-        skillId,
-        action: latestSkillRun.action ?? null,
-        summary: latestSkillRun.summary ?? null,
-        userText: ctx.currentTurnResumeText || ctx.contextualUserInput,
-      })
+      const userText = ctx.currentTurnResumeText || ctx.contextualUserInput
+      const skillContextInjectionText = identity.relation === 'new'
+        ? [
+          `系统补充：这是一次 skill 重新开始请求。优先使用 skill "${skillName}" (${skillId})，按同一目标重新发起，不要沿用旧进度。`,
+          latestSkillRun.action ? `上一轮技能动作：${latestSkillRun.action}` : '',
+          latestSkillRun.summary ? `上次摘要/目标、输出目录或 artifact、失败原因：${latestSkillRun.summary}` : '',
+          `用户本轮补充内容：${userText || '重新开始当前任务。'}`,
+        ].filter(Boolean).join('\n')
+        : ctx.buildSkillResumeContextPrompt({
+          skillName,
+          skillId,
+          action: latestSkillRun.action ?? null,
+          summary: latestSkillRun.summary ?? null,
+          userText,
+        })
       if (
         activeSkillContext
         && ctx.isSameSkillRunForResume(activeContextSkillRun, latestSkillRun)
+        // Stage Q (Stage 11) — restart relation='new' must NOT re-remember
+        // the old active context. Audit §E found that this line was
+        // running for restart turns too (the apply branch was relation-
+        // agnostic), so 重新开始 cemented the stale context for future
+        // turns. Plan §3.6 contract C9.
+        && identity.relation !== 'new'
       ) {
         ctx.rememberActiveSkillContext(ctx.sessionId, activeSkillContext)
       }

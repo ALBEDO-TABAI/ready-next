@@ -21,6 +21,14 @@ type ContinuationIntentPayload = {
   runStatePath?: string
   outputDir?: string
   progressFingerprint?: string
+  /**
+   * Stage Q (Stage 11) — child run identifier. Renderer-side resume
+   * paths (`buildRunContinuationIntent`) read childRunId from the live
+   * `taskContinuation` and propagate it through this payload to main,
+   * where `runtime.buildContinuationIntent`'s canResumeShape gate
+   * uses it to validate resumability.
+   */
+  childRunId?: string
 }
 
 // Agent API

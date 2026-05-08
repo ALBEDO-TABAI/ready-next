@@ -67,6 +67,11 @@ const BLACKLIST_FIELDS = new Set([
   'steps',
   'taskTitle',
   'taskSummary',
+  // Stage Q (Stage 11) — `canResume` is a projection-derived field
+  // (computed in main `runtime.listTaskProjections` /
+  // `runtime.getTaskProjection` via `canResumeWithFs`). Renderer
+  // must mirror it from projection, never compute its own.
+  'canResume',
 ])
 
 const NAMED_HELPERS = new Set([

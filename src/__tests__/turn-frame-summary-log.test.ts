@@ -151,7 +151,6 @@ function createBaseHost(overrides: Record<string, unknown> = {}) {
     skillContextOrchestrator: {
       shouldKeepToolsWithVideo: () => false,
       findExplicitlyRequestedSkills: () => [],
-      hasActiveSkillExecution: () => false,
       buildPreferredSkillToolNames: () => null,
       maybeInjectExplicitSkillContext: async () => {},
     },
@@ -335,7 +334,6 @@ test('TurnEngine emits turn_frame_summary on budget-exhaustion checkpoint with s
         skillContextOrchestrator: {
           shouldKeepToolsWithVideo: () => false,
           findExplicitlyRequestedSkills: () => [],
-          hasActiveSkillExecution: () => false,
           getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
           rememberExplicitReferenceSkillHint: () => true,
           buildPreferredSkillToolNames: () => ['skill_run_shell'],

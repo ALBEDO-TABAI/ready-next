@@ -37,6 +37,7 @@ function makeSnapshot(overrides: Partial<SkillTurnIdentitySnapshot> = {}): Skill
     explicitRunStateResourceForTurn: null,
     providedContinuationState: null,
     isSkillResumeTurnDetected: false,
+    isSkillRestartTurnDetected: false,
     isConfigRepairTurnDetected: false,
     previousAssistantSkillToolUses: Object.freeze([] as string[]),
     firstSkillMatch: null,
@@ -44,7 +45,7 @@ function makeSnapshot(overrides: Partial<SkillTurnIdentitySnapshot> = {}): Skill
     runStateResourceVia: null,
     explicitlyRequestedSkillsBySkillIdProbe: Object.freeze([] as Array<{ skillId?: string; id?: string; name?: string }>),
     referenceHintSnapshot: null as ReferenceHintSnapshot,
-    hasActiveSkillExecutionSnapshot: false,
+    // Stage Q (Stage 11) — `hasActiveSkillExecutionSnapshot` retired.
     activeSkillContextSnapshot: null,
     hasStrongActiveSkillContext: false,
     latestSkillRunSnapshot: null,
@@ -151,6 +152,38 @@ test('shadow resolver matches legacy on config-repair no-recoverable-task path',
   assert.equal(identity.mode, 'none')
   if (identity.mode === 'none') {
     assert.equal(identity.reason, 'config_repair_no_recoverable_task')
+  }
+})
+
+test('resolver treats restart-same-goal as a new skill turn from active task history', () => {
+  const snapshot = makeSnapshot({
+    isSkillRestartTurnDetected: true,
+    activeSkillContextSnapshot: Object.freeze({
+      skillId: 'humanizer-zh',
+      skillName: 'Humanizer',
+      taskRunId: 'str-humanizer',
+      detachedTaskId: null,
+      runStatePath: null,
+      outputDir: null,
+      sceneScoresPath: null,
+      deliveryReportPath: null,
+      action: 'humanize',
+      source: 'supervisor',
+      confidence: 92,
+      status: 'running',
+      staleBlockerReason: null,
+      observedAt: new Date().toISOString(),
+    }),
+    hasStrongActiveSkillContext: true,
+    explicitlyRequestedSkillsBySkillIdProbe: Object.freeze([{ id: 'humanizer-zh', name: 'Humanizer' }]),
+  })
+
+  const identity = resolveSkillTurnIdentity(snapshot)
+  assert.equal(identity.mode, 'skill')
+  if (identity.mode === 'skill') {
+    assert.equal(identity.relation, 'new')
+    assert.equal(identity.skillId, 'humanizer-zh')
+    assert.equal(identity.source, 'skill_history')
   }
 })
 

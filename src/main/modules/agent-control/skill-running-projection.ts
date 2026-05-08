@@ -319,6 +319,13 @@ export function buildLongSkillRunningProjection(params: {
   const stepDetail = runState?.lastError
     ? `${detail}；最近错误：${runState.lastError}`
     : detail
+  // Stage Q (Stage 11) note: this writer emits a 2-colon `skill:S:T` key
+  // (T = toolName, e.g. `skill_video_expert_pipeline`). PR-3 deferred the
+  // tracker's `getOrCreateProjection` key change to runKind-partitioned
+  // form; this builder follows the same legacy form. Migration 033 does
+  // NOT clean 2-colon keys with durable handles (Codex round 1 ❌#6: those
+  // are legitimate live tasks). Future PR can partition this key to
+  // `skill:S:T:typed_action` for cohesion, but it's not blocking PR-5.
   const projection: Record<string, unknown> = {
     module: 'skill',
     taskId: `skill:${params.sessionId || '__global_skill_session__'}:${params.toolName}`,

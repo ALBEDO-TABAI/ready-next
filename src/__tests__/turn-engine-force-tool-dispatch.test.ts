@@ -196,7 +196,6 @@ function legacySkillContextOrchestratorOverride(toolNames: string[] = [LEGACY_TO
   return {
     shouldKeepToolsWithVideo: () => false,
     findExplicitlyRequestedSkills: () => [],
-    hasActiveSkillExecution: () => false,
     getCurrentReferenceSkillHint: () => ({ id: LEGACY_SKILL_ID, name: LEGACY_SKILL_NAME }),
     rememberExplicitReferenceSkillHint: () => true,
     buildPreferredSkillToolNames: () => toolNames,
@@ -357,7 +356,6 @@ function createForceToolHost(overrides: Record<string, unknown> = {}) {
     skillContextOrchestrator: {
       shouldKeepToolsWithVideo: () => false,
       findExplicitlyRequestedSkills: () => [],
-      hasActiveSkillExecution: () => false,
       getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'video-expert-analyzer' }),
       rememberExplicitReferenceSkillHint: () => true,
       buildPreferredSkillToolNames: () => ['skill_video_expert_pipeline'],

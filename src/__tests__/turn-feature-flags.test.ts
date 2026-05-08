@@ -25,6 +25,9 @@ test('snapshotTurnFeatureFlags returns a frozen stable snapshot', () => {
     childResumeEnabled: true,
     childInternalStrictAdmission: false,
     childRunCircuitBreakerEnabled: false,
+    // Stage Q (Stage 11) — both default to true (env values absent).
+    referencePrimitiveLifecycleFence: true,
+    skillTaskRunInvariantEnforced: true,
   })
 })
 

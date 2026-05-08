@@ -133,7 +133,20 @@ function skillIdFromProjection(projection: TaskProjectionRecord): string | null 
   if (continuation?.skillId) return continuation.skillId
   const artifactSkill = firstArtifactMetaString(projection, 'skillId')
   if (artifactSkill) return artifactSkill
-  const taskMatch = projection.taskId.match(/^skill:(?!detached:|run_state:|output:)[^:]+:(.+)$/)
+  // Stage Q (Stage 11) — accept both legacy `skill:S:K` (2 colons) and
+  // future runKind-partitioned `skill:S:K:R` (3 colons) keys. The skill
+  // id is always group 1; an optional `:runKind` tail is allowed but
+  // not captured. PR-3 ships the regex update; the writer-side key
+  // change can land in any subsequent PR without breaking this lookup.
+  //
+  // Stage Q PR-3 also reserves `primitive-output:` and `primitive-run-state:`
+  // as continuity-payload taskId prefixes (see `rememberSkillRun` primitive
+  // path in `tools/skills-tools.ts`). They MUST NOT be parsed as a skillId
+  // even though they contain colons, so the second-segment negative
+  // lookahead is extended below.
+  const taskMatch = projection.taskId.match(
+    /^skill:(?!detached:|run_state:|output:)[^:]+:(?!(?:primitive-output|primitive-run-state):)([^:]+)(?::[^:]+)?$/,
+  )
   if (taskMatch?.[1]) return taskMatch[1]
   return null
 }

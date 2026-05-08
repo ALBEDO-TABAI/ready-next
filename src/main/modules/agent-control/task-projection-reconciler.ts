@@ -7,6 +7,7 @@ import type { SkillTaskRunRecord } from '../repositories/skill-task-run-reposito
 import { inspectSkillProgressArtifacts } from './skill-progress-artifacts'
 import { logAgentMetric } from './metrics'
 import { PROJECTION_OBSERVABILITY_METRICS } from './projection-observability-metrics'
+import { canResumeShape } from './resume-handle'
 
 const RECONCILABLE_STATUSES = new Set<TaskProjectionRecord['status']>(['running', 'queued', 'blocked'])
 const STALE_WITHOUT_HANDLE_MS = 30 * 60 * 1000
@@ -535,7 +536,17 @@ function deriveHandles(record: TaskProjectionRecord, taskRun?: SkillTaskRunRecor
 }
 
 function hasDurableHandle(handles: ProjectionHandles): boolean {
-  return Boolean(handles.outputDir || handles.runStatePath)
+  // Stage Q (Stage 11) — single-source via `canResumeShape`. The prior
+  // local predicate (`outputDir || runStatePath`) was the strict version
+  // and remains semantically equivalent here, but routing through the
+  // helper unifies the contract across all 5 layers (Stage Q audit §3.1
+  // / plan §3.4 / contract C6).
+  return canResumeShape({
+    childRunId: handles.childRunId,
+    detachedTaskId: null, // ProjectionHandles doesn't carry detachedTaskId
+    outputDir: handles.outputDir,
+    runStatePath: handles.runStatePath,
+  })
 }
 
 function isCompleteStatus(value: unknown): boolean {

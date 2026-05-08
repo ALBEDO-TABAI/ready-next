@@ -76,6 +76,24 @@
   ],
   "c4Exempt": [
     {
+      "path": "src/__tests__/reference-primitive-no-lifecycle.test.ts",
+      "reason": "Stage Q (Stage 11) PR-2: tests use registerSkillTaskRunRepository() to inject a fake repository before calling executeSkillTool; the SkillTaskRunRepository class is referenced only via TYPE imports for the harness fixture. No call site triggers lazy require('better-sqlite3') because tests register the fake repo and __setSkillsRuntimeManagerForTests() before any code path that would resolve the real repository.",
+      "since": "2026-05-08",
+      "owner": "stage-q-pr2"
+    },
+    {
+      "path": "src/__tests__/restart-frame-no-stale-liveness.test.ts",
+      "reason": "Stage Q (Stage 11) PR-6: tests drive `resolveTurnFrame` directly with synthetic SkillTaskSupervisorSnapshot fixtures. No DB is touched (the supervisor snapshot is hand-built; the resolver itself does not load sqlite). Transitively imports turn-frame-resolver which type-references SkillTaskRunRepository, but the value path is never reached.",
+      "since": "2026-05-08",
+      "owner": "stage-q-pr6"
+    },
+    {
+      "path": "src/__tests__/skill-task-tracker-runkind-invariant.test.ts",
+      "reason": "Stage Q (Stage 11) PR-3: tests use registerSkillTaskRunRepository() to inject a fake in-memory repository before any recordSkillTaskEvent / recordSkillParentTaskLifecycleEvent call. The injected repo handles all DB-shaped operations; the real getRepositoryDatabase() path is never reached. assertSkillTaskRunInvariantConsistency is also tested with a fake getCheckEnforcedSql function.",
+      "since": "2026-05-08",
+      "owner": "stage-q-pr3"
+    },
+    {
       "path": "src/__tests__/active-skill-context.test.ts",
       "reason": "transitive value-import reaches a nativeBackedModule via wrapper modules but never triggers native sqlite load in any test path (all sqlite-touching call sites use fakes/stubs); verified passing on host-Node test runs as of 2026-05-06",
       "since": "2026-05-06",
