@@ -64,7 +64,15 @@ export class ResearchDomainAdapter implements DomainAdapter {
   readonly id = 'research' as const
 
   shouldHandle(params: DomainAdapterSelectionContext): boolean {
-    return params.route?.taskType === 'research'
+    if (!params.route) return false
+    // Direct research route: taskType === 'research' (intent-classifier path)
+    if (params.route.taskType === 'research') return true
+    // Continuation re-entry: TaskType is 'continuation' but executor is 'research'
+    // (set by task-execution-router.ts:89 when continuation projection module
+    // is 'research'). Without this branch, ResearchDomainAdapter would not
+    // re-bind on continuation, dropping prepare.allowedToolNames narrowing.
+    if (params.route.executor === 'research') return true
+    return false
   }
 
   contributePromptFragment(): CoordinatorPromptFragment[] | null {
