@@ -19,7 +19,13 @@ describe('resolveAIConfigCapabilities', () => {
     assert.strictEqual(capabilities?.supportsToolCalls, true)
     assert.strictEqual(capabilities?.supportsNativeToolCalls, false)
     assert.strictEqual(capabilities?.toolCallTransport, 'text')
-    assert.strictEqual(capabilities?.supportsVision, true)
+    // Stage S (PR-S5): vision now flows through the three-layer
+    // capabilityClass merge. `openai-compatible` declares
+    // `supportsVision: false`, so endpoints under that provider must
+    // default to `false` instead of inferring `true` from
+    // `agentProtocol === 'openai'`. This is the conservative-default
+    // contract — unsupported providers no longer silently pass through.
+    assert.strictEqual(capabilities?.supportsVision, false)
   })
 
   it('supports explicit anthropic agent protocol on custom providers', () => {

@@ -408,6 +408,25 @@ export function resolveAIConfigCapabilities(config: AIModelConfig | null | undef
     ? 'none'
     : (supportsNativeToolCalls ? 'native' : 'text')
 
+  // Stage S (PR-S5 / W4.0): three-layer capability merge.
+  //
+  // Priority (highest first):
+  //   1. model.capabilityOverrides   (per-model)
+  //   2. provider.capabilityClass    (per-provider)
+  //   3. legacy heuristics fallback  (agentProtocol / contextWindow)
+  //
+  // Replaces the PR-S2 `false` placeholders for `supportsThinking`
+  // and `supportsLongContext`, and now also routes `supportsVision`
+  // through the same merge so unsupported providers (fox / volcengine
+  // / openai-compatible) default to `false` instead of inferring `true`
+  // from `agentProtocol`.
+  const providerCap = provider?.capabilityClass ?? {}
+  const modelDef = provider?.models.find(m => m.id === normalizedConfig.model)
+  const modelCap = modelDef?.capabilityOverrides ?? {}
+  const visionDefault = modelCap.supportsVision ?? providerCap.supportsVision ?? (agentProtocol === 'anthropic' || agentProtocol === 'openai')
+  const thinkingDefault = modelCap.supportsThinking ?? providerCap.supportsThinking ?? false
+  const longContextDefault = modelCap.supportsLongContext ?? providerCap.supportsLongContext ?? ((modelDef?.contextWindow ?? 0) >= 128000)
+
   return {
     config: normalizedConfig,
     provider,
@@ -418,19 +437,15 @@ export function resolveAIConfigCapabilities(config: AIModelConfig | null | undef
     supportsToolCalls,
     supportsNativeToolCalls,
     toolCallTransport,
-    supportsVision: applyCapabilityMode(normalizeCapabilityMode(normalizedConfig.visionMode), agentProtocol === 'anthropic' || agentProtocol === 'openai'),
+    supportsVision: applyCapabilityMode(normalizeCapabilityMode(normalizedConfig.visionMode), visionDefault),
     supportsNativeVideo: applyCapabilityMode(
       normalizeCapabilityMode(normalizedConfig.nativeVideoMode),
       isKimiCoding || (agentProtocol === 'openai' && !baseUrl.includes('/coding'))
     ),
     supportsToolChoice: agentProtocol === 'anthropic' || wireApi === 'chat/completions',
     isKimiCoding,
-    // Stage S (PR-S2): placeholder values; PR-S5 wires the
-    // model.capabilityOverrides → provider.capabilityClass → legacy
-    // three-layer merge. Until then `false` is a safe conservative
-    // default — features that gate on these flags simply stay off.
-    supportsThinking: false,
-    supportsLongContext: false,
+    supportsThinking: applyCapabilityMode(normalizeCapabilityMode(normalizedConfig.thinkingMode), thinkingDefault),
+    supportsLongContext: applyCapabilityMode(normalizeCapabilityMode(normalizedConfig.longContextMode), longContextDefault),
   }
 }
 
