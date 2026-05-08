@@ -32,6 +32,16 @@ export interface AIModelDef {
   category: AIModelCategory
   contextWindow?: number
   description?: string
+  /**
+   * Stage S (PR-S2): per-model capability overrides applied on top of
+   * the provider-level `capabilityClass` defaults. Three-layer merge
+   * (model overrides > provider class > legacy heuristics) lands in PR-S5.
+   */
+  capabilityOverrides?: {
+    supportsVision?: boolean
+    supportsThinking?: boolean
+    supportsLongContext?: boolean
+  }
 }
 
 export interface AIProviderDef {
@@ -49,6 +59,15 @@ export interface AIProviderDef {
   models: AIModelDef[]
   apiKeyPlaceholder: string
   helpUrl: string
+  /**
+   * Stage S (PR-S2): provider-level capability defaults. Acts as the
+   * middle layer of the three-layer merge introduced in PR-S5.
+   */
+  capabilityClass?: {
+    supportsVision?: boolean
+    supportsThinking?: boolean
+    supportsLongContext?: boolean
+  }
 }
 
 export interface AIModelConfig {
@@ -69,6 +88,17 @@ export interface AIModelConfig {
   displayName?: string
   /** 业务能力分组开关 */
   capabilityModes?: CapabilityModeMap
+  /**
+   * Stage S (PR-S2): independent thinking-mode toggle (auto/on/off).
+   * Not part of `CapabilityModeMap` because that map's keys are
+   * restricted to `CapabilityGroupId`. Three-layer merge in PR-S5.
+   */
+  thinkingMode?: AICapabilityMode
+  /**
+   * Stage S (PR-S2): independent long-context toggle (auto/on/off).
+   * See `thinkingMode` for rationale.
+   */
+  longContextMode?: AICapabilityMode
 }
 
 export type AIProviderCategory = 'openai' | 'anthropic' | 'gemini' | 'custom'
@@ -452,6 +482,15 @@ export interface AIResolvedCapabilities {
   supportsNativeVideo: boolean
   supportsToolChoice: boolean
   isKimiCoding: boolean
+  /**
+   * Stage S (PR-S2): placeholder fields for the capabilityClass
+   * three-layer merge. PR-S5 will replace the `false` defaults with
+   * `model.capabilityOverrides ?? provider.capabilityClass ?? legacy`
+   * resolution. Required (not optional) so downstream consumers can
+   * branch unconditionally once PR-S5 lands.
+   */
+  supportsThinking: boolean
+  supportsLongContext: boolean
 }
 
 function normalizeAgentProtocol(value: unknown): AIAgentProtocol | undefined {
@@ -515,6 +554,12 @@ export function resolveAIConfigCapabilities(config: AIModelConfig | null | undef
     ),
     supportsToolChoice: agentProtocol === 'anthropic' || wireApi === 'chat/completions',
     isKimiCoding,
+    // Stage S (PR-S2): placeholder values; PR-S5 wires the
+    // model.capabilityOverrides → provider.capabilityClass → legacy
+    // three-layer merge. Until then `false` is a safe conservative
+    // default — features that gate on these flags simply stay off.
+    supportsThinking: false,
+    supportsLongContext: false,
   }
 }
 
