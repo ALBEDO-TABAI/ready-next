@@ -4092,7 +4092,7 @@ export class TurnEngine {
                   pendingNextRoundInjection: true,
                 })
               } catch {
-                // metrics must never break the tool loop
+                // silent-catch: token-attribution metric is best-effort; must never break the tool loop
               }
             }
           }

@@ -76,6 +76,12 @@
   ],
   "c4Exempt": [
     {
+      "path": "src/__tests__/vision-tool-gating.test.ts",
+      "reason": "Stage S (Stage 13) PR-S6/W4.2: tests only exercise the pure helper filterToolsByVisionCapability and the frozen VISION_REQUIRING_TOOL_NAMES constant from tool-gateway. Transitive imports reach nativeBackedModules via the gateway barrel, but no test path ever instantiates ToolGateway, opens better-sqlite3, or reads any repository. Verified passing on host-Node.",
+      "since": "2026-05-09",
+      "owner": "stage-s-pr-s13"
+    },
+    {
       "path": "src/__tests__/reference-primitive-no-lifecycle.test.ts",
       "reason": "Stage Q (Stage 11) PR-2: tests use registerSkillTaskRunRepository() to inject a fake repository before calling executeSkillTool; the SkillTaskRunRepository class is referenced only via TYPE imports for the harness fixture. No call site triggers lazy require('better-sqlite3') because tests register the fake repo and __setSkillsRuntimeManagerForTests() before any code path that would resolve the real repository.",
       "since": "2026-05-08",

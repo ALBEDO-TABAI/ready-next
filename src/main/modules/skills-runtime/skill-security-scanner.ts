@@ -107,8 +107,7 @@ function scanFile(absolutePath: string, issues: ScanIssue[]): void {
     }
     content = readFileSync(absolutePath, 'utf8')
   } catch {
-    // Binary, unreadable, or vanished mid-scan. Not an issue per se —
-    // we silently skip rather than fail the entire install.
+    // silent-catch: binary/unreadable/vanished mid-scan files are skipped, not surfaced as install failure
     return
   }
   for (const { pattern, description } of HIGH_RISK_PATTERNS) {
@@ -160,6 +159,7 @@ export function scanSkillDirectory(skillDir: string): ScanResult {
     try {
       entries = readdirSync(dir, { withFileTypes: true }) as Dirent[]
     } catch {
+      // silent-catch: unreadable subdir is treated as empty; install continues
       return
     }
     for (const entry of entries) {

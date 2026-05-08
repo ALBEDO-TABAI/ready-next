@@ -38,11 +38,14 @@ try {
 if (pkg) {
   const verify = pkg.scripts?.['verify'] || ''
   const verifyCloud = pkg.scripts?.['verify:cloud'] || ''
-  if (!verify.includes('verify:r')) {
-    errors.push(`package.json: 'verify' script must embed 'verify:r' (got: ${verify})`)
+  // Accept Stage R or any later cutover (verify:r, verify:s, verify:t, ...) —
+  // each later stage's verify chain transitively embeds verify:r.
+  const stageRorLater = /verify:[r-z]\b/
+  if (!stageRorLater.test(verify)) {
+    errors.push(`package.json: 'verify' script must embed 'verify:r' or later stage chain (got: ${verify})`)
   }
-  if (!verifyCloud.includes('verify:r')) {
-    errors.push(`package.json: 'verify:cloud' script must embed 'verify:r' (got: ${verifyCloud})`)
+  if (!stageRorLater.test(verifyCloud)) {
+    errors.push(`package.json: 'verify:cloud' script must embed 'verify:r' or later stage chain (got: ${verifyCloud})`)
   }
 }
 

@@ -37,7 +37,7 @@ if (!constMatch) {
 } else {
   const body = constMatch[1]
   for (const required of ['ownerKind', 'ownerId']) {
-    if (!new RegExp(`['\"]${required}['\"]`).test(body)) {
+    if (!new RegExp(`['"]${required}['"]`).test(body)) {
       errors.push(`THREAD_META_IMMUTABLE_FIELDS must include '${required}'`)
     }
   }

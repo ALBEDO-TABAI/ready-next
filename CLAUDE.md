@@ -390,6 +390,19 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - **未启用项**：纠错/强化识别仅落 helper（`message-correction-detector.ts`），尚未接入 turn 主流程，留 Stage S/T 决策。
 - **Verify chain**：`npm run verify:r` 必须内嵌 `verify:q`，并覆盖 30 个新 gate + `test:r:gates` + `test:r:focus`。Stage R done 后主 `verify` 与 `verify:cloud` 起步链切到 `verify:r`。
 
+### 6.26 deer-flow 借鉴 · 完整功能（S / Stage 13）
+
+- Stage 13（S 阶段）落地 provider 子模块化 / capability 仲裁 / observability 完整 / SQLite 持久化 / clarification 升级 / LLM 弹性 / skill 安全门。
+- **Provider 子模块**：`src/shared/ai-providers/` 7 个 provider（moonshot / anthropic / fox / openai / gemini / volcengine / openai-compatible）+ 4 patch profile（gemini-oai / deepseek / minimax / vllm）+ apply-provider-patch helper + resolve-provider-patch-profile。原 inline `AI_PROVIDERS[]` 改 import 子模块汇总。
+- **Patch 优先级**：用户 config > provider default > profile patcher。
+- **Capability merge 三层**：model overrides > provider class > inferred fallback。未填能力 = 保守拒绝。`o3-mini` 走 model overrides 双覆盖（thinking=true/vision=false），不再有零散特判。
+- **Token attribution**：per model-call span + per-step taskCard 归因；多维 namespace（search/fetch/subagent/present/clarification/todo）独立计数，**不**进 TOOL_ERROR_METRICS。
+- **Clarification**：5-type + options（missing_info/ambiguous_requirement/approach_choice/risk_confirmation/suggestion）；stable message ID `clarification:<tool_call_id>` 重试 replace 不 append；turn-gap 触发**非 middleware**形态，不吞 turn。
+- **LLM resilience**：`llm-resilience.ts` 共享 helper，408/409/425/429/5xx + "server busy" 模式重试 + 退避，所有 provider 适配层接入。
+- **SQLite 持久化**：migration 034 `run_meta` / 035 `thread_meta`（含 owner kind/id strict mutate） / 036 `run_feedback` (rating 1-5 + signal + upsert)。
+- **Skill hardening**：manifest `allowed_tools` 字段编译期 + 运行期联合 §6.23 authorization；安装期 security_scanner 阻断恶意 fixture。
+- **Verify chain**：`npm run verify:s` 必须内嵌 `verify:r` + `verify:native`，并覆盖 40 个内嵌 gate + `test:s:gates` + `test:s:focus`（外加 PR-S13 切换 gate `check-stage-s-verify-switch.cjs`，共 41 unique）。Stage S done 后主 `verify` / `verify:cloud` 起步链切到 `verify:s`。
+
 ## 7. 新功能开发最小闭环
 新增跨进程功能时，至少同步修改：
 1. Main IPC handler

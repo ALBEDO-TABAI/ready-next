@@ -46,7 +46,7 @@ for (const target of TARGET_MIGRATIONS) {
 
   // Locate the migration block by its name literal.
   const nameLiteralRe = new RegExp(
-    `name:\\s*['\"]${fullName}['\"]`,
+    `name:\\s*['"]${fullName}['"]`,
     'm',
   )
   const nameMatch = nameLiteralRe.exec(src)
