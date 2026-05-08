@@ -41,6 +41,7 @@ import {
   updateManagedCustomSkillDescription,
 } from './custom-skill-registry'
 import { SkillLoader } from './skill-loader'
+import { scanSkillDirectory } from './skill-security-scanner'
 // Phase 4: ExecutionStateStore / ExecutionCoordinator retired along with the
 // skill_executions state machine. The imports (and the files) are removed in
 // PR1-E.
@@ -681,6 +682,20 @@ export class SkillsRuntimeManager {
 
   importCustomSkill(sourcePath: string): SkillState {
     this.ensureRuntimeDirs()
+    // Stage S W11.2 — security scan BEFORE we copy the user's skill folder
+    // into the managed customSkillsRoot. Critical issues (rm -rf /, curl|sh,
+    // path traversal, …) hard-block install — we surface a structured Error
+    // with all issues in the message so the IPC layer can show them to the
+    // user.
+    const scan = scanSkillDirectory(sourcePath)
+    if (!scan.ok) {
+      const summary = scan.issues
+        .filter((issue) => issue.severity === 'critical')
+        .slice(0, 5)
+        .map((issue) => `${issue.pattern} @ ${issue.file}${issue.excerpt ? ` :: ${issue.excerpt}` : ''}`)
+        .join('; ')
+      throw new Error(`Skill 安全扫描失败: ${summary || '未通过安全检查'}`)
+    }
     const record = importCustomSkillFolder(sourcePath, this.customSkillsRoot)
     const definition = this.getSkillLoader().loadSkill(record.id, record.managedPath)
     return this.toSkillState(definition || {

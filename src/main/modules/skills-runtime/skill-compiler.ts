@@ -65,6 +65,49 @@ function asStringArray(value: unknown): string[] {
   return value.map((item) => asString(item)).filter((item): item is string => Boolean(item))
 }
 
+/**
+ * Stage S W11.1 — validate manifest `allowed_tools` field.
+ *
+ * Returns a normalised `string[]` (trimmed, deduped) when the field is
+ * a valid array of strings; returns `undefined` when the field is absent.
+ * Throws `ManifestValidationError` when the field exists but is not a
+ * string array — surface "manifest is malformed" rather than silently
+ * dropping the safeguard.
+ */
+class ManifestValidationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ManifestValidationError'
+  }
+}
+
+function validateAllowedTools(skillId: string, raw: unknown): string[] | undefined {
+  if (raw === undefined || raw === null) return undefined
+  if (!Array.isArray(raw)) {
+    throw new ManifestValidationError(
+      `Skill ${skillId} allowed_tools 必须是 string 数组（收到 ${typeof raw}）`,
+    )
+  }
+  const result: string[] = []
+  const seen = new Set<string>()
+  for (let i = 0; i < raw.length; i += 1) {
+    const item = raw[i]
+    if (typeof item !== 'string') {
+      throw new ManifestValidationError(
+        `Skill ${skillId} allowed_tools[${i}] 必须是 string（收到 ${typeof item}）`,
+      )
+    }
+    const trimmed = item.trim()
+    if (trimmed.length === 0) continue
+    if (seen.has(trimmed)) continue
+    seen.add(trimmed)
+    result.push(trimmed)
+  }
+  return result
+}
+
+export { ManifestValidationError, validateAllowedTools }
+
 function findFirstExisting(folderPath: string, candidates: string[]): string | null {
   for (const candidate of candidates) {
     const resolved = join(folderPath, candidate)
@@ -472,6 +515,11 @@ export function compileSkillDefinition(options: SkillCompilerOptions): SkillDefi
   // `STATIC_SKILL_TOOL_NAMES_BY_ACTION`, so the manifest predicate cannot
   // reverse-look-up to fence them). We strip the field at compile and warn
   // so the operator notices.
+  // Stage S W11.1 — validate optional manifest `allowed_tools` (string[]).
+  // Accepts both snake_case (`allowed_tools`, deer-flow form) and camelCase
+  // (`allowedTools`) for symmetry with other manifest fields.
+  const allowedTools = validateAllowedTools(id, manifest?.allowed_tools ?? manifest?.allowedTools)
+
   const rawChildLoop = manifest?.child_loop ?? manifest?.childLoop
   const childLoop = (rawChildLoop !== undefined && rawChildLoop !== null && source !== 'embedded')
     ? (() => {
@@ -504,5 +552,6 @@ export function compileSkillDefinition(options: SkillCompilerOptions): SkillDefi
     manifestValid: true,
     hostRequirements,
     childLoop,
+    allowedTools,
   }
 }
