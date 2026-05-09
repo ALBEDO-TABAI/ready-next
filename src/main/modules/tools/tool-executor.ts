@@ -59,6 +59,7 @@ import {
   normalizeAllowedToolSet,
 } from './tool-not-allowed-message'
 import { STATIC_SKILL_ACTIONS_BY_TOOL_NAME } from './skills-tools-static'
+import { AppSettingsRepository } from '../repositories/app-settings-repository'
 
 export interface ToolContext {
   browserController?: BrowserController | null
@@ -339,12 +340,28 @@ export async function executeToolCall(
           // do not leak SkillsRuntimeManager handles into ToolContext;
           // child-runner / model invokers all converge here.
           const runtimeInfo = getSkillsRuntimeManager().getRuntimeInfo()
+          // Stage R W1.1/W1.2 follow-up (B1 fix): plumb Tavily/Jina API keys
+          // from settings. Without this the keys were always undefined and
+          // both Tavily search + Tavily Extract fallback were `not_attempted`.
+          // Settings keys: `web_search_tavily_key`, `web_fetch_jina_key`.
+          let tavilyKey: string | undefined
+          let jinaKey: string | undefined
+          try {
+            const repo = new AppSettingsRepository()
+            tavilyKey = repo.getSetting('web_search_tavily_key') || undefined
+            jinaKey = repo.getSetting('web_fetch_jina_key') || undefined
+          } catch {
+            // silent-catch: settings unavailable at boot or in tests; tools
+            // still work via DDG / Jina-no-auth fallback paths.
+          }
           return executeGeneralResearchTool(toolName, args as Record<string, unknown>, {
             abortSignal: context.abortSignal,
             sessionId: context.sessionId,
             outputsRoot: runtimeInfo.outputsRoot,
             requestModuleToolAction: context.requestModuleToolAction,
             scope: context.scope,
+            tavilyKey,
+            jinaKey,
           })
         }
 

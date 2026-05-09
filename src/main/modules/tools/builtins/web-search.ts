@@ -161,10 +161,13 @@ export async function executeWebSearch(
   if (ctx.tavilyKey) {
     try {
       const results = await searchViaTavily(args, ctx)
+      // Stage R W1.1 follow-up: do NOT throw on empty Tavily results either —
+      // returning an empty array as the model-facing answer keeps the loop
+      // forward-progressing. We only fall through to DDG for empty results
+      // because DDG sometimes finds long-tail hits Tavily misses; we do NOT
+      // synthesize an error to drive that fallback.
       if (results.length > 0) return { results }
-      // Empty result is treated as a fallback condition: surfacing zero hits
-      // is no better than DDG for the model's purposes.
-      tavilyError = new Error('tavily_empty_results')
+      tavilyError = null  // empty, not an error
     } catch (error) {
       // silent-catch: capture for fallback handoff; metric is logged below before DDG try
       tavilyError = error
@@ -177,8 +180,12 @@ export async function executeWebSearch(
   let ddgError: unknown = null
   try {
     const results = await searchViaDdg(args, ctx)
-    if (results.length > 0) return { results }
-    ddgError = new Error('ddg_empty_results')
+    // Stage R W1.1 follow-up: empty results are NOT a failure — query may
+    // simply have no match. Return [] and let the model decide whether to
+    // refine the query. Throwing for empty was forcing the parent loop into
+    // wasteful retries on rare topics. Real network/HTTP errors still throw
+    // from inside searchViaDdg and land in the catch below.
+    return { results }
   } catch (error) {
     // silent-catch: capture for ToolDomainError aggregation thrown immediately below
     ddgError = error
