@@ -394,8 +394,15 @@ export function sanitizeContinuationRequest(params: {
     content: parsedControl.hasControlLines
       ? replaceTrailingUserText(params.content, originalRawUserText, sanitizedRawUserText)
       : params.content,
+    // Stage T R3 fix: rebuilt envelope must inherit sessionId/scopeId from
+    // the source envelope; otherwise direct-chat.ts:797 hands a no-scope
+    // envelope to turn-engine and MCP authorization sees scope=undefined.
     requestEnvelope: parsedControl.hasControlLines
-      ? buildRequestEnvelope({ userText: sanitizedRawUserText })
+      ? buildRequestEnvelope({
+          userText: sanitizedRawUserText,
+          sessionId: params.requestEnvelope?.sessionId,
+          scopeId: params.requestEnvelope?.scopeId,
+        })
       : (params.requestEnvelope || buildRequestEnvelope({ userText: originalRawUserText })),
     parsedControl,
     sanitizedRawUserText,
