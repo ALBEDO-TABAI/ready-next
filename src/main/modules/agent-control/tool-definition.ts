@@ -14,6 +14,7 @@ export type ToolDomain =
   | 'pet'
   | 'system'
   | 'general_research'
+  | 'mcp'
 
 export type ToolKind = 'read' | 'write' | 'interactive' | 'job'
 export type ToolConcurrency = 'parallel_read_safe' | 'serialized'

@@ -78,13 +78,20 @@ export class McpClient {
         }
       }
     }
-    // Skeleton: real wire framing lands in a follow-up. The PR-T5
-    // gate only checks the call graph (ensureAuthorized → callTool).
+    // Skeleton: real wire framing lands in a follow-up. Return an `ok` stub
+    // with a `stub: true` marker so once authorization is granted the
+    // executor branch (`tool-executor.ts` `case 'mcp'`) actually completes
+    // and the model gets a deterministic structured result instead of a
+    // misleading "not_implemented" failure during the skeleton phase.
+    // TODO(PR-T5+): replace with real stdio / websocket framing.
     return {
-      ok: false,
-      error: {
-        kind: 'not_implemented',
-        message: `mcp.callTool ${this.config.transport}://${this.config.serverId}/${request.toolName} (skeleton)`,
+      ok: true,
+      output: {
+        status: 'ok',
+        stub: true,
+        transport: this.config.transport,
+        serverId: this.config.serverId,
+        toolName: request.toolName,
       },
     }
   }

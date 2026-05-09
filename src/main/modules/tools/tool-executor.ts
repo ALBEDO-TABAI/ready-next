@@ -37,6 +37,7 @@ import { executeBrowserTool } from './browser-tools'
 import { executeCalendarTool } from './calendar-tools'
 import { executeDocumentTool } from './document-tools'
 import { executeGeneralResearchTool } from './general-research-tools'
+import { executeMcpTool } from './mcp-tools'
 import { executeRSSTool } from './rss-tools'
 import { executeSkillTool, findSkillToolByNameForExecution } from './skills-tools'
 import { executeSystemTool } from './system-tools'
@@ -346,6 +347,16 @@ export async function executeToolCall(
             scope: context.scope,
           })
         }
+
+        case 'mcp':
+          // Stage T PR-T5 — MCP dispatch. The model-visible list resolver
+          // already gated this name through `mcp/registry.isAuthorized`;
+          // here we only forward to the per-server `McpClient`.
+          return executeMcpTool(toolName, args as Record<string, unknown>, {
+            abortSignal: context.abortSignal,
+            sessionId: context.sessionId,
+            scopeId: context.scopeId,
+          })
 
         default:
           return `Unknown tool: ${toolName}`

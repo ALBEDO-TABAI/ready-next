@@ -56,7 +56,7 @@ export interface ParallelToolGroup {
 }
 
 export interface ToolResourceTag {
-  domain: 'browser' | 'document' | 'file' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'memory' | 'session' | 'pet' | 'system' | 'general_research'
+  domain: 'browser' | 'document' | 'file' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'memory' | 'session' | 'pet' | 'system' | 'general_research' | 'mcp'
   accessMode: 'read' | 'write' | 'interactive'
 }
 
@@ -186,6 +186,10 @@ export function getToolResourceTag(toolName: string): ToolResourceTag {
   if (normalized === 'web_search') return { domain: 'general_research', accessMode: 'read' }
   if (normalized === 'web_fetch') return { domain: 'general_research', accessMode: 'read' }
   if (normalized === 'present_file') return { domain: 'general_research', accessMode: 'interactive' }
+  // Stage T PR-T5 — MCP tools advertised as `mcp_*` are dispatched to the
+  // mcp client and are interactive by default (the client makes a remote
+  // call per invocation, no parallelism guarantee from the server side).
+  if (normalized.startsWith('mcp_')) return { domain: 'mcp', accessMode: 'interactive' }
   return { domain: 'system', accessMode: 'interactive' }
 }
 
