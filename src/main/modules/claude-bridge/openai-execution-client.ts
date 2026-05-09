@@ -127,18 +127,23 @@ export class OpenAIExecutionClient {
       // before serialization (priority enforced inside helper).
       const patchCtx = this.buildPatchContext({ config: params.config, baseUrl: params.baseUrl, model })
       applyProviderRequestPatch(reqBody, patchCtx)
-      // TODO(stage-s-followup): wrap with withRetryBackoff
-      const resp = await this.deps.fetchWithTimeout(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(reqBody),
-        signal: params.signal,
-      }, params.signal, 'openai simple responses', params.timeoutMs)
-
-      if (!resp.ok) {
-        const errBody = await resp.text().catch(() => '')
-        throw new Error(`HTTP ${resp.status}: ${errBody.slice(0, 300)}`)
-      }
+      // Stage S round 2 — wrap fetch in withRetryBackoff so transient 408/409/425/429/5xx
+      // and "server busy" responses are retried with exponential backoff before bubbling.
+      const resp = await withRetryBackoff(async () => {
+        const r = await this.deps.fetchWithTimeout(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(reqBody),
+          signal: params.signal,
+        }, params.signal, 'openai simple responses', params.timeoutMs)
+        if (!r.ok) {
+          const errBody = await r.text().catch(() => '')
+          const err = new Error(`HTTP ${r.status}: ${errBody.slice(0, 300)}`) as Error & { status?: number }
+          err.status = r.status
+          throw err
+        }
+        return r
+      })
 
       const json = await parseJsonOrEventStreamResponse(resp, { requestUrl: url })
       applyProviderResponsePatch(json, patchCtx)
@@ -225,18 +230,23 @@ export class OpenAIExecutionClient {
       // Stage S (PR-S4 / W3.5) — provider-default + profile patcher.
       const patchCtx = this.buildPatchContext({ config: params.config, baseUrl: params.baseUrl, model })
       applyProviderRequestPatch(reqBody, patchCtx)
-      // TODO(stage-s-followup): wrap with withRetryBackoff
-      const resp = await this.deps.fetchWithTimeout(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(reqBody),
-        signal: params.signal,
-      }, params.signal, 'openai text tool bridge responses')
-
-      if (!resp.ok) {
-        const errBody = await resp.text().catch(() => '')
-        throw new Error(`HTTP ${resp.status}: ${errBody.slice(0, 300)}`)
-      }
+      // Stage S round 2 — wrap fetch in withRetryBackoff so transient 408/409/425/429/5xx
+      // and "server busy" responses are retried with exponential backoff before bubbling.
+      const resp = await withRetryBackoff(async () => {
+        const r = await this.deps.fetchWithTimeout(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(reqBody),
+          signal: params.signal,
+        }, params.signal, 'openai text tool bridge responses')
+        if (!r.ok) {
+          const errBody = await r.text().catch(() => '')
+          const err = new Error(`HTTP ${r.status}: ${errBody.slice(0, 300)}`) as Error & { status?: number }
+          err.status = r.status
+          throw err
+        }
+        return r
+      })
 
       const json = await parseJsonOrEventStreamResponse(resp, { requestUrl: url }) as Record<string, unknown>
       applyProviderResponsePatch(json, patchCtx)
@@ -259,18 +269,23 @@ export class OpenAIExecutionClient {
     const reqBody: Record<string, unknown> = { model, messages }
     const patchCtx = this.buildPatchContext({ config: params.config, baseUrl: params.baseUrl, model })
     applyProviderRequestPatch(reqBody, patchCtx)
-    // TODO(stage-s-followup): wrap with withRetryBackoff
-    const resp = await this.deps.fetchWithTimeout(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(reqBody),
-      signal: params.signal,
-    }, params.signal, 'openai text tool bridge')
-
-    if (!resp.ok) {
-      const errBody = await resp.text().catch(() => '')
-      throw new Error(`HTTP ${resp.status}: ${errBody.slice(0, 300)}`)
-    }
+    // Stage S round 2 — wrap fetch in withRetryBackoff so transient 408/409/425/429/5xx
+    // and "server busy" responses are retried with exponential backoff before bubbling.
+    const resp = await withRetryBackoff(async () => {
+      const r = await this.deps.fetchWithTimeout(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(reqBody),
+        signal: params.signal,
+      }, params.signal, 'openai text tool bridge')
+      if (!r.ok) {
+        const errBody = await r.text().catch(() => '')
+        const err = new Error(`HTTP ${r.status}: ${errBody.slice(0, 300)}`) as Error & { status?: number }
+        err.status = r.status
+        throw err
+      }
+      return r
+    })
 
     const json = await parseJsonResponse(resp, { requestUrl: url }) as {
       choices?: Array<{
@@ -674,18 +689,23 @@ export class OpenAIExecutionClient {
       model: params.model,
     })
     applyProviderRequestPatch(reqBody, patchCtx)
-    // TODO(stage-s-followup): wrap with withRetryBackoff
-    const resp = await this.deps.fetchWithTimeout(url, {
-      method: 'POST',
-      headers: params.headers,
-      body: JSON.stringify(reqBody),
-      signal: params.signal,
-    }, params.signal, 'openai responses tools', params.timeoutMs)
-
-    if (!resp.ok) {
-      const errBody = await resp.text().catch(() => '')
-      throw new Error(`HTTP ${resp.status}: ${errBody.slice(0, 300)}`)
-    }
+    // Stage S round 2 — wrap fetch in withRetryBackoff so transient 408/409/425/429/5xx
+    // and "server busy" responses are retried with exponential backoff before bubbling.
+    const resp = await withRetryBackoff(async () => {
+      const r = await this.deps.fetchWithTimeout(url, {
+        method: 'POST',
+        headers: params.headers,
+        body: JSON.stringify(reqBody),
+        signal: params.signal,
+      }, params.signal, 'openai responses tools', params.timeoutMs)
+      if (!r.ok) {
+        const errBody = await r.text().catch(() => '')
+        const err = new Error(`HTTP ${r.status}: ${errBody.slice(0, 300)}`) as Error & { status?: number }
+        err.status = r.status
+        throw err
+      }
+      return r
+    })
 
     const json = await parseJsonOrEventStreamResponse(resp, { requestUrl: url }) as Record<string, unknown>
     applyProviderResponsePatch(json, patchCtx)
@@ -732,18 +752,23 @@ export class OpenAIExecutionClient {
       model: params.model,
     })
     applyProviderRequestPatch(reqBody, patchCtx)
-    // TODO(stage-s-followup): wrap with withRetryBackoff
-    const resp = await this.deps.fetchWithTimeout(url, {
-      method: 'POST',
-      headers: params.headers,
-      body: JSON.stringify(reqBody),
-      signal: params.signal,
-    }, params.signal, 'openai tools', params.timeoutMs)
-
-    if (!resp.ok) {
-      const errBody = await resp.text().catch(() => '')
-      throw new Error(`HTTP ${resp.status}: ${errBody.slice(0, 300)}`)
-    }
+    // Stage S round 2 — wrap fetch in withRetryBackoff so transient 408/409/425/429/5xx
+    // and "server busy" responses are retried with exponential backoff before bubbling.
+    const resp = await withRetryBackoff(async () => {
+      const r = await this.deps.fetchWithTimeout(url, {
+        method: 'POST',
+        headers: params.headers,
+        body: JSON.stringify(reqBody),
+        signal: params.signal,
+      }, params.signal, 'openai tools', params.timeoutMs)
+      if (!r.ok) {
+        const errBody = await r.text().catch(() => '')
+        const err = new Error(`HTTP ${r.status}: ${errBody.slice(0, 300)}`) as Error & { status?: number }
+        err.status = r.status
+        throw err
+      }
+      return r
+    })
 
     const json = await parseJsonResponse(resp, { requestUrl: url }) as {
       choices?: Array<{

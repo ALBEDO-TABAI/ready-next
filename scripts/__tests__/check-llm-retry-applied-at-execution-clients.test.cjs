@@ -11,27 +11,41 @@ const {
   TARGETS,
 } = require('../check-llm-retry-applied-at-execution-clients.cjs')
 
+// Stage S round 2 — TARGETS shape switched from string[] to
+// `Array<{ rel, minCalls }>` so we can require ≥ 6 calls in the openai
+// client and ≥ 2 calls in the anthropic client. Tests below build
+// fixtures sized to the configured minima.
+
+function targetEntry(index) {
+  const t = TARGETS[index]
+  return typeof t === 'string' ? { rel: t, minCalls: 1 } : t
+}
+
 function makeFixture({ openaiContent, anthropicContent }) {
   const root = mkdtempSync(join(tmpdir(), 'check-llm-retry-applied-'))
   if (openaiContent !== null) {
-    const abs = join(root, TARGETS[0])
+    const abs = join(root, targetEntry(0).rel)
     mkdirSync(dirname(abs), { recursive: true })
     writeFileSync(abs, openaiContent)
   }
   if (anthropicContent !== null) {
-    const abs = join(root, TARGETS[1])
+    const abs = join(root, targetEntry(1).rel)
     mkdirSync(dirname(abs), { recursive: true })
     writeFileSync(abs, anthropicContent)
   }
   return root
 }
 
-function goodClient() {
-  return `import { withRetryBackoff } from './llm-resilience'\nexport async function go() { return withRetryBackoff(async () => 1) }\n`
+function goodClient(callCount) {
+  const calls = Array.from({ length: callCount }, () => 'await withRetryBackoff(async () => 1)').join('; ')
+  return `import { withRetryBackoff } from './llm-resilience'\nexport async function go() { ${calls} }\n`
 }
 
-test('passes when both clients import and call withRetryBackoff', () => {
-  const root = makeFixture({ openaiContent: goodClient(), anthropicContent: goodClient() })
+test('passes when both clients import and call withRetryBackoff at the required minima', () => {
+  const root = makeFixture({
+    openaiContent: goodClient(targetEntry(0).minCalls),
+    anthropicContent: goodClient(targetEntry(1).minCalls),
+  })
   try {
     const r = check({ root })
     assert.equal(r.ok, true, r.errors?.join('\n'))
@@ -43,7 +57,7 @@ test('passes when both clients import and call withRetryBackoff', () => {
 test('fails when openai client is missing the import', () => {
   const root = makeFixture({
     openaiContent: `export async function go() { return 1 }\n`,
-    anthropicContent: goodClient(),
+    anthropicContent: goodClient(targetEntry(1).minCalls),
   })
   try {
     const r = check({ root })
@@ -56,7 +70,7 @@ test('fails when openai client is missing the import', () => {
 
 test('fails when anthropic client imports but never calls', () => {
   const root = makeFixture({
-    openaiContent: goodClient(),
+    openaiContent: goodClient(targetEntry(0).minCalls),
     anthropicContent: `import { withRetryBackoff } from './llm-resilience'\nexport async function go() { return 1 }\n`,
   })
   try {
@@ -68,8 +82,37 @@ test('fails when anthropic client imports but never calls', () => {
   }
 })
 
+test('fails when openai client falls below the strengthened ≥ 6 floor', () => {
+  const root = makeFixture({
+    // 1 call < 6 → fail
+    openaiContent: goodClient(1),
+    anthropicContent: goodClient(targetEntry(1).minCalls),
+  })
+  try {
+    const r = check({ root })
+    assert.equal(r.ok, false)
+    assert.ok(r.errors.some((e) => /openai-execution-client.*1 time.*expected ≥ 6/.test(e)))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('fails when a leftover TODO(stage-s-followup) marker is present', () => {
+  const root = makeFixture({
+    openaiContent: `${goodClient(targetEntry(0).minCalls)}\n// TODO(stage-s-followup): wrap with withRetryBackoff\n`,
+    anthropicContent: goodClient(targetEntry(1).minCalls),
+  })
+  try {
+    const r = check({ root })
+    assert.equal(r.ok, false)
+    assert.ok(r.errors.some((e) => /leftover TODO\(stage-s-followup\)/.test(e)))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('fails when a target file is missing', () => {
-  const root = makeFixture({ openaiContent: null, anthropicContent: goodClient() })
+  const root = makeFixture({ openaiContent: null, anthropicContent: goodClient(targetEntry(1).minCalls) })
   try {
     const r = check({ root })
     assert.equal(r.ok, false)

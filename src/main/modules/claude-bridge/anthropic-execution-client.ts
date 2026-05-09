@@ -206,18 +206,23 @@ export class AnthropicExecutionClient {
       model,
     })
     applyProviderRequestPatch(reqBody, patchCtx)
-    // TODO(stage-s-followup): wrap with withRetryBackoff
-    const resp = await this.deps.fetchWithTimeout(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(reqBody),
-      signal: params.signal,
-    }, params.signal, 'anthropic tools', timeoutMs)
-
-    if (!resp.ok) {
-      const errBody = await resp.text().catch(() => '')
-      throw new Error(`HTTP ${resp.status}: ${errBody.slice(0, 300)}`)
-    }
+    // Stage S round 2 — wrap fetch in withRetryBackoff so transient 408/409/425/429/5xx
+    // and "server busy" responses are retried with exponential backoff before bubbling.
+    const resp = await withRetryBackoff(async () => {
+      const r = await this.deps.fetchWithTimeout(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(reqBody),
+        signal: params.signal,
+      }, params.signal, 'anthropic tools', timeoutMs)
+      if (!r.ok) {
+        const errBody = await r.text().catch(() => '')
+        const err = new Error(`HTTP ${r.status}: ${errBody.slice(0, 300)}`) as Error & { status?: number }
+        err.status = r.status
+        throw err
+      }
+      return r
+    })
 
     const json = await parseJsonResponse(resp, { requestUrl: url }) as {
       content?: Array<{ type: string; text?: string; id?: string; name?: string; input?: Record<string, unknown> }>

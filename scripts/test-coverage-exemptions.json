@@ -596,6 +596,18 @@
       "reason": "Stage N transitive: turn-frame.ts imports run-contracts.ts which now statically imports child-loop-skill-actions / runtime-manager; existing test exercises pure patch helpers with synthetic frames — no DB call.",
       "since": "2026-05-07",
       "owner": "stage-n-parent-force-fence"
+    },
+    {
+      "path": "src/__tests__/run-capability-controller.test.ts",
+      "reason": "Stage S round 2 (Issue 5): run-capability-controller.ts now contains a `require('../skills-runtime/runtime-manager')` inside `resolveActiveSkillAllowedTools` so the controller can resolve a selected skill's manifest allowlist for the model-visible bundle. The require is lazy (only fires when authorization.mode === 'selected') and is wrapped in try/catch — tests in this file pass `mode:'none'` or hand-built skill states, so the require never resolves at runtime and no DB is opened. Static gate flagged this as C4-transitive.",
+      "since": "2026-05-09",
+      "owner": "stage-s-round-2"
+    },
+    {
+      "path": "src/__tests__/capability-gate-arbitration.test.ts",
+      "reason": "Stage S round 2 (Issue 5): capability-gate-arbitration.test.ts transitively imports run-capability-controller.ts which now lazy-requires runtime-manager inside `resolveActiveSkillAllowedTools`. Tests in this file drive the arbitration policy with synthetic capability resolutions and never set `mode:'selected'` authorization, so the require is never reached at runtime. No DB call.",
+      "since": "2026-05-09",
+      "owner": "stage-s-round-2"
     }
   ]
 }

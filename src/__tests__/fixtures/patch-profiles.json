@@ -143,6 +143,20 @@
         "baseUrl": "https://my-vllm.example.com/v1",
         "model": "qwen-2.5-32b-instruct",
         "expectsMatch": false
+      },
+      {
+        "name": "match_positive_openai_compatible_provider",
+        "config": { "provider": "openai-compatible" },
+        "baseUrl": "https://my-vllm.example.com/v1",
+        "model": "qwen-2.5-32b-instruct",
+        "expectsMatch": true
+      },
+      {
+        "name": "no_match_unknown_provider_fail_closed",
+        "config": { "provider": "some-unknown-provider" },
+        "baseUrl": "https://my-vllm.example.com/v1",
+        "model": "qwen-2.5-32b-instruct",
+        "expectsMatch": false
       }
     ]
   }
