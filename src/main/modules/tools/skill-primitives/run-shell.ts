@@ -16,6 +16,8 @@ import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent
 import { ToolDomainError } from '../tool-errors'
 import { logAgentMetric } from '../../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../../agent-control/tool-error-metrics'
+import { auditBashCommand } from './bash-risk-patterns'
+import { redactHostPaths } from './host-path-redactor'
 import { defaultLookupSkillRoots, type LookupSkillRoots } from './root-resolver'
 
 const STDOUT_LIMIT = 8_192
@@ -209,7 +211,10 @@ function writeOverflowArtifact(artifactRoot: string, streamLabel: string, fullTe
     mkdirSync(logsDir, { recursive: true })
     const name = `shell-${Date.now()}-${randomUUID().slice(0, 8)}-${streamLabel}.txt`
     const abs = join(logsDir, name)
-    writeFileSync(abs, fullText, 'utf-8')
+    // Stage T W7.3 (round 12 fix) — redact host paths BEFORE persisting the
+    // overflow log so the on-disk artifact never carries `/Users/<name>`.
+    const redacted = redactHostPaths(fullText)
+    writeFileSync(abs, redacted, 'utf-8')
     return { path: abs, error: null }
   } catch (err) {
     return { path: null, error: err instanceof Error ? err.message : String(err) }
@@ -232,6 +237,29 @@ export async function executeRunShell(
       'missing_skill',
       `Skill "${deps.skillId}" is not registered; cannot resolve shell cwd.`,
       { skillId: deps.skillId || null },
+    )
+  }
+
+  // Stage T W7.1 — high-risk pattern audit. Runs BEFORE the shouldUseShell
+  // branch so both the `bash -c <full command>` compound path and the
+  // `parseCommand` argv path share the same gate. Without this fence,
+  // dangerous compound forms like `| sh`, `$(curl ...)`, `>/etc/...` would
+  // route through `bash -c` and bypass `parseCommand` entirely.
+  const audit = auditBashCommand(args.command)
+  if (!audit.allowed && audit.matched) {
+    logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
+      primitive: 'skill_run_shell',
+      reason: 'command_high_risk_blocked',
+      pattern: audit.matched.pattern,
+      description: audit.matched.description,
+    })
+    throw new ToolDomainError(
+      'command_high_risk_blocked',
+      `skill_run_shell: command rejected by high-risk pattern audit (${audit.matched.description}).`,
+      {
+        pattern: audit.matched.pattern,
+        description: audit.matched.description,
+      },
     )
   }
 
@@ -383,12 +411,22 @@ export async function executeRunShell(
 
   const stdoutSafe = truncate(stdout)
   const stderrSafe = truncate(stderr)
+  // Stage T W7.3 — host-path redaction is applied to stdout/stderr before
+  // the model ever sees them. Overflow log write (inside writeOverflowArtifact)
+  // re-redacts the FULL stream so the persisted file is also clean. Together
+  // these are the ≥3 redaction sites the gate enforces.
+  const stdoutRedacted = redactHostPaths(stdoutSafe.text)
+  const stderrRedacted = redactHostPaths(stderrSafe.text)
   const stdoutArtifact: OverflowResult = stdoutSafe.truncated
     ? writeOverflowArtifact(roots.artifactRoot, 'stdout', stdout)
     : { path: null, error: null }
   const stderrArtifact: OverflowResult = stderrSafe.truncated
     ? writeOverflowArtifact(roots.artifactRoot, 'stderr', stderr)
     : { path: null, error: null }
+  // Round-12 — artifact path strings themselves carry `<artifactRoot>` which
+  // typically lives under the user's home dir; redact before surfacing.
+  const stdoutArtifactPathRedacted = stdoutArtifact.path ? redactHostPaths(stdoutArtifact.path) : null
+  const stderrArtifactPathRedacted = stderrArtifact.path ? redactHostPaths(stderrArtifact.path) : null
   if (stdoutArtifact.error) {
     logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
       primitive: 'skill_run_shell',
@@ -442,19 +480,19 @@ export async function executeRunShell(
   const textLines: string[] = [
     `exitCode=${exitCode} durationMs=${durationMs}`,
   ]
-  if (stdoutSafe.text) textLines.push('STDOUT:', stdoutSafe.text)
-  if (stderrSafe.text) textLines.push('STDERR:', stderrSafe.text)
+  if (stdoutRedacted) textLines.push('STDOUT:', stdoutRedacted)
+  if (stderrRedacted) textLines.push('STDERR:', stderrRedacted)
   if (stdoutSafe.truncated) {
     textLines.push(
-      stdoutArtifact.path
-        ? `(stdout truncated; full log at ${stdoutArtifact.path})`
+      stdoutArtifactPathRedacted
+        ? `(stdout truncated; full log at ${stdoutArtifactPathRedacted})`
         : `(stdout truncated; overflow log write failed: ${stdoutArtifact.error})`,
     )
   }
   if (stderrSafe.truncated) {
     textLines.push(
-      stderrArtifact.path
-        ? `(stderr truncated; full log at ${stderrArtifact.path})`
+      stderrArtifactPathRedacted
+        ? `(stderr truncated; full log at ${stderrArtifactPathRedacted})`
         : `(stderr truncated; overflow log write failed: ${stderrArtifact.error})`,
     )
   }
@@ -464,12 +502,12 @@ export async function executeRunShell(
     data: {
       exitCode,
       durationMs,
-      stdout: stdoutSafe.text,
-      stderr: stderrSafe.text,
+      stdout: stdoutRedacted,
+      stderr: stderrRedacted,
       stdoutTruncated: stdoutSafe.truncated,
       stderrTruncated: stderrSafe.truncated,
-      stdoutArtifactPath: stdoutArtifact.path,
-      stderrArtifactPath: stderrArtifact.path,
+      stdoutArtifactPath: stdoutArtifactPathRedacted,
+      stderrArtifactPath: stderrArtifactPathRedacted,
       stdoutArtifactError: stdoutArtifact.error,
       stderrArtifactError: stderrArtifact.error,
       command: { bin: parsed.bin, args: parsed.args },
