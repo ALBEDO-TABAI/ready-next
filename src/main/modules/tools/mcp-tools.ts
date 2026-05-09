@@ -12,7 +12,7 @@
 import { ToolDomainError } from './tool-errors'
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../agent-control/tool-result-types'
 import { getMcpClient } from '../mcp/client'
-import { getMcpServerForTool } from '../mcp/registry'
+import { getMcpServerForTool, isAuthorized } from '../mcp/registry'
 
 export interface McpToolContext {
   abortSignal?: AbortSignal
@@ -28,6 +28,18 @@ export async function executeMcpTool(
   const serverId = getMcpServerForTool(toolName)
   if (!serverId) {
     throw new ToolDomainError('mcp_tool_unregistered', `MCP tool ${toolName} is not registered against any server`)
+  }
+  // Stage T R5 fix: re-check isAuthorized at execution time. The model-
+  // visible filter (tool-registry list resolver) gates discovery, but
+  // tool-executor's allowlist may pass-through (empty allowlist case at
+  // tool-executor.ts:226), so MCP tools can be invoked without consent
+  // unless we re-verify here. scopeId is the canonical authorization key.
+  if (!isAuthorized(toolName, ctx.sessionId, ctx.scopeId)) {
+    throw new ToolDomainError(
+      'mcp_authorization_denied',
+      `MCP tool ${toolName} not authorized for current scope`,
+      { serverId, toolName, sessionId: ctx.sessionId, scopeId: ctx.scopeId },
+    )
   }
   const client = getMcpClient(serverId)
   if (!client) {
