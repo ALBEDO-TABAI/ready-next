@@ -13,6 +13,7 @@ export type CapabilityGroupId =
   | 'general_research'
   | 'system_host'
   | 'design_reserved'
+  | 'mcp'
 
 export type CapabilityProfileId =
   | 'local_chat'
@@ -189,6 +190,17 @@ export const CAPABILITY_GROUPS: CapabilityGroupDefinition[] = [
     defaultMode: 'off',
     defaultProfiles: [],
     executionKinds: ['hosted'],
+    settingsVisible: false,
+  },
+  {
+    id: 'mcp',
+    label: 'MCP 工具',
+    description: '通过 Model Context Protocol 接入的远程工具；走 OAuth 授权 + 每轮 deferred 提级。',
+    exposure: 'model_visible',
+    availability: 'active',
+    defaultMode: 'auto',
+    defaultProfiles: ['local_chat'],
+    executionKinds: ['deterministic'],
     settingsVisible: false,
   },
 ]

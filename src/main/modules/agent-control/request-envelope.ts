@@ -78,6 +78,13 @@ export interface RequestEnvelope {
     countsBySource: Record<InputChunkSource, number>
     userControllableSourcesOnly: boolean
   }
+  /**
+   * Stage T PR-T5 — conversation scope id. Plumbed end-to-end into
+   * `ToolPolicy.scopeId` so `tool-gateway` / `tool-registry` can pass
+   * it to `mcp.registry.isAuthorized(toolName, sessionId, scopeId)`.
+   * Optional — omitted in unit-test contexts that don't have a scope.
+   */
+  scopeId?: string
 }
 
 const LEADING_BOOTSTRAP_TITLES = new Set([

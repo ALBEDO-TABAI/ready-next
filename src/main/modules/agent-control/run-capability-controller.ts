@@ -44,6 +44,14 @@ interface RunCapabilityBaseParams {
   }
   sessionId?: string
   /**
+   * Stage T PR-T5 — conversation scope id, sourced from
+   * `RequestEnvelope.scopeId`. Plumbed onto `toolPolicy.scopeId` so the
+   * gateway / registry pass it into
+   * `mcp.registry.isAuthorized(toolName, sessionId, scopeId)` for the
+   * model-visible MCP tool list.
+   */
+  scopeId?: string
+  /**
    * Stage 4 W3b.2 fix — per-turn skill tool authorization. Threaded
    * through `resolveRunCapabilities` so it's already on `toolPolicy`
    * BEFORE `getPolicyOpenAIToolBundle` computes `allowedToolNames` and
@@ -281,6 +289,11 @@ function resolveRunCapabilities(
   // snapshot and the text-tool-bridge allowed-name list drift from the
   // post-cutover policy applied later in turn-engine.
   toolPolicy.authorization = baseParams.authorization
+
+  // Stage T PR-T5 — thread scopeId from RequestEnvelope onto the policy
+  // so the bundle path (gateway → registry → mcp.registry.isAuthorized)
+  // sees a consistent (sessionId, scopeId) tuple per turn.
+  toolPolicy.scopeId = baseParams.scopeId
 
   // Stage S round 2 (Issue 3) — vision capability filter.
   //

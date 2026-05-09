@@ -134,8 +134,9 @@ export class ToolGateway {
     groupId: CapabilityGroupId,
     sessionId: string | undefined,
     authorization: SkillToolAuthorization,
+    scopeId?: string,
   ): ToolDefinition[] {
-    return this.registry.getToolDefinitionsForGroup(groupId, sessionId, authorization)
+    return this.registry.getToolDefinitionsForGroup(groupId, sessionId, authorization, scopeId)
   }
 
   private resolveGroupToolSchemasDetailed(
@@ -143,11 +144,12 @@ export class ToolGateway {
     format: ToolSchemaFormat,
     sessionId: string | undefined,
     authorization: SkillToolAuthorization,
+    scopeId?: string,
   ): ToolSchemaResolution {
     const errorKey = this.resolutionErrorKey(groupId, format)
     this.lastSchemaResolutionErrors.delete(errorKey)
     try {
-      const resolution = this.registry.getToolSchemasResolutionForGroup(groupId, format, sessionId, authorization)
+      const resolution = this.registry.getToolSchemasResolutionForGroup(groupId, format, sessionId, authorization, scopeId)
       const errorMessage = resolution.error || null
       if (errorMessage) {
         this.lastSchemaResolutionErrors.set(errorKey, errorMessage)
@@ -178,8 +180,9 @@ export class ToolGateway {
     format: ToolSchemaFormat,
     sessionId: string | undefined,
     authorization: SkillToolAuthorization,
+    scopeId?: string,
   ): Array<Record<string, unknown>> {
-    return this.resolveGroupToolSchemasDetailed(groupId, format, sessionId, authorization).tools
+    return this.resolveGroupToolSchemasDetailed(groupId, format, sessionId, authorization, scopeId).tools
   }
 
   // Stage 10 (P) Phase B'-1 — capability metadata path. The previous
@@ -264,8 +267,9 @@ export class ToolGateway {
     format: ToolSchemaFormat,
     sessionId: string | undefined,
     authorization: SkillToolAuthorization,
+    scopeId?: string,
   ): Array<Record<string, unknown>> {
-    return this.resolveGroupToolSchemas(groupId, format, sessionId, authorization)
+    return this.resolveGroupToolSchemas(groupId, format, sessionId, authorization, scopeId)
   }
 
   getLastSchemaResolutionError(groupId: CapabilityGroupId, format: ToolSchemaFormat): string | null {
@@ -277,11 +281,12 @@ export class ToolGateway {
     format: ToolSchemaFormat,
     sessionId: string | undefined,
     authorization: SkillToolAuthorization,
+    scopeId?: string,
   ): ToolGroupResolutionResult {
     const tools = new Map<string, Record<string, unknown>>()
     const groupResolutions: ToolGroupResolutionEntry[] = []
     for (const groupId of groupIds) {
-      const resolution = this.resolveGroupToolSchemasDetailed(groupId, format, sessionId, authorization)
+      const resolution = this.resolveGroupToolSchemasDetailed(groupId, format, sessionId, authorization, scopeId)
       for (const tool of resolution.tools) {
         const name = format === 'anthropic'
           ? (typeof tool.name === 'string' ? tool.name : null)
@@ -310,16 +315,18 @@ export class ToolGateway {
     groupIds: CapabilityGroupId[],
     sessionId: string | undefined,
     authorization: SkillToolAuthorization,
+    scopeId?: string,
   ): Array<Record<string, unknown>> {
-    return this.getToolSchemaResolutionForGroups(groupIds, 'anthropic', sessionId, authorization).tools
+    return this.getToolSchemaResolutionForGroups(groupIds, 'anthropic', sessionId, authorization, scopeId).tools
   }
 
   getOpenAIToolsForGroups(
     groupIds: CapabilityGroupId[],
     sessionId: string | undefined,
     authorization: SkillToolAuthorization,
+    scopeId?: string,
   ): Array<Record<string, unknown>> {
-    return this.getToolSchemaResolutionForGroups(groupIds, 'openai', sessionId, authorization).tools
+    return this.getToolSchemaResolutionForGroups(groupIds, 'openai', sessionId, authorization, scopeId).tools
   }
 
   getToolDefinition(id: string): ToolDefinition | null {

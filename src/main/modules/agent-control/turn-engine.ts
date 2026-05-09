@@ -1336,6 +1336,21 @@ export class TurnEngine {
         // metrics must never break the control path
       }
       transcript.emitStatus(status, terminalReason)
+      // Stage T PR-T5 — turn-end hook for MCP deferred-tool registry.
+      // Promotion within a turn-gap is non-persistent; at terminal
+      // closure the next turn must start cold. Required by
+      // `check-deferred-registry-per-turn-reset.cjs`.
+      try {
+        // Lazy import to avoid pulling MCP module into early init paths
+        // (helper-only call site; safe to no-op if mcp dir is absent).
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const mcpDeferred = require('../mcp/deferred-filter') as {
+          deferredRegistry: { reset(): void }
+        }
+        mcpDeferred.deferredRegistry.reset()
+      } catch {
+        // mcp module not available in this build — noop
+      }
       return {
         ...state.buildResult({
           success: params.success,
@@ -2190,6 +2205,11 @@ export class TurnEngine {
             || userText,
         },
         sessionId: request.sessionId,
+        // Stage T PR-T5 — thread scopeId from the per-turn request
+        // envelope into the capability controller so the resulting
+        // ToolPolicy carries scopeId end-to-end into gateway → registry
+        // → mcp.registry.isAuthorized(toolName, sessionId, scopeId).
+        scopeId: requestEnvelope.scopeId,
         // Stage 4 W3b.2 fix — thread authorization into the capability
         // controller so allowedToolNames + toolResolution snapshot are
         // computed with the same filter the model-visible list uses.

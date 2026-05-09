@@ -29,22 +29,26 @@ import {
 export function getAnthropicTools(
   authorization: SkillToolAuthorization,
   sessionId?: string,
+  scopeId?: string,
 ): Array<Record<string, unknown>> {
   return defaultToolGateway.getAnthropicToolsForGroups(
     defaultToolGateway.listCapabilityGroups().map((group) => group.id),
     sessionId,
     authorization,
+    scopeId,
   )
 }
 
 export function getOpenAITools(
   authorization: SkillToolAuthorization,
   sessionId?: string,
+  scopeId?: string,
 ): Array<Record<string, unknown>> {
   return defaultToolGateway.getOpenAIToolsForGroups(
     defaultToolGateway.listCapabilityGroups().map((group) => group.id),
     sessionId,
     authorization,
+    scopeId,
   )
 }
 

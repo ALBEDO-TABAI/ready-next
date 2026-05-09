@@ -58,6 +58,14 @@ export interface ToolPolicy {
   // See skills-tools.ts::getSkillToolDefs (B plan Phase 0).
   sessionId?: string
   /**
+   * Stage T PR-T5 — conversation scope id. Threaded from
+   * `RequestEnvelope.scopeId` by `run-capability-controller`. The
+   * gateway / registry pass it into
+   * `mcp.registry.isAuthorized(toolName, sessionId, scopeId)` so MCP
+   * tool exposure is gated per (session, scope).
+   */
+  scopeId?: string
+  /**
    * Stage 4 W3b.2 — per-turn skill tool authorization. When populated by
    * turn-engine (post-W3b.1 cutover), `getPolicyAnthropicTools` /
    * `getPolicyOpenAITools` / `getPolicyOpenAIToolBundle` thread it through
@@ -274,7 +282,12 @@ export function buildToolGuidance(policy: ToolPolicy): string {
 export function getPolicyAnthropicTools(policy?: ToolPolicy): Array<Record<string, unknown>> {
   const visibleGroupIds = resolveVisibleGroupIds(policy)
 
-  let tools = defaultToolGateway.getAnthropicToolsForGroups(visibleGroupIds, policy?.sessionId, resolvePolicyAuthorization(policy))
+  let tools = defaultToolGateway.getAnthropicToolsForGroups(
+    visibleGroupIds,
+    policy?.sessionId,
+    resolvePolicyAuthorization(policy),
+    policy?.scopeId,
+  )
   if (policy?.forceDocumentTool) {
     const baseAllowed = policy.documentWidgetTaskKind === 'create'
       ? DOCUMENT_WIDGET_CREATE_TOOL_NAMES
@@ -344,6 +357,7 @@ export function getPolicyOpenAIToolBundle(policy?: ToolPolicy): PolicyOpenAITool
     'openai',
     policy?.sessionId,
     resolvePolicyAuthorization(policy),
+    policy?.scopeId,
   )
   let tools = resolution.tools
   if (policy?.forceDocumentTool) {
