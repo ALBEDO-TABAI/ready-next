@@ -403,6 +403,15 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - **Skill hardening**：manifest `allowed_tools` 字段编译期 + 运行期联合 §6.23 authorization；安装期 security_scanner 阻断恶意 fixture。
 - **Verify chain**：`npm run verify:s` 必须内嵌 `verify:r` + `verify:native`，并覆盖 40 个内嵌 gate + `test:s:gates` + `test:s:focus`（外加 PR-S13 切换 gate `check-stage-s-verify-switch.cjs`，共 41 unique）。Stage S done 后主 `verify` / `verify:cloud` 起步链切到 `verify:s`。
 
+### 6.27 deer-flow 借鉴 · 深度扩展（T / Stage 14）
+
+- Stage 14（T 阶段）落地 sandbox hardening 三件套 + worker event ledger + parallel subagent + MCP integration。
+- **Sandbox**：`bash-risk-patterns.ts` 10 条高危正则（rm -rf / / dd / mkfs / |sh / $(curl) / base64 -d| / >/etc / >/usr/bin / wget exec），`run-shell.ts executeRunShell` 入口审计（先于 `shouldUseShell` 分支，覆盖 bash -c 复合命令路径与 parseCommand 解析路径双侧）；read/write-artifact symlink 拒绝 + 现有大小限保留（read 1MB read-artifact.ts:18，write 50MB write-artifact.ts:30；与 §6.12 一致）；run-shell stdout/stderr 走 `redactHostPaths` 脱敏 host path。
+- **Event ledger**：skill-child-runner JSONL 加 `event_kind / ts / terminal_reason / rollback_target` 字段；rollback_target 仅在 cancel 终态填，**只作诊断字段不触发回滚**——deer-flow worker abort rollback 自动语义显式拒绝。
+- **Parallel subagent**：`parallel-branch-orchestrator.ts` PARALLEL_BRANCH_HARD_CAP=3；framePatch 串行 merge 保 §6.20 单源；超 cap 返 null + emit `parallel_branch_hard_cap_reached`。
+- **MCP**：`src/main/modules/mcp/{client,oauth,registry,tool-discovery,deferred-filter}.ts` 五件套；新 capability group `'mcp'`（第 15 值；同步 `CapabilityGroupId` union + `CAPABILITY_GROUPS` 数组）；MCP tool 走**独立** `mcp.registry.isAuthorized(toolName, sessionId, scopeId)` 合同（**与 §6.23 `SkillToolAuthorization` 正交不复用**：§6.23 只过滤 `skill_*` 前缀，MCP 工具非 `skill_*` 前缀会漏，因此独立维度）；deferred registry per-turn reset 防 schema 爆炸。
+- **Verify chain**：`npm run verify:t` 必须内嵌 `verify:s`（已含 verify:r + verify:native），并覆盖 15 个内嵌 gate + `test:t:gates` + `test:t:focus`（外加 PR-T6 切换 gate `check-stage-t-verify-switch.cjs`，共 16 unique）。Stage T done 后主 `verify` / `verify:cloud` 起步链切到 `verify:t`。
+
 ## 7. 新功能开发最小闭环
 新增跨进程功能时，至少同步修改：
 1. Main IPC handler

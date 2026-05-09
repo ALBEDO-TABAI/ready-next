@@ -110,6 +110,10 @@ export function authorizeMcpToolForScope(
   server.scopedAllowlist = allowlist
 }
 
+export const __breaksInvariants = [
+  'singleton.mcp-server-registry.never-reset-mid-session',
+] as const
+
 /** Test helper. */
 export function __resetMcpRegistryForTests(): void {
   servers.clear()

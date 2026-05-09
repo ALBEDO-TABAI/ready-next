@@ -112,6 +112,10 @@ export function listMcpClients(): McpClient[] {
   return Array.from(clientRegistry.values())
 }
 
+export const __breaksInvariants = [
+  'singleton.mcp-client-registry.never-reset-mid-session',
+] as const
+
 /** Test helper. */
 export function __resetMcpClientsForTests(): void {
   clientRegistry.clear()

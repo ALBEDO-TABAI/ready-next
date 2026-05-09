@@ -167,6 +167,10 @@ export async function ensureAuthorized(
   return token
 }
 
+export const __breaksInvariants = [
+  'singleton.mcp-oauth-token-cache.never-reset-mid-session',
+] as const
+
 /**
  * Test helper — clears all cached tokens and registered server
  * configs. Not for production use.

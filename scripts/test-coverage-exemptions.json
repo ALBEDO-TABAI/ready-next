@@ -76,6 +76,24 @@
   ],
   "c4Exempt": [
     {
+      "path": "src/__tests__/sandbox-bash-high-risk.test.ts",
+      "reason": "Stage T (Stage 14) PR-T2/W7.1: tests only exercise auditBashCommand pure regex matrix + executeRunShell with mkdtempSync filesystem fixtures (no sqlite). Transitive value-import reaches nativeBackedModules via tools/skill-primitives/run-shell.ts barrel, but no test path opens better-sqlite3 or reads any repository. Verified passing on host-Node.",
+      "since": "2026-05-09",
+      "owner": "stage-t-pr-t6"
+    },
+    {
+      "path": "src/__tests__/sandbox-symlink-rejected.test.ts",
+      "reason": "Stage T (Stage 14) PR-T2/W7.2: tests only exercise read/write-artifact symlink rejection with mkdtempSync filesystem fixtures (no sqlite). Transitive value-import reaches nativeBackedModules via tools/skill-primitives barrel, but no test path opens better-sqlite3 or reads any repository. Verified passing on host-Node.",
+      "since": "2026-05-09",
+      "owner": "stage-t-pr-t6"
+    },
+    {
+      "path": "src/__tests__/shell-output-host-path-redacted.test.ts",
+      "reason": "Stage T (Stage 14) PR-T2/W7.3: tests only exercise redactHostPaths pure helper + run-shell stdout/stderr redaction with mkdtempSync fixtures (no sqlite). Transitive value-import reaches nativeBackedModules via tools/skill-primitives/run-shell.ts barrel, but no test path opens better-sqlite3 or reads any repository. Verified passing on host-Node.",
+      "since": "2026-05-09",
+      "owner": "stage-t-pr-t6"
+    },
+    {
       "path": "src/__tests__/vision-tool-gating.test.ts",
       "reason": "Stage S (Stage 13) PR-S6/W4.2: tests only exercise the pure helper filterToolsByVisionCapability and the frozen VISION_REQUIRING_TOOL_NAMES constant from tool-gateway. Transitive imports reach nativeBackedModules via the gateway barrel, but no test path ever instantiates ToolGateway, opens better-sqlite3, or reads any repository. Verified passing on host-Node.",
       "since": "2026-05-09",
