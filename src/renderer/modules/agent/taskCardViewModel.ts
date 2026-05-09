@@ -56,6 +56,15 @@ export interface TaskCardRunLike {
   recoveryHistory?: RecoveryRecordData[]
   blockedReason?: string | null
   error?: string | null
+  /**
+   * Stage T (W9.2) — Worker Event Ledger diagnostic. Snapshot of the
+   * cancel terminal event's `rollback_target` (= the runner's
+   * `lastSafeStepId` at cancel time). `null` means cancel happened
+   * before any step completed; `undefined` means this run never
+   * cancelled. Diagnostic-only — the renderer surfaces it for triage,
+   * but no UI action triggers a rollback.
+   */
+  rollback_target?: string | null
   updatedAt: string
   toolTrace?: ToolTraceEvent[]
 }
@@ -85,6 +94,14 @@ export interface TaskCardViewModel {
   sections: Record<TaskSectionKey, TaskSectionViewModel>
   detailGroups: TaskEventGroupViewModel[]
   legacyHandoffHit?: 'pathMatch' | 'subtaskMatch' | 'rawIncludes'
+  /**
+   * Stage T (W9.2) — diagnostic-only passthrough of the cancel
+   * `rollback_target` from the JSONL Worker Event Ledger. `undefined`
+   * unless the run cancelled. Renderer can surface as a triage label
+   * (`'已取消（最后安全步骤：<id>）'`) but must NOT bind any UI action
+   * to it — the runner does not roll back on cancel.
+   */
+  rollback_target?: string | null
 }
 
 // Stage O §1.4 — `TaskCardVisualState` is now a single source: imported
@@ -530,6 +547,9 @@ export function buildTaskCardViewModel(
     summary,
     legacyHandoffHit,
     currentStep,
+    // Stage T (W9.2) — diagnostic passthrough; undefined for non-cancel
+    // runs, null for cancel-before-any-safe-step.
+    rollback_target: run.rollback_target,
     sections: {
       overview: {
         key: 'overview',

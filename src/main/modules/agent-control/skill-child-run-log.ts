@@ -61,11 +61,42 @@ export async function resolveChildRunLogPathForResume(
 export async function appendChildRunEvent(opts: AppendChildRunEventOptions): Promise<void> {
   const { logPath, event } = opts
   await fs.mkdir(path.dirname(logPath), { recursive: true })
+  // Stage T (W9.1) — Worker Event Ledger. The new fields
+  // `event_kind / ts / terminal_reason / rollback_target` are written
+  // through unchanged — callers are responsible for setting them when
+  // relevant (terminal events set `event_kind` + `terminal_reason`;
+  // cancel terminals also set `rollback_target`). Pass-through keeps
+  // backward-compat with pre-Stage-T callers that emit only the legacy
+  // shape.
   // Compact JSON, single line, trailing newline. `appendFile` opens the
   // file in append mode each call, which is atomic enough for the
   // single-writer (driver) child-run model.
   const line = `${JSON.stringify(event)}\n`
   await fs.appendFile(logPath, line, { encoding: 'utf8' })
+}
+
+/**
+ * Stage T (W9.2) — diagnostic helper for renderer / debugging consumers.
+ * Reads the JSONL log and returns the `rollback_target` from the most
+ * recent close event tagged with `event_kind === 'cancelled'` (or any
+ * close carrying a `rollback_target` field for future-proofing).
+ *
+ * Returns `undefined` when no cancel close exists; `null` when a cancel
+ * close exists but no safe step was recorded; otherwise the safe step id.
+ *
+ * Explicitly does NOT trigger any rollback action — pure read.
+ */
+export async function readChildRunRollbackTarget(
+  logPath: string,
+): Promise<string | null | undefined> {
+  const result = await readChildRunLog(logPath)
+  for (let i = result.events.length - 1; i >= 0; i--) {
+    const event = result.events[i]
+    if (!event || event.type !== 'close') continue
+    if (event.event_kind !== 'cancelled') continue
+    return event.rollback_target ?? null
+  }
+  return undefined
 }
 
 export async function readChildRunLog(logPath: string): Promise<ReadChildRunLogResult> {
