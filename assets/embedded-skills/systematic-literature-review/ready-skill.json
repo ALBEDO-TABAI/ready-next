@@ -1,0 +1,15 @@
+{
+  "id": "systematic-literature-review",
+  "name": "systematic-literature-review",
+  "displayName": "Systematic Literature Review",
+  "description": "学术综述方法论：Boolean query + PRISMA + 引用图谱",
+  "version": "0.1.0",
+  "runtime": "reference",
+  "execution": { "mode": "advisory" },
+  "actions": {
+    "read_skill": {
+      "runtime": "reference",
+      "visibility": "internal"
+    }
+  }
+}

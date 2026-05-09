@@ -7,7 +7,7 @@
  * handlers are free to surface sandbox rejections as plain throws.
  */
 
-import { mkdirSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent-control/tool-result-types'
@@ -119,6 +119,29 @@ export async function executeWriteArtifact(
       })
     }
     throw error
+  }
+
+  // Stage T W7.2 — refuse to OVERWRITE an existing path that is itself a
+  // symlink. `path-sandbox.assertNotReservedPath` already blocked reserved
+  // filenames; this gate is the symlink companion. We check with lstatSync
+  // (not statSync) so we see the link itself rather than its target. Targets
+  // pointing OUT of the sandbox were already rejected by `resolveWithinRoot`;
+  // this rejects in-sandbox symlinks too because clobbering a link surprises
+  // the LLM's mental model of "write file X".
+  if (existsSync(absPath)) {
+    const linkStats = lstatSync(absPath)
+    if (linkStats.isSymbolicLink()) {
+      logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
+        primitive: 'skill_write_artifact',
+        reason: 'symlink_rejected',
+        relativePath: args.relativePath,
+      })
+      throw new ToolDomainError(
+        'symlink_rejected',
+        `Refusing to overwrite symlink: ${args.relativePath}`,
+        { relativePath: args.relativePath, absolutePath: absPath },
+      )
+    }
   }
 
   const encoding = args.encoding || 'utf-8'

@@ -167,6 +167,22 @@ export interface SkillDefinition {
    * contract instead of carrying per-skill action tables.
    */
   childLoop?: SkillChildLoopDefinition
+  /**
+   * Stage S W11.1 — optional manifest-declared tool allowlist.
+   *
+   * When present, Ready core treats this as a second-layer filter on top of
+   * the §6.23 SkillToolAuthorization model: even if authorization permits
+   * a tool, it must also appear in `allowedTools` (or in the always-allowed
+   * skill_<id>_<action> typed-action set) before being exposed to the model.
+   *
+   * Source: deer-flow `skills/<skill>/skill.json` `allowed_tools` field.
+   * Validated at compile time as `string[]` (entries trimmed; empty array
+   * permitted but rejects non-string entries with ManifestValidationError).
+   *
+   * Helper-only at PR-S12: tool-gateway integration is deferred — see TODO
+   * marker in `tool-gateway.ts` / `filterToolsByAuthorization` callsite.
+   */
+  allowedTools?: string[]
 }
 
 export interface SkillArtifact {

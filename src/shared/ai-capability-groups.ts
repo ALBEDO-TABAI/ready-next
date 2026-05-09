@@ -10,8 +10,10 @@ export type CapabilityGroupId =
   | 'session_recall'
   | 'pet'
   | 'channel_feishu'
+  | 'general_research'
   | 'system_host'
   | 'design_reserved'
+  | 'mcp'
 
 export type CapabilityProfileId =
   | 'local_chat'
@@ -158,6 +160,17 @@ export const CAPABILITY_GROUPS: CapabilityGroupDefinition[] = [
     settingsVisible: true,
   },
   {
+    id: 'general_research',
+    label: '研究工具',
+    description: '网络搜索、网页抓取、产物呈现等系统化研究工具。',
+    exposure: 'model_visible',
+    availability: 'active',
+    defaultMode: 'auto',
+    defaultProfiles: ['local_chat', 'scheduled_run'],
+    executionKinds: ['deterministic'],
+    settingsVisible: true,
+  },
+  {
     id: 'system_host',
     label: '宿主内部',
     description: '只允许宿主受控调用的高风险内部能力。',
@@ -177,6 +190,17 @@ export const CAPABILITY_GROUPS: CapabilityGroupDefinition[] = [
     defaultMode: 'off',
     defaultProfiles: [],
     executionKinds: ['hosted'],
+    settingsVisible: false,
+  },
+  {
+    id: 'mcp',
+    label: 'MCP 工具',
+    description: '通过 Model Context Protocol 接入的远程工具；走 OAuth 授权 + 每轮 deferred 提级。',
+    exposure: 'model_visible',
+    availability: 'active',
+    defaultMode: 'auto',
+    defaultProfiles: ['local_chat'],
+    executionKinds: ['deterministic'],
     settingsVisible: false,
   },
 ]

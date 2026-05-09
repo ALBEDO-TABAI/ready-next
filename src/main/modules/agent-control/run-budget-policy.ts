@@ -39,6 +39,10 @@ const TASK_TYPE_BUDGET_PRESETS: Record<TaskType, Pick<RunBudgetSeed, 'maxIterati
     maxIterations: 24,
     maxToolCalls: 24,
   },
+  research: {
+    maxIterations: 60,
+    maxToolCalls: 60,
+  },
 }
 
 export function createRunBudgetSeed(taskType: TaskType = 'short_task'): RunBudgetSeed {
@@ -74,7 +78,11 @@ export function createRunBudgetSeed(taskType: TaskType = 'short_task'): RunBudge
 export function createContinuationRunBudgetSeed(
   inheritedFromTaskType: TaskType | null | undefined,
 ): RunBudgetSeed {
-  if (inheritedFromTaskType === 'multi_step_task' || inheritedFromTaskType === 'media_task') {
+  if (
+    inheritedFromTaskType === 'multi_step_task'
+    || inheritedFromTaskType === 'media_task'
+    || inheritedFromTaskType === 'research'
+  ) {
     return createRunBudgetSeed(inheritedFromTaskType)
   }
   return createRunBudgetSeed('continuation')

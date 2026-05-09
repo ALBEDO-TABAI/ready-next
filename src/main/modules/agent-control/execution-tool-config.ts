@@ -1,5 +1,7 @@
 import {
   defaultToolGateway,
+  filterToolsByAllowedTools,
+  filterToolsByVisionCapability,
   type ToolGroupResolutionEntry,
 } from './tool-gateway'
 import { normalizeOpenAIToolSchema } from '../tools/tool-schema'
@@ -56,6 +58,14 @@ export interface ToolPolicy {
   // See skills-tools.ts::getSkillToolDefs (B plan Phase 0).
   sessionId?: string
   /**
+   * Stage T PR-T5 — conversation scope id. Threaded from
+   * `RequestEnvelope.scopeId` by `run-capability-controller`. The
+   * gateway / registry pass it into
+   * `mcp.registry.isAuthorized(toolName, sessionId, scopeId)` so MCP
+   * tool exposure is gated per (session, scope).
+   */
+  scopeId?: string
+  /**
    * Stage 4 W3b.2 — per-turn skill tool authorization. When populated by
    * turn-engine (post-W3b.1 cutover), `getPolicyAnthropicTools` /
    * `getPolicyOpenAITools` / `getPolicyOpenAIToolBundle` thread it through
@@ -65,6 +75,25 @@ export interface ToolPolicy {
    * `preferredSkillToolNames` filter.
    */
   authorization?: SkillToolAuthorization | null
+  /**
+   * Stage S round 2 (Issue 3) — vision capability of the resolved
+   * agent/provider/model for this turn. When `supportsVision === false`,
+   * `getPolicyAnthropicTools` / `getPolicyOpenAIToolBundle` route the
+   * tool list through `filterToolsByVisionCapability` so the model never
+   * sees vision-bearing tools (e.g. `view_image`) it cannot use.
+   * `null` / undefined means "treat as no-capability data" → conservative
+   * deny path (matches the helper's `supportsVision !== true` branch).
+   */
+  capabilityResolution?: { readonly supportsVision?: boolean } | null
+  /**
+   * Stage S round 2 (Issue 5) — when an active skill is selected for
+   * this turn (`authorization.mode === 'selected'`) and the skill's
+   * manifest declares `allowed_tools: string[]`, the controller resolves
+   * the normalised array onto the policy. The bundle path applies it
+   * via `filterToolsByAllowedTools` so the model only sees the skill's
+   * declared toolset. `null` / `undefined` / empty → identity filter.
+   */
+  activeSkillAllowedTools?: ReadonlyArray<string> | null
 }
 
 export interface PolicyOpenAIToolBundle {
@@ -253,7 +282,12 @@ export function buildToolGuidance(policy: ToolPolicy): string {
 export function getPolicyAnthropicTools(policy?: ToolPolicy): Array<Record<string, unknown>> {
   const visibleGroupIds = resolveVisibleGroupIds(policy)
 
-  let tools = defaultToolGateway.getAnthropicToolsForGroups(visibleGroupIds, policy?.sessionId, resolvePolicyAuthorization(policy))
+  let tools = defaultToolGateway.getAnthropicToolsForGroups(
+    visibleGroupIds,
+    policy?.sessionId,
+    resolvePolicyAuthorization(policy),
+    policy?.scopeId,
+  )
   if (policy?.forceDocumentTool) {
     const baseAllowed = policy.documentWidgetTaskKind === 'create'
       ? DOCUMENT_WIDGET_CREATE_TOOL_NAMES
@@ -295,6 +329,20 @@ export function getPolicyAnthropicTools(policy?: ToolPolicy): Array<Record<strin
     policy?.preferredSkillToolNames || [],
     resolvePolicyAuthorization(policy),
   )
+  // Stage S round 2 (Issue 3) — vision capability gate. When the
+  // resolved capability says the model cannot accept image input, drop
+  // any vision-bearing tool (currently `view_image`) before the model
+  // ever sees the list. Conservative default: missing/undefined caps →
+  // treated as `supportsVision: false` by the helper (deny).
+  tools = filterToolsByVisionCapability(
+    tools as Array<Record<string, unknown>>,
+    { supportsVision: policy?.capabilityResolution?.supportsVision === true },
+  )
+  // Stage S round 2 (Issue 5) — active-skill manifest allowlist. When
+  // a `mode:'selected'` authorization picked a skill whose manifest
+  // declares `allowed_tools`, restrict the model-visible list to that
+  // set. Empty / null → identity (no extra filtering on top of policy).
+  tools = filterToolsByAllowedTools(tools, policy?.activeSkillAllowedTools ?? null)
   return tools
 }
 
@@ -309,6 +357,7 @@ export function getPolicyOpenAIToolBundle(policy?: ToolPolicy): PolicyOpenAITool
     'openai',
     policy?.sessionId,
     resolvePolicyAuthorization(policy),
+    policy?.scopeId,
   )
   let tools = resolution.tools
   if (policy?.forceDocumentTool) {
@@ -352,6 +401,15 @@ export function getPolicyOpenAIToolBundle(policy?: ToolPolicy): PolicyOpenAITool
     policy?.preferredSkillToolNames || [],
     resolvePolicyAuthorization(policy),
   )
+  // Stage S round 2 (Issue 3) — vision capability gate. See the
+  // anthropic path for rationale; OpenAI tools wrap the name under
+  // `function.name`, the helper handles both shapes.
+  tools = filterToolsByVisionCapability(
+    tools,
+    { supportsVision: policy?.capabilityResolution?.supportsVision === true },
+  )
+  // Stage S round 2 (Issue 5) — active-skill manifest allowlist filter.
+  tools = filterToolsByAllowedTools(tools, policy?.activeSkillAllowedTools ?? null)
   const normalizedTools = tools.map((tool) => normalizeOpenAIToolSchema(tool))
   const toolNames = collectToolNames(normalizedTools, 'openai')
   return {

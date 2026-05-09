@@ -78,6 +78,23 @@ export interface RequestEnvelope {
     countsBySource: Record<InputChunkSource, number>
     userControllableSourcesOnly: boolean
   }
+  /**
+   * Stage T PR-T5 — conversation scope id. Plumbed end-to-end into
+   * `ToolPolicy.scopeId` so `tool-gateway` / `tool-registry` can pass
+   * it to `mcp.registry.isAuthorized(toolName, sessionId, scopeId)`.
+   * Optional — omitted in unit-test contexts that don't have a scope.
+   *
+   * Round-1 (Codex) fix — populated by `buildRequestEnvelope` from its
+   * optional `scopeId` parameter; turn-engine forwards the value at the
+   * envelope-construction call site.
+   */
+  scopeId?: string
+  /**
+   * Round-1 (Codex) — paired session identifier, kept symmetric with
+   * `scopeId` so resolvers downstream don't have to reach back into the
+   * raw `TurnEngineRequest`. Also optional.
+   */
+  sessionId?: string
 }
 
 const LEADING_BOOTSTRAP_TITLES = new Set([
@@ -373,7 +390,19 @@ function buildReferencedResources(raw: string): RequestEnvelopeResourceRef[] {
   return refs
 }
 
-export function buildRequestEnvelope(params: { userText: string }): RequestEnvelope {
+export function buildRequestEnvelope(params: {
+  userText: string
+  /**
+   * Round-1 (Codex) — optional `sessionId` / `scopeId` so the envelope
+   * carries scope identity end-to-end. `turn-engine.ts` reads
+   * `requestEnvelope.scopeId` to build `ToolPolicy.scopeId` which
+   * `tool-gateway` / `tool-registry` thread into
+   * `mcp.registry.isAuthorized(toolName, sessionId, scopeId)`.
+   * Optional — unit-test contexts that don't have a scope can omit.
+   */
+  sessionId?: string
+  scopeId?: string
+}): RequestEnvelope {
   const rawUserText = String(params.userText || '')
   const pureUserText = extractPureUserInput(rawUserText)
   const primaryInstruction = extractPrimaryUserInstructionFromText(pureUserText || rawUserText).trim()
@@ -435,5 +464,10 @@ export function buildRequestEnvelope(params: { userText: string }): RequestEnvel
       countsBySource,
       userControllableSourcesOnly: chunks.every((chunk) => USER_CONTROLLABLE_SOURCES.has(chunk.source)),
     },
+    // Round-1 (Codex) — only set when caller passed a non-empty value so
+    // existing tests that omit `sessionId / scopeId` continue to see
+    // `undefined` rather than empty strings.
+    ...(params.sessionId ? { sessionId: params.sessionId } : {}),
+    ...(params.scopeId ? { scopeId: params.scopeId } : {}),
   }
 }

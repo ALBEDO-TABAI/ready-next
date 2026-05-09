@@ -167,6 +167,7 @@ export function toAgentModule(value: unknown): AgentModuleKind | null {
     normalized === 'rss' ||
     normalized === 'calendar' ||
     normalized === 'feishu' ||
+    normalized === 'research' ||
     normalized === 'system'
   ) {
     return normalized

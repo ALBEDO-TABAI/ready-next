@@ -374,6 +374,44 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - **历史代码退役**：`hasActiveSkillExecution` shim 整体删除（3 prod 文件 + 8 test 文件 stub 清理）；`skill.workflow.json` 默认探测删除，仅显式 manifest `workflowFile` 字段触发；`(host as unknown as { resolveRecentSkillTaskRun })` 类型穿越改为 `TurnEngineHost.resolveRecentSkillTaskRun?` 正式接口；`resolveActiveSkillContextLive` 命名改回 `resolveActiveSkillContext`。
 - **Verify 链**：新增 `verify:q = verify:p + 9 cjs gates + test:q:gates + test:q:focus`。顶层 `verify` 与 `verify:cloud` 起步链切到 `verify:q`。Migration 033 SQLite-backed acceptance 由 `verify:native` 下游的真 sqlite 测试覆盖；host-Node 走 `[ABI-SKIP]` canonical helper，per §6.13。
 
+### 6.25 deer-flow 借鉴 · 合同基础（R / Stage 12）
+
+- Stage 12（R 阶段）落地 deep-research 全栈基础设施 + 三处工具边界硬合同 + observability 起点。
+- **TaskType 单源**：`src/shared/task-types.ts` 是 main + renderer 共享 union；`run-contracts.ts` 重导出，`electron.d.ts` import type；新增 'research' 第 6 值。AST gate `check-tasktype-allowlist-completeness.cjs` 强制：所有 `taskType: <literal>` 字段、`Record<TaskType, ...>` keys、`=== '<task-type>'` type guard 全部对齐 6 值或走 `isTaskType()` helper。
+- **Research domain adapter**：`research-domain-adapter.ts` 实现 §6.14 `DomainAdapter`，装载位在 `direct-chat.ts` `domainAdapters` **首位**（确保 research 意图早期分流）。`intent-classifier.ts` `IntentDomain` 加 `'research'`，关键词矩阵覆盖中英双语（研究/调研/综述/对比 / research/survey/review/compare）。
+- **Web tools 分流**：`browser-mode` 优先 `browser_research_topic`（已存在）；`non-browser-mode` 优先 `web_search` + `web_fetch`（新建于 `src/main/modules/tools/builtins/`，分别走 Tavily + DDG fallback / Jina + Tavily fallback）。两套工具不冲突。`general_research` capability group 收纳 web_search / web_fetch / present_file，profiles **只**含 `local_chat` + `scheduled_run`，不含 `remote_channel`（防 Tavily key 远程滥用）。
+- **Embedded skill 起点**：`assets/embedded-skills/{deep-research, systematic-literature-review, github-deep-research, academic-paper-review, web-design-guidelines, find-skills}/` 共 6 个新 reference/advisory skill；`manifest.ts` `EmbeddedSkillId` union + `EMBEDDED_SKILLS[]` 同步注册。
+- **Tool boundary 硬合同**：(a) `tool-call-args-hash.ts` 提供 stable hash（同语义不同 JSON 顺序 hash 相同）；(b) history sanitizer drop-only（拒绝 deer-flow `dangling_tool_call_middleware` inject 形态，与 §6.11 errorKind 互斥语义冲突）；(c) tool name 重名注册期硬失败 throw `ToolNameCollisionError`（拒绝 deer-flow `tools/tools.py:160-174` skip+warn 形态）。
+- **General-research 工具集成 8 条硬合同**（Stage R 加入 web_search/web_fetch/present_file 三新工具时强制）：(1) `tool-parallelism-policy.ts` `ToolResourceTag.domain` union 必须含 `'general_research'`，`getToolResourceTag` 显式返该 domain；(2) **present_file `concurrency: 'serialized'`**（不能 parallel_read_safe，IPC 写动作需序列化）；(3) `tools/schemas/index.ts` STATIC_TOOL_INPUT_SCHEMAS 必须 spread `GENERAL_RESEARCH_SCHEMAS`，否则 dispatch-time Zod 校验跳过；(4) **新工具不扩 `ToolContext`**——present_file 走现有 `requestModuleToolAction` IPC 桥 + `outputsRoot` 字符串（dispatch 层从 `SkillsRuntimeManager.getRuntimeInfo().outputsRoot` 派生），**不**加 runtimeRoot / rendererPushAttachment 字段，**不**用 AgentControlRuntime.getArtifactRoot()（这两个 API 不存在）；(5) **research adapter prefix 集必须在两 mode 都含 present_file**：browser-mode `['browser_research_topic', 'present_file']` / non-browser-mode `['web_search', 'web_fetch', 'present_file']`。capability group "general_research" 仅约束 profile-level exposure 一致（local_chat / scheduled_run），最终模型可见名单由 `prepare.allowedToolNames` 经 prefix 进一步过滤；present_file 必须出现在两 mode 才能跨 browser/non-browser 都可呈现产物；(6) **`executeGeneralResearchTool` 返回 `string | ToolExecutionOutput`**（args 类型 `Record<string, unknown>` + handler 内 Zod parse；JSON 走 `createToolExecutionOutput(JSON.stringify(result), { data: result })`——options 真实字段是 `data`，**不是** `structured`），dispatch 不识别其他形态；(7) **provider 注册容器**实测是 `tool-registry.ts` 的 `GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider>`（不是 Map）；新增 entry 通过 spread 进 ToolRegistry constructor；(8) **present_file 路径守护**走 `resolveReadableWithinRoot(outputsRoot, path)`（`path-sandbox.ts`）做 canonical + symlink 校验，**禁用**朴素 `startsWith`（会被 sibling-prefix 攻击）。
+- **Observability 起点**：`run-span-metadata.ts` 定 `RUN_SPAN_METADATA_KEYS` 6 个 frozen key，**不**入 §6.11 `TOOL_ERROR_METRICS`；`auto-title.ts` 首轮后异步生成 task title，失败本地兜底（不阻塞 turn）。
+- **Web tool errorKind 不进 TOOL_ERROR_METRICS**：`web_search_failed / web_fetch_failed / present_file_failed / path_outside_outputs` 全部由 `ToolDomainError.errorKind` 字符串携带；dispatch 通过 `TOOL_ERROR_METRICS.surfaced` 已统一打 metric（带 errorKind 字段）。registry 是 metric 名表不是 errorKind 表。
+- **Web tool fallback metric** 进新 `WEB_TOOL_FALLBACK_METRICS` namespace，**不**与 `TOOL_ERROR_METRICS` 合并。
+- **prepare.allowedToolNames 收紧到 [] 而非 null**：research domain adapter 的工具集分流必须用 `filtered ?? []`，避免 `turn-engine.ts` 把 null 解为"unrestricted_passthrough"导致分流失效。
+- **未启用项**：纠错/强化识别仅落 helper（`message-correction-detector.ts`），尚未接入 turn 主流程，留 Stage S/T 决策。
+- **Verify chain**：`npm run verify:r` 必须内嵌 `verify:q`，并覆盖 30 个新 gate + `test:r:gates` + `test:r:focus`。Stage R done 后主 `verify` 与 `verify:cloud` 起步链切到 `verify:r`。
+
+### 6.26 deer-flow 借鉴 · 完整功能（S / Stage 13）
+
+- Stage 13（S 阶段）落地 provider 子模块化 / capability 仲裁 / observability 完整 / SQLite 持久化 / clarification 升级 / LLM 弹性 / skill 安全门。
+- **Provider 子模块**：`src/shared/ai-providers/` 7 个 provider（moonshot / anthropic / fox / openai / gemini / volcengine / openai-compatible）+ 4 patch profile（gemini-oai / deepseek / minimax / vllm）+ apply-provider-patch helper + resolve-provider-patch-profile。原 inline `AI_PROVIDERS[]` 改 import 子模块汇总。
+- **Patch 优先级**：用户 config > provider default > profile patcher。
+- **Capability merge 三层**：model overrides > provider class > inferred fallback。未填能力 = 保守拒绝。`o3-mini` 走 model overrides 双覆盖（thinking=true/vision=false），不再有零散特判。
+- **Token attribution**：per model-call span + per-step taskCard 归因；多维 namespace（search/fetch/subagent/present/clarification/todo）独立计数，**不**进 TOOL_ERROR_METRICS。
+- **Clarification**：5-type + options（missing_info/ambiguous_requirement/approach_choice/risk_confirmation/suggestion）；stable message ID `clarification:<tool_call_id>` 重试 replace 不 append；turn-gap 触发**非 middleware**形态，不吞 turn。
+- **LLM resilience**：`llm-resilience.ts` 共享 helper，408/409/425/429/5xx + "server busy" 模式重试 + 退避，所有 provider 适配层接入。
+- **SQLite 持久化**：migration 034 `run_meta` / 035 `thread_meta`（含 owner kind/id strict mutate） / 036 `run_feedback` (rating 1-5 + signal + upsert)。
+- **Skill hardening**：manifest `allowed_tools` 字段编译期 + 运行期联合 §6.23 authorization；安装期 security_scanner 阻断恶意 fixture。
+- **Verify chain**：`npm run verify:s` 必须内嵌 `verify:r` + `verify:native`，并覆盖 40 个内嵌 gate + `test:s:gates` + `test:s:focus`（外加 PR-S13 切换 gate `check-stage-s-verify-switch.cjs`，共 41 unique）。Stage S done 后主 `verify` / `verify:cloud` 起步链切到 `verify:s`。
+
+### 6.27 deer-flow 借鉴 · 深度扩展（T / Stage 14）
+
+- Stage 14（T 阶段）落地 sandbox hardening 三件套 + worker event ledger + parallel subagent + MCP integration。
+- **Sandbox**：`bash-risk-patterns.ts` 10 条高危正则（rm -rf / / dd / mkfs / |sh / $(curl) / base64 -d| / >/etc / >/usr/bin / wget exec），`run-shell.ts executeRunShell` 入口审计（先于 `shouldUseShell` 分支，覆盖 bash -c 复合命令路径与 parseCommand 解析路径双侧）；read/write-artifact symlink 拒绝 + 现有大小限保留（read 1MB read-artifact.ts:18，write 50MB write-artifact.ts:30；与 §6.12 一致）；run-shell stdout/stderr 走 `redactHostPaths` 脱敏 host path。
+- **Event ledger**：skill-child-runner JSONL 加 `event_kind / ts / terminal_reason / rollback_target` 字段；rollback_target 仅在 cancel 终态填，**只作诊断字段不触发回滚**——deer-flow worker abort rollback 自动语义显式拒绝。
+- **Parallel subagent**：`parallel-branch-orchestrator.ts` PARALLEL_BRANCH_HARD_CAP=3；framePatch 串行 merge 保 §6.20 单源；超 cap 返 null + emit `parallel_branch_hard_cap_reached`。
+- **MCP**：`src/main/modules/mcp/{client,oauth,registry,tool-discovery,deferred-filter}.ts` 五件套；新 capability group `'mcp'`（第 15 值；同步 `CapabilityGroupId` union + `CAPABILITY_GROUPS` 数组）；MCP tool 走**独立** `mcp.registry.isAuthorized(toolName, sessionId, scopeId)` 合同（**与 §6.23 `SkillToolAuthorization` 正交不复用**：§6.23 只过滤 `skill_*` 前缀，MCP 工具非 `skill_*` 前缀会漏，因此独立维度）；deferred registry per-turn reset 防 schema 爆炸。
+- **Verify chain**：`npm run verify:t` 必须内嵌 `verify:s`（已含 verify:r + verify:native），并覆盖 15 个内嵌 gate + `test:t:gates` + `test:t:focus`（外加 PR-T6 切换 gate `check-stage-t-verify-switch.cjs`，共 16 unique）。Stage T done 后主 `verify` / `verify:cloud` 起步链切到 `verify:t`。
+
 ## 7. 新功能开发最小闭环
 新增跨进程功能时，至少同步修改：
 1. Main IPC handler

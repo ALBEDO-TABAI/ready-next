@@ -1,0 +1,15 @@
+{
+  "id": "github-deep-research",
+  "name": "github-deep-research",
+  "displayName": "GitHub Deep Research",
+  "description": "GitHub 项目调研方法论：仓库 + issue + 贡献者 + 依赖图",
+  "version": "0.1.0",
+  "runtime": "reference",
+  "execution": { "mode": "advisory" },
+  "actions": {
+    "read_skill": {
+      "runtime": "reference",
+      "visibility": "internal"
+    }
+  }
+}

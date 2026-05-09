@@ -1646,6 +1646,95 @@ const migrations: Migration[] = [
           ON skill_task_runs(detached_task_id);
       `)
     }
+  },
+
+  // ------------------------------------------------------------------ 034
+  // Stage S (PR-S11) — `run_meta` table.
+  //
+  // Per-run metadata aggregator owned by main process: token-usage rollup,
+  // first/last/follow-up message text snapshots, and run-level status.
+  // Indexed by task_id and scope_id for projection joins.
+  {
+    name: '034_add_run_meta_table',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS run_meta (
+          run_id TEXT PRIMARY KEY,
+          task_id TEXT,
+          scope_id TEXT,
+          agent_id TEXT,
+          status TEXT NOT NULL,
+          input_tokens INTEGER DEFAULT 0,
+          output_tokens INTEGER DEFAULT 0,
+          total_tokens INTEGER DEFAULT 0,
+          first_message_text TEXT,
+          last_message_text TEXT,
+          follow_up_text TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_run_meta_task_id ON run_meta(task_id);
+        CREATE INDEX IF NOT EXISTS idx_run_meta_scope_id ON run_meta(scope_id);
+      `)
+    }
+  },
+
+  // ------------------------------------------------------------------ 035
+  // Stage S (PR-S11) — `thread_meta` table.
+  //
+  // Thread-level metadata (display title, pinned/archived flags) keyed by
+  // `thread_id`. Owner identity (`owner_kind` + `owner_id`) is set at create
+  // time and is immutable thereafter; the strict-mutate contract is enforced
+  // by `thread-meta-repository.ts` (see check-thread-meta-strict-mutate.cjs).
+  {
+    name: '035_add_thread_meta_table',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS thread_meta (
+          thread_id TEXT PRIMARY KEY,
+          scope_id TEXT NOT NULL,
+          owner_kind TEXT NOT NULL CHECK (owner_kind IN ('user','agent','system')),
+          owner_id TEXT NOT NULL,
+          display_title TEXT,
+          pinned INTEGER DEFAULT 0,
+          archived INTEGER DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_thread_meta_scope_id ON thread_meta(scope_id);
+      `)
+    }
+  },
+
+  // ------------------------------------------------------------------ 036
+  // Stage S (PR-S11) — `run_feedback` table.
+  //
+  // Per-run user feedback (rating 1-5, optional signal label, optional
+  // free-text comment). Foreign-keyed to `run_meta(run_id)` for join-based
+  // queries. Note: SQLite foreign-key enforcement is OFF by default and is
+  // not enabled by the migration framework; the FK is declarative for the
+  // schema reader, but PRAGMA enforcement is a separate runtime concern.
+  // TODO(stage-s-followup): wire `PRAGMA foreign_keys = ON` at connection
+  // open time if/when joining workflows depend on cascade semantics.
+  // Repository upsert shape: INSERT ... ON CONFLICT(feedback_id) DO UPDATE.
+  {
+    name: '036_add_run_feedback_table',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS run_feedback (
+          feedback_id TEXT PRIMARY KEY,
+          run_id TEXT NOT NULL,
+          task_id TEXT,
+          rating INTEGER CHECK (rating BETWEEN 1 AND 5),
+          signal TEXT,
+          comment TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          FOREIGN KEY (run_id) REFERENCES run_meta(run_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_run_feedback_run_id ON run_feedback(run_id);
+      `)
+    }
   }
 ]
 

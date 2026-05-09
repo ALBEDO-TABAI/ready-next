@@ -29,22 +29,26 @@ import {
 export function getAnthropicTools(
   authorization: SkillToolAuthorization,
   sessionId?: string,
+  scopeId?: string,
 ): Array<Record<string, unknown>> {
   return defaultToolGateway.getAnthropicToolsForGroups(
     defaultToolGateway.listCapabilityGroups().map((group) => group.id),
     sessionId,
     authorization,
+    scopeId,
   )
 }
 
 export function getOpenAITools(
   authorization: SkillToolAuthorization,
   sessionId?: string,
+  scopeId?: string,
 ): Array<Record<string, unknown>> {
   return defaultToolGateway.getOpenAIToolsForGroups(
     defaultToolGateway.listCapabilityGroups().map((group) => group.id),
     sessionId,
     authorization,
+    scopeId,
   )
 }
 
@@ -53,6 +57,7 @@ export { executeDocumentTool }
 export { executeRSSTool }
 export { executeCalendarTool }
 export { executeSystemTool }
+export { executeGeneralResearchTool } from './general-research-tools'
 export { executeToolCall } from './tool-executor'
 export type { ToolContext } from './tool-executor'
 export type {

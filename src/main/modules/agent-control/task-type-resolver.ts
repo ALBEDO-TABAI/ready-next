@@ -138,6 +138,15 @@ export function resolveTaskType(params: {
     }
   }
 
+  if (params.intent.primaryDomain === 'research') {
+    return {
+      taskType: 'research',
+      executionChain: 'domain_executor',
+      preferredExecutor: 'research',
+      requiresPlanner: false,
+    }
+  }
+
   return {
     taskType: 'direct_answer',
     executionChain: 'direct',

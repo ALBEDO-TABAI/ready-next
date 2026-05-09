@@ -1,0 +1,1 @@
+# advisory skill — no python deps

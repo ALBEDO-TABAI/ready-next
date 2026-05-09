@@ -6,6 +6,7 @@ import type {
   TaskProjectionStore,
   TaskStep,
 } from './run-contracts'
+import { isTaskType } from '../../../shared/task-types'
 import { buildContinuationStateFromProjection } from './continuation-state'
 import { clearContinuationState, rememberContinuationState } from './session-continuity'
 import type { ScopeRunEventPayload, ScopeRunSummary } from './types'
@@ -574,14 +575,10 @@ export function buildTaskProjectionRecord(
   const effectiveSummary: ScopeRunSummary = {
     ...summary,
     taskType: (
-      truthPatch?.taskType === 'direct_answer'
-      || truthPatch?.taskType === 'short_task'
-      || truthPatch?.taskType === 'multi_step_task'
-      || truthPatch?.taskType === 'media_task'
-      || truthPatch?.taskType === 'continuation'
-    )
+      isTaskType(truthPatch?.taskType)
       ? truthPatch.taskType
-      : summary.taskType,
+      : summary.taskType
+    ),
     taskTitle: typeof truthPatch?.taskTitle === 'string' ? truthPatch.taskTitle : summary.taskTitle,
     taskSummary: typeof truthPatch?.taskSummary === 'string' ? truthPatch.taskSummary : summary.taskSummary,
     interactionState: (

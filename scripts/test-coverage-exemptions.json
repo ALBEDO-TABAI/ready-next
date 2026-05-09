@@ -76,6 +76,30 @@
   ],
   "c4Exempt": [
     {
+      "path": "src/__tests__/sandbox-bash-high-risk.test.ts",
+      "reason": "Stage T (Stage 14) PR-T2/W7.1: tests only exercise auditBashCommand pure regex matrix + executeRunShell with mkdtempSync filesystem fixtures (no sqlite). Transitive value-import reaches nativeBackedModules via tools/skill-primitives/run-shell.ts barrel, but no test path opens better-sqlite3 or reads any repository. Verified passing on host-Node.",
+      "since": "2026-05-09",
+      "owner": "stage-t-pr-t6"
+    },
+    {
+      "path": "src/__tests__/sandbox-symlink-rejected.test.ts",
+      "reason": "Stage T (Stage 14) PR-T2/W7.2: tests only exercise read/write-artifact symlink rejection with mkdtempSync filesystem fixtures (no sqlite). Transitive value-import reaches nativeBackedModules via tools/skill-primitives barrel, but no test path opens better-sqlite3 or reads any repository. Verified passing on host-Node.",
+      "since": "2026-05-09",
+      "owner": "stage-t-pr-t6"
+    },
+    {
+      "path": "src/__tests__/shell-output-host-path-redacted.test.ts",
+      "reason": "Stage T (Stage 14) PR-T2/W7.3: tests only exercise redactHostPaths pure helper + run-shell stdout/stderr redaction with mkdtempSync fixtures (no sqlite). Transitive value-import reaches nativeBackedModules via tools/skill-primitives/run-shell.ts barrel, but no test path opens better-sqlite3 or reads any repository. Verified passing on host-Node.",
+      "since": "2026-05-09",
+      "owner": "stage-t-pr-t6"
+    },
+    {
+      "path": "src/__tests__/vision-tool-gating.test.ts",
+      "reason": "Stage S (Stage 13) PR-S6/W4.2: tests only exercise the pure helper filterToolsByVisionCapability and the frozen VISION_REQUIRING_TOOL_NAMES constant from tool-gateway. Transitive imports reach nativeBackedModules via the gateway barrel, but no test path ever instantiates ToolGateway, opens better-sqlite3, or reads any repository. Verified passing on host-Node.",
+      "since": "2026-05-09",
+      "owner": "stage-s-pr-s13"
+    },
+    {
       "path": "src/__tests__/reference-primitive-no-lifecycle.test.ts",
       "reason": "Stage Q (Stage 11) PR-2: tests use registerSkillTaskRunRepository() to inject a fake repository before calling executeSkillTool; the SkillTaskRunRepository class is referenced only via TYPE imports for the harness fixture. No call site triggers lazy require('better-sqlite3') because tests register the fake repo and __setSkillsRuntimeManagerForTests() before any code path that would resolve the real repository.",
       "since": "2026-05-08",
@@ -590,6 +614,18 @@
       "reason": "Stage N transitive: turn-frame.ts imports run-contracts.ts which now statically imports child-loop-skill-actions / runtime-manager; existing test exercises pure patch helpers with synthetic frames — no DB call.",
       "since": "2026-05-07",
       "owner": "stage-n-parent-force-fence"
+    },
+    {
+      "path": "src/__tests__/run-capability-controller.test.ts",
+      "reason": "Stage S round 2 (Issue 5): run-capability-controller.ts now contains a `require('../skills-runtime/runtime-manager')` inside `resolveActiveSkillAllowedTools` so the controller can resolve a selected skill's manifest allowlist for the model-visible bundle. The require is lazy (only fires when authorization.mode === 'selected') and is wrapped in try/catch — tests in this file pass `mode:'none'` or hand-built skill states, so the require never resolves at runtime and no DB is opened. Static gate flagged this as C4-transitive.",
+      "since": "2026-05-09",
+      "owner": "stage-s-round-2"
+    },
+    {
+      "path": "src/__tests__/capability-gate-arbitration.test.ts",
+      "reason": "Stage S round 2 (Issue 5): capability-gate-arbitration.test.ts transitively imports run-capability-controller.ts which now lazy-requires runtime-manager inside `resolveActiveSkillAllowedTools`. Tests in this file drive the arbitration policy with synthetic capability resolutions and never set `mode:'selected'` authorization, so the require is never reached at runtime. No DB call.",
+      "since": "2026-05-09",
+      "owner": "stage-s-round-2"
     }
   ]
 }

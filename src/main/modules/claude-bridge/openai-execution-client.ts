@@ -1,6 +1,13 @@
 import { randomUUID } from 'crypto'
 
 import { resolveAIConfigCapabilities, type AIModelConfig, type AIProviderDef } from '../../../shared/ai-providers'
+import {
+  applyProviderRequestPatch,
+  applyProviderResponsePatch,
+  resolveProviderDefaultPatchers,
+  resolveProviderPatchProfile,
+  type PatchContext,
+} from '../../../shared/ai-providers/index'
 import { parseJsonOrEventStreamResponse, parseJsonResponse } from '../openai-responses'
 import { buildToolDispatchDecision } from '../agent-control/execution-tool-policy'
 import { getPolicyOpenAITools, buildTextToolBridgeSystemPrompt, collectToolNames, type ToolPolicy } from '../agent-control/execution-tool-config'
@@ -10,6 +17,7 @@ import { resolveOpenAIProviderRuntime } from '../agent-control/provider-runtime-
 import type { ToolSnapshot, TurnToolCallParseError } from '../agent-control/run-contracts'
 import type { ExecutionFallbackInfo } from './execution-fallback-policy'
 import { annotateFallbackResult, resolveFallbackPlan } from './execution-fallback-policy'
+import { withRetryBackoff } from './llm-resilience'
 import { sanitizeOpenAICompatibleMessageHistory } from './openai-history-sanitization'
 import { resolveRegisteredToolNamesLazily } from './tool-registry-bridge'
 import { extractOpenAIMessageText } from './openai-message-text'
@@ -115,19 +123,31 @@ export class OpenAIExecutionClient {
       if (runtime.reasoningEffort) {
         reqBody.reasoning = { effort: runtime.reasoningEffort }
       }
-      const resp = await this.deps.fetchWithTimeout(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(reqBody),
-        signal: params.signal,
-      }, params.signal, 'openai simple responses', params.timeoutMs)
+      // Stage S (PR-S4 / W3.5) — apply provider-default + profile patcher
+      // before serialization (priority enforced inside helper).
+      const patchCtx = this.buildPatchContext({ config: params.config, baseUrl: params.baseUrl, model })
+      applyProviderRequestPatch(reqBody, patchCtx)
+      // Stage S round 2 — wrap fetch in withRetryBackoff so transient 408/409/425/429/5xx
+      // and "server busy" responses are retried with exponential backoff before bubbling.
+      const resp = await withRetryBackoff(async () => {
+        const r = await this.deps.fetchWithTimeout(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(reqBody),
+          signal: params.signal,
+        }, params.signal, 'openai simple responses', params.timeoutMs)
+        if (!r.ok) {
+          const errBody = await r.text().catch(() => '')
+          const err = new Error(`HTTP ${r.status}: ${errBody.slice(0, 300)}`) as Error & { status?: number }
+          err.status = r.status
+          throw err
+        }
+        return r
+      })
 
-      if (!resp.ok) {
-        const errBody = await resp.text().catch(() => '')
-        throw new Error(`HTTP ${resp.status}: ${errBody.slice(0, 300)}`)
-      }
-
-      return { text: this.extractResponsesText(await parseJsonOrEventStreamResponse(resp, { requestUrl: url })) }
+      const json = await parseJsonOrEventStreamResponse(resp, { requestUrl: url })
+      applyProviderResponsePatch(json, patchCtx)
+      return { text: this.extractResponsesText(json) }
     }
 
     const messages = [
@@ -145,21 +165,31 @@ export class OpenAIExecutionClient {
       }]
     }
 
-    const resp = await this.deps.fetchWithTimeout(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(reqBody),
-      signal: params.signal,
-    }, params.signal, 'openai simple', params.timeoutMs)
-
-    if (!resp.ok) {
-      const errBody = await resp.text().catch(() => '')
-      throw new Error(`HTTP ${resp.status}: ${errBody.slice(0, 300)}`)
-    }
+    // Stage S (PR-S4 / W3.5) — provider-default + profile patcher.
+    const patchCtx = this.buildPatchContext({ config: params.config, baseUrl: params.baseUrl, model })
+    applyProviderRequestPatch(reqBody, patchCtx)
+    // Stage S W8.2 — wrap fetch in withRetryBackoff so transient 408/409/425/429/5xx
+    // and "server busy" responses are retried with exponential backoff before bubbling.
+    const resp = await withRetryBackoff(async () => {
+      const r = await this.deps.fetchWithTimeout(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(reqBody),
+        signal: params.signal,
+      }, params.signal, 'openai simple', params.timeoutMs)
+      if (!r.ok) {
+        const errBody = await r.text().catch(() => '')
+        const err = new Error(`HTTP ${r.status}: ${errBody.slice(0, 300)}`) as Error & { status?: number }
+        err.status = r.status
+        throw err
+      }
+      return r
+    })
 
     const json = await parseJsonResponse(resp, { requestUrl: url }) as {
       choices?: Array<{ message?: { content?: string } }>
     }
+    applyProviderResponsePatch(json, patchCtx)
     return { text: json.choices?.[0]?.message?.content || '' }
   }
 
@@ -197,19 +227,29 @@ export class OpenAIExecutionClient {
       if (runtime.reasoningEffort) {
         reqBody.reasoning = { effort: runtime.reasoningEffort }
       }
-      const resp = await this.deps.fetchWithTimeout(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(reqBody),
-        signal: params.signal,
-      }, params.signal, 'openai text tool bridge responses')
-
-      if (!resp.ok) {
-        const errBody = await resp.text().catch(() => '')
-        throw new Error(`HTTP ${resp.status}: ${errBody.slice(0, 300)}`)
-      }
+      // Stage S (PR-S4 / W3.5) — provider-default + profile patcher.
+      const patchCtx = this.buildPatchContext({ config: params.config, baseUrl: params.baseUrl, model })
+      applyProviderRequestPatch(reqBody, patchCtx)
+      // Stage S round 2 — wrap fetch in withRetryBackoff so transient 408/409/425/429/5xx
+      // and "server busy" responses are retried with exponential backoff before bubbling.
+      const resp = await withRetryBackoff(async () => {
+        const r = await this.deps.fetchWithTimeout(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(reqBody),
+          signal: params.signal,
+        }, params.signal, 'openai text tool bridge responses')
+        if (!r.ok) {
+          const errBody = await r.text().catch(() => '')
+          const err = new Error(`HTTP ${r.status}: ${errBody.slice(0, 300)}`) as Error & { status?: number }
+          err.status = r.status
+          throw err
+        }
+        return r
+      })
 
       const json = await parseJsonOrEventStreamResponse(resp, { requestUrl: url }) as Record<string, unknown>
+      applyProviderResponsePatch(json, patchCtx)
       return this.toTextToolBridgeResponse(
         this.extractResponsesText(json),
         (json as { reasoning?: unknown }).reasoning,
@@ -224,17 +264,28 @@ export class OpenAIExecutionClient {
     const url = `${params.baseUrl}/chat/completions`
     this.deps.log(`POST ${url}, model=${model}, tool bridge=text`)
 
-    const resp = await this.deps.fetchWithTimeout(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({ model, messages }),
-      signal: params.signal,
-    }, params.signal, 'openai text tool bridge')
-
-    if (!resp.ok) {
-      const errBody = await resp.text().catch(() => '')
-      throw new Error(`HTTP ${resp.status}: ${errBody.slice(0, 300)}`)
-    }
+    // Stage S (PR-S4 / W3.5) — extract inline body to a variable so the
+    // patcher can mutate it before serialization.
+    const reqBody: Record<string, unknown> = { model, messages }
+    const patchCtx = this.buildPatchContext({ config: params.config, baseUrl: params.baseUrl, model })
+    applyProviderRequestPatch(reqBody, patchCtx)
+    // Stage S round 2 — wrap fetch in withRetryBackoff so transient 408/409/425/429/5xx
+    // and "server busy" responses are retried with exponential backoff before bubbling.
+    const resp = await withRetryBackoff(async () => {
+      const r = await this.deps.fetchWithTimeout(url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(reqBody),
+        signal: params.signal,
+      }, params.signal, 'openai text tool bridge')
+      if (!r.ok) {
+        const errBody = await r.text().catch(() => '')
+        const err = new Error(`HTTP ${r.status}: ${errBody.slice(0, 300)}`) as Error & { status?: number }
+        err.status = r.status
+        throw err
+      }
+      return r
+    })
 
     const json = await parseJsonResponse(resp, { requestUrl: url }) as {
       choices?: Array<{
@@ -244,6 +295,7 @@ export class OpenAIExecutionClient {
         }
       }>
     }
+    applyProviderResponsePatch(json, patchCtx)
     const choice = json.choices?.[0]
     return this.toTextToolBridgeResponse(
       extractOpenAIMessageText(choice?.message?.content),
@@ -383,6 +435,7 @@ export class OpenAIExecutionClient {
         recordProviderRequest('native')
         const nativeResponse = await this.requestWithResponsesTools({
           session: params.session,
+          config: params.config,
           runtime,
           model,
           openAIBase,
@@ -430,6 +483,7 @@ export class OpenAIExecutionClient {
         recordProviderRequest('native', 'wire_api_retry')
         const retryResponse = await this.requestWithChatCompletionsTools({
           session: params.session,
+          config: params.config,
           model,
           openAIBase,
           headers,
@@ -447,6 +501,7 @@ export class OpenAIExecutionClient {
     recordProviderRequest('native')
     const nativeResponse = await this.requestWithChatCompletionsTools({
       session: params.session,
+      config: params.config,
       model,
       openAIBase,
       headers,
@@ -481,6 +536,33 @@ export class OpenAIExecutionClient {
       return annotateFallbackResult(attachToolSnapshots(textBridgeResponse), { kind: 'text_bridge', attempts: 1 })
     }
     return attachToolSnapshots(nativeResponse)
+  }
+
+  /**
+   * Stage S (PR-S4 / W3.5) — build a PatchContext for the current call.
+   *
+   * Resolves the provider-default patchers (e.g. openai-compatible's
+   * `stream_usage` filler) from the sub-module registry, then resolves
+   * the matching profile (gemini-oai / deepseek / minimax / vllm). The
+   * priority contract — user config > provider default > profile — is
+   * enforced inside `apply-provider-patch.ts`; callers must merge user
+   * values into `body` before invoking `applyProviderRequestPatch`.
+   */
+  private buildPatchContext(params: {
+    config: AIModelConfig
+    baseUrl: string
+    model: string
+  }): PatchContext {
+    const defaults = resolveProviderDefaultPatchers(params.config.provider)
+    const profile = resolveProviderPatchProfile(params.config, params.baseUrl, params.model)
+    return {
+      config: params.config,
+      baseUrl: params.baseUrl,
+      model: params.model,
+      profile,
+      providerDefaultRequestPatcher: defaults.defaultRequestPatcher,
+      providerDefaultResponsePatcher: defaults.defaultResponsePatcher,
+    }
   }
 
   private buildHeaders(
@@ -570,6 +652,7 @@ export class OpenAIExecutionClient {
 
   private async requestWithResponsesTools(params: {
     session: OpenAISessionLike
+    config: AIModelConfig
     runtime: ReturnType<typeof resolveOpenAIProviderRuntime>
     model: string
     openAIBase: string
@@ -599,19 +682,33 @@ export class OpenAIExecutionClient {
       reqBody.input = this.serializeMessagesForResponses(params.repairedMessages)
     }
 
-    const resp = await this.deps.fetchWithTimeout(url, {
-      method: 'POST',
-      headers: params.headers,
-      body: JSON.stringify(reqBody),
-      signal: params.signal,
-    }, params.signal, 'openai responses tools', params.timeoutMs)
-
-    if (!resp.ok) {
-      const errBody = await resp.text().catch(() => '')
-      throw new Error(`HTTP ${resp.status}: ${errBody.slice(0, 300)}`)
-    }
+    // Stage S (PR-S4 / W3.5) — provider-default + profile patcher.
+    const patchCtx = this.buildPatchContext({
+      config: params.config,
+      baseUrl: params.openAIBase,
+      model: params.model,
+    })
+    applyProviderRequestPatch(reqBody, patchCtx)
+    // Stage S round 2 — wrap fetch in withRetryBackoff so transient 408/409/425/429/5xx
+    // and "server busy" responses are retried with exponential backoff before bubbling.
+    const resp = await withRetryBackoff(async () => {
+      const r = await this.deps.fetchWithTimeout(url, {
+        method: 'POST',
+        headers: params.headers,
+        body: JSON.stringify(reqBody),
+        signal: params.signal,
+      }, params.signal, 'openai responses tools', params.timeoutMs)
+      if (!r.ok) {
+        const errBody = await r.text().catch(() => '')
+        const err = new Error(`HTTP ${r.status}: ${errBody.slice(0, 300)}`) as Error & { status?: number }
+        err.status = r.status
+        throw err
+      }
+      return r
+    })
 
     const json = await parseJsonOrEventStreamResponse(resp, { requestUrl: url }) as Record<string, unknown>
+    applyProviderResponsePatch(json, patchCtx)
     const responsesToolCallResult = this.extractResponsesToolCalls(json)
     const responsesNative: OpenAIExecutionResponse = {
       text: this.extractResponsesText(json),
@@ -630,6 +727,7 @@ export class OpenAIExecutionClient {
 
   private async requestWithChatCompletionsTools(params: {
     session: OpenAISessionLike
+    config: AIModelConfig
     model: string
     openAIBase: string
     headers: Record<string, string>
@@ -645,17 +743,32 @@ export class OpenAIExecutionClient {
     ]
     const url = `${params.openAIBase}/chat/completions`
     this.deps.log(`POST ${url}, model=${params.model}, with tools${params.policy?.forceDocumentTool ? ' (force document)' : params.policy?.forceDesignTool ? ' (force design)' : ''}, timeout=${params.timeoutMs}`)
-    const resp = await this.deps.fetchWithTimeout(url, {
-      method: 'POST',
-      headers: params.headers,
-      body: JSON.stringify({ model: params.model, messages, tools: params.tools }),
-      signal: params.signal,
-    }, params.signal, 'openai tools', params.timeoutMs)
-
-    if (!resp.ok) {
-      const errBody = await resp.text().catch(() => '')
-      throw new Error(`HTTP ${resp.status}: ${errBody.slice(0, 300)}`)
-    }
+    // Stage S (PR-S4 / W3.5) — extract inline body to a variable so the
+    // patcher can mutate it before serialization.
+    const reqBody: Record<string, unknown> = { model: params.model, messages, tools: params.tools }
+    const patchCtx = this.buildPatchContext({
+      config: params.config,
+      baseUrl: params.openAIBase,
+      model: params.model,
+    })
+    applyProviderRequestPatch(reqBody, patchCtx)
+    // Stage S round 2 — wrap fetch in withRetryBackoff so transient 408/409/425/429/5xx
+    // and "server busy" responses are retried with exponential backoff before bubbling.
+    const resp = await withRetryBackoff(async () => {
+      const r = await this.deps.fetchWithTimeout(url, {
+        method: 'POST',
+        headers: params.headers,
+        body: JSON.stringify(reqBody),
+        signal: params.signal,
+      }, params.signal, 'openai tools', params.timeoutMs)
+      if (!r.ok) {
+        const errBody = await r.text().catch(() => '')
+        const err = new Error(`HTTP ${r.status}: ${errBody.slice(0, 300)}`) as Error & { status?: number }
+        err.status = r.status
+        throw err
+      }
+      return r
+    })
 
     const json = await parseJsonResponse(resp, { requestUrl: url }) as {
       choices?: Array<{
@@ -670,6 +783,7 @@ export class OpenAIExecutionClient {
         finish_reason?: string
       }>
     }
+    applyProviderResponsePatch(json, patchCtx)
     const choice = json.choices?.[0]
     // Stage 2.1a — corrupt `arguments` JSON used to silently become `{}`,
     // letting an empty-args call into dispatch and ultimately invoking the

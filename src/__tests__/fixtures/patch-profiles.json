@@ -1,0 +1,163 @@
+{
+  "_comment": "Stage S (PR-S4 / W3.2-W3.5) fixtures — each profile MUST have at least one match case so check-patch-profile-coverage.cjs passes. Schema: { profileId, cases: [{ name, config, baseUrl, model, expectsMatch }] }.",
+  "geminiOAI": {
+    "profileId": "gemini-oai",
+    "cases": [
+      {
+        "name": "match_by_baseurl_generativelanguage",
+        "config": null,
+        "baseUrl": "https://generativelanguage.googleapis.com/v1beta",
+        "model": "custom-thinker",
+        "expectsMatch": true
+      },
+      {
+        "name": "match_by_model_prefix",
+        "config": null,
+        "baseUrl": "https://api.example.com",
+        "model": "gemini-2.0-flash-thinking",
+        "expectsMatch": true
+      },
+      {
+        "name": "no_match_unrelated_provider",
+        "config": null,
+        "baseUrl": "https://api.openai.com/v1",
+        "model": "gpt-4o",
+        "expectsMatch": false
+      }
+    ]
+  },
+  "deepseek": {
+    "profileId": "deepseek",
+    "cases": [
+      {
+        "name": "match_by_baseurl_deepseek_com",
+        "config": null,
+        "baseUrl": "https://api.deepseek.com/v1",
+        "model": "deepseek-chat",
+        "expectsMatch": true
+      },
+      {
+        "name": "match_by_model_prefix",
+        "config": null,
+        "baseUrl": "https://elsewhere.example.com",
+        "model": "deepseek-r1",
+        "expectsMatch": true
+      },
+      {
+        "name": "no_match_openai",
+        "config": null,
+        "baseUrl": "https://api.openai.com/v1",
+        "model": "gpt-4o",
+        "expectsMatch": false
+      }
+    ]
+  },
+  "minimax": {
+    "profileId": "minimax",
+    "cases": [
+      {
+        "name": "match_by_baseurl_minimax_chat",
+        "config": null,
+        "baseUrl": "https://api.minimax.chat/v1",
+        "model": "abab6.5-chat",
+        "expectsMatch": true
+      },
+      {
+        "name": "match_by_model_prefix",
+        "config": null,
+        "baseUrl": "https://relay.example.com",
+        "model": "MiniMax-M1",
+        "expectsMatch": true
+      },
+      {
+        "name": "no_match_openai",
+        "config": null,
+        "baseUrl": "https://api.openai.com/v1",
+        "model": "gpt-4o",
+        "expectsMatch": false
+      }
+    ]
+  },
+  "vllm": {
+    "profileId": "vllm",
+    "cases": [
+      {
+        "name": "match_by_model_prefix",
+        "config": null,
+        "baseUrl": "https://my-vllm.example.com/v1",
+        "model": "vllm/qwen-7b",
+        "expectsMatch": true
+      },
+      {
+        "name": "match_by_keyword_qwen",
+        "config": null,
+        "baseUrl": "https://my-vllm.example.com/v1",
+        "model": "qwen-2.5-32b-instruct",
+        "expectsMatch": true
+      },
+      {
+        "name": "no_match_official_openai",
+        "config": { "id": "openai" },
+        "baseUrl": "https://my-vllm.example.com/v1",
+        "model": "qwen-2.5-32b-instruct",
+        "expectsMatch": false
+      },
+      {
+        "name": "no_match_official_anthropic",
+        "config": { "id": "anthropic" },
+        "baseUrl": "https://my-vllm.example.com/v1",
+        "model": "qwen-2.5-32b-instruct",
+        "expectsMatch": false
+      },
+      {
+        "name": "no_match_official_gemini",
+        "config": { "id": "gemini" },
+        "baseUrl": "https://my-vllm.example.com/v1",
+        "model": "qwen-2.5-32b-instruct",
+        "expectsMatch": false
+      },
+      {
+        "name": "no_match_baseurl_without_v1",
+        "config": null,
+        "baseUrl": "https://my-vllm.example.com",
+        "model": "qwen-2.5-32b-instruct",
+        "expectsMatch": false
+      },
+      {
+        "name": "no_match_official_openai_by_provider_field",
+        "config": { "provider": "openai" },
+        "baseUrl": "https://my-vllm.example.com/v1",
+        "model": "qwen-2.5-32b-instruct",
+        "expectsMatch": false
+      },
+      {
+        "name": "no_match_official_anthropic_by_provider_field",
+        "config": { "provider": "anthropic" },
+        "baseUrl": "https://my-vllm.example.com/v1",
+        "model": "qwen-2.5-32b-instruct",
+        "expectsMatch": false
+      },
+      {
+        "name": "no_match_official_gemini_by_provider_field",
+        "config": { "provider": "gemini" },
+        "baseUrl": "https://my-vllm.example.com/v1",
+        "model": "qwen-2.5-32b-instruct",
+        "expectsMatch": false
+      },
+      {
+        "name": "match_positive_openai_compatible_provider",
+        "config": { "provider": "openai-compatible" },
+        "baseUrl": "https://my-vllm.example.com/v1",
+        "model": "qwen-2.5-32b-instruct",
+        "expectsMatch": true
+      },
+      {
+        "name": "no_match_unknown_provider_fail_closed",
+        "config": { "provider": "some-unknown-provider" },
+        "baseUrl": "https://my-vllm.example.com/v1",
+        "model": "qwen-2.5-32b-instruct",
+        "expectsMatch": false
+      }
+    ]
+  }
+}

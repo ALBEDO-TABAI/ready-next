@@ -215,6 +215,17 @@ interface ActiveRun {
   agentContext: AgentSpawnContext | null
   progress: ScopeRunSkillProgress
   blockedReason: string | null
+  /**
+   * Stage T (W9.1) — last truly-persisted step id (snapshot of
+   * `progress.stage` on each `action_completed` event). Used as the
+   * `rollback_target` diagnostic value when this run is cancelled.
+   * `null` until at least one action has completed; `null` on cancel
+   * means "no safe step recorded".
+   *
+   * This is a DIAGNOSTIC field only — the runner does not auto-roll-back
+   * on cancel. Consumers (renderer / debug) can surface it for triage.
+   */
+  lastSafeStepId: string | null
 }
 
 interface ChildRunSummary {
@@ -621,11 +632,21 @@ class SkillChildRunner {
   }): Promise<void> {
     const eventLogPath = this.deriveEventLogPathFromRecord(args.record)
     if (eventLogPath) {
+      // Stage T (W9.1) — Worker Event Ledger. This caller resolves a close
+      // from artifacts (no live ActiveRun in scope), so `rollback_target`
+      // can only be set if the persisted record carried a `lastSafeStepId`
+      // — which today it does not, so cancel terminal events from this
+      // path emit `rollback_target: null` (diagnostic null-marker).
+      const ledger = deriveCloseEventLedgerKind(args.close)
       await appendChildRunEvent({
         logPath: eventLogPath,
         event: {
           type: 'close',
           at: new Date().toISOString(),
+          ts: Date.now(),
+          event_kind: ledger.event_kind,
+          terminal_reason: args.close.terminalReason,
+          ...(ledger.isCancel ? { rollback_target: null } : {}),
           close: args.close,
         },
       })
@@ -1103,6 +1124,9 @@ class SkillChildRunner {
       agentContext: params.params.agentContext ?? null,
       progress: emptyChildProgress(),
       blockedReason: null,
+      // Stage T (W9.1) — Worker Event Ledger: lastSafeStepId starts null
+      // and is updated on each successful `action_completed`.
+      lastSafeStepId: null,
     }
     this.active.set(childRunId, active)
     this.rememberChildRunSummary(this.summaryFromActive(active))
@@ -1127,7 +1151,9 @@ class SkillChildRunner {
         errorKind: 'runner_uncaught',
         message: errorMessage(error),
       })
-      this.finalizeRun(active, close)
+      // Round-1 (Codex) — finalizeRun is now async; fire-and-forget here
+      // is fine because this `.catch` is itself the last-ditch path.
+      void this.finalizeRun(active, close)
     })
 
     return {
@@ -1173,7 +1199,7 @@ class SkillChildRunner {
         errorKind: 'driver_init_failed',
         message: errorMessage(error),
       })
-      this.finalizeRun(active, close)
+      await this.finalizeRun(active, close)
       return
     }
 
@@ -1208,7 +1234,10 @@ class SkillChildRunner {
         message: `No action_started within ${this.config.launchStuckGuardMs}ms`,
       })
       active.controller.abort(new Error('launch_stuck'))
-      this.finalizeRun(active, close)
+      // Round-1 (Codex) — finalizeRun is now async. Timer callback is sync;
+      // fire-and-forget is acceptable because launch_stuck is itself a
+      // best-effort recovery path (the controller has already been aborted).
+      void this.finalizeRun(active, close)
     }, this.config.launchStuckGuardMs)
     // Don't keep the process alive on this timer.
     if (typeof launchStuckTimer.unref === 'function') launchStuckTimer.unref()
@@ -1292,9 +1321,18 @@ class SkillChildRunner {
 
         if (event.payload.kind === 'action_completed') {
           const result = actionResults.shift()
+          // Stage T (W9.1) — Worker Event Ledger. On each successful
+          // action_completed, snapshot the action name as `lastSafeStepId`
+          // so a subsequent cancel terminal event can carry it as
+          // `rollback_target` for diagnostic display. Failed actions do
+          // not advance the safe step.
+          if (event.payload.success) {
+            active.lastSafeStepId = event.payload.actionName
+          }
           await this.appendEvent(active, {
             type: 'action_completed',
             at: new Date().toISOString(),
+            event_kind: 'progress',
             action: event.payload.actionName,
             result: {
               success: event.payload.success,
@@ -1333,7 +1371,7 @@ class SkillChildRunner {
           isParentSessionAbort: abortReason === 'process_restarted',
           isLaunchStuckFired,
         })
-        this.finalizeRun(active, mergeCloseWithLastProgress(close, active.progress))
+        await this.finalizeRun(active, mergeCloseWithLastProgress(close, active.progress))
         return
       }
     }
@@ -1407,7 +1445,7 @@ class SkillChildRunner {
         errorKind: 'handoff_agent_context_missing',
         message: 'Pending skill handoff requires the active agent context before resume.',
       })
-      this.finalizeRun(active, close)
+      await this.finalizeRun(active, close)
       return false
     }
     try {
@@ -1453,7 +1491,7 @@ class SkillChildRunner {
         errorKind: 'handoff_completion_failed',
         message: errorMessage(error),
       })
-      this.finalizeRun(active, close)
+      await this.finalizeRun(active, close)
       return false
     }
   }
@@ -1820,7 +1858,7 @@ class SkillChildRunner {
     }
   }
 
-  private finalizeRun(active: ActiveRun, close: SkillChildCloseEvent): void {
+  private async finalizeRun(active: ActiveRun, close: SkillChildCloseEvent): Promise<void> {
     // Identity guard — only the lifecycle that owns the current `active` map
     // entry may finalize. Two protections in one:
     //   1. Same-lifecycle race (abort + driver throw): the second call sees
@@ -1832,9 +1870,29 @@ class SkillChildRunner {
       return
     }
     const frozenClose = freezeSkillChildCloseEvent(close as MutableSkillChildCloseEvent)
-    void this.appendEvent(active, {
+    // Stage T (W9.1) — Worker Event Ledger. Tag the terminal close event
+    // with `event_kind` + `terminal_reason`; on cancel, also fill
+    // `rollback_target` from the active run's `lastSafeStepId` (`null` if
+    // no action ever completed). Diagnostic field only — finalize does
+    // NOT trigger any rollback action.
+    const ledger = deriveCloseEventLedgerKind(frozenClose)
+    const isCancelTerminal = frozenClose.terminalReason === 'cancelled_user'
+    // Round-1 (Codex) fix — await the ledger append BEFORE resolving the
+    // close awaiters. Previously this was `void this.appendEvent(...)` then
+    // an immediate `active.resolveClose(...)` at the bottom, which let
+    // close-promise consumers proceed before the terminal close record
+    // hit the JSONL ledger. Awaiting it here closes the ordering gap;
+    // resolveClose at the end of this method now fires only after the
+    // ledger, repository write, projection publish, and retained-lifecycle
+    // write are all settled.
+    await this.appendEvent(active, {
       type: 'close',
       at: new Date().toISOString(),
+      ts: Date.now(),
+      event_kind: ledger.event_kind,
+      terminal_reason: frozenClose.terminalReason,
+      // cancel branch: emit rollback_target only on cancelled terminal.
+      ...(isCancelTerminal ? { rollback_target: active.lastSafeStepId ?? null } : {}),
       close: frozenClose,
     })
     try {
@@ -2062,6 +2120,26 @@ function childTaskProjectionTaskId(childRunId: string): string {
 
 function isPromiseLike<T>(value: unknown): value is Promise<T> {
   return Boolean(value && typeof (value as { then?: unknown }).then === 'function')
+}
+
+/**
+ * Stage T (W9.1) — Worker Event Ledger. Derive `event_kind` (and the
+ * `cancelled` terminal trigger predicate) from a `SkillChildCloseEvent`.
+ * Diagnostic-only — caller layers the result onto the JSONL `close`
+ * event before append.
+ */
+function deriveCloseEventLedgerKind(
+  close: SkillChildCloseEvent,
+): { event_kind: 'cancelled' | 'completed' | 'failed'; isCancel: boolean } {
+  if (close.terminalReason === 'cancelled_user') {
+    return { event_kind: 'cancelled', isCancel: true }
+  }
+  if (close.status === 'completed') {
+    return { event_kind: 'completed', isCancel: false }
+  }
+  // status: 'blocked' / 'failed' / 'killed' — all non-cancel terminal
+  // outcomes map to 'failed' for ledger purposes.
+  return { event_kind: 'failed', isCancel: false }
 }
 
 function isTaskProjectionUniqueRace(error: unknown): boolean {

@@ -23,6 +23,7 @@ import { ExecutionLoopOrchestrator } from '../agent-control/execution-loop-orche
 import { HostCapabilityDispatcher } from '../agent-control/host-capability-dispatcher'
 import { CalendarDomainAdapter } from '../agent-control/calendar-domain-adapter'
 import { RSSDomainAdapter } from '../agent-control/rss-domain-adapter'
+import { ResearchDomainAdapter } from '../agent-control/research-domain-adapter'
 import { DocumentTaskPipelineExecutor } from '../agent-control/document-task-pipeline-executor'
 import type { DocumentInsight, DocumentInsightMetrics, DocumentWidgetDraft } from '../agent-control/document-task-pipeline'
 import {
@@ -444,6 +445,9 @@ export class DirectChatEngine extends EventEmitter {
       executeHostTool: (toolName, args, toolContext) => executeToolCall(toolName, args, toolContext as any),
     })
     this.domainAdapters = [
+      // Stage R W1.6: research adapter goes first so primaryDomain==='research'
+      // intents are routed before browser/document can grab them.
+      new ResearchDomainAdapter(),
       new BrowserDomainAdapter(this.browserDomainOrchestrator as never),
       new DocumentDomainAdapter({
         orchestrator: this.documentDomainOrchestrator as never,

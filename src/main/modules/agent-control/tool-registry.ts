@@ -21,6 +21,11 @@ import type {
 } from './tool-definition'
 import { getCalendarAnthropicTools, getCalendarOpenAITools } from '../tools/calendar-tools'
 import {
+  GENERAL_RESEARCH_TOOL_NAMES,
+  getGeneralResearchAnthropicTools,
+  getGeneralResearchOpenAITools,
+} from '../tools/general-research-tool-defs'
+import {
   BROWSER_CONTENT_TASK_TOOL_NAMES,
   BROWSER_INTERACTION_TOOL_NAMES,
   getBrowserAnthropicTools,
@@ -70,6 +75,7 @@ import {
   createToolExecutionOutput,
   type ToolExecutionOutput,
 } from './tool-result-types'
+import { ToolNameCollisionError, type ToolNameCollision } from './tool-registry-errors'
 import type {
   SkillRunResult,
   SkillsRuntimeManager,
@@ -77,6 +83,10 @@ import type {
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 import { snapshotTurnFeatureFlags } from './turn-feature-flags'
 import { fallbackThrottle } from './skill-tool-fallback-throttle'
+// Stage T PR-T5 — MCP authorization gate. The model-visible mcp tool list
+// resolver below calls `mcpRegistry.isAuthorized(name, sessionId, scopeId)`
+// before exposing any `mcp_*` tool to the model.
+import * as mcpRegistry from '../mcp/registry'
 
 // skills-tools / system-tools transitively import SkillsRuntimeManager (which
 // imports `electron`). Top-level imports are required here because electron-vite
@@ -119,12 +129,14 @@ export interface ToolRegistryReader {
     groupId: CapabilityGroupId,
     sessionId: string | undefined,
     authorization: SkillToolAuthorization,
+    scopeId?: string,
   ): ToolDefinition[]
   getToolSchemasForGroup(
     groupId: CapabilityGroupId,
     format: ToolSchemaFormat,
     sessionId: string | undefined,
     authorization: SkillToolAuthorization,
+    scopeId?: string,
   ): Array<Record<string, unknown>>
 }
 
@@ -750,9 +762,45 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
       }
     },
   },
+  general_research: {
+    staticToolNames: GENERAL_RESEARCH_TOOL_NAMES,
+    getToolDefinitions: () => buildToolDefinitions('general_research', GENERAL_RESEARCH_TOOL_NAMES),
+    getAnthropicTools: () => {
+      try {
+        return getGeneralResearchAnthropicTools()
+      } catch {
+        // silent-catch: schema build failure → use static fallback so registry still resolves
+        return GENERAL_RESEARCH_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'anthropic'))
+      }
+    },
+    getOpenAITools: () => {
+      try {
+        return getGeneralResearchOpenAITools()
+      } catch {
+        // silent-catch: schema build failure → use static fallback so registry still resolves
+        return GENERAL_RESEARCH_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'openai'))
+      }
+    },
+  },
   design_reserved: {
     staticToolNames: [],
     getToolDefinitions: () => [],
+  },
+  // Stage T PR-T5 — MCP provider entry. Tool names are dynamic (pulled
+  // from `mcpRegistry.listMcpToolNames()`); the model-visible filter in
+  // `getToolDefinitionsResolutionForGroup` / `getToolSchemasResolutionForGroup`
+  // gates each name through `mcpRegistry.isAuthorized(name, sessionId, scopeId)`.
+  mcp: {
+    hasDynamicSource: true,
+    get staticToolNames(): readonly string[] {
+      return mcpRegistry.listMcpToolNames()
+    },
+    getToolDefinitions: () =>
+      buildToolDefinitions('mcp', mcpRegistry.listMcpToolNames()),
+    getAnthropicTools: () =>
+      mcpRegistry.listMcpToolNames().map((name) => createStaticFallbackSchema(name, 'anthropic')),
+    getOpenAITools: () =>
+      mcpRegistry.listMcpToolNames().map((name) => createStaticFallbackSchema(name, 'openai')),
   },
 }
 
@@ -848,19 +896,30 @@ export class ToolRegistry implements ToolRegistryReader {
     groupId: CapabilityGroupId,
     sessionId: string | undefined,
     authorization: SkillToolAuthorization,
+    scopeId?: string,
   ): ToolDefinitionResolution {
     const resolution = this.getToolDefinitionsResolutionForGroupForInternalLookup(groupId, sessionId)
     // Stage 4 W3b.2 — apply authorization filter to the model-visible
     // definitions list. Defense-in-depth alongside ToolPolicy's
     // preferredSkillToolNames filter; here we also strip primitives in
     // mode:'none' turns.
+    let definitions = filterToolsByAuthorization(
+      resolution.definitions,
+      authorization,
+      (def) => def.name,
+    )
+    // Stage T PR-T5 — when listing the MCP group, gate every advertised
+    // tool through `mcpRegistry.isAuthorized(name, sessionId, scopeId)`.
+    // 3-arity (name + sessionId + scopeId) is the contract enforced by
+    // `check-mcp-tools-go-through-authorization.cjs`.
+    if (groupId === 'mcp') {
+      definitions = definitions.filter((def) =>
+        mcpRegistry.isAuthorized(def.name, sessionId, scopeId),
+      )
+    }
     return {
       ...resolution,
-      definitions: filterToolsByAuthorization(
-        resolution.definitions,
-        authorization,
-        (def) => def.name,
-      ),
+      definitions,
     }
   }
 
@@ -932,22 +991,35 @@ export class ToolRegistry implements ToolRegistryReader {
     format: ToolSchemaFormat,
     sessionId: string | undefined,
     authorization: SkillToolAuthorization,
+    scopeId?: string,
   ): ToolSchemaResolution {
     const resolution = this.getToolSchemasResolutionForGroupForInternalMetadata(groupId, format, sessionId)
     // Stage 4 W3b.2 — apply authorization filter to the model-visible
     // schemas list. Tool name extraction adapts to both anthropic
     // (`tool.name`) and openai (`tool.function.name`) shapes.
+    const extractName = (tool: Record<string, unknown>): string | null =>
+      format === 'anthropic'
+        ? (typeof (tool as { name?: unknown }).name === 'string' ? ((tool as { name: string }).name) : null)
+        : (typeof ((tool as { function?: { name?: unknown } }).function?.name) === 'string'
+            ? ((tool as { function: { name: string } }).function.name)
+            : null)
+    let tools = filterToolsByAuthorization(
+      resolution.tools,
+      authorization,
+      extractName,
+    )
+    // Stage T PR-T5 — schema list MUST go through the same MCP
+    // authorization gate. Required by
+    // `check-mcp-tools-go-through-authorization.cjs` (E).
+    if (groupId === 'mcp') {
+      tools = tools.filter((tool) => {
+        const name = extractName(tool)
+        return name ? mcpRegistry.isAuthorized(name, sessionId, scopeId) : false
+      })
+    }
     return {
       ...resolution,
-      tools: filterToolsByAuthorization(
-        resolution.tools,
-        authorization,
-        (tool) => format === 'anthropic'
-          ? (typeof (tool as { name?: unknown }).name === 'string' ? ((tool as { name: string }).name) : null)
-          : (typeof ((tool as { function?: { name?: unknown } }).function?.name) === 'string'
-              ? ((tool as { function: { name: string } }).function.name)
-              : null),
-      ),
+      tools,
     }
   }
 
@@ -955,23 +1027,40 @@ export class ToolRegistry implements ToolRegistryReader {
     // Stage 10 (P) Phase B'-1 — execution-lookup path. Uses the unfiltered
     // internal resolver so callers (e.g. `getToolDefinition` for execution
     // dispatch) see ALL tools, never a model-visible filtered subset.
-    const tools = new Map<string, ToolDefinition>()
+    //
+    // Stage R W2.3 — collect across groups and throw on inter-group name
+    // collisions. Same-group repeats (e.g. a dynamic skill action that also
+    // appears in a static fallback list) are still silently deduped, since
+    // those represent the same logical tool. Cross-group clashes always
+    // indicate a registration bug and must fail boot loudly via the boot
+    // assertion in `runtime.ts`.
+    const tools = new Map<string, { def: ToolDefinition; group: CapabilityGroupId }>()
+    const collisions: ToolNameCollision[] = []
     for (const groupId of Object.keys(this.groupProviders) as CapabilityGroupId[]) {
       for (const tool of this.getToolDefinitionsResolutionForGroupForInternalLookup(groupId).definitions) {
-        if (!tools.has(tool.name)) {
-          tools.set(tool.name, tool)
+        const existing = tools.get(tool.name)
+        if (existing) {
+          if (existing.group !== groupId) {
+            collisions.push({ name: tool.name, existingGroup: existing.group, incomingGroup: groupId })
+          }
+          continue
         }
+        tools.set(tool.name, { def: tool, group: groupId })
       }
     }
-    return Array.from(tools.values())
+    if (collisions.length > 0) {
+      throw new ToolNameCollisionError(collisions)
+    }
+    return Array.from(tools.values()).map((entry) => entry.def)
   }
 
   getToolDefinitionsForGroup(
     groupId: CapabilityGroupId,
     sessionId: string | undefined,
     authorization: SkillToolAuthorization,
+    scopeId?: string,
   ): ToolDefinition[] {
-    return this.getToolDefinitionsResolutionForGroup(groupId, sessionId, authorization).definitions
+    return this.getToolDefinitionsResolutionForGroup(groupId, sessionId, authorization, scopeId).definitions
   }
 
   getToolSchemasForGroup(
@@ -979,8 +1068,9 @@ export class ToolRegistry implements ToolRegistryReader {
     format: ToolSchemaFormat,
     sessionId: string | undefined,
     authorization: SkillToolAuthorization,
+    scopeId?: string,
   ): Array<Record<string, unknown>> {
-    return this.getToolSchemasResolutionForGroup(groupId, format, sessionId, authorization).tools
+    return this.getToolSchemasResolutionForGroup(groupId, format, sessionId, authorization, scopeId).tools
   }
 
   private enrichToolDefinitions(

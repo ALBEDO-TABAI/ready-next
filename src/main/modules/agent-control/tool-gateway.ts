@@ -3,6 +3,74 @@ import { CAPABILITY_GROUPS } from '../../../shared/ai-capability-groups'
 import { logAgentMetric } from './metrics'
 import type { ToolDefinition } from './tool-definition'
 import type { SkillToolAuthorization } from './skill-tool-authorization'
+import type { CapabilityResolution } from './capability-resolver'
+
+/**
+ * Stage S (PR-S6 / W4.2) — vision tool capability gating.
+ *
+ * Tool names that require image-input capability on the model side.
+ * Resolved at load-time (when the gateway hands the model its tool
+ * list). When `capabilityResolution.supportsVision === false`, these
+ * tools must NOT be exposed to the model.
+ *
+ * Today the catalogue is empty (no `view_image` tool ships yet); this
+ * helper exists so the future `view_image` (and any other vision tools)
+ * can be added in one place. The gate `check-vision-tool-capability-
+ * gated.cjs` only requires the helper + a `capabilityResolution.
+ * supportsVision` check to be wired here.
+ */
+export const VISION_REQUIRING_TOOL_NAMES: ReadonlyArray<string> = Object.freeze([
+  // The `view_image` tool is the canonical vision-bearing tool name. It
+  // does not yet ship as a registered tool; listing it here pre-arms the
+  // allowlist so the gateway is ready the moment the handler lands. The
+  // filter is a no-op for non-vision models even with this entry, since
+  // `view_image` won't appear in the input `tools` array until then.
+  'view_image',
+])
+
+export function filterToolsByVisionCapability(
+  tools: Array<Record<string, unknown>>,
+  capabilityResolution: Pick<CapabilityResolution, 'supportsVision'>,
+): Array<Record<string, unknown>> {
+  if (capabilityResolution.supportsVision === true) return tools
+  if (VISION_REQUIRING_TOOL_NAMES.length === 0) return tools
+  return tools.filter((tool) => {
+    const name = typeof (tool as { name?: unknown }).name === 'string'
+      ? (tool as { name: string }).name
+      : (typeof (tool as { function?: { name?: unknown } }).function?.name === 'string'
+        ? (tool as { function: { name: string } }).function.name
+        : null)
+    if (!name) return true
+    return !VISION_REQUIRING_TOOL_NAMES.includes(name)
+  })
+}
+
+/**
+ * Stage S (PR-S12 / W11.1 followup) — manifest `allowed_tools` runtime
+ * filter. When a skill manifest declares `allowed_tools: string[]`, the
+ * compiler attaches the normalised array onto `SkillDefinition.allowedTools`
+ * (see `skill-compiler.validateAllowedTools`). This helper applies that
+ * allowlist at the gateway boundary so future integration into
+ * `getToolDefinitionsForGroup`'s skills branch is a single call site.
+ *
+ * Contract:
+ *   - `null` / `undefined` / empty array → identity (no filtering)
+ *   - otherwise → tools whose `name` (or `function.name`) is in the set
+ *   - tools without a resolvable name pass through (defensive)
+ */
+export function filterToolsByAllowedTools<T extends { name?: string; function?: { name?: string } }>(
+  tools: ReadonlyArray<T>,
+  allowedTools: ReadonlyArray<string> | null | undefined,
+): T[] {
+  if (!allowedTools || allowedTools.length === 0) return tools.slice()
+  const allowed = new Set(allowedTools)
+  return tools.filter((tool) => {
+    const name = (typeof tool.name === 'string' && tool.name)
+      || (tool.function && typeof tool.function.name === 'string' ? tool.function.name : null)
+    return name ? allowed.has(name) : true
+  })
+}
+
 import {
   ToolRegistry,
   type ToolSchemaResolution,
@@ -66,8 +134,9 @@ export class ToolGateway {
     groupId: CapabilityGroupId,
     sessionId: string | undefined,
     authorization: SkillToolAuthorization,
+    scopeId?: string,
   ): ToolDefinition[] {
-    return this.registry.getToolDefinitionsForGroup(groupId, sessionId, authorization)
+    return this.registry.getToolDefinitionsForGroup(groupId, sessionId, authorization, scopeId)
   }
 
   private resolveGroupToolSchemasDetailed(
@@ -75,11 +144,12 @@ export class ToolGateway {
     format: ToolSchemaFormat,
     sessionId: string | undefined,
     authorization: SkillToolAuthorization,
+    scopeId?: string,
   ): ToolSchemaResolution {
     const errorKey = this.resolutionErrorKey(groupId, format)
     this.lastSchemaResolutionErrors.delete(errorKey)
     try {
-      const resolution = this.registry.getToolSchemasResolutionForGroup(groupId, format, sessionId, authorization)
+      const resolution = this.registry.getToolSchemasResolutionForGroup(groupId, format, sessionId, authorization, scopeId)
       const errorMessage = resolution.error || null
       if (errorMessage) {
         this.lastSchemaResolutionErrors.set(errorKey, errorMessage)
@@ -110,8 +180,9 @@ export class ToolGateway {
     format: ToolSchemaFormat,
     sessionId: string | undefined,
     authorization: SkillToolAuthorization,
+    scopeId?: string,
   ): Array<Record<string, unknown>> {
-    return this.resolveGroupToolSchemasDetailed(groupId, format, sessionId, authorization).tools
+    return this.resolveGroupToolSchemasDetailed(groupId, format, sessionId, authorization, scopeId).tools
   }
 
   // Stage 10 (P) Phase B'-1 — capability metadata path. The previous
@@ -196,8 +267,9 @@ export class ToolGateway {
     format: ToolSchemaFormat,
     sessionId: string | undefined,
     authorization: SkillToolAuthorization,
+    scopeId?: string,
   ): Array<Record<string, unknown>> {
-    return this.resolveGroupToolSchemas(groupId, format, sessionId, authorization)
+    return this.resolveGroupToolSchemas(groupId, format, sessionId, authorization, scopeId)
   }
 
   getLastSchemaResolutionError(groupId: CapabilityGroupId, format: ToolSchemaFormat): string | null {
@@ -209,11 +281,12 @@ export class ToolGateway {
     format: ToolSchemaFormat,
     sessionId: string | undefined,
     authorization: SkillToolAuthorization,
+    scopeId?: string,
   ): ToolGroupResolutionResult {
     const tools = new Map<string, Record<string, unknown>>()
     const groupResolutions: ToolGroupResolutionEntry[] = []
     for (const groupId of groupIds) {
-      const resolution = this.resolveGroupToolSchemasDetailed(groupId, format, sessionId, authorization)
+      const resolution = this.resolveGroupToolSchemasDetailed(groupId, format, sessionId, authorization, scopeId)
       for (const tool of resolution.tools) {
         const name = format === 'anthropic'
           ? (typeof tool.name === 'string' ? tool.name : null)
@@ -242,16 +315,18 @@ export class ToolGateway {
     groupIds: CapabilityGroupId[],
     sessionId: string | undefined,
     authorization: SkillToolAuthorization,
+    scopeId?: string,
   ): Array<Record<string, unknown>> {
-    return this.getToolSchemaResolutionForGroups(groupIds, 'anthropic', sessionId, authorization).tools
+    return this.getToolSchemaResolutionForGroups(groupIds, 'anthropic', sessionId, authorization, scopeId).tools
   }
 
   getOpenAIToolsForGroups(
     groupIds: CapabilityGroupId[],
     sessionId: string | undefined,
     authorization: SkillToolAuthorization,
+    scopeId?: string,
   ): Array<Record<string, unknown>> {
-    return this.getToolSchemaResolutionForGroups(groupIds, 'openai', sessionId, authorization).tools
+    return this.getToolSchemaResolutionForGroups(groupIds, 'openai', sessionId, authorization, scopeId).tools
   }
 
   getToolDefinition(id: string): ToolDefinition | null {

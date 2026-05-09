@@ -2,6 +2,12 @@ export type EmbeddedSkillId =
   | 'video-expert-analyzer'
   | 'video-copy-analyzer'
   | 'lets-go-rss'
+  | 'deep-research'
+  | 'systematic-literature-review'
+  | 'github-deep-research'
+  | 'academic-paper-review'
+  | 'web-design-guidelines'
+  | 'find-skills'
 
 export interface EmbeddedSkillManifest {
   id: EmbeddedSkillId
@@ -31,6 +37,48 @@ export const EMBEDDED_SKILLS: EmbeddedSkillManifest[] = [
     name: "Let's Go RSS",
     description: '多平台订阅聚合、增量更新、摘要报告',
     version: '2026.04.23',
+    requirementsFile: 'requirements.txt',
+  },
+  {
+    id: 'deep-research',
+    name: 'Deep Research',
+    description: '系统化多源研究方法论：维度拆解 + 多查询 + 全文 fetch + 引用追踪',
+    version: '2026.05.09',
+    requirementsFile: 'requirements.txt',
+  },
+  {
+    id: 'systematic-literature-review',
+    name: 'Systematic Literature Review',
+    description: '学术综述方法论：Boolean query / PRISMA / 引用图谱',
+    version: '2026.05.09',
+    requirementsFile: 'requirements.txt',
+  },
+  {
+    id: 'github-deep-research',
+    name: 'GitHub Deep Research',
+    description: 'GitHub 项目调研方法论：仓库 / issue / 贡献者 / 依赖图',
+    version: '2026.05.09',
+    requirementsFile: 'requirements.txt',
+  },
+  {
+    id: 'academic-paper-review',
+    name: 'Academic Paper Review',
+    description: '论文审稿方法论：method / experiment / claim / threat-to-validity',
+    version: '2026.05.09',
+    requirementsFile: 'requirements.txt',
+  },
+  {
+    id: 'web-design-guidelines',
+    name: 'Web Design Guidelines',
+    description: '网页设计调研方法论：sitemap / typography / palette / interaction patterns',
+    version: '2026.05.09',
+    requirementsFile: 'requirements.txt',
+  },
+  {
+    id: 'find-skills',
+    name: 'Find Skills',
+    description: '技能搜索方法论：description matching + when-to-use 反向 lookup',
+    version: '2026.05.09',
     requirementsFile: 'requirements.txt',
   },
 ]

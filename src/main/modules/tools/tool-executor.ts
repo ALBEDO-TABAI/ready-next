@@ -36,6 +36,8 @@ import {
 import { executeBrowserTool } from './browser-tools'
 import { executeCalendarTool } from './calendar-tools'
 import { executeDocumentTool } from './document-tools'
+import { executeGeneralResearchTool } from './general-research-tools'
+import { executeMcpTool } from './mcp-tools'
 import { executeRSSTool } from './rss-tools'
 import { executeSkillTool, findSkillToolByNameForExecution } from './skills-tools'
 import { executeSystemTool } from './system-tools'
@@ -43,6 +45,7 @@ import { executeFeishuTool } from './feishu-tools'
 import { executeMemoryTool } from './memory-tools'
 import { executePetTool } from './pet-tools'
 import { executeSessionRecallTool } from './session-recall-tools'
+import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
 import {
   ToolDomainError,
   errorKindFor,
@@ -56,6 +59,7 @@ import {
   normalizeAllowedToolSet,
 } from './tool-not-allowed-message'
 import { STATIC_SKILL_ACTIONS_BY_TOOL_NAME } from './skills-tools-static'
+import { AppSettingsRepository } from '../repositories/app-settings-repository'
 
 export interface ToolContext {
   browserController?: BrowserController | null
@@ -329,6 +333,47 @@ export async function executeToolCall(
 
         case 'pet':
           return executePetTool(toolName, args)
+
+        case 'general_research': {
+          // Stage R W1.1/W1.2/W6.4 — `outputsRoot` is the single sandbox
+          // root for `present_file`. Derived from the skills runtime so we
+          // do not leak SkillsRuntimeManager handles into ToolContext;
+          // child-runner / model invokers all converge here.
+          const runtimeInfo = getSkillsRuntimeManager().getRuntimeInfo()
+          // Stage R W1.1/W1.2 follow-up (B1 fix): plumb Tavily/Jina API keys
+          // from settings. Without this the keys were always undefined and
+          // both Tavily search + Tavily Extract fallback were `not_attempted`.
+          // Settings keys: `web_search_tavily_key`, `web_fetch_jina_key`.
+          let tavilyKey: string | undefined
+          let jinaKey: string | undefined
+          try {
+            const repo = new AppSettingsRepository()
+            tavilyKey = repo.getSetting('web_search_tavily_key') || undefined
+            jinaKey = repo.getSetting('web_fetch_jina_key') || undefined
+          } catch {
+            // silent-catch: settings unavailable at boot or in tests; tools
+            // still work via DDG / Jina-no-auth fallback paths.
+          }
+          return executeGeneralResearchTool(toolName, args as Record<string, unknown>, {
+            abortSignal: context.abortSignal,
+            sessionId: context.sessionId,
+            outputsRoot: runtimeInfo.outputsRoot,
+            requestModuleToolAction: context.requestModuleToolAction,
+            scope: context.scope,
+            tavilyKey,
+            jinaKey,
+          })
+        }
+
+        case 'mcp':
+          // Stage T PR-T5 — MCP dispatch. The model-visible list resolver
+          // already gated this name through `mcp/registry.isAuthorized`;
+          // here we only forward to the per-server `McpClient`.
+          return executeMcpTool(toolName, args as Record<string, unknown>, {
+            abortSignal: context.abortSignal,
+            sessionId: context.sessionId,
+            scopeId: context.scopeId,
+          })
 
         default:
           return `Unknown tool: ${toolName}`

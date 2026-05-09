@@ -38,6 +38,19 @@ export interface CapabilityResolution {
   uiProjectionGroupIds: CapabilityGroupId[]
   groupStates: Record<CapabilityGroupId, CapabilityGroupState>
   reasons: Partial<Record<CapabilityGroupId, CapabilityGroupReason>>
+  /**
+   * Stage S (PR-S6 / W4.1) — capability gate enforce in arbitration.
+   *
+   * Surface the three resolved capability flags from
+   * `resolveAIConfigCapabilities` directly on `CapabilityResolution`
+   * so `run-capability-controller.resolveRunCapabilities` and other
+   * arbitration-time consumers can branch on them without re-resolving.
+   * Optional because legacy code paths constructing a stub
+   * `CapabilityResolution` (tests, fixtures) need to keep working.
+   */
+  supportsVision?: boolean
+  supportsThinking?: boolean
+  supportsLongContext?: boolean
 }
 
 export interface CapabilityRuntimeAvailability {
@@ -203,5 +216,11 @@ export function resolveCapabilityResolution(params: {
     uiProjectionGroupIds,
     groupStates,
     reasons,
+    // Stage S (PR-S6 / W4.1) — surface the three resolved capability
+    // flags so arbitration-time consumers (run-capability-controller,
+    // tool-gateway) can read them off `capabilityResolution` directly.
+    supportsVision: resolvedCapabilities?.supportsVision ?? false,
+    supportsThinking: resolvedCapabilities?.supportsThinking ?? false,
+    supportsLongContext: resolvedCapabilities?.supportsLongContext ?? false,
   }
 }

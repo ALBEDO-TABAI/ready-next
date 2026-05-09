@@ -5,7 +5,7 @@
  * ToolDomainError('not_found', …) by way of the dispatch layer.
  */
 
-import { existsSync, openSync, readSync, closeSync, statSync } from 'node:fs'
+import { existsSync, lstatSync, openSync, readSync, closeSync, statSync } from 'node:fs'
 
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent-control/tool-result-types'
 import { ToolDomainError } from '../tool-errors'
@@ -100,6 +100,26 @@ export async function executeReadArtifact(
     throw new ToolDomainError(
       'not_found',
       `Artifact not found: ${args.relativePath}`,
+      { relativePath: args.relativePath, absolutePath: absPath },
+    )
+  }
+
+  // Stage T W7.2 — refuse to read a path that is itself a symlink, even when
+  // the realpath would still land inside the sandbox. lstatSync sees the link
+  // itself; statSync follows it. The path-sandbox `realpathSync` check
+  // rejects symlinks pointing OUT of the sandbox, but a symlink that loops
+  // back inside still bypasses the LLM's mental model of "I asked to read
+  // file X" so we refuse it here.
+  const linkStats = lstatSync(absPath)
+  if (linkStats.isSymbolicLink()) {
+    logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
+      primitive: 'skill_read_artifact',
+      reason: 'symlink_rejected',
+      relativePath: args.relativePath,
+    })
+    throw new ToolDomainError(
+      'symlink_rejected',
+      `Refusing to read symlink: ${args.relativePath}`,
       { relativePath: args.relativePath, absolutePath: absPath },
     )
   }

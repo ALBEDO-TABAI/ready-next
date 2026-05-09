@@ -86,7 +86,7 @@ function resolveExecutor(params: {
   if (params.chain === 'planner') return 'planner'
   if (params.chain === 'continuation') {
     const module = params.continuationModule || params.continuationProjection?.module
-    if (module === 'browser' || module === 'document' || module === 'skill' || module === 'rss' || module === 'calendar' || module === 'feishu') {
+    if (module === 'browser' || module === 'document' || module === 'skill' || module === 'rss' || module === 'calendar' || module === 'feishu' || module === 'research') {
       return module
     }
     return 'tool_loop'
@@ -174,7 +174,7 @@ export function resolveTaskExecutionRoute(params: {
     steps: params.resolution.executionChain === 'planner'
       ? buildPlannerSteps({
         envelope: params.envelope,
-        maxIterations: params.resolution.taskType === 'multi_step_task' ? 60 : 24,
+        maxIterations: (params.resolution.taskType === 'multi_step_task' || params.resolution.taskType === 'research') ? 60 : 24,
       })
       : [],
     currentStepId: null,

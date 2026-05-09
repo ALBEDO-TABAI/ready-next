@@ -44,6 +44,14 @@ interface RunCapabilityBaseParams {
   }
   sessionId?: string
   /**
+   * Stage T PR-T5 — conversation scope id, sourced from
+   * `RequestEnvelope.scopeId`. Plumbed onto `toolPolicy.scopeId` so the
+   * gateway / registry pass it into
+   * `mcp.registry.isAuthorized(toolName, sessionId, scopeId)` for the
+   * model-visible MCP tool list.
+   */
+  scopeId?: string
+  /**
    * Stage 4 W3b.2 fix — per-turn skill tool authorization. Threaded
    * through `resolveRunCapabilities` so it's already on `toolPolicy`
    * BEFORE `getPolicyOpenAIToolBundle` computes `allowedToolNames` and
@@ -90,6 +98,44 @@ function extractOpenclawPairingCommand(userText: string): string | null {
   const direct = text.match(/^\s*(openclaw\s+pairing\s+[^\n\r]+)\s*$/i)
   if (direct) return direct[1].trim()
   return null
+}
+
+/**
+ * Stage S round 2 (Issue 5) — resolve the active skill's manifest
+ * `allowed_tools` from `SkillsRuntimeManager`. Defensive try/catch:
+ * skill-runtime is the source of truth at runtime but is occasionally
+ * unavailable in early-boot test paths or when the host runtime has
+ * not finished init; in those cases we return `null` (identity filter).
+ *
+ * Production callers feed this onto `toolPolicy.activeSkillAllowedTools`
+ * so `getPolicyOpenAIToolBundle` / `getPolicyAnthropicTools` can apply
+ * `filterToolsByAllowedTools` without re-resolving the runtime per call.
+ */
+function resolveActiveSkillAllowedTools(
+  authorization: SkillToolAuthorization,
+): ReadonlyArray<string> | null {
+  if (authorization.mode !== 'selected') return null
+  const skillId = authorization.skillId
+  if (!skillId) return null
+  try {
+    // Lazy require so we don't import the runtime manager at module load
+    // time (would create a circular import via skill_*-tools paths).
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    const { getSkillsRuntimeManager } = require('../skills-runtime/runtime-manager') as {
+      getSkillsRuntimeManager: () => { listSkills(): Array<{ id: string; allowedTools?: string[] | null }> }
+    }
+    const skill = getSkillsRuntimeManager()
+      .listSkills()
+      .find((s) => s.id === skillId)
+    if (!skill) return null
+    const allowed = skill.allowedTools
+    if (!Array.isArray(allowed) || allowed.length === 0) return null
+    return Object.freeze([...allowed])
+  } catch {
+    // Skill runtime unavailable (e.g. boot race / test harness without
+    // skills tree). Conservative behavior: identity filter.
+    return null
+  }
 }
 
 function resolveHostShortcutDecision(params: {
@@ -243,6 +289,47 @@ function resolveRunCapabilities(
   // snapshot and the text-tool-bridge allowed-name list drift from the
   // post-cutover policy applied later in turn-engine.
   toolPolicy.authorization = baseParams.authorization
+
+  // Stage T PR-T5 — thread scopeId from RequestEnvelope onto the policy
+  // so the bundle path (gateway → registry → mcp.registry.isAuthorized)
+  // sees a consistent (sessionId, scopeId) tuple per turn.
+  toolPolicy.scopeId = baseParams.scopeId
+
+  // Stage S round 2 (Issue 3) — vision capability filter.
+  //
+  // The three resolved capability flags travel on `capabilityResolution`
+  // (see capability-resolver.ts). Stage S round 1 only recorded the
+  // decision for observability; round 2 makes it actually filter the
+  // tool bundle by attaching `capabilityResolution` to `toolPolicy`.
+  // Both `getPolicyAnthropicTools` and `getPolicyOpenAIToolBundle` then
+  // route the tool list through `filterToolsByVisionCapability`, dropping
+  // any vision-bearing tool when `supportsVision !== true`. Conservative
+  // default: when the flag is missing/undefined, the helper treats it
+  // as `false` (deny vision tools).
+  toolPolicy.capabilityResolution = { supportsVision: capabilityResolution.supportsVision === true }
+
+  // Stage S round 2 (Issue 5) — manifest `allowed_tools` filter.
+  //
+  // When the per-turn authorization picked a skill (`mode:'selected'`),
+  // resolve its compiled `allowedTools` array off `SkillsRuntimeManager`
+  // and attach to the policy. The bundle path then strips the model-
+  // visible list down to the manifest's declared toolset. We resolve
+  // here (not in the bundle) so the lookup is single-shot per turn and
+  // skill-runtime crashes (e.g. host startup race) cannot fault the
+  // tool bundle path. `null` / empty → identity (no filtering).
+  toolPolicy.activeSkillAllowedTools = resolveActiveSkillAllowedTools(baseParams.authorization)
+
+  const visionCapable = capabilityResolution.supportsVision === true
+  if (!visionCapable) {
+    try {
+      logAgentMetric('capability_gate_arbitration_denied', {
+        capability: 'vision',
+        supportsVision: capabilityResolution.supportsVision === true,
+      })
+    } catch {
+      // metrics must never break the resolver
+    }
+  }
 
   const toolBundle = getPolicyOpenAIToolBundle(toolPolicy)
 

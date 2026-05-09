@@ -7,6 +7,7 @@ import type {
   TaskStep,
   TaskType,
 } from './run-contracts'
+import { isTaskType } from '../../../shared/task-types'
 import { buildRequestEnvelope, type RequestEnvelope } from './request-envelope'
 import { logAgentMetric } from './metrics'
 import { matchesResumeIntent } from './resume-lexicon'
@@ -119,16 +120,7 @@ function cloneBudgetRuntime(runtime: TaskBudgetRuntime | null | undefined): Task
 }
 
 function normalizeTaskType(value: unknown): TaskType {
-  if (
-    value === 'direct_answer'
-    || value === 'short_task'
-    || value === 'multi_step_task'
-    || value === 'media_task'
-    || value === 'continuation'
-  ) {
-    return value
-  }
-  return 'short_task'
+  return isTaskType(value) ? value : 'short_task'
 }
 
 function normalizeInteractionState(value: unknown): TaskInteractionState {
@@ -402,8 +394,15 @@ export function sanitizeContinuationRequest(params: {
     content: parsedControl.hasControlLines
       ? replaceTrailingUserText(params.content, originalRawUserText, sanitizedRawUserText)
       : params.content,
+    // Stage T R3 fix: rebuilt envelope must inherit sessionId/scopeId from
+    // the source envelope; otherwise direct-chat.ts:797 hands a no-scope
+    // envelope to turn-engine and MCP authorization sees scope=undefined.
     requestEnvelope: parsedControl.hasControlLines
-      ? buildRequestEnvelope({ userText: sanitizedRawUserText })
+      ? buildRequestEnvelope({
+          userText: sanitizedRawUserText,
+          sessionId: params.requestEnvelope?.sessionId,
+          scopeId: params.requestEnvelope?.scopeId,
+        })
       : (params.requestEnvelope || buildRequestEnvelope({ userText: originalRawUserText })),
     parsedControl,
     sanitizedRawUserText,

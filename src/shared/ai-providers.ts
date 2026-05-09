@@ -6,6 +6,19 @@
 import type { CapabilityModeMap } from './ai-capability-groups'
 import { normalizeCapabilityModeMap } from './ai-capability-groups'
 
+// Stage S (PR-S3): the 7 inline provider literals were extracted into
+// per-provider sub-modules under `./ai-providers/`. The umbrella file
+// now imports each sub-module and assembles `AI_PROVIDERS[]` from
+// `{ ...def, capabilityClass }`. PR-S4 wires the patcher entry +
+// profile resolver into the 6 execution-client serialization points.
+import * as moonshotModule from './ai-providers/moonshot'
+import * as anthropicModule from './ai-providers/anthropic'
+import * as foxModule from './ai-providers/fox'
+import * as openaiModule from './ai-providers/openai'
+import * as geminiModule from './ai-providers/gemini'
+import * as volcengineModule from './ai-providers/volcengine'
+import * as openaiCompatibleModule from './ai-providers/openai-compatible'
+
 // ---------------------------------------------------------------------------
 // Core Types
 // ---------------------------------------------------------------------------
@@ -32,6 +45,16 @@ export interface AIModelDef {
   category: AIModelCategory
   contextWindow?: number
   description?: string
+  /**
+   * Stage S (PR-S2): per-model capability overrides applied on top of
+   * the provider-level `capabilityClass` defaults. Three-layer merge
+   * (model overrides > provider class > legacy heuristics) lands in PR-S5.
+   */
+  capabilityOverrides?: {
+    supportsVision?: boolean
+    supportsThinking?: boolean
+    supportsLongContext?: boolean
+  }
 }
 
 export interface AIProviderDef {
@@ -49,6 +72,15 @@ export interface AIProviderDef {
   models: AIModelDef[]
   apiKeyPlaceholder: string
   helpUrl: string
+  /**
+   * Stage S (PR-S2): provider-level capability defaults. Acts as the
+   * middle layer of the three-layer merge introduced in PR-S5.
+   */
+  capabilityClass?: {
+    supportsVision?: boolean
+    supportsThinking?: boolean
+    supportsLongContext?: boolean
+  }
 }
 
 export interface AIModelConfig {
@@ -69,6 +101,17 @@ export interface AIModelConfig {
   displayName?: string
   /** 业务能力分组开关 */
   capabilityModes?: CapabilityModeMap
+  /**
+   * Stage S (PR-S2): independent thinking-mode toggle (auto/on/off).
+   * Not part of `CapabilityModeMap` because that map's keys are
+   * restricted to `CapabilityGroupId`. Three-layer merge in PR-S5.
+   */
+  thinkingMode?: AICapabilityMode
+  /**
+   * Stage S (PR-S2): independent long-context toggle (auto/on/off).
+   * See `thinkingMode` for rationale.
+   */
+  longContextMode?: AICapabilityMode
 }
 
 export type AIProviderCategory = 'openai' | 'anthropic' | 'gemini' | 'custom'
@@ -103,155 +146,13 @@ export interface ChatSwitcherProfileGroups {
 // ---------------------------------------------------------------------------
 
 export const AI_PROVIDERS: AIProviderDef[] = [
-  // ── Moonshot / Kimi ──────────────────────────────────────────────────
-  {
-    id: 'moonshot',
-    label: 'Kimi (月之暗面)',
-    labelEn: 'Moonshot AI',
-    icon: '🌙',
-    baseUrl: 'https://api.moonshot.cn/v1',
-    authHeader: 'Authorization',
-    authPrefix: 'Bearer ',
-    agentProtocol: 'openai',
-    models: [
-      { id: 'kimi-for-coding', label: 'Kimi For Coding', category: 'chat', description: 'Coding 专用（第三方 Agent 兼容）' },
-      { id: 'moonshot-v1-128k', label: 'Moonshot V1 128K', category: 'chat', contextWindow: 128000, description: '超长上下文' },
-      { id: 'moonshot-v1-32k', label: 'Moonshot V1 32K', category: 'chat', contextWindow: 32768 },
-      { id: 'moonshot-v1-8k', label: 'Moonshot V1 8K', category: 'chat', contextWindow: 8192 },
-      { id: 'kimi-latest', label: 'Kimi Latest', category: 'chat', description: '最新版本' },
-    ],
-    apiKeyPlaceholder: 'sk-...',
-    helpUrl: 'https://platform.moonshot.cn/docs',
-  },
-
-  // ── Anthropic / Claude ───────────────────────────────────────────────
-  {
-    id: 'anthropic',
-    label: 'Claude (Anthropic)',
-    labelEn: 'Anthropic',
-    icon: '🤖',
-    baseUrl: 'https://api.anthropic.com',
-    authHeader: 'x-api-key',
-    authPrefix: '',
-    agentProtocol: 'anthropic',
-    extraHeaders: { 'anthropic-version': '2023-06-01' },
-    models: [
-      { id: 'claude-opus-4-20250514', label: 'Claude Opus 4', category: 'chat', description: '最强推理' },
-      { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4', category: 'chat', description: '均衡性能' },
-      { id: 'claude-haiku-3-5-20241022', label: 'Claude Haiku 3.5', category: 'chat', description: '快速低成本' },
-      { id: '__custom__', label: '自定义模型 ID', category: 'chat', description: '手动输入，如 kimi-for-coding' },
-    ],
-    apiKeyPlaceholder: 'sk-ant-...',
-    helpUrl: 'https://docs.anthropic.com',
-  },
-
-  // ── FoxCode / NewCLI Codex ───────────────────────────────────────────
-  {
-    id: 'fox',
-    label: 'FoxCode Codex',
-    labelEn: 'FoxCode / NewCLI Codex',
-    icon: '🦊',
-    baseUrl: 'https://code.newcli.com/codex/v1',
-    authHeader: 'Authorization',
-    authPrefix: 'Bearer ',
-    agentProtocol: 'openai',
-    wireApi: 'responses',
-    defaultReasoningEffort: 'high',
-    models: [
-      { id: 'gpt-5.4', label: 'GPT-5.4', category: 'chat', description: 'FoxCode 推荐模型' },
-      { id: 'gpt-5', label: 'GPT-5', category: 'chat', description: 'Codex 通道' },
-      { id: 'gpt-5-codex', label: 'GPT-5 Codex', category: 'chat', description: 'Codex 优化变体' },
-      { id: '__custom__', label: '自定义模型 ID', category: 'chat', description: '手动输入，如 gpt-5.4' },
-    ],
-    apiKeyPlaceholder: 'sk-ant-...',
-    helpUrl: 'https://foxcode.rjj.cc/api-keys',
-  },
-
-  // ── OpenAI / GPT ─────────────────────────────────────────────────────
-  {
-    id: 'openai',
-    label: 'OpenAI',
-    labelEn: 'OpenAI',
-    icon: '⚡',
-    baseUrl: 'https://api.openai.com/v1',
-    authHeader: 'Authorization',
-    authPrefix: 'Bearer ',
-    agentProtocol: 'openai',
-    models: [
-      { id: 'gpt-5.4', label: 'GPT-5.4', category: 'chat', description: '自定义新增模型' },
-      { id: 'gpt-4o', label: 'GPT-4o', category: 'chat', description: '旗舰多模态' },
-      { id: 'gpt-4o-mini', label: 'GPT-4o Mini', category: 'chat', description: '高性价比' },
-      { id: 'o3-mini', label: 'o3-mini', category: 'chat', description: '高效推理' },
-      { id: 'gpt-4-turbo', label: 'GPT-4 Turbo', category: 'chat', contextWindow: 128000 },
-      { id: 'codex-mini-latest', label: 'Codex Mini', category: 'chat', description: '代码优化' },
-      { id: '__custom__', label: '自定义模型 ID', category: 'chat', description: '手动输入，如 gpt-5.4-custom' },
-    ],
-    apiKeyPlaceholder: 'sk-...',
-    helpUrl: 'https://platform.openai.com/docs/api-reference',
-  },
-
-  // ── Google Gemini ────────────────────────────────────────────────────
-  {
-    id: 'gemini',
-    label: 'Gemini (Google)',
-    labelEn: 'Google Gemini',
-    icon: '💎',
-    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
-    authHeader: 'Authorization',
-    authPrefix: 'Bearer ',
-    agentProtocol: 'openai',
-    models: [
-      { id: 'gemini-2.5-pro', label: 'Gemini 2.5 Pro', category: 'chat', description: '最新旗舰，支持思考' },
-      { id: 'gemini-2.5-flash', label: 'Gemini 2.5 Flash', category: 'chat', description: '快速思考' },
-      { id: 'gemini-2.0-flash', label: 'Gemini 2.0 Flash', category: 'chat', description: '快速多模态' },
-      { id: 'gemini-1.5-pro', label: 'Gemini 1.5 Pro', category: 'chat', contextWindow: 2000000, description: '200万上下文' },
-    ],
-    apiKeyPlaceholder: 'AIza...',
-    helpUrl: 'https://ai.google.dev/gemini-api/docs',
-  },
-
-  // ── Volcano Engine (Seedance + Seedream) ─────────────────────────────
-  {
-    id: 'volcengine',
-    label: '火山方舟 (豆包)',
-    labelEn: 'Volcano Engine',
-    icon: '🌋',
-    baseUrl: 'https://ark.cn-beijing.volces.com/api/v3',
-    authHeader: 'Authorization',
-    authPrefix: 'Bearer ',
-    agentProtocol: 'openai',
-    models: [
-      { id: 'doubao-1.5-pro-32k', label: '豆包 1.5 Pro', category: 'chat', contextWindow: 32768, description: '通用对话' },
-      { id: 'doubao-1.5-lite-32k', label: '豆包 1.5 Lite', category: 'chat', contextWindow: 32768, description: '轻量对话' },
-      { id: 'seedance-1.0-pro', label: 'Seedance 1.0 Pro', category: 'video', description: '文本转视频' },
-      { id: 'seedance-1.0-lite', label: 'Seedance 1.0 Lite', category: 'video', description: '快速视频生成' },
-      { id: 'seedream-3.0', label: 'Seedream 3.0', category: 'image', description: '文本转图像' },
-      { id: 'seedream-2.0', label: 'Seedream 2.0', category: 'image', description: '图像生成' },
-    ],
-    apiKeyPlaceholder: 'ark-...',
-    helpUrl: 'https://www.volcengine.com/docs/82379',
-  },
-
-  // ── OpenAI Compatible ────────────────────────────────────────────────
-  {
-    id: 'openai-compatible',
-    label: '自定义 (OpenAI 兼容)',
-    labelEn: 'OpenAI Compatible',
-    icon: '🔧',
-    baseUrl: '',
-    authHeader: 'Authorization',
-    authPrefix: 'Bearer ',
-    agentProtocol: 'openai',
-    models: [
-      { id: 'newcli-codex', label: 'NewCLI Codex', category: 'chat', description: 'FoxCode / NewCLI Codex 通道' },
-      { id: 'free-codex', label: 'Free Codex', category: 'chat', description: 'FoxCode 免费 Codex 通道' },
-      { id: 'newcli-codex-claude-sonnet', label: 'NewCLI Codex Claude Sonnet', category: 'chat', description: 'Claude Sonnet 风格 Codex 通道' },
-      { id: 'newcli-codex-qwen-coder', label: 'NewCLI Codex Qwen Coder', category: 'chat', description: 'Qwen Coder 风格 Codex 通道' },
-      { id: 'custom', label: '自定义模型', category: 'chat', description: '手动输入模型 ID' },
-    ],
-    apiKeyPlaceholder: 'sk-...',
-    helpUrl: '',
-  },
+  { ...moonshotModule.def, capabilityClass: moonshotModule.capabilityClass },
+  { ...anthropicModule.def, capabilityClass: anthropicModule.capabilityClass },
+  { ...foxModule.def, capabilityClass: foxModule.capabilityClass },
+  { ...openaiModule.def, capabilityClass: openaiModule.capabilityClass },
+  { ...geminiModule.def, capabilityClass: geminiModule.capabilityClass },
+  { ...volcengineModule.def, capabilityClass: volcengineModule.capabilityClass },
+  { ...openaiCompatibleModule.def, capabilityClass: openaiCompatibleModule.capabilityClass },
 ]
 
 // ---------------------------------------------------------------------------
@@ -452,6 +353,15 @@ export interface AIResolvedCapabilities {
   supportsNativeVideo: boolean
   supportsToolChoice: boolean
   isKimiCoding: boolean
+  /**
+   * Stage S (PR-S2): placeholder fields for the capabilityClass
+   * three-layer merge. PR-S5 will replace the `false` defaults with
+   * `model.capabilityOverrides ?? provider.capabilityClass ?? legacy`
+   * resolution. Required (not optional) so downstream consumers can
+   * branch unconditionally once PR-S5 lands.
+   */
+  supportsThinking: boolean
+  supportsLongContext: boolean
 }
 
 function normalizeAgentProtocol(value: unknown): AIAgentProtocol | undefined {
@@ -498,6 +408,25 @@ export function resolveAIConfigCapabilities(config: AIModelConfig | null | undef
     ? 'none'
     : (supportsNativeToolCalls ? 'native' : 'text')
 
+  // Stage S (PR-S5 / W4.0): three-layer capability merge.
+  //
+  // Priority (highest first):
+  //   1. model.capabilityOverrides   (per-model)
+  //   2. provider.capabilityClass    (per-provider)
+  //   3. legacy heuristics fallback  (agentProtocol / contextWindow)
+  //
+  // Replaces the PR-S2 `false` placeholders for `supportsThinking`
+  // and `supportsLongContext`, and now also routes `supportsVision`
+  // through the same merge so unsupported providers (fox / volcengine
+  // / openai-compatible) default to `false` instead of inferring `true`
+  // from `agentProtocol`.
+  const providerCap = provider?.capabilityClass ?? {}
+  const modelDef = provider?.models.find(m => m.id === normalizedConfig.model)
+  const modelCap = modelDef?.capabilityOverrides ?? {}
+  const visionDefault = modelCap.supportsVision ?? providerCap.supportsVision ?? (agentProtocol === 'anthropic' || agentProtocol === 'openai')
+  const thinkingDefault = modelCap.supportsThinking ?? providerCap.supportsThinking ?? false
+  const longContextDefault = modelCap.supportsLongContext ?? providerCap.supportsLongContext ?? ((modelDef?.contextWindow ?? 0) >= 128000)
+
   return {
     config: normalizedConfig,
     provider,
@@ -508,13 +437,15 @@ export function resolveAIConfigCapabilities(config: AIModelConfig | null | undef
     supportsToolCalls,
     supportsNativeToolCalls,
     toolCallTransport,
-    supportsVision: applyCapabilityMode(normalizeCapabilityMode(normalizedConfig.visionMode), agentProtocol === 'anthropic' || agentProtocol === 'openai'),
+    supportsVision: applyCapabilityMode(normalizeCapabilityMode(normalizedConfig.visionMode), visionDefault),
     supportsNativeVideo: applyCapabilityMode(
       normalizeCapabilityMode(normalizedConfig.nativeVideoMode),
       isKimiCoding || (agentProtocol === 'openai' && !baseUrl.includes('/coding'))
     ),
     supportsToolChoice: agentProtocol === 'anthropic' || wireApi === 'chat/completions',
     isKimiCoding,
+    supportsThinking: applyCapabilityMode(normalizeCapabilityMode(normalizedConfig.thinkingMode), thinkingDefault),
+    supportsLongContext: applyCapabilityMode(normalizeCapabilityMode(normalizedConfig.longContextMode), longContextDefault),
   }
 }
 

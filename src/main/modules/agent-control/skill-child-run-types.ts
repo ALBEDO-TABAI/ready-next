@@ -193,43 +193,75 @@ export interface SkillChildRunPayload {
  * Source plan §5.3 — append-only JSONL event log shapes. Parent code may
  * surface the path; parent code must NOT parse the log to choose the next
  * VEA step.
+ *
+ * Stage T (W9.1) — Worker Event Ledger augmentation. Every variant now
+ * also carries:
+ *   - `event_kind`: one of `'started' | 'progress' | 'budget_warning' |
+ *     'paused' | 'resumed' | 'cancelled' | 'completed' | 'failed'` —
+ *     coarse kind for diagnostic / dashboard consumers (not used by
+ *     parent-loop logic).
+ *   - `ts`: numeric epoch-ms timestamp (peer to the existing `at` ISO
+ *     string, retained for back-compat).
+ *   - `terminal_reason?`: only set on terminal events; mirrors the
+ *     close event's `terminalReason` for at-a-glance triage.
+ *   - `rollback_target?: string | null`: ONLY filled on cancel terminal
+ *     events — the runner's `lastSafeStepId` snapshot (`null` if no safe
+ *     step was ever recorded). This is a diagnostic-only field; the
+ *     runner explicitly does NOT auto-roll-back on cancel.
  */
+export type SkillChildRunEventLedgerKind =
+  | 'started'
+  | 'progress'
+  | 'budget_warning'
+  | 'paused'
+  | 'resumed'
+  | 'cancelled'
+  | 'completed'
+  | 'failed'
+
+interface SkillChildRunEventLedgerFields {
+  event_kind?: SkillChildRunEventLedgerKind
+  ts?: number
+  terminal_reason?: string
+  rollback_target?: string | null
+}
+
 export type SkillChildRunEvent =
-  | {
+  | ({
       type: 'started'
       at: string
       childRunId: string
       input: Record<string, unknown>
-    }
-  | {
+    } & SkillChildRunEventLedgerFields)
+  | ({
       type: 'action_started'
       at: string
       action: string
       input: Record<string, unknown>
-    }
-  | {
+    } & SkillChildRunEventLedgerFields)
+  | ({
       type: 'action_completed'
       at: string
       action: string
       result: Record<string, unknown>
-    }
-  | {
+    } & SkillChildRunEventLedgerFields)
+  | ({
       type: 'state_observed'
       at: string
       runStatePath: string
       state: Record<string, unknown>
-    }
-  | {
+    } & SkillChildRunEventLedgerFields)
+  | ({
       type: 'checkpoint'
       at: string
       reason: string
       state: Record<string, unknown>
-    }
-  | {
+    } & SkillChildRunEventLedgerFields)
+  | ({
       type: 'close'
       at: string
       close: SkillChildCloseEvent
-    }
+    } & SkillChildRunEventLedgerFields)
 
 /**
  * Phase 1 placeholder for the per-run driver state. Phase 5 fills the real

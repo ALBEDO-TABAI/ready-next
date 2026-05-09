@@ -22,6 +22,11 @@ export type ReminderTopic =
   // before the checkpoint-instead-of-force logic can run), so default
   // conflicts table lists none.
   | 'force-tool-blocked-child-owned'
+  // Stage R W1.3 — daily date prompt for live-info / web research turns.
+  // Pure observability: the reminder advises the model about the current
+  // date so it can apply staleness judgement to web_search / web_fetch
+  // citations. No conflicts with other topics.
+  | 'current-date'
 
 export interface ReminderEntry {
   readonly topic: ReminderTopic

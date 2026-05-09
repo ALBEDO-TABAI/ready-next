@@ -1,0 +1,15 @@
+{
+  "id": "find-skills",
+  "name": "find-skills",
+  "displayName": "Find Skills",
+  "description": "技能搜索方法论：description matching + when-to-use 反向 lookup",
+  "version": "0.1.0",
+  "runtime": "reference",
+  "execution": { "mode": "advisory" },
+  "actions": {
+    "read_skill": {
+      "runtime": "reference",
+      "visibility": "internal"
+    }
+  }
+}

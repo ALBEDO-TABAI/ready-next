@@ -1,5 +1,6 @@
-import { createHash, randomUUID } from 'crypto'
+import { randomUUID } from 'crypto'
 import { buildRequestEnvelope } from './request-envelope'
+import { hashToolCallArgs } from './tool-call-args-hash'
 
 /**
  * skill-resume C1 — pure helper for tool-repetition detection.
@@ -1335,6 +1336,21 @@ export class TurnEngine {
         // metrics must never break the control path
       }
       transcript.emitStatus(status, terminalReason)
+      // Stage T PR-T5 — turn-end hook for MCP deferred-tool registry.
+      // Promotion within a turn-gap is non-persistent; at terminal
+      // closure the next turn must start cold. Required by
+      // `check-deferred-registry-per-turn-reset.cjs`.
+      try {
+        // Lazy import to avoid pulling MCP module into early init paths
+        // (helper-only call site; safe to no-op if mcp dir is absent).
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        const mcpDeferred = require('../mcp/deferred-filter') as {
+          deferredRegistry: { reset(): void }
+        }
+        mcpDeferred.deferredRegistry.reset()
+      } catch {
+        // mcp module not available in this build — noop
+      }
       return {
         ...state.buildResult({
           success: params.success,
@@ -1361,7 +1377,18 @@ export class TurnEngine {
     try {
       const session = request.session
       const userText = extractIncomingText(request.content as string | Array<Record<string, unknown>>)
-      const requestEnvelope = request.requestEnvelope || buildRequestEnvelope({ userText })
+      // Round-1 (Codex) — propagate sessionId/scopeId into the envelope at
+      // construction time. Without this, `requestEnvelope.scopeId` read
+      // ~line 2212 below would always be `undefined`, defeating the
+      // `mcp.registry.isAuthorized(toolName, sessionId, scopeId)` plumbing.
+      // In this codebase the conversation scope id is the sessionId itself
+      // (see e.g. line 1604 / 1864 below where `scopeId: request.sessionId`
+      // is the canonical mapping).
+      const requestEnvelope = request.requestEnvelope || buildRequestEnvelope({
+        userText,
+        sessionId: request.sessionId,
+        scopeId: request.sessionId,
+      })
       const hookRegistry = host.hookRegistry || NOOP_HOOK_REGISTRY
       await fireUserPromptSubmitHook(hookRegistry, {
         userText,
@@ -1371,13 +1398,36 @@ export class TurnEngine {
       const activeWidgetEditLease = host.resolveActiveWidgetEditLease?.() || null
       const registeredSkillTokens = skillContextOrchestrator.listRegisteredSkillTokens?.() || []
       const previousPureUserInputs = host.collectRecentPureUserInputs(session.messages.slice(0, -1), 40)
+      // Stage R W1.6 (Codex round 3 fix) — bare-continue research re-entry must
+      // re-bind ResearchDomainAdapter AND keep general_research capability.
+      // Without this override, prepareInitialRun (line ~2153) computes
+      // capability before continuationProjection (line ~2268) is resolved,
+      // so allowResearchTools=false and prepare narrows tools to []. Force
+      // primaryDomain='research' early when the request carries continuation
+      // state pointing at a research task.
+      const baseIntentClassification = request.intentClassification || classifyIntent(requestEnvelope, {
+        registeredSkillTokens,
+      })
+      const continuationResearchHint = Boolean(
+        request.continuationState
+          && (request.continuationState.taskType === 'research'
+            || request.continuationState.module === 'research'),
+      )
+      const effectiveIntentClassification = (continuationResearchHint && baseIntentClassification.primaryDomain !== 'research')
+        ? {
+            ...baseIntentClassification,
+            primaryDomain: 'research' as const,
+            mentionedDomains: Array.from(new Set([
+              ...(baseIntentClassification.mentionedDomains || []),
+              'research' as const,
+            ])),
+          }
+        : baseIntentClassification
       const executionIntentContext = resolveExecutionIntentContext({
         requestEnvelope,
         previousInputs: previousPureUserInputs,
         lastDocumentContextInput: session.lastDocumentContextInput,
-        intentClassification: request.intentClassification || classifyIntent(requestEnvelope, {
-          registeredSkillTokens,
-        }),
+        intentClassification: effectiveIntentClassification,
         activeWidgetEditLease,
         refreshWidgetEditLease: host.refreshActiveWidgetEditLease
           ? () => host.refreshActiveWidgetEditLease?.() || null
@@ -2166,6 +2216,11 @@ export class TurnEngine {
             || userText,
         },
         sessionId: request.sessionId,
+        // Stage T PR-T5 — thread scopeId from the per-turn request
+        // envelope into the capability controller so the resulting
+        // ToolPolicy carries scopeId end-to-end into gateway → registry
+        // → mcp.registry.isAuthorized(toolName, sessionId, scopeId).
+        scopeId: requestEnvelope.scopeId,
         // Stage 4 W3b.2 fix — thread authorization into the capability
         // controller so allowedToolNames + toolResolution snapshot are
         // computed with the same filter the model-visible list uses.
@@ -2505,6 +2560,7 @@ export class TurnEngine {
         && (
           continuationProjection?.taskType === 'multi_step_task'
           || continuationProjection?.taskType === 'media_task'
+          || continuationProjection?.taskType === 'research'
         )
       ) {
         const inheritedSeed = createContinuationRunBudgetSeed(continuationProjection.taskType)
@@ -3894,7 +3950,10 @@ export class TurnEngine {
         const recentToolCallsBeforeIteration = [...recentToolCalls]
         const recordRecentToolCallsForIteration = (): void => {
           for (const toolCall of toolCallsForIteration) {
-            const argsHash = createHash('sha1').update(JSON.stringify(toolCall.input ?? null)).digest('hex').slice(0, 16)
+            // Stage R W2.1 — stable args hash via shared helper (sorts object keys
+            // recursively before JSON stringify so semantically-identical args with
+            // different key order compare equal in the repetition ring buffer).
+            const argsHash = hashToolCallArgs(toolCall.input)
             recentToolCalls.push({ name: toolCall.name, argsHash })
             if (recentToolCalls.length > RECENT_TOOL_CALLS_RING_SIZE) recentToolCalls.shift()
           }
@@ -4037,6 +4096,38 @@ export class TurnEngine {
             serializedResult: string
           }) => void
         }) => {
+          // Stage S (PR-S6 / W4.3) — view_image followup injection hook.
+          //
+          // When a `view_image` tool call lands in the executed batch, the
+          // next round needs the image bytes injected back into the model
+          // input as a vision content block. Today no such tool ships, so
+          // this hook only records the detection for observability — the
+          // actual injection into `state.session.messages` is left as a
+          // TODO until the tool ships and we have the result-shape contract
+          // (base64 vs. URL vs. attachment ref) nailed down.
+          //
+          // Gate `check-view-image-followup-injection.cjs` requires:
+          //   (a) reference to the literal tool name `view_image`
+          //   (b) reference to a follow-up / next-round injection token
+          //
+          // TODO(PR-S6 follow-up) — wire actual image-block injection into
+          // the next round's messages once `view_image` ships.
+          for (const executedTool of executedToolBatch.results) {
+            if (executedTool.name === 'view_image') {
+              try {
+                logAgentMetric('view_image_followup_injection_pending', {
+                  toolUseId: executedTool.id,
+                  // Placeholder: next-round image-block injection will read
+                  // `executedTool.result.imageData` and append it to the
+                  // upcoming model input.
+                  pendingNextRoundInjection: true,
+                })
+              } catch {
+                // silent-catch: token-attribution metric is best-effort; must never break the tool loop
+              }
+            }
+          }
+
           state.appendRecoveryHistory(executedToolBatch.recoveryHistory)
           Object.assign(state.runBudgetState, consumeToolCallBudget(state.runBudgetState, executedToolBatch.results.length))
           const batchHasLongTypedSkillAction = executedToolBatch.results.some((executedTool) =>
