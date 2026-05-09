@@ -26,7 +26,7 @@ export interface BashAuditResult {
 }
 
 /**
- * 10 high-risk patterns. Each entry pairs a regex with a short description
+ * 11 high-risk patterns. Each entry pairs a regex with a short description
  * that surfaces back to the model in the rejection detail. Keep the list
  * literal — the structural gate `check-sandbox-bash-high-risk-patterns.cjs`
  * counts entries and asserts each fixture command matches.
@@ -44,6 +44,11 @@ export const HIGH_RISK_PATTERNS: ReadonlyArray<{ pattern: RegExp; description: s
   { pattern: />\s*\/etc\//i, description: 'overwrite /etc' },
   { pattern: />\s*\/usr\/bin\//i, description: 'overwrite /usr/bin' },
   { pattern: /\bwget\b[^|;]*\|\s*(?:python|node|sh|bash)\b/i, description: 'wget exec' },
+  // Round-1 (Codex) fix — classic bash fork bomb `:(){ :|:& };:`.
+  // Structure: `:` `(` `)` `{` `:` `|` `:` `&` `}` `;` `:` — the `&` runs
+  // the `:|:` recursion in the background, the `;` separates from the
+  // outermost call. Tolerate optional whitespace between every token.
+  { pattern: /:\s*\(\s*\)\s*\{\s*:[\s|]+:\s*&\s*\}\s*;\s*:/, description: 'fork bomb' },
 ]
 
 export function auditBashCommand(command: string): BashAuditResult {

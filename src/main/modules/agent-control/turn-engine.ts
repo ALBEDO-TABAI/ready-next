@@ -1377,7 +1377,18 @@ export class TurnEngine {
     try {
       const session = request.session
       const userText = extractIncomingText(request.content as string | Array<Record<string, unknown>>)
-      const requestEnvelope = request.requestEnvelope || buildRequestEnvelope({ userText })
+      // Round-1 (Codex) — propagate sessionId/scopeId into the envelope at
+      // construction time. Without this, `requestEnvelope.scopeId` read
+      // ~line 2212 below would always be `undefined`, defeating the
+      // `mcp.registry.isAuthorized(toolName, sessionId, scopeId)` plumbing.
+      // In this codebase the conversation scope id is the sessionId itself
+      // (see e.g. line 1604 / 1864 below where `scopeId: request.sessionId`
+      // is the canonical mapping).
+      const requestEnvelope = request.requestEnvelope || buildRequestEnvelope({
+        userText,
+        sessionId: request.sessionId,
+        scopeId: request.sessionId,
+      })
       const hookRegistry = host.hookRegistry || NOOP_HOOK_REGISTRY
       await fireUserPromptSubmitHook(hookRegistry, {
         userText,

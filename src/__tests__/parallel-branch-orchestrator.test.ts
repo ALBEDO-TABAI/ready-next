@@ -136,6 +136,53 @@ test('awaitAll catches synchronous throws from the branch function', async () =>
   assert.equal((result.reason as Error).message, 'sync boom')
 })
 
+test('awaitAllOrFirstFailure aborts siblings when one branch rejects', async () => {
+  const orch = createParallelBranchOrchestrator()
+  let siblingAborted = false
+  let secondSiblingAborted = false
+  const ok = orch.spawn('long-running', (signal) => {
+    return new Promise((resolve) => {
+      signal.addEventListener('abort', () => {
+        siblingAborted = true
+        resolve('aborted-1')
+      })
+    })
+  })
+  const ok2 = orch.spawn('long-running-2', (signal) => {
+    return new Promise((resolve) => {
+      signal.addEventListener('abort', () => {
+        secondSiblingAborted = true
+        resolve('aborted-2')
+      })
+    })
+  })
+  const bad = orch.spawn('failing', () => Promise.reject(new Error('first failure')))
+  assert.ok(ok)
+  assert.ok(ok2)
+  assert.ok(bad)
+
+  const results = await orch.awaitAllOrFirstFailure()
+  assert.equal(results.length, 3)
+  // All siblings observed the abort signal.
+  assert.equal(siblingAborted, true)
+  assert.equal(secondSiblingAborted, true)
+  const badR = results.find((r) => r.branchId === bad!.id)
+  assert.ok(badR)
+  assert.equal(badR!.status, 'rejected')
+  assert.equal((badR!.reason as Error).message, 'first failure')
+})
+
+test('awaitAllOrFirstFailure resolves cleanly when all branches succeed', async () => {
+  const orch = createParallelBranchOrchestrator()
+  const a = orch.spawn('a', () => Promise.resolve(1))
+  const b = orch.spawn('b', () => Promise.resolve(2))
+  assert.ok(a)
+  assert.ok(b)
+  const results = await orch.awaitAllOrFirstFailure()
+  assert.equal(results.length, 2)
+  assert.deepEqual(results.map((r) => r.status), ['fulfilled', 'fulfilled'])
+})
+
 test('mergePatchesSerially folds N branch patches deterministically (delegates to mergeTurnFramePatches)', () => {
   const merged = mergePatchesSerially([
     { activeArtifactRoots: ['/a', '/b'], terminalReason: 'done' },

@@ -63,6 +63,19 @@ export interface ParallelBranchOrchestrator {
   awaitAll(): Promise<ParallelBranchAwaitResult[]>
 
   /**
+   * Round-1 (Codex) opt-in alternative — abort all sibling branches as
+   * soon as any branch rejects. The returned array is still in spawn
+   * order: the first rejecting branch surfaces with its real reason,
+   * siblings that were aborted by this helper surface as `rejected` with
+   * their abort reason (or `'aborted'`). Branches that had already
+   * fulfilled before the first failure remain `fulfilled`.
+   *
+   * The default `awaitAll` is unchanged (allSettled). Callers that want
+   * fail-fast cancellation must opt in explicitly.
+   */
+  awaitAllOrFirstFailure(): Promise<ParallelBranchAwaitResult[]>
+
+  /**
    * Cancel a single branch by id (`controller.abort()`). No-op if the
    * branch has already settled or the id is unknown.
    */
@@ -147,6 +160,52 @@ export function createParallelBranchOrchestrator(): ParallelBranchOrchestrator {
     return results
   }
 
+  async function awaitAllOrFirstFailure(): Promise<ParallelBranchAwaitResult[]> {
+    const snapshot = getActiveList()
+    if (snapshot.length === 0) return []
+    // Race for the first rejection — Promise.any inverts and rejects only
+    // when ALL succeed, so we use a custom racer that flips reject -> resolve.
+    type FirstFailure = { index: number; reason: unknown }
+    const firstFailure = new Promise<FirstFailure | null>((resolve) => {
+      let pending = snapshot.length
+      snapshot.forEach((branch, index) => {
+        branch.promise.then(
+          () => {
+            pending -= 1
+            if (pending === 0) resolve(null)
+          },
+          (reason) => {
+            resolve({ index, reason })
+          },
+        )
+      })
+    })
+    const failure = await firstFailure
+    if (failure) {
+      // Abort all still-pending siblings cooperatively. The branch
+      // function decides whether to honour the signal — same contract
+      // as `cancel`.
+      for (let i = 0; i < snapshot.length; i += 1) {
+        if (i === failure.index) continue
+        const sibling = snapshot[i]
+        if (!sibling.abortController.signal.aborted) {
+          sibling.abortController.abort()
+        }
+      }
+    }
+    // Now drain everyone via allSettled — siblings that observed the
+    // abort settle with whatever they returned (typically a rejection).
+    const settled = await Promise.allSettled(snapshot.map((b) => b.promise))
+    return snapshot.map((branch, i) => {
+      const r = settled[i]
+      branches.delete(branch.id)
+      if (r.status === 'fulfilled') {
+        return { branchId: branch.id, status: 'fulfilled', value: r.value }
+      }
+      return { branchId: branch.id, status: 'rejected', reason: r.reason }
+    })
+  }
+
   function cancel(branchId: string): void {
     const branch = branches.get(branchId)
     if (!branch) return
@@ -159,5 +218,5 @@ export function createParallelBranchOrchestrator(): ParallelBranchOrchestrator {
     return getActiveList()
   }
 
-  return { spawn, awaitAll, cancel, getActive }
+  return { spawn, awaitAll, awaitAllOrFirstFailure, cancel, getActive }
 }

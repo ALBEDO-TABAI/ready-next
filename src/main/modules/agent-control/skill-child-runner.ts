@@ -1151,7 +1151,9 @@ class SkillChildRunner {
         errorKind: 'runner_uncaught',
         message: errorMessage(error),
       })
-      this.finalizeRun(active, close)
+      // Round-1 (Codex) — finalizeRun is now async; fire-and-forget here
+      // is fine because this `.catch` is itself the last-ditch path.
+      void this.finalizeRun(active, close)
     })
 
     return {
@@ -1197,7 +1199,7 @@ class SkillChildRunner {
         errorKind: 'driver_init_failed',
         message: errorMessage(error),
       })
-      this.finalizeRun(active, close)
+      await this.finalizeRun(active, close)
       return
     }
 
@@ -1232,7 +1234,10 @@ class SkillChildRunner {
         message: `No action_started within ${this.config.launchStuckGuardMs}ms`,
       })
       active.controller.abort(new Error('launch_stuck'))
-      this.finalizeRun(active, close)
+      // Round-1 (Codex) — finalizeRun is now async. Timer callback is sync;
+      // fire-and-forget is acceptable because launch_stuck is itself a
+      // best-effort recovery path (the controller has already been aborted).
+      void this.finalizeRun(active, close)
     }, this.config.launchStuckGuardMs)
     // Don't keep the process alive on this timer.
     if (typeof launchStuckTimer.unref === 'function') launchStuckTimer.unref()
@@ -1366,7 +1371,7 @@ class SkillChildRunner {
           isParentSessionAbort: abortReason === 'process_restarted',
           isLaunchStuckFired,
         })
-        this.finalizeRun(active, mergeCloseWithLastProgress(close, active.progress))
+        await this.finalizeRun(active, mergeCloseWithLastProgress(close, active.progress))
         return
       }
     }
@@ -1440,7 +1445,7 @@ class SkillChildRunner {
         errorKind: 'handoff_agent_context_missing',
         message: 'Pending skill handoff requires the active agent context before resume.',
       })
-      this.finalizeRun(active, close)
+      await this.finalizeRun(active, close)
       return false
     }
     try {
@@ -1486,7 +1491,7 @@ class SkillChildRunner {
         errorKind: 'handoff_completion_failed',
         message: errorMessage(error),
       })
-      this.finalizeRun(active, close)
+      await this.finalizeRun(active, close)
       return false
     }
   }
@@ -1853,7 +1858,7 @@ class SkillChildRunner {
     }
   }
 
-  private finalizeRun(active: ActiveRun, close: SkillChildCloseEvent): void {
+  private async finalizeRun(active: ActiveRun, close: SkillChildCloseEvent): Promise<void> {
     // Identity guard — only the lifecycle that owns the current `active` map
     // entry may finalize. Two protections in one:
     //   1. Same-lifecycle race (abort + driver throw): the second call sees
@@ -1872,7 +1877,15 @@ class SkillChildRunner {
     // NOT trigger any rollback action.
     const ledger = deriveCloseEventLedgerKind(frozenClose)
     const isCancelTerminal = frozenClose.terminalReason === 'cancelled_user'
-    void this.appendEvent(active, {
+    // Round-1 (Codex) fix — await the ledger append BEFORE resolving the
+    // close awaiters. Previously this was `void this.appendEvent(...)` then
+    // an immediate `active.resolveClose(...)` at the bottom, which let
+    // close-promise consumers proceed before the terminal close record
+    // hit the JSONL ledger. Awaiting it here closes the ordering gap;
+    // resolveClose at the end of this method now fires only after the
+    // ledger, repository write, projection publish, and retained-lifecycle
+    // write are all settled.
+    await this.appendEvent(active, {
       type: 'close',
       at: new Date().toISOString(),
       ts: Date.now(),

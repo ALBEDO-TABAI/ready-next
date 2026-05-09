@@ -21,12 +21,27 @@ import {
   registerMcpServer,
   __resetMcpRegistryForTests,
 } from '../main/modules/mcp/registry'
-import { __resetMcpOAuthForTests } from '../main/modules/mcp/oauth'
+import {
+  setCachedMcpOAuthToken,
+  __resetMcpOAuthForTests,
+} from '../main/modules/mcp/oauth'
 
 function reset() {
   __resetMcpRegistryForTests()
   __resetMcpOAuthForTests()
   deferredRegistry.reset()
+}
+
+// Round-1 (Codex) — `isAuthorized` now requires BOTH (session, scope) consent
+// AND a non-expired cached OAuth token. Helper to seed the latter so the
+// behaviour under test (deferred-tool promotion + scope-based filtering)
+// stays the same.
+function seedToken(serverId: string): void {
+  setCachedMcpOAuthToken(serverId, {
+    accessToken: `tok-${serverId}`,
+    expiresAt: Date.now() + 60_000,
+    scopes: ['read'],
+  })
 }
 
 test('promoteActive: only authorized tools are promoted', () => {
@@ -36,6 +51,7 @@ test('promoteActive: only authorized tools are promoted', () => {
     toolNames: ['mcp_srv_1_a', 'mcp_srv_1_b'],
     requiresAuthorization: true,
   })
+  seedToken('srv-1')
   // Authorize only the first tool for (session, scope).
   authorizeMcpToolForScope('srv-1', 'mcp_srv_1_a', 'sess-1', 'scope-1')
   markDeferredToolActive('mcp_srv_1_a')
@@ -65,6 +81,7 @@ test('promoteActive: different (sessionId, scopeId) tuples see different sets', 
     toolNames: ['mcp_srv_2_x'],
     requiresAuthorization: true,
   })
+  seedToken('srv-2')
   authorizeMcpToolForScope('srv-2', 'mcp_srv_2_x', 'sess-A', 'scope-A')
   markDeferredToolActive('mcp_srv_2_x')
   // Authorized tuple → tool surfaces.

@@ -56,11 +56,18 @@ function scopeKey(sessionId: string | undefined, scopeId: string | undefined): s
  * tool-executor admission. Returns `true` only when:
  *   1. The tool is registered against an MCP server, AND
  *   2. (a) the server doesn't require auth, OR
- *      (b) the (session, scope) tuple has an allowed entry, OR
- *      (c) a non-expired OAuth token is cached for the server.
+ *      (b) the (session, scope) tuple has an allowed entry AND a
+ *          non-expired OAuth token is cached for the server.
  *
  * The 3-arity signature is mandatory — `check-mcp-tools-go-through-
  * authorization.cjs` (D) requires `(toolName, sessionId, scopeId)`.
+ *
+ * Round-1 (Codex) fix — a cached OAuth token alone is NOT sufficient
+ * authorization. A token is a per-server credential; without an explicit
+ * `(sessionId, scopeId, toolName)` consent entry, the same token would
+ * leak the tool into every conversation scope on the device. The gate
+ * now requires both signals: the user has consented for THIS scope AND
+ * the underlying OAuth token is still valid.
  */
 export function isAuthorized(
   toolName: string,
@@ -73,19 +80,18 @@ export function isAuthorized(
   if (!server) return false
   if (!server.requiresAuthorization) return true
 
+  // Per-(session, scope, tool) consent must be recorded explicitly via
+  // `authorizeMcpToolForScope`. No allowlist or no entry → deny, even
+  // if the server has a cached OAuth token from a different scope.
   const allowlist = server.scopedAllowlist
-  if (allowlist) {
-    const key = scopeKey(sessionId, scopeId)
-    const entry = allowlist.get(key)
-    if (entry && entry.has(toolName)) return true
-  }
+  if (!allowlist) return false
+  const key = scopeKey(sessionId, scopeId)
+  const entry = allowlist.get(key)
+  if (!entry || !entry.has(toolName)) return false
 
-  // Fallback signal: a valid cached OAuth token implies prior
-  // user-mediated authorization. Real production wiring would also
-  // record per-(session, scope) consent; PR-T5 keeps this minimal.
+  // Consent is recorded — the OAuth token must still be valid.
   const token = getCachedMcpOAuthToken(serverId)
   if (token && token.expiresAt > Date.now()) return true
-
   return false
 }
 
