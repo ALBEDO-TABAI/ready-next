@@ -242,6 +242,10 @@ function MediaEmbed({
   )
 }
 
+function mergeMarkdownClassName(className: string | undefined, previewClassName: string): string {
+  return className ? `${className} ${previewClassName}` : previewClassName
+}
+
 export default function NotePreview({
   content,
   notePath,
@@ -332,9 +336,15 @@ export default function NotePreview({
         em: ({ children, node: _node, ...props }) => <em className="note-preview-markdown-em" {...props}>{children}</em>,
         hr: () => <hr className="note-preview-markdown-hr" />,
         blockquote: ({ children }) => <blockquote className="note-preview-markdown-quote">{children}</blockquote>,
-        ul: ({ children }) => <ul className="note-preview-markdown-ul">{children}</ul>,
-        ol: ({ children }) => <ol className="note-preview-markdown-ol">{children}</ol>,
-        li: ({ children }) => <li className="note-preview-markdown-li">{children}</li>,
+        ul: ({ children, node: _node, className, ...props }) => (
+          <ul className={mergeMarkdownClassName(className, 'note-preview-markdown-ul')} {...props}>{children}</ul>
+        ),
+        ol: ({ children, node: _node, className, ...props }) => (
+          <ol className={mergeMarkdownClassName(className, 'note-preview-markdown-ol')} {...props}>{children}</ol>
+        ),
+        li: ({ children, node: _node, className, ...props }) => (
+          <li className={mergeMarkdownClassName(className, 'note-preview-markdown-li')} {...props}>{children}</li>
+        ),
         table: ({ children, node: _node, ...props }) => (
           <div className="note-preview-table-scroll" data-note-preview-table="true">
             <table className="note-preview-markdown-table" {...props}>{children}</table>

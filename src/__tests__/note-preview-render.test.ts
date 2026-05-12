@@ -28,3 +28,33 @@ test('NotePreview renders markdown tables with a dedicated preview shell', () =>
   assert.match(html, /note-preview-markdown-th/)
   assert.match(html, /note-preview-markdown-td/)
 })
+
+test('NotePreview preserves ordered, unordered and nested markdown list structure', () => {
+  const markdown = [
+    '3. 有序列表第一项',
+    '4. 有序列表第二项',
+    '   1. 嵌套有序列表',
+    '',
+    '- 无序列表项',
+    '  - 嵌套无序列表项',
+    '',
+    '- [ ] 待办项',
+  ].join('\n')
+
+  const html = renderToStaticMarkup(
+    React.createElement(NotePreview, {
+      content: markdown,
+      notePath: '/tmp/list-demo.md',
+    }),
+  )
+
+  assert.match(html, /<ol[^>]*class="note-preview-markdown-ol"[^>]*start="3"/)
+  assert.match(html, /<ul class="note-preview-markdown-ul">/)
+  assert.match(html, /<li class="note-preview-markdown-li">有序列表第一项<\/li>/)
+  assert.match(html, /<li class="note-preview-markdown-li">有序列表第二项\s*<ol class="note-preview-markdown-ol">/)
+  assert.match(html, /<li class="note-preview-markdown-li">无序列表项\s*<ul class="note-preview-markdown-ul">/)
+  assert.match(html, /<ul class="contains-task-list note-preview-markdown-ul">/)
+  assert.match(html, /<li class="task-list-item note-preview-markdown-li"><input type="checkbox" disabled=""/)
+  assert.doesNotMatch(html, /<p class="note-preview-markdown-p">3\. 有序列表第一项<\/p>/)
+  assert.doesNotMatch(html, /<p class="note-preview-markdown-p">- 无序列表项<\/p>/)
+})

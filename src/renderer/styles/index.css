@@ -1173,6 +1173,51 @@ html[data-theme='dark'] .ready-app-bg::after {
   line-height: 1.8;
 }
 
+.note-preview-markdown-ul {
+  list-style-type: disc;
+}
+
+.note-preview-markdown-ol {
+  list-style-type: decimal;
+}
+
+.note-preview-markdown-ul .note-preview-markdown-ul {
+  list-style-type: circle;
+}
+
+.note-preview-markdown-ul .note-preview-markdown-ul .note-preview-markdown-ul {
+  list-style-type: square;
+}
+
+.note-preview-markdown-ol .note-preview-markdown-ol {
+  list-style-type: lower-alpha;
+}
+
+.note-preview-markdown-ol .note-preview-markdown-ol .note-preview-markdown-ol {
+  list-style-type: lower-roman;
+}
+
+.note-preview-markdown-li > .note-preview-markdown-ul,
+.note-preview-markdown-li > .note-preview-markdown-ol {
+  margin: 4px 0 0;
+}
+
+.note-preview-markdown-ul.contains-task-list {
+  list-style-type: none;
+  padding-left: 0;
+}
+
+.note-preview-markdown-li.task-list-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.note-preview-markdown-li.task-list-item > input[type='checkbox'] {
+  flex: 0 0 auto;
+  margin: 0.62em 0 0;
+}
+
 .note-preview-table-scroll {
   width: 100%;
   overflow-x: auto;
