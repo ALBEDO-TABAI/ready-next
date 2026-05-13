@@ -6,6 +6,7 @@
  * (`./ipc-handler.ts`) re-exports the public surface for backward compat.
  */
 import { extname } from 'path'
+import { EBOOK_BINARY_EXTENSIONS } from '../../../shared/ebook'
 
 // --- Cap constants ---
 // Block main thread on huge base64 / readFile calls is the primary cause of
@@ -14,14 +15,18 @@ import { extname } from 'path'
 export const ATTACHMENT_HARD_CAP_BYTES = 100 * 1024 * 1024 // 100 MB any type
 export const VIDEO_INLINE_CAP_BYTES = 40 * 1024 * 1024 // 40 MB video → ref
 export const IMAGE_INLINE_CAP_BYTES = 20 * 1024 * 1024 // 20 MB image → refuse base64
+export const EBOOK_INLINE_CAP_BYTES = 40 * 1024 * 1024 // 40 MB ebook → inline bytes for reader
+
+export type AttachmentCategory = 'image' | 'video' | 'audio' | 'pdf' | 'ebook' | 'binary'
 
 /** Detect content type category from extension. Mirrors getFileCategory() in ipc-handler. */
-export function getAttachmentCategory(filePath: string): 'image' | 'video' | 'audio' | 'pdf' | 'binary' {
+export function getAttachmentCategory(filePath: string): AttachmentCategory {
   const ext = extname(filePath).toLowerCase()
   if (['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.ico', '.svg', '.tiff', '.tif', '.avif'].includes(ext)) return 'image'
   if (['.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv', '.m4v'].includes(ext)) return 'video'
   if (['.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a', '.wma'].includes(ext)) return 'audio'
   if (ext === '.pdf') return 'pdf'
+  if (EBOOK_BINARY_EXTENSIONS.has(ext)) return 'ebook'
   return 'binary'
 }
 
@@ -41,7 +46,7 @@ export function base64DecodedLength(value: string): number {
 /** Best-effort category guess for a base64 payload using the suggested filename's extension. */
 export function categoryFromSuggestedName(
   name: string | undefined | null,
-): 'image' | 'video' | 'audio' | 'pdf' | 'binary' {
+): AttachmentCategory {
   if (!name) return 'binary'
   return getAttachmentCategory(name)
 }
@@ -71,7 +76,7 @@ export type AttachmentSizeDecision =
  */
 export function decideAttachmentSize(
   approxBytes: number,
-  category: 'image' | 'video' | 'audio' | 'pdf' | 'binary',
+  category: AttachmentCategory,
 ): AttachmentSizeDecision {
   if (approxBytes > ATTACHMENT_HARD_CAP_BYTES) {
     return { kind: 'attachment_too_large', max: ATTACHMENT_HARD_CAP_BYTES, actual: approxBytes }
@@ -91,6 +96,7 @@ export type ReadAttachmentDecision =
   | { kind: 'large_image_ref'; size: number }
   | { kind: 'attachment_too_large'; max: number; actual: number }
   | { kind: 'pdf_too_large_for_inline_bytes'; max: number; actual: number }
+  | { kind: 'ebook_too_large_for_inline_bytes'; max: number; actual: number }
 
 /**
  * Pure decision function for the binary read size guard.
@@ -99,7 +105,7 @@ export type ReadAttachmentDecision =
  */
 export function decideReadAttachmentSize(
   size: number,
-  category: 'image' | 'video' | 'audio' | 'pdf' | 'binary',
+  category: AttachmentCategory,
 ): ReadAttachmentDecision {
   if (size > ATTACHMENT_HARD_CAP_BYTES) {
     return { kind: 'attachment_too_large', max: ATTACHMENT_HARD_CAP_BYTES, actual: size }
@@ -113,6 +119,12 @@ export function decideReadAttachmentSize(
   if (category === 'pdf') {
     if (size > VIDEO_INLINE_CAP_BYTES) {
       return { kind: 'pdf_too_large_for_inline_bytes', max: VIDEO_INLINE_CAP_BYTES, actual: size }
+    }
+    return { kind: 'ok', loadInlineBytes: true }
+  }
+  if (category === 'ebook') {
+    if (size > EBOOK_INLINE_CAP_BYTES) {
+      return { kind: 'ebook_too_large_for_inline_bytes', max: EBOOK_INLINE_CAP_BYTES, actual: size }
     }
     return { kind: 'ok', loadInlineBytes: true }
   }

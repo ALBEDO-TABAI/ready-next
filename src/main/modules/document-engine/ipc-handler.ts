@@ -9,10 +9,13 @@ import { homedir } from 'os'
 import { buildDocumentHtmlSnapshotExport } from '../../../shared/document-widget-html-export'
 import { documentCommitRegistry, type DocumentWidgetCommitEvent } from './document-commit-registry'
 import { validateWorkspaceRoot } from '../../../shared/workspace-validation'
+import { EBOOK_BINARY_EXTENSIONS } from '../../../shared/ebook'
 import { BINARY_EXTENSIONS } from './binary-extensions'
+import { importEpubAsMarkdown } from './ebook-importer'
 import {
   ATTACHMENT_HARD_CAP_BYTES,
   IMAGE_INLINE_CAP_BYTES,
+  type AttachmentCategory,
   VIDEO_INLINE_CAP_BYTES,
   base64DecodedLength,
   categoryFromSuggestedName,
@@ -79,6 +82,7 @@ export { BINARY_EXTENSIONS }
 
 const TEXT_WRITE_BLOCKED_EXTENSIONS = new Set([
   '.docx', '.doc', '.xlsx', '.xls', '.pptx', '.ppt', '.pdf',
+  ...EBOOK_BINARY_EXTENSIONS,
 ])
 
 function isBinaryFile(filePath: string): boolean {
@@ -305,16 +309,19 @@ function toLocalFileUrl(filePath: string): string {
     .split('/')
     .map((segment) => encodeURIComponent(segment))
     .join('/')
-  return `local-file:///${encoded}` // Three slashes for absolute paths
+  return normalized.startsWith('/')
+    ? `local-file://${encoded}`
+    : `local-file:///${encoded}`
 }
 
 /** Detect content type category from extension */
-function getFileCategory(filePath: string): 'image' | 'video' | 'audio' | 'pdf' | 'binary' {
+function getFileCategory(filePath: string): AttachmentCategory {
   const ext = extname(filePath).toLowerCase()
   if (['.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.ico', '.svg', '.tiff', '.tif', '.avif'].includes(ext)) return 'image'
   if (['.mp4', '.mov', '.avi', '.mkv', '.webm', '.flv', '.wmv', '.m4v'].includes(ext)) return 'video'
   if (['.mp3', '.wav', '.ogg', '.flac', '.aac', '.m4a', '.wma'].includes(ext)) return 'audio'
   if (ext === '.pdf') return 'pdf'
+  if (EBOOK_BINARY_EXTENSIONS.has(ext)) return 'ebook'
   return 'binary'
 }
 
@@ -661,7 +668,7 @@ export function setupDocumentIPC(useMock = false): void {
         }
         const data: {
           type: 'binary'
-          category: 'image' | 'video' | 'audio' | 'pdf' | 'binary'
+          category: AttachmentCategory
           localUrl: string
           extension: string
           bytes?: Uint8Array
@@ -681,7 +688,7 @@ export function setupDocumentIPC(useMock = false): void {
         } else if (decision.kind === 'large_image_ref') {
           data.kind = 'large_image_ref'
         } else if (decision.kind === 'ok' && decision.loadInlineBytes) {
-          // react-pdf reads raw bytes more reliably than fetching a custom protocol URL.
+          // PDF and ebook previews read raw bytes more reliably than fetching a custom protocol URL.
           data.bytes = new Uint8Array(await readFile(path))
         }
 
@@ -743,6 +750,42 @@ export function setupDocumentIPC(useMock = false): void {
       }
     }
     return saveDocumentWithDialog(payload)
+  })
+
+  ipcMain.handle('document:importEbookAsMarkdown', async (_, payload: { sourcePath?: string }) => {
+    try {
+      if (useMock) {
+        const sourcePath = payload?.sourcePath || 'book.epub'
+        return {
+          success: true,
+          outputDir: dirname(sourcePath),
+          indexPath: join(dirname(sourcePath), 'index.md'),
+          assetCount: 0,
+          warnings: [],
+          mock: true,
+        }
+      }
+      const sourcePath = typeof payload?.sourcePath === 'string' ? payload.sourcePath : ''
+      if (!sourcePath) {
+        return { success: false, error: '缺少电子书路径', errorCode: 'INVALID_INPUT' }
+      }
+      const result = await importEpubAsMarkdown(sourcePath)
+      if (result.success && result.indexPath && documentWriteIndexHook) {
+        try {
+          const content = await readFile(result.indexPath, 'utf-8')
+          documentWriteIndexHook(result.indexPath, content)
+        } catch (hookError) {
+          console.warn('[document-engine] ebook import index hook failed', hookError)
+        }
+      }
+      return result
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        errorCode: 'EBOOK_IMPORT_FAILED',
+      }
+    }
   })
 
   // List directory

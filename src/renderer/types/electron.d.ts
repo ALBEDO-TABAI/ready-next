@@ -1235,10 +1235,10 @@ interface DocumentReadTextData {
 /** Binary file data from document:read */
 interface DocumentReadBinaryData {
   type: 'binary'
-  category: 'image' | 'video' | 'audio' | 'pdf' | 'binary'
+  category: 'image' | 'video' | 'audio' | 'pdf' | 'ebook' | 'binary'
   localUrl: string
   extension: string
-  /** Raw bytes are currently attached for PDF previews to avoid custom-protocol fetch issues. */
+  /** Raw bytes are attached for PDF/ebook previews to avoid custom-protocol fetch issues. */
   bytes?: Uint8Array | ArrayBuffer | number[]
   /** File byte size from a pre-read stat (added by the D2 perf size guard). */
   size?: number
@@ -1338,6 +1338,17 @@ interface DocumentXlsxResponse {
   mock?: boolean
 }
 
+interface DocumentEbookImportResponse {
+  success: boolean
+  outputDir?: string
+  indexPath?: string
+  assetCount?: number
+  warnings?: string[]
+  error?: string
+  errorCode?: string
+  mock?: boolean
+}
+
 /** File stat structured data */
 interface DocumentStatData {
   size: number
@@ -1409,6 +1420,7 @@ interface ElectronDocumentAPI {
   listFiles: (dir: string) => Promise<DocumentListResponse>
   parseDocx: (path: string) => Promise<DocumentDocxResponse>
   parseXlsx: (path: string) => Promise<DocumentXlsxResponse>
+  importEbookAsMarkdown: (payload: { sourcePath: string }) => Promise<DocumentEbookImportResponse>
   // File management
   mkdir: (path: string) => Promise<DocumentOperationResponse>
   rename: (oldPath: string, newPath: string) => Promise<DocumentOperationResponse>

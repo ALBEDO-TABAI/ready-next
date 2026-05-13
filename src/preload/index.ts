@@ -387,6 +387,8 @@ const documentAPI = {
   listFiles: (dir: string) => ipcRenderer.invoke('document:list', dir),
   parseDocx: (path: string) => ipcRenderer.invoke('document:parseDocx', path),
   parseXlsx: (path: string) => ipcRenderer.invoke('document:parseXlsx', path),
+  importEbookAsMarkdown: (payload: { sourcePath: string }) =>
+    ipcRenderer.invoke('document:importEbookAsMarkdown', payload),
   // File management
   mkdir: (path: string) => ipcRenderer.invoke('document:mkdir', path),
   rename: (oldPath: string, newPath: string) => ipcRenderer.invoke('document:rename', { oldPath, newPath }),

@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 
 import {
   ATTACHMENT_HARD_CAP_BYTES,
+  EBOOK_INLINE_CAP_BYTES,
   IMAGE_INLINE_CAP_BYTES,
   VIDEO_INLINE_CAP_BYTES,
   base64DecodedLength,
@@ -19,6 +20,7 @@ describe('document attachment size guards', () => {
       assert.equal(ATTACHMENT_HARD_CAP_BYTES, 100 * MB)
       assert.equal(VIDEO_INLINE_CAP_BYTES, 40 * MB)
       assert.equal(IMAGE_INLINE_CAP_BYTES, 20 * MB)
+      assert.equal(EBOOK_INLINE_CAP_BYTES, 40 * MB)
     })
   })
 
@@ -48,6 +50,7 @@ describe('document attachment size guards', () => {
       assert.equal(categoryFromSuggestedName('clip.mp4'), 'video')
       assert.equal(categoryFromSuggestedName('photo.jpg'), 'image')
       assert.equal(categoryFromSuggestedName('handout.pdf'), 'pdf')
+      assert.equal(categoryFromSuggestedName('book.epub'), 'ebook')
       assert.equal(categoryFromSuggestedName('beep.mp3'), 'audio')
       assert.equal(categoryFromSuggestedName('scratch.bin'), 'binary')
     })
@@ -141,6 +144,23 @@ describe('document attachment size guards', () => {
       assert.equal(decision.kind, 'ok')
       if (decision.kind === 'ok') {
         assert.equal(decision.loadInlineBytes, true)
+      }
+    })
+
+    it('returns ok+loadInlineBytes:true for a small ebook (preview path)', () => {
+      const decision = decideReadAttachmentSize(2 * MB, 'ebook')
+      assert.equal(decision.kind, 'ok')
+      if (decision.kind === 'ok') {
+        assert.equal(decision.loadInlineBytes, true)
+      }
+    })
+
+    it('falls back to streaming for an ebook above the inline cap', () => {
+      const decision = decideReadAttachmentSize(50 * MB, 'ebook')
+      assert.equal(decision.kind, 'ebook_too_large_for_inline_bytes')
+      if (decision.kind === 'ebook_too_large_for_inline_bytes') {
+        assert.equal(decision.max, EBOOK_INLINE_CAP_BYTES)
+        assert.equal(decision.actual, 50 * MB)
       }
     })
 

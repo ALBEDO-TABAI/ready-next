@@ -4,6 +4,7 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 
 import NotePreview from '../renderer/components/document/NotePreview'
+import { EBOOK_MARKDOWN_MARKER } from '../shared/ebook'
 
 test('NotePreview renders markdown tables with a dedicated preview shell', () => {
   const markdown = [
@@ -57,4 +58,37 @@ test('NotePreview preserves ordered, unordered and nested markdown list structur
   assert.match(html, /<li class="task-list-item note-preview-markdown-li"><input type="checkbox" disabled=""/)
   assert.doesNotMatch(html, /<p class="note-preview-markdown-p">3\. 有序列表第一项<\/p>/)
   assert.doesNotMatch(html, /<p class="note-preview-markdown-p">- 无序列表项<\/p>/)
+})
+
+test('NotePreview only applies ebook reading class to imported ebook markdown', () => {
+  const plainHtml = renderToStaticMarkup(
+    React.createElement(NotePreview, {
+      content: '# Plain Note\n\nReadable text.',
+      notePath: '/tmp/plain.md',
+    }),
+  )
+  assert.doesNotMatch(plainHtml, /note-preview-shell--ebook/)
+
+  const ebookHtml = renderToStaticMarkup(
+    React.createElement(NotePreview, {
+      content: `${EBOOK_MARKDOWN_MARKER}\n\n# Book\n\nReadable text.`,
+      notePath: '/tmp/book.md',
+    }),
+  )
+  assert.match(ebookHtml, /note-preview-shell--ebook/)
+  assert.doesNotMatch(ebookHtml, /ready:ebook-import/)
+})
+
+test('ebook reading CSS covers body text and non-indented block elements', async () => {
+  const css = await import('node:fs/promises').then(({ readFile }) => (
+    readFile(new URL('../renderer/styles/index.css', import.meta.url), 'utf-8')
+  ))
+  assert.match(css, /\.note-preview-shell--ebook \.note-preview-markdown-p/)
+  assert.match(css, /\.note-preview-shell--ebook \.note-preview-markdown-ul/)
+  assert.match(css, /\.note-preview-shell--ebook \.note-preview-markdown-ol/)
+  assert.match(css, /\.note-preview-shell--ebook \.note-preview-markdown-quote/)
+  assert.match(css, /\.note-preview-shell--ebook \.note-preview-table-scroll/)
+  assert.match(css, /\.note-preview-shell--ebook \.note-preview-image/)
+  const paragraphRule = css.match(/\.note-preview-shell--ebook \.note-preview-markdown-p\s*\{[^}]+\}/)?.[0] || ''
+  assert.doesNotMatch(paragraphRule, /text-indent/)
 })

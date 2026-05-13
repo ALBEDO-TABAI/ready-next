@@ -9,6 +9,7 @@ import {
 import { browserTabActivationSequencer } from '../../modules/browser/browserTabActivationSequencer'
 import { useBrowserTabs } from '../../stores/useBrowserTabs'
 import { useMode } from '../../stores/useMode'
+import { EBOOK_MARKDOWN_MARKER } from '../../../shared/ebook'
 import {
   buildStructuredNotePreview,
   resolvePreviewReference,
@@ -257,8 +258,14 @@ export default function NotePreview({
   widgetStates,
 }: NotePreviewProps) {
   const [copiedChipId, setCopiedChipId] = useState<string | null>(null)
-  const preview = useMemo(() => buildStructuredNotePreview(content, notePath), [content, notePath])
-  const widgetRenderBudget = useMemo(() => getDocumentWidgetRenderBudget(content), [content])
+  const isEbookMarkdown = content.includes(EBOOK_MARKDOWN_MARKER)
+  const displayContent = useMemo(() => (
+    isEbookMarkdown
+      ? content.split(EBOOK_MARKDOWN_MARKER).join('').replace(/^\s*\n/, '')
+      : content
+  ), [content, isEbookMarkdown])
+  const preview = useMemo(() => buildStructuredNotePreview(displayContent, notePath), [displayContent, notePath])
+  const widgetRenderBudget = useMemo(() => getDocumentWidgetRenderBudget(displayContent), [displayContent])
   const embedsById = useMemo(
     () => new Map(preview.embeds.map((embed) => [embed.id, embed])),
     [preview.embeds],
@@ -404,7 +411,7 @@ export default function NotePreview({
   ), [notePath, openHref])
 
   return (
-    <div className="note-preview-shell">
+    <div className={isEbookMarkdown ? 'note-preview-shell note-preview-shell--ebook' : 'note-preview-shell'}>
       {preview.warnings.length > 0 ? (
         <div className="note-preview-warning">
           {preview.warnings.join('；')}
