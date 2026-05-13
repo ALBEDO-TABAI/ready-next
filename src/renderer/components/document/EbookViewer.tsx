@@ -435,7 +435,7 @@ export default function EbookViewer({ tab, fileUrl, currentExt }: EbookViewerPro
             </div>
           </div>
         )}
-        <div ref={containerRef} className="h-full min-h-0" />
+        <div ref={containerRef} className="ebook-viewer-layout h-full min-h-0" />
       </div>
     </div>
   )

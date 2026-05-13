@@ -1536,6 +1536,12 @@ body.resizing [data-browser-surface] {
   transition: none !important;
 }
 
+body.resizing .document-source-textarea {
+  white-space: pre !important;
+  overflow-wrap: normal !important;
+  word-break: normal !important;
+}
+
 /* Shared workbench shell surfaces */
 html:not([data-skin='liquid-glass']) .workbench-mode-root {
   --bg-content: var(--workbench-mode-bg);
@@ -3168,6 +3174,11 @@ html[data-skin='liquid-glass'] [class*="border-left"] {
   transition:
     width 180ms cubic-bezier(0.22, 1, 0.36, 1),
     min-width 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+[data-panel-width-transition='instant'] [data-liquid-shell='side-panel'],
+[data-panel-width-transition='instant'] [data-liquid-shell='chat-panel'] {
+  transition: none;
 }
 
 body.resizing [data-liquid-shell='side-panel'],

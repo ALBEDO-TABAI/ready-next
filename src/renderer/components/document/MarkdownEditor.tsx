@@ -512,7 +512,7 @@ export default function MarkdownEditor({
               onDragOver={handleEditorDragOver}
               onDrop={handleEditorDrop}
             >
-              <div style={{ padding: '12px 40px 24px', maxWidth: 800, margin: '0 auto' }}>
+              <div className="document-editor-layout" style={{ padding: '12px 40px 24px', maxWidth: 800, margin: '0 auto' }}>
                 {contentReady ? (
                   loadError ? (
                     renderLoadState()
@@ -523,14 +523,16 @@ export default function MarkdownEditor({
                       onChange={handleRawEditorChange}
                       spellCheck={false}
                       aria-label="Markdown source editor"
-                      className="w-full min-h-full resize-none border-0 bg-transparent outline-none ready-input-slot-inner"
+                      className="document-source-textarea w-full min-h-full resize-none border-0 bg-transparent outline-none ready-input-slot-inner"
                       style={{
                         minHeight: 'calc(100vh - 220px)',
                         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, Liberation Mono, monospace',
                         fontSize: 14,
                         lineHeight: 1.7,
                         color: 'var(--text-primary)',
-                        whiteSpace: 'pre',
+                        whiteSpace: 'pre-wrap',
+                        overflowWrap: 'anywhere',
+                        wordBreak: 'break-word',
                         tabSize: 2,
                       }}
                     />
@@ -549,7 +551,7 @@ export default function MarkdownEditor({
               style={{ background: 'var(--workbench-module-surface-bg)' }}
               onContextMenu={handleContextMenu}
             >
-              <div style={{ padding: '12px 40px 24px', maxWidth: 800, margin: '0 auto' }}>
+              <div className="document-preview-layout" style={{ padding: '12px 40px 24px', maxWidth: 800, margin: '0 auto' }}>
                 {loadError ? (
                   renderLoadState()
                 ) : (

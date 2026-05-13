@@ -13,6 +13,7 @@ import {
   WORKBENCH_CANVAS_OUTER_PADDING_X,
 } from '../../modules/workbench/chrome'
 import { useRafResizeDrag } from '../../modules/workbench/useRafResizeDrag'
+import { freezeVisibleDocumentLayoutWidths } from '../../modules/document/documentLayoutFreeze'
 import { getFileExtension } from '../../utils/path'
 import { isEbookExtension } from '../../../shared/ebook'
 
@@ -163,6 +164,7 @@ export default function DocumentMode({
   const scrollSnapshotsRef = useRef<Map<string, DocumentModeScrollSnapshot>>(new Map())
   const documentSplitRatioRef = useRef(documentSplitRatio)
   const liveDocumentSplitRatioRef = useRef(documentSplitRatio)
+  const restoreDocumentLayoutFreezeRef = useRef<(() => void) | null>(null)
   const [editorMode, setEditorMode] = useState<'edit' | 'preview'>('edit')
   const [previewFocusWidgetTitle, setPreviewFocusWidgetTitle] = useState<string | null>(null)
   const [hasActivated, setHasActivated] = useState(isActive)
@@ -309,6 +311,8 @@ export default function DocumentMode({
   const handleSplitResizeStateChange = useCallback((resizing: boolean) => {
     if (resizing) {
       captureVisibleDocumentScrollPositions()
+      restoreDocumentLayoutFreezeRef.current?.()
+      restoreDocumentLayoutFreezeRef.current = freezeVisibleDocumentLayoutWidths()
       liveDocumentSplitRatioRef.current = documentSplitRatioRef.current
       primarySplitPaneRef.current?.style.setProperty('will-change', 'flex-basis')
       return
@@ -318,7 +322,10 @@ export default function DocumentMode({
     const nextRatio = clampDocumentSplitRatio(liveDocumentSplitRatioRef.current)
     documentSplitRatioRef.current = nextRatio
     setDocumentSplitRatio(nextRatio)
-  }, [captureVisibleDocumentScrollPositions, setDocumentSplitRatio])
+    restoreDocumentLayoutFreezeRef.current?.()
+    restoreDocumentLayoutFreezeRef.current = null
+    requestAnimationFrame(restoreVisibleDocumentScrollPositions)
+  }, [captureVisibleDocumentScrollPositions, restoreVisibleDocumentScrollPositions, setDocumentSplitRatio])
 
   return (
     <div className="workbench-mode-root">

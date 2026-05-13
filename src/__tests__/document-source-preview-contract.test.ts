@@ -18,6 +18,20 @@ test('document edit mode uses raw text editing while preview mode keeps rendered
   assert.match(markdownEditor, /<NotePreview[\s\S]*content=\{tab\.content\}/)
 })
 
+test('document source editor soft-wraps long markdown lines inside narrow split panes', () => {
+  const markdownEditor = readWorkspaceFile('src/renderer/components/document/MarkdownEditor.tsx')
+  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+
+  assert.match(markdownEditor, /className="document-source-textarea /)
+  assert.match(markdownEditor, /whiteSpace:\s*'pre-wrap'/)
+  assert.match(markdownEditor, /overflowWrap:\s*'anywhere'/)
+  assert.match(markdownEditor, /wordBreak:\s*'break-word'/)
+  assert.doesNotMatch(markdownEditor, /whiteSpace:\s*'pre',/)
+  assert.match(styles, /body\.resizing \.document-source-textarea\s*\{[\s\S]*white-space:\s*pre !important;/)
+  assert.match(styles, /body\.resizing \.document-source-textarea\s*\{[\s\S]*overflow-wrap:\s*normal !important;/)
+  assert.match(styles, /body\.resizing \.document-source-textarea\s*\{[\s\S]*word-break:\s*normal !important;/)
+})
+
 test('document edit and preview modes share reading scroll position when remounted', () => {
   const markdownEditor = readWorkspaceFile('src/renderer/components/document/MarkdownEditor.tsx')
   const documentMode = readWorkspaceFile('src/renderer/pages/modes/DocumentMode.tsx')
@@ -53,8 +67,29 @@ test('document split resize applies live width without rerendering document pane
 
   assert.match(documentMode, /const primarySplitPaneRef = useRef<HTMLDivElement>\(null\)/)
   assert.match(documentMode, /const liveDocumentSplitRatioRef = useRef\(documentSplitRatio\)/)
+  assert.match(documentMode, /const restoreDocumentLayoutFreezeRef = useRef<\(\(\) => void\) \| null>\(null\)/)
+  assert.match(documentMode, /freezeVisibleDocumentLayoutWidths\(\)/)
   assert.match(documentMode, /primarySplitPaneRef\.current\.style\.flexBasis = `\$\{nextRatio\}%`/)
   assert.match(documentMode, /onResizeStateChange=\{handleSplitResizeStateChange\}/)
   assert.match(documentMode, /setDocumentSplitRatio\(nextRatio\)/)
   assert.doesNotMatch(documentMode, /setDocumentSplitRatio\(documentSplitRatio \+ deltaPercent\)/)
+})
+
+test('document resize freezes heavy content layout only while dragging', () => {
+  const markdownEditor = readWorkspaceFile('src/renderer/components/document/MarkdownEditor.tsx')
+  const ebookViewer = readWorkspaceFile('src/renderer/components/document/EbookViewer.tsx')
+  const layoutFreeze = readWorkspaceFile('src/renderer/modules/document/documentLayoutFreeze.ts')
+
+  assert.match(markdownEditor, /className="document-editor-layout"/)
+  assert.match(markdownEditor, /className="document-preview-layout"/)
+  assert.match(ebookViewer, /className="ebook-viewer-layout h-full min-h-0"/)
+
+  assert.match(layoutFreeze, /\.document-editor-layout/)
+  assert.match(layoutFreeze, /\.document-preview-layout/)
+  assert.match(layoutFreeze, /\.ebook-viewer-layout/)
+  assert.match(layoutFreeze, /getBoundingClientRect\(\)/)
+  assert.match(layoutFreeze, /element\.style\.width = frozenWidth/)
+  assert.match(layoutFreeze, /element\.style\.minWidth = frozenWidth/)
+  assert.match(layoutFreeze, /element\.style\.maxWidth = 'none'/)
+  assert.match(layoutFreeze, /return \(\) => \{/)
 })
