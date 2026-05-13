@@ -6,6 +6,8 @@ export const EBOOK_BINARY_EXTENSIONS: ReadonlySet<string> = new Set(
   EBOOK_EXTENSIONS.map((ext) => `.${ext}`),
 )
 
+export const EBOOK_MARKDOWN_MARKER = '<!-- ready:ebook-import -->'
+
 export function normalizeEbookExtension(input: string | null | undefined): string {
   return (input || '').trim().toLowerCase().replace(/^\./, '')
 }

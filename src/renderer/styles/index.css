@@ -852,6 +852,12 @@ html[data-theme='dark'] .ready-app-bg::after {
   color: var(--text-body);
 }
 
+.note-preview-shell--ebook {
+  max-width: 680px;
+  margin: 0 auto;
+  gap: 22px;
+}
+
 .note-preview-warning {
   border-radius: 10px;
   padding: 10px 12px;
@@ -1279,6 +1285,62 @@ html[data-theme='dark'] .ready-app-bg::after {
   border: none;
   border-top: 1px solid color-mix(in srgb, var(--border-default) 64%, transparent);
   margin: 12px 0 0;
+}
+
+.note-preview-shell--ebook .note-preview-body {
+  gap: 20px;
+}
+
+.note-preview-shell--ebook .note-preview-markdown-h1 {
+  font-size: 30px;
+  line-height: 1.35;
+  margin: 4px 0 24px;
+  text-align: center;
+}
+
+.note-preview-shell--ebook .note-preview-markdown-h2 {
+  font-size: 23px;
+  line-height: 1.45;
+  margin: 22px 0 14px;
+}
+
+.note-preview-shell--ebook .note-preview-markdown-h3 {
+  font-size: 18px;
+  line-height: 1.5;
+  margin: 18px 0 10px;
+}
+
+.note-preview-shell--ebook .note-preview-markdown-h4 {
+  font-size: 16px;
+  line-height: 1.5;
+  margin: 14px 0 8px;
+}
+
+.note-preview-shell--ebook .note-preview-markdown-p {
+  margin: 0 0 14px;
+  font-size: 16px;
+  line-height: 2;
+}
+
+.note-preview-shell--ebook .note-preview-markdown-ul,
+.note-preview-shell--ebook .note-preview-markdown-ol {
+  margin: 2px 0 16px;
+  font-size: 15px;
+  line-height: 1.9;
+}
+
+.note-preview-shell--ebook .note-preview-markdown-quote {
+  margin: 4px 0 18px;
+  font-size: 15px;
+  line-height: 1.9;
+}
+
+.note-preview-shell--ebook .note-preview-table-scroll {
+  margin: 6px 0 18px;
+}
+
+.note-preview-shell--ebook .note-preview-image {
+  margin: 8px auto 18px;
 }
 
 @media (max-width: 860px) {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import test from 'node:test'
 import JSZip from 'jszip'
@@ -10,9 +10,16 @@ import { BINARY_EXTENSIONS } from '../main/modules/document-engine/binary-extens
 import { decideFileForIndex } from '../main/modules/search-engine/adapters'
 import { importEpubAsMarkdown } from '../main/modules/document-engine/ebook-importer'
 import { toLocalFileUrl } from '../renderer/utils/dragDrop'
+import { EBOOK_MARKDOWN_MARKER } from '../shared/ebook'
 
-async function writeMinimalEpub(path: string, options?: { unsafe?: boolean; image?: boolean; footnote?: boolean }): Promise<void> {
+async function writeMinimalEpub(
+  path: string,
+  options?: { unsafe?: boolean; image?: boolean; footnote?: boolean; title?: string | null },
+): Promise<void> {
   const zip = new JSZip()
+  const titleMarkup = options?.title === null
+    ? ''
+    : `<dc:title>${options?.title ?? 'Minimal Book'}</dc:title>`
   zip.file('mimetype', 'application/epub+zip')
   zip.file('META-INF/container.xml', `<?xml version="1.0"?>
 <container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
@@ -23,7 +30,7 @@ async function writeMinimalEpub(path: string, options?: { unsafe?: boolean; imag
   zip.file('OEBPS/content.opf', `<?xml version="1.0" encoding="UTF-8"?>
 <package xmlns="http://www.idpf.org/2007/opf" version="3.0">
   <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
-    <dc:title>Minimal Book</dc:title>
+    ${titleMarkup}
   </metadata>
   <manifest>
     <item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/>
@@ -77,7 +84,7 @@ test('renderer CSP allows ebook preview resource loading paths', async () => {
   assert.match(csp, /img-src[^;]*blob:/)
 })
 
-test('importEpubAsMarkdown writes index.md and assets without overwriting existing import', async () => {
+test('importEpubAsMarkdown writes a book-named markdown file and assets without overwriting existing import', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'ready-ebook-import-'))
   try {
     const epubPath = join(dir, 'Minimal Book.epub')
@@ -87,16 +94,55 @@ test('importEpubAsMarkdown writes index.md and assets without overwriting existi
     assert.equal(first.success, true, first.error)
     assert.ok(first.outputDir)
     assert.ok(first.indexPath)
+    assert.equal(basename(first.indexPath!), 'Minimal Book.md')
+    assert.equal(existsSync(join(first.outputDir!, 'index.md')), false)
     assert.equal(first.assetCount, 1)
     assert.equal(existsSync(join(first.outputDir!, 'assets', 'cover.png')), true)
     const markdown = await readFile(first.indexPath!, 'utf-8')
+    assert.match(markdown, new RegExp(EBOOK_MARKDOWN_MARKER.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
     assert.match(markdown, /^# Minimal Book/m)
+    assert.doesNotMatch(markdown, /^# Hello/m)
+    assert.match(markdown, /^## Hello/m)
     assert.match(markdown, /Readable text\./)
     assert.match(markdown, /assets\/cover\.png/)
+    assert.doesNotMatch(markdown, /\n---\n/)
 
     const second = await importEpubAsMarkdown(epubPath)
     assert.equal(second.success, true, second.error)
     assert.notEqual(second.outputDir, first.outputDir)
+    assert.equal(basename(second.indexPath!), 'Minimal Book.md')
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('importEpubAsMarkdown falls back to source name when EPUB title is missing', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ready-ebook-title-fallback-'))
+  try {
+    const epubPath = join(dir, 'Source Book.epub')
+    await writeMinimalEpub(epubPath, { title: null })
+    const result = await importEpubAsMarkdown(epubPath)
+    assert.equal(result.success, true, result.error)
+    assert.equal(basename(result.indexPath!), 'Source Book.md')
+    const markdown = await readFile(result.indexPath!, 'utf-8')
+    assert.match(markdown, /^# Source Book/m)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('importEpubAsMarkdown sanitizes unsafe and long markdown file names', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ready-ebook-title-sanitize-'))
+  try {
+    const unsafeTitle = `${'A'.repeat(140)}/Bad:Name*?`
+    const epubPath = join(dir, 'Unsafe Name.epub')
+    await writeMinimalEpub(epubPath, { title: unsafeTitle })
+    const result = await importEpubAsMarkdown(epubPath)
+    assert.equal(result.success, true, result.error)
+    const fileName = basename(result.indexPath!)
+    assert.equal(fileName.endsWith('.md'), true)
+    assert.equal(fileName.length <= 123, true)
+    assert.doesNotMatch(fileName, /[<>:"/\\|?*\u0000-\u001F]/)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

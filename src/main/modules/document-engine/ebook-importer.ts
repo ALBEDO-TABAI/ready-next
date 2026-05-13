@@ -4,6 +4,7 @@ import { basename, dirname, extname, join, posix } from 'path'
 import { XMLParser } from 'fast-xml-parser'
 import JSZip from 'jszip'
 import TurndownService from 'turndown'
+import { EBOOK_MARKDOWN_MARKER } from '../../../shared/ebook'
 
 export interface EbookMarkdownImportResult {
   success: boolean
@@ -42,6 +43,7 @@ const IMAGE_MEDIA_TYPES = new Set([
   'image/svg+xml',
   'image/bmp',
 ])
+const MAX_MARKDOWN_FILENAME_STEM_LENGTH = 120
 
 function asArray<T>(value: T | T[] | undefined | null): T[] {
   if (value == null) return []
@@ -85,6 +87,28 @@ function uniqueOutputDir(sourcePath: string): string {
   return candidate
 }
 
+function normalizeTitleText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim()
+}
+
+function safeMarkdownFileName(title: string): string {
+  const stem = normalizeTitleText(title)
+    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/[. ]+$/g, '')
+    .trim()
+    .slice(0, MAX_MARKDOWN_FILENAME_STEM_LENGTH)
+    .replace(/[. ]+$/g, '')
+    .trim() || 'ebook'
+  return `${stem}.md`
+}
+
+function resolveBookTitle(pkg: ParsedPackage, sourcePath: string): string {
+  return normalizeTitleText(pkg.title)
+    || normalizeTitleText(basename(sourcePath, extname(sourcePath)))
+    || 'Untitled'
+}
+
 function extractText(value: unknown): string {
   if (typeof value === 'string') return value.trim()
   if (Array.isArray(value)) return extractText(value[0])
@@ -107,7 +131,7 @@ function parsePackage(opfXml: string, opfPath: string): ParsedPackage {
   const manifestNode = (pkg.manifest || {}) as Record<string, unknown>
   const spineNode = (pkg.spine || {}) as Record<string, unknown>
 
-  const title = extractText(metadata.title) || basename(opfPath, extname(opfPath)) || 'Untitled'
+  const title = extractText(metadata.title)
   const manifest = new Map<string, ManifestItem>()
   for (const item of asArray(manifestNode.item as Record<string, unknown> | Record<string, unknown>[] | undefined)) {
     const id = typeof item.id === 'string' ? item.id : ''
@@ -233,6 +257,21 @@ function normalizeMarkdownFootnotes(markdown: string): string {
     .replace(/(\[\^[^\]\n]+\]:)\s*\n+\s*/g, '$1 ')
 }
 
+function demoteMarkdownHeadings(markdown: string): string {
+  let inFence = false
+  return markdown.split('\n').map((line) => {
+    if (/^\s*(```|~~~)/.test(line)) {
+      inFence = !inFence
+      return line
+    }
+    if (inFence) return line
+    return line.replace(/^(#{1,6})(\s+)/, (match, hashes: string, space: string) => {
+      if (hashes.length >= 6) return match
+      return `${hashes}#${space}`
+    })
+  }).join('\n')
+}
+
 async function rewriteAssets(
   zip: JSZip,
   html: string,
@@ -287,6 +326,7 @@ export async function importEpubAsMarkdown(sourcePath: string): Promise<EbookMar
     if (!opfFile) throw new Error('EPUB OPF 文件不存在')
 
     const pkg = parsePackage(await opfFile.async('text'), opfPath)
+    const bookTitle = resolveBookTitle(pkg, sourcePath)
     const outputDir = uniqueOutputDir(sourcePath)
     const assetsDir = join(outputDir, 'assets')
     await mkdir(assetsDir, { recursive: true })
@@ -313,7 +353,7 @@ export async function importEpubAsMarkdown(sourcePath: string): Promise<EbookMar
       const rawHtml = stripUnsafeHtml(normalizeFootnotes(await chapterFile.async('text')))
       const rewritten = await rewriteAssets(zip, rawHtml, chapterBase, assetsDir, usedAssetNames, warnings)
       assetCount += rewritten.assetCount
-      const markdown = normalizeMarkdownFootnotes(turndown.turndown(rewritten.html))
+      const markdown = demoteMarkdownHeadings(normalizeMarkdownFootnotes(turndown.turndown(rewritten.html)))
         .replace(/\n{3,}/g, '\n\n')
         .trim()
       if (markdown) sections.push(markdown)
@@ -326,8 +366,8 @@ export async function importEpubAsMarkdown(sourcePath: string): Promise<EbookMar
     const warningBlock = warnings.length > 0
       ? `\n\n<!-- 导入提示：${warnings.join('；')} -->`
       : ''
-    const markdown = `# ${pkg.title}\n\n${sections.join('\n\n---\n\n')}${warningBlock}\n`
-    const indexPath = join(outputDir, 'index.md')
+    const markdown = `${EBOOK_MARKDOWN_MARKER}\n\n# ${bookTitle}\n\n${sections.join('\n\n')}${warningBlock}\n`
+    const indexPath = join(outputDir, safeMarkdownFileName(bookTitle))
     await writeFile(indexPath, markdown, 'utf-8')
 
     return {
