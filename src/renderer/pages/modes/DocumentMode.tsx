@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { FileText, Loader2 } from 'lucide-react'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { useDocTabs, type DocTab } from '../../stores/useDocTabs'
@@ -21,6 +21,49 @@ const UniverSheet = lazy(() => import('../../components/document/UniverSheet'))
 const getFileExt = (path: string | null): string => {
   if (!path) return ''
   return getFileExtension(path)
+}
+
+type DocumentModeScrollSnapshot = {
+  top: number
+  ratio: number
+  maxScroll: number
+}
+
+function captureElementScroll(element: HTMLElement): DocumentModeScrollSnapshot {
+  const maxScroll = Math.max(0, element.scrollHeight - element.clientHeight)
+  const top = Math.max(0, Math.min(element.scrollTop, maxScroll))
+  return {
+    top,
+    ratio: maxScroll > 0 ? top / maxScroll : 0,
+    maxScroll,
+  }
+}
+
+function restoreElementScroll(element: HTMLElement, snapshot: DocumentModeScrollSnapshot) {
+  const restore = () => {
+    const maxScroll = Math.max(0, element.scrollHeight - element.clientHeight)
+    const nextTop = snapshot.maxScroll === maxScroll ? snapshot.top : snapshot.ratio * maxScroll
+    element.scrollTop = Math.max(0, Math.min(Math.round(nextTop), maxScroll))
+  }
+  restore()
+  requestAnimationFrame(restore)
+  requestAnimationFrame(() => requestAnimationFrame(restore))
+}
+
+function findScrollCandidates(scope: HTMLElement): HTMLElement[] {
+  return [
+    scope.querySelector('textarea'),
+    scope.querySelector('.document-preview-surface'),
+    scope.querySelector('.document-editor-surface'),
+    scope,
+  ].filter((element): element is HTMLElement => element instanceof HTMLElement)
+}
+
+function findCurrentScrollElement(scope: HTMLElement): HTMLElement | null {
+  const candidates = findScrollCandidates(scope)
+  return candidates.find((element) => element.scrollTop > 0)
+    || candidates.find((element) => element.scrollHeight > element.clientHeight)
+    || null
 }
 
 const getFileTypeColor = (path: string | null): string => {
@@ -96,6 +139,7 @@ export default function DocumentMode({
   } = useDocTabs()
 
   const splitContainerRef = useRef<HTMLDivElement>(null)
+  const scrollSnapshotsRef = useRef<Map<string, DocumentModeScrollSnapshot>>(new Map())
   const [editorMode, setEditorMode] = useState<'edit' | 'preview'>('edit')
   const [previewFocusWidgetTitle, setPreviewFocusWidgetTitle] = useState<string | null>(null)
   const [hasActivated, setHasActivated] = useState(isActive)
@@ -140,14 +184,45 @@ export default function DocumentMode({
   const splitTab = splitTabId ? tabs.find(t => t.id === splitTabId) : null
   const activeTabPathLabel = activeTab?.path || activeTab?.title || '未打开文档'
 
+  const captureVisibleDocumentScrollPositions = useCallback(() => {
+    document.querySelectorAll<HTMLElement>('[data-ready-document-scroll-key]').forEach((scope) => {
+      const key = scope.dataset.readyDocumentScrollKey
+      if (!key) return
+      const element = findCurrentScrollElement(scope)
+      if (!element) return
+      scrollSnapshotsRef.current.set(key, captureElementScroll(element))
+    })
+  }, [])
+
+  const restoreVisibleDocumentScrollPositions = useCallback(() => {
+    document.querySelectorAll<HTMLElement>('[data-ready-document-scroll-key]').forEach((scope) => {
+      const key = scope.dataset.readyDocumentScrollKey
+      if (!key) return
+      const snapshot = scrollSnapshotsRef.current.get(key)
+      if (!snapshot) return
+      findScrollCandidates(scope).forEach((element) => restoreElementScroll(element, snapshot))
+    })
+  }, [])
+
+  useLayoutEffect(() => {
+    restoreVisibleDocumentScrollPositions()
+  }, [activeTabId, editorMode, restoreVisibleDocumentScrollPositions, splitTabId])
+
+  const handleEditorModeChange = useCallback((nextMode: 'edit' | 'preview') => {
+    if (nextMode === editorMode) return
+    captureVisibleDocumentScrollPositions()
+    setEditorMode(nextMode)
+  }, [captureVisibleDocumentScrollPositions, editorMode])
+
   // Tab click handler
   const handleTabClick = useCallback((id: string, e: React.MouseEvent) => {
+    captureVisibleDocumentScrollPositions()
     if (e.shiftKey && id !== activeTabId) {
       setSplitTab(id)
     } else {
       setActiveTab(id)
     }
-  }, [activeTabId, setActiveTab, setSplitTab])
+  }, [activeTabId, captureVisibleDocumentScrollPositions, setActiveTab, setSplitTab])
 
   // Drag & drop reorder
   const dragIndexRef = useRef<number | null>(null)
@@ -233,7 +308,7 @@ export default function DocumentMode({
             rightActions={
               <DraggableModeSwitch
                 mode={editorMode}
-                onChange={setEditorMode}
+                onChange={handleEditorModeChange}
               />
             }
           />

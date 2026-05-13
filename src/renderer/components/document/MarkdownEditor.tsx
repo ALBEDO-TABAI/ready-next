@@ -203,6 +203,7 @@ export default function MarkdownEditor({
   const [contextSelection, setContextSelection] = useState<string>('')
 
   const currentExt = useMemo(() => getFileExt(tab.path), [tab.path])
+  const documentScrollKey = useMemo(() => tab.path || tab.id, [tab.id, tab.path])
   const canSave = !!tab.path
   const activeRevealTarget = useMemo(() => {
     if (!tab.path || !pendingReveal || pendingReveal.path !== tab.path) return null
@@ -498,7 +499,7 @@ export default function MarkdownEditor({
   }
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full" data-ready-document-scroll-key={documentScrollKey}>
       {/* ── Content area ──────────────────────────────────── */}
       <div className="flex-1 overflow-hidden flex" style={{ background: 'var(--workbench-module-surface-bg)' }}>
         <>

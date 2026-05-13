@@ -17,3 +17,18 @@ test('document edit mode uses raw text editing while preview mode keeps rendered
   assert.match(markdownEditor, /viewMode === 'preview'/)
   assert.match(markdownEditor, /<NotePreview[\s\S]*content=\{tab\.content\}/)
 })
+
+test('document edit and preview modes share reading scroll position when remounted', () => {
+  const markdownEditor = readWorkspaceFile('src/renderer/components/document/MarkdownEditor.tsx')
+  const documentMode = readWorkspaceFile('src/renderer/pages/modes/DocumentMode.tsx')
+
+  assert.match(markdownEditor, /const documentScrollKey = useMemo\(\(\) => tab\.path \|\| tab\.id, \[tab\.id, tab\.path\]\)/)
+  assert.match(markdownEditor, /data-ready-document-scroll-key=\{documentScrollKey\}/)
+
+  assert.match(documentMode, /captureVisibleDocumentScrollPositions\(\)/)
+  assert.match(documentMode, /restoreVisibleDocumentScrollPositions\(\)/)
+  assert.match(documentMode, /useLayoutEffect\(\(\) => \{/)
+  assert.match(documentMode, /onChange=\{handleEditorModeChange\}/)
+  assert.match(documentMode, /\[data-ready-document-scroll-key\]/)
+  assert.match(documentMode, /findCurrentScrollElement\(scope\)/)
+})
