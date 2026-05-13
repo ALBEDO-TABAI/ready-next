@@ -66,6 +66,10 @@ function findCurrentScrollElement(scope: HTMLElement): HTMLElement | null {
     || null
 }
 
+function clampDocumentSplitRatio(ratio: number): number {
+  return Math.max(20, Math.min(80, ratio))
+}
+
 const getFileTypeColor = (path: string | null): string => {
   const ext = getFileExt(path)
   if (['md', 'txt', 'docx'].includes(ext)) return '#E97A2B' // orange - docs
@@ -77,9 +81,25 @@ const getFileTypeColor = (path: string | null): string => {
 }
 
 // --- SplitResizeHandle ---
-function SplitResizeHandle({ onResize }: { onResize: (delta: number) => void }) {
-  const handleMouseDown = useRafResizeDrag({ onDelta: onResize })
-  return <div className="resize-handle" onMouseDown={handleMouseDown} />
+function SplitResizeHandle({
+  onResize,
+  onResizeStateChange,
+}: {
+  onResize: (delta: number) => void
+  onResizeStateChange?: (resizing: boolean) => void
+}) {
+  const handleMouseDown = useRafResizeDrag({ onDelta: onResize, onResizeStateChange })
+  return (
+    <div
+      className="document-split-resize-handle"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="调整文档分栏宽度"
+      onMouseDown={handleMouseDown}
+    >
+      <span className="document-split-resize-handle__grip" aria-hidden="true" />
+    </div>
+  )
 }
 
 // --- Tab content router ---
@@ -139,7 +159,10 @@ export default function DocumentMode({
   } = useDocTabs()
 
   const splitContainerRef = useRef<HTMLDivElement>(null)
+  const primarySplitPaneRef = useRef<HTMLDivElement>(null)
   const scrollSnapshotsRef = useRef<Map<string, DocumentModeScrollSnapshot>>(new Map())
+  const documentSplitRatioRef = useRef(documentSplitRatio)
+  const liveDocumentSplitRatioRef = useRef(documentSplitRatio)
   const [editorMode, setEditorMode] = useState<'edit' | 'preview'>('edit')
   const [previewFocusWidgetTitle, setPreviewFocusWidgetTitle] = useState<string | null>(null)
   const [hasActivated, setHasActivated] = useState(isActive)
@@ -149,6 +172,15 @@ export default function DocumentMode({
       setHasActivated(true)
     }
   }, [isActive])
+
+  useEffect(() => {
+    const nextRatio = clampDocumentSplitRatio(documentSplitRatio)
+    documentSplitRatioRef.current = nextRatio
+    liveDocumentSplitRatioRef.current = nextRatio
+    if (primarySplitPaneRef.current) {
+      primarySplitPaneRef.current.style.flexBasis = `${nextRatio}%`
+    }
+  }, [documentSplitRatio])
 
   // Open the file selected in SidePanel
   useEffect(() => {
@@ -267,8 +299,26 @@ export default function DocumentMode({
     const containerWidth = splitContainerRef.current.offsetWidth
     if (containerWidth <= 0) return
     const deltaPercent = (delta / containerWidth) * 100
-    setDocumentSplitRatio(documentSplitRatio + deltaPercent)
-  }, [documentSplitRatio, setDocumentSplitRatio])
+    const nextRatio = clampDocumentSplitRatio(liveDocumentSplitRatioRef.current + deltaPercent)
+    liveDocumentSplitRatioRef.current = nextRatio
+    if (primarySplitPaneRef.current) {
+      primarySplitPaneRef.current.style.flexBasis = `${nextRatio}%`
+    }
+  }, [])
+
+  const handleSplitResizeStateChange = useCallback((resizing: boolean) => {
+    if (resizing) {
+      captureVisibleDocumentScrollPositions()
+      liveDocumentSplitRatioRef.current = documentSplitRatioRef.current
+      primarySplitPaneRef.current?.style.setProperty('will-change', 'flex-basis')
+      return
+    }
+
+    primarySplitPaneRef.current?.style.removeProperty('will-change')
+    const nextRatio = clampDocumentSplitRatio(liveDocumentSplitRatioRef.current)
+    documentSplitRatioRef.current = nextRatio
+    setDocumentSplitRatio(nextRatio)
+  }, [captureVisibleDocumentScrollPositions, setDocumentSplitRatio])
 
   return (
     <div className="workbench-mode-root">
@@ -341,8 +391,9 @@ export default function DocumentMode({
 
           {/* Content Area */}
           {splitTab && activeTab ? (
-            <div className="flex-1 flex min-w-0 overflow-hidden" ref={splitContainerRef} style={{ gap: 10 }}>
+            <div className="flex-1 flex min-w-0 overflow-hidden" ref={splitContainerRef} style={{ gap: 0 }}>
               <div
+                ref={primarySplitPaneRef}
                 className="flex flex-col min-w-0 overflow-hidden"
                 style={{ flexBasis: `${documentSplitRatio}%`, flexShrink: 0, flexGrow: 0 }}
               >
@@ -353,7 +404,10 @@ export default function DocumentMode({
                   previewFocusWidgetTitle={previewFocusWidgetTitle}
                 />
               </div>
-              <SplitResizeHandle onResize={handleSplitResize} />
+              <SplitResizeHandle
+                onResize={handleSplitResize}
+                onResizeStateChange={handleSplitResizeStateChange}
+              />
               <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
                 <DocumentEditor
                   key={splitTab.id}

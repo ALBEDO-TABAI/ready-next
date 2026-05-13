@@ -32,3 +32,29 @@ test('document edit and preview modes share reading scroll position when remount
   assert.match(documentMode, /\[data-ready-document-scroll-key\]/)
   assert.match(documentMode, /findCurrentScrollElement\(scope\)/)
 })
+
+test('document split divider keeps a transparent drag target with a hairline visual', () => {
+  const documentMode = readWorkspaceFile('src/renderer/pages/modes/DocumentMode.tsx')
+  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+
+  assert.match(documentMode, /className="document-split-resize-handle"/)
+  assert.match(documentMode, /className="document-split-resize-handle__grip"/)
+  assert.match(documentMode, /style=\{\{ gap: 0 \}\}/)
+
+  assert.match(styles, /\.document-split-resize-handle\s*\{[\s\S]*width:\s*12px;/)
+  assert.match(styles, /\.document-split-resize-handle\s*\{[\s\S]*margin:\s*0 -6px;/)
+  assert.match(styles, /\.document-split-resize-handle\s*\{[\s\S]*background:\s*transparent;/)
+  assert.match(styles, /\.document-split-resize-handle::before\s*\{[\s\S]*width:\s*1px;/)
+  assert.match(styles, /\.document-split-resize-handle__grip\s*\{[\s\S]*opacity:\s*0;/)
+})
+
+test('document split resize applies live width without rerendering document panes on every drag frame', () => {
+  const documentMode = readWorkspaceFile('src/renderer/pages/modes/DocumentMode.tsx')
+
+  assert.match(documentMode, /const primarySplitPaneRef = useRef<HTMLDivElement>\(null\)/)
+  assert.match(documentMode, /const liveDocumentSplitRatioRef = useRef\(documentSplitRatio\)/)
+  assert.match(documentMode, /primarySplitPaneRef\.current\.style\.flexBasis = `\$\{nextRatio\}%`/)
+  assert.match(documentMode, /onResizeStateChange=\{handleSplitResizeStateChange\}/)
+  assert.match(documentMode, /setDocumentSplitRatio\(nextRatio\)/)
+  assert.doesNotMatch(documentMode, /setDocumentSplitRatio\(documentSplitRatio \+ deltaPercent\)/)
+})

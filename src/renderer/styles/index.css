@@ -1476,6 +1476,54 @@ html[data-theme='dark'] .ready-app-bg::after {
   opacity: 0.94;
 }
 
+.document-split-resize-handle {
+  width: 12px;
+  flex: 0 0 12px;
+  margin: 0 -6px;
+  cursor: col-resize;
+  position: relative;
+  align-self: stretch;
+  z-index: 12;
+  background: transparent;
+}
+
+.document-split-resize-handle::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: color-mix(in srgb, var(--text-gray) 22%, transparent);
+  opacity: 0.62;
+  transition: background 0.15s, opacity 0.15s;
+}
+
+.document-split-resize-handle__grip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 2px;
+  height: 18px;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  background-image: radial-gradient(circle, color-mix(in srgb, var(--text-gray) 34%, transparent) 0 1px, transparent 1.2px);
+  background-repeat: repeat-y;
+  background-position: center;
+  background-size: 2px 7px;
+  transition: opacity 0.15s;
+}
+
+.document-split-resize-handle:hover::before {
+  background: color-mix(in srgb, var(--text-gray) 30%, transparent);
+  opacity: 0.78;
+}
+
+.document-split-resize-handle:hover .document-split-resize-handle__grip {
+  opacity: 0.46;
+}
+
 /* Disable layout-related transitions during panel resize drag.
    Scoped to panel/canvas/glass shells + BrowserView hosts so unrelated
    hover/tooltip transitions elsewhere are not collateral damage. */
