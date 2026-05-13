@@ -44,6 +44,9 @@ export default defineConfig({
         '@shared': resolve(__dirname, 'src/shared')
       }
     },
+    optimizeDeps: {
+      exclude: ['foliate-js'],
+    },
     plugins: [tailwindcss(), react()]
   }
 })

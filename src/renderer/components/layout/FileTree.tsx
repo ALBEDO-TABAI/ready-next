@@ -24,6 +24,7 @@ import {
   type BrowserTabDropTarget,
 } from './fileTreeBrowserTabDrop'
 import { getActiveBrowserTabDragPayload } from '../../modules/browser/browserTabDragSession'
+import { EBOOK_EXTENSIONS, isEbookExtension } from '../../../shared/ebook'
 import './filesPanelFloatingMenu.css'
 
 const ALLOWED_EXTENSIONS = new Set([
@@ -37,11 +38,12 @@ const ALLOWED_EXTENSIONS = new Set([
   'mp4', 'mov', 'mkv', 'avi', 'webm', 'flv', 'wmv', 'm4v',
   'mp3', 'wav', 'flac', 'aac', 'ogg', 'm4a', 'opus',
   'xlsx', 'xls', 'csv', 'tsv',
+  ...EBOOK_EXTENSIONS,
   'ini', 'cfg', 'conf', 'properties', 'plist',
   'log', 'lock', 'tldr',
 ])
 
-const DOCUMENT_EXTS = new Set(['md', 'txt', 'pdf', 'doc', 'docx', 'rtf', 'odt', 'html', 'htm'])
+const DOCUMENT_EXTS = new Set(['md', 'txt', 'pdf', 'doc', 'docx', 'rtf', 'odt', 'html', 'htm', ...EBOOK_EXTENSIONS])
 const CODE_EXTS = new Set(['ts', 'tsx', 'js', 'jsx', 'json', 'css', 'scss', 'less', 'py', 'go', 'rs', 'java', 'kt', 'swift', 'c', 'cpp', 'h', 'yaml', 'yml', 'toml', 'xml', 'sql', 'sh', 'bash', 'zsh', 'vue', 'svelte', 'astro', 'ini', 'cfg', 'conf', 'properties', 'log'])
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'ico', 'tiff', 'svg'])
 const VIDEO_EXTS = new Set(['mp4', 'mov', 'mkv', 'avi', 'webm', 'flv', 'wmv', 'm4v'])
@@ -122,6 +124,7 @@ function fileIcon(item: FileItem, expanded = false) {
   if (kind === 'video') return <Film className="w-[14px] h-[14px]" style={{ color: 'var(--color-orange)' }} />
   if (kind === 'audio') return <Music2 className="w-[14px] h-[14px]" style={{ color: 'var(--color-blue)' }} />
   if (kind === 'spreadsheet') return <FileSpreadsheet className="w-[14px] h-[14px]" style={{ color: 'var(--color-blue)' }} />
+  if (isEbookExtension(getFileExt(item))) return <BookOpen className="w-[14px] h-[14px]" style={{ color: 'var(--color-blue)' }} />
   if (kind === 'design') return <Pen className="w-[14px] h-[14px]" style={{ color: 'var(--color-blue)' }} />
   return <FileText className="w-[14px] h-[14px]" style={{ color: 'var(--color-blue)' }} />
 }
@@ -792,6 +795,7 @@ export default function FileTree({
       png: 'document', jpg: 'document', jpeg: 'document', webp: 'document', svg: 'document', gif: 'document',
       bmp: 'document', ico: 'document',
       pdf: 'document',
+      epub: 'document', mobi: 'document', azw: 'document', azw3: 'document', fb2: 'document', cbz: 'document',
       tldr: 'document'
     }
     if (modeMap[ext]) {

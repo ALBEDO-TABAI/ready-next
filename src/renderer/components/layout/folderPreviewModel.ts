@@ -1,3 +1,5 @@
+import { EBOOK_EXTENSIONS } from '../../../shared/ebook'
+
 export interface FolderPreviewItemLike {
   name: string
   path: string
@@ -22,7 +24,7 @@ const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'bmp', '
 const VIDEO_EXTS = new Set(['mp4', 'mov', 'mkv', 'avi', 'webm', 'flv', 'wmv', 'm4v'])
 const AUDIO_EXTS = new Set(['mp3', 'wav', 'flac', 'aac', 'ogg', 'm4a', 'opus'])
 const SPREADSHEET_EXTS = new Set(['xlsx', 'xls', 'csv', 'tsv'])
-const DOCUMENT_EXTS = new Set(['md', 'txt', 'pdf', 'doc', 'docx', 'rtf', 'odt', 'html', 'htm'])
+const DOCUMENT_EXTS = new Set(['md', 'txt', 'pdf', 'doc', 'docx', 'rtf', 'odt', 'html', 'htm', ...EBOOK_EXTENSIONS])
 const CODE_EXTS = new Set([
   'ts', 'tsx', 'js', 'jsx', 'json', 'css', 'scss', 'less',
   'py', 'go', 'rs', 'java', 'kt', 'swift', 'c', 'cpp', 'h',

@@ -14,6 +14,8 @@
 // game assets + crash dumps. Background: a 25 GB indexing balloon was caused
 // by 9.7K .heic photos and ~337K extension-less files that this set used to
 // allow through.
+import { EBOOK_BINARY_EXTENSIONS } from '../../../shared/ebook'
+
 export const BINARY_EXTENSIONS: ReadonlySet<string> = new Set<string>([
   // Apple / iOS specific
   '.car', '.icns',
@@ -30,6 +32,7 @@ export const BINARY_EXTENSIONS: ReadonlySet<string> = new Set<string>([
   '.appimage', '.deb', '.dmg', '.iso', '.msi', '.pkg', '.rpm',
   // Documents (binary, large)
   '.doc', '.docx', '.pdf', '.ppt', '.pptx', '.xls', '.xlsx',
+  ...EBOOK_BINARY_EXTENSIONS,
   // Fonts
   '.eot', '.otf', '.ttf', '.woff', '.woff2',
   // Game assets

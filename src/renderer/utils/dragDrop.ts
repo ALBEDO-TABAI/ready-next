@@ -1,3 +1,5 @@
+import { EBOOK_EXTENSIONS } from '../../shared/ebook'
+
 export interface DroppedFile {
   path: string
   name: string
@@ -17,7 +19,7 @@ export type DroppedFileKind =
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'svg', 'bmp', 'ico', 'tiff'])
 const VIDEO_EXTS = new Set(['mp4', 'mov', 'avi', 'mkv', 'webm', 'flv', 'wmv', 'm4v'])
 const AUDIO_EXTS = new Set(['mp3', 'wav', 'aac', 'ogg', 'flac', 'm4a', 'wma', 'opus'])
-const DOCUMENT_EXTS = new Set(['md', 'txt', 'pdf', 'doc', 'docx', 'rtf', 'odt', 'html', 'htm'])
+const DOCUMENT_EXTS = new Set(['md', 'txt', 'pdf', 'doc', 'docx', 'rtf', 'odt', 'html', 'htm', ...EBOOK_EXTENSIONS])
 const SPREADSHEET_EXTS = new Set(['xlsx', 'xls', 'csv', 'tsv'])
 
 function normalizeExt(input: string | undefined | null): string {
@@ -119,7 +121,10 @@ export function getDroppedFileKind(file: Pick<DroppedFile, 'ext'>): DroppedFileK
 export function toLocalFileUrl(filePath: string): string {
   // Normalize Windows backslashes to forward slashes
   const normalized = filePath.replace(/\\/g, '/')
-  return `local-file:///${encodeURI(normalized).replace(/#/g, '%23')}`
+  const encoded = encodeURI(normalized).replace(/#/g, '%23')
+  return normalized.startsWith('/')
+    ? `local-file://${encoded}`
+    : `local-file:///${encoded}`
 }
 
 export function toFileUrl(filePath: string): string {

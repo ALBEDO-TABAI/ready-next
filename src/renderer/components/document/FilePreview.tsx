@@ -3,10 +3,12 @@ import { Loader2 } from 'lucide-react'
 import { type DocTab } from '../../stores/useDocTabs'
 import { toLocalFileUrl } from '../../utils/dragDrop'
 import { getFileExtension } from '../../utils/path'
+import { isEbookExtension } from '../../../shared/ebook'
 
 const PdfViewer = lazy(() => import('./PdfViewer'))
 const ArtVideoPlayer = lazy(() => import('./ArtVideoPlayer'))
 const ImageGallery = lazy(() => import('./ImageGallery'))
+const EbookViewer = lazy(() => import('./EbookViewer'))
 
 const getFileExt = (path: string | null): string => {
   if (!path) return ''
@@ -28,6 +30,7 @@ export default function FilePreview({ tab }: FilePreviewProps) {
   const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(currentExt)
   const isVideo = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'ogg'].includes(currentExt)
   const isPdf = currentExt === 'pdf'
+  const isEbook = isEbookExtension(currentExt)
 
   const fileUrl = tab.path ? toLocalFileUrl(tab.path) : ''
 
@@ -51,6 +54,14 @@ export default function FilePreview({ tab }: FilePreviewProps) {
     return (
       <Suspense fallback={<LoadingFallback bg="var(--bg-editor)" />}>
         <PdfViewer tab={tab} fileUrl={fileUrl} />
+      </Suspense>
+    )
+  }
+
+  if (isEbook && tab.path) {
+    return (
+      <Suspense fallback={<LoadingFallback bg="var(--bg-editor)" />}>
+        <EbookViewer tab={tab} fileUrl={fileUrl} currentExt={currentExt} />
       </Suspense>
     )
   }

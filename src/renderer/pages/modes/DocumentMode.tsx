@@ -14,6 +14,7 @@ import {
 } from '../../modules/workbench/chrome'
 import { useRafResizeDrag } from '../../modules/workbench/useRafResizeDrag'
 import { getFileExtension } from '../../utils/path'
+import { isEbookExtension } from '../../../shared/ebook'
 
 const UniverSheet = lazy(() => import('../../components/document/UniverSheet'))
 
@@ -52,9 +53,10 @@ function DocumentEditor({
   const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext)
   const isVideo = ['mp4', 'webm', 'mov', 'avi', 'mkv', 'ogg'].includes(ext)
   const isPdf = ext === 'pdf'
+  const isEbook = isEbookExtension(ext)
   const isXlsx = ['xlsx', 'csv', 'xls'].includes(ext)
 
-  if (isImage || isVideo || isPdf) {
+  if (isImage || isVideo || isPdf || isEbook) {
     return <FilePreview tab={tab} />
   }
 

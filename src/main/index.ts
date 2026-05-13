@@ -487,6 +487,7 @@ protocol.registerSchemesAsPrivileged([
       standard: true,
       secure: true,
       supportFetchAPI: true,
+      corsEnabled: true,
       stream: true,
     }
   }
@@ -622,6 +623,12 @@ app.whenReady().then(() => {
       '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.flac': 'audio/flac',
       '.aac': 'audio/aac', '.m4a': 'audio/mp4',
       '.pdf': 'application/pdf', '.json': 'application/json',
+      '.epub': 'application/epub+zip',
+      '.mobi': 'application/x-mobipocket-ebook',
+      '.azw': 'application/vnd.amazon.ebook',
+      '.azw3': 'application/vnd.amazon.ebook',
+      '.fb2': 'application/x-fictionbook+xml',
+      '.cbz': 'application/vnd.comicbook+zip',
       '.html': 'text/html', '.css': 'text/css', '.js': 'text/javascript',
     }
     const ext = extname(filePath).toLowerCase()
