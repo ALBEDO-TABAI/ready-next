@@ -220,6 +220,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
         >
           <textarea
             ref={textareaRef}
+            data-ready-agent-input="true"
             value={inputValue}
             onChange={(e) => handleInputChange(e.target.value, e.target.selectionStart)}
             onKeyDown={handleKeyDown}
@@ -442,6 +443,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
           {composerLocked ? (
             <button
               onClick={onStop}
+              data-ready-agent-stop="true"
               title="停止生成"
               className="flex items-center justify-center text-white hover:brightness-95 active:scale-[0.98] transition-[filter,transform] duration-200 ease-out"
               style={{
@@ -456,6 +458,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
           ) : (
             <button
               onClick={onSend}
+              data-ready-agent-send="true"
               disabled={!inputValue.trim() && attachmentsCount === 0}
               className="flex items-center justify-center text-white hover:brightness-95 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed transition-[opacity,filter,transform] duration-200 ease-out"
               style={{

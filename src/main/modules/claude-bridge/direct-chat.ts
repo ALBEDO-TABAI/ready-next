@@ -520,6 +520,10 @@ export class DirectChatEngine extends EventEmitter {
     return this.domainAdapters
   }
 
+  getSkillContextOrchestrator(): SkillContextOrchestrator {
+    return this.skillContextOrchestrator
+  }
+
   private registerSessionAbortSource(
     name: string,
     sessionId: string | undefined,

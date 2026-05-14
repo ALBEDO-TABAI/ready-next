@@ -521,7 +521,7 @@ test('two finalize attempts in the same lifecycle do not double-resolve', async 
   // skips the public surface because we want to test the private guard.
   const runner = getSkillChildRunner() as unknown as {
     active: Map<string, unknown>
-    finalizeRun: (active: unknown, close: SkillChildCloseEvent) => void
+    finalizeRun: (active: unknown, close: SkillChildCloseEvent) => Promise<void>
     recentCloses: Map<string, SkillChildCloseEvent>
   }
   const activeRef = runner.active.get(first.childRunId)
@@ -532,7 +532,7 @@ test('two finalize attempts in the same lifecycle do not double-resolve', async 
 
   const closeA = makeTerminalClose('test-skill-double-finalize', 'completed', 'completed')
   closeA.childRunId = first.childRunId
-  runner.finalizeRun(activeRef, closeA)
+  await runner.finalizeRun(activeRef, closeA)
 
   const updatesAfterFirst = repo.state.updateCalls.get(first.childRunId) ?? 0
   const cachedAfterFirst = runner.recentCloses.get(first.childRunId)
@@ -545,7 +545,7 @@ test('two finalize attempts in the same lifecycle do not double-resolve', async 
   // the visible state should mutate.
   const closeB = makeTerminalClose('test-skill-double-finalize', 'failed', 'child_process_crashed')
   closeB.childRunId = first.childRunId
-  runner.finalizeRun(activeRef, closeB)
+  await runner.finalizeRun(activeRef, closeB)
 
   const updatesAfterSecond = repo.state.updateCalls.get(first.childRunId) ?? 0
   assert.equal(updatesAfterSecond, updatesAfterFirst,

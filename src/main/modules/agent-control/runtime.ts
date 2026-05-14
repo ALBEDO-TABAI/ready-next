@@ -573,7 +573,7 @@ export class AgentControlRuntime extends EventEmitter {
     const errors = Number((channelState as { errors?: number }).errors || 0)
 
     return {
-      orchestrator: 'claude-sdk',
+      orchestrator: this.orchestrator.getRuntimeKernel(),
       sidecarEnabled: this.getSettingBool('remote_channels_enabled', true),
       sidecar: this.heartbeat.sidecar,
       channels: {

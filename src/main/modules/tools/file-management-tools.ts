@@ -4,6 +4,7 @@ import type { SearchEngine } from '../search-engine/indexer'
 import { getSearchEngine } from '../search-engine/ipc-handler'
 import { getWorkerDbBridge } from '../database/worker-bridge'
 import { parseDocumentGraph } from '../../../shared/document-graph-parse'
+import { resolveIndexedDocumentCandidate } from './file-locate-path'
 
 export {
   FILE_MANAGEMENT_TOOL_NAMES,
@@ -102,20 +103,21 @@ async function runFileSearch(args: Record<string, unknown>, engine: SearchEngine
 }
 
 async function runFileLocate(args: Record<string, unknown>, engine: SearchEngine): Promise<string> {
-  const path = typeof args.path === 'string' ? args.path : ''
+  let path = typeof args.path === 'string' ? args.path.trim() : ''
   if (!path) return 'Error: path is required'
   const anchor = typeof args.anchor === 'string' ? args.anchor : ''
   const repo = engine.getRepository()
-  const row = repo
-    .getConnection()
-    .prepare('SELECT id, source_type FROM documents WHERE path = ? LIMIT 1')
-    .get<{ id: number; source_type: string }>(path)
-  let sourceType = row?.source_type || 'document'
-  if (!row) {
+  const resolved = resolveIndexedDocumentCandidate(repo.getConnection(), path)
+  let sourceType = 'document'
+  if (resolved.kind === 'found') {
+    path = resolved.row.path
+    sourceType = resolved.row.source_type || 'document'
+  } else if (resolved.kind === 'ambiguous') {
+    return toJsonString({ ok: false, error: 'path is ambiguous', candidates: resolved.candidates })
+  } else {
     const guard = assertInsideWorkspace(path, engine)
     if (!guard.ok) return toJsonString({ ok: false, error: 'path not in index', detail: guard.error })
     await engine.indexDocument(guard.root, path)
-    sourceType = 'document'
   }
 
   if (sourceType !== 'document') {

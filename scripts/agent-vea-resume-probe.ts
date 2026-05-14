@@ -293,8 +293,12 @@ export async function runAgentVeaResumeProbe(options: ProbeOptions): Promise<Pro
     : fixtureFromRunState(options.runStatePath)
   const message = buildProbeMessage(fixture, options.message)
   const requestEnvelope = buildRequestEnvelope({ userText: message })
-  const orchestrator = new ClaudeSdkOrchestrator()
-  const engine = (orchestrator as unknown as { engine: Record<string, unknown> }).engine
+  const orchestrator = new ClaudeSdkOrchestrator({ forceAgentSdkRuntime: false })
+  const engine = (
+    (orchestrator as unknown as { domainAdapterEngine?: Record<string, unknown> }).domainAdapterEngine
+    || (orchestrator as unknown as { engine?: Record<string, unknown> }).engine
+  )
+  if (!engine) throw new Error('DirectChatEngine probe target is unavailable')
   const metrics: AgentMetricEvent[] = []
   const modelAllowedToolSnapshots: string[][] = []
   const dispatchedTools: string[] = []

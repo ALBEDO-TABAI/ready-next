@@ -135,6 +135,7 @@ export function createParallelBranchOrchestrator(): ParallelBranchOrchestrator {
     try {
       promise = Promise.resolve(fn(abortController.signal))
     } catch (err) {
+      // silent-catch: synchronous branch errors are converted into the branch promise.
       // Synchronous throw from `fn` — wrap into rejected promise so the
       // branch settles cleanly via awaitAll's Promise.allSettled.
       promise = Promise.reject(err)

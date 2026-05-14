@@ -185,6 +185,20 @@ function detectDomainSignals(
   return signals
 }
 
+function suppressGenericResearchModifier(signals: DomainSignal[]): DomainSignal[] {
+  const research = signals.find((item) => item.domain === 'research')
+  if (!research) return signals
+  const nonResearchSignals = signals.filter((item) => item.domain !== 'research')
+  if (nonResearchSignals.length !== 1) return signals
+  const [productSignal] = nonResearchSignals
+  if (!productSignal || productSignal.score < research.score) return signals
+  const researchIsGenericModifier = research.signals.every((signal) => (
+    signal === 'research-object' || signal === 'research-action'
+  ))
+  if (!researchIsGenericModifier) return signals
+  return nonResearchSignals
+}
+
 function resolveExcludedDomains(
   primaryDomain: IntentDomain,
   signals: DomainSignal[],
@@ -199,7 +213,7 @@ export function classifyIntent(
   envelope: RequestEnvelope,
   options?: { registeredSkillTokens?: string[] },
 ): IntentClassification {
-  const signals = detectDomainSignals(envelope, options)
+  const signals = suppressGenericResearchModifier(detectDomainSignals(envelope, options))
   if (signals.length === 0) {
     return {
       primaryDomain: 'generic',

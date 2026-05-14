@@ -70,6 +70,20 @@
         "expectsMatch": true
       },
       {
+        "name": "match_by_xiaomimimo_baseurl",
+        "config": null,
+        "baseUrl": "https://token-plan-sgp.xiaomimimo.com/anthropic",
+        "model": "mimo-v2.5",
+        "expectsMatch": true
+      },
+      {
+        "name": "match_by_mimo_model_prefix",
+        "config": null,
+        "baseUrl": "https://relay.example.com/v1",
+        "model": "mimo-v2.5",
+        "expectsMatch": true
+      },
+      {
         "name": "no_match_openai",
         "config": null,
         "baseUrl": "https://api.openai.com/v1",

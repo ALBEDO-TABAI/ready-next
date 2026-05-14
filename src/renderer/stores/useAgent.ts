@@ -19,6 +19,7 @@ import {
 import { mapBackendErrorToFriendly } from '../modules/agent/error-message-mapping'
 import { emitRendererAgentMetric } from '../modules/agent/rendererMetrics'
 import { createAgentRuntimeDriver, syncActiveScopeRunAliases } from '../modules/agent/runtimeDriver'
+import { installAgentPanelTestHarness } from '../modules/agent/agentPanelTestHarness'
 import {
   ScopeCreatePersistenceMetricThrottle,
   type ScopeCreatePersistenceSite,
@@ -1363,6 +1364,7 @@ export const useAgent = create<AgentState>((set, get) => ({
 }))
 
 const agentRuntimeDriver = createAgentRuntimeDriver(useAgent as unknown as { getState: () => unknown; setState: (partial: unknown) => void })
+installAgentPanelTestHarness(useAgent as unknown as Parameters<typeof installAgentPanelTestHarness>[0])
 
 export function initAgentListeners(): () => void {
   return agentRuntimeDriver.initAgentListeners()

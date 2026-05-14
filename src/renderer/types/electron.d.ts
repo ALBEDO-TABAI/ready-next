@@ -117,7 +117,7 @@ interface AgentHeartbeatSnapshot {
 }
 
 interface AgentRuntimeStatusData {
-  orchestrator: 'claude-sdk'
+  orchestrator: 'ready-agent-sdk' | 'direct-chat'
   sidecarEnabled: boolean
   sidecar: AgentHeartbeatSnapshot['sidecar']
   channels: {

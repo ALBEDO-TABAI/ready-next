@@ -70,6 +70,7 @@ import {
   type ChildGatewayResult,
 } from './tool-registry'
 import {
+  isCompletedChildCloseStatus,
   isRetainedLifecycleChildCloseStatus,
   type ChildWaitResult,
   type MutableSkillChildCloseEvent,
@@ -2134,7 +2135,7 @@ function deriveCloseEventLedgerKind(
   if (close.terminalReason === 'cancelled_user') {
     return { event_kind: 'cancelled', isCancel: true }
   }
-  if (close.status === 'completed') {
+  if (isCompletedChildCloseStatus(close.status)) {
     return { event_kind: 'completed', isCancel: false }
   }
   // status: 'blocked' / 'failed' / 'killed' — all non-cancel terminal

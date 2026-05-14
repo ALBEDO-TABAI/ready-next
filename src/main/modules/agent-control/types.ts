@@ -92,8 +92,10 @@ export interface HeartbeatSnapshot {
   toolGateway: HeartbeatComponentSnapshot & { availableTools: number }
 }
 
+export type AgentRuntimeKernel = 'ready-agent-sdk' | 'direct-chat'
+
 export interface AgentRuntimeStatus {
-  orchestrator: 'claude-sdk'
+  orchestrator: AgentRuntimeKernel
   sidecarEnabled: boolean
   sidecar: HeartbeatSnapshot['sidecar']
   channels: {

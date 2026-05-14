@@ -387,6 +387,7 @@ export function installSettingsPreviewMocks(): void {
       getRuntimeStatus: async () => ({
         success: true,
         data: {
+          orchestrator: 'ready-agent-sdk',
           sidecar: {
             status: 'running',
             port: 8765,

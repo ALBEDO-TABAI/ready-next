@@ -14,6 +14,7 @@ test('file_locate falls back to a workspace file when the search index has not c
     fileManagementTools,
     /if \(!row\) return toJsonString\(\{ ok: false, error: 'path not in index' \}\)/,
   )
-  assert.match(fileManagementTools, /if \(!row\) \{[\s\S]*assertInsideWorkspace\(path, engine\)/)
-  assert.match(fileManagementTools, /if \(!row\) \{[\s\S]*engine\.indexDocument\(guard\.root, path\)/)
+  assert.match(fileManagementTools, /resolveIndexedDocumentCandidate\(repo\.getConnection\(\), path\)/)
+  assert.match(fileManagementTools, /else \{[\s\S]*assertInsideWorkspace\(path, engine\)/)
+  assert.match(fileManagementTools, /else \{[\s\S]*engine\.indexDocument\(guard\.root, path\)/)
 })

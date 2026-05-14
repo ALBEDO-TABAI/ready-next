@@ -12,38 +12,75 @@ import { AgentSessionManager } from './session-manager'
 import { createScopedRunCollector, type SendAndCollectResult } from './run-collector'
 import { RunCleanupRegistry, type RunCleanupCallback } from './run-cleanup-registry'
 import type { DomainAdapter } from './domain-adapter'
+import type { AgentRuntimeKernel } from './types'
+import {
+  AgentSdkRuntime,
+  canUseReadyAgentSdkForConfig,
+  type AgentSdkRuntimeDeps,
+} from './agent-sdk-runtime'
+import { isReadyAgentSdkRuntimeEnabled } from './agent-sdk-feature-flag'
 
 interface SessionDescriptor {
   agent: string
   sessionId?: string
 }
 
+interface ClaudeSdkOrchestratorOptions {
+  browserController?: BrowserController
+  sidecarManager?: SidecarManager
+  agentSdkRuntimeDeps?: AgentSdkRuntimeDeps
+  forceAgentSdkRuntime?: boolean
+}
+
 export class ClaudeSdkOrchestrator extends EventEmitter {
-  private readonly engine: DirectChatEngine
+  private readonly domainAdapterEngine: DirectChatEngine
+  private readonly sdkEngine: AgentSdkRuntime | null
+  private readonly sdkConfigProbe?: AgentSdkRuntimeDeps['loadAIConfig']
   private readonly sessions: AgentSessionManager
   private readonly descriptors = new Map<string, SessionDescriptor>()
   private readonly runCleanupRegistry = new RunCleanupRegistry()
   private readonly activeRunIds = new Map<string, string>()
 
-  constructor(options?: { browserController?: BrowserController; sidecarManager?: SidecarManager }) {
+  constructor(options?: ClaudeSdkOrchestratorOptions) {
     super()
-    this.engine = new DirectChatEngine()
+    this.domainAdapterEngine = new DirectChatEngine()
+    const shouldCreateSdkEngine = options?.forceAgentSdkRuntime ?? isReadyAgentSdkRuntimeEnabled()
+    this.sdkConfigProbe = options?.agentSdkRuntimeDeps?.loadAIConfig
+    this.sdkEngine = shouldCreateSdkEngine
+      ? new AgentSdkRuntime({
+        domainAdapters: this.domainAdapterEngine.getDomainAdapters(),
+        skillContextOrchestrator: this.domainAdapterEngine.getSkillContextOrchestrator(),
+        ...options?.agentSdkRuntimeDeps,
+      })
+      : null
     this.sessions = new AgentSessionManager()
-    this.engine.setRunCleanupRegistry({
+    this.domainAdapterEngine.setRunCleanupRegistry({
+      registerRunCleanup: (runId, cleanup) => {
+        this.registerRunCleanup(runId, cleanup)
+      },
+    })
+    this.sdkEngine?.setRunCleanupRegistry({
       registerRunCleanup: (runId, cleanup) => {
         this.registerRunCleanup(runId, cleanup)
       },
     })
 
+    this.bindEngineEvents(this.domainAdapterEngine)
+    if (this.sdkEngine) {
+      this.bindEngineEvents(this.sdkEngine)
+    }
+
     if (options?.browserController) {
-      this.engine.setBrowserController(options.browserController)
+      this.setBrowserController(options.browserController)
     }
 
     if (options?.sidecarManager) {
-      this.engine.setSidecarManager(options.sidecarManager)
+      this.setSidecarManager(options.sidecarManager)
     }
+  }
 
-    this.engine.on('output', (payload) => {
+  private bindEngineEvents(engine: DirectChatEngine | AgentSdkRuntime): void {
+    engine.on('output', (payload) => {
       const descriptor = this.resolveDescriptor(payload.agent)
       const taskKey = this.toTaskKey(descriptor.agent, descriptor.sessionId)
       if (payload.type === 'done') {
@@ -62,7 +99,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
       })
     })
 
-    this.engine.on('status', (payload) => {
+    engine.on('status', (payload) => {
       const descriptor = this.resolveDescriptor(payload.agent)
       const taskKey = this.toTaskKey(descriptor.agent, descriptor.sessionId)
       if (payload.status === 'working') {
@@ -81,7 +118,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
       })
     })
 
-    this.engine.on('error', (payload) => {
+    engine.on('error', (payload) => {
       const descriptor = this.resolveDescriptor(payload.agent)
       const taskKey = this.toTaskKey(descriptor.agent, descriptor.sessionId)
       this.sessions.setState(taskKey, 'failed', payload.error)
@@ -92,7 +129,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
       })
     })
 
-    this.engine.on('toolAction', (payload) => {
+    engine.on('toolAction', (payload) => {
       const descriptor = this.resolveDescriptor(payload.agent)
       this.emit('toolAction', {
         ...payload,
@@ -100,6 +137,21 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
         sessionId: descriptor.sessionId,
       })
     })
+  }
+
+  private selectEngineForRun(): DirectChatEngine | AgentSdkRuntime {
+    if (!this.sdkEngine) return this.domainAdapterEngine
+    const configDetail = this.sdkConfigProbe
+      ? this.sdkConfigProbe()
+      : this.domainAdapterEngine.getAIConfigDetailed()
+    if (!configDetail.ok) return this.sdkEngine
+    return canUseReadyAgentSdkForConfig(configDetail.config)
+      ? this.sdkEngine
+      : this.domainAdapterEngine
+  }
+
+  getRuntimeKernel(): AgentRuntimeKernel {
+    return this.selectEngineForRun() === this.sdkEngine ? 'ready-agent-sdk' : 'direct-chat'
   }
 
   private toInternalSessionKey(agent: string, sessionId?: string): string {
@@ -124,23 +176,26 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
   }
 
   setBrowserController(controller: BrowserController): void {
-    this.engine.setBrowserController(controller)
+    this.domainAdapterEngine.setBrowserController(controller)
+    this.sdkEngine?.setBrowserController(controller)
   }
 
   hasBrowserController(): boolean {
-    return this.engine.hasBrowserController()
+    return this.domainAdapterEngine.hasBrowserController()
   }
 
   getDomainAdapters(): ReadonlyArray<DomainAdapter> {
-    return this.engine.getDomainAdapters()
+    return this.domainAdapterEngine.getDomainAdapters()
   }
 
   setSidecarManager(manager: SidecarManager): void {
-    this.engine.setSidecarManager(manager)
+    this.domainAdapterEngine.setSidecarManager(manager)
+    this.sdkEngine?.setSidecarManager(manager)
   }
 
   setRuntime(runtime: AgentControlRuntime): void {
-    this.engine.setRuntime(runtime)
+    this.domainAdapterEngine.setRuntime(runtime)
+    this.sdkEngine?.setRuntime(runtime)
   }
 
   setRendererToolActionRequester(
@@ -152,13 +207,15 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
       args: Record<string, unknown>
     }) => Promise<Record<string, unknown>>) | null,
   ): void {
-    this.engine.setRendererToolActionRequester(requester)
+    this.domainAdapterEngine.setRendererToolActionRequester(requester)
+    this.sdkEngine?.setRendererToolActionRequester(requester)
   }
 
   setCancelPendingToolActions(
     canceller: ((agent: string, sessionId?: string) => void) | null,
   ): void {
-    this.engine.setCancelPendingToolActions(canceller)
+    this.domainAdapterEngine.setCancelPendingToolActions(canceller)
+    this.sdkEngine?.setCancelPendingToolActions(canceller)
   }
 
   async send(
@@ -180,6 +237,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     success: boolean
     error?: string
     taskId?: ExecutionHostResult['taskId']
+    usedTools?: ExecutionHostResult['usedTools']
     taskType?: ExecutionHostResult['taskType']
     interactionState?: ExecutionHostResult['interactionState']
     taskProjectionId?: ExecutionHostResult['taskProjectionId']
@@ -194,11 +252,12 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     this.descriptors.set(internalKey, { agent, sessionId })
     this.sessions.setState(taskKey, 'queued')
     this.activeRunIds.set(taskKey, effectiveRequestId)
+    const engine = this.selectEngineForRun()
     if (systemPrompt) {
-      this.engine.setSystemPrompt(internalKey, systemPrompt)
+      engine.setSystemPrompt(internalKey, systemPrompt)
     }
     try {
-      const result = await this.engine.sendMessage(internalKey, message, effectiveRequestId, {
+      const result = await engine.sendMessage(internalKey, message, effectiveRequestId, {
         taskId,
         publicSessionId: sessionId,
         requestEnvelope,
@@ -254,6 +313,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     let taskProjectionId: ExecutionHostResult['taskProjectionId']
     let projectionTruth: ExecutionHostResult['projectionTruth']
     let terminalReason: ExecutionHostResult['terminalReason']
+    let usedToolsFromExecution: string[] | null = null
     const sendResultPromise = this.send(
       agent,
       message,
@@ -277,6 +337,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
       taskProjectionId = result.taskProjectionId
       projectionTruth = result.projectionTruth
       terminalReason = result.terminalReason
+      usedToolsFromExecution = result.usedTools || null
       if (!result.success) {
         collector.handleError({
           agent,
@@ -314,6 +375,7 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
       await sendResultPromise
       return {
         ...result,
+        usedTools: usedToolsFromExecution || result.usedTools,
         taskId: resolvedTaskId || undefined,
         taskType,
         interactionState,
@@ -367,7 +429,8 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
   newSession(agent: string, sessionId?: string): void {
     const internalKey = this.toInternalSessionKey(agent, sessionId)
     this.descriptors.set(internalKey, { agent, sessionId })
-    this.engine.newSession(internalKey)
+    this.domainAdapterEngine.newSession(internalKey)
+    this.sdkEngine?.newSession(internalKey)
     this.sessions.setState(this.toTaskKey(agent, sessionId), 'done')
   }
 
@@ -387,7 +450,8 @@ export class ClaudeSdkOrchestrator extends EventEmitter {
     const taskKey = this.toTaskKey(agent, sessionId)
     const runId = this.activeRunIds.get(taskKey)
     const internalKey = this.toInternalSessionKey(agent, sessionId)
-    this.engine.stopGeneration(internalKey)
+    this.domainAdapterEngine.stopGeneration(internalKey)
+    this.sdkEngine?.stopGeneration(internalKey)
     this.sessions.setState(taskKey, 'cancelled')
     if (runId) {
       this.activeRunIds.delete(taskKey)

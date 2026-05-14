@@ -334,7 +334,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   }
   orchestrator.setRendererToolActionRequester(requestRendererToolAction)
   orchestrator.setCancelPendingToolActions(cancelToolActionRequestsBySession)
-  log('setupAgentIPC called, Claude SDK runtime initialized')
+  log('setupAgentIPC called, Ready agent runtime initialized')
 
   ipcMain.removeAllListeners('tools:logToolEvent')
   ipcMain.on('tools:logToolEvent', (_event, payload: ToolEventLogPayload) => {

@@ -192,7 +192,11 @@ export class DocumentDomainAdapter implements DomainAdapter {
   }
 
   shouldHandle(params: Parameters<DomainAdapter['shouldHandle']>[0]): boolean {
-    return params.route.executor === 'document'
+    if (params.route.executor === 'document') return true
+    const intent = params.executionIntentContext?.intentClassification
+    return params.route.executor === 'skill'
+      && intent?.primaryDomain === 'document'
+      && !intent.mentionedDomains.includes('skill')
   }
 
   prepare(params: Parameters<DomainAdapter['prepare']>[0]): DomainAdapterPrepareResult {

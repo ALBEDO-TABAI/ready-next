@@ -91,9 +91,15 @@ function normalizeTitleText(value: string): string {
   return value.replace(/\s+/g, ' ').trim()
 }
 
+function replaceUnsafeFilenameChars(value: string): string {
+  const forbiddenChars = new Set(['<', '>', ':', '"', '/', '\\', '|', '?', '*'])
+  return Array.from(value)
+    .map((char) => forbiddenChars.has(char) || char.charCodeAt(0) < 32 ? ' ' : char)
+    .join('')
+}
+
 function safeMarkdownFileName(title: string): string {
-  const stem = normalizeTitleText(title)
-    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, ' ')
+  const stem = replaceUnsafeFilenameChars(normalizeTitleText(title))
     .replace(/\s+/g, ' ')
     .replace(/[. ]+$/g, '')
     .trim()

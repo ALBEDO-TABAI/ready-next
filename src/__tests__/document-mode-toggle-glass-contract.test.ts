@@ -12,7 +12,9 @@ test('document mode toggle follows refined iOS Segmented Control style', () => {
   const modeSwitch = readWorkspaceFile('src/renderer/components/document/DraggableModeSwitch.tsx')
   const styles = readWorkspaceFile('src/renderer/styles/index.css')
 
-  assert.match(documentMode, /<DraggableModeSwitch\s+mode=\{editorMode\}\s+onChange=\{setEditorMode\}/)
+  assert.match(documentMode, /const handleEditorModeChange = useCallback/)
+  assert.match(documentMode, /captureVisibleDocumentScrollPositions\(\)[\s\S]*?setEditorMode\(nextMode\)/)
+  assert.match(documentMode, /<DraggableModeSwitch\s+mode=\{editorMode\}\s+onChange=\{handleEditorModeChange\}/)
   assert.match(modeSwitch, /className="draggable-mode-switch"/)
   assert.match(modeSwitch, /draggable-mode-switch__thumb/)
   assert.match(modeSwitch, /draggable-mode-switch__label/)

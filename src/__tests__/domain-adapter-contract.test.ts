@@ -95,6 +95,35 @@ test('domain adapter selector picks the matching adapter for the resolved execut
   assert.equal(selected?.id, 'calendar')
 })
 
+test('document intent is not stolen by a stale skill executor route', () => {
+  const adapters: DomainAdapter[] = [
+    new DocumentDomainAdapter({
+      orchestrator: {} as never,
+      toolLoopOrchestrator: {} as never,
+    }),
+    new SkillDomainAdapter(),
+  ]
+
+  const selected = selectDomainAdapter(adapters, {
+    route: createRoute('skill'),
+    userText: '根据@[白痴.md]前 3 章的内容，来在@[新文档.md]制作一个人物关系图看看',
+    hasTools: true,
+    executionIntentContext: {
+      intentClassification: {
+        primaryDomain: 'document',
+        mentionedDomains: ['document'],
+        excludedDomains: ['skill'],
+        objectSignals: ['document-object'],
+        actionSignals: [],
+        crossDomain: false,
+        confidence: 'medium',
+      },
+    } as never,
+  })
+
+  assert.equal(selected?.id, 'document')
+})
+
 test('browser domain adapter preserves upload prompt refinement before building browser state', async () => {
   const adapter = new BrowserDomainAdapter({
     async prepareBrowserExecution(params: Record<string, unknown>) {

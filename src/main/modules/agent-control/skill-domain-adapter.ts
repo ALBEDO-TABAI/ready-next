@@ -158,7 +158,9 @@ export class SkillDomainAdapter implements DomainAdapter {
   }
 
   shouldHandle(params: Parameters<DomainAdapter['shouldHandle']>[0]): boolean {
-    return params.route.executor === 'skill'
+    if (params.route.executor !== 'skill') return false
+    const intent = params.executionIntentContext?.intentClassification
+    return !(intent?.primaryDomain === 'document' && !intent.mentionedDomains.includes('skill'))
   }
 
   prepare(params: Parameters<DomainAdapter['prepare']>[0]): DomainAdapterPrepareResult {
