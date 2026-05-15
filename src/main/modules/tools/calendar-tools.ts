@@ -19,6 +19,7 @@ interface CalendarToolDef {
 
 interface CalendarToolContext {
   emitToolAction?: (tool: string, args: Record<string, unknown>) => void
+  requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
 }
 
 const CALENDAR_TOOLS: CalendarToolDef[] = [
@@ -135,8 +136,23 @@ export async function executeCalendarTool(
     if (!id) return 'Error: id is required'
   }
 
-  context?.emitToolAction?.(tool.action, args)
+  if (context?.requestModuleToolAction) {
+    try {
+      const payload = await context.requestModuleToolAction(tool.action, args)
+      const summary = typeof payload.summary === 'string' && payload.summary.trim()
+        ? payload.summary.trim()
+        : `${tool.action} 已完成。`
+      return toStructuredResult(tool, summary, payload)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      return toStructuredResult(tool, `calendar action failed: ${tool.action} - ${message}`, {
+        ok: false,
+        error: message,
+      })
+    }
+  }
 
+  context?.emitToolAction?.(tool.action, args)
   return toStructuredResult(tool, `${tool.action} 已排队执行。`, {
     ownerResourceId: typeof args.id === 'string' ? args.id : null,
   })

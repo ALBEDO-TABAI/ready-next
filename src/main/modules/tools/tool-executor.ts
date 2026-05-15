@@ -289,10 +289,16 @@ export async function executeToolCall(
           }
 
         case 'rss':
-          return executeRSSTool(toolName, args, { emitToolAction: context.emitToolAction })
+          return executeRSSTool(toolName, args, {
+            emitToolAction: context.emitToolAction,
+            requestModuleToolAction: context.requestModuleToolAction,
+          })
 
         case 'calendar':
-          return executeCalendarTool(toolName, args, { emitToolAction: context.emitToolAction })
+          return executeCalendarTool(toolName, args, {
+            emitToolAction: context.emitToolAction,
+            requestModuleToolAction: context.requestModuleToolAction,
+          })
 
         case 'skill':
           if (definition.executionVisibility === 'internal' && allowsChildInternal) {

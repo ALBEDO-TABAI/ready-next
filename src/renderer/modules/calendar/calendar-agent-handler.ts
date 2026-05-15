@@ -29,6 +29,20 @@ export interface CalendarAgentHandlerDeps {
 }
 
 export function createCalendarAgentHandler(deps: CalendarAgentHandlerDeps): ModuleAgentActionHandler {
+  const serializeEvent = (event: CalendarEvent) => ({
+    id: event.id,
+    title: event.title,
+    startTime: event.startTime.toISOString(),
+    endTime: event.endTime.toISOString(),
+    calendarId: event.calendarId,
+    color: event.color,
+    description: event.description ?? null,
+    allDay: event.allDay ?? false,
+    contentType: event.contentType ?? null,
+    platform: event.platform ?? null,
+    publishStatus: event.publishStatus ?? null,
+  })
+
   const computeConflicts = (eventId: string | null, startTime: Date, endTime: Date) => {
     return deps.getEvents().filter((event) => {
       if (eventId && event.id === eventId) return false
@@ -39,17 +53,23 @@ export function createCalendarAgentHandler(deps: CalendarAgentHandlerDeps): Modu
   return async ({ action, args }) => {
     if (action === 'calendar.captureSession') {
       const { start, end } = deps.getDateRange(deps.currentDate, deps.viewType)
+      const events = deps.getEvents()
+      const visibleEvents = events.filter((event) => event.startTime < end && event.endTime > start)
       return {
         intent: 'capture_calendar_session',
         ownerResourceId: deps.editingEvent?.id || null,
         summary: deps.editingEvent
           ? `日程会话已捕获：当前选中事件为 ${deps.editingEvent.title}。`
-          : `日程会话已捕获：当前视图范围 ${start.toLocaleDateString()} - ${end.toLocaleDateString()}。`,
+          : `日程会话已捕获：当前视图范围 ${start.toLocaleDateString()} - ${end.toLocaleDateString()}；已加载 ${events.length} 个事件，当前视图 ${visibleEvents.length} 个。`,
         selectedEventId: deps.editingEvent?.id ?? null,
         visibleRange: {
           start: start.toISOString(),
           end: end.toISOString(),
         },
+        totalEvents: events.length,
+        visibleEventCount: visibleEvents.length,
+        events: events.map(serializeEvent),
+        visibleEvents: visibleEvents.map(serializeEvent),
       }
     }
 
