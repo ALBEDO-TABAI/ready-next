@@ -78,7 +78,7 @@ test('local-file URL helper keeps macOS absolute paths as pathnames', () => {
 
 test('renderer CSP allows ebook preview resource loading paths', async () => {
   const html = await readFile(new URL('../renderer/index.html', import.meta.url), 'utf-8')
-  const csp = html.match(/Content-Security-Policy[\s\S]*?content=\"([^\"]+)\"/)?.[1] || ''
+  const csp = html.match(/Content-Security-Policy[\s\S]*?content="([^"]+)"/)?.[1] || ''
   assert.match(csp, /connect-src[^;]*local-file:/)
   assert.match(csp, /style-src[^;]*blob:/)
   assert.match(csp, /img-src[^;]*blob:/)
@@ -142,7 +142,9 @@ test('importEpubAsMarkdown sanitizes unsafe and long markdown file names', async
     const fileName = basename(result.indexPath!)
     assert.equal(fileName.endsWith('.md'), true)
     assert.equal(fileName.length <= 123, true)
-    assert.doesNotMatch(fileName, /[<>:"/\\|?*\u0000-\u001F]/)
+    const forbiddenChars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*']
+    assert.equal(forbiddenChars.some((char) => fileName.includes(char)), false)
+    assert.equal(Array.from(fileName).some((char) => char.charCodeAt(0) < 32), false)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

@@ -1532,6 +1532,24 @@ describe('useWorkspace Store', () => {
         assert.deepStrictEqual(stored, ['/Users/test/project'])
     })
 
+    it('should promote the first safe pinned folder to workspace root for search', () => {
+        const safeRoot = '/Users/test/Documents/project'
+        useWorkspace.getState().addPinnedFolder(safeRoot)
+        const state = useWorkspace.getState()
+        assert.deepStrictEqual(state.pinnedFolders, [safeRoot])
+        assert.strictEqual(state.workspaceRoot, safeRoot)
+        assert.strictEqual(state.currentPath, safeRoot)
+        assert.strictEqual(storage.get('ready-workspace-root'), safeRoot)
+    })
+
+    it('should keep unsafe pinned folders as pins without enabling workspace search', () => {
+        useWorkspace.getState().addPinnedFolder('/folder-a')
+        const state = useWorkspace.getState()
+        assert.deepStrictEqual(state.pinnedFolders, ['/folder-a'])
+        assert.strictEqual(state.workspaceRoot, null)
+        assert.strictEqual(storage.get('ready-workspace-root'), undefined)
+    })
+
     it('should not add duplicate pinned folder', () => {
         useWorkspace.getState().addPinnedFolder('/Users/test/project')
         useWorkspace.getState().addPinnedFolder('/Users/test/project')

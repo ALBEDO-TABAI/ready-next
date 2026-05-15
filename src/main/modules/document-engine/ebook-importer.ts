@@ -92,8 +92,11 @@ function normalizeTitleText(value: string): string {
 }
 
 function safeMarkdownFileName(title: string): string {
-  const stem = normalizeTitleText(title)
-    .replace(/[<>:"/\\|?*\u0000-\u001F]/g, ' ')
+  const titleWithoutControls = Array.from(normalizeTitleText(title), (char) => (
+    char.charCodeAt(0) < 32 ? ' ' : char
+  )).join('')
+  const stem = titleWithoutControls
+    .replace(/[<>:"/\\|?*]/g, ' ')
     .replace(/\s+/g, ' ')
     .replace(/[. ]+$/g, '')
     .trim()

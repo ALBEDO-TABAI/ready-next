@@ -1326,6 +1326,37 @@ html[data-theme='dark'] .ready-app-bg::after {
   font-size: 12px;
 }
 
+.note-preview-mermaid {
+  margin: 0 0 16px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--border-default) 50%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface-card-bg) 88%, white 12%);
+  overflow-x: auto;
+}
+
+.note-preview-mermaid__svg {
+  display: flex;
+  justify-content: center;
+  min-width: max-content;
+}
+
+.note-preview-mermaid__svg svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.note-preview-mermaid__loading {
+  margin: 0;
+}
+
+.note-preview-mermaid__error {
+  margin-bottom: 10px;
+  color: var(--color-red);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 .note-preview-markdown-hr {
   border: none;
   border-top: 1px solid color-mix(in srgb, var(--border-default) 64%, transparent);

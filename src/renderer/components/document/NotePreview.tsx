@@ -1,4 +1,13 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import {
+  Children,
+  isValidElement,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import {
@@ -247,6 +256,82 @@ function mergeMarkdownClassName(className: string | undefined, previewClassName:
   return className ? `${className} ${previewClassName}` : previewClassName
 }
 
+function extractMarkdownText(children: ReactNode): string {
+  if (children === null || children === undefined || typeof children === 'boolean') return ''
+  if (typeof children === 'string' || typeof children === 'number') return String(children)
+  if (Array.isArray(children)) return children.map(extractMarkdownText).join('')
+  if (isValidElement<{ children?: ReactNode }>(children)) return extractMarkdownText(children.props.children)
+  return ''
+}
+
+function isMermaidLanguage(className: string | undefined): boolean {
+  return /\blanguage-mermaid\b/.test(className || '')
+}
+
+function MermaidBlock({ code }: { code: string }) {
+  const renderId = `ready-mermaid-${useId().replace(/[^a-zA-Z0-9_-]/g, '')}`
+  const [svg, setSvg] = useState<string | null>(null)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setSvg(null)
+    setError(null)
+
+    void import('mermaid')
+      .then(async (module) => {
+        const mermaid = module.default
+        mermaid.initialize({
+          startOnLoad: false,
+          securityLevel: 'strict',
+          theme: 'base',
+        })
+        return mermaid.render(renderId, code)
+      })
+      .then((result) => {
+        if (!cancelled) setSvg(result.svg)
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [code, renderId])
+
+  if (error) {
+    return (
+      <div className="note-preview-mermaid note-preview-mermaid--error">
+        <div className="note-preview-mermaid__error">Mermaid 渲染失败：{error}</div>
+        <pre className="note-preview-markdown-pre">
+          <code className="language-mermaid note-preview-markdown-code">{code}</code>
+        </pre>
+      </div>
+    )
+  }
+
+  return (
+    <div className="note-preview-mermaid" data-ready-mermaid="true">
+      {svg ? (
+        <div
+          className="note-preview-mermaid__svg"
+          dangerouslySetInnerHTML={{ __html: svg }}
+        />
+      ) : (
+        <pre className="note-preview-markdown-pre note-preview-mermaid__loading">
+          <code className="language-mermaid note-preview-markdown-code">{code}</code>
+        </pre>
+      )}
+    </div>
+  )
+}
+
+function isMermaidPreChildren(children: ReactNode): boolean {
+  const onlyChild = Children.toArray(children)[0]
+  return isValidElement<{ className?: string }>(onlyChild) && isMermaidLanguage(onlyChild.props.className)
+}
+
 export default function NotePreview({
   content,
   notePath,
@@ -335,10 +420,10 @@ export default function NotePreview({
       key={block.id}
       remarkPlugins={[remarkGfm]}
       components={{
-        h1: ({ children }) => <h1 className="note-preview-markdown-h1">{children}</h1>,
-        h2: ({ children }) => <h2 className="note-preview-markdown-h2">{children}</h2>,
-        h3: ({ children }) => <h3 className="note-preview-markdown-h3">{children}</h3>,
-        h4: ({ children }) => <h4 className="note-preview-markdown-h4">{children}</h4>,
+        h1: ({ children }) => <h1 className="note-preview-markdown-h1" data-ready-heading-level="1" data-ready-heading-title={extractMarkdownText(children)}>{children}</h1>,
+        h2: ({ children }) => <h2 className="note-preview-markdown-h2" data-ready-heading-level="2" data-ready-heading-title={extractMarkdownText(children)}>{children}</h2>,
+        h3: ({ children }) => <h3 className="note-preview-markdown-h3" data-ready-heading-level="3" data-ready-heading-title={extractMarkdownText(children)}>{children}</h3>,
+        h4: ({ children }) => <h4 className="note-preview-markdown-h4" data-ready-heading-level="4" data-ready-heading-title={extractMarkdownText(children)}>{children}</h4>,
         p: ({ children }) => <p className="note-preview-markdown-p">{children}</p>,
         em: ({ children, node: _node, ...props }) => <em className="note-preview-markdown-em" {...props}>{children}</em>,
         hr: () => <hr className="note-preview-markdown-hr" />,
@@ -370,12 +455,21 @@ export default function NotePreview({
             {children}
           </td>
         ),
-        pre: ({ children }) => <pre className="note-preview-markdown-pre">{children}</pre>,
-        code: ({ children, className, ...props }) => (
-          <code className={className ? `${className} note-preview-markdown-code` : 'note-preview-markdown-code'} {...props}>
-            {children}
-          </code>
+        pre: ({ children }) => (
+          isMermaidPreChildren(children)
+            ? <>{children}</>
+            : <pre className="note-preview-markdown-pre">{children}</pre>
         ),
+        code: ({ children, className, ...props }) => {
+          if (isMermaidLanguage(className)) {
+            return <MermaidBlock code={extractMarkdownText(children).trim()} />
+          }
+          return (
+            <code className={className ? `${className} note-preview-markdown-code` : 'note-preview-markdown-code'} {...props}>
+              {children}
+            </code>
+          )
+        },
         a: ({ href, children }) => {
           const reference = href || ''
           const resolved = resolvePreviewReference(reference, notePath)

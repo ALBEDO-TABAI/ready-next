@@ -80,7 +80,7 @@ function hasContinuationHandle(continuation: ScopeRunTaskContinuation): boolean 
     detachedTaskId: continuation.detachedTaskId ?? null,
     outputDir: continuation.outputDir ?? null,
     runStatePath: continuation.runStatePath ?? null,
-  })
+  }) || Boolean(continuation.taskRunId && (continuation.outputDir || continuation.runStatePath))
 }
 
 function buildBlockedReason(snapshot: SkillTaskSupervisorSnapshot, fallback: string): string {

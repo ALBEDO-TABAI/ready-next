@@ -423,7 +423,10 @@ export function resolveAIConfigCapabilities(config: AIModelConfig | null | undef
   const providerCap = provider?.capabilityClass ?? {}
   const modelDef = provider?.models.find(m => m.id === normalizedConfig.model)
   const modelCap = modelDef?.capabilityOverrides ?? {}
-  const visionDefault = modelCap.supportsVision ?? providerCap.supportsVision ?? (agentProtocol === 'anthropic' || agentProtocol === 'openai')
+  const isXiaomiMimoVisionModel = baseUrl.includes('xiaomimimo.com') && /mimo-v2\.5/i.test(normalizedConfig.model)
+  const visionDefault = isXiaomiMimoVisionModel
+    ? true
+    : (modelCap.supportsVision ?? providerCap.supportsVision ?? (agentProtocol === 'anthropic' || agentProtocol === 'openai'))
   const thinkingDefault = modelCap.supportsThinking ?? providerCap.supportsThinking ?? false
   const longContextDefault = modelCap.supportsLongContext ?? providerCap.supportsLongContext ?? ((modelDef?.contextWindow ?? 0) >= 128000)
 

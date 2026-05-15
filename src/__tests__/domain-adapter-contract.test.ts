@@ -667,9 +667,15 @@ test('phase4 channel adapters short-circuit dispatch when no domain tool is avai
     } as never) as Awaited<ReturnType<typeof item.adapter.dispatch>>
 
     assert.equal(result.finish?.status, 'done', `${item.executor} dispatch 应返回 finish`)
-    assert.equal(result.finish?.success, false, `${item.executor} dispatch 应以未成功结束`)
-    assert.equal(result.projection?.phase, 'blocked')
-    assert.match(String(result.projection?.blockedReason || ''), /未解析到可用的/)
+    if (item.executor === 'skill') {
+      assert.equal(result.finish?.success, true, 'skill 无工具空壳应静默结束，避免误生成可续跑任务')
+      assert.equal(result.projection?.phase, 'done')
+      assert.equal(result.projection?.blockedReason, null)
+    } else {
+      assert.equal(result.finish?.success, false, `${item.executor} dispatch 应以未成功结束`)
+      assert.equal(result.projection?.phase, 'blocked')
+      assert.match(String(result.projection?.blockedReason || ''), /未解析到可用的/)
+    }
   }
 })
 

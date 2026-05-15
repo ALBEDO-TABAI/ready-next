@@ -1,5 +1,6 @@
 import { readFile, rename, stat } from 'fs/promises'
-import { dirname, isAbsolute, join, relative, resolve as resolvePath } from 'path'
+import { basename, dirname, isAbsolute, join, relative, resolve as resolvePath } from 'path'
+import { fileURLToPath } from 'url'
 import type { SearchEngine } from '../search-engine/indexer'
 import { getSearchEngine } from '../search-engine/ipc-handler'
 import { getWorkerDbBridge } from '../database/worker-bridge'
@@ -34,6 +35,130 @@ function assertInsideWorkspace(target: string, engine: SearchEngine): { ok: true
 
 function toJsonString(value: unknown): string {
   try { return JSON.stringify(value) } catch { return String(value) }
+}
+
+type IndexedDocumentRow = {
+  id: number
+  path: string
+  source_type: string
+}
+
+function addCandidate(candidates: string[], value: string | null | undefined) {
+  const trimmed = String(value || '').trim()
+  if (!trimmed || candidates.includes(trimmed)) return
+  candidates.push(trimmed)
+}
+
+function stripBalancedWrapper(value: string): string {
+  let current = value.trim()
+  const pairs: Array<[string, string]> = [
+    ['`', '`'],
+    ['"', '"'],
+    ["'", "'"],
+    ['“', '”'],
+    ['‘', '’'],
+    ['<', '>'],
+  ]
+  let changed = true
+  while (changed && current.length >= 2) {
+    changed = false
+    for (const [open, close] of pairs) {
+      if (current.startsWith(open) && current.endsWith(close)) {
+        current = current.slice(open.length, current.length - close.length).trim()
+        changed = true
+      }
+    }
+  }
+  return current
+}
+
+function tryDecodeCandidate(value: string): string | null {
+  try {
+    return decodeURIComponent(value)
+  } catch {
+    try {
+      return decodeURI(value)
+    } catch {
+      return null
+    }
+  }
+}
+
+export function buildFileLocatePathCandidates(input: string): string[] {
+  const candidates: string[] = []
+  const raw = String(input || '').trim()
+  addCandidate(candidates, raw)
+  const stripped = stripBalancedWrapper(raw)
+  addCandidate(candidates, stripped)
+
+  const markdownLink = stripped.match(/^!?\[([^\]]+)\]\(([^)]+)\)$/)
+  if (markdownLink) {
+    addCandidate(candidates, markdownLink[2])
+    addCandidate(candidates, markdownLink[1])
+  }
+
+  const mention = stripped.match(/^@?\[([^\]]+)\]$/)
+  if (mention) addCandidate(candidates, mention[1])
+  if (stripped.startsWith('@') && stripped.length > 1) addCandidate(candidates, stripped.slice(1))
+
+  for (const candidate of [...candidates]) {
+    if (/^file:\/\//i.test(candidate)) {
+      try {
+        addCandidate(candidates, fileURLToPath(candidate))
+      } catch {
+        // Keep the original candidate; a malformed file URL will fail normally.
+      }
+    }
+    addCandidate(candidates, tryDecodeCandidate(candidate))
+  }
+
+  return candidates
+}
+
+function uniqueDocumentRows(rows: IndexedDocumentRow[]): IndexedDocumentRow[] {
+  return Array.from(new Map(rows.map((row) => [row.path, row])).values())
+}
+
+function resolveIndexedDocumentCandidate(input: string, engine: SearchEngine): {
+  path: string
+  row: IndexedDocumentRow | null
+  ambiguous?: IndexedDocumentRow[]
+} {
+  const db = engine.getRepository().getConnection()
+  const candidates = buildFileLocatePathCandidates(input)
+  for (const candidate of candidates) {
+    const row = db
+      .prepare('SELECT id, path, source_type FROM documents WHERE path = ? LIMIT 1')
+      .get<IndexedDocumentRow>(candidate)
+    if (row) return { path: row.path, row }
+  }
+
+  const rowsByPath = new Map<string, IndexedDocumentRow>()
+  for (const candidate of candidates) {
+    const name = basename(candidate)
+    if (name && name !== '.' && name !== '/') {
+      for (const row of db
+        .prepare('SELECT id, path, source_type FROM documents WHERE name = ? LIMIT 3')
+        .all<IndexedDocumentRow>(name)) {
+        rowsByPath.set(row.path, row)
+      }
+    }
+
+    const normalizedSuffix = candidate.replace(/\\/g, '/').replace(/^\.\//, '').replace(/^\/+/, '')
+    if (normalizedSuffix.includes('/')) {
+      const suffix = `/${normalizedSuffix}`
+      for (const row of db
+        .prepare('SELECT id, path, source_type FROM documents WHERE substr(path, -?) = ? LIMIT 3')
+        .all<IndexedDocumentRow>(suffix.length, suffix)) {
+        rowsByPath.set(row.path, row)
+      }
+    }
+  }
+
+  const matches = uniqueDocumentRows(Array.from(rowsByPath.values()))
+  if (matches.length === 1) return { path: matches[0].path, row: matches[0] }
+  if (matches.length > 1) return { path: input, row: null, ambiguous: matches }
+  return { path: candidates.find(isAbsolute) || candidates[0] || input, row: null }
 }
 
 export async function executeFileManagementTool(
@@ -102,14 +227,19 @@ async function runFileSearch(args: Record<string, unknown>, engine: SearchEngine
 }
 
 async function runFileLocate(args: Record<string, unknown>, engine: SearchEngine): Promise<string> {
-  const path = typeof args.path === 'string' ? args.path : ''
-  if (!path) return 'Error: path is required'
+  const requestedPath = typeof args.path === 'string' ? args.path : ''
+  if (!requestedPath) return 'Error: path is required'
   const anchor = typeof args.anchor === 'string' ? args.anchor : ''
-  const repo = engine.getRepository()
-  const row = repo
-    .getConnection()
-    .prepare('SELECT id, source_type FROM documents WHERE path = ? LIMIT 1')
-    .get<{ id: number; source_type: string }>(path)
+  const resolved = resolveIndexedDocumentCandidate(requestedPath, engine)
+  const path = resolved.path
+  if (resolved.ambiguous?.length) {
+    return toJsonString({
+      ok: false,
+      error: 'ambiguous path',
+      candidates: resolved.ambiguous.map((item) => item.path),
+    })
+  }
+  const row = resolved.row
   let sourceType = row?.source_type || 'document'
   if (!row) {
     const guard = assertInsideWorkspace(path, engine)

@@ -17,3 +17,14 @@ test('file_locate falls back to a workspace file when the search index has not c
   assert.match(fileManagementTools, /if \(!row\) \{[\s\S]*assertInsideWorkspace\(path, engine\)/)
   assert.match(fileManagementTools, /if \(!row\) \{[\s\S]*engine\.indexDocument\(guard\.root, path\)/)
 })
+
+test('file_locate normalizes user-facing file mention wrappers before lookup', () => {
+  const fileManagementTools = readWorkspaceFile('src/main/modules/tools/file-management-tools.ts')
+
+  assert.match(fileManagementTools, /function buildFileLocatePathCandidates\(input: string\)/)
+  assert.ok(fileManagementTools.includes('stripped.match(/^@?\\[([^\\]]+)\\]$/)'))
+  assert.match(fileManagementTools, /fileURLToPath\(candidate\)/)
+  assert.match(fileManagementTools, /decodeURIComponent\(value\)/)
+  assert.match(fileManagementTools, /WHERE name = \? LIMIT 3/)
+  assert.match(fileManagementTools, /WHERE substr\(path, -\?\) = \? LIMIT 3/)
+})

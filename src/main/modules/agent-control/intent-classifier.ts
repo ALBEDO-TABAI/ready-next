@@ -43,7 +43,7 @@ const DOMAIN_OBJECT_PATTERNS: Record<Exclude<IntentDomain, 'generic'>, Array<[Re
     [/(宠物|猫猫|桌面猫|宠物气泡|信息气泡|便利贴|便签|贴纸|pet)/i, 'pet-object', 5],
   ],
   research: [
-    [/(研究|调研|综述|报告|综评|综合分析)/i, 'research-object', 4],
+    [/(研究|调研|综述|综评|综合分析)/i, 'research-object', 4],
     [/(^|[^a-z])(research|survey|review|analysis|overview)([^a-z]|$)/i, 'research-object-en', 3],
   ],
   browser: [

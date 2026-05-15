@@ -28,20 +28,98 @@ type DocumentModeScrollSnapshot = {
   top: number
   ratio: number
   maxScroll: number
+  anchorTitle: string | null
 }
 
-function captureElementScroll(element: HTMLElement): DocumentModeScrollSnapshot {
+function getMarkdownHeadingTitle(line: string): string | null {
+  const match = line.match(/^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/)
+  return match ? match[1].trim() : null
+}
+
+function estimateTextareaLineHeight(element: HTMLElement): number {
+  const styles = window.getComputedStyle(element)
+  const lineHeight = Number.parseFloat(styles.lineHeight)
+  if (Number.isFinite(lineHeight) && lineHeight > 0) return lineHeight
+  const fontSize = Number.parseFloat(styles.fontSize)
+  return Number.isFinite(fontSize) && fontSize > 0 ? fontSize * 1.6 : 24
+}
+
+function findNearestHeadingTitle(content: string, lineNumber: number): string | null {
+  const lines = content.split('\n')
+  const start = Math.max(0, Math.min(lines.length - 1, lineNumber - 1))
+  for (let index = start; index >= 0; index -= 1) {
+    const title = getMarkdownHeadingTitle(lines[index])
+    if (title) return title
+  }
+  return null
+}
+
+function findHeadingLine(content: string, title: string): number | null {
+  const lines = content.split('\n')
+  for (let index = 0; index < lines.length; index += 1) {
+    if (getMarkdownHeadingTitle(lines[index]) === title) return index + 1
+  }
+  return null
+}
+
+function captureTextareaAnchor(element: HTMLElement, content: string): string | null {
+  if (!(element instanceof HTMLTextAreaElement)) return null
+  const lineNumber = Math.floor(element.scrollTop / estimateTextareaLineHeight(element)) + 1
+  return findNearestHeadingTitle(content, lineNumber)
+}
+
+function capturePreviewAnchor(element: HTMLElement): string | null {
+  const headings = Array.from(element.querySelectorAll<HTMLElement>('[data-ready-heading-title]'))
+  if (headings.length === 0) return null
+  const containerTop = element.getBoundingClientRect().top
+  let nearest: HTMLElement | null = null
+  for (const heading of headings) {
+    const top = heading.getBoundingClientRect().top - containerTop
+    if (top <= 24) {
+      nearest = heading
+      continue
+    }
+    if (!nearest) nearest = heading
+    break
+  }
+  return nearest?.dataset.readyHeadingTitle || null
+}
+
+function captureElementScroll(element: HTMLElement, content: string): DocumentModeScrollSnapshot {
   const maxScroll = Math.max(0, element.scrollHeight - element.clientHeight)
   const top = Math.max(0, Math.min(element.scrollTop, maxScroll))
   return {
     top,
     ratio: maxScroll > 0 ? top / maxScroll : 0,
     maxScroll,
+    anchorTitle: captureTextareaAnchor(element, content) || capturePreviewAnchor(element),
   }
 }
 
-function restoreElementScroll(element: HTMLElement, snapshot: DocumentModeScrollSnapshot) {
+function restoreAnchorScroll(element: HTMLElement, snapshot: DocumentModeScrollSnapshot, content: string): boolean {
+  if (!snapshot.anchorTitle) return false
+
+  if (element instanceof HTMLTextAreaElement) {
+    const line = findHeadingLine(content, snapshot.anchorTitle)
+    if (!line) return false
+    element.scrollTop = Math.max(0, Math.round((line - 1) * estimateTextareaLineHeight(element)))
+    return true
+  }
+
+  const target = Array.from(element.querySelectorAll<HTMLElement>('[data-ready-heading-title]'))
+    .find((heading) => heading.dataset.readyHeadingTitle === snapshot.anchorTitle)
+  if (!target) return false
+  const elementRect = element.getBoundingClientRect()
+  const targetRect = target.getBoundingClientRect()
+  const maxScroll = Math.max(0, element.scrollHeight - element.clientHeight)
+  const nextTop = element.scrollTop + targetRect.top - elementRect.top - 8
+  element.scrollTop = Math.max(0, Math.min(Math.round(nextTop), maxScroll))
+  return true
+}
+
+function restoreElementScroll(element: HTMLElement, snapshot: DocumentModeScrollSnapshot, content: string) {
   const restore = () => {
+    if (restoreAnchorScroll(element, snapshot, content)) return
     const maxScroll = Math.max(0, element.scrollHeight - element.clientHeight)
     const nextTop = snapshot.maxScroll === maxScroll ? snapshot.top : snapshot.ratio * maxScroll
     element.scrollTop = Math.max(0, Math.min(Math.round(nextTop), maxScroll))
@@ -217,6 +295,11 @@ export default function DocumentMode({
   const activeTab = tabs.find(t => t.id === activeTabId)
   const splitTab = splitTabId ? tabs.find(t => t.id === splitTabId) : null
   const activeTabPathLabel = activeTab?.path || activeTab?.title || '未打开文档'
+  const tabByScrollKey = useMemo(() => {
+    const next = new Map<string, DocTab>()
+    tabs.forEach((tab) => next.set(tab.path || tab.id, tab))
+    return next
+  }, [tabs])
 
   const captureVisibleDocumentScrollPositions = useCallback(() => {
     document.querySelectorAll<HTMLElement>('[data-ready-document-scroll-key]').forEach((scope) => {
@@ -224,9 +307,9 @@ export default function DocumentMode({
       if (!key) return
       const element = findCurrentScrollElement(scope)
       if (!element) return
-      scrollSnapshotsRef.current.set(key, captureElementScroll(element))
+      scrollSnapshotsRef.current.set(key, captureElementScroll(element, tabByScrollKey.get(key)?.content || ''))
     })
-  }, [])
+  }, [tabByScrollKey])
 
   const restoreVisibleDocumentScrollPositions = useCallback(() => {
     document.querySelectorAll<HTMLElement>('[data-ready-document-scroll-key]').forEach((scope) => {
@@ -234,9 +317,10 @@ export default function DocumentMode({
       if (!key) return
       const snapshot = scrollSnapshotsRef.current.get(key)
       if (!snapshot) return
-      findScrollCandidates(scope).forEach((element) => restoreElementScroll(element, snapshot))
+      const content = tabByScrollKey.get(key)?.content || ''
+      findScrollCandidates(scope).forEach((element) => restoreElementScroll(element, snapshot, content))
     })
-  }, [])
+  }, [tabByScrollKey])
 
   useLayoutEffect(() => {
     restoreVisibleDocumentScrollPositions()

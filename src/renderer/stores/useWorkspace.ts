@@ -520,11 +520,31 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
   },
 
   addPinnedFolder: (path) => {
-    const { pinnedFolders } = get()
-    if (pinnedFolders.includes(path)) return
+    const { pinnedFolders, workspaceRoot } = get()
+    const validation = workspaceRoot ? null : validateWorkspaceRoot(path)
+    const shouldPromote = validation?.ok === true
+    if (pinnedFolders.includes(path)) {
+      if (shouldPromote) {
+        set({ workspaceRoot: path, currentPath: path, expandedDirs: new Set(), dirChildren: new Map(), selectedFile: null })
+        writeStorage('ready-workspace-root', path)
+        void syncFileWatcher(path)
+        get().refreshFiles()
+      }
+      return
+    }
     const next = [...pinnedFolders, path]
-    set({ pinnedFolders: next })
+    set({
+      pinnedFolders: next,
+      ...(shouldPromote
+        ? { workspaceRoot: path, currentPath: path, expandedDirs: new Set(), dirChildren: new Map(), selectedFile: null }
+        : {}),
+    })
     writeJsonStorage('ready-pinned-folders', next)
+    if (shouldPromote) {
+      writeStorage('ready-workspace-root', path)
+      void syncFileWatcher(path)
+      get().refreshFiles()
+    }
   },
 
   removePinnedFolder: (path) => {

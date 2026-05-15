@@ -101,8 +101,8 @@ export interface TurnTranscriptEvent {
   projectionPatch?: Record<string, unknown> | null
 }
 
-import type { TaskType } from '../../../shared/task-types'
-export type { TaskType }
+import type { TaskType as SharedTaskType } from '../../../shared/task-types'
+export type TaskType = SharedTaskType
 
 export type TaskInteractionState =
   | 'running'

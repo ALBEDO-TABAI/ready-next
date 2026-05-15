@@ -30,6 +30,29 @@ test('NotePreview renders markdown tables with a dedicated preview shell', () =>
   assert.match(html, /note-preview-markdown-td/)
 })
 
+test('NotePreview renders mermaid fences through a dedicated diagram block', () => {
+  const markdown = [
+    '# 图表',
+    '',
+    '```mermaid',
+    'graph TD',
+    '  A[开始] --> B[结束]',
+    '```',
+  ].join('\n')
+
+  const html = renderToStaticMarkup(
+    React.createElement(NotePreview, {
+      content: markdown,
+      notePath: '/tmp/diagram.md',
+    }),
+  )
+
+  assert.match(html, /data-ready-heading-title="图表"/)
+  assert.match(html, /data-ready-mermaid="true"/)
+  assert.match(html, /note-preview-mermaid/)
+  assert.doesNotMatch(html, /<pre class="note-preview-markdown-pre"><div class="note-preview-mermaid/)
+})
+
 test('NotePreview preserves ordered, unordered and nested markdown list structure', () => {
   const markdown = [
     '3. 有序列表第一项',
