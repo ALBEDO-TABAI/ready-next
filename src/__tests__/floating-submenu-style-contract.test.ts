@@ -31,6 +31,37 @@ test('files panel dropdown menus stay within the sidebar and do not hide browser
   assert.match(filesPanel, /const moreMenuStyle = buildFloatingMenuSurfaceStyle\(188/)
 })
 
+test('file tree context menus use a native popup above BrowserView without hiding browser content', () => {
+  const contextMenu = readWorkspaceFile('src/renderer/components/layout/ContextMenu.tsx')
+  const fileTree = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
+  const editorContextMenu = readWorkspaceFile('src/renderer/components/document/EditorContextMenu.tsx')
+  const skillsCenter = readWorkspaceFile('src/renderer/components/layout/SkillsCenterPanel.tsx')
+  const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
+  const browserContextMenu = readWorkspaceFile('src/main/modules/browser-engine/context-menu-service.ts')
+  const nativeMenuIpc = readWorkspaceFile('src/main/modules/app-control/native-context-menu-ipc.ts')
+  const preload = readWorkspaceFile('src/preload/index.ts')
+
+  assert.match(contextMenu, /portal = true/)
+  assert.match(contextMenu, /createPortal\(menu, document\.body\)/)
+  assert.doesNotMatch(contextMenu, /BROWSER_OVERLAY_LOCK_EVENT/)
+  assert.doesNotMatch(contextMenu, /browser\?\.hideAll/)
+  assert.doesNotMatch(contextMenu, /browser\?\.showActive/)
+  assert.match(fileTree, /<ContextMenuBridge/)
+  assert.match(fileTree, /showNativeContextMenu/)
+  assert.match(fileTree, /iconTextById/)
+  assert.match(fileTree, /if \(nativeMenuAvailable\) \{\s*return null\s*\}/)
+  assert.doesNotMatch(fileTree, /portal=\{false\}/)
+  assert.match(editorContextMenu, /<ContextMenu/)
+  assert.doesNotMatch(editorContextMenu, /portal=\{false\}/)
+  assert.match(skillsCenter, /<ContextMenu/)
+  assert.doesNotMatch(skillsCenter, /portal=\{false\}/)
+  assert.match(chatPanel, /<ContextMenu[\s\S]*portal/)
+  assert.match(browserContextMenu, /menu\.popup\(\{ window: this\.host\.mainWindow \}\)/)
+  assert.match(nativeMenuIpc, /Menu\.buildFromTemplate\(template\)/)
+  assert.match(nativeMenuIpc, /menu\.popup\(/)
+  assert.match(preload, /showNativeContextMenu/)
+})
+
 test('shared submenu styles use the denser browser-like frosted background and hover treatment', () => {
   const styles = readWorkspaceFile('src/renderer/components/layout/filesPanelFloatingMenu.css')
 

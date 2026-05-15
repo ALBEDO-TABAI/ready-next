@@ -9,6 +9,7 @@ import { useWorkspace, type FileItem } from '../../stores/useWorkspace'
 import { useMode, type WorkbenchMode } from '../../stores/useMode'
 import { toLocalFileUrl } from '../../utils/dragDrop'
 import ContextMenu, { type ContextMenuItem } from './ContextMenu'
+import type { NativeContextMenuItem } from '../../../shared/native-context-menu'
 import { FolderPreview } from './FolderPreview'
 import { describeFolderPreview } from './folderPreviewModel'
 import {
@@ -1776,6 +1777,10 @@ function ContextMenuBridge({
     refreshFiles,
   } = useWorkspace()
 
+  const nativeMenuAvailable = Boolean(
+    typeof window !== 'undefined' && window.electronAPI?.ui?.showNativeContextMenu,
+  )
+
   const getContextItems = useCallback((item: FileItem | null): ContextMenuItem[] => {
     if (!item) {
       return [
@@ -1859,9 +1864,74 @@ function ContextMenuBridge({
     ]
   }, [onOpenFile, startRenaming, copyPathToClipboard, startCreating, showInFolder, deleteItem, refreshFiles])
 
+  const contextItems = useMemo(() => getContextItems(contextMenu.item), [contextMenu.item, getContextItems])
+
+  const toNativeContextItems = useCallback((items: ContextMenuItem[]): NativeContextMenuItem[] => {
+    const iconTextById: Record<string, string> = {
+      open: '↩',
+      rename: '✎',
+      copyPath: '⧉',
+      newFile: '+',
+      newFolder: '⊞',
+      showInFinder: '↗',
+      refresh: '↻',
+      delete: '⌫',
+    }
+    const acceleratorById: Record<string, string> = {
+      rename: 'Enter',
+      copyPath: 'Alt+Command+C',
+    }
+    return items.map((item) => ({
+      id: item.id,
+      label: item.label,
+      enabled: !item.disabled,
+      separator: item.separator,
+      iconText: item.separator ? undefined : iconTextById[item.id],
+      accelerator: item.separator ? undefined : acceleratorById[item.id],
+    }))
+  }, [])
+
+  useEffect(() => {
+    if (!nativeMenuAvailable) return
+    let cancelled = false
+    const actionById = new Map(
+      contextItems
+        .filter((item) => !item.separator)
+        .map((item) => [item.id, item]),
+    )
+    void window.electronAPI.ui?.showNativeContextMenu({
+      x: contextMenu.x,
+      y: contextMenu.y,
+      items: toNativeContextItems(contextItems),
+    }).then((result) => {
+      if (cancelled) return
+      if (!result?.success || !result.selectedId) {
+        onClose()
+        return
+      }
+      const item = actionById.get(result.selectedId)
+      if (!item || item.disabled) {
+        onClose()
+        return
+      }
+      item.onClick?.()
+      onClose()
+    }).catch(() => {
+      if (!cancelled) onClose()
+    })
+
+    return () => {
+      cancelled = true
+    }
+  }, [contextItems, contextMenu.x, contextMenu.y, nativeMenuAvailable, onClose, toNativeContextItems])
+
+  if (nativeMenuAvailable) {
+    return null
+  }
+
   return (
     <ContextMenu
-      items={getContextItems(contextMenu.item)}
+      items={contextItems}
       x={contextMenu.x}
       y={contextMenu.y}
       onClose={onClose}

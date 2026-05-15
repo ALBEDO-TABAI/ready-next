@@ -1841,6 +1841,47 @@ describe('useWorkspace Store', () => {
         assert.strictEqual(useWorkspace.getState().selectedFile, '/a.md')
     })
 
+    it('should clear stale file tree entries when delete target is already gone', async () => {
+        const modified = new Date().toISOString()
+        ;(globalThis as any).window.electronAPI = {
+            document: {
+                deleteItem: async () => ({ success: false, error: 'Not found' }),
+                listFiles: async (path: string) => ({
+                    success: true,
+                    items: path === '/workspace'
+                        ? [{ name: 'keep.md', path: '/workspace/keep.md', isDirectory: false, size: 200, modified }]
+                        : [],
+                }),
+            },
+        }
+
+        useWorkspace.setState({
+            currentPath: '/workspace/ghost',
+            files: [
+                { name: 'ghost', path: '/workspace/ghost', isDirectory: true, size: 0, modified: new Date() },
+                { name: 'keep.md', path: '/workspace/keep.md', isDirectory: false, size: 200, modified: new Date() },
+            ],
+            selectedFile: '/workspace/ghost/Book.md',
+            expandedDirs: new Set(['/workspace/ghost', '/workspace/ghost/nested']),
+            dirChildren: new Map([
+                ['/workspace', [
+                    { name: 'ghost', path: '/workspace/ghost', isDirectory: true, size: 0, modified: new Date() },
+                ]],
+            ]),
+        })
+
+        const result = await useWorkspace.getState().deleteItem('/workspace/ghost')
+        const state = useWorkspace.getState()
+
+        assert.strictEqual(result, true)
+        assert.strictEqual(state.currentPath, '/workspace')
+        assert.deepStrictEqual(state.files.map((item) => item.path), ['/workspace/keep.md'])
+        assert.strictEqual(state.selectedFile, null)
+        assert.strictEqual(state.expandedDirs.has('/workspace/ghost'), false)
+        assert.strictEqual(state.expandedDirs.has('/workspace/ghost/nested'), false)
+        assert.deepStrictEqual(state.dirChildren.get('/workspace')?.map((item) => item.path), ['/workspace/keep.md'])
+    })
+
     it('should set currentPath and trigger mock file loading', () => {
         useWorkspace.getState().setCurrentPath('/test/dir')
         const state = useWorkspace.getState()

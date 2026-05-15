@@ -1,8 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 
-const BROWSER_OVERLAY_LOCK_EVENT = 'ready:browser-overlay-lock'
-
 export interface ContextMenuItem {
   id: string
   label: string
@@ -19,12 +17,11 @@ interface ContextMenuProps {
   x: number
   y: number
   onClose: () => void
-  lockBrowserView?: boolean
   portal?: boolean
   boundary?: { left: number; top: number; right: number; bottom: number }
 }
 
-export default function ContextMenu({ items, x, y, onClose, lockBrowserView = true, portal = false, boundary }: ContextMenuProps) {
+export default function ContextMenu({ items, x, y, onClose, portal = true, boundary }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
   const [adjustedPos, setAdjustedPos] = useState({ x, y })
   const [hoveredItemId, setHoveredItemId] = useState<string | null>(null)
@@ -34,23 +31,6 @@ export default function ContextMenu({ items, x, y, onClose, lockBrowserView = tr
     item.onClick?.()
     onClose()
   }
-
-  useLayoutEffect(() => {
-    if (!lockBrowserView) return
-    window.dispatchEvent(
-      new CustomEvent(BROWSER_OVERLAY_LOCK_EVENT, {
-        detail: { source: 'context-menu', locked: true },
-      }),
-    )
-
-    return () => {
-      window.dispatchEvent(
-        new CustomEvent(BROWSER_OVERLAY_LOCK_EVENT, {
-          detail: { source: 'context-menu', locked: false },
-        }),
-      )
-    }
-  }, [lockBrowserView])
 
   useLayoutEffect(() => {
     if (!menuRef.current) return

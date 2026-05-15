@@ -75,13 +75,18 @@ function safeAssetName(sourcePath: string, usedNames: Set<string>): string {
   return candidate
 }
 
-function uniqueOutputDir(sourcePath: string): string {
+function assetsDirForMarkdown(markdownPath: string): string {
+  return join(dirname(markdownPath), `${basename(markdownPath, extname(markdownPath))}.assets`)
+}
+
+function uniqueMarkdownOutputPath(sourcePath: string, fileName: string): string {
   const parent = dirname(sourcePath)
-  const stem = basename(sourcePath, extname(sourcePath)) || 'ebook'
-  let candidate = join(parent, stem)
+  const ext = extname(fileName) || '.md'
+  const stem = basename(fileName, ext) || 'ebook'
+  let candidate = join(parent, `${stem}${ext}`)
   let counter = 2
-  while (existsSync(candidate)) {
-    candidate = join(parent, `${stem} ${counter}`)
+  while (existsSync(candidate) || existsSync(assetsDirForMarkdown(candidate))) {
+    candidate = join(parent, `${stem} ${counter}${ext}`)
     counter += 1
   }
   return candidate
@@ -302,9 +307,10 @@ async function rewriteAssets(
     const isImage = IMAGE_MEDIA_TYPES.has(file.comment || '') || /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(lower)
     if (!isImage || attr !== 'src') continue
     const assetName = safeAssetName(resolved, usedAssetNames)
+    await mkdir(assetsDir, { recursive: true })
     await writeFile(join(assetsDir, assetName), await file.async('nodebuffer'))
     assetCount += 1
-    replacements.push({ raw, next: ` src="assets/${assetName}"` })
+    replacements.push({ raw, next: ` src="${basename(assetsDir)}/${assetName}"` })
   }
   let nextHtml = html
   for (const replacement of replacements) {
@@ -333,9 +339,8 @@ export async function importEpubAsMarkdown(sourcePath: string): Promise<EbookMar
 
     const pkg = parsePackage(await opfFile.async('text'), opfPath)
     const bookTitle = resolveBookTitle(pkg, sourcePath)
-    const outputDir = uniqueOutputDir(sourcePath)
-    const assetsDir = join(outputDir, 'assets')
-    await mkdir(assetsDir, { recursive: true })
+    const indexPath = uniqueMarkdownOutputPath(sourcePath, safeMarkdownFileName(bookTitle))
+    const assetsDir = assetsDirForMarkdown(indexPath)
 
     const turndown = createTurndown()
     const usedAssetNames = new Set<string>()
@@ -373,12 +378,11 @@ export async function importEpubAsMarkdown(sourcePath: string): Promise<EbookMar
       ? `\n\n<!-- 导入提示：${warnings.join('；')} -->`
       : ''
     const markdown = `${EBOOK_MARKDOWN_MARKER}\n\n# ${bookTitle}\n\n${sections.join('\n\n')}${warningBlock}\n`
-    const indexPath = join(outputDir, safeMarkdownFileName(bookTitle))
     await writeFile(indexPath, markdown, 'utf-8')
 
     return {
       success: true,
-      outputDir,
+      outputDir: dirname(indexPath),
       indexPath,
       assetCount,
       warnings,

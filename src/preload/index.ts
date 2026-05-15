@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import type { BrowserBoundsSyncMode } from '../shared/browser-view-layout'
 import type { BrowserUtilityMenuRequest } from '../shared/browser-utility-menu'
+import type { NativeContextMenuRequest } from '../shared/native-context-menu'
 import type { RendererAgentMetricName } from '../shared/renderer-agent-metrics'
 import type { PetActivitySnapshot, PetSettings, PetStickyNoteInput, PetWindowSnapshot } from '../shared/pet'
 
@@ -712,6 +713,10 @@ const toolsAPI = {
   }) => ipcRenderer.send('tools:logToolEvent', payload),
 }
 
+const uiAPI = {
+  showNativeContextMenu: (payload: NativeContextMenuRequest) => ipcRenderer.invoke('ui:showNativeContextMenu', payload),
+}
+
 // Expose APIs to renderer
 contextBridge.exposeInMainWorld('electronAPI', {
   agent: agentAPI,
@@ -732,6 +737,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   userProfile: userProfileAPI,
   agentPersonality: agentPersonalityAPI,
   tools: toolsAPI,
+  ui: uiAPI,
   platform: process.platform,
   // Utility for drag-and-drop: get real file path from File object
   getFilePathFromDrop: (file: File) => webUtils.getPathForFile(file),
@@ -759,6 +765,7 @@ declare global {
       userProfile: typeof userProfileAPI
       agentPersonality: typeof agentPersonalityAPI
       tools: typeof toolsAPI
+      ui: typeof uiAPI
       platform: string
       getFilePathFromDrop: (file: File) => string
     }

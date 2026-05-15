@@ -3852,7 +3852,6 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
           x={agentSelectionMenu.x}
           y={agentSelectionMenu.y}
           boundary={agentSelectionMenu.boundary}
-          lockBrowserView={false}
           portal
           onClose={() => setAgentSelectionMenu(null)}
           items={[

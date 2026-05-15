@@ -22,6 +22,7 @@ import { setupPetIPC } from './modules/pet/ipc-handler'
 import type { PetWindowManager } from './modules/pet/pet-window-manager'
 import { applyBundledAISettingsSeed } from './modules/settings-engine/seed-loader'
 import { setupAppCacheIPC } from './modules/app-control/cache-stats-ipc'
+import { setupNativeContextMenuIPC } from './modules/app-control/native-context-menu-ipc'
 import { setupSkillsIPC } from './modules/skills-runtime/ipc-handler'
 import { setupMemoryManagementIPC } from './modules/memory-management/ipc-handler'
 import { rsshubManager } from './modules/rss-engine/rsshub-process'
@@ -369,6 +370,7 @@ function setupGlobalIPC(): void {
       ensureDockApp: ensureDockIconVisible,
     })
   setupAppCacheIPC()
+  setupNativeContextMenuIPC(() => mainWindow)
   setupSkillsIPC()
   setupMemoryManagementIPC()
 

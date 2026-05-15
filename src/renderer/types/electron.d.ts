@@ -1,6 +1,7 @@
 import type { BrowserDiagnosticsData } from '../modules/browser/types'
 import type { BrowserUtilityMenuRequest } from '../../shared/browser-utility-menu'
 import type { BrowserBoundsSyncMode } from '../../shared/browser-view-layout'
+import type { NativeContextMenuRequest, NativeContextMenuResponse } from '../../shared/native-context-menu'
 import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runtime'
 import type { RendererAgentMetricName } from '../../shared/renderer-agent-metrics'
 import type {
@@ -2451,6 +2452,10 @@ interface ElectronToolsAPI {
   logToolEvent: (payload: ToolEventLogPayload) => void
 }
 
+interface ElectronUIAPI {
+  showNativeContextMenu: (payload: NativeContextMenuRequest) => Promise<NativeContextMenuResponse>
+}
+
 // =============================================================================
 // Top-level API
 // =============================================================================
@@ -2474,6 +2479,7 @@ interface ElectronAPI {
   userProfile: ElectronUserProfileAPI
   agentPersonality: ElectronAgentPersonalityAPI
   tools?: ElectronToolsAPI
+  ui?: ElectronUIAPI
   platform: string
   getFilePathFromDrop: (file: File) => string
 }

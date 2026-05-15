@@ -769,20 +769,21 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         const state = get()
         const parentPath = getDirName(path)
         const result = await window.electronAPI.document.deleteItem(path)
-        if (result.success) {
-          if (state.currentPath === path) {
+        const alreadyGone = !result.success && /not found|enoent/i.test(String(result.error || ''))
+        if (result.success || alreadyGone) {
+          if (isSameOrDescendantPath(state.currentPath, path)) {
             set({ currentPath: parentPath })
           }
           await get().refreshFiles()
           const currentState = get()
           const cleanedExpanded = new Set<string>()
           currentState.expandedDirs.forEach((dir) => {
-            if (dir !== path && !dir.startsWith(`${path}/`) && !dir.startsWith(`${path}\\`)) {
+            if (!isSameOrDescendantPath(dir, path)) {
               cleanedExpanded.add(dir)
             }
           })
           set({
-            selectedFile: currentState.selectedFile === path ? null : currentState.selectedFile,
+            selectedFile: currentState.selectedFile && isSameOrDescendantPath(currentState.selectedFile, path) ? null : currentState.selectedFile,
             expandedDirs: cleanedExpanded,
           })
           await get().loadDirChildren(parentPath)
