@@ -97,6 +97,7 @@ export interface PendingContinuationIntent {
   runStatePath?: string
   outputDir?: string
   progressFingerprint?: string
+  childRunId?: string
 }
 
 interface AgentSendResult {
@@ -123,6 +124,7 @@ interface AgentState {
   currentAgent: string
   inputValue: string
   pendingContinuationIntent: PendingContinuationIntent | null
+  pendingContinuationDraftAnchor: string | null
   isStreaming: boolean
   foregroundBusy: boolean
   composerLocked: boolean
@@ -200,6 +202,8 @@ function mapScopeToConversation(scope: ConversationScope): ChatConversation {
 }
 
 const DEFAULT_SEND_COALESCE_WINDOW_MS = 1200
+const CONTINUATION_DRAFT_PATTERN =
+  /^(?:请|请你|麻烦你)?(?:(?:继续(?:当前|这个|刚才|上次|任务|处理|执行|完成|一下)?|接着(?:来|做|处理|执行|完成)?|恢复(?:上次|刚才|当前)?|重试(?:一次|一下)?|重试刚才的任务|再试(?:一次|一下)?|再来(?:一次|一下)?|重新(?:跑|执行|做|开始)(?:一次|一下|一轮|一遍)?|从头(?:跑|来|做|开始|重新)(?:一次|一下|一轮|一遍)?|确认继续|暂不继续|我已完成|人工步骤已完成|请重试刚才的任务)(?:$|[\s，。,.!?！？])|继续后台任务(?:$|\s)|(?:continue|retry|resume)(?:$|\s))/i
 
 let pendingSendTimer: ReturnType<typeof setTimeout> | null = null
 let pendingSendBuffer:
@@ -210,6 +214,26 @@ let pendingSendBuffer:
   }
   | null = null
 let bypassCoalescingOnce = false
+
+function normalizeContinuationDraftText(value: string): string {
+  return String(value || '').trim().replace(/\s+/g, '')
+}
+
+function shouldPreserveContinuationIntent(params: {
+  preserveRequested?: boolean
+  pendingIntent: PendingContinuationIntent | null
+  draftAnchor: string | null
+  nextValue: string
+}): boolean {
+  if (!params.preserveRequested || !params.pendingIntent) return false
+  const next = normalizeContinuationDraftText(params.nextValue)
+  if (!next) return true
+
+  const anchor = normalizeContinuationDraftText(params.draftAnchor || '')
+  if (anchor && (next.startsWith(anchor) || anchor.startsWith(next))) return true
+
+  return CONTINUATION_DRAFT_PATTERN.test(params.nextValue.trim())
+}
 
 async function persistLocalConversationScope(scope: ConversationScope | null): Promise<void> {
   if (!scope || scope.sourceKind !== 'local') return
@@ -306,6 +330,7 @@ export const useAgent = create<AgentState>((set, get) => ({
   currentAgent: 'butler',
   inputValue: '',
   pendingContinuationIntent: null,
+  pendingContinuationDraftAnchor: null,
   isStreaming: false,
   foregroundBusy: false,
   composerLocked: false,
@@ -349,19 +374,30 @@ export const useAgent = create<AgentState>((set, get) => ({
     )
   })),
 
-  setInputValue: (value, options) => set({
-    inputValue: value,
-    pendingContinuationIntent: options?.preserveContinuationIntent
-      ? get().pendingContinuationIntent
-      : null,
+  setInputValue: (value, options) => set((state) => {
+    const preserveContinuation = shouldPreserveContinuationIntent({
+      preserveRequested: options?.preserveContinuationIntent,
+      pendingIntent: state.pendingContinuationIntent,
+      draftAnchor: state.pendingContinuationDraftAnchor,
+      nextValue: value,
+    })
+    return {
+      inputValue: value,
+      pendingContinuationIntent: preserveContinuation ? state.pendingContinuationIntent : null,
+      pendingContinuationDraftAnchor: preserveContinuation ? state.pendingContinuationDraftAnchor : null,
+    }
   }),
 
   setComposerDraft: (value, continuationIntent) => set({
     inputValue: value,
     pendingContinuationIntent: continuationIntent || null,
+    pendingContinuationDraftAnchor: continuationIntent ? value : null,
   }),
 
-  clearPendingContinuationIntent: () => set({ pendingContinuationIntent: null }),
+  clearPendingContinuationIntent: () => set({
+    pendingContinuationIntent: null,
+    pendingContinuationDraftAnchor: null,
+  }),
 
   setIsStreaming: (streaming) => set({
     isStreaming: streaming,
@@ -555,6 +591,7 @@ export const useAgent = create<AgentState>((set, get) => ({
       messages: restored,
       inputValue: undoneContent,
       pendingContinuationIntent: null,
+      pendingContinuationDraftAnchor: null,
       isStreaming: false,
       foregroundBusy: false,
       composerLocked: false,
@@ -613,6 +650,7 @@ export const useAgent = create<AgentState>((set, get) => ({
       attachments: [],
       filePool: [],
       pendingContinuationIntent: null,
+      pendingContinuationDraftAnchor: null,
       taskDisclosureState: {},
     })
     void persistLocalConversationScope(fallbackScope)
@@ -693,6 +731,7 @@ export const useAgent = create<AgentState>((set, get) => ({
         isStreaming: isStreamingScopeRunState(activeRunState),
         streamingRequestId: activeRunState?.requestId || null,
         pendingContinuationIntent: null,
+        pendingContinuationDraftAnchor: null,
       })
     } catch { /* ignore */ }
   },
@@ -751,6 +790,7 @@ export const useAgent = create<AgentState>((set, get) => ({
         attachments: [],
         filePool: [],
         pendingContinuationIntent: null,
+        pendingContinuationDraftAnchor: null,
       })
     } catch { /* ignore */ }
   },
@@ -1275,7 +1315,7 @@ export const useAgent = create<AgentState>((set, get) => ({
             errorKind: result.errorKind || 'unknown',
           }
         }
-        set({ pendingContinuationIntent: null })
+        set({ pendingContinuationIntent: null, pendingContinuationDraftAnchor: null })
         // Stream data arrives via onStream listener
         // Persistence of assistant message happens in onStream 'done' handler
         return { success: true, shouldClearInput: true, preserveInput: false }

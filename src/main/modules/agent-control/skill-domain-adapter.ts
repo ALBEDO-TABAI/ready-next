@@ -183,13 +183,13 @@ export class SkillDomainAdapter implements DomainAdapter {
       return {
         domainState: state,
         projection: {
-          phase: 'blocked',
+          phase: 'done',
           summary: '本轮没有可用的 skill 工具',
           waitingFor: 'none',
-          resumableActions: ['retry', 'cancel'],
-          blockedReason: '未解析到可用的 skill_* 工具',
+          resumableActions: ['none'],
+          blockedReason: null,
         },
-        finish: { status: 'done', success: false },
+        finish: { status: 'done', success: true },
       }
     }
     return {

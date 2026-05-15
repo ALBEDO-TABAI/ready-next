@@ -44,8 +44,9 @@ test('skill adapter surfaces no-tool dispatch failures as a task projection patc
   assert.equal(patch?.module, 'skill')
   assert.equal(patch?.taskTitle, 'Skill 任务')
   assert.equal(patch?.taskSummary, '本轮没有可用的 skill 工具')
-  assert.equal(patch?.blockedReason, '未解析到可用的 skill_* 工具')
-  assert.deepEqual(patch?.resumableActions, ['retry', 'cancel'])
+  assert.equal(patch?.blockedReason, null)
+  assert.deepEqual(patch?.resumableActions, ['none'])
+  assert.equal(result.finish?.success, true)
 })
 
 test('skill adapter keeps clarification waiting patches blocked', () => {

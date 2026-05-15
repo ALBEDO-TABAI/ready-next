@@ -120,6 +120,31 @@ test('selectContinuationProjection prefers the most recently updated continuatio
   assert.equal(selected?.taskId, 'task-newer')
 })
 
+test('selectContinuationProjection ignores blocked skill shells with no continuation anchor', () => {
+  const emptyShell = createProjection({
+    taskId: 'task-empty-shell',
+    taskSummary: '本轮没有可用的 skill 工具',
+    blockedReason: '未解析到可用的 skill_* 工具',
+    resumableActions: ['retry', 'cancel'],
+    continuationRef: null,
+  })
+  const reconciledShell = createProjection({
+    taskId: 'task-reconciled-shell',
+    taskSummary: '本轮没有可用的 skill 工具',
+    blockedReason: '任务状态已过期，缺少可续跑句柄',
+    resumableActions: ['none'],
+    continuationRef: null,
+    updatedAt: '2026-04-17T00:00:03.000Z',
+  })
+
+  const selected = selectContinuationProjection({
+    projections: [emptyShell, reconciledShell],
+    userText: '继续刚才那个任务',
+  })
+
+  assert.equal(selected, null)
+})
+
 test('buildContinuationStateFromProjection keeps a single continuation identity across projection and restore data', () => {
   const projection = createProjection()
 

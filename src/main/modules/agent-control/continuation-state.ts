@@ -11,6 +11,7 @@ import { isTaskType } from '../../../shared/task-types'
 import { buildRequestEnvelope, type RequestEnvelope } from './request-envelope'
 import { logAgentMetric } from './metrics'
 import { matchesResumeIntent } from './resume-lexicon'
+import { canResumeShape } from './resume-handle'
 import type { ScopeRunResumableAction, ScopeRunTaskContinuation } from './types'
 
 export interface ContinuationState {
@@ -411,12 +412,38 @@ export function sanitizeContinuationRequest(params: {
 
 export function isContinuationProjectionCandidate(projection: TaskProjectionRecord | null | undefined): boolean {
   if (!projection) return false
+  if (!isProjectionEligibleForImplicitContinuation(projection)) return false
   return (
     projection.status === 'blocked'
     || projection.status === 'running'
     || projection.interactionState === 'resuming'
     || projection.taskType === 'continuation'
   )
+}
+
+function skillProjectionHasContinuationAnchor(projection: TaskProjectionRecord): boolean {
+  const ref = projection.continuationRef || null
+  if (!ref) return false
+  if (canResumeShape({
+    childRunId: ref.childRunId,
+    detachedTaskId: ref.detachedTaskId,
+    outputDir: ref.outputDir,
+    runStatePath: ref.runStatePath,
+  })) {
+    return true
+  }
+  return Boolean(
+    ref.executionId
+    || ref.todoId
+    || ref.blockerType
+    || ref.targetUrl,
+  )
+}
+
+function isProjectionEligibleForImplicitContinuation(projection: TaskProjectionRecord): boolean {
+  if (projection.module !== 'skill') return true
+  if (projection.status === 'failed') return true
+  return skillProjectionHasContinuationAnchor(projection)
 }
 
 /**
@@ -476,7 +503,9 @@ export function selectContinuationProjection(params: {
   // skill executions (audit Phase 2 §B4). New behavior: returning null when
   // no live candidate exists lets the upstream gate fall back to "fresh
   // task" routing instead of a stale resume.
-  const liveProjections = sortedProjections.filter((item) => !isTerminalProjection(item))
+  const liveProjections = sortedProjections.filter((item) =>
+    !isTerminalProjection(item) && isProjectionEligibleForImplicitContinuation(item)
+  )
   // Phase 5.4 — observability: count how often the terminal filter actually
   // saved us from picking a closed task. Emitted only when the filter
   // dropped at least one candidate so the metric stays signal-not-noise.

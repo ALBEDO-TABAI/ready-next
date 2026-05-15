@@ -168,6 +168,11 @@ test('Phase 2.5 — selectContinuationProjection excludes terminal-status tasks 
     taskId: 'task-blocked',
     status: 'blocked',
     updatedAt: '2026-04-27T00:00:00.000Z',
+    continuationRef: {
+      taskId: 'task-blocked',
+      executionId: 'exec-blocked',
+      blockerType: 'need_confirmation',
+    },
   })
   const done = makeProjection({
     taskId: 'task-done',
@@ -265,10 +270,20 @@ test('Phase 2.5 — does not regress: blocked tasks sorted by updatedAt (newer f
   const older = makeProjection({
     taskId: 'task-older',
     updatedAt: '2026-04-27T00:00:01.000Z',
+    continuationRef: {
+      taskId: 'task-older',
+      executionId: 'exec-older',
+      blockerType: 'need_confirmation',
+    },
   })
   const newer = makeProjection({
     taskId: 'task-newer',
     updatedAt: '2026-04-27T00:00:03.000Z',
+    continuationRef: {
+      taskId: 'task-newer',
+      executionId: 'exec-newer',
+      blockerType: 'need_confirmation',
+    },
   })
 
   const selected = selectContinuationProjection({

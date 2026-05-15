@@ -269,6 +269,11 @@ test('SCREENSHOT BUG — blocked task still preferred over failed when both exis
     taskId: 'task-blocked',
     status: 'blocked',
     updatedAt: '2026-04-27T01:00:00.000Z',
+    continuationRef: {
+      taskId: 'task-blocked',
+      executionId: 'exec-blocked',
+      blockerType: 'need_confirmation',
+    },
   })
   const failed = makeProjection({
     taskId: 'task-failed',

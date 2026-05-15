@@ -246,12 +246,12 @@ function AISettingsFieldCard({
       className={`settings-ai-light-card rounded-2xl border ${wide ? 'md:col-span-2' : ''}`}
       style={{
         ...SETTINGS_FLAT_CARD_STYLE,
-        padding: '14px 16px',
+        padding: '16px 18px',
       }}
     >
       <div className="min-w-0">
         <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>{title}</div>
-        <div className="text-[11px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>{description}</div>
+        <div className="text-[11px] mt-1 leading-5" style={{ color: 'var(--text-light)', maxWidth: 560 }}>{description}</div>
       </div>
       <div className="mt-3 min-w-0">{control}</div>
     </div>
@@ -278,10 +278,10 @@ function AISettingsCapabilityChip({
       className="settings-ai-light-chip flex items-center gap-2 rounded-full border"
       style={{
         ...SETTINGS_FLAT_CHIP_STYLE,
-        padding: '6px 10px',
+        padding: '7px 11px',
       }}
     >
-      <span className="text-[10px] uppercase tracking-[0.16em]" style={{ color: 'var(--text-light)' }}>{label}</span>
+      <span className="text-[10px]" style={{ color: 'var(--text-light)' }}>{label}</span>
       <span className="text-[11px] font-semibold" style={{ color }}>{value}</span>
     </div>
   )
@@ -296,15 +296,61 @@ function AISettingsInfoChip({
 }) {
   return (
     <div
-      className="settings-ai-light-chip rounded-xl border"
+      className="settings-ai-light-chip rounded-2xl border"
       style={{
         ...SETTINGS_FLAT_CHIP_STYLE,
-        padding: '10px 12px',
+        padding: '10px 14px',
       }}
     >
-      <div className="text-[10px] uppercase tracking-[0.14em]" style={{ color: 'var(--text-light)' }}>{label}</div>
+      <div className="text-[10px]" style={{ color: 'var(--text-light)' }}>{label}</div>
       <div className="mt-1 text-[12px] font-medium leading-5" style={{ color: 'var(--text-body)' }}>{value}</div>
     </div>
+  )
+}
+
+function AISettingsSwitch({
+  checked,
+  onChange,
+  label,
+  stopPropagation = false,
+}: {
+  checked: boolean
+  onChange: (checked: boolean) => void
+  label?: string
+  stopPropagation?: boolean
+}) {
+  return (
+    <label
+      className="inline-flex items-center gap-2 text-[11px] font-medium"
+      style={{ color: 'var(--text-light)' }}
+      onClick={(event) => {
+        if (stopPropagation) event.stopPropagation()
+      }}
+    >
+      {label && <span>{label}</span>}
+      <span
+        className="relative inline-flex h-6 w-11 shrink-0 rounded-full border transition-[background-color,border-color]"
+        style={{
+          borderColor: checked
+            ? 'color-mix(in srgb, var(--color-blue) 42%, transparent)'
+            : 'color-mix(in srgb, var(--surface-border) 68%, transparent)',
+          background: checked
+            ? 'color-mix(in srgb, var(--color-blue) 78%, var(--surface-floating-bg) 22%)'
+            : 'color-mix(in srgb, var(--surface-floating-bg) 72%, var(--bg-content) 28%)',
+        }}
+      >
+        <span
+          className="absolute top-[3px] h-[18px] w-[18px] rounded-full bg-white shadow-sm transition-transform"
+          style={{ transform: checked ? 'translateX(20px)' : 'translateX(3px)' }}
+        />
+      </span>
+      <input
+        type="checkbox"
+        checked={checked}
+        onChange={(event) => onChange(event.target.checked)}
+        className="sr-only"
+      />
+    </label>
   )
 }
 
@@ -372,22 +418,22 @@ function AISettingsPanel() {
     : capabilities?.wireApi === 'responses'
       ? 'OpenAI /responses'
       : 'OpenAI /chat/completions'
-  const compactInputStyle = {
-    ...SETTINGS_FLAT_INPUT_STYLE,
-    padding: '6px 12px',
-  }
   const compactSelectStyle = {
     ...SETTINGS_FLAT_INPUT_STYLE,
-    padding: '6px 28px 6px 12px',
+    borderRadius: 14,
+    padding: '8px 28px 8px 12px',
   }
   const stackedInputStyle = {
-    ...compactInputStyle,
+    ...SETTINGS_FLAT_INPUT_STYLE,
+    borderRadius: 16,
+    padding: '11px 14px',
     width: '100%',
     textAlign: 'left' as const,
   }
   const stackedSelectStyle = {
     ...SETTINGS_FLAT_INPUT_STYLE,
-    padding: '6px 28px 6px 12px',
+    borderRadius: 16,
+    padding: '11px 34px 11px 14px',
     width: '100%',
   }
   const capabilityRuntimeConfig = useMemo(() => ({
@@ -546,7 +592,7 @@ function AISettingsPanel() {
   ]
 
   return (
-    <div className="settings-ai-panel flex flex-col gap-6">
+    <div className="settings-ai-panel flex flex-col gap-5">
       {saveStatus === 'error' && (
         <div
           className="settings-ai-light-card flex items-center gap-2 rounded-2xl border"
@@ -565,13 +611,13 @@ function AISettingsPanel() {
         className="glass-surface-card rounded-2xl border"
         style={{
           ...SETTINGS_CARD_STYLE,
-          padding: '16px 18px',
+          padding: '22px 24px',
         }}
       >
-        <div className="flex items-start justify-between gap-4 flex-wrap">
+        <div className="flex items-start justify-between gap-5 flex-wrap">
           <div className="min-w-0">
-            <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>模型配置</div>
-            <div className="text-[11px] mt-1 leading-5" style={{ color: 'var(--text-light)', maxWidth: 760 }}>
+            <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>模型入口</div>
+            <div className="text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)', maxWidth: 680 }}>
               只保留 OpenAI、Anthropic、Gemini 三个内置入口，其他供应商统一放进自定义预设。每个预设都可以决定是否在聊天切换面板显示。
             </div>
           </div>
@@ -581,17 +627,17 @@ function AISettingsPanel() {
           />
         </div>
 
-        <div className="mt-4 grid grid-cols-2 gap-2 xl:grid-cols-4">
+        <div className="mt-5 grid grid-cols-2 gap-3 xl:grid-cols-4">
           {categoryTabs.map((tab) => {
             const isActive = activeCategory === tab.id
             return (
               <button
                 key={tab.id}
                 onClick={() => selectCategory(tab.id)}
-                className="settings-ai-light-card rounded-2xl border text-left transition-[background-color,border-color,color] duration-200"
+                className="settings-ai-light-card min-h-[76px] rounded-2xl border text-left transition-[background-color,border-color,color] duration-200"
                 style={{
                   ...SETTINGS_FLAT_CARD_STYLE,
-                  padding: '12px 14px',
+                  padding: '15px 17px',
                   ...(isActive ? {
                     borderColor: 'color-mix(in srgb, var(--color-blue) 34%, var(--lg-border-soft) 66%)',
                     background: 'color-mix(in srgb, var(--color-blue-light) 74%, var(--surface-card-bg) 26%)',
@@ -600,7 +646,7 @@ function AISettingsPanel() {
                 }}
               >
                 <div className="text-[13px] font-semibold" style={{ color: isActive ? 'var(--color-blue)' : 'var(--text-title)' }}>{tab.label}</div>
-                <div className="text-[10px] mt-1" style={{ color: 'var(--text-light)' }}>{tab.meta}</div>
+                <div className="text-[11px] mt-1.5" style={{ color: 'var(--text-light)' }}>{tab.meta}</div>
               </button>
             )
           })}
@@ -612,74 +658,84 @@ function AISettingsPanel() {
           className="glass-surface-card rounded-2xl border"
           style={{
             ...SETTINGS_CARD_STYLE,
-            padding: '16px 18px',
+            padding: '22px 24px',
           }}
         >
-          <div className="flex items-start justify-between gap-4 flex-wrap">
-            <div>
-              <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>自定义预设</div>
-              <div className="text-[11px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
+          <div className="flex items-start justify-between gap-5 flex-wrap">
+            <div className="min-w-0">
+              <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>自定义预设</div>
+              <div className="text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)', maxWidth: 620 }}>
                 用来管理 Kimi、FoxCode、火山方舟或你自己的任意模型供应商。
               </div>
             </div>
             <button
               onClick={() => addCustomProfile()}
-              className="rounded-lg text-[12px] font-medium"
+              className="rounded-full text-[12px] font-semibold"
               style={{
                 ...SETTINGS_FLAT_BUTTON_STYLE,
                 background: 'color-mix(in srgb, var(--color-blue) 84%, var(--surface-floating-bg) 16%)',
                 color: '#fff',
-                padding: '7px 12px',
+                padding: '9px 16px',
               }}
             >
               新建自定义预设
             </button>
           </div>
 
-          <div className="mt-4 grid gap-2">
+          <div className="mt-5 grid gap-3">
             {customProfiles.map((profile) => {
               const isSelected = profile.id === selectedProfile?.id
               const isCurrent = profile.id === activeProfile?.id
               return (
-                <button
+                <div
                   key={profile.id}
+                  role="button"
+                  tabIndex={0}
                   onClick={() => selectProfile(profile.id)}
-                  className="settings-ai-light-card rounded-xl border text-left transition-[background-color,border-color,color] duration-200"
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter' || event.key === ' ') {
+                      event.preventDefault()
+                      selectProfile(profile.id)
+                    }
+                  }}
+                  className="settings-ai-light-card rounded-2xl border text-left transition-[background-color,border-color,color] duration-200"
                   style={{
                     ...SETTINGS_FLAT_CARD_STYLE,
-                    padding: '12px 14px',
+                    padding: '14px 18px',
                     ...(isSelected ? {
                       borderColor: 'color-mix(in srgb, var(--color-blue) 32%, var(--lg-border-soft) 68%)',
                       background: 'color-mix(in srgb, var(--color-blue-light) 72%, var(--surface-card-bg) 28%)',
                     } : SETTINGS_FLAT_CARD_STYLE),
                   }}
                 >
-                  <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center justify-between gap-4">
                     <div className="min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-[13px] font-semibold" style={{ color: isSelected ? 'var(--color-blue)' : 'var(--text-title)' }}>{profile.name}</span>
                         {isCurrent && (
-                          <span className="text-[10px] font-semibold" style={{ color: 'var(--color-green)' }}>当前生效</span>
+                          <span
+                            className="rounded-full px-2 py-0.5 text-[10px] font-semibold"
+                            style={{
+                              color: 'var(--color-green)',
+                              background: 'color-mix(in srgb, var(--color-green-light) 72%, transparent)',
+                            }}
+                          >
+                            当前生效
+                          </span>
                         )}
                       </div>
-                      <div className="text-[11px] mt-1 truncate" style={{ color: 'var(--text-light)' }}>
+                      <div className="text-[11px] mt-1.5 truncate" style={{ color: 'var(--text-light)' }}>
                         {profile.config.model || '未设置模型'} · {profile.config.baseUrl || '未设置地址'}
                       </div>
                     </div>
-                    <label
-                      className="flex items-center gap-2 text-[11px] shrink-0"
-                      style={{ color: 'var(--text-light)' }}
-                      onClick={(event) => event.stopPropagation()}
-                    >
-                      <span>在切换面板显示</span>
-                      <input
-                        type="checkbox"
-                        checked={profile.showInChatSwitcher}
-                        onChange={(event) => setProfileVisibility(profile.id, event.target.checked)}
-                      />
-                    </label>
+                    <AISettingsSwitch
+                      label="切换面板显示"
+                      checked={profile.showInChatSwitcher}
+                      onChange={(checked) => setProfileVisibility(profile.id, checked)}
+                      stopPropagation
+                    />
                   </div>
-                </button>
+                </div>
               )
             })}
           </div>
@@ -692,13 +748,13 @@ function AISettingsPanel() {
             className="glass-surface-card rounded-2xl border"
             style={{
               ...SETTINGS_CARD_STYLE,
-              padding: '14px 16px',
+              padding: '22px 24px',
             }}
           >
-            <div className="flex items-start justify-between gap-4 flex-wrap">
+            <div className="flex items-start justify-between gap-5 flex-wrap">
               <div className="min-w-0">
-                <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>{selectedProfile.name}</div>
-                <div className="text-[11px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
+                <div className="text-[15px] font-semibold" style={{ color: 'var(--text-title)' }}>{selectedProfile.name}</div>
+                <div className="text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)', maxWidth: 620 }}>
                   {activeProfile?.id === selectedProfile.id ? '当前默认正在使用这个预设。' : '你可以先调整这里的内容，再决定是否设为当前默认。'}
                 </div>
               </div>
@@ -706,10 +762,10 @@ function AISettingsPanel() {
                 {activeProfile?.id !== selectedProfile.id && (
                   <button
                     onClick={() => activateProfile(selectedProfile.id)}
-                    className="rounded-lg text-[12px] font-medium"
+                    className="rounded-full text-[12px] font-semibold"
                     style={{
                       ...SETTINGS_FLAT_BUTTON_STYLE,
-                      padding: '7px 12px',
+                      padding: '9px 14px',
                     }}
                   >
                     设为当前默认
@@ -718,13 +774,13 @@ function AISettingsPanel() {
                 {!selectedProfile.builtIn && (
                   <button
                     onClick={() => removeCustomProfile(selectedProfile.id)}
-                    className="rounded-lg text-[12px] font-medium"
+                    className="rounded-full text-[12px] font-semibold"
                     style={{
                       ...SETTINGS_FLAT_BUTTON_STYLE,
                       borderColor: 'color-mix(in srgb, var(--color-red) 34%, var(--surface-border) 66%)',
                       background: 'color-mix(in srgb, var(--color-red-light) 70%, var(--surface-card-bg) 30%)',
                       color: 'var(--color-red)',
-                      padding: '7px 12px',
+                      padding: '9px 14px',
                     }}
                   >
                     删除预设
@@ -739,9 +795,8 @@ function AISettingsPanel() {
               <AISettingsCapabilityChip label="聊天可见" value={selectedProfile.showInChatSwitcher ? '显示' : '隐藏'} tone={selectedProfile.showInChatSwitcher ? 'positive' : 'muted'} />
               <AISettingsCapabilityChip label="当前主机" value={safeHostname} tone="muted" />
             </div>
-          </div>
 
-          <div className="grid gap-3 md:grid-cols-2">
+            <div className="mt-5 grid gap-3 md:grid-cols-2">
             <AISettingsFieldCard
               title="预设名称"
               description="聊天区和设置页里看到的名字。"
@@ -761,14 +816,13 @@ function AISettingsPanel() {
               title="在切换面板显示"
               description="决定它是否会出现在 Agent 聊天区的快速切换面板。"
               control={(
-                <label className="settings-ai-light-card flex items-center justify-between gap-3 rounded-xl border px-3 py-2" style={SETTINGS_FLAT_CARD_STYLE}>
-                  <span className="text-[12px]" style={{ color: 'var(--text-body)' }}>showInChatSwitcher</span>
-                  <input
-                    type="checkbox"
+                <div className="settings-ai-light-card flex items-center justify-between gap-3 rounded-2xl border px-4 py-3" style={SETTINGS_FLAT_CARD_STYLE}>
+                  <span className="text-[12px]" style={{ color: 'var(--text-body)' }}>显示在聊天切换面板</span>
+                  <AISettingsSwitch
                     checked={selectedProfile.showInChatSwitcher}
-                    onChange={(event) => setProfileVisibility(selectedProfile.id, event.target.checked)}
+                    onChange={(checked) => setProfileVisibility(selectedProfile.id, checked)}
                   />
-                </label>
+                </div>
               )}
             />
 
@@ -922,10 +976,10 @@ function AISettingsPanel() {
                         setPendingModelId('')
                       }}
                       disabled={!pendingModelId.trim()}
-                      className="rounded-lg text-[12px] font-medium disabled:opacity-50"
+                      className="rounded-full text-[12px] font-semibold disabled:opacity-50"
                       style={{
                         ...SETTINGS_FLAT_BUTTON_STYLE,
-                        padding: '7px 12px',
+                        padding: '10px 14px',
                       }}
                     >
                       添加模型 ID
@@ -970,12 +1024,13 @@ function AISettingsPanel() {
               />
             )}
           </div>
+          </div>
 
           <div
             className="glass-surface-card rounded-2xl border"
             style={{
               ...SETTINGS_CARD_STYLE,
-              padding: '14px 16px',
+              padding: '18px 20px',
             }}
           >
             <button
@@ -983,8 +1038,8 @@ function AISettingsPanel() {
               className="w-full flex items-center justify-between gap-3 text-left"
             >
               <div>
-                <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>高级设置</div>
-                <div className="text-[11px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
+                <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>高级设置</div>
+                <div className="text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)', maxWidth: 680 }}>
                   接口形式、工具调用、网页视觉和思考强度默认收起，需要时再展开。
                 </div>
               </div>
@@ -1097,13 +1152,13 @@ function AISettingsPanel() {
             className="glass-surface-card rounded-2xl border"
             style={{
               ...SETTINGS_CARD_STYLE,
-              padding: '14px 16px',
+              padding: '18px 20px',
             }}
           >
-            <div className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-light)' }}>
+            <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>
               能力分组
             </div>
-            <div className="text-[11px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
+            <div className="text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)', maxWidth: 680 }}>
               控制哪些业务能力默认暴露给模型；当前状态会显示是已启用，还是因环境不可用而关闭。
             </div>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
@@ -1138,7 +1193,7 @@ function AISettingsPanel() {
                       </select>
                     </div>
                     <div className="mt-3 flex items-center justify-between gap-3">
-                      <span className="text-[10px] uppercase tracking-[0.14em]" style={{ color: 'var(--text-light)' }}>当前状态</span>
+                      <span className="text-[10px]" style={{ color: 'var(--text-light)' }}>当前状态</span>
                       <span
                         className="text-[11px] font-semibold"
                         style={{
@@ -1172,12 +1227,12 @@ function AISettingsPanel() {
                 <button
                   onClick={() => testConnection(selectedProfile.id)}
                   disabled={testStatus === 'testing'}
-                  className="flex-shrink-0 flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-95 active:scale-[0.98] disabled:opacity-50"
+                  className="flex-shrink-0 flex items-center gap-1.5 rounded-full text-[12px] font-semibold transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-95 active:scale-[0.98] disabled:opacity-50"
                   style={{
                     ...SETTINGS_FLAT_BUTTON_STYLE,
                     background: 'color-mix(in srgb, var(--color-blue) 84%, var(--surface-floating-bg) 16%)',
                     color: '#fff',
-                    padding: '7px 16px',
+                    padding: '10px 18px',
                   }}
                 >
                   {testStatus === 'testing' ? '测试中...' : '测试'}
@@ -1191,10 +1246,10 @@ function AISettingsPanel() {
               className="glass-surface-card rounded-2xl border"
               style={{
                 ...SETTINGS_CARD_STYLE,
-                padding: '14px 16px',
+                padding: '18px 20px',
               }}
             >
-              <div className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-light)' }}>
+              <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>
                 远端返回的模型列表
               </div>
               <div className="mt-3 flex flex-wrap gap-2">
@@ -1230,30 +1285,28 @@ function AISettingsPanel() {
         className="glass-surface-card rounded-2xl border"
         style={{
           ...SETTINGS_CARD_STYLE,
-          padding: '14px 16px',
+          padding: '18px 20px',
         }}
       >
         <div className="flex-1 min-w-0">
-          <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>对话发送</div>
-          <div className="text-[11px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
+          <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>对话发送</div>
+          <div className="text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)', maxWidth: 680 }}>
             当用户在很短时间内连续发送多条消息时，先合并再统一交给 Agent，减少逐次等待。
           </div>
         </div>
-        <div className="mt-3 grid gap-2 md:grid-cols-[minmax(0,1.2fr)_minmax(180px,0.8fr)]">
-          <label className="flex items-center justify-between gap-3 rounded-xl border px-3 py-2" style={SETTINGS_SUBTLE_CARD_STYLE}>
+        <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1.2fr)_minmax(180px,0.8fr)]">
+          <div className="flex items-center justify-between gap-3 rounded-2xl border px-4 py-3" style={SETTINGS_SUBTLE_CARD_STYLE}>
             <span className="text-[12px]" style={{ color: 'var(--text-body)' }}>启用连续消息合并</span>
-            <input
-              type="checkbox"
+            <AISettingsSwitch
               checked={messageCoalesceEnabled}
-              onChange={(event) => {
-                const next = event.target.checked
+              onChange={(next) => {
                 setMessageCoalesceEnabled(next)
                 persistBridgeSetting('agent_message_coalesce_enabled', String(next))
               }}
             />
-          </label>
-          <label className="rounded-xl border px-3 py-2" style={SETTINGS_SUBTLE_CARD_STYLE}>
-            <div className="text-[10px] uppercase tracking-[0.14em]" style={{ color: 'var(--text-light)' }}>合并窗口</div>
+          </div>
+          <label className="rounded-2xl border px-4 py-3" style={SETTINGS_SUBTLE_CARD_STYLE}>
+            <div className="text-[10px]" style={{ color: 'var(--text-light)' }}>合并窗口</div>
             <select
               value={messageCoalesceWindowMs}
               onChange={(event) => {
@@ -1277,18 +1330,18 @@ function AISettingsPanel() {
         className="glass-surface-card rounded-2xl border overflow-hidden"
         style={SETTINGS_CARD_STYLE}
       >
-        <div className="flex items-center justify-between gap-3" style={{ padding: '12px 16px', borderBottom: '1px solid color-mix(in srgb, var(--lg-border-soft) 88%, transparent)' }}>
+        <div className="flex items-start justify-between gap-5 flex-wrap" style={{ padding: '18px 20px 16px', borderBottom: '1px solid color-mix(in srgb, var(--lg-border-soft) 88%, transparent)' }}>
           <div className="flex-1 min-w-0 mr-4">
-            <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>Agent Runtime</div>
-            <div className="text-[11px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
+            <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>连接与运行</div>
+            <div className="text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)', maxWidth: 680 }}>
               Claude SDK 单核编排，Python sidecar 提供 Channels / Heartbeat / cron
             </div>
           </div>
           <button
-            className="rounded-lg border text-[12px] hover:bg-[var(--bg-hover)] transition-colors"
+            className="rounded-full border text-[12px] font-semibold hover:bg-[var(--bg-hover)] transition-colors"
             style={{
               ...SETTINGS_SECONDARY_BUTTON_STYLE,
-              padding: '6px 10px',
+              padding: '9px 14px',
             }}
             onClick={() => {
               void refreshRuntimeSummary()
@@ -1297,58 +1350,54 @@ function AISettingsPanel() {
             刷新状态
           </button>
         </div>
-        <div className="grid gap-2 md:grid-cols-2" style={{ padding: '12px 16px', borderBottom: '1px solid color-mix(in srgb, var(--lg-border-soft) 88%, transparent)' }}>
-          <label className="glass-surface-card flex items-center justify-between gap-3 rounded-xl border px-3 py-2" style={SETTINGS_SUBTLE_CARD_STYLE}>
+        <div className="grid gap-3 md:grid-cols-2" style={{ padding: '16px 20px', borderBottom: '1px solid color-mix(in srgb, var(--lg-border-soft) 88%, transparent)' }}>
+          <div className="glass-surface-card flex items-center justify-between gap-3 rounded-2xl border px-4 py-3" style={SETTINGS_SUBTLE_CARD_STYLE}>
             <span className="text-[12px]" style={{ color: 'var(--text-body)' }}>启用远程 Channels</span>
-            <input
-              type="checkbox"
+            <AISettingsSwitch
               checked={remoteChannelsEnabled}
-              onChange={(event) => {
-                const next = event.target.checked
+              onChange={(next) => {
                 setRemoteChannelsEnabled(next)
                 persistBridgeSetting('remote_channels_enabled', String(next))
               }}
             />
-          </label>
-          <label className="glass-surface-card flex items-center justify-between gap-3 rounded-xl border px-3 py-2" style={SETTINGS_SUBTLE_CARD_STYLE}>
+          </div>
+          <div className="glass-surface-card flex items-center justify-between gap-3 rounded-2xl border px-4 py-3" style={SETTINGS_SUBTLE_CARD_STYLE}>
             <span className="text-[12px]" style={{ color: 'var(--text-body)' }}>启动时自动拉起 Sidecar</span>
-            <input
-              type="checkbox"
+            <AISettingsSwitch
               checked={sidecarAutostart}
-              onChange={(event) => {
-                const next = event.target.checked
+              onChange={(next) => {
                 setSidecarAutostart(next)
                 persistBridgeSetting('sidecar_autostart', String(next))
               }}
             />
-          </label>
+          </div>
         </div>
-        <div className="grid gap-2 md:grid-cols-2" style={{ padding: '12px 16px', borderBottom: '1px solid color-mix(in srgb, var(--lg-border-soft) 88%, transparent)' }}>
-          <div className="glass-surface-card rounded-xl border px-3 py-2" style={SETTINGS_SUBTLE_CARD_STYLE}>
-            <div className="text-[10px] uppercase tracking-[0.14em]" style={{ color: 'var(--text-light)' }}>Bind Host</div>
+        <div className="grid gap-3 md:grid-cols-2" style={{ padding: '16px 20px', borderBottom: '1px solid color-mix(in srgb, var(--lg-border-soft) 88%, transparent)' }}>
+          <div className="glass-surface-card rounded-2xl border px-4 py-3" style={SETTINGS_SUBTLE_CARD_STYLE}>
+            <div className="text-[10px]" style={{ color: 'var(--text-light)' }}>Bind Host</div>
             <input
               type="text"
               value={sidecarHost}
               onChange={(event) => setSidecarHost(event.target.value)}
               onBlur={() => persistBridgeSetting('sidecar_bind_host', sidecarHost)}
-              className="mt-1 w-full bg-transparent text-[12px] outline-none"
+              className="mt-1.5 w-full bg-transparent text-[12px] outline-none"
               style={{ color: 'var(--text-body)' }}
             />
           </div>
-          <div className="glass-surface-card rounded-xl border px-3 py-2" style={SETTINGS_SUBTLE_CARD_STYLE}>
-            <div className="text-[10px] uppercase tracking-[0.14em]" style={{ color: 'var(--text-light)' }}>Bind Port</div>
+          <div className="glass-surface-card rounded-2xl border px-4 py-3" style={SETTINGS_SUBTLE_CARD_STYLE}>
+            <div className="text-[10px]" style={{ color: 'var(--text-light)' }}>Bind Port</div>
             <input
               type="text"
               value={sidecarPort}
               onChange={(event) => setSidecarPort(event.target.value)}
               onBlur={() => persistBridgeSetting('sidecar_bind_port', sidecarPort)}
-              className="mt-1 w-full bg-transparent text-[12px] outline-none"
+              className="mt-1.5 w-full bg-transparent text-[12px] outline-none"
               style={{ color: 'var(--text-body)' }}
             />
           </div>
         </div>
-        <div style={{ padding: '12px 16px' }}>
-          <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+        <div style={{ padding: '16px 20px 18px' }}>
+          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <AISettingsInfoChip
               label="编排内核"
               value={<span style={{ color: 'var(--color-blue)' }}>Claude SDK</span>}

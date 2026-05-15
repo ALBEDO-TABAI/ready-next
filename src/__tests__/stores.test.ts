@@ -550,6 +550,8 @@ describe('useAgent Store', () => {
             currentScope: null,
             scopes: [],
             inputValue: '',
+            pendingContinuationIntent: null,
+            pendingContinuationDraftAnchor: null,
             isStreaming: false,
             foregroundBusy: false,
             composerLocked: false,
@@ -648,6 +650,40 @@ describe('useAgent Store', () => {
         assert.strictEqual(useAgent.getState().inputValue, 'test input')
         useAgent.getState().setInputValue('')
         assert.strictEqual(useAgent.getState().inputValue, '')
+    })
+
+    it('should clear a continuation draft when the user replaces it with a fresh request', () => {
+        useAgent.getState().setComposerDraft('请重试刚才的任务，并在开始前先说明你准备怎么继续。', {
+            taskId: 'task-old',
+            detachedTaskId: 'detached-old',
+        })
+
+        useAgent.getState().setInputValue(
+            '你先看一遍，然后跟我详细讲讲第一部第三章开始的人物关系以及故事推进内容',
+            { preserveContinuationIntent: true },
+        )
+
+        assert.strictEqual(useAgent.getState().inputValue.includes('第一部第三章'), true)
+        assert.strictEqual(useAgent.getState().pendingContinuationIntent, null)
+        assert.strictEqual(useAgent.getState().pendingContinuationDraftAnchor, null)
+    })
+
+    it('should keep a continuation draft when the user appends details to it', () => {
+        useAgent.getState().setComposerDraft('请重试刚才的任务，并在开始前先说明你准备怎么继续。', {
+            taskId: 'task-old',
+            detachedTaskId: 'detached-old',
+        })
+
+        useAgent.getState().setInputValue(
+            '请重试刚才的任务，并在开始前先说明你准备怎么继续。先检查 provider 配置。',
+            { preserveContinuationIntent: true },
+        )
+
+        assert.strictEqual(useAgent.getState().pendingContinuationIntent?.taskId, 'task-old')
+        assert.strictEqual(
+            useAgent.getState().pendingContinuationDraftAnchor,
+            '请重试刚才的任务，并在开始前先说明你准备怎么继续。',
+        )
     })
 
     it('should set streaming state', () => {
