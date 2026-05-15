@@ -239,7 +239,7 @@ test('tool executor rejects internal VEA actions when the active frame belongs t
     },
   )
 
-  assert.equal(result.data?.reason, 'internal_tool_not_allowed')
+  assert.equal(result.data?.reason, 'tool_not_in_allowed_typed_actions')
 })
 
 test('ToolRuntime uses the VEA typed action timeout instead of the generic skill timeout', async () => {

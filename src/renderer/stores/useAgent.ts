@@ -19,6 +19,7 @@ import {
 import { mapBackendErrorToFriendly } from '../modules/agent/error-message-mapping'
 import { emitRendererAgentMetric } from '../modules/agent/rendererMetrics'
 import { createAgentRuntimeDriver, syncActiveScopeRunAliases } from '../modules/agent/runtimeDriver'
+import { installAgentPanelTestHarness } from '../modules/agent/agentPanelTestHarness'
 import {
   ScopeCreatePersistenceMetricThrottle,
   type ScopeCreatePersistenceSite,
@@ -685,36 +686,9 @@ export const useAgent = create<AgentState>((set, get) => ({
     try {
       const { currentAgent } = get()
       const result = await window.electronAPI.agent.listConversationScopes(currentAgent)
-      let scopes: ConversationScope[] = result.success && Array.isArray(result.data)
+      const scopes: ConversationScope[] = result.success && Array.isArray(result.data)
         ? result.data as unknown as ConversationScope[]
         : []
-      const fallbackReason = result.success ? 'empty_scopes' : 'scope_list_failed'
-      if (
-        scopes.length === 0 &&
-        typeof window !== 'undefined' &&
-        window.electronAPI?.chat?.getConversations
-      ) {
-        const fallback = await window.electronAPI.chat.getConversations(currentAgent).catch(() => null)
-        if (fallback?.success && Array.isArray(fallback.data)) {
-          emitRendererAgentMetric('legacy_conversations_fallback_used', {
-            agent: currentAgent,
-            reason: fallbackReason,
-            returnedCount: fallback.data.length,
-          })
-          scopes = fallback.data.map((conversation) => ({
-            id: conversation.id,
-            agent: conversation.agent,
-            title: conversation.title,
-            sourceKind: 'local',
-            sourceId: 'app',
-            threadKey: conversation.id,
-            meta: { sourceLabel: '应用内', createdBy: 'app' },
-            createdAt: conversation.created_at,
-            updatedAt: conversation.updated_at,
-            lastMessageAt: conversation.updated_at,
-          }))
-        }
-      }
       if (scopes.length === 0) return
       const currentScopeId = get().currentScopeId
       const currentScope = scopes.find((scope) => scope.id === currentScopeId) || scopes[0] || null
@@ -1403,6 +1377,7 @@ export const useAgent = create<AgentState>((set, get) => ({
 }))
 
 const agentRuntimeDriver = createAgentRuntimeDriver(useAgent as unknown as { getState: () => unknown; setState: (partial: unknown) => void })
+installAgentPanelTestHarness(useAgent as unknown as Parameters<typeof installAgentPanelTestHarness>[0])
 
 export function initAgentListeners(): () => void {
   return agentRuntimeDriver.initAgentListeners()

@@ -40,7 +40,7 @@ const EXPECTED_ANTHROPIC = [
   {
     name: 'file_locate',
     description:
-      '定位文件中的特定锚点。传 path + 可选 anchor（章节标题 / 首个命中关键词），返回 { path, line, sectionTitle } 供导航。',
+      '定位文件中的特定锚点。传 path（绝对路径、索引 path、唯一文件名或相对后缀）+ 可选 anchor（章节标题 / 首个命中关键词），返回 { path, line, sectionTitle } 供导航。',
     input_schema: {
       type: 'object',
       properties: {
@@ -48,6 +48,28 @@ const EXPECTED_ANTHROPIC = [
         anchor: {
           type: 'string',
           description: '可选：目标章节标题或关键词；不传则返回首行',
+        },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'file_read_excerpt',
+    description:
+      '读取 workspace 内文档正文片段。可传 anchor 读取章节，或传 lineStart / lineEnd 读取行号范围；用于基于原文的总结、分析、改写和关系梳理。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '文件绝对路径或索引内 path' },
+        anchor: {
+          type: 'string',
+          description: '可选：章节标题或关键词；命中标题时读取该章节',
+        },
+        lineStart: { type: 'number', description: '可选：起始行号（从 1 开始）' },
+        lineEnd: { type: 'number', description: '可选：结束行号（包含该行）' },
+        maxChars: {
+          type: 'number',
+          description: '可选：最大返回字符数（默认 32000，上限 40000）',
         },
       },
       required: ['path'],

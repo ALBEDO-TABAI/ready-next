@@ -6,7 +6,7 @@ const test = require('node:test')
 
 const ROOT = resolve(__dirname, '..', '..')
 
-test('agent:probe:vea-resume runs a DirectChat/TurnEngine closed-loop smoke and reports tool truth', () => {
+test('agent:probe:vea-resume runs a Ready Agent SDK closed-loop smoke and reports tool truth', () => {
   const packageJson = JSON.parse(readFileSync(resolve(ROOT, 'package.json'), 'utf8'))
   assert.equal(
     packageJson.scripts['agent:probe:vea-resume'],
@@ -24,7 +24,7 @@ test('agent:probe:vea-resume runs a DirectChat/TurnEngine closed-loop smoke and 
 
   assert.equal(report.success, true)
   assert.equal(report.scenario, 'vea_resume_score_batches')
-  assert.equal(report.agentEntrypoint, 'ClaudeSdkOrchestrator.sendAndCollect')
+  assert.equal(report.agentEntrypoint, 'ReadyAgentOrchestrator.sendAndCollect')
   // Stage N (Phase 1.2) — VEA contract without childRunId now hits the
   // manifest fence; the turn closes via checkpoint, not legacy `done`.
   assert.ok(
@@ -37,7 +37,7 @@ test('agent:probe:vea-resume runs a DirectChat/TurnEngine closed-loop smoke and 
   assert.equal(report.dispatchedTools.includes('skill_video_expert_ai_analyze'), false)
   assert.equal(report.assertions.aiAnalyzeDispatched, false)
   assert.equal(report.assertions.pipelineNotDispatched, true)
-  assert.equal(report.assertions.manifestFenceFired, true)
+  assert.equal(report.assertions.sdkCheckpointRecovered, true)
   assert.equal(report.assertions.veaTypedActionsExcludedFromAllowed, true)
   // The model's allowedToolNames snapshots must never include VEA typed
   // actions (defense-in-depth: the manifest fence at the synthesis site

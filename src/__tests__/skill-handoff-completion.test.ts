@@ -215,6 +215,77 @@ test('skill handoff completion uses single-flight for duplicate handoff calls', 
   assert.equal(readFileSync(join(root, 'audiovisual_handoff', 'body', 'output.md'), 'utf8'), 'completed once')
 })
 
+test('skill handoff completion retries long SVG tasks with compact prompt after empty model output', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'ready-handoff-svg-compact-'))
+  writeJson(join(root, 'audiovisual_handoff', 'receipt.json'), {
+    tasks: {
+      diagram: {
+        status: 'pending',
+        task: 'audiovisual_handoff/diagram/task.md',
+        output: 'diagram/output.svg',
+      },
+    },
+  })
+  mkdirSync(join(root, 'audiovisual_handoff', 'diagram'), { recursive: true })
+  const filler = '不要让这段长报告原文进入第二次请求。'.repeat(1600)
+  writeFileSync(join(root, 'audiovisual_handoff', 'diagram', 'task.md'), [
+    '# 视听剖析 · 子任务：SVG 结构图',
+    '### 标题行规格',
+    '<text class="ts" x="124" y="28">形式约束（操作源）</text>',
+    '<text class="ts" x="340" y="28">感知干预（效果机制）</text>',
+    '<text class="ts" x="556" y="28">认识论效应（观者终点）</text>',
+    '水平箭头严格为 左→中→右。',
+    '视频标题：C3-sample-video',
+    '子类型：形式实验',
+    '## 形式约束识别',
+    '全黑画面取消空间信息。',
+    '## 感知干预地图',
+    '00:00:00 → 00:00:05 初始冲击与搜索。',
+    '00:00:05 → 00:00:20 持续适应与时间感扭曲。',
+    '00:00:20 → 00:00:30 接受与物质性浮现。',
+    '## 边界测试',
+    '这还是电影/视频吗？',
+    filler,
+  ].join('\n'), 'utf8')
+  const requests: unknown[] = []
+  const anthropicContext: AgentSpawnContext = {
+    ...agentContext,
+    api_kind: 'anthropic-messages',
+    base_url: 'https://example.test/anthropic',
+  }
+  const fakeFetch = (async (_url: string | URL | Request, init?: RequestInit) => {
+    const body = JSON.parse(String(init?.body || '{}')) as { messages?: Array<{ content?: string }> }
+    requests.push(body)
+    if (requests.length === 1) {
+      return new Response(JSON.stringify({
+        content: [{ type: 'thinking', thinking: 'I know the SVG rows but did not emit text.' }],
+      }), { status: 200 })
+    }
+    const sentPrompt = String(body.messages?.[0]?.content || '')
+    assert.ok(sentPrompt.length < filler.length)
+    assert.match(sentPrompt, /compact task packet/)
+    return new Response(JSON.stringify({
+      content: [{
+        type: 'text',
+        text: '<svg role="img" width="100%" viewBox="0 0 680 340"><title>结构图</title><desc>结构图</desc><defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M2 1L8 5L2 9"/></marker></defs><text class="ts" x="124" y="28">形式约束（操作源）</text><text class="ts" x="340" y="28">感知干预（效果机制）</text><text class="ts" x="556" y="28">认识论效应（观者终点）</text><line class="arr" x1="208" y1="78" x2="254" y2="78" marker-end="url(#arrow)"/></svg>',
+      }],
+    }), { status: 200 })
+  }) as typeof fetch
+
+  const completed = await completePendingSkillHandoffs({
+    outputDir: root,
+    agentContext: anthropicContext,
+    fetchImpl: fakeFetch,
+  })
+
+  assert.equal(completed.length, 1)
+  assert.equal(completed[0].name, 'diagram')
+  assert.equal(requests.length, 2)
+  assert.match(readFileSync(join(root, 'audiovisual_handoff', 'diagram', 'output.svg'), 'utf8'), /<svg/)
+  const receipt = JSON.parse(readFileSync(join(root, 'audiovisual_handoff', 'receipt.json'), 'utf8'))
+  assert.equal(receipt.tasks.diagram.status, 'completed')
+})
+
 test('skill handoff validation repair also uses single-flight for duplicate calls', async () => {
   const root = mkdtempSync(join(tmpdir(), 'ready-handoff-repair-single-flight-'))
   writeJson(join(root, 'audiovisual_handoff', 'receipt.json'), {

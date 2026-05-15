@@ -125,6 +125,7 @@ function readStateStore(): ReaderState[] {
       typeof (item as ReaderState).updatedAt === 'number'
     ))
   } catch {
+    // silent-catch: corrupted cached reader state should reset to an empty cache.
     return []
   }
 }
@@ -145,6 +146,7 @@ function saveReaderState(next: ReaderState): void {
       .slice(0, MAX_READING_STATES)
     localStorage.setItem(READING_STATE_KEY, JSON.stringify(merged))
   } catch {
+    // silent-catch: reading state is a convenience cache and may be unavailable.
     // Reading state is a convenience cache; failure should not break reading.
   }
 }
@@ -166,6 +168,7 @@ function sanitizeHtmlDocument(raw: string, mimeType: string): string {
     })
     return new XMLSerializer().serializeToString(doc)
   } catch {
+    // silent-catch: DOMParser failures fall back to regex-based sanitization.
     return raw
       .replace(/<script\b[\s\S]*?<\/script>/gi, '')
       .replace(/\s+on[a-z]+\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi, '')
@@ -197,6 +200,7 @@ function disposeView(view: FoliateViewElement | null): void {
   try {
     view.close?.()
   } catch {
+    // silent-catch: best-effort cleanup should not block replacing the reader element.
     // Best-effort cleanup; replacing/removing the element is enough for UI recovery.
   }
   view.remove()
@@ -329,6 +333,7 @@ export default function EbookViewer({ tab, fileUrl, currentExt }: EbookViewerPro
         : ''
       setImportState({ kind: 'done', message: `已导入 ${result.assetCount || 0} 个资源${warningText}` })
     } catch (err) {
+      // silent-catch: the UI surfaces the import failure in component state.
       setImportState({ kind: 'error', message: err instanceof Error ? err.message : '导入失败' })
     }
   }, [canImport, importState.kind, openTab, tab.path])

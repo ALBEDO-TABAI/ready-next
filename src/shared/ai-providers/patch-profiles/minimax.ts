@@ -2,8 +2,9 @@
  * Stage S (PR-S4 / W3.4) — MiniMax patch profile.
  *
  * Match contract:
- *   - baseUrl contains `api.minimax.chat` or `.minimaxi.com`, OR
- *   - model id starts with `MiniMax-`.
+ *   - baseUrl contains `api.minimax.chat`, `.minimaxi.com`, or
+ *     `.xiaomimimo.com`, OR
+ *   - model id starts with `MiniMax-` or `mimo-`.
  *
  * Why this exists: when callers ask for `extra_body.reasoning_split=
  * true`, MiniMax returns `reasoning_details` (an array of reasoning
@@ -22,11 +23,12 @@ export const matchPredicate = (
   baseUrl: string | null,
   model: string,
 ): boolean => {
-  if (typeof model === 'string' && /^MiniMax-/i.test(model)) return true
+  if (typeof model === 'string' && /^(MiniMax-|mimo-)/i.test(model)) return true
   if (!baseUrl) return false
   return (
     baseUrl.includes('api.minimax.chat') ||
-    /\.minimaxi\.com/i.test(baseUrl)
+    /\.minimaxi\.com/i.test(baseUrl) ||
+    /\.xiaomimimo\.com/i.test(baseUrl)
   )
 }
 

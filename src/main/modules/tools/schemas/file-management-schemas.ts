@@ -1,5 +1,5 @@
 /**
- * Zod schemas for the 7 file_management domain tools (Phase 2.5 PR 6).
+ * Zod schemas for the file_management domain tools (Phase 2.5 PR 6).
  *
  * Observations:
  * - file-management-tools' toSchemaParam always emits `items: {type: 'string'}`
@@ -28,6 +28,14 @@ export const FileSearchSchema = z.object({
 export const FileLocateSchema = z.object({
   path: z.string().describe('文件绝对路径或索引内 path'),
   anchor: z.string().optional().describe('可选：目标章节标题或关键词；不传则返回首行'),
+})
+
+export const FileReadExcerptSchema = z.object({
+  path: z.string().describe('文件绝对路径或索引内 path'),
+  anchor: z.string().optional().describe('可选：章节标题或关键词；命中标题时读取该章节'),
+  lineStart: z.number().optional().describe('可选：起始行号（从 1 开始）'),
+  lineEnd: z.number().optional().describe('可选：结束行号（包含该行）'),
+  maxChars: z.number().optional().describe('可选：最大返回字符数（默认 32000，上限 40000）'),
 })
 
 export const FileGetBacklinksSchema = z.object({
@@ -67,6 +75,7 @@ export const FileMoveSchema = z.object({
 export type FileManagementToolName =
   | 'file_search'
   | 'file_locate'
+  | 'file_read_excerpt'
   | 'file_get_backlinks'
   | 'file_get_graph'
   | 'file_classify'
@@ -76,6 +85,7 @@ export type FileManagementToolName =
 export const FILE_MANAGEMENT_SCHEMAS: Record<FileManagementToolName, z.ZodObject<z.ZodRawShape>> = {
   file_search: FileSearchSchema,
   file_locate: FileLocateSchema,
+  file_read_excerpt: FileReadExcerptSchema,
   file_get_backlinks: FileGetBacklinksSchema,
   file_get_graph: FileGetGraphSchema,
   file_classify: FileClassifySchema,

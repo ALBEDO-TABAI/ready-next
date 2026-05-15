@@ -88,7 +88,8 @@ interface ProbeReport {
     inspectDispatched: boolean
     aiAnalyzeDispatched: boolean
     pipelineNotDispatched: boolean
-    toolPolicyRefreshed: boolean
+    sdkCheckpointRecovered: boolean
+    veaTypedActionsExcludedFromAllowed: boolean
   }
   modelAllowedToolSnapshots: string[][]
   dispatchedTools: string[]
@@ -138,7 +139,7 @@ function printHelp(): void {
     'Usage: npm run agent:probe:vea-resume -- --fixture [--json]',
     '       npm run agent:probe:vea-resume -- --run-state /abs/path/run_state.json [--json]',
     '',
-    'Runs an in-process DirectChatEngine/TurnEngine probe for VEA resume routing.',
+    'Runs an in-process Ready Agent SDK probe for VEA resume routing.',
   ].join('\n'))
 }
 
@@ -190,66 +191,6 @@ function buildProbeMessage(fixture: ProbeFixture, rawMessage: string | null): st
   ].join('\n')
 }
 
-function installProbeSkillToolDefinitions(defaultToolRegistry: unknown): () => void {
-  const registry = defaultToolRegistry as {
-    getToolDefinitionForExecution: (name: string) => ToolDefinition | null
-  }
-  const original = registry.getToolDefinitionForExecution.bind(defaultToolRegistry)
-  registry.getToolDefinitionForExecution = (name: string): ToolDefinition | null => {
-    const base = original(name)
-    if (name !== 'skill_video_expert_pipeline' && name !== 'skill_video_expert_ai_analyze') return base
-    return {
-      ...(base || {
-        name,
-        groupId: 'skills',
-        domain: 'skill',
-        kind: 'interactive',
-        concurrency: 'serialized',
-        interruptBehavior: 'host_managed',
-        timeoutProfile: 'skill',
-        supportsTextBridge: true,
-        projectionHint: { emitsProjectionPatch: true },
-        description: name,
-        schema: null,
-        resultShape: 'projection_patch',
-      }),
-      executionTimeoutMs: 30 * 60 * 1000,
-      requiresExplicitAllowlist: true,
-    }
-  }
-  return () => {
-    registry.getToolDefinitionForExecution = original
-  }
-}
-
-function installProbeSkillContext(engine: Record<string, unknown>): void {
-  let armedHint: { id: string; name: string } | null = null
-  engine.skillContextOrchestrator = {
-    shouldKeepToolsWithVideo: () => false,
-    findExplicitlyRequestedSkills: () => [],
-    // Stage Q (Stage 11) — `hasActiveSkillExecution` retired.
-    getCurrentReferenceSkillHint: () => armedHint,
-    rememberReferenceSkillFromRunStateResource: (skillId: string) => {
-      if (skillId !== 'video-expert-analyzer') return { armed: false }
-      armedHint = { id: 'video-expert-analyzer', name: 'Video Expert Analyzer (VNext)' }
-      return { armed: true, skillId: armedHint.id, skillName: armedHint.name }
-    },
-    rememberExplicitReferenceSkillHint: () => Boolean(armedHint),
-    buildPreferredSkillToolNames: () => armedHint
-      ? [
-          'skill_video_expert_pipeline',
-          'skill_inspect_run_state',
-          'skill_read_artifact',
-          'skill_patch_config',
-          'skill_start_detached',
-          'skill_ask_user',
-        ]
-      : [],
-    maybeInjectExplicitSkillContext: async () => {},
-    listRegisteredSkillTokens: () => ['video-expert-analyzer', 'Video Expert Analyzer'],
-  }
-}
-
 function buildAIConfig(): AIModelConfig {
   return {
     provider: 'openai',
@@ -274,18 +215,16 @@ function tailLog(path: string, maxLines = 30): string[] {
 
 export async function runAgentVeaResumeProbe(options: ProbeOptions): Promise<ProbeReport> {
   const [
-    { ClaudeSdkOrchestrator },
+    { ReadyAgentOrchestrator },
     { buildRequestEnvelope },
     { __setMetricSinkForTests },
     { _resetLastReferenceSkillHintsForTests },
-    { defaultToolRegistry },
     { __setSkillsRuntimeManagerForTests },
   ] = await Promise.all([
     import('../src/main/modules/agent-control/orchestrator'),
     import('../src/main/modules/agent-control/request-envelope'),
     import('../src/main/modules/agent-control/metrics'),
     import('../src/main/modules/agent-control/skill-reference-hints'),
-    import('../src/main/modules/agent-control/tool-registry'),
     import('../src/main/modules/skills-runtime/runtime-manager'),
   ])
   const fixture = options.fixture || !options.runStatePath
@@ -293,14 +232,33 @@ export async function runAgentVeaResumeProbe(options: ProbeOptions): Promise<Pro
     : fixtureFromRunState(options.runStatePath)
   const message = buildProbeMessage(fixture, options.message)
   const requestEnvelope = buildRequestEnvelope({ userText: message })
-  const orchestrator = new ClaudeSdkOrchestrator()
-  const engine = (orchestrator as unknown as { engine: Record<string, unknown> }).engine
   const metrics: AgentMetricEvent[] = []
   const modelAllowedToolSnapshots: string[][] = []
   const dispatchedTools: string[] = []
   const statusEvents: Array<Record<string, unknown>> = []
   const outputEvents: Array<Record<string, unknown>> = []
-  const restoreToolDefinitions = installProbeSkillToolDefinitions(defaultToolRegistry)
+  const inspectTool: ToolDefinition = {
+    name: 'skill_inspect_run_state',
+    groupId: 'skills',
+    domain: 'skill',
+    kind: 'interactive',
+    concurrency: 'serialized',
+    interruptBehavior: 'host_managed',
+    timeoutProfile: 'skill',
+    supportsTextBridge: true,
+    projectionHint: { emitsProjectionPatch: true },
+    description: 'Inspect a VEA run_state file and project resume state.',
+    schema: {
+      type: 'object',
+      properties: {
+        runStatePath: { type: 'string' },
+      },
+      required: ['runStatePath'],
+      additionalProperties: false,
+    },
+    executionVisibility: 'model',
+    resultShape: 'projection_patch',
+  }
 
   __setMetricSinkForTests((event) => metrics.push(event))
   _resetLastReferenceSkillHintsForTests()
@@ -342,170 +300,76 @@ export async function runAgentVeaResumeProbe(options: ProbeOptions): Promise<Pro
       ],
     }],
   })
-  installProbeSkillContext(engine)
-  engine.getAIConfig = () => buildAIConfig()
-  // Commit cfb4369 added DirectChat.getAIConfigDetailed which bypasses the
-  // legacy getAIConfig() path inside sendMessage() (direct-chat.ts:856). The
-  // probe must override it too — otherwise the detailed call falls through
-  // to settingsRepository.getSetting → database.ts which uses CommonJS
-  // require('electron') and bypasses the ESM electron stub registered above,
-  // surfacing as `ai_config_db_error: app.getPath is unavailable`.
-  engine.getAIConfigDetailed = () => ({
-    ok: true,
-    config: buildAIConfig(),
-    reason: 'present',
-  })
-  engine.requestSimpleText = async () => {
-    throw new Error('probe expected tool-loop path, but DirectChat requested simple text')
-  }
-  engine.requestToolLoopResponse = async (params: { allowedToolNames?: string[] | null }) => {
-    const allowed = [...(params.allowedToolNames || [])]
-    modelAllowedToolSnapshots.push(allowed)
-    if (modelAllowedToolSnapshots.length === 1) {
-      return {
-        text: 'probe inspect run_state',
-        toolCalls: [{
-          id: `probe_inspect_${randomUUID().slice(0, 8)}`,
-          name: 'skill_inspect_run_state',
-          input: { runStatePath: fixture.runStatePath },
-        }],
-        stopReason: 'tool_calls',
-      }
-    }
-    if (allowed.includes('skill_video_expert_pipeline') && !allowed.includes('skill_video_expert_ai_analyze')) {
-      return {
-        text: 'probe stale policy would call pipeline',
-        toolCalls: [{
-          id: `probe_pipeline_${randomUUID().slice(0, 8)}`,
-          name: 'skill_video_expert_pipeline',
-          input: { url: 'https://www.youtube.com/watch?v=4qkyxm4jppc', outputDir: fixture.outputDir },
-        }],
-        stopReason: 'tool_calls',
-      }
-    }
-    return {
-      text: 'probe complete',
-      toolCalls: [],
-      stopReason: 'stop',
-    }
-  }
-
-  const executionLoop = engine.executionLoopOrchestrator as {
-    executeToolCalls: (params: {
-      toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>
-    }) => Promise<unknown>
-  }
-  executionLoop.executeToolCalls = async (params) => {
-    dispatchedTools.push(...params.toolCalls.map((toolCall) => toolCall.name))
-    return {
-      results: params.toolCalls.map((toolCall) => {
-        if (toolCall.name === 'skill_inspect_run_state') {
-          if (!existsSync(fixture.sceneScoresPath)) {
-            writeFileSync(fixture.sceneScoresPath, JSON.stringify({ scenes: [] }), 'utf8')
-            fixture.createdSceneScoresDuringInspect = true
-          }
+  const orchestrator = new ReadyAgentOrchestrator({
+    agentSdkRuntimeDeps: {
+      loadAIConfig: () => ({
+        ok: true,
+        config: buildAIConfig(),
+        reason: 'present',
+      }),
+      listToolDefinitions: () => [inspectTool],
+      executeToolCall: async (toolName, args) => {
+        dispatchedTools.push(toolName)
+        if (toolName !== 'skill_inspect_run_state') {
           return {
-            id: toolCall.id,
-            name: toolCall.name,
-            input: toolCall.input,
-            result: {
-              text: 'score_batches: 0/97',
-              framePatch: {
-                activeArtifactRoots: [fixture.outputDir],
-                livenessHint: 'blocked',
-                skillStatusUpdates: {
-                  status: 'blocked',
-                  action: 'score_batches',
-                  outputDir: fixture.outputDir,
-                  runStatePath: fixture.runStatePath,
-                  artifactPaths: {
-                    sceneScoresPath: fixture.sceneScoresPath,
-                    deliveryReportPath: null,
-                  },
-                  staleBlockerReason: null,
-                },
-                runContract: {
-                  skillId: 'video-expert-analyzer',
-                  action: 'score_batches',
-                  outputDir: fixture.outputDir,
-                  runStatePath: fixture.runStatePath,
-                  artifactPaths: {
-                    sceneScoresPath: fixture.sceneScoresPath,
-                    deliveryReportPath: null,
-                  },
-                  status: 'blocked',
-                  liveness: 'blocked',
-                  progress: {
-                    stage: 'score_batches',
-                    totalUnits: 97,
-                    completedUnits: 0,
-                    coverageRatio: 0,
-                    fingerprint: 'score_batches:0/97',
-                  },
-                },
-              },
-            },
+            text: `${toolName} dispatched unexpectedly`,
+            shape: 'json',
+            data: { errorKind: 'unexpected_tool' },
+            projectionPatch: null,
+            interactionHint: null,
+            framePatch: null,
           }
         }
-        if (toolCall.name === 'skill_video_expert_ai_analyze') {
-          return {
-            id: toolCall.id,
-            name: toolCall.name,
-            input: toolCall.input,
-            result: {
-              text: 'ai_analyze dispatched',
-              framePatch: {
-                activeArtifactRoots: [fixture.outputDir],
-                livenessHint: 'done',
-                skillStatusUpdates: {
-                  status: 'completed',
-                  action: 'video_expert_ai_analyze',
-                  outputDir: fixture.outputDir,
-                  runStatePath: fixture.runStatePath,
-                  artifactPaths: {
-                    sceneScoresPath: fixture.sceneScoresPath,
-                    deliveryReportPath: null,
-                  },
-                  staleBlockerReason: null,
-                },
-                runContract: {
-                  skillId: 'video-expert-analyzer',
-                  action: 'video_expert_ai_analyze',
-                  outputDir: fixture.outputDir,
-                  runStatePath: fixture.runStatePath,
-                  artifactPaths: {
-                    sceneScoresPath: fixture.sceneScoresPath,
-                    deliveryReportPath: null,
-                  },
-                  status: 'completed',
-                  liveness: 'done',
-                  progress: {
-                    stage: 'score_batches',
-                    totalUnits: 97,
-                    completedUnits: 97,
-                    coverageRatio: 1,
-                    fingerprint: 'score_batches:97/97',
-                  },
-                },
-              },
-            },
-          }
+        if (!existsSync(fixture.sceneScoresPath)) {
+          writeFileSync(fixture.sceneScoresPath, JSON.stringify({ scenes: [] }), 'utf8')
+          fixture.createdSceneScoresDuringInspect = true
         }
         return {
-          id: toolCall.id,
-          name: toolCall.name,
-          input: toolCall.input,
-          result: {
-            text: `${toolCall.name} dispatched unexpectedly`,
-            errorKind: 'unexpected_tool',
-            framePatch: null,
+          text: 'score_batches: 0/97',
+          shape: 'projection_patch',
+          data: {
+            status: 'child_paused',
+            skillId: 'video-expert-analyzer',
+            action: 'score_batches',
+            childRunId: 'probe-child-run',
+            outputDir: fixture.outputDir,
+            runStatePath: String(args.runStatePath || fixture.runStatePath),
+            closeEvent: { terminalReason: 'checkpoint_budget' },
           },
+          projectionPatch: {
+            taskTitle: 'VEA 续跑探针',
+            taskSummary: 'score_batches: 0/97',
+            status: 'waiting',
+            runContract: {
+              skillId: 'video-expert-analyzer',
+              action: 'score_batches',
+              outputDir: fixture.outputDir,
+              runStatePath: fixture.runStatePath,
+              status: 'blocked',
+              liveness: 'blocked',
+            },
+          },
+          interactionHint: null,
+          framePatch: null,
         }
-      }),
-      budgetLimited: false,
-      recoveryHistory: [],
-    }
-  }
+      },
+      runAgent: async ({ tools }) => {
+        modelAllowedToolSnapshots.push(tools.map((tool) => tool.name))
+        const inspect = tools.find((tool) => tool.name === 'skill_inspect_run_state') as
+          | { invoke: (context: unknown, input: string) => Promise<string> }
+          | undefined
+        if (!inspect) throw new Error('skill_inspect_run_state is not visible to the SDK agent')
+        await inspect.invoke({}, JSON.stringify({ runStatePath: fixture.runStatePath }))
+        throw new Error('Max turns (10) exceeded')
+      },
+      skillContextOrchestrator: {
+        findExplicitlyRequestedSkills: () => [],
+        buildPreferredSkillToolNames: () => ['skill_inspect_run_state'],
+        getCurrentReferenceSkillHint: () => ({ id: 'video-expert-analyzer', name: 'Video Expert Analyzer (VNext)' }),
+        rememberExplicitReferenceSkillHint: () => true,
+      },
+    },
+  })
 
   orchestrator.on('status', (payload) => statusEvents.push(payload))
   orchestrator.on('output', (payload) => outputEvents.push(payload))
@@ -529,35 +393,11 @@ export async function runAgentVeaResumeProbe(options: ProbeOptions): Promise<Pro
         confidence: 'high',
       },
     )
-    // Stage N (Phase 1.2) — VEA actions are now manifest-fenced. The probe
-    // contract has no `childRunId`, so the manifest fence catches both
-    // `skill_video_expert_pipeline` AND `skill_video_expert_ai_analyze`
-    // before parent-force synthesis can fire. The expected steady state:
-    //   - inspect/read/ask primitives stay allowed (model can probe state).
-    //   - VEA typed actions are NOT in allowedToolNames or preferredToolNames.
-    //   - `skill_video_expert_pipeline` AND `skill_video_expert_ai_analyze`
-    //     are both NOT dispatched (no parent force; no model selection
-    //     because they're not in allowedToolNames).
-    //   - Turn closes with a checkpoint terminal reason. When the model
-    //     uses inspect primitives without making progress, budget exhausts
-    //     first → `checkpoint_budget` (Stage M priority rank 20 dominates
-    //     `checkpoint_user_input` rank 10).
-    //   - At least one `turn_force_tool_blocked_child_owned` metric fires
-    //     for whichever VEA action steering tried to surface (typically
-    //     ai_analyze for the score_batches resume scenario).
-    const aiAnalyzeBlocked = metrics.some((event) =>
-      event.metric === 'turn_force_tool_blocked_child_owned'
-      && (event as { toolName?: string }).toolName === 'skill_video_expert_ai_analyze',
-    )
-    const pipelineBlocked = metrics.some((event) =>
-      event.metric === 'turn_force_tool_blocked_child_owned'
-      && (event as { toolName?: string }).toolName === 'skill_video_expert_pipeline',
-    )
     const assertions = {
       inspectDispatched: dispatchedTools.includes('skill_inspect_run_state'),
       aiAnalyzeDispatched: dispatchedTools.includes('skill_video_expert_ai_analyze'),
       pipelineNotDispatched: !dispatchedTools.includes('skill_video_expert_pipeline'),
-      manifestFenceFired: aiAnalyzeBlocked || pipelineBlocked,
+      sdkCheckpointRecovered: result.terminalReason === 'checkpoint_budget',
       veaTypedActionsExcludedFromAllowed: modelAllowedToolSnapshots.every((snapshot) =>
         !snapshot.includes('skill_video_expert_pipeline')
         && !snapshot.includes('skill_video_expert_ai_analyze'),
@@ -572,13 +412,13 @@ export async function runAgentVeaResumeProbe(options: ProbeOptions): Promise<Pro
         || result.terminalReason === 'checkpoint_background')
       && assertions.pipelineNotDispatched
       && !assertions.aiAnalyzeDispatched
-      && assertions.manifestFenceFired
+      && assertions.sdkCheckpointRecovered
       && assertions.veaTypedActionsExcludedFromAllowed
 
     return {
       success,
       scenario: 'vea_resume_score_batches',
-      agentEntrypoint: 'ClaudeSdkOrchestrator.sendAndCollect',
+      agentEntrypoint: 'ReadyAgentOrchestrator.sendAndCollect',
       fixture: {
         outputDir: fixture.outputDir,
         runStatePath: fixture.runStatePath,
@@ -604,7 +444,6 @@ export async function runAgentVeaResumeProbe(options: ProbeOptions): Promise<Pro
       ).slice(-40),
     }
   } finally {
-    restoreToolDefinitions()
     __setMetricSinkForTests(null)
     _resetLastReferenceSkillHintsForTests()
     __setSkillsRuntimeManagerForTests(null)
@@ -625,11 +464,11 @@ async function main(): Promise<void> {
       console.log('\nMetric excerpt:')
       console.log(report.logExcerpt.join('\n') || '(empty)')
       const metricTail = tailLog(join(tmpdir(), 'ready-agent-metrics.log'), 20)
-      const directTail = tailLog(join(tmpdir(), 'ready-directchat.log'), 20)
+      const sdkTail = tailLog(join(tmpdir(), 'ready-agent-sdk.log'), 20)
       console.log('\nready-agent-metrics tail:')
       console.log(metricTail.join('\n') || '(empty)')
-      console.log('\nready-directchat tail:')
-      console.log(directTail.join('\n') || '(empty)')
+      console.log('\nready-agent-sdk tail:')
+      console.log(sdkTail.join('\n') || '(empty)')
     }
   }
   if (!report.success) process.exitCode = 1

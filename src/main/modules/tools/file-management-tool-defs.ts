@@ -40,8 +40,14 @@ export const FILE_MANAGEMENT_TOOLS: FileManagementToolDef[] = [
   {
     name: 'file_locate',
     description:
-      '定位文件中的特定锚点。传 path + 可选 anchor（章节标题 / 首个命中关键词），返回 { path, line, sectionTitle } 供导航。',
+      '定位文件中的特定锚点。传 path（绝对路径、索引 path、唯一文件名或相对后缀）+ 可选 anchor（章节标题 / 首个命中关键词），返回 { path, line, sectionTitle } 供导航。',
     params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.file_locate) as ToolParam[],
+  },
+  {
+    name: 'file_read_excerpt',
+    description:
+      '读取 workspace 内文档正文片段。可传 anchor 读取章节，或传 lineStart / lineEnd 读取行号范围；用于基于原文的总结、分析、改写和关系梳理。',
+    params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.file_read_excerpt) as ToolParam[],
   },
   {
     name: 'file_get_backlinks',

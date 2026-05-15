@@ -19,6 +19,7 @@ import {
   toFileUrl,
 } from '../../utils/dragDrop'
 import { convertDocxHtmlToMarkdownText } from '../../utils/docx-format'
+import { shouldApplyAsyncDocumentLoad } from './documentLoadGuard'
 import '../../styles/tiptap.css'
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
@@ -213,6 +214,16 @@ export default function MarkdownEditor({
   // ─── File loading ───────────────────────────────────────────
   useEffect(() => {
     let cancelled = false
+    const initialLoadSnapshot = {
+      id: tab.id,
+      path: tab.path || null,
+      content: tab.content,
+      isDirty: Boolean(tab.isDirty),
+    }
+    const canCommitLoadedContent = () => {
+      const current = useDocTabs.getState().tabs.find((item) => item.id === tab.id)
+      return shouldApplyAsyncDocumentLoad(initialLoadSnapshot, current || null)
+    }
     const load = async () => {
       if (!tab.path) {
         if (!tab.content && !tab.isDirty) {
@@ -246,7 +257,7 @@ export default function MarkdownEditor({
         if (['md', 'txt', 'json', 'ts', 'tsx', 'js', 'css', 'html'].includes(ext)) {
           const result = (await window.electronAPI.document.readFile(tab.path)) as ReadResult
           if (!result.success) throw new Error(result.error || '文件读取失败')
-          if (!cancelled) {
+          if (!cancelled && canCommitLoadedContent()) {
             updateTabContent(tab.id, result.content || '')
             markTabSaved(tab.id)
           }
@@ -264,8 +275,10 @@ export default function MarkdownEditor({
               html,
               rawText || result.content || result.html || '',
             )
-            updateTabContent(tab.id, markdownish)
-            markTabSaved(tab.id)
+            if (canCommitLoadedContent()) {
+              updateTabContent(tab.id, markdownish)
+              markTabSaved(tab.id)
+            }
           }
         } else {
           if (!cancelled) {

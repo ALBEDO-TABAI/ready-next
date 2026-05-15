@@ -342,9 +342,10 @@ export interface TaskProjectionRecord {
   /**
    * Stage Q (Stage 11) — derived-at-read truth of "is this projection
    * actually resumable?" Computed by `runtime.listTaskProjections()` /
-   * `runtime.getTaskProjection()` via `canResumeWithFs(continuationRef)`
-   * before returning to renderer. NOT persisted; main re-derives on each
-   * fetch so disk-state changes (deleted output dir, etc) are reflected.
+   * `runtime.getTaskProjection()` from `continuationRef`, terminal status,
+   * and resumable actions before returning to renderer. NOT persisted; main
+   * re-derives on each fetch so disk-state changes (deleted output dir, etc)
+   * are reflected.
    *
    * Renderer must consume this field directly and NOT recompute from
    * `resumableActions` / `taskRunId` / `interactionState` in isolation

@@ -20,7 +20,7 @@ import {
   type ChatMessageRecord,
   type ConversationSourceKind,
 } from '../database'
-import { ClaudeSdkOrchestrator } from './orchestrator'
+import { ReadyAgentOrchestrator } from './orchestrator'
 import { PromptAssemblyService } from './prompt-assembly'
 import { RunCoordinator } from './run-coordinator'
 import type { DomainAdapter } from './domain-adapter'
@@ -54,12 +54,17 @@ import { ToolNameCollisionError } from './tool-registry-errors'
 import { RunProjection } from './run-projection'
 import { syncTaskProjection } from './task-projection-sync'
 import { reconcileTaskProjections } from './task-projection-reconciler'
-import { canResumeShape, canResumeWithFs, type ResumeHandle } from './resume-handle'
+import { canResumeShape, type ResumeHandle } from './resume-handle'
+import { deriveTaskProjectionCanResume } from './task-projection-resume'
 import { isAwaitingUserInteractionState } from '../../../shared/task-interaction-state'
 import { assertSkillTaskRunInvariantConsistency } from './skill-task-tracker'
 import type { ProjectionTruthSnapshot, TaskProjectionRecord } from './run-contracts'
 import { getBudgetUsagePercent, restoreContinuationTaskBudgetRuntime } from './run-budget-policy'
-import { normalizeContinuationIntent, type ContinuationIntent } from './continuation-state'
+import {
+  normalizeContinuationIntent,
+  selectContinuationProjection,
+  type ContinuationIntent,
+} from './continuation-state'
 import { forgetSession } from './session-continuity'
 import { isRetryOnlyTurn } from './skill-detection-inputs'
 import { logAgentMetric } from './metrics'
@@ -222,31 +227,6 @@ function childRunSummaryStatusFromProjection(status: string): string {
   return 'running'
 }
 
-/**
- * Stage Q (Stage 11) — derive `canResume` for a TaskProjectionRecord.
- *
- * Pure helper used by `runtime.listTaskProjections` /
- * `runtime.getTaskProjection`. Reads `continuationRef` and computes
- * fs-aware truth (`canResumeWithFs`) so renderer can consume one
- * boolean instead of recomputing across `resumableActions / taskRunId /
- * interactionState`.
- *
- * NOTE: this is read-only — it returns a NEW record with `canResume`
- * appended; the underlying store is not mutated.
- */
-function deriveTaskProjectionCanResume(record: TaskProjectionRecord): TaskProjectionRecord {
-  const ref = record.continuationRef || null
-  const handle: ResumeHandle = {
-    childRunId:
-      (ref as { childRunId?: string | null } | null)?.childRunId
-      || null,
-    detachedTaskId: ref?.detachedTaskId || null,
-    outputDir: ref?.outputDir || null,
-    runStatePath: ref?.runStatePath || null,
-  }
-  return { ...record, canResume: canResumeWithFs(handle) }
-}
-
 function canRespondToUserInteractionWithoutResumeHandle(params: {
   projection: TaskProjectionRecord | null
   scopeRunSummary: ScopeRunSummary | null
@@ -259,7 +239,7 @@ export class AgentControlRuntime extends EventEmitter {
   private readonly db = getDatabase()
   private readonly settingsRepository = new AppSettingsRepository()
   private readonly sidecar = new SidecarManager()
-  private readonly orchestrator: ClaudeSdkOrchestrator
+  private readonly orchestrator: ReadyAgentOrchestrator
   private readonly toolGateway = new ToolGateway()
   private readonly memoryRepository = new MemoryRepository()
   private readonly memoryLifecycle = new MemoryLifecycleManager(this.memoryRepository)
@@ -370,7 +350,7 @@ export class AgentControlRuntime extends EventEmitter {
     // both conditions diverge, throw early so the user sees the error
     // at startup rather than mid-session.
     this.maybeAssertSkillTaskRunInvariant()
-    this.orchestrator = new ClaudeSdkOrchestrator({
+    this.orchestrator = new ReadyAgentOrchestrator({
       browserController,
       sidecarManager: this.sidecar
     })
@@ -408,6 +388,7 @@ export class AgentControlRuntime extends EventEmitter {
         runtimeManager: getSkillsRuntimeManager(),
         repository: this.skillTaskRunRepository,
         taskProjectionStore: this.taskProjectionStore,
+        publishScopeRunEvent: (payload) => this.publishScopeRunEvent(payload),
       })
     } catch (error) {
       // Boot-time wiring failure is best-effort logged; the parent loop
@@ -455,7 +436,7 @@ export class AgentControlRuntime extends EventEmitter {
     }
   }
 
-  getOrchestrator(): ClaudeSdkOrchestrator {
+  getOrchestrator(): ReadyAgentOrchestrator {
     return this.orchestrator
   }
 
@@ -573,7 +554,7 @@ export class AgentControlRuntime extends EventEmitter {
     const errors = Number((channelState as { errors?: number }).errors || 0)
 
     return {
-      orchestrator: 'claude-sdk',
+      orchestrator: this.orchestrator.getRuntimeKernel(),
       sidecarEnabled: this.getSettingBool('remote_channels_enabled', true),
       sidecar: this.heartbeat.sidecar,
       channels: {
@@ -1166,7 +1147,38 @@ export class AgentControlRuntime extends EventEmitter {
         this.maybeAutoAttachSessionRecallOnResume(payload.scopeId, payload.message)
         const normalizedContinuationIntent = (() => {
           const intent = normalizeContinuationIntent(payload.continuationIntent || null)
-          if (!intent) return null
+          if (!intent) {
+            const text = this.extractTextFromMessage(payload.message)
+            if (!isRetryOnlyTurn(text)) return null
+            const projections = this.listTaskProjections(payload.scopeId)
+            const sortedProjections = projections
+              .slice()
+              .sort((left, right) => String(right.updatedAt || '').localeCompare(String(left.updatedAt || '')))
+            const resumableProjection = sortedProjections.find((projection) =>
+              deriveTaskProjectionCanResume(projection).canResume === true
+            ) || null
+            const targetProjection = resumableProjection || selectContinuationProjection({
+              projections,
+              userText: text,
+            })
+            const scopeRunSummary = this.scopeRunSummaries.get(payload.scopeId) || null
+            const built = this.buildContinuationIntent({
+              projection: targetProjection,
+              scopeRunSummary,
+              incoming: null,
+              responseText: text,
+            })
+            if (built) {
+              logAgentMetric('runtime_resume_intent_auto_built_on_send', {
+                scopeId: scope.id,
+                taskId: built.taskId,
+                hasChildRunId: Boolean(built.childRunId),
+                hasOutputDir: Boolean(built.outputDir),
+                hasRunStatePath: Boolean(built.runStatePath),
+              })
+            }
+            return built
+          }
           const target = this.resolveTaskControlTarget(payload.scopeId, intent.taskId)
           if (!target) return null
           return this.buildContinuationIntent({
@@ -2399,6 +2411,9 @@ export class AgentControlRuntime extends EventEmitter {
     if (!taskId) return null
 
     const continuationRef = params.projection?.continuationRef || params.scopeRunSummary?.taskContinuation || null
+    if (params.projection && deriveTaskProjectionCanResume(params.projection).canResume !== true) {
+      return null
+    }
 
     // Stage Q (Stage 11) — Audit §F-6 found this builder was the main-side
     // empty-shell escape route: any taskId would pass, regardless of

@@ -8,14 +8,55 @@ const test = require('node:test')
 const repoRoot = path.resolve(__dirname, '..', '..')
 const scriptsRoot = path.join(repoRoot, 'assets', 'embedded-skills', 'video-expert-analyzer', 'scripts')
 
-test('VEA typed pipeline can treat outputDir as the exact durable task directory', () => {
+let cachedPython = undefined
+
+function resolvePython() {
+  if (cachedPython !== undefined) return cachedPython
+  const candidates = [
+    process.env.READY_E2E_PYTHON,
+    process.env.PYTHON,
+    'python3.12',
+    'python3.11',
+    'python3.10',
+    'python3',
+  ].filter(Boolean)
+  for (const candidate of candidates) {
+    try {
+      execFileSync(candidate, ['-c', 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'])
+      cachedPython = candidate
+      return candidate
+    } catch {
+      // keep trying candidates
+    }
+  }
+  cachedPython = null
+  return null
+}
+
+function pythonOrSkip(t) {
+  const python = resolvePython()
+  if (!python) {
+    t.skip('VEA pipeline contract requires Python 3.10 or newer')
+    return null
+  }
+  return python
+}
+
+const pipelineImportPreamble = `
+import sys
+import types
+sys.modules.setdefault("requests", types.SimpleNamespace())
+sys.path.insert(0, ${JSON.stringify(scriptsRoot)})
+`
+
+test('VEA typed pipeline can treat outputDir as the exact durable task directory', (t) => {
+  const pythonExe = pythonOrSkip(t)
+  if (!pythonExe) return
   const tempDir = mkdtempSync(path.join(tmpdir(), 'ready-vea-exact-output-'))
   try {
     const python = `
 from pathlib import Path
-import sys
-
-sys.path.insert(0, ${JSON.stringify(scriptsRoot)})
+${pipelineImportPreamble}
 import pipeline_enhanced
 
 pipeline_enhanced.get_video_info = lambda url: {
@@ -33,7 +74,7 @@ pipeline = pipeline_enhanced.VideoAnalysisPipeline(
 print(pipeline.video_output_dir)
 print(pipeline.scores_path)
 `
-    const [videoOutputDir, scoresPath] = execFileSync('python3', ['-c', python], {
+    const [videoOutputDir, scoresPath] = execFileSync(pythonExe, ['-c', python], {
       encoding: 'utf8',
     }).trim().split('\n').slice(-2)
     const realTempDir = realpathSync(tempDir)
@@ -44,12 +85,12 @@ print(pipeline.scores_path)
   }
 })
 
-test('VEA ready compat treats outputDir as an output root unless exactOutputDir is explicit', () => {
+test('VEA ready compat treats outputDir as an output root unless exactOutputDir is explicit', (t) => {
+  const pythonExe = pythonOrSkip(t)
+  if (!pythonExe) return
   const python = `
 import json
-import sys
-
-sys.path.insert(0, ${JSON.stringify(scriptsRoot)})
+${pipelineImportPreamble}
 import ready_compat
 
 root_payload = {"url": "https://www.youtube.com/watch?v=p4ahGSFTY-c", "outputDir": "/tmp/ready-output-root"}
@@ -57,7 +98,7 @@ exact_payload = {**root_payload, "exactOutputDir": True}
 print(json.dumps(ready_compat._build_pipeline_cmd(root_payload), ensure_ascii=False))
 print(json.dumps(ready_compat._build_pipeline_cmd(exact_payload), ensure_ascii=False))
 `
-  const [rootCmdRaw, exactCmdRaw] = execFileSync('python3', ['-c', python], {
+  const [rootCmdRaw, exactCmdRaw] = execFileSync(pythonExe, ['-c', python], {
     encoding: 'utf8',
   }).trim().split('\n').slice(-2)
   const rootCmd = JSON.parse(rootCmdRaw)
@@ -68,12 +109,12 @@ print(json.dumps(ready_compat._build_pipeline_cmd(exact_payload), ensure_ascii=F
   assert.ok(exactCmd.includes('--exact-output-dir'))
 })
 
-test('VEA prepare stage reports scene clipping progress before scoring starts', () => {
+test('VEA prepare stage reports scene clipping progress before scoring starts', (t) => {
+  const pythonExe = pythonOrSkip(t)
+  if (!pythonExe) return
   const python = `
 import json
-import sys
-
-sys.path.insert(0, ${JSON.stringify(scriptsRoot)})
+${pipelineImportPreamble}
 import pipeline_enhanced
 
 pipeline = pipeline_enhanced.VideoAnalysisPipeline.__new__(pipeline_enhanced.VideoAnalysisPipeline)
@@ -83,7 +124,7 @@ pipeline._mark_prepare_progress(total_scenes=10, completed_scenes=4)
 pipeline._mark_prepare_progress(total_scenes=0, completed_scenes=0)
 print(json.dumps(calls, ensure_ascii=False))
 `
-  const calls = JSON.parse(execFileSync('python3', ['-c', python], {
+  const calls = JSON.parse(execFileSync(pythonExe, ['-c', python], {
     encoding: 'utf8',
   }).trim().split('\n').at(-1))
 
@@ -100,16 +141,16 @@ print(json.dumps(calls, ensure_ascii=False))
   })
 })
 
-test('VEA fresh pipeline resets stale completion artifacts in the selected output directory', () => {
+test('VEA fresh pipeline resets stale completion artifacts in the selected output directory', (t) => {
+  const pythonExe = pythonOrSkip(t)
+  if (!pythonExe) return
   const tempDir = mkdtempSync(path.join(tmpdir(), 'ready-vea-fresh-reset-'))
   try {
     const python = `
 from pathlib import Path
 import json
 import os
-import sys
-
-sys.path.insert(0, ${JSON.stringify(scriptsRoot)})
+${pipelineImportPreamble}
 import pipeline_enhanced
 
 pipeline_enhanced.get_video_info = lambda url: {
@@ -146,7 +187,7 @@ print(video_dir / "delivery_report.json")
       READY_SKILL_TASK_ID: 'new-task',
       READY_SKILL_CHILD_RUN_ID: 'new-child',
     }
-    const [runStatePath, scoresPath, deliveryReportPath] = execFileSync('python3', ['-c', python], {
+    const [runStatePath, scoresPath, deliveryReportPath] = execFileSync(pythonExe, ['-c', python], {
       encoding: 'utf8',
       env,
     }).trim().split('\n').slice(-3)

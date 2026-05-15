@@ -36,7 +36,7 @@ import type {
 } from '../skills-runtime/runtime-manager'
 import type { SkillTaskRunRepository } from '../repositories/skill-task-run-repository'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
-import type { ScopeRunResumableAction, ScopeRunSkillProgress } from './types'
+import type { ScopeRunEventPayload, ScopeRunResumableAction, ScopeRunSkillProgress } from './types'
 import type { TaskProjectionRecord, TaskProjectionStore, TaskStep } from './run-contracts'
 
 import { logAgentMetric } from './metrics'
@@ -50,7 +50,11 @@ import {
 } from './skill-child-run-log'
 import { writeLifecycle } from './output-dir-lifecycle'
 import { inspectSkillProgressArtifacts } from './skill-progress-artifacts'
-import { completePendingSkillHandoffs, listPendingSkillHandoffTasks } from './skill-handoff-completion'
+import {
+  completePendingSkillHandoffs,
+  listHandoffValidationRepairTasks,
+  listPendingSkillHandoffTasks,
+} from './skill-handoff-completion'
 import { selectRunStateCandidate } from './run-state-selection'
 import {
   recordSkillParentTaskLifecycleEvent,
@@ -70,6 +74,8 @@ import {
   type ChildGatewayResult,
 } from './tool-registry'
 import {
+  isCompletedChildCloseStatus,
+  isKilledChildCloseStatus,
   isRetainedLifecycleChildCloseStatus,
   type ChildWaitResult,
   type MutableSkillChildCloseEvent,
@@ -194,6 +200,8 @@ export interface SkillChildRunnerConfig {
   sleep?: (ms: number) => Promise<void>
   /** Background artifact polling cadence. Tests may lower this. */
   progressPollIntervalMs?: number
+  /** Pushes terminal child-run truth into the same scope-run channel the UI watches. */
+  publishScopeRunEvent?: ((payload: ScopeRunEventPayload) => void) | null
 }
 
 interface ActiveRun {
@@ -270,6 +278,7 @@ class SkillChildRunner {
       maxActiveVeaRuns: config.maxActiveVeaRuns ?? MAX_ACTIVE_VEA_CHILD_RUNS,
       sleep: config.sleep ?? defaultSleep,
       progressPollIntervalMs: config.progressPollIntervalMs ?? PROGRESS_POLL_INTERVAL_MS,
+      publishScopeRunEvent: config.publishScopeRunEvent ?? null,
     }
     this.circuitBreaker = new ChildRunCircuitBreaker({
       enabled: snapshotTurnFeatureFlags().childRunCircuitBreakerEnabled,
@@ -510,13 +519,23 @@ class SkillChildRunner {
     const statusClass = classifySkillChildRunStatus(payload.status)
     if (!isSkillChildRunResumable(payload.status)) {
       if (statusClass === 'active') {
+        const active = this.active.get(childRunId)
+        if (!active) {
+          return this.resumePayloadChildRun({
+            childRunId,
+            record,
+            payload,
+            agentContext: options.agentContext ?? null,
+            completePendingHandoffsBeforePlan: this.hasCompletableHandoffTasks(payload.outputDir),
+          })
+        }
         return {
           childRunId,
           status: 'reused',
-          outputDir: payload.outputDir,
-          runStatePath: payload.runStatePath,
-          eventLogPath: this.deriveEventLogPathFromRecord(record),
-          parentNextHint: payload.parentNextHint,
+          outputDir: active.outputDir,
+          runStatePath: active.runStatePath,
+          eventLogPath: active.eventLogPath,
+          parentNextHint: active.parentNextHint,
           freshContractFields: null,
           closeEvent: null,
         }
@@ -570,6 +589,7 @@ class SkillChildRunner {
       record,
       payload,
       agentContext: options.agentContext ?? null,
+      completePendingHandoffsBeforePlan: this.hasCompletableHandoffTasks(payload.outputDir),
     })
   }
 
@@ -681,12 +701,18 @@ class SkillChildRunner {
     const agentContext = options.agentContext ?? null
     if (!agentContext) return null
     if (!payload.outputDir) return null
-    try {
-      if (listPendingSkillHandoffTasks(payload.outputDir).length === 0) return null
-    } catch {
-      return null
-    }
+    if (!this.hasCompletableHandoffTasks(payload.outputDir)) return null
     return { agentContext }
+  }
+
+  private hasCompletableHandoffTasks(outputDir: string | null | undefined): boolean {
+    if (!outputDir) return false
+    try {
+      return listPendingSkillHandoffTasks(outputDir).length > 0
+        || listHandoffValidationRepairTasks(outputDir).length > 0
+    } catch {
+      return false
+    }
   }
 
   private async resumePayloadChildRun(args: {
@@ -1390,13 +1416,14 @@ class SkillChildRunner {
     active: ActiveRun,
     result: SkillRunResult,
   ): Promise<SkillRunResult> {
-    if (result.success || result.status !== 'blocked' || !active.agentContext) return result
     const outputs = result.outputs ?? {}
     const outputDir = pickString(result.outputDir)
       ?? pickString(outputs.outputDir)
       ?? pickString(outputs.output_dir)
       ?? active.outputDir
     if (!outputDir) return result
+    if (!this.hasCompletableHandoffTasks(outputDir)) return result
+    if (!active.agentContext) return result
     try {
       const completed = await completePendingSkillHandoffs({
         outputDir,
@@ -1686,6 +1713,83 @@ class SkillChildRunner {
       progress,
       close,
     })
+    this.publishScopeRunClose(active, close, {
+      state,
+      reason,
+      message: close.error?.message || closeMessage(close),
+      progress,
+    })
+  }
+
+  private publishScopeRunClose(
+    active: ActiveRun,
+    close: SkillChildCloseEvent,
+    args: {
+      state: SkillParentTaskLifecycleState
+      reason: SkillParentTaskLifecycleReason
+      message: string
+      progress: ScopeRunSkillProgress
+    },
+  ): void {
+    const publish = this.config.publishScopeRunEvent
+    if (!publish) return
+    const scopeId = active.scopeId || active.sessionId
+    if (!scopeId) return
+    const taskId = childTaskProjectionTaskId(active.childRunId)
+    const now = new Date().toISOString()
+    const snapshot = buildChildTaskProjectionRecord({
+      active,
+      state: args.state,
+      reason: args.reason,
+      message: args.message,
+      progress: args.progress,
+      close,
+      scopeId,
+      taskId,
+      previous: null,
+      now,
+    })
+    const terminalReason = turnTerminalReasonFromChildClose(close)
+    try {
+      publish({
+        type: 'finished',
+        scopeId,
+        agent: 'assistant',
+        runId: active.childRunId,
+        taskId,
+        taskProjectionId: taskId,
+        phase: scopeRunPhaseFromTerminalReason(terminalReason),
+        terminalReason,
+        module: 'skill',
+        executionKind: 'job',
+        taskTitle: snapshot.taskTitle || `技能子任务 · ${active.skillId}`,
+        taskSummary: snapshot.taskSummary || args.message,
+        taskType: snapshot.taskType,
+        interactionState: snapshot.interactionState,
+        steps: snapshot.steps.map((step) => ({
+          id: step.id,
+          title: step.title || step.description || '技能子任务',
+          status: step.status || childProjectionStepStatusForState(args.state),
+          detail: step.detail,
+          updatedAt: step.updatedAt || now,
+        })),
+        currentStepId: snapshot.currentStepId,
+        waitingFor: snapshot.waitingFor,
+        resumableActions: snapshot.resumableActions,
+        recentArtifacts: snapshot.recentArtifacts,
+        artifactRefs: snapshot.recentArtifacts,
+        taskContinuation: snapshot.continuationRef,
+        progress: snapshot.progress,
+        blockedReason: snapshot.blockedReason,
+        error: snapshot.status === 'failed' ? args.message : undefined,
+        timestamp: now,
+      })
+    } catch (error) {
+      logAgentMetric('skill_child_scope_run_event_publish_failed', {
+        childRunId: active.childRunId,
+        error: errorMessage(error),
+      })
+    }
   }
 
   private upsertChildTaskProjection(args: {
@@ -2134,7 +2238,7 @@ function deriveCloseEventLedgerKind(
   if (close.terminalReason === 'cancelled_user') {
     return { event_kind: 'cancelled', isCancel: true }
   }
-  if (close.status === 'completed') {
+  if (isCompletedChildCloseStatus(close.status)) {
     return { event_kind: 'completed', isCancel: false }
   }
   // status: 'blocked' / 'failed' / 'killed' — all non-cancel terminal
@@ -2161,7 +2265,7 @@ function childProjectionStatusForState(
   return 'done'
 }
 
-function childProjectionStepStatusForState(state: SkillParentTaskLifecycleState): TaskStep['status'] {
+function childProjectionStepStatusForState(state: SkillParentTaskLifecycleState): NonNullable<TaskStep['status']> {
   if (state === 'background_running') return 'running'
   if (state === 'budget_paused' || state === 'blocked') return 'blocked'
   if (state === 'failed' || state === 'cancelled') return 'error'
@@ -2182,6 +2286,60 @@ function childProjectionActionsForStatus(
   return ['none']
 }
 
+function turnTerminalReasonFromChildClose(close: SkillChildCloseEvent): NonNullable<ScopeRunEventPayload['terminalReason']> {
+  if (isCompletedChildCloseStatus(close.status)) return 'done'
+  if (isKilledChildCloseStatus(close.status)) return close.terminalReason === 'cancelled_user'
+    ? 'cancelled_user'
+    : 'cancelled_runtime'
+  switch (close.terminalReason) {
+    case 'checkpoint_budget':
+      return 'checkpoint_budget'
+    case 'checkpoint_background':
+    case 'queued_global_concurrency':
+    case 'launch_stuck':
+    case 'process_restarted':
+      return 'checkpoint_background'
+    case 'blocked_config':
+      return 'blocked_config'
+    case 'blocked_external':
+      return 'blocked_external'
+    case 'cancelled_user':
+      return 'cancelled_user'
+    case 'failed_skill':
+    case 'child_process_crashed':
+    case 'host_unavailable':
+    case 'nested_child_run_not_supported':
+      return 'failed_skill'
+    case 'resume_launch_failed':
+      return 'resume_launch_failed'
+    case 'persistence_failed':
+      return 'persistence_failed'
+    case 'tool_not_registered':
+    case 'input_validation':
+      return 'blocked_tool_error'
+    case 'completed':
+      return 'done'
+    default:
+      return 'checkpoint_user_input'
+  }
+}
+
+function scopeRunPhaseFromTerminalReason(
+  terminalReason: NonNullable<ScopeRunEventPayload['terminalReason']>,
+): ScopeRunEventPayload['phase'] {
+  if (terminalReason === 'done') return 'done'
+  if (terminalReason === 'cancelled_user' || terminalReason === 'cancelled_runtime') return 'cancelled'
+  if (
+    terminalReason === 'failed_skill'
+    || terminalReason === 'resume_launch_failed'
+    || terminalReason === 'persistence_failed'
+    || terminalReason === 'blocked_tool_error'
+  ) {
+    return 'error'
+  }
+  return 'checkpoint'
+}
+
 function childProjectionArtifacts(args: {
   active: ActiveRun
   close?: SkillChildCloseEvent | null
@@ -2190,7 +2348,9 @@ function childProjectionArtifacts(args: {
   const outputDir = args.close?.outputDir ?? args.active.outputDir
   const runStatePath = args.close?.runStatePath ?? args.active.runStatePath
   const sceneScoresPath = args.close?.sceneScoresPath ?? null
-  const deliveryReportPath = args.close?.deliveryReportPath ?? null
+  const inferredDeliveryReportPath = outputDir ? join(outputDir, 'delivery_report.json') : null
+  const deliveryReportPath = args.close?.deliveryReportPath
+    ?? (inferredDeliveryReportPath && existsSync(inferredDeliveryReportPath) ? inferredDeliveryReportPath : null)
   const items = [
     outputDir
       ? { key: 'outputDir', path: outputDir, label: '输出目录', kind: 'output_dir' }

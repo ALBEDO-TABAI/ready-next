@@ -392,6 +392,7 @@ function AISettingsPanel() {
   const [messageCoalesceEnabled, setMessageCoalesceEnabled] = useState(true)
   const [messageCoalesceWindowMs, setMessageCoalesceWindowMs] = useState('1200')
   const [runtimeSummary, setRuntimeSummary] = useState<{
+    orchestrator?: 'ready-agent-sdk'
     sidecarStatus?: string
     sidecarPort?: number
     channelCount?: number
@@ -464,6 +465,9 @@ function AISettingsPanel() {
     || !knownModel
     || selectedConfig.model === '__custom__'
     || selectedConfig.model === 'custom'
+  const runtimeKernelLabel = runtimeSummary?.orchestrator === 'ready-agent-sdk'
+    ? 'Ready Agent SDK'
+    : 'Ready Agent Runtime'
 
   const safeHostname = (() => {
     try {
@@ -483,6 +487,7 @@ function AISettingsPanel() {
     const result = await window.electronAPI.agent.getRuntimeStatus()
     if (!result.success || !result.data) return
     setRuntimeSummary({
+      orchestrator: result.data.orchestrator,
       sidecarStatus: result.data.sidecar.status,
       sidecarPort: result.data.sidecar.port,
       channelCount: result.data.channels.total,
@@ -1332,9 +1337,9 @@ function AISettingsPanel() {
       >
         <div className="flex items-start justify-between gap-5 flex-wrap" style={{ padding: '18px 20px 16px', borderBottom: '1px solid color-mix(in srgb, var(--lg-border-soft) 88%, transparent)' }}>
           <div className="flex-1 min-w-0 mr-4">
-            <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>连接与运行</div>
-            <div className="text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)', maxWidth: 680 }}>
-              Claude SDK 单核编排，Python sidecar 提供 Channels / Heartbeat / cron
+            <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>Agent Runtime</div>
+            <div className="text-[11px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
+              Ready Agent SDK 编排，Python sidecar 提供 Channels / Heartbeat / cron
             </div>
           </div>
           <button
@@ -1400,7 +1405,7 @@ function AISettingsPanel() {
           <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
             <AISettingsInfoChip
               label="编排内核"
-              value={<span style={{ color: 'var(--color-blue)' }}>Claude SDK</span>}
+              value={<span style={{ color: 'var(--color-blue)' }}>{runtimeKernelLabel}</span>}
             />
             <AISettingsInfoChip
               label="Sidecar"

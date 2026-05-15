@@ -422,7 +422,15 @@ export class SkillContextOrchestrator {
   }
 
   private composeReferenceSystemInjection(skill: SkillState, docText: string): string {
-    const header = `已加载技能「${skill.name}」。请直接按此方法论输出结果。如需向用户追问细节，用 skill_ask_user；如需执行脚本或读写文件，用 skill_run_shell / skill_write_artifact / skill_read_artifact；如需启动耗时较长的技能 action，用 skill_start_detached。`
+    const childLoopActions = new Set(skill.childLoop?.actions || [])
+    const childLoopToolNames = skill.actions
+      .filter((action) => childLoopActions.has(action.name))
+      .map((action) => this.deps.resolveSkillToolByAction(skill.id, action.name)?.name || null)
+      .filter((name): name is string => typeof name === 'string' && name.length > 0)
+    const longTaskGuidance = childLoopToolNames.length > 0
+      ? `本技能的长任务已由 Ready child-loop 接管；启动或续跑时优先直接调用 ${childLoopToolNames.join(' / ')}，不要用 skill_start_detached 包一层。`
+      : '如需启动耗时较长的技能 action，用 skill_start_detached。'
+    const header = `已加载技能「${skill.name}」。请直接按此方法论输出结果。如需向用户追问细节，用 skill_ask_user；如需执行脚本或读写文件，用 skill_run_shell / skill_write_artifact / skill_read_artifact；${longTaskGuidance}`
     const goal = skill.description ? `技能目标：${skill.description}` : ''
     return [header, goal, '技能说明正文：', docText].filter(Boolean).join('\n')
   }

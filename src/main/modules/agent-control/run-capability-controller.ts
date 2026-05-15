@@ -132,6 +132,7 @@ function resolveActiveSkillAllowedTools(
     if (!Array.isArray(allowed) || allowed.length === 0) return null
     return Object.freeze([...allowed])
   } catch {
+    // silent-catch: skill runtime absence keeps capability filtering conservative.
     // Skill runtime unavailable (e.g. boot race / test harness without
     // skills tree). Conservative behavior: identity filter.
     return null

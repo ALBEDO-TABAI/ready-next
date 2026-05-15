@@ -217,9 +217,29 @@ function resolveProjectionForTaskRun(
     if (matched) return matched
   }
 
-  return items.find((item) =>
-    item.status === 'running' || item.status === 'blocked' || item.interactionState === 'resuming',
-  ) || items[0] || null
+  return selectFallbackProjection(items)
+}
+
+function isStalePausedProjection(item: PersistedTaskProjection): boolean {
+  const actions = item.resumableActions || []
+  return item.degradationReason === 'stale_paused'
+    && item.canResume !== true
+    && !actions.includes('continue')
+    && !actions.includes('retry')
+}
+
+function isLiveProjectionCandidate(item: PersistedTaskProjection): boolean {
+  return item.status === 'running'
+    || item.interactionState === 'resuming'
+    || (item.status === 'blocked' && !isStalePausedProjection(item))
+}
+
+function selectFallbackProjection(items: PersistedTaskProjection[]): PersistedTaskProjection | null {
+  return items.find(isLiveProjectionCandidate)
+    || items.find((item) => item.status === 'done' && (item.recentArtifacts?.length || 0) > 0)
+    || items.find((item) => item.status === 'done')
+    || items[0]
+    || null
 }
 
 /**

@@ -92,7 +92,7 @@ LLM 看到工具名时按下表对应：
 11. 用户请求里包含 `pdf` 时，任何一个必需 PDF 缺失都不算完成。
 12. Windows 上如果本地链路明确报 `HTTP Error 429`，应直接当成平台限流阻塞回报，不要擅自改走浏览器下载、录屏或别的旁路。
 13. 禁止用本地 `PIL` / `OpenCV` 的亮度、颜色、对比度特征脚本冒充“已看图”；这类结果只能算失败或诊断，不能算正式评分。
-14. 视听剖析的正文长文、SVG 结构图、MV 内容架构总览改由运行本 skill 的 agent（也就是你）直接完成；脚本不再调远端文本模型做这几段，也不再保留任何本地兜底文本。遇到 `audiovisual_handoff/` 下的任务包必须按序（body → 然后 diagram **或** overview（互斥，由路由决定，通常只触发其一）→ 最后 illustrate）完成，再重新跑 `finalize`。正文 `body/output.md` 必须逐模块展开：task.md 里"输出骨架"列出的每个 `##` 模块、`###` 子条目都要字面出现，不得合并/省略；每个 `##` ≥ 700 字、每个 `###` ≥ 180 字、每个 `##` 至少引用 3 个不同 Scene 编号。脚本会在 finalize 时机器校验，不达标会抛 `ValueError`，并把缺项写到 `audiovisual_handoff/body/validation_errors.json`，按错误提示补齐再跑，不要把"已经写过"当成"合规"。
+14. 视听剖析的正文长文、SVG 结构图、MV 内容架构总览改由运行本 skill 的 agent（也就是你）直接完成；脚本不再调远端文本模型做这几段，也不再保留任何本地兜底文本。遇到 `audiovisual_handoff/` 下的任务包必须按序（body → 然后 diagram **或** overview（互斥，由路由决定，通常只触发其一）→ 最后 illustrate）完成，再重新跑 `finalize`。正文 `body/output.md` 必须逐模块展开：task.md 里"输出骨架"列出的每个 `##` 模块、`###` 子条目都要字面出现，不得合并/省略；每个 `##` ≥ 700 字、每个 `###` ≥ 180 字，Scene 证据数量以 task.md 的交付规则为准（长视频默认 3 个不同 Scene，短视频按真实可用 Scene 数降低）。脚本会在 finalize 时机器校验，不达标会抛 `ValueError`，并把缺项写到 `audiovisual_handoff/body/validation_errors.json`，按错误提示补齐再跑，不要把"已经写过"当成"合规"。
 15. `illustrate/output.md` 只能使用 `audiovisual_handoff/illustrate/task.md` 中「场景目录」列出的截图路径，不得凭空编造；同一张截图也不能在连续 3 段以内重复出现，否则脚本会抛 `ValueError`。
 16. Handoff `receipt.json` 会记录每个子任务的 `input_hash`；当分类结果或 prompt 变化时，已有 `output.md/svg/json` 会被自动作废，需要重新生成。
 

@@ -42,6 +42,7 @@ test('capability groups define required reserved and host-only entries', () => {
   assert.equal(getCapabilityGroup('system_host')?.exposure, 'host_only')
   assert.equal(getCapabilityGroup('design_reserved')?.availability, 'inactive')
   assert.equal(getCapabilityGroup('mcp')?.exposure, 'model_visible')
+  assert.equal(getCapabilityGroup('mcp')?.settingsVisible, false)
 })
 
 test('resolver suppresses all model-visible groups when provider tool calling is disabled', () => {

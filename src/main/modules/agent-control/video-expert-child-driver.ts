@@ -152,7 +152,7 @@ function isKnownVisionModel(provider: string, model: string): boolean {
   if (p === 'anthropic' && (m.startsWith('claude-3') || m.startsWith('claude-opus-4') || m.startsWith('claude-sonnet-4'))) return true
   if (p === 'gemini' && m.startsWith('gemini-')) return true
   if ((p === 'openai' || p === 'fox') && (m.startsWith('gpt-4o') || m.startsWith('gpt-4.1') || m.startsWith('gpt-5.4'))) return true
-  if (m.includes('glm-5v') || m.includes('glm-4v') || m.includes('qwen-vl') || m.includes('mimo-v2-omni')) return true
+  if (m.includes('glm-5v') || m.includes('glm-4v') || m.includes('qwen-vl') || m.includes('mimo-v2-omni') || m === 'mimo-v2.5') return true
   return false
 }
 

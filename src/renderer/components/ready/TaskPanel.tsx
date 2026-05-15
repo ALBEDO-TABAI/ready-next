@@ -231,9 +231,29 @@ function resolveActiveProjection(
     if (matched) return matched
   }
 
-  return taskProjections.find((item) =>
-    item.status === 'running' || item.status === 'blocked' || item.interactionState === 'resuming',
-  ) || taskProjections[0] || null
+  return selectFallbackProjection(taskProjections)
+}
+
+function isStalePausedProjection(item: TaskProjectionRecordData): boolean {
+  const actions = item.resumableActions || []
+  return item.degradationReason === 'stale_paused'
+    && item.canResume !== true
+    && !actions.includes('continue')
+    && !actions.includes('retry')
+}
+
+function isLiveProjectionCandidate(item: TaskProjectionRecordData): boolean {
+  return item.status === 'running'
+    || item.interactionState === 'resuming'
+    || (item.status === 'blocked' && !isStalePausedProjection(item))
+}
+
+function selectFallbackProjection(items: TaskProjectionRecordData[]): TaskProjectionRecordData | null {
+  return items.find(isLiveProjectionCandidate)
+    || items.find((item) => item.status === 'done' && (item.recentArtifacts?.length || 0) > 0)
+    || items.find((item) => item.status === 'done')
+    || items[0]
+    || null
 }
 
 function buildProjectionContinuationIntent(

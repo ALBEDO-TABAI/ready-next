@@ -182,8 +182,8 @@ test('strict internal admission flag defaults enabled', () => {
   }), true)
 })
 
-test('executeToolCall rejects internal tools unless child internal context is allowed', async () => {
-  const result = await executeToolCall('skill_video_expert_pipeline', { url: 'https://example.test/video' }, {
+test('executeToolCall allows authorized model calls to exposed internal typed actions', async () => {
+  const result = await executeToolCall('skill_video_expert_pipeline', {}, {
     allowedToolNames: new Set(['skill_video_expert_pipeline']),
     invoker: 'model',
     authorization: buildSelectedSkillToolAuthorization({
@@ -195,8 +195,24 @@ test('executeToolCall rejects internal tools unless child internal context is al
     }),
   })
 
-  assert.equal(result.data?.errorKind, 'host_unavailable')
-  assert.equal(result.data?.reason, 'internal_tool_not_allowed')
+  assert.equal(result.data?.errorKind, 'input_validation')
+})
+
+test('executeToolCall denies unselected internal typed actions via authorization', async () => {
+  const result = await executeToolCall('skill_video_expert_pipeline', {}, {
+    allowedToolNames: new Set(['skill_video_expert_pipeline']),
+    invoker: 'model',
+    authorization: buildSelectedSkillToolAuthorization({
+      skillId: 'video-expert-analyzer',
+      allowedTypedActions: [],
+      allowedPrimitives: [],
+      source: 'explicit',
+      reason: 'test_setup',
+    }),
+  })
+
+  assert.equal(result.data?.errorKind, 'authorization_denied')
+  assert.equal(result.data?.reason, 'tool_not_in_allowed_typed_actions')
 })
 
 test('public model surface does not expose internal VEA actions without hint', () => {

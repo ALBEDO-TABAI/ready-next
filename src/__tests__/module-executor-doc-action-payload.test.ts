@@ -8,6 +8,7 @@ import {
 } from '../renderer/modules/agent/documentActions'
 import { executeModuleToolAction } from '../renderer/modules/agent/moduleExecutor'
 import { useDocTabs } from '../renderer/stores/useDocTabs'
+import { shouldApplyAsyncDocumentLoad } from '../renderer/components/document/documentLoadGuard'
 
 function buildGuideFenceFixture(): string {
   return [
@@ -135,6 +136,93 @@ describe('executeModuleToolAction · document.updateWidget payload 合约', () =
     const summary = await performDocAction({ type: 'list_widgets' })
     assert.equal(typeof summary, 'string')
     assert.equal(classifyDocActionFailureReason({ type: 'list_widgets' }, summary), null)
+  })
+})
+
+describe('performDocAction · save_tab disk drift', () => {
+  it('dirty 标记已清但磁盘内容不同步时仍会写回文件', async () => {
+    const previousWindow = (globalThis as { window?: unknown }).window
+    const writes: Array<{ path: string; content: string }> = []
+    ;(globalThis as { window?: unknown }).window = {
+      electronAPI: {
+        document: {
+          readFile: async () => ({ success: true, content: '\n' }),
+          writeFile: async (path: string, content: string) => {
+            writes.push({ path, content })
+            return { success: true }
+          },
+        },
+      },
+    }
+    try {
+      const store = useDocTabs.getState()
+      const tab = store.tabs[0]
+      store.setActiveTab(tab.id)
+      store.setTabPath(tab.id, '/tmp/agent-target.md')
+      store.setTabContent(tab.id, '# 新内容\n')
+      store.markTabSaved(tab.id)
+
+      const result = await performDocAction({ type: 'save_tab', tabId: tab.id })
+
+      assert.match(result, /已保存文档/)
+      assert.deepEqual(writes, [{ path: '/tmp/agent-target.md', content: '# 新内容\n' }])
+    } finally {
+      ;(globalThis as { window?: unknown }).window = previousWindow
+    }
+  })
+
+  it('工具写入后即使编辑器异步加载把标签重置为干净态，保存仍使用待落盘内容', async () => {
+    const previousWindow = (globalThis as { window?: unknown }).window
+    const writes: Array<{ path: string; content: string }> = []
+    ;(globalThis as { window?: unknown }).window = {
+      electronAPI: {
+        document: {
+          readFile: async () => ({ success: true, content: '\n' }),
+          writeFile: async (path: string, content: string) => {
+            writes.push({ path, content })
+            return { success: true }
+          },
+        },
+      },
+    }
+    try {
+      const store = useDocTabs.getState()
+      const tab = store.tabs[0]
+      store.setActiveTab(tab.id)
+      store.setTabPath(tab.id, '/tmp/agent-target.md')
+      store.setTabContent(tab.id, '\n')
+      store.markTabSaved(tab.id)
+
+      await performDocAction({ type: 'set_content', content: '# 人物关系图\n', tabId: tab.id })
+      store.setTabContent(tab.id, '\n')
+      store.markTabSaved(tab.id)
+
+      const result = await performDocAction({ type: 'save_tab', tabId: tab.id })
+
+      assert.match(result, /已保存文档/)
+      assert.deepEqual(writes, [{ path: '/tmp/agent-target.md', content: '# 人物关系图\n' }])
+      const savedTab = useDocTabs.getState().tabs.find((item) => item.id === tab.id)
+      assert.equal(savedTab?.content, '# 人物关系图\n')
+      assert.equal(savedTab?.isDirty, false)
+    } finally {
+      ;(globalThis as { window?: unknown }).window = previousWindow
+    }
+  })
+})
+
+describe('shouldApplyAsyncDocumentLoad', () => {
+  it('异步加载完成前标签已被写入时不覆盖现有内容', () => {
+    const initial = { id: 'tab-1', path: '/tmp/新文档.md', content: '', isDirty: false }
+    const current = { id: 'tab-1', path: '/tmp/新文档.md', content: '# 已写入\n', isDirty: true }
+
+    assert.equal(shouldApplyAsyncDocumentLoad(initial, current), false)
+  })
+
+  it('同一标签未被修改时允许提交加载结果', () => {
+    const initial = { id: 'tab-1', path: '/tmp/新文档.md', content: '', isDirty: false }
+    const current = { id: 'tab-1', path: '/tmp/新文档.md', content: '', isDirty: false }
+
+    assert.equal(shouldApplyAsyncDocumentLoad(initial, current), true)
   })
 })
 

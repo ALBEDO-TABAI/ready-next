@@ -1349,6 +1349,7 @@ export class TurnEngine {
         }
         mcpDeferred.deferredRegistry.reset()
       } catch {
+        // silent-catch: builds without MCP reset support start the next turn cold elsewhere.
         // mcp module not available in this build — noop
       }
       return {

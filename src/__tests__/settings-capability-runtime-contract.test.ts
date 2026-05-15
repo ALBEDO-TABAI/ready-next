@@ -28,3 +28,14 @@ test('settings capability status is sourced from a main-process runtime snapshot
   assert.match(agentIPC, /ipcMain\.handle\('agent:getCapabilityRuntimeSnapshot'/)
   assert.match(runtime, /async getCapabilityRuntimeSnapshot\(configOverride\?: AIModelConfig\)/)
 })
+
+test('settings runtime panel does not expose the retired Claude SDK label', () => {
+  const settingsPage = readWorkspaceFile('src/renderer/pages/Settings.tsx')
+  const rendererTypes = readWorkspaceFile('src/renderer/types/electron.d.ts')
+  const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime.ts')
+
+  assert.doesNotMatch(settingsPage, /Claude SDK/)
+  assert.doesNotMatch(rendererTypes, /claude-sdk/)
+  assert.match(runtime, /orchestrator:\s*this\.orchestrator\.getRuntimeKernel\(\)/)
+  assert.match(settingsPage, /Ready Agent SDK/)
+})

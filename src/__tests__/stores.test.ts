@@ -757,7 +757,7 @@ describe('useAgent Store', () => {
         assert.strictEqual(state.messages[0].type, 'agent')
     })
 
-    it('should fall back to chat history when scoped conversation loading is temporarily unavailable', async () => {
+    it('should not repopulate scoped conversations from old chat history when scoped loading is unavailable', async () => {
         ;(globalThis as any).window.electronAPI = {
             agent: {
                 listConversationScopes: async () => ({
@@ -784,12 +784,9 @@ describe('useAgent Store', () => {
         await useAgent.getState().loadScopes()
 
         const state = useAgent.getState()
-        assert.strictEqual(state.scopes.length, 1)
-        assert.strictEqual(state.scopes[0].id, 'conv-local-history-1')
-        assert.strictEqual(state.scopes[0].sourceKind, 'local')
-        assert.strictEqual(state.currentScopeId, 'conv-local-history-1')
-        assert.strictEqual(state.conversations.length, 1)
-        assert.strictEqual(state.conversations[0].title, '历史会话')
+        assert.strictEqual(state.scopes.length, 0)
+        assert.strictEqual(state.currentScopeId, null)
+        assert.strictEqual(state.conversations.length, 0)
     })
 
     it('should merge remote conversation events into scopes and active messages', async () => {

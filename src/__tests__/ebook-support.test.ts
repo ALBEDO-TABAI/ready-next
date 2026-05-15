@@ -142,9 +142,11 @@ test('importEpubAsMarkdown sanitizes unsafe and long markdown file names', async
     const fileName = basename(result.indexPath!)
     assert.equal(fileName.endsWith('.md'), true)
     assert.equal(fileName.length <= 123, true)
-    const forbiddenChars = ['<', '>', ':', '"', '/', '\\', '|', '?', '*']
-    assert.equal(forbiddenChars.some((char) => fileName.includes(char)), false)
-    assert.equal(Array.from(fileName).some((char) => char.charCodeAt(0) < 32), false)
+    const forbiddenChars = new Set(['<', '>', ':', '"', '/', '\\', '|', '?', '*'])
+    assert.equal(
+      Array.from(fileName).some((char) => forbiddenChars.has(char) || char.charCodeAt(0) < 32),
+      false,
+    )
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

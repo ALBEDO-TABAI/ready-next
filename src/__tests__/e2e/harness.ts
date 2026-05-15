@@ -19,6 +19,14 @@ import type {
 const execFileAsync = promisify(execFile)
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(__dirname, '../../..')
+const PYTHON_CANDIDATES = [
+  process.env.READY_E2E_PYTHON,
+  'python3.12',
+  'python3.11',
+  'python3.10',
+  'python3',
+].filter((value): value is string => Boolean(value && value.trim()))
+let cachedPythonExecutable: string | null | undefined
 
 export const fixtureVideoPath = join(__dirname, 'fixtures', 'sample-video.mp4')
 
@@ -50,7 +58,8 @@ export async function hasFfmpeg(): Promise<boolean> {
 }
 
 export async function hasPySceneDetect(): Promise<boolean> {
-  return canRun('python3', ['-c', 'import scenedetect'])
+  const python = await resolveE2ePython()
+  return Boolean(python) && canRun(python, ['-c', 'import scenedetect'], 15_000)
 }
 
 export async function createVeaE2eHarness(): Promise<VeaE2eHarness> {
@@ -69,13 +78,29 @@ export async function createVeaE2eHarness(): Promise<VeaE2eHarness> {
   }
 }
 
-async function canRun(command: string, args: string[]): Promise<boolean> {
+async function canRun(command: string, args: string[], timeoutMs = 5_000): Promise<boolean> {
   try {
-    await execFileAsync(command, args, { timeout: 5_000 })
+    await execFileAsync(command, args, { timeout: timeoutMs })
     return true
   } catch {
     return false
   }
+}
+
+async function resolveE2ePython(): Promise<string | null> {
+  if (cachedPythonExecutable !== undefined) return cachedPythonExecutable
+  for (const candidate of PYTHON_CANDIDATES) {
+    const ok = await canRun(
+      candidate,
+      ['-c', 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)'],
+    )
+    if (ok) {
+      cachedPythonExecutable = candidate
+      return candidate
+    }
+  }
+  cachedPythonExecutable = null
+  return null
 }
 
 async function mkdtempCompat(prefix: string): Promise<string> {
@@ -250,6 +275,8 @@ async function runRealMaterialsPipeline(
   if (!source) throw new Error('VEA e2e pipeline request missing url')
   const sceneThreshold = Number(request.params?.sceneThreshold ?? 1)
   const bestThreshold = Number(request.params?.bestThreshold ?? 7.5)
+  const python = await resolveE2ePython()
+  if (!python) throw new Error('VEA e2e requires Python 3.10 or newer')
   const script = `
 import json
 import sys
@@ -313,7 +340,7 @@ print(json.dumps({
 }, ensure_ascii=False))
 `
   const { stdout, stderr } = await execFileAsync(
-    'python3',
+    python,
     ['-c', script, repoRoot, childOutputDir, source, String(sceneThreshold), String(bestThreshold)],
     {
       timeout: 60_000,
