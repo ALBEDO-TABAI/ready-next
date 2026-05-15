@@ -11,7 +11,7 @@
     "rebuild:native": "electron-builder install-app-deps",
     "native:check": "node scripts/check-better-sqlite3-electron-abi.cjs",
     "verify:native": "npm run rebuild:native && npm run native:check",
-    "dev": "node ./scripts/sync-dev-icon.mjs && npm run rebuild:native && npm run native:check && electron-vite dev",
+    "dev": "node ./scripts/sync-dev-icon.mjs && node scripts/ensure-native-dev.cjs && electron-vite dev",
     "build": "npm run rebuild:native && npm run native:check && npm run typecheck && electron-vite build",
     "build:dist": "npm run build && electron-builder --config electron-builder.yml",
     "build:dist:seeded": "node ./scripts/export-ai-settings-seed.mjs && npm run build:dist",

@@ -9,6 +9,7 @@ import {
   Plus,
 } from 'lucide-react'
 import { type DocTab, useDocTabs } from '../../stores/useDocTabs'
+import { useWorkspace } from '../../stores/useWorkspace'
 import { isEpubExtension } from '../../../shared/ebook'
 
 type FoliateViewElement = HTMLElement & {
@@ -211,7 +212,8 @@ export default function EbookViewer({ tab, fileUrl, currentExt }: EbookViewerPro
   const viewRef = useRef<FoliateViewElement | null>(null)
   const fileMetaRef = useRef<{ size: number; modifiedTime: number }>({ size: 0, modifiedTime: 0 })
   const fontSizeRef = useRef(DEFAULT_FONT_SIZE)
-  const { openTab } = useDocTabs()
+  const openTab = useDocTabs((state) => state.openTab)
+  const revealFile = useWorkspace((state) => state.revealFile)
 
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading')
   const [error, setError] = useState<string | null>(null)
@@ -328,6 +330,7 @@ export default function EbookViewer({ tab, fileUrl, currentExt }: EbookViewerPro
         throw new Error(result.error || '导入失败')
       }
       openTab(result.indexPath)
+      await revealFile(result.indexPath)
       const warningText = result.warnings && result.warnings.length > 0
         ? `，${result.warnings.length} 条提示`
         : ''
@@ -336,7 +339,7 @@ export default function EbookViewer({ tab, fileUrl, currentExt }: EbookViewerPro
       // silent-catch: the UI surfaces the import failure in component state.
       setImportState({ kind: 'error', message: err instanceof Error ? err.message : '导入失败' })
     }
-  }, [canImport, importState.kind, openTab, tab.path])
+  }, [canImport, importState.kind, openTab, revealFile, tab.path])
 
   const stepFont = useCallback((delta: number) => {
     setFontSize((value) => Math.max(13, Math.min(26, value + delta)))

@@ -14,6 +14,11 @@ import {
 } from '../../modules/workbench/chrome'
 import { useRafResizeDrag } from '../../modules/workbench/useRafResizeDrag'
 import { freezeVisibleDocumentLayoutWidths } from '../../modules/document/documentLayoutFreeze'
+import {
+  captureMarkdownLineAnchor,
+  resolveMarkdownLineFromAnchor,
+  type DocumentScrollAnchorSnapshot,
+} from '../../modules/document/documentScrollAnchor'
 import { getFileExtension } from '../../utils/path'
 import { isEbookExtension } from '../../../shared/ebook'
 
@@ -24,18 +29,6 @@ const getFileExt = (path: string | null): string => {
   return getFileExtension(path)
 }
 
-type DocumentModeScrollSnapshot = {
-  top: number
-  ratio: number
-  maxScroll: number
-  anchorTitle: string | null
-}
-
-function getMarkdownHeadingTitle(line: string): string | null {
-  const match = line.match(/^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$/)
-  return match ? match[1].trim() : null
-}
-
 function estimateTextareaLineHeight(element: HTMLElement): number {
   const styles = window.getComputedStyle(element)
   const lineHeight = Number.parseFloat(styles.lineHeight)
@@ -44,80 +37,110 @@ function estimateTextareaLineHeight(element: HTMLElement): number {
   return Number.isFinite(fontSize) && fontSize > 0 ? fontSize * 1.6 : 24
 }
 
-function findNearestHeadingTitle(content: string, lineNumber: number): string | null {
-  const lines = content.split('\n')
-  const start = Math.max(0, Math.min(lines.length - 1, lineNumber - 1))
-  for (let index = start; index >= 0; index -= 1) {
-    const title = getMarkdownHeadingTitle(lines[index])
-    if (title) return title
-  }
-  return null
-}
-
-function findHeadingLine(content: string, title: string): number | null {
-  const lines = content.split('\n')
-  for (let index = 0; index < lines.length; index += 1) {
-    if (getMarkdownHeadingTitle(lines[index]) === title) return index + 1
-  }
-  return null
-}
-
-function captureTextareaAnchor(element: HTMLElement, content: string): string | null {
+function captureTextareaAnchor(element: HTMLElement, content: string): Pick<DocumentScrollAnchorSnapshot, 'anchorTitle' | 'anchorOrdinal' | 'anchorProgress'> | null {
   if (!(element instanceof HTMLTextAreaElement)) return null
   const lineNumber = Math.floor(element.scrollTop / estimateTextareaLineHeight(element)) + 1
-  return findNearestHeadingTitle(content, lineNumber)
+  const anchor = captureMarkdownLineAnchor(content, lineNumber)
+  return anchor
+    ? { anchorTitle: anchor.title, anchorOrdinal: anchor.ordinal, anchorProgress: anchor.progress }
+    : null
 }
 
-function capturePreviewAnchor(element: HTMLElement): string | null {
+function getElementContentOffset(container: HTMLElement, child: HTMLElement): number {
+  const containerRect = container.getBoundingClientRect()
+  const childRect = child.getBoundingClientRect()
+  return childRect.top - containerRect.top + container.scrollTop
+}
+
+function capturePreviewAnchor(element: HTMLElement): Pick<DocumentScrollAnchorSnapshot, 'anchorTitle' | 'anchorOrdinal' | 'anchorProgress'> | null {
   const headings = Array.from(element.querySelectorAll<HTMLElement>('[data-ready-heading-title]'))
   if (headings.length === 0) return null
-  const containerTop = element.getBoundingClientRect().top
+  const headingCounts = new Map<string, number>()
+  const contentTop = element.scrollTop + 8
   let nearest: HTMLElement | null = null
-  for (const heading of headings) {
-    const top = heading.getBoundingClientRect().top - containerTop
-    if (top <= 24) {
+  let nearestIndex = 0
+  const ordinals = headings.map((heading) => {
+    const title = heading.dataset.readyHeadingTitle || ''
+    const ordinal = headingCounts.get(title) || 0
+    headingCounts.set(title, ordinal + 1)
+    return ordinal
+  })
+  for (let index = 0; index < headings.length; index += 1) {
+    const heading = headings[index]
+    const top = getElementContentOffset(element, heading)
+    if (top <= contentTop + 16) {
       nearest = heading
+      nearestIndex = index
       continue
     }
-    if (!nearest) nearest = heading
+    if (!nearest) {
+      nearest = heading
+      nearestIndex = index
+    }
     break
   }
-  return nearest?.dataset.readyHeadingTitle || null
+  if (!nearest) return null
+  const sectionStart = getElementContentOffset(element, nearest)
+  const nextHeading = headings[nearestIndex + 1] || null
+  const sectionEnd = nextHeading
+    ? getElementContentOffset(element, nextHeading)
+    : Math.max(element.scrollHeight, sectionStart + element.clientHeight)
+  const sectionLength = Math.max(1, sectionEnd - sectionStart)
+  const progress = Math.max(0, Math.min(1, (contentTop - sectionStart) / sectionLength))
+  return {
+    anchorTitle: nearest.dataset.readyHeadingTitle || null,
+    anchorOrdinal: ordinals[nearestIndex] || 0,
+    anchorProgress: progress,
+  }
 }
 
-function captureElementScroll(element: HTMLElement, content: string): DocumentModeScrollSnapshot {
+function captureElementScroll(element: HTMLElement, content: string): DocumentScrollAnchorSnapshot {
   const maxScroll = Math.max(0, element.scrollHeight - element.clientHeight)
   const top = Math.max(0, Math.min(element.scrollTop, maxScroll))
+  const anchor = captureTextareaAnchor(element, content) || capturePreviewAnchor(element)
   return {
     top,
     ratio: maxScroll > 0 ? top / maxScroll : 0,
     maxScroll,
-    anchorTitle: captureTextareaAnchor(element, content) || capturePreviewAnchor(element),
+    anchorTitle: anchor?.anchorTitle || null,
+    anchorOrdinal: anchor?.anchorOrdinal ?? null,
+    anchorProgress: anchor?.anchorProgress ?? null,
   }
 }
 
-function restoreAnchorScroll(element: HTMLElement, snapshot: DocumentModeScrollSnapshot, content: string): boolean {
+function restoreAnchorScroll(element: HTMLElement, snapshot: DocumentScrollAnchorSnapshot, content: string): boolean {
   if (!snapshot.anchorTitle) return false
 
   if (element instanceof HTMLTextAreaElement) {
-    const line = findHeadingLine(content, snapshot.anchorTitle)
+    const line = resolveMarkdownLineFromAnchor(content, snapshot)
     if (!line) return false
     element.scrollTop = Math.max(0, Math.round((line - 1) * estimateTextareaLineHeight(element)))
     return true
   }
 
-  const target = Array.from(element.querySelectorAll<HTMLElement>('[data-ready-heading-title]'))
-    .find((heading) => heading.dataset.readyHeadingTitle === snapshot.anchorTitle)
+  const headings = Array.from(element.querySelectorAll<HTMLElement>('[data-ready-heading-title]'))
+  let seenOrdinal = 0
+  const targetIndex = headings.findIndex((heading) => {
+    if (heading.dataset.readyHeadingTitle !== snapshot.anchorTitle) return false
+    const matches = seenOrdinal === (snapshot.anchorOrdinal || 0)
+    seenOrdinal += 1
+    return matches
+  })
+  const target = targetIndex >= 0 ? headings[targetIndex] : null
   if (!target) return false
-  const elementRect = element.getBoundingClientRect()
-  const targetRect = target.getBoundingClientRect()
+  const sectionStart = getElementContentOffset(element, target)
+  const nextHeading = headings[targetIndex + 1] || null
+  const sectionEnd = nextHeading
+    ? getElementContentOffset(element, nextHeading)
+    : Math.max(element.scrollHeight, sectionStart + element.clientHeight)
   const maxScroll = Math.max(0, element.scrollHeight - element.clientHeight)
-  const nextTop = element.scrollTop + targetRect.top - elementRect.top - 8
+  const progress = Math.max(0, Math.min(1, snapshot.anchorProgress ?? 0))
+  const nextTop = sectionStart + (sectionEnd - sectionStart) * progress - 8
   element.scrollTop = Math.max(0, Math.min(Math.round(nextTop), maxScroll))
   return true
 }
 
-function restoreElementScroll(element: HTMLElement, snapshot: DocumentModeScrollSnapshot, content: string) {
+function restoreElementScroll(element: HTMLElement, snapshot: DocumentScrollAnchorSnapshot, content: string) {
   const restore = () => {
     if (restoreAnchorScroll(element, snapshot, content)) return
     const maxScroll = Math.max(0, element.scrollHeight - element.clientHeight)
@@ -127,6 +150,8 @@ function restoreElementScroll(element: HTMLElement, snapshot: DocumentModeScroll
   restore()
   requestAnimationFrame(restore)
   requestAnimationFrame(() => requestAnimationFrame(restore))
+  window.setTimeout(restore, 160)
+  window.setTimeout(restore, 420)
 }
 
 function findScrollCandidates(scope: HTMLElement): HTMLElement[] {
@@ -239,7 +264,7 @@ export default function DocumentMode({
 
   const splitContainerRef = useRef<HTMLDivElement>(null)
   const primarySplitPaneRef = useRef<HTMLDivElement>(null)
-  const scrollSnapshotsRef = useRef<Map<string, DocumentModeScrollSnapshot>>(new Map())
+  const scrollSnapshotsRef = useRef<Map<string, DocumentScrollAnchorSnapshot>>(new Map())
   const documentSplitRatioRef = useRef(documentSplitRatio)
   const liveDocumentSplitRatioRef = useRef(documentSplitRatio)
   const restoreDocumentLayoutFreezeRef = useRef<(() => void) | null>(null)

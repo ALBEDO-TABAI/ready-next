@@ -45,10 +45,10 @@ test('document edit and preview modes share reading scroll position when remount
   assert.match(documentMode, /onChange=\{handleEditorModeChange\}/)
   assert.match(documentMode, /\[data-ready-document-scroll-key\]/)
   assert.match(documentMode, /findCurrentScrollElement\(scope\)/)
-  assert.match(documentMode, /anchorTitle: captureTextareaAnchor\(element, content\) \|\| capturePreviewAnchor\(element\)/)
+  assert.match(documentMode, /anchorTitle: anchor\?\.anchorTitle \|\| null/)
   assert.match(documentMode, /restoreAnchorScroll\(element, snapshot, content\)/)
-  assert.match(documentMode, /findNearestHeadingTitle\(content, lineNumber\)/)
-  assert.match(documentMode, /findHeadingLine\(content, snapshot\.anchorTitle\)/)
+  assert.match(documentMode, /captureMarkdownLineAnchor\(content, lineNumber\)/)
+  assert.match(documentMode, /resolveMarkdownLineFromAnchor\(content, snapshot\)/)
 
   const notePreview = readWorkspaceFile('src/renderer/components/document/NotePreview.tsx')
   assert.match(notePreview, /data-ready-heading-title=\{extractMarkdownText\(children\)\}/)

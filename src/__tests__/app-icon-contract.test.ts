@@ -38,8 +38,10 @@ test('main process applies the project-owned icon during development instead of 
   )
   assert.equal(
     packageJson.scripts.dev,
-    'node ./scripts/sync-dev-icon.mjs && npm run rebuild:native && npm run native:check && electron-vite dev',
+    'node ./scripts/sync-dev-icon.mjs && node scripts/ensure-native-dev.cjs && electron-vite dev',
   )
+  assert.ok(existsSync(resolve(process.cwd(), 'scripts/ensure-native-dev.cjs')))
+  assert.doesNotMatch(packageJson.scripts.dev, /npm run rebuild:native && npm run native:check/)
   assert.equal(
     packageJson.scripts.build,
     'npm run rebuild:native && npm run native:check && npm run typecheck && electron-vite build',

@@ -52,6 +52,7 @@ interface WorkspaceState {
   refreshFiles: () => Promise<void>
   toggleDir: (path: string) => Promise<void>
   loadDirChildren: (path: string) => Promise<FileItem[]>
+  revealFile: (path: string) => Promise<void>
 
   // Workspace
   setWorkspaceRoot: (path: string) => WorkspaceValidationResult
@@ -440,6 +441,19 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       console.warn('Failed to load dir children:', dirPath, error)
     }
     return []
+  },
+
+  revealFile: async (path) => {
+    const parentDir = getDirName(path)
+    const parentParentDir = getDirName(parentDir)
+    const state = get()
+    const expandedDirs = expandDirsForTarget(parentDir, state.expandedDirs, state.pinnedFolders)
+    set({ selectedFile: path, expandedDirs })
+    await get().refreshFiles()
+    if (parentParentDir && parentParentDir !== parentDir) {
+      await get().loadDirChildren(parentParentDir)
+    }
+    await get().loadDirChildren(parentDir)
   },
 
   toggleDir: async (path) => {
