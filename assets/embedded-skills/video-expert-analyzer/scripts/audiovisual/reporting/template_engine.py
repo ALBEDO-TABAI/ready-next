@@ -1275,6 +1275,10 @@ def build_audiovisual_body_prompt(
         required_headings = _raw_prompt_adapter.extract_required_sections_from_raw_prompt(prompt_text)
         required_sections = [f"## {heading}" for heading in required_headings]
         validation_rules = _raw_prompt_adapter.extract_prompt_fidelity_rules(prompt_text)
+        validation_rules["min_scene_evidence_per_section"] = _effective_scene_evidence_min(
+            data,
+            int(validation_rules.get("min_scene_evidence_per_section") or 3),
+        )
         user_message = _raw_prompt_adapter.build_raw_prompt_user_message(
             data,
             route,
@@ -1309,6 +1313,20 @@ def build_audiovisual_body_prompt(
         "source": "template",
         "validation_rules": {},
     }
+
+
+def _effective_scene_evidence_min(data: Dict, configured_min: int) -> int:
+    if configured_min <= 0:
+        return 0
+    scene_numbers = {
+        int(scene.get("scene_number"))
+        for scene in data.get("scenes", [])
+        if isinstance(scene, dict) and str(scene.get("scene_number") or "").isdigit()
+    }
+    available = len(scene_numbers)
+    if available <= 0:
+        return configured_min
+    return max(1, min(configured_min, available))
 
 
 def synthesize_audiovisual_report(
@@ -1486,6 +1504,48 @@ def _extract_required_sections(tasks_text: str) -> List[str]:
 _SCENE_NUMBER_RE = re.compile(r"(?:Scene|场景)\s*(\d{2,4})")
 
 
+def _normalize_heading_literal(text: str) -> str:
+    return (
+        text
+        .replace("“", '"')
+        .replace("”", '"')
+        .replace("‘", "'")
+        .replace("’", "'")
+    )
+
+
+def _canonicalize_required_headings(
+    text: str,
+    required_sections: Sequence[str],
+    validation_rules: Dict[str, Any],
+) -> str:
+    canonical_by_normalized = {
+        _normalize_heading_literal(section.strip()): section.strip()
+        for section in required_sections
+    }
+    required_subsections_by_module: Dict[str, List[str]] = validation_rules.get("required_subsections") or {}
+    for titles in required_subsections_by_module.values():
+        for title in titles:
+            heading = f"### {title}".strip()
+            canonical_by_normalized[_normalize_heading_literal(heading)] = heading
+
+    if not canonical_by_normalized:
+        return text
+
+    lines: List[str] = []
+    changed = False
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("##"):
+            canonical = canonical_by_normalized.get(_normalize_heading_literal(stripped))
+            if canonical:
+                lines.append(canonical)
+                changed = changed or canonical != line
+                continue
+        lines.append(line)
+    return "\n".join(lines) if changed else text
+
+
 def _split_body_sections(text: str) -> Dict[str, str]:
     return {heading: info["body"] for heading, info in _split_body_sections_detailed(text).items()}
 
@@ -1651,6 +1711,7 @@ def _validate_required_sections(
         return text
 
     rules = validation_rules or {}
+    text = _canonicalize_required_headings(text, required_sections, rules)
     section_map_detailed = _split_body_sections_detailed(text)
     present = set(section_map_detailed.keys())
     missing = [section for section in required_sections if section not in present]

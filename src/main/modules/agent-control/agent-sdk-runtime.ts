@@ -1,5 +1,7 @@
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
+import { readFile } from 'fs/promises'
+import { basename } from 'path'
 import {
   Agent,
   MemorySession,
@@ -29,6 +31,17 @@ import type {
 } from './run-contracts'
 import type { ScopeRunEventPayload } from './types'
 import type { TurnTerminalReason } from './turn-frame'
+import type { ContinuationIntent, ContinuationState } from './continuation-state'
+import {
+  resumeSkillChildRun,
+  waitForSkillChildRunClose,
+} from './skill-child-runner'
+import {
+  isCompletedChildCloseStatus,
+  isFailedChildCloseStatus,
+  isKilledChildCloseStatus,
+  type SkillChildCloseEvent,
+} from './skill-child-run-types'
 import type { MultimodalBlock } from '../claude-bridge/direct-chat'
 import {
   buildTextToolBridgePrompt,
@@ -76,8 +89,13 @@ import {
   buildToolRuntimeContext,
   toToolExecutorContext,
 } from './tool-runtime-context-builder'
-import { createEmptyActiveFrameContext } from './tool-runtime'
+import {
+  applyContextModifier,
+  createEmptyActiveFrameContext,
+  type ToolRuntimeActiveFrameContext,
+} from './tool-runtime'
 import { snapshotTurnFeatureFlags } from './turn-feature-flags'
+import { buildAgentSpawnContextFromAIConfig } from '../skills-runtime/agent-context-source'
 import { executeToolCall as executeReadyToolCall } from '../tools'
 import { PRIMITIVE_TOOL_DEFS, PRIMITIVE_TOOL_NAME_SET } from '../tools/skill-primitives/tool-defs'
 import {
@@ -85,10 +103,12 @@ import {
   normalizeToolExecutionOutput,
   type ToolExecutionOutput,
 } from './tool-result-types'
+import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 import { createRotatingLogger } from '../../utils/rotating-logger'
 
 const agentSdkLogger = createRotatingLogger('ready-agent-sdk.log')
 const settingsRepository = new AppSettingsRepository()
+const SDK_CHILD_RESUME_AWAIT_TIMEOUT_MS = 1_500
 
 function log(message: string): void {
   try {
@@ -134,9 +154,45 @@ interface ToolBridgeRuntimeContext {
   signal: AbortSignal
   allowedToolNames: string[]
   authorization: SkillToolAuthorization
+  activeFrame: ToolRuntimeActiveFrameContext
+  agentContext?: AgentSpawnContext | null
+  documentTargetGuard?: DocumentTargetGuard | null
   emitOutput: (chunk: string, type: string, projectionPatch?: Record<string, unknown> | null) => void
   emitToolAction: (toolName: string, args: Record<string, unknown>) => void
   recordToolResult: (toolName: string, output: ToolExecutionOutput) => void
+}
+
+interface SdkLongSkillCheckpoint {
+  toolName: string
+  skillId: string | null
+  action: string | null
+  childRunId: string | null
+  outputDir: string | null
+  runStatePath: string | null
+  terminalReason: TurnTerminalReason
+}
+
+interface AgentSdkExecutionOptions {
+  taskId?: string
+  publicSessionId?: string
+  requestEnvelope?: unknown
+  intentClassification?: unknown
+  budget?: unknown
+  budgetState?: unknown
+  taskBudgetRuntime?: unknown
+  continuationIntent?: ContinuationIntent | null
+  continuationState?: ContinuationState | null
+}
+
+interface DocumentTargetGuard {
+  targetName: string
+  targetPath: string
+  opened: boolean
+  preserveExistingContent: boolean
+  initialContent?: string
+  requiredPreservedSnippets?: string[]
+  openToolDefinition?: ToolDefinition
+  saveToolDefinition?: ToolDefinition
 }
 
 interface SkillContextOrchestratorLike {
@@ -190,8 +246,573 @@ function messageToText(message: RunMessage): string {
     .trim()
 }
 
-function shouldExposeResearchTools(message: RunMessage): boolean {
+const SDK_CONTEXT_MARKERS = [
+  '## 环境信息',
+  '## 当前 Scope',
+  '## 最近会话摘要',
+  '### Widget 更新上下文',
+  '### 当前文档上下文',
+  '### 文档引用',
+  '### 浏览页面引用',
+  '### 文件夹引用',
+  '### 技能目录引用',
+  '--- 测试模式附件路径 ---',
+  '--- 引用文件:',
+  '--- 附件:',
+] as const
+
+function allowedPrimitiveToolsForSdkSkillTurn(): string[] {
+  const safeSkillPrimitives = new Set([
+    'skill_ask_user',
+    'skill_write_artifact',
+    'skill_read_artifact',
+    'skill_inspect_run_state',
+  ])
+  return PRIMITIVE_TOOL_DEFS
+    .map((definition) => definition.name)
+    .filter((name) => safeSkillPrimitives.has(name))
+}
+
+function primaryInstructionText(message: RunMessage): string {
   const text = messageToText(message)
+  let end = text.length
+  for (const marker of SDK_CONTEXT_MARKERS) {
+    const index = text.indexOf(marker)
+    if (index >= 0 && index < end) end = index
+  }
+  const primary = text.slice(0, end).trim()
+  return primary || text
+}
+
+function normalizedReferenceName(value: string): string {
+  return value
+    .normalize('NFC')
+    .trim()
+    .replace(/^@\[/, '')
+    .replace(/\]$/, '')
+    .toLowerCase()
+}
+
+function parseAttachmentReferences(message: RunMessage): Array<{ name: string; path: string }> {
+  const text = messageToText(message)
+  const references: Array<{ name: string; path: string }> = []
+  const pattern = /--- 附件:\s*([^\n-][^\n]*?)\s*---\s*\n-\s*路径:\s*([^\n]+)/g
+  let match: RegExpExecArray | null
+  while ((match = pattern.exec(text)) !== null) {
+    const name = match[1]?.trim()
+    const path = match[2]?.trim()
+    if (name && path) references.push({ name, path })
+  }
+  const harnessMarker = '--- 测试模式附件路径 ---'
+  const harnessIndex = text.indexOf(harnessMarker)
+  if (harnessIndex >= 0) {
+    const afterMarker = text.slice(harnessIndex + harnessMarker.length)
+    const nextSectionIndex = afterMarker.search(/\n--- (?!测试模式附件路径)/)
+    const harnessSection = nextSectionIndex >= 0 ? afterMarker.slice(0, nextSectionIndex) : afterMarker
+    const harnessPattern = /^-\s*([^:\n]+?)\s*:\s*(\/[^\n]+)$/gm
+    let harnessMatch: RegExpExecArray | null
+    while ((harnessMatch = harnessPattern.exec(harnessSection)) !== null) {
+      const name = harnessMatch[1]?.trim()
+      const path = harnessMatch[2]?.trim()
+      if (name && path) references.push({ name, path })
+    }
+  }
+  return references
+}
+
+function parseEnvelopeResourceReferences(envelope: unknown): {
+  primaryInstruction: string | null
+  resources: Array<{ name: string; path: string }>
+} {
+  const record = asRecord(envelope)
+  if (!record) return { primaryInstruction: null, resources: [] }
+  const primaryInstruction = typeof record.primaryInstruction === 'string' && record.primaryInstruction.trim()
+    ? record.primaryInstruction.trim()
+    : typeof record.pureUserText === 'string' && record.pureUserText.trim()
+      ? record.pureUserText.trim()
+      : typeof record.rawUserText === 'string' && record.rawUserText.trim()
+        ? primaryInstructionText(record.rawUserText)
+        : null
+  const rawResources = Array.isArray(record.resources) ? record.resources : []
+  const resources = rawResources
+    .map((item) => asRecord(item))
+    .filter((item): item is Record<string, unknown> => Boolean(item))
+    .map((item) => ({
+      name: String(item.name || '').trim(),
+      path: String(item.path || item.documentPath || '').trim(),
+    }))
+    .filter((item) => item.name && item.path)
+  return { primaryInstruction, resources }
+}
+
+function findAttachmentByMention(
+  attachments: Array<{ name: string; path: string }>,
+  mention: string,
+): { name: string; path: string } | null {
+  const wanted = normalizedReferenceName(mention)
+  return attachments.find((attachment) => {
+    const name = normalizedReferenceName(attachment.name)
+    const fileName = normalizedReferenceName(basename(attachment.path))
+    return name === wanted || fileName === wanted
+  }) || null
+}
+
+function resolveDocumentTargetGuard(message: RunMessage, requestEnvelope?: unknown): DocumentTargetGuard | null {
+  const envelopeRefs = parseEnvelopeResourceReferences(requestEnvelope)
+  const primary = envelopeRefs.primaryInstruction || primaryInstructionText(message)
+  const attachments = [
+    ...envelopeRefs.resources,
+    ...parseAttachmentReferences(message),
+  ]
+  if (attachments.length === 0) return null
+
+  const targetPatterns = [
+    /(?:在|到|写(?:入|到)|放(?:到|在)|整理(?:到|进)|生成(?:到|在)|保存(?:到|在))@\[(.+?)\](?:里|中|内|下面)?/g,
+    /@\[(.+?)\](?:里|中|内|下面).{0,12}(?:生成|写入|整理|制作|放|保存)/g,
+    /把@\[(.+?)\].{0,18}(?:改得|改成|改写|编辑|润色|优化|整理成|写成|删掉|删除)/g,
+  ]
+  for (const pattern of targetPatterns) {
+    let match: RegExpExecArray | null
+    while ((match = pattern.exec(primary)) !== null) {
+      const attachment = findAttachmentByMention(attachments, match[1] || '')
+      if (!attachment) continue
+      if (!/\.(?:md|markdown|txt|docx?)$/i.test(attachment.path)) continue
+      return {
+        targetName: attachment.name,
+        targetPath: attachment.path,
+        opened: false,
+        preserveExistingContent: shouldPreserveExistingDocumentContent(primary),
+      }
+    }
+  }
+  return null
+}
+
+function buildDocumentTargetInstruction(guard: DocumentTargetGuard | null): string {
+  if (!guard) return ''
+  const preservedSnippets = guard.preserveExistingContent && guard.requiredPreservedSnippets?.length
+    ? [
+      '本轮还要求保留目标文档已有内容。以下原有片段必须原样留在最终文档中：',
+      ...guard.requiredPreservedSnippets.slice(0, 8).map((snippet) => `- ${snippet}`),
+      '如果需要在某个小节下面补充内容，优先把新增内容插入到原有片段之后；不要用替换操作删除原有片段。',
+    ].join('\n')
+    : ''
+  return [
+    `本轮用户已明确目标文档：${guard.targetName} (${guard.targetPath})。`,
+    '任何写入、追加、插入 widget 或保存前，必须把该路径作为目标文档处理；不要新建临时文档来替代这个目标。',
+    '如果需要改内容，先使用 document_open_tab 打开该路径，再执行内容修改，最后调用 document_save_tab 保存。',
+    '在目标文档实际写入并保存前，不要用“我将要写入/我准备插入”作为最终回复。',
+    '确认目标文档已有结果并保存后，直接用中文说明完成位置，不要继续重复切换标签或重复写入。',
+    preservedSnippets,
+  ].join('\n')
+}
+
+function shouldPreserveExistingDocumentContent(primaryInstruction: string): boolean {
+  return /(?:保留(?:原有|已有|原文|原来的|现有).{0,12}(?:内容|笔记|段落|章节|说明)?|不要(?:覆盖|删除|替换)|不能(?:覆盖|删除|替换)|不可(?:覆盖|删除|替换)|不(?:覆盖|删除)|追加|插入|补充到|整理到|放到|写入已有|已有(?:文档|笔记|内容)|原有(?:文档|笔记|内容|段落|章节))/.test(primaryInstruction)
+}
+
+function collectRequiredPreservedSnippets(content: string): string[] {
+  const seen = new Set<string>()
+  const snippets: string[] = []
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    if (/^#{1,6}\s/.test(trimmed)) continue
+    if (trimmed.length < 4 || trimmed.length > 240) continue
+    if (seen.has(trimmed)) continue
+    seen.add(trimmed)
+    snippets.push(trimmed)
+    if (snippets.length >= 40) break
+  }
+  if (snippets.length > 0) return snippets
+  for (const line of content.split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed || seen.has(trimmed)) continue
+    if (trimmed.length < 2 || trimmed.length > 240) continue
+    seen.add(trimmed)
+    snippets.push(trimmed)
+    if (snippets.length >= 20) break
+  }
+  return snippets
+}
+
+async function hydrateDocumentTargetPreservation(guard: DocumentTargetGuard | null): Promise<void> {
+  if (!guard?.preserveExistingContent) return
+  if (!/\.(?:md|markdown|txt)$/i.test(guard.targetPath)) return
+  try {
+    const content = await readFile(guard.targetPath, 'utf-8')
+    guard.initialContent = content
+    guard.requiredPreservedSnippets = collectRequiredPreservedSnippets(content)
+  } catch {
+    // silent-catch: preservation snippets are best-effort; save validation still runs without them.
+    guard.requiredPreservedSnippets = []
+  }
+}
+
+function findMissingPreservedSnippets(
+  guard: DocumentTargetGuard,
+  content: string,
+): string[] {
+  if (!guard.preserveExistingContent || !guard.requiredPreservedSnippets?.length) return []
+  return guard.requiredPreservedSnippets.filter((snippet) => !content.includes(snippet))
+}
+
+function formatPreservedSnippetList(snippets: string[]): string {
+  return snippets.slice(0, 6).map((snippet) => `- ${snippet}`).join('\n')
+}
+
+function buildPreservedContentRepairContext(guard: DocumentTargetGuard): string {
+  if (!guard.preserveExistingContent) return ''
+  const snippets = guard.requiredPreservedSnippets?.length
+    ? `必须恢复并保留的原有片段：\n${formatPreservedSnippetList(guard.requiredPreservedSnippets)}`
+    : ''
+  const initial = guard.initialContent && guard.initialContent.length <= 8000
+    ? `原始目标文档全文：\n${guard.initialContent}`
+    : ''
+  return [snippets, initial].filter(Boolean).join('\n\n')
+}
+
+function createPreservedContentViolationOutput(
+  guard: DocumentTargetGuard,
+  missingSnippets: string[],
+): ToolExecutionOutput {
+  return createToolExecutionOutput(
+    [
+      `这次工具调用会删除 ${guard.targetName} 的原有内容，已拦截以避免覆盖用户笔记。`,
+      '请保留原有片段，并把新增内容插入或追加到它们后面。',
+      formatPreservedSnippetList(missingSnippets),
+    ].filter(Boolean).join('\n'),
+    {
+      shape: 'json',
+      data: {
+        errorKind: 'target_document_preserved_content_missing',
+        targetPath: guard.targetPath,
+        missingSnippets: missingSnippets.slice(0, 6),
+      },
+    },
+  )
+}
+
+function extractMarkdownSection(content: string, sectionTitle: string): string {
+  const titleKey = normalizedReferenceName(sectionTitle)
+  if (!titleKey) return ''
+  const lines = content.split(/\r?\n/)
+  let start = -1
+  let level = 0
+  for (let i = 0; i < lines.length; i += 1) {
+    const match = /^(#{1,6})\s+(.+?)\s*$/.exec(lines[i] || '')
+    if (!match) continue
+    const heading = normalizedReferenceName(match[2] || '')
+    if (heading === titleKey || heading.includes(titleKey) || titleKey.includes(heading)) {
+      start = i + 1
+      level = match[1]?.length || 1
+      break
+    }
+  }
+  if (start < 0) return ''
+  let end = lines.length
+  for (let i = start; i < lines.length; i += 1) {
+    const match = /^(#{1,6})\s+/.exec(lines[i] || '')
+    if (match && (match[1]?.length || 1) <= level) {
+      end = i
+      break
+    }
+  }
+  return lines.slice(start, end).join('\n')
+}
+
+function validatePreservedDocumentMutation(
+  guard: DocumentTargetGuard | null | undefined,
+  toolName: string,
+  args: Record<string, unknown>,
+): ToolExecutionOutput | null {
+  if (!guard?.preserveExistingContent || !guard.requiredPreservedSnippets?.length) return null
+  const snippets = guard.requiredPreservedSnippets
+  if (toolName === 'document_set_content') {
+    const content = typeof args.content === 'string' ? args.content : ''
+    const missing = snippets.filter((snippet) => !content.includes(snippet))
+    return missing.length > 0 ? createPreservedContentViolationOutput(guard, missing) : null
+  }
+  if (toolName === 'document_replace_exact' || toolName === 'document_replace_text') {
+    const target = typeof args.target === 'string'
+      ? args.target
+      : typeof args.from === 'string'
+        ? args.from
+        : ''
+    const replacement = typeof args.replacement === 'string'
+      ? args.replacement
+      : typeof args.to === 'string'
+        ? args.to
+        : ''
+    const touched = snippets.filter((snippet) => target.includes(snippet) || snippet.includes(target.trim()))
+    const missing = touched.filter((snippet) => !replacement.includes(snippet))
+    return missing.length > 0 ? createPreservedContentViolationOutput(guard, missing) : null
+  }
+  if (toolName === 'document_rewrite_section') {
+    const sectionTitle = typeof args.sectionTitle === 'string' ? args.sectionTitle : ''
+    const newContent = typeof args.content === 'string' ? args.content : ''
+    const originalSection = guard.initialContent ? extractMarkdownSection(guard.initialContent, sectionTitle) : ''
+    const touched = originalSection
+      ? snippets.filter((snippet) => originalSection.includes(snippet))
+      : []
+    const missing = touched.filter((snippet) => !newContent.includes(snippet))
+    return missing.length > 0 ? createPreservedContentViolationOutput(guard, missing) : null
+  }
+  return null
+}
+
+const DOCUMENT_TARGET_MUTATION_TOOL_NAMES = new Set([
+  'document_set_content',
+  'document_append_content',
+  'document_insert_widget',
+  'document_update_widget',
+  'document_remove_widget',
+  'document_replace_text',
+  'document_replace_exact',
+  'document_format_section',
+  'document_rewrite_section',
+])
+
+function hasDocumentTargetMutation(usedTools: string[]): boolean {
+  return usedTools.some((name) => DOCUMENT_TARGET_MUTATION_TOOL_NAMES.has(name))
+}
+
+function normalizeExplicitDocumentTargetToolArgs(
+  toolName: string,
+  args: Record<string, unknown>,
+): Record<string, unknown> {
+  if (toolName === 'document_save_tab') return {}
+  const next = { ...args }
+  delete next.tabId
+  return next
+}
+
+function buildDocumentTargetRepairInput(guard: DocumentTargetGuard): string {
+  return [
+    '系统检查：目标文档尚未发生实际写入，上一轮不能算完成。',
+    `请现在直接把结果写入目标文档 ${guard.targetName} (${guard.targetPath})。`,
+    '必须调用 document_set_content、document_append_content 或 document_insert_widget 之一完成写入，并确保 document_save_tab 保存成功。',
+    '不要只说明计划，不要输出伪工具调用文本；完成工具调用后再用中文简短确认。',
+  ].join('\n')
+}
+
+function buildNewDocumentSaveRepairInput(): string {
+  return [
+    '系统检查：你已经创建并修改了新文档，但还没有调用 document_save_tab 保存，不能算完成。',
+    '请现在只调用 document_save_tab 保存当前文档；保存成功后，用中文简短说明结果并给出保存路径。',
+    '不要再新建文档，不要只口头说明，不要输出伪工具调用文本。',
+  ].join('\n')
+}
+
+function finalTextIndicatesIncompleteDocument(text: string): boolean {
+  const normalized = text.trim()
+  if (!normalized) return false
+  if (/(?:已|已经).{0,12}(?:补完|补全|补充完整|完成补充)/.test(normalized)) return false
+  return /(?:被截断|内容截断|未完成|不完整|还没完成|没有完成|我(?:来|会|要).{0,12}补(?:完|全|充)|继续.{0,12}(?:写|补|完成)|需要.{0,12}(?:补|继续))/.test(normalized)
+}
+
+function buildDocumentTargetContinuationRepairInput(guard: DocumentTargetGuard): string {
+  return [
+    '系统检查：上一轮回复表示目标文档还没补完，因此不能进入完成态。',
+    `请现在继续修正目标文档 ${guard.targetName} (${guard.targetPath})，把未完成或截断的部分补完整。`,
+    '必须调用 document_set_content、document_append_content 或 document_replace_text/replace_exact 完成修正，并调用 document_save_tab 保存。',
+    '完成后只简短确认，不要再说“我会补完”。',
+  ].join('\n')
+}
+
+async function inspectDocumentTargetContent(
+  guard: DocumentTargetGuard,
+  options: { forbidFutureLeakage?: boolean } = {},
+): Promise<string | null> {
+  if (!/\.(?:md|markdown|txt)$/i.test(guard.targetPath)) return null
+  let content = ''
+  try {
+    content = await readFile(guard.targetPath, 'utf-8')
+  } catch {
+    // silent-catch: target file not readable yet (not on disk, permission, race with save).
+    // Skip the post-write content inspection; downstream guards still block the turn if no
+    // mutation happened, so a missing file is not a hidden failure.
+    return null
+  }
+  if (/```show-widget/i.test(content)) {
+    const widgetFence = /```show-widget\s*\n([\s\S]*?)(?:\n```|$)/gi
+    let match: RegExpExecArray | null
+    while ((match = widgetFence.exec(content)) !== null) {
+      const raw = (match[1] || '').trim()
+      if (!raw) return '目标文档里有空的 show-widget 代码块'
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(raw)
+      } catch {
+        // silent-catch: parse failure IS the surfaced signal — the returned issue text becomes
+        // the blocked_tool_error reason that the caller emits. No separate log/metric needed.
+        return '目标文档里的 show-widget JSON 不完整或无法解析'
+      }
+      const record = parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? parsed as Record<string, unknown>
+        : null
+      const widgetCode = typeof record?.widget_code === 'string' ? record.widget_code : ''
+      if (/<svg[\s>]/i.test(widgetCode) && !/<\/svg>/i.test(widgetCode)) {
+        return '目标文档里的 show-widget SVG 没有闭合'
+      }
+    }
+  }
+  if (
+    options.forbidFutureLeakage
+    && /(?:日后|将来|未来|后续剧情|后续章节|后续待展开|情感纠葛|争夺)/.test(content)
+  ) {
+    return '目标文档包含超出指定章节的后续剧情或未来话术'
+  }
+  const missingPreserved = findMissingPreservedSnippets(guard, content)
+  if (missingPreserved.length > 0) {
+    return `目标文档缺少原有内容：${missingPreserved.slice(0, 3).join(' / ')}`
+  }
+  return null
+}
+
+function buildDocumentTargetContentRepairInput(guard: DocumentTargetGuard, issue: string): string {
+  return [
+    `系统检查：${issue}，目标文档不能进入完成态。`,
+    `请修正目标文档 ${guard.targetName} (${guard.targetPath})。`,
+    buildPreservedContentRepairContext(guard),
+    '如果用户没有明确要求 widget、信息卡或交互式图表，请把损坏的 show-widget 改成稳定的 Markdown 表格、文本关系图或 Mermaid 图。',
+    '如果问题是后续剧情或未来话术，请删除这些内容，只保留指定章节内已经发生或已明示的信息。',
+    '如果问题是原有内容缺失，请先恢复原有内容，再把新增内容放在目标位置，不要覆盖原有笔记。',
+    '必须调用 document_set_content、document_replace_text、document_replace_exact 或 document_append_content 完成修正，并调用 document_save_tab 保存。',
+    '完成后只简短确认。',
+  ].join('\n')
+}
+
+function recoverLooseXmlToolCallText(text: string): {
+  visibleText: string
+  toolCalls: Array<{ name: string; args: Record<string, unknown> }>
+} {
+  const start = text.search(/<tool_call>/i)
+  if (start < 0) return { visibleText: text, toolCalls: [] }
+  const endMatch = /<\/tool_call>/i.exec(text.slice(start))
+  const blockEnd = endMatch ? start + endMatch.index + endMatch[0].length : text.length
+  const block = text.slice(start, blockEnd)
+  const before = text.slice(0, start).trim()
+  const after = endMatch ? text.slice(blockEnd).trim() : ''
+  const fnMatch = /<function=([^>\s]+)\s*>/i.exec(block)
+  if (!fnMatch) return { visibleText: text, toolCalls: [] }
+  const name = String(fnMatch[1] || '').trim()
+  if (!name) return { visibleText: text, toolCalls: [] }
+  const fnBodyStart = (fnMatch.index || 0) + fnMatch[0].length
+  const fnClose = /<\/function>/i.exec(block.slice(fnBodyStart))
+  const fnBody = fnClose
+    ? block.slice(fnBodyStart, fnBodyStart + fnClose.index)
+    : block.slice(fnBodyStart)
+  const paramRegex = /<parameter=([^>\s]+)\s*>/ig
+  const starts: Array<{ key: string; start: number; end: number }> = []
+  let match: RegExpExecArray | null
+  while ((match = paramRegex.exec(fnBody)) !== null) {
+    const key = String(match[1] || '').trim()
+    if (!key) continue
+    starts.push({ key, start: match.index, end: match.index + match[0].length })
+  }
+  const args: Record<string, unknown> = {}
+  for (let index = 0; index < starts.length; index += 1) {
+    const current = starts[index]
+    const nextStart = starts[index + 1]?.start ?? fnBody.length
+    const rawValue = fnBody.slice(current.end, nextStart)
+    const explicitEnd = rawValue.search(new RegExp(`</parameter>`, 'i'))
+    const value = (explicitEnd >= 0 ? rawValue.slice(0, explicitEnd) : rawValue)
+      .replace(/<\/function>\s*$/i, '')
+      .replace(/<\/tool_call>\s*$/i, '')
+      .trim()
+    args[current.key] = value
+  }
+  return {
+    visibleText: [before, after].filter(Boolean).join('\n').trim(),
+    toolCalls: [{ name, args }],
+  }
+}
+
+function shouldSuppressVisibleTextOnToolCall(text: string): boolean {
+  const normalized = String(text || '').trim()
+  if (!normalized) return true
+  return /^(?:now|let me|good,|okay,|ok,|i will|i'll|i need|next,|然后|接下来|现在|我先|我会|让我|好的)[\s\S]{0,240}$/i.test(normalized)
+}
+
+function hasLocalDocumentResource(message: RunMessage, requestEnvelope?: unknown): boolean {
+  const references = collectLocalDocumentReferences(message, requestEnvelope)
+  return references.length > 0
+}
+
+function collectLocalDocumentReferences(
+  message: RunMessage,
+  requestEnvelope?: unknown,
+): Array<{ name: string; path: string }> {
+  const envelopeRefs = parseEnvelopeResourceReferences(requestEnvelope)
+  return [
+    ...envelopeRefs.resources,
+    ...parseAttachmentReferences(message),
+  ].filter((reference) => /\.(?:md|markdown|txt|docx?)$/i.test(reference.path || reference.name))
+}
+
+function hasNonTargetLocalDocumentResource(message: RunMessage, requestEnvelope?: unknown): boolean {
+  const target = resolveDocumentTargetGuard(message, requestEnvelope)
+  const targetPath = target?.targetPath || ''
+  return collectLocalDocumentReferences(message, requestEnvelope)
+    .some((reference) => {
+      const key = reference.path || reference.name
+      return key && key !== targetPath
+    })
+}
+
+function shouldUseLocalDocumentToolSet(message: RunMessage, requestEnvelope?: unknown): boolean {
+  if (!hasLocalDocumentResource(message, requestEnvelope)) return false
+  const envelopeRefs = parseEnvelopeResourceReferences(requestEnvelope)
+  const primary = envelopeRefs.primaryInstruction || primaryInstructionText(message)
+  if (/(?:网页|浏览器|网站|url|https?:\/\/|www\.|网上|网络|搜索|检索|最新|今天|新闻|官网|公告|source|citation|research|search|latest|today|news)/i.test(primary)) {
+    return false
+  }
+  return /(?:文档|文稿|章节|段落|人物关系|关系图|信息卡|卡片|图表|写入|整理|生成|保存|编辑|改写|润色|排版|@\[[^\]]+\.(?:md|markdown|txt|docx?)\])/i.test(primary)
+}
+
+function shouldRequireLocalDocumentExcerpt(message: RunMessage, requestEnvelope?: unknown): boolean {
+  if (!shouldUseLocalDocumentToolSet(message, requestEnvelope)) return false
+  if (!hasNonTargetLocalDocumentResource(message, requestEnvelope)) return false
+  const envelopeRefs = parseEnvelopeResourceReferences(requestEnvelope)
+  const primary = envelopeRefs.primaryInstruction || primaryInstructionText(message)
+  if (/(?:根据|基于|读取|读完|参考|原文|章节|前\s*[一二三四五六七八九十\d]+\s*(?:章|节)|第\s*[一二三四五六七八九十\d]+\s*(?:章|节)|证据|出处|来源)/i.test(primary)) {
+    return true
+  }
+  const documentResourceKeys = new Set([
+    ...envelopeRefs.resources,
+    ...parseAttachmentReferences(message),
+  ]
+    .filter((reference) => /\.(?:md|markdown|txt|docx?)$/i.test(reference.path || reference.name))
+    .map((reference) => reference.path || reference.name))
+  return documentResourceKeys.size > 1 && /(?:总结|梳理|分析|人物|关系)/i.test(primary)
+}
+
+function buildLocalDocumentExcerptInstruction(required: boolean): string {
+  if (!required) return ''
+  return [
+    '本轮是本地文档依据任务：生成结论前必须先调用 file_read_excerpt 读取用户指定章节或片段。',
+    '如果用户限定“前几章/某几章”，先用 file_locate 定位章节，再用 file_read_excerpt 读取对应章节正文。',
+    '只根据读取到的片段写结果；不要使用书本常识、后续剧情或附件外信息。不确定的关系要标注“不确定”。',
+    '不要写“后续待展开”“后续剧情”“日后”“未来”等超出指定章节的提示语；章节外内容一律省略。',
+    '除非用户明确要求 widget、信息卡、卡片或交互式图表，否则关系图优先用 Markdown 表格、文本框图或 Mermaid，不要生成 show-widget。',
+  ].join('\n')
+}
+
+function buildLocalDocumentExcerptRepairInput(): string {
+  return [
+    '系统检查：你还没有读取用户指定文档正文，上一轮不能算完成。',
+    '请先调用 file_read_excerpt 读取相关章节或片段，再基于读取内容重新生成结果。',
+    '如果已经写入了目标文档，请用读取后的依据修正并替换为可靠版本，然后保存。',
+  ].join('\n')
+}
+
+function isLocalDocumentToolDefinition(definition: ToolDefinition): boolean {
+  return definition.domain === 'document' || definition.domain === 'file'
+}
+
+function shouldExposeResearchTools(message: RunMessage): boolean {
+  const text = primaryInstructionText(message)
   return /(?:搜索|查找|查一下|检索|研究|资料|来源|引用|最新|今天|新闻|天气|股价|汇率|比分|赛程|官网|公告|价格|source|citation|research|search|latest|today|news)/i.test(text)
 }
 
@@ -200,11 +821,20 @@ function resolveBrowserDecisionMode(
   browserHostAvailable: boolean,
 ): BrowserTaskDecisionMode {
   if (!browserHostAvailable) return 'free_tool_loop'
-  const text = messageToText(message)
-  if (/(?:上传|附件|文件选择|upload|attach)/i.test(text)) return 'browser_upload_workflow'
+  const text = primaryInstructionText(message)
+  const hasExplicitBrowserSurface =
+    /(?:网页|浏览器|网站|当前页|页面|链接|url|https?:\/\/|www\.|browser|website|web page|current page|click|download)/i.test(text)
+  const hasDocumentSurface =
+    /(?:文档|文稿|原文|文章|段落|章节|markdown|\.md\b|@\[.*?\.(?:md|txt|docx?)\]|widget|show-widget|图表|趋势图|人物关系图|卡片|信息卡|表格|保存|写入|追加|替换|编辑|改写|润色|排版|格式)/i.test(text)
+  const hasBrowserUploadIntent =
+    hasExplicitBrowserSurface &&
+    /(?:上传|提交|发布|发送|选择).{0,30}(?:附件|文件|图片|图像|视频|upload|attach|file|image|video)|(?:附件|文件|图片|图像|视频|file|image|video).{0,30}(?:上传|提交|发布|发送|upload|attach)|(?:upload|attach).{0,30}(?:file|image|video)/i.test(text)
+  if (hasBrowserUploadIntent) return 'browser_upload_workflow'
+  if (hasDocumentSurface && !hasExplicitBrowserSurface) return 'free_tool_loop'
   if (
     shouldExposeResearchTools(message)
-    || /(?:网页|浏览器|网站|打开|点击|输入|页面|链接|下载|url|https?:\/\/|browser|website|click|download)/i.test(text)
+    || hasExplicitBrowserSurface
+    || /(?:打开|点击|输入|下载)/i.test(text)
   ) {
     return 'browser_workflow'
   }
@@ -385,7 +1015,7 @@ async function runWithOpenAIAgentsSdk(
     stream: true,
     signal: params.signal,
     session: params.session,
-    maxTurns: 8,
+    maxTurns: 16,
     toolExecution: {
       maxFunctionToolConcurrency: 1,
     },
@@ -507,6 +1137,186 @@ function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null
+}
+
+function stringField(record: Record<string, unknown> | null | undefined, key: string): string | null {
+  const value = record?.[key]
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function nonEmptyString(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function continuationChildRunId(options?: AgentSdkExecutionOptions): string | null {
+  return nonEmptyString(options?.continuationIntent?.childRunId)
+    || nonEmptyString(options?.continuationState?.continuationRef?.childRunId)
+}
+
+function projectionPatchFromChildClose(close: SkillChildCloseEvent | null): Record<string, unknown> | null {
+  const patch = asRecord(close?.projectionPatch)
+  return patch ? { ...patch } : null
+}
+
+function turnTerminalReasonFromChildClose(close: SkillChildCloseEvent): TurnTerminalReason {
+  if (isCompletedChildCloseStatus(close.status)) return 'done'
+  if (isKilledChildCloseStatus(close.status)) return 'cancelled_user'
+  switch (close.terminalReason) {
+    case 'checkpoint_budget':
+      return 'checkpoint_budget'
+    case 'checkpoint_background':
+    case 'queued_global_concurrency':
+    case 'launch_stuck':
+      return 'checkpoint_background'
+    case 'blocked_config':
+      return 'blocked_config'
+    case 'blocked_external':
+      return 'blocked_external'
+    case 'cancelled_user':
+      return 'cancelled_user'
+    case 'failed_skill':
+    case 'child_process_crashed':
+    case 'host_unavailable':
+    case 'nested_child_run_not_supported':
+      return 'failed_skill'
+    case 'resume_launch_failed':
+      return 'resume_launch_failed'
+    case 'persistence_failed':
+      return 'persistence_failed'
+    case 'tool_not_registered':
+    case 'input_validation':
+      return 'blocked_tool_error'
+    case 'process_restarted':
+      return 'checkpoint_background'
+    case 'completed':
+      return 'done'
+    default:
+      return 'checkpoint_user_input'
+  }
+}
+
+function sdkStatusFromTerminalReason(
+  reason: TurnTerminalReason,
+): 'done' | 'error' | 'cancelled' | 'checkpoint' {
+  if (reason === 'done') return 'done'
+  if (reason === 'cancelled_user' || reason === 'cancelled_runtime') return 'cancelled'
+  if (
+    reason === 'failed_skill'
+    || reason === 'resume_launch_failed'
+    || reason === 'persistence_failed'
+    || reason === 'blocked_tool_error'
+  ) {
+    return 'error'
+  }
+  return 'checkpoint'
+}
+
+function summarizeChildResume(
+  childRunId: string,
+  close: SkillChildCloseEvent | null,
+): {
+  message: string
+  terminalReason: TurnTerminalReason
+  status: 'done' | 'error' | 'cancelled' | 'checkpoint'
+} {
+  if (!close) {
+    return {
+      message: `已继续技能任务 ${childRunId}，后台仍在运行。`,
+      terminalReason: 'checkpoint_background',
+      status: 'checkpoint',
+    }
+  }
+  if (isCompletedChildCloseStatus(close.status)) {
+    return {
+      message: `技能任务 ${childRunId} 已完成。`,
+      terminalReason: 'done',
+      status: 'done',
+    }
+  }
+  if (isKilledChildCloseStatus(close.status)) {
+    return {
+      message: `技能任务 ${childRunId} 已取消。`,
+      terminalReason: 'cancelled_user',
+      status: 'cancelled',
+    }
+  }
+  const terminalReason = turnTerminalReasonFromChildClose(close)
+  const detail = close.error?.message || close.terminalReason
+  return {
+    message: isFailedChildCloseStatus(close.status)
+      ? `继续技能任务 ${childRunId} 失败：${detail}`
+      : `技能任务 ${childRunId} 仍在等待：${detail}`,
+    terminalReason,
+    status: sdkStatusFromTerminalReason(terminalReason),
+  }
+}
+
+function isChildSkillEnvelopeStatus(status: string | null): boolean {
+  return status === 'child_launched'
+    || status === 'child_reused'
+    || status === 'child_paused'
+    || status === 'child_terminal'
+}
+
+function shouldRecoverLongSkillCheckpoint(
+  checkpoint: SdkLongSkillCheckpoint | null,
+): checkpoint is SdkLongSkillCheckpoint {
+  if (!checkpoint) return false
+  if (checkpoint.terminalReason === 'blocked_config' || checkpoint.terminalReason === 'failed_skill') return false
+  return Boolean(checkpoint.childRunId || checkpoint.outputDir || checkpoint.runStatePath)
+}
+
+function summarizeLongSkillCheckpoint(checkpoint: SdkLongSkillCheckpoint): string {
+  const output = checkpoint.outputDir
+    ? `输出目录：${checkpoint.outputDir}`
+    : checkpoint.runStatePath
+      ? `run_state：${checkpoint.runStatePath}`
+      : checkpoint.childRunId
+        ? `子任务：${checkpoint.childRunId}`
+        : ''
+  const action = checkpoint.action || checkpoint.toolName
+  return [
+    `技能任务已启动并进入后台/暂停状态（${action}）。`,
+    output,
+    '可以从任务卡继续、取消或查看产物。',
+  ].filter(Boolean).join('\n')
+}
+
+function extractLongSkillCheckpoint(
+  toolName: string,
+  output: ToolExecutionOutput,
+  previous: SdkLongSkillCheckpoint | null,
+): SdkLongSkillCheckpoint | null {
+  const normalized = normalizeToolExecutionOutput(output)
+  const data = normalized.data
+  const status = stringField(data, 'status')
+  if (!toolName.startsWith('skill_') || !isChildSkillEnvelopeStatus(status)) return previous
+
+  const closeEvent = asRecord(data?.closeEvent)
+  const closeReason = stringField(closeEvent, 'terminalReason')
+  const terminalReason: TurnTerminalReason = closeReason === 'blocked_config'
+    ? 'blocked_config'
+    : closeReason === 'failed_skill'
+      ? 'failed_skill'
+      : closeReason === 'checkpoint_budget'
+        ? 'checkpoint_budget'
+        : 'checkpoint_background'
+  const next: SdkLongSkillCheckpoint = {
+    toolName,
+    skillId: stringField(data, 'skillId'),
+    action: stringField(data, 'action'),
+    childRunId: stringField(data, 'childRunId'),
+    outputDir: stringField(data, 'outputDir'),
+    runStatePath: stringField(data, 'runStatePath'),
+    terminalReason,
+  }
+  if (!previous) return next
+  if ((next.outputDir || next.runStatePath) && !(previous.outputDir || previous.runStatePath)) return next
+  return previous
 }
 
 function readReasoningContentFromRecord(record: Record<string, unknown>): unknown {
@@ -912,6 +1722,31 @@ function contentPartToAnthropic(part: Record<string, unknown>): Record<string, u
   return null
 }
 
+function sanitizeAnthropicThinkingBlock(block: Record<string, unknown>): Record<string, unknown> | null {
+  if (block.type !== 'thinking' || typeof block.thinking !== 'string') return null
+  return {
+    type: 'thinking',
+    thinking: block.thinking,
+    ...(typeof block.signature === 'string' ? { signature: block.signature } : {}),
+  }
+}
+
+function readAnthropicThinkingBlocksFromRecord(record: Record<string, unknown>): Record<string, unknown>[] {
+  const direct = Array.isArray(record.anthropicThinkingBlocks)
+    ? record.anthropicThinkingBlocks
+    : null
+  if (direct) {
+    return direct
+      .map((item) => item && typeof item === 'object'
+        ? sanitizeAnthropicThinkingBlock(item as Record<string, unknown>)
+        : null)
+      .filter((item): item is Record<string, unknown> => Boolean(item))
+  }
+  const providerData = asRecord(record.providerData)
+  if (!providerData) return []
+  return readAnthropicThinkingBlocksFromRecord(providerData)
+}
+
 function normalizeAnthropicContent(content: unknown): string | Array<Record<string, unknown>> {
   if (typeof content === 'string') return content
   if (!Array.isArray(content)) return ''
@@ -930,14 +1765,18 @@ function modelInputToAnthropicMessages(input: ModelRequest['input']): Array<Reco
     if (!rawItem || typeof rawItem !== 'object') continue
     const item = rawItem as Record<string, unknown>
     if (item.type === 'function_call') {
+      const thinkingBlocks = readAnthropicThinkingBlocksFromRecord(item)
       messages.push({
         role: 'assistant',
-        content: [{
-          type: 'tool_use',
-          id: String(item.callId || item.id || ''),
-          name: String(item.name || ''),
-          input: typeof item.arguments === 'string' ? safeJsonParseObject(item.arguments) : {},
-        }],
+        content: [
+          ...thinkingBlocks,
+          {
+            type: 'tool_use',
+            id: String(item.callId || item.id || ''),
+            name: String(item.name || ''),
+            input: typeof item.arguments === 'string' ? safeJsonParseObject(item.arguments) : {},
+          },
+        ],
       })
       continue
     }
@@ -984,6 +1823,12 @@ function serializeAnthropicTools(request: ModelRequest): Array<Record<string, un
 function extractAnthropicOutput(json: Record<string, unknown>, fallbackId: string): AgentOutputItem[] {
   const output: AgentOutputItem[] = []
   const content = Array.isArray(json.content) ? json.content as Array<Record<string, unknown>> : []
+  const thinkingBlocks = content
+    .map(sanitizeAnthropicThinkingBlock)
+    .filter((block): block is Record<string, unknown> => Boolean(block))
+  const providerData = thinkingBlocks.length > 0
+    ? { anthropicThinkingBlocks: thinkingBlocks }
+    : undefined
   const text = content
     .filter((block) => block.type === 'text')
     .map((block) => String(block.text || ''))
@@ -1010,6 +1855,7 @@ function extractAnthropicOutput(json: Record<string, unknown>, fallbackId: strin
           ? block.input
           : {},
       ),
+      ...(providerData ? { providerData } : {}),
     } as AgentOutputItem)
   }
   return output
@@ -1304,11 +2150,7 @@ export class AgentSdkRuntime extends EventEmitter {
     name: string,
     content: string | MultimodalBlock[],
     requestId?: string,
-    executionOptions?: {
-      taskId?: string
-      publicSessionId?: string
-      requestEnvelope?: unknown
-    },
+    executionOptions?: AgentSdkExecutionOptions,
   ): Promise<ExecutionTurnResult> {
     const runId = requestId || randomUUID()
     if (!this.sessions.has(name)) {
@@ -1320,6 +2162,11 @@ export class AgentSdkRuntime extends EventEmitter {
     const transcriptEvents: TurnTranscriptEvent[] = []
     const usedTools: string[] = []
     const projectionPatches: Record<string, unknown>[] = []
+    const activeFrame = createEmptyActiveFrameContext()
+    let longSkillCheckpoint: SdkLongSkillCheckpoint | null = null
+    let finalText = ''
+    let documentTargetGuardForRecovery: DocumentTargetGuard | null = null
+    let requiresLocalDocumentExcerptForRecovery = false
 
     if (session.abortController) {
       const previousAbortController = session.abortController
@@ -1426,13 +2273,72 @@ export class AgentSdkRuntime extends EventEmitter {
         })
       }
 
-      const { provider, model } = resolveAgentSdkProvider(configDetail.config, {
+      const normalizedConfig = normalizeAIConfig(configDetail.config)
+      const { provider, model } = resolveAgentSdkProvider(normalizedConfig, {
         fetchWithTimeout: this.fetchWithTimeout,
       })
-      const capabilities = resolveAIConfigCapabilities(normalizeAIConfig(configDetail.config))
+      const capabilities = resolveAIConfigCapabilities(normalizedConfig)
       const useTextToolBridge = capabilities?.toolCallTransport === 'text'
+      const agentContext = buildAgentSpawnContextFromAIConfig(normalizedConfig, {
+        baseUrl: String(capabilities?.baseUrl || normalizedConfig.baseUrl || '').trim(),
+      })
+      const resumeChildRunId = continuationChildRunId(executionOptions)
+      if (resumeChildRunId) {
+        usedTools.push('skill_child_resume')
+        transcriptEvents.push({
+          kind: 'tool_action',
+          tool: 'skill_child_resume',
+          args: { childRunId: resumeChildRunId },
+        })
+        this.emit('toolAction', {
+          agent: name,
+          sessionId,
+          runId,
+          tool: 'skill_child_resume',
+          args: { childRunId: resumeChildRunId },
+        })
+        emitOutput(`正在继续技能任务 ${resumeChildRunId}。`, 'text')
+        const resumed = await resumeSkillChildRun(resumeChildRunId, { agentContext })
+        const waited = resumed.closeEvent
+          ? null
+          : await waitForSkillChildRunClose(resumed.childRunId, {
+            timeoutMs: SDK_CHILD_RESUME_AWAIT_TIMEOUT_MS,
+            signal: abortController.signal,
+          })
+        const close = resumed.closeEvent || (waited?.kind === 'closed' ? waited.closeEvent : null)
+        const closeProjectionPatch = projectionPatchFromChildClose(close)
+        if (closeProjectionPatch) {
+          projectionPatches.push(closeProjectionPatch)
+        }
+        const outcome = summarizeChildResume(resumed.childRunId, close)
+        finalText = outcome.message
+        emitOutput(outcome.message, outcome.status === 'error' ? 'error' : 'text', closeProjectionPatch)
+        emitOutput('', 'done', closeProjectionPatch)
+        emitStatus(outcome.status, outcome.terminalReason)
+        return this.buildResult({
+          success: outcome.status !== 'error',
+          error: outcome.status === 'error' ? outcome.message : undefined,
+          finalText,
+          cancelled: outcome.status === 'cancelled',
+          taskId,
+          usedTools,
+          transcriptEvents,
+          projectionPatches,
+          terminalReason: outcome.terminalReason,
+        })
+      }
       const authorization = this.resolveSkillAuthorizationForTurn(content as RunMessage, sessionId)
-      const toolDefinitions = this.listToolDefinitionsForTurn({
+      const documentTargetGuard = resolveDocumentTargetGuard(content as RunMessage, executionOptions?.requestEnvelope)
+      documentTargetGuardForRecovery = documentTargetGuard
+      if (documentTargetGuard?.preserveExistingContent) {
+        await hydrateDocumentTargetPreservation(documentTargetGuard)
+      }
+      const requiresLocalDocumentExcerpt = shouldRequireLocalDocumentExcerpt(
+        content as RunMessage,
+        executionOptions?.requestEnvelope,
+      )
+      requiresLocalDocumentExcerptForRecovery = requiresLocalDocumentExcerpt
+      let toolDefinitions = this.listToolDefinitionsForTurn({
         message: content as RunMessage,
         sessionId,
         scopeId: sessionId,
@@ -1441,7 +2347,19 @@ export class AgentSdkRuntime extends EventEmitter {
         feishuConnected: this.runtime?.isChannelTypeAvailable?.('feishu-app') ?? false,
         authorization,
       })
+      if (shouldUseLocalDocumentToolSet(content as RunMessage, executionOptions?.requestEnvelope)) {
+        toolDefinitions = toolDefinitions.filter(isLocalDocumentToolDefinition)
+      }
+      if (documentTargetGuard) {
+        documentTargetGuard.openToolDefinition = toolDefinitions.find((definition) => definition.name === 'document_open_tab')
+        documentTargetGuard.saveToolDefinition = toolDefinitions.find((definition) => definition.name === 'document_save_tab')
+        toolDefinitions = toolDefinitions.filter((definition) => definition.name !== 'document_new_tab')
+      }
+      const hasVeaPipelineTool = toolDefinitions.some((definition) => definition.name === 'skill_video_expert_pipeline')
       const allowedToolNames = toolDefinitions.map((definition) => definition.name)
+      let lastDocumentSaveFailure: string | null = null
+      let lastDocumentSaveSuccessText: string | null = null
+      let newDocumentNeedsSave = false
       const toolBridgeRuntimeContext: ToolBridgeRuntimeContext = {
         agentName: name,
         runId,
@@ -1450,6 +2368,8 @@ export class AgentSdkRuntime extends EventEmitter {
         signal: abortController.signal,
         allowedToolNames,
         authorization,
+        activeFrame,
+        documentTargetGuard,
         emitOutput,
         emitToolAction: (toolName, args) => {
           if (!isCurrentRun()) return
@@ -1459,10 +2379,31 @@ export class AgentSdkRuntime extends EventEmitter {
         recordToolResult: (toolName, output) => {
           usedTools.push(toolName)
           const normalized = normalizeToolExecutionOutput(output)
+          const documentToolFailed = this.isDocumentToolFailure(normalized)
+          const documentToolChangedContent = !documentToolFailed && !/内容未变化|已跳过/i.test(normalized.text)
+          if (
+            DOCUMENT_TARGET_MUTATION_TOOL_NAMES.has(toolName)
+            && documentToolChangedContent
+            && usedTools.includes('document_new_tab')
+          ) {
+            newDocumentNeedsSave = true
+          }
+          if (toolName === 'document_save_tab') {
+            lastDocumentSaveFailure = documentToolFailed
+              ? normalized.text || 'document_save_tab failed'
+              : null
+            if (!documentToolFailed) {
+              lastDocumentSaveSuccessText = normalized.text
+              newDocumentNeedsSave = false
+            }
+          }
+          applyContextModifier(toolBridgeRuntimeContext, normalized)
+          longSkillCheckpoint = extractLongSkillCheckpoint(toolName, normalized, longSkillCheckpoint)
           if (normalized.projectionPatch) {
             projectionPatches.push(normalized.projectionPatch)
           }
         },
+        agentContext,
       }
       const definitionByName = new Map(toolDefinitions.map((definition) => [definition.name, definition]))
       const sdkTools = useTextToolBridge
@@ -1472,19 +2413,32 @@ export class AgentSdkRuntime extends EventEmitter {
       const instructions = [
         session.systemPrompt,
         '你现在运行在 Ready 的 OpenAI Agents SDK 实验路径中。',
-        '能用工具完成的事情要直接完成；最后用简单中文说明结果。',
+        '能用工具完成的事情要直接完成；过程和最后回复都使用简单中文。',
         sdkTools.length > 0
           ? '本轮可用工具已经按 Ready 的策略过滤。不要声称使用不存在的工具。'
           : '本轮没有开放工具；直接回答或说明缺口。',
+        hasVeaPipelineTool
+          ? '本轮 VEA 长任务必须优先调用 skill_video_expert_pipeline；不要用 skill_run_shell、手工建目录或口头说明替代真实启动。'
+          : '',
+        buildDocumentTargetInstruction(documentTargetGuard),
+        buildLocalDocumentExcerptInstruction(requiresLocalDocumentExcerpt),
         useTextToolBridge && toolDefinitions.length > 0
           ? buildTextToolBridgePrompt(toOpenAIToolSchemas(toolDefinitions))
           : '',
         `当前日期：${new Date().toISOString().slice(0, 10)}`,
       ].join('\n')
 
-      let finalText = ''
       let nextInput = toSdkInput(content as RunMessage)
-      for (let bridgeTurn = 0; bridgeTurn < (useTextToolBridge ? 4 : 1); bridgeTurn += 1) {
+      let documentTargetRepairAttempts = 0
+      let documentTargetContinuationRepairAttempts = 0
+      let documentTargetContentRepairAttempts = 0
+      let newDocumentSaveRepairAttempts = 0
+      let localDocumentExcerptRepairAttempts = 0
+      const bufferNativeTextUntilParsed =
+        !useTextToolBridge
+        && toolDefinitions.length > 0
+        && (normalizedConfig.provider !== 'openai' || capabilities?.agentProtocol === 'anthropic')
+      for (let bridgeTurn = 0; bridgeTurn < (useTextToolBridge ? 4 : 3); bridgeTurn += 1) {
         let streamedText = ''
         const runResult = await this.runAgent({
           agentName: name,
@@ -1500,26 +2454,165 @@ export class AgentSdkRuntime extends EventEmitter {
           signal: abortController.signal,
           onTextDelta: (delta) => {
             streamedText += delta
-            if (!useTextToolBridge) {
+            if (!useTextToolBridge && !bufferNativeTextUntilParsed) {
               emitOutput(delta, 'text')
             }
           },
         })
         const modelText = runResult.finalText || streamedText
         if (!useTextToolBridge) {
+          let leakedToolCall = /<tool_call>|<function=|<parameter=|:::tool_call/i.test(modelText)
+            ? parseTextToolBridgeResponse(modelText)
+            : { visibleText: modelText, toolCalls: [] }
+          if (leakedToolCall.toolCalls.length === 0 && /<tool_call>|<function=|<parameter=/i.test(modelText)) {
+            leakedToolCall = recoverLooseXmlToolCallText(modelText)
+          }
+          if (leakedToolCall.toolCalls.length > 0) {
+            if (leakedToolCall.visibleText && !shouldSuppressVisibleTextOnToolCall(leakedToolCall.visibleText)) {
+              emitOutput(leakedToolCall.visibleText, 'text')
+            }
+            const bridgeResults: Array<{ id: string; name: string; result: ToolExecutionOutput }> = []
+            for (const call of leakedToolCall.toolCalls) {
+              const definition = definitionByName.get(call.name)
+              if (!definition) {
+                bridgeResults.push({
+                  id: `native-xml-recovery-${bridgeTurn}-${bridgeResults.length}`,
+                  name: call.name,
+                  result: createToolExecutionOutput(`工具 ${call.name} 未在本轮授权列表中。`, {
+                    shape: 'json',
+                    data: {
+                      errorKind: 'tool_restricted_this_turn',
+                      toolName: call.name,
+                    },
+                  }),
+                })
+                continue
+              }
+              const output = await this.executeReadyToolDefinition(
+                definition,
+                call.args,
+                toolBridgeRuntimeContext,
+              )
+              if (call.name === 'document_save_tab') {
+                lastDocumentSaveFailure = this.isDocumentToolFailure(output)
+                  ? normalizeToolExecutionOutput(output).text || 'document_save_tab failed'
+                  : null
+              }
+              bridgeResults.push({
+                id: `native-xml-recovery-${bridgeTurn}-${bridgeResults.length}`,
+                name: call.name,
+                result: output,
+              })
+            }
+            nextInput = buildTextToolResultMessage(bridgeResults)
+            finalText = leakedToolCall.visibleText
+            continue
+          }
           finalText = modelText
-          if (!streamedText && finalText) {
+          if (bufferNativeTextUntilParsed && finalText) {
             emitOutput(finalText, 'text')
+          } else if (!streamedText && finalText) {
+            emitOutput(finalText, 'text')
+          }
+          if (
+            requiresLocalDocumentExcerpt
+            && !usedTools.includes('file_read_excerpt')
+            && localDocumentExcerptRepairAttempts < 1
+          ) {
+            localDocumentExcerptRepairAttempts += 1
+            nextInput = buildLocalDocumentExcerptRepairInput()
+            emitOutput('还没有读取指定章节正文，我会先读取原文再重做结果。', 'text')
+            continue
+          }
+          if (newDocumentNeedsSave && newDocumentSaveRepairAttempts < 1) {
+            newDocumentSaveRepairAttempts += 1
+            nextInput = buildNewDocumentSaveRepairInput()
+            emitOutput('新文档已经写入但还没有保存，我会先保存再结束。', 'text')
+            continue
+          }
+          if (
+            documentTargetGuard
+            && finalTextIndicatesIncompleteDocument(finalText)
+            && documentTargetContinuationRepairAttempts < 1
+          ) {
+            documentTargetContinuationRepairAttempts += 1
+            nextInput = buildDocumentTargetContinuationRepairInput(documentTargetGuard)
+            emitOutput('目标文档看起来还没补完，我会继续修正并保存。', 'text')
+            continue
+          }
+          if (
+            documentTargetGuard
+            && documentTargetContentRepairAttempts < 1
+          ) {
+            const contentIssue = await inspectDocumentTargetContent(documentTargetGuard, {
+              forbidFutureLeakage: requiresLocalDocumentExcerpt,
+            })
+            if (contentIssue) {
+              documentTargetContentRepairAttempts += 1
+              nextInput = buildDocumentTargetContentRepairInput(documentTargetGuard, contentIssue)
+              emitOutput('目标文档里有未通过检查的内容，我会改成稳定版本并保存。', 'text')
+              continue
+            }
+          }
+          if (
+            documentTargetGuard
+            && !hasDocumentTargetMutation(usedTools)
+            && documentTargetRepairAttempts < 1
+          ) {
+            documentTargetRepairAttempts += 1
+            nextInput = buildDocumentTargetRepairInput(documentTargetGuard)
+            emitOutput('目标文档还没有实际写入，我会继续完成写入并保存。', 'text')
+            continue
           }
           break
         }
 
         const parsed = parseTextToolBridgeResponse(modelText)
-        if (parsed.visibleText) {
+        if (parsed.visibleText && (parsed.toolCalls.length === 0 || !shouldSuppressVisibleTextOnToolCall(parsed.visibleText))) {
           emitOutput(parsed.visibleText, 'text')
         }
         if (parsed.toolCalls.length === 0) {
           finalText = parsed.visibleText || modelText
+          if (
+            requiresLocalDocumentExcerpt
+            && !usedTools.includes('file_read_excerpt')
+            && localDocumentExcerptRepairAttempts < 1
+          ) {
+            localDocumentExcerptRepairAttempts += 1
+            nextInput = buildLocalDocumentExcerptRepairInput()
+            emitOutput('还没有读取指定章节正文，我会先读取原文再重做结果。', 'text')
+            continue
+          }
+          if (newDocumentNeedsSave && newDocumentSaveRepairAttempts < 1) {
+            newDocumentSaveRepairAttempts += 1
+            nextInput = buildNewDocumentSaveRepairInput()
+            emitOutput('新文档已经写入但还没有保存，我会先保存再结束。', 'text')
+            continue
+          }
+          if (
+            documentTargetGuard
+            && finalTextIndicatesIncompleteDocument(finalText)
+            && documentTargetContinuationRepairAttempts < 1
+          ) {
+            documentTargetContinuationRepairAttempts += 1
+            nextInput = buildDocumentTargetContinuationRepairInput(documentTargetGuard)
+            emitOutput('目标文档看起来还没补完，我会继续修正并保存。', 'text')
+            continue
+          }
+          if (
+            documentTargetGuard
+            && documentTargetContentRepairAttempts < 1
+          ) {
+            const contentIssue = await inspectDocumentTargetContent(documentTargetGuard, {
+              forbidFutureLeakage: requiresLocalDocumentExcerpt,
+            })
+            if (contentIssue) {
+              documentTargetContentRepairAttempts += 1
+              nextInput = buildDocumentTargetContentRepairInput(documentTargetGuard, contentIssue)
+              emitOutput('目标文档里有未通过检查的内容，我会改成稳定版本并保存。', 'text')
+              continue
+            }
+          }
           break
         }
 
@@ -1545,6 +2638,11 @@ export class AgentSdkRuntime extends EventEmitter {
             call.args,
             toolBridgeRuntimeContext,
           )
+          if (call.name === 'document_save_tab') {
+            lastDocumentSaveFailure = this.isDocumentToolFailure(output)
+              ? normalizeToolExecutionOutput(output).text || 'document_save_tab failed'
+              : null
+          }
           bridgeResults.push({
             id: `text-bridge-${bridgeTurn}-${bridgeResults.length}`,
             name: call.name,
@@ -1556,6 +2654,138 @@ export class AgentSdkRuntime extends EventEmitter {
       }
       if (useTextToolBridge && !finalText && usedTools.length > 0) {
         finalText = '工具已执行，但模型尚未给出最终回复。'
+        emitOutput(finalText, 'text')
+      }
+      if (requiresLocalDocumentExcerpt && !usedTools.includes('file_read_excerpt')) {
+        const message = '还没有读取指定文档正文，不能声明完成。'
+        emitOutput(message, 'error')
+        emitOutput('', 'done')
+        emitStatus('error', 'blocked_tool_error')
+        return this.buildResult({
+          success: false,
+          error: message,
+          finalText: '',
+          cancelled: false,
+          taskId,
+          usedTools,
+          transcriptEvents,
+          projectionPatches,
+          terminalReason: 'blocked_tool_error',
+        })
+      }
+      if (documentTargetGuard && finalTextIndicatesIncompleteDocument(finalText)) {
+        const message = `目标文档 ${documentTargetGuard.targetName} 仍未补完，不能声明完成。`
+        emitOutput(message, 'error')
+        emitOutput('', 'done')
+        emitStatus('error', 'blocked_tool_error')
+        return this.buildResult({
+          success: false,
+          error: message,
+          finalText: '',
+          cancelled: false,
+          taskId,
+          usedTools,
+          transcriptEvents,
+          projectionPatches,
+          terminalReason: 'blocked_tool_error',
+        })
+      }
+      if (documentTargetGuard) {
+        const contentIssue = await inspectDocumentTargetContent(documentTargetGuard, {
+          forbidFutureLeakage: requiresLocalDocumentExcerpt,
+        })
+        if (contentIssue) {
+          const message = `目标文档 ${documentTargetGuard.targetName} 内容未通过检查：${contentIssue}`
+          emitOutput(message, 'error')
+          emitOutput('', 'done')
+          emitStatus('error', 'blocked_tool_error')
+          return this.buildResult({
+            success: false,
+            error: message,
+            finalText: '',
+            cancelled: false,
+            taskId,
+            usedTools,
+            transcriptEvents,
+            projectionPatches,
+            terminalReason: 'blocked_tool_error',
+          })
+        }
+      }
+      if (documentTargetGuard && !hasDocumentTargetMutation(usedTools)) {
+        const message = `目标文档 ${documentTargetGuard.targetName} 尚未实际写入，不能声明完成。`
+        emitOutput(message, 'error')
+        emitOutput('', 'done')
+        emitStatus('error', 'blocked_tool_error')
+        return this.buildResult({
+          success: false,
+          error: message,
+          finalText: '',
+          cancelled: false,
+          taskId,
+          usedTools,
+          transcriptEvents,
+          projectionPatches,
+          terminalReason: 'blocked_tool_error',
+        })
+      }
+      if (newDocumentNeedsSave) {
+        const saveDefinition = definitionByName.get('document_save_tab')
+        if (saveDefinition) {
+          emitOutput('新文档已经写入但还没有保存，我会自动保存当前文档。', 'text')
+          const output = await this.executeReadyToolDefinition(saveDefinition, {}, toolBridgeRuntimeContext)
+          const normalized = normalizeToolExecutionOutput(output)
+          if (this.isDocumentToolFailure(normalized)) {
+            lastDocumentSaveFailure = normalized.text || 'document_save_tab failed'
+          } else if (lastDocumentSaveSuccessText && !finalText.includes(lastDocumentSaveSuccessText)) {
+            const savedMessage = `已完成，${lastDocumentSaveSuccessText}`
+            finalText = finalText.trim()
+              ? `${finalText}\n\n${savedMessage}`
+              : savedMessage
+            emitOutput(savedMessage, 'text')
+          }
+        } else {
+          lastDocumentSaveFailure = '本轮未开放 document_save_tab'
+        }
+      }
+      if (lastDocumentSaveFailure && hasDocumentTargetMutation(usedTools)) {
+        const message = `文档保存失败，不能声明完成：${lastDocumentSaveFailure}`
+        emitOutput(message, 'error')
+        emitOutput('', 'done')
+        emitStatus('error', 'persistence_failed')
+        return this.buildResult({
+          success: false,
+          error: message,
+          finalText: '',
+          cancelled: false,
+          taskId,
+          usedTools,
+          transcriptEvents,
+          projectionPatches,
+          terminalReason: 'persistence_failed',
+        })
+      }
+      if (newDocumentNeedsSave) {
+        const message = '新文档已经修改但尚未保存，不能声明完成。'
+        emitOutput(message, 'error')
+        emitOutput('', 'done')
+        emitStatus('error', 'persistence_failed')
+        return this.buildResult({
+          success: false,
+          error: message,
+          finalText: '',
+          cancelled: false,
+          taskId,
+          usedTools,
+          transcriptEvents,
+          projectionPatches,
+          terminalReason: 'persistence_failed',
+        })
+      }
+      if (!finalText.trim() && usedTools.length > 0) {
+        finalText = lastDocumentSaveSuccessText
+          ? `已完成，${lastDocumentSaveSuccessText}`
+          : '工具已执行完成。'
         emitOutput(finalText, 'text')
       }
       const finalProjectionPatch = this.mergeProjectionPatches(projectionPatches)
@@ -1586,8 +2816,61 @@ export class AgentSdkRuntime extends EventEmitter {
           terminalReason: 'cancelled_runtime',
         })
       }
-      const failure = classifySdkRuntimeError(error)
       const message = errorMessage(error)
+      const recoverableLongSkillCheckpoint = longSkillCheckpoint as SdkLongSkillCheckpoint | null
+      if (
+        /Max turns \(\d+\) exceeded/i.test(message)
+        && shouldRecoverLongSkillCheckpoint(recoverableLongSkillCheckpoint)
+      ) {
+        const checkpointText = finalText || summarizeLongSkillCheckpoint(recoverableLongSkillCheckpoint)
+        if (!finalText) {
+          emitOutput(checkpointText, 'text')
+        }
+        emitOutput('', 'done', this.mergeProjectionPatches(projectionPatches))
+        emitStatus('checkpoint', recoverableLongSkillCheckpoint.terminalReason)
+        return this.buildResult({
+          success: true,
+          finalText: checkpointText,
+          cancelled: false,
+          taskId,
+          usedTools,
+          transcriptEvents,
+          projectionPatches,
+          terminalReason: recoverableLongSkillCheckpoint.terminalReason,
+        })
+      }
+      if (
+        /Max turns \(\d+\) exceeded/i.test(message)
+        && documentTargetGuardForRecovery
+        && hasDocumentTargetMutation(usedTools)
+        && (
+          !requiresLocalDocumentExcerptForRecovery
+          || usedTools.includes('file_read_excerpt')
+        )
+      ) {
+        const contentIssue = await inspectDocumentTargetContent(documentTargetGuardForRecovery, {
+          forbidFutureLeakage: requiresLocalDocumentExcerptForRecovery,
+        })
+        if (!contentIssue) {
+          const fallbackText = finalText || `已完成并保存到 ${documentTargetGuardForRecovery.targetName}。`
+          if (!finalText) {
+            emitOutput(fallbackText, 'text')
+          }
+          emitOutput('', 'done', this.mergeProjectionPatches(projectionPatches))
+          emitStatus('done', 'done')
+          return this.buildResult({
+            success: true,
+            finalText: fallbackText,
+            cancelled: false,
+            taskId,
+            usedTools,
+            transcriptEvents,
+            projectionPatches,
+            terminalReason: 'done',
+          })
+        }
+      }
+      const failure = classifySdkRuntimeError(error)
       emitOutput(`${failure.userMessagePrefix}: ${message}`, 'error')
       emitOutput('', 'done')
       emitRuntimeError(error, failure.terminalReason)
@@ -1647,7 +2930,50 @@ export class AgentSdkRuntime extends EventEmitter {
     }) as AgentSdkTool
   }
 
-  private async executeReadyToolDefinition(
+  private buildExecutorContext(
+    runtimeContext: ToolBridgeRuntimeContext,
+  ): ReturnType<typeof toToolExecutorContext> {
+    return toToolExecutorContext(buildToolRuntimeContext({
+      browserController: this.browserController,
+      sidecarManager: this.sidecarManager,
+      runtime: this.runtime,
+      scope: runtimeContext.sessionId
+        ? this.runtime?.getConversationScope(runtimeContext.sessionId) || undefined
+        : undefined,
+      allowedToolNames: runtimeContext.allowedToolNames,
+      // SDK runtime executes renderer-mediated tools through the request/ack
+      // path below. Forwarding tool handlers' advisory emitToolAction here
+      // would make document/rss/calendar actions run twice in the renderer.
+      emitToolAction: () => undefined,
+      requestModuleToolAction: this.rendererToolActionRequester
+        ? (toolName, toolArgs) => this.rendererToolActionRequester!({
+          agent: runtimeContext.agentName,
+          sessionId: runtimeContext.sessionId,
+          runId: runtimeContext.runId,
+          tool: toolName,
+          args: toolArgs,
+        })
+        : undefined,
+      abortSignal: runtimeContext.signal,
+      sessionId: runtimeContext.sessionId,
+      scopeId: runtimeContext.sessionId,
+      runId: runtimeContext.runId,
+      taskId: runtimeContext.taskId,
+      parentTaskId: runtimeContext.taskId,
+      parentStepId: runtimeContext.taskId,
+      taskProjectionId: runtimeContext.taskId,
+      frameSkillId: null,
+      registerRunCleanup: (cleanup) => {
+        this.runCleanupRegistry?.registerRunCleanup(runtimeContext.runId, cleanup)
+      },
+      agentContext: runtimeContext.agentContext ?? null,
+      turnFeatureFlags: snapshotTurnFeatureFlags(),
+      activeFrame: runtimeContext.activeFrame,
+      authorization: runtimeContext.authorization,
+    }))
+  }
+
+  private async executeGuardDocumentTool(
     definition: ToolDefinition,
     args: Record<string, unknown>,
     runtimeContext: ToolBridgeRuntimeContext,
@@ -1664,41 +2990,7 @@ export class AgentSdkRuntime extends EventEmitter {
     const output = await this.executeToolCall(
       definition.name,
       args,
-      toToolExecutorContext(buildToolRuntimeContext({
-        browserController: this.browserController,
-        sidecarManager: this.sidecarManager,
-        runtime: this.runtime,
-        scope: runtimeContext.sessionId
-          ? this.runtime?.getConversationScope(runtimeContext.sessionId) || undefined
-          : undefined,
-        allowedToolNames: runtimeContext.allowedToolNames,
-        emitToolAction: runtimeContext.emitToolAction,
-        requestModuleToolAction: this.rendererToolActionRequester
-          ? (toolName, toolArgs) => this.rendererToolActionRequester!({
-            agent: runtimeContext.agentName,
-            sessionId: runtimeContext.sessionId,
-            runId: runtimeContext.runId,
-            tool: toolName,
-            args: toolArgs,
-          })
-          : undefined,
-        abortSignal: runtimeContext.signal,
-        sessionId: runtimeContext.sessionId,
-        scopeId: runtimeContext.sessionId,
-        runId: runtimeContext.runId,
-        taskId: runtimeContext.taskId,
-        parentTaskId: runtimeContext.taskId,
-        parentStepId: runtimeContext.taskId,
-        taskProjectionId: runtimeContext.taskId,
-        frameSkillId: null,
-        registerRunCleanup: (cleanup) => {
-          this.runCleanupRegistry?.registerRunCleanup(runtimeContext.runId, cleanup)
-        },
-        agentContext: null,
-        turnFeatureFlags: snapshotTurnFeatureFlags(),
-            activeFrame: createEmptyActiveFrameContext(),
-            authorization: runtimeContext.authorization,
-          })),
+      this.buildExecutorContext(runtimeContext),
     )
     runtimeContext.recordToolResult(definition.name, output)
     const normalized = normalizeToolExecutionOutput(output)
@@ -1711,6 +3003,179 @@ export class AgentSdkRuntime extends EventEmitter {
       text: resultTrace,
       projectionPatch: normalized.projectionPatch,
     })
+    return output
+  }
+
+  private isDocumentToolFailure(output: ToolExecutionOutput): boolean {
+    const normalized = normalizeToolExecutionOutput(output)
+    const data = normalized.data && typeof normalized.data === 'object'
+      ? normalized.data as Record<string, unknown>
+      : {}
+    return (
+      typeof data.errorKind === 'string'
+      || /(?:^Error:|Document action failed|failed|失败|无法|没有可)/i.test(normalized.text)
+    )
+  }
+
+  private async ensureExplicitDocumentTargetOpened(
+    runtimeContext: ToolBridgeRuntimeContext,
+  ): Promise<ToolExecutionOutput | null> {
+    const guard = runtimeContext.documentTargetGuard
+    if (!guard || guard.opened) return null
+    const definition = guard.openToolDefinition
+    if (!definition) {
+      return createToolExecutionOutput(`无法打开目标文档 ${guard.targetName}：本轮未开放 document_open_tab。`, {
+        shape: 'json',
+        data: {
+          errorKind: 'target_document_open_unavailable',
+          targetPath: guard.targetPath,
+        },
+      })
+    }
+
+    const args = { path: guard.targetPath }
+    const output = await this.executeGuardDocumentTool(definition, args, runtimeContext)
+    const normalized = normalizeToolExecutionOutput(output)
+    if (this.isDocumentToolFailure(normalized)) {
+      return createToolExecutionOutput(`无法打开目标文档 ${guard.targetName}，已停止写入，避免写错文件。`, {
+        shape: 'json',
+        data: {
+          errorKind: 'target_document_open_failed',
+          targetPath: guard.targetPath,
+          openResult: normalized.text,
+        },
+      })
+    }
+    guard.opened = true
+    return null
+  }
+
+  private async ensureExplicitDocumentTargetSaved(
+    runtimeContext: ToolBridgeRuntimeContext,
+  ): Promise<ToolExecutionOutput | null> {
+    const guard = runtimeContext.documentTargetGuard
+    if (!guard) return null
+    const definition = guard.saveToolDefinition
+    if (!definition) {
+      return createToolExecutionOutput(`目标文档 ${guard.targetName} 已修改，但本轮未开放 document_save_tab，无法确认落盘。`, {
+        shape: 'json',
+        data: {
+          errorKind: 'target_document_save_unavailable',
+          targetPath: guard.targetPath,
+        },
+      })
+    }
+    const output = await this.executeGuardDocumentTool(definition, {}, runtimeContext)
+    if (this.isDocumentToolFailure(output)) {
+      return createToolExecutionOutput(`目标文档 ${guard.targetName} 保存失败，不能声明完成。`, {
+        shape: 'json',
+        data: {
+          errorKind: 'target_document_save_failed',
+          targetPath: guard.targetPath,
+          saveResult: normalizeToolExecutionOutput(output).text,
+        },
+      })
+    }
+    return null
+  }
+
+  private async executeReadyToolDefinition(
+    definition: ToolDefinition,
+    args: Record<string, unknown>,
+    runtimeContext: ToolBridgeRuntimeContext,
+  ): Promise<ToolExecutionOutput> {
+    const guard = runtimeContext.documentTargetGuard
+    if (guard && definition.name === 'document_new_tab') {
+      return createToolExecutionOutput(
+        `用户已明确要求写入 ${guard.targetName}，不能新建临时文档替代。请打开目标文档后再修改。`,
+        {
+          shape: 'json',
+          data: {
+            errorKind: 'target_document_required',
+            targetPath: guard.targetPath,
+          },
+        },
+      )
+    }
+    if (guard && definition.name === 'document_switch_tab') {
+      return createToolExecutionOutput(
+        `目标文档已固定为 ${guard.targetName}，本轮不需要切换到其他标签。`,
+        {
+          shape: 'json',
+          data: {
+            ok: true,
+            targetPath: guard.targetPath,
+            ignoredTool: definition.name,
+          },
+        },
+      )
+    }
+    if (guard && (DOCUMENT_TARGET_MUTATION_TOOL_NAMES.has(definition.name) || definition.name === 'document_save_tab')) {
+      const blocker = await this.ensureExplicitDocumentTargetOpened(runtimeContext)
+      if (blocker) return blocker
+    }
+    const effectiveArgs = guard
+      ? normalizeExplicitDocumentTargetToolArgs(definition.name, args)
+      : args
+
+    const callTrace = formatToolCallTrace(definition.name, effectiveArgs)
+    runtimeContext.emitOutput(callTrace, 'tool_use')
+    this.publishSdkToolEvent({
+      runtimeContext,
+      definition,
+      kind: 'call',
+      text: callTrace,
+    })
+    const preservationBlocker = DOCUMENT_TARGET_MUTATION_TOOL_NAMES.has(definition.name)
+      ? validatePreservedDocumentMutation(guard, definition.name, effectiveArgs)
+      : null
+    if (preservationBlocker) {
+      runtimeContext.recordToolResult(definition.name, preservationBlocker)
+      const resultTrace = formatToolResultTrace(definition.name, normalizeToolExecutionOutput(preservationBlocker))
+      runtimeContext.emitOutput(resultTrace, 'tool_result')
+      this.publishSdkToolEvent({
+        runtimeContext,
+        definition,
+        kind: 'result',
+        text: resultTrace,
+      })
+      return preservationBlocker
+    }
+    runtimeContext.emitToolAction(definition.name, effectiveArgs)
+    const output = await this.executeToolCall(
+      definition.name,
+      effectiveArgs,
+      this.buildExecutorContext(runtimeContext),
+    )
+    runtimeContext.recordToolResult(definition.name, output)
+    const normalized = normalizeToolExecutionOutput(output)
+    if (
+      guard
+      && definition.name === 'document_open_tab'
+      && String(effectiveArgs.path || '').trim() === guard.targetPath
+      && !(normalized.data && typeof normalized.data === 'object' && 'errorKind' in normalized.data)
+      && !/(?:^Error:|Document action failed|failed|失败|无法)/i.test(normalized.text)
+    ) {
+      guard.opened = true
+    }
+    const resultTrace = formatToolResultTrace(definition.name, normalized)
+    runtimeContext.emitOutput(resultTrace, 'tool_result', normalized.projectionPatch || null)
+    this.publishSdkToolEvent({
+      runtimeContext,
+      definition,
+      kind: 'result',
+      text: resultTrace,
+      projectionPatch: normalized.projectionPatch,
+    })
+    if (
+      guard
+      && DOCUMENT_TARGET_MUTATION_TOOL_NAMES.has(definition.name)
+      && !this.isDocumentToolFailure(normalized)
+      && !/内容未变化|已跳过/i.test(normalized.text)
+    ) {
+      const saveBlocker = await this.ensureExplicitDocumentTargetSaved(runtimeContext)
+      if (saveBlocker) return saveBlocker
+    }
     return output
   }
 
@@ -1733,18 +3198,21 @@ export class AgentSdkRuntime extends EventEmitter {
       }
     }
 
-    const preferredSkillToolNames = orchestrator.buildPreferredSkillToolNames?.(userText, sessionId) || []
-    const typedActions = preferredSkillToolNames.filter((name) =>
-      name.startsWith('skill_') && !PRIMITIVE_TOOL_NAME_SET.has(name),
-    )
     const referenceHint = orchestrator.getCurrentReferenceSkillHint?.(sessionId) || null
+    const typedActionNames = new Set((orchestrator.buildPreferredSkillToolNames?.(userText, sessionId) || [])
+      .filter((name) => name.startsWith('skill_') && !PRIMITIVE_TOOL_NAME_SET.has(name)))
+    if (explicitSkillId === 'video-expert-analyzer' || referenceHint?.id === 'video-expert-analyzer') {
+      typedActionNames.add('skill_video_expert_pipeline')
+      typedActionNames.add('skill_video_expert_ai_analyze')
+    }
+    const typedActions = Array.from(typedActionNames)
     const skillId = explicitSkillId || (typedActions.length > 0 ? referenceHint?.id || null : null)
     if (!skillId) return buildExplicitNoSkillAuthorization('no_skill_signal')
 
     return buildSelectedSkillToolAuthorization({
       skillId,
       allowedTypedActions: typedActions,
-      allowedPrimitives: PRIMITIVE_TOOL_DEFS.map((definition) => definition.name),
+      allowedPrimitives: allowedPrimitiveToolsForSdkSkillTurn(),
       source: explicitSkillId ? 'explicit' : 'active_task',
       reason: explicitSkillId ? 'explicit_user_mention' : 'reference_hint',
     })

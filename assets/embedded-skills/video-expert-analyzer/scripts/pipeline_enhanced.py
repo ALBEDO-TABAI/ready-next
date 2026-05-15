@@ -4,6 +4,8 @@ Video Expert Analyzer Pipeline - Enhanced Version
 支持：配置目录选择、精选片段子文件夹、详细分析报告
 """
 
+from __future__ import annotations
+
 import os
 import sys
 import json

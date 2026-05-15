@@ -54,6 +54,28 @@ const EXPECTED_ANTHROPIC = [
     },
   },
   {
+    name: 'file_read_excerpt',
+    description:
+      '读取 workspace 内文档正文片段。可传 anchor 读取章节，或传 lineStart / lineEnd 读取行号范围；用于基于原文的总结、分析、改写和关系梳理。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '文件绝对路径或索引内 path' },
+        anchor: {
+          type: 'string',
+          description: '可选：章节标题或关键词；命中标题时读取该章节',
+        },
+        lineStart: { type: 'number', description: '可选：起始行号（从 1 开始）' },
+        lineEnd: { type: 'number', description: '可选：结束行号（包含该行）' },
+        maxChars: {
+          type: 'number',
+          description: '可选：最大返回字符数（默认 32000，上限 40000）',
+        },
+      },
+      required: ['path'],
+    },
+  },
+  {
     name: 'file_get_backlinks',
     description: '列出引用目标文档的所有来源文件（wikilink 反向链接）。',
     input_schema: {

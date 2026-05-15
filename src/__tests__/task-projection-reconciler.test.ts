@@ -276,6 +276,46 @@ test('reconcileTaskProjections marks complete VEA output done and is idempotent'
   assert.equal(updates.length, 1)
 })
 
+test('reconcileTaskProjections enriches completed child projections with delivery report artifacts', async () => {
+  const outputDir = createRoot('done-enrich-artifacts')
+  const { runStatePath, deliveryReportPath } = writeCompletedRun(outputDir, { includeAudiovisual: true })
+  const { store, records, updates } = createStore([
+    baseProjection({
+      taskId: 'skill-child:vcr_done_enrich',
+      runId: 'vcr_done_enrich',
+      status: 'done',
+      interactionState: 'suspended',
+      waitingFor: 'none',
+      resumableActions: ['open_artifact'],
+      continuationRef: {
+        childRunId: 'vcr_done_enrich',
+        skillId: 'video-expert-analyzer',
+        action: 'video_expert_pipeline',
+        outputDir,
+        runStatePath,
+      },
+      recentArtifacts: [{
+        id: 'run-state',
+        module: 'skill',
+        kind: 'run_state',
+        label: 'run_state.json',
+        path: runStatePath,
+        createdAt: OLD,
+        meta: { outputDir, skillId: 'video-expert-analyzer' },
+      }],
+    }),
+  ])
+
+  await reconcileTaskProjections({ store, records: Array.from(records.values()), now: NOW })
+  await reconcileTaskProjections({ store, records: Array.from(records.values()), now: NOW })
+
+  const updated = records.get('skill-child:vcr_done_enrich')!
+  assert.equal(updated.status, 'done')
+  assert.equal(updated.blockedReason, null)
+  assert.ok(updated.recentArtifacts?.some((item) => item.kind === 'delivery_report' && item.path === deliveryReportPath))
+  assert.equal(updates.length, 1)
+})
+
 test('reconcileTaskProjections restores child-run handles from DB row and event log before checking artifacts', async () => {
   const outputDir = createRoot('db-log-done')
   const { runStatePath } = writeCompletedRun(outputDir, { includeAudiovisual: true })

@@ -6,7 +6,7 @@ config({ path: resolve(__dirname, '../../.env') })
 
 import { app, shell, BrowserWindow, ipcMain, protocol, nativeImage, nativeTheme, Menu, dialog, type MenuItemConstructorOptions } from 'electron'
 import { join, extname, normalize } from 'path'
-import { createReadStream, statSync, existsSync } from 'fs'
+import { createReadStream, statSync, existsSync, mkdirSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 
 // Import modules
@@ -41,6 +41,12 @@ const { autoUpdater } = pkg
 const ENABLE_MOCK_SERVICES = process.env.ENABLE_MOCK_SERVICES === 'true'
 const READY_APP_NAME = 'Ready'
 app.setName(READY_APP_NAME)
+
+const READY_USER_DATA_DIR = process.env.READY_USER_DATA_DIR?.trim()
+if (READY_USER_DATA_DIR) {
+  mkdirSync(READY_USER_DATA_DIR, { recursive: true })
+  app.setPath('userData', READY_USER_DATA_DIR)
+}
 
 function ensureRegularDockApp(): void {
   if (process.platform !== 'darwin') return

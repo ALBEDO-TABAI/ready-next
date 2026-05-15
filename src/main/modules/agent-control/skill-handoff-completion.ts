@@ -40,6 +40,7 @@ export interface CompletePendingSkillHandoffsOptions {
 const HANDOFF_DIR = 'audiovisual_handoff'
 const HANDOFF_TIMEOUT_MS = 240_000
 const HANDOFF_MAX_ATTEMPTS = 3
+const SVG_COMPACT_PROMPT_THRESHOLD = 24_000
 const inFlightHandoffs = new Map<string, Promise<SkillHandoffCompletionSummary>>()
 
 function resolveTaskPaths(outputDir: string, name: string, rawTask: unknown): SkillHandoffTask | null {
@@ -118,6 +119,76 @@ function stripCodeFence(text: string): string {
   const trimmed = text.trim()
   const match = trimmed.match(/^```(?:[a-zA-Z0-9_-]+)?\s*\n([\s\S]*?)\n```$/)
   return match ? match[1].trim() : trimmed
+}
+
+function isEmptyHandoffOutputError(error: unknown): boolean {
+  return error instanceof Error && error.message === 'handoff model returned empty output'
+}
+
+function clipText(text: string, limit: number): string {
+  const trimmed = text.trim()
+  return trimmed.length > limit ? `${trimmed.slice(0, limit).trimEnd()}\n...[truncated]` : trimmed
+}
+
+function sectionSnippet(text: string, heading: string, limit: number): string {
+  const index = text.indexOf(heading)
+  if (index < 0) return ''
+  const next = text.slice(index + heading.length).search(/\n##\s+/)
+  const end = next >= 0 ? index + heading.length + next : text.length
+  return clipText(text.slice(index, end), limit)
+}
+
+function extractHeaderLabels(text: string): string[] {
+  const titleSection = text.match(/###\s*标题行规格([\s\S]*?)(?:\n---|\n###\s)/)
+  const source = titleSection ? titleSection[1] : text
+  const labels: string[] = []
+  for (const match of source.matchAll(/<text\b[^>]*>([^<]+)<\/text>/gi)) {
+    const label = match[1]?.trim()
+    if (label && !labels.includes(label)) labels.push(label)
+  }
+  return labels
+}
+
+function buildCompactSvgTaskPrompt(taskText: string): string {
+  const headers = extractHeaderLabels(taskText)
+  const reportIntro = taskText.match(/视频标题：.*(?:\n.*){0,4}/)?.[0] ?? ''
+  const relevantSections = [
+    sectionSnippet(taskText, '## 形式约束识别', 2_500),
+    sectionSnippet(taskText, '## 感知干预地图', 3_500),
+    sectionSnippet(taskText, '## 吸引力模式', 2_000),
+    sectionSnippet(taskText, '## 边界测试', 2_500),
+  ].filter(Boolean)
+  const direction = taskText.includes('严格为 左→中→右')
+    ? 'Horizontal arrows must go left to right only.'
+    : taskText.includes('双向')
+      ? 'Horizontal arrows may be bidirectional only if required by the prompt.'
+      : 'Use the arrow direction required by the task.'
+
+  return [
+    'The previous SVG handoff prompt was too long for the model to produce the artifact body.',
+    'Generate the requested SVG from this compact task packet instead.',
+    '',
+    'Required output contract:',
+    '- Return exactly one complete <svg>...</svg> document, without Markdown fences or explanation.',
+    '- Use width="100%" and a viewBox beginning with "0 0 680".',
+    '- Include role="img", <title>, <desc>, and a <defs> marker with id="arrow".',
+    '- Keep a transparent background; do not wrap the SVG in a div.',
+    '- Include the required header labels exactly: ' + (headers.length > 0 ? headers.join(' | ') : 'use the labels in the original task'),
+    '- Use text classes "th" and "ts", node groups with "node c-..." classes, and arrow lines with class "arr".',
+    `- ${direction}`,
+    '- Prefer 3 to 5 rows. Keep card titles short so labels stay inside each card.',
+    '',
+    'Source summary:',
+    clipText(reportIntro, 700),
+    '',
+    relevantSections.join('\n\n'),
+  ].join('\n').trim()
+}
+
+function shouldUseCompactSvgPrompt(task: SkillHandoffTask, taskText: string, attempt: number): boolean {
+  return attempt > 1
+    && task.outputPath.toLowerCase().endsWith('.svg')
+    && taskText.length > SVG_COMPACT_PROMPT_THRESHOLD
 }
 
 function extractOpenAIChatText(payload: unknown): string {
@@ -259,19 +330,31 @@ async function requestValidHandoffCompletion(
 ): Promise<string> {
   let lastOutput = ''
   for (let attempt = 1; attempt <= 3; attempt += 1) {
+    const basePrompt = shouldUseCompactSvgPrompt(task, taskText, attempt)
+      ? buildCompactSvgTaskPrompt(taskText)
+      : taskText
     const prompt = attempt === 1
-      ? taskText
+      ? basePrompt
       : [
-          taskText,
+          basePrompt,
           '',
           '--- Previous invalid output ---',
-          lastOutput,
+          clipText(lastOutput, 4_000),
           '',
           'Repair instructions:',
           '- Return the complete requested output file, not a patch.',
           '- If the output is SVG, it must contain one complete <svg>...</svg> document with a closing </svg> tag.',
         ].join('\n')
-    const output = await requestHandoffCompletion(agentContext, task, prompt, fetchImpl)
+    let output = ''
+    try {
+      output = await requestHandoffCompletion(agentContext, task, prompt, fetchImpl)
+    } catch (error) {
+      if (isEmptyHandoffOutputError(error) && attempt < HANDOFF_MAX_ATTEMPTS) {
+        lastOutput = ''
+        continue
+      }
+      throw error
+    }
     if (isValidHandoffOutput(task.outputPath, output)) return output
     lastOutput = output
   }

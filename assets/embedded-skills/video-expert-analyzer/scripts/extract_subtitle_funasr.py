@@ -4,6 +4,8 @@
 非音乐视频默认先听人声，再补画面文字；音乐视频优先保留歌词/OCR 路径。
 """
 
+from __future__ import annotations
+
 import subprocess
 import sys
 import os

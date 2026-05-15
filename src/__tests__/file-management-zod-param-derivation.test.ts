@@ -54,6 +54,37 @@ test('derives file_locate params correctly', () => {
   assert.deepEqual(zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.file_locate), expected)
 })
 
+test('derives file_read_excerpt params correctly', () => {
+  const expected: SkillParamDefinition[] = [
+    { name: 'path', type: 'string', description: '文件绝对路径或索引内 path', required: true },
+    {
+      name: 'anchor',
+      type: 'string',
+      description: '可选：章节标题或关键词；命中标题时读取该章节',
+      required: false,
+    },
+    {
+      name: 'lineStart',
+      type: 'number',
+      description: '可选：起始行号（从 1 开始）',
+      required: false,
+    },
+    {
+      name: 'lineEnd',
+      type: 'number',
+      description: '可选：结束行号（包含该行）',
+      required: false,
+    },
+    {
+      name: 'maxChars',
+      type: 'number',
+      description: '可选：最大返回字符数（默认 32000，上限 40000）',
+      required: false,
+    },
+  ]
+  assert.deepEqual(zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.file_read_excerpt), expected)
+})
+
 test('derives file_get_backlinks params correctly', () => {
   const expected: SkillParamDefinition[] = [
     { name: 'path', type: 'string', description: '目标文件路径', required: true },

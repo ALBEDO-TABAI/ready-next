@@ -989,7 +989,8 @@ test('acceptance 23: SDK explicit skill turns expose only the selected skill act
 
     assert.equal(result.success, true)
     assert.equal(run.seenToolNames.includes('skill_video_expert_pipeline'), true)
-    assert.equal(run.seenToolNames.includes('skill_run_shell'), true)
+    assert.equal(run.seenToolNames.includes('skill_run_shell'), false)
+    assert.equal(run.seenToolNames.includes('skill_inspect_run_state'), true)
     assert.equal(run.seenToolNames.includes('skill_rss_update'), false)
   } finally {
     __setSkillActionToolDefsForTests(null)

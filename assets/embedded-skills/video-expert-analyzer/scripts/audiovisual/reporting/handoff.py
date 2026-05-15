@@ -217,7 +217,7 @@ class AudiovisualHandoffCoordinator:
             "## 视听剖析正文的硬指标",
             "",
             '- 输出必须逐模块展开，不是"每模块一段话总结"。`task.md` 里"输出骨架"列出的每个 `## 模块` 和 `### 子条目` 都必须按字面出现，不得合并、改写或省略。',
-            "- 每个 `##` 模块默认不少于 700 字；每个 `###` 子条目默认不少于 180 字；每个模块至少引用 3 个不同 Scene 编号作为证据。",
+            "- 每个 `##` 模块默认不少于 700 字；每个 `###` 子条目默认不少于 180 字；Scene 证据数量以 `task.md` 里的交付规则为准，短视频会按真实可用 Scene 数降低。",
             "- 凡 prompt 要求的表格（`| 字段 | 内容 |` 等）必须原样用 Markdown 表格呈现，不可改写成段落。",
             '- 脚本会在 finalize 时机器校验这些指标；不合规会抛 ValueError，你需要对照错误信息补齐后再跑 finalize，不要把"已经写过"当成"已经合规"。',
             "",
@@ -270,7 +270,7 @@ class AudiovisualHandoffCoordinator:
             user_message=user_message,
             output_instruction=(
                 '写入完整的视听剖析正文 Markdown：严格复刻 user message 中"输出骨架"列出的 `##` 模块与 `###` 子条目标题；'
-                "每个 `##` 模块 ≥ 700 字、每个 `###` 子条目 ≥ 180 字、每个 `##` 模块至少出现 3 个不同 Scene 编号；"
+                "每个 `##` 模块 ≥ 700 字、每个 `###` 子条目 ≥ 180 字，并按 user message 中交付规则引用可用 Scene 编号；"
                 "不要加顶层 `#` 标题，也不要用代码块围栏包住整份正文。"
             ),
             prompt_source=prompt_source,

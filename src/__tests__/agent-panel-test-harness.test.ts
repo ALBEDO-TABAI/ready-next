@@ -194,14 +194,74 @@ describe('agent panel test harness', () => {
     assert.ok(diagnostics.some((item) => item.id === 'tool_call_without_result' && item.layer === 'tool'))
   })
 
+  it('diagnoses failed tool results even when the run later reports done', () => {
+    const snapshot = createAgentPanelSnapshot(baseState({
+      messages: [
+        message({ id: 'user-1', type: 'user', content: '展示产物' }),
+        message({ id: 'agent-1', type: 'agent', content: '已完成。' }),
+      ],
+      scopeRunStates: {
+        'scope-test': run({
+          phase: 'done',
+          terminalReason: 'done',
+          toolTrace: [
+            { id: 'tool-1', kind: 'call', text: 'present_file(path)', timestamp: new Date('2026-05-14T09:00:04.000Z') },
+            { id: 'tool-2', kind: 'result', text: 'present_file: 工具 present_file 失败：path escapes sandbox root', timestamp: new Date('2026-05-14T09:00:05.000Z') },
+          ],
+        }),
+      },
+    }))
+    const diagnostics = diagnoseAgentPanelSnapshot(snapshot)
+
+    assert.ok(diagnostics.some((item) => item.id === 'tool_result_failure' && item.layer === 'tool'))
+  })
+
+  it('diagnoses raw tool-call protocol leaked into agent messages', () => {
+    const snapshot = createAgentPanelSnapshot(baseState({
+      messages: [
+        message({ id: 'user-1', type: 'user', content: '生成文档' }),
+        message({
+          id: 'response-1',
+          type: 'agent',
+          content: '<tool_call>\n<function=document_save_tab>\n</function>\n</tool_call>',
+        }),
+      ],
+    }))
+    const diagnostics = diagnoseAgentPanelSnapshot(snapshot)
+
+    assert.ok(diagnostics.some((item) => item.id === 'raw_tool_call_visible' && item.layer === 'renderer'))
+  })
+
   it('installs a forced window harness that can submit through the store fallback and record events', async () => {
     const originalWindow = (globalThis as { window?: unknown }).window
+    const originalDocument = (globalThis as { document?: unknown }).document
+    class FakeTextarea {
+      value = ''
+      focus() {}
+      dispatchEvent() {
+        return true
+      }
+    }
+    let domClickCount = 0
+    const fakeTextarea = new FakeTextarea()
+    const fakeButton = {
+      disabled: false,
+      click: () => {
+        domClickCount += 1
+      },
+    }
     const testWindow = {
       location: { search: '' },
       localStorage: { getItem: () => null },
       electronAPI: undefined,
+      HTMLTextAreaElement: FakeTextarea,
     }
     ;(globalThis as { window?: unknown }).window = testWindow
+    ;(globalThis as { document?: unknown }).document = {
+      querySelector: (selector: string) => selector === '[data-ready-agent-input="true"]'
+        ? fakeTextarea
+        : fakeButton,
+    }
 
     let state = baseState()
     const listeners = new Set<(next: HarnessState, previous: HarnessState) => void>()
@@ -248,7 +308,21 @@ describe('agent panel test harness', () => {
     assert.equal(result.after.messages.at(-1)?.content, '收到，测试完成。')
     assert.ok(harness.events().some((event) => event.kind === 'message_count'))
 
+    const domFallback = await harness.submit('DOM 空点提交', { mode: 'dom', waitForIdle: false })
+    assert.equal(domClickCount, 1)
+    assert.equal(domFallback.inputMode, 'store')
+    assert.equal(domFallback.sendResult?.success, true)
+
+    const missingTool = await harness.submit('模拟 VEA 输入', {
+      mode: 'store',
+      waitForIdle: false,
+      expectedToolNames: ['skill_video_expert_pipeline'],
+    })
+    assert.equal(missingTool.ok, false)
+    assert.ok(missingTool.diagnostics.some((item) => item.id === 'expected_tool_not_called'))
+
     harness.dispose()
     ;(globalThis as { window?: unknown }).window = originalWindow
+    ;(globalThis as { document?: unknown }).document = originalDocument
   })
 })

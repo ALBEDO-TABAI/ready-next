@@ -146,45 +146,13 @@ export async function executeToolCall(
   }
 
   const allowedToolNames = normalizeAllowedToolSet(context.allowedToolNames)
-  const allowsChildInternal =
-    context.allowInternal === true && context.invoker === 'child_runner'
-  const allowsFrameScopedInternal =
-    definition.executionVisibility === 'internal'
-    && isFrameScopedInternalSkillActionAllowed(toolName, context, allowedToolNames)
-  const childInternalStrictAdmission =
-    context.turnFeatureFlags?.childInternalStrictAdmission ?? true
-  if (
-    childInternalStrictAdmission
-    && definition.executionVisibility === 'internal'
-    && !allowsChildInternal
-    && !allowsFrameScopedInternal
-  ) {
-    return createToolExecutionOutput(`Tool ${toolName} is internal-only and cannot be called from this context.`, {
-      shape: 'json',
-      data: {
-        errorKind: 'host_unavailable',
-        reason: 'internal_tool_not_allowed',
-        toolName,
-      },
-    })
-  }
+  const invoker = context.invoker ?? 'model'
 
   // Stage 4 W3 — per-turn skill tool authorization MUST run BEFORE the
-  // legacy allowedToolNames checks below, otherwise a model-issued
-  // skill_* tool that's both unauthorized AND missing from this turn's
-  // allowedToolNames would be intercepted as `tool_restricted_this_turn`
-  // (legacy errorKind) instead of the canonical `authorization_denied`
-  // (per v6 plan §10 互斥语义: skill 工具被 admission 拒 → authorization_denied).
-  //
-  // Only enforced for model-issued calls (invoker:'model' or undefined).
-  // child_runner / host invokers continue through their own admission
-  // paths (the child-internal admission above for child_runner, and the
-  // legacy allowedToolNames gate below for host).
-  //
-  // Stage 10 — `context.authorization` is required by the type. The
-  // belt-and-suspenders runtime assert below catches any `as any`
-  // bypass that smuggles a missing authorization past typecheck.
-  const invoker = context.invoker ?? 'model'
+  // legacy/internal visibility gates below. `expose_when_hint_armed`
+  // intentionally makes selected internal typed actions model-visible; once
+  // authorization admits that exact typed action, the internal gate must not
+  // reject it as a generic internal-only tool.
   if (invoker === 'model' && toolName.startsWith('skill_') && !context.authorization) {
     throw new Error('Stage 10 invariant: model-issued skill_* tool call missing authorization')
   }
@@ -212,6 +180,36 @@ export async function executeToolCall(
         },
       )
     }
+  }
+
+  const allowsChildInternal =
+    context.allowInternal === true && context.invoker === 'child_runner'
+  const allowsFrameScopedInternal =
+    definition.executionVisibility === 'internal'
+    && isFrameScopedInternalSkillActionAllowed(toolName, context, allowedToolNames)
+  const allowsAuthorizedModelInternal =
+    invoker === 'model'
+    && toolName.startsWith('skill_')
+    && definition.executionVisibility === 'internal'
+    && authorization.mode === 'selected'
+    && authorization.allowedTypedActions.has(toolName)
+  const childInternalStrictAdmission =
+    context.turnFeatureFlags?.childInternalStrictAdmission ?? true
+  if (
+    childInternalStrictAdmission
+    && definition.executionVisibility === 'internal'
+    && !allowsChildInternal
+    && !allowsFrameScopedInternal
+    && !allowsAuthorizedModelInternal
+  ) {
+    return createToolExecutionOutput(`Tool ${toolName} is internal-only and cannot be called from this context.`, {
+      shape: 'json',
+      data: {
+        errorKind: 'host_unavailable',
+        reason: 'internal_tool_not_allowed',
+        toolName,
+      },
+    })
   }
 
   if (definition.requiresExplicitAllowlist && !allowedToolNames?.has(toolName)) {

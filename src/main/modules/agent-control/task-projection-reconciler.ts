@@ -9,7 +9,7 @@ import { logAgentMetric } from './metrics'
 import { PROJECTION_OBSERVABILITY_METRICS } from './projection-observability-metrics'
 import { canResumeShape } from './resume-handle'
 
-const RECONCILABLE_STATUSES = new Set<TaskProjectionRecord['status']>(['running', 'queued', 'blocked'])
+const RECONCILABLE_STATUSES = new Set<TaskProjectionRecord['status']>(['running', 'queued', 'blocked', 'done'])
 const STALE_WITHOUT_HANDLE_MS = 30 * 60 * 1000
 const REQUIRED_VEA_OUTPUT_KEYS = ['storyboard_md', 'storyboard_pdf', 'audiovisual_md', 'audiovisual_pdf']
 
@@ -209,6 +209,16 @@ function nonEmptyFile(path: string | null): boolean {
   try {
     const stat = statSync(path)
     return stat.isFile() && stat.size > 0
+  } catch {
+    return false
+  }
+}
+
+function pathExists(path: string | null): boolean {
+  if (!path) return false
+  try {
+    const stat = statSync(path)
+    return stat.isFile() || stat.isDirectory()
   } catch {
     return false
   }
@@ -693,6 +703,45 @@ function mergeContinuationRef(
   }
 }
 
+function mergeProjectionArtifacts(
+  record: TaskProjectionRecord,
+  handles: ProjectionHandles,
+  now: string,
+): TaskProjectionRecord['recentArtifacts'] {
+  const existing = record.recentArtifacts || []
+  const outputDir = handles.outputDir
+  const runStatePath = handles.runStatePath || (outputDir ? join(outputDir, 'run_state.json') : null)
+  const sceneScoresPath = outputDir ? join(outputDir, 'scene_scores.json') : null
+  const deliveryReportPath = handles.deliveryReportPath || (outputDir ? join(outputDir, 'delivery_report.json') : null)
+  const candidates = [
+    outputDir ? { key: 'outputDir', path: outputDir, label: '输出目录', kind: 'output_dir' } : null,
+    runStatePath && nonEmptyFile(runStatePath) ? { key: 'runStatePath', path: runStatePath, label: 'run_state.json', kind: 'run_state' } : null,
+    sceneScoresPath && nonEmptyFile(sceneScoresPath) ? { key: 'sceneScoresPath', path: sceneScoresPath, label: 'scene_scores.json', kind: 'scene_scores' } : null,
+    deliveryReportPath && nonEmptyFile(deliveryReportPath) ? { key: 'deliveryReportPath', path: deliveryReportPath, label: 'delivery_report.json', kind: 'delivery_report' } : null,
+  ].filter((item): item is { key: string; path: string; label: string; kind: string } => Boolean(item))
+  const seen = new Set(existing.map((item) => item.path).filter((path): path is string => Boolean(path)))
+  const additions = candidates
+    .filter((item) => pathExists(item.path) && !seen.has(item.path))
+    .map((item) => ({
+      id: `${record.taskId}:${item.key}`,
+      module: 'skill',
+      kind: item.kind,
+      label: item.label,
+      path: item.path,
+      createdAt: now,
+      meta: {
+        outputKey: item.key,
+        outputDir,
+        runStatePath,
+        ...(deliveryReportPath ? { deliveryReportPath } : {}),
+        ...(handles.childRunId ? { childRunId: handles.childRunId } : {}),
+        ...(handles.skillId ? { skillId: handles.skillId } : {}),
+        ...(handles.action ? { action: handles.action } : {}),
+      },
+    }))
+  return [...existing, ...additions]
+}
+
 function patchSteps(
   record: TaskProjectionRecord,
   status: 'blocked' | 'done' | 'cancelled',
@@ -751,7 +800,8 @@ export function reconcileTaskProjections(params: ReconcileTaskProjectionsParams)
     emitProjectionHandleLegacyOriginMetrics(record.taskId, origins)
 
     let target: Partial<TaskProjectionRecord> | null = null
-    if (projectionIsDone(handles)) {
+    if (record.status === 'done') {
+      if (!projectionIsDone(handles)) continue
       target = {
         status: 'done',
         interactionState: 'suspended',
@@ -760,6 +810,19 @@ export function reconcileTaskProjections(params: ReconcileTaskProjectionsParams)
         degradationReason: null,
         resumableActions: ['open_artifact'],
         continuationRef: mergeContinuationRef(record, handles),
+        recentArtifacts: mergeProjectionArtifacts(record, handles, now),
+        steps: patchSteps(record, 'done', now),
+      }
+    } else if (projectionIsDone(handles)) {
+      target = {
+        status: 'done',
+        interactionState: 'suspended',
+        waitingFor: 'none',
+        blockedReason: null,
+        degradationReason: null,
+        resumableActions: ['open_artifact'],
+        continuationRef: mergeContinuationRef(record, handles),
+        recentArtifacts: mergeProjectionArtifacts(record, handles, now),
         steps: patchSteps(record, 'done', now),
       }
     } else if (hasDurableHandle(handles)) {

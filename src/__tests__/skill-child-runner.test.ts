@@ -262,6 +262,7 @@ import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-met
 import type { ToolDefinition } from '../main/modules/agent-control/tool-definition'
 import type { SkillTaskRunRecord } from '../main/modules/repositories/skill-task-run-repository'
 import type { TaskProjectionRecord, TaskProjectionStore } from '../main/modules/agent-control/run-contracts'
+import type { ScopeRunEventPayload } from '../main/modules/agent-control/types'
 // `SkillTaskRunRepository` is already imported as a value (the class
 // constructor) on line 25; ESLint flags a redeclare if we re-import it
 // here as a type, so we reuse the value-imported binding for both
@@ -586,6 +587,7 @@ function setupRunner(opts: {
   maxActiveVeaRuns?: number
   progressPollIntervalMs?: number
   taskProjectionStore?: ReturnType<typeof makeFakeTaskProjectionStore>
+  publishScopeRunEvent?: (payload: ScopeRunEventPayload) => void
 } = {}): {
   runtime: ReturnType<typeof makeFakeRuntime>
   repo: ReturnType<typeof makeFakeRepository>
@@ -603,6 +605,7 @@ function setupRunner(opts: {
     maxActionsPerRun: opts.maxActionsPerRun,
     maxActiveVeaRuns: opts.maxActiveVeaRuns,
     progressPollIntervalMs: opts.progressPollIntervalMs,
+    publishScopeRunEvent: opts.publishScopeRunEvent ?? null,
     ...(opts.taskProjectionStore ? { taskProjectionStore: opts.taskProjectionStore.store } : {}),
   } as Parameters<typeof configureSkillChildRunner>[0] & { taskProjectionStore?: TaskProjectionStore }
   configureSkillChildRunner(config)
@@ -769,10 +772,12 @@ test('Worker B: child runner persists childRunId-keyed projection rows through l
   const outputDir = mkdtempSync(join(tmpdir(), 'ready-child-task-projection-'))
   const runStatePath = join(outputDir, 'run_state.json')
   const taskProjectionStore = makeFakeTaskProjectionStore()
+  const scopeRunEvents: ScopeRunEventPayload[] = []
   const { runtime, repo } = setupRunner({
     launchStuckGuardMs: 5_000,
     progressPollIntervalMs: 10,
     taskProjectionStore,
+    publishScopeRunEvent: (event) => scopeRunEvents.push(event),
   })
   let releaseAction!: () => void
   const actionHold = new Promise<void>((resolve) => { releaseAction = resolve })
@@ -785,6 +790,7 @@ test('Worker B: child runner persists childRunId-keyed projection rows through l
       updated_at: '2026-05-04T08:00:00.000Z',
       status: 'running',
     }), 'utf8')
+    writeFileSync(join(outputDir, 'delivery_report.json'), JSON.stringify({ status: 'completed' }), 'utf8')
     await actionHold
     return {
       success: true,
@@ -839,7 +845,14 @@ test('Worker B: child runner persists childRunId-keyed projection rows through l
   assert.equal(closed.interactionState, 'suspended')
   assert.equal(closed.waitingFor, 'none')
   assert.deepEqual(closed.resumableActions, ['open_artifact'])
+  assert.ok(closed.recentArtifacts?.some((item) => item.kind === 'delivery_report'))
   assert.equal(repo.state.rows.get(launch.childRunId)?.interactionState, 'suspended')
+  const terminalEvent = scopeRunEvents.at(-1)
+  assert.equal(terminalEvent?.taskId, taskId)
+  assert.equal(terminalEvent?.phase, 'done')
+  assert.equal(terminalEvent?.terminalReason, 'done')
+  assert.deepEqual(terminalEvent?.resumableActions, ['open_artifact'])
+  assert.ok(terminalEvent?.artifactRefs?.some((item) => item.kind === 'delivery_report'))
 })
 
 test('Worker B: state_observed reads run_state/artifact progress into projection and active summary', async () => {

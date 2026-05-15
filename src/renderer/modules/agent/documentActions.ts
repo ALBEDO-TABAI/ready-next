@@ -30,6 +30,32 @@ function raceWithTimeout<T>(op: Promise<T>, ms: number, label: string): Promise<
 
 const widgetWriteLocks = new Map<string, Promise<void>>()
 
+const pendingToolDocumentWrites = new Map<string, {
+  content: string
+  baseContent: string
+  action: string
+  updatedAt: number
+}>()
+
+function rememberPendingToolDocumentWrite(tabId: string, content: string, action: string, baseContent: string): void {
+  if (!tabId) return
+  pendingToolDocumentWrites.set(tabId, { content, baseContent, action, updatedAt: Date.now() })
+}
+
+function getPendingToolDocumentWrite(tabId: string): {
+  content: string
+  baseContent: string
+  action: string
+  updatedAt: number
+} | null {
+  return pendingToolDocumentWrites.get(tabId) || null
+}
+
+function clearPendingToolDocumentWrite(tabId: string): void {
+  if (!tabId) return
+  pendingToolDocumentWrites.delete(tabId)
+}
+
 // Per-tab epoch: bumped whenever a pending widget write for that tab should be
 // treated as cancelled. runUpdate captures the epoch at enqueue time; before
 // committing to the store it re-checks and bails if the epoch has advanced.
@@ -981,12 +1007,47 @@ async function loadDocumentContentForEditing(path: string): Promise<{ success: b
   }
 }
 
+function sanitizeAutosaveName(title: string): string {
+  const cleaned = String(title || '新文档')
+    .replace(/[\\/:*?"<>|]/g, '-')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 80)
+  return cleaned || '新文档'
+}
+
+function getHarnessAutosavePath(title: string): string | null {
+  if (typeof window === 'undefined') return null
+  const harnessEnabled = Boolean((window as unknown as { __READY_AGENT_TEST__?: unknown }).__READY_AGENT_TEST__)
+    || window.localStorage?.getItem('ready.agentPanelTest') === '1'
+    || window.localStorage?.getItem('ready:agent:test') === '1'
+  if (!harnessEnabled) return null
+  const root = String(window.localStorage?.getItem('ready-workspace-root') || '').trim()
+  if (!root || !root.startsWith('/')) return null
+  return `${root.replace(/\/+$/, '')}/${sanitizeAutosaveName(title)}-${Date.now()}.md`
+}
+
 async function saveTabWithDialog(tabId: string, title: string, content: string, existingPath?: string | null): Promise<{
   success: boolean
   path?: string
   error?: string
 }> {
-  if (typeof window === 'undefined' || !window.electronAPI?.document?.saveFileAs) {
+  if (typeof window === 'undefined') {
+    return { success: false, error: '当前环境不支持另存为' }
+  }
+
+  const harnessAutosavePath = existingPath ? null : getHarnessAutosavePath(title)
+  if (harnessAutosavePath && window.electronAPI?.document?.writeFile) {
+    const result = await window.electronAPI.document.writeFile(harnessAutosavePath, content)
+    if (!result.success) return { success: false, error: result.error || '测试模式自动保存失败' }
+    const docStore = useDocTabs.getState()
+    docStore.setTabPath(tabId, harnessAutosavePath)
+    docStore.renameTab(tabId, harnessAutosavePath.split('/').pop() || title || '新文档')
+    docStore.markTabSaved(tabId)
+    return { success: true, path: harnessAutosavePath }
+  }
+
+  if (!window.electronAPI?.document?.saveFileAs) {
     return { success: false, error: '当前环境不支持另存为' }
   }
 
@@ -1100,6 +1161,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
 
     currentStore.updateTabContent(opened.id, loaded.content)
     currentStore.markTabSaved(opened.id)
+    clearPendingToolDocumentWrite(opened.id)
     return `已打开并载入文档：${path}（${loaded.content.length} 字）`
   }
 
@@ -1126,6 +1188,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     if (!tab) return '没有可写入的文档标签'
     if (tab.content === content) return `内容未变化，已跳过写入：${tab.title}`
     docStore.setTabContent(tab.id, content)
+    rememberPendingToolDocumentWrite(tab.id, content, 'set_content', tab.content)
     return `已写入内容到：${tab.title}`
   }
 
@@ -1139,12 +1202,15 @@ export async function performDocAction(action: DocActionPayload): Promise<string
       if (mergedWidgets.error) return `widget 写入已拒绝：${mergedWidgets.error}`
       if (mergedWidgets.content === tab.content) return `widget 内容未变化，已跳过：${tab.title}`
       docStore.setTabContent(tab.id, mergedWidgets.content)
+      rememberPendingToolDocumentWrite(tab.id, mergedWidgets.content, 'append_content', tab.content)
       if (mergedWidgets.updated > 0) {
         return `已更新 ${mergedWidgets.updated} 个 widget 到：${tab.title}${mergedWidgets.removedDuplicates > 0 ? `（已清理 ${mergedWidgets.removedDuplicates} 个重复块）` : ''}`
       }
       return `已追加 ${mergedWidgets.inserted} 个 widget 到：${tab.title}`
     }
-    docStore.appendTabContent(tab.id, content)
+    const nextContent = `${tab.content}${content}`
+    docStore.setTabContent(tab.id, nextContent)
+    rememberPendingToolDocumentWrite(tab.id, nextContent, 'append_content', tab.content)
     return `已追加内容到：${tab.title}`
   }
 
@@ -1177,6 +1243,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
       return `widget 内容未变化，已跳过：${tab.title}（${skip.summary}）`
     }
     docStore.setTabContent(tab.id, inserted.content)
+    rememberPendingToolDocumentWrite(tab.id, inserted.content, 'insert_widget', tab.content)
     if (inserted.updatedExisting) {
       return `已更新同标题 widget（${tab.title}）${inserted.removedDuplicates ? `，并清理 ${inserted.removedDuplicates} 个重复块` : ''}`
     }
@@ -1281,6 +1348,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
             return `update_widget 已取消：在写入前被更高优先级的抢占取消`
           }
           docStore.setTabContent(liveTab.id, updated.content)
+          rememberPendingToolDocumentWrite(liveTab.id, updated.content, 'update_widget', liveContent)
           emitWidgetCommitted(liveTab.id, updated.widget?.id || record.id)
           return `已更新 widget（字段级 patch）：${nextTitle || updated.widget?.title || target}（${liveTab.title}）`
         } catch (error) {
@@ -1301,6 +1369,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
         return `update_widget 已取消：在写入前被更高优先级的抢占取消`
       }
       docStore.setTabContent(liveTab.id, updated.content)
+      rememberPendingToolDocumentWrite(liveTab.id, updated.content, 'update_widget', liveContent)
       emitWidgetCommitted(liveTab.id, updated.widget?.id || target)
       return `已更新 widget：${nextTitle || updated.widget?.title || target}（${liveTab.title}）`
     }
@@ -1334,6 +1403,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
       return `widget 内容未变化，已跳过：${tab.title}（${skip.summary}）`
     }
     docStore.setTabContent(tab.id, removed.content)
+    rememberPendingToolDocumentWrite(tab.id, removed.content, 'remove_widget', tab.content)
     return `已删除 widget：${removed.widget?.title || target}（${tab.title}）`
   }
 
@@ -1347,6 +1417,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     const nextContent = tab.content.split(from).join(to)
     if (nextContent === tab.content) return `替换后内容无变化，已跳过：${tab.title}`
     docStore.setTabContent(tab.id, nextContent)
+    rememberPendingToolDocumentWrite(tab.id, nextContent, 'replace_text', tab.content)
     return `已替换文本（${tab.title}）`
   }
 
@@ -1361,6 +1432,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     if (!replaced.found) return replaced.error || '未匹配到目标片段'
     if (replaced.content === tab.content) return `精准替换后内容无变化，已跳过：${tab.title}`
     docStore.setTabContent(tab.id, replaced.content)
+    rememberPendingToolDocumentWrite(tab.id, replaced.content, 'replace_exact', tab.content)
     return `已精准替换第 ${replaced.occurrenceUsed || 1} 处目标片段（${tab.title}）`
   }
 
@@ -1373,6 +1445,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     if (!formatted.found) return `未找到章节“${sectionTitle}”，未做改动`
     if (formatted.content === tab.content) return `章节“${formatted.matchedTitle || sectionTitle}”已是目标格式，未做改动`
     docStore.setTabContent(tab.id, formatted.content)
+    rememberPendingToolDocumentWrite(tab.id, formatted.content, 'format_section', tab.content)
     return `已优化章节格式（${formatted.matchedTitle || sectionTitle}）`
   }
 
@@ -1386,6 +1459,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     if (!rewritten.found) return `未找到章节“${sectionTitle}”，未做改动`
     if (rewritten.content === tab.content) return `章节“${rewritten.matchedTitle || sectionTitle}”内容无变化，未做改动`
     docStore.setTabContent(tab.id, rewritten.content)
+    rememberPendingToolDocumentWrite(tab.id, rewritten.content, 'rewrite_section', tab.content)
     return `已重写章节（${rewritten.matchedTitle || sectionTitle}）`
   }
 
@@ -1396,13 +1470,31 @@ export async function performDocAction(action: DocActionPayload): Promise<string
       const saved = await saveTabWithDialog(tab.id, tab.title, tab.content, null)
       return saved.success ? `已另存文档：${saved.path}` : `保存失败：${saved.error || tab.title}`
     }
-    if (!tab.isDirty) return `文档未改动，已跳过保存：${tab.path}`
     const saveBlockedReason = getDirectSaveBlockReason(tab.path)
     if (saveBlockedReason) return saveBlockedReason
     if (typeof window === 'undefined' || !window.electronAPI?.document?.writeFile) return '当前环境不支持保存文档'
-    const result = await window.electronAPI.document.writeFile(tab.path, tab.content)
+    const pendingToolWrite = getPendingToolDocumentWrite(tab.id)
+    const shouldUsePendingToolWrite = Boolean(
+      pendingToolWrite && (tab.content === pendingToolWrite.content || tab.content === pendingToolWrite.baseContent),
+    )
+    const contentToSave = shouldUsePendingToolWrite && pendingToolWrite ? pendingToolWrite.content : tab.content
+    if (!tab.isDirty || shouldUsePendingToolWrite) {
+      const disk = await window.electronAPI.document.readFile?.(tab.path).catch(() => null)
+      const diskContent = disk && typeof disk === 'object' && 'success' in disk && disk.success
+        ? String(disk.content || '')
+        : null
+      if (diskContent === null || diskContent === contentToSave) {
+        if (pendingToolWrite) clearPendingToolDocumentWrite(tab.id)
+        return `文档未改动，已跳过保存：${tab.path}`
+      }
+    }
+    const result = await window.electronAPI.document.writeFile(tab.path, contentToSave)
     if (!result.success) return `保存失败：${result.error || tab.title}`
+    if (contentToSave !== tab.content) {
+      docStore.setTabContent(tab.id, contentToSave)
+    }
     docStore.markTabSaved(tab.id)
+    clearPendingToolDocumentWrite(tab.id)
     return `已保存文档：${tab.path}`
   }
 

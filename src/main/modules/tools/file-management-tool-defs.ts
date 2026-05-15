@@ -44,6 +44,12 @@ export const FILE_MANAGEMENT_TOOLS: FileManagementToolDef[] = [
     params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.file_locate) as ToolParam[],
   },
   {
+    name: 'file_read_excerpt',
+    description:
+      '读取 workspace 内文档正文片段。可传 anchor 读取章节，或传 lineStart / lineEnd 读取行号范围；用于基于原文的总结、分析、改写和关系梳理。',
+    params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.file_read_excerpt) as ToolParam[],
+  },
+  {
     name: 'file_get_backlinks',
     description: '列出引用目标文档的所有来源文件（wikilink 反向链接）。',
     params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.file_get_backlinks) as ToolParam[],

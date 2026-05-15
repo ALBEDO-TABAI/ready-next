@@ -14,6 +14,7 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -91,6 +92,52 @@ test('vnext entry script and referenced docs are bundled at expected paths', () 
   )
 })
 
+test('audiovisual raw-prompt evidence rule caps to available scene count', () => {
+  const script = `
+import json
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path.cwd() / "scripts"))
+from audiovisual.reporting.template_engine import build_audiovisual_body_prompt
+
+data = {
+  "scenes": [{
+    "scene_number": 1,
+    "duration_seconds": 30,
+    "description": "全黑画面",
+    "weighted_score": 1,
+    "selection": "[DISCARD]",
+    "scores": {"impact": 1},
+    "storyboard": {"visual_style": "黑屏"}
+  }],
+  "classification_result": {"classification": {"type": "experimental"}},
+  "audiovisual_route": {"framework": "experimental"}
+}
+route = {
+  "framework": "experimental",
+  "route_label": "Experimental",
+  "child_type": "experimental",
+  "reference": "test"
+}
+spec = build_audiovisual_body_prompt(data, route)
+print(json.dumps({
+  "min": spec["validation_rules"]["min_scene_evidence_per_section"],
+  "has_one": "至少引用 **1** 个不同的 Scene 编号" in spec["user_message"],
+  "has_three": "至少引用 **3** 个不同的 Scene 编号" in spec["user_message"],
+  "source": spec["source"]
+}, ensure_ascii=False))
+`
+  const raw = execFileSync('python3', ['-c', script], {
+    cwd: SKILL_DIR,
+    encoding: 'utf8',
+  })
+  const result = JSON.parse(raw)
+  assert.equal(result.source, 'raw_prompt')
+  assert.equal(result.min, 1)
+  assert.equal(result.has_one, true)
+  assert.equal(result.has_three, false)
+})
+
 test('SKILL.md frontmatter declares name / description / when-to-use per Claude Skill protocol', () => {
   const skillMd = readFileSync(join(SKILL_DIR, 'SKILL.md'), 'utf-8')
   const frontmatterMatch = skillMd.match(/^---\n([\s\S]*?)\n---/)
@@ -117,7 +164,17 @@ test('orchestrator inline-injects SKILL.md, arms primitive hint, creates no skil
         runtime: 'reference',
         params: [],
       },
+      {
+        name: 'video_expert_pipeline',
+        visibility: 'internal',
+        runtime: 'python',
+        params: [],
+      },
     ],
+    childLoop: {
+      version: 1,
+      actions: ['video_expert_pipeline'],
+    },
   }
 
   // Phase 4: listExecutions dep removed from orchestrator; no execution row
@@ -126,9 +183,11 @@ test('orchestrator inline-injects SKILL.md, arms primitive hint, creates no skil
   const orchestrator = new SkillContextOrchestrator({
     extractPrimaryUserInstruction: (raw) => raw,
     listSkills: () => [skillState],
-    resolveSkillToolByAction: () => ({
-      name: 'skill_video_expert_analyzer_read_skill',
-      action: 'read_skill',
+    resolveSkillToolByAction: (_skillId, action) => ({
+      name: action === 'video_expert_pipeline'
+        ? 'skill_video_expert_pipeline'
+        : 'skill_video_expert_analyzer_read_skill',
+      action,
       params: [],
     }) as any,
   })
@@ -152,6 +211,8 @@ test('orchestrator inline-injects SKILL.md, arms primitive hint, creates no skil
   const injected = session.messages[0] as { role: string; content: string }
   assert.equal(injected.role, 'system')
   assert.ok(injected.content.includes('已加载技能'), 'injection header present')
+  assert.ok(injected.content.includes('skill_video_expert_pipeline'), 'child-loop typed action is named in guidance')
+  assert.ok(injected.content.includes('不要用 skill_start_detached'), 'child-loop skill must not be steered to detached primitive')
   assert.ok(injected.content.includes('video-expert-analyzer'), 'skill id rendered')
   // vnext SKILL.md keywords that prove the body was inlined (not truncated out).
   assert.ok(

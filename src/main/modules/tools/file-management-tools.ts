@@ -1,4 +1,4 @@
-import { readFile, rename, stat } from 'fs/promises'
+import { readFile, realpath, rename, stat } from 'fs/promises'
 import { dirname, isAbsolute, join, relative, resolve as resolvePath } from 'path'
 import type { SearchEngine } from '../search-engine/indexer'
 import { getSearchEngine } from '../search-engine/ipc-handler'
@@ -20,6 +20,9 @@ interface FileManagementToolContext {
   searchEngine?: SearchEngine | null
   abortSignal?: AbortSignal
 }
+
+const DEFAULT_EXCERPT_CHARS = 32_000
+const MAX_EXCERPT_CHARS = 40_000
 
 function assertInsideWorkspace(target: string, engine: SearchEngine): { ok: true; root: string } | { ok: false; error: string } {
   if (!isAbsolute(target)) {
@@ -56,6 +59,8 @@ export async function executeFileManagementTool(
       return runFileSearch(args, engine)
     case 'file_locate':
       return runFileLocate(args, engine)
+    case 'file_read_excerpt':
+      return runFileReadExcerpt(args, engine)
     case 'file_get_backlinks':
       return runFileGetBacklinks(args, engine)
     case 'file_get_graph':
@@ -153,6 +158,200 @@ async function runFileLocate(args: Record<string, unknown>, engine: SearchEngine
     return toJsonString({ ok: true, path, line: null, sectionTitle: null, note: 'anchor not found' })
   } catch (error) {
     return toJsonString({ ok: false, error: error instanceof Error ? error.message : String(error) })
+  }
+}
+
+async function resolveReadableDocumentPath(
+  rawPath: string,
+  engine: SearchEngine,
+): Promise<
+  | { ok: true; path: string; readPath: string; root: string }
+  | { ok: false; output: Record<string, unknown> }
+> {
+  let path = rawPath.trim()
+  if (!path) return { ok: false, output: { ok: false, error: 'path is required' } }
+  const repo = engine.getRepository()
+  const resolved = resolveIndexedDocumentCandidate(repo.getConnection(), path)
+  let sourceType = 'document'
+  if (resolved.kind === 'found') {
+    path = resolved.row.path
+    sourceType = resolved.row.source_type || 'document'
+  } else if (resolved.kind === 'ambiguous') {
+    return { ok: false, output: { ok: false, error: 'path is ambiguous', candidates: resolved.candidates } }
+  } else {
+    const guard = assertInsideWorkspace(path, engine)
+    if (!guard.ok) return { ok: false, output: { ok: false, error: 'path not in index', detail: guard.error } }
+    await engine.indexDocument(guard.root, path)
+  }
+
+  if (sourceType !== 'document') {
+    return { ok: false, output: { ok: false, path, sourceType, error: 'non-filesystem source; open via host UI' } }
+  }
+
+  const guard = assertInsideWorkspace(path, engine)
+  if (!guard.ok) return { ok: false, output: { ok: false, error: guard.error } }
+
+  const rootRealPath = await realpath(guard.root)
+  const targetRealPath = await realpath(path)
+  const rootPrefix = rootRealPath.endsWith('/') ? rootRealPath : `${rootRealPath}/`
+  if (targetRealPath !== rootRealPath && !targetRealPath.startsWith(rootPrefix)) {
+    return {
+      ok: false,
+      output: {
+        ok: false,
+        path,
+        error: 'path escapes workspace via symlink',
+      },
+    }
+  }
+  return { ok: true, path, readPath: targetRealPath, root: guard.root }
+}
+
+function headingInfo(line: string): { level: number; title: string } | null {
+  const match = /^(#{1,6})\s+(.+?)\s*$/.exec(line)
+  if (!match) return null
+  return { level: match[1].length, title: match[2].trim() }
+}
+
+function clampLine(value: unknown, fallback: number, lineCount: number): number {
+  const numeric = typeof value === 'number' && Number.isFinite(value) ? Math.floor(value) : fallback
+  return Math.max(1, Math.min(lineCount, numeric))
+}
+
+function boundedExcerpt(
+  lines: string[],
+  startIndex: number,
+  endExclusive: number,
+  maxChars: number,
+): { content: string; lineEnd: number; truncated: boolean; nextLine: number | null } {
+  let content = ''
+  let endIndex = startIndex - 1
+  let truncated = false
+  for (let i = startIndex; i < endExclusive; i += 1) {
+    const addition = content ? `\n${lines[i]}` : lines[i]
+    if (content.length + addition.length > maxChars) {
+      const remaining = maxChars - content.length
+      if (remaining > 0 && !content) {
+        content = addition.slice(0, remaining)
+        endIndex = i
+      }
+      truncated = true
+      break
+    }
+    content += addition
+    endIndex = i
+  }
+  if (endIndex < startIndex) endIndex = startIndex
+  return {
+    content,
+    lineEnd: endIndex + 1,
+    truncated,
+    nextLine: truncated && endIndex + 2 <= lines.length ? endIndex + 2 : null,
+  }
+}
+
+function resolveExcerptRange(
+  lines: string[],
+  args: Record<string, unknown>,
+): { ok: true; startIndex: number; endExclusive: number; anchorLine: number | null; sectionTitle: string | null }
+  | { ok: false; output: Record<string, unknown> } {
+  const lineCount = Math.max(1, lines.length)
+  const hasExplicitRange = typeof args.lineStart === 'number' || typeof args.lineEnd === 'number'
+  const anchor = typeof args.anchor === 'string' ? args.anchor.trim() : ''
+  if (hasExplicitRange) {
+    const start = clampLine(args.lineStart, 1, lineCount)
+    const end = clampLine(args.lineEnd, start, lineCount)
+    if (end < start) {
+      return { ok: false, output: { ok: false, error: 'lineEnd must be greater than or equal to lineStart' } }
+    }
+    return { ok: true, startIndex: start - 1, endExclusive: end, anchorLine: null, sectionTitle: null }
+  }
+
+  if (!anchor) {
+    return { ok: true, startIndex: 0, endExclusive: lines.length, anchorLine: null, sectionTitle: null }
+  }
+
+  const anchorLower = anchor.toLowerCase()
+  let foundIndex = -1
+  let foundHeading: { level: number; title: string } | null = null
+  for (let i = 0; i < lines.length; i += 1) {
+    const heading = headingInfo(lines[i])
+    if (heading && (heading.title.toLowerCase().includes(anchorLower) || lines[i].toLowerCase().includes(anchorLower))) {
+      foundIndex = i
+      foundHeading = heading
+      break
+    }
+  }
+  if (foundIndex < 0) {
+    for (let i = 0; i < lines.length; i += 1) {
+      if (lines[i].toLowerCase().includes(anchorLower)) {
+        foundIndex = i
+        break
+      }
+    }
+  }
+  if (foundIndex < 0) {
+    return { ok: false, output: { ok: false, error: 'anchor not found', anchor } }
+  }
+
+  let endExclusive = lines.length
+  if (foundHeading) {
+    for (let i = foundIndex + 1; i < lines.length; i += 1) {
+      const heading = headingInfo(lines[i])
+      if (heading && heading.level <= foundHeading.level) {
+        endExclusive = i
+        break
+      }
+    }
+  } else {
+    endExclusive = Math.min(lines.length, foundIndex + 80)
+  }
+  return {
+    ok: true,
+    startIndex: foundIndex,
+    endExclusive,
+    anchorLine: foundIndex + 1,
+    sectionTitle: foundHeading?.title || null,
+  }
+}
+
+async function runFileReadExcerpt(args: Record<string, unknown>, engine: SearchEngine): Promise<string> {
+  const rawPath = typeof args.path === 'string' ? args.path : ''
+  const resolved = await resolveReadableDocumentPath(rawPath, engine)
+  if (!resolved.ok) return toJsonString(resolved.output)
+
+  try {
+    const content = await readFile(resolved.readPath, 'utf-8')
+    const lines = content.split(/\r?\n/)
+    const range = resolveExcerptRange(lines, args)
+    if (!range.ok) return toJsonString({ ...range.output, path: resolved.path })
+    const maxChars = Math.max(
+      1,
+      Math.min(
+        MAX_EXCERPT_CHARS,
+        typeof args.maxChars === 'number' && Number.isFinite(args.maxChars)
+          ? Math.floor(args.maxChars)
+          : DEFAULT_EXCERPT_CHARS,
+      ),
+    )
+    const excerpt = boundedExcerpt(lines, range.startIndex, range.endExclusive, maxChars)
+    return toJsonString({
+      ok: true,
+      path: resolved.path,
+      lineStart: range.startIndex + 1,
+      lineEnd: excerpt.lineEnd,
+      anchorLine: range.anchorLine,
+      sectionTitle: range.sectionTitle,
+      truncated: excerpt.truncated,
+      nextLine: excerpt.nextLine,
+      content: excerpt.content,
+    })
+  } catch (error) {
+    // silent-catch: tool dispatch surface — the error message is serialized into the JSON
+    // string returned to the LLM as the tool result, which is the surfaced channel for
+    // tool errors. No separate metric/log: this matches how other file_management tools
+    // signal failure to the model.
+    return toJsonString({ ok: false, path: resolved.path, error: error instanceof Error ? error.message : String(error) })
   }
 }
 

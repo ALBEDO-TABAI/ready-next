@@ -8,6 +8,7 @@ import test from 'node:test'
 import {
   FileSearchSchema,
   FileLocateSchema,
+  FileReadExcerptSchema,
   FileGetBacklinksSchema,
   FileGetGraphSchema,
   FileClassifySchema,
@@ -27,6 +28,17 @@ test('FileLocateSchema requires path, anchor optional', () => {
   assert.equal(FileLocateSchema.safeParse({ path: '/x' }).success, true)
   assert.equal(FileLocateSchema.safeParse({ path: '/x', anchor: 'intro' }).success, true)
   assert.equal(FileLocateSchema.safeParse({}).success, false)
+})
+
+test('FileReadExcerptSchema requires path and accepts anchor or line ranges', () => {
+  assert.equal(FileReadExcerptSchema.safeParse({ path: '/x' }).success, true)
+  assert.equal(FileReadExcerptSchema.safeParse({ path: '/x', anchor: '第二章' }).success, true)
+  assert.equal(
+    FileReadExcerptSchema.safeParse({ path: '/x', lineStart: 10, lineEnd: 30, maxChars: 12000 }).success,
+    true,
+  )
+  assert.equal(FileReadExcerptSchema.safeParse({}).success, false)
+  assert.equal(FileReadExcerptSchema.safeParse({ path: '/x', lineStart: '10' }).success, false)
 })
 
 test('FileGetBacklinksSchema requires path', () => {

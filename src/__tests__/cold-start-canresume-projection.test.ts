@@ -15,6 +15,28 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { deriveTaskCardRuntimeState } from '../renderer/modules/agent/taskCardViewModel'
+import { deriveTaskProjectionCanResume } from '../main/modules/agent-control/task-projection-resume'
+import type { TaskProjectionRecord } from '../main/modules/agent-control/run-contracts'
+
+function projection(overrides: Partial<TaskProjectionRecord>): TaskProjectionRecord {
+  return {
+    taskId: 'task-q',
+    scopeId: 'scope-q',
+    runId: 'run-q',
+    taskType: 'skill',
+    module: 'skill',
+    taskTitle: 'VEA',
+    status: 'blocked',
+    interactionState: 'suspended',
+    waitingFor: 'none',
+    steps: [],
+    resumableActions: ['continue'],
+    continuationRef: { childRunId: 'child-q' },
+    createdAt: '2026-05-08T00:00:00.000Z',
+    updatedAt: '2026-05-08T00:00:00.000Z',
+    ...overrides,
+  }
+}
 
 test('cold-start canResume=false: continue/retry actions are stripped', () => {
   // Empty-shell projection: status='blocked', resumableActions includes
@@ -148,6 +170,24 @@ test('Q.6 contract: live projection (childRunId) → canResume=true after derive
     runStatePath: null,
   }
   assert.equal(canResumeWithFs(live), true)
+})
+
+test('Q.6 contract: done projection with artifact-only action → canResume=false after derive', () => {
+  const record = deriveTaskProjectionCanResume(projection({
+    status: 'done',
+    interactionState: 'suspended',
+    resumableActions: ['open_artifact'],
+  }))
+  assert.equal(record.canResume, false)
+})
+
+test('Q.6 contract: blocked projection with continue action → canResume=true after derive', () => {
+  const record = deriveTaskProjectionCanResume(projection({
+    status: 'blocked',
+    interactionState: 'suspended',
+    resumableActions: ['continue', 'cancel'],
+  }))
+  assert.equal(record.canResume, true)
 })
 
 test('Q.6 contract: ghost path-pair (paths set but fs absent) → canResume=false', async () => {

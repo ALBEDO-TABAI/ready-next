@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict'
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 
 import {
@@ -234,6 +237,69 @@ test('agent sdk runtime exposes Ready tool definitions and preserves structured 
     taskTitle: 'Research',
     taskSummary: 'Search done',
   })
+})
+
+test('agent sdk runtime buffers native text before recovering XML tool calls', async () => {
+  const toolDefinition = createToolDefinition({ description: 'Search the web' })
+  const outputEvents: Array<Record<string, unknown>> = []
+  const calls: Array<Record<string, unknown>> = []
+  let runCount = 0
+  const runtime = createRuntime({
+    loadAIConfig: () => ({
+      ok: true,
+      reason: 'present',
+      config: {
+        ...fakeConfig,
+        provider: 'openai-compatible',
+        baseUrl: 'https://token-plan-sgp.xiaomimimo.com/anthropic',
+        model: 'mimo-v2.5',
+        agentProtocol: 'anthropic',
+      },
+    }),
+    listToolDefinitions: () => [toolDefinition],
+    executeToolCall: async (_toolName, args) => {
+      calls.push(args)
+      return createToolExecutionOutput('found result', {
+        shape: 'json',
+        data: { ok: true },
+      })
+    },
+    runAgent: async ({ onTextDelta }) => {
+      runCount += 1
+      if (runCount === 1) {
+        const leaked = [
+          'Now I will search.',
+          '<tool_call>',
+          '<function=web_search>',
+          '<parameter=query>OpenAI Agents SDK</parameter>',
+          '</function>',
+          '</tool_call>',
+        ].join('\n')
+        onTextDelta(leaked)
+        return { finalText: leaked }
+      }
+      onTextDelta('研究完成')
+      return { finalText: '研究完成' }
+    },
+  })
+  runtime.on('output', (event) => outputEvents.push(event))
+  runtime.newSession('butler::scope-xml-buffer', 'system prompt')
+
+  const result = await runtime.sendMessage('butler::scope-xml-buffer', '查一下资料', 'run-xml-buffer', {
+    publicSessionId: 'scope-xml-buffer',
+    taskId: 'task-xml-buffer',
+  })
+
+  assert.equal(result.success, true)
+  assert.equal(runCount, 2)
+  assert.deepEqual(calls, [{ query: 'OpenAI Agents SDK' }])
+  const visibleText = outputEvents
+    .filter((event) => event.type === 'text')
+    .map((event) => String(event.chunk || ''))
+    .join('\n')
+  assert.doesNotMatch(visibleText, /<tool_call>|<function=|<parameter=/)
+  assert.doesNotMatch(visibleText, /Now I will search/)
+  assert.match(visibleText, /研究完成/)
 })
 
 test('agent sdk runtime emits tool trace truth and registers run cleanup', async () => {
@@ -538,6 +604,1383 @@ test('agent sdk runtime carries compatible reasoning content across tool turns',
   assert.equal(requests.length, 2)
 })
 
+test('agent sdk runtime carries anthropic thinking blocks across tool turns', async () => {
+  const toolDefinition = createToolDefinition({
+    name: 'file_locate',
+    groupId: 'file',
+    domain: 'file',
+    kind: 'read',
+    description: 'Locate a referenced file',
+    schema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string' },
+      },
+      required: ['path'],
+      additionalProperties: false,
+    },
+  })
+  const requests: Array<Record<string, unknown>> = []
+  const runtime = new AgentSdkRuntime({
+    loadAIConfig: () => ({
+      ok: true,
+      reason: 'present',
+      config: {
+        ...fakeConfig,
+        provider: 'openai-compatible',
+        baseUrl: 'https://token-plan-sgp.xiaomimimo.com/anthropic',
+        model: 'mimo-v2.5',
+        agentProtocol: 'anthropic',
+        toolUseMode: 'on',
+        thinkingMode: 'on',
+      },
+    }),
+    listToolDefinitions: () => [toolDefinition],
+    executeToolCall: async () => createToolExecutionOutput('定位失败：path_missing', {
+      shape: 'json',
+      data: { ok: false, error: 'path_missing' },
+    }),
+    fetchWithTimeout: async (url, init) => {
+      requests.push({
+        url,
+        body: JSON.parse(String(init.body || '{}')) as Record<string, unknown>,
+      })
+      if (requests.length === 1) {
+        return new Response(JSON.stringify({
+          id: 'msg-mimo-anthropic-1',
+          role: 'assistant',
+          type: 'message',
+          content: [
+            {
+              type: 'thinking',
+              thinking: '需要先定位文件中的第 2、3 章。',
+              signature: 'thinking-signature-1',
+            },
+            {
+              type: 'tool_use',
+              id: 'call-mimo-anthropic-1',
+              name: 'file_locate',
+              input: { path: '白痴.md' },
+            },
+          ],
+          stop_reason: 'tool_use',
+          usage: { input_tokens: 10, output_tokens: 4 },
+        }), { status: 200 })
+      }
+      const body = requests[1].body as { messages?: Array<Record<string, unknown>> }
+      const assistantTurn = body.messages?.find((message) => (
+        message.role === 'assistant' && Array.isArray(message.content)
+      ))
+      const content = assistantTurn?.content as Array<Record<string, unknown>> | undefined
+      assert.equal(content?.[0]?.type, 'thinking')
+      assert.equal(content?.[0]?.thinking, '需要先定位文件中的第 2、3 章。')
+      assert.equal(content?.[0]?.signature, 'thinking-signature-1')
+      assert.equal(content?.[1]?.type, 'tool_use')
+      assert.equal(content?.[1]?.id, 'call-mimo-anthropic-1')
+      return new Response(JSON.stringify({
+        id: 'msg-mimo-anthropic-2',
+        role: 'assistant',
+        type: 'message',
+        content: [{ type: 'text', text: '我没找到该文件，请重新选择附件。' }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 12, output_tokens: 6 },
+      }), { status: 200 })
+    },
+  })
+  runtime.newSession('butler::scope-mimo-anthropic', 'system prompt')
+
+  const result = await runtime.sendMessage('butler::scope-mimo-anthropic', '读取白痴.md', 'run-mimo-anthropic', {
+    publicSessionId: 'scope-mimo-anthropic',
+    taskId: 'task-mimo-anthropic',
+  })
+
+  assert.equal(result.success, true)
+  assert.equal(result.finalText, '我没找到该文件，请重新选择附件。')
+  assert.deepEqual(result.usedTools, ['file_locate'])
+  assert.equal(requests.length, 2)
+})
+
+test('agent sdk runtime keeps browser tools hidden for local document attachment tasks', async () => {
+  const requests: Array<Record<string, unknown>> = []
+  const runtime = new AgentSdkRuntime({
+    loadAIConfig: () => ({
+      ok: true,
+      reason: 'present',
+      config: {
+        ...fakeConfig,
+        provider: 'openai-compatible',
+        baseUrl: 'https://token-plan-sgp.xiaomimimo.com/anthropic',
+        model: 'mimo-v2.5',
+        agentProtocol: 'anthropic',
+        toolUseMode: 'on',
+      },
+    }),
+    executeToolCall: async (name) => createToolExecutionOutput(
+      name === 'file_read_excerpt' ? '已读取章节正文' : 'ok',
+      { shape: 'json', data: { ok: true } },
+    ),
+    fetchWithTimeout: async (url, init) => {
+      const body = JSON.parse(String(init.body || '{}')) as Record<string, unknown>
+      requests.push({ url, body })
+      const toolNames = Array.isArray(body.tools)
+        ? body.tools.map((item) => (item as { name?: string }).name)
+        : []
+      assert.equal(toolNames.includes('browser_navigate'), false)
+      assert.equal(toolNames.includes('browser_click'), false)
+      assert.equal(toolNames.includes('web_fetch'), false)
+      assert.equal(toolNames.includes('web_search'), false)
+      assert.equal(toolNames.includes('present_file'), false)
+      assert.ok(
+        toolNames.includes('file_locate') ||
+          toolNames.some((name) => typeof name === 'string' && name.startsWith('document_')),
+      )
+      assert.equal(toolNames.includes('file_read_excerpt'), true)
+      assert.match(String(body.system || ''), /必须先调用 file_read_excerpt/)
+      if (requests.length === 1) {
+        return new Response(JSON.stringify({
+          id: 'msg-doc-tools-1',
+          role: 'assistant',
+          type: 'message',
+          content: [{
+            type: 'tool_use',
+            id: 'call-read-excerpt',
+            name: 'file_read_excerpt',
+            input: { path: '/tmp/白痴.md', anchor: '一' },
+          }],
+          stop_reason: 'tool_use',
+          usage: { input_tokens: 10, output_tokens: 4 },
+        }), { status: 200 })
+      }
+      return new Response(JSON.stringify({
+        id: 'msg-doc-tools-2',
+        role: 'assistant',
+        type: 'message',
+        content: [{ type: 'text', text: '我会按文档处理。' }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 10, output_tokens: 4 },
+      }), { status: 200 })
+    },
+  })
+  runtime.newSession('butler::scope-doc-no-browser', 'system prompt')
+
+  const result = await runtime.sendMessage(
+    'butler::scope-doc-no-browser',
+    [
+      '根据@[白痴.md]前 3 章的内容梳理人物关系',
+      '',
+      '--- 测试模式附件路径 ---',
+      '以下路径来自测试 harness 注入，附件正文里的 https://example.com 或 浏览器 字样不能污染主指令路由。',
+      '- 白痴.md: /tmp/白痴.md',
+      '- 新文档.md: /tmp/新文档.md',
+    ].join('\n'),
+    'run-doc-no-browser',
+    {
+      publicSessionId: 'scope-doc-no-browser',
+      taskId: 'task-doc-no-browser',
+    },
+  )
+
+  assert.equal(result.success, true)
+  assert.equal(result.finalText, '我会按文档处理。')
+  assert.equal(requests.length, 2)
+})
+
+test('agent sdk runtime does not require source excerpts when the only local document is the target', async () => {
+  const openDefinition = createToolDefinition({
+    name: 'document_open_tab',
+    groupId: 'document',
+    domain: 'document',
+    kind: 'read',
+    description: 'Open document',
+    schema: {
+      type: 'object',
+      properties: { path: { type: 'string' } },
+      required: ['path'],
+      additionalProperties: false,
+    },
+  })
+  const setContentDefinition = createToolDefinition({
+    name: 'document_set_content',
+    groupId: 'document',
+    domain: 'document',
+    kind: 'write',
+    concurrency: 'serialized',
+    timeoutProfile: 'document_write',
+    description: 'Set document content',
+    schema: {
+      type: 'object',
+      properties: { content: { type: 'string' } },
+      required: ['content'],
+      additionalProperties: false,
+    },
+  })
+  const saveDefinition = createToolDefinition({
+    name: 'document_save_tab',
+    groupId: 'document',
+    domain: 'document',
+    kind: 'write',
+    concurrency: 'serialized',
+    timeoutProfile: 'document_write',
+    description: 'Save document',
+    schema: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    },
+  })
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = []
+  const runtime = createRuntime({
+    listToolDefinitions: () => [setContentDefinition, openDefinition, saveDefinition],
+    executeToolCall: async (name, args) => {
+      calls.push({ name, args })
+      return createToolExecutionOutput(
+        name === 'document_open_tab'
+          ? 'opened target'
+          : name === 'document_save_tab'
+            ? 'saved target'
+            : 'updated target',
+        { shape: 'json', data: { ok: true } },
+      )
+    },
+    runAgent: async ({ tools, onTextDelta }) => {
+      const setContentTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+      await setContentTool.invoke({}, JSON.stringify({ content: '# B1 渠道销售图表\n\n老客复购最高，线下活动最低。' }))
+      onTextDelta('已根据内联数据生成图表文档。')
+      return { finalText: '已根据内联数据生成图表文档。' }
+    },
+  })
+  runtime.newSession('butler::scope-target-only-inline-data', 'system prompt')
+
+  const result = await runtime.sendMessage(
+    'butler::scope-target-only-inline-data',
+    [
+      '根据下面这组渠道销售数据，在@[B1-渠道销售图表.md]里做一个清楚的图表，并写一段结论。',
+      '搜索广告 128，社交广告 96，内容种草 74，自然流量 112，老客复购 153，线下活动 41。',
+      '',
+      '--- 附件: B1-渠道销售图表.md ---',
+      '- 路径: /tmp/B1-渠道销售图表.md',
+    ].join('\n'),
+    'run-target-only-inline-data',
+    {
+      publicSessionId: 'scope-target-only-inline-data',
+      taskId: 'task-target-only-inline-data',
+      requestEnvelope: {
+        primaryInstruction: '根据下面这组渠道销售数据，在@[B1-渠道销售图表.md]里做一个清楚的图表，并写一段结论。',
+        resources: [
+          { name: 'B1-渠道销售图表.md', path: '/tmp/B1-渠道销售图表.md' },
+        ],
+      },
+    },
+  )
+
+  assert.equal(result.success, true)
+  assert.deepEqual(calls, [
+    { name: 'document_open_tab', args: { path: '/tmp/B1-渠道销售图表.md' } },
+    { name: 'document_set_content', args: { content: '# B1 渠道销售图表\n\n老客复购最高，线下活动最低。' } },
+    { name: 'document_save_tab', args: {} },
+  ])
+})
+
+test('agent sdk runtime allows rewrite tasks that preserve meaning without preserving exact old lines', async () => {
+  const tmpRoot = await mkdtemp(join(tmpdir(), 'ready-agent-sdk-meaning-'))
+  const targetPath = join(tmpRoot, 'E2-提案草稿.md')
+  await writeFile(targetPath, '# 草稿\n\n这个方案挺好的，但是有点乱。这个目标要重复说一下，目标是提高报名。\n', 'utf-8')
+  try {
+    const openDefinition = createToolDefinition({
+      name: 'document_open_tab',
+      groupId: 'document',
+      domain: 'document',
+      kind: 'read',
+      description: 'Open document',
+      schema: {
+        type: 'object',
+        properties: { path: { type: 'string' } },
+        required: ['path'],
+        additionalProperties: false,
+      },
+    })
+    const setContentDefinition = createToolDefinition({
+      name: 'document_set_content',
+      groupId: 'document',
+      domain: 'document',
+      kind: 'write',
+      concurrency: 'serialized',
+      timeoutProfile: 'document_write',
+      description: 'Set document content',
+      schema: {
+        type: 'object',
+        properties: { content: { type: 'string' } },
+        required: ['content'],
+        additionalProperties: false,
+      },
+    })
+    const saveDefinition = createToolDefinition({
+      name: 'document_save_tab',
+      groupId: 'document',
+      domain: 'document',
+      kind: 'write',
+      concurrency: 'serialized',
+      timeoutProfile: 'document_write',
+      description: 'Save document',
+      schema: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+    })
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = []
+    const runtime = createRuntime({
+      listToolDefinitions: () => [setContentDefinition, openDefinition, saveDefinition],
+      executeToolCall: async (name, args) => {
+        calls.push({ name, args })
+        if (name === 'document_set_content') {
+          await writeFile(targetPath, String(args.content || ''), 'utf-8')
+        }
+        return createToolExecutionOutput(
+          name === 'document_open_tab'
+            ? 'opened target'
+            : name === 'document_save_tab'
+              ? 'saved target'
+              : 'updated target',
+          { shape: 'json', data: { ok: true } },
+        )
+      },
+      runAgent: async ({ tools, onTextDelta }) => {
+        const setContentTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+        await setContentTool.invoke({}, JSON.stringify({
+          content: '# 正式提案\n\n## 目标\n\n通过更清晰的活动方案提升报名转化。',
+        }))
+        onTextDelta('已改写为正式提案。')
+        return { finalText: '已改写为正式提案。' }
+      },
+    })
+    runtime.newSession('butler::scope-doc-preserve-meaning', 'system prompt')
+
+    const result = await runtime.sendMessage(
+      'butler::scope-doc-preserve-meaning',
+      [
+        '把@[E2-提案草稿.md]改得更像正式提案，保留原意，删掉重复内容。',
+        '',
+        '--- 附件: E2-提案草稿.md ---',
+        `- 路径: ${targetPath}`,
+      ].join('\n'),
+      'run-doc-preserve-meaning',
+      {
+        publicSessionId: 'scope-doc-preserve-meaning',
+        taskId: 'task-doc-preserve-meaning',
+        requestEnvelope: {
+          primaryInstruction: '把@[E2-提案草稿.md]改得更像正式提案，保留原意，删掉重复内容。',
+          resources: [
+            { name: 'E2-提案草稿.md', path: targetPath },
+          ],
+        },
+      },
+    )
+
+    assert.equal(result.success, true)
+    assert.deepEqual(calls.map((call) => call.name), [
+      'document_open_tab',
+      'document_set_content',
+      'document_save_tab',
+    ])
+  } finally {
+    await rm(tmpRoot, { recursive: true, force: true })
+  }
+})
+
+test('agent sdk runtime repairs new document turns that mutate without saving', async () => {
+  const newTabDefinition = createToolDefinition({
+    name: 'document_new_tab',
+    groupId: 'document',
+    domain: 'document',
+    kind: 'write',
+    concurrency: 'serialized',
+    timeoutProfile: 'document_write',
+    description: 'Create document',
+    schema: {
+      type: 'object',
+      properties: { title: { type: 'string' } },
+      required: ['title'],
+      additionalProperties: false,
+    },
+  })
+  const insertWidgetDefinition = createToolDefinition({
+    name: 'document_insert_widget',
+    groupId: 'document',
+    domain: 'document',
+    kind: 'write',
+    concurrency: 'serialized',
+    timeoutProfile: 'document_write',
+    description: 'Insert widget',
+    schema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string' },
+        position: { type: 'string' },
+        widgetCode: { type: 'string' },
+      },
+      required: ['title', 'widgetCode'],
+      additionalProperties: false,
+    },
+  })
+  const saveDefinition = createToolDefinition({
+    name: 'document_save_tab',
+    groupId: 'document',
+    domain: 'document',
+    kind: 'write',
+    concurrency: 'serialized',
+    timeoutProfile: 'document_write',
+    description: 'Save document',
+    schema: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    },
+  })
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = []
+  const runInputs: unknown[] = []
+  let runCount = 0
+  const runtime = createRuntime({
+    listToolDefinitions: () => [newTabDefinition, insertWidgetDefinition, saveDefinition],
+    executeToolCall: async (name, args) => {
+      calls.push({ name, args })
+      return createToolExecutionOutput(
+        name === 'document_save_tab'
+          ? '已另存文档：/tmp/A1-人物关系图.md'
+          : name === 'document_new_tab'
+            ? '已创建文档标签：A1-人物关系图'
+            : '已在文档尾部插入 widget（人物关系图）',
+        { shape: 'json', data: { ok: true } },
+      )
+    },
+    runAgent: async ({ tools, input, onTextDelta }) => {
+      runInputs.push(input)
+      runCount += 1
+      const byName = new Map(tools.map((tool) => [tool.name, tool as { invoke: (context: unknown, input: string) => Promise<string> }]))
+      if (runCount === 1) {
+        await byName.get('document_new_tab')?.invoke({}, JSON.stringify({ title: 'A1-人物关系图' }))
+        await byName.get('document_insert_widget')?.invoke({}, JSON.stringify({
+          title: '人物关系图',
+          position: 'end',
+          widgetCode: '{"type":"relationship-map"}',
+        }))
+        return { finalText: '' }
+      }
+      assert.match(String(input), /还没有调用 document_save_tab 保存/)
+      onTextDelta('我会保存当前文档。')
+      return { finalText: '我会保存当前文档。' }
+    },
+  })
+  runtime.newSession('butler::scope-new-doc-save-repair', 'system prompt')
+
+  const result = await runtime.sendMessage(
+    'butler::scope-new-doc-save-repair',
+    '新建一份《白痴》前 3 章人物关系图文档',
+    'run-new-doc-save-repair',
+    {
+      publicSessionId: 'scope-new-doc-save-repair',
+      taskId: 'task-new-doc-save-repair',
+    },
+  )
+
+  assert.equal(result.success, true)
+  assert.equal(runCount, 2)
+  assert.match(result.finalText, /已另存文档/)
+  assert.match(result.finalText, /我会保存当前文档/)
+  assert.deepEqual(calls, [
+    { name: 'document_new_tab', args: { title: 'A1-人物关系图' } },
+    {
+      name: 'document_insert_widget',
+      args: { title: '人物关系图', position: 'end', widgetCode: '{"type":"relationship-map"}' },
+    },
+    { name: 'document_save_tab', args: {} },
+  ])
+})
+
+test('agent sdk runtime anchors explicit target document instead of exposing new-tab writes', async () => {
+  const requests: Array<Record<string, unknown>> = []
+  const runtime = new AgentSdkRuntime({
+    loadAIConfig: () => ({
+      ok: true,
+      reason: 'present',
+      config: {
+        ...fakeConfig,
+        provider: 'openai-compatible',
+        baseUrl: 'https://token-plan-sgp.xiaomimimo.com/anthropic',
+        model: 'mimo-v2.5',
+        agentProtocol: 'anthropic',
+        toolUseMode: 'on',
+      },
+    }),
+    fetchWithTimeout: async (url, init) => {
+      const body = JSON.parse(String(init.body || '{}')) as Record<string, unknown>
+      requests.push({ url, body })
+      const toolNames = Array.isArray(body.tools)
+        ? body.tools.map((item) => (item as { name?: string }).name)
+        : []
+      assert.equal(toolNames.includes('document_new_tab'), false)
+      assert.equal(toolNames.includes('document_open_tab'), true)
+      assert.equal(toolNames.includes('document_save_tab'), true)
+      assert.equal(toolNames.includes('web_fetch'), false)
+      assert.equal(toolNames.includes('web_search'), false)
+      assert.match(String(body.system || ''), /\/tmp\/新文档\.md/)
+      assert.match(String(body.system || ''), /不要新建临时文档/)
+      return new Response(JSON.stringify({
+        id: 'msg-doc-target-1',
+        role: 'assistant',
+        type: 'message',
+        content: [{ type: 'text', text: '会写入目标文档。' }],
+        stop_reason: 'end_turn',
+        usage: { input_tokens: 10, output_tokens: 4 },
+      }), { status: 200 })
+    },
+  })
+  runtime.newSession('butler::scope-doc-target', 'system prompt')
+
+  const result = await runtime.sendMessage(
+    'butler::scope-doc-target',
+    [
+      '在@[新文档.md]里写入一段人物关系图占位内容',
+      '',
+      '--- 附件: 新文档.md ---',
+      '- 路径: /tmp/新文档.md',
+    ].join('\n'),
+    'run-doc-target',
+    {
+      publicSessionId: 'scope-doc-target',
+      taskId: 'task-doc-target',
+    },
+  )
+
+  assert.equal(result.success, false)
+  assert.equal(result.terminalReason, 'blocked_tool_error')
+  assert.match(result.error || '', /目标文档/)
+  assert.equal(requests.length, 2)
+})
+
+test('agent sdk runtime opens explicit target document before the first mutation', async () => {
+  const openDefinition = createToolDefinition({
+    name: 'document_open_tab',
+    groupId: 'document',
+    domain: 'document',
+    kind: 'read',
+    description: 'Open document',
+    schema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string' },
+      },
+      required: ['path'],
+      additionalProperties: false,
+    },
+  })
+  const setContentDefinition = createToolDefinition({
+    name: 'document_set_content',
+    groupId: 'document',
+    domain: 'document',
+    kind: 'write',
+    concurrency: 'serialized',
+    timeoutProfile: 'document_write',
+    description: 'Set document content',
+    schema: {
+      type: 'object',
+      properties: {
+        content: { type: 'string' },
+      },
+      required: ['content'],
+      additionalProperties: false,
+    },
+  })
+  const saveDefinition = createToolDefinition({
+    name: 'document_save_tab',
+    groupId: 'document',
+    domain: 'document',
+    kind: 'write',
+    concurrency: 'serialized',
+    timeoutProfile: 'document_write',
+    description: 'Save document',
+    schema: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    },
+  })
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = []
+  const runtime = createRuntime({
+    listToolDefinitions: () => [setContentDefinition, openDefinition, saveDefinition],
+    executeToolCall: async (name, args) => {
+      calls.push({ name, args })
+      return createToolExecutionOutput(
+        name === 'document_open_tab'
+          ? 'opened target'
+          : name === 'document_save_tab'
+            ? 'saved target'
+            : 'updated target',
+        {
+        shape: 'json',
+        data: { ok: true },
+        },
+      )
+    },
+    runAgent: async ({ tools, onTextDelta }) => {
+      const setContentTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+      await setContentTool.invoke({}, JSON.stringify({ content: '人物关系图内容', tabId: 'draft-tab' }))
+      onTextDelta('已写入目标文档')
+      return { finalText: '已写入目标文档' }
+    },
+  })
+  runtime.newSession('butler::scope-doc-auto-open', 'system prompt')
+
+  const result = await runtime.sendMessage(
+    'butler::scope-doc-auto-open',
+    [
+      '在@[新文档.md]里写入一段人物关系图占位内容',
+      '',
+      '--- 附件: 新文档.md ---',
+      '- 路径: /tmp/新文档.md',
+    ].join('\n'),
+    'run-doc-auto-open',
+    {
+      publicSessionId: 'scope-doc-auto-open',
+      taskId: 'task-doc-auto-open',
+      requestEnvelope: {
+        primaryInstruction: '在@[新文档.md]里写入一段人物关系图占位内容',
+        resources: [
+          { name: '新文档.md', path: '/tmp/新文档.md' },
+        ],
+      },
+    },
+  )
+
+  assert.equal(result.success, true)
+  assert.deepEqual(calls, [
+    { name: 'document_open_tab', args: { path: '/tmp/新文档.md' } },
+    { name: 'document_set_content', args: { content: '人物关系图内容' } },
+    { name: 'document_save_tab', args: {} },
+  ])
+})
+
+test('agent sdk runtime repairs explicit target turns that finish before writing', async () => {
+  const openDefinition = createToolDefinition({
+    name: 'document_open_tab',
+    groupId: 'document',
+    domain: 'document',
+    kind: 'read',
+    description: 'Open document',
+    schema: {
+      type: 'object',
+      properties: { path: { type: 'string' } },
+      required: ['path'],
+      additionalProperties: false,
+    },
+  })
+  const setContentDefinition = createToolDefinition({
+    name: 'document_set_content',
+    groupId: 'document',
+    domain: 'document',
+    kind: 'write',
+    concurrency: 'serialized',
+    timeoutProfile: 'document_write',
+    description: 'Set document content',
+    schema: {
+      type: 'object',
+      properties: { content: { type: 'string' } },
+      required: ['content'],
+      additionalProperties: false,
+    },
+  })
+  const saveDefinition = createToolDefinition({
+    name: 'document_save_tab',
+    groupId: 'document',
+    domain: 'document',
+    kind: 'write',
+    concurrency: 'serialized',
+    timeoutProfile: 'document_write',
+    description: 'Save document',
+    schema: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    },
+  })
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = []
+  const runInputs: unknown[] = []
+  let runCount = 0
+  const runtime = createRuntime({
+    listToolDefinitions: () => [setContentDefinition, openDefinition, saveDefinition],
+    executeToolCall: async (name, args) => {
+      calls.push({ name, args })
+      return createToolExecutionOutput(
+        name === 'document_open_tab'
+          ? 'opened target'
+          : name === 'document_save_tab'
+            ? 'saved target'
+            : 'updated target',
+        { shape: 'json', data: { ok: true } },
+      )
+    },
+    runAgent: async ({ tools, input, onTextDelta }) => {
+      runInputs.push(input)
+      runCount += 1
+      if (runCount === 1) {
+        onTextDelta('我准备写入。')
+        return { finalText: '我准备写入。' }
+      }
+      const setContentTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+      await setContentTool.invoke({}, JSON.stringify({ content: '补救写入的人物关系图' }))
+      onTextDelta('已写入目标文档。')
+      return { finalText: '已写入目标文档。' }
+    },
+  })
+  runtime.newSession('butler::scope-doc-repair-write', 'system prompt')
+
+  const result = await runtime.sendMessage(
+    'butler::scope-doc-repair-write',
+    [
+      '在@[新文档.md]里写入一段人物关系图占位内容',
+      '',
+      '--- 附件: 新文档.md ---',
+      '- 路径: /tmp/新文档.md',
+    ].join('\n'),
+    'run-doc-repair-write',
+    {
+      publicSessionId: 'scope-doc-repair-write',
+      taskId: 'task-doc-repair-write',
+      requestEnvelope: {
+        primaryInstruction: '在@[新文档.md]里写入一段人物关系图占位内容',
+        resources: [
+          { name: '新文档.md', path: '/tmp/新文档.md' },
+        ],
+      },
+    },
+  )
+
+  assert.equal(result.success, true)
+  assert.equal(runCount, 2)
+  assert.match(String(runInputs[1]), /目标文档尚未发生实际写入/)
+  assert.deepEqual(calls, [
+    { name: 'document_open_tab', args: { path: '/tmp/新文档.md' } },
+    { name: 'document_set_content', args: { content: '补救写入的人物关系图' } },
+    { name: 'document_save_tab', args: {} },
+  ])
+})
+
+test('agent sdk runtime blocks explicit target replacements that drop preserved content', async () => {
+  const tmpRoot = await mkdtemp(join(tmpdir(), 'ready-agent-sdk-preserve-'))
+  const targetPath = join(tmpRoot, 'A2-读书笔记.md')
+  const initialContent = [
+    '# 《白痴》读书笔记',
+    '',
+    '## 阅读目标',
+    '',
+    '这是一份原有笔记，请保留这一段。',
+    '',
+    '## 人物关系',
+    '',
+    '> 这里是原有占位说明，不要删除。',
+    '',
+    '## 主题观察',
+    '',
+    '原有主题观察：公爵返俄后的处境值得继续记录。',
+    '',
+  ].join('\n')
+  await writeFile(targetPath, initialContent, 'utf-8')
+  try {
+    const openDefinition = createToolDefinition({
+      name: 'document_open_tab',
+      groupId: 'document',
+      domain: 'document',
+      kind: 'read',
+      description: 'Open document',
+      schema: {
+        type: 'object',
+        properties: { path: { type: 'string' } },
+        required: ['path'],
+        additionalProperties: false,
+      },
+    })
+    const fileReadDefinition = createToolDefinition({
+      name: 'file_read_excerpt',
+      groupId: 'file_management',
+      domain: 'file',
+      kind: 'read',
+      description: 'Read excerpt',
+      schema: {
+        type: 'object',
+        properties: { path: { type: 'string' } },
+        required: ['path'],
+        additionalProperties: false,
+      },
+    })
+    const replaceDefinition = createToolDefinition({
+      name: 'document_replace_exact',
+      groupId: 'document',
+      domain: 'document',
+      kind: 'write',
+      concurrency: 'serialized',
+      timeoutProfile: 'document_write',
+      description: 'Replace exact text',
+      schema: {
+        type: 'object',
+        properties: {
+          target: { type: 'string' },
+          replacement: { type: 'string' },
+        },
+        required: ['target', 'replacement'],
+        additionalProperties: false,
+      },
+    })
+    const saveDefinition = createToolDefinition({
+      name: 'document_save_tab',
+      groupId: 'document',
+      domain: 'document',
+      kind: 'write',
+      concurrency: 'serialized',
+      timeoutProfile: 'document_write',
+      description: 'Save document',
+      schema: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+    })
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = []
+    const runtime = createRuntime({
+      listToolDefinitions: () => [fileReadDefinition, replaceDefinition, openDefinition, saveDefinition],
+      executeToolCall: async (name, args) => {
+        calls.push({ name, args })
+        if (name === 'document_replace_exact') {
+          const current = await readFile(targetPath, 'utf-8')
+          await writeFile(
+            targetPath,
+            current.replace(String(args.target || ''), String(args.replacement || '')),
+            'utf-8',
+          )
+        }
+        if (name === 'file_read_excerpt') {
+          return createToolExecutionOutput(await readFile(targetPath, 'utf-8'), {
+            shape: 'json',
+            data: { ok: true },
+          })
+        }
+        return createToolExecutionOutput(
+          name === 'document_open_tab'
+            ? 'opened target'
+            : name === 'document_save_tab'
+              ? 'saved target'
+              : 'updated target',
+          { shape: 'json', data: { ok: true } },
+        )
+      },
+      runAgent: async ({ tools, onTextDelta }) => {
+        const fileReadTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+        const replaceTool = tools[1] as { invoke: (context: unknown, input: string) => Promise<string> }
+        await fileReadTool.invoke({}, JSON.stringify({ path: targetPath }))
+        const unsafe = await replaceTool.invoke({}, JSON.stringify({
+          target: '> 这里是原有占位说明，不要删除。',
+          replacement: '> 以下人物关系基于前三章整理。',
+        }))
+        assert.match(unsafe, /原有内容/)
+        await replaceTool.invoke({}, JSON.stringify({
+          target: '> 这里是原有占位说明，不要删除。',
+          replacement: [
+            '> 这里是原有占位说明，不要删除。',
+            '',
+            '> 以下人物关系基于前三章整理。',
+          ].join('\n'),
+        }))
+        onTextDelta('已保留原文并补充内容。')
+        return { finalText: '已保留原文并补充内容。' }
+      },
+    })
+    runtime.newSession('butler::scope-doc-preserve-replace', 'system prompt')
+
+    const result = await runtime.sendMessage(
+      'butler::scope-doc-preserve-replace',
+      [
+        '把人物关系整理到@[A2-读书笔记.md]的“人物关系”这一节下面，保留原有笔记内容，不要覆盖其他章节。',
+        '',
+        '--- 附件: A2-读书笔记.md ---',
+        `- 路径: ${targetPath}`,
+      ].join('\n'),
+      'run-doc-preserve-replace',
+      {
+        publicSessionId: 'scope-doc-preserve-replace',
+        taskId: 'task-doc-preserve-replace',
+        requestEnvelope: {
+          primaryInstruction: '把人物关系整理到@[A2-读书笔记.md]的“人物关系”这一节下面，保留原有笔记内容，不要覆盖其他章节。',
+          resources: [
+            { name: 'A2-读书笔记.md', path: targetPath },
+          ],
+        },
+      },
+    )
+
+    const finalContent = await readFile(targetPath, 'utf-8')
+    assert.equal(result.success, true)
+    assert.equal(finalContent.includes('这是一份原有笔记，请保留这一段。'), true)
+    assert.equal(finalContent.includes('> 这里是原有占位说明，不要删除。'), true)
+    assert.equal(finalContent.includes('原有主题观察：公爵返俄后的处境值得继续记录。'), true)
+    assert.deepEqual(calls.map((call) => call.name), [
+      'file_read_excerpt',
+      'document_open_tab',
+      'document_replace_exact',
+      'document_save_tab',
+    ])
+  } finally {
+    await rm(tmpRoot, { recursive: true, force: true })
+  }
+})
+
+test('agent sdk runtime continues explicit target turns that admit the document is incomplete', async () => {
+  const openDefinition = createToolDefinition({
+    name: 'document_open_tab',
+    groupId: 'document',
+    domain: 'document',
+    kind: 'read',
+    description: 'Open document',
+    schema: {
+      type: 'object',
+      properties: { path: { type: 'string' } },
+      required: ['path'],
+      additionalProperties: false,
+    },
+  })
+  const setContentDefinition = createToolDefinition({
+    name: 'document_set_content',
+    groupId: 'document',
+    domain: 'document',
+    kind: 'write',
+    concurrency: 'serialized',
+    timeoutProfile: 'document_write',
+    description: 'Set document content',
+    schema: {
+      type: 'object',
+      properties: { content: { type: 'string' } },
+      required: ['content'],
+      additionalProperties: false,
+    },
+  })
+  const saveDefinition = createToolDefinition({
+    name: 'document_save_tab',
+    groupId: 'document',
+    domain: 'document',
+    kind: 'write',
+    concurrency: 'serialized',
+    timeoutProfile: 'document_write',
+    description: 'Save document',
+    schema: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    },
+  })
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = []
+  const runInputs: unknown[] = []
+  let runCount = 0
+  const runtime = createRuntime({
+    listToolDefinitions: () => [setContentDefinition, openDefinition, saveDefinition],
+    executeToolCall: async (name, args) => {
+      calls.push({ name, args })
+      return createToolExecutionOutput(
+        name === 'document_open_tab'
+          ? 'opened target'
+          : name === 'document_save_tab'
+            ? 'saved target'
+            : 'updated target',
+        { shape: 'json', data: { ok: true } },
+      )
+    },
+    runAgent: async ({ tools, input, onTextDelta }) => {
+      runInputs.push(input)
+      runCount += 1
+      const setContentTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+      if (runCount === 1) {
+        await setContentTool.invoke({}, JSON.stringify({ content: '未完成内容 ——' }))
+        onTextDelta('内容被截断了，我来补完末尾部分。')
+        return { finalText: '内容被截断了，我来补完末尾部分。' }
+      }
+      await setContentTool.invoke({}, JSON.stringify({ content: '完整内容。' }))
+      onTextDelta('已补完并保存。')
+      return { finalText: '已补完并保存。' }
+    },
+  })
+  runtime.newSession('butler::scope-doc-incomplete-continue', 'system prompt')
+
+  const result = await runtime.sendMessage(
+    'butler::scope-doc-incomplete-continue',
+    [
+      '在@[新文档.md]里写入一段人物关系图占位内容',
+      '',
+      '--- 附件: 新文档.md ---',
+      '- 路径: /tmp/新文档.md',
+    ].join('\n'),
+    'run-doc-incomplete-continue',
+    {
+      publicSessionId: 'scope-doc-incomplete-continue',
+      taskId: 'task-doc-incomplete-continue',
+      requestEnvelope: {
+        primaryInstruction: '在@[新文档.md]里写入一段人物关系图占位内容',
+        resources: [
+          { name: '新文档.md', path: '/tmp/新文档.md' },
+        ],
+      },
+    },
+  )
+
+  assert.equal(result.success, true)
+  assert.equal(runCount, 2)
+  assert.match(String(runInputs[1]), /还没补完/)
+  assert.deepEqual(calls, [
+    { name: 'document_open_tab', args: { path: '/tmp/新文档.md' } },
+    { name: 'document_set_content', args: { content: '未完成内容 ——' } },
+    { name: 'document_save_tab', args: {} },
+    { name: 'document_set_content', args: { content: '完整内容。' } },
+    { name: 'document_save_tab', args: {} },
+  ])
+})
+
+test('agent sdk runtime repairs damaged show-widget content before completing target document turns', async () => {
+  const tmpRoot = await mkdtemp(join(tmpdir(), 'ready-agent-sdk-widget-'))
+  const targetPath = join(tmpRoot, '新文档.md')
+  await writeFile(targetPath, '\n', 'utf-8')
+  try {
+    const openDefinition = createToolDefinition({
+      name: 'document_open_tab',
+      groupId: 'document',
+      domain: 'document',
+      kind: 'read',
+      description: 'Open document',
+      schema: {
+        type: 'object',
+        properties: { path: { type: 'string' } },
+        required: ['path'],
+        additionalProperties: false,
+      },
+    })
+    const setContentDefinition = createToolDefinition({
+      name: 'document_set_content',
+      groupId: 'document',
+      domain: 'document',
+      kind: 'write',
+      concurrency: 'serialized',
+      timeoutProfile: 'document_write',
+      description: 'Set document content',
+      schema: {
+        type: 'object',
+        properties: { content: { type: 'string' } },
+        required: ['content'],
+        additionalProperties: false,
+      },
+    })
+    const saveDefinition = createToolDefinition({
+      name: 'document_save_tab',
+      groupId: 'document',
+      domain: 'document',
+      kind: 'write',
+      concurrency: 'serialized',
+      timeoutProfile: 'document_write',
+      description: 'Save document',
+      schema: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+    })
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = []
+    const runInputs: unknown[] = []
+    let runCount = 0
+    const runtime = createRuntime({
+      listToolDefinitions: () => [setContentDefinition, openDefinition, saveDefinition],
+      executeToolCall: async (name, args) => {
+        calls.push({ name, args })
+        if (name === 'document_set_content') {
+          await writeFile(targetPath, String(args.content || ''), 'utf-8')
+        }
+        return createToolExecutionOutput(
+          name === 'document_open_tab'
+            ? 'opened target'
+            : name === 'document_save_tab'
+              ? 'saved target'
+              : 'updated target',
+          { shape: 'json', data: { ok: true } },
+        )
+      },
+      runAgent: async ({ tools, input, onTextDelta }) => {
+        runInputs.push(input)
+        runCount += 1
+        const setContentTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+        if (runCount === 1) {
+          await setContentTool.invoke({}, JSON.stringify({
+            content: [
+              '# 人物关系图',
+              '',
+              '```show-widget',
+              JSON.stringify({ id: 'broken', widget_code: '<svg><line x1="1"' }),
+              '```',
+            ].join('\n'),
+          }))
+          onTextDelta('已完成。')
+          return { finalText: '已完成。' }
+        }
+        await setContentTool.invoke({}, JSON.stringify({ content: '# 人物关系图\n\n文本版关系图。' }))
+        onTextDelta('已改成稳定版本并保存。')
+        return { finalText: '已改成稳定版本并保存。' }
+      },
+    })
+    runtime.newSession('butler::scope-doc-widget-repair', 'system prompt')
+
+    const result = await runtime.sendMessage(
+      'butler::scope-doc-widget-repair',
+      [
+        '在@[新文档.md]里写入一段人物关系图占位内容',
+        '',
+        '--- 附件: 新文档.md ---',
+        `- 路径: ${targetPath}`,
+      ].join('\n'),
+      'run-doc-widget-repair',
+      {
+        publicSessionId: 'scope-doc-widget-repair',
+        taskId: 'task-doc-widget-repair',
+        requestEnvelope: {
+          primaryInstruction: '在@[新文档.md]里写入一段人物关系图占位内容',
+          resources: [
+            { name: '新文档.md', path: targetPath },
+          ],
+        },
+      },
+    )
+
+    assert.equal(result.success, true)
+    assert.equal(runCount, 2)
+    assert.match(String(runInputs[1]), /show-widget/)
+    assert.deepEqual(calls.map((call) => call.name), [
+      'document_open_tab',
+      'document_set_content',
+      'document_save_tab',
+      'document_set_content',
+      'document_save_tab',
+    ])
+    assert.equal((await readFile(targetPath, 'utf-8')).includes('show-widget'), false)
+  } finally {
+    await rm(tmpRoot, { recursive: true, force: true })
+  }
+})
+
+test('agent sdk runtime treats max-turn exhaustion after a valid saved target document as complete', async () => {
+  const tmpRoot = await mkdtemp(join(tmpdir(), 'ready-agent-sdk-max-turn-'))
+  const targetPath = join(tmpRoot, 'B2-运营数据多图表报告.md')
+  await writeFile(targetPath, '# B2 运营数据多图表报告\n\n', 'utf-8')
+  try {
+    const openDefinition = createToolDefinition({
+      name: 'document_open_tab',
+      groupId: 'document',
+      domain: 'document',
+      kind: 'read',
+      description: 'Open document',
+      schema: {
+        type: 'object',
+        properties: { path: { type: 'string' } },
+        required: ['path'],
+        additionalProperties: false,
+      },
+    })
+    const setContentDefinition = createToolDefinition({
+      name: 'document_set_content',
+      groupId: 'document',
+      domain: 'document',
+      kind: 'write',
+      concurrency: 'serialized',
+      timeoutProfile: 'document_write',
+      description: 'Set document content',
+      schema: {
+        type: 'object',
+        properties: { content: { type: 'string' } },
+        required: ['content'],
+        additionalProperties: false,
+      },
+    })
+    const saveDefinition = createToolDefinition({
+      name: 'document_save_tab',
+      groupId: 'document',
+      domain: 'document',
+      kind: 'write',
+      concurrency: 'serialized',
+      timeoutProfile: 'document_write',
+      description: 'Save document',
+      schema: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+    })
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = []
+    const runtime = createRuntime({
+      listToolDefinitions: () => [setContentDefinition, openDefinition, saveDefinition],
+      executeToolCall: async (name, args) => {
+        calls.push({ name, args })
+        if (name === 'document_set_content') {
+          await writeFile(targetPath, String(args.content || ''), 'utf-8')
+        }
+        return createToolExecutionOutput(
+          name === 'document_open_tab'
+            ? 'opened target'
+            : name === 'document_save_tab'
+              ? 'saved target'
+              : 'updated target',
+          { shape: 'json', data: { ok: true } },
+        )
+      },
+      runAgent: async ({ tools }) => {
+        const setContentTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+        await setContentTool.invoke({}, JSON.stringify({
+          content: '# B2 运营数据多图表报告\n\n已生成 4 个图表，并保存关键结论。',
+        }))
+        throw new Error('Max turns (16) exceeded')
+      },
+    })
+    runtime.newSession('butler::scope-doc-max-turn-complete', 'system prompt')
+
+    const result = await runtime.sendMessage(
+      'butler::scope-doc-max-turn-complete',
+      [
+        '把多组运营数据整理到@[B2-运营数据多图表报告.md]里。',
+        '',
+        '--- 附件: B2-运营数据多图表报告.md ---',
+        `- 路径: ${targetPath}`,
+      ].join('\n'),
+      'run-doc-max-turn-complete',
+      {
+        publicSessionId: 'scope-doc-max-turn-complete',
+        taskId: 'task-doc-max-turn-complete',
+        requestEnvelope: {
+          primaryInstruction: '把多组运营数据整理到@[B2-运营数据多图表报告.md]里。',
+          resources: [
+            { name: 'B2-运营数据多图表报告.md', path: targetPath },
+          ],
+        },
+      },
+    )
+
+    assert.equal(result.success, true)
+    assert.equal(result.terminalReason, 'done')
+    assert.match(result.finalText, /已完成并保存/)
+    assert.deepEqual(calls.map((call) => call.name), [
+      'document_open_tab',
+      'document_set_content',
+      'document_save_tab',
+    ])
+  } finally {
+    await rm(tmpRoot, { recursive: true, force: true })
+  }
+})
+
+test('agent sdk runtime recovers loose XML tool calls leaked as native model text', async () => {
+  const openDefinition = createToolDefinition({
+    name: 'document_open_tab',
+    groupId: 'document',
+    domain: 'document',
+    kind: 'read',
+    description: 'Open document',
+    schema: {
+      type: 'object',
+      properties: { path: { type: 'string' } },
+      required: ['path'],
+      additionalProperties: false,
+    },
+  })
+  const setContentDefinition = createToolDefinition({
+    name: 'document_set_content',
+    groupId: 'document',
+    domain: 'document',
+    kind: 'write',
+    concurrency: 'serialized',
+    timeoutProfile: 'document_write',
+    description: 'Set document content',
+    schema: {
+      type: 'object',
+      properties: { content: { type: 'string' } },
+      required: ['content'],
+      additionalProperties: false,
+    },
+  })
+  const saveDefinition = createToolDefinition({
+    name: 'document_save_tab',
+    groupId: 'document',
+    domain: 'document',
+    kind: 'write',
+    concurrency: 'serialized',
+    timeoutProfile: 'document_write',
+    description: 'Save document',
+    schema: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    },
+  })
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = []
+  let runCount = 0
+  const runtime = createRuntime({
+    listToolDefinitions: () => [setContentDefinition, openDefinition, saveDefinition],
+    executeToolCall: async (name, args) => {
+      calls.push({ name, args })
+      return createToolExecutionOutput(
+        name === 'document_open_tab'
+          ? 'opened target'
+          : name === 'document_save_tab'
+            ? 'saved target'
+            : 'updated target',
+        { shape: 'json', data: { ok: true } },
+      )
+    },
+    runAgent: async ({ onTextDelta }) => {
+      runCount += 1
+      if (runCount === 1) {
+        const leaked = [
+          '现在写入目标文档：',
+          '<tool_call>',
+          '<function=document_set_content>',
+          '<parameter=content>XML 恢复写入的人物关系图',
+        ].join('\n')
+        onTextDelta(leaked)
+        return { finalText: leaked }
+      }
+      onTextDelta('已写入并保存。')
+      return { finalText: '已写入并保存。' }
+    },
+  })
+  runtime.newSession('butler::scope-doc-xml-recovery', 'system prompt')
+
+  const result = await runtime.sendMessage(
+    'butler::scope-doc-xml-recovery',
+    [
+      '在@[新文档.md]里写入一段人物关系图占位内容',
+      '',
+      '--- 附件: 新文档.md ---',
+      '- 路径: /tmp/新文档.md',
+    ].join('\n'),
+    'run-doc-xml-recovery',
+    {
+      publicSessionId: 'scope-doc-xml-recovery',
+      taskId: 'task-doc-xml-recovery',
+      requestEnvelope: {
+        primaryInstruction: '在@[新文档.md]里写入一段人物关系图占位内容',
+        resources: [
+          { name: '新文档.md', path: '/tmp/新文档.md' },
+        ],
+      },
+    },
+  )
+
+  assert.equal(result.success, true)
+  assert.equal(runCount, 2)
+  assert.deepEqual(calls, [
+    { name: 'document_open_tab', args: { path: '/tmp/新文档.md' } },
+    { name: 'document_set_content', args: { content: 'XML 恢复写入的人物关系图' } },
+    { name: 'document_save_tab', args: {} },
+  ])
+})
+
 test('agent sdk runtime honors Ready OpenAI-compatible responses wire API', async () => {
   const requests: Array<Record<string, unknown>> = []
   const runtime = new AgentSdkRuntime({
@@ -613,6 +2056,10 @@ test('agent sdk runtime forwards renderer-mediated tool requests', async () => {
         }
       ).requestModuleToolAction
       assert.ok(requestModuleToolAction)
+      ;(context as { emitToolAction?: (tool: string, args: Record<string, unknown>) => void }).emitToolAction?.(
+        'document.setContent',
+        args,
+      )
       const rendererResult = await requestModuleToolAction('document_set_content', args)
       return createToolExecutionOutput('document updated', {
         shape: 'json',
@@ -891,8 +2338,9 @@ test('agent sdk runtime exposes authorized skill tools for explicit skill turns'
     assert.equal(result.success, true)
     assert.equal(remembered, true)
     assert.equal(seenToolNames.includes('skill_video_expert_pipeline'), true)
-    assert.equal(seenToolNames.includes('skill_run_shell'), true)
+    assert.equal(seenToolNames.includes('skill_run_shell'), false)
     assert.equal(seenToolNames.includes('skill_inspect_run_state'), true)
+    assert.equal(seenToolNames.includes('skill_start_detached'), false)
     assert.equal(seenToolNames.includes('skill_rss_update'), false)
   } finally {
     __setSkillActionToolDefsForTests(null)
@@ -947,6 +2395,128 @@ test('agent sdk runtime threads selected skill authorization into tool execution
   assert.equal(executionAuthorization?.skillId, 'video-expert-analyzer')
   assert.deepEqual(result.usedTools, ['skill_video_expert_pipeline'])
   assert.deepEqual(result.projectionTruth?.projectionPatch, { taskTitle: 'VEA' })
+})
+
+test('agent sdk runtime carries skill contextModifier active roots into later SDK tool calls', async () => {
+  const outputDir = join(tmpdir(), 'ready-agent-sdk-active-root')
+  const pipelineDefinition = createToolDefinition({
+    name: 'skill_video_expert_pipeline',
+    groupId: 'skills',
+    domain: 'skill',
+    kind: 'job',
+    description: 'Run VEA pipeline',
+  })
+  const readArtifactDefinition = createToolDefinition({
+    name: 'skill_read_artifact',
+    groupId: 'skills',
+    domain: 'skill',
+    kind: 'read',
+    description: 'Read skill artifact',
+  })
+  let observedRoots: string[] = []
+  const runtime = createRuntime({
+    listToolDefinitions: () => [pipelineDefinition, readArtifactDefinition],
+    executeToolCall: async (name, _args, context) => {
+      if (name === 'skill_video_expert_pipeline') {
+        return createToolExecutionOutput(JSON.stringify({
+          status: 'child_launched',
+          childRunId: 'child-active-root',
+          skillId: 'video-expert-analyzer',
+          action: 'video_expert_pipeline',
+          outputDir,
+          runStatePath: join(outputDir, 'run_state.json'),
+          parentNextHint: 'wait_for_close_event',
+        }), {
+          shape: 'json',
+          data: {
+            status: 'child_launched',
+            childRunId: 'child-active-root',
+            skillId: 'video-expert-analyzer',
+            action: 'video_expert_pipeline',
+            outputDir,
+            runStatePath: join(outputDir, 'run_state.json'),
+            parentNextHint: 'wait_for_close_event',
+          },
+          contextModifier: {
+            activeFrame: {
+              activeArtifactRoots: [outputDir],
+            },
+          },
+        })
+      }
+      observedRoots = [...((context as { activeFrame?: { activeArtifactRoots?: string[] } }).activeFrame?.activeArtifactRoots || [])]
+      return createToolExecutionOutput('artifact read', { shape: 'json', data: { ok: true } })
+    },
+    runAgent: async ({ tools }) => {
+      const pipelineTool = tools.find((item) => item.name === 'skill_video_expert_pipeline') as { invoke: (context: unknown, input: string) => Promise<string> }
+      const readTool = tools.find((item) => item.name === 'skill_read_artifact') as { invoke: (context: unknown, input: string) => Promise<string> }
+      await pipelineTool.invoke({}, JSON.stringify({ url: 'fixture.mp4', outputDir }))
+      await readTool.invoke({}, JSON.stringify({ relativePath: 'scene_scores.json' }))
+      return { finalText: '已读取产物' }
+    },
+  })
+  runtime.newSession('butler::scope-skill-active-root', 'system prompt')
+
+  const result = await runtime.sendMessage('butler::scope-skill-active-root', '使用 VEA 分析视频', 'run-skill-active-root', {
+    publicSessionId: 'scope-skill-active-root',
+    taskId: 'task-skill-active-root',
+  })
+
+  assert.equal(result.success, true)
+  assert.ok(observedRoots.includes(outputDir))
+})
+
+test('agent sdk runtime recovers max-turn after long skill checkpoint instead of surfacing send failure', async () => {
+  const outputDir = join(tmpdir(), 'ready-agent-sdk-long-skill-checkpoint')
+  const statuses: Array<Record<string, unknown>> = []
+  const pipelineDefinition = createToolDefinition({
+    name: 'skill_video_expert_pipeline',
+    groupId: 'skills',
+    domain: 'skill',
+    kind: 'job',
+    description: 'Run VEA pipeline',
+  })
+  const runtime = createRuntime({
+    listToolDefinitions: () => [pipelineDefinition],
+    executeToolCall: async () => createToolExecutionOutput(JSON.stringify({
+      status: 'child_launched',
+      childRunId: 'child-checkpoint',
+      skillId: 'video-expert-analyzer',
+      action: 'video_expert_pipeline',
+      outputDir,
+      runStatePath: join(outputDir, 'run_state.json'),
+      parentNextHint: 'wait_for_close_event',
+    }), {
+      shape: 'json',
+      data: {
+        status: 'child_launched',
+        childRunId: 'child-checkpoint',
+        skillId: 'video-expert-analyzer',
+        action: 'video_expert_pipeline',
+        outputDir,
+        runStatePath: join(outputDir, 'run_state.json'),
+        parentNextHint: 'wait_for_close_event',
+      },
+    }),
+    runAgent: async ({ tools }) => {
+      const pipelineTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+      await pipelineTool.invoke({}, JSON.stringify({ url: 'fixture.mp4', outputDir }))
+      throw new Error('Max turns (16) exceeded')
+    },
+  })
+  runtime.on('status', (event) => statuses.push(event as Record<string, unknown>))
+  runtime.newSession('butler::scope-long-skill-checkpoint', 'system prompt')
+
+  const result = await runtime.sendMessage('butler::scope-long-skill-checkpoint', '使用 VEA 分析视频', 'run-long-skill-checkpoint', {
+    publicSessionId: 'scope-long-skill-checkpoint',
+    taskId: 'task-long-skill-checkpoint',
+  })
+
+  assert.equal(result.success, true)
+  assert.equal(result.terminalReason, 'checkpoint_background')
+  assert.match(result.finalText, /技能任务已启动/)
+  assert.equal(statuses.some((event) => event.status === 'error'), false)
+  assert.equal(statuses.some((event) => event.status === 'checkpoint' && event.terminalReason === 'checkpoint_background'), true)
 })
 
 test('agent sdk runtime reports provider quota failures as external blockers', async () => {

@@ -1,4 +1,7 @@
 import { isForegroundBusyScopeRunState } from './scopeRunState'
+import { deriveTaskCardRuntimeState, type TaskCardAction } from './taskCardViewModel'
+import type { TaskCardVisualState } from './task-status-vocabulary'
+import type { TaskProjectionRecordData } from '../../types/electron'
 import type {
   AgentArtifact,
   AgentMessage,
@@ -40,12 +43,18 @@ type StoreState = {
   streamingRequestId: string | null
   pendingSendCount: number
   pendingSendFlushAt: number | null
+  sendCoalescingEnabled?: boolean
+  sendCoalescingWindowMs?: number
   sendMessage: (content: string) => Promise<SendMessageResultLike>
   setInputValue: (value: string, options?: { preserveContinuationIntent?: boolean }) => void
+  addAttachments?: (files: ChatAttachment[]) => void
+  clearAttachments?: () => void
+  newSession?: () => void
 }
 
 type StoreLike = {
   getState: () => StoreState
+  setState?: (partial: Partial<StoreState>) => void
   subscribe?: (listener: (state: StoreState, previousState: StoreState) => void) => () => void
 }
 
@@ -95,6 +104,14 @@ export interface AgentPanelTaskCardSnapshot {
   continuation: ScopeRunTaskContinuation | null
   error: string | null
   updatedAt: string | null
+  // The user-visible task-card state, computed via the same priority rules
+  // the real renderer uses (`deriveTaskCardRuntimeState`, CLAUDE §6.22):
+  // `failed_no_background_alive > background_running > budget_paused >
+  // waiting_handoff/input > done > running`. `null` for snapshots sourced
+  // from message meta or remote task projections without a live run.
+  visualState: TaskCardVisualState | null
+  statusLabel: string | null
+  actionSet: TaskCardAction[] | null
 }
 
 export interface AgentPanelInfoCardSnapshot {
@@ -185,6 +202,9 @@ export interface AgentPanelSubmitOptions {
   waitForIdle?: boolean
   timeoutMs?: number
   pollMs?: number
+  attachments?: AgentPanelTestAttachmentInput[]
+  expectedToolNames?: string[]
+  forbiddenToolNames?: string[]
 }
 
 export interface AgentPanelSubmitResult {
@@ -196,10 +216,31 @@ export interface AgentPanelSubmitResult {
   diagnostics: AgentPanelDiagnostic[]
 }
 
+export interface AgentPanelTestAttachmentInput {
+  path: string
+  name?: string
+  type?: ChatAttachment['type']
+  size?: number
+  ext?: string
+  source?: ChatAttachment['source']
+  isDirectory?: boolean
+}
+
+export interface AgentPanelTestWorkspaceResult {
+  ok: boolean
+  root: string
+  reindex?: unknown
+  error?: string
+}
+
 export interface AgentPanelTestHarness {
   snapshot: () => Promise<AgentPanelSnapshot>
   diagnose: () => Promise<AgentPanelDiagnostic[]>
   submit: (text: string, options?: AgentPanelSubmitOptions) => Promise<AgentPanelSubmitResult>
+  attachFiles: (files: AgentPanelTestAttachmentInput[]) => Promise<ChatAttachment[]>
+  clearAttachments: () => void
+  newSession: () => Promise<AgentPanelSnapshot>
+  prepareWorkspace: (root: string, options?: { reindex?: boolean }) => Promise<AgentPanelTestWorkspaceResult>
   waitForIdle: (options?: { timeoutMs?: number; pollMs?: number }) => Promise<AgentPanelSnapshot>
   events: () => AgentPanelHarnessEvent[]
   clearEvents: () => void
@@ -215,6 +256,12 @@ declare global {
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   return value as Record<string, unknown>
+}
+
+function extractToolNameFromTraceText(text: string): string | null {
+  const trimmed = String(text || '').trim()
+  const match = trimmed.match(/^([a-zA-Z0-9_:-]+)\s*(?:\(|:)/)
+  return match?.[1] || null
 }
 
 function toIso(value: unknown): string {
@@ -286,6 +333,35 @@ function serializeRun(run: ScopeRunState | null): AgentPanelRunSnapshot | null {
 }
 
 function taskCardFromRun(run: ScopeRunState): AgentPanelTaskCardSnapshot {
+  const canResume = run.resumableActions
+    ? run.resumableActions.some((item) => item === 'continue' || item === 'retry')
+    : null
+  // deriveTaskCardRuntimeState applies CLAUDE §6.22 priority — this is the
+  // state the user actually sees in the task card, distinct from the raw
+  // `run.phase` (which can be `'done'` even while a child task is alive).
+  const runtimeState = deriveTaskCardRuntimeState({
+    scopeId: run.scopeId,
+    taskId: run.taskId || null,
+    phase: run.phase,
+    terminalReason: run.terminalReason || null,
+    title: run.taskTitle || run.taskSummary || run.latestText || '当前运行',
+    taskTitle: run.taskTitle || null,
+    taskSummary: run.taskSummary || null,
+    steps: run.steps || [],
+    currentStepId: run.currentStepId || null,
+    waitingFor: run.waitingFor || 'none',
+    resumableActions: run.resumableActions || [],
+    canResume: canResume === true,
+    recentArtifacts: run.recentArtifacts || run.artifactRefs || [],
+    taskContinuation: run.taskContinuation || null,
+    progress: run.progress || null,
+    memoryCapture: run.memoryCapture || null,
+    executionDiagnostics: run.executionDiagnostics || null,
+    blockedReason: run.blockedReason || null,
+    error: run.error || null,
+    updatedAt: run.updatedAt || new Date().toISOString(),
+    toolTrace: run.toolTrace || [],
+  })
   return {
     source: 'scopeRunState',
     scopeId: run.scopeId,
@@ -296,13 +372,16 @@ function taskCardFromRun(run: ScopeRunState): AgentPanelTaskCardSnapshot {
     status: run.phase,
     terminalReason: run.terminalReason || null,
     waitingFor: run.waitingFor || 'none',
-    canResume: run.resumableActions ? run.resumableActions.some((item) => item === 'continue' || item === 'retry') : null,
+    canResume,
     steps: run.steps || [],
     progress: run.progress || null,
     recentArtifacts: run.recentArtifacts || run.artifactRefs || [],
     continuation: run.taskContinuation || null,
     error: run.error || run.blockedReason || null,
     updatedAt: run.updatedAt || null,
+    visualState: runtimeState.visualState,
+    statusLabel: runtimeState.statusLabel,
+    actionSet: runtimeState.actionSet,
   }
 }
 
@@ -327,28 +406,76 @@ function taskCardFromMeta(message: AgentMessage): AgentPanelTaskCardSnapshot | n
     continuation: asRecord(taskSnapshot.taskContinuation) as ScopeRunTaskContinuation | null,
     error: readText(taskSnapshot.error) || readText(taskSnapshot.blockedReason),
     updatedAt: readText(taskSnapshot.updatedAt),
+    visualState: null,
+    statusLabel: null,
+    actionSet: null,
   }
 }
 
 function taskCardFromProjection(input: Record<string, unknown>): AgentPanelTaskCardSnapshot {
+  const scopeId = readText(input.scopeId)
+  const taskId = readText(input.taskId)
+  const status = readText(input.status) as TaskProjectionRecordData['status'] | null
+  const phase: ScopeRunState['phase'] = (readText(input.phase) as ScopeRunState['phase'] | null)
+    || phaseFromProjectionStatus(status)
+  const title = readText(input.taskTitle) || readText(input.title) || '任务投影'
+  const summary = readText(input.taskSummary)
+  const waitingFor = readText(input.waitingFor) as ScopeRunWaitingFor | null
+  const steps = Array.isArray(input.steps) ? input.steps as ScopeRunTaskStep[] : []
+  const recentArtifacts = Array.isArray(input.recentArtifacts) ? input.recentArtifacts as AgentArtifact[] : []
+  const continuation = asRecord(input.continuationRef) as ScopeRunTaskContinuation | null
+  const progress = asRecord(input.progress) as ScopeRunSkillProgress | null
+  const error = readText(input.error) || readText(input.blockedReason)
+  const updatedAt = readText(input.updatedAt)
+  const canResume = typeof input.canResume === 'boolean' ? input.canResume : null
+  const runtimeState = deriveTaskCardRuntimeState({
+    scopeId: scopeId || 'unknown-scope',
+    taskId,
+    phase,
+    title,
+    taskTitle: title,
+    taskSummary: summary,
+    status: status || undefined,
+    waitingFor: waitingFor || 'none',
+    resumableActions: Array.isArray(input.resumableActions) ? input.resumableActions as ScopeRunState['resumableActions'] : [],
+    canResume: canResume === true,
+    steps,
+    recentArtifacts,
+    taskContinuation: continuation,
+    progress,
+    blockedReason: readText(input.blockedReason),
+    error,
+    updatedAt: updatedAt || new Date().toISOString(),
+  })
   return {
     source: 'taskProjection',
-    scopeId: readText(input.scopeId),
-    taskId: readText(input.taskId),
-    title: readText(input.taskTitle) || readText(input.title) || '任务投影',
-    summary: readText(input.taskSummary),
-    phase: readText(input.phase),
-    status: readText(input.status),
+    scopeId,
+    taskId,
+    title,
+    summary,
+    phase,
+    status,
     terminalReason: readText(input.terminalReason),
-    waitingFor: readText(input.waitingFor),
-    canResume: typeof input.canResume === 'boolean' ? input.canResume : null,
-    steps: Array.isArray(input.steps) ? input.steps as ScopeRunTaskStep[] : [],
-    progress: asRecord(input.progress) as ScopeRunSkillProgress | null,
-    recentArtifacts: Array.isArray(input.recentArtifacts) ? input.recentArtifacts as AgentArtifact[] : [],
-    continuation: asRecord(input.continuationRef) as ScopeRunTaskContinuation | null,
-    error: readText(input.error) || readText(input.blockedReason),
-    updatedAt: readText(input.updatedAt),
+    waitingFor,
+    canResume,
+    steps,
+    progress,
+    recentArtifacts,
+    continuation,
+    error,
+    updatedAt,
+    visualState: runtimeState.visualState,
+    statusLabel: runtimeState.statusLabel,
+    actionSet: runtimeState.actionSet,
   }
+}
+
+function phaseFromProjectionStatus(status: TaskProjectionRecordData['status'] | null): ScopeRunState['phase'] {
+  if (status === 'done') return 'done'
+  if (status === 'failed') return 'error'
+  if (status === 'cancelled') return 'cancelled'
+  if (status === 'running' || status === 'queued') return 'tool_running'
+  return 'checkpoint'
 }
 
 function collectInfoCards(state: StoreState, activeRun: ScopeRunState | null): AgentPanelInfoCardSnapshot[] {
@@ -515,6 +642,22 @@ export function diagnoseAgentPanelSnapshot(snapshot: AgentPanelSnapshot): AgentP
     })
   }
 
+  const leakedToolCallMessage = snapshot.messages.find((message) =>
+    message.type === 'agent' && /<tool_call>|<function=|<parameter=|:::tool_call/i.test(message.content),
+  )
+  if (leakedToolCallMessage) {
+    diagnostics.push({
+      id: 'raw_tool_call_visible',
+      severity: 'error',
+      layer: 'renderer',
+      message: 'Agent 回复中出现原始工具调用文本，说明文本工具桥没有正确隐藏工具协议。',
+      evidence: {
+        messageId: leakedToolCallMessage.id,
+        content: leakedToolCallMessage.content.slice(0, 240),
+      },
+    })
+  }
+
   if (activeRun?.softError) {
     diagnostics.push({
       id: 'soft_error_capsule',
@@ -522,6 +665,23 @@ export function diagnoseAgentPanelSnapshot(snapshot: AgentPanelSnapshot): AgentP
       layer: 'tool',
       message: '当前运行有软失败胶囊，说明工具或外部依赖失败但运行未终止。',
       evidence: { ...activeRun.softError },
+    })
+  }
+
+  const failedToolResult = snapshot.toolTrace.find((item) =>
+    item.kind === 'result'
+    && /(?:工具 .{0,60}失败|失败：|保存失败|Document action failed|failed|errorKind|escapes sandbox root|path_outside_outputs)/i.test(item.text),
+  )
+  if (failedToolResult) {
+    diagnostics.push({
+      id: 'tool_result_failure',
+      severity: 'error',
+      layer: 'tool',
+      message: '工具结果里出现失败信息，不能只看最终回复判断为通过。',
+      evidence: {
+        traceId: failedToolResult.id,
+        text: failedToolResult.text.slice(0, 300),
+      },
     })
   }
 
@@ -545,11 +705,18 @@ export function diagnoseAgentPanelSnapshot(snapshot: AgentPanelSnapshot): AgentP
   }
 
   if (activeRun?.terminalReason && activeRun.terminalReason !== 'done') {
+    const recoverableCheckpoint = activeRun.terminalReason === 'checkpoint_background'
+      || activeRun.terminalReason === 'checkpoint_budget'
+      || activeRun.terminalReason === 'checkpoint_user_input'
+      || activeRun.phase === 'checkpoint'
+      || (Boolean(activeRun.waitingFor) && activeRun.waitingFor !== 'none')
     diagnostics.push({
       id: 'non_done_terminal_reason',
-      severity: activeRun.phase === 'done' ? 'warning' : 'error',
+      severity: recoverableCheckpoint ? 'info' : activeRun.phase === 'done' ? 'warning' : 'error',
       layer: activeRun.terminalReason.startsWith('blocked_') ? 'tool' : 'runtime',
-      message: `运行以 ${activeRun.terminalReason} 结束，需要按终态原因继续定位。`,
+      message: recoverableCheckpoint
+        ? `运行以 ${activeRun.terminalReason} 暂停，已保留可继续状态。`
+        : `运行以 ${activeRun.terminalReason} 结束，需要按终态原因继续定位。`,
       evidence: { phase: activeRun.phase, terminalReason: activeRun.terminalReason },
     })
   }
@@ -614,6 +781,55 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
+function basenameFromPath(path: string): string {
+  return path.replace(/\\/g, '/').split('/').filter(Boolean).at(-1) || path
+}
+
+function extensionFromPath(path: string): string {
+  const name = basenameFromPath(path)
+  const index = name.lastIndexOf('.')
+  return index >= 0 ? name.slice(index).toLowerCase() : ''
+}
+
+function typeFromExtension(ext: string): ChatAttachment['type'] {
+  const normalized = ext.toLowerCase()
+  if (['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.heic'].includes(normalized)) return 'image'
+  if (['.mp4', '.mov', '.m4v', '.webm', '.avi', '.mkv'].includes(normalized)) return 'video'
+  if (['.md', '.txt', '.json', '.csv', '.html', '.xml', '.yaml', '.yml'].includes(normalized)) return 'text'
+  if (['.xls', '.xlsx', '.tsv'].includes(normalized)) return 'spreadsheet'
+  return 'other'
+}
+
+async function hydrateAttachment(input: AgentPanelTestAttachmentInput): Promise<ChatAttachment> {
+  const path = String(input.path || '').trim()
+  if (!path) throw new Error('attachment path is required')
+  const stat = await window.electronAPI?.document?.stat?.(path).catch(() => null)
+  const data = stat && typeof stat === 'object' && 'success' in stat && stat.success ? stat.data : null
+  const ext = input.ext || (typeof data?.extension === 'string' ? data.extension : extensionFromPath(path))
+  return {
+    id: `test-attach-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    name: input.name || basenameFromPath(path),
+    path,
+    type: input.type || typeFromExtension(ext),
+    size: typeof input.size === 'number' ? input.size : (typeof data?.size === 'number' ? data.size : 0),
+    ext,
+    source: input.source || 'file',
+    isDirectory: typeof input.isDirectory === 'boolean' ? input.isDirectory : Boolean(data?.isDirectory),
+  }
+}
+
+function buildTestAttachmentPathContext(attachments: ChatAttachment[]): string {
+  const lines = attachments
+    .filter((attachment) => typeof attachment.path === 'string' && attachment.path.trim())
+    .map((attachment) => `- ${attachment.name || basenameFromPath(attachment.path)}: ${attachment.path}`)
+  if (lines.length === 0) return ''
+  return [
+    '--- 测试模式附件路径 ---',
+    '以下路径来自测试 harness 注入，等同于用户已附加的本地文件；需要处理附件时优先使用这些绝对路径。',
+    ...lines,
+  ].join('\n')
+}
+
 async function setDomTextareaValue(text: string): Promise<boolean> {
   if (typeof document === 'undefined') return false
   const textarea = document.querySelector('[data-ready-agent-input="true"]') as HTMLTextAreaElement | null
@@ -638,6 +854,43 @@ async function submitViaDom(text: string): Promise<boolean> {
   sendButton.click()
   await delay(0)
   return true
+}
+
+function hasSubmittedUserMessage(
+  messages: AgentMessage[],
+  beforeMessageCount: number,
+  normalizedText: string,
+): boolean {
+  return Boolean(
+    messages
+      .slice(beforeMessageCount)
+      .find((message) => message.type === 'user' && message.content.trim() === normalizedText)
+    || messages.find((message) => message.type === 'user' && message.content.trim() === normalizedText),
+  )
+}
+
+async function waitForDomSubmitEvidence(
+  store: StoreLike,
+  beforeMessageCount: number,
+  normalizedText: string,
+): Promise<boolean> {
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < 1_500) {
+    const state = store.getState()
+    const currentRun = state.currentScopeId ? state.scopeRunStates[state.currentScopeId] || null : null
+    if (
+      hasSubmittedUserMessage(state.messages, beforeMessageCount, normalizedText)
+      || state.pendingSendCount > 0
+      || state.isStreaming
+      || state.foregroundBusy
+      || Boolean(currentRun?.requestId)
+      || Boolean(currentRun?.taskId)
+    ) {
+      return true
+    }
+    await delay(50)
+  }
+  return false
 }
 
 async function loadProjectionCards(scopeId: string | null): Promise<AgentPanelTaskCardSnapshot[]> {
@@ -733,26 +986,115 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
     options: AgentPanelSubmitOptions = {},
   ): Promise<AgentPanelSubmitResult> => {
     const before = await snapshot()
+    let attached: ChatAttachment[] = []
+    if (options.attachments?.length) {
+      attached = await attachFiles(options.attachments)
+    }
+    const attachmentContext = buildTestAttachmentPathContext(attached)
+    const messageText = attachmentContext ? `${text.trim()}\n\n${attachmentContext}` : text
+    const normalizedText = messageText.trim()
     const mode = options.mode || 'dom'
     let inputMode: 'dom' | 'store' = mode
     let sendResult: SendMessageResultLike | null = null
     let domSubmitted = false
-
-    if (mode === 'dom') {
-      domSubmitted = await submitViaDom(text)
+    const coalescingState = store.getState()
+    const canDisableCoalescing = typeof store.setState === 'function'
+      && typeof coalescingState.sendCoalescingEnabled === 'boolean'
+      && typeof coalescingState.sendCoalescingWindowMs === 'number'
+    if (canDisableCoalescing) {
+      store.setState?.({
+        sendCoalescingEnabled: false,
+        sendCoalescingWindowMs: 0,
+      })
     }
 
-    if (!domSubmitted) {
-      inputMode = 'store'
-      const state = store.getState()
-      state.setInputValue(text, { preserveContinuationIntent: true })
-      sendResult = await state.sendMessage(text)
+    try {
+      if (mode === 'dom') {
+        domSubmitted = await submitViaDom(messageText)
+        if (domSubmitted) {
+          domSubmitted = await waitForDomSubmitEvidence(store, before.messages.length, normalizedText)
+        }
+      }
+
+      if (!domSubmitted) {
+        inputMode = 'store'
+        const state = store.getState()
+        state.setInputValue(messageText, { preserveContinuationIntent: true })
+        sendResult = await state.sendMessage(messageText)
+      }
+    } finally {
+      if (canDisableCoalescing) {
+        store.setState?.({
+          sendCoalescingEnabled: coalescingState.sendCoalescingEnabled,
+          sendCoalescingWindowMs: coalescingState.sendCoalescingWindowMs,
+        })
+      }
     }
 
     const after = options.waitForIdle === false
       ? await snapshot()
       : await waitForIdle({ timeoutMs: options.timeoutMs, pollMs: options.pollMs })
     const diagnostics = diagnoseAgentPanelSnapshot(after)
+    const submittedUserMessage = after.messages
+      .slice(before.messages.length)
+      .find((message) => message.type === 'user' && message.content.trim() === normalizedText)
+      || after.messages.find((message) => message.type === 'user' && message.content.trim() === normalizedText)
+    const hasRunEvidence = Boolean(
+      after.runtime.activeRun?.requestId
+      || after.runtime.activeRun?.taskId
+      || after.toolTrace.length > before.toolTrace.length
+      || after.messages.length > before.messages.length + (submittedUserMessage ? 1 : 0),
+    )
+    if (!submittedUserMessage) {
+      diagnostics.push({
+        id: 'send_returned_without_user_message',
+        severity: 'error',
+        layer: 'send',
+        message: 'sendMessage 返回后面板没有出现对应用户消息，测试不能判定为通过。',
+        evidence: {
+          sendResult,
+          beforeMessageCount: before.messages.length,
+          afterMessageCount: after.messages.length,
+          currentScopeId: after.currentScopeId,
+        },
+      })
+    } else if (!hasRunEvidence) {
+      diagnostics.push({
+        id: 'send_returned_without_run_evidence',
+        severity: 'error',
+        layer: 'runtime',
+        message: '用户消息已出现，但没有任务卡、运行态或工具记录，测试不能判定为通过。',
+        evidence: {
+          sendResult,
+          currentScopeId: after.currentScopeId,
+          activeRun: after.runtime.activeRun,
+        },
+      })
+    }
+    const observedToolNames = Array.from(new Set(after.toolTrace
+      .filter((item) => item.kind === 'call')
+      .map((item) => extractToolNameFromTraceText(item.text))
+      .filter((name): name is string => Boolean(name))))
+    for (const expectedToolName of options.expectedToolNames || []) {
+      if (observedToolNames.includes(expectedToolName)) continue
+      diagnostics.push({
+        id: 'expected_tool_not_called',
+        severity: 'error',
+        layer: 'tool',
+        message: `测试要求调用 ${expectedToolName}，但面板工具轨迹中没有出现。`,
+        evidence: { expectedToolName, observedToolNames },
+      })
+    }
+    for (const forbiddenToolName of options.forbiddenToolNames || []) {
+      if (!observedToolNames.includes(forbiddenToolName)) continue
+      diagnostics.push({
+        id: 'forbidden_tool_called',
+        severity: 'error',
+        layer: 'tool',
+        message: `测试禁止调用 ${forbiddenToolName}，但面板工具轨迹中出现了该工具。`,
+        evidence: { forbiddenToolName, observedToolNames },
+      })
+    }
     return {
       ok: diagnostics.every((item) => item.severity !== 'error'),
       inputMode,
@@ -763,10 +1105,59 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
     }
   }
 
+  const attachFiles = async (files: AgentPanelTestAttachmentInput[]): Promise<ChatAttachment[]> => {
+    const state = store.getState()
+    if (!state.addAttachments) throw new Error('agent store does not expose addAttachments')
+    const attachments = await Promise.all(files.map(hydrateAttachment))
+    state.addAttachments(attachments)
+    return attachments
+  }
+
+  const clearAttachments = (): void => {
+    store.getState().clearAttachments?.()
+  }
+
+  const newSession = async (): Promise<AgentPanelSnapshot> => {
+    const beforeScopeId = store.getState().currentScopeId
+    store.getState().newSession?.()
+    const startedAt = Date.now()
+    while (Date.now() - startedAt < 5_000) {
+      const current = store.getState()
+      if (current.currentScopeId && current.currentScopeId !== beforeScopeId) break
+      await delay(50)
+    }
+    return snapshot()
+  }
+
+  const prepareWorkspace = async (
+    root: string,
+    options: { reindex?: boolean } = {},
+  ): Promise<AgentPanelTestWorkspaceResult> => {
+    const normalizedRoot = String(root || '').trim()
+    if (!normalizedRoot) return { ok: false, root: normalizedRoot, error: 'workspace root is required' }
+    try {
+      window.localStorage?.setItem('ready-workspace-root', normalizedRoot)
+    } catch {
+      // silent-catch: the persisted workspace hint is optional for harness-driven tests;
+      // localStorage may be unavailable in some renderer sandboxes and that just leaves the
+      // hint unset for the next reload.
+    }
+    if (options.reindex === false) return { ok: true, root: normalizedRoot }
+    const reindex = await window.electronAPI?.document?.reindexWorkspace?.(normalizedRoot)
+    if (!reindex?.success) {
+      return { ok: false, root: normalizedRoot, reindex, error: reindex?.error || 'reindex failed' }
+    }
+    return { ok: true, root: normalizedRoot, reindex }
+  }
+
   return {
     snapshot,
     diagnose: async () => (await snapshot()).diagnostics,
     submit,
+    attachFiles,
+    clearAttachments,
+    newSession,
+    prepareWorkspace,
     waitForIdle,
     events: () => [...events],
     clearEvents: () => {
