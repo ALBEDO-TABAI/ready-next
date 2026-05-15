@@ -44,3 +44,14 @@ test('isSupportedBrowserNavigationUrl allows web urls and the Ready blank page o
   assert.equal(isSupportedBrowserNavigationUrl('file:///tmp/demo.txt'), false)
   assert.equal(isSupportedBrowserNavigationUrl('local-file:///tmp/demo.txt'), false)
 })
+
+test('Ready blank BrowserView fallback keeps only a neutral blank surface', () => {
+  const encodedHtml = READY_BROWSER_BLANK_URL.slice(READY_BROWSER_BLANK_URL.indexOf(',') + 1)
+  const html = decodeURIComponent(encodedHtml)
+
+  assert.match(html, /--ready-blank-surface: #eff2f6/)
+  assert.match(html, /--ready-blank-surface: #24282e/)
+  assert.match(html, /height: 100%/)
+  assert.doesNotMatch(html, /ready-dot-logo/)
+  assert.doesNotMatch(html, /ready-wordmark/)
+})

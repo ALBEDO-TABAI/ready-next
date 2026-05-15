@@ -92,7 +92,7 @@ function inferDocumentWidgetReferenceIntent(userText: string): DocumentWidgetRef
   if (!primaryInstruction) return 'none'
 
   const widgetKeyword =
-    /(widget|show-widget|图表|趋势图|波动图|折线图|柱状图|统计图|走势图|价格图|股价图|收益图|对比图|小工具|卡片组件|计算器|卡片|信息卡|提示块|表格|对比卡|进度卡|日程卡|待办|习惯|计划板)/i
+    /(widget|show-widget|图表|趋势图|波动图|折线图|柱状图|统计图|走势图|价格图|股价图|收益图|对比图|关系图|人物关系|关系网络|小工具|卡片组件|计算器|卡片|信息卡|提示块|表格|对比卡|进度卡|日程卡|待办|习惯|计划板)/i
   if (!widgetKeyword.test(primaryInstruction)) return 'none'
 
   const createVerb = /(插入|新建|创建|生成|做一个|加一个|新增|添加一个|放一个|来一个|append|insert|create|add one)/i
@@ -131,7 +131,7 @@ export function shouldForceDocumentToolCall(userText: string): boolean {
   if (hasDocContext && editIntent.test(primaryInstruction)) return true
 
   const hasDocKeyword = /(文档|文稿|原文|文章|段落|docx?|markdown|\.md\b)/i
-  const hasWidgetKeyword = /(widget|show-widget|图表|趋势图|卡片|信息卡|提示块|表格|对比卡|进度卡|日程卡|待办|习惯|计划板)/i
+  const hasWidgetKeyword = /(widget|show-widget|图表|趋势图|关系图|人物关系|关系网络|卡片|信息卡|提示块|表格|对比卡|进度卡|日程卡|待办|习惯|计划板)/i
   const existingWidgetReference = /(这个|当前|现有|已有|上面|上面这个|图里|卡片里|widget里|趋势图里|波动图里|收益图里|股价图里)/i
   const widgetSurfaceReference = /(预览|输入框|边框|底色|灰色底|卡片|面板|背景|外边框|垫底色块|计算器)/i
   const strongDirectness = /(直接|立刻|马上|立即|在原文中|就地)/i
@@ -157,7 +157,7 @@ export function inferDocumentWidgetTaskKind(userText: string): DocumentWidgetTas
   if (!primaryInstruction) return null
 
   const widgetKeyword =
-    /(widget|show-widget|生成式\s*ui|交互组件|可视化说明|可视化组件|图表|趋势图|波动图|折线图|柱状图|统计图|走势图|价格图|股价图|收益图|对比图|小工具|卡片组件|计算器|输入框|边框|底色|灰色底|卡片|信息卡|卡片式总结|提示块|表格|对比卡|进度卡|日程卡|待办|习惯|计划板|预览)/i
+    /(widget|show-widget|生成式\s*ui|交互组件|可视化说明|可视化组件|图表|趋势图|波动图|折线图|柱状图|统计图|走势图|价格图|股价图|收益图|对比图|关系图|人物关系|关系网络|小工具|卡片组件|计算器|输入框|边框|底色|灰色底|卡片|信息卡|卡片式总结|提示块|表格|对比卡|进度卡|日程卡|待办|习惯|计划板|预览)/i
   if (!widgetKeyword.test(primaryInstruction)) return null
 
   const existingWidgetReference = /(这个|当前|现有|已有|上面|上面这个|图里|卡片里|widget里|趋势图里|波动图里|收益图里|股价图里)/i

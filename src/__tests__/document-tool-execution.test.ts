@@ -3,6 +3,10 @@ import assert from 'node:assert/strict'
 
 import { executeDocumentTool } from '../main/modules/tools/document-tools'
 
+function toolText(result: Awaited<ReturnType<typeof executeDocumentTool>>): string {
+  return typeof result === 'string' ? result : result.text
+}
+
 describe('document tool execution', () => {
   it('returns real renderer summaries when a requester is available', async () => {
     const result = await executeDocumentTool(
@@ -20,12 +24,12 @@ describe('document tool execution', () => {
       },
     )
 
-    assert.match(result, /当前文档共有 1 个 widget/)
+    assert.match(toolText(result), /当前文档共有 1 个 widget/)
   })
 
   it('falls back to queued summaries when renderer execution is unavailable', async () => {
     const result = await executeDocumentTool('document_save_tab', {})
-    assert.equal(result, 'Document save queued: document.saveTab')
+    assert.equal(toolText(result), 'Document save queued: document.saveTab')
   })
 
   it('accepts componentSpec payloads for widget insertion tools', async () => {
@@ -50,6 +54,26 @@ describe('document tool execution', () => {
       },
     )
 
-    assert.match(result, /插入 widget/)
+    assert.match(toolText(result), /插入 widget/)
+  })
+
+  it('returns structured mutation metadata from renderer document actions', async () => {
+    const result = await executeDocumentTool(
+      'document_replace_text',
+      { from: 'Old', to: 'New' },
+      {
+        requestModuleToolAction: async () => ({
+          summary: '文本替换已拒绝：不能用普通文本替换工具修改 show-widget 代码块内部内容。请改用 document_update_widget。',
+          mutated: false,
+          mutationReason: 'rejected',
+          errorKind: 'widget_boundary_violation',
+          recoverable: true,
+        }),
+      },
+    )
+
+    assert.equal(typeof result, 'object')
+    assert.equal(typeof result === 'string' ? null : result.data?.errorKind, 'widget_boundary_violation')
+    assert.equal(typeof result === 'string' ? null : result.data?.mutated, false)
   })
 })

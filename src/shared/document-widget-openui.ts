@@ -77,6 +77,31 @@ const weeklyLaneSchema = z.object({
   items: z.array(z.string()).min(1),
 })
 
+const relationshipGroupSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  color: z.string().optional(),
+  position: z.enum(['center', 'left', 'right', 'top', 'bottom']).optional(),
+})
+
+const relationshipNodeSchema = z.object({
+  id: z.string().min(1),
+  label: z.string().min(1),
+  subtitle: z.string().optional(),
+  tag: z.string().optional(),
+  group: z.string().optional(),
+  emphasis: z.enum(['primary', 'secondary', 'muted']).optional(),
+})
+
+const relationshipEdgeSchema = z.object({
+  from: z.string().min(1),
+  to: z.string().min(1),
+  label: z.string().optional(),
+  kind: z.enum(['emotion', 'family', 'conflict', 'alliance', 'influence', 'other']).optional(),
+  style: z.enum(['solid', 'dashed', 'dotted']).optional(),
+  weight: z.enum(['light', 'normal', 'heavy']).optional(),
+})
+
 const habitSchema = z.object({
   name: z.string().min(1),
   streak: z.number().min(0),
@@ -167,6 +192,13 @@ const componentSchemas = {
       to: z.string().min(1),
       label: z.string().optional(),
     })).min(1).max(10),
+  }),
+  relationship_graph: z.object({
+    heading: z.string().optional(),
+    groups: z.array(relationshipGroupSchema).max(6).optional(),
+    nodes: z.array(relationshipNodeSchema).min(2).max(24),
+    edges: z.array(relationshipEdgeSchema).min(1).max(40),
+    note: z.string().optional(),
   }),
   day_schedule_card: z.object({
     heading: z.string().optional(),
@@ -433,6 +465,18 @@ export const documentWidgetCatalog: DocumentWidgetCatalogEntry[] = [
     openuiExample: buildExampleTag('flow_diagram', { heading: '流程图', nodes: '[...]', edges: '[...]' }),
   },
   {
+    name: 'relationship_graph',
+    group: 'common-display',
+    description: 'Relationship graph for people, roles, families, and semantic links; use structured nodes, groups, and edges instead of hand-written SVG coordinates.',
+    sourceType: 'manual',
+    implementation: 'html-inline-script',
+    actionPolicy: 'readonly',
+    styleTags: ['editorial', 'notebook'],
+    titleHint: 'relationship_graph',
+    propsSchema: componentSchemas.relationship_graph,
+    openuiExample: buildExampleTag('relationship_graph', { heading: '人物关系图', groups: '[...]', nodes: '[...]', edges: '[...]' }),
+  },
+  {
     name: 'day_schedule_card',
     group: 'personal-data',
     description: 'Single-day schedule card based on calendar events.',
@@ -573,6 +617,15 @@ function escapeHtml(value: string): string {
 
 function escapeAttr(value: string): string {
   return escapeHtml(value)
+}
+
+function escapeJsonForScript(value: unknown): string {
+  return JSON.stringify(value)
+    .replace(/</g, '\\u003c')
+    .replace(/>/g, '\\u003e')
+    .replace(/&/g, '\\u0026')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
 }
 
 function renderHeader(heading?: string): string {
@@ -794,6 +847,226 @@ function compileFlowDiagram(props: z.infer<typeof componentSchemas.flow_diagram>
       <text x="${node.x}" y="${node.y + 4}" text-anchor="middle" font-size="12" font-weight="700" fill="#0f172a">${escapeHtml(node.label)}</text>
     `).join('')}
   </svg>`
+}
+
+function relationshipGroupColor(group: z.infer<typeof relationshipGroupSchema> | undefined, index: number): string {
+  if (group?.color) return group.color
+  const palette = ['#2563eb', '#be123c', '#0f766e', '#a16207', '#7c3aed', '#475569']
+  return palette[index % palette.length]
+}
+
+function relationshipEdgeColor(kind: z.infer<typeof relationshipEdgeSchema>['kind'] | undefined): string {
+  switch (kind) {
+    case 'emotion':
+      return '#be123c'
+    case 'family':
+      return '#2563eb'
+    case 'conflict':
+      return '#b45309'
+    case 'alliance':
+      return '#0f766e'
+    case 'influence':
+      return '#7c3aed'
+    default:
+      return '#64748b'
+  }
+}
+
+function compileRelationshipGraph(props: z.infer<typeof componentSchemas.relationship_graph>): string {
+  type RelationshipGroup = z.infer<typeof relationshipGroupSchema>
+  type RelationshipNode = z.infer<typeof relationshipNodeSchema>
+  type RelationshipEdgeKind = NonNullable<z.infer<typeof relationshipEdgeSchema>['kind']>
+  type RelationshipGroupWithColor = RelationshipGroup & { color: string }
+  type ResolvedRelationshipGroup = RelationshipGroupWithColor & { nodes: RelationshipNode[] }
+  const edgeLabels: Record<RelationshipEdgeKind, string> = {
+    emotion: '情感',
+    family: '亲属',
+    conflict: '冲突',
+    alliance: '同盟',
+    influence: '影响',
+    other: '其他',
+  }
+
+  const suppliedGroups = props.groups || []
+  const nodeGroups = Array.from(new Set(props.nodes.map((node) => node.group).filter((value): value is string => Boolean(value))))
+  const groups: RelationshipGroup[] = [
+    ...suppliedGroups,
+    ...nodeGroups
+      .filter((groupId) => !suppliedGroups.some((group) => group.id === groupId))
+      .map((groupId) => ({ id: groupId, label: groupId })),
+  ]
+  const groupsWithFallback: RelationshipGroup[] = groups.length > 0 ? groups : [{ id: 'main', label: '关系网络', position: 'center' }]
+  const groupById = new Map<string, RelationshipGroupWithColor>(
+    groupsWithFallback.map((group, index) => [group.id, { ...group, color: relationshipGroupColor(group, index) }] as const),
+  )
+  const ungroupedId = groupsWithFallback[0]?.id || 'main'
+  const groupedNodes: ResolvedRelationshipGroup[] = groupsWithFallback.map((group) => ({
+    ...groupById.get(group.id)!,
+    nodes: props.nodes.filter((node) => (node.group || ungroupedId) === group.id),
+  })).filter((group) => group.nodes.length > 0)
+  const knownNodeIds = new Set(props.nodes.map((node) => node.id))
+  const invalidEdgeCount = props.edges.filter((edge) => !knownNodeIds.has(edge.from) || !knownNodeIds.has(edge.to)).length
+  const edges = props.edges
+    .filter((edge) => knownNodeIds.has(edge.from) && knownNodeIds.has(edge.to))
+    .map((edge) => ({
+      ...edge,
+      kind: edge.kind || 'other',
+      style: edge.style || 'solid',
+      weight: edge.weight || 'normal',
+      color: relationshipEdgeColor(edge.kind),
+    }))
+  const edgeData = escapeJsonForScript(edges)
+  const legendKinds = Array.from(new Set(edges.map((edge) => edge.kind)))
+  const legend = legendKinds.length
+    ? `<div class="rg-legend">${legendKinds.map((kind) => `<span><i style="background:${escapeAttr(relationshipEdgeColor(kind))};"></i>${escapeHtml(edgeLabels[kind])}</span>`).join('')}</div>`
+    : ''
+  const warning = invalidEdgeCount > 0
+    ? `<div class="rg-warning">有 ${invalidEdgeCount} 条关系引用了不存在的人物，已跳过。</div>`
+    : ''
+  const note = props.note ? `<div class="rg-note">${escapeHtml(props.note)}</div>` : ''
+  const groupsHtml = groupedNodes.map((group) => {
+    const position = group.position || 'center'
+    return `<section class="rg-group rg-pos-${escapeAttr(position)}" style="--rg-group-color:${escapeAttr(group.color)};">
+      <div class="rg-group-label"><span></span>${escapeHtml(group.label)}</div>
+      <div class="rg-node-list">
+        ${group.nodes.map((node) => `<article class="rg-node rg-node-${escapeAttr(node.emphasis || 'secondary')}" data-rg-node="${escapeAttr(node.id)}" style="--rg-node-color:${escapeAttr(group.color)};">
+          <div class="rg-node-title">${escapeHtml(node.label)}</div>
+          ${node.subtitle ? `<div class="rg-node-subtitle">${escapeHtml(node.subtitle)}</div>` : ''}
+          ${node.tag ? `<div class="rg-node-tag">${escapeHtml(node.tag)}</div>` : ''}
+        </article>`).join('')}
+      </div>
+    </section>`
+  }).join('')
+
+  return `<div class="card relationship-graph-widget" data-rg-root>
+    <style>
+      .relationship-graph-widget{position:relative;overflow:hidden;padding:22px;background:linear-gradient(180deg,#f8fafc 0%,#ffffff 100%);border:1px solid rgba(15,23,42,.08);}
+      .relationship-graph-widget .rg-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:14px;}
+      .relationship-graph-widget .rg-stage{position:relative;min-height:360px;padding:10px 0 4px;}
+      .relationship-graph-widget .rg-lines{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none;z-index:1;}
+      .relationship-graph-widget .rg-groups{position:relative;z-index:2;display:grid;grid-template-columns:minmax(150px,1fr) minmax(190px,1.18fr) minmax(150px,1fr);gap:14px;align-items:start;}
+      .relationship-graph-widget .rg-group{min-width:0;padding:10px;border-radius:18px;background:rgba(255,255,255,.78);border:1px solid color-mix(in srgb,var(--rg-group-color) 28%,transparent);box-shadow:0 12px 32px rgba(15,23,42,.06);backdrop-filter:blur(8px);}
+      .relationship-graph-widget .rg-pos-top,.relationship-graph-widget .rg-pos-bottom{grid-column:1 / -1;}
+      .relationship-graph-widget .rg-pos-left{grid-column:1;}
+      .relationship-graph-widget .rg-pos-center{grid-column:2;}
+      .relationship-graph-widget .rg-pos-right{grid-column:3;}
+      .relationship-graph-widget .rg-group-label{display:flex;align-items:center;gap:7px;margin:0 0 9px;font-size:12px;font-weight:800;color:#475569;}
+      .relationship-graph-widget .rg-group-label span{width:8px;height:8px;border-radius:999px;background:var(--rg-group-color);}
+      .relationship-graph-widget .rg-node-list{display:grid;gap:8px;}
+      .relationship-graph-widget .rg-pos-top .rg-node-list,.relationship-graph-widget .rg-pos-bottom .rg-node-list{grid-template-columns:repeat(auto-fit,minmax(132px,1fr));}
+      .relationship-graph-widget .rg-node{position:relative;border-radius:14px;background:#fff;border:1px solid rgba(15,23,42,.09);padding:10px 11px;box-shadow:0 7px 18px rgba(15,23,42,.05);}
+      .relationship-graph-widget .rg-node:before{content:"";position:absolute;left:0;top:10px;bottom:10px;width:3px;border-radius:4px;background:var(--rg-node-color);}
+      .relationship-graph-widget .rg-node-primary{border-color:color-mix(in srgb,var(--rg-node-color) 45%,#ffffff);box-shadow:0 12px 26px rgba(15,23,42,.09);}
+      .relationship-graph-widget .rg-node-muted{opacity:.78;}
+      .relationship-graph-widget .rg-node-title{font-size:13px;font-weight:800;color:#0f172a;line-height:1.35;padding-left:5px;}
+      .relationship-graph-widget .rg-node-subtitle{font-size:11px;color:#64748b;line-height:1.35;margin-top:3px;padding-left:5px;}
+      .relationship-graph-widget .rg-node-tag{display:inline-flex;margin:7px 0 0 5px;border-radius:999px;padding:3px 7px;background:#f1f5f9;color:#475569;font-size:10px;font-weight:700;}
+      .relationship-graph-widget .rg-legend{display:flex;gap:10px;flex-wrap:wrap;align-items:center;font-size:11px;color:#64748b;}
+      .relationship-graph-widget .rg-legend span{display:inline-flex;align-items:center;gap:5px;}
+      .relationship-graph-widget .rg-legend i{display:block;width:16px;height:3px;border-radius:999px;}
+      .relationship-graph-widget .rg-note,.relationship-graph-widget .rg-warning{font-size:12px;color:#64748b;margin-top:10px;}
+      .relationship-graph-widget .rg-warning{color:#b45309;}
+      @media (max-width:720px){.relationship-graph-widget .rg-groups{grid-template-columns:1fr;}.relationship-graph-widget .rg-group{grid-column:1 / -1 !important;}.relationship-graph-widget .rg-lines{display:none;}}
+    </style>
+    <div class="rg-head">
+      <div>${renderHeader(props.heading || '关系图')}</div>
+      ${legend}
+    </div>
+    <div class="rg-stage">
+      <svg class="rg-lines" aria-hidden="true"></svg>
+      <div class="rg-groups">${groupsHtml}</div>
+    </div>
+    ${warning}
+    ${note}
+    <script>(function(){
+      const root=document.currentScript && document.currentScript.closest('[data-rg-root]');
+      if(!root) return;
+      const stage=root.querySelector('.rg-stage');
+      const svg=root.querySelector('.rg-lines');
+      const edges=${edgeData};
+      const ns='http://www.w3.org/2000/svg';
+      const nodeMap=new Map();
+      Array.from(root.querySelectorAll('[data-rg-node]')).forEach(function(node){
+        nodeMap.set(node.getAttribute('data-rg-node'), node);
+      });
+      function clear(node){ while(node.firstChild) node.removeChild(node.firstChild); }
+      function box(element, origin){
+        const rect=element.getBoundingClientRect();
+        return {left:rect.left-origin.left,top:rect.top-origin.top,right:rect.right-origin.left,bottom:rect.bottom-origin.top,width:rect.width,height:rect.height,cx:rect.left-origin.left+rect.width/2,cy:rect.top-origin.top+rect.height/2};
+      }
+      function anchor(from,to,isStart){
+        const dx=to.cx-from.cx;
+        const dy=to.cy-from.cy;
+        if(Math.abs(dx)>=Math.abs(dy)){
+          return {x:dx>=0 ? from.right : from.left,y:from.cy,side:dx>=0?'right':'left'};
+        }
+        return {x:from.cx,y:dy>=0 ? from.bottom : from.top,side:dy>=0?'bottom':'top'};
+      }
+      function makePath(edge, start, end){
+        const path=document.createElementNS(ns,'path');
+        const bend=Math.max(28, Math.min(90, Math.abs(end.x-start.x)/3));
+        const c1x=start.side==='right'?start.x+bend:start.side==='left'?start.x-bend:start.x;
+        const c1y=start.side==='bottom'?start.y+bend:start.side==='top'?start.y-bend:start.y;
+        const c2x=end.side==='right'?end.x+bend:end.side==='left'?end.x-bend:end.x;
+        const c2y=end.side==='bottom'?end.y+bend:end.side==='top'?end.y-bend:end.y;
+        path.setAttribute('d','M '+start.x+' '+start.y+' C '+c1x+' '+c1y+', '+c2x+' '+c2y+', '+end.x+' '+end.y);
+        path.setAttribute('fill','none');
+        path.setAttribute('stroke',edge.color || '#64748b');
+        path.setAttribute('stroke-width',edge.weight==='heavy'?'2.8':edge.weight==='light'?'1.4':'2');
+        path.setAttribute('stroke-linecap','round');
+        path.setAttribute('stroke-linejoin','round');
+        path.setAttribute('opacity',edge.weight==='light'?'.58':'.82');
+        if(edge.style==='dashed') path.setAttribute('stroke-dasharray','7 6');
+        if(edge.style==='dotted') path.setAttribute('stroke-dasharray','2 6');
+        return path;
+      }
+      function render(){
+        if(!stage || !svg) return;
+        const origin=stage.getBoundingClientRect();
+        const width=Math.max(stage.clientWidth,1);
+        const height=Math.max(stage.clientHeight,1);
+        svg.setAttribute('viewBox','0 0 '+width+' '+height);
+        svg.setAttribute('width',String(width));
+        svg.setAttribute('height',String(height));
+        clear(svg);
+        edges.forEach(function(edge){
+          const fromNode=nodeMap.get(edge.from);
+          const toNode=nodeMap.get(edge.to);
+          if(!fromNode || !toNode) return;
+          const from=box(fromNode,origin);
+          const to=box(toNode,origin);
+          const start=anchor(from,to,true);
+          const end=anchor(to,from,false);
+          svg.appendChild(makePath(edge,start,end));
+          if(edge.label){
+            const label=document.createElementNS(ns,'text');
+            label.textContent=String(edge.label).slice(0,18);
+            label.setAttribute('x',String((start.x+end.x)/2));
+            label.setAttribute('y',String((start.y+end.y)/2-4));
+            label.setAttribute('text-anchor','middle');
+            label.setAttribute('font-size','10');
+            label.setAttribute('font-weight','700');
+            label.setAttribute('fill',edge.color || '#64748b');
+            label.setAttribute('paint-order','stroke');
+            label.setAttribute('stroke','#ffffff');
+            label.setAttribute('stroke-width','4');
+            label.setAttribute('stroke-linejoin','round');
+            svg.appendChild(label);
+          }
+        });
+      }
+      let raf=0;
+      function schedule(){ if(raf) cancelAnimationFrame(raf); raf=requestAnimationFrame(render); }
+      if(typeof ResizeObserver==='function'){
+        const observer=new ResizeObserver(schedule);
+        observer.observe(stage);
+        nodeMap.forEach(function(node){ observer.observe(node); });
+      }
+      window.addEventListener('resize',schedule);
+      schedule();
+      setTimeout(schedule,80);
+    })();</script>
+  </div>`
 }
 
 function compileWeekScheduleCard(props: z.infer<typeof componentSchemas.week_schedule_card>): string {
@@ -1063,6 +1336,28 @@ export function validateDocumentWidgetComponentSpec(spec: DocumentWidgetComponen
       errors.push(...result.error.issues.map((issue) => issue.path.length > 0
         ? `${entry.name}.${issue.path.join('.')}: ${issue.message}`
         : `${entry.name}: ${issue.message}`))
+    } else if (entry.name === 'relationship_graph') {
+      const props = result.data as z.infer<typeof componentSchemas.relationship_graph>
+      const nodeIds = new Set<string>()
+      for (const node of props.nodes) {
+        if (nodeIds.has(node.id)) errors.push(`relationship_graph.nodes: duplicate node id "${node.id}"`)
+        nodeIds.add(node.id)
+      }
+      const groupIds = new Set((props.groups || []).map((group) => group.id))
+      for (const group of props.groups || []) {
+        if ((props.groups || []).filter((candidate) => candidate.id === group.id).length > 1) {
+          errors.push(`relationship_graph.groups: duplicate group id "${group.id}"`)
+        }
+      }
+      for (const node of props.nodes) {
+        if (node.group && groupIds.size > 0 && !groupIds.has(node.group)) {
+          errors.push(`relationship_graph.nodes.${node.id}: unknown group "${node.group}"`)
+        }
+      }
+      for (const edge of props.edges) {
+        if (!nodeIds.has(edge.from)) errors.push(`relationship_graph.edges: unknown from node "${edge.from}"`)
+        if (!nodeIds.has(edge.to)) errors.push(`relationship_graph.edges: unknown to node "${edge.to}"`)
+      }
     }
   }
 
@@ -1098,6 +1393,8 @@ function compileByComponent(component: DocumentWidgetComponentName, props: Recor
       return compileMiniCalculator(componentSchemas.mini_calculator.parse(props))
     case 'flow_diagram':
       return compileFlowDiagram(componentSchemas.flow_diagram.parse(props))
+    case 'relationship_graph':
+      return compileRelationshipGraph(componentSchemas.relationship_graph.parse(props))
     case 'day_schedule_card':
       return compileDayScheduleCard(componentSchemas.day_schedule_card.parse(props))
     case 'week_schedule_card':
@@ -1158,3 +1455,7 @@ export function buildDocumentWidgetOpenUIRulesSnippet(): string {
 
 export const WIDGET_COMPONENT_IDS: ReadonlyArray<DocumentWidgetComponentName>
   = documentWidgetCatalog.map((entry) => entry.name)
+
+export function listDocumentWidgetCatalog(): DocumentWidgetCatalogEntry[] {
+  return [...documentWidgetCatalog]
+}

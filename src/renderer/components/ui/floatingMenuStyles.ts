@@ -21,11 +21,11 @@ export function buildFloatingMenuSurfaceStyle(
     minWidth: options?.minWidth,
     maxHeight: options?.maxHeight ?? 340,
     overflowY: 'auto',
-    background: 'color-mix(in srgb, var(--surface-floating-bg) 94%, rgba(255,255,255,0.2))',
-    border: '1px solid color-mix(in srgb, var(--border-default) 78%, rgba(255,255,255,0.48))',
+    background: 'var(--chat-menu-frost-bg, color-mix(in srgb, var(--surface-floating-bg) 94%, rgba(255,255,255,0.2)))',
+    border: '1px solid var(--chat-menu-frost-border, color-mix(in srgb, var(--border-default) 78%, rgba(255,255,255,0.48)))',
     borderRadius: 16,
     boxShadow:
-      '0 14px 32px rgba(24, 39, 77, 0.10), 0 4px 10px rgba(24, 39, 77, 0.04), inset 0 1px 0 rgba(255,255,255,0.38)',
+      'var(--chat-menu-shadow, 0 14px 32px rgba(24, 39, 77, 0.10), 0 4px 10px rgba(24, 39, 77, 0.04), inset 0 1px 0 rgba(255,255,255,0.38))',
     padding: options?.padding ?? 8,
     zIndex: options?.zIndex ?? 240,
     pointerEvents: 'auto',
@@ -58,14 +58,14 @@ export function buildFloatingMenuCheckStyle(checked: boolean): CSSProperties {
     height: 14,
     borderRadius: 4,
     border: checked
-      ? '1px solid color-mix(in srgb, var(--text-light) 36%, rgba(255,255,255,0.52))'
-      : '1px solid color-mix(in srgb, var(--border-default) 88%, rgba(255,255,255,0.4))',
+      ? '1px solid color-mix(in srgb, var(--text-light) 34%, var(--surface-border) 66%)'
+      : '1px solid color-mix(in srgb, var(--border-default) 88%, transparent)',
     background: checked
-      ? 'color-mix(in srgb, var(--surface-floating-bg) 80%, rgba(255,255,255,0.82))'
-      : 'color-mix(in srgb, rgba(255,255,255,0.6) 56%, transparent)',
+      ? 'color-mix(in srgb, var(--surface-floating-bg) 84%, var(--text-light) 16%)'
+      : 'color-mix(in srgb, var(--surface-floating-bg) 62%, transparent)',
     boxShadow: checked
-      ? '0 4px 10px rgba(24, 39, 77, 0.08), inset 0 1px 0 rgba(255,255,255,0.42)'
-      : 'inset 0 1px 0 rgba(255,255,255,0.36)',
+      ? '0 4px 10px rgba(24, 39, 77, 0.08), inset 0 1px 0 color-mix(in srgb, var(--text-light) 18%, transparent)'
+      : 'inset 0 1px 0 color-mix(in srgb, var(--surface-border) 24%, transparent)',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',

@@ -12,6 +12,7 @@ import { useBrowserTabActions } from '../../modules/browser/useBrowserTabActions
 import { useBrowserViewBounds } from '../../modules/browser/useBrowserViewBounds'
 import {
   extractBrowserDomain,
+  isReadyBrowserBlankUrl,
   normalizeBrowserUrlInput,
 } from '../../modules/browser/url-utils'
 import { useWorkspace } from '../../stores/useWorkspace'
@@ -70,6 +71,7 @@ export default function BrowserMode({
   const activeTab = tabs.find(t => t.id === activeTabId) || null
   const currentDomain = activeTab?.domain || extractBrowserDomain(activeTab?.url || '')
   const hasError = !!activeTab?.error
+  const isReadyBlankTab = activeTab ? isReadyBrowserBlankUrl(activeTab.url) : false
   const setAddressEditing = useCallback((next: boolean) => {
     isAddressEditingRef.current = next
   }, [])
@@ -103,7 +105,7 @@ export default function BrowserMode({
     skillsSplitRatio,
     chatPanelVisible,
     chatPanelWidth,
-    hasError,
+    hasError: hasError || isReadyBlankTab,
   })
 
   // URL helpers — auto-Google for non-URL input (Task 2)

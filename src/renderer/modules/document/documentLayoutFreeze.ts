@@ -6,6 +6,7 @@ const DOCUMENT_LAYOUT_FREEZE_SELECTOR = [
 
 type LayoutFreezeSnapshot = {
   element: HTMLElement
+  frozenWidth: string
   width: string
   minWidth: string
   maxWidth: string
@@ -22,12 +23,14 @@ export function freezeVisibleDocumentLayoutWidths(): () => void {
 
     snapshots.push({
       element,
+      frozenWidth: `${Math.ceil(rect.width)}px`,
       width: element.style.width,
       minWidth: element.style.minWidth,
       maxWidth: element.style.maxWidth,
     })
+  })
 
-    const frozenWidth = `${Math.ceil(rect.width)}px`
+  snapshots.forEach(({ element, frozenWidth }) => {
     element.style.width = frozenWidth
     element.style.minWidth = frozenWidth
     element.style.maxWidth = 'none'

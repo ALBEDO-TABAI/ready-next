@@ -15,6 +15,22 @@ import {
   type SectionRewritePlan,
 } from './document-domain-helpers'
 
+function hasToolErrorKind(result: ToolExecutionOutput): boolean {
+  return Boolean(result.data && typeof result.data.errorKind === 'string')
+}
+
+function isDocumentActionFailureText(text: string): boolean {
+  return /(?:^Error:|Document action failed|failed|失败|无法|没有可|未匹配到|未找到|缺少|已拒绝|被拒绝|已取消|被取消)/i.test(text)
+}
+
+function isDocumentNoMutationText(text: string): boolean {
+  return /(?:内容未变化|无变化|未做改动|已跳过|已是目标格式)/i.test(text)
+}
+
+function isDocumentActionFailure(result: ToolExecutionOutput): boolean {
+  return hasToolErrorKind(result) || isDocumentActionFailureText(result.text)
+}
+
 export class DocumentDomainOrchestrator {
   constructor(private readonly deps: {
     log: (message: string) => void
@@ -131,6 +147,7 @@ export class DocumentDomainOrchestrator {
         const openResult = await this.deps.executeToolCall('document_open_tab', { path: targetPath }, toolContext)
         this.deps.emitOutput({ agent: agentName, chunk: openResult.text.slice(0, 200), type: 'tool_result' })
         this.deps.log(`deterministic section format open result=${openResult.text.slice(0, 180)}`)
+        if (isDocumentActionFailure(openResult)) return false
       }
 
       const formatArgs = { sectionTitle: sectionTitle || '第一部分', style: 'readable' }
@@ -142,6 +159,9 @@ export class DocumentDomainOrchestrator {
       const formatResult = await this.deps.executeToolCall('document_format_section', formatArgs, toolContext)
       this.deps.emitOutput({ agent: agentName, chunk: formatResult.text.slice(0, 200), type: 'tool_result' })
       this.deps.log(`deterministic section format result=${formatResult.text.slice(0, 180)}`)
+      if (isDocumentActionFailure(formatResult) || isDocumentNoMutationText(formatResult.text)) {
+        return false
+      }
 
       this.deps.emitOutput({
         agent: agentName,
@@ -151,6 +171,7 @@ export class DocumentDomainOrchestrator {
       const saveResult = await this.deps.executeToolCall('document_save_tab', {}, toolContext)
       this.deps.emitOutput({ agent: agentName, chunk: saveResult.text.slice(0, 200), type: 'tool_result' })
       this.deps.log(`deterministic section format save result=${saveResult.text.slice(0, 180)}`)
+      if (isDocumentActionFailure(saveResult)) return false
 
       const summary = [
         `已执行格式优化：${targetScope}`,
@@ -270,6 +291,7 @@ export class DocumentDomainOrchestrator {
         const openResult = await this.deps.executeToolCall('document_open_tab', { path: targetPath }, toolContext)
         this.deps.emitOutput({ agent: agentName, chunk: openResult.text.slice(0, 200), type: 'tool_result' })
         this.deps.log(`deterministic section rewrite open result=${openResult.text.slice(0, 180)}`)
+        if (isDocumentActionFailure(openResult)) return false
       }
 
       const rewriteArgs: Record<string, unknown> = {
@@ -284,6 +306,9 @@ export class DocumentDomainOrchestrator {
       const rewriteResult = await this.deps.executeToolCall('document_rewrite_section', rewriteArgs, toolContext)
       this.deps.emitOutput({ agent: agentName, chunk: rewriteResult.text.slice(0, 200), type: 'tool_result' })
       this.deps.log(`deterministic section rewrite tool result=${rewriteResult.text.slice(0, 180)}`)
+      if (isDocumentActionFailure(rewriteResult) || isDocumentNoMutationText(rewriteResult.text)) {
+        return false
+      }
 
       this.deps.emitOutput({
         agent: agentName,
@@ -293,6 +318,7 @@ export class DocumentDomainOrchestrator {
       const saveResult = await this.deps.executeToolCall('document_save_tab', {}, toolContext)
       this.deps.emitOutput({ agent: agentName, chunk: saveResult.text.slice(0, 200), type: 'tool_result' })
       this.deps.log(`deterministic section rewrite save result=${saveResult.text.slice(0, 180)}`)
+      if (isDocumentActionFailure(saveResult)) return false
 
       const summary = [
         `已执行章节改写：${finalPlan.sectionTitle}`,

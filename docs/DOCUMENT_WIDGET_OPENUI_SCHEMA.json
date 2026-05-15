@@ -38,6 +38,9 @@
     "flow_diagram": {
       "$ref": "#/$defs/flow_diagram"
     },
+    "relationship_graph": {
+      "$ref": "#/$defs/relationship_graph"
+    },
     "day_schedule_card": {
       "$ref": "#/$defs/day_schedule_card"
     },
@@ -76,6 +79,7 @@
     "weekly_focus_chart",
     "mini_calculator",
     "flow_diagram",
+    "relationship_graph",
     "day_schedule_card",
     "week_schedule_card",
     "time_allocation_chart",
@@ -616,6 +620,151 @@
       ],
       "additionalProperties": false,
       "id": "flow_diagram"
+    },
+    "relationship_graph": {
+      "type": "object",
+      "properties": {
+        "heading": {
+          "type": "string"
+        },
+        "groups": {
+          "maxItems": 6,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "color": {
+                "type": "string"
+              },
+              "position": {
+                "type": "string",
+                "enum": [
+                  "center",
+                  "left",
+                  "right",
+                  "top",
+                  "bottom"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "label"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "nodes": {
+          "minItems": 2,
+          "maxItems": 24,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1
+              },
+              "label": {
+                "type": "string",
+                "minLength": 1
+              },
+              "subtitle": {
+                "type": "string"
+              },
+              "tag": {
+                "type": "string"
+              },
+              "group": {
+                "type": "string"
+              },
+              "emphasis": {
+                "type": "string",
+                "enum": [
+                  "primary",
+                  "secondary",
+                  "muted"
+                ]
+              }
+            },
+            "required": [
+              "id",
+              "label"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "edges": {
+          "minItems": 1,
+          "maxItems": 40,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "from": {
+                "type": "string",
+                "minLength": 1
+              },
+              "to": {
+                "type": "string",
+                "minLength": 1
+              },
+              "label": {
+                "type": "string"
+              },
+              "kind": {
+                "type": "string",
+                "enum": [
+                  "emotion",
+                  "family",
+                  "conflict",
+                  "alliance",
+                  "influence",
+                  "other"
+                ]
+              },
+              "style": {
+                "type": "string",
+                "enum": [
+                  "solid",
+                  "dashed",
+                  "dotted"
+                ]
+              },
+              "weight": {
+                "type": "string",
+                "enum": [
+                  "light",
+                  "normal",
+                  "heavy"
+                ]
+              }
+            },
+            "required": [
+              "from",
+              "to"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "note": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "nodes",
+        "edges"
+      ],
+      "additionalProperties": false,
+      "id": "relationship_graph"
     },
     "day_schedule_card": {
       "type": "object",

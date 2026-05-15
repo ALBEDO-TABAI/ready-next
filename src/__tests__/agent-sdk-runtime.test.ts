@@ -1328,6 +1328,148 @@ test('agent sdk runtime repairs explicit target turns that finish before writing
   ])
 })
 
+test('agent sdk runtime does not count no-op section rewrites as target writes', async () => {
+  const tmpRoot = await mkdtemp(join(tmpdir(), 'ready-agent-sdk-noop-rewrite-'))
+  const targetPath = join(tmpRoot, '人物关系.md')
+  await writeFile(targetPath, '# 一、背景\n\n原文。', 'utf-8')
+  try {
+    const openDefinition = createToolDefinition({
+      name: 'document_open_tab',
+      groupId: 'document',
+      domain: 'document',
+      kind: 'read',
+      description: 'Open document',
+      schema: {
+        type: 'object',
+        properties: { path: { type: 'string' } },
+        required: ['path'],
+        additionalProperties: false,
+      },
+    })
+    const rewriteDefinition = createToolDefinition({
+      name: 'document_rewrite_section',
+      groupId: 'document',
+      domain: 'document',
+      kind: 'write',
+      concurrency: 'serialized',
+      timeoutProfile: 'document_write',
+      description: 'Rewrite section',
+      schema: {
+        type: 'object',
+        properties: {
+          sectionTitle: { type: 'string' },
+          content: { type: 'string' },
+        },
+        required: ['sectionTitle', 'content'],
+        additionalProperties: false,
+      },
+    })
+    const setContentDefinition = createToolDefinition({
+      name: 'document_set_content',
+      groupId: 'document',
+      domain: 'document',
+      kind: 'write',
+      concurrency: 'serialized',
+      timeoutProfile: 'document_write',
+      description: 'Set document content',
+      schema: {
+        type: 'object',
+        properties: { content: { type: 'string' } },
+        required: ['content'],
+        additionalProperties: false,
+      },
+    })
+    const saveDefinition = createToolDefinition({
+      name: 'document_save_tab',
+      groupId: 'document',
+      domain: 'document',
+      kind: 'write',
+      concurrency: 'serialized',
+      timeoutProfile: 'document_write',
+      description: 'Save document',
+      schema: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+    })
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = []
+    const runInputs: unknown[] = []
+    let runCount = 0
+    const runtime = createRuntime({
+      listToolDefinitions: () => [rewriteDefinition, setContentDefinition, openDefinition, saveDefinition],
+      executeToolCall: async (name, args) => {
+        calls.push({ name, args })
+        if (name === 'document_set_content') {
+          await writeFile(targetPath, String(args.content || ''), 'utf-8')
+        }
+        return createToolExecutionOutput(
+          name === 'document_open_tab'
+            ? 'opened target'
+            : name === 'document_save_tab'
+              ? 'saved target'
+              : name === 'document_rewrite_section'
+                ? '未找到章节“二、人物关系图”，未做改动'
+                : 'updated target',
+          { shape: 'json', data: { ok: true } },
+        )
+      },
+      runAgent: async ({ tools, input, onTextDelta }) => {
+        runInputs.push(input)
+        runCount += 1
+        const rewriteTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+        const setContentTool = tools[1] as { invoke: (context: unknown, input: string) => Promise<string> }
+        if (runCount === 1) {
+          await rewriteTool.invoke({}, JSON.stringify({
+            sectionTitle: '二、人物关系图',
+            content: '修复后的人物关系图',
+          }))
+          onTextDelta('已完成。')
+          return { finalText: '已完成。' }
+        }
+        await setContentTool.invoke({}, JSON.stringify({ content: '# 二、人物关系图\n\n修复后的人物关系图' }))
+        onTextDelta('已真正写入目标文档。')
+        return { finalText: '已真正写入目标文档。' }
+      },
+    })
+    runtime.newSession('butler::scope-doc-noop-rewrite', 'system prompt')
+
+    const result = await runtime.sendMessage(
+      'butler::scope-doc-noop-rewrite',
+      [
+        '把@[人物关系.md]里的 Mermaid 段落改成可渲染版本',
+        '',
+        '--- 附件: 人物关系.md ---',
+        `- 路径: ${targetPath}`,
+      ].join('\n'),
+      'run-doc-noop-rewrite',
+      {
+        publicSessionId: 'scope-doc-noop-rewrite',
+        taskId: 'task-doc-noop-rewrite',
+        requestEnvelope: {
+          primaryInstruction: '把@[人物关系.md]里的 Mermaid 段落改成可渲染版本',
+          resources: [
+            { name: '人物关系.md', path: targetPath },
+          ],
+        },
+      },
+    )
+
+    assert.equal(result.success, true)
+    assert.equal(runCount, 2)
+    assert.match(String(runInputs[1]), /目标文档尚未发生实际写入/)
+    assert.deepEqual(calls.map((call) => call.name), [
+      'document_open_tab',
+      'document_rewrite_section',
+      'document_set_content',
+      'document_save_tab',
+    ])
+    assert.match(await readFile(targetPath, 'utf-8'), /修复后的人物关系图/)
+  } finally {
+    await rm(tmpRoot, { recursive: true, force: true })
+  }
+})
+
 test('agent sdk runtime blocks explicit target replacements that drop preserved content', async () => {
   const tmpRoot = await mkdtemp(join(tmpdir(), 'ready-agent-sdk-preserve-'))
   const targetPath = join(tmpRoot, 'A2-读书笔记.md')
@@ -1730,6 +1872,292 @@ test('agent sdk runtime repairs damaged show-widget content before completing ta
   }
 })
 
+test('agent sdk runtime repairs exposed Mermaid source before completing target document turns', async () => {
+  const tmpRoot = await mkdtemp(join(tmpdir(), 'ready-agent-sdk-mermaid-'))
+  const targetPath = join(tmpRoot, '新文档.md')
+  await writeFile(targetPath, '\n', 'utf-8')
+  try {
+    const openDefinition = createToolDefinition({
+      name: 'document_open_tab',
+      groupId: 'document',
+      domain: 'document',
+      kind: 'read',
+      description: 'Open document',
+      schema: {
+        type: 'object',
+        properties: { path: { type: 'string' } },
+        required: ['path'],
+        additionalProperties: false,
+      },
+    })
+    const setContentDefinition = createToolDefinition({
+      name: 'document_set_content',
+      groupId: 'document',
+      domain: 'document',
+      kind: 'write',
+      concurrency: 'serialized',
+      timeoutProfile: 'document_write',
+      description: 'Set document content',
+      schema: {
+        type: 'object',
+        properties: { content: { type: 'string' } },
+        required: ['content'],
+        additionalProperties: false,
+      },
+    })
+    const saveDefinition = createToolDefinition({
+      name: 'document_save_tab',
+      groupId: 'document',
+      domain: 'document',
+      kind: 'write',
+      concurrency: 'serialized',
+      timeoutProfile: 'document_write',
+      description: 'Save document',
+      schema: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+    })
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = []
+    const runInputs: unknown[] = []
+    let runCount = 0
+    const runtime = createRuntime({
+      listToolDefinitions: () => [setContentDefinition, openDefinition, saveDefinition],
+      executeToolCall: async (name, args) => {
+        calls.push({ name, args })
+        if (name === 'document_set_content') {
+          await writeFile(targetPath, String(args.content || ''), 'utf-8')
+        }
+        return createToolExecutionOutput(
+          name === 'document_open_tab'
+            ? 'opened target'
+            : name === 'document_save_tab'
+              ? 'saved target'
+              : 'updated target',
+          { shape: 'json', data: { ok: true } },
+        )
+      },
+      runAgent: async ({ tools, input, onTextDelta }) => {
+        runInputs.push(input)
+        runCount += 1
+        const setContentTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+        if (runCount === 1) {
+          await setContentTool.invoke({}, JSON.stringify({
+            content: [
+              '# 人物关系图',
+              '',
+              '```mermaid',
+              'graph LR',
+              '公爵["梅诗金公爵"]',
+              '娜斯塔霞["娜斯塔霞"]',
+              '```',
+              '',
+              '公爵 --- "一见钟情" --> 娜斯塔霞',
+              '%% 叶班钦家族',
+              '将军["叶班钦将军"] --- "父女" --> 大姐["亚历山德拉"]',
+            ].join('\n'),
+          }))
+          onTextDelta('已完成。')
+          return { finalText: '已完成。' }
+        }
+        await setContentTool.invoke({}, JSON.stringify({
+          content: [
+            '# 人物关系图',
+            '',
+            '```mermaid',
+            'graph LR',
+            '公爵["梅诗金公爵"] --> 娜斯塔霞["娜斯塔霞"]',
+            '将军["叶班钦将军"] --> 大姐["亚历山德拉"]',
+            '```',
+          ].join('\n'),
+        }))
+        onTextDelta('已改成完整 Mermaid 图并保存。')
+        return { finalText: '已改成完整 Mermaid 图并保存。' }
+      },
+    })
+    runtime.newSession('butler::scope-doc-mermaid-repair', 'system prompt')
+
+    const result = await runtime.sendMessage(
+      'butler::scope-doc-mermaid-repair',
+      [
+        '在@[新文档.md]里写入一段人物关系图占位内容',
+        '',
+        '--- 附件: 新文档.md ---',
+        `- 路径: ${targetPath}`,
+      ].join('\n'),
+      'run-doc-mermaid-repair',
+      {
+        publicSessionId: 'scope-doc-mermaid-repair',
+        taskId: 'task-doc-mermaid-repair',
+        requestEnvelope: {
+          primaryInstruction: '在@[新文档.md]里写入一段人物关系图占位内容',
+          resources: [
+            { name: '新文档.md', path: targetPath },
+          ],
+        },
+      },
+    )
+
+    assert.equal(result.success, true)
+    assert.equal(runCount, 2)
+    assert.match(String(runInputs[1]), /Mermaid\/关系图源码裸露/)
+    assert.deepEqual(calls.map((call) => call.name), [
+      'document_open_tab',
+      'document_set_content',
+      'document_save_tab',
+      'document_set_content',
+      'document_save_tab',
+    ])
+    const saved = await readFile(targetPath, 'utf-8')
+    assert.match(saved, /```mermaid/)
+    assert.doesNotMatch(saved, /\n公爵 --- "一见钟情"/)
+  } finally {
+    await rm(tmpRoot, { recursive: true, force: true })
+  }
+})
+
+test('agent sdk runtime treats a single selected document as target for section repair turns', async () => {
+  const tmpRoot = await mkdtemp(join(tmpdir(), 'ready-agent-sdk-selected-target-'))
+  const targetPath = join(tmpRoot, '白痴-笔记.md')
+  await writeFile(targetPath, '# 二、人物关系图\n\n旧内容。', 'utf-8')
+  try {
+    const openDefinition = createToolDefinition({
+      name: 'document_open_tab',
+      groupId: 'document',
+      domain: 'document',
+      kind: 'read',
+      description: 'Open document',
+      schema: {
+        type: 'object',
+        properties: { path: { type: 'string' } },
+        required: ['path'],
+        additionalProperties: false,
+      },
+    })
+    const setContentDefinition = createToolDefinition({
+      name: 'document_set_content',
+      groupId: 'document',
+      domain: 'document',
+      kind: 'write',
+      concurrency: 'serialized',
+      timeoutProfile: 'document_write',
+      description: 'Set document content',
+      schema: {
+        type: 'object',
+        properties: { content: { type: 'string' } },
+        required: ['content'],
+        additionalProperties: false,
+      },
+    })
+    const saveDefinition = createToolDefinition({
+      name: 'document_save_tab',
+      groupId: 'document',
+      domain: 'document',
+      kind: 'write',
+      concurrency: 'serialized',
+      timeoutProfile: 'document_write',
+      description: 'Save document',
+      schema: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+    })
+    const calls: Array<{ name: string; args: Record<string, unknown> }> = []
+    const runInputs: unknown[] = []
+    let runCount = 0
+    const runtime = createRuntime({
+      listToolDefinitions: () => [setContentDefinition, openDefinition, saveDefinition],
+      executeToolCall: async (name, args) => {
+        calls.push({ name, args })
+        if (name === 'document_set_content') {
+          await writeFile(targetPath, String(args.content || ''), 'utf-8')
+        }
+        return createToolExecutionOutput(
+          name === 'document_open_tab'
+            ? 'opened target'
+            : name === 'document_save_tab'
+              ? 'saved target'
+              : 'updated target',
+          { shape: 'json', data: { ok: true } },
+        )
+      },
+      runAgent: async ({ tools, input, onTextDelta }) => {
+        runInputs.push(input)
+        runCount += 1
+        const setContentTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+        if (runCount === 1) {
+          await setContentTool.invoke({}, JSON.stringify({
+            content: [
+              '# 二、人物关系图',
+              '',
+              '```mermaid',
+              'graph TD',
+              'duke -- "一见钟情" --- nastasya',
+              '%% 叶班钦家族',
+              'epanchin["叶班钦将军"]',
+              '```',
+            ].join('\n'),
+          }))
+          onTextDelta('已修复并保存。')
+          return { finalText: '已修复并保存。' }
+        }
+        await setContentTool.invoke({}, JSON.stringify({
+          content: [
+            '# 二、人物关系图',
+            '',
+            '| 人物 | 关系 | 对象 |',
+            '| --- | --- | --- |',
+            '| 梅诗金公爵 | 一见钟情 | 娜斯塔霞 |',
+          ].join('\n'),
+        }))
+        onTextDelta('已改成表格并保存。')
+        return { finalText: '已改成表格并保存。' }
+      },
+    })
+    runtime.newSession('butler::scope-doc-selected-target', 'system prompt')
+
+    const result = await runtime.sendMessage(
+      'butler::scope-doc-selected-target',
+      [
+        '修复一下这段 mermaid',
+        '',
+        '--- 附件: 白痴-笔记.md ---',
+        `- 路径: ${targetPath}`,
+      ].join('\n'),
+      'run-doc-selected-target',
+      {
+        publicSessionId: 'scope-doc-selected-target',
+        taskId: 'task-doc-selected-target',
+        requestEnvelope: {
+          primaryInstruction: '修复一下这段 mermaid',
+          resources: [
+            { name: '白痴-笔记.md', path: targetPath },
+          ],
+        },
+      },
+    )
+
+    assert.equal(result.success, true)
+    assert.equal(runCount, 2)
+    assert.match(String(runInputs[1]), /Mermaid/)
+    assert.match(String(runInputs[1]), /边标签/)
+    assert.deepEqual(calls.map((call) => call.name), [
+      'document_open_tab',
+      'document_set_content',
+      'document_save_tab',
+      'document_set_content',
+      'document_save_tab',
+    ])
+    const saved = await readFile(targetPath, 'utf-8')
+    assert.match(saved, /\| 人物 \| 关系 \| 对象 \|/)
+    assert.doesNotMatch(saved, /duke --/)
+  } finally {
+    await rm(tmpRoot, { recursive: true, force: true })
+  }
+})
+
 test('agent sdk runtime treats max-turn exhaustion after a valid saved target document as complete', async () => {
   const tmpRoot = await mkdtemp(join(tmpdir(), 'ready-agent-sdk-max-turn-'))
   const targetPath = join(tmpRoot, 'B2-运营数据多图表报告.md')
@@ -1833,6 +2261,53 @@ test('agent sdk runtime treats max-turn exhaustion after a valid saved target do
       'document_set_content',
       'document_save_tab',
     ])
+  } finally {
+    await rm(tmpRoot, { recursive: true, force: true })
+  }
+})
+
+test('agent sdk runtime checkpoints max-turn target document turns with no effective mutation', async () => {
+  const tmpRoot = await mkdtemp(join(tmpdir(), 'ready-agent-sdk-max-turn-empty-'))
+  const targetPath = join(tmpRoot, '空文档.md')
+  await writeFile(targetPath, '\n', 'utf-8')
+  try {
+    const statuses: Array<Record<string, unknown>> = []
+    const errors: Array<Record<string, unknown>> = []
+    const runtime = createRuntime({
+      runAgent: async () => {
+        throw new Error('Max turns (16) exceeded')
+      },
+    })
+    runtime.on('status', (event) => statuses.push(event as Record<string, unknown>))
+    runtime.on('error', (event) => errors.push(event as Record<string, unknown>))
+    runtime.newSession('butler::scope-doc-max-turn-no-mutation', 'system prompt')
+
+    const result = await runtime.sendMessage(
+      'butler::scope-doc-max-turn-no-mutation',
+      [
+        '修复@[空文档.md]里的信息卡。',
+        '',
+        '--- 附件: 空文档.md ---',
+        `- 路径: ${targetPath}`,
+      ].join('\n'),
+      'run-doc-max-turn-no-mutation',
+      {
+        publicSessionId: 'scope-doc-max-turn-no-mutation',
+        taskId: 'task-doc-max-turn-no-mutation',
+        requestEnvelope: {
+          primaryInstruction: '修复@[空文档.md]里的信息卡。',
+          resources: [
+            { name: '空文档.md', path: targetPath },
+          ],
+        },
+      },
+    )
+
+    assert.equal(result.success, true)
+    assert.equal(result.terminalReason, 'checkpoint_budget')
+    assert.match(result.finalText, /还没有发生有效写入/)
+    assert.equal(errors.length, 0)
+    assert.equal(statuses.some((event) => event.status === 'checkpoint' && event.terminalReason === 'checkpoint_budget'), true)
   } finally {
     await rm(tmpRoot, { recursive: true, force: true })
   }

@@ -102,6 +102,14 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.match(documentDomainOrchestrator, /export class DocumentDomainOrchestrator/)
   assert.match(documentDomainOrchestrator, /async tryDeterministicSectionFormatFlow\(/)
   assert.match(documentDomainOrchestrator, /async tryDeterministicSectionRewriteFlow\(/)
+  assert.match(documentDomainOrchestrator, /function isDocumentActionFailureText\(/)
+  assert.match(documentDomainOrchestrator, /function isDocumentNoMutationText\(/)
+  const rewriteNoMutationGuard = documentDomainOrchestrator.indexOf(
+    'if (isDocumentActionFailure(rewriteResult) || isDocumentNoMutationText(rewriteResult.text))',
+  )
+  const rewriteSaveCall = documentDomainOrchestrator.indexOf("chunk: 'document_save_tab({})'", rewriteNoMutationGuard)
+  assert.ok(rewriteNoMutationGuard > 0, 'rewrite shortcut must reject no-op rewrite results')
+  assert.ok(rewriteSaveCall > rewriteNoMutationGuard, 'rewrite shortcut must reject no-op rewrites before saving')
   assert.match(
     readWorkspaceFile('src/main/modules/agent-control/document-task-pipeline-executor.ts'),
     /export class DocumentTaskPipelineExecutor/,

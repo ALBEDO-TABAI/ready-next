@@ -48,6 +48,16 @@ describe('document widget guidance', () => {
     assert.equal(daySchedule?.family, 'day_schedule_card')
   })
 
+  it('maps character relationship graphs away from raw flow diagrams', () => {
+    const profile = inferDocumentWidgetProfile('帮我把《白痴》前三章做成人物关系图信息卡')
+    const snippet = buildDocumentWidgetGuidanceSnippet(profile)
+
+    assert.equal(profile?.family, 'relationship_graph')
+    assert.equal(profile?.titleHint, 'relationship_graph')
+    assert.match(snippet, /不要手写 SVG 坐标/)
+    assert.match(snippet, /groups、nodes、edges/)
+  })
+
   it('builds readable widget guidance snippets for agent prompts', () => {
     const profile = inferDocumentWidgetProfile('做一个本周下周对比图，像周报')
     const snippet = buildDocumentWidgetGuidanceSnippet(profile)

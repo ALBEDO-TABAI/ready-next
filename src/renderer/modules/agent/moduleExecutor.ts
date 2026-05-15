@@ -1,6 +1,12 @@
 import { requestModuleAgentAction } from '../../utils/moduleAgentBridge'
 import { createAgentArtifact, mergeArtifacts } from './scopeRunState'
-import { classifyDocActionFailureReason, getActiveDocumentSnapshot, mapToolActionToDocAction, performDocAction } from './documentActions'
+import {
+  classifyDocActionFailureReason,
+  classifyDocActionMutationOutcome,
+  getActiveDocumentSnapshot,
+  mapToolActionToDocAction,
+  performDocAction,
+} from './documentActions'
 import type { AgentArtifact, AgentModuleKind, ScopeRunState, ScopeRunTaskStepStatus, ToolTraceEvent } from './types'
 
 function toExecutionKind(tool: string): ScopeRunState['executionKind'] {
@@ -295,6 +301,7 @@ export async function executeModuleToolAction(
       intent: tool,
       summary,
     }
+    Object.assign(payload, classifyDocActionMutationOutcome(docAction, summary))
     if (failureReason) {
       payload.ok = false
       payload.reason = failureReason

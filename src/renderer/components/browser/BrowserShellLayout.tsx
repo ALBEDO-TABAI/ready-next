@@ -1,5 +1,7 @@
 import type { DragEvent, RefObject } from 'react'
 import { AlertTriangle, CheckCircle, Globe, RefreshCw } from 'lucide-react'
+import readyWordmark from '../../assets/ready-wordmark.png'
+import { isReadyBrowserBlankUrl } from '../../modules/browser/url-utils'
 import type { BrowserTab } from '../../stores/useBrowserTabs'
 
 interface BrowserShellLayoutProps {
@@ -21,6 +23,9 @@ export default function BrowserShellLayout({
   onDrop,
   onRetry,
 }: BrowserShellLayoutProps) {
+  const showReadyBlankPage = activeTab ? isReadyBrowserBlankUrl(activeTab.url) && !activeTab.error : false
+  const showBrowserViewCornerFill = isElectron && Boolean(activeTab) && !showReadyBlankPage && !activeTab?.error
+
   return (
     <div className="flex min-h-0 h-full flex-1">
       <div className="relative min-w-0 flex flex-1 flex-col">
@@ -47,34 +52,38 @@ export default function BrowserShellLayout({
               isolation: 'isolate',
             }}
           >
-            <div
-              className="browser-shell-corner-fill-left"
-              style={{
-                position: 'absolute',
-                left: 0,
-                top: 0,
-                width: 'var(--workbench-canvas-radius)',
-                height: 'var(--workbench-canvas-radius)',
-                borderBottomRightRadius: 'var(--workbench-canvas-radius)',
-                background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
-                pointerEvents: 'none',
-                zIndex: 2,
-              }}
-            />
-            <div
-              className="browser-shell-corner-fill-right"
-              style={{
-                position: 'absolute',
-                right: 0,
-                top: 0,
-                width: 'var(--workbench-canvas-radius)',
-                height: 'var(--workbench-canvas-radius)',
-                borderBottomLeftRadius: 'var(--workbench-canvas-radius)',
-                background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
-                pointerEvents: 'none',
-                zIndex: 2,
-              }}
-            />
+            {showBrowserViewCornerFill && (
+              <>
+                <div
+                  className="browser-shell-corner-fill-left"
+                  style={{
+                    position: 'absolute',
+                    left: 0,
+                    top: 0,
+                    width: 'var(--workbench-canvas-radius)',
+                    height: 'var(--workbench-canvas-radius)',
+                    borderBottomRightRadius: 'var(--workbench-canvas-radius)',
+                    background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
+                    pointerEvents: 'none',
+                    zIndex: 2,
+                  }}
+                />
+                <div
+                  className="browser-shell-corner-fill-right"
+                  style={{
+                    position: 'absolute',
+                    right: 0,
+                    top: 0,
+                    width: 'var(--workbench-canvas-radius)',
+                    height: 'var(--workbench-canvas-radius)',
+                    borderBottomLeftRadius: 'var(--workbench-canvas-radius)',
+                    background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
+                    pointerEvents: 'none',
+                    zIndex: 2,
+                  }}
+                />
+              </>
+            )}
 
             {!isElectron && (
               <div className="absolute inset-0 flex items-center justify-center text-[var(--text-light)]">
@@ -82,6 +91,30 @@ export default function BrowserShellLayout({
                   <Globe className="mx-auto mb-3 h-12 w-12 opacity-30" />
                   <p className="text-[13px]">Browser requires Electron environment</p>
                 </div>
+              </div>
+            )}
+
+            {showReadyBlankPage && (
+              <div
+                className="browser-ready-blank-page absolute inset-0 flex items-center justify-center"
+                style={{
+                  background: 'var(--workbench-module-surface-bg)',
+                  backdropFilter: 'blur(20px) saturate(0%)',
+                  WebkitBackdropFilter: 'blur(20px) saturate(0%)',
+                  zIndex: 1,
+                  pointerEvents: 'none',
+                }}
+              >
+                <img
+                  src={readyWordmark}
+                  alt="Ready"
+                  draggable={false}
+                  style={{
+                    display: 'block',
+                    width: 'min(210px, calc(100vw - 96px))',
+                    height: 'auto',
+                  }}
+                />
               </div>
             )}
 

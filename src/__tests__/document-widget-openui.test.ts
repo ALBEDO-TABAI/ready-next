@@ -24,6 +24,7 @@ describe('document widget OpenUI artifacts', () => {
   it('publishes a prompt artifact that covers both common and personal widget families', () => {
     assert.match(documentWidgetOpenUIPrompt, /info_card/)
     assert.match(documentWidgetOpenUIPrompt, /data_table/)
+    assert.match(documentWidgetOpenUIPrompt, /relationship_graph/)
     assert.match(documentWidgetOpenUIPrompt, /day_schedule_card/)
     assert.match(documentWidgetOpenUIPrompt, /todo_list_manual/)
   })
@@ -32,6 +33,7 @@ describe('document widget OpenUI artifacts', () => {
     const defs = (documentWidgetOpenUISchema as { $defs?: Record<string, unknown> }).$defs || {}
     assert.ok(defs.info_card)
     assert.ok(defs.callout_block)
+    assert.ok(defs.relationship_graph)
     assert.ok(defs.day_schedule_card)
     assert.ok(defs.schedule_runtime_card)
   })
@@ -48,8 +50,10 @@ describe('document widget OpenUI artifacts', () => {
 
     assert.match(promptDoc, /Document Widget OpenUI Prompt/)
     assert.match(promptDoc, /info_card/)
+    assert.match(promptDoc, /relationship_graph/)
     assert.match(promptDoc, /day_schedule_card/)
     assert.ok(schemaDoc.$defs?.info_card)
+    assert.ok(schemaDoc.$defs?.relationship_graph)
     assert.ok(schemaDoc.$defs?.todo_list_manual)
   })
 })
@@ -77,6 +81,25 @@ describe('document widget OpenUI validation', () => {
 
     assert.equal(result.ok, false)
     assert.match(result.errors.join('\n'), /unknown_widget/)
+  })
+
+  it('rejects relationship graph edges that reference missing nodes', () => {
+    const result = validateDocumentWidgetComponentSpec({
+      component: 'relationship_graph',
+      props: {
+        heading: '人物关系图',
+        nodes: [
+          { id: 'duke', label: '梅诗金公爵' },
+          { id: 'nastasya', label: '娜斯塔霞' },
+        ],
+        edges: [
+          { from: 'duke', to: 'rogohin', label: '竞争' },
+        ],
+      },
+    })
+
+    assert.equal(result.ok, false)
+    assert.match(result.errors.join('\n'), /unknown to node "rogohin"/)
   })
 })
 
@@ -131,5 +154,37 @@ describe('document widget OpenUI compiler', () => {
     assert.match(compiled.widgetCode, /今天/)
     assert.match(compiled.widgetCode, /晨会/)
     assert.match(compiled.widgetCode, /09:30 - 10:00/)
+  })
+
+  it('compiles relationship graphs as measured cards plus an SVG overlay', () => {
+    const compiled = compileDocumentWidgetSpec({
+      component: 'relationship_graph',
+      props: {
+        heading: '《白痴》人物关系图',
+        groups: [
+          { id: 'core', label: '核心三角', position: 'center', color: '#be123c' },
+          { id: 'family', label: '叶班钦家族', position: 'right', color: '#2563eb' },
+        ],
+        nodes: [
+          { id: 'duke', label: '梅诗金公爵', subtitle: '男主角', group: 'core', emphasis: 'primary' },
+          { id: 'nastasya', label: '娜斯塔霞', subtitle: '女主角', group: 'core', emphasis: 'primary' },
+          { id: 'rogohin', label: '罗果仁', group: 'core' },
+          { id: 'aglaia', label: '阿格拉雅', group: 'family' },
+        ],
+        edges: [
+          { from: 'duke', to: 'nastasya', kind: 'emotion', label: '怜悯/吸引', weight: 'heavy' },
+          { from: 'rogohin', to: 'nastasya', kind: 'emotion', label: '执迷' },
+          { from: 'aglaia', to: 'duke', kind: 'emotion', label: '好奇' },
+        ],
+      },
+    })
+
+    assert.equal(compiled.component, 'relationship_graph')
+    assert.match(compiled.widgetCode, /data-rg-root/)
+    assert.match(compiled.widgetCode, /data-rg-node="duke"/)
+    assert.match(compiled.widgetCode, /ResizeObserver/)
+    assert.match(compiled.widgetCode, /getBoundingClientRect/)
+    assert.match(compiled.widgetCode, /梅诗金公爵/)
+    assert.doesNotMatch(compiled.widgetCode, /<line\b[^>]*x1=/)
   })
 })

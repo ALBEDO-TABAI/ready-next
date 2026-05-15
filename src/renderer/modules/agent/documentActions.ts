@@ -12,10 +12,34 @@ import {
 import { compileDocumentWidgetComponentSpec } from './documentWidgetOpenUI'
 import type { DocumentWidgetComponentSpec } from '../../../shared/document-widget-openui'
 import { mergeComponentSpecPatch } from '../../../shared/document-widget-patch'
+import {
+  findDocumentVisualSyntaxIssue,
+  findShowWidgetBoundaryViolation,
+} from '../../../shared/document-visual-syntax'
 
-interface DocActionPayload {
+const MERMAID_FENCE_REGEX = /```mermaid[^\n]*\n([\s\S]*?)```/gi
+
+export interface DocActionPayload {
   type: string
   [key: string]: unknown
+}
+
+export type DocActionMutationReason =
+  | 'changed'
+  | 'saved'
+  | 'no_match'
+  | 'identical'
+  | 'rejected'
+  | 'cancelled'
+  | 'validation_failed'
+  | 'not_mutation'
+
+export interface DocActionMutationOutcome {
+  mutated: boolean
+  mutationReason: DocActionMutationReason
+  documentSaved?: boolean
+  errorKind?: 'widget_boundary_violation' | 'document_visual_syntax_invalid'
+  recoverable?: boolean
 }
 
 function raceWithTimeout<T>(op: Promise<T>, ms: number, label: string): Promise<T> {
@@ -157,6 +181,145 @@ function logWidgetSkip(scope: string, tabTitle: string, info: ReturnType<typeof 
   } catch {
     // Best-effort diagnostics must never block widget updates.
   }
+}
+
+function collectMermaidBlocks(content: string): string[] {
+  MERMAID_FENCE_REGEX.lastIndex = 0
+  const blocks: string[] = []
+  let match: RegExpExecArray | null
+  while ((match = MERMAID_FENCE_REGEX.exec(content)) !== null) {
+    const code = String(match[1] || '').trim()
+    if (code) blocks.push(code)
+  }
+  return blocks
+}
+
+function mermaidSvgContainsSourceLeak(svg: string): boolean {
+  return /(?:%%|--&gt;|-->|-\.-&gt;|---\|?|graph\s+(?:TD|TB|BT|LR|RL)|flowchart\s+(?:TD|TB|BT|LR|RL))/i.test(svg)
+}
+
+async function validateMermaidPreviewRender(content: string): Promise<string | null> {
+  if (typeof window === 'undefined' || typeof document === 'undefined') return null
+  const blocks = collectMermaidBlocks(content)
+  if (blocks.length === 0) return null
+  try {
+    const module = await import('mermaid')
+    const mermaid = module.default
+    mermaid.initialize({
+      startOnLoad: false,
+      securityLevel: 'strict',
+      theme: 'base',
+    })
+    for (let index = 0; index < blocks.length; index += 1) {
+      const renderId = `ready-doc-tool-mermaid-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`
+      const result = await raceWithTimeout(
+        mermaid.render(renderId, blocks[index]),
+        3_000,
+        'mermaid_validate',
+      )
+      if (mermaidSvgContainsSourceLeak(result.svg)) {
+        return '目标文档里的 Mermaid 预览结果仍包含源码痕迹'
+      }
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    return `目标文档里的 Mermaid 无法完成真实预览渲染：${message}`
+  }
+  return null
+}
+
+async function buildVisualSyntaxRejection(actionLabel: string, content: string): Promise<string | null> {
+  const visualSyntaxIssue = findDocumentVisualSyntaxIssue(content)
+  const previewIssue = visualSyntaxIssue || await validateMermaidPreviewRender(content)
+  return previewIssue
+    ? `${actionLabel}已拒绝：${previewIssue}。请把所有 graph/flowchart 节点和连线放在同一个 \`\`\`mermaid 代码块里；如果真实预览仍不稳定，请改成 Markdown 表格。`
+    : null
+}
+
+function buildWidgetBoundaryRejection(actionLabel: string): string {
+  return `${actionLabel}已拒绝：不能用普通文本替换工具修改 show-widget 代码块内部内容。请改用 document_update_widget。`
+}
+
+function findAllReplacementRanges(source: string, target: string): Array<{ start: number; end: number }> {
+  if (!target) return []
+  const ranges: Array<{ start: number; end: number }> = []
+  let searchFrom = 0
+  while (searchFrom <= source.length) {
+    const nextIndex = source.indexOf(target, searchFrom)
+    if (nextIndex < 0) break
+    ranges.push({ start: nextIndex, end: nextIndex + target.length })
+    searchFrom = nextIndex + Math.max(1, target.length)
+  }
+  return ranges
+}
+
+function buildWidgetBoundaryRejectionForRanges(
+  actionLabel: string,
+  source: string,
+  ranges: Array<{ start: number; end: number }>,
+): string | null {
+  const issue = findShowWidgetBoundaryViolation(source, ranges)
+  return issue ? buildWidgetBoundaryRejection(actionLabel) : null
+}
+
+export function classifyDocActionMutationOutcome(
+  action: DocActionPayload,
+  summary: string,
+): DocActionMutationOutcome {
+  const type = String(action.type || '').trim()
+  const normalized = summary.trim()
+
+  if (type === 'save_tab') {
+    if (/保存失败|不支持保存|另存为已取消|当前环境不支持/.test(normalized)) {
+      return { mutated: false, mutationReason: 'validation_failed' }
+    }
+    return {
+      mutated: false,
+      mutationReason: 'saved',
+      documentSaved: /已保存文档|已另存文档|文档未改动，已跳过保存/.test(normalized),
+    }
+  }
+
+  const mutationActions = new Set([
+    'set_content',
+    'append_content',
+    'insert_widget',
+    'update_widget',
+    'remove_widget',
+    'replace_text',
+    'replace_exact',
+    'format_section',
+    'rewrite_section',
+  ])
+  if (!mutationActions.has(type)) {
+    return { mutated: false, mutationReason: 'not_mutation' }
+  }
+  if (/不能用普通文本替换工具修改 show-widget/.test(normalized)) {
+    return {
+      mutated: false,
+      mutationReason: 'rejected',
+      errorKind: 'widget_boundary_violation',
+      recoverable: true,
+    }
+  }
+  if (/Mermaid|show-widget JSON|show-widget SVG|视觉|源码裸露/.test(normalized) && /已拒绝|不能进入完成态|无法解析|没有闭合/.test(normalized)) {
+    return {
+      mutated: false,
+      mutationReason: 'validation_failed',
+      errorKind: 'document_visual_syntax_invalid',
+      recoverable: true,
+    }
+  }
+  if (/已取消|被取消/.test(normalized)) return { mutated: false, mutationReason: 'cancelled' }
+  if (/未匹配到|未找到|没有可|缺少/.test(normalized)) return { mutated: false, mutationReason: 'no_match' }
+  if (/内容未变化|无变化|未做改动|已跳过|已是目标格式/.test(normalized)) {
+    return { mutated: false, mutationReason: 'identical' }
+  }
+  if (/已写入|已追加|已插入|已在[^，。]*插入|已更新|已删除|已替换|已精准替换|已优化章节格式|已重写/.test(normalized)) {
+    return { mutated: true, mutationReason: 'changed' }
+  }
+  if (/已拒绝|失败|无法/.test(normalized)) return { mutated: false, mutationReason: 'rejected' }
+  return { mutated: false, mutationReason: 'validation_failed' }
 }
 
 function extractDeclaredWidgetAspect(widgetCode: string): { width: number; height: number } | null {
@@ -854,7 +1017,7 @@ export function replaceExactTextInDocument(
   target: string,
   replacement: string,
   occurrence?: number,
-): { content: string; found: boolean; totalMatches: number; occurrenceUsed?: number; error?: string } {
+): { content: string; found: boolean; totalMatches: number; occurrenceUsed?: number; range?: { start: number; end: number }; error?: string } {
   const normalizedSource = source.replace(/\r\n/g, '\n')
   const normalizedTarget = target.replace(/\r\n/g, '\n')
   const normalizedReplacement = replacement.replace(/\r\n/g, '\n')
@@ -905,6 +1068,10 @@ export function replaceExactTextInDocument(
     found: true,
     totalMatches: matchIndexes.length,
     occurrenceUsed: targetOccurrence,
+    range: {
+      start: targetIndex,
+      end: targetIndex + normalizedTarget.length,
+    },
   }
 }
 
@@ -1186,6 +1353,8 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     const content = typeof action.content === 'string' ? normalizePotentialWidgetPayloadContent(action.content) : ''
     const tab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
     if (!tab) return '没有可写入的文档标签'
+    const visualSyntaxRejection = await buildVisualSyntaxRejection('文档写入', content)
+    if (visualSyntaxRejection) return visualSyntaxRejection
     if (tab.content === content) return `内容未变化，已跳过写入：${tab.title}`
     docStore.setTabContent(tab.id, content)
     rememberPendingToolDocumentWrite(tab.id, content, 'set_content', tab.content)
@@ -1197,6 +1366,8 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     const tab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
     if (!tab) return '没有可追加的文档标签'
     if (!content) return `追加内容为空，已跳过：${tab.title}`
+    const visualSyntaxRejection = await buildVisualSyntaxRejection('文档追加', content)
+    if (visualSyntaxRejection) return visualSyntaxRejection
     const mergedWidgets = mergeStandaloneWidgetsIntoDocument(tab.content, content)
     if (mergedWidgets) {
       if (mergedWidgets.error) return `widget 写入已拒绝：${mergedWidgets.error}`
@@ -1414,7 +1585,15 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     const tab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
     if (!tab) return '没有可替换的文档标签'
     if (!tab.content.includes(from)) return `未匹配到替换目标“${from}”，未做改动`
+    const widgetBoundaryRejection = buildWidgetBoundaryRejectionForRanges(
+      '文本替换',
+      tab.content,
+      findAllReplacementRanges(tab.content, from),
+    )
+    if (widgetBoundaryRejection) return widgetBoundaryRejection
     const nextContent = tab.content.split(from).join(to)
+    const visualSyntaxRejection = await buildVisualSyntaxRejection('文本替换', nextContent)
+    if (visualSyntaxRejection) return visualSyntaxRejection
     if (nextContent === tab.content) return `替换后内容无变化，已跳过：${tab.title}`
     docStore.setTabContent(tab.id, nextContent)
     rememberPendingToolDocumentWrite(tab.id, nextContent, 'replace_text', tab.content)
@@ -1430,6 +1609,12 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     if (!tab) return '没有可精准替换的文档标签'
     const replaced = replaceExactTextInDocument(tab.content, target, replacement, occurrence)
     if (!replaced.found) return replaced.error || '未匹配到目标片段'
+    const widgetBoundaryRejection = replaced.range
+      ? buildWidgetBoundaryRejectionForRanges('精准替换', tab.content, [replaced.range])
+      : null
+    if (widgetBoundaryRejection) return widgetBoundaryRejection
+    const visualSyntaxRejection = await buildVisualSyntaxRejection('精准替换', replaced.content)
+    if (visualSyntaxRejection) return visualSyntaxRejection
     if (replaced.content === tab.content) return `精准替换后内容无变化，已跳过：${tab.title}`
     docStore.setTabContent(tab.id, replaced.content)
     rememberPendingToolDocumentWrite(tab.id, replaced.content, 'replace_exact', tab.content)
@@ -1457,6 +1642,8 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     if (!tab) return '没有可重写章节的文档标签'
     const rewritten = rewriteSectionInDocument(tab.content, sectionTitle, content, { appendIfMissing: false })
     if (!rewritten.found) return `未找到章节“${sectionTitle}”，未做改动`
+    const visualSyntaxRejection = await buildVisualSyntaxRejection('章节重写', rewritten.content)
+    if (visualSyntaxRejection) return visualSyntaxRejection
     if (rewritten.content === tab.content) return `章节“${rewritten.matchedTitle || sectionTitle}”内容无变化，未做改动`
     docStore.setTabContent(tab.id, rewritten.content)
     rememberPendingToolDocumentWrite(tab.id, rewritten.content, 'rewrite_section', tab.content)

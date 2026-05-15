@@ -35,6 +35,8 @@ export const TOOL_ERROR_METRICS = {
   unknownSurfaced: 'tool_error_unknown_surfaced',
   /** dispatch 入口 Zod safeParse 拒绝模型输入（Phase 2/2.5） */
   inputValidation: 'tool_input_validation_failed',
+  /** document text tools attempted to edit inside a show-widget fence. */
+  widgetBoundaryViolation: 'widget_boundary_violation',
   /** 工具策略裁决后仍出现 invariant 违规（残留遥测） */
   resolutionViolation: 'tool_resolution_violation_post_arbitration',
   /** D W1 — SystemReminderRegistry 组装时因 topic 冲突压制了另一条 reminder */

@@ -126,9 +126,37 @@ export function useBrowserTabActions({
 
   const handleCloseTab = useCallback(async (id: string) => {
     if (!isElectron) return
-    await window.electronAPI?.browser?.closeTab(id)
     const { tabs: currentTabs, activeTabId: currentActive } = useBrowserTabs.getState()
     const remaining = currentTabs.filter((tab) => tab.id !== id)
+    const isClosingLastTab = currentTabs.length <= 1 || remaining.length === 0
+
+    if (isClosingLastTab) {
+      const result = await window.electronAPI?.browser?.createTab(DEFAULT_BROWSER_URL) as { success: boolean; tabId?: string } | undefined
+      if (!result?.success || !result.tabId) return
+
+      const replacementTab: BrowserTab = {
+        id: result.tabId,
+        url: DEFAULT_BROWSER_URL,
+        title: 'New Tab',
+        loading: true,
+        canGoBack: false,
+        canGoForward: false,
+        domain: extractBrowserDomain(DEFAULT_BROWSER_URL),
+        owner: 'manual',
+        required: false,
+        activity: 'idle',
+      }
+      browserTabActivationSequencer.invalidate()
+      setTabs([replacementTab])
+      setActiveTabId(result.tabId)
+      setUrlInput('')
+      await window.electronAPI?.browser?.closeTab(id)
+      await syncTabsFromBackend()
+      requestAnimationFrame(() => sendBoundsImmediate({ forceExact: true }))
+      return
+    }
+
+    await window.electronAPI?.browser?.closeTab(id)
     if (id === currentActive) {
       if (remaining.length > 0) {
         const nextTab = remaining[remaining.length - 1]
@@ -143,7 +171,7 @@ export function useBrowserTabActions({
     }
     setTabs(remaining)
     await syncTabsFromBackend()
-  }, [isElectron, setTabs, setActiveTabId, setUrlInput, syncTabsFromBackend])
+  }, [isElectron, sendBoundsImmediate, setTabs, setActiveTabId, setUrlInput, syncTabsFromBackend])
 
   const handleTabClick = useCallback(async (id: string) => {
     if (!isElectron) return

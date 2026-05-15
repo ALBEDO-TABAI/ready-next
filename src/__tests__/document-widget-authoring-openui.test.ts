@@ -117,4 +117,42 @@ describe('document widget authoring with OpenUI component specs', () => {
     assert.match(updated?.content || '', /核心概念/)
     assert.match(updated?.content || '', /建议定期复习巩固/)
   })
+
+  it('inserts relationship graph component specs without raw coordinate SVG', async () => {
+    const store = useDocTabs.getState()
+    const tab = store.tabs[0]
+    store.setTabContent(tab.id, '# 人物关系图\n')
+
+    const result = await performDocAction({
+      type: 'insert_widget',
+      title: 'idiot_relationship_graph',
+      componentSpec: {
+        component: 'relationship_graph',
+        props: {
+          heading: '《白痴》人物关系图',
+          groups: [
+            { id: 'core', label: '核心三角', position: 'center' },
+            { id: 'family', label: '叶班钦家族', position: 'right' },
+          ],
+          nodes: [
+            { id: 'duke', label: '梅诗金公爵', group: 'core', emphasis: 'primary' },
+            { id: 'nastasya', label: '娜斯塔霞', group: 'core', emphasis: 'primary' },
+            { id: 'aglaia', label: '阿格拉雅', group: 'family' },
+          ],
+          edges: [
+            { from: 'duke', to: 'nastasya', kind: 'emotion', label: '怜悯/吸引' },
+            { from: 'aglaia', to: 'duke', kind: 'emotion', label: '好奇' },
+          ],
+        },
+      },
+      position: 'append_end',
+      tabId: tab.id,
+    })
+
+    const updated = useDocTabs.getState().tabs.find((item) => item.id === tab.id)
+    assert.match(result, /插入 widget/)
+    assert.match(updated?.content || '', /"component":"relationship_graph"/)
+    assert.match(updated?.content || '', /data-rg-root/)
+    assert.doesNotMatch(updated?.content || '', /<line\b[^>]*x1=/)
+  })
 })

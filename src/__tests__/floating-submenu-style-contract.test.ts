@@ -64,13 +64,18 @@ test('file tree context menus use a native popup above BrowserView without hidin
 
 test('shared submenu styles use the denser browser-like frosted background and hover treatment', () => {
   const styles = readWorkspaceFile('src/renderer/components/layout/filesPanelFloatingMenu.css')
+  const themeStyles = readWorkspaceFile('src/renderer/styles/index.css')
+  const menuHelpers = readWorkspaceFile('src/renderer/components/ui/floatingMenuStyles.ts')
 
   assert.match(styles, /\.ready-floating-menu\s*\{/)
-  assert.match(styles, /rgba\(236,\s*239,\s*243,\s*0\.92\)/)
-  assert.match(styles, /rgba\(246,\s*248,\s*251,\s*0\.72\)/)
+  assert.match(styles, /background:\s*var\(--chat-menu-frost-bg\) !important/)
+  assert.match(styles, /background:\s*var\(--chat-menu-hover-bg\) !important/)
   assert.match(styles, /html\[data-skin='liquid-glass'\] \.ready-floating-menu\s*\{/)
   assert.match(styles, /backdrop-filter:\s*blur\(calc\(var\(--lg-blur-strong\) \* 1\.28\)\)/)
   assert.match(styles, /\.ready-floating-menu-item:hover\s*\{/)
+  assert.match(themeStyles, /html\[data-theme='dark'\]\s*\{[\s\S]*--chat-menu-frost-bg:\s*color-mix\(in srgb,\s*var\(--surface-floating-bg\) 88%,\s*rgba\(255,\s*255,\s*255,\s*0\.02\)\);/)
+  assert.match(menuHelpers, /background:\s*'var\(--chat-menu-frost-bg,/)
+  assert.doesNotMatch(styles, /rgba\(236,\s*239,\s*243,\s*0\.92\) !important/)
 })
 
 test('floating submenu check indicators stay neutral instead of blue', () => {
@@ -80,5 +85,6 @@ test('floating submenu check indicators stay neutral instead of blue', () => {
   assert.doesNotMatch(String(checkedStyle.border), /color-blue/)
   assert.doesNotMatch(String(checkedStyle.background), /color-blue/)
   assert.doesNotMatch(String(checkedStyle.background), /linear-gradient/)
+  assert.doesNotMatch(String(checkedStyle.background), /255,255,255,0\.82/)
   assert.doesNotMatch(String(uncheckedStyle.border), /color-blue/)
 })

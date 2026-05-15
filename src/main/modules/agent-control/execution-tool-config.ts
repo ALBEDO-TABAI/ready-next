@@ -251,13 +251,13 @@ export function buildToolGuidance(policy: ToolPolicy): string {
 当前用户的请求可能涉及文档操作。如果用户明确要求编辑、修改或保存文档，请使用 document_* 工具。
 
 **判断标准**:
-- "修改第一段" → 使用 document_update_section
+- "修改第一段" → 使用 document_rewrite_section 或 document_replace_exact
 - "把这段原文精准改掉" → 使用 document_replace_exact
 - "在文档里做一个交互图表/组件" → 使用 document_insert_widget
 - "看看文档里有哪些 widget" → 使用 document_list_widgets
-- "更新这个 widget / 改图表内容" → 使用 document_update_widget
+- "更新这个 widget / 改图表内容" → 使用 document_update_widget，不要用 document_replace_text / document_replace_exact 修改 show-widget 围栏内部
 - "删掉这个 widget" → 使用 document_remove_widget
-- "保存文档" → 使用 document_save
+- "保存文档" → 使用 document_save_tab
 - "你是谁" → 直接回答，不使用工具
 - "这篇文章怎么样" → 直接回答，不使用工具
 `)

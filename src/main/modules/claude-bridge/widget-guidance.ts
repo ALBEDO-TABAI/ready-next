@@ -32,10 +32,11 @@ export interface DocumentWidgetProfile {
 }
 
 function looksLikeGenericWidgetAsk(userText: string): boolean {
-  return /(图表|可视化|widget|show-widget|生成式\s*ui|数据图|趋势图|卡片组件|信息卡|表格|提示块|对比卡|进度卡|日程卡|待办|习惯|计划板)/i.test(userText)
+  return /(图表|可视化|widget|show-widget|生成式\s*ui|数据图|趋势图|关系图|人物关系|卡片组件|信息卡|表格|提示块|对比卡|进度卡|日程卡|待办|习惯|计划板)/i.test(userText)
 }
 
 function inferWidgetFamily(userText: string): DocumentWidgetFamily {
+  if (/(人物关系|关系图|关系网络|人物网络|character relationship|relationship graph|relationship map)/i.test(userText)) return 'relationship_graph'
   if (/(信息卡|摘要卡|推荐卡|结论卡|summary card|info card)/i.test(userText)) return 'info_card'
   if (/(提示块|提醒块|告警块|callout|提醒卡|风险提示|结论提示)/i.test(userText)) return 'callout_block'
   if (/(表格|清单表|数据表|table|对照表|明细表)/i.test(userText)) return 'data_table'
@@ -51,7 +52,7 @@ function inferWidgetFamily(userText: string): DocumentWidgetFamily {
   if (/(本周|下周|周报|周计划|weekly|week)/i.test(userText)) return 'weekly_focus_chart'
   if (/(周计划板|计划板|kanban|board)/i.test(userText)) return 'weekly_plan_board_manual'
   if (/(评分|打分|计算器|预算|估算|score|calculator|estimate|budget)/i.test(userText)) return 'mini_calculator'
-  if (/(流程|步骤|架构图|关系图|flow|diagram|pipeline)/i.test(userText)) return 'flow_diagram'
+  if (/(流程|步骤|架构图|flow|diagram|pipeline)/i.test(userText)) return 'flow_diagram'
   if (/(科研绘图|研究结果|实验结果|investment trend|投资趋向|数据动态|动态变化|走势分析)/i.test(userText)) return 'line_chart'
   if (/(趋势|折线|line chart|time series|走势)/i.test(userText)) return 'line_chart'
   if (/(柱状|条形|分类对比|bar chart|compare|comparison)/i.test(userText)) return 'bar_chart'
@@ -156,6 +157,17 @@ function buildFamilyGuidance(family: DocumentWidgetFamily): {
         guidanceBullets: [
           '优先单个 SVG，保证结构完整，不要只输出背景壳。',
           '节点和连线密度适中，优先清晰层级而不是装饰。',
+        ],
+      }
+    case 'relationship_graph':
+      return {
+        interactionHint: '结构化人物/对象关系图',
+        titleHint: 'relationship_graph',
+        implementationHint: 'HTML cards + SVG overlay',
+        guidanceBullets: [
+          '人物关系图优先使用 relationship_graph 的 componentSpec，不要手写 SVG 坐标，也不要拆成裸 Mermaid 文本。',
+          '模型只提供 groups、nodes、edges；卡片排版、连线端点和图例交给组件渲染。',
+          '节点 id 保持稳定，中文人物名放在 label；edges.from / edges.to 必须引用已存在的节点 id。',
         ],
       }
     case 'bar_chart':

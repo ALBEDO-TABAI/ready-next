@@ -104,6 +104,7 @@ import {
   type ToolExecutionOutput,
 } from './tool-result-types'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
+import { findDocumentVisualSyntaxIssue } from '../../../shared/document-visual-syntax'
 import { createRotatingLogger } from '../../utils/rotating-logger'
 
 const agentSdkLogger = createRotatingLogger('ready-agent-sdk.log')
@@ -357,6 +358,29 @@ function findAttachmentByMention(
   }) || null
 }
 
+function isEditableDocumentPath(path: string): boolean {
+  return /\.(?:md|markdown|txt|docx?)$/i.test(path)
+}
+
+function collectUniqueEditableAttachments(
+  attachments: Array<{ name: string; path: string }>,
+): Array<{ name: string; path: string }> {
+  const seen = new Set<string>()
+  const result: Array<{ name: string; path: string }> = []
+  for (const attachment of attachments) {
+    if (!isEditableDocumentPath(attachment.path)) continue
+    const key = attachment.path || attachment.name
+    if (!key || seen.has(key)) continue
+    seen.add(key)
+    result.push(attachment)
+  }
+  return result
+}
+
+function isImplicitSingleDocumentEditInstruction(primary: string): boolean {
+  return /(?:修复|修正|修一下|修改|改一下|改成|改写|编辑|润色|优化|替换|删除|删掉|调整|排版)/.test(primary)
+}
+
 function resolveDocumentTargetGuard(message: RunMessage, requestEnvelope?: unknown): DocumentTargetGuard | null {
   const envelopeRefs = parseEnvelopeResourceReferences(requestEnvelope)
   const primary = envelopeRefs.primaryInstruction || primaryInstructionText(message)
@@ -376,13 +400,23 @@ function resolveDocumentTargetGuard(message: RunMessage, requestEnvelope?: unkno
     while ((match = pattern.exec(primary)) !== null) {
       const attachment = findAttachmentByMention(attachments, match[1] || '')
       if (!attachment) continue
-      if (!/\.(?:md|markdown|txt|docx?)$/i.test(attachment.path)) continue
+      if (!isEditableDocumentPath(attachment.path)) continue
       return {
         targetName: attachment.name,
         targetPath: attachment.path,
         opened: false,
         preserveExistingContent: shouldPreserveExistingDocumentContent(primary),
       }
+    }
+  }
+  const editableAttachments = collectUniqueEditableAttachments(attachments)
+  if (editableAttachments.length === 1 && isImplicitSingleDocumentEditInstruction(primary)) {
+    const attachment = editableAttachments[0]
+    return {
+      targetName: attachment.name,
+      targetPath: attachment.path,
+      opened: false,
+      preserveExistingContent: shouldPreserveExistingDocumentContent(primary),
     }
   }
   return null
@@ -573,8 +607,30 @@ const DOCUMENT_TARGET_MUTATION_TOOL_NAMES = new Set([
   'document_rewrite_section',
 ])
 
-function hasDocumentTargetMutation(usedTools: string[]): boolean {
-  return usedTools.some((name) => DOCUMENT_TARGET_MUTATION_TOOL_NAMES.has(name))
+function isDocumentNoMutationText(text: string): boolean {
+  return /(?:内容未变化|无变化|未做改动|已跳过|已是目标格式)/i.test(text)
+}
+
+function isDocumentToolFailureText(text: string): boolean {
+  return /(?:^Error:|Document action failed|failed|失败|无法|没有可|未匹配到|未找到|缺少|已拒绝|被拒绝|已取消|被取消)/i.test(text)
+}
+
+function getToolDataRecord(output: ToolExecutionOutput): Record<string, unknown> {
+  return output.data && typeof output.data === 'object'
+    ? output.data as Record<string, unknown>
+    : {}
+}
+
+function documentToolMutatedContent(output: ToolExecutionOutput): boolean {
+  const data = getToolDataRecord(output)
+  if (typeof data.mutated === 'boolean') return data.mutated
+  return !isDocumentToolFailureText(output.text) && !isDocumentNoMutationText(output.text)
+}
+
+function documentSaveSucceeded(output: ToolExecutionOutput): boolean {
+  const data = getToolDataRecord(output)
+  if (typeof data.documentSaved === 'boolean') return data.documentSaved
+  return !isDocumentToolFailureText(output.text)
 }
 
 function normalizeExplicitDocumentTargetToolArgs(
@@ -591,7 +647,7 @@ function buildDocumentTargetRepairInput(guard: DocumentTargetGuard): string {
   return [
     '系统检查：目标文档尚未发生实际写入，上一轮不能算完成。',
     `请现在直接把结果写入目标文档 ${guard.targetName} (${guard.targetPath})。`,
-    '必须调用 document_set_content、document_append_content 或 document_insert_widget 之一完成写入，并确保 document_save_tab 保存成功。',
+    '如果是在修已有 widget 或信息卡，必须调用 document_update_widget；其他文本内容请调用 document_set_content、document_append_content 或 document_insert_widget 完成写入，并确保 document_save_tab 保存成功。',
     '不要只说明计划，不要输出伪工具调用文本；完成工具调用后再用中文简短确认。',
   ].join('\n')
 }
@@ -615,7 +671,7 @@ function buildDocumentTargetContinuationRepairInput(guard: DocumentTargetGuard):
   return [
     '系统检查：上一轮回复表示目标文档还没补完，因此不能进入完成态。',
     `请现在继续修正目标文档 ${guard.targetName} (${guard.targetPath})，把未完成或截断的部分补完整。`,
-    '必须调用 document_set_content、document_append_content 或 document_replace_text/replace_exact 完成修正，并调用 document_save_tab 保存。',
+    '必须调用 document_set_content、document_append_content、document_replace_text 或 document_replace_exact 完成修正；如果是在修已有 widget，请改用 document_update_widget。最后调用 document_save_tab 保存。',
     '完成后只简短确认，不要再说“我会补完”。',
   ].join('\n')
 }
@@ -657,6 +713,8 @@ async function inspectDocumentTargetContent(
       }
     }
   }
+  const visualSyntaxIssue = findDocumentVisualSyntaxIssue(content)
+  if (visualSyntaxIssue) return visualSyntaxIssue
   if (
     options.forbidFutureLeakage
     && /(?:日后|将来|未来|后续剧情|后续章节|后续待展开|情感纠葛|争夺)/.test(content)
@@ -676,9 +734,13 @@ function buildDocumentTargetContentRepairInput(guard: DocumentTargetGuard, issue
     `请修正目标文档 ${guard.targetName} (${guard.targetPath})。`,
     buildPreservedContentRepairContext(guard),
     '如果用户没有明确要求 widget、信息卡或交互式图表，请把损坏的 show-widget 改成稳定的 Markdown 表格、文本关系图或 Mermaid 图。',
+    '如果问题是 Mermaid/关系图源码裸露，请把所有 graph/flowchart 节点和连线合并到一个完整的 ```mermaid 代码块里；如果不确定语法能通过，就改成 Markdown 表格或文本关系图。',
+    '如果 Mermaid 代码块语法不兼容，请优先改成 Markdown 表格；若继续用 Mermaid，连线标签用 A -->|关系| B，不要用 A -- "关系" --- B。',
+    '修复后，```mermaid 代码块外不能再留下 graph/flowchart、%% 注释、节点声明或 -- / --> / --- 这类连线源码。',
+    '如果问题是 show-widget 或信息卡损坏，优先调用 document_update_widget 修复已有 widget；不要用 document_replace_text 或 document_replace_exact 修改 show-widget 围栏内部。',
     '如果问题是后续剧情或未来话术，请删除这些内容，只保留指定章节内已经发生或已明示的信息。',
     '如果问题是原有内容缺失，请先恢复原有内容，再把新增内容放在目标位置，不要覆盖原有笔记。',
-    '必须调用 document_set_content、document_replace_text、document_replace_exact 或 document_append_content 完成修正，并调用 document_save_tab 保存。',
+    '必须调用 document_update_widget、document_set_content、document_replace_text、document_replace_exact 或 document_append_content 完成修正，并调用 document_save_tab 保存。',
     '完成后只简短确认。',
   ].join('\n')
 }
@@ -2160,6 +2222,8 @@ export class AgentSdkRuntime extends EventEmitter {
     let finalText = ''
     let documentTargetGuardForRecovery: DocumentTargetGuard | null = null
     let requiresLocalDocumentExcerptForRecovery = false
+    let hasSuccessfulDocumentTargetMutation = false
+    let lastDocumentSaveSuccessText: string | null = null
 
     if (session.abortController) {
       const previousAbortController = session.abortController
@@ -2351,7 +2415,6 @@ export class AgentSdkRuntime extends EventEmitter {
       const hasVeaPipelineTool = toolDefinitions.some((definition) => definition.name === 'skill_video_expert_pipeline')
       const allowedToolNames = toolDefinitions.map((definition) => definition.name)
       let lastDocumentSaveFailure: string | null = null
-      let lastDocumentSaveSuccessText: string | null = null
       let newDocumentNeedsSave = false
       const toolBridgeRuntimeContext: ToolBridgeRuntimeContext = {
         agentName: name,
@@ -2373,10 +2436,14 @@ export class AgentSdkRuntime extends EventEmitter {
           usedTools.push(toolName)
           const normalized = normalizeToolExecutionOutput(output)
           const documentToolFailed = this.isDocumentToolFailure(normalized)
-          const documentToolChangedContent = !documentToolFailed && !/内容未变化|已跳过/i.test(normalized.text)
+          const documentToolChangedContent = DOCUMENT_TARGET_MUTATION_TOOL_NAMES.has(toolName)
+            && !documentToolFailed
+            && documentToolMutatedContent(normalized)
+          if (documentToolChangedContent) {
+            hasSuccessfulDocumentTargetMutation = true
+          }
           if (
-            DOCUMENT_TARGET_MUTATION_TOOL_NAMES.has(toolName)
-            && documentToolChangedContent
+            documentToolChangedContent
             && usedTools.includes('document_new_tab')
           ) {
             newDocumentNeedsSave = true
@@ -2385,7 +2452,7 @@ export class AgentSdkRuntime extends EventEmitter {
             lastDocumentSaveFailure = documentToolFailed
               ? normalized.text || 'document_save_tab failed'
               : null
-            if (!documentToolFailed) {
+            if (!documentToolFailed && documentSaveSucceeded(normalized)) {
               lastDocumentSaveSuccessText = normalized.text
               newDocumentNeedsSave = false
             }
@@ -2549,7 +2616,7 @@ export class AgentSdkRuntime extends EventEmitter {
           }
           if (
             documentTargetGuard
-            && !hasDocumentTargetMutation(usedTools)
+            && !hasSuccessfulDocumentTargetMutation
             && documentTargetRepairAttempts < 1
           ) {
             documentTargetRepairAttempts += 1
@@ -2705,7 +2772,7 @@ export class AgentSdkRuntime extends EventEmitter {
           })
         }
       }
-      if (documentTargetGuard && !hasDocumentTargetMutation(usedTools)) {
+      if (documentTargetGuard && !hasSuccessfulDocumentTargetMutation) {
         const message = `目标文档 ${documentTargetGuard.targetName} 尚未实际写入，不能声明完成。`
         emitOutput(message, 'error')
         emitOutput('', 'done')
@@ -2741,7 +2808,7 @@ export class AgentSdkRuntime extends EventEmitter {
           lastDocumentSaveFailure = '本轮未开放 document_save_tab'
         }
       }
-      if (lastDocumentSaveFailure && hasDocumentTargetMutation(usedTools)) {
+      if (lastDocumentSaveFailure && hasSuccessfulDocumentTargetMutation) {
         const message = `文档保存失败，不能声明完成：${lastDocumentSaveFailure}`
         emitOutput(message, 'error')
         emitOutput('', 'done')
@@ -2835,7 +2902,8 @@ export class AgentSdkRuntime extends EventEmitter {
       if (
         /Max turns \(\d+\) exceeded/i.test(message)
         && documentTargetGuardForRecovery
-        && hasDocumentTargetMutation(usedTools)
+        && hasSuccessfulDocumentTargetMutation
+        && lastDocumentSaveSuccessText
         && (
           !requiresLocalDocumentExcerptForRecovery
           || usedTools.includes('file_read_excerpt')
@@ -2862,6 +2930,26 @@ export class AgentSdkRuntime extends EventEmitter {
             terminalReason: 'done',
           })
         }
+      }
+      if (
+        /Max turns \(\d+\) exceeded/i.test(message)
+        && documentTargetGuardForRecovery
+        && !hasSuccessfulDocumentTargetMutation
+      ) {
+        const checkpointText = `本轮工具调用次数已用完，但目标文档 ${documentTargetGuardForRecovery.targetName} 还没有发生有效写入。请继续这项任务，我会从当前文档状态接着修。`
+        emitOutput(checkpointText, 'text')
+        emitOutput('', 'done', this.mergeProjectionPatches(projectionPatches))
+        emitStatus('checkpoint', 'checkpoint_budget')
+        return this.buildResult({
+          success: true,
+          finalText: checkpointText,
+          cancelled: false,
+          taskId,
+          usedTools,
+          transcriptEvents,
+          projectionPatches,
+          terminalReason: 'checkpoint_budget',
+        })
       }
       const failure = classifySdkRuntimeError(error)
       emitOutput(`${failure.userMessagePrefix}: ${message}`, 'error')
@@ -3006,7 +3094,7 @@ export class AgentSdkRuntime extends EventEmitter {
       : {}
     return (
       typeof data.errorKind === 'string'
-      || /(?:^Error:|Document action failed|failed|失败|无法|没有可)/i.test(normalized.text)
+      || isDocumentToolFailureText(normalized.text)
     )
   }
 
@@ -3147,7 +3235,7 @@ export class AgentSdkRuntime extends EventEmitter {
       && definition.name === 'document_open_tab'
       && String(effectiveArgs.path || '').trim() === guard.targetPath
       && !(normalized.data && typeof normalized.data === 'object' && 'errorKind' in normalized.data)
-      && !/(?:^Error:|Document action failed|failed|失败|无法)/i.test(normalized.text)
+      && !isDocumentToolFailureText(normalized.text)
     ) {
       guard.opened = true
     }
@@ -3164,7 +3252,7 @@ export class AgentSdkRuntime extends EventEmitter {
       guard
       && DOCUMENT_TARGET_MUTATION_TOOL_NAMES.has(definition.name)
       && !this.isDocumentToolFailure(normalized)
-      && !/内容未变化|已跳过/i.test(normalized.text)
+      && documentToolMutatedContent(normalized)
     ) {
       const saveBlocker = await this.ensureExplicitDocumentTargetSaved(runtimeContext)
       if (saveBlocker) return saveBlocker

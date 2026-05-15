@@ -1,6 +1,7 @@
 import {
   Children,
   isValidElement,
+  memo,
   useCallback,
   useEffect,
   useId,
@@ -14,8 +15,10 @@ import {
   Check,
   Copy,
   ExternalLink,
+  Wrench,
 } from 'lucide-react'
 import { browserTabActivationSequencer } from '../../modules/browser/browserTabActivationSequencer'
+import { appendToAgentInput } from '../../modules/agent/chat-input-bridge'
 import { useBrowserTabs } from '../../stores/useBrowserTabs'
 import { useMode } from '../../stores/useMode'
 import { EBOOK_MARKDOWN_MARKER } from '../../../shared/ebook'
@@ -302,11 +305,16 @@ function MermaidBlock({ code }: { code: string }) {
 
   if (error) {
     return (
-      <div className="note-preview-mermaid note-preview-mermaid--error">
+      <div className="note-preview-mermaid note-preview-mermaid--error" data-ready-mermaid-render-error={error}>
         <div className="note-preview-mermaid__error">Mermaid 渲染失败：{error}</div>
-        <pre className="note-preview-markdown-pre">
-          <code className="language-mermaid note-preview-markdown-code">{code}</code>
-        </pre>
+        <button
+          type="button"
+          className="note-preview-repair-button"
+          onClick={() => appendToAgentInput(`请修复当前文档里渲染失败的 Mermaid 图。预览报错：${error}`)}
+        >
+          <Wrench size={14} strokeWidth={2} />
+          <span>让 AI 修复</span>
+        </button>
       </div>
     )
   }
@@ -319,10 +327,31 @@ function MermaidBlock({ code }: { code: string }) {
           dangerouslySetInnerHTML={{ __html: svg }}
         />
       ) : (
-        <pre className="note-preview-markdown-pre note-preview-mermaid__loading">
-          <code className="language-mermaid note-preview-markdown-code">{code}</code>
-        </pre>
+        <div className="note-preview-mermaid__loading" aria-live="polite">
+          正在渲染图表…
+        </div>
       )}
+    </div>
+  )
+}
+
+function BrokenWidgetFallback({ reason }: { reason: string }) {
+  return (
+    <div className="note-preview-widget-error" data-ready-widget-error="true">
+      <div className="note-preview-widget-error__title">此信息卡已损坏</div>
+      <div className="note-preview-widget-error__body">{reason}</div>
+      <div className="note-preview-widget-error__actions">
+        <button
+          type="button"
+          className="note-preview-repair-button"
+          data-ready-widget-repair="true"
+          onClick={() => appendToAgentInput(`请修复当前文档里损坏的信息卡。问题：${reason}`)}
+        >
+          <Wrench size={14} strokeWidth={2} />
+          <span>让 AI 修复</span>
+        </button>
+        <span>也可以切到编辑模式手动修复。</span>
+      </div>
     </div>
   )
 }
@@ -332,7 +361,7 @@ function isMermaidPreChildren(children: ReactNode): boolean {
   return isValidElement<{ className?: string }>(onlyChild) && isMermaidLanguage(onlyChild.props.className)
 }
 
-export default function NotePreview({
+function NotePreview({
   content,
   notePath,
   focusWidgetTitle,
@@ -585,9 +614,15 @@ export default function NotePreview({
             )
           }
 
+          if (block.type === 'widget_error') {
+            return <BrokenWidgetFallback key={block.id} reason={block.reason} />
+          }
+
           return null
         })}
       </div>
     </div>
   )
 }
+
+export default memo(NotePreview)

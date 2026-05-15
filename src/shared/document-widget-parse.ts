@@ -42,6 +42,7 @@ export interface DocumentWidgetData {
 export type DocumentWidgetSegment =
   | { type: 'text'; content: string }
   | { type: 'widget'; data: DocumentWidgetData }
+  | { type: 'invalid-widget'; content: string; reason: string }
 
 export type WidgetRenderMode = 'static-svg' | 'static-html' | 'scripted'
 
@@ -212,8 +213,9 @@ export function parseShowWidgetFences(text: string): DocumentWidgetSegment[] {
       })
     } else {
       segments.push({
-        type: 'text',
+        type: 'invalid-widget',
         content: fullMatch,
+        reason: 'show-widget JSON 不完整或无法解析',
       })
     }
 

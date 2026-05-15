@@ -43,6 +43,7 @@ export type PreviewBlock =
   | { id: string; type: 'embed'; embedId: string }
   | { id: string; type: 'chips'; chips: PreviewTag[] }
   | { id: string; type: 'widget'; widgetId: string }
+  | { id: string; type: 'widget_error'; reason: string }
 
 export interface StructuredNotePreview {
   properties: PreviewProperty[]
@@ -961,7 +962,9 @@ function parseBodyBlocks(
   widgetSegments.forEach((segment) => {
     const normalizedSegments = segment.type === 'widget'
       ? [segment]
-      : parseBareWidgetPayloadSegments(segment.content)
+      : segment.type === 'invalid-widget'
+        ? [segment]
+        : parseBareWidgetPayloadSegments(segment.content)
 
     normalizedSegments.forEach((subsegment) => {
       if (subsegment.type === 'widget') {
@@ -974,6 +977,16 @@ function parseBodyBlocks(
           id: makeId('widget-block', widgetId, blockIndex.value),
           type: 'widget',
           widgetId,
+        })
+        blockIndex.value += 1
+        return
+      }
+
+      if (subsegment.type === 'invalid-widget') {
+        blocks.push({
+          id: makeId('widget-error', subsegment.reason, blockIndex.value),
+          type: 'widget_error',
+          reason: subsegment.reason,
         })
         blockIndex.value += 1
         return

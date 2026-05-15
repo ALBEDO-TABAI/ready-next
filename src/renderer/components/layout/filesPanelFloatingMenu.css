@@ -1,8 +1,5 @@
 .ready-floating-menu {
-  box-shadow:
-    0 12px 28px rgba(24, 39, 77, 0.1),
-    0 4px 10px rgba(24, 39, 77, 0.04),
-    inset 0 1px 0 rgba(255, 255, 255, 0.38) !important;
+  box-shadow: var(--chat-menu-shadow) !important;
 }
 
 .ready-floating-menu-item {
@@ -14,39 +11,31 @@
 }
 
 .ready-floating-menu-item:hover {
-  background: color-mix(in srgb, rgba(255, 255, 255, 0.24) 72%, rgba(0, 0, 0, 0.02)) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24);
+  background: var(--chat-menu-hover-bg) !important;
+  box-shadow: var(--chat-menu-hover-shadow);
 }
 
 .ready-floating-menu-item.is-selected {
-  background: rgba(239, 242, 246, 0.66) !important;
-  border-color: rgba(222, 228, 236, 0.42) !important;
-  box-shadow:
-    0 6px 14px rgba(15, 23, 42, 0.03),
-    inset 0 1px 0 rgba(255, 255, 255, 0.5) !important;
+  background: var(--chat-menu-selected-bg) !important;
+  border-color: var(--chat-menu-selected-border) !important;
+  box-shadow: var(--chat-menu-selected-shadow) !important;
 }
 
 html[data-skin='liquid-glass'] .ready-floating-menu {
-  background: rgba(236, 239, 243, 0.92) !important;
-  border-color: rgba(255, 255, 255, 0.42) !important;
-  box-shadow:
-    0 18px 36px rgba(30, 46, 82, 0.12),
-    0 6px 14px rgba(30, 46, 82, 0.05),
-    inset 0 1px 0 rgba(255, 255, 255, 0.72),
-    inset 0 -1px 0 rgba(255, 255, 255, 0.2) !important;
+  background: var(--chat-menu-frost-bg) !important;
+  border-color: var(--chat-menu-frost-border) !important;
+  box-shadow: var(--chat-menu-shadow) !important;
   backdrop-filter: blur(calc(var(--lg-blur-strong) * 1.28)) saturate(calc(var(--surface-saturate) - 8%)) contrast(1.01) !important;
   -webkit-backdrop-filter: blur(calc(var(--lg-blur-strong) * 1.28)) saturate(calc(var(--surface-saturate) - 8%)) contrast(1.01) !important;
 }
 
 html[data-skin='liquid-glass'] .ready-floating-menu-item:hover {
-  background: rgba(246, 248, 251, 0.72) !important;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.34);
+  background: var(--chat-menu-hover-bg) !important;
+  box-shadow: var(--chat-menu-hover-shadow);
 }
 
 html[data-skin='liquid-glass'] .ready-floating-menu-item.is-selected {
-  background: rgba(239, 242, 246, 0.66) !important;
-  border-color: rgba(222, 228, 236, 0.42) !important;
-  box-shadow:
-    0 6px 14px rgba(15, 23, 42, 0.03),
-    inset 0 1px 0 rgba(255, 255, 255, 0.58) !important;
+  background: var(--chat-menu-selected-bg) !important;
+  border-color: var(--chat-menu-selected-border) !important;
+  box-shadow: var(--chat-menu-selected-shadow) !important;
 }

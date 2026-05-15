@@ -29,7 +29,7 @@ describe('document widget fence parsing', () => {
     }
   })
 
-  it('keeps malformed widget fences as text so preview does not break', () => {
+  it('keeps malformed widget fences as an error block so preview does not expose source', () => {
     const segments = parseShowWidgetFences([
       'before',
       '```show-widget',
@@ -39,10 +39,14 @@ describe('document widget fence parsing', () => {
     ].join('\n'))
 
     assert.equal(segments.length, 3)
-    assert.equal(segments[1]?.type, 'text')
-    if (segments[1]?.type === 'text') {
-      assert.match(segments[1].content, /```show-widget/)
+    assert.equal(segments[1]?.type, 'invalid-widget')
+    if (segments[1]?.type === 'invalid-widget') {
+      assert.match(segments[1].reason, /JSON/)
     }
+    const preview = buildStructuredNotePreview(segments.map((segment) => (
+      segment.type === 'invalid-widget' ? segment.content : segment.type === 'text' ? segment.content : segment.data.rawFence
+    )).join(''))
+    assert.deepEqual(preview.blocks.map((block) => block.type), ['markdown', 'widget_error', 'markdown'])
   })
 
   it('adds widget blocks into structured note preview in order', () => {

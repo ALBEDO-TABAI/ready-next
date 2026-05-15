@@ -7,17 +7,26 @@ const READY_BROWSER_BLANK_HTML = `<!doctype html>
   <style>
     :root {
       color-scheme: light dark;
-      background: #f4f2ee;
+      --ready-blank-surface: #eff2f6;
+      background: var(--ready-blank-surface);
     }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --ready-blank-surface: #24282e;
+      }
+    }
+
     html,
     body {
       margin: 0;
       width: 100%;
+      height: 100%;
       min-height: 100%;
-      background:
-        radial-gradient(circle at 18% 12%, rgba(255,255,255,0.78), transparent 34rem),
-        linear-gradient(135deg, #f7f5f1 0%, #ece9e2 100%);
+      background: var(--ready-blank-surface);
     }
+
+    body { overflow: hidden; }
   </style>
 </head>
 <body></body>

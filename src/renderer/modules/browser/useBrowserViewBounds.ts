@@ -340,7 +340,7 @@ export function useBrowserViewBounds({
 
   useEffect(() => {
     void syncBrowserVisibility({ forceExact: true })
-  }, [isActive, isVisibleAllowed, syncBrowserVisibility])
+  }, [hasError, isActive, isVisibleAllowed, syncBrowserVisibility])
 
   useEffect(() => {
     const pendingSelfHealTimers: number[] = []

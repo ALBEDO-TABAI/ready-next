@@ -1,5 +1,11 @@
 import { DOCUMENT_SCHEMAS } from './schemas/document-schemas'
 import { zodObjectToParamList } from './zod-param-derivation'
+import { logAgentMetric } from '../agent-control/metrics'
+import { TOOL_ERROR_METRICS } from '../agent-control/tool-error-metrics'
+import {
+  createToolExecutionOutput,
+  type ToolExecutionOutput,
+} from '../agent-control/tool-result-types'
 
 interface ToolParam {
   name: string
@@ -151,7 +157,7 @@ export async function executeDocumentTool(
   toolName: string,
   args: Record<string, unknown>,
   context?: DocumentToolContext,
-): Promise<string> {
+): Promise<string | ToolExecutionOutput> {
   const tool = DOCUMENT_TOOLS.find((item) => item.name === toolName)
   if (!tool) return `Unknown document tool: ${toolName}`
 
@@ -216,7 +222,20 @@ export async function executeDocumentTool(
     try {
       const payload = await context.requestModuleToolAction(tool.action, args)
       const summary = typeof payload.summary === 'string' ? payload.summary.trim() : ''
-      if (summary) return summary
+      if (summary) {
+        const data = { ...payload }
+        delete data.summary
+        delete data.intent
+        if (data.errorKind === 'widget_boundary_violation') {
+          logAgentMetric(TOOL_ERROR_METRICS.widgetBoundaryViolation, {
+            toolName,
+            action: tool.action,
+          })
+        }
+        return Object.keys(data).length > 0
+          ? createToolExecutionOutput(summary, { shape: 'json', data })
+          : summary
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       return `Document action failed: ${tool.action} - ${message}`

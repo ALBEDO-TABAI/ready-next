@@ -128,6 +128,7 @@ test('inactive tabs get the same hover hint affordance without entering the acti
 test('browser shell layout adds corner fillers so the header chrome visually meets the page surface', () => {
   const browserShellLayout = readWorkspaceFile('src/renderer/components/browser/BrowserShellLayout.tsx')
 
+  assert.match(browserShellLayout, /const showBrowserViewCornerFill = isElectron && Boolean\(activeTab\) && !showReadyBlankPage && !activeTab\?\.error/)
   assert.match(browserShellLayout, /browser-shell-corner-fill-left/)
   assert.match(browserShellLayout, /browser-shell-corner-fill-right/)
   assert.doesNotMatch(browserShellLayout, /marginRight:\s*WORKBENCH_HEADER_EDGE_X/)

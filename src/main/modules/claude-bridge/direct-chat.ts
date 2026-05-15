@@ -233,11 +233,12 @@ const TOOL_SYSTEM_PROMPT = `
 当用户要求“直接改文档”“帮我写入并保存”时，请先基于用户语义做简短执行计划，再调用这些 document_* 工具执行真实操作。
 如果用户给出了明确的原文片段、句子、选区或精确引用，优先使用 document_replace_exact，避免整篇覆盖或误改重复片段。
 如果用户明确要求在文档里生成图表、交互组件、可视化说明、小工具或生成式 UI，优先使用 document_insert_widget，把 show-widget 围栏写入原文档。
-如果用户要求“看看现在有哪些 widget / 更新这个 widget / 删除这个 widget”，优先使用 document_list_widgets / document_update_widget / document_remove_widget，不要退回整篇覆盖。
+如果用户要求“看看现在有哪些 widget / 更新这个 widget / 删除这个 widget”，优先使用 document_list_widgets / document_update_widget / document_remove_widget，不要退回整篇覆盖，也不要用 document_replace_text / document_replace_exact 修改 show-widget 围栏内部。
 show-widget 规则：
 - 使用 \`\`\`show-widget 围栏
 - JSON 结构为 {"title":"snake_case_id","widget_code":"<div>...</div>"}
 - 如能表达为结构化组件规格，优先使用 document_insert_widget / document_update_widget 的 componentSpec 参数，不要总是自由编写原始 HTML
+- 人物关系图/关系网络优先用 componentSpec.component="relationship_graph"，只提供 groups/nodes/edges，不要手写 SVG 坐标
 - widget_code 可使用本地内联事件（如 oninput / onclick）完成简单交互
 - 复杂本地交互可追加小型内联 <script>，但不要依赖网络
 - 如需把 widget 内交互结果发回 agent，可使用 \`window.__readyWidgetSendMessage("...")\` 或 \`data-ready-agent-message="..."\` 触发

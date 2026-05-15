@@ -46,10 +46,10 @@ function captureTextareaAnchor(element: HTMLElement, content: string): Pick<Docu
     : null
 }
 
-function getElementContentOffset(container: HTMLElement, child: HTMLElement): number {
-  const containerRect = container.getBoundingClientRect()
+function getElementContentOffset(container: HTMLElement, child: HTMLElement, containerTop?: number): number {
+  const resolvedContainerTop = containerTop ?? container.getBoundingClientRect().top
   const childRect = child.getBoundingClientRect()
-  return childRect.top - containerRect.top + container.scrollTop
+  return childRect.top - resolvedContainerTop + container.scrollTop
 }
 
 function capturePreviewAnchor(element: HTMLElement): Pick<DocumentScrollAnchorSnapshot, 'anchorTitle' | 'anchorOrdinal' | 'anchorProgress'> | null {
@@ -57,6 +57,7 @@ function capturePreviewAnchor(element: HTMLElement): Pick<DocumentScrollAnchorSn
   if (headings.length === 0) return null
   const headingCounts = new Map<string, number>()
   const contentTop = element.scrollTop + 8
+  const containerTop = element.getBoundingClientRect().top
   let nearest: HTMLElement | null = null
   let nearestIndex = 0
   const ordinals = headings.map((heading) => {
@@ -67,7 +68,7 @@ function capturePreviewAnchor(element: HTMLElement): Pick<DocumentScrollAnchorSn
   })
   for (let index = 0; index < headings.length; index += 1) {
     const heading = headings[index]
-    const top = getElementContentOffset(element, heading)
+    const top = getElementContentOffset(element, heading, containerTop)
     if (top <= contentTop + 16) {
       nearest = heading
       nearestIndex = index
@@ -80,10 +81,10 @@ function capturePreviewAnchor(element: HTMLElement): Pick<DocumentScrollAnchorSn
     break
   }
   if (!nearest) return null
-  const sectionStart = getElementContentOffset(element, nearest)
+  const sectionStart = getElementContentOffset(element, nearest, containerTop)
   const nextHeading = headings[nearestIndex + 1] || null
   const sectionEnd = nextHeading
-    ? getElementContentOffset(element, nextHeading)
+    ? getElementContentOffset(element, nextHeading, containerTop)
     : Math.max(element.scrollHeight, sectionStart + element.clientHeight)
   const sectionLength = Math.max(1, sectionEnd - sectionStart)
   const progress = Math.max(0, Math.min(1, (contentTop - sectionStart) / sectionLength))
@@ -94,10 +95,16 @@ function capturePreviewAnchor(element: HTMLElement): Pick<DocumentScrollAnchorSn
   }
 }
 
-function captureElementScroll(element: HTMLElement, content: string): DocumentScrollAnchorSnapshot {
+function captureElementScroll(
+  element: HTMLElement,
+  content: string,
+  options?: { includeAnchor?: boolean },
+): DocumentScrollAnchorSnapshot {
   const maxScroll = Math.max(0, element.scrollHeight - element.clientHeight)
   const top = Math.max(0, Math.min(element.scrollTop, maxScroll))
-  const anchor = captureTextareaAnchor(element, content) || capturePreviewAnchor(element)
+  const anchor = options?.includeAnchor === false
+    ? null
+    : captureTextareaAnchor(element, content) || capturePreviewAnchor(element)
   return {
     top,
     ratio: maxScroll > 0 ? top / maxScroll : 0,
@@ -119,6 +126,7 @@ function restoreAnchorScroll(element: HTMLElement, snapshot: DocumentScrollAncho
   }
 
   const headings = Array.from(element.querySelectorAll<HTMLElement>('[data-ready-heading-title]'))
+  const containerTop = element.getBoundingClientRect().top
   let seenOrdinal = 0
   const targetIndex = headings.findIndex((heading) => {
     if (heading.dataset.readyHeadingTitle !== snapshot.anchorTitle) return false
@@ -128,10 +136,10 @@ function restoreAnchorScroll(element: HTMLElement, snapshot: DocumentScrollAncho
   })
   const target = targetIndex >= 0 ? headings[targetIndex] : null
   if (!target) return false
-  const sectionStart = getElementContentOffset(element, target)
+  const sectionStart = getElementContentOffset(element, target, containerTop)
   const nextHeading = headings[targetIndex + 1] || null
   const sectionEnd = nextHeading
-    ? getElementContentOffset(element, nextHeading)
+    ? getElementContentOffset(element, nextHeading, containerTop)
     : Math.max(element.scrollHeight, sectionStart + element.clientHeight)
   const maxScroll = Math.max(0, element.scrollHeight - element.clientHeight)
   const progress = Math.max(0, Math.min(1, snapshot.anchorProgress ?? 0))
@@ -326,13 +334,13 @@ export default function DocumentMode({
     return next
   }, [tabs])
 
-  const captureVisibleDocumentScrollPositions = useCallback(() => {
+  const captureVisibleDocumentScrollPositions = useCallback((options?: { includeAnchor?: boolean }) => {
     document.querySelectorAll<HTMLElement>('[data-ready-document-scroll-key]').forEach((scope) => {
       const key = scope.dataset.readyDocumentScrollKey
       if (!key) return
       const element = findCurrentScrollElement(scope)
       if (!element) return
-      scrollSnapshotsRef.current.set(key, captureElementScroll(element, tabByScrollKey.get(key)?.content || ''))
+      scrollSnapshotsRef.current.set(key, captureElementScroll(element, tabByScrollKey.get(key)?.content || '', options))
     })
   }, [tabByScrollKey])
 
@@ -419,7 +427,7 @@ export default function DocumentMode({
 
   const handleSplitResizeStateChange = useCallback((resizing: boolean) => {
     if (resizing) {
-      captureVisibleDocumentScrollPositions()
+      captureVisibleDocumentScrollPositions({ includeAnchor: false })
       restoreDocumentLayoutFreezeRef.current?.()
       restoreDocumentLayoutFreezeRef.current = freezeVisibleDocumentLayoutWidths()
       liveDocumentSplitRatioRef.current = documentSplitRatioRef.current
