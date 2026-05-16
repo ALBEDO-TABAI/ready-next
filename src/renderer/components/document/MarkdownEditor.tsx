@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useDocTabs, type DocTab } from '../../stores/useDocTabs'
 import EditorContextMenu from './EditorContextMenu'
+import MarkdownSelectionToolbar, {
+  type SelectionRange,
+} from './MarkdownSelectionToolbar'
 import NotePreview from './NotePreview'
 import { addDocumentQuoteReference, addDocumentWidgetTargetReference } from '../../modules/agent/chat-input-bridge'
 import type { DocumentWidgetPersistedState } from './widget-state-runtime'
@@ -203,6 +206,10 @@ export default function MarkdownEditor({
   }>({ visible: false, x: 0, y: 0 })
   const [contextSelection, setContextSelection] = useState<string>('')
 
+  // Selection toolbar state (markdown formatting on highlighted text)
+  const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null)
+  const [selectionAnchor, setSelectionAnchor] = useState<{ x: number; y: number } | null>(null)
+
   const currentExt = useMemo(() => getFileExt(tab.path), [tab.path])
   const documentScrollKey = useMemo(() => tab.path || tab.id, [tab.id, tab.path])
   const canSave = !!tab.path
@@ -342,6 +349,62 @@ export default function MarkdownEditor({
     updateTabContent(tab.id, e.target.value)
     setSaveState('idle')
   }, [tab.id, updateTabContent])
+
+  // ─── Selection tracking for floating toolbar ───────────────
+  const refreshSelectionRange = useCallback(() => {
+    const ta = rawEditorRef.current
+    if (!ta) return
+    const start = ta.selectionStart
+    const end = ta.selectionEnd
+    if (start === end) {
+      setSelectionRange(null)
+      setSelectionAnchor(null)
+      return
+    }
+    setSelectionRange({ start, end })
+  }, [])
+
+  const handleEditorMouseUp = useCallback((e: React.MouseEvent<HTMLTextAreaElement>) => {
+    const ta = rawEditorRef.current
+    if (!ta) return
+    const start = ta.selectionStart
+    const end = ta.selectionEnd
+    if (start === end) {
+      setSelectionRange(null)
+      setSelectionAnchor(null)
+      return
+    }
+    setSelectionRange({ start, end })
+    setSelectionAnchor({ x: e.clientX, y: e.clientY })
+  }, [])
+
+  const handleEditorBlur = useCallback((e: React.FocusEvent<HTMLTextAreaElement>) => {
+    const next = e.relatedTarget as HTMLElement | null
+    if (next?.closest('[data-ready-md-toolbar]')) return
+    setSelectionRange(null)
+    setSelectionAnchor(null)
+  }, [])
+
+  const handleToolbarChange = useCallback(
+    (nextContent: string, nextSelection: SelectionRange) => {
+      updateTabContent(tab.id, nextContent)
+      setSaveState('idle')
+      // After applying a toolbar edit, the mouse anchor is no longer
+      // meaningful — fall back to caret-derived placement so the bar
+      // tracks the resulting selection cleanly.
+      setSelectionAnchor(null)
+      requestAnimationFrame(() => {
+        const ta = rawEditorRef.current
+        if (!ta) return
+        ta.focus()
+        ta.setSelectionRange(nextSelection.start, nextSelection.end)
+        setSelectionRange(
+          nextSelection.start === nextSelection.end ? null : { ...nextSelection },
+        )
+      })
+    },
+    [tab.id, updateTabContent],
+  )
 
   // ─── Context menu handler ──────────────────────────────────
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
@@ -546,6 +609,10 @@ export default function MarkdownEditor({
                       ref={rawEditorRef}
                       value={tab.content}
                       onChange={handleRawEditorChange}
+                      onMouseUp={handleEditorMouseUp}
+                      onKeyUp={refreshSelectionRange}
+                      onSelect={refreshSelectionRange}
+                      onBlur={handleEditorBlur}
                       spellCheck={false}
                       aria-label="Markdown source editor"
                       className="document-source-textarea w-full min-h-full resize-none border-0 bg-transparent outline-none ready-input-slot-inner"
@@ -596,6 +663,17 @@ export default function MarkdownEditor({
           )}
         </>
       </div>
+
+      {/* ── Markdown selection toolbar (only in edit mode) ───── */}
+      {viewMode === 'edit' && selectionRange && (
+        <MarkdownSelectionToolbar
+          textareaRef={rawEditorRef}
+          content={tab.content}
+          selectionRange={selectionRange}
+          anchor={selectionAnchor}
+          onChange={handleToolbarChange}
+        />
+      )}
 
       {/* ── Editor Context Menu (fixed position, portal-like) ── */}
       <EditorContextMenu
