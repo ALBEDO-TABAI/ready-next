@@ -82,27 +82,29 @@ test('Stage 1 — theme:get IPC response shape includes skin and isNativeFullscr
   assert.match(snapshotBody, /isNativeFullscreen:/)
 })
 
-test('Stage 1+2.5 — fullscreen backing is handled by main process bg only (no DOM CSS fallback)', () => {
+test('验证 2 — fullscreen backing is handled by DOM .ready-app-bg, not BrowserWindow.setBackgroundColor', () => {
   const styles = readWorkspaceFile('src/renderer/styles/index.css')
 
-  // Stage 2.5: 删除了 .ready-app-shell[data-native-fullscreen]  CSS 规则。
-  // 历史背景：原本是"防 IPC 延迟"的双保险，但实测发现 .ready-app-shell 在 isolation:isolate
-  // compositor 层上对 CSS 变量级联响应不及时，导致全屏中切主题时视觉卡死。
-  // 改成：main 进程的 setBackgroundColor 是 backing 色的唯一来源，DOM 层 .ready-app-shell 永远透明。
+  // 验证 2：BrowserWindow 的 bg 在 darwin 上永远透明（'#00000000'），
+  // fullscreen backing 改由 DOM 层 `.ready-app-bg` 通过 `--app-bg-overlay-opacity` 控制。
+  // 这条 CSS 规则是 fullscreen backing 的唯一 DOM-side 来源。
+  // 设计动机：避免 BrowserWindow.setBackgroundColor 的"opaque→transparent"切换让 macOS
+  // NSVisualEffectView 静默 quiesce（用户报：全屏退出 / ready-glass→liquid-glass 后整片黑屏）。
+  assert.match(
+    styles,
+    /html\[data-skin='liquid-glass'\]\[data-glass-backdrop='native'\]\[data-native-fullscreen='true'\]\s*\{[\s\S]*?--app-bg-overlay-opacity:\s*1/,
+    'liquid-glass + native + fullscreen must opt .ready-app-bg into visible (opacity=1) via --app-bg-overlay-opacity (validation 2)',
+  )
+
+  // 旧的 .ready-app-shell 全屏 backing 规则（Stage 2.5 删除）不能复活
   assert.doesNotMatch(
     styles,
     /html\[data-native-fullscreen='true'\][\s\S]*?\.ready-app-shell\s*\{[\s\S]*?background:\s*var\(--ready-native-fullscreen-bg\)/,
-    'fullscreen backing CSS rule on .ready-app-shell should be removed (main process bg is single source of truth)',
+    '.ready-app-shell fullscreen backing rule must stay deleted (Stage 2.5 found it caused compositor cache issues)',
   )
-  // --ready-native-fullscreen-bg 变量定义也应该清掉（CSS 里不再有消费者）
-  assert.doesNotMatch(styles, /--ready-native-fullscreen-bg:/)
+  assert.doesNotMatch(styles, /--ready-native-fullscreen-bg:/, '--ready-native-fullscreen-bg variable retired')
 
-  // 但 data-native-fullscreen attr 本身还是要设/清的——给未来可能的 renderer 状态判断用，
-  // 也作为"main 进程 fullscreen lifecycle 已通知 renderer"的可观察信号。
-  // 测试 1 已断言 reconcileStartupTheme 仍然同步这个 attr。
-
-  // data-glass-backdrop='native' 让 --app-bg-overlay-opacity 变 0（藏掉 .ready-app-bg 渐变，
-  // 让 vibrancy 桌面壁纸做底）；data-glass-backdrop='ready' 不覆盖，沿用 liquid-glass scope 的 1
+  // data-glass-backdrop='native' 默认（无 fullscreen）让 --app-bg-overlay-opacity=0
   assert.match(
     styles,
     /html\[data-skin='liquid-glass'\]\[data-glass-backdrop='native'\]\s*\{[\s\S]*?--app-bg-overlay-opacity:\s*0/,

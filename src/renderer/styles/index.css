@@ -459,6 +459,25 @@ html[data-theme='dark'][data-skin='liquid-glass'][data-glass-backdrop='native'] 
   --app-bg-overlay-opacity: 0;
 }
 
+/*
+ * **验证 2 架构（2026-05-16）**：进入 macOS 原生全屏时，liquid-glass + native backdrop
+ * 必须立刻让 `.ready-app-bg` 渐变可见（opacity=1），承担 fullscreen backing 角色——
+ * 否则 vibrancy 在全屏期间会把桌面壁纸采样到窗口（Bug 2，原始"湖水绿"诉求）。
+ *
+ * 历史上这层 backing 由 BrowserWindow.setBackgroundColor 在 main 进程切到不透明色实现，
+ * 但任何"opaque → transparent"的 CALayer 切换都会让 macOS NSVisualEffectView 静默 quiesce，
+ * 退回 windowed 时 vibrancy backdrop 不重新渲染 → 用户看到深黑屏。
+ *
+ * 现在 BrowserWindow 的 bg 在 darwin 上永远是 '#00000000'，fullscreen backing 由 DOM 层
+ * `.ready-app-bg` 承担：CSS 变量级联触发 opacity 过渡（260ms ease），无 CALayer opaque 覆盖，
+ * NSVisualEffectView 永远不被 quiesce。
+ *
+ * 选择器优先级：四个 attr 同时存在时优先级高于上面 native+windowed 的 opacity=0 规则。
+ */
+html[data-skin='liquid-glass'][data-glass-backdrop='native'][data-native-fullscreen='true'] {
+  --app-bg-overlay-opacity: 1;
+}
+
 /* Base styles */
 * {
   margin: 0;

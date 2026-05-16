@@ -1,30 +1,34 @@
 // Ready 主窗口材料状态管理。
 //
-// 用一张 4 行状态表把 (skin × isFullscreen) → (backgroundColor, vibrancy) 决定下来，
-// 所有触发点（createWindow, theme:set, theme:setSkin, nativeTheme.updated, 4 个 fullscreen
-// lifecycle 事件）统一调 syncMaterial() 走表，避免上一轮 "broadcastThemeChanged 偷偷
-// 改材料 + isFullScreen() 时机错位" 的回归。
+// **架构（验证 2，2026-05-16）**：在 macOS 上 `setBackgroundColor` 永远是 `'#00000000'`，
+// `setVibrancy` 永远是 `'under-window'`，**两者在 applyInitial 之后再也不会被 Electron API
+// 触碰**。所有"opaque backing"需求（ready-glass、liquid-glass + 全屏防壁纸泄漏）改由
+// DOM 层 `.ready-app-bg` 用 `--app-bg-overlay-opacity` 控制透明度承担。
+//
+// 为什么：macOS NSVisualEffectView 在 CALayer 长期 opaque 覆盖期间会被静默 quiesce，
+// CALayer 再变透明时它不会自动恢复，Electron 没有显式 "reactivate vibrancy" API。任何
+// "opaque → transparent" 切换都暴露这个 quiesce 窗口（用户报：B 站全屏退出黑、
+// ready-glass→liquid-glass 黑）。把 darwin 上 CALayer 冻结在透明态，NSVisualEffectView
+// 永远不被遮盖 → 永远不被 quiesce → 状态机彻底退役。
+//
+// fullscreen 4 个 lifecycle handler 在 darwin 上**只发 IPC 通知 renderer**，不动 bg/vibrancy。
+// renderer 通过 `data-native-fullscreen` attr 让 CSS 决定 `.ready-app-bg` 是否可见。
 //
 // 详见 docs/superpowers/specs/2026-05-16-liquid-glass-ui-layering-and-motion-contract.md
-// 与 ~/.claude/plans/agent-teams-eventual-parrot.md。
 
 import type { BrowserWindow } from 'electron'
 
 // ----- 色常量 -----
+//
+// 验证 2 之后 darwin 只用 DARWIN_LIQUID_GLASS_TRANSPARENT 一个值——所有不透明 backing
+// 都挪到 DOM 层 `.ready-app-bg`（CSS 自己持有 gradient 颜色，TS 这边不再为 BrowserWindow
+// 提供 backing 色常量）。原来的 DARWIN_FULLSCREEN_BACKING_* / READY_GLASS_BACKING_* 已
+// 退役——它们是给 setBackgroundColor 用的，但 setBackgroundColor 不再在这些场景下被调。
 
-// macOS liquid-glass 透明（让 vibrancy 桌面壁纸做底）
+// macOS BrowserWindow 永远的 bg 值（让 vibrancy 桌面壁纸做底）
 export const DARWIN_LIQUID_GLASS_TRANSPARENT = '#00000000'
 
-// macOS fullscreen backing（spec §3.3 中性色，仅 fullscreen 生命周期内使用）
-export const DARWIN_FULLSCREEN_BACKING_LIGHT = '#DEE1E4'
-export const DARWIN_FULLSCREEN_BACKING_DARK = '#282D33'
-
-// Ready-glass 稳定底（与 --bg-primary 同源中性色；
-// 禁止使用 #F6F1E7 / #192131，那是 ritual 端点色，spec §3.3 红线）
-export const READY_GLASS_BACKING_LIGHT = '#FFFFFF'
-export const READY_GLASS_BACKING_DARK = '#1A1B1E'
-
-// 非 macOS 平台首帧/稳定态 bg（沿用原有实现，本轮不顺手改 Win/Linux 视觉）
+// 非 macOS 平台 bg（沿用原有实现，本轮不动 Win/Linux 视觉）
 export const NON_DARWIN_BACKGROUND_LIGHT = '#F7F9FC'
 export const NON_DARWIN_BACKGROUND_DARK = '#1A1B1E'
 
@@ -50,76 +54,27 @@ export interface MaterialOutputs {
   vibrancy: 'under-window' | null
 }
 
-// ----- computeMaterial：纯函数，状态表 -----
-
-// ----- 关于 darwin 上 vibrancy 永远 'under-window' 的决定 -----
-//
-// 起初的实现按 spec §1.2 字面规则把 ready-glass 的 vibrancy 设为 null（"ready-glass
-// 不启用 macOS under-window"），把 liquid-glass + fullscreen 的 vibrancy 也设为 null
-// （"全屏期间桌面采样会泄漏壁纸"）。但这两条路径都触发了同一类 macOS bug：
-//
-//   长时间停留在 vibrancy=null 后，再调 setVibrancy('under-window') 会被合并成 no-op，
-//   vibrancy 没真活起来；用户报的两次 race 都是这个原因：
-//     1. Bug 2 残余：夜间 → 全屏 → 切日间 → 退全屏 → 暖色（已在 Stage 2.3 修复）
-//     2. ready-glass race：ready-glass + 夜间 → 切回 liquid-glass → 实色黑色（本次修复）
-//
-// 修复策略：darwin 上 vibrancy 始终 'under-window'。用 backgroundColor 的不透明性
-// 在合成层级覆盖 vibrancy backdrop 来达到"看不到桌面壁纸"的效果：
-//
-//   - liquid-glass + windowed: bg='#00000000' 透明 → vibrancy backdrop 可见（桌面壁纸） ✓
-//   - liquid-glass + fullscreen: bg=DARWIN_FULLSCREEN_BACKING_* 不透明 → 盖住 vibrancy → 看到 backing ✓
-//   - ready-glass + windowed: bg=READY_GLASS_BACKING_* 不透明 → 盖住 vibrancy → 看到 backing ✓
-//   - ready-glass + fullscreen: 同上 ✓
-//
-// 在 ready-glass 模式下 vibrancy 虽然是 'under-window' 但被不透明 bg 完全盖住，
-// 视觉效果跟"真正关闭 vibrancy"完全一致——spec §1.2 真实意图是"视觉上不透出桌面"，
-// 而非"API 状态 vibrancy 必须是 null"。这条工程取舍以可靠性优先于 spec 字面合规。
-//
-// 关键好处：darwin 上所有 skin / fullscreen 组合的 vibrancy 字段都是 'under-window'，
-// applyMaterial 的 diff 在 darwin 上**永远不会变化 vibrancy 字段**，根本消除 macOS
-// vibrancy 重建 race 的可能。
-//
-// 注意：这要求 macOS NSVisualEffectView 的合成顺序是 [vibrancy backdrop, bg, content]
-// 自下而上。如果未来 macOS 版本改了合成模型，需要重新评估。
-
-const DARWIN_STATE_TABLE: Record<`${ThemeSkin}:${'fullscreen' | 'windowed'}`, (theme: ResolvedTheme) => MaterialOutputs> = {
-  'liquid-glass:windowed': () => ({
-    backgroundColor: DARWIN_LIQUID_GLASS_TRANSPARENT,
-    vibrancy: 'under-window',
-  }),
-  'liquid-glass:fullscreen': (theme) => ({
-    backgroundColor: theme === 'dark' ? DARWIN_FULLSCREEN_BACKING_DARK : DARWIN_FULLSCREEN_BACKING_LIGHT,
-    vibrancy: 'under-window',
-  }),
-  'ready-glass:windowed': (theme) => ({
-    backgroundColor: theme === 'dark' ? READY_GLASS_BACKING_DARK : READY_GLASS_BACKING_LIGHT,
-    // 也保持 'under-window'：不透明 bg 在合成层级盖住 vibrancy，视觉等同于关闭 vibrancy，
-    // 但避免了 ready-glass ↔ liquid-glass 切换时 vibrancy 重建 race。
-    vibrancy: 'under-window',
-  }),
-  'ready-glass:fullscreen': (theme) => ({
-    backgroundColor: theme === 'dark' ? READY_GLASS_BACKING_DARK : READY_GLASS_BACKING_LIGHT,
-    vibrancy: 'under-window',
-  }),
-}
+// ----- computeMaterial：纯函数 -----
 
 /**
  * 计算给定输入下的材料目标。
  *
- * darwin: 按 4 行状态表（skin × isFullscreen）决定
- * win32 / linux: 忽略 skin / isFullscreen，按 resolvedTheme 输出对应不透明 bg；vibrancy 恒 null
+ * darwin: bg 永远透明，vibrancy 永远 'under-window'。skin / fullscreen 差异**不**走 BrowserWindow，
+ *         走 DOM 层 `.ready-app-bg`（见 src/renderer/styles/index.css）。
+ *         这样 CALayer 永远不会 opaque 覆盖 NSVisualEffectView → 永远不会 quiesce →
+ *         永远不会出现"切换后 vibrancy 静默死掉 = 黑屏"。
  *
- * 完全纯函数，方便测试。
+ * win32 / linux: 按 resolvedTheme 输出对应不透明 bg；vibrancy 恒 null（mica 由
+ *                applyNonDarwinPlatformExtras 单独管）。
  */
 export function computeMaterial(inputs: MaterialInputs): MaterialOutputs {
   if (inputs.platform === 'darwin') {
-    const fence = inputs.isFullscreen ? 'fullscreen' : 'windowed'
-    const key = `${inputs.skin}:${fence}` as const
-    return DARWIN_STATE_TABLE[key](inputs.resolvedTheme)
+    return {
+      backgroundColor: DARWIN_LIQUID_GLASS_TRANSPARENT,
+      vibrancy: 'under-window',
+    }
   }
 
-  // 非 macOS：vibrancy 在 Win/Linux 没有等价物，本轮不引入跨平台风格统一。
-  // setBackgroundMaterial('mica') 在 Win32 由 applyNonDarwinPlatformExtras 处理（不在状态表里）。
   return {
     backgroundColor: inputs.resolvedTheme === 'dark' ? NON_DARWIN_BACKGROUND_DARK : NON_DARWIN_BACKGROUND_LIGHT,
     vibrancy: null,
@@ -174,36 +129,42 @@ export function applyNonDarwinPlatformExtras(window: BrowserWindow, platform: Su
   }
 }
 
-// ----- WindowMaterialController：状态机持有者 -----
+// ----- WindowMaterialController：fullscreen flag + IPC 推送，**不**动 bg/vibrancy -----
 
 /**
- * 包住 (mainWindow, 内部 fullscreen flag, lastAppliedMaterial 缓存) 三件套，
- * 让 main/index.ts 不用直接管理这些。
+ * 验证 2 架构：
+ *   - `applyInitial()` 在 createWindow 后调一次，把 bg/vibrancy 写到稳定值（macOS 上是
+ *     '#00000000' + 'under-window'），之后 controller **不再触碰** Electron 的 setBackgroundColor /
+ *     setVibrancy。
+ *   - `sync()` 只对非 darwin 平台有意义（theme 切换时刷新 bg）。darwin 上 sync() 是
+ *     no-op（computeMaterial 永远返回相同的稳定值，applyMaterial diff 不调 setter）。
+ *   - fullscreen lifecycle handler 只翻内部 flag + 调 notifyFullscreenChanged。
+ *     darwin CALayer 永远透明 → NSVisualEffectView 永远不被 quiesce → 没有"切换后黑屏"。
  *
  * 用法：
  *   const controller = createWindowMaterialController({ window, platform, getTheme })
- *   controller.applyInitial()  // createWindow 后调一次
- *   controller.attachLifecycle() // 挂 fullscreen 监听
- *   // 之后 theme:set / theme:setSkin / nativeTheme.updated 都调：
- *   controller.sync()
+ *   controller.applyInitial()    // createWindow 后调一次
+ *   controller.attachLifecycle() // 挂 fullscreen lifecycle handler
+ *   // theme:set / theme:setSkin / nativeTheme.updated 上游仍调 sync()，
+ *   // win32/linux 会刷新 bg，darwin 是 no-op。
  */
 export interface WindowMaterialControllerOptions {
   window: BrowserWindow
   platform: SupportedPlatform
-  /** 实时读取，每次 sync 拉一次（让 theme/skin 切换时自动反映） */
+  /** 实时读取，每次 sync 拉一次（非 darwin 上让 theme 切换刷新 bg） */
   getTheme: () => { skin: ThemeSkin; resolvedTheme: ResolvedTheme }
-  /** Stage 2 用：fullscreen 状态改变后通知 renderer，让 renderer 设置 data-native-fullscreen */
+  /** fullscreen 状态改变后通知 renderer，让 renderer 设置 data-native-fullscreen attr */
   notifyFullscreenChanged?: (isFullscreen: boolean) => void
 }
 
 export interface WindowMaterialController {
   /** 当前的 fullscreen 标记（内部追踪，不读 mainWindow.isFullScreen()） */
   isFullscreen: () => boolean
-  /** 重新查表 → diff → 只 set 变化字段。所有触发点都该调这个。 */
+  /** 重算目标 → diff → 只 set 变化字段。darwin 上是 no-op。 */
   sync: () => void
-  /** Stage 2 用：挂 will-enter/enter/will-leave/leave-full-screen 监听 */
+  /** 挂 will-enter / enter / will-leave / leave-full-screen 监听 */
   attachLifecycle: () => void
-  /** createWindow 之后调一次，确保首帧之后状态对齐 */
+  /** createWindow 之后调一次：set 初始 bg/vibrancy + 调 platform extras */
   applyInitial: () => void
 }
 
@@ -235,58 +196,37 @@ export function createWindowMaterialController(options: WindowMaterialController
 
   const attachLifecycle = (): void => {
     // 仅 macOS 有 fullscreen 生命周期事件（will-enter/leave-full-screen 是 macOS-only）。
-    // 非 macOS 上挂这些监听器无害但永远不会触发，所以提前 return 避免 lint 噪音。
     if (platform !== 'darwin') return
     if (window.isDestroyed()) return
 
-    // Electron 34 类型定义里只覆盖了 'enter-full-screen' / 'leave-full-screen'，
-    // 'will-enter-full-screen' / 'will-leave-full-screen' 是 macOS 运行时支持但未进 .d.ts 的事件。
-    // 用一个局部类型 cast 桥接，避免在每个 on() 上单独打 @ts-expect-error。
+    // Electron 34 .d.ts 没覆盖 'will-enter-full-screen' / 'will-leave-full-screen'，
+    // 局部 type cast 桥接。
     const macFullscreenEmitter = window as BrowserWindow & {
       on(event: 'will-enter-full-screen' | 'will-leave-full-screen', listener: () => void): BrowserWindow
     }
 
-    // 关键架构选择：vibrancy 在整个 liquid-glass lifecycle 中始终 'under-window'，
-    // 不主动 set 到 null。fullscreen 期间用不透明 backgroundColor 在合成层级上盖住 vibrancy
-    // backdrop 来防止桌面壁纸泄漏（Bug 2）。退出全屏只把 bg 改回透明，vibrancy 从头到尾
-    // 没被 Electron API 碰过——让 macOS 自己管 NSVisualEffectView 的 stash / restore。
-    //
-    // **历史教训（验证 1，2026-05-16）**：曾在 Stage 2.6/2.7/2.8 加过一段 vibrancy 重建路径
-    // (`setVibrancy(null) → setTimeout → setVibrancy('under-window')`)，目的是修用户报的
-    // "退原生全屏后偶发 vibrancy 失效"的 一次性问题。但这套主动 kick 反而把 macOS 一个
-    // 本来好端端的状态机推进了"等 Electron 重新激活"分支——HTML5 fullscreen（B 站 iframe
-    // 视频全屏）退出时复现稳定的"整片深黑色无法恢复"bug，根因是 setVibrancy('under-window')
-    // 被 NSVisualEffectView 静默忽略，留在 null 态 + 透明 bg = 黑。撤回 rebuild 后
-    // 让 macOS 自治 stash/restore 是更稳的选择。
-    //
-    // 4 个 lifecycle handler 都极简："翻 flag + sync() + 通知"。
-    // applyMaterial 的 diff 保证只对变化字段调 setter：
-    //   - will-enter: bg 变化（透明→backing）调 setBackgroundColor；vibrancy 不变不调
-    //   - enter:      幂等 sync
-    //   - will-leave: 故意 no-op（保持 backing 不透明覆盖 vibrancy 直到 OS 动画结束）
-    //   - leave:      bg 变化（backing→透明）调 setBackgroundColor；vibrancy 不变不调
-
+    // **验证 2 架构**：4 个 handler 只翻内部 flag + 调 notifyFullscreenChanged 推 IPC。
+    // 不调 sync()，因为 darwin 上 computeMaterial 永远返回相同稳定值——调了也是 no-op
+    // （applyMaterial diff 看 bg/vibrancy 没变）。renderer 收到 IPC 后写
+    // `data-native-fullscreen` attr，让 CSS 决定 `.ready-app-bg` 是否承担 fullscreen backing
+    // —— DOM 层处理一切 backing 变化，BrowserWindow 的 CALayer 永远透明。
     macFullscreenEmitter.on('will-enter-full-screen', () => {
       materialFullscreenState = true
-      sync()
       notifyFullscreenChanged?.(true)
     })
 
     window.on('enter-full-screen', () => {
-      sync()
+      // 幂等 IPC 不需要重发；OS 状态已经在 will-enter 同步过，这里只是动画结束信号。
     })
 
     macFullscreenEmitter.on('will-leave-full-screen', () => {
       // intentionally empty
-      // 故意不在这里翻 flag / 调 sync——OS 离场动画期间窗口必须保持不透明 backing，
-      // 否则瞬间露出透明 + vibrancy backdrop = 用户看到的"切换中"状态会很丑。
-      // 等动画结束的 leave-full-screen 才翻 flag、切 bg 回透明。
+      // 等动画结束的 leave-full-screen 才翻 flag + 推 IPC（renderer 端 backing 在动画期间保持可见）。
     })
 
     window.on('leave-full-screen', () => {
       if (window.isDestroyed()) return
       materialFullscreenState = false
-      sync()
       notifyFullscreenChanged?.(false)
     })
   }

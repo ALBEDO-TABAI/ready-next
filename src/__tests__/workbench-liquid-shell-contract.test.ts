@@ -78,7 +78,7 @@ test('main window uses native material via window-material controller', () => {
   assert.match(mainIndex, /visualEffectState:\s*platform === 'darwin' \? 'active' : undefined/)
 })
 
-test('Stage 1 — main window backgrounds use neutral colors, not ritual endpoints', () => {
+test('验证 2 — main window backgrounds: darwin frozen transparent, non-darwin neutral', () => {
   const mainIndex = readWorkspaceFile('src/main/index.ts')
   const materialModule = readWorkspaceFile('src/main/modules/window-material/main-window-material.ts')
 
@@ -88,11 +88,13 @@ test('Stage 1 — main window backgrounds use neutral colors, not ritual endpoin
   assert.doesNotMatch(materialModule, /'#F6F1E7'/)
   assert.doesNotMatch(materialModule, /'#192131'/)
 
-  // 状态表使用的色常量
-  assert.match(materialModule, /DARWIN_FULLSCREEN_BACKING_LIGHT\s*=\s*'#DEE1E4'/)
-  assert.match(materialModule, /DARWIN_FULLSCREEN_BACKING_DARK\s*=\s*'#282D33'/)
-  assert.match(materialModule, /READY_GLASS_BACKING_LIGHT\s*=\s*'#FFFFFF'/)
-  assert.match(materialModule, /READY_GLASS_BACKING_DARK\s*=\s*'#1A1B1E'/)
+  // 验证 2：darwin 只用透明常量；不透明 backing 全部移到 DOM 层 .ready-app-bg
+  assert.match(materialModule, /DARWIN_LIQUID_GLASS_TRANSPARENT\s*=\s*'#00000000'/)
+  // DARWIN_FULLSCREEN_BACKING_* / READY_GLASS_BACKING_* 已退役（不再供 setBackgroundColor 用）
+  assert.doesNotMatch(materialModule, /export const DARWIN_FULLSCREEN_BACKING_LIGHT/)
+  assert.doesNotMatch(materialModule, /export const DARWIN_FULLSCREEN_BACKING_DARK/)
+  assert.doesNotMatch(materialModule, /export const READY_GLASS_BACKING_LIGHT/)
+  assert.doesNotMatch(materialModule, /export const READY_GLASS_BACKING_DARK/)
 
   // 非 macOS 平台沿用原色 (本轮不改 Win/Linux 视觉)
   assert.match(materialModule, /NON_DARWIN_BACKGROUND_LIGHT\s*=\s*'#F7F9FC'/)
@@ -149,87 +151,70 @@ test('Stage 2 — controller attaches 4 fullscreen lifecycle listeners on darwin
   assert.match(materialModule, /if \(platform !== 'darwin'\) return/)
 })
 
-test('验证 1 (2026-05-16) — leave-full-screen must NOT manipulate vibrancy at all', () => {
+test('验证 2 (2026-05-16) — controller never calls setBackgroundColor/setVibrancy after applyInitial on darwin', () => {
   const materialModule = readWorkspaceFile('src/main/modules/window-material/main-window-material.ts')
-
-  // 验证 1 决定：撤回 Stage 2.6/2.7/2.8 的 vibrancy 重建路径。
-  // 让 macOS 自己管 NSVisualEffectView stash/restore；Electron 不主动 setVibrancy(null)。
-  // 历史上加重建是为了修一次性"偶发 vibrancy 失效"，但 rebuild 本身在 HTML5 fullscreen
-  // 退出场景（B 站 iframe）触发了更严重的"整片深黑色无法恢复"。撤回后让 OS 自治更稳。
   const codeOnly = materialModule
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/\/\/.*$/gm, '')
 
-  const leaveMatch = codeOnly.match(/\.on\(['"]leave-full-screen['"][\s\S]*?\n\s*\}\)/)
-  assert.ok(leaveMatch, 'leave-full-screen handler should exist')
-  const leaveBody = leaveMatch![0]
+  // attachLifecycle 内的 4 个 handler 都不能调 setBackgroundColor / setVibrancy。
+  // backing 完全由 DOM 层 .ready-app-bg 通过 data-native-fullscreen attr 触发的 CSS 变量级联承担。
+  const attachLifecycleMatch = codeOnly.match(/const attachLifecycle\s*=[\s\S]*?\n\s*\}\n/)
+  assert.ok(attachLifecycleMatch, 'attachLifecycle should exist')
+  const lifecycleBody = attachLifecycleMatch![0]
+  assert.doesNotMatch(lifecycleBody, /window\.setBackgroundColor/, 'lifecycle handlers must not call setBackgroundColor (validation 2)')
+  assert.doesNotMatch(lifecycleBody, /window\.setVibrancy/, 'lifecycle handlers must not call setVibrancy (validation 2)')
+  // 禁止 setTimeout / setImmediate / process.nextTick 偷偷做异步 rebuild
+  assert.doesNotMatch(lifecycleBody, /setTimeout/, 'lifecycle handlers must not schedule timers')
+  assert.doesNotMatch(lifecycleBody, /setImmediate/, 'lifecycle handlers must not use setImmediate')
+  assert.doesNotMatch(lifecycleBody, /process\.nextTick/, 'lifecycle handlers must not use process.nextTick')
 
-  // 关键合同：leave-full-screen handler 内禁止任何 setVibrancy 调用（无论传 null 还是
-  // 'under-window'）。任何 vibrancy 重建尝试都属于 Stage 2.6 回潮。
-  assert.doesNotMatch(leaveBody, /setVibrancy/, 'leave-full-screen must not call setVibrancy (validation 1: let macOS auto-restore)')
-  // 同时禁止 setTimeout 延时——撤回 rebuild 后，leave 必须同步走 flag + sync + notify。
-  assert.doesNotMatch(leaveBody, /setTimeout/, 'leave-full-screen must not schedule any timer (rebuild path retired)')
-  // 也不能用 setImmediate / process.nextTick 偷偷重建。
-  assert.doesNotMatch(leaveBody, /setImmediate/, 'leave-full-screen must not use setImmediate')
-  assert.doesNotMatch(leaveBody, /process\.nextTick/, 'leave-full-screen must not use process.nextTick')
-
-  // 模块整体也不该有 fullscreenSource / wasHtmlFullscreen / enter-html-full-screen 监听等
-  // Stage 2.8 source-tracking 残留——撤回 rebuild 后这套区分已无意义。
-  assert.doesNotMatch(codeOnly, /fullscreenSource/, 'fullscreenSource state should be removed (validation 1)')
-  assert.doesNotMatch(codeOnly, /wasHtmlFullscreen/, 'wasHtmlFullscreen local should be removed (validation 1)')
-  assert.doesNotMatch(
-    codeOnly,
-    /enter-html-full-screen/,
-    'no html-fullscreen event subscription needed once rebuild is gone (validation 1)',
-  )
+  // 也不能 enter-html-full-screen / fullscreenSource / wasHtmlFullscreen 残留
+  assert.doesNotMatch(codeOnly, /fullscreenSource/, 'fullscreenSource state retired (validation 2)')
+  assert.doesNotMatch(codeOnly, /wasHtmlFullscreen/, 'wasHtmlFullscreen retired (validation 2)')
+  assert.doesNotMatch(codeOnly, /enter-html-full-screen/, 'no HTML5 fullscreen subscription needed (validation 2)')
 })
 
-test('Stage 2 — liquid-glass fullscreen state table entry uses under-window vibrancy (NOT null)', () => {
+test('验证 2 — computeMaterial darwin branch returns frozen {transparent, under-window} only', () => {
   const materialModule = readWorkspaceFile('src/main/modules/window-material/main-window-material.ts')
+  const codeOnly = materialModule
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/.*$/gm, '')
 
-  // 提取 DARWIN_STATE_TABLE 块
-  const tableMatch = materialModule.match(/const DARWIN_STATE_TABLE[\s\S]*?\}\n\}/)
-  assert.ok(tableMatch, 'DARWIN_STATE_TABLE should exist')
-  const tableBody = tableMatch![0]
+  // computeMaterial 的 darwin 分支必须只返回稳定值；不允许根据 skin / isFullscreen / resolvedTheme 切换
+  const computeMatch = codeOnly.match(/export function computeMaterial[\s\S]*?\n\}/)
+  assert.ok(computeMatch, 'computeMaterial should exist')
+  const computeBody = computeMatch![0]
 
-  // 提取 'liquid-glass:fullscreen' 行
-  const lqFullscreenMatch = tableBody.match(/'liquid-glass:fullscreen':[\s\S]*?\}\)/)
-  assert.ok(lqFullscreenMatch, 'liquid-glass:fullscreen entry should exist')
-  const lqFullscreenBody = lqFullscreenMatch![0]
-  assert.match(
-    lqFullscreenBody,
-    /vibrancy:\s*'under-window'/,
-    'liquid-glass:fullscreen must use vibrancy=under-window (opaque bg covers it; avoids rebuild race)',
-  )
-  assert.doesNotMatch(
-    lqFullscreenBody,
-    /vibrancy:\s*null/,
-    'liquid-glass:fullscreen must NOT use vibrancy=null (causes leave-fullscreen rebuild race)',
-  )
+  // darwin 分支只返回 DARWIN_LIQUID_GLASS_TRANSPARENT + 'under-window'
+  const darwinBranch = computeBody.match(/if\s*\(\s*inputs\.platform\s*===\s*'darwin'\s*\)[\s\S]*?\}/)
+  assert.ok(darwinBranch, 'darwin branch should exist')
+  assert.match(darwinBranch![0], /DARWIN_LIQUID_GLASS_TRANSPARENT/)
+  assert.match(darwinBranch![0], /vibrancy:\s*'under-window'/)
+  // darwin 分支禁止读 skin / isFullscreen / resolvedTheme（差异化都退役了）
+  assert.doesNotMatch(darwinBranch![0], /inputs\.skin/, 'darwin compute must not branch on skin (validation 2)')
+  assert.doesNotMatch(darwinBranch![0], /inputs\.isFullscreen/, 'darwin compute must not branch on isFullscreen (validation 2)')
+  assert.doesNotMatch(darwinBranch![0], /inputs\.resolvedTheme/, 'darwin compute must not branch on resolvedTheme (validation 2)')
 })
 
-test('验证 1 — leave-full-screen handler shape: flag flip + sync + notify, single branch, no skin/source check', () => {
+test('验证 2 — lifecycle handler shape: flag flip + IPC only, no sync()', () => {
   const materialModule = readWorkspaceFile('src/main/modules/window-material/main-window-material.ts')
 
-  // will-enter: 翻 flag → sync → notify (no vibrancy rebuild needed on entry)
+  // will-enter: 翻 flag + 通知 renderer，不调 sync (sync 在 darwin 上是 no-op 但也不该多余调)
   const willEnterMatch = materialModule.match(/\.on\(['"]will-enter-full-screen['"][\s\S]*?\}\)/)
   assert.ok(willEnterMatch)
   const willEnterBody = willEnterMatch![0]
   assert.match(willEnterBody, /materialFullscreenState\s*=\s*true/)
-  assert.match(willEnterBody, /\bsync\(\)/)
-  assert.match(willEnterBody, /notifyFullscreenChanged/)
+  assert.match(willEnterBody, /notifyFullscreenChanged\?\.\(true\)/)
 
-  // leave: 单一分支，三件事：materialFullscreenState=false、sync()、notifyFullscreenChanged(false)。
-  // 不再按 skin / source 分流——验证 1 的结论是任何分流都属于 over-engineering。
+  // leave: 翻 flag + 通知，单一分支，无 skin/source 判断
   const leaveMatch = materialModule.match(/\.on\(['"]leave-full-screen['"][\s\S]*?\n\s*\}\)/)
   assert.ok(leaveMatch)
   const leaveBody = leaveMatch![0]
   assert.match(leaveBody, /materialFullscreenState\s*=\s*false/)
-  assert.match(leaveBody, /\bsync\(\)/)
   assert.match(leaveBody, /notifyFullscreenChanged\?\.\(false\)/)
-  // 禁止 skin 分支判断（撤回 Stage 2.6 分流）
-  assert.doesNotMatch(leaveBody, /skin\s*===\s*'liquid-glass'/, 'no skin branching (validation 1)')
-  assert.doesNotMatch(leaveBody, /skin\s*!==\s*'liquid-glass'/, 'no skin branching (validation 1)')
+  assert.doesNotMatch(leaveBody, /skin\s*===\s*'liquid-glass'/, 'no skin branching')
+  assert.doesNotMatch(leaveBody, /skin\s*!==\s*'liquid-glass'/, 'no skin branching')
 })
 
 test('Stage 2 — will-leave-full-screen handler is a deliberate no-op (do not expose transparent mid-animation)', () => {

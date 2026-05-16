@@ -13,13 +13,9 @@ import test from 'node:test'
 import {
   applyMaterial,
   computeMaterial,
-  DARWIN_FULLSCREEN_BACKING_DARK,
-  DARWIN_FULLSCREEN_BACKING_LIGHT,
   DARWIN_LIQUID_GLASS_TRANSPARENT,
   NON_DARWIN_BACKGROUND_DARK,
   NON_DARWIN_BACKGROUND_LIGHT,
-  READY_GLASS_BACKING_DARK,
-  READY_GLASS_BACKING_LIGHT,
   createWindowMaterialController,
   type MaterialInputs,
   type MaterialOutputs,
@@ -41,58 +37,18 @@ test('module exports the public surface required by main/index.ts', () => {
   assert.match(source, /export type ThemeSkin/)
 })
 
-test('Darwin state table — 4 rows match spec §3.3 colors', () => {
-  // 行 1: liquid-glass + windowed → 透明 + under-window vibrancy
-  assert.deepEqual(
-    computeMaterial({ platform: 'darwin', skin: 'liquid-glass', resolvedTheme: 'light', isFullscreen: false }),
-    { backgroundColor: DARWIN_LIQUID_GLASS_TRANSPARENT, vibrancy: 'under-window' },
-  )
-  assert.deepEqual(
-    computeMaterial({ platform: 'darwin', skin: 'liquid-glass', resolvedTheme: 'dark', isFullscreen: false }),
-    { backgroundColor: DARWIN_LIQUID_GLASS_TRANSPARENT, vibrancy: 'under-window' },
-  )
-
-  // 行 2: liquid-glass + fullscreen → 中性 backing + vibrancy 仍 'under-window'。
-  // 不透明 bg 在合成层级上覆盖 vibrancy backdrop，桌面壁纸不可见（修 Bug 2）；
-  // vibrancy 从未被禁用，退出时 bg 变回透明，桌面立刻可见——避免 vibrancy 重建 race。
-  assert.deepEqual(
-    computeMaterial({ platform: 'darwin', skin: 'liquid-glass', resolvedTheme: 'light', isFullscreen: true }),
-    { backgroundColor: DARWIN_FULLSCREEN_BACKING_LIGHT, vibrancy: 'under-window' },
-  )
-  assert.deepEqual(
-    computeMaterial({ platform: 'darwin', skin: 'liquid-glass', resolvedTheme: 'dark', isFullscreen: true }),
-    { backgroundColor: DARWIN_FULLSCREEN_BACKING_DARK, vibrancy: 'under-window' },
-  )
-
-  // 行 3-4: ready-glass + windowed/fullscreen → Ready 稳定底 + vibrancy 仍 'under-window'。
-  // 不透明 bg 在合成层级覆盖 vibrancy backdrop → 视觉等同于"关闭 vibrancy"，但避免
-  // ready-glass ↔ liquid-glass 切换时的 vibrancy 重建 race（用户报的"实色黑"bug）。
-  // isFullscreen 不影响 ready-glass 的输出（bg 和 vibrancy 都不变）。
-  for (const isFullscreen of [false, true]) {
-    assert.deepEqual(
-      computeMaterial({ platform: 'darwin', skin: 'ready-glass', resolvedTheme: 'light', isFullscreen }),
-      { backgroundColor: READY_GLASS_BACKING_LIGHT, vibrancy: 'under-window' },
-      `ready-glass + isFullscreen=${isFullscreen} light should use READY_GLASS_BACKING_LIGHT`,
-    )
-    assert.deepEqual(
-      computeMaterial({ platform: 'darwin', skin: 'ready-glass', resolvedTheme: 'dark', isFullscreen }),
-      { backgroundColor: READY_GLASS_BACKING_DARK, vibrancy: 'under-window' },
-      `ready-glass + isFullscreen=${isFullscreen} dark should use READY_GLASS_BACKING_DARK`,
-    )
-  }
-})
-
-test('Darwin: vibrancy is "under-window" for ALL skin × fullscreen combinations (no rebuild race possible)', () => {
-  // 这条是 Stage 2.3 + 2.4 的核心架构保证：darwin 上 vibrancy 字段永远 'under-window'，
-  // applyMaterial 的 diff 永远不会变化 vibrancy 字段，根本消除 macOS vibrancy 重建 race。
+test('验证 2 — Darwin computeMaterial returns frozen { transparent, under-window } for every input', () => {
+  // 验证 2 架构：darwin 上 CALayer 永远透明，vibrancy 永远 under-window。所有 skin / fullscreen
+  // / resolvedTheme 组合都映射到同一个稳定输出——backing 完全由 DOM 层 .ready-app-bg 承担。
+  // 这是防"CALayer opaque 覆盖 → NSVisualEffectView 静默 quiesce → 切回透明黑屏"的核心合同。
+  const expected = { backgroundColor: DARWIN_LIQUID_GLASS_TRANSPARENT, vibrancy: 'under-window' } as const
   for (const skin of ['liquid-glass', 'ready-glass'] as const) {
     for (const isFullscreen of [false, true]) {
       for (const resolvedTheme of ['light', 'dark'] as const) {
-        const output = computeMaterial({ platform: 'darwin', skin, resolvedTheme, isFullscreen })
-        assert.equal(
-          output.vibrancy,
-          'under-window',
-          `darwin / ${skin} / fs=${isFullscreen} / ${resolvedTheme} must use vibrancy='under-window' (architecture rule)`,
+        assert.deepEqual(
+          computeMaterial({ platform: 'darwin', skin, resolvedTheme, isFullscreen }),
+          expected,
+          `darwin/${skin}/fs=${isFullscreen}/${resolvedTheme} must always be transparent+under-window`,
         )
       }
     }
@@ -121,18 +77,12 @@ test('Non-darwin platforms use neutral theme-matched bg, never vibrancy', () => 
   }
 })
 
-test('Color constants match spec §3.3 — neutral, not ritual endpoints', () => {
-  // spec §3.3 显式：#DEE1E4 / #282D33 中性 fullscreen backing；不允许 #F6F1E7 / #192131
-  assert.equal(DARWIN_FULLSCREEN_BACKING_LIGHT, '#DEE1E4')
-  assert.equal(DARWIN_FULLSCREEN_BACKING_DARK, '#282D33')
-  // Ready-glass 稳定底必须是 #FFFFFF / #1A1B1E 中性色（与 --bg-primary 同源）
-  assert.equal(READY_GLASS_BACKING_LIGHT, '#FFFFFF')
-  assert.equal(READY_GLASS_BACKING_DARK, '#1A1B1E')
-  // 非 macOS 沿用 #F7F9FC / #1A1B1E
+test('Color constants — darwin transparent + non-darwin neutral theme bg', () => {
+  // 验证 2 之后 darwin 只剩透明常量；fullscreen / ready-glass backing 全部移到 CSS .ready-app-bg
+  assert.equal(DARWIN_LIQUID_GLASS_TRANSPARENT, '#00000000')
+  // 非 macOS 仍按 light/dark 切 bg（vibrancy 不可用，必须有不透明 bg）
   assert.equal(NON_DARWIN_BACKGROUND_LIGHT, '#F7F9FC')
   assert.equal(NON_DARWIN_BACKGROUND_DARK, '#1A1B1E')
-  // liquid-glass 窗口态透明（让 vibrancy 桌面壁纸做底）
-  assert.equal(DARWIN_LIQUID_GLASS_TRANSPARENT, '#00000000')
 })
 
 test('applyMaterial only calls setters for changed fields (idempotency)', () => {
@@ -215,7 +165,7 @@ test('controller exposes isFullscreen() flag, not mainWindow.isFullScreen()', ()
   assert.deepEqual(setters.vibrancy, ['under-window'], 'initial sync should set under-window vibrancy')
 })
 
-test('controller sync respects getTheme() callback for live theme/skin reads', () => {
+test('验证 2 — controller.sync() on darwin is no-op regardless of theme/skin (no setter calls after applyInitial)', () => {
   let currentSkin: 'liquid-glass' | 'ready-glass' = 'liquid-glass'
   let currentTheme: 'light' | 'dark' = 'light'
 
@@ -233,40 +183,45 @@ test('controller sync respects getTheme() callback for live theme/skin reads', (
     getTheme: () => ({ skin: currentSkin, resolvedTheme: currentTheme }),
   })
   controller.applyInitial()
-  // Initial: liquid-glass + light + windowed → '#00000000' + 'under-window'
-  assert.equal(setters.bg.at(-1), '#00000000')
-  assert.equal(setters.vibrancy.at(-1), 'under-window')
+  // 初始：darwin 上无论 skin/theme，都是稳定的 '#00000000' + 'under-window'
+  assert.deepEqual(setters.bg, ['#00000000'])
+  assert.deepEqual(setters.vibrancy, ['under-window'])
 
-  // 切到 ready-glass: bg 变 '#FFFFFF'。vibrancy **不变**（始终 'under-window'，由不透明 bg 覆盖）。
-  const vibrancyCallsBeforeReadyGlass = setters.vibrancy.length
-  currentSkin = 'ready-glass'
-  controller.sync()
-  assert.equal(setters.bg.at(-1), '#FFFFFF', 'ready-glass + light should set #FFFFFF')
-  assert.equal(
-    setters.vibrancy.length,
-    vibrancyCallsBeforeReadyGlass,
-    'ready-glass: vibrancy stays under-window (no setter call) — avoids null↔under-window rebuild race',
-  )
+  // 切 skin / theme 各种组合都是 no-op——computeMaterial 永远返回相同值，applyMaterial diff 不调 setter
+  for (const skin of ['ready-glass', 'liquid-glass', 'ready-glass'] as const) {
+    for (const theme of ['dark', 'light'] as const) {
+      currentSkin = skin
+      currentTheme = theme
+      controller.sync()
+    }
+  }
+  assert.deepEqual(setters.bg, ['#00000000'], 'theme/skin sync must not trigger setBackgroundColor on darwin')
+  assert.deepEqual(setters.vibrancy, ['under-window'], 'theme/skin sync must not trigger setVibrancy on darwin')
+})
 
-  // 切到 dark: bg 变 '#1A1B1E'。vibrancy 仍不变。
-  const vibrancyCallsBeforeDark = setters.vibrancy.length
+test('non-darwin sync responds to theme changes (bg flips between light/dark)', () => {
+  let currentTheme: 'light' | 'dark' = 'light'
+  const setters: { bg: string[]; vibrancy: (string | null)[] } = { bg: [], vibrancy: [] }
+  const fakeWindow = {
+    isDestroyed: () => false,
+    setBackgroundColor: (c: string) => { setters.bg.push(c) },
+    setVibrancy: (v: 'under-window' | null) => { setters.vibrancy.push(v) },
+    setWindowButtonPosition: () => undefined,
+  } as unknown as Parameters<typeof createWindowMaterialController>[0]['window']
+
+  const controller = createWindowMaterialController({
+    window: fakeWindow,
+    platform: 'win32',
+    getTheme: () => ({ skin: 'liquid-glass', resolvedTheme: currentTheme }),
+  })
+  controller.applyInitial()
+  assert.equal(setters.bg.at(-1), NON_DARWIN_BACKGROUND_LIGHT)
+
   currentTheme = 'dark'
   controller.sync()
-  assert.equal(setters.bg.at(-1), '#1A1B1E', 'ready-glass + dark should set #1A1B1E')
-  assert.equal(setters.vibrancy.length, vibrancyCallsBeforeDark, 'vibrancy still unchanged')
-
-  // 切回 liquid-glass: bg 变回透明，vibrancy **仍不变**（一直 'under-window'）。
-  // 这是修 ready-glass→liquid-glass 实色黑色 bug 的关键：vibrancy 从未被 null 化，
-  // 所以 macOS 不存在"vibrancy=null 稳定状态后 setVibrancy('under-window') no-op"的 race。
-  const vibrancyCallsBeforeLiquidGlass = setters.vibrancy.length
-  currentSkin = 'liquid-glass'
-  controller.sync()
-  assert.equal(setters.bg.at(-1), '#00000000', 'liquid-glass windowed should set transparent')
-  assert.equal(
-    setters.vibrancy.length,
-    vibrancyCallsBeforeLiquidGlass,
-    'liquid-glass: vibrancy stays under-window throughout — no rebuild race possible',
-  )
+  assert.equal(setters.bg.at(-1), NON_DARWIN_BACKGROUND_DARK, 'win32: theme change should switch bg')
+  // setVibrancy 在非 darwin 上从未被调用
+  assert.deepEqual(setters.vibrancy, [], 'non-darwin must never call setVibrancy')
 })
 
 test('controller does no-op when window is destroyed', () => {
@@ -365,73 +320,59 @@ test('Stage 2 — attachLifecycle is no-op on non-darwin (events do not exist th
   }
 })
 
-test('Stage 2 — will-enter-full-screen flips flag and applies opaque fullscreen backing (vibrancy stays under-window)', () => {
+test('验证 2 — will-enter-full-screen: no setter calls, only flag + IPC', () => {
   const { fakeWindow, setters, emit } = createFakeWindowWithEvents()
   let fullscreenNotifications: boolean[] = []
-  const controller = createWindowMaterialController({
-    window: fakeWindow,
-    platform: 'darwin',
-    getTheme: () => ({ skin: 'liquid-glass', resolvedTheme: 'light' }),
-    notifyFullscreenChanged: (isFullscreen) => fullscreenNotifications.push(isFullscreen),
-  })
-  controller.applyInitial()
-  controller.attachLifecycle()
-
-  // applyInitial 已经 set bg='#00000000' + vibrancy='under-window'
-  const bgBeforeEnter = setters.bg.length
-  const vibrancyBeforeEnter = setters.vibrancy.length
-
-  emit('will-enter-full-screen')
-
-  // 关键：vibrancy 保持 'under-window'，不切到 null。
-  // applyMaterial 的 diff 只看到 bg 变化（透明→backing），所以只调 setBackgroundColor，不调 setVibrancy。
-  // 不透明 bg 在合成层级上覆盖 vibrancy backdrop → 桌面壁纸看不见（修 Bug 2）。
-  assert.equal(setters.bg.at(-1), '#DEE1E4', 'should set fullscreen backing color (light)')
-  assert.equal(setters.bg.length, bgBeforeEnter + 1)
-  assert.equal(setters.vibrancy.length, vibrancyBeforeEnter, 'vibrancy should NOT be touched (still under-window)')
-
-  assert.equal(controller.isFullscreen(), true, 'materialFullscreenState should be true after will-enter')
-  assert.deepEqual(fullscreenNotifications, [true], 'notifyFullscreenChanged(true) should fire')
-})
-
-test('Stage 2 — will-enter-full-screen with dark theme uses dark backing (vibrancy still under-window)', () => {
-  const { fakeWindow, setters, emit } = createFakeWindowWithEvents()
   const controller = createWindowMaterialController({
     window: fakeWindow,
     platform: 'darwin',
     getTheme: () => ({ skin: 'liquid-glass', resolvedTheme: 'dark' }),
+    notifyFullscreenChanged: (isFullscreen) => fullscreenNotifications.push(isFullscreen),
   })
   controller.applyInitial()
-  // applyInitial 设 bg='#00000000' + vibrancy='under-window'
-  const vibrancyBefore = setters.vibrancy.length
   controller.attachLifecycle()
 
+  // applyInitial 已经 set bg='#00000000' + vibrancy='under-window'，记下基线
+  const bgCallsAfterInit = setters.bg.length
+  const vibrancyCallsAfterInit = setters.vibrancy.length
+
   emit('will-enter-full-screen')
-  assert.equal(setters.bg.at(-1), '#282D33', 'should set dark fullscreen backing')
-  assert.equal(setters.vibrancy.length, vibrancyBefore, 'vibrancy not touched (stays under-window)')
+  // 关键：darwin 上 will-enter 不调任何 setter。bg/vibrancy 永远停在 applyInitial 的稳定值。
+  // backing 完全由 DOM 层 .ready-app-bg 承担（renderer 收到 IPC 后写 data-native-fullscreen，
+  // 让 CSS 切 .ready-app-bg 的 opacity）。
+  assert.equal(setters.bg.length, bgCallsAfterInit, 'will-enter must NOT call setBackgroundColor (validation 2)')
+  assert.equal(setters.vibrancy.length, vibrancyCallsAfterInit, 'will-enter must NOT call setVibrancy')
+
+  assert.equal(controller.isFullscreen(), true, 'materialFullscreenState should flip true')
+  assert.deepEqual(fullscreenNotifications, [true], 'notifyFullscreenChanged(true) should fire')
 })
 
-test('Stage 2 — will-leave-full-screen is no-op (do not expose transparent during exit animation)', () => {
+test('验证 2 — will-leave-full-screen is no-op (does not flip flag yet)', () => {
   const { fakeWindow, setters, emit } = createFakeWindowWithEvents()
+  let fullscreenNotifications: boolean[] = []
   const controller = createWindowMaterialController({
     window: fakeWindow,
     platform: 'darwin',
     getTheme: () => ({ skin: 'liquid-glass', resolvedTheme: 'light' }),
+    notifyFullscreenChanged: (isFullscreen) => fullscreenNotifications.push(isFullscreen),
   })
   controller.applyInitial()
   controller.attachLifecycle()
   emit('will-enter-full-screen')
 
-  const bgBeforeWillLeave = setters.bg.length
-  const vibrancyBeforeWillLeave = setters.vibrancy.length
+  const bgBefore = setters.bg.length
+  const vibrancyBefore = setters.vibrancy.length
+  fullscreenNotifications = []
+
   emit('will-leave-full-screen')
-  // will-leave 不应触发任何 setter 或 flag 翻转
-  assert.equal(setters.bg.length, bgBeforeWillLeave, 'will-leave should not touch bg')
-  assert.equal(setters.vibrancy.length, vibrancyBeforeWillLeave, 'will-leave should not touch vibrancy')
+
+  assert.equal(setters.bg.length, bgBefore, 'will-leave should not touch bg')
+  assert.equal(setters.vibrancy.length, vibrancyBefore, 'will-leave should not touch vibrancy')
   assert.equal(controller.isFullscreen(), true, 'will-leave should not flip materialFullscreenState yet')
+  assert.deepEqual(fullscreenNotifications, [], 'will-leave should not push IPC yet (renderer keeps backing during animation)')
 })
 
-test('验证 1 — leave-full-screen liquid-glass: synchronous bg transparent, vibrancy untouched', () => {
+test('验证 2 — leave-full-screen: flag + IPC only, no setter calls', () => {
   const { fakeWindow, setters, emit } = createFakeWindowWithEvents()
   let fullscreenNotifications: boolean[] = []
   const controller = createWindowMaterialController({
@@ -445,79 +386,25 @@ test('验证 1 — leave-full-screen liquid-glass: synchronous bg transparent, v
 
   emit('will-enter-full-screen')
   fullscreenNotifications = []
-  const bgIndexBeforeLeave = setters.bg.length
-  const vibrancyIndexBeforeLeave = setters.vibrancy.length
+  const bgBeforeLeave = setters.bg.length
+  const vibrancyBeforeLeave = setters.vibrancy.length
 
   emit('leave-full-screen')
 
-  // 验证 1：撤回 rebuild 后，leave 同步走 flag + sync + notify。
-  // - bg 立刻从 backing 切到透明（diff 检测到变化）
-  // - vibrancy 在 darwin 上始终 'under-window'，diff 无变化，setVibrancy 不调
-  // - materialFullscreenState 同步翻 false
-  // - notifyFullscreenChanged(false) 同步发
-  assert.equal(setters.bg.at(-1), '#00000000', 'leave should sync bg back to transparent immediately')
-  assert.equal(setters.bg.length, bgIndexBeforeLeave + 1, 'exactly one bg setter call')
-  assert.equal(setters.vibrancy.length, vibrancyIndexBeforeLeave, 'vibrancy must never be touched in leave handler (validation 1)')
+  // 验证 2 核心合同：leave 不调 setBackgroundColor，不调 setVibrancy。
+  // 整个 fullscreen lifecycle 里 BrowserWindow 的 CALayer 永远停留在 applyInitial 的透明态。
+  assert.equal(setters.bg.length, bgBeforeLeave, 'leave must NOT call setBackgroundColor (CALayer stays frozen transparent)')
+  assert.equal(setters.vibrancy.length, vibrancyBeforeLeave, 'leave must NOT call setVibrancy')
   assert.equal(controller.isFullscreen(), false, 'materialFullscreenState should flip false synchronously')
   assert.deepEqual(fullscreenNotifications, [false])
 })
 
-test('验证 1 — leave-full-screen liquid-glass: lastAppliedMaterial cache updated by standard sync()', () => {
-  const { fakeWindow, setters, emit } = createFakeWindowWithEvents()
-  const controller = createWindowMaterialController({
-    window: fakeWindow,
-    platform: 'darwin',
-    getTheme: () => ({ skin: 'liquid-glass', resolvedTheme: 'light' }),
-  })
-  controller.applyInitial()
-  controller.attachLifecycle()
-  emit('will-enter-full-screen')
-  emit('leave-full-screen')
-
-  // sync() 已经在 leave 里同步跑过；缓存应该被更新到 windowed liquid-glass = {bg='#00000000', vibrancy='under-window'}
-  const bgCallsBefore = setters.bg.length
-  const vibrancyCallsBefore = setters.vibrancy.length
-  controller.sync()
-  assert.equal(setters.bg.length, bgCallsBefore, 'cache should prevent redundant setBackgroundColor on next sync')
-  assert.equal(setters.vibrancy.length, vibrancyCallsBefore, 'cache should prevent redundant setVibrancy on next sync')
-})
-
-test('Stage 2 — leave-full-screen ready-glass: bg stays at ready-glass color (no transition)', () => {
-  let currentSkin: 'liquid-glass' | 'ready-glass' = 'ready-glass'
-  const { fakeWindow, setters, emit } = createFakeWindowWithEvents()
-  let fullscreenNotifications: boolean[] = []
-  const controller = createWindowMaterialController({
-    window: fakeWindow,
-    platform: 'darwin',
-    getTheme: () => ({ skin: currentSkin, resolvedTheme: 'light' }),
-    notifyFullscreenChanged: (isFullscreen) => fullscreenNotifications.push(isFullscreen),
-  })
-  controller.applyInitial()
-  controller.attachLifecycle()
-
-  emit('will-enter-full-screen')
-  // ready-glass: bg='#FFFFFF', vibrancy='under-window'。fullscreen target 一样（状态表行 3=行 4）。
-  // 即使 ready-glass 也保持 vibrancy='under-window'（被不透明 bg 覆盖；这是 Stage 2.4 修复 ready-glass↔liquid-glass race 的关键）。
-  assert.equal(setters.bg.at(-1), '#FFFFFF')
-  assert.equal(setters.vibrancy.at(-1), 'under-window')
-
-  fullscreenNotifications = []
-  const bgBefore = setters.bg.length
-  const vibrancyBefore = setters.vibrancy.length
-
-  emit('leave-full-screen')
-  // ready-glass windowed 也是 '#FFFFFF' + 'under-window'。diff 为空，setter 不调用。
-  assert.equal(setters.bg.length, bgBefore, 'ready-glass leave should not change bg (same in fullscreen and windowed)')
-  assert.equal(setters.vibrancy.length, vibrancyBefore, 'ready-glass leave should not touch vibrancy')
-  assert.equal(controller.isFullscreen(), false)
-  assert.deepEqual(fullscreenNotifications, [false])
-})
-
-test('Stage 2 — leave-full-screen lifecycle handler bails when window destroyed', () => {
+test('验证 2 — leave-full-screen lifecycle handler bails when window destroyed', () => {
   let isDestroyed = false
   type Listener = () => void
   const listeners = new Map<string, Listener[]>()
   const setters: { bg: string[]; vibrancy: (string | null)[] } = { bg: [], vibrancy: [] }
+  let fullscreenNotifications: boolean[] = []
   const fakeWindow = {
     isDestroyed: () => isDestroyed,
     setBackgroundColor: (c: string) => { setters.bg.push(c) },
@@ -534,19 +421,21 @@ test('Stage 2 — leave-full-screen lifecycle handler bails when window destroye
     window: fakeWindow,
     platform: 'darwin',
     getTheme: () => ({ skin: 'liquid-glass', resolvedTheme: 'light' }),
+    notifyFullscreenChanged: (isFullscreen) => fullscreenNotifications.push(isFullscreen),
   })
   controller.applyInitial()
   controller.attachLifecycle()
   for (const cb of listeners.get('will-enter-full-screen') ?? []) cb()
-  const callsBeforeDestroy = setters.bg.length + setters.vibrancy.length
+  fullscreenNotifications = []
 
   isDestroyed = true
   for (const cb of listeners.get('leave-full-screen') ?? []) cb()
-  // 因为 destroyed，handler 早 return；sync() 内也 early return
-  assert.equal(setters.bg.length + setters.vibrancy.length, callsBeforeDestroy, 'destroyed window should skip all setter calls in leave-full-screen')
+  // 因为 destroyed，handler early return，flag 也不翻、IPC 也不发
+  assert.equal(controller.isFullscreen(), true, 'destroyed window: leave handler bails before flipping flag')
+  assert.deepEqual(fullscreenNotifications, [], 'destroyed window: no IPC sent')
 })
 
-test('验证 1 — fullscreen entry → exit cycle: bg toggles, vibrancy never manipulated', () => {
+test('验证 2 — full entry+exit cycle on darwin: zero setter calls after applyInitial', () => {
   const { fakeWindow, setters, emit } = createFakeWindowWithEvents()
   const controller = createWindowMaterialController({
     window: fakeWindow,
@@ -554,6 +443,8 @@ test('验证 1 — fullscreen entry → exit cycle: bg toggles, vibrancy never m
     getTheme: () => ({ skin: 'liquid-glass', resolvedTheme: 'dark' }),
   })
   controller.applyInitial()
+  const bgAfterInit = [...setters.bg]
+  const vibrancyAfterInit = [...setters.vibrancy]
   controller.attachLifecycle()
 
   emit('will-enter-full-screen')
@@ -561,66 +452,39 @@ test('验证 1 — fullscreen entry → exit cycle: bg toggles, vibrancy never m
   emit('will-leave-full-screen')
   emit('leave-full-screen')
 
-  // bg 序列：initial '#00000000' → enter '#282D33' → leave '#00000000'
-  assert.deepEqual(setters.bg, ['#00000000', '#282D33', '#00000000'])
-  // vibrancy 序列：applyInitial 唯一一次设 'under-window'，之后再也不该有任何 setVibrancy 调用——
-  // 让 macOS 自治 NSVisualEffectView stash/restore，避免 Stage 2.6 那种 rebuild 反噬。
-  assert.deepEqual(setters.vibrancy, ['under-window'])
+  // 整个 fullscreen 循环里没有任何额外的 setBackgroundColor / setVibrancy 调用
+  assert.deepEqual(setters.bg, bgAfterInit, 'no bg setter calls after applyInitial across full fullscreen cycle')
+  assert.deepEqual(setters.vibrancy, vibrancyAfterInit, 'no vibrancy setter calls after applyInitial')
+  // applyInitial 设的初值是稳定值
+  assert.deepEqual(bgAfterInit, ['#00000000'])
+  assert.deepEqual(vibrancyAfterInit, ['under-window'])
 })
 
-test('验证 1 — edge case: theme toggle during fullscreen + exit, vibrancy still untouched', () => {
+test('验证 2 — theme/skin sync() on darwin is a no-op (target equals applyInitial values)', () => {
   let currentTheme: 'light' | 'dark' = 'dark'
-  const { fakeWindow, setters, emit } = createFakeWindowWithEvents()
+  let currentSkin: 'liquid-glass' | 'ready-glass' = 'liquid-glass'
+  const { fakeWindow, setters } = createFakeWindowWithEvents()
   const controller = createWindowMaterialController({
     window: fakeWindow,
     platform: 'darwin',
-    getTheme: () => ({ skin: 'liquid-glass', resolvedTheme: currentTheme }),
+    getTheme: () => ({ skin: currentSkin, resolvedTheme: currentTheme }),
   })
   controller.applyInitial()
-  controller.attachLifecycle()
+  const bgAfterInit = setters.bg.length
+  const vibrancyAfterInit = setters.vibrancy.length
 
-  emit('will-enter-full-screen')
-  assert.equal(setters.bg.at(-1), '#282D33')
-
+  // 各种 theme/skin 切换都不能让 darwin 上的 controller 调 setter——computeMaterial 永远返回同一个值
   currentTheme = 'light'
   controller.sync()
-  assert.equal(setters.bg.at(-1), '#DEE1E4', 'theme toggle in fullscreen should update bg to light backing')
+  currentSkin = 'ready-glass'
+  controller.sync()
+  currentTheme = 'dark'
+  controller.sync()
+  currentSkin = 'liquid-glass'
+  controller.sync()
 
-  emit('leave-full-screen')
-  // light + windowed → bg='#00000000'
-  assert.equal(setters.bg.at(-1), '#00000000', 'leave-full-screen should restore transparent bg')
-  // vibrancy 全程只有 applyInitial 那一次设
-  assert.deepEqual(
-    setters.vibrancy,
-    ['under-window'],
-    'no vibrancy manipulation after applyInitial (validation 1)',
-  )
-  assert.equal(controller.isFullscreen(), false)
-})
-
-test('验证 1 — HTML5 fullscreen exit (iframe video): bg restored to transparent, vibrancy untouched', () => {
-  // 用户报：在文档里 bilibili iframe 视频全屏 → 退出 → 整个 UI 深黑色无法恢复，只能重启。
-  // 撤回 rebuild 后，HTML5 与 native 走同一条 leave 路径：flag + sync + notify。
-  // 不再需要区分触发源；NSVisualEffectView 由 macOS 自治管理。
-  const { fakeWindow, setters, emit } = createFakeWindowWithEvents()
-  const controller = createWindowMaterialController({
-    window: fakeWindow,
-    platform: 'darwin',
-    getTheme: () => ({ skin: 'liquid-glass', resolvedTheme: 'dark' }),
-  })
-  controller.applyInitial()
-  controller.attachLifecycle()
-
-  emit('will-enter-full-screen')
-  emit('enter-full-screen')
-  assert.equal(setters.bg.at(-1), '#282D33')
-
-  emit('will-leave-full-screen')
-  emit('leave-full-screen')
-
-  assert.equal(setters.bg.at(-1), '#00000000', 'bg reverts to transparent via sync()')
-  assert.deepEqual(setters.vibrancy, ['under-window'], 'vibrancy must remain at applyInitial value, never re-set')
-  assert.equal(controller.isFullscreen(), false)
+  assert.equal(setters.bg.length, bgAfterInit, 'theme/skin changes must not trigger setBackgroundColor on darwin')
+  assert.equal(setters.vibrancy.length, vibrancyAfterInit, 'theme/skin changes must not trigger setVibrancy on darwin')
 })
 
 test('MaterialInputs type carries platform field (testing-friendly explicit input)', () => {
