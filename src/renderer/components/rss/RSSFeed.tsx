@@ -16,6 +16,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { WORKBENCH_HEADER_EDGE_X } from '../../modules/workbench/chrome'
+import { endRssItemDragSession, setRssItemDragPayload } from '../layout/fileTreeExternalDrop'
 
 export interface RSSItem {
   id: string
@@ -657,22 +658,18 @@ export default function RSSFeed({
                       <div
                         draggable
                         onDragStart={(e) => {
-                          const payload = JSON.stringify({
-                            type: 'rss-item' as const,
+                          setRssItemDragPayload(e, {
                             id: item.id,
-                            name: item.title,
                             title: item.title,
                             link: item.link,
                             summary: item.summary,
                             source: item.source,
                             publishedAt: item.publishedAt,
                           })
-                          e.dataTransfer.setData('application/x-ready-drag', payload)
-                          e.dataTransfer.setData('application/x-ready-rss-item', payload)
-                          e.dataTransfer.setData('text/plain', `${item.title}\n${item.link}`)
-                          e.dataTransfer.setData('text/uri-list', item.link)
-                          e.dataTransfer.effectAllowed = 'copy'
                           e.stopPropagation()
+                        }}
+                        onDragEnd={() => {
+                          endRssItemDragSession()
                         }}
                         onClick={(e) => e.stopPropagation()}
                         className="mt-0.5 w-4 h-7 rounded cursor-grab active:cursor-grabbing hover:bg-[var(--bg-hover)] transition-colors flex items-center justify-center"

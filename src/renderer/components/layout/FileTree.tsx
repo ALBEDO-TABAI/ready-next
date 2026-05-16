@@ -18,12 +18,16 @@ import {
 } from '../ui/floatingMenuStyles'
 import {
   clampDropMenuPositionToBoundary,
+  dispatchFileTreeExternalDropAction,
+  getActiveRssItemDragPayload,
   parseBrowserTabDragPayload,
-  resolveBrowserTabDropTarget,
-  shouldKeepBrowserTabDropHintOnLeave,
-  type BrowserTabDragPayload,
-  type BrowserTabDropTarget,
-} from './fileTreeBrowserTabDrop'
+  parseRssItemDragPayload,
+  resolveFileTreeDropTarget,
+  shouldKeepFileTreeDropHintOnLeave,
+  type FileTreeDropTarget,
+  type FileTreeExternalDropAction,
+  type FileTreeExternalDropPayload,
+} from './fileTreeExternalDrop'
 import { getActiveBrowserTabDragPayload } from '../../modules/browser/browserTabDragSession'
 import { EBOOK_EXTENSIONS, isEbookExtension } from '../../../shared/ebook'
 import './filesPanelFloatingMenu.css'
@@ -140,24 +144,11 @@ interface WorkspaceDragPayload {
   movable: boolean
 }
 
-interface RSSDragPayload {
-  type: 'rss-item'
-  id: string
-  name: string
-  title?: string
-  link: string
-  summary?: string
-  source?: string
-  publishedAt?: string
-}
-
-type BrowserTabDropAction = 'web-clip' | 'content-study' | 'copy-analysis' | 'visual-analysis'
-
-interface BrowserTabDropMenuState {
+interface FileTreeExternalDropMenuState {
   x: number
   y: number
-  payload: BrowserTabDragPayload
-  target: BrowserTabDropTarget
+  payload: FileTreeExternalDropPayload
+  target: FileTreeDropTarget
 }
 
 function putDragData(e: React.DragEvent, item: FileItem, movable = true) {
@@ -186,19 +177,6 @@ function parseWorkspaceDragPayload(dataTransfer: DataTransfer): WorkspaceDragPay
   try {
     const parsed = JSON.parse(raw) as WorkspaceDragPayload
     if (!parsed.path || !parsed.name) return null
-    return parsed
-  } catch {
-    return null
-  }
-}
-
-function parseRSSDragPayload(dataTransfer: DataTransfer): RSSDragPayload | null {
-  const raw = dataTransfer.getData('application/x-ready-drag')
-  if (!raw) return null
-  try {
-    const parsed = JSON.parse(raw) as RSSDragPayload
-    if (parsed.type !== 'rss-item') return null
-    if (!parsed.id || !parsed.name || !parsed.link) return null
     return parsed
   } catch {
     return null
@@ -687,7 +665,7 @@ function FileTreeRecursive({
   queryLower,
   filters,
   moveDropTargetDir,
-  browserTabDropTarget,
+  fileTreeDropTarget,
   flashingPath,
   pendingClips,
   onToggleDir,
@@ -713,7 +691,7 @@ function FileTreeRecursive({
   queryLower: string
   filters: FileFilterMap
   moveDropTargetDir: string | null
-  browserTabDropTarget: BrowserTabDropTarget | null
+  fileTreeDropTarget: FileTreeDropTarget | null
   flashingPath: string | null
   pendingClips: PendingClipPlaceholder[]
   onToggleDir: (path: string) => Promise<void>
@@ -763,9 +741,9 @@ function FileTreeRecursive({
         const isExpanded = expandedDirs.has(item.path)
         const children = dirChildren.get(item.path) || []
         const browserDropLine =
-          browserTabDropTarget?.kind === 'insert-before' && browserTabDropTarget.anchorPath === item.path
+          fileTreeDropTarget?.kind === 'insert-before' && fileTreeDropTarget.anchorPath === item.path
             ? 'before'
-            : browserTabDropTarget?.kind === 'insert-after' && browserTabDropTarget.anchorPath === item.path
+            : fileTreeDropTarget?.kind === 'insert-after' && fileTreeDropTarget.anchorPath === item.path
               ? 'after'
               : null
         return (
@@ -777,7 +755,7 @@ function FileTreeRecursive({
               isRenaming={renamingPath === item.path}
               isDropTarget={item.isDirectory && moveDropTargetDir === item.path}
               isBrowserDropInside={
-                browserTabDropTarget?.kind === 'inside-directory' && browserTabDropTarget.itemPath === item.path
+                fileTreeDropTarget?.kind === 'inside-directory' && fileTreeDropTarget.itemPath === item.path
               }
               browserDropLine={browserDropLine}
               isFlashing={flashingPath === item.path}
@@ -805,7 +783,7 @@ function FileTreeRecursive({
                 queryLower={queryLower}
                 filters={filters}
                 moveDropTargetDir={moveDropTargetDir}
-                browserTabDropTarget={browserTabDropTarget}
+                fileTreeDropTarget={fileTreeDropTarget}
                 flashingPath={flashingPath}
                 pendingClips={pendingClips}
                 onToggleDir={onToggleDir}
@@ -863,13 +841,7 @@ export default function FileTree({
   const { setWorkbenchMode } = useMode()
 
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: FileItem | null } | null>(null)
-  const [rssDropMenu, setRssDropMenu] = useState<{
-    x: number
-    y: number
-    dirPath: string
-    payload: RSSDragPayload
-  } | null>(null)
-  const [browserTabDropMenu, setBrowserTabDropMenu] = useState<BrowserTabDropMenuState | null>(null)
+  const [externalDropMenu, setExternalDropMenu] = useState<FileTreeExternalDropMenuState | null>(null)
   const [flashingTargetPath, setFlashingTargetPath] = useState<string | null>(null)
   const flashClearTimerRef = useRef<number | null>(null)
   /**
@@ -894,7 +866,7 @@ export default function FileTree({
   const pendingClipRemoveTimersRef = useRef<Map<string, number>>(new Map())
   const [isDragOver, setIsDragOver] = useState(false)
   const [moveDropTargetDir, setMoveDropTargetDir] = useState<string | null>(null)
-  const [browserTabDropTarget, setBrowserTabDropTarget] = useState<BrowserTabDropTarget | null>(null)
+  const [fileTreeDropTarget, setFileTreeDropTarget] = useState<FileTreeDropTarget | null>(null)
   const [internalGridPath, setInternalGridPath] = useState<string | null>(null)
   const treeRootRef = useRef<HTMLDivElement>(null)
   const gridPreviewLoadingRef = useRef(new Set<string>())
@@ -907,7 +879,7 @@ export default function FileTree({
     const nextTarget = event.relatedTarget as Node | null
     const rect = currentTarget.getBoundingClientRect()
 
-    return shouldKeepBrowserTabDropHintOnLeave({
+    return shouldKeepFileTreeDropHintOnLeave({
       clientX: event.clientX,
       clientY: event.clientY,
       rectLeft: rect.left,
@@ -1066,10 +1038,15 @@ export default function FileTree({
     await moveItem(payload.path, nextPath)
   }, [moveItem])
 
-  const getBrowserTabPayload = useCallback((dataTransfer: DataTransfer) => {
-    const raw = dataTransfer.getData('application/x-ready-drag')
-    return parseBrowserTabDragPayload(raw) ?? getActiveBrowserTabDragPayload()
-  }, [])
+  const getExternalDropPayload = useCallback(
+    (dataTransfer: DataTransfer): FileTreeExternalDropPayload | null => {
+      const raw = dataTransfer.getData('application/x-ready-drag')
+      const browserTab = parseBrowserTabDragPayload(raw) ?? getActiveBrowserTabDragPayload()
+      if (browserTab) return browserTab
+      return parseRssItemDragPayload(raw) ?? getActiveRssItemDragPayload()
+    },
+    [],
+  )
 
   const handleDirectoryDragOver = useCallback((e: React.DragEvent, dirPath: string) => {
     const payload = parseWorkspaceDragPayload(e.dataTransfer)
@@ -1078,31 +1055,23 @@ export default function FileTree({
       e.stopPropagation()
       e.dataTransfer.dropEffect = 'move'
       if (moveDropTargetDir !== dirPath) setMoveDropTargetDir(dirPath)
-      setBrowserTabDropTarget(null)
+      setFileTreeDropTarget(null)
       return
     }
-    const browserTabPayload = getBrowserTabPayload(e.dataTransfer)
-    if (browserTabPayload) {
+    const externalPayload = getExternalDropPayload(e.dataTransfer)
+    if (externalPayload) {
       e.preventDefault()
       e.stopPropagation()
       e.dataTransfer.dropEffect = 'copy'
       setMoveDropTargetDir(null)
-      setBrowserTabDropTarget({
+      setFileTreeDropTarget({
         kind: 'inside-directory',
         dirPath,
         itemPath: dirPath,
         containerPath: dirPath,
       })
-      return
     }
-    const rssPayload = parseRSSDragPayload(e.dataTransfer)
-    if (!rssPayload) return
-    e.preventDefault()
-    e.stopPropagation()
-    e.dataTransfer.dropEffect = 'copy'
-    setBrowserTabDropTarget(null)
-    if (moveDropTargetDir !== dirPath) setMoveDropTargetDir(dirPath)
-  }, [getBrowserTabPayload, moveDropTargetDir])
+  }, [getExternalDropPayload, moveDropTargetDir])
 
   const handleDirectoryDragLeave = useCallback((e: React.DragEvent, dirPath: string) => {
     e.stopPropagation()
@@ -1110,24 +1079,23 @@ export default function FileTree({
       return
     }
     if (moveDropTargetDir === dirPath) setMoveDropTargetDir(null)
-    if (browserTabDropTarget?.kind === 'inside-directory' && browserTabDropTarget.dirPath === dirPath) {
-      setBrowserTabDropTarget(null)
+    if (fileTreeDropTarget?.kind === 'inside-directory' && fileTreeDropTarget.dirPath === dirPath) {
+      setFileTreeDropTarget(null)
     }
-  }, [browserTabDropTarget, moveDropTargetDir, shouldPreserveDropHint])
+  }, [fileTreeDropTarget, moveDropTargetDir, shouldPreserveDropHint])
 
   const handleDirectoryDrop = useCallback((e: React.DragEvent, dirPath: string) => {
-    const browserTabPayload = getBrowserTabPayload(e.dataTransfer)
-    if (browserTabPayload) {
+    const externalPayload = getExternalDropPayload(e.dataTransfer)
+    if (externalPayload) {
       e.preventDefault()
       e.stopPropagation()
       setMoveDropTargetDir(null)
-      setBrowserTabDropTarget(null)
+      setFileTreeDropTarget(null)
       setContextMenu(null)
-      setRssDropMenu(null)
-      setBrowserTabDropMenu({
+      setExternalDropMenu({
         x: e.clientX,
         y: e.clientY,
-        payload: browserTabPayload,
+        payload: externalPayload,
         target: {
           kind: 'inside-directory',
           dirPath,
@@ -1138,30 +1106,14 @@ export default function FileTree({
       return
     }
 
-    const rssPayload = parseRSSDragPayload(e.dataTransfer)
-    if (rssPayload) {
-      e.preventDefault()
-      e.stopPropagation()
-      setMoveDropTargetDir(null)
-      setBrowserTabDropTarget(null)
-      setContextMenu(null)
-      setRssDropMenu({
-        x: e.clientX,
-        y: e.clientY,
-        dirPath,
-        payload: rssPayload,
-      })
-      return
-    }
-
     const payload = parseWorkspaceDragPayload(e.dataTransfer)
     if (!payload || !canMoveToDirectory(payload, dirPath)) return
     e.preventDefault()
     e.stopPropagation()
     setMoveDropTargetDir(null)
-    setBrowserTabDropTarget(null)
+    setFileTreeDropTarget(null)
     void moveWorkspaceItem(payload, dirPath)
-  }, [getBrowserTabPayload, moveWorkspaceItem])
+  }, [getExternalDropPayload, moveWorkspaceItem])
 
   const handleItemDragOver = useCallback((e: React.DragEvent, item: FileItem, containerPath: string) => {
     const workspacePayload = parseWorkspaceDragPayload(e.dataTransfer)
@@ -1170,19 +1122,19 @@ export default function FileTree({
       e.stopPropagation()
       e.dataTransfer.dropEffect = 'move'
       if (moveDropTargetDir !== item.path) setMoveDropTargetDir(item.path)
-      setBrowserTabDropTarget(null)
+      setFileTreeDropTarget(null)
       return
     }
 
-    const browserTabPayload = getBrowserTabPayload(e.dataTransfer)
-    if (browserTabPayload) {
+    const externalPayload = getExternalDropPayload(e.dataTransfer)
+    if (externalPayload) {
       e.preventDefault()
       e.stopPropagation()
       e.dataTransfer.dropEffect = 'copy'
       setMoveDropTargetDir(null)
       const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
-      setBrowserTabDropTarget(
-        resolveBrowserTabDropTarget({
+      setFileTreeDropTarget(
+        resolveFileTreeDropTarget({
           itemPath: item.path,
           isDirectory: item.isDirectory,
           containerPath,
@@ -1191,17 +1143,8 @@ export default function FileTree({
           rectHeight: rect.height,
         }),
       )
-      return
     }
-
-    if (item.isDirectory && parseRSSDragPayload(e.dataTransfer)) {
-      e.preventDefault()
-      e.stopPropagation()
-      e.dataTransfer.dropEffect = 'copy'
-      setBrowserTabDropTarget(null)
-      if (moveDropTargetDir !== item.path) setMoveDropTargetDir(item.path)
-    }
-  }, [getBrowserTabPayload, moveDropTargetDir])
+  }, [getExternalDropPayload, moveDropTargetDir])
 
   const handleItemDragLeave = useCallback((e: React.DragEvent, item: FileItem) => {
     if (shouldPreserveDropHint(e as React.DragEvent<HTMLElement>)) return
@@ -1210,26 +1153,26 @@ export default function FileTree({
       setMoveDropTargetDir(null)
     }
 
-    if (browserTabDropTarget?.kind === 'inside-directory' && browserTabDropTarget.itemPath === item.path) {
-      setBrowserTabDropTarget(null)
+    if (fileTreeDropTarget?.kind === 'inside-directory' && fileTreeDropTarget.itemPath === item.path) {
+      setFileTreeDropTarget(null)
       return
     }
 
     if (
-      (browserTabDropTarget?.kind === 'insert-before' || browserTabDropTarget?.kind === 'insert-after') &&
-      browserTabDropTarget.anchorPath === item.path
+      (fileTreeDropTarget?.kind === 'insert-before' || fileTreeDropTarget?.kind === 'insert-after') &&
+      fileTreeDropTarget.anchorPath === item.path
     ) {
-      setBrowserTabDropTarget(null)
+      setFileTreeDropTarget(null)
     }
-  }, [browserTabDropTarget, moveDropTargetDir, shouldPreserveDropHint])
+  }, [fileTreeDropTarget, moveDropTargetDir, shouldPreserveDropHint])
 
   const handleItemDrop = useCallback((e: React.DragEvent, item: FileItem, containerPath: string) => {
-    const browserTabPayload = getBrowserTabPayload(e.dataTransfer)
-    if (browserTabPayload) {
+    const externalPayload = getExternalDropPayload(e.dataTransfer)
+    if (externalPayload) {
       e.preventDefault()
       e.stopPropagation()
       const rect = (e.currentTarget as HTMLDivElement).getBoundingClientRect()
-      const target = resolveBrowserTabDropTarget({
+      const target = resolveFileTreeDropTarget({
         itemPath: item.path,
         isDirectory: item.isDirectory,
         containerPath,
@@ -1238,13 +1181,12 @@ export default function FileTree({
         rectHeight: rect.height,
       })
       setMoveDropTargetDir(null)
-      setBrowserTabDropTarget(null)
+      setFileTreeDropTarget(null)
       setContextMenu(null)
-      setRssDropMenu(null)
-      setBrowserTabDropMenu({
+      setExternalDropMenu({
         x: e.clientX,
         y: e.clientY,
-        payload: browserTabPayload,
+        payload: externalPayload,
         target,
       })
       return
@@ -1253,7 +1195,7 @@ export default function FileTree({
     if (item.isDirectory) {
       handleDirectoryDrop(e, item.path)
     }
-  }, [getBrowserTabPayload, handleDirectoryDrop])
+  }, [getExternalDropPayload, handleDirectoryDrop])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -1263,11 +1205,7 @@ export default function FileTree({
       e.dataTransfer.dropEffect = 'move'
       return
     }
-    if (parseRSSDragPayload(e.dataTransfer)) {
-      e.dataTransfer.dropEffect = 'copy'
-      return
-    }
-    if (getBrowserTabPayload(e.dataTransfer)) {
+    if (getExternalDropPayload(e.dataTransfer)) {
       e.dataTransfer.dropEffect = 'copy'
       return
     }
@@ -1275,7 +1213,7 @@ export default function FileTree({
       e.dataTransfer.dropEffect = 'copy'
       setIsDragOver(true)
     }
-  }, [currentPath, getBrowserTabPayload])
+  }, [currentPath, getExternalDropPayload])
 
   const handleDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -1285,8 +1223,7 @@ export default function FileTree({
     }
     setIsDragOver(false)
     setMoveDropTargetDir(null)
-    setBrowserTabDropTarget(null)
-    setRssDropMenu(null)
+    setFileTreeDropTarget(null)
   }, [shouldPreserveDropHint])
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
@@ -1294,9 +1231,8 @@ export default function FileTree({
     e.stopPropagation()
     setIsDragOver(false)
     setMoveDropTargetDir(null)
-    const lastBrowserTabDropTarget = browserTabDropTarget
-    setBrowserTabDropTarget(null)
-    setRssDropMenu(null)
+    const lastDropTarget = fileTreeDropTarget
+    setFileTreeDropTarget(null)
 
     const payload = parseWorkspaceDragPayload(e.dataTransfer)
     if (payload && canMoveToDirectory(payload, currentPath)) {
@@ -1304,19 +1240,14 @@ export default function FileTree({
       return
     }
 
-    if (parseRSSDragPayload(e.dataTransfer)) {
-      return
-    }
-
-    const browserTabPayload = getBrowserTabPayload(e.dataTransfer)
-    if (browserTabPayload && lastBrowserTabDropTarget) {
+    const externalPayload = getExternalDropPayload(e.dataTransfer)
+    if (externalPayload && lastDropTarget) {
       setContextMenu(null)
-      setRssDropMenu(null)
-      setBrowserTabDropMenu({
+      setExternalDropMenu({
         x: e.clientX,
         y: e.clientY,
-        payload: browserTabPayload,
-        target: lastBrowserTabDropTarget,
+        payload: externalPayload,
+        target: lastDropTarget,
       })
       return
     }
@@ -1329,161 +1260,32 @@ export default function FileTree({
         if (p) addPinnedFolder(p)
       }
     }
-  }, [addPinnedFolder, browserTabDropTarget, currentPath, getBrowserTabPayload, moveWorkspaceItem])
+  }, [addPinnedFolder, fileTreeDropTarget, currentPath, getExternalDropPayload, moveWorkspaceItem])
 
-  const handleRssDropAction = useCallback(
-    async (action: 'web-clip' | 'copy-analysis' | 'visual-analysis') => {
-      if (!rssDropMenu) return
-      const { dirPath, payload } = rssDropMenu
-      setRssDropMenu(null)
-
-      const itemTitle = rssDropMenu.payload.title || rssDropMenu.payload.name
-      if (action === 'web-clip') {
-        console.info('[rss-drop-action] web clip placeholder', {
-          action,
-          dirPath,
-          title: itemTitle,
-          link: payload.link,
-        })
-        return
-      }
-
-      if (!window.electronAPI?.rss?.startItemAnalysis) {
-        console.warn('[rss-drop-action] rss.startItemAnalysis not available')
-        return
-      }
-
-      const mappedAction = action === 'copy-analysis' ? 'copy' : 'visual'
-      try {
-        const result = await window.electronAPI.rss.startItemAnalysis({
-          itemId: payload.id,
-          action: mappedAction,
-          link: payload.link,
-          title: itemTitle,
-          targetDir: dirPath,
-          source: payload.source,
-          summary: payload.summary,
-          publishedAt: payload.publishedAt,
-        })
-        if (!result.success) {
-          console.error('[rss-drop-action] failed', result.error)
-          return
-        }
-        console.info('[rss-drop-action] started', {
-          action: mappedAction,
-          itemId: payload.id,
-          outputDir: result.data?.outputDir,
-        })
-      } catch (error) {
-        console.error('[rss-drop-action] start failed', error)
-      }
-    },
-    [rssDropMenu],
-  )
-
-  const handleBrowserTabDropAction = useCallback((action: BrowserTabDropAction) => {
-    if (!browserTabDropMenu) return
-    const { payload, target } = browserTabDropMenu
-    setBrowserTabDropMenu(null)
-
-    // Row to flash on completion: the actual row the user pointed at.
-    // For inside-directory the row is the folder; for insert-before/after
-    // it's the anchor row (file or folder) above/below the drop indicator.
-    const flashRowPath =
-      target.kind === 'inside-directory' ? target.itemPath : target.anchorPath
-    // Folder for the auto-copy: for inside-directory it's the folder itself;
-    // for insert-before/after it's the container holding the anchor row.
-    const targetDir =
-      target.kind === 'inside-directory' ? target.dirPath : target.containerPath
-    const targetHint = flashRowPath
-
-    if (action === 'web-clip') {
-      // Fire-and-forget background clip via host IPC. Does NOT route through
-      // the agent loop — user can keep chatting / typing in other panels.
-      // Pipeline writes to `<outputsRoot>/obsidian-web-clip/...` first, then
-      // materializeToVault moves the .md + downloaded image assets into
-      // `targetDir`. On completion the FS watcher surfaces the new file and
-      // the subscriber below flashes that row briefly.
-      let urlHost = ''
-      try {
-        urlHost = new URL(payload.url).hostname
-      } catch {
-        urlHost = payload.url
-      }
-      const clientTaskId = `client-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
-      // Insert the optimistic placeholder before kicking off the IPC so the
-      // user sees a "处理中" row in the target folder immediately. We use the
-      // client-side taskId so the ack/update path can refer to the same row.
-      setPendingClips((prev) => [
-        ...prev,
-        {
-          taskId: clientTaskId,
-          targetDir,
-          urlHost,
-          title: payload.title || urlHost,
-          status: 'running',
-          createdAt: Date.now(),
+  const handleExternalDropAction = useCallback(
+    (action: FileTreeExternalDropAction) => {
+      if (!externalDropMenu) return
+      const { payload, target } = externalDropMenu
+      setExternalDropMenu(null)
+      void dispatchFileTreeExternalDropAction({
+        payload,
+        action,
+        target,
+        onPlaceholderStart: (placeholder) => {
+          setPendingClips((prev) => [...prev, placeholder])
         },
-      ])
-
-      const promise = window.electronAPI?.browser?.clipDraggedTab?.({
-        url: payload.url,
-        title: payload.title,
-        target_hint: targetHint,
-        target_dir: targetDir,
-        client_task_id: clientTaskId,
-      })
-      if (!promise) {
-        console.warn('[browser-tab-drop-action] clipDraggedTab IPC unavailable')
-        // No backend wiring — drop the placeholder so the user isn't stuck.
-        setPendingClips((prev) => prev.filter((p) => p.taskId !== clientTaskId))
-        return
-      }
-      promise
-        .then((ack) => {
-          if (!ack?.ok) {
-            console.warn('[browser-tab-drop-action] clip dispatch rejected', ack?.errorKind, ack?.errorDetail)
-            // Promote placeholder to failed; schedule auto-remove.
-            setPendingClips((prev) =>
-              prev.map((p) =>
-                p.taskId === clientTaskId
-                  ? { ...p, status: 'failed', errorMessage: ack?.errorDetail?.message || ack?.errorKind || 'dispatch rejected' }
-                  : p,
-              ),
-            )
-            schedulePlaceholderRemoval(clientTaskId, 4000)
-            return
-          }
-          console.info('[browser-tab-drop-action] clip dispatched', {
-            taskId: ack.taskId,
-            target: targetHint,
-            target_dir: targetDir,
-            url: payload.url,
-          })
-        })
-        .catch((err) => {
-          console.warn('[browser-tab-drop-action] clipDraggedTab IPC threw', err)
+        onPlaceholderUpdate: (taskId, patch) => {
           setPendingClips((prev) =>
-            prev.map((p) =>
-              p.taskId === clientTaskId ? { ...p, status: 'failed', errorMessage: String(err) } : p,
-            ),
+            prev.map((p) => (p.taskId === taskId ? { ...p, ...patch } : p)),
           )
-          schedulePlaceholderRemoval(clientTaskId, 4000)
-        })
-      return
-    }
-
-    // TODO(phase-2): wire content-study / copy-analysis / visual-analysis
-    // through their respective skill / agent entry points.
-    console.info('[browser-tab-drop-action] placeholder', {
-      type: 'browser-tab',
-      action,
-      target: targetHint,
-      title: payload.title,
-      url: payload.url,
-      tabId: payload.tabId,
-    })
-  }, [browserTabDropMenu])
+          if (patch.status === 'failed') {
+            schedulePlaceholderRemoval(taskId, 4000)
+          }
+        },
+      })
+    },
+    [externalDropMenu, schedulePlaceholderRemoval],
+  )
 
   const renderTreeContent = () => {
     if (pinnedFolders.length > 0) {
@@ -1509,9 +1311,9 @@ export default function FileTree({
         const isExpanded = expandedDirs.has(folderPath)
         const children = dirChildren.get(folderPath) || []
         const browserDropLine =
-          browserTabDropTarget?.kind === 'insert-before' && browserTabDropTarget.anchorPath === folderPath
+          fileTreeDropTarget?.kind === 'insert-before' && fileTreeDropTarget.anchorPath === folderPath
             ? 'before'
-            : browserTabDropTarget?.kind === 'insert-after' && browserTabDropTarget.anchorPath === folderPath
+            : fileTreeDropTarget?.kind === 'insert-after' && fileTreeDropTarget.anchorPath === folderPath
               ? 'after'
               : null
         const pinnedItem: FileItem = {
@@ -1530,7 +1332,7 @@ export default function FileTree({
               isRenaming={renamingPath === folderPath}
               isDropTarget={moveDropTargetDir === folderPath}
               isBrowserDropInside={
-                browserTabDropTarget?.kind === 'inside-directory' && browserTabDropTarget.itemPath === folderPath
+                fileTreeDropTarget?.kind === 'inside-directory' && fileTreeDropTarget.itemPath === folderPath
               }
               browserDropLine={browserDropLine}
               isFlashing={flashingTargetPath === folderPath}
@@ -1563,7 +1365,7 @@ export default function FileTree({
                 queryLower={queryLower}
                 filters={filters}
                 moveDropTargetDir={moveDropTargetDir}
-                browserTabDropTarget={browserTabDropTarget}
+                fileTreeDropTarget={fileTreeDropTarget}
                 flashingPath={flashingTargetPath}
                 pendingClips={pendingClips}
                 onToggleDir={toggleDir}
@@ -1622,7 +1424,7 @@ export default function FileTree({
         queryLower={queryLower}
         filters={filters}
         moveDropTargetDir={moveDropTargetDir}
-        browserTabDropTarget={browserTabDropTarget}
+        fileTreeDropTarget={fileTreeDropTarget}
         flashingPath={flashingTargetPath}
         pendingClips={pendingClips}
         onToggleDir={toggleDir}
@@ -1858,7 +1660,7 @@ export default function FileTree({
                 item.isDirectory &&
                 (
                   moveDropTargetDir === item.path ||
-                  (browserTabDropTarget?.kind === 'inside-directory' && browserTabDropTarget.itemPath === item.path)
+                  (fileTreeDropTarget?.kind === 'inside-directory' && fileTreeDropTarget.itemPath === item.path)
                 )
               }
               thumbnailSize={thumbnailSize}
@@ -1916,52 +1718,27 @@ export default function FileTree({
         />
       )}
 
-      {browserTabDropMenu && (
-        <BrowserTabDropActionMenu
-          menu={browserTabDropMenu}
+      {externalDropMenu && (
+        <FileTreeExternalDropMenu
+          menu={externalDropMenu}
           boundaryRect={treeRootRef.current?.getBoundingClientRect() ?? null}
-          onAction={handleBrowserTabDropAction}
-          onClose={() => setBrowserTabDropMenu(null)}
-        />
-      )}
-
-      {rssDropMenu && (
-        <ContextMenu
-          items={[
-            {
-              id: 'rss-web-clip',
-              label: '网页剪藏',
-              onClick: () => handleRssDropAction('web-clip'),
-            },
-            {
-              id: 'rss-copy-analysis',
-              label: '文案分析',
-              onClick: () => handleRssDropAction('copy-analysis'),
-            },
-            {
-              id: 'rss-visual-analysis',
-              label: '视觉分析',
-              onClick: () => handleRssDropAction('visual-analysis'),
-            },
-          ]}
-          x={rssDropMenu.x}
-          y={rssDropMenu.y}
-          onClose={() => setRssDropMenu(null)}
+          onAction={handleExternalDropAction}
+          onClose={() => setExternalDropMenu(null)}
         />
       )}
     </div>
   )
 }
 
-function BrowserTabDropActionMenu({
+function FileTreeExternalDropMenu({
   menu,
   boundaryRect,
   onAction,
   onClose,
 }: {
-  menu: BrowserTabDropMenuState
+  menu: FileTreeExternalDropMenuState
   boundaryRect: DOMRect | null
-  onAction: (action: BrowserTabDropAction) => void
+  onAction: (action: FileTreeExternalDropAction) => void
   onClose: () => void
 }) {
   const menuRef = useRef<HTMLDivElement>(null)

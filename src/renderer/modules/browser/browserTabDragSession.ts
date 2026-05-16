@@ -1,4 +1,4 @@
-import type { BrowserTabDragPayload } from '../../components/layout/fileTreeBrowserTabDrop'
+import type { BrowserTabDragPayload } from '../../components/layout/fileTreeExternalDrop'
 
 let activeBrowserTabDragPayload: BrowserTabDragPayload | null = null
 

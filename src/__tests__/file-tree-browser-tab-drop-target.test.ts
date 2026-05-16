@@ -4,8 +4,8 @@ import test from 'node:test'
 import {
   clampDropMenuPositionToBoundary,
   parseBrowserTabDragPayload,
-  resolveBrowserTabDropTarget,
-} from '../renderer/components/layout/fileTreeBrowserTabDrop'
+  resolveFileTreeDropTarget,
+} from '../renderer/components/layout/fileTreeExternalDrop'
 
 test('parseBrowserTabDragPayload accepts browser tab drags and rejects other payloads', () => {
   const validPayload = JSON.stringify({
@@ -33,8 +33,8 @@ test('parseBrowserTabDragPayload accepts browser tab drags and rejects other pay
   assert.strictEqual(parseBrowserTabDragPayload('not-json'), null)
 })
 
-test('resolveBrowserTabDropTarget highlights directory bodies as inside drops', () => {
-  const target = resolveBrowserTabDropTarget({
+test('resolveFileTreeDropTarget highlights directory bodies as inside drops', () => {
+  const target = resolveFileTreeDropTarget({
     itemPath: '/workspace/archive',
     isDirectory: true,
     containerPath: '/workspace',
@@ -51,8 +51,8 @@ test('resolveBrowserTabDropTarget highlights directory bodies as inside drops', 
   })
 })
 
-test('resolveBrowserTabDropTarget uses separator targets near row edges', () => {
-  const beforeTarget = resolveBrowserTabDropTarget({
+test('resolveFileTreeDropTarget uses separator targets near row edges', () => {
+  const beforeTarget = resolveFileTreeDropTarget({
     itemPath: '/workspace/archive',
     isDirectory: true,
     containerPath: '/workspace',
@@ -60,7 +60,7 @@ test('resolveBrowserTabDropTarget uses separator targets near row edges', () => 
     rectTop: 10,
     rectHeight: 48,
   })
-  const afterTarget = resolveBrowserTabDropTarget({
+  const afterTarget = resolveFileTreeDropTarget({
     itemPath: '/workspace/brief.md',
     isDirectory: false,
     containerPath: '/workspace',

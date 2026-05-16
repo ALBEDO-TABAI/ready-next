@@ -9,8 +9,9 @@ function readWorkspaceFile(path: string): string {
 
 test('file tree offers a browser-style placeholder action menu for dropped browser tabs', () => {
   const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
+  const dispatcher = readWorkspaceFile('src/renderer/components/layout/fileTreeExternalDrop.ts')
 
-  assert.match(source, /type:\s*'browser-tab'/)
+  assert.match(dispatcher, /type:\s*'browser-tab'/)
   assert.match(source, /label:\s*'网页剪藏'/)
   assert.match(source, /label:\s*'内容学习'/)
   assert.match(source, /label:\s*'文案分析'/)
