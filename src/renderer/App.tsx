@@ -27,17 +27,43 @@ function MainAppShell() {
   // 这里**不再**重复设置 data-skin，避免与 applySkin 形成 race。
 
   useEffect(() => {
-    // 订阅 main 进程的 fullscreen lifecycle 推送，把 data-native-fullscreen attr
-    // 与窗口实际全屏状态对齐。Stage 1 阶段没有推送源（Stage 2 才挂监听），但订阅链路本身有效，
-    // 避免 Stage 2 再加新接口。
-    if (!window.electronAPI?.window?.onFullscreenChanged) return
-    return window.electronAPI.window.onFullscreenChanged((isFullscreen) => {
-      if (isFullscreen) {
-        document.documentElement.setAttribute('data-native-fullscreen', 'true')
+    // `data-native-fullscreen` attr 控制 `.ready-app-bg` 是否承担 fullscreen backing（防壁纸泄漏）。
+    // 它**只**应该在"纯原生窗口全屏"（用户走 CMD+CTRL+F / 窗口绿按钮，BrowserWindow 进独立 Space）
+    // 期间设置，在 **HTML5 fullscreen（页面里 element.requestFullscreen()，如 B 站 iframe 视频全屏）**
+    // 期间**绝不**设置——因为 iframe `:fullscreen` UA CSS + `::backdrop` 已经盖了一切，
+    // `.ready-app-bg` 没有任何角色；反而设了 attr 会因为 OOPIF 路径下 `BrowserWindow.leave-full-screen`
+    // IPC 不可靠而卡死在 'true'，让 dark gradient 透过 glass surface 显成"外框黑屏"。
+    //
+    // 决策合同：`attr ⟺ (IPC 报 native) ∧ ¬(document.fullscreenElement 非空)`。
+    // 两个信号 OR-NOT，任何一个说"HTML5 fullscreen 活跃"或"IPC 说退出"都立刻清 attr。
+    // `fullscreenchange` 是 W3C 标准事件、renderer 内部同步触发，不走 IPC，作为 OOPIF 路径不可靠的兜底。
+    let nativeWindowFullscreen = false
+    let htmlFullscreenActive = false
+
+    const reconcile = (): void => {
+      const root = document.documentElement
+      if (nativeWindowFullscreen && !htmlFullscreenActive) {
+        root.setAttribute('data-native-fullscreen', 'true')
       } else {
-        document.documentElement.removeAttribute('data-native-fullscreen')
+        root.removeAttribute('data-native-fullscreen')
       }
-    })
+    }
+
+    const onFsChange = (): void => {
+      htmlFullscreenActive = document.fullscreenElement !== null
+      reconcile()
+    }
+    document.addEventListener('fullscreenchange', onFsChange)
+
+    const unsubIPC = window.electronAPI?.window?.onFullscreenChanged?.((isFullscreen) => {
+      nativeWindowFullscreen = isFullscreen
+      reconcile()
+    }) ?? (() => undefined)
+
+    return () => {
+      document.removeEventListener('fullscreenchange', onFsChange)
+      unsubIPC()
+    }
   }, [])
 
   // Keep agent tool/event listeners alive at app root to avoid missed tool actions

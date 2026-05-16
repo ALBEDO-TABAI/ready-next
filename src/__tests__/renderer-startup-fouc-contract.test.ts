@@ -65,6 +65,51 @@ test('Stage 1 — reconcileStartupTheme syncs four <html> attrs from main snapsh
   assert.match(rendererMain, /removeAttribute\(['"]data-native-fullscreen['"]\)/)
 })
 
+test('验证 3 — reconcileStartupTheme guards data-native-fullscreen against HTML5 fullscreen active state', () => {
+  const rendererMain = readWorkspaceFile('src/renderer/main.tsx')
+
+  // 启动 reconciliation 必须 AND-NOT：data-native-fullscreen='true' 仅在
+  //   (isNativeFullscreen=true) ∧ (document.fullscreenElement 为空) 时设置。
+  // 防 OOPIF 路径下 isNativeFullscreen 残留在 main snapshot 里、又叠加 HTML5 fullscreen 时
+  // 把"外框黑"状态在首帧就引入。
+  assert.match(
+    rendererMain,
+    /document\.fullscreenElement/,
+    'reconcileStartupTheme must consult document.fullscreenElement to gate data-native-fullscreen',
+  )
+  assert.match(
+    rendererMain,
+    /isNativeFullscreen\s*&&\s*!htmlFullscreenActive|!htmlFullscreenActive\s*&&\s*isNativeFullscreen/,
+    'reconcileStartupTheme must gate setAttribute with (isNativeFullscreen && !htmlFullscreenActive)',
+  )
+})
+
+test('验证 3 — App.tsx subscribes to fullscreenchange + IPC, OR-NOT reconciles data-native-fullscreen', () => {
+  const appTsx = readWorkspaceFile('src/renderer/App.tsx')
+
+  // 关键：renderer 必须独立侦测 HTML5 fullscreen 状态（OOPIF 路径下 BrowserWindow.leave-full-screen
+  // IPC 可能不可靠 fire；fullscreenchange 是 W3C 标准事件，renderer 内部同步触发）。
+  // 防 iframe 视频全屏退出后 attr 卡死在 'true' 让 .ready-app-bg dark gradient 透过 glass surface 显成"外框黑屏"。
+  assert.match(
+    appTsx,
+    /addEventListener\(['"]fullscreenchange['"]/,
+    'App.tsx must subscribe to document.fullscreenchange to track HTML5 fullscreen state independently',
+  )
+  assert.match(
+    appTsx,
+    /removeEventListener\(['"]fullscreenchange['"]/,
+    'fullscreenchange listener must be cleaned up on unmount',
+  )
+  // 必须同时订阅 IPC（原生窗口全屏信号）
+  assert.match(appTsx, /onFullscreenChanged/, 'App.tsx must still subscribe to native fullscreen IPC')
+  // 两个信号必须 AND-NOT 出 data-native-fullscreen
+  assert.match(
+    appTsx,
+    /nativeWindowFullscreen\s*&&\s*!htmlFullscreenActive|!htmlFullscreenActive\s*&&\s*nativeWindowFullscreen/,
+    'data-native-fullscreen must be (nativeWindowFullscreen && !htmlFullscreenActive)',
+  )
+})
+
 test('Stage 1 — theme:get IPC response shape includes skin and isNativeFullscreen', () => {
   const mainIndex = readWorkspaceFile('src/main/index.ts')
 
