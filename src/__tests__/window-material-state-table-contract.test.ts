@@ -313,26 +313,16 @@ test('platform input is explicit, not read from process.platform', () => {
 function createFakeWindowWithEvents() {
   type Listener = () => void
   const listeners = new Map<string, Listener[]>()
-  // webContents 事件单独维度（enter-html-full-screen / leave-html-full-screen 走这里）
-  const wcListeners = new Map<string, Listener[]>()
   const setters: { bg: string[]; vibrancy: (string | null)[]; buttonPos: number } = {
     bg: [],
     vibrancy: [],
     buttonPos: 0,
-  }
-  const fakeWebContents = {
-    on: (event: string, cb: Listener) => {
-      const arr = wcListeners.get(event) ?? []
-      arr.push(cb)
-      wcListeners.set(event, arr)
-    },
   }
   const fakeWindow = {
     isDestroyed: () => false,
     setBackgroundColor: (c: string) => { setters.bg.push(c) },
     setVibrancy: (v: 'under-window' | null) => { setters.vibrancy.push(v) },
     setWindowButtonPosition: () => { setters.buttonPos += 1 },
-    webContents: fakeWebContents,
     on: (event: string, cb: Listener) => {
       const arr = listeners.get(event) ?? []
       arr.push(cb)
@@ -344,20 +334,8 @@ function createFakeWindowWithEvents() {
     for (const cb of listeners.get(event) ?? []) cb()
   }
 
-  // 触发 webContents 事件（用于模拟页面 element.requestFullscreen()）
-  function emitWebContents(event: string) {
-    for (const cb of wcListeners.get(event) ?? []) cb()
-  }
-
-  return { fakeWindow, setters, listeners, wcListeners, emit, emitWebContents }
+  return { fakeWindow, setters, listeners, emit }
 }
-
-// flushSetImmediate: 让 setImmediate callback 跑完
-const flushSetImmediate = () => new Promise<void>((resolve) => setImmediate(resolve))
-
-// flushVibrancyRebuild: 等 Stage 2.7 的 leave-full-screen vibrancy 重建 setTimeout(50) 完成
-// 等 80ms 给 50ms timer 加 30ms buffer，避免快机器/慢机器 timing 边界
-const flushVibrancyRebuild = () => new Promise<void>((resolve) => setTimeout(resolve, 80))
 
 test('Stage 2 — attachLifecycle attaches 4 fullscreen handlers on darwin', () => {
   const { fakeWindow, listeners } = createFakeWindowWithEvents()
@@ -453,7 +431,7 @@ test('Stage 2 — will-leave-full-screen is no-op (do not expose transparent dur
   assert.equal(controller.isFullscreen(), true, 'will-leave should not flip materialFullscreenState yet')
 })
 
-test('Stage 2.7 — leave-full-screen liquid-glass: vibrancy rebuild uses setTimeout(50) to give macOS time to process null', async () => {
+test('验证 1 — leave-full-screen liquid-glass: synchronous bg transparent, vibrancy untouched', () => {
   const { fakeWindow, setters, emit } = createFakeWindowWithEvents()
   let fullscreenNotifications: boolean[] = []
   const controller = createWindowMaterialController({
@@ -472,36 +450,19 @@ test('Stage 2.7 — leave-full-screen liquid-glass: vibrancy rebuild uses setTim
 
   emit('leave-full-screen')
 
-  // 同步阶段：只 setVibrancy(null)；bg 不动，flag 不翻，IPC 不发
-  assert.equal(setters.vibrancy.at(-1), null, 'should synchronously call setVibrancy(null) to kick macOS rebuild')
-  assert.equal(setters.vibrancy.length, vibrancyIndexBeforeLeave + 1)
-  assert.equal(setters.bg.length, bgIndexBeforeLeave, 'bg should not change synchronously in leave handler')
-  assert.equal(controller.isFullscreen(), true, 'materialFullscreenState should not flip synchronously')
-  assert.deepEqual(fullscreenNotifications, [])
-
-  // setImmediate 之后还不应该完成（因为 Stage 2.7 用的是 setTimeout(50)，不是 setImmediate）
-  await flushSetImmediate()
-  assert.equal(
-    setters.vibrancy.length,
-    vibrancyIndexBeforeLeave + 1,
-    'after setImmediate (which fires sub-ms): rebuild should NOT yet have happened (waiting for setTimeout 50ms)',
-  )
-
-  // 等 setTimeout(50) callback 跑完（用 80ms buffer）
-  await flushVibrancyRebuild()
-
-  // 严格顺序：setVibrancy('under-window') 在 setBackgroundColor('#00000000') 之前
-  // vibrancy 重建时 bg 还是 backing 不透明（重建不可见）；bg 切透明时 vibrancy 已工作
-  assert.equal(setters.vibrancy.at(-1), 'under-window', 'should set vibrancy=under-window after setTimeout(50)')
-  assert.equal(setters.bg.at(-1), '#00000000', 'should set bg=transparent after vibrancy rebuild')
-  assert.equal(setters.vibrancy.length, vibrancyIndexBeforeLeave + 2, 'vibrancy sequence: null then under-window')
-  assert.equal(setters.bg.length, bgIndexBeforeLeave + 1, 'one bg setter call')
-
-  assert.equal(controller.isFullscreen(), false)
+  // 验证 1：撤回 rebuild 后，leave 同步走 flag + sync + notify。
+  // - bg 立刻从 backing 切到透明（diff 检测到变化）
+  // - vibrancy 在 darwin 上始终 'under-window'，diff 无变化，setVibrancy 不调
+  // - materialFullscreenState 同步翻 false
+  // - notifyFullscreenChanged(false) 同步发
+  assert.equal(setters.bg.at(-1), '#00000000', 'leave should sync bg back to transparent immediately')
+  assert.equal(setters.bg.length, bgIndexBeforeLeave + 1, 'exactly one bg setter call')
+  assert.equal(setters.vibrancy.length, vibrancyIndexBeforeLeave, 'vibrancy must never be touched in leave handler (validation 1)')
+  assert.equal(controller.isFullscreen(), false, 'materialFullscreenState should flip false synchronously')
   assert.deepEqual(fullscreenNotifications, [false])
 })
 
-test('Stage 2.7 — leave-full-screen liquid-glass: lastAppliedMaterial cache updated to windowed state', async () => {
+test('验证 1 — leave-full-screen liquid-glass: lastAppliedMaterial cache updated by standard sync()', () => {
   const { fakeWindow, setters, emit } = createFakeWindowWithEvents()
   const controller = createWindowMaterialController({
     window: fakeWindow,
@@ -512,9 +473,8 @@ test('Stage 2.7 — leave-full-screen liquid-glass: lastAppliedMaterial cache up
   controller.attachLifecycle()
   emit('will-enter-full-screen')
   emit('leave-full-screen')
-  await flushVibrancyRebuild()
 
-  // 缓存应该被手动同步到 {bg='#00000000', vibrancy='under-window'}
+  // sync() 已经在 leave 里同步跑过；缓存应该被更新到 windowed liquid-glass = {bg='#00000000', vibrancy='under-window'}
   const bgCallsBefore = setters.bg.length
   const vibrancyCallsBefore = setters.vibrancy.length
   controller.sync()
@@ -563,7 +523,6 @@ test('Stage 2 — leave-full-screen lifecycle handler bails when window destroye
     setBackgroundColor: (c: string) => { setters.bg.push(c) },
     setVibrancy: (v: 'under-window' | null) => { setters.vibrancy.push(v) },
     setWindowButtonPosition: () => undefined,
-    webContents: { on: () => undefined },
     on: (event: string, cb: Listener) => {
       const arr = listeners.get(event) ?? []
       arr.push(cb)
@@ -587,7 +546,7 @@ test('Stage 2 — leave-full-screen lifecycle handler bails when window destroye
   assert.equal(setters.bg.length + setters.vibrancy.length, callsBeforeDestroy, 'destroyed window should skip all setter calls in leave-full-screen')
 })
 
-test('Stage 2.6 — fullscreen entry → exit cycle: bg toggles, vibrancy rebuilds on exit to recover from macOS vibrancy loss', async () => {
+test('验证 1 — fullscreen entry → exit cycle: bg toggles, vibrancy never manipulated', () => {
   const { fakeWindow, setters, emit } = createFakeWindowWithEvents()
   const controller = createWindowMaterialController({
     window: fakeWindow,
@@ -601,18 +560,15 @@ test('Stage 2.6 — fullscreen entry → exit cycle: bg toggles, vibrancy rebuil
   emit('enter-full-screen')
   emit('will-leave-full-screen')
   emit('leave-full-screen')
-  await flushVibrancyRebuild()
 
-  // bg 序列：initial '#00000000' → enter '#282D33' → leave 同步阶段不动 → setImmediate '#00000000'
+  // bg 序列：initial '#00000000' → enter '#282D33' → leave '#00000000'
   assert.deepEqual(setters.bg, ['#00000000', '#282D33', '#00000000'])
-  // vibrancy 序列：applyInitial 设 'under-window' → leave 同步 null（重建踢醒 macOS）→ setImmediate 'under-window'
-  // 这就是 Stage 2.6 添加的 vibrancy rebuild kick——即使 Electron 层从未真的需要变 vibrancy，
-  // macOS NSVisualEffectView 在 fullscreen lifecycle 期间可能静默丢失 vibrancy effect，
-  // 退出时强制 null → under-window 切换序列踢醒它。
-  assert.deepEqual(setters.vibrancy, ['under-window', null, 'under-window'])
+  // vibrancy 序列：applyInitial 唯一一次设 'under-window'，之后再也不该有任何 setVibrancy 调用——
+  // 让 macOS 自治 NSVisualEffectView stash/restore，避免 Stage 2.6 那种 rebuild 反噬。
+  assert.deepEqual(setters.vibrancy, ['under-window'])
 })
 
-test('Stage 2.6 — edge case: theme toggle during fullscreen + exit (with vibrancy rebuild on exit)', async () => {
+test('验证 1 — edge case: theme toggle during fullscreen + exit, vibrancy still untouched', () => {
   let currentTheme: 'light' | 'dark' = 'dark'
   const { fakeWindow, setters, emit } = createFakeWindowWithEvents()
   const controller = createWindowMaterialController({
@@ -631,60 +587,21 @@ test('Stage 2.6 — edge case: theme toggle during fullscreen + exit (with vibra
   assert.equal(setters.bg.at(-1), '#DEE1E4', 'theme toggle in fullscreen should update bg to light backing')
 
   emit('leave-full-screen')
-  await flushVibrancyRebuild()
-  // light + windowed → bg='#00000000', vibrancy='under-window' (rebuilt)
+  // light + windowed → bg='#00000000'
   assert.equal(setters.bg.at(-1), '#00000000', 'leave-full-screen should restore transparent bg')
-  // vibrancy 完整序列：applyInitial 'under-window' → leave 同步 null → setImmediate 'under-window'
+  // vibrancy 全程只有 applyInitial 那一次设
   assert.deepEqual(
     setters.vibrancy,
-    ['under-window', null, 'under-window'],
-    'vibrancy rebuild kick: null then under-window to recover from macOS vibrancy loss during fullscreen',
+    ['under-window'],
+    'no vibrancy manipulation after applyInitial (validation 1)',
   )
   assert.equal(controller.isFullscreen(), false)
 })
 
-test('Stage 2.8 — HTML5 fullscreen exit (iframe video) does NOT trigger vibrancy rebuild', async () => {
+test('验证 1 — HTML5 fullscreen exit (iframe video): bg restored to transparent, vibrancy untouched', () => {
   // 用户报：在文档里 bilibili iframe 视频全屏 → 退出 → 整个 UI 深黑色无法恢复，只能重启。
-  // 根因：HTML5 fullscreen 退出后做 vibrancy null → under-window 重建会让 macOS NSVisualEffectView
-  // 静默忽略 set，留在 null 态 → bg='#00000000' 透明 + vibrancy=null = 深黑色。
-  // 修法：webContents.enter-html-full-screen 把 fullscreenSource 标为 'html'，leave 路径跳过重建走标准 sync。
-  const { fakeWindow, setters, emit, emitWebContents } = createFakeWindowWithEvents()
-  const controller = createWindowMaterialController({
-    window: fakeWindow,
-    platform: 'darwin',
-    getTheme: () => ({ skin: 'liquid-glass', resolvedTheme: 'dark' }),
-  })
-  controller.applyInitial()
-  controller.attachLifecycle()
-
-  // HTML5 fullscreen sequence: webContents.enter-html-full-screen 先触发，
-  // BrowserWindow.will-enter-full-screen 紧随其后
-  emitWebContents('enter-html-full-screen')
-  emit('will-enter-full-screen')
-  emit('enter-full-screen')
-
-  // Enter 与 native 路径一致：bg 切到 dark backing，vibrancy 不动
-  assert.equal(setters.bg.at(-1), '#282D33')
-  const vibrancyCallsBeforeLeave = setters.vibrancy.length
-
-  // 退出 HTML5 fullscreen
-  emit('will-leave-full-screen')
-  emit('leave-full-screen')
-  await flushVibrancyRebuild()
-
-  // 关键断言：HTML5 退出不能调 setVibrancy(null) —— 否则 NSVisualEffectView 失效，UI 变黑
-  assert.equal(
-    setters.vibrancy.length,
-    vibrancyCallsBeforeLeave,
-    'HTML5 fullscreen exit must NOT touch vibrancy (rebuild kick reserved for native window-button fullscreen)',
-  )
-  assert.equal(setters.bg.at(-1), '#00000000', 'bg should still revert to transparent via standard sync()')
-  assert.equal(controller.isFullscreen(), false, 'materialFullscreenState should still flip false')
-})
-
-test('Stage 2.8 — native window-button fullscreen still rebuilds vibrancy on exit', async () => {
-  // 反例确认：当 fullscreenSource === 'native'（webContents.enter-html-full-screen 没先触发），
-  // leave 路径仍走 vibrancy null → setTimeout(50) → under-window 重建踢醒（Stage 2.6/2.7 行为保留）。
+  // 撤回 rebuild 后，HTML5 与 native 走同一条 leave 路径：flag + sync + notify。
+  // 不再需要区分触发源；NSVisualEffectView 由 macOS 自治管理。
   const { fakeWindow, setters, emit } = createFakeWindowWithEvents()
   const controller = createWindowMaterialController({
     window: fakeWindow,
@@ -694,15 +611,16 @@ test('Stage 2.8 — native window-button fullscreen still rebuilds vibrancy on e
   controller.applyInitial()
   controller.attachLifecycle()
 
-  // 不发 webContents 事件：模拟窗口按钮 / CMD+CTRL+F 触发的原生全屏
   emit('will-enter-full-screen')
   emit('enter-full-screen')
+  assert.equal(setters.bg.at(-1), '#282D33')
+
   emit('will-leave-full-screen')
   emit('leave-full-screen')
-  await flushVibrancyRebuild()
 
-  // 完整 vibrancy 序列：applyInitial → leave 同步 null → setTimeout 'under-window'
-  assert.deepEqual(setters.vibrancy, ['under-window', null, 'under-window'])
+  assert.equal(setters.bg.at(-1), '#00000000', 'bg reverts to transparent via sync()')
+  assert.deepEqual(setters.vibrancy, ['under-window'], 'vibrancy must remain at applyInitial value, never re-set')
+  assert.equal(controller.isFullscreen(), false)
 })
 
 test('MaterialInputs type carries platform field (testing-friendly explicit input)', () => {

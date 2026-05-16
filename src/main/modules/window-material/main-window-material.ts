@@ -212,12 +212,6 @@ export function createWindowMaterialController(options: WindowMaterialController
 
   let materialFullscreenState = false
   let lastAppliedMaterial: MaterialOutputs | null = null
-  // 区分 fullscreen 触发源：'native' = 用户走窗口按钮 / CMD+CTRL+F；
-  // 'html' = 页面里 element.requestFullscreen() 触发（比如 bilibili iframe 视频全屏）；
-  // null = 当前不在 fullscreen 态。Stage 2.8 新增——leave-full-screen 时 native 路径
-  // 才做 vibrancy 重建踢醒；HTML5 fullscreen 退出后做重建反而会让 NSVisualEffectView
-  // 静默失效（用户报：视频全屏退出后 UI 整片黑色无法恢复）。
-  let fullscreenSource: 'native' | 'html' | null = null
 
   const sync = (): void => {
     if (window.isDestroyed()) return
@@ -252,30 +246,27 @@ export function createWindowMaterialController(options: WindowMaterialController
       on(event: 'will-enter-full-screen' | 'will-leave-full-screen', listener: () => void): BrowserWindow
     }
 
-    // 关键架构选择：vibrancy 在整个 liquid-glass lifecycle 中始终 'under-window'。
-    // fullscreen 期间不关 vibrancy；用不透明 backgroundColor 在合成层级上盖住 vibrancy backdrop
-    // 来防止桌面壁纸泄漏（Bug 2）。退出全屏只需把 bg 改回透明，vibrancy 从未被禁用，
-    // 桌面立刻通过 vibrancy 可见——彻底避免了 vibrancy 重建的 macOS no-op 边界 case。
-    // 详见 computeMaterial 上方的长注释。
+    // 关键架构选择：vibrancy 在整个 liquid-glass lifecycle 中始终 'under-window'，
+    // 不主动 set 到 null。fullscreen 期间用不透明 backgroundColor 在合成层级上盖住 vibrancy
+    // backdrop 来防止桌面壁纸泄漏（Bug 2）。退出全屏只把 bg 改回透明，vibrancy 从头到尾
+    // 没被 Electron API 碰过——让 macOS 自己管 NSVisualEffectView 的 stash / restore。
     //
-    // 因此 4 个 lifecycle handler 都简化成"翻 flag + sync() + 通知"。
-    // applyMaterial 的"只对变化字段调 setter"会自动做正确的 setter 调用：
+    // **历史教训（验证 1，2026-05-16）**：曾在 Stage 2.6/2.7/2.8 加过一段 vibrancy 重建路径
+    // (`setVibrancy(null) → setTimeout → setVibrancy('under-window')`)，目的是修用户报的
+    // "退原生全屏后偶发 vibrancy 失效"的 一次性问题。但这套主动 kick 反而把 macOS 一个
+    // 本来好端端的状态机推进了"等 Electron 重新激活"分支——HTML5 fullscreen（B 站 iframe
+    // 视频全屏）退出时复现稳定的"整片深黑色无法恢复"bug，根因是 setVibrancy('under-window')
+    // 被 NSVisualEffectView 静默忽略，留在 null 态 + 透明 bg = 黑。撤回 rebuild 后
+    // 让 macOS 自治 stash/restore 是更稳的选择。
+    //
+    // 4 个 lifecycle handler 都极简："翻 flag + sync() + 通知"。
+    // applyMaterial 的 diff 保证只对变化字段调 setter：
     //   - will-enter: bg 变化（透明→backing）调 setBackgroundColor；vibrancy 不变不调
-    //   - enter:      幂等 sync（一般 no-op）
+    //   - enter:      幂等 sync
     //   - will-leave: 故意 no-op（保持 backing 不透明覆盖 vibrancy 直到 OS 动画结束）
     //   - leave:      bg 变化（backing→透明）调 setBackgroundColor；vibrancy 不变不调
 
-    // HTML5 fullscreen（页面 element.requestFullscreen()）会在 macOS 上同时触发
-    // webContents.enter-html-full-screen + BrowserWindow.will-enter-full-screen。
-    // 这个 handler 必须在 will-enter 之前打 'html' 标，让 leave 路径走简单 sync 而非
-    // vibrancy 重建——重建在 HTML5 fullscreen 退出时会让 NSVisualEffectView 静默失效。
-    window.webContents.on('enter-html-full-screen', () => {
-      fullscreenSource = 'html'
-    })
-
     macFullscreenEmitter.on('will-enter-full-screen', () => {
-      // 如果 enter-html-full-screen 已经先打过 'html' 标，保留；否则视为用户走窗口按钮 / CMD+CTRL+F。
-      if (fullscreenSource === null) fullscreenSource = 'native'
       materialFullscreenState = true
       sync()
       notifyFullscreenChanged?.(true)
@@ -294,57 +285,9 @@ export function createWindowMaterialController(options: WindowMaterialController
 
     window.on('leave-full-screen', () => {
       if (window.isDestroyed()) return
-      const { skin } = getTheme()
-      const wasHtmlFullscreen = fullscreenSource === 'html'
-      fullscreenSource = null
-
-      // **Stage 2.8 关键分支**：区分 fullscreen 触发源决定退出路径。
-      //
-      // - 'native'（窗口按钮 / CMD+CTRL+F）：window 移动到独立 macOS Space，
-      //   NSVisualEffectView 真的会跟 compositor 失联，需要 vibrancy null → under-window
-      //   重建踢醒。Stage 2.6/2.7 修复的就是这条路径的"偶发实色灰"。
-      //
-      // - 'html'（页面 requestFullscreen，比如 bilibili iframe 视频全屏）：iframe 元素接管
-      //   viewport 而已，window 没换 Space，NSVisualEffectView 也没跟 compositor 失联。
-      //   此时再做 vibrancy null → under-window 重建反而 trigger 一个新的 macOS quirk：
-      //   under-window vibrancy 被 set 到一个"刚从 HTML5 fullscreen 出来"的 window 时，
-      //   NSVisualEffectView 会静默忽略 set，留在 null 态——bg='#00000000' 透明 + vibrancy=null
-      //   = 用户看到深黑色，且因为 vibrancy state 已经损坏，后续 theme/skin 切换都救不回来，
-      //   只能重启进程（用户报的 bug）。
-      //
-      //   走标准 sync() 路径：vibrancy 始终保持 'under-window'（applyMaterial diff 看到不变
-      //   就不调 setVibrancy），只改 bg backing → 透明。NSVisualEffectView 状态从未被破坏。
-      //
-      // - ready-glass：bg 在 fullscreen / windowed 之间不变，更不需要 rebuild。
-      //
-      // 重建路径细节（仅 native + liquid-glass 走这里）：
-      //   Stage 2.7 用 setTimeout(50) 而非 setImmediate——macOS NSVisualEffectView 处理
-      //   setVibrancy(null) 是异步的，需要一个完整 render frame（60fps 16ms）把 effect 真停掉。
-      //   setImmediate sub-ms 触发，会让 null → under-window 合并成 no-op。
-      //   setTimeout(50) 给 macOS 充足时间，且 OS 退出动画本身 ~500ms 远没收尾，不迟滞。
-      //   严格顺序：先 setVibrancy('under-window')，再 setBackgroundColor('#00000000')，
-      //   否则中间帧会露"透明 + null vibrancy"= OS fallback 黑底。
-      //   手动 setter 绕过 applyMaterial diff 缓存，所以必须手动同步 lastAppliedMaterial。
-      if (wasHtmlFullscreen || skin !== 'liquid-glass') {
-        materialFullscreenState = false
-        sync()
-        notifyFullscreenChanged?.(false)
-        return
-      }
-
-      // native + liquid-glass 路径：vibrancy 重建踢醒
-      window.setVibrancy(null)
-      setTimeout(() => {
-        if (window.isDestroyed()) return
-        window.setVibrancy('under-window')
-        window.setBackgroundColor(DARWIN_LIQUID_GLASS_TRANSPARENT)
-        materialFullscreenState = false
-        lastAppliedMaterial = {
-          backgroundColor: DARWIN_LIQUID_GLASS_TRANSPARENT,
-          vibrancy: 'under-window',
-        }
-        notifyFullscreenChanged?.(false)
-      }, 50)
+      materialFullscreenState = false
+      sync()
+      notifyFullscreenChanged?.(false)
     })
   }
 

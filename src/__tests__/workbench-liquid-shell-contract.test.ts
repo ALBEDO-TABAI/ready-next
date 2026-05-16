@@ -149,38 +149,39 @@ test('Stage 2 — controller attaches 4 fullscreen lifecycle listeners on darwin
   assert.match(materialModule, /if \(platform !== 'darwin'\) return/)
 })
 
-test('Stage 2.7 — leave-full-screen vibrancy rebuild uses setTimeout(>=30ms), NOT setImmediate (race-prone)', () => {
+test('验证 1 (2026-05-16) — leave-full-screen must NOT manipulate vibrancy at all', () => {
   const materialModule = readWorkspaceFile('src/main/modules/window-material/main-window-material.ts')
 
-  // Stage 2.6 加入了 leave-full-screen 的 vibrancy 重建踢醒序列：
-  //   window.setVibrancy(null) → 延时 → window.setVibrancy('under-window') + setBackgroundColor('#00000000')
-  // 即使 Electron 层 vibrancy 状态从未改过（Stage 2.4 状态表保持 'under-window'），
-  // macOS NSVisualEffectView 仍可能在 fullscreen lifecycle 期间静默丢失 vibrancy。
-  // 退出全屏时必须强制一次状态切换序列来踢醒它。
+  // 验证 1 决定：撤回 Stage 2.6/2.7/2.8 的 vibrancy 重建路径。
+  // 让 macOS 自己管 NSVisualEffectView stash/restore；Electron 不主动 setVibrancy(null)。
+  // 历史上加重建是为了修一次性"偶发 vibrancy 失效"，但 rebuild 本身在 HTML5 fullscreen
+  // 退出场景（B 站 iframe）触发了更严重的"整片深黑色无法恢复"。撤回后让 OS 自治更稳。
   const codeOnly = materialModule
     .replace(/\/\*[\s\S]*?\*\//g, '')
     .replace(/\/\/.*$/gm, '')
 
-  // Stage 2.7 关键修正：用 setTimeout(50) 而非 setImmediate。
-  // setImmediate 在快机器上 sub-ms 触发，macOS NSVisualEffectView 来不及处理 null 状态，
-  // null → under-window 转移被合并成 no-op（用户报的"偶发 vibrancy 失败"）。
-  assert.match(codeOnly, /setTimeout\s*\(\s*\(\s*\)\s*=>\s*\{/, 'leave-full-screen rebuild must use setTimeout (Stage 2.7)')
-  // 延时值必须 >= 30ms（至少 60fps 一帧 16ms + 充足 buffer）
-  const setTimeoutMatch = codeOnly.match(/setTimeout\s*\(\s*\(\s*\)\s*=>\s*\{[\s\S]*?\}\s*,\s*(\d+)\s*\)/)
-  assert.ok(setTimeoutMatch, 'setTimeout call should be parseable')
-  const delay = parseInt(setTimeoutMatch![1], 10)
-  assert.ok(delay >= 30, `setTimeout delay must be >= 30ms (got ${delay}ms) — need to give macOS NSVisualEffectView a full frame to process null state`)
-
-  // setImmediate / process.nextTick 不该再用于 vibrancy 重建（race-prone）
-  assert.doesNotMatch(codeOnly, /setImmediate/, 'must not use setImmediate for vibrancy rebuild (Stage 2.7 found it race-prone)')
-  assert.doesNotMatch(codeOnly, /process\.nextTick/, 'must not use process.nextTick for vibrancy rebuild')
-
-  // leave-full-screen handler 必须显式做 setVibrancy(null) 同步调用作为重建第一步
   const leaveMatch = codeOnly.match(/\.on\(['"]leave-full-screen['"][\s\S]*?\n\s*\}\)/)
   assert.ok(leaveMatch, 'leave-full-screen handler should exist')
   const leaveBody = leaveMatch![0]
-  assert.match(leaveBody, /window\.setVibrancy\(null\)/, 'leave-full-screen must call setVibrancy(null) synchronously to kick rebuild')
-  assert.match(leaveBody, /window\.setVibrancy\('under-window'\)/, 'leave-full-screen must call setVibrancy(under-window) after the timeout to re-activate')
+
+  // 关键合同：leave-full-screen handler 内禁止任何 setVibrancy 调用（无论传 null 还是
+  // 'under-window'）。任何 vibrancy 重建尝试都属于 Stage 2.6 回潮。
+  assert.doesNotMatch(leaveBody, /setVibrancy/, 'leave-full-screen must not call setVibrancy (validation 1: let macOS auto-restore)')
+  // 同时禁止 setTimeout 延时——撤回 rebuild 后，leave 必须同步走 flag + sync + notify。
+  assert.doesNotMatch(leaveBody, /setTimeout/, 'leave-full-screen must not schedule any timer (rebuild path retired)')
+  // 也不能用 setImmediate / process.nextTick 偷偷重建。
+  assert.doesNotMatch(leaveBody, /setImmediate/, 'leave-full-screen must not use setImmediate')
+  assert.doesNotMatch(leaveBody, /process\.nextTick/, 'leave-full-screen must not use process.nextTick')
+
+  // 模块整体也不该有 fullscreenSource / wasHtmlFullscreen / enter-html-full-screen 监听等
+  // Stage 2.8 source-tracking 残留——撤回 rebuild 后这套区分已无意义。
+  assert.doesNotMatch(codeOnly, /fullscreenSource/, 'fullscreenSource state should be removed (validation 1)')
+  assert.doesNotMatch(codeOnly, /wasHtmlFullscreen/, 'wasHtmlFullscreen local should be removed (validation 1)')
+  assert.doesNotMatch(
+    codeOnly,
+    /enter-html-full-screen/,
+    'no html-fullscreen event subscription needed once rebuild is gone (validation 1)',
+  )
 })
 
 test('Stage 2 — liquid-glass fullscreen state table entry uses under-window vibrancy (NOT null)', () => {
@@ -207,7 +208,7 @@ test('Stage 2 — liquid-glass fullscreen state table entry uses under-window vi
   )
 })
 
-test('Stage 2.8 — leave-full-screen branches by source × skin: native+liquid uses rebuild, others use sync()', () => {
+test('验证 1 — leave-full-screen handler shape: flag flip + sync + notify, single branch, no skin/source check', () => {
   const materialModule = readWorkspaceFile('src/main/modules/window-material/main-window-material.ts')
 
   // will-enter: 翻 flag → sync → notify (no vibrancy rebuild needed on entry)
@@ -218,44 +219,17 @@ test('Stage 2.8 — leave-full-screen branches by source × skin: native+liquid 
   assert.match(willEnterBody, /\bsync\(\)/)
   assert.match(willEnterBody, /notifyFullscreenChanged/)
 
-  // leave: 必须按"触发源 × skin"分支：
-  //   native (window button / CMD+CTRL+F) + liquid-glass: vibrancy 重建路径
-  //   html (页面 requestFullscreen，比如 bilibili iframe 视频全屏) | ready-glass: 标准 sync 路径
+  // leave: 单一分支，三件事：materialFullscreenState=false、sync()、notifyFullscreenChanged(false)。
+  // 不再按 skin / source 分流——验证 1 的结论是任何分流都属于 over-engineering。
   const leaveMatch = materialModule.match(/\.on\(['"]leave-full-screen['"][\s\S]*?\n\s*\}\)/)
   assert.ok(leaveMatch)
   const leaveBody = leaveMatch![0]
-  // 必须读 fullscreenSource 决定是否走重建
-  assert.match(leaveBody, /wasHtmlFullscreen/, 'leave handler must distinguish HTML5 vs native fullscreen source')
-  assert.match(leaveBody, /fullscreenSource === 'html'/, 'leave handler must check source==html')
-  // 重建路径仅留给 native + liquid-glass
-  assert.match(leaveBody, /skin !== 'liquid-glass'/, 'leave handler must early-return for non-liquid-glass via skin !== check')
-  // liquid-glass + native 分支必须有 setTimeout 重建路径
-  assert.match(leaveBody, /setTimeout/)
-  // 所有分支都必须把 materialFullscreenState 翻成 false 并通知 renderer
   assert.match(leaveBody, /materialFullscreenState\s*=\s*false/)
-  assert.match(leaveBody, /notifyFullscreenChanged/)
-})
-
-test('Stage 2.8 — webContents.enter-html-full-screen tags source so leave path can skip vibrancy rebuild', () => {
-  const materialModule = readWorkspaceFile('src/main/modules/window-material/main-window-material.ts')
-
-  // 必须有 webContents.on('enter-html-full-screen') 监听器
-  assert.match(
-    materialModule,
-    /webContents\.on\(['"]enter-html-full-screen['"]/,
-    'must subscribe to webContents enter-html-full-screen to tag source',
-  )
-
-  // 监听器 body 必须把 fullscreenSource 设为 'html'
-  const htmlEnterMatch = materialModule.match(/webContents\.on\(['"]enter-html-full-screen['"][\s\S]*?\}\)/)
-  assert.ok(htmlEnterMatch, 'enter-html-full-screen handler must exist')
-  assert.match(htmlEnterMatch![0], /fullscreenSource\s*=\s*'html'/)
-
-  // will-enter-full-screen 时如果 source 还是 null，标为 'native'（窗口按钮路径）
-  const willEnterMatch = materialModule.match(/\.on\(['"]will-enter-full-screen['"][\s\S]*?\}\)/)
-  assert.ok(willEnterMatch)
-  assert.match(willEnterMatch![0], /fullscreenSource\s*===\s*null/)
-  assert.match(willEnterMatch![0], /fullscreenSource\s*=\s*'native'/)
+  assert.match(leaveBody, /\bsync\(\)/)
+  assert.match(leaveBody, /notifyFullscreenChanged\?\.\(false\)/)
+  // 禁止 skin 分支判断（撤回 Stage 2.6 分流）
+  assert.doesNotMatch(leaveBody, /skin\s*===\s*'liquid-glass'/, 'no skin branching (validation 1)')
+  assert.doesNotMatch(leaveBody, /skin\s*!==\s*'liquid-glass'/, 'no skin branching (validation 1)')
 })
 
 test('Stage 2 — will-leave-full-screen handler is a deliberate no-op (do not expose transparent mid-animation)', () => {
