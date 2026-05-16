@@ -45,3 +45,73 @@ test('renderer first frame already carries data-theme + data-skin to prevent FOU
   )
   assert.match(mainIndex, /nonMacFirstFrameBg = nativeTheme\.shouldUseDarkColors \? '#1A1B1E' : '#F7F9FC'/)
 })
+
+test('Stage 1 — reconcileStartupTheme syncs four <html> attrs from main snapshot', () => {
+  const rendererMain = readWorkspaceFile('src/renderer/main.tsx')
+
+  // theme:get 现在返回 { option, resolved, skin, isNativeFullscreen }；
+  // reconcileStartupTheme 必须把这四个值映射到 4 个 <html> attr。
+  assert.match(rendererMain, /skin/, 'reconcileStartupTheme should read skin from snapshot')
+  assert.match(rendererMain, /isNativeFullscreen/, 'reconcileStartupTheme should read isNativeFullscreen')
+
+  // data-theme = resolved
+  assert.match(rendererMain, /setAttribute\(['"]data-theme['"]/)
+  // data-skin 永远是 'liquid-glass'（与 useTheme.applySkin 行为一致，兼容 CSS selector）
+  assert.match(rendererMain, /setAttribute\(['"]data-skin['"],\s*['"]liquid-glass['"]\)/)
+  // data-glass-backdrop = 'ready' 或 'native'（按 skin 派生）
+  assert.match(rendererMain, /setAttribute\(['"]data-glass-backdrop['"]/)
+  // data-native-fullscreen 仅在 isNativeFullscreen=true 时设置；否则 removeAttribute
+  assert.match(rendererMain, /setAttribute\(['"]data-native-fullscreen['"]/)
+  assert.match(rendererMain, /removeAttribute\(['"]data-native-fullscreen['"]\)/)
+})
+
+test('Stage 1 — theme:get IPC response shape includes skin and isNativeFullscreen', () => {
+  const mainIndex = readWorkspaceFile('src/main/index.ts')
+
+  // ThemeSnapshot type must carry skin + isNativeFullscreen
+  assert.match(mainIndex, /skin:\s*ThemeSkin/)
+  assert.match(mainIndex, /isNativeFullscreen:/)
+
+  // getThemeSnapshot must populate all four fields
+  const snapshotFnMatch = mainIndex.match(/function getThemeSnapshot[\s\S]*?\n\}/)
+  assert.ok(snapshotFnMatch, 'getThemeSnapshot function should exist')
+  const snapshotBody = snapshotFnMatch![0]
+  assert.match(snapshotBody, /option:/)
+  assert.match(snapshotBody, /resolved:/)
+  assert.match(snapshotBody, /skin:/)
+  assert.match(snapshotBody, /isNativeFullscreen:/)
+})
+
+test('Stage 1+2.5 — fullscreen backing is handled by main process bg only (no DOM CSS fallback)', () => {
+  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+
+  // Stage 2.5: 删除了 .ready-app-shell[data-native-fullscreen]  CSS 规则。
+  // 历史背景：原本是"防 IPC 延迟"的双保险，但实测发现 .ready-app-shell 在 isolation:isolate
+  // compositor 层上对 CSS 变量级联响应不及时，导致全屏中切主题时视觉卡死。
+  // 改成：main 进程的 setBackgroundColor 是 backing 色的唯一来源，DOM 层 .ready-app-shell 永远透明。
+  assert.doesNotMatch(
+    styles,
+    /html\[data-native-fullscreen='true'\][\s\S]*?\.ready-app-shell\s*\{[\s\S]*?background:\s*var\(--ready-native-fullscreen-bg\)/,
+    'fullscreen backing CSS rule on .ready-app-shell should be removed (main process bg is single source of truth)',
+  )
+  // --ready-native-fullscreen-bg 变量定义也应该清掉（CSS 里不再有消费者）
+  assert.doesNotMatch(styles, /--ready-native-fullscreen-bg:/)
+
+  // 但 data-native-fullscreen attr 本身还是要设/清的——给未来可能的 renderer 状态判断用，
+  // 也作为"main 进程 fullscreen lifecycle 已通知 renderer"的可观察信号。
+  // 测试 1 已断言 reconcileStartupTheme 仍然同步这个 attr。
+
+  // data-glass-backdrop='native' 让 --app-bg-overlay-opacity 变 0（藏掉 .ready-app-bg 渐变，
+  // 让 vibrancy 桌面壁纸做底）；data-glass-backdrop='ready' 不覆盖，沿用 liquid-glass scope 的 1
+  assert.match(
+    styles,
+    /html\[data-skin='liquid-glass'\]\[data-glass-backdrop='native'\]\s*\{[\s\S]*?--app-bg-overlay-opacity:\s*0/,
+  )
+
+  // 不再有 .ready-app-bg { opacity: 0 } 硬覆盖（旧的两条规则已删，改用变量级联）
+  assert.doesNotMatch(
+    styles,
+    /html\[data-skin='liquid-glass'\]\s*\.ready-app-bg\s*\{\s*background:\s*transparent;\s*opacity:\s*0/,
+    '.ready-app-bg opacity:0 hard overrides should be removed (variable cascade handles it)',
+  )
+})

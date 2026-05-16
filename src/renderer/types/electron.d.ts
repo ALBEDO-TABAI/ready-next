@@ -20,7 +20,7 @@ import type {
   RSSStatusData,
   RSSUpdateTaskStatusData
 } from '../modules/rss/types'
-import type { ThemeOption, ResolvedTheme } from '../stores/useTheme'
+import type { ThemeOption, ResolvedTheme, ThemeSkin } from '../stores/useTheme'
 import type { TaskType } from '../../shared/task-types'
 
 // Type declarations for window.electronAPI exposed by preload
@@ -2041,16 +2041,28 @@ interface ElectronWindowAPI {
   minimize: () => Promise<void>
   maximize: () => Promise<void>
   close: () => Promise<void>
+  /** macOS fullscreen lifecycle push from main; Stage 2 onwards 才有事件，Stage 1 是空订阅 */
+  onFullscreenChanged: (listener: (isFullscreen: boolean) => void) => () => void
 }
 
 // =============================================================================
 // Theme API Types
 // =============================================================================
 
+interface ThemeSnapshotPayload {
+  option: ThemeOption
+  resolved: ResolvedTheme
+  skin: ThemeSkin
+  /** 主窗口当前是否在 macOS 原生 fullscreen 态。renderer 启动 reconciliation 用以同步 data-native-fullscreen attr */
+  isNativeFullscreen: boolean
+}
+
 interface ElectronThemeAPI {
   set: (theme: string) => Promise<void>
-  get: () => Promise<{ success: boolean; data?: { option: ThemeOption; resolved: ResolvedTheme }; error?: string }>
-  onChanged: (listener: (snapshot: { option: ThemeOption; resolved: ResolvedTheme }) => void) => () => void
+  /** 切换玻璃风格；不触发昼夜 ritual，仅影响窗口材料和 .ready-app-bg 渐变可见性 */
+  setSkin: (skin: ThemeSkin) => Promise<void>
+  get: () => Promise<{ success: boolean; data?: ThemeSnapshotPayload; error?: string }>
+  onChanged: (listener: (snapshot: ThemeSnapshotPayload) => void) => () => void
 }
 
 // =============================================================================

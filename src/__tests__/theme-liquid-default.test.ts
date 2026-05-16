@@ -137,6 +137,9 @@ describe('useTheme liquid default', () => {
     queuedTimeouts.length = 0
     nativeThemeCalls.length = 0
     documentAttributes.set('data-theme', 'light')
+    // 模拟 useTheme.applySkin('liquid-glass') 在模块初始化时设置的两个 attr：
+    documentAttributes.set('data-skin', 'liquid-glass')
+    documentAttributes.set('data-glass-backdrop', 'native')
     useTheme.setState({
       theme: 'light',
       resolvedTheme: 'light',
@@ -144,18 +147,42 @@ describe('useTheme liquid default', () => {
     })
   })
 
-  it('keeps liquid-glass as the default skin', () => {
+  it('defaults to liquid-glass skin with data-skin=liquid-glass and data-glass-backdrop=native', () => {
     assert.strictEqual(useTheme.getState().skin, 'liquid-glass')
-    useTheme.getState().toggleSkin()
-    assert.strictEqual(useTheme.getState().skin, 'liquid-glass')
-    assert.strictEqual(storage.get('ready-theme-skin'), 'liquid-glass')
+    // data-skin 永远是 'liquid-glass'（兼容现有 CSS selector）；
+    // 真正的差异化通过 data-glass-backdrop 区分。
     assert.strictEqual(documentAttributes.get('data-skin'), 'liquid-glass')
+    assert.strictEqual(documentAttributes.get('data-glass-backdrop'), 'native')
   })
 
-  it('persists liquid-glass when set explicitly', () => {
+  it('toggleSkin flips between liquid-glass and ready-glass without triggering ritual', () => {
+    const ritualBefore = useRitualOverlayStore.getState().session
+    useTheme.getState().toggleSkin()
+    assert.strictEqual(useTheme.getState().skin, 'ready-glass')
+    assert.strictEqual(storage.get('ready-theme-skin'), 'ready-glass')
+    assert.strictEqual(documentAttributes.get('data-skin'), 'liquid-glass', 'data-skin remains liquid-glass')
+    assert.strictEqual(documentAttributes.get('data-glass-backdrop'), 'ready', 'data-glass-backdrop flips to ready')
+    // 关键合同：切换 skin 不触发昼夜 ritual（ritual 只为 theme 切换）
+    assert.strictEqual(useRitualOverlayStore.getState().session, ritualBefore, 'toggleSkin should not start a ritual')
+
+    useTheme.getState().toggleSkin()
+    assert.strictEqual(useTheme.getState().skin, 'liquid-glass')
+    assert.strictEqual(documentAttributes.get('data-glass-backdrop'), 'native')
+  })
+
+  it('persists ready-glass when set explicitly via setSkin', () => {
+    useTheme.getState().setSkin('ready-glass')
+    assert.strictEqual(useTheme.getState().skin, 'ready-glass')
+    assert.strictEqual(storage.get('ready-theme-skin'), 'ready-glass')
+    assert.strictEqual(documentAttributes.get('data-glass-backdrop'), 'ready')
+  })
+
+  it('persists liquid-glass when set explicitly via setSkin', () => {
+    useTheme.getState().setSkin('ready-glass')
     useTheme.getState().setSkin('liquid-glass')
     assert.strictEqual(useTheme.getState().skin, 'liquid-glass')
     assert.strictEqual(storage.get('ready-theme-skin'), 'liquid-glass')
+    assert.strictEqual(documentAttributes.get('data-glass-backdrop'), 'native')
   })
 
   it('updates the store immediately when setTheme is called; DOM swap is staged by the ritual overlay', () => {

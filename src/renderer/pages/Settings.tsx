@@ -221,7 +221,8 @@ const themeOptions: { value: 'light' | 'dark' | 'system'; label: string; icon: R
 ]
 
 const skinOptions: { value: ThemeSkin; label: string; icon: React.ElementType; description: string }[] = [
-  { value: 'liquid-glass', label: 'Liquid Glass', icon: Droplets, description: '高质感玻璃化层叠界面' },
+  { value: 'liquid-glass', label: '通透玻璃', icon: Droplets, description: '真半透明液态玻璃，背后透出 macOS 桌面壁纸（默认）' },
+  { value: 'ready-glass', label: '稳定玻璃', icon: Droplets, description: 'Ready 自持稳定底色，不透出桌面（更稳定但失去通透感）' },
 ]
 
 const SETTING_SLOT_WIDTHS = {

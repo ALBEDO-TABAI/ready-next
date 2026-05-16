@@ -443,6 +443,22 @@ html[data-theme='dark'][data-skin='liquid-glass'] {
   --workbench-module-surface-bg: var(--lg-material-panel);
 }
 
+/*
+ * data-glass-backdrop 修饰符 —— 'liquid-glass' skin 现在有两种 backdrop:
+ *   - 'native'（默认）: 用 macOS vibrancy 桌面壁纸做底，所以 .ready-app-bg 渐变要藏起来
+ *   - 'ready':         用 .ready-app-bg 自己的渐变层做底，不依赖 vibrancy
+ *
+ * 这条规则**必须** 用 [data-skin='liquid-glass'] 限定（不要写成 :root），
+ * 因为 data-skin 永远是 liquid-glass，data-glass-backdrop 才是差异化开关。
+ */
+html[data-skin='liquid-glass'][data-glass-backdrop='native'] {
+  --app-bg-overlay-opacity: 0;
+}
+
+html[data-theme='dark'][data-skin='liquid-glass'][data-glass-backdrop='native'] {
+  --app-bg-overlay-opacity: 0;
+}
+
 /* Base styles */
 * {
   margin: 0;
@@ -481,6 +497,23 @@ html[data-skin='liquid-glass'] #root,
 html[data-skin='liquid-glass'] .ready-app-shell {
   background: transparent !important;
 }
+
+/*
+ * 注：原 `html[data-native-fullscreen='true'][...]  .ready-app-shell` 双保险规则已删除。
+ *
+ * 历史背景：Stage 1 加这条规则是为了"防 IPC 延迟"——main 进程 setBackgroundColor 与 renderer
+ * 收到 fullscreen IPC 之间会有 ms 级延迟，那段时间 .ready-app-shell 透明 + main 还没切到
+ * backing 色 = 露出 OS fallback 灰。所以 DOM 层加一道不透明 backing 兜底。
+ *
+ * 但 Stage 2.4 把 vibrancy 改成在 liquid-glass 期间始终 'under-window' 后，main 的
+ * setBackgroundColor 是同步生效的；IPC 延迟也只影响 `data-native-fullscreen` attr 是否准时
+ * 设置——而 attr 不再被 CSS 用到。在 fullscreen 中切主题时，这条 CSS 规则 + `.ready-app-shell`
+ * 的 isolation:isolate compositor 层在 Chromium 上有时不会按 CSS 变量级联及时重绘 bg color，
+ * 导致 .ready-app-shell 视觉卡在旧 backing 色 = 用户报的"实色全屏切液态玻璃后没法换主题"。
+ *
+ * 删除这条规则后：main 进程 bg 是 backing 色的唯一来源，DOM 层 `.ready-app-shell` 永远透明，
+ * main 的 setBackgroundColor 直接被用户看到，避免了 CSS 层的潜在 repaint 卡死。
+ */
 
 .ready-app-shell {
   position: relative;
@@ -1780,15 +1813,14 @@ html[data-theme='dark'][data-skin='liquid-glass'] .glass-surface-card {
   background: var(--lg-material-card) !important;
 }
 
-html[data-skin='liquid-glass'] .ready-app-bg {
-  background: transparent;
-  opacity: 0;
-}
-
-html[data-theme='dark'][data-skin='liquid-glass'] .ready-app-bg {
-  background: transparent;
-  opacity: 0;
-}
+/*
+ * 注：原有 `html[data-skin='liquid-glass'] .ready-app-bg { opacity: 0 }` 两条硬覆盖已删除。
+ * 改用变量级联：
+ *   - 默认 'native' backdrop: `--app-bg-overlay-opacity: 0` 在 [data-glass-backdrop='native'] 设置（保持原效果）
+ *   - 可选 'ready' backdrop:  `--app-bg-overlay-opacity: 1` 沿用 light/dark liquid-glass 默认值（让 .ready-app-bg 渐变可见）
+ *
+ * 不再用硬覆盖，因为它会阻止 ready-glass 模式看到 .ready-app-bg 渐变层。
+ */
 
 .content-surface-panel,
 .content-surface-card {
