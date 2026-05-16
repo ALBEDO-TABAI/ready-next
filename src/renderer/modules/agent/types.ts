@@ -5,14 +5,38 @@ type DesignRepairScope = 'run-owned' | 'selected'
 type DesignControllerPhase = string
 type DesignStyleSystem = Record<string, unknown>
 
+export interface AskUserQuestionsCardState {
+  cardId: string
+  status: 'pending' | 'submitted' | 'cancelled' | 'timeout'
+  questions: Array<{
+    id: string
+    question: string
+    kind: 'single_choice' | 'multi_choice' | 'free_text'
+    options?: string[] | null
+    placeholder?: string | null
+    required?: boolean
+  }>
+  askedAt: number
+  answers?: Array<{ id: string; answer: string | string[] }>
+  answeredAt?: number
+  cancelReason?: string
+  cancelledAt?: number
+}
+
 export interface AgentMessage {
   id: string
   agent: string
   content: string
-  type: 'user' | 'agent' | 'system'
+  type: 'user' | 'agent' | 'system' | 'ask_user_questions'
   timestamp: Date
   attachments?: ChatAttachment[]
   meta?: Record<string, unknown>
+  /**
+   * Populated when `type === 'ask_user_questions'`. The chat panel renders
+   * `AskUserQuestionsCard` for these messages and persistence (DB
+   * meta_json.askUserQuestions) matches this shape.
+   */
+  askUserQuestions?: AskUserQuestionsCardState
 }
 
 export interface Agent {

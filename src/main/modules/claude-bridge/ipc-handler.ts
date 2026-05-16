@@ -18,8 +18,19 @@ import {
 } from '../agent-control/skill-reference-hints'
 import { clearSkillTaskProjection } from '../agent-control/skill-task-tracker'
 import { registerAskUserQuestionEmitter } from '../agent-control/ask-user-bridge'
+import {
+  registerAskUserQuestionsCardEmitter,
+  registerAskUserQuestionsCardPersistor,
+} from '../agent-control/ask-user-questions-bridge'
 import { registerSkillReferenceInlinedEmitter } from '../agent-control/skill-reference-inlined-bridge'
 import { getEphemeralExecutionStore } from '../tools/skill-primitives/ephemeral-execution-store'
+import {
+  getAskUserQuestionsStore,
+  type AskUserAnswer,
+  type AskUserQuestionSpec,
+} from '../tools/builtins/ask-user-questions-store'
+import { ToolDomainError } from '../tools/tool-errors'
+import { getDatabase } from '../database'
 import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
 import { sanitizeAssistantText } from '../agent-control/tool-call-text-guard'
 import { cancelChildRunForIpc, listActiveChildRunsForIpc } from './active-child-run-ipc'
@@ -153,19 +164,80 @@ function cleanupSkillSessionState(sessionId?: string, reason = 'Skill session st
     clearLastReferenceSkill(sessionId)
     clearSkillTaskProjection(sessionId)
     getEphemeralExecutionStore().rejectBySession(sessionId, new Error(reason))
+    // agent_interaction — pending ask_user_questions cards belong to the
+    // turn that issued them; a session reset / kill must drop them too so
+    // the renderer card UI clears and the model's awaiting Promise unblocks.
+    getAskUserQuestionsStore().rejectBySession(sessionId, new Error(reason))
     return
   }
   clearAllReferenceSkillHints()
   clearSkillTaskProjection()
   getEphemeralExecutionStore().clear()
+  getAskUserQuestionsStore().clear()
 }
 
 function cancelSkillSessionPendingInteractions(sessionId?: string, reason = 'Skill session interaction cancelled'): void {
   if (sessionId) {
     getEphemeralExecutionStore().rejectBySession(sessionId, new Error(reason))
+    getAskUserQuestionsStore().rejectBySession(sessionId, new Error(reason))
     return
   }
   getEphemeralExecutionStore().clear()
+  getAskUserQuestionsStore().clear()
+}
+
+interface PersistAskUserQuestionsCardArgs {
+  cardId: string
+  sessionId: string | null
+  conversationId: string | null
+  questions: AskUserQuestionSpec[]
+  askedAt: number
+}
+
+/**
+ * Persist a card row in `chat_messages` with status='pending'. Runs BEFORE
+ * the IPC push so renderer hydrate (`agent:askUserQuestions:listPending`)
+ * can never observe a card in IPC that DB hasn't seen yet.
+ *
+ * Returns the chat_messages row id (= cardId, by design — the cardId IS the
+ * message id so submit / cancel / boot-sweep can target it without a join).
+ */
+function persistAskUserQuestionsCardPending(args: PersistAskUserQuestionsCardArgs): void {
+  const conversationId = args.conversationId || args.sessionId || ''
+  if (!conversationId) {
+    throw new Error('ask_user_questions persist requires a conversationId or sessionId')
+  }
+  const askedAt = new Date(args.askedAt).toISOString()
+  const summary = `等待用户回答 ${args.questions.length} 个问题`
+  getDatabase().addChatMessage(
+    args.cardId,
+    conversationId,
+    'agent_card',
+    summary,
+    askedAt,
+    {
+      askUserQuestions: {
+        cardId: args.cardId,
+        status: 'pending',
+        questions: args.questions,
+        askedAt: args.askedAt,
+      },
+    },
+  )
+}
+
+function renderCardSummary(
+  questions: AskUserQuestionSpec[],
+  answers: AskUserAnswer[],
+): string {
+  const byId = new Map(answers.map((a) => [a.id, a] as const))
+  const parts = questions.map((q, index) => {
+    const answer = byId.get(q.id)
+    if (!answer) return `${index + 1}. ${q.question} → (未作答)`
+    const rendered = Array.isArray(answer.answer) ? answer.answer.join(' / ') : String(answer.answer)
+    return `${index + 1}. ${q.question} → ${rendered}`
+  })
+  return `用户回答了 ${answers.length}/${questions.length} 个问题：\n${parts.join('\n')}`
 }
 
 export async function cleanupAgentRuntime(): Promise<void> {
@@ -208,6 +280,25 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     if (mainWindow.isDestroyed()) return
     mainWindow.webContents.send('skill:askUserQuestion', event)
   })
+  // agent_interaction — wire `ask_user_questions` emitter + persistor.
+  // Boot sweep runs FIRST (synchronously, before any renderer hydrate) so
+  // pending cards from a previous app run never resurrect with a missing
+  // Promise resolver.
+  try {
+    const swept = getDatabase().sweepPendingAskUserQuestionsCardsOnBoot()
+    if (swept > 0) {
+      log(`ask_user_questions boot sweep cancelled ${swept} stale pending card(s)`)
+    }
+  } catch (sweepErr) {
+    // Don't crash boot — the worst case is one stale pending card we'll
+    // hide via renderer-side timestamp check.
+    log(`ask_user_questions boot sweep failed: ${sweepErr instanceof Error ? sweepErr.message : String(sweepErr)}`)
+  }
+  registerAskUserQuestionsCardEmitter((event) => {
+    if (mainWindow.isDestroyed()) return
+    mainWindow.webContents.send('agent:askUserQuestions:push', event)
+  })
+  registerAskUserQuestionsCardPersistor((args) => persistAskUserQuestionsCardPending(args))
   registerSkillReferenceInlinedEmitter((event) => {
     if (mainWindow.isDestroyed()) return
     mainWindow.webContents.send('skill:referenceInlined', event)
@@ -256,6 +347,149 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   })
   ipcMain.handle('skills:askUser:pending', () => {
     return getEphemeralExecutionStore().list()
+  })
+
+  // ===================== agent_interaction IPC =====================
+  // ask_user_questions — multi-question reflection card. Submit handler:
+  //   1. validate payload shape
+  //   2. update DB row to status='submitted' + content=summary (so chat
+  //      history search picks up the resolved Q/A even after restart)
+  //   3. store.resolve(cardId, answerSet) so the handler Promise unblocks
+  //      and the executor returns a ToolExecutionOutput to the model
+  //
+  // Order is critical: DB FIRST then store.resolve. Otherwise the model's
+  // turn engine could race ahead (handler resumes synchronously inside
+  // resolve) and observe DB still showing pending.
+  try { ipcMain.removeHandler('agent:askUserQuestions:submit') } catch { /* ignore */ }
+  try { ipcMain.removeHandler('agent:askUserQuestions:cancel') } catch { /* ignore */ }
+  try { ipcMain.removeHandler('agent:askUserQuestions:listPending') } catch { /* ignore */ }
+  ipcMain.handle('agent:askUserQuestions:submit', (_event, rawPayload: unknown) => {
+    const payload = (rawPayload || {}) as { cardId?: string; answers?: unknown }
+    const cardId = typeof payload.cardId === 'string' ? payload.cardId : ''
+    if (!cardId) return { success: false, error: 'cardId is required' }
+    if (!Array.isArray(payload.answers)) return { success: false, error: 'answers must be an array' }
+    const answers: AskUserAnswer[] = []
+    for (const raw of payload.answers as unknown[]) {
+      if (!raw || typeof raw !== 'object') continue
+      const a = raw as { id?: unknown; answer?: unknown }
+      const id = typeof a.id === 'string' ? a.id : null
+      if (!id) continue
+      if (typeof a.answer === 'string') {
+        answers.push({ id, answer: a.answer })
+      } else if (Array.isArray(a.answer)) {
+        const list: string[] = []
+        for (const v of a.answer) {
+          if (typeof v === 'string') list.push(v)
+        }
+        answers.push({ id, answer: list })
+      }
+    }
+    const store = getAskUserQuestionsStore()
+    const record = store.get(cardId)
+    if (!record) {
+      return { success: false, error: 'No pending card with this id (already answered, cancelled or timed out)' }
+    }
+    const answeredAt = Date.now()
+    // DB write first — so a re-hydrate immediately after this returns sees
+    // status='submitted'. Failure aborts the resolve so the model isn't
+    // told the user answered when persistence didn't actually land.
+    try {
+      const existing = getDatabase().getChatMessageById(cardId)
+      const meta: Record<string, unknown> = existing?.meta_json
+        ? (JSON.parse(existing.meta_json) as Record<string, unknown>)
+        : {}
+      const aug = (meta.askUserQuestions as Record<string, unknown>) || {}
+      const nextMeta: Record<string, unknown> = {
+        ...meta,
+        askUserQuestions: {
+          ...aug,
+          status: 'submitted',
+          answers,
+          answeredAt,
+        },
+      }
+      const summary = renderCardSummary(record.questions, answers)
+      getDatabase().updateChatMessageMeta(cardId, nextMeta, { content: summary })
+    } catch (persistErr) {
+      const message = persistErr instanceof Error ? persistErr.message : String(persistErr)
+      return { success: false, error: `Failed to persist answers: ${message}` }
+    }
+    const resolved = store.resolve(cardId, { answers, answeredAt })
+    if (!resolved) {
+      return { success: false, error: 'Card resolver missed (race) — answers were persisted but the model turn already moved on' }
+    }
+    return { success: true }
+  })
+  ipcMain.handle('agent:askUserQuestions:cancel', (_event, rawPayload: unknown) => {
+    const payload = (rawPayload || {}) as { cardId?: string; reason?: string }
+    const cardId = typeof payload.cardId === 'string' ? payload.cardId : ''
+    if (!cardId) return { success: false, error: 'cardId is required' }
+    const reason = typeof payload.reason === 'string' && payload.reason.length > 0
+      ? payload.reason
+      : 'user_cancelled'
+    const store = getAskUserQuestionsStore()
+    const record = store.get(cardId)
+    const cancelledAt = Date.now()
+    try {
+      const existing = getDatabase().getChatMessageById(cardId)
+      if (existing) {
+        const meta: Record<string, unknown> = existing.meta_json
+          ? (JSON.parse(existing.meta_json) as Record<string, unknown>)
+          : {}
+        const aug = (meta.askUserQuestions as Record<string, unknown>) || {}
+        const nextMeta: Record<string, unknown> = {
+          ...meta,
+          askUserQuestions: {
+            ...aug,
+            status: 'cancelled',
+            cancelReason: reason,
+            cancelledAt,
+          },
+        }
+        getDatabase().updateChatMessageMeta(cardId, nextMeta)
+      }
+    } catch {
+      // Persist failure should not block the in-flight Promise rejection;
+      // the next renderer hydrate will pick up the stale pending row.
+    }
+    if (record) {
+      // Map the reason to a tool error kind. `user_typed_instead` is the
+      // common "user sent a new message while a card was pending" case —
+      // the handler returns errorKind=user_skipped which the model sees
+      // as "the user replied with prose instead of card answers".
+      const errorKind = reason === 'user_typed_instead' ? 'user_skipped' : 'user_cancelled'
+      const friendly = reason === 'user_typed_instead'
+        ? '用户用新消息替代了选项回答。'
+        : '用户取消了反问卡。'
+      store.reject(cardId, new ToolDomainError(errorKind, friendly, { cardId, reason }))
+    }
+    return { success: true }
+  })
+  ipcMain.handle('agent:askUserQuestions:listPending', () => {
+    // Source of truth = DB rows still tagged status='pending'. Combine with
+    // in-memory store to detect rows whose handler isn't waiting on them
+    // anymore (those count as orphaned and are sent down as 'cancelled' so
+    // the renderer doesn't display them as live cards).
+    try {
+      const dbPending = getDatabase().listPendingAskUserQuestionsCards()
+      const store = getAskUserQuestionsStore()
+      const liveIds = new Set(store.list().map((entry) => entry.cardId))
+      const cards = dbPending
+        .filter((entry) => liveIds.has(entry.messageId))
+        .map((entry) => {
+          const aug = entry.meta.askUserQuestions as Record<string, unknown>
+          return {
+            cardId: entry.messageId,
+            conversationId: entry.conversationId,
+            askedAt: typeof aug.askedAt === 'number' ? aug.askedAt : Date.parse(entry.timestamp),
+            questions: Array.isArray(aug.questions) ? aug.questions : [],
+          }
+        })
+      return { success: true, data: cards }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      return { success: false, error: message }
+    }
   })
   const orchestrator = runtime.getOrchestrator()
   const pendingToolActionRequests = new Map<string, {

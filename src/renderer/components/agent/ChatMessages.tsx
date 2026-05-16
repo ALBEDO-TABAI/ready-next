@@ -1,7 +1,9 @@
-import { useRef, useEffect } from 'react'
+import { useRef, useEffect, useMemo } from 'react'
 import { Copy, Check, ChevronRight, Wrench, CheckCircle2, CircleDashed } from 'lucide-react'
 import type { AgentMessage, ChatAttachment, ToolTraceEvent } from '../../stores/useAgent'
 import { formatToolTracePreview } from '../../modules/agent/toolTracePreview'
+import { AskUserQuestionsCard } from './AskUserQuestionsCard'
+import { submitAskUserQuestionsAnswers, cancelAskUserQuestionsCard } from '../../stores/useAgent'
 
 interface ChatMessagesProps {
   messages: AgentMessage[]
@@ -55,20 +57,22 @@ export default function ChatMessages({
   renderMarkdown,
 }: ChatMessagesProps) {
   const messagesEndRef = useRef<HTMLDivElement>(null)
-  const hasWelcomeMessage = messages.some((msg) => /^welcome(?:-|$)/.test(msg.id))
-  const totalMessageTextLength = messages.reduce((sum, msg) => sum + msg.content.trim().length, 0)
-  const shouldFloatIntroBlock = (
-    !showToolTraceCapsule &&
-    hasWelcomeMessage &&
-    messages.length > 0 &&
-    messages.length <= 4 &&
-    totalMessageTextLength <= 280
+  // Welcome 文案是 renderer-only 的本地提示（不进 LLM 上下文）。一旦用户
+  // 发出第一条消息就把它从可见列表里抹掉——视觉上"被新内容顶走"。
+  const hasUserMessage = messages.some((msg) => msg.type === 'user')
+  const visibleMessages = useMemo(
+    () => (hasUserMessage ? messages.filter((msg) => !/^welcome(?:-|$)/.test(msg.id)) : messages),
+    [messages, hasUserMessage],
   )
+  // "无对话历史" 状态：只有 welcome 文案、没有任何用户消息也没有真正的 agent
+  // 回复。这一状态下欢迎语应竖直居中（更像登陆页），用户一旦输入立刻进入
+  // bottom-anchored 流：欢迎语从可见列表里消失，新消息从底部向上"顶"。
+  const onlyWelcomePresent = !hasUserMessage && visibleMessages.every((msg) => /^welcome(?:-|$)/.test(msg.id))
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages.length])
+  }, [visibleMessages.length])
 
   const latestToolEvent = toolTrace.length > 0 ? toolTrace[toolTrace.length - 1] : null
   const latestToolPreview = formatToolTracePreview(latestToolEvent?.text)
@@ -78,15 +82,18 @@ export default function ChatMessages({
     <div
       className="panel-hover-scrollbar flex-1 overflow-auto"
       style={{
-        padding: shouldFloatIntroBlock ? '20px 16px clamp(76px, 16vh, 132px)' : 16,
+        padding: 16,
         display: 'flex',
         flexDirection: 'column',
         gap: 14,
-        justifyContent: shouldFloatIntroBlock ? 'center' : 'flex-start',
+        // Welcome-only state: vertically center the welcome message. Once
+        // the user types, switch to bottom-anchored flow (spacer below
+        // handles the rest).
+        justifyContent: onlyWelcomePresent ? 'center' : 'flex-start',
       }}
     >
       {/* Welcome Card */}
-      {messages.length === 0 && (
+      {visibleMessages.length === 0 && messages.length === 0 && (
         <div
           className="flex flex-col items-center"
           style={{ gap: 16, padding: '12px 16px' }}
@@ -143,9 +150,31 @@ export default function ChatMessages({
         </div>
       )}
 
+      {/* Bottom-anchor spacer: only active once the user has typed. When the
+          welcome message is the sole content we let `justifyContent: center`
+          on the parent center it instead — so the empty-state hero floats
+          mid-pane rather than sticking to the input. After first user input,
+          this spacer consumes the leftover vertical space so messages enter
+          at the bottom and push earlier ones up. */}
+      {!onlyWelcomePresent && <div style={{ marginTop: 'auto' }} aria-hidden />}
+
       {/* Messages */}
-      {messages.map((msg, index) => {
-        const showMessageDivider = index < messages.length - 1 && (msg.type === 'user' || msg.type === 'agent')
+      {visibleMessages.map((msg, index) => {
+        // agent_interaction — render the inline question card as a special
+        // message. Skip the normal user/agent bubble pipeline entirely; the
+        // card handles its own pending/collapsed presentation.
+        if (msg.type === 'ask_user_questions' && msg.askUserQuestions) {
+          return (
+            <div key={msg.id} className="flex flex-col" style={{ gap: 10 }}>
+              <AskUserQuestionsCard
+                card={msg.askUserQuestions}
+                onSubmit={submitAskUserQuestionsAnswers}
+                onCancel={cancelAskUserQuestionsCard}
+              />
+            </div>
+          )
+        }
+        const showMessageDivider = index < visibleMessages.length - 1 && (msg.type === 'user' || msg.type === 'agent')
         const taskSnapshot = msg.type === 'agent' ? messageTaskSnapshots[msg.id] : null
         const toolTraceSnapshot = msg.type === 'agent' ? messageToolTraceSnapshots[msg.id] : null
 

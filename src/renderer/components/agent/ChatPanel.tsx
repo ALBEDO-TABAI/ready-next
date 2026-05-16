@@ -501,6 +501,30 @@ function renderInline(text: string): React.ReactNode[] {
 function MarkdownContent({ content }: { content: string }) {
   const nodes = useMemo(() => parseMarkdown(content), [content])
 
+  // Bug fix: numbered list ordinals must reflect position *within the list*,
+  // not the node's index in the whole document. The line-based parser emits
+  // each numbered line as its own node and inserts `br` nodes between blank
+  // lines, so `idx + 1` was producing 3, 5, 7, 9 (odd numbers from the array
+  // index plus the leading text/br) for an agent reply that wrote 1, 2, 3, 4.
+  // Walk the node list once to compute a stable ordinal that only counts
+  // `numbered` items and is interrupted by any non-numbered, non-br node.
+  const numberedOrdinals = useMemo(() => {
+    const out = new Array<number>(nodes.length).fill(0)
+    let counter = 0
+    for (let i = 0; i < nodes.length; i += 1) {
+      const node = nodes[i]
+      if (node.type === 'numbered') {
+        counter += 1
+        out[i] = counter
+      } else if (node.type !== 'br') {
+        // Any non-br interruption (paragraph, header, code block, bullet)
+        // ends the current ordered list. The next numbered item starts over.
+        counter = 0
+      }
+    }
+    return out
+  }, [nodes])
+
   return (
     <div className="markdown-content" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
       {nodes.map((node, idx) => {
@@ -551,7 +575,7 @@ function MarkdownContent({ content }: { content: string }) {
                     textAlign: 'right'
                   }}
                 >
-                  {idx + 1}.
+                  {numberedOrdinals[idx]}.
                 </span>
                 <span>{renderInline(node.content)}</span>
               </div>
@@ -3428,6 +3452,51 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
   ])
 
   const bottomTaskCard = useMemo<React.ReactNode | null>(() => {
+    // The bottom task card is reserved for tasks that genuinely benefit from
+    // a stationary progress surface — work that runs long enough and emits
+    // enough rolling output that the user wants a fixed anchor to glance
+    // at without scrolling the chat. For everything else (chit-chat, single-
+    // tool calls, planning-phase placeholders, the ask_user_questions wait
+    // state), the floating "正在思考" capsule plus the inline task snapshot
+    // already carry the signal and the bottom card just steals room.
+    //
+    // Three suppression rules:
+    //   (a) A pending `ask_user_questions` card already owns the "I'm waiting
+    //       on you" signal — the bottom card would be pure duplication.
+    //   (b) Task isn't classified as heavy yet (`taskType` is undefined,
+    //       `direct_answer`, `short_task`, or a `multi_step_task` that has
+    //       NOT produced concrete multi-step evidence). Even when planning
+    //       phase is active, stay silent rather than render a "正在理解需求"
+    //       placeholder.
+    //   (c) "Heavy" means one of:
+    //         - `media_task` (always heavy by construction — VEA-style)
+    //         - `continuation` (resumed work, usually long)
+    //         - `multi_step_task` WITH ≥2 tracked steps OR a structured
+    //           progress total OR at least one artifact emitted (i.e. the
+    //           task is actually multi-stepping, not just classified as
+    //           such by a hopeful intent classifier).
+    //
+    // Background tasks are unaffected and continue to surface regardless —
+    // those represent independent long-running work that owns the bottom
+    // strip even when the foreground turn is light.
+    const hasPendingAskUserCard = messages.some(
+      (m) => m.type === 'ask_user_questions' && m.askUserQuestions?.status === 'pending',
+    )
+
+    function isHeavyOngoing(run: typeof currentTaskRun): boolean {
+      if (!run) return false
+      const taskType = run.taskType
+      if (taskType === 'media_task') return true
+      if (taskType === 'continuation') return true
+      if (taskType === 'multi_step_task') {
+        const stepCount = run.steps?.length ?? 0
+        const totalSteps = typeof run.progress?.total === 'number' ? run.progress.total : 0
+        const artifactCount = run.recentArtifacts?.length ?? 0
+        return stepCount >= 2 || totalSteps >= 2 || artifactCount >= 1
+      }
+      return false
+    }
+
     const foregroundActive = Boolean(
       currentTaskRun &&
       (
@@ -3440,10 +3509,17 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         currentTaskRun.phase === 'responding'
       )
     )
-    if (!foregroundActive && backgroundTaskRuns.length === 0) return null
+    const suppressForeground = foregroundActive && (hasPendingAskUserCard || !isHeavyOngoing(currentTaskRun))
+    const effectiveForegroundActive = foregroundActive && !suppressForeground
+
+    if (!effectiveForegroundActive && backgroundTaskRuns.length === 0) return null
     return (
-      <div className="flex flex-col" style={{ gap: 6 }}>
-        {foregroundActive && currentTaskRun
+      // width:100% + box-sizing so the card visually pairs with the
+      // composer chrome (which is also `w-full`). Without the explicit
+      // width some intrinsic-sized children inside TaskCard can collapse
+      // the wrapper narrower than the input slot.
+      <div className="flex flex-col" style={{ gap: 6, width: '100%', boxSizing: 'border-box' }}>
+        {effectiveForegroundActive && currentTaskRun
           ? renderTaskSnapshotCard(
               currentTaskRun,
               `bottom-task-${getTaskRunDisplayKey(currentTaskRun)}`,
@@ -3451,8 +3527,8 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
             )
           : null}
         {backgroundTaskRuns.length > 0 && (
-          <div className="flex flex-col" style={{ gap: 6 }}>
-            {(foregroundActive || backgroundTaskRuns.length > 1) && (
+          <div className="flex flex-col" style={{ gap: 6, width: '100%' }}>
+            {(effectiveForegroundActive || backgroundTaskRuns.length > 1) && (
               <div
                 style={{
                   fontSize: 10.5,
@@ -3475,7 +3551,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         )}
       </div>
     )
-  }, [backgroundTaskRuns, currentTaskRun, isStreaming, renderTaskSnapshotCard])
+  }, [backgroundTaskRuns, currentTaskRun, isStreaming, messages, renderTaskSnapshotCard])
 
   // W3: Drag & drop support (app-internal + OS files)
   const [isDragOver, setIsDragOver] = useState(false)

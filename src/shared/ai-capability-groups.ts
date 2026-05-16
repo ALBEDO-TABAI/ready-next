@@ -14,6 +14,7 @@ export type CapabilityGroupId =
   | 'system_host'
   | 'design_reserved'
   | 'mcp'
+  | 'agent_interaction'
 
 export type CapabilityProfileId =
   | 'local_chat'
@@ -201,6 +202,17 @@ export const CAPABILITY_GROUPS: CapabilityGroupDefinition[] = [
     defaultMode: 'auto',
     defaultProfiles: ['local_chat'],
     executionKinds: ['deterministic'],
+    settingsVisible: false,
+  },
+  {
+    id: 'agent_interaction',
+    label: '反问用户',
+    description: '主 agent 在意图含糊时主动向用户反问多个结构化问题（inline 卡片，预渲染 + 前进后退导航）。仅 local_chat。',
+    exposure: 'model_visible',
+    availability: 'active',
+    defaultMode: 'on',
+    defaultProfiles: ['local_chat'],
+    executionKinds: ['interactive'],
     settingsVisible: false,
   },
 ]

@@ -2581,6 +2581,42 @@ interface ElectronUIAPI {
 // Top-level API
 // =============================================================================
 
+interface AskUserQuestionsCardQuestionPayload {
+  id: string
+  question: string
+  kind: 'single_choice' | 'multi_choice' | 'free_text'
+  options?: string[]
+  placeholder?: string
+  required?: boolean
+}
+
+interface AskUserQuestionsCardPushEvent {
+  cardId: string
+  sessionId: string | null
+  conversationId: string | null
+  questions: AskUserQuestionsCardQuestionPayload[]
+  askedAt: number
+}
+
+interface AskUserQuestionsPendingCard {
+  cardId: string
+  conversationId: string | null
+  askedAt: number
+  questions: AskUserQuestionsCardQuestionPayload[]
+}
+
+interface ElectronAgentInteractionAPI {
+  submitAskUserQuestions: (payload: {
+    cardId: string
+    answers: Array<{ id: string; answer: string | string[] }>
+  }) => Promise<IPCResponse | { success: boolean; error?: string }>
+  cancelAskUserQuestions: (payload: { cardId: string; reason?: string }) =>
+    Promise<{ success: boolean; error?: string }>
+  listPendingAskUserQuestions: () =>
+    Promise<IPCResponse<AskUserQuestionsPendingCard[]>>
+  onAskUserQuestionsCard: (handler: (event: AskUserQuestionsCardPushEvent) => void) => () => void
+}
+
 interface ElectronAPI {
   agent: ElectronAgentAPI
   memory: ElectronMemoryAPI
@@ -2601,6 +2637,7 @@ interface ElectronAPI {
   agentPersonality: ElectronAgentPersonalityAPI
   tools?: ElectronToolsAPI
   ui?: ElectronUIAPI
+  agentInteraction?: ElectronAgentInteractionAPI
   platform: string
   getFilePathFromDrop: (file: File) => string
 }

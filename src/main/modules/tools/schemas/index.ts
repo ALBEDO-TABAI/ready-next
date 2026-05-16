@@ -34,6 +34,7 @@ import { PET_SCHEMAS } from './pet-schemas'
 import { SKILL_PRIMITIVE_SCHEMAS } from '../skill-primitives/primitive-schemas'
 import { getStaticSkillActionSchemas } from '../skills-tools-static'
 import { GENERAL_RESEARCH_SCHEMAS } from './general-research-schemas'
+import { AGENT_INTERACTION_SCHEMAS } from './agent-interaction-schemas'
 
 const STATIC_TOOL_INPUT_SCHEMAS: Record<string, ZodObject<ZodRawShape>> = {
   ...SKILL_PRIMITIVE_SCHEMAS,
@@ -49,6 +50,7 @@ const STATIC_TOOL_INPUT_SCHEMAS: Record<string, ZodObject<ZodRawShape>> = {
   ...SYSTEM_SCHEMAS,
   ...PET_SCHEMAS,
   ...GENERAL_RESEARCH_SCHEMAS,
+  ...AGENT_INTERACTION_SCHEMAS,
   // Stage B5 — static manifest-derived skill-action schemas. Spread BEFORE
   // the per-domain entries so any name collision (in practice none — skill_*
   // names are namespaced) is overridden by the curated static maps.

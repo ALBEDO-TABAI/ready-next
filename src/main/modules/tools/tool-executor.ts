@@ -37,6 +37,11 @@ import { executeBrowserTool } from './browser-tools'
 import { executeCalendarTool } from './calendar-tools'
 import { executeDocumentTool } from './document-tools'
 import { executeGeneralResearchTool } from './general-research-tools'
+import { executeAskUserQuestions } from './builtins/ask-user-questions'
+import {
+  getAskUserQuestionsCardEmitter,
+  getAskUserQuestionsCardPersistor,
+} from '../agent-control/ask-user-questions-bridge'
 import { executeMcpTool } from './mcp-tools'
 import { executeRSSTool } from './rss-tools'
 import { executeSkillTool, findSkillToolByNameForExecution } from './skills-tools'
@@ -383,6 +388,21 @@ export async function executeToolCall(
             abortSignal: context.abortSignal,
             sessionId: context.sessionId,
             scopeId: context.scopeId,
+          })
+
+        case 'agent_interaction':
+          // Single tool today: `ask_user_questions`. Emitter + persistor are
+          // looked up via the bridge so the handler stays electron-free and
+          // testable under `tsx --test`. Conversation id falls back to the
+          // session/scope identifier when the caller did not pass one; the
+          // renderer uses it only as a grouping key on the DB row, so any
+          // stable per-conversation token is acceptable.
+          return executeAskUserQuestions(args as unknown as Parameters<typeof executeAskUserQuestions>[0], {
+            sessionId: context.sessionId,
+            conversationId: context.scope?.id || context.sessionId,
+            signal: context.abortSignal,
+            emitAskUserQuestionsCard: getAskUserQuestionsCardEmitter(),
+            persistCardPending: getAskUserQuestionsCardPersistor(),
           })
 
         default:

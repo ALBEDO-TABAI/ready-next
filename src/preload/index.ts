@@ -778,6 +778,42 @@ const uiAPI = {
   showNativeContextMenu: (payload: NativeContextMenuRequest) => ipcRenderer.invoke('ui:showNativeContextMenu', payload),
 }
 
+// agent_interaction — `ask_user_questions` IPC. Deliberately a top-level API
+// (not under skillsAPI) because the underlying tool is a main-agent built-in
+// and bypasses skill authorization (§6.23).
+interface AgentInteractionQuestionPayload {
+  id: string
+  question: string
+  kind: 'single_choice' | 'multi_choice' | 'free_text'
+  options?: string[]
+  placeholder?: string
+  required?: boolean
+}
+
+interface AgentInteractionCardEvent {
+  cardId: string
+  sessionId: string | null
+  conversationId: string | null
+  questions: AgentInteractionQuestionPayload[]
+  askedAt: number
+}
+
+const agentInteractionAPI = {
+  submitAskUserQuestions: (payload: {
+    cardId: string
+    answers: Array<{ id: string; answer: string | string[] }>
+  }) => ipcRenderer.invoke('agent:askUserQuestions:submit', payload),
+  cancelAskUserQuestions: (payload: { cardId: string; reason?: string }) =>
+    ipcRenderer.invoke('agent:askUserQuestions:cancel', payload),
+  listPendingAskUserQuestions: () =>
+    ipcRenderer.invoke('agent:askUserQuestions:listPending'),
+  onAskUserQuestionsCard: (handler: (event: AgentInteractionCardEvent) => void) => {
+    const listener = (_event: unknown, payload: AgentInteractionCardEvent) => handler(payload)
+    ipcRenderer.on('agent:askUserQuestions:push', listener)
+    return () => ipcRenderer.removeListener('agent:askUserQuestions:push', listener)
+  },
+}
+
 // Expose APIs to renderer
 contextBridge.exposeInMainWorld('electronAPI', {
   agent: agentAPI,
@@ -799,6 +835,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   agentPersonality: agentPersonalityAPI,
   tools: toolsAPI,
   ui: uiAPI,
+  agentInteraction: agentInteractionAPI,
   platform: process.platform,
   // Utility for drag-and-drop: get real file path from File object
   getFilePathFromDrop: (file: File) => webUtils.getPathForFile(file),
@@ -827,6 +864,7 @@ declare global {
       agentPersonality: typeof agentPersonalityAPI
       tools: typeof toolsAPI
       ui: typeof uiAPI
+      agentInteraction: typeof agentInteractionAPI
       platform: string
       getFilePathFromDrop: (file: File) => string
     }

@@ -26,6 +26,11 @@ import {
   getGeneralResearchOpenAITools,
 } from '../tools/general-research-tool-defs'
 import {
+  AGENT_INTERACTION_TOOL_NAMES,
+  getAgentInteractionAnthropicTools,
+  getAgentInteractionOpenAITools,
+} from '../tools/agent-interaction-tool-defs'
+import {
   BROWSER_CONTENT_TASK_TOOL_NAMES,
   BROWSER_INTERACTION_TOOL_NAMES,
   getBrowserAnthropicTools,
@@ -801,6 +806,28 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
       mcpRegistry.listMcpToolNames().map((name) => createStaticFallbackSchema(name, 'anthropic')),
     getOpenAITools: () =>
       mcpRegistry.listMcpToolNames().map((name) => createStaticFallbackSchema(name, 'openai')),
+  },
+  // agent_interaction — main-agent reflection tool. Outside the skill
+  // domain on purpose: name has no `skill_` prefix so
+  // `filterToolsByAuthorization` (§6.23) does not strip it on mode:'none'
+  // turns, which is exactly what we want for the main agent.
+  agent_interaction: {
+    staticToolNames: AGENT_INTERACTION_TOOL_NAMES,
+    getToolDefinitions: () => buildToolDefinitions('agent_interaction', AGENT_INTERACTION_TOOL_NAMES),
+    getAnthropicTools: () => {
+      try {
+        return getAgentInteractionAnthropicTools()
+      } catch {
+        return AGENT_INTERACTION_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'anthropic'))
+      }
+    },
+    getOpenAITools: () => {
+      try {
+        return getAgentInteractionOpenAITools()
+      } catch {
+        return AGENT_INTERACTION_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'openai'))
+      }
+    },
   },
 }
 

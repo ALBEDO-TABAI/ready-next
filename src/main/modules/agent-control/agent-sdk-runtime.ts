@@ -2024,6 +2024,10 @@ function scopeRunModuleForTool(definition: ToolDefinition): ScopeRunEventPayload
     || definition.domain === 'session'
     || definition.domain === 'mcp'
     || definition.domain === 'pet'
+    // agent_interaction has no scope-run module concept (it's a reflection
+    // pause, not a domain-owned action) — bucket it under `system` so the
+    // scope-run timeline still captures the tool call for observability.
+    || definition.domain === 'agent_interaction'
   ) {
     return 'system'
   }

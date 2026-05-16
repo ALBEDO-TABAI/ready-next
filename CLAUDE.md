@@ -1,9 +1,26 @@
 # Ready 项目协作指引（CLAUDE）
 
-> 更新时间: 2026-04-16
+> 更新时间: 2026-05-16
 
 ## 0. 前置思考
 请使用第一性原理思考。不要默认用户已经把目标、限制和最佳路径都描述完整；当目标不清晰时先澄清，当路径不优时先提出更好的方案。
+
+## 0.1 编码执行原则（所有任务默认适用）
+
+这些原则适用于本仓每一次开发、修复、审查和整理；除非用户明确覆盖，非平凡任务默认谨慎优先于速度。
+
+1. **先想清楚再写代码。** 开工前说清假设、完成标准和验证方式；存在多种理解时列出来，不要静默挑一个；看不懂或目标不清时先停下，把不清楚的点说出来。
+2. **简单优先。** 只写解决当前问题所需的最小代码；不加未被要求的功能、扩展点、配置项或单次使用的抽象；如果 200 行能变 50 行，先简化。
+3. **手术式改动。** 只碰必须改的地方；不要顺手重排、重命名、改注释或清理邻近代码；只移除本次改动制造出的无用导入、变量和函数。
+4. **目标驱动，不是步骤驱动。** 每个任务先定义“做到什么才算完成”，再围绕证据循环；修 bug 要尽量复现并验证，补能力要有可检查的通过标准；发现一个缺口后顺着数据、日志和调用链继续下钻，先分清根因层级再动手。
+5. **模型只做判断题。** 在产品代码里，LLM 适合分类、抽取、总结、草拟和需要语义判断的分支；路由、重试、状态机、权限、预算、确定性转换和可重复计算必须由代码、合同或测试承担。
+6. **预算不是建议。** 交互上下文和运行时 token / iteration 预算都要当硬限制；接近单任务约 4,000 token 或单会话约 30,000 token 的警戒线时，先摘要、切分或开启新上下文；产品内预算超限必须可观测，不得静默吞掉。
+7. **冲突要显性选边。** 遇到两套相互矛盾的模式、合同或历史实现时，选择更新、更强测试覆盖或更符合当前架构原则的一边，并说明理由；不要把两者平均混合成第三种隐性复杂度。
+8. **读完再写。** 新增或修改代码前，先读导出、直接调用方、共享工具和同目录惯例；觉得“看起来无关”时尤其要确认边界；不理解现有结构原因时先问或继续查证。
+9. **测试要验证意图。** 测试不仅断言结果，还要体现这个行为为什么重要；无法在业务规则变化时失败的测试不算有效保护；不得用 skip 当通过，也不得用 source-grep 冒充行为验证。
+10. **重要步骤后要 checkpoint。** 每完成一段有意义的工作，能说清“已做什么、已验证什么、还剩什么”；如果自己无法复述当前状态，先停下整理再继续。
+11. **遵守本仓惯例。** 代码风格、分层、命名、测试方式和文档结构以现有项目为准；即使个人偏好不同，也不要在局部悄悄另开一套；认为惯例有害时先提出，不要暗改。
+12. **失败要响亮。** 只要有检查没跑、测试被跳过、路径没验证、假设没证明，就不能说“完成”或“通过”；默认暴露不确定性，不要把风险藏在漂亮总结里。
 
 ## 0.5 战略级架构原则（不可绕过）
 
@@ -411,6 +428,19 @@ Ready 是一个集成式创作工作台，统一承载：浏览、文稿、RSS�
 - **Parallel subagent**：`parallel-branch-orchestrator.ts` PARALLEL_BRANCH_HARD_CAP=3；framePatch 串行 merge 保 §6.20 单源；超 cap 返 null + emit `parallel_branch_hard_cap_reached`。
 - **MCP**：`src/main/modules/mcp/client.ts` / `src/main/modules/mcp/oauth.ts` / `src/main/modules/mcp/registry.ts` / `src/main/modules/mcp/tool-discovery.ts` / `src/main/modules/mcp/deferred-filter.ts` 五件套；新 capability group `'mcp'`（第 15 值；同步 `CapabilityGroupId` union + `CAPABILITY_GROUPS` 数组）；MCP tool 走**独立** `mcp.registry.isAuthorized(toolName, sessionId, scopeId)` 合同（**与 §6.23 `SkillToolAuthorization` 正交不复用**：§6.23 只过滤 `skill_*` 前缀，MCP 工具非 `skill_*` 前缀会漏，因此独立维度）；deferred registry per-turn reset 防 schema 爆炸。
 - **Verify chain**：`npm run verify:t` 必须内嵌 `verify:s`（已含 verify:r + verify:native），并覆盖 15 个内嵌 gate + `test:t:gates` + `test:t:focus`（外加 PR-T6 切换 gate `check-stage-t-verify-switch.cjs`，共 16 unique）。Stage T done 后主 `verify` / `verify:cloud` 起步链切到 `verify:t`。
+
+### 6.28 主 agent 反问工具 `ask_user_questions`（agent_interaction 组）
+
+- 新增 capability group `agent_interaction`（第 16 个 group）+ 单 tool `ask_user_questions`，专供主 agent 在意图含糊时主动向用户反问 1-5 个结构化问题。**完全独立于 skill 域**：tool name 没有 `skill_` 前缀，§6.23 `filterToolsByAuthorization` 天然不剥它，因此 `SkillToolAuthorization.mode` 是 `'none' / 'selected'` 均不影响其可见性。
+- 三种问题类型：`single_choice` / `multi_choice` / `free_text`。choice 类必须配 ≥2 个 options（业务层 `validateAskUserQuestionsArgs` 校验，schema 保持纯 ZodObject 以便 zodObjectToParamList 衍生 LLM JSONSchema）；自由文本不允许配 options。
+- 触发约束（写在 tool description，硬合同写在 handler）：每 turn 最多调用 1 次（dispatch 层的 `tool_restricted_this_turn` 后续可登记）；同一 sessionId 单 pending 卡（store 层的 `hasPendingForSession` 是硬挡板），第二次触发返 `errorKind: 'overlapping_card'`。
+- **生命周期与持久化**：cardId 前缀 `auq-<8hex>`（区分 `skill_ask_user` 的 `eau-`）。`AskUserQuestionsStore` 是独立内存 store（**不复用** `EphemeralExecutionStore`，因为后者写死单题 + 不持久）。卡片持久化走 `chat_messages` 表，role=`'agent_card'`，meta_json.askUserQuestions 携带 `status / questions / answers / askedAt / answeredAt / cancelReason / cancelledAt` —— 跨 session 永久保留。
+- **状态机**：`pending` → `submitted` / `cancelled` / `timeout`。submit 走 IPC `agent:askUserQuestions:submit`（**DB update 先于 store.resolve**，否则 turn engine 同步推进时 renderer hydrate 仍读到 pending）。cancel 走 `agent:askUserQuestions:cancel`，reason=`user_typed_instead` 时映射为 `errorKind: 'user_skipped'`（不是 hard error，model 视为"用户用新消息替代选项回答"继续）。
+- **boot sweep**：`setupAgentIPC` 前同步调 `getDatabase().sweepPendingAskUserQuestionsCardsOnBoot()`，把上一次进程残留的 pending 卡全部改成 `cancelled (app_restart)`，避免 renderer hydrate 看到永远转圈的孤儿卡片。
+- **renderer UI**：`AskUserQuestionsCard.tsx` 是 inline 嵌入消息流的卡片（不是底部浮层），预渲染所有问题 + 单题展示 + 前进 / 后退导航 + Submit 按 required 校验；答完折叠成"已回复 N/M 题"的历史卡片，点击展开全部 Q/A。`useAgent.sendMessage` 入口前置 `cancelPendingAskUserQuestionsForCurrentScope(...'user_typed_instead')`，避免"模型在等答案、用户却在说别的话题"死锁。
+- **profiles**：仅 `local_chat` 暴露。`scheduled_run` / `remote_channel` 不允许（远端 IM 与定时任务里反问用户无意义）。
+- **CI 强制**：3 个新 gate 进 `verify:t` —— `check-agent-interaction-group-registered.cjs`（group 在 capability-groups / tool-registry / parallelism-policy / tool-definition 四处都登记）/ `check-ask-user-questions-tool-name-frozen.cjs`（tool name 在 tool-defs / schemas / parallelism / executor 四处拼写一致）/ `check-ask-user-questions-not-in-skill-authorization.cjs`（防回归"误划归 skill"）。
+- **未做（明确 out of scope）**：(a) Stage S clarification 5-type 系统的真实接通—当前不消费 type 分类；(b) 触发判断器 reference skill—第一版纯靠 tool description 引导，未来按效果决定要不要做 advisory skill；(c) agent preset 维度的工具可见性—默认全 agent 可见，待 preset 系统落地再接 capability 维度。
 
 ## 7. 新功能开发最小闭环
 新增跨进程功能时，至少同步修改：

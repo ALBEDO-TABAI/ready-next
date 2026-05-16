@@ -61,6 +61,7 @@ async function callCreateLocalScopeWithMetric(
 import type {
   Agent,
   AgentMessage,
+  AskUserQuestionsCardState,
   AttachmentPreviewState,
   ChatAttachment,
   ChatConversation,
@@ -73,6 +74,7 @@ export type {
   Agent,
   AgentArtifact,
   AgentMessage,
+  AskUserQuestionsCardState,
   AttachmentPreviewState,
   ChatAttachment,
   ChatConversation,
@@ -244,6 +246,126 @@ async function persistLocalConversationScope(scope: ConversationScope | null): P
     agent: scope.agent,
     title: scope.title || '新对话',
   }).catch(() => undefined)
+}
+
+interface ChatRowFromIPC {
+  id: string
+  role: string
+  content: string
+  timestamp: string
+  meta?: Record<string, unknown>
+}
+
+function extractAskUserCardState(
+  meta: Record<string, unknown>,
+  fallbackCardId: string,
+  fallbackAskedAtIso: string,
+): AskUserQuestionsCardState | null {
+  const aug = meta.askUserQuestions
+  if (!aug || typeof aug !== 'object') return null
+  const augRecord = aug as Record<string, unknown>
+  const rawStatus = augRecord.status
+  const status: AskUserQuestionsCardState['status'] =
+    rawStatus === 'pending' || rawStatus === 'submitted' || rawStatus === 'cancelled' || rawStatus === 'timeout'
+      ? rawStatus
+      : 'cancelled'
+  const rawQuestions = Array.isArray(augRecord.questions) ? augRecord.questions : []
+  const questions: AskUserQuestionsCardState['questions'] = rawQuestions
+    .filter((q): q is Record<string, unknown> => Boolean(q) && typeof q === 'object')
+    .map((q) => {
+      const kindRaw = q.kind
+      const kind: AskUserQuestionsCardState['questions'][number]['kind'] =
+        kindRaw === 'single_choice' || kindRaw === 'multi_choice' || kindRaw === 'free_text'
+          ? kindRaw
+          : 'free_text'
+      return {
+        id: typeof q.id === 'string' ? q.id : '',
+        question: typeof q.question === 'string' ? q.question : '',
+        kind,
+        options: Array.isArray(q.options) ? q.options.filter((o): o is string => typeof o === 'string') : null,
+        placeholder: typeof q.placeholder === 'string' ? q.placeholder : null,
+        required: typeof q.required === 'boolean' ? q.required : true,
+      }
+    })
+    .filter((q) => q.id && q.question)
+  const rawAnswers = Array.isArray(augRecord.answers) ? augRecord.answers : null
+  let answers: AskUserQuestionsCardState['answers']
+  if (rawAnswers) {
+    const collected: Array<{ id: string; answer: string | string[] }> = []
+    for (const a of rawAnswers) {
+      if (!a || typeof a !== 'object') continue
+      const record = a as Record<string, unknown>
+      const id = typeof record.id === 'string' ? record.id : ''
+      if (!id) continue
+      const value = record.answer
+      if (typeof value === 'string') {
+        collected.push({ id, answer: value })
+      } else if (Array.isArray(value)) {
+        collected.push({ id, answer: value.filter((v): v is string => typeof v === 'string') })
+      }
+    }
+    answers = collected
+  }
+  return {
+    cardId: typeof augRecord.cardId === 'string' ? augRecord.cardId : fallbackCardId,
+    status,
+    questions,
+    askedAt: typeof augRecord.askedAt === 'number' ? augRecord.askedAt : Date.parse(fallbackAskedAtIso),
+    answers,
+    answeredAt: typeof augRecord.answeredAt === 'number' ? augRecord.answeredAt : undefined,
+    cancelReason: typeof augRecord.cancelReason === 'string' ? augRecord.cancelReason : undefined,
+    cancelledAt: typeof augRecord.cancelledAt === 'number' ? augRecord.cancelledAt : undefined,
+  }
+}
+
+async function cancelPendingAskUserQuestionsForCurrentScope(): Promise<void> {
+  const state = useAgent.getState()
+  const scopeId = state.currentScopeId
+  if (!scopeId) return
+  const api = window.electronAPI?.agentInteraction
+  if (!api) return
+  // Walk the message list backwards to find the most recent pending card.
+  for (let i = state.messages.length - 1; i >= 0; i -= 1) {
+    const msg = state.messages[i]
+    if (msg.type !== 'ask_user_questions') continue
+    if (!msg.askUserQuestions || msg.askUserQuestions.status !== 'pending') continue
+    try {
+      await api.cancelAskUserQuestions({ cardId: msg.askUserQuestions.cardId, reason: 'user_typed_instead' })
+    } catch {
+      // silent-catch: IPC bridge unavailable or main rejected the cancel —
+      // either way the next message must still go out, and main-side store
+      // cleanup happens on session reset.
+    }
+    break
+  }
+}
+
+function rebuildAgentMessageFromRow(row: ChatRowFromIPC, agent: string): AgentMessage {
+  const meta = (row.meta || {}) as Record<string, unknown>
+  const cardState = row.role === 'agent_card'
+    ? extractAskUserCardState(meta, row.id, row.timestamp)
+    : null
+  const isAskUserCard = cardState !== null
+  const type: AgentMessage['type'] = isAskUserCard
+    ? 'ask_user_questions'
+    : row.role === 'user'
+      ? 'user'
+      : row.role === 'assistant'
+        ? 'agent'
+        : 'system'
+  const message: AgentMessage = {
+    id: row.id,
+    agent,
+    content: row.content,
+    type,
+    timestamp: new Date(row.timestamp),
+    attachments: extractPersistedAttachments(meta),
+    meta,
+  }
+  if (cardState) {
+    message.askUserQuestions = cardState
+  }
+  return message
 }
 
 function clearPendingSendBufferState() {
@@ -718,15 +840,9 @@ export const useAgent = create<AgentState>((set, get) => ({
       const scopes = get().scopes
       const scope = scopes.find((item) => item.id === scopeId) || null
       const activeRunState = getActiveScopeRunState(get().scopeRunStates, scopeId)
-      const messages: AgentMessage[] = result.data.map((m: { id: string; role: string; content: string; timestamp: string; meta?: Record<string, unknown> }) => ({
-        id: m.id,
-        agent: scope?.agent || get().currentAgent,
-        content: m.content,
-        type: m.role === 'user' ? 'user' : m.role === 'assistant' ? 'agent' : 'system',
-        timestamp: new Date(m.timestamp),
-        attachments: extractPersistedAttachments(m.meta),
-        meta: m.meta || {},
-      }))
+      const messages: AgentMessage[] = result.data.map((m: { id: string; role: string; content: string; timestamp: string; meta?: Record<string, unknown> }) =>
+        rebuildAgentMessageFromRow(m, scope?.agent || get().currentAgent),
+      )
       const currentMessages = get().currentScopeId === scopeId ? get().messages : []
       const transientMessages = currentMessages.filter((message) =>
         message.meta?.transient &&
@@ -851,6 +967,15 @@ export const useAgent = create<AgentState>((set, get) => ({
     if (!normalizedContent && pendingAttachments.length === 0) {
       return { success: false, shouldClearInput: false, preserveInput: true, errorKind: 'empty_input' }
     }
+
+    // agent_interaction — if there's a pending ask_user_questions card in
+    // this scope, cancel it BEFORE pushing the new prose into the model.
+    // The cancel reason 'user_typed_instead' tells the tool handler to
+    // return errorKind=user_skipped so the model treats it as "user
+    // replied with prose" instead of a hard failure.
+    cancelPendingAskUserQuestionsForCurrentScope().catch(() => {
+      /* fire-and-forget — never block send on this */
+    })
 
     const stateBeforeSend = get()
     const runBeforeSend = getActiveScopeRunState(
@@ -1379,6 +1504,159 @@ export const useAgent = create<AgentState>((set, get) => ({
 const agentRuntimeDriver = createAgentRuntimeDriver(useAgent as unknown as { getState: () => unknown; setState: (partial: unknown) => void })
 installAgentPanelTestHarness(useAgent as unknown as Parameters<typeof installAgentPanelTestHarness>[0])
 
+function makeMessageFromPushedCard(
+  event: { cardId: string; sessionId: string | null; conversationId: string | null; questions: AskUserQuestionsCardState['questions']; askedAt: number },
+  agent: string,
+): AgentMessage {
+  return {
+    id: event.cardId,
+    agent,
+    content: `等待用户回答 ${event.questions.length} 个问题`,
+    type: 'ask_user_questions',
+    timestamp: new Date(event.askedAt || Date.now()),
+    meta: {
+      askUserQuestions: {
+        cardId: event.cardId,
+        status: 'pending',
+        questions: event.questions,
+        askedAt: event.askedAt,
+      },
+    },
+    askUserQuestions: {
+      cardId: event.cardId,
+      status: 'pending',
+      questions: event.questions,
+      askedAt: event.askedAt,
+    },
+  }
+}
+
+function initAgentInteractionListeners(): () => void {
+  const api = typeof window !== 'undefined' ? window.electronAPI?.agentInteraction : null
+  if (!api) return () => {}
+  // Hydrate any pending cards left from a mid-flight renderer reload.
+  api.listPendingAskUserQuestions().then((result) => {
+    if (!result || !result.success || !Array.isArray(result.data)) return
+    const state = useAgent.getState()
+    const agent = state.currentAgent
+    const existingIds = new Set(state.messages.map((m) => m.id))
+    const additions: AgentMessage[] = []
+    for (const card of result.data) {
+      if (existingIds.has(card.cardId)) continue
+      // Hydrate only into the current scope to avoid leaking cards from a
+      // different conversation into the active view. The DB row already
+      // belongs to the right conversation via conversation_id.
+      if (card.conversationId && state.currentScopeId && card.conversationId !== state.currentScopeId) continue
+      additions.push(makeMessageFromPushedCard({
+        cardId: card.cardId,
+        sessionId: state.currentScopeId,
+        conversationId: card.conversationId,
+        questions: card.questions as AskUserQuestionsCardState['questions'],
+        askedAt: card.askedAt,
+      }, agent))
+    }
+    if (additions.length > 0) {
+      useAgent.setState((prev) => ({
+        messages: [...prev.messages, ...additions].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime()),
+      }))
+    }
+  }).catch(() => { /* ignore hydrate failures */ })
+
+  const unsubscribePush = api.onAskUserQuestionsCard((event) => {
+    const state = useAgent.getState()
+    const agent = state.currentAgent
+    // Drop cards that belong to a different active scope so they don't
+    // jump into the wrong conversation. They'll surface on scope load via
+    // the DB hydrate path instead.
+    if (event.conversationId && state.currentScopeId && event.conversationId !== state.currentScopeId) return
+    const message = makeMessageFromPushedCard({
+      cardId: event.cardId,
+      sessionId: event.sessionId,
+      conversationId: event.conversationId,
+      questions: event.questions as AskUserQuestionsCardState['questions'],
+      askedAt: event.askedAt,
+    }, agent)
+    useAgent.setState((prev) => {
+      if (prev.messages.some((m) => m.id === message.id)) return prev
+      return {
+        messages: [...prev.messages, message].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime()),
+      }
+    })
+  })
+  return () => {
+    try { unsubscribePush() } catch { /* ignore */ }
+  }
+}
+
 export function initAgentListeners(): () => void {
-  return agentRuntimeDriver.initAgentListeners()
+  const offRuntime = agentRuntimeDriver.initAgentListeners()
+  const offAgentInteraction = initAgentInteractionListeners()
+  return () => {
+    try { offRuntime() } catch { /* ignore */ }
+    try { offAgentInteraction() } catch { /* ignore */ }
+  }
+}
+
+/**
+ * Submit handler used by `AskUserQuestionsCard`. Pushes answers to main and
+ * updates the local message state on success so the card immediately flips
+ * to its collapsed view (no need to wait for a re-hydrate round-trip).
+ */
+export async function submitAskUserQuestionsAnswers(
+  cardId: string,
+  answers: Array<{ id: string; answer: string | string[] }>,
+): Promise<{ success: boolean; error?: string }> {
+  const api = window.electronAPI?.agentInteraction
+  if (!api) return { success: false, error: 'agentInteraction API not available' }
+  const result = await api.submitAskUserQuestions({ cardId, answers })
+  const r = result as { success: boolean; error?: string }
+  if (r.success) {
+    const answeredAt = Date.now()
+    useAgent.setState((prev) => ({
+      messages: prev.messages.map((m) => {
+        if (m.id !== cardId || m.type !== 'ask_user_questions' || !m.askUserQuestions) return m
+        return {
+          ...m,
+          askUserQuestions: {
+            ...m.askUserQuestions,
+            status: 'submitted',
+            answers,
+            answeredAt,
+          },
+        }
+      }),
+    }))
+  }
+  return r
+}
+
+/**
+ * Cancel handler used by `AskUserQuestionsCard`'s skip button (and by the
+ * pre-send hook when the user types a new message while a card is pending).
+ */
+export async function cancelAskUserQuestionsCard(
+  cardId: string,
+  reason: string = 'user_cancelled',
+): Promise<{ success: boolean; error?: string }> {
+  const api = window.electronAPI?.agentInteraction
+  if (!api) return { success: false, error: 'agentInteraction API not available' }
+  const result = await api.cancelAskUserQuestions({ cardId, reason })
+  if (result.success) {
+    const cancelledAt = Date.now()
+    useAgent.setState((prev) => ({
+      messages: prev.messages.map((m) => {
+        if (m.id !== cardId || m.type !== 'ask_user_questions' || !m.askUserQuestions) return m
+        return {
+          ...m,
+          askUserQuestions: {
+            ...m.askUserQuestions,
+            status: 'cancelled',
+            cancelReason: reason,
+            cancelledAt,
+          },
+        }
+      }),
+    }))
+  }
+  return result
 }

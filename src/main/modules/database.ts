@@ -1636,6 +1636,123 @@ export class DatabaseManager {
     ).all<ChatMessageRecord>(conversationId)
   }
 
+  /**
+   * Replace meta_json on an existing chat_messages row. Returns true when a
+   * row was updated, false when no row with this id existed.
+   *
+   * Used by `ask_user_questions` to flip a card from status='pending' to
+   * status='submitted' / 'cancelled' / 'timeout' without rewriting role /
+   * content / timestamp. Content is also updated optionally so the folded
+   * card summary can reflect the user's answers in chat history search
+   * (FTS index is replaced when content changes).
+   */
+  updateChatMessageMeta(
+    messageId: string,
+    meta: Record<string, unknown>,
+    options?: { content?: string },
+  ): boolean {
+    if (!this.db) return false
+    const metaJson = JSON.stringify(meta || {})
+    const nextContent = typeof options?.content === 'string' ? options.content : null
+    if (nextContent !== null) {
+      const info = this.db.prepare(
+        'UPDATE chat_messages SET meta_json = ?, content = ? WHERE id = ?'
+      ).run(metaJson, nextContent, messageId)
+      if ((info as { changes?: number }).changes === 0) return false
+      const conversationId = (this.db.prepare(
+        'SELECT conversation_id FROM chat_messages WHERE id = ?'
+      ).get(messageId) as { conversation_id?: string } | undefined)?.conversation_id || ''
+      this.db.prepare('DELETE FROM chat_messages_fts WHERE message_id = ?').run(messageId)
+      this.db.prepare(
+        'INSERT INTO chat_messages_fts (message_id, conversation_id, content) VALUES (?, ?, ?)'
+      ).run(messageId, conversationId, nextContent)
+      return true
+    }
+    const info = this.db.prepare(
+      'UPDATE chat_messages SET meta_json = ? WHERE id = ?'
+    ).run(metaJson, messageId)
+    return (info as { changes?: number }).changes !== 0
+  }
+
+  getChatMessageById(messageId: string): ChatMessageRecord | null {
+    if (!this.db) return null
+    return this.db.prepare(
+      'SELECT * FROM chat_messages WHERE id = ?'
+    ).get<ChatMessageRecord>(messageId) ?? null
+  }
+
+  /**
+   * Find every chat_messages row whose meta_json carries
+   * `askUserQuestions.status='pending'`. Used by:
+   *   - app boot: sweep to `cancelled (app_restart)` so resurrected rows
+   *     never appear in the renderer as永远转圈卡片.
+   *   - renderer hydrate (`agent:askUserQuestions:listPending`): show
+   *     cards the user hadn't answered yet when the renderer reconnects
+   *     mid-flight without restart.
+   *
+   * Note: `like '%"status":"pending"%'` is a heuristic pre-filter (the
+   * exact match is done in JS); we accept a tiny false-positive rate to
+   * avoid scanning every chat_messages row. Production volume on the
+   * `agent_card` role is small so the filter pays off via the role index.
+   */
+  listPendingAskUserQuestionsCards(): Array<{
+    messageId: string
+    conversationId: string
+    timestamp: string
+    meta: Record<string, unknown>
+  }> {
+    if (!this.db) return []
+    const rows = this.db.prepare(
+      "SELECT id, conversation_id, timestamp, meta_json FROM chat_messages WHERE role = 'agent_card' AND meta_json LIKE '%\"status\":\"pending\"%'"
+    ).all<{ id: string; conversation_id: string; timestamp: string; meta_json: string | null }>()
+    const out: Array<{ messageId: string; conversationId: string; timestamp: string; meta: Record<string, unknown> }> = []
+    for (const row of rows) {
+      let meta: Record<string, unknown> = {}
+      try {
+        meta = row.meta_json ? JSON.parse(row.meta_json) as Record<string, unknown> : {}
+      } catch {
+        continue
+      }
+      const aug = meta.askUserQuestions
+      if (!aug || typeof aug !== 'object') continue
+      if ((aug as { status?: unknown }).status !== 'pending') continue
+      out.push({
+        messageId: row.id,
+        conversationId: row.conversation_id,
+        timestamp: row.timestamp,
+        meta,
+      })
+    }
+    return out
+  }
+
+  /**
+   * Boot-time sweep: rewrite every pending ask_user_questions card to
+   * status='cancelled' with reason='app_restart'. Idempotent. Returns the
+   * number of rows mutated for telemetry / logging.
+   */
+  sweepPendingAskUserQuestionsCardsOnBoot(now: string = new Date().toISOString()): number {
+    if (!this.db) return 0
+    const pending = this.listPendingAskUserQuestionsCards()
+    let mutated = 0
+    for (const entry of pending) {
+      const aug = entry.meta.askUserQuestions as Record<string, unknown>
+      const nextMeta: Record<string, unknown> = {
+        ...entry.meta,
+        askUserQuestions: {
+          ...aug,
+          status: 'cancelled',
+          cancelReason: 'app_restart',
+          cancelledAt: now,
+        },
+      }
+      if (this.updateChatMessageMeta(entry.messageId, nextMeta)) {
+        mutated += 1
+      }
+    }
+    return mutated
+  }
+
   listConversationAttachments(conversationId: string): ConversationAttachmentRecord[] {
     const rows = this.getChatMessages(conversationId)
     if (rows.length === 0) return []

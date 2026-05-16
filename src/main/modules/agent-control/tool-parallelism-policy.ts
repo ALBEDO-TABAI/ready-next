@@ -56,7 +56,7 @@ export interface ParallelToolGroup {
 }
 
 export interface ToolResourceTag {
-  domain: 'browser' | 'document' | 'file' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'memory' | 'session' | 'pet' | 'system' | 'general_research' | 'mcp'
+  domain: 'browser' | 'document' | 'file' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'memory' | 'session' | 'pet' | 'system' | 'general_research' | 'mcp' | 'agent_interaction'
   accessMode: 'read' | 'write' | 'interactive'
 }
 
@@ -192,6 +192,10 @@ export function getToolResourceTag(toolName: string): ToolResourceTag {
   // mcp client and are interactive by default (the client makes a remote
   // call per invocation, no parallelism guarantee from the server side).
   if (normalized.startsWith('mcp_')) return { domain: 'mcp', accessMode: 'interactive' }
+  // agent_interaction group — the model pauses the turn waiting for the user
+  // to answer N inline question cards. Serialized so the same session never
+  // has two ask_user_questions cards pending in parallel.
+  if (normalized === 'ask_user_questions') return { domain: 'agent_interaction', accessMode: 'interactive' }
   return { domain: 'system', accessMode: 'interactive' }
 }
 
