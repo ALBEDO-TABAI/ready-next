@@ -418,6 +418,18 @@ export default function MarkdownEditor({
     })
   }, [contextSelection, tab.content, tab.path, tab.title])
 
+  const pasteSelectionToStickyNote = useCallback(async () => {
+    const text = contextSelection.trim()
+    if (!text) return
+    await window.electronAPI.pet.updateSettings({ enabled: true }).catch(() => null)
+    await window.electronAPI.pet.pushStickyNote({
+      title: '便利贴',
+      body: text,
+      tone: 'default',
+    }).catch(() => null)
+    await window.electronAPI.pet.show().catch(() => null)
+  }, [contextSelection])
+
   const handleWidgetRename = useCallback((currentTitle: string, widgetCode: string, nextTitle: string) => {
     const nextContent = renameWidgetFenceTitleInContent(tab.content, currentTitle, widgetCode, nextTitle)
     if (nextContent === tab.content) return
@@ -593,6 +605,7 @@ export default function MarkdownEditor({
         onClose={closeContextMenu}
         canQuote={contextSelection.trim().length > 0}
         onQuoteToAgent={quoteSelectionToAgent}
+        onPasteToStickyNote={pasteSelectionToStickyNote}
       />
     </div>
   )

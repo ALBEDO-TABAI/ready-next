@@ -8,6 +8,7 @@ import {
   Undo2,
   Redo2,
   MessageSquareQuote,
+  StickyNote,
 } from 'lucide-react'
 import ContextMenu, { type ContextMenuItem } from '../layout/ContextMenu'
 
@@ -18,6 +19,7 @@ interface EditorContextMenuProps {
   onClose: () => void
   canQuote?: boolean
   onQuoteToAgent?: () => void
+  onPasteToStickyNote?: () => void
 }
 
 export default function EditorContextMenu({
@@ -27,6 +29,7 @@ export default function EditorContextMenu({
   onClose,
   canQuote = false,
   onQuoteToAgent,
+  onPasteToStickyNote,
 }: EditorContextMenuProps) {
   if (!visible) return null
 
@@ -56,6 +59,15 @@ export default function EditorContextMenu({
       disabled: !canQuote,
       onClick: () => {
         onQuoteToAgent?.()
+      },
+    },
+    {
+      id: 'paste-to-sticky-note',
+      label: '贴到便利贴',
+      icon: <StickyNote style={{ width: 16, height: 16 }} />,
+      disabled: !canQuote,
+      onClick: () => {
+        void onPasteToStickyNote?.()
       },
     },
     {
