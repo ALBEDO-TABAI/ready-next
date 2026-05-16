@@ -30,9 +30,19 @@ const defaultPreviewState: PreviewState = {
   canGoForward: false,
 }
 
+const EXIT_DURATION_MS = 240
+const PREVIEW_OPEN_DELAY_MS = 260
+
 export default function PreviewBrowser({ item, onClose, isActive = true }: PreviewBrowserProps) {
   const [previewState, setPreviewState] = useState<PreviewState>(defaultPreviewState)
+  const [isMounted, setIsMounted] = useState(false)
+  const [isExiting, setIsExiting] = useState(false)
   const contentRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const raf = requestAnimationFrame(() => setIsMounted(true))
+    return () => cancelAnimationFrame(raf)
+  }, [])
 
   const sidebarVisible = useWorkspace((state) => state.sidebarVisible)
   const sidePanelVariant = useWorkspace((state) => state.sidePanelVariant)
@@ -73,10 +83,13 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
       return
     }
     setPreviewState((prev) => ({ ...prev, loading: true, error: undefined }))
-    void window.electronAPI?.browser?.previewOpen({ url: item.link })
-    requestAnimationFrame(() => {
-      scheduleBoundsSync({ force: true, trailingFinal: true })
-    })
+    const timer = window.setTimeout(() => {
+      void window.electronAPI?.browser?.previewOpen({ url: item.link })
+      requestAnimationFrame(() => {
+        scheduleBoundsSync({ force: true, trailingFinal: true })
+      })
+    }, PREVIEW_OPEN_DELAY_MS)
+    return () => window.clearTimeout(timer)
   }, [isActive, item.id, item.link, scheduleBoundsSync])
 
   useEffect(() => {
@@ -102,7 +115,10 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
 
   const handleClose = useCallback(() => {
     void window.electronAPI?.browser?.previewClose()
-    onClose()
+    setIsExiting(true)
+    window.setTimeout(() => {
+      onClose()
+    }, EXIT_DURATION_MS)
   }, [onClose])
 
   const handleOpenBrowserMode = useCallback(async () => {
@@ -128,8 +144,26 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
     }
   }, [item.link, item.title, onClose])
 
+  const floatingStateClass = isExiting ? 'is-exiting' : isMounted ? 'is-entered' : ''
+
   return (
-    <div className="content-surface-panel rss-preview-surface flex-1 flex flex-col animate-fadeIn" style={{ background: 'var(--workbench-module-surface-bg)' }}>
+    <div
+      className={`rss-preview-floating content-surface-panel rss-preview-surface flex flex-col ${floatingStateClass}`}
+      style={{
+        position: 'absolute',
+        top: 0,
+        right: 0,
+        bottom: 0,
+        width: 'calc(100% - 300px)',
+        minWidth: 480,
+        background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
+        borderRadius: 'var(--workbench-canvas-radius) 0 0 var(--workbench-canvas-radius)',
+        overflow: 'hidden',
+        isolation: 'isolate',
+        boxShadow: '-18px 0 44px -16px rgba(8,12,22,0.32)',
+        zIndex: 30,
+      }}
+    >
       <div
         className="glass-surface-panel flex items-center justify-between flex-shrink-0"
         style={{
@@ -187,6 +221,34 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
       </div>
 
       <div ref={contentRef} className="rss-preview-content flex-1 relative overflow-hidden" style={{ background: 'transparent' }}>
+        <div
+          aria-hidden
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: 0,
+            width: 'var(--workbench-canvas-radius)',
+            height: 'var(--workbench-canvas-radius)',
+            borderBottomRightRadius: 'var(--workbench-canvas-radius)',
+            background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
+            pointerEvents: 'none',
+            zIndex: 2,
+          }}
+        />
+        <div
+          aria-hidden
+          style={{
+            position: 'absolute',
+            left: 0,
+            bottom: 0,
+            width: 'var(--workbench-canvas-radius)',
+            height: 'var(--workbench-canvas-radius)',
+            borderTopRightRadius: 'var(--workbench-canvas-radius)',
+            background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
+            pointerEvents: 'none',
+            zIndex: 2,
+          }}
+        />
         {previewState.loading && !previewState.error && (
           <div
             className="absolute inset-0 z-10 flex items-center justify-center"

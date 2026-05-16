@@ -12,7 +12,6 @@ import {
   WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM,
   WORKBENCH_CANVAS_OUTER_PADDING_TOP,
   WORKBENCH_CANVAS_OUTER_PADDING_X,
-  WORKBENCH_SUPPORT_PANEL_WIDTH,
 } from '../../modules/workbench/chrome'
 import { useBrowserTabs } from '../../stores/useBrowserTabs'
 import { useRSSSession } from '../../stores/useRSSSession'
@@ -708,17 +707,13 @@ export default function RSSMode({
         }}
       >
         <div
-          className="workbench-canvas-shell flex h-full min-h-0 overflow-hidden"
+          className="workbench-canvas-shell relative flex h-full min-h-0 overflow-hidden"
           style={{ background: 'var(--workbench-module-surface-bg)' }}
         >
-          {/* Feed list (shrinks when preview is open) */}
+          {/* Feed list keeps its full width; preview floats above it */}
           <div
-            className={`rss-feed-sheet content-surface-panel flex-shrink-0 overflow-hidden flex flex-col relative ${
-              selectedItem ? 'border-r border-[var(--border-default)]' : 'flex-1'
-            }`}
+            className="rss-feed-sheet content-surface-panel flex-1 overflow-hidden flex flex-col relative"
             style={{
-              width: selectedItem ? WORKBENCH_SUPPORT_PANEL_WIDTH : undefined,
-              minWidth: selectedItem ? WORKBENCH_SUPPORT_PANEL_WIDTH : undefined,
               background: 'var(--workbench-module-surface-bg)',
             }}
           >
