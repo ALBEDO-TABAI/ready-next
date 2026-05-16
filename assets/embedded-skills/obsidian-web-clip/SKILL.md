@@ -38,9 +38,20 @@ Preset 决定 frontmatter 字段 + 正文 noteContentFormat + 笔记保存路径
 
 ## 3. 输出约定
 
-- 所有产物写到 `<outputsRoot>/obsidian-web-clip/<preset.path or output_subdir>/<safe-title>.md`，受 `resolveReadableWithinRoot` 沙箱约束。
+### 3.1 `web_clip_url` / `/clip-current` 入口
+- 产物写到 `<outputsRoot>/obsidian-web-clip/<preset.path or output_subdir>/<safe-title>.md`，受 `resolveReadableWithinRoot` 沙箱约束。
 - 写入后自动调用 `present_file`，用户在前台能看到附件卡片。
 - 笔记包含 `frontmatter` 与正文；`url / title / site / author / published / created / tags` 等字段由 preset properties 渲染。
+- 图片在 markdown 里保留为 **remote http(s) URL**——Obsidian 打开时通过网络加载。
+
+### 3.2 `browser:clipDraggedTab`（拖标签到文件管理）入口
+拖拽完成后 pipeline 写入沙盒，**紧接着** `materializeToVault` 把笔记**移动**到用户拖入的文件夹：
+1. 解析沙盒 .md 里所有 `![](http...)` 引用，并行下载到 `<target>/<noteBaseName>.assets/<8hex>.<ext>`，单图 ≤12MB、超时 20s、按内容 hash 去重。
+2. 把 markdown 里的 remote URL 改写为相对路径 `<noteBaseName>.assets/<...>`，**且 URL-encode** 每段（空格 → `%20`、`()'!*` → 百分号编码）。这是预览器兼容性必须步骤——CommonMark 严格解析器在 inline URL 里遇到空格会**截断**链接，导致占位符 ⬜。
+3. 写最终 `<target>/<noteBaseName>.md`，`unlink` 沙盒副本（**move 语义，沙盒无残留**）。
+4. 失败时（target dir 不存在 / 权限不足 / 等）沙盒文件保留，事件携带 `copyError`；用户看到的还是占位剪藏行 → "剪藏失败"。
+
+**关键**：拖入路径下的 `<noteBaseName>` 经过 `sanitizeFileNameSegment`：所有空格 / `<>:"/\\|?*` / U+0000–U+001F / U+007F 控制字符 → `-`，连续 dash 折叠，首尾 dash 去除。这一步**必须真正生效**——见 §7.1。
 
 ## 4. 失败与降级
 
@@ -53,7 +64,62 @@ Preset 决定 frontmatter 字段 + 正文 noteContentFormat + 笔记保存路径
 - `clip_write_blocked` / `path_outside_outputs` → 内部沙箱错误，向用户报告但不重试
 - `clip_active_tab_unstable` → 仅 host-IPC 路径会出现；提示用户保持页面静止后重试
 
-## 5. 不在 P1 范围内
+## 5. 抽取链路与 picker（readability ↔ Jina）
+
+两条抽取通道并行跑、最后 `pickRicherMarkdown` 选胜者：
+
+- **Readability（本地，无 JS）**：raw HTTP fetch → `promoteLazyImages` 提升 lazy-load 属性 → `<template>.content` unseal（HTML5 inert 容器） → Readability article → reconciliation 把 DOM 全部图 vs article 图比对，丢失 ≥3 张时以 `<figure>` 形式追加回 article 末尾。
+- **Jina r.jina.ai（远端，JS-rendered）**：headless 浏览器渲染。**陷阱**：某些 CMS（典型 RebelMouse）的客户端 JS 把 gallery 图转成 `blob:http://localhost/<hash>` object URL，Jina 把这些 blob 引用直接转录进 markdown——**完全不可下载**。
+
+Picker 规则（已经经历真实案例迭代）：
+1. 比较**前**：两路 markdown 各跑一遍 `sanitizeUnfetchableImageRefs`，把 `blob:/data:/javascript:/file:/chrome:` 全部 strip（带真 alt 的转 `_alt_` italic，否则整段删）。这样 blob 不会被算成"图片数"。
+2. **readability 抽到 ≥5 张真 http(s) 图时强制胜出**——除非 Jina 真图数 ≥ readability × 2。理由：readability 干净的正文 + 全套图 远好于 Jina 带整页 nav menu 的 dump。
+3. 标准信号：图数差 ≥2 取多者；否则
+4. 长度 tiebreaker **仅在双方真图都为 0 时生效**，阈值 `jina.length > readability.length × 2`。
+
+防御层 3（即使 picker 选了 Jina）：`materializeToVault` 入口再跑一次 `stripUnfetchableImageRefs`，**保证最终 .md 里没有任何 broken refs**。
+
+## 6. lazy-load CMS 适配（已知模式）
+
+`promoteLazyImages` 覆盖 22 个 lazy-src 属性命名：
+
+- 通用：`data-src` / `data-original` / `data-lazy-src` / `data-image-src` / `data-actualsrc` / `data-hi-res-src` / `data-cms-src` / `data-defer-src` / `data-img-src` / `data-image` / `data-actual-src` / `data-fallback-src` / `data-orig-src` / `data-large` / `data-medium` / `data-image-url`
+- **RebelMouse**（PaperMag / Indy100 / OK! Mag / Daily Dot 等几十家媒体）：`data-runner-src`、`data-runner-srcset`
+- Flickity / Glide / Splide carousels：`data-flickity-lazyload` / `data-flickity-lazyload-src` / `data-glide-src` / `data-splide-lazy`
+- 中文 CMS / WeChat：`data-real-src`
+- BBC / Guardian / NYT 内部 CMS：`data-source` / `data-full-src` / `data-zoom-src`
+
+外加 `<picture><source srcset>` 提升、`srcset` 选最大尺寸、`<noscript>` 兜底、HTML5 `<template>` unseal（用 `template.content` 而非 `textContent`——这是 RebelMouse listicle-slideshow 的关键，13/24 张图都藏在 `<template>` 里）。
+
+## 7. 已知陷阱 / 诊断脚本
+
+### 7.1 用户报告"剪藏的 md 全是占位符号"
+**最常见根因**：文件名 / `.assets` 目录名里有**空格**，markdown 严格解析器（CommonMark / 多数 preview 库）在 inline URL 第一个空格处截断链接。
+
+诊断步骤：
+1. 让用户告诉你保存的 .md 路径，看文件名是否含空格、中文字符之外的可见字符（`-` OK、空格 NOT OK）。
+2. 让用户在编辑器里看 .md 的图片引用，是否 `![](Folder Name.assets/x.webp)` 直接含空格——含 = sanitize 失效。
+3. 看 `sanitizeFileNameSegment` 测试是否 pass（`npm run typecheck` + clip 测试套件）。
+4. **历史教训**：character class regex 曾被一个不可见的 U+0000–U+001F 控制字符 paste 静悄悄破坏，让空格替换不工作。规则现在用 explicit `\x00-\x1f\x7f` hex 范围 + 多阶段 replace 防御。
+
+### 7.2 用户报告"图片数量比页面少很多"
+诊断顺序：
+1. 直接 `curl -sIL` 一个图片 URL，看 200 还是 4xx。RebelMouse 的 `?id=X&width=Y` query 形态某些站需要更多 transform 参数；带 `&height=&quality=&coordinates=` 完整参数才能 200。
+2. 看 `data-runner-src`、`<template>` 解封是否生效——`grep -c data-runner-src raw.html` 与最终 .md 图数对比。
+3. **picker 选了哪一路**？如果是 Jina markdown 含大量 `blob:http://localhost/...` → 应当被 sanitize strip + readability 胜出。运行用户 .md 跑 `grep -c "blob:"` 应为 0。
+
+### 7.3 用户报告"剪藏后文件不在拖入的文件夹"
+- §3.1 入口（`web_clip_url` / `/clip-current`）的产物永远在 `<outputsRoot>/obsidian-web-clip/`，**不在用户 vault**。建议改用拖拽入口。
+- §3.2 入口（drag-to-FileTree）应通过 `materializeToVault` move 到 target dir。如果 .md 没出现，看主进程 log `[obsidian-web-clip] background failed` 行的 `copyError.kind`：`invalid_target`（target_dir 路径不存在/无权限）、`not_a_directory`（dropped on a file, not folder）、`sandbox_read_failed`（沙盒文件被并发删了）。
+
+### 7.4 Jina r.jina.ai 限制
+Jina 在以下场景失效或污染输出：
+- RebelMouse / 类似 CMS：gallery images → `blob:http://localhost/<hash>`（不可访问）。
+- 强反爬站（Cloudflare challenge / hCaptcha）：返回空 / 405 / 触发风控页。
+- 长按需登录页：与 readability 一样拿不到内容。
+- **不要**因为 Jina markdown "看起来很长"就选它——picker 会比真图数，长度只是 fallback。
+
+## 8. 不在 P1 范围内
 
 - LLM 占位真解释器（P2）
 - defuddle + linkedom 抽取器替换（P2，需先有 fixture 快照）
