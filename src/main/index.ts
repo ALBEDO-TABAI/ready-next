@@ -33,6 +33,13 @@ import { assertPrimaryDatabaseReady, getDatabase } from './modules/database'
 import { shutdownWorkerDbBridge } from './modules/database/worker-bridge'
 import { toOAuthCompatibleUserAgent } from './modules/browser-engine/popup-policy'
 import { registerMainProcessHandlers } from './process-handlers'
+import {
+  createWindowMaterialController,
+  type ThemeSkin,
+  type ResolvedTheme as MaterialResolvedTheme,
+  type SupportedPlatform,
+  type WindowMaterialController,
+} from './modules/window-material/main-window-material'
 import pkg from 'electron-updater'
 const { autoUpdater } = pkg
 
@@ -72,10 +79,18 @@ let petWindowManager: PetWindowManager | null = null
 // Guard to prevent re-registering window-dependent IPC handlers on macOS dock re-open
 let windowIPCRegistered = false
 const THEME_SETTING_KEY = 'ui_theme_option'
+const THEME_SKIN_SETTING_KEY = 'ui_theme_skin'
+
+// 窗口材料状态机控制器（单一职责：管理窗口 bg + vibrancy + fullscreen 内部追踪）
+// 在 createWindow() 内实例化；createWindow 之外的所有材料读写都通过它进行。
+let windowMaterialController: WindowMaterialController | null = null
 
 type ThemeSnapshot = {
   option: 'light' | 'dark' | 'system'
-  resolved: 'light' | 'dark'
+  resolved: MaterialResolvedTheme
+  skin: ThemeSkin
+  /** 由 windowMaterialController.isFullscreen() 派生，主要给 renderer 启动 reconciliation 用 */
+  isNativeFullscreen: boolean
 }
 
 function resolveStoredThemeSource(): 'light' | 'dark' | 'system' {
@@ -88,19 +103,61 @@ function resolveStoredThemeSource(): 'light' | 'dark' | 'system' {
   return 'light'
 }
 
+function resolveStoredThemeSkin(): ThemeSkin {
+  try {
+    const raw = String(getDatabase().getSetting(THEME_SKIN_SETTING_KEY) || '').trim().toLowerCase()
+    if (raw === 'liquid-glass' || raw === 'ready-glass') return raw
+  } catch {
+    // ignore persisted skin read failures
+  }
+  return 'liquid-glass'
+}
+
+function resolveSupportedPlatform(): SupportedPlatform {
+  if (process.platform === 'darwin') return 'darwin'
+  if (process.platform === 'win32') return 'win32'
+  return 'linux'
+}
+
+function resolveResolvedTheme(): MaterialResolvedTheme {
+  // 用户显式选了 light/dark 就直接尊重；只有 'system' 才下放给 nativeTheme.shouldUseDarkColors
+  const option = resolveStoredThemeSource()
+  if (option === 'system') return nativeTheme.shouldUseDarkColors ? 'dark' : 'light'
+  return option
+}
+
 function getThemeSnapshot(): ThemeSnapshot {
   return {
     option: resolveStoredThemeSource(),
-    resolved: nativeTheme.shouldUseDarkColors ? 'dark' : 'light',
+    resolved: resolveResolvedTheme(),
+    skin: resolveStoredThemeSkin(),
+    isNativeFullscreen: windowMaterialController?.isFullscreen() ?? false,
   }
 }
 
+/**
+ * 广播主题变更给所有 renderer。
+ *
+ * **重要**：此函数仅负责 IPC 通知，**不再** 直接修改窗口材料。材料更新由
+ * `windowMaterialController.sync()` 负责。如果你在调 broadcastThemeChanged 的同一路径上
+ * 也要刷新材料，请显式两个都调（参见 nativeTheme.on('updated') 处理）。
+ */
 function broadcastThemeChanged(): void {
   const snapshot = getThemeSnapshot()
   for (const window of BrowserWindow.getAllWindows()) {
     if (!window.isDestroyed()) {
       window.webContents.send('theme:changed', snapshot)
     }
+  }
+}
+
+/**
+ * 通知 renderer 窗口 fullscreen 状态变化。Stage 1 留这个 helper 但没人触发；
+ * Stage 2 的 will-enter / leave-full-screen lifecycle 监听器会用。
+ */
+function broadcastFullscreenChanged(isFullscreen: boolean): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('window:fullscreen-changed', isFullscreen)
   }
 }
 
@@ -128,21 +185,9 @@ function applyAppIcon(): void {
   }
 }
 
-function applyNativeWindowMaterial(window: BrowserWindow): void {
-  if (process.platform === 'darwin') {
-    window.setVibrancy('under-window')
-    window.setWindowButtonPosition({ x: 14, y: 14 })
-    return
-  }
-
-  if (process.platform === 'win32' && 'setBackgroundMaterial' in window) {
-    try {
-      window.setBackgroundMaterial('mica')
-    } catch {
-      /* ignore unsupported Windows builds */
-    }
-  }
-}
+// 注：applyNativeWindowMaterial 已被 windowMaterialController 替代。
+// 旧函数手动写死 setVibrancy('under-window') / setBackgroundMaterial('mica')，没法响应
+// skin / fullscreen 切换；新模块按 4 行状态表自动算目标值并 diff 应用。
 
 async function runBookmarkMenuAction(action: 'import' | 'export'): Promise<void> {
   if (!browserController) return
@@ -274,7 +319,10 @@ async function showMainWindow(): Promise<void> {
 async function createWindow(): Promise<void> {
   nativeTheme.themeSource = resolveStoredThemeSource()
   ensureDockIconVisible()
-  // Pick a first-frame background that matches the resolved theme so non-macOS platforms don't flash white.
+  // 首帧色：保留 baseline 行为——macOS 透明（让 vibrancy 优先），非 macOS 用主题匹配色避免白闪。
+  // controller.applyInitial() 紧接着会按状态表 sync() 一次，把 macOS bg 切到 '#00000000'
+  // 并打开 vibrancy；非 macOS 也会 diff 应用一次（通常 no-op）。Stage 2 可能调整首帧色策略。
+  const platform = resolveSupportedPlatform()
   const nonMacFirstFrameBg = nativeTheme.shouldUseDarkColors ? '#1A1B1E' : '#F7F9FC'
   // Create the browser window.
   mainWindow = new BrowserWindow({
@@ -285,7 +333,7 @@ async function createWindow(): Promise<void> {
     autoHideMenuBar: true,
     titleBarStyle: 'hiddenInset',
     backgroundColor: process.platform === 'darwin' ? '#00000000' : nonMacFirstFrameBg,
-    visualEffectState: process.platform === 'darwin' ? 'active' : undefined,
+    visualEffectState: platform === 'darwin' ? 'active' : undefined,
     webPreferences: {
       preload: join(__dirname, '../preload/index.mjs'),
       sandbox: false,
@@ -294,11 +342,24 @@ async function createWindow(): Promise<void> {
     }
   })
 
-  applyNativeWindowMaterial(mainWindow)
+  // 用 controller 接管材料；applyInitial 内部按状态表 sync 一次（macOS 上会立刻把 bg 切到透明 + vibrancy）
+  windowMaterialController = createWindowMaterialController({
+    window: mainWindow,
+    platform,
+    getTheme: () => ({
+      skin: resolveStoredThemeSkin(),
+      resolvedTheme: resolveResolvedTheme(),
+    }),
+    notifyFullscreenChanged: (isFullscreen) => broadcastFullscreenChanged(isFullscreen),
+  })
+  windowMaterialController.applyInitial()
+  windowMaterialController.attachLifecycle() // Stage 1 是 stub；Stage 2 填监听器
+
   const closedWindow = mainWindow
   mainWindow.on('closed', () => {
     if (mainWindow === closedWindow) {
       mainWindow = null
+      windowMaterialController = null
     }
   })
 
@@ -389,7 +450,8 @@ function setupGlobalIPC(): void {
     mainWindow?.close()
   })
 
-  // Theme sync — sets Electron's nativeTheme so BrowserView respects prefers-color-scheme
+  // Theme sync — sets Electron's nativeTheme so BrowserView respects prefers-color-scheme,
+  // then refreshes window material via the state machine and broadcasts the snapshot.
   ipcMain.handle('theme:set', (_event, theme: string) => {
     const nextTheme = theme === 'dark' || theme === 'light' || theme === 'system' ? theme : 'light'
     nativeTheme.themeSource = nextTheme
@@ -398,8 +460,25 @@ function setupGlobalIPC(): void {
     } catch {
       // ignore persistence failures
     }
+    // 通过状态机刷新窗口材料（macOS 下 light/dark 切换可能影响 fullscreen backing 色）
+    windowMaterialController?.sync()
     broadcastThemeChanged()
   })
+
+  // Skin sync — switches between liquid-glass (真半透明) and ready-glass (Ready 自持稳定底);
+  // Persists to DB and refreshes window material (vibrancy / opaque bg 切换走状态表).
+  // 切换 skin **不** 触发 ritual（ritual 只为昼夜主题切换），renderer 端通过 onChanged 收新 snapshot.
+  ipcMain.handle('theme:setSkin', (_event, skin: string) => {
+    const nextSkin: ThemeSkin = skin === 'ready-glass' ? 'ready-glass' : 'liquid-glass'
+    try {
+      getDatabase().setSetting(THEME_SKIN_SETTING_KEY, nextSkin)
+    } catch {
+      // ignore persistence failures
+    }
+    windowMaterialController?.sync()
+    broadcastThemeChanged()
+  })
+
   ipcMain.handle('theme:get', () => {
     try {
       return {
@@ -572,7 +651,14 @@ app.whenReady().then(() => {
     return
   }
 
-  nativeTheme.on('updated', broadcastThemeChanged)
+  // nativeTheme.updated 可能在 OS 切换深浅模式时、或我们在 theme:set handler 里设置
+  // themeSource 时触发。**必须显式做两件事**：刷新窗口材料 + 广播 renderer。
+  // 不能简化成只 sync 不 broadcast —— 否则 system 模式下 OS 切换深浅时 renderer
+  // 收不到 theme:changed 推送，useTheme 状态静默不同步。
+  nativeTheme.on('updated', () => {
+    windowMaterialController?.sync()
+    broadcastThemeChanged()
+  })
 
   console.log('[Main] App ready, registering protocol handler...')
 

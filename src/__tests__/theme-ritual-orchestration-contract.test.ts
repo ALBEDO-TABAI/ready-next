@@ -141,3 +141,73 @@ test('theme transitions route through the ritual overlay and the per-selector tr
   assert.match(topBar, /state\.session\?\.stage === 'theme-transition'/)
   assert.match(topBar, /disabled=\{isThemeRitualRunning\}/)
 })
+
+test('Stage 3 — will-change is scoped to ritual phase only, not in base .ready-app-content rule', () => {
+  const ritualCss = readWorkspaceFile('src/renderer/styles/ritual-overlay.css')
+
+  // base .ready-app-content 规则**不能含** will-change。否则 Chromium 永久把元素提到
+  // GPU compositor 层，配合 ritual 的 filter:blur 会缓存 raster；data-theme 翻转后
+  // 子元素重栅格化被吃掉，导致部分 UI 颜色不变（Bug 1-A）。
+  const baseContentMatch = ritualCss.match(/\n\.ready-app-content\s*\{([\s\S]*?)\n\}/)
+  assert.ok(baseContentMatch, 'base .ready-app-content rule should exist')
+  const baseBody = baseContentMatch![1]
+  assert.doesNotMatch(
+    baseBody,
+    /will-change/,
+    'base .ready-app-content rule MUST NOT include will-change (causes GPU layer caching across ritual)',
+  )
+
+  // will-change: opacity 必须只在 ritual phase 期间生效——通过 [data-theme-ritual-phase=...]
+  // 限定符。ritual 结束 phase attr 移除时 will-change 也消失，Chromium 释放 GPU 层重栅格化。
+  assert.match(
+    ritualCss,
+    /html\[data-theme-ritual-phase='entering'\]\s+\.ready-app-content[\s\S]*?html\[data-theme-ritual-phase='holding'\]\s+\.ready-app-content[\s\S]*?html\[data-theme-ritual-phase='leaving'\]\s+\.ready-app-content\s*\{[\s\S]*?will-change:\s*opacity/,
+    'will-change: opacity should be scoped to all three ritual phase selectors',
+  )
+})
+
+test('Stage 3 — ritual visual parameters unchanged (spec §3.4 red lines)', () => {
+  const ritualCss = readWorkspaceFile('src/renderer/styles/ritual-overlay.css')
+
+  // filter: blur(18px) 数值不变（saturate 数值在 0.7x 区间内）
+  assert.match(ritualCss, /html\[data-theme-ritual-phase='entering'\]\s+\.ready-app-content\s*\{[\s\S]*?filter:\s*blur\(18px\)\s+saturate\(0\.7\d?\)/)
+  assert.match(ritualCss, /html\[data-theme-ritual-phase='holding'\]\s+\.ready-app-content\s*\{[\s\S]*?filter:\s*blur\(18px\)\s+saturate\(0\.7\d?\)/)
+
+  // 内容层 opacity 0.06 (entering) / 0.04 (holding) 数值不变
+  assert.match(ritualCss, /html\[data-theme-ritual-phase='entering'\]\s+\.ready-app-content\s*\{[\s\S]*?opacity:\s*0\.06/)
+  assert.match(ritualCss, /html\[data-theme-ritual-phase='holding'\]\s+\.ready-app-content\s*\{[\s\S]*?opacity:\s*0\.04/)
+
+  // .ready-theme-ritual-tint 的 entering 18% / holding 28% alpha 不变
+  assert.match(
+    ritualCss,
+    /html\[data-theme-ritual-phase='entering'\]\[data-theme-ritual-direction='to-dark'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*?color-mix\(in srgb,\s*var\(--workbench-mode-bg-light\)\s*18%,\s*transparent\)/,
+    'entering tint (to-dark) must stay at 18% alpha source theme color',
+  )
+  assert.match(
+    ritualCss,
+    /html\[data-theme-ritual-phase='holding'\]\[data-theme-ritual-direction='to-dark'\]\s+\.ready-theme-ritual-tint\s*\{[\s\S]*?color-mix\(in srgb,\s*var\(--workbench-mode-bg-dark\)\s*28%,\s*transparent\)/,
+    'holding tint (to-dark) must stay at 28% alpha target theme color',
+  )
+})
+
+test('Stage 3 — no offsetHeight / getComputedStyle reflow hack in theme code (spec §3.4)', () => {
+  const themeStore = readWorkspaceFile('src/renderer/stores/useTheme.ts')
+  const ritualOverlay = readWorkspaceFile('src/renderer/modules/overlay/useRitualOverlay.ts')
+  const appShell = readWorkspaceFile('src/renderer/App.tsx')
+
+  // 这三个文件是 ritual + theme flip 的核心路径。
+  // 禁止使用 offsetHeight / getComputedStyle 作为强制 reflow 的 hack——
+  // 那是 spec §3.4 明确禁止的修法（不解释根因，靠拍桌子让浏览器重画）。
+  for (const [source, name] of [[themeStore, 'useTheme.ts'], [ritualOverlay, 'useRitualOverlay.ts'], [appShell, 'App.tsx']] as const) {
+    assert.doesNotMatch(
+      source,
+      /\.offsetHeight\b/,
+      `${name} must not use .offsetHeight as a reflow hack`,
+    )
+    assert.doesNotMatch(
+      source,
+      /getComputedStyle/,
+      `${name} must not use getComputedStyle as a reflow hack`,
+    )
+  }
+})

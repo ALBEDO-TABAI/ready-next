@@ -81,7 +81,11 @@ test('browser startup gates chrome until host restoration completes and main pro
   assert.doesNotMatch(rendererMain, /useBrowserTabs\.setState\(/)
   assert.doesNotMatch(rendererMain, /readyToShow/)
   assert.match(preload, /get: \(\) => ipcRenderer\.invoke\('theme:get'\)/)
-  assert.match(electronTypes, /get: \(\) => Promise<\{ success: boolean; data\?: \{ option: ThemeOption; resolved: ResolvedTheme \}; error\?: string \}>/)
+  // Stage 1: theme.get 返回类型从 inline shape 改为命名的 ThemeSnapshotPayload（含 skin + isNativeFullscreen）
+  assert.match(electronTypes, /get: \(\) => Promise<\{ success: boolean; data\?: ThemeSnapshotPayload; error\?: string \}>/)
+  assert.match(electronTypes, /interface ThemeSnapshotPayload/)
+  assert.match(electronTypes, /skin: ThemeSkin/)
+  assert.match(electronTypes, /isNativeFullscreen: boolean/)
   assert.doesNotMatch(preload, /readyToShow:/)
   assert.doesNotMatch(electronTypes, /readyToShow:/)
   assert.match(mainIndex, /const THEME_SETTING_KEY = 'ui_theme_option'/)

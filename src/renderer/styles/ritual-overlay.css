@@ -86,12 +86,33 @@ html[data-theme-ritual-direction='to-light'][data-theme-ritual-phase='leaving'] 
 
 /* Only the content layer fades. The shell stays mounted so the ritual base can cover the
    app without exposing the native window or BrowserView underneath. The residual blur keeps
-   the existing glass state visible instead of collapsing into a solid shell. */
+   the existing glass state visible instead of collapsing into a solid shell.
+
+   关键：will-change: opacity 不在 base 规则里——它只在 ritual phase 期间生效（见下方
+   phase-only 选择器）。这样设计的原因：
+
+   `will-change` 提示 Chromium 把元素提到独立 GPU compositor 层。结合 ritual 的
+   `filter: blur(18px)` 会让 `.ready-app-content` 子树被栅格化进 GPU 缓存。
+   ritual 的 holding 阶段翻 `data-theme` 时，子元素的 CSS 变量虽然立刻变了，但
+   Chromium 在 filter 过渡期间会优先复用 GPU 缓存的 raster，不重新栅格化。
+
+   解决方案：把 `will-change` 限制在 phase attr 存在时。ritual 结束、phase attr 移除
+   的瞬间 `will-change` 也消失 → Chromium 释放 GPU compositor 层 → 子树重新栅格化 →
+   新主题完整生效。
+
+   不允许在 base 加 `will-change` 任何值，也不允许通过 `offsetHeight` 强制 reflow。 */
 .ready-app-content {
   opacity: 1;
-  will-change: opacity;
   filter: none;
   transition: opacity 0ms linear, filter 0ms linear;
+}
+
+/* will-change 只在 theme ritual 三个 phase 期间生效——结束时 attribute 被移除，
+   Chromium 释放 GPU 缓存层并用最新 CSS 变量重栅格化子树。 */
+html[data-theme-ritual-phase='entering'] .ready-app-content,
+html[data-theme-ritual-phase='holding'] .ready-app-content,
+html[data-theme-ritual-phase='leaving'] .ready-app-content {
+  will-change: opacity;
 }
 
 html[data-theme-ritual-phase='entering'] .ready-app-content {

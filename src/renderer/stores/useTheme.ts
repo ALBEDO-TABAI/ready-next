@@ -14,7 +14,15 @@ let themeDomReconcileTimer: number | null = null
 
 export type ThemeOption = 'light' | 'dark' | 'system'
 export type ResolvedTheme = 'light' | 'dark'
-export type ThemeSkin = 'liquid-glass'
+/**
+ * 玻璃风格。
+ * - `liquid-glass`（默认）：真半透明，macOS 用 `under-window` vibrancy 让桌面壁纸做底。
+ * - `ready-glass`（可选）：Ready 自己持有稳定底色（`.ready-app-bg` 渐变），不使用 macOS vibrancy。
+ *
+ * 注意：DOM 层始终设 `data-skin='liquid-glass'`（与现有玻璃面板 selector 兼容），
+ * 两种风格的差异通过 `data-glass-backdrop` ∈ `{native, ready}` 区分。
+ */
+export type ThemeSkin = 'liquid-glass' | 'ready-glass'
 
 interface ThemeState {
     theme: ThemeOption
@@ -35,8 +43,14 @@ const getStoredTheme = (): ThemeOption => {
 
 const getStoredSkin = (): ThemeSkin => {
     const stored = readStorage('ready-theme-skin')
-    if (stored === 'liquid-glass') return stored
+    if (stored === 'liquid-glass' || stored === 'ready-glass') return stored
     return 'liquid-glass'
+}
+
+const syncNativeSkin = (skin: ThemeSkin) => {
+    if (typeof window !== 'undefined' && window.electronAPI?.theme?.setSkin) {
+        window.electronAPI.theme.setSkin(skin).catch(() => { /* ignore in browser-only dev */ })
+    }
 }
 
 // Resolve the effective theme (system -> actual light/dark)
@@ -177,8 +191,21 @@ const applyColorTheme = (
     }, THEME_DOM_RECONCILE_FALLBACK_MS)
 }
 
+/**
+ * 把 skin 状态应用到 DOM。
+ *
+ * - `data-skin` 永远是 `'liquid-glass'`：兼容现有 CSS selector（`html[data-skin='liquid-glass']
+ *   .glass-surface-*` 等数百条规则），避免大规模重写。
+ * - `data-glass-backdrop` 才是真正区分两种风格的开关：
+ *   - `'native'`（默认）：使用 macOS vibrancy + 透明窗口（真半透明）
+ *   - `'ready'`：Ready 自持稳定底（`.ready-app-bg` 渐变层可见）
+ *
+ * CSS 用 `[data-glass-backdrop='native']` / `[data-glass-backdrop='ready']` 修饰符选区分。
+ */
 const applySkin = (skin: ThemeSkin) => {
-    document.documentElement.setAttribute('data-skin', skin)
+    const root = document.documentElement
+    root.setAttribute('data-skin', 'liquid-glass')
+    root.setAttribute('data-glass-backdrop', skin === 'ready-glass' ? 'ready' : 'native')
 }
 
 export const useTheme = create<ThemeState>((set, get) => {
@@ -223,15 +250,18 @@ export const useTheme = create<ThemeState>((set, get) => {
             writeStorage('ready-theme', next)
             set({ theme: next, resolvedTheme: next })
         },
-        setSkin: (_skin) => {
-            applySkin('liquid-glass')
-            writeStorage('ready-theme-skin', 'liquid-glass')
-            set({ skin: 'liquid-glass' })
+        setSkin: (skin) => {
+            applySkin(skin)
+            syncNativeSkin(skin)
+            writeStorage('ready-theme-skin', skin)
+            set({ skin })
         },
         toggleSkin: () => {
-            applySkin('liquid-glass')
-            writeStorage('ready-theme-skin', 'liquid-glass')
-            set({ skin: 'liquid-glass' })
+            const next: ThemeSkin = get().skin === 'liquid-glass' ? 'ready-glass' : 'liquid-glass'
+            applySkin(next)
+            syncNativeSkin(next)
+            writeStorage('ready-theme-skin', next)
+            set({ skin: next })
         },
     }
 })

@@ -632,19 +632,44 @@ const appAPI = {
 }
 
 // Window API
+type ThemeSkinIPC = 'liquid-glass' | 'ready-glass'
+interface ThemeSnapshotIPC {
+  option: string
+  resolved: 'light' | 'dark'
+  skin: ThemeSkinIPC
+  isNativeFullscreen: boolean
+}
+
 const windowAPI = {
   minimize: () => ipcRenderer.invoke('window:minimize'),
   maximize: () => ipcRenderer.invoke('window:maximize'),
   close: () => ipcRenderer.invoke('window:close'),
+  /**
+   * 订阅主进程的 `window:fullscreen-changed` push。Stage 2 起会从 will-enter/leave-full-screen
+   * lifecycle handlers 推送；Stage 1 阶段没有推送源，订阅了也不会收到事件，但订阅链路本身有效，
+   * 不需要 Stage 2 再加新接口。
+   */
+  onFullscreenChanged: (listener: (isFullscreen: boolean) => void) => {
+    const handler = (_event: IpcRendererEvent, isFullscreen: boolean) => {
+      listener(Boolean(isFullscreen))
+    }
+    ipcRenderer.on('window:fullscreen-changed', handler)
+    return () => ipcRenderer.removeListener('window:fullscreen-changed', handler)
+  },
 }
 
 // Theme API
 const themeAPI = {
   set: (theme: string) => ipcRenderer.invoke('theme:set', theme),
-  setSkin: (skin: string) => ipcRenderer.invoke('theme:setSkin', skin),
+  /**
+   * 切换玻璃风格：'liquid-glass'（真半透明，macOS 用 vibrancy under-window）/
+   * 'ready-glass'（Ready 自持稳定底，不启用 vibrancy）。
+   * 切换 skin **不** 触发昼夜 ritual，仅改变窗口材料与 .ready-app-bg 渐变可见性。
+   */
+  setSkin: (skin: ThemeSkinIPC) => ipcRenderer.invoke('theme:setSkin', skin),
   get: () => ipcRenderer.invoke('theme:get'),
-  onChanged: (listener: (snapshot: { option: string; resolved: 'light' | 'dark'; skin?: string }) => void) => {
-    const handler = (_event: IpcRendererEvent, snapshot: { option: string; resolved: 'light' | 'dark'; skin?: string }) => {
+  onChanged: (listener: (snapshot: ThemeSnapshotIPC) => void) => {
+    const handler = (_event: IpcRendererEvent, snapshot: ThemeSnapshotIPC) => {
       listener(snapshot)
     }
     ipcRenderer.on('theme:changed', handler)

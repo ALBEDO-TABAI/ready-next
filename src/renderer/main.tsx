@@ -17,10 +17,28 @@ async function reconcileStartupTheme() {
   const themeResult = await window.electronAPI?.theme.get()
   if (!themeResult?.success || !themeResult.data) return
 
-  writeStorage('ready-theme', themeResult.data.option)
+  const { option, resolved, skin, isNativeFullscreen } = themeResult.data
   const root = document.documentElement
-  if (root.getAttribute('data-theme') !== themeResult.data.resolved) {
-    root.setAttribute('data-theme', themeResult.data.resolved)
+
+  // Main 进程是主题/皮肤的真值来源；localStorage 是 FOUC 兜底。这里把 stale localStorage 覆盖。
+  writeStorage('ready-theme', option)
+  if (skin === 'liquid-glass' || skin === 'ready-glass') {
+    writeStorage('ready-theme-skin', skin)
+  }
+
+  // 同步四个 <html> attr：CSS selector
+  //   html[data-native-fullscreen='true'][data-skin='liquid-glass'][data-glass-backdrop='native']
+  // 同时依赖三个 attr，缺一不可。
+  if (root.getAttribute('data-theme') !== resolved) {
+    root.setAttribute('data-theme', resolved)
+  }
+  // data-skin 永远是 'liquid-glass'（与 useTheme.applySkin 行为一致，兼容现有 CSS）
+  root.setAttribute('data-skin', 'liquid-glass')
+  root.setAttribute('data-glass-backdrop', skin === 'ready-glass' ? 'ready' : 'native')
+  if (isNativeFullscreen) {
+    root.setAttribute('data-native-fullscreen', 'true')
+  } else {
+    root.removeAttribute('data-native-fullscreen')
   }
 }
 
