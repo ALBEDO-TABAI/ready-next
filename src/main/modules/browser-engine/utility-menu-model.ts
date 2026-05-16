@@ -18,6 +18,7 @@ export type BrowserUtilityMenuAction =
   | 'toggle-current-site-adblock'
   | 'print'
   | 'open-external'
+  | 'clip-current-tab'
 
 export interface BrowserUtilityMenuItem {
   type: 'action' | 'separator' | 'submenu'
@@ -205,6 +206,13 @@ function buildMoreMenu(state: BrowserUtilityMenuState): BrowserUtilityMenuModel 
         label: '打印',
         enabled: Boolean(state.currentTab),
         action: 'print',
+      },
+      {
+        type: 'action',
+        label: '剪藏到 Obsidian 笔记',
+        enabled: Boolean(currentUrl),
+        action: 'clip-current-tab',
+        payload: { url: currentUrl },
       },
       {
         type: 'action',

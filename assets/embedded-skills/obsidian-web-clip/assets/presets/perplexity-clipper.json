@@ -1,0 +1,33 @@
+{
+	"schemaVersion": "0.1.0",
+	"name": "Perplexity",
+	"behavior": "create",
+	"noteContentFormat": "{{content}}",
+	"properties": [
+		{
+			"name": "title",
+			"value": " {{\\\"从中文内容中概述出一个简短的标题\\\"}}",
+			"type": "text"
+		},
+		{
+			"name": "author",
+			"value": "Perplexity AI",
+			"type": "multitext"
+		},
+		{
+			"name": "published",
+			"value": "{{time}}",
+			"type": "date"
+		},
+		{
+			"name": "tags",
+			"value": "{{\\\"从笔记内容中提取tags，使用 # 标记每个tag\\\"}}",
+			"type": "multitext"
+		}
+	],
+	"triggers": [
+		"https://www.perplexity.ai/"
+	],
+	"noteNameFormat": " {{\"从中文内容中概述出一个简短的标题\"}}",
+	"path": "🌐网页/Perplexity"
+}

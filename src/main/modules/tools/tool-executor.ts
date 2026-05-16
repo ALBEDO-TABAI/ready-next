@@ -358,6 +358,11 @@ export async function executeToolCall(
             // silent-catch: settings unavailable at boot or in tests; tools
             // still work via DDG / Jina-no-auth fallback paths.
           }
+          // P1.2 — `web_clip_url` resolves its preset bundle from the synced
+          // embedded-skill folder: `<skillsRoot>/obsidian-web-clip/assets/presets/`.
+          // We pass it as a separate plain-string field instead of expanding
+          // ToolContext (Stage R 8-contract #4 — no new ToolContext fields).
+          const obsidianWebClipPresetDir = `${runtimeInfo.skillsRoot}/obsidian-web-clip/assets/presets`
           return executeGeneralResearchTool(toolName, args as Record<string, unknown>, {
             abortSignal: context.abortSignal,
             sessionId: context.sessionId,
@@ -366,6 +371,7 @@ export async function executeToolCall(
             scope: context.scope,
             tavilyKey,
             jinaKey,
+            obsidianWebClipPresetDir,
           })
         }
 

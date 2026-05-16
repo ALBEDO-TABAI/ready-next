@@ -1,0 +1,38 @@
+{
+	"schemaVersion": "0.1.0",
+	"name": "Behance",
+	"behavior": "create",
+	"noteContentFormat": "{{content}}",
+	"properties": [
+		{
+			"name": "title",
+			"value": "{{title}}",
+			"type": "text"
+		},
+		{
+			"name": "source",
+			"value": "{{url}}",
+			"type": "text"
+		},
+		{
+			"name": "author",
+			"value": "{{meta:property:og:owners}}",
+			"type": "multitext"
+		},
+		{
+			"name": "published",
+			"value": "{{time}}",
+			"type": "date"
+		},
+		{
+			"name": "tags",
+			"value": "{{\\\"从笔记内容中提取tags，使用 # 标记每个tag\\\"}}",
+			"type": "multitext"
+		}
+	],
+	"triggers": [
+		"https://www.behance.net/"
+	],
+	"noteNameFormat": "{{title}}",
+	"path": "🌐网页/Behance"
+}

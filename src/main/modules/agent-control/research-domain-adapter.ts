@@ -100,9 +100,13 @@ export class ResearchDomainAdapter implements DomainAdapter {
   prepare(params: DomainAdapterPrepareParams): DomainAdapterPrepareResult {
     const isBrowserMode = this.detectBrowserMode(params)
     const inputAllowed = params.allowedToolNames ?? null
+    // P1.2 / Codex iter-3 — `web_clip_url` appears in BOTH mode prefix sets:
+    // it is a general research output entry point (saving a public URL into
+    // outputs as an Obsidian-style Markdown note), independent of whether
+    // the agent is otherwise in browser-mode for live page interaction.
     const prefixes = isBrowserMode
-      ? ['browser_research_topic', 'present_file']
-      : ['web_search', 'web_fetch', 'present_file']
+      ? ['browser_research_topic', 'present_file', 'web_clip_url']
+      : ['web_search', 'web_fetch', 'present_file', 'web_clip_url']
     const filtered = filterAllowedToolNamesByPrefixes(inputAllowed, prefixes)
     return {
       // R3-D1: filtered === null means either input was empty OR no prefix

@@ -1193,6 +1193,115 @@ interface ElectronBrowserAPI {
     error?: string
     filePath?: string
   }>
+  /** P1.4 — Clip the currently active BrowserView tab into the
+   * obsidian-web-clip outputs folder. Triggered by the renderer (slash
+   * command / toolbar button); there is no equivalent model-facing tool.
+   * Returns `{ ok: false, errorKind, recoverable, errorDetail }` on
+   * failure; on success returns the saved-note metadata. */
+  clipCurrentTab: (args?: {
+    preset?: string | null
+    preset_file?: string | null
+    output_subdir?: string | null
+    flatten_path?: boolean
+    preserve_pagination?: boolean
+    force_render_with_placeholders?: boolean
+  }) => Promise<{
+    ok: boolean
+    errorKind?:
+      | 'clip_no_active_tab'
+      | 'clip_parse_failed'
+      | 'clip_active_tab_unstable'
+      | 'clip_fetch_failed'
+      | 'clip_preset_render_failed'
+      | 'clip_login_required'
+      | 'clip_write_blocked'
+    recoverable?: boolean
+    errorDetail?: Record<string, unknown>
+    savedPath?: string
+    savedPathRelative?: string
+    suggestedVaultRelativePath?: string
+    preset?: { id: string; name: string }
+    frontmatter?: Record<string, string | string[]>
+    title?: string
+    url?: string
+    warnings?: string[]
+    sanitizationSummary?: Record<string, number>
+  }>
+  onClipCurrentTabRequested: (callback: (data: { url?: string }) => void) => () => void
+  /** Background clip triggered by dragging a browser tab onto FileTree.
+   * `invoke` resolves immediately with `{ ok, taskId }`; live progress is
+   * pushed via `onClipBackgroundUpdate`. Not exposed to the model. */
+  clipDraggedTab: (args: {
+    url: string
+    title?: string
+    preset?: string | null
+    preset_file?: string | null
+    output_subdir?: string | null
+    flatten_path?: boolean
+    force_render_with_placeholders?: boolean
+    target_hint?: string
+    target_dir?: string
+    client_task_id?: string
+  }) => Promise<{
+    ok: boolean
+    taskId?: string
+    errorKind?: 'invalid_url' | 'invalid_args'
+    errorDetail?: { message: string }
+  }>
+  onClipBackgroundUpdate: (
+    callback: (
+      data:
+        | {
+            taskId: string
+            status: 'running'
+            url: string
+            title?: string
+            targetHint?: string
+          }
+        | {
+            taskId: string
+            status: 'completed'
+            url: string
+            title?: string
+            targetHint?: string
+            savedPath: string
+            savedPathRelative: string
+            suggestedVaultRelativePath: string
+            copiedPath?: string
+            assetPaths?: string[]
+            imageDownloadFailures?: number
+            copyError?: {
+              kind:
+                | 'invalid_target'
+                | 'not_a_directory'
+                | 'sandbox_read_failed'
+                | 'target_write_failed'
+                | 'sandbox_unlink_failed'
+              message: string
+            }
+            preset: { id: string; name: string }
+            frontmatter: Record<string, string | string[]>
+            warnings: string[]
+          }
+        | {
+            taskId: string
+            status: 'failed'
+            url: string
+            title?: string
+            targetHint?: string
+            errorKind:
+              | 'clip_fetch_failed'
+              | 'clip_parse_failed'
+              | 'clip_preset_render_failed'
+              | 'clip_login_required'
+              | 'clip_write_blocked'
+              | 'clip_active_tab_unstable'
+              | 'unexpected'
+            recoverable: boolean
+            errorDetail?: Record<string, unknown>
+          },
+    ) => void,
+  ) => () => void
   onBookmarksChanged: (callback: (data: BrowserBookmarksChangedEvent) => void) => () => void
 
   // History

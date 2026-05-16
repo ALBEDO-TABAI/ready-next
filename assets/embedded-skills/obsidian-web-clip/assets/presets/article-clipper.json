@@ -1,0 +1,46 @@
+{
+  "schemaVersion": "0.1.0",
+  "name": "Article",
+  "behavior": "create",
+  "noteContentFormat": "{{content}}",
+  "properties": [
+    {
+      "name": "title",
+      "value": "{{title}}",
+      "type": "text"
+    },
+    {
+      "name": "url",
+      "value": "{{url}}",
+      "type": "text"
+    },
+    {
+      "name": "author",
+      "value": "{{author}}",
+      "type": "text"
+    },
+    {
+      "name": "site",
+      "value": "{{site}}",
+      "type": "text"
+    },
+    {
+      "name": "published",
+      "value": "{{published}}",
+      "type": "date"
+    },
+    {
+      "name": "created",
+      "value": "{{time|date:\"YYYY-MM-DDTHH:mm:ssZ\"}}",
+      "type": "date"
+    },
+    {
+      "name": "tags",
+      "value": "{{meta:name:keywords}}",
+      "type": "multitext"
+    }
+  ],
+  "triggers": [],
+  "noteNameFormat": "{{title}}",
+  "path": ""
+}

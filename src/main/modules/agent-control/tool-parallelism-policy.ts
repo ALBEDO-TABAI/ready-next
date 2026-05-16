@@ -182,10 +182,12 @@ export function getToolResourceTag(toolName: string): ToolResourceTag {
   }
   // Stage R W1.1/W1.2/W6.4 — `general_research` group tools. Read-safe HTTP
   // calls (`web_search` / `web_fetch`) join parallel groups; `present_file`
-  // is interactive (renderer IPC) so it serializes.
+  // is interactive (renderer IPC) so it serializes. `web_clip_url` writes
+  // a file + calls present_file so it is also interactive / serialized.
   if (normalized === 'web_search') return { domain: 'general_research', accessMode: 'read' }
   if (normalized === 'web_fetch') return { domain: 'general_research', accessMode: 'read' }
   if (normalized === 'present_file') return { domain: 'general_research', accessMode: 'interactive' }
+  if (normalized === 'web_clip_url') return { domain: 'general_research', accessMode: 'interactive' }
   // Stage T PR-T5 — MCP tools advertised as `mcp_*` are dispatched to the
   // mcp client and are interactive by default (the client makes a remote
   // call per invocation, no parallelism guarantee from the server side).

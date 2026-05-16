@@ -165,6 +165,18 @@ export class BrowserUtilityMenuService {
       case 'print':
         this.host.printCurrentTab()
         return
+      case 'clip-current-tab':
+        // P1.4 — User-driven entry point. Push a request event to renderer;
+        // the renderer subscribes and invokes the existing
+        // `window.electron.browser.clipCurrentTab()` preload API, which lands
+        // on the `browser:clipCurrentTab` IPC handler with real BrowserView
+        // access. This keeps the menu service free of BrowserController
+        // dependencies and ensures the privacy sanitizer always runs in the
+        // user-facing path (not autonomous turn-loop).
+        this.host.sendToRenderer('browser:clipCurrentTabRequested', {
+          url: String(item.payload?.url || state.currentTab?.url || '').trim(),
+        })
+        return
       case 'open-external': {
         const url = String(item.payload?.url || state.currentTab?.url || '').trim()
         if (!url) return

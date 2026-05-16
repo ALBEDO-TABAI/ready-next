@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom'
 import {
   ChevronRight, ChevronDown, Minus, Plus,
   FileText, Folder, FolderOpen, Image, Film, FileSpreadsheet, Pen, Music2, Globe, BookOpen,
-  FilePlus2, FolderPlus, Copy, RefreshCw, Trash2,
+  FilePlus2, FolderPlus, Copy, RefreshCw, Trash2, Loader2, AlertTriangle, Check,
 } from 'lucide-react'
 import { useWorkspace, type FileItem } from '../../stores/useWorkspace'
 import { useMode, type WorkbenchMode } from '../../stores/useMode'
@@ -290,6 +290,7 @@ function FileTreeItem({
   isDropTarget,
   isBrowserDropInside,
   browserDropLine,
+  isFlashing,
   draggableEnabled,
   dragMovable,
   depth,
@@ -310,6 +311,7 @@ function FileTreeItem({
   isDropTarget: boolean
   isBrowserDropInside?: boolean
   browserDropLine?: 'before' | 'after' | null
+  isFlashing?: boolean
   draggableEnabled?: boolean
   dragMovable?: boolean
   depth: number
@@ -344,6 +346,7 @@ function FileTreeItem({
       className={`
         flex items-center gap-[6px] rounded-[8px] text-[13px] cursor-pointer
         transition-[background-color,box-shadow,outline-color] duration-200 ease-out group
+        ${isFlashing ? 'file-tree-item-flash-complete' : ''}
       `}
       style={{
         position: 'relative',
@@ -564,6 +567,113 @@ function GridItemCard({
   )
 }
 
+/**
+ * Non-selectable "正在剪藏" placeholder row, shown the instant the user
+ * picks 网页剪藏 from the drop popup so they get immediate feedback even
+ * before the network fetch completes. Pointer-events disabled — the row
+ * can't be selected, dragged, or used as a drop target. Replaced by the
+ * real file row (via FS watcher) once materialization finishes.
+ */
+function PendingClipRow({
+  status,
+  urlHost,
+  title,
+  errorMessage,
+  depth,
+}: {
+  status: 'running' | 'completed' | 'failed'
+  urlHost: string
+  title: string
+  errorMessage?: string
+  depth: number
+}) {
+  const baseStyle: React.CSSProperties = {
+    padding: '6px 8px',
+    paddingLeft: `${8 + depth * 22}px`,
+    opacity: status === 'failed' ? 0.85 : 0.7,
+    pointerEvents: 'none',
+    userSelect: 'none',
+    cursor: 'default',
+    background: status === 'failed' ? 'color-mix(in srgb, var(--color-rose-light, #fee2e2) 36%, transparent)' : 'transparent',
+    boxShadow:
+      status === 'completed'
+        ? 'inset 0 0 0 1px color-mix(in srgb, var(--color-green, #10b981) 38%, transparent)'
+        : status === 'failed'
+          ? 'inset 0 0 0 1px color-mix(in srgb, var(--color-rose, #f43f5e) 32%, transparent)'
+          : 'inset 0 0 0 1px rgba(148, 163, 184, 0.22)',
+  }
+  const label =
+    status === 'running'
+      ? '正在剪藏'
+      : status === 'completed'
+        ? '已剪藏'
+        : '剪藏失败'
+  return (
+    <div
+      aria-disabled
+      aria-live={status === 'failed' ? 'polite' : undefined}
+      className="flex items-center gap-[6px] rounded-[8px] text-[13px]"
+      style={baseStyle}
+    >
+      <span
+        aria-hidden
+        className="flex items-center justify-center"
+        style={{ width: 16, height: 16 }}
+      >
+        {status === 'running' ? (
+          <Loader2 className="animate-spin" style={{ width: 14, height: 14 }} strokeWidth={2} />
+        ) : status === 'completed' ? (
+          <Check style={{ width: 14, height: 14, color: 'var(--color-green, #10b981)' }} strokeWidth={2.5} />
+        ) : (
+          <AlertTriangle style={{ width: 14, height: 14, color: 'var(--color-rose, #f43f5e)' }} strokeWidth={2.4} />
+        )}
+      </span>
+      <span
+        style={{
+          flex: 1,
+          minWidth: 0,
+          whiteSpace: 'nowrap',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          color: 'var(--text-muted)',
+          fontStyle: 'italic',
+        }}
+      >
+        <span style={{ marginRight: 6, fontStyle: 'normal', fontVariant: 'all-small-caps', letterSpacing: '0.04em' }}>
+          {label}
+        </span>
+        <span>{title || urlHost}</span>
+      </span>
+      {status === 'failed' && errorMessage && (
+        <span
+          title={errorMessage}
+          style={{
+            fontSize: 11,
+            color: 'var(--color-rose, #f43f5e)',
+            maxWidth: 140,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+        >
+          {errorMessage}
+        </span>
+      )}
+    </div>
+  )
+}
+
+export interface PendingClipPlaceholder {
+  taskId: string
+  targetDir: string
+  urlHost: string
+  title: string
+  status: 'running' | 'completed' | 'failed'
+  copiedPath?: string
+  errorMessage?: string
+  createdAt: number
+}
+
 function FileTreeRecursive({
   items,
   containerPath,
@@ -578,6 +688,8 @@ function FileTreeRecursive({
   filters,
   moveDropTargetDir,
   browserTabDropTarget,
+  flashingPath,
+  pendingClips,
   onToggleDir,
   onOpenFile,
   onContextMenu,
@@ -602,6 +714,8 @@ function FileTreeRecursive({
   filters: FileFilterMap
   moveDropTargetDir: string | null
   browserTabDropTarget: BrowserTabDropTarget | null
+  flashingPath: string | null
+  pendingClips: PendingClipPlaceholder[]
   onToggleDir: (path: string) => Promise<void>
   onOpenFile: (item: FileItem) => void
   onContextMenu: (e: React.MouseEvent, item: FileItem) => void
@@ -624,6 +738,7 @@ function FileTreeRecursive({
     return false
   })
 
+  const placeholdersForThisFolder = pendingClips.filter((p) => p.targetDir === containerPath)
   return (
     <>
       {creatingType && creatingPath === containerPath && (
@@ -634,6 +749,16 @@ function FileTreeRecursive({
           onCancel={onCreateCancel}
         />
       )}
+      {placeholdersForThisFolder.map((p) => (
+        <PendingClipRow
+          key={p.taskId}
+          status={p.status}
+          urlHost={p.urlHost}
+          title={p.title}
+          errorMessage={p.errorMessage}
+          depth={depth}
+        />
+      ))}
       {visibleItems.map((item) => {
         const isExpanded = expandedDirs.has(item.path)
         const children = dirChildren.get(item.path) || []
@@ -655,6 +780,7 @@ function FileTreeRecursive({
                 browserTabDropTarget?.kind === 'inside-directory' && browserTabDropTarget.itemPath === item.path
               }
               browserDropLine={browserDropLine}
+              isFlashing={flashingPath === item.path}
               depth={depth}
               onToggleDir={() => onToggleDir(item.path)}
               onOpenFile={() => onOpenFile(item)}
@@ -680,6 +806,8 @@ function FileTreeRecursive({
                 filters={filters}
                 moveDropTargetDir={moveDropTargetDir}
                 browserTabDropTarget={browserTabDropTarget}
+                flashingPath={flashingPath}
+                pendingClips={pendingClips}
                 onToggleDir={onToggleDir}
                 onOpenFile={onOpenFile}
                 onContextMenu={onContextMenu}
@@ -742,6 +870,28 @@ export default function FileTree({
     payload: RSSDragPayload
   } | null>(null)
   const [browserTabDropMenu, setBrowserTabDropMenu] = useState<BrowserTabDropMenuState | null>(null)
+  const [flashingTargetPath, setFlashingTargetPath] = useState<string | null>(null)
+  const flashClearTimerRef = useRef<number | null>(null)
+  /**
+   * Pending background clips, surfaced as placeholder rows in the FileTree so
+   * the user gets immediate "处理中" feedback before any file actually appears
+   * on disk. Keyed by taskId. `targetDir` decides which folder the row lives
+   * in; `status` controls the visual (running / completed / failed). Cleared
+   * when the actual file lands (FS watcher) or after a short failure delay.
+   */
+  const [pendingClips, setPendingClips] = useState<
+    Array<{
+      taskId: string
+      targetDir: string
+      urlHost: string
+      title: string
+      status: 'running' | 'completed' | 'failed'
+      copiedPath?: string
+      errorMessage?: string
+      createdAt: number
+    }>
+  >([])
+  const pendingClipRemoveTimersRef = useRef<Map<string, number>>(new Map())
   const [isDragOver, setIsDragOver] = useState(false)
   const [moveDropTargetDir, setMoveDropTargetDir] = useState<string | null>(null)
   const [browserTabDropTarget, setBrowserTabDropTarget] = useState<BrowserTabDropTarget | null>(null)
@@ -778,6 +928,111 @@ export default function FileTree({
   useEffect(() => {
     onResultCountChange?.(filteredCurrentItems.length)
   }, [filteredCurrentItems.length, onResultCountChange])
+
+  // Background clip progress subscriber. The drop popup's "网页剪藏" action
+  // dispatches `browser:clipDraggedTab` via host IPC; the main process writes
+  // the note to `<outputsRoot>/obsidian-web-clip/...` and pushes `running →
+  // completed | failed` events here. We log to console (matching RSS drop
+  // action pattern); a richer toast UX is Phase 2.
+  const schedulePlaceholderRemoval = useCallback((taskId: string, delayMs: number) => {
+    const existing = pendingClipRemoveTimersRef.current.get(taskId)
+    if (existing !== undefined) window.clearTimeout(existing)
+    const timer = window.setTimeout(() => {
+      setPendingClips((prev) => prev.filter((p) => p.taskId !== taskId))
+      pendingClipRemoveTimersRef.current.delete(taskId)
+    }, delayMs)
+    pendingClipRemoveTimersRef.current.set(taskId, timer)
+  }, [])
+
+  useEffect(() => {
+    const cleanup = window.electronAPI?.browser?.onClipBackgroundUpdate?.((data) => {
+      if (!data || typeof data !== 'object') return
+      const update = data as { taskId: string; status: string; url?: string; targetHint?: string }
+      if (update.status === 'running') {
+        console.info('[obsidian-web-clip] background running', update.taskId, update.url, '→', update.targetHint)
+      } else if (update.status === 'completed') {
+        const completed = data as {
+          taskId: string
+          savedPath: string
+          preset: { id: string; name: string }
+          suggestedVaultRelativePath: string
+          copiedPath?: string
+          assetPaths?: string[]
+          imageDownloadFailures?: number
+          copyError?: { kind: string; message: string }
+        }
+        console.info(
+          '[obsidian-web-clip] background completed',
+          completed.taskId,
+          '→',
+          completed.copiedPath || completed.savedPath,
+          `(preset: ${completed.preset.id}, vault-rel: ${completed.suggestedVaultRelativePath}, ` +
+            `assets: ${completed.assetPaths?.length || 0}, ` +
+            `imgFail: ${completed.imageDownloadFailures || 0})`,
+        )
+        if (completed.copyError) {
+          console.warn(
+            '[obsidian-web-clip] materialize to dragged folder failed:',
+            completed.copyError.kind,
+            completed.copyError.message,
+          )
+        }
+        // Update placeholder to "completed" and arm flash on the NEW file.
+        // We keep the placeholder briefly so the user sees an explicit
+        // "完成" beat; the FS watcher will surface the real file at copiedPath
+        // within ~100-500ms and our flash CSS triggers when the new row
+        // first renders with isFlashing=true.
+        setPendingClips((prev) =>
+          prev.map((p) =>
+            p.taskId === completed.taskId ? { ...p, status: 'completed', copiedPath: completed.copiedPath } : p,
+          ),
+        )
+        schedulePlaceholderRemoval(completed.taskId, 1200)
+        const newFilePath = completed.copiedPath
+        if (newFilePath) {
+          setFlashingTargetPath(newFilePath)
+          if (flashClearTimerRef.current !== null) {
+            window.clearTimeout(flashClearTimerRef.current)
+          }
+          // 2500ms — gives the FS watcher ample time to surface the new
+          // row even on slow disks; CSS animation is 1500ms once mounted,
+          // so the row may animate any time within this window.
+          flashClearTimerRef.current = window.setTimeout(() => {
+            setFlashingTargetPath(null)
+            flashClearTimerRef.current = null
+          }, 2500)
+        }
+      } else if (update.status === 'failed') {
+        const failed = data as { taskId: string; errorKind: string; recoverable: boolean; errorDetail?: { message?: string } }
+        console.warn(
+          '[obsidian-web-clip] background failed',
+          failed.taskId,
+          failed.errorKind,
+          'recoverable=' + failed.recoverable,
+          failed.errorDetail,
+        )
+        setPendingClips((prev) =>
+          prev.map((p) =>
+            p.taskId === failed.taskId
+              ? { ...p, status: 'failed', errorMessage: failed.errorDetail?.message || failed.errorKind }
+              : p,
+          ),
+        )
+        schedulePlaceholderRemoval(failed.taskId, 4000)
+      }
+    })
+    return () => {
+      cleanup?.()
+      if (flashClearTimerRef.current !== null) {
+        window.clearTimeout(flashClearTimerRef.current)
+        flashClearTimerRef.current = null
+      }
+      for (const timer of pendingClipRemoveTimersRef.current.values()) {
+        window.clearTimeout(timer)
+      }
+      pendingClipRemoveTimersRef.current.clear()
+    }
+  }, [schedulePlaceholderRemoval])
 
   const handleOpenFile = useCallback((item: FileItem) => {
     if (item.isDirectory) {
@@ -1131,14 +1386,99 @@ export default function FileTree({
     const { payload, target } = browserTabDropMenu
     setBrowserTabDropMenu(null)
 
-    const targetLabel = target.kind === 'inside-directory'
-      ? `folder:${target.dirPath}`
-      : `${target.kind}:${target.anchorPath}`
+    // Row to flash on completion: the actual row the user pointed at.
+    // For inside-directory the row is the folder; for insert-before/after
+    // it's the anchor row (file or folder) above/below the drop indicator.
+    const flashRowPath =
+      target.kind === 'inside-directory' ? target.itemPath : target.anchorPath
+    // Folder for the auto-copy: for inside-directory it's the folder itself;
+    // for insert-before/after it's the container holding the anchor row.
+    const targetDir =
+      target.kind === 'inside-directory' ? target.dirPath : target.containerPath
+    const targetHint = flashRowPath
 
+    if (action === 'web-clip') {
+      // Fire-and-forget background clip via host IPC. Does NOT route through
+      // the agent loop — user can keep chatting / typing in other panels.
+      // Pipeline writes to `<outputsRoot>/obsidian-web-clip/...` first, then
+      // materializeToVault moves the .md + downloaded image assets into
+      // `targetDir`. On completion the FS watcher surfaces the new file and
+      // the subscriber below flashes that row briefly.
+      let urlHost = ''
+      try {
+        urlHost = new URL(payload.url).hostname
+      } catch {
+        urlHost = payload.url
+      }
+      const clientTaskId = `client-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
+      // Insert the optimistic placeholder before kicking off the IPC so the
+      // user sees a "处理中" row in the target folder immediately. We use the
+      // client-side taskId so the ack/update path can refer to the same row.
+      setPendingClips((prev) => [
+        ...prev,
+        {
+          taskId: clientTaskId,
+          targetDir,
+          urlHost,
+          title: payload.title || urlHost,
+          status: 'running',
+          createdAt: Date.now(),
+        },
+      ])
+
+      const promise = window.electronAPI?.browser?.clipDraggedTab?.({
+        url: payload.url,
+        title: payload.title,
+        target_hint: targetHint,
+        target_dir: targetDir,
+        client_task_id: clientTaskId,
+      })
+      if (!promise) {
+        console.warn('[browser-tab-drop-action] clipDraggedTab IPC unavailable')
+        // No backend wiring — drop the placeholder so the user isn't stuck.
+        setPendingClips((prev) => prev.filter((p) => p.taskId !== clientTaskId))
+        return
+      }
+      promise
+        .then((ack) => {
+          if (!ack?.ok) {
+            console.warn('[browser-tab-drop-action] clip dispatch rejected', ack?.errorKind, ack?.errorDetail)
+            // Promote placeholder to failed; schedule auto-remove.
+            setPendingClips((prev) =>
+              prev.map((p) =>
+                p.taskId === clientTaskId
+                  ? { ...p, status: 'failed', errorMessage: ack?.errorDetail?.message || ack?.errorKind || 'dispatch rejected' }
+                  : p,
+              ),
+            )
+            schedulePlaceholderRemoval(clientTaskId, 4000)
+            return
+          }
+          console.info('[browser-tab-drop-action] clip dispatched', {
+            taskId: ack.taskId,
+            target: targetHint,
+            target_dir: targetDir,
+            url: payload.url,
+          })
+        })
+        .catch((err) => {
+          console.warn('[browser-tab-drop-action] clipDraggedTab IPC threw', err)
+          setPendingClips((prev) =>
+            prev.map((p) =>
+              p.taskId === clientTaskId ? { ...p, status: 'failed', errorMessage: String(err) } : p,
+            ),
+          )
+          schedulePlaceholderRemoval(clientTaskId, 4000)
+        })
+      return
+    }
+
+    // TODO(phase-2): wire content-study / copy-analysis / visual-analysis
+    // through their respective skill / agent entry points.
     console.info('[browser-tab-drop-action] placeholder', {
       type: 'browser-tab',
       action,
-      target: targetLabel,
+      target: targetHint,
       title: payload.title,
       url: payload.url,
       tabId: payload.tabId,
@@ -1193,6 +1533,7 @@ export default function FileTree({
                 browserTabDropTarget?.kind === 'inside-directory' && browserTabDropTarget.itemPath === folderPath
               }
               browserDropLine={browserDropLine}
+              isFlashing={flashingTargetPath === folderPath}
               dragMovable={false}
               depth={0}
               onToggleDir={() => toggleDir(folderPath)}
@@ -1223,6 +1564,8 @@ export default function FileTree({
                 filters={filters}
                 moveDropTargetDir={moveDropTargetDir}
                 browserTabDropTarget={browserTabDropTarget}
+                flashingPath={flashingTargetPath}
+                pendingClips={pendingClips}
                 onToggleDir={toggleDir}
                 onOpenFile={handleOpenFile}
                 onContextMenu={(e, item) => {
@@ -1280,6 +1623,8 @@ export default function FileTree({
         filters={filters}
         moveDropTargetDir={moveDropTargetDir}
         browserTabDropTarget={browserTabDropTarget}
+        flashingPath={flashingTargetPath}
+        pendingClips={pendingClips}
         onToggleDir={toggleDir}
         onOpenFile={handleOpenFile}
         onContextMenu={(e, item) => {

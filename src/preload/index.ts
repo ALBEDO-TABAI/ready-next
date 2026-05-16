@@ -353,6 +353,41 @@ const browserAPI = {
   isBookmarked: (url: string) => ipcRenderer.invoke('browser:isBookmarked', url),
   importBookmarks: () => ipcRenderer.invoke('browser:importBookmarks'),
   exportBookmarks: () => ipcRenderer.invoke('browser:exportBookmarks'),
+  // P1.4 — obsidian-web-clip current tab. Renderer-only entry point;
+  // there is intentionally no matching model-facing tool. See SKILL.md.
+  clipCurrentTab: (args?: {
+    preset?: string | null
+    preset_file?: string | null
+    output_subdir?: string | null
+    flatten_path?: boolean
+    preserve_pagination?: boolean
+    force_render_with_placeholders?: boolean
+  }) => ipcRenderer.invoke('browser:clipCurrentTab', args ?? {}),
+  onClipCurrentTabRequested: (callback: (data: { url?: string }) => void) => {
+    const handler = (_: unknown, data: unknown): void => callback((data || {}) as { url?: string })
+    ipcRenderer.on('browser:clipCurrentTabRequested', handler)
+    return () => ipcRenderer.removeListener('browser:clipCurrentTabRequested', handler)
+  },
+  // Drag-tab-to-FileTree background clip. invoke acks immediately with
+  // taskId; progress streams via onClipBackgroundUpdate. Not routed through
+  // the agent loop. See ipc-clip-dragged-tab.ts.
+  clipDraggedTab: (args: {
+    url: string
+    title?: string
+    preset?: string | null
+    preset_file?: string | null
+    output_subdir?: string | null
+    flatten_path?: boolean
+    force_render_with_placeholders?: boolean
+    target_hint?: string
+    target_dir?: string
+    client_task_id?: string
+  }) => ipcRenderer.invoke('browser:clipDraggedTab', args),
+  onClipBackgroundUpdate: (callback: (data: unknown) => void) => {
+    const handler = (_: unknown, data: unknown): void => callback(data)
+    ipcRenderer.on('clip:backgroundUpdate', handler)
+    return () => ipcRenderer.removeListener('clip:backgroundUpdate', handler)
+  },
   onBookmarksChanged: (callback: (data: unknown) => void) => {
     const handler = (_: unknown, data: unknown): void => callback(data)
     ipcRenderer.on('browser:bookmarksChanged', handler)
@@ -606,9 +641,10 @@ const windowAPI = {
 // Theme API
 const themeAPI = {
   set: (theme: string) => ipcRenderer.invoke('theme:set', theme),
+  setSkin: (skin: string) => ipcRenderer.invoke('theme:setSkin', skin),
   get: () => ipcRenderer.invoke('theme:get'),
-  onChanged: (listener: (snapshot: { option: string; resolved: 'light' | 'dark' }) => void) => {
-    const handler = (_event: IpcRendererEvent, snapshot: { option: string; resolved: 'light' | 'dark' }) => {
+  onChanged: (listener: (snapshot: { option: string; resolved: 'light' | 'dark'; skin?: string }) => void) => {
+    const handler = (_event: IpcRendererEvent, snapshot: { option: string; resolved: 'light' | 'dark'; skin?: string }) => {
       listener(snapshot)
     }
     ipcRenderer.on('theme:changed', handler)

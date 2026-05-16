@@ -1,0 +1,36 @@
+{
+	"schemaVersion": "0.1.0",
+	"name": "中文网页",
+	"behavior": "create",
+	"noteContentFormat": "{{content}}",
+	"properties": [
+		{
+			"name": "title",
+			"value": "{{\\\"从网页内容中提取合适的标题\\\"}}",
+			"type": "text"
+		},
+		{
+			"name": "url",
+			"value": "{{url}}",
+			"type": "text"
+		},
+		{
+			"name": "author",
+			"value": "{{\\\"从网页内容中提取作者名，使用 # 标记作者名\\\"}}",
+			"type": "multitext"
+		},
+		{
+			"name": "published",
+			"value": "{{time}}",
+			"type": "date"
+		},
+		{
+			"name": "tags",
+			"value": "{{\\\"从网页内容中提取tags，使用 # 标记每个tag\\\"}}",
+			"type": "multitext"
+		}
+	],
+	"triggers": [],
+	"noteNameFormat": "{{title}}",
+	"path": "🌐网页/其他"
+}

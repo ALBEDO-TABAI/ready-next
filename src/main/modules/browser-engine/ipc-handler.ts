@@ -45,6 +45,8 @@ import {
   type BrowserViewBoundsUpdate,
   type PreviewTabState,
 } from './host-types'
+import { setupBrowserClipIPC } from './ipc-clip'
+import { setupBrowserClipDraggedTabIPC } from './ipc-clip-dragged-tab'
 import { setupBrowserDataIPC } from './ipc-data'
 import { setupBrowserShellIPC } from './ipc-shell'
 import { BrowserPreviewService } from './preview-service'
@@ -1314,6 +1316,22 @@ export function setupBrowserIPC(mainWindow: BrowserWindow, useMock = false): Bro
   const browserDataService = new BrowserDataService()
   setupBrowserShellIPC(controller)
   setupBrowserDataIPC(controller, browserDataService)
+  setupBrowserClipIPC({
+    getActiveTab: () => {
+      const active = controller.getActiveTab()
+      if (!active) return undefined
+      return {
+        id: active.id,
+        url: active.url,
+        title: active.title,
+        domain: active.domain,
+      }
+    },
+    executeJS: (tabId, code) => controller.executeJS(tabId, code),
+  })
+  setupBrowserClipDraggedTabIPC({
+    sendToRenderer: (channel, data) => controller.sendToRenderer(channel, data),
+  })
 
   return controller
 }

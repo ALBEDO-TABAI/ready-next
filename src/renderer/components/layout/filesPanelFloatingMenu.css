@@ -39,3 +39,32 @@ html[data-skin='liquid-glass'] .ready-floating-menu-item.is-selected {
   border-color: var(--chat-menu-selected-border) !important;
   box-shadow: var(--chat-menu-selected-shadow) !important;
 }
+
+/*
+ * Transient confirmation glow applied to the FileTree row that was the drop
+ * target of a successful background obsidian-web-clip. The row is NOT
+ * selected/activated during the drop; this animation only fires once on
+ * completion, runs for ~1.5s, and the row returns to its inactive state.
+ */
+.file-tree-item-flash-complete {
+  animation: file-tree-flash-glow 1500ms ease-out 1;
+  z-index: 3;
+}
+@keyframes file-tree-flash-glow {
+  0% {
+    background: var(--color-blue-light);
+    box-shadow:
+      0 0 0 2px var(--color-blue),
+      0 0 18px rgba(59, 130, 246, 0.55);
+  }
+  60% {
+    background: color-mix(in srgb, var(--color-blue-light) 60%, transparent);
+    box-shadow:
+      0 0 0 1.5px color-mix(in srgb, var(--color-blue) 70%, transparent),
+      0 0 12px rgba(59, 130, 246, 0.32);
+  }
+  100% {
+    background: transparent;
+    box-shadow: none;
+  }
+}

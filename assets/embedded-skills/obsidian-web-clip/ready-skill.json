@@ -1,0 +1,15 @@
+{
+  "id": "obsidian-web-clip",
+  "name": "obsidian-web-clip",
+  "displayName": "Obsidian Web Clip",
+  "description": "把网页存成 Obsidian-compatible Markdown 笔记的方法论：路由 web_clip_url（公共 URL）或 /clip-current（用户当前标签页），用 preset 控制 frontmatter 与正文格式。",
+  "version": "0.1.0",
+  "runtime": "reference",
+  "execution": { "mode": "advisory" },
+  "actions": {
+    "read_skill": {
+      "runtime": "reference",
+      "visibility": "internal"
+    }
+  }
+}

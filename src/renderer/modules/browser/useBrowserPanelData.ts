@@ -73,6 +73,33 @@ export function useBrowserPanelData({
     return () => { cleanup?.() }
   }, [activeTab?.url, isElectron, refreshBookmarks])
 
+  // P1.4 — bridge utility-menu "剪藏到 Obsidian 笔记" click → preload
+  // `clipCurrentTab()` IPC. The menu service emits
+  // `browser:clipCurrentTabRequested`; here we react to it. Result is
+  // logged for P1 (renderer toast UI is P2.9). Any rejection from the
+  // preload call is caught so we don't surface unhandled-promise warnings
+  // into the renderer.
+  useEffect(() => {
+    if (!isElectron) return
+    const cleanup = window.electronAPI?.browser?.onClipCurrentTabRequested(() => {
+      const promise = window.electronAPI?.browser?.clipCurrentTab()
+      if (!promise) return
+      promise
+        .then((result) => {
+          if (!result) return
+          if (result.ok && result.savedPath) {
+            console.info('[obsidian-web-clip] saved:', result.savedPath, result)
+          } else {
+            console.warn('[obsidian-web-clip] clip failed:', result.errorKind, result.errorDetail)
+          }
+        })
+        .catch((err) => {
+          console.warn('[obsidian-web-clip] clipCurrentTab IPC rejected:', err)
+        })
+    })
+    return () => { cleanup?.() }
+  }, [isElectron])
+
   return {
     isBookmarked,
     bookmarks,

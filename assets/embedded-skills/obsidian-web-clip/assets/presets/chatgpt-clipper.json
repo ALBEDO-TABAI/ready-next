@@ -1,0 +1,33 @@
+{
+	"schemaVersion": "0.1.0",
+	"name": "ChatGPT",
+	"behavior": "create",
+	"noteContentFormat": "{{content}}",
+	"properties": [
+		{
+			"name": "title",
+			"value": "{{title}}",
+			"type": "text"
+		},
+		{
+			"name": "author",
+			"value": "GPT",
+			"type": "multitext"
+		},
+		{
+			"name": "published",
+			"value": "{{time}}",
+			"type": "date"
+		},
+		{
+			"name": "tags",
+			"value": "{{\\\"从笔记内容中提取tags，使用 # 标记每个tag\\\"}}",
+			"type": "multitext"
+		}
+	],
+	"triggers": [
+		"https://chatgpt.com/"
+	],
+	"noteNameFormat": "{{title}}",
+	"path": "🌐网页/GPT"
+}

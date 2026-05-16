@@ -28,6 +28,7 @@ export const GENERAL_RESEARCH_TOOL_NAMES: readonly string[] = [
   'web_search',
   'web_fetch',
   'present_file',
+  'web_clip_url',
 ] as const
 
 export const GENERAL_RESEARCH_TOOLS: GeneralResearchToolDef[] = [
@@ -48,6 +49,12 @@ export const GENERAL_RESEARCH_TOOLS: GeneralResearchToolDef[] = [
     description:
       '把 outputs 目录内的文件作为附件呈现给用户。路径必须落在沙箱根 `<outputsRoot>` 之下，否则会被拒绝。',
     params: zodObjectToParamList(GENERAL_RESEARCH_SCHEMAS.present_file!) as ToolParam[],
+  },
+  {
+    name: 'web_clip_url',
+    description:
+      '把一个公共 http(s) URL 剪藏成 Obsidian-compatible Markdown 笔记，写入 `<outputsRoot>/obsidian-web-clip/...` 并自动 present_file。只能用于公开页面；登录态页面请告知用户使用 /clip-current 斜杠命令。含 LLM 占位的 preset (xhs/youtube/chatgpt/...) 在 Phase 1 会拒绝渲染，除非显式 `force_render_with_placeholders=true`。',
+    params: zodObjectToParamList(GENERAL_RESEARCH_SCHEMAS.web_clip_url!) as ToolParam[],
   },
 ]
 

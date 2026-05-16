@@ -1,0 +1,38 @@
+{
+	"schemaVersion": "0.1.0",
+	"name": "小红书",
+	"behavior": "create",
+	"noteContentFormat": "{{\"只保留{{content}}中的图片部分并记为md格式\"}}\n\n{{\"将{{description}}的内容整理为md格式\"}}\n",
+	"properties": [
+		{
+			"name": "title",
+			"value": "{{title}}",
+			"type": "text"
+		},
+		{
+			"name": "url",
+			"value": "{{url}}",
+			"type": "text"
+		},
+		{
+			"name": "author",
+			"value": "小红书",
+			"type": "multitext"
+		},
+		{
+			"name": "published",
+			"value": "{{time}}",
+			"type": "date"
+		},
+		{
+			"name": "tags",
+			"value": "{{meta:name:keywords}}",
+			"type": "multitext"
+		}
+	],
+	"triggers": [
+		"https://www.xiaohongshu.com/"
+	],
+	"noteNameFormat": "{{title}}",
+	"path": "🌐网页/小红书"
+}

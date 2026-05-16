@@ -29,6 +29,10 @@ import {
   presentFileSchema,
 } from './builtins/present-file'
 import {
+  executeWebClipUrl,
+  webClipUrlSchema,
+} from './builtins/web-clip-url'
+import {
   executeWebFetch,
   webFetchSchema,
 } from './builtins/web-fetch'
@@ -50,6 +54,8 @@ export interface GeneralResearchToolContext {
   tavilyKey?: string
   /** Optional Jina reader key for web_fetch. */
   jinaKey?: string
+  /** Embedded skill preset dir for `web_clip_url`; injected by host. */
+  obsidianWebClipPresetDir?: string
 }
 
 export async function executeGeneralResearchTool(
@@ -94,6 +100,30 @@ export async function executeGeneralResearchTool(
         abortSignal: ctx.abortSignal,
         sessionId: ctx.sessionId,
         outputsRoot: ctx.outputsRoot,
+        requestModuleToolAction: ctx.requestModuleToolAction,
+      })
+      return createToolExecutionOutput(JSON.stringify(result), {
+        data: result as unknown as Record<string, unknown>,
+      })
+    }
+    case 'web_clip_url': {
+      const parsed = webClipUrlSchema.safeParse(args)
+      if (!parsed.success) {
+        throw new ToolDomainError('input_validation', parsed.error.message)
+      }
+      if (!ctx.obsidianWebClipPresetDir) {
+        throw new ToolDomainError(
+          'clip_preset_render_failed',
+          'preset directory not configured; ensure obsidian-web-clip skill is installed',
+          { reason: 'preset_not_found' },
+        )
+      }
+      const result = await executeWebClipUrl(parsed.data, {
+        abortSignal: ctx.abortSignal,
+        sessionId: ctx.sessionId,
+        outputsRoot: ctx.outputsRoot,
+        presetDir: ctx.obsidianWebClipPresetDir,
+        jinaKey: ctx.jinaKey,
         requestModuleToolAction: ctx.requestModuleToolAction,
       })
       return createToolExecutionOutput(JSON.stringify(result), {

@@ -8,6 +8,7 @@ export type EmbeddedSkillId =
   | 'academic-paper-review'
   | 'web-design-guidelines'
   | 'find-skills'
+  | 'obsidian-web-clip'
 
 export interface EmbeddedSkillManifest {
   id: EmbeddedSkillId
@@ -79,6 +80,13 @@ export const EMBEDDED_SKILLS: EmbeddedSkillManifest[] = [
     name: 'Find Skills',
     description: '技能搜索方法论：description matching + when-to-use 反向 lookup',
     version: '2026.05.09',
+    requirementsFile: 'requirements.txt',
+  },
+  {
+    id: 'obsidian-web-clip',
+    name: 'Obsidian Web Clip',
+    description: '网页 → Obsidian-compatible Markdown 笔记的方法论 + preset 库：路由 web_clip_url（公共 URL）或 /clip-current（用户当前标签页）',
+    version: '2026.05.15',
     requirementsFile: 'requirements.txt',
   },
 ]

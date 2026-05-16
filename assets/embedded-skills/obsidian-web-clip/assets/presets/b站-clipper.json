@@ -1,0 +1,43 @@
+{
+	"schemaVersion": "0.1.0",
+	"name": "B站",
+	"behavior": "create",
+	"noteContentFormat": "<iframe src=\"https://player.bilibili.com/player.html?isOutside=true&bvid={{ meta:property:og:url | split:'video/' | last | split:'/' | first }}&p=1\" scrolling=\"no\" border=\"0\" frameborder=\"no\" framespacing=\"0\" allowfullscreen=\"true\" style=\"width:100%; height:500px;\"></iframe>",
+	"properties": [
+		{
+			"name": "title",
+			"value": "{{noteName}}",
+			"type": "text"
+		},
+		{
+			"name": "tags",
+			"value": "{{meta:name:keywords}}",
+			"type": "multitext"
+		},
+		{
+			"name": "author",
+			"value": "{{meta:name:author}}",
+			"type": "multitext"
+		},
+		{
+			"name": "published",
+			"value": "{{time}}",
+			"type": "date"
+		},
+		{
+			"name": "source",
+			"value": "{{url}}",
+			"type": "text"
+		},
+		{
+			"name": "description",
+			"value": "{{meta:name:description}}",
+			"type": "text"
+		}
+	],
+	"triggers": [
+		"https://www.bilibili.com/"
+	],
+	"noteNameFormat": "{{noteName}}",
+	"path": "🎞️视频笔记/B站"
+}
