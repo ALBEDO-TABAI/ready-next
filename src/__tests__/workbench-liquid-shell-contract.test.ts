@@ -207,7 +207,7 @@ test('Stage 2 — liquid-glass fullscreen state table entry uses under-window vi
   )
 })
 
-test('Stage 2.6 — will-enter delegates to sync(); leave-full-screen branches: liquid-glass uses rebuild, ready-glass uses sync()', () => {
+test('Stage 2.8 — leave-full-screen branches by source × skin: native+liquid uses rebuild, others use sync()', () => {
   const materialModule = readWorkspaceFile('src/main/modules/window-material/main-window-material.ts')
 
   // will-enter: 翻 flag → sync → notify (no vibrancy rebuild needed on entry)
@@ -218,18 +218,44 @@ test('Stage 2.6 — will-enter delegates to sync(); leave-full-screen branches: 
   assert.match(willEnterBody, /\bsync\(\)/)
   assert.match(willEnterBody, /notifyFullscreenChanged/)
 
-  // leave: liquid-glass 走重建路径 (setVibrancy(null) → setTimeout(50) → setVibrancy + setBackgroundColor)；
-  //        ready-glass 走标准 sync() 路径（不需要重建，因为 ready-glass bg 在 fullscreen / windowed 间不变）。
+  // leave: 必须按"触发源 × skin"分支：
+  //   native (window button / CMD+CTRL+F) + liquid-glass: vibrancy 重建路径
+  //   html (页面 requestFullscreen，比如 bilibili iframe 视频全屏) | ready-glass: 标准 sync 路径
   const leaveMatch = materialModule.match(/\.on\(['"]leave-full-screen['"][\s\S]*?\n\s*\}\)/)
   assert.ok(leaveMatch)
   const leaveBody = leaveMatch![0]
-  // 必须含 skin 分支
-  assert.match(leaveBody, /skin === 'liquid-glass'/)
-  // liquid-glass 分支必须有 setTimeout 重建路径（Stage 2.7 替换 setImmediate）
+  // 必须读 fullscreenSource 决定是否走重建
+  assert.match(leaveBody, /wasHtmlFullscreen/, 'leave handler must distinguish HTML5 vs native fullscreen source')
+  assert.match(leaveBody, /fullscreenSource === 'html'/, 'leave handler must check source==html')
+  // 重建路径仅留给 native + liquid-glass
+  assert.match(leaveBody, /skin !== 'liquid-glass'/, 'leave handler must early-return for non-liquid-glass via skin !== check')
+  // liquid-glass + native 分支必须有 setTimeout 重建路径
   assert.match(leaveBody, /setTimeout/)
-  // 两个分支都必须把 materialFullscreenState 翻成 false 并通知 renderer
+  // 所有分支都必须把 materialFullscreenState 翻成 false 并通知 renderer
   assert.match(leaveBody, /materialFullscreenState\s*=\s*false/)
   assert.match(leaveBody, /notifyFullscreenChanged/)
+})
+
+test('Stage 2.8 — webContents.enter-html-full-screen tags source so leave path can skip vibrancy rebuild', () => {
+  const materialModule = readWorkspaceFile('src/main/modules/window-material/main-window-material.ts')
+
+  // 必须有 webContents.on('enter-html-full-screen') 监听器
+  assert.match(
+    materialModule,
+    /webContents\.on\(['"]enter-html-full-screen['"]/,
+    'must subscribe to webContents enter-html-full-screen to tag source',
+  )
+
+  // 监听器 body 必须把 fullscreenSource 设为 'html'
+  const htmlEnterMatch = materialModule.match(/webContents\.on\(['"]enter-html-full-screen['"][\s\S]*?\}\)/)
+  assert.ok(htmlEnterMatch, 'enter-html-full-screen handler must exist')
+  assert.match(htmlEnterMatch![0], /fullscreenSource\s*=\s*'html'/)
+
+  // will-enter-full-screen 时如果 source 还是 null，标为 'native'（窗口按钮路径）
+  const willEnterMatch = materialModule.match(/\.on\(['"]will-enter-full-screen['"][\s\S]*?\}\)/)
+  assert.ok(willEnterMatch)
+  assert.match(willEnterMatch![0], /fullscreenSource\s*===\s*null/)
+  assert.match(willEnterMatch![0], /fullscreenSource\s*=\s*'native'/)
 })
 
 test('Stage 2 — will-leave-full-screen handler is a deliberate no-op (do not expose transparent mid-animation)', () => {

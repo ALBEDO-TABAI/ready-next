@@ -313,16 +313,26 @@ test('platform input is explicit, not read from process.platform', () => {
 function createFakeWindowWithEvents() {
   type Listener = () => void
   const listeners = new Map<string, Listener[]>()
+  // webContents 事件单独维度（enter-html-full-screen / leave-html-full-screen 走这里）
+  const wcListeners = new Map<string, Listener[]>()
   const setters: { bg: string[]; vibrancy: (string | null)[]; buttonPos: number } = {
     bg: [],
     vibrancy: [],
     buttonPos: 0,
+  }
+  const fakeWebContents = {
+    on: (event: string, cb: Listener) => {
+      const arr = wcListeners.get(event) ?? []
+      arr.push(cb)
+      wcListeners.set(event, arr)
+    },
   }
   const fakeWindow = {
     isDestroyed: () => false,
     setBackgroundColor: (c: string) => { setters.bg.push(c) },
     setVibrancy: (v: 'under-window' | null) => { setters.vibrancy.push(v) },
     setWindowButtonPosition: () => { setters.buttonPos += 1 },
+    webContents: fakeWebContents,
     on: (event: string, cb: Listener) => {
       const arr = listeners.get(event) ?? []
       arr.push(cb)
@@ -334,7 +344,12 @@ function createFakeWindowWithEvents() {
     for (const cb of listeners.get(event) ?? []) cb()
   }
 
-  return { fakeWindow, setters, listeners, emit }
+  // 触发 webContents 事件（用于模拟页面 element.requestFullscreen()）
+  function emitWebContents(event: string) {
+    for (const cb of wcListeners.get(event) ?? []) cb()
+  }
+
+  return { fakeWindow, setters, listeners, wcListeners, emit, emitWebContents }
 }
 
 // flushSetImmediate: 让 setImmediate callback 跑完
@@ -548,6 +563,7 @@ test('Stage 2 — leave-full-screen lifecycle handler bails when window destroye
     setBackgroundColor: (c: string) => { setters.bg.push(c) },
     setVibrancy: (v: 'under-window' | null) => { setters.vibrancy.push(v) },
     setWindowButtonPosition: () => undefined,
+    webContents: { on: () => undefined },
     on: (event: string, cb: Listener) => {
       const arr = listeners.get(event) ?? []
       arr.push(cb)
@@ -625,6 +641,68 @@ test('Stage 2.6 — edge case: theme toggle during fullscreen + exit (with vibra
     'vibrancy rebuild kick: null then under-window to recover from macOS vibrancy loss during fullscreen',
   )
   assert.equal(controller.isFullscreen(), false)
+})
+
+test('Stage 2.8 — HTML5 fullscreen exit (iframe video) does NOT trigger vibrancy rebuild', async () => {
+  // 用户报：在文档里 bilibili iframe 视频全屏 → 退出 → 整个 UI 深黑色无法恢复，只能重启。
+  // 根因：HTML5 fullscreen 退出后做 vibrancy null → under-window 重建会让 macOS NSVisualEffectView
+  // 静默忽略 set，留在 null 态 → bg='#00000000' 透明 + vibrancy=null = 深黑色。
+  // 修法：webContents.enter-html-full-screen 把 fullscreenSource 标为 'html'，leave 路径跳过重建走标准 sync。
+  const { fakeWindow, setters, emit, emitWebContents } = createFakeWindowWithEvents()
+  const controller = createWindowMaterialController({
+    window: fakeWindow,
+    platform: 'darwin',
+    getTheme: () => ({ skin: 'liquid-glass', resolvedTheme: 'dark' }),
+  })
+  controller.applyInitial()
+  controller.attachLifecycle()
+
+  // HTML5 fullscreen sequence: webContents.enter-html-full-screen 先触发，
+  // BrowserWindow.will-enter-full-screen 紧随其后
+  emitWebContents('enter-html-full-screen')
+  emit('will-enter-full-screen')
+  emit('enter-full-screen')
+
+  // Enter 与 native 路径一致：bg 切到 dark backing，vibrancy 不动
+  assert.equal(setters.bg.at(-1), '#282D33')
+  const vibrancyCallsBeforeLeave = setters.vibrancy.length
+
+  // 退出 HTML5 fullscreen
+  emit('will-leave-full-screen')
+  emit('leave-full-screen')
+  await flushVibrancyRebuild()
+
+  // 关键断言：HTML5 退出不能调 setVibrancy(null) —— 否则 NSVisualEffectView 失效，UI 变黑
+  assert.equal(
+    setters.vibrancy.length,
+    vibrancyCallsBeforeLeave,
+    'HTML5 fullscreen exit must NOT touch vibrancy (rebuild kick reserved for native window-button fullscreen)',
+  )
+  assert.equal(setters.bg.at(-1), '#00000000', 'bg should still revert to transparent via standard sync()')
+  assert.equal(controller.isFullscreen(), false, 'materialFullscreenState should still flip false')
+})
+
+test('Stage 2.8 — native window-button fullscreen still rebuilds vibrancy on exit', async () => {
+  // 反例确认：当 fullscreenSource === 'native'（webContents.enter-html-full-screen 没先触发），
+  // leave 路径仍走 vibrancy null → setTimeout(50) → under-window 重建踢醒（Stage 2.6/2.7 行为保留）。
+  const { fakeWindow, setters, emit } = createFakeWindowWithEvents()
+  const controller = createWindowMaterialController({
+    window: fakeWindow,
+    platform: 'darwin',
+    getTheme: () => ({ skin: 'liquid-glass', resolvedTheme: 'dark' }),
+  })
+  controller.applyInitial()
+  controller.attachLifecycle()
+
+  // 不发 webContents 事件：模拟窗口按钮 / CMD+CTRL+F 触发的原生全屏
+  emit('will-enter-full-screen')
+  emit('enter-full-screen')
+  emit('will-leave-full-screen')
+  emit('leave-full-screen')
+  await flushVibrancyRebuild()
+
+  // 完整 vibrancy 序列：applyInitial → leave 同步 null → setTimeout 'under-window'
+  assert.deepEqual(setters.vibrancy, ['under-window', null, 'under-window'])
 })
 
 test('MaterialInputs type carries platform field (testing-friendly explicit input)', () => {
