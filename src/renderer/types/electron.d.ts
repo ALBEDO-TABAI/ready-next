@@ -531,6 +531,7 @@ type SessionRecallMatchKindData =
   | 'task'
   | 'attachment'
   | 'recent'
+  | 'recent_self_lineage'
   | 'semantic'
 
 interface SessionRecallHitData {

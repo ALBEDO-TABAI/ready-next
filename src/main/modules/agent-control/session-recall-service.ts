@@ -128,10 +128,21 @@ export class SessionRecallService {
     limit?: number
   }): SessionRecallHit[] {
     const exclusionLineageRootId = this.resolveExcludedLineageRootId(params?.currentScopeId)
-    const rows = this.listRecentMetadata()
-      .filter((row) => this.matchesFilters(row, params || {}, exclusionLineageRootId))
-    const hits = rows.map((row) => this.buildHit(row, ['recent'], 20, row.preview_text))
-    return this.groupAndLimitHits(hits, params?.limit)
+    const metadata = this.listRecentMetadata()
+    const rows = metadata.filter((row) => this.matchesFilters(row, params || {}, exclusionLineageRootId))
+    if (rows.length > 0) {
+      const hits = rows.map((row) => this.buildHit(row, ['recent'], 20, row.preview_text))
+      return this.groupAndLimitHits(hits, params?.limit)
+    }
+    // Soft-exclude fallback: when the strict filter wipes everything (typical
+    // when the DB has a single lineage and the user is currently in it),
+    // retry without the lineage exclusion so the "历史对话" popover honors
+    // its "这里会先显示当前频道最近会话" promise. The keyword search path
+    // (`searchSessionRecall`) keeps the hard exclusion — users searching for
+    // an old topic shouldn't see their current scope as a hit.
+    const fallbackRows = metadata.filter((row) => this.matchesFilters(row, params || {}, null))
+    const fallbackHits = fallbackRows.map((row) => this.buildHit(row, ['recent_self_lineage'], 15, row.preview_text))
+    return this.groupAndLimitHits(fallbackHits, params?.limit)
   }
 
   getAutomaticRecallCapsules(params: {

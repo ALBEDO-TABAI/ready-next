@@ -1,4 +1,11 @@
-export type SessionRecallMatchKind = 'message' | 'title' | 'task' | 'attachment' | 'recent' | 'semantic'
+export type SessionRecallMatchKind =
+  | 'message'
+  | 'title'
+  | 'task'
+  | 'attachment'
+  | 'recent'
+  | 'recent_self_lineage'
+  | 'semantic'
 
 export interface SessionRecallHit {
   conversationId: string

@@ -939,8 +939,8 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
 
   ipcMain.handle('agent:createLocalScope', (_, payload: { agent: string; id?: string }): IPCResponse => {
     try {
-      const scope = runtime!.createLocalScope(payload.agent, payload.id)
-      log(`[ipc] agent:createLocalScope agent=${payload.agent} requestedId=${payload.id || 'auto'} actualId=${scope.id}`)
+      const { scope, mode } = runtime!.createLocalScopeWithMode(payload.agent, payload.id)
+      log(`[ipc] agent:createLocalScope agent=${payload.agent} requestedId=${payload.id || 'auto'} actualId=${scope.id} mode=${mode}`)
       return { success: true, data: scope }
     } catch (error) {
       log(`[ipc] agent:createLocalScope failed agent=${payload.agent} requestedId=${payload.id || 'auto'} error=${error instanceof Error ? error.message : String(error)}`)

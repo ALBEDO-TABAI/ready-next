@@ -19,6 +19,7 @@ import {
   type ChatConversationRecord,
   type ChatMessageRecord,
   type ConversationSourceKind,
+  type UpsertConversationScopeMode,
 } from '../database'
 import { ReadyAgentOrchestrator } from './orchestrator'
 import { PromptAssemblyService } from './prompt-assembly'
@@ -1080,8 +1081,24 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   createLocalScope(agent: string, id?: string): ConversationScope {
+    return this.createLocalScopeWithMode(agent, id).scope
+  }
+
+  /**
+   * Same as createLocalScope but exposes whether the underlying upsert
+   * inserted a new chat_conversations row or reused an existing one
+   * (matched either by id or by the unique (source_kind, source_id,
+   * thread_key, agent) tuple).
+   *
+   * The IPC handler uses this to log mode; renderer callers stay on the
+   * legacy scope-only signature.
+   */
+  createLocalScopeWithMode(
+    agent: string,
+    id?: string,
+  ): { scope: ConversationScope; mode: UpsertConversationScopeMode } {
     const scopeId = typeof id === 'string' && id.trim() ? id.trim() : `conv-${randomUUID()}`
-    const row = this.db.upsertConversationScope({
+    const { row, mode } = this.db.upsertConversationScope({
       id: scopeId,
       agent,
       title: '新对话',
@@ -1091,8 +1108,9 @@ export class AgentControlRuntime extends EventEmitter {
       meta: { sourceLabel: '应用内', createdBy: 'app' }
     })
     const scope = this.mapConversationRow(row)
+    logAgentMetric('local_scope_upsert', { scopeId: scope.id, agent, mode })
     this.emitConversationEvent({ type: 'scope_created', scope })
-    return scope
+    return { scope, mode }
   }
 
   async sendScoped(payload: {
@@ -1963,7 +1981,7 @@ export class AgentControlRuntime extends EventEmitter {
     const channel = this.db.getAgentChannel(channelId)
     const channelMeta = channel ? this.mapChannelRow(channel) : null
     const existing = this.db.findConversationScope('channel', channelId, remoteThread, agent)
-    const row = this.db.upsertConversationScope({
+    const { row } = this.db.upsertConversationScope({
       id: existing?.id || `conv-${randomUUID()}`,
       agent,
       title: existing?.title || sender || channelMeta?.name || '远程会话',

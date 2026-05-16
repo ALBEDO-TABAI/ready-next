@@ -151,7 +151,6 @@ export interface CalendarEvent {
   all_day: number
   recurrence_rule: string | null
   reminders: string | null
-  agent_action: string | null
   created_at: number
   updated_at: number
 }
@@ -283,6 +282,13 @@ export interface ChatConversationRecord {
   meta_json: string | null
   created_at: string
   updated_at: string
+}
+
+export type UpsertConversationScopeMode = 'inserted' | 'reused'
+
+export interface UpsertConversationScopeResult {
+  row: ChatConversationRecord
+  mode: UpsertConversationScopeMode
 }
 
 export interface ChatMessageRecord {
@@ -1499,12 +1505,13 @@ export class DatabaseManager {
     sourceId: string
     threadKey: string
     meta?: Record<string, unknown>
-  }): ChatConversationRecord {
+  }): UpsertConversationScopeResult {
     if (!this.db) throw new Error('Database not available')
     const now = new Date().toISOString()
     const existing =
       this.getConversationScope(payload.id) ||
       this.findConversationScope(payload.sourceKind, payload.sourceId, payload.threadKey, payload.agent)
+    const mode: UpsertConversationScopeMode = existing ? 'reused' : 'inserted'
     const id = existing?.id || payload.id
     const metaJson = JSON.stringify(payload.meta || {})
     this.db.prepare(
@@ -1540,7 +1547,7 @@ export class DatabaseManager {
       now,
     )
     this.syncConversationRecallMetadata(id)
-    return this.getConversationScope(id)!
+    return { row: this.getConversationScope(id)!, mode }
   }
 
   listConversationScopes(

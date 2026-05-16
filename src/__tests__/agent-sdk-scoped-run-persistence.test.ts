@@ -189,7 +189,7 @@ test('SDK scoped run persists user message, assistant snapshot, scope run, and t
         sourceId: 'app',
         threadKey: id,
         meta: {},
-      }),
+      }).row,
       persistUserMessage: (scopeRow, userMessage) => {
         db!.addChatMessage(
           userMessage.id,

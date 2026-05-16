@@ -305,6 +305,68 @@ test('SessionRecallService returns grouped recent sessions and builds recall cap
   assert.deepEqual(capsule?.attachmentNames, ['brand-board.pdf'])
 })
 
+test('SessionRecallService listRecentSessions falls back to soft-exclude when current lineage is the only one', () => {
+  // Regression for "历史对话" popover showing empty when DB has a single conv
+  // and the user is currently in it. The strict lineage exclusion in
+  // matchesFilters filtered the only metadata row out → popover空无一物.
+  // listRecentSessions should retry without the lineage exclusion in that
+  // case and surface the row with matchedBy=['recent_self_lineage'].
+  const conversations = [
+    createConversation({ id: 'conv-solo', title: '唯一会话', lineageRootId: 'conv-solo', resumeTitle: '唯一会话' }),
+  ]
+  const metadata = [
+    createMetadata({
+      conversation_id: 'conv-solo',
+      title: '唯一会话',
+      lineage_root_id: 'conv-solo',
+      resume_title: '唯一会话',
+      preview_text: '只有这一条历史，且用户正在它里面。',
+      updated_at: '2026-04-12T13:00:00.000Z',
+    }),
+  ]
+  const db = new FakeSessionRecallDb(conversations, metadata, [], [])
+  const service = new SessionRecallService(db)
+
+  const recent = service.listRecentSessions({ currentScopeId: 'conv-solo', limit: 10 })
+  assert.equal(recent.length, 1)
+  assert.equal(recent[0]?.conversationId, 'conv-solo')
+  assert.deepEqual(recent[0]?.matchedBy, ['recent_self_lineage'])
+})
+
+test('SessionRecallService listRecentSessions keeps hard-excluding current lineage when others exist', () => {
+  // When other lineages are available, the lineage exclusion still applies —
+  // soft-exclude is only the empty-result fallback.
+  const conversations = [
+    createConversation({ id: 'conv-current', title: '正在用', lineageRootId: 'conv-current', resumeTitle: '正在用' }),
+    createConversation({ id: 'conv-other', title: '另一条', lineageRootId: 'conv-other', resumeTitle: '另一条' }),
+  ]
+  const metadata = [
+    createMetadata({
+      conversation_id: 'conv-current',
+      title: '正在用',
+      lineage_root_id: 'conv-current',
+      resume_title: '正在用',
+      preview_text: '当前 scope，不应进入 recent 列表。',
+      updated_at: '2026-04-12T14:00:00.000Z',
+    }),
+    createMetadata({
+      conversation_id: 'conv-other',
+      title: '另一条',
+      lineage_root_id: 'conv-other',
+      resume_title: '另一条',
+      preview_text: '另一条历史，应进入 recent 列表。',
+      updated_at: '2026-04-12T13:00:00.000Z',
+    }),
+  ]
+  const db = new FakeSessionRecallDb(conversations, metadata, [], [])
+  const service = new SessionRecallService(db)
+
+  const recent = service.listRecentSessions({ currentScopeId: 'conv-current', limit: 10 })
+  assert.equal(recent.length, 1)
+  assert.equal(recent[0]?.conversationId, 'conv-other')
+  assert.deepEqual(recent[0]?.matchedBy, ['recent'])
+})
+
 test('SessionRecallService can attach, list, detach, and resume recall contexts', () => {
   const conversations = [
     createConversation({ id: 'scope-current', title: '当前会话', lineageRootId: 'scope-current', resumeTitle: '当前会话' }),
