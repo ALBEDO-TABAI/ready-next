@@ -169,10 +169,13 @@ test('验证 2 (2026-05-16) — controller never calls setBackgroundColor/setVib
   assert.doesNotMatch(lifecycleBody, /setImmediate/, 'lifecycle handlers must not use setImmediate')
   assert.doesNotMatch(lifecycleBody, /process\.nextTick/, 'lifecycle handlers must not use process.nextTick')
 
-  // 也不能 enter-html-full-screen / fullscreenSource / wasHtmlFullscreen 残留
+  // Stage 2.8 的 source-tracking 状态 (`fullscreenSource` / `wasHtmlFullscreen`) 已永久退役
   assert.doesNotMatch(codeOnly, /fullscreenSource/, 'fullscreenSource state retired (validation 2)')
   assert.doesNotMatch(codeOnly, /wasHtmlFullscreen/, 'wasHtmlFullscreen retired (validation 2)')
-  assert.doesNotMatch(codeOnly, /enter-html-full-screen/, 'no HTML5 fullscreen subscription needed (validation 2)')
+  // 注：webContents.on('enter-html-full-screen') / leave-html-full-screen 在验证 3 重新登场作为
+  // OOPIF 路径的 IPC 兜底源（参见单独的"webContents enter/leave-html-full-screen handlers" 测试）。
+  // 它们的存在不影响"lifecycle handler 不动 bg/vibrancy"的合同——因为它们也只调
+  // notifyFullscreenChanged，不调任何 setter。
 })
 
 test('验证 2 — computeMaterial darwin branch returns frozen {transparent, under-window} only', () => {
@@ -208,13 +211,32 @@ test('验证 2 — lifecycle handler shape: flag flip + IPC only, no sync()', ()
   assert.match(willEnterBody, /notifyFullscreenChanged\?\.\(true\)/)
 
   // leave: 翻 flag + 通知，单一分支，无 skin/source 判断
-  const leaveMatch = materialModule.match(/\.on\(['"]leave-full-screen['"][\s\S]*?\n\s*\}\)/)
+  const leaveMatch = materialModule.match(/window\.on\(['"]leave-full-screen['"][\s\S]*?\n\s*\}\)/)
   assert.ok(leaveMatch)
   const leaveBody = leaveMatch![0]
   assert.match(leaveBody, /materialFullscreenState\s*=\s*false/)
   assert.match(leaveBody, /notifyFullscreenChanged\?\.\(false\)/)
   assert.doesNotMatch(leaveBody, /skin\s*===\s*'liquid-glass'/, 'no skin branching')
   assert.doesNotMatch(leaveBody, /skin\s*!==\s*'liquid-glass'/, 'no skin branching')
+})
+
+test('验证 3 — webContents enter/leave-html-full-screen handlers provide OOPIF fallback IPC', () => {
+  const materialModule = readWorkspaceFile('src/main/modules/window-material/main-window-material.ts')
+
+  // OOPIF (cross-origin iframe) 路径下 BrowserWindow.leave-full-screen 不可靠 fire——
+  // webContents-level html-fullscreen 事件是 Chromium 统一出口，作为兜底。
+  // 必须查 window.isFullScreen() 而不是硬编码 true/false，正确处理 CMD+CTRL+F 嵌套 iframe 的边界 case。
+  const enterHtmlMatch = materialModule.match(/webContents\.on\(['"]enter-html-full-screen['"][\s\S]*?\}\)/)
+  assert.ok(enterHtmlMatch, 'enter-html-full-screen webContents handler must exist (OOPIF fallback)')
+  const enterHtmlBody = enterHtmlMatch![0]
+  assert.match(enterHtmlBody, /window\.isFullScreen\(\)/, 'enter-html handler must query window.isFullScreen() for authoritative state')
+  assert.match(enterHtmlBody, /notifyFullscreenChanged/, 'enter-html handler must push IPC')
+
+  const leaveHtmlMatch = materialModule.match(/webContents\.on\(['"]leave-html-full-screen['"][\s\S]*?\}\)/)
+  assert.ok(leaveHtmlMatch, 'leave-html-full-screen webContents handler must exist (OOPIF fallback)')
+  const leaveHtmlBody = leaveHtmlMatch![0]
+  assert.match(leaveHtmlBody, /window\.isFullScreen\(\)/, 'leave-html handler must query window.isFullScreen() for authoritative state')
+  assert.match(leaveHtmlBody, /notifyFullscreenChanged/, 'leave-html handler must push IPC')
 })
 
 test('Stage 2 — will-leave-full-screen handler is a deliberate no-op (do not expose transparent mid-animation)', () => {

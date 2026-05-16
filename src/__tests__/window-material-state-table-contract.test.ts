@@ -268,16 +268,29 @@ test('platform input is explicit, not read from process.platform', () => {
 function createFakeWindowWithEvents() {
   type Listener = () => void
   const listeners = new Map<string, Listener[]>()
+  const wcListeners = new Map<string, Listener[]>()
   const setters: { bg: string[]; vibrancy: (string | null)[]; buttonPos: number } = {
     bg: [],
     vibrancy: [],
     buttonPos: 0,
   }
+  // 验证 3：controller 在 webContents 上挂 enter/leave-html-full-screen handler 作为 OOPIF 兜底；
+  // 模拟 webContents.on 接 wcListeners，让测试能直接 emit 这两个事件。
+  // window.isFullScreen() 由测试通过 setIsFullScreen 控制返回值。
+  let isFullScreenValue = false
   const fakeWindow = {
     isDestroyed: () => false,
+    isFullScreen: () => isFullScreenValue,
     setBackgroundColor: (c: string) => { setters.bg.push(c) },
     setVibrancy: (v: 'under-window' | null) => { setters.vibrancy.push(v) },
     setWindowButtonPosition: () => { setters.buttonPos += 1 },
+    webContents: {
+      on: (event: string, cb: Listener) => {
+        const arr = wcListeners.get(event) ?? []
+        arr.push(cb)
+        wcListeners.set(event, arr)
+      },
+    },
     on: (event: string, cb: Listener) => {
       const arr = listeners.get(event) ?? []
       arr.push(cb)
@@ -289,7 +302,15 @@ function createFakeWindowWithEvents() {
     for (const cb of listeners.get(event) ?? []) cb()
   }
 
-  return { fakeWindow, setters, listeners, emit }
+  function emitWebContents(event: string) {
+    for (const cb of wcListeners.get(event) ?? []) cb()
+  }
+
+  function setIsFullScreen(value: boolean) {
+    isFullScreenValue = value
+  }
+
+  return { fakeWindow, setters, listeners, wcListeners, emit, emitWebContents, setIsFullScreen }
 }
 
 test('Stage 2 — attachLifecycle attaches 4 fullscreen handlers on darwin', () => {
@@ -407,9 +428,11 @@ test('验证 2 — leave-full-screen lifecycle handler bails when window destroy
   let fullscreenNotifications: boolean[] = []
   const fakeWindow = {
     isDestroyed: () => isDestroyed,
+    isFullScreen: () => false,
     setBackgroundColor: (c: string) => { setters.bg.push(c) },
     setVibrancy: (v: 'under-window' | null) => { setters.vibrancy.push(v) },
     setWindowButtonPosition: () => undefined,
+    webContents: { on: () => undefined },
     on: (event: string, cb: Listener) => {
       const arr = listeners.get(event) ?? []
       arr.push(cb)
@@ -458,6 +481,49 @@ test('验证 2 — full entry+exit cycle on darwin: zero setter calls after appl
   // applyInitial 设的初值是稳定值
   assert.deepEqual(bgAfterInit, ['#00000000'])
   assert.deepEqual(vibrancyAfterInit, ['under-window'])
+})
+
+test('验证 3 — webContents.leave-html-full-screen fallback IPC pushes window.isFullScreen() reality', () => {
+  // OOPIF iframe（B 站 iframe 视频）退出 fullscreen 时 BrowserWindow.leave-full-screen 可能不 fire，
+  // webContents.leave-html-full-screen 兜底。它必须用 window.isFullScreen() 真实查询值推 IPC，
+  // 而不是硬编码——这样能正确处理"用户先 CMD+CTRL+F + 然后 iframe 全屏 + 退 iframe 但仍 native fullscreen"
+  // 的嵌套边界 case：退出 html-fullscreen 时 isFullScreen() 仍 true → IPC 推 true → renderer 保留 attr。
+  const { fakeWindow, emitWebContents, setIsFullScreen } = createFakeWindowWithEvents()
+  let fullscreenNotifications: boolean[] = []
+  const controller = createWindowMaterialController({
+    window: fakeWindow,
+    platform: 'darwin',
+    getTheme: () => ({ skin: 'liquid-glass', resolvedTheme: 'dark' }),
+    notifyFullscreenChanged: (isFullscreen) => fullscreenNotifications.push(isFullscreen),
+  })
+  controller.applyInitial()
+  controller.attachLifecycle()
+
+  // 场景 A：iframe 触发的 fullscreen，BrowserWindow 真的进了 native fullscreen，退出时 isFullScreen()=false
+  setIsFullScreen(true)
+  fullscreenNotifications = []
+  emitWebContents('enter-html-full-screen')
+  assert.deepEqual(fullscreenNotifications, [true], 'enter-html should push true when window.isFullScreen() is true')
+  assert.equal(controller.isFullscreen(), true)
+
+  setIsFullScreen(false) // 模拟 BrowserWindow 已退出 native fullscreen 但 leave-full-screen 没 fire
+  fullscreenNotifications = []
+  emitWebContents('leave-html-full-screen')
+  assert.deepEqual(fullscreenNotifications, [false], 'leave-html must push false when window.isFullScreen() is false (the bug case)')
+  assert.equal(controller.isFullscreen(), false, 'materialFullscreenState must sync to authoritative isFullScreen()')
+
+  // 场景 B：CMD+CTRL+F 嵌套 iframe 全屏，退 iframe 时 window 仍 native fullscreen
+  setIsFullScreen(true)
+  fullscreenNotifications = []
+  emitWebContents('enter-html-full-screen') // iframe 进 html-fullscreen，window 已在 native fullscreen
+  assert.deepEqual(fullscreenNotifications, [true])
+
+  // 退 iframe 但 native 还在
+  // isFullScreen 仍 true（用户仍在 CMD+CTRL+F native fullscreen）
+  fullscreenNotifications = []
+  emitWebContents('leave-html-full-screen')
+  assert.deepEqual(fullscreenNotifications, [true], 'nested case: leave-html should push true when native fullscreen still active')
+  assert.equal(controller.isFullscreen(), true, 'native fullscreen flag preserved across iframe-only exit')
 })
 
 test('验证 2 — theme/skin sync() on darwin is a no-op (target equals applyInitial values)', () => {

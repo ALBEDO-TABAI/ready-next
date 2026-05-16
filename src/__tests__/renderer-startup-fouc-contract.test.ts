@@ -84,7 +84,7 @@ test('验证 3 — reconcileStartupTheme guards data-native-fullscreen against H
   )
 })
 
-test('验证 3 — App.tsx subscribes to fullscreenchange + IPC, OR-NOT reconciles data-native-fullscreen', () => {
+test('验证 3 — App.tsx subscribes to fullscreenchange + IPC, AND-NOT reconciles data-native-fullscreen', () => {
   const appTsx = readWorkspaceFile('src/renderer/App.tsx')
 
   // 关键：renderer 必须独立侦测 HTML5 fullscreen 状态（OOPIF 路径下 BrowserWindow.leave-full-screen
@@ -100,13 +100,13 @@ test('验证 3 — App.tsx subscribes to fullscreenchange + IPC, OR-NOT reconcil
     /removeEventListener\(['"]fullscreenchange['"]/,
     'fullscreenchange listener must be cleaned up on unmount',
   )
-  // 必须同时订阅 IPC（原生窗口全屏信号）
+  // 必须同时订阅 IPC（authoritative 的 native fullscreen 状态）
   assert.match(appTsx, /onFullscreenChanged/, 'App.tsx must still subscribe to native fullscreen IPC')
   // 两个信号必须 AND-NOT 出 data-native-fullscreen
   assert.match(
     appTsx,
-    /nativeWindowFullscreen\s*&&\s*!htmlFullscreenActive|!htmlFullscreenActive\s*&&\s*nativeWindowFullscreen/,
-    'data-native-fullscreen must be (nativeWindowFullscreen && !htmlFullscreenActive)',
+    /nativeWindowFullscreenFromIPC\s*&&\s*!htmlFullscreenActive|!htmlFullscreenActive\s*&&\s*nativeWindowFullscreenFromIPC/,
+    'data-native-fullscreen must be (nativeWindowFullscreenFromIPC && !htmlFullscreenActive) — IPC is authoritative for native state, fullscreenchange for HTML5 state',
   )
 })
 

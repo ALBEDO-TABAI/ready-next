@@ -205,7 +205,7 @@ export function createWindowMaterialController(options: WindowMaterialController
       on(event: 'will-enter-full-screen' | 'will-leave-full-screen', listener: () => void): BrowserWindow
     }
 
-    // **验证 2 架构**：4 个 handler 只翻内部 flag + 调 notifyFullscreenChanged 推 IPC。
+    // **验证 2 架构**：4 个 BrowserWindow handler 只翻内部 flag + 调 notifyFullscreenChanged 推 IPC。
     // 不调 sync()，因为 darwin 上 computeMaterial 永远返回相同稳定值——调了也是 no-op
     // （applyMaterial diff 看 bg/vibrancy 没变）。renderer 收到 IPC 后写
     // `data-native-fullscreen` attr，让 CSS 决定 `.ready-app-bg` 是否承担 fullscreen backing
@@ -228,6 +228,28 @@ export function createWindowMaterialController(options: WindowMaterialController
       if (window.isDestroyed()) return
       materialFullscreenState = false
       notifyFullscreenChanged?.(false)
+    })
+
+    // **验证 3 加固**：BrowserWindow.leave-full-screen 在 OOPIF（cross-origin iframe）路径下不可靠 fire。
+    // webContents-level 的 enter/leave-html-full-screen 是 Chromium 内部 fullscreen 状态机的统一出口，
+    // 对 OOPIF 路径更可靠。这两个 handler 作为兜底，确保即使 BrowserWindow 事件不触发，
+    // renderer 也能收到 fullscreen 状态 IPC。
+    //
+    // 关键：传给 notifyFullscreenChanged 的是 `window.isFullScreen()` 真实查询值，而不是硬编码 true/false。
+    // 这样能正确处理"CMD+CTRL+F 嵌套 iframe 全屏"边界 case：用户已在 native fullscreen 内点 iframe 视频全屏，
+    // 然后退 iframe 全屏，window.isFullScreen() 仍 true → 不能错误地把 native fullscreen flag 也清掉。
+    window.webContents.on('enter-html-full-screen', () => {
+      if (window.isDestroyed()) return
+      const stillFullscreen = window.isFullScreen()
+      materialFullscreenState = stillFullscreen
+      notifyFullscreenChanged?.(stillFullscreen)
+    })
+
+    window.webContents.on('leave-html-full-screen', () => {
+      if (window.isDestroyed()) return
+      const stillFullscreen = window.isFullScreen()
+      materialFullscreenState = stillFullscreen
+      notifyFullscreenChanged?.(stillFullscreen)
     })
   }
 
