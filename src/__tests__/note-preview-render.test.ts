@@ -115,3 +115,33 @@ test('ebook reading CSS covers body text and non-indented block elements', async
   const paragraphRule = css.match(/\.note-preview-shell--ebook \.note-preview-markdown-p\s*\{[^}]+\}/)?.[0] || ''
   assert.doesNotMatch(paragraphRule, /text-indent/)
 })
+
+test('NotePreview renders b 站 player iframe as a real iframe (not raw HTML)', () => {
+  const markdown = [
+    '---',
+    'title: "面包科普"',
+    'source: "https://www.bilibili.com/video/BV1Uu5k6TETr/"',
+    '---',
+    '',
+    '<iframe src="https://player.bilibili.com/player.html?isOutside=true&bvid=BV1Uu5k6TETr&p=1" scrolling="no" border="0" frameborder="no" framespacing="0" allowfullscreen="true" style="width:100%; height:500px;"></iframe>',
+    '',
+  ].join('\n')
+
+  const html = renderToStaticMarkup(
+    React.createElement(NotePreview, {
+      content: markdown,
+      notePath: '/tmp/bilibili.md',
+    }),
+  )
+
+  // A real <iframe> mounted with the player URL — this is what produces the
+  // playable card. The previous behavior dropped the iframe entirely (raw
+  // HTML gets sanitized out of markdown).
+  assert.match(html, /<iframe[^>]+src="https:\/\/player\.bilibili\.com\/player\.html[^"]+bvid=BV1Uu5k6TETr/)
+  // The iframe reuses the YouTube card frame styling.
+  assert.match(html, /class="note-preview-youtube-iframe"/)
+  // Phantom metadata keys (height / src) must NOT appear in the rendered
+  // property table — the inline style attribute previously leaked them.
+  assert.doesNotMatch(html, /<dt[^>]*>\s*height\s*<\/dt>/i)
+  assert.doesNotMatch(html, /\sheight:\s*500px;"><\/iframe>/)
+})

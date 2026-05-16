@@ -22,7 +22,7 @@ export interface PreviewProperty {
 
 export interface PreviewEmbed {
   id: string
-  kind: 'youtube' | 'image' | 'video'
+  kind: 'youtube' | 'bilibili' | 'image' | 'video'
   source: 'metadata' | 'body'
   url: string
   displayUrl: string
@@ -301,6 +301,14 @@ function stringifyScalar(value: unknown): string {
 }
 
 function parseChainedMetadataLine(line: string): Array<{ key: string; value: string }> {
+  // Header-metadata heuristic is line-oriented: a plain `key: value [key: value]*`
+  // line right after frontmatter is treated as additional metadata. We must NOT
+  // apply this to lines that are clearly markup / inline HTML — e.g. a B 站 /
+  // YouTube embed `<iframe src="..." style="width:100%; height:500px;"></iframe>`
+  // would otherwise donate spurious `src` / `height` keys into the properties
+  // table. Reject any line containing HTML angle brackets so embedded media,
+  // self-closing tags and span markup never leak into metadata.
+  if (line.includes('<') || line.includes('>')) return []
   const matches: Array<{ key: string; start: number; end: number }> = []
   PROPERTY_TOKEN_PATTERN.lastIndex = 0
 
@@ -599,6 +607,36 @@ function resolveReference(reference: string, notePath: string | null | undefined
   }
 }
 
+/**
+ * Recognize a B 站 (Bilibili) player iframe embedded in markdown body:
+ *   `<iframe src="https://player.bilibili.com/player.html?...bvid=BV...">...</iframe>`
+ * The obsidian-web-clip `b站-clipper.json` preset writes exactly this. We
+ * trust this specific origin (`player.bilibili.com/player.html`) because it
+ * is the official embed endpoint and serves the same content the linked URL
+ * does. Returns the BV id + the safe player URL, or null.
+ */
+function extractBilibiliEmbed(line: string): { bvid: string; embedUrl: string; pageUrl: string } | null {
+  const trimmed = line.trim()
+  // Anchored: the iframe must constitute the entire (trimmed) line so we
+  // don't accidentally consume prose that happens to contain an iframe.
+  const iframeMatch = trimmed.match(/^<iframe\b[^>]*\bsrc\s*=\s*["']([^"']+)["'][^>]*>\s*<\/iframe>$/i)
+  if (!iframeMatch) return null
+  const src = iframeMatch[1]
+  // Whitelist: only the official Bilibili player endpoint is safe to mount
+  // as a renderer iframe. Anything else falls through (markdown body keeps
+  // the raw iframe text; the markdown renderer's sanitize step will strip
+  // it into nothing visible — acceptable, as widening the trust list
+  // requires a deliberate review).
+  if (!/^https?:\/\/player\.bilibili\.com\/player\.html\b/i.test(src)) return null
+  const bvidMatch = src.match(/[?&]bvid=(BV[A-Za-z0-9]+)/)
+  if (!bvidMatch) return null
+  return {
+    bvid: bvidMatch[1],
+    embedUrl: src,
+    pageUrl: `https://www.bilibili.com/video/${bvidMatch[1]}/`,
+  }
+}
+
 function extractYouTubeVideoId(url: string): string | null {
   const trimmed = stripWrappingQuotes(url)
   const matchers = [
@@ -834,7 +872,7 @@ function buildMetadataEmbed(metadata: MetadataMap, notePath: string | null | und
 }
 
 function buildBodyEmbed(
-  kind: 'youtube' | 'image' | 'video',
+  kind: PreviewEmbed['kind'],
   reference: string,
   notePath: string | null | undefined,
   options: Partial<PreviewEmbed> = {},
@@ -876,6 +914,14 @@ function parseStandaloneEmbedLine(
 ): PreviewEmbed | null {
   const trimmed = line.trim()
   if (!trimmed) return null
+
+  const bilibili = extractBilibiliEmbed(trimmed)
+  if (bilibili) {
+    return buildBodyEmbed('bilibili', bilibili.pageUrl, notePath, {
+      videoId: bilibili.bvid,
+      embedUrl: bilibili.embedUrl,
+    })
+  }
 
   const markdownImage = trimmed.match(/^!\[([^\]]*)\]\(([^)]+)\)$/)
   if (markdownImage) {

@@ -207,6 +207,57 @@ function YouTubeCard({
   )
 }
 
+function BilibiliCard({
+  embed,
+  onOpen,
+}: {
+  embed: PreviewEmbed
+  onOpen: (href: string, localPath?: string | null) => void
+}) {
+  // Reuses the YouTube card frame because the visual contract is identical
+  // (16:9 iframe + open-in-browser fallback). The trust origin is checked
+  // upstream in `extractBilibiliEmbed` — we only mount embedUrl that came
+  // from a `player.bilibili.com/player.html?...` source.
+  return (
+    <div className="note-preview-youtube-card">
+      <div className="note-preview-youtube-thumb-shell">
+        {embed.embedUrl ? (
+          <iframe
+            src={embed.embedUrl}
+            title={embed.title || `Bilibili video ${embed.videoId || ''}`}
+            className="note-preview-youtube-iframe"
+            loading="lazy"
+            referrerPolicy="strict-origin-when-cross-origin"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowFullScreen
+          />
+        ) : (
+          <button
+            type="button"
+            className="note-preview-youtube-fallback"
+            onClick={() => onOpen(embed.url, embed.localPath)}
+            title={embed.title || embed.displayUrl}
+          >
+            Bilibili
+          </button>
+        )}
+      </div>
+      <div className="note-preview-youtube-meta">
+        <button
+          type="button"
+          className="note-preview-youtube-title-button"
+          onClick={() => onOpen(embed.url, embed.localPath)}
+        >
+          <span className="note-preview-youtube-title">
+            {embed.title || embed.videoId || '哔哩哔哩视频'}
+          </span>
+          <ExternalLink style={{ width: 13, height: 13 }} strokeWidth={2} />
+        </button>
+      </div>
+    </div>
+  )
+}
+
 function MediaEmbed({
   embed,
   onOpen,
@@ -216,6 +267,10 @@ function MediaEmbed({
 }) {
   if (embed.kind === 'youtube') {
     return <YouTubeCard embed={embed} onOpen={onOpen} />
+  }
+
+  if (embed.kind === 'bilibili') {
+    return <BilibiliCard embed={embed} onOpen={onOpen} />
   }
 
   if (embed.kind === 'video') {

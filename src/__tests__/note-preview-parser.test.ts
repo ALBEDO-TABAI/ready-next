@@ -129,3 +129,75 @@ Body text.
     assert.deepEqual(preview.tags.map((tag) => tag.label), ['#奥术'])
   })
 })
+
+describe('buildStructuredNotePreview · bilibili iframe + metadata-leak fix', () => {
+  it('renders b 站 player iframe as a `bilibili` embed (not raw HTML)', () => {
+    const md = [
+      '---',
+      'title: "面包科普"',
+      'source: "https://www.bilibili.com/video/BV1Uu5k6TETr/"',
+      '---',
+      '',
+      '<iframe src="https://player.bilibili.com/player.html?isOutside=true&bvid=BV1Uu5k6TETr&p=1" scrolling="no" border="0" frameborder="no" framespacing="0" allowfullscreen="true" style="width:100%; height:500px;"></iframe>',
+      '',
+    ].join('\n')
+    const out = buildStructuredNotePreview(md)
+    const bilibili = out.embeds.find((e) => e.kind === 'bilibili')
+    assert.ok(bilibili, 'bilibili embed should be detected')
+    assert.equal(bilibili!.videoId, 'BV1Uu5k6TETr')
+    assert.match(bilibili!.embedUrl || '', /^https:\/\/player\.bilibili\.com\/player\.html\?/)
+    // No markdown block should still contain the raw iframe tag — it must be
+    // consumed by the embed pipeline.
+    const markdownBlocks = out.blocks.filter((b) => b.type === 'markdown')
+    for (const block of markdownBlocks) {
+      assert.equal(
+        (block as { markdown: string }).markdown.includes('<iframe'),
+        false,
+        'iframe must not leak into a markdown block',
+      )
+    }
+  })
+
+  it('inline iframe attributes do NOT donate spurious metadata keys (height / src)', () => {
+    // Regression: the chained-metadata heuristic used to scan ALL header
+    // lines for `key: value` tokens. An inline `<iframe ... style="width:100%;
+    // height:500px;"></iframe>` would inject a phantom `height` property,
+    // which is what users saw in the b 站 preview (a "height: 500px;"></iframe>"
+    // row in the frontmatter table).
+    const md = [
+      '---',
+      'title: "演示"',
+      'source: "https://www.bilibili.com/video/BV1XX1XXXXX1/"',
+      '---',
+      '',
+      '<iframe src="https://player.bilibili.com/player.html?bvid=BV1XX1XXXXX1" style="width:100%; height:500px;"></iframe>',
+      '',
+    ].join('\n')
+    const out = buildStructuredNotePreview(md)
+    const keys = out.properties.map((p) => p.key.toLowerCase())
+    assert.equal(keys.includes('height'), false, `height must not appear in metadata, got: ${keys.join(', ')}`)
+    assert.equal(keys.includes('src'), false, `src must not appear in metadata, got: ${keys.join(', ')}`)
+    assert.equal(keys.includes('style'), false, `style must not appear in metadata, got: ${keys.join(', ')}`)
+    // The legitimate `source` from frontmatter is still preserved.
+    assert.ok(keys.includes('source'), 'source from frontmatter should survive')
+    assert.ok(keys.includes('title'), 'title from frontmatter should survive')
+  })
+
+  it('rejects iframe with non-whitelisted src (only player.bilibili.com is trusted)', () => {
+    const md = [
+      '<iframe src="https://evil.example.com/player.html?bvid=BV1XX1XXXXX1" style="width:100%; height:500px;"></iframe>',
+    ].join('\n')
+    const out = buildStructuredNotePreview(md)
+    const bilibili = out.embeds.find((e) => e.kind === 'bilibili')
+    assert.equal(bilibili, undefined, 'untrusted iframe src must not produce a bilibili embed')
+  })
+
+  it('rejects iframe without bvid query parameter', () => {
+    const md = [
+      '<iframe src="https://player.bilibili.com/player.html?aid=123456" style="width:100%; height:500px;"></iframe>',
+    ].join('\n')
+    const out = buildStructuredNotePreview(md)
+    const bilibili = out.embeds.find((e) => e.kind === 'bilibili')
+    assert.equal(bilibili, undefined, 'iframe without bvid must not become a bilibili embed')
+  })
+})
