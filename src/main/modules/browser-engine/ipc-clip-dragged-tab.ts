@@ -42,6 +42,7 @@ import {
   type ClipDraggedTabRunnerDeps,
 } from '../clipping/clip-dragged-tab-runner'
 import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
+import { ExternalServiceStore } from '../settings-engine/external-service-store'
 
 export type {
   ClipDraggedTabAck,
@@ -53,10 +54,14 @@ export type {
 } from '../clipping/clip-dragged-tab-runner'
 
 export function buildDefaultDeps(): ClipDraggedTabRunnerDeps {
+  const externalServices = new ExternalServiceStore()
   return {
     getRuntimeInfo: () => getSkillsRuntimeManager().getRuntimeInfo(),
     fetchHtml: fetchClipHtml,
-    fetchJina: fetchJinaMarkdown,
+    fetchJina: (url, key, signal) => {
+      const config = externalServices.getGeneralResearchConfig()
+      return fetchJinaMarkdown(url, key || config.jinaKey, signal, config.jinaBaseUrl)
+    },
     runPipeline: runClipPipeline,
     generateTaskId: () => `clip-${Date.now()}-${randomUUID().slice(0, 8)}`,
     materializeToTargetDir: async (sandboxMdPath, targetDir, options) => {

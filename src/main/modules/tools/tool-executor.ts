@@ -64,7 +64,7 @@ import {
   normalizeAllowedToolSet,
 } from './tool-not-allowed-message'
 import { STATIC_SKILL_ACTIONS_BY_TOOL_NAME } from './skills-tools-static'
-import { AppSettingsRepository } from '../repositories/app-settings-repository'
+import { ExternalServiceStore } from '../settings-engine/external-service-store'
 
 export interface ToolContext {
   browserController?: BrowserController | null
@@ -349,16 +349,47 @@ export async function executeToolCall(
           // do not leak SkillsRuntimeManager handles into ToolContext;
           // child-runner / model invokers all converge here.
           const runtimeInfo = getSkillsRuntimeManager().getRuntimeInfo()
-          // Stage R W1.1/W1.2 follow-up (B1 fix): plumb Tavily/Jina API keys
-          // from settings. Without this the keys were always undefined and
-          // both Tavily search + Tavily Extract fallback were `not_attempted`.
-          // Settings keys: `web_search_tavily_key`, `web_fetch_jina_key`.
-          let tavilyKey: string | undefined
-          let jinaKey: string | undefined
+          let serviceConfig: ReturnType<ExternalServiceStore['getGeneralResearchConfig']> = {
+            ddgEnabled: true,
+          }
           try {
-            const repo = new AppSettingsRepository()
-            tavilyKey = repo.getSetting('web_search_tavily_key') || undefined
-            jinaKey = repo.getSetting('web_fetch_jina_key') || undefined
+            const externalServices = new ExternalServiceStore()
+            serviceConfig = externalServices.getGeneralResearchConfig()
+            if (context.authorization.mode === 'selected' && context.authorization.skillId === 'deep-research') {
+              const skillConfig = getSkillsRuntimeManager().getSkillConfiguration('deep-research')
+              const searchServiceId = skillConfig?.values.serviceBindings.searchService
+              const fetchServiceId = skillConfig?.values.serviceBindings.fetchService
+              if (searchServiceId) {
+                const searchService = externalServices.getRuntimeService(searchServiceId)
+                if (searchService?.kind === 'duckduckgo') {
+                  serviceConfig = {
+                    ...serviceConfig,
+                    tavilyKey: undefined,
+                    tavilyBaseUrl: undefined,
+                    ddgEnabled: searchService.enabled,
+                    ddgBaseUrl: searchService.baseUrl,
+                  }
+                }
+              }
+              if (fetchServiceId) {
+                const fetchService = externalServices.getRuntimeService(fetchServiceId)
+                if (fetchService?.kind === 'tavily') {
+                  serviceConfig = {
+                    ...serviceConfig,
+                    tavilyKey: fetchService.enabled ? fetchService.secrets.apiKey || serviceConfig.tavilyKey : serviceConfig.tavilyKey,
+                    tavilyBaseUrl: fetchService.enabled ? fetchService.baseUrl || serviceConfig.tavilyBaseUrl : serviceConfig.tavilyBaseUrl,
+                    preferTavilyExtract: true,
+                  }
+                } else if (fetchService?.kind === 'jina') {
+                  serviceConfig = {
+                    ...serviceConfig,
+                    jinaKey: fetchService.enabled ? fetchService.secrets.apiKey || serviceConfig.jinaKey : serviceConfig.jinaKey,
+                    jinaBaseUrl: fetchService.enabled ? fetchService.baseUrl || serviceConfig.jinaBaseUrl : serviceConfig.jinaBaseUrl,
+                    preferTavilyExtract: false,
+                  }
+                }
+              }
+            }
           } catch {
             // silent-catch: settings unavailable at boot or in tests; tools
             // still work via DDG / Jina-no-auth fallback paths.
@@ -374,8 +405,13 @@ export async function executeToolCall(
             outputsRoot: runtimeInfo.outputsRoot,
             requestModuleToolAction: context.requestModuleToolAction,
             scope: context.scope,
-            tavilyKey,
-            jinaKey,
+            tavilyKey: serviceConfig.tavilyKey,
+            tavilyBaseUrl: serviceConfig.tavilyBaseUrl,
+            jinaKey: serviceConfig.jinaKey,
+            jinaBaseUrl: serviceConfig.jinaBaseUrl,
+            ddgEnabled: serviceConfig.ddgEnabled,
+            ddgBaseUrl: serviceConfig.ddgBaseUrl,
+            preferTavilyExtract: serviceConfig.preferTavilyExtract,
             obsidianWebClipPresetDir,
           })
         }

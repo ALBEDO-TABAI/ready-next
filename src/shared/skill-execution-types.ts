@@ -183,6 +183,12 @@ export interface SkillDefinition {
    * marker in `tool-gateway.ts` / `filterToolsByAuthorization` callsite.
    */
   allowedTools?: string[]
+  /**
+   * Optional UI/runtime configuration contract. Unlike host_requirements this
+   * is user-facing: Settings / Skill Center use it to expose service bindings
+   * without hard-coding skill ids in renderer code.
+   */
+  configuration?: import('./skill-configuration').SkillConfigurationDefinition
 }
 
 export interface SkillArtifact {

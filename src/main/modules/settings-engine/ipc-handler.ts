@@ -11,6 +11,8 @@ import {
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import { createRotatingLogger } from '../../utils/rotating-logger'
 import { parseJsonResponse } from '../openai-responses'
+import { ExternalServiceStore } from './external-service-store'
+import type { ExternalServiceUpdateInput, PublicExternalServiceProfile, ExternalServiceTestResult } from '../../../shared/external-services'
 
 interface SettingsIPCResponse<T = unknown> {
   success: boolean
@@ -25,6 +27,7 @@ function logSettings(msg: string) {
 
 export function setupSettingsIPC(): void {
   const repository = new AppSettingsRepository()
+  const externalServices = new ExternalServiceStore(repository)
 
   // Get a single setting by key
   ipcMain.handle('settings:get', (_, key: string): SettingsIPCResponse<string | null> => {
@@ -93,6 +96,45 @@ export function setupSettingsIPC(): void {
     try {
       repository.setAIWorkspace(normalizeAIWorkspace(workspace))
       return { success: true }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('settings:listExternalServices', (): SettingsIPCResponse<PublicExternalServiceProfile[]> => {
+    try {
+      return { success: true, data: externalServices.listPublicProfiles() }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('settings:updateExternalService', (_, input: ExternalServiceUpdateInput): SettingsIPCResponse<PublicExternalServiceProfile> => {
+    try {
+      return { success: true, data: externalServices.upsertProfile(input) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('settings:resetExternalService', (_, payload: { id: string }): SettingsIPCResponse<PublicExternalServiceProfile> => {
+    try {
+      const id = payload?.id
+      if (!id) return { success: false, error: 'Missing service id' }
+      return { success: true, data: externalServices.resetProfile(id) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('settings:testExternalService', async (_, payload: { id: string }): Promise<SettingsIPCResponse<ExternalServiceTestResult>> => {
+    try {
+      const id = payload?.id
+      if (!id) return { success: false, error: 'Missing service id' }
+      const result = await externalServices.testProfile(id)
+      return result.ok
+        ? { success: true, data: result }
+        : { success: false, data: result, error: result.message }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }

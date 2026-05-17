@@ -102,6 +102,32 @@ export function setupSkillsIPC(): void {
     }
   })
 
+  ipcMain.handle('skills:configuration:get', (_, payload: { skillId: string }): SkillsIPCResponse => {
+    try {
+      const skillId = payload?.skillId
+      if (!skillId) return { success: false, error: 'Missing skillId' }
+      const result = manager.getSkillConfiguration(skillId)
+      if (!result) return { success: false, error: `Skill not found: ${skillId}` }
+      return { success: true, data: result }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('skills:configuration:update', (_, payload: {
+    skillId: string
+    serviceBindings?: Record<string, string>
+    fields?: Record<string, string | number | boolean | null>
+  }): SkillsIPCResponse => {
+    try {
+      const skillId = payload?.skillId
+      if (!skillId) return { success: false, error: 'Missing skillId' }
+      return { success: true, data: manager.updateSkillConfiguration(payload) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
   // Phase 4: skills:executions:* IPC channels retired along with the
   // skill_executions state machine. The 7 removed handlers were:
   //   skills:executions:list / :get / :submitInput / :submitConfirmation

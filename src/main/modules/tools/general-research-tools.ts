@@ -52,8 +52,13 @@ export interface GeneralResearchToolContext {
   scope?: ConversationScope | null
   /** Optional Tavily API key for web_search / web_fetch backends. */
   tavilyKey?: string
+  tavilyBaseUrl?: string
   /** Optional Jina reader key for web_fetch. */
   jinaKey?: string
+  jinaBaseUrl?: string
+  ddgEnabled?: boolean
+  ddgBaseUrl?: string
+  preferTavilyExtract?: boolean
   /** Embedded skill preset dir for `web_clip_url`; injected by host. */
   obsidianWebClipPresetDir?: string
 }
@@ -72,6 +77,9 @@ export async function executeGeneralResearchTool(
       const result = await executeWebSearch(parsed.data, {
         abortSignal: ctx.abortSignal,
         tavilyKey: ctx.tavilyKey,
+        tavilyBaseUrl: ctx.tavilyBaseUrl,
+        ddgEnabled: ctx.ddgEnabled,
+        ddgBaseUrl: ctx.ddgBaseUrl,
       })
       return createToolExecutionOutput(JSON.stringify(result), {
         data: result as unknown as Record<string, unknown>,
@@ -85,7 +93,10 @@ export async function executeGeneralResearchTool(
       const result = await executeWebFetch(parsed.data, {
         abortSignal: ctx.abortSignal,
         tavilyKey: ctx.tavilyKey,
+        tavilyBaseUrl: ctx.tavilyBaseUrl,
         jinaKey: ctx.jinaKey,
+        jinaBaseUrl: ctx.jinaBaseUrl,
+        preferTavilyExtract: ctx.preferTavilyExtract,
       })
       return createToolExecutionOutput(JSON.stringify(result), {
         data: result as unknown as Record<string, unknown>,
@@ -124,6 +135,7 @@ export async function executeGeneralResearchTool(
         outputsRoot: ctx.outputsRoot,
         presetDir: ctx.obsidianWebClipPresetDir,
         jinaKey: ctx.jinaKey,
+        jinaBaseUrl: ctx.jinaBaseUrl,
         requestModuleToolAction: ctx.requestModuleToolAction,
       })
       return createToolExecutionOutput(JSON.stringify(result), {

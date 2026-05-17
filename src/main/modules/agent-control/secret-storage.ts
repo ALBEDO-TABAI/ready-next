@@ -1,12 +1,24 @@
-import { app, safeStorage } from 'electron'
+import { createRequire } from 'module'
 
 import { logAgentMetric } from './metrics'
 import { TOOL_ERROR_METRICS } from './tool-error-metrics'
+
+const electronModule = (() => {
+  try { return createRequire(import.meta.url)('electron') as typeof import('electron') }
+  catch { return {} as typeof import('electron') }
+})()
+const { app, safeStorage } = electronModule
 
 const SECRET_KEYS = new Set([
   'token',
   'botToken',
   'appSecret',
+  'apiKey',
+  'api_key',
+  'sessdata',
+  'biliJct',
+  'bili_jct',
+  'cookie',
   'webhook',
   'secret',
 ])
@@ -15,7 +27,7 @@ const ENC_PREFIX = '__enc__'
 const PLAIN_PREFIX = '__plain__'
 
 function fallbackSecretKey(): Buffer {
-  const seed = `${app.getPath('userData')}::ready-agent-channel-config`
+  const seed = `${app?.getPath?.('userData') || process.cwd()}::ready-agent-channel-config`
   return Buffer.from(seed, 'utf8')
 }
 
@@ -30,7 +42,7 @@ function xorCipher(input: Buffer, key: Buffer): Buffer {
 function encryptValue(raw: string): string {
   if (!raw) return raw
   try {
-    if (safeStorage.isEncryptionAvailable()) {
+    if (safeStorage?.isEncryptionAvailable?.()) {
       const encrypted = safeStorage.encryptString(raw)
       return `${ENC_PREFIX}${encrypted.toString('base64')}`
     }
@@ -53,6 +65,7 @@ function decryptValue(raw: string, key?: string): string {
   try {
     if (raw.startsWith(ENC_PREFIX)) {
       const b64 = raw.slice(ENC_PREFIX.length)
+      if (!safeStorage?.decryptString) return raw
       const decrypted = safeStorage.decryptString(Buffer.from(b64, 'base64'))
       return decrypted
     }
@@ -93,3 +106,6 @@ export function encryptChannelConfig(config: Record<string, unknown>): Record<st
 export function decryptChannelConfig(config: Record<string, unknown>): Record<string, unknown> {
   return mapSecretFields(config, decryptValue)
 }
+
+export const encryptSecretConfig = encryptChannelConfig
+export const decryptSecretConfig = decryptChannelConfig

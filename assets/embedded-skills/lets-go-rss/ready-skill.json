@@ -9,6 +9,20 @@
     "mode": "advisory",
     "autoAdvance": false
   },
+  "configuration": {
+    "version": 1,
+    "serviceBindings": [
+      {
+        "id": "rsshub",
+        "label": "RSSHub 服务",
+        "description": "用于需要 RSSHub 适配的平台订阅和刷新。",
+        "allowedKinds": ["rsshub"],
+        "defaultServiceId": "rsshub-default",
+        "required": false
+      }
+    ],
+    "fields": []
+  },
   "actions": [
     {
       "name": "read_skill",

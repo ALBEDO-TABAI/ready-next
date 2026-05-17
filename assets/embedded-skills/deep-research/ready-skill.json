@@ -6,6 +6,28 @@
   "version": "0.1.0",
   "runtime": "reference",
   "execution": { "mode": "advisory" },
+  "configuration": {
+    "version": 1,
+    "serviceBindings": [
+      {
+        "id": "searchService",
+        "label": "优先搜索服务",
+        "description": "Tavily 有 key 时优先使用；DuckDuckGo 作为无 key 兜底。",
+        "allowedKinds": ["tavily", "duckduckgo"],
+        "defaultServiceId": "tavily-default",
+        "required": false
+      },
+      {
+        "id": "fetchService",
+        "label": "全文抓取服务",
+        "description": "Jina Reader 作为主抓取服务，失败后可回退 Tavily Extract。",
+        "allowedKinds": ["jina", "tavily"],
+        "defaultServiceId": "jina-default",
+        "required": false
+      }
+    ],
+    "fields": []
+  },
   "actions": {
     "read_skill": {
       "runtime": "reference",

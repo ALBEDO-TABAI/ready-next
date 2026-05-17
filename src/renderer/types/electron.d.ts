@@ -2415,6 +2415,42 @@ interface ElectronVideoInfo {
 type SkillSource = 'embedded' | 'custom'
 type SkillRuntimeKind = 'python' | 'node' | 'shell' | 'reference'
 type SkillExecutionMode = 'advisory' | 'workflow' | 'direct'
+type SkillConfigFieldTypeData = 'text' | 'password' | 'number' | 'boolean' | 'select'
+type SkillConfigValueData = string | number | boolean | null
+
+interface SkillServiceBindingDefinitionData {
+  id: string
+  label: string
+  description?: string
+  required?: boolean
+  allowedKinds: ExternalServiceKindData[]
+  defaultServiceId?: string
+}
+
+interface SkillConfigFieldDefinitionData {
+  id: string
+  label: string
+  description?: string
+  type: SkillConfigFieldTypeData
+  required?: boolean
+  defaultValue?: SkillConfigValueData
+  options?: { value: string; label: string }[]
+}
+
+interface SkillConfigurationDefinitionData {
+  version: 1
+  serviceBindings: SkillServiceBindingDefinitionData[]
+  fields: SkillConfigFieldDefinitionData[]
+}
+
+interface SkillConfigurationViewData {
+  skillId: string
+  definition: SkillConfigurationDefinitionData | null
+  values: {
+    serviceBindings: Record<string, string>
+    fields: Record<string, SkillConfigValueData>
+  }
+}
 
 interface SkillParamDefinition {
   name: string
@@ -2450,6 +2486,7 @@ interface SkillState {
   executionMode: SkillExecutionMode
   managedPath?: string
   sourcePath?: string
+  configuration?: SkillConfigurationDefinitionData
 }
 
 // Phase 4: SkillExecutionBlocker / SkillExecutionStepRecord /
@@ -2559,6 +2596,12 @@ interface ElectronSkillsAPI {
     executionMode?: 'auto' | 'workflow' | 'direct'
   }) => Promise<IPCResponse<SkillRunResult>>
   listJobs: (limit?: number) => Promise<IPCResponse<SkillJobRecord[]>>
+  getConfiguration: (payload: { skillId: string }) => Promise<IPCResponse<SkillConfigurationViewData>>
+  updateConfiguration: (payload: {
+    skillId: string
+    serviceBindings?: Record<string, string>
+    fields?: Record<string, SkillConfigValueData>
+  }) => Promise<IPCResponse<SkillConfigurationViewData>>
   // Phase 4: skills:executions:* API surface retired along with the
   // skill_executions state machine. Removed: listExecutions / getExecution /
   // submitInput / submitConfirmation / submitAgentResult / restartFromStep /
@@ -2698,6 +2741,46 @@ interface SettingsTestResult {
   modelList?: string[]
 }
 
+type ExternalServiceKindData =
+  | 'tavily'
+  | 'duckduckgo'
+  | 'jina'
+  | 'rsshub'
+  | 'bilibili'
+  | 'github'
+  | 'vision-model'
+
+type ExternalServiceOptionValueData = string | number | boolean | string[] | null
+
+interface PublicExternalServiceProfileData {
+  id: string
+  kind: ExternalServiceKindData
+  name: string
+  enabled: boolean
+  baseUrl?: string
+  options: Record<string, ExternalServiceOptionValueData>
+  secretStatus: Record<string, { configured: boolean; masked?: string }>
+  updatedAt?: string
+}
+
+interface ExternalServiceUpdateInputData {
+  id: string
+  kind?: ExternalServiceKindData
+  name?: string
+  enabled?: boolean
+  baseUrl?: string
+  options?: Record<string, ExternalServiceOptionValueData>
+  secrets?: Record<string, string>
+  clearSecrets?: string[]
+}
+
+interface ExternalServiceTestResultData {
+  ok: boolean
+  serviceId: string
+  message: string
+  latencyMs?: number
+}
+
 interface ElectronSettingsAPI {
   get: (key: string) => Promise<{ success: boolean; data?: string | null; error?: string }>
   set: (key: string, value: string) => Promise<{ success: boolean; error?: string }>
@@ -2709,6 +2792,16 @@ interface ElectronSettingsAPI {
   testAIConnection: (
     config: AIModelConfigData
   ) => Promise<{ success: boolean; data?: SettingsTestResult; error?: string }>
+  listExternalServices: () => Promise<{ success: boolean; data?: PublicExternalServiceProfileData[]; error?: string }>
+  updateExternalService: (
+    input: ExternalServiceUpdateInputData
+  ) => Promise<{ success: boolean; data?: PublicExternalServiceProfileData; error?: string }>
+  resetExternalService: (
+    payload: { id: string }
+  ) => Promise<{ success: boolean; data?: PublicExternalServiceProfileData; error?: string }>
+  testExternalService: (
+    payload: { id: string }
+  ) => Promise<{ success: boolean; data?: ExternalServiceTestResultData; error?: string }>
 }
 
 interface ElectronPetAPI {

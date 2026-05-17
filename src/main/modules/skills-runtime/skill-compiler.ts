@@ -22,6 +22,7 @@ import {
   SkillHostRequirementsSchema,
   type SkillHostRequirements,
 } from '../../../shared/skill-host-contract'
+import { normalizeSkillConfiguration } from '../../../shared/skill-configuration'
 
 const MANIFEST_CANDIDATES = ['ready-skill.json', '.ready-skill.json', 'skill.json', 'manifest.json']
 const DOCUMENT_CANDIDATES = ['SKILL.md', 'README.md', 'README.zh-CN.md']
@@ -519,6 +520,7 @@ export function compileSkillDefinition(options: SkillCompilerOptions): SkillDefi
   // Accepts both snake_case (`allowed_tools`, deer-flow form) and camelCase
   // (`allowedTools`) for symmetry with other manifest fields.
   const allowedTools = validateAllowedTools(id, manifest?.allowed_tools ?? manifest?.allowedTools)
+  const configuration = normalizeSkillConfiguration(manifest?.configuration ?? manifest?.skill_configuration)
 
   const rawChildLoop = manifest?.child_loop ?? manifest?.childLoop
   const childLoop = (rawChildLoop !== undefined && rawChildLoop !== null && source !== 'embedded')
@@ -553,5 +555,6 @@ export function compileSkillDefinition(options: SkillCompilerOptions): SkillDefi
     hostRequirements,
     childLoop,
     allowedTools,
+    configuration,
   }
 }

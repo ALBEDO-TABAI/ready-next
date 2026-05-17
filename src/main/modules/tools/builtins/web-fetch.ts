@@ -36,6 +36,9 @@ export interface WebFetchContext {
   abortSignal?: AbortSignal
   tavilyKey?: string
   jinaKey?: string
+  tavilyBaseUrl?: string
+  jinaBaseUrl?: string
+  preferTavilyExtract?: boolean
 }
 
 export const WEB_FETCH_CONTENT_HARD_CAP = 4096
@@ -64,7 +67,8 @@ async function fetchViaJina(
   if (ctx.jinaKey) {
     headers['Authorization'] = `Bearer ${ctx.jinaKey}`
   }
-  const response = await fetch(`https://r.jina.ai/${args.url}`, {
+  const baseUrl = (ctx.jinaBaseUrl || 'https://r.jina.ai').replace(/\/+$/, '')
+  const response = await fetch(`${baseUrl}/${args.url}`, {
     method: 'GET',
     headers,
     signal: ctx.abortSignal,
@@ -102,7 +106,8 @@ async function fetchViaTavilyExtract(
   if (!ctx.tavilyKey) {
     throw new Error('tavily_key_missing')
   }
-  const response = await fetch('https://api.tavily.com/extract', {
+  const baseUrl = (ctx.tavilyBaseUrl || 'https://api.tavily.com').replace(/\/+$/, '')
+  const response = await fetch(`${baseUrl}/extract`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -141,15 +146,19 @@ export async function executeWebFetch(
   ctx: WebFetchContext,
 ): Promise<WebFetchResult> {
   let jinaError: unknown = null
-  try {
-    return await fetchViaJina(args, ctx)
-  } catch (error) {
-    // silent-catch: capture for fallback handoff; metric is logged below before Tavily try
-    jinaError = error
+  if (!ctx.preferTavilyExtract) {
+    try {
+      return await fetchViaJina(args, ctx)
+    } catch (error) {
+      // silent-catch: capture for fallback handoff; metric is logged below before Tavily try
+      jinaError = error
+    }
+    logAgentMetric(WEB_TOOL_FALLBACK_METRICS.WEB_FETCH_JINA_TO_TAVILY, {
+      reason: jinaError instanceof Error ? jinaError.message : String(jinaError),
+    })
+  } else {
+    jinaError = 'disabled_by_preference'
   }
-  logAgentMetric(WEB_TOOL_FALLBACK_METRICS.WEB_FETCH_JINA_TO_TAVILY, {
-    reason: jinaError instanceof Error ? jinaError.message : String(jinaError),
-  })
 
   let tavilyError: unknown = null
   try {

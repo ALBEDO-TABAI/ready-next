@@ -64,6 +64,9 @@ import {
   type PythonVersionInfo,
 } from './python-runtime-version'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
+import { ExternalServiceStore } from '../settings-engine/external-service-store'
+import { SkillConfigurationStore } from './skill-configuration-store'
+import type { SkillConfigurationUpdateInput, SkillConfigurationView } from '../../../shared/skill-configuration'
 
 const execFileAsync = promisify(execFile)
 
@@ -173,6 +176,7 @@ export interface SkillState {
    */
   hostRequirements?: import('../../../shared/skill-host-contract').SkillHostRequirements
   childLoop?: SkillChildLoopDefinition
+  configuration?: import('../../../shared/skill-configuration').SkillConfigurationDefinition
 }
 
 export interface SkillsRuntimeInfo {
@@ -416,6 +420,8 @@ export class SkillsRuntimeManager {
   private readonly outputsRoot: string
   private readonly embeddedSkillsRootOverride?: string
   private readonly hostControllerOverride?: SkillHostController
+  private readonly externalServiceStore = new ExternalServiceStore()
+  private readonly skillConfigurationStore = new SkillConfigurationStore()
   private readonly retiredEmbeddedSkillIdsOverride?: ReadonlySet<string>
   private loader: SkillLoader | null = null
   private installLocks = new Map<SkillId, Promise<SkillInstallResult>>()
@@ -577,6 +583,7 @@ export class SkillsRuntimeManager {
       sourcePath: definition.sourcePath,
       hostRequirements: definition.hostRequirements,
       childLoop: definition.childLoop,
+      configuration: definition.configuration,
     }
   }
 
@@ -593,6 +600,20 @@ export class SkillsRuntimeManager {
     ]
   }
 
+  getSkillConfiguration(skillId: SkillId): SkillConfigurationView | null {
+    this.ensureRuntimeDirs()
+    const definition = this.getSkillLoader().loadSkill(skillId)
+    if (!definition) return null
+    return this.skillConfigurationStore.getView(definition)
+  }
+
+  updateSkillConfiguration(input: SkillConfigurationUpdateInput): SkillConfigurationView {
+    this.ensureRuntimeDirs()
+    const definition = this.getSkillLoader().loadSkill(input.skillId)
+    if (!definition) throw new Error(`Unknown skill: ${input.skillId}`)
+    return this.skillConfigurationStore.updateValues(definition, input)
+  }
+
   getRuntimeInfo(): SkillsRuntimeInfo {
     this.ensureRuntimeDirs()
     return {
@@ -602,6 +623,39 @@ export class SkillsRuntimeManager {
       outputsRoot: this.outputsRoot,
       venvRoot: this.venvRoot,
     }
+  }
+
+  private resolveConfiguredAgentContext(definition: SkillDefinition): AgentSpawnContext | null {
+    if (definition.id !== 'video-expert-analyzer') return null
+    const values = this.skillConfigurationStore.getValues(definition)
+    const serviceId = values.serviceBindings.visionModel || 'vision-model-default'
+    return this.externalServiceStore.buildVisionAgentContext(serviceId)
+  }
+
+  private resolveExternalEnv(definition: SkillDefinition): Record<string, string> {
+    const values = this.skillConfigurationStore.getValues(definition)
+    const env = this.externalServiceStore.getSkillExternalEnv(definition.id)
+
+    if (definition.id === 'lets-go-rss') {
+      const serviceId = values.serviceBindings.rsshub || 'rsshub-default'
+      const rsshub = this.externalServiceStore.getRuntimeService(serviceId)
+      if (rsshub?.enabled && rsshub.baseUrl) {
+        env.RSSHUB_BASE_URL = rsshub.baseUrl.replace(/\/+$/, '')
+      }
+    }
+
+    if (definition.id === 'video-copy-analyzer' || definition.id === 'video-expert-analyzer') {
+      const serviceId = values.serviceBindings.bilibili || 'bilibili-default'
+      const bilibili = this.externalServiceStore.getRuntimeService(serviceId)
+      if (bilibili?.enabled) {
+        if (bilibili.secrets.sessdata) env.BILIBILI_SESSDATA = bilibili.secrets.sessdata
+        if (bilibili.secrets.biliJct) env.BILIBILI_BILI_JCT = bilibili.secrets.biliJct
+        const cookieFile = bilibili.options.cookieFile
+        if (typeof cookieFile === 'string' && cookieFile.trim()) env.BILIBILI_COOKIE_FILE = cookieFile.trim()
+      }
+    }
+
+    return env
   }
 
   /**
@@ -828,15 +882,24 @@ export class SkillsRuntimeManager {
       const preparedOutputDir = hostRequirements
         ? this.resolveOutputDir(requestedOutputDir, resolved.definition.id, jobId)
         : undefined
-      const actionParams = preparedOutputDir && action.inputMode === 'json' && !requestedOutputDir
+      let actionParams = preparedOutputDir && action.inputMode === 'json' && !requestedOutputDir
         ? { ...(request.params || {}), outputDir: preparedOutputDir }
         : (request.params || {})
+      if (resolved.definition.id === 'video-copy-analyzer' && action.name === 'video_copy_analyze' && !actionParams.model) {
+        const values = this.skillConfigurationStore.getValues(resolved.definition)
+        const model = values.fields.subtitleModel
+        if (typeof model === 'string' && model.trim()) {
+          actionParams = { ...actionParams, model: model.trim() }
+        }
+      }
       const childRunContext = request.params?.__childRunContext && typeof request.params.__childRunContext === 'object'
         ? request.params.__childRunContext as Record<string, unknown>
         : null
       const childRunId = typeof childRunContext?.childRunId === 'string' && childRunContext.childRunId.trim()
         ? childRunContext.childRunId.trim()
         : ''
+      const configuredAgentContext = this.resolveConfiguredAgentContext(resolved.definition)
+      const effectiveAgentContext = configuredAgentContext ?? request.agentContext ?? null
       if (hostRequirements) {
         spawnHandle = await controller.prepareSpawnContext(
           resolved.definition.id,
@@ -845,12 +908,13 @@ export class SkillsRuntimeManager {
           hostRequirements,
           jobId,
           preparedOutputDir,
-          request.agentContext ?? null,
+          effectiveAgentContext,
         )
       }
 
       const mergedEnv = {
         ...(spawnHandle?.envOverrides || {}),
+        ...this.resolveExternalEnv(resolved.definition),
         READY_SKILL_TASK_ID: jobId,
         ...(childRunId ? { READY_SKILL_CHILD_RUN_ID: childRunId } : {}),
         ...(request.env || {}),

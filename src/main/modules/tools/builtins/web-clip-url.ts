@@ -88,6 +88,7 @@ export interface WebClipUrlContext {
   presetDir: string
   /** Optional Jina reader key. */
   jinaKey?: string
+  jinaBaseUrl?: string
   requestModuleToolAction?: (
     tool: string,
     args: Record<string, unknown>,
@@ -135,7 +136,7 @@ export async function executeWebClipUrl(
   }
 
   try {
-    jinaMarkdown = await fetchJinaMarkdown(args.url, ctx.jinaKey, ctx.abortSignal)
+    jinaMarkdown = await fetchJinaMarkdown(args.url, ctx.jinaKey, ctx.abortSignal, ctx.jinaBaseUrl)
   } catch {
     jinaMarkdown = undefined
   }
@@ -186,4 +187,3 @@ export async function executeWebClipUrl(
     warnings: result.warnings,
   }
 }
-

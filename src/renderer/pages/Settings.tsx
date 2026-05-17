@@ -11,6 +11,7 @@ import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runti
 import { listSettingsCapabilityGroups, type CapabilityGroupId } from '../../shared/ai-capability-groups'
 import { useSettings, getProviderDef } from '../stores/useSettings'
 import type { AIProviderCategory } from '../stores/useSettings'
+import type { ExternalServiceOptionValue, PublicExternalServiceProfile } from '../../shared/external-services'
 import RemoteIMSettingsPanel from '../components/settings/RemoteIMSettingsPanel'
 import PetSettingsPanel from '../components/settings/PetSettingsPanel'
 import {
@@ -98,6 +99,13 @@ const settingsData: SettingSection[] = [
     icon: MessageSquare,
     description: '连接飞书/Telegram，让 Agent 远程执行任务',
     settings: [] // Rendered dynamically via RemoteIMSettingsPanel
+  },
+  {
+    id: 'external-services',
+    title: '外部服务',
+    icon: ExternalLink,
+    description: '统一管理 Tavily、Jina、RSSHub、Bilibili、GitHub 与读图模型',
+    settings: []
   },
   {
     id: 'memory',
@@ -1953,6 +1961,329 @@ function StorageSettingsPanel() {
   )
 }
 
+const EXTERNAL_SERVICE_SECRET_LABELS: Record<string, string> = {
+  apiKey: 'API Key',
+  token: 'Token',
+  sessdata: 'SESSDATA',
+  biliJct: 'bili_jct',
+}
+
+function serviceSecretKeys(profile: PublicExternalServiceProfile): string[] {
+  const keys = Object.keys(profile.secretStatus || {})
+  if (keys.length > 0) return keys
+  if (profile.kind === 'tavily' || profile.kind === 'jina' || profile.kind === 'vision-model') return ['apiKey']
+  if (profile.kind === 'github') return ['token']
+  if (profile.kind === 'bilibili') return ['sessdata', 'biliJct']
+  return []
+}
+
+function serviceNeedsBaseUrl(profile: PublicExternalServiceProfile): boolean {
+  return profile.kind !== 'bilibili'
+}
+
+function normalizeServiceOptionValue(value: unknown): ExternalServiceOptionValue {
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || value === null) return value
+  if (Array.isArray(value)) return value.filter((item): item is string => typeof item === 'string')
+  return ''
+}
+
+function ExternalServicesSettingsPanel() {
+  const [profiles, setProfiles] = useState<PublicExternalServiceProfile[]>([])
+  const [secretDrafts, setSecretDrafts] = useState<Record<string, Record<string, string>>>({})
+  const [loading, setLoading] = useState(true)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [testingId, setTestingId] = useState<string | null>(null)
+  const [message, setMessage] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    if (typeof window === 'undefined' || !window.electronAPI?.settings?.listExternalServices) {
+      setLoading(false)
+      setMessage('外部服务 IPC 不可用')
+      return
+    }
+    setLoading(true)
+    try {
+      const res = await window.electronAPI.settings.listExternalServices()
+      if (res.success && res.data) {
+        setProfiles(res.data as PublicExternalServiceProfile[])
+        setMessage(null)
+      } else {
+        setMessage(res.error || '读取外部服务配置失败')
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error))
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  const patchProfile = useCallback((id: string, patch: Partial<PublicExternalServiceProfile>) => {
+    setProfiles((prev) => prev.map((profile) => profile.id === id ? { ...profile, ...patch } : profile))
+  }, [])
+
+  const patchOptions = useCallback((id: string, patch: Record<string, ExternalServiceOptionValue>) => {
+    setProfiles((prev) => prev.map((profile) => (
+      profile.id === id
+        ? { ...profile, options: { ...(profile.options || {}), ...patch } }
+        : profile
+    )))
+  }, [])
+
+  const updateSecretDraft = useCallback((id: string, key: string, value: string) => {
+    setSecretDrafts((prev) => ({
+      ...prev,
+      [id]: {
+        ...(prev[id] || {}),
+        [key]: value,
+      },
+    }))
+  }, [])
+
+  const saveProfile = useCallback(async (profile: PublicExternalServiceProfile) => {
+    if (!window.electronAPI?.settings?.updateExternalService) return
+    setBusyId(profile.id)
+    setMessage(null)
+    try {
+      const secrets: Record<string, string> = {}
+      for (const [key, value] of Object.entries(secretDrafts[profile.id] || {})) {
+        if (value.trim()) secrets[key] = value.trim()
+      }
+      const res = await window.electronAPI.settings.updateExternalService({
+        id: profile.id,
+        kind: profile.kind,
+        name: profile.name,
+        enabled: profile.enabled,
+        baseUrl: profile.baseUrl,
+        options: profile.options,
+        secrets,
+      })
+      if (res.success && res.data) {
+        setProfiles((prev) => prev.map((item) => item.id === profile.id ? res.data as PublicExternalServiceProfile : item))
+        setSecretDrafts((prev) => ({ ...prev, [profile.id]: {} }))
+        setMessage(`已保存：${profile.name}`)
+      } else {
+        setMessage(res.error || `保存失败：${profile.name}`)
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusyId(null)
+    }
+  }, [secretDrafts])
+
+  const resetProfile = useCallback(async (profile: PublicExternalServiceProfile) => {
+    if (!window.electronAPI?.settings?.resetExternalService) return
+    setBusyId(profile.id)
+    setMessage(null)
+    try {
+      const res = await window.electronAPI.settings.resetExternalService({ id: profile.id })
+      if (res.success && res.data) {
+        setProfiles((prev) => prev.map((item) => item.id === profile.id ? res.data as PublicExternalServiceProfile : item))
+        setSecretDrafts((prev) => ({ ...prev, [profile.id]: {} }))
+        setMessage(`已重置：${profile.name}`)
+      } else {
+        setMessage(res.error || `重置失败：${profile.name}`)
+      }
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusyId(null)
+    }
+  }, [])
+
+  const testProfile = useCallback(async (profile: PublicExternalServiceProfile) => {
+    if (!window.electronAPI?.settings?.testExternalService) return
+    setTestingId(profile.id)
+    setMessage(null)
+    try {
+      const res = await window.electronAPI.settings.testExternalService({ id: profile.id })
+      const detail = res.data?.latencyMs ? `（${res.data.latencyMs}ms）` : ''
+      setMessage(res.success ? `${profile.name}：${res.data?.message || '连接正常'}${detail}` : `${profile.name}：${res.error || '测试失败'}`)
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : String(error))
+    } finally {
+      setTestingId(null)
+    }
+  }, [])
+
+  if (loading) {
+    return (
+      <div className="flex items-center gap-2 text-[12px]" style={{ color: 'var(--text-muted)' }}>
+        <Loader2 className="w-3.5 h-3.5 animate-spin" />
+        加载外部服务配置...
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-5">
+      {message && (
+        <div className="rounded-2xl border text-[12px]" style={{ ...SETTINGS_SUBTLE_CARD_STYLE, padding: '10px 12px', color: 'var(--text-body)' }}>
+          {message}
+        </div>
+      )}
+      <div className="grid gap-4 md:grid-cols-2">
+        {profiles.map((profile) => {
+          const secretKeys = serviceSecretKeys(profile)
+          const isVisionModel = profile.kind === 'vision-model'
+          const isBilibili = profile.kind === 'bilibili'
+          const busy = busyId === profile.id
+          const testing = testingId === profile.id
+          return (
+            <div key={profile.id} className="rounded-2xl border" style={{ ...SETTINGS_FLAT_CARD_STYLE, padding: '16px 18px' }}>
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-[13px] font-semibold" style={{ color: 'var(--text-title)' }}>
+                    {profile.name}
+                  </div>
+                  <div className="text-[11px] mt-1" style={{ color: 'var(--text-light)' }}>
+                    {profile.kind === 'vision-model' ? '供视觉分析独立使用' : profile.kind}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => patchProfile(profile.id, { enabled: !profile.enabled })}
+                  className="rounded-full border text-[11px] font-medium"
+                  style={{
+                    padding: '5px 10px',
+                    borderColor: profile.enabled ? 'rgba(34,197,94,.35)' : 'var(--border-subtle)',
+                    color: profile.enabled ? 'var(--color-green)' : 'var(--text-muted)',
+                    background: profile.enabled ? 'rgba(34,197,94,.10)' : 'transparent',
+                  }}
+                >
+                  {profile.enabled ? '已启用' : '未启用'}
+                </button>
+              </div>
+
+              <div className="mt-4 flex flex-col gap-3">
+                {serviceNeedsBaseUrl(profile) && (
+                  <label className="flex flex-col gap-1.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                    服务地址
+                    <input
+                      value={profile.baseUrl || ''}
+                      onChange={(event) => patchProfile(profile.id, { baseUrl: event.target.value })}
+                      style={{ ...SETTINGS_FLAT_INPUT_STYLE, padding: '9px 10px' }}
+                      placeholder={profile.kind === 'vision-model' ? 'https://api.example.com/v1' : 'https://...'}
+                    />
+                  </label>
+                )}
+
+                {isVisionModel && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <label className="flex flex-col gap-1.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                      Provider
+                      <input
+                        value={String(profile.options.provider || '')}
+                        onChange={(event) => patchOptions(profile.id, { provider: event.target.value })}
+                        style={{ ...SETTINGS_FLAT_INPUT_STYLE, padding: '9px 10px' }}
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                      Model
+                      <input
+                        value={String(profile.options.model || '')}
+                        onChange={(event) => patchOptions(profile.id, { model: event.target.value })}
+                        style={{ ...SETTINGS_FLAT_INPUT_STYLE, padding: '9px 10px' }}
+                        placeholder="gpt-4o / qwen-vl..."
+                      />
+                    </label>
+                    <label className="flex flex-col gap-1.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                      API 格式
+                      <select
+                        value={String(profile.options.apiKind || 'openai-completions')}
+                        onChange={(event) => patchOptions(profile.id, { apiKind: event.target.value })}
+                        style={{ ...SETTINGS_FLAT_INPUT_STYLE, padding: '9px 10px' }}
+                      >
+                        <option value="openai-completions">OpenAI Chat</option>
+                        <option value="openai-responses">OpenAI Responses</option>
+                        <option value="anthropic-messages">Anthropic Messages</option>
+                      </select>
+                    </label>
+                    <label className="flex items-center gap-2 text-[11px]" style={{ color: 'var(--text-muted)', paddingTop: 22 }}>
+                      <input
+                        type="checkbox"
+                        checked={Array.isArray(profile.options.inputModes) && profile.options.inputModes.includes('image')}
+                        onChange={(event) => patchOptions(profile.id, { inputModes: event.target.checked ? ['text', 'image'] : ['text'] })}
+                      />
+                      支持图片输入
+                    </label>
+                  </div>
+                )}
+
+                {isBilibili && (
+                  <label className="flex flex-col gap-1.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                    Cookie 文件路径（可选）
+                    <input
+                      value={String(normalizeServiceOptionValue(profile.options.cookieFile))}
+                      onChange={(event) => patchOptions(profile.id, { cookieFile: event.target.value })}
+                      style={{ ...SETTINGS_FLAT_INPUT_STYLE, padding: '9px 10px' }}
+                      placeholder="/path/to/cookies.txt"
+                    />
+                  </label>
+                )}
+
+                {secretKeys.map((key) => {
+                  const status = profile.secretStatus[key]
+                  return (
+                    <label key={key} className="flex flex-col gap-1.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                      {EXTERNAL_SERVICE_SECRET_LABELS[key] || key}
+                      <input
+                        type="password"
+                        value={secretDrafts[profile.id]?.[key] || ''}
+                        onChange={(event) => updateSecretDraft(profile.id, key, event.target.value)}
+                        style={{ ...SETTINGS_FLAT_INPUT_STYLE, padding: '9px 10px' }}
+                        placeholder={status?.configured ? `已配置 ${status.masked || ''}，留空则保留` : '未配置'}
+                      />
+                    </label>
+                  )
+                })}
+              </div>
+
+              <div className="mt-4 flex items-center justify-between gap-2">
+                <button
+                  type="button"
+                  onClick={() => { void resetProfile(profile) }}
+                  disabled={busy}
+                  className="rounded-lg text-[12px] font-medium"
+                  style={{ ...SETTINGS_SECONDARY_BUTTON_STYLE, padding: '7px 10px', opacity: busy ? 0.7 : 1 }}
+                >
+                  重置
+                </button>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { void testProfile(profile) }}
+                    disabled={testing || busy}
+                    className="inline-flex items-center gap-1.5 rounded-lg text-[12px] font-medium"
+                    style={{ ...SETTINGS_SECONDARY_BUTTON_STYLE, padding: '7px 10px', opacity: testing || busy ? 0.7 : 1 }}
+                  >
+                    {testing ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                    测试
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { void saveProfile(profile) }}
+                    disabled={busy}
+                    className="inline-flex items-center gap-1.5 rounded-lg text-[12px] font-medium"
+                    style={{ ...SETTINGS_PRIMARY_BUTTON_STYLE, padding: '7px 12px', opacity: busy ? 0.7 : 1 }}
+                  >
+                    {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
+                    保存
+                  </button>
+                </div>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 function ActiveChildRunsDebug() {
   const [runs, setRuns] = useState<ActiveChildRunSummaryView[]>([])
   const [loading, setLoading] = useState(false)
@@ -2107,7 +2438,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
   }
 
   const isDynamicSection = currentSection
-    ? ['ai', 'remote-im', 'memory', 'personalities', 'user-profiles', 'pet', 'rss-storage', 'storage'].includes(currentSection.id)
+    ? ['ai', 'remote-im', 'external-services', 'memory', 'personalities', 'user-profiles', 'pet', 'rss-storage', 'storage'].includes(currentSection.id)
     : false
 
   return (
@@ -2238,6 +2569,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                 {currentSection.id === 'rss-storage' && <RSSDraftStoreSettingsPanel />}
                 {currentSection.id === 'storage' && <StorageSettingsPanel />}
                 {currentSection.id === 'remote-im' && <RemoteIMSettingsPanel />}
+                {currentSection.id === 'external-services' && <ExternalServicesSettingsPanel />}
                 {currentSection.id === 'pet' && <PetSettingsPanel />}
                 {currentSection.id === 'memory' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>

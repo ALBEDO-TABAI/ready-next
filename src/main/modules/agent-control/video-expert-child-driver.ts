@@ -22,6 +22,7 @@ import { dirname, isAbsolute, join } from 'node:path'
 
 import type { SkillRunResult } from '../skills-runtime/runtime-manager'
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
+import { ExternalServiceStore } from '../settings-engine/external-service-store'
 import {
   getProviderDef,
   resolveAIConfigCapabilities,
@@ -351,6 +352,8 @@ function shouldPreflightFirstVeaAction(state: VeaDriverState): boolean {
 }
 
 function findVeaProviderPreflightIssue(agentContext: AgentSpawnContext | null): string | null {
+  const configuredVisionContext = new ExternalServiceStore().buildVisionAgentContext()
+  if (configuredVisionContext) return findAgentContextVisionIssue(configuredVisionContext)
   if (agentContext) return findAgentContextVisionIssue(agentContext)
   const currentConfig = readCurrentAIConfigForPreflight()
   if (currentConfig) return findCurrentModelVisionIssue(currentConfig)

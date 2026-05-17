@@ -75,12 +75,14 @@ export async function fetchJinaMarkdown(
   url: string,
   jinaKey: string | undefined,
   signal: AbortSignal | undefined,
+  jinaBaseUrl?: string,
 ): Promise<string | undefined> {
   const headers: Record<string, string> = { Accept: 'text/plain' }
   if (jinaKey) headers['Authorization'] = `Bearer ${jinaKey}`
+  const baseUrl = (jinaBaseUrl || 'https://r.jina.ai').replace(/\/+$/, '')
   let response: Response
   try {
-    response = await fetch(`https://r.jina.ai/${url}`, {
+    response = await fetch(`${baseUrl}/${url}`, {
       method: 'GET',
       headers,
       signal: signal ?? AbortSignal.timeout(DEFAULT_TIMEOUT_MS),

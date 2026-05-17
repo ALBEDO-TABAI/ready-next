@@ -8,6 +8,35 @@
   "execution": {
     "mode": "advisory"
   },
+  "configuration": {
+    "version": 1,
+    "serviceBindings": [
+      {
+        "id": "bilibili",
+        "label": "Bilibili 登录态",
+        "description": "用于下载需要登录态的视频；视觉分析会复用同一配置，避免重复维护。",
+        "allowedKinds": ["bilibili"],
+        "defaultServiceId": "bilibili-default",
+        "required": false
+      }
+    ],
+    "fields": [
+      {
+        "id": "subtitleModel",
+        "label": "默认字幕模型",
+        "description": "内部分析没有显式传入 model 时使用。",
+        "type": "select",
+        "defaultValue": "base",
+        "options": [
+          { "value": "tiny", "label": "tiny" },
+          { "value": "base", "label": "base" },
+          { "value": "small", "label": "small" },
+          { "value": "medium", "label": "medium" },
+          { "value": "large", "label": "large" }
+        ]
+      }
+    ]
+  },
   "actions": [
     {
       "name": "read_skill",

@@ -42,6 +42,9 @@ export interface WebSearchResult {
 export interface WebSearchContext {
   abortSignal?: AbortSignal
   tavilyKey?: string
+  tavilyBaseUrl?: string
+  ddgEnabled?: boolean
+  ddgBaseUrl?: string
 }
 
 interface TavilyApiResponse {
@@ -59,7 +62,8 @@ async function searchViaTavily(
   if (!ctx.tavilyKey) {
     throw new Error('tavily_key_missing')
   }
-  const response = await fetch('https://api.tavily.com/search', {
+  const baseUrl = (ctx.tavilyBaseUrl || 'https://api.tavily.com').replace(/\/+$/, '')
+  const response = await fetch(`${baseUrl}/search`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -112,7 +116,8 @@ async function searchViaDdg(
   args: WebSearchArgs,
   ctx: WebSearchContext,
 ): Promise<WebSearchResultItem[]> {
-  const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(args.query)}`
+  const baseUrl = (ctx.ddgBaseUrl || 'https://html.duckduckgo.com').replace(/\/+$/, '')
+  const url = `${baseUrl}/html/?q=${encodeURIComponent(args.query)}`
   const response = await fetch(url, {
     method: 'GET',
     headers: {
@@ -178,6 +183,17 @@ export async function executeWebSearch(
   }
 
   let ddgError: unknown = null
+  if (ctx.ddgEnabled === false) {
+    throw new ToolDomainError(
+      'web_search_failed',
+      `Tavily failed and DDG is disabled: tavily=${tavilyError instanceof Error ? tavilyError.message : String(tavilyError ?? 'not_attempted')}`,
+      {
+        query: args.query,
+        tavilyError: tavilyError ? String(tavilyError) : null,
+        ddgError: 'disabled',
+      },
+    )
+  }
   try {
     const results = await searchViaDdg(args, ctx)
     // Stage R W1.1 follow-up: empty results are NOT a failure — query may

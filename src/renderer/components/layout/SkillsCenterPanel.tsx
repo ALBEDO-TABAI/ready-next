@@ -1,9 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
-import { Folder, FolderInput, FolderOpen, Pen, Trash2 } from 'lucide-react'
+import { Folder, FolderInput, FolderOpen, Loader2, Pen, Settings2, Trash2 } from 'lucide-react'
 import ContextMenu, { type ContextMenuItem } from './ContextMenu'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { readStorage, removeStorage, writeStorage } from '../../utils/storage'
 import { PANEL_TOKENS, SKILLS_PANEL_DIMENSIONS } from './panelTokens'
+import type { PublicExternalServiceProfile } from '../../../shared/external-services'
+import type {
+  SkillConfigurationDefinition,
+  SkillConfigurationView,
+  SkillConfigValue,
+} from '../../../shared/skill-configuration'
 
 interface SkillActionDefinition {
   name: string
@@ -25,6 +31,7 @@ interface SkillState {
   executionMode: 'advisory' | 'workflow' | 'direct'
   managedPath?: string
   sourcePath?: string
+  configuration?: SkillConfigurationDefinition
 }
 
 interface SkillsRuntimeInfo {
@@ -151,6 +158,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
   const [selectedCardId, setSelectedCardId] = useState<string | null>(null)
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; target: SkillCardContextTarget } | null>(null)
   const [editingSkill, setEditingSkill] = useState<SkillState | null>(null)
+  const [configuringSkill, setConfiguringSkill] = useState<SkillState | null>(null)
   const [descriptionDraft, setDescriptionDraft] = useState('')
   const [savingDescription, setSavingDescription] = useState(false)
 
@@ -455,6 +463,15 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
       },
     ]
 
+    if (skill.configuration) {
+      items.push({
+        id: 'configure-skill',
+        label: '配置',
+        icon: <Settings2 style={{ width: 16, height: 16 }} />,
+        onClick: () => { setConfiguringSkill(skill) },
+      })
+    }
+
     if (skill.source === 'custom') {
       items.push(
         {
@@ -693,10 +710,8 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
     </div>
   )
 
-  const shell = (
-    <div className="relative flex h-full min-h-0 flex-col">
-      {header}
-      {body}
+  const overlays = (
+    <>
       {message && (
         <div className="pointer-events-none absolute left-[8px] right-[8px] bottom-[8px]">
           <div
@@ -730,11 +745,29 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
         }}
         onSave={() => { void handleSaveDescription() }}
       />
+
+      <SkillConfigurationDialog
+        open={Boolean(configuringSkill)}
+        skill={configuringSkill}
+        onClose={() => setConfiguringSkill(null)}
+        onSaved={(text) => {
+          setConfiguringSkill(null)
+          pushMessage(text)
+        }}
+      />
+    </>
+  )
+
+  const shell = (
+    <div className="relative flex h-full min-h-0 flex-col">
+      {header}
+      {body}
+      {overlays}
     </div>
   )
 
   if (children) {
-    return <>{children({ header, body })}</>
+    return <>{children({ header, body })}{overlays}</>
   }
 
   return shell
@@ -870,6 +903,293 @@ function DescriptionEditorDialog({
               {saving ? '保存中...' : '保存'}
             </button>
           </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function SkillConfigurationDialog({
+  open,
+  skill,
+  onClose,
+  onSaved,
+}: {
+  open: boolean
+  skill: SkillState | null
+  onClose: () => void
+  onSaved: (message: string) => void
+}) {
+  const [view, setView] = useState<SkillConfigurationView | null>(null)
+  const [services, setServices] = useState<PublicExternalServiceProfile[]>([])
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!open || !skill) return
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    void (async () => {
+      try {
+        const [configRes, servicesRes] = await Promise.all([
+          window.electronAPI.skills.getConfiguration({ skillId: skill.id }),
+          window.electronAPI.settings.listExternalServices(),
+        ])
+        if (cancelled) return
+        if (configRes.success && configRes.data) {
+          setView(configRes.data as SkillConfigurationView)
+        } else {
+          setError(configRes.error || '读取技能配置失败')
+        }
+        if (servicesRes.success && servicesRes.data) {
+          setServices(servicesRes.data as PublicExternalServiceProfile[])
+        }
+      } catch (err) {
+        if (!cancelled) setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [open, skill])
+
+  useEffect(() => {
+    if (!open) return
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onClose()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [onClose, open])
+
+  const updateBinding = useCallback((id: string, value: string) => {
+    setView((current) => current ? {
+      ...current,
+      values: {
+        ...current.values,
+        serviceBindings: {
+          ...current.values.serviceBindings,
+          [id]: value,
+        },
+      },
+    } : current)
+  }, [])
+
+  const updateField = useCallback((id: string, value: SkillConfigValue) => {
+    setView((current) => current ? {
+      ...current,
+      values: {
+        ...current.values,
+        fields: {
+          ...current.values.fields,
+          [id]: value,
+        },
+      },
+    } : current)
+  }, [])
+
+  const save = useCallback(async () => {
+    if (!skill || !view) return
+    setSaving(true)
+    setError(null)
+    try {
+      const res = await window.electronAPI.skills.updateConfiguration({
+        skillId: skill.id,
+        serviceBindings: view.values.serviceBindings,
+        fields: view.values.fields,
+      })
+      if (res.success) {
+        onSaved(`已保存配置：${skill.name}`)
+      } else {
+        setError(res.error || '保存失败')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSaving(false)
+    }
+  }, [onSaved, skill, view])
+
+  if (!open || !skill) return null
+
+  const definition = view?.definition || skill.configuration || null
+  const hasConfig = Boolean(definition && (definition.serviceBindings.length > 0 || definition.fields.length > 0))
+
+  return (
+    <div
+      className="fixed inset-0 z-[10020] flex items-center justify-center"
+      style={{ background: 'rgba(0,0,0,0.28)' }}
+      onClick={(event) => {
+        if (event.target === event.currentTarget) onClose()
+      }}
+    >
+      <div
+        style={{
+          width: 520,
+          maxWidth: 'calc(100vw - 40px)',
+          maxHeight: 'calc(100vh - 80px)',
+          overflow: 'auto',
+          background: 'var(--bg-primary)',
+          border: '1px solid var(--border-default)',
+          borderRadius: 14,
+          boxShadow: '0 16px 46px rgba(0, 0, 0, 0.18)',
+          padding: 20,
+        }}
+      >
+        <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--text-title)' }}>
+          配置 Skill
+        </h3>
+        <p style={{ margin: '8px 0 0', fontSize: 12, lineHeight: 1.6, color: 'var(--text-secondary)' }}>
+          {skill.name}
+        </p>
+
+        <div style={{ marginTop: 16, display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {loading && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-muted)' }}>
+              <Loader2 size={14} className="animate-spin" />
+              加载配置...
+            </div>
+          )}
+
+          {!loading && !hasConfig && (
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', lineHeight: 1.6 }}>
+              这个 Skill 当前没有需要单独配置的项目。
+            </div>
+          )}
+
+          {!loading && definition?.serviceBindings.map((binding) => {
+            const options = services.filter((service) => binding.allowedKinds.includes(service.kind))
+            return (
+              <label key={binding.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: 'var(--text-muted)' }}>
+                <span style={{ fontWeight: 600, color: 'var(--text-body)' }}>{binding.label}</span>
+                {binding.description && <span style={{ fontSize: 11, lineHeight: 1.5 }}>{binding.description}</span>}
+                <select
+                  value={view?.values.serviceBindings[binding.id] || binding.defaultServiceId || ''}
+                  onChange={(event) => updateBinding(binding.id, event.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '9px 10px',
+                    fontSize: 12,
+                    color: 'var(--text-body)',
+                    background: 'var(--bg-editor)',
+                    border: '1px solid var(--border-input)',
+                    borderRadius: 10,
+                    outline: 'none',
+                  }}
+                >
+                  <option value="">不绑定</option>
+                  {options.map((service) => (
+                    <option key={service.id} value={service.id}>
+                      {service.name}{service.enabled ? '' : '（未启用）'}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )
+          })}
+
+          {!loading && definition?.fields.map((field) => {
+            const value = view?.values.fields[field.id] ?? field.defaultValue ?? ''
+            return (
+              <label key={field.id} style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: 12, color: 'var(--text-muted)' }}>
+                <span style={{ fontWeight: 600, color: 'var(--text-body)' }}>{field.label}</span>
+                {field.description && <span style={{ fontSize: 11, lineHeight: 1.5 }}>{field.description}</span>}
+                {field.type === 'boolean' ? (
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input
+                      type="checkbox"
+                      checked={Boolean(value)}
+                      onChange={(event) => updateField(field.id, event.target.checked)}
+                    />
+                    启用
+                  </span>
+                ) : field.type === 'select' ? (
+                  <select
+                    value={String(value || '')}
+                    onChange={(event) => updateField(field.id, event.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '9px 10px',
+                      fontSize: 12,
+                      color: 'var(--text-body)',
+                      background: 'var(--bg-editor)',
+                      border: '1px solid var(--border-input)',
+                      borderRadius: 10,
+                      outline: 'none',
+                    }}
+                  >
+                    {(field.options || []).map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type={field.type === 'password' ? 'password' : field.type === 'number' ? 'number' : 'text'}
+                    value={String(value || '')}
+                    onChange={(event) => updateField(field.id, field.type === 'number' ? Number(event.target.value) : event.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '9px 10px',
+                      fontSize: 12,
+                      color: 'var(--text-body)',
+                      background: 'var(--bg-editor)',
+                      border: '1px solid var(--border-input)',
+                      borderRadius: 10,
+                      outline: 'none',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                )}
+              </label>
+            )
+          })}
+        </div>
+
+        {error && (
+          <div style={{ marginTop: 12, fontSize: 12, color: 'var(--color-red)', lineHeight: 1.5 }}>
+            {error}
+          </div>
+        )}
+
+        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', marginTop: 16, gap: 8 }}>
+          <button
+            onClick={onClose}
+            disabled={saving}
+            style={{
+              padding: '7px 14px',
+              fontSize: 13,
+              fontWeight: 500,
+              color: 'var(--text-muted)',
+              background: 'transparent',
+              border: '1px solid var(--border-default)',
+              borderRadius: 8,
+              cursor: saving ? 'not-allowed' : 'pointer',
+            }}
+          >
+            取消
+          </button>
+          <button
+            onClick={() => { void save() }}
+            disabled={saving || loading || !hasConfig}
+            style={{
+              padding: '7px 14px',
+              fontSize: 13,
+              fontWeight: 500,
+              color: '#FFFFFF',
+              background: 'var(--color-blue)',
+              border: '1px solid transparent',
+              borderRadius: 8,
+              cursor: saving || loading || !hasConfig ? 'not-allowed' : 'pointer',
+              opacity: saving || loading || !hasConfig ? 0.7 : 1,
+            }}
+          >
+            {saving ? '保存中...' : '保存'}
+          </button>
         </div>
       </div>
     </div>

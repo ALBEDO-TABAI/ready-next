@@ -710,6 +710,12 @@ const skillsAPI = {
     executionMode?: 'auto' | 'workflow' | 'direct'
   }) => ipcRenderer.invoke('skills:run', payload),
   listJobs: (limit?: number) => ipcRenderer.invoke('skills:jobs:list', { limit }),
+  getConfiguration: (payload: { skillId: string }) => ipcRenderer.invoke('skills:configuration:get', payload),
+  updateConfiguration: (payload: {
+    skillId: string
+    serviceBindings?: Record<string, string>
+    fields?: Record<string, string | number | boolean | null>
+  }) => ipcRenderer.invoke('skills:configuration:update', payload),
   // Phase 4: skills:executions:* preload methods retired along with the
   // skill_executions state machine (listExecutions / getExecution /
   // submitInput / submitConfirmation / submitAgentResult / restartFromStep /
@@ -860,6 +866,10 @@ const settingsAPI = {
   getAIWorkspace: () => ipcRenderer.invoke('settings:getAIWorkspace'),
   setAIWorkspace: (workspace: unknown) => ipcRenderer.invoke('settings:setAIWorkspace', workspace),
   testAIConnection: (config: unknown) => ipcRenderer.invoke('settings:testAIConnection', config),
+  listExternalServices: () => ipcRenderer.invoke('settings:listExternalServices'),
+  updateExternalService: (input: unknown) => ipcRenderer.invoke('settings:updateExternalService', input),
+  resetExternalService: (payload: { id: string }) => ipcRenderer.invoke('settings:resetExternalService', payload),
+  testExternalService: (payload: { id: string }) => ipcRenderer.invoke('settings:testExternalService', payload),
 }
 
 const petAPI = {
