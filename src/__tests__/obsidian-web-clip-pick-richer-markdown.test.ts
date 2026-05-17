@@ -14,7 +14,12 @@ import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { pickRicherMarkdown, runClipPipeline, sanitizeUnfetchableImageRefs } from '../main/modules/clipping/clip-pipeline'
+import {
+  cleanJinaReaderMarkdown,
+  pickRicherMarkdown,
+  runClipPipeline,
+  sanitizeUnfetchableImageRefs,
+} from '../main/modules/clipping/clip-pipeline'
 
 const READ = 'readability content with a few words'
 const JINA = 'jina content rendered after JS'
@@ -169,6 +174,65 @@ describe('sanitizeUnfetchableImageRefs', () => {
   })
 })
 
+describe('cleanJinaReaderMarkdown', () => {
+  it('keeps the article body while removing Jina full-page navigation and language noise', () => {
+    const sourceUrl = 'https://znetwork.org/znetarticle/gaza-elders-who-survived-the-nakba-reflect-on-being-displaced-by-israel-again-78-years-later/'
+    const raw = [
+      'Title: Gaza Elders Who Survived The Nakba Reflect On Being Displaced By Israel Again, 78 Years Later',
+      '',
+      `URL Source: ${sourceUrl}`,
+      '',
+      'Published Time: 2026-05-16T15:42:50+00:00',
+      '',
+      'Markdown Content:',
+      '# Gaza Elders Who Survived The Nakba Reflect On Being Displaced By Israel Again, 78 Years Later - ZNetwork',
+      '',
+      '[Close Menu](https://znetwork.org/#)',
+      '',
+      '[Facebook](https://www.facebook.com/OfficialZNet)[X (Twitter)](https://twitter.com/OfficialZNet)[RSS](https://znetwork.org/rss-feeds/)',
+      '',
+      '[![Image 4: ZNetwork](https://znetwork.org/wp-content/uploads/2022/08/Z_logo_64.png)](https://znetwork.org/ "ZNetwork")',
+      '',
+      `[![Image 6: af](${sourceUrl})Afrikaans](https://znetwork.org/af/znetarticle/example)[![Image 7: sq](${sourceUrl})Albanian](https://znetwork.org/sq/znetarticle/example)[![Image 8: am](${sourceUrl})Amharic](https://znetwork.org/am/znetarticle/example)[![Image 9: hy](${sourceUrl})Armenian](https://znetwork.org/hy/znetarticle/example)[![Image 10: az](${sourceUrl})Azerbaijani](https://znetwork.org/az/znetarticle/example)[![Image 11: eu](${sourceUrl})Basque](https://znetwork.org/eu/znetarticle/example)`,
+      '',
+      '[Home](https://znetwork.org/) » [ZNet Articles](https://znetwork.org/znetarticle/) » Gaza Elders Who Survived The Nakba Reflect On Being Displaced By Israel Again, 78 Years Later',
+      '',
+      '[Featured](https://znetwork.org/category/contenttype/featured/)[Human Rights](https://znetwork.org/category/topic/politics-gov/social-policy/human-rights/)[Palestine & Israel](https://znetwork.org/category/place/middle-east/israel-palestine/)',
+      '',
+      '# Gaza Elders Who Survived The Nakba Reflect On Being Displaced By Israel Again, 78 Years Later',
+      '',
+      '“Every moment I connect my life now to those years after the Nakba,” says 85-year-old Fatima Ibrahim Khalfallah.',
+      '',
+      'By[Mohamed Solaimane](https://znetwork.org/author/mohamed-solaimane/ "Posts by Mohamed Solaimane")May 16, 2026 Z Article[No Comments](https://znetwork.org/#respond)9 Mins Read',
+      '',
+      'Source: [Mondoweiss](https://mondoweiss.net/2026/05/source-article/)',
+      '',
+      '[![Image 146: Gaza Elders Who Survived The Nakba Reflect On Being Displaced By Israel Again, 78 Years Later](https://znetwork.org/wp-content/uploads/2026/05/hero-600x338.jpeg)](https://znetwork.org/wp-content/uploads/2026/05/hero.jpeg "Gaza Elders")',
+      '',
+      'Ismail Atiya Nasir al-Din treads cautiously through the ruins of his three-story home in the Amal neighborhood of western Khan Younis.',
+      '',
+      '### Related Posts',
+      '',
+      '*   [Israel’s Gaza War Is One of History’s Worst Crimes Ever](https://znetwork.org/znetarticle/related/)',
+      '',
+      'Leave A Reply[Cancel Reply](https://znetwork.org/#respond)',
+    ].join('\n')
+
+    const out = cleanJinaReaderMarkdown(raw, sourceUrl)
+
+    assert.ok(out.startsWith('# Gaza Elders Who Survived'), 'article heading should become the start')
+    assert.ok(out.includes('Ismail Atiya Nasir al-Din treads cautiously'), 'article prose should remain')
+    assert.ok(out.includes('![Gaza Elders Who Survived'), 'content image should remain as an image')
+    assert.ok(out.includes('hero.jpeg'), 'linked full-size image target should be preferred')
+    assert.ok(!out.includes('Close Menu'))
+    assert.ok(!out.includes('Afrikaans'))
+    assert.ok(!out.includes('Related Posts'))
+    assert.ok(!out.includes('Z_logo_64'))
+    assert.ok(!out.includes('Markdown Content:'))
+    assert.ok(out.includes('By [Mohamed Solaimane]'), 'cramped inline links should be spaced')
+  })
+})
+
 describe('runClipPipeline · Jina-only fallback', () => {
   it('writes a note when raw HTML is unavailable but Jina markdown is present', async () => {
     const outputsRoot = mkdtempSync(join(tmpdir(), 'ready-clip-jina-only-'))
@@ -189,5 +253,48 @@ describe('runClipPipeline · Jina-only fallback', () => {
     assert.ok(result.warnings.includes('raw_html_unavailable_jina_fallback'))
     const saved = readFileSync(result.savedPath, 'utf-8')
     assert.ok(saved.includes('Body from Jina'))
+    assert.ok(!saved.includes('Markdown Content:'))
+  })
+
+  it('writes cleaned Jina content instead of full-page menu dumps', async () => {
+    const outputsRoot = mkdtempSync(join(tmpdir(), 'ready-clip-jina-clean-'))
+    const result = await runClipPipeline(
+      {
+        html: '',
+        url: 'https://example.com/article',
+        jinaMarkdown: [
+          'Title: Useful Article',
+          '',
+          'Markdown Content:',
+          '# Useful Article - Example',
+          '',
+          '[Close Menu](https://example.com/#)',
+          '',
+          '[Facebook](https://facebook.com/example)[RSS](https://example.com/rss-feeds/)',
+          '',
+          '# Useful Article',
+          '',
+          'This is the first real paragraph of the clipped article, with enough words to look like prose.',
+          '',
+          '![Hero](https://example.com/wp-content/uploads/2026/05/hero.jpg)',
+          '',
+          '### Related Posts',
+          '',
+          '* [Other story](https://example.com/other)',
+        ].join('\n'),
+      },
+      {
+        presetDir: PRESET_DIR,
+        preset: 'article-clipper',
+        outputsRoot,
+      },
+    )
+
+    const saved = readFileSync(result.savedPath, 'utf-8')
+    assert.ok(saved.includes('This is the first real paragraph'))
+    assert.ok(saved.includes('![Hero](https://example.com/wp-content/uploads/2026/05/hero.jpg)'))
+    assert.ok(!saved.includes('Close Menu'))
+    assert.ok(!saved.includes('Related Posts'))
+    assert.ok(!saved.includes('rss-feeds'))
   })
 })
