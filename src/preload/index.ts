@@ -450,8 +450,13 @@ const documentAPI = {
   reindexWorkspace: (root: string) => ipcRenderer.invoke('document:reindexWorkspace', root),
   indexDocument: (payload: { path: string; root?: string; content?: string }) =>
     ipcRenderer.invoke('document:indexDocument', payload),
-  searchIndex: (payload: { query: string; limit?: number; workspaceRoot?: string; sources?: string[] }) =>
-    ipcRenderer.invoke('document:searchIndex', payload),
+  searchIndex: (payload: {
+    query: string
+    limit?: number
+    workspaceRoot?: string
+    workspaceRoots?: string[]
+    sources?: string[]
+  }) => ipcRenderer.invoke('document:searchIndex', payload),
   reindexAllSources: (root: string) => ipcRenderer.invoke('document:reindexAllSources', root),
   listSources: () => ipcRenderer.invoke('document:listSources'),
   getBacklinks: (payload: { path: string; limit?: number }) =>

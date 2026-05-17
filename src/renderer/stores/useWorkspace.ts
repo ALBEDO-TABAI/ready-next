@@ -210,46 +210,170 @@ const resolveCreationBaseDir = (state: Pick<
   return state.currentPath || '/'
 }
 
-// perf-rescue B7: keep the active chokidar watcher in sync with the workspace
-// root. Module-scoped so we don't leak a watcher when the user switches
-// workspaces — switching always stops the previous before starting the new
-// one. Failures during start are silent: the indexer keeps working, just
-// without delta updates (user can manually reindex).
-let activeWatcherId: string | null = null
-let activeWatcherRoot: string | null = null
-async function syncFileWatcher(nextRoot: string | null): Promise<void> {
+// perf-rescue B7 → multi-root (2026-05): keep one chokidar watcher per safe
+// workspace root in sync with `(workspaceRoot ∪ pinnedFolders)`. Module-scoped
+// state survives HMR the same way the previous single-pair did. Failures
+// during start are non-fatal — already-running watchers keep working; the
+// user can manually reindex on the failed root after fixing it.
+//
+// Race contract (see plan):
+//   - `intendedRoots` is the latest desired set. Updated synchronously by
+//     reconcile/ensure/release entrypoints BEFORE any awaited IPC.
+//   - After `startWatcher` resolves, ensure re-checks `intendedRoots.has(root)`
+//     — if intent has flipped away, the just-issued watcherId is immediately
+//     stopped (rollback) and never recorded.
+//   - After `stopWatcher` is about to fire in release, release re-checks
+//     intent — if the root was added back during the inflight wait, the
+//     wanted watcher is preserved.
+const watcherIdsByRoot = new Map<string, string>()
+const watcherStartInflight = new Map<string, Promise<void>>()
+let intendedRoots: ReadonlySet<string> = new Set()
+
+/** Pure: roots that pass `validateWorkspaceRoot`. Unsafe pins still show in
+ * the file tree but never feed the indexer / watcher / search subsystem. */
+export function computeDesiredRoots(
+  state: Pick<WorkspaceState, 'workspaceRoot' | 'pinnedFolders'>,
+): string[] {
+  const union = state.workspaceRoot
+    ? [state.workspaceRoot, ...state.pinnedFolders.filter((p) => p !== state.workspaceRoot)]
+    : [...state.pinnedFolders]
+  return union.filter((root) => validateWorkspaceRoot(root).ok)
+}
+
+async function ensureWatcherFor(root: string): Promise<void> {
   if (typeof window === 'undefined' || !window.electronAPI?.document) return
   const doc = window.electronAPI.document
-  // No-op when the root didn't actually change. Avoids a stop+start cycle on
-  // unrelated state transitions that touch workspaceRoot.
-  if (nextRoot === activeWatcherRoot) return
-  // Stop the previous watcher first so chokidar releases its FSEvents/inotify
-  // handles before we open new ones.
-  if (activeWatcherId && doc.stopWatcher) {
-    const prevId = activeWatcherId
-    activeWatcherId = null
-    activeWatcherRoot = null
+  if (watcherIdsByRoot.has(root)) return
+  const existing = watcherStartInflight.get(root)
+  if (existing) return existing
+  if (!doc.startWatcher) return
+  const promise = (async () => {
     try {
-      await doc.stopWatcher({ watcherId: prevId })
-    } catch (error) {
-      console.warn('[workspace] stopWatcher failed:', error)
-    }
-  }
-  if (nextRoot && doc.startWatcher) {
-    try {
-      const result = await doc.startWatcher({ workspaceRoot: nextRoot })
+      const result = await doc.startWatcher({ workspaceRoot: root })
+      // Race check #1: intent may have flipped away during the await
+      // (e.g. user clearWorkspace before chokidar `ready`). Roll back
+      // the newly-allocated watcher immediately and skip recording it.
+      if (!intendedRoots.has(root)) {
+        if (result?.success && result.data?.watcherId && doc.stopWatcher) {
+          try {
+            await doc.stopWatcher({ watcherId: result.data.watcherId })
+          } catch (error) {
+            console.warn('[workspace] watcher race rollback stopWatcher failed:', error)
+          }
+        }
+        return
+      }
       if (result?.success && result.data?.watcherId) {
-        activeWatcherId = result.data.watcherId
-        activeWatcherRoot = nextRoot
+        watcherIdsByRoot.set(root, result.data.watcherId)
       } else if (result && !result.success) {
-        // ENOSPC on Linux is the common case worth surfacing — leave it to the
-        // toast layer to read result.errorKind/hint when we wire UX.
         console.warn('[workspace] startWatcher rejected:', result.errorKind, result.error, result.hint)
       }
     } catch (error) {
       console.warn('[workspace] startWatcher failed:', error)
+    } finally {
+      watcherStartInflight.delete(root)
+    }
+  })()
+  watcherStartInflight.set(root, promise)
+  return promise
+}
+
+async function releaseWatcherFor(root: string): Promise<void> {
+  if (typeof window === 'undefined' || !window.electronAPI?.document) return
+  const doc = window.electronAPI.document
+  // Strip intent first so any inflight start sees the new state on completion.
+  if (intendedRoots.has(root)) {
+    intendedRoots = new Set([...intendedRoots].filter((r) => r !== root))
+  }
+  const inflight = watcherStartInflight.get(root)
+  if (inflight) {
+    try {
+      await inflight
+    } catch {
+      /* inflight failures are already logged in ensureWatcherFor */
     }
   }
+  // Race check #2: intent may have flipped BACK during the inflight await
+  // (remove → add of the same root). If so, the watcher we were about to
+  // stop is now wanted again — leave it alone.
+  if (intendedRoots.has(root)) return
+  const id = watcherIdsByRoot.get(root)
+  if (!id || !doc.stopWatcher) return
+  watcherIdsByRoot.delete(root)
+  try {
+    await doc.stopWatcher({ watcherId: id })
+  } catch (error) {
+    console.warn('[workspace] stopWatcher failed:', error)
+  }
+}
+
+async function releaseAllWatchers(): Promise<void> {
+  if (typeof window === 'undefined' || !window.electronAPI?.document) return
+  const doc = window.electronAPI.document
+  // Step A: clear intent synchronously. Any inflight start that resolves after
+  // this point will observe the empty intent and roll back.
+  intendedRoots = new Set()
+  // Step B: drain inflight starts. The await yields control, so a concurrent
+  // addPinnedFolder MAY run during this window and re-populate `intendedRoots`.
+  const inflightPromises = Array.from(watcherStartInflight.values())
+  if (inflightPromises.length > 0) {
+    await Promise.all(
+      inflightPromises.map((p) => p.catch(() => undefined)),
+    )
+  }
+  // Step C: re-check intent BEFORE stopping anything. If a concurrent caller
+  // re-armed the desired set (e.g. clearWorkspace immediately followed by
+  // addPinnedFolder(X) — both sync entries, then this releaseAll resumes from
+  // its await), `intendedRoots` now reflects the latest wishes. Stop ONLY the
+  // watchers that are no longer wanted, so we don't kill freshly-needed ones.
+  if (!doc.stopWatcher) {
+    for (const root of Array.from(watcherIdsByRoot.keys())) {
+      if (!intendedRoots.has(root)) watcherIdsByRoot.delete(root)
+    }
+    return
+  }
+  const toStop: Array<{ root: string; id: string }> = []
+  for (const [root, id] of watcherIdsByRoot.entries()) {
+    if (!intendedRoots.has(root)) toStop.push({ root, id })
+  }
+  for (const { root } of toStop) {
+    watcherIdsByRoot.delete(root)
+  }
+  await Promise.all(
+    toStop.map(async ({ id }) => {
+      try {
+        await doc.stopWatcher!({ watcherId: id })
+      } catch (error) {
+        console.warn('[workspace] stopWatcher failed during releaseAll:', error)
+      }
+    }),
+  )
+}
+
+async function reconcileWatchers(desired: readonly string[]): Promise<void> {
+  intendedRoots = new Set(desired)
+  const current = new Set(watcherIdsByRoot.keys())
+  const toStop: string[] = []
+  for (const root of current) {
+    if (!intendedRoots.has(root)) toStop.push(root)
+  }
+  const toStart: string[] = []
+  for (const root of intendedRoots) {
+    if (!watcherIdsByRoot.has(root) && !watcherStartInflight.has(root)) {
+      toStart.push(root)
+    }
+  }
+  await Promise.all([
+    ...toStop.map((r) => releaseWatcherFor(r)),
+    ...toStart.map((r) => ensureWatcherFor(r)),
+  ])
+}
+
+/** Single external entry point for boot / WorkbenchMode reconcile.
+ * External callers do not compose root sets themselves — `computeDesiredRoots`
+ * is the only place the union rule lives. */
+export async function reconcileWorkspaceWatchersFromStore(): Promise<void> {
+  await reconcileWatchers(computeDesiredRoots(useWorkspace.getState()))
 }
 
 const SIDE_PANEL_WIDTHS_KEY = 'ready-side-panel-widths-v2'
@@ -483,8 +607,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     }
     set({ workspaceRoot: path, currentPath: path, expandedDirs: new Set(), dirChildren: new Map(), selectedFile: null })
     writeStorage('ready-workspace-root', path)
-    // perf-rescue B7: chokidar delta indexing — start watcher on root change.
-    void syncFileWatcher(path)
+    // Multi-root reconcile: starts watcher for the new primary (and any pinned
+    // folders) while stopping watchers no longer in the desired set.
+    void reconcileWatchers(computeDesiredRoots(get()))
     get().refreshFiles()
     return validation
   },
@@ -529,8 +654,8 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     })
     removeStorage('ready-workspace-root')
     removeStorage('ready-pinned-folders')
-    // perf-rescue B7: stop the chokidar watcher when the workspace closes.
-    void syncFileWatcher(null)
+    // Stop every active chokidar watcher; rolls back any inflight starts too.
+    void releaseAllWatchers()
   },
 
   addPinnedFolder: (path) => {
@@ -541,8 +666,14 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       if (shouldPromote) {
         set({ workspaceRoot: path, currentPath: path, expandedDirs: new Set(), dirChildren: new Map(), selectedFile: null })
         writeStorage('ready-workspace-root', path)
-        void syncFileWatcher(path)
+        // Multi-root: ensure watcher for the (possibly newly-promoted) root
+        // and every other safe pinned folder — also stops any stale watchers.
+        void reconcileWatchers(computeDesiredRoots(get()))
         get().refreshFiles()
+      } else {
+        // Already-pinned path: even when not promoted, the watcher set may
+        // need a refresh (e.g. cold-start after manual storage edit).
+        void reconcileWatchers(computeDesiredRoots(get()))
       }
       return
     }
@@ -556,9 +687,13 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     writeJsonStorage('ready-pinned-folders', next)
     if (shouldPromote) {
       writeStorage('ready-workspace-root', path)
-      void syncFileWatcher(path)
       get().refreshFiles()
     }
+    // Core bug fix: subsequent pinned folders previously never reached the
+    // watcher / index subsystem. The unconditional reconcile below covers the
+    // promote and non-promote branches, applying `computeDesiredRoots`'s safety
+    // filter so unsafe pins (e.g. `~`) stay browsable but never get watched.
+    void reconcileWatchers(computeDesiredRoots(get()))
   },
 
   removePinnedFolder: (path) => {
@@ -566,6 +701,9 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     const next = pinnedFolders.filter(p => p !== path)
     set({ pinnedFolders: next })
     writeJsonStorage('ready-pinned-folders', next)
+    // If `path === workspaceRoot`, the path is still in the desired set
+    // (workspaceRoot is part of the union), so the reconcile won't stop it.
+    void reconcileWatchers(computeDesiredRoots(get()))
   },
 
   saveWorkspace: (name) => {
@@ -606,8 +744,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         console.warn('[workspace] loadSavedWorkspace dropped unsafe primary:', validation.reason, validation.message)
       }
     }
-    // perf-rescue B7: keep the watcher in sync when a saved workspace loads.
-    void syncFileWatcher(safePrimary)
+    // Multi-root: replace the entire watcher set with the saved folders'
+    // safe union. Unsafe folders in the saved set still appear in pinned for
+    // browsing, but `computeDesiredRoots` filters them out of the watcher set.
+    void reconcileWatchers(computeDesiredRoots(get()))
     get().refreshFiles()
   },
 

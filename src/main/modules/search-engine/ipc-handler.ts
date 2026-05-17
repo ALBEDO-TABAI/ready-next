@@ -14,6 +14,7 @@ import {
   isInotifyExhaustionError,
 } from './file-watcher'
 import type { SearchHit } from './query'
+import { validateWorkspaceRoot } from '../../../shared/workspace-validation'
 
 interface SearchIPCResponse<T> {
   success: boolean
@@ -62,12 +63,27 @@ export function setupSearchIPC(): void {
 
   ipcMain.handle(
     'document:reindexWorkspace',
-    async (_event, root: string): Promise<SearchIPCResponse<ReindexWorkspaceResult>> => {
+    async (_event, root: string): Promise<SearchIPCResponse<ReindexWorkspaceResult> & {
+      errorKind?: 'invalid_root' | 'engine_unavailable' | 'failed'
+      validationReason?: string
+    }> => {
       if (!searchEngine) {
-        return { success: false, error: 'search engine unavailable' }
+        return { success: false, error: 'search engine unavailable', errorKind: 'engine_unavailable' }
       }
       if (typeof root !== 'string' || root.length === 0) {
-        return { success: false, error: 'root path required' }
+        return { success: false, error: 'root path required', errorKind: 'invalid_root' }
+      }
+      // Defense-in-depth: even if the renderer's computeDesiredRoots filter
+      // is bypassed (older callers, tests, future code paths), we never let
+      // the indexer touch a forbidden tree like `~` / `/Users/<x>`.
+      const validation = validateWorkspaceRoot(root)
+      if (!validation.ok) {
+        return {
+          success: false,
+          error: validation.message ?? 'unsafe workspace root',
+          errorKind: 'invalid_root',
+          validationReason: validation.reason,
+        }
       }
       // perf-rescue B1: reindex walks the full workspace + writes batches.
       // Run in worker; on bridge failure fall back to in-process engine.
@@ -79,7 +95,7 @@ export function setupSearchIPC(): void {
           const result = await searchEngine.reindexWorkspace({ root })
           return { success: true, data: result }
         } catch (error) {
-          return { success: false, error: error instanceof Error ? error.message : String(error) }
+          return { success: false, error: error instanceof Error ? error.message : String(error), errorKind: 'failed' }
         }
       }
     },
@@ -89,17 +105,57 @@ export function setupSearchIPC(): void {
     'document:searchIndex',
     async (
       _event,
-      payload: { query: string; limit?: number; workspaceRoot?: string; sources?: string[] },
+      payload: {
+        query: string
+        limit?: number
+        workspaceRoot?: string
+        workspaceRoots?: string[]
+        sources?: string[]
+      },
     ): Promise<SearchIPCResponse<{
       items: Array<SearchHit & { sourceType: string; sourceMeta?: Record<string, unknown> | null }>
       stats: { returned: number; elapsedMs: number }
       degraded: boolean
-    }>> => {
+    }> & {
+      errorKind?: 'invalid_root' | 'engine_unavailable' | 'failed'
+      validationReason?: string
+    }> => {
       if (!searchEngine) {
-        return { success: false, error: 'search engine unavailable' }
+        return { success: false, error: 'search engine unavailable', errorKind: 'engine_unavailable' }
       }
       if (!payload || typeof payload.query !== 'string') {
         return { success: false, error: 'query required' }
+      }
+      // Defense-in-depth: even though the renderer's computeDesiredRoots
+      // pre-filters unsafe paths, a buggy or malicious caller could still
+      // pass `~` / `/Users/<x>` / `/Volumes/<x>` here. We hard-reject so
+      // search never operates on a forbidden tree (even if a stale row for
+      // one survives in the DB — engine-side filtering covers that path
+      // separately).
+      if (typeof payload.workspaceRoot === 'string' && payload.workspaceRoot.length > 0) {
+        const validation = validateWorkspaceRoot(payload.workspaceRoot)
+        if (!validation.ok) {
+          return {
+            success: false,
+            error: validation.message ?? 'unsafe workspace root',
+            errorKind: 'invalid_root',
+            validationReason: validation.reason,
+          }
+        }
+      }
+      if (Array.isArray(payload.workspaceRoots)) {
+        for (const root of payload.workspaceRoots) {
+          if (typeof root !== 'string') continue
+          const validation = validateWorkspaceRoot(root)
+          if (!validation.ok) {
+            return {
+              success: false,
+              error: validation.message ?? 'unsafe workspace root',
+              errorKind: 'invalid_root',
+              validationReason: validation.reason,
+            }
+          }
+        }
       }
       // perf-rescue B1: FTS scan on multi-GB index — offload to worker.
       try {
@@ -107,6 +163,7 @@ export function setupSearchIPC(): void {
           query: payload.query,
           limit: payload.limit,
           workspaceRoot: payload.workspaceRoot,
+          workspaceRoots: payload.workspaceRoots,
           sources: payload.sources,
         })
         return { success: true, data: result }
@@ -115,11 +172,12 @@ export function setupSearchIPC(): void {
           const result = await searchEngine.search(payload.query, {
             limit: payload.limit,
             workspaceRoot: payload.workspaceRoot,
+            workspaceRoots: payload.workspaceRoots,
             sources: payload.sources,
           })
           return { success: true, data: result }
         } catch (error) {
-          return { success: false, error: error instanceof Error ? error.message : String(error) }
+          return { success: false, error: error instanceof Error ? error.message : String(error), errorKind: 'failed' }
         }
       }
     },
@@ -127,10 +185,24 @@ export function setupSearchIPC(): void {
 
   ipcMain.handle(
     'document:reindexAllSources',
-    async (_event, root: string): Promise<SearchIPCResponse<ReindexAllSourcesResult>> => {
-      if (!searchEngine) return { success: false, error: 'search engine unavailable' }
+    async (_event, root: string): Promise<SearchIPCResponse<ReindexAllSourcesResult> & {
+      errorKind?: 'invalid_root' | 'engine_unavailable' | 'failed'
+      validationReason?: string
+    }> => {
+      if (!searchEngine) return { success: false, error: 'search engine unavailable', errorKind: 'engine_unavailable' }
       if (typeof root !== 'string' || root.length === 0) {
-        return { success: false, error: 'root path required' }
+        return { success: false, error: 'root path required', errorKind: 'invalid_root' }
+      }
+      // Same defense-in-depth gate as document:reindexWorkspace. Forbidden
+      // roots never enter the worker / fallback search engine.
+      const validation = validateWorkspaceRoot(root)
+      if (!validation.ok) {
+        return {
+          success: false,
+          error: validation.message ?? 'unsafe workspace root',
+          errorKind: 'invalid_root',
+          validationReason: validation.reason,
+        }
       }
       // perf-rescue B1: full multi-source reindex — offload to worker.
       try {
@@ -141,7 +213,7 @@ export function setupSearchIPC(): void {
           const result = await searchEngine.reindexAllSources({ root })
           return { success: true, data: result }
         } catch (error) {
-          return { success: false, error: error instanceof Error ? error.message : String(error) }
+          return { success: false, error: error instanceof Error ? error.message : String(error), errorKind: 'failed' }
         }
       }
     },

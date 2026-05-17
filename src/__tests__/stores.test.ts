@@ -80,7 +80,7 @@ if (typeof (globalThis as any).window === 'undefined') {
 const { useMode } = await import('../renderer/stores/useMode')
 const { useDocTabs } = await import('../renderer/stores/useDocTabs')
 const { useAgent } = await import('../renderer/stores/useAgent')
-const { useWorkspace } = await import('../renderer/stores/useWorkspace')
+const { useWorkspace, computeDesiredRoots } = await import('../renderer/stores/useWorkspace')
 const { useTheme } = await import('../renderer/stores/useTheme')
 const { useRSSSession } = await import('../renderer/stores/useRSSSession')
 const { useSettings } = await import('../renderer/stores/useSettings')
@@ -1888,6 +1888,265 @@ describe('useWorkspace Store', () => {
         assert.strictEqual(state.currentPath, '/test/dir')
         // refreshFiles mock populates files
         assert.ok(state.files.length > 0)
+    })
+})
+
+// ============================================================
+// useWorkspace Multi-Root Watcher Tests
+// ============================================================
+//
+// These tests assert the multi-root watcher contract introduced in the
+// pinned-folder closure fix:
+//   - every safe pinned folder gets its own startWatcher call
+//   - unsafe paths still pin but never reach the watcher subsystem
+//   - cross-direction races (add↔clear, remove↔re-add) never leak or wrongly stop
+//   - reconcile is the single source of truth for the active watcher set
+
+describe('useWorkspace multi-root watchers', () => {
+    type StartCall = { workspaceRoot: string }
+    type StopCall = { watcherId: string }
+
+    let startCalls: StartCall[]
+    let stopCalls: StopCall[]
+    let watcherIdCounter: number
+    let startResolvers: Array<{ root: string; resolve: (id: string) => void }>
+    let delayStart: boolean
+
+    const resetWorkspaceState = () => {
+        useWorkspace.setState({
+            workspaceRoot: null,
+            currentPath: '/',
+            files: [],
+            selectedFile: null,
+            expandedDirs: new Set<string>(),
+            dirChildren: new Map(),
+            pinnedFolders: [],
+            sidebarVisible: true,
+            sidePanelVariant: 'files',
+            sidePanelWidths: { shared: 220 },
+            skillsSplitRatio: 0.5,
+            chatPanelVisible: true,
+            chatPanelWidth: 380,
+            renamingPath: null,
+            creatingType: null,
+            creatingPath: null,
+        })
+    }
+
+    // Drain async watcher work fired by `void reconcileWatchers(...)`. The
+    // reconcile chain is: outer set() (sync) → void reconcile → Promise.all →
+    // ensure/release → await doc.startWatcher/stopWatcher (microtask) → map
+    // update. A handful of macrotask ticks covers it; we add a small loop so
+    // chained awaits (e.g. release-after-inflight) settle deterministically.
+    const flushWatchers = async (ticks = 4) => {
+        for (let i = 0; i < ticks; i++) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 0))
+        }
+    }
+
+    beforeEach(async () => {
+        storage.clear()
+        startCalls = []
+        stopCalls = []
+        watcherIdCounter = 0
+        startResolvers = []
+        delayStart = false
+        // Install the mock FIRST so the upcoming cleanup pass below can use it
+        // to drain any leaked module-level watcher state (`watcherIdsByRoot` /
+        // `intendedRoots` are private and persist across tests).
+        ;(globalThis as any).window.electronAPI = {
+            document: {
+                startWatcher: async ({ workspaceRoot }: { workspaceRoot: string }) => {
+                    startCalls.push({ workspaceRoot })
+                    if (delayStart) {
+                        // Hand control back to the test so it can drive races
+                        // (e.g. clearWorkspace while a start is still in flight).
+                        const id = await new Promise<string>((resolve) => {
+                            startResolvers.push({ root: workspaceRoot, resolve })
+                        })
+                        return { success: true, data: { watcherId: id, workspaceRoot } }
+                    }
+                    return {
+                        success: true,
+                        data: { watcherId: `wch-${++watcherIdCounter}`, workspaceRoot },
+                    }
+                },
+                stopWatcher: async ({ watcherId }: { watcherId: string }) => {
+                    stopCalls.push({ watcherId })
+                    return { success: true, data: { stopped: true } }
+                },
+                // refreshFiles uses listFiles; stub returns empty so calls
+                // don't fail with "result.success undefined".
+                listFiles: async () => ({ success: true, items: [] }),
+            },
+        }
+        // Drain module-level watcher state from any prior test. clearWorkspace
+        // triggers releaseAllWatchers under the new mock, stopping every leaked
+        // watcher and clearing `watcherIdsByRoot` / `intendedRoots`.
+        useWorkspace.getState().clearWorkspace()
+        await flushWatchers()
+        // Reset counters AFTER cleanup so the actual test starts with empty
+        // arrays. Closures captured the bindings, so reassigning is safe.
+        startCalls = []
+        stopCalls = []
+        watcherIdCounter = 0
+        resetWorkspaceState()
+    })
+
+    const SAFE_A = '/Users/test/Documents/proj-a'
+    const SAFE_B = '/Users/test/Documents/proj-b'
+    const SAFE_C = '/Users/test/Documents/proj-c'
+
+    it('computes safe-only desired roots', () => {
+        const safe = computeDesiredRoots({ workspaceRoot: null, pinnedFolders: [SAFE_A, '/Users/test'] })
+        assert.deepStrictEqual(safe, [SAFE_A])
+    })
+
+    it('starts a watcher for the second safe pinned folder (core fix)', async () => {
+        useWorkspace.getState().addPinnedFolder(SAFE_A)
+        await flushWatchers()
+        useWorkspace.getState().addPinnedFolder(SAFE_B)
+        await flushWatchers()
+        const roots = startCalls.map((c) => c.workspaceRoot)
+        assert.ok(roots.includes(SAFE_A), 'first pinned must trigger startWatcher')
+        assert.ok(roots.includes(SAFE_B), 'second pinned must trigger startWatcher (this was the bug)')
+        assert.strictEqual(startCalls.length, 2)
+    })
+
+    it('does not start a watcher twice for the same path', async () => {
+        useWorkspace.getState().addPinnedFolder(SAFE_A)
+        await flushWatchers()
+        useWorkspace.getState().addPinnedFolder(SAFE_A)
+        await flushWatchers()
+        assert.strictEqual(startCalls.length, 1)
+    })
+
+    it('does not start a watcher for unsafe roots, but keeps them pinned', async () => {
+        useWorkspace.getState().addPinnedFolder('/Users/test') // unsafe (home-like)
+        await flushWatchers()
+        assert.deepStrictEqual(useWorkspace.getState().pinnedFolders, ['/Users/test'])
+        assert.strictEqual(startCalls.length, 0)
+    })
+
+    it('stops the watcher when a pinned folder is removed (non-primary)', async () => {
+        useWorkspace.getState().addPinnedFolder(SAFE_A)
+        useWorkspace.getState().addPinnedFolder(SAFE_B)
+        await flushWatchers()
+        const stopBefore = stopCalls.length
+        useWorkspace.getState().removePinnedFolder(SAFE_B)
+        await flushWatchers()
+        assert.ok(stopCalls.length > stopBefore, 'remove must invoke stopWatcher')
+    })
+
+    it('does NOT stop the watcher when the removed path equals workspaceRoot', async () => {
+        useWorkspace.getState().addPinnedFolder(SAFE_A) // promotes to workspaceRoot
+        await flushWatchers()
+        assert.strictEqual(useWorkspace.getState().workspaceRoot, SAFE_A)
+        useWorkspace.getState().removePinnedFolder(SAFE_A)
+        await flushWatchers()
+        // pinned list lost SAFE_A but it's still the workspaceRoot, so it
+        // stays in desiredRoots — no stop should fire.
+        assert.strictEqual(stopCalls.length, 0)
+    })
+
+    it('reconciles to a new desired set on loadSavedWorkspace replacing the old one', async () => {
+        useWorkspace.getState().addPinnedFolder(SAFE_A)
+        useWorkspace.getState().addPinnedFolder(SAFE_B)
+        await flushWatchers()
+        const startsBefore = startCalls.length
+        const stopsBefore = stopCalls.length
+        useWorkspace.getState().loadSavedWorkspace([SAFE_C])
+        await flushWatchers()
+        // SAFE_A and SAFE_B both leave the set (one was workspaceRoot, one was
+        // pinned) — both must be stopped. SAFE_C is the new set so it starts.
+        const stoppedRoots = stopCalls.length - stopsBefore
+        const startedRoots = startCalls.length - startsBefore
+        assert.strictEqual(stoppedRoots, 2, 'both old roots should stop')
+        assert.strictEqual(startedRoots, 1, 'new root should start')
+        const lastStart = startCalls[startCalls.length - 1]
+        assert.strictEqual(lastStart.workspaceRoot, SAFE_C)
+    })
+
+    it('stops every watcher on clearWorkspace', async () => {
+        useWorkspace.getState().addPinnedFolder(SAFE_A)
+        useWorkspace.getState().addPinnedFolder(SAFE_B)
+        useWorkspace.getState().addPinnedFolder(SAFE_C)
+        await flushWatchers()
+        const stopsBefore = stopCalls.length
+        useWorkspace.getState().clearWorkspace()
+        await flushWatchers()
+        assert.ok(stopCalls.length - stopsBefore >= 3, 'all watchers must be stopped')
+        assert.strictEqual(useWorkspace.getState().pinnedFolders.length, 0)
+    })
+
+    it('rolls back a start that completes after the intent flipped away', async () => {
+        delayStart = true
+        useWorkspace.getState().addPinnedFolder(SAFE_A)
+        await flushWatchers()
+        assert.strictEqual(startResolvers.length, 1, 'start is in flight')
+        // Flip intent away mid-start. The mock startWatcher has not resolved.
+        useWorkspace.getState().clearWorkspace()
+        await flushWatchers()
+        // Resolve the in-flight start: it should observe the empty intent
+        // and immediately stop the just-issued watcherId, never recording it.
+        const resolver = startResolvers[0]
+        resolver.resolve('wch-late')
+        await flushWatchers()
+        // Exactly one stop for the rolled-back watcherId — no leak.
+        assert.ok(stopCalls.some((c) => c.watcherId === 'wch-late'), 'late watcherId must be rolled back')
+    })
+
+    it('preserves the watcher when remove happens during in-flight start and the same path is re-added before stop fires', async () => {
+        delayStart = true
+        useWorkspace.getState().addPinnedFolder(SAFE_A)
+        await flushWatchers()
+        assert.strictEqual(startResolvers.length, 1)
+        // Remove triggers releaseWatcherFor, which now awaits the inflight start.
+        useWorkspace.getState().removePinnedFolder(SAFE_A)
+        await flushWatchers()
+        // Re-add the same path; intent flips back BEFORE the inflight resolves.
+        useWorkspace.getState().addPinnedFolder(SAFE_A)
+        await flushWatchers()
+        // Resolve the original start; release should re-check intent and
+        // skip the stop because SAFE_A is wanted again.
+        const resolver = startResolvers[0]
+        resolver.resolve('wch-original')
+        await flushWatchers()
+        // Re-add must not start a SECOND watcher while the first is still in
+        // flight — `watcherStartInflight` dedups. After resolution, the only
+        // active watcher is wch-original. We should NOT have stopped it.
+        assert.ok(
+            !stopCalls.some((c) => c.watcherId === 'wch-original'),
+            'wch-original must survive the remove→re-add race',
+        )
+    })
+
+    it('preserves a freshly-re-added watcher when clearWorkspace is still draining inflight', async () => {
+        // Reverse race (code review #2): releaseAllWatchers must re-check
+        // `intendedRoots` AFTER awaiting inflight starts. Otherwise a
+        // clearWorkspace → add(SAFE_A) → (release resumes) → stops SAFE_A
+        // sequence would kill the freshly-wanted watcher.
+        delayStart = true
+        useWorkspace.getState().addPinnedFolder(SAFE_A)
+        await flushWatchers()
+        assert.strictEqual(startResolvers.length, 1, 'start is in flight')
+        // clearWorkspace synchronously sets intent={}, queues a releaseAll that
+        // now awaits the inflight start.
+        useWorkspace.getState().clearWorkspace()
+        // Before the inflight resolves, user re-adds the same path. addPinned's
+        // reconcile sets intent={SAFE_A} synchronously.
+        useWorkspace.getState().addPinnedFolder(SAFE_A)
+        // Resolve the inflight: ensure() sees intent={SAFE_A} and writes to
+        // map. releaseAllWatchers then resumes; with the fix it re-checks
+        // intent and leaves SAFE_A alone.
+        startResolvers[0].resolve('wch-survives-clear')
+        await flushWatchers()
+        assert.ok(
+            !stopCalls.some((c) => c.watcherId === 'wch-survives-clear'),
+            'wch-survives-clear must NOT be stopped by the late releaseAllWatchers',
+        )
+        // Sanity: SAFE_A is back in pinnedFolders after the re-add.
+        assert.ok(useWorkspace.getState().pinnedFolders.includes(SAFE_A))
     })
 })
 

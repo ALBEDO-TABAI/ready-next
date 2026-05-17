@@ -1556,7 +1556,13 @@ interface ElectronDocumentAPI {
   }) => void
   reindexWorkspace: (root: string) => Promise<DocumentReindexWorkspaceResponse>
   indexDocument: (payload: { path: string; root?: string; content?: string }) => Promise<DocumentIndexDocumentResponse>
-  searchIndex: (payload: { query: string; limit?: number; workspaceRoot?: string; sources?: string[] }) => Promise<DocumentSearchIndexResponse>
+  searchIndex: (payload: {
+    query: string
+    limit?: number
+    workspaceRoot?: string
+    workspaceRoots?: string[]
+    sources?: string[]
+  }) => Promise<DocumentSearchIndexResponse>
   reindexAllSources: (root: string) => Promise<DocumentReindexAllSourcesResponse>
   listSources: () => Promise<DocumentListSourcesResponse>
   getBacklinks: (payload: { path: string; limit?: number }) => Promise<DocumentBacklinksResponse>
@@ -1642,6 +1648,16 @@ interface DocumentReindexAllSourcesResponse {
   success: boolean
   data?: DocumentReindexAllSourcesResult
   error?: string
+  /**
+   * When success=false, surfaces why the request was rejected. Aligned with
+   * `document:startWatcher` so the renderer can branch on the same vocabulary.
+   * `invalid_root` covers unsafe workspace roots (`~`, `/Users/<x>`, etc).
+   */
+  errorKind?: 'invalid_root' | 'engine_unavailable' | 'failed'
+  /** Populated when errorKind='invalid_root', mirrors validateWorkspaceRoot.reason. */
+  validationReason?: string
+  /** Optional advisory hint (matches startWatcher's hint shape). */
+  hint?: string
 }
 
 interface DocumentListSourcesResponse {
@@ -1660,6 +1676,8 @@ interface DocumentSearchIndexResponse {
   success: boolean
   data?: DocumentSearchIndexResult
   error?: string
+  errorKind?: 'invalid_root' | 'engine_unavailable' | 'failed'
+  validationReason?: string
 }
 
 interface DocumentReindexWorkspaceResult {
@@ -1679,6 +1697,14 @@ interface DocumentReindexWorkspaceResponse {
   success: boolean
   data?: DocumentReindexWorkspaceResult
   error?: string
+  /**
+   * When success=false, surfaces why the request was rejected. Aligned with
+   * `document:startWatcher` and `reindexAllSources` so renderers branch on
+   * one vocabulary.
+   */
+  errorKind?: 'invalid_root' | 'engine_unavailable' | 'failed'
+  validationReason?: string
+  hint?: string
 }
 
 interface DocumentIndexDocumentResult {

@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useRef, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useWorkspace, type SidePanelWidthKey } from '../stores/useWorkspace'
+import { useWorkspace, type SidePanelWidthKey, reconcileWorkspaceWatchersFromStore } from '../stores/useWorkspace'
 import { useMode, type WorkbenchMode as WorkbenchModeType } from '../stores/useMode'
 import { useDocTabs } from '../stores/useDocTabs'
 import TopBar from '../components/layout/TopBar'
@@ -185,6 +185,9 @@ export default function WorkbenchMode() {
         const result = useWorkspace.getState().setWorkspaceRoot(savedRoot)
         if (result.ok) {
           setWorkspaceInitError(null)
+          // setWorkspaceRoot already triggers reconcile; the call below is
+          // a redundant no-op on this branch but kept for symmetry.
+          await reconcileWorkspaceWatchersFromStore()
           return
         }
         // Saved root is no longer acceptable — clear and fall through to
@@ -196,6 +199,12 @@ export default function WorkbenchMode() {
       // No (valid) saved root → leave workspaceRoot null. NEVER auto-fallback
       // to homedir; that triggers the bb529f1 681K-file index storm.
       setWorkspaceInitError(null)
+
+      // Cold-start watcher rehydrate: `pinnedFolders` came back from
+      // localStorage during store init, but store init does NOT trigger the
+      // mutation-site reconcile. This call ensures every safe pinned folder
+      // gets its watcher even when there's no (or an invalidated) workspaceRoot.
+      await reconcileWorkspaceWatchersFromStore()
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       console.warn('Workspace init failed:', message)

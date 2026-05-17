@@ -273,6 +273,7 @@ interface SearchDocumentsArgs {
   query: string
   limit?: number
   workspaceRoot?: string
+  workspaceRoots?: string[]
   sources?: string[]
 }
 
@@ -286,6 +287,7 @@ async function searchDocuments(args: SearchDocumentsArgs): Promise<SearchPayload
   return engine.search(args.query, {
     limit: args.limit,
     workspaceRoot: args.workspaceRoot,
+    workspaceRoots: args.workspaceRoots,
     sources: args.sources,
   })
 }

@@ -1,6 +1,7 @@
 import type { DatabaseConnection } from '../database'
 import { createRotatingLogger } from '../../utils/rotating-logger'
 import { normalizeSearchText } from '../../../shared/document-graph-parse'
+import { validateWorkspaceRoot } from '../../../shared/workspace-validation'
 import { SearchRepository } from './repository'
 import { parseSearchQuery, type SearchHit } from './query'
 import {
@@ -156,10 +157,11 @@ export class SearchEngine {
       scanned: fsResult.scanned,
       ...(fsResult.error ? { error: fsResult.error } : {}),
     }
+    const fsAborted = (fsResult as ReindexWorkspaceResult & { aborted?: boolean }).aborted === true
 
     // If the FS pass was aborted, skip shared adapters too — caller wants
     // the whole reindex stopped, not partially advanced into bookmark/RSS.
-    if ((fsResult as ReindexWorkspaceResult & { aborted?: boolean }).aborted || signal?.aborted) {
+    if (fsAborted || signal?.aborted) {
       return { ok: false, perSource, elapsedMs: Date.now() - started }
     }
 
@@ -171,7 +173,7 @@ export class SearchEngine {
         continue
       }
       try {
-        // eslint-disable-next-line no-await-in-loop
+
         const r = await adapter.reindex({
           workspaceId: sharedWorkspaceId,
           workspaceRoot: SHARED_WORKSPACE_ROOT,
@@ -186,7 +188,13 @@ export class SearchEngine {
       }
     }
     this.repository.touchWorkspace(sharedWorkspaceId, Math.floor(Date.now() / 1000))
-    return { ok: true, perSource, elapsedMs: Date.now() - started }
+    // `ok` reflects the primary deliverable: the FS index for `root`. When
+    // the FS pass failed (e.g. ENOENT after the workspace dir was deleted)
+    // we still let shared adapters run so bookmark / RSS / calendar caches
+    // get refreshed, but the overall call must NOT report success — the
+    // renderer-side reducer relies on this to avoid persisting a "successful"
+    // IndexStatus on top of a root whose FS index never actually built.
+    return { ok: fsResult.ok, perSource, elapsedMs: Date.now() - started }
   }
 
   async indexDocument(
@@ -327,7 +335,7 @@ export class SearchEngine {
 
   async search(
     query: string,
-    opts: { limit?: number; workspaceRoot?: string; sources?: string[] } = {},
+    opts: { limit?: number; workspaceRoot?: string; workspaceRoots?: string[]; sources?: string[] } = {},
   ): Promise<{
     items: Array<SearchHit & { sourceType: string; sourceMeta?: Record<string, unknown> | null }>
     stats: { returned: number; elapsedMs: number }
@@ -336,12 +344,44 @@ export class SearchEngine {
     const started = Date.now()
     const limit = Math.max(1, Math.min(200, opts.limit ?? 100))
     const parsed = parseSearchQuery(query)
-    const results: Array<SearchHit & { sourceType: string; sourceMeta?: Record<string, unknown> | null }> = []
 
-    const roots = this.repository.listWorkspaceRoots()
-    const chosenRoots = opts.workspaceRoot
-      ? roots.filter((r) => r.root === opts.workspaceRoot || r.root === SHARED_WORKSPACE_ROOT)
-      : roots
+    const allRoots = this.repository.listWorkspaceRoots()
+    // Defense-in-depth: filter out any DB rows pointing at unsafe trees BEFORE
+    // any scope branching. Stale `workspaces` rows from before validation was
+    // added (legacy `~` / `/Users/<x>` / `/Volumes/<x>` etc.) must NEVER leak
+    // into results, regardless of how the caller scoped this search. The
+    // IPC handler also rejects unsafe inputs at the boundary; this layer
+    // covers the case where a caller bypasses the handler (worker bridge,
+    // in-process tests, future direct callers) and the DB itself carries
+    // pre-validation rows.
+    const safeAllRoots = allRoots.filter((r) =>
+      r.root === SHARED_WORKSPACE_ROOT || validateWorkspaceRoot(r.root).ok,
+    )
+    // Scope precedence:
+    //   1. `workspaceRoots` (array, possibly empty) — caller explicitly named
+    //      the scope. An empty list means "no scope" → no results. We MUST NOT
+    //      fall through to unscoped here; otherwise an empty list silently
+    //      broadens to "every workspace ever indexed", leaking old workspaces.
+    //      Unsafe entries in the list are stripped — if every requested root
+    //      is unsafe, the result set is empty (NO SHARED bleed-through).
+    //   2. `workspaceRoot` (single string) — legacy single-root caller.
+    //      An unsafe value yields empty results, mirroring (1).
+    //   3. Neither — legacy unscoped fallback. Returns the full safe set.
+    // SHARED_WORKSPACE_ROOT is appended to (1) and (2) so bookmark/RSS/calendar/
+    // agent hits surface alongside file results.
+    let chosenRoots: typeof allRoots
+    if (opts.workspaceRoots !== undefined) {
+      const safeRequested = opts.workspaceRoots.filter((r) => validateWorkspaceRoot(r).ok)
+      chosenRoots = safeRequested.length === 0
+        ? []
+        : safeAllRoots.filter((r) => safeRequested.includes(r.root) || r.root === SHARED_WORKSPACE_ROOT)
+    } else if (opts.workspaceRoot) {
+      chosenRoots = validateWorkspaceRoot(opts.workspaceRoot).ok
+        ? safeAllRoots.filter((r) => r.root === opts.workspaceRoot || r.root === SHARED_WORKSPACE_ROOT)
+        : []
+    } else {
+      chosenRoots = safeAllRoots
+    }
     if (chosenRoots.length === 0) {
       return {
         items: [],
@@ -359,14 +399,11 @@ export class SearchEngine {
       : null
 
     const normalizedQuery = normalizeSearchText(query).toLowerCase()
-    for (const { id: workspaceId } of chosenRoots) {
-      const hits = this.runWorkspaceSearch(workspaceId, parsed, limit - results.length, normalizedQuery, sources)
-      for (const hit of hits) {
-        results.push(hit)
-        if (results.length >= limit) break
-      }
-      if (results.length >= limit) break
-    }
+    // Single SQL pass across all chosen workspace_ids: cross-root ranking is
+    // computed by BM25 in one ORDER BY, so the global top-K cannot be starved
+    // by an early root saturating its slice.
+    const workspaceIds = chosenRoots.map((r) => r.id)
+    const results = this.runMultiWorkspaceSearch(workspaceIds, parsed, limit, normalizedQuery, sources)
 
     return {
       items: results,
@@ -375,14 +412,14 @@ export class SearchEngine {
     }
   }
 
-  private runWorkspaceSearch(
-    workspaceId: number,
+  private runMultiWorkspaceSearch(
+    workspaceIds: readonly number[],
     parsed: ReturnType<typeof parseSearchQuery>,
     limit: number,
     normalizedQuery: string,
     sources: string[] | null,
   ): Array<SearchHit & { sourceType: string; sourceMeta?: Record<string, unknown> | null }> {
-    if (limit <= 0) return []
+    if (limit <= 0 || workspaceIds.length === 0) return []
     const fts5 = this.options.fts5Available
     const usingFts = fts5 && parsed.ftsMatch !== null
 
@@ -397,8 +434,9 @@ export class SearchEngine {
          0 AS rank, '' AS snip`
     let sql = `SELECT ${selectFields} FROM documents d`
     if (usingFts) sql += ' JOIN documents_fts f ON f.rowid = d.id'
-    sql += ' WHERE d.workspace_id = ?'
-    bindings.push(workspaceId)
+    const workspacePlaceholders = workspaceIds.map(() => '?').join(',')
+    sql += ` WHERE d.workspace_id IN (${workspacePlaceholders})`
+    bindings.push(...workspaceIds)
     if (usingFts) {
       sql += ' AND documents_fts MATCH ?'
       bindings.push(parsed.ftsMatch as string)

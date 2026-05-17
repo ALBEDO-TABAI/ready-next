@@ -85,7 +85,13 @@ export interface WorkerDbBridge {
     cursor?: { afterId: number }
     mode?: 'full' | 'focus'
   }): Promise<GraphResult>
-  searchDocuments(opts: { query: string; workspaceRoot?: string; limit?: number; sources?: string[] }): Promise<SearchPayload>
+  searchDocuments(opts: {
+    query: string
+    workspaceRoot?: string
+    workspaceRoots?: string[]
+    limit?: number
+    sources?: string[]
+  }): Promise<SearchPayload>
   reindexWorkspace(opts: { root: string }): Promise<ReindexWorkspaceResult>
   reindexAllSources(opts: { root: string }): Promise<ReindexAllSourcesResult>
   /**
@@ -227,7 +233,13 @@ export class WorkerDbBridgeImpl implements WorkerDbBridge {
     return this.send<GraphResult>('getDocumentGraph', opts ?? {})
   }
 
-  searchDocuments(opts: { query: string; workspaceRoot?: string; limit?: number; sources?: string[] }): Promise<SearchPayload> {
+  searchDocuments(opts: {
+    query: string
+    workspaceRoot?: string
+    workspaceRoots?: string[]
+    limit?: number
+    sources?: string[]
+  }): Promise<SearchPayload> {
     return this.send<SearchPayload>('searchDocuments', opts)
   }
 

@@ -4,6 +4,7 @@ import { basename, extname, join } from 'path'
 import { BINARY_EXTENSIONS } from '../document-engine/binary-extensions'
 import { createRotatingLogger } from '../../utils/rotating-logger'
 import { parseDocumentGraph } from '../../../shared/document-graph-parse'
+import { FS_SOURCE_TYPE } from '../../../shared/search-source-types'
 import type { SearchRepository } from './repository'
 
 const searchLogger = createRotatingLogger('ready-search.log')
@@ -212,9 +213,13 @@ export async function decideFileForIndex(
   return { accept: true }
 }
 
-/** Canonical filesystem adapter — the original single-source reindex behavior. */
+/** Canonical filesystem adapter — the original single-source reindex behavior.
+ *
+ * `sourceType` is exported as the shared `FS_SOURCE_TYPE` constant so the
+ * renderer's reindex reducer can read `perSource[FS_SOURCE_TYPE]?.error`
+ * without hardcoding the string in two places. */
 export class FileSystemAdapter implements IndexSourceAdapter {
-  readonly sourceType = 'document'
+  readonly sourceType = FS_SOURCE_TYPE
   readonly workspaceScope = 'per-root'
 
   async reindex(ctx: AdapterContext): Promise<AdapterReindexResult> {
@@ -251,7 +256,7 @@ export class FileSystemAdapter implements IndexSourceAdapter {
       // Bounded-parallel load (4 concurrent reads/sniffs) instead of a
       // 50-wide Promise.all. Yields to the event loop after each individual
       // file so the worker can process incoming abort/cancel posts mid-batch.
-      // eslint-disable-next-line no-await-in-loop
+
       const parsedBatch = await mapBounded(batch, BATCH_CONCURRENCY, async (p) => {
         const parsed = await this.loadFile(p)
         // Per-file yield. setImmediate runs on the macrotask queue, giving
@@ -291,7 +296,7 @@ export class FileSystemAdapter implements IndexSourceAdapter {
 
       // Inter-batch yield. Combined with the per-file yield above, this is
       // belt-and-suspenders for cancel responsiveness on huge workspaces.
-      // eslint-disable-next-line no-await-in-loop
+
       await new Promise<void>((resolve) => setImmediate(resolve))
     }
 
@@ -325,7 +330,7 @@ export class FileSystemAdapter implements IndexSourceAdapter {
       const current = stack.pop()!
       let entries: Array<{ name: string; isDirectory(): boolean; isFile(): boolean }> = []
       try {
-        // eslint-disable-next-line no-await-in-loop
+
         entries = await readdir(current, { withFileTypes: true })
       } catch { continue }
       for (const entry of entries) {
