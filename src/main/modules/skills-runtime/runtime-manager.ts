@@ -566,7 +566,7 @@ export class SkillsRuntimeManager {
       name: definition.name,
       description: definition.description,
       version: definition.version,
-      installed: existsSync(statePath),
+      installed: definition.source === 'embedded' ? true : existsSync(statePath),
       installStatePath: statePath,
       source: definition.source,
       manifestValid: definition.manifestValid,

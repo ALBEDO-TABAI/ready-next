@@ -388,6 +388,23 @@ const browserAPI = {
     ipcRenderer.on('clip:backgroundUpdate', handler)
     return () => ipcRenderer.removeListener('clip:backgroundUpdate', handler)
   },
+  // Drag-tab-to-FileTree "内容学习" pipeline. invoke acks immediately with
+  // both clipTaskId and studyTaskId; clip progress streams via the existing
+  // `clip:backgroundUpdate`, study-phase progress streams via
+  // `clip:contentStudyUpdate`. See ipc-content-study-dragged-tab.ts.
+  contentStudyDraggedTab: (args: {
+    url: string
+    title?: string
+    target_hint?: string
+    target_dir?: string
+    client_task_id_clip?: string
+    client_task_id_study?: string
+  }) => ipcRenderer.invoke('browser:contentStudyDraggedTab', args),
+  onContentStudyUpdate: (callback: (data: unknown) => void) => {
+    const handler = (_: unknown, data: unknown): void => callback(data)
+    ipcRenderer.on('clip:contentStudyUpdate', handler)
+    return () => ipcRenderer.removeListener('clip:contentStudyUpdate', handler)
+  },
   onBookmarksChanged: (callback: (data: unknown) => void) => {
     const handler = (_: unknown, data: unknown): void => callback(data)
     ipcRenderer.on('browser:bookmarksChanged', handler)
@@ -434,6 +451,9 @@ const documentAPI = {
   stat: (path: string) => ipcRenderer.invoke('document:stat', path),
   openFolder: (payload?: { validateAsWorkspace?: boolean }) =>
     ipcRenderer.invoke('document:openFolder', payload),
+  exportWorkspace: (payload: { name: string; folders: string[] }) =>
+    ipcRenderer.invoke('document:exportWorkspace', payload),
+  importWorkspace: () => ipcRenderer.invoke('document:importWorkspace'),
   getHome: () => ipcRenderer.invoke('document:getHome'),
   showInFolder: (path: string) => ipcRenderer.invoke('document:showInFolder', path),
   openPath: (path: string) => ipcRenderer.invoke('document:openPath', path),
@@ -516,12 +536,119 @@ const rssAPI = {
 }
 
 // Calendar API
+//
+// L2-B-Reminder-UI — `onReminderFired` subscribes to the
+// `calendar:reminderFired` channel pushed by `reminder-notifier.ts` in
+// main when a scheduled reminder triggers. Returns an unsubscriber. The
+// payload shape is the shared `ReminderFirePayload` (see
+// `src/shared/calendar-types.ts`).
+import type { ReminderFirePayload as CalendarReminderFirePayload } from '../shared/calendar-types'
+
 const calendarAPI = {
   getSources: () => ipcRenderer.invoke('calendar:getSources'),
   getEvents: (start: Date, end: Date) => ipcRenderer.invoke('calendar:getEvents', { start, end }),
   createEvent: (event: unknown) => ipcRenderer.invoke('calendar:createEvent', event),
   updateEvent: (id: string, event: unknown) => ipcRenderer.invoke('calendar:updateEvent', { id, event }),
-  deleteEvent: (id: string) => ipcRenderer.invoke('calendar:deleteEvent', id)
+  deleteEvent: (id: string) => ipcRenderer.invoke('calendar:deleteEvent', id),
+  // L3-B — per-occurrence override CRUD. `upsertEventOverride` covers
+  // both "modify single occurrence" (kind='single' + patch fields) and
+  // "skip single occurrence" (kind='cancelled'); `deleteEventOverride`
+  // removes the row so the parent's default rule re-applies.
+  //
+  // `splitRecurringSeries` is the "modify this and future" gesture:
+  // it truncates the parent series at `occurrenceStart - 1s` and
+  // creates a new event starting at `patch.startTime ?? occurrenceStart`
+  // carrying the rest of the patched fields. The new event's RRULE
+  // defaults to the parent's original rule unless `patch.recurrenceRule`
+  // is explicitly provided.
+  upsertEventOverride: (payload: {
+    parentEventId: string
+    occurrenceStart: number | string | Date
+    kind: 'single' | 'cancelled'
+    patch?: {
+      title?: string
+      description?: string | null
+      location?: string | null
+      startTime?: number | string | Date
+      endTime?: number | string | Date
+      allDay?: boolean
+      reminders?: unknown
+      /** L4-A — per-occurrence start tz; null = local. */
+      startTz?: string | null
+      /** L4-A — per-occurrence end tz; null = local. */
+      endTz?: string | null
+    }
+  }) => ipcRenderer.invoke('calendar:upsertEventOverride', payload),
+  deleteEventOverride: (payload: {
+    parentEventId: string
+    occurrenceStart: number | string | Date
+  }) => ipcRenderer.invoke('calendar:deleteEventOverride', payload),
+  splitRecurringSeries: (payload: {
+    parentEventId: string
+    occurrenceStart: number | string | Date
+    patch: {
+      title?: string
+      description?: string | null
+      location?: string | null
+      startTime?: number | string | Date
+      endTime?: number | string | Date
+      allDay?: boolean
+      reminders?: unknown
+      recurrenceRule?: string | null
+      calendarId?: string
+      /** L4-A — start tz for the NEW series; null = local. */
+      startTz?: string | null
+      /** L4-A — end tz for the NEW series; null = local. */
+      endTz?: string | null
+    }
+  }) => ipcRenderer.invoke('calendar:splitRecurringSeries', payload),
+  // L4-B-External-Sync — ICS import + URL subscription.
+  //
+  // `importIcsString` takes raw ICS body text (renderer reads the file
+  // and ships the string); the main process parses, dedupes by VEVENT
+  // UID, and writes to the named source (creating one when needed).
+  //
+  // `subscribeUrl` registers a periodic poller against an ICS URL and
+  // returns the count of events imported in the first sync (which is
+  // run immediately so the calendar isn't empty while waiting for the
+  // first scheduled tick).
+  //
+  // `unsubscribeSource` cascades — FK ON DELETE CASCADE drops every
+  // event whose calendar_id matched the source.
+  //
+  // `syncSourceNow` is the "立即同步" action: forces one sync cycle
+  // and returns the full SyncResult so the renderer can show counts.
+  importIcsString: (payload: {
+    rawIcs: string
+    calendarSourceId?: string
+    sourceName?: string
+  }) => ipcRenderer.invoke('calendar:importIcsString', payload),
+  subscribeUrl: (payload: {
+    url: string
+    name: string
+    color?: string
+    syncIntervalMinutes?: number
+  }) => ipcRenderer.invoke('calendar:subscribeUrl', payload),
+  unsubscribeSource: (sourceId: string) =>
+    ipcRenderer.invoke('calendar:unsubscribeSource', sourceId),
+  syncSourceNow: (sourceId: string) =>
+    ipcRenderer.invoke('calendar:syncSourceNow', sourceId),
+  onReminderFired: (handler: (payload: CalendarReminderFirePayload) => void) => {
+    const listener = (_event: unknown, payload: CalendarReminderFirePayload) => handler(payload)
+    ipcRenderer.on('calendar:reminderFired', listener)
+    return () => { ipcRenderer.removeListener('calendar:reminderFired', listener) }
+  },
+  // L5-B — natural-language time-expression detection for the RSS
+  // "create event from article" hint. `text` is the plain-text body to
+  // scan (renderer is responsible for HTML stripping); `referenceDate`
+  // defaults to "now" on the main side and can be set to the article's
+  // `publishedAt` if older articles should resolve "tomorrow" relative
+  // to when they were written rather than when read. The main handler
+  // truncates inputs over 8KB.
+  detectTimeExpressions: (payload: {
+    text: string
+    referenceDate?: string | number
+  }) => ipcRenderer.invoke('calendar:detectTimeExpressions', payload),
 }
 
 // Skills Runtime API

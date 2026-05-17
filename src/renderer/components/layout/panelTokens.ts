@@ -44,7 +44,7 @@ export const PANEL_TOKENS = {
   cardBg: 'var(--lg-content-card-bg, var(--surface-card-bg))',
   inputBorder: 'var(--border-input)',
   dropBorder: 'var(--lg-content-border, var(--surface-border))',
-  iconAccent: 'var(--color-gold)',
+  iconAccent: 'var(--text-muted)',
   blue: 'var(--color-blue)',
   blueLight: 'var(--color-blue-light)',
 } as const

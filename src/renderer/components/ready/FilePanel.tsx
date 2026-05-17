@@ -200,7 +200,7 @@ export default function FilePanel({ onFileDrop, onFileOpen }: FilePanelProps) {
               <Icon
                 style={{
                   width: 14, height: 14, flexShrink: 0,
-                  color: file.isDirectory ? 'var(--color-orange)' : 'var(--text-muted)'
+                  color: 'var(--text-muted)'
                 }}
                 strokeWidth={2}
               />

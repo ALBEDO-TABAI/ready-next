@@ -65,6 +65,8 @@ interface WorkspaceState {
   getSavedWorkspaces: () => { name: string; folders: string[] }[]
   loadSavedWorkspace: (folders: string[]) => void
   deleteSavedWorkspace: (name: string) => void
+  exportWorkspaceToFile: (name: string) => Promise<{ ok: true; path: string; name: string } | { ok: false; reason: string }>
+  importWorkspaceFromFile: () => Promise<{ ok: true; name: string; folders: string[] } | { ok: false; reason: string }>
 
   // File operations
   createFile: (name: string) => Promise<boolean>
@@ -755,6 +757,51 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
     const saved = readJsonStorage('ready-saved-workspaces', [] as { name: string; folders: string[] }[])
     const filtered = saved.filter(w => w.name !== name)
     writeJsonStorage('ready-saved-workspaces', filtered)
+  },
+
+  exportWorkspaceToFile: async (name) => {
+    const { pinnedFolders } = get()
+    if (pinnedFolders.length === 0) {
+      return { ok: false, reason: '当前没有可保存的文件夹' }
+    }
+    if (!window.electronAPI?.document?.exportWorkspace) {
+      return { ok: false, reason: '当前环境不支持导出' }
+    }
+    try {
+      const result = await window.electronAPI.document.exportWorkspace({
+        name,
+        folders: [...pinnedFolders],
+      })
+      if (!result.success) {
+        return { ok: false, reason: result.error || '保存失败' }
+      }
+      // Mirror to localStorage so the quick-switch list stays consistent.
+      get().saveWorkspace(result.name)
+      return { ok: true, path: result.path, name: result.name }
+    } catch (error) {
+      return { ok: false, reason: error instanceof Error ? error.message : String(error) }
+    }
+  },
+
+  importWorkspaceFromFile: async () => {
+    if (!window.electronAPI?.document?.importWorkspace) {
+      return { ok: false, reason: '当前环境不支持导入' }
+    }
+    try {
+      const result = await window.electronAPI.document.importWorkspace()
+      if (!result.success) {
+        return { ok: false, reason: result.error || '导入失败' }
+      }
+      get().loadSavedWorkspace(result.folders)
+      // Remember the imported workspace in localStorage for quick switching next time.
+      const saved = readJsonStorage('ready-saved-workspaces', [] as { name: string; folders: string[] }[])
+      const filtered = saved.filter(w => w.name !== result.name)
+      filtered.push({ name: result.name, folders: result.folders })
+      writeJsonStorage('ready-saved-workspaces', filtered)
+      return { ok: true, name: result.name, folders: result.folders }
+    } catch (error) {
+      return { ok: false, reason: error instanceof Error ? error.message : String(error) }
+    }
   },
 
   openFolderDialog: async () => {

@@ -706,6 +706,10 @@ interface ScopeRunEventData {
 }
 
 interface ElectronAgentAPI {
+  /** Best-effort renderer-side telemetry; preload may not surface this in every
+   *  build (the callers use optional-chaining). Declared optional so callers
+   *  can `window.electronAPI?.agent?.metric?.(...)` without a TS error. */
+  metric?: (payload: { name: string; payload?: Record<string, unknown> }) => void
   send: (
     agent: string,
     message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>,
@@ -1303,6 +1307,65 @@ interface ElectronBrowserAPI {
           },
     ) => void,
   ) => () => void
+  /** Drag-tab "内容学习" pipeline. Acks immediately with both task ids; clip
+   * progress streams through `onClipBackgroundUpdate` (existing channel) and
+   * the study-phase progress through `onContentStudyUpdate`. Not exposed to
+   * the model. */
+  contentStudyDraggedTab: (args: {
+    url: string
+    title?: string
+    target_hint?: string
+    target_dir?: string
+    client_task_id_clip?: string
+    client_task_id_study?: string
+  }) => Promise<{
+    ok: boolean
+    clipTaskId?: string
+    studyTaskId?: string
+    errorKind?: 'invalid_url' | 'invalid_args'
+    errorDetail?: { message: string }
+  }>
+  onContentStudyUpdate: (
+    callback: (
+      data:
+        | {
+            kind: 'study'
+            taskId: string
+            status: 'waiting_for_clip' | 'running'
+            url: string
+            title?: string
+            targetHint?: string
+          }
+        | {
+            kind: 'study'
+            taskId: string
+            status: 'completed'
+            url: string
+            title?: string
+            targetHint?: string
+            copiedPath: string
+          }
+        | {
+            kind: 'study'
+            taskId: string
+            status: 'failed' | 'skipped'
+            url: string
+            title?: string
+            targetHint?: string
+            errorKind:
+              | 'clip_failed'
+              | 'clip_target_dir_failed'
+              | 'no_ai_config'
+              | 'skill_md_missing'
+              | 'clip_output_unreadable'
+              | 'ai_failed'
+              | 'write_failed'
+              | 'user_too_large'
+              | 'unexpected'
+            errorMessage?: string
+          },
+    ) => void,
+  ) => () => void
   onBookmarksChanged: (callback: (data: BrowserBookmarksChangedEvent) => void) => () => void
 
   // History
@@ -1540,6 +1603,14 @@ interface ElectronDocumentAPI {
   moveItem: (src: string, dest: string) => Promise<DocumentOperationResponse>
   stat: (path: string) => Promise<DocumentStatResponse>
   openFolder: (payload?: { validateAsWorkspace?: boolean }) => Promise<DocumentOpenFolderResponse>
+  exportWorkspace: (payload: { name: string; folders: string[] }) => Promise<
+    | { success: true; path: string; name: string }
+    | { success: false; error: string }
+  >
+  importWorkspace: () => Promise<
+    | { success: true; path: string; name: string; folders: string[] }
+    | { success: false; error: string }
+  >
   getHome: () => Promise<DocumentHomeResponse>
   showInFolder: (path: string) => Promise<DocumentOperationResponse>
   openPath: (path: string) => Promise<DocumentOperationResponse>
@@ -1927,16 +1998,83 @@ interface CalendarSourceData {
   enabled: boolean
 }
 
-/** Calendar event record */
+/** Reminder offset definition; offsetMinutes < 0 = before event start. */
+interface CalendarReminderInput {
+  offsetMinutes: number
+  method: 'notification' | 'sound'
+}
+
+/**
+ * Calendar event record as it crosses the IPC boundary.
+ *
+ * Wire contract — this MUST match `CalendarEventWire` in
+ * `src/shared/calendar-wire.ts`:
+ *   - Time fields (`startTime` / `endTime` / `createdAt` / `updatedAt` /
+ *     `occurrenceStart`) are Unix **SECONDS** (not milliseconds, not ISO
+ *     strings). The renderer converts via `parseEventFromWire(...)`; no
+ *     other call site should construct `new Date(...)` from these values
+ *     directly — multiplying by 1000 is the boundary helper's job.
+ *   - `allDay` is `boolean` on the wire (the legacy `0 | 1` row form is
+ *     normalized by `serializeEventToWire` before IPC).
+ *
+ * Pre-fix this type declared `startTime: string` even though the live
+ * IPC handed back integers, which let callers write `new Date(value)`
+ * and land in 1970. Keeping the wire type honest is the type-level
+ * counterpart to the `calendar-wire-round-trip` test gate.
+ */
 interface CalendarEventData {
   id: string
   calendarId: string
   title: string
   description?: string | null
   location?: string | null
-  startTime: string
-  endTime: string
-  allDay: boolean | number
+  /** Unix SECONDS. */
+  startTime: number
+  /** Unix SECONDS. */
+  endTime: number
+  allDay: boolean
+  reminders?: CalendarReminderInput[] | null
+  /**
+   * L3-B — RFC 5545 RRULE body. Null / empty means non-recurring.
+   * Returned only on the parent row; expanded EventInstance rows carry
+   * the parent's RRULE here too so the renderer can detect "this is
+   * an instance, not a single event".
+   */
+  recurrenceRule?: string | null
+  /**
+   * L3-B — set on EventInstance rows produced by the rrule engine
+   * expansion. For non-recurring single events this equals `id`; for
+   * recurring instances it equals the parent event id (without the
+   * `#<occurrenceStart>` suffix).
+   */
+  instanceOf?: string
+  /** L3-B — Unix seconds of the ORIGINAL (pre-patch) occurrence start. */
+  occurrenceStart?: number
+  /** L3-B — `'single' | 'cancelled' | null`; the kind of override
+   * applied to this instance (or null if no override). */
+  overrideKind?: 'single' | 'cancelled' | null
+  /**
+   * L4-A — IANA timezone identifier for the start wall-clock; null
+   * means "local timezone" (back-compat for pre-039 rows). The renderer
+   * uses this together with `useCalendarSession.displayTimezone` to
+   * decide how to format the start time.
+   */
+  startTz?: string | null
+  /** L4-A — IANA timezone identifier for the end wall-clock; null = local. */
+  endTz?: string | null
+  /** Unix SECONDS. */
+  createdAt?: number
+  /** Unix SECONDS. */
+  updatedAt?: number
+  /** Renderer key for `EventInstance` (recurring): `${parent}#${occurrence}`.
+   *  Equal to `id` for non-recurring events. Required only on the wire
+   *  contract; declared optional here to keep migration smooth with older
+   *  consumers that ignore the field. */
+  syntheticId?: string
+  /** L4-B — external ICS UID; null for local events. */
+  icsUid?: string | null
+  /** L4-B — `calendar_sources.id` when sourced from external sync; null for local. */
+  sourceId?: string | null
 }
 
 /** Input for creating a calendar event */
@@ -1948,6 +2086,13 @@ interface CalendarCreateEventInput {
   startTime: Date | string | number
   endTime: Date | string | number
   allDay?: boolean
+  reminders?: CalendarReminderInput[] | null
+  /** L3-B — RFC 5545 RRULE body or null for non-recurring. */
+  recurrenceRule?: string | null
+  /** L4-A — IANA tz id; null / undefined = local timezone. */
+  startTz?: string | null
+  /** L4-A — IANA tz id; null / undefined = local timezone. */
+  endTz?: string | null
   [key: string]: unknown
 }
 
@@ -1960,7 +2105,56 @@ interface CalendarUpdateEventInput {
   startTime?: Date | string | number
   endTime?: Date | string | number
   allDay?: boolean
+  reminders?: CalendarReminderInput[] | null
+  /** L3-B — set / clear the parent's RRULE. */
+  recurrenceRule?: string | null
+  /** L4-A — set / clear the IANA start tz; null = local. */
+  startTz?: string | null
+  /** L4-A — set / clear the IANA end tz; null = local. */
+  endTz?: string | null
   [key: string]: unknown
+}
+
+/** L3-B — payload for "modify this single occurrence" / "skip this occurrence". */
+interface CalendarUpsertEventOverrideInput {
+  parentEventId: string
+  /** Unix seconds, ISO string, or Date. */
+  occurrenceStart: number | string | Date
+  kind: 'single' | 'cancelled'
+  patch?: {
+    title?: string
+    description?: string | null
+    location?: string | null
+    startTime?: number | string | Date
+    endTime?: number | string | Date
+    allDay?: boolean
+    reminders?: CalendarReminderInput[] | null
+    /** L4-A — per-occurrence start tz; null clears. */
+    startTz?: string | null
+    /** L4-A — per-occurrence end tz; null clears. */
+    endTz?: string | null
+  }
+}
+
+/** L3-B — payload for "modify this and all future occurrences". */
+interface CalendarSplitRecurringSeriesInput {
+  parentEventId: string
+  occurrenceStart: number | string | Date
+  patch: {
+    title?: string
+    description?: string | null
+    location?: string | null
+    startTime?: number | string | Date
+    endTime?: number | string | Date
+    allDay?: boolean
+    reminders?: CalendarReminderInput[] | null
+    recurrenceRule?: string | null
+    calendarId?: string
+    /** L4-A — start tz for the new series; null = local. */
+    startTz?: string | null
+    /** L4-A — end tz for the new series; null = local. */
+    endTz?: string | null
+  }
 }
 
 /** Unified calendar response shape (all calendar handlers use { success, mock, data?, error? }) */
@@ -1969,6 +2163,62 @@ interface CalendarResponse<T> {
   mock: boolean
   data?: T
   error?: string
+}
+
+/**
+ * Payload pushed from main → renderer when a reminder fires. Mirrors
+ * the shared `ReminderFirePayload` in `src/shared/calendar-types.ts`
+ * (which is the single source of truth). Duplicated here because this
+ * file is a renderer-internal `declare global` ambient type and pulling
+ * a value import would shift it out of the ambient namespace.
+ */
+interface CalendarReminderFirePayload {
+  eventId: string
+  eventTitle: string
+  /** Unix seconds. */
+  eventStartTime: number
+  offsetMinutes: number
+  method: 'notification' | 'sound'
+  /** Unix seconds. */
+  firedAt: number
+}
+
+/**
+ * L4-B — payload shape for `calendar:importIcsString`. The renderer
+ * reads the .ics file (FileReader / drop-zone) and ships the string;
+ * we don't accept file paths because the renderer doesn't have
+ * filesystem access.
+ */
+interface CalendarImportIcsInput {
+  rawIcs: string
+  calendarSourceId?: string
+  sourceName?: string
+}
+
+/**
+ * L4-B — payload shape for `calendar:subscribeUrl`. `color` is optional
+ * (defaults to the DB default `#5B8DEF`); `syncIntervalMinutes` defaults
+ * to 60 and is floored at 5 minutes on the main side.
+ */
+interface CalendarSubscribeUrlInput {
+  url: string
+  name: string
+  color?: string
+  syncIntervalMinutes?: number
+}
+
+/**
+ * L4-B — result shape emitted per source by the sync scheduler. Used
+ * as the data payload of `calendar:syncSourceNow` so the renderer can
+ * surface created / updated / removed counts in the source list.
+ */
+interface CalendarSyncResult {
+  sourceId: string
+  ok: boolean
+  eventsCreated: number
+  eventsUpdated: number
+  eventsRemoved: number
+  error: string | null
 }
 
 interface ElectronCalendarAPI {
@@ -1980,6 +2230,98 @@ interface ElectronCalendarAPI {
     event: CalendarUpdateEventInput
   ) => Promise<CalendarResponse<{ updated: boolean }>>
   deleteEvent: (id: string) => Promise<CalendarResponse<{ deleted: boolean }>>
+  /**
+   * L3-B — per-occurrence override CRUD. See `CalendarUpsertEventOverrideInput`
+   * and `CalendarSplitRecurringSeriesInput` for the payload shape.
+   */
+  upsertEventOverride: (
+    payload: CalendarUpsertEventOverrideInput
+  ) => Promise<CalendarResponse<{ id: string }>>
+  deleteEventOverride: (
+    payload: { parentEventId: string; occurrenceStart: number | string | Date }
+  ) => Promise<CalendarResponse<{ deleted: boolean }>>
+  splitRecurringSeries: (
+    payload: CalendarSplitRecurringSeriesInput
+  ) => Promise<CalendarResponse<{ newEventId: string }>>
+  /**
+   * L4-B — import a raw .ics body string into a calendar source.
+   * When `calendarSourceId` is omitted the handler auto-creates a
+   * new source named `sourceName` (or `'导入的日历'` if also absent).
+   */
+  importIcsString: (
+    payload: CalendarImportIcsInput
+  ) => Promise<CalendarResponse<{
+    sourceId: string
+    created: number
+    updated: number
+    skipped: number
+  }>>
+  /**
+   * L4-B — subscribe to an ICS URL. Creates a `calendar_sources` row,
+   * runs an immediate first sync, then registers a periodic timer.
+   * `initialEvents` is the created + updated count from the first sync.
+   */
+  subscribeUrl: (
+    payload: CalendarSubscribeUrlInput
+  ) => Promise<CalendarResponse<{ sourceId: string; initialEvents: number }>>
+  /**
+   * L4-B — unsubscribe / delete a calendar source. FK CASCADE drops
+   * all events owned by the source. Returns `removed: false` when
+   * the source didn't exist (idempotent).
+   */
+  unsubscribeSource: (
+    sourceId: string
+  ) => Promise<CalendarResponse<{ removed: boolean }>>
+  /**
+   * L4-B — manually trigger a sync for one source. The reply carries
+   * the full SyncResult so the UI can show counts inline.
+   */
+  syncSourceNow: (
+    sourceId: string
+  ) => Promise<CalendarResponse<CalendarSyncResult>>
+  /**
+   * L2-B — subscribe to reminder fire events. Returns an unsubscriber.
+   */
+  onReminderFired: (
+    handler: (payload: CalendarReminderFirePayload) => void
+  ) => () => void
+  /**
+   * L5-B — natural-language time-expression detection used by the RSS
+   * reader to surface "create calendar event?" hints. The renderer
+   * sends plain text (HTML must be stripped beforehand). Returns the
+   * sorted list of matches; the consumer is responsible for filtering
+   * confidence tiers it doesn't want to show. The main handler returns
+   * an empty list when mock mode is enabled.
+   */
+  detectTimeExpressions: (
+    payload: { text: string; referenceDate?: string | number }
+  ) => Promise<CalendarResponse<CalendarDetectedTimeExpression[]>>
+}
+
+/**
+ * L5-B — one recognised time expression. Mirrors the
+ * `DetectedTimeExpression` shape in
+ * `src/main/modules/calendar-engine/time-expression-detector.ts`.
+ */
+type CalendarDetectedTimeConfidence = 'high' | 'medium' | 'low'
+
+interface CalendarDetectedTimeExpression {
+  /** The matched substring (e.g. `"明天下午 3 点"`). */
+  text: string
+  /** Inclusive UTF-16 offset of the match in the input string. */
+  startIndex: number
+  /** Exclusive UTF-16 offset of the match end. */
+  endIndex: number
+  /** Resolved start time, Unix seconds. */
+  startTime: number
+  /** Resolved end time, Unix seconds. Defaults to `startTime + 3600`. */
+  endTime: number
+  /** Whether the expression carries an explicit clock time. */
+  hasTime: boolean
+  /** Coarse confidence tier — drop `'low'` to skip vague phrases. */
+  confidence: CalendarDetectedTimeConfidence
+  /** Locale that produced this hit. */
+  locale: 'en' | 'zh'
 }
 
 // =============================================================================

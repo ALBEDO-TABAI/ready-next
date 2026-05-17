@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { History, Plus, ChevronDown, X, PanelRightClose } from 'lucide-react'
 import { IconButton } from '../ui/IconButton'
+import Modal from '../ui/Modal'
 import type { SessionRecallHit } from '../../../shared/session-recall'
 import {
   CHAT_HEADER_MENU_DELETE_BUTTON_STYLE,
@@ -70,6 +71,7 @@ export default function ChatHeader({
   const [showHistory, setShowHistory] = useState(false)
   const [scopeMenuPosition, setScopeMenuPosition] = useState<FloatingMenuPosition | null>(null)
   const [historyMenuPosition, setHistoryMenuPosition] = useState<FloatingMenuPosition | null>(null)
+  const [pendingDeleteSession, setPendingDeleteSession] = useState<{ conversationId: string; title: string } | null>(null)
   const scopeTriggerRef = useRef<HTMLButtonElement>(null)
   const historyTriggerRef = useRef<HTMLButtonElement>(null)
   const scopeMenuRef = useRef<HTMLDivElement>(null)
@@ -542,7 +544,10 @@ export default function ChatHeader({
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation()
-                          onDeleteConversation(conv.conversationId)
+                          setPendingDeleteSession({
+                            conversationId: conv.conversationId,
+                            title: conv.title || '新对话',
+                          })
                         }}
                         className="chat-header-menu-delete-button group-hover:opacity-100 transition-[background-color,opacity]"
                         style={CHAT_HEADER_MENU_DELETE_BUTTON_STYLE}
@@ -559,6 +564,23 @@ export default function ChatHeader({
         </div>,
         document.body,
       )}
+
+      <Modal
+        open={pendingDeleteSession !== null}
+        mode="confirm"
+        danger
+        title="删除会话"
+        message={pendingDeleteSession ? `确定删除会话 "${pendingDeleteSession.title}" 吗？此操作不可撤销。` : ''}
+        confirmLabel="删除"
+        cancelLabel="取消"
+        onConfirm={() => {
+          if (pendingDeleteSession) {
+            onDeleteConversation(pendingDeleteSession.conversationId)
+          }
+          setPendingDeleteSession(null)
+        }}
+        onCancel={() => setPendingDeleteSession(null)}
+      />
     </>
   )
 }

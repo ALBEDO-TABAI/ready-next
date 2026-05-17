@@ -11,10 +11,13 @@ import {
   RefreshCw,
   Folder,
   FolderOpen,
+  Download,
+  Upload,
 } from 'lucide-react'
 
 import { useWorkspace } from '../../stores/useWorkspace'
 import FileTree, { DEFAULT_FILE_FILTERS, type FileFilterMap, type FileViewMode } from './FileTree'
+import Modal from '../ui/Modal'
 import { computeNextGridHistory, type GridNavigationEntry } from './gridNavigation'
 import { FILES_PANEL_DIMENSIONS, PANEL_TOKENS } from './panelTokens'
 import { WORKBENCH_HEADER_EDGE_X } from '../../modules/workbench/chrome'
@@ -52,6 +55,9 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
   const [showMoreMenu, setShowMoreMenu] = useState(false)
   const [filterMenuPosition, setFilterMenuPosition] = useState<FloatingMenuPosition | null>(null)
   const [moreMenuPosition, setMoreMenuPosition] = useState<FloatingMenuPosition | null>(null)
+  const [saveWorkspacePrompt, setSaveWorkspacePrompt] = useState<{ defaultName: string } | null>(null)
+  const [clearWorkspaceConfirm, setClearWorkspaceConfirm] = useState(false)
+  const [workspaceFeedback, setWorkspaceFeedback] = useState<{ kind: 'success' | 'error'; message: string } | null>(null)
   const [thumbnailSize, setThumbnailSize] = useState(132)
   const [gridNavigation, setGridNavigation] = useState<{
     path: GridNavigationEntry
@@ -76,9 +82,10 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
     pinnedFolders,
     startCreating,
     clearWorkspace,
-    saveWorkspace,
     getSavedWorkspaces,
     loadSavedWorkspace,
+    exportWorkspaceToFile,
+    importWorkspaceFromFile,
     refreshFiles,
     loadDirChildren,
     expandedDirs,
@@ -578,11 +585,13 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
         >
           <button
             onClick={() => {
-              if (pinnedFolders.length === 0) return
+              if (pinnedFolders.length === 0) {
+                setWorkspaceFeedback({ kind: 'error', message: '当前没有可保存的文件夹' })
+                return
+              }
               const defaultName =
                 pinnedFolders.map((p) => p.split('/').pop()).join(' + ') || '我的工作区'
-              const name = prompt('工作区名称：', defaultName)
-              if (name) saveWorkspace(name)
+              setSaveWorkspacePrompt({ defaultName })
             }}
             className="ready-floating-menu-item w-full text-left flex items-center gap-2"
             style={{
@@ -594,14 +603,42 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
               color: PANEL_TOKENS.text,
             }}
           >
-            <Folder style={{ width: 14, height: 14, color: PANEL_TOKENS.mutedStrong }} />
+            <Download style={{ width: 14, height: 14, color: PANEL_TOKENS.mutedStrong }} />
             保存当前工作区
           </button>
           <button
             onClick={() => {
-              if (!workspaceRoot || confirm('确定新建工作区？当前文件列表将被清空。')) {
+              void (async () => {
+                const result = await importWorkspaceFromFile()
+                if (result.ok) {
+                  setWorkspaceFeedback({ kind: 'success', message: `已导入工作区 "${result.name}"` })
+                } else {
+                  if (result.reason !== 'cancelled') {
+                    setWorkspaceFeedback({ kind: 'error', message: result.reason })
+                  }
+                }
+              })()
+            }}
+            className="ready-floating-menu-item w-full text-left flex items-center gap-2"
+            style={{
+              ...buildFloatingMenuItemStyle({ compact: true }),
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              fontSize: 12,
+              color: PANEL_TOKENS.text,
+            }}
+          >
+            <Upload style={{ width: 14, height: 14, color: PANEL_TOKENS.mutedStrong }} />
+            导入工作区
+          </button>
+          <button
+            onClick={() => {
+              if (!workspaceRoot) {
                 clearWorkspace()
+                return
               }
+              setClearWorkspaceConfirm(true)
             }}
             className="ready-floating-menu-item w-full text-left flex items-center gap-2"
             style={{
@@ -651,6 +688,55 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
         </div>,
         document.body,
       )}
+
+      <Modal
+        open={saveWorkspacePrompt !== null}
+        mode="prompt"
+        title="保存当前工作区"
+        message="为这次工作区起一个名字，稍后可以通过「导入工作区」恢复。"
+        defaultValue={saveWorkspacePrompt?.defaultName ?? '我的工作区'}
+        placeholder="工作区名称"
+        confirmLabel="保存"
+        cancelLabel="取消"
+        onConfirm={(value) => {
+          const name = (value || saveWorkspacePrompt?.defaultName || '').trim()
+          setSaveWorkspacePrompt(null)
+          if (!name) return
+          void (async () => {
+            const result = await exportWorkspaceToFile(name)
+            if (result.ok) {
+              setWorkspaceFeedback({ kind: 'success', message: `已保存工作区 "${result.name}"` })
+            } else if (result.reason !== 'cancelled') {
+              setWorkspaceFeedback({ kind: 'error', message: result.reason })
+            }
+          })()
+        }}
+        onCancel={() => setSaveWorkspacePrompt(null)}
+      />
+
+      <Modal
+        open={clearWorkspaceConfirm}
+        mode="confirm"
+        danger
+        title="新建工作区"
+        message="确定新建工作区？当前文件列表将被清空。已保存的工作区不会被删除。"
+        confirmLabel="清空"
+        cancelLabel="取消"
+        onConfirm={() => {
+          setClearWorkspaceConfirm(false)
+          clearWorkspace()
+        }}
+        onCancel={() => setClearWorkspaceConfirm(false)}
+      />
+
+      <Modal
+        open={workspaceFeedback !== null}
+        mode="alert"
+        title={workspaceFeedback?.kind === 'success' ? '已完成' : '操作未完成'}
+        message={workspaceFeedback?.message ?? ''}
+        confirmLabel="知道了"
+        onConfirm={() => setWorkspaceFeedback(null)}
+      />
     </>
   )
 

@@ -1145,6 +1145,87 @@ export function setupDocumentIPC(useMock = false): void {
     }
   })
 
+  // Export workspace index file. Caller supplies a name + folder list; we
+  // pop a save dialog so the user picks a location and we write a
+  // `.ready-workspace.json` file. The schema is intentionally minimal so it
+  // stays portable (just absolute folder paths).
+  ipcMain.handle('document:exportWorkspace', async (_event, payload: { name: string; folders: string[] }) => {
+    try {
+      const win = BrowserWindow.getFocusedWindow()
+      if (!win) return { success: false, error: 'No window' }
+      const safeName = (payload?.name || '工作区').replace(/[\\/:*?"<>|]/g, '_').trim() || '工作区'
+      const folders = Array.isArray(payload?.folders) ? payload.folders.filter((f) => typeof f === 'string' && f.length > 0) : []
+      if (folders.length === 0) {
+        return { success: false, error: '当前没有可保存的文件夹' }
+      }
+      const defaultPath = join(homedir(), `${safeName}.ready-workspace.json`)
+      const result = await dialog.showSaveDialog(win, {
+        title: '保存工作区',
+        defaultPath,
+        filters: [{ name: 'Ready 工作区', extensions: ['ready-workspace.json', 'json'] }],
+      })
+      if (result.canceled || !result.filePath) {
+        return { success: false, error: 'cancelled' }
+      }
+      const now = new Date().toISOString()
+      const indexBody = {
+        schema: 'ready-workspace@1',
+        name: safeName,
+        folders,
+        createdAt: now,
+        updatedAt: now,
+      }
+      await writeFile(result.filePath, JSON.stringify(indexBody, null, 2), 'utf-8')
+      return { success: true, path: result.filePath, name: safeName }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  // Import workspace index file. Opens a file picker and returns the parsed
+  // schema. Caller (renderer store) is responsible for validating each
+  // folder against `validateWorkspaceRoot` before adopting them.
+  ipcMain.handle('document:importWorkspace', async () => {
+    try {
+      const win = BrowserWindow.getFocusedWindow()
+      if (!win) return { success: false, error: 'No window' }
+      const result = await dialog.showOpenDialog(win, {
+        title: '导入工作区',
+        properties: ['openFile'],
+        filters: [{ name: 'Ready 工作区', extensions: ['json'] }],
+      })
+      if (result.canceled || result.filePaths.length === 0) {
+        return { success: false, error: 'cancelled' }
+      }
+      const filePath = result.filePaths[0]
+      const raw = await readFile(filePath, 'utf-8')
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(raw)
+      } catch {
+        return { success: false, error: '文件不是合法的 JSON' }
+      }
+      if (!parsed || typeof parsed !== 'object') {
+        return { success: false, error: '工作区文件结构不合法' }
+      }
+      const obj = parsed as Record<string, unknown>
+      const schema = typeof obj.schema === 'string' ? obj.schema : null
+      if (schema !== 'ready-workspace@1') {
+        return { success: false, error: '未识别的工作区版本' }
+      }
+      const name = typeof obj.name === 'string' && obj.name.trim() ? obj.name : '导入的工作区'
+      const folders = Array.isArray(obj.folders)
+        ? (obj.folders.filter((f): f is string => typeof f === 'string' && f.length > 0))
+        : []
+      if (folders.length === 0) {
+        return { success: false, error: '工作区不包含任何文件夹' }
+      }
+      return { success: true, path: filePath, name, folders }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
   // Get home directory
   ipcMain.handle('document:getHome', async () => {
     return { success: true, path: homedir() }

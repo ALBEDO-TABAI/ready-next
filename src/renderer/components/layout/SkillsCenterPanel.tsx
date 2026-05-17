@@ -551,9 +551,6 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
                           <p className="truncate" style={{ fontSize: 12, fontWeight: 500, lineHeight: 1.25, color: PANEL_COLORS.text }}>
                             {skill.name}
                           </p>
-                          <span style={{ marginLeft: 'auto', fontSize: 10, color: PANEL_COLORS.mutedStrong }}>
-                            {skill.installed ? '已安装' : '未安装'}
-                          </span>
                         </div>
                         <p
                           style={{

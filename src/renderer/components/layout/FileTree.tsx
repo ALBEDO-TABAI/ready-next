@@ -3,8 +3,9 @@ import { createPortal } from 'react-dom'
 import {
   ChevronRight, ChevronDown, Minus, Plus,
   FileText, Folder, FolderOpen, Image, Film, FileSpreadsheet, Pen, Music2, Globe, BookOpen,
-  FilePlus2, FolderPlus, Copy, RefreshCw, Trash2, Loader2, AlertTriangle, Check,
+  FilePlus2, FolderPlus, Copy, RefreshCw, Trash2, Loader2, AlertTriangle, Check, ListMinus,
 } from 'lucide-react'
+import Modal from '../ui/Modal'
 import { useWorkspace, type FileItem } from '../../stores/useWorkspace'
 import { useMode, type WorkbenchMode } from '../../stores/useMode'
 import { toLocalFileUrl } from '../../utils/dragDrop'
@@ -118,20 +119,22 @@ function formatSize(bytes: number): string {
   return `${(bytes / 1048576).toFixed(1)}MB`
 }
 
-function fileIcon(item: FileItem, expanded = false) {
+function fileIcon(item: FileItem, _expanded = false) {
+  // 文件夹始终用 Folder。展开/折叠状态已由 chevron 表达，避免 Folder ↔ FolderOpen
+  // 在小尺寸（14px）下因笔触差异让顶层与子层视觉不一致。
+  const iconStyle = { color: 'var(--text-muted)' }
+  const iconStroke = 1.75
   if (item.isDirectory) {
-    return expanded
-      ? <FolderOpen className="w-[14px] h-[14px]" style={{ color: 'var(--color-gold)' }} />
-      : <Folder className="w-[14px] h-[14px]" style={{ color: 'var(--color-gold)' }} />
+    return <Folder className="w-[14px] h-[14px]" style={iconStyle} strokeWidth={iconStroke} />
   }
   const kind = getFileKind(item)
-  if (kind === 'image') return <Image className="w-[14px] h-[14px]" style={{ color: 'var(--color-green)' }} />
-  if (kind === 'video') return <Film className="w-[14px] h-[14px]" style={{ color: 'var(--color-orange)' }} />
-  if (kind === 'audio') return <Music2 className="w-[14px] h-[14px]" style={{ color: 'var(--color-blue)' }} />
-  if (kind === 'spreadsheet') return <FileSpreadsheet className="w-[14px] h-[14px]" style={{ color: 'var(--color-blue)' }} />
-  if (isEbookExtension(getFileExt(item))) return <BookOpen className="w-[14px] h-[14px]" style={{ color: 'var(--color-blue)' }} />
-  if (kind === 'design') return <Pen className="w-[14px] h-[14px]" style={{ color: 'var(--color-blue)' }} />
-  return <FileText className="w-[14px] h-[14px]" style={{ color: 'var(--color-blue)' }} />
+  if (kind === 'image') return <Image className="w-[14px] h-[14px]" style={iconStyle} strokeWidth={iconStroke} />
+  if (kind === 'video') return <Film className="w-[14px] h-[14px]" style={iconStyle} strokeWidth={iconStroke} />
+  if (kind === 'audio') return <Music2 className="w-[14px] h-[14px]" style={iconStyle} strokeWidth={iconStroke} />
+  if (kind === 'spreadsheet') return <FileSpreadsheet className="w-[14px] h-[14px]" style={iconStyle} strokeWidth={iconStroke} />
+  if (isEbookExtension(getFileExt(item))) return <BookOpen className="w-[14px] h-[14px]" style={iconStyle} strokeWidth={iconStroke} />
+  if (kind === 'design') return <Pen className="w-[14px] h-[14px]" style={iconStyle} strokeWidth={iconStroke} />
+  return <FileText className="w-[14px] h-[14px]" style={iconStyle} strokeWidth={iconStroke} />
 }
 
 interface WorkspaceDragPayload {
@@ -452,8 +455,8 @@ function InlineCreateRow({
       <span className="w-3 flex-shrink-0" />
       <span className="flex-shrink-0">
         {type === 'folder'
-          ? <Folder className="w-[14px] h-[14px]" style={{ color: 'var(--color-gold)' }} />
-          : <FileText className="w-[14px] h-[14px]" style={{ color: 'var(--color-blue)' }} />}
+          ? <Folder className="w-[14px] h-[14px]" style={{ color: 'var(--text-muted)' }} />
+          : <FileText className="w-[14px] h-[14px]" style={{ color: 'var(--text-muted)' }} />}
       </span>
       <div className="flex-1 min-w-0">
         <InlineInput
@@ -558,34 +561,50 @@ function PendingClipRow({
   title,
   errorMessage,
   depth,
+  kind = 'clip',
 }: {
-  status: 'running' | 'completed' | 'failed'
+  status: 'running' | 'completed' | 'failed' | 'waiting_for_clip' | 'skipped'
   urlHost: string
   title: string
   errorMessage?: string
   depth: number
+  kind?: 'clip' | 'study'
 }) {
+  const isFailure = status === 'failed' || status === 'skipped'
   const baseStyle: React.CSSProperties = {
     padding: '6px 8px',
     paddingLeft: `${8 + depth * 22}px`,
-    opacity: status === 'failed' ? 0.85 : 0.7,
+    opacity: isFailure ? 0.85 : 0.7,
     pointerEvents: 'none',
     userSelect: 'none',
     cursor: 'default',
-    background: status === 'failed' ? 'color-mix(in srgb, var(--color-rose-light, #fee2e2) 36%, transparent)' : 'transparent',
+    background: isFailure ? 'color-mix(in srgb, var(--color-rose-light, #fee2e2) 36%, transparent)' : 'transparent',
     boxShadow:
       status === 'completed'
         ? 'inset 0 0 0 1px color-mix(in srgb, var(--color-green, #10b981) 38%, transparent)'
-        : status === 'failed'
+        : isFailure
           ? 'inset 0 0 0 1px color-mix(in srgb, var(--color-rose, #f43f5e) 32%, transparent)'
           : 'inset 0 0 0 1px rgba(148, 163, 184, 0.22)',
   }
-  const label =
-    status === 'running'
-      ? '正在剪藏'
-      : status === 'completed'
-        ? '已剪藏'
-        : '剪藏失败'
+  const label = kind === 'study'
+    ? (status === 'waiting_for_clip'
+        ? '等待剪藏'
+        : status === 'running'
+          ? '生成学习笔记'
+          : status === 'completed'
+            ? '已生成笔记'
+            : status === 'skipped'
+              ? '已跳过'
+              : '笔记失败')
+    : (status === 'running'
+        ? '正在剪藏'
+        : status === 'completed'
+          ? '已剪藏'
+          : status === 'waiting_for_clip'
+            ? '等待中'
+            : status === 'skipped'
+              ? '已跳过'
+              : '剪藏失败')
   return (
     <div
       aria-disabled
@@ -598,7 +617,7 @@ function PendingClipRow({
         className="flex items-center justify-center"
         style={{ width: 16, height: 16 }}
       >
-        {status === 'running' ? (
+        {status === 'running' || status === 'waiting_for_clip' ? (
           <Loader2 className="animate-spin" style={{ width: 14, height: 14 }} strokeWidth={2} />
         ) : status === 'completed' ? (
           <Check style={{ width: 14, height: 14, color: 'var(--color-green, #10b981)' }} strokeWidth={2.5} />
@@ -622,7 +641,7 @@ function PendingClipRow({
         </span>
         <span>{title || urlHost}</span>
       </span>
-      {status === 'failed' && errorMessage && (
+      {(status === 'failed' || status === 'skipped') && errorMessage && (
         <span
           title={errorMessage}
           style={{
@@ -646,10 +665,13 @@ export interface PendingClipPlaceholder {
   targetDir: string
   urlHost: string
   title: string
-  status: 'running' | 'completed' | 'failed'
+  status: 'running' | 'completed' | 'failed' | 'waiting_for_clip' | 'skipped'
   copiedPath?: string
   errorMessage?: string
   createdAt: number
+  /** Discriminates clip-side placeholder vs study-side placeholder (when
+   * the action was 'content-study'). Default 'clip' for backward compat. */
+  kind?: 'clip' | 'study'
 }
 
 function FileTreeRecursive({
@@ -735,6 +757,7 @@ function FileTreeRecursive({
           title={p.title}
           errorMessage={p.errorMessage}
           depth={depth}
+          kind={p.kind}
         />
       ))}
       {visibleItems.map((item) => {
@@ -836,11 +859,14 @@ export default function FileTree({
     addPinnedFolder,
     moveItem,
     loadDirChildren,
+    deleteItem,
+    removePinnedFolder,
   } = useWorkspace()
 
   const { setWorkbenchMode } = useMode()
 
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: FileItem | null } | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<{ kind: 'fs' | 'unpin'; path: string; name: string } | null>(null)
   const [externalDropMenu, setExternalDropMenu] = useState<FileTreeExternalDropMenuState | null>(null)
   const [flashingTargetPath, setFlashingTargetPath] = useState<string | null>(null)
   const flashClearTimerRef = useRef<number | null>(null)
@@ -851,18 +877,7 @@ export default function FileTree({
    * in; `status` controls the visual (running / completed / failed). Cleared
    * when the actual file lands (FS watcher) or after a short failure delay.
    */
-  const [pendingClips, setPendingClips] = useState<
-    Array<{
-      taskId: string
-      targetDir: string
-      urlHost: string
-      title: string
-      status: 'running' | 'completed' | 'failed'
-      copiedPath?: string
-      errorMessage?: string
-      createdAt: number
-    }>
-  >([])
+  const [pendingClips, setPendingClips] = useState<PendingClipPlaceholder[]>([])
   const pendingClipRemoveTimersRef = useRef<Map<string, number>>(new Map())
   const [isDragOver, setIsDragOver] = useState(false)
   const [moveDropTargetDir, setMoveDropTargetDir] = useState<string | null>(null)
@@ -917,6 +932,62 @@ export default function FileTree({
   }, [])
 
   useEffect(() => {
+    const cleanupStudy = window.electronAPI?.browser?.onContentStudyUpdate?.((data) => {
+      if (!data || typeof data !== 'object') return
+      const update = data as {
+        kind?: string
+        taskId: string
+        status: string
+        url?: string
+        copiedPath?: string
+        errorKind?: string
+        errorMessage?: string
+      }
+      if (update.kind !== 'study') return
+      if (update.status === 'waiting_for_clip') {
+        setPendingClips((prev) =>
+          prev.map((p) =>
+            p.taskId === update.taskId ? { ...p, status: 'waiting_for_clip' } : p,
+          ),
+        )
+      } else if (update.status === 'running') {
+        setPendingClips((prev) =>
+          prev.map((p) => (p.taskId === update.taskId ? { ...p, status: 'running' } : p)),
+        )
+      } else if (update.status === 'completed') {
+        setPendingClips((prev) =>
+          prev.map((p) =>
+            p.taskId === update.taskId
+              ? { ...p, status: 'completed', copiedPath: update.copiedPath }
+              : p,
+          ),
+        )
+        schedulePlaceholderRemoval(update.taskId, 1500)
+        if (update.copiedPath) {
+          setFlashingTargetPath(update.copiedPath)
+          if (flashClearTimerRef.current !== null) {
+            window.clearTimeout(flashClearTimerRef.current)
+          }
+          flashClearTimerRef.current = window.setTimeout(() => {
+            setFlashingTargetPath(null)
+            flashClearTimerRef.current = null
+          }, 2500)
+        }
+      } else if (update.status === 'failed' || update.status === 'skipped') {
+        setPendingClips((prev) =>
+          prev.map((p) =>
+            p.taskId === update.taskId
+              ? {
+                  ...p,
+                  status: update.status as 'failed' | 'skipped',
+                  errorMessage: update.errorMessage || update.errorKind || '失败',
+                }
+              : p,
+          ),
+        )
+        schedulePlaceholderRemoval(update.taskId, 4000)
+      }
+    })
     const cleanup = window.electronAPI?.browser?.onClipBackgroundUpdate?.((data) => {
       if (!data || typeof data !== 'object') return
       const update = data as { taskId: string; status: string; url?: string; targetHint?: string }
@@ -995,6 +1066,7 @@ export default function FileTree({
     })
     return () => {
       cleanup?.()
+      cleanupStudy?.()
       if (flashClearTimerRef.current !== null) {
         window.clearTimeout(flashClearTimerRef.current)
         flashClearTimerRef.current = null
@@ -1241,13 +1313,24 @@ export default function FileTree({
     }
 
     const externalPayload = getExternalDropPayload(e.dataTransfer)
-    if (externalPayload && lastDropTarget) {
+    if (externalPayload) {
+      // Fallback target for drops landing in blank container space (no row
+      // or directory was the hover target). Without this the drop menu
+      // silently fails to appear, which is confusing — the user expects the
+      // drop to apply to the folder they're currently viewing.
+      const resolvedTarget: FileTreeDropTarget =
+        lastDropTarget ?? {
+          kind: 'inside-directory',
+          dirPath: currentPath,
+          itemPath: currentPath,
+          containerPath: currentPath,
+        }
       setContextMenu(null)
       setExternalDropMenu({
         x: e.clientX,
         y: e.clientY,
         payload: externalPayload,
-        target: lastDropTarget,
+        target: resolvedTarget,
       })
       return
     }
@@ -1272,13 +1355,27 @@ export default function FileTree({
         action,
         target,
         onPlaceholderStart: (placeholder) => {
-          setPendingClips((prev) => [...prev, placeholder])
+          setPendingClips((prev) => [...prev, { ...placeholder, kind: 'clip' }])
         },
         onPlaceholderUpdate: (taskId, patch) => {
           setPendingClips((prev) =>
             prev.map((p) => (p.taskId === taskId ? { ...p, ...patch } : p)),
           )
           if (patch.status === 'failed') {
+            schedulePlaceholderRemoval(taskId, 4000)
+          }
+        },
+        onStudyPlaceholderStart: (placeholder) => {
+          setPendingClips((prev) => [
+            ...prev,
+            { ...placeholder, kind: 'study', status: 'waiting_for_clip' },
+          ])
+        },
+        onStudyPlaceholderUpdate: (taskId, patch) => {
+          setPendingClips((prev) =>
+            prev.map((p) => (p.taskId === taskId ? { ...p, ...patch } : p)),
+          )
+          if (patch.status === 'failed' || patch.status === 'skipped') {
             schedulePlaceholderRemoval(taskId, 4000)
           }
         },
@@ -1636,8 +1733,8 @@ export default function FileTree({
                 style={{ height: Math.max(52, Math.round(thumbnailSize * 0.62)) }}
               >
                 {creatingType === 'folder'
-                  ? <Folder className="w-[16px] h-[16px]" style={{ color: 'var(--color-gold)' }} />
-                  : <FileText className="w-[16px] h-[16px]" style={{ color: 'var(--color-blue)' }} />}
+                  ? <Folder className="w-[16px] h-[16px]" style={{ color: 'var(--text-muted)' }} />
+                  : <FileText className="w-[16px] h-[16px]" style={{ color: 'var(--text-muted)' }} />}
               </div>
               <div className="mt-2 px-1">
                 <InlineInput
@@ -1713,10 +1810,39 @@ export default function FileTree({
       {contextMenu && (
         <ContextMenuBridge
           contextMenu={contextMenu}
+          pinnedFolders={pinnedFolders}
           onClose={() => setContextMenu(null)}
           onOpenFile={handleOpenFile}
+          onRequestDelete={({ path, name }) => setPendingDelete({ kind: 'fs', path, name })}
+          onRequestUnpin={({ path, name }) => setPendingDelete({ kind: 'unpin', path, name })}
         />
       )}
+
+      <Modal
+        open={pendingDelete !== null}
+        mode="confirm"
+        danger
+        title={pendingDelete?.kind === 'unpin' ? '从列表里移除' : '删除文件'}
+        message={
+          pendingDelete?.kind === 'unpin'
+            ? `确定从文件管理列表里移除 "${pendingDelete.name}" 吗？不会删除磁盘上的实际文件夹。`
+            : pendingDelete
+              ? `确定删除 "${pendingDelete.name}" 吗？此操作不可撤销。`
+              : ''
+        }
+        confirmLabel={pendingDelete?.kind === 'unpin' ? '移除' : '删除'}
+        cancelLabel="取消"
+        onConfirm={() => {
+          if (!pendingDelete) return
+          if (pendingDelete.kind === 'fs') {
+            void deleteItem(pendingDelete.path)
+          } else {
+            removePinnedFolder(pendingDelete.path)
+          }
+          setPendingDelete(null)
+        }}
+        onCancel={() => setPendingDelete(null)}
+      />
 
       {externalDropMenu && (
         <FileTreeExternalDropMenu
@@ -1883,21 +2009,27 @@ function FileTreeExternalDropMenu({
 
 function ContextMenuBridge({
   contextMenu,
+  pinnedFolders,
   onClose,
-  onOpenFile
+  onOpenFile,
+  onRequestDelete,
+  onRequestUnpin,
 }: {
   contextMenu: { x: number; y: number; item: FileItem | null }
+  pinnedFolders: string[]
   onClose: () => void
   onOpenFile: (item: FileItem) => void
+  onRequestDelete: (info: { path: string; name: string }) => void
+  onRequestUnpin: (info: { path: string; name: string }) => void
 }) {
   const {
     startRenaming,
     copyPathToClipboard,
     startCreating,
     showInFolder,
-    deleteItem,
     refreshFiles,
   } = useWorkspace()
+  const pinnedFolderSet = useMemo(() => new Set(pinnedFolders), [pinnedFolders])
 
   const nativeMenuAvailable = Boolean(
     typeof window !== 'undefined' && window.electronAPI?.ui?.showNativeContextMenu,
@@ -1971,20 +2103,24 @@ function ContextMenuBridge({
         icon: <FolderOpen style={{ width: 16, height: 16 }} />,
         onClick: () => void showInFolder(item.path)
       },
+      ...(pinnedFolderSet.has(item.path) ? [
+        {
+          id: 'removeFromList',
+          label: '从列表里移除',
+          icon: <ListMinus style={{ width: 16, height: 16 }} />,
+          onClick: () => onRequestUnpin({ path: item.path, name: item.name }),
+        },
+      ] : []),
       { id: 'sep4', label: '', separator: true },
       {
         id: 'delete',
         label: '删除',
         icon: <Trash2 style={{ width: 16, height: 16 }} />,
         danger: true,
-        onClick: () => {
-          if (confirm(`确定删除 "${item.name}" 吗？`)) {
-            void deleteItem(item.path)
-          }
-        }
+        onClick: () => onRequestDelete({ path: item.path, name: item.name })
       }
     ]
-  }, [onOpenFile, startRenaming, copyPathToClipboard, startCreating, showInFolder, deleteItem, refreshFiles])
+  }, [onOpenFile, startRenaming, copyPathToClipboard, startCreating, showInFolder, refreshFiles, pinnedFolderSet, onRequestDelete, onRequestUnpin])
 
   const contextItems = useMemo(() => getContextItems(contextMenu.item), [contextMenu.item, getContextItems])
 
@@ -1997,6 +2133,7 @@ function ContextMenuBridge({
       newFolder: '⊞',
       showInFinder: '↗',
       refresh: '↻',
+      removeFromList: '−',
       delete: '⌫',
     }
     const acceleratorById: Record<string, string> = {
@@ -2013,39 +2150,51 @@ function ContextMenuBridge({
     }))
   }, [])
 
+  // ref 模式：useEffect 只在菜单首次打开（坐标变化）时跑，避免父组件 inline
+  // 函数引用变化导致 cancelled=true、用户已经选了的 onClick 永远不触发。
+  const liveRef = useRef({ contextItems, onClose, toNativeContextItems })
+  liveRef.current = { contextItems, onClose, toNativeContextItems }
+
   useEffect(() => {
     if (!nativeMenuAvailable) return
-    let cancelled = false
+    let invoked = false
+    const itemsAtOpen = liveRef.current.contextItems
     const actionById = new Map(
-      contextItems
+      itemsAtOpen
         .filter((item) => !item.separator)
         .map((item) => [item.id, item]),
     )
     void window.electronAPI.ui?.showNativeContextMenu({
       x: contextMenu.x,
       y: contextMenu.y,
-      items: toNativeContextItems(contextItems),
+      items: liveRef.current.toNativeContextItems(itemsAtOpen),
     }).then((result) => {
-      if (cancelled) return
+      invoked = true
+      const close = liveRef.current.onClose
       if (!result?.success || !result.selectedId) {
-        onClose()
+        close()
         return
       }
       const item = actionById.get(result.selectedId)
       if (!item || item.disabled) {
-        onClose()
+        close()
         return
       }
       item.onClick?.()
-      onClose()
+      close()
     }).catch(() => {
-      if (!cancelled) onClose()
+      invoked = true
+      liveRef.current.onClose()
     })
 
     return () => {
-      cancelled = true
+      // 卸载时若菜单还没回调（用户尚未选择），主动让 UI 收起；如果 promise
+      // 已 resolved（invoked=true），无需再做任何事——onClick 已经跑过。
+      if (!invoked) {
+        liveRef.current.onClose()
+      }
     }
-  }, [contextItems, contextMenu.x, contextMenu.y, nativeMenuAvailable, onClose, toNativeContextItems])
+  }, [contextMenu.x, contextMenu.y, nativeMenuAvailable])
 
   if (nativeMenuAvailable) {
     return null

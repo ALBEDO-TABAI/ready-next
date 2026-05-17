@@ -19,6 +19,8 @@ export interface ModalProps {
   confirmLabel?: string
   /** Label for the cancel button */
   cancelLabel?: string
+  /** Render the confirm button in danger (red) style — for destructive actions */
+  danger?: boolean
   /** Called when the user confirms. For prompt mode, receives the input value. */
   onConfirm?: (value?: string) => void
   /** Called when the user cancels or closes the modal */
@@ -50,6 +52,7 @@ export default function Modal({
   placeholder,
   confirmLabel = '确定',
   cancelLabel = '取消',
+  danger = false,
   onConfirm,
   onCancel,
 }: ModalProps) {
@@ -288,7 +291,7 @@ export default function Modal({
               fontSize: 'var(--text-base)',
               fontWeight: 500,
               color: '#FFFFFF',
-              background: 'var(--color-blue)',
+              background: danger ? 'var(--color-red)' : 'var(--color-blue)',
               border: '1px solid transparent',
               borderRadius: 'var(--radius-md)',
               cursor: 'pointer',

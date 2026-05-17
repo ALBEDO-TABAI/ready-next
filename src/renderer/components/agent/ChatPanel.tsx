@@ -3091,10 +3091,14 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
   )
 
   const handleDeleteConversation = useCallback(
-    (convId: string) => {
-      deleteConversation(convId)
+    async (convId: string) => {
+      await deleteConversation(convId)
+      // 乐观从 sessionRecallResults 移除，避免列表残留让用户以为没删掉
+      setSessionRecallResults((prev) => prev.filter((hit) => hit.conversationId !== convId))
+      // 异步重新拉取一次，确保与后端一致
+      void runSessionRecallSearch(sessionRecallQuery)
     },
-    [deleteConversation]
+    [deleteConversation, runSessionRecallSearch, sessionRecallQuery]
   )
 
   const patchScopeRun = useCallback(
