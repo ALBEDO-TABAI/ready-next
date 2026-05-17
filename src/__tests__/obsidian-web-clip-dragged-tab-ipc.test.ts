@@ -127,6 +127,39 @@ describe('runClipDraggedTabBackground · happy path', () => {
     )
     assert.equal(events[events.length - 1].status, 'completed')
   })
+
+  it('recovers a raw 403 when Jina returns readable markdown', async () => {
+    const { events, controller } = makeRecorder()
+    let pipelineInput: { html: string; jinaMarkdown?: string } | null = null
+    await runClipDraggedTabBackground(
+      'clip-test-004',
+      { url: 'https://example.com/cloudflare' },
+      controller,
+      makeDeps({
+        fetchHtml: async () => { throw new ClipFetchError('login_required', 'HTTP 403') },
+        fetchJina: async () => 'Title: Cloudflare page\n\nMarkdown Content:\n# Article\n\nBody',
+        runPipeline: async (input) => {
+          pipelineInput = { html: input.html, jinaMarkdown: input.jinaMarkdown }
+          return {
+            savedPath: '/tmp/outputs/obsidian-web-clip/cloudflare.md',
+            savedPathRelative: 'obsidian-web-clip/cloudflare.md',
+            suggestedVaultRelativePath: 'cloudflare.md',
+            preset: { id: 'article-clipper', name: 'Article' },
+            frontmatter: { title: 'Cloudflare page', url: 'https://example.com/cloudflare' },
+            title: 'Cloudflare page',
+            url: 'https://example.com/cloudflare',
+            warnings: ['raw_html_unavailable_jina_fallback'],
+          }
+        },
+      }),
+    )
+    const last = events[events.length - 1]
+    assert.equal(last.status, 'completed')
+    assert.deepEqual(pipelineInput, {
+      html: '',
+      jinaMarkdown: 'Title: Cloudflare page\n\nMarkdown Content:\n# Article\n\nBody',
+    })
+  })
 })
 
 describe('runClipDraggedTabBackground · error mapping', () => {

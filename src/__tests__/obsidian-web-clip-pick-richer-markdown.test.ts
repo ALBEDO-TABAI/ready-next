@@ -9,11 +9,25 @@
 
 import { describe, it } from 'node:test'
 import assert from 'node:assert'
+import { mkdtempSync, readFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-import { pickRicherMarkdown, sanitizeUnfetchableImageRefs } from '../main/modules/clipping/clip-pipeline'
+import { pickRicherMarkdown, runClipPipeline, sanitizeUnfetchableImageRefs } from '../main/modules/clipping/clip-pipeline'
 
 const READ = 'readability content with a few words'
 const JINA = 'jina content rendered after JS'
+const PRESET_DIR = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  '..',
+  'assets',
+  'embedded-skills',
+  'obsidian-web-clip',
+  'assets',
+  'presets',
+)
 
 describe('pickRicherMarkdown · empty cases', () => {
   it('returns Jina when readability is empty', () => {
@@ -152,5 +166,28 @@ describe('sanitizeUnfetchableImageRefs', () => {
     assert.equal(httpRefs, 2, 'real http(s) refs preserved')
     assert.equal(unfetchableRefs, 0, 'no unfetchable refs survive')
     assert.ok(out.includes('_Hero again_'), 'real alt promoted to italic')
+  })
+})
+
+describe('runClipPipeline · Jina-only fallback', () => {
+  it('writes a note when raw HTML is unavailable but Jina markdown is present', async () => {
+    const outputsRoot = mkdtempSync(join(tmpdir(), 'ready-clip-jina-only-'))
+    const result = await runClipPipeline(
+      {
+        html: '',
+        url: 'https://example.com/cloudflare',
+        jinaMarkdown: 'Title: Cloudflare Article\n\nMarkdown Content:\n# Cloudflare Article\n\nBody from Jina',
+      },
+      {
+        presetDir: PRESET_DIR,
+        preset: 'article-clipper',
+        outputsRoot,
+      },
+    )
+
+    assert.equal(result.title, 'Cloudflare Article')
+    assert.ok(result.warnings.includes('raw_html_unavailable_jina_fallback'))
+    const saved = readFileSync(result.savedPath, 'utf-8')
+    assert.ok(saved.includes('Body from Jina'))
   })
 })

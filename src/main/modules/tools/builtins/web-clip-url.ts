@@ -116,6 +116,7 @@ export async function executeWebClipUrl(
   let finalUrl: string
   let inlineTitle: string | undefined
   let jinaMarkdown: string | undefined
+  let rawFetchError: unknown = null
 
   try {
     const fetched = await fetchClipHtml(args.url, ctx.abortSignal)
@@ -123,22 +124,28 @@ export async function executeWebClipUrl(
     finalUrl = fetched.finalUrl
     inlineTitle = fetched.titleFromHead
   } catch (err) {
-    if (err instanceof ClipFetchError && err.kind === 'login_required') {
-      throw new ToolDomainError('clip_login_required', err.message)
-    }
-    if (err instanceof ClipFetchError) {
-      throw new ToolDomainError('clip_fetch_failed', err.message)
-    }
-    throw new ToolDomainError(
-      'clip_fetch_failed',
-      `Failed to fetch ${args.url}: ${(err as Error).message}`,
-    )
+    rawFetchError = err
+    html = ''
+    finalUrl = args.url
   }
 
   try {
     jinaMarkdown = await fetchJinaMarkdown(args.url, ctx.jinaKey, ctx.abortSignal, ctx.jinaBaseUrl)
   } catch {
     jinaMarkdown = undefined
+  }
+
+  if (!html && !jinaMarkdown) {
+    if (rawFetchError instanceof ClipFetchError && rawFetchError.kind === 'login_required') {
+      throw new ToolDomainError('clip_login_required', rawFetchError.message)
+    }
+    if (rawFetchError instanceof ClipFetchError) {
+      throw new ToolDomainError('clip_fetch_failed', rawFetchError.message)
+    }
+    throw new ToolDomainError(
+      'clip_fetch_failed',
+      `Failed to fetch ${args.url}: ${rawFetchError instanceof Error ? rawFetchError.message : String(rawFetchError || 'unknown')}`,
+    )
   }
 
   const pipelineOptions: ClipPipelineOptions = {

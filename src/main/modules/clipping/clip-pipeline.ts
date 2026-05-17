@@ -27,6 +27,7 @@ import {
 } from '../tools/skill-primitives/path-sandbox'
 
 import type { ExtractionAdapter } from './extraction-adapter'
+import type { ExtractionResult } from './extraction-adapter'
 import { ReadabilityJsdomAdapter } from './readability-jsdom-adapter'
 import {
   loadAllPresets,
@@ -133,7 +134,9 @@ export async function runClipPipeline(
   input: ClipPipelineInput,
   options: ClipPipelineOptions,
 ): Promise<ClipPipelineResult> {
-  if (!input.html || input.html.trim().length === 0) {
+  const hasHtml = input.html && input.html.trim().length > 0
+  const hasJinaMarkdown = input.jinaMarkdown && input.jinaMarkdown.trim().length > 0
+  if (!hasHtml && !hasJinaMarkdown) {
     throw new ClipPipelineError('clip_parse_failed', false, { reason: 'extraction_empty' }, 'Empty HTML body')
   }
   if (!options.outputsRoot || options.outputsRoot.trim().length === 0) {
@@ -147,16 +150,20 @@ export async function runClipPipeline(
 
   const adapter = options.adapter || new ReadabilityJsdomAdapter()
 
-  let extracted
-  try {
-    extracted = await adapter.extract({ html: input.html, url: input.url, sanitized: input.sanitized })
-  } catch (err) {
-    throw new ClipPipelineError(
-      'clip_parse_failed',
-      false,
-      { reason: 'extraction_threw', message: (err as Error).message },
-      `Extraction failed: ${(err as Error).message}`,
-    )
+  let extracted: ExtractionResult
+  if (hasHtml) {
+    try {
+      extracted = await adapter.extract({ html: input.html, url: input.url, sanitized: input.sanitized })
+    } catch (err) {
+      throw new ClipPipelineError(
+        'clip_parse_failed',
+        false,
+        { reason: 'extraction_threw', message: (err as Error).message },
+        `Extraction failed: ${(err as Error).message}`,
+      )
+    }
+  } else {
+    extracted = buildJinaOnlyExtraction(input.jinaMarkdown || '', input.inlineTitle || input.url)
   }
 
   if (!extracted.contentMarkdown && !input.jinaMarkdown) {
@@ -303,6 +310,32 @@ export async function runClipPipeline(
 const IMG_MARKDOWN_COUNT_RE = /!\[[^\]]*\]\(https?:\/\/[^)\s]+\)/g
 const IMG_MARKDOWN_ANY_RE = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
 const UNFETCHABLE_SCHEME_RE = /^(?:blob|data|javascript|about|chrome|file|filesystem):/i
+
+function buildJinaOnlyExtraction(markdown: string, fallbackTitle: string): ExtractionResult {
+  const title = extractJinaMarkdownTitle(markdown) || fallbackTitle
+  const words = markdown.trim().split(/\s+/).filter(Boolean).length
+  return {
+    title,
+    contentMarkdown: '',
+    metadata: {
+      wordCount: words,
+    },
+    structuredData: [],
+    metaLookup: {},
+    diagnostics: {
+      extractionSource: 'jina',
+      confidence: 0.7,
+      warnings: ['raw_html_unavailable_jina_fallback'],
+    },
+  }
+}
+
+function extractJinaMarkdownTitle(markdown: string): string {
+  const titleMatch = /^Title:\s*(.+)$/mi.exec(markdown)
+  if (titleMatch?.[1]?.trim()) return titleMatch[1].trim()
+  const headingMatch = /^#\s+(.+)$/m.exec(markdown)
+  return headingMatch?.[1]?.trim() || ''
+}
 
 /**
  * Replace `![alt](blob:...)` / `![alt](data:...)` / `![alt](javascript:...)`

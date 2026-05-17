@@ -178,12 +178,26 @@ export async function runClipDraggedTabBackground(
   emit(controller, { ...base, status: 'running' })
 
   try {
-    const fetched = await deps.fetchHtml(args.url, undefined)
+    let fetched
+    let rawFetchError: unknown = null
+    try {
+      fetched = await deps.fetchHtml(args.url, undefined)
+    } catch (err) {
+      rawFetchError = err
+      fetched = {
+        html: '',
+        finalUrl: args.url,
+        titleFromHead: undefined,
+      }
+    }
     let jinaMarkdown: string | undefined
     try {
       jinaMarkdown = await deps.fetchJina(args.url, undefined, undefined)
     } catch {
       jinaMarkdown = undefined
+    }
+    if (!fetched.html && !jinaMarkdown) {
+      throw rawFetchError
     }
 
     const runtimeInfo = deps.getRuntimeInfo()
