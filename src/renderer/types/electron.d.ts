@@ -879,6 +879,33 @@ interface ElectronAgentAPI {
     enabled?: boolean
     config?: Record<string, unknown>
   }) => Promise<{ success: boolean; error?: string }>
+  startWechatLogin: (payload: {
+    id?: string
+    defaultTarget?: string
+    force?: boolean
+  }) => Promise<IPCResponse<{
+    sessionKey?: string
+    qrcodeUrl?: string
+    qrDataUrl?: string
+    status?: string
+    message?: string
+  }>>
+  getWechatLoginStatus: (payload: {
+    channelId: string
+    sessionKey: string
+  }) => Promise<IPCResponse<{
+    sessionKey?: string
+    qrcodeUrl?: string
+    qrDataUrl?: string
+    status?: string
+    message?: string
+    accountId?: string
+  }>>
+  submitWechatLoginVerifyCode: (payload: {
+    channelId: string
+    sessionKey: string
+    code: string
+  }) => Promise<IPCResponse>
   deleteChannel: (id: string) => Promise<{ success: boolean; error?: string }>
   setChannelEnabled: (id: string, enabled: boolean) => Promise<IPCResponse<AgentChannelConfigData>>
   sendChannelProbe: (id: string, text: string) => Promise<{ success: boolean; error?: string }>

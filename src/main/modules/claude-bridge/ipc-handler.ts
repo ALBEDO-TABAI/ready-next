@@ -1102,7 +1102,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
 
   ipcMain.handle('agent:upsertChannel', async (_, payload: {
     id?: string
-    type: 'local-debug' | 'generic-webhook' | 'feishu-bot' | 'feishu-app' | 'telegram-bot'
+    type: 'local-debug' | 'generic-webhook' | 'feishu-bot' | 'feishu-app' | 'telegram-bot' | 'wechat-openclaw'
     name: string
     enabled?: boolean
     config?: Record<string, unknown>
@@ -1118,7 +1118,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
 
   ipcMain.handle('agent:testChannel', async (_, payload: {
     id?: string
-    type: 'local-debug' | 'generic-webhook' | 'feishu-bot' | 'feishu-app' | 'telegram-bot'
+    type: 'local-debug' | 'generic-webhook' | 'feishu-bot' | 'feishu-app' | 'telegram-bot' | 'wechat-openclaw'
     name: string
     enabled?: boolean
     config?: Record<string, unknown>
@@ -1129,6 +1129,60 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error)
       return { success: false, error: errorMessage }
+    }
+  })
+
+  ipcMain.handle('agent:startWechatLogin', async (_, payload: {
+    id?: string
+    defaultTarget?: string
+    force?: boolean
+  }): Promise<IPCResponse> => {
+    try {
+      const result = await runtime!.startWechatLogin(payload || {})
+      if (result.success === false) {
+        return { success: false, error: String(result.error || 'wechat login failed'), data: result }
+      }
+      return { success: true, data: result }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('agent:getWechatLoginStatus', async (_, payload: {
+    channelId?: string
+    sessionKey?: string
+  }): Promise<IPCResponse> => {
+    try {
+      const channelId = String(payload?.channelId || '')
+      const sessionKey = String(payload?.sessionKey || '')
+      if (!channelId || !sessionKey) return { success: false, error: 'channelId and sessionKey are required' }
+      const result = await runtime!.getWechatLoginStatus(channelId, sessionKey)
+      if (result.success === false) {
+        return { success: false, error: String(result.error || 'wechat login status failed'), data: result }
+      }
+      return { success: true, data: result }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('agent:submitWechatLoginVerifyCode', async (_, payload: {
+    channelId?: string
+    sessionKey?: string
+    code?: string
+  }): Promise<IPCResponse> => {
+    try {
+      const channelId = String(payload?.channelId || '')
+      const sessionKey = String(payload?.sessionKey || '')
+      const code = String(payload?.code || '')
+      if (!channelId || !sessionKey || !code) return { success: false, error: 'channelId, sessionKey and code are required' }
+      const result = await runtime!.submitWechatLoginVerifyCode(channelId, sessionKey, code)
+      if (result.success === false) {
+        return { success: false, error: String(result.error || 'wechat verify failed'), data: result }
+      }
+      return { success: true, data: result }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
   })
 

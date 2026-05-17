@@ -244,6 +244,27 @@ export class SidecarManager {
     })
   }
 
+  async startWechatLogin(channelId: string, force?: boolean): Promise<Record<string, unknown>> {
+    return this.request('/channels/wechat-openclaw/login/start', {
+      method: 'POST',
+      body: JSON.stringify({ channel_id: channelId, force: Boolean(force) }),
+    })
+  }
+
+  async getWechatLoginStatus(channelId: string, sessionKey: string): Promise<Record<string, unknown>> {
+    return this.request('/channels/wechat-openclaw/login/status', {
+      method: 'POST',
+      body: JSON.stringify({ channel_id: channelId, session_key: sessionKey }),
+    })
+  }
+
+  async submitWechatLoginVerifyCode(channelId: string, sessionKey: string, code: string): Promise<Record<string, unknown>> {
+    return this.request('/channels/wechat-openclaw/login/verify', {
+      method: 'POST',
+      body: JSON.stringify({ channel_id: channelId, session_key: sessionKey, code }),
+    })
+  }
+
   async listSchedules(): Promise<Record<string, unknown>> {
     return this.request('/cron')
   }

@@ -1504,6 +1504,48 @@ export class AgentControlRuntime extends EventEmitter {
     }
   }
 
+  async startWechatLogin(payload: {
+    id?: string
+    defaultTarget?: string
+    force?: boolean
+  }): Promise<Record<string, unknown>> {
+    if (!this.sidecar.isRunning()) {
+      await this.startSidecar()
+    }
+    const id = payload.id || 'channel-wechat-openclaw-default'
+    const existing = this.db.getAgentChannel(id)
+    const existingConfig = existing
+      ? decryptChannelConfig(this.tryParseJson<Record<string, unknown>>(existing.config_json, {}))
+      : {}
+    const defaultTarget = String(payload.defaultTarget || existingConfig.defaultTarget || '').trim()
+    const config: Record<string, unknown> = {
+      ...existingConfig,
+      ...(defaultTarget ? { defaultTarget } : {}),
+    }
+    await this.sidecar.upsertChannel({
+      id,
+      type: 'wechat-openclaw',
+      name: existing?.name || '微信',
+      enabled: false,
+      config,
+    })
+    return this.sidecar.startWechatLogin(id, payload.force ?? true)
+  }
+
+  async getWechatLoginStatus(channelId: string, sessionKey: string): Promise<Record<string, unknown>> {
+    if (!this.sidecar.isRunning()) {
+      await this.startSidecar()
+    }
+    return this.sidecar.getWechatLoginStatus(channelId, sessionKey)
+  }
+
+  async submitWechatLoginVerifyCode(channelId: string, sessionKey: string, code: string): Promise<Record<string, unknown>> {
+    if (!this.sidecar.isRunning()) {
+      await this.startSidecar()
+    }
+    return this.sidecar.submitWechatLoginVerifyCode(channelId, sessionKey, code)
+  }
+
   listSchedules(): CronTask[] {
     const rows = this.db.listAgentSchedules()
     return rows.map((row) => this.mapScheduleRow(row))

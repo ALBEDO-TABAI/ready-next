@@ -19,6 +19,7 @@ import uvicorn
 from ready_sidecar.channels import ChannelConfigModel, ChannelManager
 from ready_sidecar.channels.feishu_app_adapter import FeishuAppAdapter
 from ready_sidecar.channels.feishu_plugin_ops import FeishuPluginOperations
+from ready_sidecar.channels.wechat_openclaw_adapter import WechatOpenClawAdapter
 
 
 # ---------------------------------------------------------------------------
@@ -91,6 +92,22 @@ class ChannelSendPayload(BaseModel):
     id: str
     thread: Optional[str] = None
     text: str
+
+
+class WechatLoginStartPayload(BaseModel):
+    channel_id: str
+    force: bool = False
+
+
+class WechatLoginStatusPayload(BaseModel):
+    channel_id: str
+    session_key: str
+
+
+class WechatLoginVerifyPayload(BaseModel):
+    channel_id: str
+    session_key: str
+    code: str
 
 
 class RuntimeState:
@@ -376,6 +393,52 @@ async def feishu_callback(channel_id: str, request: Request) -> Response:
     for key, value in headers.items():
         response.headers[key] = value
     return response
+
+
+@app.post("/channels/wechat-openclaw/inbound/{channel_id}")
+async def wechat_openclaw_inbound(channel_id: str, request: Request, _: None = Depends(check_auth)) -> Dict[str, Any]:
+    channel = state.channels.get(channel_id)
+    if not channel or channel.type != "wechat-openclaw":
+        raise HTTPException(status_code=404, detail="channel not found")
+
+    adapter = state.channel_manager.adapters.get(channel_id)
+    if not isinstance(adapter, WechatOpenClawAdapter):
+        adapter = WechatOpenClawAdapter(channel.id, channel.type, channel.name, channel.config)
+        adapter.set_event_callback(state.enqueue_event)
+
+    payload = await request.json()
+    ok, err = adapter.handle_openclaw_event(payload if isinstance(payload, dict) else {})
+    return {"success": bool(ok), "error": err}
+
+
+def _get_wechat_adapter(channel_id: str) -> WechatOpenClawAdapter:
+    channel = state.channels.get(channel_id)
+    if not channel or channel.type != "wechat-openclaw":
+        raise HTTPException(status_code=404, detail="channel not found")
+    adapter = state.channel_manager.adapters.get(channel_id)
+    if not isinstance(adapter, WechatOpenClawAdapter):
+        adapter = WechatOpenClawAdapter(channel.id, channel.type, channel.name, channel.config)
+        adapter.set_event_callback(state.enqueue_event)
+        state.channel_manager.adapters[channel_id] = adapter
+    return adapter
+
+
+@app.post("/channels/wechat-openclaw/login/start")
+def wechat_login_start(payload: WechatLoginStartPayload, _: None = Depends(check_auth)) -> Dict[str, Any]:
+    adapter = _get_wechat_adapter(payload.channel_id)
+    return adapter.start_login(force=payload.force)
+
+
+@app.post("/channels/wechat-openclaw/login/status")
+def wechat_login_status(payload: WechatLoginStatusPayload, _: None = Depends(check_auth)) -> Dict[str, Any]:
+    adapter = _get_wechat_adapter(payload.channel_id)
+    return adapter.get_login_status(payload.session_key)
+
+
+@app.post("/channels/wechat-openclaw/login/verify")
+def wechat_login_verify(payload: WechatLoginVerifyPayload, _: None = Depends(check_auth)) -> Dict[str, Any]:
+    adapter = _get_wechat_adapter(payload.channel_id)
+    return adapter.submit_verify_code(payload.session_key, payload.code)
 
 
 # ============================================================

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import QRCode from 'qrcode'
 import { Bot, CheckCircle2, ChevronDown, ChevronUp, Eye, EyeOff, Loader2, MessageSquare, RefreshCcw, Send, Trash2, XCircle } from 'lucide-react'
 import {
   SETTINGS_CARD_STYLE,
@@ -7,7 +8,7 @@ import {
   SETTINGS_SECONDARY_BUTTON_STYLE,
 } from './settings-theme'
 
-type IMTab = 'imessage' | 'telegram' | 'feishu'
+type IMTab = 'imessage' | 'telegram' | 'feishu' | 'wechat'
 
 type ChannelAdapterType =
   | 'local-debug'
@@ -15,6 +16,7 @@ type ChannelAdapterType =
   | 'feishu-bot'
   | 'feishu-app'
   | 'telegram-bot'
+  | 'wechat-openclaw'
 
 interface ChannelData {
   id: string
@@ -78,6 +80,8 @@ const primaryButtonStyle = {
   ...SETTINGS_PRIMARY_BUTTON_STYLE,
 }
 
+const WECHAT_CHANNEL_ID = 'channel-wechat-openclaw-default'
+
 export default function RemoteIMSettingsPanel() {
   const [tab, setTab] = useState<IMTab>('feishu')
   const [channels, setChannels] = useState<ChannelData[]>([])
@@ -91,6 +95,11 @@ export default function RemoteIMSettingsPanel() {
   const [feishuAppSecret, setFeishuAppSecret] = useState('')
   const [feishuVerificationToken, setFeishuVerificationToken] = useState('')
   const [feishuEncryptKey, setFeishuEncryptKey] = useState('')
+  const [wechatDefaultTarget, setWechatDefaultTarget] = useState('')
+  const [wechatLoginSessionKey, setWechatLoginSessionKey] = useState('')
+  const [wechatLoginStatus, setWechatLoginStatus] = useState('')
+  const [wechatQrImage, setWechatQrImage] = useState('')
+  const [wechatVerifyCode, setWechatVerifyCode] = useState('')
   const [showFeishuSecret, setShowFeishuSecret] = useState(false)
   const [showFeishuAdvanced, setShowFeishuAdvanced] = useState(false)
   const [showTelegramToken, setShowTelegramToken] = useState(false)
@@ -126,22 +135,27 @@ export default function RemoteIMSettingsPanel() {
       setChannels(list)
       const tg = list.find((item) => item.type === 'telegram-bot')
       const fs = list.find((item) => item.type === 'feishu-app')
+      const wx = list.find((item) => item.type === 'wechat-openclaw')
       if (tg) {
         const token = String(tg.config?.token || tg.config?.botToken || '')
         if (token) setTelegramToken(token)
       }
-        if (fs) {
-          const appId = String(fs.config?.appId || '')
-          const appSecret = String(fs.config?.appSecret || '')
-          const verificationToken = String(fs.config?.verificationToken || '')
-          const encryptKey = String(fs.config?.encryptKey || '')
+      if (fs) {
+        const appId = String(fs.config?.appId || '')
+        const appSecret = String(fs.config?.appSecret || '')
+        const verificationToken = String(fs.config?.verificationToken || '')
+        const encryptKey = String(fs.config?.encryptKey || '')
         if (appId) setFeishuAppId(appId)
-          if (appSecret) setFeishuAppSecret(appSecret)
-          if (verificationToken) setFeishuVerificationToken(verificationToken)
-          if (encryptKey) setFeishuEncryptKey(encryptKey)
-          if (verificationToken || encryptKey) setShowFeishuAdvanced(true)
-        }
+        if (appSecret) setFeishuAppSecret(appSecret)
+        if (verificationToken) setFeishuVerificationToken(verificationToken)
+        if (encryptKey) setFeishuEncryptKey(encryptKey)
+        if (verificationToken || encryptKey) setShowFeishuAdvanced(true)
       }
+      if (wx) {
+        const defaultTarget = String(wx.config?.defaultTarget || '')
+        if (defaultTarget) setWechatDefaultTarget(defaultTarget)
+      }
+    }
     if (runtimeRes.success && runtimeRes.data) {
       setRuntimeStatus(runtimeRes.data as unknown as RuntimeStatusData)
     }
@@ -160,6 +174,10 @@ export default function RemoteIMSettingsPanel() {
   )
   const telegramChannel = useMemo(
     () => channels.find((item) => item.type === 'telegram-bot'),
+    [channels],
+  )
+  const wechatChannel = useMemo(
+    () => channels.find((item) => item.type === 'wechat-openclaw'),
     [channels],
   )
 
@@ -238,6 +256,104 @@ export default function RemoteIMSettingsPanel() {
     })
   }
 
+  const saveWechatChannel = useCallback(async (accountId?: string) => {
+    if (!window.electronAPI?.agent) return
+    const defaultTarget = wechatDefaultTarget.trim()
+    const config: Record<string, string> = {}
+    if (defaultTarget) config.defaultTarget = defaultTarget
+    if (accountId) config.accountId = accountId
+    const save = await window.electronAPI.agent.upsertChannel({
+      id: wechatChannel?.id || WECHAT_CHANNEL_ID,
+      type: 'wechat-openclaw' as const,
+      name: '微信',
+      enabled: true,
+      config,
+    })
+    if (!save.success) {
+      setStatusText(`保存失败：${save.error || '未知错误'}`)
+      return
+    }
+    setStatusText('微信已启用')
+    await refresh()
+  }, [refresh, wechatChannel?.id, wechatDefaultTarget])
+
+  const connectWechat = async () => {
+    if (!window.electronAPI?.agent) return
+    setStatusText('正在生成微信绑定二维码…')
+    await runWithBusy('wechat-connect', async () => {
+      const channelId = wechatChannel?.id || WECHAT_CHANNEL_ID
+      const res = await window.electronAPI.agent.startWechatLogin({
+        id: channelId,
+        defaultTarget: wechatDefaultTarget.trim(),
+        force: true,
+      })
+      if (!res.success || !res.data) {
+        setStatusText(`启用失败：${res.error || '未知错误'}`)
+        return
+      }
+      const data = res.data
+      const qrcodeUrl = String(data.qrcodeUrl || data.qrDataUrl || '')
+      const sessionKey = String(data.sessionKey || '')
+      if (!qrcodeUrl || !sessionKey) {
+        setStatusText('启用失败：没有拿到二维码')
+        return
+      }
+      const qrImage = await QRCode.toDataURL(qrcodeUrl, { width: 240, margin: 1 })
+      setWechatQrImage(qrImage)
+      setWechatLoginSessionKey(sessionKey)
+      setWechatLoginStatus(String(data.status || 'waiting'))
+      setWechatVerifyCode('')
+      setStatusText(String(data.message || '请用手机微信扫码绑定'))
+    })
+  }
+
+  useEffect(() => {
+    if (!wechatLoginSessionKey || !window.electronAPI?.agent) return undefined
+    let disposed = false
+    const channelId = wechatChannel?.id || WECHAT_CHANNEL_ID
+    const poll = async () => {
+      const res = await window.electronAPI.agent.getWechatLoginStatus({
+        channelId,
+        sessionKey: wechatLoginSessionKey,
+      })
+      if (disposed) return
+      if (!res.success || !res.data) {
+        setWechatLoginStatus('error')
+        setStatusText(res.error || '微信绑定状态获取失败')
+        return
+      }
+      const data = res.data
+      const status = String(data.status || 'waiting')
+      setWechatLoginStatus(status)
+      if (data.message) setStatusText(String(data.message))
+      if (status === 'connected' || status === 'already_connected') {
+        setWechatLoginSessionKey('')
+        setWechatQrImage('')
+        await saveWechatChannel(String(data.accountId || ''))
+      } else if (status === 'expired' || status === 'error') {
+        setWechatLoginSessionKey('')
+      }
+    }
+    void poll()
+    const timer = window.setInterval(() => { void poll() }, 2_000)
+    return () => {
+      disposed = true
+      window.clearInterval(timer)
+    }
+  }, [saveWechatChannel, wechatChannel?.id, wechatLoginSessionKey])
+
+  const submitWechatVerifyCode = async () => {
+    if (!window.electronAPI?.agent || !wechatLoginSessionKey) return
+    await runWithBusy('wechat-verify', async () => {
+      const res = await window.electronAPI.agent.submitWechatLoginVerifyCode({
+        channelId: wechatChannel?.id || WECHAT_CHANNEL_ID,
+        sessionKey: wechatLoginSessionKey,
+        code: wechatVerifyCode,
+      })
+      setStatusText(res.success ? '已提交，继续等待微信确认' : `提交失败：${res.error || '未知错误'}`)
+    })
+  }
+
   const disconnectChannel = async (id: string) => {
     if (!window.electronAPI?.agent) return
     await runWithBusy(`disconnect:${id}`, async () => {
@@ -283,6 +399,7 @@ export default function RemoteIMSettingsPanel() {
           { key: 'imessage' as const, label: 'iMessage' },
           { key: 'telegram' as const, label: 'Telegram' },
           { key: 'feishu' as const, label: '飞书' },
+          { key: 'wechat' as const, label: '微信' },
         ].map((item) => (
           <button
             key={item.key}
@@ -312,7 +429,7 @@ export default function RemoteIMSettingsPanel() {
             lineHeight: 1.7,
           }}
         >
-          iMessage 正在开发中，当前版本先支持 Telegram 与飞书。
+          iMessage 正在开发中，当前版本先支持 Telegram、飞书与微信。
         </div>
       )}
 
@@ -499,6 +616,92 @@ export default function RemoteIMSettingsPanel() {
             <div>3. 订阅消息事件至少包含 `im.message.receive_v1`；长连接模式通常不需要填写 Verification Token / Encrypt Key，只有回调校验或消息加密时才需要。</div>
             <div>4. 发布应用版本后，填入 App ID / App Secret 并连接。</div>
           </div>
+        </div>
+      )}
+
+      {tab === 'wechat' && (
+        <div className="flex flex-col" style={{ padding: '4px 0 10px', gap: 24 }}>
+          <div className="flex flex-col" style={{ gap: 8 }}>
+            <div className="text-[15px] font-semibold" style={{ color: 'var(--text-title)' }}>微信连接</div>
+            <div className="text-[12px] leading-6" style={{ color: 'var(--text-muted)' }}>
+              点击启用后会直接生成二维码，用手机微信扫码确认即可绑定。
+            </div>
+          </div>
+          <div className="grid grid-cols-1" style={{ gap: 16 }}>
+            <input
+              value={wechatDefaultTarget}
+              onChange={(e) => setWechatDefaultTarget(e.target.value)}
+              placeholder="默认收件人（可选，用于测试发送）"
+              className="border text-[13px] focus:outline-none"
+              style={{ ...fieldStyle, borderRadius: 20 }}
+            />
+          </div>
+          <div className="flex items-center flex-wrap" style={{ gap: 12 }}>
+            <button
+              disabled={isBusy('wechat-connect')}
+              onClick={() => { void connectWechat() }}
+              className="text-[13px] font-medium"
+              style={{ ...primaryButtonStyle, minWidth: 104, padding: '13px 24px', borderRadius: 20, lineHeight: 1.35 }}
+            >
+              <span className="inline-flex items-center gap-2">
+                {isBusy('wechat-connect') && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                {wechatChannel?.enabled ? '重新绑定' : '启用'}
+              </span>
+            </button>
+            {wechatChannel && wechatChannel.enabled && (
+              <>
+                <button
+                  disabled={isBusy(`probe:${wechatChannel.id}`)}
+                  onClick={() => { void sendProbe(wechatChannel.id) }}
+                  className="border text-[13px]"
+                  style={{ ...secondaryButtonStyle, minWidth: 104, padding: '13px 24px', borderRadius: 20, lineHeight: 1.35 }}
+                >
+                  <span className="inline-flex items-center gap-2">
+                    {isBusy(`probe:${wechatChannel.id}`) && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    测试
+                  </span>
+                </button>
+                <button
+                  disabled={isBusy(`disconnect:${wechatChannel.id}`)}
+                  onClick={() => { void disconnectChannel(wechatChannel.id) }}
+                  className="border text-[13px]"
+                  style={{ ...secondaryButtonStyle, minWidth: 104, padding: '13px 24px', borderRadius: 20, lineHeight: 1.35 }}
+                >
+                  <span className="inline-flex items-center gap-2">
+                    {isBusy(`disconnect:${wechatChannel.id}`) && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                    断开
+                  </span>
+                </button>
+              </>
+            )}
+          </div>
+          {wechatQrImage && (
+            <div className="flex flex-col border" style={{ borderColor: 'var(--border-subtle)', borderRadius: 18, padding: 18, gap: 14, width: 286 }}>
+              <img src={wechatQrImage} alt="微信绑定二维码" style={{ width: 240, height: 240, alignSelf: 'center' }} />
+              <div className="text-[12px] text-center" style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>
+                {wechatLoginStatus === 'scanned' ? '已扫码，等待手机确认。' : '请用手机微信扫码确认绑定。'}
+              </div>
+            </div>
+          )}
+          {wechatLoginStatus === 'needs_verify_code' && (
+            <div className="flex items-center" style={{ gap: 12 }}>
+              <input
+                value={wechatVerifyCode}
+                onChange={(e) => setWechatVerifyCode(e.target.value)}
+                placeholder="输入手机微信显示的数字"
+                className="border text-[13px] focus:outline-none"
+                style={{ ...fieldStyle, borderRadius: 20, maxWidth: 220 }}
+              />
+              <button
+                disabled={isBusy('wechat-verify')}
+                onClick={() => { void submitWechatVerifyCode() }}
+                className="border text-[13px]"
+                style={{ ...secondaryButtonStyle, minWidth: 104, padding: '13px 24px', borderRadius: 20, lineHeight: 1.35 }}
+              >
+                提交
+              </button>
+            </div>
+          )}
         </div>
       )}
 

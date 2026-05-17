@@ -5,6 +5,7 @@ from typing import Any, Callable, Dict, Optional
 from .base import ChannelAdapter
 from .feishu_app_adapter import FeishuAppAdapter
 from .telegram_adapter import TelegramAdapter
+from .wechat_openclaw_adapter import WechatOpenClawAdapter
 
 
 class NoopAdapter(ChannelAdapter):
@@ -102,6 +103,8 @@ class ChannelManager:
             return TelegramAdapter(channel.id, ctype, channel.name, channel.config)
         if ctype == "feishu-app":
             return FeishuAppAdapter(channel.id, ctype, channel.name, channel.config)
+        if ctype == "wechat-openclaw":
+            return WechatOpenClawAdapter(channel.id, ctype, channel.name, channel.config)
         return NoopAdapter(channel.id, ctype, channel.name, channel.config)
 @dataclass
 class ChannelConfigModel:

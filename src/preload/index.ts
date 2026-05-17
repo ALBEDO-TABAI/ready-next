@@ -170,6 +170,20 @@ const agentAPI = {
     enabled?: boolean
     config?: Record<string, unknown>
   }) => ipcRenderer.invoke('agent:testChannel', payload),
+  startWechatLogin: (payload: {
+    id?: string
+    defaultTarget?: string
+    force?: boolean
+  }) => ipcRenderer.invoke('agent:startWechatLogin', payload),
+  getWechatLoginStatus: (payload: {
+    channelId: string
+    sessionKey: string
+  }) => ipcRenderer.invoke('agent:getWechatLoginStatus', payload),
+  submitWechatLoginVerifyCode: (payload: {
+    channelId: string
+    sessionKey: string
+    code: string
+  }) => ipcRenderer.invoke('agent:submitWechatLoginVerifyCode', payload),
   deleteChannel: (id: string) => ipcRenderer.invoke('agent:deleteChannel', { id }),
   setChannelEnabled: (id: string, enabled: boolean) =>
     ipcRenderer.invoke('agent:setChannelEnabled', { id, enabled }),

@@ -7,6 +7,7 @@ export type ChannelAdapterType =
   | 'feishu-bot'
   | 'feishu-app'
   | 'telegram-bot'
+  | 'wechat-openclaw'
 
 export type ConversationSourceKind = 'local' | 'channel'
 

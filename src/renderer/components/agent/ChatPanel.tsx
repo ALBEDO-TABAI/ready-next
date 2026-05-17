@@ -2199,6 +2199,9 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
       } else if (channelType === 'telegram-bot' || /telegram/i.test(sourceLabel)) {
         label = 'Telegram'
         caption = sourceLabel || 'Telegram 频道'
+      } else if (channelType === 'wechat-openclaw' || /微信|wechat|weixin/i.test(sourceLabel)) {
+        label = '微信会话'
+        caption = sourceLabel || '微信频道'
       }
 
       options.set(key, {
