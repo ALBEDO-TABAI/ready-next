@@ -2,6 +2,7 @@ import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
 import {
+  applyProfileActiveModel,
   createCustomAIProviderProfile,
   createDefaultAIWorkspace,
   deriveLegacyAISettingsPayload,
@@ -13,6 +14,7 @@ import {
   normalizeAIWorkspace,
   resolveAIConfigCapabilities,
   type AIModelConfig,
+  type AIProviderWorkspace,
 } from '../shared/ai-providers'
 
 describe('AI provider workspace', () => {
@@ -162,5 +164,68 @@ describe('AI provider workspace', () => {
     })
 
     assert.deepEqual(config.modelIds, ['gpt-5.4', 'gpt-4o'])
+  })
+})
+
+describe('applyProfileActiveModel', () => {
+  const buildMimoWorkspace = (): AIProviderWorkspace => {
+    const mimoProfile = createCustomAIProviderProfile({
+      provider: 'openai-compatible',
+      baseUrl: 'https://token-plan-sgp.xiaomimo.com/v1',
+      apiKey: 'sk-mimo',
+      model: 'mimo-v2.5',
+      modelIds: ['mimo-v2.5', 'mimo-v2.5-pro'],
+      displayName: 'mimo',
+    }, {
+      id: 'custom-mimo',
+      name: 'mimo',
+    })
+    const defaults = createDefaultAIWorkspace()
+    return normalizeAIWorkspace({
+      ...defaults,
+      activeProfileId: 'builtin-openai',
+      profiles: [...defaults.profiles, mimoProfile],
+    })
+  }
+
+  it('switches profile.config.model to a valid modelId and activates the profile', () => {
+    const workspace = buildMimoWorkspace()
+    const next = applyProfileActiveModel(workspace, 'custom-mimo', 'mimo-v2.5-pro')
+
+    assert.equal(next.activeProfileId, 'custom-mimo')
+    const mimo = next.profiles.find((p) => p.id === 'custom-mimo')
+    assert.equal(mimo?.config.model, 'mimo-v2.5-pro')
+
+    const openai = next.profiles.find((p) => p.id === 'builtin-openai')
+    const openaiBefore = workspace.profiles.find((p) => p.id === 'builtin-openai')
+    assert.equal(openai?.config.model, openaiBefore?.config.model)
+  })
+
+  it('returns a no-op workspace when the modelId is not in the profile modelIds list', () => {
+    const workspace = buildMimoWorkspace()
+    const next = applyProfileActiveModel(workspace, 'custom-mimo', 'gpt-4o')
+
+    assert.equal(next.activeProfileId, workspace.activeProfileId)
+    const mimoBefore = workspace.profiles.find((p) => p.id === 'custom-mimo')
+    const mimoAfter = next.profiles.find((p) => p.id === 'custom-mimo')
+    assert.equal(mimoAfter?.config.model, mimoBefore?.config.model)
+    assert.deepEqual(mimoAfter?.config.modelIds, mimoBefore?.config.modelIds)
+  })
+
+  it('normalizes modelIds after switching so the new primary is still in the deduped list', () => {
+    const workspace = buildMimoWorkspace()
+    const next = applyProfileActiveModel(workspace, 'custom-mimo', 'mimo-v2.5-pro')
+
+    const mimo = next.profiles.find((p) => p.id === 'custom-mimo')
+    assert.equal(mimo?.config.model, 'mimo-v2.5-pro')
+    assert.deepEqual(mimo?.config.modelIds, ['mimo-v2.5-pro', 'mimo-v2.5'])
+  })
+
+  it('is a no-op when the profileId is unknown', () => {
+    const workspace = buildMimoWorkspace()
+    const next = applyProfileActiveModel(workspace, 'nonexistent-id', 'mimo-v2.5-pro')
+
+    assert.equal(next.activeProfileId, workspace.activeProfileId)
+    assert.equal(next.profiles.length, workspace.profiles.length)
   })
 })

@@ -654,3 +654,40 @@ export function getProviderShortLabel(config: AIModelConfig): string {
   if (!provider) return config.provider
   return provider.label.split(' ')[0] // "Kimi", "Claude", "OpenAI", etc.
 }
+
+/**
+ * Set a profile's `config.model` to `modelId` and activate that profile in one
+ * atomic workspace mutation. No-op when the profile does not exist or when
+ * `modelId` is not in the profile's normalized modelIds list.
+ */
+export function applyProfileActiveModel(
+  workspace: AIProviderWorkspace | null | undefined,
+  profileId: string,
+  modelId: string,
+): AIProviderWorkspace {
+  const normalized = normalizeAIWorkspace(workspace)
+  const trimmedModelId = String(modelId || '').trim()
+  const target = normalized.profiles.find((profile) => profile.id === profileId)
+  if (!target || !trimmedModelId) return normalized
+
+  const validModelIds = normalizeModelIds(target.config.model, target.config.modelIds) || []
+  if (!validModelIds.includes(trimmedModelId)) return normalized
+
+  const nextProfiles = normalized.profiles.map((profile) => (
+    profile.id === profileId
+      ? {
+        ...profile,
+        config: normalizeAIConfig({
+          ...profile.config,
+          model: trimmedModelId,
+        }),
+      }
+      : profile
+  ))
+
+  return {
+    version: 1,
+    activeProfileId: profileId,
+    profiles: nextProfiles,
+  }
+}

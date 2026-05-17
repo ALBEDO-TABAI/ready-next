@@ -28,7 +28,7 @@ import {
   ScopeRunState
 } from '../../stores/useAgent'
 import { useWorkspace } from '../../stores/useWorkspace'
-import { useSettings, listChatSwitcherProfiles } from '../../stores/useSettings'
+import { useSettings, listChatSwitcherProfiles, getProviderDef } from '../../stores/useSettings'
 import { useNavigate } from 'react-router-dom'
 import { READY_FOCUS_CHAT_INPUT_EVENT } from '../../modules/agent/chat-input-bridge'
 import { revealDocumentQuoteAttachment } from '../../modules/agent/document-quote-navigation'
@@ -1527,12 +1527,15 @@ function ModelSelector() {
     loaded,
     loadConfig,
     activateProfile,
+    activateProfileWithModel,
     getActiveProfile,
     getShortModelLabel,
     getShortProviderLabel,
   } = useSettings()
   const [open, setOpen] = useState(false)
+  const [expandedProfileIds, setExpandedProfileIds] = useState<Set<string>>(() => new Set())
   const ref = useRef<HTMLDivElement>(null)
+  const autoExpandedActiveIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     if (!loaded) loadConfig()
@@ -1552,6 +1555,24 @@ function ModelSelector() {
   const label = activeProfile?.name || config.displayName || getShortProviderLabel()
   // `showInChatSwitcher` is pre-filtered into `visibleProfiles`.
   const { currentHiddenProfile, visibleProfiles } = listChatSwitcherProfiles(workspace)
+
+  useEffect(() => {
+    if (!open) {
+      autoExpandedActiveIdRef.current = null
+      return
+    }
+    if (!activeProfile) return
+    if (autoExpandedActiveIdRef.current === activeProfile.id) return
+    const ids = activeProfile.config.modelIds || []
+    if (ids.length <= 1) return
+    autoExpandedActiveIdRef.current = activeProfile.id
+    setExpandedProfileIds((prev) => {
+      if (prev.has(activeProfile.id)) return prev
+      const next = new Set(prev)
+      next.add(activeProfile.id)
+      return next
+    })
+  }, [open, activeProfile?.id])
 
   const resolveHost = (value: string): string => {
     try {
@@ -1680,32 +1701,118 @@ function ModelSelector() {
               </div>
               <div className="flex flex-col gap-1">
                 {visibleProfiles.map((profile) => {
-                  const isActive = profile.id === activeProfile?.id
+                  const isActiveProfile = profile.id === activeProfile?.id
+                  const modelIds = profile.config.modelIds || []
+                  const hasMulti = modelIds.length > 1
+                  const expanded = expandedProfileIds.has(profile.id)
+                  const providerDef = getProviderDef(profile.config.provider, profile.config.baseUrl)
                   return (
-                    <button
-                      key={profile.id}
-                      onClick={() => {
-                        activateProfile(profile.id)
-                        setOpen(false)
-                      }}
-                      className="w-full text-left hover:bg-black/5 transition-colors"
-                      style={{
-                        padding: '8px 10px',
-                        borderRadius: 8,
-                        border: isActive ? '1px solid color-mix(in srgb, var(--color-blue) 28%, transparent)' : '1px solid transparent',
-                        background: isActive ? 'var(--bg-hover)' : 'transparent',
-                      }}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-body)' }}>{profile.name}</span>
-                        {isActive && (
-                          <span style={{ fontSize: 10, color: 'var(--color-blue)' }}>当前</span>
-                        )}
-                      </div>
-                      <div style={{ fontSize: 10, color: 'var(--text-light)', marginTop: 2 }}>
-                        {getShortModelLabel(profile.id)}
-                      </div>
-                    </button>
+                    <div key={profile.id} className="flex flex-col gap-1">
+                      <button
+                        onClick={() => {
+                          activateProfile(profile.id)
+                          setOpen(false)
+                        }}
+                        className="w-full text-left hover:bg-black/5 transition-colors"
+                        style={{
+                          padding: '8px 10px',
+                          borderRadius: 8,
+                          border: isActiveProfile ? '1px solid color-mix(in srgb, var(--color-blue) 28%, transparent)' : '1px solid transparent',
+                          background: isActiveProfile ? 'var(--bg-hover)' : 'transparent',
+                        }}
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-body)' }}>{profile.name}</span>
+                          <div className="flex items-center gap-2">
+                            {isActiveProfile && (
+                              <span style={{ fontSize: 10, color: 'var(--color-blue)' }}>当前</span>
+                            )}
+                            {hasMulti && (
+                              <span
+                                role="button"
+                                aria-label={expanded ? '收起模型列表' : '展开模型列表'}
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  setExpandedProfileIds((prev) => {
+                                    const next = new Set(prev)
+                                    if (next.has(profile.id)) next.delete(profile.id)
+                                    else next.add(profile.id)
+                                    return next
+                                  })
+                                }}
+                                className="hover:bg-black/10"
+                                style={{
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  padding: 2,
+                                  borderRadius: 4,
+                                  cursor: 'pointer',
+                                }}
+                              >
+                                <ChevronDown
+                                  style={{
+                                    width: 12,
+                                    height: 12,
+                                    transform: expanded ? 'rotate(180deg)' : 'rotate(0deg)',
+                                    transition: 'transform 180ms ease',
+                                  }}
+                                  className="text-[var(--text-light)]"
+                                />
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <div style={{ fontSize: 10, color: 'var(--text-light)', marginTop: 2 }}>
+                          {getShortModelLabel(profile.id)}
+                        </div>
+                      </button>
+
+                      {hasMulti && expanded && (
+                        <div
+                          className="flex flex-col"
+                          style={{
+                            marginLeft: 12,
+                            paddingLeft: 8,
+                            borderLeft: '1px solid var(--border-default)',
+                            gap: 2,
+                          }}
+                        >
+                          {modelIds.map((modelId) => {
+                            const isActiveModel = isActiveProfile && profile.config.model === modelId
+                            const modelLabel = providerDef?.models.find((m) => m.id === modelId)?.label || modelId
+                            return (
+                              <button
+                                key={modelId}
+                                onClick={() => {
+                                  activateProfileWithModel(profile.id, modelId)
+                                }}
+                                className="w-full text-left hover:bg-black/5 transition-colors"
+                                style={{
+                                  padding: '6px 10px',
+                                  borderRadius: 6,
+                                  background: isActiveModel ? 'var(--bg-hover)' : 'transparent',
+                                }}
+                              >
+                                <div className="flex items-center justify-between gap-2">
+                                  <span
+                                    style={{
+                                      fontSize: 11,
+                                      fontWeight: isActiveModel ? 500 : 400,
+                                      color: isActiveModel ? 'var(--color-blue)' : 'var(--text-body)',
+                                    }}
+                                  >
+                                    {modelLabel}
+                                  </span>
+                                  {isActiveModel && (
+                                    <span style={{ fontSize: 10, color: 'var(--color-blue)' }}>当前</span>
+                                  )}
+                                </div>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
                   )
                 })}
               </div>

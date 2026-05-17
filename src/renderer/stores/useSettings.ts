@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import {
+  applyProfileActiveModel,
   createConfigFromProvider,
   createCustomAIProviderProfile,
   createDefaultAIWorkspace,
@@ -102,6 +103,7 @@ interface AISettingsState {
   switchProvider: (provider: AIProviderType) => void
   selectProfile: (profileId: string) => void
   activateProfile: (profileId: string) => void
+  activateProfileWithModel: (profileId: string, modelId: string) => void
   renameProfile: (profileId: string, name: string) => void
   setProfileVisibility: (profileId: string, visible: boolean) => void
   addCustomProfile: (initialConfig?: Partial<AIModelConfig>) => string
@@ -438,6 +440,18 @@ export const useSettings = create<AISettingsState>((set, get) => ({
       ...state.workspace,
       activeProfileId: profileId,
     }
+    set({
+      ...buildStateFromWorkspace(nextWorkspace, profileId),
+      testStatus: 'idle',
+      testMessage: '',
+      remoteModels: [],
+    })
+    void get().saveWorkspace(nextWorkspace, { selectedProfileId: profileId })
+  },
+
+  activateProfileWithModel: (profileId, modelId) => {
+    const state = get()
+    const nextWorkspace = applyProfileActiveModel(state.workspace, profileId, modelId)
     set({
       ...buildStateFromWorkspace(nextWorkspace, profileId),
       testStatus: 'idle',
