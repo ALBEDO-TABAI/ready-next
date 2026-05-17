@@ -11,6 +11,7 @@ const HOST = '127.0.0.1'
 
 const PARENT_PID = process.ppid
 const WATCHDOG_INTERVAL_MS = 30_000
+const REQUEST_TIMEOUT_MS = Number.parseInt(process.env.RSSHUB_REQUEST_TIMEOUT_MS || '60000', 10) || 60_000
 
 function startParentWatchdog() {
   if (process.platform === 'win32') return // TODO: Windows
@@ -126,7 +127,7 @@ async function start() {
         if (buf.length > 0) body = buf
       }
 
-      const timeout = createAbortableTimeout(30_000)
+      const timeout = createAbortableTimeout(REQUEST_TIMEOUT_MS)
       const response = await rsshubApp.request(`${reqUrl.pathname}${reqUrl.search}`, {
         method,
         headers,

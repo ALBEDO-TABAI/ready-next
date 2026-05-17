@@ -16,6 +16,7 @@ import {
 import { useBrowserTabs } from '../../stores/useBrowserTabs'
 import { useRSSSession } from '../../stores/useRSSSession'
 import type { RSSItem, RSSSource } from '../../components/rss/RSSFeed'
+import type { AddSourceSuccessInfo } from '../../components/rss/AddSourceModal'
 import type { RSSBrowserOpenActionData } from '../../modules/rss/types'
 
 const AUTO_REFRESH_INTERVAL = 15 * 60 * 1000 // 15 minutes
@@ -463,6 +464,11 @@ export default function RSSMode({
         const selectedSourceEntry = latestSelectedSourceId
           ? sourcesRef.current.find((source) => source.id === latestSelectedSourceId) ?? null
           : null
+        setStatusMessage(
+          selectedSourceEntry
+            ? `${selectedSourceEntry.name} 正在刷新…`
+            : '正在刷新全部 RSS 源…',
+        )
 
         if (selectedSourceEntry) {
           const result = await window.electronAPI.rss.refreshSource(selectedSourceEntry.id)
@@ -672,9 +678,20 @@ export default function RSSMode({
     setSelectedItem(null)
   }, [])
 
-  const handleAddSourceSuccess = useCallback(() => {
-    loadRSSData()
-  }, [loadRSSData])
+  const handleAddSourceSuccess = useCallback((source?: AddSourceSuccessInfo) => {
+    void loadRSSData().then(() => {
+      if (source?.id) {
+        setSelection({
+          selectedSourceId: source.id,
+          selectedItemId: null,
+          selectedItemTitle: null,
+        })
+      }
+      if (source?.name) {
+        setStatusMessage(source.warning || `${source.name} 已添加`)
+      }
+    })
+  }, [loadRSSData, setSelection])
 
   // Error state
   if (error && !loading && items.length === 0) {

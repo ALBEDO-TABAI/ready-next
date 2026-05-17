@@ -515,6 +515,28 @@ function resolveBrowserAcquisitionMode(
   return source.draft_seeded === 1 ? 'incremental' : 'full'
 }
 
+function canSaveSourceWithoutInitialItems(platform: PlatformType, result: ScrapeResult): boolean {
+  return result.items.length === 0 && Boolean(result.error) && (
+    platform === 'bilibili' || platform === 'xiaohongshu'
+  )
+}
+
+function buildInitialFetchWarning(platform: PlatformType, error: string | undefined): string | undefined {
+  if (!error) return undefined
+  if (platform === 'bilibili') {
+    return `Bilibili 源已添加，但首次抓取失败：${error}`
+  }
+  if (platform === 'xiaohongshu') {
+    return `小红书源已添加，但首次抓取失败；可稍后刷新或配置可用 RSSHub/Cookie：${error}`
+  }
+  return error
+}
+
+function resolveRSSItemGuid(item: ScrapedItem): string {
+  const rssGuid = typeof item.metadata.rssGuid === 'string' ? item.metadata.rssGuid.trim() : ''
+  return rssGuid || item.link || item.itemId
+}
+
 function filterSelectedSources(
   sources: DBRSSSource[],
   options?: { group?: string; sourceIds?: string[] },
@@ -813,8 +835,7 @@ export function setupRSSIPC(useMock = false): void {
         rsshubBase,
       )
 
-      const allowSourceWithoutInitialItems =
-        platform === 'bilibili' && result.items.length === 0 && !!result.error
+      const allowSourceWithoutInitialItems = canSaveSourceWithoutInitialItems(platform, result)
 
       const sourceName = source.name?.trim() || result.feedTitle || feedUrl
       const id = rssRepository.addRSSSource({
@@ -829,7 +850,7 @@ export function setupRSSIPC(useMock = false): void {
         const dbItems = result.items.map((item) => ({
           id: item.itemId,
           source_id: id,
-          guid: item.link || item.itemId,
+          guid: resolveRSSItemGuid(item),
           title: item.title,
           link: item.link,
           summary: item.description || null,
@@ -883,10 +904,10 @@ export function setupRSSIPC(useMock = false): void {
           itemCount,
           warning:
             allowSourceWithoutInitialItems
-              ? `Bilibili 源已添加，但首次抓取失败：${result.error}`
+              ? buildInitialFetchWarning(platform, result.error)
               : result.error
                 ? result.error
-              : undefined,
+                : undefined,
         },
         false,
       )
@@ -1336,7 +1357,7 @@ export function setupRSSIPC(useMock = false): void {
           const dbItems = result.items.map((item: ScrapedItem) => ({
             id: item.itemId,
             source_id: source.id,
-            guid: item.link || item.itemId,
+            guid: resolveRSSItemGuid(item),
             title: item.title,
             link: item.link,
             summary: item.description || null,
@@ -1560,7 +1581,7 @@ export function setupRSSIPC(useMock = false): void {
       const dbItems = result.items.map((item: ScrapedItem) => ({
         id: item.itemId,
         source_id: source.id,
-        guid: item.link || item.itemId,
+        guid: resolveRSSItemGuid(item),
         title: item.title,
         link: item.link,
         summary: item.description || null,

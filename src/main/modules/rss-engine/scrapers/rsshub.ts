@@ -10,6 +10,8 @@ import { createHash } from 'crypto'
 interface RSSHubJSONItem {
   title?: string
   link?: string
+  guid?: string
+  id?: string
   description?: string
   pubDate?: string
   author?: string
@@ -30,6 +32,9 @@ function isTransientBrowserRouteError(message: string): boolean {
   const lower = message.toLowerCase()
   return (
     lower.includes('targetcloseerror') ||
+    lower.includes('request timed out') ||
+    lower.includes('operation was aborted') ||
+    lower.includes('aborterror') ||
     lower.includes('frame got detached') ||
     lower.includes('execution context was destroyed') ||
     lower.includes('session closed') ||
@@ -46,6 +51,10 @@ function isChromiumDependencyError(message: string): boolean {
   return (
     lower.includes('could not find chrome') ||
     lower.includes('chromium') ||
+    lower.includes('playwright') ||
+    lower.includes('browsertype.launch') ||
+    lower.includes('browser executable') ||
+    lower.includes("executable doesn't exist") ||
     lower.includes('browser platform') ||
     lower.includes('executable path') ||
     lower.includes('chrome path')
@@ -72,6 +81,25 @@ function isWafRouteError(message: string): boolean {
     lower.includes('risk control') ||
     lower.includes('-352') ||
     lower.includes('-799')
+  )
+}
+
+function isRouteTimeoutError(message: string): boolean {
+  const lower = message.toLowerCase()
+  return (
+    lower.includes('request timed out') ||
+    lower.includes('operation was aborted') ||
+    lower.includes('aborterror')
+  )
+}
+
+function isXiaohongshuRouteParserError(message: string): boolean {
+  const lower = message.toLowerCase()
+  return (
+    lower.includes("reading 'user'") ||
+    lower.includes('reading "user"') ||
+    lower.includes('__initial_state__') ||
+    lower.includes('cannot extract __initial_state__')
   )
 }
 
@@ -151,7 +179,8 @@ class RSSHubScraper extends BaseScraper {
     const mapped: ScrapedItem[] = items.map((item) => {
       const link = item.link?.trim() || ''
       const title = item.title?.trim() || '(Untitled)'
-      const key = link || `${title}-${item.pubDate || ''}`
+      const rssGuid = item.guid?.trim() || item.id?.trim() || ''
+      const key = rssGuid || link || `${title}-${item.pubDate || ''}`
       return {
         itemId: this.generateItemId(key),
         title,
@@ -160,7 +189,7 @@ class RSSHubScraper extends BaseScraper {
         pubDate: item.pubDate || '',
         author: item.author || '',
         coverImage: null,
-        metadata: {},
+        metadata: rssGuid ? { rssGuid } : {},
       }
     })
 
@@ -754,9 +783,9 @@ export class XiaohongshuScraper extends RSSHubScraper {
   }
 
   extractUserId(url: string): string | null {
-    let match = url.match(/user\/profile\/([a-zA-Z0-9_-]+)/i)
+    let match = url.match(/\/user\/profile\/([a-zA-Z0-9_-]+)(?:[/?#]|$)/i)
     if (match) return match[1]
-    match = url.match(/xiaohongshu\.com\/([a-zA-Z0-9_-]+)/i)
+    match = url.match(/xiaohongshu\.com\/([a-f0-9]{24})(?:[/?#]|$)/i)
     return match ? match[1] : null
   }
 
@@ -770,13 +799,19 @@ export class XiaohongshuScraper extends RSSHubScraper {
 
   protected normalizeRouteError(message: string, url: string): string {
     if (isChromiumDependencyError(message)) {
-      return `小红书抓取依赖 Chromium/session，可先修复 RSS 运行时后重试：${message}`
+      return `小红书 RSSHub 抓取依赖 Chromium，可先修复 RSS 运行时后重试：${message}`
     }
     if (isLoginOrCookieError(message)) {
-      return `小红书当前需要有效登录态或访客会话：${message}`
+      return `小红书 RSSHub 当前需要有效 Cookie 或访客会话：${message}`
+    }
+    if (isRouteTimeoutError(message)) {
+      return `小红书 RSSHub 路由请求超时，已保留为可稍后刷新的订阅：${message}`
+    }
+    if (isXiaohongshuRouteParserError(message)) {
+      return `小红书页面结构已变化，RSSHub 暂时没有解析到公开笔记：${message}`
     }
     if (isTransientBrowserRouteError(message)) {
-      return `小红书浏览器抓取链路不稳定，已自动重试一次：${message}`
+      return `小红书 RSSHub 浏览器抓取链路不稳定，已自动重试一次：${message}`
     }
     if (message.includes('Cannot extract user ID')) {
       return `小红书当前仅支持用户主页订阅，请使用 /user/profile/{id} 链接：${url}`

@@ -73,7 +73,11 @@ export abstract class BaseScraper {
         return { text, status: response.status, headers: response.headers }
       } catch (err) {
         clearTimeout(timer)
-        lastError = err instanceof Error ? err : new Error(String(err))
+        const error = err instanceof Error ? err : new Error(String(err))
+        lastError =
+          error.name === 'AbortError' || error.message.toLowerCase().includes('operation was aborted')
+            ? new Error(`Request timed out after ${reqTimeout}ms`)
+            : error
         if (attempt < maxRetries - 1) {
           await new Promise((r) => setTimeout(r, this.retryBackoff * (attempt + 1)))
         }

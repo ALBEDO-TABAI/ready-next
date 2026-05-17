@@ -285,6 +285,7 @@ class RSSHubManager {
 
   private findExplicitChromeExecutable(): string | null {
     const candidates = [
+      process.env.CHROMIUM_EXECUTABLE_PATH,
       process.env.PUPPETEER_EXECUTABLE_PATH,
       process.env.CHROME_PATH,
       process.env.CHROME_BIN,
@@ -339,6 +340,7 @@ class RSSHubManager {
     }
 
     if (this.puppeteerExecutablePath) {
+      env.CHROMIUM_EXECUTABLE_PATH = this.puppeteerExecutablePath
       env.PUPPETEER_EXECUTABLE_PATH = this.puppeteerExecutablePath
       env.CHROME_PATH = this.puppeteerExecutablePath
       env.CHROME_BIN = this.puppeteerExecutablePath
@@ -542,7 +544,7 @@ class RSSHubManager {
       const forceKill = setTimeout(() => {
         // The graceful 'shutdown' message didn't reap the worker in time —
         // fall back to a process-group kill so Chromium grandchildren spawned
-        // by RSSHub's internal puppeteer are reaped too. We resolve as soon
+        // by RSSHub's internal browser automation are reaped too. We resolve as soon
         // as SIGTERM is dispatched; the SIGKILL escalation runs in the
         // background under killWorkerProcessTree.
         void killWorkerProcessTree({
@@ -664,7 +666,7 @@ class RSSHubManager {
    *
    * Was previously synchronous + `child.kill('SIGKILL')`, which only
    * signalled the immediate Node child and orphaned every Chromium subprocess
-   * that RSSHub's internal puppeteer had booted. Users observed 14+ leaked
+   * that RSSHub's internal browser automation had booted. Users observed 14+ leaked
    * Chrome processes after a single quit cycle. The `before-quit` cleanup
    * orchestrator (`runBeforeQuitCleanup`) already supports a `Promise<void>`
    * return, so the cost of awaiting the SIGTERM→SIGKILL escalation is bounded

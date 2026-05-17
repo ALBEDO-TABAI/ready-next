@@ -10,10 +10,16 @@ import {
 interface AddSourceModalProps {
   open: boolean
   onClose: () => void
-  onSuccess: () => void
+  onSuccess: (source?: AddSourceSuccessInfo) => void
   browserPresetUrl?: string
   browserPresetName?: string
   browserPresetLabel?: string | null
+}
+
+export interface AddSourceSuccessInfo {
+  id?: string
+  name?: string
+  warning?: string
 }
 
 function detectPlatformHint(url: string): string | null {
@@ -22,7 +28,9 @@ function detectPlatformHint(url: string): string | null {
   if (lower.includes('bilibili.com') || lower.includes('b23.tv') || lower.includes('bili2233.cn')) return 'Bilibili (需要 RSSHub)'
   if (lower.includes('weibo.com')) return '微博 (需要应用内浏览器登录态)'
   if (lower.includes('douyin.com')) return '抖音 (需要应用内浏览器登录态)'
-  if (lower.includes('xiaohongshu.com') || lower.includes('xhslink.com')) return '小红书 (需要应用内浏览器登录态)'
+  if (lower.includes('xiaohongshu.com') || lower.includes('xhslink.com') || lower.includes('xhsurl.cn')) {
+    return '小红书 (需要 RSSHub)'
+  }
   if (lower.includes('x.com') || lower.includes('twitter.com')) return 'Twitter/X'
   if (lower.includes('vimeo.com')) return 'Vimeo'
   if (lower.includes('behance.net')) return 'Behance'
@@ -77,7 +85,7 @@ export default function AddSourceModal({
         setUrl('')
         setName('')
         setError(null)
-        onSuccess()
+        onSuccess(result?.data as AddSourceSuccessInfo | undefined)
         onClose()
       }
     } catch (err) {

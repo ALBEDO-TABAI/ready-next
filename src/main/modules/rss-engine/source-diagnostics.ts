@@ -168,10 +168,10 @@ const routeCapabilityMatrix: Record<PlatformType, RouteCapabilityMatrixEntry> = 
     platform: 'bilibili',
     label: platformLabel('bilibili'),
     backend: 'rsshub',
-    fallbackOrder: ['rsshub', 'native', 'scrapling'],
+    fallbackOrder: ['rsshub', 'browser', 'native', 'scrapling'],
     chromiumRequired: false,
     scraplingEligible: false,
-    notes: '继续以 RSSHub/官方 API 回退为主体，Scrapling 仅保留远期 anti-risk 备选。',
+    notes: '继续以 RSSHub/官方 API 为主体，必要时用应用内浏览器页面兜底；Scrapling 仅保留远期 anti-risk 备选。',
   },
   weibo: {
     platform: 'weibo',
@@ -196,9 +196,9 @@ const routeCapabilityMatrix: Record<PlatformType, RouteCapabilityMatrixEntry> = 
     label: platformLabel('xiaohongshu'),
     backend: 'rsshub',
     fallbackOrder: ['rsshub'],
-    chromiumRequired: false,
+    chromiumRequired: true,
     scraplingEligible: false,
-    notes: '小红书后台获取不复用应用内浏览器登录态；只走 RSSHub，避免触发账号风控。',
+    notes: '小红书后台获取不复用应用内浏览器登录态；只走 RSSHub 管理的 Chromium，避免触发账号风控。',
   },
   vimeo: {
     platform: 'vimeo',
@@ -248,6 +248,10 @@ function classifyRouteFailure(message: string): RSSRouteErrorInfo {
   if (
     lower.includes('could not find chrome') ||
     lower.includes('chromium') ||
+    lower.includes('playwright') ||
+    lower.includes('browsertype.launch') ||
+    lower.includes('browser executable') ||
+    lower.includes("executable doesn't exist") ||
     lower.includes('browser platform') ||
     lower.includes('executable path') ||
     lower.includes('chrome path')
@@ -279,10 +283,16 @@ function classifyRouteFailure(message: string): RSSRouteErrorInfo {
   if (
     lower.includes('targetcloseerror') ||
     lower.includes('target closed') ||
+    lower.includes('request timed out') ||
+    lower.includes('operation was aborted') ||
+    lower.includes('aborterror') ||
     lower.includes('frame got detached') ||
     lower.includes('execution context was destroyed') ||
     lower.includes('browser_target_closed') ||
     lower.includes('cannot extract user id') ||
+    lower.includes("reading 'user'") ||
+    lower.includes('reading "user"') ||
+    lower.includes('__initial_state__') ||
     lower.includes('http 5') ||
     lower.includes('http 4')
   ) {
@@ -294,8 +304,16 @@ function classifyRouteFailure(message: string): RSSRouteErrorInfo {
         lower.includes('frame got detached') ||
         lower.includes('browser_target_closed')
         ? 'browser_target_closed'
+        : lower.includes('request timed out') ||
+            lower.includes('operation was aborted') ||
+            lower.includes('aborterror')
+          ? 'route_request_timeout'
         : lower.includes('cannot extract user id')
           ? 'route_parser_failed'
+          : lower.includes("reading 'user'") ||
+              lower.includes('reading "user"') ||
+              lower.includes('__initial_state__')
+            ? 'route_parser_failed'
           : 'route_request_failed',
       message: normalized,
       recordedAt: new Date().toISOString(),

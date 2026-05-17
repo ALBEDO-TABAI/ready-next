@@ -11,7 +11,7 @@ import {
 import { needsRSSHub } from '../main/modules/rss-engine/scrapers/index'
 
 describe('RSS source diagnostics', () => {
-  it('marks xiaohongshu RSSHub failures without browser-session requirements', () => {
+  it('marks xiaohongshu RSSHub failures as RSSHub-managed Chromium work', () => {
     recordSourceRouteAttempt({
       sourceId: 'xhs-source',
       sourceName: 'XHS Creator',
@@ -36,7 +36,7 @@ describe('RSS source diagnostics', () => {
 
     assert.equal(entry.backend, 'rsshub')
     assert.equal(entry.backendState, 'failing')
-    assert.equal(entry.chromiumRequired, false)
+    assert.equal(entry.chromiumRequired, true)
     assert.equal(entry.scraplingEligible, false)
     assert.equal(entry.lastRouteError?.kind, 'startup')
     assert.equal(entry.lastRouteError?.detail, 'rsshub_runtime_unavailable')
@@ -66,6 +66,53 @@ describe('RSS source diagnostics', () => {
 
     assert.equal(entry.backendState, 'conditional')
     assert.equal(entry.lastRouteError, null)
+  })
+
+  it('classifies RSSHub timeout and parser failures as route failures', () => {
+    recordSourceRouteAttempt({
+      sourceId: 'xhs-timeout',
+      sourceName: 'XHS Timeout',
+      url: 'https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06',
+      groupName: 'creator-watchlist',
+      platform: 'xiaohongshu',
+      durationMs: 35000,
+      itemCount: 0,
+      success: false,
+      error: 'Request timed out after 35000ms',
+    })
+    recordSourceRouteAttempt({
+      sourceId: 'xhs-parser',
+      sourceName: 'XHS Parser',
+      url: 'https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06',
+      groupName: 'creator-watchlist',
+      platform: 'xiaohongshu',
+      durationMs: 8500,
+      itemCount: 0,
+      success: false,
+      error: "HTTP 503: Service Unavailable | Cannot read properties of undefined (reading 'user')",
+    })
+
+    const [timeoutEntry, parserEntry] = buildSourceDiagnostics([
+      {
+        id: 'xhs-timeout',
+        name: 'XHS Timeout',
+        url: 'https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06',
+        group_name: 'creator-watchlist',
+        platform: 'xiaohongshu',
+      },
+      {
+        id: 'xhs-parser',
+        name: 'XHS Parser',
+        url: 'https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06',
+        group_name: 'creator-watchlist',
+        platform: 'xiaohongshu',
+      },
+    ])
+
+    assert.equal(timeoutEntry.lastRouteError?.kind, 'route')
+    assert.equal(timeoutEntry.lastRouteError?.detail, 'route_request_timeout')
+    assert.equal(parserEntry.lastRouteError?.kind, 'route')
+    assert.equal(parserEntry.lastRouteError?.detail, 'route_parser_failed')
   })
 })
 
@@ -107,18 +154,21 @@ describe('RSS benchmark summary', () => {
 
   it('exposes the fixed route capability matrix', () => {
     const matrix = getRouteCapabilityMatrix()
+    const bilibili = matrix.find((entry) => entry.platform === 'bilibili')
     const weibo = matrix.find((entry) => entry.platform === 'weibo')
     const douyin = matrix.find((entry) => entry.platform === 'douyin')
     const xiaohongshu = matrix.find((entry) => entry.platform === 'xiaohongshu')
     const behance = matrix.find((entry) => entry.platform === 'behance')
 
+    assert.equal(bilibili?.backend, 'rsshub')
+    assert.deepEqual(bilibili?.fallbackOrder, ['rsshub', 'browser', 'native', 'scrapling'])
     assert.equal(weibo?.backend, 'browser')
     assert.deepEqual(weibo?.fallbackOrder, ['browser', 'scrapling'])
     assert.equal(douyin?.backend, 'browser')
     assert.deepEqual(douyin?.fallbackOrder, ['browser', 'scrapling'])
     assert.equal(xiaohongshu?.backend, 'rsshub')
     assert.deepEqual(xiaohongshu?.fallbackOrder, ['rsshub'])
-    assert.equal(xiaohongshu?.chromiumRequired, false)
+    assert.equal(xiaohongshu?.chromiumRequired, true)
     assert.equal(douyin?.scraplingEligible, true)
     assert.equal(behance?.backend, 'native')
     assert.equal(behance?.scraplingEligible, false)

@@ -16,6 +16,7 @@ describe('RSS scraper platform detection', () => {
     assert.equal(detectPlatform('https://space.bilibili.com/1577804'), 'bilibili')
     assert.equal(detectPlatform('https://www.youtube.com/@matthewencina'), 'youtube')
     assert.equal(detectPlatform('https://www.xiaohongshu.com/user/profile/5fc91b41000000000101fe32'), 'xiaohongshu')
+    assert.equal(detectPlatform('https://xhsurl.cn/abc123'), 'xiaohongshu')
     assert.equal(detectPlatform('https://weibo.com/u/6182606334'), 'weibo')
     assert.equal(detectPlatform('https://m.weibo.cn/profile/6182606334'), 'weibo')
     assert.equal(detectPlatform('https://vimeo.com/offf'), 'vimeo')
@@ -251,6 +252,50 @@ describe('WeiboScraper', () => {
 })
 
 describe('XiaohongshuScraper', () => {
+  it('keeps RSSHub JSON items separate when the route reuses the profile link', () => {
+    class TestXiaohongshuScraper extends XiaohongshuScraper {
+      parseForTest(payload: {
+        item: Array<{ title: string; link: string; guid: string }>
+        title: string
+      }) {
+        return this.parseJSONFeed(payload, 'xiaohongshu')
+      }
+    }
+    const scraper = new TestXiaohongshuScraper('http://127.0.0.1:1240')
+    const result = scraper.parseForTest({
+      title: '广州潮会吃 - 小红书笔记',
+      item: [
+        {
+          title: '广州越来越少见的纯手工茶楼。。。。',
+          link: 'https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06',
+          guid: '广州越来越少见的纯手工茶楼。。。。',
+        },
+        {
+          title: '广州真正好味的纯手工茶楼！！！',
+          link: 'https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06',
+          guid: '广州真正好味的纯手工茶楼！！！',
+        },
+      ],
+    })
+
+    assert.equal(result.items.length, 2)
+    assert.notEqual(result.items[0]?.itemId, result.items[1]?.itemId)
+    assert.equal(result.items[0]?.metadata.rssGuid, '广州越来越少见的纯手工茶楼。。。。')
+  })
+
+  it('does not treat note or explore URLs as user IDs', () => {
+    const scraper = new XiaohongshuScraper('http://127.0.0.1:1240')
+
+    assert.equal(
+      scraper.extractUserId('https://www.xiaohongshu.com/explore/65a123456789012345678901'),
+      null,
+    )
+    assert.equal(
+      scraper.extractUserId('https://www.xiaohongshu.com/discovery/item/65a123456789012345678901'),
+      null,
+    )
+  })
+
   it('resolves xhs short links before extracting user id', async () => {
     const scraper = new XiaohongshuScraper('http://127.0.0.1:1240') as XiaohongshuScraper & {
       resolveFinalUrl: (url: string) => Promise<string>
@@ -275,6 +320,50 @@ describe('XiaohongshuScraper', () => {
     await scraper.fetchItems('https://xhslink.com/abc123')
 
     assert.equal(requestedRoute, 'xiaohongshu:/xiaohongshu/user/5fc91b41000000000101fe32/notes')
+  })
+
+  it('explains RSSHub parser failures without exposing raw route internals', async () => {
+    const scraper = new XiaohongshuScraper('http://127.0.0.1:1240') as XiaohongshuScraper & {
+      fetchRoute: (routePath: string, platform: string) => Promise<{
+        items: never[]
+        feedTitle: string
+        platform: string
+        error?: string
+      }>
+    }
+
+    scraper.fetchRoute = async (_routePath, platform) => ({
+      items: [],
+      feedTitle: '',
+      platform,
+      error: "HTTP 503: Service Unavailable | Cannot read properties of undefined (reading 'user')",
+    })
+
+    const result = await scraper.fetchItems('https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06')
+
+    assert.match(result.error || '', /RSSHub 暂时没有解析到公开笔记/)
+  })
+
+  it('explains RSSHub timeouts without leaking AbortError text', async () => {
+    const scraper = new XiaohongshuScraper('http://127.0.0.1:1240') as XiaohongshuScraper & {
+      fetchRoute: (routePath: string, platform: string) => Promise<{
+        items: never[]
+        feedTitle: string
+        platform: string
+        error?: string
+      }>
+    }
+
+    scraper.fetchRoute = async (_routePath, platform) => ({
+      items: [],
+      feedTitle: '',
+      platform,
+      error: 'This operation was aborted',
+    })
+
+    const result = await scraper.fetchItems('https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06')
+
+    assert.match(result.error || '', /RSSHub 路由请求超时/)
   })
 
   it('retries transient browser route failures once', async () => {
