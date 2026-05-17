@@ -21,6 +21,7 @@
 
 import assert from 'node:assert/strict'
 import test from 'node:test'
+import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -35,6 +36,22 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url))
 // src/__tests__ → repo root → assets/embedded-skills/video-copy-analyzer
 const SKILL_DIR = join(__dirname, '..', '..', 'assets', 'embedded-skills', 'video-copy-analyzer')
+
+function findPython39(): string | null {
+  const candidates = [
+    process.env.READY_TEST_PYTHON_39,
+    'python3.9',
+    'python3',
+  ].filter((item): item is string => Boolean(item))
+  for (const candidate of candidates) {
+    const probe = spawnSync(candidate, [
+      '-c',
+      'import sys; raise SystemExit(0 if sys.version_info[:2] == (3, 9) else 10)',
+    ], { encoding: 'utf-8' })
+    if (probe.status === 0) return candidate
+  }
+  return null
+}
 
 test('manifest compiles to advisory with read_skill default + retained internal video_copy_analyze action', () => {
   const def = compileSkillDefinition({ folderPath: SKILL_DIR, source: 'embedded' })
@@ -86,6 +103,24 @@ test('video_copy_analyze action contract matches item-analysis-manager call site
   // language values must include 'auto' (the literal value at the call site).
   const langParam = action!.params.find((p) => p.name === 'language')!
   assert.ok(langParam.enum?.includes('auto'), `language enum must include "auto" (passed by item-analysis-manager)`)
+})
+
+test('video_copy_analyze entry compiles under the bundled Python 3.9 runtime', (t) => {
+  const python = findPython39()
+  if (!python) {
+    t.skip('Python 3.9 is not available in this test environment')
+    return
+  }
+  const scriptPaths = [
+    join(SKILL_DIR, 'main.py'),
+    join(SKILL_DIR, 'scripts', 'ready_extract_subtitle.py'),
+  ]
+  const compiled = spawnSync(python, ['-m', 'py_compile', ...scriptPaths], { encoding: 'utf-8' })
+  assert.equal(
+    compiled.status,
+    0,
+    [compiled.stderr, compiled.stdout].filter(Boolean).join('\n'),
+  )
 })
 
 test('skill.workflow.json has been removed from disk', () => {

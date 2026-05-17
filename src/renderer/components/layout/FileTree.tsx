@@ -26,6 +26,7 @@ import {
   resolveFileTreeDropTarget,
   shouldKeepFileTreeDropHintOnLeave,
   type FileTreeDropTarget,
+  type FileTreeAnalysisPlaceholderStatus,
   type FileTreeExternalDropAction,
   type FileTreeExternalDropPayload,
 } from './fileTreeExternalDrop'
@@ -152,6 +153,37 @@ interface FileTreeExternalDropMenuState {
   y: number
   payload: FileTreeExternalDropPayload
   target: FileTreeDropTarget
+}
+
+const VIDEO_DROP_HOST_HINTS = [
+  'youtube.com',
+  'youtu.be',
+  'bilibili.com',
+  'b23.tv',
+  'bili2233.cn',
+  'vimeo.com',
+  'douyin.com',
+  'tiktok.com',
+  'xiaohongshu.com',
+  'xhslink.com',
+]
+const VIDEO_DROP_EXTS = ['.mp4', '.mov', '.mkv', '.avi', '.webm', '.m4v', '.flv']
+
+function isLikelyVideoDropPayload(payload: FileTreeExternalDropPayload): boolean {
+  const url = payload.type === 'browser-tab' ? payload.url : payload.link
+  const lower = (url || '').trim().toLowerCase()
+  if (!lower) return false
+  if (VIDEO_DROP_EXTS.some((ext) => lower.endsWith(ext))) return true
+  if (lower.includes('/video/')) return true
+  try {
+    const parsed = new URL(lower)
+    return (
+      VIDEO_DROP_HOST_HINTS.some((host) => parsed.hostname.includes(host))
+      || VIDEO_DROP_EXTS.some((ext) => parsed.pathname.endsWith(ext))
+    )
+  } catch {
+    return VIDEO_DROP_EXTS.some((ext) => lower.endsWith(ext))
+  }
 }
 
 function putDragData(e: React.DragEvent, item: FileItem, movable = true) {
@@ -549,113 +581,212 @@ function GridItemCard({
 }
 
 /**
- * Non-selectable "正在剪藏" placeholder row, shown the instant the user
- * picks 网页剪藏 from the drop popup so they get immediate feedback even
- * before the network fetch completes. Pointer-events disabled — the row
- * can't be selected, dragged, or used as a drop target. Replaced by the
- * real file row (via FS watcher) once materialization finishes.
+ * Non-selectable background-task placeholder row. Web clip / content study
+ * remove themselves when the real file appears; RSS analysis rows follow the
+ * persisted job progress until success or failure.
  */
+type PendingPlaceholderKind = 'clip' | 'study' | 'analysis-copy' | 'analysis-visual'
+type PendingPlaceholderStatus =
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'waiting_for_clip'
+  | 'skipped'
+  | FileTreeAnalysisPlaceholderStatus
+
+function isAnalysisPlaceholderKind(kind?: PendingPlaceholderKind): boolean {
+  return kind === 'analysis-copy' || kind === 'analysis-visual'
+}
+
+function isActiveAnalysisStatus(status: PendingPlaceholderStatus): boolean {
+  return status === 'queued' || status === 'running_script' || status === 'running_subagent'
+}
+
+function clampProgress(value: number | undefined): number | null {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  return Math.max(0, Math.min(100, Math.round(value)))
+}
+
+function pendingPlaceholderLabel(kind: PendingPlaceholderKind, status: PendingPlaceholderStatus): string {
+  if (kind === 'study') {
+    if (status === 'waiting_for_clip') return '等待剪藏'
+    if (status === 'running') return '生成学习笔记'
+    if (status === 'completed' || status === 'success') return '已生成笔记'
+    if (status === 'skipped') return '已跳过'
+    return '笔记失败'
+  }
+
+  if (kind === 'analysis-copy' || kind === 'analysis-visual') {
+    const subject = kind === 'analysis-copy' ? '文案' : '视觉'
+    if (status === 'queued') return `${subject}排队`
+    if (status === 'paused') return `${subject}暂停`
+    if (status === 'running_script') return kind === 'analysis-copy' ? '提取文案' : '分析画面'
+    if (status === 'running_subagent') return '生成报告'
+    if (status === 'success' || status === 'completed') return `${subject}完成`
+    if (status === 'skipped') return '已跳过'
+    return `${subject}失败`
+  }
+
+  if (status === 'running') return '正在剪藏'
+  if (status === 'completed' || status === 'success') return '已剪藏'
+  if (status === 'waiting_for_clip' || status === 'queued') return '等待中'
+  if (status === 'skipped') return '已跳过'
+  return '剪藏失败'
+}
+
 function PendingClipRow({
   status,
   urlHost,
   title,
   errorMessage,
+  message,
+  progress,
   depth,
   kind = 'clip',
 }: {
-  status: 'running' | 'completed' | 'failed' | 'waiting_for_clip' | 'skipped'
+  status: PendingPlaceholderStatus
   urlHost: string
   title: string
   errorMessage?: string
+  message?: string | null
+  progress?: number
   depth: number
-  kind?: 'clip' | 'study'
+  kind?: PendingPlaceholderKind
 }) {
   const isFailure = status === 'failed' || status === 'skipped'
+  const isComplete = status === 'completed' || status === 'success'
+  const isActive =
+    status === 'running'
+    || status === 'waiting_for_clip'
+    || status === 'queued'
+    || status === 'running_script'
+    || status === 'running_subagent'
+  const isAnalysis = isAnalysisPlaceholderKind(kind)
+  const progressValue = clampProgress(progress)
   const baseStyle: React.CSSProperties = {
     padding: '6px 8px',
     paddingLeft: `${8 + depth * 22}px`,
-    opacity: isFailure ? 0.85 : 0.7,
+    opacity: isFailure ? 0.85 : isComplete ? 0.78 : 0.72,
     pointerEvents: 'none',
     userSelect: 'none',
     cursor: 'default',
     background: isFailure ? 'color-mix(in srgb, var(--color-rose-light, #fee2e2) 36%, transparent)' : 'transparent',
     boxShadow:
-      status === 'completed'
+      isComplete
         ? 'inset 0 0 0 1px color-mix(in srgb, var(--color-green, #10b981) 38%, transparent)'
         : isFailure
           ? 'inset 0 0 0 1px color-mix(in srgb, var(--color-rose, #f43f5e) 32%, transparent)'
           : 'inset 0 0 0 1px rgba(148, 163, 184, 0.22)',
   }
-  const label = kind === 'study'
-    ? (status === 'waiting_for_clip'
-        ? '等待剪藏'
-        : status === 'running'
-          ? '生成学习笔记'
-          : status === 'completed'
-            ? '已生成笔记'
-            : status === 'skipped'
-              ? '已跳过'
-              : '笔记失败')
-    : (status === 'running'
-        ? '正在剪藏'
-        : status === 'completed'
-          ? '已剪藏'
-          : status === 'waiting_for_clip'
-            ? '等待中'
-            : status === 'skipped'
-              ? '已跳过'
-              : '剪藏失败')
+  const label = pendingPlaceholderLabel(kind, status)
   return (
     <div
       aria-disabled
       aria-live={status === 'failed' ? 'polite' : undefined}
-      className="flex items-center gap-[6px] rounded-[8px] text-[13px]"
+      className="rounded-[8px] text-[13px]"
       style={baseStyle}
     >
-      <span
-        aria-hidden
-        className="flex items-center justify-center"
-        style={{ width: 16, height: 16 }}
-      >
-        {status === 'running' || status === 'waiting_for_clip' ? (
-          <Loader2 className="animate-spin" style={{ width: 14, height: 14 }} strokeWidth={2} />
-        ) : status === 'completed' ? (
-          <Check style={{ width: 14, height: 14, color: 'var(--color-green, #10b981)' }} strokeWidth={2.5} />
-        ) : (
-          <AlertTriangle style={{ width: 14, height: 14, color: 'var(--color-rose, #f43f5e)' }} strokeWidth={2.4} />
-        )}
-      </span>
-      <span
-        style={{
-          flex: 1,
-          minWidth: 0,
-          whiteSpace: 'nowrap',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          color: 'var(--text-muted)',
-          fontStyle: 'italic',
-        }}
-      >
-        <span style={{ marginRight: 6, fontStyle: 'normal', fontVariant: 'all-small-caps', letterSpacing: '0.04em' }}>
-          {label}
-        </span>
-        <span>{title || urlHost}</span>
-      </span>
-      {(status === 'failed' || status === 'skipped') && errorMessage && (
+      <div className="flex items-center gap-[6px]">
         <span
-          title={errorMessage}
-          style={{
-            fontSize: 11,
-            color: 'var(--color-rose, #f43f5e)',
-            maxWidth: 140,
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}
+          aria-hidden
+          className="flex items-center justify-center"
+          style={{ width: 16, height: 16 }}
         >
-          {errorMessage}
+          {isActive ? (
+            <Loader2 className="animate-spin" style={{ width: 14, height: 14 }} strokeWidth={2} />
+          ) : isComplete ? (
+            <Check style={{ width: 14, height: 14, color: 'var(--color-green, #10b981)' }} strokeWidth={2.5} />
+          ) : status === 'paused' ? (
+            <ListMinus style={{ width: 14, height: 14, color: 'var(--color-orange, #f59e0b)' }} strokeWidth={2.4} />
+          ) : (
+            <AlertTriangle style={{ width: 14, height: 14, color: 'var(--color-rose, #f43f5e)' }} strokeWidth={2.4} />
+          )}
         </span>
-      )}
+
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              minWidth: 0,
+              color: 'var(--text-muted)',
+              fontStyle: 'italic',
+            }}
+          >
+            <span style={{ flexShrink: 0, fontStyle: 'normal', fontVariant: 'all-small-caps', letterSpacing: '0.04em' }}>
+              {label}
+            </span>
+            {isAnalysis && progressValue !== null && (
+              <span style={{ flexShrink: 0, fontSize: 11, fontStyle: 'normal', color: 'var(--text-light)' }}>
+                {progressValue}%
+              </span>
+            )}
+            <span style={{ minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              {title || urlHost}
+            </span>
+          </div>
+
+          {isAnalysis && progressValue !== null && (
+            <div
+              aria-hidden
+              style={{
+                marginTop: 4,
+                height: 3,
+                borderRadius: 999,
+                overflow: 'hidden',
+                background: 'rgba(148, 163, 184, 0.18)',
+              }}
+            >
+              <div
+                style={{
+                  width: `${progressValue}%`,
+                  height: '100%',
+                  borderRadius: 999,
+                  background: isFailure
+                    ? 'var(--color-rose, #f43f5e)'
+                    : isComplete
+                      ? 'var(--color-green, #10b981)'
+                      : 'var(--color-blue, #3b82f6)',
+                  transition: 'width 240ms ease',
+                }}
+              />
+            </div>
+          )}
+
+          {isAnalysis && message && !isFailure && (
+            <div
+              title={message}
+              style={{
+                marginTop: 2,
+                fontSize: 11,
+                color: 'var(--text-light)',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              }}
+            >
+              {message}
+            </div>
+          )}
+        </div>
+
+        {(status === 'failed' || status === 'skipped') && errorMessage && (
+          <span
+            title={errorMessage}
+            style={{
+              fontSize: 11,
+              color: 'var(--color-rose, #f43f5e)',
+              maxWidth: 140,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {errorMessage}
+          </span>
+        )}
+      </div>
     </div>
   )
 }
@@ -665,13 +796,60 @@ export interface PendingClipPlaceholder {
   targetDir: string
   urlHost: string
   title: string
-  status: 'running' | 'completed' | 'failed' | 'waiting_for_clip' | 'skipped'
+  status: PendingPlaceholderStatus
   copiedPath?: string
   errorMessage?: string
+  message?: string | null
+  progress?: number
+  jobId?: string
+  itemId?: string
+  outputDir?: string
+  reportPath?: string | null
   createdAt: number
   /** Discriminates clip-side placeholder vs study-side placeholder (when
-   * the action was 'content-study'). Default 'clip' for backward compat. */
-  kind?: 'clip' | 'study'
+   * the action was 'content-study') and RSS analysis placeholders. */
+  kind?: PendingPlaceholderKind
+}
+
+interface FileTreeRSSAnalysisJob {
+  id: string
+  status: FileTreeAnalysisPlaceholderStatus
+  progress: number
+  message: string | null
+  error: string | null
+  outputDir: string
+  reportPath: string | null
+}
+
+function mapAnalysisJobToPlaceholderPatch(job: FileTreeRSSAnalysisJob): Partial<PendingClipPlaceholder> {
+  return {
+    status: job.status,
+    progress: Number(job.progress) || 0,
+    message: job.message,
+    errorMessage: job.error || undefined,
+    outputDir: job.outputDir,
+    reportPath: job.reportPath,
+    copiedPath: job.reportPath || job.outputDir,
+  }
+}
+
+function isTrackedAnalysisPlaceholder(placeholder: PendingClipPlaceholder): boolean {
+  return isAnalysisPlaceholderKind(placeholder.kind) && Boolean(placeholder.jobId)
+}
+
+function analysisPlaceholderTerminalDelay(status: PendingPlaceholderStatus): number | null {
+  if (status === 'success' || status === 'completed') return 2600
+  if (status === 'failed' || status === 'skipped') return 6000
+  return null
+}
+
+function buildAnalysisJobKey(placeholders: PendingClipPlaceholder[]): string {
+  return placeholders
+    .filter((p) => isTrackedAnalysisPlaceholder(p) && isActiveAnalysisStatus(p.status))
+    .map((p) => p.jobId)
+    .filter((id): id is string => Boolean(id))
+    .sort()
+    .join('|')
 }
 
 function FileTreeRecursive({
@@ -753,12 +931,14 @@ function FileTreeRecursive({
         <PendingClipRow
           key={p.taskId}
           status={p.status}
-          urlHost={p.urlHost}
-          title={p.title}
-          errorMessage={p.errorMessage}
-          depth={depth}
-          kind={p.kind}
-        />
+            urlHost={p.urlHost}
+            title={p.title}
+            errorMessage={p.errorMessage}
+            message={p.message}
+            progress={p.progress}
+            depth={depth}
+            kind={p.kind}
+          />
       ))}
       {visibleItems.map((item) => {
         const isExpanded = expandedDirs.has(item.path)
@@ -879,6 +1059,7 @@ export default function FileTree({
    */
   const [pendingClips, setPendingClips] = useState<PendingClipPlaceholder[]>([])
   const pendingClipRemoveTimersRef = useRef<Map<string, number>>(new Map())
+  const pendingClipsRef = useRef<PendingClipPlaceholder[]>([])
   const [isDragOver, setIsDragOver] = useState(false)
   const [moveDropTargetDir, setMoveDropTargetDir] = useState<string | null>(null)
   const [fileTreeDropTarget, setFileTreeDropTarget] = useState<FileTreeDropTarget | null>(null)
@@ -888,6 +1069,11 @@ export default function FileTree({
   const queryLower = query.trim().toLowerCase()
   const effectiveGridPath = gridPath !== undefined ? gridPath : internalGridPath
   const setEffectiveGridPath = onGridPathChange ?? setInternalGridPath
+  const activeAnalysisJobKey = useMemo(() => buildAnalysisJobKey(pendingClips), [pendingClips])
+
+  useEffect(() => {
+    pendingClipsRef.current = pendingClips
+  }, [pendingClips])
 
   const shouldPreserveDropHint = useCallback((event: React.DragEvent<HTMLElement>) => {
     const currentTarget = event.currentTarget
@@ -916,11 +1102,8 @@ export default function FileTree({
     onResultCountChange?.(filteredCurrentItems.length)
   }, [filteredCurrentItems.length, onResultCountChange])
 
-  // Background clip progress subscriber. The drop popup's "网页剪藏" action
-  // dispatches `browser:clipDraggedTab` via host IPC; the main process writes
-  // the note to `<outputsRoot>/obsidian-web-clip/...` and pushes `running →
-  // completed | failed` events here. We log to console (matching RSS drop
-  // action pattern); a richer toast UX is Phase 2.
+  // Background task subscribers keep file-tree placeholders in sync with work
+  // that runs outside the right-side agent chat.
   const schedulePlaceholderRemoval = useCallback((taskId: string, delayMs: number) => {
     const existing = pendingClipRemoveTimersRef.current.get(taskId)
     if (existing !== undefined) window.clearTimeout(existing)
@@ -929,6 +1112,18 @@ export default function FileTree({
       pendingClipRemoveTimersRef.current.delete(taskId)
     }, delayMs)
     pendingClipRemoveTimersRef.current.set(taskId, timer)
+  }, [])
+
+  const flashCompletedPath = useCallback((path?: string | null) => {
+    if (!path) return
+    setFlashingTargetPath(path)
+    if (flashClearTimerRef.current !== null) {
+      window.clearTimeout(flashClearTimerRef.current)
+    }
+    flashClearTimerRef.current = window.setTimeout(() => {
+      setFlashingTargetPath(null)
+      flashClearTimerRef.current = null
+    }, 2500)
   }, [])
 
   useEffect(() => {
@@ -963,16 +1158,7 @@ export default function FileTree({
           ),
         )
         schedulePlaceholderRemoval(update.taskId, 1500)
-        if (update.copiedPath) {
-          setFlashingTargetPath(update.copiedPath)
-          if (flashClearTimerRef.current !== null) {
-            window.clearTimeout(flashClearTimerRef.current)
-          }
-          flashClearTimerRef.current = window.setTimeout(() => {
-            setFlashingTargetPath(null)
-            flashClearTimerRef.current = null
-          }, 2500)
-        }
+        flashCompletedPath(update.copiedPath)
       } else if (update.status === 'failed' || update.status === 'skipped') {
         setPendingClips((prev) =>
           prev.map((p) =>
@@ -1031,20 +1217,7 @@ export default function FileTree({
           ),
         )
         schedulePlaceholderRemoval(completed.taskId, 1200)
-        const newFilePath = completed.copiedPath
-        if (newFilePath) {
-          setFlashingTargetPath(newFilePath)
-          if (flashClearTimerRef.current !== null) {
-            window.clearTimeout(flashClearTimerRef.current)
-          }
-          // 2500ms — gives the FS watcher ample time to surface the new
-          // row even on slow disks; CSS animation is 1500ms once mounted,
-          // so the row may animate any time within this window.
-          flashClearTimerRef.current = window.setTimeout(() => {
-            setFlashingTargetPath(null)
-            flashClearTimerRef.current = null
-          }, 2500)
-        }
+        flashCompletedPath(completed.copiedPath)
       } else if (update.status === 'failed') {
         const failed = data as { taskId: string; errorKind: string; recoverable: boolean; errorDetail?: { message?: string } }
         console.warn(
@@ -1076,7 +1249,65 @@ export default function FileTree({
       }
       pendingClipRemoveTimersRef.current.clear()
     }
-  }, [schedulePlaceholderRemoval])
+  }, [flashCompletedPath, schedulePlaceholderRemoval])
+
+  useEffect(() => {
+    if (!activeAnalysisJobKey) return
+    let disposed = false
+    let timer: ReturnType<typeof setTimeout> | null = null
+
+    const tick = async () => {
+      const tracked = pendingClipsRef.current.filter((p) =>
+        isTrackedAnalysisPlaceholder(p) && isActiveAnalysisStatus(p.status),
+      )
+      if (tracked.length === 0) return
+
+      try {
+        const result = await window.electronAPI?.rss?.listItemAnalysisJobs?.({ limit: 200 })
+        if (disposed || !result?.success || !result.data) return
+
+        const jobsById = new Map(result.data.map((job) => [job.id, job]))
+        const terminalUpdates: Array<{ taskId: string; delayMs: number; flashPath?: string | null }> = []
+
+        for (const placeholder of pendingClipsRef.current) {
+          if (!isTrackedAnalysisPlaceholder(placeholder) || !placeholder.jobId) continue
+          const job = jobsById.get(placeholder.jobId)
+          if (!job) continue
+          const delayMs = analysisPlaceholderTerminalDelay(job.status)
+          if (delayMs !== null) {
+            terminalUpdates.push({
+              taskId: placeholder.taskId,
+              delayMs,
+              flashPath: job.status === 'success' ? job.reportPath || job.outputDir : null,
+            })
+          }
+        }
+
+        setPendingClips((prev) =>
+          prev.map((placeholder) => {
+            if (!isTrackedAnalysisPlaceholder(placeholder) || !placeholder.jobId) return placeholder
+            const job = jobsById.get(placeholder.jobId)
+            return job ? { ...placeholder, ...mapAnalysisJobToPlaceholderPatch(job) } : placeholder
+          }),
+        )
+
+        for (const update of terminalUpdates) {
+          schedulePlaceholderRemoval(update.taskId, update.delayMs)
+          flashCompletedPath(update.flashPath)
+        }
+      } finally {
+        if (!disposed) {
+          timer = setTimeout(tick, 1400)
+        }
+      }
+    }
+
+    void tick()
+    return () => {
+      disposed = true
+      if (timer) clearTimeout(timer)
+    }
+  }, [activeAnalysisJobKey, flashCompletedPath, schedulePlaceholderRemoval])
 
   const handleOpenFile = useCallback((item: FileItem) => {
     if (item.isDirectory) {
@@ -1379,9 +1610,32 @@ export default function FileTree({
             schedulePlaceholderRemoval(taskId, 4000)
           }
         },
+        onAnalysisPlaceholderStart: (placeholder) => {
+          setPendingClips((prev) => [
+            ...prev,
+            {
+              ...placeholder,
+              kind: placeholder.action === 'copy' ? 'analysis-copy' : 'analysis-visual',
+            },
+          ])
+        },
+        onAnalysisPlaceholderUpdate: (taskId, patch) => {
+          setPendingClips((prev) =>
+            prev.map((p) => (p.taskId === taskId ? { ...p, ...patch } : p)),
+          )
+          if (patch.status) {
+            const delayMs = analysisPlaceholderTerminalDelay(patch.status)
+            if (delayMs !== null) {
+              schedulePlaceholderRemoval(taskId, delayMs)
+            }
+          }
+          if (patch.status === 'success') {
+            flashCompletedPath(patch.copiedPath || patch.reportPath || patch.outputDir)
+          }
+        },
       })
     },
-    [externalDropMenu, schedulePlaceholderRemoval],
+    [externalDropMenu, flashCompletedPath, schedulePlaceholderRemoval],
   )
 
   const renderTreeContent = () => {
@@ -1877,28 +2131,37 @@ function FileTreeExternalDropMenu({
     }),
     [],
   )
-  const actionItems = useMemo(() => ([
-    {
-      id: 'web-clip' as const,
-      label: '网页剪藏',
-      icon: <Globe style={{ width: 15, height: 15 }} />,
-    },
-    {
-      id: 'content-study' as const,
-      label: '内容学习',
-      icon: <BookOpen style={{ width: 15, height: 15 }} />,
-    },
-    {
-      id: 'copy-analysis' as const,
-      label: '文案分析',
-      icon: <FileText style={{ width: 15, height: 15 }} />,
-    },
-    {
-      id: 'visual-analysis' as const,
-      label: '视觉分析',
-      icon: <Image style={{ width: 15, height: 15 }} />,
-    },
-  ]), [])
+  const actionItems = useMemo(() => {
+    const items: Array<{
+      id: FileTreeExternalDropAction
+      label: string
+      icon: React.ReactNode
+    }> = [
+      {
+        id: 'web-clip',
+        label: '网页剪藏',
+        icon: <Globe style={{ width: 15, height: 15 }} />,
+      },
+      {
+        id: 'content-study',
+        label: '内容学习',
+        icon: <BookOpen style={{ width: 15, height: 15 }} />,
+      },
+      {
+        id: 'copy-analysis',
+        label: '文案分析',
+        icon: <FileText style={{ width: 15, height: 15 }} />,
+      },
+    ]
+    if (isLikelyVideoDropPayload(menu.payload)) {
+      items.push({
+        id: 'visual-analysis',
+        label: '视觉分析',
+        icon: <Image style={{ width: 15, height: 15 }} />,
+      })
+    }
+    return items
+  }, [menu.payload])
 
   useLayoutEffect(() => {
     if (!menuRef.current) return

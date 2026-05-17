@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
 import { mkdirSync } from 'fs'
-import { readFile, readdir, writeFile } from 'fs/promises'
-import { dirname, join } from 'path'
+import { readFile, readdir, stat, writeFile } from 'fs/promises'
+import { basename, dirname, join } from 'path'
 import {
   type RSSAnalysisAction,
   type RSSAnalysisJob,
@@ -99,6 +99,104 @@ function parseMetaJson(raw: string | null): Record<string, unknown> {
   }
 }
 
+function getOutputPath(outputs: Record<string, string> | undefined, key: string): string | null {
+  const value = outputs?.[key]
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function stripKnownTranscriptSuffix(filePath: string): string {
+  const name = basename(filePath)
+  return name
+    .replace(/_文字稿\.md$/i, '')
+    .replace(/\.md$/i, '')
+}
+
+function stripKnownVideoSuffix(filePath: string): string {
+  const name = basename(filePath)
+  const lower = name.toLowerCase()
+  const ext = VIDEO_EXTS.find((item) => lower.endsWith(item))
+  return ext ? name.slice(0, -ext.length) : name
+}
+
+function extractVideoIdHint(source: string): string | null {
+  const text = String(source || '').trim()
+  const bilibili = text.match(/(?:^|[/?&_=.-])(BV[\w]+)/i)
+  if (bilibili?.[1]) return bilibili[1]
+  const youtube = text.match(/(?:v=|youtu\.be\/)([a-zA-Z0-9_-]{11})/)
+  if (youtube?.[1]) return youtube[1]
+  const localName = stripKnownVideoSuffix(text)
+  return localName && localName !== text ? localName : null
+}
+
+function pathParts(filePath: string): string[] {
+  return filePath.split(/[\\/]+/).map((part) => part.toLowerCase()).filter(Boolean)
+}
+
+function isGeneratedVideoDerivativePath(filePath: string): boolean {
+  const parts = pathParts(filePath)
+  return parts.includes('scenes') || parts.includes('frames') || parts.includes('best_shots')
+}
+
+async function isUsableVideoFile(filePath: string): Promise<boolean> {
+  const lower = basename(filePath).toLowerCase()
+  if (!VIDEO_EXTS.some((ext) => lower.endsWith(ext))) return false
+  if (isGeneratedVideoDerivativePath(filePath)) return false
+  const fileStat = await stat(filePath).catch(() => null)
+  return Boolean(fileStat?.isFile() && fileStat.size > 0)
+}
+
+function scoreReusableVideo(filePath: string, videoIdHint: string | null): number {
+  const parts = pathParts(filePath)
+  const stem = stripKnownVideoSuffix(filePath).toLowerCase()
+  const hint = videoIdHint?.toLowerCase() || ''
+  let score = 0
+  if (hint && stem === hint) score += 1000
+  else if (hint && stem.includes(hint)) score += 300
+  if (parts.includes('copy-analysis')) score += 200
+  if (parts.includes('visual-analysis')) score += 120
+  return score
+}
+
+export async function findReusableVideoFile(
+  rootDir: string,
+  source: string,
+  depth = 0,
+): Promise<string | null> {
+  if (depth > 5) return null
+  const entries = await readdir(rootDir, { withFileTypes: true }).catch(() => [])
+  const videoIdHint = extractVideoIdHint(source)
+  const candidates: Array<{ path: string; score: number; mtime: number }> = []
+
+  for (const entry of entries) {
+    const absolute = join(rootDir, entry.name)
+    if (entry.isDirectory()) {
+      const lower = entry.name.toLowerCase()
+      if (lower === 'scenes' || lower === 'frames' || lower === 'best_shots') continue
+      const nested = await findReusableVideoFile(absolute, source, depth + 1)
+      if (nested) {
+        const nestedStat = await stat(nested).catch(() => null)
+        candidates.push({
+          path: nested,
+          score: scoreReusableVideo(nested, videoIdHint),
+          mtime: nestedStat?.mtimeMs || 0,
+        })
+      }
+      continue
+    }
+    if (!entry.isFile()) continue
+    if (!await isUsableVideoFile(absolute)) continue
+    const fileStat = await stat(absolute).catch(() => null)
+    candidates.push({
+      path: absolute,
+      score: scoreReusableVideo(absolute, videoIdHint),
+      mtime: fileStat?.mtimeMs || 0,
+    })
+  }
+
+  candidates.sort((a, b) => (b.score - a.score) || (b.mtime - a.mtime))
+  return candidates[0]?.path || null
+}
+
 async function collectTextFiles(
   dirPath: string,
   extensions: string[],
@@ -132,6 +230,20 @@ async function findFileByName(dirPath: string, fileName: string, depth = 0): Pro
     if (entry.isFile() && entry.name === fileName) return absolute
     if (entry.isDirectory()) {
       const hit = await findFileByName(absolute, fileName, depth + 1)
+      if (hit) return hit
+    }
+  }
+  return null
+}
+
+async function findFileBySuffix(dirPath: string, suffix: string, depth = 0): Promise<string | null> {
+  if (depth > 5) return null
+  const entries = await readdir(dirPath, { withFileTypes: true }).catch(() => [])
+  for (const entry of entries) {
+    const absolute = join(dirPath, entry.name)
+    if (entry.isFile() && entry.name.endsWith(suffix)) return absolute
+    if (entry.isDirectory()) {
+      const hit = await findFileBySuffix(absolute, suffix, depth + 1)
       if (hit) return hit
     }
   }
@@ -444,18 +556,21 @@ export class RSSItemAnalysisManager {
     const runtime = getSkillsRuntimeManager()
     const isVideo = isLikelyVideoLink(payload.link)
     let extractedText = ''
+    let transcriptPath: string | null = null
+    let sourceVideoPath: string | null = null
 
     if (isVideo) {
+      sourceVideoPath = await findReusableVideoFile(rootDir, payload.link)
       this.updateJob(jobId, {
         status: 'running_script',
         progress: 24,
-        message: '正在提取视频文案',
+        message: sourceVideoPath ? '复用已下载视频，正在提取文案' : '正在下载并提取视频文案',
       })
       const skillResult = await runtime.runSkill({
         skillId: 'video-copy-analyzer',
         action: 'video_copy_analyze',
         params: {
-          input: payload.link,
+          input: sourceVideoPath || payload.link,
           outputDir,
           model: 'small',
           language: 'auto',
@@ -468,9 +583,18 @@ export class RSSItemAnalysisManager {
       }
       this.updateJob(jobId, {
         progress: 70,
-        message: '文案提取完成，正在生成总结',
+        message: '文案提取完成，正在校正文稿',
       })
-      extractedText = await collectTextFiles(outputDir, ['.md', '.txt', '.srt'], 12_000)
+      transcriptPath = getOutputPath(skillResult.outputs, 'transcriptPath')
+      sourceVideoPath = getOutputPath(skillResult.outputs, 'videoPath')
+        || sourceVideoPath
+        || await findReusableVideoFile(outputDir, payload.link)
+      if (transcriptPath) {
+        extractedText = await readFile(transcriptPath, 'utf-8').catch(() => '')
+      }
+      if (!extractedText) {
+        extractedText = await collectTextFiles(outputDir, ['.md', '.txt'], 12_000)
+      }
       if (!extractedText) {
         extractedText = `${skillResult.stdout}\n${skillResult.stderr}`.trim()
       }
@@ -491,10 +615,10 @@ export class RSSItemAnalysisManager {
     this.updateJob(jobId, {
       status: 'running_subagent',
       progress: 86,
-      message: 'subagent 正在撰写文案报告',
+      message: 'subagent 正在校正文字稿并撰写文案报告',
     })
 
-    const summary = await rssSubagentRunner.summarizeCopy({
+    const deliverables = await rssSubagentRunner.buildCopyDeliverables({
       title: payload.title,
       link: payload.link,
       source: payload.source,
@@ -502,6 +626,13 @@ export class RSSItemAnalysisManager {
       publishedAt: payload.publishedAt,
       extractedText,
     })
+
+    const existingTranscriptPath = transcriptPath || await findFileBySuffix(outputDir, '_文字稿.md')
+    const baseVideoId = existingTranscriptPath ? stripKnownTranscriptSuffix(existingTranscriptPath) : sanitizeName(payload.title)
+    const correctedTranscriptPath = existingTranscriptPath || join(outputDir, `${baseVideoId}_文字稿.md`)
+    const structuredTranscriptPath = join(outputDir, `${baseVideoId}_结构化文字稿.md`)
+    await writeFile(correctedTranscriptPath, deliverables.correctedTranscript.trim() + '\n', 'utf-8')
+    await writeFile(structuredTranscriptPath, deliverables.structuredTranscript.trim() + '\n', 'utf-8')
 
     const reportPath = join(outputDir, '文案分析报告.md')
     await writeFile(
@@ -513,7 +644,7 @@ export class RSSItemAnalysisManager {
         `- 链接: ${payload.link}`,
         `- 来源: ${payload.source || '未知来源'}`,
         '',
-        summary.trim(),
+        deliverables.report.trim(),
         '',
       ].join('\n'),
       'utf-8',
@@ -531,6 +662,9 @@ export class RSSItemAnalysisManager {
           outputDir,
           rootDir,
           reportPath,
+          correctedTranscriptPath,
+          structuredTranscriptPath,
+          sourceVideoPath,
           generatedAt: new Date().toISOString(),
         },
         null,
@@ -636,13 +770,21 @@ export class RSSItemAnalysisManager {
       message: '正在执行视觉脚本分析',
     })
 
+    const reusableVideoPath = await findReusableVideoFile(rootDir, payload.link)
+    if (reusableVideoPath) {
+      this.updateJob(jobId, {
+        progress: 22,
+        message: '复用已下载视频，正在执行视觉脚本分析',
+      })
+    }
+
     // Phase 7 — VEA long actions run as child runs. RSS visual flow keeps
     // its await-style behavior; internally the long work is now child-owned.
     const pipelineResult = await this.awaitVeaChildRun({
       skillId: 'video-expert-analyzer',
       action: 'video_expert_pipeline',
       params: {
-        url: payload.link,
+        url: reusableVideoPath || payload.link,
         outputDir,
       },
       timeoutMs: 35 * 60 * 1000,
@@ -655,6 +797,7 @@ export class RSSItemAnalysisManager {
     if (!sceneScoresPath) {
       throw new Error('未找到 scene_scores.json，无法继续视觉评分')
     }
+    const sourceVideoPath = reusableVideoPath || await findReusableVideoFile(outputDir, payload.link)
 
     this.updateJob(jobId, {
       status: 'running_script',
@@ -723,6 +866,8 @@ export class RSSItemAnalysisManager {
           rootDir,
           reportPath,
           sceneScoresPath,
+          sourceVideoPath,
+          reusedSourceVideo: Boolean(reusableVideoPath),
           generatedAt: new Date().toISOString(),
         },
         null,

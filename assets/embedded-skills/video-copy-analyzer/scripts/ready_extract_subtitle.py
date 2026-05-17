@@ -5,9 +5,11 @@ import subprocess
 import sys
 import uuid
 from pathlib import Path
+from typing import Optional
 
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
+VIDEO_EXTENSIONS = [".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".flv"]
 
 
 def load_payload() -> dict:
@@ -28,8 +30,16 @@ def emit(result: dict) -> None:
         print(result["logs"]["stderr"], file=sys.stderr)
 
 
-def find_latest(path: Path, suffix: str) -> Path | None:
+def find_latest(path: Path, suffix: str) -> Optional[Path]:
     matches = sorted(path.glob(f"*{suffix}"), key=lambda item: item.stat().st_mtime, reverse=True)
+    return matches[0] if matches else None
+
+
+def find_latest_video(path: Path) -> Optional[Path]:
+    matches = []
+    for ext in VIDEO_EXTENSIONS:
+        matches.extend(path.glob(f"*{ext}"))
+    matches = sorted(matches, key=lambda item: item.stat().st_mtime, reverse=True)
     return matches[0] if matches else None
 
 
@@ -96,12 +106,16 @@ def main() -> int:
 
         srt_path = find_latest(output_dir, ".srt")
         transcript_path = find_latest(output_dir, "_文字稿.md")
+        source_path = Path(source_input).expanduser()
+        video_path = source_path.resolve() if source_path.exists() and source_path.is_file() else find_latest_video(output_dir)
         if not transcript_path and srt_path and srt_path.exists():
             transcript_path = build_transcript_from_srt(srt_path)
         if not srt_path or not srt_path.exists():
             raise RuntimeError("Missing generated SRT file")
         if not transcript_path or not transcript_path.exists():
             raise RuntimeError("Missing generated transcript file")
+        if not video_path or not video_path.exists():
+            raise RuntimeError("Missing resolved video file")
 
         emit({
             "ok": True,
@@ -109,6 +123,7 @@ def main() -> int:
             "outputs": {
                 "sourceInput": source_input,
                 "outputDir": str(output_dir),
+                "videoPath": str(video_path),
                 "srtPath": str(srt_path),
                 "transcriptPath": str(transcript_path),
                 "forceSubtitleMode": force_mode,
@@ -120,6 +135,13 @@ def main() -> int:
                     "kind": "file",
                     "path": str(srt_path),
                     "mimeType": "application/x-subrip"
+                },
+                {
+                    "id": uuid.uuid4().hex,
+                    "label": "source_video",
+                    "kind": "file",
+                    "path": str(video_path),
+                    "mimeType": "video/mp4"
                 },
                 {
                     "id": uuid.uuid4().hex,

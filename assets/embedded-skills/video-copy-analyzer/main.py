@@ -8,7 +8,10 @@ import os
 import sys
 import subprocess
 import re
+import shutil
 from pathlib import Path
+
+_YT_DLP_JS_RUNTIMES_SUPPORT_CACHE = {}
 
 def get_script_dir():
     """获取脚本所在目录"""
@@ -27,6 +30,32 @@ def get_venv_ytdlp():
     if venv_ytdlp.exists():
         return str(venv_ytdlp)
     return "yt-dlp"
+
+def yt_dlp_supports_js_runtimes(base_command):
+    cache_key = tuple(base_command)
+    if cache_key in _YT_DLP_JS_RUNTIMES_SUPPORT_CACHE:
+        return _YT_DLP_JS_RUNTIMES_SUPPORT_CACHE[cache_key]
+    try:
+        result = subprocess.run(
+            [*base_command, "--help"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+    except Exception:
+        _YT_DLP_JS_RUNTIMES_SUPPORT_CACHE[cache_key] = False
+        return False
+
+    output = f"{result.stdout}\n{result.stderr}"
+    supported = result.returncode == 0 and "--js-runtimes" in output
+    _YT_DLP_JS_RUNTIMES_SUPPORT_CACHE[cache_key] = supported
+    return supported
+
+def build_yt_dlp_command(*args):
+    ytdlp = get_venv_ytdlp()
+    base_command = [ytdlp] if shutil.which(ytdlp) or Path(ytdlp).exists() else [sys.executable, "-m", "yt_dlp"]
+    runtime_args = ["--js-runtimes", "node"] if shutil.which("node") and yt_dlp_supports_js_runtimes(base_command) else []
+    return [*base_command, *runtime_args, *args]
 
 def is_url(path):
     """判断是否为 URL"""
@@ -52,13 +81,12 @@ def download_video(url, output_dir):
     video_id = extract_video_id(url)
     output_template = str(output_dir / f"{video_id}.%(ext)s")
     
-    cmd = [
-        get_venv_ytdlp(),
+    cmd = build_yt_dlp_command(
         "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
         "--merge-output-format", "mp4",
         "-o", output_template,
         url
-    ]
+    )
     
     print(f"📥 正在下载视频: {url}")
     print(f"   输出路径: {output_dir}")

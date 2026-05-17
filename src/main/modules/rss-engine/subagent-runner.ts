@@ -6,6 +6,7 @@ interface CompletionRequest {
   system: string
   user: string
   maxTokens: number
+  timeoutMs?: number
 }
 
 interface CopySummaryInput {
@@ -17,6 +18,12 @@ interface CopySummaryInput {
   extractedText: string
 }
 
+interface CopyDeliverables {
+  correctedTranscript: string
+  structuredTranscript: string
+  report: string
+}
+
 interface VisualSummaryInput {
   title: string
   link: string
@@ -24,10 +31,69 @@ interface VisualSummaryInput {
   pipelineSummary: string
 }
 
+const REQUIRED_COPY_HEADINGS = [
+  '## 一、TextContent Analysis 视角',
+  '## 二、Viral-Abstract-Script 视角',
+  '## 三、Brainstorming 视角',
+]
+
 function clipText(input: string, maxChars: number): string {
   const text = input.replace(/\s+/g, ' ').trim()
   if (text.length <= maxChars) return text
   return `${text.slice(0, maxChars)}…`
+}
+
+function hasCompleteCopySummaryShape(text: string): boolean {
+  const normalized = text.trim()
+  if (!normalized) return false
+  return REQUIRED_COPY_HEADINGS.every((heading) => normalized.includes(heading))
+}
+
+function getMarkdownBodyLength(text: string): number {
+  return text
+    .replace(/^#+\s+.*$/gm, '')
+    .replace(/[*_`>#-]/g, '')
+    .replace(/\s+/g, '')
+    .trim()
+    .length
+}
+
+function hasCorrectedTranscriptShape(text: string, sourceText: string): boolean {
+  const normalized = text.trim()
+  if (!normalized) return false
+
+  const sourceLength = getMarkdownBodyLength(sourceText)
+  const bodyLength = getMarkdownBodyLength(normalized)
+  const minLength = sourceLength < 120
+    ? Math.max(16, Math.floor(sourceLength * 0.3))
+    : Math.floor(sourceLength * 0.25)
+  return bodyLength >= minLength
+}
+
+function formatCorrectedTranscript(title: string, text: string): string {
+  const normalized = text.trim()
+  if (normalized.includes('## 完整文稿')) return normalized
+  return [
+    `# ${title} 校正文稿`,
+    '',
+    '## 完整文稿',
+    '',
+    normalized,
+  ].join('\n')
+}
+
+function hasStructuredTranscriptShape(text: string, correctedTranscript: string): boolean {
+  const normalized = text.trim()
+  if (!normalized) return false
+  const sectionCount = normalized.match(/^##\s+/gm)?.length || 0
+  if (sectionCount < 1) return false
+
+  const referenceLength = getMarkdownBodyLength(correctedTranscript)
+  const structuredLength = getMarkdownBodyLength(normalized)
+  const minLength = referenceLength < 120
+    ? Math.max(30, Math.floor(referenceLength * 0.5))
+    : Math.floor(referenceLength * 0.45)
+  return structuredLength >= minLength
 }
 
 function readAIConfig(): AIModelConfig | null {
@@ -123,6 +189,80 @@ export class RSSSubagentRunner {
     }
   }
 
+  async buildCopyDeliverables(input: CopySummaryInput): Promise<CopyDeliverables> {
+    const correctedTranscript = await this.correctCopyTranscript(input)
+    const report = await this.summarizeCopy({
+      ...input,
+      extractedText: correctedTranscript,
+    })
+    const structuredTranscript = await this.structureCopyTranscript({
+      ...input,
+      correctedTranscript,
+      report,
+    })
+    return { correctedTranscript, structuredTranscript, report }
+  }
+
+  private async correctCopyTranscript(input: CopySummaryInput): Promise<string> {
+    const text = await this.complete({
+      system: [
+        '你是短视频文稿校正助手。',
+        '只输出 Markdown；保留原意和口语风格，不增加原文没有的信息。',
+        '重点修正 ASR 同音字、错别字、断句和标点。',
+      ].join(''),
+      user: [
+        `标题: ${input.title}`,
+        `链接: ${input.link}`,
+        input.source ? `来源账号: ${input.source}` : '',
+        '',
+        '原始转录文本:',
+        clipText(input.extractedText, 8_000),
+        '',
+        '请输出一份校正文稿，格式必须为：',
+        `# ${input.title} 校正文稿`,
+        '',
+        '## 完整文稿',
+        '<校正后的完整口播文本>',
+      ].filter(Boolean).join('\n'),
+      maxTokens: 1_600,
+      timeoutMs: 120_000,
+    })
+    if (hasCorrectedTranscriptShape(text, input.extractedText)) {
+      return formatCorrectedTranscript(input.title, text)
+    }
+
+    if (text) {
+      const retryText = await this.complete({
+        system: [
+          '你是短视频文稿校正助手。',
+          '只输出 Markdown；保留原意和口语风格，不增加原文没有的信息。',
+          '重点修正 ASR 同音字、错别字、断句和标点。',
+        ].join(''),
+        user: [
+          `标题: ${input.title}`,
+          `链接: ${input.link}`,
+          input.source ? `来源账号: ${input.source}` : '',
+          '',
+          '原始转录文本:',
+          clipText(input.extractedText, 8_000),
+          '',
+          '上一次输出不完整。请重新输出完整校正文稿，必须包含：',
+          `# ${input.title} 校正文稿`,
+          '',
+          '## 完整文稿',
+          '<校正后的完整口播文本>',
+        ].filter(Boolean).join('\n'),
+        maxTokens: 2_400,
+        timeoutMs: 150_000,
+      })
+      if (hasCorrectedTranscriptShape(retryText, input.extractedText)) {
+        return formatCorrectedTranscript(input.title, retryText)
+      }
+    }
+
+    throw new Error('文稿校正失败：AI 模型超时或返回内容不完整')
+  }
+
   async summarizeCopy(input: CopySummaryInput): Promise<string> {
     const user = [
       `标题: ${input.title}`,
@@ -137,70 +277,128 @@ export class RSSSubagentRunner {
       .filter(Boolean)
       .join('\n')
 
-    const text = await this.complete({
-      system:
-        [
-          '你是视频文案分析助手，严格对齐 video-copy-analyzer 的三维分析框架。',
-          '只输出 Markdown；保留事实，不虚构，不擅自重写原文内容。',
-          '优先做结构化分析与优化建议，不做大段改写。',
-        ].join(''),
-      user:
-        [
-          `${user}`,
-          '',
-          '请严格按以下标题输出（不可改名、不可缺失）：',
-          '## 一、TextContent Analysis 视角',
-          '- 叙事结构分析（开场/发展/高潮/转折/结尾）',
-          '- 叙事声音分析（基调/节奏/金句）',
-          '- 修辞手法识别（比喻/反转/呼应/隐喻）',
-          '- 词库提取（关键词 8-15 个）',
-          '',
-          '## 二、Viral-Abstract-Script 视角',
-          '- Viral-5D 诊断（Hook/Emotion/爆点/CTA/社交货币，分别 1-5 星并简评）',
-          '- 风格定位（2-4 个标签）',
-          '- 爆款潜力评估（完播率/互动率/转发率）',
-          '- 优化建议（1-3 条，必须可执行）',
-          '',
-          '## 三、Brainstorming 视角',
-          '- 核心价值拆解',
-          '- 创意方向探索（2-3 个）',
-          '- 增量验证点（2-4 个可测试项）',
-          '',
-          '要求：',
-          '- 全文中文；',
-          '- 保持原意，不做改写式重写；',
-          '- 每段简洁，避免空泛套话。',
-        ].join('\n'),
-      maxTokens: 900,
-    })
-    if (text) return text
-
-    return [
-      `# 文案分析报告`,
+    const system = [
+      '你是视频文案分析助手，严格对齐 video-copy-analyzer 的三维分析框架。',
+      '只输出 Markdown；保留事实，不虚构，不擅自重写原文内容。',
+      '优先做结构化分析与优化建议，不做大段改写。',
+    ].join('')
+    const summaryPrompt = [
+      `${user}`,
       '',
-      `- 标题：${input.title}`,
-      `- 链接：${input.link}`,
-      '',
+      '请严格按以下标题输出（不可改名、不可缺失）：',
       '## 一、TextContent Analysis 视角',
-      '- 叙事结构分析：自动分析降级，建议人工复核结构分段。',
-      '- 叙事声音分析：语料提取完成，但模型总结不可用。',
-      '- 修辞手法识别：请参考原始文本进行二次判断。',
-      `- 词库提取：${clipText(input.extractedText, 260)}`,
+      '- 叙事结构分析（开场/发展/高潮/转折/结尾）',
+      '- 叙事声音分析（基调/节奏/金句）',
+      '- 修辞手法识别（比喻/反转/呼应/隐喻）',
+      '- 词库提取（关键词 8-15 个）',
       '',
       '## 二、Viral-Abstract-Script 视角',
-      '- Viral-5D 诊断：自动诊断失败（降级）。',
-      '- 风格定位：待补充。',
-      '- 爆款潜力评估：待补充。',
-      '- 优化建议：先补齐上游分析结果后再生成。',
+      '- Viral-5D 诊断（Hook/Emotion/爆点/CTA/社交货币，分别 1-5 星并简评）',
+      '- 风格定位（2-4 个标签）',
+      '- 爆款潜力评估（完播率/互动率/转发率）',
+      '- 优化建议（1-3 条，必须可执行）',
       '',
       '## 三、Brainstorming 视角',
-      '- 核心价值拆解：待补充。',
-      '- 创意方向探索：待补充。',
-      '- 增量验证点：待补充。',
+      '- 核心价值拆解',
+      '- 创意方向探索（2-3 个）',
+      '- 增量验证点（2-4 个可测试项）',
       '',
-      '> 备注：自动分析失败，已降级为脚本提取结果。',
-      '',
+      '要求：',
+      '- 全文中文；',
+      '- 保持原意，不做改写式重写；',
+      '- 每段简洁，避免空泛套话。',
     ].join('\n')
+
+    const text = await this.complete({
+      system,
+      user: summaryPrompt,
+      maxTokens: 2_400,
+      timeoutMs: 150_000,
+    })
+    if (hasCompleteCopySummaryShape(text)) return text
+
+    if (text) {
+      const retryText = await this.complete({
+        system,
+        user: [
+          summaryPrompt,
+          '',
+          '上一次输出不完整。请重新输出一份完整报告，必须包含上述三个一级章节和每个章节下的所有条目。',
+        ].join('\n'),
+        maxTokens: 3_200,
+        timeoutMs: 180_000,
+      })
+      if (hasCompleteCopySummaryShape(retryText)) return retryText
+    }
+
+    throw new Error('文案分析失败：AI 模型超时或返回内容不完整')
+  }
+
+  private async structureCopyTranscript(input: CopySummaryInput & {
+    correctedTranscript: string
+    report: string
+  }): Promise<string> {
+    const text = await this.complete({
+      system: [
+        '你是短视频文稿结构化助手。',
+        '只输出 Markdown；按叙事逻辑分段，保留口语化表达。',
+        '不要新增原文没有的信息。',
+      ].join(''),
+      user: [
+        `标题: ${input.title}`,
+        '',
+        '校正文稿:',
+        clipText(input.correctedTranscript, 8_000),
+        '',
+        '分析报告:',
+        clipText(input.report, 6_000),
+        '',
+        '请输出结构化文字稿，格式必须为：',
+        `# ${input.title} 结构化文字稿`,
+        '',
+        '## 一、<段落标题>',
+        '<按语义分行后的文本>',
+        '',
+        '## 二、<段落标题>',
+        '<按语义分行后的文本>',
+      ].join('\n'),
+      maxTokens: 1_800,
+      timeoutMs: 120_000,
+    })
+    if (hasStructuredTranscriptShape(text, input.correctedTranscript)) return text
+
+    if (text) {
+      const retryText = await this.complete({
+        system: [
+          '你是短视频文稿结构化助手。',
+          '只输出 Markdown；按叙事逻辑分段，保留口语化表达。',
+          '不要新增原文没有的信息。',
+        ].join(''),
+        user: [
+          `标题: ${input.title}`,
+          '',
+          '校正文稿:',
+          clipText(input.correctedTranscript, 8_000),
+          '',
+          '分析报告:',
+          clipText(input.report, 6_000),
+          '',
+          '上一次输出不完整。请重新输出完整结构化文字稿，必须覆盖校正文稿的主要口播内容，并使用以下格式：',
+          `# ${input.title} 结构化文字稿`,
+          '',
+          '## 一、<段落标题>',
+          '<按语义分行后的文本>',
+          '',
+          '## 二、<段落标题>',
+          '<按语义分行后的文本>',
+        ].join('\n'),
+        maxTokens: 2_400,
+        timeoutMs: 150_000,
+      })
+      if (hasStructuredTranscriptShape(retryText, input.correctedTranscript)) return retryText
+    }
+
+    throw new Error('结构化文字稿生成失败：AI 模型超时或返回内容不完整')
   }
 
   async summarizeVisual(input: VisualSummaryInput): Promise<string> {
@@ -256,7 +454,7 @@ export class RSSSubagentRunner {
             system: request.system,
             messages: [{ role: 'user', content: request.user }],
           }),
-          signal: AbortSignal.timeout(40_000),
+          signal: AbortSignal.timeout(request.timeoutMs || 120_000),
         })
         if (!resp.ok) return ''
         const json = await resp.json()
@@ -287,7 +485,7 @@ export class RSSSubagentRunner {
             input: [{ role: 'user', content: [{ type: 'input_text', text: request.user }] }],
             max_output_tokens: request.maxTokens,
           }),
-          signal: AbortSignal.timeout(40_000),
+          signal: AbortSignal.timeout(request.timeoutMs || 120_000),
         })
         if (!resp.ok) return ''
         const json = await parseJsonOrEventStreamResponse(resp)
@@ -306,7 +504,7 @@ export class RSSSubagentRunner {
             { role: 'user', content: request.user },
           ],
         }),
-        signal: AbortSignal.timeout(40_000),
+        signal: AbortSignal.timeout(request.timeoutMs || 120_000),
       })
       if (!resp.ok) return ''
       const json = await resp.json()

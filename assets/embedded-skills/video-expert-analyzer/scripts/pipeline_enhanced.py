@@ -123,6 +123,7 @@ LOCAL_VIDEO_EXTENSIONS = {
 URL_SCHEME_PATTERN = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://")
 _FFMPEG_ENCODER_CACHE: Optional[set[str]] = None
 _UNAVAILABLE_SCENE_VIDEO_CODECS: set[str] = set()
+_YT_DLP_JS_RUNTIMES_SUPPORT_CACHE: Dict[Tuple[str, ...], bool] = {}
 
 
 @dataclass
@@ -685,13 +686,33 @@ def build_yt_dlp_command(*args: str) -> List[str]:
     Windows 上经常出现 yt-dlp 已通过 pip 安装、但命令未进入 PATH 的情况，
     这时自动回退到当前 Python 解释器里的 yt_dlp 模块。
     """
+    base_command = ["yt-dlp"] if shutil.which("yt-dlp") else [sys.executable, "-m", "yt_dlp"]
     runtime_args: List[str] = []
-    if shutil.which("node"):
+    if shutil.which("node") and yt_dlp_supports_js_runtimes(base_command):
         runtime_args = ["--js-runtimes", "node"]
+    return [*base_command, *runtime_args, *args]
 
-    if shutil.which("yt-dlp"):
-        return ["yt-dlp", *runtime_args, *args]
-    return [sys.executable, "-m", "yt_dlp", *runtime_args, *args]
+
+def yt_dlp_supports_js_runtimes(base_command: List[str]) -> bool:
+    cache_key = tuple(base_command)
+    cached = _YT_DLP_JS_RUNTIMES_SUPPORT_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    try:
+        result = subprocess.run(
+            [*base_command, "--help"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+    except Exception:
+        _YT_DLP_JS_RUNTIMES_SUPPORT_CACHE[cache_key] = False
+        return False
+
+    output = f"{result.stdout}\n{result.stderr}"
+    supported = result.returncode == 0 and "--js-runtimes" in output
+    _YT_DLP_JS_RUNTIMES_SUPPORT_CACHE[cache_key] = supported
+    return supported
 
 
 def get_video_info(url: str) -> Dict:
@@ -1236,7 +1257,8 @@ class VideoAnalysisPipeline:
         else:
             # 使用yt-dlp下载其他平台视频
             cmd = build_yt_dlp_command(
-                "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+                "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
+                "--merge-output-format", "mp4",
                 "-o", str(self.video_path),
                 self.url,
             )

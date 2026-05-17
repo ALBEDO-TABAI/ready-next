@@ -734,6 +734,48 @@ def auto_fill_pending_batches(
     }
 
 
+def _collect_auto_scoring_errors(video_dir: Path) -> List[str]:
+    errors: List[str] = []
+    host_dir = video_dir / "host_batches"
+    if not host_dir.exists():
+        return errors
+    for output_path in sorted(host_dir.glob("batch-*-output.json")):
+        payload = _read_json(output_path, {})
+        receipt = payload.get("receipt") if isinstance(payload, dict) else None
+        if not isinstance(receipt, dict):
+            continue
+        needs_review = receipt.get("needs_review")
+        if not isinstance(needs_review, list):
+            continue
+        for item in needs_review:
+            if isinstance(item, dict):
+                error = str(item.get("error", "") or "").strip()
+                if error:
+                    errors.append(error)
+    return errors
+
+
+def summarize_auto_scoring_blocker(video_dir: Path, failed_scenes: int) -> str:
+    errors = _collect_auto_scoring_errors(video_dir)
+    joined = "\n".join(errors).lower()
+    if "no endpoints found that support image input" in joined or "support image input" in joined:
+        return (
+            f"当前视觉评分模型或接口不支持图片输入，{failed_scenes} 个场景未能评分；"
+            "请切换到支持图像输入的模型/endpoint 后重试。"
+        )
+    if "401" in joined or "unauthorized" in joined or "invalid api key" in joined:
+        return (
+            f"当前视觉评分接口鉴权失败，{failed_scenes} 个场景未能评分；"
+            "请检查 API key、账号权限或模型访问权限。"
+        )
+    if "rate limit" in joined or "429" in joined:
+        return (
+            f"当前视觉评分接口触发限流，{failed_scenes} 个场景未能评分；"
+            "请稍后重试或降低并发。"
+        )
+    return f"自动并行评分仍有 {failed_scenes} 个场景失败，请检查 host_batches 输出"
+
+
 def resolve_stage(mode: str, scores_path: Path) -> str:
     if mode in {"host", "agent"}:
         return "score_batches"
@@ -1355,9 +1397,10 @@ def auto_score_scenes(
                     blocking_problems = resource_problems + packet_problems
                     finalize_problems = validate_finalize_readiness(video_analysis_dir, data) if not next_batch else []
                     if int(auto_summary.get("failed_scenes", 0) or 0) > 0:
-                        blocking_problems.append(
-                            f"自动并行评分仍有 {int(auto_summary.get('failed_scenes', 0) or 0)} 个场景失败，请检查 host_batches 输出"
-                        )
+                        blocking_problems.append(summarize_auto_scoring_blocker(
+                            video_analysis_dir,
+                            int(auto_summary.get("failed_scenes", 0) or 0),
+                        ))
                     elif auto_summary.get("scored_scene_numbers"):
                         validation_summary = run_auto_scoring_validation(
                             scores_path,

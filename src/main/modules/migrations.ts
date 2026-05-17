@@ -308,8 +308,7 @@ const migrations: Migration[] = [
           created_at TEXT NOT NULL,
           started_at TEXT,
           updated_at TEXT NOT NULL,
-          finished_at TEXT,
-          FOREIGN KEY (item_id) REFERENCES rss_items(id) ON DELETE CASCADE
+          finished_at TEXT
         )
       `)
       db.exec(
@@ -1887,6 +1886,56 @@ const migrations: Migration[] = [
         ALTER TABLE calendar_events ADD COLUMN source_id TEXT;
         CREATE INDEX IF NOT EXISTS idx_events_ics_uid ON calendar_events(ics_uid);
         CREATE INDEX IF NOT EXISTS idx_events_source_id ON calendar_events(source_id);
+      `)
+    }
+  },
+
+  // ------------------------------------------------------------------ 041
+  // RSS analysis jobs can now be launched from browser tabs as well as true
+  // RSS items. Keep `item_id` as the UI correlation key, but do not require it
+  // to exist in `rss_items`, otherwise browser-tab analysis fails at job create.
+  {
+    name: '041_relax_rss_analysis_item_fk',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE rss_analysis_jobs_new (
+          id TEXT PRIMARY KEY,
+          item_id TEXT NOT NULL,
+          action TEXT NOT NULL,
+          source_url TEXT NOT NULL,
+          title TEXT NOT NULL,
+          target_dir TEXT NOT NULL,
+          output_dir TEXT NOT NULL,
+          report_path TEXT,
+          status TEXT NOT NULL,
+          progress INTEGER NOT NULL DEFAULT 0,
+          message TEXT,
+          error TEXT,
+          meta_json TEXT,
+          created_at TEXT NOT NULL,
+          started_at TEXT,
+          updated_at TEXT NOT NULL,
+          finished_at TEXT
+        );
+
+        INSERT INTO rss_analysis_jobs_new (
+          id, item_id, action, source_url, title, target_dir, output_dir,
+          report_path, status, progress, message, error, meta_json,
+          created_at, started_at, updated_at, finished_at
+        )
+        SELECT
+          id, item_id, action, source_url, title, target_dir, output_dir,
+          report_path, status, progress, message, error, meta_json,
+          created_at, started_at, updated_at, finished_at
+        FROM rss_analysis_jobs;
+
+        DROP TABLE rss_analysis_jobs;
+        ALTER TABLE rss_analysis_jobs_new RENAME TO rss_analysis_jobs;
+
+        CREATE INDEX IF NOT EXISTS idx_rss_analysis_item_updated
+          ON rss_analysis_jobs(item_id, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_rss_analysis_status_updated
+          ON rss_analysis_jobs(status, updated_at DESC);
       `)
     }
   }

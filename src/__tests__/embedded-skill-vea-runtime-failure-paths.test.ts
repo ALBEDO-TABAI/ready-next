@@ -20,6 +20,14 @@ const READY_COMPAT = join(
   'scripts',
   'ready_compat.py',
 )
+const PIPELINE_ENHANCED = join(
+  REPO_ROOT,
+  'assets',
+  'embedded-skills',
+  'video-expert-analyzer',
+  'scripts',
+  'pipeline_enhanced.py',
+)
 const VEA_STATUS_DETECTION: SkillHostRequirements = {
   manifest_version: 1,
   status_detection: {
@@ -42,6 +50,73 @@ async function withRunState(
     rmSync(outputDir, { recursive: true, force: true })
   }
 }
+
+function runYtDlpCommandProbe(helpText: string): string[] {
+  const root = mkdtempSync(join(tmpdir(), 'vea-ytdlp-probe-'))
+  try {
+    const binDir = join(root, 'bin')
+    mkdirSync(binDir, { recursive: true })
+    const ytdlp = join(binDir, 'yt-dlp')
+    const node = join(binDir, 'node')
+    const harness = join(root, 'harness.py')
+    writeFileSync(ytdlp, [
+      '#!/bin/sh',
+      'if [ "$1" = "--help" ]; then',
+      `  printf '%s\\n' ${JSON.stringify(helpText)}`,
+      '  exit 0',
+      'fi',
+      'printf "%s\\n" "$@"',
+      '',
+    ].join('\n'), 'utf8')
+    writeFileSync(node, '#!/bin/sh\nexit 0\n', 'utf8')
+    chmodSync(ytdlp, 0o755)
+    chmodSync(node, 0o755)
+    writeFileSync(harness, [
+      'import importlib.util, json, sys, types',
+      'download_douyin = types.SimpleNamespace(is_douyin_url=lambda _url: False, download_douyin_video=lambda *_args: False)',
+      'sys.modules["download_douyin"] = download_douyin',
+      'sys.modules["detailed_report_builder"] = types.SimpleNamespace(generate_detailed_analysis_outputs=lambda *_args, **_kwargs: {})',
+      'sys.modules["motion_analysis"] = types.SimpleNamespace(build_frame_sample_paths=lambda *_args, **_kwargs: [], extract_scene_sample_frames=lambda *_args, **_kwargs: [], ffmpeg_hwaccel_args=lambda *_args, **_kwargs: [], probe_duration_seconds=lambda *_args, **_kwargs: 0)',
+      'sys.modules["storyboard_generator"] = types.SimpleNamespace(scene_has_complete_analysis=lambda *_args, **_kwargs: False)',
+      'sys.modules["run_state"] = types.SimpleNamespace(mark_stage=lambda *_args, **_kwargs: None, reset_run_state=lambda *_args, **_kwargs: None)',
+      'class DummyLogger:',
+      '    def __getattr__(self, _name):',
+      '        return lambda *_args, **_kwargs: None',
+      'sys.modules["logger"] = types.SimpleNamespace(get_logger=lambda _name: DummyLogger())',
+      `spec = importlib.util.spec_from_file_location("pipeline_enhanced", ${JSON.stringify(PIPELINE_ENHANCED)})`,
+      'module = importlib.util.module_from_spec(spec)',
+      'assert spec.loader is not None',
+      'sys.modules["pipeline_enhanced"] = module',
+      'spec.loader.exec_module(module)',
+      'print(json.dumps(module.build_yt_dlp_command("--version")))',
+      '',
+    ].join('\n'), 'utf8')
+    const stdout = execFileSync('python3', [harness], {
+      encoding: 'utf8',
+      env: {
+        ...process.env,
+        PATH: `${binDir}:${process.env.PATH || ''}`,
+      },
+    })
+    return JSON.parse(stdout.trim()) as string[]
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+}
+
+test('VEA yt-dlp command skips --js-runtimes when the installed yt-dlp does not support it', () => {
+  const command = runYtDlpCommandProbe('Usage: yt-dlp [OPTIONS] URL')
+
+  assert.equal(command.includes('--js-runtimes'), false)
+  assert.deepEqual(command.slice(-1), ['--version'])
+})
+
+test('VEA yt-dlp command includes --js-runtimes only when yt-dlp advertises it', () => {
+  const command = runYtDlpCommandProbe('Usage: yt-dlp [OPTIONS] URL\\n    --js-runtimes RUNTIMES')
+
+  assert.equal(command.includes('--js-runtimes'), true)
+  assert.deepEqual(command.slice(-2), ['node', '--version'])
+})
 
 test('VEA ready_compat writes blocked structured result from run_state even when subprocess exits 0', () => {
   const root = mkdtempSync(join(tmpdir(), 'vea-compat-'))

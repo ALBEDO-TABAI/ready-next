@@ -19,6 +19,10 @@ import {
   resolveMarkdownLineFromAnchor,
   type DocumentScrollAnchorSnapshot,
 } from '../../modules/document/documentScrollAnchor'
+import {
+  isReloadableTextDocumentPath,
+  shouldRefreshDocumentTabForDirectoryChange,
+} from '../../modules/document/documentExternalRefresh'
 import { getFileExtension } from '../../utils/path'
 import { isEbookExtension } from '../../../shared/ebook'
 
@@ -267,7 +271,7 @@ export default function DocumentMode({
   const {
     tabs, activeTabId, splitTabId, documentSplitRatio,
     openTab, closeTab, setActiveTab, setSplitTab, setDocumentSplitRatio,
-    reorderTabs,
+    reorderTabs, updateTabContent, markTabSaved,
   } = useDocTabs()
 
   const splitContainerRef = useRef<HTMLDivElement>(null)
@@ -333,6 +337,43 @@ export default function DocumentMode({
     tabs.forEach((tab) => next.set(tab.path || tab.id, tab))
     return next
   }, [tabs])
+
+  const refreshCleanTextTabsFromDisk = useCallback(async (candidateTabs: DocTab[]) => {
+    if (!window.electronAPI?.document?.readFile) return
+    for (const candidate of candidateTabs) {
+      if (!candidate.path || candidate.isDirty || !isReloadableTextDocumentPath(candidate.path)) continue
+      const result = await window.electronAPI.document.readFile(candidate.path).catch(() => null)
+      if (!result?.success) continue
+      const current = useDocTabs.getState().tabs.find((item) => item.id === candidate.id)
+      if (!current || current.path !== candidate.path || current.isDirty) continue
+      const nextContent = result.content || ''
+      if (current.content === nextContent) continue
+      updateTabContent(current.id, nextContent)
+      markTabSaved(current.id)
+    }
+  }, [markTabSaved, updateTabContent])
+
+  useEffect(() => {
+    if (!isActive) return
+    const visibleTabs = [activeTab, splitTab].filter((tab): tab is DocTab => Boolean(tab))
+    void refreshCleanTextTabsFromDisk(visibleTabs)
+  }, [activeTab?.id, isActive, refreshCleanTextTabsFromDisk, splitTab?.id])
+
+  useEffect(() => {
+    if (!window.electronAPI?.document?.onDirectoryChange) return undefined
+    const unsubscribe = window.electronAPI.document.onDirectoryChange((event) => {
+      const changedPaths = Array.isArray(event?.paths) ? event.paths : []
+      if (changedPaths.length === 0) return
+      const candidates = useDocTabs
+        .getState()
+        .tabs
+        .filter((tab) => shouldRefreshDocumentTabForDirectoryChange(tab, changedPaths))
+      if (candidates.length > 0) {
+        void refreshCleanTextTabsFromDisk(candidates)
+      }
+    })
+    return () => unsubscribe()
+  }, [refreshCleanTextTabsFromDisk])
 
   const captureVisibleDocumentScrollPositions = useCallback((options?: { includeAnchor?: boolean }) => {
     document.querySelectorAll<HTMLElement>('[data-ready-document-scroll-key]').forEach((scope) => {

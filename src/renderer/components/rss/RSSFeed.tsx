@@ -5,7 +5,6 @@ import {
   Plus,
   Sparkles,
   ChevronDown,
-  ArrowDownToLine,
   Check,
   CircleDashed,
   Loader2,
@@ -96,7 +95,6 @@ interface RSSFeedProps {
   onMarkItemRead: (itemId: string) => void
   onToggleStar: (itemId: string) => void
   onDeleteItem: (itemId: string) => void
-  onDownloadItem: (item: RSSItem) => Promise<boolean> | boolean
   onOpenAnalysisOutput: (itemId: string) => void
   onRefresh: () => void
   onAddSource: () => void
@@ -214,7 +212,6 @@ export default function RSSFeed({
   onMarkItemRead,
   onToggleStar,
   onDeleteItem,
-  onDownloadItem,
   onOpenAnalysisOutput,
   onRefresh,
   onAddSource,
@@ -223,7 +220,6 @@ export default function RSSFeed({
   onResumeAnalysisJob,
   onDeleteAnalysisJob,
 }: RSSFeedProps) {
-  const [, setDownloadedItemIds] = useState<Set<string>>(new Set())
   const [taskMenuOpen, setTaskMenuOpen] = useState(false)
 
   // Apply filters
@@ -741,24 +737,6 @@ export default function RSSFeed({
                             item.read ? 'text-[var(--color-green)]' : 'text-[var(--text-muted)]'
                           }`}
                         />
-                      </button>
-                      <button
-                        onClick={async (e) => {
-                          e.stopPropagation()
-                          const ok = await onDownloadItem(item)
-                          if (ok) {
-                            setDownloadedItemIds((prev) => {
-                              if (prev.has(item.id)) return prev
-                              const next = new Set(prev)
-                              next.add(item.id)
-                              return next
-                            })
-                          }
-                        }}
-                        className="h-7 w-7 rounded-md hover:bg-[var(--bg-hover)] transition-colors flex items-center justify-center"
-                        title="选择目录并下载内容（后续完善）"
-                      >
-                        <ArrowDownToLine className="w-[16px] h-[16px] text-[var(--text-muted)]" />
                       </button>
                       <button
                         onClick={(e) => {

@@ -117,19 +117,44 @@ interface SetRssItemDragInput {
   publishedAt?: string
 }
 
-let activeRssItemDragPayload: RSSItemDragPayload | null = null
+/**
+ * Defensive TTL for the RSS drag session global. RSSFeed's `onDragEnd`
+ * handler clears the state on a normal drag end, but the handler does not
+ * fire if the source element unmounts mid-drag (route change, list refresh,
+ * filter re-render). Without a TTL the leaked payload would surface on
+ * subsequent unrelated drags (e.g. desktop file drop) via the fallback in
+ * `getExternalDropPayload`, incorrectly opening the RSS/web-clip menu.
+ * 60 seconds is well beyond any realistic drag duration.
+ */
+const RSS_DRAG_TTL_MS = 60_000
+
+interface ActiveRssDragRecord {
+  payload: RSSItemDragPayload
+  createdAt: number
+}
+
+let activeRssItemDragRecord: ActiveRssDragRecord | null = null
 
 export function beginRssItemDragSession(payload: RSSItemDragPayload): void {
-  activeRssItemDragPayload = { ...payload }
+  activeRssItemDragRecord = { payload: { ...payload }, createdAt: Date.now() }
 }
 
 export function getActiveRssItemDragPayload(): RSSItemDragPayload | null {
-  if (!activeRssItemDragPayload) return null
-  return { ...activeRssItemDragPayload }
+  if (!activeRssItemDragRecord) return null
+  if (Date.now() - activeRssItemDragRecord.createdAt > RSS_DRAG_TTL_MS) {
+    activeRssItemDragRecord = null
+    return null
+  }
+  return { ...activeRssItemDragRecord.payload }
 }
 
 export function endRssItemDragSession(): void {
-  activeRssItemDragPayload = null
+  activeRssItemDragRecord = null
+}
+
+/** Test-only: probe whether the TTL has cleared the session. */
+export function __rssDragSessionAgeMs(): number | null {
+  return activeRssItemDragRecord ? Date.now() - activeRssItemDragRecord.createdAt : null
 }
 
 export function setRssItemDragPayload(event: React.DragEvent, item: SetRssItemDragInput): void {
@@ -257,12 +282,69 @@ export interface FileTreeExternalDropPlaceholderPatch {
   errorMessage?: string
 }
 
+export type FileTreeAnalysisPlaceholderStatus =
+  | 'queued'
+  | 'paused'
+  | 'running_script'
+  | 'running_subagent'
+  | 'success'
+  | 'failed'
+  | 'skipped'
+
+export interface FileTreeAnalysisPlaceholder {
+  taskId: string
+  itemId: string
+  action: 'copy' | 'visual'
+  targetDir: string
+  urlHost: string
+  title: string
+  status: FileTreeAnalysisPlaceholderStatus
+  progress: number
+  message?: string | null
+  jobId?: string
+  outputDir?: string
+  reportPath?: string | null
+  copiedPath?: string
+  errorMessage?: string
+  createdAt: number
+}
+
+export interface FileTreeAnalysisPlaceholderPatch {
+  status?: FileTreeAnalysisPlaceholderStatus
+  progress?: number
+  message?: string | null
+  jobId?: string
+  outputDir?: string
+  reportPath?: string | null
+  copiedPath?: string
+  errorMessage?: string
+}
+
+export type FileTreeStudyPlaceholderStatus =
+  | 'waiting_for_clip'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'skipped'
+
+export interface FileTreeStudyPlaceholderPatch {
+  status?: FileTreeStudyPlaceholderStatus
+  copiedPath?: string
+  errorMessage?: string
+}
+
 export interface DispatchFileTreeExternalDropArgs {
   payload: FileTreeExternalDropPayload
   action: FileTreeExternalDropAction
   target: FileTreeDropTarget
   onPlaceholderStart?: (placeholder: FileTreeExternalDropPlaceholder) => void
   onPlaceholderUpdate?: (taskId: string, patch: FileTreeExternalDropPlaceholderPatch) => void
+  /** Optional separate callbacks for the study-side placeholder (used by
+   * the 'content-study' action which produces two placeholders). */
+  onStudyPlaceholderStart?: (placeholder: FileTreeExternalDropPlaceholder) => void
+  onStudyPlaceholderUpdate?: (taskId: string, patch: FileTreeStudyPlaceholderPatch) => void
+  onAnalysisPlaceholderStart?: (placeholder: FileTreeAnalysisPlaceholder) => void
+  onAnalysisPlaceholderUpdate?: (taskId: string, patch: FileTreeAnalysisPlaceholderPatch) => void
 }
 
 export async function dispatchFileTreeExternalDropAction({
@@ -271,16 +353,69 @@ export async function dispatchFileTreeExternalDropAction({
   target,
   onPlaceholderStart,
   onPlaceholderUpdate,
+  onStudyPlaceholderStart,
+  onStudyPlaceholderUpdate,
+  onAnalysisPlaceholderStart,
+  onAnalysisPlaceholderUpdate,
 }: DispatchFileTreeExternalDropArgs): Promise<void> {
-  if (action === 'content-study') {
-    alert('内容学习功能即将上线')
-    return
-  }
-
   const targetDir =
     target.kind === 'inside-directory' ? target.dirPath : target.containerPath
   const targetHint =
     target.kind === 'inside-directory' ? target.itemPath : target.anchorPath
+
+  if (action === 'content-study') {
+    const url = payload.type === 'browser-tab' ? payload.url : payload.link
+    const titleRaw =
+      payload.type === 'browser-tab'
+        ? payload.title
+        : payload.title || payload.name
+    const rng = Math.random().toString(16).slice(2, 8)
+    const now = Date.now()
+    const clipTaskId = `client-${now}-${rng}-clip`
+    const studyTaskId = `client-${now}-${rng}-study`
+    let urlHost = ''
+    try {
+      urlHost = new URL(url).host || url
+    } catch {
+      urlHost = url
+    }
+    onPlaceholderStart?.({
+      taskId: clipTaskId,
+      targetDir,
+      urlHost,
+      title: titleRaw || urlHost,
+      status: 'running',
+      createdAt: now,
+    })
+    onStudyPlaceholderStart?.({
+      taskId: studyTaskId,
+      targetDir,
+      urlHost,
+      title: titleRaw || urlHost,
+      status: 'running',
+      createdAt: now,
+    })
+    try {
+      const ack = await window.electronAPI?.browser?.contentStudyDraggedTab?.({
+        url,
+        title: titleRaw,
+        target_hint: targetHint,
+        target_dir: targetDir,
+        client_task_id_clip: clipTaskId,
+        client_task_id_study: studyTaskId,
+      })
+      if (!ack?.ok) {
+        const msg = ack?.errorDetail?.message ?? '内容学习启动失败'
+        onPlaceholderUpdate?.(clipTaskId, { status: 'failed', errorMessage: msg })
+        onStudyPlaceholderUpdate?.(studyTaskId, { status: 'failed', errorMessage: msg })
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      onPlaceholderUpdate?.(clipTaskId, { status: 'failed', errorMessage: msg })
+      onStudyPlaceholderUpdate?.(studyTaskId, { status: 'failed', errorMessage: msg })
+    }
+    return
+  }
 
   if (action === 'web-clip') {
     const url = payload.type === 'browser-tab' ? payload.url : payload.link
@@ -346,19 +481,66 @@ export async function dispatchFileTreeExternalDropAction({
           publishedAt: undefined as string | undefined,
         }
 
+  const now = Date.now()
+  const clientTaskId = `client-${now}-${Math.random().toString(16).slice(2, 8)}-${mappedAction}-analysis`
+  let urlHost = ''
+  try {
+    urlHost = new URL(baseParams.link).host || baseParams.link
+  } catch {
+    urlHost = baseParams.link
+  }
+  onAnalysisPlaceholderStart?.({
+    taskId: clientTaskId,
+    itemId: baseParams.itemId,
+    action: mappedAction,
+    targetDir,
+    urlHost,
+    title: baseParams.title || urlHost,
+    status: 'queued',
+    progress: 3,
+    message: '正在提交后台任务',
+    createdAt: now,
+  })
+
   try {
     const result = await window.electronAPI?.rss?.startItemAnalysis?.({
       ...baseParams,
       action: mappedAction,
       targetDir,
     })
-    if (result && !result.success) {
-      console.error('[file-tree-external-drop] analysis failed', {
-        action,
-        error: result.error,
+    if (!result) {
+      onAnalysisPlaceholderUpdate?.(clientTaskId, {
+        status: 'failed',
+        progress: 0,
+        errorMessage: '当前环境暂不支持后台分析',
+      })
+      return
+    }
+    if (!result.success) {
+      onAnalysisPlaceholderUpdate?.(clientTaskId, {
+        status: 'failed',
+        progress: 0,
+        errorMessage: result.error || '分析启动失败',
+      })
+      return
+    }
+    if (result.data) {
+      onAnalysisPlaceholderUpdate?.(clientTaskId, {
+        jobId: result.data.id,
+        status: result.data.status,
+        progress: result.data.progress,
+        message: result.data.message,
+        outputDir: result.data.outputDir,
+        reportPath: result.data.reportPath,
+        copiedPath: result.data.reportPath || result.data.outputDir,
+        errorMessage: result.data.error || undefined,
       })
     }
   } catch (err) {
-    console.error('[file-tree-external-drop] analysis threw', err)
+    onAnalysisPlaceholderUpdate?.(clientTaskId, {
+      status: 'failed',
+      progress: 0,
+      errorMessage: err instanceof Error ? err.message : String(err),
+    })
   }
 }

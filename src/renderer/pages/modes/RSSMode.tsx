@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react'
 import { RefreshCw, AlertCircle, ExternalLink } from 'lucide-react'
 import RSSFeed from '../../components/rss/RSSFeed'
 import PreviewBrowser from '../../components/rss/PreviewBrowser'
@@ -12,6 +12,7 @@ import {
   WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM,
   WORKBENCH_CANVAS_OUTER_PADDING_TOP,
   WORKBENCH_CANVAS_OUTER_PADDING_X,
+  WORKBENCH_SUPPORT_PANEL_WIDTH,
 } from '../../modules/workbench/chrome'
 import { useBrowserTabs } from '../../stores/useBrowserTabs'
 import { useRSSSession } from '../../stores/useRSSSession'
@@ -20,6 +21,11 @@ import type { AddSourceSuccessInfo } from '../../components/rss/AddSourceModal'
 import type { RSSBrowserOpenActionData } from '../../modules/rss/types'
 
 const AUTO_REFRESH_INTERVAL = 15 * 60 * 1000 // 15 minutes
+
+const RSS_MODE_SHELL_STYLE = {
+  background: 'var(--workbench-module-surface-bg)',
+  '--workbench-support-panel-width': `${WORKBENCH_SUPPORT_PANEL_WIDTH}px`,
+} as CSSProperties & { '--workbench-support-panel-width': string }
 
 type RSSAnalysisStatus =
   | 'queued'
@@ -603,23 +609,6 @@ export default function RSSMode({
     [computeUnreadCounts],
   )
 
-  const handleDownloadItem = useCallback(async (item: RSSItem) => {
-    void item
-    if (!window.electronAPI?.document?.openFolder) {
-      setStatusMessage('当前环境暂不支持选择下载目录')
-      return false
-    }
-    const result = await window.electronAPI.document.openFolder()
-    if (!result.success || !result.path) {
-      if (result.error) {
-        setStatusMessage(`目录选择失败：${result.error}`)
-      }
-      return false
-    }
-    setStatusMessage(`已选择目录：${result.path}`)
-    return true
-  }, [])
-
   const handleOpenAnalysisOutput = useCallback(
     async (itemId: string) => {
       const progress = analysisProgressMap[itemId]
@@ -716,7 +705,7 @@ export default function RSSMode({
   }
 
   return (
-    <div className="workbench-mode-root rss-mode-shell" style={{ background: 'var(--workbench-module-surface-bg)' }}>
+    <div className="workbench-mode-root rss-mode-shell" style={RSS_MODE_SHELL_STYLE}>
       <div
         className="flex-1 min-h-0"
         style={{
@@ -729,7 +718,7 @@ export default function RSSMode({
         >
           {/* Feed list keeps its full width; preview floats above it */}
           <div
-            className="rss-feed-sheet content-surface-panel flex-1 overflow-hidden flex flex-col relative"
+            className={`rss-feed-sheet content-surface-panel flex-1 overflow-hidden flex flex-col relative`}
             style={{
               background: 'var(--workbench-module-surface-bg)',
             }}
@@ -753,7 +742,6 @@ export default function RSSMode({
               onMarkItemRead={handleMarkItemRead}
               onToggleStar={handleToggleStar}
               onDeleteItem={handleDeleteItem}
-              onDownloadItem={handleDownloadItem}
               onOpenAnalysisOutput={handleOpenAnalysisOutput}
               onRefresh={handleRefresh}
               onAddSource={handleAddSource}
