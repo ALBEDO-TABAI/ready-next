@@ -1,17 +1,44 @@
 import type { CalendarSource } from '../../components/calendar/CalendarSources'
 import type { CalendarEvent, ViewType } from '../../components/calendar/schedule-x-utils'
 import type { ModuleAgentActionHandler } from '../../utils/moduleAgentBridge'
+import type { Reminder } from '../../../shared/calendar-types'
 
+/**
+ * Structural subset of `ElectronCalendarAPI` that this agent handler
+ * needs. We mirror the optional-args shape that preload exposes so
+ * `window.electronAPI?.calendar` can be passed directly without a cast.
+ * The fields listed here are the ones L0 added to the LLM tool schema
+ * but that were silently dropped by the handler pre-fix.
+ */
+/**
+ * Structural subset of `ElectronCalendarAPI` that this agent handler
+ * needs. The optional fields mirror `CalendarCreateEventInput` in
+ * `electron.d.ts` so `window.electronAPI?.calendar` is assignable here
+ * without an unsafe cast — L0 added the location / allDay / reminders /
+ * recurrenceRule fields and pre-fix the handler dropped all of them.
+ */
 interface CalendarApi {
   getEvents: (start: Date, end: Date) => Promise<{ success?: boolean; error?: string; data?: unknown[] }>
   createEvent: (payload: {
     title: string
-    startTime: Date
-    endTime: Date
+    startTime: Date | number | string
+    endTime: Date | number | string
     calendarId: string
     description?: string
+    location?: string
+    allDay?: boolean
+    reminders?: Reminder[] | null
+    recurrenceRule?: string | null
+    startTz?: string | null
+    endTz?: string | null
+    // `[key: string]: unknown` mirrors electron.d.ts so callers may pass
+    // additional fields without TS narrowing them out.
+    [key: string]: unknown
   }) => Promise<{ success?: boolean; error?: string; data?: { id?: string } }>
-  updateEvent: (id: string, payload: Partial<CalendarEvent>) => Promise<{ success?: boolean; error?: string }>
+  // `updateEvent` accepts the renderer-view `Partial<CalendarEvent>` plus
+  // the wider preload-side payload. The cast in callers below narrows
+  // back to the exact preload-input shape where needed.
+  updateEvent: (id: string, payload: Partial<CalendarEvent> | Record<string, unknown>) => Promise<{ success?: boolean; error?: string }>
   deleteEvent: (id: string) => Promise<{ success?: boolean; error?: string }>
 }
 
@@ -29,6 +56,23 @@ export interface CalendarAgentHandlerDeps {
 }
 
 export function createCalendarAgentHandler(deps: CalendarAgentHandlerDeps): ModuleAgentActionHandler {
+  // Snapshot shape for `calendar.captureSession`. The agent uses this to
+  // see "what's currently on the calendar"; pre-fix the snapshot was
+  // missing every L0-L4 field added after the initial schema (location /
+  // reminders / recurrenceRule / instance-of), so the model could create
+  // an event with reminders + RRULE and then read back its own creation
+  // and not see them — the "agent creates complete events but cannot see
+  // them in the session" failure mode flagged in audit.
+  //
+  // **Deliberately OMITTED**: `startTz / endTz`. The L4 timezone work is
+  // explicitly degraded to "display-layer timezone only; event-level
+  // timezone NOT complete" (see `rrule-engine.ts` top docstring). Until
+  // event-level tz is real — i.e. EventModal can edit a per-event tz AND
+  // rrule expansion honors it for DST correctness — surfacing tz to the
+  // agent would invite the model to set / read a value the rest of the
+  // app cannot uphold. The locked behavior is enforced by
+  // `calendar-agent-snapshot-shape.test.ts`; bringing tz into the
+  // snapshot must update that test FIRST, then close the L4 gap.
   const serializeEvent = (event: CalendarEvent) => ({
     id: event.id,
     title: event.title,
@@ -37,7 +81,17 @@ export function createCalendarAgentHandler(deps: CalendarAgentHandlerDeps): Modu
     calendarId: event.calendarId,
     color: event.color,
     description: event.description ?? null,
+    location: event.location ?? null,
     allDay: event.allDay ?? false,
+    reminders: Array.isArray(event.reminders) ? event.reminders : null,
+    recurrenceRule: event.recurrenceRule ?? null,
+    /** When non-null, identifies this row as an expanded recurring
+     *  instance whose parent event lives at `instanceOf`. */
+    instanceOf: event.instanceOf ?? null,
+    occurrenceStart: typeof event.occurrenceStart === 'number'
+      ? event.occurrenceStart
+      : null,
+    overrideKind: event.overrideKind ?? null,
     contentType: event.contentType ?? null,
     platform: event.platform ?? null,
     publishStatus: event.publishStatus ?? null,
@@ -110,12 +164,28 @@ export function createCalendarAgentHandler(deps: CalendarAgentHandlerDeps): Modu
       if (!calendarId) {
         throw new Error('calendar.createEvent 缺少可用的 calendarId')
       }
+      // L0 expanded the LLM schema to include location / allDay / reminders /
+      // recurrenceRule but the handler was still forwarding only the original
+      // 5 fields, so models would "successfully create" an event while the
+      // location / reminders / recurrence vanished silently. Forward every
+      // schema-blessed field; preload re-validates with zod at the IPC
+      // boundary so loose typing here cannot corrupt the DB.
+      const remindersArg = Array.isArray(args.reminders)
+        ? (args.reminders as Reminder[])
+        : undefined
+      const recurrenceArg = typeof args.recurrenceRule === 'string' && args.recurrenceRule.trim().length > 0
+        ? args.recurrenceRule
+        : undefined
       const result = await deps.calendarApi?.createEvent({
         title,
         startTime,
         endTime,
         calendarId,
         description: typeof args.description === 'string' ? args.description : undefined,
+        location: typeof args.location === 'string' ? args.location : undefined,
+        allDay: typeof args.allDay === 'boolean' ? args.allDay : undefined,
+        reminders: remindersArg,
+        recurrenceRule: recurrenceArg,
       })
       if (!result?.success || !result.data?.id) {
         throw new Error(result?.error || '创建事件失败')
@@ -145,13 +215,25 @@ export function createCalendarAgentHandler(deps: CalendarAgentHandlerDeps): Modu
             : { hasConflict: false, reason: null },
         )
       }
-      const updatePayload: Partial<CalendarEvent> = {
+      // Same fix as createEvent above: forward every schema-blessed field
+      // so an "update reminders" or "change location" tool call actually
+      // reaches the DB rather than being silently dropped at the handler.
+      // `Partial<CalendarEvent>` is the renderer view-event type (Date /
+      // camelCase); the IPC layer's preload helper accepts a wider shape
+      // (reminders / recurrenceRule / allDay) so we cast via Record below.
+      const updatePayloadView: Partial<CalendarEvent> = {
         ...(typeof args.title === 'string' ? { title: args.title } : {}),
         ...(nextStart ? { startTime: nextStart } : {}),
         ...(nextEnd ? { endTime: nextEnd } : {}),
         ...(typeof args.description === 'string' ? { description: args.description } : {}),
+        ...(typeof args.location === 'string' ? { location: args.location } : {}),
+        ...(typeof args.allDay === 'boolean' ? { allDay: args.allDay } : {}),
+        ...(Array.isArray(args.reminders) ? { reminders: args.reminders as Reminder[] } : {}),
+        ...(typeof args.recurrenceRule === 'string'
+          ? { recurrenceRule: args.recurrenceRule.trim() || null }
+          : {}),
       }
-      const result = await deps.calendarApi?.updateEvent(id, updatePayload)
+      const result = await deps.calendarApi?.updateEvent(id, updatePayloadView)
       if (!result?.success) {
         throw new Error(result?.error || '更新事件失败')
       }

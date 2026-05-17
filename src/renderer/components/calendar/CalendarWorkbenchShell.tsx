@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, Info, Plus } from 'lucide-react'
 import MiniCalendar from './MiniCalendar'
 import CalendarSources, { type CalendarSource } from './CalendarSources'
 import CalendarViewSelector from './CalendarViewSelector'
+import CalendarTimezoneSelector from './CalendarTimezoneSelector'
 import { NewEventCard, NewEventMenu } from './NewEventMenu'
 import type { ViewType } from './schedule-x-utils'
 import {
@@ -43,12 +44,32 @@ interface CalendarWorkbenchShellProps {
   newEventCardType: string
   newEventCardDesc?: string
   sourcesForView: { id: string; name: string; color: string }[]
+  /**
+   * L4-A — IANA tz id (e.g. 'Asia/Shanghai'). Read from
+   * `useCalendarSession.displayTimezone`. The selector renders this in
+   * the toolbar; selecting a new zone fires `onDisplayTimezoneChange`.
+   */
+  displayTimezone: string
+  onDisplayTimezoneChange: (tz: string) => void
   onDateChange: (date: Date) => void
   onSelectDate: (date: Date) => void
   onToggleSource: (id: string) => void
   onAddSource: (source: CalendarSource) => void
   onUpdateSource: (id: string, updates: Partial<CalendarSource>) => void
   onDeleteSource: (id: string) => void
+  /**
+   * L4-B — when wired, surfaces the "导入 .ics 文件" + "订阅日历 URL"
+   * buttons in the sidebar (`CalendarSources` component) and the same
+   * actions inside the `NewEventMenu` dropdown.
+   */
+  onImportIcs?: (file: File) => void
+  onSubscribeUrl?: (payload: {
+    url: string
+    name: string
+    color: string
+    syncIntervalMinutes: number
+  }) => void
+  onSyncSourceNow?: (id: string) => void
   onOpenCreateMenu: () => void
   onViewTypeChange: (viewType: ViewType) => void
   onGoToToday: () => void
@@ -93,12 +114,17 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
     newEventCardType,
     newEventCardDesc,
     sourcesForView,
+    displayTimezone,
+    onDisplayTimezoneChange,
     onDateChange,
     onSelectDate,
     onToggleSource,
     onAddSource,
     onUpdateSource,
     onDeleteSource,
+    onImportIcs,
+    onSubscribeUrl,
+    onSyncSourceNow,
     onOpenCreateMenu,
     onViewTypeChange,
     onGoToToday,
@@ -177,6 +203,9 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
               onAddSource={onAddSource}
               onUpdateSource={onUpdateSource}
               onDeleteSource={onDeleteSource}
+              onImportIcs={onImportIcs}
+              onSubscribeUrl={onSubscribeUrl}
+              onSyncNow={onSyncSourceNow}
             />
           </div>
 
@@ -231,8 +260,43 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
                   <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-title)' }}>
                     {headerTitle}
                   </span>
+                  {isMock && (
+                    // L1-B-Mock-Surface — compact amber badge in the toolbar
+                    // so devs cannot mistake ENABLE_MOCK_SERVICES=true mock
+                    // data for real calendar data. Sits next to the date
+                    // title; the broader banner above explains the state in
+                    // a sentence.
+                    <span
+                      role="status"
+                      aria-label="演示数据模式"
+                      title="当前显示的是开发模拟数据，关闭 ENABLE_MOCK_SERVICES 环境变量后会显示真实日历"
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        height: 18,
+                        padding: '0 6px',
+                        borderRadius: 4,
+                        background: 'var(--color-orange-light)',
+                        border: '1px solid var(--color-orange)',
+                        color: 'var(--color-orange)',
+                        fontSize: 10,
+                        fontWeight: 700,
+                        letterSpacing: '0.04em',
+                        textTransform: 'uppercase',
+                        lineHeight: 1,
+                      }}
+                    >
+                      <Info style={{ width: 10, height: 10 }} />
+                      MOCK DATA
+                    </span>
+                  )}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                  <CalendarTimezoneSelector
+                    value={displayTimezone}
+                    onChange={onDisplayTimezoneChange}
+                  />
                   <CalendarViewSelector viewType={viewType} onViewTypeChange={onViewTypeChange} />
                   <button
                     onClick={onGoToToday}

@@ -17,6 +17,17 @@ import { setupDocumentIPC } from './modules/document-engine/ipc-handler'
 import { setupSearchIPC, shutdownFileWatchers } from './modules/search-engine/ipc-handler'
 import { setupRSSIPC, setRSSBrowserController } from './modules/rss-engine/ipc-handler'
 import { setupCalendarIPC } from './modules/calendar-engine/ipc-handler'
+import {
+  startReminderScheduler,
+  defaultScheduleAt,
+  type ReminderScheduler,
+} from './modules/calendar-engine/reminder-scheduler'
+import { createReminderNotifier } from './modules/calendar-engine/reminder-notifier'
+import { recoverMissedReminders } from './modules/calendar-engine/reminder-cold-start'
+import {
+  createSyncScheduler,
+  type SyncScheduler,
+} from './modules/calendar-engine/sync-scheduler'
 import { setupSettingsIPC } from './modules/settings-engine/ipc-handler'
 import { setupPetIPC } from './modules/pet/ipc-handler'
 import type { PetWindowManager } from './modules/pet/pet-window-manager'
@@ -76,6 +87,9 @@ const agentManager = new AgentManager(ENABLE_MOCK_SERVICES)
 let mainWindow: BrowserWindow | null = null
 let browserController: BrowserController | null = null
 let petWindowManager: PetWindowManager | null = null
+let reminderScheduler: ReminderScheduler | null = null
+let reminderNotifierFire: ((payload: import('./modules/calendar-engine/reminder-scheduler').ReminderFirePayload) => void) | null = null
+let calendarSyncScheduler: SyncScheduler | null = null
 // Guard to prevent re-registering window-dependent IPC handlers on macOS dock re-open
 let windowIPCRegistered = false
 const THEME_SETTING_KEY = 'ui_theme_option'
@@ -421,7 +435,94 @@ function setupGlobalIPC(): void {
   setupDocumentIPC(DOCUMENT_USE_MOCK)  // Always real fs
   setupSearchIPC()
   setupRSSIPC(RSS_USE_MOCK)
-  setupCalendarIPC(CALENDAR_USE_MOCK)
+  // Reminder runtime: notifier closes over the mainWindow accessor (window
+  // may be created after this point on cold start; closure defers reads).
+  // Scheduler reads from the DB and calls notifier.fire() when timers
+  // expire. The IPC handler notifies scheduler.onEventChanged() after
+  // each successful event mutation.
+  const reminderNotifier = createReminderNotifier({
+    getMainWindow: () => mainWindow,
+  })
+  reminderNotifierFire = (payload) => reminderNotifier.fire(payload)
+  reminderScheduler = startReminderScheduler({
+    getDb: () => getDatabase(),
+    now: () => Math.floor(Date.now() / 1000),
+    scheduleAt: defaultScheduleAt,
+    fire: (payload) => reminderNotifier.fire(payload),
+  })
+  // L4-B-External-Sync — periodic ICS subscription poller. Lives next
+  // to the reminder scheduler because both share the "in-memory
+  // setTimeout map + DI clock + scheduleAt" shape; one stop call kills
+  // both kinds of timers cleanly. Skip the construction entirely under
+  // mock mode so we don't reach into a non-existent DB on dev start.
+  if (!CALENDAR_USE_MOCK) {
+    calendarSyncScheduler = createSyncScheduler({
+      getSources: () => {
+        try {
+          // The repository.getSources() filter strips disabled rows,
+          // which is what we want — disabled subscriptions should not
+          // be re-polled. We narrow the row shape so the scheduler's
+          // TS contract is preserved (it only needs id / sync_url /
+          // sync_interval).
+          return getDatabase().getCalendarSources().map((s) => ({
+            id: s.id,
+            sync_url: s.sync_url,
+            sync_interval: s.sync_interval,
+          }))
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          console.warn('[sync-scheduler] getSources read failed:', message)
+          return []
+        }
+      },
+      fetchIcs: async (url: string) => {
+        // Node 18+ has a global `fetch`; Electron 34 inherits it. We
+        // set a UA so upstream servers can tell us apart from generic
+        // crawlers and apply less aggressive rate-limits where they
+        // distinguish (Google's iCal endpoints do this).
+        const res = await fetch(url, {
+          headers: { 'User-Agent': 'Ready-Calendar/1.0' },
+        })
+        if (!res.ok) {
+          throw new Error(`HTTP ${res.status} ${res.statusText}`)
+        }
+        return res.text()
+      },
+      importedEventsFor: (sourceId: string) => {
+        try {
+          return getDatabase().listImportedEventsForSource(sourceId)
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error)
+          console.warn(`[sync-scheduler] listImportedEventsForSource(${sourceId}) failed:`, message)
+          return []
+        }
+      },
+      upsertImportedEvent: (sourceId, ev) =>
+        getDatabase().upsertImportedEvent(sourceId, ev),
+      deleteImportedEvent: (sourceId, uid) =>
+        getDatabase().deleteImportedEvent(sourceId, uid),
+      onSourceSynced: (result) => {
+        // Telemetry hook — log line; tests rely on this not throwing.
+        if (result.ok) {
+          console.log(
+            `[sync-scheduler] ${result.sourceId} ok created=${result.eventsCreated} updated=${result.eventsUpdated} removed=${result.eventsRemoved}`,
+          )
+        } else {
+          console.warn(
+            `[sync-scheduler] ${result.sourceId} fail ${result.error}`,
+          )
+        }
+      },
+      now: () => Math.floor(Date.now() / 1000),
+      scheduleAt: defaultScheduleAt,
+    })
+  }
+  setupCalendarIPC(CALENDAR_USE_MOCK, {
+    onEventChanged: (eventId) => {
+      reminderScheduler?.onEventChanged(eventId)
+    },
+    syncScheduler: calendarSyncScheduler ?? undefined,
+  })
   setupSettingsIPC()
   petWindowManager = setupPetIPC({
     preloadPath: join(__dirname, '../preload/index.mjs'),
@@ -805,6 +906,41 @@ app.whenReady().then(() => {
   setupGlobalIPC()
   applyBundledAISettingsSeed()
 
+  // Reminder bootstrap: replay any missed reminders inside the grace window,
+  // then arm the live scheduler. Window creation is async, but the notifier
+  // closes over a deferred `getMainWindow` accessor so it's safe to fire
+  // here — IPC pushes will silently no-op until the window mounts, and
+  // missed-reminder OS notifications still surface via the system tray.
+  if (reminderScheduler && reminderNotifierFire) {
+    const scheduler = reminderScheduler
+    const fire = reminderNotifierFire
+    void recoverMissedReminders({
+      getDb: () => getDatabase(),
+      now: () => Math.floor(Date.now() / 1000),
+      fire,
+    }).then((summary) => {
+      console.log('[reminder-cold-start]', summary)
+    }).catch((err) => {
+      console.warn('[reminder-cold-start] recovery failed:', err)
+    })
+    void scheduler.rescheduleAll().catch((err) => {
+      console.warn('[reminder-scheduler] initial sweep failed:', err)
+    })
+  }
+
+  // L4-B — kick off the periodic ICS sync timers. The constructor is
+  // a no-op when no source has a sync_url; calling here is safe even
+  // for fresh installs. We wrap in try/catch so a startup misconfig
+  // (e.g. a bad URL recorded in a previous session) can't crash the
+  // app cold-start path.
+  if (calendarSyncScheduler) {
+    try {
+      calendarSyncScheduler.startPeriodic()
+    } catch (err) {
+      console.warn('[sync-scheduler] startPeriodic failed:', err)
+    }
+  }
+
   void createWindow().then(() => petWindowManager?.restoreIfEnabled())
 
   app.on('activate', function () {
@@ -831,6 +967,20 @@ app.on('before-quit', (event) => {
   if (isQuitting) return
   isQuitting = true
   event.preventDefault()
+  // Stop the reminder scheduler synchronously — it owns only in-process
+  // setTimeout handles, no IO or sidecar processes, so it's safe to run
+  // before the async cleanup chain. Doing it here prevents any timer that
+  // races the shutdown from trying to call into a half-destroyed mainWindow.
+  try {
+    reminderScheduler?.stop()
+  } catch (err) {
+    console.warn('[before-quit] reminderScheduler.stop threw:', err)
+  }
+  try {
+    calendarSyncScheduler?.stop()
+  } catch (err) {
+    console.warn('[before-quit] calendarSyncScheduler.stop threw:', err)
+  }
   void runBeforeQuitCleanup({
     cleanupAgentRuntime,
     cleanupAgentManager: () => agentManager.cleanup(),

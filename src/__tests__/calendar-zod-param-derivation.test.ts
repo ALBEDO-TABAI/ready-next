@@ -18,12 +18,24 @@ test('derives calendar_list_window params identical to legacy hand-rolled list',
 })
 
 test('derives calendar_create_event params identical to legacy hand-rolled list', () => {
+  // L0-Schema-Lock: this expected list mirrors `CalendarCreateEventSchema` —
+  // any addition there (reminders, recurrenceRule …) must be reflected here.
   const expected: SkillParamDefinition[] = [
     { name: 'title', type: 'string', description: '事件标题', required: true },
     { name: 'startTime', type: 'string', description: '开始时间 ISO 字符串', required: true },
     { name: 'endTime', type: 'string', description: '结束时间 ISO 字符串', required: true },
     { name: 'calendarId', type: 'string', description: '目标日历 ID', required: false },
     { name: 'description', type: 'string', description: '事件描述', required: false },
+    { name: 'location', type: 'string', description: '事件地点', required: false },
+    { name: 'allDay', type: 'boolean', description: '是否全天事件', required: false },
+    {
+      name: 'reminders',
+      type: 'array',
+      description: '提醒列表',
+      required: false,
+      items: { type: 'object' },
+    },
+    { name: 'recurrenceRule', type: 'string', description: 'RFC 5545 RRULE 字符串，描述循环规则', required: false },
   ]
   assert.deepEqual(zodObjectToParamList(CALENDAR_SCHEMAS.calendar_create_event), expected)
 })
@@ -35,6 +47,16 @@ test('derives calendar_update_event params identical to legacy hand-rolled list'
     { name: 'startTime', type: 'string', description: '可选，新的开始时间 ISO 字符串', required: false },
     { name: 'endTime', type: 'string', description: '可选，新的结束时间 ISO 字符串', required: false },
     { name: 'description', type: 'string', description: '可选，新的事件描述', required: false },
+    { name: 'location', type: 'string', description: '可选，新的事件地点', required: false },
+    { name: 'allDay', type: 'boolean', description: '可选，是否全天事件', required: false },
+    {
+      name: 'reminders',
+      type: 'array',
+      description: '可选，新的提醒列表（整组替换）',
+      required: false,
+      items: { type: 'object' },
+    },
+    { name: 'recurrenceRule', type: 'string', description: '可选，新的 RFC 5545 RRULE 字符串', required: false },
   ]
   assert.deepEqual(zodObjectToParamList(CALENDAR_SCHEMAS.calendar_update_event), expected)
 })

@@ -1,6 +1,15 @@
-import { app } from 'electron'
+import { app, BrowserWindow } from 'electron'
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
+// L5-C-Universal: channel-agnostic remote-message → calendar-event detector.
+// Imported here so the inbound-channel pipeline can opportunistically push
+// suggestions to the renderer without each adapter implementing detection.
+import { detectRemoteChannelEventSuggestions } from '../calendar-engine/remote-channel-event-detector'
+import {
+  REMOTE_CHANNEL_CALENDAR_POLICY_KEY,
+  type RemoteChannelKind,
+  type RemoteChannelMessage,
+} from '../../../shared/calendar-remote-channel'
 import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'fs'
 import { extname, isAbsolute, join } from 'path'
 import {
@@ -1774,6 +1783,74 @@ export class AgentControlRuntime extends EventEmitter {
     }
   }
 
+  /**
+   * L5-C-Universal — channel-agnostic calendar-event detection on
+   * inbound messages.
+   *
+   * Wired by `flushInboundChannel`. Best-effort by design:
+   *   - Reads channel kind + per-channel policy override from
+   *     `agent_channels` (a malformed `config_json` is treated as "no
+   *     override" — registry default wins).
+   *   - Runs the universal detector (chrono inside; channel kind is just
+   *     the dispatch label, not feishu-specific).
+   *   - Pushes each suggestion to the renderer via
+   *     `calendar:remoteEventSuggested`. The renderer dedupes by
+   *     `suggestionId` and shows a "create event?" prompt.
+   *
+   * Any thrown error is swallowed + logged: this enhancement must NEVER
+   * block the inbound conversation pipeline. If detection or IPC push
+   * fails, the user simply doesn't see a suggestion — the agent loop
+   * proceeds normally.
+   */
+  private maybeEmitRemoteCalendarSuggestions(
+    pending: {
+      channelId: string
+      thread: string
+      sender: string | null
+      eventIds: string[]
+    },
+    inboundText: string,
+  ): void {
+    try {
+      const channel = this.db.getAgentChannel(pending.channelId)
+      if (!channel) return
+      const channelKind = (channel.type ?? 'generic-webhook') as RemoteChannelKind
+      let autoDetectOverride: boolean | null = null
+      const rawConfig = (channel as { config_json?: string | null }).config_json
+      if (typeof rawConfig === 'string' && rawConfig.length > 0) {
+        try {
+          const parsed = JSON.parse(rawConfig) as Record<string, unknown>
+          const policy = parsed[REMOTE_CHANNEL_CALENDAR_POLICY_KEY]
+          if (policy && typeof policy === 'object') {
+            const v = (policy as Record<string, unknown>).autoDetectCalendarEvents
+            if (v === true || v === false) autoDetectOverride = v
+          }
+        } catch {
+          // Malformed config — treat as "no override"; registry default wins.
+        }
+      }
+      const message: RemoteChannelMessage = {
+        messageId: pending.eventIds[pending.eventIds.length - 1] ?? `channel-${Date.now()}`,
+        channelKind,
+        channelId: pending.channelId,
+        threadKey: pending.thread,
+        sender: pending.sender,
+        text: inboundText,
+        receivedAtUnix: Math.floor(Date.now() / 1000),
+      }
+      const suggestions = detectRemoteChannelEventSuggestions(message, { autoDetectOverride })
+      if (suggestions.length === 0) return
+      const mainWin = BrowserWindow.getAllWindows().find((w) => !w.isDestroyed())
+      if (!mainWin) return
+      for (const suggestion of suggestions) {
+        mainWin.webContents.send('calendar:remoteEventSuggested', suggestion)
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      console.warn('[runtime] remote-channel calendar detection swallowed:', message)
+    }
+  }
+
   private async flushInboundChannel(key: string): Promise<void> {
     const pending = this.pendingInboundChannels.get(key)
     if (!pending) return
@@ -1820,6 +1897,15 @@ export class AgentControlRuntime extends EventEmitter {
       scope: this.refreshScope(scope.id),
       message: inboundMessage
     })
+
+    // L5-C-Universal: opportunistically detect calendar events in this
+    // inbound message. Channel-agnostic — works for any
+    // `RemoteChannelKind` declared in the registry. Per-channel policy
+    // (registry default OR user override stored in
+    // `agent_channels.config_json.calendar.autoDetectCalendarEvents`)
+    // decides whether to scan at all. Failures are swallowed; this is a
+    // best-effort enhancement, not part of the conversation contract.
+    this.maybeEmitRemoteCalendarSuggestions(pending, inboundText)
 
     if (!mergedText) {
       this.markInboundChannelEvents(pending.eventIds, pending.channelId, 'done', null)

@@ -158,14 +158,14 @@ const agentAPI = {
     ipcRenderer.invoke('agent:respondToInteraction', payload),
   upsertChannel: (payload: {
     id?: string
-    type: 'local-debug' | 'generic-webhook' | 'feishu-bot' | 'feishu-app' | 'telegram-bot'
+    type: 'local-debug' | 'generic-webhook' | 'feishu-bot' | 'feishu-app' | 'telegram-bot' | 'wechat-openclaw'
     name: string
     enabled?: boolean
     config?: Record<string, unknown>
   }) => ipcRenderer.invoke('agent:upsertChannel', payload),
   testChannel: (payload: {
     id?: string
-    type: 'local-debug' | 'generic-webhook' | 'feishu-bot' | 'feishu-app' | 'telegram-bot'
+    type: 'local-debug' | 'generic-webhook' | 'feishu-bot' | 'feishu-app' | 'telegram-bot' | 'wechat-openclaw'
     name: string
     enabled?: boolean
     config?: Record<string, unknown>
@@ -649,6 +649,33 @@ const calendarAPI = {
     text: string
     referenceDate?: string | number
   }) => ipcRenderer.invoke('calendar:detectTimeExpressions', payload),
+
+  // L5-C-Universal — channel-agnostic "remote message → calendar event"
+  // detection. Adapter / sidecar code (feishu / telegram / imessage /
+  // discord / wechat / slack / generic-webhook) calls this with one
+  // `RemoteChannelMessage` envelope; the main side runs chrono + applies
+  // per-channel policy and returns suggestions. The renderer also
+  // subscribes to `onRemoteEventSuggested` for runtime.ts-pushed
+  // detections originating in the inbound-channel pipeline.
+  detectRemoteChannelEvent: (payload: {
+    message: import('../shared/calendar-remote-channel').RemoteChannelMessage
+    autoDetectOverride?: boolean | null
+    minConfidence?: 'high' | 'medium' | 'low'
+  }) => ipcRenderer.invoke('calendar:detectRemoteChannelEvent', payload),
+  listRemoteChannelEntries: () =>
+    ipcRenderer.invoke('calendar:listRemoteChannelEntries'),
+  onRemoteEventSuggested: (
+    handler: (suggestion: import('../shared/calendar-remote-channel').RemoteCalendarEventSuggestion) => void,
+  ) => {
+    const listener = (
+      _event: unknown,
+      suggestion: import('../shared/calendar-remote-channel').RemoteCalendarEventSuggestion,
+    ) => handler(suggestion)
+    ipcRenderer.on('calendar:remoteEventSuggested', listener)
+    return () => {
+      ipcRenderer.removeListener('calendar:remoteEventSuggested', listener)
+    }
+  },
 }
 
 // Skills Runtime API

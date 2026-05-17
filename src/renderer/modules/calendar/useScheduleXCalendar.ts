@@ -35,6 +35,16 @@ interface UseScheduleXCalendarParams {
   events: CalendarEvent[]
   eventsRef: React.MutableRefObject<CalendarEvent[]>
   enabledSourceIds: Set<string>
+  /**
+   * L4-A — IANA timezone id used for the schedule-x runtime's
+   * `timezone` config. When this changes, the hook mutates
+   * `app.$app.config.timezone.value` (the reactive seam schedule-x
+   * exposes — same pattern used for `calendars.value`).
+   * `null / undefined` falls back to `Intl` local at create time but
+   * the caller is expected to pass an explicit string from the
+   * `useCalendarSession` store.
+   */
+  displayTimezone: string
   handleOpenEditModal: (event: CalendarEvent) => void
   handleUpdateEvent: (id: string, updates: Partial<CalendarEvent>) => void
   onQuickCardRequest: (payload: { date: Date; hour?: number }) => void
@@ -49,6 +59,7 @@ export function useScheduleXCalendar({
   events,
   eventsRef,
   enabledSourceIds,
+  displayTimezone,
   handleOpenEditModal,
   handleUpdateEvent,
   onQuickCardRequest,
@@ -76,7 +87,14 @@ export function useScheduleXCalendar({
         isResponsive: false,
         selectedDate: toPlainDateLike(currentDate),
         dayBoundaries: { start: '06:00', end: '21:00' },
-        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        // L4-A — schedule-x supports `timezone` natively as a config
+        // value (`$app.config.timezone.value` is the reactive seam). We
+        // pass `displayTimezone` from the store; if for any reason it's
+        // empty (defensive), fall back to the user's local IANA zone.
+        timezone:
+          displayTimezone && displayTimezone.length > 0
+            ? displayTimezone
+            : Intl.DateTimeFormat().resolvedOptions().timeZone,
         callbacks: {
           onEventClick: (sxEvent: Record<string, unknown>) => {
             const original = eventsRef.current.find((e) => e.id === String(sxEvent.id))
@@ -190,6 +208,24 @@ export function useScheduleXCalendar({
       console.warn('SX calendars sync error:', err)
     }
   }, [isActive, sources, sxReady])
+
+  // L4-A — re-bind schedule-x's timezone when `displayTimezone` changes.
+  // schedule-x exposes a reactive `$app.config.timezone.value` (Vue
+  // signal-style) — mutating it in place re-renders month/week/day
+  // views in the new zone without tearing down the calendar app.
+  useEffect(() => {
+    const app = calendarAppRef.current
+    if (!app || !isActive) return
+    if (!displayTimezone || displayTimezone.length === 0) return
+    try {
+      const a = app as any
+      if (a.$app?.config?.timezone) {
+        a.$app.config.timezone.value = displayTimezone
+      }
+    } catch (err) {
+      console.warn('SX timezone sync error:', err)
+    }
+  }, [isActive, displayTimezone, sxReady])
 
   useEffect(() => {
     const plugin = controlsPluginRef.current

@@ -60,6 +60,7 @@ type ChannelAdapterType =
   | 'feishu-bot'
   | 'feishu-app'
   | 'telegram-bot'
+  | 'wechat-openclaw'
 
 interface AgentChannelConfigData {
   id: string
@@ -2296,6 +2297,46 @@ interface ElectronCalendarAPI {
   detectTimeExpressions: (
     payload: { text: string; referenceDate?: string | number }
   ) => Promise<CalendarResponse<CalendarDetectedTimeExpression[]>>
+
+  /**
+   * L5-C-Universal — detect calendar events in a single remote-channel
+   * message envelope. Channel-agnostic: works for feishu / telegram /
+   * imessage / discord / wechat / slack / generic-webhook (and any
+   * future adapter that produces a `RemoteChannelMessage`). The main
+   * side applies per-channel policy (registry default OR per-channel
+   * user override) and confidence filtering before returning. Returns
+   * `[]` whenever policy says "don't detect" — there is no separate
+   * error path for "channel disabled".
+   */
+  detectRemoteChannelEvent: (
+    payload: {
+      message: import('../../shared/calendar-remote-channel').RemoteChannelMessage
+      autoDetectOverride?: boolean | null
+      minConfidence?: 'high' | 'medium' | 'low'
+    }
+  ) => Promise<CalendarResponse<
+    import('../../shared/calendar-remote-channel').RemoteCalendarEventSuggestion[]
+  >>
+
+  /** Registry enumeration for the settings UI — one entry per known
+   *  remote channel kind (display name, icon hint, default policy). */
+  listRemoteChannelEntries: () => Promise<CalendarResponse<
+    Array<{
+      kind: import('../../shared/calendar-remote-channel').RemoteChannelKind
+      displayName: string
+      iconKey: string
+      autoDetectByDefault: boolean
+    }>
+  >>
+
+  /** Push subscription: the inbound-channel pipeline (runtime.ts) calls
+   *  this whenever a freshly-received remote message yields suggestions.
+   *  Returns an unsubscribe function. */
+  onRemoteEventSuggested: (
+    handler: (
+      suggestion: import('../../shared/calendar-remote-channel').RemoteCalendarEventSuggestion,
+    ) => void,
+  ) => () => void
 }
 
 /**

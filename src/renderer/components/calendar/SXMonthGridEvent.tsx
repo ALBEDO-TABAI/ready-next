@@ -1,5 +1,5 @@
 import { useCallback } from 'react'
-import { Video, Image as ImageIcon, FileText, BookOpen, Radio } from 'lucide-react'
+import { Video, Image as ImageIcon, FileText, BookOpen, Radio, MapPin } from 'lucide-react'
 import { useCalendarContext } from './CalendarContext'
 import { sxEventToEvent } from './schedule-x-utils'
 import type { CalendarEvent } from './schedule-x-utils'
@@ -42,6 +42,7 @@ export default function SXMonthGridEvent({ calendarEvent }: SXMonthGridEventProp
   const parsed = sxEventToEvent(calendarEvent)
   const eventColor = (calendarEvent.color as string) || '#5B8DEF'
   const contentType = (calendarEvent.contentType as string) || undefined
+  const location = ((calendarEvent.location as string) || '').trim()
   const platformStr = (calendarEvent.platform as string) || ''
   let platforms: string[] = []
   try {
@@ -62,13 +63,14 @@ export default function SXMonthGridEvent({ calendarEvent }: SXMonthGridEventProp
       calendarId: (calendarEvent.calendarId as string) || '',
       color: eventColor,
       description: parsed.description,
+      location: parsed.location || location || undefined,
       allDay: parsed.allDay,
       contentType: parsed.contentType,
       platform: platforms,
       publishStatus: parsed.publishStatus,
     }
     onEditEvent(event)
-  }, [calendarEvent, parsed, eventColor, platforms, onEditEvent])
+  }, [calendarEvent, parsed, eventColor, location, platforms, onEditEvent])
 
   const handleDragStart = useCallback((e: React.DragEvent<HTMLSpanElement>) => {
     e.stopPropagation()
@@ -82,6 +84,7 @@ export default function SXMonthGridEvent({ calendarEvent }: SXMonthGridEventProp
       calendarId: String(calendarEvent.calendarId || ''),
       color: eventColor,
       description: parsed.description || '',
+      location: location || '',
       contentType: parsed.contentType,
       platform: platforms,
       publishStatus: parsed.publishStatus,
@@ -90,7 +93,7 @@ export default function SXMonthGridEvent({ calendarEvent }: SXMonthGridEventProp
     e.dataTransfer.setData('application/x-ready-drag', payload)
     e.dataTransfer.setData('text/plain', parsed.title || '(无标题日程)')
     e.dataTransfer.effectAllowed = 'copy'
-  }, [calendarEvent.calendarId, calendarEvent.id, eventColor, parsed.contentType, parsed.description, parsed.endTime, parsed.publishStatus, parsed.startTime, parsed.title, platforms])
+  }, [calendarEvent.calendarId, calendarEvent.id, eventColor, location, parsed.contentType, parsed.description, parsed.endTime, parsed.publishStatus, parsed.startTime, parsed.title, platforms])
 
   return (
     <div

@@ -6,6 +6,7 @@ import { useWorkspace } from '../../stores/useWorkspace'
 import { useMode } from '../../stores/useMode'
 import { useBrowserTabs } from '../../stores/useBrowserTabs'
 import type { RSSItem } from './RSSFeed'
+import RssTimeHintBanner from './RssTimeHintBanner'
 
 interface PreviewBrowserProps {
   item: RSSItem
@@ -210,6 +211,17 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
             </span>
           </div>
         </div>
+        {/* L5-B — RSS → calendar event hint. Renders nothing when no
+            time expressions are detected; otherwise shows a small chip
+            that opens a "create event" modal pre-filled with the
+            recognised time and the article title. */}
+        <RssTimeHintBanner
+          itemId={item.id}
+          title={item.title}
+          summary={item.summary}
+          author={item.author}
+          publishedAt={item.publishedAt}
+        />
         <button
           onClick={handleOpenBrowserMode}
           className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg hover:bg-black/5 transition-colors text-[11px] text-[var(--text-muted)] ml-2"

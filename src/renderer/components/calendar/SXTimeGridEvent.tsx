@@ -1,8 +1,10 @@
 import { useState, useCallback, useRef, useEffect } from 'react'
-import { Video, Image as ImageIcon, FileText, BookOpen, Radio } from 'lucide-react'
+import { Video, Image as ImageIcon, FileText, BookOpen, Radio, MapPin } from 'lucide-react'
+import { Temporal } from '@js-temporal/polyfill'
 import { useCalendarContext } from './CalendarContext'
 import { sxEventToEvent } from './schedule-x-utils'
 import type { CalendarEvent } from './schedule-x-utils'
+import { useCalendarSession } from '../../stores/useCalendarSession'
 
 const CONTENT_TYPE_ICONS: Record<string, typeof Video> = {
   video: Video,
@@ -31,6 +33,12 @@ interface SXTimeGridEventProps {
  */
 export default function SXTimeGridEvent({ calendarEvent }: SXTimeGridEventProps) {
   const { onEditEvent, onUpdateEvent } = useCalendarContext()
+  // L4-A — read the user's display timezone so the inline HH:mm next to
+  // each event renders under the chosen zone, not the host's local zone.
+  // schedule-x's own time-grid axis labels still honor its `timezone`
+  // config (kept in sync by `useScheduleXCalendar`); this hook is for
+  // the custom event renderer we mount inside each time-grid cell.
+  const displayTimezone = useCalendarSession((state) => state.displayTimezone)
   const [isResizing, setIsResizing] = useState(false)
   const resizeRef = useRef<{
     startY: number
@@ -43,6 +51,7 @@ export default function SXTimeGridEvent({ calendarEvent }: SXTimeGridEventProps)
   const parsed = sxEventToEvent(calendarEvent)
   const eventColor = (calendarEvent.color as string) || '#5B8DEF'
   const contentType = (calendarEvent.contentType as string) || undefined
+  const location = ((calendarEvent.location as string) || '').trim()
   const platformStr = (calendarEvent.platform as string) || ''
   let platforms: string[] = []
   try {
@@ -54,9 +63,18 @@ export default function SXTimeGridEvent({ calendarEvent }: SXTimeGridEventProps)
 
   const ContentIcon = contentType ? CONTENT_TYPE_ICONS[contentType] : null
 
-  const formatTime = (date: Date | undefined) => {
+  // L4-A — render a Date under `displayTimezone` instead of host-local.
+  // Bad IANA strings fall back to host-local so the event card never
+  // becomes unrenderable; an invalid zone is the user's input mistake
+  // and the toolbar selector should be the only way to set it anyway.
+  const formatTime = (date: Date | undefined): string => {
     if (!date) return ''
-    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+    try {
+      const zdt = Temporal.Instant.fromEpochMilliseconds(date.getTime()).toZonedDateTimeISO(displayTimezone)
+      return `${String(zdt.hour).padStart(2, '0')}:${String(zdt.minute).padStart(2, '0')}`
+    } catch {
+      return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+    }
   }
 
   const handleClick = useCallback((e: React.MouseEvent) => {
@@ -71,13 +89,14 @@ export default function SXTimeGridEvent({ calendarEvent }: SXTimeGridEventProps)
       calendarId: (calendarEvent.calendarId as string) || '',
       color: eventColor,
       description: parsed.description,
+      location: parsed.location || location || undefined,
       allDay: parsed.allDay,
       contentType: parsed.contentType,
       platform: platforms,
       publishStatus: parsed.publishStatus,
     }
     onEditEvent(event)
-  }, [calendarEvent, parsed, eventColor, platforms, isResizing, onEditEvent])
+  }, [calendarEvent, parsed, eventColor, platforms, isResizing, location, onEditEvent])
 
   const handleDragStart = useCallback((e: React.DragEvent<HTMLSpanElement>) => {
     e.stopPropagation()
@@ -91,6 +110,7 @@ export default function SXTimeGridEvent({ calendarEvent }: SXTimeGridEventProps)
       calendarId: String(calendarEvent.calendarId || ''),
       color: eventColor,
       description: parsed.description || '',
+      location: location || '',
       contentType: parsed.contentType,
       platform: platforms,
       publishStatus: parsed.publishStatus,
@@ -99,7 +119,7 @@ export default function SXTimeGridEvent({ calendarEvent }: SXTimeGridEventProps)
     e.dataTransfer.setData('application/x-ready-drag', payload)
     e.dataTransfer.setData('text/plain', parsed.title || '(无标题日程)')
     e.dataTransfer.effectAllowed = 'copy'
-  }, [calendarEvent.calendarId, calendarEvent.id, eventColor, parsed.contentType, parsed.description, parsed.endTime, parsed.publishStatus, parsed.startTime, parsed.title, platforms])
+  }, [calendarEvent.calendarId, calendarEvent.id, eventColor, location, parsed.contentType, parsed.description, parsed.endTime, parsed.publishStatus, parsed.startTime, parsed.title, platforms])
 
   // Resize via bottom edge drag
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
@@ -215,6 +235,28 @@ export default function SXTimeGridEvent({ calendarEvent }: SXTimeGridEventProps)
         <span style={{ width: 3, height: 3, borderRadius: '50%', background: 'currentColor', flexShrink: 0 }} />
         {formatTime(parsed.startTime)} - {formatTime(parsed.endTime)}
       </div>
+
+      {/* Location */}
+      {location && (
+        <div
+          title={location}
+          style={{
+            fontSize: 10, opacity: 0.85, marginTop: 2,
+            display: 'flex', alignItems: 'center', gap: 4,
+            overflow: 'hidden',
+          }}
+        >
+          <MapPin style={{ width: 10, height: 10, flexShrink: 0 }} strokeWidth={2} />
+          <span style={{
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+            minWidth: 0,
+          }}>
+            {location}
+          </span>
+        </div>
+      )}
 
       {/* Platform badges */}
       {platforms.length > 0 && (

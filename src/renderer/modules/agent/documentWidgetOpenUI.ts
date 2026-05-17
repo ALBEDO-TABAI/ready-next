@@ -1,16 +1,70 @@
-import { endOfDay, endOfWeek, format, startOfDay, startOfWeek } from 'date-fns'
-import { zhCN } from 'date-fns/locale'
+/**
+ * L5-A — Document widget compile entrypoint (renderer side).
+ *
+ * Two responsibilities live here:
+ *
+ *   1. Normalize the LLM-emitted spec into the strict
+ *      `DocumentWidgetComponentSpec` shape (component name + props
+ *      + optional dataSource) so downstream compile is deterministic.
+ *
+ *   2. For widgets whose `sourceType` is `calendar` / `schedule`, build
+ *      a `DocumentWidgetCompileContext` from the live calendar IPC.
+ *      The compile pipeline reaches into the context whenever `props`
+ *      are missing.
+ *
+ * Important bug fix in L5-A:
+ *   Previously the compile context was only built when the LLM
+ *   remembered to set `spec.dataSource`. The 5 calendar widgets
+ *   (`day_schedule_card`, `week_schedule_card`, `time_allocation_chart`,
+ *   `schedule_runtime_card`, `today_focus_snapshot`) silently rendered
+ *   the "暂无安排" empty state whenever the model omitted that field.
+ *   We now treat calendar-backed widgets as auto-fetch by default: if
+ *   `props` is missing AND the widget is one of the five, we
+ *   transparently fill in a `dataSource` and pull live snapshots.
+ *   The LLM can opt out by setting `dataSource.autoFetch: false`
+ *   together with explicit `props` (manual data path).
+ *
+ * Boundary notes (CLAUDE §6.8.1 + §6.9):
+ *   - The widget renderer never participates in `live-info-intent` or
+ *     `arbitrateSkeletonForUserText`. We only translate IPC payloads
+ *     into `DocumentWidgetCompileContext` shapes.
+ *   - We must NOT issue any user-facing instruction or chat message
+ *     from this compile path.
+ */
 
 import {
   compileDocumentWidgetSpec,
-  type DayScheduleSnapshot,
   type DocumentWidgetComponentSpec,
   type DocumentWidgetCompileContext,
-  type ScheduleRuntimeSnapshot,
-  type TimeAllocationSnapshot,
-  type TodayFocusSnapshot,
-  type WeekScheduleSnapshot,
 } from '../../../shared/document-widget-openui'
+import {
+  getDefaultCalendarWidgetFetcher,
+  type CalendarWidgetFetcher,
+  type WidgetFetchOptions,
+} from '../calendar/widget-data-provider'
+
+/* ------------------------------------------------------------------ */
+/* Component classification                                           */
+/* ------------------------------------------------------------------ */
+
+const CALENDAR_SOURCED_WIDGETS: ReadonlySet<string> = new Set([
+  'day_schedule_card',
+  'week_schedule_card',
+  'time_allocation_chart',
+  'today_focus_snapshot',
+])
+
+const SCHEDULE_RUNTIME_WIDGETS: ReadonlySet<string> = new Set([
+  'schedule_runtime_card',
+])
+
+function isCalendarBackedWidget(name: string): boolean {
+  return CALENDAR_SOURCED_WIDGETS.has(name) || SCHEDULE_RUNTIME_WIDGETS.has(name)
+}
+
+/* ------------------------------------------------------------------ */
+/* Spec normalization (LLM -> strict shape)                           */
+/* ------------------------------------------------------------------ */
 
 function toPointText(item: unknown): string | null {
   if (typeof item === 'string') {
@@ -82,208 +136,94 @@ function normalizeIncomingComponentSpec(spec: DocumentWidgetComponentSpec): Docu
   }
 }
 
-interface CalendarEventLike {
-  id?: string
-  title?: string
-  startTime?: string | Date
-  endTime?: string | Date
-  calendarId?: string
-  color?: string
-  allDay?: boolean
-  description?: string
+/* ------------------------------------------------------------------ */
+/* Auto-fetch promotion                                               */
+/* ------------------------------------------------------------------ */
+
+/**
+ * For the 5 calendar-backed widgets, decide whether the compile path
+ * should fetch live data instead of just trusting the LLM's `props`.
+ *
+ * Rules:
+ *   - If `props` is present, the LLM is providing static / curated
+ *     data. We honor it (existing behavior; matches §6.8.1's "do not
+ *     write fake data and silently replace").
+ *   - If `dataSource` is present, the LLM has explicitly opted into
+ *     the live path. Fetch.
+ *   - Otherwise, for calendar-backed widgets, promote to live fetch
+ *     by synthesizing a `dataSource` with `autoFetch: true`. This is
+ *     the L5-A fix.
+ */
+function maybePromoteAutoFetch(spec: DocumentWidgetComponentSpec): DocumentWidgetComponentSpec {
+  if (spec.props) return spec
+  if (spec.dataSource) return spec
+  if (!isCalendarBackedWidget(spec.component)) return spec
+
+  const type: DocumentWidgetComponentSpec['dataSource'] = SCHEDULE_RUNTIME_WIDGETS.has(spec.component)
+    ? { type: 'schedule' }
+    : { type: 'calendar' }
+  return { ...spec, dataSource: type }
 }
 
-interface CalendarSourceLike {
-  id: string
-  name: string
-  color?: string
+/* ------------------------------------------------------------------ */
+/* Compile context builder                                            */
+/* ------------------------------------------------------------------ */
+
+export interface CompileContextDeps {
+  fetcher?: CalendarWidgetFetcher
+  fetchOptions?: WidgetFetchOptions
 }
 
-function normalizeDate(value: string | Date | undefined): Date | null {
-  if (!value) return null
-  const date = value instanceof Date ? value : new Date(value)
-  return Number.isNaN(date.getTime()) ? null : date
-}
-
-function buildTimeLabel(event: CalendarEventLike): string {
-  if (event.allDay) return '全天'
-  const start = normalizeDate(event.startTime)
-  const end = normalizeDate(event.endTime)
-  if (!start) return '未定时间'
-  if (!end) return format(start, 'HH:mm')
-  return `${format(start, 'HH:mm')} - ${format(end, 'HH:mm')}`
-}
-
-function sameDay(a: Date, b: Date): boolean {
-  return a.getFullYear() === b.getFullYear()
-    && a.getMonth() === b.getMonth()
-    && a.getDate() === b.getDate()
-}
-
-async function loadCalendarEvents(start: Date, end: Date): Promise<CalendarEventLike[]> {
-  const result = await window.electronAPI.calendar.getEvents(start, end).catch(() => null)
-  if (!result?.success || !Array.isArray(result.data)) return []
-  return result.data as CalendarEventLike[]
-}
-
-async function loadCalendarSources(): Promise<CalendarSourceLike[]> {
-  const result = await window.electronAPI.calendar.getSources().catch(() => null)
-  if (!result?.success || !Array.isArray(result.data)) return []
-  return result.data as CalendarSourceLike[]
-}
-
-function mapSourceNames(sources: CalendarSourceLike[]): Map<string, string> {
-  return new Map(sources.map((source) => [source.id, source.name]))
-}
-
-async function buildDayScheduleSnapshot(date = new Date()): Promise<DayScheduleSnapshot> {
-  const [events, sources] = await Promise.all([
-    loadCalendarEvents(startOfDay(date), endOfDay(date)),
-    loadCalendarSources(),
-  ])
-  const sourceNames = mapSourceNames(sources)
-  const filtered = events.filter((event) => {
-    const start = normalizeDate(event.startTime)
-    return start ? sameDay(start, date) : false
-  })
-
-  return {
-    dateLabel: format(date, 'M月d日 EEEE', { locale: zhCN }),
-    events: filtered
-      .sort((left, right) => {
-        const leftStart = normalizeDate(left.startTime)?.getTime() || 0
-        const rightStart = normalizeDate(right.startTime)?.getTime() || 0
-        return leftStart - rightStart
-      })
-      .map((event) => ({
-        title: String(event.title || '未命名事件'),
-        timeLabel: buildTimeLabel(event),
-        accent: event.color || '#5B8DEF',
-        meta: sourceNames.get(String(event.calendarId || '')) || undefined,
-      })),
-  }
-}
-
-async function buildWeekScheduleSnapshot(date = new Date()): Promise<WeekScheduleSnapshot> {
-  const weekStart = startOfWeek(date, { locale: zhCN })
-  const weekEnd = endOfWeek(date, { locale: zhCN })
-  const events = await loadCalendarEvents(weekStart, weekEnd)
-  const days = Array.from({ length: 7 }, (_, index) => {
-    const current = new Date(weekStart)
-    current.setDate(weekStart.getDate() + index)
-    const dayEvents = events.filter((event) => {
-      const start = normalizeDate(event.startTime)
-      return start ? sameDay(start, current) : false
-    })
-
-    return {
-      label: format(current, 'EEE', { locale: zhCN }),
-      count: dayEvents.length,
-      highlights: dayEvents.slice(0, 3).map((event) => String(event.title || '未命名事件')),
-    }
-  })
-
-  return {
-    weekLabel: `${format(weekStart, 'M月d日', { locale: zhCN })} - ${format(weekEnd, 'M月d日', { locale: zhCN })}`,
-    days,
-  }
-}
-
-async function buildTimeAllocationSnapshot(date = new Date()): Promise<TimeAllocationSnapshot> {
-  const weekStart = startOfWeek(date, { locale: zhCN })
-  const weekEnd = endOfWeek(date, { locale: zhCN })
-  const [events, sources] = await Promise.all([
-    loadCalendarEvents(weekStart, weekEnd),
-    loadCalendarSources(),
-  ])
-  const sourceNames = mapSourceNames(sources)
-  const buckets = new Map<string, { label: string; value: number; accent?: string }>()
-
-  for (const event of events) {
-    const start = normalizeDate(event.startTime)
-    const end = normalizeDate(event.endTime)
-    if (!start || !end) continue
-    const durationHours = Math.max(0.5, (end.getTime() - start.getTime()) / (60 * 60 * 1000))
-    const key = String(event.calendarId || 'unknown')
-    const existing = buckets.get(key) || {
-      label: sourceNames.get(key) || '其他',
-      value: 0,
-      accent: event.color || '#5B8DEF',
-    }
-    existing.value += Number(durationHours.toFixed(1))
-    buckets.set(key, existing)
-  }
-
-  return {
-    periodLabel: '本周时间分配',
-    segments: Array.from(buckets.values()).sort((left, right) => right.value - left.value).slice(0, 6),
-  }
-}
-
-async function buildScheduleRuntimeSnapshot(): Promise<ScheduleRuntimeSnapshot> {
-  const result = await window.electronAPI.agent.listSchedules().catch(() => null)
-  const rows = result?.success && Array.isArray(result.data) ? result.data : []
-  const jobs: ScheduleRuntimeSnapshot['jobs'] = rows.slice(0, 6).map((row) => ({
-    name: String(row.name || '未命名计划'),
-    status: row.enabled ? 'enabled' : 'paused',
-    nextRun: typeof row.nextRunAt === 'string' ? row.nextRunAt : undefined,
-    lastRun: typeof row.lastRunAt === 'string' ? row.lastRunAt : undefined,
-  }))
-
-  return {
-    heading: '自动计划',
-    jobs: jobs.length > 0 ? jobs : [{
-      name: '当前没有自动计划',
-      status: 'paused',
-      nextRun: undefined,
-      lastRun: undefined,
-    }],
-  }
-}
-
-async function buildTodayFocusSnapshot(date = new Date()): Promise<TodayFocusSnapshot> {
-  const [calendar, schedule] = await Promise.all([
-    buildDayScheduleSnapshot(date),
-    buildScheduleRuntimeSnapshot(),
-  ])
-  const nextEvent = calendar.events[0]
-  const enabledCount = schedule.jobs.filter((job) => job.status === 'enabled').length
-
-  return {
-    dayLabel: format(date, '今天 · M月d日', { locale: zhCN }),
-    highlights: [
-      nextEvent ? `下一项安排：${nextEvent.title}` : '今天还没有安排事件',
-      enabledCount > 0 ? `已启用 ${enabledCount} 个自动计划` : '当前没有启用中的自动计划',
-    ],
-    metrics: [
-      { label: '今日事件', value: String(calendar.events.length) },
-      { label: '启用计划', value: String(enabledCount) },
-    ],
-  }
-}
-
-async function buildCompileContext(spec: DocumentWidgetComponentSpec): Promise<DocumentWidgetCompileContext> {
+async function buildCompileContext(
+  spec: DocumentWidgetComponentSpec,
+  deps: CompileContextDeps,
+): Promise<DocumentWidgetCompileContext> {
+  const fetcher = deps.fetcher ?? getDefaultCalendarWidgetFetcher()
+  const fetchOptions = deps.fetchOptions
   switch (spec.component) {
     case 'day_schedule_card':
-      return { calendar: await buildDayScheduleSnapshot() }
+      return { calendar: await fetcher.fetchDaySchedule(fetchOptions) }
     case 'week_schedule_card':
-      return { calendarWeek: await buildWeekScheduleSnapshot() }
+      return { calendarWeek: await fetcher.fetchWeekSchedule(fetchOptions) }
     case 'time_allocation_chart':
-      return { timeAllocation: await buildTimeAllocationSnapshot() }
+      return { timeAllocation: await fetcher.fetchTimeAllocation(fetchOptions) }
     case 'schedule_runtime_card':
-      return { schedule: await buildScheduleRuntimeSnapshot() }
+      return { schedule: await fetcher.fetchScheduleRuntime() }
     case 'today_focus_snapshot':
-      return { todayFocus: await buildTodayFocusSnapshot() }
+      return { todayFocus: await fetcher.fetchTodayFocusSnapshot(fetchOptions) }
     default:
       return {}
   }
 }
 
-export async function compileDocumentWidgetComponentSpec(spec: DocumentWidgetComponentSpec): Promise<{
+/* ------------------------------------------------------------------ */
+/* Public entrypoint                                                  */
+/* ------------------------------------------------------------------ */
+
+export async function compileDocumentWidgetComponentSpec(
+  spec: DocumentWidgetComponentSpec,
+  deps: CompileContextDeps = {},
+): Promise<{
   component: string
   widgetCode: string
 }> {
   const normalizedSpec = normalizeIncomingComponentSpec(spec)
-  const context = normalizedSpec.dataSource ? await buildCompileContext(normalizedSpec) : undefined
-  return compileDocumentWidgetSpec(normalizedSpec, context)
+  const promotedSpec = maybePromoteAutoFetch(normalizedSpec)
+  const context = promotedSpec.dataSource ? await buildCompileContext(promotedSpec, deps) : undefined
+  return compileDocumentWidgetSpec(promotedSpec, context)
 }
+
+/**
+ * Re-export so renderer callers can build a fetcher with their own DI
+ * (e.g. an integration test that swaps in a fake `CalendarWidgetApi`).
+ */
+export {
+  createCalendarWidgetFetcher,
+  getDefaultCalendarWidgetFetcher,
+  type CalendarWidgetFetcher,
+  type CalendarWidgetApi,
+  type CalendarWidgetEventLike,
+  type CalendarWidgetSourceLike,
+  type ScheduleRuntimeApi,
+  type WidgetFetchOptions,
+} from '../calendar/widget-data-provider'

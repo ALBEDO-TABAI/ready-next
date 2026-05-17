@@ -5,16 +5,32 @@ import {
 } from 'lucide-react'
 
 // --- Menu items ---
-const MENU_ITEMS = [
+// `disabled` 占位项目前没有对应的数据模型/后端逻辑，仅展示禁用态以避免欺骗用户。
+// 真实数据语义后续由 L2/L3/L4/L5 团队逐步落实。
+type MenuItem = {
+  key: string
+  icon: typeof CalendarPlus
+  color: string
+  title: string
+  desc: string
+  disabled?: boolean
+  disabledTip?: string
+}
+
+const MENU_ITEMS: MenuItem[] = [
   { key: 'event', icon: CalendarPlus, color: '#EB5757', title: '新建日程事件', desc: '创建一个新的日历事件' },
-  { key: 'task', icon: CheckSquare, color: '#F2994A', title: '新建任务', desc: '添加待办任务到日程' },
+  { key: 'task', icon: CheckSquare, color: '#F2994A', title: '新建任务', desc: '添加待办任务到日程', disabled: true, disabledTip: '暂不支持此事件类型，使用普通事件代替' },
   { key: 'repeat', icon: Repeat, color: '#9B51E0', title: '新建重复事件', desc: '每天/每周/每月重复' },
-  { key: 'milestone', icon: Flag, color: '#2D9CDB', title: '新建里程碑', desc: '标记项目关键节点' },
+  { key: 'milestone', icon: Flag, color: '#2D9CDB', title: '新建里程碑', desc: '标记项目关键节点', disabled: true, disabledTip: '暂不支持此事件类型，使用普通事件代替' },
   { key: 'reminder', icon: Bell, color: '#27AE60', title: '新建提醒', desc: '设置时间提醒通知' },
-  { key: 'memo', icon: StickyNote, color: '#F2C94C', title: '新建备忘', desc: '快速记录备忘信息' },
+  { key: 'memo', icon: StickyNote, color: '#F2C94C', title: '新建备忘', desc: '快速记录备忘信息', disabled: true, disabledTip: '暂不支持此事件类型，使用普通事件代替' },
 ]
 
-const BOTTOM_ITEMS = [
+// L4-B-External-Sync — `import` 与 `subscribe` 现在由 L4-B 接通：
+//   - 点击 import 会让父级触发隐藏 file picker 选 .ics 文件
+//   - 点击 subscribe 会让父级打开 URL 订阅 modal
+// 两个动作都不再展示新建表单（NewEventCard 只服务于本地手写事件）。
+const BOTTOM_ITEMS: MenuItem[] = [
   { key: 'import', icon: Upload, color: 'var(--text-light)', title: '导入日程 (.ics)', desc: '从文件导入日程事件' },
   { key: 'subscribe', icon: Link, color: 'var(--text-light)', title: '订阅日历', desc: '通过 URL 订阅外部日历' },
 ]
@@ -50,35 +66,49 @@ export function NewEventMenu({
     return () => document.removeEventListener('mousedown', handler)
   }, [onClose])
 
-  const renderItem = (item: typeof MENU_ITEMS[0]) => (
-    <div
-      key={item.key}
-      onClick={() => onSelect(item.key)}
-      onMouseEnter={() => setHoveredKey(item.key)}
-      onMouseLeave={() => setHoveredKey(null)}
-      style={{
-        display: 'flex', alignItems: 'center', gap: 10,
-        padding: '6px 10px', cursor: 'pointer',
-        borderRadius: 6,
-        background: hoveredKey === item.key ? 'var(--bg-hover)' : 'transparent',
-        transition: 'background 0.12s',
-      }}
-    >
-      <span
+  const renderItem = (item: MenuItem) => {
+    const isDisabled = item.disabled === true
+    return (
+      <div
+        key={item.key}
+        onClick={() => { if (!isDisabled) onSelect(item.key) }}
+        onMouseEnter={() => { if (!isDisabled) setHoveredKey(item.key) }}
+        onMouseLeave={() => setHoveredKey(null)}
+        title={isDisabled ? item.disabledTip : undefined}
+        aria-disabled={isDisabled || undefined}
         style={{
-          width: 26, height: 26, borderRadius: 6,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: `${item.color}14`, flexShrink: 0,
+          display: 'flex', alignItems: 'center', gap: 10,
+          padding: '6px 10px',
+          cursor: isDisabled ? 'not-allowed' : 'pointer',
+          borderRadius: 6,
+          background: !isDisabled && hoveredKey === item.key ? 'var(--bg-hover)' : 'transparent',
+          opacity: isDisabled ? 0.5 : 1,
+          transition: 'background 0.12s',
         }}
       >
-        <item.icon style={{ width: 14, height: 14, color: item.color }} strokeWidth={1.8} />
-      </span>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
-        <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-body)' }}>{item.title}</span>
-        <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-muted)' }}>{item.desc}</span>
+        <span
+          style={{
+            width: 26, height: 26, borderRadius: 6,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            background: `${item.color}14`, flexShrink: 0,
+          }}
+        >
+          <item.icon style={{ width: 14, height: 14, color: item.color }} strokeWidth={1.8} />
+        </span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 1, flex: 1, minWidth: 0 }}>
+          <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-body)' }}>
+            {item.title}
+            {isDisabled ? (
+              <span style={{ marginLeft: 6, fontSize: 10, fontWeight: 400, color: 'var(--text-muted)' }}>
+                （开发中）
+              </span>
+            ) : null}
+          </span>
+          <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-muted)' }}>{item.desc}</span>
+        </div>
       </div>
-    </div>
-  )
+    )
+  }
 
   return (
     <div
@@ -312,12 +342,22 @@ export function NewEventCard({
           </div>
         </div>
 
-        {/* Participants */}
-        <div>
+        {/* Participants — 占位：L5 阶段开放参与者数据模型 */}
+        <div title="L5 阶段开放（暂不支持参与者）">
           <span style={labelStyle}>参与者</span>
-          <div style={{ ...inputStyle, display: 'flex', alignItems: 'center', gap: 6 }}>
+          <div
+            aria-disabled
+            style={{
+              ...inputStyle,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              cursor: 'not-allowed',
+              opacity: 0.5,
+            }}
+          >
             <Users style={{ width: 12, height: 12, color: 'var(--text-muted)', flexShrink: 0 }} strokeWidth={2} />
-            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>添加参与者...</span>
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>L5 阶段开放（暂不支持参与者）</span>
           </div>
         </div>
 

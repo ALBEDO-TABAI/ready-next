@@ -16,12 +16,23 @@ export const CalendarListWindowSchema = z.object({
   end: z.string().describe('结束时间 ISO 字符串'),
 })
 
+const ReminderSchema = z.object({
+  offsetMinutes: z
+    .number()
+    .describe('相对事件开始时间的分钟偏移，负数表示开始前（例如 -15 表示提前 15 分钟）'),
+  method: z.enum(['notification', 'sound']).describe('提醒方式'),
+})
+
 export const CalendarCreateEventSchema = z.object({
   title: z.string().describe('事件标题'),
   startTime: z.string().describe('开始时间 ISO 字符串'),
   endTime: z.string().describe('结束时间 ISO 字符串'),
   calendarId: z.string().optional().describe('目标日历 ID'),
   description: z.string().optional().describe('事件描述'),
+  location: z.string().optional().describe('事件地点'),
+  allDay: z.boolean().optional().describe('是否全天事件'),
+  reminders: z.array(ReminderSchema).optional().describe('提醒列表'),
+  recurrenceRule: z.string().optional().describe('RFC 5545 RRULE 字符串，描述循环规则'),
 })
 
 export const CalendarUpdateEventSchema = z.object({
@@ -30,6 +41,10 @@ export const CalendarUpdateEventSchema = z.object({
   startTime: z.string().optional().describe('可选，新的开始时间 ISO 字符串'),
   endTime: z.string().optional().describe('可选，新的结束时间 ISO 字符串'),
   description: z.string().optional().describe('可选，新的事件描述'),
+  location: z.string().optional().describe('可选，新的事件地点'),
+  allDay: z.boolean().optional().describe('可选，是否全天事件'),
+  reminders: z.array(ReminderSchema).optional().describe('可选，新的提醒列表（整组替换）'),
+  recurrenceRule: z.string().optional().describe('可选，新的 RFC 5545 RRULE 字符串'),
 })
 
 export const CalendarDeleteEventSchema = z.object({

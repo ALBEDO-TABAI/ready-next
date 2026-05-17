@@ -1735,6 +1735,160 @@ const migrations: Migration[] = [
         CREATE INDEX IF NOT EXISTS idx_run_feedback_run_id ON run_feedback(run_id);
       `)
     }
+  },
+
+  // ------------------------------------------------------------------ 037
+  // Calendar L0-Schema-Lock: agent_action 列从声明以来零消费者，按 §0.5.3
+  // 拒绝 legacy 痕迹与 §6.13 CREATE-INSERT-DROP-RENAME 模式删除。其余 4 个
+  // 保留字段（recurrence_rule / reminders / sync_url / sync_interval）由
+  // 下游 L2-L4 团队落实，由 `scripts/check-calendar-schema-no-dead-fields.cjs`
+  // 守门防止回退。
+  {
+    name: '037_drop_calendar_events_agent_action',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE calendar_events_new (
+          id TEXT PRIMARY KEY,
+          calendar_id TEXT NOT NULL,
+          title TEXT NOT NULL,
+          description TEXT,
+          location TEXT,
+          start_time INTEGER NOT NULL,
+          end_time INTEGER NOT NULL,
+          all_day INTEGER DEFAULT 0,
+          recurrence_rule TEXT,
+          reminders TEXT,
+          created_at INTEGER DEFAULT (unixepoch()),
+          updated_at INTEGER DEFAULT (unixepoch()),
+          FOREIGN KEY (calendar_id) REFERENCES calendar_sources(id) ON DELETE CASCADE
+        );
+
+        INSERT INTO calendar_events_new (
+          id, calendar_id, title, description, location,
+          start_time, end_time, all_day, recurrence_rule, reminders,
+          created_at, updated_at
+        )
+        SELECT
+          id, calendar_id, title, description, location,
+          start_time, end_time, all_day, recurrence_rule, reminders,
+          created_at, updated_at
+        FROM calendar_events;
+
+        DROP TABLE calendar_events;
+
+        ALTER TABLE calendar_events_new RENAME TO calendar_events;
+
+        CREATE INDEX IF NOT EXISTS idx_events_start_date ON calendar_events(start_time);
+        CREATE INDEX IF NOT EXISTS idx_events_end_date ON calendar_events(end_time);
+        CREATE INDEX IF NOT EXISTS idx_events_calendar ON calendar_events(calendar_id);
+      `)
+    }
+  },
+
+  // ------------------------------------------------------------------ 038
+  // Calendar L3-A RRULE-Engine — `calendar_event_overrides` table for
+  // per-occurrence overrides of recurring events. Two kinds:
+  //   - 'single': patch one occurrence's fields (title / time / location /
+  //     reminders) WITHOUT touching the parent's RRULE.
+  //   - 'cancelled': hide one occurrence entirely.
+  // `occurrence_start` is the ORIGINAL Unix-seconds timestamp of the
+  // occurrence as RRULE produces it (pre-patch). A "move Tuesday to
+  // Wednesday" creates an override keyed by the Tuesday timestamp.
+  // `patch_json` is the JSON-encoded partial fields; null when
+  // kind='cancelled'. CHECK constraint enforces the patch_json/kind
+  // discipline at the schema layer per §0.5.5 (CI > docs > human review).
+  //
+  // L3-A creates the schema only; L3-B (UI) wires the CRUD operations.
+  // Per §6.13 — fresh tables use simple CREATE; the table is new so no
+  // CREATE-INSERT-DROP-RENAME pattern is needed.
+  {
+    name: '038_create_calendar_event_overrides',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS calendar_event_overrides (
+          id TEXT PRIMARY KEY,
+          parent_event_id TEXT NOT NULL,
+          occurrence_start INTEGER NOT NULL,
+          kind TEXT NOT NULL CHECK (kind IN ('single', 'cancelled')),
+          patch_json TEXT,
+          created_at INTEGER DEFAULT (unixepoch()),
+          updated_at INTEGER DEFAULT (unixepoch()),
+          UNIQUE (parent_event_id, occurrence_start),
+          FOREIGN KEY (parent_event_id) REFERENCES calendar_events(id) ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_event_overrides_parent
+          ON calendar_event_overrides(parent_event_id);
+        CREATE INDEX IF NOT EXISTS idx_event_overrides_occurrence
+          ON calendar_event_overrides(occurrence_start);
+      `)
+    }
+  },
+
+  // ------------------------------------------------------------------ 039
+  // Calendar L4-A-Timezone — add `start_tz / end_tz TEXT` columns to
+  // `calendar_events`. SQLite `ALTER TABLE ADD COLUMN` is non-destructive
+  // and preserves existing rows, so we use it directly instead of the
+  // CREATE-INSERT-DROP-RENAME pattern (§6.13 reserves that pattern for
+  // schema changes that ADD/CHANGE CHECK constraints or REORDER columns,
+  // neither of which applies here).
+  //
+  // Column semantics:
+  //   - NULL  ⇒ local timezone (back-compat for events created before
+  //     migration 039 lands; their behavior is unchanged).
+  //   - non-NULL ⇒ IANA timezone identifier (e.g. 'Asia/Shanghai' /
+  //     'America/New_York' / 'UTC') for the start and end wall-clocks.
+  // Validation of IANA strings happens at the application layer; the DB
+  // stores whatever the IPC layer wrote. Bad identifiers surface as
+  // runtime errors when `timezone-utils.formatInTimezone` is called.
+  //
+  // L4-A only adds the schema + helpers; downstream call sites (rrule
+  // engine, schedule-x renderer, reminder scheduler) consume the columns
+  // as further teams wire them through.
+  {
+    name: '039_add_calendar_events_timezone',
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE calendar_events ADD COLUMN start_tz TEXT;
+        ALTER TABLE calendar_events ADD COLUMN end_tz TEXT;
+      `)
+    }
+  },
+
+  // ------------------------------------------------------------------ 040
+  // Calendar L4-B-External-Sync — add `ics_uid / source_id TEXT` columns
+  // to `calendar_events` so externally-synced VEVENTs can be tracked by
+  // their iCal UID and back-linked to the originating `calendar_sources`
+  // row.
+  //
+  //   - `ics_uid`: the VEVENT UID from the upstream feed. Null for
+  //     locally-authored rows. The sync scheduler matches by
+  //     `(source_id, ics_uid)` so re-syncing the same feed lands on the
+  //     same row and dedups correctly.
+  //   - `source_id`: redundant with `calendar_id` for purely-local rows
+  //     but explicit for externally-synced events so a sync diff can
+  //     answer "give me every row this subscription owns" without
+  //     needing a separate join through `calendar_sources`. The two
+  //     columns are different concepts: `calendar_id` is "which user-
+  //     visible calendar bucket the event appears in", `source_id` is
+  //     "which sync feed produced this row". They happen to be the same
+  //     id when an ICS subscription writes events into its own
+  //     auto-created source; they diverge if a user moves an externally-
+  //     synced event into a different local calendar (future feature).
+  //
+  // SQLite ALTER TABLE ADD COLUMN is non-destructive, so per §6.13 we
+  // use ALTER directly rather than the CREATE-INSERT-DROP-RENAME pattern
+  // (reserved for changes that add CHECK constraints or reorder columns).
+  // Indexes on both columns speed up the sync-scheduler diff query.
+  {
+    name: '040_add_calendar_event_ics_uid',
+    up: (db) => {
+      db.exec(`
+        ALTER TABLE calendar_events ADD COLUMN ics_uid TEXT;
+        ALTER TABLE calendar_events ADD COLUMN source_id TEXT;
+        CREATE INDEX IF NOT EXISTS idx_events_ics_uid ON calendar_events(ics_uid);
+        CREATE INDEX IF NOT EXISTS idx_events_source_id ON calendar_events(source_id);
+      `)
+    }
   }
 ]
 

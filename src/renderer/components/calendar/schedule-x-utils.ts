@@ -1,6 +1,12 @@
 import type { CalendarSource } from './CalendarSources'
+import type { Reminder } from '../../../shared/calendar-types'
 import { Temporal } from '@js-temporal/polyfill'
 
+// Boundary note (L1.5): 本文件的 CalendarEvent 是渲染端给 schedule-x runtime
+// 使用的视图类型，故意保留 Date 表达 + UI-only 字段（color / contentType /
+// platform / publishStatus 等）。SSOT 数据契约在 `src/shared/calendar-types.ts`
+// (Unix seconds + 数据字段)。两侧 boundary 转换在下游团队真的需要 IPC 直传时
+// 再补 helper（fromContract / toContract），当前无消费者所以不强制。
 export interface CalendarEvent {
   id: string
   title: string
@@ -9,10 +15,49 @@ export interface CalendarEvent {
   calendarId: string
   color: string
   description?: string
+  location?: string
   allDay?: boolean
   contentType?: 'video' | 'image' | 'article' | 'story' | 'live'
   platform?: string[]
   publishStatus?: 'draft' | 'scheduled' | 'published' | 'failed'
+  /**
+   * L2-B-Reminder-UI — propagated through the renderer view type so the
+   * EventModal can seed its editor from `event.reminders` and pass any
+   * edits back to IPC. The wire shape is the shared `Reminder` (Unix
+   * seconds + minutes offset); no Date conversion needed here because
+   * the offset is relative to event.startTime, not an absolute instant.
+   */
+  reminders?: Reminder[] | null
+  /**
+   * L3-B-RRULE-UI — RFC 5545 RRULE body or null for non-recurring.
+   * Returned by the IPC layer on the parent row and also propagated to
+   * expanded EventInstance rows so the renderer can detect "this row
+   * is part of a series" without keeping a separate parent map.
+   */
+  recurrenceRule?: string | null
+  /**
+   * L3-B — on EventInstance rows, the parent event id (without
+   * `#<occurrenceStart>` suffix). For non-recurring single events this
+   * equals `id`. Renderer uses `instanceOf !== id` (or the equivalent
+   * `id` contains `'#'`) to switch the "modify this / future / all"
+   * dialog on edit.
+   */
+  instanceOf?: string
+  /**
+   * L3-B — Unix seconds of the ORIGINAL (pre-patch) occurrence start.
+   * This is the key used by `upsertEventOverride / deleteEventOverride`
+   * IPC payloads — even after a `single` override moved the row's
+   * `startTime`, the override row is still keyed by this original
+   * timestamp.
+   */
+  occurrenceStart?: number
+  /**
+   * L3-B — `'single' | 'cancelled' | null`. Reflects the kind of
+   * override applied to this instance (or null if none). Renderers
+   * can show a subtle badge when this is non-null so the user knows
+   * the instance has been customized.
+   */
+  overrideKind?: 'single' | 'cancelled' | null
 }
 
 // Schedule-X event shape (runtime accepts string dates despite Temporal types)
@@ -23,6 +68,7 @@ export interface SXEvent {
   title?: string
   calendarId?: string
   description?: string
+  location?: string
   // Custom fields stored directly — SX preserves arbitrary keys via [key: string]: any
   contentType?: string
   platform?: string
@@ -126,12 +172,23 @@ export function eventToSX(event: CalendarEvent): SXEvent {
     title: event.title,
     calendarId: event.calendarId,
     description: event.description,
+    location: event.location,
     color: event.color,
   }
 
   if (event.contentType) sxEvent.contentType = event.contentType
   if (event.platform) sxEvent.platform = JSON.stringify(event.platform)
   if (event.publishStatus) sxEvent.publishStatus = event.publishStatus
+
+  // L3-B — propagate recurrence fields. We attach them as passthrough
+  // custom fields on the SX event so an SX round-trip via
+  // `sxEventToEvent` preserves them. None of these influence SX's own
+  // rendering; they're consumed only by EventModal's "modify this /
+  // future / all" dialog and by the agent adapter.
+  if (event.recurrenceRule !== undefined) sxEvent.recurrenceRule = event.recurrenceRule
+  if (event.instanceOf !== undefined) sxEvent.instanceOf = event.instanceOf
+  if (event.occurrenceStart !== undefined) sxEvent.occurrenceStart = event.occurrenceStart
+  if (event.overrideKind !== undefined) sxEvent.overrideKind = event.overrideKind
 
   return sxEvent
 }
@@ -146,7 +203,18 @@ export function sxEventToEvent(sxEvent: Record<string, unknown>): Partial<Calend
     title: (sxEvent.title as string) || '',
     calendarId: sxEvent.calendarId as string | undefined,
     description: sxEvent.description as string | undefined,
+    location: sxEvent.location as string | undefined,
     color: sxEvent.color as string | undefined,
+  }
+
+  // L2-B — preserve reminders if SX kept them as a passthrough custom
+  // field. We only accept an array shape (Reminder[]) or null; anything
+  // else is dropped silently so a malformed SX side effect cannot crash
+  // the editor.
+  if (sxEvent.reminders === null) {
+    result.reminders = null
+  } else if (Array.isArray(sxEvent.reminders)) {
+    result.reminders = sxEvent.reminders as Reminder[]
   }
 
   result.startTime = temporalToDate(sxEvent.start)
@@ -181,6 +249,26 @@ export function sxEventToEvent(sxEvent: Record<string, unknown>): Partial<Calend
   }
   if (sxEvent.publishStatus) {
     result.publishStatus = sxEvent.publishStatus as CalendarEvent['publishStatus']
+  }
+
+  // L3-B — recover recurrence fields from passthrough. Same defensive
+  // shape-check as reminders above: only the documented types survive,
+  // unknown shapes are dropped silently.
+  if (sxEvent.recurrenceRule === null) {
+    result.recurrenceRule = null
+  } else if (typeof sxEvent.recurrenceRule === 'string') {
+    result.recurrenceRule = sxEvent.recurrenceRule
+  }
+  if (typeof sxEvent.instanceOf === 'string') {
+    result.instanceOf = sxEvent.instanceOf
+  }
+  if (typeof sxEvent.occurrenceStart === 'number') {
+    result.occurrenceStart = sxEvent.occurrenceStart
+  }
+  if (sxEvent.overrideKind === null) {
+    result.overrideKind = null
+  } else if (sxEvent.overrideKind === 'single' || sxEvent.overrideKind === 'cancelled') {
+    result.overrideKind = sxEvent.overrideKind
   }
 
   return result
