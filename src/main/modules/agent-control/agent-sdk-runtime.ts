@@ -75,6 +75,15 @@ import {
   buildResponsesToolCalls,
 } from '../claude-bridge/provider-tool-arguments'
 import { resolveOpenAIProviderRuntime } from './provider-runtime-resolver'
+import {
+  assertCurrentMessageCapability,
+  sanitizeHistoricalMessagesByCapability,
+  type CapabilityMessage,
+  type MessageCapabilitySnapshot,
+} from './message-capability-filter'
+import { assertManualThinkingModeProviderSafe } from './thinking-compatibility'
+import { logAgentMetric } from './metrics'
+import { TOOL_ERROR_METRICS } from './tool-error-metrics'
 import type { BrowserTaskDecisionMode } from '../../../shared/browser-agent-task'
 import { defaultToolRegistry } from './tool-registry'
 import type { ToolDefinition } from './tool-definition'
@@ -1397,6 +1406,51 @@ function reasoningProviderData(reasoningContent: unknown): Record<string, unknow
   return reasoningContent !== undefined ? { reasoning_content: reasoningContent } : undefined
 }
 
+/**
+ * PR 2 (Phase C.2 second segment) — resolve a `MessageCapabilitySnapshot`
+ * from the runtime AIModelConfig and apply `sanitizeHistoricalMessagesByCapability`
+ * to a provider-formatted message list. All three model builders below
+ * (chat-completions, responses, anthropic) funnel through this helper so
+ * the contract is enforced uniformly.
+ *
+ * Emits `provider_request_capability_filter` when any blocks were removed,
+ * so operators can see which provider routes had image residue in their
+ * history.
+ */
+function sanitizeMessagesForModelClient(
+  rawMessages: ReadonlyArray<Record<string, unknown>>,
+  config: AIModelConfig,
+  route: 'openai-chat' | 'openai-responses' | 'anthropic',
+): Array<Record<string, unknown>> {
+  const resolved = resolveAIConfigCapabilities(config)
+  const snapshot: MessageCapabilitySnapshot = {
+    supportsVision: resolved?.supportsVision === true,
+    // PR 2 review patch — must consult `supportsNativeVideo` (true on
+    // providers like Anthropic / Gemini that natively accept video blocks)
+    // instead of hardcoding `false`, otherwise multi-turn video tasks lose
+    // their video blocks at history sanitize even on capable providers.
+    supportsVideo: resolved?.supportsNativeVideo === true,
+  }
+  if (snapshot.supportsVision && snapshot.supportsVideo) {
+    return rawMessages.slice()
+  }
+  const decision = sanitizeHistoricalMessagesByCapability(
+    rawMessages as unknown as CapabilityMessage[],
+    snapshot,
+  )
+  if (decision.removedImageBlocks > 0 || decision.removedVideoBlocks > 0) {
+    logAgentMetric('provider_request_capability_filter', {
+      route,
+      removedImageBlocks: decision.removedImageBlocks,
+      removedVideoBlocks: decision.removedVideoBlocks,
+      replacedWithPlaceholders: decision.replacedWithPlaceholders,
+      model: config.model,
+      provider: config.provider,
+    })
+  }
+  return decision.filtered as unknown as Array<Record<string, unknown>>
+}
+
 function modelInputToOpenAIChatMessages(input: ModelRequest['input']): Array<Record<string, unknown>> {
   if (typeof input === 'string') {
     return [{ role: 'user', content: input }]
@@ -1584,6 +1638,11 @@ function toOpenAIFunctionCallOutput(
   } as AgentOutputItem))
 }
 
+// PR 2 (review patch) — test seam: the Model classes are exported under a
+// `__forTests` namespace so behavior tests can mount them directly with a
+// fake fetch and assert the actual outbound request body. Production code
+// continues to construct them via the providers above; the seam is purely
+// for `src/__tests__/agent-sdk-runtime-capability-body.test.ts`.
 class ReadyOpenAICompatibleModelProvider implements ModelProvider {
   constructor(private readonly deps: {
     config: AIModelConfig
@@ -1596,7 +1655,7 @@ class ReadyOpenAICompatibleModelProvider implements ModelProvider {
   }
 }
 
-class ReadyOpenAICompatibleModel implements Model {
+export class ReadyOpenAICompatibleModel implements Model {
   constructor(private readonly deps: {
     config: AIModelConfig
     baseUrl: string
@@ -1604,6 +1663,7 @@ class ReadyOpenAICompatibleModel implements Model {
   }) {}
 
   async getResponse(request: ModelRequest): Promise<ModelResponse> {
+    assertManualThinkingModeProviderSafe(this.deps.config, 'sdk-openai-compatible')
     const provider = getProviderDef(this.deps.config.provider, this.deps.baseUrl)
     const runtime = resolveOpenAIProviderRuntime({
       config: this.deps.config,
@@ -1623,7 +1683,14 @@ class ReadyOpenAICompatibleModel implements Model {
     const model = resolveOpenAIProtocolModel(this.deps.config)
     const messages = [
       { role: 'system', content: request.systemInstructions || '' },
-      ...modelInputToOpenAIChatMessages(request.input),
+      // PR 2 Phase C.2 second segment — sanitize history-side multimodal
+      // blocks per current capability. Current turn was already gated at
+      // SDK entry, so any image residue here is from prior turns.
+      ...sanitizeMessagesForModelClient(
+        modelInputToOpenAIChatMessages(request.input),
+        this.deps.config,
+        'openai-chat',
+      ),
     ]
     const body: Record<string, unknown> = { model, messages }
     const tools = serializeSdkOpenAITools(request)
@@ -1675,7 +1742,14 @@ class ReadyOpenAICompatibleModel implements Model {
     const body: Record<string, unknown> = {
       model,
       instructions: request.systemInstructions || '',
-      input: modelInputToOpenAIResponsesInput(request.input),
+      // PR 2 Phase C.2 second segment — same history sanitization for the
+      // Responses API path. Block types differ (`input_image` here) but the
+      // helper recognizes all three legal names.
+      input: sanitizeMessagesForModelClient(
+        modelInputToOpenAIResponsesInput(request.input),
+        this.deps.config,
+        'openai-responses',
+      ),
       stream: false,
     }
     if (runtime.reasoningEffort) body.reasoning = { effort: runtime.reasoningEffort }
@@ -1928,7 +2002,7 @@ class ReadyAnthropicModelProvider implements ModelProvider {
   }
 }
 
-class ReadyAnthropicModel implements Model {
+export class ReadyAnthropicModel implements Model {
   constructor(private readonly deps: {
     config: AIModelConfig
     baseUrl: string
@@ -1936,12 +2010,19 @@ class ReadyAnthropicModel implements Model {
   }) {}
 
   async getResponse(request: ModelRequest): Promise<ModelResponse> {
+    assertManualThinkingModeProviderSafe(this.deps.config, 'sdk-anthropic')
     const responseId = `anthropic-${randomUUID()}`
     const body: Record<string, unknown> = {
       model: this.deps.config.model,
       max_tokens: request.modelSettings.maxTokens || 4096,
       system: request.systemInstructions || '',
-      messages: modelInputToAnthropicMessages(request.input),
+      // PR 2 Phase C.2 second segment — Anthropic path. Block types here
+      // include `image` (block.source variant) which the helper recognizes.
+      messages: sanitizeMessagesForModelClient(
+        modelInputToAnthropicMessages(request.input),
+        this.deps.config,
+        'anthropic',
+      ),
     }
     const tools = serializeAnthropicTools(request)
     if (tools.length > 0) body.tools = tools
@@ -2492,6 +2573,51 @@ export class AgentSdkRuntime extends EventEmitter {
         `当前日期：${new Date().toISOString().slice(0, 10)}`,
       ].join('\n')
 
+      // PR 2 (Phase C.2 first segment) — current-turn capability pre-check.
+      // If `content` is a multimodal block array (image/video/...), validate
+      // it BEFORE entering the SDK. Vision-off + image → throws
+      // `ToolDomainError('provider_request_failed')` with recoverable:false.
+      // Subsequent provider request builders can then assume any remaining
+      // image/video blocks are historical residue and strip them silently
+      // (the second SDK-side segment lives in the provider Model classes).
+      if (Array.isArray(content)) {
+        // MultimodalBlock shapes vary by `block.type`; treat each as a
+        // record-with-type for the capability check (helper only inspects
+        // `type`). The cast keeps the helper free of MultimodalBlock import.
+        const blocksForCheck = content
+          .filter((b): b is MultimodalBlock => Boolean(b && typeof b === 'object'))
+          .map((b) => ({ ...(b as unknown as Record<string, unknown>) })) as Array<{ type: string; [key: string]: unknown }>
+        try {
+          assertCurrentMessageCapability(blocksForCheck, {
+            supportsVision: capabilities?.supportsVision === true,
+            // PR 2 review patch — `supportsNativeVideo` is the existing
+            // capability flag that tracks "this provider accepts native
+            // video blocks". Hardcoding `false` here blocked legitimate
+            // multi-turn video tasks at SDK entry.
+            supportsVideo: capabilities?.supportsNativeVideo === true,
+          })
+        } catch (capErr) {
+          const userMessage = capErr instanceof Error ? capErr.message : String(capErr)
+          logAgentMetric(TOOL_ERROR_METRICS.providerRequestImageBlockedAtAttach, {
+            sessionId,
+            errorMessage: userMessage.slice(0, 200),
+          })
+          emitOutput(userMessage, 'error')
+          emitOutput('', 'done')
+          emitStatus('error', 'blocked_config')
+          return this.buildResult({
+            success: false,
+            error: userMessage,
+            finalText: '',
+            cancelled: false,
+            taskId,
+            usedTools,
+            transcriptEvents,
+            projectionPatches,
+            terminalReason: 'blocked_config',
+          })
+        }
+      }
       let nextInput = toSdkInput(content as RunMessage)
       let documentTargetRepairAttempts = 0
       let documentTargetContinuationRepairAttempts = 0

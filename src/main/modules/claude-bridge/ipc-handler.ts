@@ -29,7 +29,10 @@ import {
   type AskUserAnswer,
   type AskUserQuestionSpec,
 } from '../tools/builtins/ask-user-questions-store'
-import { ToolDomainError } from '../tools/tool-errors'
+import {
+  cancelAskUserQuestionsCardCore,
+  submitAskUserQuestionsAnswersCore,
+} from '../tools/builtins/ask-user-questions'
 import { getDatabase } from '../database'
 import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
 import { sanitizeAssistantText } from '../agent-control/tool-call-text-guard'
@@ -159,6 +162,19 @@ const chatRepository = new ChatRepository()
  */
 let currentTaskProjectionsChangeOff: (() => void) | null = null
 
+/**
+ * Stage U (PR 1, B.4b) — module-scoped guard so the ask_user_questions DB
+ * sweep runs at most once per main-process lifetime. `setupAgentIPC` is
+ * re-invoked on dev hot-reload of the renderer side; without this latch
+ * the sweep would re-cancel any live in-memory cards on every reload.
+ *
+ * Reset only by a true main-process restart (the module is reloaded along
+ * with the rest of main). `cleanupAgentRuntime` deliberately does NOT reset
+ * it — quitting the app and re-launching is the only legitimate path to
+ * re-trigger the sweep.
+ */
+let askUserQuestionsSweepRanForBoot = false
+
 function cleanupSkillSessionState(sessionId?: string, reason = 'Skill session state cleared'): void {
   if (sessionId) {
     clearLastReferenceSkill(sessionId)
@@ -168,6 +184,15 @@ function cleanupSkillSessionState(sessionId?: string, reason = 'Skill session st
     // turn that issued them; a session reset / kill must drop them too so
     // the renderer card UI clears and the model's awaiting Promise unblocks.
     getAskUserQuestionsStore().rejectBySession(sessionId, new Error(reason))
+    // PR 1 B.4c — DB rows for cards in this session must also be swept,
+    // otherwise the next renderer hydrate would resurrect a pending row whose
+    // in-memory Promise is already gone.
+    try {
+      const swept = getDatabase().sweepPendingAskUserQuestionsCardsBySession(sessionId, 'session_reset')
+      if (swept > 0) {
+        logAgentMetric('ask_user_questions_session_reset_swept_db', { sessionId, swept })
+      }
+    } catch { /* swallow — best-effort */ }
     return
   }
   clearAllReferenceSkillHints()
@@ -180,6 +205,14 @@ function cancelSkillSessionPendingInteractions(sessionId?: string, reason = 'Ski
   if (sessionId) {
     getEphemeralExecutionStore().rejectBySession(sessionId, new Error(reason))
     getAskUserQuestionsStore().rejectBySession(sessionId, new Error(reason))
+    // PR 1 B.4c — keep DB aligned with in-memory store after a session-scoped
+    // interaction cancel.
+    try {
+      const swept = getDatabase().sweepPendingAskUserQuestionsCardsBySession(sessionId, 'session_reset')
+      if (swept > 0) {
+        logAgentMetric('ask_user_questions_session_reset_swept_db', { sessionId, swept })
+      }
+    } catch { /* swallow — best-effort */ }
     return
   }
   getEphemeralExecutionStore().clear()
@@ -226,20 +259,6 @@ function persistAskUserQuestionsCardPending(args: PersistAskUserQuestionsCardArg
   )
 }
 
-function renderCardSummary(
-  questions: AskUserQuestionSpec[],
-  answers: AskUserAnswer[],
-): string {
-  const byId = new Map(answers.map((a) => [a.id, a] as const))
-  const parts = questions.map((q, index) => {
-    const answer = byId.get(q.id)
-    if (!answer) return `${index + 1}. ${q.question} → (未作答)`
-    const rendered = Array.isArray(answer.answer) ? answer.answer.join(' / ') : String(answer.answer)
-    return `${index + 1}. ${q.question} → ${rendered}`
-  })
-  return `用户回答了 ${answers.length}/${questions.length} 个问题：\n${parts.join('\n')}`
-}
-
 export async function cleanupAgentRuntime(): Promise<void> {
   // Stage O — drop the projection-change subscription BEFORE stopping the
   // runtime so any trailing emit during stop() doesn't reach a destroyed
@@ -284,15 +303,30 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   // Boot sweep runs FIRST (synchronously, before any renderer hydrate) so
   // pending cards from a previous app run never resurrect with a missing
   // Promise resolver.
-  try {
-    const swept = getDatabase().sweepPendingAskUserQuestionsCardsOnBoot()
-    if (swept > 0) {
-      log(`ask_user_questions boot sweep cancelled ${swept} stale pending card(s)`)
+  //
+  // Stage U (PR 1, B.4b) — guarded by `askUserQuestionsSweepRanForBoot` so
+  // the sweep happens once per main-process lifetime. Even within that one
+  // sweep, the in-memory store snapshot (`liveCardIds`) protects any cards
+  // whose Promise resolver is still alive (e.g. dev reload preserved them).
+  if (!askUserQuestionsSweepRanForBoot) {
+    try {
+      const liveCardIds = new Set(
+        getAskUserQuestionsStore().list().map((entry) => entry.cardId),
+      )
+      const { mutated, skippedLive } = getDatabase().sweepPendingAskUserQuestionsCardsOnBoot({ liveCardIds })
+      if (mutated > 0) {
+        log(`ask_user_questions boot sweep cancelled ${mutated} stale pending card(s)`)
+      }
+      if (skippedLive > 0) {
+        log(`ask_user_questions boot sweep skipped ${skippedLive} live card(s) (in-memory store)`)
+        logAgentMetric('ask_user_questions_boot_sweep_skipped_live', { skippedLive })
+      }
+    } catch (sweepErr) {
+      // Don't crash boot — the worst case is one stale pending card we'll
+      // hide via renderer-side timestamp check.
+      log(`ask_user_questions boot sweep failed: ${sweepErr instanceof Error ? sweepErr.message : String(sweepErr)}`)
     }
-  } catch (sweepErr) {
-    // Don't crash boot — the worst case is one stale pending card we'll
-    // hide via renderer-side timestamp check.
-    log(`ask_user_questions boot sweep failed: ${sweepErr instanceof Error ? sweepErr.message : String(sweepErr)}`)
+    askUserQuestionsSweepRanForBoot = true
   }
   registerAskUserQuestionsCardEmitter((event) => {
     if (mainWindow.isDestroyed()) return
@@ -384,41 +418,14 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
         answers.push({ id, answer: list })
       }
     }
-    const store = getAskUserQuestionsStore()
-    const record = store.get(cardId)
-    if (!record) {
-      return { success: false, error: 'No pending card with this id (already answered, cancelled or timed out)' }
-    }
-    const answeredAt = Date.now()
-    // DB write first — so a re-hydrate immediately after this returns sees
-    // status='submitted'. Failure aborts the resolve so the model isn't
-    // told the user answered when persistence didn't actually land.
-    try {
-      const existing = getDatabase().getChatMessageById(cardId)
-      const meta: Record<string, unknown> = existing?.meta_json
-        ? (JSON.parse(existing.meta_json) as Record<string, unknown>)
-        : {}
-      const aug = (meta.askUserQuestions as Record<string, unknown>) || {}
-      const nextMeta: Record<string, unknown> = {
-        ...meta,
-        askUserQuestions: {
-          ...aug,
-          status: 'submitted',
-          answers,
-          answeredAt,
-        },
-      }
-      const summary = renderCardSummary(record.questions, answers)
-      getDatabase().updateChatMessageMeta(cardId, nextMeta, { content: summary })
-    } catch (persistErr) {
-      const message = persistErr instanceof Error ? persistErr.message : String(persistErr)
-      return { success: false, error: `Failed to persist answers: ${message}` }
-    }
-    const resolved = store.resolve(cardId, { answers, answeredAt })
-    if (!resolved) {
-      return { success: false, error: 'Card resolver missed (race) — answers were persisted but the model turn already moved on' }
-    }
-    return { success: true }
+    // PR 1 — submit logic lives in `submitAskUserQuestionsAnswersCore` so it
+    // can be unit-tested without electron / sqlite. This handler is the IPC
+    // thin wrapper: payload unwrap + dep injection + result forward.
+    return submitAskUserQuestionsAnswersCore(cardId, answers, {
+      store: getAskUserQuestionsStore(),
+      db: getDatabase(),
+      logMetric: (name, payload) => logAgentMetric(name, payload),
+    })
   })
   ipcMain.handle('agent:askUserQuestions:cancel', (_event, rawPayload: unknown) => {
     const payload = (rawPayload || {}) as { cardId?: string; reason?: string }
@@ -427,43 +434,13 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     const reason = typeof payload.reason === 'string' && payload.reason.length > 0
       ? payload.reason
       : 'user_cancelled'
-    const store = getAskUserQuestionsStore()
-    const record = store.get(cardId)
-    const cancelledAt = Date.now()
-    try {
-      const existing = getDatabase().getChatMessageById(cardId)
-      if (existing) {
-        const meta: Record<string, unknown> = existing.meta_json
-          ? (JSON.parse(existing.meta_json) as Record<string, unknown>)
-          : {}
-        const aug = (meta.askUserQuestions as Record<string, unknown>) || {}
-        const nextMeta: Record<string, unknown> = {
-          ...meta,
-          askUserQuestions: {
-            ...aug,
-            status: 'cancelled',
-            cancelReason: reason,
-            cancelledAt,
-          },
-        }
-        getDatabase().updateChatMessageMeta(cardId, nextMeta)
-      }
-    } catch {
-      // Persist failure should not block the in-flight Promise rejection;
-      // the next renderer hydrate will pick up the stale pending row.
-    }
-    if (record) {
-      // Map the reason to a tool error kind. `user_typed_instead` is the
-      // common "user sent a new message while a card was pending" case —
-      // the handler returns errorKind=user_skipped which the model sees
-      // as "the user replied with prose instead of card answers".
-      const errorKind = reason === 'user_typed_instead' ? 'user_skipped' : 'user_cancelled'
-      const friendly = reason === 'user_typed_instead'
-        ? '用户用新消息替代了选项回答。'
-        : '用户取消了反问卡。'
-      store.reject(cardId, new ToolDomainError(errorKind, friendly, { cardId, reason }))
-    }
-    return { success: true }
+    // PR 1 — cancel logic lives in `cancelAskUserQuestionsCardCore` for the
+    // same testability reasons as submit. See the test file for B.4a coverage.
+    return cancelAskUserQuestionsCardCore(cardId, reason, {
+      store: getAskUserQuestionsStore(),
+      db: getDatabase(),
+      logMetric: (name, payload) => logAgentMetric(name, payload),
+    })
   })
   ipcMain.handle('agent:askUserQuestions:listPending', () => {
     // Source of truth = DB rows still tagged status='pending'. Combine with

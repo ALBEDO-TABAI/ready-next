@@ -19,9 +19,9 @@ export const def: AIProviderDef = {
   agentProtocol: 'anthropic',
   extraHeaders: { 'anthropic-version': '2023-06-01' },
   models: [
-    { id: 'claude-opus-4-20250514', label: 'Claude Opus 4', category: 'chat', description: '最强推理' },
-    { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4', category: 'chat', description: '均衡性能' },
-    { id: 'claude-haiku-3-5-20241022', label: 'Claude Haiku 3.5', category: 'chat', description: '快速低成本' },
+    { id: 'claude-opus-4-20250514', label: 'Claude Opus 4', category: 'chat', description: '最强推理', capabilityOverrides: { multiTurnThinkingPolicy: 'echo_required' } },
+    { id: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4', category: 'chat', description: '均衡性能', capabilityOverrides: { multiTurnThinkingPolicy: 'echo_required' } },
+    { id: 'claude-haiku-3-5-20241022', label: 'Claude Haiku 3.5', category: 'chat', description: '快速低成本', capabilityOverrides: { multiTurnThinkingPolicy: 'echo_required' } },
     { id: '__custom__', label: '自定义模型 ID', category: 'chat', description: '手动输入，如 kimi-for-coding' },
   ],
   apiKeyPlaceholder: 'sk-ant-...',

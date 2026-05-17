@@ -41,6 +41,25 @@ function isQuestionAnswered(
   return false
 }
 
+/**
+ * Stage U (PR 1) — `cancelReason` → 中文展示文案。新增的 cancelReason
+ * 来源详见 `error-kinds.ts` 与 `ipc-handler.ts`。未知 reason 走 fallback
+ * 文案，避免 `default-cancelled` UI 出现裸的英文 reason 字符串。
+ */
+function cancelHeadlineFromReason(reason?: string): string {
+  switch (reason) {
+    case 'user_typed_instead': return '已用新消息替代（跳过）'
+    case 'user_cancelled': return '已取消'
+    case 'app_restart': return '已取消（应用已重启）'
+    case 'session_reset': return '已取消（会话已重置）'
+    case 'card_resolver_missed': return '已取消（系统状态不一致，答案未送达模型）'
+    case 'cancel_persist_failed': return '已取消（服务端记录失败，重启后会自动清理）'
+    case 'card_row_missing': return '已取消（卡片已被会话清理）'
+    case undefined: return '已取消'
+    default: return '已取消'
+  }
+}
+
 function buildInitialAnswers(card: AskUserQuestionsCardState): AnswerMap {
   if (card.status === 'submitted' && Array.isArray(card.answers)) {
     const out: AnswerMap = {}
@@ -88,7 +107,12 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
   const canGoForward = safeIndex < totalQuestions - 1 && (
     currentQ.required === false || isQuestionAnswered(currentQ, answers)
   )
-  const canSubmit = isPending && allRequiredAnswered
+  // Stage U (PR 1, B.5) — `localDisabled` is the pre-send cancel hook saying
+  // "an in-flight cancel for this card timed out; do not allow submit until
+  // the late cancel result lands". We keep status:'pending' so the card UI
+  // shape doesn't jump, but the submit button is greyed and a hint is shown.
+  const localDisabled = card.localDisabled === true
+  const canSubmit = isPending && allRequiredAnswered && !localDisabled
 
   const setAnswer = useCallback((id: string, value: string | string[]) => {
     setAnswers((prev) => ({ ...prev, [id]: value }))
@@ -160,7 +184,7 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
     const headlineByStatus: Record<typeof card.status, string> = {
       pending: '等待回答',
       submitted: `已回复 ${card.answers?.length ?? 0}/${totalQuestions} 题`,
-      cancelled: card.cancelReason === 'user_typed_instead' ? '已用新消息替代（跳过）' : '已取消',
+      cancelled: cancelHeadlineFromReason(card.cancelReason),
       timeout: '已超时（未回答）',
     }
     return (
@@ -419,7 +443,12 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
           <ChevronRight size={16} />
         </button>
 
-        <div style={{ marginLeft: 'auto' }}>
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+          {localDisabled && (
+            <span style={{ fontSize: 11.5, color: 'var(--text-light)', fontStyle: 'italic' }}>
+              取消处理中…
+            </span>
+          )}
           <button
             type="button"
             disabled={!canSubmit || isSubmitting}
@@ -440,7 +469,7 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
               transition: 'background-color 120ms ease, border-color 120ms ease',
             }}
           >
-            {isSubmitting ? '提交中…' : '提交回答'}
+            {isSubmitting ? '提交中…' : localDisabled ? '已禁用' : '提交回答'}
           </button>
         </div>
       </div>

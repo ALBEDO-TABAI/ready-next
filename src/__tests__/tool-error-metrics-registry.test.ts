@@ -18,6 +18,9 @@ import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-met
 test('registry exposes documented tool-error metric keys', () => {
   const keys = Object.keys(TOOL_ERROR_METRICS).sort()
   assert.deepEqual(keys, [
+    'askUserQuestionsCancelPersistFailed',
+    'askUserQuestionsSubmitDbFailed',
+    'askUserQuestionsSubmitResolverMissed',
     'authorizationDenied',
     'childResumeDisabledByFlag',
     'childRunCircuitBreak',
@@ -34,6 +37,9 @@ test('registry exposes documented tool-error metric keys', () => {
     'outputDirGc',
     'outputDirSweepFailed',
     'providerArgumentsCorrupt',
+    'providerRequestImageBlockedAtAttach',
+    'providerThinkingEchoRequired400',
+    'providerThinkingEchoUnsupported',
     'resolutionViolation',
     'runStateSelectionDirSkipped',
     'secretDecryptFailed',
@@ -51,6 +57,7 @@ test('registry exposes documented tool-error metric keys', () => {
     'toolLoopRepetitionDetected',
     'toolSnapshotMismatch',
     'unknownSurfaced',
+    'widgetBoundaryViolation',
     'xmlToolCallsRecoveredFromNative',
   ])
 })
@@ -101,4 +108,11 @@ test('historical metric strings are preserved (log-compat contract)', () => {
   assert.equal(TOOL_ERROR_METRICS.skillReferenceInlineFailed, 'skill_reference_inline_failed')
   assert.equal(TOOL_ERROR_METRICS.skillProjectionPartial, 'skill_projection_partial')
   assert.equal(TOOL_ERROR_METRICS.runStateSelectionDirSkipped, 'run_state_selection_dir_skipped')
+  // Stage U (PR 1) — ask_user_questions submit / cancel chain diagnostics.
+  assert.equal(TOOL_ERROR_METRICS.askUserQuestionsSubmitDbFailed, 'ask_user_questions_submit_db_failed')
+  assert.equal(TOOL_ERROR_METRICS.askUserQuestionsSubmitResolverMissed, 'ask_user_questions_submit_resolver_missed')
+  assert.equal(TOOL_ERROR_METRICS.askUserQuestionsCancelPersistFailed, 'ask_user_questions_cancel_persist_failed')
+  assert.equal(TOOL_ERROR_METRICS.providerThinkingEchoUnsupported, 'provider_thinking_echo_unsupported')
+  assert.equal(TOOL_ERROR_METRICS.providerThinkingEchoRequired400, 'provider_thinking_echo_required_400')
+  assert.equal(TOOL_ERROR_METRICS.providerRequestImageBlockedAtAttach, 'provider_request_image_blocked_at_attach')
 })

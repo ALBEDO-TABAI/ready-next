@@ -18,6 +18,7 @@ import {
 } from '../modules/agent/messageComposer'
 import { mapBackendErrorToFriendly } from '../modules/agent/error-message-mapping'
 import { emitRendererAgentMetric } from '../modules/agent/rendererMetrics'
+import { boundedCancelWithFallback } from '../modules/agent/boundedCancelWithFallback'
 import { createAgentRuntimeDriver, syncActiveScopeRunAliases } from '../modules/agent/runtimeDriver'
 import { installAgentPanelTestHarness } from '../modules/agent/agentPanelTestHarness'
 import {
@@ -318,26 +319,128 @@ function extractAskUserCardState(
   }
 }
 
-async function cancelPendingAskUserQuestionsForCurrentScope(): Promise<void> {
+/**
+ * Stage U (PR 1, B.5) — flip a card's renderer-only `localDisabled` flag.
+ * Used by the sendMessage cancel hook when the IPC cancel times out: we keep
+ * `status:'pending'` (no terminal write) but disable the submit button so
+ * the user can't double-submit while the cancel races behind the scenes.
+ */
+function setCardLocallyDisabled(cardId: string, disabled: boolean): void {
+  useAgent.setState((prev) => ({
+    messages: prev.messages.map((m) => {
+      if (m.id !== cardId || m.type !== 'ask_user_questions' || !m.askUserQuestions) return m
+      return {
+        ...m,
+        askUserQuestions: {
+          ...m.askUserQuestions,
+          localDisabled: disabled,
+        },
+      }
+    }),
+  }))
+}
+
+interface CancelPendingAskUserQuestionsOptions {
+  /** Cap the wait at this many ms. After this, log a metric, mark the card
+   *  locally disabled, and let the caller proceed. Default 2000ms. */
+  timeoutMs?: number
+}
+
+/**
+ * Stage U (PR 1, B.5) — cancel the most-recent pending ask_user_questions
+ * card for the current scope, bounded by `timeoutMs` (default 2s).
+ *
+ * Algorithm lives in `boundedCancelWithFallback` for testability; this
+ * function is the renderer-bound thin wrapper that resolves the target
+ * cardId from useAgent state and wires up the side effects.
+ *
+ * Outcomes:
+ *   - normal path (< timeoutMs): cancel IPC returns, card folds to
+ *     `cancelled (user_typed_instead | cancel_persist_failed)`.
+ *   - timeout path: card is marked `localDisabled = true` so submit is
+ *     blocked, metric emitted, caller proceeds. Late cancel arrival still
+ *     flips the card to terminal (the fold callback is idempotent — only
+ *     applies if status is still 'pending').
+ */
+async function cancelPendingAskUserQuestionsForCurrentScope(
+  options: CancelPendingAskUserQuestionsOptions = {},
+): Promise<{ kind: 'no_pending' | 'cancelled' | 'timeout' | 'error'; cardId?: string }> {
+  const timeoutMs = typeof options.timeoutMs === 'number' && options.timeoutMs > 0
+    ? options.timeoutMs
+    : 2000
   const state = useAgent.getState()
   const scopeId = state.currentScopeId
-  if (!scopeId) return
+  if (!scopeId) return { kind: 'no_pending' }
   const api = window.electronAPI?.agentInteraction
-  if (!api) return
-  // Walk the message list backwards to find the most recent pending card.
+  if (!api) return { kind: 'no_pending' }
+
+  let targetCardId: string | null = null
   for (let i = state.messages.length - 1; i >= 0; i -= 1) {
     const msg = state.messages[i]
     if (msg.type !== 'ask_user_questions') continue
     if (!msg.askUserQuestions || msg.askUserQuestions.status !== 'pending') continue
-    try {
-      await api.cancelAskUserQuestions({ cardId: msg.askUserQuestions.cardId, reason: 'user_typed_instead' })
-    } catch {
-      // silent-catch: IPC bridge unavailable or main rejected the cancel —
-      // either way the next message must still go out, and main-side store
-      // cleanup happens on session reset.
-    }
+    targetCardId = msg.askUserQuestions.cardId
     break
   }
+  if (!targetCardId) return { kind: 'no_pending' }
+  const cardId = targetCardId
+
+  const outcome = await boundedCancelWithFallback({
+    cancelIpc: () => api.cancelAskUserQuestions({ cardId, reason: 'user_typed_instead' }),
+    onTimeout: () => {
+      setCardLocallyDisabled(cardId, true)
+      emitRendererAgentMetric('ask_user_questions_cancel_pre_send_timeout', {
+        cardId,
+        timeoutMs,
+      })
+    },
+    onCancelLanded: (result) => {
+      const r = result as { success: boolean; errorKind?: string }
+      const cancelledAt = Date.now()
+      useAgent.setState((prev) => ({
+        messages: prev.messages.map((m) => {
+          if (m.id !== cardId || m.type !== 'ask_user_questions' || !m.askUserQuestions) return m
+          // Only fold if still pending — if a previous timeout already locally
+          // disabled it and a late cancel arrives, override to cancelled.
+          if (m.askUserQuestions.status !== 'pending') return m
+          return {
+            ...m,
+            askUserQuestions: {
+              ...m.askUserQuestions,
+              status: 'cancelled',
+              cancelReason: r.success
+                ? 'user_typed_instead'
+                : (r.errorKind === 'cancel_persist_failed' ? 'cancel_persist_failed' : 'user_typed_instead'),
+              cancelledAt,
+              localDisabled: false,
+            },
+          }
+        }),
+      }))
+    },
+    onCancelError: (err) => {
+      // PR 1 B.5 (review patch) — cancel IPC rejected within the 2s window.
+      // Without this branch, the old card would stay pending + still
+      // submittable while sendMessage proceeds, re-opening the "stale card
+      // contaminates new turn" window. Mirror the timeout side effect:
+      //   - mark card locally disabled so submit is blocked
+      //   - emit metric so the failure is observable (re-uses the timeout
+      //     metric since both are "the cancel did not land cleanly before
+      //     the new message went out" — we differentiate via reason kind)
+      setCardLocallyDisabled(cardId, true)
+      emitRendererAgentMetric('ask_user_questions_cancel_pre_send_timeout', {
+        cardId,
+        timeoutMs,
+        kind: 'ipc_rejected',
+        errorMessage: err instanceof Error ? err.message.slice(0, 200) : String(err).slice(0, 200),
+      })
+    },
+    timeoutMs,
+  })
+
+  if (outcome.kind === 'cancelled') return { kind: 'cancelled', cardId }
+  if (outcome.kind === 'timeout') return { kind: 'timeout', cardId }
+  return { kind: 'error', cardId }
 }
 
 function rebuildAgentMessageFromRow(row: ChatRowFromIPC, agent: string): AgentMessage {
@@ -973,9 +1076,12 @@ export const useAgent = create<AgentState>((set, get) => ({
     // The cancel reason 'user_typed_instead' tells the tool handler to
     // return errorKind=user_skipped so the model treats it as "user
     // replied with prose" instead of a hard failure.
-    cancelPendingAskUserQuestionsForCurrentScope().catch(() => {
-      /* fire-and-forget — never block send on this */
-    })
+    //
+    // PR 1 B.5 — bounded await (2000ms hard cap). On timeout the old card is
+    // locally disabled (`localDisabled = true`) so the user can't double-submit
+    // while the late cancel races behind the scenes. We then proceed to send
+    // the new message — the user must never be blocked on a stuck IPC.
+    await cancelPendingAskUserQuestionsForCurrentScope({ timeoutMs: 2000 })
 
     const stateBeforeSend = get()
     const runBeforeSend = getActiveScopeRunState(
@@ -1598,6 +1704,33 @@ export function initAgentListeners(): () => void {
 }
 
 /**
+ * Stage U (PR 1, B.2/B.4a) — fold an ask_user_questions card to the local
+ * `cancelled` terminal state without going through IPC. Used when:
+ *   - Submit returned `waiting_task_gone` (DB row missing): card is dead;
+ *     show user the diagnostic reason instead of leaving it spinning.
+ *   - Cancel returned `cancel_persist_failed` (DB write failed): in-memory
+ *     Promise already rejected; UI must terminate so we don't keep showing
+ *     pending. Boot sweep will clean up the DB residue.
+ */
+function foldCardLocallyToCancelled(cardId: string, cancelReason: string): void {
+  const cancelledAt = Date.now()
+  useAgent.setState((prev) => ({
+    messages: prev.messages.map((m) => {
+      if (m.id !== cardId || m.type !== 'ask_user_questions' || !m.askUserQuestions) return m
+      return {
+        ...m,
+        askUserQuestions: {
+          ...m.askUserQuestions,
+          status: 'cancelled',
+          cancelReason,
+          cancelledAt,
+        },
+      }
+    }),
+  }))
+}
+
+/**
  * Submit handler used by `AskUserQuestionsCard`. Pushes answers to main and
  * updates the local message state on success so the card immediately flips
  * to its collapsed view (no need to wait for a re-hydrate round-trip).
@@ -1609,7 +1742,7 @@ export async function submitAskUserQuestionsAnswers(
   const api = window.electronAPI?.agentInteraction
   if (!api) return { success: false, error: 'agentInteraction API not available' }
   const result = await api.submitAskUserQuestions({ cardId, answers })
-  const r = result as { success: boolean; error?: string }
+  const r = result as { success: boolean; error?: string; errorKind?: string }
   if (r.success) {
     const answeredAt = Date.now()
     useAgent.setState((prev) => ({
@@ -1626,7 +1759,17 @@ export async function submitAskUserQuestionsAnswers(
         }
       }),
     }))
+  } else if (r.errorKind === 'waiting_task_gone') {
+    // PR 1 B.2 (row missing) — card row was swept; main has already
+    // rejected the in-memory Promise. Fold UI to a diagnostic cancelled.
+    foldCardLocallyToCancelled(cardId, 'card_row_missing')
+  } else if (r.errorKind === 'card_resolver_missed') {
+    // PR 1 B.3 — submit hit a resolver race; main rolled back the DB row.
+    // Mirror it locally so the card immediately collapses.
+    foldCardLocallyToCancelled(cardId, 'card_resolver_missed')
   }
+  // 'persistence_failed' / 'input_validation' / 'overlapping_card' are
+  // recoverable — keep UI pending so the user can retry / fix.
   return r
 }
 
@@ -1640,23 +1783,18 @@ export async function cancelAskUserQuestionsCard(
 ): Promise<{ success: boolean; error?: string }> {
   const api = window.electronAPI?.agentInteraction
   if (!api) return { success: false, error: 'agentInteraction API not available' }
-  const result = await api.cancelAskUserQuestions({ cardId, reason })
+  const result = await api.cancelAskUserQuestions({ cardId, reason }) as {
+    success: boolean
+    error?: string
+    errorKind?: string
+  }
   if (result.success) {
-    const cancelledAt = Date.now()
-    useAgent.setState((prev) => ({
-      messages: prev.messages.map((m) => {
-        if (m.id !== cardId || m.type !== 'ask_user_questions' || !m.askUserQuestions) return m
-        return {
-          ...m,
-          askUserQuestions: {
-            ...m.askUserQuestions,
-            status: 'cancelled',
-            cancelReason: reason,
-            cancelledAt,
-          },
-        }
-      }),
-    }))
+    foldCardLocallyToCancelled(cardId, reason)
+  } else if (result.errorKind === 'cancel_persist_failed') {
+    // PR 1 B.4a — in-memory store.reject succeeded; only the DB write failed.
+    // The model is already unblocked. UI must NOT keep showing pending — fold
+    // locally with the diagnostic reason. Boot sweep will reconcile DB later.
+    foldCardLocallyToCancelled(cardId, 'cancel_persist_failed')
   }
   return result
 }

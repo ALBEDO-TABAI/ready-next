@@ -11,10 +11,17 @@
  * PR-S4 wires real patchers.
  */
 
+export type MultiTurnThinkingPolicy =
+  | 'proven_safe'
+  | 'echo_required'
+  | 'unsupported'
+  | 'unknown'
+
 export interface ProviderCapabilityClass {
   supportsVision?: boolean
   supportsThinking?: boolean
   supportsLongContext?: boolean
+  multiTurnThinkingPolicy?: MultiTurnThinkingPolicy
 }
 
 export interface PatchProfile {

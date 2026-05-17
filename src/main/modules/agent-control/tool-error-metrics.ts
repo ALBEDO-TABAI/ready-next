@@ -161,6 +161,46 @@ export const TOOL_ERROR_METRICS = {
    */
   subagentCleanupDrainFailed: 'subagent_cleanup_drain_failed',
   /**
+   * Stage U (PR 1) — `ask_user_questions` submit IPC: DB write failed (throw
+   * or `updateChatMessageMeta` returned false). Distinct from
+   * `cancel_persist_failed` (submit vs cancel) and from `resolver_missed`
+   * (DB success but in-memory waiter gone). Detail payload includes
+   * `{ kind: 'throw'|'row_missing', cardId, errorMessage? }`.
+   */
+  askUserQuestionsSubmitDbFailed: 'ask_user_questions_submit_db_failed',
+  /**
+   * Stage U (PR 1) — `ask_user_questions` submit IPC: DB row update succeeded
+   * but `store.resolve(cardId, ...)` returned false. The submit handler
+   * rolls back the DB row to `cancelled (card_resolver_missed)` and returns
+   * `errorKind: 'card_resolver_missed'` so the renderer marks the card
+   * folded with the diagnostic reason.
+   */
+  askUserQuestionsSubmitResolverMissed: 'ask_user_questions_submit_resolver_missed',
+  /**
+   * Stage U (PR 1) — `ask_user_questions` cancel IPC: DB write failed but the
+   * in-memory store.reject was still issued. IPC returns `success:false` so
+   * the renderer can locally fold the card to `cancelled (cancel_persist_failed)`.
+   * Boot sweep next time will clean up the DB residue.
+   */
+  askUserQuestionsCancelPersistFailed: 'ask_user_questions_cancel_persist_failed',
+  /**
+   * Stage U (PR 3) — manual thinking mode was enabled for a provider/model
+   * whose multi-turn thinking behavior is not proven safe. Runtime blocks the
+   * provider request before network I/O and returns provider_request_failed.
+   */
+  providerThinkingEchoUnsupported: 'provider_thinking_echo_unsupported',
+  /**
+   * Stage U (PR 3) — fallback classifier saw a provider 400 mentioning
+   * thinking / reasoning_content / extended thinking. This is non-retryable
+   * and is surfaced as provider_request_failed.
+   */
+  providerThinkingEchoRequired400: 'provider_thinking_echo_required_400',
+  /**
+   * Stage U (PR 3) — current-turn media attachment was blocked before sending
+   * to a provider that does not support image/video input.
+   */
+  providerRequestImageBlockedAtAttach: 'provider_request_image_blocked_at_attach',
+  /**
    * Stage 2.1a — provider 返回的 tool_calls.arguments 不是合法的 JSON 对象
    * （空串 / "{}" 视为合法的空参数；非空但解析失败、或解析为数组 / 字符串 /
    * 数字 / null 都算 corrupt）。叶子层（openai-execution-client）丢弃该 call

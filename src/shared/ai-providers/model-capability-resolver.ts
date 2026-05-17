@@ -23,12 +23,13 @@
  */
 
 import type { AIProviderDef } from '../ai-providers'
-import type { ProviderCapabilityClass } from './types'
+import type { MultiTurnThinkingPolicy, ProviderCapabilityClass } from './types'
 
 export interface ResolvedModelCapabilities {
   supportsVision: boolean
   supportsThinking: boolean
   supportsLongContext: boolean
+  multiTurnThinkingPolicy: MultiTurnThinkingPolicy
 }
 
 export function resolveModelCapabilities(
@@ -42,5 +43,6 @@ export function resolveModelCapabilities(
     supportsVision: modelCap.supportsVision ?? providerCap.supportsVision ?? false,
     supportsThinking: modelCap.supportsThinking ?? providerCap.supportsThinking ?? false,
     supportsLongContext: modelCap.supportsLongContext ?? providerCap.supportsLongContext ?? false,
+    multiTurnThinkingPolicy: modelCap.multiTurnThinkingPolicy ?? providerCap.multiTurnThinkingPolicy ?? 'unknown',
   }
 }

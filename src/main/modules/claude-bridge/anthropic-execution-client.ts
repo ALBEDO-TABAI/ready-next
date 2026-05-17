@@ -1,6 +1,7 @@
 import { randomUUID } from 'crypto'
 import type { AIModelConfig } from '../../../shared/ai-providers'
 import { getProviderDef } from '../../../shared/ai-providers'
+import { resolveAIConfigCapabilities } from '../../../shared/ai-providers'
 import {
   applyProviderRequestPatch,
   applyProviderResponsePatch,
@@ -8,6 +9,11 @@ import {
   resolveProviderPatchProfile,
   type PatchContext,
 } from '../../../shared/ai-providers/index'
+import {
+  applyCapabilityFilterForRoute,
+  type MessageCapabilitySnapshot,
+} from '../agent-control/message-capability-filter'
+import { assertManualThinkingModeProviderSafe } from '../agent-control/thinking-compatibility'
 import { getPolicyAnthropicTools, collectToolNames, type ToolPolicy } from '../agent-control/execution-tool-config'
 import { logAgentMetric } from '../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../agent-control/tool-error-metrics'
@@ -64,6 +70,7 @@ export class AnthropicExecutionClient {
     onFallbackApplied?: (messages: AnthropicSessionLike['messages']) => void
     timeoutMs?: number
   }): Promise<{ text: string; fallback?: ExecutionFallbackInfo }> {
+    assertManualThinkingModeProviderSafe(params.config, 'legacy-anthropic-simple')
     try {
       return { text: await this.requestSimpleOnce(params) }
     } catch (error) {
@@ -109,7 +116,10 @@ export class AnthropicExecutionClient {
       model,
       max_tokens: 4096,
       system: params.session.systemPrompt,
-      messages: this.deps.serializeMessages(params.messagesOverride ?? params.session.messages, 'anthropic'),
+      messages: this.applyCapability(
+        this.deps.serializeMessages(params.messagesOverride ?? params.session.messages, 'anthropic'),
+        params.config,
+      ),
     }
     const patchCtx = this.buildPatchContext({
       config: params.config,
@@ -150,6 +160,7 @@ export class AnthropicExecutionClient {
     policy?: ToolPolicy
     timeoutMs?: number
   }): Promise<AnthropicExecutionResponse> {
+    assertManualThinkingModeProviderSafe(params.config, 'legacy-anthropic-tools')
     try {
       return await this.requestWithToolsOnce(params)
     } catch (error) {
@@ -197,7 +208,10 @@ export class AnthropicExecutionClient {
       model,
       max_tokens: 4096,
       system: params.session.systemPrompt,
-      messages: this.deps.serializeMessages(params.session.messages, 'anthropic'),
+      messages: this.applyCapability(
+        this.deps.serializeMessages(params.session.messages, 'anthropic'),
+        params.config,
+      ),
       tools,
     }
     const patchCtx = this.buildPatchContext({
@@ -271,6 +285,36 @@ export class AnthropicExecutionClient {
       })),
       toolTransport: 'text',
     }
+  }
+
+  /**
+   * Stage U (PR 2, Phase C.3) — wrap a provider-formatted Anthropic message
+   * array with the capability filter. Matches the OpenAI client wrapper —
+   * vision-off + historical image blocks → image stripped + count surfaced.
+   * Current-turn image blocks must already be gated at intake.
+   */
+  private applyCapability(
+    messages: Array<Record<string, unknown>>,
+    config: AIModelConfig,
+  ): Array<Record<string, unknown>> {
+    const resolved = resolveAIConfigCapabilities(config)
+    const snapshot: MessageCapabilitySnapshot = {
+      supportsVision: resolved?.supportsVision === true,
+      // PR 2 review patch — Anthropic natively accepts video on capable
+      // models; consult `supportsNativeVideo` so multi-turn video on
+      // Anthropic doesn't lose video blocks at sanitize.
+      supportsVideo: resolved?.supportsNativeVideo === true,
+    }
+    return applyCapabilityFilterForRoute(messages, snapshot, (decision) => {
+      logAgentMetric('provider_request_capability_filter', {
+        route: 'anthropic',
+        removedImageBlocks: decision.removedImageBlocks,
+        removedVideoBlocks: decision.removedVideoBlocks,
+        replacedWithPlaceholders: decision.replacedWithPlaceholders,
+        model: config.model,
+        provider: config.provider,
+      })
+    })
   }
 
   resolveModel(config: AIModelConfig, baseUrl: string): string {

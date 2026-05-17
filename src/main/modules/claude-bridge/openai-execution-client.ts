@@ -28,6 +28,11 @@ import {
   buildResponsesToolCalls,
   type ProviderToolCallFailure,
 } from './provider-tool-arguments'
+import {
+  applyCapabilityFilterForRoute,
+  type MessageCapabilitySnapshot,
+} from '../agent-control/message-capability-filter'
+import { assertManualThinkingModeProviderSafe } from '../agent-control/thinking-compatibility'
 
 export interface OpenAIChatMessage {
   role: 'user' | 'assistant' | 'system' | 'tool'
@@ -99,6 +104,7 @@ export class OpenAIExecutionClient {
     enableKimiWebSearch?: boolean
     timeoutMs?: number
   }): Promise<{ text: string; fallback?: ExecutionFallbackInfo }> {
+    assertManualThinkingModeProviderSafe(params.config, 'legacy-openai-simple')
     const headers = this.buildHeaders(params.config, params.provider)
     let model = params.config.model
     if (params.config.provider === 'volcengine' && params.config.endpointId) {
@@ -117,7 +123,7 @@ export class OpenAIExecutionClient {
       const reqBody: Record<string, unknown> = {
         model,
         instructions: params.session.systemPrompt,
-        input: this.serializeMessagesForResponses(repairedMessages),
+        input: this.applyCapability(this.serializeMessagesForResponses(repairedMessages), params.config, 'openai-responses'),
         stream: false,
       }
       if (runtime.reasoningEffort) {
@@ -152,7 +158,7 @@ export class OpenAIExecutionClient {
 
     const messages = [
       { role: 'system' as const, content: params.session.systemPrompt },
-      ...this.serializeMessages(repairedMessages),
+      ...this.applyCapability(this.serializeMessages(repairedMessages), params.config, 'openai-chat'),
     ]
 
     const url = `${params.baseUrl}/chat/completions`
@@ -201,6 +207,7 @@ export class OpenAIExecutionClient {
     signal: AbortSignal
     policy?: ToolPolicy
   }): Promise<OpenAIExecutionResponse> {
+    assertManualThinkingModeProviderSafe(params.config, 'legacy-openai-text-tool-bridge')
     const headers = this.buildHeaders(params.config, params.provider)
     let model = params.config.model
     if (params.config.provider === 'volcengine' && params.config.endpointId) {
@@ -221,7 +228,7 @@ export class OpenAIExecutionClient {
       const reqBody: Record<string, unknown> = {
         model,
         instructions: systemPrompt,
-        input: this.serializeMessagesForResponses(repairedMessages),
+        input: this.applyCapability(this.serializeMessagesForResponses(repairedMessages), params.config, 'openai-responses'),
         stream: false,
       }
       if (runtime.reasoningEffort) {
@@ -259,7 +266,7 @@ export class OpenAIExecutionClient {
 
     const messages = [
       { role: 'system' as const, content: systemPrompt },
-      ...this.serializeMessages(repairedMessages),
+      ...this.applyCapability(this.serializeMessages(repairedMessages), params.config, 'openai-chat'),
     ]
     const url = `${params.baseUrl}/chat/completions`
     this.deps.log(`POST ${url}, model=${model}, tool bridge=text`)
@@ -314,6 +321,7 @@ export class OpenAIExecutionClient {
     preferTextToolBridgeOnce?: boolean
     toolSnapshotContext?: OpenAIToolSnapshotContext
   }): Promise<OpenAIExecutionResponse> {
+    assertManualThinkingModeProviderSafe(params.config, 'legacy-openai-tools')
     const headers = this.buildHeaders(params.config, params.provider)
     const isKimiCodingBase = params.baseUrl.replace(/\/+$/, '').includes('api.kimi.com/coding')
     if (isKimiCodingBase) {
@@ -565,6 +573,38 @@ export class OpenAIExecutionClient {
     }
   }
 
+  /**
+   * Stage U (PR 2, Phase C.3) — wrap a provider-formatted message array
+   * with the capability filter. Used at every serialize call site so the
+   * legacy DirectChatEngine path matches the SDK's contract: vision-off
+   * model + historical image blocks → image residue stripped + counts
+   * surfaced via metric. Current-turn image blocks must have been gated
+   * in `direct-chat.ts` attachment intake before reaching this point.
+   */
+  private applyCapability(
+    messages: Array<Record<string, unknown>>,
+    config: AIModelConfig,
+    route: 'openai-chat' | 'openai-responses',
+  ): Array<Record<string, unknown>> {
+    const resolved = resolveAIConfigCapabilities(config)
+    const snapshot: MessageCapabilitySnapshot = {
+      supportsVision: resolved?.supportsVision === true,
+      // PR 2 review patch — consult `supportsNativeVideo` so capable
+      // providers' historical video blocks are not stripped.
+      supportsVideo: resolved?.supportsNativeVideo === true,
+    }
+    return applyCapabilityFilterForRoute(messages, snapshot, (decision) => {
+      logAgentMetric('provider_request_capability_filter', {
+        route,
+        removedImageBlocks: decision.removedImageBlocks,
+        removedVideoBlocks: decision.removedVideoBlocks,
+        replacedWithPlaceholders: decision.replacedWithPlaceholders,
+        model: config.model,
+        provider: config.provider,
+      })
+    })
+  }
+
   private buildHeaders(
     config: AIModelConfig,
     provider: AIProviderDef | undefined,
@@ -663,7 +703,7 @@ export class OpenAIExecutionClient {
     repairedMessages: OpenAIChatMessage[]
     policy?: ToolPolicy
   }): Promise<OpenAIExecutionResponse> {
-    const continuation = this.getResponsesContinuationState(params.session)
+    const continuation = this.getResponsesContinuationState(params.session, params.config)
     const url = `${params.openAIBase}/responses`
     this.deps.log(`POST ${url}, model=${params.model}, with tools, wireApi=responses${params.policy?.forceDocumentTool ? ' (force document)' : params.policy?.forceDesignTool ? ' (force design)' : ''}, timeout=${params.timeoutMs}`)
     const reqBody: Record<string, unknown> = {
@@ -676,10 +716,13 @@ export class OpenAIExecutionClient {
     }
     if (continuation) {
       reqBody.previous_response_id = continuation.previousResponseId
+      // `getResponsesContinuationState` is the canonical builder for the
+      // continuation slice and already passes through `applyCapability`,
+      // so `continuation.input` is safe to consume directly.
       reqBody.input = continuation.input
     } else {
       reqBody.instructions = params.session.systemPrompt
-      reqBody.input = this.serializeMessagesForResponses(params.repairedMessages)
+      reqBody.input = this.applyCapability(this.serializeMessagesForResponses(params.repairedMessages), params.config, 'openai-responses')
     }
 
     // Stage S (PR-S4 / W3.5) — provider-default + profile patcher.
@@ -739,7 +782,7 @@ export class OpenAIExecutionClient {
   }): Promise<OpenAIExecutionResponse> {
     const messages = [
       { role: 'system' as const, content: params.session.systemPrompt },
-      ...this.serializeMessages(params.repairedMessages),
+      ...this.applyCapability(this.serializeMessages(params.repairedMessages), params.config, 'openai-chat'),
     ]
     const url = `${params.openAIBase}/chat/completions`
     this.deps.log(`POST ${url}, model=${params.model}, with tools${params.policy?.forceDocumentTool ? ' (force document)' : params.policy?.forceDesignTool ? ' (force design)' : ''}, timeout=${params.timeoutMs}`)
@@ -1015,7 +1058,10 @@ export class OpenAIExecutionClient {
     }))
   }
 
-  private getResponsesContinuationState(session: OpenAISessionLike): {
+  private getResponsesContinuationState(
+    session: OpenAISessionLike,
+    config: AIModelConfig,
+  ): {
     previousResponseId: string
     input: Array<Record<string, unknown>>
   } | null {
@@ -1036,7 +1082,14 @@ export class OpenAIExecutionClient {
     if (!previousResponseId) return null
     return {
       previousResponseId,
-      input: this.serializeMessagesForResponses(rawMessages.slice(startIndex) as unknown as OpenAIChatMessage[]),
+      // PR 2 Phase C.3 — wrap at the source so the only consumer doesn't
+      // have to re-apply the capability filter (the CI gate enforces that
+      // every bare `this.serializeMessages*(...)` call is wrapped here).
+      input: this.applyCapability(
+        this.serializeMessagesForResponses(rawMessages.slice(startIndex) as unknown as OpenAIChatMessage[]),
+        config,
+        'openai-responses',
+      ),
     }
   }
 
@@ -1067,7 +1120,9 @@ export class OpenAIExecutionClient {
           if (block.type === 'text') return { type: 'text', text: block.text }
           return block
         })
-        return { role: message.role, content: parts }
+        const out: Record<string, unknown> = { role: message.role, content: parts }
+        if (message.reasoning_content !== undefined) out.reasoning_content = message.reasoning_content
+        return out
       }
       return { ...message } as Record<string, unknown>
     })

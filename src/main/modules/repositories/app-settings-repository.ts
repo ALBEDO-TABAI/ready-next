@@ -1,4 +1,6 @@
 import {
+  assertAIWorkspaceThinkingModesValid,
+  assertThinkingModeConfigValid,
   createCustomAIProviderProfile,
   createDefaultAIWorkspace,
   deriveLegacyAISettingsPayload,
@@ -46,7 +48,7 @@ export class AppSettingsRepository {
     })
 
     if (this.getSetting('ai_model_config') || this.getSetting('ai_saved_configs')) {
-      this.setAIWorkspace(migrated)
+      this.persistAIWorkspace(normalizeAIWorkspace(migrated))
       return migrated
     }
 
@@ -59,6 +61,7 @@ export class AppSettingsRepository {
 
   setAIConfig(config: AIModelConfig): void {
     const normalizedConfig = normalizeAIConfig(config)
+    assertThinkingModeConfigValid(normalizedConfig)
     const workspace = this.getAIWorkspace()
     const nextWorkspace = normalizeAIWorkspace({
       ...workspace,
@@ -130,6 +133,11 @@ export class AppSettingsRepository {
 
   setAIWorkspace(workspace: AIProviderWorkspace): void {
     const normalizedWorkspace = normalizeAIWorkspace(workspace)
+    assertAIWorkspaceThinkingModesValid(normalizedWorkspace)
+    this.persistAIWorkspace(normalizedWorkspace)
+  }
+
+  private persistAIWorkspace(normalizedWorkspace: AIProviderWorkspace): void {
     this.setSetting('ai_provider_workspace', JSON.stringify(normalizedWorkspace))
 
     const legacyPayload = deriveLegacyAISettingsPayload(normalizedWorkspace)

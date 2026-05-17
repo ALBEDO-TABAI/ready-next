@@ -50,6 +50,7 @@ describe('resolveAIConfigCapabilities — three-layer capabilityClass merge', ()
       assert.strictEqual(caps?.supportsVision, true)
       assert.strictEqual(caps?.supportsThinking, true)
       assert.strictEqual(caps?.supportsLongContext, true)
+      assert.strictEqual(caps?.multiTurnThinkingPolicy, 'echo_required')
     })
 
     it('fox — conservative default (vision=false, thinking=false, longContext=false)', () => {
@@ -58,6 +59,7 @@ describe('resolveAIConfigCapabilities — three-layer capabilityClass merge', ()
       assert.strictEqual(caps?.supportsVision, false)
       assert.strictEqual(caps?.supportsThinking, false)
       assert.strictEqual(caps?.supportsLongContext, false)
+      assert.strictEqual(caps?.multiTurnThinkingPolicy, 'unknown')
     })
 
     it('openai — vision=true, thinking=false, longContext=true', () => {
@@ -126,6 +128,20 @@ describe('resolveAIConfigCapabilities — three-layer capabilityClass merge', ()
         assert.strictEqual(caps?.supportsLongContext, true)
         // Thinking flipped by the model override.
         assert.strictEqual(caps?.supportsThinking, true, 'model override must win over provider class')
+      } finally {
+        model.capabilityOverrides = previous
+      }
+    })
+
+    it('a model with capabilityOverrides.multiTurnThinkingPolicy beats provider class/default', () => {
+      const provider = AI_PROVIDERS.find(p => p.id === 'openai-compatible')!
+      const model = provider.models.find(m => m.id !== '__custom__' && m.id !== 'custom')!
+      const previous = model.capabilityOverrides
+      model.capabilityOverrides = { multiTurnThinkingPolicy: 'proven_safe' }
+      try {
+        const caps = resolveAIConfigCapabilities(configFor('openai-compatible', model.id))
+        assert.ok(caps)
+        assert.strictEqual(caps?.multiTurnThinkingPolicy, 'proven_safe')
       } finally {
         model.capabilityOverrides = previous
       }

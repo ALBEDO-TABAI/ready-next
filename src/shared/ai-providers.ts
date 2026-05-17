@@ -5,6 +5,7 @@
 
 import type { CapabilityModeMap } from './ai-capability-groups'
 import { normalizeCapabilityModeMap } from './ai-capability-groups'
+import type { MultiTurnThinkingPolicy } from './ai-providers/types'
 
 // Stage S (PR-S3): the 7 inline provider literals were extracted into
 // per-provider sub-modules under `./ai-providers/`. The umbrella file
@@ -54,6 +55,7 @@ export interface AIModelDef {
     supportsVision?: boolean
     supportsThinking?: boolean
     supportsLongContext?: boolean
+    multiTurnThinkingPolicy?: MultiTurnThinkingPolicy
   }
 }
 
@@ -80,6 +82,7 @@ export interface AIProviderDef {
     supportsVision?: boolean
     supportsThinking?: boolean
     supportsLongContext?: boolean
+    multiTurnThinkingPolicy?: MultiTurnThinkingPolicy
   }
 }
 
@@ -362,6 +365,7 @@ export interface AIResolvedCapabilities {
    */
   supportsThinking: boolean
   supportsLongContext: boolean
+  multiTurnThinkingPolicy: MultiTurnThinkingPolicy
 }
 
 function normalizeAgentProtocol(value: unknown): AIAgentProtocol | undefined {
@@ -376,6 +380,56 @@ function applyCapabilityMode(mode: AICapabilityMode | undefined, defaultValue: b
   if (mode === 'on') return true
   if (mode === 'off') return false
   return defaultValue
+}
+
+export function isMultiTurnThinkingPolicySafe(policy: MultiTurnThinkingPolicy): boolean {
+  return policy === 'proven_safe' || policy === 'echo_required'
+}
+
+function thinkingModeConfigError(policy: MultiTurnThinkingPolicy): string {
+  if (policy === 'unsupported') {
+    return '当前供应商已确认不支持多轮 thinking 模式，请关闭思考模式或切换供应商。'
+  }
+  return '当前供应商的多轮 thinking 兼容性未验证，暂不支持手动开启；请关闭思考模式或切换到已验证的供应商。'
+}
+
+export interface ThinkingModeValidationResult {
+  ok: boolean
+  policy: MultiTurnThinkingPolicy
+  error?: string
+}
+
+export function validateThinkingModeConfig(
+  config: AIModelConfig | null | undefined,
+): ThinkingModeValidationResult {
+  const normalized = normalizeAIConfig(config)
+  if (!normalized || normalizeCapabilityMode(normalized.thinkingMode) !== 'on') {
+    return { ok: true, policy: 'unknown' }
+  }
+  const capabilities = resolveAIConfigCapabilities(normalized)
+  const policy = capabilities?.multiTurnThinkingPolicy ?? 'unknown'
+  if (isMultiTurnThinkingPolicySafe(policy)) {
+    return { ok: true, policy }
+  }
+  return { ok: false, policy, error: thinkingModeConfigError(policy) }
+}
+
+export function assertThinkingModeConfigValid(config: AIModelConfig | null | undefined): void {
+  const result = validateThinkingModeConfig(config)
+  if (!result.ok) {
+    throw new Error(result.error || thinkingModeConfigError(result.policy))
+  }
+}
+
+export function assertAIWorkspaceThinkingModesValid(workspace: AIProviderWorkspace | null | undefined): void {
+  const normalized = normalizeAIWorkspace(workspace)
+  for (const profile of normalized.profiles) {
+    const result = validateThinkingModeConfig(profile.config)
+    if (!result.ok) {
+      const name = String(profile.name || profile.config.displayName || profile.config.model || '').trim()
+      throw new Error(name ? `${name}：${result.error}` : result.error)
+    }
+  }
 }
 
 export function resolveAIConfigCapabilities(config: AIModelConfig | null | undefined): AIResolvedCapabilities | null {
@@ -429,6 +483,7 @@ export function resolveAIConfigCapabilities(config: AIModelConfig | null | undef
     : (modelCap.supportsVision ?? providerCap.supportsVision ?? (agentProtocol === 'anthropic' || agentProtocol === 'openai'))
   const thinkingDefault = modelCap.supportsThinking ?? providerCap.supportsThinking ?? false
   const longContextDefault = modelCap.supportsLongContext ?? providerCap.supportsLongContext ?? ((modelDef?.contextWindow ?? 0) >= 128000)
+  const multiTurnThinkingPolicy = modelCap.multiTurnThinkingPolicy ?? providerCap.multiTurnThinkingPolicy ?? 'unknown'
 
   return {
     config: normalizedConfig,
@@ -449,6 +504,7 @@ export function resolveAIConfigCapabilities(config: AIModelConfig | null | undef
     isKimiCoding,
     supportsThinking: applyCapabilityMode(normalizeCapabilityMode(normalizedConfig.thinkingMode), thinkingDefault),
     supportsLongContext: applyCapabilityMode(normalizeCapabilityMode(normalizedConfig.longContextMode), longContextDefault),
+    multiTurnThinkingPolicy,
   }
 }
 

@@ -145,6 +145,9 @@ import { VideoFallbackService } from './video-fallback-service'
 import { createRotatingLogger } from '../../utils/rotating-logger'
 import { readAIConfigDetailed, type AIConfigLoad } from './direct-chat-ai-config'
 import { AttachmentLoadFailureThrottle } from './direct-chat-attachment-metrics'
+import { assertCurrentMessageCapability } from '../agent-control/message-capability-filter'
+import { logAgentMetric } from '../agent-control/metrics'
+import { TOOL_ERROR_METRICS } from '../agent-control/tool-error-metrics'
 
 const directChatLogger = createRotatingLogger('ready-directchat.log')
 const settingsRepository = new AppSettingsRepository()
@@ -163,6 +166,10 @@ function toContinuationUpdatedAt(value?: string | null): number {
 interface ChatMessage {
   role: 'user' | 'assistant' | 'system' | 'tool'
   content: string | Array<Record<string, unknown>>
+  reasoningContent?: unknown
+  reasoning_content?: unknown
+  providerData?: Record<string, unknown>
+  anthropicThinkingBlocks?: unknown
 }
 
 interface DirectChatSession {
@@ -940,6 +947,39 @@ export class DirectChatEngine extends EventEmitter {
     const supportsVideoBlock = capabilities?.supportsNativeVideo ?? (!normalizedBaseUrl.includes('/coding'))
     const hasRawVideoInIncoming = Array.isArray(normalizedContent) && normalizedContent.some((block) => block.type === 'video')
 
+    // PR 2 Phase C.3 — current-turn capability pre-check at the legacy
+    // DirectChatEngine entry. Vision-off + image attachment → throw a
+    // `ToolDomainError('provider_request_failed')` BEFORE history sanitize
+    // could mask it; that way history-side stripping (in execution clients)
+    // can safely treat any remaining image residue as prior-turn data.
+    // Video is left to the existing `supportsVideoBlock` text-downgrade
+    // path above because legacy code has historically tolerated it; the
+    // hard image gate is the regression fix.
+    if (Array.isArray(normalizedContent)) {
+      try {
+        assertCurrentMessageCapability(
+          normalizedContent
+            .filter((b) => b && typeof b === 'object')
+            .map((b) => ({ ...(b as unknown as Record<string, unknown>) })) as Array<{ type: string; [key: string]: unknown }>,
+          {
+            supportsVision: capabilities?.supportsVision === true,
+            // Anthropic / kimi-coding video path already has its own
+            // downgrade; we only enforce image here.
+            supportsVideo: true,
+          },
+        )
+      } catch (capErr) {
+        log(`direct-chat current-turn capability rejected: ${capErr instanceof Error ? capErr.message : String(capErr)}`)
+        logAgentMetric(TOOL_ERROR_METRICS.providerRequestImageBlockedAtAttach, {
+          sessionId,
+          provider: config.provider,
+          model: config.model,
+          errorMessage: capErr instanceof Error ? capErr.message.slice(0, 200) : String(capErr).slice(0, 200),
+        })
+        throw capErr
+      }
+    }
+
     // Build message content — support multimodal blocks
     if (Array.isArray(normalizedContent)) {
       // Convert MultimodalBlock[] to provider-internal format.
@@ -1638,6 +1678,23 @@ export class DirectChatEngine extends EventEmitter {
   ): Array<Record<string, unknown>> {
     return messages.map(m => {
       if (format === 'anthropic') {
+        const rawThinkingBlocks = Array.isArray(m.anthropicThinkingBlocks)
+          ? m.anthropicThinkingBlocks
+          : Array.isArray(m.providerData?.anthropicThinkingBlocks)
+            ? m.providerData.anthropicThinkingBlocks
+            : []
+        const thinkingBlocks = rawThinkingBlocks.filter((block): block is Record<string, unknown> => (
+          !!block && typeof block === 'object' && (block as Record<string, unknown>).type === 'thinking'
+        ))
+        if (thinkingBlocks.length > 0 && m.role === 'assistant') {
+          const content = Array.isArray(m.content)
+            ? m.content
+            : [{ type: 'text', text: String(m.content || '') }]
+          return {
+            role: m.role,
+            content: [...thinkingBlocks, ...content],
+          }
+        }
         return {
           role: m.role === 'system' ? 'user' : m.role,
           content: m.content
@@ -1663,7 +1720,10 @@ export class DirectChatEngine extends EventEmitter {
           if (block.type === 'text') return { type: 'text', text: block.text }
           return block
         })
-        return { role: m.role, content: parts }
+        const out: Record<string, unknown> = { role: m.role, content: parts }
+        const reasoningContent = m.reasoning_content ?? m.reasoningContent
+        if (reasoningContent !== undefined) out.reasoning_content = reasoningContent
+        return out
       }
       // OpenAI format — pass through as-is (handles tool role, tool_call_id etc.)
       return { ...m } as Record<string, unknown>

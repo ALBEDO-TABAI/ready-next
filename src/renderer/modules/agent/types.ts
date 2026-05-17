@@ -21,6 +21,16 @@ export interface AskUserQuestionsCardState {
   answeredAt?: number
   cancelReason?: string
   cancelledAt?: number
+  /**
+   * Stage U (PR 1, B.5) — renderer-only flag set when sendMessage's pre-send
+   * cancel hook timed out (2s). The card stays `status:'pending'` but submit
+   * is disabled and a "取消处理中…" hint shows so the user can't double-submit
+   * while the in-flight cancel races behind the scenes. Never persisted —
+   * absent in `meta_json.askUserQuestions`. Once the late cancel actually
+   * lands, the normal cancel flow flips status to 'cancelled' and this flag
+   * becomes moot.
+   */
+  localDisabled?: boolean
 }
 
 export interface AgentMessage {

@@ -39,7 +39,17 @@ const TERMINAL_KINDS: ReadonlySet<string> = new Set([
   'host_unavailable',
   'aborted',
   'unknown',
+  'provider_request_failed',
+  'provider_thinking_echo_required',
 ])
+
+function readRecoverableOverride(error: unknown): boolean | null {
+  if (!error || typeof error !== 'object') return null
+  const detail = (error as { detail?: unknown }).detail
+  if (!detail || typeof detail !== 'object') return null
+  const value = (detail as { recoverable?: unknown }).recoverable
+  return typeof value === 'boolean' ? value : null
+}
 
 function readToolNameFromError(error: unknown): string | undefined {
   if (error && typeof error === 'object' && 'toolName' in error) {
@@ -68,8 +78,11 @@ export function deriveAgentErrorContract(
     resolvedKind = classifyExecutionError(error).kind
   }
 
+  const override = readRecoverableOverride(error)
   let recoverable: boolean
-  if (RECOVERABLE_KINDS.has(resolvedKind)) {
+  if (override !== null) {
+    recoverable = override
+  } else if (RECOVERABLE_KINDS.has(resolvedKind)) {
     recoverable = true
   } else if (TERMINAL_KINDS.has(resolvedKind)) {
     recoverable = false
