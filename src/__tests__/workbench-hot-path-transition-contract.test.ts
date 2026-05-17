@@ -11,6 +11,7 @@ test('workbench hot-path surfaces avoid transition-all on interactive chrome', (
   const hotPathFiles = [
     'src/renderer/components/agent/ChatInput.tsx',
     'src/renderer/components/agent/ChatMessages.tsx',
+    'src/renderer/components/calendar/CalendarAssistantPanel.tsx',
     'src/renderer/components/calendar/EventModal.tsx',
     'src/renderer/components/calendar/NewEventMenu.tsx',
     'src/renderer/components/document/DocumentTabRail.tsx',

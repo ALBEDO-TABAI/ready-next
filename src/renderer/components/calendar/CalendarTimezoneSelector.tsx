@@ -59,6 +59,10 @@ const COMMON_TIMEZONES: TimezoneOption[] = [
   { id: 'UTC', label: 'UTC' },
 ]
 
+function getTimezoneLabel(id: string): string {
+  return COMMON_TIMEZONES.find((option) => option.id === id)?.label || id
+}
+
 /**
  * Best-effort wrapper around `Intl.supportedValuesOf('timeZone')` so a
  * runtime that doesn't ship it (older Node test environments,
@@ -74,6 +78,7 @@ function getAllIanaTimezones(): string[] {
     if (typeof fn !== 'function') return []
     return fn('timeZone')
   } catch {
+    // silent-catch: older Intl builds may not support timeZone enumeration; curated zones still work.
     return []
   }
 }
@@ -144,15 +149,14 @@ export default function CalendarTimezoneSelector({
     return out
   }, [query, value])
 
-  // Display label for the current value — try to match the curated
-  // label, else fall back to the raw IANA id (already user-readable).
+  // Display label for the current value — keep the compact city label
+  // in chrome; raw IANA ids stay available through search results.
   const currentLabel = useMemo(() => {
-    const match = COMMON_TIMEZONES.find((o) => o.id === value)
-    return match ? `${match.label} (${match.id})` : value
+    return getTimezoneLabel(value)
   }, [value])
 
   return (
-    <div ref={ref} style={{ position: 'relative' }}>
+    <div ref={ref} className="calendar-timezone-selector" style={{ position: 'relative' }}>
       <button
         onClick={() => setOpen(!open)}
         aria-label="切换时区显示"
@@ -245,17 +249,6 @@ export default function CalendarTimezoneSelector({
               <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {opt.label}
               </span>
-              {opt.label !== opt.id && (
-                <span
-                  style={{
-                    fontSize: 10,
-                    color: 'var(--text-muted)',
-                    flexShrink: 0,
-                  }}
-                >
-                  {opt.id}
-                </span>
-              )}
             </button>
           ))}
         </div>

@@ -7,17 +7,17 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('dark liquid calendar shell reuses the rss surface tone and removes the leading grid divider', () => {
+test('dark liquid calendar shell reuses the rss surface tone and keeps a complete grid', () => {
   const styles = readWorkspaceFile('src/renderer/styles/index.css')
   const scheduleCss = readWorkspaceFile('src/renderer/styles/schedule-x.css')
 
   assert.match(
     styles,
-    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.calendar-mode-shell \.workbench-canvas-shell \{[\s\S]*background:\s*var\(--workbench-module-surface-bg\) !important;/,
+    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.calendar-mode-shell \.workbench-canvas-shell \{[\s\S]*background:\s*var\(--calendar-canvas-bg\) !important;/,
   )
   assert.match(
     styles,
-    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.calendar-mode-shell \.workbench-canvas-shell \{[\s\S]*border:\s*none !important;/,
+    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.calendar-mode-shell \.workbench-canvas-shell \{[\s\S]*border-color:\s*var\(--calendar-canvas-border\) !important;/,
   )
   assert.match(
     scheduleCss,
@@ -29,7 +29,7 @@ test('dark liquid calendar shell reuses the rss surface tone and removes the lea
   )
   assert.match(
     scheduleCss,
-    /\.sx__week-grid__time-axis \.sx__time-grid-day:first-child,\s*\.sx__week-grid__time-axis \.sx__time-grid-day:first-of-type,\s*\.sx__week-grid \.sx__time-grid-day:first-child,\s*\.sx__week-grid \.sx__time-grid-day:first-of-type \{[\s\S]*border-left:\s*none !important;/,
+    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\s*\{[\s\S]*--sx-ready-grid-chrome-surface:\s*var\(--sx-ready-week-solid-surface\);/,
   )
   assert.match(
     scheduleCss,
@@ -49,26 +49,35 @@ test('dark liquid calendar shell reuses the rss surface tone and removes the lea
   )
   assert.match(
     scheduleCss,
-    /\.sx__week-grid__date,\s*\.sx__week-grid__time-axis,\s*\.sx__week-grid__hour,[\s\S]*\.sx__time-grid-day \{[\s\S]*background:\s*var\(--sx-ready-grid-surface\) !important;/,
+    /\.sx__week-grid__time-axis,\s*\.sx__week-grid__hour,[\s\S]*\.sx__time-grid-day \{[\s\S]*background:\s*var\(--sx-ready-grid-surface\) !important;/,
   )
   assert.match(
     scheduleCss,
-    /\.sx__week-grid__hour \{[\s\S]*border-top:\s*1px solid var\(--sx-ready-grid-line-color\) !important;/,
+    /\.sx__week-grid__hour \{[\s\S]*border-top:\s*none !important;/,
   )
   assert.match(
     scheduleCss,
-    /\.sx__time-grid-day \{[\s\S]*border-left:\s*1px solid var\(--sx-ready-grid-line-color\) !important;/,
+    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\s*\{[\s\S]*--sx-ready-time-grid-line-color:\s*var\(--sx-ready-grid-line-color\);/,
   )
+  assert.match(
+    scheduleCss,
+    /html\[data-skin='liquid-glass'\] \.sx__week-grid__time-axis,\s*html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.sx__week-grid__time-axis,\s*\.sx__week-grid__time-axis \{[\s\S]*background-image:[\s\S]*linear-gradient\(to right,\s*var\(--sx-ready-time-grid-line-color\)[\s\S]*linear-gradient\(to bottom,\s*var\(--sx-ready-time-grid-line-color\)/,
+  )
+  assert.doesNotMatch(scheduleCss, /linear-gradient\(to left,\s*var\(--sx-ready-time-grid-line-color\)/)
   assert.match(
     scheduleCss,
     /\.sx__week-grid\s*\{[\s\S]*isolation:\s*isolate;/,
   )
   assert.match(
     scheduleCss,
-    /\.sx__week-grid::before \{[\s\S]*left:\s*var\(--sx-calendar-week-grid-padding-left\);[\s\S]*background:\s*var\(--sx-ready-grid-surface\) !important;[\s\S]*z-index:\s*2;/,
+    /\.sx__week-grid__date::before,\s*\.sx__date-grid-day::before \{[\s\S]*background:\s*var\(--sx-ready-time-grid-line-color\);/,
   )
+  assert.doesNotMatch(scheduleCss, /\.sx__week-grid__date:last-child::after/)
+  assert.doesNotMatch(scheduleCss, /\.sx__date-grid-day:last-child::after/)
   assert.match(
     scheduleCss,
     /\.sx__week-header-border \{[\s\S]*display:\s*none !important;/,
   )
+  assert.match(scheduleCss, /\.calendar-schedule-view-day \{[\s\S]*--sx-ready-visible-day-count:\s*1;/)
+  assert.match(scheduleCss, /\.calendar-schedule-view-week \{[\s\S]*--sx-ready-visible-day-count:\s*7;/)
 })

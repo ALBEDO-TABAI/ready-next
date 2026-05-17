@@ -38,7 +38,12 @@
   --sx-color-surface-tint: var(--color-blue);
   --sx-ready-liquid-neutral-bg: rgba(247, 248, 251, 0.96);
   --sx-ready-grid-surface: var(--bg-content);
+  --sx-ready-grid-chrome-surface: var(--sx-ready-grid-surface);
   --sx-ready-grid-line-color: color-mix(in srgb, var(--text-gray) 36%, transparent);
+  --sx-ready-time-grid-line-color: var(--sx-ready-grid-line-color);
+  --sx-ready-grid-line-width: 1px;
+  --sx-ready-current-time-line-color: color-mix(in srgb, var(--color-blue) 82%, transparent);
+  --sx-ready-current-time-line-width: 1px;
 }
 
 html[data-skin='liquid-glass'] {
@@ -52,6 +57,7 @@ html[data-skin='liquid-glass'] {
   --sx-color-outline: color-mix(in srgb, var(--border-default) 74%, transparent);
   --sx-color-outline-variant: color-mix(in srgb, var(--border-default) 48%, transparent);
   --sx-ready-grid-surface: var(--sx-ready-liquid-neutral-bg);
+  --sx-ready-grid-chrome-surface: var(--sx-ready-grid-surface);
 }
 
 html[data-theme='dark'] {
@@ -62,6 +68,26 @@ html[data-theme='dark'][data-skin='liquid-glass'] {
   --sx-ready-liquid-neutral-bg: color-mix(in srgb, var(--workbench-module-surface-bg) 85%, rgba(255, 255, 255, 0.18) 15%);
   --sx-ready-grid-surface: transparent;
   --sx-ready-week-solid-surface: var(--bg-editor);
+  --sx-ready-grid-chrome-surface: var(--sx-ready-week-solid-surface);
+  --sx-ready-grid-line-color: color-mix(in srgb, var(--text-gray) 34%, transparent);
+  --sx-ready-time-grid-line-color: var(--sx-ready-grid-line-color);
+}
+
+html[data-skin='liquid-glass'][data-glass-backdrop='ready'] {
+  --sx-ready-liquid-neutral-bg: var(--bg-content);
+  --sx-ready-grid-surface: var(--bg-content);
+  --sx-ready-grid-chrome-surface: var(--sx-ready-grid-surface);
+  --sx-ready-grid-line-color: color-mix(in srgb, var(--text-gray) 42%, transparent);
+  --sx-ready-time-grid-line-color: var(--sx-ready-grid-line-color);
+}
+
+html[data-theme='dark'][data-skin='liquid-glass'][data-glass-backdrop='ready'] {
+  --sx-ready-liquid-neutral-bg: var(--bg-content);
+  --sx-ready-grid-surface: var(--bg-content);
+  --sx-ready-week-solid-surface: var(--bg-content);
+  --sx-ready-grid-chrome-surface: var(--sx-ready-grid-surface);
+  --sx-ready-grid-line-color: color-mix(in srgb, var(--text-gray) 40%, transparent);
+  --sx-ready-time-grid-line-color: var(--sx-ready-grid-line-color);
 }
 
 /* ========== Undo Tailwind v4 preflight border reset inside SX ========== */
@@ -126,34 +152,34 @@ html[data-skin='liquid-glass'] .sx-react-calendar-wrapper {
 /* ========== Week/Day view ========== */
 .sx__week-wrapper,
 .sx__day-wrapper,
-.sx__week-header,
-.sx__week-header-content,
-.sx__week-grid__date-axis,
-.sx__week-grid__date,
 .sx__week-grid__time-axis,
 .sx__week-grid__hour,
-.sx__date-grid,
-.sx__date-grid-day,
 .sx__week-grid,
 .sx__time-axis,
 .sx__time-grid-day {
   background: var(--sx-ready-grid-surface) !important;
 }
 
+.sx__week-header,
+.sx__week-header-content,
+.sx__week-grid__date-axis,
+.sx__week-grid__date,
+.sx__date-grid,
+.sx__date-grid-day {
+  background: var(--sx-ready-grid-chrome-surface) !important;
+}
+
 .sx__week-grid {
+  position: relative;
   isolation: isolate;
 }
 
-.sx__week-grid::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  left: var(--sx-calendar-week-grid-padding-left);
-  width: 1px;
-  background: var(--sx-ready-grid-surface) !important;
-  pointer-events: none;
-  z-index: 2;
+.calendar-schedule-view-day {
+  --sx-ready-visible-day-count: 1;
+}
+
+.calendar-schedule-view-week {
+  --sx-ready-visible-day-count: 7;
 }
 
 /* In dark liquid week view, keep one solid base layer and let inner grid layers stay transparent. */
@@ -164,29 +190,22 @@ html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-wrapper {
 html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-header,
 html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-header-content,
 html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-grid__date-axis,
-html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-grid__date,
+html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-grid__date {
+  background: var(--sx-ready-grid-chrome-surface) !important;
+}
+
 html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-grid__time-axis,
 html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-grid__hour,
 html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-grid,
 html[data-theme='dark'][data-skin='liquid-glass'] .sx__time-axis,
 html[data-theme='dark'][data-skin='liquid-glass'] .sx__time-grid-day {
-  background: transparent !important;
-}
-
-html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-grid::before {
-  background: var(--sx-ready-week-solid-surface) !important;
+  background: var(--sx-ready-grid-surface) !important;
 }
 
 html[data-skin='liquid-glass'] .sx__week-wrapper,
 html[data-skin='liquid-glass'] .sx__day-wrapper,
-html[data-skin='liquid-glass'] .sx__week-header,
-html[data-skin='liquid-glass'] .sx__week-header-content,
-html[data-skin='liquid-glass'] .sx__week-grid__date-axis,
-html[data-skin='liquid-glass'] .sx__week-grid__date,
 html[data-skin='liquid-glass'] .sx__week-grid__time-axis,
 html[data-skin='liquid-glass'] .sx__week-grid__hour,
-html[data-skin='liquid-glass'] .sx__date-grid,
-html[data-skin='liquid-glass'] .sx__date-grid-day,
 html[data-skin='liquid-glass'] .sx__week-grid,
 html[data-skin='liquid-glass'] .sx__time-grid-day,
 html[data-skin='liquid-glass'] .sx__time-axis,
@@ -194,8 +213,47 @@ html[data-skin='liquid-glass'] .sx__month-grid-wrapper {
   background: var(--sx-ready-grid-surface) !important;
 }
 
+html[data-skin='liquid-glass'] .sx__week-header,
+html[data-skin='liquid-glass'] .sx__week-header-content,
+html[data-skin='liquid-glass'] .sx__week-grid__date-axis,
+html[data-skin='liquid-glass'] .sx__week-grid__date,
+html[data-skin='liquid-glass'] .sx__date-grid,
+html[data-skin='liquid-glass'] .sx__date-grid-day {
+  background: var(--sx-ready-grid-chrome-surface) !important;
+}
+
 .sx__time-axis {
   background: var(--sx-ready-grid-surface) !important;
+}
+
+.sx__week-grid__time-axis {
+  left: var(--sx-calendar-week-grid-padding-left) !important;
+  right: 0 !important;
+  width: auto !important;
+  z-index: 3;
+  pointer-events: none;
+}
+
+html[data-skin='liquid-glass'] .sx__week-grid__time-axis,
+html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-grid__time-axis,
+.sx__week-grid__time-axis {
+  background-color: transparent !important;
+  background-image:
+    linear-gradient(to right, var(--sx-ready-time-grid-line-color) 0 var(--sx-ready-grid-line-width), transparent var(--sx-ready-grid-line-width)),
+    linear-gradient(to bottom, var(--sx-ready-time-grid-line-color) 0 var(--sx-ready-grid-line-width), transparent var(--sx-ready-grid-line-width)) !important;
+  background-size:
+    calc(100% / var(--sx-ready-visible-day-count, 7)) 100%,
+    100% var(--sx-week-grid-hour-height) !important;
+  background-position:
+    0 0,
+    0 var(--sx-week-grid-hour-height) !important;
+  background-repeat: repeat, repeat !important;
+}
+
+html[data-skin='liquid-glass'] .sx__week-grid__time-axis .sx__week-grid__hour,
+html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-grid__time-axis .sx__week-grid__hour,
+.sx__week-grid__time-axis .sx__week-grid__hour {
+  background: transparent !important;
 }
 
 .sx__time-axis-hour {
@@ -206,33 +264,82 @@ html[data-skin='liquid-glass'] .sx__month-grid-wrapper {
 
 /* Grid hour lines */
 .sx__week-grid__hour {
-  border-top: 1px solid var(--sx-ready-grid-line-color) !important;
+  border-top: none !important;
+}
+
+.sx__week-grid__hour:first-child {
+  visibility: hidden !important;
+}
+
+.sx__week-grid__hour:first-child .sx__week-grid__hour-text {
+  visibility: hidden !important;
 }
 
 /* Day column borders */
-.sx__time-grid-day {
-  border-left: 1px solid var(--sx-ready-grid-line-color) !important;
+.sx__time-grid-day,
+.sx__week-grid__date,
+.sx__date-grid-day {
+  border-left: none !important;
+}
+
+.sx__time-grid-day:last-child,
+.sx__week-grid__date:last-child,
+.sx__date-grid-day:last-child {
+  border-right: none !important;
 }
 
 /* Week header */
 .sx__week-header {
-  border-bottom: 1px solid var(--sx-ready-grid-line-color) !important;
+  border-bottom: none !important;
 }
 
 .sx__week-header-border {
   display: none !important;
 }
 
-.sx__week-grid__time-axis .sx__time-grid-day:first-child,
-.sx__week-grid__time-axis .sx__time-grid-day:first-of-type,
-.sx__week-grid .sx__time-grid-day:first-child,
-.sx__week-grid .sx__time-grid-day:first-of-type {
-  border-left: none !important;
-}
-
 .sx__week-grid__date,
 .sx__date-grid-day {
-  background: var(--sx-ready-grid-surface) !important;
+  background: var(--sx-ready-grid-chrome-surface) !important;
+}
+
+.sx__week-grid__date-axis,
+.sx__date-grid,
+.sx__time-grid-day,
+.sx__week-grid__date,
+.sx__date-grid-day {
+  position: relative;
+}
+
+.sx__week-grid__date-axis::after,
+.sx__date-grid::after,
+.sx__week-grid__date::before,
+.sx__date-grid-day::before {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.sx__week-grid__date-axis::after,
+.sx__date-grid::after {
+  left: var(--sx-calendar-week-grid-padding-left);
+  right: 0;
+  bottom: 0;
+  height: var(--sx-ready-grid-line-width);
+  background: var(--sx-ready-grid-line-color);
+}
+
+.sx__week-grid__date::before,
+.sx__date-grid-day::before {
+  top: 0;
+  bottom: 0;
+  width: var(--sx-ready-grid-line-width);
+  background: var(--sx-ready-time-grid-line-color);
+}
+
+.sx__week-grid__date::before,
+.sx__date-grid-day::before {
+  left: 0;
 }
 
 .sx__week-grid__day-name {
@@ -270,6 +377,7 @@ html[data-skin='liquid-glass'] .sx__month-grid-wrapper {
   padding: 0 !important;
   opacity: 0.92;
   transition: none !important;
+  z-index: 4 !important;
 }
 
 .sx__time-grid-event-inner {
@@ -289,15 +397,28 @@ html[data-skin='liquid-glass'] .sx__month-grid-wrapper {
 
 /* ========== Month grid ========== */
 .sx__month-grid-wrapper {
-  background: var(--bg-content) !important;
+  background: var(--sx-ready-grid-surface) !important;
+  border-bottom: var(--sx-ready-grid-line-width) solid var(--sx-ready-grid-line-color) !important;
+}
+
+.sx__month-grid-week {
+  border-top: var(--sx-ready-grid-line-width) solid var(--sx-ready-grid-line-color) !important;
+}
+
+.sx__month-grid-week:first-child {
+  border-top: none !important;
+}
+
+.sx__month-grid-day:not(:last-child) {
+  border-inline-end: var(--sx-ready-grid-line-width) solid var(--sx-ready-grid-line-color) !important;
 }
 
 .sx__month-grid-cell {
-  border: 1px solid var(--border-default) !important;
+  border: var(--sx-ready-grid-line-width) solid var(--sx-ready-grid-line-color) !important;
 }
 
 .sx__month-grid-day {
-  border-bottom: 1px solid var(--border-default) !important;
+  border-bottom: none !important;
 }
 
 .sx__month-grid-day__header-date {
@@ -345,14 +466,14 @@ html[data-skin='liquid-glass'] .sx__month-grid-day--not-in-month {
 
 /* ========== Current time indicator ========== */
 .sx__current-time-indicator {
-  background: var(--color-red) !important;
-  height: 2px !important;
+  background: var(--sx-ready-current-time-line-color) !important;
+  height: var(--sx-ready-current-time-line-width) !important;
 }
 
 .sx__current-time-indicator::before {
-  background: var(--color-red) !important;
-  width: 8px !important;
-  height: 8px !important;
+  background: var(--sx-ready-current-time-line-color) !important;
+  width: 7px !important;
+  height: 7px !important;
   border-radius: 4px !important;
   top: -3px !important;
 }

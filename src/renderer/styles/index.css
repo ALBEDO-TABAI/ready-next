@@ -1832,6 +1832,63 @@ html[data-theme='dark'][data-skin='liquid-glass'] .glass-surface-card {
   background: var(--lg-material-card) !important;
 }
 
+.calendar-mode-shell {
+  --calendar-canvas-bg: rgba(241, 244, 249, 0.94);
+  --calendar-canvas-border: rgba(224, 230, 240, 0.96);
+  --calendar-sidebar-bg: var(--calendar-canvas-bg);
+  --calendar-control-bg: color-mix(in srgb, var(--surface-card-bg) 34%, transparent);
+  --calendar-control-bg-hover: color-mix(in srgb, var(--surface-card-bg) 48%, transparent);
+  --calendar-control-bg-active: color-mix(in srgb, var(--color-blue) 22%, var(--surface-card-bg) 30%);
+  --calendar-control-border: color-mix(in srgb, var(--border-input) 82%, transparent);
+  --calendar-assistant-bg: color-mix(in srgb, var(--workbench-module-surface-bg) 94%, var(--bg-content) 6%);
+  --calendar-assistant-card-bg: color-mix(in srgb, var(--surface-card-bg) 42%, transparent);
+  --calendar-assistant-card-border: color-mix(in srgb, var(--surface-border) 78%, transparent);
+  --calendar-event-chip-bg: color-mix(in srgb, var(--surface-card-bg) 38%, transparent);
+}
+
+html[data-skin='liquid-glass'][data-glass-backdrop='native'] .calendar-mode-shell {
+  --calendar-canvas-bg: rgba(241, 244, 249, 0.94);
+  --calendar-canvas-border: rgba(224, 230, 240, 0.96);
+  --calendar-assistant-bg: rgba(241, 244, 249, 0.96);
+  --calendar-assistant-card-bg: rgba(255, 255, 255, 0.34);
+}
+
+html[data-theme='dark'][data-skin='liquid-glass'][data-glass-backdrop='native'] .calendar-mode-shell {
+  --calendar-canvas-bg: var(--workbench-module-surface-bg);
+  --calendar-canvas-border: transparent;
+  --calendar-control-bg: color-mix(in srgb, var(--surface-card-bg) 44%, transparent);
+  --calendar-control-bg-hover: color-mix(in srgb, var(--surface-card-bg) 58%, transparent);
+  --calendar-control-bg-active: color-mix(in srgb, var(--color-blue) 24%, var(--surface-card-bg) 26%);
+  --calendar-control-border: color-mix(in srgb, var(--border-input) 62%, transparent);
+  --calendar-assistant-bg: color-mix(in srgb, var(--bg-editor) 92%, transparent);
+  --calendar-assistant-card-bg: color-mix(in srgb, var(--surface-card-bg) 52%, transparent);
+  --calendar-assistant-card-border: color-mix(in srgb, var(--surface-border) 62%, transparent);
+}
+
+html[data-skin='liquid-glass'][data-glass-backdrop='ready'] .calendar-mode-shell {
+  --calendar-canvas-bg: var(--workbench-liquid-chrome-bg, var(--workbench-module-surface-bg));
+  --calendar-canvas-border: color-mix(in srgb, var(--border-default) 92%, transparent);
+  --calendar-sidebar-bg: var(--calendar-canvas-bg);
+  --calendar-control-bg: color-mix(in srgb, var(--bg-primary) 82%, var(--bg-panel) 18%);
+  --calendar-control-bg-hover: color-mix(in srgb, var(--bg-primary) 92%, var(--bg-panel) 8%);
+  --calendar-control-bg-active: color-mix(in srgb, var(--color-blue) 16%, var(--bg-primary) 84%);
+  --calendar-assistant-bg: color-mix(in srgb, var(--bg-content) 96%, var(--bg-panel) 4%);
+  --calendar-assistant-card-bg: color-mix(in srgb, var(--bg-primary) 88%, var(--bg-panel) 12%);
+  --calendar-assistant-card-border: color-mix(in srgb, var(--border-default) 82%, transparent);
+}
+
+html[data-theme='dark'][data-skin='liquid-glass'][data-glass-backdrop='ready'] .calendar-mode-shell {
+  --calendar-canvas-bg: var(--bg-content);
+  --calendar-canvas-border: color-mix(in srgb, var(--border-default) 82%, transparent);
+  --calendar-control-bg: color-mix(in srgb, var(--bg-toolbar) 76%, var(--bg-content) 24%);
+  --calendar-control-bg-hover: color-mix(in srgb, var(--bg-toolbar) 92%, var(--bg-content) 8%);
+  --calendar-control-bg-active: color-mix(in srgb, var(--color-blue) 20%, var(--bg-toolbar) 80%);
+  --calendar-control-border: color-mix(in srgb, var(--border-default) 80%, transparent);
+  --calendar-assistant-bg: color-mix(in srgb, var(--bg-content) 94%, var(--bg-toolbar) 6%);
+  --calendar-assistant-card-bg: color-mix(in srgb, var(--bg-primary) 72%, var(--bg-content) 28%);
+  --calendar-assistant-card-border: color-mix(in srgb, var(--border-default) 78%, transparent);
+}
+
 /*
  * 注：原有 `html[data-skin='liquid-glass'] .ready-app-bg { opacity: 0 }` 两条硬覆盖已删除。
  * 改用变量级联：
@@ -3364,17 +3421,360 @@ body.resizing [data-liquid-shell='chat-panel'] {
 }
 
 html[data-skin='liquid-glass'] .calendar-mode-shell .workbench-canvas-shell {
-  background: rgba(241, 244, 249, 0.94) !important;
-  border: 1px solid rgba(224, 230, 240, 0.96) !important;
+  background: var(--calendar-canvas-bg) !important;
+  border: 1px solid var(--calendar-canvas-border) !important;
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.72),
     0 8px 24px rgba(15, 23, 42, 0.05) !important;
 }
 
 html[data-theme='dark'][data-skin='liquid-glass'] .calendar-mode-shell .workbench-canvas-shell {
-  background: var(--workbench-module-surface-bg) !important;
-  border: none !important;
+  background: var(--calendar-canvas-bg) !important;
+  border-color: var(--calendar-canvas-border) !important;
   box-shadow: none !important;
+}
+
+.calendar-timezone-dock {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--surface-border) 54%, transparent);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.calendar-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  -webkit-app-region: no-drag;
+}
+
+.calendar-toolbar-button,
+.calendar-icon-button {
+  height: 28px;
+  border: 1px solid var(--calendar-control-border);
+  background: var(--calendar-control-bg);
+  color: var(--text-body);
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease,
+    opacity 160ms ease;
+  -webkit-app-region: no-drag;
+}
+
+.calendar-toolbar-button:hover,
+.calendar-icon-button:hover {
+  background: var(--calendar-control-bg-hover);
+  color: var(--text-title);
+}
+
+.calendar-toolbar-button {
+  padding: 0 12px;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.calendar-icon-button {
+  width: 28px;
+  padding: 0;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.calendar-assistant-toggle.is-active,
+.calendar-view-segment button.is-active {
+  background: var(--calendar-control-bg-active);
+  border-color: color-mix(in srgb, var(--color-blue) 42%, var(--calendar-control-border) 58%);
+  color: var(--color-blue);
+}
+
+.calendar-view-segment {
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  padding: 2px;
+  border-radius: 9px;
+  border: 1px solid var(--calendar-control-border);
+  background: color-mix(in srgb, var(--calendar-control-bg) 76%, transparent);
+  -webkit-app-region: no-drag;
+}
+
+.calendar-view-segment button {
+  width: 30px;
+  height: 22px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    color 160ms ease;
+  -webkit-app-region: no-drag;
+}
+
+.calendar-view-segment button:hover {
+  color: var(--text-title);
+}
+
+.calendar-timezone-dock > .calendar-timezone-selector > button {
+  width: 100%;
+  justify-content: flex-start;
+  background: var(--calendar-control-bg) !important;
+  border-color: var(--calendar-control-border) !important;
+  border-radius: 8px !important;
+  max-width: none !important;
+  -webkit-app-region: no-drag;
+}
+
+.calendar-assistant-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 34;
+  width: min(360px, calc(100% - 96px));
+  min-width: 320px;
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+  transform: translateX(12px);
+  pointer-events: none;
+  transition:
+    opacity 240ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    transform 240ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: opacity, transform;
+  -webkit-app-region: no-drag;
+}
+
+.calendar-assistant-drawer.is-entered {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+.calendar-assistant-surface {
+  background: var(--calendar-assistant-bg) !important;
+  border-left: 1px solid var(--calendar-assistant-card-border) !important;
+  border-radius: var(--workbench-canvas-radius) 0 0 var(--workbench-canvas-radius);
+  box-shadow: -18px 0 44px -18px rgba(8, 12, 22, 0.28) !important;
+  overflow: hidden;
+}
+
+.calendar-assistant-header {
+  height: 40px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 12px 0 16px;
+  border-bottom: 1px solid var(--calendar-assistant-card-border);
+}
+
+.calendar-assistant-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-title);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.calendar-assistant-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+}
+
+.calendar-assistant-card {
+  border: 1px solid var(--calendar-assistant-card-border);
+  border-radius: 10px;
+  background: var(--calendar-assistant-card-bg);
+  padding: 12px;
+  margin-bottom: 10px;
+}
+
+.calendar-assistant-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 10px;
+  color: var(--text-title);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.calendar-assistant-event-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.calendar-assistant-event {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 42px;
+  padding: 8px;
+  border-radius: 8px;
+  background: var(--calendar-event-chip-bg);
+}
+
+.calendar-assistant-event-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  flex-shrink: 0;
+}
+
+.calendar-assistant-event-main {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.calendar-assistant-event-title,
+.calendar-assistant-next-title {
+  color: var(--text-title);
+  font-size: 12px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-assistant-event-time,
+.calendar-assistant-next-time,
+.calendar-assistant-empty {
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.calendar-assistant-event-source {
+  max-width: 74px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--color-blue);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.calendar-assistant-next {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.calendar-assistant-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.calendar-assistant-metrics div {
+  min-width: 0;
+  text-align: center;
+  padding: 4px 0;
+}
+
+.calendar-assistant-metrics strong {
+  display: block;
+  color: var(--text-title);
+  font-size: 16px;
+  line-height: 1.2;
+}
+
+.calendar-assistant-metrics span {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.calendar-assistant-suggestions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.calendar-assistant-chip {
+  height: 28px;
+  padding: 0 10px;
+  border-radius: 8px;
+  border: 1px solid var(--calendar-assistant-card-border);
+  background: var(--calendar-event-chip-bg);
+  color: var(--text-body);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 160ms ease,
+    color 160ms ease;
+}
+
+.calendar-assistant-chip:hover {
+  background: var(--calendar-control-bg-hover);
+  color: var(--text-title);
+}
+
+.calendar-assistant-composer {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px 12px;
+  border-top: 1px solid var(--calendar-assistant-card-border);
+}
+
+.calendar-assistant-composer input {
+  flex: 1;
+  min-width: 0;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid var(--input-slot-border);
+  background: var(--input-slot-bg);
+  color: var(--text-body);
+  outline: none;
+  padding: 0 11px;
+  font-size: 12px;
+}
+
+.calendar-assistant-send {
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid color-mix(in srgb, var(--color-blue) 38%, transparent);
+  background: color-mix(in srgb, var(--color-blue) 82%, var(--surface-card-bg) 18%);
+  color: #fff;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .calendar-assistant-drawer {
+    transition-duration: 80ms;
+  }
 }
 
 html:not([data-skin='liquid-glass']) .rss-mode-shell .workbench-canvas-shell,

@@ -1,11 +1,13 @@
 import type { ComponentType, DragEvent, ReactNode, RefObject } from 'react'
-import { ChevronLeft, ChevronRight, Info, Plus } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Info, PanelRightOpen, Plus } from 'lucide-react'
 
 import MiniCalendar from './MiniCalendar'
+import CalendarAssistantPanel from './CalendarAssistantPanel'
 import CalendarSources, { type CalendarSource } from './CalendarSources'
 import CalendarViewSelector from './CalendarViewSelector'
 import CalendarTimezoneSelector from './CalendarTimezoneSelector'
 import { NewEventCard, NewEventMenu } from './NewEventMenu'
+import type { CalendarAssistantSummary } from './CalendarAssistantPanel'
 import type { ViewType } from './schedule-x-utils'
 import {
   WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM,
@@ -47,10 +49,15 @@ interface CalendarWorkbenchShellProps {
   /**
    * L4-A — IANA tz id (e.g. 'Asia/Shanghai'). Read from
    * `useCalendarSession.displayTimezone`. The selector renders this in
-   * the toolbar; selecting a new zone fires `onDisplayTimezoneChange`.
+   * the sidebar; selecting a new zone fires `onDisplayTimezoneChange`.
    */
   displayTimezone: string
+  assistantOpen: boolean
+  assistantSummary: CalendarAssistantSummary
   onDisplayTimezoneChange: (tz: string) => void
+  onToggleAssistant: () => void
+  onCloseAssistant: () => void
+  onAssistantAskAgent: (instruction: string) => void
   onDateChange: (date: Date) => void
   onSelectDate: (date: Date) => void
   onToggleSource: (id: string) => void
@@ -115,7 +122,12 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
     newEventCardDesc,
     sourcesForView,
     displayTimezone,
+    assistantOpen,
+    assistantSummary,
     onDisplayTimezoneChange,
+    onToggleAssistant,
+    onCloseAssistant,
+    onAssistantAskAgent,
     onDateChange,
     onSelectDate,
     onToggleSource,
@@ -183,7 +195,7 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
             style={{
               width: WORKBENCH_SUPPORT_PANEL_WIDTH,
               minWidth: WORKBENCH_SUPPORT_PANEL_WIDTH,
-              background: 'transparent',
+              background: 'var(--calendar-sidebar-bg)',
               padding: '0 14px 12px',
             }}
           >
@@ -197,16 +209,26 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
 
             <div style={{ height: 8 }} />
 
-            <CalendarSources
-              sources={sources}
-              onToggleSource={onToggleSource}
-              onAddSource={onAddSource}
-              onUpdateSource={onUpdateSource}
-              onDeleteSource={onDeleteSource}
-              onImportIcs={onImportIcs}
-              onSubscribeUrl={onSubscribeUrl}
-              onSyncNow={onSyncSourceNow}
-            />
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <CalendarSources
+                sources={sources}
+                onToggleSource={onToggleSource}
+                onAddSource={onAddSource}
+                onUpdateSource={onUpdateSource}
+                onDeleteSource={onDeleteSource}
+                onImportIcs={onImportIcs}
+                onSubscribeUrl={onSubscribeUrl}
+                onSyncNow={onSyncSourceNow}
+              />
+            </div>
+
+            <div className="calendar-timezone-dock">
+              <span>显示时区</span>
+              <CalendarTimezoneSelector
+                value={displayTimezone}
+                onChange={onDisplayTimezoneChange}
+              />
+            </div>
           </div>
 
           <div
@@ -226,11 +248,11 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
               }}
             >
               <div
-                className="flex items-center justify-between flex-shrink-0"
+                className="calendar-schedule-toolbar flex items-center justify-between flex-shrink-0"
                 style={{
                   height: WORKBENCH_TOOLBAR_ROW_HEIGHT,
                   padding: `0 ${WORKBENCH_HEADER_EDGE_X}px`,
-                  background: 'transparent',
+                  background: 'var(--sx-ready-grid-chrome-surface)',
                   boxSizing: 'border-box',
                 }}
               >
@@ -292,31 +314,40 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
                     </span>
                   )}
                 </div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <CalendarTimezoneSelector
-                    value={displayTimezone}
-                    onChange={onDisplayTimezoneChange}
-                  />
+                <div className="calendar-toolbar-actions">
                   <CalendarViewSelector viewType={viewType} onViewTypeChange={onViewTypeChange} />
                   <button
+                    type="button"
+                    className="calendar-toolbar-button"
                     onClick={onGoToToday}
-                    style={{
-                      padding: '4px 12px', borderRadius: 10,
-                      border: '1px solid var(--border-input)', background: 'transparent',
-                      fontSize: 12, fontWeight: 500, color: 'var(--text-body)',
-                      cursor: 'pointer',
-                    }}
                   >
                     今天
                   </button>
-                  <ChevronLeft
+                  <button
+                    type="button"
+                    className="calendar-icon-button"
+                    aria-label="上一段时间"
                     onClick={() => onNavigateDate(-1)}
-                    style={{ width: 16, height: 16, color: 'var(--text-muted)', cursor: 'pointer' }}
-                  />
-                  <ChevronRight
+                  >
+                    <ChevronLeft style={{ width: 16, height: 16 }} />
+                  </button>
+                  <button
+                    type="button"
+                    className="calendar-icon-button"
+                    aria-label="下一段时间"
                     onClick={() => onNavigateDate(1)}
-                    style={{ width: 16, height: 16, color: 'var(--text-muted)', cursor: 'pointer' }}
-                  />
+                  >
+                    <ChevronRight style={{ width: 16, height: 16 }} />
+                  </button>
+                  <button
+                    type="button"
+                    className={`calendar-icon-button calendar-assistant-toggle ${assistantOpen ? 'is-active' : ''}`}
+                    aria-label="打开日程管家"
+                    aria-pressed={assistantOpen}
+                    onClick={onToggleAssistant}
+                  >
+                    <PanelRightOpen style={{ width: 16, height: 16 }} />
+                  </button>
                 </div>
               </div>
 
@@ -341,7 +372,7 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
                   <>
                     <div
                       ref={sxContainerRef}
-                      className="sx-react-calendar-wrapper"
+                      className={`sx-react-calendar-wrapper calendar-schedule-view calendar-schedule-view-${viewType}`}
                       style={{ width: '100%', height: '100%' }}
                     />
                     {customPortalNodes}
@@ -366,6 +397,13 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
                         </div>
                       </div>
                     )}
+                    <CalendarAssistantPanel
+                      open={assistantOpen}
+                      summary={assistantSummary}
+                      displayTimezone={displayTimezone}
+                      onClose={onCloseAssistant}
+                      onAskAgent={onAssistantAskAgent}
+                    />
                   </>
                 )}
               </div>

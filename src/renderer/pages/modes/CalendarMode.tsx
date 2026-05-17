@@ -1,10 +1,11 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { format, addDays, addMonths, subMonths, subDays, startOfWeek, startOfMonth, endOfMonth, endOfWeek } from 'date-fns'
+import { format, addDays, addMonths, subMonths, subDays, startOfWeek, startOfMonth, endOfMonth, endOfWeek, startOfDay, endOfDay } from 'date-fns'
 import { zhCN } from 'date-fns/locale'
 
 import CalendarWorkbenchShell from '../../components/calendar/CalendarWorkbenchShell'
 import { CalendarProvider } from '../../components/calendar/CalendarContext'
 import type { CalendarContextValue } from '../../components/calendar/CalendarContext'
+import type { CalendarAssistantEvent, CalendarAssistantSummary } from '../../components/calendar/CalendarAssistantPanel'
 import EventModal from '../../components/calendar/EventModal'
 import type { EventModalData } from '../../components/calendar/EventModal'
 import type { CalendarSource } from '../../components/calendar/CalendarSources'
@@ -17,6 +18,7 @@ import { DEFAULT_SOURCES, persistCalendarModeCache, readCalendarModeCache } from
 import { buildRemoteSuggestionEventDraft } from '../../modules/calendar/remoteSuggestion'
 import { useCalendarQuickCreate } from '../../modules/calendar/useCalendarQuickCreate'
 import { useScheduleXCalendar } from '../../modules/calendar/useScheduleXCalendar'
+import { appendToAgentInput } from '../../modules/agent/chat-input-bridge'
 import { useCalendarSession } from '../../stores/useCalendarSession'
 
 import '@schedule-x/theme-default/dist/index.css'
@@ -51,6 +53,7 @@ export default function CalendarMode({
   const [dataLoaded, setDataLoaded] = useState(persistedState?.dataLoaded ?? false)
   const [hasActivated, setHasActivated] = useState(isActive || Boolean(persistedState?.dataLoaded))
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [assistantOpen, setAssistantOpen] = useState(false)
 
   const [modalOpen, setModalOpen] = useState(false)
   const [modalMode, setModalMode] = useState<'create' | 'edit'>('create')
@@ -847,6 +850,84 @@ export default function CalendarMode({
     [events, enabledSourceIds],
   )
 
+  const headerTitle = useMemo(() => {
+    if (viewType === 'day') {
+      return format(currentDate, 'yyyy年 M月d日 EEEE', { locale: zhCN })
+    }
+    if (viewType === 'month') {
+      return format(currentDate, 'yyyy年 M月', { locale: zhCN })
+    }
+    return format(currentDate, 'MMMM yyyy', { locale: zhCN })
+  }, [currentDate, viewType])
+
+  const calendarAssistantSummary = useMemo<CalendarAssistantSummary>(() => {
+    const sourceNameById = new Map(sources.map((source) => [source.id, source.name]))
+    const toAssistantEvent = (event: CalendarEvent): CalendarAssistantEvent => ({
+      id: event.id,
+      title: event.title,
+      startTime: event.startTime,
+      endTime: event.endTime,
+      calendarName: sourceNameById.get(event.calendarId) || '日历',
+      color: event.color,
+      allDay: event.allDay,
+    })
+    const activeEvents = events
+      .filter((event) => enabledSourceIds.has(event.calendarId))
+      .slice()
+      .sort((a, b) => a.startTime.getTime() - b.startTime.getTime())
+
+    const todayStart = startOfDay(new Date())
+    const todayEnd = endOfDay(new Date())
+    const todayEvents = activeEvents
+      .filter((event) => overlapsRange(event.startTime, event.endTime, todayStart, todayEnd))
+      .map(toAssistantEvent)
+
+    const now = Date.now()
+    const nextEvent = activeEvents.find((event) => event.endTime.getTime() >= now)
+
+    const weekRange = getDateRange(currentDate, 'week')
+    const weekStartMs = startOfDay(weekRange.start).getTime()
+    const weekEndMs = endOfDay(weekRange.end).getTime()
+    const weekEventsRaw = activeEvents.filter((event) => (
+      event.endTime.getTime() >= weekStartMs && event.startTime.getTime() <= weekEndMs
+    ))
+    const weekTotalMinutes = weekEventsRaw.reduce((total, event) => {
+      if (event.allDay) return total
+      const startMs = Math.max(event.startTime.getTime(), weekStartMs)
+      const endMs = Math.min(event.endTime.getTime(), weekEndMs)
+      return total + Math.max(0, Math.round((endMs - startMs) / 60000))
+    }, 0)
+    const weekCalendarCount = new Set(weekEventsRaw.map((event) => event.calendarId)).size
+
+    return {
+      todayEvents,
+      weekEvents: weekEventsRaw.map(toAssistantEvent),
+      nextEvent: nextEvent ? toAssistantEvent(nextEvent) : null,
+      weekEventCount: weekEventsRaw.length,
+      weekTotalHours: Math.round((weekTotalMinutes / 60) * 10) / 10,
+      weekCalendarCount,
+    }
+  }, [currentDate, enabledSourceIds, events, sources])
+
+  const handleCalendarAssistantAskAgent = useCallback((instruction: string) => {
+    const trimmed = instruction.trim()
+    if (!trimmed) return
+    const weekLines = calendarAssistantSummary.weekEvents.slice(0, 8).map((event) => {
+      const startLabel = format(event.startTime, 'M月d日 HH:mm', { locale: zhCN })
+      const endLabel = format(event.endTime, 'HH:mm', { locale: zhCN })
+      return `- ${startLabel}-${endLabel} ${event.title || '无标题日程'}（${event.calendarName}）`
+    })
+    const prompt = [
+      '### 日程管家',
+      `请求：${trimmed}`,
+      `当前视图：${headerTitle}`,
+      `本周：${calendarAssistantSummary.weekEventCount} 件事，约 ${calendarAssistantSummary.weekTotalHours} 小时，来自 ${calendarAssistantSummary.weekCalendarCount} 个日历。`,
+      weekLines.length > 0 ? '本周日程：' : '本周暂时没有日程。',
+      ...weekLines,
+    ].join('\n')
+    appendToAgentInput(prompt)
+  }, [calendarAssistantSummary, headerTitle])
+
   const calendarContextValue: CalendarContextValue = useMemo(() => ({
     onEditEvent: handleOpenEditModal,
     onUpdateEvent: handleUpdateEvent,
@@ -867,16 +948,6 @@ export default function CalendarMode({
   const goToToday = useCallback(() => {
     setCurrentDate(new Date())
   }, [])
-
-  const headerTitle = useMemo(() => {
-    if (viewType === 'day') {
-      return format(currentDate, 'yyyy年 M月d日 EEEE', { locale: zhCN })
-    }
-    if (viewType === 'month') {
-      return format(currentDate, 'yyyy年 M月', { locale: zhCN })
-    }
-    return format(currentDate, 'MMMM yyyy', { locale: zhCN })
-  }, [currentDate, viewType])
 
   return (
     <CalendarProvider value={calendarContextValue}>
@@ -904,7 +975,12 @@ export default function CalendarMode({
           newEventCardDesc={quickCreate.newEventCardDesc}
           sourcesForView={sourcesForView}
           displayTimezone={displayTimezone}
+          assistantOpen={assistantOpen}
+          assistantSummary={calendarAssistantSummary}
           onDisplayTimezoneChange={setDisplayTimezone}
+          onToggleAssistant={() => setAssistantOpen((open) => !open)}
+          onCloseAssistant={() => setAssistantOpen(false)}
+          onAssistantAskAgent={handleCalendarAssistantAskAgent}
           onDateChange={setCurrentDate}
           onSelectDate={handleSelectDate}
           onToggleSource={toggleSource}
@@ -1254,4 +1330,8 @@ function getDateRange(date: Date, view: ViewType) {
   }
   const weekStart = startOfWeek(date, { weekStartsOn: 0 })
   return { start: weekStart, end: addDays(weekStart, 6) }
+}
+
+function overlapsRange(start: Date, end: Date, rangeStart: Date, rangeEnd: Date): boolean {
+  return end.getTime() >= rangeStart.getTime() && start.getTime() <= rangeEnd.getTime()
 }
