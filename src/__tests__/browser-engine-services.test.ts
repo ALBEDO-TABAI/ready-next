@@ -566,6 +566,36 @@ describe('BrowserTabLifecycleService', () => {
 })
 
 describe('BrowserPreviewService', () => {
+  it('uses the browser tab session so RSS previews share login state with browser mode', async () => {
+    const mock = createMockView()
+    const requestedPartitions: string[] = []
+    const service = new BrowserPreviewService({
+      useMock: false,
+      browserUserAgent: 'ready-test',
+      createHost: (partition) => {
+        requestedPartitions.push(partition)
+        return mock.view as any
+      },
+      showHost: () => undefined,
+      hideHost: () => undefined,
+      detachHost: () => undefined,
+      applyPreviewBounds: () => undefined,
+      getPreviewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
+      setPreviewBounds: () => undefined,
+      sendToRenderer: () => undefined,
+      logBrowserDiag: () => undefined,
+      bindPopup: () => undefined,
+      installContextMenu: () => undefined,
+      handleWindowOpen: () => ({ action: 'deny' }),
+      hideActiveTab: () => false,
+      restoreActiveTab: () => undefined,
+    })
+
+    await service.open('https://example.com')
+
+    assert.deepStrictEqual(requestedPartitions, ['persist:browser'])
+  })
+
   it('registers the preview session for downloads before opening preview pages', async () => {
     const mock = createMockView()
     const downloadSessions: unknown[] = []

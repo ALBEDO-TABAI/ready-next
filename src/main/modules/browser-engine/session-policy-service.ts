@@ -160,7 +160,6 @@ export class BrowserSessionPolicyService {
     }
 
     applyForPartition('persist:browser')
-    applyForPartition('persist:browser-preview')
   }
 
   private persistAdblockState(): void {

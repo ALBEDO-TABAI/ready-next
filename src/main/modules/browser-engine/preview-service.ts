@@ -71,7 +71,7 @@ export class BrowserPreviewService {
       return this.previewView
     }
 
-    const view = this.deps.createHost('persist:browser-preview')
+    const view = this.deps.createHost('persist:browser')
     try {
       view.webContents.setUserAgent(this.deps.browserUserAgent)
     } catch {
