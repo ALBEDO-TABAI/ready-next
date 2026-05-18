@@ -50,6 +50,19 @@ test('browser and rss share one support panel width constant to reduce mode swit
   assert.match(rssMode, /WORKBENCH_SUPPORT_PANEL_WIDTH/)
 })
 
+test('rss analysis task menu uses a solid floating surface with compact status rows', () => {
+  const rssFeed = readWorkspaceFile('src/renderer/components/rss/RSSFeed.tsx')
+
+  assert.match(rssFeed, /className="glass-surface-floating absolute right-0/)
+  assert.match(rssFeed, /var\(--surface-floating-bg\) 92%/)
+  assert.match(rssFeed, /backdropFilter: 'blur\(var\(--surface-blur\)\) saturate\(var\(--surface-saturate\)\)'/)
+  assert.match(rssFeed, /function taskStageTone/)
+  assert.match(rssFeed, /gridTemplateColumns: '18px minmax\(0, 1fr\) auto'/)
+  assert.match(rssFeed, /<AnalysisProgressRing/)
+  assert.match(rssFeed, /{roundedProgress}%/)
+  assert.match(rssFeed, /{analysisJobs\.length} 条记录 · {activeJobsCount} 个进行中/)
+})
+
 test('skills center and global search inherit the file manager side panel surface instead of nesting a second glass sheet', () => {
   const skillsPanel = readWorkspaceFile('src/renderer/components/layout/SkillsCenterPanel.tsx')
   const globalSearch = readWorkspaceFile('src/renderer/components/layout/GlobalSearchPanel.tsx')

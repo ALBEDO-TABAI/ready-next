@@ -149,7 +149,36 @@ function taskStageLabel(status: AnalysisStatus): string {
   return map[status] || status
 }
 
-function AnalysisProgressRing({ entry }: { entry?: ItemAnalysisProgress }) {
+function taskStageTone(status: AnalysisStatus): { color: string; background: string; border: string } {
+  if (status === 'success') {
+    return {
+      color: 'var(--color-green)',
+      background: 'color-mix(in srgb, var(--color-green) 12%, transparent)',
+      border: 'color-mix(in srgb, var(--color-green) 28%, transparent)',
+    }
+  }
+  if (status === 'failed') {
+    return {
+      color: 'var(--color-red)',
+      background: 'color-mix(in srgb, var(--color-red) 10%, transparent)',
+      border: 'color-mix(in srgb, var(--color-red) 24%, transparent)',
+    }
+  }
+  if (status === 'paused') {
+    return {
+      color: 'var(--color-orange)',
+      background: 'color-mix(in srgb, var(--color-orange) 12%, transparent)',
+      border: 'color-mix(in srgb, var(--color-orange) 28%, transparent)',
+    }
+  }
+  return {
+    color: 'var(--color-blue)',
+    background: 'color-mix(in srgb, var(--color-blue) 10%, transparent)',
+    border: 'color-mix(in srgb, var(--color-blue) 24%, transparent)',
+  }
+}
+
+function AnalysisProgressRing({ entry }: { entry?: Pick<ItemAnalysisProgress, 'progress' | 'status'> }) {
   const value = Math.max(0, Math.min(100, entry?.progress ?? 0))
   const radius = 7
   const circumference = 2 * Math.PI * radius
@@ -429,64 +458,93 @@ export default function RSSFeed({
 
             {taskMenuOpen && (
               <div
-                className="absolute right-0 top-[calc(100%+8px)] z-20 overflow-y-auto overflow-x-hidden rounded-xl border"
+                className="glass-surface-floating absolute right-0 top-[calc(100%+10px)] z-20 overflow-hidden rounded-[18px] border"
                 style={{
-                  width: 460,
-                  maxHeight: 420,
-                  background: 'color-mix(in srgb, var(--surface-floating-bg) 28%, transparent)',
-                  borderColor: 'var(--border-default)',
-                  boxShadow: 'var(--shadow-sm)',
+                  width: 430,
+                  maxWidth: 'min(430px, calc(100vw - 48px))',
+                  background: 'color-mix(in srgb, var(--surface-floating-bg) 92%, rgba(255, 255, 255, 0.12))',
+                  borderColor: 'color-mix(in srgb, var(--border-default) 74%, transparent)',
+                  boxShadow: '0 20px 52px rgba(24, 33, 49, 0.18)',
+                  backdropFilter: 'blur(var(--surface-blur)) saturate(var(--surface-saturate))',
+                  WebkitBackdropFilter: 'blur(var(--surface-blur)) saturate(var(--surface-saturate))',
                 }}
               >
                 <div
-                  className="sticky top-0 flex items-center justify-between border-b px-4 py-3"
+                  className="flex items-center justify-between border-b px-4 py-3"
                   style={{
-                    background: 'color-mix(in srgb, var(--surface-floating-bg) 28%, transparent)',
-                    borderColor: 'var(--border-default)',
+                    background: 'color-mix(in srgb, var(--surface-floating-bg) 96%, transparent)',
+                    borderColor: 'color-mix(in srgb, var(--border-default) 62%, transparent)',
                   }}
                 >
-                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-secondary)' }}>分析任务</span>
+                  <div className="min-w-0">
+                    <div style={{ fontSize: 12, fontWeight: 650, color: 'var(--text-secondary)', lineHeight: 1.2 }}>
+                      分析任务
+                    </div>
+                    <div style={{ marginTop: 3, fontSize: 10, color: 'var(--text-muted)', lineHeight: 1.2 }}>
+                      {analysisJobs.length} 条记录 · {activeJobsCount} 个进行中
+                    </div>
+                  </div>
                   <button
                     type="button"
                     onClick={() => setTaskMenuOpen(false)}
-                    className="rounded p-1 hover:bg-[var(--bg-hover)]"
+                    className="flex h-7 w-7 items-center justify-center rounded-[9px] hover:bg-[var(--bg-hover)]"
                     title="关闭"
                   >
                     <X style={{ width: 14, height: 14, color: 'var(--text-muted)' }} />
                   </button>
                 </div>
                 {analysisJobs.length === 0 ? (
-                  <div className="px-4 py-8 text-center text-[12px]" style={{ color: 'var(--text-muted)' }}>
+                  <div className="px-4 py-10 text-center text-[12px]" style={{ color: 'var(--text-muted)' }}>
                     暂无任务记录
                   </div>
                 ) : (
-                  <div className="p-3" style={{ display: 'grid', gap: 10 }}>
+                  <div
+                    className="rss-feed-scroll p-2.5"
+                    style={{
+                      display: 'grid',
+                      gap: 8,
+                      maxHeight: 360,
+                      overflowY: 'auto',
+                      overscrollBehavior: 'contain',
+                    }}
+                  >
                     {analysisJobs.map((job) => {
                       const isQueued = job.status === 'queued'
                       const isPaused = job.status === 'paused'
                       const isRunning = job.status === 'running_script' || job.status === 'running_subagent'
                       const canDelete = !isRunning
                       const canToggle = isQueued || isPaused
+                      const stageTone = taskStageTone(job.status)
+                      const detailText = job.error || job.message || ''
+                      const roundedProgress = Math.max(0, Math.min(100, Math.round(job.progress || 0)))
                       return (
                         <div
                           key={job.id}
-                          className="rounded-md border transition-colors"
+                          className="border transition-colors"
                           style={{
-                            borderColor: 'var(--border-default)',
-                            background: 'color-mix(in srgb, var(--surface-card-bg) 18%, transparent)',
-                            borderRadius: 10,
+                            borderColor: 'color-mix(in srgb, var(--border-default) 62%, transparent)',
+                            background: 'color-mix(in srgb, var(--surface-card-bg) 74%, rgba(255, 255, 255, 0.08))',
+                            borderRadius: 14,
+                            boxShadow: 'inset 0 1px 0 color-mix(in srgb, var(--glass-highlight) 42%, transparent)',
                           }}
                         >
-                          <div className="flex items-center justify-between gap-4 px-4 py-3">
-                            <div className="min-w-0 flex-1">
+                          <div className="grid items-center gap-3 px-3 py-2.5" style={{ gridTemplateColumns: '18px minmax(0, 1fr) auto' }}>
+                            <AnalysisProgressRing
+                              entry={{
+                                progress: roundedProgress,
+                                status: job.status,
+                              }}
+                            />
+
+                            <div className="min-w-0">
                               <div
-                                className="text-[13px] font-medium"
+                                className="text-[12px] font-medium"
                                 style={{
                                   color: 'var(--text-secondary)',
                                   display: '-webkit-box',
                                   overflow: 'hidden',
                                   WebkitBoxOrient: 'vertical',
-                                  WebkitLineClamp: 2,
+                                  WebkitLineClamp: 1,
                                   lineHeight: 1.35,
                                 }}
                                 title={job.title}
@@ -494,16 +552,35 @@ export default function RSSFeed({
                                 {job.title}
                               </div>
                               <div
-                                className="mt-1 flex items-center gap-2 text-[12px]"
+                                className="mt-1 flex min-w-0 items-center gap-2 text-[11px]"
                                 style={{ color: 'var(--text-muted)' }}
                               >
-                                <span>{taskTypeLabel(job.action)}</span>
-                                <span>·</span>
-                                <span>{taskStageLabel(job.status)}</span>
+                                <span className="shrink-0">{taskTypeLabel(job.action)}</span>
+                                <span className="shrink-0">·</span>
+                                <span className="shrink-0">{roundedProgress}%</span>
+                                <span
+                                  className="shrink-0 rounded-full border px-1.5 py-[1px]"
+                                  style={{
+                                    color: stageTone.color,
+                                    background: stageTone.background,
+                                    borderColor: stageTone.border,
+                                  }}
+                                >
+                                  {taskStageLabel(job.status)}
+                                </span>
                               </div>
+                              {detailText ? (
+                                <div
+                                  className="mt-1 truncate text-[11px]"
+                                  style={{ color: job.error ? 'var(--color-red)' : 'var(--text-light)' }}
+                                  title={detailText}
+                                >
+                                  {detailText}
+                                </div>
+                              ) : null}
                             </div>
 
-                            <div className="flex items-center gap-2">
+                            <div className="flex items-center gap-1">
                               <button
                                 type="button"
                                 disabled={!canToggle}
@@ -514,14 +591,18 @@ export default function RSSFeed({
                                     onPauseAnalysisJob(job.id)
                                   }
                                 }}
-                                className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-[var(--bg-hover)] disabled:opacity-40"
-                                style={{ color: isPaused ? 'var(--color-orange)' : 'var(--color-blue)' }}
+                                className="flex h-7 w-7 items-center justify-center rounded-[9px] hover:bg-[var(--bg-hover)] disabled:opacity-35"
+                                style={{
+                                  color: canToggle
+                                    ? (isPaused ? 'var(--color-orange)' : 'var(--color-blue)')
+                                    : 'var(--text-light)',
+                                }}
                                 title={isPaused ? '继续任务' : isQueued ? '暂停任务' : '当前阶段不可切换'}
                               >
                                 {isPaused ? (
-                                  <Pause className="h-[15px] w-[15px]" />
+                                  <Pause className="h-[14px] w-[14px]" />
                                 ) : (
-                                  <Play className="h-[15px] w-[15px]" />
+                                  <Play className="h-[14px] w-[14px]" />
                                 )}
                               </button>
 
@@ -529,11 +610,11 @@ export default function RSSFeed({
                                 type="button"
                                 disabled={!canDelete}
                                 onClick={() => onDeleteAnalysisJob(job.id)}
-                                className="flex h-8 w-8 items-center justify-center rounded-md hover:bg-[var(--bg-hover)] disabled:opacity-40"
-                                style={{ color: 'var(--color-red)' }}
+                                className="flex h-7 w-7 items-center justify-center rounded-[9px] hover:bg-[var(--bg-hover)] disabled:opacity-35"
+                                style={{ color: canDelete ? 'var(--color-red)' : 'var(--text-light)' }}
                                 title={canDelete ? '删除任务' : '运行中任务暂不可删除'}
                               >
-                                <Trash2 className="h-[15px] w-[15px]" />
+                                <Trash2 className="h-[14px] w-[14px]" />
                               </button>
                             </div>
                           </div>
