@@ -3588,25 +3588,50 @@ html[data-theme='dark'][data-skin='liquid-glass'] .calendar-mode-shell .workbenc
   -webkit-app-region: no-drag;
 }
 
+.calendar-create-button,
 .calendar-toolbar-button,
 .calendar-icon-button {
   height: 28px;
-  border: 1px solid var(--calendar-control-border);
-  background: var(--calendar-control-bg);
+  border: 0;
+  background: transparent;
   color: var(--text-body);
   cursor: pointer;
   transition:
     background 160ms ease,
-    border-color 160ms ease,
     color 160ms ease,
-    opacity 160ms ease;
+    opacity 160ms ease,
+    transform 160ms ease;
   -webkit-app-region: no-drag;
 }
 
+.calendar-create-button:hover,
 .calendar-toolbar-button:hover,
 .calendar-icon-button:hover {
   background: var(--calendar-control-bg-hover);
   color: var(--text-title);
+  transform: translateY(-1px);
+}
+
+.calendar-create-button:active,
+.calendar-toolbar-button:active,
+.calendar-icon-button:active {
+  transform: translateY(0);
+}
+
+.calendar-create-button:focus-visible,
+.calendar-toolbar-button:focus-visible,
+.calendar-icon-button:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--color-blue) 18%, transparent);
+}
+
+.calendar-create-button {
+  width: 28px;
+  padding: 0;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .calendar-toolbar-button {
@@ -3628,7 +3653,6 @@ html[data-theme='dark'][data-skin='liquid-glass'] .calendar-mode-shell .workbenc
 .calendar-assistant-toggle.is-active,
 .calendar-view-segment button.is-active {
   background: var(--calendar-control-bg-active);
-  border-color: color-mix(in srgb, var(--color-blue) 42%, var(--calendar-control-border) 58%);
   color: var(--color-blue);
 }
 
@@ -3638,7 +3662,7 @@ html[data-theme='dark'][data-skin='liquid-glass'] .calendar-mode-shell .workbenc
   height: 28px;
   padding: 2px;
   border-radius: 9px;
-  border: 1px solid var(--calendar-control-border);
+  border: 0;
   background: color-mix(in srgb, var(--calendar-control-bg) 76%, transparent);
   -webkit-app-region: no-drag;
 }
@@ -3660,6 +3684,7 @@ html[data-theme='dark'][data-skin='liquid-glass'] .calendar-mode-shell .workbenc
 }
 
 .calendar-view-segment button:hover {
+  background: var(--calendar-control-bg-hover);
   color: var(--text-title);
 }
 

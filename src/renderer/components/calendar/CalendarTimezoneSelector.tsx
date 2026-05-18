@@ -192,9 +192,9 @@ export default function CalendarTimezoneSelector({
               zIndex: 80,
             }),
             position: 'absolute',
-            top: '100%',
+            bottom: '100%',
             right: 0,
-            marginTop: 4,
+            marginBottom: 4,
           }}
         >
           <input

@@ -1,5 +1,5 @@
 import type { ComponentType, DragEvent, ReactNode, RefObject } from 'react'
-import { ChevronLeft, ChevronRight, Info, PanelRightOpen, Plus } from 'lucide-react'
+import { CalendarDays, ChevronLeft, ChevronRight, Info, PanelRightOpen, Plus } from 'lucide-react'
 
 import MiniCalendar from './MiniCalendar'
 import CalendarAssistantPanel from './CalendarAssistantPanel'
@@ -260,24 +260,11 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
                   <button
                     ref={createButtonRef}
                     onClick={onOpenCreateMenu}
-                    className="glass-surface-card"
-                    style={{
-                      height: 28,
-                      borderRadius: 8,
-                      border: '1px solid var(--border-default)',
-                      background: 'color-mix(in srgb, var(--surface-card-bg) 28%, transparent)',
-                      color: 'var(--text-title)',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 5,
-                      padding: '0 10px',
-                      cursor: 'pointer',
-                      fontSize: 12,
-                      fontWeight: 500,
-                    }}
+                    className="calendar-create-button"
+                    aria-label="新建日程"
+                    title="新建日程"
                   >
                     <Plus style={{ width: 13, height: 13, color: 'var(--color-red)' }} />
-                    新建
                   </button>
                   <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-title)' }}>
                     {headerTitle}
@@ -318,10 +305,12 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
                   <CalendarViewSelector viewType={viewType} onViewTypeChange={onViewTypeChange} />
                   <button
                     type="button"
-                    className="calendar-toolbar-button"
+                    className="calendar-icon-button"
+                    aria-label="回到今天"
+                    title="今天"
                     onClick={onGoToToday}
                   >
-                    今天
+                    <CalendarDays style={{ width: 16, height: 16 }} />
                   </button>
                   <button
                     type="button"
