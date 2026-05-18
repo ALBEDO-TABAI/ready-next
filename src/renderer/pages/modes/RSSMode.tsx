@@ -1,13 +1,20 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { RefreshCw, AlertCircle, ExternalLink } from 'lucide-react'
 import RSSFeed from '../../components/rss/RSSFeed'
 import PreviewBrowser from '../../components/rss/PreviewBrowser'
 import AddSourceModal from '../../components/rss/AddSourceModal'
+import RSSSettingsPanel from '../../components/rss/RSSSettingsPanel'
 import Modal from '../../components/ui/Modal'
 import { useModal } from '../../components/ui/useModal'
 import { useRSSAgentAdapter } from '../../modules/rss/useRSSAgentAdapter'
 import { fetchRSSWarmSnapshot } from '../../modules/rss/rssWarmLoader'
 import { getRSSWarmCache, primeRSSWarmCache, setRSSWarmCache } from '../../modules/rss/rssWarmCache'
+import {
+  DEFAULT_RSS_AUTO_REFRESH_INTERVAL_MS,
+  parseRSSAutoRefreshInterval,
+  RSS_AUTO_REFRESH_INTERVAL_KEY,
+} from '../../modules/rss/settings'
 import {
   WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM,
   WORKBENCH_CANVAS_OUTER_PADDING_TOP,
@@ -22,8 +29,6 @@ import { openRSSItemInBrowserTab } from '../../modules/rss/open-rss-item-in-brow
 import type { RSSItem, RSSSource } from '../../components/rss/RSSFeed'
 import type { AddSourceSuccessInfo } from '../../components/rss/AddSourceModal'
 import type { RSSBrowserOpenActionData } from '../../modules/rss/types'
-
-const AUTO_REFRESH_INTERVAL = 15 * 60 * 1000 // 15 minutes
 
 const RSS_MODE_SHELL_STYLE = {
   background: 'var(--workbench-module-surface-bg)',
@@ -88,6 +93,7 @@ export default function RSSMode({
   isActive = true,
   isMotionSettled = true,
 }: RSSModeProps) {
+  const navigate = useNavigate()
   const initialWarmCache = useMemo(() => getRSSWarmCache(), [])
   const selectedSourceId = useRSSSession((state) => state.selectedSourceId)
   const setFeedSnapshot = useRSSSession((state) => state.setFeedSnapshot)
@@ -107,6 +113,8 @@ export default function RSSMode({
   const [isMock, setIsMock] = useState(() => initialWarmCache?.isMock || false)
   const [error, setError] = useState<string | null>(null)
   const [showAddModal, setShowAddModal] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [autoRefreshIntervalMs, setAutoRefreshIntervalMs] = useState(DEFAULT_RSS_AUTO_REFRESH_INTERVAL_MS)
   const [addSourceDraft, setAddSourceDraft] = useState<AddSourceDraftState>({
     browserPresetUrl: '',
     browserPresetName: '',
@@ -171,6 +179,20 @@ export default function RSSMode({
   useEffect(() => {
     sourcesRef.current = sources
   }, [sources])
+
+  useEffect(() => {
+    let cancelled = false
+    const loadAutoRefreshSetting = async () => {
+      if (!window.electronAPI?.settings?.get) return
+      const result = await window.electronAPI.settings.get(RSS_AUTO_REFRESH_INTERVAL_KEY)
+      if (cancelled || !result.success) return
+      setAutoRefreshIntervalMs(parseRSSAutoRefreshInterval(result.data))
+    }
+    void loadAutoRefreshSetting()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   const applyRSSSnapshot = useCallback((snapshot: RSSModeSnapshot) => {
     setItems(snapshot.items)
@@ -345,9 +367,10 @@ export default function RSSMode({
     }
   }, [fetchAnalysisJobs, fetchAnalysisProgress, shouldPoll, visibleItemIds])
 
-  // Task 6: Auto-refresh every 15 minutes
+  // Auto-refresh interval is user-configurable, preserving 15 minutes as the upgrade default.
   useEffect(() => {
     if (!shouldPoll) return
+    if (autoRefreshIntervalMs <= 0) return
     const interval = setInterval(async () => {
       try {
         await window.electronAPI?.rss?.fetchAll()
@@ -356,9 +379,9 @@ export default function RSSMode({
       } catch {
         setBackgroundWarning('RSS 自动刷新失败，稍后会再次尝试。')
       }
-    }, AUTO_REFRESH_INTERVAL)
+    }, autoRefreshIntervalMs)
     return () => clearInterval(interval)
-  }, [loadRSSData, shouldPoll])
+  }, [autoRefreshIntervalMs, loadRSSData, shouldPoll])
 
   useEffect(() => {
     if (!shouldPoll) return
@@ -537,6 +560,10 @@ export default function RSSMode({
     if (!statusAction?.url) return
     await window.electronAPI?.browser?.openForCaptureTarget(statusAction.url)
   }, [statusAction])
+
+  const handleOpenExternalServices = useCallback(() => {
+    navigate('/settings?section=external-services')
+  }, [navigate])
 
   useRSSAgentAdapter({
     items,
@@ -764,9 +791,11 @@ export default function RSSMode({
               onRefresh={handleRefresh}
               onAddSource={handleAddSource}
               onClearRead={handleClearRead}
+              onOpenSettings={() => setSettingsOpen((open) => !open)}
               onPauseAnalysisJob={handlePauseAnalysisJob}
               onResumeAnalysisJob={handleResumeAnalysisJob}
               onDeleteAnalysisJob={handleDeleteAnalysisJob}
+              settingsOpen={settingsOpen}
             />
             {(statusMessage || backgroundWarning || statusAction) && (
               <div
@@ -797,6 +826,16 @@ export default function RSSMode({
                 ) : null}
               </div>
             )}
+            <RSSSettingsPanel
+              open={settingsOpen}
+              sources={sources}
+              selectedSourceId={selectedSource}
+              autoRefreshIntervalMs={autoRefreshIntervalMs}
+              onAutoRefreshIntervalChange={setAutoRefreshIntervalMs}
+              onClose={() => setSettingsOpen(false)}
+              onReloadData={() => loadRSSData({ background: true })}
+              onOpenExternalServices={handleOpenExternalServices}
+            />
           </div>
 
           {/* Preview Browser */}
