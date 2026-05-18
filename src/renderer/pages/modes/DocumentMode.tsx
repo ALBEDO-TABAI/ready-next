@@ -6,6 +6,7 @@ import MarkdownEditor from '../../components/document/MarkdownEditor'
 import DocumentTabRail from '../../components/document/DocumentTabRail'
 import FilePreview from '../../components/document/FilePreview'
 import DraggableModeSwitch from '../../components/document/DraggableModeSwitch'
+import DocumentFloatingPanels, { DocumentPanelToggleButtons } from '../../components/document/DocumentFloatingPanels'
 import { READY_DOCUMENT_REVEAL_EVENT } from '../../modules/agent/document-quote-navigation'
 import {
   WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM,
@@ -196,6 +197,11 @@ const getFileTypeColor = (path: string | null): string => {
   return '#5B8DEF' // blue - default
 }
 
+function readDocumentPanelOpenState(key: string): boolean {
+  if (typeof window === 'undefined') return false
+  return window.localStorage?.getItem(key) === '1'
+}
+
 // --- SplitResizeHandle ---
 function SplitResizeHandle({
   onResize,
@@ -223,10 +229,12 @@ function DocumentEditor({
   tab,
   viewMode,
   previewFocusWidgetTitle,
+  onVisibleLineChange,
 }: {
   tab: DocTab
   viewMode: 'edit' | 'preview'
   previewFocusWidgetTitle?: string | null
+  onVisibleLineChange?: (line: number | null) => void
 }) {
   const ext = useMemo(() => getFileExt(tab.path), [tab.path])
   const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext)
@@ -253,6 +261,7 @@ function DocumentEditor({
       tab={tab}
       viewMode={viewMode}
       previewFocusWidgetTitle={previewFocusWidgetTitle}
+      onVisibleLineChange={onVisibleLineChange}
     />
   )
 }
@@ -271,7 +280,7 @@ export default function DocumentMode({
   const {
     tabs, activeTabId, splitTabId, documentSplitRatio,
     openTab, closeTab, setActiveTab, setSplitTab, setDocumentSplitRatio,
-    reorderTabs, updateTabContent, markTabSaved,
+    reorderTabs, updateTabContent, markTabSaved, setPendingReveal,
   } = useDocTabs()
 
   const splitContainerRef = useRef<HTMLDivElement>(null)
@@ -283,12 +292,23 @@ export default function DocumentMode({
   const [editorMode, setEditorMode] = useState<'edit' | 'preview'>('edit')
   const [previewFocusWidgetTitle, setPreviewFocusWidgetTitle] = useState<string | null>(null)
   const [hasActivated, setHasActivated] = useState(isActive)
+  const [outlinePanelOpen, setOutlinePanelOpen] = useState(() => readDocumentPanelOpenState('ready-document-outline-panel-open'))
+  const [marksPanelOpen, setMarksPanelOpen] = useState(() => readDocumentPanelOpenState('ready-document-marks-panel-open'))
+  const [activeDocumentLine, setActiveDocumentLine] = useState<number | null>(null)
 
   useEffect(() => {
     if (isActive) {
       setHasActivated(true)
     }
   }, [isActive])
+
+  useEffect(() => {
+    window.localStorage?.setItem('ready-document-outline-panel-open', outlinePanelOpen ? '1' : '0')
+  }, [outlinePanelOpen])
+
+  useEffect(() => {
+    window.localStorage?.setItem('ready-document-marks-panel-open', marksPanelOpen ? '1' : '0')
+  }, [marksPanelOpen])
 
   useEffect(() => {
     const nextRatio = clampDocumentSplitRatio(documentSplitRatio)
@@ -337,6 +357,10 @@ export default function DocumentMode({
     tabs.forEach((tab) => next.set(tab.path || tab.id, tab))
     return next
   }, [tabs])
+
+  useEffect(() => {
+    setActiveDocumentLine(null)
+  }, [activeTabId])
 
   const refreshCleanTextTabsFromDisk = useCallback(async (candidateTabs: DocTab[]) => {
     if (!window.electronAPI?.document?.readFile) return
@@ -405,6 +429,16 @@ export default function DocumentMode({
     captureVisibleDocumentScrollPositions()
     setEditorMode(nextMode)
   }, [captureVisibleDocumentScrollPositions, editorMode])
+
+  const handlePanelReveal = useCallback((lineStart: number, lineEnd?: number | null) => {
+    if (!activeTab?.path) return
+    setPendingReveal({
+      path: activeTab.path,
+      lineStart,
+      lineEnd: lineEnd ?? lineStart,
+      requestedAt: Date.now(),
+    })
+  }, [activeTab?.path, setPendingReveal])
 
   // Tab click handler
   const handleTabClick = useCallback((id: string, e: React.MouseEvent) => {
@@ -521,10 +555,19 @@ export default function DocumentMode({
             onTabDrop={handleDrop}
             onTabDragEnd={handleDragEnd}
             rightActions={
-              <DraggableModeSwitch
-                mode={editorMode}
-                onChange={handleEditorModeChange}
-              />
+              <>
+                <DocumentPanelToggleButtons
+                  outlineOpen={outlinePanelOpen}
+                  marksOpen={marksPanelOpen}
+                  onToggleOutline={() => setOutlinePanelOpen((value) => !value)}
+                  onToggleMarks={() => setMarksPanelOpen((value) => !value)}
+                  rail
+                />
+                <DraggableModeSwitch
+                  mode={editorMode}
+                  onChange={handleEditorModeChange}
+                />
+              </>
             }
           />
 
@@ -555,50 +598,69 @@ export default function DocumentMode({
           </div>
 
           {/* Content Area */}
-          {splitTab && activeTab ? (
-            <div className="flex-1 flex min-w-0 overflow-hidden" ref={splitContainerRef} style={{ gap: 0 }}>
-              <div
-                ref={primarySplitPaneRef}
-                className="flex flex-col min-w-0 overflow-hidden"
-                style={{ flexBasis: `${documentSplitRatio}%`, flexShrink: 0, flexGrow: 0 }}
-              >
+          <div className="relative flex-1 min-h-0 overflow-hidden">
+            {splitTab && activeTab ? (
+              <div className="h-full flex min-w-0 overflow-hidden" ref={splitContainerRef} style={{ gap: 0 }}>
+                <div
+                  ref={primarySplitPaneRef}
+                  className="flex flex-col min-w-0 overflow-hidden"
+                  style={{ flexBasis: `${documentSplitRatio}%`, flexShrink: 0, flexGrow: 0 }}
+                >
+                  <DocumentEditor
+                    key={activeTab.id}
+                    tab={activeTab}
+                    viewMode={editorMode}
+                    previewFocusWidgetTitle={previewFocusWidgetTitle}
+                    onVisibleLineChange={setActiveDocumentLine}
+                  />
+                </div>
+                <SplitResizeHandle
+                  onResize={handleSplitResize}
+                  onResizeStateChange={handleSplitResizeStateChange}
+                />
+                <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+                  <DocumentEditor
+                    key={splitTab.id}
+                    tab={splitTab}
+                    viewMode={editorMode}
+                    previewFocusWidgetTitle={previewFocusWidgetTitle}
+                  />
+                </div>
+              </div>
+            ) : activeTab ? (
+              <div className="h-full flex flex-col min-w-0 overflow-hidden">
                 <DocumentEditor
                   key={activeTab.id}
                   tab={activeTab}
                   viewMode={editorMode}
                   previewFocusWidgetTitle={previewFocusWidgetTitle}
+                  onVisibleLineChange={setActiveDocumentLine}
                 />
               </div>
-              <SplitResizeHandle
-                onResize={handleSplitResize}
-                onResizeStateChange={handleSplitResizeStateChange}
-              />
-              <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-                <DocumentEditor
-                  key={splitTab.id}
-                  tab={splitTab}
-                  viewMode={editorMode}
-                  previewFocusWidgetTitle={previewFocusWidgetTitle}
-                />
+            ) : (
+              <div className="h-full flex items-center justify-center text-[var(--text-muted)]">
+                <div className="text-center">
+                  <FileText className="w-12 h-12 mx-auto mb-3 opacity-30" />
+                  <p className="text-[13px]">点击左侧文件打开文档</p>
+                </div>
               </div>
-            </div>
-          ) : activeTab ? (
-            <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
-              <DocumentEditor
-                key={activeTab.id}
-                tab={activeTab}
-                viewMode={editorMode}
-                previewFocusWidgetTitle={previewFocusWidgetTitle}
+            )}
+
+            {activeTab && (
+              <DocumentFloatingPanels
+                documentPath={activeTab.path}
+                documentTitle={activeTab.title}
+                content={activeTab.content}
+                activeLine={activeDocumentLine}
+                outlineOpen={outlinePanelOpen}
+                marksOpen={marksPanelOpen}
+                onToggleOutline={() => setOutlinePanelOpen((value) => !value)}
+                onToggleMarks={() => setMarksPanelOpen((value) => !value)}
+                onReveal={handlePanelReveal}
+                showToggles={false}
               />
-            </div>
-          ) : (
-            <div className="flex-1 flex items-center justify-center text-[var(--text-muted)]">
-              <div className="text-center">
-                <FileText className="w-12 h-12 mx-auto mb-3 opacity-30" />
-                <p className="text-[13px]">点击左侧文件打开文档</p>
-              </div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
     </div>

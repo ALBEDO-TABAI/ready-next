@@ -497,6 +497,14 @@ const documentAPI = {
     ipcRenderer.invoke('document:getBacklinks', payload),
   getGraph: (payload?: { centerPath?: string; depth?: number; workspaceRoot?: string }) =>
     ipcRenderer.invoke('document:getGraph', payload),
+  listMarks: (payload: { documentPath: string }) =>
+    ipcRenderer.invoke('document:listMarks', payload),
+  createMark: (payload: unknown) =>
+    ipcRenderer.invoke('document:createMark', payload),
+  updateMark: (payload: { id: string; patch: unknown }) =>
+    ipcRenderer.invoke('document:updateMark', payload),
+  deleteMark: (payload: { id: string }) =>
+    ipcRenderer.invoke('document:deleteMark', payload),
   // perf-rescue B7 — chokidar watcher for delta incremental indexing.
   startWatcher: (payload: { workspaceRoot: string }) =>
     ipcRenderer.invoke('document:startWatcher', payload),

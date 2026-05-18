@@ -1938,6 +1938,38 @@ const migrations: Migration[] = [
           ON rss_analysis_jobs(status, updated_at DESC);
       `)
     }
+  },
+
+  // ------------------------------------------------------------------ 042
+  {
+    name: '042_create_document_marks',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS document_marks (
+          id TEXT PRIMARY KEY,
+          kind TEXT NOT NULL CHECK (kind IN ('bookmark', 'note')),
+          document_path TEXT NOT NULL,
+          title TEXT NOT NULL DEFAULT '',
+          group_name TEXT NOT NULL DEFAULT '默认',
+          note_text TEXT,
+          excerpt TEXT,
+          line_start INTEGER,
+          line_end INTEGER,
+          anchor_title TEXT,
+          anchor_ordinal INTEGER,
+          anchor_progress REAL,
+          anchor_status TEXT NOT NULL DEFAULT 'linked',
+          sort_order INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_document_marks_path_kind
+          ON document_marks(document_path, kind, sort_order, updated_at DESC);
+        CREATE INDEX IF NOT EXISTS idx_document_marks_path_group
+          ON document_marks(document_path, group_name, kind);
+      `)
+    }
   }
 ]
 

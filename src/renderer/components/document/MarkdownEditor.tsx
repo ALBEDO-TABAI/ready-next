@@ -16,6 +16,7 @@ import {
   renameWidgetFenceTitleInContent,
 } from './widget-card-helpers'
 import { collectDocumentWidgets } from '../../../shared/document-widget-parse'
+import { buildDocumentOutline, getOutlineNodeForLine } from '../../../shared/document-side-panels'
 import {
   getDroppedFileKind,
   getDroppedFilesFromDataTransfer,
@@ -83,6 +84,7 @@ interface MarkdownEditorProps {
   tab: DocTab
   viewMode?: 'edit' | 'preview'
   previewFocusWidgetTitle?: string | null
+  onVisibleLineChange?: (line: number | null) => void
 }
 
 function escapeHtmlAttr(value: string): string {
@@ -102,6 +104,14 @@ function escapeHtmlText(value: string): string {
 
 function normalizeDocText(value: string): string {
   return value.replace(/\r\n?/g, '\n')
+}
+
+function estimateTextareaLineHeight(element: HTMLElement): number {
+  const styles = window.getComputedStyle(element)
+  const lineHeight = Number.parseFloat(styles.lineHeight)
+  if (Number.isFinite(lineHeight) && lineHeight > 0) return lineHeight
+  const fontSize = Number.parseFloat(styles.fontSize)
+  return Number.isFinite(fontSize) && fontSize > 0 ? fontSize * 1.6 : 24
 }
 
 function findDocumentSelectionLocation(
@@ -187,6 +197,7 @@ export default function MarkdownEditor({
   tab,
   viewMode = 'edit',
   previewFocusWidgetTitle,
+  onVisibleLineChange,
 }: MarkdownEditorProps) {
   const { updateTabContent, markTabSaved, pendingReveal, setPendingReveal } = useDocTabs()
   const [isLoading, setIsLoading] = useState(!!tab.path)
@@ -197,6 +208,9 @@ export default function MarkdownEditor({
     extractWidgetStateMapFromContent(tab.content)
   ))
   const rawEditorRef = useRef<HTMLTextAreaElement>(null)
+  const editorSurfaceRef = useRef<HTMLDivElement>(null)
+  const previewSurfaceRef = useRef<HTMLDivElement>(null)
+  const visibleLineFrameRef = useRef<number | null>(null)
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
@@ -212,6 +226,7 @@ export default function MarkdownEditor({
 
   const currentExt = useMemo(() => getFileExt(tab.path), [tab.path])
   const documentScrollKey = useMemo(() => tab.path || tab.id, [tab.id, tab.path])
+  const outlineForVisibility = useMemo(() => buildDocumentOutline(tab.content), [tab.content])
   const canSave = !!tab.path
   const activeRevealTarget = useMemo(() => {
     if (!tab.path || !pendingReveal || pendingReveal.path !== tab.path) return null
@@ -536,6 +551,71 @@ export default function MarkdownEditor({
     }))
   }, [])
 
+  const emitVisibleLine = useCallback((line: number | null) => {
+    if (!onVisibleLineChange) return
+    if (visibleLineFrameRef.current !== null) {
+      window.cancelAnimationFrame(visibleLineFrameRef.current)
+    }
+    visibleLineFrameRef.current = window.requestAnimationFrame(() => {
+      visibleLineFrameRef.current = null
+      onVisibleLineChange(line)
+    })
+  }, [onVisibleLineChange])
+
+  const handleEditorSurfaceScroll = useCallback(() => {
+    const surface = editorSurfaceRef.current
+    const rawEditor = rawEditorRef.current
+    if (!surface || !rawEditor) return
+    const lineHeight = estimateTextareaLineHeight(rawEditor)
+    emitVisibleLine(Math.max(1, Math.floor(surface.scrollTop / lineHeight) + 1))
+  }, [emitVisibleLine])
+
+  const handlePreviewSurfaceScroll = useCallback(() => {
+    const surface = previewSurfaceRef.current
+    if (!surface) return
+    const headings = Array.from(surface.querySelectorAll<HTMLElement>('[data-ready-heading-title]'))
+    if (headings.length === 0) {
+      const maxScroll = Math.max(1, surface.scrollHeight - surface.clientHeight)
+      const line = Math.max(1, Math.round((surface.scrollTop / maxScroll) * outlineForVisibility.lineCount))
+      emitVisibleLine(line)
+      return
+    }
+
+    const counts = new Map<string, number>()
+    const ordinals = headings.map((heading) => {
+      const title = heading.dataset.readyHeadingTitle || ''
+      const ordinal = counts.get(title) || 0
+      counts.set(title, ordinal + 1)
+      return ordinal
+    })
+    const contentTop = surface.scrollTop + 12
+    const containerTop = surface.getBoundingClientRect().top
+    let nearestIndex = 0
+    for (let index = 0; index < headings.length; index += 1) {
+      const top = headings[index].getBoundingClientRect().top - containerTop + surface.scrollTop
+      if (top <= contentTop + 16) {
+        nearestIndex = index
+        continue
+      }
+      break
+    }
+    const title = headings[nearestIndex]?.dataset.readyHeadingTitle || null
+    const ordinal = ordinals[nearestIndex] || 0
+    const node = outlineForVisibility.nodes.find((item) => (
+      item.kind === 'heading' &&
+      item.anchorTitle === title &&
+      item.anchorOrdinal === ordinal
+    ))
+    emitVisibleLine(node?.lineStart ?? 1)
+  }, [emitVisibleLine, outlineForVisibility])
+
+  useEffect(() => () => {
+    if (visibleLineFrameRef.current !== null) {
+      window.cancelAnimationFrame(visibleLineFrameRef.current)
+      visibleLineFrameRef.current = null
+    }
+  }, [])
+
   useEffect(() => {
     if (viewMode !== 'edit' || !activeRevealTarget) return
     const rawEditor = rawEditorRef.current
@@ -563,10 +643,51 @@ export default function MarkdownEditor({
     requestAnimationFrame(() => {
       rawEditor.focus()
       rawEditor.setSelectionRange(start, end || start)
-      rawEditor.scrollTop = rawEditor.scrollHeight * (start / Math.max(normalizedContent.length, 1))
+      const targetTop = activeRevealTarget.lineStart
+        ? Math.max(0, (activeRevealTarget.lineStart - 1) * estimateTextareaLineHeight(rawEditor))
+        : rawEditor.scrollHeight * (start / Math.max(normalizedContent.length, 1))
+      rawEditor.scrollTop = targetTop
+      if (editorSurfaceRef.current) {
+        editorSurfaceRef.current.scrollTop = targetTop
+      }
       setPendingReveal(null)
     })
   }, [activeRevealTarget, setPendingReveal, tab.content, viewMode])
+
+  useEffect(() => {
+    if (viewMode !== 'preview' || !activeRevealTarget) return
+    const surface = previewSurfaceRef.current
+    if (!surface) return
+
+    const targetLine = activeRevealTarget.lineStart || 1
+    const targetNode = getOutlineNodeForLine(outlineForVisibility, targetLine)
+    const scrollToTop = (top: number) => {
+      surface.scrollTop = Math.max(0, Math.min(Math.round(top), Math.max(0, surface.scrollHeight - surface.clientHeight)))
+    }
+
+    requestAnimationFrame(() => {
+      if (targetNode?.anchorTitle) {
+        const headings = Array.from(surface.querySelectorAll<HTMLElement>('[data-ready-heading-title]'))
+        let seenOrdinal = 0
+        const targetHeading = headings.find((heading) => {
+          if (heading.dataset.readyHeadingTitle !== targetNode.anchorTitle) return false
+          const matches = seenOrdinal === (targetNode.anchorOrdinal || 0)
+          seenOrdinal += 1
+          return matches
+        })
+        if (targetHeading) {
+          const containerTop = surface.getBoundingClientRect().top
+          scrollToTop(targetHeading.getBoundingClientRect().top - containerTop + surface.scrollTop - 8)
+          setPendingReveal(null)
+          return
+        }
+      }
+
+      const ratio = Math.max(0, Math.min(1, targetLine / Math.max(1, outlineForVisibility.lineCount)))
+      scrollToTop(ratio * Math.max(0, surface.scrollHeight - surface.clientHeight))
+      setPendingReveal(null)
+    })
+  }, [activeRevealTarget, outlineForVisibility, setPendingReveal, viewMode])
 
   const renderLoadState = () => {
     if (loadError) {
@@ -594,11 +715,13 @@ export default function MarkdownEditor({
           {/* ── Edit pane: TiptapEditor ── */}
           {viewMode === 'edit' && (
             <div
+              ref={editorSurfaceRef}
               className="panel-hover-scrollbar document-editor-surface flex-1 overflow-auto"
               style={{ position: 'relative' }}
               onContextMenu={handleContextMenu}
               onDragOver={handleEditorDragOver}
               onDrop={handleEditorDrop}
+              onScroll={handleEditorSurfaceScroll}
             >
               <div className="document-editor-layout" style={{ padding: '12px 40px 24px', maxWidth: 800, margin: '0 auto' }}>
                 {contentReady ? (
@@ -639,9 +762,11 @@ export default function MarkdownEditor({
           {/* ── Preview pane ──────────── */}
           {viewMode === 'preview' && (
             <div
+              ref={previewSurfaceRef}
               className="panel-hover-scrollbar document-preview-surface flex-1 overflow-auto"
               style={{ background: 'var(--workbench-module-surface-bg)' }}
               onContextMenu={handleContextMenu}
+              onScroll={handlePreviewSurfaceScroll}
             >
               <div className="document-preview-layout" style={{ padding: '12px 40px 24px', maxWidth: 800, margin: '0 auto' }}>
                 {loadError ? (

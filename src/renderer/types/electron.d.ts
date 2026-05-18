@@ -22,6 +22,11 @@ import type {
 } from '../modules/rss/types'
 import type { ThemeOption, ResolvedTheme, ThemeSkin } from '../stores/useTheme'
 import type { TaskType } from '../../shared/task-types'
+import type {
+  DocumentMarkDraft,
+  DocumentMarkPatch,
+  DocumentMarkRecord,
+} from '../../shared/document-side-panels'
 
 // Type declarations for window.electronAPI exposed by preload
 
@@ -1610,6 +1615,27 @@ interface DocumentWatchDirectoriesResponse {
   mock?: boolean
 }
 
+interface DocumentMarksResponse {
+  success: boolean
+  data?: DocumentMarkRecord[]
+  error?: string
+  mock?: boolean
+}
+
+interface DocumentMarkResponse {
+  success: boolean
+  data?: DocumentMarkRecord
+  error?: string
+  mock?: boolean
+}
+
+interface DocumentDeleteMarkResponse {
+  success: boolean
+  deleted?: boolean
+  error?: string
+  mock?: boolean
+}
+
 interface ElectronDocumentAPI {
   readFile: (path: string) => Promise<DocumentReadResponse>
   writeFile: (path: string, content: string) => Promise<DocumentWriteResponse>
@@ -1666,6 +1692,10 @@ interface ElectronDocumentAPI {
   listSources: () => Promise<DocumentListSourcesResponse>
   getBacklinks: (payload: { path: string; limit?: number }) => Promise<DocumentBacklinksResponse>
   getGraph: (payload?: { centerPath?: string; depth?: number; workspaceRoot?: string }) => Promise<DocumentGraphResponse>
+  listMarks: (payload: { documentPath: string }) => Promise<DocumentMarksResponse>
+  createMark: (payload: DocumentMarkDraft) => Promise<DocumentMarkResponse>
+  updateMark: (payload: { id: string; patch: DocumentMarkPatch }) => Promise<DocumentMarkResponse>
+  deleteMark: (payload: { id: string }) => Promise<DocumentDeleteMarkResponse>
   startWatcher: (payload: { workspaceRoot: string }) => Promise<DocumentStartWatcherResponse>
   stopWatcher: (payload: { watcherId: string }) => Promise<DocumentStopWatcherResponse>
 }

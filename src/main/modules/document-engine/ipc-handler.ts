@@ -7,11 +7,14 @@ import { readFile, readdir, stat, writeFile, rename, cp, mkdir, unlink, rm, copy
 import { join, basename, dirname, extname } from 'path'
 import { homedir } from 'os'
 import { buildDocumentHtmlSnapshotExport } from '../../../shared/document-widget-html-export'
+import type { DocumentMarkDraft, DocumentMarkPatch } from '../../../shared/document-side-panels'
 import { documentCommitRegistry, type DocumentWidgetCommitEvent } from './document-commit-registry'
 import { validateWorkspaceRoot } from '../../../shared/workspace-validation'
 import { EBOOK_BINARY_EXTENSIONS } from '../../../shared/ebook'
 import { BINARY_EXTENSIONS } from './binary-extensions'
 import { importEpubAsMarkdown } from './ebook-importer'
+import { getDatabase } from '../database'
+import { DocumentMarksRepository } from './document-marks-repository'
 import {
   ATTACHMENT_HARD_CAP_BYTES,
   IMAGE_INLINE_CAP_BYTES,
@@ -619,6 +622,56 @@ export function setupDocumentIPC(useMock = false): void {
       }
       const watchedPaths = syncWatchedDirectories(event.sender, Array.isArray(payload?.paths) ? payload.paths : [])
       return { success: true, data: { watchedPaths } }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  const getDocumentMarksRepository = () => {
+    const rawDb = getDatabase().getRawDb()
+    if (!rawDb) throw new Error('database_unavailable')
+    return new DocumentMarksRepository(rawDb)
+  }
+
+  ipcMain.handle('document:listMarks', async (_, payload: { documentPath?: string }) => {
+    try {
+      if (useMock) return { success: true, data: [] }
+      const documentPath = typeof payload?.documentPath === 'string' ? payload.documentPath : ''
+      return { success: true, data: getDocumentMarksRepository().list(documentPath) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('document:createMark', async (_, payload: DocumentMarkDraft) => {
+    try {
+      if (useMock) return { success: false, error: 'mock_document_marks_unavailable' }
+      return { success: true, data: getDocumentMarksRepository().create(payload) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('document:updateMark', async (_, payload: { id?: string; patch?: DocumentMarkPatch }) => {
+    try {
+      if (useMock) return { success: false, error: 'mock_document_marks_unavailable' }
+      const id = typeof payload?.id === 'string' ? payload.id : ''
+      if (!id) return { success: false, error: 'document_mark_id_required' }
+      const data = getDocumentMarksRepository().update(id, payload.patch || {})
+      return data
+        ? { success: true, data }
+        : { success: false, error: 'document_mark_not_found' }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('document:deleteMark', async (_, payload: { id?: string }) => {
+    try {
+      if (useMock) return { success: false, error: 'mock_document_marks_unavailable' }
+      const id = typeof payload?.id === 'string' ? payload.id : ''
+      if (!id) return { success: false, error: 'document_mark_id_required' }
+      return { success: true, deleted: getDocumentMarksRepository().delete(id) }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
