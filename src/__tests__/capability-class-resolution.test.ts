@@ -155,6 +155,16 @@ describe('resolveAIConfigCapabilities — three-layer capabilityClass merge', ()
       assert.strictEqual(caps?.supportsVision, true)
     })
 
+    it('xiaomi mimo pro custom profile does not inherit image support by model prefix', () => {
+      const caps = resolveAIConfigCapabilities(configFor('openai-compatible', 'mimo-v2.5-pro', {
+        baseUrl: 'https://token-plan-sgp.xiaomimimo.com/anthropic',
+        agentProtocol: 'anthropic',
+        visionMode: 'auto',
+      }))
+      assert.ok(caps)
+      assert.strictEqual(caps?.supportsVision, false)
+    })
+
     it('thinkingMode=off forces thinking false even if provider class is true', () => {
       const caps = resolveAIConfigCapabilities(configFor('anthropic', undefined, { thinkingMode: 'off' }))
       assert.ok(caps)

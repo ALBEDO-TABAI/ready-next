@@ -508,6 +508,35 @@ test('Worker E: Xiaomi MiMo v2.5 custom profile passes VEA vision preflight in a
   assert.equal(action.input.sceneScoresPath, sceneScoresPath)
 })
 
+test('Worker E: Xiaomi MiMo v2.5 pro custom profile stays blocked until image input is verified', async () => {
+  const outputDir = await makeTempOutputDir()
+  const sceneScoresPath = path.join(outputDir, 'scene_scores.json')
+  await fs.writeFile(sceneScoresPath, JSON.stringify({ scenes: [] }), 'utf8')
+  __setVeaProviderPreflightConfigReaderForTests(() => makeAIConfig({
+    provider: 'openai-compatible',
+    baseUrl: 'https://token-plan-sgp.xiaomimimo.com/anthropic',
+    model: 'mimo-v2.5-pro',
+    agentProtocol: 'anthropic',
+    visionMode: 'auto',
+  }))
+
+  const state = await videoExpertChildDriver.createInitialState({
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_ai_analyze',
+    scopeId: 'scope-1',
+    sessionId: 'session-1',
+    requestedInput: { sceneScoresPath, outputDir },
+    parentNextHint: 'wait_for_close_event',
+    outputDir,
+  })
+
+  const next = await videoExpertChildDriver.planNextAction(state)
+  const close = asClose(next)
+  assert.equal(close.status, 'blocked')
+  assert.equal(close.terminalReason, 'blocked_config')
+  assert.match(close.error?.message || '', /mimo-v2\.5-pro/)
+})
+
 test('Worker F: fresh ai_analyze blocks when preferred provider is missing from models catalog', async () => {
   const outputDir = await makeTempOutputDir()
   const sceneScoresPath = path.join(outputDir, 'scene_scores.json')

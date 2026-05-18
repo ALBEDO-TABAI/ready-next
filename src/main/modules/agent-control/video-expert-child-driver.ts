@@ -352,7 +352,12 @@ function shouldPreflightFirstVeaAction(state: VeaDriverState): boolean {
 }
 
 function findVeaProviderPreflightIssue(agentContext: AgentSpawnContext | null): string | null {
-  const configuredVisionContext = new ExternalServiceStore().buildVisionAgentContext()
+  let configuredVisionContext: AgentSpawnContext | null = null
+  try {
+    configuredVisionContext = new ExternalServiceStore().buildVisionAgentContext()
+  } catch {
+    configuredVisionContext = null
+  }
   if (configuredVisionContext) return findAgentContextVisionIssue(configuredVisionContext)
   if (agentContext) return findAgentContextVisionIssue(agentContext)
   const currentConfig = readCurrentAIConfigForPreflight()

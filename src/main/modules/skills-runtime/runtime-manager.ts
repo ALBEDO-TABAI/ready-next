@@ -633,8 +633,26 @@ export class SkillsRuntimeManager {
   }
 
   private resolveExternalEnv(definition: SkillDefinition): Record<string, string> {
-    const values = this.skillConfigurationStore.getValues(definition)
-    const env = this.externalServiceStore.getSkillExternalEnv(definition.id)
+    let env: Record<string, string> = {}
+    try {
+      env = this.externalServiceStore.getSkillExternalEnv(definition.id)
+    } catch {
+      return env
+    }
+    if (
+      definition.id !== 'lets-go-rss'
+      && definition.id !== 'video-copy-analyzer'
+      && definition.id !== 'video-expert-analyzer'
+    ) {
+      return env
+    }
+
+    let values
+    try {
+      values = this.skillConfigurationStore.getValues(definition)
+    } catch {
+      return env
+    }
 
     if (definition.id === 'lets-go-rss') {
       const serviceId = values.serviceBindings.rsshub || 'rsshub-default'
@@ -965,6 +983,7 @@ export class SkillsRuntimeManager {
       stderr: '',
       command: [],
       error,
+      status: 'error',
     }
   }
 
@@ -1353,6 +1372,7 @@ export class SkillsRuntimeManager {
     },
   ): SkillRunResult {
     const structured = executed.structuredResult
+    const success = structured ? structured.ok === true : executed.success
     const outputs = structured?.outputs || {}
     const stringOutputs = Object.fromEntries(
       Object.entries(outputs)
@@ -1366,7 +1386,7 @@ export class SkillsRuntimeManager {
     ].filter(Boolean).join('\n')
 
     return {
-      success: structured ? structured.ok : executed.success,
+      success,
       skillId,
       action: actionName,
       stdout: [executed.stdout, extraStdout].filter(Boolean).join('\n').trim(),
@@ -1374,8 +1394,8 @@ export class SkillsRuntimeManager {
       outputDir: executed.outputDir,
       outputs: Object.keys(stringOutputs).length > 0 ? stringOutputs : undefined,
       command: executed.command,
-      error: structured?.ok ? undefined : (structured?.error?.message || executed.error),
-      status: normalizeSkillRunStatus(structured?.status, structured?.ok),
+      error: success ? undefined : (structured?.error?.message || executed.error),
+      status: normalizeSkillRunStatus(structured?.status, success),
       mode: 'direct',
       stdoutArtifactPath: executed.stdoutArtifactPath,
       stderrArtifactPath: executed.stderrArtifactPath,
