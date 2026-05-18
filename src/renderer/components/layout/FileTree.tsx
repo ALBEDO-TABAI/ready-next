@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import Modal from '../ui/Modal'
 import { useWorkspace, type FileItem } from '../../stores/useWorkspace'
+import { useDocTabs } from '../../stores/useDocTabs'
 import { useMode, type WorkbenchMode } from '../../stores/useMode'
 import { toLocalFileUrl } from '../../utils/dragDrop'
 import ContextMenu, { type ContextMenuItem } from './ContextMenu'
@@ -1330,6 +1331,7 @@ export default function FileTree({
       tldr: 'document'
     }
     if (modeMap[ext]) {
+      useDocTabs.getState().openTab(item.path)
       setWorkbenchMode(modeMap[ext])
     }
   }, [selectFile, setWorkbenchMode, toggleDir, viewMode])

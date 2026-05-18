@@ -337,6 +337,7 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
   const setWorkbenchMode = useMode((state) => state.setWorkbenchMode)
   const tabs = useDocTabs((state) => state.tabs)
   const setActiveTab = useDocTabs((state) => state.setActiveTab)
+  const openTab = useDocTabs((state) => state.openTab)
 
   // Multi-root scope: every safe pinned folder (∪ workspaceRoot) is searched
   // and indexed in one batch. `computeDesiredRoots` is the single rule
@@ -638,10 +639,11 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
         return
       case 'document':
       default:
+        openTab(item.path)
         selectFile(item.path)
         setWorkbenchMode(modeForPath(item.path))
     }
-  }, [selectFile, setActiveTab, setWorkbenchMode])
+  }, [openTab, selectFile, setActiveTab, setWorkbenchMode])
 
   // Overlay unsaved (path-less or dirty) drafts from useDocTabs. Indexed search
   // only sees persisted files; this keeps brand-new or in-flight edits visible.

@@ -46,6 +46,18 @@ const makeId = () => `doc-${++tabCounter}`
 
 const STORAGE_KEY = 'ready-doc-tabs-v2'
 
+export function normalizeDocTabPathKey(path: string | null | undefined): string | null {
+    if (!path) return null
+    const normalized = path.normalize('NFC').replace(/\\/g, '/')
+    if (!normalized) return null
+    const withoutTrailingSlash = normalized.length > 1 ? normalized.replace(/\/+$/, '') : normalized
+    const driveMatch = withoutTrailingSlash.match(/^([A-Za-z]):(\/.*)?$/)
+    if (driveMatch) {
+        return `${driveMatch[1].toLowerCase()}:${driveMatch[2] || ''}`
+    }
+    return withoutTrailingSlash
+}
+
 function syncTabCounterFromTabs(tabs: DocTab[]) {
     const maxId = tabs.reduce((max, tab) => {
         const match = tab.id.match(/^doc-(\d+)$/)
@@ -104,8 +116,8 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
             return
         }
 
-        // If already open, just activate it
-        const existing = tabs.find(t => t.path === path)
+        const pathKey = normalizeDocTabPathKey(path)
+        const existing = pathKey ? tabs.find(t => normalizeDocTabPathKey(t.path) === pathKey) : undefined
         if (existing) {
             set({ activeTabId: existing.id })
             return
