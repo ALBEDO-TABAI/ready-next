@@ -92,11 +92,16 @@ import ContextMenu from '../layout/ContextMenu'
 // ---------------------------------------------------------------------------
 
 interface MarkdownNode {
-  type: 'text' | 'bold' | 'italic' | 'code' | 'codeblock' | 'header' | 'bullet' | 'numbered' | 'br'
+  type: 'text' | 'bold' | 'italic' | 'code' | 'codeblock' | 'header' | 'bullet' | 'numbered' | 'table' | 'br'
   content: string
   level?: number // header level 1-3
   lang?: string // code block language
+  headers?: string[]
+  rows?: string[][]
+  aligns?: TableAlignment[]
 }
+
+type TableAlignment = 'left' | 'center' | 'right' | null
 
 interface PersistedScopeRunSummary {
   scopeId: string
@@ -413,6 +418,19 @@ function parseMarkdown(raw: string): MarkdownNode[] {
       continue
     }
 
+    const table = parseTableAt(lines, i)
+    if (table) {
+      nodes.push({
+        type: 'table',
+        content: '',
+        headers: table.headers,
+        rows: table.rows,
+        aligns: table.aligns,
+      })
+      i = table.nextIndex
+      continue
+    }
+
     // Header (# ## ###)
     const headerMatch = line.match(/^(#{1,3})\s+(.+)$/)
     if (headerMatch) {
@@ -450,6 +468,108 @@ function parseMarkdown(raw: string): MarkdownNode[] {
   }
 
   return nodes
+}
+
+function parseTableAt(
+  lines: string[],
+  startIndex: number,
+): { headers: string[]; rows: string[][]; aligns: TableAlignment[]; nextIndex: number } | null {
+  if (startIndex + 1 >= lines.length) return null
+  const headers = splitMarkdownTableRow(lines[startIndex])
+  if (headers.length < 2) return null
+
+  const aligns = parseMarkdownTableSeparator(lines[startIndex + 1])
+  if (!aligns || aligns.length < 2) return null
+
+  const columnCount = Math.max(headers.length, aligns.length)
+  const rows: string[][] = []
+  let index = startIndex + 2
+
+  while (index < lines.length) {
+    if (lines[index].trim() === '') break
+    const cells = splitMarkdownTableRow(lines[index])
+    if (cells.length < 2) break
+    rows.push(normalizeMarkdownTableCells(cells, columnCount))
+    index += 1
+  }
+
+  return {
+    headers: normalizeMarkdownTableCells(headers, columnCount),
+    rows,
+    aligns: normalizeMarkdownTableAligns(aligns, columnCount),
+    nextIndex: index,
+  }
+}
+
+function splitMarkdownTableRow(line: string): string[] {
+  let trimmed = line.trim()
+  if (!hasMarkdownTablePipe(trimmed)) return []
+  if (isMarkdownTablePipe(trimmed[0])) trimmed = trimmed.slice(1)
+  if (isMarkdownTablePipe(trimmed[trimmed.length - 1])) trimmed = trimmed.slice(0, -1)
+
+  const cells: string[] = []
+  let cell = ''
+  let inInlineCode = false
+
+  for (let index = 0; index < trimmed.length; index += 1) {
+    const char = trimmed[index]
+    if (char === '\\' && index + 1 < trimmed.length) {
+      cell += trimmed[index + 1]
+      index += 1
+      continue
+    }
+    if (char === '`') {
+      inInlineCode = !inInlineCode
+      cell += char
+      continue
+    }
+    if (!inInlineCode && isMarkdownTablePipe(char)) {
+      cells.push(cell.trim())
+      cell = ''
+      continue
+    }
+    cell += char
+  }
+  cells.push(cell.trim())
+  return cells
+}
+
+function parseMarkdownTableSeparator(line: string): TableAlignment[] | null {
+  const cells = splitMarkdownTableRow(line)
+  if (cells.length < 2) return null
+  const aligns: TableAlignment[] = []
+
+  for (const cell of cells) {
+    const marker = cell.replace(/\s/g, '')
+    if (!/^:?-{1,}:?$/.test(marker)) return null
+    const starts = marker.startsWith(':')
+    const ends = marker.endsWith(':')
+    aligns.push(starts && ends ? 'center' : ends ? 'right' : starts ? 'left' : null)
+  }
+
+  return aligns
+}
+
+function normalizeMarkdownTableCells(cells: string[], count: number): string[] {
+  if (cells.length === count) return cells
+  const normalized = cells.slice(0, count)
+  while (normalized.length < count) normalized.push('')
+  return normalized
+}
+
+function normalizeMarkdownTableAligns(aligns: TableAlignment[], count: number): TableAlignment[] {
+  if (aligns.length === count) return aligns
+  const normalized = aligns.slice(0, count)
+  while (normalized.length < count) normalized.push(null)
+  return normalized
+}
+
+function hasMarkdownTablePipe(line: string): boolean {
+  return line.includes('|') || line.includes('｜')
+}
+
+function isMarkdownTablePipe(char: string | undefined): boolean {
+  return char === '|' || char === '｜'
 }
 
 /** Parse inline formatting: **bold**, *italic*, `code` */
@@ -580,6 +700,43 @@ function MarkdownContent({ content }: { content: string }) {
                 <span>{renderInline(node.content)}</span>
               </div>
             )
+          case 'table': {
+            const headers = node.headers || []
+            const rows = node.rows || []
+            const aligns = node.aligns || []
+            return (
+              <div key={idx} className="agent-markdown-table-scroll">
+                <table className="agent-markdown-table">
+                  <thead>
+                    <tr>
+                      {headers.map((header, columnIndex) => (
+                        <th
+                          key={`h-${columnIndex}`}
+                          style={{ textAlign: aligns[columnIndex] || undefined }}
+                        >
+                          {renderInline(header)}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row, rowIndex) => (
+                      <tr key={`r-${rowIndex}`}>
+                        {headers.map((_, columnIndex) => (
+                          <td
+                            key={`c-${rowIndex}-${columnIndex}`}
+                            style={{ textAlign: aligns[columnIndex] || undefined }}
+                          >
+                            {renderInline(row[columnIndex] || '')}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          }
           case 'br':
             return <div key={idx} style={{ height: 6 }} />
           default:

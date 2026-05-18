@@ -1396,6 +1396,57 @@ html[data-theme='dark'] .ready-app-bg::after {
   padding-right: 18px;
 }
 
+.agent-markdown-table-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow-x: auto;
+  margin: 6px 0;
+  border: 1px solid color-mix(in srgb, var(--border-default) 74%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface-card-bg) 88%, var(--bg-canvas) 12%);
+  scrollbar-width: thin;
+}
+
+.agent-markdown-table {
+  width: 100%;
+  min-width: 360px;
+  border-collapse: separate;
+  border-spacing: 0;
+  color: var(--text-body);
+  font-size: 12.5px;
+  line-height: 1.55;
+}
+
+.agent-markdown-table th,
+.agent-markdown-table td {
+  padding: 7px 9px;
+  border-right: 1px solid color-mix(in srgb, var(--border-default) 62%, transparent);
+  border-bottom: 1px solid color-mix(in srgb, var(--border-default) 62%, transparent);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
+.agent-markdown-table th {
+  background: color-mix(in srgb, var(--text-muted) 8%, transparent);
+  color: var(--text-title);
+  font-weight: 700;
+  text-align: left;
+}
+
+.agent-markdown-table tbody tr:nth-child(even) {
+  background: color-mix(in srgb, var(--text-muted) 5%, transparent);
+}
+
+.agent-markdown-table th:last-child,
+.agent-markdown-table td:last-child {
+  border-right: none;
+}
+
+.agent-markdown-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
 .note-preview-markdown-li {
   margin-bottom: 4px;
 }
