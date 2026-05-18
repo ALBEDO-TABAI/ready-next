@@ -3,8 +3,8 @@ import { ChevronLeft, ChevronRight, ExternalLink, Loader2, RefreshCw, X } from '
 import { browserTabActivationSequencer } from '../../modules/browser/browserTabActivationSequencer'
 import { useHostedPreviewBounds } from '../../modules/browser/useHostedPreviewBounds'
 import { useWorkspace } from '../../stores/useWorkspace'
-import { useMode } from '../../stores/useMode'
 import { useBrowserTabs } from '../../stores/useBrowserTabs'
+import { requestWorkbenchModeChange } from '../../modules/workbench/mode-transition'
 import type { RSSItem } from './RSSFeed'
 import RssTimeHintBanner from './RssTimeHintBanner'
 
@@ -139,7 +139,7 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
       browserTabActivationSequencer.invalidate()
       useBrowserTabs.getState().setActiveTabId(result.tabId)
       useBrowserTabs.getState().setUrlInput(item.link)
-      useMode.getState().setWorkbenchMode('browser')
+      requestWorkbenchModeChange('browser')
       void window.electronAPI?.browser?.previewClose()
       onClose()
     }
