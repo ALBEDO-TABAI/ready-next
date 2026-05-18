@@ -40,6 +40,13 @@ describe('browser popup policy', () => {
     assert.strictEqual(isAllowedBrowserURL('data:text/html,external'), false)
   })
 
+  it('should allow local HTML only for explicit top-level browser navigation', () => {
+    assert.strictEqual(isAllowedBrowserURL('file:///tmp/demo.html'), false)
+    assert.strictEqual(isAllowedBrowserURL('file:///tmp/demo.html', { allowLocalHtml: true }), true)
+    assert.strictEqual(isAllowedBrowserURL('local-file:///tmp/demo.htm', { allowLocalHtml: true }), true)
+    assert.strictEqual(isAllowedBrowserURL('file:///tmp/demo.pdf', { allowLocalHtml: true }), false)
+  })
+
   it('should enforce media permission only on secure origin', () => {
     assert.strictEqual(shouldAllowBrowserPermission('camera', 'http://example.com'), false)
     assert.strictEqual(shouldAllowBrowserPermission('camera', 'https://example.com'), false)

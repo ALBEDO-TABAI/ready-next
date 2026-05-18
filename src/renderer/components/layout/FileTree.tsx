@@ -33,6 +33,7 @@ import {
 } from './fileTreeExternalDrop'
 import { getActiveBrowserTabDragPayload } from '../../modules/browser/browserTabDragSession'
 import { EBOOK_EXTENSIONS, isEbookExtension } from '../../../shared/ebook'
+import { isLocalHtmlFilePath, openLocalHtmlFileInBrowser } from '../../modules/browser/localHtmlFileOpen'
 import './filesPanelFloatingMenu.css'
 
 const ALLOWED_EXTENSIONS = new Set([
@@ -1319,11 +1320,18 @@ export default function FileTree({
       return
     }
 
-    selectFile(item.path)
     const ext = item.name.split('.').pop()?.toLowerCase() || ''
+    selectFile(item.path)
+    if (isLocalHtmlFilePath(item.path)) {
+      void openLocalHtmlFileInBrowser(item.path, item.name).then((opened) => {
+        if (opened) setWorkbenchMode('browser')
+      })
+      return
+    }
+
     const modeMap: Record<string, WorkbenchMode> = {
       md: 'document', txt: 'document', json: 'document', ts: 'document', tsx: 'document',
-      js: 'document', css: 'document', html: 'document', docx: 'document', xlsx: 'document',
+      js: 'document', css: 'document', docx: 'document', xlsx: 'document',
       png: 'document', jpg: 'document', jpeg: 'document', webp: 'document', svg: 'document', gif: 'document',
       bmp: 'document', ico: 'document',
       pdf: 'document',

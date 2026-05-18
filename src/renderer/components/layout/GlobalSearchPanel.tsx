@@ -8,6 +8,7 @@ import { parseDocumentGraph, normalizeSearchText } from '../../../shared/documen
 import { readJsonStorage, writeJsonStorage, removeStorage } from '../../utils/storage'
 import { GLOBAL_SEARCH_DIMENSIONS, PANEL_TOKENS } from './panelTokens'
 import Modal from '../ui/Modal'
+import { isLocalHtmlFilePath, openLocalHtmlFileInBrowser } from '../../modules/browser/localHtmlFileOpen'
 
 interface SearchResultItem {
   path: string
@@ -198,8 +199,7 @@ function countOccurrences(text: string, keyword: string): number {
 }
 
 function modeForPath(path: string): WorkbenchMode {
-  void path
-  // All files open in document mode now
+  if (isLocalHtmlFilePath(path)) return 'browser'
   return 'document'
 }
 
@@ -639,6 +639,13 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
         return
       case 'document':
       default:
+        if (isLocalHtmlFilePath(item.path)) {
+          selectFile(item.path)
+          void openLocalHtmlFileInBrowser(item.path, item.name).then((opened) => {
+            if (opened) setWorkbenchMode('browser')
+          })
+          return
+        }
         openTab(item.path)
         selectFile(item.path)
         setWorkbenchMode(modeForPath(item.path))

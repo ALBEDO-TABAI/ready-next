@@ -187,7 +187,7 @@ export function useBrowserTabActions({
       if (activeTabId) {
         updateTab(activeTabId, {
           loading: false,
-          error: '浏览器当前只支持网页地址，本地文件请改用文稿或文件区打开。',
+          error: '浏览器当前支持网页地址和本地 HTML 文件；其他本地文件请改用文稿或文件区打开。',
         })
       }
       return

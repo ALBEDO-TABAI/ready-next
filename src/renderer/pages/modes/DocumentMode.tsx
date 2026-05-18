@@ -26,6 +26,7 @@ import {
 } from '../../modules/document/documentExternalRefresh'
 import { getFileExtension } from '../../utils/path'
 import { isEbookExtension } from '../../../shared/ebook'
+import { isLocalHtmlFilePath } from '../../modules/browser/localHtmlFileOpen'
 
 const UniverSheet = lazy(() => import('../../components/document/UniverSheet'))
 
@@ -335,7 +336,7 @@ export default function DocumentMode({
       }
       const result = await window.electronAPI.document.stat(selectedFile).catch(() => null)
       const isDirectory = result?.data?.isDirectory ?? result?.stat?.isDirectory ?? false
-      if (!disposed && result?.success && !isDirectory) {
+      if (!disposed && result?.success && !isDirectory && !isLocalHtmlFilePath(selectedFile)) {
         openTab(selectedFile)
       }
     })()

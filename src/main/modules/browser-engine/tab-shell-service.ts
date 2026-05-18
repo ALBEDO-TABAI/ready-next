@@ -86,7 +86,7 @@ export class BrowserTabShellService {
 
   async navigate(tabId: string | null, url: string): Promise<{ success: boolean; error?: string }> {
     if (!this.host.isAllowedUrl(url)) {
-      return { success: false, error: 'Blocked URL protocol. Only http: and https: are allowed.' }
+      return { success: false, error: 'Blocked URL protocol. Only http:, https:, and local HTML files are allowed.' }
     }
 
     const resolvedTabId = tabId || this.host.getActiveTabId()

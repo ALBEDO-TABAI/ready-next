@@ -12,6 +12,7 @@ import TaskPanel from '../components/ready/TaskPanel'
 import MeetingChat from '../components/ready/MeetingChat'
 import LiveFollowPanel from '../components/ready/LiveFollowPanel'
 import FilePanel from '../components/ready/FilePanel'
+import { isLocalHtmlFilePath, openLocalHtmlFileInBrowser } from '../modules/browser/localHtmlFileOpen'
 
 /* ─── Sub-mode tab definitions ─── */
 const subModes: { id: WorkbenchMode; label: string; icon: React.ElementType }[] = [
@@ -58,9 +59,16 @@ export default function ReadyMode() {
     })
   }, [addMessage])
 
-  /** Handle file click in FilePanel — open in LiveFollowPanel document mode */
+  /** Handle file click in FilePanel — open in the matching LiveFollowPanel mode */
   const handleFileOpen = useCallback((filePath: string) => {
-    // All files open in document mode now
+    if (isLocalHtmlFilePath(filePath)) {
+      setIsFollowMode(false)
+      void openLocalHtmlFileInBrowser(filePath).then((opened) => {
+        if (opened) setReadySubMode('browser')
+      })
+      return
+    }
+
     setReadySubMode('document')
     setIsFollowMode(false)
   }, [setReadySubMode])

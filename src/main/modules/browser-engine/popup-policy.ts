@@ -20,6 +20,10 @@ export interface PopupPolicyDecision {
   authLike: boolean
 }
 
+interface BrowserUrlAllowanceOptions {
+  allowLocalHtml?: boolean
+}
+
 const AUTH_HOST_PATTERNS = [
   /(^|\.)accounts\.google\.com$/i,
   /(^|\.)myaccount\.google\.com$/i,
@@ -56,11 +60,23 @@ function looksPopupSized(features: Record<string, string>): boolean {
   return width > 0 && width <= 1100 && height > 0 && height <= 900
 }
 
-export function isAllowedBrowserURL(url: string): boolean {
+function isLocalHtmlBrowserURL(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    if (parsed.protocol !== 'file:' && parsed.protocol !== 'local-file:') return false
+    const path = decodeURIComponent(`${parsed.host || ''}${parsed.pathname || ''}`)
+    return /\.(?:html|htm)$/i.test(path)
+  } catch {
+    return false
+  }
+}
+
+export function isAllowedBrowserURL(url: string, options: BrowserUrlAllowanceOptions = {}): boolean {
   if (isReadyBrowserBlankUrl(url)) return true
   try {
     const parsed = new URL(url)
-    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return true
+    return Boolean(options.allowLocalHtml && isLocalHtmlBrowserURL(url))
   } catch {
     return false
   }

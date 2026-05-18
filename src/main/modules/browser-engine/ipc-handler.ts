@@ -225,7 +225,7 @@ export class BrowserController {
       getNextTabId: () => `tab-${++this.tabCounter}`,
       getViewBounds: () => this.viewBounds,
       shouldPresentHosts: () => this.browserVisibilityState.shouldPresentHosts(),
-      isAllowedUrl: (url) => isAllowedBrowserURL(url),
+      isAllowedUrl: (url) => isAllowedBrowserURL(url, { allowLocalHtml: true }),
       extractDomain: (url) => extractBrowserDomain(url),
       createHost: (partition) => this.createHost(partition),
       applyBounds: (view) => this.applyBounds(view, 'settled'),
@@ -254,7 +254,7 @@ export class BrowserController {
         this.viewBounds = bounds
       },
       shouldPresentHosts: () => this.browserVisibilityState.shouldPresentHosts(),
-      isAllowedUrl: (url) => isAllowedBrowserURL(url),
+      isAllowedUrl: (url) => isAllowedBrowserURL(url, { allowLocalHtml: true }),
       createTab: (url) => this.createTab(url),
       detachHost: (view) => this.detachHost(view),
       showHost: (view, bounds) => this.showHost(view, bounds),

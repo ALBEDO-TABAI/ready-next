@@ -74,7 +74,7 @@ export class BrowserTabLifecycleService {
 
   async createTab(url: string): Promise<{ success: boolean; tabId?: string; error?: string }> {
     if (!this.host.isAllowedUrl(url)) {
-      return { success: false, error: 'Blocked URL protocol. Only http: and https: are allowed.' }
+      return { success: false, error: 'Blocked URL protocol. Only http:, https:, and local HTML files are allowed.' }
     }
 
     const tabId = this.host.getNextTabId()

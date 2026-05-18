@@ -48,7 +48,19 @@ export function normalizeBrowserUrlInput(
   return `${SEARCH_URL}${encodeURIComponent(trimmed)}`
 }
 
+export function isLocalHtmlBrowserUrl(url: string): boolean {
+  const normalized = String(url || '').trim()
+  try {
+    const parsed = new URL(normalized)
+    if (parsed.protocol !== 'file:' && parsed.protocol !== 'local-file:') return false
+    const path = decodeURIComponent(`${parsed.host || ''}${parsed.pathname || ''}`)
+    return /\.(?:html|htm)$/i.test(path)
+  } catch {
+    return false
+  }
+}
+
 export function isSupportedBrowserNavigationUrl(url: string): boolean {
   const normalized = String(url || '').trim()
-  return isReadyBrowserBlankUrl(normalized) || /^https?:\/\//i.test(normalized)
+  return isReadyBrowserBlankUrl(normalized) || /^https?:\/\//i.test(normalized) || isLocalHtmlBrowserUrl(normalized)
 }
