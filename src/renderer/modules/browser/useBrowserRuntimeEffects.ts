@@ -24,11 +24,55 @@ export function useBrowserRuntimeEffects({
   const hydrationPromiseRef = useRef<Promise<boolean> | null>(null)
   const [browserRuntimeReady, setBrowserRuntimeReady] = useState(!isElectron)
 
+  const rebuildRuntimeFromPersistedTabs = useCallback(async (store: ReturnType<typeof useBrowserTabs.getState>) => {
+    const persistedTabs = store.tabs
+      .filter((tab) => tab.url)
+      .map((tab) => ({ ...tab, loading: true, error: undefined }))
+    if (persistedTabs.length === 0) return false
+
+    const recoveredTabs: BrowserTab[] = []
+    const previousActiveTabId = store.activeTabId
+    let recoveredActiveTabId: string | null = null
+
+    for (const tab of persistedTabs) {
+      const result = await window.electronAPI?.browser?.createTab(tab.url) as { success?: boolean; tabId?: string } | undefined
+      if (!result?.success || !result.tabId) continue
+
+      const recoveredTab: BrowserTab = {
+        ...tab,
+        id: result.tabId,
+        title: tab.title || 'Loading...',
+        domain: tab.domain || extractBrowserDomain(tab.url),
+      }
+      recoveredTabs.push(recoveredTab)
+      if (tab.id === previousActiveTabId) {
+        recoveredActiveTabId = result.tabId
+      }
+    }
+
+    if (recoveredTabs.length === 0) return false
+
+    const nextActiveTabId = recoveredActiveTabId || recoveredTabs[recoveredTabs.length - 1]?.id || null
+    store.setTabs(recoveredTabs)
+    browserTabActivationSequencer.invalidate()
+    store.setActiveTabId(nextActiveTabId)
+    const activeTab = recoveredTabs.find((tab) => tab.id === nextActiveTabId) || null
+    store.setUrlInput(activeTab?.url === DEFAULT_BROWSER_URL ? '' : activeTab?.url || '')
+
+    if (nextActiveTabId && nextActiveTabId !== recoveredTabs[recoveredTabs.length - 1]?.id) {
+      await window.electronAPI?.browser?.switchTab(nextActiveTabId).catch(() => undefined)
+    }
+
+    return true
+  }, [])
+
   const restoreExistingTabs = useCallback(async () => {
     if (!isElectron) return false
     const existingTabs = await window.electronAPI?.browser?.getTabs()
     const store = useBrowserTabs.getState()
     if (!Array.isArray(existingTabs) || existingTabs.length === 0) {
+      const rebuilt = await rebuildRuntimeFromPersistedTabs(store)
+      if (rebuilt) return true
       store.setTabs([])
       store.setActiveTabId(null)
       store.setUrlInput('')
@@ -57,7 +101,7 @@ export function useBrowserRuntimeEffects({
     store.setActiveTabId(activeTab?.id || hydratedTabs[hydratedTabs.length - 1]?.id || null)
     store.setUrlInput(activeTab?.url === DEFAULT_BROWSER_URL ? '' : activeTab?.url || '')
     return true
-  }, [isElectron])
+  }, [isElectron, rebuildRuntimeFromPersistedTabs])
 
   const ensureBrowserRuntime = useCallback(async () => {
     if (!isElectron) return true

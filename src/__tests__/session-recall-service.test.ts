@@ -37,6 +37,7 @@ class FakeSessionRecallDb implements SessionRecallDatabaseAdapter {
   ) {}
 
   getRawDb() {
+    const conversations = this.conversations
     const metadataRows = this.metadataRows
     const messageRows = this.messageRows
     const attachmentRows = this.attachmentRows
@@ -73,6 +74,9 @@ class FakeSessionRecallDb implements SessionRecallDatabaseAdapter {
             }
             if (sql.includes('FROM session_recall_metadata') && sql.includes('ORDER BY updated_at DESC') && (sql.includes('LIMIT 80') || sql.includes('LIMIT 240'))) {
               return [...metadataRows].sort((a, b) => b.updated_at.localeCompare(a.updated_at)) as T[]
+            }
+            if (sql.includes('FROM chat_conversations') && sql.includes('ORDER BY updated_at DESC')) {
+              return [...conversations].sort((a, b) => b.updated_at.localeCompare(a.updated_at)) as T[]
             }
             return [] as T[]
           },
@@ -135,6 +139,7 @@ function createConversation(params: {
   lineageRootId?: string | null
   resumeTitle?: string | null
   meta?: Record<string, unknown>
+  updatedAt?: string
 }): ChatConversationRecord {
   return {
     id: params.id,
@@ -149,7 +154,7 @@ function createConversation(params: {
     thread_key: params.threadKey || params.id,
     meta_json: JSON.stringify(params.meta || {}),
     created_at: '2026-04-12T09:00:00.000Z',
-    updated_at: '2026-04-12T09:00:00.000Z',
+    updated_at: params.updatedAt || '2026-04-12T09:00:00.000Z',
   }
 }
 
@@ -303,6 +308,48 @@ test('SessionRecallService returns grouped recent sessions and builds recall cap
   assert.match(capsule?.summary || '', /品牌方向/)
   assert.match(capsule?.summary || '', /logo 风格提案/)
   assert.deepEqual(capsule?.attachmentNames, ['brand-board.pdf'])
+})
+
+test('SessionRecallService shows conversations even when recall metadata is missing', () => {
+  const db = new FakeSessionRecallDb(
+    [
+      createConversation({
+        id: 'conv-indexed',
+        title: '已有索引',
+        lineageRootId: 'conv-indexed',
+        resumeTitle: '已有索引',
+        updatedAt: '2026-04-12T11:00:00.000Z',
+      }),
+      createConversation({
+        id: 'conv-unindexed',
+        title: '刚刚产生的会话',
+        lineageRootId: 'conv-unindexed',
+        resumeTitle: '刚刚产生的会话',
+        updatedAt: '2026-04-12T12:00:00.000Z',
+      }),
+    ],
+    [
+      createMetadata({
+        conversation_id: 'conv-indexed',
+        title: '已有索引',
+        lineage_root_id: 'conv-indexed',
+        resume_title: '已有索引',
+        preview_text: '这条已有召回索引。',
+        updated_at: '2026-04-12T11:00:00.000Z',
+      }),
+    ],
+    [],
+    [],
+  )
+  const service = new SessionRecallService(db)
+
+  const recent = service.listRecentSessions({ limit: 10 })
+  assert.equal(recent[0]?.conversationId, 'conv-unindexed')
+  assert.equal(recent[0]?.title, '刚刚产生的会话')
+
+  const search = service.searchSessionRecall({ query: '刚刚产生', limit: 10 })
+  assert.equal(search[0]?.conversationId, 'conv-unindexed')
+  assert.equal(service.getSessionRecallCapsule({ conversationId: 'conv-unindexed' })?.title, '刚刚产生的会话')
 })
 
 test('SessionRecallService listRecentSessions falls back to soft-exclude when current lineage is the only one', () => {

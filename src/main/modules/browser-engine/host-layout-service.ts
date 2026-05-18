@@ -71,6 +71,7 @@ export class BrowserHostLayoutService {
   showHost(view: BrowserHostView, bounds: BrowserRect): void {
     this.attachHost(view)
     this.hiddenHosts.delete(view)
+    this.appliedBoundsByView.delete(view)
     this.setHostBoundsNow(view, bounds)
   }
 

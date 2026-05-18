@@ -5,6 +5,7 @@ import { PANEL_RESIZE_STATE_EVENT, type PanelResizeReason, type PanelResizeState
 
 const BROWSER_OVERLAY_LOCK_EVENT = 'ready:browser-overlay-lock'
 const OVERLAY_LOCK_SELF_HEAL_MS = 1000
+const HOST_RECOVERY_SETTLE_MS = 120
 
 interface UseBrowserViewBoundsParams {
   isElectron: boolean
@@ -59,6 +60,7 @@ export function useBrowserViewBounds({
   const frameSyncRequestRef = useRef<PendingBoundsSyncRequest | null>(null)
   const dragBoundsSyncRafRef = useRef<number | null>(null)
   const settleSyncTimeoutRef = useRef<number | null>(null)
+  const hostRecoveryTimeoutRef = useRef<number | null>(null)
   const lastBoundsKeyRef = useRef('')
   const overlayLockCountRef = useRef(0)
   const visibilitySyncTokenRef = useRef(0)
@@ -99,6 +101,13 @@ export function useBrowserViewBounds({
     if (settleSyncTimeoutRef.current !== null) {
       window.clearTimeout(settleSyncTimeoutRef.current)
       settleSyncTimeoutRef.current = null
+    }
+  }, [])
+
+  const clearHostRecoveryTimeout = useCallback(() => {
+    if (hostRecoveryTimeoutRef.current !== null) {
+      window.clearTimeout(hostRecoveryTimeoutRef.current)
+      hostRecoveryTimeoutRef.current = null
     }
   }, [])
 
@@ -250,6 +259,18 @@ export function useBrowserViewBounds({
     await window.electronAPI?.browser?.showActive()
   }, [hostVisibleRef, isElectron, sendBoundsImmediate])
 
+  const scheduleHostRecovery = useCallback(() => {
+    if (!isElectron || !isActiveRef.current || !isVisibleAllowedRef.current) return
+    lastBoundsKeyRef.current = ''
+    clearHostRecoveryTimeout()
+    void syncBrowserVisibility('visible', { forceExact: true, forceBoundsSync: true })
+    hostRecoveryTimeoutRef.current = window.setTimeout(() => {
+      hostRecoveryTimeoutRef.current = null
+      if (!isActiveRef.current || !isVisibleAllowedRef.current) return
+      void syncBrowserVisibility('visible', { forceExact: true, forceBoundsSync: true })
+    }, HOST_RECOVERY_SETTLE_MS)
+  }, [clearHostRecoveryTimeout, isElectron, syncBrowserVisibility])
+
   useEffect(() => {
     const element = contentRef.current
     if (!element) return
@@ -341,6 +362,31 @@ export function useBrowserViewBounds({
   useEffect(() => {
     void syncBrowserVisibility({ forceExact: true })
   }, [hasError, isActive, isVisibleAllowed, syncBrowserVisibility])
+
+  useEffect(() => {
+    if (!isElectron) return
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return
+      scheduleHostRecovery()
+    }
+    const handleWindowFocus = () => {
+      scheduleHostRecovery()
+    }
+    const handlePageShow = () => {
+      scheduleHostRecovery()
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('focus', handleWindowFocus)
+    window.addEventListener('pageshow', handlePageShow)
+    return () => {
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('focus', handleWindowFocus)
+      window.removeEventListener('pageshow', handlePageShow)
+      clearHostRecoveryTimeout()
+    }
+  }, [clearHostRecoveryTimeout, isElectron, scheduleHostRecovery])
 
   useEffect(() => {
     const pendingSelfHealTimers: number[] = []

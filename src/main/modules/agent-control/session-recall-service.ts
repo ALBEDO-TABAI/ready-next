@@ -321,7 +321,17 @@ export class SessionRecallService {
          OR COALESCE(latest_task_title, '') LIKE ?
          OR COALESCE(latest_task_summary, '') LIKE ?
     `).all<SessionRecallMetadataRow>(likeQuery, likeQuery, likeQuery, likeQuery)
-    if (attachmentConversationIds.length === 0) return directMatches
+    const lowerQuery = query.toLowerCase()
+    const conversationMatches = this.listRecentConversationMetadata()
+      .filter((row) => (
+        row.title.toLowerCase().includes(lowerQuery) ||
+        row.resume_title.toLowerCase().includes(lowerQuery)
+      ))
+    if (attachmentConversationIds.length === 0) {
+      const merged = new Map<string, SessionRecallMetadataRow>()
+      for (const row of [...directMatches, ...conversationMatches]) merged.set(row.conversation_id, row)
+      return Array.from(merged.values())
+    }
     const placeholders = attachmentConversationIds.map(() => '?').join(', ')
     const attachmentMatches = db.prepare(`
       SELECT *
@@ -329,19 +339,26 @@ export class SessionRecallService {
       WHERE conversation_id IN (${placeholders})
     `).all<SessionRecallMetadataRow>(...attachmentConversationIds)
     const merged = new Map<string, SessionRecallMetadataRow>()
-    for (const row of [...directMatches, ...attachmentMatches]) merged.set(row.conversation_id, row)
+    for (const row of [...directMatches, ...attachmentMatches, ...conversationMatches]) merged.set(row.conversation_id, row)
     return Array.from(merged.values())
   }
 
   private listRecentMetadata(): SessionRecallMetadataRow[] {
     const db = this.db.getRawDb()
     if (!db) return []
-    return db.prepare(`
+    const metadataRows = db.prepare(`
       SELECT *
       FROM session_recall_metadata
       ORDER BY updated_at DESC
       LIMIT 80
     `).all<SessionRecallMetadataRow>()
+    const merged = new Map<string, SessionRecallMetadataRow>()
+    for (const row of [...metadataRows, ...this.listRecentConversationMetadata()]) {
+      if (!merged.has(row.conversation_id)) merged.set(row.conversation_id, row)
+    }
+    return Array.from(merged.values())
+      .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+      .slice(0, 80)
   }
 
   private listVectorSearchMetadata(): SessionRecallMetadataRow[] {
@@ -364,7 +381,45 @@ export class SessionRecallService {
       WHERE conversation_id = ?
       LIMIT 1
     `).get<SessionRecallMetadataRow>(conversationId)
-    return row || null
+    return row || this.getConversationFallbackMetadata(conversationId)
+  }
+
+  private listRecentConversationMetadata(): SessionRecallMetadataRow[] {
+    const db = this.db.getRawDb()
+    if (!db) return []
+    const rows = db.prepare(`
+      SELECT *
+      FROM chat_conversations
+      ORDER BY updated_at DESC
+      LIMIT 80
+    `).all<ChatConversationRecord>()
+    return rows.map((row) => this.metadataFromConversation(row))
+  }
+
+  private getConversationFallbackMetadata(conversationId: string): SessionRecallMetadataRow | null {
+    const row = this.db.getConversationScope(conversationId)
+    return row ? this.metadataFromConversation(row) : null
+  }
+
+  private metadataFromConversation(row: ChatConversationRecord): SessionRecallMetadataRow {
+    const sourceKind = row.source_kind
+    const sourceId = row.source_id || (sourceKind === 'local' ? 'app' : '')
+    return {
+      conversation_id: row.id,
+      lineage_root_id: row.lineage_root_id || row.id,
+      resume_title: row.resume_title || row.title || '新对话',
+      title: row.title || row.resume_title || '新对话',
+      source_kind: sourceKind,
+      source_id: sourceId,
+      thread_key: row.thread_key || row.id,
+      user_id: row.user_id || null,
+      channel_key: `${sourceKind}:${sourceKind === 'local' ? 'app' : sourceId}`,
+      preview_text: null,
+      latest_task_title: null,
+      latest_task_summary: null,
+      attachment_names_json: '[]',
+      updated_at: row.updated_at,
+    }
   }
 
   private resolveExcludedLineageRootId(currentScopeId?: string): string | null {
