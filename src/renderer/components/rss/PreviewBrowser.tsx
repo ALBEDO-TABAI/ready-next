@@ -4,6 +4,7 @@ import { browserTabActivationSequencer } from '../../modules/browser/browserTabA
 import { useHostedPreviewBounds } from '../../modules/browser/useHostedPreviewBounds'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { useBrowserTabs } from '../../stores/useBrowserTabs'
+import { WORKBENCH_SUPPORT_PANEL_WIDTH } from '../../modules/workbench/chrome'
 import { requestWorkbenchModeChange } from '../../modules/workbench/mode-transition'
 import type { RSSItem } from './RSSFeed'
 import RssTimeHintBanner from './RssTimeHintBanner'
@@ -155,9 +156,9 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
         top: 0,
         right: 0,
         bottom: 0,
-        width: 'calc(100% - 300px)',
+        width: `calc(100% - ${WORKBENCH_SUPPORT_PANEL_WIDTH}px)`,
         minWidth: 480,
-        background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
+        background: 'var(--workbench-module-surface-bg)',
         borderRadius: 'var(--workbench-canvas-radius) 0 0 var(--workbench-canvas-radius)',
         overflow: 'hidden',
         isolation: 'isolate',
@@ -242,7 +243,7 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
             width: 'var(--workbench-canvas-radius)',
             height: 'var(--workbench-canvas-radius)',
             borderBottomRightRadius: 'var(--workbench-canvas-radius)',
-            background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
+            background: 'var(--workbench-module-surface-bg)',
             pointerEvents: 'none',
             zIndex: 2,
           }}
@@ -256,7 +257,7 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
             width: 'var(--workbench-canvas-radius)',
             height: 'var(--workbench-canvas-radius)',
             borderTopRightRadius: 'var(--workbench-canvas-radius)',
-            background: 'var(--workbench-liquid-chrome-bg, var(--bg-content))',
+            background: 'var(--workbench-module-surface-bg)',
             pointerEvents: 'none',
             zIndex: 2,
           }}
