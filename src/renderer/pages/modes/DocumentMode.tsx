@@ -9,6 +9,10 @@ import DraggableModeSwitch from '../../components/document/DraggableModeSwitch'
 import DocumentFloatingPanels, { DocumentPanelToggleButtons } from '../../components/document/DocumentFloatingPanels'
 import { READY_DOCUMENT_REVEAL_EVENT } from '../../modules/agent/document-quote-navigation'
 import {
+  addReadyContextReferenceToAgentInput,
+  showReferenceToInputMenu,
+} from '../../modules/agent/chat-input-bridge'
+import {
   WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM,
   WORKBENCH_CANVAS_OUTER_PADDING_TOP,
   WORKBENCH_CANVAS_OUTER_PADDING_X,
@@ -526,6 +530,27 @@ export default function DocumentMode({
     dragIndexRef.current = null
   }, [])
 
+  const handleTabContextMenu = useCallback((event: React.MouseEvent<HTMLButtonElement>, id: string) => {
+    const tab = tabs.find((candidate) => candidate.id === id)
+    if (!tab) return
+    event.preventDefault()
+    event.stopPropagation()
+    void showReferenceToInputMenu({ x: event.clientX, y: event.clientY }).then((selected) => {
+      if (!selected) return
+      void addReadyContextReferenceToAgentInput({
+        type: 'doc-tab',
+        name: tab.title,
+        title: tab.title,
+        path: tab.path,
+        tabId: tab.id,
+        content: tab.content,
+        ext: getFileExt(tab.path),
+        size: tab.content.length,
+        dirty: tab.isDirty,
+      })
+    })
+  }, [tabs])
+
   // Split resize
   const handleSplitResize = useCallback((delta: number) => {
     if (!splitContainerRef.current) return
@@ -593,6 +618,7 @@ export default function DocumentMode({
             onTabDragOver={handleDragOver}
             onTabDrop={handleDrop}
             onTabDragEnd={handleDragEnd}
+            onTabContextMenu={handleTabContextMenu}
             rightActions={
               <>
                 <DocumentPanelToggleButtons

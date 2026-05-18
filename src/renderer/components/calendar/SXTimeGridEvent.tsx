@@ -1,10 +1,14 @@
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { Video, Image as ImageIcon, FileText, BookOpen, Radio, MapPin } from 'lucide-react'
 import { Temporal } from '@js-temporal/polyfill'
 import { useCalendarContext } from './CalendarContext'
 import { sxEventToEvent } from './schedule-x-utils'
 import type { CalendarEvent } from './schedule-x-utils'
 import { useCalendarSession } from '../../stores/useCalendarSession'
+import {
+  addReadyContextReferenceToAgentInput,
+  showReferenceToInputMenu,
+} from '../../modules/agent/chat-input-bridge'
 
 const CONTENT_TYPE_ICONS: Record<string, typeof Video> = {
   video: Video,
@@ -53,12 +57,13 @@ export default function SXTimeGridEvent({ calendarEvent }: SXTimeGridEventProps)
   const contentType = (calendarEvent.contentType as string) || undefined
   const location = ((calendarEvent.location as string) || '').trim()
   const platformStr = (calendarEvent.platform as string) || ''
-  let platforms: string[] = []
-  try {
-    platforms = platformStr ? JSON.parse(platformStr) : []
-  } catch {
-    platforms = []
-  }
+  const platforms = useMemo(() => {
+    try {
+      return platformStr ? JSON.parse(platformStr) as string[] : []
+    } catch {
+      return []
+    }
+  }, [platformStr])
   const publishStatus = (calendarEvent.publishStatus as string) || undefined
 
   const ContentIcon = contentType ? CONTENT_TYPE_ICONS[contentType] : null
@@ -121,6 +126,29 @@ export default function SXTimeGridEvent({ calendarEvent }: SXTimeGridEventProps)
     e.dataTransfer.effectAllowed = 'copy'
   }, [calendarEvent.calendarId, calendarEvent.id, eventColor, location, parsed.contentType, parsed.description, parsed.endTime, parsed.publishStatus, parsed.startTime, parsed.title, platforms])
 
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    void showReferenceToInputMenu({ x: e.clientX, y: e.clientY }).then((selected) => {
+      if (!selected) return
+      void addReadyContextReferenceToAgentInput({
+        type: 'calendar-event',
+        eventId: String(calendarEvent.id),
+        name: parsed.title || '(无标题日程)',
+        title: parsed.title || '(无标题日程)',
+        startTime: parsed.startTime?.toISOString(),
+        endTime: parsed.endTime?.toISOString(),
+        calendarId: String(calendarEvent.calendarId || ''),
+        description: parsed.description || '',
+        location: location || '',
+        allDay: parsed.allDay,
+        contentType: parsed.contentType,
+        platform: platforms,
+        publishStatus: parsed.publishStatus,
+      })
+    })
+  }, [calendarEvent.calendarId, calendarEvent.id, location, parsed.allDay, parsed.contentType, parsed.description, parsed.endTime, parsed.publishStatus, parsed.startTime, parsed.title, platforms])
+
   // Resize via bottom edge drag
   const handleResizeStart = useCallback((e: React.MouseEvent) => {
     e.stopPropagation()
@@ -176,6 +204,7 @@ export default function SXTimeGridEvent({ calendarEvent }: SXTimeGridEventProps)
     <div
       className="sx-custom-time-event"
       onClick={handleClick}
+      onContextMenu={handleContextMenu}
       style={{
         width: '100%',
         height: '100%',

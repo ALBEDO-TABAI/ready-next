@@ -7,6 +7,7 @@ import {
   Film,
   Table,
   Globe,
+  CalendarDays,
   Puzzle,
   Pen,
   MessageSquareQuote,
@@ -30,7 +31,11 @@ import {
 import { useWorkspace } from '../../stores/useWorkspace'
 import { useSettings, listChatSwitcherProfiles, getProviderDef } from '../../stores/useSettings'
 import { useNavigate } from 'react-router-dom'
-import { READY_FOCUS_CHAT_INPUT_EVENT } from '../../modules/agent/chat-input-bridge'
+import {
+  READY_FOCUS_CHAT_INPUT_EVENT,
+  createSkillReferenceAttachment,
+  type ReadySkillReference,
+} from '../../modules/agent/chat-input-bridge'
 import { revealDocumentQuoteAttachment } from '../../modules/agent/document-quote-navigation'
 import { toLocalFileUrl } from '../../utils/dragDrop'
 import {
@@ -2022,6 +2027,9 @@ function AttachmentIcon({ attachment, size = 16 }: { attachment: ChatAttachment;
   if (attachment.source === 'browser-tab') {
     return <Globe style={style} className={cls} strokeWidth={2} />
   }
+  if (attachment.source === 'calendar-event') {
+    return <CalendarDays style={style} className={cls} strokeWidth={2} />
+  }
   if (attachment.source === 'document-quote') {
     return <MessageSquareQuote style={style} className={cls} strokeWidth={2} />
   }
@@ -2147,6 +2155,14 @@ function getAttachmentMetaSummary(attachment: ChatAttachment): string | null {
 
   if (attachment.source === 'browser-tab') {
     return '网页引用'
+  }
+
+  if (attachment.source === 'document-tab') {
+    return attachment.dirty ? '文档标签 · 未保存' : '文档标签'
+  }
+
+  if (attachment.source === 'calendar-event') {
+    return '日程引用'
   }
 
   if (attachment.source === 'document-widget-target') {
@@ -3214,6 +3230,11 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     },
     [currentScope?.sourceKind, loadScopes, selectAgent]
   )
+
+  const handleSkillReference = useCallback((skill: ReadySkillReference) => {
+    addAttachments([createSkillReferenceAttachment(skill)])
+    focusInputWithResize()
+  }, [addAttachments, focusInputWithResize])
 
   const handleNewSession = useCallback(() => {
     newSession()
@@ -4431,6 +4452,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
           onUndo={undoLastMessage}
           onPickFiles={pickFiles}
           onAgentSelect={handleAgentSelect}
+          onSkillReference={handleSkillReference}
           renderAttachmentIcon={(attachment, size = 16) => (
             <AttachmentIcon attachment={attachment} size={size} />
           )}

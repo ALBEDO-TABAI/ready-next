@@ -28,6 +28,7 @@ interface DocumentTabRailProps {
   onTabDragOver?: (event: DragEvent<HTMLButtonElement>, index: number) => void
   onTabDrop?: (event: DragEvent<HTMLButtonElement>, index: number) => void
   onTabDragEnd?: (event: DragEvent<HTMLButtonElement>) => void
+  onTabContextMenu?: (event: MouseEvent<HTMLButtonElement>, id: string) => void
   rightActions?: ReactNode
 }
 
@@ -41,6 +42,7 @@ export default function DocumentTabRail({
   onTabDragOver,
   onTabDrop,
   onTabDragEnd,
+  onTabContextMenu,
   rightActions,
 }: DocumentTabRailProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
@@ -162,6 +164,7 @@ export default function DocumentTabRail({
                       onDrop={onTabDrop ? (event) => handleDrop(event, index) : undefined}
                       onDragEnd={handleDragEnd}
                       onClick={(event) => onTabClick(tab.id, event)}
+                      onContextMenu={onTabContextMenu ? (event) => onTabContextMenu(event, tab.id) : undefined}
                       onMouseEnter={() => setHoveredTabId(tab.id)}
                       onMouseLeave={() => setHoveredTabId((current) => current === tab.id ? null : current)}
                       className="group relative flex min-w-0 w-full cursor-pointer items-center rounded-[14px] border px-[10px] text-[12px] transition-[background-color,border-color,box-shadow,color] duration-150"

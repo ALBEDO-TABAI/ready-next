@@ -96,3 +96,28 @@ test('request envelope keeps repeated attachments and references as distinct res
     envelope.resources.some((resource) => resource.name === '新文档.md' && resource.canWrite === true),
   )
 })
+
+test('request envelope records calendar event references as structured resources', () => {
+  const envelope = buildRequestEnvelope({
+    userText: [
+      '帮我看看这个日程前后要准备什么',
+      '',
+      '### 日程事件引用',
+      '- 标题: 周会',
+      '- eventId: event-1',
+      '- 时间: 2026-05-18T09:00:00.000Z - 2026-05-18T10:00:00.000Z',
+      '- 日历: work',
+      '- 备注: 同步 Ready 输入框引用能力。',
+    ].join('\n'),
+  })
+
+  const calendarResource = envelope.resources.find((resource) => resource.kind === 'calendar_event')
+  assert.ok(calendarResource)
+  assert.equal(calendarResource.name, '周会')
+  assert.equal(calendarResource.path, 'calendar-event://event-1')
+  assert.equal(calendarResource.source, 'calendar_context')
+  assert.equal(calendarResource.canRead, true)
+  assert.equal(calendarResource.canWrite, false)
+  assert.equal(envelope.primaryInstruction, '帮我看看这个日程前后要准备什么')
+  assert.ok(envelope.chunks.some((chunk) => chunk.source === 'ui_resource_ref'))
+})

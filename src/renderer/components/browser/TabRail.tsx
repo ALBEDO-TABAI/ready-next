@@ -17,6 +17,10 @@ import {
   beginBrowserTabDragSession,
   endBrowserTabDragSession,
 } from '../../modules/browser/browserTabDragSession'
+import {
+  addReadyContextReferenceToAgentInput,
+  showReferenceToInputMenu,
+} from '../../modules/agent/chat-input-bridge'
 import type { BrowserTab } from '../../stores/useBrowserTabs'
 import ActiveTabSurface from './ActiveTabSurface'
 
@@ -127,6 +131,22 @@ export default function TabRail({
     beginBrowserTabDragSession(payload)
     const data = JSON.stringify(payload)
     event.dataTransfer.setData('application/x-ready-drag', data)
+  }, [])
+
+  const referenceBrowserTab = useCallback((event: React.MouseEvent, tab: BrowserTab) => {
+    if (!tab.url && !tab.title) return
+    event.preventDefault()
+    event.stopPropagation()
+    void showReferenceToInputMenu({ x: event.clientX, y: event.clientY }).then((selected) => {
+      if (!selected) return
+      void addReadyContextReferenceToAgentInput({
+        type: 'browser-tab',
+        name: tab.title || 'New Tab',
+        title: tab.title || 'New Tab',
+        url: tab.url,
+        tabId: tab.id,
+      })
+    })
   }, [])
 
   const checkOverflow = useCallback(() => {
@@ -379,6 +399,7 @@ export default function TabRail({
                       onInputBlur={onInputBlur}
                       onCommitNavigation={onCommitNavigation}
                       onToggleBookmark={onToggleBookmark}
+                      onContextMenu={(event) => referenceBrowserTab(event, tab)}
                       onClose={() => void onTabClose(tab.id)}
                     />
                   </div>
@@ -393,6 +414,7 @@ export default function TabRail({
                     onDrop={isStarterTab ? undefined : (event) => handleDrop(event, index)}
                     onMouseEnter={() => setHoveredTabId(tab.id)}
                     onMouseLeave={() => setHoveredTabId((current) => current === tab.id ? null : current)}
+                    onContextMenu={isStarterTab ? undefined : (event) => referenceBrowserTab(event, tab)}
                     onClick={() => {
                       if (isStarterTab) {
                         if (loading) return

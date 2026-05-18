@@ -70,8 +70,10 @@ export interface ChatAttachment {
     | 'browser-tab'
     | 'skill-folder'
     | 'design-project'
+    | 'document-tab'
     | 'document-quote'
     | 'document-widget-target'
+    | 'calendar-event'
     | 'channel'
   browserTabId?: string
   url?: string
@@ -89,6 +91,16 @@ export interface ChatAttachment {
   sectionTitle?: string
   excerpt?: string
   capturedAt?: number
+  eventId?: string
+  startTime?: string
+  endTime?: string
+  calendarId?: string
+  description?: string
+  location?: string
+  allDay?: boolean
+  contentType?: string
+  platform?: string[] | string
+  publishStatus?: string
   skillId?: string
   skillFolderPath?: string
   dirty?: boolean

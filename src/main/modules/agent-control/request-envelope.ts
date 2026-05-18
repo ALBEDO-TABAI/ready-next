@@ -26,6 +26,7 @@ export type RequestEnvelopeResourceKind =
   | 'document_context'
   | 'document_quote'
   | 'browser_reference'
+  | 'calendar_event'
   | 'folder_reference'
   | 'widget_target'
 
@@ -35,6 +36,7 @@ export type RequestEnvelopeResourceSource =
   | 'current_document'
   | 'document_quote'
   | 'browser_context'
+  | 'calendar_context'
   | 'folder_reference'
   | 'widget_target'
 
@@ -114,6 +116,7 @@ const CONTEXT_MARKERS = [
   '### 当前文档上下文',
   '### 文档引用',
   '### 浏览页面引用',
+  '### 日程事件引用',
   '### 文件夹引用',
   '### 技能目录引用',
   '--- 引用设计项目:',
@@ -136,6 +139,7 @@ const STRUCTURED_MARKERS: Array<{ marker: string; source: InputChunkSource }> = 
   { marker: '### 当前文档上下文', source: 'document_excerpt' },
   { marker: '### 文档引用', source: 'ui_resource_ref' },
   { marker: '### 浏览页面引用', source: 'ui_resource_ref' },
+  { marker: '### 日程事件引用', source: 'ui_resource_ref' },
   { marker: '### 文件夹引用', source: 'ui_resource_ref' },
   { marker: '### 技能目录引用', source: 'ui_resource_ref' },
   { marker: '--- 引用技能目录:', source: 'ui_resource_ref' },
@@ -224,8 +228,8 @@ export function extractPureUserInput(userText: string): string {
 function stripStructuredResourceBoilerplate(text: string): string {
   return String(text || '')
     .replace(/^---\s*(引用文件|附件):[^\n]*\n?/gm, '')
-    .replace(/^(###\s*当前文档上下文|###\s*文档引用|###\s*浏览页面引用|###\s*文件夹引用|###\s*Widget 更新上下文)\s*\n?/gm, '')
-    .replace(/(?:^|\n)-\s*(标题|文档|路径|类型|字符数|链接|主标题|当前选中文本|页面摘要|名称|用途|目标 widget|标签页ID|widgetId|当前模式|约束):\s*[^\n]*/g, '')
+    .replace(/^(###\s*当前文档上下文|###\s*文档引用|###\s*浏览页面引用|###\s*日程事件引用|###\s*文件夹引用|###\s*Widget 更新上下文)\s*\n?/gm, '')
+    .replace(/(?:^|\n)-\s*(标题|文档|路径|类型|字符数|链接|主标题|当前选中文本|页面摘要|名称|用途|目标 widget|标签页ID|widgetId|当前模式|约束|eventId|时间|日历|地点|全天|平台|状态|备注):\s*[^\n]*/g, '')
     .replace(/---\s*文档(摘要|内容)开始\s*---/g, '')
     .replace(/---\s*文档(摘要|内容)结束\s*---/g, '')
     .replace(/```(?:show-widget|quote)?[\s\S]*?```/g, '')
@@ -314,6 +318,25 @@ function buildResourceFromBlock(block: StructuredBlock, order: number): RequestE
       id: `${block.marker}-${order}-${name}`,
       kind: 'browser_reference',
       source: 'browser_context',
+      name,
+      path,
+      text,
+      summary: summarizeResourceText(text),
+      order,
+      canRead: true,
+      canWrite: false,
+    }
+  }
+
+  if (block.marker === '### 日程事件引用') {
+    const name = extractNamedBlockValue(block.text, '标题') || '日程事件'
+    const eventId = extractNamedBlockValue(block.text, 'eventId')
+    const path = eventId ? `calendar-event://${encodeURIComponent(eventId)}` : null
+    const text = stripStructuredResourceBoilerplate(block.text)
+    return {
+      id: `${block.marker}-${order}-${name}`,
+      kind: 'calendar_event',
+      source: 'calendar_context',
       name,
       path,
       text,

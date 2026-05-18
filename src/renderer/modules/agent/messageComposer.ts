@@ -88,8 +88,10 @@ function normalizeAttachmentSource(value: unknown): ChatAttachment['source'] {
   const normalized = String(value || '').toLowerCase()
   if (normalized === 'browser-tab') return 'browser-tab'
   if (normalized === 'skill-folder') return 'skill-folder'
+  if (normalized === 'document-tab') return 'document-tab'
   if (normalized === 'document-quote') return 'document-quote'
   if (normalized === 'document-widget-target') return 'document-widget-target'
+  if (normalized === 'calendar-event') return 'calendar-event'
   if (normalized === 'file') return 'file'
   return 'channel'
 }
@@ -126,6 +128,21 @@ export function extractAttachmentsFromMeta(meta?: Record<string, unknown>): Chat
         lineStart: typeof record.lineStart === 'number' ? Number(record.lineStart) : undefined,
         lineEnd: typeof record.lineEnd === 'number' ? Number(record.lineEnd) : undefined,
         sectionTitle: typeof record.sectionTitle === 'string' ? record.sectionTitle : undefined,
+        excerpt: typeof record.excerpt === 'string' ? record.excerpt : undefined,
+        eventId: typeof record.eventId === 'string' ? record.eventId : undefined,
+        startTime: typeof record.startTime === 'string' ? record.startTime : undefined,
+        endTime: typeof record.endTime === 'string' ? record.endTime : undefined,
+        calendarId: typeof record.calendarId === 'string' ? record.calendarId : undefined,
+        description: typeof record.description === 'string' ? record.description : undefined,
+        location: typeof record.location === 'string' ? record.location : undefined,
+        allDay: typeof record.allDay === 'boolean' ? record.allDay : undefined,
+        contentType: typeof record.contentType === 'string' ? record.contentType : undefined,
+        platform: Array.isArray(record.platform)
+          ? record.platform.filter((item): item is string => typeof item === 'string')
+          : typeof record.platform === 'string'
+            ? record.platform
+            : undefined,
+        publishStatus: typeof record.publishStatus === 'string' ? record.publishStatus : undefined,
         dirty: typeof record.dirty === 'boolean' ? record.dirty : undefined,
         saveStatus: typeof record.saveStatus === 'string' ? record.saveStatus : undefined,
         snapshotHash: typeof record.snapshotHash === 'string' ? record.snapshotHash : undefined,
@@ -192,6 +209,27 @@ function formatDocumentQuoteReference(payload: {
   ].filter(Boolean).join('\n')
 }
 
+function formatDocumentTabReference(payload: {
+  name: string
+  path: string
+  title?: string
+  excerpt?: string
+  dirty?: boolean
+  saveStatus?: string
+}): string {
+  const content = String(payload.excerpt || '').trim()
+  return [
+    `--- 引用文件: ${payload.title || payload.name} ---`,
+    `- 路径: ${payload.path}`,
+    '- 来源: 文档标签页',
+    payload.dirty ? '- 状态: 有未保存修改' : payload.saveStatus ? `- 状态: ${payload.saveStatus}` : null,
+    content ? '' : null,
+    content ? '--- 文档内容开始 ---' : null,
+    content ? content.slice(0, 12000) : null,
+    content ? '--- 文档内容结束 ---' : null,
+  ].filter(Boolean).join('\n')
+}
+
 function formatDocumentWidgetTargetReference(payload: {
   name: string
   path: string
@@ -218,6 +256,38 @@ function formatDocumentWidgetTargetReference(payload: {
       widget_code: payload.widgetCode || '',
     }),
     '```',
+  ].filter(Boolean).join('\n')
+}
+
+function formatCalendarEventReference(payload: {
+  title?: string
+  name?: string
+  eventId?: string
+  startTime?: string
+  endTime?: string
+  calendarId?: string
+  description?: string
+  location?: string
+  allDay?: boolean
+  contentType?: string
+  platform?: string[] | string
+  publishStatus?: string
+}): string {
+  const platform = Array.isArray(payload.platform)
+    ? payload.platform.join(', ')
+    : String(payload.platform || '').trim()
+  return [
+    '### 日程事件引用',
+    `- 标题: ${payload.title || payload.name || '日程'}`,
+    payload.eventId ? `- eventId: ${payload.eventId}` : null,
+    payload.startTime || payload.endTime ? `- 时间: ${payload.startTime || '?'} - ${payload.endTime || '?'}` : null,
+    payload.calendarId ? `- 日历: ${payload.calendarId}` : null,
+    payload.location ? `- 地点: ${payload.location}` : null,
+    typeof payload.allDay === 'boolean' ? `- 全天: ${payload.allDay ? '是' : '否'}` : null,
+    payload.contentType ? `- 类型: ${payload.contentType}` : null,
+    platform ? `- 平台: ${platform}` : null,
+    payload.publishStatus ? `- 状态: ${payload.publishStatus}` : null,
+    payload.description ? `- 备注: ${payload.description.slice(0, 2000)}` : null,
   ].filter(Boolean).join('\n')
 }
 
@@ -311,6 +381,17 @@ export function serializePersistedAttachments(attachments: ChatAttachment[]): Ar
       lineStart: attachment.lineStart,
       lineEnd: attachment.lineEnd,
       sectionTitle: attachment.sectionTitle,
+      excerpt: attachment.excerpt,
+      eventId: attachment.eventId,
+      startTime: attachment.startTime,
+      endTime: attachment.endTime,
+      calendarId: attachment.calendarId,
+      description: attachment.description,
+      location: attachment.location,
+      allDay: attachment.allDay,
+      contentType: attachment.contentType,
+      platform: attachment.platform,
+      publishStatus: attachment.publishStatus,
     }))
 }
 
@@ -423,6 +504,22 @@ export async function buildComposedAgentInputWithDiagnostics(params: {
           continue
         }
 
+        if (att.source === 'document-tab') {
+          blocks.push({
+            type: 'text',
+            text: `\n\n${formatDocumentTabReference({
+              name: att.name,
+              path: att.path,
+              title: att.title || att.documentTitle,
+              excerpt: att.excerpt,
+              dirty: att.dirty,
+              saveStatus: att.saveStatus,
+            })}`,
+          })
+          markIncluded()
+          continue
+        }
+
         if (att.source === 'document-widget-target') {
           blocks.push({
             type: 'text',
@@ -435,6 +532,28 @@ export async function buildComposedAgentInputWithDiagnostics(params: {
               widgetId: att.widgetId,
               widgetCode: att.widgetCode,
               widgetMode: att.widgetMode,
+            })}`,
+          })
+          markIncluded()
+          continue
+        }
+
+        if (att.source === 'calendar-event') {
+          blocks.push({
+            type: 'text',
+            text: `\n\n${formatCalendarEventReference({
+              title: att.title,
+              name: att.name,
+              eventId: att.eventId,
+              startTime: att.startTime,
+              endTime: att.endTime,
+              calendarId: att.calendarId,
+              description: att.description,
+              location: att.location,
+              allDay: att.allDay,
+              contentType: att.contentType,
+              platform: att.platform,
+              publishStatus: att.publishStatus,
             })}`,
           })
           markIncluded()
@@ -530,10 +649,17 @@ export async function buildComposedAgentInputWithDiagnostics(params: {
 
   const atRefs = content.match(/@\[([^\]]+)\]/g)
   if (atRefs && filePool.length > 0) {
+    const isAlreadyAttached = (candidate: ChatAttachment) => effectiveAttachments.some((attachment) => (
+      attachment.source === candidate.source &&
+      attachment.path === candidate.path &&
+      attachment.name === candidate.name
+    ))
+
     for (const ref of atRefs) {
       const fileName = ref.slice(2, -1)
       const poolFile = [...filePool].reverse().find((f) => f.name === fileName)
       if (!poolFile) continue
+      if (isAlreadyAttached(poolFile)) continue
       try {
         if (poolFile.source === 'skill-folder') {
           finalMessage = appendTextBlock(
@@ -602,6 +728,42 @@ export async function buildComposedAgentInputWithDiagnostics(params: {
               widgetId: poolFile.widgetId,
               widgetCode: poolFile.widgetCode,
               widgetMode: poolFile.widgetMode,
+            })}`,
+          )
+          continue
+        }
+
+        if (poolFile.source === 'document-tab') {
+          finalMessage = appendTextBlock(
+            finalMessage,
+            `\n\n${formatDocumentTabReference({
+              name: poolFile.name,
+              path: poolFile.path,
+              title: poolFile.title || poolFile.documentTitle,
+              excerpt: poolFile.excerpt,
+              dirty: poolFile.dirty,
+              saveStatus: poolFile.saveStatus,
+            })}`,
+          )
+          continue
+        }
+
+        if (poolFile.source === 'calendar-event') {
+          finalMessage = appendTextBlock(
+            finalMessage,
+            `\n\n${formatCalendarEventReference({
+              title: poolFile.title,
+              name: poolFile.name,
+              eventId: poolFile.eventId,
+              startTime: poolFile.startTime,
+              endTime: poolFile.endTime,
+              calendarId: poolFile.calendarId,
+              description: poolFile.description,
+              location: poolFile.location,
+              allDay: poolFile.allDay,
+              contentType: poolFile.contentType,
+              platform: poolFile.platform,
+              publishStatus: poolFile.publishStatus,
             })}`,
           )
           continue

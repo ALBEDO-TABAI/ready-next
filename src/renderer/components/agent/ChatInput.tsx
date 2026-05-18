@@ -1,7 +1,13 @@
 import { forwardRef, useRef, useEffect, useState, useImperativeHandle, useCallback, useMemo } from 'react'
-import { AtSign, Plus, Send, Square, Undo2, ChevronDown } from 'lucide-react'
+import { AtSign, Plus, Send, Square, Undo2, ChevronDown, Puzzle } from 'lucide-react'
 import { IconButton } from '../ui/IconButton'
 import type { ChatAttachment } from '../../stores/useAgent'
+import type { ReadySkillReference } from '../../modules/agent/chat-input-bridge'
+import {
+  buildSlashSkillInsertion,
+  filterSlashSkills,
+  type SkillMenuItem,
+} from '../../modules/agent/slash-skill-selection'
 
 interface ChatInputProps {
   inputValue: string
@@ -25,6 +31,7 @@ interface ChatInputProps {
   onUndo: () => void
   onPickFiles: () => void
   onAgentSelect: (agentName: string) => void
+  onSkillReference: (skill: ReadySkillReference) => void
   renderAttachmentIcon: (attachment: ChatAttachment, size?: number) => React.ReactNode
   ModelSelector: React.ComponentType
 }
@@ -56,15 +63,21 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   onUndo,
   onPickFiles,
   onAgentSelect,
+  onSkillReference,
   renderAttachmentIcon,
   ModelSelector,
 }: ChatInputProps, ref) {
   const [showAgentSelect, setShowAgentSelect] = useState(false)
   const [showAtMenu, setShowAtMenu] = useState(false)
   const [atFilter, setAtFilter] = useState('')
+  const [showSlashMenu, setShowSlashMenu] = useState(false)
+  const [slashFilter, setSlashFilter] = useState('')
+  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
+  const [skills, setSkills] = useState<SkillMenuItem[]>([])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const atMenuRef = useRef<HTMLDivElement>(null)
+  const slashMenuRef = useRef<HTMLDivElement>(null)
   const composingRef = useRef(false)
   const composerLocked = isStreaming
 
@@ -91,6 +104,38 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     resetHeight,
   }), [focusWithResize, resetHeight])
 
+  const loadSkills = useCallback(async () => {
+    const api = typeof window !== 'undefined' ? window.electronAPI?.skills : null
+    if (!api?.list) return
+    const result = await api.list().catch(() => null)
+    if (!result?.success || !Array.isArray(result.data)) return
+    const nextSkills = result.data
+      .map((item: unknown): SkillMenuItem | null => {
+        if (!item || typeof item !== 'object') return null
+        const record = item as Record<string, unknown>
+        const id = String(record.id || '').trim()
+        const name = String(record.name || id).trim()
+        if (!id || !name) return null
+        return {
+          id,
+          name,
+          description: String(record.description || ''),
+          installed: record.installed !== false,
+          manifestValid: record.manifestValid !== false,
+          defaultAction: typeof record.defaultAction === 'string' ? record.defaultAction : undefined,
+          managedPath: typeof record.managedPath === 'string' ? record.managedPath : undefined,
+          sourcePath: typeof record.sourcePath === 'string' ? record.sourcePath : undefined,
+        }
+      })
+      .filter((item): item is SkillMenuItem => Boolean(item && item.manifestValid))
+      .sort((left, right) => left.name.localeCompare(right.name, 'zh-CN'))
+    setSkills(nextSkills)
+  }, [])
+
+  useEffect(() => {
+    void loadSkills()
+  }, [loadSkills])
+
   // Auto-resize textarea
   useEffect(() => {
     resizeTextarea()
@@ -106,10 +151,14 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
         setShowAtMenu(false)
         setAtFilter('')
       }
+      if (showSlashMenu && slashMenuRef.current && !slashMenuRef.current.contains(e.target as Node)) {
+        setShowSlashMenu(false)
+        setSlashFilter('')
+      }
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
-  }, [showAgentSelect, showAtMenu])
+  }, [showAgentSelect, showAtMenu, showSlashMenu])
 
   const filteredFilePool = useMemo(() => {
     if (!atFilter) return filePool
@@ -119,6 +168,18 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
       file.path.toLowerCase().includes(loweredFilter)
     ))
   }, [filePool, atFilter])
+
+  const filteredSkills = useMemo(() => {
+    return filterSlashSkills(skills, slashFilter)
+  }, [skills, slashFilter])
+
+  useEffect(() => {
+    setSlashSelectedIndex(0)
+  }, [slashFilter])
+
+  useEffect(() => {
+    setSlashSelectedIndex((index) => Math.max(0, Math.min(index, Math.max(0, filteredSkills.length - 1))))
+  }, [filteredSkills.length])
 
   const insertAtReference = useCallback((file: ChatAttachment) => {
     const textarea = textareaRef.current
@@ -145,6 +206,33 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     setAtFilter('')
   }, [inputValue, onInputChange])
 
+  const insertSlashSkillReference = useCallback((skill: SkillMenuItem) => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+
+    const cursorPos = textarea.selectionStart
+    const insertion = buildSlashSkillInsertion(inputValue, cursorPos, skill.name)
+    if (!insertion) return
+
+    onInputChange(insertion.nextValue)
+    onSkillReference({
+      type: 'skill-folder',
+      name: skill.name,
+      path: skill.managedPath || skill.sourcePath || undefined,
+      skillId: skill.id,
+      description: skill.description,
+      defaultAction: skill.defaultAction,
+    })
+
+    setTimeout(() => {
+      textarea.setSelectionRange(insertion.cursorPosition, insertion.cursorPosition)
+      textarea.focus()
+    }, 0)
+
+    setShowSlashMenu(false)
+    setSlashFilter('')
+  }, [inputValue, onInputChange, onSkillReference])
+
   const handleInputChange = (value: string, cursorPos: number) => {
     onInputChange(value)
     const textBeforeCursor = value.slice(0, cursorPos)
@@ -152,9 +240,20 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     if (atMatch && filePool.length > 0) {
       setAtFilter(atMatch[1])
       setShowAtMenu(true)
+      setShowSlashMenu(false)
+      setSlashFilter('')
     } else {
       setShowAtMenu(false)
       setAtFilter('')
+      const slashMatch = textBeforeCursor.match(/(?:^|\s)\/([^\s/@]*)$/)
+      if (slashMatch) {
+        setSlashFilter(slashMatch[1] || '')
+        setShowSlashMenu(true)
+        if (skills.length === 0) void loadSkills()
+      } else {
+        setShowSlashMenu(false)
+        setSlashFilter('')
+      }
     }
   }
 
@@ -165,6 +264,32 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     const isImeConfirmKey = nativeKeyCode === 229 || nativeWhich === 229
     if (composingRef.current || e.nativeEvent.isComposing || isImeConfirmKey) {
       return
+    }
+    if (showSlashMenu) {
+      if ((e.key === 'Enter' && !e.shiftKey) || e.key === 'Tab') {
+        const selected = filteredSkills[slashSelectedIndex] || filteredSkills[0]
+        if (selected) {
+          e.preventDefault()
+          insertSlashSkillReference(selected)
+          return
+        }
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setSlashSelectedIndex((index) => Math.min(index + 1, Math.max(0, filteredSkills.length - 1)))
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setSlashSelectedIndex((index) => Math.max(0, index - 1))
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setShowSlashMenu(false)
+        setSlashFilter('')
+        return
+      }
     }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
@@ -323,6 +448,87 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
               ))}
             </div>
           )}
+
+          {showSlashMenu && (
+            <div
+              ref={slashMenuRef}
+              className="glass-surface-floating panel-hover-scrollbar"
+              style={{
+                position: 'absolute',
+                bottom: '100%',
+                left: 0,
+                marginBottom: 4,
+                width: '100%',
+                maxHeight: 240,
+                overflowY: 'auto',
+                background: 'color-mix(in srgb, var(--surface-floating-bg) 34%, transparent)',
+                border: '1px solid var(--border-default)',
+                borderRadius: 8,
+                boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+                padding: 4,
+                zIndex: 210,
+              }}
+            >
+              <div style={{ fontSize: 10, color: 'var(--text-light)', padding: '2px 8px', marginBottom: 2 }}>
+                选择 Skill
+              </div>
+              {filteredSkills.length > 0 ? filteredSkills.map((skill, index) => (
+                <button
+                  key={skill.id}
+                  onMouseDown={(event) => {
+                    event.preventDefault()
+                    insertSlashSkillReference(skill)
+                  }}
+                  onPointerEnter={() => setSlashSelectedIndex(index)}
+                  className="w-full flex items-center gap-2 active:scale-[0.98] transition-[background-color,transform] duration-150"
+                  style={{
+                    padding: '7px 10px',
+                    borderRadius: 6,
+                    border: 'none',
+                    background: index === slashSelectedIndex ? 'var(--bg-hover)' : 'transparent',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                  }}
+                >
+                  <Puzzle style={{ width: 15, height: 15, flexShrink: 0, color: 'var(--text-gray)' }} strokeWidth={2} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: 'var(--text-body)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {skill.name}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 10,
+                        color: 'var(--text-light)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                        marginTop: 2,
+                      }}
+                      title={skill.description || skill.id}
+                    >
+                      {skill.description || skill.id}
+                    </div>
+                  </div>
+                  <span style={{ fontSize: 10, color: 'var(--text-light)', marginLeft: 'auto', flexShrink: 0 }}>
+                    {skill.installed ? '已就绪' : '未安装'}
+                  </span>
+                </button>
+              )) : (
+                <div style={{ padding: '8px 10px', fontSize: 12, color: 'var(--text-light)' }}>
+                  没有匹配的 skill
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </div>
 
@@ -434,6 +640,8 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             onClick={() => {
               if (filePool.length === 0) return
               setAtFilter('')
+              setShowSlashMenu(false)
+              setSlashFilter('')
               setShowAtMenu((value) => !value)
             }}
             title={filePoolCount > 0 ? '引用文件或文件夹' : '先用 + 添加文件'}

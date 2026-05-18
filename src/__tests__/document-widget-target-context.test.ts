@@ -123,6 +123,97 @@ describe('document widget target context', () => {
     assert.doesNotMatch(String(composed), /\/skill video-expert-analyzer/)
   })
 
+  it('does not duplicate an attached skill when the draft also mentions it', async () => {
+    ;(globalThis as { window?: unknown }).window = {
+      electronAPI: {
+        settings: {
+          getAIConfig: async () => ({ success: true, data: { provider: 'anthropic', baseUrl: 'https://api.example.com' } }),
+        },
+        chat: {
+          readFileForAI: async () => ({ success: false, error: 'not used' }),
+        },
+      },
+    }
+
+    const skillAttachment = {
+      id: 'skill-att-1',
+      name: 'Video Expert Analyzer (VNext)',
+      path: '/Users/user/Library/Application Support/ready/skill-runtime/skills/video-expert-analyzer',
+      type: 'text' as const,
+      size: 0,
+      ext: '.skill',
+      source: 'skill-folder' as const,
+      skillId: 'video-expert-analyzer',
+      skillFolderPath: '/Users/user/Library/Application Support/ready/skill-runtime/skills/video-expert-analyzer',
+    }
+
+    const composed = await buildComposedAgentInput({
+      content: '使用@[Video Expert Analyzer (VNext)]分析视频',
+      attachments: [skillAttachment],
+      filePool: [skillAttachment],
+    })
+
+    const text = String(composed)
+    assert.equal((text.match(/### 技能目录引用/g) || []).length, 1)
+    assert.doesNotMatch(text, /--- 引用技能目录:/)
+  })
+
+  it('injects document tab and calendar event references into composed input', async () => {
+    ;(globalThis as { window?: unknown }).window = {
+      electronAPI: {
+        settings: {
+          getAIConfig: async () => ({ success: true, data: { provider: 'anthropic', baseUrl: 'https://api.example.com' } }),
+        },
+        chat: {
+          readFileForAI: async () => ({ success: false, error: 'not used' }),
+        },
+      },
+    }
+
+    const composed = await buildComposedAgentInput({
+      content: '总结这两个引用',
+      attachments: [
+        {
+          id: 'doc-tab-1',
+          name: '会议纪要.md',
+          path: '/tmp/会议纪要.md',
+          type: 'text',
+          size: 20,
+          ext: '.md',
+          source: 'document-tab',
+          title: '会议纪要.md',
+          documentTitle: '会议纪要.md',
+          excerpt: '本周要确认浏览器引用和日程引用。',
+          dirty: true,
+        },
+        {
+          id: 'cal-1',
+          name: '周会',
+          path: 'calendar-event://event-1',
+          type: 'text',
+          size: 12,
+          ext: '.calendar',
+          source: 'calendar-event',
+          title: '周会',
+          eventId: 'event-1',
+          startTime: '2026-05-18T09:00:00.000Z',
+          endTime: '2026-05-18T10:00:00.000Z',
+          calendarId: 'work',
+          description: '同步 Ready 输入框引用能力。',
+        },
+      ],
+      filePool: [],
+    })
+
+    const text = String(composed)
+    assert.match(text, /--- 引用文件: 会议纪要\.md ---/)
+    assert.match(text, /- 来源: 文档标签页/)
+    assert.match(text, /本周要确认浏览器引用和日程引用/)
+    assert.match(text, /### 日程事件引用/)
+    assert.match(text, /- eventId: event-1/)
+    assert.match(text, /同步 Ready 输入框引用能力/)
+  })
+
   it('does not carry widget update context into unrelated plain questions', async () => {
     ;(globalThis as { window?: unknown }).window = {
       electronAPI: {

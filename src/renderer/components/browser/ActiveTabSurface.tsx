@@ -14,6 +14,7 @@ interface ActiveTabSurfaceProps {
   draggable?: boolean
   onDragStart?: (event: React.DragEvent<HTMLElement>) => void
   onDragEnd?: (event: React.DragEvent<HTMLElement>) => void
+  onContextMenu?: (event: React.MouseEvent<HTMLElement>) => void
   onUrlChange: (value: string) => void
   onExpandRequest: () => void
   onHotspotEnter: () => void
@@ -36,6 +37,7 @@ export default function ActiveTabSurface({
   draggable = false,
   onDragStart,
   onDragEnd,
+  onContextMenu,
   onUrlChange,
   onExpandRequest,
   onHotspotEnter,
@@ -90,6 +92,11 @@ export default function ActiveTabSurface({
         onDragStart?.(event)
       }}
       onDragEnd={onDragEnd}
+      onContextMenu={(event) => {
+        const target = event.target as HTMLElement | null
+        if (target?.closest('input')) return
+        onContextMenu?.(event)
+      }}
       className="group relative flex min-w-0 items-center rounded-[14px] border"
       style={{
         height: 34,
