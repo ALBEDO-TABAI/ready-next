@@ -10,6 +10,8 @@ interface BrowserPreviewServiceDeps {
   useMock: boolean
   browserUserAgent: string
   createHost: (partition: string) => BrowserHostView
+  resetPageBackground: (view: BrowserHostView) => void
+  syncPageBackground: (view: BrowserHostView) => void
   showHost: (view: BrowserHostView, bounds: BrowserRect) => void
   hideHost: (view: BrowserHostView) => void
   detachHost: (view: BrowserHostView) => void
@@ -81,6 +83,7 @@ export class BrowserPreviewService {
 
     view.webContents.on('dom-ready', () => {
       applyRoundedPreviewViewport(view)
+      this.deps.syncPageBackground(view)
     })
 
     view.webContents.on('page-title-updated', (_, title) => {
@@ -94,6 +97,7 @@ export class BrowserPreviewService {
       this.previewState.canGoForward = view.webContents.navigationHistory.canGoForward()
       this.previewState.error = undefined
       this.sendPreviewUpdate()
+      this.deps.syncPageBackground(view)
     })
 
     view.webContents.on('did-navigate-in-page', (_, url) => {
@@ -102,15 +106,18 @@ export class BrowserPreviewService {
       this.previewState.canGoForward = view.webContents.navigationHistory.canGoForward()
       this.previewState.error = undefined
       this.sendPreviewUpdate()
+      this.deps.syncPageBackground(view)
     })
 
     view.webContents.on('did-start-loading', () => {
+      this.deps.resetPageBackground(view)
       this.previewState.loading = true
       this.sendPreviewUpdate()
     })
 
     view.webContents.on('did-stop-loading', () => {
       applyRoundedPreviewViewport(view)
+      this.deps.syncPageBackground(view)
       this.previewState.loading = false
       this.previewState.canGoBack = view.webContents.navigationHistory.canGoBack()
       this.previewState.canGoForward = view.webContents.navigationHistory.canGoForward()

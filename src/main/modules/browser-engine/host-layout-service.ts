@@ -3,7 +3,6 @@ import { BrowserView, BrowserWindow, WebContentsView } from 'electron'
 import { type BrowserBoundsSyncMode, type BrowserHostKind, type BrowserHostView, type BrowserRect } from './host-types'
 
 const HOST_BORDER_RADIUS = 18
-const HOST_TRANSPARENT_BG = '#00000000'
 
 export class BrowserHostLayoutService {
   private appliedBoundsByView = new WeakMap<BrowserHostView, string>()
@@ -36,11 +35,6 @@ export class BrowserHostLayoutService {
     const view = this.browserHostKind === 'webContentsView'
       ? new WebContentsView(options)
       : new BrowserView(options)
-    try {
-      view.setBackgroundColor(HOST_TRANSPARENT_BG)
-    } catch {
-      // ignore background color failures
-    }
     if ('setBorderRadius' in view && typeof view.setBorderRadius === 'function') {
       try {
         view.setBorderRadius(HOST_BORDER_RADIUS)

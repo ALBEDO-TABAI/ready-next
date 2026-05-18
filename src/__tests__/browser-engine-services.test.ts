@@ -120,6 +120,11 @@ function createMockView(options?: {
   return { view: view as any, state }
 }
 
+const noopPageBackgroundDeps = {
+  resetPageBackground: () => undefined,
+  syncPageBackground: () => undefined,
+}
+
 describe('BrowserTabShellService', () => {
   it('delegates to createTab when there is no active tab during navigate', async () => {
     const tabs = new Map()
@@ -447,6 +452,7 @@ describe('BrowserTabLifecycleService', () => {
       isAllowedUrl: () => true,
       extractDomain: (url) => new URL(url).hostname,
       createHost: () => next.view as any,
+      ...noopPageBackgroundDeps,
       applyBounds: () => {
         events.push('apply')
       },
@@ -497,6 +503,7 @@ describe('BrowserTabLifecycleService', () => {
       isAllowedUrl: () => true,
       extractDomain: (url) => new URL(url).hostname,
       createHost: () => next.view,
+      ...noopPageBackgroundDeps,
       applyBounds: () => undefined,
       detachHost: () => undefined,
       showHost: () => undefined,
@@ -540,6 +547,7 @@ describe('BrowserTabLifecycleService', () => {
       isAllowedUrl: () => true,
       extractDomain: () => '',
       createHost: () => next.view,
+      ...noopPageBackgroundDeps,
       applyBounds: () => undefined,
       detachHost: () => undefined,
       showHost: () => undefined,
@@ -576,6 +584,7 @@ describe('BrowserPreviewService', () => {
         requestedPartitions.push(partition)
         return mock.view as any
       },
+      ...noopPageBackgroundDeps,
       showHost: () => undefined,
       hideHost: () => undefined,
       detachHost: () => undefined,
@@ -603,6 +612,7 @@ describe('BrowserPreviewService', () => {
       useMock: false,
       browserUserAgent: 'ready-test',
       createHost: () => mock.view as any,
+      ...noopPageBackgroundDeps,
       showHost: () => undefined,
       hideHost: () => undefined,
       detachHost: () => undefined,
@@ -633,6 +643,7 @@ describe('BrowserPreviewService', () => {
       useMock: false,
       browserUserAgent: 'ready-test',
       createHost: () => mock.view as any,
+      ...noopPageBackgroundDeps,
       showHost: () => {
         events.push('show')
       },
@@ -667,6 +678,7 @@ describe('BrowserPreviewService', () => {
       useMock: false,
       browserUserAgent: 'ready-test',
       createHost: () => mock.view as any,
+      ...noopPageBackgroundDeps,
       showHost: () => undefined,
       hideHost: () => undefined,
       detachHost: () => undefined,
@@ -698,6 +710,7 @@ describe('BrowserPreviewService', () => {
       useMock: false,
       browserUserAgent: 'ready-test',
       createHost: () => mock.view as any,
+      ...noopPageBackgroundDeps,
       showHost: () => undefined,
       hideHost: () => undefined,
       detachHost: () => undefined,

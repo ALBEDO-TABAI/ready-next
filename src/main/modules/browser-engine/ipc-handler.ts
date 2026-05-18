@@ -51,6 +51,7 @@ import { setupBrowserContentStudyIPC } from './ipc-content-study-dragged-tab'
 import { setupBrowserDataIPC } from './ipc-data'
 import { setupBrowserShellIPC } from './ipc-shell'
 import { BrowserPreviewService } from './preview-service'
+import { BrowserPageBackgroundService } from './page-background-service'
 import { BrowserSessionPolicyService } from './session-policy-service'
 import { BrowserTabLifecycleService } from './tab-lifecycle-service'
 import { type BrowserTabMetaRecord, BrowserTabMetaService } from './tab-meta-service'
@@ -121,6 +122,7 @@ export class BrowserController {
   private readonly contextMenuService: BrowserContextMenuService
   private readonly bookmarkTransferService: BrowserBookmarkTransferService
   private readonly hostLayoutService: BrowserHostLayoutService
+  private readonly pageBackgroundService: BrowserPageBackgroundService
   private readonly automationService: BrowserAutomationService
   private readonly capabilityService: BrowserCapabilityService
   private readonly contentTaskRunner: BrowserContentTaskRunner
@@ -144,6 +146,7 @@ export class BrowserController {
     })
     this.diagnosticsService = new BrowserDiagnosticsService()
     this.hostLayoutService = new BrowserHostLayoutService(mainWindow, this.browserHostKind)
+    this.pageBackgroundService = new BrowserPageBackgroundService((message) => this.logBrowserDiag(message))
     this.appShortcutBridgeService = new BrowserAppShortcutBridgeService({
       sendToRenderer: (channel, data) => this.sendToRenderer(channel, data),
     })
@@ -176,6 +179,8 @@ export class BrowserController {
       useMock: this.useMock,
       browserUserAgent: this.browserUserAgent,
       createHost: (partition) => this.createHost(partition),
+      resetPageBackground: (view) => this.pageBackgroundService.reset(view),
+      syncPageBackground: (view) => this.pageBackgroundService.sync(view),
       showHost: (view, bounds) => this.showHost(view, bounds),
       hideHost: (view) => this.hideHost(view),
       detachHost: (view) => this.detachHost(view),
@@ -228,6 +233,8 @@ export class BrowserController {
       isAllowedUrl: (url) => isAllowedBrowserURL(url, { allowLocalHtml: true }),
       extractDomain: (url) => extractBrowserDomain(url),
       createHost: (partition) => this.createHost(partition),
+      resetPageBackground: (view) => this.pageBackgroundService.reset(view),
+      syncPageBackground: (view) => this.pageBackgroundService.sync(view),
       applyBounds: (view) => this.applyBounds(view, 'settled'),
       detachHost: (view) => this.detachHost(view),
       showHost: (view, bounds) => this.showHost(view, bounds),
@@ -369,7 +376,9 @@ export class BrowserController {
   }
 
   private createHost(partition: string): BrowserHostView {
-    return this.hostLayoutService.createHost(partition)
+    const view = this.hostLayoutService.createHost(partition)
+    this.pageBackgroundService.reset(view)
+    return view
   }
 
   detachHost(view: BrowserHostView): void {

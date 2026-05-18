@@ -49,6 +49,8 @@ interface BrowserTabLifecycleHost {
   isAllowedUrl(url: string): boolean
   extractDomain(url: string): string
   createHost(partition: string): BrowserHostView
+  resetPageBackground(view: BrowserHostView): void
+  syncPageBackground(view: BrowserHostView): void
   applyBounds(view: BrowserHostView): void
   detachHost(view: BrowserHostView): void
   showHost(view: BrowserHostView, bounds: BrowserRect): void
@@ -183,6 +185,7 @@ export class BrowserTabLifecycleService {
   private bindTabEvents(tabId: string, tab: BrowserLifecycleTabRecord, view: BrowserHostView): void {
     view.webContents.on('dom-ready', () => {
       applyRoundedViewport(view)
+      this.host.syncPageBackground(view)
     })
 
     view.webContents.on('page-title-updated', (_event, title) => {
@@ -214,6 +217,7 @@ export class BrowserTabLifecycleService {
         }
       }
       this.emitNavigationState(tabId, tab, view, newUrl)
+      this.host.syncPageBackground(view)
     })
 
     view.webContents.on('did-navigate-in-page', (_event, newUrl) => {
@@ -223,15 +227,18 @@ export class BrowserTabLifecycleService {
       tab.canGoForward = view.webContents.navigationHistory.canGoForward()
       tab.error = null
       this.emitNavigationState(tabId, tab, view, newUrl)
+      this.host.syncPageBackground(view)
     })
 
     view.webContents.on('did-start-loading', () => {
+      this.host.resetPageBackground(view)
       tab.loading = true
       this.host.sendToRenderer('browser:tabUpdate', { type: 'loading', tabId, loading: true })
     })
 
     view.webContents.on('did-stop-loading', () => {
       applyRoundedViewport(view)
+      this.host.syncPageBackground(view)
       tab.loading = false
       tab.canGoBack = view.webContents.navigationHistory.canGoBack()
       tab.canGoForward = view.webContents.navigationHistory.canGoForward()
