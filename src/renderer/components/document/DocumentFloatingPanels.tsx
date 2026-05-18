@@ -6,9 +6,9 @@ import {
   ListTree,
   Pencil,
   Plus,
-  RefreshCw,
   StickyNote,
   Trash2,
+  X,
 } from 'lucide-react'
 import {
   buildDocumentOutline,
@@ -23,6 +23,7 @@ import {
 import './documentFloatingPanels.css'
 
 type MarkTab = 'bookmark' | 'note'
+const PANEL_EXIT_ANIMATION_MS = 180
 
 interface DocumentFloatingPanelsProps {
   documentPath: string | null
@@ -181,6 +182,40 @@ export default function DocumentFloatingPanels({
   const [groupName, setGroupName] = useState('默认')
   const [noteDraft, setNoteDraft] = useState('')
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set())
+  const [outlinePanelRendered, setOutlinePanelRendered] = useState(outlineOpen)
+  const [outlinePanelClosing, setOutlinePanelClosing] = useState(false)
+  const [marksPanelRendered, setMarksPanelRendered] = useState(marksOpen)
+  const [marksPanelClosing, setMarksPanelClosing] = useState(false)
+
+  useEffect(() => {
+    if (outlineOpen) {
+      setOutlinePanelRendered(true)
+      setOutlinePanelClosing(false)
+      return undefined
+    }
+    if (!outlinePanelRendered) return undefined
+    setOutlinePanelClosing(true)
+    const timer = window.setTimeout(() => {
+      setOutlinePanelRendered(false)
+      setOutlinePanelClosing(false)
+    }, PANEL_EXIT_ANIMATION_MS)
+    return () => window.clearTimeout(timer)
+  }, [outlineOpen, outlinePanelRendered])
+
+  useEffect(() => {
+    if (marksOpen) {
+      setMarksPanelRendered(true)
+      setMarksPanelClosing(false)
+      return undefined
+    }
+    if (!marksPanelRendered) return undefined
+    setMarksPanelClosing(true)
+    const timer = window.setTimeout(() => {
+      setMarksPanelRendered(false)
+      setMarksPanelClosing(false)
+    }, PANEL_EXIT_ANIMATION_MS)
+    return () => window.clearTimeout(timer)
+  }, [marksOpen, marksPanelRendered])
 
   useEffect(() => {
     setOutlineLoading(true)
@@ -308,8 +343,11 @@ export default function DocumentFloatingPanels({
         />
       )}
 
-      {outlineOpen && (
-        <aside className="document-floating-panel document-floating-panel--left" aria-label="内容速览">
+      {outlinePanelRendered && (
+        <aside
+          className={`document-floating-panel document-floating-panel--left${outlinePanelClosing ? ' is-closing' : ''}`}
+          aria-label="内容速览"
+        >
           <header className="document-floating-panel__header">
             <div>
               <div className="document-floating-panel__title">内容速览</div>
@@ -317,14 +355,17 @@ export default function DocumentFloatingPanels({
                 {outline.lineCount} 行 · {outline.wordCount} 字符点
               </div>
             </div>
-            <button
-              type="button"
-              className="document-floating-icon-button"
-              onClick={() => setOutline(buildDocumentOutline(content))}
-              title="刷新速览"
-            >
-              <RefreshCw className={`h-[14px] w-[14px]${outlineLoading ? ' animate-spin' : ''}`} strokeWidth={1.8} />
-            </button>
+            <div className="document-floating-panel__header-actions">
+              <button
+                type="button"
+                className="document-floating-icon-button"
+                onClick={onToggleOutline}
+                title="收回内容速览"
+                aria-label="收回内容速览"
+              >
+                <X className="h-[14px] w-[14px]" strokeWidth={1.8} />
+              </button>
+            </div>
           </header>
           <div className="document-floating-panel__body">
             {outlineLoading && (
@@ -346,14 +387,28 @@ export default function DocumentFloatingPanels({
         </aside>
       )}
 
-      {marksOpen && (
-        <aside className="document-floating-panel document-floating-panel--right" aria-label="书签和笔记">
+      {marksPanelRendered && (
+        <aside
+          className={`document-floating-panel document-floating-panel--right${marksPanelClosing ? ' is-closing' : ''}`}
+          aria-label="书签和笔记"
+        >
           <header className="document-floating-panel__header">
             <div>
               <div className="document-floating-panel__title">书签 / 笔记</div>
               <div className="document-floating-panel__hint">
                 {documentPath ? '跟随当前文档保存' : '保存前需打开本地文档'}
               </div>
+            </div>
+            <div className="document-floating-panel__header-actions">
+              <button
+                type="button"
+                className="document-floating-icon-button"
+                onClick={onToggleMarks}
+                title="收回书签和笔记"
+                aria-label="收回书签和笔记"
+              >
+                <X className="h-[14px] w-[14px]" strokeWidth={1.8} />
+              </button>
             </div>
           </header>
 

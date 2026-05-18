@@ -85,6 +85,7 @@ interface MarkdownEditorProps {
   viewMode?: 'edit' | 'preview'
   previewFocusWidgetTitle?: string | null
   onVisibleLineChange?: (line: number | null) => void
+  onActivate?: () => void
 }
 
 function escapeHtmlAttr(value: string): string {
@@ -198,6 +199,7 @@ export default function MarkdownEditor({
   viewMode = 'edit',
   previewFocusWidgetTitle,
   onVisibleLineChange,
+  onActivate,
 }: MarkdownEditorProps) {
   const { updateTabContent, markTabSaved, pendingReveal, setPendingReveal } = useDocTabs()
   const [isLoading, setIsLoading] = useState(!!tab.path)
@@ -365,6 +367,23 @@ export default function MarkdownEditor({
     setSaveState('idle')
   }, [tab.id, updateTabContent])
 
+  const emitVisibleLine = useCallback((line: number | null) => {
+    if (!onVisibleLineChange) return
+    if (visibleLineFrameRef.current !== null) {
+      window.cancelAnimationFrame(visibleLineFrameRef.current)
+    }
+    visibleLineFrameRef.current = window.requestAnimationFrame(() => {
+      visibleLineFrameRef.current = null
+      onVisibleLineChange(line)
+    })
+  }, [onVisibleLineChange])
+
+  const emitCaretLine = useCallback(() => {
+    const rawEditor = rawEditorRef.current
+    if (!rawEditor) return
+    emitVisibleLine(Math.max(1, rawEditor.value.slice(0, rawEditor.selectionStart).split('\n').length))
+  }, [emitVisibleLine])
+
   // ─── Selection tracking for floating toolbar ───────────────
   const refreshSelectionRange = useCallback(() => {
     const ta = rawEditorRef.current
@@ -379,9 +398,32 @@ export default function MarkdownEditor({
     setSelectionRange({ start, end })
   }, [])
 
+  const handleEditorKeyUp = useCallback(() => {
+    onActivate?.()
+    refreshSelectionRange()
+    emitCaretLine()
+  }, [emitCaretLine, onActivate, refreshSelectionRange])
+
+  const handleEditorSelect = useCallback(() => {
+    onActivate?.()
+    refreshSelectionRange()
+    emitCaretLine()
+  }, [emitCaretLine, onActivate, refreshSelectionRange])
+
+  const handleEditorFocus = useCallback(() => {
+    onActivate?.()
+    emitCaretLine()
+  }, [emitCaretLine, onActivate])
+
+  const handleSurfacePointerDown = useCallback(() => {
+    onActivate?.()
+  }, [onActivate])
+
   const handleEditorMouseUp = useCallback((e: React.MouseEvent<HTMLTextAreaElement>) => {
     const ta = rawEditorRef.current
     if (!ta) return
+    onActivate?.()
+    emitCaretLine()
     const start = ta.selectionStart
     const end = ta.selectionEnd
     if (start === end) {
@@ -391,7 +433,7 @@ export default function MarkdownEditor({
     }
     setSelectionRange({ start, end })
     setSelectionAnchor({ x: e.clientX, y: e.clientY })
-  }, [])
+  }, [emitCaretLine, onActivate])
 
   const handleEditorBlur = useCallback((e: React.FocusEvent<HTMLTextAreaElement>) => {
     const next = e.relatedTarget as HTMLElement | null
@@ -551,28 +593,19 @@ export default function MarkdownEditor({
     }))
   }, [])
 
-  const emitVisibleLine = useCallback((line: number | null) => {
-    if (!onVisibleLineChange) return
-    if (visibleLineFrameRef.current !== null) {
-      window.cancelAnimationFrame(visibleLineFrameRef.current)
-    }
-    visibleLineFrameRef.current = window.requestAnimationFrame(() => {
-      visibleLineFrameRef.current = null
-      onVisibleLineChange(line)
-    })
-  }, [onVisibleLineChange])
-
   const handleEditorSurfaceScroll = useCallback(() => {
     const surface = editorSurfaceRef.current
     const rawEditor = rawEditorRef.current
     if (!surface || !rawEditor) return
+    onActivate?.()
     const lineHeight = estimateTextareaLineHeight(rawEditor)
     emitVisibleLine(Math.max(1, Math.floor(surface.scrollTop / lineHeight) + 1))
-  }, [emitVisibleLine])
+  }, [emitVisibleLine, onActivate])
 
   const handlePreviewSurfaceScroll = useCallback(() => {
     const surface = previewSurfaceRef.current
     if (!surface) return
+    onActivate?.()
     const headings = Array.from(surface.querySelectorAll<HTMLElement>('[data-ready-heading-title]'))
     if (headings.length === 0) {
       const maxScroll = Math.max(1, surface.scrollHeight - surface.clientHeight)
@@ -607,7 +640,7 @@ export default function MarkdownEditor({
       item.anchorOrdinal === ordinal
     ))
     emitVisibleLine(node?.lineStart ?? 1)
-  }, [emitVisibleLine, outlineForVisibility])
+  }, [emitVisibleLine, onActivate, outlineForVisibility])
 
   useEffect(() => () => {
     if (visibleLineFrameRef.current !== null) {
@@ -721,6 +754,7 @@ export default function MarkdownEditor({
               onContextMenu={handleContextMenu}
               onDragOver={handleEditorDragOver}
               onDrop={handleEditorDrop}
+              onPointerDownCapture={handleSurfacePointerDown}
               onScroll={handleEditorSurfaceScroll}
             >
               <div className="document-editor-layout" style={{ padding: '12px 40px 24px', maxWidth: 800, margin: '0 auto' }}>
@@ -733,8 +767,9 @@ export default function MarkdownEditor({
                       value={tab.content}
                       onChange={handleRawEditorChange}
                       onMouseUp={handleEditorMouseUp}
-                      onKeyUp={refreshSelectionRange}
-                      onSelect={refreshSelectionRange}
+                      onKeyUp={handleEditorKeyUp}
+                      onSelect={handleEditorSelect}
+                      onFocus={handleEditorFocus}
                       onBlur={handleEditorBlur}
                       spellCheck={false}
                       aria-label="Markdown source editor"
@@ -766,6 +801,7 @@ export default function MarkdownEditor({
               className="panel-hover-scrollbar document-preview-surface flex-1 overflow-auto"
               style={{ background: 'var(--workbench-module-surface-bg)' }}
               onContextMenu={handleContextMenu}
+              onPointerDownCapture={handleSurfacePointerDown}
               onScroll={handlePreviewSurfaceScroll}
             >
               <div className="document-preview-layout" style={{ padding: '12px 40px 24px', maxWidth: 800, margin: '0 auto' }}>

@@ -230,11 +230,13 @@ function DocumentEditor({
   viewMode,
   previewFocusWidgetTitle,
   onVisibleLineChange,
+  onActivate,
 }: {
   tab: DocTab
   viewMode: 'edit' | 'preview'
   previewFocusWidgetTitle?: string | null
   onVisibleLineChange?: (line: number | null) => void
+  onActivate?: () => void
 }) {
   const ext = useMemo(() => getFileExt(tab.path), [tab.path])
   const isImage = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext)
@@ -262,6 +264,7 @@ function DocumentEditor({
       viewMode={viewMode}
       previewFocusWidgetTitle={previewFocusWidgetTitle}
       onVisibleLineChange={onVisibleLineChange}
+      onActivate={onActivate}
     />
   )
 }
@@ -294,7 +297,8 @@ export default function DocumentMode({
   const [hasActivated, setHasActivated] = useState(isActive)
   const [outlinePanelOpen, setOutlinePanelOpen] = useState(() => readDocumentPanelOpenState('ready-document-outline-panel-open'))
   const [marksPanelOpen, setMarksPanelOpen] = useState(() => readDocumentPanelOpenState('ready-document-marks-panel-open'))
-  const [activeDocumentLine, setActiveDocumentLine] = useState<number | null>(null)
+  const [panelTargetTabId, setPanelTargetTabId] = useState<string | null>(activeTabId)
+  const [visibleLineByTabId, setVisibleLineByTabId] = useState<Record<string, number | null>>({})
 
   useEffect(() => {
     if (isActive) {
@@ -352,6 +356,11 @@ export default function DocumentMode({
   const activeTab = tabs.find(t => t.id === activeTabId)
   const splitTab = splitTabId ? tabs.find(t => t.id === splitTabId) : null
   const activeTabPathLabel = activeTab?.path || activeTab?.title || '未打开文档'
+  const panelTargetTab = useMemo(() => {
+    const visibleTabs = [activeTab, splitTab].filter((tab): tab is DocTab => Boolean(tab))
+    return visibleTabs.find((tab) => tab.id === panelTargetTabId) || activeTab || splitTab || null
+  }, [activeTab, panelTargetTabId, splitTab])
+  const panelTargetLine = panelTargetTab ? visibleLineByTabId[panelTargetTab.id] ?? null : null
   const tabByScrollKey = useMemo(() => {
     const next = new Map<string, DocTab>()
     tabs.forEach((tab) => next.set(tab.path || tab.id, tab))
@@ -359,8 +368,25 @@ export default function DocumentMode({
   }, [tabs])
 
   useEffect(() => {
-    setActiveDocumentLine(null)
-  }, [activeTabId])
+    const visibleIds = [activeTab?.id, splitTab?.id].filter((id): id is string => Boolean(id))
+    setPanelTargetTabId((current) => (current && visibleIds.includes(current) ? current : activeTab?.id ?? splitTab?.id ?? null))
+  }, [activeTab?.id, splitTab?.id])
+
+  useEffect(() => {
+    const openIds = new Set(tabs.map((tab) => tab.id))
+    setVisibleLineByTabId((current) => {
+      const next: Record<string, number | null> = {}
+      let changed = false
+      Object.entries(current).forEach(([id, line]) => {
+        if (openIds.has(id)) {
+          next[id] = line
+        } else {
+          changed = true
+        }
+      })
+      return changed ? next : current
+    })
+  }, [tabs])
 
   const refreshCleanTextTabsFromDisk = useCallback(async (candidateTabs: DocTab[]) => {
     if (!window.electronAPI?.document?.readFile) return
@@ -431,22 +457,34 @@ export default function DocumentMode({
   }, [captureVisibleDocumentScrollPositions, editorMode])
 
   const handlePanelReveal = useCallback((lineStart: number, lineEnd?: number | null) => {
-    if (!activeTab?.path) return
+    if (!panelTargetTab?.path) return
     setPendingReveal({
-      path: activeTab.path,
+      path: panelTargetTab.path,
       lineStart,
       lineEnd: lineEnd ?? lineStart,
       requestedAt: Date.now(),
     })
-  }, [activeTab?.path, setPendingReveal])
+  }, [panelTargetTab?.path, setPendingReveal])
+
+  const handlePanelTargetLineChange = useCallback((tabId: string, line: number | null) => {
+    setVisibleLineByTabId((current) => (
+      current[tabId] === line ? current : { ...current, [tabId]: line }
+    ))
+  }, [])
+
+  const handlePaneActivate = useCallback((tabId: string) => {
+    setPanelTargetTabId(tabId)
+  }, [])
 
   // Tab click handler
   const handleTabClick = useCallback((id: string, e: React.MouseEvent) => {
     captureVisibleDocumentScrollPositions()
     if (e.shiftKey && id !== activeTabId) {
       setSplitTab(id)
+      setPanelTargetTabId(id)
     } else {
       setActiveTab(id)
+      setPanelTargetTabId(id)
     }
   }, [activeTabId, captureVisibleDocumentScrollPositions, setActiveTab, setSplitTab])
 
@@ -605,36 +643,50 @@ export default function DocumentMode({
                   ref={primarySplitPaneRef}
                   className="flex flex-col min-w-0 overflow-hidden"
                   style={{ flexBasis: `${documentSplitRatio}%`, flexShrink: 0, flexGrow: 0 }}
+                  onFocusCapture={() => handlePaneActivate(activeTab.id)}
+                  onPointerDownCapture={() => handlePaneActivate(activeTab.id)}
                 >
                   <DocumentEditor
                     key={activeTab.id}
                     tab={activeTab}
                     viewMode={editorMode}
                     previewFocusWidgetTitle={previewFocusWidgetTitle}
-                    onVisibleLineChange={setActiveDocumentLine}
+                    onVisibleLineChange={(line) => handlePanelTargetLineChange(activeTab.id, line)}
+                    onActivate={() => handlePaneActivate(activeTab.id)}
                   />
                 </div>
                 <SplitResizeHandle
                   onResize={handleSplitResize}
                   onResizeStateChange={handleSplitResizeStateChange}
                 />
-                <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+                <div
+                  className="flex-1 flex flex-col min-w-0 overflow-hidden"
+                  onFocusCapture={() => handlePaneActivate(splitTab.id)}
+                  onPointerDownCapture={() => handlePaneActivate(splitTab.id)}
+                >
                   <DocumentEditor
                     key={splitTab.id}
                     tab={splitTab}
                     viewMode={editorMode}
                     previewFocusWidgetTitle={previewFocusWidgetTitle}
+                    onVisibleLineChange={(line) => handlePanelTargetLineChange(splitTab.id, line)}
+                    onActivate={() => handlePaneActivate(splitTab.id)}
                   />
                 </div>
               </div>
             ) : activeTab ? (
-              <div className="h-full flex flex-col min-w-0 overflow-hidden">
+              <div
+                className="h-full flex flex-col min-w-0 overflow-hidden"
+                onFocusCapture={() => handlePaneActivate(activeTab.id)}
+                onPointerDownCapture={() => handlePaneActivate(activeTab.id)}
+              >
                 <DocumentEditor
                   key={activeTab.id}
                   tab={activeTab}
                   viewMode={editorMode}
                   previewFocusWidgetTitle={previewFocusWidgetTitle}
-                  onVisibleLineChange={setActiveDocumentLine}
+                  onVisibleLineChange={(line) => handlePanelTargetLineChange(activeTab.id, line)}
+                  onActivate={() => handlePaneActivate(activeTab.id)}
                 />
               </div>
             ) : (
@@ -646,12 +698,12 @@ export default function DocumentMode({
               </div>
             )}
 
-            {activeTab && (
+            {panelTargetTab && (
               <DocumentFloatingPanels
-                documentPath={activeTab.path}
-                documentTitle={activeTab.title}
-                content={activeTab.content}
-                activeLine={activeDocumentLine}
+                documentPath={panelTargetTab.path}
+                documentTitle={panelTargetTab.title}
+                content={panelTargetTab.content}
+                activeLine={panelTargetLine}
                 outlineOpen={outlinePanelOpen}
                 marksOpen={marksPanelOpen}
                 onToggleOutline={() => setOutlinePanelOpen((value) => !value)}
