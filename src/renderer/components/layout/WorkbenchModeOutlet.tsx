@@ -126,10 +126,12 @@ function resolveVisualState(
 
 export default function WorkbenchModeOutlet({
   mode,
+  mountedModes = ALL_WORKBENCH_MODES,
   isMotionSettled = true,
   browserLayoutPhase = null,
 }: {
   mode: WorkbenchMode
+  mountedModes?: WorkbenchMode[]
   isMotionSettled?: boolean
   browserLayoutPhase?: BrowserHostLayoutPhase | null
 }) {
@@ -178,7 +180,7 @@ export default function WorkbenchModeOutlet({
         background: 'transparent',
       }}
     >
-      {ALL_WORKBENCH_MODES.map((modeKey) => {
+      {mountedModes.map((modeKey) => {
         const visualState = resolveVisualState(modeKey, runtime)
         return (
           <ModeScene
@@ -195,4 +197,3 @@ export default function WorkbenchModeOutlet({
     </div>
   )
 }
-

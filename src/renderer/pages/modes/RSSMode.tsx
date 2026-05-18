@@ -15,7 +15,10 @@ import {
   WORKBENCH_SUPPORT_PANEL_WIDTH,
 } from '../../modules/workbench/chrome'
 import { useBrowserTabs } from '../../stores/useBrowserTabs'
+import { useMode } from '../../stores/useMode'
 import { useRSSSession } from '../../stores/useRSSSession'
+import { isWorkbenchModePairActive } from '../../modules/workbench/mode-split'
+import { openRSSItemInBrowserTab } from '../../modules/rss/open-rss-item-in-browser'
 import type { RSSItem, RSSSource } from '../../components/rss/RSSFeed'
 import type { AddSourceSuccessInfo } from '../../components/rss/AddSourceModal'
 import type { RSSBrowserOpenActionData } from '../../modules/rss/types'
@@ -92,6 +95,8 @@ export default function RSSMode({
   const setLastAnalysis = useRSSSession((state) => state.setLastAnalysis)
   const browserTabs = useBrowserTabs((state) => state.tabs)
   const activeBrowserTabId = useBrowserTabs((state) => state.activeTabId)
+  const workbenchMode = useMode((state) => state.workbenchMode)
+  const splitMode = useMode((state) => state.splitMode)
   const selectedSource = selectedSourceId
   const [items, setItems] = useState<RSSItem[]>(() => initialWarmCache?.items || [])
   const [sources, setSources] = useState<RSSSource[]>(() => initialWarmCache?.sources || [])
@@ -129,6 +134,12 @@ export default function RSSMode({
     const label = activeBrowserTab.title?.trim() || activeBrowserTab.domain?.trim() || activeBrowserTab.url
     return `当前页：${label}`
   }, [activeBrowserTab])
+  const shouldOpenItemsInBrowserPane = isWorkbenchModePairActive({
+    workbenchMode,
+    splitMode,
+    firstMode: 'browser',
+    secondMode: 'rss',
+  })
 
   const computeUnreadCounts = useCallback((list: RSSItem[]) => {
     const counts = new Map<string, number>()
@@ -416,7 +427,14 @@ export default function RSSMode({
   }, [activeBrowserPageLabel, activeBrowserTab])
 
   const handleItemClick = useCallback((item: RSSItem) => {
-    setSelectedItem(item)
+    if (shouldOpenItemsInBrowserPane) {
+      setSelectedItem(null)
+      void openRSSItemInBrowserTab(item).then((opened) => {
+        if (!opened) setSelectedItem(item)
+      })
+    } else {
+      setSelectedItem(item)
+    }
     // Mark as read locally
     setItems((prev) => {
       const next = prev.map((i) => (i.id === item.id ? { ...i, read: true } : i))
@@ -438,7 +456,7 @@ export default function RSSMode({
     if (typeof window !== 'undefined' && window.electronAPI) {
       window.electronAPI.rss.markRead(item.id)
     }
-  }, [computeUnreadCounts])
+  }, [computeUnreadCounts, shouldOpenItemsInBrowserPane])
 
   const handleToggleStar = useCallback((itemId: string) => {
     setItems(prev => {

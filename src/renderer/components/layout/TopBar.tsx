@@ -14,6 +14,7 @@ import {
   WORKBENCH_TOPBAR_PADDING_LEFT,
   WORKBENCH_TOPBAR_PADDING_RIGHT,
 } from '../../modules/workbench/chrome'
+import { resolveWorkbenchSplitToggle } from '../../modules/workbench/mode-split'
 
 interface TopBarProps {
   onToggleChatPanel?: () => void
@@ -21,7 +22,7 @@ interface TopBarProps {
 }
 
 export default function TopBar({ onToggleChatPanel, onWorkbenchModeChange }: TopBarProps) {
-  const { appMode, workbenchMode, setWorkbenchMode } = useMode()
+  const { appMode, workbenchMode, splitMode, setWorkbenchMode, setSplitMode } = useMode()
   const { modalProps, showAlert } = useModal()
   const { resolvedTheme, toggleTheme } = useTheme()
   const chatPanelVisible = useWorkspace((state) => state.chatPanelVisible)
@@ -36,6 +37,14 @@ export default function TopBar({ onToggleChatPanel, onWorkbenchModeChange }: Top
     }
     setWorkbenchMode(mode)
   }, [onWorkbenchModeChange, setWorkbenchMode])
+
+  const handleSplitModeToggle = useCallback((mode: WorkbenchMode) => {
+    setSplitMode(resolveWorkbenchSplitToggle({
+      workbenchMode,
+      splitMode,
+      requestedMode: mode,
+    }))
+  }, [setSplitMode, splitMode, workbenchMode])
 
   return (
     <div
@@ -56,7 +65,9 @@ export default function TopBar({ onToggleChatPanel, onWorkbenchModeChange }: Top
         {appMode === 'workbench' && (
           <DraggableModeTabs
             activeMode={workbenchMode}
+            splitMode={splitMode}
             onChange={handleModeChange}
+            onSplitToggle={handleSplitModeToggle}
           />
         )}
       </div>

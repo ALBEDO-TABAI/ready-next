@@ -1703,6 +1703,51 @@ html[data-theme='dark'] .ready-app-bg::after {
   opacity: 0.94;
 }
 
+.workbench-split-resize-handle {
+  width: 3.5px;
+  flex: 0 0 3.5px;
+  cursor: col-resize;
+  position: relative;
+  align-self: stretch;
+  z-index: 12;
+  background: transparent;
+}
+
+.workbench-split-resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -10px;
+  right: -10px;
+}
+
+.workbench-split-resize-handle__grip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  grid-template-columns: repeat(2, 2px);
+  grid-auto-rows: 2px;
+  gap: 4px 3px;
+  transform: translate(-50%, -50%);
+  opacity: 0.28;
+  transition: opacity 0.15s, transform 0.15s;
+}
+
+.workbench-split-resize-handle__grip span {
+  width: 2px;
+  height: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-gray) 46%, transparent);
+}
+
+.workbench-split-resize-handle:hover .workbench-split-resize-handle__grip,
+body.resizing .workbench-split-resize-handle__grip {
+  opacity: 0.48;
+  transform: translate(-50%, -50%) scale(1.08);
+}
+
 .document-split-resize-handle {
   width: 12px;
   flex: 0 0 12px;
@@ -2917,7 +2962,7 @@ html[data-skin='liquid-glass'] .icon-rail-slider__thumb {
   position: absolute;
   top: 2px;
   left: 2px;
-  width: calc((100% - 4px) / 4);
+  width: calc(((100% - 4px) / 4) * var(--dmt-thumb-span, 1));
   height: calc(100% - 4px);
   border-radius: 12px;
   z-index: 2;
@@ -2940,6 +2985,11 @@ html[data-skin='liquid-glass'] .icon-rail-slider__thumb {
     inset 0.3px 0 0.5px rgba(255, 255, 255, 0.6),
     inset -0.3px 0 0.5px rgba(255, 255, 255, 0.6);
   border: 0.3px solid rgba(255, 255, 255, 0.8);
+  transform: translateX(calc(var(--dmt-thumb-pos, 0) * (100% / var(--dmt-thumb-span, 1))));
+  transition:
+    width 420ms cubic-bezier(0.18, 1.22, 0.24, 1),
+    opacity 140ms ease,
+    box-shadow 140ms ease;
   will-change: transform;
   touch-action: pan-y;
 }
@@ -2984,6 +3034,13 @@ html[data-skin='liquid-glass'] .icon-rail-slider__thumb {
 
 /* Icon buttons */
 .draggable-mode-tabs__icon {
+  --dmt-thumb-end: calc(var(--dmt-thumb-pos, 0) + var(--dmt-thumb-span, 1) - 1);
+  --dmt-icon-range-distance: max(
+    0,
+    calc(var(--dmt-thumb-pos, 0) - var(--dmt-icon-index, 0)),
+    calc(var(--dmt-icon-index, 0) - var(--dmt-thumb-end))
+  );
+  --dmt-icon-proximity: max(0, calc(1 - var(--dmt-icon-range-distance) * 0.8));
   position: relative;
   z-index: 3;
   flex: 1;
@@ -2995,12 +3052,38 @@ html[data-skin='liquid-glass'] .icon-rail-slider__thumb {
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: opacity 80ms ease, color 80ms ease;
-  will-change: opacity;
+  transform: translateX(calc(var(--dmt-icon-shift, 0) * 100%));
+  opacity: calc(0.4 + var(--dmt-icon-proximity) * 0.6);
+  color: color-mix(
+    in srgb,
+    var(--color-blue, #5B8DEF) calc(max(0, var(--dmt-icon-proximity) - 0.5) * 200%),
+    var(--text-muted, #666)
+  );
+  transition:
+    transform 420ms cubic-bezier(0.2, 1.24, 0.28, 1),
+    opacity 140ms ease,
+    color 160ms ease;
+  will-change: transform, opacity;
 }
 
 .draggable-mode-tabs__icon:focus-visible {
   outline: none;
+}
+
+.draggable-mode-tabs__icon.is-split-active {
+  opacity: 0.96;
+  color: color-mix(in srgb, var(--color-blue, #5B8DEF) 82%, var(--text-muted, #666));
+}
+
+.draggable-mode-tabs__icon.is-split-active::after {
+  content: '';
+  position: absolute;
+  bottom: 5px;
+  width: 3px;
+  height: 3px;
+  border-radius: 999px;
+  background: currentColor;
+  opacity: 0.62;
 }
 
 /* Liquid Glass skin */

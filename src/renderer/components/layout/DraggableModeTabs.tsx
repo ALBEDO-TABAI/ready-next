@@ -1,13 +1,22 @@
-import { useRef, useState, useCallback, useEffect } from 'react'
+import { useRef, useState, useCallback, useEffect, useMemo } from 'react'
 import { Globe, FileText, Rss, Calendar } from 'lucide-react'
 import type { WorkbenchMode } from '../../stores/useMode'
 import '../../styles/workbench-sliders.css'
+import { WORKBENCH_MODE_ORDER } from '../../modules/workbench/mode-split'
+import { resolveWorkbenchModeTabLayout } from '../../modules/workbench/mode-tabs-layout'
 import {
   easeWorkbenchSliderClick,
   WORKBENCH_SLIDER_CLICK_DURATION_MS,
   WORKBENCH_SLIDER_FRAME_STEP,
   WORKBENCH_SLIDER_SPRING,
 } from '../../modules/workbench/slider-motion'
+
+const modeIcons: Record<WorkbenchMode, typeof Globe> = {
+  browser: Globe,
+  document: FileText,
+  rss: Rss,
+  calendar: Calendar,
+}
 
 const modes: { id: WorkbenchMode; icon: typeof Globe }[] = [
   { id: 'browser', icon: Globe },
@@ -18,12 +27,23 @@ const modes: { id: WorkbenchMode; icon: typeof Globe }[] = [
 
 interface DraggableModeTabsProps {
   activeMode: WorkbenchMode
+  splitMode?: WorkbenchMode | null
   onChange: (mode: WorkbenchMode) => void
+  onSplitToggle?: (mode: WorkbenchMode) => void
 }
 
-export default function DraggableModeTabs({ activeMode, onChange }: DraggableModeTabsProps) {
+export default function DraggableModeTabs({
+  activeMode,
+  splitMode = null,
+  onChange,
+  onSplitToggle,
+}: DraggableModeTabsProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const initialIndex = modes.findIndex(m => m.id === activeMode)
+  const tabLayout = useMemo(
+    () => resolveWorkbenchModeTabLayout(activeMode, splitMode),
+    [activeMode, splitMode],
+  )
+  const initialIndex = tabLayout.thumbStart
   const [snapIndex, setSnapIndex] = useState(initialIndex)
   const [isDragging, setIsDragging] = useState(false)
 
@@ -34,18 +54,21 @@ export default function DraggableModeTabs({ activeMode, onChange }: DraggableMod
   const velocityRef = useRef(0)
   const targetRef = useRef(initialIndex)
   const currentRef = useRef(initialIndex)
+  const thumbSpanRef = useRef(tabLayout.thumbSpan)
+  const displayModesRef = useRef(tabLayout.displayModes)
   const isDraggingRef = useRef(false)
   const skipClickAnimationRef = useRef(false)
 
-  const writeThumbPos = useCallback((pos: number) => {
+  const writeThumbMetrics = useCallback((pos: number, span = thumbSpanRef.current) => {
     const el = containerRef.current
     if (!el) return
     el.style.setProperty('--dmt-thumb-pos', String(pos))
+    el.style.setProperty('--dmt-thumb-span', String(span))
   }, [])
 
   useEffect(() => {
-    writeThumbPos(currentRef.current)
-  }, [writeThumbPos])
+    writeThumbMetrics(currentRef.current, thumbSpanRef.current)
+  }, [writeThumbMetrics])
 
   const cancelAnimation = useCallback(() => {
     if (rafRef.current) {
@@ -62,7 +85,7 @@ export default function DraggableModeTabs({ activeMode, onChange }: DraggableMod
 
     if (Math.abs(target - start) < 0.001) {
       currentRef.current = target
-      writeThumbPos(target)
+      writeThumbMetrics(target)
       return
     }
 
@@ -76,11 +99,11 @@ export default function DraggableModeTabs({ activeMode, onChange }: DraggableMod
       const next = start + (target - start) * eased
 
       currentRef.current = next
-      writeThumbPos(next)
+      writeThumbMetrics(next)
 
       if (progress >= 1) {
         currentRef.current = target
-        writeThumbPos(target)
+        writeThumbMetrics(target)
         rafRef.current = null
         return
       }
@@ -89,7 +112,7 @@ export default function DraggableModeTabs({ activeMode, onChange }: DraggableMod
     }
 
     rafRef.current = requestAnimationFrame(animate)
-  }, [cancelAnimation, writeThumbPos])
+  }, [cancelAnimation, writeThumbMetrics])
 
   const startSpringAnimation = useCallback(() => {
     cancelAnimation()
@@ -109,24 +132,26 @@ export default function DraggableModeTabs({ activeMode, onChange }: DraggableMod
       if (Math.abs(target - currentRef.current) < 0.002 && Math.abs(velocityRef.current) < 0.02) {
         currentRef.current = target
         velocityRef.current = 0
-        writeThumbPos(target)
+        writeThumbMetrics(target)
         rafRef.current = null
         return
       }
 
-      writeThumbPos(currentRef.current)
+      writeThumbMetrics(currentRef.current)
       rafRef.current = requestAnimationFrame(animate)
     }
 
     rafRef.current = requestAnimationFrame(animate)
-  }, [cancelAnimation, writeThumbPos])
+  }, [cancelAnimation, writeThumbMetrics])
 
   useEffect(() => {
     if (isDraggingRef.current) return
 
-    const index = modes.findIndex(m => m.id === activeMode)
-    targetRef.current = index
-    setSnapIndex(index)
+    displayModesRef.current = tabLayout.displayModes
+    thumbSpanRef.current = tabLayout.thumbSpan
+    writeThumbMetrics(currentRef.current, tabLayout.thumbSpan)
+    targetRef.current = tabLayout.thumbStart
+    setSnapIndex(tabLayout.activeIndex)
 
     if (skipClickAnimationRef.current) {
       skipClickAnimationRef.current = false
@@ -135,7 +160,7 @@ export default function DraggableModeTabs({ activeMode, onChange }: DraggableMod
     }
 
     startClickAnimation()
-  }, [activeMode, startClickAnimation, startSpringAnimation])
+  }, [activeMode, splitMode, startClickAnimation, startSpringAnimation, tabLayout, writeThumbMetrics])
 
   useEffect(() => {
     return () => {
@@ -168,10 +193,10 @@ export default function DraggableModeTabs({ activeMode, onChange }: DraggableMod
       const deltaPos = deltaX / segmentWidth
 
       let newPos = dragStartPosRef.current + deltaPos
-      newPos = Math.max(0, Math.min(3, newPos))
+      newPos = Math.max(0, Math.min(4 - thumbSpanRef.current, newPos))
 
       currentRef.current = newPos
-      writeThumbPos(newPos)
+      writeThumbMetrics(newPos)
     }
 
     const handleMouseUp = () => {
@@ -182,7 +207,7 @@ export default function DraggableModeTabs({ activeMode, onChange }: DraggableMod
       targetRef.current = nextIndex
       setSnapIndex(nextIndex)
 
-      const newMode = modes[nextIndex].id
+      const newMode = displayModesRef.current[nextIndex] ?? activeMode
       if (newMode !== activeMode) {
         skipClickAnimationRef.current = true
         onChange(newMode)
@@ -198,20 +223,30 @@ export default function DraggableModeTabs({ activeMode, onChange }: DraggableMod
       document.removeEventListener('mousemove', handleMouseMove)
       document.removeEventListener('mouseup', handleMouseUp)
     }
-  }, [isDragging, activeMode, onChange, startSpringAnimation, writeThumbPos])
+  }, [isDragging, activeMode, onChange, startSpringAnimation, writeThumbMetrics])
 
   const handleIconClick = useCallback((index: number, e: React.MouseEvent) => {
     e.stopPropagation()
     if (isDraggingRef.current) return
-    onChange(modes[index].id)
-  }, [onChange])
+    const mode = modes[index].id
+    if (e.shiftKey && onSplitToggle) {
+      onSplitToggle(mode)
+      return
+    }
+    onChange(mode)
+  }, [onChange, onSplitToggle])
 
   return (
     <div
       ref={containerRef}
       className="draggable-mode-tabs"
       data-dragging={isDragging}
-      style={{ ['--dmt-thumb-pos' as string]: String(currentRef.current) }}
+      data-split-active={tabLayout.splitIndex === null ? 'false' : 'true'}
+      data-active-position={snapIndex}
+      style={{
+        ['--dmt-thumb-pos' as string]: String(currentRef.current),
+        ['--dmt-thumb-span' as string]: String(thumbSpanRef.current),
+      }}
     >
       <div className="draggable-mode-tabs__track" />
 
@@ -223,15 +258,23 @@ export default function DraggableModeTabs({ activeMode, onChange }: DraggableMod
         <div className="draggable-mode-tabs__thumb-glow" />
       </div>
 
-      {modes.map((mode, index) => {
-        const Icon = mode.icon
+      {WORKBENCH_MODE_ORDER.map((modeId, index) => {
+        const Icon = modeIcons[modeId]
+        const mode = { id: modeId, icon: Icon }
+        const visualIndex = tabLayout.visualIndexByMode[mode.id]
+        const isPrimaryActive = activeMode === mode.id
+        const isSplitActive = splitMode === mode.id
         return (
           <button
             key={mode.id}
             type="button"
-            className={`draggable-mode-tabs__icon ${snapIndex === index ? 'is-active' : ''}`}
+            className={`draggable-mode-tabs__icon ${isPrimaryActive ? 'is-active' : ''} ${isSplitActive ? 'is-split-active' : ''}`}
             data-mode={mode.id}
-            style={{ ['--dmt-icon-index' as string]: String(index) }}
+            data-split-active={isSplitActive ? 'true' : undefined}
+            style={{
+              ['--dmt-icon-index' as string]: String(visualIndex),
+              ['--dmt-icon-shift' as string]: String(visualIndex - index),
+            }}
             onMouseDown={(e) => e.stopPropagation()}
             onClick={(e) => handleIconClick(index, e)}
             title={mode.id}

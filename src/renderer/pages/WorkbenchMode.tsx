@@ -79,6 +79,34 @@ function ResizeHandle({
   )
 }
 
+function WorkbenchSplitResizeHandle({
+  onResize,
+  onResizeStateChange,
+}: {
+  onResize: (delta: number) => void
+  onResizeStateChange?: (resizing: boolean) => void
+}) {
+  const handleMouseDown = useRafResizeDrag({
+    onDelta: onResize,
+    direction: 'right',
+    onResizeStateChange,
+    dispatchPanelResizeEvent: true,
+  })
+
+  return (
+    <div
+      className="workbench-split-resize-handle"
+      onMouseDown={handleMouseDown}
+    >
+      <span className="workbench-split-resize-handle__grip" aria-hidden="true">
+        {Array.from({ length: 6 }, (_, index) => (
+          <span key={index} />
+        ))}
+      </span>
+    </div>
+  )
+}
+
 export default function WorkbenchMode() {
   const {
     toggleSidebar,
@@ -323,12 +351,13 @@ export default function WorkbenchMode() {
 
   const handleWorkbenchModeChange = useCallback(async function handleWorkbenchModeChange(nextMode: WorkbenchModeType) {
     const strategy = resolveModeTransitionStrategy(workbenchMode, nextMode)
-    if (strategy === 'same-mode') return
 
     if (splitMode) {
       setWorkbenchMode(nextMode)
       return
     }
+
+    if (strategy === 'same-mode') return
 
     if (strategy === 'dom-only') {
       transitionTargetModeRef.current = nextMode
@@ -459,9 +488,13 @@ export default function WorkbenchMode() {
             )}
 
             {splitMode ? (
-              <div className="flex-1 flex min-w-0" ref={splitContainerRef}>
+              <div
+                className="workbench-split-layout flex-1 flex min-w-0"
+                ref={splitContainerRef}
+                data-workbench-split-layout="true"
+              >
                 <div
-                  className="flex flex-col min-w-0"
+                  className="workbench-split-pane flex flex-col min-w-0"
                   style={{
                     flexBasis: `${workbenchSplitRatio}%`,
                     flexShrink: 0,
@@ -471,14 +504,19 @@ export default function WorkbenchMode() {
                 >
                   <WorkbenchModeOutlet
                     mode={workbenchMode}
+                    mountedModes={[workbenchMode]}
                     isMotionSettled={isMotionSettled}
                     browserLayoutPhase={browserLayoutPhase}
                   />
                 </div>
-                <ResizeHandle onResize={handleSplitResize} direction="right" onResizeStateChange={handlePanelResizeStateChange} />
-                <div className="flex-1 flex flex-col min-w-0" style={{ background: 'transparent' }}>
+                <WorkbenchSplitResizeHandle
+                  onResize={handleSplitResize}
+                  onResizeStateChange={handlePanelResizeStateChange}
+                />
+                <div className="workbench-split-pane flex-1 flex flex-col min-w-0" style={{ background: 'transparent' }}>
                   <WorkbenchModeOutlet
                     mode={splitMode}
+                    mountedModes={[splitMode]}
                     isMotionSettled={isMotionSettled}
                     browserLayoutPhase={browserLayoutPhase}
                   />

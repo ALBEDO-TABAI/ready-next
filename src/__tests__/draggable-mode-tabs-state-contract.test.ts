@@ -12,7 +12,7 @@ test('DraggableModeTabs writes thumb position through CSS variables and does not
   const styles = readWorkspaceFile('src/renderer/styles/workbench-sliders.css')
 
   // Thumb position lives in a CSS variable, not React state.
-  assert.match(source, /const writeThumbPos = useCallback\(\(pos: number\) => \{[\s\S]*el\.style\.setProperty\('--dmt-thumb-pos', String\(pos\)\)/)
+  assert.match(source, /const writeThumbMetrics = useCallback\(\(pos: number, span = thumbSpanRef\.current\) => \{[\s\S]*el\.style\.setProperty\('--dmt-thumb-pos', String\(pos\)\)[\s\S]*el\.style\.setProperty\('--dmt-thumb-span', String\(span\)\)/)
   assert.doesNotMatch(source, /const \[position, setPosition\] = useState/)
   assert.doesNotMatch(source, /setPosition\(/)
 
@@ -32,11 +32,14 @@ test('DraggableModeTabs writes thumb position through CSS variables and does not
   assert.doesNotMatch(source, /captureFreezeTimerRef/)
 
   // CSS drives thumb translateX and icon color via CSS variables.
-  assert.match(styles, /\.draggable-mode-tabs__thumb\s*\{[\s\S]*transform:\s*translateX\(calc\(var\(--dmt-thumb-pos[\s\S]*\* 100%\)\)/)
+  assert.match(styles, /\.draggable-mode-tabs__thumb\s*\{[\s\S]*width:\s*calc\(\(\(100% - 4px\) \/ 4\) \* var\(--dmt-thumb-span/)
+  assert.match(styles, /\.draggable-mode-tabs__thumb\s*\{[\s\S]*transform:\s*translateX\(calc\(var\(--dmt-thumb-pos[\s\S]*100% \/ var\(--dmt-thumb-span/)
   assert.match(styles, /--dmt-icon-index/)
+  assert.match(styles, /--dmt-icon-shift/)
   assert.match(styles, /--dmt-icon-proximity/)
   assert.match(styles, /color-mix\(in srgb,\s*var\(--color-blue/)
 
-  // Per-icon index is passed through style for the CSS variable cascade.
-  assert.match(source, /\['--dmt-icon-index' as string\]:\s*String\(index\)/)
+  // Per-icon visual index and reordering shift are passed through style for the CSS variable cascade.
+  assert.match(source, /\['--dmt-icon-index' as string\]:\s*String\(visualIndex\)/)
+  assert.match(source, /\['--dmt-icon-shift' as string\]:\s*String\(visualIndex - index\)/)
 })

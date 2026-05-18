@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ChevronLeft, ChevronRight, ExternalLink, Loader2, RefreshCw, X } from 'lucide-react'
-import { browserTabActivationSequencer } from '../../modules/browser/browserTabActivationSequencer'
 import { useHostedPreviewBounds } from '../../modules/browser/useHostedPreviewBounds'
 import { useWorkspace } from '../../stores/useWorkspace'
-import { useBrowserTabs } from '../../stores/useBrowserTabs'
 import { WORKBENCH_SUPPORT_PANEL_WIDTH } from '../../modules/workbench/chrome'
 import { requestWorkbenchModeChange } from '../../modules/workbench/mode-transition'
+import { openRSSItemInBrowserTab } from '../../modules/rss/open-rss-item-in-browser'
 import type { RSSItem } from './RSSFeed'
 import RssTimeHintBanner from './RssTimeHintBanner'
 
@@ -124,27 +123,12 @@ export default function PreviewBrowser({ item, onClose, isActive = true }: Previ
   }, [onClose])
 
   const handleOpenBrowserMode = useCallback(async () => {
-    const result = (await window.electronAPI?.browser?.createTab(item.link)) as
-      | { success: boolean; tabId?: string }
-      | undefined
-
-    if (result?.success && result.tabId) {
-      useBrowserTabs.getState().addTab({
-        id: result.tabId,
-        url: item.link,
-        title: item.title || 'Loading...',
-        loading: true,
-        canGoBack: false,
-        canGoForward: false,
-      })
-      browserTabActivationSequencer.invalidate()
-      useBrowserTabs.getState().setActiveTabId(result.tabId)
-      useBrowserTabs.getState().setUrlInput(item.link)
-      requestWorkbenchModeChange('browser')
-      void window.electronAPI?.browser?.previewClose()
-      onClose()
-    }
-  }, [item.link, item.title, onClose])
+    const opened = await openRSSItemInBrowserTab(item)
+    if (!opened) return
+    requestWorkbenchModeChange('browser')
+    void window.electronAPI?.browser?.previewClose()
+    onClose()
+  }, [item, onClose])
 
   const floatingStateClass = isExiting ? 'is-exiting' : isMounted ? 'is-entered' : ''
 
