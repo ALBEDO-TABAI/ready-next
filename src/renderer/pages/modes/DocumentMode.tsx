@@ -21,7 +21,9 @@ import { useRafResizeDrag } from '../../modules/workbench/useRafResizeDrag'
 import { freezeVisibleDocumentLayoutWidths } from '../../modules/document/documentLayoutFreeze'
 import {
   captureMarkdownLineAnchor,
+  readDocumentReadingPositionMap,
   resolveMarkdownLineFromAnchor,
+  saveDocumentReadingPosition,
   type DocumentScrollAnchorSnapshot,
 } from '../../modules/document/documentScrollAnchor'
 import {
@@ -170,6 +172,8 @@ function restoreElementScroll(element: HTMLElement, snapshot: DocumentScrollAnch
   requestAnimationFrame(() => requestAnimationFrame(restore))
   window.setTimeout(restore, 160)
   window.setTimeout(restore, 420)
+  window.setTimeout(restore, 900)
+  window.setTimeout(restore, 1600)
 }
 
 function findScrollCandidates(scope: HTMLElement): HTMLElement[] {
@@ -293,7 +297,7 @@ export default function DocumentMode({
 
   const splitContainerRef = useRef<HTMLDivElement>(null)
   const primarySplitPaneRef = useRef<HTMLDivElement>(null)
-  const scrollSnapshotsRef = useRef<Map<string, DocumentScrollAnchorSnapshot>>(new Map())
+  const scrollSnapshotsRef = useRef<Map<string, DocumentScrollAnchorSnapshot>>(readDocumentReadingPositionMap())
   const documentSplitRatioRef = useRef(documentSplitRatio)
   const liveDocumentSplitRatioRef = useRef(documentSplitRatio)
   const restoreDocumentLayoutFreezeRef = useRef<(() => void) | null>(null)
@@ -430,15 +434,72 @@ export default function DocumentMode({
     return () => unsubscribe()
   }, [refreshCleanTextTabsFromDisk])
 
+  const captureDocumentScrollScope = useCallback((scope: HTMLElement, options?: { includeAnchor?: boolean }) => {
+    const key = scope.dataset.readyDocumentScrollKey
+    if (!key) return
+    const element = findCurrentScrollElement(scope)
+    if (!element) return
+    const snapshot = captureElementScroll(element, tabByScrollKey.get(key)?.content || '', options)
+    scrollSnapshotsRef.current.set(key, snapshot)
+    saveDocumentReadingPosition(key, snapshot)
+  }, [tabByScrollKey])
+
   const captureVisibleDocumentScrollPositions = useCallback((options?: { includeAnchor?: boolean }) => {
     document.querySelectorAll<HTMLElement>('[data-ready-document-scroll-key]').forEach((scope) => {
-      const key = scope.dataset.readyDocumentScrollKey
-      if (!key) return
-      const element = findCurrentScrollElement(scope)
-      if (!element) return
-      scrollSnapshotsRef.current.set(key, captureElementScroll(element, tabByScrollKey.get(key)?.content || '', options))
+      captureDocumentScrollScope(scope, options)
     })
-  }, [tabByScrollKey])
+  }, [captureDocumentScrollScope])
+
+  useEffect(() => {
+    if (!isActive) {
+      captureVisibleDocumentScrollPositions()
+    }
+  }, [captureVisibleDocumentScrollPositions, isActive])
+
+  useEffect(() => {
+    const flush = () => captureVisibleDocumentScrollPositions()
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flush()
+    }
+    window.addEventListener('pagehide', flush)
+    window.addEventListener('beforeunload', flush)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      flush()
+      window.removeEventListener('pagehide', flush)
+      window.removeEventListener('beforeunload', flush)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [captureVisibleDocumentScrollPositions])
+
+  useEffect(() => {
+    if (!isActive) return undefined
+    const scopes = Array.from(document.querySelectorAll<HTMLElement>('[data-ready-document-scroll-key]'))
+    const timers = new Map<HTMLElement, number>()
+    const cleanups: Array<() => void> = []
+
+    scopes.forEach((scope) => {
+      const handler = () => {
+        const previous = timers.get(scope)
+        if (previous) window.clearTimeout(previous)
+        const timer = window.setTimeout(() => {
+          timers.delete(scope)
+          captureDocumentScrollScope(scope)
+        }, 220)
+        timers.set(scope, timer)
+      }
+      findScrollCandidates(scope).forEach((element) => {
+        element.addEventListener('scroll', handler, { passive: true })
+        cleanups.push(() => element.removeEventListener('scroll', handler))
+      })
+    })
+
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer))
+      cleanups.forEach((cleanup) => cleanup())
+      captureVisibleDocumentScrollPositions()
+    }
+  }, [activeTabId, captureDocumentScrollScope, captureVisibleDocumentScrollPositions, editorMode, isActive, splitTabId])
 
   const restoreVisibleDocumentScrollPositions = useCallback(() => {
     document.querySelectorAll<HTMLElement>('[data-ready-document-scroll-key]').forEach((scope) => {

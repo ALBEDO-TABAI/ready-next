@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Bookmark,
   ChevronDown,
@@ -24,6 +24,16 @@ import './documentFloatingPanels.css'
 
 type MarkTab = 'bookmark' | 'note'
 const PANEL_EXIT_ANIMATION_MS = 180
+const MARK_DRAFTS_KEY = 'ready-document-mark-drafts-v1'
+const MAX_MARK_DRAFTS = 200
+
+type MarkDraftCacheEntry = {
+  documentPath: string
+  groupName: string
+  noteDraft: string
+  markTab: MarkTab
+  updatedAt: number
+}
 
 interface DocumentFloatingPanelsProps {
   documentPath: string | null
@@ -121,6 +131,41 @@ function groupMarks(marks: DocumentMarkRecord[]): Array<[string, DocumentMarkRec
   return Array.from(groups.entries())
 }
 
+function readMarkDraftStore(): MarkDraftCacheEntry[] {
+  try {
+    const parsed = JSON.parse(window.localStorage?.getItem(MARK_DRAFTS_KEY) || '[]') as unknown
+    if (!Array.isArray(parsed)) return []
+    return parsed.filter((item): item is MarkDraftCacheEntry => (
+      typeof item === 'object' &&
+      item !== null &&
+      typeof (item as MarkDraftCacheEntry).documentPath === 'string' &&
+      typeof (item as MarkDraftCacheEntry).groupName === 'string' &&
+      typeof (item as MarkDraftCacheEntry).noteDraft === 'string' &&
+      ((item as MarkDraftCacheEntry).markTab === 'bookmark' || (item as MarkDraftCacheEntry).markTab === 'note') &&
+      typeof (item as MarkDraftCacheEntry).updatedAt === 'number'
+    ))
+  } catch {
+    // silent-catch: corrupted mark draft cache should reset to an empty cache.
+    return []
+  }
+}
+
+function readMarkDraft(documentPath: string): MarkDraftCacheEntry | null {
+  return readMarkDraftStore().find((item) => item.documentPath === documentPath) || null
+}
+
+function saveMarkDraft(next: MarkDraftCacheEntry): void {
+  try {
+    const rest = readMarkDraftStore().filter((item) => item.documentPath !== next.documentPath)
+    window.localStorage?.setItem(
+      MARK_DRAFTS_KEY,
+      JSON.stringify([next, ...rest].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_MARK_DRAFTS)),
+    )
+  } catch {
+    // silent-catch: draft persistence is best-effort; mark creation still writes to the database.
+  }
+}
+
 export function DocumentPanelToggleButtons({
   outlineOpen,
   marksOpen,
@@ -186,6 +231,8 @@ export default function DocumentFloatingPanels({
   const [outlinePanelClosing, setOutlinePanelClosing] = useState(false)
   const [marksPanelRendered, setMarksPanelRendered] = useState(marksOpen)
   const [marksPanelClosing, setMarksPanelClosing] = useState(false)
+  const marksRequestSeqRef = useRef(0)
+  const skipNextDraftSaveRef = useRef(false)
 
   useEffect(() => {
     if (outlineOpen) {
@@ -228,21 +275,58 @@ export default function DocumentFloatingPanels({
 
   const loadMarks = useCallback(async () => {
     if (!documentPath || !window.electronAPI?.document?.listMarks) {
+      marksRequestSeqRef.current += 1
       setMarks([])
       return
     }
+    const requestSeq = marksRequestSeqRef.current + 1
+    marksRequestSeqRef.current = requestSeq
     setMarksLoading(true)
     try {
       const result = await window.electronAPI.document.listMarks({ documentPath })
-      setMarks(result.success ? (result.data || []) : [])
+      if (marksRequestSeqRef.current === requestSeq) {
+        setMarks(result.success ? (result.data || []) : [])
+      }
     } finally {
-      setMarksLoading(false)
+      if (marksRequestSeqRef.current === requestSeq) {
+        setMarksLoading(false)
+      }
     }
   }, [documentPath])
 
   useEffect(() => {
     void loadMarks()
   }, [loadMarks])
+
+  useEffect(() => {
+    if (!documentPath) {
+      skipNextDraftSaveRef.current = true
+      setGroupName('默认')
+      setNoteDraft('')
+      setMarkTab('bookmark')
+      return
+    }
+    const draft = readMarkDraft(documentPath)
+    skipNextDraftSaveRef.current = true
+    setGroupName(draft?.groupName || '默认')
+    setNoteDraft(draft?.noteDraft || '')
+    setMarkTab(draft?.markTab || 'bookmark')
+  }, [documentPath])
+
+  useEffect(() => {
+    if (!documentPath) return
+    if (skipNextDraftSaveRef.current) {
+      skipNextDraftSaveRef.current = false
+      return
+    }
+    saveMarkDraft({
+      documentPath,
+      groupName: normalizeGroupName(groupName),
+      noteDraft,
+      markTab,
+      updatedAt: Date.now(),
+    })
+  }, [documentPath, groupName, markTab, noteDraft])
 
   const currentOutlineNode = useMemo(() => getOutlineNodeForLine(outline, activeLine), [activeLine, outline])
   const visibleMarks = useMemo(() => marks.filter((mark) => mark.kind === markTab), [markTab, marks])

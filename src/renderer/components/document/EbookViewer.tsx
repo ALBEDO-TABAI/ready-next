@@ -212,6 +212,7 @@ export default function EbookViewer({ tab, fileUrl, currentExt }: EbookViewerPro
   const viewRef = useRef<FoliateViewElement | null>(null)
   const fileMetaRef = useRef<{ size: number; modifiedTime: number }>({ size: 0, modifiedTime: 0 })
   const fontSizeRef = useRef(DEFAULT_FONT_SIZE)
+  const latestReaderStateRef = useRef<ReaderState | null>(null)
   const openTab = useDocTabs((state) => state.openTab)
   const revealFile = useWorkspace((state) => state.revealFile)
 
@@ -250,6 +251,7 @@ export default function EbookViewer({ tab, fileUrl, currentExt }: EbookViewerPro
       setError(null)
       setProgress(null)
       setImportState({ kind: 'idle' })
+      latestReaderStateRef.current = null
       disposeView(viewRef.current)
       viewRef.current = null
 
@@ -275,14 +277,16 @@ export default function EbookViewer({ tab, fileUrl, currentExt }: EbookViewerPro
           const detail = (event as CustomEvent<{ fraction?: number; index?: number }>).detail
           const nextProgress = typeof detail?.fraction === 'number' ? detail.fraction : null
           setProgress(nextProgress)
-          saveReaderState({
+          const nextState = {
             path: filePath,
             size: fileMetaRef.current.size,
             modifiedTime: fileMetaRef.current.modifiedTime,
             fraction: nextProgress ?? undefined,
             index: typeof detail?.index === 'number' ? detail.index : undefined,
             updatedAt: Date.now(),
-          })
+          }
+          latestReaderStateRef.current = nextState
+          saveReaderState(nextState)
         })
 
         containerRef.current.replaceChildren(view)
@@ -316,10 +320,32 @@ export default function EbookViewer({ tab, fileUrl, currentExt }: EbookViewerPro
     void mount()
     return () => {
       cancelled = true
+      if (latestReaderStateRef.current) {
+        saveReaderState({ ...latestReaderStateRef.current, updatedAt: Date.now() })
+      }
       disposeView(viewRef.current)
       viewRef.current = null
     }
-  }, [applyReadingStyle, fileUrl, tab.path])
+  }, [applyReadingStyle, currentExt, fileUrl, tab.path])
+
+  useEffect(() => {
+    const flush = () => {
+      if (latestReaderStateRef.current) {
+        saveReaderState({ ...latestReaderStateRef.current, updatedAt: Date.now() })
+      }
+    }
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flush()
+    }
+    window.addEventListener('pagehide', flush)
+    window.addEventListener('beforeunload', flush)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      window.removeEventListener('pagehide', flush)
+      window.removeEventListener('beforeunload', flush)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [])
 
   const handleImport = useCallback(async () => {
     if (!tab.path || !canImport || importState.kind === 'running') return

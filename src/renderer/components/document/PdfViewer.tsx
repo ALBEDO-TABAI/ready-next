@@ -11,6 +11,10 @@ import {
   Loader2,
 } from 'lucide-react'
 import { type DocTab } from '../../stores/useDocTabs'
+import {
+  loadDocumentReadingPosition,
+  saveDocumentReadingPosition,
+} from '../../modules/document/documentScrollAnchor'
 
 // Configure PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = new URL(
@@ -66,6 +70,9 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const pageRefs = useRef<Map<number, HTMLDivElement>>(new Map())
   const observerRef = useRef<IntersectionObserver | null>(null)
+  const saveScrollTimerRef = useRef<number | null>(null)
+  const restoredScrollKeyRef = useRef<string | null>(null)
+  const documentScrollKey = useMemo(() => tab.path || tab.id, [tab.id, tab.path])
 
   // Load PDF data via IPC
   useEffect(() => {
@@ -83,6 +90,7 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
     setPdfUrl(null)
     setError(null)
     pageRefs.current.clear()
+    restoredScrollKeyRef.current = null
 
     const loadPdf = async () => {
       try {
@@ -155,6 +163,37 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
     return pdfUrl
   }, [pdfData, pdfUrl])
 
+  const savePdfReadingPosition = useCallback(() => {
+    const element = containerRef.current
+    if (!element) return
+    const maxScroll = Math.max(0, element.scrollHeight - element.clientHeight)
+    const top = Math.max(0, Math.min(element.scrollTop, maxScroll))
+    saveDocumentReadingPosition(documentScrollKey, {
+      top,
+      ratio: maxScroll > 0 ? top / maxScroll : 0,
+      maxScroll,
+      anchorTitle: null,
+      anchorOrdinal: null,
+      anchorProgress: null,
+    })
+  }, [documentScrollKey])
+
+  const restorePdfReadingPosition = useCallback(() => {
+    const snapshot = loadDocumentReadingPosition(documentScrollKey)
+    const element = containerRef.current
+    if (!snapshot || !element) return
+    const restore = () => {
+      const maxScroll = Math.max(0, element.scrollHeight - element.clientHeight)
+      const nextTop = snapshot.maxScroll === maxScroll ? snapshot.top : snapshot.ratio * maxScroll
+      element.scrollTop = Math.max(0, Math.min(Math.round(nextTop), maxScroll))
+    }
+    requestAnimationFrame(restore)
+    requestAnimationFrame(() => requestAnimationFrame(restore))
+    window.setTimeout(restore, 180)
+    window.setTimeout(restore, 520)
+    window.setTimeout(restore, 1100)
+  }, [documentScrollKey])
+
   const onLoadSuccess = useCallback(({ numPages: n }: { numPages: number }) => {
     setNumPages(n)
     setError(null)
@@ -191,6 +230,20 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
 
     return () => observerRef.current?.disconnect()
   }, [numPages, zoom])
+
+  useEffect(() => {
+    if (numPages === 0 || restoredScrollKeyRef.current === documentScrollKey) return
+    restoredScrollKeyRef.current = documentScrollKey
+    restorePdfReadingPosition()
+  }, [documentScrollKey, numPages, restorePdfReadingPosition])
+
+  useEffect(() => () => {
+    if (saveScrollTimerRef.current !== null) {
+      window.clearTimeout(saveScrollTimerRef.current)
+      saveScrollTimerRef.current = null
+    }
+    savePdfReadingPosition()
+  }, [savePdfReadingPosition])
 
   const registerPageRef = useCallback((pageNum: number, el: HTMLDivElement | null) => {
     if (el) pageRefs.current.set(pageNum, el)
@@ -245,6 +298,16 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
     },
     [zoomIn, zoomOut],
   )
+
+  const handleScroll = useCallback(() => {
+    if (saveScrollTimerRef.current !== null) {
+      window.clearTimeout(saveScrollTimerRef.current)
+    }
+    saveScrollTimerRef.current = window.setTimeout(() => {
+      saveScrollTimerRef.current = null
+      savePdfReadingPosition()
+    }, 220)
+  }, [savePdfReadingPosition])
 
   const scale = zoom / 100
 
@@ -362,9 +425,11 @@ export default function PdfViewer({ tab, fileUrl }: PdfViewerProps) {
       {/* PDF content - continuous scroll */}
       <div
         ref={containerRef}
+        data-ready-document-scroll-key={documentScrollKey}
         className="panel-hover-scrollbar flex-1 overflow-auto"
         style={{ background: '#525659' }}
         onWheel={handleWheel}
+        onScroll={handleScroll}
       >
         <Document
           file={fileOption}

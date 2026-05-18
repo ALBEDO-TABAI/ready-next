@@ -54,6 +54,10 @@ test('document edit and preview modes share reading scroll position when remount
   assert.match(markdownEditor, /data-ready-document-scroll-key=\{documentScrollKey\}/)
 
   assert.match(documentMode, /captureVisibleDocumentScrollPositions\(\)/)
+  assert.match(documentMode, /readDocumentReadingPositionMap\(\)/)
+  assert.match(documentMode, /saveDocumentReadingPosition\(key, snapshot\)/)
+  assert.match(documentMode, /document\.addEventListener\('visibilitychange', handleVisibilityChange\)/)
+  assert.match(documentMode, /element\.addEventListener\('scroll', handler, \{ passive: true \}\)/)
   assert.match(documentMode, /restoreVisibleDocumentScrollPositions\(\)/)
   assert.match(documentMode, /useLayoutEffect\(\(\) => \{/)
   assert.match(documentMode, /onChange=\{handleEditorModeChange\}/)
@@ -67,6 +71,26 @@ test('document edit and preview modes share reading scroll position when remount
   const notePreview = readWorkspaceFile('src/renderer/components/document/NotePreview.tsx')
   assert.match(notePreview, /data-ready-heading-title=\{extractMarkdownText\(children\)\}/)
   assert.match(notePreview, /data-ready-mermaid="true"/)
+})
+
+test('document PDF and mark drafts keep reading context across remounts', () => {
+  const pdfViewer = readWorkspaceFile('src/renderer/components/document/PdfViewer.tsx')
+  const panels = readWorkspaceFile('src/renderer/components/document/DocumentFloatingPanels.tsx')
+  const ebookViewer = readWorkspaceFile('src/renderer/components/document/EbookViewer.tsx')
+
+  assert.match(pdfViewer, /data-ready-document-scroll-key=\{documentScrollKey\}/)
+  assert.match(pdfViewer, /loadDocumentReadingPosition\(documentScrollKey\)/)
+  assert.match(pdfViewer, /saveDocumentReadingPosition\(documentScrollKey,/)
+  assert.match(pdfViewer, /onScroll=\{handleScroll\}/)
+
+  assert.match(panels, /MARK_DRAFTS_KEY = 'ready-document-mark-drafts-v1'/)
+  assert.match(panels, /readMarkDraft\(documentPath\)/)
+  assert.match(panels, /saveMarkDraft\(\{/)
+  assert.match(panels, /marksRequestSeqRef/)
+
+  assert.match(ebookViewer, /latestReaderStateRef/)
+  assert.match(ebookViewer, /saveReaderState\(\{ \.\.\.latestReaderStateRef\.current, updatedAt: Date\.now\(\) \}\)/)
+  assert.match(ebookViewer, /document\.addEventListener\('visibilitychange', handleVisibilityChange\)/)
 })
 
 test('document preview shows repair affordances instead of raw broken visual source', () => {
