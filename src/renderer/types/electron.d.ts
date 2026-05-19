@@ -1085,6 +1085,7 @@ interface BrowserDownloadUpdateEvent {
   totalBytes: number
   receivedBytes: number
   state: string
+  savePath?: string
 }
 
 interface BrowserTabContextData {
@@ -1431,6 +1432,12 @@ interface ElectronBrowserAPI {
   // Downloads
   getDownloads: () => Promise<{ success: boolean; data?: BrowserDownloadData[]; error?: string }>
   clearDownloads: () => Promise<{ success: boolean; error?: string }>
+  downloadUrlToDirectory: (payload: {
+    url: string
+    targetDir: string
+    sourcePageUrl?: string | null
+    suggestedName?: string | null
+  }) => Promise<{ success: boolean; savePath?: string; filename?: string; error?: string }>
   onDownloadUpdate: (callback: (data: BrowserDownloadUpdateEvent) => void) => () => void
   showUtilityMenu: (payload: BrowserUtilityMenuRequest) => Promise<{ success: boolean; error?: string }>
 
@@ -3217,6 +3224,7 @@ interface ElectronAPI {
   ui?: ElectronUIAPI
   agentInteraction?: ElectronAgentInteractionAPI
   platform: string
+  startNativeFileDrag: (paths: string[]) => void
   getFilePathFromDrop: (file: File) => string
 }
 

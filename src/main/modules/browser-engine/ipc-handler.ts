@@ -1,4 +1,4 @@
-import { BrowserWindow, shell } from 'electron'
+import { BrowserWindow, shell, session } from 'electron'
 import { BrowserAppShortcutBridgeService } from './app-shortcut-service'
 import { BrowserAutomationService } from './automation-service'
 import { BrowserCapabilityService } from './capability-service'
@@ -28,7 +28,7 @@ import { BrowserBookmarkTransferService } from './bookmark-transfer-service'
 import { BrowserContextMenuService } from './context-menu-service'
 import { findReusableCaptureTabId, isReusableCaptureTabUrl } from './capture-url-utils'
 import { BrowserDataService, type BrowserAdblockState } from './data-service'
-import { BrowserDownloadService } from './download-service'
+import { BrowserDownloadService, type BrowserDownloadUrlToDirectoryPayload, type BrowserDownloadUrlToDirectoryResult } from './download-service'
 import {
   BROWSER_DIAGNOSTICS_LOG_PATH,
   BrowserDiagnosticsService,
@@ -1342,6 +1342,12 @@ export class BrowserController {
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
+  }
+
+  async downloadUrlToDirectory(
+    payload: BrowserDownloadUrlToDirectoryPayload,
+  ): Promise<BrowserDownloadUrlToDirectoryResult> {
+    return this.downloadService.downloadUrlToDirectory(session.fromPartition('persist:browser'), payload)
   }
 }
 

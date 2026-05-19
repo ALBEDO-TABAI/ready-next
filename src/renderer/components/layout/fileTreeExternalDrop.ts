@@ -19,7 +19,17 @@ export interface RSSItemDragPayload {
   publishedAt?: string
 }
 
-export type FileTreeExternalDropPayload = BrowserTabDragPayload | RSSItemDragPayload
+export interface WebDownloadDragPayload {
+  type: 'web-download-url'
+  url: string
+  name: string
+  title?: string
+  sourcePageUrl?: string
+  suggestedName?: string
+  unsupportedReason?: string
+}
+
+export type FileTreeExternalDropPayload = BrowserTabDragPayload | RSSItemDragPayload | WebDownloadDragPayload
 
 export type FileTreeDropTarget =
   | {
@@ -106,6 +116,126 @@ export function parseRssItemDragPayload(raw: string | null | undefined): RSSItem
   } catch {
     return null
   }
+}
+
+const WEB_DOWNLOAD_EXTS = new Set([
+  '.png', '.jpg', '.jpeg', '.webp', '.gif', '.bmp', '.ico', '.tiff', '.svg', '.avif',
+  '.mp4', '.mov', '.mkv', '.avi', '.webm', '.flv', '.wmv', '.m4v',
+  '.mp3', '.wav', '.flac', '.aac', '.ogg', '.m4a', '.opus',
+  '.pdf', '.zip',
+])
+
+function firstUriListUrl(raw: string | null | undefined): string | null {
+  if (!raw) return null
+  return raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.length > 0 && !line.startsWith('#')) ?? null
+}
+
+function decodeHtmlEntity(value: string): string {
+  return value
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+}
+
+function extractAttribute(tag: string, name: string): string | null {
+  const pattern = new RegExp(`${name}\\s*=\\s*("([^"]*)"|'([^']*)'|([^\\s>]+))`, 'i')
+  const match = tag.match(pattern)
+  return decodeHtmlEntity(match?.[2] || match?.[3] || match?.[4] || '').trim() || null
+}
+
+function urlPathExt(url: string): string {
+  try {
+    const parsed = new URL(url)
+    const pathname = parsed.pathname.toLowerCase()
+    const dotIndex = pathname.lastIndexOf('.')
+    if (dotIndex < 0) return ''
+    return pathname.slice(dotIndex)
+  } catch {
+    const lower = url.toLowerCase().split(/[?#]/)[0]
+    const dotIndex = lower.lastIndexOf('.')
+    return dotIndex >= 0 ? lower.slice(dotIndex) : ''
+  }
+}
+
+function suggestedFilenameFromUrl(url: string): string | undefined {
+  try {
+    const parsed = new URL(url)
+    return decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() || '') || undefined
+  } catch {
+    return undefined
+  }
+}
+
+function buildWebDownloadPayload(
+  url: string | null | undefined,
+  source: 'media-html' | 'download-link' | 'url-list',
+  suggestedName?: string | null,
+): WebDownloadDragPayload | null {
+  const trimmed = (url || '').trim()
+  if (!trimmed) return null
+  let parsed: URL
+  try {
+    parsed = new URL(trimmed)
+  } catch {
+    return null
+  }
+  if (parsed.protocol === 'blob:' || parsed.protocol === 'data:') {
+    return {
+      type: 'web-download-url',
+      url: trimmed,
+      name: suggestedName || suggestedFilenameFromUrl(trimmed) || '网页资源',
+      suggestedName: suggestedName || suggestedFilenameFromUrl(trimmed),
+      unsupportedReason: '暂不支持临时网页资源',
+    }
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return null
+  const ext = urlPathExt(trimmed)
+  const isMediaHtml = source === 'media-html'
+  const isDownloadableLink = source === 'download-link' || WEB_DOWNLOAD_EXTS.has(ext)
+  if (!isMediaHtml && !isDownloadableLink) return null
+  const name = suggestedName || suggestedFilenameFromUrl(trimmed) || parsed.hostname || '网页资源'
+  return {
+    type: 'web-download-url',
+    url: trimmed,
+    name,
+    title: name,
+    suggestedName: suggestedName || suggestedFilenameFromUrl(trimmed),
+  }
+}
+
+function parseHtmlWebDownloadPayload(rawHtml: string | null | undefined): WebDownloadDragPayload | null {
+  if (!rawHtml) return null
+  const html = rawHtml.trim()
+  if (!html) return null
+  const mediaTagPattern = /<(img|video|source)\b[^>]*>/gi
+  let mediaMatch: RegExpExecArray | null
+  while ((mediaMatch = mediaTagPattern.exec(html))) {
+    const payload = buildWebDownloadPayload(extractAttribute(mediaMatch[0], 'src'), 'media-html')
+    if (payload) return payload
+  }
+  const linkTagPattern = /<a\b[^>]*>/gi
+  let linkMatch: RegExpExecArray | null
+  while ((linkMatch = linkTagPattern.exec(html))) {
+    const tag = linkMatch[0]
+    const href = extractAttribute(tag, 'href')
+    const downloadName = extractAttribute(tag, 'download')
+    const payload = buildWebDownloadPayload(href, downloadName ? 'download-link' : 'url-list', downloadName)
+    if (payload) return payload
+  }
+  return null
+}
+
+export function parseWebDownloadDragPayload(dataTransfer: Pick<DataTransfer, 'getData'>): WebDownloadDragPayload | null {
+  const htmlPayload = parseHtmlWebDownloadPayload(dataTransfer.getData('text/html'))
+  if (htmlPayload) return htmlPayload
+  const uriListPayload = buildWebDownloadPayload(firstUriListUrl(dataTransfer.getData('text/uri-list')), 'url-list')
+  if (uriListPayload) return uriListPayload
+  return buildWebDownloadPayload(dataTransfer.getData('text/plain'), 'url-list')
 }
 
 interface SetRssItemDragInput {
@@ -280,7 +410,12 @@ const VIDEO_DROP_HOST_HINTS = [
 const VIDEO_DROP_EXTS = ['.mp4', '.mov', '.mkv', '.avi', '.webm', '.m4v', '.flv']
 
 export function isLikelyVideoDropPayload(payload: FileTreeExternalDropPayload): boolean {
-  const url = payload.type === 'browser-tab' ? payload.url : payload.link
+  const url =
+    payload.type === 'browser-tab'
+      ? payload.url
+      : payload.type === 'rss-item'
+        ? payload.link
+        : payload.url
   const lower = (url || '').trim().toLowerCase()
   if (!lower) return false
   if (VIDEO_DROP_EXTS.some((ext) => lower.endsWith(ext))) return true
@@ -387,6 +522,8 @@ export async function dispatchFileTreeExternalDropAction({
   onAnalysisPlaceholderStart,
   onAnalysisPlaceholderUpdate,
 }: DispatchFileTreeExternalDropArgs): Promise<void> {
+  if (payload.type === 'web-download-url') return
+
   const targetDir =
     target.kind === 'inside-directory' ? target.dirPath : target.containerPath
   const targetHint =

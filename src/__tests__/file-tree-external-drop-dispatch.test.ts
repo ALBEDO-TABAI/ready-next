@@ -8,6 +8,7 @@ import {
   endRssItemDragSession,
   getActiveRssItemDragPayload,
   isLikelyVideoDropPayload,
+  parseWebDownloadDragPayload,
   type BrowserTabDragPayload,
   type FileTreeDropTarget,
   type RSSItemDragPayload,
@@ -188,6 +189,43 @@ const rssItem: RSSItemDragPayload = {
   source: 'example-feed',
   publishedAt: '2026-05-01',
 }
+
+function makeDropData(values: Record<string, string>): Pick<DataTransfer, 'getData'> {
+  return {
+    getData: (type: string) => values[type] || '',
+  }
+}
+
+test('web download drops extract downloadable media URLs and reject ordinary pages', () => {
+  const imageFromUriList = parseWebDownloadDragPayload(makeDropData({
+    'text/uri-list': '# dragged image\nhttps://cdn.example.com/path/photo.jpg?token=abc',
+  }))
+  assert.equal(imageFromUriList?.type, 'web-download-url')
+  assert.equal(imageFromUriList?.url, 'https://cdn.example.com/path/photo.jpg?token=abc')
+  assert.equal(imageFromUriList?.suggestedName, 'photo.jpg')
+
+  const extensionlessImage = parseWebDownloadDragPayload(makeDropData({
+    'text/html': '<img src="https://images.example.com/asset?id=123&amp;w=800">',
+  }))
+  assert.equal(extensionlessImage?.url, 'https://images.example.com/asset?id=123&w=800')
+
+  const videoDownloadLink = parseWebDownloadDragPayload(makeDropData({
+    'text/html': '<a href="https://cdn.example.com/video/clip.mp4?sig=1" download="clip.mp4">clip</a>',
+  }))
+  assert.equal(videoDownloadLink?.url, 'https://cdn.example.com/video/clip.mp4?sig=1')
+  assert.equal(videoDownloadLink?.suggestedName, 'clip.mp4')
+
+  const ordinaryPage = parseWebDownloadDragPayload(makeDropData({
+    'text/plain': 'https://example.com/article',
+  }))
+  assert.equal(ordinaryPage, null)
+
+  const blobImage = parseWebDownloadDragPayload(makeDropData({
+    'text/html': '<img src="blob:https://example.com/temporary-id">',
+  }))
+  assert.equal(blobImage?.type, 'web-download-url')
+  assert.match(blobImage?.unsupportedReason || '', /临时网页资源/)
+})
 
 test('video-only drop actions do not treat generic Xiaohongshu pages as videos', () => {
   assert.equal(

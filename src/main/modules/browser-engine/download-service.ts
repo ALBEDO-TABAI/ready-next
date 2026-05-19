@@ -1,4 +1,6 @@
 import type { Session } from 'electron'
+import { existsSync, statSync } from 'fs'
+import { basename, extname, isAbsolute, join } from 'path'
 import { BrowserDataService } from './data-service'
 
 interface BrowserDownloadServiceDeps {
@@ -6,17 +8,181 @@ interface BrowserDownloadServiceDeps {
   sendToRenderer: (channel: string, data: unknown) => void
 }
 
+export interface BrowserDownloadUrlToDirectoryPayload {
+  url: string
+  targetDir: string
+  sourcePageUrl?: string | null
+  suggestedName?: string | null
+}
+
+export interface BrowserDownloadUrlToDirectoryResult {
+  success: boolean
+  savePath?: string
+  filename?: string
+  error?: string
+}
+
+interface PendingTargetedDownload {
+  requestedUrl: string
+  targetDir: string
+  suggestedName?: string | null
+  resolve: (result: BrowserDownloadUrlToDirectoryResult) => void
+  timer: ReturnType<typeof setTimeout>
+}
+
+const TARGETED_DOWNLOAD_START_TIMEOUT_MS = 30_000
+
+function sanitizeFilename(input: string, fallback = 'download'): string {
+  const trimmed = input.trim()
+  const safe = trimmed
+    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '-')
+    .replace(/\s+/g, ' ')
+    .replace(/^\.+$/, '')
+    .replace(/^\.+/, '')
+    .slice(0, 180)
+    .trim()
+  return safe || fallback
+}
+
+function filenameFromUrl(url: string): string {
+  try {
+    const parsed = new URL(url)
+    const name = decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() || '')
+    return sanitizeFilename(name || 'download')
+  } catch {
+    return 'download'
+  }
+}
+
+function uniquePathForDownload(targetDir: string, requestedName: string): string {
+  const safeName = sanitizeFilename(basename(requestedName), 'download')
+  const ext = extname(safeName)
+  const base = ext ? safeName.slice(0, -ext.length) : safeName
+  let candidate = join(targetDir, safeName)
+  let index = 1
+  while (existsSync(candidate)) {
+    candidate = join(targetDir, `${base || 'download'} (${index})${ext}`)
+    index += 1
+  }
+  return candidate
+}
+
 export class BrowserDownloadService {
   private registeredSessions = new WeakSet<Session>()
+  private pendingTargetedDownloads = new Map<string, PendingTargetedDownload[]>()
 
   constructor(private readonly deps: BrowserDownloadServiceDeps) {}
+
+  async downloadUrlToDirectory(
+    targetSession: Session,
+    payload: BrowserDownloadUrlToDirectoryPayload,
+  ): Promise<BrowserDownloadUrlToDirectoryResult> {
+    const url = String(payload.url || '').trim()
+    const targetDir = String(payload.targetDir || '').trim()
+    let parsed: URL
+    try {
+      parsed = new URL(url)
+    } catch {
+      return { success: false, error: '下载地址无效' }
+    }
+    if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+      return { success: false, error: '暂不支持这个网页资源类型' }
+    }
+    try {
+      if (!targetDir || !isAbsolute(targetDir) || !statSync(targetDir).isDirectory()) {
+        return { success: false, error: '目标目录不可用' }
+      }
+    } catch {
+      return { success: false, error: '目标目录不可用' }
+    }
+
+    this.ensureRegistered(targetSession)
+    return await new Promise((resolve) => {
+      const pending: PendingTargetedDownload = {
+        requestedUrl: url,
+        targetDir,
+        suggestedName: payload.suggestedName,
+        resolve,
+        timer: setTimeout(() => {
+          this.removePendingTargetedDownload(url, pending)
+          resolve({ success: false, error: '下载没有开始' })
+        }, TARGETED_DOWNLOAD_START_TIMEOUT_MS),
+      }
+      const queue = this.pendingTargetedDownloads.get(url) ?? []
+      queue.push(pending)
+      this.pendingTargetedDownloads.set(url, queue)
+      const headers: Record<string, string> = {}
+      const referrer = String(payload.sourcePageUrl || '').trim()
+      if (referrer) {
+        try {
+          const parsedReferrer = new URL(referrer)
+          if (parsedReferrer.protocol === 'http:' || parsedReferrer.protocol === 'https:') {
+            headers.Referer = referrer
+          }
+        } catch {
+          // ignore invalid referrer
+        }
+      }
+      try {
+        targetSession.downloadURL(url, Object.keys(headers).length > 0 ? { headers } : undefined)
+      } catch (error) {
+        clearTimeout(pending.timer)
+        this.removePendingTargetedDownload(url, pending)
+        resolve({ success: false, error: error instanceof Error ? error.message : String(error) })
+      }
+    })
+  }
+
+  private removePendingTargetedDownload(url: string, pending: PendingTargetedDownload): void {
+    const queue = this.pendingTargetedDownloads.get(url)
+    if (!queue) return
+    const nextQueue = queue.filter((item) => item !== pending)
+    if (nextQueue.length === 0) {
+      this.pendingTargetedDownloads.delete(url)
+    } else {
+      this.pendingTargetedDownloads.set(url, nextQueue)
+    }
+  }
+
+  private takePendingTargetedDownload(itemUrl: string, urlChain: string[]): PendingTargetedDownload | null {
+    const candidates = [itemUrl, ...urlChain]
+    for (const candidate of candidates) {
+      const queue = this.pendingTargetedDownloads.get(candidate)
+      if (!queue || queue.length === 0) continue
+      const pending = queue.shift() ?? null
+      if (queue.length === 0) {
+        this.pendingTargetedDownloads.delete(candidate)
+      }
+      if (pending) {
+        clearTimeout(pending.timer)
+      }
+      return pending
+    }
+    return null
+  }
 
   ensureRegistered(targetSession: Session): void {
     if (this.registeredSessions.has(targetSession)) return
 
     targetSession.on('will-download', (_event, item) => {
       const downloadId = `dl-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-      const filename = item.getFilename()
+      const pendingTarget = this.takePendingTargetedDownload(item.getURL(), item.getURLChain())
+      let savePath = item.getSavePath() || ''
+      let filename = item.getFilename()
+      if (pendingTarget) {
+        try {
+          savePath = uniquePathForDownload(
+            pendingTarget.targetDir,
+            pendingTarget.suggestedName || filename || filenameFromUrl(pendingTarget.requestedUrl),
+          )
+          item.setSavePath(savePath)
+          filename = basename(savePath)
+        } catch (error) {
+          item.cancel()
+          pendingTarget.resolve({ success: false, error: error instanceof Error ? error.message : String(error) })
+          return
+        }
+      }
       const totalBytes = item.getTotalBytes()
       const startedAt = Math.floor(Date.now() / 1000)
       const mimeType = typeof item.getMimeType === 'function' ? item.getMimeType() : null
@@ -27,7 +193,7 @@ export class BrowserDownloadService {
           id: downloadId,
           url: item.getURL(),
           filename,
-          save_path: item.getSavePath() || '',
+          save_path: savePath,
           total_bytes: totalBytes,
           received_bytes: 0,
           state: 'progressing',
@@ -58,6 +224,7 @@ export class BrowserDownloadService {
           totalBytes,
           receivedBytes: received,
           state: 'progressing',
+          savePath: item.getSavePath() || savePath,
         })
       })
 
@@ -96,7 +263,16 @@ export class BrowserDownloadService {
           totalBytes,
           receivedBytes: item.getReceivedBytes(),
           state,
+          savePath: finalPath,
         })
+        if (pendingTarget) {
+          pendingTarget.resolve({
+            success: state === 'completed',
+            savePath: state === 'completed' ? finalPath : undefined,
+            filename,
+            error: state === 'completed' ? undefined : state,
+          })
+        }
       })
     })
 

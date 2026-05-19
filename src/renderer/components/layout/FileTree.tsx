@@ -22,14 +22,17 @@ import {
   clampDropMenuPositionToBoundary,
   dispatchFileTreeExternalDropAction,
   getActiveRssItemDragPayload,
+  isLikelyVideoDropPayload,
   parseBrowserTabDragPayload,
   parseRssItemDragPayload,
+  parseWebDownloadDragPayload,
   resolveFileTreeDropTarget,
   shouldKeepFileTreeDropHintOnLeave,
   type FileTreeDropTarget,
   type FileTreeAnalysisPlaceholderStatus,
   type FileTreeExternalDropAction,
   type FileTreeExternalDropPayload,
+  type WebDownloadDragPayload,
 } from './fileTreeExternalDrop'
 import { getActiveBrowserTabDragPayload } from '../../modules/browser/browserTabDragSession'
 import { EBOOK_EXTENSIONS, isEbookExtension } from '../../../shared/ebook'
@@ -157,37 +160,6 @@ interface FileTreeExternalDropMenuState {
   target: FileTreeDropTarget
 }
 
-const VIDEO_DROP_HOST_HINTS = [
-  'youtube.com',
-  'youtu.be',
-  'bilibili.com',
-  'b23.tv',
-  'bili2233.cn',
-  'vimeo.com',
-  'douyin.com',
-  'tiktok.com',
-  'xiaohongshu.com',
-  'xhslink.com',
-]
-const VIDEO_DROP_EXTS = ['.mp4', '.mov', '.mkv', '.avi', '.webm', '.m4v', '.flv']
-
-function isLikelyVideoDropPayload(payload: FileTreeExternalDropPayload): boolean {
-  const url = payload.type === 'browser-tab' ? payload.url : payload.link
-  const lower = (url || '').trim().toLowerCase()
-  if (!lower) return false
-  if (VIDEO_DROP_EXTS.some((ext) => lower.endsWith(ext))) return true
-  if (lower.includes('/video/')) return true
-  try {
-    const parsed = new URL(lower)
-    return (
-      VIDEO_DROP_HOST_HINTS.some((host) => parsed.hostname.includes(host))
-      || VIDEO_DROP_EXTS.some((ext) => parsed.pathname.endsWith(ext))
-    )
-  } catch {
-    return VIDEO_DROP_EXTS.some((ext) => lower.endsWith(ext))
-  }
-}
-
 function putDragData(e: React.DragEvent, item: FileItem, movable = true) {
   const ext = getFileExt(item)
   const payload: WorkspaceDragPayload = {
@@ -206,6 +178,9 @@ function putDragData(e: React.DragEvent, item: FileItem, movable = true) {
   e.dataTransfer.setData('text/plain', item.path)
   e.dataTransfer.setData('text/uri-list', `file://${encodeURI(item.path)}`)
   e.dataTransfer.effectAllowed = 'copyMove'
+  if (!item.isDirectory) {
+    window.electronAPI?.startNativeFileDrag?.([item.path])
+  }
 }
 
 function parseWorkspaceDragPayload(dataTransfer: DataTransfer): WorkspaceDragPayload | null {
@@ -238,6 +213,10 @@ function canMoveToDirectory(source: WorkspaceDragPayload, targetDir: string): bo
     }
   }
   return true
+}
+
+function getTargetDirFromDropTarget(target: FileTreeDropTarget): string {
+  return target.kind === 'inside-directory' ? target.dirPath : target.containerPath
 }
 
 function hasMatchingDescendant(
@@ -587,7 +566,7 @@ function GridItemCard({
  * remove themselves when the real file appears; RSS analysis rows follow the
  * persisted job progress until success or failure.
  */
-type PendingPlaceholderKind = 'clip' | 'study' | 'analysis-copy' | 'analysis-visual'
+type PendingPlaceholderKind = 'clip' | 'study' | 'analysis-copy' | 'analysis-visual' | 'download'
 type PendingPlaceholderStatus =
   | 'running'
   | 'completed'
@@ -610,6 +589,13 @@ function clampProgress(value: number | undefined): number | null {
 }
 
 function pendingPlaceholderLabel(kind: PendingPlaceholderKind, status: PendingPlaceholderStatus): string {
+  if (kind === 'download') {
+    if (status === 'running') return '正在下载'
+    if (status === 'completed' || status === 'success') return '已下载'
+    if (status === 'skipped') return '已跳过'
+    return '下载失败'
+  }
+
   if (kind === 'study') {
     if (status === 'waiting_for_clip') return '等待剪藏'
     if (status === 'running') return '生成学习笔记'
@@ -1041,6 +1027,7 @@ export default function FileTree({
     addPinnedFolder,
     moveItem,
     loadDirChildren,
+    refreshFiles,
     deleteItem,
     removePinnedFolder,
   } = useWorkspace()
@@ -1356,10 +1343,95 @@ export default function FileTree({
       const raw = dataTransfer.getData('application/x-ready-drag')
       const browserTab = parseBrowserTabDragPayload(raw) ?? getActiveBrowserTabDragPayload()
       if (browserTab) return browserTab
-      return parseRssItemDragPayload(raw) ?? getActiveRssItemDragPayload()
+      const rssItem = parseRssItemDragPayload(raw) ?? getActiveRssItemDragPayload()
+      if (rssItem) return rssItem
+      return parseWebDownloadDragPayload(dataTransfer)
     },
     [],
   )
+
+  const handleWebDownloadDrop = useCallback((payload: WebDownloadDragPayload, target: FileTreeDropTarget) => {
+    const targetDir = getTargetDirFromDropTarget(target)
+    const taskId = `download-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
+    let urlHost = payload.url
+    try {
+      urlHost = new URL(payload.url).host || payload.url
+    } catch {
+      urlHost = payload.url
+    }
+    setPendingClips((prev) => [
+      ...prev,
+      {
+        taskId,
+        targetDir,
+        urlHost,
+        title: payload.name || payload.title || urlHost,
+        status: 'running',
+        createdAt: Date.now(),
+        kind: 'download',
+      },
+    ])
+
+    const fail = (message: string) => {
+      setPendingClips((prev) =>
+        prev.map((item) => (item.taskId === taskId ? { ...item, status: 'failed', errorMessage: message } : item)),
+      )
+      schedulePlaceholderRemoval(taskId, 4000)
+    }
+
+    if (payload.unsupportedReason) {
+      fail(payload.unsupportedReason)
+      return
+    }
+
+    void (async () => {
+      try {
+        const result = await window.electronAPI?.browser?.downloadUrlToDirectory?.({
+          url: payload.url,
+          targetDir,
+          sourcePageUrl: payload.sourcePageUrl,
+          suggestedName: payload.suggestedName,
+        })
+        if (!result?.success) {
+          fail(result?.error || '下载失败')
+          return
+        }
+        const savedPath = result.savePath || ''
+        setPendingClips((prev) =>
+          prev.map((item) =>
+            item.taskId === taskId
+              ? {
+                  ...item,
+                  title: result.filename || item.title,
+                  status: 'completed',
+                  copiedPath: savedPath,
+                }
+              : item,
+          ),
+        )
+        await refreshFiles()
+        await loadDirChildren(targetDir)
+        flashCompletedPath(savedPath)
+        schedulePlaceholderRemoval(taskId, 1800)
+      } catch (error) {
+        fail(error instanceof Error ? error.message : String(error))
+      }
+    })()
+  }, [flashCompletedPath, loadDirChildren, refreshFiles, schedulePlaceholderRemoval])
+
+  const handleResolvedExternalDrop = useCallback((
+    payload: FileTreeExternalDropPayload,
+    target: FileTreeDropTarget,
+    x: number,
+    y: number,
+  ) => {
+    setContextMenu(null)
+    if (payload.type === 'web-download-url') {
+      handleWebDownloadDrop(payload, target)
+      return
+    }
+    setExternalDropMenu({ x, y, payload, target })
+  }, [handleWebDownloadDrop])
 
   const handleDirectoryDragOver = useCallback((e: React.DragEvent, dirPath: string) => {
     const payload = parseWorkspaceDragPayload(e.dataTransfer)
@@ -1404,18 +1476,17 @@ export default function FileTree({
       e.stopPropagation()
       setMoveDropTargetDir(null)
       setFileTreeDropTarget(null)
-      setContextMenu(null)
-      setExternalDropMenu({
-        x: e.clientX,
-        y: e.clientY,
-        payload: externalPayload,
-        target: {
+      handleResolvedExternalDrop(
+        externalPayload,
+        {
           kind: 'inside-directory',
           dirPath,
           itemPath: dirPath,
           containerPath: dirPath,
         },
-      })
+        e.clientX,
+        e.clientY,
+      )
       return
     }
 
@@ -1426,7 +1497,7 @@ export default function FileTree({
     setMoveDropTargetDir(null)
     setFileTreeDropTarget(null)
     void moveWorkspaceItem(payload, dirPath)
-  }, [getExternalDropPayload, moveWorkspaceItem])
+  }, [getExternalDropPayload, handleResolvedExternalDrop, moveWorkspaceItem])
 
   const handleItemDragOver = useCallback((e: React.DragEvent, item: FileItem, containerPath: string) => {
     const workspacePayload = parseWorkspaceDragPayload(e.dataTransfer)
@@ -1495,20 +1566,14 @@ export default function FileTree({
       })
       setMoveDropTargetDir(null)
       setFileTreeDropTarget(null)
-      setContextMenu(null)
-      setExternalDropMenu({
-        x: e.clientX,
-        y: e.clientY,
-        payload: externalPayload,
-        target,
-      })
+      handleResolvedExternalDrop(externalPayload, target, e.clientX, e.clientY)
       return
     }
 
     if (item.isDirectory) {
       handleDirectoryDrop(e, item.path)
     }
-  }, [getExternalDropPayload, handleDirectoryDrop])
+  }, [getExternalDropPayload, handleDirectoryDrop, handleResolvedExternalDrop])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -1566,13 +1631,7 @@ export default function FileTree({
           itemPath: currentPath,
           containerPath: currentPath,
         }
-      setContextMenu(null)
-      setExternalDropMenu({
-        x: e.clientX,
-        y: e.clientY,
-        payload: externalPayload,
-        target: resolvedTarget,
-      })
+      handleResolvedExternalDrop(externalPayload, resolvedTarget, e.clientX, e.clientY)
       return
     }
 
@@ -1584,7 +1643,7 @@ export default function FileTree({
         if (p) addPinnedFolder(p)
       }
     }
-  }, [addPinnedFolder, fileTreeDropTarget, currentPath, getExternalDropPayload, moveWorkspaceItem])
+  }, [addPinnedFolder, fileTreeDropTarget, currentPath, getExternalDropPayload, handleResolvedExternalDrop, moveWorkspaceItem])
 
   const handleExternalDropAction = useCallback(
     (action: FileTreeExternalDropAction) => {

@@ -5,7 +5,7 @@ import { resolve } from 'path'
 config({ path: resolve(__dirname, '../../.env') })
 
 import { app, shell, BrowserWindow, ipcMain, protocol, nativeImage, nativeTheme, Menu, dialog, type MenuItemConstructorOptions } from 'electron'
-import { join, extname, normalize } from 'path'
+import { join, extname, normalize, isAbsolute } from 'path'
 import { createReadStream, statSync, existsSync, mkdirSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 
@@ -549,6 +549,30 @@ function setupGlobalIPC(): void {
   })
   ipcMain.handle('window:close', () => {
     mainWindow?.close()
+  })
+
+  ipcMain.on('app:startNativeFileDrag', (event, paths: unknown) => {
+    try {
+      if (!Array.isArray(paths)) return
+      const files = paths
+        .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
+        .filter((filePath) => {
+          try {
+            return isAbsolute(filePath) && existsSync(filePath) && statSync(filePath).isFile()
+          } catch {
+            return false
+          }
+        })
+      if (files.length === 0) return
+      const iconPath = resolveAppIconPath()
+      event.sender.startDrag({
+        file: files[0],
+        files,
+        icon: iconPath,
+      })
+    } catch (error) {
+      console.warn('[drag] start native file drag failed:', error instanceof Error ? error.message : String(error))
+    }
   })
 
   // Theme sync — sets Electron's nativeTheme so BrowserView respects prefers-color-scheme,

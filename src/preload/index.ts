@@ -445,6 +445,12 @@ const browserAPI = {
   // Downloads
   getDownloads: () => ipcRenderer.invoke('browser:getDownloads'),
   clearDownloads: () => ipcRenderer.invoke('browser:clearDownloads'),
+  downloadUrlToDirectory: (payload: {
+    url: string
+    targetDir: string
+    sourcePageUrl?: string | null
+    suggestedName?: string | null
+  }) => ipcRenderer.invoke('browser:downloadUrlToDirectory', payload),
   onDownloadUpdate: (callback: (data: unknown) => void) => {
     const handler = (_: unknown, data: unknown): void => callback(data)
     ipcRenderer.on('browser:downloadUpdate', handler)
@@ -1040,6 +1046,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   ui: uiAPI,
   agentInteraction: agentInteractionAPI,
   platform: process.platform,
+  startNativeFileDrag: (paths: string[]) => ipcRenderer.send('app:startNativeFileDrag', paths),
   // Utility for drag-and-drop: get real file path from File object
   getFilePathFromDrop: (file: File) => webUtils.getPathForFile(file),
 })
@@ -1069,6 +1076,7 @@ declare global {
       ui: typeof uiAPI
       agentInteraction: typeof agentInteractionAPI
       platform: string
+      startNativeFileDrag: (paths: string[]) => void
       getFilePathFromDrop: (file: File) => string
     }
   }

@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import { BrowserDataService } from './data-service'
+import type { BrowserDownloadUrlToDirectoryPayload } from './download-service'
 
 interface BrowserDataIPCController {
   getAdblockState: () => unknown
@@ -9,6 +10,7 @@ interface BrowserDataIPCController {
   importBookmarksFromDialog: () => Promise<unknown>
   exportBookmarksToDialog: () => Promise<unknown>
   showUtilityMenu: (payload: unknown) => { success: boolean }
+  downloadUrlToDirectory: (payload: BrowserDownloadUrlToDirectoryPayload) => Promise<unknown>
   tabs: Map<string, { view?: { webContents: { print: () => void } } }>
 }
 
@@ -114,6 +116,14 @@ export function setupBrowserDataIPC(
     try {
       dataService.clearDownloads()
       return { success: true }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('browser:downloadUrlToDirectory', async (_, payload: BrowserDownloadUrlToDirectoryPayload) => {
+    try {
+      return await controller.downloadUrlToDirectory(payload)
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
