@@ -26,12 +26,14 @@ function resetAgentStore(): void {
 
 function installElectronApiMock(params: {
   listConversationScopes: () => Promise<unknown>
+  getConversationScopeMessages?: (scopeId: string) => Promise<unknown>
   getConversations?: (agent: string) => Promise<unknown>
 }): { legacyCalls: () => number } {
   let legacyCallCount = 0
   ;(globalThis as any).window.electronAPI = {
     agent: {
       listConversationScopes: params.listConversationScopes,
+      getConversationScopeMessages: params.getConversationScopeMessages,
       emitRendererMetric: async () => ({ success: true }),
     },
     chat: {
@@ -99,5 +101,70 @@ describe('useAgent scope list contract', () => {
     assert.equal(useAgent.getState().scopes.length, 1)
     assert.equal(useAgent.getState().currentScopeId, 'scope-ready')
     assert.equal(mock.legacyCalls(), 0)
+  })
+
+  it('hydrates selected scoped messages on cold start', async () => {
+    let loadedScopeId: string | null = null
+    installElectronApiMock({
+      listConversationScopes: async () => ({
+        success: true,
+        data: [
+          {
+            id: 'scope-with-history',
+            agent: 'butler',
+            title: 'Yesterday test session',
+            sourceKind: 'local',
+            sourceId: 'app',
+            threadKey: 'scope-with-history',
+            meta: { sourceLabel: '应用内' },
+            createdAt: '2026-05-18T10:00:00.000Z',
+            updatedAt: '2026-05-18T10:02:00.000Z',
+            lastMessageAt: '2026-05-18T10:02:00.000Z',
+          },
+        ],
+      }),
+      getConversationScopeMessages: async (scopeId: string) => {
+        loadedScopeId = scopeId
+        return {
+          success: true,
+          data: [
+            {
+              id: 'msg-user-1',
+              role: 'user',
+              content: '昨天的测试问题',
+              timestamp: '2026-05-18T10:01:00.000Z',
+              meta: {},
+            },
+            {
+              id: 'msg-agent-1',
+              role: 'assistant',
+              content: '昨天的测试回复',
+              timestamp: '2026-05-18T10:02:00.000Z',
+              meta: {},
+            },
+          ],
+        }
+      },
+    })
+    useAgent.setState({
+      messages: [
+        {
+          id: 'welcome',
+          agent: 'butler',
+          content: 'welcome',
+          type: 'agent',
+          timestamp: new Date('2026-05-19T00:00:00.000Z'),
+        },
+      ],
+    })
+
+    await useAgent.getState().loadScopes()
+
+    const state = useAgent.getState()
+    assert.equal(loadedScopeId, 'scope-with-history')
+    assert.equal(state.currentScopeId, 'scope-with-history')
+    assert.equal(state.messages.length, 2)
+    assert.equal(state.messages[0].content, '昨天的测试问题')
+    assert.equal(state.messages[1].content, '昨天的测试回复')
   })
 })

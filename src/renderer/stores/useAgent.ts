@@ -915,8 +915,8 @@ export const useAgent = create<AgentState>((set, get) => ({
         ? result.data as unknown as ConversationScope[]
         : []
       if (scopes.length === 0) return
-      const currentScopeId = get().currentScopeId
-      const currentScope = scopes.find((scope) => scope.id === currentScopeId) || scopes[0] || null
+      const previousScopeId = get().currentScopeId
+      const currentScope = scopes.find((scope) => scope.id === previousScopeId) || scopes[0] || null
       const activeRunState = getActiveScopeRunState(get().scopeRunStates, currentScope?.id || null)
       set({
         scopes,
@@ -932,6 +932,15 @@ export const useAgent = create<AgentState>((set, get) => ({
         pendingContinuationIntent: null,
         pendingContinuationDraftAnchor: null,
       })
+      const hasOnlyWelcomeMessages = get().messages.every((message) => /^welcome(?:-|$)/.test(message.id))
+      if (
+        currentScope?.id &&
+        currentScope.lastMessageAt &&
+        (previousScopeId !== currentScope.id || hasOnlyWelcomeMessages) &&
+        typeof window.electronAPI.agent.getConversationScopeMessages === 'function'
+      ) {
+        await get().loadScope(currentScope.id)
+      }
     } catch { /* ignore */ }
   },
 
