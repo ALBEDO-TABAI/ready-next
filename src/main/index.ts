@@ -4,7 +4,7 @@ import { resolve } from 'path'
 // Load .env from project root (before anything else)
 config({ path: resolve(__dirname, '../../.env') })
 
-import { app, shell, BrowserWindow, ipcMain, protocol, nativeImage, nativeTheme, Menu, dialog, type MenuItemConstructorOptions } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, protocol, nativeImage, nativeTheme, Menu, dialog, type MenuItemConstructorOptions, type NativeImage } from 'electron'
 import { join, extname, normalize, isAbsolute } from 'path'
 import { createReadStream, statSync, existsSync, mkdirSync } from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -58,6 +58,7 @@ const { autoUpdater } = pkg
 // Document operations (local fs) are always real — no external dependencies.
 // All environments: opt-in only via ENABLE_MOCK_SERVICES=true
 const ENABLE_MOCK_SERVICES = process.env.ENABLE_MOCK_SERVICES === 'true'
+const READY_NATIVE_FILE_DRAG_ENABLED = process.env.READY_NATIVE_FILE_DRAG_ENABLED !== '0'
 const READY_APP_NAME = 'Ready'
 app.setName(READY_APP_NAME)
 
@@ -179,6 +180,14 @@ function resolveAppIconPath(): string {
   return app.isPackaged
     ? join(process.resourcesPath, 'icon.icns')
     : resolve(__dirname, '../../build/icon.png')
+}
+
+let nativeFileDragIcon: NativeImage | null = null
+function resolveNativeFileDragIcon(): NativeImage {
+  if (nativeFileDragIcon) return nativeFileDragIcon
+  const icon = nativeImage.createFromPath(resolveAppIconPath())
+  nativeFileDragIcon = icon.isEmpty() ? nativeImage.createEmpty() : icon.resize({ width: 32, height: 32 })
+  return nativeFileDragIcon
 }
 
 function ensureDockIconVisible(): void {
@@ -553,6 +562,7 @@ function setupGlobalIPC(): void {
 
   ipcMain.on('app:startNativeFileDrag', (event, paths: unknown) => {
     try {
+      if (!READY_NATIVE_FILE_DRAG_ENABLED) return
       if (!Array.isArray(paths)) return
       const files = paths
         .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
@@ -564,11 +574,12 @@ function setupGlobalIPC(): void {
           }
         })
       if (files.length === 0) return
-      const iconPath = resolveAppIconPath()
+      const icon = resolveNativeFileDragIcon()
+      if (icon.isEmpty()) return
       event.sender.startDrag({
         file: files[0],
         files,
-        icon: iconPath,
+        icon,
       })
     } catch (error) {
       console.warn('[drag] start native file drag failed:', error instanceof Error ? error.message : String(error))
