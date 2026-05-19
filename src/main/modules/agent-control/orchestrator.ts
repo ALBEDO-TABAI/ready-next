@@ -215,6 +215,8 @@ export class ReadyAgentOrchestrator extends EventEmitter {
   ): Promise<{
     success: boolean
     error?: string
+    finalText?: string
+    cancelled?: boolean
     taskId?: ExecutionHostResult['taskId']
     usedTools?: ExecutionHostResult['usedTools']
     taskType?: ExecutionHostResult['taskType']
@@ -349,7 +351,37 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     })
 
     try {
-      const result = await collector.result
+      const firstResult = await Promise.race([
+        collector.result.then((result) => ({ source: 'collector' as const, result })),
+        sendResultPromise.then((result) => ({ source: 'send' as const, result })),
+      ])
+      if (firstResult.source === 'send') {
+        const executionResult = firstResult.result
+        if (executionResult) {
+          return {
+            success: executionResult.success,
+            finalText: executionResult.finalText || '',
+            cancelled: Boolean(executionResult.cancelled),
+            usedTools: usedToolsFromExecution || executionResult.usedTools || [],
+            error: executionResult.error,
+            taskId: resolvedTaskId || executionResult.taskId || undefined,
+            taskType: taskType || executionResult.taskType,
+            interactionState: interactionState || executionResult.interactionState,
+            taskProjectionId: taskProjectionId || executionResult.taskProjectionId,
+            executionDiagnostics: executionDiagnostics || executionResult.executionDiagnostics || null,
+            projectionTruth: projectionTruth || executionResult.projectionTruth,
+            terminalReason: terminalReason || executionResult.terminalReason || (executionResult.cancelled ? 'cancelled_runtime' : null),
+          }
+        }
+        return {
+          success: false,
+          finalText: '',
+          cancelled: false,
+          usedTools: [],
+          error: 'Agent execution failed',
+        }
+      }
+      const result = firstResult.result
       await sendResultPromise
       return {
         ...result,

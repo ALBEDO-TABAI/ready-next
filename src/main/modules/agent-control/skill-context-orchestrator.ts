@@ -42,6 +42,18 @@ const REFERENCE_SKILL_PRIMITIVE_TOOL_NAMES = [
   'skill_inspect_run_state',
 ]
 
+const DESCRIPTION_MATCH_STOP_TERMS = new Set([
+  '帮我',
+  '帮忙',
+  '请帮',
+  '给我',
+  '这个',
+  '那个',
+  '一下',
+  '内容',
+  '文档',
+])
+
 function errorKind(error: unknown): string {
   if (error && typeof error === 'object' && 'code' in error && typeof (error as { code?: unknown }).code === 'string') {
     return (error as { code: string }).code
@@ -486,9 +498,11 @@ export class SkillContextOrchestrator {
   }
 
   private skillMatchesDescriptionIntent(skill: SkillState, text: string): boolean {
-    const taskTerms = new Set(this.extractIntentTerms(text))
+    const taskTerms = new Set(this.extractIntentTerms(text).filter((term) => !DESCRIPTION_MATCH_STOP_TERMS.has(term)))
     if (taskTerms.size < 2) return false
-    const skillTerms = new Set(this.extractIntentTerms(`${skill.name} ${skill.description}`))
+    const skillTerms = new Set(
+      this.extractIntentTerms(`${skill.name} ${skill.description}`).filter((term) => !DESCRIPTION_MATCH_STOP_TERMS.has(term)),
+    )
     let matches = 0
     for (const term of taskTerms) {
       if (!skillTerms.has(term)) continue

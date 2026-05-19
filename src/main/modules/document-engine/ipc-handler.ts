@@ -398,12 +398,19 @@ export async function writeDocumentEditableText(
   }
 }
 
+function resolveDialogWindow(parentWindow?: BrowserWindow | null): BrowserWindow | null {
+  if (parentWindow && !parentWindow.isDestroyed()) return parentWindow
+  const focused = BrowserWindow.getFocusedWindow()
+  if (focused && !focused.isDestroyed()) return focused
+  return BrowserWindow.getAllWindows().find((candidate) => !candidate.isDestroyed()) || null
+}
+
 async function saveDocumentWithDialog(payload: {
   content?: string
   contentBase64?: string
   suggestedName?: string
   defaultPath?: string | null
-}): Promise<{
+}, parentWindow?: BrowserWindow | null): Promise<{
   success: boolean
   path?: string
   canceled?: boolean
@@ -415,7 +422,7 @@ async function saveDocumentWithDialog(payload: {
   actual?: number
 }> {
   try {
-    const win = BrowserWindow.getFocusedWindow()
+    const win = resolveDialogWindow(parentWindow)
     if (!win) return { success: false, error: 'No window' }
 
     const suggestedName = (payload.suggestedName || '新文档.md').trim() || '新文档.md'
@@ -794,7 +801,7 @@ export function setupDocumentIPC(useMock = false): void {
     }
   })
 
-  ipcMain.handle('document:saveAs', async (_, payload: { content?: string; contentBase64?: string; suggestedName?: string; defaultPath?: string | null }) => {
+  ipcMain.handle('document:saveAs', async (event, payload: { content?: string; contentBase64?: string; suggestedName?: string; defaultPath?: string | null }) => {
     if (useMock) {
       return {
         success: true,
@@ -802,7 +809,7 @@ export function setupDocumentIPC(useMock = false): void {
         mock: true,
       }
     }
-    return saveDocumentWithDialog(payload)
+    return saveDocumentWithDialog(payload, BrowserWindow.fromWebContents(event.sender))
   })
 
   ipcMain.handle('document:importEbookAsMarkdown', async (_, payload: { sourcePath?: string }) => {
@@ -1159,9 +1166,9 @@ export function setupDocumentIPC(useMock = false): void {
   // returning the path. Callers that pick a folder for *non*-workspace
   // purposes (e.g. RSS download dir, skill import) pass no payload and get
   // the legacy unconditional behavior.
-  ipcMain.handle('document:openFolder', async (_event, payload?: { validateAsWorkspace?: boolean }) => {
+  ipcMain.handle('document:openFolder', async (event, payload?: { validateAsWorkspace?: boolean }) => {
     try {
-      const win = BrowserWindow.getFocusedWindow()
+      const win = resolveDialogWindow(BrowserWindow.fromWebContents(event.sender))
       if (!win) return { success: false, error: 'No window' }
       const result = await dialog.showOpenDialog(win, {
         properties: ['openDirectory'],
@@ -1202,9 +1209,9 @@ export function setupDocumentIPC(useMock = false): void {
   // pop a save dialog so the user picks a location and we write a
   // `.ready-workspace.json` file. The schema is intentionally minimal so it
   // stays portable (just absolute folder paths).
-  ipcMain.handle('document:exportWorkspace', async (_event, payload: { name: string; folders: string[] }) => {
+  ipcMain.handle('document:exportWorkspace', async (event, payload: { name: string; folders: string[] }) => {
     try {
-      const win = BrowserWindow.getFocusedWindow()
+      const win = resolveDialogWindow(BrowserWindow.fromWebContents(event.sender))
       if (!win) return { success: false, error: 'No window' }
       const safeName = (payload?.name || '工作区').replace(/[\\/:*?"<>|]/g, '_').trim() || '工作区'
       const folders = Array.isArray(payload?.folders) ? payload.folders.filter((f) => typeof f === 'string' && f.length > 0) : []
@@ -1238,9 +1245,9 @@ export function setupDocumentIPC(useMock = false): void {
   // Import workspace index file. Opens a file picker and returns the parsed
   // schema. Caller (renderer store) is responsible for validating each
   // folder against `validateWorkspaceRoot` before adopting them.
-  ipcMain.handle('document:importWorkspace', async () => {
+  ipcMain.handle('document:importWorkspace', async (event) => {
     try {
-      const win = BrowserWindow.getFocusedWindow()
+      const win = resolveDialogWindow(BrowserWindow.fromWebContents(event.sender))
       if (!win) return { success: false, error: 'No window' }
       const result = await dialog.showOpenDialog(win, {
         title: '导入工作区',

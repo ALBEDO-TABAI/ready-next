@@ -37,35 +37,7 @@ export interface SendAndCollectResult {
   taskType?: import('./run-contracts').TaskType
   interactionState?: import('./run-contracts').TaskInteractionState
   taskProjectionId?: string | null
-  executionDiagnostics?: {
-    taskBudgetRuntime?: import('./run-contracts').TaskBudgetRuntime | null
-    compression?: {
-      historyCompressed: boolean
-      toolTraceCompressed: boolean
-      artifactSummaryUsed: boolean
-    } | null
-    budget?: {
-      maxIterations: number
-      maxToolCalls: number
-      maxParallelToolGroups: number
-      iterationsUsed?: number
-      toolCallsUsed?: number
-      parallelToolGroupsUsed?: number
-    } | null
-    stepBudget?: {
-      stepId?: string | null
-      maxIterations?: number
-      remainingIterations?: number
-    } | null
-    budgetUsagePercent?: number | null
-    fallback?: {
-      happened: boolean
-      kind: string
-      attempts: number
-    } | null
-    recoveryHistory?: import('./run-contracts').RecoveryRecord[] | null
-    degradationReason?: string | null
-  } | null
+  executionDiagnostics?: import('./run-contracts').ExecutionRunDiagnostics | null
   projectionTruth?: import('./run-contracts').ProjectionTruthSnapshot | null
   terminalReason?: import('./turn-frame').TurnTerminalReason | null
 }

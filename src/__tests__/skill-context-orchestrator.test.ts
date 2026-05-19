@@ -204,6 +204,31 @@ test('SkillContextOrchestrator can match concrete tasks through skill descriptio
   assert.equal(matched[0]?.id, 'media-scene-review')
 })
 
+test('SkillContextOrchestrator ignores generic helper terms in fuzzy skill description matches', () => {
+  const orchestrator = new SkillContextOrchestrator({
+    extractPrimaryUserInstruction: (raw) => raw,
+    listSkills: () => [
+      {
+        id: 'image-analysis-router',
+        name: 'image-analysis-router',
+        description: 'Route image-heavy requests. Trigger on requests such as "帮我看这页PPT".',
+        defaultAction: 'read_skill',
+        executionMode: 'advisory',
+        actions: [{ name: 'read_skill', visibility: 'internal', runtime: 'reference', params: [] }],
+      } as any,
+    ],
+    resolveSkillToolByAction: (_skillId, action) => ({ name: `skill_${action}`, action }) as any,
+  })
+
+  const matched = orchestrator.findExplicitlyRequestedSkills(
+    '再帮我新开一个文档把下面内容转为详细地分镜描述，每一行都是一个镜头：\n' +
+      'a厕所前对镜自拍检查\n' +
+      'a：完了，熬夜改PPT，脸垮的能拖到地上。',
+  )
+
+  assert.deepEqual(matched.map((skill) => skill.id), [])
+})
+
 test('SkillContextOrchestrator filters out short skill tokens below length threshold', () => {
   const orchestrator = new SkillContextOrchestrator({
     extractPrimaryUserInstruction: (raw) => raw,
