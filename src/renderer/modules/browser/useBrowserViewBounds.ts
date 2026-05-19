@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, type RefObject } from 'react'
-import type { BrowserBoundsSyncMode, BrowserHostLayoutPhase } from '../../../shared/browser-view-layout'
+import type { BrowserBoundsSyncMode, BrowserHostLayoutPhase, BrowserViewRect } from '../../../shared/browser-view-layout'
 import { subscribeWorkbenchWindowResize } from '../workbench/windowResize'
 import { PANEL_RESIZE_STATE_EVENT, type PanelResizeReason, type PanelResizeStateDetail } from './resize-events'
 
@@ -10,6 +10,9 @@ const HOST_RECOVERY_SETTLE_MS = 120
 interface UseBrowserViewBoundsParams {
   isElectron: boolean
   contentRef: RefObject<HTMLDivElement | null>
+  splitContentRef?: RefObject<HTMLDivElement | null>
+  activeTabId?: string | null
+  splitTabId?: string | null
   isActive: boolean
   layoutPhase: BrowserHostLayoutPhase
   isVisibleAllowed?: boolean
@@ -40,9 +43,25 @@ interface PendingBoundsSyncRequest {
 const buildBoundsSignature = (bounds: MeasuredBounds, syncMode: BrowserBoundsSyncMode) =>
   `${syncMode}:${bounds.x}:${bounds.y}:${bounds.width}:${bounds.height}`
 
+const buildSplitBoundsSignature = (
+  bounds: MeasuredBounds,
+  syncMode: BrowserBoundsSyncMode,
+  activeTabId?: string | null,
+  splitTabId?: string | null,
+  splitBounds?: MeasuredBounds | null,
+) => [
+  buildBoundsSignature(bounds, syncMode),
+  activeTabId || '',
+  splitTabId || '',
+  splitBounds ? `${splitBounds.x}:${splitBounds.y}:${splitBounds.width}:${splitBounds.height}` : '',
+].join(':')
+
 export function useBrowserViewBounds({
   isElectron,
   contentRef,
+  splitContentRef,
+  activeTabId,
+  splitTabId,
   isActive,
   layoutPhase,
   isVisibleAllowed = true,
@@ -76,10 +95,10 @@ export function useBrowserViewBounds({
   isVisibleAllowedRef.current = isVisibleAllowed
   hasErrorRef.current = hasError
 
-  const measureBounds = useCallback((): MeasuredBounds | null => {
-    if (!isElectron || !contentRef.current) return null
+  const measureElementBounds = useCallback((element: HTMLElement | null): MeasuredBounds | null => {
+    if (!isElectron || !element) return null
 
-    const rect = contentRef.current.getBoundingClientRect()
+    const rect = element.getBoundingClientRect()
     const x = Math.round(rect.left)
     const y = Math.round(rect.top - topInset)
     const exactWidth = Math.round(rect.width)
@@ -87,7 +106,15 @@ export function useBrowserViewBounds({
     if (exactWidth <= 0 || height <= 0) return null
 
     return { x, y, width: exactWidth, height }
-  }, [contentRef, isElectron, topInset])
+  }, [isElectron, topInset])
+
+  const measureBounds = useCallback((): MeasuredBounds | null => (
+    measureElementBounds(contentRef.current)
+  ), [contentRef, measureElementBounds])
+
+  const measureSplitBounds = useCallback((): MeasuredBounds | null => (
+    measureElementBounds(splitContentRef?.current || null)
+  ), [measureElementBounds, splitContentRef])
 
   const clearFrameSync = useCallback(() => {
     if (frameSyncRafRef.current !== null) {
@@ -116,12 +143,27 @@ export function useBrowserViewBounds({
     if (!bounds) return
 
     const resolvedSyncMode = options?.syncMode ?? (layoutPhaseRef.current === 'idle' ? 'settled' : 'transient')
-    const boundsKey = buildBoundsSignature(bounds, resolvedSyncMode)
+    const splitBounds = splitTabId && splitTabId !== activeTabId ? measureSplitBounds() : null
+    const boundsKey = buildSplitBoundsSignature(bounds, resolvedSyncMode, activeTabId, splitTabId, splitBounds)
     if (!options?.forceExact && lastBoundsKeyRef.current === boundsKey) return
 
     lastBoundsKeyRef.current = boundsKey
-    await window.electronAPI?.browser?.updateBounds({ ...bounds, syncMode: resolvedSyncMode })
-  }, [measureBounds])
+    const secondaryBounds: BrowserViewRect | null = splitBounds
+      ? {
+          x: splitBounds.x,
+          y: splitBounds.y,
+          width: splitBounds.width,
+          height: splitBounds.height,
+        }
+      : null
+    await window.electronAPI?.browser?.updateBounds({
+      ...bounds,
+      tabId: activeTabId ?? null,
+      secondaryTabId: secondaryBounds ? splitTabId ?? null : null,
+      secondaryBounds,
+      syncMode: resolvedSyncMode,
+    })
+  }, [activeTabId, measureBounds, measureSplitBounds, splitTabId])
 
   const stopDragBoundsSync = useCallback(() => {
     if (dragBoundsSyncRafRef.current !== null) {

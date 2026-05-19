@@ -1796,6 +1796,39 @@ body.resizing .workbench-split-resize-handle__grip {
   opacity: 0.46;
 }
 
+.browser-split-resize-handle {
+  width: 3px;
+  flex: 0 0 3px;
+  cursor: col-resize;
+  position: relative;
+  align-self: stretch;
+  z-index: 12;
+  background: transparent;
+}
+
+.browser-split-resize-handle__grip {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 1px;
+  height: 22px;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  background: color-mix(in srgb, var(--text-gray) 56%, transparent);
+  border-radius: 999px;
+  transition: opacity 0.15s;
+}
+
+.browser-split-resize-handle:hover,
+body.resizing .browser-split-resize-handle {
+  background: transparent;
+}
+
+.browser-split-resize-handle:hover .browser-split-resize-handle__grip,
+body.resizing .browser-split-resize-handle__grip {
+  opacity: 0.58;
+}
+
 /* Disable layout-related transitions during panel resize drag.
    Scoped to panel/canvas/glass shells + BrowserView hosts so unrelated
    hover/tooltip transitions elsewhere are not collateral damage. */

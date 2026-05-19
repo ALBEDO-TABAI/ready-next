@@ -106,8 +106,10 @@ export { isAllowedBrowserURL }
 export class BrowserController {
   tabs = new Map<string, Tab>()
   activeTabId: string | null = null
+  splitTabId: string | null = null
   tabCounter = 0
   viewBounds: BrowserRect = { x: 0, y: 0, width: 800, height: 600 }
+  splitViewBounds: BrowserRect = { x: 0, y: 0, width: 800, height: 600 }
   previewBounds: BrowserRect = { x: 0, y: 0, width: 800, height: 600 }
   private readonly browserVisibilityState = new BrowserVisibilityCommandState()
   private readonly browserHostKind: BrowserHostKind
@@ -256,16 +258,24 @@ export class BrowserController {
       setActiveTabId: (tabId) => {
         this.activeTabId = tabId
       },
+      getSplitTabId: () => this.splitTabId,
+      setSplitTabId: (tabId) => {
+        this.splitTabId = tabId
+      },
       getViewBounds: () => this.viewBounds,
       setViewBounds: (bounds) => {
         this.viewBounds = bounds
+      },
+      getSplitViewBounds: () => this.splitViewBounds,
+      setSplitViewBounds: (bounds) => {
+        this.splitViewBounds = bounds
       },
       shouldPresentHosts: () => this.browserVisibilityState.shouldPresentHosts(),
       isAllowedUrl: (url) => isAllowedBrowserURL(url, { allowLocalHtml: true }),
       createTab: (url) => this.createTab(url),
       detachHost: (view) => this.detachHost(view),
       showHost: (view, bounds) => this.showHost(view, bounds),
-      applyBounds: (view, syncMode) => this.applyBounds(view, syncMode),
+      applyBounds: (view, syncMode, bounds) => this.applyBounds(view, syncMode, bounds),
       hideHost: (view) => this.hideHost(view),
       detachPreviewView: () => this.detachPreviewView(),
       restoreActiveTabHost: () => this.restoreActiveTabHost(),
@@ -399,8 +409,12 @@ export class BrowserController {
     }
   }
 
-  applyBounds(view: BrowserHostView, syncMode: BrowserBoundsSyncMode = 'settled'): void {
-    this.hostLayoutService.applyBounds(view, this.viewBounds, syncMode)
+  applyBounds(
+    view: BrowserHostView,
+    syncMode: BrowserBoundsSyncMode = 'settled',
+    bounds: BrowserRect = this.viewBounds,
+  ): void {
+    this.hostLayoutService.applyBounds(view, bounds, syncMode)
   }
 
   applyPreviewBounds(view: BrowserHostView): void {
@@ -423,6 +437,15 @@ export class BrowserController {
       this.showHost(activeTab.view, this.viewBounds)
       this.applyBounds(activeTab.view, 'settled')
     }
+  }
+
+  private clearSplitTabHost(): void {
+    if (!this.splitTabId) return
+    const splitTab = this.tabs.get(this.splitTabId)
+    if (splitTab?.view) {
+      this.detachHost(splitTab.view)
+    }
+    this.splitTabId = null
   }
 
   private bindAppShortcutBridge(webContents: Electron.WebContents): void {
@@ -748,6 +771,7 @@ export class BrowserController {
    * Create a new tab and navigate to URL. Returns the tab ID.
    */
   async createTab(url: string): Promise<{ success: boolean; tabId?: string; error?: string }> {
+    this.clearSplitTabHost()
     return this.tabLifecycleService.createTab(url)
   }
 

@@ -59,14 +59,18 @@ interface BrowserTabShellHost {
   tabs: Map<string, BrowserShellTabRecord>
   getActiveTabId(): string | null
   setActiveTabId(tabId: string | null): void
+  getSplitTabId(): string | null
+  setSplitTabId(tabId: string | null): void
   getViewBounds(): BrowserRect
   setViewBounds(bounds: BrowserRect): void
+  getSplitViewBounds(): BrowserRect
+  setSplitViewBounds(bounds: BrowserRect): void
   shouldPresentHosts(): boolean
   isAllowedUrl(url: string): boolean
   createTab(url: string): Promise<{ success: boolean; tabId?: string; error?: string }>
   detachHost(view: BrowserShellView): void
   showHost(view: BrowserShellView, bounds: BrowserRect): void
-  applyBounds(view: BrowserShellView, syncMode?: BrowserBoundsSyncMode): void
+  applyBounds(view: BrowserShellView, syncMode?: BrowserBoundsSyncMode, bounds?: BrowserRect): void
   hideHost(view: BrowserShellView): void
   detachPreviewView(): void
   restoreActiveTabHost(): void
@@ -75,13 +79,17 @@ interface BrowserTabShellHost {
 export class BrowserTabShellService {
   constructor(private readonly host: BrowserTabShellHost) {}
 
-  private detachNonTargetHosts(targetTabId: string | null): void {
+  private detachNonTargetHosts(targetTabIds: ReadonlySet<string>): void {
     for (const [tabId, tab] of this.host.tabs.entries()) {
-      if (tabId === targetTabId) continue
+      if (targetTabIds.has(tabId)) continue
       if (tab.view) {
         this.host.detachHost(tab.view)
       }
     }
+  }
+
+  private clearSplitHostState(): void {
+    this.host.setSplitTabId(null)
   }
 
   async navigate(tabId: string | null, url: string): Promise<{ success: boolean; error?: string }> {
@@ -141,6 +149,7 @@ export class BrowserTabShellService {
     this.host.tabs.delete(tabId)
 
     if (this.host.getActiveTabId() === tabId) {
+      this.clearSplitHostState()
       const remaining = Array.from(this.host.tabs.values())
       if (remaining.length > 0) {
         const nextTab = remaining[remaining.length - 1]
@@ -152,6 +161,8 @@ export class BrowserTabShellService {
       } else {
         this.host.setActiveTabId(null)
       }
+    } else if (this.host.getSplitTabId() === tabId) {
+      this.clearSplitHostState()
     }
 
     return { success: true }
@@ -160,12 +171,13 @@ export class BrowserTabShellService {
   switchTab(tabId: string): BrowserTabSwitchResult {
     const nextTab = this.host.tabs.get(tabId)
     if (!nextTab?.view) return { success: false, error: 'Tab not found' }
+    this.clearSplitHostState()
     this.host.setActiveTabId(tabId)
     if (this.host.shouldPresentHosts()) {
       this.host.showHost(nextTab.view, this.host.getViewBounds())
       this.host.applyBounds(nextTab.view)
     }
-    this.detachNonTargetHosts(tabId)
+    this.detachNonTargetHosts(new Set([tabId]))
 
     return {
       success: true,
@@ -183,16 +195,37 @@ export class BrowserTabShellService {
   }
 
   updateViewBounds(bounds: BrowserViewBoundsUpdate): { success: boolean } {
-    const { syncMode = 'settled', ...nextBounds } = bounds
+    const {
+      syncMode = 'settled',
+      tabId,
+      secondaryTabId,
+      secondaryBounds,
+      ...nextBounds
+    } = bounds
     this.host.setViewBounds(nextBounds)
+    const resolvedActiveTabId = this.host.getActiveTabId()
+    const resolvedPrimaryTabId = tabId || resolvedActiveTabId
+    const resolvedSecondaryTabId =
+      secondaryTabId && secondaryTabId !== resolvedPrimaryTabId && secondaryBounds
+        ? secondaryTabId
+        : null
+    this.host.setSplitTabId(resolvedSecondaryTabId)
+    if (resolvedSecondaryTabId && secondaryBounds) {
+      this.host.setSplitViewBounds(secondaryBounds)
+    }
     if (!this.host.shouldPresentHosts()) {
       return { success: true }
     }
-    const activeTabId = this.host.getActiveTabId()
-    if (activeTabId) {
-      const activeTab = this.host.tabs.get(activeTabId)
+    if (resolvedPrimaryTabId) {
+      const activeTab = this.host.tabs.get(resolvedPrimaryTabId)
       if (activeTab?.view) {
-        this.host.applyBounds(activeTab.view, syncMode)
+        this.host.applyBounds(activeTab.view, syncMode, nextBounds)
+      }
+    }
+    if (resolvedSecondaryTabId) {
+      const splitTab = this.host.tabs.get(resolvedSecondaryTabId)
+      if (splitTab?.view) {
+        this.host.applyBounds(splitTab.view, syncMode, this.host.getSplitViewBounds())
       }
     }
     return { success: true }
@@ -221,8 +254,28 @@ export class BrowserTabShellService {
 
   showActiveHost(): { success: boolean } {
     this.host.detachPreviewView()
-    this.detachNonTargetHosts(this.host.getActiveTabId())
-    this.host.restoreActiveTabHost()
+    const activeTabId = this.host.getActiveTabId()
+    const splitTabId = this.host.getSplitTabId()
+    const visibleTabIds = new Set<string>()
+    if (activeTabId) visibleTabIds.add(activeTabId)
+    if (splitTabId && splitTabId !== activeTabId) visibleTabIds.add(splitTabId)
+    this.detachNonTargetHosts(visibleTabIds)
+
+    if (activeTabId) {
+      const activeTab = this.host.tabs.get(activeTabId)
+      if (activeTab?.view) {
+        this.host.showHost(activeTab.view, this.host.getViewBounds())
+        this.host.applyBounds(activeTab.view, 'settled', this.host.getViewBounds())
+      }
+    }
+
+    if (splitTabId && splitTabId !== activeTabId) {
+      const splitTab = this.host.tabs.get(splitTabId)
+      if (splitTab?.view) {
+        this.host.showHost(splitTab.view, this.host.getSplitViewBounds())
+        this.host.applyBounds(splitTab.view, 'settled', this.host.getSplitViewBounds())
+      }
+    }
     return { success: true }
   }
 

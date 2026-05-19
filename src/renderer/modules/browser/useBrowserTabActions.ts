@@ -179,13 +179,14 @@ export function useBrowserTabActions({
     await syncTabsFromBackend()
   }, [executeTabSwitch, isElectron, syncTabsFromBackend])
 
-  const handleNavigate = useCallback(async (url?: string) => {
+  const handleNavigate = useCallback(async (url?: string, options?: { tabId?: string | null }) => {
     if (!isElectron) return
     const { urlInput: currentInput } = useBrowserTabs.getState()
     const targetUrl = normalizeUrl(url || currentInput)
+    const targetTabId = options?.tabId ?? activeTabId
     if (!isSupportedBrowserNavigationUrl(targetUrl)) {
-      if (activeTabId) {
-        updateTab(activeTabId, {
+      if (targetTabId) {
+        updateTab(targetTabId, {
           loading: false,
           error: '浏览器当前支持网页地址和本地 HTML 文件；其他本地文件请改用文稿或文件区打开。',
         })
@@ -193,7 +194,7 @@ export function useBrowserTabActions({
       return
     }
 
-    if (!activeTabId) {
+    if (!targetTabId) {
       await sendBoundsImmediate({ forceExact: true })
       await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
       const created = await window.electronAPI?.browser?.createTab(targetUrl) as { success: boolean; tabId?: string } | undefined
@@ -220,11 +221,13 @@ export function useBrowserTabActions({
       return
     }
 
-    updateTab(activeTabId, { url: targetUrl, loading: true, error: undefined })
-    setUrlInput(targetUrl)
-    const result = await window.electronAPI?.browser?.navigate(activeTabId, targetUrl)
+    updateTab(targetTabId, { url: targetUrl, loading: true, error: undefined })
+    if (targetTabId === activeTabId) {
+      setUrlInput(targetUrl)
+    }
+    const result = await window.electronAPI?.browser?.navigate(targetTabId, targetUrl)
     if (!result?.success) {
-      updateTab(activeTabId, {
+      updateTab(targetTabId, {
         loading: false,
         error: result?.error || '页面打开失败',
       })
@@ -243,18 +246,18 @@ export function useBrowserTabActions({
     event.dataTransfer.dropEffect = 'copy'
   }, [])
 
-  const handleContentDrop = useCallback((event: React.DragEvent<HTMLDivElement>) => {
+  const handleContentDrop = useCallback((event: React.DragEvent<HTMLDivElement>, tabId?: string | null) => {
     const droppedFiles = getDroppedFilesFromDataTransfer(event.dataTransfer)
     if (droppedFiles.length > 0) {
       event.preventDefault()
-      void handleNavigate(toFileUrl(droppedFiles[0].path))
+      void handleNavigate(toFileUrl(droppedFiles[0].path), { tabId })
       return
     }
 
     const rawText = event.dataTransfer.getData('text/plain')?.trim()
     if (!rawText) return
     event.preventDefault()
-    void handleNavigate(rawText)
+    void handleNavigate(rawText, { tabId })
   }, [handleNavigate])
 
   const handleGoBack = useCallback(async () => {
@@ -273,13 +276,14 @@ export function useBrowserTabActions({
     await window.electronAPI?.browser?.reload(activeTabId)
   }, [isElectron, activeTabId, updateTab])
 
-  const handleRetry = useCallback(async () => {
-    if (!isElectron || !activeTabId) return
+  const handleRetry = useCallback(async (tabId?: string | null) => {
+    const targetTabId = tabId ?? activeTabId
+    if (!isElectron || !targetTabId) return
     const { tabs: currentTabs } = useBrowserTabs.getState()
-    const tab = currentTabs.find((item) => item.id === activeTabId)
+    const tab = currentTabs.find((item) => item.id === targetTabId)
     if (tab) {
-      updateTab(activeTabId, { loading: true, error: undefined })
-      await window.electronAPI?.browser?.navigate(activeTabId, tab.url)
+      updateTab(targetTabId, { loading: true, error: undefined })
+      await window.electronAPI?.browser?.navigate(targetTabId, tab.url)
     }
   }, [isElectron, activeTabId, updateTab])
 

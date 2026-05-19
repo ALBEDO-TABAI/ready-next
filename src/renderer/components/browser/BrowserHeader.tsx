@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react'
+import { useCallback, useEffect, useRef, type MouseEvent } from 'react'
 
 import HeaderUtilityActions from './HeaderUtilityActions'
 import TabRail from './TabRail'
@@ -11,13 +11,14 @@ interface BrowserHeaderProps {
   isActive: boolean
   tabs: BrowserTab[]
   activeTabId: string | null
+  splitTabId: string | null
   urlInput: string
   bookmarkedUrls: string[]
   loading: boolean
   canGoBack: boolean
   canGoForward: boolean
   isBookmarked: boolean
-  onTabClick: (id: string) => void
+  onTabClick: (id: string, event: MouseEvent<HTMLButtonElement>) => void
   onTabClose: (id: string) => void
   onNewTab: () => void
   onReorder: (fromIndex: number, toIndex: number) => void
@@ -39,6 +40,7 @@ export default function BrowserHeader({
   isActive,
   tabs,
   activeTabId,
+  splitTabId,
   urlInput,
   bookmarkedUrls,
   loading,
@@ -119,6 +121,7 @@ export default function BrowserHeader({
           isActive={isActive}
           tabs={tabs}
           activeTabId={activeTabId}
+          splitTabId={splitTabId}
           activeTabMode={activeTabMode}
           loading={loading}
           canGoBack={canGoBack}
@@ -128,9 +131,9 @@ export default function BrowserHeader({
           urlInput={urlInput}
           isBookmarked={isBookmarked}
           bookmarkedUrls={bookmarkedUrls}
-          onTabClick={(tabId) => {
+          onTabClick={(tabId, event) => {
             dismissAddressEditing()
-            onTabClick(tabId)
+            onTabClick(tabId, event)
           }}
           onTabClose={onTabClose}
           onNewTab={onNewTab}

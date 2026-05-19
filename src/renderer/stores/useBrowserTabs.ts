@@ -20,10 +20,14 @@ export interface BrowserTab {
 interface BrowserTabsState {
   tabs: BrowserTab[]
   activeTabId: string | null
+  splitTabId: string | null
+  browserSplitRatio: number
   urlInput: string
 
   setTabs: (tabs: BrowserTab[] | ((prev: BrowserTab[]) => BrowserTab[])) => void
   setActiveTabId: (id: string | null | ((prev: string | null) => string | null)) => void
+  setSplitTabId: (id: string | null) => void
+  setBrowserSplitRatio: (ratio: number) => void
   setUrlInput: (input: string) => void
   addTab: (tab: BrowserTab) => void
   removeTab: (id: string) => void
@@ -34,6 +38,8 @@ interface BrowserTabsState {
 interface BrowserTabsSnapshot {
   tabs: BrowserTab[]
   activeTabId: string | null
+  splitTabId: string | null
+  browserSplitRatio: number
   urlInput: string
 }
 
@@ -65,10 +71,15 @@ function sanitizeSnapshot(snapshot: BrowserTabsSnapshot): BrowserTabsSnapshot {
     : []
   const activeTabId = tabs.some((tab) => tab.id === snapshot.activeTabId) ? snapshot.activeTabId : tabs[0]?.id || null
   const activeTab = tabs.find((tab) => tab.id === activeTabId) || null
+  const splitTabId = snapshot.splitTabId && snapshot.splitTabId !== activeTabId && tabs.some((tab) => tab.id === snapshot.splitTabId)
+    ? snapshot.splitTabId
+    : null
 
   return {
     tabs,
     activeTabId,
+    splitTabId,
+    browserSplitRatio: Math.max(20, Math.min(80, Number(snapshot.browserSplitRatio) || 50)),
     urlInput: typeof snapshot.urlInput === 'string'
       ? snapshot.urlInput
       : activeTab?.url || '',
@@ -79,6 +90,8 @@ function readBrowserTabsSnapshot(): BrowserTabsSnapshot {
   return sanitizeSnapshot(readJsonStorage(BROWSER_TABS_SNAPSHOT_KEY, {
     tabs: [],
     activeTabId: null,
+    splitTabId: null,
+    browserSplitRatio: 50,
     urlInput: '',
   } satisfies BrowserTabsSnapshot))
 }
@@ -92,6 +105,8 @@ const initialBrowserTabsSnapshot = readBrowserTabsSnapshot()
 export const useBrowserTabs = create<BrowserTabsState>((set) => ({
   tabs: initialBrowserTabsSnapshot.tabs,
   activeTabId: initialBrowserTabsSnapshot.activeTabId,
+  splitTabId: initialBrowserTabsSnapshot.splitTabId,
+  browserSplitRatio: initialBrowserTabsSnapshot.browserSplitRatio,
   urlInput: initialBrowserTabsSnapshot.urlInput,
 
   setTabs: (tabsOrUpdater) =>
@@ -100,6 +115,8 @@ export const useBrowserTabs = create<BrowserTabsState>((set) => ({
       const nextState = sanitizeSnapshot({
         tabs: nextTabs,
         activeTabId: state.activeTabId,
+        splitTabId: state.splitTabId,
+        browserSplitRatio: state.browserSplitRatio,
         urlInput: state.urlInput,
       })
       persistBrowserTabsSnapshot(nextState)
@@ -109,11 +126,37 @@ export const useBrowserTabs = create<BrowserTabsState>((set) => ({
   setActiveTabId: (idOrUpdater) =>
     set((state) => {
       const nextActiveTabId = typeof idOrUpdater === 'function' ? idOrUpdater(state.activeTabId) : idOrUpdater
+      const activeTabChanged = nextActiveTabId !== state.activeTabId
       const nextState = sanitizeSnapshot({
         tabs: state.tabs,
         activeTabId: nextActiveTabId,
+        splitTabId: activeTabChanged ? null : state.splitTabId,
+        browserSplitRatio: state.browserSplitRatio,
         urlInput: state.urlInput,
       })
+      persistBrowserTabsSnapshot(nextState)
+      return nextState
+    }),
+
+  setSplitTabId: (id) =>
+    set((state) => {
+      const nextState = sanitizeSnapshot({
+        tabs: state.tabs,
+        activeTabId: state.activeTabId,
+        splitTabId: id,
+        browserSplitRatio: state.browserSplitRatio,
+        urlInput: state.urlInput,
+      })
+      persistBrowserTabsSnapshot(nextState)
+      return nextState
+    }),
+
+  setBrowserSplitRatio: (ratio) =>
+    set((state) => {
+      const nextState = {
+        ...state,
+        browserSplitRatio: Math.max(20, Math.min(80, ratio)),
+      }
       persistBrowserTabsSnapshot(nextState)
       return nextState
     }),
@@ -134,6 +177,8 @@ export const useBrowserTabs = create<BrowserTabsState>((set) => ({
       const nextState = sanitizeSnapshot({
         tabs: [...state.tabs, tab],
         activeTabId: state.activeTabId,
+        splitTabId: state.splitTabId,
+        browserSplitRatio: state.browserSplitRatio,
         urlInput: state.urlInput,
       })
       persistBrowserTabsSnapshot(nextState)
@@ -145,6 +190,8 @@ export const useBrowserTabs = create<BrowserTabsState>((set) => ({
       const nextState = sanitizeSnapshot({
         tabs: state.tabs.filter((tab) => tab.id !== id),
         activeTabId: state.activeTabId === id ? null : state.activeTabId,
+        splitTabId: state.splitTabId === id ? null : state.splitTabId,
+        browserSplitRatio: state.browserSplitRatio,
         urlInput: state.urlInput,
       })
       persistBrowserTabsSnapshot(nextState)
@@ -156,6 +203,8 @@ export const useBrowserTabs = create<BrowserTabsState>((set) => ({
       const nextState = sanitizeSnapshot({
         tabs: state.tabs.map((tab) => (tab.id === id ? { ...tab, ...updates } : tab)),
         activeTabId: state.activeTabId,
+        splitTabId: state.splitTabId,
+        browserSplitRatio: state.browserSplitRatio,
         urlInput: state.urlInput,
       })
       persistBrowserTabsSnapshot(nextState)
@@ -170,6 +219,8 @@ export const useBrowserTabs = create<BrowserTabsState>((set) => ({
       const nextState = sanitizeSnapshot({
         tabs: newTabs,
         activeTabId: state.activeTabId,
+        splitTabId: state.splitTabId,
+        browserSplitRatio: state.browserSplitRatio,
         urlInput: state.urlInput,
       })
       persistBrowserTabsSnapshot(nextState)

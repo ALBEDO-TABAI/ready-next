@@ -1155,6 +1155,14 @@ interface ElectronBrowserAPI {
     y: number
     width: number
     height: number
+    tabId?: string | null
+    secondaryTabId?: string | null
+    secondaryBounds?: {
+      x: number
+      y: number
+      width: number
+      height: number
+    } | null
     syncMode?: BrowserBoundsSyncMode
   }) => Promise<{ success: boolean }>
   hideAll: () => Promise<{ success: boolean }>

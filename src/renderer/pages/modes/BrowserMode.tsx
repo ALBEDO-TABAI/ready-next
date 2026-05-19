@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import BrowserModeEmptyState from '../../components/browser/BrowserModeEmptyState'
 import BrowserDiagnosticsDock from '../../components/browser/BrowserDiagnosticsDock'
 import BrowserHeader from '../../components/browser/BrowserHeader'
@@ -26,6 +26,7 @@ import {
   WORKBENCH_CANVAS_OUTER_PADDING_X,
   WORKBENCH_TAB_ROW_HEIGHT,
 } from '../../modules/workbench/chrome'
+import { useRafResizeDrag } from '../../modules/workbench/useRafResizeDrag'
 
 // 模式切换的仪式化遮罩接管了"离开浏览器时的截图"这一职责。
 // 本组件只需保留 resize 期间的 captureStableFrame 作为 BrowserView 就绪信号。
@@ -36,6 +37,35 @@ interface BrowserModeProps {
   layoutPhase?: BrowserHostLayoutPhase
 }
 
+function clampBrowserSplitRatio(ratio: number): number {
+  return Math.max(20, Math.min(80, ratio))
+}
+
+function BrowserSplitResizeHandle({
+  onResize,
+  onResizeStateChange,
+}: {
+  onResize: (delta: number) => void
+  onResizeStateChange?: (resizing: boolean) => void
+}) {
+  const handleMouseDown = useRafResizeDrag({
+    onDelta: onResize,
+    onResizeStateChange,
+    dispatchPanelResizeEvent: true,
+  })
+  return (
+    <div
+      className="browser-split-resize-handle"
+      role="separator"
+      aria-orientation="vertical"
+      aria-label="调整浏览器双开宽度"
+      onMouseDown={handleMouseDown}
+    >
+      <span className="browser-split-resize-handle__grip" aria-hidden="true" />
+    </div>
+  )
+}
+
 export default function BrowserMode({
   isActive = true,
   isMotionSettled = true,
@@ -43,8 +73,9 @@ export default function BrowserMode({
 }: BrowserModeProps) {
   // Persistent browser tab state — survives mode switches
   const {
-    tabs, activeTabId, urlInput,
+    tabs, activeTabId, splitTabId, browserSplitRatio, urlInput,
     setTabs, setActiveTabId, setUrlInput,
+    setSplitTabId, setBrowserSplitRatio,
     addTab, updateTab, reorderTabs,
   } = useBrowserTabs()
   const [isBrowserSurfaceReady, setIsBrowserSurfaceReady] = useState(false)
@@ -59,6 +90,11 @@ export default function BrowserMode({
   const modeRootRef = useRef<HTMLDivElement>(null)
   const shellRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
+  const splitContentRef = useRef<HTMLDivElement>(null)
+  const splitContainerRef = useRef<HTMLDivElement>(null)
+  const primarySplitPaneRef = useRef<HTMLDivElement>(null)
+  const browserSplitRatioRef = useRef(browserSplitRatio)
+  const liveBrowserSplitRatioRef = useRef(browserSplitRatio)
   const isElectron = typeof window !== 'undefined' && !!window.electronAPI
 
   const sidebarVisible = useWorkspace(s => s.sidebarVisible)
@@ -69,9 +105,12 @@ export default function BrowserMode({
   const chatPanelWidth = useWorkspace(s => s.chatPanelWidth)
   const effectiveSidePanelWidth = sidePanelWidths.shared
   const activeTab = tabs.find(t => t.id === activeTabId) || null
+  const splitTab = splitTabId && splitTabId !== activeTabId ? tabs.find(t => t.id === splitTabId) || null : null
   const currentDomain = activeTab?.domain || extractBrowserDomain(activeTab?.url || '')
   const hasError = !!activeTab?.error
   const isReadyBlankTab = activeTab ? isReadyBrowserBlankUrl(activeTab.url) : false
+  const splitTabHasNativeSurface = splitTab ? !splitTab.error && !isReadyBrowserBlankUrl(splitTab.url) : false
+  const shouldHideAllBrowserHosts = (hasError || isReadyBlankTab) && !splitTabHasNativeSurface
   const setAddressEditing = useCallback((next: boolean) => {
     isAddressEditingRef.current = next
   }, [])
@@ -94,6 +133,9 @@ export default function BrowserMode({
   const { sendBoundsImmediate, syncBrowserVisibility } = useBrowserViewBounds({
     isElectron,
     contentRef,
+    splitContentRef,
+    activeTabId,
+    splitTabId: splitTab?.id || null,
     isActive: shouldPrepareBrowserHost,
     layoutPhase,
     isVisibleAllowed: isMotionSettled, // D方案：水平滚动动画期间禁止 BrowserView 显示
@@ -105,8 +147,14 @@ export default function BrowserMode({
     skillsSplitRatio,
     chatPanelVisible,
     chatPanelWidth,
-    hasError: hasError || isReadyBlankTab,
+    hasError: shouldHideAllBrowserHosts,
   })
+
+  useEffect(() => {
+    const nextRatio = clampBrowserSplitRatio(browserSplitRatio)
+    browserSplitRatioRef.current = nextRatio
+    liveBrowserSplitRatioRef.current = nextRatio
+  }, [browserSplitRatio])
 
   // URL helpers — auto-Google for non-URL input (Task 2)
   const normalizeUrl = useCallback((input: string): string => {
@@ -193,7 +241,7 @@ export default function BrowserMode({
   const {
     handleNewTab,
     handleCloseTab,
-    handleTabClick,
+    handleTabClick: handleSwitchTab,
     handleNavigate,
     handleContentDragOver,
     handleContentDrop,
@@ -217,6 +265,37 @@ export default function BrowserMode({
     updateTab,
     reorderTabs,
   })
+
+  const handleHeaderTabClick = useCallback((id: string, event: MouseEvent<HTMLButtonElement>) => {
+    if (event.shiftKey && id !== activeTabId) {
+      setSplitTabId(id)
+      return
+    }
+    setSplitTabId(null)
+    void handleSwitchTab(id)
+  }, [activeTabId, handleSwitchTab, setSplitTabId])
+
+  const handleSplitResize = useCallback((delta: number) => {
+    if (!splitContainerRef.current) return
+    const containerWidth = splitContainerRef.current.offsetWidth
+    if (containerWidth <= 0) return
+    const deltaPercent = (delta / containerWidth) * 100
+    const nextRatio = clampBrowserSplitRatio(liveBrowserSplitRatioRef.current + deltaPercent)
+    liveBrowserSplitRatioRef.current = nextRatio
+    primarySplitPaneRef.current?.style.setProperty('flex-basis', `${nextRatio}%`)
+  }, [])
+
+  const handleSplitResizeStateChange = useCallback((resizing: boolean) => {
+    if (resizing) {
+      liveBrowserSplitRatioRef.current = browserSplitRatioRef.current
+      primarySplitPaneRef.current?.style.setProperty('will-change', 'flex-basis')
+      return
+    }
+    primarySplitPaneRef.current?.style.removeProperty('will-change')
+    const nextRatio = clampBrowserSplitRatio(liveBrowserSplitRatioRef.current)
+    browserSplitRatioRef.current = nextRatio
+    setBrowserSplitRatio(nextRatio)
+  }, [setBrowserSplitRatio])
 
   const handleOpenBrowserTarget = useCallback(() => {
     const targetUrl = browserDiagnostics?.currentTask?.targetUrl || browserDiagnostics?.continuity?.targetUrl
@@ -337,11 +416,14 @@ export default function BrowserMode({
       if (activeTabId) {
         await window.electronAPI?.browser?.fitActiveTabToBounds(activeTabId)
       }
+      if (splitTab?.id) {
+        await window.electronAPI?.browser?.fitActiveTabToBounds(splitTab.id)
+      }
       await syncBrowserVisibility('visible', { forceBoundsSync: true })
     }
 
     void syncVisibleHost().catch(() => undefined)
-  }, [browserRuntimeReady, isElectron, syncBrowserVisibility, shouldPresentBrowserHost, shouldRevealBrowserHost, tabs.length])
+  }, [activeTabId, browserRuntimeReady, isElectron, splitTab?.id, syncBrowserVisibility, shouldPresentBrowserHost, shouldRevealBrowserHost, tabs.length])
 
   useEffect(() => {
     if (!isElectron || !isActive) return
@@ -354,6 +436,9 @@ export default function BrowserMode({
       postActivationHostResyncTimerRef.current = null
       void (async () => {
         await window.electronAPI?.browser?.fitActiveTabToBounds(activeTabId)
+        if (splitTab?.id) {
+          await window.electronAPI?.browser?.fitActiveTabToBounds(splitTab.id)
+        }
         await syncBrowserVisibility('visible', { forceExact: true, forceBoundsSync: true })
       })().catch(() => undefined)
     }, 180)
@@ -368,6 +453,7 @@ export default function BrowserMode({
     isActive,
     isElectron,
     layoutPhase,
+    splitTab?.id,
     syncBrowserVisibility,
     shouldPresentBrowserHost,
     shouldRevealBrowserHost,
@@ -423,13 +509,14 @@ export default function BrowserMode({
             isActive={isActive}
             tabs={tabs}
             activeTabId={activeTabId}
+            splitTabId={splitTab?.id || null}
             urlInput={urlInput}
             loading={activeTab?.loading || false}
             canGoBack={activeTab?.canGoBack || false}
             canGoForward={activeTab?.canGoForward || false}
             isBookmarked={isBookmarked}
             bookmarkedUrls={bookmarks.map((item) => item.url)}
-            onTabClick={handleTabClick}
+            onTabClick={handleHeaderTabClick}
             onTabClose={handleCloseTab}
             onNewTab={handleNewTab}
             onReorder={handleReorder}
@@ -454,15 +541,50 @@ export default function BrowserMode({
             }}
             className="flex min-h-0 flex-1"
           >
-            <BrowserShellLayout
-              isElectron={isElectron}
-              contentRef={contentRef}
-              activeTab={activeTab}
-              toastVisible={toastVisible}
-              onDragOver={handleContentDragOver}
-              onDrop={handleContentDrop}
-              onRetry={() => void handleRetry()}
-            />
+            {splitTab && activeTab ? (
+              <div className="flex h-full min-w-0 flex-1 overflow-hidden" ref={splitContainerRef} style={{ gap: 0 }}>
+                <div
+                  ref={primarySplitPaneRef}
+                  className="flex min-w-0 flex-col overflow-hidden"
+                  style={{ flexBasis: `${browserSplitRatio}%`, flexShrink: 0, flexGrow: 0 }}
+                >
+                  <BrowserShellLayout
+                    isElectron={isElectron}
+                    contentRef={contentRef}
+                    activeTab={activeTab}
+                    toastVisible={toastVisible}
+                    onDragOver={handleContentDragOver}
+                    onDrop={(event) => handleContentDrop(event, activeTab.id)}
+                    onRetry={() => void handleRetry(activeTab.id)}
+                  />
+                </div>
+                <BrowserSplitResizeHandle
+                  onResize={handleSplitResize}
+                  onResizeStateChange={handleSplitResizeStateChange}
+                />
+                <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+                  <BrowserShellLayout
+                    isElectron={isElectron}
+                    contentRef={splitContentRef}
+                    activeTab={splitTab}
+                    toastVisible={false}
+                    onDragOver={handleContentDragOver}
+                    onDrop={(event) => handleContentDrop(event, splitTab.id)}
+                    onRetry={() => void handleRetry(splitTab.id)}
+                  />
+                </div>
+              </div>
+            ) : (
+              <BrowserShellLayout
+                isElectron={isElectron}
+                contentRef={contentRef}
+                activeTab={activeTab}
+                toastVisible={toastVisible}
+                onDragOver={handleContentDragOver}
+                onDrop={handleContentDrop}
+                onRetry={() => void handleRetry()}
+              />
+            )}
             <BrowserDiagnosticsDock
               browserDiagnostics={browserDiagnostics}
               onContinue={handleContinueBrowserTask}

@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron'
-import type { BrowserBoundsSyncMode } from '../../../shared/browser-view-layout'
+import type { BrowserViewBoundsUpdate } from '../../../shared/browser-view-layout'
 
 interface BrowserShellView {
   webContents: {
@@ -54,7 +54,7 @@ interface BrowserShellIPCController {
   goBack(tabId: string | null): { success: boolean; error?: string }
   goForward(tabId: string | null): { success: boolean; error?: string }
   reload(tabId: string | null): { success: boolean; error?: string }
-  updateViewBounds(bounds: { x: number; y: number; width: number; height: number; syncMode?: BrowserBoundsSyncMode }): { success: boolean }
+  updateViewBounds(bounds: BrowserViewBoundsUpdate): { success: boolean }
   hideAllHosts(payload?: { requestId?: number }): { success: boolean }
   hideActiveHost(payload?: { requestId?: number }): { success: boolean }
   showActiveHost(payload?: { requestId?: number }): { success: boolean }
@@ -149,10 +149,10 @@ export function setupBrowserShellIPC(controller: BrowserShellIPCController): voi
     }
   })
 
-  ipcMain.handle('browser:updateBounds', (_, bounds: { x: number; y: number; width: number; height: number; syncMode?: BrowserBoundsSyncMode }) => {
+  ipcMain.handle('browser:updateBounds', (_, bounds: BrowserViewBoundsUpdate) => {
     return controller.updateViewBounds(bounds)
   })
-  ipcMain.on('browser:updateBounds', (_, bounds: { x: number; y: number; width: number; height: number; syncMode?: BrowserBoundsSyncMode }) => {
+  ipcMain.on('browser:updateBounds', (_, bounds: BrowserViewBoundsUpdate) => {
     controller.updateViewBounds(bounds)
   })
 
