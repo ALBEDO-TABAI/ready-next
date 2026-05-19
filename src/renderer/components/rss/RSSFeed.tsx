@@ -335,8 +335,8 @@ export default function RSSFeed({
         top: 'calc(100% + 10px)',
         right: 0,
         zIndex: 30,
-        width: 430,
-        maxWidth: 'min(430px, calc(100vw - 48px))',
+        width: 384,
+        maxWidth: 'min(384px, calc(100vw - 48px))',
         background:
           'color-mix(in srgb, var(--surface-floating-bg) 92%, rgba(255, 255, 255, 0.12))',
         borderColor: 'color-mix(in srgb, var(--border-default) 74%, transparent)',
@@ -390,13 +390,14 @@ export default function RSSFeed({
         </div>
       ) : (
         <div
-          className="rss-feed-scroll px-4 py-3"
+          className="rss-feed-scroll"
           style={{
             display: 'grid',
-            gap: 7,
+            gap: 8,
             maxHeight: 360,
             overflowY: 'auto',
-            overscrollBehavior: 'contain'
+            overscrollBehavior: 'contain',
+            padding: '12px 11px 14px'
           }}
         >
           {analysisJobs.map((job) => {
@@ -411,22 +412,31 @@ export default function RSSFeed({
             return (
               <div
                 key={job.id}
-                className="group rounded-[14px] py-3 pl-[17px] pr-[17px] transition-colors hover:bg-[var(--bg-hover)]"
+                className="group rounded-[16px] transition-colors hover:bg-[var(--bg-hover)]"
+                style={{
+                  minHeight: 62,
+                  padding: '10px 12px'
+                }}
               >
                 <div
-                  className="grid items-start gap-4"
-                  style={{ gridTemplateColumns: '18px minmax(0, 1fr) auto' }}
+                  className="grid items-center"
+                  style={{
+                    columnGap: 14,
+                    gridTemplateColumns: '20px minmax(0, 1fr) 64px'
+                  }}
                 >
-                  <AnalysisProgressRing
-                    entry={{
-                      progress: roundedProgress,
-                      status: job.status
-                    }}
-                  />
+                  <div className="flex h-6 items-center justify-center">
+                    <AnalysisProgressRing
+                      entry={{
+                        progress: roundedProgress,
+                        status: job.status
+                      }}
+                    />
+                  </div>
 
                   <div className="min-w-0">
                     <div
-                      className="text-[13px] font-semibold"
+                      className="text-[12px] font-semibold"
                       style={{
                         color: 'var(--text-secondary)',
                         display: '-webkit-box',
@@ -440,7 +450,7 @@ export default function RSSFeed({
                       {job.title}
                     </div>
                     <div
-                      className="mt-2 flex min-w-0 items-center gap-2 text-[12px]"
+                      className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[11px]"
                       style={{ color: 'var(--text-muted)' }}
                     >
                       <span className="shrink-0">{taskTypeLabel(job.action)}</span>
@@ -458,7 +468,7 @@ export default function RSSFeed({
                     </div>
                     {detailText ? (
                       <div
-                        className="mt-2 truncate text-[12px]"
+                        className="mt-1.5 truncate text-[11px]"
                         style={{
                           color: job.error ? 'var(--color-red)' : 'var(--text-light)'
                         }}
@@ -469,7 +479,7 @@ export default function RSSFeed({
                     ) : null}
                   </div>
 
-                  <div className="flex items-center gap-1 opacity-70 transition-opacity group-hover:opacity-100">
+                  <div className="flex items-center justify-end gap-1.5 opacity-70 transition-opacity group-hover:opacity-100">
                     <button
                       type="button"
                       disabled={!canToggle}
@@ -480,7 +490,7 @@ export default function RSSFeed({
                           onPauseAnalysisJob(job.id)
                         }
                       }}
-                      className="flex h-7 w-7 items-center justify-center rounded-[9px] hover:bg-[var(--bg-hover)] disabled:opacity-35"
+                      className="flex h-6 w-6 items-center justify-center rounded-[8px] hover:bg-[var(--bg-hover)] disabled:opacity-35"
                       style={{
                         color: canToggle
                           ? isPaused
@@ -491,9 +501,9 @@ export default function RSSFeed({
                       title={isPaused ? '继续任务' : isQueued ? '暂停任务' : '当前阶段不可切换'}
                     >
                       {isPaused ? (
-                        <Pause className="h-[14px] w-[14px]" />
+                        <Pause className="h-[13px] w-[13px]" />
                       ) : (
-                        <Play className="h-[14px] w-[14px]" />
+                        <Play className="h-[13px] w-[13px]" />
                       )}
                     </button>
 
@@ -501,13 +511,13 @@ export default function RSSFeed({
                       type="button"
                       disabled={!canDelete}
                       onClick={() => onDeleteAnalysisJob(job.id)}
-                      className="flex h-7 w-7 items-center justify-center rounded-[9px] hover:bg-[var(--bg-hover)] disabled:opacity-35"
+                      className="flex h-6 w-6 items-center justify-center rounded-[8px] hover:bg-[var(--bg-hover)] disabled:opacity-35"
                       style={{
                         color: canDelete ? 'var(--color-red)' : 'var(--text-light)'
                       }}
                       title={canDelete ? '删除任务' : '运行中任务暂不可删除'}
                     >
-                      <Trash2 className="h-[14px] w-[14px]" />
+                      <Trash2 className="h-[13px] w-[13px]" />
                     </button>
                   </div>
                 </div>
