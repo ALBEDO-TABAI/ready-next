@@ -12,7 +12,7 @@ import assert from 'node:assert'
 
 import {
   MaterializeError,
-  encodePathForMarkdown,
+  formatLocalPathForMarkdown,
   inferExtension,
   materializeToVault,
   stripUnfetchableImageRefs,
@@ -268,43 +268,38 @@ describe('materializeToVault · defense-in-depth strips blob/data refs', () => {
   })
 })
 
-describe('encodePathForMarkdown · URL-encodes path segments', () => {
-  it('encodes spaces as %20', () => {
+describe('formatLocalPathForMarkdown · preserves local asset names', () => {
+  it('wraps spaces in angle-bracket markdown destination syntax', () => {
     assert.equal(
-      encodePathForMarkdown('Shay Mitchell.assets/x.webp'),
-      'Shay%20Mitchell.assets/x.webp',
+      formatLocalPathForMarkdown('Shay Mitchell.assets/x.webp'),
+      '<Shay Mitchell.assets/x.webp>',
     )
   })
 
-  it('preserves / separators', () => {
+  it('leaves simple ASCII paths unchanged', () => {
     assert.equal(
-      encodePathForMarkdown('folder/sub folder/file name.png'),
-      'folder/sub%20folder/file%20name.png',
+      formatLocalPathForMarkdown('folder/subfolder/file-name.png'),
+      'folder/subfolder/file-name.png',
     )
   })
 
-  it('encodes parentheses + brackets which also break some md parsers', () => {
-    const out = encodePathForMarkdown('My (note).assets/a.jpg')
-    assert.ok(out.includes('%28'), 'encodes (')
-    assert.ok(out.includes('%29'), 'encodes )')
+  it('wraps parentheses + Chinese paths without percent-encoding the folder name', () => {
+    assert.equal(
+      formatLocalPathForMarkdown('弹丸论破同人插画｜整理了一些以前的摸鱼 (小红书).assets/a.jpg'),
+      '<弹丸论破同人插画｜整理了一些以前的摸鱼 (小红书).assets/a.jpg>',
+    )
   })
 
-  it('safe roundtrip — decodeURIComponent matches the input', () => {
-    const inputs = [
-      'a b c.assets/x.png',
-      'note - title.assets/y (1).webp',
-      'plain.assets/z.gif',
-    ]
-    for (const input of inputs) {
-      const encoded = encodePathForMarkdown(input)
-      const decoded = encoded.split('/').map(decodeURIComponent).join('/')
-      assert.equal(decoded, input)
-    }
+  it('escapes > inside an angle-bracket destination', () => {
+    assert.equal(
+      formatLocalPathForMarkdown('title > draft.assets/a.jpg'),
+      '<title \\> draft.assets/a.jpg>',
+    )
   })
 })
 
-describe('materializeToVault · markdown image refs are URL-safe', () => {
-  it('saved .md image refs are percent-encoded for path segments with spaces', async () => {
+describe('materializeToVault · markdown image refs preserve local asset folders', () => {
+  it('saved .md image refs use angle brackets for path segments with spaces', async () => {
     const initialMd = '# Title\n\n![hero](https://cdn.example.com/hero.jpg)'
     const { deps, writtenFiles } = makeMemoryDeps({ initialMd })
     // Place the sandbox file at the path the test asserts on.
@@ -318,14 +313,25 @@ describe('materializeToVault · markdown image refs are URL-safe', () => {
       deps,
     )
     const md = String(writtenFiles.get('/Users/me/Notes/My note title.md'))
-    // The asset folder name encodes spaces; strict md parsers + Obsidian
-    // wikilink preview both resolve %20-encoded paths.
-    assert.match(md, /!\[hero\]\(My%20note%20title\.assets\/[0-9a-f]+\.jpg\)/, `got: ${md}`)
-    // And critically, no literal space in the image ref URL (which would
-    // truncate the link in strict CommonMark).
-    const imgRefMatch = md.match(/!\[hero\]\(([^)]+)\)/)
-    assert.ok(imgRefMatch, 'image ref present')
-    assert.ok(!imgRefMatch![1].includes(' '), 'image ref URL must not contain literal spaces')
+    assert.match(md, /!\[hero\]\(<My note title\.assets\/[0-9a-f]+\.jpg>\)/, `got: ${md}`)
+    assert.ok(!md.includes('My%20note%20title.assets'), 'asset folder name must not be percent-encoded')
+  })
+
+  it('saved .md image refs keep Chinese asset folder names readable and resolvable', async () => {
+    const initialMd = '# Title\n\n![hero](https://cdn.example.com/hero.jpg)'
+    const { deps, writtenFiles } = makeMemoryDeps({ initialMd })
+    writtenFiles.set('/sandbox/弹丸论破同人插画｜整理了一些以前的摸鱼-小红书.md', initialMd)
+
+    await materializeToVault(
+      {
+        sandboxMdPath: '/sandbox/弹丸论破同人插画｜整理了一些以前的摸鱼-小红书.md',
+        targetDir: '/Users/me/Notes',
+      },
+      deps,
+    )
+    const md = String(writtenFiles.get('/Users/me/Notes/弹丸论破同人插画｜整理了一些以前的摸鱼-小红书.md'))
+    assert.match(md, /!\[hero\]\(<弹丸论破同人插画｜整理了一些以前的摸鱼-小红书\.assets\/[0-9a-f]+\.jpg>\)/, `got: ${md}`)
+    assert.ok(!md.includes('%E5%BC%B9%E4%B8%B8'), 'Chinese asset folder name must not be percent-encoded')
   })
 })
 

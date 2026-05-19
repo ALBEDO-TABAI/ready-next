@@ -187,12 +187,7 @@ export async function materializeToVault(
             const filename = `${hash}${ext}`
             const absoluteAssetPath = deps.joinPath(assetsDir, filename)
             await deps.writeFile(absoluteAssetPath, fetched.bytes)
-            // Markdown image refs must be URL-safe — strict CommonMark parsers
-            // (and most md-preview libs) break the link at the first space in
-            // an inline URL like `![](a b.assets/c.jpg)`. We percent-encode
-            // every path segment (preserving the `/` separators) so the ref
-            // survives note titles with spaces, parens, brackets, etc.
-            const relativePath = encodePathForMarkdown(`${noteBaseName}.assets/${filename}`)
+            const relativePath = formatLocalPathForMarkdown(`${noteBaseName}.assets/${filename}`)
             return [url, relativePath, absoluteAssetPath] as const
           } catch (err) {
             failureMessages.push(`${url}: ${(err as Error).message}`)
@@ -249,23 +244,13 @@ interface ImageRef {
   matchEnd: number
 }
 
-/**
- * Percent-encode each path segment so inline markdown image refs are
- * unambiguous to strict CommonMark / Obsidian preview parsers. Preserves
- * `/` separators. `encodeURIComponent` covers most cases but does NOT
- * escape `(` `)` `'` `!` `*` (per RFC 3986 "unreserved sub-delims") — and
- * `)` is exactly what breaks an inline `![](...)` ref. Post-process those.
- */
-export function encodePathForMarkdown(relativePath: string): string {
-  return relativePath
-    .split('/')
-    .map((segment) =>
-      encodeURIComponent(segment).replace(
-        /[()'!*]/g,
-        (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase().padStart(2, '0')}`,
-      ),
-    )
-    .join('/')
+export function formatLocalPathForMarkdown(relativePath: string): string {
+  if (!needsAngleBracketMarkdownDestination(relativePath)) return relativePath
+  return `<${relativePath.replace(/\\/g, '\\\\').replace(/>/g, '\\>')}>`
+}
+
+function needsAngleBracketMarkdownDestination(relativePath: string): boolean {
+  return /[\s()[\]{}<>]/.test(relativePath) || /[^\x20-\x7E]/.test(relativePath)
 }
 
 export function stripUnfetchableImageRefs(markdown: string): string {

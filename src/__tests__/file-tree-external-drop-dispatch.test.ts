@@ -7,6 +7,7 @@ import {
   dispatchFileTreeExternalDropAction,
   endRssItemDragSession,
   getActiveRssItemDragPayload,
+  isLikelyVideoDropPayload,
   type BrowserTabDragPayload,
   type FileTreeDropTarget,
   type RSSItemDragPayload,
@@ -18,6 +19,12 @@ interface ClipCall {
   target_hint?: string
   target_dir?: string
   client_task_id?: string
+}
+
+interface ClipCurrentCall {
+  tab_id?: string | null
+  target_hint?: string
+  target_dir?: string
 }
 
 interface AnalysisCall {
@@ -62,61 +69,83 @@ interface ContentStudyCall {
 
 interface ElectronAPIShape {
   browser: {
+    clipCurrentTab: (args?: ClipCurrentCall) => Promise<{
+      ok: boolean
+      errorKind?: string
+      errorDetail?: Record<string, unknown>
+      copiedPath?: string
+      savedPath?: string
+      copyError?: { kind: string; message: string }
+    }>
     clipDraggedTab: (args: ClipCall) => Promise<{ ok: boolean }>
     contentStudyDraggedTab: (args: ContentStudyCall) => Promise<{ ok: boolean; clipTaskId?: string; studyTaskId?: string }>
   }
   rss: { startItemAnalysis: (args: AnalysisCall) => Promise<{ success: boolean; data?: AnalysisJobData; error?: string }> }
 }
 
-function installFakeApi(overrides?: Partial<ElectronAPIShape>): {
+interface ElectronAPIOverrides {
+  browser?: Partial<ElectronAPIShape['browser']>
+  rss?: Partial<ElectronAPIShape['rss']>
+}
+
+function installFakeApi(overrides?: ElectronAPIOverrides): {
   clipCalls: ClipCall[]
+  clipCurrentCalls: ClipCurrentCall[]
   analysisCalls: AnalysisCall[]
   contentStudyCalls: ContentStudyCall[]
   restore: () => void
 } {
   const clipCalls: ClipCall[] = []
+  const clipCurrentCalls: ClipCurrentCall[] = []
   const analysisCalls: AnalysisCall[] = []
   const contentStudyCalls: ContentStudyCall[] = []
+  const browser: ElectronAPIShape['browser'] = {
+    clipCurrentTab: async (args) => {
+      clipCurrentCalls.push(args || {})
+      return { ok: true, copiedPath: '/workspace/notes/Example Page.md' }
+    },
+    clipDraggedTab: async (args) => {
+      clipCalls.push(args)
+      return { ok: true }
+    },
+    contentStudyDraggedTab: async (args) => {
+      contentStudyCalls.push(args)
+      return { ok: true, clipTaskId: args.client_task_id_clip, studyTaskId: args.client_task_id_study }
+    },
+    ...overrides?.browser,
+  }
+  const rss: ElectronAPIShape['rss'] = {
+    startItemAnalysis: async (args) => {
+      analysisCalls.push(args)
+      const now = new Date(0).toISOString()
+      return {
+        success: true,
+        data: {
+          id: `job-${analysisCalls.length}`,
+          itemId: args.itemId,
+          action: args.action,
+          sourceUrl: args.link,
+          title: args.title,
+          targetDir: args.targetDir,
+          outputDir: `${args.targetDir}/analysis-output`,
+          reportPath: null,
+          status: 'queued',
+          progress: 5,
+          message: '已排队，等待执行',
+          error: null,
+          meta: null,
+          createdAt: now,
+          startedAt: null,
+          updatedAt: now,
+          finishedAt: null,
+        },
+      }
+    },
+    ...overrides?.rss,
+  }
   const fake: ElectronAPIShape = {
-    browser: {
-      clipDraggedTab: async (args) => {
-        clipCalls.push(args)
-        return { ok: true }
-      },
-      contentStudyDraggedTab: async (args) => {
-        contentStudyCalls.push(args)
-        return { ok: true, clipTaskId: args.client_task_id_clip, studyTaskId: args.client_task_id_study }
-      },
-    },
-    rss: {
-      startItemAnalysis: async (args) => {
-        analysisCalls.push(args)
-        const now = new Date(0).toISOString()
-        return {
-          success: true,
-          data: {
-            id: `job-${analysisCalls.length}`,
-            itemId: args.itemId,
-            action: args.action,
-            sourceUrl: args.link,
-            title: args.title,
-            targetDir: args.targetDir,
-            outputDir: `${args.targetDir}/analysis-output`,
-            reportPath: null,
-            status: 'queued',
-            progress: 5,
-            message: '已排队，等待执行',
-            error: null,
-            meta: null,
-            createdAt: now,
-            startedAt: null,
-            updatedAt: now,
-            finishedAt: null,
-          },
-        }
-      },
-    },
-    ...overrides,
+    browser,
+    rss,
   }
   const originalWindow = (globalThis as { window?: unknown }).window
   ;(globalThis as { window?: unknown }).window = { electronAPI: fake }
@@ -124,6 +153,7 @@ function installFakeApi(overrides?: Partial<ElectronAPIShape>): {
   ;(globalThis as { alert?: (msg: string) => void }).alert = () => {}
   return {
     clipCalls,
+    clipCurrentCalls,
     analysisCalls,
     contentStudyCalls,
     restore: () => {
@@ -159,13 +189,42 @@ const rssItem: RSSItemDragPayload = {
   publishedAt: '2026-05-01',
 }
 
-test('web-clip routes both browser-tab and rss-item sources to clipDraggedTab', async () => {
-  const { clipCalls, analysisCalls, restore } = installFakeApi()
+test('video-only drop actions do not treat generic Xiaohongshu pages as videos', () => {
+  assert.equal(
+    isLikelyVideoDropPayload({
+      ...browserTab,
+      url: 'https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06',
+    }),
+    false,
+  )
+  assert.equal(
+    isLikelyVideoDropPayload({
+      ...browserTab,
+      url: 'https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06/6a0ae7700000000035038e72',
+    }),
+    false,
+  )
+  assert.equal(
+    isLikelyVideoDropPayload({
+      ...browserTab,
+      url: 'https://xhslink.com/a/abc123',
+    }),
+    false,
+  )
+  assert.equal(isLikelyVideoDropPayload({ ...browserTab, url: 'https://www.bilibili.com/video/BV1h9Ln6DEJE/' }), true)
+  assert.equal(isLikelyVideoDropPayload({ ...browserTab, url: 'https://example.com/video/foo' }), true)
+  assert.equal(isLikelyVideoDropPayload({ ...browserTab, url: 'https://cdn.example.com/foo.mp4' }), true)
+})
+
+test('web-clip uses live BrowserView DOM for browser tabs and URL fetch for RSS items', async () => {
+  const { clipCalls, clipCurrentCalls, analysisCalls, restore } = installFakeApi()
+  const updates: Array<{ taskId: string; status?: string; copiedPath?: string }> = []
   try {
     await dispatchFileTreeExternalDropAction({
       payload: browserTab,
       action: 'web-clip',
       target: insideDirTarget,
+      onPlaceholderUpdate: (taskId, patch) => updates.push({ taskId, ...patch }),
     })
     await dispatchFileTreeExternalDropAction({
       payload: rssItem,
@@ -173,14 +232,17 @@ test('web-clip routes both browser-tab and rss-item sources to clipDraggedTab', 
       target: insideDirTarget,
     })
 
-    assert.equal(clipCalls.length, 2)
+    assert.equal(clipCurrentCalls.length, 1)
+    assert.equal(clipCurrentCalls[0].tab_id, 'tab-abc')
+    assert.equal(clipCurrentCalls[0].target_dir, '/workspace/notes')
+    assert.equal(clipCalls.length, 1)
     assert.equal(analysisCalls.length, 0)
-    assert.equal(clipCalls[0].url, 'https://example.com/article')
-    assert.equal(clipCalls[0].title, 'Example Page')
+    assert.equal(updates.length, 1)
+    assert.equal(updates[0].status, 'completed')
+    assert.equal(updates[0].copiedPath, '/workspace/notes/Example Page.md')
+    assert.equal(clipCalls[0].url, 'https://feed.example.com/post/1')
+    assert.equal(clipCalls[0].title, 'Daily News')
     assert.equal(clipCalls[0].target_dir, '/workspace/notes')
-    assert.equal(clipCalls[1].url, 'https://feed.example.com/post/1')
-    assert.equal(clipCalls[1].title, 'Daily News')
-    assert.equal(clipCalls[1].target_dir, '/workspace/notes')
   } finally {
     restore()
   }
@@ -361,7 +423,36 @@ test('web-clip placeholder is marked failed when IPC ack rejects', async () => {
   const updates: Array<{ taskId: string; status?: string; errorMessage?: string }> = []
   const { restore } = installFakeApi({
     browser: {
+      clipCurrentTab: async () => ({ ok: true }),
       clipDraggedTab: async () => ({ ok: false, errorDetail: { message: 'bad url' } } as unknown as { ok: boolean }),
+      contentStudyDraggedTab: async () => ({ ok: true }),
+    },
+  })
+  try {
+    await dispatchFileTreeExternalDropAction({
+      payload: rssItem,
+      action: 'web-clip',
+      target: insideDirTarget,
+      onPlaceholderUpdate: (taskId, patch) => updates.push({ taskId, ...patch }),
+    })
+    assert.equal(updates.length, 1)
+    assert.equal(updates[0].status, 'failed')
+    assert.equal(updates[0].errorMessage, 'bad url')
+  } finally {
+    restore()
+  }
+})
+
+test('browser-tab web-clip placeholder is marked failed when live tab clip cannot write target folder', async () => {
+  const updates: Array<{ taskId: string; status?: string; errorMessage?: string; copiedPath?: string }> = []
+  const { restore } = installFakeApi({
+    browser: {
+      clipCurrentTab: async () => ({
+        ok: true,
+        savedPath: '/tmp/outputs/obsidian-web-clip/xhs.md',
+        copyError: { kind: 'invalid_target', message: 'target_dir must be absolute' },
+      }),
+      clipDraggedTab: async () => ({ ok: true }),
       contentStudyDraggedTab: async () => ({ ok: true }),
     },
   })
@@ -374,7 +465,8 @@ test('web-clip placeholder is marked failed when IPC ack rejects', async () => {
     })
     assert.equal(updates.length, 1)
     assert.equal(updates[0].status, 'failed')
-    assert.equal(updates[0].errorMessage, 'bad url')
+    assert.equal(updates[0].copiedPath, '/tmp/outputs/obsidian-web-clip/xhs.md')
+    assert.match(updates[0].errorMessage || '', /target_dir must be absolute/)
   } finally {
     restore()
   }
@@ -448,7 +540,7 @@ test('RSS drag session auto-clears after 60s TTL (regression for unmounted-mid-d
 })
 
 test('insert-before target resolves to containerPath for targetDir', async () => {
-  const { clipCalls, restore } = installFakeApi()
+  const { clipCurrentCalls, restore } = installFakeApi()
   try {
     await dispatchFileTreeExternalDropAction({
       payload: browserTab,
@@ -459,9 +551,9 @@ test('insert-before target resolves to containerPath for targetDir', async () =>
         containerPath: '/workspace/notes',
       },
     })
-    assert.equal(clipCalls.length, 1)
-    assert.equal(clipCalls[0].target_dir, '/workspace/notes')
-    assert.equal(clipCalls[0].target_hint, '/workspace/notes/draft.md')
+    assert.equal(clipCurrentCalls.length, 1)
+    assert.equal(clipCurrentCalls[0].target_dir, '/workspace/notes')
+    assert.equal(clipCurrentCalls[0].target_hint, '/workspace/notes/draft.md')
   } finally {
     restore()
   }

@@ -379,12 +379,15 @@ const browserAPI = {
   // P1.4 — obsidian-web-clip current tab. Renderer-only entry point;
   // there is intentionally no matching model-facing tool. See SKILL.md.
   clipCurrentTab: (args?: {
+    tab_id?: string | null
     preset?: string | null
     preset_file?: string | null
     output_subdir?: string | null
     flatten_path?: boolean
     preserve_pagination?: boolean
     force_render_with_placeholders?: boolean
+    target_hint?: string
+    target_dir?: string
   }) => ipcRenderer.invoke('browser:clipCurrentTab', args ?? {}),
   onClipCurrentTabRequested: (callback: (data: { url?: string }) => void) => {
     const handler = (_: unknown, data: unknown): void => callback((data || {}) as { url?: string })

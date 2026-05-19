@@ -51,8 +51,6 @@ const VIDEO_HOST_HINTS = [
   'vimeo.com',
   'douyin.com',
   'tiktok.com',
-  'xiaohongshu.com',
-  'xhslink.com',
 ]
 
 const VIDEO_EXTS = ['.mp4', '.mov', '.mkv', '.avi', '.webm', '.m4v', '.flv']
@@ -66,7 +64,7 @@ function sanitizeName(input: string): string {
   return normalized.slice(0, 56)
 }
 
-function isLikelyVideoLink(url: string): boolean {
+export function isLikelyVideoLink(url: string): boolean {
   const lower = (url || '').trim().toLowerCase()
   if (!lower) return false
   if (VIDEO_EXTS.some((ext) => lower.endsWith(ext))) return true

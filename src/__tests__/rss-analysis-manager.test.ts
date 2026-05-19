@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { RSSAnalysisAction, RSSAnalysisJobStatus } from '../main/modules/database'
-import { findReusableVideoFile } from '../main/modules/rss-engine/item-analysis-manager'
+import { findReusableVideoFile, isLikelyVideoLink } from '../main/modules/rss-engine/item-analysis-manager'
 
 describe('RSS Analysis Contracts', () => {
   it('should cover supported actions and statuses', () => {
@@ -43,6 +43,15 @@ describe('RSS Analysis Contracts', () => {
     assert.ok(progress.progress >= 0)
     assert.ok(progress.progress <= 100)
     assert.strictEqual(progress.status, 'running_script')
+  })
+
+  it('should not classify generic Xiaohongshu pages as video links', () => {
+    assert.equal(isLikelyVideoLink('https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06'), false)
+    assert.equal(isLikelyVideoLink('https://www.xiaohongshu.com/user/profile/5e31b693000000000100bb06/6a0ae7700000000035038e72'), false)
+    assert.equal(isLikelyVideoLink('https://xhslink.com/a/abc123'), false)
+    assert.equal(isLikelyVideoLink('https://www.bilibili.com/video/BV1h9Ln6DEJE/'), true)
+    assert.equal(isLikelyVideoLink('https://example.com/video/foo'), true)
+    assert.equal(isLikelyVideoLink('https://cdn.example.com/foo.mp4'), true)
   })
 
   it('should reuse the copy-analysis source video before visual derivatives', async () => {

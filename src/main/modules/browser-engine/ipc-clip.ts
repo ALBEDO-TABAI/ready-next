@@ -23,9 +23,14 @@
  *   - pipeline throws → forward errorKind + recoverable flag to renderer.
  */
 
-import { ipcMain } from 'electron'
+import { createRequire } from 'node:module'
+
+const electronModule = createRequire(import.meta.url)('electron') as typeof import('electron')
+const { ipcMain } = electronModule
 
 import { ClipPipelineError, runClipPipeline } from '../clipping/clip-pipeline'
+import { materializeToVault } from '../clipping/materialize-to-vault'
+import { buildRealMaterializeDeps } from '../clipping/materialize-real-deps'
 import {
   buildSanitizerBundle,
   decodeSanitizerResult,
@@ -34,16 +39,32 @@ import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
 
 interface ClipCurrentTabIPCController {
   getActiveTab(): { id: string; url: string; title: string; domain: string } | undefined
+  getTab?(tabId: string): { id: string; url: string; title: string; domain: string } | undefined
   executeJS(tabId: string | null, code: string): Promise<unknown>
 }
 
+interface ClipCurrentTabRuntimeInfo {
+  skillsRoot: string
+  outputsRoot: string
+}
+
+interface ClipCurrentTabDeps {
+  getRuntimeInfo?: () => ClipCurrentTabRuntimeInfo
+  runClipPipeline?: typeof runClipPipeline
+  materializeToVault?: typeof materializeToVault
+  buildMaterializeDeps?: typeof buildRealMaterializeDeps
+}
+
 export interface ClipCurrentTabArgs {
+  tab_id?: string | null
   preset?: string | null
   preset_file?: string | null
   output_subdir?: string | null
   flatten_path?: boolean
   preserve_pagination?: boolean
   force_render_with_placeholders?: boolean
+  target_hint?: string
+  target_dir?: string
 }
 
 export interface ClipCurrentTabResult {
@@ -65,6 +86,13 @@ export interface ClipCurrentTabResult {
   frontmatter?: Record<string, string | string[]>
   title?: string
   url?: string
+  copiedPath?: string
+  assetPaths?: string[]
+  imageDownloadFailures?: number
+  copyError?: {
+    kind: string
+    message: string
+  }
   warnings?: string[]
   sanitizationSummary?: Record<string, number>
 }
@@ -78,16 +106,20 @@ export function setupBrowserClipIPC(controller: ClipCurrentTabIPCController): vo
 export async function runClipCurrentTab(
   controller: ClipCurrentTabIPCController,
   args: ClipCurrentTabArgs,
+  deps: ClipCurrentTabDeps = {},
 ): Promise<ClipCurrentTabResult> {
-  const activeTab = controller.getActiveTab()
-  if (!activeTab) {
+  const requestedTabId = args.tab_id?.trim()
+  const targetTab = requestedTabId
+    ? controller.getTab?.(requestedTabId)
+    : controller.getActiveTab()
+  if (!targetTab) {
     return { ok: false, errorKind: 'clip_no_active_tab', recoverable: false }
   }
 
   const bundle = buildSanitizerBundle({ preservePagination: Boolean(args.preserve_pagination) })
   let raw: unknown
   try {
-    raw = await controller.executeJS(activeTab.id, bundle)
+    raw = await controller.executeJS(targetTab.id, bundle)
   } catch (err) {
     return {
       ok: false,
@@ -131,37 +163,89 @@ export async function runClipCurrentTab(
     }
   }
 
-  const runtimeInfo = getSkillsRuntimeManager().getRuntimeInfo()
+  const runtimeInfo = deps.getRuntimeInfo?.() ?? getSkillsRuntimeManager().getRuntimeInfo()
   const presetDir = `${runtimeInfo.skillsRoot}/obsidian-web-clip/assets/presets`
+  const runPipeline = deps.runClipPipeline ?? runClipPipeline
+  const materialize = deps.materializeToVault ?? materializeToVault
+  const buildMaterialize = deps.buildMaterializeDeps ?? buildRealMaterializeDeps
 
   try {
-    const result = await runClipPipeline(
-      {
-        html: decoded.result.html,
-        url: decoded.result.url,
-        inlineTitle: decoded.result.title,
-        sanitized: true,
-      },
-      {
-        presetDir,
-        presetFile: args.preset_file ?? null,
-        preset: args.preset ?? 'auto',
-        outputSubdir: args.output_subdir ?? null,
-        flattenPath: Boolean(args.flatten_path),
-        forceRenderWithPlaceholders: Boolean(args.force_render_with_placeholders),
-        outputsRoot: runtimeInfo.outputsRoot,
-      },
-    )
+    const pipelineInput = {
+      html: decoded.result.html,
+      url: decoded.result.url,
+      inlineTitle: decoded.result.title,
+      sanitized: true,
+    }
+    const pipelineOptions = {
+      presetDir,
+      presetFile: args.preset_file ?? null,
+      preset: args.preset ?? 'auto',
+      outputSubdir: args.output_subdir ?? null,
+      flattenPath: Boolean(args.flatten_path),
+      forceRenderWithPlaceholders: Boolean(args.force_render_with_placeholders),
+      outputsRoot: runtimeInfo.outputsRoot,
+    }
+    const warnings: string[] = []
+    let result
+    try {
+      result = await runPipeline(pipelineInput, pipelineOptions)
+    } catch (err) {
+      const canFallbackToArticle =
+        err instanceof ClipPipelineError
+        && err.kind === 'clip_preset_render_failed'
+        && err.detail.reason === 'requires_interpreter'
+        && !args.preset_file
+        && (!args.preset || args.preset === 'auto')
+        && !args.force_render_with_placeholders
+      if (!canFallbackToArticle) throw err
+      result = await runPipeline(pipelineInput, {
+        ...pipelineOptions,
+        preset: 'article-clipper',
+      })
+      warnings.push('preset_requires_interpreter_fallback_to_article')
+    }
+    let copiedPath: string | undefined
+    let assetPaths: string[] | undefined
+    let imageDownloadFailures: number | undefined
+    let copyError: ClipCurrentTabResult['copyError']
+    let savedPathAfterMaterialize = result.savedPath
+
+    if (args.target_dir && args.target_dir.trim().length > 0) {
+      try {
+        const materialized = await materialize(
+          {
+            sandboxMdPath: result.savedPath,
+            targetDir: args.target_dir,
+          },
+          buildMaterialize(),
+        )
+        copiedPath = materialized.finalMdPath
+        assetPaths = materialized.assetPaths
+        imageDownloadFailures = materialized.imageDownloadFailures
+        savedPathAfterMaterialize = ''
+      } catch (err) {
+        const maybeMaterialize = err as { kind?: string; message?: string }
+        copyError = {
+          kind: maybeMaterialize.kind || 'target_write_failed',
+          message: maybeMaterialize.message || (err as Error).message,
+        }
+      }
+    }
+
     return {
       ok: true,
-      savedPath: result.savedPath,
+      savedPath: savedPathAfterMaterialize,
       savedPathRelative: result.savedPathRelative,
       suggestedVaultRelativePath: result.suggestedVaultRelativePath,
       preset: result.preset,
       frontmatter: result.frontmatter,
       title: result.title,
       url: result.url,
-      warnings: result.warnings,
+      copiedPath,
+      assetPaths,
+      imageDownloadFailures,
+      copyError,
+      warnings: [...warnings, ...result.warnings],
       sanitizationSummary: decoded.result.sanitizationSummary as unknown as Record<string, number>,
     }
   } catch (err) {

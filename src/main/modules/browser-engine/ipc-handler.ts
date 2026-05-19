@@ -1361,6 +1361,16 @@ export function setupBrowserIPC(mainWindow: BrowserWindow, useMock = false): Bro
         domain: active.domain,
       }
     },
+    getTab: (tabId) => {
+      const tab = controller.tabs.get(tabId)
+      if (!tab) return undefined
+      return {
+        id: tab.id,
+        url: tab.url,
+        title: tab.title,
+        domain: tab.domain,
+      }
+    },
     executeJS: (tabId, code) => controller.executeJS(tabId, code),
   })
   setupBrowserClipDraggedTabIPC({

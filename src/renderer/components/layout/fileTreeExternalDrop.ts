@@ -267,6 +267,35 @@ export type FileTreeExternalDropAction =
   | 'copy-analysis'
   | 'visual-analysis'
 
+const VIDEO_DROP_HOST_HINTS = [
+  'youtube.com',
+  'youtu.be',
+  'bilibili.com',
+  'b23.tv',
+  'bili2233.cn',
+  'vimeo.com',
+  'douyin.com',
+  'tiktok.com',
+]
+const VIDEO_DROP_EXTS = ['.mp4', '.mov', '.mkv', '.avi', '.webm', '.m4v', '.flv']
+
+export function isLikelyVideoDropPayload(payload: FileTreeExternalDropPayload): boolean {
+  const url = payload.type === 'browser-tab' ? payload.url : payload.link
+  const lower = (url || '').trim().toLowerCase()
+  if (!lower) return false
+  if (VIDEO_DROP_EXTS.some((ext) => lower.endsWith(ext))) return true
+  if (lower.includes('/video/')) return true
+  try {
+    const parsed = new URL(lower)
+    return (
+      VIDEO_DROP_HOST_HINTS.some((host) => parsed.hostname.includes(host))
+      || VIDEO_DROP_EXTS.some((ext) => parsed.pathname.endsWith(ext))
+    )
+  } catch {
+    return VIDEO_DROP_EXTS.some((ext) => lower.endsWith(ext))
+  }
+}
+
 export interface FileTreeExternalDropPlaceholder {
   taskId: string
   targetDir: string
@@ -439,6 +468,36 @@ export async function dispatchFileTreeExternalDropAction({
       createdAt: Date.now(),
     })
     try {
+      if (payload.type === 'browser-tab' && window.electronAPI?.browser?.clipCurrentTab) {
+        const result = await window.electronAPI.browser.clipCurrentTab({
+          tab_id: payload.tabId,
+          target_hint: targetHint,
+          target_dir: targetDir,
+        })
+        if (!result?.ok) {
+          onPlaceholderUpdate?.(clientTaskId, {
+            status: 'failed',
+            errorMessage: typeof result?.errorDetail?.message === 'string'
+              ? result.errorDetail.message
+              : result?.errorKind ?? '剪藏失败',
+          })
+          return
+        }
+        if (result.copyError) {
+          onPlaceholderUpdate?.(clientTaskId, {
+            status: 'failed',
+            copiedPath: result.savedPath,
+            errorMessage: `剪藏未能写入目标目录：${result.copyError.message}`,
+          })
+          return
+        }
+        onPlaceholderUpdate?.(clientTaskId, {
+          status: 'completed',
+          copiedPath: result.copiedPath || result.savedPath,
+        })
+        return
+      }
+
       const ack = await window.electronAPI?.browser?.clipDraggedTab?.({
         url,
         title: titleRaw,

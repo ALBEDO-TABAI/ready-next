@@ -1245,12 +1245,15 @@ interface ElectronBrowserAPI {
    * Returns `{ ok: false, errorKind, recoverable, errorDetail }` on
    * failure; on success returns the saved-note metadata. */
   clipCurrentTab: (args?: {
+    tab_id?: string | null
     preset?: string | null
     preset_file?: string | null
     output_subdir?: string | null
     flatten_path?: boolean
     preserve_pagination?: boolean
     force_render_with_placeholders?: boolean
+    target_hint?: string
+    target_dir?: string
   }) => Promise<{
     ok: boolean
     errorKind?:
@@ -1270,6 +1273,13 @@ interface ElectronBrowserAPI {
     frontmatter?: Record<string, string | string[]>
     title?: string
     url?: string
+    copiedPath?: string
+    assetPaths?: string[]
+    imageDownloadFailures?: number
+    copyError?: {
+      kind: string
+      message: string
+    }
     warnings?: string[]
     sanitizationSummary?: Record<string, number>
   }>
