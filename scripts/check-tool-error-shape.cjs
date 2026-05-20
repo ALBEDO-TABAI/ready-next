@@ -63,8 +63,8 @@ function* walk(dir) {
 const LEGACY_NESTED_SHAPE = /errorKind:\s*['"]host_unavailable['"][\s\S]{0,200}?reason:\s*['"]tool_not_registered['"]/
 
 /**
- * Strip line comments (// …) and block comments (/* … *​/) before scanning
- * so the gate doesn't flag historical-shape mentions in docstrings.
+ * Strip line comments and block comments before scanning so the gate
+ * doesn't flag historical-shape mentions in docstrings.
  */
 function stripComments(source) {
   // Block comments first.

@@ -26,6 +26,7 @@ import {
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
 function readWorkspaceFile(rel: string): string {
+  // eslint-disable-next-line ready/no-source-grep-test -- Stage U §0.7: source-grep is permitted as a structural gate when paired with a runtime gate. This test pairs with check-turn-engine-no-domain-branch.cjs (U1.4).
   return readFileSync(resolve(REPO_ROOT, rel), 'utf8')
 }
 
