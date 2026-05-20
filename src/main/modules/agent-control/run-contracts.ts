@@ -54,7 +54,7 @@ import type { ContinuationIntent, ContinuationState } from './continuation-state
 import type { DomainAdapter } from './domain-adapter'
 import type { ToolExecutionHooks } from './tool-execution-hooks'
 import type { ToolRuntimeContext } from './tool-runtime'
-import type { HookRegistry } from './hook-registry'
+import type { HookRegistry } from './system-reminders/hook-registry'
 import type { SkillTaskSupervisorSnapshot } from './skill-task-supervisor'
 import type { ReferenceSkillHint } from './skill-reference-hints'
 import type { TurnFrame, TurnFramePatch, TurnTerminalReason } from './turn-frame'

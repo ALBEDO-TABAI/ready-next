@@ -3,8 +3,8 @@ import test, { afterEach } from 'node:test'
 
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-metrics'
-import { composeSystemReminder } from '../main/modules/agent-control/system-reminder-assembly'
-import { createSystemReminderRegistry } from '../main/modules/agent-control/system-reminder-registry'
+import { composeSystemReminder } from '../main/modules/agent-control/system-reminders/system-reminder-assembly'
+import { createSystemReminderRegistry } from '../main/modules/agent-control/system-reminders/system-reminder-registry'
 
 afterEach(() => {
   __setMetricSinkForTests(null)

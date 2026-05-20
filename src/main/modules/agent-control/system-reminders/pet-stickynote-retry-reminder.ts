@@ -14,7 +14,7 @@
  * single source of the reminder text.
  */
 
-import { composeSystemReminder } from '../system-reminder-assembly'
+import { composeSystemReminder } from './system-reminder-assembly'
 
 export const PET_STICKYNOTE_RETRY_REMINDER_TEXT =
   '系统补充：当前任务是宠物便利贴任务，必须调用 pet_show_sticky_note 把内容贴到猫猫旁边；不要写入文档，也不要只用文字说"贴好了"。'

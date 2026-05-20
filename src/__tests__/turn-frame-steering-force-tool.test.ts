@@ -27,7 +27,7 @@ import {
   selectSteeringMode,
   validateForcedActionInput,
 } from '../main/modules/agent-control/turn-frame-steering'
-import { createSystemReminderRegistry, type ReminderTopic } from '../main/modules/agent-control/system-reminder-registry'
+import { createSystemReminderRegistry, type ReminderTopic } from '../main/modules/agent-control/system-reminders/system-reminder-registry'
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
 import type { TurnFrame, TurnFrameLiveness } from '../main/modules/agent-control/turn-frame'
 import type { SkillRunContract } from '../main/modules/agent-control/run-contracts'

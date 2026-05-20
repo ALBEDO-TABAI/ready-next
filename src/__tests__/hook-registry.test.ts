@@ -5,7 +5,7 @@ import {
   createHookRegistry,
   type HookName,
   type HookPayloadFor,
-} from '../main/modules/agent-control/hook-registry'
+} from '../main/modules/agent-control/system-reminders/hook-registry'
 
 test('register returns unregister function that removes handler', async () => {
   const registry = createHookRegistry()

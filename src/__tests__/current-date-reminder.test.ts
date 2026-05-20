@@ -7,7 +7,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { createSystemReminderRegistry } from '../main/modules/agent-control/system-reminder-registry'
+import { createSystemReminderRegistry } from '../main/modules/agent-control/system-reminders/system-reminder-registry'
 import { registerCurrentDateReminder } from '../main/modules/agent-control/system-reminders/current-date-reminder'
 
 test('registerCurrentDateReminder writes topic="current-date" priority=90', () => {

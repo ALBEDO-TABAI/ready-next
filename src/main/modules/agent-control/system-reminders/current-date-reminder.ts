@@ -13,7 +13,7 @@
  * Helper is published here so the wiring PR is mechanical.
  */
 
-import type { SystemReminderRegistry } from '../system-reminder-registry'
+import type { SystemReminderRegistry } from './system-reminder-registry'
 
 const WEEKDAY_LABELS = ['周日', '周一', '周二', '周三', '周四', '周五', '周六'] as const
 

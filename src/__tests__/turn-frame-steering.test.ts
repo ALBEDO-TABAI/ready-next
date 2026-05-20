@@ -6,7 +6,7 @@ import test from 'node:test'
 
 import { resolveTurnFrame } from '../main/modules/agent-control/turn-frame-resolver'
 import { buildTurnFrameSteering } from '../main/modules/agent-control/turn-frame-steering'
-import { createSystemReminderRegistry, type ReminderTopic } from '../main/modules/agent-control/system-reminder-registry'
+import { createSystemReminderRegistry, type ReminderTopic } from '../main/modules/agent-control/system-reminders/system-reminder-registry'
 import type { TaskProjectionRecord } from '../main/modules/agent-control/run-contracts'
 import type { SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skill-task-supervisor'
 

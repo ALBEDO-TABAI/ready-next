@@ -17,7 +17,7 @@ import assert from 'node:assert/strict'
 // emitMetric which gives us observability into both metrics.
 
 test('U2.3 cooperative handler that listens for abort settles cleanly', async () => {
-  const { createHookRegistry } = await import('../main/modules/agent-control/hook-registry')
+  const { createHookRegistry } = await import('../main/modules/agent-control/system-reminders/hook-registry')
   const emitted: { name: string; payload: Record<string, unknown> }[] = []
   const registry = createHookRegistry({
     emitMetric: (name, payload) => emitted.push({ name, payload: payload as Record<string, unknown> }),
@@ -49,7 +49,7 @@ test('U2.3 cooperative handler that listens for abort settles cleanly', async ()
 })
 
 test('U2.3 non-cooperative handler triggers hook_handler_timeout_with_unknown_outcome', async () => {
-  const { createHookRegistry } = await import('../main/modules/agent-control/hook-registry')
+  const { createHookRegistry } = await import('../main/modules/agent-control/system-reminders/hook-registry')
   const emitted: { name: string; payload: Record<string, unknown> }[] = []
   const registry = createHookRegistry({
     emitMetric: (name, payload) => emitted.push({ name, payload: payload as Record<string, unknown> }),
