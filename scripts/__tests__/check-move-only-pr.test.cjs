@@ -48,3 +48,11 @@ test('U5.0 require export from re-export classifies as import', () => {
   assert.equal(classifyLine('+export { Foo } from \'../shared/foo\''), 'import')
   assert.equal(classifyLine('+const { X } = require(\'./y\')'), 'import')
 })
+
+test('U5.0 dynamic import expression classifies as import (dogfood fix)', () => {
+  // Caught by U5.1a1 dogfooding: `await import('...')` was treated as behavior change.
+  assert.equal(classifyLine('+  const m = await import(\'../foo\')'), 'import')
+  assert.equal(classifyLine('-  const m = await import(\'../foo\')'), 'import')
+  assert.equal(classifyLine('+  const { X } = await import(\'./bar\')'), 'import')
+  assert.equal(classifyLine('+  return import(\'./baz\').then((m) => m.default)'), 'import')
+})

@@ -55,6 +55,9 @@ function resolveDiffRange(env) {
   const base = env.GITHUB_BASE_REF
   const head = env.GITHUB_HEAD_REF
   if (base && head) return { range: `origin/${base}...origin/${head}`, source: 'github-actions' }
+  const override = env.STAGE_U_MOVE_ONLY_BASE
+  if (override === 'staged') return { range: '__STAGED__', source: 'staged' }
+  if (override) return { range: `${override}...HEAD`, source: `env:${override}` }
   if (runGit(['rev-parse', '--verify', '--quiet', 'origin/main'])) {
     return { range: 'origin/main...HEAD', source: 'origin/main' }
   }
@@ -62,7 +65,11 @@ function resolveDiffRange(env) {
 }
 
 function listChangedFiles(range) {
-  const out = runGit(['diff', '--name-status', range])
+  // -M50 enables rename detection at 50% similarity threshold so move-only PRs
+  // with internal import-path edits still register as 'R' (rename) instead of A+D.
+  const out = range === '__STAGED__'
+    ? runGit(['diff', '--name-status', '-M50', '--cached'])
+    : runGit(['diff', '--name-status', '-M50', range])
   if (out === null) return []
   return out.split('\n').map((l) => l.trim()).filter(Boolean).map((line) => {
     const parts = line.split('\t')
@@ -88,11 +95,19 @@ function classifyLine(line) {
   if (/^\/\//.test(body) || /^\/\*/.test(body) || /^\*/.test(body) || /^\*\//.test(body)) return 'comment'
   if (/^import\b/.test(body) || /^export\s+(?:type\s+)?(?:\{|\*)/.test(body) || /\brequire\s*\(/.test(body)) return 'import'
   if (/^export\s+\*\s+from\b/.test(body) || /^export\s+\{[^}]*\}\s+from\b/.test(body)) return 'import'
+  // Dynamic import expressions: `await import('...')`, `import('...')`. The path is the
+  // only thing that changes during a move-only PR; the surrounding statement structure
+  // (await / const = / .then) is unchanged.
+  if (/\bimport\s*\(\s*['"]/.test(body)) return 'import'
   return sign === '+' ? 'add' : 'remove'
 }
 
 function inspectFileDiff(range, file) {
-  const raw = runGit(['diff', '--unified=0', range, '--', file])
+  // Match listChangedFiles: enable -M50 rename detection so the diff for a moved file
+  // shows only the internal hunks that genuinely changed, not the entire file as +.
+  const raw = range === '__STAGED__'
+    ? runGit(['diff', '--unified=0', '-M50', '--cached', '--', file])
+    : runGit(['diff', '--unified=0', '-M50', range, '--', file])
   if (!raw) return { ok: true, offending: [] }
   const lines = raw.split('\n')
   const offending = []
