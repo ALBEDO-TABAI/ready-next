@@ -140,11 +140,14 @@ export async function executeToolCall(
   // see tool-not-allowed-message.ts for the rationale.
   const definition = defaultToolRegistry.getToolDefinitionForExecution(toolName)
   if (!definition) {
+    // Stage U PR U1.1 — `tool_not_registered` is now a top-level errorKind
+    // (mutually exclusive with `authorization_denied` per AGENTS.md §3).
+    // The previous shape `errorKind: 'host_unavailable', reason: 'tool_not_registered'`
+    // conflated "infra unavailable" with "fabricated tool name" — see plan §2 U1.1.
     return createToolExecutionOutput(buildUnknownToolMessage(toolName), {
       shape: 'json',
       data: {
-        errorKind: 'host_unavailable',
-        reason: 'tool_not_registered',
+        errorKind: 'tool_not_registered',
         toolName,
       },
     })

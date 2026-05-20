@@ -1263,11 +1263,11 @@ export async function executeSkillActionViaToolGateway(
 
   const registryDefinition = defaultToolRegistry.getToolDefinitionForExecution(toolName)
   if (!registryDefinition) {
+    // Stage U PR U1.1 — top-level `tool_not_registered` errorKind (AGENTS.md §3).
     return makeChildGatewayError({
-      errorKind: 'host_unavailable',
+      errorKind: 'tool_not_registered',
       message: `Tool is not registered: ${toolName}`,
       detail: {
-        reason: 'tool_not_registered',
         toolName,
         skillId,
         action,

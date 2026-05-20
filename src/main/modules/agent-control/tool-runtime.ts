@@ -480,11 +480,11 @@ export class ToolRuntime {
     // tool" signal for fabricated names, not an "allowed list" signal that
     // would invite retry. Matches tool-executor.ts for a unified contract.
     if (options?.requireRegisteredTool && !defaultToolRegistry.getToolDefinitionForExecution(toolName)) {
+      // Stage U PR U1.1 — top-level `tool_not_registered` (see tool-executor.ts).
       return createToolExecutionOutput(buildUnknownToolMessage(toolName), {
         shape: 'json',
         data: {
-          errorKind: 'host_unavailable',
-          reason: 'tool_not_registered',
+          errorKind: 'tool_not_registered',
           toolName,
         },
       })
