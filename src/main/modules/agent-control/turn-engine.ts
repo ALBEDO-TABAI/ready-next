@@ -316,6 +316,8 @@ import {
 import { TurnState } from './turn-state'
 import { TurnTranscript } from './turn-transcript'
 import { createSystemReminderRegistry, type ReminderEntry } from './system-reminder-registry'
+import { composePetStickynoteRetryReminder } from './system-reminders/pet-stickynote-retry-reminder'
+import { composeBrowserTaskCorrectionReminder } from './system-reminders/browser-task-correction-reminder'
 import { createLayeredCompactor, type LayeredCompactorMetricName } from './layered-compactor'
 import type { HookRegistry } from './hook-registry'
 import { buildLongSkillRunningProjection } from './skill-running-projection'
@@ -1343,7 +1345,7 @@ export class TurnEngine {
       try {
         // Lazy import to avoid pulling MCP module into early init paths
         // (helper-only call site; safe to no-op if mcp dir is absent).
-        // eslint-disable-next-line @typescript-eslint/no-var-requires
+         
         const mcpDeferred = require('../mcp/deferred-filter') as {
           deferredRegistry: { reset(): void }
         }
@@ -3801,11 +3803,8 @@ export class TurnEngine {
               })
             }
             preferTextToolBridgeOnce = true
-            const reminderText = composeSystemReminderText({
-              topic: 'checkpoint',
-              priority: 80,
-              text: '系统补充：当前任务是宠物便利贴任务，必须调用 pet_show_sticky_note 把内容贴到猫猫旁边；不要写入文档，也不要只用文字说“贴好了”。',
-            })
+            // Stage U PR U1.4 — reminder text relocated to system-reminders/.
+            const reminderText = composePetStickynoteRetryReminder()
             const correctionText = [
               buildTextToolBridgeCorrectionMessage(toolPolicy as any),
               reminderText,
@@ -3828,11 +3827,8 @@ export class TurnEngine {
               pushAssistantTextSafely(session, assistantHistoryText, { sessionId: request.sessionId, iteration: iterations, toolTransport: response.toolTransport })
             }
             preferTextToolBridgeOnce = true
-            const reminderText = composeSystemReminderText({
-              topic: 'checkpoint',
-              priority: 80,
-              text: '系统补充：当前任务是浏览器任务，至少先调用一个 browser_* 工具（例如 browser_search、browser_navigate、browser_read_page），不要直接解释这轮工具列表。',
-            })
+            // Stage U PR U1.4 — reminder text relocated to system-reminders/.
+            const reminderText = composeBrowserTaskCorrectionReminder()
             const correctionText = [
               buildTextToolBridgeCorrectionMessage(toolPolicy as any),
               reminderText,
