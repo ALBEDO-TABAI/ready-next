@@ -62,10 +62,12 @@ const FORBIDDEN_LITERALS = [
 // future PR might be tempted to use to re-introduce product branching
 // without tripping the literal list above.
 const FORBIDDEN_PATTERNS = [
-  // adapter.id === '...'
+  // adapter.id === '...' / adapterId === '...' / sourceAdapterId === '...'
+  // (Stage U mid-stage codex review v2 — the prior pattern missed the
+  // `adapter.id` dotted form because `\b(?:Id)?` cannot match `.id`.)
   /\bsourceAdapterId\s*(===|==)\s*['"]/,
-  /\badapter(?:Id)?\s*(===|==)\s*['"](?:pet|browser|rss|calendar|document|feishu)['"]/,
-  /\bdomain(?:Id)?\s*(===|==)\s*['"](?:pet|browser|rss|calendar|document|feishu)['"]/,
+  /\badapter(?:\.id|Id)?\s*(===|==)\s*['"](?:pet|browser|rss|calendar|document|feishu)['"]/,
+  /\bdomain(?:\.id|Id)?\s*(===|==)\s*['"](?:pet|browser|rss|calendar|document|feishu)['"]/,
   // switch on adapter-typed string
   /\bcase\s+['"](?:pet|browser|rss|calendar|document|feishu)['"]\s*:/,
 ]
