@@ -15,6 +15,10 @@ import {
 } from './file-watcher'
 import type { SearchHit } from './query'
 import { validateWorkspaceRoot } from '../../../shared/workspace-validation'
+import {
+  noteSearchWorkerSuccess,
+  recordSearchWorkerFallback,
+} from './worker-fallback-observer'
 
 interface SearchIPCResponse<T> {
   success: boolean
@@ -89,8 +93,12 @@ export function setupSearchIPC(): void {
       // Run in worker; on bridge failure fall back to in-process engine.
       try {
         const result = await getWorkerDbBridge().reindexWorkspace({ root })
+        noteSearchWorkerSuccess()
         return { success: true, data: result }
-      } catch {
+      } catch (workerError) {
+        // Stage U / U8.1 — log fallback so we can see how often the worker
+        // boundary is bypassed. Fallback behavior itself is unchanged.
+        recordSearchWorkerFallback({ task: 'reindexWorkspace', error: workerError, workspaceRoot: root })
         try {
           const result = await searchEngine.reindexWorkspace({ root })
           return { success: true, data: result }
@@ -166,8 +174,14 @@ export function setupSearchIPC(): void {
           workspaceRoots: payload.workspaceRoots,
           sources: payload.sources,
         })
+        noteSearchWorkerSuccess()
         return { success: true, data: result }
-      } catch {
+      } catch (workerError) {
+        recordSearchWorkerFallback({
+          task: 'searchDocuments',
+          error: workerError,
+          workspaceRoot: payload.workspaceRoot,
+        })
         try {
           const result = await searchEngine.search(payload.query, {
             limit: payload.limit,
@@ -207,8 +221,10 @@ export function setupSearchIPC(): void {
       // perf-rescue B1: full multi-source reindex — offload to worker.
       try {
         const result = await getWorkerDbBridge().reindexAllSources({ root })
+        noteSearchWorkerSuccess()
         return { success: true, data: result }
-      } catch {
+      } catch (workerError) {
+        recordSearchWorkerFallback({ task: 'reindexAllSources', error: workerError, workspaceRoot: root })
         try {
           const result = await searchEngine.reindexAllSources({ root })
           return { success: true, data: result }
