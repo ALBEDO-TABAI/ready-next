@@ -355,7 +355,16 @@ function findVeaProviderPreflightIssue(agentContext: AgentSpawnContext | null): 
   let configuredVisionContext: AgentSpawnContext | null = null
   try {
     configuredVisionContext = new ExternalServiceStore().buildVisionAgentContext()
-  } catch {
+  } catch (err) {
+    // U0.2 — observable degradation: preflight diagnose continues with the
+    // remaining fallback layers (agentContext → current AI config → preferred
+    // model), but a load failure of the configured vision store must surface
+    // as a metric so we can see VEA preflights silently degrading.
+    logAgentMetric('runtime.config.load_failed', {
+      skillId: 'video-expert-analyzer',
+      source: 'external_service_store_vision_context',
+      error: err instanceof Error ? err.message : String(err),
+    })
     configuredVisionContext = null
   }
   if (configuredVisionContext) return findAgentContextVisionIssue(configuredVisionContext)

@@ -16,6 +16,10 @@ function parseJson(value: string | undefined): Record<string, unknown> {
     const parsed = JSON.parse(value)
     return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
   } catch {
+    // silent-catch: skill configuration value is a free-form JSON blob persisted
+    // by the user via Settings UI. Corrupt JSON resets to empty config (same as
+    // never-configured), which is recoverable by re-saving. Loud failure would
+    // permanently brick the Settings page for any user with a stale blob.
     return {}
   }
 }

@@ -633,11 +633,21 @@ export class SkillsRuntimeManager {
   }
 
   private resolveExternalEnv(definition: SkillDefinition): Record<string, string> {
-    let env: Record<string, string> = {}
+    // U0.2 — fail-fast: previously these catches swallowed config-load failures
+    // and let the sub-agent start with a partial / empty env, which consumed
+    // VEA / RSS budget before crashing deep in the long task. Throwing here
+    // makes the failure surface immediately as a blocked task projection.
+    let env: Record<string, string>
     try {
       env = this.externalServiceStore.getSkillExternalEnv(definition.id)
-    } catch {
-      return env
+    } catch (err) {
+      logAgentMetric('runtime.config.load_failed', {
+        skillId: definition.id,
+        source: 'external_service_store',
+      })
+      throw new Error(
+        `SkillRuntimeConfigError(external_service_unavailable): cannot resolve external env for ${definition.id} — ${err instanceof Error ? err.message : String(err)}`,
+      )
     }
     if (
       definition.id !== 'lets-go-rss'
@@ -650,8 +660,14 @@ export class SkillsRuntimeManager {
     let values
     try {
       values = this.skillConfigurationStore.getValues(definition)
-    } catch {
-      return env
+    } catch (err) {
+      logAgentMetric('runtime.config.load_failed', {
+        skillId: definition.id,
+        source: 'skill_configuration_store',
+      })
+      throw new Error(
+        `SkillRuntimeConfigError(skill_configuration_corrupt): cannot read skill configuration for ${definition.id} — ${err instanceof Error ? err.message : String(err)}`,
+      )
     }
 
     if (definition.id === 'lets-go-rss') {
