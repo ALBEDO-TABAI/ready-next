@@ -22,6 +22,14 @@ import type {
 } from '../modules/rss/types'
 import type { ThemeOption, ResolvedTheme, ThemeSkin } from '../stores/useTheme'
 import type { TaskType } from '../../shared/task-types'
+// Stage U PR U4.v2-2 — TaskProjectionRecordData now derives its main
+// shape from the canonical wire contract instead of hand-mirroring it.
+// ScopeRun* sub-fields keep their strict renderer-side aliases (see
+// Phase 4 v2 scope: wire's ScopeRun fields are intentionally unknown
+// to stay free of src/main/ imports).
+import type {
+  TaskProjectionRecord as TaskProjectionRecordWire,
+} from '../../shared/ipc-contracts/task-projection'
 import type {
   DocumentMarkDraft,
   DocumentMarkPatch,
@@ -469,41 +477,38 @@ interface TaskProjectionStepData {
   }>
 }
 
-interface TaskProjectionRecordData {
-  taskId: string
-  scopeId: string
-  runId: string
-  parentTaskId?: string | null
-  parentStepId?: string | null
-  taskType: TaskTypeData
-  module: string
-  taskTitle?: string | null
-  taskSummary?: string | null
-  status: TaskProjectionStatusData
-  interactionState: TaskInteractionStateData
-  waitingFor?: ScopeRunWaitingForData
-  steps: TaskProjectionStepData[]
-  currentStepId?: string | null
-  budget?: TaskBudgetData | null
-  budgetUsagePercent?: number | null
-  budgetWarningLevel?: 'none' | 'warning' | 'converge' | 'exhausted' | null
-  recoveryHistory?: RecoveryRecordData[]
-  degradationReason?: string | null
-  blockedReason?: string | null
-  resumableActions?: ScopeRunResumableActionData[]
-  continuationRef?: ScopeRunTaskContinuationData | null
-  progress?: ScopeRunSkillProgressData | null
-  recentArtifacts?: ScopeRunEventData['artifactRefs']
-  /**
-   * Stage Q (Stage 11) — derived-at-read truth from main side. Renderer
-   * must consume this directly and NOT recompute from `resumableActions`
-   * / `taskRunId` / `interactionState` (Stage Q audit §C-9 / contract C7).
-   * Defensive default: when undefined or false, treat as not resumable.
-   */
-  canResume?: boolean
-  createdAt: string
-  updatedAt: string
-}
+/**
+ * Stage U PR U4.v2-2 — wire-derived task-projection record.
+ *
+ * Top-level shape is now sourced from the canonical wire contract at
+ * `src/shared/ipc-contracts/task-projection.ts`. The five ScopeRun*
+ * sub-fields (waitingFor / resumableActions / continuationRef /
+ * progress / recentArtifacts) are typed permissively as `unknown` in
+ * the wire module to keep src/shared/ free of src/main/ imports, so
+ * we override them here with the renderer-side strict aliases. The
+ * `check-task-projection-wire-canonical.cjs` gate (U4.v2-4) rejects
+ * any future PR that reintroduces a full hand-rewrite of this shape.
+ *
+ * Stage Q canResume contract preserved verbatim from the wire source:
+ * renderer must consume `canResume` directly and never recompute from
+ * `resumableActions` / `taskRunId` / `interactionState` (audit §C-9 /
+ * contract C7).
+ */
+type TaskProjectionRecordData =
+  Omit<
+    TaskProjectionRecordWire,
+    'steps' | 'waitingFor' | 'resumableActions' | 'continuationRef' | 'progress' | 'recentArtifacts'
+  > & {
+    /** Renderer uses the narrower ScopeRunTaskStepStatus-compatible
+     *  shape (consumers like ChatPanel.normalizeProjectionSteps assign
+     *  step.status into ScopeRunTaskStep[] downstream). */
+    steps: TaskProjectionStepData[]
+    waitingFor?: ScopeRunWaitingForData
+    resumableActions?: ScopeRunResumableActionData[]
+    continuationRef?: ScopeRunTaskContinuationData | null
+    progress?: ScopeRunSkillProgressData | null
+    recentArtifacts?: ScopeRunEventData['artifactRefs']
+  }
 
 interface ScopeRunSummaryData {
   scopeId: string
@@ -2805,6 +2810,7 @@ type ExternalServiceKindData =
   | 'rsshub'
   | 'bilibili'
   | 'github'
+  | 'amap'
   | 'vision-model'
 
 type ExternalServiceOptionValueData = string | number | boolean | string[] | null
@@ -2858,6 +2864,9 @@ interface ElectronSettingsAPI {
   ) => Promise<{ success: boolean; data?: PublicExternalServiceProfileData; error?: string }>
   testExternalService: (
     payload: { id: string }
+  ) => Promise<{ success: boolean; data?: ExternalServiceTestResultData; error?: string }>
+  testExternalServiceDraft: (
+    input: ExternalServiceUpdateInputData
   ) => Promise<{ success: boolean; data?: ExternalServiceTestResultData; error?: string }>
 }
 
