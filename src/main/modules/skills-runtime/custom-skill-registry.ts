@@ -9,6 +9,7 @@ import type {
   SkillRuntimeKind,
   SkillSource,
 } from '../../../shared/skill-execution-types'
+import { normalizeReadSkillVisibility } from './read-skill-visibility'
 
 export interface CustomSkillExecutionConfig {
   mode: Exclude<SkillExecutionMode, 'direct'>
@@ -238,14 +239,14 @@ function normalizeActions(raw: unknown, runtime: SkillRuntimeKind, documentEntry
       const name = asString(obj?.name)
       if (!name) continue
       const normalized = normalizeAction(name, obj, runtime)
-      if (normalized) actions.push(normalizeReferenceReadSkillVisibility(normalized))
+      if (normalized) actions.push(applyReadSkillVisibility(normalized))
     }
   } else {
     const obj = asObject(raw)
     if (obj) {
       for (const [name, value] of Object.entries(obj)) {
         const normalized = normalizeAction(name, value, runtime)
-        if (normalized) actions.push(normalizeReferenceReadSkillVisibility(normalized))
+        if (normalized) actions.push(applyReadSkillVisibility(normalized))
       }
     }
   }
@@ -257,7 +258,7 @@ function normalizeActions(raw: unknown, runtime: SkillRuntimeKind, documentEntry
     // The orchestrator inlines SKILL.md directly via `tryInlineReferenceSkillDoc`,
     // so the read_skill tool only needs to exist for the legacy tool-call
     // fallback, which runs in-process and does not consult visibility.
-    actions.push(normalizeReferenceReadSkillVisibility({
+    actions.push(applyReadSkillVisibility({
       name: 'read_skill',
       description: '读取并应用该技能的说明与方法完成当前任务',
       runtime: 'reference',
@@ -274,11 +275,10 @@ function coerceVisibility(value: unknown): SkillActionVisibility {
   return asString(value) === 'internal' ? 'internal' : 'public'
 }
 
-function normalizeReferenceReadSkillVisibility(action: SkillActionDefinition): SkillActionDefinition {
-  if (action.name === 'read_skill' && action.runtime === 'reference') {
-    return { ...action, visibility: 'internal' }
-  }
-  return action
+function applyReadSkillVisibility(action: SkillActionDefinition): SkillActionDefinition {
+  if (action.name !== 'read_skill') return action
+  const kind = action.runtime === 'reference' ? 'reference' : 'runtime'
+  return { ...action, visibility: normalizeReadSkillVisibility(kind, action.visibility) }
 }
 
 function coerceExecutionMode(value: unknown): Exclude<SkillExecutionMode, 'direct'> | null {
@@ -428,15 +428,16 @@ export function listManagedCustomSkills(customSkillsRoot: string): RegisteredCus
       const description = isWeakDescription(manifest.description, fallbackName, manifest.id)
         ? (documentEntry ? guessDescriptionFromMarkdown(join(managedPath, documentEntry), fallbackName, manifest.id) : (asString(manifest.description) || '导入的自定义技能'))
         : manifest.description
-      const actions = (Array.isArray(manifest.actions) ? manifest.actions : []).map((action) =>
-        action?.name === 'read_skill' && action?.runtime === 'reference' && (!asString(action.description) || /读取技能说明与执行流程/.test(String(action.description)))
-          ? {
-            ...action,
-            description: '读取并应用该技能的说明与方法完成当前任务',
-            visibility: 'internal' as const,
-          }
-          : normalizeReferenceReadSkillVisibility(action),
-      )
+      const actions = (Array.isArray(manifest.actions) ? manifest.actions : []).map((action) => {
+        const shouldRefreshDescription =
+          action?.name === 'read_skill' &&
+          action?.runtime === 'reference' &&
+          (!asString(action.description) || /读取技能说明与执行流程/.test(String(action.description)))
+        const withDescription = shouldRefreshDescription
+          ? { ...action, description: '读取并应用该技能的说明与方法完成当前任务' }
+          : action
+        return applyReadSkillVisibility(withDescription)
+      })
       records.push({
         ...manifest,
         source: 'custom',

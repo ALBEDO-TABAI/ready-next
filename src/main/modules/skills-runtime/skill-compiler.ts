@@ -23,6 +23,7 @@ import {
   type SkillHostRequirements,
 } from '../../../shared/skill-host-contract'
 import { normalizeSkillConfiguration } from '../../../shared/skill-configuration'
+import { normalizeReadSkillVisibility } from './read-skill-visibility'
 
 const MANIFEST_CANDIDATES = ['ready-skill.json', '.ready-skill.json', 'skill.json', 'manifest.json']
 const DOCUMENT_CANDIDATES = ['SKILL.md', 'README.md', 'README.zh-CN.md']
@@ -135,11 +136,10 @@ function coerceVisibility(value: unknown): SkillActionVisibility {
   return asString(value)?.toLowerCase() === 'internal' ? 'internal' : 'public'
 }
 
-function normalizeReferenceReadSkillVisibility(action: SkillActionDefinition): SkillActionDefinition {
-  if (action.name === 'read_skill' && action.runtime === 'reference') {
-    return { ...action, visibility: 'internal' }
-  }
-  return action
+function applyReadSkillVisibility(action: SkillActionDefinition): SkillActionDefinition {
+  if (action.name !== 'read_skill') return action
+  const kind = action.runtime === 'reference' ? 'reference' : 'runtime'
+  return { ...action, visibility: normalizeReadSkillVisibility(kind, action.visibility) }
 }
 
 function coerceExecutionMode(value: unknown): Exclude<SkillExecutionMode, 'direct'> | undefined {
@@ -243,20 +243,20 @@ function normalizeActions(raw: unknown, runtime: SkillRuntimeKind, documentEntry
       const name = asString(obj?.name)
       if (!name) continue
       const normalized = normalizeAction(name, obj, runtime)
-      if (normalized) actions.push(normalizeReferenceReadSkillVisibility(normalized))
+      if (normalized) actions.push(applyReadSkillVisibility(normalized))
     }
   } else {
     const obj = asObject(raw)
     if (obj) {
       for (const [name, value] of Object.entries(obj)) {
         const normalized = normalizeAction(name, value, runtime)
-        if (normalized) actions.push(normalizeReferenceReadSkillVisibility(normalized))
+        if (normalized) actions.push(applyReadSkillVisibility(normalized))
       }
     }
   }
 
   if (actions.length === 0 && documentEntry) {
-    actions.push(normalizeReferenceReadSkillVisibility({
+    actions.push(applyReadSkillVisibility({
       name: 'read_skill',
       description: '读取并应用该技能的说明与方法完成当前任务',
       runtime: 'reference',
