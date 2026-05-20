@@ -1,3 +1,24 @@
+/**
+ * Stage U PR U4.1a — WIRE / INTERNAL classification (locked).
+ *
+ * This file is being bisected by Stage U PRs U4.1a–e. The full
+ * classification table is the single source of truth at
+ * `docs/superpowers/plans/U4.1-run-contracts-export-classification.md`.
+ *
+ * Summary:
+ *   - 2 WIRE exports (TaskProjectionRecord, TaskProjectionChangeEvent)
+ *     will move to `src/shared/ipc-contracts/task-projection.ts` in U4.1b.
+ *   - 63 INTERNAL exports will move to `run-contracts-internal.ts`
+ *     (currently empty skeleton) in U4.1d.
+ *   - This file itself is deleted in U4.1e.
+ *
+ * Do NOT add new exports to this file. Add WIRE types directly to
+ * `src/shared/ipc-contracts/`; add INTERNAL types to
+ * `run-contracts-internal.ts`. The check-wire-contract-isolation.cjs
+ * gate (activating in U4.1d) will fence src/preload/ and src/renderer/
+ * from importing run-contracts-internal.
+ */
+
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type {
@@ -263,6 +284,7 @@ export interface ToolResourceTag {
     | 'rss'
     | 'calendar'
     | 'feishu'
+    | 'map'
     | 'skill'
     | 'memory'
     | 'session'
@@ -275,14 +297,14 @@ export interface TaskTypeResolution {
   executionChain: 'direct' | 'tool_loop' | 'planner' | 'domain_executor' | 'continuation'
   degradationReason?: string | null
   requiresPlanner: boolean
-  preferredExecutor?: 'browser' | 'document' | 'skill' | 'rss' | 'calendar' | 'feishu' | 'research' | 'none'
+  preferredExecutor?: 'browser' | 'document' | 'skill' | 'rss' | 'calendar' | 'feishu' | 'research' | 'map' | 'none'
 }
 
 export interface TaskExecutionRoute {
   taskId: string
   taskType: TaskType
   chain: TaskTypeResolution['executionChain']
-  executor: 'direct' | 'tool_loop' | 'planner' | 'browser' | 'document' | 'skill' | 'rss' | 'calendar' | 'feishu' | 'research'
+  executor: 'direct' | 'tool_loop' | 'planner' | 'browser' | 'document' | 'skill' | 'rss' | 'calendar' | 'feishu' | 'research' | 'map'
   steps: TaskStep[]
   currentStepId?: string | null
   degradationReason?: string | null
