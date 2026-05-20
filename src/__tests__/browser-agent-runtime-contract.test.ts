@@ -13,7 +13,7 @@ test('browser agent runtime is split into planner, runtime adapter, page-state s
   const browserRunner = readWorkspaceFile('src/main/modules/tools/browser-agent-runner.ts')
   const browserTools = readWorkspaceFile('src/main/modules/tools/browser-tools.ts')
   const ipcHandler = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')
-  const planner = readWorkspaceFile('src/main/modules/agent-control/browser-task-planner.ts')
+  const planner = readWorkspaceFile('src/main/modules/agent-control/domain-adapters/browser-task-planner.ts')
   const runtimeAdapter = readWorkspaceFile('src/main/modules/browser-engine/agent-runtime-adapter.ts')
   const pageStateService = readWorkspaceFile('src/main/modules/browser-engine/page-state-service.ts')
   const evidenceService = readWorkspaceFile('src/main/modules/browser-engine/evidence-service.ts')
@@ -65,7 +65,7 @@ test('browser agent runtime is split into planner, runtime adapter, page-state s
   assert.match(planner, /buildClarifyMessage\(/)
   assert.match(planner, /getRecommendedMaxToolIterations\(/)
 
-  assert.match(directChat, /import \{ BrowserTaskPlanner \} from '\.\.\/agent-control\/browser-task-planner'/)
+  assert.match(directChat, /import \{ BrowserTaskPlanner \} from '\.\.\/agent-control\/domain-adapters\/browser-task-planner'/)
   assert.match(directChat, /import type \{[\s\S]*BrowserTaskDecision[\s\S]*BrowserTaskPlan[\s\S]*BrowserTaskPlanContinuity[\s\S]*\} from '\.\.\/\.\.\/\.\.\/shared\/browser-agent-task'/)
   assert.doesNotMatch(directChat, /interface BrowserTaskDecision \{/)
   assert.doesNotMatch(directChat, /private async buildBrowserTaskContinuityContext\(/)
