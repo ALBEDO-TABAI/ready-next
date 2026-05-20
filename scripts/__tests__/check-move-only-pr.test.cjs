@@ -56,3 +56,11 @@ test('U5.0 dynamic import expression classifies as import (dogfood fix)', () => 
   assert.equal(classifyLine('+  const { X } = await import(\'./bar\')'), 'import')
   assert.equal(classifyLine('+  return import(\'./baz\').then((m) => m.default)'), 'import')
 })
+
+test('U5.0 multi-line import trailing path line classifies as import (dogfood fix)', () => {
+  // Caught by U5.1a1 dogfooding: `} from '...'` on its own line (closing
+  // a multi-line `import { ... } from '...'`) was treated as behavior change.
+  assert.equal(classifyLine('+} from \'../foo\''), 'import')
+  assert.equal(classifyLine('-} from \'../foo\''), 'import')
+  assert.equal(classifyLine('+from \'../foo\''), 'import')
+})

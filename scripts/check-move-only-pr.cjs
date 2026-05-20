@@ -99,6 +99,10 @@ function classifyLine(line) {
   // only thing that changes during a move-only PR; the surrounding statement structure
   // (await / const = / .then) is unchanged.
   if (/\bimport\s*\(\s*['"]/.test(body)) return 'import'
+  // Multi-line import / export trailing line: `} from '...'` or `from '...'`.
+  // The opening `import { ... ` is one or more lines above and unchanged; only
+  // the closing path line moves during a path adjustment.
+  if (/^\}\s*from\s+['"]/.test(body) || /^from\s+['"]/.test(body)) return 'import'
   return sign === '+' ? 'add' : 'remove'
 }
 
