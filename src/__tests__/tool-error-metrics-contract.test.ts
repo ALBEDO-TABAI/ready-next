@@ -25,7 +25,7 @@ function readWorkspaceFile(path: string): string {
 
 test('tool-executor.ts imports TOOL_ERROR_METRICS and uses .inputValidation + .surfaced', () => {
   const source = readWorkspaceFile('src/main/modules/tools/tool-executor.ts')
-  assert.match(source, /from ['"]\.\.\/agent-control\/tool-error-metrics['"]/)
+  assert.match(source, /from ['"]\.\.\/agent-control\/tools-runtime\/tool-error-metrics['"]/)
   assert.match(source, /logAgentMetric\(TOOL_ERROR_METRICS\.inputValidation/)
   assert.match(source, /logAgentMetric\(TOOL_ERROR_METRICS\.surfaced/)
   // Old hardcoded strings must be gone from this file (within logAgentMetric call sites).
@@ -34,7 +34,7 @@ test('tool-executor.ts imports TOOL_ERROR_METRICS and uses .inputValidation + .s
 })
 
 test('tool-runtime.ts uses TOOL_ERROR_METRICS.unknownSurfaced', () => {
-  const source = readWorkspaceFile('src/main/modules/agent-control/tool-runtime.ts')
+  const source = readWorkspaceFile('src/main/modules/agent-control/tools-runtime/tool-runtime.ts')
   assert.match(source, /from ['"]\.\/tool-error-metrics['"]/)
   assert.match(source, /logAgentMetric\(TOOL_ERROR_METRICS\.unknownSurfaced/)
   assert.doesNotMatch(source, /logAgentMetric\(['"]tool_error_unknown_surfaced['"]/)

@@ -108,7 +108,7 @@ test('resolveToolInputSchemaForExecution returns null for unknown tool names', (
 
 test('T6: gateway rejects invalid input with errorKind=input_validation and never reaches the runtime manager', async () => {
   const { executeSkillActionViaToolGateway } = await import(
-    '../main/modules/agent-control/tool-registry'
+    '../main/modules/agent-control/tools-runtime/tool-registry'
   )
   const fakeRuntime = {
     callCount: 0,
@@ -145,7 +145,7 @@ test('T6: gateway rejects invalid input with errorKind=input_validation and neve
 
 test('T6: gateway succeeds when input matches the same schema the public dispatch path resolves', async () => {
   const { executeSkillActionViaToolGateway } = await import(
-    '../main/modules/agent-control/tool-registry'
+    '../main/modules/agent-control/tools-runtime/tool-registry'
   )
   // Build a fake runtime that captures the request and returns success.
   const fakeRuntime = {

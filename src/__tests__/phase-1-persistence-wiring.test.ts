@@ -16,7 +16,7 @@ import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tools-runtime/
 const RUNTIME_PATH = new URL('../main/modules/agent-control/runtime.ts', import.meta.url)
 const IPC_HANDLER_PATH = new URL('../main/modules/claude-bridge/ipc-handler.ts', import.meta.url)
 const RUNTIME_MANAGER_PATH = new URL('../main/modules/skills-runtime/runtime-manager.ts', import.meta.url)
-const TOOL_ERROR_METRICS_PATH = new URL('../main/modules/agent-control/tool-error-metrics.ts', import.meta.url)
+const TOOL_ERROR_METRICS_PATH = new URL('../main/modules/agent-control/tools-runtime/tool-error-metrics.ts', import.meta.url)
 
 function readSource(url: URL): string {
   return readFileSync(url, 'utf8')

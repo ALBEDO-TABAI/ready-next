@@ -19,13 +19,13 @@ function assertMatchesAll(
 }
 
 test('phase2 promotes structured tool execution into ToolRuntime', () => {
-  const toolDefinition = readWorkspaceFile('src/main/modules/agent-control/tool-definition.ts')
-  const toolResultTypes = readWorkspaceFile('src/main/modules/agent-control/tool-result-types.ts')
-  const toolRegistry = readWorkspaceFile('src/main/modules/agent-control/tool-registry.ts')
-  const toolGateway = readWorkspaceFile('src/main/modules/agent-control/tool-gateway.ts')
-  const toolRuntime = readWorkspaceFile('src/main/modules/agent-control/tool-runtime.ts')
-  const toolExecutionHooks = readWorkspaceFile('src/main/modules/agent-control/tool-execution-hooks.ts')
-  const toolRuntimeContextBuilder = readWorkspaceFile('src/main/modules/agent-control/tool-runtime-context-builder.ts')
+  const toolDefinition = readWorkspaceFile('src/main/modules/agent-control/tools-runtime/tool-definition.ts')
+  const toolResultTypes = readWorkspaceFile('src/main/modules/agent-control/tools-runtime/tool-result-types.ts')
+  const toolRegistry = readWorkspaceFile('src/main/modules/agent-control/tools-runtime/tool-registry.ts')
+  const toolGateway = readWorkspaceFile('src/main/modules/agent-control/tools-runtime/tool-gateway.ts')
+  const toolRuntime = readWorkspaceFile('src/main/modules/agent-control/tools-runtime/tool-runtime.ts')
+  const toolExecutionHooks = readWorkspaceFile('src/main/modules/agent-control/tools-runtime/tool-execution-hooks.ts')
+  const toolRuntimeContextBuilder = readWorkspaceFile('src/main/modules/agent-control/tools-runtime/tool-runtime-context-builder.ts')
   const toolExecutor = readWorkspaceFile('src/main/modules/tools/tool-executor.ts')
   const executionLoopOrchestrator = readWorkspaceFile('src/main/modules/agent-control/execution-loop-orchestrator.ts')
 

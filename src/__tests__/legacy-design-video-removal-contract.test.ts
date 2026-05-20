@@ -10,7 +10,7 @@ function readWorkspaceFile(path: string): string {
 test('active workbench and runtime guidance no longer advertise removed design and video modules', () => {
   const modeStore = readWorkspaceFile('src/renderer/stores/useMode.ts')
   const promptAssembly = readWorkspaceFile('src/main/modules/agent-control/prompt-assembly.ts')
-  const toolGateway = readWorkspaceFile('src/main/modules/agent-control/tool-gateway.ts')
+  const toolGateway = readWorkspaceFile('src/main/modules/agent-control/tools-runtime/tool-gateway.ts')
   const directChat = readWorkspaceFile('src/main/modules/claude-bridge/direct-chat.ts')
 
   assert.match(modeStore, /export type WorkbenchMode = 'browser' \| 'document' \| 'rss' \| 'calendar'/)

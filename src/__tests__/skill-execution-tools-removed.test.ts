@@ -129,7 +129,7 @@ test('source — general skill prompts do not recommend retired execution-contro
     // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: prompt text is assembled in multiple UI/main modules with no exported builder surface to exercise directly.
     readFileSync(resolve(process.cwd(), 'src/main/modules/agent-control/skill-context-orchestrator.ts'), 'utf-8'),
     // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: prompt text is assembled in multiple UI/main modules with no exported builder surface to exercise directly.
-    readFileSync(resolve(process.cwd(), 'src/main/modules/agent-control/tool-parallelism-policy.ts'), 'utf-8'),
+    readFileSync(resolve(process.cwd(), 'src/main/modules/agent-control/tools-runtime/tool-parallelism-policy.ts'), 'utf-8'),
   ].join('\n')
 
   assert.doesNotMatch(sources, /skill_get_state\s*\/\s*skill_submit_\*/)

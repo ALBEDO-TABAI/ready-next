@@ -88,7 +88,7 @@ test('executeToolCall wraps handler throws into structured ToolExecutionOutput',
 })
 
 test('tool-runtime no longer rethrows on unknown-kind errors', () => {
-  const source = readWorkspaceFile('src/main/modules/agent-control/tool-runtime.ts')
+  const source = readWorkspaceFile('src/main/modules/agent-control/tools-runtime/tool-runtime.ts')
 
   // Terminal infra guard exists.
   assert.match(source, /if \(isTerminalInfrastructureError\(error\)\) \{\s*throw error\s*\}/)
@@ -118,7 +118,7 @@ test('tool-executor runs Zod validator for every tool domain via the unified reg
   // map import to per-tool resolution.
   assert.match(
     source,
-    /resolveToolInputSchemaForExecution[\s\S]*from ['"]\.\.\/agent-control\/tool-registry['"]/,
+    /resolveToolInputSchemaForExecution[\s\S]*from ['"]\.\.\/agent-control\/tools-runtime\/tool-registry['"]/,
     'tool-executor must import resolveToolInputSchemaForExecution from the unified registry',
   )
   assert.match(
@@ -180,7 +180,7 @@ test('Stage U U1.1: tool-executor returns errorKind:tool_not_registered (top-lev
 
 test('Stage 4 W0: tool-runtime preflight rejects unallowed tools as tool_restricted_this_turn — W3 will skip skill_* but keep this for non-skill', () => {
    
-  const source = readWorkspaceFile('src/main/modules/agent-control/tool-runtime.ts')
+  const source = readWorkspaceFile('src/main/modules/agent-control/tools-runtime/tool-runtime.ts')
   assert.match(
     source,
     /reason: 'tool_restricted_this_turn'/,

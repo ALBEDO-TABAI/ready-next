@@ -113,7 +113,7 @@ function withSkillActionLookupThrowing(fn: () => void): void {
 
 test('tool-registry imports skills-tools / system-tools at module top (not via lazyRequire)', () => {
   // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: electron-vite bundle safety depends on static import topology rather than runtime registry output
-  const source = readFileSync(resolve(process.cwd(), 'src/main/modules/agent-control/tool-registry.ts'), 'utf8')
+  const source = readFileSync(resolve(process.cwd(), 'src/main/modules/agent-control/tools-runtime/tool-registry.ts'), 'utf8')
 
   assert.match(
     source,
@@ -129,7 +129,7 @@ test('tool-registry imports skills-tools / system-tools at module top (not via l
 
 test('tool-registry has no lazyRequire or createRequire invocation', () => {
   // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: bundled production regressed specifically through createRequire/lazyRequire topology
-  const source = readFileSync(resolve(process.cwd(), 'src/main/modules/agent-control/tool-registry.ts'), 'utf8')
+  const source = readFileSync(resolve(process.cwd(), 'src/main/modules/agent-control/tools-runtime/tool-registry.ts'), 'utf8')
 
   // Allow "createRequire" to appear only inside comments (we intentionally
   // leave a forensic explanation behind). Strip // and /* */ comments first.

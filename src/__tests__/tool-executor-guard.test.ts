@@ -10,7 +10,7 @@ function readWorkspaceFile(path: string): string {
 
 test('tool executor rejects tool calls outside the current allowlist', () => {
   const executor = readWorkspaceFile('src/main/modules/tools/tool-executor.ts')
-  const builder = readWorkspaceFile('src/main/modules/agent-control/tool-runtime-context-builder.ts')
+  const builder = readWorkspaceFile('src/main/modules/agent-control/tools-runtime/tool-runtime-context-builder.ts')
   const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
 
   assert.match(executor, /allowedToolNames\?: Set<string> \| string\[\] \| null/)

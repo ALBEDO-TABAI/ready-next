@@ -63,7 +63,7 @@ test('long running skill heartbeat can surface live run_state artifacts', () => 
 
 test('skill action spawn receives the current turn agent context', () => {
   const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
-  const contextBuilder = readWorkspaceFile('src/main/modules/agent-control/tool-runtime-context-builder.ts')
+  const contextBuilder = readWorkspaceFile('src/main/modules/agent-control/tools-runtime/tool-runtime-context-builder.ts')
   const toolExecutor = readWorkspaceFile('src/main/modules/tools/tool-executor.ts')
   const skillsTools = readWorkspaceFile('src/main/modules/tools/skills-tools.ts')
   const runtimeManager = readWorkspaceFile('src/main/modules/skills-runtime/runtime-manager.ts')

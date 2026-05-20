@@ -23,7 +23,7 @@ const requireFromHere = createRequire(import.meta.url)
 function resolveRegistryGetter(): (() => Set<string>) | null {
   if (cachedResolver !== undefined) return cachedResolver
   try {
-    const mod = requireFromHere('../agent-control/tool-registry') as {
+    const mod = requireFromHere('../agent-control/tools-runtime/tool-registry') as {
       getRegisteredToolNames?: () => Set<string>
     }
     cachedResolver = typeof mod.getRegisteredToolNames === 'function' ? mod.getRegisteredToolNames : null

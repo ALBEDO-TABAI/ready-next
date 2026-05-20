@@ -23,7 +23,7 @@ test('openai-execution-client emits tool_snapshot_mismatch metric inside the mis
   const client = readWorkspaceFile('src/main/modules/claude-bridge/openai-execution-client.ts')
 
   // Metric must be imported from the central registry, not hard-coded.
-  assert.match(client, /import \{ TOOL_ERROR_METRICS \} from '\.\.\/agent-control\/tool-error-metrics'/)
+  assert.match(client, /import \{ TOOL_ERROR_METRICS \} from '\.\.\/agent-control\/tools-runtime\/tool-error-metrics'/)
   assert.match(client, /import \{ logAgentMetric \} from '\.\.\/agent-control\/metrics'/)
 
   // The metric emission must be nested inside the `if (mismatch)` block, not

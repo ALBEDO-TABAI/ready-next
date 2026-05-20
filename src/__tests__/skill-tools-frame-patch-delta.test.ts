@@ -333,7 +333,7 @@ test('Phase 3: applyContextModifier mutates activeFrame.activeArtifactRoots in p
  */
 test('T7: ToolRuntimeContext.activeFrame is seeded from TurnFrame BEFORE any same-batch contextModifier runs', async () => {
   const { buildToolRuntimeContext, buildActiveFrameContextFromTurnFrame } = await import(
-    '../main/modules/agent-control/tool-runtime-context-builder'
+    '../main/modules/agent-control/tools-runtime/tool-runtime-context-builder'
   )
 
   // Construct a minimal TurnFrame fixture mimicking what the resolver
@@ -445,13 +445,13 @@ test('T7: ToolRuntimeContext.activeFrame is seeded from TurnFrame BEFORE any sam
 
 test('T7: same-batch contextModifier from tool-A unions onto the seeded roots so tool-B sees BOTH', async () => {
   const { applyContextModifier } = await import(
-    '../main/modules/agent-control/tool-runtime'
+    '../main/modules/agent-control/tools-runtime/tool-runtime'
   )
   const { buildToolRuntimeContext, buildActiveFrameContextFromTurnFrame } = await import(
-    '../main/modules/agent-control/tool-runtime-context-builder'
+    '../main/modules/agent-control/tools-runtime/tool-runtime-context-builder'
   )
   const { createToolExecutionOutput } = await import(
-    '../main/modules/agent-control/tool-result-types'
+    '../main/modules/agent-control/tools-runtime/tool-result-types'
   )
 
   const seededFrame: any = {
