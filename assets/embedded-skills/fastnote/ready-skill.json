@@ -1,0 +1,15 @@
+{
+  "id": "fastnote",
+  "name": "fastnote",
+  "displayName": "FastNote",
+  "description": "笔记快捷模式路由方法论：把 IM-style 混合输入按 -/: / -/2: 触发深度档位分发到剪藏 / study-notes / image-analysis-router / video-* 并写入工作区",
+  "version": "0.1.0",
+  "runtime": "reference",
+  "execution": { "mode": "advisory" },
+  "actions": {
+    "read_skill": {
+      "runtime": "reference",
+      "visibility": "internal"
+    }
+  }
+}

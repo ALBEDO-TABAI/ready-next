@@ -1,0 +1,15 @@
+{
+  "id": "study-notes",
+  "name": "study-notes",
+  "displayName": "Study Notes",
+  "description": "结构化学习笔记方法论：按 8 种内容类型路由（教程 / 评论 / 故事 / 数据报告 / 新闻 / 框架 / 混合 / 不适合）+ 复杂度分层 + 可信度初判",
+  "version": "0.1.0",
+  "runtime": "reference",
+  "execution": { "mode": "advisory" },
+  "actions": {
+    "read_skill": {
+      "runtime": "reference",
+      "visibility": "internal"
+    }
+  }
+}

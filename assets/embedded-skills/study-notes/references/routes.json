@@ -1,0 +1,14 @@
+{
+  "version": "1.0.0",
+  "routes": [
+    "knowledge-tutorial",
+    "opinion-commentary",
+    "narrative-story",
+    "data-report",
+    "news-brief",
+    "framework-methodology",
+    "mixed-content",
+    "unsuitable-input"
+  ],
+  "comment": "Single source of truth for the study-notes route list. route_study_notes.py and validate_study_notes.py both load this."
+}
