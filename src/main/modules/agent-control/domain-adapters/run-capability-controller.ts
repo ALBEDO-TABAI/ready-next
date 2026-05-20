@@ -1,21 +1,21 @@
-import type { AIModelConfig } from '../../../shared/ai-providers'
-import type { BrowserTaskDecisionMode } from '../../../shared/browser-agent-task'
-import type { CapabilityProfileId } from '../../../shared/ai-capability-groups'
-import type { CapabilityRuntimeSnapshot } from '../../../shared/ai-capability-runtime'
-import type { ToolPolicy } from './execution-tool-config'
-import type { SkillToolAuthorization } from './skills/skill-tool-authorization'
-import { getPolicyOpenAIToolBundle } from './execution-tool-config'
-import type { ToolVisibilityPlan } from './run-contracts'
+import type { AIModelConfig } from '../../../../shared/ai-providers'
+import type { BrowserTaskDecisionMode } from '../../../../shared/browser-agent-task'
+import type { CapabilityProfileId } from '../../../../shared/ai-capability-groups'
+import type { CapabilityRuntimeSnapshot } from '../../../../shared/ai-capability-runtime'
+import type { ToolPolicy } from '../execution-tool-config'
+import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
+import { getPolicyOpenAIToolBundle } from '../execution-tool-config'
+import type { ToolVisibilityPlan } from '../run-contracts'
 import type { CapabilityResolution, CapabilityRuntimeAvailability } from './capability-resolver'
 import { buildCapabilityRuntimeSnapshot } from './capability-runtime-snapshot'
-import { buildExecutionToolState, type ExecutionIntentContext } from './execution-intent-resolver'
-import { logAgentMetric } from './metrics'
+import { buildExecutionToolState, type ExecutionIntentContext } from '../execution-intent-resolver'
+import { logAgentMetric } from '../metrics'
 import {
   MAX_ARBITRATION_RECURSION,
   resolvePolicyConflicts,
   type PolicyArbitration,
   type PolicyConflictType,
-} from './policy-arbitration'
+} from '../policy-arbitration'
 
 export type { PolicyArbitration, PolicyConflictType }
 

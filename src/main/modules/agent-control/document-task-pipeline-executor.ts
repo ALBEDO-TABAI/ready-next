@@ -22,7 +22,7 @@ import {
 import { resolveControlledWidgetTarget } from '../../../shared/document-widget-target'
 import { readDocumentEditableText } from '../document-engine/ipc-handler'
 import { documentCommitRegistry } from '../document-engine/document-commit-registry'
-import { type DomainAdapterDispatchResult } from './domain-adapter'
+import { type DomainAdapterDispatchResult } from './domain-adapters/domain-adapter'
 import { classifyStructuredDocumentIntent } from './document-task-types'
 import { buildDocumentTaskStepCacheKey, hashText } from './document-task-cache-key'
 import {

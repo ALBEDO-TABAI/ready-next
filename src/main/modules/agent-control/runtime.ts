@@ -33,7 +33,7 @@ import {
 import { ReadyAgentOrchestrator } from './orchestrator'
 import { PromptAssemblyService } from './prompt-assembly'
 import { RunCoordinator } from './task-projection/run-coordinator'
-import type { DomainAdapter } from './domain-adapter'
+import type { DomainAdapter } from './domain-adapters/domain-adapter'
 import {
   snapshotLastReferenceSkill,
   restoreLastReferenceSkill,
@@ -97,7 +97,7 @@ import type { CapabilityRuntimeSnapshot } from '../../../shared/ai-capability-ru
 import { ExternalMemoryProviderSlot } from './external-memory-provider-slot'
 import { decryptChannelConfig, encryptChannelConfig } from './secret-storage'
 import { ToolGateway } from './tools-runtime/tool-gateway'
-import { buildCapabilityRuntimeSnapshot } from './capability-runtime-snapshot'
+import { buildCapabilityRuntimeSnapshot } from './domain-adapters/capability-runtime-snapshot'
 import { TaskProjectionRepository } from '../repositories/task-projection-repository'
 import {
   DetachedSkillTaskTracker,

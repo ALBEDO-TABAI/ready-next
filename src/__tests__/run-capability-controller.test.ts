@@ -7,7 +7,7 @@ import { buildRequestEnvelope } from '../main/modules/agent-control/request-enve
 import {
   prepareInitialRun,
   reconcileAfterBrowserDecision,
-} from '../main/modules/agent-control/run-capability-controller'
+} from '../main/modules/agent-control/domain-adapters/run-capability-controller'
 import {
   buildExplicitNoSkillAuthorization,
   buildSelectedSkillToolAuthorization,

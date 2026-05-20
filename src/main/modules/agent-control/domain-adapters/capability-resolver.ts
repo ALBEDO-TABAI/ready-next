@@ -1,16 +1,16 @@
-import type { AIModelConfig } from '../../../shared/ai-providers'
-import { resolveAIConfigCapabilities } from '../../../shared/ai-providers'
+import type { AIModelConfig } from '../../../../shared/ai-providers'
+import { resolveAIConfigCapabilities } from '../../../../shared/ai-providers'
 import type {
   CapabilityGroupId,
   CapabilityMode,
   CapabilityModeMap,
   CapabilityProfileId,
-} from '../../../shared/ai-capability-groups'
+} from '../../../../shared/ai-capability-groups'
 import {
   CAPABILITY_GROUPS,
   normalizeCapabilityModeMap,
-} from '../../../shared/ai-capability-groups'
-import type { BrowserTaskDecisionMode } from '../../../shared/browser-agent-task'
+} from '../../../../shared/ai-capability-groups'
+import type { BrowserTaskDecisionMode } from '../../../../shared/browser-agent-task'
 
 export type CapabilityGroupStatus = 'visible' | 'suppressed' | 'unavailable' | 'host_only' | 'inactive'
 export type CapabilityGroupReason =

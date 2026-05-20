@@ -31,7 +31,7 @@ import {
   sanitizeHistoricalMessagesByCapability,
   type CapabilityMessage,
   type MessageCapabilitySnapshot,
-} from '../main/modules/agent-control/message-capability-filter'
+} from '../main/modules/agent-control/domain-adapters/message-capability-filter'
 import { ToolDomainError } from '../main/modules/tools/tool-errors'
 
 const VISION_ON: MessageCapabilitySnapshot = { supportsVision: true, supportsVideo: true }

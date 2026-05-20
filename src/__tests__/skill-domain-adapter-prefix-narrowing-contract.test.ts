@@ -4,7 +4,7 @@ import test from 'node:test'
 import {
   filterAllowedToolNamesByPrefixes,
   logPrefixNarrowing,
-} from '../main/modules/agent-control/domain-adapter'
+} from '../main/modules/agent-control/domain-adapters/domain-adapter'
 
 // R2 contract tests: pin the second-gate allowedToolNames narrowing semantics
 // of the domain adapters. These narrowing steps are not obvious from reading

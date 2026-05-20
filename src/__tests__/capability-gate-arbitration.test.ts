@@ -12,8 +12,8 @@ import test from 'node:test'
 import type { AIModelConfig } from '../shared/ai-providers'
 import { classifyIntent } from '../main/modules/agent-control/intent-classifier'
 import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
-import { prepareInitialRun } from '../main/modules/agent-control/run-capability-controller'
-import { resolveCapabilityResolution } from '../main/modules/agent-control/capability-resolver'
+import { prepareInitialRun } from '../main/modules/agent-control/domain-adapters/run-capability-controller'
+import { resolveCapabilityResolution } from '../main/modules/agent-control/domain-adapters/capability-resolver'
 import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 
 const VISION_PROVEN_CONFIG: AIModelConfig = {

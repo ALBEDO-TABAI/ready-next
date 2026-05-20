@@ -31,7 +31,7 @@
  * `AgentInputItem` from the SDK. Callers adapt at the boundary.
  */
 
-import { ToolDomainError } from '../tools/tool-errors'
+import { ToolDomainError } from '../../tools/tool-errors'
 
 export interface CapabilityBlock {
   type: string

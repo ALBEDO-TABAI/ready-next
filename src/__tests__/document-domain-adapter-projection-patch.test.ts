@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { DocumentDomainAdapter } from '../main/modules/agent-control/document-domain-adapter'
+import { DocumentDomainAdapter } from '../main/modules/agent-control/domain-adapters/document-domain-adapter'
 import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import type { ToolRegistryReader } from '../main/modules/agent-control/tools-runtime/tool-registry'

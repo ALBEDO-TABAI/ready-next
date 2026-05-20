@@ -13,7 +13,7 @@ import { constants as fsConstants, existsSync } from 'fs'
 import { basename, extname, join } from 'path'
 import { homedir } from 'os'
 import { analyzeViewportWithVision } from './browser-vision'
-import { domainsLikelyMatch } from '../agent-control/browser-action-heuristics'
+import { domainsLikelyMatch } from '../agent-control/domain-adapters/browser-action-heuristics'
 import { AgentRepository } from '../repositories/agent-repository'
 import { createRotatingLogger } from '../../utils/rotating-logger'
 import {

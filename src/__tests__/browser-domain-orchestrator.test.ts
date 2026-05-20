@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import type { BrowserTaskDecision } from '../shared/browser-agent-task'
-import { BrowserDomainOrchestrator } from '../main/modules/agent-control/browser-domain-orchestrator'
-import { BrowserTaskPlanner } from '../main/modules/agent-control/browser-task-planner'
+import { BrowserDomainOrchestrator } from '../main/modules/agent-control/domain-adapters/browser-domain-orchestrator'
+import { BrowserTaskPlanner } from '../main/modules/agent-control/domain-adapters/browser-task-planner'
 
 function createDecision(): BrowserTaskDecision {
   return {

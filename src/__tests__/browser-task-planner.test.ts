@@ -4,7 +4,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 
-import { BrowserTaskPlanner } from '../main/modules/agent-control/browser-task-planner'
+import { BrowserTaskPlanner } from '../main/modules/agent-control/domain-adapters/browser-task-planner'
 import {
   __resetSessionContinuityForTests,
   __setSessionContinuityStoragePathForTests,

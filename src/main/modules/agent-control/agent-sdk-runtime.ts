@@ -22,7 +22,7 @@ import {
 import type { BrowserController } from '../browser-engine/ipc-handler'
 import type { SidecarManager } from './sidecar-manager'
 import type { AgentControlRuntime } from './runtime'
-import type { DomainAdapter } from './domain-adapter'
+import type { DomainAdapter } from './domain-adapters/domain-adapter'
 import type {
   ExecutionTurnResult,
   RunMessage,
@@ -80,7 +80,7 @@ import {
   sanitizeHistoricalMessagesByCapability,
   type CapabilityMessage,
   type MessageCapabilitySnapshot,
-} from './message-capability-filter'
+} from './domain-adapters/message-capability-filter'
 import { assertManualThinkingModeProviderSafe } from './thinking-compatibility'
 import { logAgentMetric } from './metrics'
 import { TOOL_ERROR_METRICS } from './tools-runtime/tool-error-metrics'
@@ -92,7 +92,7 @@ import {
   buildSelectedSkillToolAuthorization,
   type SkillToolAuthorization,
 } from './skills/skill-tool-authorization'
-import { resolveCapabilityResolution } from './capability-resolver'
+import { resolveCapabilityResolution } from './domain-adapters/capability-resolver'
 import { filterToolsByVisionCapability } from './tools-runtime/tool-gateway'
 import {
   buildToolRuntimeContext,

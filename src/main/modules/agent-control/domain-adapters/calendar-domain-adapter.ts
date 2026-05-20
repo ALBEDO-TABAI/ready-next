@@ -5,32 +5,32 @@ import {
   type DomainAdapter,
   type DomainAdapterPrepareResult,
 } from './domain-adapter'
-import type { ScopeRunTaskStep } from './types'
+import type { ScopeRunTaskStep } from '../types'
 
 // R2: See skill-domain-adapter.ts for why prefix narrowing is a second gate.
-// RSS uniquely keeps both rss_* (deterministic handlers) and skill_rss_*
-// (pipeline/workflow skills) so a rss workflow started via skill can still
-// call its subsequent actions without the adapter stripping them.
-const TOOL_PREFIXES = ['rss_', 'skill_rss_', 'memory_', 'session_']
-const INSTRUCTION = '系统执行器：本轮走 RSS 执行路径。优先使用 rss_* 或 skill_rss_* 工具完成任务，不要改走无关工具。'
-const RSS_TRIGGER_PATTERN =
-  /(?:\b(?:rss|feed|rsshub)\b|订阅源|订阅|源站|信息源|推送|skill_rss_|lets-go-rss).*(?:抓取|拉取|分析|汇总|输出.*报告|生成.*报告|添加|更新|查看|列出|状态|统计)|(?:抓取|拉取|分析|汇总|输出.*报告|生成.*报告|添加|更新|查看|列出|状态|统计).*(?:\b(?:rss|feed|rsshub)\b|订阅源|订阅|源站|信息源|推送|skill_rss_|lets-go-rss)|(?:skill_rss_|lets-go-rss)/i
+// Calendar intentionally strips skill_* tools (including skill_calendar_*
+// if it ever gets introduced — unlike RSS) to keep deterministic calendar
+// handlers in charge. Adjust TOOL_PREFIXES only if a calendar skill pipeline
+// actually lands.
+const TOOL_PREFIXES = ['calendar_', 'memory_', 'session_']
+const INSTRUCTION = '系统执行器：本轮走日程执行路径。优先使用 calendar_* 工具完成任务，不要改走无关工具。'
+const CALENDAR_WRITE_TRIGGER_PATTERN = /(日程|日历|会议|提醒).*(创建|修改|删除|改期)|创建日程|修改日程/i
 
-interface RSSAdapterState {
+interface CalendarAdapterState {
   steps: ScopeRunTaskStep[]
   taskSummary: string | null
   currentStepId: string | null
   dispatchedAt: string | null
 }
 
-function createState(domainState: unknown): RSSAdapterState {
+function createState(domainState: unknown): CalendarAdapterState {
   if (
     domainState
     && typeof domainState === 'object'
     && 'steps' in domainState
-    && Array.isArray((domainState as RSSAdapterState).steps)
+    && Array.isArray((domainState as CalendarAdapterState).steps)
   ) {
-    const record = domainState as RSSAdapterState
+    const record = domainState as CalendarAdapterState
     return {
       steps: record.steps,
       taskSummary: record.taskSummary ?? null,
@@ -48,7 +48,7 @@ function createState(domainState: unknown): RSSAdapterState {
 
 function hasAnyDomainTool(allowedToolNames: string[] | null | undefined): boolean {
   if (!allowedToolNames || allowedToolNames.length === 0) return false
-  return allowedToolNames.some((name) => name.startsWith('rss_') || name.startsWith('skill_rss_'))
+  return allowedToolNames.some((name) => name.startsWith('calendar_'))
 }
 
 function buildStepId(existingSteps: ScopeRunTaskStep[], toolName: string): string {
@@ -56,32 +56,27 @@ function buildStepId(existingSteps: ScopeRunTaskStep[], toolName: string): strin
   return repeats === 0 ? toolName : `${toolName}#${repeats + 1}`
 }
 
-function formatInputMeta(input: Record<string, unknown>): string | null {
-  const candidate = ['title', 'id', 'itemId', 'name']
-    .map((key) => input[key])
-    .find((value) => typeof value === 'string' && value.trim().length > 0)
-  return typeof candidate === 'string' ? candidate.trim() : null
-}
-
 function buildSummary(record: Record<string, unknown> | null, toolName: string, input: Record<string, unknown>): string {
   const action = typeof record?.action === 'string' && record.action.trim() ? record.action.trim() : toolName
   const message = typeof record?.message === 'string' && record.message.trim() ? record.message.trim() : '已执行'
-  const inputMeta = formatInputMeta(input)
-  return inputMeta ? `${action}（${inputMeta}）：${message}` : `${action}：${message}`
+  const title = typeof input.title === 'string' && input.title.trim() ? input.title.trim() : null
+  return title ? `${action}（${title}）：${message}` : `${action}：${message}`
 }
 
-export class RSSDomainAdapter implements DomainAdapter {
-  readonly id = 'rss'
+export class CalendarDomainAdapter implements DomainAdapter {
+  readonly id = 'calendar'
 
   contributePromptFragment(): ReturnType<DomainAdapter['contributePromptFragment']> {
     return [
       {
-        id: 'rss-analysis',
-        label: 'RSS 分析操作',
+        id: 'calendar-write',
+        label: '日程写入操作',
         priority: 0,
-        matches: ({ userText }) => RSS_TRIGGER_PATTERN.test(userText),
-        blocking: false,
-        refs: [{ path: 'docs/rss-rules.md', title: 'RSS 分析规则', summary: 'RSS 拉取和分析规则' }],
+        matches: ({ userText }) => CALENDAR_WRITE_TRIGGER_PATTERN.test(userText),
+        blocking: true,
+        refs: [
+          { path: 'docs/calendar-rules.md', title: '日程写入规则', summary: '日历冲突和时间歧义规则' },
+        ],
       },
     ]
   }
@@ -100,13 +95,13 @@ export class RSSDomainAdapter implements DomainAdapter {
   }
 
   shouldHandle(params: Parameters<DomainAdapter['shouldHandle']>[0]): boolean {
-    return params.route.executor === 'rss'
+    return params.route.executor === 'calendar'
   }
 
   prepare(params: Parameters<DomainAdapter['prepare']>[0]): DomainAdapterPrepareResult {
     const narrowed = filterAllowedToolNamesByPrefixes(params.allowedToolNames, TOOL_PREFIXES)
     if (params.host?.log) {
-      logPrefixNarrowing(params.host.log, 'rss', params.allowedToolNames, narrowed, TOOL_PREFIXES)
+      logPrefixNarrowing(params.host.log, 'calendar', params.allowedToolNames, narrowed, TOOL_PREFIXES)
     }
     return {
       allowedToolNames: narrowed,
@@ -122,10 +117,10 @@ export class RSSDomainAdapter implements DomainAdapter {
         domainState: state,
         projection: {
           phase: 'blocked',
-          summary: '本轮没有可用的 RSS 工具',
+          summary: '本轮没有可用的日程工具',
           waitingFor: 'none',
           resumableActions: ['retry', 'cancel'],
-          blockedReason: '未解析到可用的 rss_* 工具',
+          blockedReason: '未解析到可用的 calendar_* 工具',
         },
         finish: { status: 'done', success: false },
       }
@@ -143,7 +138,7 @@ export class RSSDomainAdapter implements DomainAdapter {
     if (params.phase === 'tool_batch') {
       let nextState = state
       for (const executedTool of params.toolBatch?.executedTools || []) {
-        if (!executedTool.name.startsWith('rss_') && !executedTool.name.startsWith('skill_rss_')) continue
+        if (!executedTool.name.startsWith('calendar_')) continue
         const record = readStructuredToolResultRecord(executedTool.result)
         const stepId = buildStepId(nextState.steps, executedTool.name)
         nextState = {
@@ -170,7 +165,7 @@ export class RSSDomainAdapter implements DomainAdapter {
         domainState: state,
         projection: {
           phase: 'done',
-          summary: state.taskSummary || 'RSS 任务已执行',
+          summary: state.taskSummary || '日程任务已执行',
           waitingFor: 'none',
           resumableActions: ['cancel'],
           blockedReason: null,
@@ -183,7 +178,7 @@ export class RSSDomainAdapter implements DomainAdapter {
         domainState: state,
         projection: {
           phase: 'blocked',
-          summary: state.taskSummary || 'RSS 任务达到本轮执行上限',
+          summary: state.taskSummary || '日程任务达到本轮执行上限',
           waitingFor: 'none',
           resumableActions: ['retry', 'cancel'],
           blockedReason: '已达到本轮执行上限',
@@ -198,8 +193,8 @@ export class RSSDomainAdapter implements DomainAdapter {
     const state = createState(params.domainState)
     if (!state.currentStepId) return null
     return {
-      module: 'rss',
-      taskTitle: 'RSS 任务',
+      module: 'calendar',
+      taskTitle: '日程任务',
       taskSummary: params.projection.summary,
       steps: state.steps,
       currentStepId: state.currentStepId,

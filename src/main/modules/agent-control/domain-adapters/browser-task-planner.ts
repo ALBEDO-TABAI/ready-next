@@ -1,6 +1,6 @@
-import { domainsLikelyMatch, getBrowserWorkflowState, getLatestSkillRun, getRecentBrowserActions } from './session-continuity'
-import type { AttachmentResourceList, BrowserTaskAttachmentResource, BrowserTaskDecision, BrowserTaskPlan, BrowserTaskPlanContinuity } from '../../../shared/browser-agent-task'
-import { detectLiveInfoIntent } from './live-info-intent'
+import { domainsLikelyMatch, getBrowserWorkflowState, getLatestSkillRun, getRecentBrowserActions } from '../session-continuity'
+import type { AttachmentResourceList, BrowserTaskAttachmentResource, BrowserTaskDecision, BrowserTaskPlan, BrowserTaskPlanContinuity } from '../../../../shared/browser-agent-task'
+import { detectLiveInfoIntent } from '../live-info-intent'
 
 interface PlannerTabLike {
   id: string

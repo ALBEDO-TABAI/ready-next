@@ -35,7 +35,7 @@ import { buildRequestEnvelope } from '../main/modules/agent-control/request-enve
 import {
   prepareInitialRun,
   type ReconciledRunCapabilities,
-} from '../main/modules/agent-control/run-capability-controller'
+} from '../main/modules/agent-control/domain-adapters/run-capability-controller'
 import {
   getPolicyOpenAIToolBundle,
   type ToolPolicy,

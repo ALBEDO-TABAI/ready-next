@@ -257,14 +257,14 @@ import {
   resolveSkillRunForResume,
   type SkillRunRecord,
 } from './session-continuity'
-import { prepareInitialRun, reconcileAfterBrowserDecision } from './run-capability-controller'
+import { prepareInitialRun, reconcileAfterBrowserDecision } from './domain-adapters/run-capability-controller'
 import { defaultToolRegistry, resolveToolInputSchemaForExecution } from './tools-runtime/tool-registry'
 import {
   selectDomainAdapter,
   type DomainAdapter,
   type DomainAdapterApplyResult,
   type DomainAdapterPrepareResult,
-} from './domain-adapter'
+} from './domain-adapters/domain-adapter'
 import {
   applyLongSkillTaskBudgetSeed,
   applyRunBudgetHint,

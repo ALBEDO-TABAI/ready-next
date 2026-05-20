@@ -4,7 +4,7 @@ import { rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { executeBrowserTool } from '../main/modules/tools/browser-tools'
-import { BrowserTaskPlanner } from '../main/modules/agent-control/browser-task-planner'
+import { BrowserTaskPlanner } from '../main/modules/agent-control/domain-adapters/browser-task-planner'
 import {
   __resetSessionContinuityForTests,
   __setSessionContinuityStoragePathForTests,

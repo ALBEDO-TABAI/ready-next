@@ -1,16 +1,16 @@
-import type { AIModelConfig } from '../../../shared/ai-providers'
-import type { BrowserTaskDecisionMode } from '../../../shared/browser-agent-task'
+import type { AIModelConfig } from '../../../../shared/ai-providers'
+import type { BrowserTaskDecisionMode } from '../../../../shared/browser-agent-task'
 import type {
   CapabilityGroupId,
   CapabilityProfileId,
-} from '../../../shared/ai-capability-groups'
+} from '../../../../shared/ai-capability-groups'
 import type {
   CapabilityRuntimeGroupSnapshot,
   CapabilityRuntimeSnapshot,
   CapabilityRuntimeStatus,
-} from '../../../shared/ai-capability-runtime'
+} from '../../../../shared/ai-capability-runtime'
 import { resolveCapabilityResolution, type CapabilityRuntimeAvailability } from './capability-resolver'
-import { defaultToolGateway } from './tools-runtime/tool-gateway'
+import { defaultToolGateway } from '../tools-runtime/tool-gateway'
 
 function mapRuntimeStatus(params: {
   status: 'visible' | 'suppressed' | 'unavailable' | 'host_only' | 'inactive'

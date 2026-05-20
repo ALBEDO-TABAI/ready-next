@@ -11,7 +11,7 @@ import type { ContinuationIntent, ContinuationState } from './continuation-state
 import { AgentSessionManager } from './session-manager'
 import { createScopedRunCollector, type SendAndCollectResult } from './task-projection/run-collector'
 import { RunCleanupRegistry, type RunCleanupCallback } from './task-projection/run-cleanup-registry'
-import type { DomainAdapter } from './domain-adapter'
+import type { DomainAdapter } from './domain-adapters/domain-adapter'
 import type { AgentRuntimeKernel } from './types'
 import {
   AgentSdkRuntime,

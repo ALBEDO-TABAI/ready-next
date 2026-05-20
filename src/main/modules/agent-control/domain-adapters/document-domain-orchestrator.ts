@@ -1,10 +1,10 @@
-import type { AIModelConfig } from '../../../shared/ai-providers'
-import type { ToolContext } from '../tools/tool-executor'
+import type { AIModelConfig } from '../../../../shared/ai-providers'
+import type { ToolContext } from '../../tools/tool-executor'
 import {
   createToolExecutionOutput,
   serializeToolExecutionOutput,
   type ToolExecutionOutput,
-} from './tools-runtime/tool-result-types'
+} from '../tools-runtime/tool-result-types'
 import {
   applyFormatSectionByPath,
   applyRewriteSectionByPath,
@@ -13,7 +13,7 @@ import {
   stripCodeFence,
   type DocumentChatSessionLike,
   type SectionRewritePlan,
-} from './document-domain-helpers'
+} from '../document-domain-helpers'
 
 function hasToolErrorKind(result: ToolExecutionOutput): boolean {
   return Boolean(result.data && typeof result.data.errorKind === 'string')

@@ -35,7 +35,7 @@ import type {
 import type {
   IntentClassification,
 } from '../main/modules/agent-control/intent-classifier'
-import type { DomainAdapter } from '../main/modules/agent-control/domain-adapter'
+import type { DomainAdapter } from '../main/modules/agent-control/domain-adapters/domain-adapter'
 import type {
   SkillTaskSupervisorSnapshot,
 } from '../main/modules/agent-control/skills/skill-task-supervisor'

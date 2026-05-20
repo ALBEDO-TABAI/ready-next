@@ -15,7 +15,7 @@ import { classifyIntent } from './intent-classifier'
 import type { RequestEnvelope } from './request-envelope'
 import { buildRequestEnvelope } from './request-envelope'
 import type { SessionRecallCapsule } from '../../../shared/session-recall'
-import type { CoordinatorPromptFragment, DomainAdapter } from './domain-adapter'
+import type { CoordinatorPromptFragment, DomainAdapter } from './domain-adapters/domain-adapter'
 
 export type PromptMemoryLayer = 'l0' | 'l1' | 'l2' | 'recall'
 export type PromptMemorySourceType = MemorySourceType | 'session_recall'

@@ -16,7 +16,7 @@ import {
 } from '../main/modules/agent-control/skills/skill-reference-hints'
 import { defaultToolRegistry } from '../main/modules/agent-control/tools-runtime/tool-registry'
 import type { IntentClassification } from '../main/modules/agent-control/intent-classifier'
-import type { DomainAdapter } from '../main/modules/agent-control/domain-adapter'
+import type { DomainAdapter } from '../main/modules/agent-control/domain-adapters/domain-adapter'
 import type { ConversationScope, ScopeRunEventPayload, ScopeRunSummary } from '../main/modules/agent-control/types'
 import type { RunBudgetSeed, RunBudgetUsage, TaskProjectionRecord, TaskProjectionStore, TurnEngineRequest, TurnEngineSession, TurnTranscriptEvent } from '../main/modules/agent-control/run-contracts'
 import type { TurnTerminalReason } from '../main/modules/agent-control/turn-frame'

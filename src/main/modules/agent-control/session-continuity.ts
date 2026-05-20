@@ -11,7 +11,7 @@ import {
   rememberRecentBrowserAction,
   type BrowserActionKind,
   type BrowserActionRecord,
-} from './browser-action-heuristics'
+} from './domain-adapters/browser-action-heuristics'
 
 export { domainsLikelyMatch, normalizeDomain }
 export type { BrowserActionKind, BrowserActionRecord }

@@ -6,7 +6,7 @@ import {
   CAPABILITY_GROUPS,
   getCapabilityGroup,
 } from '../shared/ai-capability-groups'
-import { resolveCapabilityResolution } from '../main/modules/agent-control/capability-resolver'
+import { resolveCapabilityResolution } from '../main/modules/agent-control/domain-adapters/capability-resolver'
 
 const BASE_CONFIG: AIModelConfig = {
   provider: 'openai',

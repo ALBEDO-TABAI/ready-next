@@ -5,32 +5,32 @@ import {
   type DomainAdapter,
   type DomainAdapterPrepareResult,
 } from './domain-adapter'
-import type { ScopeRunTaskStep } from './types'
+import type { ScopeRunTaskStep } from '../types'
 
 // R2: See skill-domain-adapter.ts for why prefix narrowing is a second gate.
-// Calendar intentionally strips skill_* tools (including skill_calendar_*
-// if it ever gets introduced — unlike RSS) to keep deterministic calendar
-// handlers in charge. Adjust TOOL_PREFIXES only if a calendar skill pipeline
-// actually lands.
-const TOOL_PREFIXES = ['calendar_', 'memory_', 'session_']
-const INSTRUCTION = '系统执行器：本轮走日程执行路径。优先使用 calendar_* 工具完成任务，不要改走无关工具。'
-const CALENDAR_WRITE_TRIGGER_PATTERN = /(日程|日历|会议|提醒).*(创建|修改|删除|改期)|创建日程|修改日程/i
+// Feishu intentionally strips skill_* tools to keep deterministic feishu sidecar
+// in charge. A skill-pipeline that wants to end in feishu must hand off via
+// the planner / tool_loop chain, not by running under the feishu adapter.
+const TOOL_PREFIXES = ['feishu_', 'memory_', 'session_']
+const INSTRUCTION = '系统执行器：本轮走飞书执行路径。优先使用 feishu_* 工具完成任务，不要改走无关工具。'
+const FEISHU_DOC_TRIGGER_PATTERN = /(飞书).*(文档|doc)|创建飞书文档|改写飞书文档|写入飞书/i
+const FEISHU_IMAGE_TRIGGER_PATTERN = /(飞书).*(图片|插图|上传)/i
 
-interface CalendarAdapterState {
+interface FeishuAdapterState {
   steps: ScopeRunTaskStep[]
   taskSummary: string | null
   currentStepId: string | null
   dispatchedAt: string | null
 }
 
-function createState(domainState: unknown): CalendarAdapterState {
+function createState(domainState: unknown): FeishuAdapterState {
   if (
     domainState
     && typeof domainState === 'object'
     && 'steps' in domainState
-    && Array.isArray((domainState as CalendarAdapterState).steps)
+    && Array.isArray((domainState as FeishuAdapterState).steps)
   ) {
-    const record = domainState as CalendarAdapterState
+    const record = domainState as FeishuAdapterState
     return {
       steps: record.steps,
       taskSummary: record.taskSummary ?? null,
@@ -48,7 +48,7 @@ function createState(domainState: unknown): CalendarAdapterState {
 
 function hasAnyDomainTool(allowedToolNames: string[] | null | undefined): boolean {
   if (!allowedToolNames || allowedToolNames.length === 0) return false
-  return allowedToolNames.some((name) => name.startsWith('calendar_'))
+  return allowedToolNames.some((name) => name.startsWith('feishu_'))
 }
 
 function buildStepId(existingSteps: ScopeRunTaskStep[], toolName: string): string {
@@ -59,23 +59,47 @@ function buildStepId(existingSteps: ScopeRunTaskStep[], toolName: string): strin
 function buildSummary(record: Record<string, unknown> | null, toolName: string, input: Record<string, unknown>): string {
   const action = typeof record?.action === 'string' && record.action.trim() ? record.action.trim() : toolName
   const message = typeof record?.message === 'string' && record.message.trim() ? record.message.trim() : '已执行'
-  const title = typeof input.title === 'string' && input.title.trim() ? input.title.trim() : null
-  return title ? `${action}（${title}）：${message}` : `${action}：${message}`
+  const target = ['chat_id', 'doc_token', 'event_id', 'file_token']
+    .map((key) => input[key])
+    .find((value) => typeof value === 'string' && value.trim().length > 0)
+  return typeof target === 'string' ? `${action}（${target.trim()}）：${message}` : `${action}：${message}`
 }
 
-export class CalendarDomainAdapter implements DomainAdapter {
-  readonly id = 'calendar'
+export class FeishuDomainAdapter implements DomainAdapter {
+  readonly id = 'feishu'
 
   contributePromptFragment(): ReturnType<DomainAdapter['contributePromptFragment']> {
     return [
       {
-        id: 'calendar-write',
-        label: '日程写入操作',
+        id: 'feishu-doc',
+        label: '飞书文档操作',
         priority: 0,
-        matches: ({ userText }) => CALENDAR_WRITE_TRIGGER_PATTERN.test(userText),
+        matches: ({ userText }) => FEISHU_DOC_TRIGGER_PATTERN.test(userText),
         blocking: true,
         refs: [
-          { path: 'docs/calendar-rules.md', title: '日程写入规则', summary: '日历冲突和时间歧义规则' },
+          { path: 'docs/feishu-rules.md', title: '飞书文档规则', summary: '飞书文档创建与改写规则' },
+          {
+            path: 'docs/accounts.md',
+            title: '飞书账号索引',
+            summary: '飞书账号和租户索引',
+            sensitive: true,
+          },
+        ],
+      },
+      {
+        id: 'feishu-image',
+        label: '飞书插图操作',
+        priority: 0,
+        matches: ({ userText }) => FEISHU_IMAGE_TRIGGER_PATTERN.test(userText),
+        blocking: true,
+        refs: [
+          { path: 'docs/feishu-rules.md', title: '飞书插图规则', summary: '飞书图片上传和插入规则' },
+          {
+            path: 'docs/accounts.md',
+            title: '飞书账号索引',
+            summary: '飞书账号和租户索引',
+            sensitive: true,
+          },
         ],
       },
     ]
@@ -95,13 +119,13 @@ export class CalendarDomainAdapter implements DomainAdapter {
   }
 
   shouldHandle(params: Parameters<DomainAdapter['shouldHandle']>[0]): boolean {
-    return params.route.executor === 'calendar'
+    return params.route.executor === 'feishu'
   }
 
   prepare(params: Parameters<DomainAdapter['prepare']>[0]): DomainAdapterPrepareResult {
     const narrowed = filterAllowedToolNamesByPrefixes(params.allowedToolNames, TOOL_PREFIXES)
     if (params.host?.log) {
-      logPrefixNarrowing(params.host.log, 'calendar', params.allowedToolNames, narrowed, TOOL_PREFIXES)
+      logPrefixNarrowing(params.host.log, 'feishu', params.allowedToolNames, narrowed, TOOL_PREFIXES)
     }
     return {
       allowedToolNames: narrowed,
@@ -117,10 +141,10 @@ export class CalendarDomainAdapter implements DomainAdapter {
         domainState: state,
         projection: {
           phase: 'blocked',
-          summary: '本轮没有可用的日程工具',
+          summary: '本轮没有可用的飞书工具',
           waitingFor: 'none',
           resumableActions: ['retry', 'cancel'],
-          blockedReason: '未解析到可用的 calendar_* 工具',
+          blockedReason: '未解析到可用的 feishu_* 工具',
         },
         finish: { status: 'done', success: false },
       }
@@ -138,7 +162,7 @@ export class CalendarDomainAdapter implements DomainAdapter {
     if (params.phase === 'tool_batch') {
       let nextState = state
       for (const executedTool of params.toolBatch?.executedTools || []) {
-        if (!executedTool.name.startsWith('calendar_')) continue
+        if (!executedTool.name.startsWith('feishu_')) continue
         const record = readStructuredToolResultRecord(executedTool.result)
         const stepId = buildStepId(nextState.steps, executedTool.name)
         nextState = {
@@ -165,7 +189,7 @@ export class CalendarDomainAdapter implements DomainAdapter {
         domainState: state,
         projection: {
           phase: 'done',
-          summary: state.taskSummary || '日程任务已执行',
+          summary: state.taskSummary || '飞书任务已执行',
           waitingFor: 'none',
           resumableActions: ['cancel'],
           blockedReason: null,
@@ -178,7 +202,7 @@ export class CalendarDomainAdapter implements DomainAdapter {
         domainState: state,
         projection: {
           phase: 'blocked',
-          summary: state.taskSummary || '日程任务达到本轮执行上限',
+          summary: state.taskSummary || '飞书任务达到本轮执行上限',
           waitingFor: 'none',
           resumableActions: ['retry', 'cancel'],
           blockedReason: '已达到本轮执行上限',
@@ -193,8 +217,8 @@ export class CalendarDomainAdapter implements DomainAdapter {
     const state = createState(params.domainState)
     if (!state.currentStepId) return null
     return {
-      module: 'calendar',
-      taskTitle: '日程任务',
+      module: 'feishu',
+      taskTitle: '飞书任务',
       taskSummary: params.projection.summary,
       steps: state.steps,
       currentStepId: state.currentStepId,

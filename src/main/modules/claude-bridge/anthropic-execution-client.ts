@@ -12,7 +12,7 @@ import {
 import {
   applyCapabilityFilterForRoute,
   type MessageCapabilitySnapshot,
-} from '../agent-control/message-capability-filter'
+} from '../agent-control/domain-adapters/message-capability-filter'
 import { assertManualThinkingModeProviderSafe } from '../agent-control/thinking-compatibility'
 import { getPolicyAnthropicTools, collectToolNames, type ToolPolicy } from '../agent-control/execution-tool-config'
 import { logAgentMetric } from '../agent-control/metrics'

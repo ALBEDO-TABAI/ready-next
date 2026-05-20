@@ -1,11 +1,11 @@
-import type { ToolPolicy } from './execution-tool-config'
+import type { ToolPolicy } from '../execution-tool-config'
 import type { DomainAdapter, DomainAdapterApplyResult, DomainAdapterDispatchResult, DomainAdapterPrepareResult } from './domain-adapter'
-import type { DocumentToolLoopState } from './document-tool-loop-orchestrator'
-import type { DocumentChatSessionLike } from './document-domain-helpers'
-import type { ToolDefinition } from './tools-runtime/tool-definition'
-import type { ScopeRunTaskStep } from './types'
-import { defaultToolRegistry, type ToolRegistryReader } from './tools-runtime/tool-registry'
-import { normalizeToolExecutionOutput } from './tools-runtime/tool-result-types'
+import type { DocumentToolLoopState } from '../document-tool-loop-orchestrator'
+import type { DocumentChatSessionLike } from '../document-domain-helpers'
+import type { ToolDefinition } from '../tools-runtime/tool-definition'
+import type { ScopeRunTaskStep } from '../types'
+import { defaultToolRegistry, type ToolRegistryReader } from '../tools-runtime/tool-registry'
+import { normalizeToolExecutionOutput } from '../tools-runtime/tool-result-types'
 
 interface DocumentDomainOrchestratorLike {
   tryDeterministicSectionFormatFlow: (params: {

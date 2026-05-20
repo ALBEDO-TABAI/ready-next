@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { logPrefixNarrowing } from '../main/modules/agent-control/domain-adapter'
+import { logPrefixNarrowing } from '../main/modules/agent-control/domain-adapters/domain-adapter'
 import {
   __setMetricSinkForTests,
   type AgentMetricEvent,

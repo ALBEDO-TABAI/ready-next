@@ -5,7 +5,7 @@ import {
   type DomainAdapter,
   type DomainAdapterProjection,
   type DomainAdapterPrepareResult,
-} from '../domain-adapter'
+} from '../domain-adapters/domain-adapter'
 import type { RunProjectionPatch } from '../run-contracts'
 
 // R2: Domain adapter prefix narrowing is a SECOND allowedToolNames gate on top

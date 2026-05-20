@@ -7,7 +7,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { ResearchDomainAdapter } from '../main/modules/agent-control/research-domain-adapter'
+import { ResearchDomainAdapter } from '../main/modules/agent-control/domain-adapters/research-domain-adapter'
 
 test('ResearchDomainAdapter.shouldHandle returns true for taskType research', () => {
   const adapter = new ResearchDomainAdapter()
