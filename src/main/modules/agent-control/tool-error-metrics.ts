@@ -49,6 +49,10 @@ export const TOOL_ERROR_METRICS = {
   hookHandlerFailed: 'hook_handler_failed',
   /** D W4 — HookRegistry handler 超时，已跳过并继续执行后续 handler */
   hookHandlerTimeout: 'hook_handler_timeout',
+  /** Stage U PR U2.3 — HookRegistry handler 超时后即使 abort 也未在
+   *  ABORT_GRACE_MS 内 settle；旧 handler 可能仍在后台跑，下游决策时
+   *  无法判断其副作用是否已完成 */
+  hookHandlerTimeoutWithUnknownOutcome: 'hook_handler_timeout_with_unknown_outcome',
   /** Reference-skill hint TTL sweep 完成一次（Phase 4 — 替换原 `skill_executions_ttl_swept`，因为 skill_executions 状态机已退役） */
   skillReferenceHintTtlSwept: 'skill_reference_hint_ttl_swept',
   /** E W2 — outputDir retained/legacy GC completed once. */

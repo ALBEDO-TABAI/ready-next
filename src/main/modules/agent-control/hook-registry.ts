@@ -32,7 +32,15 @@ export type HookPayloadFor<H extends HookName> =
 
 export interface HookHandler<P> {
   readonly name: string
-  readonly fn: (payload: P) => Promise<void> | void
+  /**
+   * Stage U PR U2.3 — second parameter `signal` is optional for backward
+   * compatibility. Handlers that opt in can listen for `signal.aborted`
+   * to short-circuit when the registry has timed them out. Handlers that
+   * ignore the signal continue to work but will trigger the
+   * `hookHandlerTimeoutWithUnknownOutcome` metric when their late-finish
+   * window expires.
+   */
+  readonly fn: (payload: P, signal?: AbortSignal) => Promise<void> | void
   readonly timeoutMs?: number
 }
 
@@ -44,7 +52,16 @@ export interface HookRegistry {
 export const HOOK_REGISTRY_METRICS = {
   hookHandlerFailed: TOOL_ERROR_METRICS.hookHandlerFailed,
   hookHandlerTimeout: TOOL_ERROR_METRICS.hookHandlerTimeout,
+  hookHandlerTimeoutWithUnknownOutcome: TOOL_ERROR_METRICS.hookHandlerTimeoutWithUnknownOutcome,
 } as const
+
+/**
+ * Stage U PR U2.3 — grace window (ms) the registry waits after firing
+ * AbortSignal before declaring the handler's outcome unknown. Keeping it
+ * short avoids holding scheduling resources, but long enough that
+ * cooperative handlers can settle cleanly.
+ */
+const ABORT_GRACE_MS = 1000
 
 export type HookRegistryMetricName =
   typeof HOOK_REGISTRY_METRICS[keyof typeof HOOK_REGISTRY_METRICS]
@@ -97,8 +114,14 @@ async function fireHandler<P>(
   const timeoutMs = handler.timeoutMs ?? DEFAULT_HANDLER_TIMEOUT_MS
   let timeoutId: ReturnType<typeof setTimeout> | null = null
 
+  // Stage U PR U2.3 — provide an AbortController so handlers can opt in
+  // to cooperative cancellation on timeout. Ignoring the signal is still
+  // allowed (backward compatibility) but late completion fires the
+  // `hookHandlerTimeoutWithUnknownOutcome` metric so downstream decisions
+  // know the previous handler may still be running.
+  const abortController = new AbortController()
   try {
-    const handlerPromise = Promise.resolve(handler.fn(payload))
+    const handlerPromise = Promise.resolve(handler.fn(payload, abortController.signal))
     const timeoutPromise = new Promise<'timeout'>((resolve) => {
       timeoutId = setTimeout(() => resolve('timeout'), timeoutMs)
     })
@@ -110,7 +133,33 @@ async function fireHandler<P>(
         handlerName: handler.name,
         timeoutMs,
       })
-      handlerPromise.catch(() => undefined)
+      // Tell cooperative handlers to stop ASAP. Non-cooperative ones
+      // (ignoring the signal) will continue running; we watch for that
+      // below to fire the "unknown outcome" diagnostic metric.
+      abortController.abort()
+      let settledAfterAbort = false
+      const settledTracker = handlerPromise.then(() => {
+        settledAfterAbort = true
+      }, () => {
+        settledAfterAbort = true
+      })
+      const graceTimeoutPromise = new Promise<void>((resolve) => {
+        setTimeout(resolve, ABORT_GRACE_MS)
+      })
+      await Promise.race([settledTracker, graceTimeoutPromise])
+      if (!settledAfterAbort) {
+        options.emitMetric?.(HOOK_REGISTRY_METRICS.hookHandlerTimeoutWithUnknownOutcome, {
+          hookName,
+          handlerName: handler.name,
+          timeoutMs,
+          abortGraceMs: ABORT_GRACE_MS,
+        })
+      }
+      // Keep the promise alive but its result intentionally unobserved.
+      // The metric above is the diagnostic; we don't want to re-throw and
+      // break the hook loop for subsequent handlers.
+      // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+      handlerPromise.then(() => undefined, () => undefined)
     }
   } catch (error) {
     options.emitMetric?.(HOOK_REGISTRY_METRICS.hookHandlerFailed, {
