@@ -91,7 +91,7 @@ test('RunMetaRepository — create + get round-trips record', async (t) => {
   await runAllMigrations(db)
 
   const { RunMetaRepository } = await import(
-    '../main/modules/agent-control/run-meta-repository'
+    '../main/modules/agent-control/task-projection/run-meta-repository'
   )
   const repo = new RunMetaRepository(db as unknown as ConstructorParameters<typeof RunMetaRepository>[0])
 
@@ -130,7 +130,7 @@ test('RunMetaRepository — update bumps updated_at and patches fields', async (
   await runAllMigrations(db)
 
   const { RunMetaRepository } = await import(
-    '../main/modules/agent-control/run-meta-repository'
+    '../main/modules/agent-control/task-projection/run-meta-repository'
   )
   const repo = new RunMetaRepository(db as unknown as ConstructorParameters<typeof RunMetaRepository>[0])
 
@@ -159,7 +159,7 @@ test('RunMetaRepository — upsertTokens adds deltas cumulatively', async (t) =>
   await runAllMigrations(db)
 
   const { RunMetaRepository } = await import(
-    '../main/modules/agent-control/run-meta-repository'
+    '../main/modules/agent-control/task-projection/run-meta-repository'
   )
   const repo = new RunMetaRepository(db as unknown as ConstructorParameters<typeof RunMetaRepository>[0])
 
@@ -183,7 +183,7 @@ test('RunMetaRepository — list filters by scopeId / taskId', async (t) => {
   await runAllMigrations(db)
 
   const { RunMetaRepository } = await import(
-    '../main/modules/agent-control/run-meta-repository'
+    '../main/modules/agent-control/task-projection/run-meta-repository'
   )
   const repo = new RunMetaRepository(db as unknown as ConstructorParameters<typeof RunMetaRepository>[0])
 

@@ -139,7 +139,7 @@ test('Phase 4.2 wiring — long-task continuation gets createContinuationRunBudg
     'guard must be present so the override never shrinks the budget',
   )
   assert.match(source, /logAgentMetric\('continuation_budget_inherited'/)
-  assert.match(source, /from\s+'\.\/run-budget-policy'/, 'imports the helper')
+  assert.match(source, /from\s+'\.\/task-projection\/run-budget-policy'/, 'imports the helper')
   // The import line must include the new helper.
   assert.match(source, /createContinuationRunBudgetSeed,/)
 })

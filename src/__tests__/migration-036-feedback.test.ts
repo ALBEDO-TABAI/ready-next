@@ -114,7 +114,7 @@ test('RunFeedbackRepository — upsert creates new row then preserves created_at
   ).run('run-y', 'done', 1, 1)
 
   const { RunFeedbackRepository } = await import(
-    '../main/modules/agent-control/run-feedback-repository'
+    '../main/modules/agent-control/task-projection/run-feedback-repository'
   )
   const repo = new RunFeedbackRepository(
     db as unknown as ConstructorParameters<typeof RunFeedbackRepository>[0],
@@ -172,7 +172,7 @@ test('RunFeedbackRepository — list filters by runId and taskId', async (t) => 
   ).run('rB', 'done', 1, 1)
 
   const { RunFeedbackRepository } = await import(
-    '../main/modules/agent-control/run-feedback-repository'
+    '../main/modules/agent-control/task-projection/run-feedback-repository'
   )
   const repo = new RunFeedbackRepository(
     db as unknown as ConstructorParameters<typeof RunFeedbackRepository>[0],
@@ -200,7 +200,7 @@ test('RunFeedbackRepository — delete removes row', async (t) => {
   ).run('r-del', 'done', 1, 1)
 
   const { RunFeedbackRepository } = await import(
-    '../main/modules/agent-control/run-feedback-repository'
+    '../main/modules/agent-control/task-projection/run-feedback-repository'
   )
   const repo = new RunFeedbackRepository(
     db as unknown as ConstructorParameters<typeof RunFeedbackRepository>[0],
