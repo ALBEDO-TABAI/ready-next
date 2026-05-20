@@ -1717,26 +1717,15 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     }
   })
 
-  // Forward legacy agent manager events to renderer (kept for orchestration)
-  agentManager.on('output', (data) => {
-    if (!mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('agent:stream', data)
-    }
-  })
-
-  // Forward agent status changes to renderer
-  agentManager.on('status', (data) => {
-    if (!mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('agent:status', data)
-    }
-  })
-
-  // Forward agent error events to renderer
-  agentManager.on('error', (data) => {
-    if (!mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('agent:error', data)
-    }
-  })
+  // Stage U PR U1.3 — legacy AgentManager event forwards removed.
+  // The pre-SDK-runtime EventEmitter forwards for output/status/error
+  // channels are gone. The renderer-facing agent:stream / agent:status /
+  // agent:error channels are now exclusively driven by the orchestrator
+  // bindings above. Keeping the legacy forwards meant the same channel
+  // could receive two payload shapes: new (with recoverable/errorKind/
+  // softError) and old (raw without those fields), polluting renderer
+  // error display. The SDK runtime path is the single producer now.
+  // See plan §2 U1.3 / audit §1.1 / U1.1 tool error shape.
 
   // Stage U0.1 — legacy tool_execute bridge removed. The previous handler
   // used EventEmitter#emit on ipcMain to dispatch calendar create requests

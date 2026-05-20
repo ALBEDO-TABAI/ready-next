@@ -1,0 +1,65 @@
+/**
+ * Stage U PR U1.3 — agent:stream / agent:status / agent:error single producer.
+ *
+ * After U1.3, only the SDK runtime path (via ReadyAgentOrchestrator binding
+ * its sdkEngine events) should be able to push to the renderer-facing
+ * `agent:stream` / `agent:status` / `agent:error` channels. The legacy
+ * AgentManager forwards in claude-bridge/ipc-handler.ts have been removed,
+ * and the orchestrator no longer binds the DirectChatEngine's EventEmitter.
+ *
+ * Source-grep structural test (CLAUDE.md §6.4). Paired with
+ * `legacy-agent-ipc-removed.test.ts` (U1.2) and the runtime gate
+ * `check-no-legacy-agent-ipc.cjs`.
+ */
+
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { resolve, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..')
+
+function readWorkspaceFile(rel: string): string {
+  return readFileSync(resolve(REPO_ROOT, rel), 'utf8')
+}
+
+test('U1.3 ipc-handler: no remaining agentManager.on(output|status|error) forwards', () => {
+  const source = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')
+  assert.doesNotMatch(
+    source,
+    /agentManager\.on\(\s*['"](?:output|status|error)['"]/,
+    'AgentManager event forwards must be removed in U1.3 (SDK runtime owns these channels)',
+  )
+})
+
+test('U1.3 orchestrator: bindEngineEvents only on sdkEngine, not domainAdapterEngine', () => {
+  const source = readWorkspaceFile('src/main/modules/agent-control/orchestrator.ts')
+  // Only sdkEngine should be bound — DirectChatEngine is a read-only
+  // adapter/orchestrator provider after U1.3.
+  assert.match(
+    source,
+    /this\.bindEngineEvents\(this\.sdkEngine\)/,
+    'sdkEngine event binding must remain (single producer)',
+  )
+  assert.doesNotMatch(
+    source,
+    /this\.bindEngineEvents\(this\.domainAdapterEngine\)/,
+    'DirectChatEngine event binding must be removed in U1.3 (no dual-shape emission)',
+  )
+})
+
+test('U1.3 retirement is announced in code comments', () => {
+  const ipc = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')
+  assert.match(
+    ipc,
+    /U1\.3.*legacy AgentManager event forwards removed/i,
+    'ipc-handler must contain the U1.3 retirement note',
+  )
+  const orchestrator = readWorkspaceFile('src/main/modules/agent-control/orchestrator.ts')
+  assert.match(
+    orchestrator,
+    /U1\.3[\s\S]*DirectChatEngine no longer participates in event[\s\S]*emission/,
+    'orchestrator must contain the U1.3 retirement note',
+  )
+})

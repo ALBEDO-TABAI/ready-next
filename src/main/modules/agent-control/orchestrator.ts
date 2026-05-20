@@ -57,7 +57,14 @@ export class ReadyAgentOrchestrator extends EventEmitter {
       },
     })
 
-    this.bindEngineEvents(this.domainAdapterEngine)
+    // Stage U PR U1.3 — DirectChatEngine no longer participates in event
+    // emission. It survives as a DomainAdapter / SkillContextOrchestrator
+    // provider only (read-only consumer of `getDomainAdapters()` /
+    // `getSkillContextOrchestrator()`). Binding its EventEmitter here used
+    // to mean any code path that touched the legacy engine could surface
+    // events on `agent:stream` / `agent:status` / `agent:error` alongside
+    // the SDK runtime — exactly the dual-shape pollution U1.2 / U1.3 are
+    // closing. SDK runtime is the single emission producer now.
     this.bindEngineEvents(this.sdkEngine)
 
     if (options?.browserController) {
