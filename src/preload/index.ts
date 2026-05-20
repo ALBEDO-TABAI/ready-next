@@ -41,12 +41,10 @@ const agentAPI = {
     requestId?: string
   ) => ipcRenderer.invoke('agent:send', { agent, message, sessionId, requestId }),
   newSession: (agent: string, sessionId?: string) => ipcRenderer.invoke('agent:newSession', { agent, sessionId }),
-  orchestrate: (task: string, agents: string[]) =>
-    ipcRenderer.invoke('agent:orchestrate', { task, agents }),
-  getStatus: (agent: string) => ipcRenderer.invoke('agent:getStatus', agent),
-  getAll: () => ipcRenderer.invoke('agent:getAll'),
+  // Stage U PR U1.2 — removed `orchestrate / getStatus / getAll / getDiagnostics`
+  // legacy AgentManager wrappers. Zero renderer callers (verified via grep).
+  // Use `getRuntimeStatus` + `getCapabilityRuntimeSnapshot` for diagnostics.
   kill: (agent: string, sessionId?: string) => ipcRenderer.invoke('agent:kill', { agent, sessionId }),
-  getDiagnostics: () => ipcRenderer.invoke('agent:getDiagnostics'),
   getRuntimeStatus: () => ipcRenderer.invoke('agent:getRuntimeStatus'),
   getCapabilityRuntimeSnapshot: (config?: unknown) => ipcRenderer.invoke('agent:getCapabilityRuntimeSnapshot', config),
   listChannels: () => ipcRenderer.invoke('agent:listChannels'),

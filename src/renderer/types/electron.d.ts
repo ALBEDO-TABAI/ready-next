@@ -723,14 +723,9 @@ interface ElectronAgentAPI {
     requestId?: string
   ) => Promise<{ success: boolean; error?: string | null }>
   newSession: (agent: string, sessionId?: string) => Promise<{ success: boolean; error?: string }>
-  orchestrate: (
-    task: string,
-    agents: string[]
-  ) => Promise<{ success: boolean; error?: string | null }>
-  getStatus: (agent: string) => Promise<unknown>
-  getAll: () => Promise<unknown>
+  // Stage U PR U1.2 — removed `orchestrate / getStatus / getAll / getDiagnostics`
+  // legacy AgentManager wrappers. Use `getRuntimeStatus` / `getCapabilityRuntimeSnapshot`.
   kill: (agent: string, sessionId?: string) => Promise<{ success: boolean; error?: string }>
-  getDiagnostics: () => Promise<{ success: boolean; data: unknown }>
   getRuntimeStatus: () => Promise<IPCResponse<AgentRuntimeStatusData>>
   getCapabilityRuntimeSnapshot: (config?: unknown) => Promise<IPCResponse<CapabilityRuntimeSnapshotData>>
   listChannels: () => Promise<IPCResponse<AgentChannelConfigData[]>>

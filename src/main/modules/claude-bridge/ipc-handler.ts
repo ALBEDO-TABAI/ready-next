@@ -638,44 +638,13 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     }
   })
 
-  ipcMain.handle('agent:orchestrate', async (_, { task, agents }: { task: string; agents: string[] }): Promise<IPCResponse> => {
-    try {
-      const result = await agentManager.orchestrate(task, agents)
-      return { success: result.success, mock: result.mock, error: result.error }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      return { success: false, error: errorMessage }
-    }
-  })
-
-  ipcMain.handle('agent:getStatus', (_, agent: string): IPCResponse => {
-    try {
-      const status = agentManager.getAgentStatus(agent)
-      return { success: true, data: status ?? null }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      return { success: false, error: errorMessage }
-    }
-  })
-
-  ipcMain.handle('agent:getAll', (): IPCResponse => {
-    try {
-      return { success: true, data: agentManager.getAllAgents() }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      return { success: false, error: errorMessage }
-    }
-  })
-
-  // Get agent manager diagnostics
-  ipcMain.handle('agent:getDiagnostics', (): IPCResponse<ReturnType<AgentManager['getDiagnostics']>> => {
-    try {
-      return { success: true, data: agentManager.getDiagnostics() }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      return { success: false, error: errorMessage }
-    }
-  })
+  // Stage U PR U1.2 — legacy agent IPC channels removed.
+  // `agent:orchestrate`, `agent:getStatus`, `agent:getAll`, `agent:getDiagnostics`
+  // were the AgentManager-era admission surface. Verified zero renderer callers
+  // before deletion (see audit §1.1). Current production runs exclusively
+  // through `agent:getRuntimeStatus` + `agent:getCapabilityRuntimeSnapshot` +
+  // the SDK runtime channels below. Reintroduction is fenced by
+  // `scripts/check-no-legacy-agent-ipc.cjs`.
 
   ipcMain.handle('agent:getRuntimeStatus', async (): Promise<IPCResponse> => {
     try {
