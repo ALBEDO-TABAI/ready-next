@@ -22,13 +22,15 @@ import type {
 } from '../modules/rss/types'
 import type { ThemeOption, ResolvedTheme, ThemeSkin } from '../stores/useTheme'
 import type { TaskType } from '../../shared/task-types'
-// Stage U PR U4.v2-2 — TaskProjectionRecordData now derives its main
-// shape from the canonical wire contract instead of hand-mirroring it.
-// ScopeRun* sub-fields keep their strict renderer-side aliases (see
-// Phase 4 v2 scope: wire's ScopeRun fields are intentionally unknown
-// to stay free of src/main/ imports).
+// Stage U PR U4.v2-2 / U4.v2-3 — TaskProjectionRecordData +
+// TaskProjectionChangeEventData both derive from the canonical wire
+// contract instead of hand-mirroring it. ScopeRun* sub-fields keep
+// their strict renderer-side aliases (Phase 4 v2 scope: wire's
+// ScopeRun fields are intentionally unknown to stay free of src/main/
+// imports).
 import type {
   TaskProjectionRecord as TaskProjectionRecordWire,
+  TaskProjectionChangeEvent as TaskProjectionChangeEventWire,
 } from '../../shared/ipc-contracts/task-projection'
 import type {
   DocumentMarkDraft,
@@ -1010,15 +1012,15 @@ interface ElectronAgentAPI {
 }
 
 /**
- * Stage O — payload of `agent:taskProjectionsChanged`. Mirrors the
- * main-side `TaskProjectionChangeEvent` interface; defined here too so
- * the renderer doesn't import from a `src/main/...` module.
+ * Stage U PR U4.v2-3 — wire-derived payload of `agent:taskProjectionsChanged`.
+ *
+ * Previously Stage O hand-mirrored the main-side interface to avoid
+ * a `src/main/...` import. U4.v2-3 retires that mirror: the renderer
+ * now derives the exact wire shape from the canonical
+ * `src/shared/ipc-contracts/task-projection.ts`. Any future change to
+ * the wire reason union or payload fields flows here automatically.
  */
-export interface TaskProjectionChangeEventData {
-  scopeId: string
-  changedTaskIds: string[]
-  reason: 'create' | 'update' | 'delete' | 'supersede'
-}
+export type TaskProjectionChangeEventData = TaskProjectionChangeEventWire
 
 // =============================================================================
 // Browser API Types
