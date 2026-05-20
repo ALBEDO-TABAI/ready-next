@@ -5,6 +5,7 @@ import type { SkillRunRequest, SkillRunResult } from '../skills-runtime/runtime-
 import { atomicWriteJson } from './atomic-write'
 import { upsertDetachedSkillTaskRun } from './skill-task-tracker'
 import { selectRunStateCandidate } from './run-state-selection'
+import { logAgentMetric } from './metrics'
 
 export type DetachedSkillTaskStatus = 'running' | 'done' | 'failed' | 'cancelled' | 'blocked'
 
@@ -223,10 +224,25 @@ export class DetachedSkillTaskTracker {
     this.saveRecord(record)
     const task = this.run(record, controller)
     this.runningTasks.set(record.id, task)
+    // Stage U PR U2.2 — fire-and-forget cleanup is preserved (cleanup
+    // must run regardless of task outcome), but failures are now
+    // observable via metric instead of swallowed silently. The previous
+    // `.catch(() => undefined)` made cleanup failures invisible and
+    // could leak controllers / running-task entries on rare I/O races.
     task.finally(() => {
       this.controllers.delete(record.id)
       this.runningTasks.delete(record.id)
-    }).catch(() => undefined)
+    }).catch((err) => {
+      logAgentMetric('detached_tracker.finalize_failed', {
+        taskId: record.id,
+        skillId: record.skillId,
+        reason: err instanceof Error ? err.message : String(err),
+      })
+      // Best-effort defensive cleanup — if finally() itself rejected, we
+      // still don't want the controller / runningTask map to leak.
+      try { this.controllers.delete(record.id) } catch { /* silent-catch: defensive map deletion; map state already terminal. */ }
+      try { this.runningTasks.delete(record.id) } catch { /* silent-catch: defensive map deletion; map state already terminal. */ }
+    })
     return clone(record)
   }
 
