@@ -422,6 +422,7 @@ export default function BrowserMode({
       await syncBrowserVisibility('visible', { forceBoundsSync: true })
     }
 
+    // fire-and-forget: BrowserView visibility/bounds sync; failures self-correct on the next visibility transition or layout effect (BrowserView is a native overlay and is rebuilt on layout change).
     void syncVisibleHost().catch(() => undefined)
   }, [activeTabId, browserRuntimeReady, isElectron, splitTab?.id, syncBrowserVisibility, shouldPresentBrowserHost, shouldRevealBrowserHost, tabs.length])
 
@@ -434,6 +435,7 @@ export default function BrowserMode({
     clearPostActivationHostResyncTimer()
     postActivationHostResyncTimerRef.current = window.setTimeout(() => {
       postActivationHostResyncTimerRef.current = null
+      // fire-and-forget: post-activation BrowserView resync; next layout effect re-issues the bounds sync if this attempt drops.
       void (async () => {
         await window.electronAPI?.browser?.fitActiveTabToBounds(activeTabId)
         if (splitTab?.id) {

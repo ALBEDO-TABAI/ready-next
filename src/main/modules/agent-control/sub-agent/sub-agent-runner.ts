@@ -45,6 +45,7 @@ export async function* runSubAgent(
     while (true) {
       const next = await raceNextWithAbort(iterator.next(), context.abortSignal)
       if (next.kind === 'aborted') {
+        // fire-and-forget: iterator.return() is best-effort cleanup on abort; finalizeSubAgent below owns the canonical cancellation close event.
         void iterator.return(undefined).catch(() => undefined)
         const closeEvent = await finalizeSubAgent(subagent, context, {
           state: 'cancelled',
@@ -61,6 +62,7 @@ export async function* runSubAgent(
       }
 
       if (context.abortSignal.aborted) {
+        // fire-and-forget: iterator.return() is best-effort cleanup on abort; finalizeSubAgent below owns the canonical cancellation close event.
         void iterator.return(undefined).catch(() => undefined)
         const closeEvent = await finalizeSubAgent(subagent, context, {
           state: 'cancelled',
@@ -74,6 +76,7 @@ export async function* runSubAgent(
     }
   } catch (error) {
     if (context.abortSignal.aborted) {
+      // fire-and-forget: best-effort iterator cleanup during abort recovery; the surrounding catch builds the canonical cancellation close event.
       void iterator?.return(undefined).catch(() => undefined)
       const closeEvent = await finalizeSubAgent(subagent, context, {
         state: 'cancelled',

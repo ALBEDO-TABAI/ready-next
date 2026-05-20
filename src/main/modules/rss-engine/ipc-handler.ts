@@ -771,6 +771,7 @@ export function setupRSSIPC(useMock = false): void {
     loadRouteDiagnosticsSnapshot()
     queueMicrotask(() => {
       if (isRSSHubRequiredForCurrentSources()) {
+        // fire-and-forget: warm-up health probe; real fetches go through rsshubManager.fetch which retries and surfaces failures via the standard rss error pipeline.
         void rsshubManager.ensureHealthy().catch(() => {
           // best-effort warm only
         })
@@ -1913,7 +1914,9 @@ export function setupRSSIPC(useMock = false): void {
           artifacts: {
             root: getArtifactsRootDir(),
             hasOpml,
+            // fire-and-forget: probe existence by attempting read; null means "not present" — the diagnostic snapshot just omits the path.
             benchmarkJson: await readFile(benchmarkJsonPath, 'utf8').then(() => benchmarkJsonPath).catch(() => null),
+            // fire-and-forget: probe existence by attempting read; null means "not present" — the diagnostic snapshot just omits the path.
             benchmarkMarkdown: await readFile(benchmarkMarkdownPath, 'utf8').then(() => benchmarkMarkdownPath).catch(() => null),
           },
           benchmark: latestBenchmark,

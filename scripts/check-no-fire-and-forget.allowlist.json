@@ -1,0 +1,5 @@
+{
+  "version": 1,
+  "identity": "fire-and-forget allowlist for Stage U PR U2.4 — each entry MUST include {file, line, reason}; remediate by adding metric/log/throw in catch handler when feasible.",
+  "entries": []
+}

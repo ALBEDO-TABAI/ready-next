@@ -176,6 +176,7 @@ export class BrowserTabLifecycleService {
 
     this.host.setActiveTabId(tabId)
     finalizeSwap(true)
+    // fire-and-forget: load failures already surface via the `did-fail-load` webContents event which the host listens to; the catch here just prevents an unhandledRejection.
     view.webContents.loadURL(url).catch(() => {
       // handled by did-fail-load
     })

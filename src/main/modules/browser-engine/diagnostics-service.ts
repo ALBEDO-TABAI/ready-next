@@ -53,6 +53,7 @@ export class BrowserDiagnosticsService {
     if (this.recentEntries.length > 80) {
       this.recentEntries.splice(0, this.recentEntries.length - 80)
     }
+    // fire-and-forget: in-memory recentEntries + console.log already captured the line; the disk logger is a secondary forensic sink and a write failure here is recoverable.
     void browserDiagnosticsLogger.appendAsync(line).catch(() => {
       // ignore file logging failures
     })

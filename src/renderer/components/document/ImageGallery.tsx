@@ -63,6 +63,7 @@ export default function ImageGallery({ tab, fileUrl, currentExt }: ImageGalleryP
     const dir = tab.path.substring(0, tab.path.lastIndexOf('/'))
     if (!dir || typeof window === 'undefined' || !window.electronAPI) return
 
+    // fire-and-forget: sibling-image discovery for the gallery; if it fails the gallery just renders the current image with no peers (graceful degradation).
     window.electronAPI.document.listFiles(dir).then((result) => {
       if (!result.success || !result.items) return
       const imageFiles = result.items

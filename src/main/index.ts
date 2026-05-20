@@ -388,6 +388,7 @@ async function createWindow(): Promise<void> {
 
   // Keep renderer UI at 100% scale so panel sizing remains pixel-consistent with design specs.
   mainWindow.webContents.setZoomFactor(1)
+  // fire-and-forget: setVisualZoomLevelLimits rejects on some Electron builds before first navigation; UX impact is cosmetic-only zoom limit.
   void mainWindow.webContents.setVisualZoomLevelLimits(1, 1).catch(() => {
     // Ignore; some Electron builds may reject this before first navigation.
   })
@@ -689,6 +690,7 @@ function setupAutoUpdater(mainWindow: BrowserWindow): void {
 
   // Check for updates after a short delay to avoid slowing down startup
   setTimeout(() => {
+    // fire-and-forget: background update check; failure is exposed via the manual app:check-update IPC the user can invoke from the menu.
     autoUpdater.checkForUpdates().catch(() => {
       // Silently ignore — user can manually check via app:check-update
     })

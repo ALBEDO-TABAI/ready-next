@@ -49,6 +49,7 @@ const getStoredSkin = (): ThemeSkin => {
 
 const syncNativeSkin = (skin: ThemeSkin) => {
     if (typeof window !== 'undefined' && window.electronAPI?.theme?.setSkin) {
+        // fire-and-forget: native vibrancy update; renderer-side CSS already applied the skin, so a missed native sync only affects window-chrome material until the next setSkin call.
         window.electronAPI.theme.setSkin(skin).catch(() => { /* ignore in browser-only dev */ })
     }
 }
@@ -64,6 +65,7 @@ const resolveTheme = (theme: ThemeOption): ResolvedTheme => {
 
 const syncNativeTheme = (option: ThemeOption) => {
     if (typeof window !== 'undefined' && window.electronAPI?.theme) {
+        // fire-and-forget: native theme propagation; renderer-side data-theme attribute already applied (applyThemeImmediate), and a missed sync only affects future window-chrome native colors.
         window.electronAPI.theme.set(option).catch(() => { /* ignore in browser-only dev */ })
     }
 }

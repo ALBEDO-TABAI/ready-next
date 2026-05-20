@@ -831,6 +831,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             error: 'duplicate-dispatch',
           })
           try {
+            // fire-and-forget: best-effort acknowledgement of a duplicate dispatch so the main side can clear the pending request; the duplicate is already a no-op upstream.
             void window.electronAPI.agent.completeToolActionRequest?.({
               requestId: data.requestId,
               handled: false,

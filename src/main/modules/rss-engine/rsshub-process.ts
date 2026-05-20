@@ -389,6 +389,7 @@ class RSSHubManager {
           // already booted during the long startup are reaped too. The
           // promise rejection happens immediately; the SIGKILL escalation
           // runs in the background and never blocks the caller.
+          // fire-and-forget: process-tree kill is best-effort cleanup on startup timeout; the helper's own killFn already logs errors, and reject() below propagates the user-facing failure.
           void killWorkerProcessTree({
             pid: child.pid,
             hasProcessGroup: process.platform !== 'win32',
@@ -547,6 +548,7 @@ class RSSHubManager {
         // by RSSHub's internal browser automation are reaped too. We resolve as soon
         // as SIGTERM is dispatched; the SIGKILL escalation runs in the
         // background under killWorkerProcessTree.
+        // fire-and-forget: SIGKILL escalation runs to completion in the background; the helper records its own errors and stop() returns successfully regardless.
         void killWorkerProcessTree({
           pid: child.pid,
           hasProcessGroup: process.platform !== 'win32',

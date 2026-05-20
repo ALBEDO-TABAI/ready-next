@@ -1342,6 +1342,7 @@ export const useAgent = create<AgentState>((set, get) => ({
       const firstAttachmentName = currentAttachments[0]?.name
       const title = content.slice(0, 20) || (firstAttachmentName ? `附件: ${firstAttachmentName}` : '新对话')
       if (title) {
+        // fire-and-forget: persist the auto-generated conversation title; the optimistic in-memory update right below keeps the UI consistent regardless of IPC outcome.
         void window.electronAPI.chat.updateConversationTitle({ id: activeScopeId, title }).catch(() => undefined)
         const nextScope = { ...activeScope, title, updatedAt: new Date().toISOString() }
         set((state) => {
@@ -1650,6 +1651,7 @@ function initAgentInteractionListeners(): () => void {
   const api = typeof window !== 'undefined' ? window.electronAPI?.agentInteraction : null
   if (!api) return () => {}
   // Hydrate any pending cards left from a mid-flight renderer reload.
+  // fire-and-forget: bootstrap-time hydration; if it fails, the live onAskUserQuestionsCard subscription below will deliver the next card and the user can re-trigger any missing one.
   api.listPendingAskUserQuestions().then((result) => {
     if (!result || !result.success || !Array.isArray(result.data)) return
     const state = useAgent.getState()
@@ -1675,6 +1677,7 @@ function initAgentInteractionListeners(): () => void {
         messages: [...prev.messages, ...additions].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime()),
       }))
     }
+    // fire-and-forget: hydrate-failure swallow — see the matching comment on listPendingAskUserQuestions above; the live subscription is the canonical card delivery path.
   }).catch(() => { /* ignore hydrate failures */ })
 
   const unsubscribePush = api.onAskUserQuestionsCard((event) => {

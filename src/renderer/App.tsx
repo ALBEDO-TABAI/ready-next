@@ -16,6 +16,7 @@ import { primeRSSWarmCache } from './modules/rss/rssWarmCache'
 
 const LiquidTest = lazy(() => import('./LiquidTest'))
 
+// fire-and-forget: module-load warm cache prime; failure just means the first RSS read runs cold.
 void primeRSSWarmCache(fetchRSSWarmSnapshot).catch(() => undefined)
 
 function MainAppShell() {
@@ -86,6 +87,7 @@ function MainAppShell() {
   }, [])
 
   useEffect(() => {
+    // fire-and-forget: re-prime warm cache on mount; same rationale as the module-load prime above.
     void primeRSSWarmCache(fetchRSSWarmSnapshot).catch(() => undefined)
   }, [])
 

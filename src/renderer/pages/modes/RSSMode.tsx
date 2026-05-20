@@ -253,6 +253,7 @@ export default function RSSMode({
 
   useEffect(() => {
     let cancelled = false
+    // fire-and-forget: warm-cache snapshot prime on mode switch; if it fails, the next loadRSSData (`warmRefreshRSSData`) refresh cycle will hydrate the panel.
     void primeRSSWarmCache(loadRSSSnapshot)
       .then((snapshot) => {
         if (cancelled) return

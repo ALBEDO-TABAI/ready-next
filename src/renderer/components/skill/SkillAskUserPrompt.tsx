@@ -47,6 +47,7 @@ export function SkillAskUserPrompt(): ReactElement | null {
     if (!skillsAPI) return
 
     let cancelled = false
+    // fire-and-forget: bootstrap-time fetch of pending ask-user questions; if the main side isn't ready, the live onAskUserQuestion subscription below will deliver them as they arrive.
     skillsAPI
       .listPendingAskUser()
       .then((list) => {

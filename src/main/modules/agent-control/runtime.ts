@@ -1956,6 +1956,7 @@ export class AgentControlRuntime extends EventEmitter {
 
     let statusSent = false
     const statusTimer = setTimeout(() => {
+      // fire-and-forget: cosmetic "处理中…" status push to the upstream channel; failure means the user sees no typing indicator, which is acceptable degradation.
       void this.sidecar
         .sendChannel({
           id: pending.channelId,

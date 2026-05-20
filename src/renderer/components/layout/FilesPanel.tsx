@@ -245,12 +245,15 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
 
   useEffect(() => {
     if (!window.electronAPI?.document?.watchDirectories) return
+    // fire-and-forget: visibility/connection edge → reset watched-directories on the main process; if the IPC drops, the worst case is a stale watcher that gets corrected on the next visibility transition.
     if (!isVisible || !isConnected) {
       void window.electronAPI.document.watchDirectories([]).catch(() => undefined)
       return
     }
+    // fire-and-forget: same rationale — apply the desired watch set; main side reconciles on next call.
     void window.electronAPI.document.watchDirectories(watchedDirectories).catch(() => undefined)
     return () => {
+      // fire-and-forget: cleanup on unmount; idempotent at the main-process boundary.
       void window.electronAPI.document.watchDirectories([]).catch(() => undefined)
     }
   }, [isConnected, isVisible, watchedDirectories])

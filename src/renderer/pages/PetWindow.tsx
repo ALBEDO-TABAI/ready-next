@@ -93,6 +93,7 @@ export default function PetWindow() {
       setStickyNotes(snapshot.stickyNotes || [])
     }
 
+    // fire-and-forget: pet snapshot bootstrap fetch; the onSnapshot subscription below will deliver the next pet update so a missed initial fetch self-heals.
     window.electronAPI.pet.getSnapshot()
       .then((result) => {
         if (mounted && result.success && result.data) applySnapshot(result.data)

@@ -242,6 +242,7 @@ export function useBrowserRuntimeEffects({
     if (!isElectron) return
     let cancelled = false
 
+    // fire-and-forget: browser-runtime warmup; if it fails, BrowserView simply won't be ready and the user sees the empty-state UI, which has its own retry affordance.
     void ensureBrowserRuntime().then((hasTabs) => {
       if (cancelled) return
       setBrowserRuntimeReady(hasTabs)

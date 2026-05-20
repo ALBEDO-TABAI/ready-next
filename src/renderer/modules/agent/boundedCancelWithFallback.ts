@@ -75,6 +75,7 @@ export async function boundedCancelWithFallback(
   // onCancelLanded callback's idempotency is the caller's responsibility
   // (current callers only flip card status if it's still 'pending').
   if (winner.kind === 'timeout') {
+    // fire-and-forget: late cancel resolution after timeout; the original cancelPromise.catch chain (lines above) already routed errors through onCancelError, so this swallow only prevents an unhandledRejection on the late path.
     cancelPromise.catch(() => {
       /* error path already covered by onCancelError */
     })
