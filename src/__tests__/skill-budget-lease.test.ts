@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import test from 'node:test'
 
-import { createToolExecutionOutput } from '../main/modules/agent-control/tool-result-types'
+import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 import { scoreSkillProgress } from '../main/modules/agent-control/progress-scorer'
 import { scoreSkillWaste } from '../main/modules/agent-control/waste-scorer'
 import {

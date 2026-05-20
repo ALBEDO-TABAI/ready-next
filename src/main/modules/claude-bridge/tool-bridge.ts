@@ -1,4 +1,4 @@
-import { serializeToolExecutionOutput, type ToolExecutionResultLike } from '../agent-control/tool-result-types'
+import { serializeToolExecutionOutput, type ToolExecutionResultLike } from '../agent-control/tools-runtime/tool-result-types'
 
 export interface TextToolBridgeCall {
   name: string

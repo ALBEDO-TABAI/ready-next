@@ -1,7 +1,7 @@
 import {
   FRAME_PATCH_EMITTING_TOOL_NAMES,
   isFramePatchEmittingToolName,
-} from './run-contracts'
+} from '../run-contracts'
 
 /**
  * Phase 3 (skill-child-loop) — tools that may emit a `contextModifier` on

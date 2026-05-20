@@ -1,7 +1,7 @@
 import type { ToolContext } from '../tools/tool-executor'
 import type { HostShortcutDecision } from './run-capability-controller'
 import { logAgentMetric } from './metrics'
-import type { ToolExecutionOutput } from './tool-result-types'
+import type { ToolExecutionOutput } from './tools-runtime/tool-result-types'
 
 interface HostCapabilityDispatcherDeps {
   executeHostTool: (toolName: string, args: Record<string, unknown>, toolContext: ToolContext) => Promise<ToolExecutionOutput>

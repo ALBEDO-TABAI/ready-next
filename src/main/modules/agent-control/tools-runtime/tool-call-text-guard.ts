@@ -20,9 +20,9 @@
  * lives in turn-engine).
  */
 
-import { logAgentMetric } from './metrics'
+import { logAgentMetric } from '../metrics'
 import { TOOL_ERROR_METRICS } from './tool-error-metrics'
-import { parseTextToolBridgeResponse } from '../claude-bridge/tool-bridge'
+import { parseTextToolBridgeResponse } from '../../claude-bridge/tool-bridge'
 
 /**
  * Markers we treat as "this assistant text is leaking a tool call". Covers

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import test, { beforeEach } from 'node:test'
 
-import { ToolGateway } from '../main/modules/agent-control/tool-gateway'
-import { ToolRuntime } from '../main/modules/agent-control/tool-runtime'
-import { resolveToolInputSchemaForExecution } from '../main/modules/agent-control/tool-registry'
+import { ToolGateway } from '../main/modules/agent-control/tools-runtime/tool-gateway'
+import { ToolRuntime } from '../main/modules/agent-control/tools-runtime/tool-runtime'
+import { resolveToolInputSchemaForExecution } from '../main/modules/agent-control/tools-runtime/tool-registry'
 import {
   buildExplicitNoSkillAuthorization,
   buildSelectedSkillToolAuthorization,

@@ -12,7 +12,7 @@ import assert from 'node:assert/strict'
 import {
   hashToolCallArgs,
   stableToolKey,
-} from '../main/modules/agent-control/tool-call-args-hash'
+} from '../main/modules/agent-control/tools-runtime/tool-call-args-hash'
 
 test('hashToolCallArgs is order-independent for object keys', () => {
   const hashA = hashToolCallArgs({ a: 1, b: 2 })

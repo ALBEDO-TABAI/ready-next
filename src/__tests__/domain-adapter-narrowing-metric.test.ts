@@ -6,7 +6,7 @@ import {
   __setMetricSinkForTests,
   type AgentMetricEvent,
 } from '../main/modules/agent-control/metrics'
-import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-metrics'
+import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tools-runtime/tool-error-metrics'
 
 // Audit found `[domain_adapter_prefix_narrowing] domain=skill inputCount=17
 // outputCount=10 droppedSample=file_search,file_locate` in directchat.log but

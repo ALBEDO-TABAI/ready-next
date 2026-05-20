@@ -6,7 +6,7 @@ import test from 'node:test'
 
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
 import { buildLongSkillRunningProjection } from '../main/modules/agent-control/skills/skill-running-projection'
-import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-metrics'
+import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tools-runtime/tool-error-metrics'
 
 test('long skill running projection includes run_state and intermediate artifacts', () => {
   const root = mkdtempSync(join(tmpdir(), 'skill-running-projection-'))

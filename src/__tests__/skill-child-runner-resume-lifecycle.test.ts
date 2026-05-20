@@ -50,8 +50,8 @@ import type {
   SkillsRuntimeManager,
   SkillRunRequest,
 } from '../main/modules/skills-runtime/runtime-manager'
-import { defaultToolRegistry } from '../main/modules/agent-control/tool-registry'
-import type { ToolDefinition } from '../main/modules/agent-control/tool-definition'
+import { defaultToolRegistry } from '../main/modules/agent-control/tools-runtime/tool-registry'
+import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import {
   SkillTaskRunRepository,
   type SkillTaskRunRecord,

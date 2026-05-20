@@ -9,13 +9,13 @@ import type { AgentControlRuntime } from '../agent-control/runtime'
 import {
   defaultToolRegistry,
   resolveToolInputSchemaForExecution,
-} from '../agent-control/tool-registry'
-import type { ToolDefinition } from '../agent-control/tool-definition'
+} from '../agent-control/tools-runtime/tool-registry'
+import type { ToolDefinition } from '../agent-control/tools-runtime/tool-definition'
 import { logAgentMetric } from '../agent-control/metrics'
-import { TOOL_ERROR_METRICS } from '../agent-control/tool-error-metrics'
+import { TOOL_ERROR_METRICS } from '../agent-control/tools-runtime/tool-error-metrics'
 import type { ConversationScope } from '../agent-control/types'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
-import type { ToolRuntimeActiveFrameContext } from '../agent-control/tool-runtime'
+import type { ToolRuntimeActiveFrameContext } from '../agent-control/tools-runtime/tool-runtime'
 import type { TurnFeatureFlags } from '../agent-control/turn-feature-flags'
 import {
   checkSkillToolAuthorization,
@@ -32,7 +32,7 @@ import {
   normalizeToolExecutionOutput,
   type ToolExecutionOutput,
   type ToolInteractionHint,
-} from '../agent-control/tool-result-types'
+} from '../agent-control/tools-runtime/tool-result-types'
 import { executeBrowserTool } from './browser-tools'
 import { executeCalendarTool } from './calendar-tools'
 import { executeDocumentTool } from './document-tools'

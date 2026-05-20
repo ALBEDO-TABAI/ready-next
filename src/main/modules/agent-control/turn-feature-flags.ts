@@ -1,6 +1,6 @@
 import { isChildRunCircuitBreakerEnabled } from './child-run-circuit-breaker'
 import { isChildResumeEnabled } from './skills/skill-child-feature-flags'
-import { isChildInternalStrictAdmissionEnabled } from './tool-definition'
+import { isChildInternalStrictAdmissionEnabled } from './tools-runtime/tool-definition'
 
 export type TurnFeatureFlags = Readonly<{
   childResumeEnabled: boolean

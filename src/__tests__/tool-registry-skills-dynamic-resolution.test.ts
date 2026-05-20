@@ -33,8 +33,8 @@ import {
 } from '../main/modules/agent-control/skills/skill-tool-fallback-throttle'
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
 import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
-import { ToolRegistry } from '../main/modules/agent-control/tool-registry'
-import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-metrics'
+import { ToolRegistry } from '../main/modules/agent-control/tools-runtime/tool-registry'
+import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tools-runtime/tool-error-metrics'
 
 const STANDARD_PRIMITIVES = [
   'skill_ask_user',
@@ -62,7 +62,7 @@ import {
   findSkillToolBySkillAction,
   getSkillActionSchemas,
 } from '../main/modules/tools/skills-tools'
-import { resolveToolInputSchemaForExecution } from '../main/modules/agent-control/tool-registry'
+import { resolveToolInputSchemaForExecution } from '../main/modules/agent-control/tools-runtime/tool-registry'
 
 const LOOKUP_METRIC = PROJECTION_OBSERVABILITY_METRICS.skillToolDynamicLookupFailed
 

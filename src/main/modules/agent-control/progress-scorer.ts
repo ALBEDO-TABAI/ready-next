@@ -1,4 +1,4 @@
-import type { ToolExecutionOutput } from './tool-result-types'
+import type { ToolExecutionOutput } from './tools-runtime/tool-result-types'
 import type { SkillTaskSupervisorSnapshot } from './skills/skill-task-supervisor'
 
 export interface SkillProgressScore {

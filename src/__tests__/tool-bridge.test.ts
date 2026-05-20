@@ -7,7 +7,7 @@ import {
   parseTextToolBridgeResponse,
   shouldEnforceBrowserToolRetry,
 } from '../main/modules/claude-bridge/tool-bridge'
-import { createToolExecutionOutput } from '../main/modules/agent-control/tool-result-types'
+import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 
 describe('parseTextToolBridgeResponse', () => {
   it('extracts tool_call blocks and keeps visible text', () => {

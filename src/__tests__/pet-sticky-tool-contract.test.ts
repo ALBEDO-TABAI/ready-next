@@ -9,7 +9,7 @@ import {
 } from '../main/modules/agent-control/execution-intent-resolver'
 import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
 import { classifyIntent } from '../main/modules/agent-control/intent-classifier'
-import { defaultToolRegistry } from '../main/modules/agent-control/tool-registry'
+import { defaultToolRegistry } from '../main/modules/agent-control/tools-runtime/tool-registry'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')

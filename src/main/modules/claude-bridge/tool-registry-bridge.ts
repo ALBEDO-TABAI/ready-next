@@ -2,10 +2,10 @@ import { createRequire } from 'module'
 
 /**
  * B Phase 4 cleanup helper: lazily resolves the registered tool names without
- * dragging the full agent-control/tool-registry module graph into the
+ * dragging the full agent-control/tools-runtime/tool-registry module graph into the
  * claude-bridge layer at module-load time.
  *
- * The static `import { getRegisteredToolNames } from '../agent-control/tool-registry'`
+ * The static `import { getRegisteredToolNames } from '../agent-control/tools-runtime/tool-registry'`
  * approach pulls in `tools/memory-tools → tools/tool-executor → browser-engine/ipc-handler`
  * which transitively requires Electron's `BrowserWindow`, breaking tsx
  * unit tests that exercise sanitize-only call paths (e.g. KimiCodingClient

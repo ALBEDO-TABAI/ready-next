@@ -13,7 +13,7 @@ import { basename, join, resolve } from 'node:path'
 
 import type { SkillHostRequirements } from '../../../../shared/skill-host-contract'
 import { atomicWriteJson } from '../../agent-control/atomic-write'
-import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent-control/tool-result-types'
+import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent-control/tools-runtime/tool-result-types'
 import { ToolDomainError } from '../tool-errors'
 import type { TurnFramePatch } from '../../agent-control/turn-frame'
 

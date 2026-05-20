@@ -1,9 +1,9 @@
-import type { CapabilityGroupDefinition, CapabilityGroupId } from '../../../shared/ai-capability-groups'
-import { CAPABILITY_GROUPS } from '../../../shared/ai-capability-groups'
-import { logAgentMetric } from './metrics'
+import type { CapabilityGroupDefinition, CapabilityGroupId } from '../../../../shared/ai-capability-groups'
+import { CAPABILITY_GROUPS } from '../../../../shared/ai-capability-groups'
+import { logAgentMetric } from '../metrics'
 import type { ToolDefinition } from './tool-definition'
-import type { SkillToolAuthorization } from './skills/skill-tool-authorization'
-import type { CapabilityResolution } from './capability-resolver'
+import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
+import type { CapabilityResolution } from '../capability-resolver'
 
 /**
  * Stage S (PR-S6 / W4.2) — vision tool capability gating.

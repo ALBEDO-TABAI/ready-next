@@ -4,7 +4,7 @@ import test from 'node:test'
 import {
   createToolExecutionOutput,
   serializeToolExecutionOutput,
-} from '../main/modules/agent-control/tool-result-types'
+} from '../main/modules/agent-control/tools-runtime/tool-result-types'
 
 test('serializeToolExecutionOutput sends tool text to the model even when a projection patch exists', () => {
   const output = createToolExecutionOutput('exitCode=0\nSTDOUT:\nreport ready', {

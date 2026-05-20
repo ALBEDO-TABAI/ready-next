@@ -1,28 +1,28 @@
-import { classifyExecutionError, type ErrorClassifierResult } from '../claude-bridge/error-classifier'
-import { buildRecoveryPlan } from '../claude-bridge/recovery-router'
-import { logAgentMetric } from './metrics'
+import { classifyExecutionError, type ErrorClassifierResult } from '../../claude-bridge/error-classifier'
+import { buildRecoveryPlan } from '../../claude-bridge/recovery-router'
+import { logAgentMetric } from '../metrics'
 import { TOOL_ERROR_METRICS } from './tool-error-metrics'
-import { isTerminalInfrastructureError } from '../tools/tool-errors'
-import type { SidecarManager } from './sidecar-manager'
-import type { AgentControlRuntime } from './runtime'
-import type { ConversationScope } from './types'
-import type { BrowserController } from '../browser-engine/ipc-handler'
+import { isTerminalInfrastructureError } from '../../tools/tool-errors'
+import type { SidecarManager } from '../sidecar-manager'
+import type { AgentControlRuntime } from '../runtime'
+import type { ConversationScope } from '../types'
+import type { BrowserController } from '../../browser-engine/ipc-handler'
 import type { ToolDefinition } from './tool-definition'
 import { defaultToolRegistry } from './tool-registry'
-import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
-import type { TurnFeatureFlags } from './turn-feature-flags'
+import type { AgentSpawnContext } from '../../../../shared/skill-host-contract'
+import type { TurnFeatureFlags } from '../turn-feature-flags'
 import {
   buildExplicitNoSkillAuthorization,
   type SkillToolAuthorization,
-} from './skills/skill-tool-authorization'
-import type { RecoveryRecord, RunBudgetSeed, RunBudgetUsage, SkillRunContract } from './run-contracts'
+} from '../skills/skill-tool-authorization'
+import type { RecoveryRecord, RunBudgetSeed, RunBudgetUsage, SkillRunContract } from '../run-contracts'
 import { groupParallelSafeToolCalls, type ParallelToolCall } from './tool-parallelism-policy'
 import {
   canUseParallelToolGroup,
   getBudgetUsagePercent,
   getBudgetWarningLevel,
   getRemainingToolCallBudget,
-} from './task-projection/run-budget-policy'
+} from '../task-projection/run-budget-policy'
 import type { ToolExecutionHooks } from './tool-execution-hooks'
 import {
   createToolExecutionOutput,
@@ -31,12 +31,12 @@ import {
   type ToolExecutionResultLike,
 } from './tool-result-types'
 import { toToolExecutorContext } from './tool-runtime-context-builder'
-import { resolveToolExecutionTimeoutMsForProfile } from '../tools/tool-execution-timeout-policy'
+import { resolveToolExecutionTimeoutMsForProfile } from '../../tools/tool-execution-timeout-policy'
 import {
   buildToolNotAllowedMessage,
   buildUnknownToolMessage,
   normalizeAllowedToolSet,
-} from '../tools/tool-not-allowed-message'
+} from '../../tools/tool-not-allowed-message'
 
 /**
  * Phase 3 (skill-child-loop) — live, same-turn slice of the active TurnFrame

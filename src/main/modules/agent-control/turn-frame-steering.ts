@@ -1,7 +1,7 @@
 import { createHash } from 'crypto'
 
 import { getStaticSkillToolNameForAction } from '../tools/skills-tools-static'
-import { resolveToolInputSchemaForExecution } from './tool-registry'
+import { resolveToolInputSchemaForExecution } from './tools-runtime/tool-registry'
 import { createSystemReminderRegistry } from './system-reminders/system-reminder-registry'
 import { logAgentMetric } from './metrics'
 import { resolveCanonicalChildRunHandle } from './child-run-handle-resolver'

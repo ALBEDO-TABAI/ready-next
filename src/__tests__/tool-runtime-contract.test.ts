@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
-import { ToolRuntime } from '../main/modules/agent-control/tool-runtime'
-import { createToolExecutionOutput } from '../main/modules/agent-control/tool-result-types'
+import { ToolRuntime } from '../main/modules/agent-control/tools-runtime/tool-runtime'
+import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')

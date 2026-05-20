@@ -1,13 +1,13 @@
 import { existsSync, readdirSync, readFileSync } from 'fs'
 import { join } from 'path'
 import type { ZodObject, ZodRawShape } from 'zod'
-import type { CapabilityGroupId } from '../../../shared/ai-capability-groups'
+import type { CapabilityGroupId } from '../../../../shared/ai-capability-groups'
 import { getToolResourceTag } from './tool-parallelism-policy'
 import {
   buildExplicitNoSkillAuthorization,
   filterToolsByAuthorization,
   type SkillToolAuthorization,
-} from './skills/skill-tool-authorization'
+} from '../skills/skill-tool-authorization'
 import type {
   ToolConcurrency,
   ToolDefinition,
@@ -19,24 +19,24 @@ import type {
   ToolProjectionHint,
   ToolTimeoutProfile,
 } from './tool-definition'
-import { getCalendarAnthropicTools, getCalendarOpenAITools } from '../tools/calendar-tools'
+import { getCalendarAnthropicTools, getCalendarOpenAITools } from '../../tools/calendar-tools'
 import {
   GENERAL_RESEARCH_TOOL_NAMES,
   getGeneralResearchAnthropicTools,
   getGeneralResearchOpenAITools,
-} from '../tools/general-research-tool-defs'
+} from '../../tools/general-research-tool-defs'
 import {
   AGENT_INTERACTION_TOOL_NAMES,
   getAgentInteractionAnthropicTools,
   getAgentInteractionOpenAITools,
-} from '../tools/agent-interaction-tool-defs'
+} from '../../tools/agent-interaction-tool-defs'
 import {
   BROWSER_CONTENT_TASK_TOOL_NAMES,
   BROWSER_INTERACTION_TOOL_NAMES,
   getBrowserAnthropicTools,
   getBrowserOpenAITools,
-} from '../tools/browser-tool-catalog'
-import { getDocumentAnthropicTools, getDocumentOpenAITools } from '../tools/document-tools'
+} from '../../tools/browser-tool-catalog'
+import { getDocumentAnthropicTools, getDocumentOpenAITools } from '../../tools/document-tools'
 // Import the metadata-only entry point (`file-management-tool-defs`) rather than
 // the executor entry (`file-management-tools`). The executor module transitively
 // pulls in `search-engine/ipc-handler` -> `document-engine/ipc-handler` ->
@@ -50,19 +50,19 @@ import {
   FILE_MANAGEMENT_TOOL_NAMES,
   getFileManagementAnthropicTools,
   getFileManagementOpenAITools,
-} from '../tools/file-management-tool-defs'
-import { getFeishuAnthropicTools, getFeishuOpenAITools } from '../tools/feishu-tools'
-import { getMemoryAnthropicTools, getMemoryOpenAITools } from '../tools/memory-tools'
-import { getPetAnthropicTools, getPetOpenAITools } from '../tools/pet-tools'
-import { getRSSAnthropicTools, getRSSOpenAITools } from '../tools/rss-tools'
-import { getSessionRecallAnthropicTools, getSessionRecallOpenAITools } from '../tools/session-recall-tools'
+} from '../../tools/file-management-tool-defs'
+import { getFeishuAnthropicTools, getFeishuOpenAITools } from '../../tools/feishu-tools'
+import { getMemoryAnthropicTools, getMemoryOpenAITools } from '../../tools/memory-tools'
+import { getPetAnthropicTools, getPetOpenAITools } from '../../tools/pet-tools'
+import { getRSSAnthropicTools, getRSSOpenAITools } from '../../tools/rss-tools'
+import { getSessionRecallAnthropicTools, getSessionRecallOpenAITools } from '../../tools/session-recall-tools'
 import {
   STATIC_SKILL_ACTIONS_BY_TOOL_NAME,
   STATIC_SKILL_TOOL_NAMES_BOOT_SAFE,
-} from '../tools/skills-tools-static'
-import { PRIMITIVE_TOOL_NAME_SET } from '../tools/skill-primitives/tool-defs'
-import { shouldExposeSkillPrimitive } from '../tools/skill-tool-session-gate'
-import { normalizeToolJsonSchema } from '../tools/tool-schema'
+} from '../../tools/skills-tools-static'
+import { PRIMITIVE_TOOL_NAME_SET } from '../../tools/skill-primitives/tool-defs'
+import { shouldExposeSkillPrimitive } from '../../tools/skill-tool-session-gate'
+import { normalizeToolJsonSchema } from '../../tools/tool-schema'
 import {
   buildSkillToolName,
   findSkillToolByNameForExecutionDetailedWithEntry,
@@ -70,12 +70,12 @@ import {
   getSkillAnthropicTools,
   getSkillOpenAITools,
   getSkillToolDefsForRegistry,
-} from '../tools/skills-tools'
-import { getToolInputSchemas } from '../tools/schemas'
-import { getSystemAnthropicTools, getSystemOpenAITools } from '../tools/system-tools'
-import { getLastReferenceSkill } from './skills/skill-reference-hints'
-import { resolveActiveSkillContext } from './active-skill-context'
-import { hasActiveSkillTaskRun } from './skills/skill-task-tracker'
+} from '../../tools/skills-tools'
+import { getToolInputSchemas } from '../../tools/schemas'
+import { getSystemAnthropicTools, getSystemOpenAITools } from '../../tools/system-tools'
+import { getLastReferenceSkill } from '../skills/skill-reference-hints'
+import { resolveActiveSkillContext } from '../active-skill-context'
+import { hasActiveSkillTaskRun } from '../skills/skill-task-tracker'
 import {
   createToolExecutionOutput,
   type ToolExecutionOutput,
@@ -84,14 +84,14 @@ import { ToolNameCollisionError, type ToolNameCollision } from './tool-registry-
 import type {
   SkillRunResult,
   SkillsRuntimeManager,
-} from '../skills-runtime/runtime-manager'
-import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
-import { snapshotTurnFeatureFlags } from './turn-feature-flags'
-import { fallbackThrottle } from './skills/skill-tool-fallback-throttle'
+} from '../../skills-runtime/runtime-manager'
+import type { AgentSpawnContext } from '../../../../shared/skill-host-contract'
+import { snapshotTurnFeatureFlags } from '../turn-feature-flags'
+import { fallbackThrottle } from '../skills/skill-tool-fallback-throttle'
 // Stage T PR-T5 — MCP authorization gate. The model-visible mcp tool list
 // resolver below calls `mcpRegistry.isAuthorized(name, sessionId, scopeId)`
 // before exposing any `mcp_*` tool to the model.
-import * as mcpRegistry from '../mcp/registry'
+import * as mcpRegistry from '../../mcp/registry'
 
 // skills-tools / system-tools transitively import SkillsRuntimeManager (which
 // imports `electron`). Top-level imports are required here because electron-vite

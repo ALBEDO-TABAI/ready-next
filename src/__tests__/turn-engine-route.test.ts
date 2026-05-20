@@ -14,13 +14,13 @@ import {
   rememberLastReferenceSkill,
   _resetLastReferenceSkillHintsForTests,
 } from '../main/modules/agent-control/skills/skill-reference-hints'
-import { defaultToolRegistry } from '../main/modules/agent-control/tool-registry'
+import { defaultToolRegistry } from '../main/modules/agent-control/tools-runtime/tool-registry'
 import type { IntentClassification } from '../main/modules/agent-control/intent-classifier'
 import type { DomainAdapter } from '../main/modules/agent-control/domain-adapter'
 import type { ConversationScope, ScopeRunEventPayload, ScopeRunSummary } from '../main/modules/agent-control/types'
 import type { RunBudgetSeed, RunBudgetUsage, TaskProjectionRecord, TaskProjectionStore, TurnEngineRequest, TurnEngineSession, TurnTranscriptEvent } from '../main/modules/agent-control/run-contracts'
 import type { TurnTerminalReason } from '../main/modules/agent-control/turn-frame'
-import type { ToolDefinition } from '../main/modules/agent-control/tool-definition'
+import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import type { SkillChildCloseEvent } from '../main/modules/agent-control/skills/skill-child-run-types'
 
 function createSession(userText: string): TurnEngineSession {

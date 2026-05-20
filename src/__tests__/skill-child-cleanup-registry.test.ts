@@ -33,8 +33,8 @@ import {
   registerSkillChildDriver,
   type SkillChildDriver,
 } from '../main/modules/agent-control/skills/skill-child-drivers'
-import { defaultToolRegistry } from '../main/modules/agent-control/tool-registry'
-import type { ToolDefinition } from '../main/modules/agent-control/tool-definition'
+import { defaultToolRegistry } from '../main/modules/agent-control/tools-runtime/tool-registry'
+import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import type {
   SkillChildCloseEvent,
   SkillChildDriverAction,

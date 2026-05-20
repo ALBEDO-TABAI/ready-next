@@ -20,9 +20,9 @@ import {
   rememberLastReferenceSkill,
   _resetLastReferenceSkillHintsForTests,
 } from '../main/modules/agent-control/skills/skill-reference-hints'
-import { defaultToolRegistry } from '../main/modules/agent-control/tool-registry'
+import { defaultToolRegistry } from '../main/modules/agent-control/tools-runtime/tool-registry'
 import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
-import type { ToolDefinition } from '../main/modules/agent-control/tool-definition'
+import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import type { IntentClassification } from '../main/modules/agent-control/intent-classifier'
 import type {
   TurnEngineRequest,

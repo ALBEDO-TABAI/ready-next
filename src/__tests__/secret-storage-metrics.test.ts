@@ -24,7 +24,7 @@ registerHooks({
 
 test('decryptChannelConfig emits a metric when encrypted secret decrypt falls back to raw', async () => {
   const { __setMetricSinkForTests } = await import('../main/modules/agent-control/metrics')
-  const { TOOL_ERROR_METRICS } = await import('../main/modules/agent-control/tool-error-metrics')
+  const { TOOL_ERROR_METRICS } = await import('../main/modules/agent-control/tools-runtime/tool-error-metrics')
   const { decryptChannelConfig } = await import('../main/modules/agent-control/secret-storage')
   const events: Array<Record<string, unknown>> = []
   __setMetricSinkForTests((event) => events.push(event))

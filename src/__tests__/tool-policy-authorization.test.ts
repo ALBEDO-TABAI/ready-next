@@ -46,8 +46,8 @@ import {
   buildSelectedSkillToolAuthorization,
   filterToolsByAuthorization,
 } from '../main/modules/agent-control/skills/skill-tool-authorization'
-import { ToolGateway } from '../main/modules/agent-control/tool-gateway'
-import type { ToolDefinition } from '../main/modules/agent-control/tool-definition'
+import { ToolGateway } from '../main/modules/agent-control/tools-runtime/tool-gateway'
+import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 
 const BASE_CONFIG: AIModelConfig = {
   provider: 'openai',

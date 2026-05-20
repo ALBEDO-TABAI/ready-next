@@ -7,8 +7,8 @@ import {
   isLongTypedSkillActionName,
   shouldInjectBudgetWarning,
 } from '../main/modules/agent-control/turn-engine'
-import { defaultToolRegistry } from '../main/modules/agent-control/tool-registry'
-import type { ToolDefinition } from '../main/modules/agent-control/tool-definition'
+import { defaultToolRegistry } from '../main/modules/agent-control/tools-runtime/tool-registry'
+import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 
 // skill-resume plan C1 + C3 — pure helpers extracted from the tool loop:
 //

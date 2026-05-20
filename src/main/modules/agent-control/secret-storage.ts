@@ -1,7 +1,7 @@
 import { createRequire } from 'module'
 
 import { logAgentMetric } from './metrics'
-import { TOOL_ERROR_METRICS } from './tool-error-metrics'
+import { TOOL_ERROR_METRICS } from './tools-runtime/tool-error-metrics'
 
 const electronModule = (() => {
   try { return createRequire(import.meta.url)('electron') as typeof import('electron') }

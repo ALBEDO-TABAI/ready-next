@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-metrics'
+import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tools-runtime/tool-error-metrics'
 
 // Phase 1 — persistence-root wiring contract.
 //

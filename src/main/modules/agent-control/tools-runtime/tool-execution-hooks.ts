@@ -1,4 +1,4 @@
-import type { RecoveryRecord } from './run-contracts'
+import type { RecoveryRecord } from '../run-contracts'
 import type { ParallelToolCall } from './tool-parallelism-policy'
 import type { ToolExecutionOutput } from './tool-result-types'
 

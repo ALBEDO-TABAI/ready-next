@@ -8,7 +8,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { ToolNameCollisionError } from '../main/modules/agent-control/tool-registry-errors'
+import { ToolNameCollisionError } from '../main/modules/agent-control/tools-runtime/tool-registry-errors'
 
 test('ToolNameCollisionError carries collision tuples', () => {
   const collisions = [

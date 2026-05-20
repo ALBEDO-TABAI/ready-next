@@ -1,5 +1,5 @@
-import type { TurnFramePatch } from './turn-frame'
-import type { SkillRunContract } from './run-contracts'
+import type { TurnFramePatch } from '../turn-frame'
+import type { SkillRunContract } from '../run-contracts'
 
 export type ToolResultShape = 'text' | 'json' | 'projection_patch'
 

@@ -1,11 +1,11 @@
 import { DOCUMENT_SCHEMAS } from './schemas/document-schemas'
 import { zodObjectToParamList } from './zod-param-derivation'
 import { logAgentMetric } from '../agent-control/metrics'
-import { TOOL_ERROR_METRICS } from '../agent-control/tool-error-metrics'
+import { TOOL_ERROR_METRICS } from '../agent-control/tools-runtime/tool-error-metrics'
 import {
   createToolExecutionOutput,
   type ToolExecutionOutput,
-} from '../agent-control/tool-result-types'
+} from '../agent-control/tools-runtime/tool-result-types'
 
 interface ToolParam {
   name: string

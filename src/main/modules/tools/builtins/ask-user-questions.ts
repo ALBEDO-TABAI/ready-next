@@ -36,7 +36,7 @@ import { logAgentMetric } from '../../agent-control/metrics'
 import {
   createToolExecutionOutput,
   type ToolExecutionOutput,
-} from '../../agent-control/tool-result-types'
+} from '../../agent-control/tools-runtime/tool-result-types'
 import { ToolDomainError } from '../tool-errors'
 import {
   AskUserQuestionsStore,
@@ -262,7 +262,7 @@ function summarizeAnswers(
  */
 
 import { ASK_USER_ERROR_KINDS } from '../../agent-control/error-kinds'
-import { TOOL_ERROR_METRICS } from '../../agent-control/tool-error-metrics'
+import { TOOL_ERROR_METRICS } from '../../agent-control/tools-runtime/tool-error-metrics'
 
 export interface SubmitDbAccess {
   getChatMessageById(id: string): { meta_json: string | null } | null

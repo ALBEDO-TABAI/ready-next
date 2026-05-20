@@ -1,20 +1,20 @@
-import type { BrowserController } from '../browser-engine/ipc-handler'
-import type { SidecarManager } from './sidecar-manager'
-import type { AgentControlRuntime } from './runtime'
-import type { ConversationScope } from './types'
-import type { ToolContext } from '../tools/tool-executor'
+import type { BrowserController } from '../../browser-engine/ipc-handler'
+import type { SidecarManager } from '../sidecar-manager'
+import type { AgentControlRuntime } from '../runtime'
+import type { ConversationScope } from '../types'
+import type { ToolContext } from '../../tools/tool-executor'
 import {
   createEmptyActiveFrameContext,
   type ToolRuntimeActiveFrameContext,
   type ToolRuntimeContext,
 } from './tool-runtime'
-import type { TurnFrame } from './turn-frame'
-import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
+import type { TurnFrame } from '../turn-frame'
+import type { AgentSpawnContext } from '../../../../shared/skill-host-contract'
 import {
   snapshotTurnFeatureFlags,
   type TurnFeatureFlags,
-} from './turn-feature-flags'
-import type { SkillToolAuthorization } from './skills/skill-tool-authorization'
+} from '../turn-feature-flags'
+import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
 
 /**
  * Phase 3 (Team T7) — derive the initial `ToolRuntimeActiveFrameContext`

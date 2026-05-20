@@ -4,7 +4,7 @@ import {
   createToolExecutionOutput,
   serializeToolExecutionOutput,
   type ToolExecutionOutput,
-} from './tool-result-types'
+} from './tools-runtime/tool-result-types'
 import {
   applyFormatSectionByPath,
   applyRewriteSectionByPath,

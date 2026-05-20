@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import { buildRequestEnvelope } from './request-envelope'
-import { hashToolCallArgs } from './tool-call-args-hash'
+import { hashToolCallArgs } from './tools-runtime/tool-call-args-hash'
 
 /**
  * skill-resume C1 — pure helper for tool-repetition detection.
@@ -56,16 +56,16 @@ export {
   TOOL_CALL_TEXT_PATTERN,
   sanitizeAssistantText,
   pushAssistantTextSafely,
-} from './tool-call-text-guard'
+} from './tools-runtime/tool-call-text-guard'
 export type {
   SanitizeAssistantTextOptions,
   SanitizeAssistantTextOptions as PushAssistantTextSafelyOptions,
-} from './tool-call-text-guard'
+} from './tools-runtime/tool-call-text-guard'
 import {
   buildToolCallOnlyFallbackText,
   pushAssistantTextSafely,
   sanitizeAssistantText,
-} from './tool-call-text-guard'
+} from './tools-runtime/tool-call-text-guard'
 
 /**
  * Phase 3.3 — budget-warning copy that doesn't sabotage long skill flows.
@@ -220,7 +220,7 @@ import { buildContinuationStateFromProjection } from './continuation-state'
 import { matchesConfigRepairIntent, matchesResumeIntent } from './resume-lexicon'
 import { classifyIntent, type IntentClassification } from './intent-classifier'
 import { logAgentMetric } from './metrics'
-import { TOOL_ERROR_METRICS } from './tool-error-metrics'
+import { TOOL_ERROR_METRICS } from './tools-runtime/tool-error-metrics'
 import { snapshotTurnFeatureFlags } from './turn-feature-flags'
 import { classifyRestartIntent, type RestartIntentClass } from './restart-intent-classifier'
 import {
@@ -258,7 +258,7 @@ import {
   type SkillRunRecord,
 } from './session-continuity'
 import { prepareInitialRun, reconcileAfterBrowserDecision } from './run-capability-controller'
-import { defaultToolRegistry, resolveToolInputSchemaForExecution } from './tool-registry'
+import { defaultToolRegistry, resolveToolInputSchemaForExecution } from './tools-runtime/tool-registry'
 import {
   selectDomainAdapter,
   type DomainAdapter,
@@ -284,7 +284,7 @@ import { shouldEnforcePetToolRetry } from './pet-tool-loop-policy'
 import {
   buildActiveFrameContextFromTurnFrame,
   buildToolRuntimeContext,
-} from './tool-runtime-context-builder'
+} from './tools-runtime/tool-runtime-context-builder'
 import {
   buildTextToolBridgeCorrectionMessage,
   buildToolGuidance,
@@ -312,7 +312,7 @@ import {
   normalizeToolExecutionOutput,
   serializeToolExecutionOutput,
   type ToolExecutionOutput,
-} from './tool-result-types'
+} from './tools-runtime/tool-result-types'
 import { TurnState } from './turn-state'
 import { TurnTranscript } from './turn-transcript'
 import { createSystemReminderRegistry, type ReminderEntry } from './system-reminders/system-reminder-registry'

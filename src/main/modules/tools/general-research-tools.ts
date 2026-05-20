@@ -22,7 +22,7 @@ import type { ConversationScope } from '../agent-control/types'
 import {
   createToolExecutionOutput,
   type ToolExecutionOutput,
-} from '../agent-control/tool-result-types'
+} from '../agent-control/tools-runtime/tool-result-types'
 import { ToolDomainError } from './tool-errors'
 import {
   executePresentFile,

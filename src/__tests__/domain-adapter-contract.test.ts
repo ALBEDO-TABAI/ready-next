@@ -8,7 +8,7 @@ import { RSSDomainAdapter } from '../main/modules/agent-control/rss-domain-adapt
 import { CalendarDomainAdapter } from '../main/modules/agent-control/calendar-domain-adapter'
 import { FeishuDomainAdapter } from '../main/modules/agent-control/feishu-domain-adapter'
 import { selectDomainAdapter, type DomainAdapter } from '../main/modules/agent-control/domain-adapter'
-import { createToolExecutionOutput } from '../main/modules/agent-control/tool-result-types'
+import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 
 function createRoute(executor: 'browser' | 'document' | 'skill' | 'rss' | 'calendar' | 'feishu') {
   return {

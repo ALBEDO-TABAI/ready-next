@@ -210,7 +210,7 @@ test('SCREENSHOT BUG ROOT — clean text + 0 native calls → no-op (fast path, 
 // ---------------------------------------------------------------------------
 
 test('SCREENSHOT BUG ROOT — xml_tool_calls_recovered_from_native is registered in TOOL_ERROR_METRICS', async () => {
-  const { TOOL_ERROR_METRICS } = await import('../main/modules/agent-control/tool-error-metrics')
+  const { TOOL_ERROR_METRICS } = await import('../main/modules/agent-control/tools-runtime/tool-error-metrics')
   assert.equal(
     TOOL_ERROR_METRICS.xmlToolCallsRecoveredFromNative,
     'xml_tool_calls_recovered_from_native',

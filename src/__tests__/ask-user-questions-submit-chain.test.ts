@@ -28,7 +28,7 @@ import {
 } from '../main/modules/tools/builtins/ask-user-questions-store'
 import { ToolDomainError } from '../main/modules/tools/tool-errors'
 import { ASK_USER_ERROR_KINDS } from '../main/modules/agent-control/error-kinds'
-import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-metrics'
+import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tools-runtime/tool-error-metrics'
 
 function makeFakeDb(opts: {
   initialPendingMeta?: Record<string, unknown>

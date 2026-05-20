@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { resolveToolInputSchemaForExecution } from '../main/modules/agent-control/tool-registry'
+import { resolveToolInputSchemaForExecution } from '../main/modules/agent-control/tools-runtime/tool-registry'
 import { getToolInputSchemas } from '../main/modules/tools/schemas'
 import {
   STATIC_SKILL_ACTIONS_BY_TOOL_NAME,

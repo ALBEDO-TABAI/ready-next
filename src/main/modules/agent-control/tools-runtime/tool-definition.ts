@@ -1,4 +1,4 @@
-import type { CapabilityGroupId } from '../../../shared/ai-capability-groups'
+import type { CapabilityGroupId } from '../../../../shared/ai-capability-groups'
 import type { ToolResultShape } from './tool-result-types'
 
 export type ToolDomain =

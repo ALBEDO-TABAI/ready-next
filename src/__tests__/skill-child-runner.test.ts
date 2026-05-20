@@ -256,10 +256,10 @@ import type {
   SkillRunRequest,
 } from '../main/modules/skills-runtime/runtime-manager'
 import { startSkillChildRunAndWait } from '../main/modules/skills-runtime/runtime-manager'
-import { defaultToolRegistry } from '../main/modules/agent-control/tool-registry'
+import { defaultToolRegistry } from '../main/modules/agent-control/tools-runtime/tool-registry'
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
-import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-metrics'
-import type { ToolDefinition } from '../main/modules/agent-control/tool-definition'
+import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tools-runtime/tool-error-metrics'
+import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import type { SkillTaskRunRecord } from '../main/modules/repositories/skill-task-run-repository'
 import type { TaskProjectionRecord, TaskProjectionStore } from '../main/modules/agent-control/run-contracts'
 import type { ScopeRunEventPayload } from '../main/modules/agent-control/types'

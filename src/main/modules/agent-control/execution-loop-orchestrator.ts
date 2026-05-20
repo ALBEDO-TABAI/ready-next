@@ -3,10 +3,10 @@ import { annotateFallbackResult, resolveFallbackPlan } from '../claude-bridge/ex
 import { classifyExecutionError, type ErrorClassifierResult } from '../claude-bridge/error-classifier'
 import { buildRecoveryPlan } from '../claude-bridge/recovery-router'
 import type { RecoveryRecord, RunBudgetSeed, RunBudgetUsage, ToolSnapshot, TurnToolCallParseError } from './run-contracts'
-import type { ParallelToolCall } from './tool-parallelism-policy'
-import { ToolRuntime, type ToolRuntimeBatchResult, type ToolRuntimeContext } from './tool-runtime'
-import type { ToolExecutionHooks } from './tool-execution-hooks'
-import type { ToolExecutionOutput, ToolExecutionResultLike } from './tool-result-types'
+import type { ParallelToolCall } from './tools-runtime/tool-parallelism-policy'
+import { ToolRuntime, type ToolRuntimeBatchResult, type ToolRuntimeContext } from './tools-runtime/tool-runtime'
+import type { ToolExecutionHooks } from './tools-runtime/tool-execution-hooks'
+import type { ToolExecutionOutput, ToolExecutionResultLike } from './tools-runtime/tool-result-types'
 
 interface APIResponseLike {
   text: string

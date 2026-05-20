@@ -57,7 +57,7 @@ import {
 import {
   defaultToolRegistry,
   resolveToolInputSchemaForExecution,
-} from '../main/modules/agent-control/tool-registry'
+} from '../main/modules/agent-control/tools-runtime/tool-registry'
 import {
   loadSkillRunContract,
   shouldParentForceLongSkillTool,

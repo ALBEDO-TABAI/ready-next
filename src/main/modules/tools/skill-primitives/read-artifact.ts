@@ -7,10 +7,10 @@
 
 import { existsSync, lstatSync, openSync, readSync, closeSync, statSync } from 'node:fs'
 
-import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent-control/tool-result-types'
+import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent-control/tools-runtime/tool-result-types'
 import { ToolDomainError } from '../tool-errors'
 import { logAgentMetric } from '../../agent-control/metrics'
-import { TOOL_ERROR_METRICS } from '../../agent-control/tool-error-metrics'
+import { TOOL_ERROR_METRICS } from '../../agent-control/tools-runtime/tool-error-metrics'
 import { PathSandboxError, resolveReadableWithinAnyRoot } from './path-sandbox'
 import { defaultLookupSkillRoots, type LookupSkillRoots } from './root-resolver'
 

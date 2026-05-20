@@ -7,7 +7,7 @@ import {
   buildToolCallOnlyFallbackText,
   TOOL_CALL_TEXT_PATTERN,
   sanitizeAssistantText,
-} from '../main/modules/agent-control/tool-call-text-guard'
+} from '../main/modules/agent-control/tools-runtime/tool-call-text-guard'
 import {
   selectContinuationProjection,
 } from '../main/modules/agent-control/continuation-state'

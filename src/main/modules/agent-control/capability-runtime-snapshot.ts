@@ -10,7 +10,7 @@ import type {
   CapabilityRuntimeStatus,
 } from '../../../shared/ai-capability-runtime'
 import { resolveCapabilityResolution, type CapabilityRuntimeAvailability } from './capability-resolver'
-import { defaultToolGateway } from './tool-gateway'
+import { defaultToolGateway } from './tools-runtime/tool-gateway'
 
 function mapRuntimeStatus(params: {
   status: 'visible' | 'suppressed' | 'unavailable' | 'host_only' | 'inactive'

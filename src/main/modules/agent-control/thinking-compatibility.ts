@@ -7,7 +7,7 @@ import {
 import type { MultiTurnThinkingPolicy } from '../../../shared/ai-providers/types'
 import { ToolDomainError } from '../tools/tool-errors'
 import { logAgentMetric } from './metrics'
-import { TOOL_ERROR_METRICS } from './tool-error-metrics'
+import { TOOL_ERROR_METRICS } from './tools-runtime/tool-error-metrics'
 
 function messageForPolicy(policy: MultiTurnThinkingPolicy): string {
   if (policy === 'unsupported') {

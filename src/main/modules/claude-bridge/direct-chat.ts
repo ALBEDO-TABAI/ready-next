@@ -41,14 +41,14 @@ import { SkillDomainAdapter } from '../agent-control/skills/skill-domain-adapter
 import { SkillContextOrchestrator } from '../agent-control/skills/skill-context-orchestrator'
 import { SubtaskRuntime } from '../agent-control/subtask-runtime'
 import { WidgetEditLeaseStore, type ActiveWidgetEditLease } from '../agent-control/widget-edit-lease'
-import { buildToolRuntimeContext } from '../agent-control/tool-runtime-context-builder'
+import { buildToolRuntimeContext } from '../agent-control/tools-runtime/tool-runtime-context-builder'
 import { TurnEngine } from '../agent-control/turn-engine'
 import {
   createToolExecutionOutput,
   serializeToolExecutionOutput,
   type ToolExecutionOutput,
-} from '../agent-control/tool-result-types'
-import { getToolResourceTag } from '../agent-control/tool-parallelism-policy'
+} from '../agent-control/tools-runtime/tool-result-types'
+import { getToolResourceTag } from '../agent-control/tools-runtime/tool-parallelism-policy'
 import {
   applyRunBudgetHint,
   createStepBudgetState,
@@ -147,7 +147,7 @@ import { readAIConfigDetailed, type AIConfigLoad } from './direct-chat-ai-config
 import { AttachmentLoadFailureThrottle } from './direct-chat-attachment-metrics'
 import { assertCurrentMessageCapability } from '../agent-control/message-capability-filter'
 import { logAgentMetric } from '../agent-control/metrics'
-import { TOOL_ERROR_METRICS } from '../agent-control/tool-error-metrics'
+import { TOOL_ERROR_METRICS } from '../agent-control/tools-runtime/tool-error-metrics'
 
 const directChatLogger = createRotatingLogger('ready-directchat.log')
 const settingsRepository = new AppSettingsRepository()
@@ -1219,9 +1219,9 @@ export class DirectChatEngine extends EventEmitter {
       }) => this.requestToolLoopResponse(raw),
       executeToolBatch: async (raw: {
         toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }>
-        context: import('../agent-control/tool-runtime').ToolRuntimeContext
+        context: import('../agent-control/tools-runtime/tool-runtime').ToolRuntimeContext
         executeTool?: (toolCall: { id: string; name: string; input: Record<string, unknown> }) => Promise<unknown>
-        hooks?: import('../agent-control/tool-execution-hooks').ToolExecutionHooks
+        hooks?: import('../agent-control/tools-runtime/tool-execution-hooks').ToolExecutionHooks
         onGroupStart?: (group: { mode: 'parallel' | 'serial'; toolCalls: Array<{ id: string; name: string; input: Record<string, unknown> }> }) => void
         budget?: RunBudgetSeed
         budgetState?: RunBudgetUsage

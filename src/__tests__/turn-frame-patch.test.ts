@@ -30,7 +30,7 @@ import {
 import {
   getToolResourceTag,
   isParallelSafeTool,
-} from '../main/modules/agent-control/tool-parallelism-policy'
+} from '../main/modules/agent-control/tools-runtime/tool-parallelism-policy'
 
 function makeFrame(overrides?: Partial<TurnFrame>): TurnFrame {
   return {

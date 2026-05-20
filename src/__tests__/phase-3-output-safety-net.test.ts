@@ -8,7 +8,7 @@ import {
   pushAssistantTextSafely,
   sanitizeAssistantText,
 } from '../main/modules/agent-control/turn-engine'
-import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-metrics'
+import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tools-runtime/tool-error-metrics'
 
 // Phase 3 — output safety net.
 //

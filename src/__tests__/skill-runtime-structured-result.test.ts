@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 
 import { SkillsRuntimeManager } from '../main/modules/skills-runtime/runtime-manager'
-import { createToolExecutionOutput } from '../main/modules/agent-control/tool-result-types'
+import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 import { inferSkillRunStatusFromOutput } from '../main/modules/tools/skills-tools'
 
 function makeManager(): { manager: SkillsRuntimeManager; cleanup: () => void } {

@@ -18,7 +18,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { getToolInputSchemas } from '../main/modules/tools/schemas'
-import { resolveToolInputSchemaForExecution } from '../main/modules/agent-control/tool-registry'
+import { resolveToolInputSchemaForExecution } from '../main/modules/agent-control/tools-runtime/tool-registry'
 import { SKILL_PRIMITIVE_SCHEMAS } from '../main/modules/tools/skill-primitives/primitive-schemas'
 
 test('getToolInputSchemas includes every skill primitive', () => {

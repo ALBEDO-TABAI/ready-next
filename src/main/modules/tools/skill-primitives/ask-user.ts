@@ -19,9 +19,9 @@
  */
 
 import { ToolDomainError } from '../tool-errors'
-import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent-control/tool-result-types'
+import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent-control/tools-runtime/tool-result-types'
 import { logAgentMetric } from '../../agent-control/metrics'
-import { TOOL_ERROR_METRICS } from '../../agent-control/tool-error-metrics'
+import { TOOL_ERROR_METRICS } from '../../agent-control/tools-runtime/tool-error-metrics'
 import {
   EphemeralExecutionStore,
   generateEphemeralAskUserId,

@@ -10,7 +10,7 @@
  */
 
 import { ToolDomainError } from './tool-errors'
-import { createToolExecutionOutput, type ToolExecutionOutput } from '../agent-control/tool-result-types'
+import { createToolExecutionOutput, type ToolExecutionOutput } from '../agent-control/tools-runtime/tool-result-types'
 import { getMcpClient } from '../mcp/client'
 import { getMcpServerForTool, isAuthorized } from '../mcp/registry'
 

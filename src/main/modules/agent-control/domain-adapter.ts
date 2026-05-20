@@ -3,8 +3,8 @@ import type { TurnFrame } from './turn-frame'
 import type { ToolPolicy } from './execution-tool-config'
 import type { ExecutionIntentContext } from './execution-intent-resolver'
 import { logAgentMetric } from './metrics'
-import { TOOL_ERROR_METRICS } from './tool-error-metrics'
-import { normalizeToolExecutionOutput, type ToolExecutionOutput } from './tool-result-types'
+import { TOOL_ERROR_METRICS } from './tools-runtime/tool-error-metrics'
+import { normalizeToolExecutionOutput, type ToolExecutionOutput } from './tools-runtime/tool-result-types'
 import type {
   RunBudgetHint,
   TaskExecutionRoute,

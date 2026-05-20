@@ -9,7 +9,7 @@ import {
   deriveRuntimeChildRunLogPath,
 } from '../agent-control/skills/skill-child-run-log'
 import { logAgentMetric } from '../agent-control/metrics'
-import { TOOL_ERROR_METRICS } from '../agent-control/tool-error-metrics'
+import { TOOL_ERROR_METRICS } from '../agent-control/tools-runtime/tool-error-metrics'
 
 const DEFAULT_OUTPUT_DIR_RETENTION_DAYS = 7
 const DEFAULT_LEGACY_GRACE_DAYS = 30

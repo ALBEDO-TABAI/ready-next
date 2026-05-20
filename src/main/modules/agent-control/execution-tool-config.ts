@@ -3,7 +3,7 @@ import {
   filterToolsByAllowedTools,
   filterToolsByVisionCapability,
   type ToolGroupResolutionEntry,
-} from './tool-gateway'
+} from './tools-runtime/tool-gateway'
 import { normalizeOpenAIToolSchema } from '../tools/tool-schema'
 import { buildTextToolBridgePrompt } from '../claude-bridge/tool-bridge'
 import { type DocumentWidgetTaskKind } from '../claude-bridge/tool-policy-heuristics'

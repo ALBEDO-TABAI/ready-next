@@ -1,10 +1,10 @@
 import {
   createToolExecutionOutput,
   serializeToolExecutionOutput,
-} from './tool-result-types'
+} from './tools-runtime/tool-result-types'
 import type { TurnTranscriptEvent } from './run-contracts'
 import type { TurnTerminalReason } from './turn-frame'
-import { sanitizeAssistantText } from './tool-call-text-guard'
+import { sanitizeAssistantText } from './tools-runtime/tool-call-text-guard'
 
 export interface TurnTranscriptOptions {
   /**

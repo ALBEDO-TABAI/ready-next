@@ -8,8 +8,8 @@ import {
   AgentSdkRuntime,
   type AgentSdkRuntimeDeps,
 } from '../main/modules/agent-control/agent-sdk-runtime'
-import type { ToolDefinition } from '../main/modules/agent-control/tool-definition'
-import { createToolExecutionOutput } from '../main/modules/agent-control/tool-result-types'
+import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
+import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 import {
   authorizeMcpToolForScope,
   registerMcpServer,

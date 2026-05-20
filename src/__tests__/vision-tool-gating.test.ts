@@ -12,7 +12,7 @@ import test from 'node:test'
 import {
   filterToolsByVisionCapability,
   VISION_REQUIRING_TOOL_NAMES,
-} from '../main/modules/agent-control/tool-gateway'
+} from '../main/modules/agent-control/tools-runtime/tool-gateway'
 
 test('VISION_REQUIRING_TOOL_NAMES is a frozen array', () => {
   assert.ok(Array.isArray(VISION_REQUIRING_TOOL_NAMES))

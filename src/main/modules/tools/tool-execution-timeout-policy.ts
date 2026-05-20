@@ -1,5 +1,5 @@
-import type { ToolTimeoutProfile } from '../agent-control/tool-definition'
-import { getToolResourceTag } from '../agent-control/tool-parallelism-policy'
+import type { ToolTimeoutProfile } from '../agent-control/tools-runtime/tool-definition'
+import { getToolResourceTag } from '../agent-control/tools-runtime/tool-parallelism-policy'
 
 export const DEFAULT_TOOL_EXECUTION_TIMEOUT_MS = 15_000
 export const DOCUMENT_WRITE_TOOL_TIMEOUT_MS = 30_000

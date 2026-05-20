@@ -23,7 +23,7 @@ import {
   GENERAL_RESEARCH_TOOLS,
 } from '../main/modules/tools/general-research-tool-defs'
 import { GENERAL_RESEARCH_SCHEMAS } from '../main/modules/tools/schemas/general-research-schemas'
-import { getToolResourceTag } from '../main/modules/agent-control/tool-parallelism-policy'
+import { getToolResourceTag } from '../main/modules/agent-control/tools-runtime/tool-parallelism-policy'
 
 describe('web_clip_url · capability group registration', () => {
   it('appears in GENERAL_RESEARCH_TOOL_NAMES', () => {

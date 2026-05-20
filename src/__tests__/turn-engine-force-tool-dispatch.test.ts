@@ -23,11 +23,11 @@ import {
 import {
   defaultToolRegistry,
   resolveToolInputSchemaForExecution,
-} from '../main/modules/agent-control/tool-registry'
+} from '../main/modules/agent-control/tools-runtime/tool-registry'
 import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
 import { getToolInputSchemas } from '../main/modules/tools/schemas'
 import { validateToolInput } from '../main/modules/tools/tool-input-validator'
-import type { ToolDefinition } from '../main/modules/agent-control/tool-definition'
+import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import type { IntentClassification } from '../main/modules/agent-control/intent-classifier'
 import type { SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skills/skill-task-supervisor'
 import type {

@@ -35,7 +35,7 @@ import {
 } from '../tools/builtins/ask-user-questions'
 import { getDatabase } from '../database'
 import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
-import { sanitizeAssistantText } from '../agent-control/tool-call-text-guard'
+import { sanitizeAssistantText } from '../agent-control/tools-runtime/tool-call-text-guard'
 import { cancelChildRunForIpc, listActiveChildRunsForIpc } from './active-child-run-ipc'
 import { logAgentMetric } from '../agent-control/metrics'
 import { isRendererAgentMetricName } from '../../../shared/renderer-agent-metrics'

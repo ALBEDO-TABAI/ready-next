@@ -59,8 +59,8 @@ import { listRegisteredSkillChildDrivers } from './skills/skill-child-drivers'
 // registry being primed before any `startSkillChildRun` call.
 import './video-expert-child-driver'
 import { assertStageNChildLoopInvariants } from './stage-n-boot-assertion'
-import { defaultToolRegistry } from './tool-registry'
-import { ToolNameCollisionError } from './tool-registry-errors'
+import { defaultToolRegistry } from './tools-runtime/tool-registry'
+import { ToolNameCollisionError } from './tools-runtime/tool-registry-errors'
 import { RunProjection } from './task-projection/run-projection'
 import { syncTaskProjection } from './task-projection/task-projection-sync'
 import { reconcileTaskProjections } from './task-projection/task-projection-reconciler'
@@ -78,7 +78,7 @@ import {
 import { forgetSession } from './session-continuity'
 import { isRetryOnlyTurn } from './skills/skill-detection-inputs'
 import { logAgentMetric } from './metrics'
-import { TOOL_ERROR_METRICS } from './tool-error-metrics'
+import { TOOL_ERROR_METRICS } from './tools-runtime/tool-error-metrics'
 import {
   classifySendScopedError,
   runConfirmedSendScoped,
@@ -96,7 +96,7 @@ import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import type { CapabilityRuntimeSnapshot } from '../../../shared/ai-capability-runtime'
 import { ExternalMemoryProviderSlot } from './external-memory-provider-slot'
 import { decryptChannelConfig, encryptChannelConfig } from './secret-storage'
-import { ToolGateway } from './tool-gateway'
+import { ToolGateway } from './tools-runtime/tool-gateway'
 import { buildCapabilityRuntimeSnapshot } from './capability-runtime-snapshot'
 import { TaskProjectionRepository } from '../repositories/task-projection-repository'
 import {

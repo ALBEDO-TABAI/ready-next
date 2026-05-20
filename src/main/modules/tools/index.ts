@@ -1,5 +1,5 @@
-import { defaultToolGateway } from '../agent-control/tool-gateway'
-import type { ToolRegistryReader } from '../agent-control/tool-registry'
+import { defaultToolGateway } from '../agent-control/tools-runtime/tool-gateway'
+import type { ToolRegistryReader } from '../agent-control/tools-runtime/tool-registry'
 import type { SkillToolAuthorization } from '../agent-control/skills/skill-tool-authorization'
 import { executeBrowserTool } from './browser-tools'
 import {
@@ -69,10 +69,10 @@ export type {
   ToolKind,
   ToolProjectionHint,
   ToolTimeoutProfile,
-} from '../agent-control/tool-definition'
+} from '../agent-control/tools-runtime/tool-definition'
 export type {
   ToolExecutionOutput,
   ToolInteractionHint,
   ToolResultShape,
-} from '../agent-control/tool-result-types'
+} from '../agent-control/tools-runtime/tool-result-types'
 export type { ToolRegistryReader }

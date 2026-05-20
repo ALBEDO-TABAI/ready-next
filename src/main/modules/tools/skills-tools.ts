@@ -9,7 +9,7 @@ import {
   normalizeToolExecutionOutput,
   type ToolExecutionContextModifier,
   type ToolExecutionOutput,
-} from '../agent-control/tool-result-types'
+} from '../agent-control/tools-runtime/tool-result-types'
 import {
   buildContractFramePatch,
   loadSkillRunContract,

@@ -10,11 +10,11 @@
 import { existsSync, lstatSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 
-import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent-control/tool-result-types'
+import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent-control/tools-runtime/tool-result-types'
 import { markSkillHandoffOutputCompleted } from '../../agent-control/skills/skill-agent-handoff'
 import { ToolDomainError } from '../tool-errors'
 import { logAgentMetric } from '../../agent-control/metrics'
-import { TOOL_ERROR_METRICS } from '../../agent-control/tool-error-metrics'
+import { TOOL_ERROR_METRICS } from '../../agent-control/tools-runtime/tool-error-metrics'
 import {
   PathSandboxError,
   assertNotReservedPath,

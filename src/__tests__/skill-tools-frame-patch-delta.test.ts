@@ -256,8 +256,8 @@ test('Phase 3: applyContextModifier mutates activeFrame.activeArtifactRoots in p
   const {
     applyContextModifier,
     createEmptyActiveFrameContext,
-  } = await import('../main/modules/agent-control/tool-runtime')
-  const { createToolExecutionOutput } = await import('../main/modules/agent-control/tool-result-types')
+  } = await import('../main/modules/agent-control/tools-runtime/tool-runtime')
+  const { createToolExecutionOutput } = await import('../main/modules/agent-control/tools-runtime/tool-result-types')
 
   // Initial runtime context with empty active-frame slot — analogous to
   // the cold path the runtime context builder produces when no frame

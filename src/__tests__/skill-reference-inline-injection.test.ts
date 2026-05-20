@@ -23,7 +23,7 @@ import {
   _resetLastReferenceSkillHintsForTests,
   getLastReferenceSkill,
 } from '../main/modules/agent-control/skills/skill-reference-hints'
-import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-metrics'
+import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tools-runtime/tool-error-metrics'
 
 function makeSkill(managedPath: string | null): any {
   return {

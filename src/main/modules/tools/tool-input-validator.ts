@@ -14,7 +14,7 @@ import type { ZodObject, ZodRawShape } from 'zod'
 import {
   createToolExecutionOutput,
   type ToolExecutionOutput,
-} from '../agent-control/tool-result-types'
+} from '../agent-control/tools-runtime/tool-result-types'
 
 const MAX_REPORTED_ISSUES = 10
 

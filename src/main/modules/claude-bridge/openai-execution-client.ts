@@ -12,7 +12,7 @@ import { parseJsonOrEventStreamResponse, parseJsonResponse } from '../openai-res
 import { buildToolDispatchDecision } from '../agent-control/execution-tool-policy'
 import { getPolicyOpenAITools, buildTextToolBridgeSystemPrompt, collectToolNames, type ToolPolicy } from '../agent-control/execution-tool-config'
 import { logAgentMetric } from '../agent-control/metrics'
-import { TOOL_ERROR_METRICS } from '../agent-control/tool-error-metrics'
+import { TOOL_ERROR_METRICS } from '../agent-control/tools-runtime/tool-error-metrics'
 import { resolveOpenAIProviderRuntime } from '../agent-control/provider-runtime-resolver'
 import type { ToolSnapshot, TurnToolCallParseError } from '../agent-control/run-contracts'
 import type { ExecutionFallbackInfo } from './execution-fallback-policy'

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { __setMetricSinkForTests } from '../main/modules/agent-control/metrics'
-import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-metrics'
+import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tools-runtime/tool-error-metrics'
 import { runSubAgent } from '../main/modules/agent-control/sub-agent/sub-agent-runner'
 import type {
   SubAgent,

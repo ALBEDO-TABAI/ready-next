@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { collectAllowedToolNames } from '../main/modules/agent-control/execution-tool-config'
-import { ToolGateway } from '../main/modules/agent-control/tool-gateway'
-import { resolveToolInputSchemaForExecution } from '../main/modules/agent-control/tool-registry'
+import { ToolGateway } from '../main/modules/agent-control/tools-runtime/tool-gateway'
+import { resolveToolInputSchemaForExecution } from '../main/modules/agent-control/tools-runtime/tool-registry'
 import {
   rememberLastReferenceSkill,
   _resetLastReferenceSkillHintsForTests,

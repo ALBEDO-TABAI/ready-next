@@ -10,7 +10,7 @@ import {
   getToolResourceTag,
   groupParallelSafeToolCalls,
   isParallelSafeTool,
-} from '../main/modules/agent-control/tool-parallelism-policy'
+} from '../main/modules/agent-control/tools-runtime/tool-parallelism-policy'
 
 test('tool parallelism policy classifies tools into coarse resource tags', () => {
   assert.deepEqual(getToolResourceTag('document_list_widgets'), {

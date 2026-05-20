@@ -83,26 +83,26 @@ import {
 } from './message-capability-filter'
 import { assertManualThinkingModeProviderSafe } from './thinking-compatibility'
 import { logAgentMetric } from './metrics'
-import { TOOL_ERROR_METRICS } from './tool-error-metrics'
+import { TOOL_ERROR_METRICS } from './tools-runtime/tool-error-metrics'
 import type { BrowserTaskDecisionMode } from '../../../shared/browser-agent-task'
-import { defaultToolRegistry } from './tool-registry'
-import type { ToolDefinition } from './tool-definition'
+import { defaultToolRegistry } from './tools-runtime/tool-registry'
+import type { ToolDefinition } from './tools-runtime/tool-definition'
 import {
   buildExplicitNoSkillAuthorization,
   buildSelectedSkillToolAuthorization,
   type SkillToolAuthorization,
 } from './skills/skill-tool-authorization'
 import { resolveCapabilityResolution } from './capability-resolver'
-import { filterToolsByVisionCapability } from './tool-gateway'
+import { filterToolsByVisionCapability } from './tools-runtime/tool-gateway'
 import {
   buildToolRuntimeContext,
   toToolExecutorContext,
-} from './tool-runtime-context-builder'
+} from './tools-runtime/tool-runtime-context-builder'
 import {
   applyContextModifier,
   createEmptyActiveFrameContext,
   type ToolRuntimeActiveFrameContext,
-} from './tool-runtime'
+} from './tools-runtime/tool-runtime'
 import { snapshotTurnFeatureFlags } from './turn-feature-flags'
 import { buildAgentSpawnContextFromAIConfig } from '../skills-runtime/agent-context-source'
 import { executeToolCall as executeReadyToolCall } from '../tools'
@@ -111,7 +111,7 @@ import {
   createToolExecutionOutput,
   normalizeToolExecutionOutput,
   type ToolExecutionOutput,
-} from './tool-result-types'
+} from './tools-runtime/tool-result-types'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 import { findDocumentVisualSyntaxIssue } from '../../../shared/document-visual-syntax'
 import { createRotatingLogger } from '../../utils/rotating-logger'

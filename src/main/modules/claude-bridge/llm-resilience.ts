@@ -8,7 +8,7 @@
  */
 
 import { logAgentMetric } from '../agent-control/metrics'
-import { TOOL_ERROR_METRICS } from '../agent-control/tool-error-metrics'
+import { TOOL_ERROR_METRICS } from '../agent-control/tools-runtime/tool-error-metrics'
 import { ToolDomainError } from '../tools/tool-errors'
 
 export const RETRY_STATUS_CODES = [408, 409, 425, 429, 500, 502, 503, 504] as const

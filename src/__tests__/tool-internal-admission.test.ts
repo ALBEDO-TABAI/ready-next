@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { ToolGateway } from '../main/modules/agent-control/tool-gateway'
+import { ToolGateway } from '../main/modules/agent-control/tools-runtime/tool-gateway'
 import {
   executeSkillActionViaToolGateway,
-} from '../main/modules/agent-control/tool-registry'
+} from '../main/modules/agent-control/tools-runtime/tool-registry'
 import {
   isChildInternalStrictAdmissionEnabled,
-} from '../main/modules/agent-control/tool-definition'
+} from '../main/modules/agent-control/tools-runtime/tool-definition'
 import {
   buildExplicitNoSkillAuthorization,
   buildSelectedSkillToolAuthorization,

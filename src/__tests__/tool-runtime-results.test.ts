@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { ToolRuntime } from '../main/modules/agent-control/tool-runtime'
+import { ToolRuntime } from '../main/modules/agent-control/tools-runtime/tool-runtime'
 import {
   buildExplicitNoSkillAuthorization,
   buildSelectedSkillToolAuthorization,
 } from '../main/modules/agent-control/skills/skill-tool-authorization'
-import { createToolExecutionOutput } from '../main/modules/agent-control/tool-result-types'
+import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 
 test('ToolRuntime wraps legacy string results into structured outputs while preserving order', async () => {
   const runtime = new ToolRuntime({ log: () => {} })
