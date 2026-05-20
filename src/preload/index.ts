@@ -247,6 +247,15 @@ const agentAPI = {
     ipcRenderer.on('agent:scopeRunEvent', handler)
     return () => { ipcRenderer.removeListener('agent:scopeRunEvent', handler) }
   },
+  // Stage U PR U2.1 — projection sync failure diagnostic event.
+  // Fires when the runtime's fire-and-forget syncTaskProjection() rejects,
+  // so renderer diagnose UI can show the failure instead of pretending
+  // sync went through.
+  onProjectionSyncFailed: (callback: (data: { scopeId: string; taskId: string | null; reason: string; timestamp: string }) => void) => {
+    const handler = (_: unknown, data: unknown) => callback(data as { scopeId: string; taskId: string | null; reason: string; timestamp: string })
+    ipcRenderer.on('agent:projectionSyncFailed', handler)
+    return () => { ipcRenderer.removeListener('agent:projectionSyncFailed', handler) }
+  },
   // Phase 5.3 — subscribe to reference-skill hint state changes pushed by
   // main. Renderer uses this to refresh the "上下文已启用" badge immediately
   // instead of relying on next scope-run tick.

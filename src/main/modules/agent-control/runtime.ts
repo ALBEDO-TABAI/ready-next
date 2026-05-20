@@ -2449,8 +2449,31 @@ export class AgentControlRuntime extends EventEmitter {
   recordScopeRunEvent(payload: ScopeRunEventPayload, projectionTruth?: ProjectionTruthSnapshot | null): ScopeRunSummary | null {
     const summary = this.recordRunProjectionEvent(payload, projectionTruth)
     if (summary) {
+      // Stage U PR U2.1 — projection sync is still fire-and-forget (the
+      // ScopeRunEvent acknowledgement path must not block on disk I/O),
+      // but failures now surface through a metric + an IPC event so the
+      // renderer can show a diagnostic instead of pretending sync went
+      // through. See plan §3 U2.1 / audit §3.3 fire-and-forget remediation.
       void syncTaskProjection(this.taskProjectionStore, summary, payload, projectionTruth).catch((error) => {
+        const reason = error instanceof Error ? error.message : String(error)
+        const failurePayload = {
+          scopeId: summary.scopeId,
+          taskId: payload.taskId || summary.taskId || null,
+          reason,
+          timestamp: new Date().toISOString(),
+        }
         console.error('[AgentControlRuntime] Failed to sync task projection:', error)
+        logAgentMetric('projection.sync_failed', failurePayload)
+        // Emit on the runtime EventEmitter so claude-bridge/ipc-handler.ts
+        // can forward it to the renderer alongside scopeRunEvent. The
+        // emit is wrapped because we are already inside a fire-and-forget
+        // catch — re-throwing would surface as unhandledRejection.
+        try {
+          this.emit('projectionSyncFailed', failurePayload)
+        } catch (emitErr) {
+          // silent-catch: emit failure is purely an observability degradation; the runtime must keep running.
+          console.error('[AgentControlRuntime] projectionSyncFailed emit failed:', emitErr)
+        }
       })
     }
     return summary

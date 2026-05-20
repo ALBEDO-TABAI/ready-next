@@ -986,6 +986,13 @@ interface ElectronAgentAPI {
   }) => Promise<IPCResponse<{ acknowledged: boolean }>>
   onConversationEvent: (callback: (data: ConversationEventData) => void) => () => void
   onScopeRunEvent: (callback: (data: ScopeRunEventData) => void) => () => void
+  // Stage U PR U2.1 — projection sync failure diagnostic event.
+  onProjectionSyncFailed: (callback: (data: {
+    scopeId: string
+    taskId: string | null
+    reason: string
+    timestamp: string
+  }) => void) => () => void
   // Phase 5.3 — push-based reference-skill hint state changes. Renderer uses
   // this to refresh the "上下文已启用" badge immediately on arm/clear/sweep.
   onReferenceSkillHintChanged: (callback: (data: { scopeId: string; change: 'armed' | 'cleared' }) => void) => () => void

@@ -1717,6 +1717,15 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     }
   })
 
+  // Stage U PR U2.1 — surface projection sync failures so the renderer
+  // diagnose UI can show that a fire-and-forget sync failed instead of
+  // silently displaying stale ScopeRunSummary state.
+  runtime.on('projectionSyncFailed', (data) => {
+    if (!mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('agent:projectionSyncFailed', data)
+    }
+  })
+
   // Stage U PR U1.3 — legacy AgentManager event forwards removed.
   // The pre-SDK-runtime EventEmitter forwards for output/status/error
   // channels are gone. The renderer-facing agent:stream / agent:status /
