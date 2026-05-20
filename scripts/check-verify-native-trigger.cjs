@@ -57,10 +57,19 @@ function fileHits(rel) {
 
 function majorOf(spec) { const m = spec ? String(spec).match(/(\d+)\./) : null; return m ? m[1] : null }
 
-function pkgHits(cwd, files) {
+function pkgHits(cwd, files, diffSource, env) {
   if (!files.includes('package.json')) return false
   let head; try { head = JSON.parse(fs.readFileSync(path.join(cwd, 'package.json'), 'utf8')) } catch { return true }
-  const raw = runGit(['show', 'HEAD~1:package.json'], cwd)
+  // Stage U mid-stage codex review — use the same diff base as the
+  // filename diff so multi-commit PRs don't miss a native-dep change
+  // introduced in an earlier commit on the branch.
+  let baseRef = 'HEAD~1:package.json'
+  if (diffSource === 'github-actions' && env.GITHUB_BASE_REF) {
+    baseRef = `origin/${env.GITHUB_BASE_REF}:package.json`
+  } else if (diffSource === 'origin/main') {
+    baseRef = 'origin/main:package.json'
+  }
+  const raw = runGit(['show', baseRef], cwd)
   if (!raw) return true
   let base; try { base = JSON.parse(raw) } catch { return true }
   for (const key of TRIGGER_PKG_KEYS) {
@@ -73,10 +82,10 @@ function pkgHits(cwd, files) {
   return false
 }
 
-function computeTriggered(cwd, files) {
+function computeTriggered(cwd, files, diffSource, env) {
   const hits = files.filter(fileHits)
   if (hits.length) return { triggered: true, reasons: hits }
-  if (pkgHits(cwd, files)) return { triggered: true, reasons: ['package.json (better-sqlite3/electron/electron-builder)'] }
+  if (pkgHits(cwd, files, diffSource, env)) return { triggered: true, reasons: ['package.json (better-sqlite3/electron/electron-builder)'] }
   return { triggered: false, reasons: [] }
 }
 
@@ -93,7 +102,7 @@ function findArtifact(cwd, now) {
 
 function checkVerifyNativeTrigger({ cwd = REPO, env = process.env, now = Date.now(), filesOverride = null } = {}) {
   const diff = filesOverride ? { source: 'override', files: filesOverride } : diffNames(cwd, env)
-  const { triggered, reasons } = computeTriggered(cwd, diff.files)
+  const { triggered, reasons } = computeTriggered(cwd, diff.files, diff.source, env)
   if (!triggered) return { ok: true, triggered: false, diffSource: diff.source, reasons: [], notes: ['diff does not touch verify:native trigger surface'] }
   const isCI = String(env.CI ?? '').toLowerCase() === 'true' || env.CI === '1'
   if (!isCI) return { ok: true, triggered: true, diffSource: diff.source, reasons, notes: ['non-CI environment; enforcement deferred to CI'] }

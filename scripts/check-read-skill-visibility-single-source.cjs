@@ -11,7 +11,9 @@
  * literal is the helper itself (`read-skill-visibility.ts`). Any new
  * reintroduction in a sibling source file is rejected.
  *
- * Co-occurrence window: 5 lines (a single decision block).
+ * Co-occurrence window: 12 lines (covers a full action-construction
+ * object literal — Stage U mid-stage codex review found a 7-line span
+ * in custom-skill-registry.ts that the prior 5-line window missed).
  *
  * Whitelist: helper file, this gate, and any `SKILL.md` (manifest docs).
  */
@@ -24,7 +26,7 @@ const path = require('node:path')
 const REPO = path.resolve(__dirname, '..')
 const SCAN_ROOT = 'src/main/modules/skills-runtime'
 const SCAN_EXT = new Set(['.ts', '.tsx', '.cts', '.mts', '.js', '.cjs', '.mjs'])
-const WINDOW = 5
+const WINDOW = 12
 
 const FILE_ALLOWLIST = [
   /^src\/main\/modules\/skills-runtime\/read-skill-visibility\.ts$/,

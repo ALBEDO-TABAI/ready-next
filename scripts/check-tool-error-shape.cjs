@@ -55,12 +55,14 @@ function* walk(dir) {
 }
 
 /**
- * Detect the legacy nested shape on the same data object. We look for
- * `errorKind: 'host_unavailable'` followed within 200 chars (typical
- * object literal span) by `reason: 'tool_not_registered'`, ignoring
- * surrounding whitespace and intervening fields.
+ * Detect the legacy nested shape on the same data object. The two keys
+ * may appear in either order — codex review (Stage U mid-stage) flagged
+ * that a one-directional regex lets `{ reason: 'tool_not_registered',
+ * errorKind: 'host_unavailable' }` escape. We check both orderings
+ * within 200 chars (typical object literal span).
  */
-const LEGACY_NESTED_SHAPE = /errorKind:\s*['"]host_unavailable['"][\s\S]{0,200}?reason:\s*['"]tool_not_registered['"]/
+const LEGACY_NESTED_SHAPE_FORWARD = /errorKind:\s*['"]host_unavailable['"][\s\S]{0,200}?reason:\s*['"]tool_not_registered['"]/
+const LEGACY_NESTED_SHAPE_REVERSE = /reason:\s*['"]tool_not_registered['"][\s\S]{0,200}?errorKind:\s*['"]host_unavailable['"]/
 
 /**
  * Strip line comments and block comments before scanning so the gate
@@ -82,9 +84,14 @@ function checkToolErrorShape() {
       if (isAllowed(rel)) continue
       const raw = fs.readFileSync(full, 'utf8')
       const source = stripComments(raw)
-      if (LEGACY_NESTED_SHAPE.test(source)) {
+      const matched = LEGACY_NESTED_SHAPE_FORWARD.test(source)
+        ? LEGACY_NESTED_SHAPE_FORWARD
+        : LEGACY_NESTED_SHAPE_REVERSE.test(source)
+          ? LEGACY_NESTED_SHAPE_REVERSE
+          : null
+      if (matched) {
         // Re-locate the offending region in the original source for nicer reporting.
-        const match = raw.match(LEGACY_NESTED_SHAPE)
+        const match = raw.match(matched)
         const line = match ? raw.slice(0, match.index || 0).split('\n').length : 0
         violations.push({
           file: rel,

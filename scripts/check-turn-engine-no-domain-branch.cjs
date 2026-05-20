@@ -45,6 +45,29 @@ const FORBIDDEN_LITERALS = [
   '当前任务是文档',
   'pet_show_sticky_note',
   'browser_search、browser_navigate',
+  // Stage U mid-stage codex review — also fence standalone product tool
+  // names and DomainAdapter id comparisons. These would have let a
+  // future inline branch reintroduce a product reminder under a
+  // different formatting than the original Chinese sentences above.
+  'browser_navigate',
+  'browser_read_page',
+  'browser_search',
+  'pet_set_mood',
+  'rss_analyze_item',
+  'document_open_tab',
+]
+
+// Pattern-based forbidden constructs (not literal substrings). These
+// catch the "compare adapter id to a product string" pattern any
+// future PR might be tempted to use to re-introduce product branching
+// without tripping the literal list above.
+const FORBIDDEN_PATTERNS = [
+  // adapter.id === '...'
+  /\bsourceAdapterId\s*(===|==)\s*['"]/,
+  /\badapter(?:Id)?\s*(===|==)\s*['"](?:pet|browser|rss|calendar|document|feishu)['"]/,
+  /\bdomain(?:Id)?\s*(===|==)\s*['"](?:pet|browser|rss|calendar|document|feishu)['"]/,
+  // switch on adapter-typed string
+  /\bcase\s+['"](?:pet|browser|rss|calendar|document|feishu)['"]\s*:/,
 ]
 
 function stripComments(source) {
@@ -65,12 +88,10 @@ function checkTurnEngineNoDomainBranch() {
   const source = stripComments(raw)
   const lines = source.split('\n')
   const violations = []
+  const rawLines = raw.split('\n')
   for (let i = 0; i < lines.length; i += 1) {
     for (const lit of FORBIDDEN_LITERALS) {
       if (lines[i].includes(lit)) {
-        // Locate the line in the original (raw) source for nicer reporting.
-        // We re-scan raw to find the first line containing the literal.
-        const rawLines = raw.split('\n')
         let rawLine = i + 1
         for (let j = 0; j < rawLines.length; j += 1) {
           if (rawLines[j].includes(lit)) { rawLine = j + 1; break }
@@ -79,6 +100,20 @@ function checkTurnEngineNoDomainBranch() {
           file: TARGET,
           line: rawLine,
           reason: `forbidden product-domain literal '${lit}'`,
+          code: rawLines[rawLine - 1]?.trim().slice(0, 160) || '(out of range)',
+        })
+      }
+    }
+    for (const pattern of FORBIDDEN_PATTERNS) {
+      if (pattern.test(lines[i])) {
+        let rawLine = i + 1
+        for (let j = 0; j < rawLines.length; j += 1) {
+          if (pattern.test(rawLines[j])) { rawLine = j + 1; break }
+        }
+        violations.push({
+          file: TARGET,
+          line: rawLine,
+          reason: `forbidden product-domain pattern ${pattern.toString()}`,
           code: rawLines[rawLine - 1]?.trim().slice(0, 160) || '(out of range)',
         })
       }

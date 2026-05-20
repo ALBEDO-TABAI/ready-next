@@ -258,6 +258,10 @@ function normalizeActions(raw: unknown, runtime: SkillRuntimeKind, documentEntry
     // The orchestrator inlines SKILL.md directly via `tryInlineReferenceSkillDoc`,
     // so the read_skill tool only needs to exist for the legacy tool-call
     // fallback, which runs in-process and does not consult visibility.
+    // Stage U mid-stage codex review — `visibility` is intentionally NOT
+    // set here. `applyReadSkillVisibility` (via normalizeReadSkillVisibility)
+    // is the single source of truth for read_skill visibility per CLAUDE.md
+    // §3. Hand-setting it here lets a future PR drift the rule.
     actions.push(applyReadSkillVisibility({
       name: 'read_skill',
       description: '读取并应用该技能的说明与方法完成当前任务',
@@ -265,7 +269,6 @@ function normalizeActions(raw: unknown, runtime: SkillRuntimeKind, documentEntry
       entry: documentEntry,
       params: [],
       inputMode: 'flags',
-      visibility: 'internal',
     }))
   }
   return actions

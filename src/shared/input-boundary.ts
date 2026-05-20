@@ -21,10 +21,24 @@
  *   - `okResult` / `failResult` — explicit constructors for hand-written
  *     boundary code paths.
  *
- * The runtime CI gate `scripts/check-input-boundary-coverage.cjs` enforces
- * that renderer paths in src/renderer/{components/layout,modules/browser,
- * modules/agent,components/calendar}/ use this helper OR carry an explicit
- * `// silent-catch:` annotation explaining why the swallow is harmless.
+ * Stage U PR U3.1 — current rollout: all 14 known renderer silent
+ * catches were evaluated and turned out to be legitimate defensive
+ * fallbacks (URL parse, JSON parse, redundant switchTab, already-
+ * surfaced-via-callback) and are now annotated with `// silent-catch:`
+ * reasons. The `scripts/check-silent-catch.cjs` gate (wired into
+ * verify:e by U3.3) enforces that ALL future renderer/main silent
+ * catches either gain such an annotation or surface a metric/log/throw.
+ *
+ * This helper is therefore reserved for the next renderer input edge
+ * that genuinely has a user-visible failure path (e.g. a future remote
+ * attachment dialog or a multi-step import wizard). When such an edge
+ * lands it should use `asBoundary` / `asAsyncBoundary` instead of
+ * inventing its own `{ ok, error }` shape.
+ *
+ * No standalone `check-input-boundary-coverage.cjs` gate exists yet —
+ * the broader `check-silent-catch.cjs` already covers the actual
+ * concern (no unobserved catches). A dedicated coverage gate is
+ * deferred until at least one production callsite consumes this helper.
  */
 
 export type InputBoundaryReason = string
