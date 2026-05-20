@@ -379,18 +379,18 @@ export interface TaskProjectionRecord {
 }
 
 /**
- * Stage O — payload of the renderer-facing `agent:taskProjectionsChanged`
- * push event. The store wrapper (`TaskProjectionRepository`) emits this on
- * every successful create/update/delete; the IPC bridge forwards it
- * verbatim to the renderer. The renderer uses only `scopeId` to decide
- * whether to refetch projections; `changedTaskIds` and `reason` are
- * observability fields kept for future fine-grained patching.
+ * Stage U PR U4.1b — `TaskProjectionChangeEvent` (and its reason union)
+ * is now sourced from the canonical wire-contract module at
+ * `src/shared/ipc-contracts/task-projection.ts`. Re-exported here so
+ * existing main-side imports continue to work without change.
+ *
+ * Stage O original definition was the renderer-facing
+ * `agent:taskProjectionsChanged` push event payload; the wire module
+ * preserves that contract verbatim.
  */
-export interface TaskProjectionChangeEvent {
-  scopeId: string
-  changedTaskIds: string[]
-  reason: 'create' | 'update' | 'delete' | 'supersede'
-}
+import type { TaskProjectionChangeEvent as TaskProjectionChangeEventWire, TaskProjectionChangeReason as TaskProjectionChangeReasonWire } from '../../../shared/ipc-contracts/task-projection'
+export type TaskProjectionChangeEvent = TaskProjectionChangeEventWire
+export type TaskProjectionChangeReason = TaskProjectionChangeReasonWire
 
 /**
  * Stage O — write options. `silent: true` suppresses the change event;
@@ -401,7 +401,7 @@ export interface TaskProjectionChangeEvent {
  */
 export interface TaskProjectionWriteOptions {
   silent?: boolean
-  reasonHint?: TaskProjectionChangeEvent['reason']
+  reasonHint?: TaskProjectionChangeReason
 }
 
 export interface TaskProjectionStore {

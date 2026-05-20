@@ -31,4 +31,7 @@
  * Re-exports below land in U4.1b–c as the types physically move here.
  */
 
-export {}
+export type {
+  TaskProjectionChangeEvent,
+  TaskProjectionChangeReason,
+} from './task-projection'
