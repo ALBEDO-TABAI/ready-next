@@ -156,6 +156,7 @@ function urlPathExt(url: string): string {
     if (dotIndex < 0) return ''
     return pathname.slice(dotIndex)
   } catch {
+    // silent-catch: URL parse fallback for file-extension hint; degrades to substring scan. No user-facing impact.
     const lower = url.toLowerCase().split(/[?#]/)[0]
     const dotIndex = lower.lastIndexOf('.')
     return dotIndex >= 0 ? lower.slice(dotIndex) : ''
@@ -167,6 +168,7 @@ function suggestedFilenameFromUrl(url: string): string | undefined {
     const parsed = new URL(url)
     return decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() || '') || undefined
   } catch {
+    // silent-catch: URL parse fallback for suggested filename; returning undefined lets downstream synthesize one. No user-facing impact.
     return undefined
   }
 }
@@ -427,6 +429,7 @@ export function isLikelyVideoDropPayload(payload: FileTreeExternalDropPayload): 
       || VIDEO_DROP_EXTS.some((ext) => parsed.pathname.endsWith(ext))
     )
   } catch {
+    // silent-catch: URL parse fallback for video-drop hint detection; ext-only check is the legitimate fallback for raw strings.
     return VIDEO_DROP_EXTS.some((ext) => lower.endsWith(ext))
   }
 }
@@ -683,6 +686,7 @@ export async function dispatchFileTreeExternalDropAction({
   try {
     urlHost = new URL(baseParams.link).host || baseParams.link
   } catch {
+    // silent-catch: URL parse fallback for analysis placeholder host display; raw link is shown if parse fails. No user-facing impact.
     urlHost = baseParams.link
   }
   onAnalysisPlaceholderStart?.({
@@ -733,6 +737,7 @@ export async function dispatchFileTreeExternalDropAction({
       })
     }
   } catch (err) {
+    // silent-catch: failure is surfaced to renderer via onAnalysisPlaceholderUpdate(status: 'failed') below — the placeholder UI shows the error message directly to the user.
     onAnalysisPlaceholderUpdate?.(clientTaskId, {
       status: 'failed',
       progress: 0,

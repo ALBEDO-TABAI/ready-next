@@ -177,7 +177,7 @@ async function createReadyContextAttachment(reference: ReadyContextReference): P
         }
       }
     } catch {
-      // The fallback tab metadata is still useful as a reference.
+      // silent-catch: tab context lookup may legitimately fail (tab closed mid-attachment). The fallback tab metadata is still useful as a reference and no user-facing impact.
     }
     const path = snapshot.url || (reference.tabId ? `browser-tab://${reference.tabId}` : `browser-tab://${Date.now()}`)
     return {

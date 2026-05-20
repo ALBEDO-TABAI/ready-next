@@ -56,6 +56,7 @@ export function isLocalHtmlBrowserUrl(url: string): boolean {
     const path = decodeURIComponent(`${parsed.host || ''}${parsed.pathname || ''}`)
     return /\.(?:html|htm)$/i.test(path)
   } catch {
+    // silent-catch: URL parse fallback for HTML-extension detection; non-URL inputs return false (correct behavior — they are not local HTML).
     return false
   }
 }

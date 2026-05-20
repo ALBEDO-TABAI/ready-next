@@ -61,6 +61,7 @@ export default function SXTimeGridEvent({ calendarEvent }: SXTimeGridEventProps)
     try {
       return platformStr ? JSON.parse(platformStr) as string[] : []
     } catch {
+      // silent-catch: malformed platform JSON on a calendar event row degrades to "no platforms" badge. The event still renders; no user-facing impact beyond a missing icon.
       return []
     }
   }, [platformStr])

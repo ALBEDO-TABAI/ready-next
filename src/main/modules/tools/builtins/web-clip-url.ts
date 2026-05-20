@@ -124,6 +124,7 @@ export async function executeWebClipUrl(
     finalUrl = fetched.finalUrl
     inlineTitle = fetched.titleFromHead
   } catch (err) {
+    // silent-catch: fetch failure is captured into rawFetchError and surfaced downstream when both fetch attempts (this + jina) fail — the tool returns a structured error to the model in that branch. Mid-flight html='' is correct so the jina fallback gets a clean slate.
     rawFetchError = err
     html = ''
     finalUrl = args.url

@@ -24,6 +24,7 @@ function decodePath(value: string): string {
   try {
     return decodeURIComponent(value)
   } catch {
+    // silent-catch: decodeURIComponent fallback for malformed percent-encoded paths; raw value remains usable for downstream consumers.
     return value
   }
 }
@@ -45,6 +46,7 @@ function toComparableLocalPath(value: string): string | null {
     }
     return decodePath(path).replace(/\\/g, '/')
   } catch {
+    // silent-catch: URL parse fallback for local file path normalization; raw trimmed value with backslash normalization remains a valid local-path candidate.
     return trimmed.replace(/\\/g, '/')
   }
 }
@@ -138,7 +140,7 @@ export async function openLocalHtmlFileInBrowser(path: string, title?: string): 
   try {
     await browser.switchTab?.(result.tabId)
   } catch {
-    // createTab already made the tab active in the main process.
+    // silent-catch: createTab already made the tab active in the main process; a switchTab failure here is a redundant no-op rather than a real loss.
   }
 
   upsertBrowserTab({

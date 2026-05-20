@@ -1489,6 +1489,7 @@ export default function FileTree({
     try {
       urlHost = new URL(payload.url).host || payload.url
     } catch {
+      // silent-catch: URL parse fallback for clip-task placeholder host hint; raw URL is shown if parse fails. No user-facing impact.
       urlHost = payload.url
     }
     setPendingClips((prev) => [
@@ -1546,6 +1547,7 @@ export default function FileTree({
         flashCompletedPath(savedPath)
         schedulePlaceholderRemoval(taskId, 1800)
       } catch (error) {
+        // silent-catch: failure is surfaced to renderer via fail() callback which drives the placeholder's visible error state. Re-throw would re-fire the IIFE.
         fail(error instanceof Error ? error.message : String(error))
       }
     })()
