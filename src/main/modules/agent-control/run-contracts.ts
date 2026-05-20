@@ -21,6 +21,20 @@
 
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+// Stage U PR U4.1c — wire-canonical task-projection types live in
+// src/shared/ipc-contracts/task-projection.ts. Main re-exports them
+// below so the ~56 in-tree callsites continue to compile unchanged.
+// Strict ScopeRun* unions on TaskProjectionRecord are still allowed:
+// callsites that need the narrow type cast via `as ScopeRunWaitingFor`
+// at the read site.
+// Stage U PR U4.1c (deferred) — full sub-type migration would require
+// widespread call-site casts (ScopeRunTaskStep['status'] vs wire
+// TaskStepStatus differs; main-internal TaskStep extends with fields
+// the wire shape doesn't carry). Re-exporting wire types here would
+// regress active-skill-context / skill-child-runner / task-step-runtime
+// typing. The wire module continues to publish a permissive superset
+// for renderer serialization (only TaskProjectionChangeEvent moved in
+// U4.1b is currently wire-canonical).
 import type {
   ConversationScope,
   ScopeRunEventPayload,
@@ -122,6 +136,13 @@ export interface TurnTranscriptEvent {
   projectionPatch?: Record<string, unknown> | null
 }
 
+// Stage U PR U4.1c (deferred) — these sub-types stay inline on the main
+// side because each one carries sub-tle status-union differences with
+// ScopeRun* sibling types that would require widespread call-site casts
+// to bridge. A follow-up PR can co-locate them after a dedicated audit
+// of every TaskStep status touchpoint. The wire module
+// (src/shared/ipc-contracts/task-projection.ts) carries a permissive
+// superset for renderer-facing serialization only.
 import type { TaskType as SharedTaskType } from '../../../shared/task-types'
 export type TaskType = SharedTaskType
 
@@ -321,6 +342,13 @@ export interface TaskExecutionRoute {
   } | null
 }
 
+// Stage U PR U4.1c — TaskProjectionRecord + UnifiedTaskState retain
+// strict ScopeRun* sub-typing on the main side (they're not yet
+// candidates for wire re-export because the cast surface would be too
+// wide). Wire-side simplified TaskProjectionRecord lives at
+// src/shared/ipc-contracts/task-projection.ts for renderer consumers;
+// main side keeps the strict inline definition below until a follow-up
+// PR co-locates the ScopeRun* family.
 export interface UnifiedTaskState {
   taskId: string
   runId?: string | null
@@ -362,16 +390,9 @@ export interface TaskProjectionRecord {
   progress?: ScopeRunSkillProgress | null
   recentArtifacts?: ScopeRunEventPayload['artifactRefs']
   /**
-   * Stage Q (Stage 11) — derived-at-read truth of "is this projection
-   * actually resumable?" Computed by `runtime.listTaskProjections()` /
-   * `runtime.getTaskProjection()` from `continuationRef`, terminal status,
-   * and resumable actions before returning to renderer. NOT persisted; main
-   * re-derives on each fetch so disk-state changes (deleted output dir, etc)
-   * are reflected.
-   *
-   * Renderer must consume this field directly and NOT recompute from
-   * `resumableActions` / `taskRunId` / `interactionState` in isolation
-   * (Stage Q audit §C-9 / plan §3.4 / contract C7).
+   * Stage Q (Stage 11) — derived-at-read truth from main side. Renderer
+   * must consume directly and NOT recompute from `resumableActions` /
+   * `taskRunId` / `interactionState` (Stage Q audit §C-9 / contract C7).
    */
   canResume?: boolean
   createdAt: string

@@ -1,46 +1,193 @@
 /**
- * Stage U PR U4.1b — wire contract for task-projection IPC payloads.
+ * Stage U PR U4.1b–c — wire contracts for task-projection IPC payloads.
  *
  * Canonical home for renderer-facing task-projection types. Renderer
- * consumes these via:
- *   - `electronAPI.agent.listTaskProjections(scopeId)` returning an
- *     array of records (Stage U U4.3 will derive the renderer type from
- *     this module instead of the hand-written copy in electron.d.ts)
- *   - `agent:taskProjectionsChanged` push event payload, defined here
- *     and consumed by both preload (forward) and renderer
- *     (`useAgent.ts` refresh trigger)
+ * consumes these via `electronAPI.agent.listTaskProjections` /
+ * `getTaskProjection` and the `agent:taskProjectionsChanged` push event.
  *
- * Why "wire" matters: main is allowed to use richer internal types
- * (TaskProjectionRecord-internal with stricter sub-type unions), but
- * the serialized form crossing the preload boundary must match this
- * module's shape exactly. Hand-duplicating the shape in
- * electron.d.ts (today) and in main (run-contracts.ts) lets the two
- * drift; U4.1b–U4.3 retire that hazard one type at a time.
- *
- * Migration sequence:
- *   - U4.1b (this PR) — TaskProjectionChangeEvent only (zero sub-type
- *     dependencies, single ipc-handler import, smallest blast radius)
- *   - U4.1c — TaskProjectionRecord + minimum sub-types (TaskStep,
- *     TaskBudget, …) inline-defined as wire-stable string unions
- *   - U4.3 — renderer types switch from hand-written `*Data` aliases
- *     to direct imports from this module
+ * Sub-type policy (U4.1c):
+ *   - TaskType / TaskInteractionState / TaskStep / TaskStepChildTask /
+ *     TaskBudget / StepBudgetState / BudgetWarningLevel / RecoveryRecord /
+ *     UnifiedTaskState — fully defined here (wire is canonical).
+ *   - ScopeRun* sub-fields on TaskProjectionRecord (waitingFor /
+ *     resumableActions / continuationRef / progress / recentArtifacts) —
+ *     declared with permissive wire types so this module stays free of
+ *     any `src/main/` import. Main-side callsites that need strict types
+ *     narrow them via `as ScopeRun*`. Follow-up: collapse the ScopeRun
+ *     family into a sibling wire module if the cast surface grows.
  */
 
+import type { TaskType as SharedTaskType } from '../task-types'
+
+// ---------- task-type aliases ----------
+
+export type TaskType = SharedTaskType
+
+export type TaskInteractionState =
+  | 'running'
+  | 'awaiting_clarification'
+  | 'awaiting_confirmation'
+  | 'human_takeover'
+  | 'suspended'
+  | 'resuming'
+
+export type TaskProjectionStatus =
+  | 'queued'
+  | 'running'
+  | 'blocked'
+  | 'done'
+  | 'failed'
+  | 'cancelled'
+
+// ---------- step + budget sub-shapes ----------
+
 /**
- * Reason channel for the `agent:taskProjectionsChanged` push event.
- * Renderer only needs to know "something changed"; reason is kept for
- * observability and future fine-grained patch optimization.
+ * Combined union of every TaskStep status the renderer can observe.
+ * Main internal types narrow this further (ScopeRunTaskStepStatus has
+ * 'running'/'blocked'/'error'; TaskStepStatus has 'in_progress'/
+ * 'skipped'/'cancelled') — wire accepts the full superset so neither
+ * branch fails serialization.
  */
+export type TaskStepStatus =
+  | 'pending'
+  | 'in_progress'
+  | 'running'
+  | 'done'
+  | 'blocked'
+  | 'error'
+  | 'failed'
+  | 'skipped'
+  | 'cancelled'
+
+export interface TaskStepChildTask {
+  taskId: string
+  taskType: TaskType
+  status: TaskProjectionStatus
+  summary?: string | null
+  artifactSummary?: string | null
+  updatedAt?: string | null
+}
+
+export interface TaskStep {
+  id: string
+  description: string
+  title?: string
+  status?: TaskStepStatus
+  detail?: string | null
+  updatedAt?: string
+  toolHints?: string[]
+  budget?: number
+  dependsOn?: string[]
+  childTasks?: TaskStepChildTask[]
+}
+
+export interface StepBudgetState {
+  stepId?: string | null
+  maxIterations: number
+  remainingIterations: number
+}
+
+export interface TaskBudget {
+  taskType: TaskType
+  maxIterations: number
+  maxToolCalls: number
+  maxParallelToolGroups: number
+  reservedToolCalls?: number
+  iterationsUsed?: number
+  toolCallsUsed?: number
+  parallelToolGroupsUsed?: number
+  frozen?: boolean
+  bootstrapBudget?: boolean
+  stepBudget?: {
+    stepId?: string | null
+    maxIterations: number
+    remainingIterations?: number
+  } | null
+}
+
+export type BudgetWarningLevel = 'none' | 'warning' | 'converge' | 'exhausted'
+
+// ---------- recovery + unified state ----------
+
+export type RecoveryRecordKind =
+  | 'rate_limit'
+  | 'context_overflow'
+  | 'timeout_model'
+  | 'timeout_tool'
+  | 'auth'
+  | 'transient'
+  | 'host_unavailable'
+
+export type RecoveryRecordSource = 'model_request' | 'tool_execution' | 'runtime'
+
+export interface RecoveryRecord {
+  kind: RecoveryRecordKind
+  source: RecoveryRecordSource
+  message: string
+  attempt: number
+  recovered: boolean
+  timestamp: string
+}
+
+// ---------- task projection record (wire canonical) ----------
+
+export interface TaskProjectionRecord {
+  taskId: string
+  scopeId: string
+  runId: string
+  parentTaskId?: string | null
+  parentStepId?: string | null
+  taskType: TaskType
+  module: string
+  taskTitle?: string | null
+  taskSummary?: string | null
+  status: TaskProjectionStatus
+  interactionState: TaskInteractionState
+  /** Main owns the stricter ScopeRunWaitingFor union — wire keeps a
+   *  permissive placeholder so the wire module has no `src/main/` deps. */
+  waitingFor?: unknown
+  steps: TaskStep[]
+  currentStepId?: string | null
+  budget?: TaskBudget | null
+  budgetUsagePercent?: number | null
+  budgetWarningLevel?: BudgetWarningLevel | null
+  recoveryHistory?: RecoveryRecord[]
+  degradationReason?: string | null
+  blockedReason?: string | null
+  resumableActions?: unknown[]
+  continuationRef?: unknown
+  progress?: unknown
+  recentArtifacts?: unknown[]
+  /**
+   * Stage Q (Stage 11) — derived-at-read truth from main side. Renderer
+   * must consume directly and NOT recompute from resumableActions /
+   * taskRunId / interactionState (Stage Q audit §C-9 / contract C7).
+   * Defensive default: when undefined or false, treat as not resumable.
+   */
+  canResume?: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+export interface UnifiedTaskState {
+  taskId: string
+  runId?: string | null
+  scopeId?: string | null
+  taskType: TaskType
+  status: TaskProjectionStatus
+  interactionState: TaskInteractionState
+  waitingFor: unknown
+  steps: TaskStep[]
+  currentStepId?: string | null
+  budget?: TaskBudget | null
+  budgetUsagePercent?: number | null
+  recoveryHistory?: RecoveryRecord[]
+}
+
+// ---------- change event (U4.1b) ----------
+
 export type TaskProjectionChangeReason = 'create' | 'update' | 'delete' | 'supersede'
 
-/**
- * Payload of the `agent:taskProjectionsChanged` push event.
- *
- * Emitted by `TaskProjectionRepository` on every successful
- * create/update/delete, forwarded verbatim by claude-bridge ipc-handler.
- * Renderer uses `scopeId` to decide whether to refetch projections
- * (`changedTaskIds` and `reason` are observability fields).
- */
 export interface TaskProjectionChangeEvent {
   scopeId: string
   changedTaskIds: string[]
