@@ -14,7 +14,7 @@ import {
   snapshotTurnFeatureFlags,
   type TurnFeatureFlags,
 } from './turn-feature-flags'
-import type { SkillToolAuthorization } from './skill-tool-authorization'
+import type { SkillToolAuthorization } from './skills/skill-tool-authorization'
 
 /**
  * Phase 3 (Team T7) — derive the initial `ToolRuntimeActiveFrameContext`

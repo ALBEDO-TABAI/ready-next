@@ -42,8 +42,8 @@ import {
   peekLastReferenceSkill,
   REFERENCE_SKILL_HINT_TTL_MS,
   type PersistedReferenceSkillHint,
-} from './skill-reference-hints'
-import { findSkillHintInCapsuleTexts } from './skill-hint-recovery'
+} from './skills/skill-reference-hints'
+import { findSkillHintInCapsuleTexts } from './skills/skill-hint-recovery'
 import { shouldDisplayReferenceSkillHintForLatestUserText } from './reference-skill-hint-display'
 import { findSkillToolByName } from '../tools/skills-tools'
 import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
@@ -52,8 +52,8 @@ import {
   cancelSkillChildRun,
   configureSkillChildRunner,
   getSkillChildRunner,
-} from './skill-child-runner'
-import { listRegisteredSkillChildDrivers } from './skill-child-drivers'
+} from './skills/skill-child-runner'
+import { listRegisteredSkillChildDrivers } from './skills/skill-child-drivers'
 // Importing the VEA driver triggers its module-load-time
 // `registerSkillChildDriver(...)` side-effect. The runner relies on the
 // registry being primed before any `startSkillChildRun` call.
@@ -67,7 +67,7 @@ import { reconcileTaskProjections } from './task-projection-reconciler'
 import { canResumeShape, type ResumeHandle } from './resume-handle'
 import { deriveTaskProjectionCanResume } from './task-projection-resume'
 import { isAwaitingUserInteractionState } from '../../../shared/task-interaction-state'
-import { assertSkillTaskRunInvariantConsistency } from './skill-task-tracker'
+import { assertSkillTaskRunInvariantConsistency } from './skills/skill-task-tracker'
 import type { ProjectionTruthSnapshot, TaskProjectionRecord } from './run-contracts'
 import { getBudgetUsagePercent, restoreContinuationTaskBudgetRuntime } from './run-budget-policy'
 import {
@@ -76,7 +76,7 @@ import {
   type ContinuationIntent,
 } from './continuation-state'
 import { forgetSession } from './session-continuity'
-import { isRetryOnlyTurn } from './skill-detection-inputs'
+import { isRetryOnlyTurn } from './skills/skill-detection-inputs'
 import { logAgentMetric } from './metrics'
 import { TOOL_ERROR_METRICS } from './tool-error-metrics'
 import {

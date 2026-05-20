@@ -1,4 +1,4 @@
-import type { SkillRunContract } from './run-contracts'
+import type { SkillRunContract } from '../run-contracts'
 import type { SkillChildDriver } from './skill-child-drivers'
 import type {
   SkillChildLaunchParams,
@@ -8,7 +8,7 @@ import {
   createSkillChildSubAgent,
   type SkillChildSubAgentActionExecutor,
 } from './skill-child-sub-agent'
-import type { SubAgent } from './sub-agent/sub-agent-types'
+import type { SubAgent } from '../sub-agent/sub-agent-types'
 
 export interface SkillChildSubAgentFromPersistedParams {
   readonly payload: SkillChildRunPayload

@@ -4,7 +4,7 @@ import test from 'node:test'
 import { resolveTurnFrame } from '../main/modules/agent-control/turn-frame-resolver'
 import type { TaskProjectionRecord } from '../main/modules/agent-control/run-contracts'
 import type { SkillTaskRunRecord } from '../main/modules/repositories/skill-task-run-repository'
-import type { SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skill-task-supervisor'
+import type { SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skills/skill-task-supervisor'
 
 function projection(skillId: string, overrides: Partial<TaskProjectionRecord> = {}): TaskProjectionRecord {
   return {

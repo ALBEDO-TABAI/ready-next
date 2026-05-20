@@ -1,7 +1,7 @@
 import {
   isFailedChildCloseStatus,
   type SkillChildCloseEvent,
-} from './skill-child-run-types'
+} from './skills/skill-child-run-types'
 
 export const CHILD_RUN_CIRCUIT_BREAKER_WINDOW_MS = 5 * 60 * 1000
 export const CHILD_RUN_CIRCUIT_BREAKER_FAILURE_THRESHOLD = 5

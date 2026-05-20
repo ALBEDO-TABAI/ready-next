@@ -7,7 +7,7 @@ import test from 'node:test'
 import { executeSkillTool } from '../main/modules/tools/skills-tools'
 import { executeInspectRunState } from '../main/modules/tools/skill-primitives/inspect-run-state'
 import { executeReadArtifact } from '../main/modules/tools/skill-primitives/read-artifact'
-import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skill-tool-authorization'
+import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 
 function makeTempDir(): string {
   return mkdtempSync(join(tmpdir(), 'ready-vea-run-state-'))

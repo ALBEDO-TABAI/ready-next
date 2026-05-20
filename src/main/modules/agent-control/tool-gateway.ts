@@ -2,7 +2,7 @@ import type { CapabilityGroupDefinition, CapabilityGroupId } from '../../../shar
 import { CAPABILITY_GROUPS } from '../../../shared/ai-capability-groups'
 import { logAgentMetric } from './metrics'
 import type { ToolDefinition } from './tool-definition'
-import type { SkillToolAuthorization } from './skill-tool-authorization'
+import type { SkillToolAuthorization } from './skills/skill-tool-authorization'
 import type { CapabilityResolution } from './capability-resolver'
 
 /**

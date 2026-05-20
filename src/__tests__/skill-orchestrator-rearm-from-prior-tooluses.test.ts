@@ -1,11 +1,11 @@
 import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { SkillContextOrchestrator } from '../main/modules/agent-control/skill-context-orchestrator'
+import { SkillContextOrchestrator } from '../main/modules/agent-control/skills/skill-context-orchestrator'
 import {
   getLastReferenceSkill,
   _resetLastReferenceSkillHintsForTests,
-} from '../main/modules/agent-control/skill-reference-hints'
+} from '../main/modules/agent-control/skills/skill-reference-hints'
 
 // skill-resume G2 — orchestrator must reverse-resolve `skill_*` tool names from
 // prior assistant tool_use blocks back to the owning skill, then arm the

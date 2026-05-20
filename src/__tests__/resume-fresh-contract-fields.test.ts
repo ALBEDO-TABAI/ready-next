@@ -12,17 +12,17 @@ import {
   configureSkillChildRunner,
   __resetSkillChildRunnerForTests,
   resumeSkillChildRun,
-} from '../main/modules/agent-control/skill-child-runner'
+} from '../main/modules/agent-control/skills/skill-child-runner'
 import {
   registerSkillChildDriver,
   __resetSkillChildDriversForTests,
   type SkillChildDriver,
-} from '../main/modules/agent-control/skill-child-drivers'
+} from '../main/modules/agent-control/skills/skill-child-drivers'
 import type {
   SkillChildCloseEvent,
   SkillChildDriverAction,
   SkillChildDriverState,
-} from '../main/modules/agent-control/skill-child-run-types'
+} from '../main/modules/agent-control/skills/skill-child-run-types'
 import type {
   SkillRunRequest,
   SkillRunResult,
@@ -38,7 +38,7 @@ import type {
 import type { DomainAdapter } from '../main/modules/agent-control/domain-adapter'
 import type {
   SkillTaskSupervisorSnapshot,
-} from '../main/modules/agent-control/skill-task-supervisor'
+} from '../main/modules/agent-control/skills/skill-task-supervisor'
 import type {
   RunBudgetSeed,
   RunBudgetUsage,

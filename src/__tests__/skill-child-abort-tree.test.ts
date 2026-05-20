@@ -16,12 +16,12 @@ import {
   configureSkillChildRunner,
   getSkillChildRunCloseEvent,
   startSkillChildRun,
-} from '../main/modules/agent-control/skill-child-runner'
+} from '../main/modules/agent-control/skills/skill-child-runner'
 import {
   __resetSkillChildDriversForTests,
   registerSkillChildDriver,
   type SkillChildDriver,
-} from '../main/modules/agent-control/skill-child-drivers'
+} from '../main/modules/agent-control/skills/skill-child-drivers'
 import { defaultToolRegistry } from '../main/modules/agent-control/tool-registry'
 import type { ToolDefinition } from '../main/modules/agent-control/tool-definition'
 import type {
@@ -29,7 +29,7 @@ import type {
   SkillChildDriverAction,
   SkillChildRunPayload,
   SkillChildRunStatus,
-} from '../main/modules/agent-control/skill-child-run-types'
+} from '../main/modules/agent-control/skills/skill-child-run-types'
 
 test('parent abort cascades to an in-flight SkillChildSubAgent', async () => {
   const parent = new AbortController()

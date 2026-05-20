@@ -17,11 +17,11 @@ import {
 } from '../agent-control/run-contracts'
 import {
   startSkillChildRun,
-} from '../agent-control/skill-child-runner'
+} from '../agent-control/skills/skill-child-runner'
 import type {
   SkillTaskSupervisorLiveness,
   SkillTaskSupervisorSnapshot,
-} from '../agent-control/skill-task-supervisor'
+} from '../agent-control/skills/skill-task-supervisor'
 import type { TurnFramePatch } from '../agent-control/turn-frame'
 import {
   hasActiveSkillTaskRun,
@@ -29,7 +29,7 @@ import {
   readSkillTaskProjection,
   recordSkillTaskEvent,
   type SkillTaskEventStatus,
-} from '../agent-control/skill-task-tracker'
+} from '../agent-control/skills/skill-task-tracker'
 import { getDetachedSkillTaskTracker } from '../agent-control/detached-skill-task-tracker'
 import type {
   SkillActionDefinition,
@@ -39,17 +39,17 @@ import {
   STATIC_SKILL_TOOL_NAMES as STATIC_SKILL_TOOL_NAMES_PURE,
   STATIC_SKILL_TOOL_NAMES_BOOT_SAFE,
 } from './skills-tools-static'
-import { getLastReferenceSkill } from '../agent-control/skill-reference-hints'
+import { getLastReferenceSkill } from '../agent-control/skills/skill-reference-hints'
 import {
   fallbackThrottle,
   type SkillToolFallbackEntry,
   type SkillToolFallbackReason,
-} from '../agent-control/skill-tool-fallback-throttle'
+} from '../agent-control/skills/skill-tool-fallback-throttle'
 // Stage 4 W3b — authorization-driven primitive skillId resolution.
-import type { SkillToolAuthorization } from '../agent-control/skill-tool-authorization'
+import type { SkillToolAuthorization } from '../agent-control/skills/skill-tool-authorization'
 import type { TurnFeatureFlags } from '../agent-control/turn-feature-flags'
 import { logAgentMetric } from '../agent-control/metrics'
-import { resolvePendingSkillHandoffWriteTargets } from '../agent-control/skill-agent-handoff'
+import { resolvePendingSkillHandoffWriteTargets } from '../agent-control/skills/skill-agent-handoff'
 import { isChildLoopSkillAction } from './child-loop-skill-actions'
 import { filterSkillPrimitivesBySession } from './skill-tool-session-gate'
 import { PRIMITIVE_TOOL_DEFS } from './skill-primitives/tool-defs'

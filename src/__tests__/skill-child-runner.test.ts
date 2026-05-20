@@ -28,7 +28,7 @@ import {
   SkillTaskRunRepository,
   type CreateChildRunInput,
 } from '../main/modules/repositories/skill-task-run-repository'
-import { createSkillChildRunId } from '../main/modules/agent-control/skill-child-run-id'
+import { createSkillChildRunId } from '../main/modules/agent-control/skills/skill-child-run-id'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 const requireFromHere = createRequire(import.meta.url)
@@ -234,22 +234,22 @@ import {
   getSkillChildRunner,
   waitForSkillChildRunClose,
   MAX_ACTIONS_PER_CHILD_RUN,
-} from '../main/modules/agent-control/skill-child-runner'
+} from '../main/modules/agent-control/skills/skill-child-runner'
 import {
   clearSkillTaskProjection,
   readSkillTaskProjection,
   recordSkillTaskEvent,
-} from '../main/modules/agent-control/skill-task-tracker'
+} from '../main/modules/agent-control/skills/skill-task-tracker'
 import {
   registerSkillChildDriver,
   __resetSkillChildDriversForTests,
   type SkillChildDriver,
-} from '../main/modules/agent-control/skill-child-drivers'
+} from '../main/modules/agent-control/skills/skill-child-drivers'
 import type {
   SkillChildCloseEvent,
   SkillChildDriverAction,
   SkillChildDriverState,
-} from '../main/modules/agent-control/skill-child-run-types'
+} from '../main/modules/agent-control/skills/skill-child-run-types'
 import type {
   SkillRunResult,
   SkillsRuntimeManager,

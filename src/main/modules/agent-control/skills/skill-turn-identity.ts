@@ -29,9 +29,9 @@
  * intent) that the applier doesn't see.
  */
 
-import type { ActiveSkillContext, ResolveActiveSkillContextInputs } from './active-skill-context'
-import type { ExplicitRunStateResourceCandidate } from './run-state-resource-resolver'
-import type { SkillRunRecord } from './session-continuity'
+import type { ActiveSkillContext, ResolveActiveSkillContextInputs } from '../active-skill-context'
+import type { ExplicitRunStateResourceCandidate } from '../run-state-resource-resolver'
+import type { SkillRunRecord } from '../session-continuity'
 import type { SkillTaskSupervisorSnapshot } from './skill-task-supervisor'
 import type { SkillTurnIdentitySnapshot } from './skill-turn-identity-snapshot'
 

@@ -6,7 +6,7 @@ import {
   isChildRunCircuitBreakerEnabled,
   shouldCountChildRunCircuitBreakerFailure,
 } from '../main/modules/agent-control/child-run-circuit-breaker'
-import type { SkillChildCloseEvent } from '../main/modules/agent-control/skill-child-run-types'
+import type { SkillChildCloseEvent } from '../main/modules/agent-control/skills/skill-child-run-types'
 
 function closeWithStatus(status: SkillChildCloseEvent['status']): SkillChildCloseEvent {
   return {

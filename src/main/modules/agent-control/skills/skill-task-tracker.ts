@@ -5,10 +5,10 @@ import type {
   ScopeRunResumableAction,
   ScopeRunTaskStep,
   ScopeRunWaitingFor,
-} from './types'
-import type { SkillTaskLifecycleReason } from './run-contracts'
-import { normalizeRunStateStatus, type NormalizedRunStateStatus } from './run-state-selection'
-import { getRepositoryDatabase } from '../repositories/database-accessor'
+} from '../types'
+import type { SkillTaskLifecycleReason } from '../run-contracts'
+import { normalizeRunStateStatus, type NormalizedRunStateStatus } from '../run-state-selection'
+import { getRepositoryDatabase } from '../../repositories/database-accessor'
 import {
   SkillTaskRunRepository,
   createSkillTaskRunId,
@@ -16,7 +16,7 @@ import {
   type SkillTaskRunRecord,
   type SkillTaskRunStatus,
   type SkillTaskRunStep,
-} from '../repositories/skill-task-run-repository'
+} from '../../repositories/skill-task-run-repository'
 
 export type SkillTaskEventStatus = 'running' | 'done' | 'blocked' | 'error'
 export type SkillParentTaskLifecycleState =

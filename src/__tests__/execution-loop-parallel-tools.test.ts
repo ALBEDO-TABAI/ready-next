@@ -5,7 +5,7 @@ import { ExecutionLoopOrchestrator } from '../main/modules/agent-control/executi
 import {
   buildExplicitNoSkillAuthorization,
   buildSelectedSkillToolAuthorization,
-} from '../main/modules/agent-control/skill-tool-authorization'
+} from '../main/modules/agent-control/skills/skill-tool-authorization'
 import {
   getToolResourceTag,
   groupParallelSafeToolCalls,

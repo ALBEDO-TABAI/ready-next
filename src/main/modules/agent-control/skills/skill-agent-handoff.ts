@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { atomicWriteJson } from './atomic-write'
+import { atomicWriteJson } from '../atomic-write'
 import {
   HANDOFF_TIMEOUT_USER_MESSAGE,
   isSafeRelativePath,
@@ -10,7 +10,7 @@ import {
   readJson,
   stringValue,
 } from './skill-handoff-shared'
-import type { ScopeRunSkillHandoff } from './types'
+import type { ScopeRunSkillHandoff } from '../types'
 
 export interface SkillHandoffWriteTarget {
   root: string

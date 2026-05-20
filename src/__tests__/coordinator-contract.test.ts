@@ -6,7 +6,7 @@ import { CalendarDomainAdapter } from '../main/modules/agent-control/calendar-do
 import { DocumentDomainAdapter } from '../main/modules/agent-control/document-domain-adapter'
 import { FeishuDomainAdapter } from '../main/modules/agent-control/feishu-domain-adapter'
 import { RSSDomainAdapter } from '../main/modules/agent-control/rss-domain-adapter'
-import { SkillDomainAdapter } from '../main/modules/agent-control/skill-domain-adapter'
+import { SkillDomainAdapter } from '../main/modules/agent-control/skills/skill-domain-adapter'
 
 test('every registered DomainAdapter explicitly implements coordinator role hooks', () => {
   const adapters = [

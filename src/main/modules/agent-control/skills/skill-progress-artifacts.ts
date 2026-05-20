@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import type { ScopeRunSkillHandoff } from './types'
+import type { ScopeRunSkillHandoff } from '../types'
 import { readSkillHandoffStates } from './skill-agent-handoff'
 
 const REQUIRED_SCORE_KEYS = [

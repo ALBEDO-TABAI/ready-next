@@ -22,7 +22,7 @@ import {
 import {
   clearLastReferenceSkill,
   rememberLastReferenceSkill,
-} from '../main/modules/agent-control/skill-reference-hints'
+} from '../main/modules/agent-control/skills/skill-reference-hints'
 import { __setSkillActionToolDefsForTests } from '../main/modules/tools/skills-tools'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 

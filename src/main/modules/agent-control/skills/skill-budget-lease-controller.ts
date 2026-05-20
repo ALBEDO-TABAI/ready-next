@@ -2,11 +2,11 @@ import { randomUUID } from 'node:crypto'
 import type {
   SkillBudgetLeaseDecision,
   SkillBudgetLeaseState,
-} from './run-contracts'
-import type { SkillProgressScore } from './progress-scorer'
-import type { SkillWasteScore } from './waste-scorer'
+} from '../run-contracts'
+import type { SkillProgressScore } from '../progress-scorer'
+import type { SkillWasteScore } from '../waste-scorer'
 import type { SkillTaskSupervisorSnapshot } from './skill-task-supervisor'
-import type { TurnFramePatch } from './turn-frame'
+import type { TurnFramePatch } from '../turn-frame'
 
 /**
  * Stage M (M2b) — `produceBudgetPatch` is the named producer that emits a

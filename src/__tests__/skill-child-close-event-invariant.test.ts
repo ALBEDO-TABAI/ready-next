@@ -5,11 +5,11 @@ import {
   InvalidCloseEventError,
   freezeSkillChildCloseEvent,
   validateSkillChildCloseInvariant,
-} from '../main/modules/agent-control/skill-child-close-event-freeze'
+} from '../main/modules/agent-control/skills/skill-child-close-event-freeze'
 import type {
   MutableSkillChildCloseEvent,
   SkillChildRunTerminalReason,
-} from '../main/modules/agent-control/skill-child-run-types'
+} from '../main/modules/agent-control/skills/skill-child-run-types'
 
 type CloseStatus = MutableSkillChildCloseEvent['status']
 

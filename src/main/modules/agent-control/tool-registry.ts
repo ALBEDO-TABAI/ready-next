@@ -7,7 +7,7 @@ import {
   buildExplicitNoSkillAuthorization,
   filterToolsByAuthorization,
   type SkillToolAuthorization,
-} from './skill-tool-authorization'
+} from './skills/skill-tool-authorization'
 import type {
   ToolConcurrency,
   ToolDefinition,
@@ -73,9 +73,9 @@ import {
 } from '../tools/skills-tools'
 import { getToolInputSchemas } from '../tools/schemas'
 import { getSystemAnthropicTools, getSystemOpenAITools } from '../tools/system-tools'
-import { getLastReferenceSkill } from './skill-reference-hints'
+import { getLastReferenceSkill } from './skills/skill-reference-hints'
 import { resolveActiveSkillContext } from './active-skill-context'
-import { hasActiveSkillTaskRun } from './skill-task-tracker'
+import { hasActiveSkillTaskRun } from './skills/skill-task-tracker'
 import {
   createToolExecutionOutput,
   type ToolExecutionOutput,
@@ -87,7 +87,7 @@ import type {
 } from '../skills-runtime/runtime-manager'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 import { snapshotTurnFeatureFlags } from './turn-feature-flags'
-import { fallbackThrottle } from './skill-tool-fallback-throttle'
+import { fallbackThrottle } from './skills/skill-tool-fallback-throttle'
 // Stage T PR-T5 — MCP authorization gate. The model-visible mcp tool list
 // resolver below calls `mcpRegistry.isAuthorized(name, sessionId, scopeId)`
 // before exposing any `mcp_*` tool to the model.

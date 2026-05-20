@@ -8,7 +8,7 @@ import {
   buildExplicitNoSkillAuthorization,
   buildSelectedSkillToolAuthorization,
   type SkillToolAuthorization,
-} from '../main/modules/agent-control/skill-tool-authorization'
+} from '../main/modules/agent-control/skills/skill-tool-authorization'
 import { executeToolCall } from '../main/modules/tools/tool-executor'
 import {
   resolveSkillActionTimeoutMs,
@@ -17,7 +17,7 @@ import {
 import {
   rememberLastReferenceSkill,
   _resetLastReferenceSkillHintsForTests,
-} from '../main/modules/agent-control/skill-reference-hints'
+} from '../main/modules/agent-control/skills/skill-reference-hints'
 
 const STANDARD_PRIMITIVES = [
   'skill_ask_user',

@@ -1,5 +1,5 @@
-import { logAgentMetric } from './metrics'
-import { PROJECTION_OBSERVABILITY_METRICS } from './projection-observability-metrics'
+import { logAgentMetric } from '../metrics'
+import { PROJECTION_OBSERVABILITY_METRICS } from '../projection-observability-metrics'
 
 export const SKILL_TOOL_FALLBACK_ENTRIES = Object.freeze([
   'find_by_name',

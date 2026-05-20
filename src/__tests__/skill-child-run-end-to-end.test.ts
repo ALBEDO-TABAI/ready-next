@@ -48,12 +48,12 @@ import {
   cancelSkillChildRun,
   resumeSkillChildRun,
   isChildOwnedSkill,
-} from '../main/modules/agent-control/skill-child-runner'
+} from '../main/modules/agent-control/skills/skill-child-runner'
 import {
   registerSkillChildDriver,
   __resetSkillChildDriversForTests,
   type SkillChildDriver,
-} from '../main/modules/agent-control/skill-child-drivers'
+} from '../main/modules/agent-control/skills/skill-child-drivers'
 import {
   defaultToolRegistry,
   resolveToolInputSchemaForExecution,
@@ -67,7 +67,7 @@ import type {
   SkillChildCloseEvent,
   SkillChildDriverAction,
   SkillChildDriverState,
-} from '../main/modules/agent-control/skill-child-run-types'
+} from '../main/modules/agent-control/skills/skill-child-run-types'
 import type {
   SkillRunResult,
   SkillsRuntimeManager,
@@ -77,7 +77,7 @@ import type {
   SkillTaskRunRepository,
   SkillTaskRunRecord,
 } from '../main/modules/repositories/skill-task-run-repository'
-import type { SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skill-task-supervisor'
+import type { SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skills/skill-task-supervisor'
 
 export const __breaksInvariants = [
   'test-fixture.skill-child-run-end-to-end.setupRunner-resets-singleton',

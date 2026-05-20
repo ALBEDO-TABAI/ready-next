@@ -4,7 +4,7 @@ import type {
   SkillChildRunPayload,
   SkillChildRunStatus,
   SkillChildRunParentNextHint,
-} from '../agent-control/skill-child-run-types'
+} from '../agent-control/skills/skill-child-run-types'
 
 export type SkillTaskRunStatus = 'queued' | 'running' | 'blocked' | 'done' | 'failed' | 'cancelled'
 export type SkillTaskRunInteractionState =

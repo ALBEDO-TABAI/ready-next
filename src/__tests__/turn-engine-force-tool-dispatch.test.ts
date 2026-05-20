@@ -19,7 +19,7 @@ import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/
 import {
   rememberLastReferenceSkill,
   _resetLastReferenceSkillHintsForTests,
-} from '../main/modules/agent-control/skill-reference-hints'
+} from '../main/modules/agent-control/skills/skill-reference-hints'
 import {
   defaultToolRegistry,
   resolveToolInputSchemaForExecution,
@@ -29,11 +29,11 @@ import { getToolInputSchemas } from '../main/modules/tools/schemas'
 import { validateToolInput } from '../main/modules/tools/tool-input-validator'
 import type { ToolDefinition } from '../main/modules/agent-control/tool-definition'
 import type { IntentClassification } from '../main/modules/agent-control/intent-classifier'
-import type { SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skill-task-supervisor'
+import type { SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skills/skill-task-supervisor'
 import type {
   SkillChildCloseEvent,
   SkillChildRunStatus,
-} from '../main/modules/agent-control/skill-child-run-types'
+} from '../main/modules/agent-control/skills/skill-child-run-types'
 import type {
   RunBudgetSeed,
   RunBudgetUsage,

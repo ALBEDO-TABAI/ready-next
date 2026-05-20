@@ -33,11 +33,11 @@ import { startSkillChildRunAndWait } from '../main/modules/skills-runtime/runtim
 import {
   configureSkillChildRunner,
   __resetSkillChildRunnerForTests,
-} from '../main/modules/agent-control/skill-child-runner'
+} from '../main/modules/agent-control/skills/skill-child-runner'
 import {
   registerSkillChildDriver,
   __resetSkillChildDriversForTests,
-} from '../main/modules/agent-control/skill-child-drivers'
+} from '../main/modules/agent-control/skills/skill-child-drivers'
 import { getChildRunRetryPolicy } from '../main/modules/agent-control/child-run-retry-policy'
 // Importing the module re-registers the real VEA driver as a side effect.
 // We grab the singleton instance so we can re-register it after a test reset.
@@ -45,7 +45,7 @@ import { videoExpertChildDriver } from '../main/modules/agent-control/video-expe
 import type {
   SkillChildCloseEvent,
   SkillChildRunTerminalReason,
-} from '../main/modules/agent-control/skill-child-run-types'
+} from '../main/modules/agent-control/skills/skill-child-run-types'
 import type {
   SkillTaskRunRecord,
   SkillTaskRunRepository,

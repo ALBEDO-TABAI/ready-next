@@ -20,7 +20,7 @@ import type { TurnFeatureFlags } from '../agent-control/turn-feature-flags'
 import {
   checkSkillToolAuthorization,
   type SkillToolAuthorization,
-} from '../agent-control/skill-tool-authorization'
+} from '../agent-control/skills/skill-tool-authorization'
 import { PRIMITIVE_TOOL_DEFS } from './skill-primitives/tool-defs'
 import type {
   SkillRunRequest,

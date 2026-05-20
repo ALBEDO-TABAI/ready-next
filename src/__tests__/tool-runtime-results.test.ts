@@ -5,7 +5,7 @@ import { ToolRuntime } from '../main/modules/agent-control/tool-runtime'
 import {
   buildExplicitNoSkillAuthorization,
   buildSelectedSkillToolAuthorization,
-} from '../main/modules/agent-control/skill-tool-authorization'
+} from '../main/modules/agent-control/skills/skill-tool-authorization'
 import { createToolExecutionOutput } from '../main/modules/agent-control/tool-result-types'
 
 test('ToolRuntime wraps legacy string results into structured outputs while preserving order', async () => {

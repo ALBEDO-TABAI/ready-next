@@ -7,11 +7,11 @@ import { resolveToolInputSchemaForExecution } from '../main/modules/agent-contro
 import {
   rememberLastReferenceSkill,
   _resetLastReferenceSkillHintsForTests,
-} from '../main/modules/agent-control/skill-reference-hints'
+} from '../main/modules/agent-control/skills/skill-reference-hints'
 import {
   buildExplicitNoSkillAuthorization,
   buildSelectedSkillToolAuthorization,
-} from '../main/modules/agent-control/skill-tool-authorization'
+} from '../main/modules/agent-control/skills/skill-tool-authorization'
 
 test('tool gateway exposes formal capability groups and resolves grouped tools', () => {
   const gateway = new ToolGateway()

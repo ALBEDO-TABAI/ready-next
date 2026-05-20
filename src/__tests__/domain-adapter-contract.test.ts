@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import { BrowserDomainAdapter } from '../main/modules/agent-control/browser-domain-adapter'
 import { DocumentDomainAdapter } from '../main/modules/agent-control/document-domain-adapter'
-import { SkillDomainAdapter } from '../main/modules/agent-control/skill-domain-adapter'
+import { SkillDomainAdapter } from '../main/modules/agent-control/skills/skill-domain-adapter'
 import { RSSDomainAdapter } from '../main/modules/agent-control/rss-domain-adapter'
 import { CalendarDomainAdapter } from '../main/modules/agent-control/calendar-domain-adapter'
 import { FeishuDomainAdapter } from '../main/modules/agent-control/feishu-domain-adapter'

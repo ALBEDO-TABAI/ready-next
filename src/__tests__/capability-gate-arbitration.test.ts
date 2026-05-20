@@ -14,7 +14,7 @@ import { classifyIntent } from '../main/modules/agent-control/intent-classifier'
 import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
 import { prepareInitialRun } from '../main/modules/agent-control/run-capability-controller'
 import { resolveCapabilityResolution } from '../main/modules/agent-control/capability-resolver'
-import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skill-tool-authorization'
+import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 
 const VISION_PROVEN_CONFIG: AIModelConfig = {
   provider: 'openai',

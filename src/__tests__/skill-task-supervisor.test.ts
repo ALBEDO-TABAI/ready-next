@@ -9,7 +9,7 @@ import {
   inspectLatestSkillTask,
   inspectSkillTask,
   type SkillTaskSupervisorDependencies,
-} from '../main/modules/agent-control/skill-task-supervisor'
+} from '../main/modules/agent-control/skills/skill-task-supervisor'
 import type { DetachedSkillTaskRecord } from '../main/modules/agent-control/detached-skill-task-tracker'
 import type { SkillTaskRunRecord } from '../main/modules/repositories/skill-task-run-repository'
 

@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { ToolRuntime } from '../main/modules/agent-control/tool-runtime'
-import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skill-tool-authorization'
+import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 
 test('ToolRuntime notifies interruption hooks when cancellation stops the batch', async () => {
   const runtime = new ToolRuntime({ log: () => {} })

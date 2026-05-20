@@ -15,7 +15,7 @@ import {
   getLastReferenceSkill,
   rememberLastReferenceSkill,
   sweepExpiredReferenceSkillHints,
-} from '../main/modules/agent-control/skill-reference-hints'
+} from '../main/modules/agent-control/skills/skill-reference-hints'
 
 test('sweep removes hints older than TTL and keeps fresh ones', () => {
   _resetLastReferenceSkillHintsForTests()

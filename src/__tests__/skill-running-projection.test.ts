@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
-import { buildLongSkillRunningProjection } from '../main/modules/agent-control/skill-running-projection'
+import { buildLongSkillRunningProjection } from '../main/modules/agent-control/skills/skill-running-projection'
 import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-metrics'
 
 test('long skill running projection includes run_state and intermediate artifacts', () => {

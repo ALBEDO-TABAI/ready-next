@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 
-import type { SkillRunResult } from '../skills-runtime/runtime-manager'
+import type { SkillRunResult } from '../../skills-runtime/runtime-manager'
 
 import type { SkillChildDriver } from './skill-child-drivers'
 import type {
@@ -27,7 +27,7 @@ import type {
   SubAgentRunResult,
   SubAgentTerminalReason,
   SubAgentWorkEvent,
-} from './sub-agent/sub-agent-types'
+} from '../sub-agent/sub-agent-types'
 
 export type SkillChildSubAgentActionExecutor = (
   action: SkillChildDriverAction,

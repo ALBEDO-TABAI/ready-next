@@ -10,7 +10,7 @@ import {
   REFERENCE_SKILL_HINT_TTL_MS,
   _resetLastReferenceSkillHintsForTests,
   _peekLastReferenceSkillForTests,
-} from '../main/modules/agent-control/skill-reference-hints'
+} from '../main/modules/agent-control/skills/skill-reference-hints'
 
 // skill-resume plan A1 — verify the persistence shim that lets the in-memory
 // reference-skill hint survive Ready restart by being snapshotted to

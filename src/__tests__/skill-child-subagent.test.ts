@@ -4,14 +4,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { createSkillChildSubAgentFromPersisted } from '../main/modules/agent-control/skill-child-sub-agent-factory'
-import { mapSubAgentCloseToChildClose } from '../main/modules/agent-control/skill-child-sub-agent-close-mapping'
+import { createSkillChildSubAgentFromPersisted } from '../main/modules/agent-control/skills/skill-child-sub-agent-factory'
+import { mapSubAgentCloseToChildClose } from '../main/modules/agent-control/skills/skill-child-sub-agent-close-mapping'
 import {
   createSkillChildSubAgent,
   getSkillChildCloseEventFromSubAgentClose,
   isSkillChildSubAgentProgressPayload,
   type SkillChildSubAgentActionExecutor,
-} from '../main/modules/agent-control/skill-child-sub-agent'
+} from '../main/modules/agent-control/skills/skill-child-sub-agent'
 import { runSubAgent } from '../main/modules/agent-control/sub-agent/sub-agent-runner'
 import type {
   SubAgentCleanupHandle,
@@ -19,13 +19,13 @@ import type {
   SubAgentEvent,
 } from '../main/modules/agent-control/sub-agent/sub-agent-types'
 import type { SkillRunResult } from '../main/modules/skills-runtime/runtime-manager'
-import type { SkillChildDriver } from '../main/modules/agent-control/skill-child-drivers'
+import type { SkillChildDriver } from '../main/modules/agent-control/skills/skill-child-drivers'
 import type {
   SkillChildCloseEvent,
   SkillChildDriverAction,
   SkillChildDriverState,
   SkillChildRunPayload,
-} from '../main/modules/agent-control/skill-child-run-types'
+} from '../main/modules/agent-control/skills/skill-child-run-types'
 
 async function collectRun(
   generator: AsyncGenerator<SubAgentEvent, SubAgentCloseEvent, void>,

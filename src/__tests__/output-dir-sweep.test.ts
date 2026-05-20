@@ -9,7 +9,7 @@ import {
 } from '../main/modules/agent-control/output-dir-lifecycle'
 import {
   deriveRuntimeChildRunLogPath,
-} from '../main/modules/agent-control/skill-child-run-log'
+} from '../main/modules/agent-control/skills/skill-child-run-log'
 import {
   sweepOutputDirs,
 } from '../main/modules/skills-runtime/output-dir-sweep'

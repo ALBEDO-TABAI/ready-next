@@ -24,9 +24,9 @@ import {
   type SkillsRuntimeManager,
   type SkillState,
 } from '../main/modules/skills-runtime/runtime-manager'
-import { registerSkillTaskRunRepository } from '../main/modules/agent-control/skill-task-tracker'
+import { registerSkillTaskRunRepository } from '../main/modules/agent-control/skills/skill-task-tracker'
 import type { SkillTaskRunRecord, SkillTaskRunRepository } from '../main/modules/repositories/skill-task-run-repository'
-import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skill-tool-authorization'
+import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 
 // ---------------------------------------------------------------------------
 // Belt-and-braces continuity gate (pure function — no runtime needed).

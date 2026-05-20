@@ -4,7 +4,7 @@ import test from 'node:test'
 import {
   buildSkillDetectionInputs,
   isRetryOnlyTurn,
-} from '../main/modules/agent-control/skill-detection-inputs'
+} from '../main/modules/agent-control/skills/skill-detection-inputs'
 
 test('skill detection includes recent user goals for retry-only turns', () => {
   const inputs = buildSkillDetectionInputs({

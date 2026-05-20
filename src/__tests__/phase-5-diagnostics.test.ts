@@ -14,7 +14,7 @@ import {
   setReferenceHintChangeEmitter,
   sweepExpiredReferenceSkillHints,
   _resetLastReferenceSkillHintsForTests,
-} from '../main/modules/agent-control/skill-reference-hints'
+} from '../main/modules/agent-control/skills/skill-reference-hints'
 
 // Phase 5 — diagnostics behavior tests + wiring contracts.
 

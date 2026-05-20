@@ -3,12 +3,12 @@ import { test } from 'node:test'
 
 import {
   decodeStoredSkillChildCloseEvent,
-} from '../main/modules/agent-control/skill-child-state-machine'
+} from '../main/modules/agent-control/skills/skill-child-state-machine'
 import {
   mapSubAgentCloseToChildClose,
   SKILL_CHILD_CLOSE_EVENT_METADATA_KEY,
-} from '../main/modules/agent-control/skill-child-sub-agent-close-mapping'
-import type { SkillChildCloseEvent } from '../main/modules/agent-control/skill-child-run-types'
+} from '../main/modules/agent-control/skills/skill-child-sub-agent-close-mapping'
+import type { SkillChildCloseEvent } from '../main/modules/agent-control/skills/skill-child-run-types'
 
 function makeCloseEvent(overrides: Partial<SkillChildCloseEvent> = {}): SkillChildCloseEvent {
   return {

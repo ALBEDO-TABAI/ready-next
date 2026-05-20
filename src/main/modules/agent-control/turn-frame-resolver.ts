@@ -1,13 +1,13 @@
 import { dirname } from 'node:path'
 
-import type { ReferenceSkillHint } from './skill-reference-hints'
+import type { ReferenceSkillHint } from './skills/skill-reference-hints'
 import {
   loadSkillRunContract,
   type SkillRunContract,
   type TaskProjectionRecord,
 } from './run-contracts'
 import type { SkillTaskRunRecord } from '../repositories/skill-task-run-repository'
-import type { SkillTaskSupervisorSnapshot } from './skill-task-supervisor'
+import type { SkillTaskSupervisorSnapshot } from './skills/skill-task-supervisor'
 import {
   getRememberedActiveSkillContext,
   resolveActiveSkillContextFromInputs,

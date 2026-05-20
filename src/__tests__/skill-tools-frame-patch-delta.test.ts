@@ -22,8 +22,8 @@ import type { SkillRunContract } from '../main/modules/agent-control/run-contrac
 import {
   rememberLastReferenceSkill,
   _resetLastReferenceSkillHintsForTests,
-} from '../main/modules/agent-control/skill-reference-hints'
-import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skill-tool-authorization'
+} from '../main/modules/agent-control/skills/skill-reference-hints'
+import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 
 const SESSION_ID = 'scope-delta-detached'
 const SKILL_ID = 'video-expert-analyzer'

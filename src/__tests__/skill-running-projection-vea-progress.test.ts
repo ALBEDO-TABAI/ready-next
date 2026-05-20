@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { buildLongSkillRunningProjection } from '../main/modules/agent-control/skill-running-projection'
+import { buildLongSkillRunningProjection } from '../main/modules/agent-control/skills/skill-running-projection'
 
 test('long skill running projection surfaces VEA current_stage and scene coverage', () => {
   const root = mkdtempSync(join(tmpdir(), 'ready-vea-projection-'))

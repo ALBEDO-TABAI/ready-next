@@ -11,13 +11,13 @@ import {
   getLastReferenceSkill,
   _resetLastReferenceSkillHintsForTests,
   _peekLastReferenceSkillForTests,
-} from '../main/modules/agent-control/skill-reference-hints'
+} from '../main/modules/agent-control/skills/skill-reference-hints'
 import {
   collectRecentAssistantSkillToolUses,
   buildSkillDetectionInputs,
   isRetryOnlyTurn,
-} from '../main/modules/agent-control/skill-detection-inputs'
-import { recoverLatestSkillRunFromTaskProjections } from '../main/modules/agent-control/skill-run-recovery'
+} from '../main/modules/agent-control/skills/skill-detection-inputs'
+import { recoverLatestSkillRunFromTaskProjections } from '../main/modules/agent-control/skills/skill-run-recovery'
 import {
   __reloadSessionContinuityFromDiskForTests,
   __resetSessionContinuityForTests,
@@ -29,7 +29,7 @@ import {
   clearSkillTaskProjection,
   recordSkillTaskEvent,
   readSkillTaskProjection,
-} from '../main/modules/agent-control/skill-task-tracker'
+} from '../main/modules/agent-control/skills/skill-task-tracker'
 import type { TaskProjectionRecord } from '../main/modules/agent-control/run-contracts'
 import { shouldExposeSkillAction } from '../main/modules/tools/skills-tools'
 

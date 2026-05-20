@@ -5,7 +5,7 @@ import {
   snapshotTurnFeatureFlags,
   type TurnFeatureFlags,
 } from '../main/modules/agent-control/turn-feature-flags'
-import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skill-tool-authorization'
+import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import { executeToolCall } from '../main/modules/tools/tool-executor'
 
 test('snapshotTurnFeatureFlags returns a frozen stable snapshot', () => {

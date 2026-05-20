@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { SkillDomainAdapter } from '../main/modules/agent-control/skill-domain-adapter'
+import { SkillDomainAdapter } from '../main/modules/agent-control/skills/skill-domain-adapter'
 
 function createRoute() {
   return {

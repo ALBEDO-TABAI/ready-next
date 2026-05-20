@@ -4,8 +4,8 @@ import test from 'node:test'
 import {
   buildSkillTaskLifecycleSignal,
   isRelevantSkillTaskSnapshot,
-} from '../main/modules/agent-control/skill-task-lifecycle'
-import type { SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skill-task-supervisor'
+} from '../main/modules/agent-control/skills/skill-task-lifecycle'
+import type { SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skills/skill-task-supervisor'
 
 function makeSnapshot(overrides: Partial<SkillTaskSupervisorSnapshot>): SkillTaskSupervisorSnapshot {
   return {

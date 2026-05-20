@@ -24,7 +24,7 @@ import {
 import {
   buildExplicitNoSkillAuthorization,
   type SkillToolAuthorization,
-} from './skill-tool-authorization'
+} from './skills/skill-tool-authorization'
 
 /**
  * Stage 10 — when caller has a `ToolPolicy` but no authorization, build

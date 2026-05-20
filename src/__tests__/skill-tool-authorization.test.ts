@@ -21,7 +21,7 @@ import {
   buildExplicitNoSkillAuthorization,
   buildSelectedSkillToolAuthorization,
   checkSkillToolAuthorization,
-} from '../main/modules/agent-control/skill-tool-authorization'
+} from '../main/modules/agent-control/skills/skill-tool-authorization'
 
 // ---------------------------------------------------------------------------
 // Explicit mode:'none' → denies

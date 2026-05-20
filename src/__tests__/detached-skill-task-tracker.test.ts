@@ -7,7 +7,7 @@ import test from 'node:test'
 import {
   DetachedSkillTaskTracker,
 } from '../main/modules/agent-control/detached-skill-task-tracker'
-import { registerSkillTaskRunRepository } from '../main/modules/agent-control/skill-task-tracker'
+import { registerSkillTaskRunRepository } from '../main/modules/agent-control/skills/skill-task-tracker'
 import type { SkillTaskRunRecord, SkillTaskRunRepository } from '../main/modules/repositories/skill-task-run-repository'
 import type { SkillRunRequest, SkillRunResult } from '../main/modules/skills-runtime/runtime-manager'
 

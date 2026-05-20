@@ -19,7 +19,7 @@ import { executeSkillTool } from '../main/modules/tools/skills-tools'
 import {
   buildExplicitNoSkillAuthorization,
   buildSelectedSkillToolAuthorization,
-} from '../main/modules/agent-control/skill-tool-authorization'
+} from '../main/modules/agent-control/skills/skill-tool-authorization'
 
 function outputData(result: unknown): Record<string, unknown> | null {
   if (typeof result === 'string') return null

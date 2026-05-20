@@ -45,7 +45,7 @@ import { scanSkillDirectory } from './skill-security-scanner'
 // Phase 4: ExecutionStateStore / ExecutionCoordinator retired along with the
 // skill_executions state machine. The imports (and the files) are removed in
 // PR1-E.
-import { sweepExpiredReferenceSkillHints } from '../agent-control/skill-reference-hints'
+import { sweepExpiredReferenceSkillHints } from '../agent-control/skills/skill-reference-hints'
 import { logAgentMetric } from '../agent-control/metrics'
 import {
   sweepChildRunLogs,
@@ -2214,7 +2214,7 @@ export function __setSkillsRuntimeManagerForTests(
 import type {
   SkillChildCloseEvent,
   SkillChildRunStatus,
-} from '../agent-control/skill-child-run-types'
+} from '../agent-control/skills/skill-child-run-types'
 
 export interface StartSkillChildRunAndWaitParams {
   skillId: string
@@ -2255,7 +2255,7 @@ export async function startSkillChildRunAndWait(
   params: StartSkillChildRunAndWaitParams,
 ): Promise<StartSkillChildRunAndWaitResult> {
   // Lazy require to break the runtime-manager ⇄ skill-child-runner cycle.
-  const childRunner = await import('../agent-control/skill-child-runner')
+  const childRunner = await import('../agent-control/skills/skill-child-runner')
 
   const launch = await childRunner.startSkillChildRun({
     scopeId: params.scopeId ?? null,

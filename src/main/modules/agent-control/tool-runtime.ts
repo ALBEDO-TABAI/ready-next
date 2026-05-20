@@ -14,7 +14,7 @@ import type { TurnFeatureFlags } from './turn-feature-flags'
 import {
   buildExplicitNoSkillAuthorization,
   type SkillToolAuthorization,
-} from './skill-tool-authorization'
+} from './skills/skill-tool-authorization'
 import type { RecoveryRecord, RunBudgetSeed, RunBudgetUsage, SkillRunContract } from './run-contracts'
 import { groupParallelSafeToolCalls, type ParallelToolCall } from './tool-parallelism-policy'
 import {

@@ -5,8 +5,8 @@ import {
   getChildRunRetryPolicy,
   type ChildRunRetryPolicy,
 } from '../main/modules/agent-control/child-run-retry-policy'
-import { CANONICAL_SKILL_CHILD_TERMINAL_REASONS } from '../main/modules/agent-control/skill-child-state-machine'
-import type { SkillChildRunTerminalReason } from '../main/modules/agent-control/skill-child-run-types'
+import { CANONICAL_SKILL_CHILD_TERMINAL_REASONS } from '../main/modules/agent-control/skills/skill-child-state-machine'
+import type { SkillChildRunTerminalReason } from '../main/modules/agent-control/skills/skill-child-run-types'
 
 const EXPECTED_TERMINAL_REASONS: readonly SkillChildRunTerminalReason[] = [
   'completed',

@@ -6,7 +6,7 @@ import {
   getLastReferenceSkill,
   REFERENCE_SKILL_HINT_TTL_MS,
   _resetLastReferenceSkillHintsForTests,
-} from '../main/modules/agent-control/skill-reference-hints'
+} from '../main/modules/agent-control/skills/skill-reference-hints'
 
 // skill-resume G8 — getLastReferenceSkill must bump `at` on every successful
 // read so an actively-used hint doesn't expire mid-flow during a long

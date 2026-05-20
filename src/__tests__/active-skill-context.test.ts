@@ -8,7 +8,7 @@ import {
   type ActiveSkillContext,
 } from '../main/modules/agent-control/active-skill-context'
 import type { TaskProjectionRecord } from '../main/modules/agent-control/run-contracts'
-import type { SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skill-task-supervisor'
+import type { SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skills/skill-task-supervisor'
 
 function projection(overrides: Partial<TaskProjectionRecord>): TaskProjectionRecord {
   return {

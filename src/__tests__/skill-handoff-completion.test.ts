@@ -7,10 +7,10 @@ import test from 'node:test'
 import {
   completePendingSkillHandoffs,
   listPendingSkillHandoffTasks,
-} from '../main/modules/agent-control/skill-handoff-completion'
+} from '../main/modules/agent-control/skills/skill-handoff-completion'
 import {
   readSkillHandoffStates,
-} from '../main/modules/agent-control/skill-agent-handoff'
+} from '../main/modules/agent-control/skills/skill-agent-handoff'
 import type { AgentSpawnContext } from '../shared/skill-host-contract'
 
 function writeJson(path: string, value: unknown): void {

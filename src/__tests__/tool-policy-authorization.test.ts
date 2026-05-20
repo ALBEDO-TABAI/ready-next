@@ -45,7 +45,7 @@ import {
   buildExplicitNoSkillAuthorization,
   buildSelectedSkillToolAuthorization,
   filterToolsByAuthorization,
-} from '../main/modules/agent-control/skill-tool-authorization'
+} from '../main/modules/agent-control/skills/skill-tool-authorization'
 import { ToolGateway } from '../main/modules/agent-control/tool-gateway'
 import type { ToolDefinition } from '../main/modules/agent-control/tool-definition'
 

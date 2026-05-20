@@ -18,16 +18,16 @@ import {
   getSkillChildRunCloseEvent,
   __resetSkillChildRunnerForTests,
   MAX_ACTIVE_VEA_CHILD_RUNS,
-} from '../main/modules/agent-control/skill-child-runner'
+} from '../main/modules/agent-control/skills/skill-child-runner'
 import {
   registerSkillChildDriver,
   __resetSkillChildDriversForTests,
   type SkillChildDriver,
-} from '../main/modules/agent-control/skill-child-drivers'
+} from '../main/modules/agent-control/skills/skill-child-drivers'
 import type {
   SkillChildCloseEvent,
   SkillChildDriverAction,
-} from '../main/modules/agent-control/skill-child-run-types'
+} from '../main/modules/agent-control/skills/skill-child-run-types'
 import type {
   SkillRunResult,
   SkillRunRequest,
@@ -326,7 +326,7 @@ test('Phase 5: skill_failure (success:false) vs process crash throw split correc
 // =====================================================================
 
 import { __skillsToolsInternalsForTests } from '../main/modules/tools/skills-tools'
-import type { SkillTaskSupervisorStatus, SkillTaskSupervisorLiveness } from '../main/modules/agent-control/skill-task-supervisor'
+import type { SkillTaskSupervisorStatus, SkillTaskSupervisorLiveness } from '../main/modules/agent-control/skills/skill-task-supervisor'
 
 const PUBLIC_SUPERVISOR_STATUS_VALUES: ReadonlySet<SkillTaskSupervisorStatus> = new Set<SkillTaskSupervisorStatus>([
   'running',

@@ -23,7 +23,7 @@ import {
   REFERENCE_SKILL_HINT_TTL_MS,
   getLastReferenceSkill,
   setReferenceHintChangeEmitter,
-} from '../main/modules/agent-control/skill-reference-hints'
+} from '../main/modules/agent-control/skills/skill-reference-hints'
 import { SkillsRuntimeManager } from '../main/modules/skills-runtime/runtime-manager'
 
 test('runtime-manager reference-hint sweep removes stale hints on its boot timer', () => {

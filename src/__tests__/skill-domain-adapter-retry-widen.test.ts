@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { SkillDomainAdapter } from '../main/modules/agent-control/skill-domain-adapter'
+import { SkillDomainAdapter } from '../main/modules/agent-control/skills/skill-domain-adapter'
 
 // skill-resume plan D3 — when isRetryOnlyTurn=true (user said "继续/重试/接着"),
 // the SkillDomainAdapter widens its prefix narrowing to also keep file_/document_

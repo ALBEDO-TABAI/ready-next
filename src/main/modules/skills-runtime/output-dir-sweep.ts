@@ -7,7 +7,7 @@ import {
 } from '../agent-control/output-dir-lifecycle'
 import {
   deriveRuntimeChildRunLogPath,
-} from '../agent-control/skill-child-run-log'
+} from '../agent-control/skills/skill-child-run-log'
 import { logAgentMetric } from '../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../agent-control/tool-error-metrics'
 

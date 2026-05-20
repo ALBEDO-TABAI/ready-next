@@ -12,7 +12,7 @@ import {
 import {
   clearLastReferenceSkill,
   rememberLastReferenceSkill,
-} from '../main/modules/agent-control/skill-reference-hints'
+} from '../main/modules/agent-control/skills/skill-reference-hints'
 import type { AIModelConfig } from '../shared/ai-providers'
 import {
   authorizeMcpToolForScope,

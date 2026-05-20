@@ -37,8 +37,8 @@ import {
   type ContinuationState,
 } from '../agent-control/continuation-state'
 import { prepareInitialRun, reconcileAfterBrowserDecision } from '../agent-control/run-capability-controller'
-import { SkillDomainAdapter } from '../agent-control/skill-domain-adapter'
-import { SkillContextOrchestrator } from '../agent-control/skill-context-orchestrator'
+import { SkillDomainAdapter } from '../agent-control/skills/skill-domain-adapter'
+import { SkillContextOrchestrator } from '../agent-control/skills/skill-context-orchestrator'
 import { SubtaskRuntime } from '../agent-control/subtask-runtime'
 import { WidgetEditLeaseStore, type ActiveWidgetEditLease } from '../agent-control/widget-edit-lease'
 import { buildToolRuntimeContext } from '../agent-control/tool-runtime-context-builder'
@@ -130,8 +130,8 @@ import { classifyIntent } from '../agent-control/intent-classifier'
 import { detectGenericInteractionState } from '../agent-control/interaction-state-detector'
 import type { RequestEnvelope } from '../agent-control/request-envelope'
 import { buildRequestEnvelope, extractPureUserInput as extractPureUserInputFromEnvelope } from '../agent-control/request-envelope'
-import { recoverLatestSkillRunFromTaskProjections } from '../agent-control/skill-run-recovery'
-import { getLatestRecoverableSkillTaskRun } from '../agent-control/skill-task-tracker'
+import { recoverLatestSkillRunFromTaskProjections } from '../agent-control/skills/skill-run-recovery'
+import { getLatestRecoverableSkillTaskRun } from '../agent-control/skills/skill-task-tracker'
 import {
   advanceTaskStepProgress,
   detectTaskStepCompletionCue,

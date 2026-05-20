@@ -20,9 +20,9 @@ import {
   loadSkillRunContract,
   type TaskProjectionRecord,
 } from '../main/modules/agent-control/run-contracts'
-import type { SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skill-task-supervisor'
-import { createSkillChildRunId } from '../main/modules/agent-control/skill-child-run-id'
-import type { SkillChildRunPayload } from '../main/modules/agent-control/skill-child-run-types'
+import type { SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skills/skill-task-supervisor'
+import { createSkillChildRunId } from '../main/modules/agent-control/skills/skill-child-run-id'
+import type { SkillChildRunPayload } from '../main/modules/agent-control/skills/skill-child-run-types'
 import type {
   SkillTaskRunRecord,
   SkillTaskRunRepository,
@@ -265,16 +265,16 @@ import {
   configureSkillChildRunner as configureRunnerForCaseF,
   startSkillChildRun as startSkillChildRunForCaseF,
   __resetSkillChildRunnerForTests as resetRunnerForCaseF,
-} from '../main/modules/agent-control/skill-child-runner'
+} from '../main/modules/agent-control/skills/skill-child-runner'
 import {
   registerSkillChildDriver as registerDriverForCaseF,
   __resetSkillChildDriversForTests as resetDriversForCaseF,
   type SkillChildDriver as SkillChildDriverForCaseF,
-} from '../main/modules/agent-control/skill-child-drivers'
+} from '../main/modules/agent-control/skills/skill-child-drivers'
 import type {
   SkillChildCloseEvent as SkillChildCloseEventForCaseF,
   SkillChildDriverAction as SkillChildDriverActionForCaseF,
-} from '../main/modules/agent-control/skill-child-run-types'
+} from '../main/modules/agent-control/skills/skill-child-run-types'
 import type {
   SkillRunResult as SkillRunResultForCaseF,
   SkillsRuntimeManager as SkillsRuntimeManagerForCaseF,

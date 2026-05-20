@@ -7,7 +7,7 @@ import { freezeSkillChildCloseEvent } from './skill-child-close-event-freeze'
 import type {
   SubAgentCloseEvent,
   SubAgentProgress,
-} from './sub-agent/sub-agent-types'
+} from '../sub-agent/sub-agent-types'
 
 export const SKILL_CHILD_CLOSE_EVENT_METADATA_KEY = 'skillChildCloseEvent'
 

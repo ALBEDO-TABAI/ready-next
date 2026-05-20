@@ -17,7 +17,7 @@ import {
 } from '../main/modules/tools/skill-tool-session-gate'
 import { shouldExposeSkillAction } from '../main/modules/tools/skills-tools'
 import { ToolRegistry } from '../main/modules/agent-control/tool-registry'
-import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skill-tool-authorization'
+import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import {
   clearActiveSkillContext,
   rememberActiveSkillContext,

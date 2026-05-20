@@ -7,7 +7,7 @@ import {
   readSkillTaskProjection,
   recordSkillTaskEvent,
   clearSkillTaskProjection,
-} from '../main/modules/agent-control/skill-task-tracker'
+} from '../main/modules/agent-control/skills/skill-task-tracker'
 import {
   choosePrimitiveSkillId,
   shouldExposeSkillPrimitive,

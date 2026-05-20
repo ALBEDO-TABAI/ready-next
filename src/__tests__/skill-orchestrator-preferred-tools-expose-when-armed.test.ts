@@ -1,11 +1,11 @@
 import { describe, it, beforeEach } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { SkillContextOrchestrator } from '../main/modules/agent-control/skill-context-orchestrator'
+import { SkillContextOrchestrator } from '../main/modules/agent-control/skills/skill-context-orchestrator'
 import {
   rememberLastReferenceSkill,
   _resetLastReferenceSkillHintsForTests,
-} from '../main/modules/agent-control/skill-reference-hints'
+} from '../main/modules/agent-control/skills/skill-reference-hints'
 
 // skill-resume G6 — when the user fires a retry intent, G3 synthesizes a
 // skillContextInjectionText so findExplicitlyRequestedSkills succeeds. That

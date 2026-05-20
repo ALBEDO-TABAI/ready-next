@@ -23,9 +23,9 @@ import {
   appendChildRunEvent,
   deriveChildRunLogPath,
   readChildRunRollbackTarget,
-} from '../main/modules/agent-control/skill-child-run-log'
-import { createSkillChildRunId } from '../main/modules/agent-control/skill-child-run-id'
-import type { SkillChildRunEvent } from '../main/modules/agent-control/skill-child-run-types'
+} from '../main/modules/agent-control/skills/skill-child-run-log'
+import { createSkillChildRunId } from '../main/modules/agent-control/skills/skill-child-run-id'
+import type { SkillChildRunEvent } from '../main/modules/agent-control/skills/skill-child-run-types'
 import {
   buildTaskCardViewModel,
   createDefaultTaskDisclosureState,

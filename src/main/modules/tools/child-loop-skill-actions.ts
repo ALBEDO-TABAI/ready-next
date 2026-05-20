@@ -1,6 +1,6 @@
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { isChildOwnedSkill } from '../agent-control/skill-child-drivers'
+import { isChildOwnedSkill } from '../agent-control/skills/skill-child-drivers'
 import { getSkillsRuntimeManager, type SkillState } from '../skills-runtime/runtime-manager'
 import { compileSkillDefinition } from '../skills-runtime/skill-compiler'
 

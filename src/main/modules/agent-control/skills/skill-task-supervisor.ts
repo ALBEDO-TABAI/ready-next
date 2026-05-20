@@ -5,17 +5,17 @@ import { dirname, join } from 'node:path'
 import {
   getDetachedSkillTaskTracker,
   type DetachedSkillTaskRecord,
-} from './detached-skill-task-tracker'
+} from '../detached-skill-task-tracker'
 import { readSkillTaskProjection } from './skill-task-tracker'
-import { getRepositoryDatabase } from '../repositories/database-accessor'
+import { getRepositoryDatabase } from '../../repositories/database-accessor'
 import {
   SkillTaskRunRepository,
   type SkillTaskRunRecord,
-} from '../repositories/skill-task-run-repository'
-import { selectRunStateCandidate, type RunStateCandidate, type RunStateSelection } from './run-state-selection'
+} from '../../repositories/skill-task-run-repository'
+import { selectRunStateCandidate, type RunStateCandidate, type RunStateSelection } from '../run-state-selection'
 import { inspectSkillProgressArtifacts } from './skill-progress-artifacts'
-import { isConfiguredChildLoopSkillAction } from '../tools/child-loop-skill-actions'
-import { canResumeShape } from './resume-handle'
+import { isConfiguredChildLoopSkillAction } from '../../tools/child-loop-skill-actions'
+import { canResumeShape } from '../resume-handle'
 
 const RUN_STATE_FILENAME = 'run_state.json'
 const RUN_STATE_SEARCH_DEPTH = 1

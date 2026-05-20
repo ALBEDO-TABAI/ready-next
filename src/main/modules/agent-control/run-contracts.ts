@@ -48,22 +48,22 @@ import type {
 import type { IntentClassification } from './intent-classifier'
 import type { PromptAssemblyResult } from './prompt-assembly'
 import { canResumeShape } from './resume-handle'
-import type { RecentSkillRunForResume } from './skill-turn-identity-snapshot'
+import type { RecentSkillRunForResume } from './skills/skill-turn-identity-snapshot'
 import type { RequestEnvelope } from './request-envelope'
 import type { ContinuationIntent, ContinuationState } from './continuation-state'
 import type { DomainAdapter } from './domain-adapter'
 import type { ToolExecutionHooks } from './tool-execution-hooks'
 import type { ToolRuntimeContext } from './tool-runtime'
 import type { HookRegistry } from './system-reminders/hook-registry'
-import type { SkillTaskSupervisorSnapshot } from './skill-task-supervisor'
-import type { ReferenceSkillHint } from './skill-reference-hints'
+import type { SkillTaskSupervisorSnapshot } from './skills/skill-task-supervisor'
+import type { ReferenceSkillHint } from './skills/skill-reference-hints'
 import type { TurnFrame, TurnFramePatch, TurnTerminalReason } from './turn-frame'
 import type {
   SkillChildCloseEvent,
   SkillChildRunParentNextHint,
   SkillChildRunStatus,
-} from './skill-child-run-types'
-import { decodeStoredSkillChildCloseEvent } from './skill-child-state-machine'
+} from './skills/skill-child-run-types'
+import { decodeStoredSkillChildCloseEvent } from './skills/skill-child-state-machine'
 import { STATIC_SKILL_ACTIONS_BY_TOOL_NAME } from '../tools/skills-tools-static'
 import { isConfiguredChildLoopSkillAction } from '../tools/child-loop-skill-actions'
 import type { SkillTaskRunRepository } from '../repositories/skill-task-run-repository'

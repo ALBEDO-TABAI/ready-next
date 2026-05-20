@@ -14,7 +14,7 @@ import {
   getSkillChildRunKind,
   isSkillChildRunId,
   type SkillChildRunKind,
-} from '../main/modules/agent-control/skill-child-run-id'
+} from '../main/modules/agent-control/skills/skill-child-run-id'
 
 const KINDS: SkillChildRunKind[] = ['vea', 'skill', 'detached']
 const PREFIX_FOR_KIND: Record<SkillChildRunKind, string> = {

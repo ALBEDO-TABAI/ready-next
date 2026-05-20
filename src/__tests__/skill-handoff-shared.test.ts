@@ -11,7 +11,7 @@ import {
   objectValue,
   readJson,
   stringValue,
-} from '../main/modules/agent-control/skill-handoff-shared'
+} from '../main/modules/agent-control/skills/skill-handoff-shared'
 
 test('HANDOFF_TIMEOUT_USER_MESSAGE preserves the user-facing copy', () => {
   assert.equal(HANDOFF_TIMEOUT_USER_MESSAGE, '报告生成超时，可继续重试')

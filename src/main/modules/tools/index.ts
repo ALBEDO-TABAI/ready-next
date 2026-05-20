@@ -1,6 +1,6 @@
 import { defaultToolGateway } from '../agent-control/tool-gateway'
 import type { ToolRegistryReader } from '../agent-control/tool-registry'
-import type { SkillToolAuthorization } from '../agent-control/skill-tool-authorization'
+import type { SkillToolAuthorization } from '../agent-control/skills/skill-tool-authorization'
 import { executeBrowserTool } from './browser-tools'
 import {
   executeCalendarTool,

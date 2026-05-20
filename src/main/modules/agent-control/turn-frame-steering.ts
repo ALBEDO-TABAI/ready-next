@@ -5,10 +5,10 @@ import { resolveToolInputSchemaForExecution } from './tool-registry'
 import { createSystemReminderRegistry } from './system-reminders/system-reminder-registry'
 import { logAgentMetric } from './metrics'
 import { resolveCanonicalChildRunHandle } from './child-run-handle-resolver'
-import { resolvePendingSkillHandoffWriteTargets } from './skill-agent-handoff'
+import { resolvePendingSkillHandoffWriteTargets } from './skills/skill-agent-handoff'
 import type { FrameAction, TurnFrame, TurnFrameLiveness, TurnFrameMode } from './turn-frame'
 import type { SkillRunContract } from './run-contracts'
-import { isTerminalChildCloseStatus } from './skill-child-run-types'
+import { isTerminalChildCloseStatus } from './skills/skill-child-run-types'
 
 export const FRAME_STEERING_PRIMITIVE_TOOL_NAMES = [
   'skill_inspect_run_state',

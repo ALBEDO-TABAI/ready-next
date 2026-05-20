@@ -3,7 +3,7 @@ import { dirname } from 'path'
 import { existsSync, readFileSync } from 'fs'
 import type { SkillRunRequest, SkillRunResult } from '../skills-runtime/runtime-manager'
 import { atomicWriteJson } from './atomic-write'
-import { upsertDetachedSkillTaskRun } from './skill-task-tracker'
+import { upsertDetachedSkillTaskRun } from './skills/skill-task-tracker'
 import { selectRunStateCandidate } from './run-state-selection'
 import { logAgentMetric } from './metrics'
 

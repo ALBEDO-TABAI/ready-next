@@ -5,7 +5,7 @@ import test from 'node:test'
 import {
   isRetryOnlyTurn,
   buildSkillDetectionInputs,
-} from '../main/modules/agent-control/skill-detection-inputs'
+} from '../main/modules/agent-control/skills/skill-detection-inputs'
 import {
   buildContinuationStateFromProjection,
   normalizeContinuationIntent,

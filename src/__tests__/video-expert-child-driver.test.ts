@@ -24,11 +24,11 @@ import {
   __setVeaProviderPreflightConfigReaderForTests,
   videoExpertChildDriver,
 } from '../main/modules/agent-control/video-expert-child-driver'
-import { getSkillChildDriver } from '../main/modules/agent-control/skill-child-drivers'
+import { getSkillChildDriver } from '../main/modules/agent-control/skills/skill-child-drivers'
 import type {
   SkillChildCloseEvent,
   SkillChildDriverAction,
-} from '../main/modules/agent-control/skill-child-run-types'
+} from '../main/modules/agent-control/skills/skill-child-run-types'
 import type { AIModelConfig } from '../shared/ai-providers'
 
 async function makeTempOutputDir(): Promise<string> {

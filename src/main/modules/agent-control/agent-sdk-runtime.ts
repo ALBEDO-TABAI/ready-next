@@ -35,13 +35,13 @@ import type { ContinuationIntent, ContinuationState } from './continuation-state
 import {
   resumeSkillChildRun,
   waitForSkillChildRunClose,
-} from './skill-child-runner'
+} from './skills/skill-child-runner'
 import {
   isCompletedChildCloseStatus,
   isFailedChildCloseStatus,
   isKilledChildCloseStatus,
   type SkillChildCloseEvent,
-} from './skill-child-run-types'
+} from './skills/skill-child-run-types'
 import type { MultimodalBlock } from '../claude-bridge/direct-chat'
 import {
   buildTextToolBridgePrompt,
@@ -91,7 +91,7 @@ import {
   buildExplicitNoSkillAuthorization,
   buildSelectedSkillToolAuthorization,
   type SkillToolAuthorization,
-} from './skill-tool-authorization'
+} from './skills/skill-tool-authorization'
 import { resolveCapabilityResolution } from './capability-resolver'
 import { filterToolsByVisionCapability } from './tool-gateway'
 import {

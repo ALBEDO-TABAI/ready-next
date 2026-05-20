@@ -19,7 +19,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { executeToolCall, type ToolContext } from '../main/modules/tools/tool-executor'
-import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skill-tool-authorization'
+import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 
 function makeModelContext(overrides?: Partial<ToolContext>): Partial<ToolContext> {
   return {

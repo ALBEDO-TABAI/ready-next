@@ -14,11 +14,11 @@ import test from 'node:test'
 
 import {
   resolveSkillTurnIdentity,
-} from '../main/modules/agent-control/skill-turn-identity'
+} from '../main/modules/agent-control/skills/skill-turn-identity'
 import type {
   ReferenceHintSnapshot,
   SkillTurnIdentitySnapshot,
-} from '../main/modules/agent-control/skill-turn-identity-snapshot'
+} from '../main/modules/agent-control/skills/skill-turn-identity-snapshot'
 import type { ExplicitRunStateResourceCandidate } from '../main/modules/agent-control/run-state-resource-resolver'
 
 // ---------------------------------------------------------------------------

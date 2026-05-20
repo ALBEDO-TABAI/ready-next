@@ -11,9 +11,9 @@
  * without churning the Phase 1 acceptance tests.
  */
 
-import type { TurnFramePatch } from './turn-frame'
+import type { TurnFramePatch } from '../turn-frame'
 import type { SkillChildRunKind } from './skill-child-run-id'
-import type { DeepReadonly } from '../../../shared/deep-readonly'
+import type { DeepReadonly } from '../../../../shared/deep-readonly'
 
 // Re-export for downstream consumers so they only need to import from one place.
 export type { SkillChildRunKind } from './skill-child-run-id'
@@ -283,7 +283,7 @@ export interface SkillChildLaunchParams {
   sessionId: string | null
   requestedInput: Record<string, unknown>
   parentNextHint: SkillChildRunParentNextHint
-  agentContext?: import('../../../shared/skill-host-contract').AgentSpawnContext | null
+  agentContext?: import('../../../../shared/skill-host-contract').AgentSpawnContext | null
   /** Optional pre-existing output dir for legacy resume. */
   outputDir?: string
 }

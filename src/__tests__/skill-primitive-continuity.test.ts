@@ -7,8 +7,8 @@ import {
 } from '../main/modules/tools/skills-tools'
 import {
   registerSkillTaskRunRepository,
-} from '../main/modules/agent-control/skill-task-tracker'
-import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skill-tool-authorization'
+} from '../main/modules/agent-control/skills/skill-task-tracker'
+import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import type { SkillTaskRunRecord, SkillTaskRunRepository } from '../main/modules/repositories/skill-task-run-repository'
 
 function makeRepositoryWithActiveRun(): SkillTaskRunRepository {

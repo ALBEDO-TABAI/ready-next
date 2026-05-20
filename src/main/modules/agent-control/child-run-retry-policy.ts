@@ -1,4 +1,4 @@
-import type { SkillChildRunTerminalReason } from './skill-child-run-types'
+import type { SkillChildRunTerminalReason } from './skills/skill-child-run-types'
 
 export interface ChildRunRetryPolicy {
   retriable: boolean

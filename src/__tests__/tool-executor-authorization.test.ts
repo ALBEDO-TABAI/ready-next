@@ -25,7 +25,7 @@ import { executeToolCall, type ToolContext } from '../main/modules/tools/tool-ex
 import {
   buildExplicitNoSkillAuthorization,
   buildSelectedSkillToolAuthorization,
-} from '../main/modules/agent-control/skill-tool-authorization'
+} from '../main/modules/agent-control/skills/skill-tool-authorization'
 
 // ---------------------------------------------------------------------------
 // Admission-order: authorization MUST run before allowedToolNames for skill_*

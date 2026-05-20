@@ -19,7 +19,7 @@ import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/
 import {
   rememberLastReferenceSkill,
   _resetLastReferenceSkillHintsForTests,
-} from '../main/modules/agent-control/skill-reference-hints'
+} from '../main/modules/agent-control/skills/skill-reference-hints'
 import { defaultToolRegistry } from '../main/modules/agent-control/tool-registry'
 import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
 import type { ToolDefinition } from '../main/modules/agent-control/tool-definition'

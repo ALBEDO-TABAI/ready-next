@@ -8,11 +8,11 @@ import {
   configureSkillChildRunner,
   startSkillChildRun,
   waitForSkillChildRunClose,
-} from '../../main/modules/agent-control/skill-child-runner'
+} from '../../main/modules/agent-control/skills/skill-child-runner'
 import {
   __resetSkillChildDriversForTests,
   registerSkillChildDriver,
-} from '../../main/modules/agent-control/skill-child-drivers'
+} from '../../main/modules/agent-control/skills/skill-child-drivers'
 import { videoExpertChildDriver } from '../../main/modules/agent-control/video-expert-child-driver'
 
 import {

@@ -8,12 +8,12 @@ import { RunCoordinator } from '../main/modules/agent-control/run-coordinator'
 import { RunProjection } from '../main/modules/agent-control/run-projection'
 import { syncTaskProjection } from '../main/modules/agent-control/task-projection-sync'
 import { buildBudgetWarningMessage, renderChildCommandOutcome, TurnEngine } from '../main/modules/agent-control/turn-engine'
-import { SkillTaskSupervisor, type SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skill-task-supervisor'
+import { SkillTaskSupervisor, type SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skills/skill-task-supervisor'
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
 import {
   rememberLastReferenceSkill,
   _resetLastReferenceSkillHintsForTests,
-} from '../main/modules/agent-control/skill-reference-hints'
+} from '../main/modules/agent-control/skills/skill-reference-hints'
 import { defaultToolRegistry } from '../main/modules/agent-control/tool-registry'
 import type { IntentClassification } from '../main/modules/agent-control/intent-classifier'
 import type { DomainAdapter } from '../main/modules/agent-control/domain-adapter'
@@ -21,7 +21,7 @@ import type { ConversationScope, ScopeRunEventPayload, ScopeRunSummary } from '.
 import type { RunBudgetSeed, RunBudgetUsage, TaskProjectionRecord, TaskProjectionStore, TurnEngineRequest, TurnEngineSession, TurnTranscriptEvent } from '../main/modules/agent-control/run-contracts'
 import type { TurnTerminalReason } from '../main/modules/agent-control/turn-frame'
 import type { ToolDefinition } from '../main/modules/agent-control/tool-definition'
-import type { SkillChildCloseEvent } from '../main/modules/agent-control/skill-child-run-types'
+import type { SkillChildCloseEvent } from '../main/modules/agent-control/skills/skill-child-run-types'
 
 function createSession(userText: string): TurnEngineSession {
   return {

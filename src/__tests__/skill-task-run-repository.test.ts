@@ -2,8 +2,8 @@ import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
 import test from 'node:test'
 
-import { createSkillChildRunId } from '../main/modules/agent-control/skill-child-run-id'
-import type { SkillChildCloseEvent } from '../main/modules/agent-control/skill-child-run-types'
+import { createSkillChildRunId } from '../main/modules/agent-control/skills/skill-child-run-id'
+import type { SkillChildCloseEvent } from '../main/modules/agent-control/skills/skill-child-run-types'
 import { runMigrations, type MigrationDatabase } from '../main/modules/migrations'
 import {
   SkillTaskRunRepository,

@@ -1,4 +1,4 @@
-import { isRetryOnlyTurn } from './skill-detection-inputs'
+import { isRetryOnlyTurn } from './skills/skill-detection-inputs'
 
 function normalizeToken(value: string): string {
   return String(value || '')

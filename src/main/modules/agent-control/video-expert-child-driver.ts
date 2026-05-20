@@ -33,17 +33,17 @@ import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 
 import { logAgentMetric } from './metrics'
 import type { SkillRunContract } from './run-contracts'
-import { inspectSkillProgressArtifacts, type SkillProgressArtifacts } from './skill-progress-artifacts'
+import { inspectSkillProgressArtifacts, type SkillProgressArtifacts } from './skills/skill-progress-artifacts'
 import {
   registerSkillChildDriver,
   type SkillChildDriver,
-} from './skill-child-drivers'
+} from './skills/skill-child-drivers'
 import type {
   SkillChildCloseEvent,
   SkillChildDriverAction,
   SkillChildDriverState,
   SkillChildLaunchParams,
-} from './skill-child-run-types'
+} from './skills/skill-child-run-types'
 
 const VEA_SKILL_ID = 'video-expert-analyzer'
 const PIPELINE_ACTION = 'video_expert_pipeline'
@@ -690,8 +690,8 @@ function __setVeaProviderPreflightConfigReaderForTests(reader: VeaProviderPrefli
 }
 
 export { veaDriver as videoExpertChildDriver }
-export { getSkillChildDriver } from './skill-child-drivers'
-export type { SkillChildDriver } from './skill-child-drivers'
+export { getSkillChildDriver } from './skills/skill-child-drivers'
+export type { SkillChildDriver } from './skills/skill-child-drivers'
 
 // Light metric to confirm registration ordering during boot.
 try {

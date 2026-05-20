@@ -6,12 +6,12 @@ import {
   SkillTaskRunRepository,
   type SkillTaskRunRecord,
 } from '../repositories/skill-task-run-repository'
-import { getLastReferenceSkill, type ReferenceSkillHint } from './skill-reference-hints'
+import { getLastReferenceSkill, type ReferenceSkillHint } from './skills/skill-reference-hints'
 import type { TaskProjectionRecord } from './run-contracts'
 import {
   inspectLatestSkillTask,
   type SkillTaskSupervisorSnapshot,
-} from './skill-task-supervisor'
+} from './skills/skill-task-supervisor'
 import { isVeaAction, resolveVeaResumeAction } from './vea-resume-action'
 
 export type ActiveSkillContextSource =

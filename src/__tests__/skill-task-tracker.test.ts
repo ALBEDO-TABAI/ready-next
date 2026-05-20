@@ -12,7 +12,7 @@ import {
   registerSkillTaskRunRepository,
   readSkillTaskProjection,
   upsertDetachedSkillTaskRun,
-} from '../main/modules/agent-control/skill-task-tracker'
+} from '../main/modules/agent-control/skills/skill-task-tracker'
 import type { SkillTaskRunRecord, SkillTaskRunRepository } from '../main/modules/repositories/skill-task-run-repository'
 
 function createTaskRunRepositoryHarness() {

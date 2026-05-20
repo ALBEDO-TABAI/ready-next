@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { findSkillHintInCapsuleTexts } from '../main/modules/agent-control/skill-hint-recovery'
+import { findSkillHintInCapsuleTexts } from '../main/modules/agent-control/skills/skill-hint-recovery'
 
 // skill-resume G4 — last-recourse hint recovery from auto-attached capsule
 // text. Tests the pure helper without any IO or runtime-manager wiring.

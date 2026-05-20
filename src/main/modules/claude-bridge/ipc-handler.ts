@@ -15,14 +15,14 @@ import {
   clearAllReferenceSkillHints,
   clearLastReferenceSkill,
   setReferenceHintChangeEmitter,
-} from '../agent-control/skill-reference-hints'
-import { clearSkillTaskProjection } from '../agent-control/skill-task-tracker'
+} from '../agent-control/skills/skill-reference-hints'
+import { clearSkillTaskProjection } from '../agent-control/skills/skill-task-tracker'
 import { registerAskUserQuestionEmitter } from '../agent-control/ask-user-bridge'
 import {
   registerAskUserQuestionsCardEmitter,
   registerAskUserQuestionsCardPersistor,
 } from '../agent-control/ask-user-questions-bridge'
-import { registerSkillReferenceInlinedEmitter } from '../agent-control/skill-reference-inlined-bridge'
+import { registerSkillReferenceInlinedEmitter } from '../agent-control/skills/skill-reference-inlined-bridge'
 import { getEphemeralExecutionStore } from '../tools/skill-primitives/ephemeral-execution-store'
 import {
   getAskUserQuestionsStore,

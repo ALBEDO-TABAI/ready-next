@@ -20,11 +20,11 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { SkillContextOrchestrator } from '../main/modules/agent-control/skill-context-orchestrator'
+import { SkillContextOrchestrator } from '../main/modules/agent-control/skills/skill-context-orchestrator'
 import {
   _resetLastReferenceSkillHintsForTests,
   getLastReferenceSkill,
-} from '../main/modules/agent-control/skill-reference-hints'
+} from '../main/modules/agent-control/skills/skill-reference-hints'
 
 function makeReferenceSkill(id: string, name: string): any {
   return {

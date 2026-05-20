@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import {
   buildSkillDetectionInputs,
   collectRecentAssistantSkillToolUses,
-} from '../main/modules/agent-control/skill-detection-inputs'
+} from '../main/modules/agent-control/skills/skill-detection-inputs'
 
 // skill-resume plan A2 — when the user's current input is a bare retry intent
 // ("继续"), skill detection now also scans recent assistant tool_use blocks

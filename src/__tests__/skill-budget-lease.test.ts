@@ -8,8 +8,8 @@ import { scoreSkillWaste } from '../main/modules/agent-control/waste-scorer'
 import {
   createSkillBudgetLeaseState,
   evaluateSkillBudgetLease,
-} from '../main/modules/agent-control/skill-budget-lease-controller'
-import type { SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skill-task-supervisor'
+} from '../main/modules/agent-control/skills/skill-budget-lease-controller'
+import type { SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skills/skill-task-supervisor'
 
 function hashInput(input: unknown): string {
   return createHash('sha1').update(JSON.stringify(input ?? null)).digest('hex').slice(0, 16)

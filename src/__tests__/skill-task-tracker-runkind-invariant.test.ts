@@ -20,7 +20,7 @@ import {
   recordSkillParentTaskLifecycleEvent,
   recordSkillTaskEvent,
   registerSkillTaskRunRepository,
-} from '../main/modules/agent-control/skill-task-tracker'
+} from '../main/modules/agent-control/skills/skill-task-tracker'
 import type {
   SkillTaskRunRecord,
   SkillTaskRunRepository,

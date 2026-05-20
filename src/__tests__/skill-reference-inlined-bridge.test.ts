@@ -20,7 +20,7 @@ import {
   emitSkillReferenceInlined,
   registerSkillReferenceInlinedEmitter,
   type SkillReferenceInlinedEvent,
-} from '../main/modules/agent-control/skill-reference-inlined-bridge'
+} from '../main/modules/agent-control/skills/skill-reference-inlined-bridge'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')

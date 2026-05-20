@@ -8,13 +8,13 @@ import {
   decodeStoredSkillChildTerminalReason,
   isSkillChildRunResumable,
   isSkillChildRunTerminalReason,
-} from '../main/modules/agent-control/skill-child-state-machine'
+} from '../main/modules/agent-control/skills/skill-child-state-machine'
 import type {
   ChildWaitResult,
   SkillChildCloseEvent,
   SkillChildRunStatus,
   SkillChildRunTerminalReason,
-} from '../main/modules/agent-control/skill-child-run-types'
+} from '../main/modules/agent-control/skills/skill-child-run-types'
 
 function makeCloseEvent(overrides?: Partial<SkillChildCloseEvent>): SkillChildCloseEvent {
   return {

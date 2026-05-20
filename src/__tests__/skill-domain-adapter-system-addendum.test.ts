@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { buildSkillDomainInstruction } from '../main/modules/agent-control/skill-domain-adapter'
+import { buildSkillDomainInstruction } from '../main/modules/agent-control/skills/skill-domain-adapter'
 
 // skill-resume D2 — when narrowing actually drops tools, system instruction
 // gets a dynamic addendum listing the dropped tools. Without addendum, LLM

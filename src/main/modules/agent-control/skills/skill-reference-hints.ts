@@ -17,8 +17,8 @@
  * B plan Phase 0 — P0-T3.
  */
 
-import { logAgentMetric } from './metrics'
-import { TOOL_ERROR_METRICS } from './tool-error-metrics'
+import { logAgentMetric } from '../metrics'
+import { TOOL_ERROR_METRICS } from '../tool-error-metrics'
 
 export interface ReferenceSkillHint {
   id: string

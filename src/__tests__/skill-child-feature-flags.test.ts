@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { isChildResumeEnabled } from '../main/modules/agent-control/skill-child-feature-flags'
+import { isChildResumeEnabled } from '../main/modules/agent-control/skills/skill-child-feature-flags'
 
 test('isChildResumeEnabled returns true when env var is unset', () => {
   assert.equal(isChildResumeEnabled({}), true)

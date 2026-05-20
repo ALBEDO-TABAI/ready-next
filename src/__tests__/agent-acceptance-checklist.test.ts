@@ -18,7 +18,7 @@ import {
 } from '../main/modules/agent-control/agent-sdk-runtime'
 import type { ToolDefinition } from '../main/modules/agent-control/tool-definition'
 import { createToolExecutionOutput } from '../main/modules/agent-control/tool-result-types'
-import { rememberLastReferenceSkill } from '../main/modules/agent-control/skill-reference-hints'
+import { rememberLastReferenceSkill } from '../main/modules/agent-control/skills/skill-reference-hints'
 import type { ExecutionTurnResult } from '../main/modules/agent-control/run-contracts'
 import type { ScopeRunEventPayload } from '../main/modules/agent-control/types'
 import {

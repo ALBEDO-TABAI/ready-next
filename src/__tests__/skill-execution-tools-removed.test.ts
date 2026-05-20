@@ -13,7 +13,7 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 
 import { ToolGateway } from '../main/modules/agent-control/tool-gateway'
-import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skill-tool-authorization'
+import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import { SkillsRuntimeManager } from '../main/modules/skills-runtime/runtime-manager'
 import {
   STATIC_SKILL_TOOL_NAMES,

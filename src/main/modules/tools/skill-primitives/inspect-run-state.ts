@@ -31,7 +31,7 @@ import { ToolDomainError } from '../tool-errors'
 import { logAgentMetric } from '../../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../../agent-control/tool-error-metrics'
 import { getDetachedSkillTaskTracker } from '../../agent-control/detached-skill-task-tracker'
-import { inspectSkillProgressArtifacts, type SkillProgressArtifacts } from '../../agent-control/skill-progress-artifacts'
+import { inspectSkillProgressArtifacts, type SkillProgressArtifacts } from '../../agent-control/skills/skill-progress-artifacts'
 import { selectRunStateCandidate, type RunStateCandidate } from '../../agent-control/run-state-selection'
 import {
   buildContractFramePatch,

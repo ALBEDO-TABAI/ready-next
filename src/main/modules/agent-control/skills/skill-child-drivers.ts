@@ -14,9 +14,9 @@
  * Source plan: §3.2 Runtime Decisions, §5.5 Admission Rules, §Phase 5.
  */
 
-import type { SkillRunResult } from '../skills-runtime/runtime-manager'
+import type { SkillRunResult } from '../../skills-runtime/runtime-manager'
 
-import type { SkillRunContract } from './run-contracts'
+import type { SkillRunContract } from '../run-contracts'
 import type {
   SkillChildCloseEvent,
   SkillChildDriverAction,

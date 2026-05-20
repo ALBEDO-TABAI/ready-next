@@ -229,7 +229,7 @@ import {
   summarizeActiveSkillContext,
   type ActiveSkillContext,
 } from './active-skill-context'
-import { clearLastReferenceSkill } from './skill-reference-hints'
+import { clearLastReferenceSkill } from './skills/skill-reference-hints'
 import { applySupervisorRuntimeToTurnFrame, resolveTurnFrame } from './turn-frame-resolver'
 import { applySteeringToTurnFrame } from './turn-frame-steering'
 import {
@@ -246,7 +246,7 @@ import {
   collectRecentAssistantSkillToolUses,
   isConfigRepairTurn,
   isRetryOnlyTurn,
-} from './skill-detection-inputs'
+} from './skills/skill-detection-inputs'
 import {
   resolveExplicitRunStateResource,
   resolveRunStateResourceFromSessionText,
@@ -320,26 +320,26 @@ import { composePetStickynoteRetryReminder } from './system-reminders/pet-sticky
 import { composeBrowserTaskCorrectionReminder } from './system-reminders/browser-task-correction-reminder'
 import { createLayeredCompactor, type LayeredCompactorMetricName } from './layered-compactor'
 import type { HookRegistry } from './system-reminders/hook-registry'
-import { buildLongSkillRunningProjection } from './skill-running-projection'
-import { buildSkillTaskLifecycleSignal } from './skill-task-lifecycle'
-import { inspectLatestSkillTask } from './skill-task-supervisor'
-import type { SkillTaskSupervisorSnapshot } from './skill-task-supervisor'
-import { recordSkillParentTaskLifecycleEvent } from './skill-task-tracker'
+import { buildLongSkillRunningProjection } from './skills/skill-running-projection'
+import { buildSkillTaskLifecycleSignal } from './skills/skill-task-lifecycle'
+import { inspectLatestSkillTask } from './skills/skill-task-supervisor'
+import type { SkillTaskSupervisorSnapshot } from './skills/skill-task-supervisor'
+import { recordSkillParentTaskLifecycleEvent } from './skills/skill-task-tracker'
 // Stage 4 W1 — pure-read SkillTurnIdentity shadow.
-import { collectIdentityReadSnapshot } from './skill-turn-identity-snapshot'
-import { applySkillTurnIdentity, resolveSkillTurnIdentity } from './skill-turn-identity'
-import { SKILL_TURN_IDENTITY_METRICS } from './skill-turn-identity-metrics'
+import { collectIdentityReadSnapshot } from './skills/skill-turn-identity-snapshot'
+import { applySkillTurnIdentity, resolveSkillTurnIdentity } from './skills/skill-turn-identity'
+import { SKILL_TURN_IDENTITY_METRICS } from './skills/skill-turn-identity-metrics'
 // Stage 4 W3b — derive per-turn skill tool authorization from identity.
 import {
   buildAuthorizationFromIdentity,
   type SkillToolAuthorization,
-} from './skill-tool-authorization'
+} from './skills/skill-tool-authorization'
 import { PRIMITIVE_TOOL_DEFS } from '../tools/skill-primitives/tool-defs'
 import {
   createSkillBudgetLeaseState,
   evaluateSkillBudgetLease,
   produceBudgetPatch,
-} from './skill-budget-lease-controller'
+} from './skills/skill-budget-lease-controller'
 import { scoreSkillProgress, type SkillProgressScore } from './progress-scorer'
 import { scoreSkillWaste, type SkillWasteScore } from './waste-scorer'
 import { buildAgentSpawnContextFromAIConfig } from '../skills-runtime/agent-context-source'
@@ -355,7 +355,7 @@ import {
   getSkillChildRunCloseEvent,
   resumeSkillChildRun,
   type StartSkillChildRunResult,
-} from './skill-child-runner'
+} from './skills/skill-child-runner'
 import {
   isBlockedChildCloseStatus,
   isCompletedChildCloseStatus,
@@ -363,7 +363,7 @@ import {
   isKilledChildCloseStatus,
   isTerminalChildCloseStatus,
   type SkillChildCloseEvent,
-} from './skill-child-run-types'
+} from './skills/skill-child-run-types'
 import type {
   RunBudgetHint,
   SkillBudgetLeaseState,

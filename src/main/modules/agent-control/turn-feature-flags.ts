@@ -1,5 +1,5 @@
 import { isChildRunCircuitBreakerEnabled } from './child-run-circuit-breaker'
-import { isChildResumeEnabled } from './skill-child-feature-flags'
+import { isChildResumeEnabled } from './skills/skill-child-feature-flags'
 import { isChildInternalStrictAdmissionEnabled } from './tool-definition'
 
 export type TurnFeatureFlags = Readonly<{

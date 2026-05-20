@@ -3,7 +3,7 @@ import type { BrowserTaskDecisionMode } from '../../../shared/browser-agent-task
 import type { CapabilityProfileId } from '../../../shared/ai-capability-groups'
 import type { CapabilityRuntimeSnapshot } from '../../../shared/ai-capability-runtime'
 import type { ToolPolicy } from './execution-tool-config'
-import type { SkillToolAuthorization } from './skill-tool-authorization'
+import type { SkillToolAuthorization } from './skills/skill-tool-authorization'
 import { getPolicyOpenAIToolBundle } from './execution-tool-config'
 import type { ToolVisibilityPlan } from './run-contracts'
 import type { CapabilityResolution, CapabilityRuntimeAvailability } from './capability-resolver'

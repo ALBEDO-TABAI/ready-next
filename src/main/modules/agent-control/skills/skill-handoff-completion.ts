@@ -1,8 +1,8 @@
 import { existsSync, readFileSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
-import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
-import { atomicWriteText } from './atomic-write'
+import type { AgentSpawnContext } from '../../../../shared/skill-host-contract'
+import { atomicWriteText } from '../atomic-write'
 import { markSkillHandoffOutputCompleted, updateSkillHandoffTaskState } from './skill-agent-handoff'
 import {
   HANDOFF_TIMEOUT_USER_MESSAGE,

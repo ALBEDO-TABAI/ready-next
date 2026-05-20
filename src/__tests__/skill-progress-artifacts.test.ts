@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { inspectSkillProgressArtifacts } from '../main/modules/agent-control/skill-progress-artifacts'
+import { inspectSkillProgressArtifacts } from '../main/modules/agent-control/skills/skill-progress-artifacts'
 
 function tempRoot(): string {
   return mkdtempSync(join(tmpdir(), 'ready-skill-progress-'))

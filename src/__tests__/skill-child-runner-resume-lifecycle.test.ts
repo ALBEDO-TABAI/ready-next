@@ -34,17 +34,17 @@ import {
   cancelSkillChildRun,
   getSkillChildRunCloseEvent,
   getSkillChildRunner,
-} from '../main/modules/agent-control/skill-child-runner'
+} from '../main/modules/agent-control/skills/skill-child-runner'
 import {
   registerSkillChildDriver,
   __resetSkillChildDriversForTests,
   type SkillChildDriver,
-} from '../main/modules/agent-control/skill-child-drivers'
+} from '../main/modules/agent-control/skills/skill-child-drivers'
 import type {
   SkillChildCloseEvent,
   SkillChildDriverAction,
   SkillChildDriverState,
-} from '../main/modules/agent-control/skill-child-run-types'
+} from '../main/modules/agent-control/skills/skill-child-run-types'
 import type {
   SkillRunResult,
   SkillsRuntimeManager,

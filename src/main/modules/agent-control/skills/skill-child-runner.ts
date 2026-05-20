@@ -33,29 +33,29 @@ import { dirname, isAbsolute, join } from 'node:path'
 import type {
   SkillRunResult,
   SkillsRuntimeManager,
-} from '../skills-runtime/runtime-manager'
-import type { SkillTaskRunRepository } from '../repositories/skill-task-run-repository'
-import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
-import type { ScopeRunEventPayload, ScopeRunResumableAction, ScopeRunSkillProgress } from './types'
-import type { TaskProjectionRecord, TaskProjectionStore, TaskStep } from './run-contracts'
+} from '../../skills-runtime/runtime-manager'
+import type { SkillTaskRunRepository } from '../../repositories/skill-task-run-repository'
+import type { AgentSpawnContext } from '../../../../shared/skill-host-contract'
+import type { ScopeRunEventPayload, ScopeRunResumableAction, ScopeRunSkillProgress } from '../types'
+import type { TaskProjectionRecord, TaskProjectionStore, TaskStep } from '../run-contracts'
 
-import { logAgentMetric } from './metrics'
-import { TOOL_ERROR_METRICS } from './tool-error-metrics'
-import { linkParentAbort } from './link-parent-abort'
+import { logAgentMetric } from '../metrics'
+import { TOOL_ERROR_METRICS } from '../tool-error-metrics'
+import { linkParentAbort } from '../link-parent-abort'
 import { createSkillChildRunId, getSkillChildRunKind } from './skill-child-run-id'
 import {
   appendChildRunEvent,
   deriveLegacyChildRunLogPath,
   deriveRuntimeChildRunLogPath,
 } from './skill-child-run-log'
-import { writeLifecycle } from './output-dir-lifecycle'
+import { writeLifecycle } from '../output-dir-lifecycle'
 import { inspectSkillProgressArtifacts } from './skill-progress-artifacts'
 import {
   completePendingSkillHandoffs,
   listHandoffValidationRepairTasks,
   listPendingSkillHandoffTasks,
 } from './skill-handoff-completion'
-import { selectRunStateCandidate } from './run-state-selection'
+import { selectRunStateCandidate } from '../run-state-selection'
 import {
   recordSkillParentTaskLifecycleEvent,
   type SkillParentTaskLifecycleReason,
@@ -64,7 +64,7 @@ import {
 import {
   ChildRunCircuitBreaker,
   shouldCountChildRunCircuitBreakerFailure,
-} from './child-run-circuit-breaker'
+} from '../child-run-circuit-breaker'
 import {
   getSkillChildDriver,
   isChildOwnedSkill,
@@ -72,7 +72,7 @@ import {
 import {
   executeSkillActionViaToolGateway,
   type ChildGatewayResult,
-} from './tool-registry'
+} from '../tool-registry'
 import {
   isCompletedChildCloseStatus,
   isKilledChildCloseStatus,
@@ -96,14 +96,14 @@ import { freezeSkillChildCloseEvent } from './skill-child-close-event-freeze'
 import { createSkillChildSubAgent } from './skill-child-sub-agent'
 import { mapSubAgentCloseToChildClose } from './skill-child-sub-agent-close-mapping'
 import { isSkillChildProgressPayload } from './skill-child-sub-agent-events'
-import { createSubAgentCleanupHandle } from './sub-agent/sub-agent-cleanup'
-import { runSubAgent } from './sub-agent/sub-agent-runner'
-import { disposeTimeout } from './timer-disposal'
-import { snapshotTurnFeatureFlags } from './turn-feature-flags'
+import { createSubAgentCleanupHandle } from '../sub-agent/sub-agent-cleanup'
+import { runSubAgent } from '../sub-agent/sub-agent-runner'
+import { disposeTimeout } from '../timer-disposal'
+import { snapshotTurnFeatureFlags } from '../turn-feature-flags'
 import {
   isResumeOnlySkillAction,
   resolveCanonicalChildRunHandle,
-} from './child-run-handle-resolver'
+} from '../child-run-handle-resolver'
 
 // =====================================================================
 // Tunable constants (source plan §5.5).
