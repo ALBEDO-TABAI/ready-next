@@ -1,4 +1,4 @@
-import { RunCleanupRegistry, type RunCleanupCallback } from '../run-cleanup-registry'
+import { RunCleanupRegistry, type RunCleanupCallback } from '../task-projection/run-cleanup-registry'
 import type { SubAgentCleanupHandle } from './sub-agent-types'
 
 export function createSubAgentCleanupHandle(

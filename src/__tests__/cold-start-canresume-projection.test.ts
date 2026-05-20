@@ -15,7 +15,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { deriveTaskCardRuntimeState } from '../renderer/modules/agent/taskCardViewModel'
-import { deriveTaskProjectionCanResume } from '../main/modules/agent-control/task-projection-resume'
+import { deriveTaskProjectionCanResume } from '../main/modules/agent-control/task-projection/task-projection-resume'
 import type { TaskProjectionRecord } from '../main/modules/agent-control/run-contracts'
 
 function projection(overrides: Partial<TaskProjectionRecord>): TaskProjectionRecord {

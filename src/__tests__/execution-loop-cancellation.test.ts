@@ -7,7 +7,7 @@ import {
   createRunBudgetSeed,
   createStepBudgetState,
   createTaskBudgetRuntime,
-} from '../main/modules/agent-control/run-budget-policy'
+} from '../main/modules/agent-control/task-projection/run-budget-policy'
 
 test('ExecutionLoopOrchestrator stops before starting the next serial tool after cancellation', async () => {
   const orchestrator = new ExecutionLoopOrchestrator({ log: () => {} })

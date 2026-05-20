@@ -63,7 +63,7 @@ import {
   getRemainingToolCallBudget,
   rebindTaskBudgetRuntime,
   restoreContinuationTaskBudgetRuntime,
-} from '../agent-control/run-budget-policy'
+} from '../agent-control/task-projection/run-budget-policy'
 import {
   buildTextToolBridgeCorrectionMessage,
   buildToolGuidance,

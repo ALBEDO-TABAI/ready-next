@@ -12,7 +12,7 @@ import {
   SkillTaskRunRepository,
   type SkillTaskRunRecord,
 } from '../../repositories/skill-task-run-repository'
-import { selectRunStateCandidate, type RunStateCandidate, type RunStateSelection } from '../run-state-selection'
+import { selectRunStateCandidate, type RunStateCandidate, type RunStateSelection } from '../task-projection/run-state-selection'
 import { inspectSkillProgressArtifacts } from './skill-progress-artifacts'
 import { isConfiguredChildLoopSkillAction } from '../../tools/child-loop-skill-actions'
 import { canResumeShape } from '../resume-handle'

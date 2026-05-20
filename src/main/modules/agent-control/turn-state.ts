@@ -3,7 +3,7 @@ import {
   createTaskBudgetRuntime,
   getBudgetUsagePercent,
   rebindTaskBudgetRuntime,
-} from './run-budget-policy'
+} from './task-projection/run-budget-policy'
 import type {
   BudgetWarningLevel,
   ContinuationBudgetRestoreDiagnostics,

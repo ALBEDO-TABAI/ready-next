@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { RunCoordinator } from '../main/modules/agent-control/run-coordinator'
+import { RunCoordinator } from '../main/modules/agent-control/task-projection/run-coordinator'
 import type {
   ConversationScope,
   ScopeRunEventPayload,

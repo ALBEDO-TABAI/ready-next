@@ -22,7 +22,7 @@ import {
   getBudgetUsagePercent,
   getBudgetWarningLevel,
   getRemainingToolCallBudget,
-} from './run-budget-policy'
+} from './task-projection/run-budget-policy'
 import type { ToolExecutionHooks } from './tool-execution-hooks'
 import {
   createToolExecutionOutput,

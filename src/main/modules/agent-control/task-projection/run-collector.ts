@@ -17,7 +17,7 @@ export interface StatusEventLike {
   sessionId?: string
   runId?: string
   status: string
-  terminalReason?: import('./turn-frame').TurnTerminalReason | null
+  terminalReason?: import('../turn-frame').TurnTerminalReason | null
 }
 
 export interface ErrorEventLike {
@@ -34,12 +34,12 @@ export interface SendAndCollectResult {
   usedTools: string[]
   error?: string
   taskId?: string | null
-  taskType?: import('./run-contracts').TaskType
-  interactionState?: import('./run-contracts').TaskInteractionState
+  taskType?: import('../run-contracts').TaskType
+  interactionState?: import('../run-contracts').TaskInteractionState
   taskProjectionId?: string | null
-  executionDiagnostics?: import('./run-contracts').ExecutionRunDiagnostics | null
-  projectionTruth?: import('./run-contracts').ProjectionTruthSnapshot | null
-  terminalReason?: import('./turn-frame').TurnTerminalReason | null
+  executionDiagnostics?: import('../run-contracts').ExecutionRunDiagnostics | null
+  projectionTruth?: import('../run-contracts').ProjectionTruthSnapshot | null
+  terminalReason?: import('../turn-frame').TurnTerminalReason | null
 }
 
 function matchesScope(match: ScopedRunMatch, payload: { agent: string; sessionId?: string; runId?: string }): boolean {

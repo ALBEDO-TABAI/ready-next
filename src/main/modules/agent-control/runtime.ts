@@ -32,7 +32,7 @@ import {
 } from '../database'
 import { ReadyAgentOrchestrator } from './orchestrator'
 import { PromptAssemblyService } from './prompt-assembly'
-import { RunCoordinator } from './run-coordinator'
+import { RunCoordinator } from './task-projection/run-coordinator'
 import type { DomainAdapter } from './domain-adapter'
 import {
   snapshotLastReferenceSkill,
@@ -61,15 +61,15 @@ import './video-expert-child-driver'
 import { assertStageNChildLoopInvariants } from './stage-n-boot-assertion'
 import { defaultToolRegistry } from './tool-registry'
 import { ToolNameCollisionError } from './tool-registry-errors'
-import { RunProjection } from './run-projection'
-import { syncTaskProjection } from './task-projection-sync'
-import { reconcileTaskProjections } from './task-projection-reconciler'
+import { RunProjection } from './task-projection/run-projection'
+import { syncTaskProjection } from './task-projection/task-projection-sync'
+import { reconcileTaskProjections } from './task-projection/task-projection-reconciler'
 import { canResumeShape, type ResumeHandle } from './resume-handle'
-import { deriveTaskProjectionCanResume } from './task-projection-resume'
+import { deriveTaskProjectionCanResume } from './task-projection/task-projection-resume'
 import { isAwaitingUserInteractionState } from '../../../shared/task-interaction-state'
 import { assertSkillTaskRunInvariantConsistency } from './skills/skill-task-tracker'
 import type { ProjectionTruthSnapshot, TaskProjectionRecord } from './run-contracts'
-import { getBudgetUsagePercent, restoreContinuationTaskBudgetRuntime } from './run-budget-policy'
+import { getBudgetUsagePercent, restoreContinuationTaskBudgetRuntime } from './task-projection/run-budget-policy'
 import {
   normalizeContinuationIntent,
   selectContinuationProjection,

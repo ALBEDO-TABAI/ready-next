@@ -1,7 +1,7 @@
 import type { CapabilityRuntimeSnapshot } from '../../../shared/ai-capability-runtime'
 import { buildContinuationStateFromProjection } from './continuation-state'
 import { classifyIntent } from './intent-classifier'
-import { restoreContinuationTaskBudgetRuntime } from './run-budget-policy'
+import { restoreContinuationTaskBudgetRuntime } from './task-projection/run-budget-policy'
 import type {
   TaskExecutionRoute,
   TaskProjectionRecord,

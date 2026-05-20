@@ -23,7 +23,7 @@ import { resolveActiveSkillContextReadOnly } from '../active-skill-context'
 import type { SkillTaskSupervisorSnapshot } from './skill-task-supervisor'
 import type { SkillRunRecord } from '../session-continuity'
 import type { ContinuationState } from '../continuation-state'
-import type { ExplicitRunStateResourceCandidate } from '../run-state-resource-resolver'
+import type { ExplicitRunStateResourceCandidate } from '../task-projection/run-state-resource-resolver'
 
 /** Mirrors the private alias in turn-engine.ts (line 791). */
 export type RecentSkillRunForResume = SkillRunRecord

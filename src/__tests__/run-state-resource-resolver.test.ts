@@ -11,7 +11,7 @@ import type {
 import {
   resolveExplicitRunStateResource,
   resolveRunStateResourceFromSessionText,
-} from '../main/modules/agent-control/run-state-resource-resolver'
+} from '../main/modules/agent-control/task-projection/run-state-resource-resolver'
 
 function makeResource(path: string, order = 0): RequestEnvelopeResource {
   return {

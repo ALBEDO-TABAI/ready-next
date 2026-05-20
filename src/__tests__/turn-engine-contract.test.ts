@@ -4,7 +4,7 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
 import { TurnEngine } from '../main/modules/agent-control/turn-engine'
-import { createScopedRunCollector } from '../main/modules/agent-control/run-collector'
+import { createScopedRunCollector } from '../main/modules/agent-control/task-projection/run-collector'
 import type { TurnTerminalReason } from '../main/modules/agent-control/turn-frame'
 
 function readWorkspaceFile(path: string): string {

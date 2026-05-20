@@ -7,7 +7,7 @@ import {
   createTaskBudgetRuntime,
   getRemainingToolCallBudget,
   rebindTaskBudgetRuntime,
-} from '../main/modules/agent-control/run-budget-policy'
+} from '../main/modules/agent-control/task-projection/run-budget-policy'
 
 test('task budget runtime rebinds bootstrap budgets to the resolved task preset while preserving usage', () => {
   const bootstrap = createTaskBudgetRuntime('short_task', {

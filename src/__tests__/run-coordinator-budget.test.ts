@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { RunCoordinator } from '../main/modules/agent-control/run-coordinator'
+import { RunCoordinator } from '../main/modules/agent-control/task-projection/run-coordinator'
 import {
   applyRunBudgetHint,
   createStepBudgetState,
@@ -18,7 +18,7 @@ import {
   getRemainingToolCallBudget,
   refundIterationBudget,
   resumeBudgetRuntime,
-} from '../main/modules/agent-control/run-budget-policy'
+} from '../main/modules/agent-control/task-projection/run-budget-policy'
 import type { ConversationScope, ScopeRunEventPayload } from '../main/modules/agent-control/types'
 
 function createScope(): ConversationScope {

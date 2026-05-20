@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { RunProjection } from '../main/modules/agent-control/run-projection'
+import { RunProjection } from '../main/modules/agent-control/task-projection/run-projection'
 import { SubtaskRuntime } from '../main/modules/agent-control/subtask-runtime'
-import { syncTaskProjection } from '../main/modules/agent-control/task-projection-sync'
+import { syncTaskProjection } from '../main/modules/agent-control/task-projection/task-projection-sync'
 import type { TaskProjectionRecord, TaskProjectionStore } from '../main/modules/agent-control/run-contracts'
 import type {
   ConversationScope,

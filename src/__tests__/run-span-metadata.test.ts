@@ -11,7 +11,7 @@ import assert from 'node:assert/strict'
 import {
   RUN_SPAN_METADATA_KEYS,
   buildRunSpanMetadata,
-} from '../main/modules/agent-control/run-span-metadata'
+} from '../main/modules/agent-control/task-projection/run-span-metadata'
 
 test('RUN_SPAN_METADATA_KEYS is exactly 6 keys', () => {
   assert.equal(RUN_SPAN_METADATA_KEYS.length, 6)

@@ -20,7 +20,7 @@ process.on('unhandledRejection', (reason: unknown, promise: Promise<unknown>) =>
   promise.catch(() => undefined)
 })
 
-import { RunCleanupRegistry } from '../main/modules/agent-control/run-cleanup-registry'
+import { RunCleanupRegistry } from '../main/modules/agent-control/task-projection/run-cleanup-registry'
 import {
   __resetSkillChildRunnerForTests,
   cancelSkillChildRun,

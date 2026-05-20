@@ -55,7 +55,7 @@ import {
   listHandoffValidationRepairTasks,
   listPendingSkillHandoffTasks,
 } from './skill-handoff-completion'
-import { selectRunStateCandidate } from '../run-state-selection'
+import { selectRunStateCandidate } from '../task-projection/run-state-selection'
 import {
   recordSkillParentTaskLifecycleEvent,
   type SkillParentTaskLifecycleReason,

@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert'
 
-import { createScopedRunCollector } from '../main/modules/agent-control/run-collector'
+import { createScopedRunCollector } from '../main/modules/agent-control/task-projection/run-collector'
 
 describe('createScopedRunCollector', () => {
     it('should accumulate assistant text and used tools for a scoped run', async () => {

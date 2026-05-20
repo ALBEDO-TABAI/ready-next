@@ -1,7 +1,7 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { createRunBudgetSeed } from '../main/modules/agent-control/run-budget-policy'
+import { createRunBudgetSeed } from '../main/modules/agent-control/task-projection/run-budget-policy'
 
 /**
  * skill-resume plan C2 — assert multi_step_task budget reduced 60→40.

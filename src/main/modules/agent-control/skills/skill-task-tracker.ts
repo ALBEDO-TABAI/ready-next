@@ -7,7 +7,7 @@ import type {
   ScopeRunWaitingFor,
 } from '../types'
 import type { SkillTaskLifecycleReason } from '../run-contracts'
-import { normalizeRunStateStatus, type NormalizedRunStateStatus } from '../run-state-selection'
+import { normalizeRunStateStatus, type NormalizedRunStateStatus } from '../task-projection/run-state-selection'
 import { getRepositoryDatabase } from '../../repositories/database-accessor'
 import {
   SkillTaskRunRepository,

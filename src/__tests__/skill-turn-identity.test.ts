@@ -19,7 +19,7 @@ import type {
   ReferenceHintSnapshot,
   SkillTurnIdentitySnapshot,
 } from '../main/modules/agent-control/skills/skill-turn-identity-snapshot'
-import type { ExplicitRunStateResourceCandidate } from '../main/modules/agent-control/run-state-resource-resolver'
+import type { ExplicitRunStateResourceCandidate } from '../main/modules/agent-control/task-projection/run-state-resource-resolver'
 
 // ---------------------------------------------------------------------------
 // Snapshot factory — minimal, mostly nulls. Override per test.

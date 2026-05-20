@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { reconcileTaskProjections } from '../main/modules/agent-control/task-projection-reconciler'
+import { reconcileTaskProjections } from '../main/modules/agent-control/task-projection/task-projection-reconciler'
 import type { TaskProjectionRecord, TaskProjectionWriteOptions } from '../main/modules/agent-control/run-contracts'
 
 /**

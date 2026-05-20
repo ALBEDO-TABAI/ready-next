@@ -7,7 +7,7 @@ import test from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
-import { selectRunStateCandidate } from '../main/modules/agent-control/run-state-selection'
+import { selectRunStateCandidate } from '../main/modules/agent-control/task-projection/run-state-selection'
 import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tool-error-metrics'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))

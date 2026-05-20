@@ -251,7 +251,7 @@ import {
   resolveExplicitRunStateResource,
   resolveRunStateResourceFromSessionText,
   type ExplicitRunStateResourceCandidate,
-} from './run-state-resource-resolver'
+} from './task-projection/run-state-resource-resolver'
 import {
   getLatestSkillRun,
   resolveSkillRunForResume,
@@ -276,7 +276,7 @@ import {
   createStepBudgetState,
   createTaskBudgetRuntime,
   getRemainingToolCallBudget,
-} from './run-budget-policy'
+} from './task-projection/run-budget-policy'
 import { resolveTaskExecutionRoute } from './task-execution-router'
 import { resolveTaskOperationIntent } from './task-operation-intent'
 import { resolveTaskType } from './task-type-resolver'

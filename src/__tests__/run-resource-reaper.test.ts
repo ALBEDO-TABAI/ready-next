@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
 
-import { RunCleanupRegistry } from '../main/modules/agent-control/run-cleanup-registry'
+import { RunCleanupRegistry } from '../main/modules/agent-control/task-projection/run-cleanup-registry'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')

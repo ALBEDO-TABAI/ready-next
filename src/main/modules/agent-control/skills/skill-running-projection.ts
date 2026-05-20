@@ -2,7 +2,7 @@ import { readdirSync, readFileSync, statSync } from 'node:fs'
 import type { Dirent } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { logAgentMetric } from '../metrics'
-import { selectRunStateCandidate } from '../run-state-selection'
+import { selectRunStateCandidate } from '../task-projection/run-state-selection'
 import { inspectSkillProgressArtifacts } from './skill-progress-artifacts'
 import { TOOL_ERROR_METRICS } from '../tool-error-metrics'
 

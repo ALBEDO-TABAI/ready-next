@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { RunProjection } from '../main/modules/agent-control/run-projection'
+import { RunProjection } from '../main/modules/agent-control/task-projection/run-projection'
 import type { ProjectionTruthSnapshot } from '../main/modules/agent-control/run-contracts'
 import type { ConversationScope, ScopeRunSummary } from '../main/modules/agent-control/types'
 

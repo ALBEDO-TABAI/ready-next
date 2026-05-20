@@ -5,7 +5,7 @@ import {
   classifyJsonReadError,
   classifyJsonReadValue,
   scrubAbsolutePathFromMessage,
-} from '../main/modules/agent-control/task-projection-reconciler'
+} from '../main/modules/agent-control/task-projection/task-projection-reconciler'
 
 /**
  * Stage 3 W2 — pure helper tests. The reconciler-level e2e tests (in

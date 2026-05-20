@@ -5,7 +5,7 @@ import test from 'node:test'
 import {
   createContinuationRunBudgetSeed,
   createRunBudgetSeed,
-} from '../main/modules/agent-control/run-budget-policy'
+} from '../main/modules/agent-control/task-projection/run-budget-policy'
 import {
   filterSkillPrimitivesBySession,
   shouldExposeSkillPrimitive,

@@ -1,4 +1,4 @@
-import type { ScopeRunMemoryCapture, ScopeRunEventPayload, ConversationScope } from './types'
+import type { ScopeRunMemoryCapture, ScopeRunEventPayload, ConversationScope } from '../types'
 import type {
   ExecutionHostRequest,
   ExecutionHostResult,
@@ -10,16 +10,16 @@ import type {
   RunCoordinatorResult,
   RunMessage,
   RunBudgetUsage,
-} from './run-contracts'
+} from '../run-contracts'
 import {
   createRunBudgetSeed,
   createTaskBudgetRuntime,
   getBudgetUsagePercent,
   rebindTaskBudgetRuntime,
 } from './run-budget-policy'
-import { buildExecutionFallbackState } from '../claude-bridge/execution-fallback-policy'
+import { buildExecutionFallbackState } from '../../claude-bridge/execution-fallback-policy'
 import { randomUUID } from 'node:crypto'
-import type { TurnTerminalReason } from './turn-frame'
+import type { TurnTerminalReason } from '../turn-frame'
 
 function phaseFromTerminalReason(reason: TurnTerminalReason | null | undefined): ScopeRunEventPayload['phase'] | null {
   if (!reason) return null

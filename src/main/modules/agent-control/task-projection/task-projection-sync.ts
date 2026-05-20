@@ -5,12 +5,12 @@ import type {
   TaskProjectionRecord,
   TaskProjectionStore,
   TaskStep,
-} from './run-contracts'
-import { isTaskType } from '../../../shared/task-types'
-import { buildContinuationStateFromProjection } from './continuation-state'
-import { clearContinuationState, rememberContinuationState } from './session-continuity'
-import type { ScopeRunEventPayload, ScopeRunSummary } from './types'
-import type { RecoveryRecord } from './run-contracts'
+} from '../run-contracts'
+import { isTaskType } from '../../../../shared/task-types'
+import { buildContinuationStateFromProjection } from '../continuation-state'
+import { clearContinuationState, rememberContinuationState } from '../session-continuity'
+import type { ScopeRunEventPayload, ScopeRunSummary } from '../types'
+import type { RecoveryRecord } from '../run-contracts'
 
 function toContinuationUpdatedAt(value: string | null | undefined): number {
   const parsed = Date.parse(String(value || ''))

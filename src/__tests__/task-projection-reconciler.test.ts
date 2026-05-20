@@ -9,7 +9,7 @@ import {
   __resetTaskProjectionJsonReadThrottleForTests,
   deriveHandlesWithOrigins,
   reconcileTaskProjections,
-} from '../main/modules/agent-control/task-projection-reconciler'
+} from '../main/modules/agent-control/task-projection/task-projection-reconciler'
 import type { TaskProjectionRecord, TaskProjectionStore } from '../main/modules/agent-control/run-contracts'
 import type { SkillTaskRunRecord } from '../main/modules/repositories/skill-task-run-repository'
 import {
