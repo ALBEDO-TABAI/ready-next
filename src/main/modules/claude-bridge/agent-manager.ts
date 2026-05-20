@@ -500,7 +500,12 @@ export class AgentManager extends EventEmitter {
 
   /**
    * Handle a tool_use block from Claude's output.
-   * Executes the tool and feeds the result back into the process stdin.
+   *
+   * Stage U0.1 — the legacy `tool_execute` event and its consumer in
+   * `claude-bridge/ipc-handler.ts` are gone. AgentManager retains only the
+   * renderer-visible `tool_use` trace; real tool execution flows through the
+   * Agent SDK runtime. `feedToolResult` was removed as part of the bridge
+   * retirement.
    */
   private handleToolUse(
     agentName: string,
@@ -514,35 +519,6 @@ export class AgentManager extends EventEmitter {
       chunk: `${toolName}(${JSON.stringify(args)})`,
       type: 'tool_use'
     })
-
-    // Emit a tool execution event for the IPC handler to pick up
-    // The IPC handler will execute the tool and call feedToolResult
-    this.emit('tool_execute', {
-      agent: agentName,
-      tool: toolName,
-      args,
-      toolId: _toolId
-    })
-  }
-
-  /**
-   * Feed a tool result back to the agent process stdin
-   */
-  feedToolResult(agentName: string, toolId: string | undefined, result: unknown): void {
-    const session = this.sessions.get(agentName)
-    if (!session || session.process.killed) return
-
-    const resultPayload = JSON.stringify({
-      type: 'tool_result',
-      tool_use_id: toolId,
-      content: typeof result === 'string' ? result : JSON.stringify(result)
-    })
-
-    try {
-      session.process.stdin?.write(resultPayload + '\n')
-    } catch {
-      // stdin write failed
-    }
   }
 
   /**

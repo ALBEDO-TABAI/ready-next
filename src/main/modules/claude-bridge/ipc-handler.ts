@@ -1769,52 +1769,13 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     }
   })
 
-  // Handle tool execution requests from agents
-  agentManager.on('tool_execute', async (data: { agent: string; tool: string; args: Record<string, unknown>; toolId?: string }) => {
-    let result: unknown = { error: `Unknown tool: ${data.tool}` }
-
-    try {
-      switch (data.tool) {
-        case 'calendar.createEvent':
-          result = await ipcMain.emit('calendar:createEvent', data.args) || { success: true, message: 'Event creation forwarded' }
-          break
-        case 'calendar.listEvents':
-          result = { success: true, message: 'Calendar event listing forwarded' }
-          break
-        case 'document.openFile':
-          if (!mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('agent:toolAction', { tool: 'document.openFile', args: data.args })
-          }
-          result = { success: true, message: `Opening file: ${data.args.path}` }
-          break
-        case 'document.writeFile':
-          if (!mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('agent:toolAction', { tool: 'document.writeFile', args: data.args })
-          }
-          result = { success: true, message: `File written: ${data.args.path}` }
-          break
-        case 'app.switchMode':
-          if (!mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('agent:toolAction', { tool: 'app.switchMode', args: data.args })
-          }
-          result = { success: true, message: `Switched to mode: ${data.args.mode}` }
-          break
-        case 'app.notify':
-          if (!mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('agent:toolAction', { tool: 'app.notify', args: data.args })
-          }
-          result = { success: true, message: 'Notification sent' }
-          break
-        default:
-          result = { error: `Unknown tool: ${data.tool}` }
-      }
-    } catch (error) {
-      result = { error: error instanceof Error ? error.message : String(error) }
-    }
-
-    // Feed result back to the agent
-    agentManager.feedToolResult(data.agent, data.toolId, result)
-  })
+  // Stage U0.1 — legacy tool_execute bridge removed. The previous handler
+  // used EventEmitter#emit on ipcMain to dispatch calendar create requests
+  // and ORed the boolean result with a synthetic success payload, so every
+  // call appeared to succeed regardless of whether the event was written.
+  // The Agent SDK runtime now owns every tool execution; see
+  // docs/superpowers/audits/2026-05-20-ready-deep-review-and-refactor-plan.md
+  // section 1.1 for the audit entry.
 
   // ===================== Memory System IPC =====================
 
