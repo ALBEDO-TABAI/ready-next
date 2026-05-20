@@ -1,5 +1,7 @@
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import { decryptSecretConfig, encryptSecretConfig } from '../agent-control/secret-storage'
+import { logAgentMetric } from '../agent-control/metrics'
+import { getDatabase } from '../database'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 import {
   DEFAULT_EXTERNAL_SERVICE_PROFILES,
@@ -15,6 +17,27 @@ import {
 } from '../../../shared/external-services'
 
 export const EXTERNAL_SERVICE_SETTINGS_KEY = 'external_service_profiles_v1'
+
+/**
+ * U8.3 — legacy Tavily / Jina secret keys (written by the pre-U workspace
+ * settings shape) live under these database keys. They are NEVER read by
+ * runtime code paths anymore; `migrateLegacyKeysOnce()` is the only call
+ * site allowed to touch them, and the CI gate
+ * `scripts/check-settings-no-legacy-key-read.cjs` enforces that.
+ *
+ * Emergency restore: if the legacy keys have to be re-read to recover a
+ * broken upgrade, set `READY_SETTINGS_RESTORE_LEGACY_KEYS=1` in the host
+ * environment. This is a one-shot escape hatch and intentionally not exposed
+ * through any UI — production builds must leave it unset.
+ */
+const LEGACY_TAVILY_KEY_SETTING = 'web_search_tavily_key'
+const LEGACY_JINA_KEY_SETTING = 'web_fetch_jina_key'
+const LEGACY_KEY_MIGRATION_DONE_SETTING = 'external_service_legacy_key_migration_done_v1'
+const EMERGENCY_RESTORE_ENV = 'READY_SETTINGS_RESTORE_LEGACY_KEYS'
+
+function emergencyRestoreActive(): boolean {
+  return process.env[EMERGENCY_RESTORE_ENV] === '1'
+}
 
 function nowIso(): string {
   return new Date().toISOString()
@@ -173,17 +196,65 @@ export class ExternalServiceStore {
     const jina = this.getFirstRuntimeService('jina')
     const ddg = this.getFirstRuntimeService('duckduckgo')
 
-    const legacyTavilyKey = this.repository.getSetting('web_search_tavily_key') || undefined
-    const legacyJinaKey = this.repository.getSetting('web_fetch_jina_key') || undefined
+    // U8.3 — emergency-only legacy fallback. Default path uses new profile shape.
+    // `READY_SETTINGS_RESTORE_LEGACY_KEYS=1` enables a one-shot recovery
+    // for broken upgrades; default builds never set it.
+    const emergencyLegacyTavilyKey = emergencyRestoreActive()
+      ? this.repository.getSetting(LEGACY_TAVILY_KEY_SETTING) || undefined
+      : undefined
+    const emergencyLegacyJinaKey = emergencyRestoreActive()
+      ? this.repository.getSetting(LEGACY_JINA_KEY_SETTING) || undefined
+      : undefined
 
     return {
-      tavilyKey: tavily?.enabled ? (tavily.secrets.apiKey || legacyTavilyKey) : legacyTavilyKey,
+      tavilyKey: tavily?.enabled ? (tavily.secrets.apiKey || emergencyLegacyTavilyKey) : emergencyLegacyTavilyKey,
       tavilyBaseUrl: tavily?.enabled ? trimBaseUrl(tavily.baseUrl) : undefined,
-      jinaKey: jina?.enabled ? (jina.secrets.apiKey || legacyJinaKey) : legacyJinaKey,
+      jinaKey: jina?.enabled ? (jina.secrets.apiKey || emergencyLegacyJinaKey) : emergencyLegacyJinaKey,
       jinaBaseUrl: jina?.enabled ? trimBaseUrl(jina.baseUrl) : undefined,
       ddgEnabled: ddg ? ddg.enabled : true,
       ddgBaseUrl: ddg?.enabled ? trimBaseUrl(ddg.baseUrl) : undefined,
     }
+  }
+
+  /**
+   * U8.3 — One-shot migration of legacy Tavily/Jina secrets into the
+   * external-service profile shape. Idempotent: tracks completion via
+   * `LEGACY_KEY_MIGRATION_DONE_SETTING`. After migration the legacy DB rows
+   * are cleared so the only path back to them is the emergency env flag.
+   */
+  migrateLegacyKeysOnce(): { migrated: number; alreadyDone: boolean } {
+    const done = this.repository.getSetting(LEGACY_KEY_MIGRATION_DONE_SETTING)
+    if (done === 'true') return { migrated: 0, alreadyDone: true }
+
+    const legacyTavily = (this.repository.getSetting(LEGACY_TAVILY_KEY_SETTING) || '').trim()
+    const legacyJina = (this.repository.getSetting(LEGACY_JINA_KEY_SETTING) || '').trim()
+
+    let migrated = 0
+    if (legacyTavily || legacyJina) {
+      const profiles = this.readProfiles()
+      const tavily = profiles.find((p) => p.kind === 'tavily')
+      const jina = profiles.find((p) => p.kind === 'jina')
+      if (legacyTavily && tavily && !tavily.secrets.apiKey) {
+        tavily.secrets = { ...tavily.secrets, apiKey: legacyTavily }
+        tavily.enabled = true
+        tavily.updatedAt = nowIso()
+        migrated += 1
+      }
+      if (legacyJina && jina && !jina.secrets.apiKey) {
+        jina.secrets = { ...jina.secrets, apiKey: legacyJina }
+        jina.enabled = true
+        jina.updatedAt = nowIso()
+        migrated += 1
+      }
+      if (migrated > 0) this.writeProfiles(normalizeExternalServiceProfiles(profiles))
+    }
+
+    this.repository.setSetting(LEGACY_TAVILY_KEY_SETTING, '')
+    this.repository.setSetting(LEGACY_JINA_KEY_SETTING, '')
+    this.repository.setSetting(LEGACY_KEY_MIGRATION_DONE_SETTING, 'true')
+    logAgentMetric('settings.legacy_key_migration_completed', { migrated })
+
+    return { migrated, alreadyDone: false }
   }
 
   buildVisionAgentContext(serviceId = 'vision-model-default'): AgentSpawnContext | null {
