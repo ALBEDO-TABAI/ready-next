@@ -234,14 +234,14 @@ export class ExternalServiceStore {
       const profiles = this.readProfiles()
       const tavily = profiles.find((p) => p.kind === 'tavily')
       const jina = profiles.find((p) => p.kind === 'jina')
-      if (legacyTavily && tavily && !tavily.secrets.apiKey) {
-        tavily.secrets = { ...tavily.secrets, apiKey: legacyTavily }
+      if (legacyTavily && tavily && !(tavily.secrets?.apiKey)) {
+        tavily.secrets = { ...(tavily.secrets || {}), apiKey: legacyTavily }
         tavily.enabled = true
         tavily.updatedAt = nowIso()
         migrated += 1
       }
-      if (legacyJina && jina && !jina.secrets.apiKey) {
-        jina.secrets = { ...jina.secrets, apiKey: legacyJina }
+      if (legacyJina && jina && !(jina.secrets?.apiKey)) {
+        jina.secrets = { ...(jina.secrets || {}), apiKey: legacyJina }
         jina.enabled = true
         jina.updatedAt = nowIso()
         migrated += 1
