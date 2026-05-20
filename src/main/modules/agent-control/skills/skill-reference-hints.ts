@@ -18,7 +18,7 @@
  */
 
 import { logAgentMetric } from '../metrics'
-import { TOOL_ERROR_METRICS } from '../tool-error-metrics'
+import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
 
 export interface ReferenceSkillHint {
   id: string

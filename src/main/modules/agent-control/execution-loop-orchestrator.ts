@@ -38,7 +38,7 @@ export class ExecutionLoopOrchestrator {
       context: import('../tools/tool-executor').ToolContext,
     ) => Promise<ToolExecutionResultLike>
     resolveTimeoutMs?: (
-      definition: import('./tool-definition').ToolDefinition | null,
+      definition: import('./tools-runtime/tool-definition').ToolDefinition | null,
       toolCall: ParallelToolCall,
     ) => number
   }) {

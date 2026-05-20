@@ -40,7 +40,7 @@ import type { ScopeRunEventPayload, ScopeRunResumableAction, ScopeRunSkillProgre
 import type { TaskProjectionRecord, TaskProjectionStore, TaskStep } from '../run-contracts'
 
 import { logAgentMetric } from '../metrics'
-import { TOOL_ERROR_METRICS } from '../tool-error-metrics'
+import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
 import { linkParentAbort } from '../link-parent-abort'
 import { createSkillChildRunId, getSkillChildRunKind } from './skill-child-run-id'
 import {
@@ -72,7 +72,7 @@ import {
 import {
   executeSkillActionViaToolGateway,
   type ChildGatewayResult,
-} from '../tool-registry'
+} from '../tools-runtime/tool-registry'
 import {
   isCompletedChildCloseStatus,
   isKilledChildCloseStatus,

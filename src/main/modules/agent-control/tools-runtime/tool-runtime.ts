@@ -536,7 +536,7 @@ export class ToolRuntime {
     if (this.deps.executeToolCall) {
       return await this.deps.executeToolCall(toolCall.name, toolCall.input, toToolExecutorContext(effectiveContext))
     }
-    const { executeToolCall } = await import('../tools/tool-executor')
+    const { executeToolCall } = await import('../../tools/tool-executor')
     return await executeToolCall(toolCall.name, toolCall.input, toToolExecutorContext(effectiveContext))
   }
 

@@ -2,7 +2,7 @@ import type { Dirent } from 'node:fs'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, isAbsolute, join } from 'node:path'
 import { logAgentMetric } from '../metrics'
-import { TOOL_ERROR_METRICS } from '../tool-error-metrics'
+import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
 
 const DEFAULT_RUN_STATE_FILENAME = 'run_state.json'
 const DEFAULT_SEARCH_DEPTH = 1

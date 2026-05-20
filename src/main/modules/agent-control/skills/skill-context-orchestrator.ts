@@ -2,12 +2,12 @@ import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import type { SkillState } from '../../skills-runtime/runtime-manager'
-import type { ToolExecutionOutput } from '../tool-result-types'
+import type { ToolExecutionOutput } from '../tools-runtime/tool-result-types'
 import { rememberLastReferenceSkill, getLastReferenceSkill } from './skill-reference-hints'
 import { logAgentMetric } from '../metrics'
 import { emitSkillReferenceInlined } from './skill-reference-inlined-bridge'
 import { isRetryOnlyTurn } from './skill-detection-inputs'
-import { TOOL_ERROR_METRICS } from '../tool-error-metrics'
+import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
 
 /**
  * Filenames we try to read from the skill's managedPath when inlining a
