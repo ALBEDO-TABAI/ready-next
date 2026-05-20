@@ -5,7 +5,10 @@ import { TOOL_ERROR_METRICS } from './tool-error-metrics'
 
 const electronModule = (() => {
   try { return createRequire(import.meta.url)('electron') as typeof import('electron') }
-  catch { return {} as typeof import('electron') }
+  catch {
+    // silent-catch: tolerate non-electron host (test runtime); secrets fall back to xor obfuscation; no user-facing impact
+    return {} as typeof import('electron')
+  }
 })()
 const { app, safeStorage } = electronModule
 
