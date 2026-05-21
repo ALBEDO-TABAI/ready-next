@@ -10,18 +10,21 @@ function readWorkspaceFile(path: string): string {
 
 test('chat panel feeds message-level task snapshots into chat messages instead of fixed top task sections', () => {
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
+  const taskToolSnapshot = readWorkspaceFile('src/renderer/components/agent/chat-panel/task-snapshot/TaskToolSnapshot.tsx')
+  const taskCard = readWorkspaceFile('src/renderer/components/agent/chat-panel/task/TaskCard.tsx')
   const store = readWorkspaceFile('src/renderer/stores/useAgent.ts')
   const viewModel = readWorkspaceFile('src/renderer/modules/agent/taskCardViewModel.ts')
 
-  assert.match(chatPanel, /buildTaskCardViewModel/)
-  assert.match(chatPanel, /createDefaultTaskDisclosureState/)
+  // V1.6/V1.8 follow-up: buildTaskCardViewModel + createDefaultTaskDisclosureState +
+  // expanded-disclosure derivation now live in TaskCard.tsx / TaskToolSnapshot.tsx
+  assert.match(taskCard, /buildTaskCardViewModel/)
   assert.doesNotMatch(chatPanel, /<TaskSection title="当前任务">/)
   assert.doesNotMatch(chatPanel, /<TaskSection title="后台任务">/)
   assert.match(chatPanel, /messageTaskSnapshots=\{messageTaskSnapshots\}/)
   assert.match(chatPanel, /messageToolTraceSnapshots=\{messageToolTraceSnapshots\}/)
   assert.match(chatPanel, /pendingTaskRun=\{pendingTaskRun\}/)
   assert.match(chatPanel, /pendingToolTrace=\{pendingToolTrace\}/)
-  assert.match(chatPanel, /const expanded = Boolean\(taskDisclosureState\[key\]\?\.overview\)/)
+  assert.match(taskToolSnapshot, /const expanded = Boolean\(taskDisclosureState\[key\]\?\.overview\)/)
   assert.doesNotMatch(chatPanel, /onCancelExecution=/)
   assert.match(viewModel, /title:\s*'计划与步骤'/)
   assert.match(viewModel, /title:\s*'执行细节'/)
@@ -34,12 +37,14 @@ test('chat panel feeds message-level task snapshots into chat messages instead o
 
 test('chat panel can recover task snapshots from persisted assistant message metadata and current live runs', () => {
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
+  const taskToolSnapshot = readWorkspaceFile('src/renderer/components/agent/chat-panel/task-snapshot/TaskToolSnapshot.tsx')
   const runtimeDriver = readWorkspaceFile('src/renderer/modules/agent/runtimeDriver.ts')
 
   assert.match(chatPanel, /parseSerializedTaskSnapshot/)
-  assert.match(chatPanel, /message\.meta\?\.taskSnapshot/)
-  assert.match(chatPanel, /message\.meta\?\.toolTraceSnapshot/)
-  assert.match(chatPanel, /currentTaskRun\.responseMessageId/)
+  // V1.8 follow-up: meta?.taskSnapshot/toolTraceSnapshot + currentTaskRun.responseMessageId moved to TaskToolSnapshot.tsx
+  assert.match(taskToolSnapshot, /message\.meta\?\.taskSnapshot/)
+  assert.match(taskToolSnapshot, /message\.meta\?\.toolTraceSnapshot/)
+  assert.match(taskToolSnapshot, /currentTaskRun\.responseMessageId/)
   assert.match(runtimeDriver, /responseSegmentBreakPending/)
   assert.match(runtimeDriver, /responseSegmentToolTraceStart/)
 })
