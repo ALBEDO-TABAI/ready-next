@@ -17,6 +17,7 @@ import { DocumentMarksRepository } from './document-marks-repository'
 import { markGroup } from './ipc/mark-group'
 import { fileIoGroup } from './ipc/file-io-group'
 import { fileMutationGroup } from './ipc/file-mutation-group'
+import { workspaceGroup } from './ipc/workspace-group'
 import type { IpcDisposeHandle } from './ipc/types'
 import {
   ATTACHMENT_HARD_CAP_BYTES,
@@ -534,6 +535,14 @@ let fileIoGroupDispose: IpcDisposeHandle | null = null
  */
 let fileMutationGroupDispose: IpcDisposeHandle | null = null
 
+/**
+ * Stage V V2.3d — dispose handle returned by `workspaceGroup.register`.
+ * The 3 workspace-portability channels (exportWorkspace/importWorkspace/
+ * getHome) live in `ipc/workspace-group.ts`; same dev-reload lifecycle as
+ * the other extracted groups.
+ */
+let workspaceGroupDispose: IpcDisposeHandle | null = null
+
 export function setupDocumentIPC(useMock = false): void {
   // Renderer notifies main whenever a widget update has been committed into the tab content store.
   //   Pipeline executor waits on this via documentCommitRegistry.waitForCommitAfter so the write
@@ -727,6 +736,25 @@ export function setupDocumentIPC(useMock = false): void {
   }
   fileMutationGroupDispose = fileMutationGroup.register(ipcMain, {
     useMock,
+  })
+
+  // Stage V V2.3d — 3 workspace-portability channels
+  // (`document:exportWorkspace`, `document:importWorkspace`,
+  // `document:getHome`) moved into `workspaceGroup`. The group needs the
+  // dialog facades (save + open-file, distinct from the FileIoGroup's
+  // open-folder facade), the window-resolution helpers it shares with
+  // FileIoGroup, and the home-directory probe used by both the export
+  // default-path hint and the dedicated getHome read.
+  if (workspaceGroupDispose) {
+    try { workspaceGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    workspaceGroupDispose = null
+  }
+  workspaceGroupDispose = workspaceGroup.register(ipcMain, {
+    resolveDialogWindow,
+    getBrowserWindowFromWebContents: (sender) => BrowserWindow.fromWebContents(sender),
+    showSaveWorkspaceDialog: (window, options) => dialog.showSaveDialog(window, options),
+    showOpenWorkspaceFileDialog: (window, options) => dialog.showOpenDialog(window, options),
+    getHomeDirectory: () => homedir(),
   })
 
   ipcMain.handle('document:importEbookAsMarkdown', async (_, payload: { sourcePath?: string }) => {
@@ -930,91 +958,9 @@ export function setupDocumentIPC(useMock = false): void {
   // group injects the workspace-validation context (homeDir + accessSync
   // probe) so the handler stays pure.
 
-  // Export workspace index file. Caller supplies a name + folder list; we
-  // pop a save dialog so the user picks a location and we write a
-  // `.ready-workspace.json` file. The schema is intentionally minimal so it
-  // stays portable (just absolute folder paths).
-  ipcMain.handle('document:exportWorkspace', async (event, payload: { name: string; folders: string[] }) => {
-    try {
-      const win = resolveDialogWindow(BrowserWindow.fromWebContents(event.sender))
-      if (!win) return { success: false, error: 'No window' }
-      const safeName = (payload?.name || '工作区').replace(/[\\/:*?"<>|]/g, '_').trim() || '工作区'
-      const folders = Array.isArray(payload?.folders) ? payload.folders.filter((f) => typeof f === 'string' && f.length > 0) : []
-      if (folders.length === 0) {
-        return { success: false, error: '当前没有可保存的文件夹' }
-      }
-      const defaultPath = join(homedir(), `${safeName}.ready-workspace.json`)
-      const result = await dialog.showSaveDialog(win, {
-        title: '保存工作区',
-        defaultPath,
-        filters: [{ name: 'Ready 工作区', extensions: ['ready-workspace.json', 'json'] }],
-      })
-      if (result.canceled || !result.filePath) {
-        return { success: false, error: 'cancelled' }
-      }
-      const now = new Date().toISOString()
-      const indexBody = {
-        schema: 'ready-workspace@1',
-        name: safeName,
-        folders,
-        createdAt: now,
-        updatedAt: now,
-      }
-      await writeFile(result.filePath, JSON.stringify(indexBody, null, 2), 'utf-8')
-      return { success: true, path: result.filePath, name: safeName }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  // Import workspace index file. Opens a file picker and returns the parsed
-  // schema. Caller (renderer store) is responsible for validating each
-  // folder against `validateWorkspaceRoot` before adopting them.
-  ipcMain.handle('document:importWorkspace', async (event) => {
-    try {
-      const win = resolveDialogWindow(BrowserWindow.fromWebContents(event.sender))
-      if (!win) return { success: false, error: 'No window' }
-      const result = await dialog.showOpenDialog(win, {
-        title: '导入工作区',
-        properties: ['openFile'],
-        filters: [{ name: 'Ready 工作区', extensions: ['json'] }],
-      })
-      if (result.canceled || result.filePaths.length === 0) {
-        return { success: false, error: 'cancelled' }
-      }
-      const filePath = result.filePaths[0]
-      const raw = await readFile(filePath, 'utf-8')
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(raw)
-      } catch {
-        return { success: false, error: '文件不是合法的 JSON' }
-      }
-      if (!parsed || typeof parsed !== 'object') {
-        return { success: false, error: '工作区文件结构不合法' }
-      }
-      const obj = parsed as Record<string, unknown>
-      const schema = typeof obj.schema === 'string' ? obj.schema : null
-      if (schema !== 'ready-workspace@1') {
-        return { success: false, error: '未识别的工作区版本' }
-      }
-      const name = typeof obj.name === 'string' && obj.name.trim() ? obj.name : '导入的工作区'
-      const folders = Array.isArray(obj.folders)
-        ? (obj.folders.filter((f): f is string => typeof f === 'string' && f.length > 0))
-        : []
-      if (folders.length === 0) {
-        return { success: false, error: '工作区不包含任何文件夹' }
-      }
-      return { success: true, path: filePath, name, folders }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  // Get home directory
-  ipcMain.handle('document:getHome', async () => {
-    return { success: true, path: homedir() }
-  })
+  // Stage V V2.3d — `document:exportWorkspace`, `document:importWorkspace`,
+  // and `document:getHome` moved into `workspaceGroup`. See the breadcrumb
+  // + registration block alongside the other extracted groups above.
 
   // Stage V V2.3b — `document:showInFolder`, `document:openPath`, and
   // `document:createFile` moved into `fileIoGroup` alongside the rest of

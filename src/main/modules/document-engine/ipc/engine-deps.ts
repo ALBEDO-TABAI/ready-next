@@ -1,4 +1,4 @@
-// Stage V V2.3a/V2.3b — document-engine engine deps composition root.
+// Stage V V2.3a/V2.3b/V2.3d — document-engine engine deps composition root.
 //
 // `EngineDeps` is the SUPERSET of everything any extracted document-engine
 // IPC channel group might need. Each group declares its OWN per-group deps
@@ -18,7 +18,10 @@
 // As groups are extracted in V2.3b … V2.3n this file grows. V2.3a populated
 // the MarkGroup surface (mock flag + marks repository factory). V2.3b adds
 // the FileIoGroup surface (document write-index hook getter + editable text
-// writer + dialog/shell facades + workspace validation context).
+// writer + dialog/shell facades + workspace validation context). V2.3d adds
+// the WorkspaceGroup surface (save/open dialog facades narrowed to the
+// workspace-file payload + a home-directory probe for the default-path
+// hint).
 import type { BrowserWindow, WebContents } from 'electron'
 import type { DocumentMarksRepository } from '../document-marks-repository'
 import type { DocumentWriteIndexHook } from '../ipc-handler'
@@ -66,6 +69,40 @@ export interface SaveAsPayload {
   contentBase64?: string
   suggestedName?: string
   defaultPath?: string | null
+}
+
+/**
+ * Shape of a save-workspace dialog options object the WorkspaceGroup passes
+ * through to `dialog.showSaveDialog`. Mirror of Electron's `SaveDialogOptions`
+ * narrowed to the three fields the handler wires (`title`, `defaultPath`,
+ * `filters`).
+ */
+export interface SaveWorkspaceDialogOptions {
+  title: string
+  defaultPath: string
+  filters: Array<{ name: string; extensions: string[] }>
+}
+
+/**
+ * Shape of a save-workspace dialog return value the WorkspaceGroup consumes.
+ * Mirror of Electron's `SaveDialogReturnValue` narrowed to the two fields
+ * the handler reads (`canceled` + `filePath`).
+ */
+export interface SaveDialogResult {
+  canceled: boolean
+  filePath?: string
+}
+
+/**
+ * Shape of an open-file dialog options object the WorkspaceGroup passes
+ * through to `dialog.showOpenDialog`. Distinct from `OpenFolderDialogOptions`
+ * because the workspace-import flow opens FILES (single `.json`), not
+ * directories, and ships a file-extension filter set.
+ */
+export interface OpenWorkspaceFileDialogOptions {
+  title: string
+  properties: Array<'openFile'>
+  filters: Array<{ name: string; extensions: string[] }>
 }
 
 /**
@@ -131,4 +168,32 @@ export interface EngineDeps {
    * group does not bake in the home directory or the `accessSync` probe.
    */
   validateWorkspaceRoot(picked: string): WorkspaceValidationResult
+
+  // --- V2.3d — WorkspaceGroup deps ---
+
+  /**
+   * Wrap `dialog.showSaveDialog` for the workspace-export channel. Distinct
+   * from the FileIoGroup's `showOpenDialog` facade because the workspace
+   * export flow needs a SAVE dialog with a structured filter set.
+   */
+  showSaveWorkspaceDialog(
+    window: BrowserWindow,
+    options: SaveWorkspaceDialogOptions,
+  ): Promise<SaveDialogResult>
+  /**
+   * Wrap `dialog.showOpenDialog` for the workspace-import channel. The
+   * narrowed options shape (`openFile` + filters) deliberately differs from
+   * `OpenFolderDialogOptions` so the type system catches accidental cross
+   * wiring (workspace import is a FILE picker, not a folder picker).
+   */
+  showOpenWorkspaceFileDialog(
+    window: BrowserWindow,
+    options: OpenWorkspaceFileDialogOptions,
+  ): Promise<OpenDialogResult>
+  /**
+   * Resolve the OS home directory. Lifted to a dep so the group does not
+   * import `os` at runtime; the host owns the actual `homedir()` call so
+   * tests can pin a deterministic path without touching real env.
+   */
+  getHomeDirectory(): string
 }
