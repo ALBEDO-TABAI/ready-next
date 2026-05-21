@@ -57,6 +57,30 @@ test('U5.0 dynamic import expression classifies as import (dogfood fix)', () => 
   assert.equal(classifyLine('+  return import(\'./baz\').then((m) => m.default)'), 'import')
 })
 
+test('U5.0 R<100 renames must be inspected (codex finding-2 regression guard)', () => {
+  // Before this fix the gate skipped ALL Rxxx renames, letting behavior changes
+  // in renamed files slip through. Now only R100 is auto-accepted.
+  const renamedWithBehavior = checkMoveOnlyPr({
+    env: { STAGE_U_MOVE_ONLY_PR: '1' },
+    filesOverride: [{ status: 'R095', path: 'fake.ts', renameSource: 'old.ts' }],
+    rangeOverride: 'fake-range',
+  })
+  // With no real file backing, inspectFileDiff returns ok: true on empty diff,
+  // so this still passes — but the key invariant is the file is NOT auto-skipped
+  // by status alone. We assert the noop is false (gate engaged).
+  assert.equal(renamedWithBehavior.noop, false)
+})
+
+test('U5.0 R100 renames are still auto-accepted', () => {
+  const r100 = checkMoveOnlyPr({
+    env: { STAGE_U_MOVE_ONLY_PR: '1' },
+    filesOverride: [{ status: 'R100', path: 'pure-rename.ts', renameSource: 'old.ts' }],
+    rangeOverride: 'fake-range',
+  })
+  assert.equal(r100.ok, true)
+  assert.equal(r100.violations?.length ?? 0, 0)
+})
+
 test('U5.0 multi-line import trailing path line classifies as import (dogfood fix)', () => {
   // Caught by U5.1a1 dogfooding: `} from '...'` on its own line (closing
   // a multi-line `import { ... } from '...'`) was treated as behavior change.

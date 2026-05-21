@@ -47,7 +47,7 @@
 
 ## Agent Control 当前分层（Stage U Phase 5 v2 落地后）
 
-agent-control 顶层文件已按功能拆入 14 个子目录（Stage U U5.1a* PR 序列），其余少量未分组文件留在顶层。
+agent-control 顶层文件已按功能拆入 13 个子目录（Stage U U5.1a* PR 序列），另有 document-pipeline 跨模块迁出到 `document-engine/pipeline/`（U5.2）。其余少量未分组文件留在 agent-control 顶层。
 
 ### 子目录与职责
 - `domain-adapters/` — DomainAdapter 合同 + 各域接线层 + capability 解析（domain-adapter.ts、browser/document/rss/calendar/feishu/skill/research/host-capability-dispatcher.ts、capability-resolver.ts、run-capability-controller.ts、message-capability-filter.ts、browser-action-heuristics.ts、browser-task-planner.ts 等 16 文件）

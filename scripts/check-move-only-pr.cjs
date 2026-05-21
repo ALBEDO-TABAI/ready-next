@@ -151,11 +151,14 @@ function checkMoveOnlyPr({ env = process.env, filesOverride = null, rangeOverrid
   const files = filesOverride || listChangedFiles(range)
   const violations = []
   for (const file of files) {
-    // Pure renames have no diff content — accept.
-    if (file.status.startsWith('R') && file.status !== 'R000') continue
-    // Pure deletion — accept (file was moved away)
+    // Only R100 (100% identical content, pure rename) is auto-accepted.
+    // R099 and below DO carry diff content (the percentage drop is exactly the
+    // import-path adjustment) and must be inspected — otherwise a behavior
+    // line change in a renamed file would silently escape the gate.
+    // (Codex review of Stage U Phase 5 v2 flagged this as finding-2.)
+    if (file.status === 'R100') continue
+    // Pure deletion — accept (file was moved away).
     if (file.status === 'D') continue
-    // Pure addition — accept only if path indicates re-export barrel (heuristic)
     const result = inspectFileDiff(range, file.path)
     if (!result.ok) {
       violations.push({ file: file.path, count: result.offending.length, samples: result.offending.slice(0, 3) })

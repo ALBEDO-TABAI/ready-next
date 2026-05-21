@@ -29,7 +29,7 @@ ready/
 - `src/main/modules/skills-runtime`
 - `src/main/modules/tools`
 
-### agent-control 子目录（Stage U Phase 5 v2 落地）
+### agent-control 子目录（Stage U Phase 5 v2 落地，13 个）
 ```text
 src/main/modules/agent-control/
 ├── ask-user/          # 2 文件 — ask-user 桥
