@@ -1,0 +1,11 @@
+// Stage U U5.1b barrel re-export. New imports may use this subdir entry; existing deep imports remain valid.
+export * from './document-insight-cache'
+export * from './document-source-materials'
+export * from './document-task-cache-key'
+export * from './document-task-pipeline-executor'
+export * from './document-task-pipeline'
+export * from './document-task-plan'
+export * from './document-task-subtask-runner'
+export * from './document-task-tool-timing'
+export * from './document-task-types'
+export * from './document-tool-loop-orchestrator'
