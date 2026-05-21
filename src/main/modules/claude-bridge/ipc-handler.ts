@@ -47,6 +47,7 @@ import { agentRuntimeGroup } from './ipc/agent-runtime-group'
 import { conversationGroup } from './ipc/conversation-group'
 import { taskProjectionGroup } from './ipc/task-projection-group'
 import { recallGroup } from './ipc/recall-group'
+import { detachedTaskGroup } from './ipc/detached-task-group'
 import type { IpcDisposeHandle } from './ipc/types'
 import { logAgentMetric } from '../agent-control/metrics'
 import { isRendererAgentMetricName } from '../../../shared/renderer-agent-metrics'
@@ -257,6 +258,16 @@ let taskProjectionGroupDispose: IpcDisposeHandle | null = null
  */
 let recallGroupDispose: IpcDisposeHandle | null = null
 
+/**
+ * Stage V V2.1h — dispose handle returned by `detachedTaskGroup.register`.
+ * Owns the 4 detached-skill task channels (`agent:startDetachedSkillAction`,
+ * `agent:inspectDetachedSkillTask`, `agent:listDetachedSkillTasks`,
+ * `agent:cancelDetachedSkillTask`). Same lifecycle pattern as the other group
+ * dispose slots: register on `setupAgentIPC`, dispose on dev-reload re-entry,
+ * dispose on `cleanupAgentRuntime` shutdown.
+ */
+let detachedTaskGroupDispose: IpcDisposeHandle | null = null
+
 function cleanupSkillSessionState(sessionId?: string, reason = 'Skill session state cleared'): void {
   if (sessionId) {
     clearLastReferenceSkill(sessionId)
@@ -398,6 +409,13 @@ export async function cleanupAgentRuntime(): Promise<void> {
   if (recallGroupDispose) {
     try { recallGroupDispose.dispose() } catch { /* ignore */ }
     recallGroupDispose = null
+  }
+  // Stage V V2.1h — symmetric release of the 4 detached-skill task channel
+  // handlers (startDetachedSkillAction / inspectDetachedSkillTask /
+  // listDetachedSkillTasks / cancelDetachedSkillTask).
+  if (detachedTaskGroupDispose) {
+    try { detachedTaskGroupDispose.dispose() } catch { /* ignore */ }
+    detachedTaskGroupDispose = null
   }
   if (runtime) {
     await runtime.stop()
@@ -729,55 +747,21 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     resumeSessionCandidate: (payload) => runtime!.resumeSessionCandidate(payload),
   })
 
-  ipcMain.handle('agent:startDetachedSkillAction', (_, payload: {
-    scopeId?: string
-    sessionId?: string
-    agent?: string
-    skillId: string
-    action: string
-    params?: Record<string, unknown>
-  }): IPCResponse => {
-    try {
-      return { success: true, data: runtime!.startDetachedSkillAction(payload) }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('agent:inspectDetachedSkillTask', (_, payload: { taskId: string; scopeId?: string }): IPCResponse => {
-    try {
-      const taskId = String(payload?.taskId || '').trim()
-      const scopeId = String(payload?.scopeId || '').trim()
-      if (!taskId) return { success: false, error: 'taskId is required' }
-      if (!scopeId) return { success: false, error: 'scopeId is required' }
-      const task = runtime!.inspectDetachedSkillTask(taskId, scopeId)
-      if (!task) return { success: false, error: `Detached skill task not found: ${taskId}` }
-      return { success: true, data: task }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('agent:listDetachedSkillTasks', (_, payload?: { scopeId?: string }): IPCResponse => {
-    try {
-      return { success: true, data: runtime!.listDetachedSkillTasks(payload) }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('agent:cancelDetachedSkillTask', (_, payload: { taskId: string; scopeId?: string }): IPCResponse => {
-    try {
-      const taskId = String(payload?.taskId || '').trim()
-      const scopeId = String(payload?.scopeId || '').trim()
-      if (!taskId) return { success: false, error: 'taskId is required' }
-      if (!scopeId) return { success: false, error: 'scopeId is required' }
-      const task = runtime!.cancelDetachedSkillTask(taskId, scopeId)
-      if (!task) return { success: false, error: `Detached skill task not found: ${taskId}` }
-      return { success: true, data: task }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
+  // Stage V V2.1h — the 4 detached-skill task channels
+  // (`agent:startDetachedSkillAction`, `agent:inspectDetachedSkillTask`,
+  // `agent:listDetachedSkillTasks`, `agent:cancelDetachedSkillTask`) moved
+  // into `detachedTaskGroup`. Symmetric dispose lives in
+  // `cleanupAgentRuntime`; defensive dev-reload re-entry disposes the
+  // previous handle first so `ipcMain.handle` does not double-register.
+  if (detachedTaskGroupDispose) {
+    try { detachedTaskGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    detachedTaskGroupDispose = null
+  }
+  detachedTaskGroupDispose = detachedTaskGroup.register(ipcMain, {
+    startDetachedSkillAction: (payload) => runtime!.startDetachedSkillAction(payload),
+    inspectDetachedSkillTask: (taskId, scopeId) => runtime!.inspectDetachedSkillTask(taskId, scopeId),
+    listDetachedSkillTasks: (payload) => runtime!.listDetachedSkillTasks(payload),
+    cancelDetachedSkillTask: (taskId, scopeId) => runtime!.cancelDetachedSkillTask(taskId, scopeId),
   })
 
   ipcMain.handle('agent:listActiveChildRuns', (): IPCResponse => {
