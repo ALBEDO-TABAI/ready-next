@@ -1,5 +1,5 @@
-import type { RunProjectionPatch, TaskInteractionState } from './run-contracts'
-import type { ScopeRunEventPayload, ScopeRunTaskStep } from './types'
+import type { RunProjectionPatch, TaskInteractionState } from './contracts/run-contracts'
+import type { ScopeRunEventPayload, ScopeRunTaskStep } from './contracts/types'
 
 function cloneSteps(steps: ScopeRunTaskStep[] | null | undefined): ScopeRunTaskStep[] {
   return (steps || []).map((step) => ({ ...step }))

@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto'
-import type { WorkerSessionIdentity } from './run-contracts'
+import type { WorkerSessionIdentity } from './contracts/run-contracts'
 
 function normalizeSegment(value: string | null | undefined): string {
   return String(value || '')
