@@ -94,6 +94,7 @@ import { ChatPanelMotionLayer, CollapsedChatRail } from './chat-panel/layout/Mot
 // fixture locks), so this import does not change the chat-panel-baseline
 // snapshot until a session is explicitly created.
 import SessionTabs from './chat-panel/session-tabs/SessionTabs'
+import SessionCompleteToast from './chat-panel/session-tabs/SessionCompleteToast'
 import {
   AttachmentIcon,
   getAttachmentPreviewSrc,
@@ -1504,6 +1505,8 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
           />
         ) : null}
       </AnimatePresence>
+
+      <SessionCompleteToast />
 
       <AttachmentPreviewModal
         preview={activeAttachmentPreview}
