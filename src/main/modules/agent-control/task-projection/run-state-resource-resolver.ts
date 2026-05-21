@@ -1,7 +1,7 @@
 import { existsSync, statSync, readFileSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join } from 'node:path'
 
-import type { RequestEnvelopeResource, RequestEnvelopeResourceRef } from '../request-envelope'
+import type { RequestEnvelopeResource, RequestEnvelopeResourceRef } from '../contracts/request-envelope'
 
 const RUN_STATE_FILE = 'run_state.json'
 const MAX_RUN_STATE_BYTES = 64 * 1024

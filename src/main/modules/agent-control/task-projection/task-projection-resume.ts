@@ -1,5 +1,5 @@
-import { canResumeWithFs, type ResumeHandle } from '../resume-handle'
-import type { TaskProjectionRecord } from '../run-contracts'
+import { canResumeWithFs, type ResumeHandle } from '../contracts/resume-handle'
+import type { TaskProjectionRecord } from '../contracts/run-contracts'
 
 function hasResumeAction(record: TaskProjectionRecord): boolean {
   const actions = record.resumableActions || []

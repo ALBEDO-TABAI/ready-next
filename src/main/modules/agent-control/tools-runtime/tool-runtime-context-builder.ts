@@ -1,7 +1,7 @@
 import type { BrowserController } from '../../browser-engine/ipc-handler'
 import type { SidecarManager } from '../sidecar-manager'
 import type { AgentControlRuntime } from '../runtime'
-import type { ConversationScope } from '../types'
+import type { ConversationScope } from '../contracts/types'
 import type { ToolContext } from '../../tools/tool-executor'
 import {
   createEmptyActiveFrameContext,

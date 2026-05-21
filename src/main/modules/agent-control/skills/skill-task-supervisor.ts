@@ -15,7 +15,7 @@ import {
 import { selectRunStateCandidate, type RunStateCandidate, type RunStateSelection } from '../task-projection/run-state-selection'
 import { inspectSkillProgressArtifacts } from './skill-progress-artifacts'
 import { isConfiguredChildLoopSkillAction } from '../../tools/child-loop-skill-actions'
-import { canResumeShape } from '../resume-handle'
+import { canResumeShape } from '../contracts/resume-handle'
 
 const RUN_STATE_FILENAME = 'run_state.json'
 const RUN_STATE_SEARCH_DEPTH = 1

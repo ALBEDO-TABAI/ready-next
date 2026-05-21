@@ -1,4 +1,4 @@
-import type { SkillRunContract } from '../run-contracts'
+import type { SkillRunContract } from '../contracts/run-contracts'
 import type { SkillChildDriver } from './skill-child-drivers'
 import type {
   SkillChildLaunchParams,

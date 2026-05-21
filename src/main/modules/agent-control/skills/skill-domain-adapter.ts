@@ -6,7 +6,7 @@ import {
   type DomainAdapterProjection,
   type DomainAdapterPrepareResult,
 } from '../domain-adapters/domain-adapter'
-import type { RunProjectionPatch } from '../run-contracts'
+import type { RunProjectionPatch } from '../contracts/run-contracts'
 
 // R2: Domain adapter prefix narrowing is a SECOND allowedToolNames gate on top
 // of run-capability-controller's bundle. When route.executor === 'skill', this

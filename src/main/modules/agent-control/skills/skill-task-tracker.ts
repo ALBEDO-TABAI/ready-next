@@ -5,8 +5,8 @@ import type {
   ScopeRunResumableAction,
   ScopeRunTaskStep,
   ScopeRunWaitingFor,
-} from '../types'
-import type { SkillTaskLifecycleReason } from '../run-contracts'
+} from '../contracts/types'
+import type { SkillTaskLifecycleReason } from '../contracts/run-contracts'
 import { normalizeRunStateStatus, type NormalizedRunStateStatus } from '../task-projection/run-state-selection'
 import { getRepositoryDatabase } from '../../repositories/database-accessor'
 import {

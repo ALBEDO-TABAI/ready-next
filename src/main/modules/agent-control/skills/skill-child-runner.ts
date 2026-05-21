@@ -36,8 +36,8 @@ import type {
 } from '../../skills-runtime/runtime-manager'
 import type { SkillTaskRunRepository } from '../../repositories/skill-task-run-repository'
 import type { AgentSpawnContext } from '../../../../shared/skill-host-contract'
-import type { ScopeRunEventPayload, ScopeRunResumableAction, ScopeRunSkillProgress } from '../types'
-import type { TaskProjectionRecord, TaskProjectionStore, TaskStep } from '../run-contracts'
+import type { ScopeRunEventPayload, ScopeRunResumableAction, ScopeRunSkillProgress } from '../contracts/types'
+import type { TaskProjectionRecord, TaskProjectionStore, TaskStep } from '../contracts/run-contracts'
 
 import { logAgentMetric } from '../metrics'
 import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'

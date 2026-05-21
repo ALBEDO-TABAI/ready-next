@@ -34,11 +34,11 @@ export interface SendAndCollectResult {
   usedTools: string[]
   error?: string
   taskId?: string | null
-  taskType?: import('../run-contracts').TaskType
-  interactionState?: import('../run-contracts').TaskInteractionState
+  taskType?: import('../contracts/run-contracts').TaskType
+  interactionState?: import('../contracts/run-contracts').TaskInteractionState
   taskProjectionId?: string | null
-  executionDiagnostics?: import('../run-contracts').ExecutionRunDiagnostics | null
-  projectionTruth?: import('../run-contracts').ProjectionTruthSnapshot | null
+  executionDiagnostics?: import('../contracts/run-contracts').ExecutionRunDiagnostics | null
+  projectionTruth?: import('../contracts/run-contracts').ProjectionTruthSnapshot | null
   terminalReason?: import('../turn-frame').TurnTerminalReason | null
 }
 

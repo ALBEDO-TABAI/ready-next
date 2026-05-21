@@ -4,7 +4,7 @@ import type {
   BrowserTaskProjectionPayload,
   BrowserTaskPlanContinuity,
 } from '../../../../shared/browser-agent-task'
-import type { RunBudgetHint } from '../run-contracts'
+import type { RunBudgetHint } from '../contracts/run-contracts'
 import type { BrowserController } from '../../browser-engine/ipc-handler'
 import { BrowserAgentRunner, type BrowserAgentRunResult } from '../../tools/browser-agent-runner'
 import { BrowserTaskPlanner } from './browser-task-planner'

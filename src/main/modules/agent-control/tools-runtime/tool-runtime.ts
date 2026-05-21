@@ -5,7 +5,7 @@ import { TOOL_ERROR_METRICS } from './tool-error-metrics'
 import { isTerminalInfrastructureError } from '../../tools/tool-errors'
 import type { SidecarManager } from '../sidecar-manager'
 import type { AgentControlRuntime } from '../runtime'
-import type { ConversationScope } from '../types'
+import type { ConversationScope } from '../contracts/types'
 import type { BrowserController } from '../../browser-engine/ipc-handler'
 import type { ToolDefinition } from './tool-definition'
 import { defaultToolRegistry } from './tool-registry'
@@ -15,7 +15,7 @@ import {
   buildExplicitNoSkillAuthorization,
   type SkillToolAuthorization,
 } from '../skills/skill-tool-authorization'
-import type { RecoveryRecord, RunBudgetSeed, RunBudgetUsage, SkillRunContract } from '../run-contracts'
+import type { RecoveryRecord, RunBudgetSeed, RunBudgetUsage, SkillRunContract } from '../contracts/run-contracts'
 import { groupParallelSafeToolCalls, type ParallelToolCall } from './tool-parallelism-policy'
 import {
   canUseParallelToolGroup,

@@ -1,4 +1,4 @@
-import type { RequestEnvelope } from '../request-envelope'
+import type { RequestEnvelope } from '../contracts/request-envelope'
 import type { TurnFrame } from '../turn-frame'
 import type { ToolPolicy } from '../execution-tool-config'
 import type { ExecutionIntentContext } from '../execution-intent-resolver'
@@ -13,7 +13,7 @@ import type {
   TurnEngineRequest,
   TurnEngineSession,
   TurnEngineSessionMessage,
-} from '../run-contracts'
+} from '../contracts/run-contracts'
 
 /**
  * === Coordinator role (v3 stage C) ===

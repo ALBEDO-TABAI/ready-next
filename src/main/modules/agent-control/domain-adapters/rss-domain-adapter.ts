@@ -5,7 +5,7 @@ import {
   type DomainAdapter,
   type DomainAdapterPrepareResult,
 } from './domain-adapter'
-import type { ScopeRunTaskStep } from '../types'
+import type { ScopeRunTaskStep } from '../contracts/types'
 
 // R2: See skill-domain-adapter.ts for why prefix narrowing is a second gate.
 // RSS uniquely keeps both rss_* (deterministic handlers) and skill_rss_*

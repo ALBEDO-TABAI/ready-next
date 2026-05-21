@@ -1,13 +1,13 @@
 import { readFileSync, statSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 
-import type { TaskProjectionRecord, TaskProjectionStore } from '../run-contracts'
-import type { ScopeRunResumableAction } from '../types'
+import type { TaskProjectionRecord, TaskProjectionStore } from '../contracts/run-contracts'
+import type { ScopeRunResumableAction } from '../contracts/types'
 import type { SkillTaskRunRecord } from '../../repositories/skill-task-run-repository'
 import { inspectSkillProgressArtifacts } from '../skills/skill-progress-artifacts'
 import { logAgentMetric } from '../metrics'
 import { PROJECTION_OBSERVABILITY_METRICS } from '../projection-observability-metrics'
-import { canResumeShape } from '../resume-handle'
+import { canResumeShape } from '../contracts/resume-handle'
 
 const RECONCILABLE_STATUSES = new Set<TaskProjectionRecord['status']>(['running', 'queued', 'blocked', 'done'])
 const STALE_WITHOUT_HANDLE_MS = 30 * 60 * 1000

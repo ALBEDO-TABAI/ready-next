@@ -1,4 +1,4 @@
-import type { ScopeRunMemoryCapture, ScopeRunEventPayload, ConversationScope } from '../types'
+import type { ScopeRunMemoryCapture, ScopeRunEventPayload, ConversationScope } from '../contracts/types'
 import type {
   ExecutionHostRequest,
   ExecutionHostResult,
@@ -10,7 +10,7 @@ import type {
   RunCoordinatorResult,
   RunMessage,
   RunBudgetUsage,
-} from '../run-contracts'
+} from '../contracts/run-contracts'
 import {
   createRunBudgetSeed,
   createTaskBudgetRuntime,

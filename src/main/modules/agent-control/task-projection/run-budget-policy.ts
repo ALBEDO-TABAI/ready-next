@@ -8,8 +8,8 @@ import type {
   TaskBudget,
   TaskBudgetRuntime,
   TaskType,
-} from '../run-contracts'
-import type { ContinuationState } from '../continuation-state'
+} from '../contracts/run-contracts'
+import type { ContinuationState } from '../contracts/continuation-state'
 
 const DEFAULT_MAX_PARALLEL_TOOL_GROUPS = 5
 const LONG_SKILL_TASK_HARD_CAP_ITERATIONS = 220

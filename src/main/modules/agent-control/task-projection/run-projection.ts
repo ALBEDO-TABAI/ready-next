@@ -2,9 +2,9 @@ import type {
   ConversationScope,
   ScopeRunEventPayload,
   ScopeRunSummary,
-} from '../types'
+} from '../contracts/types'
 import { logAgentMetric } from '../metrics'
-import type { ProjectionTruthSnapshot, RunProjectionPatch } from '../run-contracts'
+import type { ProjectionTruthSnapshot, RunProjectionPatch } from '../contracts/run-contracts'
 
 function readProjectionTruthPatch(projectionTruth?: ProjectionTruthSnapshot | null): RunProjectionPatch {
   let patch: Record<string, unknown> | null = null

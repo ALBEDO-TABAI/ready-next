@@ -1,13 +1,13 @@
 import type {
   ScopeRunResumableAction,
   ScopeRunTaskContinuation,
-} from '../types'
-import { canResumeShape } from '../resume-handle'
+} from '../contracts/types'
+import { canResumeShape } from '../contracts/resume-handle'
 import type {
   SkillTaskLifecycleReason,
   SkillTaskLifecycleSignal,
   SkillTaskLifecycleState,
-} from '../run-contracts'
+} from '../contracts/run-contracts'
 import type { SkillTaskSupervisorSnapshot } from './skill-task-supervisor'
 
 function nonEmpty(value: unknown): string | null {

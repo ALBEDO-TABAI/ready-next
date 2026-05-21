@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type {
   SkillBudgetLeaseDecision,
   SkillBudgetLeaseState,
-} from '../run-contracts'
+} from '../contracts/run-contracts'
 import type { SkillProgressScore } from '../progress-scorer'
 import type { SkillWasteScore } from '../waste-scorer'
 import type { SkillTaskSupervisorSnapshot } from './skill-task-supervisor'

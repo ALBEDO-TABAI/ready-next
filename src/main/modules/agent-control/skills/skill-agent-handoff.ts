@@ -10,7 +10,7 @@ import {
   readJson,
   stringValue,
 } from './skill-handoff-shared'
-import type { ScopeRunSkillHandoff } from '../types'
+import type { ScopeRunSkillHandoff } from '../contracts/types'
 
 export interface SkillHandoffWriteTarget {
   root: string

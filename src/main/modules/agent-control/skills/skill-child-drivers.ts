@@ -16,7 +16,7 @@
 
 import type { SkillRunResult } from '../../skills-runtime/runtime-manager'
 
-import type { SkillRunContract } from '../run-contracts'
+import type { SkillRunContract } from '../contracts/run-contracts'
 import type {
   SkillChildCloseEvent,
   SkillChildDriverAction,

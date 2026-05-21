@@ -3,7 +3,7 @@ import type { DomainAdapter, DomainAdapterApplyResult, DomainAdapterDispatchResu
 import type { DocumentToolLoopState } from '../document-pipeline/document-tool-loop-orchestrator'
 import type { DocumentChatSessionLike } from '../document-domain-helpers'
 import type { ToolDefinition } from '../tools-runtime/tool-definition'
-import type { ScopeRunTaskStep } from '../types'
+import type { ScopeRunTaskStep } from '../contracts/types'
 import { defaultToolRegistry, type ToolRegistryReader } from '../tools-runtime/tool-registry'
 import { normalizeToolExecutionOutput } from '../tools-runtime/tool-result-types'
 
