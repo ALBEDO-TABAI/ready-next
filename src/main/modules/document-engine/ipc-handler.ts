@@ -7,7 +7,6 @@ import { readFile, readdir, stat, writeFile, rename, cp, mkdir, unlink, rm, copy
 import { join, basename, dirname, extname } from 'path'
 import { homedir } from 'os'
 import { buildDocumentHtmlSnapshotExport } from '../../../shared/document-widget-html-export'
-import type { DocumentMarkDraft, DocumentMarkPatch } from '../../../shared/document-side-panels'
 import { documentCommitRegistry, type DocumentWidgetCommitEvent } from './document-commit-registry'
 import { validateWorkspaceRoot } from '../../../shared/workspace-validation'
 import { EBOOK_BINARY_EXTENSIONS } from '../../../shared/ebook'
@@ -15,6 +14,8 @@ import { BINARY_EXTENSIONS } from './binary-extensions'
 import { importEpubAsMarkdown } from './ebook-importer'
 import { getDatabase } from '../database'
 import { DocumentMarksRepository } from './document-marks-repository'
+import { markGroup } from './ipc/mark-group'
+import type { IpcDisposeHandle } from './ipc/types'
 import {
   ATTACHMENT_HARD_CAP_BYTES,
   IMAGE_INLINE_CAP_BYTES,
@@ -506,6 +507,15 @@ async function saveDocumentWithDialog(payload: {
   }
 }
 
+/**
+ * Stage V V2.3a — dispose handle returned by `markGroup.register`. The 4
+ * document mark channels live in `ipc/mark-group.ts`; the host keeps the
+ * dispose handle so a re-entrant `setupDocumentIPC` (dev-reload) can drop
+ * the prior registration before the next one binds. A future
+ * `cleanupDocumentEngine` hook will drain this on shutdown.
+ */
+let markGroupDispose: IpcDisposeHandle | null = null
+
 export function setupDocumentIPC(useMock = false): void {
   // Renderer notifies main whenever a widget update has been committed into the tab content store.
   //   Pipeline executor waits on this via documentCommitRegistry.waitForCommitAfter so the write
@@ -634,54 +644,24 @@ export function setupDocumentIPC(useMock = false): void {
     }
   })
 
-  const getDocumentMarksRepository = () => {
-    const rawDb = getDatabase().getRawDb()
-    if (!rawDb) throw new Error('database_unavailable')
-    return new DocumentMarksRepository(rawDb)
+  // Stage V V2.3a — 4 document mark channels (`document:listMarks`,
+  // `document:createMark`, `document:updateMark`, `document:deleteMark`)
+  // moved into `markGroup`. The group handles dev-reload removeHandler
+  // pre-clear internally; we hold the dispose handle so a future cleanup
+  // hook (or the next setupDocumentIPC entry) can drop them on shutdown.
+  // Re-binding on dev reload first calls `dispose()` on the prior handle
+  // so listener slots stay clean.
+  if (markGroupDispose) {
+    try { markGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    markGroupDispose = null
   }
-
-  ipcMain.handle('document:listMarks', async (_, payload: { documentPath?: string }) => {
-    try {
-      if (useMock) return { success: true, data: [] }
-      const documentPath = typeof payload?.documentPath === 'string' ? payload.documentPath : ''
-      return { success: true, data: getDocumentMarksRepository().list(documentPath) }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('document:createMark', async (_, payload: DocumentMarkDraft) => {
-    try {
-      if (useMock) return { success: false, error: 'mock_document_marks_unavailable' }
-      return { success: true, data: getDocumentMarksRepository().create(payload) }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('document:updateMark', async (_, payload: { id?: string; patch?: DocumentMarkPatch }) => {
-    try {
-      if (useMock) return { success: false, error: 'mock_document_marks_unavailable' }
-      const id = typeof payload?.id === 'string' ? payload.id : ''
-      if (!id) return { success: false, error: 'document_mark_id_required' }
-      const data = getDocumentMarksRepository().update(id, payload.patch || {})
-      return data
-        ? { success: true, data }
-        : { success: false, error: 'document_mark_not_found' }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('document:deleteMark', async (_, payload: { id?: string }) => {
-    try {
-      if (useMock) return { success: false, error: 'mock_document_marks_unavailable' }
-      const id = typeof payload?.id === 'string' ? payload.id : ''
-      if (!id) return { success: false, error: 'document_mark_id_required' }
-      return { success: true, deleted: getDocumentMarksRepository().delete(id) }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
+  markGroupDispose = markGroup.register(ipcMain, {
+    useMock,
+    getDocumentMarksRepository: () => {
+      const rawDb = getDatabase().getRawDb()
+      if (!rawDb) throw new Error('database_unavailable')
+      return new DocumentMarksRepository(rawDb)
+    },
   })
 
   // Read file — enhanced with binary file handling via local-file:// URLs
