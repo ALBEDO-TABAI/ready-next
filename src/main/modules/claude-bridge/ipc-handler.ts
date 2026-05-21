@@ -4,7 +4,9 @@ import { AgentManager } from './agent-manager'
 // Stage V V2.1c — `MultimodalBlock` import retired: the only call sites
 // (`agent:send` + `agent:sendScoped` payload types) moved into
 // `agentLifecycleGroup`.
-import type { AIModelConfig } from '../../../shared/ai-providers'
+// Stage V V2.1d — `AIModelConfig` import retired: the only call site
+// (`agent:getCapabilityRuntimeSnapshot` payload type) moved into
+// `agentRuntimeGroup`.
 import { BrowserController } from '../browser-engine/ipc-handler'
 import { readFileSync, statSync } from 'fs'
 import { basename, extname } from 'path'
@@ -41,6 +43,7 @@ import { cancelChildRunForIpc, listActiveChildRunsForIpc } from './active-child-
 import { askUserGroup } from './ipc/ask-user-group'
 import { toolEventGroup } from './ipc/tool-event-group'
 import { agentLifecycleGroup } from './ipc/agent-lifecycle-group'
+import { agentRuntimeGroup } from './ipc/agent-runtime-group'
 import type { IpcDisposeHandle } from './ipc/types'
 import { logAgentMetric } from '../agent-control/metrics'
 import { isRendererAgentMetricName } from '../../../shared/renderer-agent-metrics'
@@ -208,6 +211,15 @@ let toolEventGroupDispose: IpcDisposeHandle | null = null
  */
 let agentLifecycleGroupDispose: IpcDisposeHandle | null = null
 
+/**
+ * Stage V V2.1d — dispose handle returned by `agentRuntimeGroup.register`.
+ * Owns the 3 read-only runtime introspection channels (`agent:getRuntimeStatus`,
+ * `agent:getCapabilityRuntimeSnapshot`, `agent:listChannels`). Same lifecycle
+ * pattern as the other group dispose slots: register on `setupAgentIPC`,
+ * dispose on dev-reload re-entry, dispose on `cleanupAgentRuntime` shutdown.
+ */
+let agentRuntimeGroupDispose: IpcDisposeHandle | null = null
+
 function cleanupSkillSessionState(sessionId?: string, reason = 'Skill session state cleared'): void {
   if (sessionId) {
     clearLastReferenceSkill(sessionId)
@@ -318,6 +330,13 @@ export async function cleanupAgentRuntime(): Promise<void> {
   if (agentLifecycleGroupDispose) {
     try { agentLifecycleGroupDispose.dispose() } catch { /* ignore */ }
     agentLifecycleGroupDispose = null
+  }
+  // Stage V V2.1d — symmetric release of the 3 agent-runtime introspection
+  // channel handlers (`agent:getRuntimeStatus`,
+  // `agent:getCapabilityRuntimeSnapshot`, `agent:listChannels`).
+  if (agentRuntimeGroupDispose) {
+    try { agentRuntimeGroupDispose.dispose() } catch { /* ignore */ }
+    agentRuntimeGroupDispose = null
   }
   if (runtime) {
     await runtime.stop()
@@ -577,33 +596,17 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   // the SDK runtime channels below. Reintroduction is fenced by
   // `scripts/check-no-legacy-agent-ipc.cjs`.
 
-  ipcMain.handle('agent:getRuntimeStatus', async (): Promise<IPCResponse> => {
-    try {
-      const status = await runtime!.getRuntimeStatus()
-      return { success: true, data: status }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      return { success: false, error: errorMessage }
-    }
-  })
-
-  ipcMain.handle('agent:getCapabilityRuntimeSnapshot', async (_, config?: AIModelConfig): Promise<IPCResponse> => {
-    try {
-      const snapshot = await runtime!.getCapabilityRuntimeSnapshot(config)
-      return { success: true, data: snapshot }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      return { success: false, error: errorMessage }
-    }
-  })
-
-  ipcMain.handle('agent:listChannels', (): IPCResponse => {
-    try {
-      return { success: true, data: runtime!.listChannels() }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      return { success: false, error: errorMessage }
-    }
+  // Stage V V2.1d — agent runtime introspection channels lifted into
+  // `agentRuntimeGroup`. The group pre-clears internally; we hold the dispose
+  // handle so `cleanupAgentRuntime` can drop them on shutdown.
+  if (agentRuntimeGroupDispose) {
+    try { agentRuntimeGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    agentRuntimeGroupDispose = null
+  }
+  agentRuntimeGroupDispose = agentRuntimeGroup.register(ipcMain, {
+    getRuntimeStatus: () => runtime!.getRuntimeStatus(),
+    getCapabilityRuntimeSnapshot: (config) => runtime!.getCapabilityRuntimeSnapshot(config),
+    listChannels: () => runtime!.listChannels(),
   })
 
   ipcMain.handle('agent:listConversationScopes', (_, payload?: { agent?: string }): IPCResponse => {
