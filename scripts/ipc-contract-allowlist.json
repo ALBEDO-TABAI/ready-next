@@ -1,0 +1,146 @@
+{
+  "$schema_version": 1,
+  "$identity": "Stage V V5 IPC contract gate allowlist. Each top-level array (other than non_literal_push) holds objects of shape { channel, reason, owner, expiry }. non_literal_push entries are { callsite: 'file:line', variable, channels[], reason, owner, expiry }. expiry is YYYY-MM-DD; expired entries fail the gate.",
+  "invoke_only": [
+    {
+      "channel": "browser:updateBounds",
+      "reason": "Channel is dual-registered as ipcMain.handle + ipcMain.on in src/main/modules/browser-engine/ipc-shell.ts:152-157; renderer (src/preload/index.ts:337) only uses ipcRenderer.send (fire-and-forget bounds sync per CLAUDE.md §2 BrowserView overlay rule). The orphan handle() pre-dates the fire-and-forget migration and is retained as a defensive request/response stub. Stage-W will remove the legacy handle() registration.",
+      "owner": "stage-v-bootstrap",
+      "expiry": "2026-08-21"
+    },
+    {
+      "channel": "browser:previewUpdateBounds",
+      "reason": "Same dual-registration pattern as browser:updateBounds at src/main/modules/browser-engine/ipc-shell.ts:217-226; renderer (src/preload/index.ts:360) uses ipcRenderer.send. Legacy handle() to be removed in stage-W cleanup.",
+      "owner": "stage-v-bootstrap",
+      "expiry": "2026-08-21"
+    },
+    {
+      "channel": "document:cancelReindex",
+      "reason": "src/main/modules/search-engine/ipc-handler.ts:250 registers a defensive cancel-reindex handler intended for workspace-close / app-quit teardown. No renderer caller exists today; the UI path that should invoke it is part of the search-engine lifecycle work scheduled for stage-W. Removing the handler now would lose the cancel hook before its replacement lands.",
+      "owner": "stage-v-bootstrap",
+      "expiry": "2026-08-21"
+    }
+  ],
+  "invoke_unhandled": [],
+  "send_unreceived": [],
+  "push_unlistened": [],
+  "methods_exposed_only": [],
+  "methods_typed_only": [],
+  "non_literal_push": [
+    {
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:149",
+      "variable": "channel",
+      "channels": ["browser:downloadUpdate"],
+      "reason": "Dependency-injection forwarder passed to BrowserDownloadService constructor; the service itself emits the literal channel 'browser:downloadUpdate' (download-service.ts:221, 260) which is captured by the literal scan.",
+      "owner": "stage-v-bootstrap",
+      "expiry": "2026-08-21"
+    },
+    {
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:155",
+      "variable": "channel",
+      "channels": ["app:shortcut"],
+      "reason": "Forwarder passed to BrowserAppShortcutBridgeService; the service emits literal 'app:shortcut' (covered by main/index.ts:642-equivalent literal scan via the bridge).",
+      "owner": "stage-v-bootstrap",
+      "expiry": "2026-08-21"
+    },
+    {
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:173",
+      "variable": "channel",
+      "channels": ["browser:fastCardContextAction"],
+      "reason": "Forwarder passed to BrowserContextMenuService; the service emits literal 'browser:fastCardContextAction' (context-menu-service.ts:401).",
+      "owner": "stage-v-bootstrap",
+      "expiry": "2026-08-21"
+    },
+    {
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:182",
+      "variable": "channel",
+      "channels": ["browser:bookmarksChanged"],
+      "reason": "Forwarder passed to BrowserBookmarkTransferService; the service emits literal 'browser:bookmarksChanged' (bookmark-transfer-service.ts:179, 221).",
+      "owner": "stage-v-bootstrap",
+      "expiry": "2026-08-21"
+    },
+    {
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:198",
+      "variable": "channel",
+      "channels": ["browser:previewUpdate"],
+      "reason": "Forwarder passed to BrowserPreviewService; the service emits literal 'browser:previewUpdate' (preview-service.ts:68).",
+      "owner": "stage-v-bootstrap",
+      "expiry": "2026-08-21"
+    },
+    {
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:228",
+      "variable": "channel",
+      "channels": ["browser:tabUpdate"],
+      "reason": "Forwarder passed to BrowserTabMetaService; the service emits literal 'browser:tabUpdate' (tab-meta-service.ts:65).",
+      "owner": "stage-v-bootstrap",
+      "expiry": "2026-08-21"
+    },
+    {
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:247",
+      "variable": "channel",
+      "channels": ["browser:tabUpdate"],
+      "reason": "Forwarder passed to BrowserTabLifecycleService; the service emits literal 'browser:tabUpdate' across tab-lifecycle-service.ts:194/237/246/255/270.",
+      "owner": "stage-v-bootstrap",
+      "expiry": "2026-08-21"
+    },
+    {
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:289",
+      "variable": "channel",
+      "channels": ["browser:adblockUpdate"],
+      "reason": "Forwarder passed to BrowserSessionPolicyService; the service emits literal 'browser:adblockUpdate' (session-policy-service.ts:173, 180).",
+      "owner": "stage-v-bootstrap",
+      "expiry": "2026-08-21"
+    },
+    {
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:329",
+      "variable": "channel",
+      "channels": ["browser:bookmarksChanged", "browser:clipCurrentTabRequested"],
+      "reason": "Forwarder passed to BrowserUtilityMenuService; the service emits literals 'browser:bookmarksChanged' (utility-menu-service.ts:106, 109, 123) and 'browser:clipCurrentTabRequested' (utility-menu-service.ts:176).",
+      "owner": "stage-v-bootstrap",
+      "expiry": "2026-08-21"
+    },
+    {
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:420",
+      "variable": "channel",
+      "channels": [
+        "browser:adblockUpdate",
+        "browser:bookmarksChanged",
+        "browser:clipCurrentTabRequested",
+        "browser:downloadUpdate",
+        "browser:fastCardContextAction",
+        "browser:newTabRequest",
+        "browser:previewUpdate",
+        "browser:tabUpdate",
+        "clip:backgroundUpdate",
+        "clip:contentStudyUpdate"
+      ],
+      "reason": "BrowserHostController.sendToRenderer (ipc-handler.ts:418-422) is the central main->renderer dispatch used by all browser-engine sub-services and the clipping runners. All emitted channels are still literal at their original call sites and covered by the literal PUSH_EMITTED scan; this is a runtime forwarder, not a fan-out blind spot.",
+      "owner": "stage-v-bootstrap",
+      "expiry": "2026-08-21"
+    },
+    {
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:1403",
+      "variable": "channel",
+      "channels": ["clip:backgroundUpdate"],
+      "reason": "Forwarder passed to setupBrowserClipDraggedTabIPC; the runner emits literal 'clip:backgroundUpdate' (clip-dragged-tab-runner.ts:304).",
+      "owner": "stage-v-bootstrap",
+      "expiry": "2026-08-21"
+    },
+    {
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:1406",
+      "variable": "channel",
+      "channels": ["clip:contentStudyUpdate"],
+      "reason": "Forwarder passed to setupBrowserContentStudyIPC; the runner emits literal 'clip:contentStudyUpdate' (content-study-runner.ts:409) plus the spy-wrapped emit at content-study-runner.ts:182 (separately allowlisted below).",
+      "owner": "stage-v-bootstrap",
+      "expiry": "2026-08-21"
+    },
+    {
+      "callsite": "src/main/modules/clipping/content-study-runner.ts:182",
+      "variable": "channel",
+      "channels": ["clip:backgroundUpdate", "clip:contentStudyUpdate"],
+      "reason": "Spy wrapper used by the content-study runner to capture clip lifecycle events before forwarding to the real controller.sendToRenderer. Only clip background/content-study channels flow through this path; both are literal-emitted upstream by clip-dragged-tab-runner.ts:304 and content-study-runner.ts:409.",
+      "owner": "stage-v-bootstrap",
+      "expiry": "2026-08-21"
+    }
+  ]
+}
