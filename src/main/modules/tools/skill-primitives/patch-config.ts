@@ -15,7 +15,7 @@ import type { SkillHostRequirements } from '../../../../shared/skill-host-contra
 import { atomicWriteJson } from '../../agent-control/atomic-write'
 import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent-control/tools-runtime/tool-result-types'
 import { ToolDomainError } from '../tool-errors'
-import type { TurnFramePatch } from '../../agent-control/turn-frame'
+import type { TurnFramePatch } from '../../agent-control/runtime-core/turn-frame'
 
 export interface PatchConfigOperation {
   op: 'set' | 'delete'

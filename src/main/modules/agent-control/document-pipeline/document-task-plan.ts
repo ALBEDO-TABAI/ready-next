@@ -1,4 +1,4 @@
-import type { RequestEnvelope, RequestEnvelopeResource } from './contracts/request-envelope'
+import type { RequestEnvelope, RequestEnvelopeResource } from '../contracts/request-envelope'
 
 export type DocumentTaskResourceRole =
   | 'primary_source'

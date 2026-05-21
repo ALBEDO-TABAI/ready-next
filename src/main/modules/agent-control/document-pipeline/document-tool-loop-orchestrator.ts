@@ -1,14 +1,14 @@
-import type { DocumentWidgetTaskKind } from '../claude-bridge/tool-policy-heuristics'
-import type { RunBudgetHint } from './contracts/run-contracts'
+import type { DocumentWidgetTaskKind } from '../../claude-bridge/tool-policy-heuristics'
+import type { RunBudgetHint } from '../contracts/run-contracts'
 import {
   accumulateDocumentToolProgress,
   buildDocumentToolCompletionText,
   shouldPreferDocumentInspectionResult,
   type DocumentToolInspection,
   type DocumentToolProgressState,
-} from '../claude-bridge/document-tool-flow'
-import { buildUserFacingInspectionSummary } from '../../../shared/document-widget-parse'
-import { logAgentMetric } from './metrics'
+} from '../../claude-bridge/document-tool-flow'
+import { buildUserFacingInspectionSummary } from '../../../../shared/document-widget-parse'
+import { logAgentMetric } from '../metrics'
 
 export type DocumentToolLoopOrchestratorDeps = {
   logMetric?: (name: string, payload: Record<string, unknown>) => void

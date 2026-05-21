@@ -38,7 +38,7 @@ import {
   loadSkillRunContract,
   type SkillRunContract,
 } from '../../agent-control/contracts/run-contracts'
-import type { TurnFrame, TurnFramePatch } from '../../agent-control/turn-frame'
+import type { TurnFrame, TurnFramePatch } from '../../agent-control/runtime-core/turn-frame'
 import { resolveVeaResumeAction } from '../../agent-control/vea-resume-action'
 
 const RUN_STATE_FILENAME = 'run_state.json'

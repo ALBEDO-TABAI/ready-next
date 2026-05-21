@@ -1,13 +1,13 @@
 import type {
   DocumentWidgetComponentName,
   DocumentWidgetComponentSpec,
-} from '../../../shared/document-widget-openui'
-import { validateDocumentWidgetComponentSpec } from '../../../shared/document-widget-openui'
+} from '../../../../shared/document-widget-openui'
+import { validateDocumentWidgetComponentSpec } from '../../../../shared/document-widget-openui'
 import {
   buildListWidgetsUserFacingText,
   type DocumentWidgetSummary,
-} from '../../../shared/document-widget-parse'
-import { logAgentMetric } from './metrics'
+} from '../../../../shared/document-widget-parse'
+import { logAgentMetric } from '../metrics'
 
 export type DocumentWidgetPipelinePhase =
   | 'loading_document'

@@ -1,4 +1,4 @@
-import type { RequestEnvelope } from './contracts/request-envelope'
+import type { RequestEnvelope } from '../contracts/request-envelope'
 import type { DocumentTaskJob } from './document-task-plan'
 
 export interface DocumentInsightSourceMaterial {
