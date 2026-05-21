@@ -18,6 +18,7 @@ import { markGroup } from './ipc/mark-group'
 import { fileIoGroup } from './ipc/file-io-group'
 import { fileMutationGroup } from './ipc/file-mutation-group'
 import { workspaceGroup } from './ipc/workspace-group'
+import { parserGroup } from './ipc/parser-group'
 import type { IpcDisposeHandle } from './ipc/types'
 import {
   ATTACHMENT_HARD_CAP_BYTES,
@@ -543,6 +544,14 @@ let fileMutationGroupDispose: IpcDisposeHandle | null = null
  */
 let workspaceGroupDispose: IpcDisposeHandle | null = null
 
+/**
+ * Stage V V2.3e — dispose handle returned by `parserGroup.register`.
+ * The 3 parser channels (parseDocx/parseXlsx/importEbookAsMarkdown) live
+ * in `ipc/parser-group.ts`; same dev-reload lifecycle as the other
+ * extracted groups.
+ */
+let parserGroupDispose: IpcDisposeHandle | null = null
+
 export function setupDocumentIPC(useMock = false): void {
   // Renderer notifies main whenever a widget update has been committed into the tab content store.
   //   Pipeline executor waits on this via documentCommitRegistry.waitForCommitAfter so the write
@@ -757,196 +766,22 @@ export function setupDocumentIPC(useMock = false): void {
     getHomeDirectory: () => homedir(),
   })
 
-  ipcMain.handle('document:importEbookAsMarkdown', async (_, payload: { sourcePath?: string }) => {
-    try {
-      if (useMock) {
-        const sourcePath = payload?.sourcePath || 'book.epub'
-        return {
-          success: true,
-          outputDir: dirname(sourcePath),
-          indexPath: join(dirname(sourcePath), 'index.md'),
-          assetCount: 0,
-          warnings: [],
-          mock: true,
-        }
-      }
-      const sourcePath = typeof payload?.sourcePath === 'string' ? payload.sourcePath : ''
-      if (!sourcePath) {
-        return { success: false, error: '缺少电子书路径', errorCode: 'INVALID_INPUT' }
-      }
-      const result = await importEpubAsMarkdown(sourcePath)
-      if (result.success && result.indexPath && documentWriteIndexHook) {
-        try {
-          const content = await readFile(result.indexPath, 'utf-8')
-          documentWriteIndexHook(result.indexPath, content)
-        } catch (hookError) {
-          console.warn('[document-engine] ebook import index hook failed', hookError)
-        }
-      }
-      return result
-    } catch (error) {
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-        errorCode: 'EBOOK_IMPORT_FAILED',
-      }
-    }
-  })
-
-  // Stage V V2.3b — `document:list` moved into `fileIoGroup`. See breadcrumb
-  // above the `document:importEbookAsMarkdown` handler for the group's
-  // single registration site.
-
-  // Parse docx — real parsing with mammoth, returns { html, rawText }
-  ipcMain.handle('document:parseDocx', async (_, path: string) => {
-    try {
-      if (useMock) {
-        return {
-          success: true,
-          data: {
-            html: '<p>[Mock] DOCX parsing requires mammoth.js</p>',
-            rawText: '[Mock] DOCX parsing requires mammoth.js'
-          },
-          // backward compat
-          content: '<p>[Mock] DOCX parsing requires mammoth.js</p>',
-          html: '<p>[Mock] DOCX parsing requires mammoth.js</p>',
-          mock: true
-        }
-      }
-
-      if (!existsSync(path)) {
-        return { success: false, error: 'File not found', errorCode: 'FILE_NOT_FOUND', file: path }
-      }
-
-      const mammoth = await getMammoth()
-      if (!mammoth) {
-        return {
-          success: false,
-          error: 'DOCX parsing library (mammoth) is not installed. Run: npm install mammoth',
-          errorCode: 'LIBRARY_NOT_INSTALLED'
-        }
-      }
-
-      const buffer = await readFile(path)
-
-      // Use the mammoth module — handle both default and named exports
-      const mammothMod = (mammoth as unknown as { default?: typeof import('mammoth') }).default || mammoth
-      const htmlResult = await mammothMod.convertToHtml({ buffer })
-      const textResult = await mammothMod.extractRawText({ buffer })
-
-      return {
-        success: true,
-        data: {
-          html: htmlResult.value,
-          rawText: textResult.value,
-          messages: htmlResult.messages
-        },
-        // backward compat
-        content: htmlResult.value,
-        html: htmlResult.value,
-        file: path
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      if (/end of central directory|zip file/i.test(errorMessage)) {
-        try {
-          const rawText = await readFile(path, 'utf-8')
-          if (looksLikeReadableText(rawText)) {
-            const html = `<pre>${escapeHtml(rawText)}</pre>`
-            return {
-              success: true,
-              data: {
-                html,
-                rawText,
-                messages: [
-                  {
-                    type: 'warning',
-                    message: 'DOCX 文件结构损坏，已回退为原始文本视图（文件可能曾被当作纯文本覆盖保存）。',
-                  },
-                ],
-              },
-              content: html,
-              html,
-              file: path,
-            }
-          }
-        } catch {
-          // Keep original parse error below.
-        }
-      }
-      return {
-        success: false,
-        error: `Failed to parse DOCX: ${errorMessage}`,
-        errorCode: 'PARSE_ERROR',
-        file: path
-      }
-    }
-  })
-
-  // Parse xlsx — real parsing with SheetJS, multi-sheet support
-  ipcMain.handle('document:parseXlsx', async (_, path: string) => {
-    try {
-      if (useMock) {
-        return {
-          success: true,
-          data: {
-            sheets: [
-              { name: 'Sheet1', data: [['A1', 'B1'], ['A2', 'B2']] }
-            ]
-          },
-          // backward compat
-          sheets: ['Sheet1'],
-          file: path,
-          mock: true
-        }
-      }
-
-      if (!existsSync(path)) {
-        return { success: false, error: 'File not found', errorCode: 'FILE_NOT_FOUND', file: path }
-      }
-
-      const xlsx = await getXlsx()
-      if (!xlsx) {
-        return {
-          success: false,
-          error: 'XLSX parsing library (xlsx) is not installed. Run: npm install xlsx',
-          errorCode: 'LIBRARY_NOT_INSTALLED'
-        }
-      }
-
-      const buffer = await readFile(path)
-      const xlsxMod = (xlsx as unknown as { default?: typeof import('xlsx') }).default || xlsx
-      const workbook = xlsxMod.read(buffer, { type: 'buffer' })
-
-      // Build structured multi-sheet output: { name, data: string[][] }
-      const sheets: Array<{ name: string; data: unknown[][] }> = []
-      const legacyData: Record<string, unknown[][]> = {}
-
-      for (const sheetName of workbook.SheetNames) {
-        const sheet = workbook.Sheets[sheetName]
-        const rows = xlsxMod.utils.sheet_to_json(sheet, { header: 1 }) as unknown[][]
-        sheets.push({ name: sheetName, data: rows })
-        legacyData[sheetName] = rows
-      }
-
-      return {
-        success: true,
-        data: { sheets },
-        // backward compat
-        sheets: workbook.SheetNames,
-        // Legacy flat data map
-        sheetData: legacyData,
-        file: path
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      return {
-        success: false,
-        error: `Failed to parse XLSX: ${errorMessage}`,
-        errorCode: 'PARSE_ERROR',
-        file: path
-      }
-    }
+  // Stage V V2.3e — 3 parser channels (`document:parseDocx`,
+  // `document:parseXlsx`, `document:importEbookAsMarkdown`) moved into
+  // `parserGroup`. The group needs the mock flag, the lazy mammoth/xlsx
+  // module getters (host owns the singleton cache), the ebook importer
+  // facade, and the write-index hook (shared with FileIoGroup so the
+  // ebook importer can fan its `index.md` back into the search engine).
+  if (parserGroupDispose) {
+    try { parserGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    parserGroupDispose = null
+  }
+  parserGroupDispose = parserGroup.register(ipcMain, {
+    useMock,
+    getDocumentWriteIndexHook: () => documentWriteIndexHook,
+    getMammothModule: () => getMammoth(),
+    getXlsxModule: () => getXlsx(),
+    importEbookAsMarkdown: (sourcePath) => importEpubAsMarkdown(sourcePath),
   })
 
   // --- File Management IPC Handlers ---
