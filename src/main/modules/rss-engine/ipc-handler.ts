@@ -45,6 +45,7 @@ import {
 import { sourceGroup } from './ipc/source-group'
 import { itemGroup } from './ipc/item-group'
 import { analysisGroup } from './ipc/analysis-group'
+import { fetchGroup } from './ipc/fetch-group'
 import type { AddSourceCoreInput, AddSourceCoreResult } from './ipc/engine-deps'
 import type { IpcDisposeHandle } from './ipc/types'
 
@@ -206,6 +207,16 @@ let itemGroupDispose: IpcDisposeHandle | null = null
  * three groups before the next registration binds.
  */
 let analysisGroupDispose: IpcDisposeHandle | null = null
+
+/**
+ * Stage V V2.2d — dispose handle returned by `fetchGroup.register`. The 5
+ * fetch / status channels (`rss:fetchAll`, `rss:refreshSource`,
+ * `rss:benchmarkSources`, `rss:status`, `rss:stats`) live in
+ * `ipc/fetch-group.ts`; mirror of the prior three dispose slots so dev-
+ * reload re-entry into `setupRSSIPC` releases every group before the next
+ * registration binds.
+ */
+let fetchGroupDispose: IpcDisposeHandle | null = null
 
 export function setRSSBrowserController(controller: BrowserController | null): void {
   rssBrowserController = controller
@@ -994,78 +1005,70 @@ export function setupRSSIPC(useMock = false): void {
     mapAnalysisJob,
   })
 
-  ipcMain.handle('rss:status', async () => {
-    if (useMock) {
-      return createSuccessResponse(
-        {
-          rsshub: {
-            state: 'mock',
-            running: false,
-            port: 0,
-            baseUrl: null,
-            restartCount: 0,
-            lastError: null,
-            lastStartupError: null,
-            lastRuntimeError: null,
-            lastRuntimeErrorAt: null,
-            startedAt: null,
-            exitedAt: null,
-            chromium: {
-              ready: false,
-              executablePath: null,
-              source: 'none',
-              cacheDir: '',
-              buildId: '',
-              downloadSupported: null,
-              lastCheckedAt: null,
-              lastError: null,
-            },
-          },
-          update: rssUpdateLock.getStatus(),
-          artifactsDir: getArtifactsRootDir(),
-        },
-        true,
-      )
-    }
-
-    try {
-      const rsshubRequired = await warmEmbeddedRSSHubForDiagnostics()
-      const status = rssUpdateLock.getStatus()
-      const rsshubStatus = await rsshubManager.describeStatus()
-      return createSuccessResponse(
-        {
-          rsshub: rsshubStatus,
-          rsshubRequired,
-          update: status,
-          artifactsDir: getArtifactsRootDir(),
-        },
-        false,
-      )
-    } catch (error) {
-      return createErrorResponse(error instanceof Error ? error.message : String(error))
-    }
-  })
-
-  ipcMain.handle('rss:stats', async () => {
-    if (useMock) {
-      return createSuccessResponse(
-        {
-          totalSources: mockSources.length,
-          totalItems: mockItems.length,
-          unreadItems: mockItems.filter((item) => !item.read).length,
-          platformDistribution: { rss: mockSources.length },
-          categoryDistribution: { 科技: mockItems.length },
-        },
-        true,
-      )
-    }
-
-    try {
-      const stats = rssRepository.getRSSStats()
-      return createSuccessResponse(stats, false)
-    } catch (error) {
-      return createErrorResponse(error instanceof Error ? error.message : String(error))
-    }
+  // Stage V V2.2d — the 5 fetch / status channels (`rss:fetchAll`,
+  // `rss:refreshSource`, `rss:benchmarkSources`, `rss:status`,
+  // `rss:stats`) moved into `fetchGroup`. The group owns mock-mode
+  // dispatch and response shaping; every collaborator (repository
+  // surface, update lock, rsshub manager describe call, route
+  // diagnostics recorder, artifact generators, fetch invocation log,
+  // digest snapshot, in-flight set, helpers) is injected via deps so
+  // the group never imports the scraper / rsshub / browser chain
+  // directly. Dev-reload re-entry disposes the prior handle first so
+  // listener slots stay clean — same pattern as SourceGroup /
+  // ItemGroup / AnalysisGroup above.
+  if (fetchGroupDispose) {
+    try { fetchGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    fetchGroupDispose = null
+  }
+  fetchGroupDispose = fetchGroup.register(ipcMain, {
+    useMock,
+    mockSources,
+    mockItems,
+    getRSSSources: () => rssRepository.getRSSSources() as DBRSSSource[],
+    getRSSItemsByIds: (ids) => rssRepository.getRSSItemsByIds(ids),
+    upsertRSSItems: (items) => rssRepository.upsertRSSItems(items as Parameters<typeof rssRepository.upsertRSSItems>[0]),
+    updateRSSSourceLastFetched: (id) => rssRepository.updateRSSSourceLastFetched(id),
+    updateRSSSourcePlatform: (id, platform) => rssRepository.updateRSSSourcePlatform(id, platform),
+    setRSSSourceDraftSeeded: (id, seeded) => rssRepository.setRSSSourceDraftSeeded(id, seeded),
+    getAllRSSItems: () => rssRepository.getAllRSSItems() as DBRSSItem[],
+    getLatestPerSource: () => rssRepository.getLatestPerSource(),
+    getRSSStats: () => rssRepository.getRSSStats(),
+    rssUpdateLock,
+    describeRsshubStatus: () => rsshubManager.describeStatus(),
+    warmEmbeddedRSSHubForDiagnostics,
+    getArtifactsRootDir,
+    fetchSourceWithCurrentStack,
+    resolveRSSHubBase,
+    requiresRSSHubWarmup,
+    requiresStrictRSSHubAvailability,
+    recordSourceRouteAttempt,
+    persistRouteDiagnosticsSnapshot,
+    resolveSourceBackend,
+    buildSourceDiagnostics: (sources) =>
+      buildSourceDiagnostics(sources.map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        url: entry.url,
+        group_name: entry.group_name,
+        platform: entry.platform,
+      }))),
+    buildBrowserActionFromSource,
+    buildBenchmarkSummary,
+    getRouteCapabilityMatrix,
+    generateRSSArtifacts: (payload) => generateRSSArtifacts(payload),
+    generateRSSBenchmarkArtifacts: (payload) => generateRSSBenchmarkArtifacts(payload),
+    classifyItem,
+    detectPlatform,
+    normalizeSourcePlatform,
+    classifyBackend,
+    resolveRSSItemGuid,
+    filterSelectedSources,
+    normalizeFetchOptions,
+    persistFetchInvocation,
+    loadDigestSnapshot,
+    saveDigestSnapshot,
+    limitConcurrency,
+    sourceRefreshInFlight,
   })
 
   ipcMain.handle('rss:exportOpml', async () => {
@@ -1100,580 +1103,6 @@ export function setupRSSIPC(useMock = false): void {
       }
     },
   )
-
-  ipcMain.handle('rss:fetchAll', async (_, options?: FetchAllOptions) => {
-    if (useMock) {
-      return createSuccessResponse(
-        { message: 'RSS fetch simulated (mock mode)', fetched: 0, digest: false, errors: [] as string[] },
-        true,
-      )
-    }
-
-    try {
-      const normalized = normalizeFetchOptions(options)
-      persistFetchInvocation({
-        mode: 'fetchAll',
-        sourceIds: normalized.sourceIds ?? [],
-        group: normalized.group ?? null,
-        digest: normalized.digest,
-        classification: normalized.classification,
-      })
-      const lockResult = await rssUpdateLock.run(normalized, async () => {
-        const allSources = rssRepository.getRSSSources() as DBRSSSource[]
-        const sources = filterSelectedSources(allSources, normalized)
-
-        if (sources.length === 0) {
-          return {
-            insertedCount: 0,
-            errors: [],
-            sourceCount: 0,
-            message:
-              normalized.sourceIds?.length || normalized.group
-                ? 'No RSS sources matched the current selection'
-                : 'No RSS sources configured',
-          }
-        }
-
-        const hasRSSHubSource = sources.some((source) =>
-          requiresRSSHubWarmup((((source.platform as PlatformType) || 'rss') as PlatformType)),
-        )
-        let rsshubBase: string | undefined
-        let rsshubResolveError: string | null = null
-        if (hasRSSHubSource) {
-          try {
-            rsshubBase = await resolveRSSHubBase()
-          } catch (error) {
-            rsshubResolveError = error instanceof Error ? error.message : String(error)
-            console.warn(`[rss:fetchAll] rsshub unavailable: ${rsshubResolveError}`)
-          }
-        }
-
-        console.log(
-          `[rss:fetchAll] sources=${sources.length} digest=${normalized.digest} classification=${normalized.classification} rsshub=${rsshubBase || 'none'}`,
-        )
-
-        const insertedItemIds: string[] = []
-        const errors: string[] = []
-        let totalInserted = 0
-
-        const tasks = sources.map((source) => async () => {
-          const startedAt = Date.now()
-          const storedPlatform = (source.platform as PlatformType) || 'rss'
-          const detectedPlatform = detectPlatform(source.url)
-          const platform =
-            storedPlatform === 'rss' && detectedPlatform !== 'rss' ? detectedPlatform : storedPlatform
-          const backend = resolveSourceBackend(platform)
-
-          if (platform !== storedPlatform) {
-            rssRepository.updateRSSSourcePlatform(source.id, platform)
-            console.log(
-              `[rss:fetchAll] migrated source platform ${source.name}: ${storedPlatform} -> ${platform}`,
-            )
-          }
-
-          if (requiresStrictRSSHubAvailability(platform) && platform !== 'bilibili' && !rsshubBase) {
-            const message = `[${source.name}] RSSHub unavailable: ${rsshubResolveError || 'unknown error'}`
-            recordSourceRouteAttempt({
-              sourceId: source.id,
-              sourceName: source.name,
-              url: source.url,
-              groupName: source.group_name,
-              platform,
-              backend,
-              durationMs: Date.now() - startedAt,
-              itemCount: 0,
-              success: false,
-              error: message,
-            })
-            persistRouteDiagnosticsSnapshot()
-            throw new Error(message)
-          }
-          const { result, backendUsed } = await fetchSourceWithCurrentStack(source, platform, rsshubBase)
-
-          if (result.error && result.items.length === 0) {
-            const message = `[${source.name}] ${result.error}`
-            recordSourceRouteAttempt({
-              sourceId: source.id,
-              sourceName: source.name,
-              url: source.url,
-              groupName: source.group_name,
-              platform,
-              backend: backendUsed,
-              durationMs: Date.now() - startedAt,
-              itemCount: 0,
-              success: false,
-              error: message,
-            })
-            persistRouteDiagnosticsSnapshot()
-            throw new Error(message)
-          }
-
-          const dbItems = result.items.map((item: ScrapedItem) => ({
-            id: item.itemId,
-            source_id: source.id,
-            guid: resolveRSSItemGuid(item),
-            title: item.title,
-            link: item.link,
-            summary: item.description || null,
-            cover_image: item.coverImage || null,
-            author: item.author || null,
-            published_at: item.pubDate ? Math.floor(new Date(item.pubDate).getTime() / 1000) : null,
-            ai_tags:
-              normalized.classification === 'simple' ? classifyItem(item.title, item.description) : null,
-          }))
-
-          const candidateIds = dbItems.map((item) => item.id)
-          const existingIds = new Set(rssRepository.getRSSItemsByIds(candidateIds).map((item) => item.id))
-          const newIds = candidateIds.filter((id) => !existingIds.has(id))
-
-          rssRepository.upsertRSSItems(dbItems)
-          rssRepository.updateRSSSourceLastFetched(source.id)
-          if (result.items.length > 0) {
-            rssRepository.setRSSSourceDraftSeeded(source.id, true)
-          }
-          recordSourceRouteAttempt({
-            sourceId: source.id,
-            sourceName: source.name,
-            url: source.url,
-            groupName: source.group_name,
-            platform,
-            backend: backendUsed,
-            durationMs: Date.now() - startedAt,
-            itemCount: result.items.length,
-            success: true,
-            warning: result.error ?? null,
-          })
-          persistRouteDiagnosticsSnapshot()
-          return {
-            sourceId: source.id,
-            inserted: newIds.length,
-            insertedIds: newIds,
-          }
-        })
-
-        const settled = await limitConcurrency(tasks, 5)
-        for (const result of settled) {
-          if (result.status === 'fulfilled') {
-            totalInserted += result.value.inserted
-            insertedItemIds.push(...result.value.insertedIds)
-          } else {
-            const message =
-              result.reason instanceof Error ? result.reason.message : String(result.reason)
-            errors.push(message)
-            console.error('[rss:fetchAll]', message)
-          }
-        }
-
-        const allItems = rssRepository.getAllRSSItems() as DBRSSItem[]
-        const insertedItems = rssRepository.getRSSItemsByIds(insertedItemIds) as DBRSSItem[]
-
-        await generateRSSArtifacts({
-          sources,
-          allItems,
-          insertedItems,
-        })
-
-        if (normalized.digest) {
-          const previous = loadDigestSnapshot()
-          const latestPerSource = rssRepository.getLatestPerSource()
-          const current: Record<string, string> = {}
-          for (const item of latestPerSource) {
-            current[item.source_id] = item.id
-          }
-          saveDigestSnapshot(current)
-
-          const changedSources = Object.keys(current).filter((sourceId) => previous[sourceId] !== current[sourceId])
-          return {
-            insertedCount: totalInserted,
-            errors,
-            sourceCount: sources.length,
-            message: `Fetched ${sources.length} sources, ${totalInserted} new items, digest changed ${changedSources.length} sources`,
-          }
-        }
-
-        return {
-          insertedCount: totalInserted,
-          errors,
-          sourceCount: sources.length,
-          message: `Fetched ${sources.length} sources, ${totalInserted} new items`,
-        }
-      })
-
-      if (lockResult.skipped) {
-        return createSuccessResponse(
-          {
-            message: 'RSS update already running',
-            fetched: lockResult.status.insertedCount,
-            running: true,
-            status: lockResult.status,
-          },
-          false,
-        )
-      }
-
-      return createSuccessResponse(
-        {
-          message: lockResult.message,
-          fetched: lockResult.insertedCount,
-          digest: normalized.digest,
-          errors: lockResult.errors.length > 0 ? lockResult.errors : undefined,
-          status: lockResult.status,
-        },
-        false,
-      )
-    } catch (error) {
-      return createErrorResponse(error instanceof Error ? error.message : String(error))
-    }
-  })
-
-  ipcMain.handle('rss:refreshSource', async (_, payload?: { sourceId?: string }) => {
-    if (useMock) {
-      return createSuccessResponse(
-        { message: 'RSS source refresh simulated (mock mode)', fetched: 0, sourceId: payload?.sourceId || '' },
-        true,
-      )
-    }
-
-    const sourceId = payload?.sourceId?.trim()
-    if (!sourceId) return createErrorResponse('Missing sourceId')
-
-    if (sourceRefreshInFlight.has(sourceId)) {
-      return createSuccessResponse(
-        {
-          message: 'Current source refresh already running',
-          sourceId,
-          running: true,
-          fetched: 0,
-        },
-        false,
-      )
-    }
-
-    sourceRefreshInFlight.add(sourceId)
-    persistFetchInvocation({
-      mode: 'refreshSource',
-      sourceId,
-      sourceIds: [sourceId],
-    })
-
-    try {
-      const source = (rssRepository.getRSSSources() as DBRSSSource[]).find((entry) => entry.id === sourceId)
-      if (!source) return createErrorResponse('RSS source not found')
-
-      const storedPlatform = (source.platform as PlatformType) || 'rss'
-      const detectedPlatform = detectPlatform(source.url)
-      const platform =
-        storedPlatform === 'rss' && detectedPlatform !== 'rss' ? detectedPlatform : storedPlatform
-      const backend = resolveSourceBackend(platform)
-      const startedAt = Date.now()
-
-      if (platform !== storedPlatform) {
-        rssRepository.updateRSSSourcePlatform(source.id, platform)
-      }
-
-      let rsshubBase: string | undefined
-      let rsshubResolveError: string | null = null
-      if (requiresRSSHubWarmup(platform)) {
-        try {
-          rsshubBase = await resolveRSSHubBase()
-        } catch (error) {
-          rsshubResolveError = error instanceof Error ? error.message : String(error)
-        }
-      }
-
-      if (requiresStrictRSSHubAvailability(platform) && platform !== 'bilibili' && !rsshubBase) {
-        const message = `[${source.name}] RSSHub unavailable: ${rsshubResolveError || 'unknown error'}`
-        recordSourceRouteAttempt({
-          sourceId: source.id,
-          sourceName: source.name,
-          url: source.url,
-          groupName: source.group_name,
-          platform,
-          backend,
-          durationMs: Date.now() - startedAt,
-          itemCount: 0,
-          success: false,
-          error: message,
-        })
-        persistRouteDiagnosticsSnapshot()
-        return createErrorResponse(message, {
-          message,
-          fetched: 0,
-          sourceId,
-          sourceName: source.name,
-        })
-      }
-
-      const { result, backendUsed } = await fetchSourceWithCurrentStack(source, platform, rsshubBase)
-      if (result.error && result.items.length === 0) {
-        const message = `[${source.name}] ${result.error}`
-        recordSourceRouteAttempt({
-          sourceId: source.id,
-          sourceName: source.name,
-          url: source.url,
-          groupName: source.group_name,
-          platform,
-          backend: backendUsed,
-          durationMs: Date.now() - startedAt,
-          itemCount: 0,
-          success: false,
-          error: message,
-        })
-        persistRouteDiagnosticsSnapshot()
-        const browserAction = buildBrowserActionFromSource(source, platform)
-        return createErrorResponse(message, {
-          message,
-          fetched: 0,
-          sourceId,
-          sourceName: source.name,
-          backend: backendUsed,
-          errors: [result.error],
-          browserAction: browserAction ?? undefined,
-        })
-      }
-
-      const dbItems = result.items.map((item: ScrapedItem) => ({
-        id: item.itemId,
-        source_id: source.id,
-        guid: resolveRSSItemGuid(item),
-        title: item.title,
-        link: item.link,
-        summary: item.description || null,
-        cover_image: item.coverImage || null,
-        author: item.author || null,
-        published_at: item.pubDate ? Math.floor(new Date(item.pubDate).getTime() / 1000) : null,
-        ai_tags: null,
-      }))
-      const candidateIds = dbItems.map((item) => item.id)
-      const existingIds = new Set(rssRepository.getRSSItemsByIds(candidateIds).map((item) => item.id))
-      const newIds = candidateIds.filter((id) => !existingIds.has(id))
-      rssRepository.upsertRSSItems(dbItems)
-      rssRepository.updateRSSSourceLastFetched(source.id)
-      if (result.items.length > 0) {
-        rssRepository.setRSSSourceDraftSeeded(source.id, true)
-      }
-      recordSourceRouteAttempt({
-        sourceId: source.id,
-        sourceName: source.name,
-        url: source.url,
-        groupName: source.group_name,
-        platform,
-        backend: backendUsed,
-        durationMs: Date.now() - startedAt,
-        itemCount: result.items.length,
-        success: true,
-        warning: result.error ?? null,
-      })
-      persistRouteDiagnosticsSnapshot()
-
-      await generateRSSArtifacts({
-        sources: rssRepository.getRSSSources() as DBRSSSource[],
-        allItems: rssRepository.getAllRSSItems() as DBRSSItem[],
-        insertedItems: rssRepository.getRSSItemsByIds(newIds) as DBRSSItem[],
-      })
-
-      return createSuccessResponse(
-        {
-          message: `Refreshed 1 source via ${backendUsed}, ${result.items.length} items, ${newIds.length} written`,
-          fetched: newIds.length,
-          sourceId,
-          sourceName: source.name,
-          backend: backendUsed,
-          itemCount: result.items.length,
-          errors: result.error ? [result.error] : undefined,
-        },
-        false,
-      )
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error)
-      const source = (rssRepository.getRSSSources() as DBRSSSource[]).find((entry) => entry.id === sourceId)
-      if (source) {
-        const storedPlatform = (source.platform as PlatformType) || 'rss'
-        const detectedPlatform = detectPlatform(source.url)
-        const platform =
-          storedPlatform === 'rss' && detectedPlatform !== 'rss' ? detectedPlatform : storedPlatform
-        recordSourceRouteAttempt({
-          sourceId: source.id,
-          sourceName: source.name,
-          url: source.url,
-          groupName: source.group_name,
-          platform,
-          backend: resolveSourceBackend(platform),
-          durationMs: 0,
-          itemCount: 0,
-          success: false,
-          error: message,
-        })
-        persistRouteDiagnosticsSnapshot()
-        const browserAction = buildBrowserActionFromSource(source, platform)
-        return createErrorResponse(message, {
-          message,
-          fetched: 0,
-          sourceId,
-          sourceName: source.name,
-          backend: resolveSourceBackend(platform),
-          errors: [message],
-          browserAction: browserAction ?? undefined,
-        })
-      }
-      return createErrorResponse(message, {
-        message,
-        fetched: 0,
-        sourceId,
-        errors: [message],
-      })
-    } finally {
-      sourceRefreshInFlight.delete(sourceId)
-    }
-  })
-
-  ipcMain.handle('rss:benchmarkSources', async (_, options?: RSSBenchmarkOptions) => {
-    if (useMock) {
-      return createSuccessResponse(
-        {
-          startedAt: new Date().toISOString(),
-          finishedAt: new Date().toISOString(),
-          sourceCount: 0,
-          entries: [] as RSSSourceBenchmarkEntry[],
-          summary: buildBenchmarkSummary([]),
-        },
-        true,
-      )
-    }
-
-    try {
-      const allSources = rssRepository.getRSSSources() as DBRSSSource[]
-      const sources = filterSelectedSources(allSources, options)
-      const startedAt = new Date().toISOString()
-
-      if (sources.length === 0) {
-        return createSuccessResponse(
-          {
-            startedAt,
-            finishedAt: new Date().toISOString(),
-            sourceCount: 0,
-            entries: [] as RSSSourceBenchmarkEntry[],
-            summary: buildBenchmarkSummary([]),
-          },
-          false,
-        )
-      }
-
-      const hasRSSHubSource = sources.some((source) =>
-        requiresRSSHubWarmup(normalizeSourcePlatform(source)),
-      )
-      let rsshubBase: string | undefined
-      let rsshubResolveError: string | null = null
-      if (hasRSSHubSource) {
-        try {
-          rsshubBase = await resolveRSSHubBase()
-        } catch (error) {
-          rsshubResolveError = error instanceof Error ? error.message : String(error)
-        }
-      }
-
-      const tasks = sources.map((source) => async (): Promise<RSSSourceBenchmarkEntry> => {
-        const platform = normalizeSourcePlatform(source)
-        const backend = classifyBackend(source)
-        const started = Date.now()
-
-        try {
-          if (requiresStrictRSSHubAvailability(platform) && platform !== 'bilibili' && !rsshubBase) {
-            throw new Error(`RSSHub unavailable: ${rsshubResolveError || 'unknown error'}`)
-          }
-
-          const { result, backendUsed } = await fetchSourceWithCurrentStack(source, platform, rsshubBase)
-          const success = result.items.length > 0 || !result.error
-          const errorMessage = success ? null : result.error || 'Unknown fetch error'
-          const durationMs = Date.now() - started
-
-          recordSourceRouteAttempt({
-            sourceId: source.id,
-            sourceName: source.name,
-            url: source.url,
-            groupName: source.group_name,
-            platform,
-            backend: backendUsed,
-            durationMs,
-            itemCount: result.items.length,
-            success,
-            warning: success ? result.error ?? null : null,
-            error: errorMessage,
-          })
-
-          return {
-            sourceId: source.id,
-            sourceName: source.name,
-            platform,
-            backend: backendUsed,
-            chromiumRequired: getRouteCapabilityMatrix().find((entry) => entry.platform === platform)?.chromiumRequired ?? false,
-            scraplingEligible: getRouteCapabilityMatrix().find((entry) => entry.platform === platform)?.scraplingEligible ?? false,
-            success,
-            durationMs,
-            itemCount: result.items.length,
-            error: errorMessage,
-            failureKind: errorMessage ? buildSourceDiagnostics([source])[0]?.lastRouteError?.kind ?? 'unknown' : null,
-          }
-        } catch (error) {
-          const message = error instanceof Error ? error.message : String(error)
-          const durationMs = Date.now() - started
-          recordSourceRouteAttempt({
-            sourceId: source.id,
-            sourceName: source.name,
-            url: source.url,
-            groupName: source.group_name,
-            platform,
-            backend,
-            durationMs,
-            itemCount: 0,
-            success: false,
-            error: message,
-          })
-          return {
-            sourceId: source.id,
-            sourceName: source.name,
-            platform,
-            backend,
-            chromiumRequired: getRouteCapabilityMatrix().find((entry) => entry.platform === platform)?.chromiumRequired ?? false,
-            scraplingEligible: getRouteCapabilityMatrix().find((entry) => entry.platform === platform)?.scraplingEligible ?? false,
-            success: false,
-            durationMs,
-            itemCount: 0,
-            error: message,
-            failureKind: buildSourceDiagnostics([source])[0]?.lastRouteError?.kind ?? 'unknown',
-          }
-        }
-      })
-
-      const settled = await limitConcurrency(tasks, 4)
-      const entries = settled
-        .filter((result): result is PromiseFulfilledResult<RSSSourceBenchmarkEntry> => result.status === 'fulfilled')
-        .map((result) => result.value)
-      persistRouteDiagnosticsSnapshot()
-      const finishedAt = new Date().toISOString()
-      const summary = buildBenchmarkSummary(entries)
-      const artifacts = await generateRSSBenchmarkArtifacts({
-        startedAt,
-        finishedAt,
-        entries,
-        summary,
-      })
-
-      return createSuccessResponse(
-        {
-          startedAt,
-          finishedAt,
-          sourceCount: sources.length,
-          entries,
-          summary,
-          artifacts: artifacts.files,
-        },
-        false,
-      )
-    } catch (error) {
-      return createErrorResponse(error instanceof Error ? error.message : String(error))
-    }
-  })
 
   ipcMain.handle('rss:repairRuntime', async () => {
     if (useMock) {
