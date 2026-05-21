@@ -24,7 +24,7 @@ import {
   defaultToolRegistry,
   resolveToolInputSchemaForExecution,
 } from '../main/modules/agent-control/tools-runtime/tool-registry'
-import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
+import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
 import { getToolInputSchemas } from '../main/modules/tools/schemas'
 import { validateToolInput } from '../main/modules/tools/tool-input-validator'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
