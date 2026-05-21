@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { classifyIntent } from '../main/modules/agent-control/intent-classifier'
-import { shouldEnforcePetToolRetry } from '../main/modules/agent-control/pet-tool-loop-policy'
+import { shouldEnforcePetToolRetry } from '../main/modules/agent-control/tool-policy/pet-tool-loop-policy'
 import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
 
 test('pet tool loop retries when the model replies without creating a sticky note', () => {

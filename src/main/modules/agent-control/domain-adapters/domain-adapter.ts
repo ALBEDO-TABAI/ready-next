@@ -1,6 +1,6 @@
 import type { RequestEnvelope } from '../contracts/request-envelope'
 import type { TurnFrame } from '../runtime-core/turn-frame'
-import type { ToolPolicy } from '../execution-tool-config'
+import type { ToolPolicy } from '../tool-policy/execution-tool-config'
 import type { ExecutionIntentContext } from '../execution-intent-resolver'
 import { logAgentMetric } from '../metrics'
 import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'

@@ -5,7 +5,7 @@ import { classifyIntent } from '../main/modules/agent-control/intent-classifier'
 import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
 import { resolvePolicyConflicts } from '../main/modules/agent-control/policy-arbitration'
 import type { ExecutionIntentContext } from '../main/modules/agent-control/execution-intent-resolver'
-import type { ToolPolicy } from '../main/modules/agent-control/execution-tool-config'
+import type { ToolPolicy } from '../main/modules/agent-control/tool-policy/execution-tool-config'
 
 // Pure-module tests for the policy arbitration layer. The full
 // run-capability-controller integration tests are blocked from running under

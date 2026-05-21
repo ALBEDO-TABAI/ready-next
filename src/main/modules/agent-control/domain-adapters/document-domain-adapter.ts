@@ -1,4 +1,4 @@
-import type { ToolPolicy } from '../execution-tool-config'
+import type { ToolPolicy } from '../tool-policy/execution-tool-config'
 import type { DomainAdapter, DomainAdapterApplyResult, DomainAdapterDispatchResult, DomainAdapterPrepareResult } from './domain-adapter'
 import type { DocumentToolLoopState } from '../document-pipeline/document-tool-loop-orchestrator'
 import type { DocumentChatSessionLike } from '../document-domain-helpers'

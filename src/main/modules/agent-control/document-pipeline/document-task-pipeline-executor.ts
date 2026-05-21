@@ -50,7 +50,7 @@ import {
 } from './document-task-pipeline'
 import type { DocumentTaskJob, DocumentTaskPlan, DocumentTaskStep } from './document-task-plan'
 import type { ExecutionIntentContext } from '../execution-intent-resolver'
-import type { ToolPolicy } from '../execution-tool-config'
+import type { ToolPolicy } from '../tool-policy/execution-tool-config'
 import type { RequestEnvelope, RequestEnvelopeResource } from '../contracts/request-envelope'
 import type { ProjectionTruthSnapshot, TurnProviderContext } from '../contracts/run-contracts'
 import { SubtaskRuntime } from '../runtime-core/subtask-runtime'

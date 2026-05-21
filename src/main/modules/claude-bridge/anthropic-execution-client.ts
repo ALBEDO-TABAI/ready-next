@@ -14,7 +14,7 @@ import {
   type MessageCapabilitySnapshot,
 } from '../agent-control/domain-adapters/message-capability-filter'
 import { assertManualThinkingModeProviderSafe } from '../agent-control/thinking-compatibility'
-import { getPolicyAnthropicTools, collectToolNames, type ToolPolicy } from '../agent-control/execution-tool-config'
+import { getPolicyAnthropicTools, collectToolNames, type ToolPolicy } from '../agent-control/tool-policy/execution-tool-config'
 import { logAgentMetric } from '../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../agent-control/tools-runtime/tool-error-metrics'
 import { parseJsonResponse } from '../openai-responses'

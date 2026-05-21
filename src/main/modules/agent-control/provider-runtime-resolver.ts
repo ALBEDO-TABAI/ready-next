@@ -1,7 +1,7 @@
 import type { AIModelConfig, AIProviderDef, AIReasoningEffort, AIWireAPI } from '../../../shared/ai-providers'
 import { resolveAIConfigCapabilities } from '../../../shared/ai-providers'
 import { looksLikeMissingNativeToolsReply } from '../claude-bridge/tool-bridge'
-import { buildToolDispatchDecision } from './execution-tool-policy'
+import { buildToolDispatchDecision } from './tool-policy/execution-tool-policy'
 
 export interface OpenAIProviderRuntime {
   wireApi: AIWireAPI

@@ -1,5 +1,5 @@
 import type { BrowserTaskDecisionMode } from '../../../shared/browser-agent-task'
-import type { ToolPolicy } from './execution-tool-config'
+import type { ToolPolicy } from './tool-policy/execution-tool-config'
 import type { ExecutionIntentContext } from './execution-intent-resolver'
 
 export type PolicyConflictType =

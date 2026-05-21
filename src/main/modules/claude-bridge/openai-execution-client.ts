@@ -9,8 +9,8 @@ import {
   type PatchContext,
 } from '../../../shared/ai-providers/index'
 import { parseJsonOrEventStreamResponse, parseJsonResponse } from '../openai-responses'
-import { buildToolDispatchDecision } from '../agent-control/execution-tool-policy'
-import { getPolicyOpenAITools, buildTextToolBridgeSystemPrompt, collectToolNames, type ToolPolicy } from '../agent-control/execution-tool-config'
+import { buildToolDispatchDecision } from '../agent-control/tool-policy/execution-tool-policy'
+import { getPolicyOpenAITools, buildTextToolBridgeSystemPrompt, collectToolNames, type ToolPolicy } from '../agent-control/tool-policy/execution-tool-config'
 import { logAgentMetric } from '../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../agent-control/tools-runtime/tool-error-metrics'
 import { resolveOpenAIProviderRuntime } from '../agent-control/provider-runtime-resolver'
