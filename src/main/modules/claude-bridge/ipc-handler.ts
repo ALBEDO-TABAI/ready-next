@@ -1,7 +1,9 @@
 import { ipcMain, BrowserWindow, dialog } from 'electron'
 import { randomUUID } from 'crypto'
 import { AgentManager } from './agent-manager'
-import type { MultimodalBlock } from './direct-chat'
+// Stage V V2.1c — `MultimodalBlock` import retired: the only call sites
+// (`agent:send` + `agent:sendScoped` payload types) moved into
+// `agentLifecycleGroup`.
 import type { AIModelConfig } from '../../../shared/ai-providers'
 import { BrowserController } from '../browser-engine/ipc-handler'
 import { readFileSync, statSync } from 'fs'
@@ -38,10 +40,12 @@ import { sanitizeAssistantText } from '../agent-control/tools-runtime/tool-call-
 import { cancelChildRunForIpc, listActiveChildRunsForIpc } from './active-child-run-ipc'
 import { askUserGroup } from './ipc/ask-user-group'
 import { toolEventGroup } from './ipc/tool-event-group'
+import { agentLifecycleGroup } from './ipc/agent-lifecycle-group'
 import type { IpcDisposeHandle } from './ipc/types'
 import { logAgentMetric } from '../agent-control/metrics'
 import { isRendererAgentMetricName } from '../../../shared/renderer-agent-metrics'
-import type { SendScopedUserMessage } from '../agent-control/send-scoped-confirmation'
+// Stage V V2.1c — `SendScopedUserMessage` import retired: the only call
+// site (the `agent:sendScoped` payload type) moved into `agentLifecycleGroup`.
 import type { ScopeRunEventPayload } from '../agent-control/contracts/types'
 import type { TaskProjectionChangeEvent } from '../agent-control/contracts/run-contracts'
 
@@ -195,6 +199,15 @@ let askUserGroupDispose: IpcDisposeHandle | null = null
  */
 let toolEventGroupDispose: IpcDisposeHandle | null = null
 
+/**
+ * Stage V V2.1c — dispose handle returned by `agentLifecycleGroup.register`.
+ * Owns the 4 channels `agent:send` + `agent:newSession` + `agent:kill` +
+ * `agent:sendScoped`. Same lifecycle pattern as the other group dispose
+ * slots: register on `setupAgentIPC`, dispose on dev-reload re-entry,
+ * dispose on `cleanupAgentRuntime` shutdown.
+ */
+let agentLifecycleGroupDispose: IpcDisposeHandle | null = null
+
 function cleanupSkillSessionState(sessionId?: string, reason = 'Skill session state cleared'): void {
   if (sessionId) {
     clearLastReferenceSkill(sessionId)
@@ -298,6 +311,13 @@ export async function cleanupAgentRuntime(): Promise<void> {
   if (toolEventGroupDispose) {
     try { toolEventGroupDispose.dispose() } catch { /* ignore */ }
     toolEventGroupDispose = null
+  }
+  // Stage V V2.1c — symmetric release of the 4 agent-lifecycle channel
+  // handlers (`agent:send` + `agent:newSession` + `agent:kill` +
+  // `agent:sendScoped`).
+  if (agentLifecycleGroupDispose) {
+    try { agentLifecycleGroupDispose.dispose() } catch { /* ignore */ }
+    agentLifecycleGroupDispose = null
   }
   if (runtime) {
     await runtime.stop()
@@ -525,57 +545,28 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     releasePendingRequest,
   })
 
-  // Send message to agent — use direct HTTP streaming
-  ipcMain.handle('agent:send', async (_, { agent, message, sessionId, requestId }: {
-    agent: string
-    message: string | MultimodalBlock[]
-    sessionId?: string
-    requestId?: string
-  }): Promise<IPCResponse> => {
-    log(`agent:send received — agent=${agent}, message=${typeof message === 'string' ? message.slice(0, 50) : `[${message.length} blocks]`}`)
-    try {
-      const result = await orchestrator.send(agent, message, sessionId, requestId)
-      log(`agent:send result — success=${result.success}, error=${result.error}`)
-      return {
-        success: result.success,
-        error: result.success ? undefined : result.error,
-        mock: false
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      log(`agent:send exception — ${errorMessage}`)
-      return { success: false, error: errorMessage, mock: false }
-    }
-  })
-
-  // Start a new session
-  ipcMain.handle('agent:newSession', (_, payload: string | { agent: string; sessionId?: string }): IPCResponse<{ cleared: boolean }> => {
-    try {
-      const agent = typeof payload === 'string' ? payload : payload.agent
-      const sessionId = typeof payload === 'string' ? undefined : payload.sessionId
-      cancelToolActionRequestsBySession(agent, sessionId)
-      cleanupSkillSessionState(sessionId, 'Agent session was reset')
-      orchestrator.newSession(agent, sessionId)
-      return { success: true, data: { cleared: true } }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      return { success: false, error: errorMessage }
-    }
-  })
-
-  // Kill / stop generation
-  ipcMain.handle('agent:kill', (_, payload: string | { agent: string; sessionId?: string }): IPCResponse<{ killed: boolean }> => {
-    try {
-      const agent = typeof payload === 'string' ? payload : payload.agent
-      const sessionId = typeof payload === 'string' ? undefined : payload.sessionId
-      cancelToolActionRequestsBySession(agent, sessionId)
-      cancelSkillSessionPendingInteractions(sessionId, 'Agent generation was stopped')
-      orchestrator.kill(agent, sessionId)
-      return { success: true, data: { killed: true } }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      return { success: false, error: errorMessage }
-    }
+  // Stage V V2.1c — 4 agent-lifecycle channels (`agent:send`,
+  // `agent:newSession`, `agent:kill`, `agent:sendScoped`) moved into
+  // `agentLifecycleGroup`. The group handles dev-reload removeHandler
+  // pre-clear internally; we hold the dispose handle so `cleanupAgentRuntime`
+  // can drop the handlers on shutdown. Re-binding on dev reload first calls
+  // `dispose()` on the prior handle so listener slots stay clean.
+  //
+  // Note `runtime!.sendScoped` is bound here (rather than passing `runtime`)
+  // so the group never imports `AgentControlRuntime` and stays decoupled from
+  // engine internals — the `runtime` non-null assertion is safe because the
+  // module-scope `runtime` is initialized at the top of `setupAgentIPC`.
+  if (agentLifecycleGroupDispose) {
+    try { agentLifecycleGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    agentLifecycleGroupDispose = null
+  }
+  agentLifecycleGroupDispose = agentLifecycleGroup.register(ipcMain, {
+    orchestrator,
+    sendScoped: (payload) => runtime!.sendScoped(payload),
+    cancelToolActionRequestsBySession,
+    cleanupSkillSessionState,
+    cancelSkillSessionPendingInteractions,
+    log,
   })
 
   // Stage U PR U1.2 — legacy agent IPC channels removed.
@@ -872,41 +863,10 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     }
   })
 
-  ipcMain.handle('agent:sendScoped', async (_, payload: {
-    scopeId: string
-    agent?: string
-    message: string | MultimodalBlock[]
-    requestId?: string
-    userMessage?: SendScopedUserMessage
-    continuationIntent?: {
-      taskId: string
-      executionId?: string
-      stepId?: string
-      blockedReason?: string
-      responseText?: string
-      todoId?: string
-      todoTitle?: string
-    } | null
-  }): Promise<IPCResponse> => {
-    try {
-      log(`[ipc] agent:sendScoped start scopeId=${payload.scopeId} requestId=${payload.requestId || 'none'}`)
-      const result = await runtime!.sendScoped(payload)
-      log(`[ipc] agent:sendScoped done scopeId=${payload.scopeId} requestId=${payload.requestId || 'none'} success=${result.success} error=${result.error || 'none'}`)
-      return {
-        success: result.success,
-        error: result.error,
-        errorKind: result.errorKind,
-        persistence: result.persistence,
-      }
-    } catch (error) {
-      log(`[ipc] agent:sendScoped failed scopeId=${payload.scopeId} requestId=${payload.requestId || 'none'} error=${error instanceof Error ? error.message : String(error)}`)
-      return {
-        success: false,
-        error: error instanceof Error ? error.message : String(error),
-        errorKind: 'unknown',
-      }
-    }
-  })
+  // Stage V V2.1c — `agent:sendScoped` moved into `agentLifecycleGroup`
+  // (registered above, alongside `agent:send` + `agent:newSession` +
+  // `agent:kill`). Removed from this site to keep the lifecycle channels in
+  // a single group.
 
   ipcMain.handle('agent:emitRendererMetric', (_, payload: {
     name?: unknown
