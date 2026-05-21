@@ -41,7 +41,7 @@ import { executeAskUserQuestions } from './builtins/ask-user-questions'
 import {
   getAskUserQuestionsCardEmitter,
   getAskUserQuestionsCardPersistor,
-} from '../agent-control/ask-user-questions-bridge'
+} from '../agent-control/ask-user/ask-user-questions-bridge'
 import { executeMcpTool } from './mcp-tools'
 import { executeRSSTool } from './rss-tools'
 import { executeSkillTool, findSkillToolByNameForExecution } from './skills-tools'

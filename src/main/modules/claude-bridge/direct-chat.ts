@@ -67,7 +67,7 @@ import {
 import {
   buildTextToolBridgeCorrectionMessage,
   buildToolGuidance,
-} from '../agent-control/execution-tool-config'
+} from '../agent-control/tool-policy/execution-tool-config'
 import type {
   BudgetWarningLevel,
   RecoveryRecord,
@@ -101,7 +101,7 @@ import {
   type BrowserActionRecord,
   type BrowserWorkflowState,
   type SkillRunRecord,
-} from '../agent-control/session-continuity'
+} from '../agent-control/session/session-continuity'
 import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
 import { executeToolCall } from '../tools'
 import { findSkillToolBySkillAction, findSkillToolByName } from '../tools/skills-tools'
@@ -123,7 +123,7 @@ import { compactToolPolicyHistory } from './tool-policy-context'
 import { DEFAULT_API_REQUEST_TIMEOUT_MS } from './request-timeout-policy'
 import { ChatRepository } from '../repositories/chat-repository'
 import type { ConversationScope } from '../agent-control/contracts/types'
-import { compressHistoryForPrompt } from '../agent-control/context-compression'
+import { compressHistoryForPrompt } from '../agent-control/compaction/context-compression'
 import { resolveExecutionIntentContext } from '../agent-control/execution-intent-resolver'
 import type { IntentClassification } from '../agent-control/intent-classifier'
 import { classifyIntent } from '../agent-control/intent-classifier'

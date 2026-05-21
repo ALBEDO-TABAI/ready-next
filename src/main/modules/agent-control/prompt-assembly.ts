@@ -8,7 +8,7 @@ import {
   buildCompressionReport,
   compressHistoryForPrompt,
   type PromptCompressionReport
-} from './context-compression'
+} from './compaction/context-compression'
 import { logAgentMetric } from './metrics'
 import type { IntentClassification } from './intent-classifier'
 import { classifyIntent } from './intent-classifier'

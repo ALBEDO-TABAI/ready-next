@@ -74,7 +74,7 @@ import {
 import { getToolInputSchemas } from '../../tools/schemas'
 import { getSystemAnthropicTools, getSystemOpenAITools } from '../../tools/system-tools'
 import { getLastReferenceSkill } from '../skills/skill-reference-hints'
-import { resolveActiveSkillContext } from '../active-skill-context'
+import { resolveActiveSkillContext } from '../session/active-skill-context'
 import { hasActiveSkillTaskRun } from '../skills/skill-task-tracker'
 import {
   createToolExecutionOutput,

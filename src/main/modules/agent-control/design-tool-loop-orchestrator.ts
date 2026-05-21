@@ -1,4 +1,4 @@
-import type { ToolPolicy } from './execution-tool-config'
+import type { ToolPolicy } from './tool-policy/execution-tool-config'
 import type { RunBudgetHint } from './run-contracts'
 
 interface ToolCallLike {

@@ -1,5 +1,5 @@
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
-import { decryptSecretConfig, encryptSecretConfig } from '../agent-control/secret-storage'
+import { decryptSecretConfig, encryptSecretConfig } from '../agent-control/memory/secret-storage'
 import { logAgentMetric } from '../agent-control/metrics'
 import { getDatabase } from '../database'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'

@@ -228,7 +228,7 @@ import {
   resolveActiveSkillContext,
   summarizeActiveSkillContext,
   type ActiveSkillContext,
-} from './active-skill-context'
+} from './session/active-skill-context'
 import { clearLastReferenceSkill } from './skills/skill-reference-hints'
 import { applySupervisorRuntimeToTurnFrame, resolveTurnFrame } from './runtime-core/turn-frame-resolver'
 import { applySteeringToTurnFrame } from './runtime-core/turn-frame-steering'
@@ -256,7 +256,7 @@ import {
   getLatestSkillRun,
   resolveSkillRunForResume,
   type SkillRunRecord,
-} from './session-continuity'
+} from './session/session-continuity'
 import { prepareInitialRun, reconcileAfterBrowserDecision } from './domain-adapters/run-capability-controller'
 import { defaultToolRegistry, resolveToolInputSchemaForExecution } from './tools-runtime/tool-registry'
 import {
@@ -280,7 +280,7 @@ import {
 import { resolveTaskExecutionRoute } from './task-execution-router'
 import { resolveTaskOperationIntent } from './task-operation-intent'
 import { resolveTaskType } from './task-type-resolver'
-import { shouldEnforcePetToolRetry } from './pet-tool-loop-policy'
+import { shouldEnforcePetToolRetry } from './tool-policy/pet-tool-loop-policy'
 import {
   buildActiveFrameContextFromTurnFrame,
   buildToolRuntimeContext,
@@ -290,15 +290,15 @@ import {
   buildToolGuidance,
   collectAllowedToolNames,
   type ToolPolicy,
-} from './execution-tool-config'
-import { buildToolDispatchDecision } from './execution-tool-policy'
+} from './tool-policy/execution-tool-config'
+import { buildToolDispatchDecision } from './tool-policy/execution-tool-policy'
 import {
   buildTextToolResultMessage,
   looksLikeMissingNativeToolsReply,
   parseTextToolBridgeResponse,
   shouldEnforceBrowserToolRetry,
 } from '../claude-bridge/tool-bridge'
-import { compressHistoryForPrompt } from './context-compression'
+import { compressHistoryForPrompt } from './compaction/context-compression'
 import type { CapabilityGroupId } from '../../../shared/ai-capability-groups'
 import {
   advanceTaskStepProgress,
@@ -318,7 +318,7 @@ import { TurnTranscript } from './runtime-core/turn-transcript'
 import { createSystemReminderRegistry, type ReminderEntry } from './system-reminders/system-reminder-registry'
 import { composePetStickynoteRetryReminder } from './system-reminders/pet-stickynote-retry-reminder'
 import { composeBrowserTaskCorrectionReminder } from './system-reminders/browser-task-correction-reminder'
-import { createLayeredCompactor, type LayeredCompactorMetricName } from './layered-compactor'
+import { createLayeredCompactor, type LayeredCompactorMetricName } from './compaction/layered-compactor'
 import type { HookRegistry } from './system-reminders/hook-registry'
 import { buildLongSkillRunningProjection } from './skills/skill-running-projection'
 import { buildSkillTaskLifecycleSignal } from './skills/skill-task-lifecycle'
