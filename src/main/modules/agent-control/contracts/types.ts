@@ -19,6 +19,12 @@ export type AgentTaskState =
   | 'done'
   | 'failed'
   | 'cancelled'
+  // Stage V V3.1 — `closed` is the terminal session state set by
+  // `ReadyAgentOrchestrator.closeSession()`. It is excluded from the V3.3d
+  // `isLiveSession` guard alongside `done`/`failed`/`cancelled` so a closed
+  // session can never be revived by listener fallback or conversation
+  // lookup (codex round-7 / Stage V plan §4 V3.3d).
+  | 'closed'
 
 export interface ChannelAttachment {
   name: string

@@ -8,11 +8,11 @@ import type { ExecutionHostRequest, ExecutionHostResult } from '../contracts/run
 import type { IntentClassification } from '../intent-classifier'
 import type { RequestEnvelope } from '../contracts/request-envelope'
 import type { ContinuationIntent, ContinuationState } from '../contracts/continuation-state'
-import { AgentSessionManager } from '../session/session-manager'
+import { AgentSessionManager, parseSessionKey } from '../session/session-manager'
 import { createScopedRunCollector, type SendAndCollectResult } from '../task-projection/run-collector'
 import { RunCleanupRegistry, type RunCleanupCallback } from '../task-projection/run-cleanup-registry'
 import type { DomainAdapter } from '../domain-adapters/domain-adapter'
-import type { AgentRuntimeKernel } from '../contracts/types'
+import type { AgentRuntimeKernel, AgentTaskState } from '../contracts/types'
 import {
   AgentSdkRuntime,
   type AgentSdkRuntimeDeps,
@@ -21,6 +21,21 @@ import {
 interface SessionDescriptor {
   agent: string
   sessionId?: string
+}
+
+/**
+ * Stage V V3.1 — public shape returned by `listAllSessions()`. Consumers
+ * (IPC handler `agent:listActiveSessions`, renderer session tab UI, etc.)
+ * address sessions by `(agent, sessionId)` rather than the raw composite
+ * key. `sessionId === null` indicates a legacy single-session entry
+ * (composite key without `::` suffix).
+ */
+export interface SessionSummary {
+  agent: string
+  sessionId: string | null
+  state: AgentTaskState
+  lastTurnAt: string
+  error?: string
 }
 
 interface ReadyAgentOrchestratorOptions {
@@ -479,4 +494,99 @@ export class ReadyAgentOrchestrator extends EventEmitter {
   getSessionManager(): AgentSessionManager {
     return this.sessions
   }
+
+  /**
+   * Stage V V3.1 — enumerate all sessions tracked by the orchestrator,
+   * parsed into `(agent, sessionId)` tuples. The IPC channel
+   * `agent:listActiveSessions` (V3.2) and the renderer session tab UI
+   * (V3.4a) consume this. Returned order matches `listStatesEnriched()`:
+   * most-recently-updated first.
+   *
+   * NOTE: returns *all* sessions (including terminal `done` / `failed` /
+   * `cancelled` / `closed`); callers that want only live sessions filter
+   * with the V3.3d `isLiveSession` predicate. Including terminal entries
+   * is deliberate so the UI can render a final state for a closed tab
+   * before it is dismissed.
+   */
+  listAllSessions(): SessionSummary[] {
+    return this.sessions.listStatesEnriched().map((snap) => ({
+      agent: snap.descriptor.agent,
+      sessionId: snap.descriptor.sessionId,
+      state: snap.state,
+      lastTurnAt: snap.updatedAt,
+      error: snap.error,
+    }))
+  }
+
+  /**
+   * Stage V V3.1 — close a session by its `(agent, sessionId)` tuple.
+   *
+   * Cleanup sequence:
+   *   1. Stop any in-flight generation on both runtimes (DirectChat +
+   *      AgentSdk) — symmetric to `kill()` so an active turn cannot
+   *      survive the close.
+   *   2. Drop the engine pool entry (`removeSession` on each runtime) so
+   *      a later `send()` to the same key starts from a clean memory
+   *      session rather than reusing stale history.
+   *   3. Drop the descriptor cache entry so a future re-creation does
+   *      not see a stale public-vs-internal binding.
+   *   4. Mark the session-manager state as `'closed'` (terminal) so the
+   *      renderer's `isLiveSession` guard filters it out of fallback
+   *      lookup (V3.3d codex round-7).
+   *
+   * Idempotent: returns `{ closed: false }` if the session was not known
+   * to the session manager beforehand; `{ closed: true }` otherwise.
+   * Calling `closeSession` twice in a row resolves `{ closed: true }`
+   * then `{ closed: false }` — the second call is a no-op observable
+   * by the boolean.
+   */
+  async closeSession(agent: string, sessionId?: string): Promise<{ closed: boolean }> {
+    const internalKey = this.toInternalSessionKey(agent, sessionId)
+    const taskKey = this.toTaskKey(agent, sessionId)
+    const prior = this.sessions.getState(taskKey)
+    // Idempotency: a re-close on an already-`'closed'` session is a
+    // no-op and reports `closed: false` — the boolean reflects whether
+    // *this* call performed the close, not whether the session exists.
+    const wasLive = !!prior && prior.state !== 'closed'
+
+    // 1 — stop in-flight generation on both runtimes so an active turn
+    // cannot survive the close. The engine pool entry itself stays
+    // (engines own their session Maps and expose no public removal
+    // hook in V3.1); a subsequent `newSession(internalKey)` will
+    // replace it, and `stopGeneration` has already nulled
+    // `abortController` + bumped `generation` so the inert entry
+    // cannot resume on its own.
+    try {
+      this.domainAdapterEngine.stopGeneration(internalKey)
+    } catch (error) {
+      console.warn('[ReadyAgentOrchestrator] closeSession: domainAdapterEngine.stopGeneration failed:', error)
+    }
+    try {
+      this.sdkEngine.stopGeneration(internalKey)
+    } catch (error) {
+      console.warn('[ReadyAgentOrchestrator] closeSession: sdkEngine.stopGeneration failed:', error)
+    }
+
+    // 3 — drop descriptor cache entry.
+    this.descriptors.delete(internalKey)
+
+    // 4 — flush projection state. If an active runId is still tracked
+    // (e.g. closeSession is invoked concurrently with a turn), drain its
+    // cleanup so the registry does not leak. Then mark the session
+    // `'closed'` so the V3.3d guard rejects it as a live target.
+    const runId = this.activeRunIds.get(taskKey)
+    if (runId) {
+      this.activeRunIds.delete(taskKey)
+      void this.drainRunCleanup(runId)
+    }
+    if (wasLive) {
+      this.sessions.setState(taskKey, 'closed')
+    }
+    return { closed: wasLive }
+  }
 }
+
+// Stage V V3.1 — re-export the descriptor parser so consumers that need
+// the parse helper (renderer payload validator, IPC fixtures) can import
+// from a single orchestrator entry point.
+export { parseSessionKey }
