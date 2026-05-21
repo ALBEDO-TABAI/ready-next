@@ -7,7 +7,7 @@ import { buildPipelinePhaseOrder } from '../main/modules/agent-control/document-
 
 const EXECUTOR_PATH = resolve(
   process.cwd(),
-  'src/main/modules/agent-control/document-task-pipeline-executor.ts',
+  'src/main/modules/agent-control/document-pipeline/document-task-pipeline-executor.ts',
 )
 
 describe('executor routes list/remove structured intents (P3 T3)', () => {
