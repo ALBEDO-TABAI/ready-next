@@ -49,6 +49,7 @@ import { taskProjectionGroup } from './ipc/task-projection-group'
 import { recallGroup } from './ipc/recall-group'
 import { detachedTaskGroup } from './ipc/detached-task-group'
 import { runControlGroup } from './ipc/run-control-group'
+import { telemetryGroup } from './ipc/telemetry-group'
 import type { IpcDisposeHandle } from './ipc/types'
 import { logAgentMetric } from '../agent-control/metrics'
 import { isRendererAgentMetricName } from '../../../shared/renderer-agent-metrics'
@@ -279,6 +280,15 @@ let detachedTaskGroupDispose: IpcDisposeHandle | null = null
  */
 let runControlGroupDispose: IpcDisposeHandle | null = null
 
+/**
+ * Stage V V2.1j — dispose handle returned by `telemetryGroup.register`.
+ * Owns the single telemetry channel (`agent:emitRendererMetric`). Same
+ * lifecycle pattern as the other group dispose slots: register on
+ * `setupAgentIPC`, dispose on dev-reload re-entry, dispose on
+ * `cleanupAgentRuntime` shutdown.
+ */
+let telemetryGroupDispose: IpcDisposeHandle | null = null
+
 function cleanupSkillSessionState(sessionId?: string, reason = 'Skill session state cleared'): void {
   if (sessionId) {
     clearLastReferenceSkill(sessionId)
@@ -434,6 +444,12 @@ export async function cleanupAgentRuntime(): Promise<void> {
   if (runControlGroupDispose) {
     try { runControlGroupDispose.dispose() } catch { /* ignore */ }
     runControlGroupDispose = null
+  }
+  // Stage V V2.1j — symmetric release of the single telemetry channel
+  // handler (emitRendererMetric).
+  if (telemetryGroupDispose) {
+    try { telemetryGroupDispose.dispose() } catch { /* ignore */ }
+    telemetryGroupDispose = null
   }
   if (runtime) {
     await runtime.stop()
@@ -818,19 +834,17 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   // `agent:kill`). Removed from this site to keep the lifecycle channels in
   // a single group.
 
-  ipcMain.handle('agent:emitRendererMetric', (_, payload: {
-    name?: unknown
-    payload?: Record<string, unknown>
-  }): IPCResponse => {
-    const name = payload?.name
-    if (!isRendererAgentMetricName(name)) {
-      return { success: false, error: 'Unknown renderer metric name' }
-    }
-    logAgentMetric(name, {
-      source: 'renderer',
-      ...(payload.payload && typeof payload.payload === 'object' ? payload.payload : {}),
-    })
-    return { success: true }
+  // Stage V V2.1j — `agent:emitRendererMetric` moved into `telemetryGroup`.
+  // Symmetric dispose lives in `cleanupAgentRuntime`; defensive dev-reload
+  // re-entry disposes the previous handle first so `ipcMain.handle` does not
+  // double-register.
+  if (telemetryGroupDispose) {
+    try { telemetryGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    telemetryGroupDispose = null
+  }
+  telemetryGroupDispose = telemetryGroup.register(ipcMain, {
+    isRendererAgentMetricName,
+    logAgentMetric: (name, payload) => logAgentMetric(name, payload),
   })
 
   ipcMain.handle('agent:upsertChannel', async (_, payload: {
