@@ -19,7 +19,7 @@ import {
   type StreamEvent,
   type Tool as AgentSdkTool,
 } from '@openai/agents'
-import type { BrowserController } from '../browser-engine/ipc-handler'
+import type { BrowserController } from '../../browser-engine/ipc-handler'
 import type { SidecarManager } from '../sidecar-manager'
 import type { AgentControlRuntime } from './runtime'
 import type { DomainAdapter } from '../domain-adapters/domain-adapter'
@@ -42,38 +42,38 @@ import {
   isKilledChildCloseStatus,
   type SkillChildCloseEvent,
 } from '../skills/skill-child-run-types'
-import type { MultimodalBlock } from '../claude-bridge/direct-chat'
+import type { MultimodalBlock } from '../../claude-bridge/direct-chat'
 import {
   buildTextToolBridgePrompt,
   buildTextToolResultMessage,
   parseTextToolBridgeResponse,
-} from '../claude-bridge/tool-bridge'
+} from '../../claude-bridge/tool-bridge'
 import {
   readAIConfigDetailed,
   type AIConfigLoad,
-} from '../claude-bridge/direct-chat-ai-config'
-import { AppSettingsRepository } from '../repositories/app-settings-repository'
+} from '../../claude-bridge/direct-chat-ai-config'
+import { AppSettingsRepository } from '../../repositories/app-settings-repository'
 import {
   getProviderDef,
   normalizeAIConfig,
   resolveAIConfigCapabilities,
   type AIModelConfig,
   type AIProviderDef,
-} from '../../../shared/ai-providers'
+} from '../../../../shared/ai-providers'
 import {
   applyProviderRequestPatch,
   applyProviderResponsePatch,
   resolveProviderDefaultPatchers,
   resolveProviderPatchProfile,
   type PatchContext,
-} from '../../../shared/ai-providers/index'
+} from '../../../../shared/ai-providers/index'
 import {
   parseJsonOrEventStreamResponse,
-} from '../openai-responses'
+} from '../../openai-responses'
 import {
   buildChatCompletionsToolCalls,
   buildResponsesToolCalls,
-} from '../claude-bridge/provider-tool-arguments'
+} from '../../claude-bridge/provider-tool-arguments'
 import { resolveOpenAIProviderRuntime } from '../provider-runtime-resolver'
 import {
   assertCurrentMessageCapability,
@@ -84,7 +84,7 @@ import {
 import { assertManualThinkingModeProviderSafe } from '../thinking-compatibility'
 import { logAgentMetric } from '../metrics'
 import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
-import type { BrowserTaskDecisionMode } from '../../../shared/browser-agent-task'
+import type { BrowserTaskDecisionMode } from '../../../../shared/browser-agent-task'
 import { defaultToolRegistry } from '../tools-runtime/tool-registry'
 import type { ToolDefinition } from '../tools-runtime/tool-definition'
 import {
@@ -104,17 +104,17 @@ import {
   type ToolRuntimeActiveFrameContext,
 } from '../tools-runtime/tool-runtime'
 import { snapshotTurnFeatureFlags } from './turn-feature-flags'
-import { buildAgentSpawnContextFromAIConfig } from '../skills-runtime/agent-context-source'
-import { executeToolCall as executeReadyToolCall } from '../tools'
-import { PRIMITIVE_TOOL_DEFS, PRIMITIVE_TOOL_NAME_SET } from '../tools/skill-primitives/tool-defs'
+import { buildAgentSpawnContextFromAIConfig } from '../../skills-runtime/agent-context-source'
+import { executeToolCall as executeReadyToolCall } from '../../tools'
+import { PRIMITIVE_TOOL_DEFS, PRIMITIVE_TOOL_NAME_SET } from '../../tools/skill-primitives/tool-defs'
 import {
   createToolExecutionOutput,
   normalizeToolExecutionOutput,
   type ToolExecutionOutput,
 } from '../tools-runtime/tool-result-types'
-import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
-import { findDocumentVisualSyntaxIssue } from '../../../shared/document-visual-syntax'
-import { createRotatingLogger } from '../../utils/rotating-logger'
+import type { AgentSpawnContext } from '../../../../shared/skill-host-contract'
+import { findDocumentVisualSyntaxIssue } from '../../../../shared/document-visual-syntax'
+import { createRotatingLogger } from '../../../utils/rotating-logger'
 
 const agentSdkLogger = createRotatingLogger('ready-agent-sdk.log')
 const settingsRepository = new AppSettingsRepository()

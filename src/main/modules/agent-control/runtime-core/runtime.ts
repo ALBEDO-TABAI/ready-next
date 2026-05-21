@@ -4,22 +4,22 @@ import { randomUUID } from 'crypto'
 // L5-C-Universal: channel-agnostic remote-message → calendar-event detector.
 // Imported here so the inbound-channel pipeline can opportunistically push
 // suggestions to the renderer without each adapter implementing detection.
-import { detectRemoteChannelEventSuggestions } from '../calendar-engine/remote-channel-event-detector'
+import { detectRemoteChannelEventSuggestions } from '../../calendar-engine/remote-channel-event-detector'
 import {
   REMOTE_CHANNEL_CALENDAR_POLICY_KEY,
   type RemoteChannelKind,
   type RemoteChannelMessage,
-} from '../../../shared/calendar-remote-channel'
+} from '../../../../shared/calendar-remote-channel'
 import { existsSync, readFileSync, readdirSync, rmSync, statSync } from 'fs'
 import { extname, isAbsolute, join } from 'path'
 import {
   getDefaultConfig,
   normalizeAIConfig,
   type AIModelConfig
-} from '../../../shared/ai-providers'
-import type { BrowserController } from '../browser-engine/ipc-handler'
-import type { AgentManager } from '../claude-bridge/agent-manager'
-import type { MultimodalBlock } from '../claude-bridge/direct-chat'
+} from '../../../../shared/ai-providers'
+import type { BrowserController } from '../../browser-engine/ipc-handler'
+import type { AgentManager } from '../../claude-bridge/agent-manager'
+import type { MultimodalBlock } from '../../claude-bridge/direct-chat'
 import {
   getDatabase,
   type AgentChannelRecord,
@@ -29,7 +29,7 @@ import {
   type ChatMessageRecord,
   type ConversationSourceKind,
   type UpsertConversationScopeMode,
-} from '../database'
+} from '../../database'
 import { ReadyAgentOrchestrator } from './orchestrator'
 import { PromptAssemblyService } from '../prompt-assembly'
 import { RunCoordinator } from '../task-projection/run-coordinator'
@@ -45,9 +45,9 @@ import {
 } from '../skills/skill-reference-hints'
 import { findSkillHintInCapsuleTexts } from '../skills/skill-hint-recovery'
 import { shouldDisplayReferenceSkillHintForLatestUserText } from '../reference-skill-hint-display'
-import { findSkillToolByName } from '../tools/skills-tools'
-import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
-import { SkillTaskRunRepository } from '../repositories/skill-task-run-repository'
+import { findSkillToolByName } from '../../tools/skills-tools'
+import { getSkillsRuntimeManager } from '../../skills-runtime/runtime-manager'
+import { SkillTaskRunRepository } from '../../repositories/skill-task-run-repository'
 import {
   cancelSkillChildRun,
   configureSkillChildRunner,
@@ -66,7 +66,7 @@ import { syncTaskProjection } from '../task-projection/task-projection-sync'
 import { reconcileTaskProjections } from '../task-projection/task-projection-reconciler'
 import { canResumeShape, type ResumeHandle } from '../contracts/resume-handle'
 import { deriveTaskProjectionCanResume } from '../task-projection/task-projection-resume'
-import { isAwaitingUserInteractionState } from '../../../shared/task-interaction-state'
+import { isAwaitingUserInteractionState } from '../../../../shared/task-interaction-state'
 import { assertSkillTaskRunInvariantConsistency } from '../skills/skill-task-tracker'
 import type { ProjectionTruthSnapshot, TaskProjectionRecord } from '../contracts/run-contracts'
 import { getBudgetUsagePercent, restoreContinuationTaskBudgetRuntime } from '../task-projection/run-budget-policy'
@@ -87,18 +87,18 @@ import {
 } from '../send-scoped-confirmation'
 import { SessionRecallService } from '../session-recall-service'
 import { SidecarManager } from '../sidecar-manager'
-import { MemoryRepository } from '../repositories/memory-repository'
+import { MemoryRepository } from '../../repositories/memory-repository'
 import { MemoryLifecycleManager } from '../memory-lifecycle'
 import { ReflectionService } from '../reflection-service'
-import { UserProfileRepository } from '../repositories/user-profile-repository'
-import { AgentPersonalityRepository } from '../repositories/agent-personality-repository'
-import { AppSettingsRepository } from '../repositories/app-settings-repository'
-import type { CapabilityRuntimeSnapshot } from '../../../shared/ai-capability-runtime'
+import { UserProfileRepository } from '../../repositories/user-profile-repository'
+import { AgentPersonalityRepository } from '../../repositories/agent-personality-repository'
+import { AppSettingsRepository } from '../../repositories/app-settings-repository'
+import type { CapabilityRuntimeSnapshot } from '../../../../shared/ai-capability-runtime'
 import { ExternalMemoryProviderSlot } from '../external-memory-provider-slot'
 import { decryptChannelConfig, encryptChannelConfig } from '../secret-storage'
 import { ToolGateway } from '../tools-runtime/tool-gateway'
 import { buildCapabilityRuntimeSnapshot } from '../domain-adapters/capability-runtime-snapshot'
-import { TaskProjectionRepository } from '../repositories/task-projection-repository'
+import { TaskProjectionRepository } from '../../repositories/task-projection-repository'
 import {
   DetachedSkillTaskTracker,
   registerDetachedSkillTaskTracker,
@@ -120,7 +120,7 @@ import type {
   ScopeRunSkillProgress,
   ScopeRunSummary
 } from '../contracts/types'
-import type { SessionRecallCapsule, SessionRecallHit } from '../../../shared/session-recall'
+import type { SessionRecallCapsule, SessionRecallHit } from '../../../../shared/session-recall'
 
 export interface UpsertChannelPayload {
   id?: string

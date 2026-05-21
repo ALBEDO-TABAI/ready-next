@@ -6,7 +6,7 @@ import {
   type SkillRunContract,
   type TaskProjectionRecord,
 } from '../contracts/run-contracts'
-import type { SkillTaskRunRecord } from '../repositories/skill-task-run-repository'
+import type { SkillTaskRunRecord } from '../../repositories/skill-task-run-repository'
 import type { SkillTaskSupervisorSnapshot } from '../skills/skill-task-supervisor'
 import {
   getRememberedActiveSkillContext,

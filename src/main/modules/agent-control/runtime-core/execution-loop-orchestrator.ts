@@ -1,8 +1,8 @@
-import type { ExecutionFallbackInfo } from '../claude-bridge/execution-fallback-policy'
-import { annotateFallbackResult, resolveFallbackPlan } from '../claude-bridge/execution-fallback-policy'
-import { classifyExecutionError, type ErrorClassifierResult } from '../claude-bridge/error-classifier'
-import { buildRecoveryPlan } from '../claude-bridge/recovery-router'
-import type { RecoveryRecord, RunBudgetSeed, RunBudgetUsage, ToolSnapshot, TurnToolCallParseError } from '../run-contracts'
+import type { ExecutionFallbackInfo } from '../../claude-bridge/execution-fallback-policy'
+import { annotateFallbackResult, resolveFallbackPlan } from '../../claude-bridge/execution-fallback-policy'
+import { classifyExecutionError, type ErrorClassifierResult } from '../../claude-bridge/error-classifier'
+import { buildRecoveryPlan } from '../../claude-bridge/recovery-router'
+import type { RecoveryRecord, RunBudgetSeed, RunBudgetUsage, ToolSnapshot, TurnToolCallParseError } from '../contracts/run-contracts'
 import type { ParallelToolCall } from '../tools-runtime/tool-parallelism-policy'
 import { ToolRuntime, type ToolRuntimeBatchResult, type ToolRuntimeContext } from '../tools-runtime/tool-runtime'
 import type { ToolExecutionHooks } from '../tools-runtime/tool-execution-hooks'
@@ -35,7 +35,7 @@ export class ExecutionLoopOrchestrator {
     executeToolCall?: (
       toolName: string,
       args: Record<string, unknown>,
-      context: import('../tools/tool-executor').ToolContext,
+      context: import('../../tools/tool-executor').ToolContext,
     ) => Promise<ToolExecutionResultLike>
     resolveTimeoutMs?: (
       definition: import('../tools-runtime/tool-definition').ToolDefinition | null,
