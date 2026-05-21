@@ -38,7 +38,7 @@ import {
   registerSkillChildDriver,
   __resetSkillChildDriversForTests,
 } from '../main/modules/agent-control/skills/skill-child-drivers'
-import { getChildRunRetryPolicy } from '../main/modules/agent-control/child-run-retry-policy'
+import { getChildRunRetryPolicy } from '../main/modules/agent-control/child-run/child-run-retry-policy'
 // Importing the module re-registers the real VEA driver as a side effect.
 // We grab the singleton instance so we can re-register it after a test reset.
 import { videoExpertChildDriver } from '../main/modules/agent-control/video-expert-child-driver'

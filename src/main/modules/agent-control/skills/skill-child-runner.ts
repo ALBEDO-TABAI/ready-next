@@ -64,7 +64,7 @@ import {
 import {
   ChildRunCircuitBreaker,
   shouldCountChildRunCircuitBreakerFailure,
-} from '../child-run-circuit-breaker'
+} from '../child-run/child-run-circuit-breaker'
 import {
   getSkillChildDriver,
   isChildOwnedSkill,
@@ -103,7 +103,7 @@ import { snapshotTurnFeatureFlags } from '../runtime-core/turn-feature-flags'
 import {
   isResumeOnlySkillAction,
   resolveCanonicalChildRunHandle,
-} from '../child-run-handle-resolver'
+} from '../child-run/child-run-handle-resolver'
 
 // =====================================================================
 // Tunable constants (source plan §5.5).

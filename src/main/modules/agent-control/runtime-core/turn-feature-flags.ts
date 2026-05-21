@@ -1,4 +1,4 @@
-import { isChildRunCircuitBreakerEnabled } from '../child-run-circuit-breaker'
+import { isChildRunCircuitBreakerEnabled } from '../child-run/child-run-circuit-breaker'
 import { isChildResumeEnabled } from '../skills/skill-child-feature-flags'
 import { isChildInternalStrictAdmissionEnabled } from '../tools-runtime/tool-definition'
 

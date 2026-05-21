@@ -4,7 +4,7 @@ import { getStaticSkillToolNameForAction } from '../../tools/skills-tools-static
 import { resolveToolInputSchemaForExecution } from '../tools-runtime/tool-registry'
 import { createSystemReminderRegistry } from '../system-reminders/system-reminder-registry'
 import { logAgentMetric } from '../metrics'
-import { resolveCanonicalChildRunHandle } from '../child-run-handle-resolver'
+import { resolveCanonicalChildRunHandle } from '../child-run/child-run-handle-resolver'
 import { resolvePendingSkillHandoffWriteTargets } from '../skills/skill-agent-handoff'
 import type { FrameAction, TurnFrame, TurnFrameLiveness, TurnFrameMode } from './turn-frame'
 import type { SkillRunContract } from '../contracts/run-contracts'

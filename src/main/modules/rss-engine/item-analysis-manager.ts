@@ -13,7 +13,7 @@ import {
   startSkillChildRunAndWait,
   type StartSkillChildRunAndWaitResult,
 } from '../skills-runtime/runtime-manager'
-import { getChildRunRetryPolicy } from '../agent-control/child-run-retry-policy'
+import { getChildRunRetryPolicy } from '../agent-control/child-run/child-run-retry-policy'
 import { extractWebContentToFile } from './content-extractor'
 import { rssSubagentRunner } from './subagent-runner'
 
