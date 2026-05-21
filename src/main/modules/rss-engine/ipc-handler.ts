@@ -47,6 +47,7 @@ import { itemGroup } from './ipc/item-group'
 import { analysisGroup } from './ipc/analysis-group'
 import { fetchGroup } from './ipc/fetch-group'
 import { diagnosticsGroup } from './ipc/diagnostics-group'
+import { exportGroup } from './ipc/export-group'
 import type { AddSourceCoreInput, AddSourceCoreResult } from './ipc/engine-deps'
 import type { IpcDisposeHandle } from './ipc/types'
 
@@ -227,6 +228,16 @@ let fetchGroupDispose: IpcDisposeHandle | null = null
  * before the next registration binds.
  */
 let diagnosticsGroupDispose: IpcDisposeHandle | null = null
+
+/**
+ * Stage V V2.2f — dispose handle returned by `exportGroup.register`. The 2
+ * artifact-export channels (`rss:exportOpml`, `rss:exportFeed`) live in
+ * `ipc/export-group.ts`; mirror of the prior five dispose slots so
+ * dev-reload re-entry into `setupRSSIPC` releases every group before the
+ * next registration binds. V2.2f is the final rss-engine group — the split
+ * (source / item / analysis / fetch / diagnostics / export) is now complete.
+ */
+let exportGroupDispose: IpcDisposeHandle | null = null
 
 export function setRSSBrowserController(controller: BrowserController | null): void {
   rssBrowserController = controller
@@ -1081,38 +1092,27 @@ export function setupRSSIPC(useMock = false): void {
     sourceRefreshInFlight,
   })
 
-  ipcMain.handle('rss:exportOpml', async () => {
-    if (useMock) {
-      return createSuccessResponse({ path: join(getArtifactsRootDir(), 'subscriptions.opml') }, true)
-    }
-
-    try {
-      const artifacts = await ensureArtifactFiles()
-      return createSuccessResponse({ path: artifacts.files.subscriptionsOpml }, false)
-    } catch (error) {
-      return createErrorResponse(error instanceof Error ? error.message : String(error))
-    }
+  // Stage V V2.2f — artifact-export channels (`rss:exportOpml`,
+  // `rss:exportFeed`) moved into `exportGroup`. The group owns mock-mode
+  // dispatch and response shaping; the artifact-bundle generator
+  // (`ensureArtifactFiles`), the artifacts root accessor
+  // (`getArtifactsRootDir`), and the path-join helper are injected via
+  // deps so the group never imports the repository / report-generator
+  // chain directly. Dev-reload re-entry disposes the prior handle first
+  // so listener slots stay clean — same pattern as SourceGroup / ItemGroup
+  // / AnalysisGroup / FetchGroup / DiagnosticsGroup above. V2.2f closes
+  // out the rss-engine split (6 groups: source / item / analysis / fetch
+  // / diagnostics / export).
+  if (exportGroupDispose) {
+    try { exportGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    exportGroupDispose = null
+  }
+  exportGroupDispose = exportGroup.register(ipcMain, {
+    useMock,
+    ensureArtifactFiles,
+    getArtifactsRootDir,
+    joinPath: (...parts) => join(...parts),
   })
-
-  ipcMain.handle(
-    'rss:exportFeed',
-    async (_, type: 'master' | 'tech' | 'humanities' | 'design' | 'entertainment' | 'others' = 'master') => {
-      if (useMock) {
-        return createSuccessResponse({ path: join(getArtifactsRootDir(), 'feed.xml') }, true)
-      }
-
-      try {
-        const artifacts = await ensureArtifactFiles()
-        const path =
-          type === 'master'
-            ? artifacts.files.masterFeed
-            : artifacts.files.categoryFeeds[type] || artifacts.files.masterFeed
-        return createSuccessResponse({ path }, false)
-      } catch (error) {
-        return createErrorResponse(error instanceof Error ? error.message : String(error))
-      }
-    },
-  )
 
   // Stage V V2.2e — runtime-health channels (`rss:repairRuntime`,
   // `rss:diagnostics`) moved into `diagnosticsGroup`. The group owns
