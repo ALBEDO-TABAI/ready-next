@@ -44,6 +44,7 @@ import {
 } from './source-diagnostics'
 import { sourceGroup } from './ipc/source-group'
 import { itemGroup } from './ipc/item-group'
+import { analysisGroup } from './ipc/analysis-group'
 import type { AddSourceCoreInput, AddSourceCoreResult } from './ipc/engine-deps'
 import type { IpcDisposeHandle } from './ipc/types'
 
@@ -196,6 +197,15 @@ let sourceGroupDispose: IpcDisposeHandle | null = null
  * both groups before the next registration binds.
  */
 let itemGroupDispose: IpcDisposeHandle | null = null
+
+/**
+ * Stage V V2.2c — dispose handle returned by `analysisGroup.register`. The
+ * 6 analysis channels (start / progress / list / pause / resume / delete)
+ * live in `ipc/analysis-group.ts`; mirror of the SourceGroup / ItemGroup
+ * dispose slots so dev-reload re-entry into `setupRSSIPC` releases all
+ * three groups before the next registration binds.
+ */
+let analysisGroupDispose: IpcDisposeHandle | null = null
 
 export function setRSSBrowserController(controller: BrowserController | null): void {
   rssBrowserController = controller
@@ -969,131 +979,19 @@ export function setupRSSIPC(useMock = false): void {
     mockItems,
   })
 
-  ipcMain.handle(
-    'rss:startItemAnalysis',
-    async (
-      _,
-      payload: {
-        itemId: string
-        action: RSSAnalysisAction
-        link: string
-        title: string
-        targetDir: string
-        source?: string
-        summary?: string
-        publishedAt?: string
-        force?: boolean
-      },
-    ) => {
-      if (useMock) {
-        const now = new Date().toISOString()
-        return createSuccessResponse(
-          {
-            id: `mock-analysis-${Date.now()}`,
-            itemId: payload.itemId,
-            action: payload.action,
-            sourceUrl: payload.link,
-            title: payload.title,
-            targetDir: payload.targetDir,
-            outputDir: payload.targetDir,
-            reportPath: null,
-            status: 'queued',
-            progress: 5,
-            message: 'mock queued',
-            error: null,
-            meta: null,
-            createdAt: now,
-            startedAt: null,
-            updatedAt: now,
-            finishedAt: null,
-          } satisfies MappedRSSAnalysisJob,
-          true,
-        )
-      }
-
-      try {
-        if (!payload?.itemId || !payload?.link || !payload?.title || !payload?.targetDir) {
-          return createErrorResponse('Missing required fields: itemId, link, title, targetDir')
-        }
-        if (payload.action !== 'copy' && payload.action !== 'visual') {
-          return createErrorResponse(`Unsupported analysis action: ${String(payload.action)}`)
-        }
-        const job = await analysisManager.startItemAnalysis({
-          itemId: payload.itemId,
-          action: payload.action,
-          link: payload.link,
-          title: payload.title,
-          targetDir: payload.targetDir,
-          source: payload.source,
-          summary: payload.summary,
-          publishedAt: payload.publishedAt,
-          force: payload.force,
-        })
-        return createSuccessResponse(mapAnalysisJob(job), false)
-      } catch (error) {
-        return createErrorResponse(error instanceof Error ? error.message : String(error))
-      }
-    },
-  )
-
-  ipcMain.handle('rss:getItemAnalysisProgress', async (_, payload?: { itemIds?: string[] }) => {
-    if (useMock) return createSuccessResponse({} as Record<string, RSSAnalysisProgressPayload>, true)
-
-    try {
-      const itemIds = Array.isArray(payload?.itemIds)
-        ? payload!.itemIds.filter((id) => typeof id === 'string' && id.trim().length > 0)
-        : undefined
-      const progress = analysisManager.getItemProgress(itemIds)
-      return createSuccessResponse(progress as Record<string, RSSAnalysisProgressPayload>, false)
-    } catch (error) {
-      return createErrorResponse(error instanceof Error ? error.message : String(error))
-    }
-  })
-
-  ipcMain.handle('rss:listItemAnalysisJobs', async (_, payload?: { itemId?: string; limit?: number }) => {
-    if (useMock) return createSuccessResponse([] as MappedRSSAnalysisJob[], true)
-
-    try {
-      const jobs = analysisManager
-        .listJobs(payload?.itemId, payload?.limit)
-        .map((job) => mapAnalysisJob(job))
-      return createSuccessResponse(jobs, false)
-    } catch (error) {
-      return createErrorResponse(error instanceof Error ? error.message : String(error))
-    }
-  })
-
-  ipcMain.handle('rss:pauseAnalysisJob', async (_, payload?: { jobId?: string }) => {
-    if (useMock) return createSuccessResponse({ paused: false }, true)
-    try {
-      if (!payload?.jobId) return createErrorResponse('Missing jobId')
-      const job = analysisManager.pauseJob(payload.jobId)
-      return createSuccessResponse({ paused: true, job: mapAnalysisJob(job) }, false)
-    } catch (error) {
-      return createErrorResponse(error instanceof Error ? error.message : String(error))
-    }
-  })
-
-  ipcMain.handle('rss:resumeAnalysisJob', async (_, payload?: { jobId?: string }) => {
-    if (useMock) return createSuccessResponse({ resumed: false }, true)
-    try {
-      if (!payload?.jobId) return createErrorResponse('Missing jobId')
-      const job = analysisManager.resumeJob(payload.jobId)
-      return createSuccessResponse({ resumed: true, job: mapAnalysisJob(job) }, false)
-    } catch (error) {
-      return createErrorResponse(error instanceof Error ? error.message : String(error))
-    }
-  })
-
-  ipcMain.handle('rss:deleteAnalysisJob', async (_, payload?: { jobId?: string }) => {
-    if (useMock) return createSuccessResponse({ deleted: false }, true)
-    try {
-      if (!payload?.jobId) return createErrorResponse('Missing jobId')
-      const result = analysisManager.deleteJob(payload.jobId)
-      return createSuccessResponse(result, false)
-    } catch (error) {
-      return createErrorResponse(error instanceof Error ? error.message : String(error))
-    }
+  // Stage V V2.2c — the 6 analysis channels (`rss:startItemAnalysis`,
+  // `rss:getItemAnalysisProgress`, `rss:listItemAnalysisJobs`,
+  // `rss:pauseAnalysisJob`, `rss:resumeAnalysisJob`,
+  // `rss:deleteAnalysisJob`) moved into `analysisGroup`. Dev-reload
+  // re-entry safety matches the SourceGroup / ItemGroup pattern above.
+  if (analysisGroupDispose) {
+    try { analysisGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    analysisGroupDispose = null
+  }
+  analysisGroupDispose = analysisGroup.register(ipcMain, {
+    useMock,
+    getAnalysisManager: () => analysisManager,
+    mapAnalysisJob,
   })
 
   ipcMain.handle('rss:status', async () => {
