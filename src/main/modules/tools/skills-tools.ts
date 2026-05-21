@@ -62,7 +62,7 @@ import {
   executeWriteArtifact,
 } from './skill-primitives'
 import { SHELL_ALLOWLIST } from './skill-primitives/run-shell'
-import { getAskUserQuestionEmitter } from '../agent-control/ask-user-bridge'
+import { getAskUserQuestionEmitter } from '../agent-control/ask-user/ask-user-bridge'
 import { getSkillHostController } from '../skills-runtime/skill-host-controller'
 import {
   toAnthropicTool,

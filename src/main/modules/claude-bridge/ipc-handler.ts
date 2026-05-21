@@ -17,11 +17,11 @@ import {
   setReferenceHintChangeEmitter,
 } from '../agent-control/skills/skill-reference-hints'
 import { clearSkillTaskProjection } from '../agent-control/skills/skill-task-tracker'
-import { registerAskUserQuestionEmitter } from '../agent-control/ask-user-bridge'
+import { registerAskUserQuestionEmitter } from '../agent-control/ask-user/ask-user-bridge'
 import {
   registerAskUserQuestionsCardEmitter,
   registerAskUserQuestionsCardPersistor,
-} from '../agent-control/ask-user-questions-bridge'
+} from '../agent-control/ask-user/ask-user-questions-bridge'
 import { registerSkillReferenceInlinedEmitter } from '../agent-control/skills/skill-reference-inlined-bridge'
 import { getEphemeralExecutionStore } from '../tools/skill-primitives/ephemeral-execution-store'
 import {
