@@ -100,13 +100,20 @@ import ModelSelector from './chat-panel/model-selector/ModelSelector'
 // props-driven (no `useAgent` / store / IPC inside the body); see the
 // header comment in the new module for the rationale and the
 // `sessionId?: string` prop slot reserved for V3.3a multi-session.
-import { TaskCard, ToolTraceCard } from './chat-panel/task/TaskCard'
+// V1.8 — direct `TaskCard` / `ToolTraceCard` consumption moved into
+// `./chat-panel/task-snapshot/TaskToolSnapshot.tsx`; ChatPanel now
+// imports only the orchestrating render-prop component below.
 // Stage V V1.7 — pure 4-pass merge that combines persistedScopeRuns,
 // inMemoryTaskRuns, activeChildRuns and cold-start projection synthesis
 // into the canonical `TaskCardRun[]`. Extracted from the inline
 // `mergedTaskRuns` useMemo so the Stage O §1.3 / §3.1 whitelist contract
 // surface stays focused; behavior preserved byte-for-byte.
 import { useTaskRunMerge } from './chat-panel/task-merge/use-task-run-merge'
+// Stage V V1.8 — task/tool snapshot rendering region extracted to
+// `./chat-panel/task-snapshot/TaskToolSnapshot.tsx`. Render-prop
+// component owns renderTaskSnapshotCard + the four derived
+// snapshot maps / pending ReactNodes + the bottom task card JSX.
+import { TaskToolSnapshot } from './chat-panel/task-snapshot/TaskToolSnapshot'
 
 interface SerializedTaskSnapshot {
   scopeId: string
@@ -1503,282 +1510,17 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     [focusInputWithResize, mergedTaskRuns, setInputValue]
   )
 
-  const renderTaskSnapshotCard = useCallback(
-    (run: TaskCardRun, key: string, compact = false) => {
-      const expanded = Boolean(taskDisclosureState[key]?.overview)
-      return (
-        <TaskCard
-          key={key}
-          run={run}
-          taskKey={key}
-          // Stage V V1.6 / V3.3a — pre-wire the multi-session slot with the
-          // active scope id. Currently unused by TaskCard's body; reserved
-          // for V3.3a per-session routing.
-          sessionId={currentScopeId || undefined}
-          compact={compact}
-          expanded={expanded}
-          disclosureState={{
-            ...createDefaultTaskDisclosureState(run),
-            ...(taskDisclosureState[key] || {})
-          }}
-          onToggleExpanded={() => setTaskSectionExpanded(key, 'overview', !expanded)}
-          onToggleSection={setTaskSectionExpanded}
-          onOpenArtifact={handleOpenTaskArtifact}
-          onDismissMemoryCapture={handleDismissMemoryCapture}
-          onUndoMemoryCapture={handleUndoMemoryCapture}
-          onSupplementMemoryCapture={handleSupplementMemoryCapture}
-          onContinueInput={handleContinueTaskInput}
-          onSubmitConfirmation={handleSubmitTaskConfirmation}
-          onSubmitAgentResult={handleSubmitTaskAgentResult}
-          onRetry={handleRetryTask}
-          onSuspendRun={handleSuspendTask}
-          onResumeRun={handleResumeTask}
-          onCancelDetachedTask={handleCancelDetachedTask}
-          onContinueDetachedTask={handleContinueDetachedTask}
-          onCancelChildRun={handleCancelChildRun}
-          onContinueChildRun={handleContinueChildRun}
-        />
-      )
-    },
-    [
-      currentScopeId,
-      handleContinueTaskInput,
-      handleCancelDetachedTask,
-      handleCancelChildRun,
-      handleContinueDetachedTask,
-      handleContinueChildRun,
-      handleDismissMemoryCapture,
-      handleOpenTaskArtifact,
-      handleRetryTask,
-      handleResumeTask,
-      handleSuspendTask,
-      handleSubmitTaskAgentResult,
-      handleSubmitTaskConfirmation,
-      handleSupplementMemoryCapture,
-      handleUndoMemoryCapture,
-      setTaskSectionExpanded,
-      taskDisclosureState
-    ]
-  )
-
-  const messageTaskSnapshots = useMemo<Record<string, React.ReactNode>>(() => {
-    const nextSnapshots: Record<string, React.ReactNode> = {}
-    for (const message of messages) {
-      if (message.type !== 'agent') continue
-      const snapshot = parseSerializedTaskSnapshot(message.meta?.taskSnapshot)
-      if (!snapshot || !isTaskVisible(snapshot)) continue
-      nextSnapshots[message.id] = renderTaskSnapshotCard(snapshot, `task-snapshot-${message.id}`)
-    }
-
-    if (
-      currentTaskRun &&
-      currentTaskRun.responseMessageId &&
-      messages.find((message) => message.id === currentTaskRun.responseMessageId)?.content.trim() &&
-      !nextSnapshots[currentTaskRun.responseMessageId] &&
-      isTaskVisible(currentTaskRun)
-    ) {
-      nextSnapshots[currentTaskRun.responseMessageId] = renderTaskSnapshotCard(
-        currentTaskRun,
-        `task-snapshot-${currentTaskRun.responseMessageId}`
-      )
-    }
-
-    return nextSnapshots
-  }, [currentTaskRun, messages, parseSerializedTaskSnapshot, renderTaskSnapshotCard])
-
-  const currentToolTraceSegment = useMemo(() => {
-    if (!currentTaskRun) return []
-    const startIndex = Math.max(0, currentTaskRun.responseSegmentToolTraceStart || 0)
-    return (currentTaskRun.toolTrace || []).slice(startIndex)
-  }, [currentTaskRun])
-
-  const currentVisibleToolTraceSegment = useMemo(
-    () => filterUserVisibleToolTraceEvents(currentToolTraceSegment),
-    [currentToolTraceSegment],
-  )
-
-  const messageToolTraceSnapshots = useMemo<Record<string, React.ReactNode>>(() => {
-    const nextSnapshots: Record<string, React.ReactNode> = {}
-    for (const message of messages) {
-      if (message.type !== 'agent') continue
-      const events = parseSerializedToolTraceSnapshot(message.meta?.toolTraceSnapshot)
-      const visibleEvents = filterUserVisibleToolTraceEvents(events)
-      if (visibleEvents.length === 0) continue
-      const toolKey = `message-tool-${message.id}`
-      const expanded = Boolean(taskDisclosureState[toolKey]?.overview)
-      nextSnapshots[message.id] = (
-        <ToolTraceCard
-          key={toolKey}
-          events={visibleEvents}
-          expanded={expanded}
-          onToggleExpanded={() => setTaskSectionExpanded(toolKey, 'overview', !expanded)}
-        />
-      )
-    }
-
-    if (
-      currentTaskRun &&
-      currentTaskRun.responseMessageId &&
-      messages.find((message) => message.id === currentTaskRun.responseMessageId)?.content.trim() &&
-      !nextSnapshots[currentTaskRun.responseMessageId] &&
-      currentVisibleToolTraceSegment.length > 0
-    ) {
-      const toolKey = `live-tool-${currentTaskRun.responseMessageId}`
-      const expanded = Boolean(taskDisclosureState[toolKey]?.overview)
-      nextSnapshots[currentTaskRun.responseMessageId] = (
-        <ToolTraceCard
-          key={toolKey}
-          events={currentVisibleToolTraceSegment}
-          expanded={expanded}
-          onToggleExpanded={() => setTaskSectionExpanded(toolKey, 'overview', !expanded)}
-        />
-      )
-    }
-
-    return nextSnapshots
-  }, [
-    currentTaskRun,
-    currentVisibleToolTraceSegment,
-    messages,
-    parseSerializedToolTraceSnapshot,
-    setTaskSectionExpanded,
-    taskDisclosureState
-  ])
-
-  const pendingTaskRun = useMemo<React.ReactNode | null>(() => {
-    const streamMessage = messages.find((message) => message.id === streamingMessageId)
-    if (!currentTaskRun || !isStreaming || !streamingMessageId) return null
-    if (streamMessage && streamMessage.content.length > 0) return null
-    return renderTaskSnapshotCard(currentTaskRun, `pending-task-${currentTaskRun.scopeId}`)
-  }, [currentTaskRun, isStreaming, messages, renderTaskSnapshotCard, streamingMessageId])
-
-  const pendingToolTrace = useMemo<React.ReactNode | null>(() => {
-    const streamMessage = messages.find((message) => message.id === streamingMessageId)
-    if (!currentTaskRun || !isStreaming || !streamingMessageId) return null
-    if (streamMessage && streamMessage.content.length > 0) return null
-    if (currentVisibleToolTraceSegment.length === 0) return null
-    const toolKey = `pending-tool-${currentTaskRun.scopeId}`
-    const expanded = Boolean(taskDisclosureState[toolKey]?.overview)
-    return (
-      <ToolTraceCard
-        key={toolKey}
-        events={currentVisibleToolTraceSegment}
-        pending
-        expanded={expanded}
-        onToggleExpanded={() => setTaskSectionExpanded(toolKey, 'overview', !expanded)}
-      />
-    )
-  }, [
-    currentTaskRun,
-    currentVisibleToolTraceSegment,
-    isStreaming,
-    messages,
-    setTaskSectionExpanded,
-    streamingMessageId,
-    taskDisclosureState
-  ])
-
-  const bottomTaskCard = useMemo<React.ReactNode | null>(() => {
-    // The bottom task card is reserved for tasks that genuinely benefit from
-    // a stationary progress surface — work that runs long enough and emits
-    // enough rolling output that the user wants a fixed anchor to glance
-    // at without scrolling the chat. For everything else (chit-chat, single-
-    // tool calls, planning-phase placeholders, the ask_user_questions wait
-    // state), the floating "正在思考" capsule plus the inline task snapshot
-    // already carry the signal and the bottom card just steals room.
-    //
-    // Three suppression rules:
-    //   (a) A pending `ask_user_questions` card already owns the "I'm waiting
-    //       on you" signal — the bottom card would be pure duplication.
-    //   (b) Task isn't classified as heavy yet (`taskType` is undefined,
-    //       `direct_answer`, `short_task`, or a `multi_step_task` that has
-    //       NOT produced concrete multi-step evidence). Even when planning
-    //       phase is active, stay silent rather than render a "正在理解需求"
-    //       placeholder.
-    //   (c) "Heavy" means one of:
-    //         - `media_task` (always heavy by construction — VEA-style)
-    //         - `continuation` (resumed work, usually long)
-    //         - `multi_step_task` WITH ≥2 tracked steps OR a structured
-    //           progress total OR at least one artifact emitted (i.e. the
-    //           task is actually multi-stepping, not just classified as
-    //           such by a hopeful intent classifier).
-    //
-    // Background tasks are unaffected and continue to surface regardless —
-    // those represent independent long-running work that owns the bottom
-    // strip even when the foreground turn is light.
-    const hasPendingAskUserCard = messages.some(
-      (m) => m.type === 'ask_user_questions' && m.askUserQuestions?.status === 'pending',
-    )
-
-    function isHeavyOngoing(run: typeof currentTaskRun): boolean {
-      if (!run) return false
-      const taskType = run.taskType
-      if (taskType === 'media_task') return true
-      if (taskType === 'continuation') return true
-      if (taskType === 'multi_step_task') {
-        const stepCount = run.steps?.length ?? 0
-        const totalSteps = typeof run.progress?.total === 'number' ? run.progress.total : 0
-        const artifactCount = run.recentArtifacts?.length ?? 0
-        return stepCount >= 2 || totalSteps >= 2 || artifactCount >= 1
-      }
-      return false
-    }
-
-    const foregroundActive = Boolean(
-      currentTaskRun &&
-      (
-        isStreaming ||
-        currentTaskRun.phase === 'queued' ||
-        currentTaskRun.phase === 'planning' ||
-        currentTaskRun.phase === 'tool_running' ||
-        currentTaskRun.phase === 'takeover' ||
-        currentTaskRun.phase === 'resuming' ||
-        currentTaskRun.phase === 'responding'
-      )
-    )
-    const suppressForeground = foregroundActive && (hasPendingAskUserCard || !isHeavyOngoing(currentTaskRun))
-    const effectiveForegroundActive = foregroundActive && !suppressForeground
-
-    if (!effectiveForegroundActive && backgroundTaskRuns.length === 0) return null
-    return (
-      // width:100% + box-sizing so the card visually pairs with the
-      // composer chrome (which is also `w-full`). Without the explicit
-      // width some intrinsic-sized children inside TaskCard can collapse
-      // the wrapper narrower than the input slot.
-      <div className="flex flex-col" style={{ gap: 6, width: '100%', boxSizing: 'border-box' }}>
-        {effectiveForegroundActive && currentTaskRun
-          ? renderTaskSnapshotCard(
-              currentTaskRun,
-              `bottom-task-${getTaskRunDisplayKey(currentTaskRun)}`,
-              true,
-            )
-          : null}
-        {backgroundTaskRuns.length > 0 && (
-          <div className="flex flex-col" style={{ gap: 6, width: '100%' }}>
-            {(effectiveForegroundActive || backgroundTaskRuns.length > 1) && (
-              <div
-                style={{
-                  fontSize: 10.5,
-                  fontWeight: 600,
-                  color: 'var(--text-light)',
-                  padding: '0 2px',
-                }}
-              >
-                后台任务
-              </div>
-            )}
-            {backgroundTaskRuns.map((run) =>
-              renderTaskSnapshotCard(
-                run,
-                `bottom-task-${getTaskRunDisplayKey(run)}`,
-                true,
-              ),
-            )}
-          </div>
-        )}
-      </div>
-    )
-  }, [backgroundTaskRuns, currentTaskRun, isStreaming, messages, renderTaskSnapshotCard])
+  // Stage V V1.8 — task/tool snapshot rendering region (renderTaskSnapshotCard
+  // useCallback + messageTaskSnapshots / messageToolTraceSnapshots /
+  // pendingTaskRun / pendingToolTrace / bottomTaskCard memos +
+  // currentToolTraceSegment / currentVisibleToolTraceSegment derivations)
+  // moved to `./chat-panel/task-snapshot/TaskToolSnapshot.tsx`. The new
+  // component is a render-prop: it owns all five derived ReactNodes and
+  // passes them to the `expandedPanelBody` JSX below via `children(...)`.
+  // The `parseSerializedTaskSnapshot` + `parseSerializedToolTraceSnapshot`
+  // useCallbacks stay here (source-grep contract under
+  // `src/__tests__/agent-task-panel-contract.test.ts`) and are injected
+  // as stable props. See plan v4 §2 V1.8 for the hook→TSX label change.
 
   // W3: Drag & drop support (app-internal + OS files)
   const [isDragOver, setIsDragOver] = useState(false)
@@ -2121,6 +1863,39 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
   )
 
   const expandedPanelBody = (
+    <TaskToolSnapshot
+      messages={messages}
+      currentTaskRun={currentTaskRun}
+      backgroundTaskRuns={backgroundTaskRuns}
+      currentScopeId={currentScopeId}
+      taskDisclosureState={taskDisclosureState}
+      isStreaming={isStreaming}
+      streamingMessageId={streamingMessageId}
+      parseSerializedTaskSnapshot={parseSerializedTaskSnapshot}
+      parseSerializedToolTraceSnapshot={parseSerializedToolTraceSnapshot}
+      setTaskSectionExpanded={setTaskSectionExpanded}
+      onOpenTaskArtifact={handleOpenTaskArtifact}
+      onDismissMemoryCapture={handleDismissMemoryCapture}
+      onUndoMemoryCapture={handleUndoMemoryCapture}
+      onSupplementMemoryCapture={handleSupplementMemoryCapture}
+      onContinueTaskInput={handleContinueTaskInput}
+      onSubmitTaskConfirmation={handleSubmitTaskConfirmation}
+      onSubmitTaskAgentResult={handleSubmitTaskAgentResult}
+      onRetryTask={handleRetryTask}
+      onSuspendTask={handleSuspendTask}
+      onResumeTask={handleResumeTask}
+      onCancelDetachedTask={handleCancelDetachedTask}
+      onContinueDetachedTask={handleContinueDetachedTask}
+      onCancelChildRun={handleCancelChildRun}
+      onContinueChildRun={handleContinueChildRun}
+    >
+      {({
+        messageTaskSnapshots,
+        messageToolTraceSnapshots,
+        pendingTaskRun,
+        pendingToolTrace,
+        bottomTaskCard,
+      }) => (
     <>
       <ChatMessages
         messages={messages}
@@ -2395,6 +2170,8 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         />
       </div>
     </>
+      )}
+    </TaskToolSnapshot>
   )
 
   const showExpandedPanel = panelState !== 'collapsed'
