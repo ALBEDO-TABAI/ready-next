@@ -50,6 +50,7 @@ import { recallGroup } from './ipc/recall-group'
 import { detachedTaskGroup } from './ipc/detached-task-group'
 import { runControlGroup } from './ipc/run-control-group'
 import { telemetryGroup } from './ipc/telemetry-group'
+import { channelManagementGroup } from './ipc/channel-management-group'
 import type { IpcDisposeHandle } from './ipc/types'
 import { logAgentMetric } from '../agent-control/metrics'
 import { isRendererAgentMetricName } from '../../../shared/renderer-agent-metrics'
@@ -289,6 +290,17 @@ let runControlGroupDispose: IpcDisposeHandle | null = null
  */
 let telemetryGroupDispose: IpcDisposeHandle | null = null
 
+/**
+ * Stage V V2.1k — dispose handle returned by `channelManagementGroup.register`.
+ * Owns the 8 agent-channel CRUD + WeChat-login channels (`agent:upsertChannel`,
+ * `agent:testChannel`, `agent:startWechatLogin`, `agent:getWechatLoginStatus`,
+ * `agent:submitWechatLoginVerifyCode`, `agent:deleteChannel`,
+ * `agent:setChannelEnabled`, `agent:sendChannelProbe`). Same lifecycle pattern
+ * as the other group dispose slots: register on `setupAgentIPC`, dispose on
+ * dev-reload re-entry, dispose on `cleanupAgentRuntime` shutdown.
+ */
+let channelManagementGroupDispose: IpcDisposeHandle | null = null
+
 function cleanupSkillSessionState(sessionId?: string, reason = 'Skill session state cleared'): void {
   if (sessionId) {
     clearLastReferenceSkill(sessionId)
@@ -450,6 +462,14 @@ export async function cleanupAgentRuntime(): Promise<void> {
   if (telemetryGroupDispose) {
     try { telemetryGroupDispose.dispose() } catch { /* ignore */ }
     telemetryGroupDispose = null
+  }
+  // Stage V V2.1k — symmetric release of the 8 channel-management +
+  // WeChat-login channel handlers (upsertChannel / testChannel /
+  // startWechatLogin / getWechatLoginStatus / submitWechatLoginVerifyCode /
+  // deleteChannel / setChannelEnabled / sendChannelProbe).
+  if (channelManagementGroupDispose) {
+    try { channelManagementGroupDispose.dispose() } catch { /* ignore */ }
+    channelManagementGroupDispose = null
   }
   if (runtime) {
     await runtime.stop()
@@ -847,127 +867,26 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     logAgentMetric: (name, payload) => logAgentMetric(name, payload),
   })
 
-  ipcMain.handle('agent:upsertChannel', async (_, payload: {
-    id?: string
-    type: 'local-debug' | 'generic-webhook' | 'feishu-bot' | 'feishu-app' | 'telegram-bot' | 'wechat-openclaw'
-    name: string
-    enabled?: boolean
-    config?: Record<string, unknown>
-  }): Promise<IPCResponse> => {
-    try {
-      const channel = await runtime!.upsertChannel(payload)
-      return { success: true, data: channel }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      return { success: false, error: errorMessage }
-    }
-  })
-
-  ipcMain.handle('agent:testChannel', async (_, payload: {
-    id?: string
-    type: 'local-debug' | 'generic-webhook' | 'feishu-bot' | 'feishu-app' | 'telegram-bot' | 'wechat-openclaw'
-    name: string
-    enabled?: boolean
-    config?: Record<string, unknown>
-  }): Promise<IPCResponse> => {
-    try {
-      const result = await runtime!.testChannel(payload)
-      return { success: result.success, error: result.error }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      return { success: false, error: errorMessage }
-    }
-  })
-
-  ipcMain.handle('agent:startWechatLogin', async (_, payload: {
-    id?: string
-    defaultTarget?: string
-    force?: boolean
-  }): Promise<IPCResponse> => {
-    try {
-      const result = await runtime!.startWechatLogin(payload || {})
-      if (result.success === false) {
-        return { success: false, error: String(result.error || 'wechat login failed'), data: result }
-      }
-      return { success: true, data: result }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('agent:getWechatLoginStatus', async (_, payload: {
-    channelId?: string
-    sessionKey?: string
-  }): Promise<IPCResponse> => {
-    try {
-      const channelId = String(payload?.channelId || '')
-      const sessionKey = String(payload?.sessionKey || '')
-      if (!channelId || !sessionKey) return { success: false, error: 'channelId and sessionKey are required' }
-      const result = await runtime!.getWechatLoginStatus(channelId, sessionKey)
-      if (result.success === false) {
-        return { success: false, error: String(result.error || 'wechat login status failed'), data: result }
-      }
-      return { success: true, data: result }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('agent:submitWechatLoginVerifyCode', async (_, payload: {
-    channelId?: string
-    sessionKey?: string
-    code?: string
-  }): Promise<IPCResponse> => {
-    try {
-      const channelId = String(payload?.channelId || '')
-      const sessionKey = String(payload?.sessionKey || '')
-      const code = String(payload?.code || '')
-      if (!channelId || !sessionKey || !code) return { success: false, error: 'channelId, sessionKey and code are required' }
-      const result = await runtime!.submitWechatLoginVerifyCode(channelId, sessionKey, code)
-      if (result.success === false) {
-        return { success: false, error: String(result.error || 'wechat verify failed'), data: result }
-      }
-      return { success: true, data: result }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('agent:deleteChannel', async (_, payload: { id: string }): Promise<IPCResponse> => {
-    try {
-      const ok = await runtime!.deleteChannel(payload.id)
-      return { success: ok, error: ok ? undefined : `Channel not found: ${payload.id}` }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      return { success: false, error: errorMessage }
-    }
-  })
-
-  ipcMain.handle('agent:setChannelEnabled', async (_, payload: {
-    id: string
-    enabled: boolean
-  }): Promise<IPCResponse> => {
-    try {
-      const channel = await runtime!.setChannelEnabled(payload.id, payload.enabled)
-      if (!channel) return { success: false, error: `Channel not found: ${payload.id}` }
-      return { success: true, data: channel }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      return { success: false, error: errorMessage }
-    }
-  })
-
-  ipcMain.handle('agent:sendChannelProbe', async (_, payload: {
-    id: string
-    text: string
-  }): Promise<IPCResponse> => {
-    try {
-      const result = await runtime!.sendChannelProbe(payload.id, payload.text)
-      return { success: result.success, error: result.error }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      return { success: false, error: errorMessage }
-    }
+  // Stage V V2.1k — the 8 channel-management + WeChat-login channels
+  // (`agent:upsertChannel`, `agent:testChannel`, `agent:startWechatLogin`,
+  // `agent:getWechatLoginStatus`, `agent:submitWechatLoginVerifyCode`,
+  // `agent:deleteChannel`, `agent:setChannelEnabled`, `agent:sendChannelProbe`)
+  // moved into `channelManagementGroup`. Symmetric dispose lives in
+  // `cleanupAgentRuntime`; defensive dev-reload re-entry disposes the previous
+  // handle first so `ipcMain.handle` does not double-register.
+  if (channelManagementGroupDispose) {
+    try { channelManagementGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    channelManagementGroupDispose = null
+  }
+  channelManagementGroupDispose = channelManagementGroup.register(ipcMain, {
+    upsertChannel: (payload) => runtime!.upsertChannel(payload),
+    testChannel: (payload) => runtime!.testChannel(payload),
+    startWechatLogin: (payload) => runtime!.startWechatLogin(payload),
+    getWechatLoginStatus: (channelId, sessionKey) => runtime!.getWechatLoginStatus(channelId, sessionKey),
+    submitWechatLoginVerifyCode: (channelId, sessionKey, code) => runtime!.submitWechatLoginVerifyCode(channelId, sessionKey, code),
+    deleteChannel: (id) => runtime!.deleteChannel(id),
+    setChannelEnabled: (id, enabled) => runtime!.setChannelEnabled(id, enabled),
+    sendChannelProbe: (id, text) => runtime!.sendChannelProbe(id, text),
   })
 
   ipcMain.handle('agent:listSchedules', (): IPCResponse => {
