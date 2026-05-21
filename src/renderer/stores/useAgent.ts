@@ -212,6 +212,14 @@ interface AgentState {
   sessions: Record<string, SessionSlice>
   /** V3.3a bootstrap — active sessionId selector; nullable until first write. */
   activeSessionId: string | null
+  /**
+   * V3.4a — render-order list for session tabs. Source of truth for tab
+   * ordering and the renderer-side ≤3 hard limit. Entries appear here in
+   * the order they were created via `createNewSession`; `closeSession`
+   * removes the matching id. The list is empty in the cold-start state so
+   * the SessionTabs strip renders nothing (V6 fixture-compatible).
+   */
+  sessionOrder: string[]
   taskDisclosureState: Record<string, TaskDisclosureState>
 
   setAgents: (agents: Agent[]) => void
@@ -247,6 +255,28 @@ interface AgentState {
   pickFiles: () => Promise<void>
   setTaskSectionExpanded: (taskKey: string, sectionKey: TaskSectionKey, expanded: boolean) => void
   toggleTaskSection: (taskKey: string, sectionKey: TaskSectionKey) => void
+  /**
+   * V3.4a — set the active session and mirror the per-session draft
+   * (`inputValue`) onto the top-level field so existing ChatInput selectors
+   * keep observing the active session's value. No-op if `id` is not present
+   * in `sessionOrder` (defensive: prevents activating a closed session).
+   */
+  setActiveSessionId: (id: string) => void
+  /**
+   * V3.4a — create a fresh session slice, append its id to `sessionOrder`,
+   * and switch the active session to it. Rejected (no-op) when the
+   * renderer-side hard limit is reached (`sessionOrder.length >= 3`); the
+   * caller can re-read `sessionOrder.length` after the call to detect this.
+   * Returns the newly created session id, or `null` if rejected.
+   */
+  createNewSession: () => string | null
+  /**
+   * V3.4a — drop a session from the tab strip. Removes the entry from
+   * `sessions` and `sessionOrder`; when `id === activeSessionId`, switches
+   * the active session to the first remaining tab (or `null` if none).
+   * No-op if `id` is not present.
+   */
+  closeSession: (id: string) => void
 }
 
 function generateSessionId(): string {
@@ -901,6 +931,9 @@ export const useAgent = create<AgentState>((set, get) => ({
   // entry for the active session key (derived from `sessionId`).
   sessions: {},
   activeSessionId: null,
+  // V3.4a — sessionOrder seeds empty; SessionTabs renders nothing in the
+  // cold-start state, keeping the V6 fixture (chat-panel-baseline) at 4/4.
+  sessionOrder: [],
   taskDisclosureState: {},
 
   setAgents: (agents) => set({ agents }),
@@ -1025,6 +1058,81 @@ export const useAgent = create<AgentState>((set, get) => ({
           [sectionKey]: !currentValue,
         },
       },
+    }
+  }),
+
+  // =========================================================================
+  // V3.4a — renderer-side session tab actions
+  // =========================================================================
+  // The renderer enforces the ≤3 session hard limit on the create side; the
+  // main-process complement (V3.5) is a deliberate follow-up so this PR
+  // stays a renderer-only change. setActiveSessionId mirrors the
+  // per-session `inputValue` onto the top-level field to match the
+  // V3.3b.1 read-through-mirror contract; selectors that still read
+  // `state.inputValue` keep observing the active session's draft.
+
+  setActiveSessionId: (id) => set((state) => {
+    // Defensive: a tab strip click should only ever target a session that
+    // currently exists in sessionOrder. If the id is unknown (e.g. it was
+    // closed concurrently), do nothing — the SessionTabs renderer will
+    // re-render with the up-to-date list on the next frame.
+    if (!state.sessionOrder.includes(id)) return state
+    const slice = state.sessions[id] ?? makeEmptySessionSlice()
+    return {
+      activeSessionId: id,
+      inputValue: slice.inputValue,
+      pendingSendCount: slice.pendingSendCount,
+      pendingSendFlushAt: slice.pendingSendFlushAt,
+    }
+  }),
+
+  createNewSession: () => {
+    const state = get()
+    // Renderer-side hard limit (plan §4 V3.4 + V3.5). Main-side enforcement
+    // lands in V3.5. Returning null lets the caller surface UI feedback
+    // without throwing.
+    if (state.sessionOrder.length >= 3) return null
+    const id = generateSessionId()
+    const slice = makeEmptySessionSlice()
+    set({
+      sessions: { ...state.sessions, [id]: slice },
+      sessionOrder: [...state.sessionOrder, id],
+      activeSessionId: id,
+      // Mirror the fresh slice's defaults onto the top-level fields so the
+      // composer/coalescer selectors observe a clean slate for the new tab.
+      inputValue: slice.inputValue,
+      pendingSendCount: slice.pendingSendCount,
+      pendingSendFlushAt: slice.pendingSendFlushAt,
+    })
+    return id
+  },
+
+  closeSession: (id) => set((state) => {
+    if (!state.sessionOrder.includes(id)) return state
+    const nextOrder = state.sessionOrder.filter((entry) => entry !== id)
+    const nextSessions = { ...state.sessions }
+    delete nextSessions[id]
+    // Re-route the active session when the closed tab was active: pick the
+    // first remaining entry; if the list is now empty, drop activeSessionId
+    // to null (the bootstrap state SessionTabs treats as the empty case).
+    const nextActiveId = state.activeSessionId === id
+      ? (nextOrder[0] ?? null)
+      : state.activeSessionId
+    const nextSlice = nextActiveId ? nextSessions[nextActiveId] : null
+    const mirrorPatch = nextSlice
+      ? {
+          inputValue: nextSlice.inputValue,
+          pendingSendCount: nextSlice.pendingSendCount,
+          pendingSendFlushAt: nextSlice.pendingSendFlushAt,
+        }
+      : state.activeSessionId === id
+        ? { inputValue: '', pendingSendCount: 0, pendingSendFlushAt: null }
+        : {}
+    return {
+      sessions: nextSessions,
+      sessionOrder: nextOrder,
+      activeSessionId: nextActiveId,
+      ...mirrorPatch,
     }
   }),
 

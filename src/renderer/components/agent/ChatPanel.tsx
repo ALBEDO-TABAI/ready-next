@@ -89,6 +89,11 @@ import { MarkdownContent } from './chat-panel/markdown'
 // to `./chat-panel/layout/MotionLayer`. Both are pure React with zero
 // `useAgent` / store / IPC dependencies; signatures preserved byte-for-byte.
 import { ChatPanelMotionLayer, CollapsedChatRail } from './chat-panel/layout/MotionLayer'
+// Stage V V3.4a — visible session tab strip. Renders `null` when the
+// `useAgent.sessionOrder` Record is empty (the cold-start state the V6
+// fixture locks), so this import does not change the chat-panel-baseline
+// snapshot until a session is explicitly created.
+import SessionTabs from './chat-panel/session-tabs/SessionTabs'
 import {
   AttachmentIcon,
   getAttachmentPreviewSrc,
@@ -1109,7 +1114,13 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     return `${d.getMonth() + 1}/${d.getDate()}`
   }
 
+  // Stage V V3.4a — SessionTabs above the channel selector. The strip renders
+  // `null` when `sessionOrder` is empty (cold start), so the V6 baseline
+  // markers (`data-chat-panel-root` / `data-liquid-shell`) are unaffected
+  // until the user explicitly creates a session.
   const expandedPanelHeader = (
+    <>
+      <SessionTabs />
     <ChatHeader
       currentChannel={currentChannel}
       channelOptions={channelOptions}
@@ -1137,6 +1148,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
       }}
       formatTime={formatTime}
     />
+    </>
   )
 
   const expandedPanelBody = (
