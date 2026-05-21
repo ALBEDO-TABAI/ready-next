@@ -1,7 +1,7 @@
-import { ipcMain, dialog, shell, BrowserWindow, type WebContents } from 'electron'
+import { ipcMain, dialog, shell, BrowserWindow } from 'electron'
 import {
   writeFileSync, statSync, existsSync,
-  copyFileSync, watch, accessSync, constants as fsConstants, type FSWatcher
+  copyFileSync, accessSync, constants as fsConstants,
 } from 'fs'
 import { readFile, writeFile } from 'fs/promises'
 import { join, basename, dirname, extname } from 'path'
@@ -19,6 +19,7 @@ import { fileIoGroup } from './ipc/file-io-group'
 import { fileMutationGroup } from './ipc/file-mutation-group'
 import { workspaceGroup } from './ipc/workspace-group'
 import { parserGroup } from './ipc/parser-group'
+import { watchGroup } from './ipc/watch-group'
 import type { IpcDisposeHandle } from './ipc/types'
 import {
   ATTACHMENT_HARD_CAP_BYTES,
@@ -552,6 +553,16 @@ let workspaceGroupDispose: IpcDisposeHandle | null = null
  */
 let parserGroupDispose: IpcDisposeHandle | null = null
 
+/**
+ * Stage V V2.3f — dispose handle returned by `watchGroup.register`. The
+ * single `document:watchDirectories` channel + the per-sender
+ * `document:directoryChanged` push live in `ipc/watch-group.ts`; same
+ * dev-reload lifecycle as the other extracted groups. Disposing the
+ * handle closes every live `FSWatcher` before unhooking the request
+ * channel so renderer reloads cannot leak file descriptors.
+ */
+let watchGroupDispose: IpcDisposeHandle | null = null
+
 export function setupDocumentIPC(useMock = false): void {
   // Renderer notifies main whenever a widget update has been committed into the tab content store.
   //   Pipeline executor waits on this via documentCommitRegistry.waitForCommitAfter so the write
@@ -571,114 +582,18 @@ export function setupDocumentIPC(useMock = false): void {
     })
   })
 
-  type DirectoryWatchSession = {
-    sender: WebContents
-    watchers: Map<string, FSWatcher>
-    debounceTimer: NodeJS.Timeout | null
-    pendingPaths: Set<string>
+  // Stage V V2.3f — `document:watchDirectories` (request) and the paired
+  // `document:directoryChanged` push moved into `watchGroup`. The group
+  // owns the per-sender `FSWatcher` session lifecycle, debounced fan-out,
+  // and the `sender.once('destroyed')` cleanup hook; dispose closes every
+  // live watcher before unhooking the channel. The push literal stays
+  // visible to the V5 IPC contract gate via the inline
+  // `session.sender.send('document:directoryChanged', …)` in the group.
+  if (watchGroupDispose) {
+    try { watchGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    watchGroupDispose = null
   }
-
-  const directoryWatchSessions = new Map<number, DirectoryWatchSession>()
-
-  const closeDirectoryWatchSession = (senderId: number) => {
-    const session = directoryWatchSessions.get(senderId)
-    if (!session) return
-    if (session.debounceTimer) {
-      clearTimeout(session.debounceTimer)
-    }
-    session.watchers.forEach((watcher) => watcher.close())
-    directoryWatchSessions.delete(senderId)
-  }
-
-  const ensureDirectoryWatchSession = (sender: WebContents): DirectoryWatchSession => {
-    const existing = directoryWatchSessions.get(sender.id)
-    if (existing) return existing
-
-    const session: DirectoryWatchSession = {
-      sender,
-      watchers: new Map<string, FSWatcher>(),
-      debounceTimer: null,
-      pendingPaths: new Set<string>(),
-    }
-
-    sender.once('destroyed', () => {
-      closeDirectoryWatchSession(sender.id)
-    })
-
-    directoryWatchSessions.set(sender.id, session)
-    return session
-  }
-
-  const queueDirectoryWatchEvent = (session: DirectoryWatchSession, watchedPath: string) => {
-    session.pendingPaths.add(watchedPath)
-    if (session.debounceTimer) return
-
-    session.debounceTimer = setTimeout(() => {
-      session.debounceTimer = null
-      if (session.sender.isDestroyed()) return
-      const paths = Array.from(session.pendingPaths)
-      session.pendingPaths.clear()
-      session.sender.send('document:directoryChanged', {
-        paths,
-        timestamp: Date.now(),
-      })
-    }, 140)
-  }
-
-  const syncWatchedDirectories = (sender: WebContents, rawPaths: string[]): string[] => {
-    const session = ensureDirectoryWatchSession(sender)
-    const normalizedPaths = Array.from(
-      new Set(
-        rawPaths
-          .map((value) => String(value || '').trim())
-          .filter(Boolean)
-          .filter((value) => {
-            if (!existsSync(value)) return false
-            try {
-              return statSync(value).isDirectory()
-            } catch {
-              return false
-            }
-          }),
-      ),
-    )
-
-    session.watchers.forEach((watcher, watchedPath) => {
-      if (normalizedPaths.includes(watchedPath)) return
-      watcher.close()
-      session.watchers.delete(watchedPath)
-    })
-
-    normalizedPaths.forEach((dirPath) => {
-      if (session.watchers.has(dirPath)) return
-      try {
-        const watcher = watch(dirPath, { persistent: false }, () => {
-          queueDirectoryWatchEvent(session, dirPath)
-        })
-        watcher.on('error', () => {
-          watcher.close()
-          session.watchers.delete(dirPath)
-        })
-        session.watchers.set(dirPath, watcher)
-      } catch {
-        // Ignore unwatchable paths; other directories should continue to work.
-      }
-    })
-
-    return Array.from(session.watchers.keys())
-  }
-
-  ipcMain.handle('document:watchDirectories', async (event, payload: { paths?: string[] }) => {
-    try {
-      if (useMock) {
-        return { success: true, data: { watchedPaths: [] }, mock: true }
-      }
-      const watchedPaths = syncWatchedDirectories(event.sender, Array.isArray(payload?.paths) ? payload.paths : [])
-      return { success: true, data: { watchedPaths } }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
+  watchGroupDispose = watchGroup.register(ipcMain, { useMock })
 
   // Stage V V2.3a — 4 document mark channels (`document:listMarks`,
   // `document:createMark`, `document:updateMark`, `document:deleteMark`)
