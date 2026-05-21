@@ -42,6 +42,9 @@ import {
   type SourceBackend,
   type RouteAttemptSnapshotEntry,
 } from './source-diagnostics'
+import { sourceGroup } from './ipc/source-group'
+import type { AddSourceCoreInput, AddSourceCoreResult } from './ipc/engine-deps'
+import type { IpcDisposeHandle } from './ipc/types'
 
 interface RSSResponse<T> {
   success: boolean
@@ -175,6 +178,15 @@ const rssRepository = new RSSRepository()
 const appSettingsRepository = new AppSettingsRepository()
 let rssBrowserController: BrowserController | null = null
 const sourceRefreshInFlight = new Set<string>()
+
+/**
+ * Stage V V2.2a — dispose handle returned by `sourceGroup.register`. The 4
+ * source channels live in `ipc/source-group.ts`; the host keeps the dispose
+ * handle so a re-entrant `setupRSSIPC` (dev-reload) can drop the prior
+ * registration before the next one binds. A future `cleanupRSSEngine` hook
+ * will drain this on shutdown.
+ */
+let sourceGroupDispose: IpcDisposeHandle | null = null
 
 export function setRSSBrowserController(controller: BrowserController | null): void {
   rssBrowserController = controller
@@ -765,6 +777,138 @@ async function loadLatestBenchmarkSnapshot(): Promise<{
   }
 }
 
+/**
+ * Stage V V2.2a — `rss:addSource` initial-fetch pipeline lifted verbatim
+ * from the inline handler so `sourceGroup` can stay focused on response
+ * shaping + mock dispatch. Semantics are byte-for-byte identical to the
+ * pre-extraction handler body: validate URL → detect platform → warm
+ * RSSHub (with bilibili fallback) → scrape → persist → record route
+ * diagnostics → return shaped result. Mock-mode short-circuits in the
+ * group itself before this runs, so this function is only invoked in
+ * real-mode.
+ */
+async function runAddSourceCore(input: AddSourceCoreInput): Promise<AddSourceCoreResult> {
+  const startedAt = Date.now()
+  let feedUrl: string
+  try {
+    feedUrl = new URL(input.url).href
+  } catch {
+    return { ok: false, error: `Invalid URL: ${input.url}` }
+  }
+
+  const platform = detectPlatform(feedUrl)
+  // resolveSourceBackend is called for parity with the pre-extraction handler
+  // (kept the side-effect-free call in case future diagnostics rely on
+  // backend resolution happening here).
+  void resolveSourceBackend(platform)
+  let rsshubBase: string | undefined
+
+  if (requiresRSSHubWarmup(platform)) {
+    try {
+      rsshubBase = await resolveRSSHubBase()
+    } catch (error) {
+      if (platform !== 'bilibili') {
+        throw error
+      }
+      console.warn(
+        `[rss:add] rsshub unavailable for bilibili, will fallback to official API: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      )
+    }
+  }
+
+  console.log(`[rss:add] url=${feedUrl} platform=${platform} hub=${rsshubBase || 'none'}`)
+  const { result, backendUsed } = await fetchSourceWithCurrentStack(
+    {
+      id: `pending:${feedUrl}`,
+      name: input.name?.trim() || feedUrl,
+      url: feedUrl,
+      group_name: input.group || 'default',
+      draft_seeded: 0,
+    },
+    platform,
+    rsshubBase,
+  )
+
+  const allowSourceWithoutInitialItems = canSaveSourceWithoutInitialItems(platform, result)
+
+  const sourceName = input.name?.trim() || result.feedTitle || feedUrl
+  const id = rssRepository.addRSSSource({
+    name: sourceName,
+    url: feedUrl,
+    group: input.group,
+    platform,
+  })
+
+  let itemCount = 0
+  if (result.items.length > 0) {
+    const dbItems = result.items.map((item) => ({
+      id: item.itemId,
+      source_id: id,
+      guid: resolveRSSItemGuid(item),
+      title: item.title,
+      link: item.link,
+      summary: item.description || null,
+      cover_image: item.coverImage || null,
+      author: item.author || null,
+      published_at: item.pubDate ? Math.floor(new Date(item.pubDate).getTime() / 1000) : null,
+      ai_tags: classifyItem(item.title, item.description),
+    }))
+    itemCount = rssRepository.upsertRSSItems(dbItems)
+    rssRepository.updateRSSSourceLastFetched(id)
+    rssRepository.setRSSSourceDraftSeeded(id, true)
+  }
+
+  if (result.error && result.items.length === 0 && !allowSourceWithoutInitialItems) {
+    recordSourceRouteAttempt({
+      sourceId: `pending:${feedUrl}`,
+      sourceName,
+      url: feedUrl,
+      groupName: input.group,
+      platform,
+      backend: backendUsed,
+      durationMs: Date.now() - startedAt,
+      itemCount: 0,
+      success: false,
+      error: result.error,
+    })
+    persistRouteDiagnosticsSnapshot()
+    rssRepository.removeRSSSource(id)
+    return { ok: false, error: `Cannot fetch feed: ${result.error}` }
+  }
+
+  recordSourceRouteAttempt({
+    sourceId: id,
+    sourceName,
+    url: feedUrl,
+    groupName: input.group,
+    platform,
+    backend: backendUsed,
+    durationMs: Date.now() - startedAt,
+    itemCount: result.items.length,
+    success: true,
+    warning: result.error ?? null,
+  })
+  persistRouteDiagnosticsSnapshot()
+
+  return {
+    ok: true,
+    data: {
+      id,
+      platform,
+      name: sourceName,
+      itemCount,
+      warning:
+        allowSourceWithoutInitialItems
+          ? buildInitialFetchWarning(platform, result.error)
+          : result.error
+            ? result.error
+            : undefined,
+    },
+  }
+}
+
 export function setupRSSIPC(useMock = false): void {
   const analysisManager = getRSSItemAnalysisManager()
   if (!useMock) {
@@ -779,153 +923,25 @@ export function setupRSSIPC(useMock = false): void {
     })
   }
 
-  ipcMain.handle('rss:getSources', async () => {
-    if (useMock) return createSuccessResponse(mockSources, true)
-
-    try {
-      const sources = rssRepository.getRSSSources() as DBRSSSource[]
-      return createSuccessResponse(sources.map(mapDBSourceToAPI), false)
-    } catch (error) {
-      return createErrorResponse(error instanceof Error ? error.message : String(error))
-    }
-  })
-
-  ipcMain.handle('rss:addSource', async (_, source: { name?: string; url: string; group?: string }) => {
-    if (useMock) {
-      return createSuccessResponse({ id: `source-${Date.now()}`, platform: 'rss', itemCount: 0 }, true)
-    }
-
-    try {
-      const startedAt = Date.now()
-      let feedUrl: string
-      try {
-        feedUrl = new URL(source.url).href
-      } catch {
-        return createErrorResponse(`Invalid URL: ${source.url}`)
-      }
-
-      const platform = detectPlatform(feedUrl)
-      const backend = resolveSourceBackend(platform)
-      let rsshubBase: string | undefined
-
-      if (requiresRSSHubWarmup(platform)) {
-        try {
-          rsshubBase = await resolveRSSHubBase()
-        } catch (error) {
-          if (platform !== 'bilibili') {
-            throw error
-          }
-          console.warn(
-            `[rss:add] rsshub unavailable for bilibili, will fallback to official API: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          )
-        }
-      }
-
-      console.log(`[rss:add] url=${feedUrl} platform=${platform} hub=${rsshubBase || 'none'}`)
-      const { result, backendUsed } = await fetchSourceWithCurrentStack(
-        {
-          id: `pending:${feedUrl}`,
-          name: source.name?.trim() || feedUrl,
-          url: feedUrl,
-          group_name: source.group || 'default',
-          draft_seeded: 0,
-        },
-        platform,
-        rsshubBase,
-      )
-
-      const allowSourceWithoutInitialItems = canSaveSourceWithoutInitialItems(platform, result)
-
-      const sourceName = source.name?.trim() || result.feedTitle || feedUrl
-      const id = rssRepository.addRSSSource({
-        name: sourceName,
-        url: feedUrl,
-        group: source.group,
-        platform,
-      })
-
-      let itemCount = 0
-      if (result.items.length > 0) {
-        const dbItems = result.items.map((item) => ({
-          id: item.itemId,
-          source_id: id,
-          guid: resolveRSSItemGuid(item),
-          title: item.title,
-          link: item.link,
-          summary: item.description || null,
-          cover_image: item.coverImage || null,
-          author: item.author || null,
-          published_at: item.pubDate ? Math.floor(new Date(item.pubDate).getTime() / 1000) : null,
-          ai_tags: classifyItem(item.title, item.description),
-        }))
-        itemCount = rssRepository.upsertRSSItems(dbItems)
-        rssRepository.updateRSSSourceLastFetched(id)
-        rssRepository.setRSSSourceDraftSeeded(id, true)
-      }
-
-      if (result.error && result.items.length === 0 && !allowSourceWithoutInitialItems) {
-        recordSourceRouteAttempt({
-          sourceId: `pending:${feedUrl}`,
-          sourceName: sourceName,
-          url: feedUrl,
-          groupName: source.group,
-          platform,
-          backend: backendUsed,
-          durationMs: Date.now() - startedAt,
-          itemCount: 0,
-          success: false,
-          error: result.error,
-        })
-        persistRouteDiagnosticsSnapshot()
-        rssRepository.removeRSSSource(id)
-        return createErrorResponse(`Cannot fetch feed: ${result.error}`)
-      }
-
-      recordSourceRouteAttempt({
-        sourceId: id,
-        sourceName,
-        url: feedUrl,
-        groupName: source.group,
-        platform,
-        backend: backendUsed,
-        durationMs: Date.now() - startedAt,
-        itemCount: result.items.length,
-        success: true,
-        warning: result.error ?? null,
-      })
-      persistRouteDiagnosticsSnapshot()
-
-      return createSuccessResponse(
-        {
-          id,
-          platform,
-          name: sourceName,
-          itemCount,
-          warning:
-            allowSourceWithoutInitialItems
-              ? buildInitialFetchWarning(platform, result.error)
-              : result.error
-                ? result.error
-                : undefined,
-        },
-        false,
-      )
-    } catch (error) {
-      return createErrorResponse(error instanceof Error ? error.message : String(error))
-    }
-  })
-
-  ipcMain.handle('rss:removeSource', async (_, id: string) => {
-    if (useMock) return createSuccessResponse({ removed: true }, true)
-
-    try {
-      rssRepository.removeRSSSource(id)
-      return createSuccessResponse({ removed: true }, false)
-    } catch (error) {
-      return createErrorResponse(error instanceof Error ? error.message : String(error))
-    }
+  // Stage V V2.2a — 4 source channels (`rss:getSources`, `rss:addSource`,
+  // `rss:removeSource`, `rss:getDraftStoreSources`) moved into
+  // `sourceGroup`. The group handles dev-reload removeHandler pre-clear
+  // internally; we hold the dispose handle so a future cleanup hook (or
+  // the next setupRSSIPC entry) can drop them on shutdown. Re-binding on
+  // dev reload first calls `dispose()` on the prior handle so listener
+  // slots stay clean.
+  if (sourceGroupDispose) {
+    try { sourceGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    sourceGroupDispose = null
+  }
+  sourceGroupDispose = sourceGroup.register(ipcMain, {
+    useMock,
+    getRSSRepository: () => rssRepository,
+    mapSourceToAPI: (source) => mapDBSourceToAPI(source as DBRSSSource),
+    mapDraftStoreSourceToAPI: (source) =>
+      mapDraftStoreSourceToAPI(source as import('../database').RSSDraftStoreSourceSummary),
+    addSourceCore: (input) => runAddSourceCore(input),
+    mockSources,
   })
 
   ipcMain.handle('rss:getItems', async (_, sourceId?: string) => {
@@ -937,17 +953,6 @@ export function setupRSSIPC(useMock = false): void {
     try {
       const rawItems = rssRepository.getRSSItemsWithSource(sourceId) as DBRSSItem[]
       return createSuccessResponse(rawItems.map(mapDBItemToAPI), false)
-    } catch (error) {
-      return createErrorResponse(error instanceof Error ? error.message : String(error))
-    }
-  })
-
-  ipcMain.handle('rss:getDraftStoreSources', async () => {
-    if (useMock) return createSuccessResponse([], true)
-
-    try {
-      const sources = rssRepository.getRSSDraftStoreSources()
-      return createSuccessResponse(sources.map(mapDraftStoreSourceToAPI), false)
     } catch (error) {
       return createErrorResponse(error instanceof Error ? error.message : String(error))
     }
