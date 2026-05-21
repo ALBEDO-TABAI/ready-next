@@ -108,6 +108,11 @@ import { MarkdownContent } from './chat-panel/markdown'
 // to `./chat-panel/layout/MotionLayer`. Both are pure React with zero
 // `useAgent` / store / IPC dependencies; signatures preserved byte-for-byte.
 import { ChatPanelMotionLayer, CollapsedChatRail } from './chat-panel/layout/MotionLayer'
+import {
+  AttachmentIcon,
+  getAttachmentPreviewSrc,
+  AttachmentPreviewModal
+} from './chat-panel/attachments-preview'
 
 interface SerializedTaskSnapshot {
   scopeId: string
@@ -1197,48 +1202,7 @@ function ModelSelector() {
   )
 }
 
-// ---------------------------------------------------------------------------
-// Attachment icon helper
-// ---------------------------------------------------------------------------
-
-function AttachmentIcon({ attachment, size = 16 }: { attachment: ChatAttachment; size?: number }) {
-  const style = { width: size, height: size }
-  const cls = 'text-[var(--text-gray)]'
-  if (attachment.isDirectory) {
-    return <Folder style={style} className={cls} strokeWidth={2} />
-  }
-  if (attachment.source === 'browser-tab') {
-    return <Globe style={style} className={cls} strokeWidth={2} />
-  }
-  if (attachment.source === 'calendar-event') {
-    return <CalendarDays style={style} className={cls} strokeWidth={2} />
-  }
-  if (attachment.source === 'document-quote') {
-    return <MessageSquareQuote style={style} className={cls} strokeWidth={2} />
-  }
-  if (attachment.source === 'design-project') {
-    return <Pen style={style} className={cls} strokeWidth={2} />
-  }
-  if (attachment.source === 'skill-folder') {
-    return <Puzzle style={style} className={cls} strokeWidth={2} />
-  }
-  switch (attachment.type) {
-    case 'image':
-      return <Image style={style} className={cls} strokeWidth={2} />
-    case 'video':
-      return <Film style={style} className={cls} strokeWidth={2} />
-    case 'spreadsheet':
-      return <Table style={style} className={cls} strokeWidth={2} />
-    default:
-      return <FileText style={style} className={cls} strokeWidth={2} />
-  }
-}
-
-function getAttachmentPreviewSrc(attachment: ChatAttachment): string | null {
-  if (attachment.type !== 'image') return null
-  if (!attachment.path || !attachment.path.startsWith('/')) return null
-  return `file://${encodeURI(attachment.path)}`
-}
+// AttachmentIcon + getAttachmentPreviewSrc + AttachmentPreviewModal extracted to chat-panel/attachments-preview/ (V1.4)
 
 function formatDesignAttachmentSummary(attachment: ChatAttachment): string {
   return [
@@ -3687,172 +3651,14 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         ) : null}
       </AnimatePresence>
 
-      {activeAttachmentPreview && (
-        <div
-          style={{
-            position: 'absolute',
-            inset: 0,
-            background: 'rgba(10, 14, 22, 0.42)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: 20,
-            zIndex: 40
-          }}
-          onClick={() => setActiveAttachmentPreview(null)}
-        >
-          <div
-            className="glass-surface-floating"
-            style={{
-              width: 'min(760px, 100%)',
-              maxHeight: '82%',
-              overflow: 'hidden',
-              borderRadius: 16,
-              border: '1px solid var(--border-default)',
-              background: 'color-mix(in srgb, var(--surface-floating-bg) 32%, transparent)',
-              display: 'flex',
-              flexDirection: 'column'
-            }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 12,
-                padding: '14px 16px',
-                borderBottom: '1px solid var(--border-default)'
-              }}
-            >
-              <div style={{ minWidth: 0 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-title)' }}>
-                  {activeAttachmentPreview.attachment.name}
-                </div>
-                <div style={{ fontSize: 11, color: 'var(--text-gray)', marginTop: 2 }}>
-                  {activeAttachmentPreview.attachment.path}
-                </div>
-              </div>
-              <div className="flex items-center" style={{ gap: 8 }}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleRevealAttachment(activeAttachmentPreview.attachment)
-                  }}
-                  style={{
-                    padding: '8px 10px',
-                    borderRadius: 10,
-                    border: '1px solid var(--border-default)',
-                    fontSize: 12,
-                    color: 'var(--text-body)'
-                  }}
-                >
-                  在 Finder 中显示
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    void handleOpenAttachment(activeAttachmentPreview.attachment)
-                  }}
-                  style={{
-                    padding: '8px 10px',
-                    borderRadius: 10,
-                    border: '1px solid var(--border-default)',
-                    fontSize: 12,
-                    color: 'var(--text-body)'
-                  }}
-                >
-                  系统打开
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setActiveAttachmentPreview(null)}
-                  style={{
-                    width: 30,
-                    height: 30,
-                    borderRadius: 15,
-                    border: '1px solid var(--border-default)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center'
-                  }}
-                >
-                  <X style={{ width: 14, height: 14 }} strokeWidth={2} />
-                </button>
-              </div>
-            </div>
+      <AttachmentPreviewModal
+        preview={activeAttachmentPreview}
+        loading={attachmentPreviewLoading}
+        onClose={() => setActiveAttachmentPreview(null)}
+        onReveal={handleRevealAttachment}
+        onOpen={handleOpenAttachment}
+      />
 
-            <div style={{ padding: 16, overflow: 'auto' }}>
-              {attachmentPreviewLoading && (
-                <div style={{ fontSize: 12, color: 'var(--text-gray)' }}>正在读取附件内容…</div>
-              )}
-
-              {!attachmentPreviewLoading && activeAttachmentPreview.mode === 'image' && (
-                <img
-                  src={toLocalFileUrl(activeAttachmentPreview.attachment.path)}
-                  alt={activeAttachmentPreview.attachment.name}
-                  style={{
-                    width: '100%',
-                    maxHeight: '70vh',
-                    objectFit: 'contain',
-                    borderRadius: 12
-                  }}
-                />
-              )}
-
-              {!attachmentPreviewLoading && activeAttachmentPreview.mode === 'video' && (
-                <video
-                  src={toLocalFileUrl(activeAttachmentPreview.attachment.path)}
-                  controls
-                  style={{ width: '100%', maxHeight: '70vh', borderRadius: 12, background: '#000' }}
-                />
-              )}
-
-              {!attachmentPreviewLoading && activeAttachmentPreview.mode === 'text' && (
-                <pre
-                  style={{
-                    margin: 0,
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                    fontSize: 12,
-                    lineHeight: 1.6,
-                    color: 'var(--text-body)',
-                    background: 'var(--bg-secondary)',
-                    border: '1px solid var(--border-default)',
-                    borderRadius: 12,
-                    padding: 14
-                  }}
-                >
-                  {activeAttachmentPreview.content || '(空文本附件)'}
-                </pre>
-              )}
-
-              {!attachmentPreviewLoading && activeAttachmentPreview.mode === 'file' && (
-                <div
-                  style={{
-                    borderRadius: 12,
-                    border: '1px solid var(--border-default)',
-                    background: 'var(--bg-secondary)',
-                    padding: 14,
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: 8
-                  }}
-                >
-                  <div style={{ fontSize: 12, color: 'var(--text-body)' }}>
-                    该附件暂不支持内嵌预览。
-                  </div>
-                  {activeAttachmentPreview.error && (
-                    <div style={{ fontSize: 12, color: 'var(--color-red)' }}>
-                      {activeAttachmentPreview.error}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
