@@ -48,6 +48,7 @@ import { conversationGroup } from './ipc/conversation-group'
 import { taskProjectionGroup } from './ipc/task-projection-group'
 import { recallGroup } from './ipc/recall-group'
 import { detachedTaskGroup } from './ipc/detached-task-group'
+import { runControlGroup } from './ipc/run-control-group'
 import type { IpcDisposeHandle } from './ipc/types'
 import { logAgentMetric } from '../agent-control/metrics'
 import { isRendererAgentMetricName } from '../../../shared/renderer-agent-metrics'
@@ -268,6 +269,16 @@ let recallGroupDispose: IpcDisposeHandle | null = null
  */
 let detachedTaskGroupDispose: IpcDisposeHandle | null = null
 
+/**
+ * Stage V V2.1i — dispose handle returned by `runControlGroup.register`.
+ * Owns the 5 run-control channels (`agent:listActiveChildRuns`,
+ * `agent:cancelChildRun`, `agent:suspendRun`, `agent:resumeRun`,
+ * `agent:respondToInteraction`). Same lifecycle pattern as the other group
+ * dispose slots: register on `setupAgentIPC`, dispose on dev-reload re-entry,
+ * dispose on `cleanupAgentRuntime` shutdown.
+ */
+let runControlGroupDispose: IpcDisposeHandle | null = null
+
 function cleanupSkillSessionState(sessionId?: string, reason = 'Skill session state cleared'): void {
   if (sessionId) {
     clearLastReferenceSkill(sessionId)
@@ -416,6 +427,13 @@ export async function cleanupAgentRuntime(): Promise<void> {
   if (detachedTaskGroupDispose) {
     try { detachedTaskGroupDispose.dispose() } catch { /* ignore */ }
     detachedTaskGroupDispose = null
+  }
+  // Stage V V2.1i — symmetric release of the 5 run-control channel handlers
+  // (listActiveChildRuns / cancelChildRun / suspendRun / resumeRun /
+  // respondToInteraction).
+  if (runControlGroupDispose) {
+    try { runControlGroupDispose.dispose() } catch { /* ignore */ }
+    runControlGroupDispose = null
   }
   if (runtime) {
     await runtime.stop()
@@ -764,12 +782,22 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     cancelDetachedSkillTask: (taskId, scopeId) => runtime!.cancelDetachedSkillTask(taskId, scopeId),
   })
 
-  ipcMain.handle('agent:listActiveChildRuns', (): IPCResponse => {
-    return listActiveChildRunsForIpc(runtime)
-  })
-
-  ipcMain.handle('agent:cancelChildRun', async (_, payload: { childRunId?: string }): Promise<IPCResponse> => {
-    return cancelChildRunForIpc(runtime, payload)
+  // Stage V V2.1i — the 5 run-control channels (`agent:listActiveChildRuns`,
+  // `agent:cancelChildRun`, `agent:suspendRun`, `agent:resumeRun`,
+  // `agent:respondToInteraction`) moved into `runControlGroup`. Symmetric
+  // dispose lives in `cleanupAgentRuntime`; defensive dev-reload re-entry
+  // disposes the previous handle first so `ipcMain.handle` does not
+  // double-register.
+  if (runControlGroupDispose) {
+    try { runControlGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    runControlGroupDispose = null
+  }
+  runControlGroupDispose = runControlGroup.register(ipcMain, {
+    listActiveChildRuns: () => listActiveChildRunsForIpc(runtime),
+    cancelChildRun: (payload) => cancelChildRunForIpc(runtime, payload),
+    suspendRun: (payload) => runtime!.suspendRun(payload),
+    resumeRun: (payload) => runtime!.resumeRun(payload),
+    respondToInteraction: (payload) => runtime!.respondToInteraction(payload),
   })
 
   // Stage V V2.1g — `agent:attachSessionRecallContext`,
@@ -803,92 +831,6 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
       ...(payload.payload && typeof payload.payload === 'object' ? payload.payload : {}),
     })
     return { success: true }
-  })
-
-  ipcMain.handle('agent:suspendRun', async (_, payload: {
-    scopeId: string
-    taskId?: string
-  }): Promise<IPCResponse> => {
-    try {
-      const result = await runtime!.suspendRun(payload)
-      return { success: result.success, error: result.error }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('agent:resumeRun', async (_, payload: {
-    scopeId: string
-    taskId?: string
-    requestId?: string
-    responseText?: string
-    continuationIntent?: {
-      taskId: string
-      executionId?: string
-      stepId?: string
-      blockedReason?: string
-      responseText?: string
-      todoId?: string
-      todoTitle?: string
-      // Stage Q (Stage 11) — durable handle fields propagated through IPC
-      // so `runtime.buildContinuationIntent`'s canResumeShape gate can see
-      // them. Without these on the IPC payload type, TS strips them at
-      // the boundary and `incoming?.childRunId` reads as undefined.
-      childRunId?: string
-      detachedTaskId?: string
-      taskRunId?: string
-      jobId?: string
-      skillId?: string
-      action?: string
-      runStatePath?: string
-      outputDir?: string
-      progressFingerprint?: string
-      pauseReason?: string
-    } | null
-  }): Promise<IPCResponse> => {
-    try {
-      const result = await runtime!.resumeRun(payload)
-      // Stage Q (Stage 11) — forward errorKind so renderer can distinguish
-      // 'not_resumable' from other failures (e.g. show a different
-      // toast / disable the button).
-      return { success: result.success, error: result.error, errorKind: result.errorKind }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('agent:respondToInteraction', async (_, payload: {
-    scopeId: string
-    taskId?: string
-    requestId?: string
-    responseText: string
-    continuationIntent?: {
-      taskId: string
-      executionId?: string
-      stepId?: string
-      blockedReason?: string
-      responseText?: string
-      todoId?: string
-      todoTitle?: string
-      // Stage Q (Stage 11) — durable handle fields (see resumeRun).
-      childRunId?: string
-      detachedTaskId?: string
-      taskRunId?: string
-      jobId?: string
-      skillId?: string
-      action?: string
-      runStatePath?: string
-      outputDir?: string
-      progressFingerprint?: string
-      pauseReason?: string
-    } | null
-  }): Promise<IPCResponse> => {
-    try {
-      const result = await runtime!.respondToInteraction(payload)
-      return { success: result.success, error: result.error, errorKind: result.errorKind }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
   })
 
   ipcMain.handle('agent:upsertChannel', async (_, payload: {
