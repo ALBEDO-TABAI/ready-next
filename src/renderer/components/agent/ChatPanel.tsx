@@ -123,6 +123,17 @@ import { TaskToolSnapshot } from './chat-panel/task-snapshot/TaskToolSnapshot'
 // All deps that previously closed over ChatPanel-local state are now
 // injected via params; behavior preserved byte-for-byte.
 import { useTaskInteractionHandlers } from './chat-panel/task-interaction/use-task-interaction-handlers'
+// Stage V V1.9a — channel + session-recall state, derivations, effects and
+// callbacks (selectedChannelKey / channelOptions / currentChannel /
+// filteredScopes / currentAgentData / sessionRecall query+results+capsules
+// + attach/detach IPC handlers + scope-change side effects) extracted to
+// `./chat-panel/recall-state/use-channel-session-recall`. The
+// `ConversationChannelOption` interface moved with it; ChatPanel
+// re-imports the type so call-site signatures stay byte-equivalent.
+import {
+  useChannelSessionRecall,
+  type ConversationChannelOption,
+} from './chat-panel/recall-state/use-channel-session-recall'
 
 interface SerializedTaskSnapshot {
   scopeId: string
@@ -311,13 +322,9 @@ function getAttachmentMetaSummary(attachment: ChatAttachment): string | null {
   return null
 }
 
-interface ConversationChannelOption {
-  key: string
-  sourceKind: 'local' | 'channel'
-  sourceId: string
-  label: string
-  caption: string
-}
+// Stage V V1.9a — `ConversationChannelOption` interface moved to
+// `./chat-panel/recall-state/use-channel-session-recall.ts` and re-imported
+// above; ChatHeader / handleChannelSelect signatures unchanged.
 
 // attachments-helpers (ext sets, getAttachmentTypeFromExt, getPathBasename, createLocalPathAttachment) extracted to chat-panel/attachments-helpers (V1.9b)
 
@@ -393,7 +400,6 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     text: string
     boundary: { left: number; top: number; right: number; bottom: number }
   } | null>(null)
-  const [selectedChannelKey, setSelectedChannelKey] = useState('local:app')
   const [pendingSendCountdown, setPendingSendCountdown] = useState(0)
   const [attachmentPreviewLoading, setAttachmentPreviewLoading] = useState(false)
   const [persistedScopeRuns, setPersistedScopeRuns] = useState<PersistedScopeRunSummary[]>([])
@@ -401,100 +407,49 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     Record<string, PersistedTaskProjection[]>
   >({})
   const [activeChildRuns, setActiveChildRuns] = useState<ActiveChildRunSummaryData[]>([])
-  const [sessionRecallQuery, setSessionRecallQuery] = useState('')
-  const [sessionRecallResults, setSessionRecallResults] = useState<SessionRecallHit[]>([])
-  const [attachedSessionRecallCapsules, setAttachedSessionRecallCapsules] = useState<
-    SessionRecallCapsule[]
-  >([])
   const [referenceSkillHint, setReferenceSkillHint] = useState<ReferenceSkillHintData | null>(null)
-  const [sessionRecallSearching, setSessionRecallSearching] = useState(false)
-  const [sessionRecallError, setSessionRecallError] = useState<string | null>(null)
   const copyFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const chatInputRef = useRef<ChatInputHandle | null>(null)
   const focusInputWithResize = useCallback(() => {
     chatInputRef.current?.focusWithResize()
   }, [])
 
-  const currentAgentData = agents.find((a) => a.name === currentAgent)
-  const getScopeChannelKey = useCallback((scope: ConversationScope) => {
-    const sourceId = scope.sourceKind === 'local' ? 'app' : scope.sourceId
-    return `${scope.sourceKind}:${sourceId}`
-  }, [])
-  const channelOptions = useMemo<ConversationChannelOption[]>(() => {
-    const options = new Map<string, ConversationChannelOption>()
-    options.set('local:app', {
-      key: 'local:app',
-      sourceKind: 'local',
-      sourceId: 'app',
-      label: '应用内',
-      caption: '本地会话'
-    })
+  // Stage V V1.9a — channel + session-recall state, derivations, IPC
+  // callbacks (attach/detach/search/refresh) and the two scope-change
+  // useEffects all live in `useChannelSessionRecall`. The 8 returns below
+  // map 1:1 to the plan-v7 hook surface; downstream call sites keep the
+  // exact same variable names so the V6 fixture stays diff = 0.
+  const {
+    selectedChannelKey,
+    filteredScopes,
+    currentAgentData,
+    currentChannel,
+    channelOptions,
+    recallState,
+    detachCallback: handleDetachSessionRecall,
+    channelEffects,
+  } = useChannelSessionRecall({
+    agents,
+    currentAgent,
+    scopes,
+    currentScope,
+    currentScopeId,
+  })
+  const { setSelectedChannelKey, getScopeChannelKey } = channelEffects
+  const {
+    capsules: attachedSessionRecallCapsules,
+    conversationIds: attachedSessionRecallConversationIds,
+    query: sessionRecallQuery,
+    setQuery: setSessionRecallQuery,
+    results: sessionRecallResults,
+    visibleResults: visibleSessionRecallResults,
+    searching: sessionRecallSearching,
+    error: sessionRecallError,
+    setResults: setSessionRecallResults,
+    runSearch: runSessionRecallSearch,
+    attach: handleAttachSessionRecall,
+  } = recallState
 
-    for (const scope of scopes) {
-      const key = getScopeChannelKey(scope)
-      if (options.has(key)) continue
-
-      const channelType = String(scope.meta?.channelType || '')
-      const sourceLabel = String(scope.meta?.sourceLabel || '')
-      let label = sourceLabel || '远程会话'
-      let caption = sourceLabel || '频道会话'
-
-      if (
-        channelType === 'feishu-app' ||
-        channelType === 'feishu-bot' ||
-        /飞书/.test(sourceLabel)
-      ) {
-        label = '飞书会话'
-        caption = sourceLabel || '飞书频道'
-      } else if (channelType === 'telegram-bot' || /telegram/i.test(sourceLabel)) {
-        label = 'Telegram'
-        caption = sourceLabel || 'Telegram 频道'
-      } else if (channelType === 'wechat-openclaw' || /微信|wechat|weixin/i.test(sourceLabel)) {
-        label = '微信会话'
-        caption = sourceLabel || '微信频道'
-      }
-
-      options.set(key, {
-        key,
-        sourceKind: scope.sourceKind,
-        sourceId: scope.sourceId,
-        label,
-        caption
-      })
-    }
-
-    return Array.from(options.values())
-  }, [getScopeChannelKey, scopes])
-  const currentChannel = useMemo<ConversationChannelOption>(() => {
-    return (
-      channelOptions.find((option) => option.key === selectedChannelKey) ||
-      channelOptions[0] || {
-        key: 'local:app',
-        sourceKind: 'local',
-        sourceId: 'app',
-        label: '应用内',
-        caption: '本地会话'
-      }
-    )
-  }, [channelOptions, selectedChannelKey])
-  const filteredScopes = useMemo(() => {
-    return scopes
-      .filter((scope) => getScopeChannelKey(scope) === selectedChannelKey)
-      .sort((a, b) => {
-        const aTime = new Date(a.lastMessageAt || a.updatedAt).getTime()
-        const bTime = new Date(b.lastMessageAt || b.updatedAt).getTime()
-        return bTime - aTime
-      })
-  }, [getScopeChannelKey, scopes, selectedChannelKey])
-  const visibleSessionRecallResults = useMemo(() => {
-    return sessionRecallResults.filter((item) => {
-      return item.sourceKind === currentChannel.sourceKind && item.sourceId === currentChannel.sourceId
-    })
-  }, [currentChannel.sourceId, currentChannel.sourceKind, sessionRecallResults])
-  const attachedSessionRecallConversationIds = useMemo(
-    () => attachedSessionRecallCapsules.map((capsule) => capsule.conversationId),
-    [attachedSessionRecallCapsules]
-  )
   const currentScopeRunUpdatedAt = currentScopeId
     ? scopeRunStates[currentScopeId]?.updatedAt || null
     : null
@@ -543,20 +498,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     setPersistedTaskProjections(Object.fromEntries(entries))
   }, [filteredScopes])
 
-  const refreshAttachedSessionRecall = useCallback(async (scopeId?: string | null) => {
-    if (!scopeId || !window.electronAPI?.agent?.listAttachedSessionRecallContexts) {
-      setAttachedSessionRecallCapsules([])
-      return
-    }
-    const result = await window.electronAPI.agent
-      .listAttachedSessionRecallContexts(scopeId)
-      .catch(() => null)
-    if (!result?.success || !Array.isArray(result.data)) {
-      setAttachedSessionRecallCapsules([])
-      return
-    }
-    setAttachedSessionRecallCapsules(result.data as SessionRecallCapsule[])
-  }, [])
+  const { refreshAttachedSessionRecall } = channelEffects
 
   const refreshReferenceSkillHint = useCallback(async (scopeId?: string | null) => {
     if (!scopeId || !window.electronAPI?.agent?.getReferenceSkillHint) {
@@ -573,95 +515,9 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     setReferenceSkillHint(result.data as ReferenceSkillHintData)
   }, [])
 
-  const runSessionRecallSearch = useCallback(
-    async (query: string) => {
-      if (!window.electronAPI?.agent?.searchSessionRecall) return
-      const normalized = query.trim()
-      setSessionRecallSearching(true)
-      setSessionRecallError(null)
-      try {
-        const result = await window.electronAPI.agent
-          .searchSessionRecall({
-            query: normalized || undefined,
-            currentScopeId: currentScopeId || undefined,
-            limit: 12
-          })
-          .catch(() => null)
-        if (!result?.success || !Array.isArray(result.data)) {
-          setSessionRecallResults([])
-          setSessionRecallError(result?.error || '旧会话搜索失败')
-          return
-        }
-        setSessionRecallResults(result.data as SessionRecallHit[])
-      } finally {
-        setSessionRecallSearching(false)
-      }
-    },
-    [currentScopeId]
-  )
-
-  const handleAttachSessionRecall = useCallback(
-    async (conversationId: string) => {
-      if (!currentScopeId || !window.electronAPI?.agent?.attachSessionRecallContext) return
-      setSessionRecallError(null)
-      const result = await window.electronAPI.agent
-        .attachSessionRecallContext(currentScopeId, conversationId)
-        .catch(() => null)
-      if (!result?.success || !result.data) {
-        setSessionRecallError(result?.error || '引用旧会话失败')
-        return
-      }
-      const payload = result.data as { scope: ConversationScope; capsule: SessionRecallCapsule }
-      useAgent.setState((state) => {
-        const nextScopes = state.scopes.map((scope) =>
-          scope.id === payload.scope.id ? payload.scope : scope
-        )
-        return {
-          scopes: nextScopes,
-          currentScope:
-            state.currentScope?.id === payload.scope.id ? payload.scope : state.currentScope,
-          conversations: nextScopes.map(mapScopeToConversation)
-        }
-      })
-      setAttachedSessionRecallCapsules((current) => {
-        const filtered = current.filter(
-          (item) => item.conversationId !== payload.capsule.conversationId
-        )
-        return [...filtered, payload.capsule]
-      })
-    },
-    [currentScopeId]
-  )
-
-  const handleDetachSessionRecall = useCallback(
-    async (conversationId: string) => {
-      if (!currentScopeId || !window.electronAPI?.agent?.detachSessionRecallContext) return
-      setSessionRecallError(null)
-      const result = await window.electronAPI.agent
-        .detachSessionRecallContext(currentScopeId, conversationId)
-        .catch(() => null)
-      if (!result?.success || !result.data) {
-        setSessionRecallError(result?.error || '移除旧会话引用失败')
-        return
-      }
-      const payload = result.data as { scope: ConversationScope }
-      useAgent.setState((state) => {
-        const nextScopes = state.scopes.map((scope) =>
-          scope.id === payload.scope.id ? payload.scope : scope
-        )
-        return {
-          scopes: nextScopes,
-          currentScope:
-            state.currentScope?.id === payload.scope.id ? payload.scope : state.currentScope,
-          conversations: nextScopes.map(mapScopeToConversation)
-        }
-      })
-      setAttachedSessionRecallCapsules((current) =>
-        current.filter((item) => item.conversationId !== conversationId)
-      )
-    },
-    [currentScopeId]
-  )
+  // Stage V V1.9a — runSessionRecallSearch / handleAttachSessionRecall /
+  // handleDetachSessionRecall moved into `useChannelSessionRecall` and
+  // surfaced above via the `recallState` destructure. Behavior unchanged.
 
   const inMemoryTaskRuns = useMemo<TaskCardRun[]>(() => {
     // Stage O §1.2 — `inMemoryTaskRuns` returns ONLY whitelist fields
