@@ -52,6 +52,7 @@ import { runControlGroup } from './ipc/run-control-group'
 import { telemetryGroup } from './ipc/telemetry-group'
 import { channelManagementGroup } from './ipc/channel-management-group'
 import { scheduleGroup } from './ipc/schedule-group'
+import { chatPersistenceGroup } from './ipc/chat-persistence-group'
 import type { IpcDisposeHandle } from './ipc/types'
 import { logAgentMetric } from '../agent-control/metrics'
 import { isRendererAgentMetricName } from '../../../shared/renderer-agent-metrics'
@@ -313,6 +314,17 @@ let channelManagementGroupDispose: IpcDisposeHandle | null = null
  */
 let scheduleGroupDispose: IpcDisposeHandle | null = null
 
+/**
+ * Stage V V2.1m — dispose handle returned by `chatPersistenceGroup.register`.
+ * Owns the 8 chat-persistence + file-picker channels
+ * (`chat:getConversations`, `chat:getMessages`, `chat:deleteConversation`,
+ * `chat:saveMessage`, `chat:createConversation`, `chat:updateConversationTitle`,
+ * `chat:pickFiles`, `chat:readFileForAI`). Same lifecycle pattern as the other
+ * group dispose slots: register on `setupAgentIPC`, dispose on dev-reload
+ * re-entry, dispose on `cleanupAgentRuntime` shutdown.
+ */
+let chatPersistenceGroupDispose: IpcDisposeHandle | null = null
+
 function cleanupSkillSessionState(sessionId?: string, reason = 'Skill session state cleared'): void {
   if (sessionId) {
     clearLastReferenceSkill(sessionId)
@@ -489,6 +501,14 @@ export async function cleanupAgentRuntime(): Promise<void> {
   if (scheduleGroupDispose) {
     try { scheduleGroupDispose.dispose() } catch { /* ignore */ }
     scheduleGroupDispose = null
+  }
+  // Stage V V2.1m — symmetric release of the 8 chat-persistence +
+  // file-picker channel handlers (getConversations / getMessages /
+  // deleteConversation / saveMessage / createConversation /
+  // updateConversationTitle / pickFiles / readFileForAI).
+  if (chatPersistenceGroupDispose) {
+    try { chatPersistenceGroupDispose.dispose() } catch { /* ignore */ }
+    chatPersistenceGroupDispose = null
   }
   if (runtime) {
     await runtime.stop()
@@ -924,92 +944,42 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     deleteSchedule: (id) => runtime!.deleteSchedule(id),
   })
 
-  // ===================== Chat History IPC =====================
-
-  ipcMain.handle('chat:getConversations', (_, agent: string): IPCResponse => {
-    try {
-      const conversations = chatRepository.getConversations(agent)
-      return { success: true, data: conversations }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('chat:getMessages', (_, conversationId: string): IPCResponse => {
-    try {
-      const messages = chatRepository.getMessages(conversationId)
-      return { success: true, data: messages }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('chat:deleteConversation', (_, conversationId: string): IPCResponse => {
-    try {
-      runtime!.deleteConversation(conversationId)
-      return { success: true }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('chat:saveMessage', (_, data: {
-    id: string; conversationId: string; role: string; content: string; timestamp: string; meta?: Record<string, unknown>
-  }): IPCResponse => {
-    try {
-      // Screenshot-bug hotfix — defense-in-depth: even if streaming leaked
-      // `<tool_call>` markers into the renderer's assembled message, scrub
-      // them here before persisting to chat_messages. Only assistant rows
-      // get cleaned (user / system content is unrelated to leaks). The
-      // primary fix lives in `TurnTranscript.emitOutput`; this layer
-      // catches anything that bypassed it (e.g. legacy code paths).
-      const sanitizedContent = data.role === 'assistant'
-        ? sanitizeAssistantText(data.content, {
-            sessionId: data.conversationId,
-            source: 'chat_save_message',
-          })
-        : data.content
-      chatRepository.saveMessage({ ...data, content: sanitizedContent })
-      // Phase 1.1 — assistant messages saved through this IPC previously
-      // bypassed `runtime.persistReferenceHintToScope`, so local sessions
-      // (the default flow for the chat panel) never wrote `lastReferenceSkill`
-      // to meta_json. Result: a Ready restart re-armed `referenceSkillHintArmed=false`
-      // and the model lost typed skill actions mid-flow. The hook is a no-op
-      // for non-assistant roles and idempotent (skips DB write when persisted
-      // snapshot equals in-memory hint).
-      runtime?.persistReferenceHintAfterAssistantMessage(data.conversationId, data.role)
-      return { success: true }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('chat:createConversation', (_, data: {
-    id: string; agent: string; title: string
-  }): IPCResponse => {
-    try {
-      chatRepository.createConversation(data)
-      return { success: true }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('chat:updateConversationTitle', (_, data: {
-    id: string; title: string
-  }): IPCResponse => {
-    try {
-      chatRepository.updateConversationTitle(data)
-      return { success: true }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  // ===================== File Picker IPC (W3) =====================
-
-  ipcMain.handle('chat:pickFiles', async (): Promise<IPCResponse> => {
-    try {
+  // Stage V V2.1m — the 8 chat-persistence + file-picker channels
+  // (chat:getConversations, chat:getMessages, chat:deleteConversation,
+  // chat:saveMessage, chat:createConversation, chat:updateConversationTitle,
+  // chat:pickFiles, chat:readFileForAI) moved into `chatPersistenceGroup`.
+  // The group pre-clears internally; we hold the dispose handle so
+  // `cleanupAgentRuntime` can drop the handlers on shutdown. Re-binding on
+  // dev reload first calls `dispose()` on the prior handle so listener slots
+  // stay clean.
+  //
+  // Per-handler closures (mainWindow-bound dialog, lazy mammoth/xlsx loaders,
+  // node fs primitives, the `<tool_call>` scrubber, runtime methods) are
+  // passed in as bound dep methods — keeps the group decoupled from electron
+  // composition-root types and from `AgentControlRuntime`.
+  if (chatPersistenceGroupDispose) {
+    try { chatPersistenceGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    chatPersistenceGroupDispose = null
+  }
+  chatPersistenceGroupDispose = chatPersistenceGroup.register(ipcMain, {
+    getConversations: (agent) => chatRepository.getConversations(agent),
+    getMessages: (conversationId) => chatRepository.getMessages(conversationId),
+    // Must be `runtime!.deleteConversation` (not `chatRepository.deleteConversation`):
+    // runtime piggybacks on the delete to drop in-memory scope state and emit
+    // detached-task cancellations. The pre-extraction handler made this same
+    // explicit choice.
+    deleteConversation: (conversationId) => runtime!.deleteConversation(conversationId),
+    saveMessage: (payload) => chatRepository.saveMessage(payload),
+    createConversation: (payload) => chatRepository.createConversation(payload),
+    updateConversationTitle: (payload) => chatRepository.updateConversationTitle(payload),
+    sanitizeAssistantText: (text, options) => sanitizeAssistantText(text, options),
+    // `runtime` may be uninitialized when the chat panel is somehow racing
+    // setupAgentIPC; mirror the pre-extraction `runtime?.persist…` no-op via
+    // the `??` short-circuit so the group dep stays a non-optional function.
+    persistReferenceHintAfterAssistantMessage: (scopeId, role) => {
+      runtime?.persistReferenceHintAfterAssistantMessage(scopeId, role)
+    },
+    pickFiles: async () => {
       const result = await dialog.showOpenDialog(mainWindow, {
         properties: ['openFile', 'multiSelections'],
         filters: [
@@ -1025,10 +995,8 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
           }
         ]
       })
-      if (result.canceled || result.filePaths.length === 0) {
-        return { success: true, data: [] }
-      }
-      const files = result.filePaths.map(filePath => {
+      if (result.canceled || result.filePaths.length === 0) return []
+      return result.filePaths.map(filePath => {
         const ext = extname(filePath).toLowerCase()
         const stat = statSync(filePath)
         const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp']
@@ -1049,16 +1017,8 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
           ext
         }
       })
-      return { success: true, data: files }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  // ===================== File Read for AI (W5) =====================
-
-  ipcMain.handle('chat:readFileForAI', async (_, filePath: string): Promise<IPCResponse> => {
-    try {
+    },
+    readFileForAI: async (filePath) => {
       const MAX_INLINE_VIDEO_BYTES = 40 * 1024 * 1024 // 40MB
       const ext = extname(filePath).toLowerCase()
       const imageExts = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg', '.tiff', '.tif', '.ico', '.avif']
@@ -1077,19 +1037,16 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
           '.svg': 'image/svg+xml', '.tiff': 'image/tiff', '.tif': 'image/tiff',
           '.ico': 'image/x-icon', '.avif': 'image/avif',
         }
-        return { success: true, data: { type: 'image', base64, mimeType: mimeMap[ext] || 'image/png' } }
+        return { type: 'image', base64, mimeType: mimeMap[ext] || 'image/png' }
       }
 
       if (videoExts.includes(ext)) {
         const stat = statSync(filePath)
         if (stat.size > MAX_INLINE_VIDEO_BYTES) {
           return {
-            success: true,
-            data: {
-              type: 'text',
-              content: `[视频文件过大，已降级为描述: ${basename(filePath)}, ${(stat.size / 1024 / 1024).toFixed(1)}MB。当前内联上传上限 ${(MAX_INLINE_VIDEO_BYTES / 1024 / 1024).toFixed(0)}MB]`,
-              name: basename(filePath)
-            }
+            type: 'text',
+            content: `[视频文件过大，已降级为描述: ${basename(filePath)}, ${(stat.size / 1024 / 1024).toFixed(1)}MB。当前内联上传上限 ${(MAX_INLINE_VIDEO_BYTES / 1024 / 1024).toFixed(0)}MB]`,
+            name: basename(filePath)
           }
         }
 
@@ -1104,31 +1061,25 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
           '.m4v': 'video/x-m4v',
         }
         return {
-          success: true,
-          data: {
-            type: 'video',
-            base64,
-            mimeType: mimeMap[ext] || 'video/mp4',
-            name: basename(filePath),
-          }
+          type: 'video',
+          base64,
+          mimeType: mimeMap[ext] || 'video/mp4',
+          name: basename(filePath),
         }
       }
 
       if (audioExts.includes(ext)) {
         const stat = statSync(filePath)
-        return { success: true, data: { type: 'text', content: `[音频文件: ${basename(filePath)}, 大小: ${(stat.size / 1024 / 1024).toFixed(1)}MB]`, name: basename(filePath) } }
+        return { type: 'text', content: `[音频文件: ${basename(filePath)}, 大小: ${(stat.size / 1024 / 1024).toFixed(1)}MB]`, name: basename(filePath) }
       }
 
       if (ext === '.docx') {
         const mammoth = await getMammoth()
         if (!mammoth) {
           return {
-            success: true,
-            data: {
-              type: 'text',
-              content: `[DOCX 文件: ${basename(filePath)}。未检测到 mammoth 解析库，暂无法提取正文内容。]`,
-              name: basename(filePath),
-            },
+            type: 'text',
+            content: `[DOCX 文件: ${basename(filePath)}。未检测到 mammoth 解析库，暂无法提取正文内容。]`,
+            name: basename(filePath),
           }
         }
 
@@ -1140,12 +1091,9 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
           const clipped = raw.slice(0, 20_000)
           const suffix = raw.length > 20_000 ? '\n...[DOCX 内容已截断]' : ''
           return {
-            success: true,
-            data: {
-              type: 'text',
-              content: `--- DOCX: ${basename(filePath)} ---\n${clipped}${suffix}`,
-              name: basename(filePath),
-            },
+            type: 'text',
+            content: `--- DOCX: ${basename(filePath)} ---\n${clipped}${suffix}`,
+            name: basename(filePath),
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
@@ -1155,12 +1103,9 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
               const clipped = fallbackText.slice(0, 20_000)
               const suffix = fallbackText.length > 20_000 ? '\n...[DOCX 回退文本已截断]' : ''
               return {
-                success: true,
-                data: {
-                  type: 'text',
-                  content: `--- DOCX(结构损坏回退文本): ${basename(filePath)} ---\n${clipped}${suffix}`,
-                  name: basename(filePath),
-                },
+                type: 'text',
+                content: `--- DOCX(结构损坏回退文本): ${basename(filePath)} ---\n${clipped}${suffix}`,
+                name: basename(filePath),
               }
             }
           }
@@ -1172,12 +1117,9 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
         const xlsx = await getXlsx()
         if (!xlsx) {
           return {
-            success: true,
-            data: {
-              type: 'text',
-              content: `[表格文件: ${basename(filePath)}。未检测到 xlsx 解析库，暂无法提取内容。]`,
-              name: basename(filePath),
-            },
+            type: 'text',
+            content: `[表格文件: ${basename(filePath)}。未检测到 xlsx 解析库，暂无法提取内容。]`,
+            name: basename(filePath),
           }
         }
 
@@ -1197,29 +1139,21 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
         }
 
         const content = `--- 表格文件: ${basename(filePath)} ---\n${sheetSummaries.join('\n\n')}`.slice(0, 20_000)
-        return {
-          success: true,
-          data: { type: 'text', content, name: basename(filePath) },
-        }
+        return { type: 'text', content, name: basename(filePath) }
       }
 
       if (textExts.includes(ext)) {
         const content = readFileSync(filePath, 'utf-8')
-        return { success: true, data: { type: 'text', content, name: basename(filePath) } }
+        return { type: 'text', content, name: basename(filePath) }
       }
 
       const stat = statSync(filePath)
       return {
-        success: true,
-        data: {
-          type: 'text',
-          content: `[文件附件: ${basename(filePath)}, 扩展名: ${ext || 'unknown'}, 大小: ${(stat.size / 1024 / 1024).toFixed(2)}MB]`,
-          name: basename(filePath),
-        },
+        type: 'text',
+        content: `[文件附件: ${basename(filePath)}, 扩展名: ${ext || 'unknown'}, 大小: ${(stat.size / 1024 / 1024).toFixed(2)}MB]`,
+        name: basename(filePath),
       }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
+    },
   })
 
   orchestrator.on('output', (data) => {
