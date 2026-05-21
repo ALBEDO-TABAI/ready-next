@@ -31,6 +31,9 @@ test('chat task cards merge task projections and expose task-type, status, budge
   const taskMerge = readWorkspaceFile(
     'src/renderer/components/agent/chat-panel/task-merge/use-task-run-merge.ts',
   )
+  const taskInteraction = readWorkspaceFile(
+    'src/renderer/components/agent/chat-panel/task-interaction/use-task-interaction-handlers.ts',
+  )
 
   assert.match(chatPanel, /const \[persistedTaskProjections, setPersistedTaskProjections\] = useState/)
   assert.match(chatPanel, /window\.electronAPI\.agent\.listTaskProjections\(scope\.id\)/)
@@ -62,12 +65,12 @@ test('chat task cards merge task projections and expose task-type, status, budge
   assert.match(taskMerge, /blockedReason:\s*projection\?\.blockedReason\s*\?\? null/)
   assert.match(projectionHelpers, /projection\.waitingFor/)
   assert.doesNotMatch(taskMerge, /waitingFor:\s*projection\?\.status === 'blocked'/)
-  assert.match(chatPanel, /detachedTaskId:\s*run\?\.taskContinuation\?\.detachedTaskId/)
-  assert.match(chatPanel, /runStatePath:\s*run\?\.taskContinuation\?\.runStatePath/)
-  assert.match(chatPanel, /outputDir:\s*run\?\.taskContinuation\?\.outputDir/)
+  assert.match(taskInteraction, /detachedTaskId:\s*run\?\.taskContinuation\?\.detachedTaskId/)
+  assert.match(taskInteraction, /runStatePath:\s*run\?\.taskContinuation\?\.runStatePath/)
+  assert.match(taskInteraction, /outputDir:\s*run\?\.taskContinuation\?\.outputDir/)
   assert.doesNotMatch(taskMerge, /resumableActions:\s*\(run\.resumableActions && run\.resumableActions\.length > 0\)\s*\?\s*run\.resumableActions\s*:\s*\(projection\?\.resumableActions \|\| \[\]\)/)
-  assert.match(chatPanel, /setComposerDraft\(/)
-  assert.match(chatPanel, /continuationIntent:/)
+  assert.match(taskInteraction, /setComposerDraft\(/)
+  assert.match(taskInteraction, /continuationIntent:/)
   assert.doesNotMatch(chatPanel, /Task ID:/)
   assert.match(badgeHelpers, /function taskTypeBadgeLabel\(/)
   assert.match(badgeHelpers, /function interactionStateBadgeLabel\(/)
@@ -90,13 +93,15 @@ test('chat task cards merge task projections and expose task-type, status, budge
 })
 
 test('chat detached continue preserves structured continuation handles', () => {
-  const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
+  const taskInteraction = readWorkspaceFile(
+    'src/renderer/components/agent/chat-panel/task-interaction/use-task-interaction-handlers.ts',
+  )
 
-  assert.match(chatPanel, /const handleContinueDetachedTask = useCallback/)
-  assert.match(chatPanel, /item\.taskContinuation\?\.detachedTaskId === detachedTaskId/)
-  assert.match(chatPanel, /item\.taskContinuation\?\.taskId === detachedTaskId/)
-  assert.match(chatPanel, /pauseReason: 'background_running'/)
-  assert.match(chatPanel, /const continuationRun:/)
-  assert.match(chatPanel, /setComposerDraft\(`继续后台任务 \$\{detachedTaskId\}`,\s*buildRunContinuationIntent\(continuationRun\) \|\| null\)/)
-  assert.doesNotMatch(chatPanel, /setInputValue\(`继续后台任务 \$\{detachedTaskId\}`/)
+  assert.match(taskInteraction, /const handleContinueDetachedTask = useCallback/)
+  assert.match(taskInteraction, /item\.taskContinuation\?\.detachedTaskId === detachedTaskId/)
+  assert.match(taskInteraction, /item\.taskContinuation\?\.taskId === detachedTaskId/)
+  assert.match(taskInteraction, /pauseReason: 'background_running'/)
+  assert.match(taskInteraction, /const continuationRun:/)
+  assert.match(taskInteraction, /setComposerDraft\(`继续后台任务 \$\{detachedTaskId\}`,\s*buildRunContinuationIntent\(continuationRun\) \|\| null\)/)
+  assert.doesNotMatch(taskInteraction, /setInputValue\(`继续后台任务 \$\{detachedTaskId\}`/)
 })

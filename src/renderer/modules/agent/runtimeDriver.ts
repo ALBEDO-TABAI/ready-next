@@ -13,6 +13,32 @@ interface AgentStoreLike {
   setState: (partial: any) => void
 }
 
+const PRIMARY_SESSION_KEY = '__primary__'
+
+function activeSessionKeyFromState(state: any): string {
+  return state?.activeSessionId || state?.sessionId || PRIMARY_SESSION_KEY
+}
+
+function withActiveSessionMessagesMirror(state: any, messages: AgentMessage[]): { messages: AgentMessage[]; sessions: Record<string, unknown> } {
+  const sessionId = activeSessionKeyFromState(state)
+  const currentSlice = (state.sessions && state.sessions[sessionId]) || {}
+  return {
+    messages,
+    sessions: {
+      ...(state.sessions || {}),
+      [sessionId]: {
+        pendingSendCount: 0,
+        pendingSendFlushAt: null,
+        state: 'live',
+        conversationId: null,
+        inputValue: '',
+        ...currentSlice,
+        messages,
+      },
+    },
+  }
+}
+
 interface RunPayloadLike {
   // Stage V V3.2 — IPC push payloads now standardise sessionId as
   // `string | null` (null = global event). RunPayloadLike accepts both the
@@ -197,13 +223,14 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     const content = currentMessage?.content || runState.responseBuffer || ''
     const snapshotMeta = buildResponseSegmentMeta(scopeId, currentScope, runState)
     if (snapshotMeta) {
-      store.setState((current: any) => ({
-        messages: current.messages.map((item: AgentMessage) =>
+      store.setState((current: any) => {
+        const messages = current.messages.map((item: AgentMessage) =>
           item.id === runState.responseMessageId
             ? { ...item, meta: { ...(item.meta || {}), ...snapshotMeta } }
             : item,
-        ),
-      }))
+        )
+        return withActiveSessionMessagesMirror(current, messages)
+      })
     }
     const result = await persistAssistantMessage(scopeId, runState.responseMessageId, content, currentScope, snapshotMeta)
     if (!result.success) {
@@ -224,13 +251,14 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     if (!content.trim()) return
     const segmentMeta = buildResponseSegmentMeta(scopeId, currentScope, runState)
     if (segmentMeta) {
-      store.setState((current: any) => ({
-        messages: current.messages.map((item: AgentMessage) =>
+      store.setState((current: any) => {
+        const messages = current.messages.map((item: AgentMessage) =>
           item.id === runState.responseMessageId
             ? { ...item, meta: { ...(item.meta || {}), ...segmentMeta } }
             : item,
-        ),
-      }))
+        )
+        return withActiveSessionMessagesMirror(current, messages)
+      })
     }
     void persistAssistantMessage(scopeId, runState.responseMessageId, content, currentScope, segmentMeta)
       .then((result) => {
@@ -263,22 +291,25 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     if (!result.handled) return
 
     const appended = `\n\n[系统已自动执行技能命令]\n${result.text}`
-    store.setState((current: any) => ({
-      messages: current.messages.map((item: AgentMessage) =>
+    store.setState((current: any) => {
+      const messages = current.messages.map((item: AgentMessage) =>
         item.id === runState.responseMessageId ? { ...item, content: `${item.content}${appended}` } : item,
-      ),
-      scopeRunStates: {
-        ...current.scopeRunStates,
-        [scopeId]: current.scopeRunStates[scopeId]
-          ? {
-            ...current.scopeRunStates[scopeId],
-            responseBuffer: `${current.scopeRunStates[scopeId].responseBuffer || ''}${appended}`,
-            latestText: result.text.slice(-500),
-            updatedAt: new Date().toISOString(),
-          }
-          : current.scopeRunStates[scopeId],
-      },
-    }))
+      )
+      return {
+        ...withActiveSessionMessagesMirror(current, messages),
+        scopeRunStates: {
+          ...current.scopeRunStates,
+          [scopeId]: current.scopeRunStates[scopeId]
+            ? {
+              ...current.scopeRunStates[scopeId],
+              responseBuffer: `${current.scopeRunStates[scopeId].responseBuffer || ''}${appended}`,
+              latestText: result.text.slice(-500),
+              updatedAt: new Date().toISOString(),
+            }
+            : current.scopeRunStates[scopeId],
+        },
+      }
+    })
   }
 
   function initAgentListeners(): () => void {
@@ -1104,7 +1135,13 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             meta: event.message.meta || {},
           }
           const hasMessage = state.messages.some((message: AgentMessage) => message.id === nextMessage.id)
-          nextState.messages = hasMessage ? state.messages : [...state.messages, nextMessage]
+          Object.assign(
+            nextState,
+            withActiveSessionMessagesMirror(
+              state,
+              hasMessage ? state.messages : [...state.messages, nextMessage],
+            ),
+          )
         }
 
         return nextState

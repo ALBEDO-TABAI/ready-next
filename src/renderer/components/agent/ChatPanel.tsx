@@ -1,26 +1,11 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { AnimatePresence } from 'framer-motion'
 import {
-  X,
-  FileText,
-  Image,
-  Film,
-  Table,
-  Globe,
-  CalendarDays,
-  Puzzle,
-  Pen,
-  MessageSquareQuote,
-  Folder,
-  Copy,
-  StickyNote
-} from 'lucide-react'
-import {
   useAgent,
   initAgentListeners,
-  ChatAttachment,
-  ConversationScope,
-  ScopeRunState
+  type ChatAttachment,
+  type ConversationScope,
+  type ScopeRunState
 } from '../../stores/useAgent'
 import { useWorkspace } from '../../stores/useWorkspace'
 import {
@@ -29,8 +14,6 @@ import {
   type ReadySkillReference,
 } from '../../modules/agent/chat-input-bridge'
 import { revealDocumentQuoteAttachment } from '../../modules/agent/document-quote-navigation'
-import { toLocalFileUrl } from '../../utils/dragDrop'
-import { LIQUID_INACTIVE_CHROME_STYLE } from '../ui/LiquidGlassScene'
 import {
   createDefaultTaskDisclosureState,
   getTaskRunDisplayKey,
@@ -45,17 +28,7 @@ import type {
   TaskProjectionRecordData,
 } from '../../types/electron'
 import ChatHeader from './ChatHeader'
-import ChatMessages from './ChatMessages'
-import ChatInput, { ChatInputHandle } from './ChatInput'
-import { SoftFailureCapsule } from './SoftFailureCapsule'
-import ChatAttachments from './ChatAttachments'
-import ContextMenu from '../layout/ContextMenu'
-
-// Stage V V1.2 — Markdown renderer (parseMarkdown + table helpers + renderInline
-// + MarkdownContent component) extracted to `./chat-panel/markdown`. The
-// pipeline is pure (no useAgent / store / IPC), so it sits in its own TSX
-// module. Only `MarkdownContent` is currently consumed in this file; the
-// other named exports are re-exported for future callers and the V6 fixture.
+import type { ChatInputHandle } from './ChatInput'
 
 // Stage V V1.1 — `PersistedScopeRunSummary` interface + `PersistedTaskProjection`
 // alias moved to `./chat-panel/helpers/projection.ts` so the pure projection
@@ -80,11 +53,6 @@ import {
   isTaskVisible,
   isBackgroundTaskRun,
 } from './chat-panel/helpers/badges'
-// Stage V V1.2 — markdown rendering extracted; only MarkdownContent is
-// consumed here (ChatMessages.renderMarkdown callback below). parseMarkdown /
-// renderInline / MarkdownNode / TableAlignment are re-exported by the module
-// for tests and future callers but ChatPanel itself no longer needs them.
-import { MarkdownContent } from './chat-panel/markdown'
 // Stage V V1.3 — layout primitives (motion wrapper + collapsed rail) extracted
 // to `./chat-panel/layout/MotionLayer`. Both are pure React with zero
 // `useAgent` / store / IPC dependencies; signatures preserved byte-for-byte.
@@ -96,32 +64,18 @@ import { ChatPanelMotionLayer, CollapsedChatRail } from './chat-panel/layout/Mot
 import SessionTabs from './chat-panel/session-tabs/SessionTabs'
 import SessionCompleteToast from './chat-panel/session-tabs/SessionCompleteToast'
 import {
-  AttachmentIcon,
-  getAttachmentPreviewSrc,
   AttachmentPreviewModal
 } from './chat-panel/attachments-preview'
 import { createLocalPathAttachment } from './chat-panel/attachments-helpers'
 import { useAttachmentIntake } from './chat-panel/drag-drop/use-attachment-intake'
-import ModelSelector from './chat-panel/model-selector/ModelSelector'
-// Stage V V1.6 — TaskCard + ToolTraceCard extracted to
-// `./chat-panel/task/TaskCard.tsx`. Both components were already fully
-// props-driven (no `useAgent` / store / IPC inside the body); see the
-// header comment in the new module for the rationale and the
-// `sessionId?: string` prop slot reserved for V3.3a multi-session.
-// V1.8 — direct `TaskCard` / `ToolTraceCard` consumption moved into
-// `./chat-panel/task-snapshot/TaskToolSnapshot.tsx`; ChatPanel now
-// imports only the orchestrating render-prop component below.
 // Stage V V1.7 — pure 4-pass merge that combines persistedScopeRuns,
 // inMemoryTaskRuns, activeChildRuns and cold-start projection synthesis
 // into the canonical `TaskCardRun[]`. Extracted from the inline
 // `mergedTaskRuns` useMemo so the Stage O §1.3 / §3.1 whitelist contract
 // surface stays focused; behavior preserved byte-for-byte.
 import { useTaskRunMerge } from './chat-panel/task-merge/use-task-run-merge'
-// Stage V V1.8 — task/tool snapshot rendering region extracted to
-// `./chat-panel/task-snapshot/TaskToolSnapshot.tsx`. Render-prop
-// component owns renderTaskSnapshotCard + the four derived
-// snapshot maps / pending ReactNodes + the bottom task card JSX.
-import { TaskToolSnapshot } from './chat-panel/task-snapshot/TaskToolSnapshot'
+import { ChatPanelBody } from './chat-panel/ChatPanelBody'
+import { formatTime } from './chat-panel/format-time'
 // Stage V V1.9c — 15 task interaction useCallbacks (continue / submit /
 // suspend / resume / cancel / retry / open artifact / memory capture) +
 // the two internal helpers (`patchScopeRun`, `buildRunContinuationIntent`)
@@ -176,172 +130,11 @@ interface SerializedToolTraceSnapshotItem {
   timestamp: string
 }
 
-// Stage V V1.1 — `normalizeProjectionSteps`, `resolveProjectionForTaskRun`,
-// `isStalePausedProjection`, `isLiveProjectionCandidate`,
-// `selectFallbackProjection`, `resolveProjectionWaitingFor`,
-// `artifactFromPath`, `activeChildRunDebugRow`, `memoryCaptureSourceLabel`,
-// `mapScopeToConversation` moved to `./chat-panel/helpers/projection.ts`.
-// `progressPercent` (originally below the markdown block) is colocated there too.
-// All names are re-imported above; behavior unchanged.
-
-// Stage V V1.1 — `taskTypeBadgeLabel`, `interactionStateBadgeLabel`,
-// `recoveryBadgeLabel`, `budgetWarningBadgeLabel`, `isTaskVisible`,
-// `isBackgroundTaskRun` moved to `./chat-panel/helpers/badges.ts`.
-// All names are re-imported above; behavior unchanged.
-
-// Stage V V1.6 — TaskCard + ToolTraceCard + TASK_ACTION_BUTTON_STYLE
-// moved to ./chat-panel/task/TaskCard.tsx. Both components were
-// already fully props-driven; the constant is colocated since it is
-// only consumed by TaskCard's action row. Imports above pull both
-// components back in for the call sites below.
-
-
 export type ChatPanelState = 'expanding' | 'expanded' | 'collapsing' | 'collapsed'
-
-// Stage V V1.3 — `ChatPanelMotionLayer` + `CollapsedChatRail` moved to
-// `./chat-panel/layout/MotionLayer.tsx` (pure React, no useAgent / store /
-// IPC). Imported above; consumers below are unchanged.
-
-// ModelSelector extracted to chat-panel/model-selector/ModelSelector.tsx (V1.5)
-// Only useSettings + useNavigate deps; no IPC, no useAgent.
-
-// AttachmentIcon + getAttachmentPreviewSrc + AttachmentPreviewModal extracted to chat-panel/attachments-preview/ (V1.4)
-
-function formatDesignAttachmentSummary(attachment: ChatAttachment): string {
-  return [
-    '### 设计项目引用',
-    `- 项目: ${attachment.name}`,
-    attachment.path && attachment.path.startsWith('/')
-      ? `- 文件: ${attachment.path}`
-      : '- 文件: (未保存草稿)',
-    attachment.dirty
-      ? '- 状态: 有未保存更改'
-      : attachment.saveStatus
-        ? `- 状态: ${attachment.saveStatus}`
-        : null,
-    attachment.selectionSummary ? `- 选择状态: ${attachment.selectionSummary}` : null,
-    attachment.currentToolContext ? `- 当前工具: ${attachment.currentToolContext}` : null,
-    attachment.snapshotHash ? `- 快照哈希: ${attachment.snapshotHash}` : null
-  ]
-    .filter(Boolean)
-    .join('\n')
-}
-
-function formatDocumentQuoteAttachmentSummary(attachment: ChatAttachment): string {
-  const lineLabel =
-    attachment.lineStart && attachment.lineEnd
-      ? attachment.lineStart === attachment.lineEnd
-        ? `第 ${attachment.lineStart} 行`
-        : `第 ${attachment.lineStart}-${attachment.lineEnd} 行`
-      : null
-
-  return [
-    '### 文档引用',
-    `- 文档: ${attachment.title || attachment.name}`,
-    `- 路径: ${attachment.path}`,
-    attachment.sectionTitle ? `- 章节: ${attachment.sectionTitle}` : null,
-    lineLabel ? `- 位置: ${lineLabel}` : null,
-    attachment.selection ? '' : null,
-    attachment.selection ? '```quote' : null,
-    attachment.selection || null,
-    attachment.selection ? '```' : null
-  ]
-    .filter(Boolean)
-    .join('\n')
-}
-
-function formatDocumentWidgetTargetSummary(attachment: ChatAttachment): string {
-  return [
-    '### Widget 更新目标',
-    `- 文档: ${attachment.documentTitle || '(未保存草稿)'}`,
-    `- 目标 widget: ${attachment.widgetTitle || attachment.title || attachment.name}`,
-    `- 路径: ${attachment.path}`,
-    attachment.widgetMode ? `- 当前模式: ${attachment.widgetMode}` : null,
-    '',
-    '```show-widget',
-    JSON.stringify({
-      title: attachment.widgetTitle || attachment.title || attachment.name,
-      widget_code: attachment.widgetCode || ''
-    }),
-    '```'
-  ]
-    .filter(Boolean)
-    .join('\n')
-}
-
-function getDocumentQuoteTooltip(attachment: ChatAttachment): string {
-  return [
-    attachment.title || attachment.name,
-    attachment.sectionTitle ? `章节: ${attachment.sectionTitle}` : null,
-    attachment.lineStart && attachment.lineEnd
-      ? attachment.lineStart === attachment.lineEnd
-        ? `第 ${attachment.lineStart} 行`
-        : `第 ${attachment.lineStart}-${attachment.lineEnd} 行`
-      : null,
-    attachment.selection ? attachment.selection.slice(0, 200) : null
-  ]
-    .filter(Boolean)
-    .join('\n')
-}
-
-function getAttachmentMetaSummary(attachment: ChatAttachment): string | null {
-  if (attachment.isDirectory) {
-    return '文件夹'
-  }
-
-  if (attachment.source === 'document-quote') {
-    const lineLabel =
-      attachment.lineStart && attachment.lineEnd
-        ? attachment.lineStart === attachment.lineEnd
-          ? `L${attachment.lineStart}`
-          : `L${attachment.lineStart}-${attachment.lineEnd}`
-        : null
-    return [attachment.sectionTitle, lineLabel].filter(Boolean).join(' · ') || '文档引用'
-  }
-
-  if (attachment.source === 'skill-folder') {
-    return attachment.skillId ? `skill · ${attachment.skillId}` : 'skill'
-  }
-
-  if (attachment.source === 'browser-tab') {
-    return '网页引用'
-  }
-
-  if (attachment.source === 'document-tab') {
-    return attachment.dirty ? '文档标签 · 未保存' : '文档标签'
-  }
-
-  if (attachment.source === 'calendar-event') {
-    return '日程引用'
-  }
-
-  if (attachment.source === 'document-widget-target') {
-    return [
-      attachment.widgetTitle || attachment.title || attachment.name,
-      attachment.documentTitle ? `文档: ${attachment.documentTitle}` : null,
-      attachment.widgetMode || 'widget 更新'
-    ]
-      .filter(Boolean)
-      .join('\n')
-  }
-
-  return null
-}
 
 // Stage V V1.9a — `ConversationChannelOption` interface moved to
 // `./chat-panel/recall-state/use-channel-session-recall.ts` and re-imported
 // above; ChatHeader / handleChannelSelect signatures unchanged.
-
-// attachments-helpers (ext sets, getAttachmentTypeFromExt, getPathBasename, createLocalPathAttachment) extracted to chat-panel/attachments-helpers (V1.9b)
-
-function formatFolderAttachmentSummary(attachment: ChatAttachment): string {
-  return [
-    '### 文件夹引用',
-    `- 名称: ${attachment.name}`,
-    `- 路径: ${attachment.path}`,
-    '- 用途: 可让 agent 直接基于这个目录继续定位文件、生成结果或说明目标落点。'
-  ].join('\n')
-}
 
 // ---------------------------------------------------------------------------
 // ChatPanel Component
@@ -772,76 +565,6 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     setAgentSelectionMenu(null)
   }, [agentSelectionMenu])
 
-  const handleAttachmentPreview = useCallback(
-    async (attachment: ChatAttachment) => {
-      if (!attachment.path) return
-      if (attachment.source === 'document-quote') {
-        setActiveAttachmentPreview({
-          attachment,
-          mode: 'text',
-          content: formatDocumentQuoteAttachmentSummary(attachment)
-        })
-        return
-      }
-      if (attachment.source === 'document-widget-target') {
-        setActiveAttachmentPreview({
-          attachment,
-          mode: 'text',
-          content: formatDocumentWidgetTargetSummary(attachment)
-        })
-        return
-      }
-      if (attachment.source === 'design-project') {
-        setActiveAttachmentPreview({
-          attachment,
-          mode: 'text',
-          content: formatDesignAttachmentSummary(attachment)
-        })
-        return
-      }
-      if (attachment.isDirectory) {
-        setActiveAttachmentPreview({
-          attachment,
-          mode: 'text',
-          content: formatFolderAttachmentSummary(attachment)
-        })
-        return
-      }
-      if (attachment.type === 'image') {
-        setActiveAttachmentPreview({ attachment, mode: 'image' })
-        return
-      }
-      if (attachment.type === 'video') {
-        setActiveAttachmentPreview({ attachment, mode: 'video' })
-        return
-      }
-      if (attachment.type === 'text') {
-        setAttachmentPreviewLoading(true)
-        try {
-          const result = await window.electronAPI.chat.readFileForAI(attachment.path)
-          if (result.success && result.data?.type === 'text') {
-            setActiveAttachmentPreview({
-              attachment,
-              mode: 'text',
-              content: result.data.content || ''
-            })
-          } else {
-            setActiveAttachmentPreview({
-              attachment,
-              mode: 'file',
-              error: result.error || '无法读取附件内容'
-            })
-          }
-        } finally {
-          setAttachmentPreviewLoading(false)
-        }
-        return
-      }
-      setActiveAttachmentPreview({ attachment, mode: 'file' })
-    },
-    [setActiveAttachmentPreview]
-  )
-
   const handleOpenAttachment = useCallback(async (attachment: ChatAttachment) => {
     if (attachment.source === 'document-quote') {
       revealDocumentQuoteAttachment(attachment)
@@ -1092,29 +815,6 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     focusInputWithResize
   })
 
-  const composerShellStyle = {
-    ...LIQUID_INACTIVE_CHROME_STYLE,
-    borderRadius: 10,
-    background: 'var(--input-slot-bg)',
-    border: isDragOver ? '2px solid var(--color-blue)' : '1px solid var(--input-slot-border)',
-    boxShadow: isDragOver ? 'var(--input-slot-shadow-focus)' : 'var(--input-slot-shadow)',
-  } as const
-
-  // Format time for history panel
-  const formatTime = (dateStr: string) => {
-    const d = new Date(dateStr)
-    const now = new Date()
-    const diffMs = now.getTime() - d.getTime()
-    const diffMins = Math.floor(diffMs / 60000)
-    if (diffMins < 1) return '刚刚'
-    if (diffMins < 60) return `${diffMins}分钟前`
-    const diffHours = Math.floor(diffMins / 60)
-    if (diffHours < 24) return `${diffHours}小时前`
-    const diffDays = Math.floor(diffHours / 24)
-    if (diffDays < 7) return `${diffDays}天前`
-    return `${d.getMonth() + 1}/${d.getDate()}`
-  }
-
   // Stage V V3.4a — SessionTabs above the channel selector. The strip renders
   // `null` when `sessionOrder` is empty (cold start), so the V6 baseline
   // markers (`data-chat-panel-root` / `data-liquid-shell`) are unaffected
@@ -1153,11 +853,12 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
   )
 
   const expandedPanelBody = (
-    <TaskToolSnapshot
+    <ChatPanelBody
       messages={messages}
       currentTaskRun={currentTaskRun}
       backgroundTaskRuns={backgroundTaskRuns}
       currentScopeId={currentScopeId}
+      scopeRunStates={scopeRunStates}
       taskDisclosureState={taskDisclosureState}
       isStreaming={isStreaming}
       streamingMessageId={streamingMessageId}
@@ -1178,290 +879,49 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
       onContinueDetachedTask={handleContinueDetachedTask}
       onCancelChildRun={handleCancelChildRun}
       onContinueChildRun={handleContinueChildRun}
-    >
-      {({
-        messageTaskSnapshots,
-        messageToolTraceSnapshots,
-        pendingTaskRun,
-        pendingToolTrace,
-        bottomTaskCard,
-      }) => (
-    <>
-      <ChatMessages
-        messages={messages}
-        messageTaskSnapshots={messageTaskSnapshots}
-        messageToolTraceSnapshots={messageToolTraceSnapshots}
-        pendingTaskRun={pendingTaskRun}
-        pendingToolTrace={pendingToolTrace}
-        isStreaming={isStreaming}
-        streamingMessageId={streamingMessageId}
-        toolTrace={userVisibleToolTrace}
-        toolTraceStatus={toolTraceStatus}
-        toolTraceExpanded={toolTraceExpanded}
-        copiedMessageId={copiedMessageId}
-        showToolTraceCapsule={showToolTraceCapsule && shouldRenderGlobalToolTraceCapsule}
-        onSetInputSuggestion={setInputValue}
-        onToggleToolTrace={() => setToolTraceExpanded((value) => !value)}
-        onCopyMessage={handleCopyAgentMessage}
-        onAgentSelectionContextMenu={handleAgentSelectionContextMenu}
-        onAttachmentPreview={handleAttachmentPreview}
-        onRevealDocumentQuote={revealDocumentQuoteAttachment}
-        getDocumentQuoteTooltip={getDocumentQuoteTooltip}
-        getAttachmentMetaSummary={getAttachmentMetaSummary}
-        getAttachmentPreviewSrc={getAttachmentPreviewSrc}
-        renderAttachmentIcon={(attachment, size = 16) => (
-          <AttachmentIcon attachment={attachment} size={size} />
-        )}
-        renderMarkdown={(content) => <MarkdownContent content={content} />}
-      />
-
-      {agentSelectionMenu && (
-        <ContextMenu
-          x={agentSelectionMenu.x}
-          y={agentSelectionMenu.y}
-          boundary={agentSelectionMenu.boundary}
-          portal
-          onClose={() => setAgentSelectionMenu(null)}
-          items={[
-            {
-              id: 'copy-selection',
-              label: '复制',
-              icon: <Copy style={{ width: 15, height: 15 }} strokeWidth={2} />,
-              onClick: () => {
-                void copyTextToClipboard(agentSelectionMenu.text)
-              },
-            },
-            {
-              id: 'pin-selection-to-pet',
-              label: '贴到便利贴',
-              icon: <StickyNote style={{ width: 15, height: 15 }} strokeWidth={2} />,
-              onClick: () => {
-                void handlePasteSelectionToPet()
-              },
-            },
-          ]}
-        />
-      )}
-
-      {(() => {
-        const scopedRun = currentScopeId ? scopeRunStates[currentScopeId] : null
-        const softError = scopedRun?.softError || null
-        if (!softError || !currentScopeId) return null
-        return (
-          <SoftFailureCapsule
-            softError={softError}
-            onDismiss={() => dismissSoftError(currentScopeId)}
-          />
-        )
-      })()}
-
-      <div
-        style={{
-          padding: '10px 0 0',
-          borderTop: '1px solid transparent',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 8,
-          background: 'transparent',
-          backdropFilter: 'none',
-          WebkitBackdropFilter: 'none',
-          boxShadow: 'none'
-        }}
-      >
-        {referenceSkillHint && (
-          <div
-            className="glass-surface-card"
-            data-reference-skill-hint="true"
-            style={{
-              borderRadius: 8,
-              border: '1px solid var(--border-default)',
-              background: 'color-mix(in srgb, var(--surface-panel-bg) 44%, transparent)',
-              padding: '8px 10px',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 10
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-              <Puzzle
-                style={{ width: 15, height: 15, color: 'var(--accent-primary)' }}
-                strokeWidth={2}
-              />
-              <div style={{ minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: 11,
-                    fontWeight: 600,
-                    color: 'var(--text-light)',
-                    letterSpacing: '0.08em',
-                    textTransform: 'uppercase'
-                  }}
-                >
-                  技能上下文
-                </div>
-                <div
-                  style={{
-                    fontSize: 12.5,
-                    fontWeight: 600,
-                    color: 'var(--text-body)',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap'
-                  }}
-                >
-                  {referenceSkillHint.name || referenceSkillHint.id}
-                </div>
-              </div>
-            </div>
-            <div
-              style={{
-                flexShrink: 0,
-                fontSize: 11,
-                color: 'var(--text-muted)'
-              }}
-            >
-              上下文已启用
-            </div>
-          </div>
-        )}
-
-        {attachedSessionRecallCapsules.length > 0 && (
-          <div
-            className="glass-surface-card"
-            data-session-recall-attachments="true"
-            style={{
-              borderRadius: 12,
-              border: '1px solid var(--border-default)',
-              background: 'color-mix(in srgb, var(--surface-panel-bg) 46%, transparent)',
-              padding: 10,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 8
-            }}
-          >
-            <div
-              style={{
-                fontSize: 11,
-                fontWeight: 600,
-                color: 'var(--text-light)',
-                letterSpacing: '0.08em',
-                textTransform: 'uppercase'
-              }}
-            >
-              当前轮已引用的旧会话
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {attachedSessionRecallCapsules.map((capsule) => (
-                <div
-                  key={capsule.conversationId}
-                  className="rounded-[10px] border"
-                  style={{
-                    borderColor: 'var(--border-default)',
-                    padding: '8px 10px',
-                    display: 'flex',
-                    alignItems: 'flex-start',
-                    justifyContent: 'space-between',
-                    gap: 10
-                  }}
-                >
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-body)' }}>
-                      {capsule.title}
-                    </div>
-                    <div style={{ fontSize: 11, color: 'var(--text-light)', marginTop: 2 }}>
-                      {capsule.sourceKind}:{capsule.sourceId} · {formatTime(capsule.updatedAt)}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 11.5,
-                        color: 'var(--text-muted)',
-                        marginTop: 4,
-                        whiteSpace: 'pre-wrap'
-                      }}
-                    >
-                      {capsule.summary}
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void handleDetachSessionRecall(capsule.conversationId)
-                    }}
-                    className="rounded-[10px] border transition-[background-color,border-color]"
-                    style={{
-                      flexShrink: 0,
-                      width: 28,
-                      height: 28,
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      borderColor: 'var(--border-default)',
-                      background: 'transparent'
-                    }}
-                    title="移除旧会话引用"
-                  >
-                    <X
-                      style={{ width: 12, height: 12, color: 'var(--text-light)' }}
-                      strokeWidth={2}
-                    />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <ChatAttachments
-          attachments={attachments}
-          onRemove={removeAttachment}
-          onPreview={handleAttachmentPreview}
-          onRevealDocumentQuote={revealDocumentQuoteAttachment}
-          getDocumentQuoteTooltip={getDocumentQuoteTooltip}
-          getAttachmentMetaSummary={getAttachmentMetaSummary}
-          renderAttachmentIcon={(attachment, size = 16) => (
-            <AttachmentIcon attachment={attachment} size={size} />
-          )}
-          toLocalFileUrl={toLocalFileUrl}
-        />
-
-        {bottomTaskCard}
-
-        <ChatInput
-          ref={chatInputRef}
-          inputValue={inputValue}
-          isStreaming={isStreaming}
-          attachmentsCount={attachments.length}
-          hasUserMessages={messages.some((m) => m.type === 'user')}
-          pendingSendCount={pendingSendCount}
-          pendingSendCountdown={pendingSendCountdown}
-          isDragOver={isDragOver}
-          composerShellStyle={composerShellStyle}
-          filePool={filePool}
-          filePoolCount={filePool.length}
-          currentAgent={currentAgent}
-          currentAgentAvatar={currentAgentData?.avatar || '🤖'}
-          currentAgentDisplayName={currentAgentData?.displayName || '管家'}
-          agents={agents}
-          isChannelScope={currentScope?.sourceKind === 'channel'}
-          onInputChange={(value) => setInputValue(value, { preserveContinuationIntent: true })}
-          onSend={() => {
-            void handleSend()
-          }}
-          onStop={stopStreaming}
-          onUndo={undoLastMessage}
-          onPickFiles={pickFiles}
-          onAgentSelect={handleAgentSelect}
-          onSkillReference={handleSkillReference}
-          renderAttachmentIcon={(attachment, size = 16) => (
-            <AttachmentIcon attachment={attachment} size={size} />
-          )}
-          ModelSelector={ModelSelector}
-        />
-      </div>
-    </>
-      )}
-    </TaskToolSnapshot>
+      toolTrace={userVisibleToolTrace}
+      toolTraceStatus={toolTraceStatus}
+      toolTraceExpanded={toolTraceExpanded}
+      copiedMessageId={copiedMessageId}
+      showToolTraceCapsule={showToolTraceCapsule}
+      shouldRenderGlobalToolTraceCapsule={shouldRenderGlobalToolTraceCapsule}
+      onSetInputSuggestion={setInputValue}
+      onToggleToolTrace={() => setToolTraceExpanded((value) => !value)}
+      onCopyMessage={handleCopyAgentMessage}
+      agentSelectionMenu={agentSelectionMenu}
+      onCloseAgentSelectionMenu={() => setAgentSelectionMenu(null)}
+      copyTextToClipboard={copyTextToClipboard}
+      onPasteSelectionToPet={handlePasteSelectionToPet}
+      onAgentSelectionContextMenu={handleAgentSelectionContextMenu}
+      referenceSkillHint={referenceSkillHint}
+      attachedSessionRecallCapsules={attachedSessionRecallCapsules}
+      onDetachSessionRecall={handleDetachSessionRecall}
+      dismissSoftError={dismissSoftError}
+      attachments={attachments}
+      removeAttachment={removeAttachment}
+      inputValue={inputValue}
+      agents={agents}
+      currentAgent={currentAgent}
+      currentAgentAvatar={currentAgentData?.avatar || '🤖'}
+      currentAgentDisplayName={currentAgentData?.displayName || '管家'}
+      isChannelScope={currentScope?.sourceKind === 'channel'}
+      pendingSendCount={pendingSendCount}
+      pendingSendCountdown={pendingSendCountdown}
+      isDragOver={isDragOver}
+      filePool={filePool}
+      chatInputRef={chatInputRef}
+      onInputChange={(value) => setInputValue(value, { preserveContinuationIntent: true })}
+      onSend={() => {
+        void handleSend()
+      }}
+      onStop={stopStreaming}
+      onUndo={undoLastMessage}
+      onPickFiles={pickFiles}
+      onAgentSelect={handleAgentSelect}
+      onSkillReference={handleSkillReference}
+      setActiveAttachmentPreview={setActiveAttachmentPreview}
+      setAttachmentPreviewLoading={setAttachmentPreviewLoading}
+    />
   )
 
   const showExpandedPanel = panelState !== 'collapsed'

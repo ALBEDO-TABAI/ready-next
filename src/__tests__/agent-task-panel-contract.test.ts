@@ -10,6 +10,7 @@ function readWorkspaceFile(path: string): string {
 
 test('chat panel feeds message-level task snapshots into chat messages instead of fixed top task sections', () => {
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
+  const chatPanelBody = readWorkspaceFile('src/renderer/components/agent/chat-panel/ChatPanelBody.tsx')
   const taskToolSnapshot = readWorkspaceFile('src/renderer/components/agent/chat-panel/task-snapshot/TaskToolSnapshot.tsx')
   const taskCard = readWorkspaceFile('src/renderer/components/agent/chat-panel/task/TaskCard.tsx')
   const store = readWorkspaceFile('src/renderer/stores/useAgent.ts')
@@ -20,10 +21,10 @@ test('chat panel feeds message-level task snapshots into chat messages instead o
   assert.match(taskCard, /buildTaskCardViewModel/)
   assert.doesNotMatch(chatPanel, /<TaskSection title="当前任务">/)
   assert.doesNotMatch(chatPanel, /<TaskSection title="后台任务">/)
-  assert.match(chatPanel, /messageTaskSnapshots=\{messageTaskSnapshots\}/)
-  assert.match(chatPanel, /messageToolTraceSnapshots=\{messageToolTraceSnapshots\}/)
-  assert.match(chatPanel, /pendingTaskRun=\{pendingTaskRun\}/)
-  assert.match(chatPanel, /pendingToolTrace=\{pendingToolTrace\}/)
+  assert.match(chatPanelBody, /messageTaskSnapshots=\{messageTaskSnapshots\}/)
+  assert.match(chatPanelBody, /messageToolTraceSnapshots=\{messageToolTraceSnapshots\}/)
+  assert.match(chatPanelBody, /pendingTaskRun=\{pendingTaskRun\}/)
+  assert.match(chatPanelBody, /pendingToolTrace=\{pendingToolTrace\}/)
   assert.match(taskToolSnapshot, /const expanded = Boolean\(taskDisclosureState\[key\]\?\.overview\)/)
   assert.doesNotMatch(chatPanel, /onCancelExecution=/)
   assert.match(viewModel, /title:\s*'计划与步骤'/)

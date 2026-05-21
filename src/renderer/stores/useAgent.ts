@@ -125,13 +125,11 @@ export interface SendMessageResult {
 /**
  * Stage V V3.3a bootstrap half-step (delivered alongside V3.3c).
  *
- * Per-session slice of state that today only carries the coalescing
- * indicators. Subsequent V3.3b passes will move messages / inputValue /
- * streaming flags / scopeRunStates / taskProjections into this slice as
- * separate atomic changes. Until then, top-level `pendingSendCount` and
- * `pendingSendFlushAt` are kept as a read-through mirror so existing
- * ChatPanel/ChatInput selectors and the agent-panel test harness keep
- * working without renderer-side edits.
+ * Per-session slice of state. V3.3b.1 moved the composer draft here, and
+ * V3.3b.2 moved visible messages here; streaming flags / scopeRunStates /
+ * taskProjections remain follow-up atomic migrations. Top-level fields are
+ * kept as read-through mirrors so existing ChatPanel/ChatInput selectors
+ * and the agent-panel test harness keep working during the migration.
  *
  * V3.3d adds `state` + `conversationId` so the listener-side direct-setState
  * routing path (`routeCardToSession`) can validate a pushed card's
@@ -148,6 +146,7 @@ const TERMINAL_SESSION_STATES: ReadonlySet<SessionSliceState> = new Set([
 ])
 
 export interface SessionSlice {
+  messages: AgentMessage[]
   pendingSendCount: number
   pendingSendFlushAt: number | null
   /** V3.3d — terminal exclusion set drives `isLiveSession`. */
@@ -156,15 +155,14 @@ export interface SessionSlice {
   conversationId: string | null
   /**
    * V3.3b.1 — per-session composer draft. The top-level `inputValue` field
-   * is a read-through mirror of `sessions[activeSessionId].inputValue`;
-   * consumers (ChatPanel/ChatInput/ChatMessages/ChatAttachments) still read
-   * `state.inputValue` and will be migrated in a later V3.3b.X step.
+   * is a read-through mirror of `sessions[activeSessionId].inputValue`.
    */
   inputValue: string
 }
 
 function makeEmptySessionSlice(conversationId: string | null = null): SessionSlice {
   return {
+    messages: [],
     pendingSendCount: 0,
     pendingSendFlushAt: null,
     state: 'live',
@@ -351,6 +349,31 @@ function withSessionSlice(
       [sessionId]: { ...current, ...patch },
     },
   }
+}
+
+function withSessionMessagesMirror(
+  state: AgentState,
+  sessionId: string,
+  messages: AgentMessage[],
+): Pick<AgentState, 'messages' | 'sessions'> {
+  return {
+    ...withSessionSlice(state, sessionId, { messages }),
+    messages,
+  }
+}
+
+function withActiveSessionMessagesMirror(
+  state: AgentState,
+  messages: AgentMessage[],
+): Pick<AgentState, 'messages' | 'sessions'> {
+  return withSessionMessagesMirror(state, activeSessionKey(state), messages)
+}
+
+function withActiveSessionConversationMirror(
+  state: AgentState,
+  conversationId: string | null,
+): Pick<AgentState, 'sessions'> {
+  return withSessionSlice(state, activeSessionKey(state), { conversationId })
 }
 
 // =============================================================================
@@ -645,8 +668,8 @@ function extractAskUserCardState(
  * the user can't double-submit while the cancel races behind the scenes.
  */
 function setCardLocallyDisabled(cardId: string, disabled: boolean): void {
-  useAgent.setState((prev) => ({
-    messages: prev.messages.map((m) => {
+  useAgent.setState((prev) => {
+    const messages = prev.messages.map((m) => {
       if (m.id !== cardId || m.type !== 'ask_user_questions' || !m.askUserQuestions) return m
       return {
         ...m,
@@ -655,8 +678,9 @@ function setCardLocallyDisabled(cardId: string, disabled: boolean): void {
           localDisabled: disabled,
         },
       }
-    }),
-  }))
+    })
+    return withActiveSessionMessagesMirror(prev, messages)
+  })
 }
 
 interface CancelPendingAskUserQuestionsOptions {
@@ -716,8 +740,8 @@ async function cancelPendingAskUserQuestionsForCurrentScope(
     onCancelLanded: (result) => {
       const r = result as { success: boolean; errorKind?: string }
       const cancelledAt = Date.now()
-      useAgent.setState((prev) => ({
-        messages: prev.messages.map((m) => {
+      useAgent.setState((prev) => {
+        const messages = prev.messages.map((m) => {
           if (m.id !== cardId || m.type !== 'ask_user_questions' || !m.askUserQuestions) return m
           // Only fold if still pending — if a previous timeout already locally
           // disabled it and a late cancel arrives, override to cancelled.
@@ -726,7 +750,7 @@ async function cancelPendingAskUserQuestionsForCurrentScope(
             ...m,
             askUserQuestions: {
               ...m.askUserQuestions,
-              status: 'cancelled',
+              status: 'cancelled' as const,
               cancelReason: r.success
                 ? 'user_typed_instead'
                 : (r.errorKind === 'cancel_persist_failed' ? 'cancel_persist_failed' : 'user_typed_instead'),
@@ -734,8 +758,9 @@ async function cancelPendingAskUserQuestionsForCurrentScope(
               localDisabled: false,
             },
           }
-        }),
-      }))
+        })
+        return withActiveSessionMessagesMirror(prev, messages)
+      })
     },
     onCancelError: (err) => {
       // PR 1 B.5 (review patch) — cancel IPC rejected within the 2s window.
@@ -946,15 +971,15 @@ export const useAgent = create<AgentState>((set, get) => ({
     )
   })),
 
-  addMessage: (message) => set((state) => ({
-    messages: [...state.messages, message]
-  })),
+  addMessage: (message) => set((state) => (
+    withActiveSessionMessagesMirror(state, [...state.messages, message])
+  )),
 
-  appendToMessage: (id, chunk) => set((state) => ({
-    messages: state.messages.map(m =>
+  appendToMessage: (id, chunk) => set((state) => (
+    withActiveSessionMessagesMirror(state, state.messages.map(m =>
       m.id === id ? { ...m, content: m.content + chunk } : m
-    )
-  })),
+    ))
+  )),
 
   setInputValue: (value, options) => set((state) => {
     const preserveContinuation = shouldPreserveContinuationIntent({
@@ -976,11 +1001,12 @@ export const useAgent = create<AgentState>((set, get) => ({
     }
   }),
 
-  setComposerDraft: (value, continuationIntent) => set({
+  setComposerDraft: (value, continuationIntent) => set((state) => ({
+    ...withSessionSlice(state, activeSessionKey(state), { inputValue: value }),
     inputValue: value,
     pendingContinuationIntent: continuationIntent || null,
     pendingContinuationDraftAnchor: continuationIntent ? value : null,
-  }),
+  })),
 
   clearPendingContinuationIntent: () => set({
     pendingContinuationIntent: null,
@@ -1080,6 +1106,7 @@ export const useAgent = create<AgentState>((set, get) => ({
     const slice = state.sessions[id] ?? makeEmptySessionSlice()
     return {
       activeSessionId: id,
+      messages: slice.messages,
       inputValue: slice.inputValue,
       pendingSendCount: slice.pendingSendCount,
       pendingSendFlushAt: slice.pendingSendFlushAt,
@@ -1100,6 +1127,7 @@ export const useAgent = create<AgentState>((set, get) => ({
       activeSessionId: id,
       // Mirror the fresh slice's defaults onto the top-level fields so the
       // composer/coalescer selectors observe a clean slate for the new tab.
+      messages: slice.messages,
       inputValue: slice.inputValue,
       pendingSendCount: slice.pendingSendCount,
       pendingSendFlushAt: slice.pendingSendFlushAt,
@@ -1121,12 +1149,13 @@ export const useAgent = create<AgentState>((set, get) => ({
     const nextSlice = nextActiveId ? nextSessions[nextActiveId] : null
     const mirrorPatch = nextSlice
       ? {
+          messages: nextSlice.messages,
           inputValue: nextSlice.inputValue,
           pendingSendCount: nextSlice.pendingSendCount,
           pendingSendFlushAt: nextSlice.pendingSendFlushAt,
         }
       : state.activeSessionId === id
-        ? { inputValue: '', pendingSendCount: 0, pendingSendFlushAt: null }
+        ? { messages: [], inputValue: '', pendingSendCount: 0, pendingSendFlushAt: null }
         : {}
     return {
       sessions: nextSessions,
@@ -1250,9 +1279,13 @@ export const useAgent = create<AgentState>((set, get) => ({
       window.electronAPI.agent.newSession(currentAgent, currentScopeId || undefined).catch(console.error)
     }
 
-    set({
-      messages: restored,
+    set((state) => ({
+      ...withActiveSessionMessagesMirror(state, restored),
       inputValue: undoneContent,
+      ...withSessionSlice(state, activeSessionKey(state), {
+        messages: restored,
+        inputValue: undoneContent,
+      }),
       pendingContinuationIntent: null,
       pendingContinuationDraftAnchor: null,
       isStreaming: false,
@@ -1262,7 +1295,7 @@ export const useAgent = create<AgentState>((set, get) => ({
       streamingRequestId: null,
       toolTrace: [],
       toolTraceStatus: 'idle',
-    })
+    }))
   },
 
   newSession: () => {
@@ -1270,6 +1303,7 @@ export const useAgent = create<AgentState>((set, get) => ({
     const agentData = get().agents.find(a => a.name === currentAgent)
     const displayName = agentData?.displayName || '管家'
     const fallbackScopeId = `conv-${generateId('local')}`
+    const nextSessionId = generateSessionId()
     const fallbackScope: ConversationScope = {
       id: fallbackScopeId,
       agent: currentAgent,
@@ -1282,39 +1316,57 @@ export const useAgent = create<AgentState>((set, get) => ({
       updatedAt: new Date().toISOString(),
       lastMessageAt: null,
     }
+    const nextMessages: AgentMessage[] = [
+      {
+        id: `welcome-${Date.now()}`,
+        agent: currentAgent,
+        content: `你好！我是 Ready 的${displayName} Agent。新的对话已开始，有什么我可以帮你的？`,
+        type: 'agent',
+        timestamp: new Date()
+      }
+    ]
 
-    set({
-      messages: [
-        {
-          id: `welcome-${Date.now()}`,
-          agent: currentAgent,
-          content: `你好！我是 Ready 的${displayName} Agent。新的对话已开始，有什么我可以帮你的？`,
-          type: 'agent',
-          timestamp: new Date()
-        }
-      ],
-      isStreaming: false,
-      foregroundBusy: false,
-      composerLocked: false,
-      streamingMessageId: null,
-      streamingRequestId: null,
-      sessionId: generateSessionId(),
-      conversationId: fallbackScope.id,
-      currentScopeId: fallbackScope.id,
-      currentScope: fallbackScope,
-      scopes: [fallbackScope, ...get().scopes.filter((item) => item.id !== fallbackScope.id)],
-      conversations: [mapScopeToConversation(fallbackScope), ...get().conversations.filter((item) => item.id !== fallbackScope.id)],
-      scopeRunStates: {
-        ...get().scopeRunStates,
-        [fallbackScope.id]: createEmptyScopeRunState({ scopeId: fallbackScope.id, agent: currentAgent }),
-      },
-      toolTrace: [],
-      toolTraceStatus: 'idle',
-      attachments: [],
-      filePool: [],
-      pendingContinuationIntent: null,
-      pendingContinuationDraftAnchor: null,
-      taskDisclosureState: {},
+    set((state) => {
+      const previousActiveSessionId = state.activeSessionId
+      const nextSessions = { ...state.sessions }
+      const sessionOrder = previousActiveSessionId && state.sessionOrder.includes(previousActiveSessionId)
+        ? state.sessionOrder.map((entry) => entry === previousActiveSessionId ? nextSessionId : entry)
+        : state.sessionOrder
+      return {
+        sessions: {
+          ...nextSessions,
+          [nextSessionId]: {
+            ...makeEmptySessionSlice(fallbackScope.id),
+            messages: nextMessages,
+            inputValue: '',
+          },
+        },
+        activeSessionId: nextSessionId,
+        sessionOrder,
+        messages: nextMessages,
+        isStreaming: false,
+        foregroundBusy: false,
+        composerLocked: false,
+        streamingMessageId: null,
+        streamingRequestId: null,
+        sessionId: nextSessionId,
+        conversationId: fallbackScope.id,
+        currentScopeId: fallbackScope.id,
+        currentScope: fallbackScope,
+        scopes: [fallbackScope, ...state.scopes.filter((item) => item.id !== fallbackScope.id)],
+        conversations: [mapScopeToConversation(fallbackScope), ...state.conversations.filter((item) => item.id !== fallbackScope.id)],
+        scopeRunStates: {
+          ...state.scopeRunStates,
+          [fallbackScope.id]: createEmptyScopeRunState({ scopeId: fallbackScope.id, agent: currentAgent }),
+        },
+        toolTrace: [],
+        toolTraceStatus: 'idle',
+        attachments: [],
+        filePool: [],
+        pendingContinuationIntent: null,
+        pendingContinuationDraftAnchor: null,
+        taskDisclosureState: {},
+      }
     })
     void persistLocalConversationScope(fallbackScope)
 
@@ -1328,13 +1380,14 @@ export const useAgent = create<AgentState>((set, get) => ({
           const scope = result.data as unknown as ConversationScope
           const currentState = useAgent.getState()
           const updatedScopes = [scope, ...currentState.scopes.filter((item) => item.id !== scope.id)]
-          useAgent.setState({
+          useAgent.setState((state) => ({
+            ...withActiveSessionConversationMirror(state, scope.id),
             currentScopeId: scope.id,
             currentScope: scope,
             conversationId: scope.id,
             scopes: updatedScopes,
             conversations: updatedScopes.map(mapScopeToConversation),
-          })
+          }))
         })
         .catch((err) => {
           scopeCreatePersistenceMetricThrottle.maybeEmit('newSession', 'ipc_rejected', fallbackScope.id, currentAgent)
@@ -1355,7 +1408,8 @@ export const useAgent = create<AgentState>((set, get) => ({
       const previousScopeId = get().currentScopeId
       const currentScope = scopes.find((scope) => scope.id === previousScopeId) || scopes[0] || null
       const activeRunState = getActiveScopeRunState(get().scopeRunStates, currentScope?.id || null)
-      set({
+      set((state) => ({
+        ...withActiveSessionConversationMirror(state, currentScope?.id || null),
         scopes,
         conversations: scopes.map(mapScopeToConversation),
         currentScopeId: currentScope?.id || null,
@@ -1368,7 +1422,7 @@ export const useAgent = create<AgentState>((set, get) => ({
         streamingRequestId: activeRunState?.requestId || null,
         pendingContinuationIntent: null,
         pendingContinuationDraftAnchor: null,
-      })
+      }))
       const hasOnlyWelcomeMessages = get().messages.every((message) => /^welcome(?:-|$)/.test(message.id))
       if (
         currentScope?.id &&
@@ -1415,8 +1469,12 @@ export const useAgent = create<AgentState>((set, get) => ({
           meta: { transient: true },
         })
       }
-      set({
-        messages,
+      set((state) => ({
+        ...withActiveSessionMessagesMirror(state, messages),
+        ...withSessionSlice(state, activeSessionKey(state), {
+          messages,
+          conversationId: scopeId,
+        }),
         currentScopeId: scopeId,
         currentScope: scope,
         conversationId: scopeId,
@@ -1430,7 +1488,7 @@ export const useAgent = create<AgentState>((set, get) => ({
         filePool: [],
         pendingContinuationIntent: null,
         pendingContinuationDraftAnchor: null,
-      })
+      }))
     } catch { /* ignore */ }
   },
 
@@ -1631,13 +1689,14 @@ export const useAgent = create<AgentState>((set, get) => ({
         scope = nextScope
         scopeId = nextScope.id
         const updatedScopes = [nextScope, ...get().scopes.filter((item) => item.id !== nextScope.id)]
-        set({
+        set((state) => ({
+          ...withActiveSessionConversationMirror(state, nextScope.id),
           currentScopeId: nextScope.id,
           currentScope: nextScope,
           conversationId: nextScope.id,
           scopes: updatedScopes,
           conversations: updatedScopes.map(mapScopeToConversation),
-        })
+        }))
       }
     }
     if (!scope || !scopeId) {
@@ -1664,13 +1723,14 @@ export const useAgent = create<AgentState>((set, get) => ({
         scope = nextScope
         scopeId = nextScope.id
         const updatedScopes = [nextScope, ...get().scopes.filter((item) => item.id !== nextScope.id)]
-        set({
+        set((state) => ({
+          ...withActiveSessionConversationMirror(state, nextScope.id),
           currentScopeId: nextScope.id,
           currentScope: nextScope,
           conversationId: nextScope.id,
           scopes: updatedScopes,
           conversations: updatedScopes.map(mapScopeToConversation),
-        })
+        }))
       }
     }
     if (
@@ -1692,13 +1752,14 @@ export const useAgent = create<AgentState>((set, get) => ({
         scope = nextScope
         scopeId = nextScope.id
         const updatedScopes = [nextScope, ...get().scopes.filter((item) => item.id !== nextScope.id)]
-        set({
+        set((state) => ({
+          ...withActiveSessionConversationMirror(state, nextScope.id),
           currentScopeId: nextScope.id,
           currentScope: nextScope,
           conversationId: nextScope.id,
           scopes: updatedScopes,
           conversations: updatedScopes.map(mapScopeToConversation),
-        })
+        }))
       }
     }
     if (!scope || !scopeId) {
@@ -1724,13 +1785,14 @@ export const useAgent = create<AgentState>((set, get) => ({
         activeScope = nextScope
         activeScopeId = nextScope.id
         const updatedScopes = [nextScope, ...get().scopes.filter((item) => item.id !== nextScope.id)]
-        set({
+        set((state) => ({
+          ...withActiveSessionConversationMirror(state, nextScope.id),
           currentScopeId: nextScope.id,
           currentScope: nextScope,
           conversationId: nextScope.id,
           scopes: updatedScopes,
           conversations: updatedScopes.map(mapScopeToConversation),
-        })
+        }))
       }
     }
 
@@ -1920,13 +1982,14 @@ export const useAgent = create<AgentState>((set, get) => ({
               activeScope = nextScope
               activeScopeId = nextScope.id
               const updatedScopes = [nextScope, ...get().scopes.filter((item) => item.id !== nextScope.id)]
-              set({
+              set((state) => ({
+                ...withActiveSessionConversationMirror(state, nextScope.id),
                 currentScopeId: nextScope.id,
                 currentScope: nextScope,
                 conversationId: nextScope.id,
                 scopes: updatedScopes,
                 conversations: updatedScopes.map(mapScopeToConversation),
-              })
+              }))
             }
           }
           result = await sendWithCurrentScope()
@@ -1952,36 +2015,39 @@ export const useAgent = create<AgentState>((set, get) => ({
             agent: currentAgent,
             errorKind: result.errorKind || 'unknown',
           })
-          set((state) => ({
-            messages: state.messages.map(m =>
+          set((state) => {
+            const messages = state.messages.map(m =>
               m.id === responseId
                 ? { ...m, content: friendly.friendlyMessage, type: 'system' as const }
                 : m
-            ),
-            attachments: result.persistence?.message === 'failed' ? currentAttachments : state.attachments,
-            isStreaming: false,
-            foregroundBusy: false,
-            composerLocked: false,
-            streamingMessageId: null,
-            streamingRequestId: null,
-            scopeRunStates: {
-              ...state.scopeRunStates,
-              [activeScopeId]: {
-                ...(state.scopeRunStates[activeScopeId] || {
-                  scopeId: activeScopeId,
-                  agent: currentAgent,
+            )
+            return {
+              ...withActiveSessionMessagesMirror(state, messages),
+              attachments: result.persistence?.message === 'failed' ? currentAttachments : state.attachments,
+              isStreaming: false,
+              foregroundBusy: false,
+              composerLocked: false,
+              streamingMessageId: null,
+              streamingRequestId: null,
+              scopeRunStates: {
+                ...state.scopeRunStates,
+                [activeScopeId]: {
+                  ...(state.scopeRunStates[activeScopeId] || {
+                    scopeId: activeScopeId,
+                    agent: currentAgent,
+                    requestId,
+                    toolTrace: [],
+                    startedAt: new Date().toISOString(),
+                  }),
                   requestId,
-                  toolTrace: [],
-                  startedAt: new Date().toISOString(),
-                }),
-                requestId,
-                phase: 'error',
-                updatedAt: new Date().toISOString(),
-                error: friendly.friendlyMessage,
+                  phase: 'error',
+                  updatedAt: new Date().toISOString(),
+                  error: friendly.friendlyMessage,
+                },
               },
-            },
-            toolTraceStatus: 'error',
-          }))
+              toolTraceStatus: 'error',
+            }
+          })
           const preserveInput = result.persistence?.message !== 'persisted'
           return {
             success: false,
@@ -2035,35 +2101,38 @@ export const useAgent = create<AgentState>((set, get) => ({
         agent: currentAgent,
         errorKind: 'unknown',
       })
-      set((state) => ({
-        messages: state.messages.map(m =>
+      set((state) => {
+        const messages = state.messages.map(m =>
           m.id === responseId
             ? { ...m, content: friendly.friendlyMessage, type: 'system' as const }
             : m
-        ),
-        isStreaming: false,
-        foregroundBusy: false,
-        composerLocked: false,
-        streamingMessageId: null,
-        streamingRequestId: null,
-        scopeRunStates: {
-          ...state.scopeRunStates,
-          [activeScopeId]: {
-            ...(state.scopeRunStates[activeScopeId] || {
-              scopeId: activeScopeId,
-              agent: currentAgent,
+        )
+        return {
+          ...withActiveSessionMessagesMirror(state, messages),
+          isStreaming: false,
+          foregroundBusy: false,
+          composerLocked: false,
+          streamingMessageId: null,
+          streamingRequestId: null,
+          scopeRunStates: {
+            ...state.scopeRunStates,
+            [activeScopeId]: {
+              ...(state.scopeRunStates[activeScopeId] || {
+                scopeId: activeScopeId,
+                agent: currentAgent,
+                requestId,
+                toolTrace: [],
+                startedAt: new Date().toISOString(),
+              }),
               requestId,
-              toolTrace: [],
-              startedAt: new Date().toISOString(),
-            }),
-            requestId,
-            phase: 'error',
-            updatedAt: new Date().toISOString(),
-            error: friendly.friendlyMessage,
+              phase: 'error',
+              updatedAt: new Date().toISOString(),
+              error: friendly.friendlyMessage,
+            },
           },
-        },
-        toolTraceStatus: 'error',
-      }))
+          toolTraceStatus: 'error',
+        }
+      })
       return { success: false, shouldClearInput: false, preserveInput: true, errorKind: 'unknown' }
     }
   }
@@ -2133,9 +2202,10 @@ function initAgentInteractionListeners(): () => void {
       }, agent))
     }
     if (additions.length > 0) {
-      useAgent.setState((prev) => ({
-        messages: [...prev.messages, ...additions].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime()),
-      }))
+      useAgent.setState((prev) => {
+        const messages = [...prev.messages, ...additions].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
+        return withActiveSessionMessagesMirror(prev, messages)
+      })
     }
     // fire-and-forget: hydrate-failure swallow — see the matching comment on listPendingAskUserQuestions above; the live subscription is the canonical card delivery path.
   }).catch(() => { /* ignore hydrate failures */ })
@@ -2174,12 +2244,20 @@ function initAgentInteractionListeners(): () => void {
       // session whose slice hasn't been touched yet) so the conversationId
       // backing field is populated for future lookups.
       const existingSlice = prev.sessions[decision.targetSessionId!]
+      const existingMessages = existingSlice?.messages ?? []
+      const nextMessages = existingMessages.some((m) => m.id === message.id)
+        ? existingMessages
+        : [...existingMessages, message].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
       const nextSlice: SessionSlice = existingSlice
         ? {
           ...existingSlice,
+          messages: nextMessages,
           conversationId: existingSlice.conversationId ?? event.conversationId,
         }
-        : makeEmptySessionSlice(event.conversationId)
+        : {
+          ...makeEmptySessionSlice(event.conversationId),
+          messages: nextMessages,
+        }
       const sessionsPatch: Pick<AgentState, 'sessions'> = {
         sessions: {
           ...prev.sessions,
@@ -2187,13 +2265,12 @@ function initAgentInteractionListeners(): () => void {
         },
       }
       // Mirror into top-level `messages` only when the routed target is the
-      // active session. Background-session cards land in the slice and will
-      // surface on session switch (V3.3b will move messages to the slice).
+      // active session. Background-session cards stay parked in that slice
+      // and surface when the user switches tabs.
       if (decision.targetSessionId === prev.activeSessionId) {
-        if (prev.messages.some((m) => m.id === message.id)) return sessionsPatch
         return {
           ...sessionsPatch,
-          messages: [...prev.messages, message].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime()),
+          messages: nextMessages,
         }
       }
       return sessionsPatch
@@ -2258,20 +2335,21 @@ export function initAgentListeners(): () => void {
  */
 function foldCardLocallyToCancelled(cardId: string, cancelReason: string): void {
   const cancelledAt = Date.now()
-  useAgent.setState((prev) => ({
-    messages: prev.messages.map((m) => {
+  useAgent.setState((prev) => {
+    const messages = prev.messages.map((m) => {
       if (m.id !== cardId || m.type !== 'ask_user_questions' || !m.askUserQuestions) return m
       return {
         ...m,
         askUserQuestions: {
           ...m.askUserQuestions,
-          status: 'cancelled',
+          status: 'cancelled' as const,
           cancelReason,
           cancelledAt,
         },
       }
-    }),
-  }))
+    })
+    return withActiveSessionMessagesMirror(prev, messages)
+  })
 }
 
 /**
@@ -2289,20 +2367,21 @@ export async function submitAskUserQuestionsAnswers(
   const r = result as { success: boolean; error?: string; errorKind?: string }
   if (r.success) {
     const answeredAt = Date.now()
-    useAgent.setState((prev) => ({
-      messages: prev.messages.map((m) => {
+    useAgent.setState((prev) => {
+      const messages = prev.messages.map((m) => {
         if (m.id !== cardId || m.type !== 'ask_user_questions' || !m.askUserQuestions) return m
         return {
           ...m,
           askUserQuestions: {
             ...m.askUserQuestions,
-            status: 'submitted',
+            status: 'submitted' as const,
             answers,
             answeredAt,
           },
         }
-      }),
-    }))
+      })
+      return withActiveSessionMessagesMirror(prev, messages)
+    })
   } else if (r.errorKind === 'waiting_task_gone') {
     // PR 1 B.2 (row missing) — card row was swept; main has already
     // rejected the in-memory Promise. Fold UI to a diagnostic cancelled.

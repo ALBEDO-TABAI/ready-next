@@ -112,8 +112,8 @@ test('scopeRunState reducer derives softError from recoverable event flag', () =
 })
 
 test('ChatPanel mounts SoftFailureCapsule gated by currentScopeRunState.softError', () => {
-  const source = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
-  assert.match(source, /from ['"]\.\/SoftFailureCapsule['"]/)
+  const source = readWorkspaceFile('src/renderer/components/agent/chat-panel/ChatPanelBody.tsx')
+  assert.match(source, /from ['"]\.\.\/SoftFailureCapsule['"]/)
   assert.match(source, /<SoftFailureCapsule/)
   assert.match(source, /dismissSoftError\(currentScopeId\)/)
 })
