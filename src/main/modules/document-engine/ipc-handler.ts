@@ -3,7 +3,7 @@ import {
   writeFileSync, statSync, existsSync,
   copyFileSync, watch, accessSync, constants as fsConstants, type FSWatcher
 } from 'fs'
-import { readFile, readdir, stat, writeFile, rename, cp, mkdir, unlink, rm, copyFile } from 'fs/promises'
+import { readFile, writeFile } from 'fs/promises'
 import { join, basename, dirname, extname } from 'path'
 import { homedir } from 'os'
 import { buildDocumentHtmlSnapshotExport } from '../../../shared/document-widget-html-export'
@@ -16,6 +16,7 @@ import { getDatabase } from '../database'
 import { DocumentMarksRepository } from './document-marks-repository'
 import { markGroup } from './ipc/mark-group'
 import { fileIoGroup } from './ipc/file-io-group'
+import { fileMutationGroup } from './ipc/file-mutation-group'
 import type { IpcDisposeHandle } from './ipc/types'
 import {
   ATTACHMENT_HARD_CAP_BYTES,
@@ -525,6 +526,14 @@ let markGroupDispose: IpcDisposeHandle | null = null
  */
 let fileIoGroupDispose: IpcDisposeHandle | null = null
 
+/**
+ * Stage V V2.3c — dispose handle returned by `fileMutationGroup.register`.
+ * The 6 file-management channels (mkdir/rename/delete/copy/move/stat) live
+ * in `ipc/file-mutation-group.ts`; same dev-reload lifecycle as MarkGroup
+ * and FileIoGroup.
+ */
+let fileMutationGroupDispose: IpcDisposeHandle | null = null
+
 export function setupDocumentIPC(useMock = false): void {
   // Renderer notifies main whenever a widget update has been committed into the tab content store.
   //   Pipeline executor waits on this via documentCommitRegistry.waitForCommitAfter so the write
@@ -705,6 +714,19 @@ export function setupDocumentIPC(useMock = false): void {
         }
       },
     }),
+  })
+
+  // Stage V V2.3c — 6 file-management channels (`document:mkdir`,
+  // `document:rename`, `document:delete`, `document:copy`, `document:move`,
+  // `document:stat`) moved into `fileMutationGroup`. The group only needs
+  // the mock flag — no dialog, no shell, no marks repo — because the inline
+  // handlers were already self-contained fs/promises calls.
+  if (fileMutationGroupDispose) {
+    try { fileMutationGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    fileMutationGroupDispose = null
+  }
+  fileMutationGroupDispose = fileMutationGroup.register(ipcMain, {
+    useMock,
   })
 
   ipcMain.handle('document:importEbookAsMarkdown', async (_, payload: { sourcePath?: string }) => {
@@ -900,112 +922,9 @@ export function setupDocumentIPC(useMock = false): void {
   })
 
   // --- File Management IPC Handlers ---
-
-  // Create directory
-  ipcMain.handle('document:mkdir', async (_, path: string) => {
-    try {
-      if (useMock) return { success: true, mock: true }
-      await mkdir(path, { recursive: true })
-      return { success: true }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  // Rename file/directory
-  ipcMain.handle('document:rename', async (_, { oldPath, newPath }: { oldPath: string; newPath: string }) => {
-    try {
-      if (useMock) return { success: true, mock: true }
-      if (!existsSync(oldPath)) return { success: false, error: 'Source not found' }
-      if (existsSync(newPath)) return { success: false, error: 'Target already exists' }
-      await rename(oldPath, newPath)
-      return { success: true }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  // Delete file/directory
-  ipcMain.handle('document:delete', async (_, path: string) => {
-    try {
-      if (useMock) return { success: true, mock: true }
-      if (!existsSync(path)) return { success: false, error: 'Not found' }
-      const stats = await stat(path)
-      if (stats.isDirectory()) {
-        await rm(path, { recursive: true, force: true })
-      } else {
-        await unlink(path)
-      }
-      return { success: true }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  // Copy file/directory
-  ipcMain.handle('document:copy', async (_, { src, dest }: { src: string; dest: string }) => {
-    try {
-      if (useMock) return { success: true, mock: true }
-      if (!existsSync(src)) return { success: false, error: 'Source not found' }
-      const stats = await stat(src)
-      if (stats.isDirectory()) {
-        await cp(src, dest, { recursive: true })
-      } else {
-        await copyFile(src, dest)
-      }
-      return { success: true }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  // Move file/directory
-  ipcMain.handle('document:move', async (_, { src, dest }: { src: string; dest: string }) => {
-    try {
-      if (useMock) return { success: true, mock: true }
-      if (!existsSync(src)) return { success: false, error: 'Source not found' }
-      await rename(src, dest)
-      return { success: true }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  // Get file stats — enhanced with extension and modifiedTime/createdTime
-  ipcMain.handle('document:stat', async (_, path: string) => {
-    try {
-      if (useMock) {
-        return {
-          success: true,
-          mock: true,
-          data: { size: 1024, isDirectory: false, modifiedTime: Date.now(), createdTime: Date.now(), extension: '.md' },
-          stat: { size: 1024, isDirectory: false, modified: new Date() }
-        }
-      }
-      if (!existsSync(path)) return { success: false, error: 'Not found' }
-      const stats = statSync(path)
-      const ext = extname(path).toLowerCase()
-      return {
-        success: true,
-        data: {
-          size: stats.size,
-          modifiedTime: stats.mtime.getTime(),
-          createdTime: stats.birthtime.getTime(),
-          isDirectory: stats.isDirectory(),
-          extension: ext || null
-        },
-        // backward compat
-        stat: {
-          size: stats.size,
-          isDirectory: stats.isDirectory(),
-          modified: stats.mtime,
-          created: stats.birthtime
-        }
-      }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
+  // Stage V V2.3c — `document:mkdir`, `document:rename`, `document:delete`,
+  // `document:copy`, `document:move`, `document:stat` moved into
+  // `fileMutationGroup`. See breadcrumb + registration block above.
 
   // Stage V V2.3b — `document:openFolder` moved into `fileIoGroup`. The
   // group injects the workspace-validation context (homeDir + accessSync
