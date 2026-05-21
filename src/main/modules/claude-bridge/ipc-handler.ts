@@ -4,13 +4,17 @@ import { AgentManager } from './agent-manager'
 import type { MultimodalBlock } from './direct-chat'
 import type { AIModelConfig } from '../../../shared/ai-providers'
 import { BrowserController } from '../browser-engine/ipc-handler'
-import { appendFileSync, readFileSync, statSync } from 'fs'
+import { readFileSync, statSync } from 'fs'
 import { basename, extname } from 'path'
 import { AgentControlRuntime } from '../agent-control/runtime-core/runtime'
 import { ChatRepository } from '../repositories/chat-repository'
-import { getLogPath } from '../../utils/platform'
+// Stage V V2.1b — `getLogPath` import retired: the only call site (the
+// design-run NDJSON append inside `agent:completeToolActionRequest`) moved
+// into `toolEventGroup`.
 import { createRotatingLogger } from '../../utils/rotating-logger'
-import { appendToolEventLog, type ToolEventLogPayload } from '../tools/tool-event-log'
+// Stage V V2.1b — `appendToolEventLog` import retired from this file when
+// the `tools:logToolEvent` handler moved into `toolEventGroup`. The host no
+// longer calls the tool-event logger directly.
 import {
   clearAllReferenceSkillHints,
   clearLastReferenceSkill,
@@ -33,6 +37,7 @@ import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
 import { sanitizeAssistantText } from '../agent-control/tools-runtime/tool-call-text-guard'
 import { cancelChildRunForIpc, listActiveChildRunsForIpc } from './active-child-run-ipc'
 import { askUserGroup } from './ipc/ask-user-group'
+import { toolEventGroup } from './ipc/tool-event-group'
 import type { IpcDisposeHandle } from './ipc/types'
 import { logAgentMetric } from '../agent-control/metrics'
 import { isRendererAgentMetricName } from '../../../shared/renderer-agent-metrics'
@@ -181,6 +186,15 @@ let askUserQuestionsSweepRanForBoot = false
  */
 let askUserGroupDispose: IpcDisposeHandle | null = null
 
+/**
+ * Stage V V2.1b — dispose handle returned by `toolEventGroup.register`. Owns
+ * the 2 channels `tools:logToolEvent` + `agent:completeToolActionRequest`.
+ * Same lifecycle pattern as `askUserGroupDispose`: register on
+ * `setupAgentIPC`, dispose on dev-reload re-entry, dispose on
+ * `cleanupAgentRuntime` shutdown.
+ */
+let toolEventGroupDispose: IpcDisposeHandle | null = null
+
 function cleanupSkillSessionState(sessionId?: string, reason = 'Skill session state cleared'): void {
   if (sessionId) {
     clearLastReferenceSkill(sessionId)
@@ -278,6 +292,12 @@ export async function cleanupAgentRuntime(): Promise<void> {
   if (askUserGroupDispose) {
     try { askUserGroupDispose.dispose() } catch { /* ignore */ }
     askUserGroupDispose = null
+  }
+  // Stage V V2.1b — symmetric release of the 2 toolEvent channel handlers
+  // (`tools:logToolEvent` + `agent:completeToolActionRequest`).
+  if (toolEventGroupDispose) {
+    try { toolEventGroupDispose.dispose() } catch { /* ignore */ }
+    toolEventGroupDispose = null
   }
   if (runtime) {
     await runtime.stop()
@@ -490,42 +510,19 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   orchestrator.setCancelPendingToolActions(cancelToolActionRequestsBySession)
   log('setupAgentIPC called, Ready agent runtime initialized')
 
-  ipcMain.removeAllListeners('tools:logToolEvent')
-  ipcMain.on('tools:logToolEvent', (_event, payload: ToolEventLogPayload) => {
-    if (!payload || typeof payload !== 'object') return
-    appendToolEventLog(payload)
-  })
-
-  ipcMain.removeHandler('agent:completeToolActionRequest')
-  ipcMain.handle('agent:completeToolActionRequest', async (_, payload: {
-    requestId: string
-    handled: boolean
-    payload?: Record<string, unknown>
-    error?: string
-  }): Promise<IPCResponse<{ acknowledged: boolean }>> => {
-    const requestId = typeof payload?.requestId === 'string' ? payload.requestId : ''
-    const pending = pendingToolActionRequests.get(requestId)
-    if (!pending) {
-      return { success: false, error: `Unknown tool action request: ${requestId}` }
-    }
-    releasePendingRequest(requestId)
-    if (payload?.error) {
-      pending.reject(new Error(payload.error))
-    } else if (!payload?.handled) {
-      pending.reject(new Error(`Renderer did not handle tool action request: ${requestId}`))
-    } else {
-      const resultPayload = payload.payload && typeof payload.payload === 'object' ? payload.payload : {}
-      try {
-        const capture = (resultPayload as { runCapture?: unknown }).runCapture
-        if (capture && typeof capture === 'object') {
-          appendFileSync(getLogPath('ready-design-run-captures.ndjson'), `${JSON.stringify(capture)}\n`)
-        }
-      } catch {
-        // ignore diagnostic persistence failures
-      }
-      pending.resolve(resultPayload)
-    }
-    return { success: true, data: { acknowledged: true } }
+  // Stage V V2.1b — 2 toolEvent channels (`tools:logToolEvent` +
+  // `agent:completeToolActionRequest`) moved into `toolEventGroup`. The group
+  // handles dev-reload removeAllListeners + removeHandler pre-clear
+  // internally; we hold the dispose handle so `cleanupAgentRuntime` can drop
+  // the handlers on shutdown. Re-binding on dev reload first calls
+  // `dispose()` on the prior handle so listener slots stay clean.
+  if (toolEventGroupDispose) {
+    try { toolEventGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    toolEventGroupDispose = null
+  }
+  toolEventGroupDispose = toolEventGroup.register(ipcMain, {
+    pendingToolActionRequests,
+    releasePendingRequest,
   })
 
   // Send message to agent — use direct HTTP streaming
