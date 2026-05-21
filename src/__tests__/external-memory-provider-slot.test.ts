@@ -4,7 +4,7 @@ import test from 'node:test'
 import {
   ExternalMemoryProviderSlot,
   type ExternalMemoryProvider
-} from '../main/modules/agent-control/external-memory-provider-slot'
+} from '../main/modules/agent-control/memory/external-memory-provider-slot'
 
 test('external memory provider slot only accepts one active provider and forwards lifecycle hooks', async () => {
   const events: string[] = []
