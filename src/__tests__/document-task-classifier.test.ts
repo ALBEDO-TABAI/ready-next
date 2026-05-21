@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { classifyStructuredDocumentIntent } from '../main/modules/agent-control/document-pipeline/document-task-types'
+import { classifyStructuredDocumentIntent } from '../main/modules/document-engine/pipeline/document-task-types'
 
 describe('classifyStructuredDocumentIntent', () => {
   it('routes create requests that pair widget generation with document reading', () => {

@@ -18,14 +18,14 @@ import { DesignToolLoopOrchestrator } from '../agent-control/design-tool-loop-or
 import { FeishuDomainAdapter } from '../agent-control/domain-adapters/feishu-domain-adapter'
 import { DocumentDomainOrchestrator } from '../agent-control/domain-adapters/document-domain-orchestrator'
 import { DocumentDomainAdapter } from '../agent-control/domain-adapters/document-domain-adapter'
-import { DocumentToolLoopOrchestrator } from '../agent-control/document-pipeline/document-tool-loop-orchestrator'
+import { DocumentToolLoopOrchestrator } from '../document-engine/pipeline/document-tool-loop-orchestrator'
 import { ExecutionLoopOrchestrator } from '../agent-control/runtime-core/execution-loop-orchestrator'
 import { HostCapabilityDispatcher } from '../agent-control/domain-adapters/host-capability-dispatcher'
 import { CalendarDomainAdapter } from '../agent-control/domain-adapters/calendar-domain-adapter'
 import { RSSDomainAdapter } from '../agent-control/domain-adapters/rss-domain-adapter'
 import { ResearchDomainAdapter } from '../agent-control/domain-adapters/research-domain-adapter'
-import { DocumentTaskPipelineExecutor } from '../agent-control/document-pipeline/document-task-pipeline-executor'
-import type { DocumentInsight, DocumentInsightMetrics, DocumentWidgetDraft } from '../agent-control/document-pipeline/document-task-pipeline'
+import { DocumentTaskPipelineExecutor } from '../document-engine/pipeline/document-task-pipeline-executor'
+import type { DocumentInsight, DocumentInsightMetrics, DocumentWidgetDraft } from '../document-engine/pipeline/document-task-pipeline'
 import {
   applyContinuationIntentToState,
   buildContinuationStateFromProjection,

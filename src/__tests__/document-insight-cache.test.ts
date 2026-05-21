@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { DocumentInsightCache } from '../main/modules/agent-control/document-pipeline/document-insight-cache'
+import { DocumentInsightCache } from '../main/modules/document-engine/pipeline/document-insight-cache'
 
 describe('DocumentInsightCache', () => {
   it('returns a cached entry before ttl expires', () => {

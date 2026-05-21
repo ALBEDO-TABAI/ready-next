@@ -1,5 +1,5 @@
 import type { DocumentWidgetTaskKind } from '../../claude-bridge/tool-policy-heuristics'
-import type { RunBudgetHint } from '../contracts/run-contracts'
+import type { RunBudgetHint } from '../../agent-control/contracts/run-contracts'
 import {
   accumulateDocumentToolProgress,
   buildDocumentToolCompletionText,
@@ -8,7 +8,7 @@ import {
   type DocumentToolProgressState,
 } from '../../claude-bridge/document-tool-flow'
 import { buildUserFacingInspectionSummary } from '../../../../shared/document-widget-parse'
-import { logAgentMetric } from '../metrics'
+import { logAgentMetric } from '../../agent-control/metrics'
 
 export type DocumentToolLoopOrchestratorDeps = {
   logMetric?: (name: string, payload: Record<string, unknown>) => void

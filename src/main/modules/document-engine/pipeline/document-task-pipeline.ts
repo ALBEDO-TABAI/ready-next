@@ -7,7 +7,7 @@ import {
   buildListWidgetsUserFacingText,
   type DocumentWidgetSummary,
 } from '../../../../shared/document-widget-parse'
-import { logAgentMetric } from '../metrics'
+import { logAgentMetric } from '../../agent-control/metrics'
 
 export type DocumentWidgetPipelinePhase =
   | 'loading_document'

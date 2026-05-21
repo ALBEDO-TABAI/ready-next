@@ -1,8 +1,8 @@
 import type { DocumentTaskJob, DocumentTaskPlan } from './document-task-plan'
-import type { SubtaskInlineWorkerResult, SubtaskInlineWorkerUpdate } from '../contracts/run-contracts'
-import { SubtaskRuntime } from '../runtime-core/subtask-runtime'
-import { buildWorkerOverviewSteps, buildWorkerParentProjectionPatch } from '../worker-projection'
-import type { ConversationScope, ScopeRunEventPayload, ScopeRunTaskStep } from '../contracts/types'
+import type { SubtaskInlineWorkerResult, SubtaskInlineWorkerUpdate } from '../../agent-control/contracts/run-contracts'
+import { SubtaskRuntime } from '../../agent-control/runtime-core/subtask-runtime'
+import { buildWorkerOverviewSteps, buildWorkerParentProjectionPatch } from '../../agent-control/worker-projection'
+import type { ConversationScope, ScopeRunEventPayload, ScopeRunTaskStep } from '../../agent-control/contracts/types'
 
 interface DocumentTaskSubtaskJobResult extends SubtaskInlineWorkerResult {
   writeSummary: string

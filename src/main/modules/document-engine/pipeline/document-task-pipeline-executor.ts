@@ -20,9 +20,9 @@ import {
   type DocumentWidgetRecord,
 } from '../../../../shared/document-widget-parse'
 import { resolveControlledWidgetTarget } from '../../../../shared/document-widget-target'
-import { readDocumentEditableText } from '../../document-engine/ipc-handler'
-import { documentCommitRegistry } from '../../document-engine/document-commit-registry'
-import { type DomainAdapterDispatchResult } from '../domain-adapters/domain-adapter'
+import { readDocumentEditableText } from '../ipc-handler'
+import { documentCommitRegistry } from '../document-commit-registry'
+import { type DomainAdapterDispatchResult } from '../../agent-control/domain-adapters/domain-adapter'
 import { classifyStructuredDocumentIntent } from './document-task-types'
 import { buildDocumentTaskStepCacheKey, hashText } from './document-task-cache-key'
 import {
@@ -33,7 +33,7 @@ import {
 } from './document-task-tool-timing'
 import { DocumentInsightCache } from './document-insight-cache'
 import { buildDocumentInsightSourceMaterial } from './document-source-materials'
-import { logAgentMetric } from '../metrics'
+import { logAgentMetric } from '../../agent-control/metrics'
 import { runDocumentTaskPlanWithSubtasks } from './document-task-subtask-runner'
 import {
   buildPipelinePhaseOrder,
@@ -49,12 +49,12 @@ import {
   type DocumentWidgetWriteStage,
 } from './document-task-pipeline'
 import type { DocumentTaskJob, DocumentTaskPlan, DocumentTaskStep } from './document-task-plan'
-import type { ExecutionIntentContext } from '../execution-intent-resolver'
-import type { ToolPolicy } from '../tool-policy/execution-tool-config'
-import type { RequestEnvelope, RequestEnvelopeResource } from '../contracts/request-envelope'
-import type { ProjectionTruthSnapshot, TurnProviderContext } from '../contracts/run-contracts'
-import { SubtaskRuntime } from '../runtime-core/subtask-runtime'
-import type { ConversationScope, ScopeRunEventPayload } from '../contracts/types'
+import type { ExecutionIntentContext } from '../../agent-control/execution-intent-resolver'
+import type { ToolPolicy } from '../../agent-control/tool-policy/execution-tool-config'
+import type { RequestEnvelope, RequestEnvelopeResource } from '../../agent-control/contracts/request-envelope'
+import type { ProjectionTruthSnapshot, TurnProviderContext } from '../../agent-control/contracts/run-contracts'
+import { SubtaskRuntime } from '../../agent-control/runtime-core/subtask-runtime'
+import type { ConversationScope, ScopeRunEventPayload } from '../../agent-control/contracts/types'
 
 interface DocumentPipelineCacheSession {
   activeRunId: string | null

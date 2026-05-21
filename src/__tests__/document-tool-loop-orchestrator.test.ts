@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { DocumentToolLoopOrchestrator } from '../main/modules/agent-control/document-pipeline/document-tool-loop-orchestrator'
+import { DocumentToolLoopOrchestrator } from '../main/modules/document-engine/pipeline/document-tool-loop-orchestrator'
 
 test('DocumentToolLoopOrchestrator nudges when document inspection result should be surfaced', () => {
   const orchestrator = new DocumentToolLoopOrchestrator()

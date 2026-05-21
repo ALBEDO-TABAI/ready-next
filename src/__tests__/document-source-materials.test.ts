@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { buildDocumentTaskPlan } from '../main/modules/agent-control/document-pipeline/document-task-plan'
+import { buildDocumentTaskPlan } from '../main/modules/document-engine/pipeline/document-task-plan'
 import { buildRequestEnvelope, type RequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
-import { buildDocumentInsightSourceMaterial } from '../main/modules/agent-control/document-pipeline/document-source-materials'
+import { buildDocumentInsightSourceMaterial } from '../main/modules/document-engine/pipeline/document-source-materials'
 
 function createEnvelope(chunks: RequestEnvelope['chunks']): RequestEnvelope {
   return {

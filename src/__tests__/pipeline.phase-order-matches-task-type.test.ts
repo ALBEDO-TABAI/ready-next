@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { buildPipelinePhaseOrder } from '../main/modules/agent-control/document-pipeline/document-task-pipeline'
+import { buildPipelinePhaseOrder } from '../main/modules/document-engine/pipeline/document-task-pipeline'
 
 describe('buildPipelinePhaseOrder matches task type (P3 T4)', () => {
   it('create task: 5-phase insert path', () => {
