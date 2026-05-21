@@ -51,6 +51,7 @@ import { detachedTaskGroup } from './ipc/detached-task-group'
 import { runControlGroup } from './ipc/run-control-group'
 import { telemetryGroup } from './ipc/telemetry-group'
 import { channelManagementGroup } from './ipc/channel-management-group'
+import { scheduleGroup } from './ipc/schedule-group'
 import type { IpcDisposeHandle } from './ipc/types'
 import { logAgentMetric } from '../agent-control/metrics'
 import { isRendererAgentMetricName } from '../../../shared/renderer-agent-metrics'
@@ -301,6 +302,17 @@ let telemetryGroupDispose: IpcDisposeHandle | null = null
  */
 let channelManagementGroupDispose: IpcDisposeHandle | null = null
 
+/**
+ * Stage V V2.1l — dispose handle returned by `scheduleGroup.register`.
+ * Owns the 6 agent-schedule (cron) CRUD + control channels
+ * (`agent:listSchedules`, `agent:upsertSchedule`, `agent:runScheduleNow`,
+ * `agent:pauseSchedule`, `agent:resumeSchedule`, `agent:deleteSchedule`).
+ * Same lifecycle pattern as the other group dispose slots: register on
+ * `setupAgentIPC`, dispose on dev-reload re-entry, dispose on
+ * `cleanupAgentRuntime` shutdown.
+ */
+let scheduleGroupDispose: IpcDisposeHandle | null = null
+
 function cleanupSkillSessionState(sessionId?: string, reason = 'Skill session state cleared'): void {
   if (sessionId) {
     clearLastReferenceSkill(sessionId)
@@ -470,6 +482,13 @@ export async function cleanupAgentRuntime(): Promise<void> {
   if (channelManagementGroupDispose) {
     try { channelManagementGroupDispose.dispose() } catch { /* ignore */ }
     channelManagementGroupDispose = null
+  }
+  // Stage V V2.1l — symmetric release of the 6 schedule (cron) channel
+  // handlers (listSchedules / upsertSchedule / runScheduleNow /
+  // pauseSchedule / resumeSchedule / deleteSchedule).
+  if (scheduleGroupDispose) {
+    try { scheduleGroupDispose.dispose() } catch { /* ignore */ }
+    scheduleGroupDispose = null
   }
   if (runtime) {
     await runtime.stop()
@@ -889,73 +908,20 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     sendChannelProbe: (id, text) => runtime!.sendChannelProbe(id, text),
   })
 
-  ipcMain.handle('agent:listSchedules', (): IPCResponse => {
-    try {
-      return { success: true, data: runtime!.listSchedules() }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      return { success: false, error: errorMessage }
-    }
-  })
-
-  ipcMain.handle('agent:upsertSchedule', async (_, payload: {
-    id?: string
-    name: string
-    cronExpr: string
-    prompt: string
-    channelId?: string | null
-    enabled?: boolean
-    payload?: Record<string, unknown>
-  }): Promise<IPCResponse> => {
-    try {
-      const schedule = await runtime!.upsertSchedule(payload)
-      return { success: true, data: schedule }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      return { success: false, error: errorMessage }
-    }
-  })
-
-  ipcMain.handle('agent:runScheduleNow', async (_, payload: { id: string }): Promise<IPCResponse> => {
-    try {
-      const result = await runtime!.runScheduleNow(payload.id)
-      return { success: result.success, error: result.error }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      return { success: false, error: errorMessage }
-    }
-  })
-
-  ipcMain.handle('agent:pauseSchedule', async (_, payload: { id: string }): Promise<IPCResponse> => {
-    try {
-      const schedule = await runtime!.pauseSchedule(payload.id)
-      if (!schedule) return { success: false, error: `Schedule not found: ${payload.id}` }
-      return { success: true, data: schedule }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      return { success: false, error: errorMessage }
-    }
-  })
-
-  ipcMain.handle('agent:resumeSchedule', async (_, payload: { id: string }): Promise<IPCResponse> => {
-    try {
-      const schedule = await runtime!.resumeSchedule(payload.id)
-      if (!schedule) return { success: false, error: `Schedule not found: ${payload.id}` }
-      return { success: true, data: schedule }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      return { success: false, error: errorMessage }
-    }
-  })
-
-  ipcMain.handle('agent:deleteSchedule', async (_, payload: { id: string }): Promise<IPCResponse> => {
-    try {
-      const removed = await runtime!.deleteSchedule(payload.id)
-      return { success: removed, error: removed ? undefined : `Schedule not found: ${payload.id}` }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      return { success: false, error: errorMessage }
-    }
+  // Stage V V2.1l — the 6 schedule (cron) handlers below were moved into
+  // `scheduleGroup`. Symmetric dispose lives in `cleanupAgentRuntime` above
+  // and the dev-reload re-entry block below.
+  if (scheduleGroupDispose) {
+    try { scheduleGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    scheduleGroupDispose = null
+  }
+  scheduleGroupDispose = scheduleGroup.register(ipcMain, {
+    listSchedules: () => runtime!.listSchedules(),
+    upsertSchedule: (payload) => runtime!.upsertSchedule(payload),
+    runScheduleNow: (id) => runtime!.runScheduleNow(id),
+    pauseSchedule: (id) => runtime!.pauseSchedule(id),
+    resumeSchedule: (id) => runtime!.resumeSchedule(id),
+    deleteSchedule: (id) => runtime!.deleteSchedule(id),
   })
 
   // ===================== Chat History IPC =====================
