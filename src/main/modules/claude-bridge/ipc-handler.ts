@@ -342,7 +342,14 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   // to pull. Audit Phase 5 §E3.
   setReferenceHintChangeEmitter((scopeId, change) => {
     if (mainWindow.isDestroyed()) return
-    mainWindow.webContents.send('agent:referenceSkillHintChanged', { scopeId, change })
+    // Stage V V3.2 — push payload carries sessionId so renderer can route
+    // per-session. scopeId === sessionId in current model; we mirror to
+    // sessionId explicitly so consumers don't have to know that aliasing.
+    mainWindow.webContents.send('agent:referenceSkillHintChanged', {
+      scopeId,
+      sessionId: scopeId,
+      change,
+    })
   })
   // Stage O §0.3 — push `agent:taskProjectionsChanged` to the renderer on
   // every successful create/update/delete in the task-projection store.
@@ -355,7 +362,12 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   const projectionStore = runtime.getTaskProjectionStore()
   const onProjectionChange = (event: TaskProjectionChangeEvent): void => {
     if (mainWindow.isDestroyed()) return
-    mainWindow.webContents.send('agent:taskProjectionsChanged', event)
+    // Stage V V3.2 — mirror scopeId to sessionId so multi-session renderer
+    // listeners can route without coupling to the scopeId alias.
+    mainWindow.webContents.send('agent:taskProjectionsChanged', {
+      ...event,
+      sessionId: event.scopeId,
+    })
   }
   projectionStore.on('change', onProjectionChange)
   currentTaskProjectionsChangeOff = () => {
@@ -507,7 +519,14 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     }
     sessionPendingIndex.delete(key)
     if (!mainWindow.isDestroyed() && cancelled.length > 0) {
-      mainWindow.webContents.send('agent:cancelToolActionRequest', { requestIds: cancelled })
+      // Stage V V3.2 — carry sessionId on the cancel push so the renderer
+      // can scope the cancellation to the correct session (multi-session UI
+      // ignores cancels destined for other sessions).
+      mainWindow.webContents.send('agent:cancelToolActionRequest', {
+        requestIds: cancelled,
+        agent,
+        sessionId: sessionId || null,
+      })
     }
   }
   const requestRendererToolAction = async (payload: {
@@ -536,10 +555,14 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
       // Renderer resolves scopeId by scanning scopeRunStates when scopeId/sessionId absent.
       //   Main's sessionId is the scopeId in practice — forward it explicitly so the renderer
       //   short-circuits the scan even when its scope run state has been retired.
+      // Stage V V3.2 — explicit sessionId on the push (null when global)
+      // so multi-session renderer can route the request without aliasing
+      // through scopeId.
       mainWindow.webContents.send('agent:toolActionRequest', {
         requestId,
         scopeId: sessionId || undefined,
         ...payload,
+        sessionId: payload.sessionId ?? null,
       })
     })
   }
@@ -1561,7 +1584,13 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
 
   orchestrator.on('output', (data) => {
     if (!mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('agent:stream', data)
+      // Stage V V3.2 — normalize undefined sessionId to null so the
+      // push payload type is `string | null` (not optional). Orchestrator
+      // sets sessionId from descriptor.sessionId which is `string | undefined`.
+      mainWindow.webContents.send('agent:stream', {
+        ...data,
+        sessionId: data.sessionId ?? null,
+      })
       if (data.sessionId) {
         const timestamp = new Date().toISOString()
         if (data.type === 'tool_use' || data.type === 'tool_result') {
@@ -1579,6 +1608,9 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
           const payload = {
             type: 'updated',
             scopeId: data.sessionId,
+            // Stage V V3.2 — explicit per-session sessionId on the push so
+            // multi-session renderer wiring doesn't depend on the scopeId alias.
+            sessionId: data.sessionId,
             agent: data.agent,
             runId: data.runId,
             taskId: typeof data.taskId === 'string'
@@ -1623,6 +1655,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
           const payload = {
             type: 'finished',
             scopeId: data.sessionId,
+            sessionId: data.sessionId, // Stage V V3.2
             agent: data.agent,
             runId: data.runId,
             phase: 'done',
@@ -1634,6 +1667,7 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
           const payload = {
             type: 'updated',
             scopeId: data.sessionId,
+            sessionId: data.sessionId, // Stage V V3.2
             agent: data.agent,
             runId: data.runId,
             phase: 'responding',
@@ -1649,7 +1683,11 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
 
   orchestrator.on('status', (data) => {
     if (!mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('agent:status', data)
+      // Stage V V3.2 — normalize undefined sessionId to null on the push.
+      mainWindow.webContents.send('agent:status', {
+        ...data,
+        sessionId: data.sessionId ?? null,
+      })
       if (data.sessionId) {
         const phase = mapAgentStatusToScopeRunPhase(data.status)
         if (!phase) {
@@ -1668,7 +1706,12 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
           timestamp: new Date().toISOString(),
         }
         runtime?.recordScopeRunEvent(payload)
-        mainWindow.webContents.send('agent:scopeRunEvent', payload)
+        // Stage V V3.2 — mirror scopeId to sessionId on the wire so renderer
+        // listeners can route per-session without aliasing knowledge.
+        mainWindow.webContents.send('agent:scopeRunEvent', {
+          ...payload,
+          sessionId: data.sessionId,
+        })
       }
     }
   })
@@ -1678,11 +1721,16 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
       // Phase 3: agent:error payload already carries errorKind/recoverable/toolName
       // via orchestrator spread — forward as-is so the renderer can route
       // recoverable errors to the soft-failure capsule.
-      mainWindow.webContents.send('agent:error', data)
+      // Stage V V3.2 — normalize undefined sessionId to null on the push.
+      mainWindow.webContents.send('agent:error', {
+        ...data,
+        sessionId: data.sessionId ?? null,
+      })
       if (data.sessionId) {
         const payload = {
           type: 'finished',
           scopeId: data.sessionId,
+          sessionId: data.sessionId, // Stage V V3.2
           agent: data.agent,
           runId: data.runId,
           phase: 'error',
@@ -1699,21 +1747,42 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     }
   })
 
-  orchestrator.on('toolAction', (data: { tool: string; args: Record<string, unknown> }) => {
+  orchestrator.on('toolAction', (data: { tool: string; args: Record<string, unknown>; agent?: string; sessionId?: string; runId?: string }) => {
     if (!mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('agent:toolAction', data)
+      // Stage V V3.2 — normalize undefined sessionId to null on the push.
+      mainWindow.webContents.send('agent:toolAction', {
+        ...data,
+        sessionId: data.sessionId ?? null,
+      })
     }
   })
 
   runtime.on('conversationEvent', (data) => {
     if (!mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('agent:conversationEvent', data)
+      // Stage V V3.2 — surface sessionId at the push payload top level.
+      // The underlying ConversationEventPayload addresses scope via
+      // `scope.id`; we mirror that to a top-level sessionId so consumers
+      // don't have to reach into the nested scope object.
+      const sessionId = data && typeof data === 'object' && data.scope && typeof data.scope.id === 'string'
+        ? data.scope.id
+        : null
+      mainWindow.webContents.send('agent:conversationEvent', {
+        ...data,
+        sessionId,
+      })
     }
   })
 
   runtime.on('scopeRunEvent', (data) => {
     if (!mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('agent:scopeRunEvent', data)
+      // Stage V V3.2 — mirror scopeId to sessionId on the wire payload.
+      const sessionId = data && typeof data === 'object' && typeof data.scopeId === 'string'
+        ? data.scopeId
+        : null
+      mainWindow.webContents.send('agent:scopeRunEvent', {
+        ...data,
+        sessionId,
+      })
     }
   })
 
@@ -1722,7 +1791,14 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   // silently displaying stale ScopeRunSummary state.
   runtime.on('projectionSyncFailed', (data) => {
     if (!mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('agent:projectionSyncFailed', data)
+      // Stage V V3.2 — projection failure is per-session; mirror scopeId.
+      const sessionId = data && typeof data === 'object' && typeof data.scopeId === 'string'
+        ? data.scopeId
+        : null
+      mainWindow.webContents.send('agent:projectionSyncFailed', {
+        ...data,
+        sessionId,
+      })
     }
   })
 

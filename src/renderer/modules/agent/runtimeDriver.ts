@@ -14,7 +14,11 @@ interface AgentStoreLike {
 }
 
 interface RunPayloadLike {
-  sessionId?: string
+  // Stage V V3.2 — IPC push payloads now standardise sessionId as
+  // `string | null` (null = global event). RunPayloadLike accepts both the
+  // legacy optional form and the V3.2 nullable form so this helper can
+  // consume push payloads directly without per-callsite normalization.
+  sessionId?: string | null
   runId?: string
   agent?: string
   scopeId?: string
@@ -673,7 +677,8 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     const runWithWatchdog = async (data: {
       requestId: string
       agent?: string
-      sessionId?: string
+      // Stage V V3.2 — push payload sessionId is `string | null` (V3.2 contract).
+      sessionId?: string | null
       runId?: string
       tool: string
       args: Record<string, unknown>

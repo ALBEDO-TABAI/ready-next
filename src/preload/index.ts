@@ -209,33 +209,36 @@ const agentAPI = {
   pauseSchedule: (id: string) => ipcRenderer.invoke('agent:pauseSchedule', { id }),
   resumeSchedule: (id: string) => ipcRenderer.invoke('agent:resumeSchedule', { id }),
   deleteSchedule: (id: string) => ipcRenderer.invoke('agent:deleteSchedule', { id }),
-  onStream: (callback: (data: { agent: string; sessionId?: string; runId?: string; chunk: string; type: string }) => void) => {
-    const handler = (_: unknown, data: { agent: string; sessionId?: string; runId?: string; chunk: string; type: string }) => callback(data)
+  // Stage V V3.2 — push payloads carry `sessionId: string | null`
+  // (not optional). null = global event (not session-scoped); a string
+  // means the event belongs to a specific session and renderer routes by it.
+  onStream: (callback: (data: { agent: string; sessionId: string | null; runId?: string; chunk: string; type: string }) => void) => {
+    const handler = (_: unknown, data: { agent: string; sessionId: string | null; runId?: string; chunk: string; type: string }) => callback(data)
     ipcRenderer.on('agent:stream', handler)
     return () => { ipcRenderer.removeListener('agent:stream', handler) }
   },
-  onStatusChange: (callback: (data: { agent: string; sessionId?: string; runId?: string; status: string; isMock: boolean }) => void) => {
-    const handler = (_: unknown, data: { agent: string; sessionId?: string; runId?: string; status: string; isMock: boolean }) => callback(data)
+  onStatusChange: (callback: (data: { agent: string; sessionId: string | null; runId?: string; status: string; isMock: boolean }) => void) => {
+    const handler = (_: unknown, data: { agent: string; sessionId: string | null; runId?: string; status: string; isMock: boolean }) => callback(data)
     ipcRenderer.on('agent:status', handler)
     return () => { ipcRenderer.removeListener('agent:status', handler) }
   },
-  onError: (callback: (data: { agent: string; sessionId?: string; runId?: string; error: string; type: string; errorKind?: string; recoverable?: boolean; toolName?: string }) => void) => {
-    const handler = (_: unknown, data: { agent: string; sessionId?: string; runId?: string; error: string; type: string; errorKind?: string; recoverable?: boolean; toolName?: string }) => callback(data)
+  onError: (callback: (data: { agent: string; sessionId: string | null; runId?: string; error: string; type: string; errorKind?: string; recoverable?: boolean; toolName?: string }) => void) => {
+    const handler = (_: unknown, data: { agent: string; sessionId: string | null; runId?: string; error: string; type: string; errorKind?: string; recoverable?: boolean; toolName?: string }) => callback(data)
     ipcRenderer.on('agent:error', handler)
     return () => { ipcRenderer.removeListener('agent:error', handler) }
   },
-  onToolAction: (callback: (data: { agent?: string; sessionId?: string; runId?: string; tool: string; args: Record<string, unknown> }) => void) => {
-    const handler = (_: unknown, data: { agent?: string; sessionId?: string; runId?: string; tool: string; args: Record<string, unknown> }) => callback(data)
+  onToolAction: (callback: (data: { agent?: string; sessionId: string | null; runId?: string; tool: string; args: Record<string, unknown> }) => void) => {
+    const handler = (_: unknown, data: { agent?: string; sessionId: string | null; runId?: string; tool: string; args: Record<string, unknown> }) => callback(data)
     ipcRenderer.on('agent:toolAction', handler)
     return () => { ipcRenderer.removeListener('agent:toolAction', handler) }
   },
-  onToolActionRequest: (callback: (data: { requestId: string; agent?: string; sessionId?: string; runId?: string; tool: string; args: Record<string, unknown> }) => void) => {
-    const handler = (_: unknown, data: { requestId: string; agent?: string; sessionId?: string; runId?: string; tool: string; args: Record<string, unknown> }) => callback(data)
+  onToolActionRequest: (callback: (data: { requestId: string; agent?: string; sessionId: string | null; runId?: string; tool: string; args: Record<string, unknown> }) => void) => {
+    const handler = (_: unknown, data: { requestId: string; agent?: string; sessionId: string | null; runId?: string; tool: string; args: Record<string, unknown> }) => callback(data)
     ipcRenderer.on('agent:toolActionRequest', handler)
     return () => { ipcRenderer.removeListener('agent:toolActionRequest', handler) }
   },
-  onCancelToolActionRequest: (callback: (data: { requestIds: string[] }) => void) => {
-    const handler = (_: unknown, data: { requestIds: string[] }) => callback(data)
+  onCancelToolActionRequest: (callback: (data: { requestIds: string[]; agent?: string; sessionId: string | null }) => void) => {
+    const handler = (_: unknown, data: { requestIds: string[]; agent?: string; sessionId: string | null }) => callback(data)
     ipcRenderer.on('agent:cancelToolActionRequest', handler)
     return () => { ipcRenderer.removeListener('agent:cancelToolActionRequest', handler) }
   },
@@ -245,13 +248,18 @@ const agentAPI = {
     payload?: Record<string, unknown>
     error?: string
   }) => ipcRenderer.invoke('agent:completeToolActionRequest', payload),
-  onConversationEvent: (callback: (data: unknown) => void) => {
-    const handler = (_: unknown, data: unknown) => callback(data)
+  // Stage V V3.2 — sessionId field surfaced on the wire payload. unknown
+  // shape retained for forward compat (renderer narrows further), but
+  // callers may always read `data.sessionId` per V3.2 contract.
+  onConversationEvent: (callback: (data: { sessionId: string | null } & Record<string, unknown>) => void) => {
+    const handler = (_: unknown, data: unknown) =>
+      callback(data as { sessionId: string | null } & Record<string, unknown>)
     ipcRenderer.on('agent:conversationEvent', handler)
     return () => { ipcRenderer.removeListener('agent:conversationEvent', handler) }
   },
-  onScopeRunEvent: (callback: (data: unknown) => void) => {
-    const handler = (_: unknown, data: unknown) => callback(data)
+  onScopeRunEvent: (callback: (data: { sessionId: string | null } & Record<string, unknown>) => void) => {
+    const handler = (_: unknown, data: unknown) =>
+      callback(data as { sessionId: string | null } & Record<string, unknown>)
     ipcRenderer.on('agent:scopeRunEvent', handler)
     return () => { ipcRenderer.removeListener('agent:scopeRunEvent', handler) }
   },
@@ -259,16 +267,16 @@ const agentAPI = {
   // Fires when the runtime's fire-and-forget syncTaskProjection() rejects,
   // so renderer diagnose UI can show the failure instead of pretending
   // sync went through.
-  onProjectionSyncFailed: (callback: (data: { scopeId: string; taskId: string | null; reason: string; timestamp: string }) => void) => {
-    const handler = (_: unknown, data: unknown) => callback(data as { scopeId: string; taskId: string | null; reason: string; timestamp: string })
+  onProjectionSyncFailed: (callback: (data: { scopeId: string; sessionId: string | null; taskId: string | null; reason: string; timestamp: string }) => void) => {
+    const handler = (_: unknown, data: unknown) => callback(data as { scopeId: string; sessionId: string | null; taskId: string | null; reason: string; timestamp: string })
     ipcRenderer.on('agent:projectionSyncFailed', handler)
     return () => { ipcRenderer.removeListener('agent:projectionSyncFailed', handler) }
   },
   // Phase 5.3 — subscribe to reference-skill hint state changes pushed by
   // main. Renderer uses this to refresh the "上下文已启用" badge immediately
   // instead of relying on next scope-run tick.
-  onReferenceSkillHintChanged: (callback: (data: { scopeId: string; change: 'armed' | 'cleared' }) => void) => {
-    const handler = (_: unknown, data: unknown) => callback(data as { scopeId: string; change: 'armed' | 'cleared' })
+  onReferenceSkillHintChanged: (callback: (data: { scopeId: string; sessionId: string | null; change: 'armed' | 'cleared' }) => void) => {
+    const handler = (_: unknown, data: unknown) => callback(data as { scopeId: string; sessionId: string | null; change: 'armed' | 'cleared' })
     ipcRenderer.on('agent:referenceSkillHintChanged', handler)
     return () => { ipcRenderer.removeListener('agent:referenceSkillHintChanged', handler) }
   },
@@ -278,10 +286,10 @@ const agentAPI = {
   // projections via `agent:listTaskProjections`. The 2-second
   // `agent:listActiveChildRuns` polling timer is retired in §1.1.
   onTaskProjectionsChanged: (
-    callback: (data: { scopeId: string; changedTaskIds: string[]; reason: 'create' | 'update' | 'delete' | 'supersede' }) => void,
+    callback: (data: { scopeId: string; sessionId: string | null; changedTaskIds: string[]; reason: 'create' | 'update' | 'delete' | 'supersede' }) => void,
   ) => {
     const handler = (_: unknown, data: unknown) =>
-      callback(data as { scopeId: string; changedTaskIds: string[]; reason: 'create' | 'update' | 'delete' | 'supersede' })
+      callback(data as { scopeId: string; sessionId: string | null; changedTaskIds: string[]; reason: 'create' | 'update' | 'delete' | 'supersede' })
     ipcRenderer.on('agent:taskProjectionsChanged', handler)
     return () => { ipcRenderer.removeListener('agent:taskProjectionsChanged', handler) }
   },

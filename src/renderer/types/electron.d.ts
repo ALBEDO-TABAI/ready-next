@@ -196,6 +196,12 @@ interface ConversationEventData {
   type: 'scope_created' | 'scope_updated' | 'message_added'
   scope: ConversationScopeData
   message?: ConversationScopeMessageData
+  /**
+   * Stage V V3.2 — top-level mirror of `scope.id` so renderer listeners can
+   * route per-session without reaching into the nested scope object. null
+   * when the push is not session-scoped (currently always set by main).
+   */
+  sessionId: string | null
 }
 
 interface ConversationAttachmentData {
@@ -650,6 +656,12 @@ type ScopeRunTerminalReasonData =
 interface ScopeRunEventData {
   type: 'started' | 'updated' | 'finished'
   scopeId: string
+  /**
+   * Stage V V3.2 — top-level mirror of `scopeId` so multi-session
+   * renderer wiring routes per-session without aliasing through scopeId.
+   * null when the event is not session-scoped.
+   */
+  sessionId: string | null
   agent: string
   runId?: string
   phase:
@@ -942,10 +954,14 @@ interface ElectronAgentAPI {
   pauseSchedule: (id: string) => Promise<IPCResponse<AgentCronTaskData>>
   resumeSchedule: (id: string) => Promise<IPCResponse<AgentCronTaskData>>
   deleteSchedule: (id: string) => Promise<{ success: boolean; error?: string }>
+  // Stage V V3.2 — push payloads carry `sessionId: string | null` (not
+  // optional). null = global event (not session-scoped); a string means
+  // the event belongs to a specific session. Renderer routes by this
+  // field rather than relying on the historical `scopeId` alias.
   onStream: (
     callback: (data: {
       agent: string
-      sessionId?: string
+      sessionId: string | null
       runId?: string
       chunk: string
       type: string
@@ -954,7 +970,7 @@ interface ElectronAgentAPI {
   onStatusChange: (
     callback: (data: {
       agent: string
-      sessionId?: string
+      sessionId: string | null
       runId?: string
       status: string
       isMock: boolean
@@ -963,7 +979,7 @@ interface ElectronAgentAPI {
   onError: (
     callback: (data: {
       agent: string
-      sessionId?: string
+      sessionId: string | null
       runId?: string
       error: string
       type: string
@@ -978,7 +994,7 @@ interface ElectronAgentAPI {
   onToolAction: (
     callback: (data: {
       agent?: string
-      sessionId?: string
+      sessionId: string | null
       runId?: string
       tool: string
       args: Record<string, unknown>
@@ -988,14 +1004,14 @@ interface ElectronAgentAPI {
     callback: (data: {
       requestId: string
       agent?: string
-      sessionId?: string
+      sessionId: string | null
       runId?: string
       tool: string
       args: Record<string, unknown>
     }) => void
   ) => () => void
   onCancelToolActionRequest: (
-    callback: (data: { requestIds: string[] }) => void
+    callback: (data: { requestIds: string[]; agent?: string; sessionId: string | null }) => void
   ) => () => void
   completeToolActionRequest: (payload: {
     requestId: string
@@ -1006,20 +1022,24 @@ interface ElectronAgentAPI {
   onConversationEvent: (callback: (data: ConversationEventData) => void) => () => void
   onScopeRunEvent: (callback: (data: ScopeRunEventData) => void) => () => void
   // Stage U PR U2.1 — projection sync failure diagnostic event.
+  // Stage V V3.2 — `sessionId` mirrors `scopeId` on the wire.
   onProjectionSyncFailed: (callback: (data: {
     scopeId: string
+    sessionId: string | null
     taskId: string | null
     reason: string
     timestamp: string
   }) => void) => () => void
   // Phase 5.3 — push-based reference-skill hint state changes. Renderer uses
   // this to refresh the "上下文已启用" badge immediately on arm/clear/sweep.
-  onReferenceSkillHintChanged: (callback: (data: { scopeId: string; change: 'armed' | 'cleared' }) => void) => () => void
+  // Stage V V3.2 — `sessionId` mirrors `scopeId` on the wire.
+  onReferenceSkillHintChanged: (callback: (data: { scopeId: string; sessionId: string | null; change: 'armed' | 'cleared' }) => void) => () => void
   // Stage O §0.4 — push notification on `task_projections` mutation. The
   // renderer uses scopeId to decide whether to refetch projections; the
   // 2-second `agent:listActiveChildRuns` polling timer is retired.
+  // Stage V V3.2 — `sessionId` mirrors `scopeId` on the wire.
   onTaskProjectionsChanged: (
-    callback: (data: TaskProjectionChangeEventData) => void,
+    callback: (data: TaskProjectionChangeEventData & { sessionId: string | null }) => void,
   ) => () => void
 }
 

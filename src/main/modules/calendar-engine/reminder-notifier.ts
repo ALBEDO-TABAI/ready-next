@@ -140,9 +140,13 @@ export function createReminderNotifier(deps: ReminderNotifierDeps): ReminderNoti
           win.focus()
           // Same channel the agent uses for mode switches; renderer already
           // wires `agent:toolAction` { tool: 'app.switchMode' }.
+          // Stage V V3.2 — reminder click is a global (no session) emit, but
+          // the push payload must carry sessionId per the V3.2 contract so
+          // listeners can distinguish global events. null = not session-scoped.
           win.webContents.send('agent:toolAction', {
             tool: 'app.switchMode',
             args: { mode: 'calendar', eventId: payload.eventId },
+            sessionId: null,
           })
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error)
