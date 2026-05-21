@@ -45,6 +45,20 @@ interface ReadyAgentOrchestratorOptions {
 }
 
 export class ReadyAgentOrchestrator extends EventEmitter {
+  /**
+   * Stage V V3.5 — hard cap on concurrent live sessions enforced at the
+   * main-process entry (plan §4 V3.5 / §10 R12). Defense in depth: the
+   * renderer's V3.4a disable is advisory; if a developer bypasses the UI
+   * via devtools (R12 risk), this cap still rejects the request. A
+   * "live" session is one whose state is NOT in the terminal set
+   * `{ done, failed, cancelled, closed }` — see `countLiveSessions()`.
+   *
+   * Reuse of an already-tracked sessionId never counts (it is not a new
+   * session, just a continuation of the existing turn loop), so this
+   * cap only fires when a NOVEL sessionId would push the live count
+   * past the limit.
+   */
+  private static readonly MAX_CONCURRENT_SESSIONS = 3
   private readonly domainAdapterEngine: DirectChatEngine
   private readonly sdkEngine: AgentSdkRuntime
   private readonly sessions: AgentSessionManager
@@ -163,6 +177,66 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     return sessionId ? `${agent}::${sessionId}` : agent
   }
 
+  /**
+   * Stage V V3.5 — count sessions that are NOT in a terminal state.
+   * Terminal set: `done`, `failed`, `cancelled`, `closed` (matches the
+   * V3.3d `isLiveSession` predicate semantics from the renderer side so
+   * the two layers agree on what "live" means).
+   *
+   * Backed by `AgentSessionManager.listStatesEnriched()` (added in V3.1)
+   * so a single source of truth governs both `listAllSessions()` and the
+   * limit check; if the terminal set ever grows, both layers move in
+   * lockstep through the manager.
+   */
+  private countLiveSessions(): number {
+    let count = 0
+    for (const snap of this.sessions.listStatesEnriched()) {
+      if (
+        snap.state !== 'done' &&
+        snap.state !== 'failed' &&
+        snap.state !== 'cancelled' &&
+        snap.state !== 'closed'
+      ) {
+        count += 1
+      }
+    }
+    return count
+  }
+
+  /**
+   * Stage V V3.5 — build the structured `session_limit_exceeded` error
+   * thrown by `send()` / `newSession()` when admitting a NOVEL sessionId
+   * would push the live count past `MAX_CONCURRENT_SESSIONS`. Carries
+   * `code` + `maxSessions` + `liveCount` so the IPC layer can echo them
+   * back to the renderer without re-parsing the message string.
+   */
+  private buildSessionLimitError(liveCount: number): Error & {
+    code: 'SESSION_LIMIT'
+    maxSessions: number
+    liveCount: number
+  } {
+    const err = new Error('session_limit_exceeded') as Error & {
+      code: 'SESSION_LIMIT'
+      maxSessions: number
+      liveCount: number
+    }
+    err.code = 'SESSION_LIMIT'
+    err.maxSessions = ReadyAgentOrchestrator.MAX_CONCURRENT_SESSIONS
+    err.liveCount = liveCount
+    return err
+  }
+
+  /**
+   * Stage V V3.5 — true if the (agent, sessionId) tuple is already
+   * tracked in the session manager (any state, including terminal).
+   * Used by the limit check to distinguish "novel session being
+   * admitted" from "continuation of an existing session" — only the
+   * former is subject to the cap.
+   */
+  private isKnownSession(agent: string, sessionId?: string): boolean {
+    return this.sessions.has(this.toTaskKey(agent, sessionId))
+  }
+
   private resolveDescriptor(internalKey: string): SessionDescriptor {
     const descriptor = this.descriptors.get(internalKey)
     if (descriptor) return descriptor
@@ -252,6 +326,17 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     const effectiveSessionId = sessionIdOverride || sessionId
     const internalKey = this.toInternalSessionKey(agent, effectiveSessionId)
     const taskKey = this.toTaskKey(agent, effectiveSessionId)
+    // Stage V V3.5 — main-side hard cap (plan §4 V3.5 / §10 R12). A
+    // NOVEL (agent, sessionId) tuple cannot be admitted if the live
+    // count is already at MAX_CONCURRENT_SESSIONS. Continuation of an
+    // existing session (any tracked state, terminal included) bypasses
+    // the check because it does not grow the live working set.
+    if (!this.isKnownSession(agent, effectiveSessionId)) {
+      const live = this.countLiveSessions()
+      if (live >= ReadyAgentOrchestrator.MAX_CONCURRENT_SESSIONS) {
+        throw this.buildSessionLimitError(live)
+      }
+    }
     this.descriptors.set(internalKey, { agent, sessionId })
     this.sessions.setState(taskKey, 'queued')
     this.activeRunIds.set(taskKey, effectiveRequestId)
@@ -459,6 +544,18 @@ export class ReadyAgentOrchestrator extends EventEmitter {
   }
 
   newSession(agent: string, sessionId?: string): void {
+    // Stage V V3.5 — same cap as `send()` (plan §4 V3.5 / §10 R12).
+    // Reusing an already-tracked (agent, sessionId) tuple is a session
+    // *reset*, not a new admission, so it bypasses the check. A novel
+    // tuple is rejected when the current live count is already at the
+    // cap so the renderer's V3.4a UI disable cannot be silently
+    // bypassed via devtools.
+    if (!this.isKnownSession(agent, sessionId)) {
+      const live = this.countLiveSessions()
+      if (live >= ReadyAgentOrchestrator.MAX_CONCURRENT_SESSIONS) {
+        throw this.buildSessionLimitError(live)
+      }
+    }
     const internalKey = this.toInternalSessionKey(agent, sessionId)
     this.descriptors.set(internalKey, { agent, sessionId })
     this.domainAdapterEngine.newSession(internalKey)

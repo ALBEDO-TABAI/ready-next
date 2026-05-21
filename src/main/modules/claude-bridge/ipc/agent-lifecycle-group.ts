@@ -43,6 +43,35 @@ interface IPCResponse<T = unknown> {
   mock?: boolean
   errorKind?: string
   persistence?: unknown
+  /**
+   * Stage V V3.5 — structured error tag for `session_limit_exceeded`.
+   * `code: 'SESSION_LIMIT'` lets the renderer pattern-match the failure
+   * without relying on `error` message parsing; `maxSessions` echoes
+   * the cap so the renderer can render a deterministic message even if
+   * the cap changes in the future.
+   */
+  code?: string
+  maxSessions?: number
+}
+
+/**
+ * Stage V V3.5 — narrow predicate for the structured
+ * `session_limit_exceeded` error thrown by
+ * `ReadyAgentOrchestrator.send()` / `newSession()`. The orchestrator
+ * builds the Error with `code: 'SESSION_LIMIT'` + `maxSessions` so the
+ * IPC layer can echo them back to the renderer without re-parsing the
+ * message string (R12 defense-in-depth).
+ */
+function isSessionLimitError(error: unknown): error is Error & {
+  code: 'SESSION_LIMIT'
+  maxSessions: number
+} {
+  return (
+    error instanceof Error &&
+    error.message === 'session_limit_exceeded' &&
+    (error as { code?: unknown }).code === 'SESSION_LIMIT' &&
+    typeof (error as { maxSessions?: unknown }).maxSessions === 'number'
+  )
 }
 
 /**
@@ -163,6 +192,21 @@ export const agentLifecycleGroup: IpcChannelGroup<AgentLifecycleGroupDeps> = {
           mock: false
         }
       } catch (error) {
+        // Stage V V3.5 — structured session-limit error gets a
+        // dedicated `code: 'SESSION_LIMIT'` + `maxSessions` echo so the
+        // renderer can render a friendly message without parsing
+        // `error`. Defense in depth per plan §10 R12: this fires even
+        // if the renderer V3.4a disable was bypassed.
+        if (isSessionLimitError(error)) {
+          deps.log(`agent:send rejected — session_limit_exceeded (max=${error.maxSessions})`)
+          return {
+            success: false,
+            error: 'session_limit_exceeded',
+            code: 'SESSION_LIMIT',
+            maxSessions: error.maxSessions,
+            mock: false,
+          }
+        }
         const errorMessage = error instanceof Error ? error.message : String(error)
         deps.log(`agent:send exception — ${errorMessage}`)
         return { success: false, error: errorMessage, mock: false }
@@ -179,6 +223,15 @@ export const agentLifecycleGroup: IpcChannelGroup<AgentLifecycleGroupDeps> = {
         deps.orchestrator.newSession(agent, sessionId)
         return { success: true, data: { cleared: true } }
       } catch (error) {
+        // Stage V V3.5 — same structured surfacing as `agent:send`.
+        if (isSessionLimitError(error)) {
+          return {
+            success: false,
+            error: 'session_limit_exceeded',
+            code: 'SESSION_LIMIT',
+            maxSessions: error.maxSessions,
+          }
+        }
         const errorMessage = error instanceof Error ? error.message : String(error)
         return { success: false, error: errorMessage }
       }
