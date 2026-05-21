@@ -39,7 +39,7 @@ import {
 import {
   getPolicyOpenAIToolBundle,
   type ToolPolicy,
-} from '../main/modules/agent-control/execution-tool-config'
+} from '../main/modules/agent-control/tool-policy/execution-tool-config'
 import {
   buildAuthorizationFromIdentity,
   buildExplicitNoSkillAuthorization,
@@ -443,7 +443,7 @@ test('prepareInitialRun: skills group visible + authorization=mode:selected (all
 
 test('filterPreferredSkillAnthropicTools: authorization=mode:none → strips skill_* even if in preferredSkillToolNames', async () => {
   const { filterPreferredSkillAnthropicTools } = await import(
-    '../main/modules/agent-control/execution-tool-skill-filters'
+    '../main/modules/agent-control/tool-policy/execution-tool-skill-filters'
   )
   const tools: Array<Record<string, unknown>> = [
     { name: 'document_open_tab' },
@@ -464,7 +464,7 @@ test('filterPreferredSkillAnthropicTools: authorization=mode:none → strips ski
 
 test('filterPreferredSkillAnthropicTools: authorization=mode:selected → keeps skill_* only when in preferredSkillToolNames AND authorized (intersection)', async () => {
   const { filterPreferredSkillAnthropicTools } = await import(
-    '../main/modules/agent-control/execution-tool-skill-filters'
+    '../main/modules/agent-control/tool-policy/execution-tool-skill-filters'
   )
   const tools: Array<Record<string, unknown>> = [
     { name: 'document_open_tab' },
@@ -491,7 +491,7 @@ test('filterPreferredSkillAnthropicTools: authorization=mode:selected → keeps 
 
 test('filterPreferredSkillOpenAITools: authorization=mode:none → strips skill_* under OpenAI tool shape', async () => {
   const { filterPreferredSkillOpenAITools } = await import(
-    '../main/modules/agent-control/execution-tool-skill-filters'
+    '../main/modules/agent-control/tool-policy/execution-tool-skill-filters'
   )
   const tools: Array<Record<string, unknown>> = [
     { function: { name: 'document_open_tab' } },
@@ -511,7 +511,7 @@ test('filterPreferredSkillOpenAITools: authorization=mode:none → strips skill_
 
 test('mergeForceDocumentAllowedNames: authorization=mode:none → does NOT merge skill names into forced-document allowlist', async () => {
   const { mergeForceDocumentAllowedNames } = await import(
-    '../main/modules/agent-control/execution-tool-skill-filters'
+    '../main/modules/agent-control/tool-policy/execution-tool-skill-filters'
   )
   const baseAllowed = new Set(['document_open_tab', 'document_save_tab'])
   const merged = mergeForceDocumentAllowedNames(
@@ -528,7 +528,7 @@ test('mergeForceDocumentAllowedNames: authorization=mode:none → does NOT merge
 
 test('mergeForceDocumentAllowedNames: authorization=mode:selected → merges only authorized skill names', async () => {
   const { mergeForceDocumentAllowedNames } = await import(
-    '../main/modules/agent-control/execution-tool-skill-filters'
+    '../main/modules/agent-control/tool-policy/execution-tool-skill-filters'
   )
   const baseAllowed = new Set(['document_open_tab'])
   const auth = buildSelectedSkillToolAuthorization({
