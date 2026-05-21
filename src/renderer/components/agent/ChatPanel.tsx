@@ -23,7 +23,6 @@ import {
 import {
   useAgent,
   initAgentListeners,
-  AgentArtifact,
   ChatAttachment,
   ConversationScope,
   ScopeRunState
@@ -59,19 +58,9 @@ import {
   formatTaskStepDisplayTitle,
   getTaskRunDisplayKey,
   getTaskStartModeLabel,
-  hasTaskRunResumeIdentity,
-  deriveTaskCardRuntimeState,
   isInternalAgentHandoffTask,
   type TaskSectionKey,
 } from '../../modules/agent/taskCardViewModel'
-import {
-  childRunToPhase as childRunPhase,
-  childRunToProjectionStatus as childRunProjectionStatus,
-  childRunToTaskActions as childRunActions,
-  childRunToWaitingFor as childRunWaitingFor,
-  interactionStateToBadgeLabel,
-  DEBUG_PLACEHOLDER_TASK_SUMMARY,
-} from '../../modules/agent/task-status-vocabulary'
 import { createDebouncedFetch } from '../../modules/agent/debouncedFetch'
 import { formatSingleLinePreview, formatToolTracePreview } from '../../modules/agent/toolTracePreview'
 import { filterUserVisibleToolTraceEvents } from '../../modules/agent/toolTraceVisibility'
@@ -108,46 +97,35 @@ interface MarkdownNode {
 
 type TableAlignment = 'left' | 'center' | 'right' | null
 
-interface PersistedScopeRunSummary {
-  scopeId: string
-  agent: string
-  title: string
-  sourceKind: 'local' | 'channel'
-  sourceId: string
-  channelKey: string
-  threadKey: string
-  phase: ScopeRunState['phase']
-  // Stage O — `terminalReason` is on the main-side ScopeRunSummary
-  // (`src/main/modules/agent-control/types.ts`); the persisted IPC
-  // payload carries it forward, and `deriveTaskCardRuntimeState`
-  // consumes it to decide background_running / budget_paused / waiting.
-  // Mirrors `ScopeRunState.terminalReason` (renderer types.ts:363).
-  terminalReason?: ScopeRunState['terminalReason']
-  taskId?: string | null
-  taskTitle?: string | null
-  taskSummary?: string | null
-  steps?: ScopeRunState['steps']
-  currentStepId?: string | null
-  waitingFor?: ScopeRunState['waitingFor']
-  resumableActions?: ScopeRunState['resumableActions']
-  recentArtifacts?: ScopeRunState['recentArtifacts']
-  taskContinuation?: ScopeRunState['taskContinuation']
-  progress?: ScopeRunState['progress']
-  memoryCapture?: ScopeRunState['memoryCapture']
-  blockedReason?: string | null
-  error?: string | null
-  updatedAt: string
-}
-
-type PersistedTaskProjection = TaskProjectionRecordData
+// Stage V V1.1 — `PersistedScopeRunSummary` interface + `PersistedTaskProjection`
+// alias moved to `./chat-panel/helpers/projection.ts` so the pure projection
+// helpers (`resolveProjectionForTaskRun`, etc.) can compile alone. ChatPanel
+// re-imports both names above for state typing; behavior is unchanged.
 
 // Stage 6 L6: TaskCardRun type lives in task-card-from-projection.ts with a
 // module-private brand symbol; constructors are the only legitimate path.
 import type { TaskCardRun } from './task-card-from-projection'
+import { taskProjectionToTaskCardRun } from './task-card-from-projection'
+// Stage V V1.1 — pure helpers extracted to ./chat-panel/helpers/.
 import {
-  buildPlaceholderProjectionFromActiveChildRun,
-  taskProjectionToTaskCardRun,
-} from './task-card-from-projection'
+  normalizeProjectionSteps,
+  resolveProjectionForTaskRun,
+  resolveProjectionWaitingFor,
+  activeChildRunDebugRow,
+  memoryCaptureSourceLabel,
+  mapScopeToConversation,
+  progressPercent,
+  type PersistedScopeRunSummary,
+  type PersistedTaskProjection,
+} from './chat-panel/helpers/projection'
+import {
+  taskTypeBadgeLabel,
+  interactionStateBadgeLabel,
+  recoveryBadgeLabel,
+  budgetWarningBadgeLabel,
+  isTaskVisible,
+  isBackgroundTaskRun,
+} from './chat-panel/helpers/badges'
 
 interface SerializedTaskSnapshot {
   scopeId: string
@@ -184,222 +162,13 @@ interface SerializedToolTraceSnapshotItem {
   timestamp: string
 }
 
-function normalizeProjectionSteps(
-  steps: TaskProjectionRecordData['steps'] | undefined,
-): ScopeRunState['steps'] {
-  return (steps || []).map((step) => ({
-    id: step.id,
-    title: step.title || step.description || step.id,
-    status: step.status || 'pending',
-    detail: step.detail,
-    updatedAt: step.updatedAt || new Date(0).toISOString(),
-  }))
-}
-
-function resolveProjectionForTaskRun(
-  projections: PersistedTaskProjection[] | undefined,
-  run: Pick<TaskCardRun, 'taskId' | 'taskContinuation'>,
-  persistedRun?: Pick<PersistedScopeRunSummary, 'taskId' | 'taskContinuation'> | null,
-): PersistedTaskProjection | null {
-  const items = projections || []
-  const continuationCandidateIds = (continuation: ScopeRunState['taskContinuation'] | undefined) => {
-    if (!continuation) return []
-    return [
-      continuation.taskId,
-      continuation.childRunId ? `skill-child:${continuation.childRunId}` : null,
-      continuation.detachedTaskId ? `detached:${continuation.detachedTaskId}` : null,
-      continuation.taskRunId,
-      continuation.jobId,
-    ]
-  }
-  const candidateIds = [
-    run.taskId,
-    run.taskContinuation?.taskId,
-    persistedRun?.taskId,
-    ...continuationCandidateIds(run.taskContinuation),
-    ...continuationCandidateIds(persistedRun?.taskContinuation),
-  ]
-    .map((item) => String(item || '').trim())
-    .filter(Boolean)
-
-  for (const candidateId of candidateIds) {
-    const matched = items.find((item) => item.taskId === candidateId)
-    if (matched) return matched
-  }
-
-  return selectFallbackProjection(items)
-}
-
-function isStalePausedProjection(item: PersistedTaskProjection): boolean {
-  const actions = item.resumableActions || []
-  return item.degradationReason === 'stale_paused'
-    && item.canResume !== true
-    && !actions.includes('continue')
-    && !actions.includes('retry')
-}
-
-function isLiveProjectionCandidate(item: PersistedTaskProjection): boolean {
-  return item.status === 'running'
-    || item.interactionState === 'resuming'
-    || (item.status === 'blocked' && !isStalePausedProjection(item))
-}
-
-function selectFallbackProjection(items: PersistedTaskProjection[]): PersistedTaskProjection | null {
-  return items.find(isLiveProjectionCandidate)
-    || items.find((item) => item.status === 'done' && (item.recentArtifacts?.length || 0) > 0)
-    || items.find((item) => item.status === 'done')
-    || items[0]
-    || null
-}
-
-/**
- * Stage O §1.6 — kept (trimmed). Translates `projection.interactionState`
- * into `waitingFor` for callers that need the synthesised value when
- * the projection's own `waitingFor` is unset. The Stage O gate's
- * named-helper allowance (`scripts/check-task-card-projection-only.cjs`)
- * lists this helper by name; do not rename without updating the gate.
- *
- * Stage O removed the `fallback` parameter — `mergedTaskRuns` no longer
- * carries `run.waitingFor` into `TaskCardRun`, so a projection-empty
- * waiting state is `'none'`, not whatever transient phase the
- * scopeRunStates store happened to hold.
- */
-function resolveProjectionWaitingFor(
-  projection: PersistedTaskProjection | null,
-): ScopeRunState['waitingFor'] {
-  if (!projection) return 'none'
-  if (projection.waitingFor) return projection.waitingFor
-  if (projection.interactionState === 'awaiting_confirmation') return 'confirmation'
-  if (projection.interactionState === 'awaiting_clarification') return 'clarification'
-  if (projection.interactionState === 'human_takeover') return 'agent_result'
-  return 'none'
-}
-
-// Stage O §1.6 — `resolveProjectionBlockedReason`,
-// `shouldPreferProjectionContinuation`, and `resolveTaskContinuationForProjection`
-// are retired. With projection-only field sourcing
-// (`projection?.blockedReason ?? null` / `projection?.continuationRef ?? null`),
-// the helpers reduced to single-line nullish coalescing.
-
-// Stage O §1.4 / §O5 — `childRunTaskSummary` is retired. It used to
-// synthesize Chinese status sentences from per-child runtime fields,
-// which is exactly the "UI guesses status from text" pattern Stage O
-// bans. The only caller — `activeChildRunDebugRow` — now writes a
-// fixed `DEBUG_PLACEHOLDER_TASK_SUMMARY` instead, and visualState /
-// actions continue to come from `deriveTaskCardRuntimeState`.
-
-function artifactFromPath(kind: string, label: string, path: string | null | undefined, childRunId: string): AgentArtifact | null {
-  if (!path) return null
-  return {
-    id: `child:${childRunId}:${kind}:${path}`,
-    module: 'skill',
-    kind,
-    label,
-    path,
-    createdAt: new Date().toISOString(),
-    meta: { childRunId },
-  }
-}
-
-/**
- * Stage 6 L6 contract: this function synthesizes a `TaskCardRun` from the
- * `agent:listActiveChildRuns` polling feed and is the renderer's last-resort
- * fallback when the persisted `task_projections` table has not yet caught up.
- *
- * It must remain a debug/control-only path; do not promote it to the primary
- * task-card source. The canonical view truth is `taskProjectionsForScope(...)`,
- * fed by main-side projection write-back. When projections cover all
- * scopes/tasks, this synthesis can be removed entirely (Stage 7+ scope).
- *
- * The L6 CI gate (`scripts/check-task-card-single-source.cjs`) enforces:
- *  - The legacy synthesis name (the pre-Stage-6 form of this function) does
- *    not appear anywhere; only the debug-named form is allowed.
- *  - This function continues to live in `ChatPanel.tsx` (or `active-child-run-debug.ts`
- *    after the Stage 7 file split).
- */
-function activeChildRunDebugRow(row: ActiveChildRunSummaryData, fallbackScopeId: string | null): TaskCardRun | null {
-  const scopeId = row.scopeId || fallbackScopeId
-  if (!scopeId) return null
-  const status = childRunProjectionStatus(row)
-  const updatedAt = row.progress?.updatedAt || new Date().toISOString()
-  const artifacts = [
-    artifactFromPath('folder', '输出目录', row.outputDir, row.childRunId),
-    artifactFromPath('run_state', 'run_state.json', row.runStatePath, row.childRunId),
-  ].filter((value): value is NonNullable<ScopeRunState['recentArtifacts']>[number] => value !== null)
-  return buildPlaceholderProjectionFromActiveChildRun({
-    scopeId,
-    taskId: `skill-child:${row.childRunId}`,
-    phase: childRunPhase(row),
-    status,
-    title: '后台任务',
-    taskTitle: `后台技能任务 · ${row.skillId}`,
-    // Stage O §1.4 — debug fallback rows must NOT translate runtime fields
-    // into Chinese status sentences. Use the canonical placeholder so the
-    // user sees an honest "projection 暂未覆盖" hint instead of a fake
-    // "后台任务已完成 · …" line during the projection-write transient.
-    taskSummary: DEBUG_PLACEHOLDER_TASK_SUMMARY,
-    steps: [{
-      id: `child_run:${row.childRunId}`,
-      title: row.progress?.stage || '后台技能执行',
-      status:
-        status === 'done'
-          ? 'done'
-          : status === 'failed'
-            ? 'error'
-            : status === 'blocked'
-              ? 'blocked'
-              : 'running',
-      detail: DEBUG_PLACEHOLDER_TASK_SUMMARY,
-      updatedAt,
-    }],
-    currentStepId: `child_run:${row.childRunId}`,
-    waitingFor: childRunWaitingFor(row),
-    resumableActions: childRunActions(row),
-    recentArtifacts: artifacts,
-    taskContinuation: {
-      taskId: `skill-child:${row.childRunId}`,
-      stepId: `child_run:${row.childRunId}`,
-      blockerType: status === 'running' ? 'background_running' : status,
-      pauseReason: status === 'running' ? 'background_running' : status,
-      childRunId: row.childRunId,
-      skillId: row.skillId,
-      runStatePath: row.runStatePath,
-      outputDir: row.outputDir,
-      progressFingerprint: row.progress?.fingerprint || null,
-    },
-    progress: row.progress,
-    blockedReason: row.blockedReason,
-    updatedAt,
-    toolTrace: [],
-  }, row)
-}
-
-function memoryCaptureSourceLabel(
-  sourceType: 'resident_agent' | 'resident_user' | 'scope_memory' | 'trigger_rule' | undefined
-): string {
-  switch (sourceType) {
-    case 'resident_agent':
-      return '常驻记忆'
-    case 'resident_user':
-      return '用户偏好'
-    case 'scope_memory':
-      return '当前任务摘要'
-    case 'trigger_rule':
-      return '规则沉淀'
-    default:
-      return '记忆'
-  }
-}
-
-function mapScopeToConversation(scope: ConversationScope) {
-  return {
-    id: scope.id,
-    agent: scope.agent,
-    title: scope.title,
-    created_at: scope.createdAt,
-    updated_at: scope.updatedAt
-  }
-}
+// Stage V V1.1 — `normalizeProjectionSteps`, `resolveProjectionForTaskRun`,
+// `isStalePausedProjection`, `isLiveProjectionCandidate`,
+// `selectFallbackProjection`, `resolveProjectionWaitingFor`,
+// `artifactFromPath`, `activeChildRunDebugRow`, `memoryCaptureSourceLabel`,
+// `mapScopeToConversation` moved to `./chat-panel/helpers/projection.ts`.
+// `progressPercent` (originally below the markdown block) is colocated there too.
+// All names are re-imported above; behavior unchanged.
 
 function parseMarkdown(raw: string): MarkdownNode[] {
   const nodes: MarkdownNode[] = []
@@ -752,115 +521,10 @@ function MarkdownContent({ content }: { content: string }) {
   )
 }
 
-function taskTypeBadgeLabel(taskType: TaskCardRun['taskType'] | undefined): string {
-  switch (taskType) {
-    case 'direct_answer':
-      return '直答'
-    case 'short_task':
-      return '短任务'
-    case 'multi_step_task':
-      return '多步任务'
-    case 'media_task':
-      return '媒体任务'
-    case 'continuation':
-      return '继续任务'
-    default:
-      return '任务'
-  }
-}
-
-function interactionStateBadgeLabel(
-  interactionState: TaskCardRun['interactionState'] | undefined
-): string {
-  return interactionStateToBadgeLabel(interactionState)
-}
-
-function recoveryBadgeLabel(recoveryHistory: RecoveryRecordData[]): string {
-  const latest = recoveryHistory[recoveryHistory.length - 1]
-  if (!latest) return '自动恢复'
-  switch (latest.kind) {
-    case 'rate_limit':
-      return '限流恢复'
-    case 'context_overflow':
-      return '压缩恢复'
-    case 'timeout_model':
-      return '模型超时恢复'
-    case 'timeout_tool':
-      return '工具超时恢复'
-    case 'auth':
-      return '认证恢复'
-    case 'transient':
-      return '重试恢复'
-    case 'host_unavailable':
-      return '宿主降级'
-    default:
-      return '自动恢复'
-  }
-}
-
-function budgetWarningBadgeLabel(level: TaskProjectionRecordData['budgetWarningLevel']): string | null {
-  switch (level) {
-    case 'warning':
-      return '预算预警'
-    case 'converge':
-      return '接近上限'
-    case 'exhausted':
-      return '预算耗尽'
-    default:
-      return null
-  }
-}
-
-function progressPercent(progress: ScopeRunState['progress'] | undefined | null): number | null {
-  if (!progress) return null
-  if (progress.overallCoverage != null) {
-    return Math.max(0, Math.min(100, Math.round(progress.overallCoverage * 100)))
-  }
-  if (progress.total && progress.total > 0 && progress.completed != null) {
-    return Math.max(0, Math.min(100, Math.round((progress.completed / progress.total) * 100)))
-  }
-  if (progress.coverage != null) return Math.max(0, Math.min(100, Math.round(progress.coverage * 100)))
-  return null
-}
-
-function isTaskVisible(run: Omit<TaskCardRun, '__brand'> | null | undefined): boolean {
-  if (!run) return false
-  return Boolean(
-    run.taskTitle ||
-    run.taskSummary ||
-    run.progress ||
-    (run.steps && run.steps.length > 0) ||
-    (run.memoryCapture && run.memoryCapture.status !== 'dismissed')
-  )
-}
-
-function isBackgroundTaskRun(run: TaskCardRun | null | undefined): boolean {
-  if (!run) return false
-  // Stage O §1.9 — both the visual state ("after-the-fact label") and
-  // the foreground/background grouping ("which pile does this card go
-  // into") share a single decision point: `deriveTaskCardRuntimeState`.
-  // This deliberately treats `budget_paused` cards as background — they
-  // are not actively waiting on the user — while their per-card visual
-  // label stays the budget-paused canonical label (resolved via
-  // `taskCardVisualStateLabel('budget_paused')` in the view-model).
-  // The `childOrDetachedIdentity` clause keeps Stage 6 L6's
-  // "child/detached resume identity → background pile until completion"
-  // semantics so the foreground pile stays clean when the user spawns
-  // a long-running skill task.
-  const taskId = String(run.taskId || run.taskContinuation?.taskId || '').trim()
-  const childOrDetachedIdentity = Boolean(
-    run.taskContinuation?.childRunId ||
-    run.taskContinuation?.detachedTaskId ||
-    taskId.startsWith('skill-child:') ||
-    taskId.startsWith('detached:'),
-  )
-  const visualState = deriveTaskCardRuntimeState(run).visualState
-  return (
-    visualState === 'background_running'
-    || visualState === 'budget_paused'
-    || (childOrDetachedIdentity && hasTaskRunResumeIdentity(run))
-  )
-}
+// Stage V V1.1 — `taskTypeBadgeLabel`, `interactionStateBadgeLabel`,
+// `recoveryBadgeLabel`, `budgetWarningBadgeLabel`, `isTaskVisible`,
+// `isBackgroundTaskRun` moved to `./chat-panel/helpers/badges.ts`.
+// All names are re-imported above; behavior unchanged.
 
 function TaskCard({
   run,
