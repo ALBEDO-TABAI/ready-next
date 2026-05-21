@@ -46,6 +46,7 @@ import { sourceGroup } from './ipc/source-group'
 import { itemGroup } from './ipc/item-group'
 import { analysisGroup } from './ipc/analysis-group'
 import { fetchGroup } from './ipc/fetch-group'
+import { diagnosticsGroup } from './ipc/diagnostics-group'
 import type { AddSourceCoreInput, AddSourceCoreResult } from './ipc/engine-deps'
 import type { IpcDisposeHandle } from './ipc/types'
 
@@ -217,6 +218,15 @@ let analysisGroupDispose: IpcDisposeHandle | null = null
  * registration binds.
  */
 let fetchGroupDispose: IpcDisposeHandle | null = null
+
+/**
+ * Stage V V2.2e — dispose handle returned by `diagnosticsGroup.register`.
+ * The 2 runtime-health channels (`rss:repairRuntime`, `rss:diagnostics`)
+ * live in `ipc/diagnostics-group.ts`; mirror of the prior four dispose
+ * slots so dev-reload re-entry into `setupRSSIPC` releases every group
+ * before the next registration binds.
+ */
+let diagnosticsGroupDispose: IpcDisposeHandle | null = null
 
 export function setRSSBrowserController(controller: BrowserController | null): void {
   rssBrowserController = controller
@@ -1104,111 +1114,42 @@ export function setupRSSIPC(useMock = false): void {
     },
   )
 
-  ipcMain.handle('rss:repairRuntime', async () => {
-    if (useMock) {
-      return createSuccessResponse({ repaired: false, mock: true }, true)
-    }
-
-    try {
-      await rsshubManager.stop().catch(() => {
-        // ignore stop failures during repair
-      })
-      const healthy = await rsshubManager.ensureHealthy()
-      const rsshubStatus = await rsshubManager.describeStatus()
-      return createSuccessResponse(
-        {
-          repaired: healthy,
-          rsshub: rsshubStatus,
-        },
-        false,
-      )
-    } catch (error) {
-      return createErrorResponse(error instanceof Error ? error.message : String(error))
-    }
-  })
-
-  ipcMain.handle('rss:diagnostics', async () => {
-    if (useMock) {
-      return createSuccessResponse(
-        {
-          rsshubRequired: false,
-          rsshub: {
-            state: 'mock',
-            running: false,
-            port: 0,
-            baseUrl: null,
-            restartCount: 0,
-            lastError: null,
-            lastStartupError: null,
-            lastRuntimeError: null,
-            lastRuntimeErrorAt: null,
-            startedAt: null,
-            exitedAt: null,
-            chromium: {
-              ready: false,
-              executablePath: null,
-              source: 'none',
-              cacheDir: '',
-              buildId: '',
-              downloadSupported: null,
-              lastCheckedAt: null,
-              lastError: null,
-            },
-          },
-          update: rssUpdateLock.getStatus(),
-          lastFetchInvocation: loadFetchInvocationSnapshot(),
-          artifacts: {
-            root: getArtifactsRootDir(),
-            hasOpml: false,
-            benchmarkJson: null,
-            benchmarkMarkdown: null,
-          },
-          benchmark: null,
-          sources: [],
-          capabilityMatrix: getRouteCapabilityMatrix(),
-        },
-        true,
-      )
-    }
-
-    try {
-      const rsshubRequired = await warmEmbeddedRSSHubForDiagnostics()
-      const opmlPath = join(getArtifactsRootDir(), 'subscriptions.opml')
-      const benchmarkJsonPath = join(getArtifactsRootDir(), 'benchmark.latest.json')
-      const benchmarkMarkdownPath = join(getArtifactsRootDir(), 'benchmark.latest.md')
-      const latestBenchmark = await loadLatestBenchmarkSnapshot()
-      let hasOpml = false
-      try {
-        await readFile(opmlPath, 'utf8')
-        hasOpml = true
-      } catch {
-        hasOpml = false
-      }
-
-      const rsshubStatus = await rsshubManager.describeStatus()
-      const sources = rssRepository.getRSSSources() as DBRSSSource[]
-      return createSuccessResponse(
-        {
-          rsshub: rsshubStatus,
-          rsshubRequired,
-          update: rssUpdateLock.getStatus(),
-          lastFetchInvocation: loadFetchInvocationSnapshot(),
-          artifacts: {
-            root: getArtifactsRootDir(),
-            hasOpml,
-            // fire-and-forget: probe existence by attempting read; null means "not present" — the diagnostic snapshot just omits the path.
-            benchmarkJson: await readFile(benchmarkJsonPath, 'utf8').then(() => benchmarkJsonPath).catch(() => null),
-            // fire-and-forget: probe existence by attempting read; null means "not present" — the diagnostic snapshot just omits the path.
-            benchmarkMarkdown: await readFile(benchmarkMarkdownPath, 'utf8').then(() => benchmarkMarkdownPath).catch(() => null),
-          },
-          benchmark: latestBenchmark,
-          sources: buildSourceDiagnostics(sources),
-          capabilityMatrix: getRouteCapabilityMatrix(),
-        },
-        false,
-      )
-    } catch (error) {
-      return createErrorResponse(error instanceof Error ? error.message : String(error))
-    }
+  // Stage V V2.2e — runtime-health channels (`rss:repairRuntime`,
+  // `rss:diagnostics`) moved into `diagnosticsGroup`. The group owns
+  // mock-mode dispatch and response shaping; every collaborator (rsshub
+  // manager stop/ensure-healthy/describe, update lock, repository
+  // `getRSSSources`, the diagnostics helpers, fetch-invocation snapshot
+  // loader, benchmark snapshot loader, artifacts directory probe, the
+  // file-read existence probe) is injected via deps so the group never
+  // imports the rsshub / repository / fs chain directly. Dev-reload
+  // re-entry disposes the prior handle first so listener slots stay
+  // clean — same pattern as SourceGroup / ItemGroup / AnalysisGroup /
+  // FetchGroup above.
+  if (diagnosticsGroupDispose) {
+    try { diagnosticsGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    diagnosticsGroupDispose = null
+  }
+  diagnosticsGroupDispose = diagnosticsGroup.register(ipcMain, {
+    useMock,
+    getRSSSources: () => rssRepository.getRSSSources() as DBRSSSource[],
+    rssUpdateLock,
+    rsshubStop: () => rsshubManager.stop(),
+    rsshubEnsureHealthy: () => rsshubManager.ensureHealthy(),
+    describeRsshubStatus: () => rsshubManager.describeStatus(),
+    warmEmbeddedRSSHubForDiagnostics,
+    buildSourceDiagnostics: (sources) =>
+      buildSourceDiagnostics(sources.map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        url: entry.url,
+        group_name: entry.group_name,
+        platform: entry.platform,
+      }))),
+    getRouteCapabilityMatrix,
+    loadFetchInvocationSnapshot,
+    loadLatestBenchmarkSnapshot,
+    getArtifactsRootDir,
+    readFileUtf8: (path) => readFile(path, 'utf8'),
+    joinPath: (...parts) => join(...parts),
   })
 }
