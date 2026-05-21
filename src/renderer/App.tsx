@@ -4,6 +4,7 @@ import WorkbenchMode from './pages/WorkbenchMode'
 import ReadyMode from './pages/ReadyMode'
 import Settings from './pages/Settings'
 import PetWindow from './pages/PetWindow'
+import FastCardOverlayWindow from './pages/FastCardOverlayWindow'
 import { useKeyboardShortcuts } from './hooks/useKeyboardShortcuts'
 import { ErrorBoundary } from './components/ErrorBoundary'
 import RitualOverlay from './components/overlay/RitualOverlay'
@@ -128,6 +129,13 @@ function App() {
     return (
       <ErrorBoundary>
         <PetWindow />
+      </ErrorBoundary>
+    )
+  }
+  if (location.pathname === '/browser-fastcard-overlay') {
+    return (
+      <ErrorBoundary>
+        <FastCardOverlayWindow />
       </ErrorBoundary>
     )
   }

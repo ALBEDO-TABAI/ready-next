@@ -1,0 +1,15 @@
+{
+  "id": "image-reverse-descriptor",
+  "name": "image-reverse-descriptor",
+  "displayName": "Image Reverse Descriptor",
+  "description": "网页图片反推描述词：从单张图片生成主体、场景、构图、光线、色彩、材质与风格关键词",
+  "version": "0.1.0",
+  "runtime": "reference",
+  "execution": { "mode": "advisory" },
+  "actions": {
+    "read_skill": {
+      "runtime": "reference",
+      "visibility": "internal"
+    }
+  }
+}

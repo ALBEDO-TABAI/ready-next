@@ -4,6 +4,14 @@ import type { BrowserUtilityMenuRequest } from '../shared/browser-utility-menu'
 import type { NativeContextMenuRequest } from '../shared/native-context-menu'
 import type { RendererAgentMetricName } from '../shared/renderer-agent-metrics'
 import type { PetActivitySnapshot, PetSettings, PetStickyNoteInput, PetWindowSnapshot } from '../shared/pet'
+import type {
+  BrowserFastCardContextActionEvent,
+  FastCardOverlayCommand,
+  FastCardOverlaySnapshot,
+  FastCardDescribeImageRequest,
+  FastCardResolveVideoRequest,
+  FastCardTranslateRequest,
+} from '../shared/fastcard'
 
 type ContinuationIntentPayload = {
   taskId: string
@@ -373,6 +381,33 @@ const browserAPI = {
     const handler = (_: unknown, url: string): void => callback(url)
     ipcRenderer.on('browser:newTabRequest', handler)
     return () => ipcRenderer.removeListener('browser:newTabRequest', handler)
+  },
+  onFastCardContextAction: (callback: (data: BrowserFastCardContextActionEvent) => void) => {
+    const handler = (_: unknown, data: BrowserFastCardContextActionEvent): void => callback(data)
+    ipcRenderer.on('browser:fastCardContextAction', handler)
+    return () => ipcRenderer.removeListener('browser:fastCardContextAction', handler)
+  },
+  translateFastCardSelection: (payload: FastCardTranslateRequest) =>
+    ipcRenderer.invoke('browser:fastCardTranslateSelection', payload),
+  describeFastCardImage: (payload: FastCardDescribeImageRequest) =>
+    ipcRenderer.invoke('browser:fastCardDescribeImage', payload),
+  resolveFastCardVideo: (payload: FastCardResolveVideoRequest) =>
+    ipcRenderer.invoke('browser:fastCardResolveVideo', payload),
+  showFastCardOverlay: (payload: FastCardOverlaySnapshot) =>
+    ipcRenderer.invoke('browser:fastCardOverlayShow', payload),
+  hideFastCardOverlay: () =>
+    ipcRenderer.invoke('browser:fastCardOverlayHide'),
+  sendFastCardOverlayCommand: (command: FastCardOverlayCommand) =>
+    ipcRenderer.invoke('browser:fastCardOverlayCommand', command),
+  onFastCardOverlayCommand: (callback: (command: FastCardOverlayCommand) => void) => {
+    const handler = (_: unknown, command: FastCardOverlayCommand): void => callback(command)
+    ipcRenderer.on('browser:fastCardOverlayCommand', handler)
+    return () => ipcRenderer.removeListener('browser:fastCardOverlayCommand', handler)
+  },
+  onFastCardOverlaySnapshot: (callback: (snapshot: FastCardOverlaySnapshot) => void) => {
+    const handler = (_: unknown, snapshot: FastCardOverlaySnapshot): void => callback(snapshot)
+    ipcRenderer.on('browser:fastCardOverlaySnapshot', handler)
+    return () => ipcRenderer.removeListener('browser:fastCardOverlaySnapshot', handler)
   },
 
   // Bookmarks

@@ -17,9 +17,28 @@ import {
 } from '../../modules/browser/url-utils'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { useBrowserTabs } from '../../stores/useBrowserTabs'
+import { useFastCard } from '../../stores/useFastCard'
 import { toFileUrl } from '../../utils/dragDrop'
 import type { BrowserUtilityMenuKind } from '../../../shared/browser-utility-menu'
 import type { BrowserHostLayoutPhase } from '../../../shared/browser-view-layout'
+import {
+  buildFastCardItemTags,
+  createFastCardId,
+  createFastCardMarkdownFilename,
+  detectFastCardTargetLanguage,
+  renderFastCardMarkdown,
+  type BrowserFastCardContextActionEvent,
+  type BrowserFastCardImageTarget,
+  type BrowserFastCardTarget,
+  type BrowserFastCardTextTarget,
+  type BrowserFastCardVideoTarget,
+  type FastCardOverlayCommand,
+  type FastCardOverlaySnapshot,
+  type FastCardItem,
+  type FastCardResultPanelData,
+  type FastCardSource,
+  type FastCardVideoMeta,
+} from '../../../shared/fastcard'
 import {
   WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM,
   WORKBENCH_CANVAS_OUTER_PADDING_TOP,
@@ -66,6 +85,56 @@ function BrowserSplitResizeHandle({
   )
 }
 
+function fastCardSourceFromTarget(target: BrowserFastCardTarget): FastCardSource {
+  return {
+    pageUrl: target.pageUrl,
+    pageTitle: target.pageTitle,
+    domain: target.domain || extractBrowserDomain(target.pageUrl || ''),
+    tabId: target.tabId,
+    capturedAt: target.capturedAt,
+  }
+}
+
+function finalizeFastCardItem(item: Omit<FastCardItem, 'tags'>): FastCardItem {
+  const withTags: FastCardItem = item
+  return { ...withTags, tags: buildFastCardItemTags(withTags) }
+}
+
+function createTextFastCardItem(target: BrowserFastCardTextTarget): FastCardItem {
+  return finalizeFastCardItem({
+    id: createFastCardId('text'),
+    kind: 'text',
+    createdAt: Date.now(),
+    text: target.text,
+    title: '文字',
+    source: fastCardSourceFromTarget(target),
+  })
+}
+
+function createImageFastCardItem(target: BrowserFastCardImageTarget): FastCardItem {
+  return finalizeFastCardItem({
+    id: createFastCardId('image'),
+    kind: 'image',
+    createdAt: Date.now(),
+    imageUrl: target.imageUrl,
+    alt: target.alt,
+    caption: target.caption,
+    title: target.caption || target.alt || '图片',
+    source: fastCardSourceFromTarget(target),
+  })
+}
+
+function createVideoFastCardItem(target: BrowserFastCardVideoTarget, video: FastCardVideoMeta): FastCardItem {
+  return finalizeFastCardItem({
+    id: createFastCardId('video'),
+    kind: 'video',
+    createdAt: Date.now(),
+    title: video.title || target.title || target.pageTitle || '视频',
+    source: fastCardSourceFromTarget(target),
+    video,
+  })
+}
+
 export default function BrowserMode({
   isActive = true,
   isMotionSettled = true,
@@ -89,6 +158,7 @@ export default function BrowserMode({
   const previousTabCountRef = useRef(tabs.length)
   const modeRootRef = useRef<HTMLDivElement>(null)
   const shellRef = useRef<HTMLDivElement>(null)
+  const browserContentFrameRef = useRef<HTMLDivElement>(null)
   const contentRef = useRef<HTMLDivElement>(null)
   const splitContentRef = useRef<HTMLDivElement>(null)
   const splitContainerRef = useRef<HTMLDivElement>(null)
@@ -111,6 +181,16 @@ export default function BrowserMode({
   const isReadyBlankTab = activeTab ? isReadyBrowserBlankUrl(activeTab.url) : false
   const splitTabHasNativeSurface = splitTab ? !splitTab.error && !isReadyBrowserBlankUrl(splitTab.url) : false
   const shouldHideAllBrowserHosts = (hasError || isReadyBlankTab) && !splitTabHasNativeSurface
+  const fastCardItems = useFastCard(s => s.items)
+  const fastCardPanelOpen = useFastCard(s => s.panelOpen && !s.collapsed)
+  const addFastCardItem = useFastCard(s => s.addItem)
+  const removeFastCardItem = useFastCard(s => s.removeItem)
+  const clearFastCard = useFastCard(s => s.clear)
+  const openFastCard = useFastCard(s => s.open)
+  const collapseFastCard = useFastCard(s => s.collapse)
+  const [fastCardResultPanel, setFastCardResultPanel] = useState<FastCardResultPanelData | null>(null)
+  const fastCardResultTargetRef = useRef<BrowserFastCardTarget | null>(null)
+  const fastCardResultRequestIdRef = useRef(0)
   const setAddressEditing = useCallback((next: boolean) => {
     isAddressEditingRef.current = next
   }, [])
@@ -302,6 +382,279 @@ export default function BrowserMode({
     if (!targetUrl) return
     void handleNavigate(targetUrl)
   }, [browserDiagnostics, handleNavigate])
+
+  const addVideoTargetToFastCard = useCallback(async (target: BrowserFastCardVideoTarget) => {
+    openFastCard()
+    const response = await window.electronAPI?.browser?.resolveFastCardVideo?.({ target })
+    const fallbackUrl = target.videoUrl || target.sources?.find(Boolean) || target.pageUrl
+    const video: FastCardVideoMeta = response?.success && response.data?.video
+      ? response.data.video
+      : {
+        originalUrl: fallbackUrl,
+        pageUrl: target.pageUrl,
+        posterUrl: target.posterUrl,
+        title: target.title || target.pageTitle,
+        parseStatus: 'failed',
+        error: response?.error || '视频解析未返回结果',
+      }
+    addFastCardItem(createVideoFastCardItem(target, video))
+  }, [addFastCardItem, openFastCard])
+
+  const handleAddTargetToFastCard = useCallback((target: BrowserFastCardTarget) => {
+    if (target.kind === 'text') {
+      addFastCardItem(createTextFastCardItem(target))
+      openFastCard()
+      return
+    }
+    if (target.kind === 'image') {
+      addFastCardItem(createImageFastCardItem(target))
+      openFastCard()
+      return
+    }
+    void addVideoTargetToFastCard(target)
+  }, [addFastCardItem, addVideoTargetToFastCard, openFastCard])
+
+  const runFastCardTranslation = useCallback(async (target: BrowserFastCardTextTarget, targetLanguage: string) => {
+    const requestId = ++fastCardResultRequestIdRef.current
+    fastCardResultTargetRef.current = target
+    setFastCardResultPanel({
+      kind: 'translation',
+      status: 'loading',
+      originalText: target.text,
+      targetLanguage,
+    })
+    const response = await window.electronAPI?.browser?.translateFastCardSelection?.({
+      text: target.text,
+      targetLanguage,
+      source: fastCardSourceFromTarget(target),
+    })
+    if (requestId !== fastCardResultRequestIdRef.current) return
+    if (response?.success && response.data) {
+      setFastCardResultPanel({
+        kind: 'translation',
+        status: 'ready',
+        originalText: response.data.originalText,
+        translatedText: response.data.translatedText,
+        targetLanguage: response.data.targetLanguage,
+      })
+      return
+    }
+    setFastCardResultPanel({
+      kind: 'translation',
+      status: 'error',
+      originalText: target.text,
+      targetLanguage,
+      error: response?.error || '翻译失败',
+    })
+  }, [])
+
+  const runFastCardImageDescription = useCallback(async (target: BrowserFastCardImageTarget) => {
+    const requestId = ++fastCardResultRequestIdRef.current
+    fastCardResultTargetRef.current = target
+    setFastCardResultPanel({
+      kind: 'image-description',
+      status: 'loading',
+      imageUrl: target.imageUrl,
+    })
+    const response = await window.electronAPI?.browser?.describeFastCardImage?.({
+      imageUrl: target.imageUrl,
+      source: fastCardSourceFromTarget(target),
+    })
+    if (requestId !== fastCardResultRequestIdRef.current) return
+    if (response?.success && response.data) {
+      setFastCardResultPanel({
+        kind: 'image-description',
+        status: 'ready',
+        imageUrl: response.data.imageUrl,
+        description: response.data.description,
+      })
+      return
+    }
+    setFastCardResultPanel({
+      kind: 'image-description',
+      status: 'error',
+      imageUrl: target.imageUrl,
+      error: response?.error || '反推描述失败',
+    })
+  }, [])
+
+  const handleFastCardContextAction = useCallback((event: BrowserFastCardContextActionEvent) => {
+    if (event.action === 'add-to-fastcard') {
+      handleAddTargetToFastCard(event.target)
+      return
+    }
+    if (event.action === 'translate-selection' && event.target.kind === 'text') {
+      void runFastCardTranslation(event.target, detectFastCardTargetLanguage(event.target.text))
+      return
+    }
+    if (event.action === 'describe-image' && event.target.kind === 'image') {
+      void runFastCardImageDescription(event.target)
+    }
+  }, [handleAddTargetToFastCard, runFastCardImageDescription, runFastCardTranslation])
+
+  const handleFastCardResultLanguageChange = useCallback((targetLanguage: string) => {
+    const target = fastCardResultTargetRef.current
+    if (!target || target.kind !== 'text') return
+    void runFastCardTranslation(target, targetLanguage)
+  }, [runFastCardTranslation])
+
+  const handleAddFastCardResult = useCallback(() => {
+    const state = fastCardResultPanel
+    const target = fastCardResultTargetRef.current
+    if (!state || state.status !== 'ready' || !target) return
+    if (state.kind === 'translation' && target.kind === 'text') {
+      addFastCardItem(finalizeFastCardItem({
+        id: createFastCardId('translation'),
+        kind: 'translation',
+        createdAt: Date.now(),
+        title: '翻译',
+        originalText: state.originalText,
+        translatedText: state.translatedText,
+        targetLanguage: state.targetLanguage,
+        source: fastCardSourceFromTarget(target),
+      }))
+      openFastCard()
+      setFastCardResultPanel(null)
+      return
+    }
+    if (state.kind === 'image-description' && target.kind === 'image') {
+      addFastCardItem(finalizeFastCardItem({
+        id: createFastCardId('image-description'),
+        kind: 'image-description',
+        createdAt: Date.now(),
+        title: '图片反推描述',
+        imageUrl: state.imageUrl,
+        description: state.description,
+        source: fastCardSourceFromTarget(target),
+      }))
+      openFastCard()
+      setFastCardResultPanel(null)
+    }
+  }, [addFastCardItem, fastCardResultPanel, openFastCard])
+
+  const handleFastCardSaveMarkdown = useCallback(() => {
+    if (fastCardItems.length === 0) return
+    const markdown = renderFastCardMarkdown(fastCardItems)
+    void window.electronAPI?.document?.saveFileAs?.({
+      content: markdown,
+      suggestedName: createFastCardMarkdownFilename(),
+    })
+  }, [fastCardItems])
+
+  const handleFastCardInsertToChat = useCallback(() => {
+    if (fastCardItems.length === 0) return
+    appendToAgentInput(renderFastCardMarkdown(fastCardItems))
+  }, [fastCardItems])
+
+  useEffect(() => {
+    if (!isElectron) return
+    return window.electronAPI?.browser?.onFastCardContextAction?.(handleFastCardContextAction)
+  }, [handleFastCardContextAction, isElectron])
+
+  useEffect(() => {
+    if (!isElectron) return
+    return window.electronAPI?.browser?.onFastCardOverlayCommand?.((command: FastCardOverlayCommand) => {
+      if (command.type === 'collapse') {
+        collapseFastCard()
+        setFastCardResultPanel(null)
+        return
+      }
+      if (command.type === 'close-result') {
+        setFastCardResultPanel(null)
+        return
+      }
+      if (command.type === 'add-result') {
+        handleAddFastCardResult()
+        return
+      }
+      if (command.type === 'clear') {
+        clearFastCard()
+        return
+      }
+      if (command.type === 'save-markdown') {
+        handleFastCardSaveMarkdown()
+        return
+      }
+      if (command.type === 'insert-chat') {
+        handleFastCardInsertToChat()
+        return
+      }
+      if (command.type === 'remove-item') {
+        removeFastCardItem(command.id)
+        return
+      }
+      if (command.type === 'target-language-change') {
+        handleFastCardResultLanguageChange(command.targetLanguage)
+      }
+    })
+  }, [
+    clearFastCard,
+    collapseFastCard,
+    handleAddFastCardResult,
+    handleFastCardInsertToChat,
+    handleFastCardResultLanguageChange,
+    handleFastCardSaveMarkdown,
+    isElectron,
+    removeFastCardItem,
+  ])
+
+  useEffect(() => {
+    if (!isElectron) return
+    return () => {
+      void window.electronAPI?.browser?.hideFastCardOverlay?.()
+    }
+  }, [isElectron])
+
+  useEffect(() => {
+    if (!isElectron) return
+    const shouldShowOverlay = isActive && (fastCardResultPanel !== null || fastCardPanelOpen)
+    if (!shouldShowOverlay) {
+      void window.electronAPI?.browser?.hideFastCardOverlay?.()
+      return
+    }
+
+    let frame = 0
+    const sendSnapshot = () => {
+      frame = 0
+      const element = browserContentFrameRef.current
+      if (!element) {
+        void window.electronAPI?.browser?.hideFastCardOverlay?.()
+        return
+      }
+      const rect = element.getBoundingClientRect()
+      if (rect.width <= 0 || rect.height <= 0) {
+        void window.electronAPI?.browser?.hideFastCardOverlay?.()
+        return
+      }
+      const snapshot: FastCardOverlaySnapshot = {
+        mode: fastCardResultPanel ? 'result' : 'fastcard',
+        items: fastCardItems,
+        resultPanel: fastCardResultPanel,
+        bounds: {
+          left: rect.left,
+          top: rect.top,
+          width: rect.width,
+          height: rect.height,
+        },
+      }
+      void window.electronAPI?.browser?.showFastCardOverlay?.(snapshot)
+    }
+    const scheduleSnapshot = () => {
+      if (frame) return
+      frame = window.requestAnimationFrame(sendSnapshot)
+    }
+
+    scheduleSnapshot()
+    const observer = new ResizeObserver(scheduleSnapshot)
+    const element = browserContentFrameRef.current
+    if (element) observer.observe(element)
+    window.addEventListener('resize', scheduleSnapshot)
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame)
+      observer.disconnect()
+      window.removeEventListener('resize', scheduleSnapshot)
+    }
+  }, [fastCardItems, fastCardPanelOpen, fastCardResultPanel, isActive, isElectron])
 
   const {
     browserRuntimeReady,
@@ -537,6 +890,7 @@ export default function BrowserMode({
           />
 
           <div
+            ref={browserContentFrameRef}
             style={{
               position: 'relative',
               zIndex: 1,

@@ -8,11 +8,22 @@ import {
   type MenuItemConstructorOptions,
   type WebContents,
 } from 'electron'
+import {
+  type BrowserFastCardContextAction,
+  type BrowserFastCardContextActionEvent,
+  type BrowserFastCardImageTarget,
+  type BrowserFastCardTarget,
+  type BrowserFastCardTextTarget,
+  type BrowserFastCardVideoTarget,
+  extractFastCardDomain,
+} from '../../../shared/fastcard'
 
 interface BrowserContextMenuHost {
   mainWindow: BrowserWindow
   isAllowedUrl(url: string): boolean
   createTab(url: string): Promise<{ success: boolean; tabId?: string; error?: string }>
+  getTabIdForWebContents(webContents: WebContents): string | null
+  sendToRenderer(channel: string, data: unknown): void
   logBrowserDiag(message: string): void
 }
 
@@ -23,6 +34,16 @@ function replaceIllegalFilenameChars(value: string): string {
     next += code <= 31 || '<>:"/\\|?*'.includes(char) ? '-' : char
   }
   return next
+}
+
+interface ElementFastCardMetadata {
+  imageUrl?: string
+  imageAlt?: string
+  caption?: string
+  videoUrl?: string
+  posterUrl?: string
+  videoTitle?: string
+  sources?: string[]
 }
 
 export class BrowserContextMenuService {
@@ -118,6 +139,14 @@ export class BrowserContextMenuService {
       pushSeparator()
       template.push(
         {
+          label: '反推描述',
+          click: () => this.emitFastCardAction(webContents, params, 'describe-image', 'image'),
+        },
+        {
+          label: '添加到 FastCard',
+          click: () => this.emitFastCardAction(webContents, params, 'add-to-fastcard', 'image'),
+        },
+        {
           label: '在新标签页打开图片',
           click: () => {
             void this.host.createTab(imageUrl).catch((error) => {
@@ -148,6 +177,30 @@ export class BrowserContextMenuService {
         },
         { label: '在外部浏览器打开图片', click: () => { void shell.openExternal(imageUrl) } },
       )
+    }
+
+    const selectedText = String(params.selectionText || '').trim()
+    if (selectedText) {
+      pushSeparator()
+      template.push(
+        {
+          label: '翻译',
+          click: () => this.emitFastCardAction(webContents, params, 'translate-selection', 'text'),
+        },
+        {
+          label: '添加到 FastCard',
+          click: () => this.emitFastCardAction(webContents, params, 'add-to-fastcard', 'text'),
+        },
+      )
+    }
+
+    const hasVideo = params.mediaType === 'video'
+    if (hasVideo) {
+      pushSeparator()
+      template.push({
+        label: '添加到 FastCard',
+        click: () => this.emitFastCardAction(webContents, params, 'add-to-fastcard', 'video'),
+      })
     }
 
     pushSeparator()
@@ -241,5 +294,113 @@ export class BrowserContextMenuService {
     )
 
     return template
+  }
+
+  private async readElementMetadata(webContents: WebContents, params: ContextMenuParams): Promise<ElementFastCardMetadata> {
+    const x = Number.isFinite(params.x) ? params.x : 0
+    const y = Number.isFinite(params.y) ? params.y : 0
+    const code = `(() => {
+      const x = ${JSON.stringify(x)};
+      const y = ${JSON.stringify(y)};
+      const absolutize = (value) => {
+        if (!value) return '';
+        if (/^(data:|blob:|https?:)/i.test(value)) return value;
+        try { return new URL(value, document.baseURI).href; } catch { return String(value || ''); }
+      };
+      const closest = (node, tag) => {
+        let current = node;
+        while (current && current.nodeType === Node.ELEMENT_NODE) {
+          if (current.tagName && current.tagName.toLowerCase() === tag) return current;
+          current = current.parentElement;
+        }
+        return null;
+      };
+      const element = document.elementFromPoint(x, y);
+      const img = closest(element, 'img');
+      const video = closest(element, 'video');
+      const figure = element?.closest?.('figure');
+      const caption = figure?.querySelector?.('figcaption')?.textContent?.trim?.() || '';
+      return {
+        imageUrl: img ? absolutize(img.currentSrc || img.src || img.getAttribute('src') || '') : '',
+        imageAlt: img ? (img.alt || img.getAttribute('aria-label') || '') : '',
+        caption,
+        videoUrl: video ? absolutize(video.currentSrc || video.src || video.getAttribute('src') || '') : '',
+        posterUrl: video ? absolutize(video.poster || video.getAttribute('poster') || '') : '',
+        videoTitle: video ? (video.title || video.getAttribute('aria-label') || document.title || '') : '',
+        sources: video ? Array.from(video.querySelectorAll('source')).map((source) => absolutize(source.currentSrc || source.src || source.getAttribute('src') || '')).filter(Boolean) : [],
+      };
+    })()`
+    try {
+      const result = await webContents.executeJavaScript(code, true)
+      return result && typeof result === 'object' ? result as ElementFastCardMetadata : {}
+    } catch (error) {
+      this.host.logBrowserDiag(`[browser-v3][context] fastcard element read failed: ${String(error)}`)
+      return {}
+    }
+  }
+
+  private getSource(webContents: WebContents) {
+    const pageUrl = webContents.getURL()
+    return {
+      pageUrl,
+      pageTitle: webContents.getTitle(),
+      domain: extractFastCardDomain(pageUrl),
+      tabId: this.host.getTabIdForWebContents(webContents),
+      capturedAt: Date.now(),
+    }
+  }
+
+  private async resolveFastCardTarget(
+    webContents: WebContents,
+    params: ContextMenuParams,
+    action: BrowserFastCardContextAction,
+    preferredKind?: BrowserFastCardTarget['kind'],
+  ): Promise<BrowserFastCardTarget | null> {
+    const source = this.getSource(webContents)
+    const selectedText = String(params.selectionText || '').trim()
+    if ((preferredKind === 'text' || action === 'translate-selection' || (action === 'add-to-fastcard' && !preferredKind && selectedText)) && selectedText) {
+      return { ...source, kind: 'text', text: selectedText } satisfies BrowserFastCardTextTarget
+    }
+
+    const metadata = await this.readElementMetadata(webContents, params)
+    const fallbackSrc = String(params.srcURL || '').trim()
+    if ((preferredKind === 'image' || action === 'describe-image' || params.mediaType === 'image' || params.hasImageContents) && (metadata.imageUrl || fallbackSrc)) {
+      return {
+        ...source,
+        kind: 'image',
+        imageUrl: metadata.imageUrl || fallbackSrc,
+        alt: metadata.imageAlt,
+        caption: metadata.caption,
+      } satisfies BrowserFastCardImageTarget
+    }
+
+    if (preferredKind === 'video' || params.mediaType === 'video' || metadata.videoUrl || metadata.sources?.length) {
+      return {
+        ...source,
+        kind: 'video',
+        videoUrl: metadata.videoUrl || fallbackSrc || undefined,
+        posterUrl: metadata.posterUrl,
+        title: metadata.videoTitle,
+        sources: metadata.sources,
+      } satisfies BrowserFastCardVideoTarget
+    }
+
+    return null
+  }
+
+  private emitFastCardAction(
+    webContents: WebContents,
+    params: ContextMenuParams,
+    action: BrowserFastCardContextAction,
+    preferredKind?: BrowserFastCardTarget['kind'],
+  ): void {
+    void (async () => {
+      const target = await this.resolveFastCardTarget(webContents, params, action, preferredKind)
+      if (!target) return
+      const payload: BrowserFastCardContextActionEvent = { action, target }
+      this.host.sendToRenderer('browser:fastCardContextAction', payload)
+    })().catch((error) => {
+      this.host.logBrowserDiag(`[browser-v3][context] fastcard action failed: ${String(error)}`)
+    })
   }
 }

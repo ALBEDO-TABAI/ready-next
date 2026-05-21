@@ -37,6 +37,18 @@ import type {
   DocumentMarkPatch,
   DocumentMarkRecord,
 } from '../../shared/document-side-panels'
+import type {
+  BrowserFastCardContextActionEvent,
+  FastCardOverlayCommand,
+  FastCardOverlaySnapshot,
+  FastCardDescribeImageRequest,
+  FastCardDescribeImageResult,
+  FastCardIPCResult,
+  FastCardResolveVideoRequest,
+  FastCardResolveVideoResult,
+  FastCardTranslateRequest,
+  FastCardTranslateResult,
+} from '../../shared/fastcard'
 
 // Type declarations for window.electronAPI exposed by preload
 
@@ -1224,6 +1236,15 @@ interface ElectronBrowserAPI {
   onTabUpdate: (callback: (data: BrowserTabUpdateEvent) => void) => () => void
   onAdblockUpdate: (callback: (data: BrowserAdblockStateData) => void) => () => void
   onNewTabRequest: (callback: (url: string) => void) => () => void
+  onFastCardContextAction: (callback: (data: BrowserFastCardContextActionEvent) => void) => () => void
+  translateFastCardSelection: (payload: FastCardTranslateRequest) => Promise<FastCardIPCResult<FastCardTranslateResult>>
+  describeFastCardImage: (payload: FastCardDescribeImageRequest) => Promise<FastCardIPCResult<FastCardDescribeImageResult>>
+  resolveFastCardVideo: (payload: FastCardResolveVideoRequest) => Promise<FastCardIPCResult<FastCardResolveVideoResult>>
+  showFastCardOverlay: (payload: FastCardOverlaySnapshot) => Promise<FastCardIPCResult<void>>
+  hideFastCardOverlay: () => Promise<FastCardIPCResult<void>>
+  sendFastCardOverlayCommand: (command: FastCardOverlayCommand) => Promise<FastCardIPCResult<void>>
+  onFastCardOverlayCommand: (callback: (command: FastCardOverlayCommand) => void) => () => void
+  onFastCardOverlaySnapshot: (callback: (snapshot: FastCardOverlaySnapshot) => void) => () => void
 
   // Bookmarks
   addBookmark: (

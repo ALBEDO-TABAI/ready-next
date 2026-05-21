@@ -1,4 +1,5 @@
 import { BrowserWindow, shell, session } from 'electron'
+import { join } from 'node:path'
 import { BrowserAppShortcutBridgeService } from './app-shortcut-service'
 import { BrowserAutomationService } from './automation-service'
 import { BrowserCapabilityService } from './capability-service'
@@ -49,6 +50,7 @@ import { setupBrowserClipIPC } from './ipc-clip'
 import { setupBrowserClipDraggedTabIPC } from './ipc-clip-dragged-tab'
 import { setupBrowserContentStudyIPC } from './ipc-content-study-dragged-tab'
 import { setupBrowserDataIPC } from './ipc-data'
+import { setupBrowserFastCardIPC } from './ipc-fastcard'
 import { setupBrowserShellIPC } from './ipc-shell'
 import { BrowserPreviewService } from './preview-service'
 import { BrowserPageBackgroundService } from './page-background-service'
@@ -167,6 +169,8 @@ export class BrowserController {
       mainWindow,
       isAllowedUrl: (url) => isAllowedBrowserURL(url),
       createTab: (url) => this.createTab(url),
+      getTabIdForWebContents: (webContents) => this.getTabIdForWebContents(webContents.id),
+      sendToRenderer: (channel, data) => this.sendToRenderer(channel, data),
       logBrowserDiag: (message) => this.logBrowserDiag(message),
     })
     this.bookmarkTransferService = new BrowserBookmarkTransferService({
@@ -372,6 +376,14 @@ export class BrowserController {
     return ''
   }
 
+  private getTabIdForWebContents(webContentsId?: number): string | null {
+    if (!webContentsId) return null
+    for (const tab of this.tabs.values()) {
+      if (tab.view?.webContents.id === webContentsId) return tab.id
+    }
+    return null
+  }
+
   private emitTabMeta(tabId: string): void {
     this.tabMetaService.emitTabMeta(tabId)
   }
@@ -407,6 +419,10 @@ export class BrowserController {
     if (!this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send(channel, data)
     }
+  }
+
+  getMainWindow(): BrowserWindow | null {
+    return this.mainWindow.isDestroyed() ? null : this.mainWindow
   }
 
   applyBounds(
@@ -1351,7 +1367,11 @@ export class BrowserController {
   }
 }
 
-export function setupBrowserIPC(mainWindow: BrowserWindow, useMock = false): BrowserController {
+export function setupBrowserIPC(
+  mainWindow: BrowserWindow,
+  useMock = false,
+  options?: { preloadPath?: string; rendererFile?: string },
+): BrowserController {
   const controller = new BrowserController(mainWindow, useMock)
   const browserDataService = new BrowserDataService()
   setupBrowserShellIPC(controller)
@@ -1384,6 +1404,11 @@ export function setupBrowserIPC(mainWindow: BrowserWindow, useMock = false): Bro
   })
   setupBrowserContentStudyIPC({
     sendToRenderer: (channel, data) => controller.sendToRenderer(channel, data),
+  })
+  setupBrowserFastCardIPC({
+    getMainWindow: () => controller.getMainWindow(),
+    preloadPath: options?.preloadPath || join(__dirname, '../preload/index.mjs'),
+    rendererFile: options?.rendererFile || join(__dirname, '../renderer/index.html'),
   })
 
   return controller

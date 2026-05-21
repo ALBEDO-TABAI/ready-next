@@ -1829,6 +1829,275 @@ body.resizing .browser-split-resize-handle__grip {
   opacity: 0.58;
 }
 
+.browser-fastcard-drawer {
+  flex: 0 0 min(372px, 42vw);
+  width: min(372px, 42vw);
+  min-width: min(320px, 42vw);
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  opacity: 0;
+  transform: translateX(12px);
+  pointer-events: none;
+  transition:
+    opacity 240ms cubic-bezier(0.22, 0.61, 0.36, 1),
+    transform 240ms cubic-bezier(0.22, 0.61, 0.36, 1);
+  will-change: opacity, transform;
+  -webkit-app-region: no-drag;
+}
+
+.browser-fastcard-drawer.is-entered {
+  opacity: 1;
+  transform: translateX(0);
+  pointer-events: auto;
+}
+
+.browser-fastcard-surface {
+  background: var(--bg-content) !important;
+  border-left: 1px solid color-mix(in srgb, var(--text-gray) 16%, transparent) !important;
+  border-radius: var(--workbench-canvas-radius) 0 0 var(--workbench-canvas-radius);
+  box-shadow: -18px 0 44px -20px rgba(8, 12, 22, 0.24) !important;
+  overflow: hidden;
+}
+
+.browser-fastcard-header {
+  min-height: 58px;
+  padding: 14px 14px 12px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid color-mix(in srgb, var(--text-gray) 12%, transparent);
+}
+
+.browser-fastcard-header h2 {
+  margin: 0;
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.25;
+  font-weight: 600;
+}
+
+.browser-fastcard-kicker {
+  margin-bottom: 3px;
+  color: var(--text-light);
+  font-size: 11px;
+  line-height: 1;
+}
+
+.browser-fastcard-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.browser-fastcard-icon-button {
+  width: 28px;
+  height: 28px;
+  border: 0;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-gray);
+  background: transparent;
+  transition: background 150ms ease, color 150ms ease;
+}
+
+.browser-fastcard-icon-button:hover {
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--text-gray) 10%, transparent);
+}
+
+.browser-fastcard-list,
+.browser-fastcard-result-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+}
+
+.browser-fastcard-list::-webkit-scrollbar,
+.browser-fastcard-result-body::-webkit-scrollbar {
+  width: 8px;
+}
+
+.browser-fastcard-list::-webkit-scrollbar-thumb,
+.browser-fastcard-result-body::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-gray) 18%, transparent);
+}
+
+.browser-fastcard-empty {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-light);
+  font-size: 13px;
+}
+
+.browser-fastcard-item {
+  border: 1px solid color-mix(in srgb, var(--text-gray) 12%, transparent);
+  border-radius: 8px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+}
+
+.browser-fastcard-item + .browser-fastcard-item {
+  margin-top: 10px;
+}
+
+.browser-fastcard-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.browser-fastcard-item-kind {
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-gray);
+  background: color-mix(in srgb, var(--text-gray) 8%, transparent);
+}
+
+.browser-fastcard-item-title {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-fastcard-item p,
+.browser-fastcard-result-body p {
+  margin: 8px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.browser-fastcard-source {
+  display: block;
+  margin-top: 8px;
+  color: var(--text-light);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.browser-fastcard-result-body section {
+  border: 1px solid color-mix(in srgb, var(--text-gray) 12%, transparent);
+  border-radius: 8px;
+  padding: 10px;
+  background: color-mix(in srgb, var(--bg-secondary) 72%, transparent);
+}
+
+.browser-fastcard-result-body section + section,
+.browser-fastcard-result-body .browser-fastcard-field + section {
+  margin-top: 10px;
+}
+
+.browser-fastcard-result-body section.is-error p {
+  color: var(--color-red);
+}
+
+.browser-fastcard-result-body h3 {
+  margin: 0;
+  color: var(--text-light);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.browser-fastcard-field {
+  display: grid;
+  gap: 6px;
+  color: var(--text-light);
+  font-size: 11px;
+}
+
+.browser-fastcard-field select {
+  height: 30px;
+  border: 1px solid color-mix(in srgb, var(--text-gray) 14%, transparent);
+  border-radius: 8px;
+  padding: 0 8px;
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  outline: none;
+}
+
+.browser-fastcard-footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px;
+  border-top: 1px solid color-mix(in srgb, var(--text-gray) 12%, transparent);
+}
+
+.browser-fastcard-action {
+  min-height: 30px;
+  border: 1px solid color-mix(in srgb, var(--text-gray) 14%, transparent);
+  border-radius: 8px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-primary);
+  background: color-mix(in srgb, var(--bg-secondary) 86%, transparent);
+  font-size: 12px;
+  transition: background 150ms ease, border-color 150ms ease, color 150ms ease;
+}
+
+.browser-fastcard-action:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--text-gray) 22%, transparent);
+  background: color-mix(in srgb, var(--bg-secondary) 100%, transparent);
+}
+
+.browser-fastcard-action.subtle {
+  color: var(--text-gray);
+}
+
+.browser-fastcard-action:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+
+.browser-fastcard-overlay-root {
+  width: 100vw;
+  height: 100vh;
+  display: flex;
+  overflow: hidden;
+  background: transparent;
+}
+
+html[data-fastcard-overlay-window='true'],
+html[data-fastcard-overlay-window='true'] body,
+html[data-fastcard-overlay-window='true'] #root {
+  background: transparent !important;
+}
+
+.browser-fastcard-overlay-root .browser-fastcard-drawer {
+  width: 100%;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.browser-fastcard-overlay-root .browser-fastcard-surface {
+  border-radius: var(--workbench-canvas-radius);
+  border: 1px solid color-mix(in srgb, var(--text-gray) 14%, transparent) !important;
+}
+
 /* Disable layout-related transitions during panel resize drag.
    Scoped to panel/canvas/glass shells + BrowserView hosts so unrelated
    hover/tooltip transitions elsewhere are not collateral damage. */
@@ -2042,6 +2311,49 @@ html[data-theme='dark'][data-skin='liquid-glass'][data-glass-backdrop='ready'] .
 
 .content-surface-card {
   background: color-mix(in srgb, var(--lg-content-card-bg) 34%, transparent) !important;
+}
+
+html[data-fastcard-overlay-window='true'] {
+  --fastcard-overlay-surface-bg: #FDFCFA;
+  --fastcard-overlay-card-bg: #F6F5F1;
+  --fastcard-overlay-control-bg: #FFFFFF;
+  --fastcard-overlay-border: rgba(116, 116, 116, 0.24);
+  --fastcard-overlay-shadow: 0 22px 58px rgba(18, 24, 38, 0.32), 0 8px 22px rgba(18, 24, 38, 0.16);
+}
+
+html[data-theme='dark'][data-fastcard-overlay-window='true'] {
+  --fastcard-overlay-surface-bg: #181F2C;
+  --fastcard-overlay-card-bg: #20293A;
+  --fastcard-overlay-control-bg: #273246;
+  --fastcard-overlay-border: rgba(186, 201, 232, 0.24);
+  --fastcard-overlay-shadow: 0 22px 58px rgba(0, 0, 0, 0.46), 0 8px 22px rgba(0, 0, 0, 0.28);
+}
+
+html[data-fastcard-overlay-window='true'] .browser-fastcard-surface.content-surface-panel {
+  background: var(--fastcard-overlay-surface-bg) !important;
+  border-color: var(--fastcard-overlay-border) !important;
+  box-shadow: var(--fastcard-overlay-shadow) !important;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  background-clip: padding-box;
+  isolation: isolate;
+}
+
+html[data-fastcard-overlay-window='true'] .browser-fastcard-header,
+html[data-fastcard-overlay-window='true'] .browser-fastcard-footer {
+  background: var(--fastcard-overlay-surface-bg);
+}
+
+html[data-fastcard-overlay-window='true'] .browser-fastcard-item,
+html[data-fastcard-overlay-window='true'] .browser-fastcard-result-body section {
+  background: var(--fastcard-overlay-card-bg);
+  border-color: var(--fastcard-overlay-border);
+}
+
+html[data-fastcard-overlay-window='true'] .browser-fastcard-field select,
+html[data-fastcard-overlay-window='true'] .browser-fastcard-action {
+  background: var(--fastcard-overlay-control-bg);
+  border-color: var(--fastcard-overlay-border);
 }
 
 .lg-surface-toolbar {

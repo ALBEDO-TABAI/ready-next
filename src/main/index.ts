@@ -417,7 +417,10 @@ async function createWindow(): Promise<void> {
   // Setup window-dependent IPC only once (agent/browser handlers register ipcMain.handle
   // which cannot be registered twice without error)
   if (!windowIPCRegistered) {
-    browserController = setupBrowserIPC(mainWindow, ENABLE_MOCK_SERVICES)
+    browserController = setupBrowserIPC(mainWindow, ENABLE_MOCK_SERVICES, {
+      preloadPath: join(__dirname, '../preload/index.mjs'),
+      rendererFile: join(__dirname, '../renderer/index.html'),
+    })
     setRSSBrowserController(browserController)
     setupAgentIPC(agentManager, mainWindow, browserController)
     windowIPCRegistered = true
