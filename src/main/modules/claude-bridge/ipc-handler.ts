@@ -54,6 +54,7 @@ import { channelManagementGroup } from './ipc/channel-management-group'
 import { scheduleGroup } from './ipc/schedule-group'
 import { chatPersistenceGroup } from './ipc/chat-persistence-group'
 import { memoryGroup } from './ipc/memory-group'
+import { triggerGroup } from './ipc/trigger-group'
 import type { IpcDisposeHandle } from './ipc/types'
 import { logAgentMetric } from '../agent-control/metrics'
 import { isRendererAgentMetricName } from '../../../shared/renderer-agent-metrics'
@@ -337,6 +338,18 @@ let chatPersistenceGroupDispose: IpcDisposeHandle | null = null
  */
 let memoryGroupDispose: IpcDisposeHandle | null = null
 
+/**
+ * Stage V V2.1o — dispose handle returned by `triggerGroup.register`. Owns
+ * the 4 agent-trigger channels (`agent:trigger:list`, `agent:trigger:create`,
+ * `agent:trigger:update`, `agent:trigger:createWithMemories`). Same lifecycle
+ * pattern as the other group dispose slots: register on `setupAgentIPC`,
+ * dispose on dev-reload re-entry, dispose on `cleanupAgentRuntime` shutdown.
+ * This is the final claude-bridge channel group — `ipc-handler.ts` no longer
+ * registers any inline `ipcMain.handle` calls of its own (every surface lives
+ * in an extracted group).
+ */
+let triggerGroupDispose: IpcDisposeHandle | null = null
+
 function cleanupSkillSessionState(sessionId?: string, reason = 'Skill session state cleared'): void {
   if (sessionId) {
     clearLastReferenceSkill(sessionId)
@@ -528,6 +541,14 @@ export async function cleanupAgentRuntime(): Promise<void> {
   if (memoryGroupDispose) {
     try { memoryGroupDispose.dispose() } catch { /* ignore */ }
     memoryGroupDispose = null
+  }
+  // Stage V V2.1o — symmetric release of the 4 agent-trigger channel
+  // handlers (trigger:list / create / update / createWithMemories). Final
+  // claude-bridge group — `ipc-handler.ts` no longer owns any inline
+  // handlers of its own.
+  if (triggerGroupDispose) {
+    try { triggerGroupDispose.dispose() } catch { /* ignore */ }
+    triggerGroupDispose = null
   }
   if (runtime) {
     await runtime.stop()
@@ -1442,87 +1463,29 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     listConversationScopes: () => runtime?.listConversationScopes() ?? null,
   })
 
-  ipcMain.removeHandler('agent:trigger:list')
-  ipcMain.handle('agent:trigger:list', async (_, filters): Promise<IPCResponse> => {
-    try {
-      const memoryRepo = runtime?.getMemoryRepository()
-      if (!memoryRepo) {
-        return { success: false, error: 'Memory repository not available' }
-      }
-      const triggers = await memoryRepo.listTriggers(filters)
-      return { success: true, data: triggers }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.removeHandler('agent:trigger:create')
-  ipcMain.handle('agent:trigger:create', async (_, trigger): Promise<IPCResponse> => {
-    try {
-      const memoryRepo = runtime?.getMemoryRepository()
-      if (!memoryRepo) {
-        return { success: false, error: 'Memory repository not available' }
-      }
-      const created = await memoryRepo.createTrigger(trigger)
-      return { success: true, data: created }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.removeHandler('agent:trigger:update')
-  ipcMain.handle('agent:trigger:update', async (_, payload: { id: string; updates: Record<string, unknown> }): Promise<IPCResponse> => {
-    try {
-      const memoryRepo = runtime?.getMemoryRepository()
-      if (!memoryRepo) {
-        return { success: false, error: 'Memory repository not available' }
-      }
-      await memoryRepo.updateTrigger(payload.id, payload.updates)
-      return { success: true }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  // Stage V V2.1n — the 3 lifecycle/promotion channels above moved into
-  // `memoryGroup` (registered earlier in this function alongside the
-  // memory CRUD channels). The `agent:trigger:createWithMemories` block
-  // below stays inline for the reason documented at the memory-group
-  // registration site.
-
-  ipcMain.removeHandler('agent:trigger:createWithMemories')
-  ipcMain.handle('agent:trigger:createWithMemories', async (_, payload: {
-    label: string
-    pattern: string
-    patternFlags?: string
-    memoryIds: string[]
-    module?: string
-    blocking?: boolean
-    priority?: number
-  }): Promise<IPCResponse> => {
-    try {
-      const promptAssembly = runtime?.getPromptAssembly()
-      if (!promptAssembly) {
-        return { success: false, error: 'Prompt assembly not available' }
-      }
-
-      const triggerId = await promptAssembly.createTrigger({
-        label: payload.label,
-        pattern: payload.pattern,
-        patternFlags: payload.patternFlags,
-        memoryIds: payload.memoryIds,
-        module: payload.module,
-        blocking: payload.blocking,
-        priority: payload.priority,
-      })
-
-      if (!triggerId) {
-        return { success: false, error: 'Failed to create trigger' }
-      }
-
-      return { success: true, data: { triggerId } }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
+  // Stage V V2.1o — the 4 `agent:trigger:*` channels (list / create / update
+  // / createWithMemories) moved into `triggerGroup`. The group pre-clears
+  // internally; we hold the dispose handle so `cleanupAgentRuntime` can drop
+  // the handlers on shutdown. Re-binding on dev reload first calls
+  // `dispose()` on the prior handle so listener slots stay clean.
+  //
+  // Per-handler closures are passed in as bound dep methods (lazy accessors
+  // returning `null` while the runtime is not yet up — matches the
+  // pre-extraction `runtime?.getMemoryRepository()` / `getPromptAssembly()`
+  // null-path).
+  //
+  // This is the FINAL claude-bridge channel group. With V2.1o landed,
+  // `ipc-handler.ts` no longer registers any inline `ipcMain.handle` calls
+  // of its own — every surface lives in an extracted group (15 total:
+  // askUser / toolEvent / agentLifecycle / agentRuntime / conversation /
+  // taskProjection / recall / detachedTask / runControl / telemetry /
+  // channelManagement / schedule / chatPersistence / memory / trigger).
+  if (triggerGroupDispose) {
+    try { triggerGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    triggerGroupDispose = null
+  }
+  triggerGroupDispose = triggerGroup.register(ipcMain, {
+    getMemoryRepository: () => runtime?.getMemoryRepository() ?? null,
+    getPromptAssembly: () => runtime?.getPromptAssembly() ?? null,
   })
 }
