@@ -5,8 +5,6 @@ import { getWorkerDbBridge } from '../database/worker-bridge'
 import {
   SearchEngine,
   probeFts5Availability,
-  type ReindexAllSourcesResult,
-  type ReindexWorkspaceResult,
 } from './indexer'
 import {
   createFileWatcher,
@@ -19,6 +17,8 @@ import {
   noteSearchWorkerSuccess,
   recordSearchWorkerFallback,
 } from './worker-fallback-observer'
+import { sourceIndexGroup } from './ipc/source-index-group'
+import type { IpcDisposeHandle } from './ipc/types'
 
 interface SearchIPCResponse<T> {
   success: boolean
@@ -43,6 +43,16 @@ export function getFileWatcherRegistry(): FileWatcherRegistry {
   return fileWatchers
 }
 
+/**
+ * Stage V V2.4a — dispose handle returned by `sourceIndexGroup.register`.
+ * The 5 source-index channels (`document:listSources`, `document:indexDocument`,
+ * `document:reindexAllSources`, `document:reindexWorkspace`,
+ * `document:cancelReindex`) live in `ipc/source-index-group.ts`; the host
+ * keeps the dispose handle so a re-entrant `setupSearchIPC` (dev-reload)
+ * can drop the prior registration before the next one binds.
+ */
+let sourceIndexGroupDispose: IpcDisposeHandle | null = null
+
 export function setupSearchIPC(): void {
   const rawDb = getDatabase().getRawDb()
   if (!rawDb) {
@@ -65,49 +75,25 @@ export function setupSearchIPC(): void {
     })
   })
 
-  ipcMain.handle(
-    'document:reindexWorkspace',
-    async (_event, root: string): Promise<SearchIPCResponse<ReindexWorkspaceResult> & {
-      errorKind?: 'invalid_root' | 'engine_unavailable' | 'failed'
-      validationReason?: string
-    }> => {
-      if (!searchEngine) {
-        return { success: false, error: 'search engine unavailable', errorKind: 'engine_unavailable' }
-      }
-      if (typeof root !== 'string' || root.length === 0) {
-        return { success: false, error: 'root path required', errorKind: 'invalid_root' }
-      }
-      // Defense-in-depth: even if the renderer's computeDesiredRoots filter
-      // is bypassed (older callers, tests, future code paths), we never let
-      // the indexer touch a forbidden tree like `~` / `/Users/<x>`.
-      const validation = validateWorkspaceRoot(root)
-      if (!validation.ok) {
-        return {
-          success: false,
-          error: validation.message ?? 'unsafe workspace root',
-          errorKind: 'invalid_root',
-          validationReason: validation.reason,
-        }
-      }
-      // perf-rescue B1: reindex walks the full workspace + writes batches.
-      // Run in worker; on bridge failure fall back to in-process engine.
-      try {
-        const result = await getWorkerDbBridge().reindexWorkspace({ root })
-        noteSearchWorkerSuccess()
-        return { success: true, data: result }
-      } catch (workerError) {
-        // Stage U / U8.1 — log fallback so we can see how often the worker
-        // boundary is bypassed. Fallback behavior itself is unchanged.
-        recordSearchWorkerFallback({ task: 'reindexWorkspace', error: workerError, workspaceRoot: root })
-        try {
-          const result = await searchEngine.reindexWorkspace({ root })
-          return { success: true, data: result }
-        } catch (error) {
-          return { success: false, error: error instanceof Error ? error.message : String(error), errorKind: 'failed' }
-        }
-      }
-    },
-  )
+  // Stage V V2.4a — 5 source-index channels (`document:listSources`,
+  // `document:indexDocument`, `document:reindexAllSources`,
+  // `document:reindexWorkspace`, `document:cancelReindex`) moved into
+  // `sourceIndexGroup`. The group handles dev-reload removeHandler
+  // pre-clear internally; we hold the dispose handle so a future cleanup
+  // hook (or the next setupSearchIPC entry) can drop them on shutdown.
+  // Re-binding on dev reload first calls `dispose()` on the prior handle
+  // so listener slots stay clean.
+  if (sourceIndexGroupDispose) {
+    try { sourceIndexGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    sourceIndexGroupDispose = null
+  }
+  sourceIndexGroupDispose = sourceIndexGroup.register(ipcMain, {
+    getSearchEngine: () => searchEngine,
+    getWorkerBridge: () => getWorkerDbBridge(),
+    validateWorkspaceRoot: (picked) => validateWorkspaceRoot(picked),
+    recordSearchWorkerFallback: (payload) => recordSearchWorkerFallback(payload),
+    noteSearchWorkerSuccess: () => noteSearchWorkerSuccess(),
+  })
 
   ipcMain.handle(
     'document:searchIndex',
@@ -193,95 +179,6 @@ export function setupSearchIPC(): void {
         } catch (error) {
           return { success: false, error: error instanceof Error ? error.message : String(error), errorKind: 'failed' }
         }
-      }
-    },
-  )
-
-  ipcMain.handle(
-    'document:reindexAllSources',
-    async (_event, root: string): Promise<SearchIPCResponse<ReindexAllSourcesResult> & {
-      errorKind?: 'invalid_root' | 'engine_unavailable' | 'failed'
-      validationReason?: string
-    }> => {
-      if (!searchEngine) return { success: false, error: 'search engine unavailable', errorKind: 'engine_unavailable' }
-      if (typeof root !== 'string' || root.length === 0) {
-        return { success: false, error: 'root path required', errorKind: 'invalid_root' }
-      }
-      // Same defense-in-depth gate as document:reindexWorkspace. Forbidden
-      // roots never enter the worker / fallback search engine.
-      const validation = validateWorkspaceRoot(root)
-      if (!validation.ok) {
-        return {
-          success: false,
-          error: validation.message ?? 'unsafe workspace root',
-          errorKind: 'invalid_root',
-          validationReason: validation.reason,
-        }
-      }
-      // perf-rescue B1: full multi-source reindex — offload to worker.
-      try {
-        const result = await getWorkerDbBridge().reindexAllSources({ root })
-        noteSearchWorkerSuccess()
-        return { success: true, data: result }
-      } catch (workerError) {
-        recordSearchWorkerFallback({ task: 'reindexAllSources', error: workerError, workspaceRoot: root })
-        try {
-          const result = await searchEngine.reindexAllSources({ root })
-          return { success: true, data: result }
-        } catch (error) {
-          return { success: false, error: error instanceof Error ? error.message : String(error), errorKind: 'failed' }
-        }
-      }
-    },
-  )
-
-  ipcMain.handle(
-    'document:listSources',
-    async (): Promise<SearchIPCResponse<{ sources: string[] }>> => {
-      if (!searchEngine) return { success: false, error: 'search engine unavailable' }
-      return { success: true, data: { sources: searchEngine.listSourceTypes() } }
-    },
-  )
-
-  // perf-rescue B6: cancel any in-flight reindex inside the db-worker. The
-  // worker tracks active reindex AbortControllers by request id and aborts
-  // them all when this command arrives. No-op if no reindex is running, so
-  // it's safe to call defensively (e.g. on workspace close / app quit).
-  ipcMain.handle(
-    'document:cancelReindex',
-    async (): Promise<SearchIPCResponse<{ cancelled: number }>> => {
-      try {
-        const cancelled = await getWorkerDbBridge().cancelReindex()
-        return { success: true, data: { cancelled } }
-      } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error) }
-      }
-    },
-  )
-
-  ipcMain.handle(
-    'document:indexDocument',
-    async (
-      _event,
-      payload: { path: string; root?: string; content?: string },
-    ): Promise<SearchIPCResponse<{ ok: boolean; documentId?: number; skipped?: boolean; error?: string }>> => {
-      if (!searchEngine) {
-        return { success: false, error: 'search engine unavailable' }
-      }
-      if (!payload || typeof payload.path !== 'string' || payload.path.length === 0) {
-        return { success: false, error: 'path required' }
-      }
-      const root = payload.root && payload.root.length > 0
-        ? payload.root
-        : searchEngine.findWorkspaceRootForPath(payload.path)
-      if (!root) {
-        return { success: false, error: 'workspace root not found for path' }
-      }
-      try {
-        const result = await searchEngine.indexDocument(root, payload.path, payload.content)
-        return { success: true, data: result }
-      } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error) }
       }
     },
   )
