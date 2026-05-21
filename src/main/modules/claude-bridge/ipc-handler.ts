@@ -45,6 +45,7 @@ import { toolEventGroup } from './ipc/tool-event-group'
 import { agentLifecycleGroup } from './ipc/agent-lifecycle-group'
 import { agentRuntimeGroup } from './ipc/agent-runtime-group'
 import { conversationGroup } from './ipc/conversation-group'
+import { taskProjectionGroup } from './ipc/task-projection-group'
 import type { IpcDisposeHandle } from './ipc/types'
 import { logAgentMetric } from '../agent-control/metrics'
 import { isRendererAgentMetricName } from '../../../shared/renderer-agent-metrics'
@@ -234,6 +235,15 @@ let agentRuntimeGroupDispose: IpcDisposeHandle | null = null
  */
 let conversationGroupDispose: IpcDisposeHandle | null = null
 
+/**
+ * Stage V V2.1f — dispose handle returned by `taskProjectionGroup.register`.
+ * Owns the 2 task-projection read channels (`agent:listTaskProjections`,
+ * `agent:getTaskProjection`). Same lifecycle pattern as the other group
+ * dispose slots: register on `setupAgentIPC`, dispose on dev-reload re-entry,
+ * dispose on `cleanupAgentRuntime` shutdown.
+ */
+let taskProjectionGroupDispose: IpcDisposeHandle | null = null
+
 function cleanupSkillSessionState(sessionId?: string, reason = 'Skill session state cleared'): void {
   if (sessionId) {
     clearLastReferenceSkill(sessionId)
@@ -360,6 +370,12 @@ export async function cleanupAgentRuntime(): Promise<void> {
   if (conversationGroupDispose) {
     try { conversationGroupDispose.dispose() } catch { /* ignore */ }
     conversationGroupDispose = null
+  }
+  // Stage V V2.1f — symmetric release of the 2 task-projection read channel
+  // handlers (`agent:listTaskProjections`, `agent:getTaskProjection`).
+  if (taskProjectionGroupDispose) {
+    try { taskProjectionGroupDispose.dispose() } catch { /* ignore */ }
+    taskProjectionGroupDispose = null
   }
   if (runtime) {
     await runtime.stop()
@@ -654,26 +670,18 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     log,
   })
 
-  ipcMain.handle('agent:listTaskProjections', (_, payload?: { scopeId?: string }): IPCResponse => {
-    try {
-      const scopeId = String(payload?.scopeId || '').trim()
-      if (!scopeId) return { success: true, data: [] }
-      return { success: true, data: runtime!.listTaskProjections(scopeId) }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('agent:getTaskProjection', (_, payload?: { taskId?: string }): IPCResponse => {
-    try {
-      const taskId = String(payload?.taskId || '').trim()
-      if (!taskId) return { success: false, error: 'taskId is required' }
-      const projection = runtime!.getTaskProjection(taskId)
-      if (!projection) return { success: false, error: `Task projection not found: ${taskId}` }
-      return { success: true, data: projection }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
+  // Stage V V2.1f — 2 task-projection read channels (`agent:listTaskProjections`,
+  // `agent:getTaskProjection`) moved into `taskProjectionGroup`. The group
+  // pre-clears internally; we hold the dispose handle so `cleanupAgentRuntime`
+  // can drop the handlers on shutdown. Re-binding on dev reload first calls
+  // `dispose()` on the prior handle so listener slots stay clean.
+  if (taskProjectionGroupDispose) {
+    try { taskProjectionGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    taskProjectionGroupDispose = null
+  }
+  taskProjectionGroupDispose = taskProjectionGroup.register(ipcMain, {
+    listTaskProjections: (scopeId) => runtime!.listTaskProjections(scopeId),
+    getTaskProjection: (taskId) => runtime!.getTaskProjection(taskId),
   })
 
   ipcMain.handle('agent:searchSessionRecall', (_, payload?: {
