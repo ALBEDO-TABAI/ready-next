@@ -9,7 +9,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { canResumeShape } from '../main/modules/agent-control/resume-handle'
+import { canResumeShape } from '../main/modules/agent-control/contracts/resume-handle'
 import { isAwaitingUserInteractionState } from '../shared/task-interaction-state'
 
 // `buildContinuationIntent` is a private method on AgentControlRuntime

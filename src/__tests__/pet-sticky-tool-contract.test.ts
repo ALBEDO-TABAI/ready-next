@@ -7,7 +7,7 @@ import {
   buildExecutionToolState,
   resolveExecutionIntentContext,
 } from '../main/modules/agent-control/execution-intent-resolver'
-import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
+import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
 import { classifyIntent } from '../main/modules/agent-control/intent-classifier'
 import { defaultToolRegistry } from '../main/modules/agent-control/tools-runtime/tool-registry'
 

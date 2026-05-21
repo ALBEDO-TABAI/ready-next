@@ -9,7 +9,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { buildTypedActionContextModifier } from '../main/modules/tools/skills-tools'
-import type { SkillRunContract } from '../main/modules/agent-control/run-contracts'
+import type { SkillRunContract } from '../main/modules/agent-control/contracts/run-contracts'
 
 function makeContract(skillId: string): SkillRunContract {
   return {

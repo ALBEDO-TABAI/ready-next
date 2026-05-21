@@ -19,7 +19,7 @@ import {
   refundIterationBudget,
   resumeBudgetRuntime,
 } from '../main/modules/agent-control/task-projection/run-budget-policy'
-import type { ConversationScope, ScopeRunEventPayload } from '../main/modules/agent-control/types'
+import type { ConversationScope, ScopeRunEventPayload } from '../main/modules/agent-control/contracts/types'
 
 function createScope(): ConversationScope {
   return {

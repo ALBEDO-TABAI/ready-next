@@ -10,8 +10,8 @@ import {
 } from '../main/modules/agent-control/tools-runtime/tool-call-text-guard'
 import {
   selectContinuationProjection,
-} from '../main/modules/agent-control/continuation-state'
-import type { TaskProjectionRecord } from '../main/modules/agent-control/run-contracts'
+} from '../main/modules/agent-control/contracts/continuation-state'
+import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
 
 // Screenshot-bug regression suite — reproduces the exact failure the user
 // sent in: "再从头重新跑一次看看" → assistant turn output `<tool_call>...

@@ -13,7 +13,7 @@ import {
 import type { ToolDefinition } from '../agent-control/tools-runtime/tool-definition'
 import { logAgentMetric } from '../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../agent-control/tools-runtime/tool-error-metrics'
-import type { ConversationScope } from '../agent-control/types'
+import type { ConversationScope } from '../agent-control/contracts/types'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 import type { ToolRuntimeActiveFrameContext } from '../agent-control/tools-runtime/tool-runtime'
 import type { TurnFeatureFlags } from '../agent-control/turn-feature-flags'

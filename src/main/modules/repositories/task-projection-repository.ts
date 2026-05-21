@@ -4,7 +4,7 @@ import type {
   TaskProjectionRecord,
   TaskProjectionStore,
   TaskProjectionWriteOptions,
-} from '../agent-control/run-contracts'
+} from '../agent-control/contracts/run-contracts'
 
 interface TaskProjectionStatement {
   run(...params: unknown[]): unknown

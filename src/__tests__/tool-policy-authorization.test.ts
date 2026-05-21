@@ -31,7 +31,7 @@ import test from 'node:test'
 
 import type { AIModelConfig } from '../shared/ai-providers'
 import { classifyIntent } from '../main/modules/agent-control/intent-classifier'
-import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
+import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
 import {
   prepareInitialRun,
   type ReconciledRunCapabilities,

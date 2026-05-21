@@ -18,7 +18,7 @@ import test from 'node:test'
 
 import { buildTypedActionContextModifier, executeSkillTool } from '../main/modules/tools/skills-tools'
 import { registerDetachedSkillTaskTracker } from '../main/modules/agent-control/detached-skill-task-tracker'
-import type { SkillRunContract } from '../main/modules/agent-control/run-contracts'
+import type { SkillRunContract } from '../main/modules/agent-control/contracts/run-contracts'
 import {
   rememberLastReferenceSkill,
   _resetLastReferenceSkillHintsForTests,

@@ -28,7 +28,7 @@ import {
   isFramePatchEmittingToolName,
   loadSkillRunContract,
   type SkillRunContract,
-} from '../main/modules/agent-control/run-contracts'
+} from '../main/modules/agent-control/contracts/run-contracts'
 import type { SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skills/skill-task-supervisor'
 
 function makeFrame(overrides?: Partial<TurnFrame>): TurnFrame {

@@ -35,7 +35,7 @@ import {
   selectContinuationProjection,
   type ContinuationIntent,
   type ContinuationState,
-} from '../agent-control/continuation-state'
+} from '../agent-control/contracts/continuation-state'
 import { prepareInitialRun, reconcileAfterBrowserDecision } from '../agent-control/domain-adapters/run-capability-controller'
 import { SkillDomainAdapter } from '../agent-control/skills/skill-domain-adapter'
 import { SkillContextOrchestrator } from '../agent-control/skills/skill-context-orchestrator'
@@ -82,7 +82,7 @@ import type {
   TurnModelResponse,
   TurnProviderContext,
   TurnSimpleResponse,
-} from '../agent-control/run-contracts'
+} from '../agent-control/contracts/run-contracts'
 import type { TurnTerminalReason } from '../agent-control/turn-frame'
 import type {
   AttachmentResourceList,
@@ -122,14 +122,14 @@ import {
 import { compactToolPolicyHistory } from './tool-policy-context'
 import { DEFAULT_API_REQUEST_TIMEOUT_MS } from './request-timeout-policy'
 import { ChatRepository } from '../repositories/chat-repository'
-import type { ConversationScope } from '../agent-control/types'
+import type { ConversationScope } from '../agent-control/contracts/types'
 import { compressHistoryForPrompt } from '../agent-control/context-compression'
 import { resolveExecutionIntentContext } from '../agent-control/execution-intent-resolver'
 import type { IntentClassification } from '../agent-control/intent-classifier'
 import { classifyIntent } from '../agent-control/intent-classifier'
 import { detectGenericInteractionState } from '../agent-control/interaction-state-detector'
-import type { RequestEnvelope } from '../agent-control/request-envelope'
-import { buildRequestEnvelope, extractPureUserInput as extractPureUserInputFromEnvelope } from '../agent-control/request-envelope'
+import type { RequestEnvelope } from '../agent-control/contracts/request-envelope'
+import { buildRequestEnvelope, extractPureUserInput as extractPureUserInputFromEnvelope } from '../agent-control/contracts/request-envelope'
 import { recoverLatestSkillRunFromTaskProjections } from '../agent-control/skills/skill-run-recovery'
 import { getLatestRecoverableSkillTaskRun } from '../agent-control/skills/skill-task-tracker'
 import {
@@ -198,7 +198,7 @@ interface APIResponse {
   toolTransport?: 'native' | 'text'
   fallback?: ExecutionFallbackInfo
   recoveryHistory?: RecoveryRecord[]
-  toolSnapshots?: import('../agent-control/run-contracts').ToolSnapshot[]
+  toolSnapshots?: import('../agent-control/contracts/run-contracts').ToolSnapshot[]
 }
 
 export interface MultimodalBlock {

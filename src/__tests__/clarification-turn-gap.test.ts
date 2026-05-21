@@ -8,8 +8,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { shouldTriggerClarification } from '../main/modules/agent-control/clarification-turn-gap'
-import type { ClarificationRequest } from '../main/modules/agent-control/clarification-types'
+import { shouldTriggerClarification } from '../main/modules/agent-control/contracts/clarification-turn-gap'
+import type { ClarificationRequest } from '../main/modules/agent-control/contracts/clarification-types'
 
 const sampleRequest: ClarificationRequest = {
   type: 'missing_info',

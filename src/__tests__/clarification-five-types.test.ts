@@ -10,7 +10,7 @@ import assert from 'node:assert/strict'
 import {
   CLARIFICATION_TYPES,
   type ClarificationType,
-} from '../main/modules/agent-control/clarification-types'
+} from '../main/modules/agent-control/contracts/clarification-types'
 
 test('CLARIFICATION_TYPES has exactly 5 members', () => {
   assert.equal(CLARIFICATION_TYPES.length, 5)

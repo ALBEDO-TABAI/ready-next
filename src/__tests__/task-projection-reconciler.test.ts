@@ -10,7 +10,7 @@ import {
   deriveHandlesWithOrigins,
   reconcileTaskProjections,
 } from '../main/modules/agent-control/task-projection/task-projection-reconciler'
-import type { TaskProjectionRecord, TaskProjectionStore } from '../main/modules/agent-control/run-contracts'
+import type { TaskProjectionRecord, TaskProjectionStore } from '../main/modules/agent-control/contracts/run-contracts'
 import type { SkillTaskRunRecord } from '../main/modules/repositories/skill-task-run-repository'
 import {
   __setMetricSinkForTests,

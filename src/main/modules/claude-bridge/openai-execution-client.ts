@@ -14,7 +14,7 @@ import { getPolicyOpenAITools, buildTextToolBridgeSystemPrompt, collectToolNames
 import { logAgentMetric } from '../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../agent-control/tools-runtime/tool-error-metrics'
 import { resolveOpenAIProviderRuntime } from '../agent-control/provider-runtime-resolver'
-import type { ToolSnapshot, TurnToolCallParseError } from '../agent-control/run-contracts'
+import type { ToolSnapshot, TurnToolCallParseError } from '../agent-control/contracts/run-contracts'
 import type { ExecutionFallbackInfo } from './execution-fallback-policy'
 import { annotateFallbackResult, resolveFallbackPlan } from './execution-fallback-policy'
 import { withRetryBackoff } from './llm-resilience'

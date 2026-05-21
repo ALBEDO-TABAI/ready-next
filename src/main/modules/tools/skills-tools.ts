@@ -14,7 +14,7 @@ import {
   buildContractFramePatch,
   loadSkillRunContract,
   type SkillRunContract,
-} from '../agent-control/run-contracts'
+} from '../agent-control/contracts/run-contracts'
 import {
   startSkillChildRun,
 } from '../agent-control/skills/skill-child-runner'

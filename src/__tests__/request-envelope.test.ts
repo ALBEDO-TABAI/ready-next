@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
+import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
 
 test('request envelope keeps only the pure user instruction for first-pass intent and records provenance', () => {
   const envelope = buildRequestEnvelope({

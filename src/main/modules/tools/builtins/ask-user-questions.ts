@@ -261,7 +261,7 @@ function summarizeAnswers(
  *   3. forwards the structured result back to the renderer
  */
 
-import { ASK_USER_ERROR_KINDS } from '../../agent-control/error-kinds'
+import { ASK_USER_ERROR_KINDS } from '../../agent-control/contracts/error-kinds'
 import { TOOL_ERROR_METRICS } from '../../agent-control/tools-runtime/tool-error-metrics'
 
 export interface SubmitDbAccess {

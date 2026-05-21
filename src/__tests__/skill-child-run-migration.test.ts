@@ -19,7 +19,7 @@ import test from 'node:test'
 import {
   loadSkillRunContract,
   type TaskProjectionRecord,
-} from '../main/modules/agent-control/run-contracts'
+} from '../main/modules/agent-control/contracts/run-contracts'
 import type { SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skills/skill-task-supervisor'
 import { createSkillChildRunId } from '../main/modules/agent-control/skills/skill-child-run-id'
 import type { SkillChildRunPayload } from '../main/modules/agent-control/skills/skill-child-run-types'

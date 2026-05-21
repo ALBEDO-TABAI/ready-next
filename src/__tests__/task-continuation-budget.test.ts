@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import type { CapabilityRuntimeSnapshot } from '../shared/ai-capability-runtime'
-import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
+import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
 import { classifyIntent } from '../main/modules/agent-control/intent-classifier'
 import { resolveTaskExecutionRoute } from '../main/modules/agent-control/task-execution-router'
 import { resolveTaskType } from '../main/modules/agent-control/task-type-resolver'

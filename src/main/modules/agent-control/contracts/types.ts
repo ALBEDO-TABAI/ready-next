@@ -1,5 +1,5 @@
-import type { TurnTerminalReason } from './turn-frame'
-import type { TaskType } from '../../../shared/task-types'
+import type { TurnTerminalReason } from '../turn-frame'
+import type { TaskType } from '../../../../shared/task-types'
 
 export type ChannelAdapterType =
   | 'local-debug'

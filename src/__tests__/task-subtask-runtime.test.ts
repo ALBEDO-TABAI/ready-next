@@ -3,13 +3,13 @@ import test from 'node:test'
 
 import { RunCoordinator } from '../main/modules/agent-control/task-projection/run-coordinator'
 import { syncTaskProjection } from '../main/modules/agent-control/task-projection/task-projection-sync'
-import type { TaskProjectionRecord, TaskProjectionStore } from '../main/modules/agent-control/run-contracts'
+import type { TaskProjectionRecord, TaskProjectionStore } from '../main/modules/agent-control/contracts/run-contracts'
 import type {
   ConversationScope,
   ScopeRunEventPayload,
   ScopeRunMemoryCapture,
   ScopeRunSummary,
-} from '../main/modules/agent-control/types'
+} from '../main/modules/agent-control/contracts/types'
 
 function createScope(): ConversationScope {
   return {

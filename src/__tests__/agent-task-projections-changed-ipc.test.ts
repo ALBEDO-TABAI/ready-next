@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { TaskProjectionRepository } from '../main/modules/repositories/task-projection-repository'
-import type { TaskProjectionRecord, TaskProjectionChangeEvent } from '../main/modules/agent-control/run-contracts'
+import type { TaskProjectionRecord, TaskProjectionChangeEvent } from '../main/modules/agent-control/contracts/run-contracts'
 
 /**
  * Stage O §0.3 / §5.1 — verify the `agent:taskProjectionsChanged`

@@ -1,4 +1,4 @@
-import { extractPrimaryUserInstruction as extractPrimaryUserInstructionFromText } from '../claude-bridge/tool-policy-heuristics'
+import { extractPrimaryUserInstruction as extractPrimaryUserInstructionFromText } from '../../claude-bridge/tool-policy-heuristics'
 
 export type InputChunkSource =
   | 'user_message'

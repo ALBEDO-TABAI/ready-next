@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { classifyIntent } from '../main/modules/agent-control/intent-classifier'
-import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
+import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
 
 test('intent classifier keeps analysis-style document card requests out of rss/feishu/calendar', () => {
   const result = classifyIntent(buildRequestEnvelope({

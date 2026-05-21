@@ -3,7 +3,7 @@ import { describe, it } from 'node:test'
 
 import { buildDocumentTaskStepCacheKey } from '../main/modules/agent-control/document-task-cache-key'
 import { buildDocumentTaskPlan } from '../main/modules/agent-control/document-task-plan'
-import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
+import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
 
 function buildPlan(rawUserText: string) {
   const requestEnvelope = buildRequestEnvelope({ userText: rawUserText })

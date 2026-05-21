@@ -61,7 +61,7 @@ import {
 import {
   loadSkillRunContract,
   shouldParentForceLongSkillTool,
-} from '../main/modules/agent-control/run-contracts'
+} from '../main/modules/agent-control/contracts/run-contracts'
 import { isChildLoopSkillAction } from '../main/modules/tools/skills-tools'
 import type {
   SkillChildCloseEvent,

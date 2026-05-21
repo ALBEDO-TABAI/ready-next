@@ -13,7 +13,7 @@ import {
   canResumeWithFs,
   type FsExistenceProbe,
   type ResumeHandle,
-} from '../main/modules/agent-control/resume-handle'
+} from '../main/modules/agent-control/contracts/resume-handle'
 
 // ---------------------------------------------------------------------------
 // canResumeShape — 6 truth quadrants

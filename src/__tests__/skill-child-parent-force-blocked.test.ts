@@ -24,7 +24,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { isParentForceForbiddenByManifest } from '../main/modules/agent-control/run-contracts'
+import { isParentForceForbiddenByManifest } from '../main/modules/agent-control/contracts/run-contracts'
 
 test('Case A — manifest fence fires for VEA pipeline tool name', () => {
   // VEA `skill_video_expert_pipeline` is in STATIC_SKILL_TOOL_NAMES_BY_ACTION

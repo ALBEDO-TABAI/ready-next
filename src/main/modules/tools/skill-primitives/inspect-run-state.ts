@@ -37,7 +37,7 @@ import {
   buildContractFramePatch,
   loadSkillRunContract,
   type SkillRunContract,
-} from '../../agent-control/run-contracts'
+} from '../../agent-control/contracts/run-contracts'
 import type { TurnFrame, TurnFramePatch } from '../../agent-control/turn-frame'
 import { resolveVeaResumeAction } from '../../agent-control/vea-resume-action'
 

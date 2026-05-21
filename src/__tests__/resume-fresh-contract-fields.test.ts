@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import test from 'node:test'
 
-import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
+import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
 import {
   TurnEngine,
   applyChildResumeFreshContractFields,
@@ -45,7 +45,7 @@ import type {
   TurnEngineRequest,
   TurnEngineSession,
   TurnTranscriptEvent,
-} from '../main/modules/agent-control/run-contracts'
+} from '../main/modules/agent-control/contracts/run-contracts'
 
 function makeFakeRepository(): {
   repo: SkillTaskRunRepository

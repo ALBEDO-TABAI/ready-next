@@ -18,7 +18,7 @@
  * Pure module — no electron, no skills-runtime imports.
  */
 
-import type { ConversationScope } from '../agent-control/types'
+import type { ConversationScope } from '../agent-control/contracts/types'
 import {
   createToolExecutionOutput,
   type ToolExecutionOutput,

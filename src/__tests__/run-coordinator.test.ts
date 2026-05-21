@@ -6,7 +6,7 @@ import type {
   ConversationScope,
   ScopeRunEventPayload,
   ScopeRunMemoryCapture
-} from '../main/modules/agent-control/types'
+} from '../main/modules/agent-control/contracts/types'
 
 function createScope(): ConversationScope {
   return {

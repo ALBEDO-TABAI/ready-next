@@ -3,12 +3,12 @@ import test from 'node:test'
 
 import { RunCoordinator } from '../main/modules/agent-control/task-projection/run-coordinator'
 import { createWorkerSessionIdentity } from '../main/modules/agent-control/worker-session'
-import type { ExecutionHostRequest } from '../main/modules/agent-control/run-contracts'
+import type { ExecutionHostRequest } from '../main/modules/agent-control/contracts/run-contracts'
 import type {
   ConversationScope,
   ScopeRunEventPayload,
   ScopeRunMemoryCapture,
-} from '../main/modules/agent-control/types'
+} from '../main/modules/agent-control/contracts/types'
 
 function createScope(): ConversationScope {
   return {

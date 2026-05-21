@@ -10,7 +10,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { buildClarificationMessageId } from '../main/modules/agent-control/clarification-message-id'
+import { buildClarificationMessageId } from '../main/modules/agent-control/contracts/clarification-message-id'
 
 test('same toolCallId yields the same ID', () => {
   const a = buildClarificationMessageId('tool-call-abc')

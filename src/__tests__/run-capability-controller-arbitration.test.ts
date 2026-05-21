@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { classifyIntent } from '../main/modules/agent-control/intent-classifier'
-import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
+import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
 import { resolvePolicyConflicts } from '../main/modules/agent-control/policy-arbitration'
 import type { ExecutionIntentContext } from '../main/modules/agent-control/execution-intent-resolver'
 import type { ToolPolicy } from '../main/modules/agent-control/execution-tool-config'

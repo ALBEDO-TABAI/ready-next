@@ -9,7 +9,7 @@ import { DocumentDomainAdapter } from '../main/modules/agent-control/domain-adap
 import { FeishuDomainAdapter } from '../main/modules/agent-control/domain-adapters/feishu-domain-adapter'
 import { PromptAssemblyService } from '../main/modules/agent-control/prompt-assembly'
 import { RSSDomainAdapter } from '../main/modules/agent-control/domain-adapters/rss-domain-adapter'
-import type { ConversationScope } from '../main/modules/agent-control/types'
+import type { ConversationScope } from '../main/modules/agent-control/contracts/types'
 import type { SessionRecallCapsule } from '../shared/session-recall'
 
 function createScope(): ConversationScope {

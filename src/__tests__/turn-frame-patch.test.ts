@@ -26,7 +26,7 @@ import {
 import {
   FRAME_PATCH_EMITTING_TOOL_NAMES,
   isFramePatchEmittingToolName,
-} from '../main/modules/agent-control/run-contracts'
+} from '../main/modules/agent-control/contracts/run-contracts'
 import {
   getToolResourceTag,
   isParallelSafeTool,

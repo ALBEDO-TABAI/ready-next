@@ -12,11 +12,11 @@ import { syncTaskProjection } from '../main/modules/agent-control/task-projectio
 import type {
   TaskProjectionRecord,
   TaskProjectionStore,
-} from '../main/modules/agent-control/run-contracts'
+} from '../main/modules/agent-control/contracts/run-contracts'
 import type {
   ScopeRunEventPayload,
   ScopeRunSummary,
-} from '../main/modules/agent-control/types'
+} from '../main/modules/agent-control/contracts/types'
 
 const TEST_STORAGE_PATH = join(tmpdir(), 'ready-task-projection-supersede-continuity.json')
 

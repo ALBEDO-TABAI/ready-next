@@ -10,13 +10,13 @@ import { createToolExecutionOutput } from '../main/modules/agent-control/tools-r
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import { TaskProjectionRepository } from '../main/modules/repositories/task-projection-repository'
 import type { ChatConversationRecord, DatabaseManager as DatabaseManagerInstance } from '../main/modules/database'
-import type { ProjectionTruthSnapshot } from '../main/modules/agent-control/run-contracts'
+import type { ProjectionTruthSnapshot } from '../main/modules/agent-control/contracts/run-contracts'
 import type {
   ConversationScope,
   ScopeRunEventPayload,
   ScopeRunMemoryCapture,
   ScopeRunSummary,
-} from '../main/modules/agent-control/types'
+} from '../main/modules/agent-control/contracts/types'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
 const fakeConfig = {

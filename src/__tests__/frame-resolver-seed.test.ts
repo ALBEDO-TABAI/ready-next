@@ -12,7 +12,7 @@ import test from 'node:test'
 
 import { deriveSeedArtifactRoots } from '../main/modules/agent-control/turn-frame-resolver'
 import type { ActiveSkillContext } from '../main/modules/agent-control/active-skill-context'
-import type { SkillRunContract } from '../main/modules/agent-control/run-contracts'
+import type { SkillRunContract } from '../main/modules/agent-control/contracts/run-contracts'
 
 function makeContext(overrides: Partial<ActiveSkillContext>): ActiveSkillContext {
   return {

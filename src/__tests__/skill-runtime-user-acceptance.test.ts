@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { buildContinuationStateFromProjection, selectContinuationProjection } from '../main/modules/agent-control/continuation-state'
+import { buildContinuationStateFromProjection, selectContinuationProjection } from '../main/modules/agent-control/contracts/continuation-state'
 import { DetachedSkillTaskTracker, type DetachedSkillTaskRecord } from '../main/modules/agent-control/detached-skill-task-tracker'
 import { createSkillBudgetLeaseState, evaluateSkillBudgetLease } from '../main/modules/agent-control/skills/skill-budget-lease-controller'
 import { scoreSkillProgress } from '../main/modules/agent-control/progress-scorer'
@@ -13,7 +13,7 @@ import { scoreSkillWaste } from '../main/modules/agent-control/waste-scorer'
 import { SkillTaskSupervisor, type SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skills/skill-task-supervisor'
 import { SkillTaskRunRepository, type SkillTaskRunRecord } from '../main/modules/repositories/skill-task-run-repository'
 import { TaskProjectionRepository } from '../main/modules/repositories/task-projection-repository'
-import type { TaskProjectionRecord } from '../main/modules/agent-control/run-contracts'
+import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
 import { buildTaskCardViewModel, deriveTaskCardRuntimeState, type TaskCardRunLike } from '../renderer/modules/agent/taskCardViewModel'
 import { filterSkillPrimitivesBySession } from '../main/modules/tools/skill-tool-session-gate'
 

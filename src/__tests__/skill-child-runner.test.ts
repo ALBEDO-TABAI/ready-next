@@ -261,8 +261,8 @@ import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/
 import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tools-runtime/tool-error-metrics'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import type { SkillTaskRunRecord } from '../main/modules/repositories/skill-task-run-repository'
-import type { TaskProjectionRecord, TaskProjectionStore } from '../main/modules/agent-control/run-contracts'
-import type { ScopeRunEventPayload } from '../main/modules/agent-control/types'
+import type { TaskProjectionRecord, TaskProjectionStore } from '../main/modules/agent-control/contracts/run-contracts'
+import type { ScopeRunEventPayload } from '../main/modules/agent-control/contracts/types'
 // `SkillTaskRunRepository` is already imported as a value (the class
 // constructor) on line 25; ESLint flags a redeclare if we re-import it
 // here as a type, so we reuse the value-imported binding for both

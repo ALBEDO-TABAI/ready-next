@@ -7,8 +7,8 @@ import {
   normalizeContinuationIntent,
   parseContinuationControlText,
   selectContinuationProjection,
-} from '../main/modules/agent-control/continuation-state'
-import type { TaskProjectionRecord } from '../main/modules/agent-control/run-contracts'
+} from '../main/modules/agent-control/contracts/continuation-state'
+import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
 
 function createProjection(overrides?: Partial<TaskProjectionRecord>): TaskProjectionRecord {
   return {

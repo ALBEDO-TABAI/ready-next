@@ -7,9 +7,9 @@ import type {
   TaskStep,
   TaskType,
 } from './run-contracts'
-import { isTaskType } from '../../../shared/task-types'
+import { isTaskType } from '../../../../shared/task-types'
 import { buildRequestEnvelope, type RequestEnvelope } from './request-envelope'
-import { logAgentMetric } from './metrics'
+import { logAgentMetric } from '../metrics'
 import { matchesResumeIntent } from './resume-lexicon'
 import { canResumeShape } from './resume-handle'
 import type { ScopeRunResumableAction, ScopeRunTaskContinuation } from './types'

@@ -1,9 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import * as continuationStateModule from '../main/modules/agent-control/continuation-state'
-import { parseContinuationControlText } from '../main/modules/agent-control/continuation-state'
-import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
+import * as continuationStateModule from '../main/modules/agent-control/contracts/continuation-state'
+import { parseContinuationControlText } from '../main/modules/agent-control/contracts/continuation-state'
+import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
 
 test('continuation request sanitization rebuilds the request envelope from sanitized raw user text while preserving the bootstrap prefix in content', () => {
   const rawUserText = [

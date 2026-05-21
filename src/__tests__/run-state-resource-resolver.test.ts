@@ -7,7 +7,7 @@ import test from 'node:test'
 import type {
   RequestEnvelopeResource,
   RequestEnvelopeResourceRef,
-} from '../main/modules/agent-control/request-envelope'
+} from '../main/modules/agent-control/contracts/request-envelope'
 import {
   resolveExplicitRunStateResource,
   resolveRunStateResourceFromSessionText,

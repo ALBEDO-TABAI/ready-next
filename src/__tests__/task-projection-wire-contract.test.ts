@@ -10,7 +10,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import type { TaskProjectionChangeEvent, TaskProjectionChangeReason } from '../shared/ipc-contracts/task-projection'
-import type { TaskProjectionChangeEvent as MainSideEvent } from '../main/modules/agent-control/run-contracts'
+import type { TaskProjectionChangeEvent as MainSideEvent } from '../main/modules/agent-control/contracts/run-contracts'
 
 test('U4.1b wire TaskProjectionChangeEvent has stable {scopeId, changedTaskIds, reason} shape', () => {
   const sample: TaskProjectionChangeEvent = {

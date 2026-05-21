@@ -30,7 +30,7 @@ import {
   recordSkillTaskEvent,
   readSkillTaskProjection,
 } from '../main/modules/agent-control/skills/skill-task-tracker'
-import type { TaskProjectionRecord } from '../main/modules/agent-control/run-contracts'
+import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
 import { shouldExposeSkillAction } from '../main/modules/tools/skills-tools'
 
 const TURN_ENGINE_PATH = new URL('../main/modules/agent-control/turn-engine.ts', import.meta.url)

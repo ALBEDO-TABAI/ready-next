@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { reconcileTaskProjections } from '../main/modules/agent-control/task-projection/task-projection-reconciler'
-import type { TaskProjectionRecord, TaskProjectionWriteOptions } from '../main/modules/agent-control/run-contracts'
+import type { TaskProjectionRecord, TaskProjectionWriteOptions } from '../main/modules/agent-control/contracts/run-contracts'
 
 /**
  * Stage O §0.2 / §2.1 — `reconcileTaskProjections` is invoked inside

@@ -19,8 +19,8 @@ import {
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 import { rememberLastReferenceSkill } from '../main/modules/agent-control/skills/skill-reference-hints'
-import type { ExecutionTurnResult } from '../main/modules/agent-control/run-contracts'
-import type { ScopeRunEventPayload } from '../main/modules/agent-control/types'
+import type { ExecutionTurnResult } from '../main/modules/agent-control/contracts/run-contracts'
+import type { ScopeRunEventPayload } from '../main/modules/agent-control/contracts/types'
 import {
   createAgentPanelSnapshot,
   diagnoseAgentPanelSnapshot,

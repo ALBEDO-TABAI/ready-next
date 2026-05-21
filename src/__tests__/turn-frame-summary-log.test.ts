@@ -21,14 +21,14 @@ import {
   _resetLastReferenceSkillHintsForTests,
 } from '../main/modules/agent-control/skills/skill-reference-hints'
 import { defaultToolRegistry } from '../main/modules/agent-control/tools-runtime/tool-registry'
-import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
+import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import type { IntentClassification } from '../main/modules/agent-control/intent-classifier'
 import type {
   TurnEngineRequest,
   TurnEngineSession,
   TurnTranscriptEvent,
-} from '../main/modules/agent-control/run-contracts'
+} from '../main/modules/agent-control/contracts/run-contracts'
 
 function createSession(userText: string): TurnEngineSession {
   return {

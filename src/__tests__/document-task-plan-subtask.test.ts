@@ -6,12 +6,12 @@ import { SubtaskRuntime } from '../main/modules/agent-control/subtask-runtime'
 import { runDocumentTaskPlanWithSubtasks } from '../main/modules/agent-control/document-task-subtask-runner'
 import { syncTaskProjection } from '../main/modules/agent-control/task-projection/task-projection-sync'
 import type { DocumentTaskPlan } from '../main/modules/agent-control/document-task-plan'
-import type { TaskProjectionRecord, TaskProjectionStore } from '../main/modules/agent-control/run-contracts'
+import type { TaskProjectionRecord, TaskProjectionStore } from '../main/modules/agent-control/contracts/run-contracts'
 import type {
   ConversationScope,
   ScopeRunEventPayload,
   ScopeRunSummary,
-} from '../main/modules/agent-control/types'
+} from '../main/modules/agent-control/contracts/types'
 
 function createScope(): ConversationScope {
   return {

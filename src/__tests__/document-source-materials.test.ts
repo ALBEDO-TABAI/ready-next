@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
 import { buildDocumentTaskPlan } from '../main/modules/agent-control/document-task-plan'
-import { buildRequestEnvelope, type RequestEnvelope } from '../main/modules/agent-control/request-envelope'
+import { buildRequestEnvelope, type RequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
 import { buildDocumentInsightSourceMaterial } from '../main/modules/agent-control/document-source-materials'
 
 function createEnvelope(chunks: RequestEnvelope['chunks']): RequestEnvelope {

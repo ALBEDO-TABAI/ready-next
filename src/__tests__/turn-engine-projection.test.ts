@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { buildRequestEnvelope } from '../main/modules/agent-control/request-envelope'
+import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
 import { RSSDomainAdapter } from '../main/modules/agent-control/domain-adapters/rss-domain-adapter'
 import { TurnEngine } from '../main/modules/agent-control/turn-engine'
 import { TurnTranscript } from '../main/modules/agent-control/turn-transcript'
 import type { DomainAdapter } from '../main/modules/agent-control/domain-adapters/domain-adapter'
 import type { IntentClassification } from '../main/modules/agent-control/intent-classifier'
-import type { TurnEngineRequest, TurnEngineSession, TurnTranscriptEvent } from '../main/modules/agent-control/run-contracts'
+import type { TurnEngineRequest, TurnEngineSession, TurnTranscriptEvent } from '../main/modules/agent-control/contracts/run-contracts'
 
 function createIntent(overrides?: Partial<IntentClassification>): IntentClassification {
   return {

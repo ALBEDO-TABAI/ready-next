@@ -40,8 +40,8 @@ import { cancelChildRunForIpc, listActiveChildRunsForIpc } from './active-child-
 import { logAgentMetric } from '../agent-control/metrics'
 import { isRendererAgentMetricName } from '../../../shared/renderer-agent-metrics'
 import type { SendScopedUserMessage } from '../agent-control/send-scoped-confirmation'
-import type { ScopeRunEventPayload } from '../agent-control/types'
-import type { TaskProjectionChangeEvent } from '../agent-control/run-contracts'
+import type { ScopeRunEventPayload } from '../agent-control/contracts/types'
+import type { TaskProjectionChangeEvent } from '../agent-control/contracts/run-contracts'
 
 let mammothLib: typeof import('mammoth') | null = null
 let xlsxLib: typeof import('xlsx') | null = null
