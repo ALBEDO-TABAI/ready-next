@@ -53,6 +53,7 @@ import { telemetryGroup } from './ipc/telemetry-group'
 import { channelManagementGroup } from './ipc/channel-management-group'
 import { scheduleGroup } from './ipc/schedule-group'
 import { chatPersistenceGroup } from './ipc/chat-persistence-group'
+import { memoryGroup } from './ipc/memory-group'
 import type { IpcDisposeHandle } from './ipc/types'
 import { logAgentMetric } from '../agent-control/metrics'
 import { isRendererAgentMetricName } from '../../../shared/renderer-agent-metrics'
@@ -325,6 +326,17 @@ let scheduleGroupDispose: IpcDisposeHandle | null = null
  */
 let chatPersistenceGroupDispose: IpcDisposeHandle | null = null
 
+/**
+ * Stage V V2.1n — dispose handle returned by `memoryGroup.register`. Owns
+ * the 8 agent-memory channels (`agent:memory:query`, `agent:memory:create`,
+ * `agent:memory:update`, `agent:memory:delete`, `agent:memory:stats`,
+ * `agent:memory:lifecycle:status`, `agent:memory:lifecycle:runMaintenance`,
+ * `agent:memory:createFromConversation`). Same lifecycle pattern as the
+ * other group dispose slots: register on `setupAgentIPC`, dispose on
+ * dev-reload re-entry, dispose on `cleanupAgentRuntime` shutdown.
+ */
+let memoryGroupDispose: IpcDisposeHandle | null = null
+
 function cleanupSkillSessionState(sessionId?: string, reason = 'Skill session state cleared'): void {
   if (sessionId) {
     clearLastReferenceSkill(sessionId)
@@ -509,6 +521,13 @@ export async function cleanupAgentRuntime(): Promise<void> {
   if (chatPersistenceGroupDispose) {
     try { chatPersistenceGroupDispose.dispose() } catch { /* ignore */ }
     chatPersistenceGroupDispose = null
+  }
+  // Stage V V2.1n — symmetric release of the 8 agent-memory channel
+  // handlers (memory:query / create / update / delete / stats +
+  // memory:lifecycle:status / runMaintenance + memory:createFromConversation).
+  if (memoryGroupDispose) {
+    try { memoryGroupDispose.dispose() } catch { /* ignore */ }
+    memoryGroupDispose = null
   }
   if (runtime) {
     await runtime.stop()
@@ -1396,74 +1415,31 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
 
   // ===================== Memory System IPC =====================
 
-  ipcMain.removeHandler('agent:memory:query')
-  ipcMain.handle('agent:memory:query', async (_, filters): Promise<IPCResponse> => {
-    try {
-      const memoryRepo = runtime?.getMemoryRepository()
-      if (!memoryRepo) {
-        return { success: false, error: 'Memory repository not available' }
-      }
-      const memories = await memoryRepo.queryMemories(filters)
-      return { success: true, data: memories }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.removeHandler('agent:memory:create')
-  ipcMain.handle('agent:memory:create', async (_, entry): Promise<IPCResponse> => {
-    try {
-      const memoryRepo = runtime?.getMemoryRepository()
-      if (!memoryRepo) {
-        return { success: false, error: 'Memory repository not available' }
-      }
-      const created = await memoryRepo.createMemory(entry)
-      return { success: true, data: created }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.removeHandler('agent:memory:update')
-  ipcMain.handle('agent:memory:update', async (_, payload: { id: string; updates: Record<string, unknown> }): Promise<IPCResponse> => {
-    try {
-      const memoryRepo = runtime?.getMemoryRepository()
-      if (!memoryRepo) {
-        return { success: false, error: 'Memory repository not available' }
-      }
-      await memoryRepo.updateMemory(payload.id, payload.updates)
-      return { success: true }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.removeHandler('agent:memory:delete')
-  ipcMain.handle('agent:memory:delete', async (_, id: string): Promise<IPCResponse> => {
-    try {
-      const memoryRepo = runtime?.getMemoryRepository()
-      if (!memoryRepo) {
-        return { success: false, error: 'Memory repository not available' }
-      }
-      await memoryRepo.deleteMemory(id)
-      return { success: true }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.removeHandler('agent:memory:stats')
-  ipcMain.handle('agent:memory:stats', async (): Promise<IPCResponse> => {
-    try {
-      const memoryRepo = runtime?.getMemoryRepository()
-      if (!memoryRepo) {
-        return { success: false, error: 'Memory repository not available' }
-      }
-      const stats = await memoryRepo.getMemoryStats()
-      return { success: true, data: stats }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
+  // Stage V V2.1n — the 8 agent-memory channels (agent:memory:query,
+  // agent:memory:create, agent:memory:update, agent:memory:delete,
+  // agent:memory:stats, agent:memory:lifecycle:status,
+  // agent:memory:lifecycle:runMaintenance, agent:memory:createFromConversation)
+  // moved into `memoryGroup`. The group pre-clears internally; we hold the
+  // dispose handle so `cleanupAgentRuntime` can drop the handlers on
+  // shutdown. Re-binding on dev reload first calls `dispose()` on the prior
+  // handle so listener slots stay clean.
+  //
+  // Per-handler closures are passed in as bound dep methods (lazy accessors
+  // returning `null` while the runtime is not yet up — matches the
+  // pre-extraction `runtime?.getMemoryRepository()` null-path). The
+  // `agent:trigger:*` channels stay inline here: they live on the same
+  // `memoryRepository` instance but are a separate Settings tab and a
+  // future V2.1 sub-step (see `memory-group.ts` header for the boundary
+  // rationale).
+  if (memoryGroupDispose) {
+    try { memoryGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    memoryGroupDispose = null
+  }
+  memoryGroupDispose = memoryGroup.register(ipcMain, {
+    getMemoryRepository: () => runtime?.getMemoryRepository() ?? null,
+    getMemoryLifecycleManager: () => runtime?.getMemoryLifecycleManager() ?? null,
+    getPromptAssembly: () => runtime?.getPromptAssembly() ?? null,
+    listConversationScopes: () => runtime?.listConversationScopes() ?? null,
   })
 
   ipcMain.removeHandler('agent:trigger:list')
@@ -1508,79 +1484,11 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     }
   })
 
-  ipcMain.removeHandler('agent:memory:lifecycle:status')
-  ipcMain.handle('agent:memory:lifecycle:status', async (): Promise<IPCResponse> => {
-    try {
-      const lifecycle = runtime?.getMemoryLifecycleManager()
-      if (!lifecycle) {
-        return { success: false, error: 'Memory lifecycle manager not available' }
-      }
-      return {
-        success: true,
-        data: {
-          running: lifecycle.isRunning(),
-          lastMaintenanceAt: lifecycle.getLastMaintenanceAt()?.toISOString() || null,
-        },
-      }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.removeHandler('agent:memory:lifecycle:runMaintenance')
-  ipcMain.handle('agent:memory:lifecycle:runMaintenance', async (): Promise<IPCResponse> => {
-    try {
-      const lifecycle = runtime?.getMemoryLifecycleManager()
-      if (!lifecycle) {
-        return { success: false, error: 'Memory lifecycle manager not available' }
-      }
-      const result = await lifecycle.runMaintenance()
-      return { success: true, data: result }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.removeHandler('agent:memory:createFromConversation')
-  ipcMain.handle('agent:memory:createFromConversation', async (_, payload: {
-    scopeId: string
-    category: 'summary' | 'learning'
-    title: string
-    content: string
-    tags?: string[]
-    priority?: number
-  }): Promise<IPCResponse> => {
-    try {
-      const promptAssembly = runtime?.getPromptAssembly()
-      if (!promptAssembly) {
-        return { success: false, error: 'Prompt assembly not available' }
-      }
-
-      // Get scope
-      const scopes = runtime?.listConversationScopes()
-      const scope = scopes?.find((s) => s.id === payload.scopeId)
-      if (!scope) {
-        return { success: false, error: 'Scope not found' }
-      }
-
-      const memoryId = await promptAssembly.createMemoryFromConversation({
-        scope,
-        category: payload.category,
-        title: payload.title,
-        content: payload.content,
-        tags: payload.tags,
-        priority: payload.priority,
-      })
-
-      if (!memoryId) {
-        return { success: false, error: 'Failed to create memory' }
-      }
-
-      return { success: true, data: { memoryId } }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
+  // Stage V V2.1n — the 3 lifecycle/promotion channels above moved into
+  // `memoryGroup` (registered earlier in this function alongside the
+  // memory CRUD channels). The `agent:trigger:createWithMemories` block
+  // below stays inline for the reason documented at the memory-group
+  // registration site.
 
   ipcMain.removeHandler('agent:trigger:createWithMemories')
   ipcMain.handle('agent:trigger:createWithMemories', async (_, payload: {
