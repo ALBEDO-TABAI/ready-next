@@ -32,7 +32,7 @@ import { resolveModelCapabilities } from '../../../shared/ai-providers/model-cap
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 
 import { logAgentMetric } from './metrics'
-import type { SkillRunContract } from './run-contracts'
+import type { SkillRunContract } from './contracts/run-contracts'
 import { inspectSkillProgressArtifacts, type SkillProgressArtifacts } from './skills/skill-progress-artifacts'
 import {
   registerSkillChildDriver,

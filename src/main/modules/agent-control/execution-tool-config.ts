@@ -15,7 +15,7 @@ import {
   type DocumentWidgetProfile,
 } from '../claude-bridge/widget-guidance'
 import type { CapabilityGroupId } from '../../../shared/ai-capability-groups'
-import type { ToolResolutionDiagnostics } from './run-contracts'
+import type { ToolResolutionDiagnostics } from './contracts/run-contracts'
 import {
   filterPreferredSkillAnthropicTools as _filterPreferredSkillAnthropic,
   filterPreferredSkillOpenAITools as _filterPreferredSkillOpenAI,

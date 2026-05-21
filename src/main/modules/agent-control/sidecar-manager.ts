@@ -5,7 +5,7 @@ import { promisify } from 'util'
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'fs'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
-import { SidecarStatus } from './types'
+import { SidecarStatus } from './contracts/types'
 import { atomicWriteJson } from './atomic-write'
 import {
   buildReadyPythonCandidates,

@@ -7,7 +7,7 @@
  * - Session summaries (what was accomplished)
  */
 
-import type { ConversationScope, ScopeRunMemoryCapture } from './types'
+import type { ConversationScope, ScopeRunMemoryCapture } from './contracts/types'
 import type { MemoryRepository } from '../repositories/memory-repository'
 import type { UserProfileRepository } from '../repositories/user-profile-repository'
 

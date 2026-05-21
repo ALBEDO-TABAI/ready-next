@@ -2,8 +2,8 @@ import { existsSync, readFileSync, rmSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
 import { atomicWriteJson } from './atomic-write'
-import type { ContinuationState } from './continuation-state'
-import { normalizeContinuationState } from './continuation-state'
+import type { ContinuationState } from './contracts/continuation-state'
+import { normalizeContinuationState } from './contracts/continuation-state'
 import {
   domainsLikelyMatch,
   findRecentBrowserActionInRecords,

@@ -1,5 +1,5 @@
-import type { ScopeRunResumableAction, ScopeRunWaitingFor } from './types'
-import type { TaskInteractionState } from './run-contracts'
+import type { ScopeRunResumableAction, ScopeRunWaitingFor } from './contracts/types'
+import type { TaskInteractionState } from './contracts/run-contracts'
 
 export interface GenericInteractionDetectionResult {
   interactionState: Exclude<TaskInteractionState, 'running' | 'suspended' | 'resuming'>

@@ -2,7 +2,7 @@ import { existsSync, realpathSync, statSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
-import type { SkillRunContract } from './run-contracts'
+import type { SkillRunContract } from './contracts/run-contracts'
 import type { TurnFrame } from './runtime-core/turn-frame'
 
 const VEA_SKILL_ID = 'video-expert-analyzer'

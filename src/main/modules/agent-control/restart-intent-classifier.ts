@@ -34,7 +34,7 @@
  *   - The exported `RESTART_INTENT_CLASSES` array length === 3.
  *   - No code path produces a value outside this set.
  */
-import { canResumeShape, type ResumeHandle } from './resume-handle'
+import { canResumeShape, type ResumeHandle } from './contracts/resume-handle'
 import type { TurnUserIntent } from './runtime-core/turn-frame'
 
 export type RestartIntentClass = 'fresh' | 'resume' | 'restart_from_existing'

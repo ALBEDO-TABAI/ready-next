@@ -7,7 +7,7 @@ import {
   type SkillTaskRunRecord,
 } from '../repositories/skill-task-run-repository'
 import { getLastReferenceSkill, type ReferenceSkillHint } from './skills/skill-reference-hints'
-import type { TaskProjectionRecord } from './run-contracts'
+import type { TaskProjectionRecord } from './contracts/run-contracts'
 import {
   inspectLatestSkillTask,
   type SkillTaskSupervisorSnapshot,

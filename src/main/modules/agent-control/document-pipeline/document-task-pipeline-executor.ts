@@ -1,28 +1,28 @@
 import { createHash } from 'crypto'
 import { existsSync } from 'fs'
-import { getProviderDef, type AIModelConfig } from '../../../shared/ai-providers'
+import { getProviderDef, type AIModelConfig } from '../../../../shared/ai-providers'
 import {
   buildDocumentChunks,
   buildFocusedDocumentContext,
   selectWidgetCenteredChunks,
   type DocumentChunk,
-} from '../../../shared/document-sectioning'
+} from '../../../../shared/document-sectioning'
 import {
   describeApprovedWidgetProps,
   validateDocumentWidgetComponentSpec,
   WIDGET_COMPONENT_IDS,
   type DocumentWidgetComponentName,
   type DocumentWidgetComponentSpec,
-} from '../../../shared/document-widget-openui'
+} from '../../../../shared/document-widget-openui'
 import {
   collectDocumentWidgets,
   summarizeWidgetRecord,
   type DocumentWidgetRecord,
-} from '../../../shared/document-widget-parse'
-import { resolveControlledWidgetTarget } from '../../../shared/document-widget-target'
-import { readDocumentEditableText } from '../document-engine/ipc-handler'
-import { documentCommitRegistry } from '../document-engine/document-commit-registry'
-import { type DomainAdapterDispatchResult } from './domain-adapters/domain-adapter'
+} from '../../../../shared/document-widget-parse'
+import { resolveControlledWidgetTarget } from '../../../../shared/document-widget-target'
+import { readDocumentEditableText } from '../../document-engine/ipc-handler'
+import { documentCommitRegistry } from '../../document-engine/document-commit-registry'
+import { type DomainAdapterDispatchResult } from '../domain-adapters/domain-adapter'
 import { classifyStructuredDocumentIntent } from './document-task-types'
 import { buildDocumentTaskStepCacheKey, hashText } from './document-task-cache-key'
 import {
@@ -33,7 +33,7 @@ import {
 } from './document-task-tool-timing'
 import { DocumentInsightCache } from './document-insight-cache'
 import { buildDocumentInsightSourceMaterial } from './document-source-materials'
-import { logAgentMetric } from './metrics'
+import { logAgentMetric } from '../metrics'
 import { runDocumentTaskPlanWithSubtasks } from './document-task-subtask-runner'
 import {
   buildPipelinePhaseOrder,
@@ -49,12 +49,12 @@ import {
   type DocumentWidgetWriteStage,
 } from './document-task-pipeline'
 import type { DocumentTaskJob, DocumentTaskPlan, DocumentTaskStep } from './document-task-plan'
-import type { ExecutionIntentContext } from './execution-intent-resolver'
-import type { ToolPolicy } from './execution-tool-config'
-import type { RequestEnvelope, RequestEnvelopeResource } from './contracts/request-envelope'
-import type { ProjectionTruthSnapshot, TurnProviderContext } from './contracts/run-contracts'
-import { SubtaskRuntime } from './runtime-core/subtask-runtime'
-import type { ConversationScope, ScopeRunEventPayload } from './contracts/types'
+import type { ExecutionIntentContext } from '../execution-intent-resolver'
+import type { ToolPolicy } from '../execution-tool-config'
+import type { RequestEnvelope, RequestEnvelopeResource } from '../contracts/request-envelope'
+import type { ProjectionTruthSnapshot, TurnProviderContext } from '../contracts/run-contracts'
+import { SubtaskRuntime } from '../runtime-core/subtask-runtime'
+import type { ConversationScope, ScopeRunEventPayload } from '../contracts/types'
 
 interface DocumentPipelineCacheSession {
   activeRunId: string | null
@@ -119,7 +119,7 @@ interface DocumentTaskPipelineExecutorDeps {
   resolveWidgetEditLease?: (params: {
     agent: string
     sessionId?: string | null
-  }) => import('./widget-edit-lease').ActiveWidgetEditLease | null
+  }) => import('../widget-edit-lease').ActiveWidgetEditLease | null
 }
 
 export interface DocumentTaskPipelineExecutionParams {

@@ -1,4 +1,4 @@
-import type { ToolDispatchDecision, ToolVisibilityPlan } from './run-contracts'
+import type { ToolDispatchDecision, ToolVisibilityPlan } from './contracts/run-contracts'
 
 export function buildToolVisibilityPlan(params: {
   supportsToolCalls: boolean

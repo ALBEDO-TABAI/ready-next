@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import type { ToolExecutionOutput } from './tools-runtime/tool-result-types'
-import type { RecoveryRecord, TurnToolCall } from './run-contracts'
+import type { RecoveryRecord, TurnToolCall } from './contracts/run-contracts'
 
 export interface SkillWasteScore {
   score: number

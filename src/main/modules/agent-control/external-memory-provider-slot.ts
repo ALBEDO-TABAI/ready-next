@@ -1,4 +1,4 @@
-import type { ConversationScope } from './types'
+import type { ConversationScope } from './contracts/types'
 
 export interface ExternalMemoryPrefetchRequest {
   scope: ConversationScope

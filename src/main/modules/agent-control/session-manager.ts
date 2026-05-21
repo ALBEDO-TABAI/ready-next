@@ -1,4 +1,4 @@
-import { AgentTaskState } from './types'
+import { AgentTaskState } from './contracts/types'
 
 export interface AgentTaskSnapshot {
   agent: string
