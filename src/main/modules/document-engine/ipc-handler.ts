@@ -15,6 +15,7 @@ import { importEpubAsMarkdown } from './ebook-importer'
 import { getDatabase } from '../database'
 import { DocumentMarksRepository } from './document-marks-repository'
 import { markGroup } from './ipc/mark-group'
+import { fileIoGroup } from './ipc/file-io-group'
 import type { IpcDisposeHandle } from './ipc/types'
 import {
   ATTACHMENT_HARD_CAP_BYTES,
@@ -516,6 +517,14 @@ async function saveDocumentWithDialog(payload: {
  */
 let markGroupDispose: IpcDisposeHandle | null = null
 
+/**
+ * Stage V V2.3b — dispose handle returned by `fileIoGroup.register`. The 8
+ * file-I/O channels (read/write/saveAs/list + openFolder/openPath/
+ * showInFolder/createFile) live in `ipc/file-io-group.ts`; same dev-reload
+ * lifecycle as MarkGroup.
+ */
+let fileIoGroupDispose: IpcDisposeHandle | null = null
+
 export function setupDocumentIPC(useMock = false): void {
   // Renderer notifies main whenever a widget update has been committed into the tab content store.
   //   Pipeline executor waits on this via documentCommitRegistry.waitForCommitAfter so the write
@@ -664,132 +673,38 @@ export function setupDocumentIPC(useMock = false): void {
     },
   })
 
-  // Read file — enhanced with binary file handling via local-file:// URLs
-  ipcMain.handle('document:read', async (_, path: string) => {
-    try {
-      if (useMock) {
-        return {
-          success: true,
-          data: { type: 'text' as const, content: `[Mock] Content of ${path}` },
-          mock: true
-        }
-      }
-
-      if (!existsSync(path)) {
-        return { success: false, error: 'File not found', errorCode: 'FILE_NOT_FOUND' }
-      }
-
-      // For binary files, return a local-file:// URL instead of content
-      if (isBinaryFile(path)) {
-        const category = getFileCategory(path)
-        const extension = extname(path).toLowerCase()
-        // Pre-stat to size-guard inline byte loads and flag oversized media
-        // so the renderer can fall back to a streaming/<video src=local-file://>
-        // path instead of rehydrating tens of MB through structured clone.
-        const stats = await stat(path)
-        const decision = decideReadAttachmentSize(stats.size, category)
-        if (decision.kind === 'attachment_too_large') {
-          return {
-            success: false,
-            error: 'attachment_too_large',
-            errorCode: 'ATTACHMENT_TOO_LARGE',
-            max: decision.max,
-            actual: decision.actual,
-          }
-        }
-        if (decision.kind === 'pdf_too_large_for_inline_bytes') {
-          return {
-            success: false,
-            error: 'pdf_too_large_for_inline_bytes',
-            errorCode: 'PDF_TOO_LARGE_FOR_INLINE_BYTES',
-            max: decision.max,
-            actual: decision.actual,
-          }
-        }
-        const data: {
-          type: 'binary'
-          category: AttachmentCategory
-          localUrl: string
-          extension: string
-          bytes?: Uint8Array
-          size: number
-          /** Set when the file is too large to inline — renderer should stream from `localUrl`. */
-          kind?: 'large_video_ref' | 'large_image_ref'
-        } = {
-          type: 'binary',
-          category,
-          localUrl: toLocalFileUrl(path),
-          extension,
-          size: stats.size,
-        }
-
-        if (decision.kind === 'large_video_ref') {
-          data.kind = 'large_video_ref'
-        } else if (decision.kind === 'large_image_ref') {
-          data.kind = 'large_image_ref'
-        } else if (decision.kind === 'ok' && decision.loadInlineBytes) {
-          // PDF and ebook previews read raw bytes more reliably than fetching a custom protocol URL.
-          data.bytes = new Uint8Array(await readFile(path))
-        }
-
-        return {
-          success: true,
-          data,
-        }
-      }
-
-      // Text file — read as UTF-8
-      const content = await readFile(path, 'utf-8')
-      return {
-        success: true,
-        data: { type: 'text' as const, content },
-        // Keep backward-compatible `content` at top level
-        content
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      return { success: false, error: errorMessage, errorCode: 'PARSE_ERROR' }
-    }
-  })
-
-  // Write file
-  ipcMain.handle('document:write', async (_, { path, content }: { path: string; content: string }) => {
-    try {
-      if (useMock) {
-        return { success: true, mock: true }
-      }
-      const result = await writeDocumentEditableText(path, content)
-      if (!result.success) {
-        const ext = extname(path).toLowerCase()
-        return {
-          success: false,
-          error: result.error || '文档写入失败',
-          errorCode: ext === '.docx' ? 'DOCX_WRITE_FAILED' : 'UNSUPPORTED_TEXT_WRITE',
-        }
-      }
-      if (documentWriteIndexHook) {
+  // Stage V V2.3b — 8 file-I/O channels (`document:read`, `document:write`,
+  // `document:saveAs`, `document:list`, `document:openFolder`,
+  // `document:openPath`, `document:showInFolder`, `document:createFile`)
+  // moved into `fileIoGroup`. The host injects the mutable write-index hook
+  // getter, the editable-text writer, the save-dialog flow, the dialog/
+  // shell facades, and the workspace-validation context — everything the
+  // 8 handler bodies touch is captured in the per-group deps contract.
+  if (fileIoGroupDispose) {
+    try { fileIoGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    fileIoGroupDispose = null
+  }
+  fileIoGroupDispose = fileIoGroup.register(ipcMain, {
+    useMock,
+    getDocumentWriteIndexHook: () => documentWriteIndexHook,
+    writeDocumentEditableText,
+    saveDocumentWithDialog,
+    resolveDialogWindow,
+    getBrowserWindowFromWebContents: (sender) => BrowserWindow.fromWebContents(sender),
+    showOpenDialog: (window, options) => dialog.showOpenDialog(window, options),
+    showItemInFolder: (target) => shell.showItemInFolder(target),
+    openShellPath: (target) => shell.openPath(target),
+    validateWorkspaceRoot: (picked) => validateWorkspaceRoot(picked, {
+      homeDir: homedir(),
+      accessCheck: (p) => {
         try {
-          documentWriteIndexHook(path, content)
-        } catch (hookError) {
-          console.warn('[document-engine] write index hook failed', hookError)
+          accessSync(p, fsConstants.R_OK)
+          return true
+        } catch {
+          return false
         }
-      }
-      return result
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      return { success: false, error: errorMessage }
-    }
-  })
-
-  ipcMain.handle('document:saveAs', async (event, payload: { content?: string; contentBase64?: string; suggestedName?: string; defaultPath?: string | null }) => {
-    if (useMock) {
-      return {
-        success: true,
-        path: payload.defaultPath || payload.suggestedName || '新文档.md',
-        mock: true,
-      }
-    }
-    return saveDocumentWithDialog(payload, BrowserWindow.fromWebContents(event.sender))
+      },
+    }),
   })
 
   ipcMain.handle('document:importEbookAsMarkdown', async (_, payload: { sourcePath?: string }) => {
@@ -828,56 +743,9 @@ export function setupDocumentIPC(useMock = false): void {
     }
   })
 
-  // List directory
-  ipcMain.handle('document:list', async (_, dir: string) => {
-    try {
-      if (useMock) {
-        return {
-          success: true,
-          items: [
-            { name: 'documents', path: `${dir}/documents`, isDirectory: true, size: 0, modified: new Date() },
-            { name: 'images', path: `${dir}/images`, isDirectory: true, size: 0, modified: new Date() },
-            { name: 'readme.md', path: `${dir}/readme.md`, isDirectory: false, size: 1024, modified: new Date() }
-          ],
-          mock: true
-        }
-      }
-
-      if (!existsSync(dir)) {
-        return { success: false, error: 'Directory not found', errorCode: 'FILE_NOT_FOUND' }
-      }
-
-      const items = (await readdir(dir))
-        .filter((name) => !shouldHideInternalBackup(name))
-      const entries = await Promise.all(items.map(async (name) => {
-        const filePath = join(dir, name)
-        try {
-          const stats = await stat(filePath)
-          return {
-            name,
-            path: filePath,
-            isDirectory: stats.isDirectory(),
-            size: stats.size,
-            modified: stats.mtime
-          }
-        } catch {
-          // Handle permission errors or broken symlinks gracefully
-          return {
-            name,
-            path: filePath,
-            isDirectory: false,
-            size: 0,
-            modified: new Date(0)
-          }
-        }
-      }))
-
-      return { success: true, items: entries }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error)
-      return { success: false, error: errorMessage, errorCode: 'PARSE_ERROR' }
-    }
-  })
+  // Stage V V2.3b — `document:list` moved into `fileIoGroup`. See breadcrumb
+  // above the `document:importEbookAsMarkdown` handler for the group's
+  // single registration site.
 
   // Parse docx — real parsing with mammoth, returns { html, rawText }
   ipcMain.handle('document:parseDocx', async (_, path: string) => {
@@ -1139,51 +1007,9 @@ export function setupDocumentIPC(useMock = false): void {
     }
   })
 
-  // Open folder dialog — let user choose a workspace directory.
-  //
-  // Optional payload `{ validateAsWorkspace: true }` runs the shared
-  // `validateWorkspaceRoot` check (with an fs.accessSync read probe) before
-  // returning the path. Callers that pick a folder for *non*-workspace
-  // purposes (e.g. RSS download dir, skill import) pass no payload and get
-  // the legacy unconditional behavior.
-  ipcMain.handle('document:openFolder', async (event, payload?: { validateAsWorkspace?: boolean }) => {
-    try {
-      const win = resolveDialogWindow(BrowserWindow.fromWebContents(event.sender))
-      if (!win) return { success: false, error: 'No window' }
-      const result = await dialog.showOpenDialog(win, {
-        properties: ['openDirectory'],
-        title: '选择工作区目录'
-      })
-      if (result.canceled || result.filePaths.length === 0) {
-        return { success: false, error: 'cancelled' }
-      }
-      const picked = result.filePaths[0]
-      if (payload?.validateAsWorkspace) {
-        const validation = validateWorkspaceRoot(picked, {
-          homeDir: homedir(),
-          accessCheck: (p) => {
-            try {
-              accessSync(p, fsConstants.R_OK)
-              return true
-            } catch {
-              return false
-            }
-          },
-        })
-        if (!validation.ok) {
-          return {
-            success: false,
-            error: validation.message || `不能将 ${picked} 设为工作区。`,
-            validationReason: validation.reason,
-            attemptedPath: picked,
-          }
-        }
-      }
-      return { success: true, path: picked }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
+  // Stage V V2.3b — `document:openFolder` moved into `fileIoGroup`. The
+  // group injects the workspace-validation context (homeDir + accessSync
+  // probe) so the handler stays pure.
 
   // Export workspace index file. Caller supplies a name + folder list; we
   // pop a save dialog so the user picks a location and we write a
@@ -1271,36 +1097,8 @@ export function setupDocumentIPC(useMock = false): void {
     return { success: true, path: homedir() }
   })
 
-  // Reveal in system file manager
-  ipcMain.handle('document:showInFolder', async (_, path: string) => {
-    try {
-      if (!existsSync(path)) return { success: false, error: 'Not found' }
-      shell.showItemInFolder(path)
-      return { success: true }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('document:openPath', async (_, path: string) => {
-    try {
-      if (!existsSync(path)) return { success: false, error: 'Not found' }
-      await shell.openPath(path)
-      return { success: true }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  // Create a new empty file
-  ipcMain.handle('document:createFile', async (_, path: string) => {
-    try {
-      if (useMock) return { success: true, mock: true }
-      if (existsSync(path)) return { success: false, error: 'File already exists' }
-      await writeFile(path, '', 'utf-8')
-      return { success: true }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
+  // Stage V V2.3b — `document:showInFolder`, `document:openPath`, and
+  // `document:createFile` moved into `fileIoGroup` alongside the rest of
+  // the file-I/O cluster. The group's single registration site sits with
+  // the MarkGroup wiring above so dev-reload disposes both groups together.
 }

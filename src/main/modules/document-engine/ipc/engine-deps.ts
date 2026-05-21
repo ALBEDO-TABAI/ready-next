@@ -1,4 +1,4 @@
-// Stage V V2.3a — document-engine engine deps composition root.
+// Stage V V2.3a/V2.3b — document-engine engine deps composition root.
 //
 // `EngineDeps` is the SUPERSET of everything any extracted document-engine
 // IPC channel group might need. Each group declares its OWN per-group deps
@@ -15,16 +15,63 @@
 //      are mechanical — copy the group + its deps interface; no implicit
 //      coupling via god-deps.
 //
-// As groups are extracted in V2.3b … V2.3n this file grows. V2.3a populates
-// only the MarkGroup-relevant fields (mock flag + marks repository
-// factory). Later sub-stages will append file-I/O hook, binary detector,
-// dialog window resolver, parser handles, workspace schema constants, etc.
+// As groups are extracted in V2.3b … V2.3n this file grows. V2.3a populated
+// the MarkGroup surface (mock flag + marks repository factory). V2.3b adds
+// the FileIoGroup surface (document write-index hook getter + editable text
+// writer + dialog/shell facades + workspace validation context).
+import type { BrowserWindow, WebContents } from 'electron'
 import type { DocumentMarksRepository } from '../document-marks-repository'
+import type { DocumentWriteIndexHook } from '../ipc-handler'
+import type { WorkspaceValidationResult } from '../../../../shared/workspace-validation'
 
 /**
- * Composition root. V2.3a populates only the MarkGroup-relevant fields;
- * later V2.3 sub-stages extend this interface as their groups need new
- * deps.
+ * Shape of an open-folder dialog result the FileIoGroup consumes. Mirror of
+ * Electron's `OpenDialogReturnValue` narrowed to the two fields the handler
+ * reads (`canceled` + `filePaths`).
+ */
+export interface OpenDialogResult {
+  canceled: boolean
+  filePaths: string[]
+}
+
+/**
+ * Shape of an open-folder dialog options object the FileIoGroup passes
+ * through. Mirror of Electron's `OpenDialogOptions` narrowed to the two
+ * fields the host wires (`properties`, `title`). `properties` is a mutable
+ * array so the value passes through to Electron's `dialog.showOpenDialog`
+ * without a structural copy.
+ */
+export interface OpenFolderDialogOptions {
+  properties: Array<'openDirectory'>
+  title: string
+}
+
+/**
+ * Result of the host-owned `saveDocumentWithDialog` helper. Mirror of the
+ * exact return shape declared inline in `ipc-handler.ts` so the group can
+ * forward it verbatim.
+ */
+export interface SaveDocumentWithDialogResult {
+  success: boolean
+  path?: string
+  canceled?: boolean
+  error?: string
+  errorCode?: string
+  max?: number
+  actual?: number
+}
+
+export interface SaveAsPayload {
+  content?: string
+  contentBase64?: string
+  suggestedName?: string
+  defaultPath?: string | null
+}
+
+/**
+ * Composition root. V2.3a populates the MarkGroup-relevant fields; V2.3b
+ * extends it with FileIoGroup deps (mock flag is shared). Later V2.3
+ * sub-stages will append further surfaces as their groups need new deps.
  *
  * Optional fields are FORBIDDEN here — if a future group can run without a
  * dep, that dep belongs in the group's per-group deps interface (also
@@ -41,4 +88,47 @@ export interface EngineDeps {
    * the same error the inline handler used.
    */
   getDocumentMarksRepository(): DocumentMarksRepository
+
+  // --- V2.3b — FileIoGroup deps ---
+
+  /**
+   * Read the current (mutable) document write-index hook the host installs
+   * via `setDocumentWriteIndexHook`. The handler invokes it after a
+   * successful `document:write` so the search-engine indexer can refresh.
+   * Returns `null` when no hook is registered.
+   */
+  getDocumentWriteIndexHook(): DocumentWriteIndexHook | null
+  /**
+   * Write editable text content to a path with the host's binary/docx
+   * guards. Lifted to a dep so the group never imports the docx/text
+   * write helpers directly.
+   */
+  writeDocumentEditableText(filePath: string, content: string): Promise<{ success: boolean; error?: string }>
+  /**
+   * Host-owned save dialog flow (window resolution + size guards + actual
+   * write). Returns the structured result `document:saveAs` forwards
+   * verbatim.
+   */
+  saveDocumentWithDialog(
+    payload: SaveAsPayload,
+    parentWindow: BrowserWindow | null,
+  ): Promise<SaveDocumentWithDialogResult>
+  /**
+   * Resolve the active BrowserWindow used as dialog parent. The host owns
+   * the focused/all-windows fallback chain.
+   */
+  resolveDialogWindow(parentWindow: BrowserWindow | null): BrowserWindow | null
+  /** Wrap `BrowserWindow.fromWebContents` so the group does not import electron at runtime. */
+  getBrowserWindowFromWebContents(sender: WebContents): BrowserWindow | null
+  /** Wrap `dialog.showOpenDialog` for the openFolder channel. */
+  showOpenDialog(window: BrowserWindow, options: OpenFolderDialogOptions): Promise<OpenDialogResult>
+  /** Wrap `shell.showItemInFolder` so the group does not import electron at runtime. */
+  showItemInFolder(targetPath: string): void
+  /** Wrap `shell.openPath` so the group does not import electron at runtime. */
+  openShellPath(targetPath: string): Promise<string>
+  /**
+   * Validate a candidate workspace root path. Lifted to a dep so the
+   * group does not bake in the home directory or the `accessSync` probe.
+   */
+  validateWorkspaceRoot(picked: string): WorkspaceValidationResult
 }
