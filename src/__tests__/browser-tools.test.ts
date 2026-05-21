@@ -8,7 +8,7 @@ import { BrowserTaskPlanner } from '../main/modules/agent-control/domain-adapter
 import {
   __resetSessionContinuityForTests,
   __setSessionContinuityStoragePathForTests,
-} from '../main/modules/agent-control/session-continuity'
+} from '../main/modules/agent-control/session/session-continuity'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
 
 const TEST_CONTINUITY_PATH = join(tmpdir(), 'ready-browser-tools-continuity.json')

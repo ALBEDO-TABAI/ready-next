@@ -1,4 +1,4 @@
-import { domainsLikelyMatch } from '../agent-control/session-continuity'
+import { domainsLikelyMatch } from '../agent-control/session/session-continuity'
 import type { BrowserPageState } from '../../../shared/browser-agent-task'
 
 function normalizeText(value: string): string {

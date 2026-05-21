@@ -1,5 +1,5 @@
 import type { BrowserController } from '../browser-engine/ipc-handler'
-import { rememberBrowserWorkflowState } from '../agent-control/session-continuity'
+import { rememberBrowserWorkflowState } from '../agent-control/session/session-continuity'
 import { executeBrowserTool } from './browser-tools'
 import { createRotatingLogger } from '../../utils/rotating-logger'
 import { BrowserAgentRuntimeAdapter } from '../browser-engine/agent-runtime-adapter'

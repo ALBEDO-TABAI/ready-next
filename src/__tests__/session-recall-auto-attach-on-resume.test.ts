@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-import { SessionRecallService } from '../main/modules/agent-control/session-recall-service'
+import { SessionRecallService } from '../main/modules/agent-control/session/session-recall-service'
 
 // skill-resume E1 — when user fires bare retry/continue intent on a scope with
 // no manually attached recall context, auto-attach top-N predecessors in same

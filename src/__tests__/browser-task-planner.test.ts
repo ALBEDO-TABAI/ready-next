@@ -9,7 +9,7 @@ import {
   __resetSessionContinuityForTests,
   __setSessionContinuityStoragePathForTests,
   rememberBrowserWorkflowState,
-} from '../main/modules/agent-control/session-continuity'
+} from '../main/modules/agent-control/session/session-continuity'
 
 const TEST_CONTINUITY_PATH = join(tmpdir(), 'ready-browser-task-planner-continuity.json')
 

@@ -24,7 +24,7 @@ import {
   __setSessionContinuityStoragePathForTests,
   getLatestSkillRun,
   rememberSkillRun,
-} from '../main/modules/agent-control/session-continuity'
+} from '../main/modules/agent-control/session/session-continuity'
 import {
   clearSkillTaskProjection,
   recordSkillTaskEvent,

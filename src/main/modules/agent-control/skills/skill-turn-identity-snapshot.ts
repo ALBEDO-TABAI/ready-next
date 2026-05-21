@@ -18,10 +18,10 @@
 import type {
   ActiveSkillContext,
   ResolveActiveSkillContextInputs,
-} from '../active-skill-context'
-import { resolveActiveSkillContextReadOnly } from '../active-skill-context'
+} from '../session/active-skill-context'
+import { resolveActiveSkillContextReadOnly } from '../session/active-skill-context'
 import type { SkillTaskSupervisorSnapshot } from './skill-task-supervisor'
-import type { SkillRunRecord } from '../session-continuity'
+import type { SkillRunRecord } from '../session/session-continuity'
 import type { ContinuationState } from '../contracts/continuation-state'
 import type { ExplicitRunStateResourceCandidate } from '../task-projection/run-state-resource-resolver'
 

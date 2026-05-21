@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, test } from 'node:test'
 
-import * as sessionContinuityModule from '../main/modules/agent-control/session-continuity'
+import * as sessionContinuityModule from '../main/modules/agent-control/session/session-continuity'
 import {
   __reloadSessionContinuityFromDiskForTests,
   __resetSessionContinuityForTests,
@@ -19,7 +19,7 @@ import {
   rememberContinuationState,
   rememberBrowserWorkflowState,
   rememberSkillRun,
-} from '../main/modules/agent-control/session-continuity'
+} from '../main/modules/agent-control/session/session-continuity'
 
 const TEST_STORAGE_PATH = join(tmpdir(), 'ready-session-continuity-persisted.json')
 

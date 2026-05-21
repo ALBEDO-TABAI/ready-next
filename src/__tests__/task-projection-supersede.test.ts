@@ -7,7 +7,7 @@ import { afterEach, beforeEach, test } from 'node:test'
 import {
   __resetSessionContinuityForTests,
   __setSessionContinuityStoragePathForTests,
-} from '../main/modules/agent-control/session-continuity'
+} from '../main/modules/agent-control/session/session-continuity'
 import { syncTaskProjection } from '../main/modules/agent-control/task-projection/task-projection-sync'
 import type {
   TaskProjectionRecord,

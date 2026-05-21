@@ -6,7 +6,7 @@ import {
   rememberActiveSkillContext,
   resolveActiveSkillContextFromInputs,
   type ActiveSkillContext,
-} from '../main/modules/agent-control/active-skill-context'
+} from '../main/modules/agent-control/session/active-skill-context'
 import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
 import type { SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skills/skill-task-supervisor'
 

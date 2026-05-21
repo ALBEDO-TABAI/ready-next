@@ -12,7 +12,7 @@ import {
   getRememberedActiveSkillContext,
   resolveActiveSkillContextFromInputs,
   type ActiveSkillContext,
-} from '../active-skill-context'
+} from '../session/active-skill-context'
 import { applySteeringToTurnFrame } from './turn-frame-steering'
 import type { TurnFrame, TurnFrameLiveness, TurnFrameMode, TurnUserIntent } from './turn-frame'
 

@@ -21,7 +21,7 @@ import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-contr
 import {
   clearActiveSkillContext,
   rememberActiveSkillContext,
-} from '../main/modules/agent-control/active-skill-context'
+} from '../main/modules/agent-control/session/active-skill-context'
 
 const STANDARD_PRIMITIVES = [
   'skill_ask_user',

@@ -8,7 +8,7 @@ import type {
 } from '../contracts/run-contracts'
 import { isTaskType } from '../../../../shared/task-types'
 import { buildContinuationStateFromProjection } from '../contracts/continuation-state'
-import { clearContinuationState, rememberContinuationState } from '../session-continuity'
+import { clearContinuationState, rememberContinuationState } from '../session/session-continuity'
 import type { ScopeRunEventPayload, ScopeRunSummary } from '../contracts/types'
 import type { RecoveryRecord } from '../contracts/run-contracts'
 

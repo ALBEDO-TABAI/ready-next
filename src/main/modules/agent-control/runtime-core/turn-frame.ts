@@ -1,4 +1,4 @@
-import type { ActiveSkillContextSource } from '../active-skill-context'
+import type { ActiveSkillContextSource } from '../session/active-skill-context'
 // SkillRunContract lives in run-contracts.ts. Imported as a type so the
 // frame schema can carry the durable contract without circular runtime
 // dependencies.

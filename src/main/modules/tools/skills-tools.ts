@@ -2,8 +2,8 @@ import { existsSync, readFileSync } from 'node:fs'
 import { dirname } from 'node:path'
 import type { ZodObject, ZodRawShape } from 'zod'
 import { getSkillsRuntimeManager, type SkillState } from '../skills-runtime/runtime-manager'
-import { rememberSkillRun } from '../agent-control/session-continuity'
-import { resolveActiveSkillContext } from '../agent-control/active-skill-context'
+import { rememberSkillRun } from '../agent-control/session/session-continuity'
+import { resolveActiveSkillContext } from '../agent-control/session/active-skill-context'
 import {
   createToolExecutionOutput,
   normalizeToolExecutionOutput,

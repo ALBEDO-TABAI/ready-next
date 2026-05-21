@@ -1,5 +1,5 @@
 import type { SkillState } from '../../skills-runtime/runtime-manager'
-import type { SkillRunRecord } from '../session-continuity'
+import type { SkillRunRecord } from '../session/session-continuity'
 import type { TaskProjectionRecord } from '../contracts/run-contracts'
 
 function normalizeLooseToken(value: string): string {

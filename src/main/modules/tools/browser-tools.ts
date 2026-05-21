@@ -19,7 +19,7 @@ import { createRotatingLogger } from '../../utils/rotating-logger'
 import {
   findRecentBrowserAction,
   rememberBrowserAction,
-} from '../agent-control/session-continuity'
+} from '../agent-control/session/session-continuity'
 import {
   getBrowserAnthropicTools,
   getBrowserOpenAITools,

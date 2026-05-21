@@ -1,4 +1,4 @@
-import { domainsLikelyMatch, getBrowserWorkflowState, getLatestSkillRun, getRecentBrowserActions } from '../session-continuity'
+import { domainsLikelyMatch, getBrowserWorkflowState, getLatestSkillRun, getRecentBrowserActions } from '../session/session-continuity'
 import type { AttachmentResourceList, BrowserTaskAttachmentResource, BrowserTaskDecision, BrowserTaskPlan, BrowserTaskPlanContinuity } from '../../../../shared/browser-agent-task'
 import { detectLiveInfoIntent } from '../live-info-intent'
 

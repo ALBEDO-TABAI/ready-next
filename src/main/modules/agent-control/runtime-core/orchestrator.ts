@@ -8,7 +8,7 @@ import type { ExecutionHostRequest, ExecutionHostResult } from '../contracts/run
 import type { IntentClassification } from '../intent-classifier'
 import type { RequestEnvelope } from '../contracts/request-envelope'
 import type { ContinuationIntent, ContinuationState } from '../contracts/continuation-state'
-import { AgentSessionManager } from '../session-manager'
+import { AgentSessionManager } from '../session/session-manager'
 import { createScopedRunCollector, type SendAndCollectResult } from '../task-projection/run-collector'
 import { RunCleanupRegistry, type RunCleanupCallback } from '../task-projection/run-cleanup-registry'
 import type { DomainAdapter } from '../domain-adapters/domain-adapter'

@@ -8,7 +8,7 @@ import {
   __resetSessionContinuityForTests,
   __setSessionContinuityStoragePathForTests,
   getContinuationState,
-} from '../main/modules/agent-control/session-continuity'
+} from '../main/modules/agent-control/session/session-continuity'
 import { syncTaskProjection } from '../main/modules/agent-control/task-projection/task-projection-sync'
 import type { TaskProjectionRecord, TaskProjectionStore } from '../main/modules/agent-control/contracts/run-contracts'
 import type { ScopeRunEventPayload, ScopeRunSummary } from '../main/modules/agent-control/contracts/types'

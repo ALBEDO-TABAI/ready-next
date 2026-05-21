@@ -75,7 +75,7 @@ import {
   selectContinuationProjection,
   type ContinuationIntent,
 } from '../contracts/continuation-state'
-import { forgetSession } from '../session-continuity'
+import { forgetSession } from '../session/session-continuity'
 import { isRetryOnlyTurn } from '../skills/skill-detection-inputs'
 import { logAgentMetric } from '../metrics'
 import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
@@ -85,7 +85,7 @@ import {
   type SendScopedResponse,
   type SendScopedUserMessage,
 } from '../send-scoped-confirmation'
-import { SessionRecallService } from '../session-recall-service'
+import { SessionRecallService } from '../session/session-recall-service'
 import { SidecarManager } from '../sidecar-manager'
 import { MemoryRepository } from '../../repositories/memory-repository'
 import { MemoryLifecycleManager } from '../memory-lifecycle'
