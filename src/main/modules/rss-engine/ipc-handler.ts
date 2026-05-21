@@ -43,6 +43,7 @@ import {
   type RouteAttemptSnapshotEntry,
 } from './source-diagnostics'
 import { sourceGroup } from './ipc/source-group'
+import { itemGroup } from './ipc/item-group'
 import type { AddSourceCoreInput, AddSourceCoreResult } from './ipc/engine-deps'
 import type { IpcDisposeHandle } from './ipc/types'
 
@@ -187,6 +188,14 @@ const sourceRefreshInFlight = new Set<string>()
  * will drain this on shutdown.
  */
 let sourceGroupDispose: IpcDisposeHandle | null = null
+
+/**
+ * Stage V V2.2b — dispose handle returned by `itemGroup.register`. The 6
+ * item channels live in `ipc/item-group.ts`; mirror of the SourceGroup
+ * dispose slot above so dev-reload re-entry into `setupRSSIPC` releases
+ * both groups before the next registration binds.
+ */
+let itemGroupDispose: IpcDisposeHandle | null = null
 
 export function setRSSBrowserController(controller: BrowserController | null): void {
   rssBrowserController = controller
@@ -944,79 +953,20 @@ export function setupRSSIPC(useMock = false): void {
     mockSources,
   })
 
-  ipcMain.handle('rss:getItems', async (_, sourceId?: string) => {
-    if (useMock) {
-      const items = sourceId ? mockItems.filter((item) => item.sourceId === sourceId) : mockItems
-      return createSuccessResponse(items, true)
-    }
-
-    try {
-      const rawItems = rssRepository.getRSSItemsWithSource(sourceId) as DBRSSItem[]
-      return createSuccessResponse(rawItems.map(mapDBItemToAPI), false)
-    } catch (error) {
-      return createErrorResponse(error instanceof Error ? error.message : String(error))
-    }
-  })
-
-  ipcMain.handle('rss:markRead', async (_, itemId: string) => {
-    if (useMock) return createSuccessResponse({ marked: true }, true)
-
-    try {
-      rssRepository.markRSSRead(itemId)
-      return createSuccessResponse({ marked: true }, false)
-    } catch (error) {
-      return createErrorResponse(error instanceof Error ? error.message : String(error))
-    }
-  })
-
-  ipcMain.handle('rss:markReadBatch', async (_, itemIds: string[]) => {
-    if (useMock) return createSuccessResponse({ marked: itemIds.length }, true)
-
-    try {
-      const marked = rssRepository.markRSSReadMany(itemIds)
-      console.log(`[rss:batch] markReadBatch size=${itemIds.length} marked=${marked}`)
-      return createSuccessResponse({ marked }, false)
-    } catch (error) {
-      return createErrorResponse(error instanceof Error ? error.message : String(error))
-    }
-  })
-
-  ipcMain.handle('rss:deleteItems', async (_, payload: string[] | { itemIds: string[]; preserveStarred?: boolean }) => {
-    const itemIds = Array.isArray(payload) ? payload : payload?.itemIds ?? []
-    const preserveStarred = Array.isArray(payload) ? false : payload?.preserveStarred === true
-    if (useMock) return createSuccessResponse({ deleted: itemIds.length }, true)
-
-    try {
-      const dismissed = rssRepository.dismissRSSItemsFromInbox(itemIds, preserveStarred)
-      console.log(`[rss:batch] deleteItems size=${itemIds.length} dismissed=${dismissed} preserveStarred=${preserveStarred}`)
-      return createSuccessResponse({ deleted: dismissed, dismissed }, false)
-    } catch (error) {
-      return createErrorResponse(error instanceof Error ? error.message : String(error))
-    }
-  })
-
-  ipcMain.handle('rss:toggleStarred', async (_, itemId: string) => {
-    if (useMock) return createSuccessResponse({ toggled: true }, true)
-
-    try {
-      rssRepository.toggleRSSStarred(itemId)
-      return createSuccessResponse({ toggled: true }, false)
-    } catch (error) {
-      return createErrorResponse(error instanceof Error ? error.message : String(error))
-    }
-  })
-
-  ipcMain.handle('rss:clearDraftStore', async (_, payload?: { sourceId?: string }) => {
-    if (useMock) {
-      return createSuccessResponse({ deletedItems: 0, resetSources: payload?.sourceId ? 1 : 0 }, true)
-    }
-
-    try {
-      const result = rssRepository.clearRSSDraftStore(payload?.sourceId?.trim() || undefined)
-      return createSuccessResponse(result, false)
-    } catch (error) {
-      return createErrorResponse(error instanceof Error ? error.message : String(error))
-    }
+  // Stage V V2.2b — 6 item channels (`rss:getItems`, `rss:markRead`,
+  // `rss:markReadBatch`, `rss:deleteItems`, `rss:toggleStarred`,
+  // `rss:clearDraftStore`) moved into `itemGroup`. Dev-reload re-entry
+  // disposes the prior handle first so listener slots stay clean — same
+  // pattern as SourceGroup above.
+  if (itemGroupDispose) {
+    try { itemGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    itemGroupDispose = null
+  }
+  itemGroupDispose = itemGroup.register(ipcMain, {
+    useMock,
+    getRSSRepository: () => rssRepository,
+    mapItemToAPI: (item) => mapDBItemToAPI(item as DBRSSItem),
+    mockItems,
   })
 
   ipcMain.handle(
