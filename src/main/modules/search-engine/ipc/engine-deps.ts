@@ -25,6 +25,12 @@ import type {
 } from '../indexer'
 import type { GraphResult, SearchPayload } from '../../database/worker-bridge'
 import type { WorkspaceValidationResult } from '../../../../shared/workspace-validation'
+import type {
+  FileWatcherHandle,
+  FileWatcherOptions,
+  FileWatcherRegistry,
+  FileWatcherStartError,
+} from '../file-watcher'
 
 /**
  * Narrow facade for the worker-db bridge surface SourceIndexGroup consumes.
@@ -116,4 +122,22 @@ export interface EngineDeps {
    * `worker-fallback-observer.ts` directly.
    */
   noteSearchWorkerSuccess(): void
+  /**
+   * V2.4c — start a chokidar file watcher for delta incremental indexing.
+   * Lifted to a dep so WatcherGroup does not import `createFileWatcher`
+   * directly; the host owns the factory binding so tests can stub watcher
+   * construction without spinning up real chokidar handles. Returns a
+   * structured `FileWatcherStartError` on validation / inotify failure
+   * (caller branches on the `kind` discriminator).
+   */
+  createFileWatcher(
+    options: FileWatcherOptions,
+  ): Promise<FileWatcherHandle | FileWatcherStartError>
+  /**
+   * V2.4c — resolve the module-scoped `FileWatcherRegistry` instance the
+   * host owns. WatcherGroup uses this to `add()` newly-started watchers
+   * and `stop()` them by id. Lifted to a dep so the group can be exercised
+   * against a fresh registry in tests without touching module state.
+   */
+  getFileWatcherRegistry(): FileWatcherRegistry
 }

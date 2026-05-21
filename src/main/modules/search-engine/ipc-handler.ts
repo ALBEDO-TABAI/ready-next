@@ -9,7 +9,6 @@ import {
 import {
   createFileWatcher,
   FileWatcherRegistry,
-  isInotifyExhaustionError,
 } from './file-watcher'
 import { validateWorkspaceRoot } from '../../../shared/workspace-validation'
 import {
@@ -18,13 +17,8 @@ import {
 } from './worker-fallback-observer'
 import { sourceIndexGroup } from './ipc/source-index-group'
 import { searchQueryGroup } from './ipc/query-group'
+import { watcherGroup } from './ipc/watcher-group'
 import type { IpcDisposeHandle } from './ipc/types'
-
-interface SearchIPCResponse<T> {
-  success: boolean
-  data?: T
-  error?: string
-}
 
 let searchEngine: SearchEngine | null = null
 
@@ -61,6 +55,20 @@ let sourceIndexGroupDispose: IpcDisposeHandle | null = null
  * the prior registration before the next one binds.
  */
 let searchQueryGroupDispose: IpcDisposeHandle | null = null
+
+/**
+ * Stage V V2.4c — dispose handle returned by `watcherGroup.register`.
+ * The 2 watcher channels (`document:startWatcher`, `document:stopWatcher`)
+ * live in `ipc/watcher-group.ts`; the host keeps the dispose handle so a
+ * re-entrant `setupSearchIPC` (dev-reload) can drop the prior registration
+ * before the next one binds.
+ *
+ * M4 IPC handler split complete with V2.4c: `setupSearchIPC` no longer
+ * contains any inline `ipcMain.handle(...)` call — all 10 search-engine
+ * channels now live in their respective `ipc/*-group.ts` files
+ * (sourceIndex × 5 / query × 3 / watcher × 2).
+ */
+let watcherGroupDispose: IpcDisposeHandle | null = null
 
 export function setupSearchIPC(): void {
   const rawDb = getDatabase().getRawDb()
@@ -121,102 +129,26 @@ export function setupSearchIPC(): void {
     noteSearchWorkerSuccess: () => noteSearchWorkerSuccess(),
   })
 
-  // -------------------------------------------------------------------------
-  // perf-rescue B7: chokidar file watcher for delta incremental indexing.
-  // Renderer calls startWatcher when a workspace becomes active (A2 picker)
-  // and stopWatcher on workspace close. The handler routes file change events
+  // Stage V V2.4c — 2 watcher channels (`document:startWatcher`,
+  // `document:stopWatcher`) moved into `watcherGroup`. The group handles
+  // dev-reload removeHandler pre-clear internally; we hold the dispose
+  // handle so a future cleanup hook (or the next setupSearchIPC entry)
+  // can drop them on shutdown.
+  //
+  // perf-rescue B7 context (preserved from the original inline handlers):
+  // chokidar file watcher for delta incremental indexing. Renderer calls
+  // startWatcher when a workspace becomes active (A2 picker) and
+  // stopWatcher on workspace close. The handler routes file change events
   // to single-file `indexDocument` calls — no full rescans.
-  // -------------------------------------------------------------------------
-
-  ipcMain.handle(
-    'document:startWatcher',
-    async (
-      _event,
-      payload: { workspaceRoot: string },
-    ): Promise<SearchIPCResponse<{ watcherId: string; workspaceRoot: string }> & {
-      errorKind?: 'invalid_root' | 'enospc' | 'failed' | 'engine_unavailable'
-      hint?: string
-    }> => {
-      if (!searchEngine) {
-        return { success: false, error: 'search engine unavailable', errorKind: 'engine_unavailable' }
-      }
-      if (!payload || typeof payload.workspaceRoot !== 'string' || payload.workspaceRoot.length === 0) {
-        return { success: false, error: 'workspaceRoot required', errorKind: 'invalid_root' }
-      }
-
-      const result = await createFileWatcher({
-        workspaceRoot: payload.workspaceRoot,
-        onChange: async ({ filePath, kind, workspaceRoot }) => {
-          if (!searchEngine) return
-          try {
-            if (kind === 'unlink') {
-              // Delete the row from documents (+ FTS via cascade trigger).
-              // ensureWorkspace is idempotent — INSERT OR IGNORE + SELECT —
-              // and we already validated the root before starting the watcher
-              // so the workspace is guaranteed to exist by this point.
-              const repo = searchEngine.getRepository()
-              const wsId = repo.ensureWorkspace(workspaceRoot)
-              repo.deletePath(wsId, filePath)
-              return
-            }
-            // add / change → re-index this single file. The indexer's own
-            // `decideFileForIndex` filter will reject binary / oversized
-            // files, so we don't pre-filter here.
-            await searchEngine.indexDocument(workspaceRoot, filePath)
-          } catch (error) {
-            // Per-event errors must not crash the watcher. Logged inside the
-            // indexer via `logSearch`; we just swallow here.
-            void error
-          }
-        },
-      })
-
-      // Discriminate handle vs error by the presence of `id` (handle) /
-      // `kind` (error). Using `'kind' in result` narrows correctly because
-      // FileWatcherHandle has no `kind` property.
-      if ('kind' in result) {
-        const hint = result.kind === 'enospc'
-          ? 'Linux inotify watch limit exhausted — run: sudo sysctl fs.inotify.max_user_watches=524288'
-          : undefined
-        return {
-          success: false,
-          error: result.message,
-          errorKind: result.kind,
-          ...(hint ? { hint } : {}),
-        }
-      }
-
-      fileWatchers.add(result)
-      return {
-        success: true,
-        data: { watcherId: result.id, workspaceRoot: result.workspaceRoot },
-      }
-    },
-  )
-
-  ipcMain.handle(
-    'document:stopWatcher',
-    async (
-      _event,
-      payload: { watcherId: string },
-    ): Promise<SearchIPCResponse<{ stopped: boolean }>> => {
-      if (!payload || typeof payload.watcherId !== 'string') {
-        return { success: false, error: 'watcherId required' }
-      }
-      try {
-        const stopped = await fileWatchers.stop(payload.watcherId)
-        return { success: true, data: { stopped } }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        // ENOSPC during close shouldn't happen in practice (close releases
-        // descriptors) but if some platform raises it we still report ok=false.
-        if (isInotifyExhaustionError(error)) {
-          return { success: false, error: `inotify error during close: ${message}` }
-        }
-        return { success: false, error: message }
-      }
-    },
-  )
+  if (watcherGroupDispose) {
+    try { watcherGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    watcherGroupDispose = null
+  }
+  watcherGroupDispose = watcherGroup.register(ipcMain, {
+    getSearchEngine: () => searchEngine,
+    createFileWatcher: (options) => createFileWatcher(options),
+    getFileWatcherRegistry: () => fileWatchers,
+  })
 }
 
 /**
