@@ -34,15 +34,20 @@ test('capability groups define required reserved and host-only entries', () => {
     'pet',
     'channel_feishu',
     'general_research',
+    'map_planning',
     'system_host',
     'design_reserved',
     'mcp',
+    'agent_interaction',
   ])
 
   assert.equal(getCapabilityGroup('system_host')?.exposure, 'host_only')
   assert.equal(getCapabilityGroup('design_reserved')?.availability, 'inactive')
   assert.equal(getCapabilityGroup('mcp')?.exposure, 'model_visible')
   assert.equal(getCapabilityGroup('mcp')?.settingsVisible, false)
+  assert.equal(getCapabilityGroup('agent_interaction')?.exposure, 'model_visible')
+  assert.equal(getCapabilityGroup('agent_interaction')?.defaultMode, 'on')
+  assert.deepEqual(getCapabilityGroup('agent_interaction')?.defaultProfiles, ['local_chat'])
 })
 
 test('resolver suppresses all model-visible groups when provider tool calling is disabled', () => {

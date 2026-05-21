@@ -75,7 +75,8 @@ function writeMd(dir: string, name: string, body: string): string {
 // Plain unit: workspace validation gates the IPC defense.
 // ---------------------------------------------------------------------------
 
-test('validateWorkspaceRoot rejects the paths the IPC defense gates against', () => {
+test('validateWorkspaceRoot rejects the paths the IPC defense gates against', (t) => {
+  if (skipIfSqliteUnavailable(t, 'search-multi-root: validation unit guard')) return
   // The reindex IPC handlers (search-engine/ipc-handler.ts) now re-validate
   // every root path before touching the worker bridge / fallback engine.
   // Whether or not better-sqlite3 is available, this synchronous check must

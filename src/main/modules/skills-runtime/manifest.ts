@@ -9,6 +9,10 @@ export type EmbeddedSkillId =
   | 'web-design-guidelines'
   | 'find-skills'
   | 'obsidian-web-clip'
+  | 'study-notes'
+  | 'image-analysis-router'
+  | 'image-reverse-descriptor'
+  | 'fastnote'
 
 export interface EmbeddedSkillManifest {
   id: EmbeddedSkillId
@@ -87,6 +91,34 @@ export const EMBEDDED_SKILLS: EmbeddedSkillManifest[] = [
     name: 'Obsidian Web Clip',
     description: '网页 → Obsidian-compatible Markdown 笔记的方法论 + preset 库：路由 web_clip_url（公共 URL）或 /clip-current（用户当前标签页）',
     version: '2026.05.15',
+    requirementsFile: 'requirements.txt',
+  },
+  {
+    id: 'study-notes',
+    name: 'Study Notes',
+    description: '结构化学习笔记方法论：8 种内容类型路由（教程 / 评论 / 故事 / 数据报告 / 新闻 / 框架 / 混合 / 不适合）+ 复杂度分层 + 可信度初判',
+    version: '2026.05.17',
+    requirementsFile: 'requirements.txt',
+  },
+  {
+    id: 'image-analysis-router',
+    name: 'Image Analysis Router',
+    description: '图像分析路由方法论：17 类视觉路由 + 批量处理 + AI 内容判定 + Study Report 模板',
+    version: '2026.05.17',
+    requirementsFile: 'requirements.txt',
+  },
+  {
+    id: 'image-reverse-descriptor',
+    name: 'Image Reverse Descriptor',
+    description: '网页图片反推描述词：主体 / 场景 / 构图 / 光线 / 色彩 / 材质 / 风格关键词',
+    version: '2026.05.21',
+    requirementsFile: 'requirements.txt',
+  },
+  {
+    id: 'fastnote',
+    name: 'FastNote',
+    description: '笔记快捷模式路由方法论：把 IM-style 混合输入按 -/: / -/2: 触发深度档位分发到剪藏 / study-notes / image-analysis-router / video-* 并写入工作区',
+    version: '2026.05.17',
     requirementsFile: 'requirements.txt',
   },
 ]

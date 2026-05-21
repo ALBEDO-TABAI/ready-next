@@ -30,7 +30,7 @@ type SqliteModule = new (path: string, options?: { readonly?: boolean }) => {
 
 function loadSqlite(): SqliteModule | null {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+     
     return require('better-sqlite3') as SqliteModule
   } catch {
     return null

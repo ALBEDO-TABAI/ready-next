@@ -463,7 +463,7 @@ function looksLikePlaceholder(src: string): boolean {
   if (!src) return true
   if (src.startsWith('data:image/svg+xml')) return true
   if (src.startsWith('data:image/gif;base64,R0lGODlh')) return true
-  if (/\b(blank|placeholder|spacer|transparent|loading|pixel)[._\-]/i.test(src)) return true
+  if (/\b(blank|placeholder|spacer|transparent|loading|pixel)[._-]/i.test(src)) return true
   return false
 }
 

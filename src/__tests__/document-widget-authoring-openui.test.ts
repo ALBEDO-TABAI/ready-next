@@ -36,6 +36,8 @@ describe('document widget authoring with OpenUI component specs', () => {
     const today = new Date()
     const startTime = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 9, 30, 0)
     const endTime = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 10, 0, 0)
+    const startUnix = Math.floor(startTime.getTime() / 1000)
+    const endUnix = Math.floor(endTime.getTime() / 1000)
     const previousWindow = (globalThis as { window?: unknown }).window
     ;(globalThis as { window?: unknown }).window = {
       electronAPI: {
@@ -46,8 +48,8 @@ describe('document widget authoring with OpenUI component specs', () => {
               {
                 id: 'evt-1',
                 title: '晨会',
-                startTime,
-                endTime,
+                startTime: startUnix,
+                endTime: endUnix,
                 calendarId: 'work',
                 color: '#5B8DEF',
                 description: '',

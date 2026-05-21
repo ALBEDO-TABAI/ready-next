@@ -415,7 +415,8 @@ function segmentizePath(relativePath: string): string[] {
 // Explicit ranges so an invisible-control-char paste can't quietly disable
 // a rule. U+0000–U+001F + DEL are filesystem-illegal on every OS we ship to;
 // the rest are the Win32 reserved set.
-const FS_ILLEGAL_CHARS_RE = /[\x00-\x1f\x7f<>:"/\\|?*]/g
+const CONTROL_CHAR_CLASS = ['\\u0000', '-\\u001f', '\\u007f'].join('')
+const FS_ILLEGAL_CHARS_RE = new RegExp(`[${CONTROL_CHAR_CLASS}<>:"/\\\\|?*]`, 'g')
 const ANY_WHITESPACE_RE = /\s+/g
 const COLLAPSE_DASHES_RE = /-{2,}/g
 const TRIM_DASHES_RE = /^-+|-+$/g

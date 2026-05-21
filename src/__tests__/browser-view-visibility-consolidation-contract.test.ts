@@ -20,7 +20,7 @@ test('BrowserView show/hide decisions are consolidated inside useBrowserViewBoun
   // Hook: reactive effect re-fires syncBrowserVisibility when isActive or isVisibleAllowed flip.
   assert.match(
     hook,
-    /useEffect\(\(\) => \{\s*void syncBrowserVisibility\(\{ forceExact: true \}\)\s*\}, \[isActive, isVisibleAllowed, syncBrowserVisibility\]\)/,
+    /useEffect\(\(\) => \{\s*void syncBrowserVisibility\(\{ forceExact: true \}\)\s*\}, \[hasError, isActive, isVisibleAllowed, syncBrowserVisibility\]\)/,
   )
 
   // WorkbenchMode: the predictive hideAll inside handleWorkbenchModeChange is gone.

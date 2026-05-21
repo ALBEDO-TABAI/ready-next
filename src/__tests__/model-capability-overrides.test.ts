@@ -40,7 +40,7 @@ function fixtureProvider(overrides: Partial<AIProviderDef>): AIProviderDef {
 }
 
 describe('resolveModelCapabilities — three-layer priority', () => {
-  it('falls back to false for all three fields when neither provider class nor model overrides are set', () => {
+  it('falls back to conservative defaults when neither provider class nor model overrides are set', () => {
     const provider = fixtureProvider({
       capabilityClass: undefined,
       models: [{ id: 'plain', label: 'Plain', category: 'chat' }],
@@ -50,6 +50,7 @@ describe('resolveModelCapabilities — three-layer priority', () => {
       supportsVision: false,
       supportsThinking: false,
       supportsLongContext: false,
+      multiTurnThinkingPolicy: 'unknown',
     })
   })
 

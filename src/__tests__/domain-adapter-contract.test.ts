@@ -7,10 +7,11 @@ import { SkillDomainAdapter } from '../main/modules/agent-control/skills/skill-d
 import { RSSDomainAdapter } from '../main/modules/agent-control/domain-adapters/rss-domain-adapter'
 import { CalendarDomainAdapter } from '../main/modules/agent-control/domain-adapters/calendar-domain-adapter'
 import { FeishuDomainAdapter } from '../main/modules/agent-control/domain-adapters/feishu-domain-adapter'
+import { MapDomainAdapter } from '../main/modules/agent-control/map-domain-adapter'
 import { selectDomainAdapter, type DomainAdapter } from '../main/modules/agent-control/domain-adapters/domain-adapter'
 import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 
-function createRoute(executor: 'browser' | 'document' | 'skill' | 'rss' | 'calendar' | 'feishu') {
+function createRoute(executor: 'browser' | 'document' | 'skill' | 'rss' | 'calendar' | 'feishu' | 'map') {
   return {
     taskId: 'task-1',
     taskType: 'short_task' as const,

@@ -2,8 +2,8 @@
  * Unit tests for `rsshub-process-cleanup` — the pure helpers that ensure the
  * embedded RSSHub worker is reaped *together with* its Chromium grandchildren.
  *
- * Background: `rebrowser-puppeteer` (used internally by RSSHub) fork-execs
- * Chromium subprocesses inside the worker. The pre-fix code did
+ * Background: RSSHub's internal browser automation fork-execs Chromium
+ * subprocesses inside the worker. The pre-fix code did
  * `child.kill('SIGKILL')` which only signalled the immediate Node child, so
  * Chromium was orphaned to PID 1. After Phase C3-followup we (a) spawn the
  * worker as its own process-group leader (`detached: true` on Unix), and

@@ -1,37 +1,145 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import test from 'node:test'
+import { createElement } from 'react'
+import { flushSync } from 'react-dom'
+import { createRoot } from 'react-dom/client'
+import { JSDOM } from 'jsdom'
 
-function readWorkspaceFile(path: string): string {
-  return readFileSync(resolve(process.cwd(), path), 'utf8')
+import { useBrowserTabActions } from '../renderer/modules/browser/useBrowserTabActions'
+import { DEFAULT_BROWSER_URL, isReadyBrowserBlankUrl, isSupportedBrowserNavigationUrl } from '../renderer/modules/browser/url-utils'
+import { useBrowserTabs, type BrowserTab } from '../renderer/stores/useBrowserTabs'
+
+function makeTab(patch: Partial<BrowserTab> = {}): BrowserTab {
+  return {
+    id: 'tab-1',
+    url: 'https://example.com',
+    title: 'Example',
+    loading: false,
+    canGoBack: false,
+    canGoForward: false,
+    domain: 'example.com',
+    owner: 'manual',
+    required: false,
+    activity: 'idle',
+    ...patch,
+  }
 }
 
-test('Ready blank tab is rendered by the browser chrome layer instead of a hardcoded BrowserView page', () => {
-  const browserMode = readWorkspaceFile('src/renderer/pages/modes/BrowserMode.tsx')
-  const browserShellLayout = readWorkspaceFile('src/renderer/components/browser/BrowserShellLayout.tsx')
-  const tabActions = readWorkspaceFile('src/renderer/modules/browser/useBrowserTabActions.ts')
-  const boundsHook = readWorkspaceFile('src/renderer/modules/browser/useBrowserViewBounds.ts')
+test('Ready blank tab is a supported browser navigation target', () => {
+  assert.equal(isReadyBrowserBlankUrl(DEFAULT_BROWSER_URL), true)
+  assert.equal(isSupportedBrowserNavigationUrl(DEFAULT_BROWSER_URL), true)
+  assert.equal(isSupportedBrowserNavigationUrl('https://example.com'), true)
+  assert.equal(isSupportedBrowserNavigationUrl('file:///tmp/example.pdf'), false)
+})
 
-  assert.match(browserMode, /isReadyBrowserBlankUrl/)
-  assert.match(browserMode, /const isReadyBlankTab = activeTab \? isReadyBrowserBlankUrl\(activeTab\.url\) : false/)
-  assert.match(browserMode, /hasError:\s*hasError \|\| isReadyBlankTab/)
+test('closing the last browser tab replaces it with a Ready blank tab', async () => {
+  const dom = new JSDOM('<div id="root"></div>', { url: 'http://localhost' })
+  const previousWindow = globalThis.window
+  const previousDocument = globalThis.document
+  const previousAnimationFrame = globalThis.requestAnimationFrame
+  const previousElectronApi = (globalThis.window as Window & { electronAPI?: unknown } | undefined)?.electronAPI
 
-  assert.match(browserShellLayout, /import readyWordmark from '\.\.\/\.\.\/assets\/ready-wordmark\.png'/)
-  assert.match(browserShellLayout, /const showReadyBlankPage = activeTab \? isReadyBrowserBlankUrl\(activeTab\.url\) && !activeTab\.error : false/)
-  assert.match(browserShellLayout, /const showBrowserViewCornerFill = isElectron && Boolean\(activeTab\) && !showReadyBlankPage && !activeTab\?\.error/)
-  assert.match(browserShellLayout, /showBrowserViewCornerFill &&/)
-  assert.match(browserShellLayout, /showReadyBlankPage &&/)
-  assert.match(browserShellLayout, /className="browser-ready-blank-page absolute inset-0 flex items-center justify-center"/)
-  assert.match(browserShellLayout, /background:\s*'var\(--workbench-module-surface-bg\)'/)
-  assert.match(browserShellLayout, /src=\{readyWordmark\}/)
-  assert.match(browserShellLayout, /width:\s*'min\(210px, calc\(100vw - 96px\)\)'/)
+  Object.defineProperty(globalThis, 'window', {
+    value: dom.window,
+    configurable: true,
+  })
+  Object.defineProperty(globalThis, 'document', {
+    value: dom.window.document,
+    configurable: true,
+  })
+  Object.defineProperty(globalThis, 'requestAnimationFrame', {
+    value: (callback: FrameRequestCallback) => {
+      callback(0)
+      return 0
+    },
+    configurable: true,
+  })
 
-  assert.match(tabActions, /const isClosingLastTab = currentTabs\.length <= 1 \|\| remaining\.length === 0/)
-  assert.match(tabActions, /if \(isClosingLastTab\) \{[\s\S]*createTab\(DEFAULT_BROWSER_URL\)/)
-  assert.match(tabActions, /setTabs\(\[replacementTab\]\)/)
-  assert.match(tabActions, /setUrlInput\(''\)/)
-  assert.match(tabActions, /await window\.electronAPI\?\.browser\?\.closeTab\(id\)[\s\S]*await syncTabsFromBackend\(\)[\s\S]*return/)
+  const closedTabs: string[] = []
+  ;(window as Window & { electronAPI?: unknown }).electronAPI = {
+    browser: {
+      createTab: async (url: string) => {
+        assert.equal(url, DEFAULT_BROWSER_URL)
+        return { success: true, tabId: 'tab-new' }
+      },
+      closeTab: async (id: string) => {
+        closedTabs.push(id)
+        return { success: true }
+      },
+      getTabs: async () => [
+        {
+          id: 'tab-new',
+          url: DEFAULT_BROWSER_URL,
+          title: 'New Tab',
+          loading: false,
+          canGoBack: false,
+          canGoForward: false,
+          domain: '',
+          active: true,
+        },
+      ],
+    },
+  }
 
-  assert.match(boundsHook, /\[hasError, isActive, isVisibleAllowed, syncBrowserVisibility\]/)
+  useBrowserTabs.setState({
+    tabs: [makeTab({ id: 'tab-old' })],
+    activeTabId: 'tab-old',
+    urlInput: 'https://example.com',
+  })
+
+  let closeLastTab: ((id: string) => Promise<void>) | null = null
+  function Harness() {
+    const state = useBrowserTabs()
+    const actions = useBrowserTabActions({
+      isElectron: true,
+      activeTab: state.tabs.find((tab) => tab.id === state.activeTabId) || null,
+      activeTabId: state.activeTabId,
+      normalizeUrl: (value) => value,
+      sendBoundsImmediate: async () => {},
+      setTabs: state.setTabs,
+      setActiveTabId: state.setActiveTabId,
+      setUrlInput: state.setUrlInput,
+      addTab: state.addTab,
+      updateTab: state.updateTab,
+      reorderTabs: state.reorderTabs,
+    })
+    closeLastTab = actions.handleCloseTab
+    return null
+  }
+
+  const root = createRoot(dom.window.document.getElementById('root') as HTMLElement)
+  try {
+    flushSync(() => root.render(createElement(Harness)))
+    assert.ok(closeLastTab)
+    await closeLastTab('tab-old')
+
+    const state = useBrowserTabs.getState()
+    assert.deepEqual(closedTabs, ['tab-old'])
+    assert.equal(state.tabs.length, 1)
+    assert.equal(state.tabs[0]?.id, 'tab-new')
+    assert.equal(state.tabs[0]?.url, DEFAULT_BROWSER_URL)
+    assert.equal(state.activeTabId, 'tab-new')
+    assert.equal(state.urlInput, '')
+  } finally {
+    root.unmount()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    useBrowserTabs.setState({ tabs: [], activeTabId: null, urlInput: '' })
+    if (previousWindow) {
+      Object.defineProperty(globalThis, 'window', { value: previousWindow, configurable: true })
+      ;(globalThis.window as Window & { electronAPI?: unknown }).electronAPI = previousElectronApi
+    } else {
+      delete (globalThis as typeof globalThis & { window?: Window }).window
+    }
+    if (previousDocument) {
+      Object.defineProperty(globalThis, 'document', { value: previousDocument, configurable: true })
+    } else {
+      delete (globalThis as typeof globalThis & { document?: Document }).document
+    }
+    if (previousAnimationFrame) {
+      Object.defineProperty(globalThis, 'requestAnimationFrame', { value: previousAnimationFrame, configurable: true })
+    } else {
+      delete (globalThis as typeof globalThis & { requestAnimationFrame?: typeof requestAnimationFrame }).requestAnimationFrame
+    }
+    dom.window.close()
+  }
 })

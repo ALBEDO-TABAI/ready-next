@@ -1,7 +1,7 @@
 /**
  * Pure helpers for spawning + reaping the embedded RSSHub worker.
  *
- * Background: RSSHub internally uses `rebrowser-puppeteer` which fork-execs
+ * Background: RSSHub internally uses browser automation that fork-execs
  * Chromium grandchildren. When the embedded worker is killed via the default
  * `child.kill('SIGKILL')`, only the immediate Node child is signalled — the
  * Chromium subprocesses are reparented to PID 1 and keep consuming CPU /

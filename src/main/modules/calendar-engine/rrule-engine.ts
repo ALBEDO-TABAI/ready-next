@@ -68,7 +68,6 @@
 // an export named 'rrulestr'"). Even `import * as rrule from 'rrule'`
 // returns a wrapper namespace with the real exports tucked under
 // `.default`. Default import + destructure is the only portable form.
-// eslint-disable-next-line import/default
 import rrulePkg from 'rrule'
 const { RRule, rrulestr } = rrulePkg as unknown as {
   RRule: typeof import('rrule').RRule

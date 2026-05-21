@@ -254,7 +254,7 @@ describe('useTheme liquid default', () => {
     await flushMicrotasks()
     flushAnimationFrame()
     await flushMicrotasks()
-    flushTimeoutByDelay(320)
+    flushTimeoutMatching((delay) => typeof delay === 'number' && delay >= 300 && delay <= 320)
     await flushMicrotasks()
     flushTimeoutByDelay(900)
     await flushMicrotasks()

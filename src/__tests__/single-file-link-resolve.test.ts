@@ -39,7 +39,7 @@ type SqliteCtor = new (path: string) => DatabaseConnection & MigrationDatabase
 
 function loadSqliteCtor(): SqliteCtor | null {
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+     
     const mod = require('better-sqlite3') as SqliteCtor & { default?: SqliteCtor }
     const Sqlite = mod.default || mod
     // Probe — better-sqlite3 throws ERR_DLOPEN_FAILED on construction when

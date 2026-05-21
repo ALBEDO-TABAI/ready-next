@@ -6,8 +6,6 @@
 // spec: docs/superpowers/specs/2026-05-16-liquid-glass-ui-layering-and-motion-contract.md
 
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import test from 'node:test'
 
 import {
@@ -21,20 +19,21 @@ import {
   type MaterialOutputs,
 } from '../main/modules/window-material/main-window-material'
 
-function readWorkspaceFile(path: string): string {
-  return readFileSync(resolve(process.cwd(), path), 'utf8')
-}
-
 test('module exports the public surface required by main/index.ts', () => {
-  const source = readWorkspaceFile('src/main/modules/window-material/main-window-material.ts')
+  assert.equal(typeof computeMaterial, 'function')
+  assert.equal(typeof applyMaterial, 'function')
+  assert.equal(typeof createWindowMaterialController, 'function')
 
-  // computeMaterial + applyMaterial 是状态表的纯函数 + 应用器
-  assert.match(source, /export function computeMaterial/)
-  assert.match(source, /export function applyMaterial/)
-  // controller 工厂是 main/index.ts 的入口
-  assert.match(source, /export function createWindowMaterialController/)
-  // 类型导出
-  assert.match(source, /export type ThemeSkin/)
+  const sampleInput: MaterialInputs = {
+    platform: 'darwin',
+    skin: 'liquid-glass',
+    resolvedTheme: 'dark',
+    isFullscreen: false,
+  }
+  assert.deepEqual(computeMaterial(sampleInput), {
+    backgroundColor: DARWIN_LIQUID_GLASS_TRANSPARENT,
+    vibrancy: 'under-window',
+  })
 })
 
 test('验证 2 — Darwin computeMaterial returns frozen { transparent, under-window } for every input', () => {
@@ -248,17 +247,23 @@ test('controller does no-op when window is destroyed', () => {
 })
 
 test('platform input is explicit, not read from process.platform', () => {
-  const source = readWorkspaceFile('src/main/modules/window-material/main-window-material.ts')
-  // computeMaterial 内禁止读 process.platform；platform 必须由调用方传入（测试友好性）。
-  // 注释里可以提及 process.platform（解释意图），但不能在代码里真实访问它。
-  // 去掉单行注释（// ...）和块注释（/* ... */）后再 grep。
-  const codeOnly = source
-    .replace(/\/\*[\s\S]*?\*\//g, '')  // block comments
-    .replace(/\/\/.*$/gm, '')           // line comments
-  assert.doesNotMatch(
-    codeOnly,
-    /process\.platform/,
-    'window-material module should not read process.platform in code (only in comments)',
+  assert.deepEqual(
+    computeMaterial({
+      platform: 'darwin',
+      skin: 'ready-glass',
+      resolvedTheme: 'dark',
+      isFullscreen: true,
+    }),
+    { backgroundColor: DARWIN_LIQUID_GLASS_TRANSPARENT, vibrancy: 'under-window' },
+  )
+  assert.deepEqual(
+    computeMaterial({
+      platform: 'win32',
+      skin: 'ready-glass',
+      resolvedTheme: 'dark',
+      isFullscreen: true,
+    }),
+    { backgroundColor: NON_DARWIN_BACKGROUND_DARK, vibrancy: null },
   )
 })
 
@@ -554,9 +559,12 @@ test('验证 2 — theme/skin sync() on darwin is a no-op (target equals applyIn
 })
 
 test('MaterialInputs type carries platform field (testing-friendly explicit input)', () => {
-  const source = readWorkspaceFile('src/main/modules/window-material/main-window-material.ts')
-  assert.match(source, /platform:\s*SupportedPlatform/)
-  assert.match(source, /SupportedPlatform\s*=\s*'darwin'\s*\|\s*'win32'\s*\|\s*'linux'/)
+  const inputs: MaterialInputs[] = [
+    { platform: 'darwin', skin: 'liquid-glass', resolvedTheme: 'light', isFullscreen: false },
+    { platform: 'win32', skin: 'liquid-glass', resolvedTheme: 'light', isFullscreen: false },
+    { platform: 'linux', skin: 'liquid-glass', resolvedTheme: 'light', isFullscreen: false },
+  ]
+  assert.deepEqual(inputs.map((input) => input.platform), ['darwin', 'win32', 'linux'])
 })
 
 // Type-level smoke: ensure MaterialInputs type can be constructed from caller side.

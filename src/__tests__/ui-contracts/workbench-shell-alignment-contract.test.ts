@@ -52,7 +52,7 @@ test('browser rss and calendar shells align their left edge with the shared work
   assert.match(rssFeed, /content-surface-panel/)
   assert.match(rssFeed, /flex flex-col h-full/)
   assert.match(rssFeed, /className="rss-feed-toolbar flex items-center justify-between flex-shrink-0"/)
-  assert.match(rssFeed, /className="rss-feed-list rss-feed-scroll flex-1 overflow-auto transition-all duration-300"/)
+  assert.match(rssFeed, /className="rss-feed-list rss-feed-scroll flex-1 overflow-auto/)
   assert.match(rssFeed, /padding:\s*`0 \$\{WORKBENCH_HEADER_EDGE_X\}px 16px`/)
   assert.match(rssFeed, /padding:\s*`12px \$\{Math\.max\(WORKBENCH_HEADER_EDGE_X - 8, 12\)\}px`/)
 

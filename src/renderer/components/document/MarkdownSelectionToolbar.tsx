@@ -112,7 +112,7 @@ function getCaretCoordinates(
   const marker = document.createElement('span')
   // A trailing char gives layout even at end-of-line; clamp to current line.
   const remainder = textarea.value.substring(position)
-  marker.textContent = (remainder.split('\n')[0] || '.') || '.'
+  marker.textContent = remainder.split('\n')[0] || '.'
   mirror.appendChild(marker)
   document.body.appendChild(mirror)
 
