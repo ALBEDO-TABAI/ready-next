@@ -34,6 +34,9 @@ interface BrowserHeaderProps {
   onToggleBookmark: () => void
   onToggleBookmarkForTab: (tab: BrowserTab) => void
   onShowUtilityMenu: (kind: BrowserUtilityMenuKind, anchorRect: DOMRect) => void
+  fastCardOpen: boolean
+  fastCardItemCount: number
+  onToggleFastCard: () => void
 }
 
 export default function BrowserHeader({
@@ -63,6 +66,9 @@ export default function BrowserHeader({
   onToggleBookmark,
   onToggleBookmarkForTab,
   onShowUtilityMenu,
+  fastCardOpen,
+  fastCardItemCount,
+  onToggleFastCard,
 }: BrowserHeaderProps) {
   const committingNavigationRef = useRef(false)
   const collapseActiveTabRef = useRef<() => void>(() => undefined)
@@ -193,6 +199,12 @@ export default function BrowserHeader({
           onShowUtilityMenu={(kind, anchorRect) => {
             dismissAddressEditing()
             onShowUtilityMenu(kind, anchorRect)
+          }}
+          fastCardOpen={fastCardOpen}
+          fastCardItemCount={fastCardItemCount}
+          onToggleFastCard={() => {
+            dismissAddressEditing()
+            onToggleFastCard()
           }}
         />
       </div>

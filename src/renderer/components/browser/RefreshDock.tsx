@@ -6,6 +6,7 @@ interface RefreshDockProps {
   canGoBack: boolean
   canGoForward: boolean
   refreshDockMode: RefreshDockMode
+  visible: boolean
   onMouseEnter: () => void
   onMouseLeave: () => void
   onRefresh: () => void
@@ -18,6 +19,7 @@ export default function RefreshDock({
   canGoBack,
   canGoForward,
   refreshDockMode,
+  visible,
   onMouseEnter,
   onMouseLeave,
   onRefresh,
@@ -30,9 +32,11 @@ export default function RefreshDock({
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       style={{
-        width: refreshDockMode === 'revealed' ? 86 : 30,
-        gap: refreshDockMode === 'revealed' ? 6 : 0,
-        transition: 'width 180ms ease, gap 180ms ease',
+        width: visible ? (refreshDockMode === 'revealed' ? 86 : 30) : 0,
+        gap: visible && refreshDockMode === 'revealed' ? 6 : 0,
+        opacity: visible ? 1 : 0,
+        pointerEvents: visible ? 'auto' : 'none',
+        transition: 'width 180ms ease, gap 180ms ease, opacity 140ms ease',
         overflow: 'hidden',
       }}
     >

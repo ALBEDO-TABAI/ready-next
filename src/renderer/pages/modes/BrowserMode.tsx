@@ -532,6 +532,19 @@ export default function BrowserMode({
     }
   }, [addFastCardItem, fastCardResultPanel, openFastCard])
 
+  const handleToggleFastCard = useCallback(() => {
+    if (fastCardResultPanel) {
+      setFastCardResultPanel(null)
+      openFastCard()
+      return
+    }
+    if (fastCardPanelOpen) {
+      collapseFastCard()
+      return
+    }
+    openFastCard()
+  }, [collapseFastCard, fastCardPanelOpen, fastCardResultPanel, openFastCard])
+
   const handleFastCardSaveMarkdown = useCallback(() => {
     if (fastCardItems.length === 0) return
     const markdown = renderFastCardMarkdown(fastCardItems)
@@ -616,7 +629,7 @@ export default function BrowserMode({
     let frame = 0
     const sendSnapshot = () => {
       frame = 0
-      const element = browserContentFrameRef.current
+      const element = browserContentFrameRef.current || contentRef.current
       if (!element) {
         void window.electronAPI?.browser?.hideFastCardOverlay?.()
         return
@@ -847,6 +860,9 @@ export default function BrowserMode({
         onEditEnd={handleBrowserEditEnd}
         loading={!browserRuntimeReady}
         onShowUtilityMenu={handleShowUtilityMenu}
+        fastCardOpen={fastCardPanelOpen || fastCardResultPanel !== null}
+        fastCardItemCount={fastCardItems.length}
+        onToggleFastCard={handleToggleFastCard}
       />
     )
   }
@@ -887,6 +903,9 @@ export default function BrowserMode({
             onToggleBookmark={handleToggleBookmark}
             onToggleBookmarkForTab={handleToggleBookmarkForTab}
             onShowUtilityMenu={handleShowUtilityMenu}
+            fastCardOpen={fastCardPanelOpen || fastCardResultPanel !== null}
+            fastCardItemCount={fastCardItems.length}
+            onToggleFastCard={handleToggleFastCard}
           />
 
           <div

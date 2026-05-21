@@ -21,6 +21,9 @@ export default function BrowserModeEmptyState({
   onEditEnd,
   loading = false,
   onShowUtilityMenu,
+  fastCardOpen,
+  fastCardItemCount,
+  onToggleFastCard,
 }: {
   onNewTab: () => void | Promise<void>
   contentRef: RefObject<HTMLDivElement | null>
@@ -33,6 +36,9 @@ export default function BrowserModeEmptyState({
   onEditEnd: () => void
   loading?: boolean
   onShowUtilityMenu: (kind: BrowserUtilityMenuKind, anchorRect: DOMRect) => void
+  fastCardOpen: boolean
+  fastCardItemCount: number
+  onToggleFastCard: () => void
 }) {
   return (
     <div className="workbench-mode-root">
@@ -47,6 +53,7 @@ export default function BrowserModeEmptyState({
             isActive
             tabs={[]}
             activeTabId={null}
+            splitTabId={null}
             urlInput={urlInput}
             bookmarkedUrls={[]}
             loading={loading}
@@ -69,6 +76,9 @@ export default function BrowserModeEmptyState({
             onToggleBookmark={() => undefined}
             onToggleBookmarkForTab={() => undefined}
             onShowUtilityMenu={onShowUtilityMenu}
+            fastCardOpen={fastCardOpen}
+            fastCardItemCount={fastCardItemCount}
+            onToggleFastCard={onToggleFastCard}
           />
 
           <div

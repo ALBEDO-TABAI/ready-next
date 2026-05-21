@@ -68,10 +68,15 @@ export function getActiveTabSlotMetrics(
   refreshDockMode: RefreshDockMode,
 ): ActiveTabSlotMetrics {
   const surfaceMetrics = getActiveTabSurfaceMetrics(layoutMetrics, activeTabMode)
-  const refreshDockWidth = refreshDockMode === 'revealed' ? REFRESH_DOCK_REVEALED_WIDTH : REFRESH_DOCK_COMPACT_WIDTH
+  const refreshDockVisible = activeTabMode === 'expanded' || activeTabMode === 'editing' || refreshDockMode !== 'idle'
+  const refreshDockWidth = !refreshDockVisible
+    ? 0
+    : refreshDockMode === 'revealed'
+      ? REFRESH_DOCK_REVEALED_WIDTH
+      : REFRESH_DOCK_COMPACT_WIDTH
 
   return {
-    width: surfaceMetrics.width + refreshDockWidth + ACTIVE_TAB_INNER_GAP,
-    minWidth: surfaceMetrics.minWidth + refreshDockWidth + ACTIVE_TAB_INNER_GAP,
+    width: surfaceMetrics.width + refreshDockWidth + (refreshDockVisible ? ACTIVE_TAB_INNER_GAP : 0),
+    minWidth: surfaceMetrics.minWidth + refreshDockWidth + (refreshDockVisible ? ACTIVE_TAB_INNER_GAP : 0),
   }
 }

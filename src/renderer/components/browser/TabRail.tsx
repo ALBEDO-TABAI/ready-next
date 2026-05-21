@@ -28,6 +28,7 @@ interface TabRailProps {
   isActive: boolean
   tabs: BrowserTab[]
   activeTabId: string | null
+  splitTabId: string | null
   activeTabMode: ActiveTabMode
   loading: boolean
   canGoBack: boolean
@@ -37,7 +38,7 @@ interface TabRailProps {
   urlInput: string
   isBookmarked: boolean
   bookmarkedUrls: string[]
-  onTabClick: (id: string) => void | Promise<void>
+  onTabClick: (id: string, event: React.MouseEvent<HTMLButtonElement>) => void | Promise<void>
   onTabClose: (id: string) => void | Promise<void>
   onNewTab: () => void | Promise<void>
   onReorder: (fromIndex: number, toIndex: number) => void
@@ -61,6 +62,7 @@ export default function TabRail({
   isActive,
   tabs,
   activeTabId,
+  splitTabId,
   activeTabMode,
   loading,
   canGoBack,
@@ -117,6 +119,7 @@ export default function TabRail({
   const layoutMetrics = getTabRailLayoutMetrics(displayTabs.length)
   const activeSurfaceMetrics = getActiveTabSurfaceMetrics(layoutMetrics, activeTabMode)
   const activeSlotMetrics = getActiveTabSlotMetrics(layoutMetrics, activeTabMode, refreshDockMode)
+  const refreshDockVisible = activeTabMode === 'expanded' || activeTabMode === 'editing' || refreshDockMode !== 'idle'
 
   const setBrowserTabDragPayload = useCallback((event: React.DragEvent, tab: BrowserTab) => {
     const payload = {
@@ -315,7 +318,13 @@ export default function TabRail({
 
   return (
     <div className="flex min-w-0 flex-1 items-center" style={{ gap: 6 }}>
-      <div className="flex h-[24px] w-[24px] flex-shrink-0 items-center justify-center">
+      <div
+        className="flex h-[24px] flex-shrink-0 items-center justify-center"
+        style={{
+          width: showLeftArrow ? 24 : 0,
+          transition: 'width 160ms ease',
+        }}
+      >
         <button
           type="button"
           onClick={() => scrollRef.current?.scrollBy({ left: -160, behavior: 'smooth' })}
@@ -336,6 +345,8 @@ export default function TabRail({
         <MorphTabStrip layoutId="browser-unified-header" className="flex min-w-full w-max items-center gap-[6px]">
           {displayTabs.map((tab, index) => {
             const isActive = tab.id === activeTabId
+            const isSplit = tab.id === splitTabId
+            const isSplitOnly = isSplit && !isActive
             const isDragOver = dragOverIndex === index
             const isDragging = draggingTabId === tab.id
             const isHovered = hoveredTabId === tab.id
@@ -366,14 +377,18 @@ export default function TabRail({
               >
                 {isActive ? (
                   <div
-                    className="relative z-[2] flex min-w-0 w-full items-center gap-[6px]"
-                    style={{ opacity: isDragging ? 0.72 : 1 }}
+                    className="relative z-[2] flex min-w-0 w-full items-center"
+                    style={{
+                      gap: refreshDockVisible ? 6 : 0,
+                      opacity: isDragging ? 0.72 : 1,
+                    }}
                   >
                     <RefreshDock
                       loading={loading}
                       canGoBack={canGoBack}
                       canGoForward={canGoForward}
                       refreshDockMode={refreshDockMode}
+                      visible={refreshDockVisible}
                       onMouseEnter={onRefreshDockEnter}
                       onMouseLeave={onRefreshDockLeave}
                       onRefresh={onRefresh}
@@ -407,6 +422,7 @@ export default function TabRail({
                   <MorphTabButton
                     layoutId="browser-unified-header"
                     active={false}
+                    secondaryActive={isSplitOnly}
                     draggable={!isStarterTab}
                     onDragStart={isStarterTab ? undefined : (event) => handleDragStart(event, index)}
                     onDragEnd={handleDragEnd}
@@ -415,16 +431,17 @@ export default function TabRail({
                     onMouseEnter={() => setHoveredTabId(tab.id)}
                     onMouseLeave={() => setHoveredTabId((current) => current === tab.id ? null : current)}
                     onContextMenu={isStarterTab ? undefined : (event) => referenceBrowserTab(event, tab)}
-                    onClick={() => {
+                    onClick={(event) => {
                       if (isStarterTab) {
                         if (loading) return
                         void onNewTab()
                         return
                       }
-                      void onTabClick(tab.id)
+                      void onTabClick(tab.id, event)
                     }}
                     onAuxClick={isStarterTab ? undefined : (event) => handleAuxClick(event, tab.id)}
                     className="group relative flex min-w-0 w-full cursor-pointer items-center rounded-[14px] border px-[10px] text-[12px] transition-[background-color,color,border-color,box-shadow,opacity] duration-150"
+                    title={`${tab.title || 'New Tab'}\n按住 Shift 点击可双开`}
                     style={{
                       gap: 6,
                       height: Math.max(30, WORKBENCH_TAB_ROW_HEIGHT - 4),
@@ -573,7 +590,13 @@ export default function TabRail({
         </MorphTabStrip>
       </div>
 
-      <div className="flex h-[24px] w-[24px] flex-shrink-0 items-center justify-center">
+      <div
+        className="flex h-[24px] flex-shrink-0 items-center justify-center"
+        style={{
+          width: showRightArrow ? 24 : 0,
+          transition: 'width 160ms ease',
+        }}
+      >
         <button
           type="button"
           onClick={() => scrollRef.current?.scrollBy({ left: 160, behavior: 'smooth' })}
