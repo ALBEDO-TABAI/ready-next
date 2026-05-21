@@ -3,9 +3,9 @@ import test from 'node:test'
 
 import { RunProjection } from '../main/modules/agent-control/task-projection/run-projection'
 import { SubtaskRuntime } from '../main/modules/agent-control/subtask-runtime'
-import { runDocumentTaskPlanWithSubtasks } from '../main/modules/agent-control/document-task-subtask-runner'
+import { runDocumentTaskPlanWithSubtasks } from '../main/modules/agent-control/document-pipeline/document-task-subtask-runner'
 import { syncTaskProjection } from '../main/modules/agent-control/task-projection/task-projection-sync'
-import type { DocumentTaskPlan } from '../main/modules/agent-control/document-task-plan'
+import type { DocumentTaskPlan } from '../main/modules/agent-control/document-pipeline/document-task-plan'
 import type { TaskProjectionRecord, TaskProjectionStore } from '../main/modules/agent-control/contracts/run-contracts'
 import type {
   ConversationScope,

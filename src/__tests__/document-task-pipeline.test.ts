@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { DocumentTaskPipeline } from '../main/modules/agent-control/document-task-pipeline'
+import { DocumentTaskPipeline } from '../main/modules/agent-control/document-pipeline/document-task-pipeline'
 
 describe('DocumentTaskPipeline', () => {
   it('runs insight and widget creation in separate phases before deterministic writeback', async () => {

@@ -21,8 +21,8 @@ import {
 } from '../claude-bridge/tool-policy-heuristics'
 import { isRetryOnlyPrompt, resolveToolPolicyInput } from '../claude-bridge/tool-policy-context'
 import { inferDocumentWidgetProfile, type DocumentWidgetProfile } from '../claude-bridge/widget-guidance'
-import { classifyStructuredDocumentIntent, type StructuredDocumentIntent } from './document-task-types'
-import { buildDocumentTaskPlan, type DocumentTaskPlan } from './document-task-plan'
+import { classifyStructuredDocumentIntent, type StructuredDocumentIntent } from './document-pipeline/document-task-types'
+import { buildDocumentTaskPlan, type DocumentTaskPlan } from './document-pipeline/document-task-plan'
 import { logAgentMetric } from './metrics'
 import type { ActiveWidgetEditLease } from './widget-edit-lease'
 

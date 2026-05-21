@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { buildDocumentTaskPlan } from '../main/modules/agent-control/document-task-plan'
+import { buildDocumentTaskPlan } from '../main/modules/agent-control/document-pipeline/document-task-plan'
 import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
 
 function buildEnvelope(userInstruction: string): ReturnType<typeof buildRequestEnvelope> {

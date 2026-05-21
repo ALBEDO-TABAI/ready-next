@@ -1,6 +1,6 @@
 import type { ToolPolicy } from '../execution-tool-config'
 import type { DomainAdapter, DomainAdapterApplyResult, DomainAdapterDispatchResult, DomainAdapterPrepareResult } from './domain-adapter'
-import type { DocumentToolLoopState } from '../document-tool-loop-orchestrator'
+import type { DocumentToolLoopState } from '../document-pipeline/document-tool-loop-orchestrator'
 import type { DocumentChatSessionLike } from '../document-domain-helpers'
 import type { ToolDefinition } from '../tools-runtime/tool-definition'
 import type { ScopeRunTaskStep } from '../types'

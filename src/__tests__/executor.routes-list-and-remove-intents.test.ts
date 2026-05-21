@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, it } from 'node:test'
 
-import { buildPipelinePhaseOrder } from '../main/modules/agent-control/document-task-pipeline'
+import { buildPipelinePhaseOrder } from '../main/modules/agent-control/document-pipeline/document-task-pipeline'
 
 const EXECUTOR_PATH = resolve(
   process.cwd(),

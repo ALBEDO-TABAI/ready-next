@@ -4,7 +4,7 @@ import test from 'node:test'
 import {
   raceWithTimeout,
   throwIfAborted,
-} from '../main/modules/agent-control/document-task-tool-timing'
+} from '../main/modules/agent-control/document-pipeline/document-task-tool-timing'
 
 test('throwIfAborted throws AbortError when signal is already aborted', () => {
   const controller = new AbortController()

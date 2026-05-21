@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { buildDocumentTaskStepCacheKey } from '../main/modules/agent-control/document-task-cache-key'
-import { buildDocumentTaskPlan } from '../main/modules/agent-control/document-task-plan'
+import { buildDocumentTaskStepCacheKey } from '../main/modules/agent-control/document-pipeline/document-task-cache-key'
+import { buildDocumentTaskPlan } from '../main/modules/agent-control/document-pipeline/document-task-plan'
 import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
 
 function buildPlan(rawUserText: string) {

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 
-import { buildPipelinePhaseOrder } from '../main/modules/agent-control/document-task-pipeline'
+import { buildPipelinePhaseOrder } from '../main/modules/agent-control/document-pipeline/document-task-pipeline'
 
 describe('buildPipelinePhaseOrder', () => {
   it('keeps the 5-phase path for create', () => {
