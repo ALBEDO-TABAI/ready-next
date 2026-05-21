@@ -26,7 +26,7 @@ test('runtime host is split into run coordinator, run projection, and execution 
   const browserDomainAdapter = readWorkspaceFile('src/main/modules/agent-control/domain-adapters/browser-domain-adapter.ts')
   const domainAdapter = readWorkspaceFile('src/main/modules/agent-control/domain-adapters/domain-adapter.ts')
   const designToolLoopOrchestrator = readWorkspaceFile('src/main/modules/agent-control/design-tool-loop-orchestrator.ts')
-  const documentToolLoopOrchestrator = readWorkspaceFile('src/main/modules/agent-control/document-pipeline/document-tool-loop-orchestrator.ts')
+  const documentToolLoopOrchestrator = readWorkspaceFile('src/main/modules/document-engine/pipeline/document-tool-loop-orchestrator.ts')
   const documentDomainAdapter = readWorkspaceFile('src/main/modules/agent-control/domain-adapters/document-domain-adapter.ts')
   const documentDomainOrchestrator = readWorkspaceFile('src/main/modules/agent-control/domain-adapters/document-domain-orchestrator.ts')
   const documentDomainHelpers = readWorkspaceFile('src/main/modules/agent-control/document-domain-helpers.ts')
@@ -111,7 +111,7 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.ok(rewriteNoMutationGuard > 0, 'rewrite shortcut must reject no-op rewrite results')
   assert.ok(rewriteSaveCall > rewriteNoMutationGuard, 'rewrite shortcut must reject no-op rewrites before saving')
   assert.match(
-    readWorkspaceFile('src/main/modules/agent-control/document-pipeline/document-task-pipeline-executor.ts'),
+    readWorkspaceFile('src/main/modules/document-engine/pipeline/document-task-pipeline-executor.ts'),
     /export class DocumentTaskPipelineExecutor/,
   )
   assert.match(documentDomainHelpers, /export function parseSectionRewritePlan\(/)

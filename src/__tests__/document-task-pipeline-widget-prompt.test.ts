@@ -22,7 +22,7 @@ registerHooks({
 })
 
 const { DocumentTaskPipelineExecutor } = await import(
-  '../main/modules/agent-control/document-pipeline/document-task-pipeline-executor'
+  '../main/modules/document-engine/pipeline/document-task-pipeline-executor'
 )
 
 function buildExecutor(responses: string[]) {

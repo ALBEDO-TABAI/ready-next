@@ -51,7 +51,7 @@ test('候选集中存在完全相等值时优先返回原值，不做大小写�
 
 const EXECUTOR_PATH = resolve(
   process.cwd(),
-  'src/main/modules/agent-control/document-pipeline/document-task-pipeline-executor.ts',
+  'src/main/modules/document-engine/pipeline/document-task-pipeline-executor.ts',
 )
 
 test('executor 在 update 分支消费 envelope widget_target 作为 preferredTargetWidgetTitle', () => {

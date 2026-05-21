@@ -5,7 +5,7 @@ import test from 'node:test'
 
 const EXECUTOR_PATH = resolve(
   process.cwd(),
-  'src/main/modules/agent-control/document-pipeline/document-task-pipeline-executor.ts',
+  'src/main/modules/document-engine/pipeline/document-task-pipeline-executor.ts',
 )
 const MODULE_EXECUTOR_PATH = resolve(
   process.cwd(),

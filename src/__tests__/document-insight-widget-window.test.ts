@@ -104,7 +104,7 @@ test('buildDocumentChunks 为每个 chunk 注入 startOffset/endOffset', () => {
 
 const EXECUTOR_PATH = resolve(
   process.cwd(),
-  'src/main/modules/agent-control/document-pipeline/document-task-pipeline-executor.ts',
+  'src/main/modules/document-engine/pipeline/document-task-pipeline-executor.ts',
 )
 
 test('buildDocumentPipelineInsight 接收 targetWidgetTitle 并做窗口化', () => {

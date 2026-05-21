@@ -5,7 +5,7 @@ import test from 'node:test'
 
 const PIPELINE_PATH = resolve(
   process.cwd(),
-  'src/main/modules/agent-control/document-pipeline/document-task-pipeline.ts',
+  'src/main/modules/document-engine/pipeline/document-task-pipeline.ts',
 )
 
 test('document-task-pipeline 导入 logAgentMetric', () => {

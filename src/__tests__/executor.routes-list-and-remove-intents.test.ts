@@ -3,11 +3,11 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { describe, it } from 'node:test'
 
-import { buildPipelinePhaseOrder } from '../main/modules/agent-control/document-pipeline/document-task-pipeline'
+import { buildPipelinePhaseOrder } from '../main/modules/document-engine/pipeline/document-task-pipeline'
 
 const EXECUTOR_PATH = resolve(
   process.cwd(),
-  'src/main/modules/agent-control/document-pipeline/document-task-pipeline-executor.ts',
+  'src/main/modules/document-engine/pipeline/document-task-pipeline-executor.ts',
 )
 
 describe('executor routes list/remove structured intents (P3 T3)', () => {

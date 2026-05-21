@@ -80,11 +80,11 @@ test('mergeRecordPatch patch === null 整段删除字段', () => {
 
 const EXECUTOR_PATH = resolve(
   process.cwd(),
-  'src/main/modules/agent-control/document-pipeline/document-task-pipeline-executor.ts',
+  'src/main/modules/document-engine/pipeline/document-task-pipeline-executor.ts',
 )
 const PIPELINE_PATH = resolve(
   process.cwd(),
-  'src/main/modules/agent-control/document-pipeline/document-task-pipeline.ts',
+  'src/main/modules/document-engine/pipeline/document-task-pipeline.ts',
 )
 const ACTIONS_PATH = resolve(
   process.cwd(),
