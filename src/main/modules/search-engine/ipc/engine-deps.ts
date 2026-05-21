@@ -23,6 +23,7 @@ import type {
   ReindexAllSourcesResult,
   ReindexWorkspaceResult,
 } from '../indexer'
+import type { GraphResult, SearchPayload } from '../../database/worker-bridge'
 import type { WorkspaceValidationResult } from '../../../../shared/workspace-validation'
 
 /**
@@ -35,6 +36,27 @@ export interface SearchWorkerBridgeFacade {
   reindexWorkspace(opts: { root: string }): Promise<ReindexWorkspaceResult>
   reindexAllSources(opts: { root: string }): Promise<ReindexAllSourcesResult>
   cancelReindex(): Promise<number>
+  /**
+   * V2.4b — FTS search offloaded to the worker. SearchQueryGroup calls this
+   * before falling back to the in-process engine on bridge failure.
+   */
+  searchDocuments(opts: {
+    query: string
+    workspaceRoot?: string
+    workspaceRoots?: string[]
+    limit?: number
+    sources?: string[]
+  }): Promise<SearchPayload>
+  /**
+   * V2.4b — graph BFS offloaded to the worker. SearchQueryGroup surfaces the
+   * structured error to the renderer on bridge failure (no in-process
+   * fallback path — the renderer handles the error directly).
+   */
+  getDocumentGraph(opts: {
+    workspaceRoot?: string
+    centerPath?: string
+    depth?: number
+  }): Promise<GraphResult>
 }
 
 /**
@@ -49,6 +71,7 @@ export interface SearchWorkerFallbackPayload {
   error: unknown
   workspaceRoot?: string
 }
+
 
 /**
  * Composition root. V2.4a populates only the SourceIndexGroup-relevant

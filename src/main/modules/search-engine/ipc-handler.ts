@@ -11,13 +11,13 @@ import {
   FileWatcherRegistry,
   isInotifyExhaustionError,
 } from './file-watcher'
-import type { SearchHit } from './query'
 import { validateWorkspaceRoot } from '../../../shared/workspace-validation'
 import {
   noteSearchWorkerSuccess,
   recordSearchWorkerFallback,
 } from './worker-fallback-observer'
 import { sourceIndexGroup } from './ipc/source-index-group'
+import { searchQueryGroup } from './ipc/query-group'
 import type { IpcDisposeHandle } from './ipc/types'
 
 interface SearchIPCResponse<T> {
@@ -52,6 +52,15 @@ export function getFileWatcherRegistry(): FileWatcherRegistry {
  * can drop the prior registration before the next one binds.
  */
 let sourceIndexGroupDispose: IpcDisposeHandle | null = null
+
+/**
+ * Stage V V2.4b — dispose handle returned by `searchQueryGroup.register`.
+ * The 3 query channels (`document:searchIndex`, `document:getBacklinks`,
+ * `document:getGraph`) live in `ipc/query-group.ts`; the host keeps the
+ * dispose handle so a re-entrant `setupSearchIPC` (dev-reload) can drop
+ * the prior registration before the next one binds.
+ */
+let searchQueryGroupDispose: IpcDisposeHandle | null = null
 
 export function setupSearchIPC(): void {
   const rawDb = getDatabase().getRawDb()
@@ -95,149 +104,22 @@ export function setupSearchIPC(): void {
     noteSearchWorkerSuccess: () => noteSearchWorkerSuccess(),
   })
 
-  ipcMain.handle(
-    'document:searchIndex',
-    async (
-      _event,
-      payload: {
-        query: string
-        limit?: number
-        workspaceRoot?: string
-        workspaceRoots?: string[]
-        sources?: string[]
-      },
-    ): Promise<SearchIPCResponse<{
-      items: Array<SearchHit & { sourceType: string; sourceMeta?: Record<string, unknown> | null }>
-      stats: { returned: number; elapsedMs: number }
-      degraded: boolean
-    }> & {
-      errorKind?: 'invalid_root' | 'engine_unavailable' | 'failed'
-      validationReason?: string
-    }> => {
-      if (!searchEngine) {
-        return { success: false, error: 'search engine unavailable', errorKind: 'engine_unavailable' }
-      }
-      if (!payload || typeof payload.query !== 'string') {
-        return { success: false, error: 'query required' }
-      }
-      // Defense-in-depth: even though the renderer's computeDesiredRoots
-      // pre-filters unsafe paths, a buggy or malicious caller could still
-      // pass `~` / `/Users/<x>` / `/Volumes/<x>` here. We hard-reject so
-      // search never operates on a forbidden tree (even if a stale row for
-      // one survives in the DB — engine-side filtering covers that path
-      // separately).
-      if (typeof payload.workspaceRoot === 'string' && payload.workspaceRoot.length > 0) {
-        const validation = validateWorkspaceRoot(payload.workspaceRoot)
-        if (!validation.ok) {
-          return {
-            success: false,
-            error: validation.message ?? 'unsafe workspace root',
-            errorKind: 'invalid_root',
-            validationReason: validation.reason,
-          }
-        }
-      }
-      if (Array.isArray(payload.workspaceRoots)) {
-        for (const root of payload.workspaceRoots) {
-          if (typeof root !== 'string') continue
-          const validation = validateWorkspaceRoot(root)
-          if (!validation.ok) {
-            return {
-              success: false,
-              error: validation.message ?? 'unsafe workspace root',
-              errorKind: 'invalid_root',
-              validationReason: validation.reason,
-            }
-          }
-        }
-      }
-      // perf-rescue B1: FTS scan on multi-GB index — offload to worker.
-      try {
-        const result = await getWorkerDbBridge().searchDocuments({
-          query: payload.query,
-          limit: payload.limit,
-          workspaceRoot: payload.workspaceRoot,
-          workspaceRoots: payload.workspaceRoots,
-          sources: payload.sources,
-        })
-        noteSearchWorkerSuccess()
-        return { success: true, data: result }
-      } catch (workerError) {
-        recordSearchWorkerFallback({
-          task: 'searchDocuments',
-          error: workerError,
-          workspaceRoot: payload.workspaceRoot,
-        })
-        try {
-          const result = await searchEngine.search(payload.query, {
-            limit: payload.limit,
-            workspaceRoot: payload.workspaceRoot,
-            workspaceRoots: payload.workspaceRoots,
-            sources: payload.sources,
-          })
-          return { success: true, data: result }
-        } catch (error) {
-          return { success: false, error: error instanceof Error ? error.message : String(error), errorKind: 'failed' }
-        }
-      }
-    },
-  )
-
-  ipcMain.handle(
-    'document:getBacklinks',
-    async (
-      _event,
-      payload: { path: string; limit?: number },
-    ): Promise<SearchIPCResponse<{ references: Array<{ path: string; name: string; kind: string }> }>> => {
-      if (!searchEngine) return { success: false, error: 'search engine unavailable' }
-      if (!payload || typeof payload.path !== 'string') return { success: false, error: 'path required' }
-      const limit = typeof payload.limit === 'number' ? Math.max(1, Math.min(200, payload.limit)) : 50
-      try {
-        const db = searchEngine.getRepository().getConnection()
-        const target = db
-          .prepare('SELECT id FROM documents WHERE path = ? LIMIT 1')
-          .get<{ id: number }>(payload.path)
-        if (!target) return { success: true, data: { references: [] } }
-        const rows = db
-          .prepare(
-            `SELECT src.path AS path, src.name AS name, dl.kind AS kind
-             FROM doc_links dl
-             JOIN documents src ON src.id = dl.src_doc_id
-             WHERE dl.target_doc_id = ? AND src.source_type = 'document'
-             LIMIT ?`,
-          )
-          .all<{ path: string; name: string; kind: string }>(target.id, limit)
-        return { success: true, data: { references: rows } }
-      } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error) }
-      }
-    },
-  )
-
-  ipcMain.handle(
-    'document:getGraph',
-    async (
-      _event,
-      payload: { centerPath?: string; depth?: number; workspaceRoot?: string } | undefined,
-    ): Promise<SearchIPCResponse<{
-      nodes: Array<{ id: string; type: 'doc' | 'tag' | 'ghost'; label: string; sourceType?: string }>
-      edges: Array<{ source: string; target: string; kind: string }>
-    }>> => {
-      if (!searchEngine) return { success: false, error: 'search engine unavailable' }
-      const depth = typeof payload?.depth === 'number' ? Math.max(1, Math.min(6, payload.depth)) : 2
-      const centerPath = typeof payload?.centerPath === 'string' ? payload.centerPath : undefined
-      const workspaceRoot = typeof payload?.workspaceRoot === 'string' ? payload.workspaceRoot : undefined
-      // perf-rescue B1: graph reads can hit 681K rows + N BFS round-trips.
-      // Offload to worker; renderer doesn't need the in-process fallback path
-      // because callers handle the structured error.
-      try {
-        const result = await getWorkerDbBridge().getDocumentGraph({ depth, centerPath, workspaceRoot })
-        return { success: true, data: { nodes: result.nodes, edges: result.edges } }
-      } catch (error) {
-        return { success: false, error: error instanceof Error ? error.message : String(error) }
-      }
-    },
-  )
+  // Stage V V2.4b — 3 query channels (`document:searchIndex`,
+  // `document:getBacklinks`, `document:getGraph`) moved into
+  // `searchQueryGroup`. The group handles dev-reload removeHandler
+  // pre-clear internally; we hold the dispose handle so a future cleanup
+  // hook (or the next setupSearchIPC entry) can drop them on shutdown.
+  if (searchQueryGroupDispose) {
+    try { searchQueryGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    searchQueryGroupDispose = null
+  }
+  searchQueryGroupDispose = searchQueryGroup.register(ipcMain, {
+    getSearchEngine: () => searchEngine,
+    getWorkerBridge: () => getWorkerDbBridge(),
+    validateWorkspaceRoot: (picked) => validateWorkspaceRoot(picked),
+    recordSearchWorkerFallback: (payload) => recordSearchWorkerFallback(payload),
+    noteSearchWorkerSuccess: () => noteSearchWorkerSuccess(),
+  })
 
   // -------------------------------------------------------------------------
   // perf-rescue B7: chokidar file watcher for delta incremental indexing.
