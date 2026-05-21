@@ -46,6 +46,7 @@ import { agentLifecycleGroup } from './ipc/agent-lifecycle-group'
 import { agentRuntimeGroup } from './ipc/agent-runtime-group'
 import { conversationGroup } from './ipc/conversation-group'
 import { taskProjectionGroup } from './ipc/task-projection-group'
+import { recallGroup } from './ipc/recall-group'
 import type { IpcDisposeHandle } from './ipc/types'
 import { logAgentMetric } from '../agent-control/metrics'
 import { isRendererAgentMetricName } from '../../../shared/renderer-agent-metrics'
@@ -244,6 +245,18 @@ let conversationGroupDispose: IpcDisposeHandle | null = null
  */
 let taskProjectionGroupDispose: IpcDisposeHandle | null = null
 
+/**
+ * Stage V V2.1g — dispose handle returned by `recallGroup.register`.
+ * Owns the 8 session-recall channels (`agent:searchSessionRecall`,
+ * `agent:listRecentSessions`, `agent:getSessionRecallCapsule`,
+ * `agent:listAttachedSessionRecallContexts`, `agent:getReferenceSkillHint`,
+ * `agent:attachSessionRecallContext`, `agent:detachSessionRecallContext`,
+ * `agent:resumeSessionCandidate`). Same lifecycle pattern as the other group
+ * dispose slots: register on `setupAgentIPC`, dispose on dev-reload re-entry,
+ * dispose on `cleanupAgentRuntime` shutdown.
+ */
+let recallGroupDispose: IpcDisposeHandle | null = null
+
 function cleanupSkillSessionState(sessionId?: string, reason = 'Skill session state cleared'): void {
   if (sessionId) {
     clearLastReferenceSkill(sessionId)
@@ -376,6 +389,15 @@ export async function cleanupAgentRuntime(): Promise<void> {
   if (taskProjectionGroupDispose) {
     try { taskProjectionGroupDispose.dispose() } catch { /* ignore */ }
     taskProjectionGroupDispose = null
+  }
+  // Stage V V2.1g — symmetric release of the 8 session-recall channel
+  // handlers (searchSessionRecall / listRecentSessions /
+  // getSessionRecallCapsule / listAttachedSessionRecallContexts /
+  // getReferenceSkillHint / attachSessionRecallContext /
+  // detachSessionRecallContext / resumeSessionCandidate).
+  if (recallGroupDispose) {
+    try { recallGroupDispose.dispose() } catch { /* ignore */ }
+    recallGroupDispose = null
   }
   if (runtime) {
     await runtime.stop()
@@ -684,63 +706,27 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     getTaskProjection: (taskId) => runtime!.getTaskProjection(taskId),
   })
 
-  ipcMain.handle('agent:searchSessionRecall', (_, payload?: {
-    query?: string
-    channelKey?: string
-    sourceKind?: 'local' | 'channel'
-    userId?: string
-    hasAttachments?: boolean
-    currentScopeId?: string
-    limit?: number
-  }): IPCResponse => {
-    try {
-      return { success: true, data: runtime!.searchSessionRecall(payload) }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('agent:listRecentSessions', (_, payload?: {
-    channelKey?: string
-    sourceKind?: 'local' | 'channel'
-    userId?: string
-    hasAttachments?: boolean
-    currentScopeId?: string
-    limit?: number
-  }): IPCResponse => {
-    try {
-      return { success: true, data: runtime!.listRecentSessions(payload) }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('agent:getSessionRecallCapsule', (_, payload: { conversationId: string }): IPCResponse => {
-    try {
-      const capsule = runtime!.getSessionRecallCapsule(payload.conversationId)
-      if (!capsule) return { success: false, error: `Session recall capsule not found: ${payload.conversationId}` }
-      return { success: true, data: capsule }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('agent:listAttachedSessionRecallContexts', (_, payload: { scopeId: string }): IPCResponse => {
-    try {
-      return { success: true, data: runtime!.listAttachedSessionRecallContexts(payload.scopeId) }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('agent:getReferenceSkillHint', (_, payload: { scopeId: string }): IPCResponse => {
-    try {
-      const scopeId = String(payload?.scopeId || '').trim()
-      if (!scopeId) return { success: true, data: null }
-      return { success: true, data: runtime!.getReferenceSkillHint(scopeId) }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
+  // Stage V V2.1g — 8 session-recall channels (`agent:searchSessionRecall`,
+  // `agent:listRecentSessions`, `agent:getSessionRecallCapsule`,
+  // `agent:listAttachedSessionRecallContexts`, `agent:getReferenceSkillHint`,
+  // `agent:attachSessionRecallContext`, `agent:detachSessionRecallContext`,
+  // `agent:resumeSessionCandidate`) moved into `recallGroup`. The group
+  // pre-clears internally; we hold the dispose handle so `cleanupAgentRuntime`
+  // can drop them on shutdown. Re-binding on dev reload first calls
+  // `dispose()` on the prior handle so listener slots stay clean.
+  if (recallGroupDispose) {
+    try { recallGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    recallGroupDispose = null
+  }
+  recallGroupDispose = recallGroup.register(ipcMain, {
+    searchSessionRecall: (payload) => runtime!.searchSessionRecall(payload),
+    listRecentSessions: (payload) => runtime!.listRecentSessions(payload),
+    getSessionRecallCapsule: (conversationId) => runtime!.getSessionRecallCapsule(conversationId),
+    listAttachedSessionRecallContexts: (scopeId) => runtime!.listAttachedSessionRecallContexts(scopeId),
+    getReferenceSkillHint: (scopeId) => runtime!.getReferenceSkillHint(scopeId),
+    attachSessionRecallContext: (currentScopeId, conversationId) => runtime!.attachSessionRecallContext(currentScopeId, conversationId),
+    detachSessionRecallContext: (currentScopeId, conversationId) => runtime!.detachSessionRecallContext(currentScopeId, conversationId),
+    resumeSessionCandidate: (payload) => runtime!.resumeSessionCandidate(payload),
   })
 
   ipcMain.handle('agent:startDetachedSkillAction', (_, payload: {
@@ -802,29 +788,11 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     return cancelChildRunForIpc(runtime, payload)
   })
 
-  ipcMain.handle('agent:attachSessionRecallContext', (_, payload: { currentScopeId: string; conversationId: string }): IPCResponse => {
-    try {
-      return { success: true, data: runtime!.attachSessionRecallContext(payload.currentScopeId, payload.conversationId) }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('agent:detachSessionRecallContext', (_, payload: { currentScopeId: string; conversationId: string }): IPCResponse => {
-    try {
-      return { success: true, data: runtime!.detachSessionRecallContext(payload.currentScopeId, payload.conversationId) }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('agent:resumeSessionCandidate', (_, payload: { conversationId?: string; resumeTitle?: string }): IPCResponse => {
-    try {
-      return { success: true, data: runtime!.resumeSessionCandidate(payload) }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
+  // Stage V V2.1g — `agent:attachSessionRecallContext`,
+  // `agent:detachSessionRecallContext` and `agent:resumeSessionCandidate`
+  // moved into `recallGroup` (registered above, alongside the 5 earlier
+  // session-recall read channels). See the single `recallGroup.register`
+  // call above.
 
   // Stage V V2.1e — the 6 channels that used to live here
   // (`agent:getConversationScopeMessages`, `agent:createLocalScope`,
