@@ -11,11 +11,11 @@ import {
 const OPENUI_PATH = resolve(process.cwd(), 'src/shared/document-widget-openui.ts')
 const PIPELINE_PATH = resolve(
   process.cwd(),
-  'src/main/modules/agent-control/document-task-pipeline.ts',
+  'src/main/modules/agent-control/document-pipeline/document-task-pipeline.ts',
 )
 const EXECUTOR_PATH = resolve(
   process.cwd(),
-  'src/main/modules/agent-control/document-task-pipeline-executor.ts',
+  'src/main/modules/agent-control/document-pipeline/document-task-pipeline-executor.ts',
 )
 
 describe('widget catalog & DocumentInsight.recommendedWidget are a superset of the 5 legacy components (P3 T5)', () => {

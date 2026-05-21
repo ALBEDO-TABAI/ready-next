@@ -12,7 +12,7 @@ import { describe, it } from 'node:test'
 
 const EXECUTOR_PATH = resolve(
   process.cwd(),
-  'src/main/modules/agent-control/document-task-pipeline-executor.ts',
+  'src/main/modules/agent-control/document-pipeline/document-task-pipeline-executor.ts',
 )
 const DIRECT_CHAT_PATH = resolve(
   process.cwd(),

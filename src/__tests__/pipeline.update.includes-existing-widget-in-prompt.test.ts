@@ -5,7 +5,7 @@ import { describe, it } from 'node:test'
 
 const EXECUTOR_PATH = resolve(
   process.cwd(),
-  'src/main/modules/agent-control/document-task-pipeline-executor.ts',
+  'src/main/modules/agent-control/document-pipeline/document-task-pipeline-executor.ts',
 )
 
 describe('pipeline update-mode existing widget prompt contract (P3 T2)', () => {
