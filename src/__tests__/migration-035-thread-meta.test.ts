@@ -90,7 +90,7 @@ test('ThreadMetaRepository — create + get round-trips record', async (t) => {
   await runAllMigrations(db)
 
   const { ThreadMetaRepository } = await import(
-    '../main/modules/agent-control/thread-meta-repository'
+    '../main/modules/agent-control/session/thread-meta-repository'
   )
   const repo = new ThreadMetaRepository(
     db as unknown as ConstructorParameters<typeof ThreadMetaRepository>[0],
@@ -127,7 +127,7 @@ test('ThreadMetaRepository — update patches displayTitle / pinned / archived o
   await runAllMigrations(db)
 
   const { ThreadMetaRepository } = await import(
-    '../main/modules/agent-control/thread-meta-repository'
+    '../main/modules/agent-control/session/thread-meta-repository'
   )
   const repo = new ThreadMetaRepository(
     db as unknown as ConstructorParameters<typeof ThreadMetaRepository>[0],
@@ -160,7 +160,7 @@ test('ThreadMetaRepository — strict mutate rejects ownerKind / ownerId / scope
   await runAllMigrations(db)
 
   const { ThreadMetaRepository } = await import(
-    '../main/modules/agent-control/thread-meta-repository'
+    '../main/modules/agent-control/session/thread-meta-repository'
   )
   const repo = new ThreadMetaRepository(
     db as unknown as ConstructorParameters<typeof ThreadMetaRepository>[0],
@@ -197,7 +197,7 @@ test('ThreadMetaRepository — list filters by scopeId / archived / pinned', asy
   await runAllMigrations(db)
 
   const { ThreadMetaRepository } = await import(
-    '../main/modules/agent-control/thread-meta-repository'
+    '../main/modules/agent-control/session/thread-meta-repository'
   )
   const repo = new ThreadMetaRepository(
     db as unknown as ConstructorParameters<typeof ThreadMetaRepository>[0],

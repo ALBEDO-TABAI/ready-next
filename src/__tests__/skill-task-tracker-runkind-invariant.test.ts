@@ -198,7 +198,7 @@ test('Q.3a: active-skill-context regex does NOT parse primitive pseudo taskIds a
   // Pin Codex round 1 ❌ #5: `primitive-output:` / `primitive-run-state:`
   // continuity prefixes must not be misinterpreted as skill ids.
   const { skillIdFromProjection } = await import(
-    '../main/modules/agent-control/active-skill-context'
+    '../main/modules/agent-control/session/active-skill-context'
   ) as unknown as {
     skillIdFromProjection?: (projection: { taskId: string }) => string | null
   }
