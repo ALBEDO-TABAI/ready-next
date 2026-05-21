@@ -9,7 +9,7 @@ function readWorkspaceFile(path: string): string {
 }
 
 test('reference skill hint is exposed from main process to the chat panel', () => {
-  const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime.ts')
+  const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime-core/runtime.ts')
   const ipcHandler = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')
   const preload = readWorkspaceFile('src/preload/index.ts')
   const electronTypes = readWorkspaceFile('src/renderer/types/electron.d.ts')
@@ -81,7 +81,7 @@ test('skill action spawn receives the current turn agent context', () => {
 })
 
 test('detached skill tasks have IPC and renderer API contracts', () => {
-  const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime.ts')
+  const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime-core/runtime.ts')
   const ipcHandler = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')
   const preload = readWorkspaceFile('src/preload/index.ts')
   const electronTypes = readWorkspaceFile('src/renderer/types/electron.d.ts')

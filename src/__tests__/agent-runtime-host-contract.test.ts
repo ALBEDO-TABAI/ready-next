@@ -17,8 +17,8 @@ function assertMatchesAll(
 }
 
 test('runtime host is split into run coordinator, run projection, and execution host contracts', () => {
-  const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime.ts')
-  const orchestrator = readWorkspaceFile('src/main/modules/agent-control/orchestrator.ts')
+  const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime-core/runtime.ts')
+  const orchestrator = readWorkspaceFile('src/main/modules/agent-control/runtime-core/orchestrator.ts')
   const runCoordinator = readWorkspaceFile('src/main/modules/agent-control/task-projection/run-coordinator.ts')
   const runProjection = readWorkspaceFile('src/main/modules/agent-control/task-projection/run-projection.ts')
   const contracts = readWorkspaceFile('src/main/modules/agent-control/run-contracts.ts')
@@ -45,7 +45,7 @@ test('runtime host is split into run coordinator, run projection, and execution 
   const kimiCodingClient = readWorkspaceFile('src/main/modules/claude-bridge/kimi-coding-client.ts')
   const openAIExecutionClient = readWorkspaceFile('src/main/modules/claude-bridge/openai-execution-client.ts')
   const documentToolFlow = readWorkspaceFile('src/main/modules/claude-bridge/document-tool-flow.ts')
-  const executionLoopOrchestrator = readWorkspaceFile('src/main/modules/agent-control/execution-loop-orchestrator.ts')
+  const executionLoopOrchestrator = readWorkspaceFile('src/main/modules/agent-control/runtime-core/execution-loop-orchestrator.ts')
   const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
   const directChat = readWorkspaceFile('src/main/modules/claude-bridge/direct-chat.ts')
   const toolConfig = readWorkspaceFile('src/main/modules/agent-control/execution-tool-config.ts')
@@ -206,7 +206,7 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.match(directChat, /import \{ DesignToolLoopOrchestrator \} from '\.\.\/agent-control\/design-tool-loop-orchestrator'/)
   assert.match(directChat, /import \{ DocumentToolLoopOrchestrator \} from '\.\.\/agent-control\/document-tool-loop-orchestrator'/)
   assert.match(directChat, /import \{ DocumentDomainOrchestrator \} from '\.\.\/agent-control\/domain-adapters\/document-domain-orchestrator'/)
-  assert.match(directChat, /import \{ ExecutionLoopOrchestrator \} from '\.\.\/agent-control\/execution-loop-orchestrator'/)
+  assert.match(directChat, /import \{ ExecutionLoopOrchestrator \} from '\.\.\/agent-control\/runtime-core\/execution-loop-orchestrator'/)
   assert.match(directChat, /private readonly browserDomainOrchestrator: BrowserDomainOrchestrator/)
   assert.match(directChat, /private readonly skillContextOrchestrator: SkillContextOrchestrator/)
   assert.match(directChat, /private readonly anthropicExecutionClient: AnthropicExecutionClient/)
@@ -442,7 +442,7 @@ test('phase0 freezes the target runtime boundary that later refactors must satis
 })
 
 test('phase3 keeps runtime ownership split while DirectChatEngine delegates single-turn execution to TurnEngine', () => {
-  const orchestrator = readWorkspaceFile('src/main/modules/agent-control/orchestrator.ts')
+  const orchestrator = readWorkspaceFile('src/main/modules/agent-control/runtime-core/orchestrator.ts')
   const directChat = readWorkspaceFile('src/main/modules/claude-bridge/direct-chat.ts')
   const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
   const contracts = readWorkspaceFile('src/main/modules/agent-control/run-contracts.ts')

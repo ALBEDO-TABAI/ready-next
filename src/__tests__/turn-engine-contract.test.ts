@@ -336,8 +336,8 @@ test('phase0 freezes the future TurnEngine contract in roadmap and design docs',
 test('phase3 routes single-turn execution through TurnEngine and shrinks DirectChatEngine into a host shell', () => {
   const directChat = readWorkspaceFile('src/main/modules/claude-bridge/direct-chat.ts')
   const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
-  const turnState = readWorkspaceFile('src/main/modules/agent-control/turn-state.ts')
-  const turnTranscript = readWorkspaceFile('src/main/modules/agent-control/turn-transcript.ts')
+  const turnState = readWorkspaceFile('src/main/modules/agent-control/runtime-core/turn-state.ts')
+  const turnTranscript = readWorkspaceFile('src/main/modules/agent-control/runtime-core/turn-transcript.ts')
   const contracts = readWorkspaceFile('src/main/modules/agent-control/run-contracts.ts')
 
   assertMatchesAll(contracts, [

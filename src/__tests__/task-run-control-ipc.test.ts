@@ -9,7 +9,7 @@ function readWorkspaceFile(path: string): string {
 }
 
 test('task run control actions are exposed through runtime, IPC, preload, renderer types, and UI entry points', () => {
-  const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime.ts')
+  const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime-core/runtime.ts')
   const ipcHandler = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')
   const preload = readWorkspaceFile('src/preload/index.ts')
   const rendererTypes = readWorkspaceFile('src/renderer/types/electron.d.ts')
@@ -67,7 +67,7 @@ test('task run control actions are exposed through runtime, IPC, preload, render
 })
 
 test('chat conversation deletion is routed through runtime cleanup before removing persisted records', () => {
-  const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime.ts')
+  const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime-core/runtime.ts')
   const ipcHandler = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')
 
   assert.match(runtime, /deleteConversation\(scopeId: string\): void/)

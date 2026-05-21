@@ -27,7 +27,7 @@ test('phase2 promotes structured tool execution into ToolRuntime', () => {
   const toolExecutionHooks = readWorkspaceFile('src/main/modules/agent-control/tools-runtime/tool-execution-hooks.ts')
   const toolRuntimeContextBuilder = readWorkspaceFile('src/main/modules/agent-control/tools-runtime/tool-runtime-context-builder.ts')
   const toolExecutor = readWorkspaceFile('src/main/modules/tools/tool-executor.ts')
-  const executionLoopOrchestrator = readWorkspaceFile('src/main/modules/agent-control/execution-loop-orchestrator.ts')
+  const executionLoopOrchestrator = readWorkspaceFile('src/main/modules/agent-control/runtime-core/execution-loop-orchestrator.ts')
 
   assertMatchesAll(toolDefinition, [
     {

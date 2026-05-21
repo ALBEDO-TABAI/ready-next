@@ -13,7 +13,7 @@ test('settings capability status is sourced from a main-process runtime snapshot
   const preload = readWorkspaceFile('src/preload/index.ts')
   const rendererTypes = readWorkspaceFile('src/renderer/types/electron.d.ts')
   const agentIPC = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')
-  const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime.ts')
+  const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime-core/runtime.ts')
 
   assert.match(settingsPage, /window\.electronAPI\.agent\.getCapabilityRuntimeSnapshot\(capabilityRuntimeConfig\)/)
   assert.match(settingsPage, /capabilityRuntimeSnapshot/)
@@ -32,7 +32,7 @@ test('settings capability status is sourced from a main-process runtime snapshot
 test('settings runtime panel does not expose the retired Claude SDK label', () => {
   const settingsPage = readWorkspaceFile('src/renderer/pages/Settings.tsx')
   const rendererTypes = readWorkspaceFile('src/renderer/types/electron.d.ts')
-  const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime.ts')
+  const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime-core/runtime.ts')
 
   assert.doesNotMatch(settingsPage, /Claude SDK/)
   assert.doesNotMatch(rendererTypes, /claude-sdk/)

@@ -23,7 +23,7 @@ test('run cleanup registry drains registered callbacks exactly once', async () =
 })
 
 test('orchestrator cancellation path and tool contexts are wired to the run cleanup registry', () => {
-  const orchestrator = readWorkspaceFile('src/main/modules/agent-control/orchestrator.ts')
+  const orchestrator = readWorkspaceFile('src/main/modules/agent-control/runtime-core/orchestrator.ts')
   const directChat = readWorkspaceFile('src/main/modules/claude-bridge/direct-chat.ts')
   const toolContextBuilder = readWorkspaceFile('src/main/modules/agent-control/tools-runtime/tool-runtime-context-builder.ts')
   const toolExecutor = readWorkspaceFile('src/main/modules/tools/tool-executor.ts')
