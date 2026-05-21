@@ -44,6 +44,7 @@ import { askUserGroup } from './ipc/ask-user-group'
 import { toolEventGroup } from './ipc/tool-event-group'
 import { agentLifecycleGroup } from './ipc/agent-lifecycle-group'
 import { agentRuntimeGroup } from './ipc/agent-runtime-group'
+import { conversationGroup } from './ipc/conversation-group'
 import type { IpcDisposeHandle } from './ipc/types'
 import { logAgentMetric } from '../agent-control/metrics'
 import { isRendererAgentMetricName } from '../../../shared/renderer-agent-metrics'
@@ -220,6 +221,19 @@ let agentLifecycleGroupDispose: IpcDisposeHandle | null = null
  */
 let agentRuntimeGroupDispose: IpcDisposeHandle | null = null
 
+/**
+ * Stage V V2.1e — dispose handle returned by `conversationGroup.register`.
+ * Owns the 8 conversation-scope + attachment channels
+ * (`agent:listConversationScopes`, `agent:listScopeRuns`,
+ * `agent:getConversationScopeMessages`, `agent:createLocalScope`,
+ * `agent:listScopeAttachments`, `agent:getScopeAttachment`,
+ * `agent:clearRemoteAttachmentCache`, `agent:getRemoteAttachmentCacheStats`).
+ * Same lifecycle pattern as the other group dispose slots: register on
+ * `setupAgentIPC`, dispose on dev-reload re-entry, dispose on
+ * `cleanupAgentRuntime` shutdown.
+ */
+let conversationGroupDispose: IpcDisposeHandle | null = null
+
 function cleanupSkillSessionState(sessionId?: string, reason = 'Skill session state cleared'): void {
   if (sessionId) {
     clearLastReferenceSkill(sessionId)
@@ -337,6 +351,15 @@ export async function cleanupAgentRuntime(): Promise<void> {
   if (agentRuntimeGroupDispose) {
     try { agentRuntimeGroupDispose.dispose() } catch { /* ignore */ }
     agentRuntimeGroupDispose = null
+  }
+  // Stage V V2.1e — symmetric release of the 8 conversation-scope + attachment
+  // channel handlers (listConversationScopes / listScopeRuns /
+  // getConversationScopeMessages / createLocalScope / listScopeAttachments /
+  // getScopeAttachment / clearRemoteAttachmentCache /
+  // getRemoteAttachmentCacheStats).
+  if (conversationGroupDispose) {
+    try { conversationGroupDispose.dispose() } catch { /* ignore */ }
+    conversationGroupDispose = null
   }
   if (runtime) {
     await runtime.stop()
@@ -609,40 +632,26 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     listChannels: () => runtime!.listChannels(),
   })
 
-  ipcMain.handle('agent:listConversationScopes', (_, payload?: { agent?: string }): IPCResponse => {
-    try {
-      const scopes = runtime!.listConversationScopes(payload?.agent)
-      log(`[ipc] agent:listConversationScopes agent=${payload?.agent || 'all'} count=${scopes.length}`)
-      return { success: true, data: scopes }
-    } catch (error) {
-      log(`[ipc] agent:listConversationScopes failed agent=${payload?.agent || 'all'} error=${error instanceof Error ? error.message : String(error)}`)
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('agent:listScopeRuns', (_, payload?: {
-    channelKey?: string
-    statuses?: string[]
-    limit?: number
-  }): IPCResponse => {
-    try {
-      const statuses = Array.isArray(payload?.statuses)
-        ? payload?.statuses.filter((item): item is 'queued' | 'planning' | 'tool_running' | 'checkpoint' | 'takeover' | 'resuming' | 'responding' | 'done' | 'error' | 'cancelled' =>
-          item === 'queued' ||
-          item === 'planning' ||
-          item === 'tool_running' ||
-          item === 'checkpoint' ||
-          item === 'takeover' ||
-          item === 'resuming' ||
-          item === 'responding' ||
-          item === 'done' ||
-          item === 'error' ||
-          item === 'cancelled')
-        : undefined
-      return { success: true, data: runtime!.listScopeRuns({ ...payload, statuses }) }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
+  // Stage V V2.1e — conversation-scope + attachment channels lifted into
+  // `conversationGroup`. The group pre-clears internally; we hold the dispose
+  // handle so `cleanupAgentRuntime` can drop them on shutdown. Eight channels
+  // moved in one shot: listConversationScopes, listScopeRuns,
+  // getConversationScopeMessages, createLocalScope, listScopeAttachments,
+  // getScopeAttachment, clearRemoteAttachmentCache, getRemoteAttachmentCacheStats.
+  if (conversationGroupDispose) {
+    try { conversationGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    conversationGroupDispose = null
+  }
+  conversationGroupDispose = conversationGroup.register(ipcMain, {
+    listConversationScopes: (agent) => runtime!.listConversationScopes(agent),
+    listScopeRuns: (payload) => runtime!.listScopeRuns(payload),
+    getConversationScopeMessages: (scopeId) => runtime!.getConversationScopeMessages(scopeId),
+    createLocalScopeWithMode: (agent, id) => runtime!.createLocalScopeWithMode(agent, id),
+    listScopeAttachments: (scopeId) => runtime!.listScopeAttachments(scopeId),
+    getScopeAttachment: (scopeId, attachmentId) => runtime!.getScopeAttachment(scopeId, attachmentId),
+    clearRemoteAttachmentCache: (channelId) => runtime!.clearRemoteAttachmentCache(channelId),
+    getRemoteAttachmentCacheStats: (channelId) => runtime!.getRemoteAttachmentCacheStats(channelId),
+    log,
   })
 
   ipcMain.handle('agent:listTaskProjections', (_, payload?: { scopeId?: string }): IPCResponse => {
@@ -809,62 +818,12 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     }
   })
 
-  ipcMain.handle('agent:getConversationScopeMessages', (_, payload: { scopeId: string }): IPCResponse => {
-    try {
-      return { success: true, data: runtime!.getConversationScopeMessages(payload.scopeId) }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('agent:createLocalScope', (_, payload: { agent: string; id?: string }): IPCResponse => {
-    try {
-      const { scope, mode } = runtime!.createLocalScopeWithMode(payload.agent, payload.id)
-      log(`[ipc] agent:createLocalScope agent=${payload.agent} requestedId=${payload.id || 'auto'} actualId=${scope.id} mode=${mode}`)
-      return { success: true, data: scope }
-    } catch (error) {
-      log(`[ipc] agent:createLocalScope failed agent=${payload.agent} requestedId=${payload.id || 'auto'} error=${error instanceof Error ? error.message : String(error)}`)
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('agent:listScopeAttachments', (_, payload?: { scopeId?: string }): IPCResponse => {
-    try {
-      const scopeId = String(payload?.scopeId || '').trim()
-      if (!scopeId) return { success: true, data: [] }
-      return { success: true, data: runtime!.listScopeAttachments(scopeId) }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('agent:getScopeAttachment', (_, payload: { scopeId: string; attachmentId: string }): IPCResponse => {
-    try {
-      const attachment = runtime!.getScopeAttachment(payload.scopeId, payload.attachmentId)
-      if (!attachment) {
-        return { success: false, error: `Attachment not found: ${payload.attachmentId}` }
-      }
-      return { success: true, data: attachment }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('agent:clearRemoteAttachmentCache', (_, payload?: { channelId?: string }): IPCResponse => {
-    try {
-      return { success: true, data: runtime!.clearRemoteAttachmentCache(payload?.channelId) }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
-
-  ipcMain.handle('agent:getRemoteAttachmentCacheStats', (_, payload?: { channelId?: string }): IPCResponse => {
-    try {
-      return { success: true, data: runtime!.getRemoteAttachmentCacheStats(payload?.channelId) }
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
-  })
+  // Stage V V2.1e — the 6 channels that used to live here
+  // (`agent:getConversationScopeMessages`, `agent:createLocalScope`,
+  // `agent:listScopeAttachments`, `agent:getScopeAttachment`,
+  // `agent:clearRemoteAttachmentCache`, `agent:getRemoteAttachmentCacheStats`)
+  // moved into `conversationGroup` along with the 2 earlier scope-list
+  // channels. See the single `conversationGroup.register` call above.
 
   // Stage V V2.1c — `agent:sendScoped` moved into `agentLifecycleGroup`
   // (registered above, alongside `agent:send` + `agent:newSession` +
