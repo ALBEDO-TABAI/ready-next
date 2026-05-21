@@ -154,6 +154,13 @@ export interface SessionSlice {
   state: SessionSliceState
   /** V3.3d — backing field for `lookupSessionByConversation`. */
   conversationId: string | null
+  /**
+   * V3.3b.1 — per-session composer draft. The top-level `inputValue` field
+   * is a read-through mirror of `sessions[activeSessionId].inputValue`;
+   * consumers (ChatPanel/ChatInput/ChatMessages/ChatAttachments) still read
+   * `state.inputValue` and will be migrated in a later V3.3b.X step.
+   */
+  inputValue: string
 }
 
 function makeEmptySessionSlice(conversationId: string | null = null): SessionSlice {
@@ -162,6 +169,7 @@ function makeEmptySessionSlice(conversationId: string | null = null): SessionSli
     pendingSendFlushAt: null,
     state: 'live',
     conversationId,
+    inputValue: '',
   }
 }
 
@@ -922,7 +930,13 @@ export const useAgent = create<AgentState>((set, get) => ({
       draftAnchor: state.pendingContinuationDraftAnchor,
       nextValue: value,
     })
+    // V3.3b.1 — write per-session slice (source of truth) and mirror to the
+    // top-level `inputValue` so existing ChatPanel/ChatInput consumers see
+    // the same value until their selector migration lands in V3.3b.X.
+    const sessionKey = activeSessionKey(state)
+    const slicePatch = withSessionSlice(state, sessionKey, { inputValue: value })
     return {
+      ...slicePatch,
       inputValue: value,
       pendingContinuationIntent: preserveContinuation ? state.pendingContinuationIntent : null,
       pendingContinuationDraftAnchor: preserveContinuation ? state.pendingContinuationDraftAnchor : null,
