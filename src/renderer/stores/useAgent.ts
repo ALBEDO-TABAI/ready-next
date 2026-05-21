@@ -132,10 +132,37 @@ export interface SendMessageResult {
  * `pendingSendFlushAt` are kept as a read-through mirror so existing
  * ChatPanel/ChatInput selectors and the agent-panel test harness keep
  * working without renderer-side edits.
+ *
+ * V3.3d adds `state` + `conversationId` so the listener-side direct-setState
+ * routing path (`routeCardToSession`) can validate a pushed card's
+ * `sessionId` is still live, and fall back via conversationId when the
+ * push payload's sessionId is null / stale / unknown.
  */
+export type SessionSliceState = 'live' | 'done' | 'error' | 'cancelled' | 'closed'
+
+const TERMINAL_SESSION_STATES: ReadonlySet<SessionSliceState> = new Set([
+  'done',
+  'error',
+  'cancelled',
+  'closed',
+])
+
 export interface SessionSlice {
   pendingSendCount: number
   pendingSendFlushAt: number | null
+  /** V3.3d — terminal exclusion set drives `isLiveSession`. */
+  state: SessionSliceState
+  /** V3.3d — backing field for `lookupSessionByConversation`. */
+  conversationId: string | null
+}
+
+function makeEmptySessionSlice(conversationId: string | null = null): SessionSlice {
+  return {
+    pendingSendCount: 0,
+    pendingSendFlushAt: null,
+    state: 'live',
+    conversationId,
+  }
 }
 
 interface AgentState {
@@ -270,7 +297,7 @@ function activeSessionKey(state: AgentState | null | undefined): string {
  */
 export function getSessionSlice(state: AgentState, sessionId?: string | null): SessionSlice {
   const id = sessionId ?? state.activeSessionId ?? state.sessionId ?? PRIMARY_SESSION_KEY
-  return state.sessions[id] ?? { pendingSendCount: 0, pendingSendFlushAt: null }
+  return state.sessions[id] ?? makeEmptySessionSlice()
 }
 
 /** V3.3a write-side helper used by the coalescing path. */
@@ -279,12 +306,160 @@ function withSessionSlice(
   sessionId: string,
   patch: Partial<SessionSlice>,
 ): Pick<AgentState, 'sessions'> {
-  const current = state.sessions[sessionId] ?? { pendingSendCount: 0, pendingSendFlushAt: null }
+  const current = state.sessions[sessionId] ?? makeEmptySessionSlice()
   return {
     sessions: {
       ...state.sessions,
       [sessionId]: { ...current, ...patch },
     },
+  }
+}
+
+// =============================================================================
+// V3.3d listener-side direct-setState routing helpers
+// =============================================================================
+
+/**
+ * Returns true iff `id` resolves to a session slice that exists and is not
+ * in a terminal state (`done` / `error` / `cancelled` / `closed`).
+ *
+ * `lookupSessionByConversation` uses the same exclusion set so a terminated
+ * session never re-enters via the conversationId fallback (v8 codex round-7).
+ */
+export function isLiveSession(
+  state: AgentState,
+  id: string | null | undefined,
+): id is string {
+  if (!id) return false
+  const slice = state.sessions[id]
+  return !!slice && !TERMINAL_SESSION_STATES.has(slice.state)
+}
+
+/**
+ * Returns the id of the most-recent live session whose `slice.conversationId`
+ * matches the given conversationId. When multiple live sessions match, the
+ * one whose id equals `state.activeSessionId` is preferred; otherwise the
+ * first encountered is returned. Returns `null` when no live match exists.
+ */
+export function lookupSessionByConversation(
+  state: AgentState,
+  conversationId: string | null | undefined,
+): string | null {
+  if (!conversationId) return null
+  const matches: string[] = []
+  for (const [id, slice] of Object.entries(state.sessions)) {
+    if (slice.conversationId !== conversationId) continue
+    if (TERMINAL_SESSION_STATES.has(slice.state)) continue
+    matches.push(id)
+  }
+  if (matches.length === 0) return null
+  const preferred = matches.find((id) => id === state.activeSessionId)
+  return preferred ?? matches[0]
+}
+
+/**
+ * V3.3d metric stubs. Today they emit a `console.warn` in non-test
+ * environments and bump a module-level counter exported for behavior tests.
+ * Wiring to the real renderer metrics infra is a deliberate follow-up so
+ * this PR remains a pure routing change.
+ */
+interface CardRoutingMetricsState {
+  orphaned: Array<{ cardId: string; reason: string; at: number }>
+  fallback: Array<{ cardId: string; reason: string; at: number }>
+}
+
+const cardRoutingMetrics: CardRoutingMetricsState = {
+  orphaned: [],
+  fallback: [],
+}
+
+function recordOrphanedCard(cardId: string, reason: string): void {
+  cardRoutingMetrics.orphaned.push({ cardId, reason, at: Date.now() })
+}
+
+function recordCardFallback(cardId: string, reason: string): void {
+  cardRoutingMetrics.fallback.push({ cardId, reason, at: Date.now() })
+}
+
+/** V3.3d test introspection — read-only snapshot of the routing metrics. */
+export function __getCardRoutingMetricsForTesting(): {
+  orphaned: ReadonlyArray<{ cardId: string; reason: string; at: number }>
+  fallback: ReadonlyArray<{ cardId: string; reason: string; at: number }>
+} {
+  return {
+    orphaned: cardRoutingMetrics.orphaned.slice(),
+    fallback: cardRoutingMetrics.fallback.slice(),
+  }
+}
+
+/** V3.3d test introspection — reset between behavior test cases. */
+export function __resetCardRoutingMetricsForTesting(): void {
+  cardRoutingMetrics.orphaned.length = 0
+  cardRoutingMetrics.fallback.length = 0
+}
+
+export interface CardRoutingDecision {
+  targetSessionId: string | null
+  metric: string | null
+}
+
+/**
+ * Three-level fallback chain used by `initAgentInteractionListeners` to route
+ * a pushed ask_user_questions card to the right session slice:
+ *
+ *   1. `event.sessionId` — accepted only when `isLiveSession` is true
+ *   2. `lookupSessionByConversation(event.conversationId)` — terminated
+ *      sessions are filtered out by the same exclusion set
+ *   3. `state.activeSessionId` — last-resort so a live card still renders
+ *
+ * Returns `targetSessionId = null` only when all three resolve to null —
+ * i.e. there is no live session and no active session to surface into. The
+ * caller drops the card and records an orphan metric in that case.
+ *
+ * When `targetSessionId !== event.sessionId` we annotate the metric with
+ * the reason the original `event.sessionId` was rejected: `null-sessionId`,
+ * `unknown-session`, or `stale-or-terminated-session`.
+ */
+export function routeCardToSession(
+  state: AgentState,
+  event: { sessionId: string | null; conversationId: string | null; cardId: string },
+): CardRoutingDecision {
+  const validSessionId = isLiveSession(state, event.sessionId) ? event.sessionId : null
+  const byConversation = lookupSessionByConversation(state, event.conversationId)
+  const targetSessionId = validSessionId ?? byConversation ?? state.activeSessionId
+
+  if (!targetSessionId) {
+    return { targetSessionId: null, metric: 'no-active-session-and-keys-null' }
+  }
+  if (targetSessionId !== event.sessionId) {
+    const reason =
+      !event.sessionId
+        ? 'null-sessionId'
+        : !state.sessions[event.sessionId]
+          ? 'unknown-session'
+          : 'stale-or-terminated-session'
+    return { targetSessionId, metric: reason }
+  }
+  return { targetSessionId, metric: null }
+}
+
+/**
+ * Map agent runtime `ScopeRunEventData['phase']` → `SessionSliceState`.
+ * Only terminal phases produce a transition; non-terminal phases keep the
+ * slice in `'live'` so the routing helpers continue to accept it.
+ */
+function mapScopeRunPhaseToSessionState(
+  phase: string,
+): SessionSliceState | null {
+  switch (phase) {
+    case 'done':
+      return 'done'
+    case 'error':
+      return 'error'
+    case 'cancelled':
+      return 'cancelled'
+    default:
+      return null
   }
 }
 
@@ -1844,28 +2019,100 @@ function initAgentInteractionListeners(): () => void {
   }).catch(() => { /* ignore hydrate failures */ })
 
   const unsubscribePush = api.onAskUserQuestionsCard((event) => {
-    const state = useAgent.getState()
-    const agent = state.currentAgent
-    // Drop cards that belong to a different active scope so they don't
-    // jump into the wrong conversation. They'll surface on scope load via
-    // the DB hydrate path instead.
-    if (event.conversationId && state.currentScopeId && event.conversationId !== state.currentScopeId) return
+    // V3.3d — route through the 3-level fallback chain instead of writing
+    // directly to top-level `messages`. The pre-V3.3d guard
+    // (`event.conversationId !== state.currentScopeId → drop`) is replaced
+    // by `routeCardToSession`, which preserves the "do not bleed across
+    // active scope" intent while also serving multi-session UIs: when the
+    // target session is not the active one, the card lands in that
+    // session's slice and surfaces when the user switches; only the
+    // double-null + no-active case drops outright.
+    const decision = routeCardToSession(useAgent.getState(), {
+      sessionId: event.sessionId,
+      conversationId: event.conversationId,
+      cardId: event.cardId,
+    })
+    if (!decision.targetSessionId) {
+      recordOrphanedCard(event.cardId, 'no-active-session-and-keys-null')
+      return
+    }
+    if (decision.metric) recordCardFallback(event.cardId, decision.metric)
+
+    const agent = useAgent.getState().currentAgent
     const message = makeMessageFromPushedCard({
       cardId: event.cardId,
-      sessionId: event.sessionId,
+      sessionId: decision.targetSessionId,
       conversationId: event.conversationId,
       questions: event.questions as AskUserQuestionsCardState['questions'],
       askedAt: event.askedAt,
     }, agent)
+
     useAgent.setState((prev) => {
-      if (prev.messages.some((m) => m.id === message.id)) return prev
-      return {
-        messages: [...prev.messages, message].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime()),
+      // Lazily create the target slice (e.g. when the card lands in a
+      // session whose slice hasn't been touched yet) so the conversationId
+      // backing field is populated for future lookups.
+      const existingSlice = prev.sessions[decision.targetSessionId!]
+      const nextSlice: SessionSlice = existingSlice
+        ? {
+          ...existingSlice,
+          conversationId: existingSlice.conversationId ?? event.conversationId,
+        }
+        : makeEmptySessionSlice(event.conversationId)
+      const sessionsPatch: Pick<AgentState, 'sessions'> = {
+        sessions: {
+          ...prev.sessions,
+          [decision.targetSessionId!]: nextSlice,
+        },
       }
+      // Mirror into top-level `messages` only when the routed target is the
+      // active session. Background-session cards land in the slice and will
+      // surface on session switch (V3.3b will move messages to the slice).
+      if (decision.targetSessionId === prev.activeSessionId) {
+        if (prev.messages.some((m) => m.id === message.id)) return sessionsPatch
+        return {
+          ...sessionsPatch,
+          messages: [...prev.messages, message].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime()),
+        }
+      }
+      return sessionsPatch
     })
   })
+
+  // V3.3d — keep `sessions[sessionId].state` in sync with the runtime
+  // scopeRunEvent stream so `isLiveSession` / `lookupSessionByConversation`
+  // see terminal sessions and stop routing pushed cards into them. Only
+  // terminal phases (done / error / cancelled) trigger a transition;
+  // non-terminal phases keep the slice in `live`. Sessions are lazily
+  // created when an event arrives ahead of any other slice write so the
+  // routing helpers can immediately classify them.
+  const agentApi = typeof window !== 'undefined' ? window.electronAPI?.agent : null
+  const unsubscribeScopeRunEvent = agentApi && typeof agentApi.onScopeRunEvent === 'function'
+    ? agentApi.onScopeRunEvent((event) => {
+      const sessionId = (event as { sessionId?: string | null }).sessionId
+      if (!sessionId) return
+      const nextState = mapScopeRunPhaseToSessionState(event.phase)
+      if (!nextState) return
+      useAgent.setState((prev) => {
+        const existing = prev.sessions[sessionId]
+        // Skip lazy creation only for non-terminal phases — terminal ones
+        // must always be recorded so a late `done` for an unseen session
+        // doesn't leave routing accepting it.
+        const nextSlice: SessionSlice = existing
+          ? { ...existing, state: nextState }
+          : { ...makeEmptySessionSlice(), state: nextState }
+        return {
+          sessions: {
+            ...prev.sessions,
+            [sessionId]: nextSlice,
+          },
+        }
+      })
+    })
+    : () => { /* ignore — older preview stubs do not surface onScopeRunEvent */ }
+
   return () => {
     try { unsubscribePush() } catch { /* ignore */ }
+    try { unsubscribeScopeRunEvent() } catch { /* ignore */ }
   }
 }
 
