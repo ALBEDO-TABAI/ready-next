@@ -13,6 +13,12 @@ test('topbar and rail icon controls use direct-on-surface styling without extra 
   const iconRail = readWorkspaceFile('src/renderer/components/layout/IconRail.tsx')
   const statusBar = readWorkspaceFile('src/renderer/components/layout/StatusBar.tsx')
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
+  // Stage V V1.3 — `CollapsedChatRail` extracted from ChatPanel.tsx to
+  // `chat-panel/layout/MotionLayer.tsx` (along with the rail's
+  // `WORKBENCH_TOPBAR_PADDING_RIGHT` + `alignItems: 'flex-end'` edge
+  // alignment). ChatPanel still owns the shell width contract and the
+  // `<CollapsedChatRail ... />` usage site.
+  const motionLayer = readWorkspaceFile('src/renderer/components/agent/chat-panel/layout/MotionLayer.tsx')
   const workbenchMode = readWorkspaceFile('src/renderer/pages/WorkbenchMode.tsx')
   const chatInput = readWorkspaceFile('src/renderer/components/agent/ChatInput.tsx')
   const chatMessages = readWorkspaceFile('src/renderer/components/agent/ChatMessages.tsx')
@@ -31,7 +37,7 @@ test('topbar and rail icon controls use direct-on-surface styling without extra 
   assert.match(statusBar, /WORKBENCH_EDGE_ICON_INSET/)
   assert.match(statusBar, /paddingLeft:\s*WORKBENCH_EDGE_ICON_INSET/)
   assert.match(statusBar, /paddingRight:\s*WORKBENCH_EDGE_ICON_INSET/)
-  assert.match(chatMessages, /padding:\s*shouldFloatIntroBlock \? '20px 16px clamp\(76px, 16vh, 132px\)' : 16/)
+  assert.match(chatMessages, /padding:\s*16,/)
   assert.match(chatPanel, /padding:\s*'10px 0 0'/)
   assert.match(iconRail, /width:\s*WORKBENCH_EDGE_RAIL_SIZE/)
   assert.match(iconRail, /minWidth:\s*WORKBENCH_EDGE_RAIL_SIZE/)
@@ -39,11 +45,11 @@ test('topbar and rail icon controls use direct-on-surface styling without extra 
   assert.match(chatPanel, /width:\s*shellWidth,/)
   assert.match(chatPanel, /minWidth:\s*shellWidth,/)
   assert.match(workbenchMode, /const chatShellWidth = chatPanelVisible \? chatPanelWidth : WORKBENCH_EDGE_RAIL_SIZE/)
-  assert.match(workbenchMode, /<ChatPanel shellWidth=\{chatShellWidth\} panelState=\{chatPanelState\} \/>/)
+  assert.match(workbenchMode, /<ChatPanel shellWidth=\{chatShellWidth\} panelState=\{chatPanelState\}/)
   assert.match(chatPanel, /<CollapsedChatRail/)
-  assert.match(chatPanel, /WORKBENCH_TOPBAR_PADDING_RIGHT/)
-  assert.match(chatPanel, /alignItems:\s*'flex-end'/)
-  assert.match(chatPanel, /paddingRight:\s*WORKBENCH_TOPBAR_PADDING_RIGHT/)
+  assert.match(motionLayer, /WORKBENCH_TOPBAR_PADDING_RIGHT/)
+  assert.match(motionLayer, /alignItems:\s*'flex-end'/)
+  assert.match(motionLayer, /paddingRight:\s*WORKBENCH_TOPBAR_PADDING_RIGHT/)
   assert.match(chatInput, /padding:\s*'10px 16px 0'/)
   assert.doesNotMatch(topBar, /className="glass-surface-card".*切换到浅色模式/s)
   assert.doesNotMatch(topBar, /className="glass-surface-card".*收起\/展开聊天面板/s)

@@ -8,7 +8,9 @@ function readWorkspaceFile(path: string): string {
 }
 
 test('ChatPanelMotionLayer body grid cell keeps a flex column context so ChatMessages flex-1 fills the height and the composer stays pinned to the bottom', () => {
-  const source = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
+  // Stage V V1.3 — `ChatPanelMotionLayer` extracted from ChatPanel.tsx to
+  // `chat-panel/layout/MotionLayer.tsx`; the body-cell JSX moved with it.
+  const source = readWorkspaceFile('src/renderer/components/agent/chat-panel/layout/MotionLayer.tsx')
 
   assert.match(
     source,
