@@ -28,10 +28,10 @@ import type {
   RunMessage,
   TaskType,
   TurnTranscriptEvent,
-} from './run-contracts'
-import type { ScopeRunEventPayload } from './types'
+} from './contracts/run-contracts'
+import type { ScopeRunEventPayload } from './contracts/types'
 import type { TurnTerminalReason } from './turn-frame'
-import type { ContinuationIntent, ContinuationState } from './continuation-state'
+import type { ContinuationIntent, ContinuationState } from './contracts/continuation-state'
 import {
   resumeSkillChildRun,
   waitForSkillChildRunClose,

@@ -7,7 +7,7 @@ import { logAgentMetric } from './metrics'
 import { resolveCanonicalChildRunHandle } from './child-run-handle-resolver'
 import { resolvePendingSkillHandoffWriteTargets } from './skills/skill-agent-handoff'
 import type { FrameAction, TurnFrame, TurnFrameLiveness, TurnFrameMode } from './turn-frame'
-import type { SkillRunContract } from './run-contracts'
+import type { SkillRunContract } from './contracts/run-contracts'
 import { isTerminalChildCloseStatus } from './skills/skill-child-run-types'
 
 export const FRAME_STEERING_PRIMITIVE_TOOL_NAMES = [

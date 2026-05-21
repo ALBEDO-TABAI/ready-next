@@ -5,7 +5,7 @@ import {
   loadSkillRunContract,
   type SkillRunContract,
   type TaskProjectionRecord,
-} from './run-contracts'
+} from './contracts/run-contracts'
 import type { SkillTaskRunRecord } from '../repositories/skill-task-run-repository'
 import type { SkillTaskSupervisorSnapshot } from './skills/skill-task-supervisor'
 import {

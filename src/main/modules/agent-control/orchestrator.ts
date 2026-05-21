@@ -4,15 +4,15 @@ import { DirectChatEngine, type MultimodalBlock } from '../claude-bridge/direct-
 import type { BrowserController } from '../browser-engine/ipc-handler'
 import type { SidecarManager } from './sidecar-manager'
 import type { AgentControlRuntime } from './runtime'
-import type { ExecutionHostRequest, ExecutionHostResult } from './run-contracts'
+import type { ExecutionHostRequest, ExecutionHostResult } from './contracts/run-contracts'
 import type { IntentClassification } from './intent-classifier'
-import type { RequestEnvelope } from './request-envelope'
-import type { ContinuationIntent, ContinuationState } from './continuation-state'
+import type { RequestEnvelope } from './contracts/request-envelope'
+import type { ContinuationIntent, ContinuationState } from './contracts/continuation-state'
 import { AgentSessionManager } from './session-manager'
 import { createScopedRunCollector, type SendAndCollectResult } from './task-projection/run-collector'
 import { RunCleanupRegistry, type RunCleanupCallback } from './task-projection/run-cleanup-registry'
 import type { DomainAdapter } from './domain-adapters/domain-adapter'
-import type { AgentRuntimeKernel } from './types'
+import type { AgentRuntimeKernel } from './contracts/types'
 import {
   AgentSdkRuntime,
   type AgentSdkRuntimeDeps,

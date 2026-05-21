@@ -64,17 +64,17 @@ import { ToolNameCollisionError } from './tools-runtime/tool-registry-errors'
 import { RunProjection } from './task-projection/run-projection'
 import { syncTaskProjection } from './task-projection/task-projection-sync'
 import { reconcileTaskProjections } from './task-projection/task-projection-reconciler'
-import { canResumeShape, type ResumeHandle } from './resume-handle'
+import { canResumeShape, type ResumeHandle } from './contracts/resume-handle'
 import { deriveTaskProjectionCanResume } from './task-projection/task-projection-resume'
 import { isAwaitingUserInteractionState } from '../../../shared/task-interaction-state'
 import { assertSkillTaskRunInvariantConsistency } from './skills/skill-task-tracker'
-import type { ProjectionTruthSnapshot, TaskProjectionRecord } from './run-contracts'
+import type { ProjectionTruthSnapshot, TaskProjectionRecord } from './contracts/run-contracts'
 import { getBudgetUsagePercent, restoreContinuationTaskBudgetRuntime } from './task-projection/run-budget-policy'
 import {
   normalizeContinuationIntent,
   selectContinuationProjection,
   type ContinuationIntent,
-} from './continuation-state'
+} from './contracts/continuation-state'
 import { forgetSession } from './session-continuity'
 import { isRetryOnlyTurn } from './skills/skill-detection-inputs'
 import { logAgentMetric } from './metrics'
@@ -119,7 +119,7 @@ import type {
   ScopeRunEventPayload,
   ScopeRunSkillProgress,
   ScopeRunSummary
-} from './types'
+} from './contracts/types'
 import type { SessionRecallCapsule, SessionRecallHit } from '../../../shared/session-recall'
 
 export interface UpsertChannelPayload {

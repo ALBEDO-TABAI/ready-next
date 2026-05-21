@@ -1,5 +1,5 @@
 import type { DocumentWidgetTaskKind } from '../claude-bridge/tool-policy-heuristics'
-import type { RunBudgetHint } from './run-contracts'
+import type { RunBudgetHint } from './contracts/run-contracts'
 import {
   accumulateDocumentToolProgress,
   buildDocumentToolCompletionText,

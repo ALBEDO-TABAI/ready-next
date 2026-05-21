@@ -51,10 +51,10 @@ import {
 import type { DocumentTaskJob, DocumentTaskPlan, DocumentTaskStep } from './document-task-plan'
 import type { ExecutionIntentContext } from './execution-intent-resolver'
 import type { ToolPolicy } from './execution-tool-config'
-import type { RequestEnvelope, RequestEnvelopeResource } from './request-envelope'
-import type { ProjectionTruthSnapshot, TurnProviderContext } from './run-contracts'
+import type { RequestEnvelope, RequestEnvelopeResource } from './contracts/request-envelope'
+import type { ProjectionTruthSnapshot, TurnProviderContext } from './contracts/run-contracts'
 import { SubtaskRuntime } from './subtask-runtime'
-import type { ConversationScope, ScopeRunEventPayload } from './types'
+import type { ConversationScope, ScopeRunEventPayload } from './contracts/types'
 
 interface DocumentPipelineCacheSession {
   activeRunId: string | null

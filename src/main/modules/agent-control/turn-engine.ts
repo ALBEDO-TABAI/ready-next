@@ -1,5 +1,5 @@
 import { randomUUID } from 'crypto'
-import { buildRequestEnvelope } from './request-envelope'
+import { buildRequestEnvelope } from './contracts/request-envelope'
 import { hashToolCallArgs } from './tools-runtime/tool-call-args-hash'
 
 /**
@@ -216,8 +216,8 @@ export function buildBudgetWarningMessage(params: {
   return `系统提醒：已用 ${params.iterations}/${params.effectiveMaxIterations} 次工具调用。请总结当前进度并询问用户是否继续，或在确认下一步方向后再继续调用工具。`
 }
 
-import { buildContinuationStateFromProjection } from './continuation-state'
-import { matchesConfigRepairIntent, matchesResumeIntent } from './resume-lexicon'
+import { buildContinuationStateFromProjection } from './contracts/continuation-state'
+import { matchesConfigRepairIntent, matchesResumeIntent } from './contracts/resume-lexicon'
 import { classifyIntent, type IntentClassification } from './intent-classifier'
 import { logAgentMetric } from './metrics'
 import { TOOL_ERROR_METRICS } from './tools-runtime/tool-error-metrics'
@@ -347,7 +347,7 @@ import type { SkillState } from '../skills-runtime/runtime-manager'
 import {
   shouldParentForceLongSkillTool,
   isParentForceForbiddenByManifest,
-} from './run-contracts'
+} from './contracts/run-contracts'
 import { STATIC_SKILL_ACTIONS_BY_TOOL_NAME } from '../tools/skills-tools-static'
 import { isConfiguredChildLoopSkillAction } from '../tools/child-loop-skill-actions'
 import {
@@ -380,7 +380,7 @@ import type {
   TurnToolCall,
   TurnToolExecutionResult,
   TurnTranscriptEvent,
-} from './run-contracts'
+} from './contracts/run-contracts'
 import { resolveAIConfigCapabilities } from '../../../shared/ai-providers'
 
 const LONG_TYPED_SKILL_ACTION_MIN_TIMEOUT_MS = 5 * 60 * 1000

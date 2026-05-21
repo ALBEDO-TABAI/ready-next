@@ -18,7 +18,7 @@ import type {
   TaskStep,
   TaskType,
   ToolSnapshot,
-} from './run-contracts'
+} from './contracts/run-contracts'
 
 export class TurnState {
   readonly taskId: string
