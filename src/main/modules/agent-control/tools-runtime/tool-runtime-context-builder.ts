@@ -1,6 +1,6 @@
 import type { BrowserController } from '../../browser-engine/ipc-handler'
 import type { SidecarManager } from '../sidecar-manager'
-import type { AgentControlRuntime } from '../runtime'
+import type { AgentControlRuntime } from '../runtime-core/runtime'
 import type { ConversationScope } from '../contracts/types'
 import type { ToolContext } from '../../tools/tool-executor'
 import {
@@ -8,12 +8,12 @@ import {
   type ToolRuntimeActiveFrameContext,
   type ToolRuntimeContext,
 } from './tool-runtime'
-import type { TurnFrame } from '../turn-frame'
+import type { TurnFrame } from '../runtime-core/turn-frame'
 import type { AgentSpawnContext } from '../../../../shared/skill-host-contract'
 import {
   snapshotTurnFeatureFlags,
   type TurnFeatureFlags,
-} from '../turn-feature-flags'
+} from '../runtime-core/turn-feature-flags'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
 
 /**

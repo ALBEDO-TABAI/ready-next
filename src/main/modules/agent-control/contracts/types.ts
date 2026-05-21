@@ -1,4 +1,4 @@
-import type { TurnTerminalReason } from '../turn-frame'
+import type { TurnTerminalReason } from '../runtime-core/turn-frame'
 import type { TaskType } from '../../../../shared/task-types'
 
 export type ChannelAdapterType =

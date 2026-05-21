@@ -57,7 +57,7 @@ import type { ToolRuntimeContext } from '../tools-runtime/tool-runtime'
 import type { HookRegistry } from '../system-reminders/hook-registry'
 import type { SkillTaskSupervisorSnapshot } from '../skills/skill-task-supervisor'
 import type { ReferenceSkillHint } from '../skills/skill-reference-hints'
-import type { TurnFrame, TurnFramePatch, TurnTerminalReason } from '../turn-frame'
+import type { TurnFrame, TurnFramePatch, TurnTerminalReason } from '../runtime-core/turn-frame'
 import type {
   SkillChildCloseEvent,
   SkillChildRunParentNextHint,

@@ -19,7 +19,7 @@ import type { IntentClassification } from '../main/modules/agent-control/intent-
 import type { DomainAdapter } from '../main/modules/agent-control/domain-adapters/domain-adapter'
 import type { ConversationScope, ScopeRunEventPayload, ScopeRunSummary } from '../main/modules/agent-control/contracts/types'
 import type { RunBudgetSeed, RunBudgetUsage, TaskProjectionRecord, TaskProjectionStore, TurnEngineRequest, TurnEngineSession, TurnTranscriptEvent } from '../main/modules/agent-control/contracts/run-contracts'
-import type { TurnTerminalReason } from '../main/modules/agent-control/turn-frame'
+import type { TurnTerminalReason } from '../main/modules/agent-control/runtime-core/turn-frame'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import type { SkillChildCloseEvent } from '../main/modules/agent-control/skills/skill-child-run-types'
 

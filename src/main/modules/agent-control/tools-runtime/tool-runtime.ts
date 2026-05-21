@@ -4,13 +4,13 @@ import { logAgentMetric } from '../metrics'
 import { TOOL_ERROR_METRICS } from './tool-error-metrics'
 import { isTerminalInfrastructureError } from '../../tools/tool-errors'
 import type { SidecarManager } from '../sidecar-manager'
-import type { AgentControlRuntime } from '../runtime'
+import type { AgentControlRuntime } from '../runtime-core/runtime'
 import type { ConversationScope } from '../contracts/types'
 import type { BrowserController } from '../../browser-engine/ipc-handler'
 import type { ToolDefinition } from './tool-definition'
 import { defaultToolRegistry } from './tool-registry'
 import type { AgentSpawnContext } from '../../../../shared/skill-host-contract'
-import type { TurnFeatureFlags } from '../turn-feature-flags'
+import type { TurnFeatureFlags } from '../runtime-core/turn-feature-flags'
 import {
   buildExplicitNoSkillAuthorization,
   type SkillToolAuthorization,

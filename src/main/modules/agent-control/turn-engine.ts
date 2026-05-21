@@ -221,7 +221,7 @@ import { matchesConfigRepairIntent, matchesResumeIntent } from './contracts/resu
 import { classifyIntent, type IntentClassification } from './intent-classifier'
 import { logAgentMetric } from './metrics'
 import { TOOL_ERROR_METRICS } from './tools-runtime/tool-error-metrics'
-import { snapshotTurnFeatureFlags } from './turn-feature-flags'
+import { snapshotTurnFeatureFlags } from './runtime-core/turn-feature-flags'
 import { classifyRestartIntent, type RestartIntentClass } from './restart-intent-classifier'
 import {
   rememberActiveSkillContext,
@@ -230,8 +230,8 @@ import {
   type ActiveSkillContext,
 } from './active-skill-context'
 import { clearLastReferenceSkill } from './skills/skill-reference-hints'
-import { applySupervisorRuntimeToTurnFrame, resolveTurnFrame } from './turn-frame-resolver'
-import { applySteeringToTurnFrame } from './turn-frame-steering'
+import { applySupervisorRuntimeToTurnFrame, resolveTurnFrame } from './runtime-core/turn-frame-resolver'
+import { applySteeringToTurnFrame } from './runtime-core/turn-frame-steering'
 import {
   applyTurnFramePatch,
   mergeTurnFramePatches,
@@ -239,7 +239,7 @@ import {
   type TurnFrame,
   type TurnFramePatch,
   type TurnTerminalReason,
-} from './turn-frame'
+} from './runtime-core/turn-frame'
 import { resolveExecutionIntentContext } from './execution-intent-resolver'
 import {
   buildSkillDetectionInputs,
@@ -304,7 +304,7 @@ import {
   advanceTaskStepProgress,
   detectTaskStepCompletionCue,
   initializeTaskStepProgress,
-} from './task-step-runtime'
+} from './runtime-core/task-step-runtime'
 import { detectGenericInteractionState } from './interaction-state-detector'
 import { inspectDocumentToolCall } from '../claude-bridge/document-tool-flow'
 import { deriveAgentErrorContract } from '../claude-bridge/error-contract'
@@ -313,8 +313,8 @@ import {
   serializeToolExecutionOutput,
   type ToolExecutionOutput,
 } from './tools-runtime/tool-result-types'
-import { TurnState } from './turn-state'
-import { TurnTranscript } from './turn-transcript'
+import { TurnState } from './runtime-core/turn-state'
+import { TurnTranscript } from './runtime-core/turn-transcript'
 import { createSystemReminderRegistry, type ReminderEntry } from './system-reminders/system-reminder-registry'
 import { composePetStickynoteRetryReminder } from './system-reminders/pet-stickynote-retry-reminder'
 import { composeBrowserTaskCorrectionReminder } from './system-reminders/browser-task-correction-reminder'

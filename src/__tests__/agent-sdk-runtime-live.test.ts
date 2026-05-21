@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { AgentSdkRuntime } from '../main/modules/agent-control/agent-sdk-runtime'
+import { AgentSdkRuntime } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import type { AIWireAPI } from '../../shared/ai-providers'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 

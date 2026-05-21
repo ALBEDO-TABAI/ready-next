@@ -31,7 +31,7 @@ import assert from 'node:assert/strict'
 import {
   ReadyAnthropicModel,
   ReadyOpenAICompatibleModel,
-} from '../main/modules/agent-control/agent-sdk-runtime'
+} from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import type { AIModelConfig } from '../../shared/ai-providers'
 
 type CapturedRequest = {

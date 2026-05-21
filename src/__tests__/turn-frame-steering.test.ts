@@ -4,8 +4,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { resolveTurnFrame } from '../main/modules/agent-control/turn-frame-resolver'
-import { buildTurnFrameSteering } from '../main/modules/agent-control/turn-frame-steering'
+import { resolveTurnFrame } from '../main/modules/agent-control/runtime-core/turn-frame-resolver'
+import { buildTurnFrameSteering } from '../main/modules/agent-control/runtime-core/turn-frame-steering'
 import { createSystemReminderRegistry, type ReminderTopic } from '../main/modules/agent-control/system-reminders/system-reminder-registry'
 import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
 import type { SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skills/skill-task-supervisor'
@@ -267,11 +267,11 @@ test('buildTurnFrameSteering: recentForceToolDispatched falls back to ask_model'
 // contract handles.
 // ------------------------------------------------------------------
 
-import { resolveTurnFrame as _resolveTurnFrame } from '../main/modules/agent-control/turn-frame-resolver'
+import { resolveTurnFrame as _resolveTurnFrame } from '../main/modules/agent-control/runtime-core/turn-frame-resolver'
 import {
   isChildOwnedFrame as _isChildOwnedFrame,
   hasTerminalChildCloseEvent as _hasTerminalChildCloseEvent,
-} from '../main/modules/agent-control/turn-frame-steering'
+} from '../main/modules/agent-control/runtime-core/turn-frame-steering'
 
 test('T5: child-owned frame (childRunId set, no close) steers ask_model with primitives only and child-aware reminder', () => {
   // Build a recoverable_paused frame the same way the legacy force-tool

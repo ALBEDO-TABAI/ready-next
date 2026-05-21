@@ -19,7 +19,7 @@ import { FeishuDomainAdapter } from '../agent-control/domain-adapters/feishu-dom
 import { DocumentDomainOrchestrator } from '../agent-control/domain-adapters/document-domain-orchestrator'
 import { DocumentDomainAdapter } from '../agent-control/domain-adapters/document-domain-adapter'
 import { DocumentToolLoopOrchestrator } from '../agent-control/document-pipeline/document-tool-loop-orchestrator'
-import { ExecutionLoopOrchestrator } from '../agent-control/execution-loop-orchestrator'
+import { ExecutionLoopOrchestrator } from '../agent-control/runtime-core/execution-loop-orchestrator'
 import { HostCapabilityDispatcher } from '../agent-control/domain-adapters/host-capability-dispatcher'
 import { CalendarDomainAdapter } from '../agent-control/domain-adapters/calendar-domain-adapter'
 import { RSSDomainAdapter } from '../agent-control/domain-adapters/rss-domain-adapter'
@@ -39,7 +39,7 @@ import {
 import { prepareInitialRun, reconcileAfterBrowserDecision } from '../agent-control/domain-adapters/run-capability-controller'
 import { SkillDomainAdapter } from '../agent-control/skills/skill-domain-adapter'
 import { SkillContextOrchestrator } from '../agent-control/skills/skill-context-orchestrator'
-import { SubtaskRuntime } from '../agent-control/subtask-runtime'
+import { SubtaskRuntime } from '../agent-control/runtime-core/subtask-runtime'
 import { WidgetEditLeaseStore, type ActiveWidgetEditLease } from '../agent-control/widget-edit-lease'
 import { buildToolRuntimeContext } from '../agent-control/tools-runtime/tool-runtime-context-builder'
 import { TurnEngine } from '../agent-control/turn-engine'
@@ -83,7 +83,7 @@ import type {
   TurnProviderContext,
   TurnSimpleResponse,
 } from '../agent-control/contracts/run-contracts'
-import type { TurnTerminalReason } from '../agent-control/turn-frame'
+import type { TurnTerminalReason } from '../agent-control/runtime-core/turn-frame'
 import type {
   AttachmentResourceList,
   BrowserTaskAttachmentResource,
@@ -136,7 +136,7 @@ import {
   advanceTaskStepProgress,
   detectTaskStepCompletionCue,
   initializeTaskStepProgress,
-} from '../agent-control/task-step-runtime'
+} from '../agent-control/runtime-core/task-step-runtime'
 import { resolveTaskType } from '../agent-control/task-type-resolver'
 import { AnthropicExecutionClient } from './anthropic-execution-client'
 import { KimiCodingClient } from './kimi-coding-client'
@@ -289,7 +289,7 @@ export class DirectChatEngine extends EventEmitter {
   private readonly domainAdapters: DomainAdapter[]
   private readonly turnEngine: TurnEngine
   private sidecarManager: SidecarManager | null = null
-  private runtime: import('../agent-control/runtime').AgentControlRuntime | null = null
+  private runtime: import('../agent-control/runtime-core/runtime').AgentControlRuntime | null = null
   private runCleanupRegistry: {
     registerRunCleanup: (runId: string, cleanup: () => void | Promise<void>) => void
   } | null = null
@@ -519,7 +519,7 @@ export class DirectChatEngine extends EventEmitter {
     log('SidecarManager set on DirectChatEngine')
   }
 
-  setRuntime(runtime: import('../agent-control/runtime').AgentControlRuntime): void {
+  setRuntime(runtime: import('../agent-control/runtime-core/runtime').AgentControlRuntime): void {
     this.runtime = runtime
     log('Runtime set on DirectChatEngine')
   }

@@ -27,7 +27,7 @@
 // We only expose `mergePatchesSerially` which delegates to the canonical
 // merge helper in `turn-frame.ts`.
 import { mergeTurnFramePatches, type TurnFramePatch } from './turn-frame'
-import { logAgentMetric } from './metrics'
+import { logAgentMetric } from '../metrics'
 
 export const PARALLEL_BRANCH_HARD_CAP = 3 as const
 

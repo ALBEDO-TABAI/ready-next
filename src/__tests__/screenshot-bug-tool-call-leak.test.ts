@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
-import { TurnTranscript } from '../main/modules/agent-control/turn-transcript'
+import { TurnTranscript } from '../main/modules/agent-control/runtime-core/turn-transcript'
 import {
   buildToolCallOnlyFallbackText,
   TOOL_CALL_TEXT_PATTERN,

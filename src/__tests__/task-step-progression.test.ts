@@ -5,7 +5,7 @@ import {
   advanceTaskStepProgress,
   detectTaskStepCompletionCue,
   initializeTaskStepProgress,
-} from '../main/modules/agent-control/task-step-runtime'
+} from '../main/modules/agent-control/runtime-core/task-step-runtime'
 
 test('task step runtime initializes planner steps with the first step running', () => {
   const initial = initializeTaskStepProgress([

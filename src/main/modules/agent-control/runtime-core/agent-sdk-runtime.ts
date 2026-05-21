@@ -20,28 +20,28 @@ import {
   type Tool as AgentSdkTool,
 } from '@openai/agents'
 import type { BrowserController } from '../browser-engine/ipc-handler'
-import type { SidecarManager } from './sidecar-manager'
+import type { SidecarManager } from '../sidecar-manager'
 import type { AgentControlRuntime } from './runtime'
-import type { DomainAdapter } from './domain-adapters/domain-adapter'
+import type { DomainAdapter } from '../domain-adapters/domain-adapter'
 import type {
   ExecutionTurnResult,
   RunMessage,
   TaskType,
   TurnTranscriptEvent,
-} from './contracts/run-contracts'
-import type { ScopeRunEventPayload } from './contracts/types'
+} from '../contracts/run-contracts'
+import type { ScopeRunEventPayload } from '../contracts/types'
 import type { TurnTerminalReason } from './turn-frame'
-import type { ContinuationIntent, ContinuationState } from './contracts/continuation-state'
+import type { ContinuationIntent, ContinuationState } from '../contracts/continuation-state'
 import {
   resumeSkillChildRun,
   waitForSkillChildRunClose,
-} from './skills/skill-child-runner'
+} from '../skills/skill-child-runner'
 import {
   isCompletedChildCloseStatus,
   isFailedChildCloseStatus,
   isKilledChildCloseStatus,
   type SkillChildCloseEvent,
-} from './skills/skill-child-run-types'
+} from '../skills/skill-child-run-types'
 import type { MultimodalBlock } from '../claude-bridge/direct-chat'
 import {
   buildTextToolBridgePrompt,
@@ -74,35 +74,35 @@ import {
   buildChatCompletionsToolCalls,
   buildResponsesToolCalls,
 } from '../claude-bridge/provider-tool-arguments'
-import { resolveOpenAIProviderRuntime } from './provider-runtime-resolver'
+import { resolveOpenAIProviderRuntime } from '../provider-runtime-resolver'
 import {
   assertCurrentMessageCapability,
   sanitizeHistoricalMessagesByCapability,
   type CapabilityMessage,
   type MessageCapabilitySnapshot,
-} from './domain-adapters/message-capability-filter'
-import { assertManualThinkingModeProviderSafe } from './thinking-compatibility'
-import { logAgentMetric } from './metrics'
-import { TOOL_ERROR_METRICS } from './tools-runtime/tool-error-metrics'
+} from '../domain-adapters/message-capability-filter'
+import { assertManualThinkingModeProviderSafe } from '../thinking-compatibility'
+import { logAgentMetric } from '../metrics'
+import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
 import type { BrowserTaskDecisionMode } from '../../../shared/browser-agent-task'
-import { defaultToolRegistry } from './tools-runtime/tool-registry'
-import type { ToolDefinition } from './tools-runtime/tool-definition'
+import { defaultToolRegistry } from '../tools-runtime/tool-registry'
+import type { ToolDefinition } from '../tools-runtime/tool-definition'
 import {
   buildExplicitNoSkillAuthorization,
   buildSelectedSkillToolAuthorization,
   type SkillToolAuthorization,
-} from './skills/skill-tool-authorization'
-import { resolveCapabilityResolution } from './domain-adapters/capability-resolver'
-import { filterToolsByVisionCapability } from './tools-runtime/tool-gateway'
+} from '../skills/skill-tool-authorization'
+import { resolveCapabilityResolution } from '../domain-adapters/capability-resolver'
+import { filterToolsByVisionCapability } from '../tools-runtime/tool-gateway'
 import {
   buildToolRuntimeContext,
   toToolExecutorContext,
-} from './tools-runtime/tool-runtime-context-builder'
+} from '../tools-runtime/tool-runtime-context-builder'
 import {
   applyContextModifier,
   createEmptyActiveFrameContext,
   type ToolRuntimeActiveFrameContext,
-} from './tools-runtime/tool-runtime'
+} from '../tools-runtime/tool-runtime'
 import { snapshotTurnFeatureFlags } from './turn-feature-flags'
 import { buildAgentSpawnContextFromAIConfig } from '../skills-runtime/agent-context-source'
 import { executeToolCall as executeReadyToolCall } from '../tools'
@@ -111,7 +111,7 @@ import {
   createToolExecutionOutput,
   normalizeToolExecutionOutput,
   type ToolExecutionOutput,
-} from './tools-runtime/tool-result-types'
+} from '../tools-runtime/tool-result-types'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 import { findDocumentVisualSyntaxIssue } from '../../../shared/document-visual-syntax'
 import { createRotatingLogger } from '../../utils/rotating-logger'

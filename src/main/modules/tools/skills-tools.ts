@@ -22,7 +22,7 @@ import type {
   SkillTaskSupervisorLiveness,
   SkillTaskSupervisorSnapshot,
 } from '../agent-control/skills/skill-task-supervisor'
-import type { TurnFramePatch } from '../agent-control/turn-frame'
+import type { TurnFramePatch } from '../agent-control/runtime-core/turn-frame'
 import {
   hasActiveSkillTaskRun,
   isSkillTaskProjectionLive,
@@ -47,7 +47,7 @@ import {
 } from '../agent-control/skills/skill-tool-fallback-throttle'
 // Stage 4 W3b — authorization-driven primitive skillId resolution.
 import type { SkillToolAuthorization } from '../agent-control/skills/skill-tool-authorization'
-import type { TurnFeatureFlags } from '../agent-control/turn-feature-flags'
+import type { TurnFeatureFlags } from '../agent-control/runtime-core/turn-feature-flags'
 import { logAgentMetric } from '../agent-control/metrics'
 import { resolvePendingSkillHandoffWriteTargets } from '../agent-control/skills/skill-agent-handoff'
 import { isChildLoopSkillAction } from './child-loop-skill-actions'

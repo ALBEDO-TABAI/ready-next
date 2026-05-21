@@ -21,7 +21,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { resolveTurnFrame } from '../main/modules/agent-control/turn-frame-resolver'
+import { resolveTurnFrame } from '../main/modules/agent-control/runtime-core/turn-frame-resolver'
 import type { SkillTaskSupervisorSnapshot } from '../main/modules/agent-control/skills/skill-task-supervisor'
 
 function makeStaleSupervisorSnapshot(): SkillTaskSupervisorSnapshot {

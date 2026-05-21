@@ -1,6 +1,6 @@
 import type { DocumentTaskJob, DocumentTaskPlan } from './document-task-plan'
 import type { SubtaskInlineWorkerResult, SubtaskInlineWorkerUpdate } from './contracts/run-contracts'
-import { SubtaskRuntime } from './subtask-runtime'
+import { SubtaskRuntime } from './runtime-core/subtask-runtime'
 import { buildWorkerOverviewSteps, buildWorkerParentProjectionPatch } from './worker-projection'
 import type { ConversationScope, ScopeRunEventPayload, ScopeRunTaskStep } from './contracts/types'
 

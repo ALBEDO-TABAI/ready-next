@@ -35,7 +35,7 @@
  *   - No code path produces a value outside this set.
  */
 import { canResumeShape, type ResumeHandle } from './resume-handle'
-import type { TurnUserIntent } from './turn-frame'
+import type { TurnUserIntent } from './runtime-core/turn-frame'
 
 export type RestartIntentClass = 'fresh' | 'resume' | 'restart_from_existing'
 

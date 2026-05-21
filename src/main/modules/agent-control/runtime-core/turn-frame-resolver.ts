@@ -1,18 +1,18 @@
 import { dirname } from 'node:path'
 
-import type { ReferenceSkillHint } from './skills/skill-reference-hints'
+import type { ReferenceSkillHint } from '../skills/skill-reference-hints'
 import {
   loadSkillRunContract,
   type SkillRunContract,
   type TaskProjectionRecord,
-} from './contracts/run-contracts'
+} from '../contracts/run-contracts'
 import type { SkillTaskRunRecord } from '../repositories/skill-task-run-repository'
-import type { SkillTaskSupervisorSnapshot } from './skills/skill-task-supervisor'
+import type { SkillTaskSupervisorSnapshot } from '../skills/skill-task-supervisor'
 import {
   getRememberedActiveSkillContext,
   resolveActiveSkillContextFromInputs,
   type ActiveSkillContext,
-} from './active-skill-context'
+} from '../active-skill-context'
 import { applySteeringToTurnFrame } from './turn-frame-steering'
 import type { TurnFrame, TurnFrameLiveness, TurnFrameMode, TurnUserIntent } from './turn-frame'
 

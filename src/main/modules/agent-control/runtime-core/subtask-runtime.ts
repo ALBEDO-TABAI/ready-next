@@ -1,7 +1,7 @@
-import type { ProjectionTruthSnapshot, SubtaskRunRequest, SubtaskRunResult, TurnTranscriptEvent } from './run-contracts'
-import { createWorkerSessionIdentity } from './worker-session'
-import { buildWorkerChildProjectionPatch } from './worker-projection'
-import type { ScopeRunEventPayload } from './types'
+import type { ProjectionTruthSnapshot, SubtaskRunRequest, SubtaskRunResult, TurnTranscriptEvent } from '../run-contracts'
+import { createWorkerSessionIdentity } from '../worker-session'
+import { buildWorkerChildProjectionPatch } from '../worker-projection'
+import type { ScopeRunEventPayload } from '../types'
 
 interface SubtaskRuntimeDeps {
   publishScopeRunEvent: (payload: ScopeRunEventPayload, projectionTruth?: ProjectionTruthSnapshot | null) => void | Promise<void>

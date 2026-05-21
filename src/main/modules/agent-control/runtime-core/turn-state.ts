@@ -3,7 +3,7 @@ import {
   createTaskBudgetRuntime,
   getBudgetUsagePercent,
   rebindTaskBudgetRuntime,
-} from './task-projection/run-budget-policy'
+} from '../task-projection/run-budget-policy'
 import type {
   BudgetWarningLevel,
   ContinuationBudgetRestoreDiagnostics,
@@ -18,7 +18,7 @@ import type {
   TaskStep,
   TaskType,
   ToolSnapshot,
-} from './contracts/run-contracts'
+} from '../contracts/run-contracts'
 
 export class TurnState {
   readonly taskId: string

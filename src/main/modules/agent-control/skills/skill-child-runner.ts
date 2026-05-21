@@ -99,7 +99,7 @@ import { isSkillChildProgressPayload } from './skill-child-sub-agent-events'
 import { createSubAgentCleanupHandle } from '../sub-agent/sub-agent-cleanup'
 import { runSubAgent } from '../sub-agent/sub-agent-runner'
 import { disposeTimeout } from '../timer-disposal'
-import { snapshotTurnFeatureFlags } from '../turn-feature-flags'
+import { snapshotTurnFeatureFlags } from '../runtime-core/turn-feature-flags'
 import {
   isResumeOnlySkillAction,
   resolveCanonicalChildRunHandle,

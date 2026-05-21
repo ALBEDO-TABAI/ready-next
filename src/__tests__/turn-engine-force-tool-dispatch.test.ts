@@ -42,7 +42,7 @@ import type {
   TurnEngineSession,
   TurnTranscriptEvent,
 } from '../main/modules/agent-control/contracts/run-contracts'
-import type { TurnTerminalReason } from '../main/modules/agent-control/turn-frame'
+import type { TurnTerminalReason } from '../main/modules/agent-control/runtime-core/turn-frame'
 
 function createSession(userText: string): TurnEngineSession {
   return {

@@ -25,7 +25,7 @@ import {
   type TurnFrame,
   type TurnFramePatch,
   type TurnTerminalReason,
-} from '../main/modules/agent-control/turn-frame'
+} from '../main/modules/agent-control/runtime-core/turn-frame'
 
 function makeFrame(overrides?: Partial<TurnFrame>): TurnFrame {
   return {

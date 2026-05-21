@@ -18,7 +18,7 @@ import {
   shouldRememberPrimitiveOutcomeForContinuity,
 } from '../main/modules/tools/skills-tools'
 import { __setMetricSinkForTests, logAgentMetric, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
-import { snapshotTurnFeatureFlags } from '../main/modules/agent-control/turn-feature-flags'
+import { snapshotTurnFeatureFlags } from '../main/modules/agent-control/runtime-core/turn-feature-flags'
 import {
   __setSkillsRuntimeManagerForTests,
   type SkillsRuntimeManager,

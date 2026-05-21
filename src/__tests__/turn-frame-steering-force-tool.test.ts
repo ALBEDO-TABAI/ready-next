@@ -26,10 +26,10 @@ import {
   deriveForcedActionInput,
   selectSteeringMode,
   validateForcedActionInput,
-} from '../main/modules/agent-control/turn-frame-steering'
+} from '../main/modules/agent-control/runtime-core/turn-frame-steering'
 import { createSystemReminderRegistry, type ReminderTopic } from '../main/modules/agent-control/system-reminders/system-reminder-registry'
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
-import type { TurnFrame, TurnFrameLiveness } from '../main/modules/agent-control/turn-frame'
+import type { TurnFrame, TurnFrameLiveness } from '../main/modules/agent-control/runtime-core/turn-frame'
 import type { SkillRunContract } from '../main/modules/agent-control/contracts/run-contracts'
 
 function composeReminder(topic: ReminderTopic, priority: number, text: string): string | null {

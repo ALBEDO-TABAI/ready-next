@@ -22,7 +22,7 @@ import {
   mergeTurnFramePatches,
   type TurnFrame,
   type TurnFramePatch,
-} from '../main/modules/agent-control/turn-frame'
+} from '../main/modules/agent-control/runtime-core/turn-frame'
 import {
   FRAME_PATCH_EMITTING_TOOL_NAMES,
   isFramePatchEmittingToolName,

@@ -7,7 +7,7 @@ import {
   TurnEngine,
   applyChildResumeFreshContractFields,
 } from '../main/modules/agent-control/turn-engine'
-import { resolveTurnFrame } from '../main/modules/agent-control/turn-frame-resolver'
+import { resolveTurnFrame } from '../main/modules/agent-control/runtime-core/turn-frame-resolver'
 import {
   configureSkillChildRunner,
   __resetSkillChildRunnerForTests,

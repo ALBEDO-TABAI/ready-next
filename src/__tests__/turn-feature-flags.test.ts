@@ -4,7 +4,7 @@ import test from 'node:test'
 import {
   snapshotTurnFeatureFlags,
   type TurnFeatureFlags,
-} from '../main/modules/agent-control/turn-feature-flags'
+} from '../main/modules/agent-control/runtime-core/turn-feature-flags'
 import { buildSelectedSkillToolAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import { executeToolCall } from '../main/modules/tools/tool-executor'
 

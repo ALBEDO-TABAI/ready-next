@@ -19,7 +19,7 @@ import {
 } from './run-budget-policy'
 import { buildExecutionFallbackState } from '../../claude-bridge/execution-fallback-policy'
 import { randomUUID } from 'node:crypto'
-import type { TurnTerminalReason } from '../turn-frame'
+import type { TurnTerminalReason } from '../runtime-core/turn-frame'
 
 function phaseFromTerminalReason(reason: TurnTerminalReason | null | undefined): ScopeRunEventPayload['phase'] | null {
   if (!reason) return null

@@ -9,7 +9,7 @@ import {
 } from '../shared/ai-providers'
 import { deriveAgentErrorContract } from '../main/modules/claude-bridge/error-contract'
 import { OpenAIExecutionClient } from '../main/modules/claude-bridge/openai-execution-client'
-import { ReadyAnthropicModel, ReadyOpenAICompatibleModel } from '../main/modules/agent-control/agent-sdk-runtime'
+import { ReadyAnthropicModel, ReadyOpenAICompatibleModel } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import { ToolDomainError } from '../main/modules/tools/tool-errors'
 
 function unknownThinkingConfig(): AIModelConfig {

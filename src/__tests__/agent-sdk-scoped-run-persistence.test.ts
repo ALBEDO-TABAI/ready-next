@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { AgentSdkRuntime, type AgentSdkRuntimeDeps } from '../main/modules/agent-control/agent-sdk-runtime'
+import { AgentSdkRuntime, type AgentSdkRuntimeDeps } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import { RunCoordinator } from '../main/modules/agent-control/task-projection/run-coordinator'
 import { RunProjection } from '../main/modules/agent-control/task-projection/run-projection'
 import { runConfirmedSendScoped } from '../main/modules/agent-control/send-scoped-confirmation'

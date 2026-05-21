@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { ExecutionLoopOrchestrator } from '../main/modules/agent-control/execution-loop-orchestrator'
+import { ExecutionLoopOrchestrator } from '../main/modules/agent-control/runtime-core/execution-loop-orchestrator'
 import {
   buildExplicitNoSkillAuthorization,
   buildSelectedSkillToolAuthorization,

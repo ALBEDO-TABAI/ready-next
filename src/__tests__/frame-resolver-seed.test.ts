@@ -10,7 +10,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { deriveSeedArtifactRoots } from '../main/modules/agent-control/turn-frame-resolver'
+import { deriveSeedArtifactRoots } from '../main/modules/agent-control/runtime-core/turn-frame-resolver'
 import type { ActiveSkillContext } from '../main/modules/agent-control/active-skill-context'
 import type { SkillRunContract } from '../main/modules/agent-control/contracts/run-contracts'
 

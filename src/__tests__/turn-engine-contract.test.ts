@@ -5,7 +5,7 @@ import test from 'node:test'
 import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
 import { TurnEngine } from '../main/modules/agent-control/turn-engine'
 import { createScopedRunCollector } from '../main/modules/agent-control/task-projection/run-collector'
-import type { TurnTerminalReason } from '../main/modules/agent-control/turn-frame'
+import type { TurnTerminalReason } from '../main/modules/agent-control/runtime-core/turn-frame'
 
 function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')

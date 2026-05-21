@@ -1,5 +1,5 @@
-import { createStepBudgetState } from './task-projection/run-budget-policy'
-import type { StepBudgetState, TaskStep } from './run-contracts'
+import { createStepBudgetState } from '../task-projection/run-budget-policy'
+import type { StepBudgetState, TaskStep } from '../run-contracts'
 
 export function detectTaskStepCompletionCue(text: string, currentStep?: TaskStep | null): boolean {
   const normalized = String(text || '').trim()

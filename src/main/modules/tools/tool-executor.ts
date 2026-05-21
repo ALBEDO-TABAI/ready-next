@@ -5,7 +5,7 @@
 
 import { BrowserController } from '../browser-engine/ipc-handler'
 import type { SidecarManager } from '../agent-control/sidecar-manager'
-import type { AgentControlRuntime } from '../agent-control/runtime'
+import type { AgentControlRuntime } from '../agent-control/runtime-core/runtime'
 import {
   defaultToolRegistry,
   resolveToolInputSchemaForExecution,
@@ -16,7 +16,7 @@ import { TOOL_ERROR_METRICS } from '../agent-control/tools-runtime/tool-error-me
 import type { ConversationScope } from '../agent-control/contracts/types'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 import type { ToolRuntimeActiveFrameContext } from '../agent-control/tools-runtime/tool-runtime'
-import type { TurnFeatureFlags } from '../agent-control/turn-feature-flags'
+import type { TurnFeatureFlags } from '../agent-control/runtime-core/turn-feature-flags'
 import {
   checkSkillToolAuthorization,
   type SkillToolAuthorization,

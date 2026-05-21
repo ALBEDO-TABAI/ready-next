@@ -53,7 +53,7 @@ import type { ExecutionIntentContext } from './execution-intent-resolver'
 import type { ToolPolicy } from './execution-tool-config'
 import type { RequestEnvelope, RequestEnvelopeResource } from './contracts/request-envelope'
 import type { ProjectionTruthSnapshot, TurnProviderContext } from './contracts/run-contracts'
-import { SubtaskRuntime } from './subtask-runtime'
+import { SubtaskRuntime } from './runtime-core/subtask-runtime'
 import type { ConversationScope, ScopeRunEventPayload } from './contracts/types'
 
 interface DocumentPipelineCacheSession {

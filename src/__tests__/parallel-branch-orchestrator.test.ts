@@ -5,7 +5,7 @@ import {
   PARALLEL_BRANCH_HARD_CAP,
   createParallelBranchOrchestrator,
   mergePatchesSerially,
-} from '../main/modules/agent-control/parallel-branch-orchestrator'
+} from '../main/modules/agent-control/runtime-core/parallel-branch-orchestrator'
 import { __setMetricSinkForTests } from '../main/modules/agent-control/metrics'
 
 test('PARALLEL_BRANCH_HARD_CAP is exactly 3', () => {

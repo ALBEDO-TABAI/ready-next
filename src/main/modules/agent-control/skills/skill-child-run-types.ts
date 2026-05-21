@@ -11,7 +11,7 @@
  * without churning the Phase 1 acceptance tests.
  */
 
-import type { TurnFramePatch } from '../turn-frame'
+import type { TurnFramePatch } from '../runtime-core/turn-frame'
 import type { SkillChildRunKind } from './skill-child-run-id'
 import type { DeepReadonly } from '../../../../shared/deep-readonly'
 

@@ -2,11 +2,11 @@ import type { ExecutionFallbackInfo } from '../claude-bridge/execution-fallback-
 import { annotateFallbackResult, resolveFallbackPlan } from '../claude-bridge/execution-fallback-policy'
 import { classifyExecutionError, type ErrorClassifierResult } from '../claude-bridge/error-classifier'
 import { buildRecoveryPlan } from '../claude-bridge/recovery-router'
-import type { RecoveryRecord, RunBudgetSeed, RunBudgetUsage, ToolSnapshot, TurnToolCallParseError } from './run-contracts'
-import type { ParallelToolCall } from './tools-runtime/tool-parallelism-policy'
-import { ToolRuntime, type ToolRuntimeBatchResult, type ToolRuntimeContext } from './tools-runtime/tool-runtime'
-import type { ToolExecutionHooks } from './tools-runtime/tool-execution-hooks'
-import type { ToolExecutionOutput, ToolExecutionResultLike } from './tools-runtime/tool-result-types'
+import type { RecoveryRecord, RunBudgetSeed, RunBudgetUsage, ToolSnapshot, TurnToolCallParseError } from '../run-contracts'
+import type { ParallelToolCall } from '../tools-runtime/tool-parallelism-policy'
+import { ToolRuntime, type ToolRuntimeBatchResult, type ToolRuntimeContext } from '../tools-runtime/tool-runtime'
+import type { ToolExecutionHooks } from '../tools-runtime/tool-execution-hooks'
+import type { ToolExecutionOutput, ToolExecutionResultLike } from '../tools-runtime/tool-result-types'
 
 interface APIResponseLike {
   text: string
@@ -38,7 +38,7 @@ export class ExecutionLoopOrchestrator {
       context: import('../tools/tool-executor').ToolContext,
     ) => Promise<ToolExecutionResultLike>
     resolveTimeoutMs?: (
-      definition: import('./tools-runtime/tool-definition').ToolDefinition | null,
+      definition: import('../tools-runtime/tool-definition').ToolDefinition | null,
       toolCall: ParallelToolCall,
     ) => number
   }) {

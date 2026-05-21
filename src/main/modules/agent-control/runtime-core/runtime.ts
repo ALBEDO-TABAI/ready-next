@@ -31,9 +31,9 @@ import {
   type UpsertConversationScopeMode,
 } from '../database'
 import { ReadyAgentOrchestrator } from './orchestrator'
-import { PromptAssemblyService } from './prompt-assembly'
-import { RunCoordinator } from './task-projection/run-coordinator'
-import type { DomainAdapter } from './domain-adapters/domain-adapter'
+import { PromptAssemblyService } from '../prompt-assembly'
+import { RunCoordinator } from '../task-projection/run-coordinator'
+import type { DomainAdapter } from '../domain-adapters/domain-adapter'
 import {
   snapshotLastReferenceSkill,
   restoreLastReferenceSkill,
@@ -42,9 +42,9 @@ import {
   peekLastReferenceSkill,
   REFERENCE_SKILL_HINT_TTL_MS,
   type PersistedReferenceSkillHint,
-} from './skills/skill-reference-hints'
-import { findSkillHintInCapsuleTexts } from './skills/skill-hint-recovery'
-import { shouldDisplayReferenceSkillHintForLatestUserText } from './reference-skill-hint-display'
+} from '../skills/skill-reference-hints'
+import { findSkillHintInCapsuleTexts } from '../skills/skill-hint-recovery'
+import { shouldDisplayReferenceSkillHintForLatestUserText } from '../reference-skill-hint-display'
 import { findSkillToolByName } from '../tools/skills-tools'
 import { getSkillsRuntimeManager } from '../skills-runtime/runtime-manager'
 import { SkillTaskRunRepository } from '../repositories/skill-task-run-repository'
@@ -52,58 +52,58 @@ import {
   cancelSkillChildRun,
   configureSkillChildRunner,
   getSkillChildRunner,
-} from './skills/skill-child-runner'
-import { listRegisteredSkillChildDrivers } from './skills/skill-child-drivers'
+} from '../skills/skill-child-runner'
+import { listRegisteredSkillChildDrivers } from '../skills/skill-child-drivers'
 // Importing the VEA driver triggers its module-load-time
 // `registerSkillChildDriver(...)` side-effect. The runner relies on the
 // registry being primed before any `startSkillChildRun` call.
-import './video-expert-child-driver'
-import { assertStageNChildLoopInvariants } from './stage-n-boot-assertion'
-import { defaultToolRegistry } from './tools-runtime/tool-registry'
-import { ToolNameCollisionError } from './tools-runtime/tool-registry-errors'
-import { RunProjection } from './task-projection/run-projection'
-import { syncTaskProjection } from './task-projection/task-projection-sync'
-import { reconcileTaskProjections } from './task-projection/task-projection-reconciler'
-import { canResumeShape, type ResumeHandle } from './contracts/resume-handle'
-import { deriveTaskProjectionCanResume } from './task-projection/task-projection-resume'
+import '../video-expert-child-driver'
+import { assertStageNChildLoopInvariants } from '../stage-n-boot-assertion'
+import { defaultToolRegistry } from '../tools-runtime/tool-registry'
+import { ToolNameCollisionError } from '../tools-runtime/tool-registry-errors'
+import { RunProjection } from '../task-projection/run-projection'
+import { syncTaskProjection } from '../task-projection/task-projection-sync'
+import { reconcileTaskProjections } from '../task-projection/task-projection-reconciler'
+import { canResumeShape, type ResumeHandle } from '../contracts/resume-handle'
+import { deriveTaskProjectionCanResume } from '../task-projection/task-projection-resume'
 import { isAwaitingUserInteractionState } from '../../../shared/task-interaction-state'
-import { assertSkillTaskRunInvariantConsistency } from './skills/skill-task-tracker'
-import type { ProjectionTruthSnapshot, TaskProjectionRecord } from './contracts/run-contracts'
-import { getBudgetUsagePercent, restoreContinuationTaskBudgetRuntime } from './task-projection/run-budget-policy'
+import { assertSkillTaskRunInvariantConsistency } from '../skills/skill-task-tracker'
+import type { ProjectionTruthSnapshot, TaskProjectionRecord } from '../contracts/run-contracts'
+import { getBudgetUsagePercent, restoreContinuationTaskBudgetRuntime } from '../task-projection/run-budget-policy'
 import {
   normalizeContinuationIntent,
   selectContinuationProjection,
   type ContinuationIntent,
-} from './contracts/continuation-state'
-import { forgetSession } from './session-continuity'
-import { isRetryOnlyTurn } from './skills/skill-detection-inputs'
-import { logAgentMetric } from './metrics'
-import { TOOL_ERROR_METRICS } from './tools-runtime/tool-error-metrics'
+} from '../contracts/continuation-state'
+import { forgetSession } from '../session-continuity'
+import { isRetryOnlyTurn } from '../skills/skill-detection-inputs'
+import { logAgentMetric } from '../metrics'
+import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
 import {
   classifySendScopedError,
   runConfirmedSendScoped,
   type SendScopedResponse,
   type SendScopedUserMessage,
-} from './send-scoped-confirmation'
-import { SessionRecallService } from './session-recall-service'
-import { SidecarManager } from './sidecar-manager'
+} from '../send-scoped-confirmation'
+import { SessionRecallService } from '../session-recall-service'
+import { SidecarManager } from '../sidecar-manager'
 import { MemoryRepository } from '../repositories/memory-repository'
-import { MemoryLifecycleManager } from './memory-lifecycle'
-import { ReflectionService } from './reflection-service'
+import { MemoryLifecycleManager } from '../memory-lifecycle'
+import { ReflectionService } from '../reflection-service'
 import { UserProfileRepository } from '../repositories/user-profile-repository'
 import { AgentPersonalityRepository } from '../repositories/agent-personality-repository'
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import type { CapabilityRuntimeSnapshot } from '../../../shared/ai-capability-runtime'
-import { ExternalMemoryProviderSlot } from './external-memory-provider-slot'
-import { decryptChannelConfig, encryptChannelConfig } from './secret-storage'
-import { ToolGateway } from './tools-runtime/tool-gateway'
-import { buildCapabilityRuntimeSnapshot } from './domain-adapters/capability-runtime-snapshot'
+import { ExternalMemoryProviderSlot } from '../external-memory-provider-slot'
+import { decryptChannelConfig, encryptChannelConfig } from '../secret-storage'
+import { ToolGateway } from '../tools-runtime/tool-gateway'
+import { buildCapabilityRuntimeSnapshot } from '../domain-adapters/capability-runtime-snapshot'
 import { TaskProjectionRepository } from '../repositories/task-projection-repository'
 import {
   DetachedSkillTaskTracker,
   registerDetachedSkillTaskTracker,
   type DetachedSkillTaskRecord,
-} from './detached-skill-task-tracker'
+} from '../detached-skill-task-tracker'
 import type {
   AgentChannelConfig,
   AgentRuntimeStatus,
@@ -119,7 +119,7 @@ import type {
   ScopeRunEventPayload,
   ScopeRunSkillProgress,
   ScopeRunSummary
-} from './contracts/types'
+} from '../contracts/types'
 import type { SessionRecallCapsule, SessionRecallHit } from '../../../shared/session-recall'
 
 export interface UpsertChannelPayload {

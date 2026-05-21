@@ -17,7 +17,7 @@ export interface StatusEventLike {
   sessionId?: string
   runId?: string
   status: string
-  terminalReason?: import('../turn-frame').TurnTerminalReason | null
+  terminalReason?: import('../runtime-core/turn-frame').TurnTerminalReason | null
 }
 
 export interface ErrorEventLike {
@@ -39,7 +39,7 @@ export interface SendAndCollectResult {
   taskProjectionId?: string | null
   executionDiagnostics?: import('../contracts/run-contracts').ExecutionRunDiagnostics | null
   projectionTruth?: import('../contracts/run-contracts').ProjectionTruthSnapshot | null
-  terminalReason?: import('../turn-frame').TurnTerminalReason | null
+  terminalReason?: import('../runtime-core/turn-frame').TurnTerminalReason | null
 }
 
 function matchesScope(match: ScopedRunMatch, payload: { agent: string; sessionId?: string; runId?: string }): boolean {

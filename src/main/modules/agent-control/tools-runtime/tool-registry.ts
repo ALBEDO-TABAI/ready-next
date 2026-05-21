@@ -86,7 +86,7 @@ import type {
   SkillsRuntimeManager,
 } from '../../skills-runtime/runtime-manager'
 import type { AgentSpawnContext } from '../../../../shared/skill-host-contract'
-import { snapshotTurnFeatureFlags } from '../turn-feature-flags'
+import { snapshotTurnFeatureFlags } from '../runtime-core/turn-feature-flags'
 import { fallbackThrottle } from '../skills/skill-tool-fallback-throttle'
 // Stage T PR-T5 — MCP authorization gate. The model-visible mcp tool list
 // resolver below calls `mcpRegistry.isAuthorized(name, sessionId, scopeId)`
