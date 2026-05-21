@@ -1,6 +1,6 @@
 # Project Structure Snapshot
 
-> Updated: 2026-04-13
+> Updated: 2026-05-21
 
 ## 顶层目录
 ```text
@@ -17,17 +17,44 @@ ready/
 ```
 
 ## 主进程模块目录
-- `src/main/modules/agent-control`
+- `src/main/modules/agent-control`（Stage U Phase 5 v2 完成，详见下）
 - `src/main/modules/browser-engine`
 - `src/main/modules/calendar-engine`
 - `src/main/modules/claude-bridge`
-- `src/main/modules/document-engine`
+- `src/main/modules/document-engine`（含 Stage U U5.2 迁入的 `pipeline/`）
 - `src/main/modules/memory-management`
 - `src/main/modules/repositories`
 - `src/main/modules/rss-engine`
 - `src/main/modules/settings-engine`
 - `src/main/modules/skills-runtime`
 - `src/main/modules/tools`
+
+### agent-control 子目录（Stage U Phase 5 v2 落地）
+```text
+src/main/modules/agent-control/
+├── ask-user/          # 2 文件 — ask-user 桥
+├── child-run/         # 3 文件 — 非 skill 子运行控制
+├── compaction/        # 3 文件 — 上下文压缩
+├── contracts/         # 11 文件 — 跨层合同 + 类型
+├── domain-adapters/   # 16 文件 — DomainAdapter + capability
+├── memory/            # 3 文件 — 外部记忆 + secret-storage
+├── runtime-core/      # 13 文件 — 主运行时 + turn frame
+├── session/           # 5 文件 — 会话生命周期 + recall
+├── skills/            # 33 文件 — Skill 运行时
+├── sub-agent/         # 子 agent 运行（既有）
+├── system-reminders/  # 6 文件 — reminder 注册 + composer
+├── task-projection/   # 13 文件 — 任务投影 + cleanup
+├── tool-policy/       # 4 文件 — 执行级工具策略
+├── tools-runtime/     # 12 文件 — 工具批执行 + registry
+└── *.ts               # 38 文件 — 未分组 helper（含 turn-engine.ts post-Stage U 拆分候选）
+```
+
+### document-engine 子目录
+```text
+src/main/modules/document-engine/
+├── pipeline/          # 10 文件 — 文档任务 pipeline（Stage U U5.2 从 agent-control/ 迁入）
+└── *.ts               # 既有 ipc-handler、ebook-importer、commit registry 等
+```
 
 ## Renderer 关键目录
 ### 页面模式

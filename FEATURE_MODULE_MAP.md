@@ -1,6 +1,6 @@
 # Feature Module Map
 
-> Updated: 2026-04-18
+> Updated: 2026-05-21
 
 ## 模块清单
 | 模块 | 前端入口 | 主进程模块 | 状态 |
@@ -45,14 +45,32 @@
 - `fox` 这类 OpenAI 兼容通道在工具调用上默认走文本桥接降级
 - `src/main/modules/tools` 继续只负责各 domain tool dispatch；旧字符串结果会在 executor 层统一包装成结构化结果后再回到主链
 
-## Agent Control 当前分层
+## Agent Control 当前分层（Stage U Phase 5 v2 落地后）
+
+agent-control 顶层文件已按功能拆入 14 个子目录（Stage U U5.1a* PR 序列），其余少量未分组文件留在顶层。
+
+### 子目录与职责
+- `domain-adapters/` — DomainAdapter 合同 + 各域接线层 + capability 解析（domain-adapter.ts、browser/document/rss/calendar/feishu/skill/research/host-capability-dispatcher.ts、capability-resolver.ts、run-capability-controller.ts、message-capability-filter.ts、browser-action-heuristics.ts、browser-task-planner.ts 等 16 文件）
+- `runtime-core/` — 主运行时与回合主链（agent-sdk-runtime.ts、runtime.ts、orchestrator.ts、parallel-branch-orchestrator.ts、subtask-runtime.ts、task-step-runtime.ts、execution-loop-orchestrator.ts、turn-frame*/turn-state/turn-transcript/turn-feature-flags 等 13 文件）
+- `skills/` — Skill 系列运行时（skill-child-runner.ts、skill-context-orchestrator.ts、skill-task-supervisor.ts、skill-tool-authorization.ts 等 33 文件）
+- `tools-runtime/` — 工具批执行 + registry + gateway（tool-runtime.ts、tool-registry.ts、tool-gateway.ts、tool-definition.ts、tool-execution-hooks.ts、tool-parallelism-policy.ts 等 12 文件）
+- `task-projection/` — 任务投影真值 + run-scoped cleanup（task-projection-*、run-projection.ts、run-coordinator.ts、run-collector.ts、run-cleanup-registry.ts、run-budget-policy.ts、run-state-* 等 13 文件）
+- `contracts/` — 跨层合同 + 类型（run-contracts.ts、types.ts、error-kinds.ts、request-envelope.ts、continuation-state.ts、resume-handle.ts、resume-lexicon.ts、clarification-* 等 11 文件）
+- `system-reminders/` — 系统提醒注册表 + composer + reminder authors + hook registry（system-reminder-registry.ts、system-reminder-assembly.ts、hook-registry.ts、current-date/browser-task-correction/pet-stickynote-retry reminders 等 6 文件）
+- `session/` — 会话生命周期 + recall + thread meta（session-continuity.ts、session-manager.ts、session-recall-service.ts、thread-meta-repository.ts、active-skill-context.ts 共 5 文件）
+- `compaction/` — 上下文压缩（context-compression.ts、layered-compactor.ts、layered-compactor-l2-stub.ts 共 3 文件）
+- `child-run/` — 非 skill 子运行控制（child-run-circuit-breaker.ts、child-run-handle-resolver.ts、child-run-retry-policy.ts 共 3 文件）
+- `tool-policy/` — 执行级工具策略（execution-tool-config.ts、execution-tool-policy.ts、execution-tool-skill-filters.ts、pet-tool-loop-policy.ts 共 4 文件）
+- `memory/` — 外部记忆 + 生命周期 + secret-storage（external-memory-provider-slot.ts、memory-lifecycle.ts、secret-storage.ts 共 3 文件）
+- `ask-user/` — 用户结构化反问桥（ask-user-bridge.ts、ask-user-questions-bridge.ts 共 2 文件）
+- `sub-agent/` — 子 agent 运行（既有）
+
+### 顶层未分组文件（38 个，多数为待分组 helper）
+turn-engine.ts（待 Stage U 后期拆分）、prompt-assembly.ts、execution-intent-resolver.ts、intent-classifier.ts、task-execution-router.ts、task-type-resolver.ts、live-info-intent.ts、restart-intent-classifier.ts、message-correction-detector.ts、task-operation-intent.ts、metrics.ts、policy-arbitration.ts、reflection-service.ts、reference-skill-hint-display.ts、send-scoped-confirmation.ts、sidecar-manager.ts、provider-runtime-resolver.ts、video-expert-child-driver.ts、worker-projection.ts、worker-session.ts、vea-resume-action.ts、widget-edit-lease.ts、token-attribution-dimensions.ts、token-usage-middleware.ts、interaction-state-detector.ts、design-tool-loop-orchestrator.ts、document-domain-helpers.ts、detached-skill-task-tracker.ts、atomic-write.ts、auto-title.ts、link-parent-abort.ts、output-dir-lifecycle.ts、progress-scorer.ts、projection-observability-metrics.ts、stage-n-boot-assertion.ts、thinking-compatibility.ts、timer-disposal.ts、waste-scorer.ts。
+
+### 跨模块迁出（Stage U U5.2）
+- `document-engine/pipeline/` — 文档任务 pipeline 执行器、source materials、insight cache、task-plan、subtask runner、tool-loop orchestrator 等 10 文件（Stage U 之前位于 agent-control/）
+
+### 入口约束（保留不动）
 - `src/main/modules/claude-bridge/direct-chat.ts`：组装 provider / session / run cleanup 宿主，注册各 domain adapter，把运行时入口接到 `TurnEngine`
-- `src/main/modules/agent-control/turn-engine.ts`：统一执行主链，按 route 选 adapter，再推进 prepare / dispatch / applyResult / buildProjectionPatch
-- `src/main/modules/agent-control/domain-adapter.ts`：adapter 合同、薄注册 helper、工具名前缀过滤
-- `src/main/modules/agent-control/browser-domain-adapter.ts`：浏览器域接线层，复用既有 browser orchestrator
-- `src/main/modules/agent-control/document-domain-adapter.ts`：文档域接线层，复用既有 document orchestrator、tool-loop orchestrator，并直连文档 pipeline 执行器
-- `src/main/modules/agent-control/document-task-pipeline-executor.ts`：文档制卡 / 更新链路执行器，统一承接快照读取、insight 与 widget draft 缓存、task-plan 编排和最终写回
-- `src/main/modules/agent-control/skill-domain-adapter.ts`
-- `src/main/modules/agent-control/rss-domain-adapter.ts`
-- `src/main/modules/agent-control/calendar-domain-adapter.ts`
-- `src/main/modules/agent-control/feishu-domain-adapter.ts`
+- `src/main/modules/agent-control/turn-engine.ts`：统一执行主链，按 route 选 adapter，再推进 prepare / dispatch / applyResult / buildProjectionPatch（4793 LOC，post-Stage-U 拆分候选）
