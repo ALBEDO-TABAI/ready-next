@@ -122,6 +122,22 @@ export interface SendMessageResult {
   errorKind?: string | null
 }
 
+/**
+ * Stage V V3.3a bootstrap half-step (delivered alongside V3.3c).
+ *
+ * Per-session slice of state that today only carries the coalescing
+ * indicators. Subsequent V3.3b passes will move messages / inputValue /
+ * streaming flags / scopeRunStates / taskProjections into this slice as
+ * separate atomic changes. Until then, top-level `pendingSendCount` and
+ * `pendingSendFlushAt` are kept as a read-through mirror so existing
+ * ChatPanel/ChatInput selectors and the agent-panel test harness keep
+ * working without renderer-side edits.
+ */
+export interface SessionSlice {
+  pendingSendCount: number
+  pendingSendFlushAt: number | null
+}
+
 interface AgentState {
   agents: Agent[]
   messages: AgentMessage[]
@@ -148,8 +164,19 @@ interface AgentState {
   activeAttachmentPreview: AttachmentPreviewState | null
   sendCoalescingEnabled: boolean
   sendCoalescingWindowMs: number
+  /**
+   * V3.3c — top-level mirror of `sessions[activeSessionId].pendingSendCount`.
+   * Source of truth lives in `sessions[id]`; the top-level value is rewritten
+   * alongside every slice write so existing ChatPanel/ChatInput selectors and
+   * the agent-panel test harness keep observing the active-session value.
+   */
   pendingSendCount: number
+  /** V3.3c — top-level mirror of `sessions[activeSessionId].pendingSendFlushAt`. */
   pendingSendFlushAt: number | null
+  /** V3.3a bootstrap — per-sessionId slice store. */
+  sessions: Record<string, SessionSlice>
+  /** V3.3a bootstrap — active sessionId selector; nullable until first write. */
+  activeSessionId: string | null
   taskDisclosureState: Record<string, TaskDisclosureState>
 
   setAgents: (agents: Agent[]) => void
@@ -209,15 +236,94 @@ const DEFAULT_SEND_COALESCE_WINDOW_MS = 1200
 const CONTINUATION_DRAFT_PATTERN =
   /^(?:请|请你|麻烦你)?(?:(?:继续(?:当前|这个|刚才|上次|任务|处理|执行|完成|一下)?|接着(?:来|做|处理|执行|完成)?|恢复(?:上次|刚才|当前)?|重试(?:一次|一下)?|重试刚才的任务|再试(?:一次|一下)?|再来(?:一次|一下)?|重新(?:跑|执行|做|开始)(?:一次|一下|一轮|一遍)?|从头(?:跑|来|做|开始|重新)(?:一次|一下|一轮|一遍)?|确认继续|暂不继续|我已完成|人工步骤已完成|请重试刚才的任务)(?:$|[\s，。,.!?！？])|继续后台任务(?:$|\s)|(?:continue|retry|resume)(?:$|\s))/i
 
-let pendingSendTimer: ReturnType<typeof setTimeout> | null = null
-let pendingSendBuffer:
-  | {
+/**
+ * Stage V V3.3c — replace per-module `let` globals with per-sessionId Maps so
+ * concurrent sessions (V3.3b roadmap) do not collide on a single shared
+ * timer/buffer. Today only one session is active at a time; the Map keying
+ * isolates against future multi-session selectors and against dev HMR
+ * reloads that would otherwise re-evaluate this module and leak the
+ * previous timer.
+ */
+const pendingSendTimers = new Map<string, ReturnType<typeof setTimeout>>()
+const pendingSendBuffers = new Map<
+  string,
+  {
     scopeId: string | null
     agent: string
     parts: string[]
   }
-  | null = null
+>()
 let bypassCoalescingOnce = false
+
+/** Sentinel key when the store has no `sessionId` yet (very early bootstrap). */
+const PRIMARY_SESSION_KEY = '__primary__'
+
+function activeSessionKey(state: AgentState | null | undefined): string {
+  if (!state) return PRIMARY_SESSION_KEY
+  return state.activeSessionId || state.sessionId || PRIMARY_SESSION_KEY
+}
+
+/**
+ * V3.3a read-side selector. Falls back to the active session, then primary,
+ * then a zero slice so consumers never observe `undefined` during bootstrap
+ * (e.g. before the store has finished initialising on first render).
+ */
+export function getSessionSlice(state: AgentState, sessionId?: string | null): SessionSlice {
+  const id = sessionId ?? state.activeSessionId ?? state.sessionId ?? PRIMARY_SESSION_KEY
+  return state.sessions[id] ?? { pendingSendCount: 0, pendingSendFlushAt: null }
+}
+
+/** V3.3a write-side helper used by the coalescing path. */
+function withSessionSlice(
+  state: AgentState,
+  sessionId: string,
+  patch: Partial<SessionSlice>,
+): Pick<AgentState, 'sessions'> {
+  const current = state.sessions[sessionId] ?? { pendingSendCount: 0, pendingSendFlushAt: null }
+  return {
+    sessions: {
+      ...state.sessions,
+      [sessionId]: { ...current, ...patch },
+    },
+  }
+}
+
+/**
+ * Pure cleanup routine shared by the Vite HMR dispose hook and the V3.3c
+ * behavior test. Exported under a `__` prefix so it is obvious this is not a
+ * production-call surface.
+ */
+export function __disposePendingSendCoalescingForHMR(): void {
+  pendingSendTimers.forEach((timer) => clearTimeout(timer))
+  pendingSendTimers.clear()
+  pendingSendBuffers.clear()
+}
+
+/**
+ * V3.3c test introspection — returns the count of currently buffered sessions
+ * and outstanding timers. The Maps themselves are intentionally not exported
+ * so call sites cannot mutate the coalescing fleet directly.
+ */
+export function __getPendingSendCoalescingFleetSizeForTesting(): {
+  timers: number
+  buffers: number
+  bufferedKeys: readonly string[]
+} {
+  return {
+    timers: pendingSendTimers.size,
+    buffers: pendingSendBuffers.size,
+    bufferedKeys: Array.from(pendingSendBuffers.keys()),
+  }
+}
+
+// Vite HMR dispose — when this module is hot-replaced in dev we must clear any
+// outstanding setTimeout handles and discard buffered messages so they don't
+// fire against a stale store closure or duplicate-send after reload.
+if (typeof import.meta !== 'undefined' && (import.meta as unknown as { hot?: { dispose: (cb: () => void) => void } }).hot) {
+  ;(import.meta as unknown as { hot: { dispose: (cb: () => void) => void } }).hot.dispose(() => {
+    __disposePendingSendCoalescingForHMR()
+  })
+}
 
 function normalizeContinuationDraftText(value: string): string {
   return String(value || '').trim().replace(/\s+/g, '')
@@ -471,14 +577,36 @@ function rebuildAgentMessageFromRow(row: ChatRowFromIPC, agent: string): AgentMe
   return message
 }
 
-function clearPendingSendBufferState() {
-  if (pendingSendTimer) {
-    clearTimeout(pendingSendTimer)
-    pendingSendTimer = null
-  }
-  pendingSendBuffer = null
+function clearPendingSendBufferState(sessionId?: string | null) {
+  let storeStateForKey: AgentState | null = null
   try {
-    useAgent.setState({ pendingSendCount: 0, pendingSendFlushAt: null })
+    storeStateForKey = useAgent.getState()
+  } catch {
+    storeStateForKey = null
+  }
+  const id = sessionId ?? activeSessionKey(storeStateForKey)
+  const existingTimer = pendingSendTimers.get(id)
+  if (existingTimer) {
+    clearTimeout(existingTimer)
+    pendingSendTimers.delete(id)
+  }
+  pendingSendBuffers.delete(id)
+  try {
+    useAgent.setState((state) => {
+      const activeId = activeSessionKey(state)
+      const slicePatch = withSessionSlice(state, id, { pendingSendCount: 0, pendingSendFlushAt: null })
+      // Mirror onto top-level only when the cleared session matches the
+      // currently-active one — otherwise we'd zero out the visible counter
+      // for a different session that is still buffering.
+      if (activeId === id) {
+        return {
+          ...slicePatch,
+          pendingSendCount: 0,
+          pendingSendFlushAt: null,
+        }
+      }
+      return slicePatch
+    })
   } catch {
     /* ignore during bootstrap */
   }
@@ -512,9 +640,16 @@ function removeFromFilePool(
   return filePool.filter((attachment) => !isSameAttachmentPoolEntry(attachment, removedAttachment))
 }
 
-async function flushPendingSendBuffer() {
-  const buffered = pendingSendBuffer
-  clearPendingSendBufferState()
+async function flushPendingSendBuffer(sessionId?: string | null) {
+  let storeStateForKey: AgentState | null = null
+  try {
+    storeStateForKey = useAgent.getState()
+  } catch {
+    storeStateForKey = null
+  }
+  const id = sessionId ?? activeSessionKey(storeStateForKey)
+  const buffered = pendingSendBuffers.get(id) ?? null
+  clearPendingSendBufferState(id)
   if (!buffered) return
 
   const merged = buffered.parts
@@ -578,6 +713,11 @@ export const useAgent = create<AgentState>((set, get) => ({
   sendCoalescingWindowMs: DEFAULT_SEND_COALESCE_WINDOW_MS,
   pendingSendCount: 0,
   pendingSendFlushAt: null,
+  // V3.3a bootstrap — sessions Record + activeSessionId top-level fields.
+  // The slice store starts empty; the first coalescing write seeds the
+  // entry for the active session key (derived from `sessionId`).
+  sessions: {},
+  activeSessionId: null,
   taskDisclosureState: {},
 
   setAgents: (agents) => set({ agents }),
@@ -1112,34 +1252,57 @@ export const useAgent = create<AgentState>((set, get) => ({
     if (shouldCoalesce) {
       const targetScopeId = stateBeforeSend.currentScopeId || null
       const targetAgent = stateBeforeSend.currentAgent
+      const sessionKey = activeSessionKey(stateBeforeSend)
+      const existingBuffer = pendingSendBuffers.get(sessionKey) ?? null
       const sameBufferedTarget =
-        pendingSendBuffer &&
-        pendingSendBuffer.scopeId === targetScopeId &&
-        pendingSendBuffer.agent === targetAgent
+        existingBuffer &&
+        existingBuffer.scopeId === targetScopeId &&
+        existingBuffer.agent === targetAgent
 
-      if (pendingSendBuffer && !sameBufferedTarget) {
-        await flushPendingSendBuffer()
+      if (existingBuffer && !sameBufferedTarget) {
+        await flushPendingSendBuffer(sessionKey)
       }
 
-      if (sameBufferedTarget && pendingSendBuffer) {
-        pendingSendBuffer.parts.push(normalizedContent)
+      let buffer = pendingSendBuffers.get(sessionKey) ?? null
+      if (buffer && sameBufferedTarget) {
+        buffer.parts.push(normalizedContent)
       } else {
-        pendingSendBuffer = {
+        buffer = {
           scopeId: targetScopeId,
           agent: targetAgent,
           parts: [normalizedContent],
         }
+        pendingSendBuffers.set(sessionKey, buffer)
       }
 
-      if (pendingSendTimer) clearTimeout(pendingSendTimer)
+      const existingTimer = pendingSendTimers.get(sessionKey)
+      if (existingTimer) clearTimeout(existingTimer)
       const flushAt = Date.now() + stateBeforeSend.sendCoalescingWindowMs
-      pendingSendTimer = setTimeout(() => {
-        void flushPendingSendBuffer()
-      }, stateBeforeSend.sendCoalescingWindowMs)
+      pendingSendTimers.set(
+        sessionKey,
+        setTimeout(() => {
+          void flushPendingSendBuffer(sessionKey)
+        }, stateBeforeSend.sendCoalescingWindowMs),
+      )
 
-      set({
-        pendingSendCount: pendingSendBuffer.parts.length,
-        pendingSendFlushAt: flushAt,
+      const nextCount = buffer.parts.length
+      set((state) => {
+        const activeId = activeSessionKey(state)
+        const slicePatch = withSessionSlice(state, sessionKey, {
+          pendingSendCount: nextCount,
+          pendingSendFlushAt: flushAt,
+        })
+        // Mirror to top-level mirror only when the buffered session is the
+        // currently-active one (so ChatInput's coalescing indicator tracks the
+        // session the composer is bound to).
+        if (activeId === sessionKey) {
+          return {
+            ...slicePatch,
+            pendingSendCount: nextCount,
+            pendingSendFlushAt: flushAt,
+          }
+        }
+        return slicePatch
       })
       return { success: true, shouldClearInput: true, preserveInput: false }
     }
