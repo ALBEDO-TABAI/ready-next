@@ -2,14 +2,14 @@ import type { BrowserTaskDecisionMode } from '../../../shared/browser-agent-task
 import type { AIModelConfig } from '../../../shared/ai-providers'
 import { getDefaultConfig } from '../../../shared/ai-providers'
 import type { CapabilityProfileId } from '../../../shared/ai-capability-groups'
-import type { ToolVisibilityPlan } from './run-contracts'
+import type { ToolVisibilityPlan } from './contracts/run-contracts'
 import { buildToolVisibilityPlan } from './tool-policy/execution-tool-policy'
 import type { ToolPolicy } from './tool-policy/execution-tool-config'
 import { resolveCapabilityResolution, type CapabilityResolution } from './domain-adapters/capability-resolver'
 import type { IntentClassification } from './intent-classifier'
 import { classifyIntent } from './intent-classifier'
-import type { RequestEnvelope } from './request-envelope'
-import { buildRequestEnvelope } from './request-envelope'
+import type { RequestEnvelope } from './contracts/request-envelope'
+import { buildRequestEnvelope } from './contracts/request-envelope'
 import {
   extractPrimaryUserInstruction,
   hasExplicitDocumentWidgetCreateIntent,
@@ -21,10 +21,14 @@ import {
 } from '../claude-bridge/tool-policy-heuristics'
 import { isRetryOnlyPrompt, resolveToolPolicyInput } from '../claude-bridge/tool-policy-context'
 import { inferDocumentWidgetProfile, type DocumentWidgetProfile } from '../claude-bridge/widget-guidance'
-import { classifyStructuredDocumentIntent, type StructuredDocumentIntent } from './document-pipeline/document-task-types'
-import { buildDocumentTaskPlan, type DocumentTaskPlan } from './document-pipeline/document-task-plan'
+import { classifyStructuredDocumentIntent, type StructuredDocumentIntent } from '../document-engine/pipeline/document-task-types'
+import { buildDocumentTaskPlan, type DocumentTaskPlan } from '../document-engine/pipeline/document-task-plan'
 import { logAgentMetric } from './metrics'
 import type { ActiveWidgetEditLease } from './widget-edit-lease'
+import {
+  isMapSemanticIntentActive,
+  type MapSemanticIntent,
+} from './map-semantic-intent'
 
 export interface ExecutionIntentContext {
   requestEnvelope: RequestEnvelope
@@ -39,6 +43,7 @@ export interface ExecutionIntentContext {
   structuredDocumentIntent: StructuredDocumentIntent
   documentTaskPlan: DocumentTaskPlan | null
   shouldUseDocumentTaskPlan: boolean
+  mapSemanticIntent?: MapSemanticIntent | null
 }
 
 function normalizeRegisteredSkillToken(value: string): string {
@@ -71,6 +76,7 @@ export function resolveExecutionIntentContext(params: {
   activeWidgetEditLease?: ActiveWidgetEditLease | null
   refreshWidgetEditLease?: () => ActiveWidgetEditLease | null
   registeredSkillTokens?: string[] | null
+  mapSemanticIntent?: MapSemanticIntent | null
 }): ExecutionIntentContext {
   const envelopeHasWidgetTarget = params.requestEnvelope.environmentHints.hasWidgetTargetContext
   const primaryInput = params.requestEnvelope.primaryInstruction || params.requestEnvelope.pureUserText
@@ -146,6 +152,8 @@ export function resolveExecutionIntentContext(params: {
     leaseRefreshed,
     providedPrimaryDomain: params.intentClassification?.primaryDomain || null,
     resolvedPrimaryDomain: intentClassification.primaryDomain,
+    mapSemanticIntent: params.mapSemanticIntent?.isMapIntent ? params.mapSemanticIntent.primaryTask : null,
+    mapSemanticConfidence: params.mapSemanticIntent?.confidence ?? null,
     skillIntentUpgraded: computedIntentClassification.primaryDomain === 'skill'
       && params.intentClassification?.primaryDomain !== 'skill',
   })
@@ -163,6 +171,7 @@ export function resolveExecutionIntentContext(params: {
     structuredDocumentIntent: classifyStructuredDocumentIntent(userInstructionText),
     documentTaskPlan,
     shouldUseDocumentTaskPlan,
+    mapSemanticIntent: params.mapSemanticIntent ?? null,
   }
 }
 
@@ -182,6 +191,7 @@ export function buildExecutionToolState(params: {
   explicitWidgetCreateIntent: boolean
   documentWidgetTaskKind: DocumentWidgetTaskKind
   documentWidgetProfile: DocumentWidgetProfile | null
+  mapSemanticIntent?: MapSemanticIntent | null
   browserDecisionMode: BrowserTaskDecisionMode
   browserHostAvailable?: boolean
   feishuConnected?: boolean
@@ -210,6 +220,8 @@ export function buildExecutionToolState(params: {
   const hasCalendarIntent = positiveDomains.has('calendar') && !excludedDomains.has('calendar')
   const hasFeishuIntent = positiveDomains.has('feishu') && !excludedDomains.has('feishu')
   const hasPetIntent = positiveDomains.has('pet') && !excludedDomains.has('pet')
+  const hasMapIntent = isMapSemanticIntentActive(params.mapSemanticIntent)
+  const mapSecondarySignals = new Set(params.mapSemanticIntent?.secondarySignals || [])
   const isPetDominantIntent = params.intentClassification.primaryDomain === 'pet' && hasPetIntent
   const hasExplicitDocumentSurface =
     /(文档|文稿|原文|文章|段落|章节|docx?|markdown|\.md\b|widget|show-widget|图表|趋势图|卡片|信息卡|提示块|表格|对比卡|进度卡|保存|写入|追加|替换|编辑|改写|润色|排版|格式)/i
@@ -221,7 +233,8 @@ export function buildExecutionToolState(params: {
     Boolean(params.documentWidgetTaskKind) ||
     shouldForceDocumentToolCall(params.contextualUserInput) ||
     hasExplicitDocumentSurface ||
-    hasDocumentIntent
+    hasDocumentIntent ||
+    (hasMapIntent && mapSecondarySignals.has('document_output'))
   )
   const allowRSSTools = baseVisibilityPlan.hasTools && hasRSSIntent
   const allowCalendarTools = baseVisibilityPlan.hasTools && hasCalendarIntent
@@ -234,7 +247,11 @@ export function buildExecutionToolState(params: {
     && Array.isArray(params.preferredSkillToolNames)
     && params.preferredSkillToolNames.length > 0
   const hasResearchIntent = positiveDomains.has('research') && !excludedDomains.has('research')
-  const allowResearchTools = baseVisibilityPlan.hasTools && hasResearchIntent
+  const allowResearchTools = baseVisibilityPlan.hasTools && (
+    hasResearchIntent || (hasMapIntent && mapSecondarySignals.has('research_lookup'))
+  )
+  const allowMapTools = baseVisibilityPlan.hasTools && hasMapIntent
+  const allowMapBrowserTools = hasMapIntent && mapSecondarySignals.has('browser_lookup')
   const capabilityResolution = resolveCapabilityResolution({
     config: params.config || getDefaultConfig(),
     profile: params.capabilityProfile || 'local_chat',
@@ -245,6 +262,7 @@ export function buildExecutionToolState(params: {
     },
     intentGroupModes: {
       ...(hasLiveInfoBrowserIntent ? { browser_interaction: true } : {}),
+      ...(allowMapBrowserTools ? { browser_interaction: true, browser_content_tasks: true } : {}),
       document: allowDocumentTools,
       rss: allowRSSTools,
       calendar: allowCalendarTools,
@@ -252,6 +270,7 @@ export function buildExecutionToolState(params: {
       pet: allowPetTools,
       skills: allowSkillTools,
       general_research: allowResearchTools,
+      map_planning: allowMapTools,
     },
   })
   const allowBrowserTools = capabilityResolution.visibleCapabilityGroupIds.includes('browser_interaction')

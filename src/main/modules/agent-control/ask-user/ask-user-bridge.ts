@@ -12,7 +12,7 @@
  * enumerate them via `store.list()`.
  */
 
-import type { EmitAskUserQuestion } from '../tools/skill-primitives/ask-user'
+import type { EmitAskUserQuestion } from '../../tools/skill-primitives/ask-user'
 
 const noopEmitter: EmitAskUserQuestion = () => {}
 

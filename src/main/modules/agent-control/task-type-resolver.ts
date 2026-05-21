@@ -1,7 +1,7 @@
 import type { CapabilityRuntimeSnapshot } from '../../../shared/ai-capability-runtime'
 import type { IntentClassification } from './intent-classifier'
-import type { RequestEnvelope } from './request-envelope'
-import type { TaskTypeResolution } from './run-contracts'
+import type { RequestEnvelope } from './contracts/request-envelope'
+import type { TaskTypeResolution } from './contracts/run-contracts'
 
 export function resolveTaskType(params: {
   intent: IntentClassification
@@ -144,6 +144,15 @@ export function resolveTaskType(params: {
       executionChain: 'domain_executor',
       preferredExecutor: 'research',
       requiresPlanner: false,
+    }
+  }
+
+  if (params.intent.primaryDomain === 'map') {
+    return {
+      taskType: 'short_task',
+      executionChain: 'tool_loop',
+      requiresPlanner: false,
+      preferredExecutor: 'map',
     }
   }
 

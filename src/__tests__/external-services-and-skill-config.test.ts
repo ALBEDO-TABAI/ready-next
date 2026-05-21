@@ -13,8 +13,19 @@ import {
 } from '../shared/skill-configuration'
 import { compileSkillDefinition } from '../main/modules/skills-runtime/skill-compiler'
 import { executeWebFetch } from '../main/modules/tools/builtins/web-fetch'
+import { ExternalServiceStore } from '../main/modules/settings-engine/external-service-store'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'assets', 'embedded-skills')
+
+class InMemorySettingsRepository {
+  private store = new Map<string, string>()
+  getSetting(key: string): string | null {
+    return this.store.has(key) ? (this.store.get(key) as string) : null
+  }
+  setSetting(key: string, value: string): void {
+    this.store.set(key, value)
+  }
+}
 
 test('external service public profile masks secrets and preserves defaults', () => {
   const profiles = normalizeExternalServiceProfiles([
@@ -37,6 +48,39 @@ test('external service public profile masks secrets and preserves defaults', () 
   assert.equal(publicProfile.secretStatus.apiKey.configured, true)
   assert.equal(publicProfile.secretStatus.apiKey.masked, '••••3456')
   assert.equal('secrets' in publicProfile, false)
+})
+
+test('external service draft test uses current form values without persisting them', async () => {
+  const repo = new InMemorySettingsRepository()
+  const store = new ExternalServiceStore(repo as unknown as ConstructorParameters<typeof ExternalServiceStore>[0])
+  const originalFetch = globalThis.fetch
+  const seenKeys: string[] = []
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? new URL(input) : input instanceof URL ? input : new URL(input.url)
+    seenKeys.push(url.searchParams.get('key') || '')
+    return new Response(JSON.stringify({ status: '1', info: 'OK', infocode: '10000' }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }) as typeof fetch
+
+  try {
+    const result = await store.testProfileDraft({
+      id: 'amap-default',
+      kind: 'amap',
+      enabled: true,
+      baseUrl: 'https://restapi.amap.com',
+      secrets: { apiKey: 'draft-test-key' },
+      options: {},
+    })
+    assert.equal(result.ok, true)
+    assert.deepEqual(seenKeys, ['draft-test-key'])
+    const persisted = store.getRuntimeService('amap-default')
+    assert.equal(persisted?.enabled, false)
+    assert.equal(persisted?.secrets.apiKey, '')
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
 
 test('skill configuration normalizer keeps service bindings and defaults', () => {

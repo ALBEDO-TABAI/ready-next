@@ -23,6 +23,7 @@ import { ExecutionLoopOrchestrator } from '../agent-control/runtime-core/executi
 import { HostCapabilityDispatcher } from '../agent-control/domain-adapters/host-capability-dispatcher'
 import { CalendarDomainAdapter } from '../agent-control/domain-adapters/calendar-domain-adapter'
 import { RSSDomainAdapter } from '../agent-control/domain-adapters/rss-domain-adapter'
+import { MapDomainAdapter } from '../agent-control/map-domain-adapter'
 import { ResearchDomainAdapter } from '../agent-control/domain-adapters/research-domain-adapter'
 import { DocumentTaskPipelineExecutor } from '../document-engine/pipeline/document-task-pipeline-executor'
 import type { DocumentInsight, DocumentInsightMetrics, DocumentWidgetDraft } from '../document-engine/pipeline/document-task-pipeline'
@@ -453,8 +454,9 @@ export class DirectChatEngine extends EventEmitter {
       executeHostTool: (toolName, args, toolContext) => executeToolCall(toolName, args, toolContext as any),
     })
     this.domainAdapters = [
-      // Stage R W1.6: research adapter goes first so primaryDomain==='research'
-      // intents are routed before browser/document can grab them.
+      // Semantic-classified adapters go first; keyword-classified adapters follow.
+      // MapDomainAdapter reads the TurnEngine-precomputed mapSemanticIntent synchronously.
+      new MapDomainAdapter(),
       new ResearchDomainAdapter(),
       new BrowserDomainAdapter(this.browserDomainOrchestrator as never),
       new DocumentDomainAdapter({

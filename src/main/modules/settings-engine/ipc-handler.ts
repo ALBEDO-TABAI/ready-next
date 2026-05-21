@@ -140,6 +140,17 @@ export function setupSettingsIPC(): void {
     }
   })
 
+  ipcMain.handle('settings:testExternalServiceDraft', async (_, input: ExternalServiceUpdateInput): Promise<SettingsIPCResponse<ExternalServiceTestResult>> => {
+    try {
+      const result = await externalServices.testProfileDraft(input)
+      return result.ok
+        ? { success: true, data: result }
+        : { success: false, data: result, error: result.message }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
   // Test API connection
   ipcMain.handle('settings:testAIConnection', async (_, config: AIModelConfig): Promise<SettingsIPCResponse<{ latencyMs: number; modelList?: string[] }>> => {
     try {

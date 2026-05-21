@@ -24,7 +24,7 @@
  * `isSkillToolName` is a pure name-shape check; authorization is not
  * relevant.
  */
-import type { SkillToolAuthorization } from './skills/skill-tool-authorization'
+import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
 
 export function isSkillToolName(name: string): boolean {
   return name.startsWith('skill_') || name === 'system_run_embedded_python'

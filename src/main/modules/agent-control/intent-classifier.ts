@@ -1,7 +1,7 @@
-import type { RequestEnvelope } from './request-envelope'
+import type { RequestEnvelope } from './contracts/request-envelope'
 import { detectLiveInfoIntent } from './live-info-intent'
 
-export type IntentDomain = 'browser' | 'document' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'pet' | 'research' | 'generic'
+export type IntentDomain = 'browser' | 'document' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'pet' | 'research' | 'map' | 'generic'
 export type IntentConfidence = 'high' | 'medium' | 'low'
 
 export interface IntentClassification {
@@ -14,13 +14,15 @@ export interface IntentClassification {
   confidence: IntentConfidence
 }
 
+type PatternIntentDomain = Exclude<IntentDomain, 'generic' | 'map'>
+
 interface DomainSignal {
-  domain: Exclude<IntentDomain, 'generic'>
+  domain: PatternIntentDomain
   score: number
   signals: string[]
 }
 
-const DOMAIN_OBJECT_PATTERNS: Record<Exclude<IntentDomain, 'generic'>, Array<[RegExp, string, number]>> = {
+const DOMAIN_OBJECT_PATTERNS: Record<PatternIntentDomain, Array<[RegExp, string, number]>> = {
   document: [
     [/(文档|文稿|原文|文章|段落|章节|widget|show-widget|图表|信息卡|卡片|svg)/i, 'document-object', 3],
     [/(当前文档|新文档|\.md\b|markdown|docx?)/i, 'document-file', 2],
@@ -52,7 +54,7 @@ const DOMAIN_OBJECT_PATTERNS: Record<Exclude<IntentDomain, 'generic'>, Array<[Re
   ],
 }
 
-const DOMAIN_ACTION_PATTERNS: Record<Exclude<IntentDomain, 'generic'>, Array<[RegExp, string, number]>> = {
+const DOMAIN_ACTION_PATTERNS: Record<PatternIntentDomain, Array<[RegExp, string, number]>> = {
   document: [
     [/(生成|创建|插入|更新|修改|改写|润色|排版|保存|输出\s*svg)/i, 'document-action', 2],
   ],
@@ -121,7 +123,7 @@ function detectDomainSignals(
     ? { needsLiveInfo: false, confidence: 'low' as const, signals: [] as string[] }
     : detectLiveInfoIntent(envelope.primaryInstruction || '')
 
-  for (const domain of Object.keys(DOMAIN_OBJECT_PATTERNS) as Array<Exclude<IntentDomain, 'generic'>>) {
+  for (const domain of Object.keys(DOMAIN_OBJECT_PATTERNS) as PatternIntentDomain[]) {
     const objectResult = collectSignals(text, DOMAIN_OBJECT_PATTERNS[domain])
     const actionResult = collectSignals(text, DOMAIN_ACTION_PATTERNS[domain])
     const hasDocumentContext = envelope.environmentHints.hasDocumentContext || envelope.environmentHints.hasWidgetTargetContext
@@ -205,8 +207,9 @@ function resolveExcludedDomains(
 ): Array<Exclude<IntentDomain, 'generic'>> {
   const positive = new Set(signals.map((item) => item.domain))
   if (primaryDomain === 'generic') return []
-  return (['browser', 'document', 'rss', 'calendar', 'feishu', 'skill', 'pet', 'research'] as Array<Exclude<IntentDomain, 'generic'>>)
+  return ((['browser', 'document', 'rss', 'calendar', 'feishu', 'skill', 'pet', 'research'] as PatternIntentDomain[])
     .filter((domain) => domain !== primaryDomain && !positive.has(domain))
+  ) as Array<Exclude<IntentDomain, 'generic'>>
 }
 
 export function classifyIntent(

@@ -206,6 +206,29 @@ describe('PromptAssemblyService', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
+  it('does not load the browser trigger for negated web lookup wording', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-browser-negated-trigger-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    mkdirSync(join(root, 'memory'), { recursive: true })
+    writeFileSync(join(root, 'docs', 'browser-rules.md'), '# Browser\nBrowser rules.', 'utf8')
+
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [],
+      now: () => new Date('2026-03-08T10:00:00.000Z')
+    })
+
+    const result = await service.buildForScopedRun({
+      scope: createScope(),
+      message: '成都 4 个地点怎么走，给我总耗时，不要查网页。',
+      coordinators: [createBrowserAdapter()]
+    })
+
+    assert.equal(countTrigger(result, 'browser-upload'), 0)
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
   it('still loads the Document trigger from the document coordinator', async () => {
     const root = mkdtempSync(join(tmpdir(), 'ready-prompt-document-trigger-'))
     mkdirSync(join(root, 'docs'), { recursive: true })

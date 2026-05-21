@@ -1,7 +1,7 @@
 import {
   FRAME_PATCH_EMITTING_TOOL_NAMES,
   isFramePatchEmittingToolName,
-} from '../run-contracts'
+} from '../contracts/run-contracts'
 
 /**
  * Phase 3 (skill-child-loop) — tools that may emit a `contextModifier` on
@@ -56,7 +56,7 @@ export interface ParallelToolGroup {
 }
 
 export interface ToolResourceTag {
-  domain: 'browser' | 'document' | 'file' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'memory' | 'session' | 'pet' | 'system' | 'general_research' | 'mcp' | 'agent_interaction'
+  domain: 'browser' | 'document' | 'file' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'memory' | 'session' | 'pet' | 'system' | 'general_research' | 'map' | 'mcp' | 'agent_interaction'
   accessMode: 'read' | 'write' | 'interactive'
 }
 
@@ -188,6 +188,7 @@ export function getToolResourceTag(toolName: string): ToolResourceTag {
   if (normalized === 'web_fetch') return { domain: 'general_research', accessMode: 'read' }
   if (normalized === 'present_file') return { domain: 'general_research', accessMode: 'interactive' }
   if (normalized === 'web_clip_url') return { domain: 'general_research', accessMode: 'interactive' }
+  if (normalized.startsWith('map_')) return { domain: 'map', accessMode: 'write' }
   // Stage T PR-T5 — MCP tools advertised as `mcp_*` are dispatched to the
   // mcp client and are interactive by default (the client makes a remote
   // call per invocation, no parallelism guarantee from the server side).

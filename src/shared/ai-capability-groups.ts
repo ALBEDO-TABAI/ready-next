@@ -11,6 +11,7 @@ export type CapabilityGroupId =
   | 'pet'
   | 'channel_feishu'
   | 'general_research'
+  | 'map_planning'
   | 'system_host'
   | 'design_reserved'
   | 'mcp'
@@ -168,6 +169,17 @@ export const CAPABILITY_GROUPS: CapabilityGroupDefinition[] = [
     availability: 'active',
     defaultMode: 'auto',
     defaultProfiles: ['local_chat', 'scheduled_run'],
+    executionKinds: ['deterministic'],
+    settingsVisible: true,
+  },
+  {
+    id: 'map_planning',
+    label: '地图行程规划',
+    description: '路线规划、顺路地点搜索、多点顺序优化和地图标注产物。',
+    exposure: 'model_visible',
+    availability: 'active',
+    defaultMode: 'auto',
+    defaultProfiles: ['local_chat'],
     executionKinds: ['deterministic'],
     settingsVisible: true,
   },

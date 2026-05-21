@@ -103,6 +103,12 @@ export interface GeneralResearchServiceRuntimeConfig {
   preferTavilyExtract?: boolean
 }
 
+export interface AmapServiceRuntimeConfig {
+  enabled: boolean
+  baseUrl: string
+  apiKey: string
+}
+
 export class ExternalServiceStore {
   constructor(private readonly repository = new AppSettingsRepository()) {}
 
@@ -137,7 +143,7 @@ export class ExternalServiceStore {
     return profile ? toRuntimeExternalServiceConfig(profile) : null
   }
 
-  upsertProfile(input: ExternalServiceUpdateInput): PublicExternalServiceProfile {
+  private resolveProfileDraft(input: ExternalServiceUpdateInput, touchUpdatedAt: boolean): ExternalServiceProfile {
     if (!input?.id) throw new Error('Missing service id')
     const profiles = this.readProfiles()
     const fallback = profiles.find((item) => item.id === input.id)
@@ -155,8 +161,8 @@ export class ExternalServiceStore {
       }),
       id: input.id,
       kind: input.kind || fallback!.kind,
-      updatedAt: nowIso(),
     }
+    if (touchUpdatedAt) next.updatedAt = nowIso()
 
     if (typeof input.name === 'string') next.name = input.name.trim() || next.name
     if (typeof input.enabled === 'boolean') next.enabled = input.enabled
@@ -172,6 +178,12 @@ export class ExternalServiceStore {
     }
     next.secrets = secrets
 
+    return next
+  }
+
+  upsertProfile(input: ExternalServiceUpdateInput): PublicExternalServiceProfile {
+    const profiles = this.readProfiles()
+    const next = this.resolveProfileDraft(input, true)
     const merged = profiles.some((item) => item.id === input.id)
       ? profiles.map((item) => item.id === input.id ? next : item)
       : [...profiles, next]
@@ -213,6 +225,16 @@ export class ExternalServiceStore {
       jinaBaseUrl: jina?.enabled ? trimBaseUrl(jina.baseUrl) : undefined,
       ddgEnabled: ddg ? ddg.enabled : true,
       ddgBaseUrl: ddg?.enabled ? trimBaseUrl(ddg.baseUrl) : undefined,
+    }
+  }
+
+  getAmapConfig(): AmapServiceRuntimeConfig | null {
+    const amap = this.getFirstRuntimeService('amap')
+    if (!amap) return null
+    return {
+      enabled: amap.enabled,
+      baseUrl: trimBaseUrl(amap.baseUrl) || 'https://restapi.amap.com',
+      apiKey: String(amap.secrets.apiKey || '').trim(),
     }
   }
 
@@ -302,25 +324,56 @@ export class ExternalServiceStore {
   async testProfile(id: string): Promise<ExternalServiceTestResult> {
     const profile = this.readProfiles().find((item) => item.id === id)
     if (!profile) throw new Error(`Unknown service: ${id}`)
+    return this.testResolvedProfile(profile)
+  }
+
+  async testProfileDraft(input: ExternalServiceUpdateInput): Promise<ExternalServiceTestResult> {
+    return this.testResolvedProfile(this.resolveProfileDraft(input, false))
+  }
+
+  private async testResolvedProfile(profile: ExternalServiceProfile): Promise<ExternalServiceTestResult> {
     const start = Date.now()
     if (!profile.enabled) {
-      return { ok: false, serviceId: id, message: '服务未启用' }
+      return { ok: false, serviceId: profile.id, message: '服务未启用' }
     }
     if (profile.kind === 'tavily' && !hasSecret(profile, 'apiKey')) {
-      return { ok: false, serviceId: id, message: '缺少 Tavily API Key' }
+      return { ok: false, serviceId: profile.id, message: '缺少 Tavily API Key' }
     }
     if (profile.kind === 'vision-model' && (!profile.baseUrl || !hasSecret(profile, 'apiKey') || !optionString(profile.options || {}, 'model'))) {
-      return { ok: false, serviceId: id, message: '缺少读图模型 baseUrl / model / apiKey' }
+      return { ok: false, serviceId: profile.id, message: '缺少读图模型 baseUrl / model / apiKey' }
     }
     if (profile.kind === 'bilibili' && !hasSecret(profile, 'sessdata')) {
-      return { ok: false, serviceId: id, message: '未配置 Bilibili SESSDATA' }
+      return { ok: false, serviceId: profile.id, message: '未配置 Bilibili SESSDATA' }
     }
     if (profile.kind === 'github' && !hasSecret(profile, 'token')) {
-      return { ok: false, serviceId: id, message: '未配置 GitHub Token' }
+      return { ok: false, serviceId: profile.id, message: '未配置 GitHub Token' }
+    }
+    if (profile.kind === 'amap') {
+      if (!hasSecret(profile, 'apiKey')) {
+        return { ok: false, serviceId: profile.id, message: '缺少高德地图 API Key' }
+      }
+      const baseUrl = trimBaseUrl(profile.baseUrl) || 'https://restapi.amap.com'
+      const probeUrl = new URL('/v3/geocode/geo', baseUrl)
+      probeUrl.searchParams.set('address', '北京市东城区天安门')
+      probeUrl.searchParams.set('city', '北京')
+      probeUrl.searchParams.set('output', 'JSON')
+      probeUrl.searchParams.set('key', String(profile.secrets?.apiKey || '').trim())
+      const response = await fetch(probeUrl, { method: 'GET', signal: AbortSignal.timeout(8_000) })
+      if (!response.ok) {
+        return { ok: false, serviceId: profile.id, message: `HTTP ${response.status}`, latencyMs: Date.now() - start }
+      }
+      const payload = await response.json() as { status?: string; info?: string; infocode?: string }
+      const ok = payload.status === '1'
+      return {
+        ok,
+        serviceId: profile.id,
+        message: ok ? '连接正常' : `高德返回 ${payload.infocode || 'unknown'}：${payload.info || '请求失败'}`,
+        latencyMs: Date.now() - start,
+      }
     }
     if (profile.kind === 'rsshub' || profile.kind === 'duckduckgo' || profile.kind === 'jina') {
       const baseUrl = trimBaseUrl(profile.baseUrl)
-      if (!baseUrl) return { ok: false, serviceId: id, message: '缺少服务地址' }
+      if (!baseUrl) return { ok: false, serviceId: profile.id, message: '缺少服务地址' }
       const probeUrl = profile.kind === 'jina'
         ? `${baseUrl}/https://example.com`
         : profile.kind === 'duckduckgo'
@@ -329,11 +382,11 @@ export class ExternalServiceStore {
       const response = await fetch(probeUrl, { method: 'GET', signal: AbortSignal.timeout(8_000) })
       return {
         ok: response.ok,
-        serviceId: id,
+        serviceId: profile.id,
         message: response.ok ? '连接正常' : `HTTP ${response.status}`,
         latencyMs: Date.now() - start,
       }
     }
-    return { ok: true, serviceId: id, message: '配置已就绪', latencyMs: Date.now() - start }
+    return { ok: true, serviceId: profile.id, message: '配置已就绪', latencyMs: Date.now() - start }
   }
 }

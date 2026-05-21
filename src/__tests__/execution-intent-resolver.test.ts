@@ -257,3 +257,53 @@ test('resolveExecutionIntentContext builds a structured document task plan for e
     '新文档.md',
   )
 })
+
+test('resolveExecutionIntentContext keeps mapSemanticIntent optional and default null', () => {
+  const requestEnvelope = buildRequestEnvelope({ userText: '你好' })
+  const context = resolveExecutionIntentContext({
+    requestEnvelope,
+    previousInputs: [],
+  })
+
+  assert.equal(context.mapSemanticIntent, null)
+})
+
+test('buildExecutionToolState admits map capability and secondary document/research/browser groups from map semantic intent', () => {
+  const requestEnvelope = buildRequestEnvelope({
+    userText: '从北京南站到故宫怎么走，路上找咖啡并写成文档，同时查评价',
+  })
+  const intent = classifyIntent(requestEnvelope)
+  const state = buildExecutionToolState({
+    supportsToolCalls: true,
+    hasVideoInputs: false,
+    hasIncomingVideo: false,
+    keepToolsWithVideo: false,
+    preferredSkillToolNames: null,
+    contextualUserInput: requestEnvelope.pureUserText,
+    userInstructionText: requestEnvelope.pureUserText,
+    intentClassification: {
+      ...intent,
+      primaryDomain: 'map',
+      mentionedDomains: [...intent.mentionedDomains, 'map'],
+    },
+    mapSemanticIntent: {
+      isMapIntent: true,
+      primaryTask: 'along_route_search',
+      secondarySignals: ['document_output', 'research_lookup', 'browser_lookup'],
+      confidence: 0.8,
+    },
+    hasDocumentEnvironment: false,
+    hasWidgetTargetContext: false,
+    explicitWidgetCreateIntent: false,
+    documentWidgetTaskKind: null,
+    documentWidgetProfile: null,
+    browserDecisionMode: 'free_tool_loop',
+    browserHostAvailable: true,
+    feishuConnected: true,
+  })
+
+  assert.ok(state.capabilityResolution.visibleCapabilityGroupIds.includes('map_planning'))
+  assert.ok(state.capabilityResolution.visibleCapabilityGroupIds.includes('document'))
+  assert.ok(state.capabilityResolution.visibleCapabilityGroupIds.includes('general_research'))
+  assert.ok(state.capabilityResolution.visibleCapabilityGroupIds.includes('browser_interaction'))
+})

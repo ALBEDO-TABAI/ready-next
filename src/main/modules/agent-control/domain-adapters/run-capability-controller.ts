@@ -5,7 +5,7 @@ import type { CapabilityRuntimeSnapshot } from '../../../../shared/ai-capability
 import type { ToolPolicy } from '../tool-policy/execution-tool-config'
 import type { SkillToolAuthorization } from '../skills/skill-tool-authorization'
 import { getPolicyOpenAIToolBundle } from '../tool-policy/execution-tool-config'
-import type { ToolVisibilityPlan } from '../run-contracts'
+import type { ToolVisibilityPlan } from '../contracts/run-contracts'
 import type { CapabilityResolution, CapabilityRuntimeAvailability } from './capability-resolver'
 import { buildCapabilityRuntimeSnapshot } from './capability-runtime-snapshot'
 import { buildExecutionToolState, type ExecutionIntentContext } from '../execution-intent-resolver'
@@ -75,7 +75,7 @@ export interface PreparedRunCapabilities {
   hostShortcutDecision: HostShortcutDecision
   runtimeSnapshot: CapabilityRuntimeSnapshot
   capabilityLogLine: string
-  toolResolution: import('./run-contracts').ToolResolutionDiagnostics
+  toolResolution: import('../contracts/run-contracts').ToolResolutionDiagnostics
   arbitration: PolicyArbitration
   _baseParams: RunCapabilityBaseParams
 }
@@ -88,7 +88,7 @@ export interface ReconciledRunCapabilities {
   hostShortcutDecision: HostShortcutDecision
   runtimeSnapshot: CapabilityRuntimeSnapshot
   capabilityLogLine: string
-  toolResolution: import('./run-contracts').ToolResolutionDiagnostics
+  toolResolution: import('../contracts/run-contracts').ToolResolutionDiagnostics
   arbitration: PolicyArbitration
 }
 
@@ -120,7 +120,7 @@ function resolveActiveSkillAllowedTools(
   try {
     // Lazy require so we don't import the runtime manager at module load
     // time (would create a circular import via skill_*-tools paths).
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
+     
     const { getSkillsRuntimeManager } = require('../skills-runtime/runtime-manager') as {
       getSkillsRuntimeManager: () => { listSkills(): Array<{ id: string; allowedTools?: string[] | null }> }
     }
@@ -208,6 +208,7 @@ function resolveRunCapabilities(
     explicitWidgetCreateIntent: baseParams.executionIntentContext.explicitWidgetCreateIntent,
     documentWidgetTaskKind: baseParams.executionIntentContext.documentWidgetTaskKind,
     documentWidgetProfile: baseParams.executionIntentContext.documentWidgetProfile,
+    mapSemanticIntent: baseParams.executionIntentContext.mapSemanticIntent ?? null,
     browserDecisionMode: baseParams.browserDecisionMode,
     browserHostAvailable: baseParams.runtimeAvailability.browserHostAvailable,
     feishuConnected: baseParams.runtimeAvailability.feishuConnected,

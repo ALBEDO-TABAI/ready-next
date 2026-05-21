@@ -3,19 +3,19 @@ import {
   filterToolsByAllowedTools,
   filterToolsByVisionCapability,
   type ToolGroupResolutionEntry,
-} from './tools-runtime/tool-gateway'
-import { normalizeOpenAIToolSchema } from '../tools/tool-schema'
-import { buildTextToolBridgePrompt } from '../claude-bridge/tool-bridge'
-import { type DocumentWidgetTaskKind } from '../claude-bridge/tool-policy-heuristics'
+} from '../tools-runtime/tool-gateway'
+import { normalizeOpenAIToolSchema } from '../../tools/tool-schema'
+import { buildTextToolBridgePrompt } from '../../claude-bridge/tool-bridge'
+import { type DocumentWidgetTaskKind } from '../../claude-bridge/tool-policy-heuristics'
 import {
   buildDocumentWidgetClarificationSnippet,
   buildDocumentWidgetGuidanceSnippet,
   buildDocumentWidgetOpenUIRulesSnippet,
   buildDocumentWidgetSkeletonRulesSnippet,
   type DocumentWidgetProfile,
-} from '../claude-bridge/widget-guidance'
-import type { CapabilityGroupId } from '../../../shared/ai-capability-groups'
-import type { ToolResolutionDiagnostics } from './contracts/run-contracts'
+} from '../../claude-bridge/widget-guidance'
+import type { CapabilityGroupId } from '../../../../shared/ai-capability-groups'
+import type { ToolResolutionDiagnostics } from '../contracts/run-contracts'
 import {
   filterPreferredSkillAnthropicTools as _filterPreferredSkillAnthropic,
   filterPreferredSkillOpenAITools as _filterPreferredSkillOpenAI,
@@ -24,7 +24,7 @@ import {
 import {
   buildExplicitNoSkillAuthorization,
   type SkillToolAuthorization,
-} from './skills/skill-tool-authorization'
+} from '../skills/skill-tool-authorization'
 
 /**
  * Stage 10 — when caller has a `ToolPolicy` but no authorization, build

@@ -1,4 +1,4 @@
-import { MemoryRepository } from '../repositories/memory-repository'
+import { MemoryRepository } from '../../repositories/memory-repository'
 
 export interface MaintenanceResult {
   archivedL1Count: number

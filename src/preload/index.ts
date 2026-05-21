@@ -938,6 +938,7 @@ const settingsAPI = {
   updateExternalService: (input: unknown) => ipcRenderer.invoke('settings:updateExternalService', input),
   resetExternalService: (payload: { id: string }) => ipcRenderer.invoke('settings:resetExternalService', payload),
   testExternalService: (payload: { id: string }) => ipcRenderer.invoke('settings:testExternalService', payload),
+  testExternalServiceDraft: (input: unknown) => ipcRenderer.invoke('settings:testExternalServiceDraft', input),
 }
 
 const petAPI = {

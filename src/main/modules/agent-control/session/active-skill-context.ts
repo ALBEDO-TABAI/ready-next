@@ -1,18 +1,18 @@
 import { dirname } from 'node:path'
 
-import { getRepositoryDatabase } from '../repositories/database-accessor'
-import { TaskProjectionRepository } from '../repositories/task-projection-repository'
+import { getRepositoryDatabase } from '../../repositories/database-accessor'
+import { TaskProjectionRepository } from '../../repositories/task-projection-repository'
 import {
   SkillTaskRunRepository,
   type SkillTaskRunRecord,
-} from '../repositories/skill-task-run-repository'
-import { getLastReferenceSkill, type ReferenceSkillHint } from './skills/skill-reference-hints'
-import type { TaskProjectionRecord } from './contracts/run-contracts'
+} from '../../repositories/skill-task-run-repository'
+import { getLastReferenceSkill, type ReferenceSkillHint } from '../skills/skill-reference-hints'
+import type { TaskProjectionRecord } from '../contracts/run-contracts'
 import {
   inspectLatestSkillTask,
   type SkillTaskSupervisorSnapshot,
-} from './skills/skill-task-supervisor'
-import { isVeaAction, resolveVeaResumeAction } from './vea-resume-action'
+} from '../skills/skill-task-supervisor'
+import { isVeaAction, resolveVeaResumeAction } from '../vea-resume-action'
 
 export type ActiveSkillContextSource =
   | 'explicit'

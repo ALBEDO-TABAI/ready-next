@@ -73,6 +73,16 @@ function normalizeBrowserEvidenceSnippet(toolName: string, resultText: string): 
   return normalized.length > limit ? `${normalized.slice(0, limit - 3)}...` : normalized
 }
 
+function hasNegatedBrowserLookupSignal(text: string): boolean {
+  return /(不要|不用|无需|别|不必).{0,8}(查|搜索|搜|打开|浏览器|网页|网上|资料|评价)/.test(text)
+    || /(不查|别查|不要查)(网页|网上|资料|评价)?/.test(text)
+}
+
+function matchesBrowserPromptTrigger(text: string): boolean {
+  if (hasNegatedBrowserLookupSignal(text)) return false
+  return /(上传|发送|提交|浏览器|网页)/i.test(text)
+}
+
 function mergeRecentEvidence(
   previous: string[],
   nextItems: Array<{ toolName: string; resultText: string }> | null | undefined,
@@ -132,7 +142,7 @@ export class BrowserDomainAdapter implements DomainAdapter {
         id: 'browser-upload',
         label: '浏览器上传流程',
         priority: 50,
-        matches: ({ userText }) => /(上传|发送|提交|浏览器|网页)/i.test(userText),
+        matches: ({ userText }) => matchesBrowserPromptTrigger(userText),
         blocking: false,
         refs: [
           {

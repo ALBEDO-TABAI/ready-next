@@ -3,7 +3,7 @@ import { join } from 'path'
 import { randomUUID } from 'crypto'
 import { AgentRepository } from '../repositories/agent-repository'
 import { MemoryRepository, type MemorySourceType } from '../repositories/memory-repository'
-import type { ConversationScope, ScopeRunEventPayload } from './types'
+import type { ConversationScope, ScopeRunEventPayload } from './contracts/types'
 import {
   buildCompressionReport,
   compressHistoryForPrompt,
@@ -12,8 +12,8 @@ import {
 import { logAgentMetric } from './metrics'
 import type { IntentClassification } from './intent-classifier'
 import { classifyIntent } from './intent-classifier'
-import type { RequestEnvelope } from './request-envelope'
-import { buildRequestEnvelope } from './request-envelope'
+import type { RequestEnvelope } from './contracts/request-envelope'
+import { buildRequestEnvelope } from './contracts/request-envelope'
 import type { SessionRecallCapsule } from '../../../shared/session-recall'
 import type { CoordinatorPromptFragment, DomainAdapter } from './domain-adapters/domain-adapter'
 

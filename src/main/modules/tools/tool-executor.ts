@@ -37,6 +37,7 @@ import { executeBrowserTool } from './browser-tools'
 import { executeCalendarTool } from './calendar-tools'
 import { executeDocumentTool } from './document-tools'
 import { executeGeneralResearchTool } from './general-research-tools'
+import { executeMapTool } from './map-tools'
 import { executeAskUserQuestions } from './builtins/ask-user-questions'
 import {
   getAskUserQuestionsCardEmitter,
@@ -418,6 +419,13 @@ export async function executeToolCall(
             obsidianWebClipPresetDir,
           })
         }
+
+        case 'map':
+          return executeMapTool(toolName, args as Record<string, unknown>, {
+            abortSignal: context.abortSignal,
+            sessionId: context.sessionId,
+            requestModuleToolAction: context.requestModuleToolAction,
+          })
 
         case 'mcp':
           // Stage T PR-T5 — MCP dispatch. The model-visible list resolver

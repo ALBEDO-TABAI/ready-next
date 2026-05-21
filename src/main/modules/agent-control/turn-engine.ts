@@ -100,6 +100,16 @@ export function detectAllowedPreferredMismatch(
   return preferredToolNames.some((name) => !allowedSet.has(name))
 }
 
+export function shouldResumeContinuationForTurn(params: {
+  continuationTaskId?: string | null
+  mapSemanticIntent?: MapSemanticIntent | null
+  retryOnlyTurnDetected: boolean
+}): boolean {
+  if (!params.continuationTaskId) return false
+  if (isMapSemanticIntentActive(params.mapSemanticIntent) && !params.retryOnlyTurnDetected) return false
+  return true
+}
+
 function areStringArraysEqual(
   left: ReadonlyArray<string> | null | undefined,
   right: ReadonlyArray<string> | null | undefined,
@@ -219,6 +229,12 @@ export function buildBudgetWarningMessage(params: {
 import { buildContinuationStateFromProjection } from './contracts/continuation-state'
 import { matchesConfigRepairIntent, matchesResumeIntent } from './contracts/resume-lexicon'
 import { classifyIntent, type IntentClassification } from './intent-classifier'
+import {
+  applyMapSemanticIntentToIntentClassification,
+  classifyMapSemanticIntent,
+  isMapSemanticIntentActive,
+  type MapSemanticIntent,
+} from './map-semantic-intent'
 import { logAgentMetric } from './metrics'
 import { TOOL_ERROR_METRICS } from './tools-runtime/tool-error-metrics'
 import { snapshotTurnFeatureFlags } from './runtime-core/turn-feature-flags'
@@ -1416,7 +1432,7 @@ export class TurnEngine {
           && (request.continuationState.taskType === 'research'
             || request.continuationState.module === 'research'),
       )
-      const effectiveIntentClassification = (continuationResearchHint && baseIntentClassification.primaryDomain !== 'research')
+      const researchAdjustedIntentClassification = (continuationResearchHint && baseIntentClassification.primaryDomain !== 'research')
         ? {
             ...baseIntentClassification,
             primaryDomain: 'research' as const,
@@ -1426,11 +1442,37 @@ export class TurnEngine {
             ])),
           }
         : baseIntentClassification
+      const mapSemanticIntent = await classifyMapSemanticIntent({
+        prompt: requestEnvelope.primaryInstruction || requestEnvelope.pureUserText || userText,
+        requestLLM: async (semanticPrompt, timeoutMs) => {
+          const semanticSession = {
+            ...session,
+            messages: [
+              { role: 'user' as const, content: semanticPrompt },
+            ],
+          }
+          const response = await host.requestSimpleText({
+            session: semanticSession,
+            signal: request.abortSignal,
+            providerContext: host.providerContext,
+            timeoutMs,
+          })
+          return response.text || ''
+        },
+      })
+      const shouldKeepContinuationResearchIntent = continuationResearchHint && !isMapSemanticIntentActive(mapSemanticIntent)
+      const effectiveIntentClassification = shouldKeepContinuationResearchIntent
+        ? researchAdjustedIntentClassification
+        : applyMapSemanticIntentToIntentClassification(
+            researchAdjustedIntentClassification,
+            mapSemanticIntent,
+          )
       const executionIntentContext = resolveExecutionIntentContext({
         requestEnvelope,
         previousInputs: previousPureUserInputs,
         lastDocumentContextInput: session.lastDocumentContextInput,
         intentClassification: effectiveIntentClassification,
+        mapSemanticIntent,
         activeWidgetEditLease,
         refreshWidgetEditLease: host.refreshActiveWidgetEditLease
           ? () => host.refreshActiveWidgetEditLease?.() || null
@@ -2396,11 +2438,16 @@ export class TurnEngine {
         host.log(`[skill_context_tool_mismatch] ${JSON.stringify(summarizeActiveSkillContext(activeSkillContextForTurn))}`)
       }
 
+      const shouldResumeContinuation = shouldResumeContinuationForTurn({
+        continuationTaskId,
+        mapSemanticIntent,
+        retryOnlyTurnDetected: isRetryOnlyTurnDetected,
+      })
       const resolvedTaskTypeForEffectiveRun = resolveTaskType({
         intent: executionIntentContext.intentClassification as IntentClassification,
         envelope: executionIntentContext.requestEnvelope,
         capabilities: reconciledRunCapabilities.runtimeSnapshot,
-        currentTaskContext: continuationTaskId ? { continuationTaskId } : null,
+        currentTaskContext: shouldResumeContinuation ? { continuationTaskId } : null,
       })
       // Phase 4.1 — long-skill resume budget no longer requires `!continuationTaskId`.
       // Audit Phase 4 §C1: an explicit continuation that's still on a typed
@@ -2442,7 +2489,7 @@ export class TurnEngine {
         resolution: taskTypeResolution,
         envelope: executionIntentContext.requestEnvelope,
         capabilities: reconciledRunCapabilities.runtimeSnapshot,
-        continuationContext: continuationTaskId
+        continuationContext: shouldResumeContinuation
           ? {
             state: continuationState ?? null,
             projection: continuationProjection ?? null,

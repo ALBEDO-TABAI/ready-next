@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties, type ReactNode } from 'react'
 import {
   ChevronLeft, User, Bell, Shield, Database,
   Palette, Keyboard, Globe, Info, Moon, Sun, Bot, Monitor, Droplets,
@@ -11,7 +11,7 @@ import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runti
 import { listSettingsCapabilityGroups, type CapabilityGroupId } from '../../shared/ai-capability-groups'
 import { useSettings, getProviderDef } from '../stores/useSettings'
 import type { AIProviderCategory } from '../stores/useSettings'
-import type { ExternalServiceOptionValue, PublicExternalServiceProfile } from '../../shared/external-services'
+import type { ExternalServiceOptionValue, ExternalServiceUpdateInput, PublicExternalServiceProfile } from '../../shared/external-services'
 import RemoteIMSettingsPanel from '../components/settings/RemoteIMSettingsPanel'
 import PetSettingsPanel from '../components/settings/PetSettingsPanel'
 import {
@@ -104,7 +104,7 @@ const settingsData: SettingSection[] = [
     id: 'external-services',
     title: '外部服务',
     icon: ExternalLink,
-    description: '统一管理 Tavily、Jina、RSSHub、Bilibili、GitHub 与读图模型',
+    description: '统一管理 Tavily、Jina、RSSHub、Bilibili、GitHub、高德地图与读图模型',
     settings: []
   },
   {
@@ -1968,6 +1968,23 @@ const EXTERNAL_SERVICE_SECRET_LABELS: Record<string, string> = {
   biliJct: 'bili_jct',
 }
 
+const EXTERNAL_SERVICE_DESCRIPTIONS: Partial<Record<PublicExternalServiceProfile['kind'], string>> = {
+  tavily: '供网页研究使用',
+  duckduckgo: '供备用搜索使用',
+  jina: '供网页正文读取使用',
+  rsshub: '供 RSS 订阅抓取使用',
+  bilibili: '供视频分析技能使用',
+  github: '供代码仓库操作使用',
+  amap: '供路线规划 Agent 使用',
+  'vision-model': '供视觉分析独立使用',
+}
+
+type ExternalServiceFeedback = {
+  kind: 'info' | 'success' | 'error'
+  serviceId?: string
+  text: string
+}
+
 function serviceSecretKeys(profile: PublicExternalServiceProfile): string[] {
   const keys = Object.keys(profile.secretStatus || {})
   if (keys.length > 0) return keys
@@ -1987,18 +2004,141 @@ function normalizeServiceOptionValue(value: unknown): ExternalServiceOptionValue
   return ''
 }
 
+function externalServiceDescription(profile: PublicExternalServiceProfile): string {
+  return EXTERNAL_SERVICE_DESCRIPTIONS[profile.kind] || profile.kind
+}
+
+function buildExternalServicePayload(
+  profile: PublicExternalServiceProfile,
+  secretDraft: Record<string, string> | undefined,
+): ExternalServiceUpdateInput {
+  const secrets: Record<string, string> = {}
+  for (const [key, value] of Object.entries(secretDraft || {})) {
+    if (value.trim()) secrets[key] = value.trim()
+  }
+  return {
+    id: profile.id,
+    kind: profile.kind,
+    name: profile.name,
+    enabled: profile.enabled,
+    baseUrl: profile.baseUrl,
+    options: profile.options,
+    secrets,
+  }
+}
+
+function externalServiceStatusStyle(enabled: boolean): CSSProperties {
+  return {
+    borderColor: enabled ? 'color-mix(in srgb, var(--color-green) 44%, transparent)' : 'color-mix(in srgb, var(--surface-border) 76%, transparent)',
+    color: enabled ? 'var(--color-green)' : 'var(--text-muted)',
+    background: 'transparent',
+  }
+}
+
+function externalServiceStatusButtonStyle(enabled: boolean): CSSProperties {
+  return {
+    ...externalServiceStatusStyle(enabled),
+    minWidth: 58,
+    height: 24,
+    padding: '0 8px',
+  }
+}
+
+function externalServiceButtonStyle(variant: 'plain' | 'secondary' | 'primary', disabled: boolean): CSSProperties {
+  if (variant === 'primary') {
+    return {
+      minWidth: 76,
+      height: 38,
+      padding: '0 15px',
+      borderRadius: 10,
+      border: '1px solid color-mix(in srgb, var(--color-blue) 72%, transparent)',
+      background: 'color-mix(in srgb, var(--color-blue) 82%, var(--surface-card-bg) 18%)',
+      color: '#fff',
+      opacity: disabled ? 0.62 : 1,
+      boxShadow: 'none',
+    }
+  }
+  return {
+    minWidth: variant === 'plain' ? 58 : 76,
+    height: 38,
+    padding: '0 13px',
+    borderRadius: 10,
+    border: variant === 'plain' ? '1px solid transparent' : '1px solid color-mix(in srgb, var(--surface-border) 70%, transparent)',
+    background: 'transparent',
+    color: variant === 'plain' ? 'var(--text-muted)' : 'var(--text-body)',
+    opacity: disabled ? 0.62 : 1,
+    boxShadow: 'none',
+  }
+}
+
+function externalServiceFeedbackStyle(kind: ExternalServiceFeedback['kind']): CSSProperties {
+  return {
+    color: kind === 'error' ? 'var(--color-red)' : kind === 'success' ? 'var(--color-green)' : 'var(--text-muted)',
+    background: 'transparent',
+  }
+}
+
+function externalServiceInputStyle(): CSSProperties {
+  return {
+    ...SETTINGS_FLAT_INPUT_STYLE,
+    minHeight: 42,
+    borderRadius: 10,
+    padding: '9px 11px',
+    boxShadow: 'none',
+  }
+}
+
+function externalServiceDraftSummary(profile: PublicExternalServiceProfile, secretDraft: Record<string, string> | undefined): string {
+  const hasDraftSecret = Object.values(secretDraft || {}).some((value) => value.trim())
+  if (hasDraftSecret) return '有未保存密钥 · 测试会使用当前输入 · 保存后生效'
+  const secretKeys = serviceSecretKeys(profile)
+  if (secretKeys.length === 0) return profile.enabled ? '服务已启用' : '服务未启用'
+  const configured = secretKeys.filter((key) => profile.secretStatus[key]?.configured).length
+  if (configured === secretKeys.length) return `已保存 ${configured} 项密钥`
+  if (configured > 0) return `已保存 ${configured}/${secretKeys.length} 项密钥`
+  return '密钥未配置'
+}
+
+function hasExternalServiceSecret(profile: PublicExternalServiceProfile, secretDraft: Record<string, string> | undefined, key: string): boolean {
+  return Boolean(String(secretDraft?.[key] || '').trim()) || profile.secretStatus[key]?.configured === true
+}
+
+function requiredExternalServiceSecretKeys(profile: PublicExternalServiceProfile): string[] {
+  if (profile.kind === 'tavily' || profile.kind === 'amap' || profile.kind === 'vision-model') return ['apiKey']
+  if (profile.kind === 'github') return ['token']
+  if (profile.kind === 'bilibili') return ['sessdata']
+  return []
+}
+
+function externalServiceMissingRequirements(profile: PublicExternalServiceProfile, secretDraft: Record<string, string> | undefined): string[] {
+  const missing: string[] = []
+  const baseUrl = String(profile.baseUrl || '').trim()
+  if (serviceNeedsBaseUrl(profile) && !baseUrl) missing.push('服务地址')
+  for (const key of requiredExternalServiceSecretKeys(profile)) {
+    if (!hasExternalServiceSecret(profile, secretDraft, key)) {
+      missing.push(EXTERNAL_SERVICE_SECRET_LABELS[key] || key)
+    }
+  }
+  if (profile.kind === 'vision-model') {
+    if (!String(profile.options.model || '').trim()) missing.push('Model')
+  }
+  return missing
+}
+
 function ExternalServicesSettingsPanel() {
   const [profiles, setProfiles] = useState<PublicExternalServiceProfile[]>([])
   const [secretDrafts, setSecretDrafts] = useState<Record<string, Record<string, string>>>({})
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [testingId, setTestingId] = useState<string | null>(null)
-  const [message, setMessage] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [hoveredId, setHoveredId] = useState<string | null>(null)
+  const [feedback, setFeedback] = useState<ExternalServiceFeedback | null>(null)
 
   const refresh = useCallback(async () => {
     if (typeof window === 'undefined' || !window.electronAPI?.settings?.listExternalServices) {
       setLoading(false)
-      setMessage('外部服务 IPC 不可用')
+      setFeedback({ kind: 'error', text: '外部服务 IPC 不可用' })
       return
     }
     setLoading(true)
@@ -2006,12 +2146,12 @@ function ExternalServicesSettingsPanel() {
       const res = await window.electronAPI.settings.listExternalServices()
       if (res.success && res.data) {
         setProfiles(res.data as PublicExternalServiceProfile[])
-        setMessage(null)
+        setFeedback(null)
       } else {
-        setMessage(res.error || '读取外部服务配置失败')
+        setFeedback({ kind: 'error', text: res.error || '读取外部服务配置失败' })
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error))
+      setFeedback({ kind: 'error', text: error instanceof Error ? error.message : String(error) })
     } finally {
       setLoading(false)
     }
@@ -2021,8 +2161,17 @@ function ExternalServicesSettingsPanel() {
     void refresh()
   }, [refresh])
 
+  useEffect(() => {
+    if (profiles.length === 0) return
+    setSelectedId((current) => {
+      if (current && profiles.some((profile) => profile.id === current)) return current
+      return profiles.find((profile) => profile.kind === 'amap')?.id || profiles[0]?.id || null
+    })
+  }, [profiles])
+
   const patchProfile = useCallback((id: string, patch: Partial<PublicExternalServiceProfile>) => {
     setProfiles((prev) => prev.map((profile) => profile.id === id ? { ...profile, ...patch } : profile))
+    setFeedback({ kind: 'info', serviceId: id, text: '有未保存更改。测试会使用当前表单值，保存后才会生效。' })
   }, [])
 
   const patchOptions = useCallback((id: string, patch: Record<string, ExternalServiceOptionValue>) => {
@@ -2031,6 +2180,7 @@ function ExternalServicesSettingsPanel() {
         ? { ...profile, options: { ...(profile.options || {}), ...patch } }
         : profile
     )))
+    setFeedback({ kind: 'info', serviceId: id, text: '有未保存更改。测试会使用当前表单值，保存后才会生效。' })
   }, [])
 
   const updateSecretDraft = useCallback((id: string, key: string, value: string) => {
@@ -2041,35 +2191,42 @@ function ExternalServicesSettingsPanel() {
         [key]: value,
       },
     }))
+    setFeedback({ kind: 'info', serviceId: id, text: '有未保存更改。测试会使用当前表单值，保存后才会生效。' })
   }, [])
+
+  const toggleProfileEnabled = useCallback((profile: PublicExternalServiceProfile) => {
+    setSelectedId(profile.id)
+    if (!profile.enabled) {
+      const missing = externalServiceMissingRequirements(profile, secretDrafts[profile.id])
+      if (missing.length > 0) {
+        const text = `请先完成配置：${missing.join('、')}。`
+        setFeedback({
+          kind: 'error',
+          serviceId: profile.id,
+          text,
+        })
+        window.alert(text)
+        return
+      }
+    }
+    patchProfile(profile.id, { enabled: !profile.enabled })
+  }, [patchProfile, secretDrafts])
 
   const saveProfile = useCallback(async (profile: PublicExternalServiceProfile) => {
     if (!window.electronAPI?.settings?.updateExternalService) return
     setBusyId(profile.id)
-    setMessage(null)
+    setFeedback({ kind: 'info', serviceId: profile.id, text: '正在保存配置...' })
     try {
-      const secrets: Record<string, string> = {}
-      for (const [key, value] of Object.entries(secretDrafts[profile.id] || {})) {
-        if (value.trim()) secrets[key] = value.trim()
-      }
-      const res = await window.electronAPI.settings.updateExternalService({
-        id: profile.id,
-        kind: profile.kind,
-        name: profile.name,
-        enabled: profile.enabled,
-        baseUrl: profile.baseUrl,
-        options: profile.options,
-        secrets,
-      })
+      const res = await window.electronAPI.settings.updateExternalService(buildExternalServicePayload(profile, secretDrafts[profile.id]))
       if (res.success && res.data) {
         setProfiles((prev) => prev.map((item) => item.id === profile.id ? res.data as PublicExternalServiceProfile : item))
         setSecretDrafts((prev) => ({ ...prev, [profile.id]: {} }))
-        setMessage(`已保存：${profile.name}`)
+        setFeedback({ kind: 'success', serviceId: profile.id, text: `已保存：${profile.name}` })
       } else {
-        setMessage(res.error || `保存失败：${profile.name}`)
+        setFeedback({ kind: 'error', serviceId: profile.id, text: res.error || `保存失败：${profile.name}` })
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error))
+      setFeedback({ kind: 'error', serviceId: profile.id, text: error instanceof Error ? error.message : String(error) })
     } finally {
       setBusyId(null)
     }
@@ -2078,37 +2235,41 @@ function ExternalServicesSettingsPanel() {
   const resetProfile = useCallback(async (profile: PublicExternalServiceProfile) => {
     if (!window.electronAPI?.settings?.resetExternalService) return
     setBusyId(profile.id)
-    setMessage(null)
+    setFeedback({ kind: 'info', serviceId: profile.id, text: '正在重置配置...' })
     try {
       const res = await window.electronAPI.settings.resetExternalService({ id: profile.id })
       if (res.success && res.data) {
         setProfiles((prev) => prev.map((item) => item.id === profile.id ? res.data as PublicExternalServiceProfile : item))
         setSecretDrafts((prev) => ({ ...prev, [profile.id]: {} }))
-        setMessage(`已重置：${profile.name}`)
+        setFeedback({ kind: 'success', serviceId: profile.id, text: `已重置：${profile.name}` })
       } else {
-        setMessage(res.error || `重置失败：${profile.name}`)
+        setFeedback({ kind: 'error', serviceId: profile.id, text: res.error || `重置失败：${profile.name}` })
       }
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error))
+      setFeedback({ kind: 'error', serviceId: profile.id, text: error instanceof Error ? error.message : String(error) })
     } finally {
       setBusyId(null)
     }
   }, [])
 
   const testProfile = useCallback(async (profile: PublicExternalServiceProfile) => {
-    if (!window.electronAPI?.settings?.testExternalService) return
+    if (!window.electronAPI?.settings?.testExternalServiceDraft) return
     setTestingId(profile.id)
-    setMessage(null)
+    setFeedback({ kind: 'info', serviceId: profile.id, text: '正在测试当前表单配置...' })
     try {
-      const res = await window.electronAPI.settings.testExternalService({ id: profile.id })
+      const res = await window.electronAPI.settings.testExternalServiceDraft(buildExternalServicePayload(profile, secretDrafts[profile.id]))
       const detail = res.data?.latencyMs ? `（${res.data.latencyMs}ms）` : ''
-      setMessage(res.success ? `${profile.name}：${res.data?.message || '连接正常'}${detail}` : `${profile.name}：${res.error || '测试失败'}`)
+      setFeedback({
+        kind: res.success ? 'success' : 'error',
+        serviceId: profile.id,
+        text: res.success ? `${profile.name}：${res.data?.message || '连接正常'}${detail}` : `${profile.name}：${res.error || '测试失败'}`,
+      })
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error))
+      setFeedback({ kind: 'error', serviceId: profile.id, text: error instanceof Error ? error.message : String(error) })
     } finally {
       setTestingId(null)
     }
-  }, [])
+  }, [secretDrafts])
 
   if (loading) {
     return (
@@ -2119,166 +2280,222 @@ function ExternalServicesSettingsPanel() {
     )
   }
 
+  const selectedProfile = profiles.find((profile) => profile.id === selectedId) || profiles[0] || null
+  const selectedSecretKeys = selectedProfile ? serviceSecretKeys(selectedProfile) : []
+  const selectedFeedback = feedback && (!feedback.serviceId || feedback.serviceId === selectedProfile?.id) ? feedback : null
+  const selectedDraft = selectedProfile ? secretDrafts[selectedProfile.id] : undefined
+  const isSelectedBusy = Boolean(selectedProfile && busyId === selectedProfile.id)
+  const isSelectedTesting = Boolean(selectedProfile && testingId === selectedProfile.id)
+  const selectedSummary = selectedProfile ? externalServiceDraftSummary(selectedProfile, selectedDraft) : ''
+
   return (
-    <div className="flex flex-col gap-5">
-      {message && (
-        <div className="rounded-2xl border text-[12px]" style={{ ...SETTINGS_SUBTLE_CARD_STYLE, padding: '10px 12px', color: 'var(--text-body)' }}>
-          {message}
-        </div>
-      )}
-      <div className="grid gap-4 md:grid-cols-2">
-        {profiles.map((profile) => {
-          const secretKeys = serviceSecretKeys(profile)
-          const isVisionModel = profile.kind === 'vision-model'
-          const isBilibili = profile.kind === 'bilibili'
-          const busy = busyId === profile.id
-          const testing = testingId === profile.id
-          return (
-            <div key={profile.id} className="rounded-2xl border" style={{ ...SETTINGS_FLAT_CARD_STYLE, padding: '16px 18px' }}>
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-[13px] font-semibold" style={{ color: 'var(--text-title)' }}>
-                    {profile.name}
-                  </div>
-                  <div className="text-[11px] mt-1" style={{ color: 'var(--text-light)' }}>
-                    {profile.kind === 'vision-model' ? '供视觉分析独立使用' : profile.kind}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => patchProfile(profile.id, { enabled: !profile.enabled })}
-                  className="rounded-full border text-[11px] font-medium"
-                  style={{
-                    padding: '5px 10px',
-                    borderColor: profile.enabled ? 'rgba(34,197,94,.35)' : 'var(--border-subtle)',
-                    color: profile.enabled ? 'var(--color-green)' : 'var(--text-muted)',
-                    background: profile.enabled ? 'rgba(34,197,94,.10)' : 'transparent',
-                  }}
-                >
-                  {profile.enabled ? '已启用' : '未启用'}
-                </button>
-              </div>
-
-              <div className="mt-4 flex flex-col gap-3">
-                {serviceNeedsBaseUrl(profile) && (
-                  <label className="flex flex-col gap-1.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                    服务地址
-                    <input
-                      value={profile.baseUrl || ''}
-                      onChange={(event) => patchProfile(profile.id, { baseUrl: event.target.value })}
-                      style={{ ...SETTINGS_FLAT_INPUT_STYLE, padding: '9px 10px' }}
-                      placeholder={profile.kind === 'vision-model' ? 'https://api.example.com/v1' : 'https://...'}
-                    />
-                  </label>
-                )}
-
-                {isVisionModel && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <label className="flex flex-col gap-1.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                      Provider
-                      <input
-                        value={String(profile.options.provider || '')}
-                        onChange={(event) => patchOptions(profile.id, { provider: event.target.value })}
-                        style={{ ...SETTINGS_FLAT_INPUT_STYLE, padding: '9px 10px' }}
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                      Model
-                      <input
-                        value={String(profile.options.model || '')}
-                        onChange={(event) => patchOptions(profile.id, { model: event.target.value })}
-                        style={{ ...SETTINGS_FLAT_INPUT_STYLE, padding: '9px 10px' }}
-                        placeholder="gpt-4o / qwen-vl..."
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                      API 格式
-                      <select
-                        value={String(profile.options.apiKind || 'openai-completions')}
-                        onChange={(event) => patchOptions(profile.id, { apiKind: event.target.value })}
-                        style={{ ...SETTINGS_FLAT_INPUT_STYLE, padding: '9px 10px' }}
-                      >
-                        <option value="openai-completions">OpenAI Chat</option>
-                        <option value="openai-responses">OpenAI Responses</option>
-                        <option value="anthropic-messages">Anthropic Messages</option>
-                      </select>
-                    </label>
-                    <label className="flex items-center gap-2 text-[11px]" style={{ color: 'var(--text-muted)', paddingTop: 22 }}>
-                      <input
-                        type="checkbox"
-                        checked={Array.isArray(profile.options.inputModes) && profile.options.inputModes.includes('image')}
-                        onChange={(event) => patchOptions(profile.id, { inputModes: event.target.checked ? ['text', 'image'] : ['text'] })}
-                      />
-                      支持图片输入
-                    </label>
-                  </div>
-                )}
-
-                {isBilibili && (
-                  <label className="flex flex-col gap-1.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                    Cookie 文件路径（可选）
-                    <input
-                      value={String(normalizeServiceOptionValue(profile.options.cookieFile))}
-                      onChange={(event) => patchOptions(profile.id, { cookieFile: event.target.value })}
-                      style={{ ...SETTINGS_FLAT_INPUT_STYLE, padding: '9px 10px' }}
-                      placeholder="/path/to/cookies.txt"
-                    />
-                  </label>
-                )}
-
-                {secretKeys.map((key) => {
-                  const status = profile.secretStatus[key]
-                  return (
-                    <label key={key} className="flex flex-col gap-1.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                      {EXTERNAL_SERVICE_SECRET_LABELS[key] || key}
-                      <input
-                        type="password"
-                        value={secretDrafts[profile.id]?.[key] || ''}
-                        onChange={(event) => updateSecretDraft(profile.id, key, event.target.value)}
-                        style={{ ...SETTINGS_FLAT_INPUT_STYLE, padding: '9px 10px' }}
-                        placeholder={status?.configured ? `已配置 ${status.masked || ''}，留空则保留` : '未配置'}
-                      />
-                    </label>
-                  )
-                })}
-              </div>
-
-              <div className="mt-4 flex items-center justify-between gap-2">
-                <button
-                  type="button"
-                  onClick={() => { void resetProfile(profile) }}
-                  disabled={busy}
-                  className="rounded-lg text-[12px] font-medium"
-                  style={{ ...SETTINGS_SECONDARY_BUTTON_STYLE, padding: '7px 10px', opacity: busy ? 0.7 : 1 }}
-                >
-                  重置
-                </button>
-                <div className="flex gap-2">
+    <div className="flex flex-col gap-3">
+      <div className="grid gap-5 xl:grid-cols-[260px_minmax(0,760px)]">
+        <nav className="flex flex-col gap-1" aria-label="外部服务列表">
+          {profiles.map((profile) => {
+            const active = profile.id === selectedProfile?.id
+            const hovered = profile.id === hoveredId
+            return (
+              <div
+                key={profile.id}
+                onMouseEnter={() => setHoveredId(profile.id)}
+                onMouseLeave={() => setHoveredId((current) => current === profile.id ? null : current)}
+                className="w-full transition-[background-color,color] duration-150"
+                style={{
+                  padding: '10px 11px',
+                  borderRadius: 12,
+                  border: '1px solid transparent',
+                  background: active
+                    ? 'color-mix(in srgb, var(--color-blue) 8%, transparent)'
+                    : hovered
+                      ? 'color-mix(in srgb, var(--surface-card-bg) 48%, transparent)'
+                      : 'transparent',
+                }}
+              >
+                <div className="flex items-center gap-2.5">
                   <button
                     type="button"
-                    onClick={() => { void testProfile(profile) }}
-                    disabled={testing || busy}
-                    className="inline-flex items-center gap-1.5 rounded-lg text-[12px] font-medium"
-                    style={{ ...SETTINGS_SECONDARY_BUTTON_STYLE, padding: '7px 10px', opacity: testing || busy ? 0.7 : 1 }}
+                    onClick={() => setSelectedId(profile.id)}
+                    className="min-w-0 flex-1 text-left"
                   >
-                    {testing ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-                    测试
+                    <div className="truncate text-[13px] font-semibold" style={{ color: 'var(--text-title)' }}>
+                      {profile.name}
+                    </div>
+                    <div className="mt-0.5 truncate text-[11px]" style={{ color: 'var(--text-light)' }}>
+                      {externalServiceDescription(profile)}
+                    </div>
                   </button>
                   <button
                     type="button"
-                    onClick={() => { void saveProfile(profile) }}
-                    disabled={busy}
-                    className="inline-flex items-center gap-1.5 rounded-lg text-[12px] font-medium"
-                    style={{ ...SETTINGS_PRIMARY_BUTTON_STYLE, padding: '7px 12px', opacity: busy ? 0.7 : 1 }}
+                    onClick={() => toggleProfileEnabled(profile)}
+                    className="inline-flex shrink-0 items-center justify-center rounded-[9px] border text-[11px] font-medium leading-none transition-[border-color,color,background-color] duration-150"
+                    style={externalServiceStatusButtonStyle(profile.enabled)}
                   >
-                    {busy ? <Loader2 className="w-3 h-3 animate-spin" /> : null}
-                    保存
+                    {profile.enabled ? '已启用' : '未启用'}
+                  </button>
+                </div>
+              </div>
+            )
+          })}
+        </nav>
+
+        {selectedProfile && (
+          <section
+            className="self-start rounded-[18px] border"
+            style={{
+              borderColor: 'color-mix(in srgb, var(--surface-border) 58%, transparent)',
+              background: 'color-mix(in srgb, var(--surface-card-bg) 88%, var(--bg-content) 12%)',
+              boxShadow: 'none',
+              padding: '18px 20px 16px',
+            }}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="text-[15px] font-semibold leading-tight" style={{ color: 'var(--text-title)' }}>
+                  {selectedProfile.name}
+                </div>
+                <div className="mt-1 text-[12px] leading-5" style={{ color: 'var(--text-muted)' }}>
+                  {externalServiceDescription(selectedProfile)}
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-2 flex items-center gap-2 text-[11px] leading-5" style={{ color: 'var(--text-light)' }}>
+              <span>{selectedSummary}</span>
+              {selectedProfile.updatedAt ? <span>· 更新于 {new Date(selectedProfile.updatedAt).toLocaleString()}</span> : null}
+            </div>
+
+            <div className="mt-4 flex max-w-[640px] flex-col gap-3.5">
+              {serviceNeedsBaseUrl(selectedProfile) && (
+                <label className="flex flex-col gap-1.5 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                  服务地址
+                  <input
+                    value={selectedProfile.baseUrl || ''}
+                    onChange={(event) => patchProfile(selectedProfile.id, { baseUrl: event.target.value })}
+                    style={externalServiceInputStyle()}
+                    placeholder={selectedProfile.kind === 'vision-model' ? 'https://api.example.com/v1' : 'https://...'}
+                  />
+                </label>
+              )}
+
+              {selectedProfile.kind === 'vision-model' && (
+                <div className="grid gap-3 md:grid-cols-2">
+                  <label className="flex flex-col gap-1.5 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                    Provider
+                    <input
+                      value={String(selectedProfile.options.provider || '')}
+                      onChange={(event) => patchOptions(selectedProfile.id, { provider: event.target.value })}
+                      style={externalServiceInputStyle()}
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                    Model
+                    <input
+                      value={String(selectedProfile.options.model || '')}
+                      onChange={(event) => patchOptions(selectedProfile.id, { model: event.target.value })}
+                      style={externalServiceInputStyle()}
+                      placeholder="gpt-4o / qwen-vl..."
+                    />
+                  </label>
+                  <label className="flex flex-col gap-1.5 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                    API 格式
+                    <select
+                      value={String(selectedProfile.options.apiKind || 'openai-completions')}
+                      onChange={(event) => patchOptions(selectedProfile.id, { apiKind: event.target.value })}
+                      style={externalServiceInputStyle()}
+                    >
+                      <option value="openai-completions">OpenAI Chat</option>
+                      <option value="openai-responses">OpenAI Responses</option>
+                      <option value="anthropic-messages">Anthropic Messages</option>
+                    </select>
+                  </label>
+                  <label className="flex items-center gap-2 self-end pb-2 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                    <input
+                      type="checkbox"
+                      checked={Array.isArray(selectedProfile.options.inputModes) && selectedProfile.options.inputModes.includes('image')}
+                      onChange={(event) => patchOptions(selectedProfile.id, { inputModes: event.target.checked ? ['text', 'image'] : ['text'] })}
+                    />
+                    支持图片输入
+                  </label>
+                </div>
+              )}
+
+              {selectedProfile.kind === 'bilibili' && (
+                <label className="flex flex-col gap-1.5 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                  Cookie 文件路径（可选）
+                  <input
+                    value={String(normalizeServiceOptionValue(selectedProfile.options.cookieFile))}
+                    onChange={(event) => patchOptions(selectedProfile.id, { cookieFile: event.target.value })}
+                    style={externalServiceInputStyle()}
+                    placeholder="/path/to/cookies.txt"
+                  />
+                </label>
+              )}
+
+              {selectedSecretKeys.map((key) => {
+                const status = selectedProfile.secretStatus[key]
+                return (
+                  <label key={key} className="flex flex-col gap-1.5 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
+                    {EXTERNAL_SERVICE_SECRET_LABELS[key] || key}
+                    <input
+                      type="password"
+                      value={secretDrafts[selectedProfile.id]?.[key] || ''}
+                      onChange={(event) => updateSecretDraft(selectedProfile.id, key, event.target.value)}
+                      style={externalServiceInputStyle()}
+                      placeholder={status?.configured ? `已配置 ${status.masked || ''}，留空则保留` : '未配置'}
+                    />
+                  </label>
+                )
+              })}
+
+              <div className="min-h-5 text-[11px] leading-5" style={selectedFeedback ? externalServiceFeedbackStyle(selectedFeedback.kind) : { color: 'var(--text-light)' }}>
+                {selectedFeedback ? (
+                  <span className="inline-flex items-center gap-1.5">
+                    {selectedFeedback.kind === 'success' ? <CheckCircle2 className="h-3.5 w-3.5" /> : selectedFeedback.kind === 'error' ? <XCircle className="h-3.5 w-3.5" /> : null}
+                    {selectedFeedback.text}
+                  </span>
+                ) : (
+                  '测试不会保存配置；保存后 Agent 才会使用。'
+                )}
+              </div>
+
+              <div className="flex items-center justify-between gap-3 pt-0.5">
+                <button
+                  type="button"
+                  onClick={() => { void resetProfile(selectedProfile) }}
+                  disabled={isSelectedBusy || isSelectedTesting}
+                  className="inline-flex items-center justify-center gap-1.5 text-[12px] font-medium transition-[border-color,color,background-color,opacity] duration-150"
+                  style={externalServiceButtonStyle('plain', isSelectedBusy || isSelectedTesting)}
+                >
+                  {isSelectedBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                  {isSelectedBusy ? '重置中' : '重置'}
+                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { void testProfile(selectedProfile) }}
+                    disabled={isSelectedTesting || isSelectedBusy}
+                    className="inline-flex items-center justify-center gap-1.5 text-[12px] font-medium transition-[border-color,color,background-color,opacity] duration-150"
+                    style={externalServiceButtonStyle('secondary', isSelectedTesting || isSelectedBusy)}
+                  >
+                    {isSelectedTesting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                    {isSelectedTesting ? '测试中' : '测试'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { void saveProfile(selectedProfile) }}
+                    disabled={isSelectedBusy || isSelectedTesting}
+                    className="inline-flex items-center justify-center gap-1.5 text-[12px] font-medium transition-[border-color,color,background-color,opacity] duration-150"
+                    style={externalServiceButtonStyle('primary', isSelectedBusy || isSelectedTesting)}
+                  >
+                    {isSelectedBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
+                    {isSelectedBusy ? '保存中' : '保存'}
                   </button>
                 </div>
               </div>
             </div>
-          )
-        })}
+          </section>
+        )}
       </div>
     </div>
   )

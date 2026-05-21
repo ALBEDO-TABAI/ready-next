@@ -5,6 +5,7 @@ export type ExternalServiceKind =
   | 'rsshub'
   | 'bilibili'
   | 'github'
+  | 'amap'
   | 'vision-model'
 
 export type ExternalServiceOptionValue = string | number | boolean | string[] | null
@@ -118,6 +119,15 @@ export const DEFAULT_EXTERNAL_SERVICE_PROFILES: ExternalServiceProfile[] = [
     options: {},
   },
   {
+    id: 'amap-default',
+    kind: 'amap',
+    name: '高德地图',
+    enabled: false,
+    baseUrl: 'https://restapi.amap.com',
+    secrets: { apiKey: '' },
+    options: {},
+  },
+  {
     id: 'vision-model-default',
     kind: 'vision-model',
     name: 'VEA 读图模型',
@@ -140,6 +150,7 @@ export const EXTERNAL_SERVICE_KIND_LABELS: Record<ExternalServiceKind, string> =
   rsshub: 'RSSHub',
   bilibili: 'Bilibili',
   github: 'GitHub',
+  amap: '高德地图',
   'vision-model': '读图模型',
 }
 

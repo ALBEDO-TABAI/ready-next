@@ -1,6 +1,6 @@
 import { createHash } from 'crypto'
-import type { ChatConversationRecord, ConversationSourceKind, DatabaseManager } from '../database'
-import type { SessionRecallCapsule, SessionRecallContextRef, SessionRecallHit, SessionRecallMatchKind } from '../../../shared/session-recall'
+import type { ChatConversationRecord, ConversationSourceKind, DatabaseManager } from '../../database'
+import type { SessionRecallCapsule, SessionRecallContextRef, SessionRecallHit, SessionRecallMatchKind } from '../../../../shared/session-recall'
 
 interface SessionRecallMetadataRow {
   conversation_id: string

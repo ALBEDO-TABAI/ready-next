@@ -1,9 +1,9 @@
 import { existsSync, readFileSync, rmSync } from 'fs'
 import { homedir } from 'os'
 import { join } from 'path'
-import { atomicWriteJson } from './atomic-write'
-import type { ContinuationState } from './contracts/continuation-state'
-import { normalizeContinuationState } from './contracts/continuation-state'
+import { atomicWriteJson } from '../atomic-write'
+import type { ContinuationState } from '../contracts/continuation-state'
+import { normalizeContinuationState } from '../contracts/continuation-state'
 import {
   domainsLikelyMatch,
   findRecentBrowserActionInRecords,
@@ -11,7 +11,7 @@ import {
   rememberRecentBrowserAction,
   type BrowserActionKind,
   type BrowserActionRecord,
-} from './domain-adapters/browser-action-heuristics'
+} from '../domain-adapters/browser-action-heuristics'
 
 export { domainsLikelyMatch, normalizeDomain }
 export type { BrowserActionKind, BrowserActionRecord }

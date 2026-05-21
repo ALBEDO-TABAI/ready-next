@@ -201,6 +201,7 @@ export interface ScopeRunTriggerHit {
     | 'calendar'
     | 'feishu'
     | 'research'
+    | 'map'
     | 'system'
   blocking: boolean
   refs: string[]
@@ -429,6 +430,7 @@ export interface ScopeRunEventPayload {
     | 'calendar'
     | 'feishu'
     | 'research'
+    | 'map'
     | 'system'
   intent?: string
   executionKind?: 'deterministic' | 'interactive' | 'job' | 'pipeline'

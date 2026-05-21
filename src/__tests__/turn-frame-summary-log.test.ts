@@ -14,6 +14,7 @@ import test from 'node:test'
 import {
   TurnEngine,
   detectAllowedPreferredMismatch,
+  shouldResumeContinuationForTurn,
 } from '../main/modules/agent-control/turn-engine'
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
 import {
@@ -475,5 +476,34 @@ test('detectAllowedPreferredMismatch: returns false when preferred is empty', ()
     detectAllowedPreferredMismatch(['skill_video_expert_pipeline'], []),
     false,
     'empty preferred cannot mismatch',
+  )
+})
+
+test('shouldResumeContinuationForTurn lets explicit map requests escape stale continuation context', () => {
+  assert.equal(
+    shouldResumeContinuationForTurn({
+      continuationTaskId: 'task-old-research',
+      mapSemanticIntent: {
+        isMapIntent: true,
+        primaryTask: 'multi_point_order',
+        secondarySignals: [],
+        confidence: 0.8,
+      },
+      retryOnlyTurnDetected: false,
+    }),
+    false,
+  )
+  assert.equal(
+    shouldResumeContinuationForTurn({
+      continuationTaskId: 'task-old-research',
+      mapSemanticIntent: {
+        isMapIntent: true,
+        primaryTask: 'multi_point_order',
+        secondarySignals: [],
+        confidence: 0.8,
+      },
+      retryOnlyTurnDetected: true,
+    }),
+    true,
   )
 })

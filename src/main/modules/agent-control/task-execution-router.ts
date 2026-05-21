@@ -1,5 +1,5 @@
 import type { CapabilityRuntimeSnapshot } from '../../../shared/ai-capability-runtime'
-import { buildContinuationStateFromProjection } from './continuation-state'
+import { buildContinuationStateFromProjection } from './contracts/continuation-state'
 import { classifyIntent } from './intent-classifier'
 import { restoreContinuationTaskBudgetRuntime } from './task-projection/run-budget-policy'
 import type {
@@ -7,8 +7,8 @@ import type {
   TaskProjectionRecord,
   TaskStep,
   TaskTypeResolution,
-} from './run-contracts'
-import type { RequestEnvelope } from './request-envelope'
+} from './contracts/run-contracts'
+import type { RequestEnvelope } from './contracts/request-envelope'
 
 function buildPlannerSteps(params: {
   envelope: RequestEnvelope
@@ -86,7 +86,7 @@ function resolveExecutor(params: {
   if (params.chain === 'planner') return 'planner'
   if (params.chain === 'continuation') {
     const module = params.continuationModule || params.continuationProjection?.module
-    if (module === 'browser' || module === 'document' || module === 'skill' || module === 'rss' || module === 'calendar' || module === 'feishu' || module === 'research') {
+    if (module === 'browser' || module === 'document' || module === 'skill' || module === 'rss' || module === 'calendar' || module === 'feishu' || module === 'research' || module === 'map') {
       return module
     }
     return 'tool_loop'
@@ -109,7 +109,7 @@ export function resolveTaskExecutionRoute(params: {
    * `continuationContext: null` when no continuation is in flight.
    */
   continuationContext: {
-    state: import('./continuation-state').ContinuationState | null
+    state: import('./contracts/continuation-state').ContinuationState | null
     projection: TaskProjectionRecord | null
   } | null
 }): TaskExecutionRoute {

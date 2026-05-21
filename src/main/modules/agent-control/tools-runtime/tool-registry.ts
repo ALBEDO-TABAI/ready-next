@@ -53,6 +53,7 @@ import {
 } from '../../tools/file-management-tool-defs'
 import { getFeishuAnthropicTools, getFeishuOpenAITools } from '../../tools/feishu-tools'
 import { getMemoryAnthropicTools, getMemoryOpenAITools } from '../../tools/memory-tools'
+import { MAP_TOOL_NAMES, getMapAnthropicTools, getMapOpenAITools } from '../../tools/map-tools'
 import { getPetAnthropicTools, getPetOpenAITools } from '../../tools/pet-tools'
 import { getRSSAnthropicTools, getRSSOpenAITools } from '../../tools/rss-tools'
 import { getSessionRecallAnthropicTools, getSessionRecallOpenAITools } from '../../tools/session-recall-tools'
@@ -787,6 +788,12 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
       }
     },
   },
+  map_planning: {
+    staticToolNames: MAP_TOOL_NAMES,
+    getToolDefinitions: () => buildToolDefinitions('map_planning', MAP_TOOL_NAMES),
+    getAnthropicTools: () => getMapAnthropicTools(),
+    getOpenAITools: () => getMapOpenAITools(),
+  },
   design_reserved: {
     staticToolNames: [],
     getToolDefinitions: () => [],
@@ -1289,7 +1296,7 @@ export async function executeSkillActionViaToolGateway(
   }
 
   try {
-    const { executeToolCall } = await import('../tools/tool-executor')
+    const { executeToolCall } = await import('../../tools/tool-executor')
     const output = await executeToolCall(toolName, rawArgs, {
       allowedToolNames: new Set([toolName]),
       abortSignal: signal,

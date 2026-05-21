@@ -1,4 +1,4 @@
-import type { IntentClassification } from './intent-classifier'
+import type { IntentClassification } from '../intent-classifier'
 
 export function shouldEnforcePetToolRetry(params: {
   intent: IntentClassification

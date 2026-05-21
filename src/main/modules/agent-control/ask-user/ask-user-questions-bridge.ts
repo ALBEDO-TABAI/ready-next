@@ -17,7 +17,7 @@
 import type {
   EmitAskUserQuestionsCard,
   PersistAskUserQuestionsCardPending,
-} from '../tools/builtins/ask-user-questions'
+} from '../../tools/builtins/ask-user-questions'
 
 const noopEmitter: EmitAskUserQuestionsCard = () => {}
 const noopPersist: PersistAskUserQuestionsCardPending = () => {}

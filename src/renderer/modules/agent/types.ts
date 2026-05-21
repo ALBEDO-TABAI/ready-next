@@ -156,6 +156,7 @@ export type AgentModuleKind =
   | 'calendar'
   | 'feishu'
   | 'research'
+  | 'map'
   | 'system'
 export type ModuleExecutionKind = 'deterministic' | 'interactive' | 'job' | 'pipeline'
 export type AgentMemoryLayer = 'l0' | 'l1' | 'l2' | 'recall'

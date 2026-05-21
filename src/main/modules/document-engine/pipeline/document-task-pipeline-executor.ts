@@ -119,7 +119,7 @@ interface DocumentTaskPipelineExecutorDeps {
   resolveWidgetEditLease?: (params: {
     agent: string
     sessionId?: string | null
-  }) => import('../widget-edit-lease').ActiveWidgetEditLease | null
+  }) => import('../../agent-control/widget-edit-lease').ActiveWidgetEditLease | null
 }
 
 export interface DocumentTaskPipelineExecutionParams {

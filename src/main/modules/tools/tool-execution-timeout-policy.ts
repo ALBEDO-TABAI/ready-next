@@ -7,6 +7,7 @@ export const BROWSER_INTERACTIVE_TOOL_TIMEOUT_MS = 60_000
 export const SKILL_TOOL_TIMEOUT_MS = 120_000
 export const SKILL_LONG_TOOL_TIMEOUT_MS = 600_000
 export const FEISHU_TOOL_TIMEOUT_MS = 30_000
+export const MAP_TOOL_TIMEOUT_MS = 60_000
 
 export function resolveToolExecutionTimeoutMsForProfile(profile: ToolTimeoutProfile): number {
   switch (profile) {
@@ -20,6 +21,8 @@ export function resolveToolExecutionTimeoutMsForProfile(profile: ToolTimeoutProf
       return SKILL_LONG_TOOL_TIMEOUT_MS
     case 'feishu':
       return FEISHU_TOOL_TIMEOUT_MS
+    case 'map':
+      return MAP_TOOL_TIMEOUT_MS
     default:
       return DEFAULT_TOOL_EXECUTION_TIMEOUT_MS
   }
@@ -42,6 +45,9 @@ export function resolveToolExecutionTimeoutMs(toolName: string): number {
   }
   if (tag.domain === 'feishu') {
     return resolveToolExecutionTimeoutMsForProfile('feishu')
+  }
+  if (tag.domain === 'map') {
+    return resolveToolExecutionTimeoutMsForProfile('map')
   }
   return resolveToolExecutionTimeoutMsForProfile('default')
 }
