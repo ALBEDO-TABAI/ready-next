@@ -41,7 +41,7 @@ import type {
   TurnEngineRequest,
   TurnEngineSession,
   TurnTranscriptEvent,
-} from '../main/modules/agent-control/run-contracts'
+} from '../main/modules/agent-control/contracts/run-contracts'
 import type { TurnTerminalReason } from '../main/modules/agent-control/turn-frame'
 
 function createSession(userText: string): TurnEngineSession {
@@ -1230,7 +1230,7 @@ describe('child-owned VEA must not be parent-forced', () => {
     // `run-contracts.ts` is the single gate the engine consults so it
     // never has to string-match skill ids.
     const ContractModule = (await import(
-      '../main/modules/agent-control/run-contracts'
+      '../main/modules/agent-control/contracts/run-contracts'
     )) as {
       shouldParentForceLongSkillTool?: (c: unknown) => boolean
     }

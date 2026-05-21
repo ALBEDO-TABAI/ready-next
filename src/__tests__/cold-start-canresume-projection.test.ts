@@ -16,7 +16,7 @@ import test from 'node:test'
 
 import { deriveTaskCardRuntimeState } from '../renderer/modules/agent/taskCardViewModel'
 import { deriveTaskProjectionCanResume } from '../main/modules/agent-control/task-projection/task-projection-resume'
-import type { TaskProjectionRecord } from '../main/modules/agent-control/run-contracts'
+import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
 
 function projection(overrides: Partial<TaskProjectionRecord>): TaskProjectionRecord {
   return {
@@ -145,7 +145,7 @@ test('cold-start canResume=false strips retry from failed state', () => {
 test('Q.6 contract: stale projection (no durable handle) → canResume=false after derive', async () => {
   // Import the helper that runtime.ts uses internally.
   const { canResumeWithFs } = await import(
-    '../main/modules/agent-control/resume-handle'
+    '../main/modules/agent-control/contracts/resume-handle'
   )
 
   // Stale shape: continuationRef has only taskRunId+skillId, NO real handle.
@@ -160,7 +160,7 @@ test('Q.6 contract: stale projection (no durable handle) → canResume=false aft
 
 test('Q.6 contract: live projection (childRunId) → canResume=true after derive', async () => {
   const { canResumeWithFs } = await import(
-    '../main/modules/agent-control/resume-handle'
+    '../main/modules/agent-control/contracts/resume-handle'
   )
   // Live shape: continuationRef has a childRunId.
   const live = {
@@ -192,7 +192,7 @@ test('Q.6 contract: blocked projection with continue action → canResume=true a
 
 test('Q.6 contract: ghost path-pair (paths set but fs absent) → canResume=false', async () => {
   const { canResumeWithFs } = await import(
-    '../main/modules/agent-control/resume-handle'
+    '../main/modules/agent-control/contracts/resume-handle'
   )
   // Path strings set but fs has no such files (typical post-restart shape
   // when the user deleted the output dir).
