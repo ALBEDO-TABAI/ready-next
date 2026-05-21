@@ -6,7 +6,7 @@ import {
   compressArtifactsForPrompt,
   compressHistoryForPrompt,
   compressToolTraceForPrompt,
-} from '../main/modules/agent-control/context-compression'
+} from '../main/modules/agent-control/compaction/context-compression'
 
 test('context compression summarizes long history while keeping recent turns visible', () => {
   const history = compressHistoryForPrompt([

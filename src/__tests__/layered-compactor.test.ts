@@ -6,7 +6,7 @@ import {
   MAX_CONSECUTIVE_COMPACT_FAILURES,
   type LayeredCompactorMetricName,
   type LayeredCompactorMessage,
-} from '../main/modules/agent-control/layered-compactor'
+} from '../main/modules/agent-control/compaction/layered-compactor'
 
 function makeMessages(): LayeredCompactorMessage[] {
   return [

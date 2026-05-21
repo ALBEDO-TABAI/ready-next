@@ -11,7 +11,7 @@ import {
   noopBeforeSummarizationHook,
   type BeforeSummarizationHookContext,
   type SkillBundlePreservePreview,
-} from '../main/modules/agent-control/layered-compactor-l2-stub'
+} from '../main/modules/agent-control/compaction/layered-compactor-l2-stub'
 
 test('noopBeforeSummarizationHook returns empty preserved/truncated arrays', () => {
   const ctx: BeforeSummarizationHookContext = { messages: [] }
