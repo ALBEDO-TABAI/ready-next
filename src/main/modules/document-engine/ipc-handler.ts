@@ -7,7 +7,7 @@ import { readFile, writeFile } from 'fs/promises'
 import { join, basename, dirname, extname } from 'path'
 import { homedir } from 'os'
 import { buildDocumentHtmlSnapshotExport } from '../../../shared/document-widget-html-export'
-import { documentCommitRegistry, type DocumentWidgetCommitEvent } from './document-commit-registry'
+import { documentCommitRegistry } from './document-commit-registry'
 import { validateWorkspaceRoot } from '../../../shared/workspace-validation'
 import { EBOOK_BINARY_EXTENSIONS } from '../../../shared/ebook'
 import { BINARY_EXTENSIONS } from './binary-extensions'
@@ -20,6 +20,7 @@ import { fileMutationGroup } from './ipc/file-mutation-group'
 import { workspaceGroup } from './ipc/workspace-group'
 import { parserGroup } from './ipc/parser-group'
 import { watchGroup } from './ipc/watch-group'
+import { widgetGroup } from './ipc/widget-group'
 import type { IpcDisposeHandle } from './ipc/types'
 import {
   ATTACHMENT_HARD_CAP_BYTES,
@@ -563,23 +564,30 @@ let parserGroupDispose: IpcDisposeHandle | null = null
  */
 let watchGroupDispose: IpcDisposeHandle | null = null
 
+/**
+ * Stage V V2.3g — dispose handle returned by `widgetGroup.register`. The
+ * single `document:widgetCommitted` listener (renderer → main push) lives
+ * in `ipc/widget-group.ts`; same dev-reload lifecycle as the other
+ * extracted groups. This is the FINAL document-engine group move — the
+ * ipc-handler.ts split is now complete (7 groups: mark / fileIo /
+ * fileMutation / workspace / parser / watch / widget).
+ */
+let widgetGroupDispose: IpcDisposeHandle | null = null
+
 export function setupDocumentIPC(useMock = false): void {
-  // Renderer notifies main whenever a widget update has been committed into the tab content store.
-  //   Pipeline executor waits on this via documentCommitRegistry.waitForCommitAfter so the write
-  //   step is acked by the actual editor state, not just the tool-call IPC round-trip.
-  ipcMain.removeAllListeners('document:widgetCommitted')
-  ipcMain.on('document:widgetCommitted', (_event, payload: DocumentWidgetCommitEvent) => {
-    if (!payload || typeof payload !== 'object') return
-    const tabId = typeof payload.tabId === 'string' ? payload.tabId : ''
-    const widgetId = typeof payload.widgetId === 'string' ? payload.widgetId : ''
-    const committedAt = typeof payload.committedAt === 'number' ? payload.committedAt : Date.now()
-    if (!tabId || !widgetId) return
-    documentCommitRegistry.record({
-      tabId,
-      widgetId,
-      requestId: typeof payload.requestId === 'string' ? payload.requestId : undefined,
-      committedAt,
-    })
+  // Stage V V2.3g — `document:widgetCommitted` (renderer → main push)
+  // moved into `widgetGroup`. The group owns the listener registration
+  // + dev-reload pre-clear; the handler body (payload validation +
+  // `documentCommitRegistry.record(…)` sink) is lifted verbatim. The
+  // V5 IPC contract gate continues to pair the literal in this file's
+  // `ipcMain.on(…)` (now inside the group) with the preload-side
+  // `ipcRenderer.send('document:widgetCommitted', …)`.
+  if (widgetGroupDispose) {
+    try { widgetGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    widgetGroupDispose = null
+  }
+  widgetGroupDispose = widgetGroup.register(ipcMain, {
+    recordCommit: (event) => documentCommitRegistry.record(event),
   })
 
   // Stage V V2.3f — `document:watchDirectories` (request) and the paired
