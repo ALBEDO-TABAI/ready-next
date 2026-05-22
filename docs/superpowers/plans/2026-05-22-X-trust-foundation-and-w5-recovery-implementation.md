@@ -61,7 +61,7 @@ This section records the facts that Stage X implementers must verify again befor
   - `react-refresh/only-export-components`: 17 / 17
   - unused disable directive: 3 / 3
 - Current deep-gate problem:
-  - `npm run verify:r` and `npm run verify:t` enter stale gate scripts (`verify:c` and `verify:s` have the same risk profile and must be inventoried alongside).
+  - Stage U/V move-only series invalidated hard-coded `src/...` paths in the `verify:c` / `verify:r` / `verify:s` / `verify:t` chain. Observed at audit time: `verify:r` and `verify:t` already fail on stale paths; `verify:c` and `verify:s` have the same risk profile and are inventoried in X1 alongside.
   - Example failure: `scripts/check-identity-resolver-pure-read.cjs` looks for `src/main/modules/agent-control/skill-turn-identity.ts`, while the current implementation lives under the post-refactor module layout.
 - W5 item 3 root cause candidate is already proven at the store level:
   - `useAgent.getState().newSession()` from an empty `sessionOrder` creates an active session, but leaves `sessionOrder` empty.
@@ -109,7 +109,7 @@ Do not proceed from X1 to X2 until the deep-gate trust repair is complete. Other
 | --- | --- | --- | --- |
 | X0 | X1, X2, X3, X4 | nothing | Truth freeze is the entry point; everything else reads it. |
 | X1 | X2, X4 | X3 | X1 inside can split into X1.1-X1.4 per `verify:*` chain (`c` / `r` / `s` / `t`), each owned by its own agent in parallel. The meta-gate is X1.5 and lands last. |
-| X2 | X4 X5 | X3 | X2 needs a real Ready dev run plus tests; do not parallelize X2 with X4 because both phases share live-app resources / evidence directory / W3.3 equipment (see § 4.1 second paragraph for full reasoning). |
+| X2 | X4, X5 | X3 | X2 needs a real Ready dev run plus tests; do not parallelize X2 with X4 because both phases share live-app resources / evidence directory / W3.3 equipment (see § 4.1 second paragraph for full reasoning). |
 | X3 | X5 | X1, X2 | Pure infra add (CI yaml + taxonomy doc); no `src/` change. |
 | X4 | X5 | nothing | PR-shell-1 → PR-shell-2 → PR-shell-4 strict serial inside X4. Each PR requires live validation on the W3.3 equipment. |
 | X5 | nothing | nothing | Stage X closeout is the last work. |
@@ -318,7 +318,7 @@ Allowlist file `scripts/check-verify-script-paths-allowlist.json`:
 The meta-gate's allowlist loader must:
 - Reject the allowlist if any entry is missing any of the five required fields: `path`, `reason`, `owner`, `expiresAt`, `addedBy`.
 - Reject entries where `expiresAt` is in the past (use `new Date(expiresAt) < new Date()`).
-- Print every active allowlist entry at the end of each run so reviewers see what is silenced.
+- Print every active allowlist entry at the start of each run (before the path-scan loop) so reviewers see what is silenced before reading scan output.
 
 The meta-gate should fail when a verification script hard-codes a `src/...` path that no longer exists, unless the path is inside an explicitly documented fixture or snapshot allowlist.
 
@@ -622,17 +622,20 @@ Required result:
 Suggested `BrowserViewIntent` contract shape (renderer → main IPC payload):
 
 ```ts
+type Rect = { x: number; y: number; w: number; h: number };
+
 type BrowserViewIntent =
-  | { kind: 'show'; intentId: number; tabId: string; bounds: { x: number; y: number; w: number; h: number }; reason: 'mode-switch' | 'tab-activate' | 'split-promote' }
+  | { kind: 'show'; intentId: number; tabId: string; bounds: Rect; reason: 'mode-switch' | 'tab-activate' | 'split-promote' }
   | { kind: 'hide'; intentId: number; tabId: string; reason: 'mode-switch' | 'overlay-open' | 'tab-deactivate' | 'split-collapse' }
   | { kind: 'hide-all'; intentId: number; reason: 'overlay-open' | 'mode-switch-prepare' }
-  | { kind: 'set-bounds'; intentId: number; tabId: string; bounds: ... }
-  | { kind: 'secondary-set-bounds'; intentId: number; tabId: string; bounds: ... }
+  | { kind: 'set-bounds'; intentId: number; tabId: string; bounds: Rect }
+  | { kind: 'secondary-set-bounds'; intentId: number; tabId: string; bounds: Rect }
 
 // Every intent carries a monotonically increasing intentId so the main-side
 // ack can echo it back (see PR-shell-2 § "Ack failure protection"). PR-shell-1
 // introduces the field; PR-shell-2 wires the ack round-trip for `hide-all`
 // (and may later extend to `show` / `set-bounds` if those need ordering proofs).
+// All bounds use the same Rect type alias.
 ```
 
 Renderer never calls `show()`/`hide()` directly; only emits intents. Main side `tab-shell-service.ts` is the single decision point that maps intent → actual `BrowserView` API calls. This eliminates the renderer-side guess that triggered FM-2 / FM-3 / FM-4.
@@ -660,13 +663,13 @@ Suggested ordered ritual for mode switch (cite this in PR description):
 ```
 mode-switch(from, to):
   if from === 'browser' and to !== 'browser':
-    1. emit BrowserViewIntent { kind: 'hide-all', reason: 'mode-switch-prepare' }
-    2. wait for main ack (1 round-trip)
+    1. emit BrowserViewIntent { kind: 'hide-all', intentId: <next>, reason: 'mode-switch-prepare' }
+    2. wait for main ack with same intentId (1 round-trip)
     3. setWorkbenchMode(to)  // renderer state flip; DOM mounts new mode
     4. nextTick: emit any DOM overlay opens
   if from !== 'browser' and to === 'browser':
     1. setWorkbenchMode(to)  // DOM mounts first (Browser mode mounts an empty native overlay slot)
-    2. nextTick: emit BrowserViewIntent { kind: 'show', tabId: <activeTabId>, bounds, reason: 'mode-switch' }
+    2. nextTick: emit BrowserViewIntent { kind: 'show', intentId: <next>, tabId: <activeTabId>, bounds: <activeBounds>, reason: 'mode-switch' }
   if from === to: no-op
 ```
 
@@ -705,11 +708,15 @@ Suggested data flow (renderer → main):
 ```
 Split mode active:
   renderer useBrowserViewBounds.ts measures both primary + secondary pane DOMRect
-  →  emit BrowserViewIntent { kind: 'set-bounds', tabId: primaryId, bounds: primaryRect }
-  →  emit BrowserViewIntent { kind: 'secondary-set-bounds', tabId: secondaryId, bounds: secondaryRect }
+  let primaryRect: Rect = measurePane(primaryRef)
+  let secondaryRect: Rect = measurePane(secondaryRef)
+  →  emit BrowserViewIntent { kind: 'set-bounds', intentId: <next>, tabId: primaryId, bounds: primaryRect }
+  →  emit BrowserViewIntent { kind: 'secondary-set-bounds', intentId: <next>, tabId: secondaryId, bounds: secondaryRect }
   main tab-shell-service.ts applies both via BrowserView.setBounds()
   main logs both in ready-browser.log
 ```
+
+`Rect` is the shared type alias defined in the PR-shell-1 `BrowserViewIntent` block; both renderer and main side import it from the same module so no re-declaration drift.
 
 The "secondary bounds count = 0" failure was: renderer measured the primary pane but never emitted the secondary intent because the split-pane mount only had one ref. PR-shell-4 must add the second ref + the second intent path.
 
