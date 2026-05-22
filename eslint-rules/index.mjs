@@ -511,10 +511,17 @@ function isAgentControlOutsideSubagent(filePath) {
 }
 
 function isBStageChildSubagentConsumer(filePath) {
-  return filePath === 'src/main/modules/agent-control/skill-child-runner.ts'
-    || filePath === 'src/main/modules/agent-control/skill-child-sub-agent-close-mapping.ts'
-    || filePath === 'src/main/modules/agent-control/skill-child-sub-agent.ts'
-    || filePath === 'src/main/modules/agent-control/skill-child-sub-agent-factory.ts'
+  // Sanctioned child-run ownership boundary. These four modules implement
+  // the parent→sub-agent bridge for skill child runs, so they are permitted
+  // to import from `agent-control/sub-agent/`. Stage U5.1a2 (commit
+  // d7897542) relocated all four files from `agent-control/` into
+  // `agent-control/skills/` as a [move-only] refactor; the allowlist tracks
+  // the post-move paths. Any new path on either side requires renewed
+  // boundary review — do not silently extend.
+  return filePath === 'src/main/modules/agent-control/skills/skill-child-runner.ts'
+    || filePath === 'src/main/modules/agent-control/skills/skill-child-sub-agent-close-mapping.ts'
+    || filePath === 'src/main/modules/agent-control/skills/skill-child-sub-agent.ts'
+    || filePath === 'src/main/modules/agent-control/skills/skill-child-sub-agent-factory.ts'
 }
 
 function importsSubagentDirectory(filePath, specifier) {

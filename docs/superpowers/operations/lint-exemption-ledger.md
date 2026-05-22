@@ -57,6 +57,18 @@ Removal condition shorthand:
 | ready/no-source-grep-test | src/__tests__/executor.routes-list-and-remove-intents.test.ts:15 | Only the tryExecute four-intent branch-order assertion needs the executor source; the other three it() blocks already exercise buildPipelinePhaseOrder at runtime via direct import. The structural branch-order check stays exempt until an electron-free executor seam exists. Items 11 and 12 in the W1 inventory are intentionally split (this file = runtime phase-order + 1 structural branch check; the hyphenated sibling = 5 structural routing checks), not duplicates. | W1.2 | runtime-upgrade when pipeline executor gets an electron-free harness |
 | ready/no-source-grep-test | src/__tests__/rss-preview-browser-handoff-contract.test.ts:8 | PreviewBrowser.tsx is a React component with renderer-only hook/store deps (useHostedPreviewBounds, useWorkspace, react refs/effects, requestWorkbenchModeChange); the handoff contract has no electron-free seam and no JSDOM/React harness in W1 scope. | W1.2 | runtime-upgrade when the RSS preview→browser handoff gains a JSDOM/React-Testing-Library harness or the handoff call site is extracted into a renderer-context-free pure helper |
 
+## Rule boundary updates
+
+`boundary-update` dispositions (per W1 plan §3.0 matrix) do not silence
+individual sites; instead they patch the Ready ESLint rule so the new
+sanctioned code shape is allowed. The W1 ledger tracks them here for the
+same audit reason: a future reader must be able to see "why the rule
+boundary changed" without reverse-engineering the diff.
+
+| Rule | Old boundary | New boundary | Reason | Owner |
+| --- | --- | --- | --- | --- |
+| ready/no-subagent-leak | `isBStageChildSubagentConsumer` allowlisted the four child-run bridge files at their pre-move paths under `src/main/modules/agent-control/` (skill-child-runner.ts, skill-child-sub-agent.ts, skill-child-sub-agent-close-mapping.ts, skill-child-sub-agent-factory.ts) | Allowlist updated to the post-move paths under `src/main/modules/agent-control/skills/`; the four files retain their sanctioned ability to import from `agent-control/sub-agent/`. No other file inside `skills/` is added to the allowlist. | Stage U5.1a2 commit d7897542 relocated the four bridge files into `skills/` as a [move-only] refactor. The rule's intent (only the parent→sub-agent bridge may reach into `sub-agent/`) is unchanged; only the file paths moved. Verified by `eslint-rules/__tests__/a0-rules.test.mjs` (post-move paths accepted, pre-move paths and a non-bridge `skills/skill-domain-adapter.ts` counterexample rejected). | W1.3 |
+
 ## How to add a row
 
 1. Run `npm run lint:check` (or `npx eslint <file>`) and confirm the rule

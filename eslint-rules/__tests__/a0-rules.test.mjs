@@ -181,21 +181,25 @@ tester.run('ready/no-subagent-leak', rules['no-subagent-leak'], {
       filename: 'src/main/modules/agent-control/turn-engine.ts',
       code: "import { createContext } from './turn-frame'",
     },
+    // Sanctioned child-run ownership boundary (post Stage U5.1a2 move into
+    // `skills/`). These four modules are the parent→sub-agent bridge for
+    // skill child runs and are permitted to reach into
+    // `agent-control/sub-agent/`.
     {
-      filename: 'src/main/modules/agent-control/skill-child-runner.ts',
-      code: "import { runSubAgent } from './sub-agent/sub-agent-runner'",
+      filename: 'src/main/modules/agent-control/skills/skill-child-runner.ts',
+      code: "import { runSubAgent } from '../sub-agent/sub-agent-runner'",
     },
     {
-      filename: 'src/main/modules/agent-control/skill-child-sub-agent.ts',
-      code: "import type { SubAgent } from './sub-agent/sub-agent-types'",
+      filename: 'src/main/modules/agent-control/skills/skill-child-sub-agent.ts',
+      code: "import type { SubAgent } from '../sub-agent/sub-agent-types'",
     },
     {
-      filename: 'src/main/modules/agent-control/skill-child-sub-agent-close-mapping.ts',
-      code: "import type { SubAgentCloseEvent } from './sub-agent/sub-agent-types'",
+      filename: 'src/main/modules/agent-control/skills/skill-child-sub-agent-close-mapping.ts',
+      code: "import type { SubAgentCloseEvent } from '../sub-agent/sub-agent-types'",
     },
     {
-      filename: 'src/main/modules/agent-control/skill-child-sub-agent-factory.ts',
-      code: "import { createSubAgentCleanupHandle } from './sub-agent/sub-agent-cleanup'",
+      filename: 'src/main/modules/agent-control/skills/skill-child-sub-agent-factory.ts',
+      code: "import { createSubAgentCleanupHandle } from '../sub-agent/sub-agent-cleanup'",
     },
     {
       filename: 'src/shared/sub-agent-debug.ts',
@@ -226,6 +230,25 @@ tester.run('ready/no-subagent-leak', rules['no-subagent-leak'], {
     {
       filename: 'src/main/modules/agent-control/runtime.ts',
       code: "async function load() { return import('./sub-agent/sub-agent-runner') }",
+      errors: [{ messageId: 'noSubagentLeak' }],
+    },
+    // Pre Stage U5.1a2 paths are no longer sanctioned: the consumer files
+    // were moved into `skills/`, so the old top-level paths must reject.
+    {
+      filename: 'src/main/modules/agent-control/skill-child-runner.ts',
+      code: "import { runSubAgent } from './sub-agent/sub-agent-runner'",
+      errors: [{ messageId: 'noSubagentLeak' }],
+    },
+    {
+      filename: 'src/main/modules/agent-control/skill-child-sub-agent.ts',
+      code: "import type { SubAgent } from './sub-agent/sub-agent-types'",
+      errors: [{ messageId: 'noSubagentLeak' }],
+    },
+    // Counterexample: a non-bridge file inside `skills/` is NOT on the
+    // allowlist. The new boundary covers exactly the four bridge files.
+    {
+      filename: 'src/main/modules/agent-control/skills/skill-domain-adapter.ts',
+      code: "import { runSubAgent } from '../sub-agent/sub-agent-runner'",
       errors: [{ messageId: 'noSubagentLeak' }],
     },
   ],
