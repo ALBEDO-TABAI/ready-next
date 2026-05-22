@@ -309,7 +309,7 @@ Allowlist file `scripts/check-verify-script-paths-allowlist.json`:
       "addedBy": "X1.5 commit <hash>"
     }
   ],
-  "comment": "Only add entries here when the script intentionally references a non-live fixture / snapshot path. Stale moved sources do not belong here. Every entry MUST have all four fields: reason, owner, expiresAt, addedBy. The meta-gate refuses to load an entry missing any field."
+  "comment": "Only add entries here when the script intentionally references a non-live fixture / snapshot path. Stale moved sources do not belong here. Every entry MUST have all five fields: path, reason, owner, expiresAt, addedBy. The meta-gate refuses to load an entry missing any field."
 }
 ```
 
