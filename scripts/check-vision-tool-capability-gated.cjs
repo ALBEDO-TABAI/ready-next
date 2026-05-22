@@ -56,9 +56,18 @@ function checkVisionToolCapabilityGated({ root = REPO_DEFAULT } = {}) {
     errors.push(`Missing target: ${BUNDLE_REL}`)
   } else {
     const bundleSrc = fs.readFileSync(bundleAbs, 'utf8')
-    const importsHelper = /import\s*\{[^}]*\bfilterToolsByVisionCapability\b[^}]*\}\s*from\s*['"]\.\/tool-gateway['"]/.test(bundleSrc)
+    // Stage U/V module reshuffle moved tool-gateway into
+    // `agent-control/tools-runtime/`, so the import path is now
+    // `../tools-runtime/tool-gateway`. Accept either the original
+    // sibling import or the post-reshuffle relative path.
+    const importsHelper =
+      /import\s*\{[^}]*\bfilterToolsByVisionCapability\b[^}]*\}\s*from\s*['"](?:\.\/tool-gateway|\.\.\/tools-runtime\/tool-gateway)['"]/.test(
+        bundleSrc,
+      )
     if (!importsHelper) {
-      errors.push(`${BUNDLE_REL}: must import \`filterToolsByVisionCapability\` from './tool-gateway'`)
+      errors.push(
+        `${BUNDLE_REL}: must import \`filterToolsByVisionCapability\` from './tool-gateway' or '../tools-runtime/tool-gateway'`,
+      )
     }
     const callCount = (bundleSrc.match(/\bfilterToolsByVisionCapability\s*\(/g) || []).length
     if (callCount < 2) {

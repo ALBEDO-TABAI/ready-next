@@ -19,7 +19,14 @@ function checkRendererMetricChannel(options = {}) {
   }
 
   const shared = read('src/shared/renderer-agent-metrics.ts')
-  const main = read('src/main/modules/claude-bridge/ipc-handler.ts')
+  // Stage V V2.1j moved the `agent:emitRendererMetric` IPC handler out of
+  // claude-bridge/ipc-handler.ts into the dedicated telemetry-group
+  // sub-module. The gate now scans both locations so a future merge or
+  // further extraction won't silently re-break this check.
+  const main = [
+    read('src/main/modules/claude-bridge/ipc-handler.ts'),
+    read('src/main/modules/claude-bridge/ipc/telemetry-group.ts'),
+  ].join('\n')
   const preload = read('src/preload/index.ts')
   const types = read('src/renderer/types/electron.d.ts')
   const rendererFiles = [

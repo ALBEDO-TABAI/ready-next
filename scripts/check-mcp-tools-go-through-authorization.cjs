@@ -56,11 +56,17 @@ function main() {
   if (!toolRegistrySrc) {
     violations.push({ file: TOOL_REGISTRY_FILE, reason: 'missing file' })
   } else {
-    if (!/import\s+\*\s+as\s+mcpRegistry\s+from\s+['"]\.\.\/mcp\/registry['"]/.test(toolRegistrySrc)
-      && !/from\s+['"]\.\.\/mcp\/registry['"]/.test(toolRegistrySrc)) {
+    // Stage U/V module reshuffle moved tool-registry into
+    // `agent-control/tools-runtime/`, so the import path is now
+    // `../../mcp/registry` (relative to the new nested location).
+    // Accept either the original sibling import or the post-reshuffle path.
+    const mcpImportRe =
+      /import\s+\*\s+as\s+mcpRegistry\s+from\s+['"](?:\.\.\/mcp\/registry|\.\.\/\.\.\/mcp\/registry)['"]/
+    const mcpFromRe = /from\s+['"](?:\.\.\/mcp\/registry|\.\.\/\.\.\/mcp\/registry)['"]/
+    if (!mcpImportRe.test(toolRegistrySrc) && !mcpFromRe.test(toolRegistrySrc)) {
       violations.push({
         file: TOOL_REGISTRY_FILE,
-        reason: 'must import mcp registry from ../mcp/registry',
+        reason: 'must import mcp registry from ../mcp/registry or ../../mcp/registry',
       })
     }
     // Need a guarded mcp branch + isAuthorized call.

@@ -105,11 +105,17 @@ function main() {
     violations.push({ file: BUNDLE_FILE, reason: 'missing file' })
   } else {
     const source = readFileSync(bundlePath, 'utf8')
-    const importsHelper = /import\s*\{[^}]*\bfilterToolsByAllowedTools\b[^}]*\}\s*from\s*['"]\.\/tool-gateway['"]/.test(source)
+    // Stage U/V module reshuffle moved tool-gateway into
+    // `agent-control/tools-runtime/`, so the import path is now
+    // `../tools-runtime/tool-gateway`. Accept either form.
+    const importsHelper =
+      /import\s*\{[^}]*\bfilterToolsByAllowedTools\b[^}]*\}\s*from\s*['"](?:\.\/tool-gateway|\.\.\/tools-runtime\/tool-gateway)['"]/.test(
+        source,
+      )
     if (!importsHelper) {
       violations.push({
         file: BUNDLE_FILE,
-        reason: 'must import `filterToolsByAllowedTools` from `./tool-gateway`',
+        reason: "must import `filterToolsByAllowedTools` from `./tool-gateway` or `../tools-runtime/tool-gateway`",
       })
     }
     const callCount = (source.match(/\bfilterToolsByAllowedTools\s*\(/g) || []).length

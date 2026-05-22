@@ -65,10 +65,18 @@ function main() {
     violations.push({ file: SDK_FILE, reason: 'missing file' })
   } else {
     const sdkSrc = stripComments(sdkSrcRaw)
-    if (!/from\s+['"]\.\/message-capability-filter['"]/.test(sdkSrc)) {
+    // Stage U/V module reshuffle moved message-capability-filter into
+    // `agent-control/domain-adapters/`. SDK runtime now lives in
+    // `agent-control/runtime-core/`, so the relative import is
+    // `../domain-adapters/message-capability-filter`. Accept either form.
+    if (
+      !/from\s+['"](?:\.\/message-capability-filter|\.\.\/domain-adapters\/message-capability-filter)['"]/.test(
+        sdkSrc,
+      )
+    ) {
       violations.push({
         file: SDK_FILE,
-        reason: 'must import from ./message-capability-filter',
+        reason: "must import from ./message-capability-filter or ../domain-adapters/message-capability-filter",
       })
     }
     if (!/assertCurrentMessageCapability\s*\(/.test(sdkSrc)) {
@@ -96,10 +104,14 @@ function main() {
     violations.push({ file: OPENAI_CLIENT_FILE, reason: 'missing file' })
   } else {
     const oaiSrc = stripComments(oaiSrcRaw)
-    if (!/from\s+['"]\.\.\/agent-control\/message-capability-filter['"]/.test(oaiSrc)) {
+    if (
+      !/from\s+['"](?:\.\.\/agent-control\/message-capability-filter|\.\.\/agent-control\/domain-adapters\/message-capability-filter)['"]/.test(
+        oaiSrc,
+      )
+    ) {
       violations.push({
         file: OPENAI_CLIENT_FILE,
-        reason: 'must import from ../agent-control/message-capability-filter',
+        reason: 'must import from ../agent-control/message-capability-filter or ../agent-control/domain-adapters/message-capability-filter',
       })
     }
     if (!/private\s+applyCapability\s*\(/.test(oaiSrc)) {
@@ -132,10 +144,14 @@ function main() {
     violations.push({ file: ANTHROPIC_CLIENT_FILE, reason: 'missing file' })
   } else {
     const anthSrc = stripComments(anthSrcRaw)
-    if (!/from\s+['"]\.\.\/agent-control\/message-capability-filter['"]/.test(anthSrc)) {
+    if (
+      !/from\s+['"](?:\.\.\/agent-control\/message-capability-filter|\.\.\/agent-control\/domain-adapters\/message-capability-filter)['"]/.test(
+        anthSrc,
+      )
+    ) {
       violations.push({
         file: ANTHROPIC_CLIENT_FILE,
-        reason: 'must import from ../agent-control/message-capability-filter',
+        reason: 'must import from ../agent-control/message-capability-filter or ../agent-control/domain-adapters/message-capability-filter',
       })
     }
     if (!/private\s+applyCapability\s*\(/.test(anthSrc)) {
@@ -160,10 +176,14 @@ function main() {
     violations.push({ file: DIRECT_CHAT_FILE, reason: 'missing file' })
   } else {
     const dcSrc = stripComments(dcSrcRaw)
-    if (!/from\s+['"]\.\.\/agent-control\/message-capability-filter['"]/.test(dcSrc)) {
+    if (
+      !/from\s+['"](?:\.\.\/agent-control\/message-capability-filter|\.\.\/agent-control\/domain-adapters\/message-capability-filter)['"]/.test(
+        dcSrc,
+      )
+    ) {
       violations.push({
         file: DIRECT_CHAT_FILE,
-        reason: 'must import from ../agent-control/message-capability-filter',
+        reason: 'must import from ../agent-control/message-capability-filter or ../agent-control/domain-adapters/message-capability-filter',
       })
     }
     if (!/assertCurrentMessageCapability\s*\(/.test(dcSrc)) {

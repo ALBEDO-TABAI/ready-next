@@ -21,6 +21,7 @@ const TARGET = path.join(
   'main',
   'modules',
   'agent-control',
+  'runtime-core',
   'parallel-branch-orchestrator.ts',
 )
 
