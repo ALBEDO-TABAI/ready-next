@@ -56,6 +56,7 @@ import {
   listPendingSkillHandoffTasks,
 } from './skill-handoff-completion'
 import { selectRunStateCandidate } from '../task-projection/run-state-selection'
+import { parseRunStateJson } from '../task-projection/run-state-schema'
 import {
   recordSkillParentTaskLifecycleEvent,
   type SkillParentTaskLifecycleReason,
@@ -2261,8 +2262,8 @@ function childProjectionStatusForState(
   if (state === 'background_running') return 'running'
   if (state === 'budget_paused' || state === 'blocked') return 'blocked'
   if (state === 'failed') return 'failed'
-  if (state === 'cancelled') return 'cancelled'
-  return 'done'
+  if (state === 'cancelled') return 'killed'
+  return 'completed'
 }
 
 function childProjectionStepStatusForState(state: SkillParentTaskLifecycleState): NonNullable<TaskStep['status']> {
@@ -2282,7 +2283,7 @@ function childProjectionActionsForStatus(
 ): ScopeRunResumableAction[] {
   if (status === 'running' || status === 'blocked') return ['continue', 'cancel']
   if (status === 'failed') return ['retry', 'cancel']
-  if (status === 'done') return ['open_artifact']
+  if (status === 'completed') return ['open_artifact']
   return ['none']
 }
 
@@ -2753,9 +2754,9 @@ function deriveOverallCoverage(args: {
 function readProgressRunState(runStatePath: string | null): Partial<ScopeRunSkillProgress> & { status?: string | null } {
   if (!runStatePath) return {}
   try {
-    const parsed = JSON.parse(readFileSync(runStatePath, 'utf8')) as unknown
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {}
-    const rec = parsed as Record<string, unknown>
+    const parsed = parseRunStateJson(readFileSync(runStatePath, 'utf8'), { path: runStatePath, emitMetric: true })
+    if (!parsed.ok) return {}
+    const rec = parsed.value.raw
     return {
       status: pickString(rec.status),
       stage: pickString(rec.current_stage)

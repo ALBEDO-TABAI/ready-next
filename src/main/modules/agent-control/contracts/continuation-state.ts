@@ -447,17 +447,17 @@ function isProjectionEligibleForImplicitContinuation(projection: TaskProjectionR
 }
 
 /**
- * Screenshot-bug hotfix — Phase 2.5 originally filtered `done | failed |
- * cancelled` as "implicitly non-resumable", but a real user case proved
+ * Screenshot-bug hotfix — Phase 2.5 originally filtered `completed | failed |
+ * killed` as "implicitly non-resumable", but a real user case proved
  * `failed` was the most natural resume target: "再从头重新跑一次" against
  * a previously-failed VEA pipeline. Filtering it out forced the turn into
  * fresh-task routing, the orchestrator never inlined the reference skill,
  * and the model emitted `<tool_call>` XML as visible chat text.
  *
  * New policy:
- *   - `cancelled` → stays excluded (user explicitly cancelled; auto-resume
+ *   - `killed` → stays excluded (user explicitly cancelled; auto-resume
  *      would override their intent).
- *   - `done` → stays excluded for IMPLICIT lookup (user typed "继续" without
+ *   - `completed` → stays excluded for IMPLICIT lookup (user typed "继续" without
  *      a Task ID is far more often referring to a live task than a
  *      finished one). Explicit Task ID still resolves done tasks.
  *   - `failed` → no longer excluded. Retry semantics make this the most
@@ -466,14 +466,14 @@ function isProjectionEligibleForImplicitContinuation(projection: TaskProjectionR
  *
  * Audit Phase 2 §B4 (the "理解需求 shadowing" risk) is still mitigated:
  * the system's auto-classified "理解需求" task is created with status
- * `done` once it lands its result, so the original shadowing remains
+ * `completed` once it lands its result, so the original shadowing remains
  * blocked. Failed tasks were never the source of that bug.
  */
 function isTerminalProjection(projection: TaskProjectionRecord | null | undefined): boolean {
   if (!projection) return true
   return (
-    projection.status === 'done'
-    || projection.status === 'cancelled'
+    projection.status === 'completed'
+    || projection.status === 'killed'
   )
 }
 

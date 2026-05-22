@@ -35,7 +35,7 @@ import { shouldExposeSkillAction } from '../main/modules/tools/skills-tools'
 
 const TURN_ENGINE_PATH = new URL('../main/modules/agent-control/turn-engine.ts', import.meta.url)
 const DIRECT_CHAT_PATH = new URL('../main/modules/claude-bridge/direct-chat.ts', import.meta.url)
-const SKILL_TURN_IDENTITY_PATH = new URL('../main/modules/agent-control/skill-turn-identity.ts', import.meta.url)
+const SKILL_TURN_IDENTITY_PATH = new URL('../main/modules/agent-control/skills/skill-turn-identity.ts', import.meta.url)
 
 // skill-resume F1 — narrative integration test that walks the full chain a
 // resume bug walked in production:

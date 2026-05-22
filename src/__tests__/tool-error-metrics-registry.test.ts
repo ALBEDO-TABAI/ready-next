@@ -32,6 +32,7 @@ test('registry exposes documented tool-error metric keys', () => {
     'domainToolNarrowingApplied',
     'hookHandlerFailed',
     'hookHandlerTimeout',
+    'hookHandlerTimeoutWithUnknownOutcome',
     'inputValidation',
     'metaParseCorrupted',
     'outputDirGc',
@@ -41,6 +42,7 @@ test('registry exposes documented tool-error metric keys', () => {
     'providerThinkingEchoRequired400',
     'providerThinkingEchoUnsupported',
     'resolutionViolation',
+    'runStateSchemaInvalid',
     'runStateSelectionDirSkipped',
     'secretDecryptFailed',
     'sessionRecallAutoAttached',
@@ -108,6 +110,7 @@ test('historical metric strings are preserved (log-compat contract)', () => {
   assert.equal(TOOL_ERROR_METRICS.skillReferenceInlineFailed, 'skill_reference_inline_failed')
   assert.equal(TOOL_ERROR_METRICS.skillProjectionPartial, 'skill_projection_partial')
   assert.equal(TOOL_ERROR_METRICS.runStateSelectionDirSkipped, 'run_state_selection_dir_skipped')
+  assert.equal(TOOL_ERROR_METRICS.runStateSchemaInvalid, 'run_state_schema_invalid')
   // Stage U (PR 1) — ask_user_questions submit / cancel chain diagnostics.
   assert.equal(TOOL_ERROR_METRICS.askUserQuestionsSubmitDbFailed, 'ask_user_questions_submit_db_failed')
   assert.equal(TOOL_ERROR_METRICS.askUserQuestionsSubmitResolverMissed, 'ask_user_questions_submit_resolver_missed')

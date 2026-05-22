@@ -33,9 +33,11 @@ test('U4.v2-2 wire TaskProjectionRecord exposes the renderer-required fields', (
   assert.equal(sample.interactionState, 'running')
 })
 
-test('U4.v2-2 wire status union accepts the five renderer-visible terminal states', () => {
-  const statuses: Wire['status'][] = ['queued', 'running', 'blocked', 'done', 'failed', 'cancelled']
-  assert.equal(statuses.length, 6)
+test('U4.v2-2 wire status union accepts the shared child-run status set', () => {
+  const statuses: Wire['status'][] = [
+    'queued', 'running', 'recoverable_paused', 'budget_paused', 'blocked', 'completed', 'failed', 'killed',
+  ]
+  assert.equal(statuses.length, 8)
 })
 
 test('U4.v2-2 wire canResume is optional (Stage Q derived-at-read field)', () => {

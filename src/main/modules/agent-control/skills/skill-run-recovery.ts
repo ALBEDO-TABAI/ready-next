@@ -27,7 +27,7 @@ function projectionSearchText(projection: TaskProjectionRecord): string {
 function projectionStatusPriority(projection: TaskProjectionRecord): number {
   if (projection.status === 'failed' || projection.status === 'blocked') return 0
   if (projection.status === 'running' || projection.interactionState === 'resuming') return 1
-  if (projection.status === 'done') return 2
+  if (projection.status === 'completed') return 2
   return 3
 }
 
@@ -96,7 +96,7 @@ export function recoverLatestSkillRunFromTaskProjections(params: {
       toolName,
       skillId: skill.id,
       action,
-      success: projection.status === 'done',
+      success: projection.status === 'completed',
       status: projection.status,
       runKind: 'task_projection',
       taskRunId: continuationRef?.taskRunId || undefined,

@@ -34,7 +34,7 @@ test('browser header dismisses address editing before external collapse or tab s
   assert.match(browserHeader, /const dismissAddressEditing = useCallback\(\(\) => \{[\s\S]*onBlur\(\)[\s\S]*onEditEnd\(\)[\s\S]*collapseActiveTab\(\)/)
   assert.match(browserHeader, /useEffect\(\(\) => \{[\s\S]*if \(isActive\) return[\s\S]*dismissAddressEditing\(\)/)
   assert.match(browserHeader, /useBrowserHeaderInteraction\(isActive,\s*dismissAddressEditing\)/)
-  assert.match(browserHeader, /onTabClick=\{\(tabId\) => \{[\s\S]*dismissAddressEditing\(\)[\s\S]*onTabClick\(tabId\)/)
+  assert.match(browserHeader, /onTabClick=\{\(tabId, event\) => \{[\s\S]*dismissAddressEditing\(\)[\s\S]*onTabClick\(tabId, event\)/)
 
   assert.match(interactionHook, /export function useBrowserHeaderInteraction\(isActive = true, onDismissActiveTab\?: \(\) => void\)/)
   assert.match(interactionHook, /onDismissActiveTab\?\.\(\)/)

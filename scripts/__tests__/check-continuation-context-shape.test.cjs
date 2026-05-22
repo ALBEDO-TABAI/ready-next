@@ -20,7 +20,7 @@ function makeHarnessRoot(t) {
 }
 
 function writeHelper(rootDir, body) {
-  const p = path.join(rootDir, 'src/main/modules/agent-control/run-budget-policy.ts')
+  const p = path.join(rootDir, 'src/main/modules/agent-control/task-projection/run-budget-policy.ts')
   fs.mkdirSync(path.dirname(p), { recursive: true })
   fs.writeFileSync(p, body)
 }

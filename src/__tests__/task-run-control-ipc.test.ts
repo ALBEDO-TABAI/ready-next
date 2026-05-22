@@ -10,12 +10,14 @@ function readWorkspaceFile(path: string): string {
 
 test('task run control actions are exposed through runtime, IPC, preload, renderer types, and UI entry points', () => {
   const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime-core/runtime.ts')
+  const runControlGroup = readWorkspaceFile('src/main/modules/claude-bridge/ipc/run-control-group.ts')
   const ipcHandler = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')
   const preload = readWorkspaceFile('src/preload/index.ts')
   const rendererTypes = readWorkspaceFile('src/renderer/types/electron.d.ts')
   const agentStore = readWorkspaceFile('src/renderer/stores/useAgent.ts')
   const taskPanel = readWorkspaceFile('src/renderer/components/ready/TaskPanel.tsx')
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
+  const taskInteractionHandlers = readWorkspaceFile('src/renderer/components/agent/chat-panel/task-interaction/use-task-interaction-handlers.ts')
 
   assert.match(runtime, /async suspendRun\(/)
   assert.match(runtime, /async resumeRun\(/)
@@ -25,9 +27,9 @@ test('task run control actions are exposed through runtime, IPC, preload, render
   assert.match(runtime, /taskTitle:\s*target\.projection\?\.taskTitle/)
   assert.doesNotMatch(runtime, /taskTitle:\s*target\.projection\?\.taskId/)
 
-  assert.match(ipcHandler, /ipcMain\.handle\('agent:suspendRun'/)
-  assert.match(ipcHandler, /ipcMain\.handle\('agent:resumeRun'/)
-  assert.match(ipcHandler, /ipcMain\.handle\('agent:respondToInteraction'/)
+  assert.match(runControlGroup, /ipcMain\.handle\('agent:suspendRun'/)
+  assert.match(runControlGroup, /ipcMain\.handle\('agent:resumeRun'/)
+  assert.match(runControlGroup, /ipcMain\.handle\('agent:respondToInteraction'/)
 
   assert.match(preload, /sendScoped:\s*\(\s*payload:\s*\{\s*scopeId: string/)
   assert.match(preload, /agent\?: string/)
@@ -61,9 +63,10 @@ test('task run control actions are exposed through runtime, IPC, preload, render
   assert.match(taskPanel, /window\.electronAPI\.agent\.suspendRun\(/)
   assert.match(taskPanel, /window\.electronAPI\.agent\.resumeRun\(/)
   assert.match(taskPanel, /window\.electronAPI\.agent\.respondToInteraction\(/)
-  assert.match(chatPanel, /window\.electronAPI\.agent\.suspendRun\(/)
-  assert.match(chatPanel, /window\.electronAPI\.agent\.resumeRun\(/)
-  assert.match(chatPanel, /window\.electronAPI\.agent\.respondToInteraction\(/)
+  assert.match(chatPanel, /useTaskInteractionHandlers/)
+  assert.match(taskInteractionHandlers, /window\.electronAPI\.agent\.suspendRun\(/)
+  assert.match(taskInteractionHandlers, /window\.electronAPI\.agent\.resumeRun\(/)
+  assert.match(taskInteractionHandlers, /window\.electronAPI\.agent\.respondToInteraction\(/)
 })
 
 test('chat conversation deletion is routed through runtime cleanup before removing persisted records', () => {

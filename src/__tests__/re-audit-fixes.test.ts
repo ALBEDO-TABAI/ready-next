@@ -23,9 +23,9 @@ import {
 
 const TURN_ENGINE_PATH = new URL('../main/modules/agent-control/turn-engine.ts', import.meta.url)
 const SKILLS_TOOLS_PATH = new URL('../main/modules/tools/skills-tools.ts', import.meta.url)
-const SKILL_CONTEXT_ORCHESTRATOR_PATH = new URL('../main/modules/agent-control/skill-context-orchestrator.ts', import.meta.url)
+const SKILL_CONTEXT_ORCHESTRATOR_PATH = new URL('../main/modules/agent-control/skills/skill-context-orchestrator.ts', import.meta.url)
 const IPC_HANDLER_PATH = new URL('../main/modules/claude-bridge/ipc-handler.ts', import.meta.url)
-const HINT_MODULE_PATH = new URL('../main/modules/agent-control/skill-reference-hints.ts', import.meta.url)
+const HINT_MODULE_PATH = new URL('../main/modules/agent-control/skills/skill-reference-hints.ts', import.meta.url)
 
 function readSource(url: URL): string {
   return readFileSync(url, 'utf8')

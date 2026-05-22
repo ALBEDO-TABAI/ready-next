@@ -103,12 +103,12 @@ test('turn-engine suppresses implicit continuation lookup when a retry resolves 
     turnEngine,
     /!\s*shouldSuppressImplicitContinuation\s*&&\s*\([\s\S]*?matchesResumeIntent\(\s*continuationHintText\s*,\s*'anywhere'\s*\)/,
   )
-  assert.match(turnEngine, /from '\.\/resume-lexicon'/, 'turn-engine imports the lexicon module')
+  assert.match(turnEngine, /from '\.\/contracts\/resume-lexicon'/, 'turn-engine imports the lexicon module')
 })
 
 test('turn-engine treats config repair turns as skill resume candidates', () => {
   const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
-  const skillTurnIdentity = readWorkspaceFile('src/main/modules/agent-control/skill-turn-identity.ts')
+  const skillTurnIdentity = readWorkspaceFile('src/main/modules/agent-control/skills/skill-turn-identity.ts')
 
   assert.match(turnEngine, /matchesConfigRepairIntent/)
   assert.match(turnEngine, /isConfigRepairTurnDetected/)
@@ -122,7 +122,7 @@ test('turn-engine treats config repair turns as skill resume candidates', () => 
 
 test('turn-engine synthesizes skill context from an armed reference hint on retry-only turns', () => {
   const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
-  const skillTurnIdentity = readWorkspaceFile('src/main/modules/agent-control/skill-turn-identity.ts')
+  const skillTurnIdentity = readWorkspaceFile('src/main/modules/agent-control/skills/skill-turn-identity.ts')
 
   // turn-engine still calls getCurrentReferenceSkillHint?.(request.sessionId)
   // directly during its W3 SkillTurnIdentity resolution pass.

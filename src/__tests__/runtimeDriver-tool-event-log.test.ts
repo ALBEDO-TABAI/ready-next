@@ -7,7 +7,7 @@ const DRIVER_PATH = resolve(process.cwd(), 'src/renderer/modules/agent/runtimeDr
 const PRELOAD_PATH = resolve(process.cwd(), 'src/preload/index.ts')
 const IPC_HANDLER_PATH = resolve(
   process.cwd(),
-  'src/main/modules/claude-bridge/ipc-handler.ts',
+  'src/main/modules/claude-bridge/ipc/tool-event-group.ts',
 )
 const LOG_HELPER_PATH = resolve(process.cwd(), 'src/main/modules/tools/tool-event-log.ts')
 

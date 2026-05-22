@@ -5,10 +5,10 @@
  * the ledger repository file does not import from any projection module.
  *
  * Projection-side files (read-only against the ledger):
- *   - src/main/modules/agent-control/run-projection.ts
- *   - src/main/modules/agent-control/task-projection-sync.ts
+ *   - src/main/modules/agent-control/task-projection/run-projection.ts
+ *   - src/main/modules/agent-control/task-projection/task-projection-sync.ts
  *   - src/main/modules/repositories/task-projection-repository.ts
- *   - src/main/modules/agent-control/skill-running-projection.ts
+ *   - src/main/modules/agent-control/skills/skill-running-projection.ts
  *
  * Forbidden call expressions in those files (depth-1 method calls on any
  * variable, regex-checked):
@@ -34,10 +34,10 @@ const path = require('node:path')
 
 const ROOT = process.cwd()
 const PROJECTION_FILES = [
-  'src/main/modules/agent-control/run-projection.ts',
-  'src/main/modules/agent-control/task-projection-sync.ts',
+  'src/main/modules/agent-control/task-projection/run-projection.ts',
+  'src/main/modules/agent-control/task-projection/task-projection-sync.ts',
   'src/main/modules/repositories/task-projection-repository.ts',
-  'src/main/modules/agent-control/skill-running-projection.ts',
+  'src/main/modules/agent-control/skills/skill-running-projection.ts',
 ]
 const LEDGER_FILE = 'src/main/modules/repositories/skill-task-run-repository.ts'
 

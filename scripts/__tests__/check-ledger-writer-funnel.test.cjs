@@ -77,7 +77,7 @@ export function bad(repo: any) {
 test('L1 gate allows tracker file to call updateRowSync', (t) => {
   const root = makeHarnessRoot(t)
   writeRepo(root, VALID_REPO_BODY)
-  const tracker = path.join(root, 'src/main/modules/agent-control/skill-task-tracker.ts')
+  const tracker = path.join(root, 'src/main/modules/agent-control/skills/skill-task-tracker.ts')
   fs.mkdirSync(path.dirname(tracker), { recursive: true })
   fs.writeFileSync(tracker, `
 export function ok(repo: any) {

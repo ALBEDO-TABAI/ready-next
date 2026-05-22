@@ -58,9 +58,9 @@ test('high-frequency browser bounds syncing uses a fire-and-forget IPC path inst
   const ipcShell = readWorkspaceFile('src/main/modules/browser-engine/ipc-shell.ts')
   const electronTypes = readWorkspaceFile('src/renderer/types/electron.d.ts')
 
-  assert.match(preload, /updateBounds:\s*\(bounds: \{ x: number; y: number; width: number; height: number; syncMode\?: BrowserBoundsSyncMode \}\)\s*=>\s*\{[\s\S]*ipcRenderer\.send\('browser:updateBounds', bounds\)/)
+  assert.match(preload, /updateBounds:\s*\(bounds: \{[\s\S]*x: number[\s\S]*y: number[\s\S]*width: number[\s\S]*height: number[\s\S]*syncMode\?: BrowserBoundsSyncMode[\s\S]*\}\)\s*=>\s*\{[\s\S]*ipcRenderer\.send\('browser:updateBounds', bounds\)/)
   assert.match(electronTypes, /syncMode\?: BrowserBoundsSyncMode/)
-  assert.match(ipcShell, /ipcMain\.on\('browser:updateBounds', \(_, bounds: \{ x: number; y: number; width: number; height: number; syncMode\?: BrowserBoundsSyncMode \}\) => \{/)
+  assert.match(ipcShell, /ipcMain\.on\('browser:updateBounds', \(_, bounds: BrowserViewBoundsUpdate\) => \{/)
 })
 
 test('browser mode surface readiness uses captureStableFrame and hides chrome jank via the shared ritual overlay instead of per-mode freeze frames', () => {

@@ -5,6 +5,7 @@ import type {
   SkillChildRunStatus,
   SkillChildRunParentNextHint,
 } from '../agent-control/skills/skill-child-run-types'
+import { validateSkillChildRunTransition } from '../agent-control/skills/skill-child-state-machine'
 
 export type SkillTaskRunStatus = 'queued' | 'running' | 'blocked' | 'done' | 'failed' | 'cancelled'
 export type SkillTaskRunInteractionState =
@@ -567,6 +568,7 @@ export class SkillTaskRunRepository {
     }
 
     if (patch.status !== undefined) {
+      validateSkillChildRunTransition(currentChild.status, patch.status)
       updatePatch.status = mapChildStatusToRowStatus(patch.status)
       if (CHILD_RUN_TERMINAL_STATUSES.includes(patch.status)) {
         updatePatch.finishedAt = nowIso

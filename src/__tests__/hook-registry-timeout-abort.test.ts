@@ -65,6 +65,7 @@ test('U2.3 non-cooperative handler triggers hook_handler_timeout_with_unknown_ou
   })
 
   await registry.fire('PostToolUse', { kind: 'PostToolUse', toolName: 'noop', input: {}, output: {} } as unknown as Parameters<typeof registry.fire>[1])
+  await new Promise((resolve) => setTimeout(resolve, 1100))
 
   const timeoutMetrics = emitted.filter((m) => m.name === 'hook_handler_timeout')
   const unknownOutcomeMetrics = emitted.filter((m) => m.name === 'hook_handler_timeout_with_unknown_outcome')

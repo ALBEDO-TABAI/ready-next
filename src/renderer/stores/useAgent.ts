@@ -149,6 +149,13 @@ export interface SessionSlice {
   messages: AgentMessage[]
   pendingSendCount: number
   pendingSendFlushAt: number | null
+  isStreaming: boolean
+  foregroundBusy: boolean
+  composerLocked: boolean
+  streamingMessageId: string | null
+  streamingRequestId: string | null
+  scopeRunStates: Record<string, ScopeRunState>
+  taskDisclosureState: Record<string, TaskDisclosureState>
   /** V3.3d — terminal exclusion set drives `isLiveSession`. */
   state: SessionSliceState
   /** V3.3d — backing field for `lookupSessionByConversation`. */
@@ -165,6 +172,13 @@ function makeEmptySessionSlice(conversationId: string | null = null): SessionSli
     messages: [],
     pendingSendCount: 0,
     pendingSendFlushAt: null,
+    isStreaming: false,
+    foregroundBusy: false,
+    composerLocked: false,
+    streamingMessageId: null,
+    streamingRequestId: null,
+    scopeRunStates: {},
+    taskDisclosureState: {},
     state: 'live',
     conversationId,
     inputValue: '',
@@ -333,7 +347,7 @@ function activeSessionKey(state: AgentState | null | undefined): string {
  */
 export function getSessionSlice(state: AgentState, sessionId?: string | null): SessionSlice {
   const id = sessionId ?? state.activeSessionId ?? state.sessionId ?? PRIMARY_SESSION_KEY
-  return state.sessions[id] ?? makeEmptySessionSlice()
+  return normalizeSessionSlice(state.sessions[id])
 }
 
 /** V3.3a write-side helper used by the coalescing path. */
@@ -342,13 +356,113 @@ function withSessionSlice(
   sessionId: string,
   patch: Partial<SessionSlice>,
 ): Pick<AgentState, 'sessions'> {
-  const current = state.sessions[sessionId] ?? makeEmptySessionSlice()
+  const current = normalizeSessionSlice(state.sessions[sessionId])
   return {
     sessions: {
       ...state.sessions,
       [sessionId]: { ...current, ...patch },
     },
   }
+}
+
+function normalizeSessionSlice(slice: Partial<SessionSlice> | null | undefined): SessionSlice {
+  const fallback = makeEmptySessionSlice(slice?.conversationId ?? null)
+  return {
+    ...fallback,
+    ...slice,
+    messages: slice?.messages ?? fallback.messages,
+    scopeRunStates: slice?.scopeRunStates ?? fallback.scopeRunStates,
+    taskDisclosureState: slice?.taskDisclosureState ?? fallback.taskDisclosureState,
+  }
+}
+
+function mirrorFromSessionSlice(
+  state: AgentState,
+  sliceInput: Partial<SessionSlice> | null | undefined,
+): Pick<
+  AgentState,
+  | 'messages'
+  | 'inputValue'
+  | 'pendingSendCount'
+  | 'pendingSendFlushAt'
+  | 'isStreaming'
+  | 'foregroundBusy'
+  | 'composerLocked'
+  | 'streamingMessageId'
+  | 'streamingRequestId'
+  | 'conversationId'
+  | 'currentScopeId'
+  | 'currentScope'
+  | 'scopeRunStates'
+  | 'toolTrace'
+  | 'toolTraceStatus'
+  | 'taskDisclosureState'
+> {
+  const slice = normalizeSessionSlice(sliceInput)
+  const currentScopeId = slice.conversationId
+  const currentScope = currentScopeId
+    ? state.scopes.find((item) => item.id === currentScopeId)
+      || (state.currentScope?.id === currentScopeId ? state.currentScope : null)
+    : null
+  const aliases = syncActiveScopeRunAliases({
+    currentScopeId,
+    scopeRunStates: slice.scopeRunStates,
+  })
+  return {
+    messages: slice.messages,
+    inputValue: slice.inputValue,
+    pendingSendCount: slice.pendingSendCount,
+    pendingSendFlushAt: slice.pendingSendFlushAt,
+    isStreaming: slice.isStreaming || aliases.isStreaming,
+    foregroundBusy: slice.foregroundBusy || aliases.foregroundBusy,
+    composerLocked: slice.composerLocked || aliases.composerLocked,
+    streamingMessageId: slice.streamingMessageId,
+    streamingRequestId: slice.streamingRequestId,
+    conversationId: currentScopeId,
+    currentScopeId,
+    currentScope,
+    scopeRunStates: slice.scopeRunStates,
+    toolTrace: aliases.toolTrace,
+    toolTraceStatus: aliases.toolTraceStatus,
+    taskDisclosureState: slice.taskDisclosureState,
+  }
+}
+
+function withSessionSliceAndActiveMirror(
+  state: AgentState,
+  sessionId: string,
+  patch: Partial<SessionSlice>,
+): Pick<AgentState, 'sessions'> | (Pick<AgentState, 'sessions'> & ReturnType<typeof mirrorFromSessionSlice>) {
+  const current = normalizeSessionSlice(state.sessions[sessionId])
+  const nextSlice = { ...current, ...patch }
+  const sessionsPatch = {
+    sessions: {
+      ...state.sessions,
+      [sessionId]: nextSlice,
+    },
+  }
+  if (activeSessionKey(state) !== sessionId) return sessionsPatch
+  return {
+    ...sessionsPatch,
+    ...mirrorFromSessionSlice(state, nextSlice),
+  }
+}
+
+function sessionKeyForScopeId(state: AgentState, scopeId: string | null | undefined): string {
+  if (scopeId) {
+    for (const [sessionId, sliceInput] of Object.entries(state.sessions)) {
+      const slice = normalizeSessionSlice(sliceInput)
+      if (slice.conversationId === scopeId) return sessionId
+    }
+  }
+  return activeSessionKey(state)
+}
+
+function getScopeRunStateForScope(state: AgentState, scopeId: string | null | undefined): ScopeRunState | null {
+  if (!scopeId) return null
+  const sessionKey = sessionKeyForScopeId(state, scopeId)
+  const slice = normalizeSessionSlice(state.sessions[sessionKey])
+  return slice.scopeRunStates[scopeId] || state.scopeRunStates[scopeId] || null
 }
 
 function withSessionMessagesMirror(
@@ -820,6 +934,7 @@ function clearPendingSendBufferState(sessionId?: string | null) {
   try {
     storeStateForKey = useAgent.getState()
   } catch {
+    /* silent-catch: store may be unavailable during module bootstrap; buffer cleanup is best-effort */
     storeStateForKey = null
   }
   const id = sessionId ?? activeSessionKey(storeStateForKey)
@@ -846,7 +961,7 @@ function clearPendingSendBufferState(sessionId?: string | null) {
       return slicePatch
     })
   } catch {
-    /* ignore during bootstrap */
+    /* silent-catch: setState may be unavailable during bootstrap; timer cleanup already completed */
   }
 }
 
@@ -883,6 +998,7 @@ async function flushPendingSendBuffer(sessionId?: string | null) {
   try {
     storeStateForKey = useAgent.getState()
   } catch {
+    /* silent-catch: store may be unavailable during module bootstrap; flush falls back to active session */
     storeStateForKey = null
   }
   const id = sessionId ?? activeSessionKey(storeStateForKey)
@@ -1013,11 +1129,15 @@ export const useAgent = create<AgentState>((set, get) => ({
     pendingContinuationDraftAnchor: null,
   }),
 
-  setIsStreaming: (streaming) => set({
-    isStreaming: streaming,
-    foregroundBusy: streaming,
-    composerLocked: streaming,
-  }),
+  setIsStreaming: (streaming) => set((state) => withSessionSliceAndActiveMirror(
+    state,
+    activeSessionKey(state),
+    {
+      isStreaming: streaming,
+      foregroundBusy: streaming,
+      composerLocked: streaming,
+    },
+  )),
 
   setActiveAttachmentPreview: (preview) => set({ activeAttachmentPreview: preview }),
 
@@ -1064,27 +1184,33 @@ export const useAgent = create<AgentState>((set, get) => ({
     }
   },
 
-  setTaskSectionExpanded: (taskKey, sectionKey, expanded) => set((state) => ({
-    taskDisclosureState: {
-      ...state.taskDisclosureState,
-      [taskKey]: {
-        ...(state.taskDisclosureState[taskKey] || {}),
-        [sectionKey]: expanded,
+  setTaskSectionExpanded: (taskKey, sectionKey, expanded) => set((state) => {
+    const sessionKey = activeSessionKey(state)
+    const slice = normalizeSessionSlice(state.sessions[sessionKey])
+    return withSessionSliceAndActiveMirror(state, sessionKey, {
+      taskDisclosureState: {
+        ...slice.taskDisclosureState,
+        [taskKey]: {
+          ...(slice.taskDisclosureState[taskKey] || {}),
+          [sectionKey]: expanded,
+        },
       },
-    },
-  })),
+    })
+  }),
 
   toggleTaskSection: (taskKey, sectionKey) => set((state) => {
-    const currentValue = Boolean(state.taskDisclosureState[taskKey]?.[sectionKey])
-    return {
+    const sessionKey = activeSessionKey(state)
+    const slice = normalizeSessionSlice(state.sessions[sessionKey])
+    const currentValue = Boolean(slice.taskDisclosureState[taskKey]?.[sectionKey])
+    return withSessionSliceAndActiveMirror(state, sessionKey, {
       taskDisclosureState: {
-        ...state.taskDisclosureState,
+        ...slice.taskDisclosureState,
         [taskKey]: {
-          ...(state.taskDisclosureState[taskKey] || {}),
+          ...(slice.taskDisclosureState[taskKey] || {}),
           [sectionKey]: !currentValue,
         },
       },
-    }
+    })
   }),
 
   // =========================================================================
@@ -1103,13 +1229,10 @@ export const useAgent = create<AgentState>((set, get) => ({
     // closed concurrently), do nothing — the SessionTabs renderer will
     // re-render with the up-to-date list on the next frame.
     if (!state.sessionOrder.includes(id)) return state
-    const slice = state.sessions[id] ?? makeEmptySessionSlice()
+    const slice = normalizeSessionSlice(state.sessions[id])
     return {
       activeSessionId: id,
-      messages: slice.messages,
-      inputValue: slice.inputValue,
-      pendingSendCount: slice.pendingSendCount,
-      pendingSendFlushAt: slice.pendingSendFlushAt,
+      ...mirrorFromSessionSlice(state, slice),
     }
   }),
 
@@ -1127,10 +1250,7 @@ export const useAgent = create<AgentState>((set, get) => ({
       activeSessionId: id,
       // Mirror the fresh slice's defaults onto the top-level fields so the
       // composer/coalescer selectors observe a clean slate for the new tab.
-      messages: slice.messages,
-      inputValue: slice.inputValue,
-      pendingSendCount: slice.pendingSendCount,
-      pendingSendFlushAt: slice.pendingSendFlushAt,
+      ...mirrorFromSessionSlice(state, slice),
     })
     return id
   },
@@ -1146,16 +1266,11 @@ export const useAgent = create<AgentState>((set, get) => ({
     const nextActiveId = state.activeSessionId === id
       ? (nextOrder[0] ?? null)
       : state.activeSessionId
-    const nextSlice = nextActiveId ? nextSessions[nextActiveId] : null
+    const nextSlice = nextActiveId ? normalizeSessionSlice(nextSessions[nextActiveId]) : null
     const mirrorPatch = nextSlice
-      ? {
-          messages: nextSlice.messages,
-          inputValue: nextSlice.inputValue,
-          pendingSendCount: nextSlice.pendingSendCount,
-          pendingSendFlushAt: nextSlice.pendingSendFlushAt,
-        }
+      ? mirrorFromSessionSlice(state, nextSlice)
       : state.activeSessionId === id
-        ? { messages: [], inputValue: '', pendingSendCount: 0, pendingSendFlushAt: null }
+        ? mirrorFromSessionSlice(state, makeEmptySessionSlice())
         : {}
     return {
       sessions: nextSessions,
@@ -1170,28 +1285,30 @@ export const useAgent = create<AgentState>((set, get) => ({
     if (!scopeId) {
       return { toolTrace: [], toolTraceStatus: 'idle' }
     }
-    const currentRun = state.scopeRunStates[scopeId]
-    return {
+    const sessionKey = sessionKeyForScopeId(state, scopeId)
+    const slice = normalizeSessionSlice(state.sessions[sessionKey])
+    const currentRun = slice.scopeRunStates[scopeId]
+    return withSessionSliceAndActiveMirror(state, sessionKey, {
       scopeRunStates: {
-        ...state.scopeRunStates,
+        ...slice.scopeRunStates,
         [scopeId]: currentRun
           ? { ...currentRun, toolTrace: [] }
           : createEmptyScopeRunState({ scopeId, agent: state.currentAgent }),
       },
-      toolTrace: [],
-      toolTraceStatus: currentRun ? phaseToToolTraceStatus(currentRun.phase) : 'idle',
-    }
+    })
   }),
 
   dismissSoftError: (scopeId: string) => set((state) => {
-    const currentRun = state.scopeRunStates[scopeId]
+    const sessionKey = sessionKeyForScopeId(state, scopeId)
+    const slice = normalizeSessionSlice(state.sessions[sessionKey])
+    const currentRun = slice.scopeRunStates[scopeId]
     if (!currentRun || !currentRun.softError) return state
-    return {
+    return withSessionSliceAndActiveMirror(state, sessionKey, {
       scopeRunStates: {
-        ...state.scopeRunStates,
+        ...slice.scopeRunStates,
         [scopeId]: { ...currentRun, softError: null },
       },
-    }
+    })
   }),
 
   stopStreaming: () => {
@@ -1211,7 +1328,9 @@ export const useAgent = create<AgentState>((set, get) => ({
     }
     if (currentScopeId) {
       set((state) => {
-        const previous = state.scopeRunStates[currentScopeId] || createEmptyScopeRunState({
+        const sessionKey = sessionKeyForScopeId(state, currentScopeId)
+        const slice = normalizeSessionSlice(state.sessions[sessionKey])
+        const previous = slice.scopeRunStates[currentScopeId] || createEmptyScopeRunState({
           scopeId: currentScopeId,
           agent: state.currentAgent,
         })
@@ -1231,28 +1350,29 @@ export const useAgent = create<AgentState>((set, get) => ({
           ],
         }
         const nextScopeRunStates = {
-          ...state.scopeRunStates,
+          ...slice.scopeRunStates,
           [currentScopeId]: nextRun,
         }
-        return {
+        return withSessionSliceAndActiveMirror(state, sessionKey, {
           scopeRunStates: nextScopeRunStates,
           streamingMessageId: null,
           streamingRequestId: null,
-          ...syncActiveScopeRunAliases({
-            currentScopeId: state.currentScopeId,
-            scopeRunStates: nextScopeRunStates,
-          }),
-        }
+          isStreaming: false,
+          foregroundBusy: false,
+          composerLocked: false,
+        })
       })
     } else {
-      set({
-        isStreaming: false,
-        foregroundBusy: false,
-        composerLocked: false,
-        streamingMessageId: null,
-        streamingRequestId: null,
+      set((state) => ({
+        ...withSessionSliceAndActiveMirror(state, activeSessionKey(state), {
+          isStreaming: false,
+          foregroundBusy: false,
+          composerLocked: false,
+          streamingMessageId: null,
+          streamingRequestId: null,
+        }),
         toolTraceStatus: 'cancelled',
-      })
+      }))
     }
     if (typeof window !== 'undefined' && window.electronAPI) {
       window.electronAPI.agent.kill(currentAgent, currentScopeId || undefined).catch(console.error)
@@ -1280,19 +1400,19 @@ export const useAgent = create<AgentState>((set, get) => ({
     }
 
     set((state) => ({
-      ...withActiveSessionMessagesMirror(state, restored),
-      inputValue: undoneContent,
-      ...withSessionSlice(state, activeSessionKey(state), {
+      ...withSessionSliceAndActiveMirror(state, activeSessionKey(state), {
         messages: restored,
         inputValue: undoneContent,
+        isStreaming: false,
+        foregroundBusy: false,
+        composerLocked: false,
+        streamingMessageId: null,
+        streamingRequestId: null,
+        scopeRunStates: {},
+        taskDisclosureState: {},
       }),
       pendingContinuationIntent: null,
       pendingContinuationDraftAnchor: null,
-      isStreaming: false,
-      foregroundBusy: false,
-      composerLocked: false,
-      streamingMessageId: null,
-      streamingRequestId: null,
       toolTrace: [],
       toolTraceStatus: 'idle',
     }))
@@ -1332,6 +1452,9 @@ export const useAgent = create<AgentState>((set, get) => ({
       const sessionOrder = previousActiveSessionId && state.sessionOrder.includes(previousActiveSessionId)
         ? state.sessionOrder.map((entry) => entry === previousActiveSessionId ? nextSessionId : entry)
         : state.sessionOrder
+      const nextScopeRunStates = {
+        [fallbackScope.id]: createEmptyScopeRunState({ scopeId: fallbackScope.id, agent: currentAgent }),
+      }
       return {
         sessions: {
           ...nextSessions,
@@ -1339,6 +1462,8 @@ export const useAgent = create<AgentState>((set, get) => ({
             ...makeEmptySessionSlice(fallbackScope.id),
             messages: nextMessages,
             inputValue: '',
+            scopeRunStates: nextScopeRunStates,
+            taskDisclosureState: {},
           },
         },
         activeSessionId: nextSessionId,
@@ -1355,10 +1480,7 @@ export const useAgent = create<AgentState>((set, get) => ({
         currentScope: fallbackScope,
         scopes: [fallbackScope, ...state.scopes.filter((item) => item.id !== fallbackScope.id)],
         conversations: [mapScopeToConversation(fallbackScope), ...state.conversations.filter((item) => item.id !== fallbackScope.id)],
-        scopeRunStates: {
-          ...state.scopeRunStates,
-          [fallbackScope.id]: createEmptyScopeRunState({ scopeId: fallbackScope.id, agent: currentAgent }),
-        },
+        scopeRunStates: nextScopeRunStates,
         toolTrace: [],
         toolTraceStatus: 'idle',
         attachments: [],
@@ -1407,22 +1529,29 @@ export const useAgent = create<AgentState>((set, get) => ({
       if (scopes.length === 0) return
       const previousScopeId = get().currentScopeId
       const currentScope = scopes.find((scope) => scope.id === previousScopeId) || scopes[0] || null
-      const activeRunState = getActiveScopeRunState(get().scopeRunStates, currentScope?.id || null)
-      set((state) => ({
-        ...withActiveSessionConversationMirror(state, currentScope?.id || null),
+      set((state) => {
+        const activeRunState = getScopeRunStateForScope(state, currentScope?.id || null)
+        const sessionKey = activeSessionKey(state)
+        const slice = normalizeSessionSlice(state.sessions[sessionKey])
+        const nextScopeRunStates = currentScope?.id && activeRunState
+          ? { ...slice.scopeRunStates, [currentScope.id]: activeRunState }
+          : slice.scopeRunStates
+        return {
+        ...withSessionSliceAndActiveMirror({ ...state, scopes }, sessionKey, {
+          conversationId: currentScope?.id || null,
+          scopeRunStates: nextScopeRunStates,
+          isStreaming: isStreamingScopeRunState(activeRunState),
+          foregroundBusy: isForegroundBusyScopeRunState(activeRunState),
+          composerLocked: isForegroundBusyScopeRunState(activeRunState),
+          streamingRequestId: activeRunState?.requestId || null,
+        }),
         scopes,
         conversations: scopes.map(mapScopeToConversation),
-        currentScopeId: currentScope?.id || null,
-        currentScope: currentScope || null,
-        conversationId: currentScope?.id || null,
         currentAgent: currentScope?.agent || get().currentAgent,
-        toolTrace: activeRunState?.toolTrace || [],
-        toolTraceStatus: phaseToToolTraceStatus(activeRunState?.phase),
-        isStreaming: isStreamingScopeRunState(activeRunState),
-        streamingRequestId: activeRunState?.requestId || null,
         pendingContinuationIntent: null,
         pendingContinuationDraftAnchor: null,
-      }))
+        }
+      })
       const hasOnlyWelcomeMessages = get().messages.every((message) => /^welcome(?:-|$)/.test(message.id))
       if (
         currentScope?.id &&
@@ -1442,7 +1571,7 @@ export const useAgent = create<AgentState>((set, get) => ({
       if (!result.success || !result.data) return
       const scopes = get().scopes
       const scope = scopes.find((item) => item.id === scopeId) || null
-      const activeRunState = getActiveScopeRunState(get().scopeRunStates, scopeId)
+      const activeRunState = getScopeRunStateForScope(get(), scopeId)
       const messages: AgentMessage[] = result.data.map((m: { id: string; role: string; content: string; timestamp: string; meta?: Record<string, unknown> }) =>
         rebuildAgentMessageFromRow(m, scope?.agent || get().currentAgent),
       )
@@ -1469,26 +1598,31 @@ export const useAgent = create<AgentState>((set, get) => ({
           meta: { transient: true },
         })
       }
-      set((state) => ({
-        ...withActiveSessionMessagesMirror(state, messages),
-        ...withSessionSlice(state, activeSessionKey(state), {
+      set((state) => {
+        const sessionKey = activeSessionKey(state)
+        const slice = normalizeSessionSlice(state.sessions[sessionKey])
+        const nextScopeRunStates = activeRunState
+          ? { ...slice.scopeRunStates, [scopeId]: activeRunState }
+          : slice.scopeRunStates
+        return {
+        ...withSessionSliceAndActiveMirror(state, sessionKey, {
           messages,
           conversationId: scopeId,
+          scopeRunStates: nextScopeRunStates,
+          isStreaming: isStreamingScopeRunState(activeRunState),
+          foregroundBusy: isForegroundBusyScopeRunState(activeRunState),
+          composerLocked: isForegroundBusyScopeRunState(activeRunState),
+          streamingMessageId: null,
+          streamingRequestId: activeRunState?.requestId || null,
         }),
-        currentScopeId: scopeId,
         currentScope: scope,
-        conversationId: scopeId,
         currentAgent: scope?.agent || get().currentAgent,
-        isStreaming: isStreamingScopeRunState(activeRunState),
-        streamingMessageId: null,
-        streamingRequestId: activeRunState?.requestId || null,
-        toolTrace: activeRunState?.toolTrace || [],
-        toolTraceStatus: phaseToToolTraceStatus(activeRunState?.phase),
         attachments: [],
         filePool: [],
         pendingContinuationIntent: null,
         pendingContinuationDraftAnchor: null,
-      }))
+        }
+      })
     } catch { /* ignore */ }
   },
 
@@ -1919,14 +2053,18 @@ export const useAgent = create<AgentState>((set, get) => ({
       timestamp: new Date(),
       meta: { transient: true },
     })
-    set((state) => ({
-      streamingMessageId: responseId,
-      streamingRequestId: requestId,
-      toolTrace: [],
-      toolTraceStatus: 'running',
-      scopeRunStates: {
-        ...state.scopeRunStates,
-        [activeScopeId]: {
+    set((state) => {
+      const sessionKey = sessionKeyForScopeId(state, activeScopeId)
+      const slice = normalizeSessionSlice(state.sessions[sessionKey])
+      return withSessionSliceAndActiveMirror(state, sessionKey, {
+        streamingMessageId: responseId,
+        streamingRequestId: requestId,
+        isStreaming: true,
+        foregroundBusy: true,
+        composerLocked: true,
+        scopeRunStates: {
+          ...slice.scopeRunStates,
+          [activeScopeId]: {
           ...createEmptyScopeRunState({
             scopeId: activeScopeId,
             agent: currentAgent,
@@ -1938,7 +2076,8 @@ export const useAgent = create<AgentState>((set, get) => ({
           updatedAt: new Date().toISOString(),
         },
       },
-    }))
+      })
+    })
 
     try {
       if (typeof window !== 'undefined' && window.electronAPI) {
@@ -2021,30 +2160,34 @@ export const useAgent = create<AgentState>((set, get) => ({
                 ? { ...m, content: friendly.friendlyMessage, type: 'system' as const }
                 : m
             )
+            const sessionKey = sessionKeyForScopeId(state, activeScopeId)
+            const slice = normalizeSessionSlice(state.sessions[sessionKey])
             return {
-              ...withActiveSessionMessagesMirror(state, messages),
-              attachments: result.persistence?.message === 'failed' ? currentAttachments : state.attachments,
-              isStreaming: false,
-              foregroundBusy: false,
-              composerLocked: false,
-              streamingMessageId: null,
-              streamingRequestId: null,
-              scopeRunStates: {
-                ...state.scopeRunStates,
-                [activeScopeId]: {
-                  ...(state.scopeRunStates[activeScopeId] || {
-                    scopeId: activeScopeId,
-                    agent: currentAgent,
+              ...withSessionSliceAndActiveMirror(state, sessionKey, {
+                messages,
+                isStreaming: false,
+                foregroundBusy: false,
+                composerLocked: false,
+                streamingMessageId: null,
+                streamingRequestId: null,
+                scopeRunStates: {
+                  ...slice.scopeRunStates,
+                  [activeScopeId]: {
+                    ...(slice.scopeRunStates[activeScopeId] || {
+                      scopeId: activeScopeId,
+                      agent: currentAgent,
+                      requestId,
+                      toolTrace: [],
+                      startedAt: new Date().toISOString(),
+                    }),
                     requestId,
-                    toolTrace: [],
-                    startedAt: new Date().toISOString(),
-                  }),
-                  requestId,
-                  phase: 'error',
-                  updatedAt: new Date().toISOString(),
-                  error: friendly.friendlyMessage,
+                    phase: 'error',
+                    updatedAt: new Date().toISOString(),
+                    error: friendly.friendlyMessage,
+                  },
                 },
-              },
+              }),
+              attachments: result.persistence?.message === 'failed' ? currentAttachments : state.attachments,
               toolTraceStatus: 'error',
             }
           })
@@ -2078,13 +2221,13 @@ export const useAgent = create<AgentState>((set, get) => ({
           } else {
             clearInterval(typeInterval)
             if (get().streamingRequestId === requestId) {
-              set({
+              set((state) => withSessionSliceAndActiveMirror(state, activeSessionKey(state), {
                 isStreaming: false,
                 foregroundBusy: false,
                 composerLocked: false,
                 streamingMessageId: null,
                 streamingRequestId: null,
-              })
+              }))
             }
           }
         }, 30)
@@ -2107,29 +2250,33 @@ export const useAgent = create<AgentState>((set, get) => ({
             ? { ...m, content: friendly.friendlyMessage, type: 'system' as const }
             : m
         )
+        const sessionKey = sessionKeyForScopeId(state, activeScopeId)
+        const slice = normalizeSessionSlice(state.sessions[sessionKey])
         return {
-          ...withActiveSessionMessagesMirror(state, messages),
-          isStreaming: false,
-          foregroundBusy: false,
-          composerLocked: false,
-          streamingMessageId: null,
-          streamingRequestId: null,
-          scopeRunStates: {
-            ...state.scopeRunStates,
-            [activeScopeId]: {
-              ...(state.scopeRunStates[activeScopeId] || {
-                scopeId: activeScopeId,
-                agent: currentAgent,
+          ...withSessionSliceAndActiveMirror(state, sessionKey, {
+            messages,
+            isStreaming: false,
+            foregroundBusy: false,
+            composerLocked: false,
+            streamingMessageId: null,
+            streamingRequestId: null,
+            scopeRunStates: {
+              ...slice.scopeRunStates,
+              [activeScopeId]: {
+                ...(slice.scopeRunStates[activeScopeId] || {
+                  scopeId: activeScopeId,
+                  agent: currentAgent,
+                  requestId,
+                  toolTrace: [],
+                  startedAt: new Date().toISOString(),
+                }),
                 requestId,
-                toolTrace: [],
-                startedAt: new Date().toISOString(),
-              }),
-              requestId,
-              phase: 'error',
-              updatedAt: new Date().toISOString(),
-              error: friendly.friendlyMessage,
+                phase: 'error',
+                updatedAt: new Date().toISOString(),
+                error: friendly.friendlyMessage,
+              },
             },
-          },
+          }),
           toolTraceStatus: 'error',
         }
       })

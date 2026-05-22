@@ -1970,6 +1970,28 @@ const migrations: Migration[] = [
           ON document_marks(document_path, group_name, kind);
       `)
     }
+  },
+
+  // ------------------------------------------------------------------ 043
+  // Stage 6 deferred closeout — task_projections.status now shares the
+  // SkillChildRunStatus vocabulary. Existing rows keep their meaning, but
+  // their terminal text values move from projection-local names to child-run
+  // names:
+  //   - done      -> completed
+  //   - cancelled -> killed
+  {
+    name: '043_migrate_task_projection_status_to_child_status',
+    up: (db) => {
+      db.exec(`
+        UPDATE task_projections
+        SET status = CASE status
+          WHEN 'done' THEN 'completed'
+          WHEN 'cancelled' THEN 'killed'
+          ELSE status
+        END
+        WHERE status IN ('done', 'cancelled')
+      `)
+    }
   }
 ]
 

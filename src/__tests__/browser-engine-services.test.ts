@@ -133,6 +133,7 @@ describe('BrowserTabShellService', () => {
       tabs,
       getActiveTabId: () => null,
       setActiveTabId: () => undefined,
+      setSplitTabId: () => undefined,
       getViewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
       setViewBounds: () => undefined,
       isAllowedUrl: () => true,
@@ -178,6 +179,7 @@ describe('BrowserTabShellService', () => {
       tabs,
       getActiveTabId: () => 'tab-1',
       setActiveTabId: () => undefined,
+      setSplitTabId: () => undefined,
       getViewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
       setViewBounds: () => undefined,
       shouldPresentHosts: () => true,
@@ -213,6 +215,7 @@ describe('BrowserTabShellService', () => {
       setActiveTabId: (tabId) => {
         activeTabId = tabId
       },
+      setSplitTabId: () => undefined,
       getViewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
       setViewBounds: () => undefined,
       shouldPresentHosts: () => true,
@@ -261,6 +264,7 @@ describe('BrowserTabShellService', () => {
       setActiveTabId: (tabId) => {
         activeTabId = tabId
       },
+      setSplitTabId: () => undefined,
       getViewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
       setViewBounds: () => undefined,
       shouldPresentHosts: () => true,
@@ -303,6 +307,7 @@ describe('BrowserTabShellService', () => {
       setActiveTabId: (tabId) => {
         activeTabId = tabId
       },
+      setSplitTabId: () => undefined,
       getViewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
       setViewBounds: () => undefined,
       shouldPresentHosts: () => true,
@@ -343,6 +348,7 @@ describe('BrowserTabShellService', () => {
       tabs: tabs as any,
       getActiveTabId: () => 'tab-1',
       setActiveTabId: () => undefined,
+      setSplitTabId: () => undefined,
       getViewBounds: () => ({ x: 0, y: 0, width: 800, height: 600 }),
       setViewBounds: () => undefined,
       shouldPresentHosts: () => true,

@@ -97,5 +97,5 @@ test('projection truth snapshots override planning text when building persisted 
   assert.equal(record?.taskTitle, '章节改写')
   assert.equal(record?.taskSummary, '已完成第一段替换')
   assert.equal(record?.steps[0]?.title, '章节改写')
-  assert.equal(record?.status, 'done')
+  assert.equal(record?.status, 'completed')
 })

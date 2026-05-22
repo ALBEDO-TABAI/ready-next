@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 
 import type { SkillRunResult } from '../../skills-runtime/runtime-manager'
 
+import { parseRunStateJson } from '../task-projection/run-state-schema'
 import type { SkillChildDriver } from './skill-child-drivers'
 import type {
   MutableSkillChildCloseEvent,
@@ -117,7 +118,15 @@ export function createSkillChildSubAgent(params: SkillChildSubAgentParams): SubA
         }
 
         const actionStartedMs = Date.now()
-        const result = await params.executeAction(plan, state)
+        let result: SkillRunResult
+        try {
+          result = await params.executeAction(plan, state)
+        } catch (error) {
+          if (context.abortSignal.aborted) {
+            return toSubAgentResult(makeAbortClose(params, context.abortSignal.reason ?? error))
+          }
+          throw error
+        }
         const durationMs = Math.max(0, Date.now() - actionStartedMs)
         yield {
           type: 'progress',
@@ -226,11 +235,17 @@ function subAgentReasonForChildClose(closeEvent: SkillChildCloseEvent): SubAgent
 function makeAbortClose(params: SkillChildSubAgentParams, reason: unknown): SkillChildCloseEvent {
   const message = reason instanceof Error ? reason.message : typeof reason === 'string' ? reason : 'cancelled_user'
   const isLaunchStuck = message === 'launch_stuck'
+  const isProcessRestarted = message === 'process_restarted'
+  const terminalReason = isLaunchStuck
+    ? 'launch_stuck'
+    : isProcessRestarted
+      ? 'process_restarted'
+      : 'cancelled_user'
   return makeCloseEvent({
     params,
     status: isLaunchStuck ? 'failed' : 'killed',
-    terminalReason: isLaunchStuck ? 'launch_stuck' : 'cancelled_user',
-    errorKind: isLaunchStuck ? 'launch_stuck' : 'cancelled_user',
+    terminalReason,
+    errorKind: terminalReason,
     message,
   })
 }
@@ -335,9 +350,8 @@ function actionResultHandles(
 function readRunStateStatus(runStatePath: string | null): string | null {
   if (!runStatePath) return null
   try {
-    const parsed = JSON.parse(readFileSync(runStatePath, 'utf8')) as unknown
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
-    return pickString((parsed as Record<string, unknown>).status)?.toLowerCase() ?? null
+    const parsed = parseRunStateJson(readFileSync(runStatePath, 'utf8'), { path: runStatePath, emitMetric: true })
+    return parsed.ok ? parsed.value.statusText : null
   } catch {
     return null
   }

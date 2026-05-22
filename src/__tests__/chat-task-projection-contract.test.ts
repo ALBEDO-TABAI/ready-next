@@ -44,7 +44,7 @@ test('chat task cards merge task projections and expose task-type, status, budge
   assert.match(projectionHelpers, /function isStalePausedProjection\(/)
   assert.match(projectionHelpers, /function isLiveProjectionCandidate\(/)
   assert.match(projectionHelpers, /function selectFallbackProjection\(/)
-  assert.match(projectionHelpers, /item\.status === 'done' && \(item\.recentArtifacts\?\.length \|\| 0\) > 0/)
+  assert.match(projectionHelpers, /item\.status === 'completed' && \(item\.recentArtifacts\?\.length \|\| 0\) > 0/)
   assert.doesNotMatch(taskMerge, /persistedTaskProjections\[run\.scopeId\]\?\[0\]/)
   assert.match(taskMerge, /taskTitle:\s*projection\?\.taskTitle\s*\?\? null/)
   assert.match(taskMerge, /taskSummary:\s*projection\?\.taskSummary\s*\?\? null/)

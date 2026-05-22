@@ -19,7 +19,7 @@ test('task panel reads task projections and renders budget and recovery hints', 
   assert.match(source, /function isStalePausedProjection\(/)
   assert.match(source, /function isLiveProjectionCandidate\(/)
   assert.match(source, /function selectFallbackProjection\(/)
-  assert.match(source, /item\.status === 'done' && \(item\.recentArtifacts\?\.length \|\| 0\) > 0/)
+  assert.match(source, /item\.status === 'completed' && \(item\.recentArtifacts\?\.length \|\| 0\) > 0/)
   assert.doesNotMatch(source, /return taskProjections\[0\] \|\| null/)
   assert.match(source, /activeProjection\?\.taskTitle\s*\|\|\s*activeRun\?\.taskTitle/)
   assert.match(source, /activeProjection\?\.taskSummary\s*\|\|\s*activeRun\?\.taskSummary/)

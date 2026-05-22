@@ -181,13 +181,15 @@ export function projectionStatusToUserLabel(
         return '排队中'
       case 'running':
         return '进行中'
+      case 'recoverable_paused':
+      case 'budget_paused':
       case 'blocked':
         return '待继续'
-      case 'done':
+      case 'completed':
         return '已完成'
       case 'failed':
         return '失败'
-      case 'cancelled':
+      case 'killed':
         return '已取消'
       default:
         return '待命'
@@ -196,19 +198,21 @@ export function projectionStatusToUserLabel(
   // 'taskCard' surface (default) — 复刻 taskCardViewModel.ts 现有 mapping。
   if (status === 'queued') return '排队中'
   if (status === 'running') return '进行中'
-  if (status === 'blocked') return '等待继续'
-  if (status === 'done') return '已完成'
+  if (status === 'blocked' || status === 'recoverable_paused' || status === 'budget_paused') return '等待继续'
+  if (status === 'completed') return '已完成'
   if (status === 'failed') return '失败'
-  if (status === 'cancelled') return '已停止'
+  if (status === 'killed') return '已停止'
   return null
 }
 
 export function childRunToProjectionStatus(
   row: ActiveChildRunSummaryData,
 ): TaskProjectionRecordData['status'] {
-  if (row.closeStatus === 'completed' || row.status === 'completed') return 'done'
+  if (row.closeStatus === 'completed' || row.status === 'completed') return 'completed'
   if (row.closeStatus === 'failed' || row.status === 'failed') return 'failed'
-  if (row.closeStatus === 'killed' || row.status === 'killed') return 'cancelled'
+  if (row.closeStatus === 'killed' || row.status === 'killed') return 'killed'
+  if (row.closeStatus === 'budget_paused' || row.status === 'budget_paused') return 'budget_paused'
+  if (row.closeStatus === 'recoverable_paused' || row.status === 'recoverable_paused') return 'recoverable_paused'
   if (row.closeStatus === 'blocked' || row.status === 'blocked') return 'blocked'
   return 'running'
 }
@@ -233,8 +237,8 @@ export function childRunToTaskActions(
   row: ActiveChildRunSummaryData,
 ): ScopeRunState['resumableActions'] {
   const status = childRunToProjectionStatus(row)
-  if (status === 'done') return ['open_artifact']
+  if (status === 'completed') return ['open_artifact']
   if (status === 'failed') return ['retry', 'cancel', 'open_artifact']
-  if (status === 'cancelled') return ['none']
+  if (status === 'killed') return ['none']
   return ['continue', 'cancel', 'open_artifact']
 }

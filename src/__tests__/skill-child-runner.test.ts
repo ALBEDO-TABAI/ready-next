@@ -837,11 +837,11 @@ test('Worker B: child runner persists childRunId-keyed projection rows through l
   releaseAction()
   await pollUntil(() => {
     const row = taskProjectionStore.state.rows.get(taskId)
-    return row?.status === 'done' ? row : null
+    return row?.status === 'completed' ? row : null
   })
 
   const closed = taskProjectionStore.state.rows.get(taskId)!
-  assert.equal(closed.status, 'done')
+  assert.equal(closed.status, 'completed')
   assert.equal(closed.interactionState, 'suspended')
   assert.equal(closed.waitingFor, 'none')
   assert.deepEqual(closed.resumableActions, ['open_artifact'])
@@ -1227,7 +1227,7 @@ test('Worker B: child close maps completed/blocked/failed/cancelled projections 
     {
       name: 'completed',
       close: makeTerminalClose('test-skill-projection-completed', 'completed', 'completed'),
-      expectedStatus: 'done',
+      expectedStatus: 'completed',
       expectedStepStatus: 'done',
       expectedWaitingFor: 'none',
     },
@@ -1248,7 +1248,7 @@ test('Worker B: child close maps completed/blocked/failed/cancelled projections 
     {
       name: 'cancelled',
       close: makeTerminalClose('test-skill-projection-cancelled', 'completed', 'completed'),
-      expectedStatus: 'cancelled',
+      expectedStatus: 'killed',
       expectedStepStatus: 'done',
       expectedWaitingFor: 'none',
       cancel: true,
@@ -1307,7 +1307,7 @@ test('Worker B: child close maps completed/blocked/failed/cancelled projections 
     assert.equal(currentProjectionStep(projection!)?.status, item.expectedStepStatus)
     assert.equal(projection!.waitingFor, item.expectedWaitingFor)
     if (item.name === 'blocked') {
-      assert.notEqual((projection as unknown as { status?: string }).status, 'done')
+      assert.notEqual((projection as unknown as { status?: string }).status, 'completed')
       assert.ok(projection!.taskContinuation)
     }
   }

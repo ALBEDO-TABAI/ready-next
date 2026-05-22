@@ -77,7 +77,7 @@ function createInMemoryStore(initial?: TaskProjectionRecord[]): {
         if (record.module !== 'system') return false
         if (record.taskType !== 'short_task') return false
         if (record.taskId.startsWith('skill:')) return false
-        if (record.status === 'cancelled' || record.status === 'done') return false
+        if (record.status === 'killed' || record.status === 'completed') return false
         for (const artifact of record.recentArtifacts || []) {
           const path = typeof artifact?.path === 'string' ? artifact.path : ''
           if (runStatePath && path === runStatePath) return true
@@ -218,7 +218,7 @@ test('legacy system short_task sibling is superseded when skill-keyed row commit
 
   const superseded = records.get(legacy.taskId)
   assert.ok(superseded)
-  assert.equal(superseded?.status, 'cancelled')
+  assert.equal(superseded?.status, 'killed')
   assert.equal(superseded?.interactionState, 'suspended')
   assert.equal(superseded?.waitingFor, 'none')
   assert.equal(superseded?.blockedReason, null)
@@ -229,7 +229,7 @@ test('legacy system short_task sibling is superseded when skill-keyed row commit
 
 test('legacy sibling already in terminal state is not modified', async () => {
   const legacy = buildLegacyRecord({
-    status: 'done',
+    status: 'completed',
     interactionState: 'suspended',
     waitingFor: 'none',
     blockedReason: null,
@@ -241,7 +241,7 @@ test('legacy sibling already in terminal state is not modified', async () => {
   await syncTaskProjection(store, buildSkillSummary(), buildSkillPayload())
 
   const after = records.get(legacy.taskId)
-  assert.equal(after?.status, 'done')
+  assert.equal(after?.status, 'completed')
   assert.equal(after?.continuationRef?.blockerType, undefined)
   // updatedAt remains untouched because supersede skipped this row.
   assert.equal(after?.updatedAt, snapshotBeforeUpdatedAt)
@@ -524,6 +524,6 @@ test('Phase 7: legacy row with no skillId remains adoptable by a same-skill chil
 
   // The legacy row was superseded — adoption succeeded.
   const after = records.get(legacy.taskId)
-  assert.equal(after?.status, 'cancelled')
+  assert.equal(after?.status, 'killed')
   assert.equal(after?.continuationRef?.blockerType, 'superseded')
 })

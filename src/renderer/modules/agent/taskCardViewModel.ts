@@ -482,7 +482,7 @@ export function deriveTaskCardRuntimeState(run: TaskCardRunLike): TaskCardRuntim
       }),
     }
   }
-  if (run.phase === 'done' || run.status === 'done') {
+  if (run.phase === 'done' || run.status === 'completed') {
     return {
       visualState: 'done',
       statusLabel: taskCardVisualStateLabel('done'),

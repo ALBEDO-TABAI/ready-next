@@ -207,10 +207,10 @@ export function useTaskRunMerge(params: UseTaskRunMergeParams): TaskCardRun[] {
       // a one-way derivation; it doesn't try to recover the original
       // scope-run phase, which is fine for cold-start restoration.
       const phaseFromStatus: ScopeRunState['phase'] =
-        projection.status === 'done' ? 'done'
+        projection.status === 'completed' ? 'done'
         : projection.status === 'failed' ? 'error'
-        : projection.status === 'cancelled' ? 'cancelled'
-        : projection.status === 'blocked' ? 'checkpoint'
+        : projection.status === 'killed' ? 'cancelled'
+        : projection.status === 'blocked' || projection.status === 'recoverable_paused' || projection.status === 'budget_paused' ? 'checkpoint'
         : projection.status === 'queued' ? 'queued'
         : 'tool_running'
       merged.set(scope.id, taskProjectionToTaskCardRun({

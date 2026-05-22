@@ -172,6 +172,17 @@ test('resolveExplicitRunStateResource rejects malformed run_state JSON without g
   assert.match(resolved.reason || '', /parse/)
 })
 
+test('resolveExplicitRunStateResource rejects schema-invalid run_state JSON without guessing', () => {
+  const outputDir = makeOutputDir()
+  const runStatePath = join(outputDir, 'run_state.json')
+  writeFileSync(runStatePath, JSON.stringify({ version: 'vnext', status: 'mystery', video_dir: outputDir }), 'utf8')
+
+  const resolved = resolveExplicitRunStateResource([makeResource(runStatePath)])
+
+  assert.equal(resolved.status, 'invalid')
+  assert.match(resolved.reason || '', /status is not recognized/)
+})
+
 test('resolveExplicitRunStateResource treats multiple explicit run_state resources as ambiguous', () => {
   const firstDir = makeOutputDir()
   const secondDir = makeOutputDir()

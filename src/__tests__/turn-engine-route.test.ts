@@ -4990,9 +4990,9 @@ test('Stage 4 W2: skill resume + force_tool checkpoint reminders route through S
 
 test('Stage 4 W2: SystemReminderRegistry exposes the two new topics', () => {
   // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: the topics added in W2 must be present in both the ReminderTopic union and the DEFAULT_CONFLICTS map. Without both, registration would either fail to typecheck or silently bypass conflict resolution.
-  const registrySource = readFileSync(resolve(process.cwd(), 'src/main/modules/agent-control/system-reminder-registry.ts'), 'utf8')
+  const registrySource = readFileSync(resolve(process.cwd(), 'src/main/modules/agent-control/system-reminders/system-reminder-registry.ts'), 'utf8')
   // eslint-disable-next-line ready/no-source-grep-test -- reviewed hard contract: see comment above; the assembly module's DEFAULT_CONFLICTS map is the second half of the topic registration that must stay in lock-step with the union.
-  const assemblySource = readFileSync(resolve(process.cwd(), 'src/main/modules/agent-control/system-reminder-assembly.ts'), 'utf8')
+  const assemblySource = readFileSync(resolve(process.cwd(), 'src/main/modules/agent-control/system-reminders/system-reminder-assembly.ts'), 'utf8')
 
   assert.match(registrySource, /'skill-resume-context-prompt'/, 'ReminderTopic union must include skill-resume-context-prompt')
   assert.match(registrySource, /'force-tool-checkpoint-blocked'/, 'ReminderTopic union must include force-tool-checkpoint-blocked')

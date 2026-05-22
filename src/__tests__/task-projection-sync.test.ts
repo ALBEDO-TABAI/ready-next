@@ -334,7 +334,7 @@ test('syncTaskProjection does not keep terminal projections in running interacti
     timestamp: '2026-04-28T01:10:00.000Z',
   })
 
-  assert.equal(result?.status, 'done')
+  assert.equal(result?.status, 'completed')
   assert.equal(result?.interactionState, 'suspended')
 })
 
@@ -535,7 +535,7 @@ test('syncTaskProjection keeps parent blocked while a detached child is still ru
     module: 'skill',
     taskTitle: '父任务',
     taskSummary: '父任务已交接',
-    status: 'done',
+    status: 'completed',
     interactionState: 'running',
     steps: [{
       id: 'parent-step',
@@ -652,7 +652,7 @@ test('syncTaskProjection demotes resuming interaction state when status is termi
     timestamp: '2026-04-28T01:11:00.000Z',
   })
 
-  assert.equal(result?.status, 'done')
+  assert.equal(result?.status, 'completed')
   assert.equal(result?.interactionState, 'suspended')
 })
 

@@ -3,6 +3,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, isAbsolute, join } from 'node:path'
 import { logAgentMetric } from '../metrics'
 import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
+import { parseRunStateJson } from './run-state-schema'
 
 const DEFAULT_RUN_STATE_FILENAME = 'run_state.json'
 const DEFAULT_SEARCH_DEPTH = 1
@@ -21,7 +22,7 @@ export interface RunStateSelection {
   ambiguous: boolean
   candidates: RunStateCandidate[]
 }
-export type NormalizedRunStateStatus = 'running' | 'done' | 'failed' | 'cancelled' | 'blocked'
+export { normalizeRunStateStatus, type NormalizedRunStateStatus } from './run-state-schema'
 
 function errorKind(error: unknown): string {
   if (error && typeof error === 'object' && 'code' in error && typeof (error as { code?: unknown }).code === 'string') {
@@ -32,17 +33,6 @@ function errorKind(error: unknown): string {
 
 function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
-}
-
-export function normalizeRunStateStatus(value: unknown): NormalizedRunStateStatus | null {
-  const raw = typeof value === 'string' ? value.trim().toLowerCase() : ''
-  if (!raw) return null
-  if (raw === 'done' || raw === 'completed' || raw === 'complete' || raw === 'success' || raw === 'succeeded') return 'done'
-  if (raw === 'failed' || raw === 'error') return 'failed'
-  if (raw === 'cancelled' || raw === 'canceled') return 'cancelled'
-  if (raw === 'blocked' || raw === 'paused' || raw === 'awaiting_input' || raw === 'pending_review') return 'blocked'
-  if (raw === 'running' || raw === 'in_progress' || raw === 'processing' || raw === 'pending') return 'running'
-  return null
 }
 
 function statFile(path: string): { isFile: boolean; isDirectory: boolean; mtimeMs: number } | null {
@@ -57,24 +47,21 @@ function statFile(path: string): { isFile: boolean; isDirectory: boolean; mtimeM
 function readRunStateCandidate(path: string, fileName: string): RunStateCandidate | null {
   const stat = statFile(path)
   if (!stat?.isFile || !path.endsWith(fileName)) return null
-  let rec: Record<string, unknown> = {}
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown
-    rec = parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : {}
+    const parsed = parseRunStateJson(readFileSync(path, 'utf8'), { path, emitMetric: true })
+    if (!parsed.ok) return null
+    const rec = parsed.value
+    return {
+      path,
+      mtimeMs: stat.mtimeMs,
+      taskId: rec.taskId,
+      childRunId: rec.childRunId,
+      status: rec.status,
+      currentStage: rec.currentStage || rec.currentStep,
+      activeOutputDir: rec.activeOutputDir,
+    }
   } catch {
-    rec = {}
-  }
-  return {
-    path,
-    mtimeMs: stat.mtimeMs,
-    taskId: nonEmptyString(rec.task_id) || nonEmptyString(rec.taskId),
-    childRunId: nonEmptyString(rec.child_run_id) || nonEmptyString(rec.childRunId),
-    status: nonEmptyString(rec.status),
-    currentStage: nonEmptyString(rec.current_stage)
-      || nonEmptyString(rec.currentStage)
-      || nonEmptyString(rec.current_step)
-      || nonEmptyString(rec.currentStep),
-    activeOutputDir: nonEmptyString(rec.active_output_dir) || nonEmptyString(rec.activeOutputDir),
+    return null
   }
 }
 
@@ -189,6 +176,7 @@ export function selectRunStateCandidate(params: {
   const explicitRunStatePath = nonEmptyString(params.explicitRunStatePath)
   if (explicitRunStatePath && existsSync(explicitRunStatePath) && statFile(explicitRunStatePath)?.isFile) {
     const explicitCandidate = readRunStateCandidate(explicitRunStatePath, fileName)
+    if (!explicitCandidate) return { path: null, ambiguous: false, candidates: [] }
     if (params.trustExplicitRunStatePath || (!expectedTaskId && !expectedChildRunId)) {
       const resolved = explicitCandidate
         ? resolveActiveCandidate(explicitCandidate, fileName, expectedTaskId, expectedChildRunId)

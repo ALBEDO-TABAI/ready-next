@@ -10,10 +10,10 @@ function readWorkspaceFile(path: string): string {
 test('browser tabs publish chat-reference drag payloads from both tab rail surfaces', () => {
   const tabRail = readWorkspaceFile('src/renderer/components/browser/TabRail.tsx')
   const activeTabSurface = readWorkspaceFile('src/renderer/components/browser/ActiveTabSurface.tsx')
-  const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
+  const attachmentIntake = readWorkspaceFile('src/renderer/components/agent/chat-panel/drag-drop/use-attachment-intake.ts')
   const fileTree = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
 
-  assert.match(chatPanel, /data\.type === 'browser-tab' && data\.url/)
+  assert.match(attachmentIntake, /data\.type === 'browser-tab' && data\.url/)
   assert.match(tabRail, /setData\('application\/x-ready-drag', data\)/)
   assert.match(tabRail, /beginBrowserTabDragSession\(/)
   assert.match(tabRail, /endBrowserTabDragSession\(\)/)

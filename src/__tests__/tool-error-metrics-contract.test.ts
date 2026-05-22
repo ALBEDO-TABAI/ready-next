@@ -42,14 +42,14 @@ test('tool-runtime.ts uses TOOL_ERROR_METRICS.unknownSurfaced', () => {
 
 test('turn-engine.ts uses TOOL_ERROR_METRICS.resolutionViolation', () => {
   const source = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
-  assert.match(source, /from ['"]\.\/tool-error-metrics['"]/)
+  assert.match(source, /from ['"]\.\/tools-runtime\/tool-error-metrics['"]/)
   assert.match(source, /logAgentMetric\(TOOL_ERROR_METRICS\.resolutionViolation/)
   assert.doesNotMatch(source, /logAgentMetric\(['"]tool_resolution_violation_post_arbitration['"]/)
 })
 
 test('skill-reference-hints.ts emits skillReferenceHintTtlSwept on sweep', () => {
-  const source = readWorkspaceFile('src/main/modules/agent-control/skill-reference-hints.ts')
-  assert.match(source, /from ['"]\.\/tool-error-metrics['"]/)
+  const source = readWorkspaceFile('src/main/modules/agent-control/skills/skill-reference-hints.ts')
+  assert.match(source, /from ['"]\.\.\/tools-runtime\/tool-error-metrics['"]/)
   assert.match(
     source,
     /logAgentMetric\(TOOL_ERROR_METRICS\.skillReferenceHintTtlSwept/,

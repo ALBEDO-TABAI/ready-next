@@ -14,7 +14,7 @@ const MODULE_EXECUTOR_PATH = resolve(
 
 test('document-task-pipeline-executor 导入 logAgentMetric', () => {
   const source = readFileSync(EXECUTOR_PATH, 'utf8')
-  assert.match(source, /import\s+\{\s*logAgentMetric\s*\}\s+from\s+'\.\/metrics'/)
+  assert.match(source, /import\s+\{\s*logAgentMetric\s*\}\s+from\s+'..\/..\/agent-control\/metrics'/)
 })
 
 test('writeDocumentWidget.update 在 reason === target_not_resolved 时 emit patch_target_resolution_failed', () => {

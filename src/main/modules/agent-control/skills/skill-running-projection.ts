@@ -3,6 +3,7 @@ import type { Dirent } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { logAgentMetric } from '../metrics'
 import { selectRunStateCandidate } from '../task-projection/run-state-selection'
+import { parseRunStateJson } from '../task-projection/run-state-schema'
 import { inspectSkillProgressArtifacts } from './skill-progress-artifacts'
 import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
 
@@ -117,12 +118,33 @@ function safeStat(path: string) {
 
 function readRunState(path: string | null): RunStateSummary | null {
   if (!path) return null
+  let raw: string
   try {
-    return extractRunStateSummary(JSON.parse(readFileSync(path, 'utf8')))
+    raw = readFileSync(path, 'utf8')
   } catch (error) {
     emitProjectionPartial('parse', path, error)
     return null
   }
+  const parsed = parseRunStateJson(raw, { path, emitMetric: true })
+  if (!parsed.ok) {
+    const parseError = new Error(parsed.message)
+    if (parsed.reason === 'parse_failed') parseError.name = 'SyntaxError'
+    emitProjectionPartial('parse', path, parseError)
+    return null
+  }
+  return extractRunStateSummary(parsed.value.raw)
+}
+
+function findDirectRunStatePath(probeDirs: string[]): string | null {
+  for (const dir of probeDirs) {
+    const candidate = join(dir, RUN_STATE_FILENAME)
+    try {
+      if (statSync(candidate).isFile()) return candidate
+    } catch {
+      // silent-catch: this fallback only preserves parse metrics for existing malformed run_state files.
+    }
+  }
+  return null
 }
 
 function collectProbeDirs(toolInput?: Record<string, unknown>): string[] {
@@ -271,6 +293,10 @@ export function buildLongSkillRunningProjection(params: {
   const ambiguousSelection = selections.find((selection) => selection.ambiguous)
   const runStatePath = selections.map((selection) => selection.path).find(Boolean) || null
   const runState = readRunState(runStatePath)
+  if (!runStatePath) {
+    const directRunStatePath = findDirectRunStatePath(probeDirs)
+    if (directRunStatePath) readRunState(directRunStatePath)
+  }
   const artifactProgress = inspectSkillProgressArtifacts({
     outputDir: runStatePath ? dirname(runStatePath) : probeDirs[0],
   })

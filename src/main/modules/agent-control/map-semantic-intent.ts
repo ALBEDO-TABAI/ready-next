@@ -82,6 +82,11 @@ function strongKeywordFallback(prompt: string): MapSemanticIntent | null {
   }
 }
 
+function hasPotentialMapSignal(prompt: string): boolean {
+  const text = prompt.replace(/\s+/g, '')
+  return /(地图|导航|路线|怎么走|从.+到|附近|途经|途径|顺路|绕路|最省时间|最短|最优行程|多点|地点|路上|开车|步行|公交|地铁|打车|耗时|多久)/.test(text)
+}
+
 function buildPrompt(userPrompt: string): string {
   return [
     '你只判断用户这句话是否是路线规划/地图导航意图，必须只输出 JSON。',
@@ -117,7 +122,7 @@ export async function classifyMapSemanticIntent(params: {
   if (cached !== undefined) return cached
 
   let result: MapSemanticIntent | null = null
-  if (params.requestLLM) {
+  if (params.requestLLM && hasPotentialMapSignal(params.prompt)) {
     try {
       const text = await withTimeout(
         params.requestLLM(buildPrompt(params.prompt), LLM_TIMEOUT_MS),

@@ -39,7 +39,7 @@ function writeSnapshot(snapshot: FastCardSnapshot): void {
   try {
     sessionStorage.setItem(FASTCARD_SESSION_KEY, JSON.stringify(snapshot))
   } catch {
-    // Session-only cache; storage failures should not break browser use.
+    // silent-catch: session-only cache; storage failures should not break browser use.
   }
 }
 

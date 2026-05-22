@@ -5,6 +5,10 @@ import type {
   SkillChildRunTerminalReason,
 } from './skill-child-run-types'
 import { freezeSkillChildCloseEvent } from './skill-child-close-event-freeze'
+import {
+  isSkillChildRunStatus,
+  isSkillChildRunTerminalStatus,
+} from '../../../../shared/skill-child-run-status'
 
 export const CANONICAL_SKILL_CHILD_TERMINAL_REASONS = [
   'completed',
@@ -27,6 +31,20 @@ export const CANONICAL_SKILL_CHILD_TERMINAL_REASONS = [
 ] as const satisfies readonly SkillChildRunTerminalReason[]
 
 export type SkillChildRunStatusClass = 'active' | 'paused' | 'blocked' | 'terminal'
+
+export class SkillChildRunTransitionError extends Error {
+  readonly fromStatus: unknown
+  readonly toStatus: unknown
+  readonly reason: string
+
+  constructor(fromStatus: unknown, toStatus: unknown, reason: string) {
+    super(`Invalid child run status transition: ${String(fromStatus)} -> ${String(toStatus)} (${reason})`)
+    this.name = 'SkillChildRunTransitionError'
+    this.fromStatus = fromStatus
+    this.toStatus = toStatus
+    this.reason = reason
+  }
+}
 
 const TERMINAL_REASON_SET = new Set<string>(CANONICAL_SKILL_CHILD_TERMINAL_REASONS)
 
@@ -97,6 +115,22 @@ export function classifySkillChildRunStatus(status: SkillChildRunStatus): SkillC
     case 'failed':
     case 'killed':
       return 'terminal'
+  }
+}
+
+export function validateSkillChildRunTransition(
+  fromStatus: unknown,
+  toStatus: unknown,
+): void {
+  if (!isSkillChildRunStatus(fromStatus)) {
+    throw new SkillChildRunTransitionError(fromStatus, toStatus, 'invalid_from_status')
+  }
+  if (!isSkillChildRunStatus(toStatus)) {
+    throw new SkillChildRunTransitionError(fromStatus, toStatus, 'invalid_to_status')
+  }
+  if (fromStatus === toStatus) return
+  if (isSkillChildRunTerminalStatus(fromStatus)) {
+    throw new SkillChildRunTransitionError(fromStatus, toStatus, 'terminal_status_is_final')
   }
 }
 

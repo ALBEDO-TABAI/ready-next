@@ -53,17 +53,18 @@ test('pet-facing chat hides internal skill/tool failure details from user-visibl
 
 test('chat selected text exposes direct copy and sticky-note context actions', () => {
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
+  const chatPanelBody = readWorkspaceFile('src/renderer/components/agent/chat-panel/ChatPanelBody.tsx')
   const chatMessages = readWorkspaceFile('src/renderer/components/agent/ChatMessages.tsx')
   const contextMenu = readWorkspaceFile('src/renderer/components/layout/ContextMenu.tsx')
 
-  assert.match(chatPanel, /ContextMenu/)
-  assert.match(chatPanel, /贴到便利贴/)
+  assert.match(chatPanelBody, /ContextMenu/)
+  assert.match(chatPanelBody, /贴到便利贴/)
   assert.match(chatPanel, /electronAPI\.pet\.pushStickyNote/)
   assert.match(chatPanel, /electronAPI\.pet\.show\(\)/)
   assert.match(chatPanel, /closest\('\[data-chat-panel-root="true"\]'\)/)
   assert.match(chatPanel, /boundary:\s*rect/)
-  assert.match(chatPanel, /boundary=\{agentSelectionMenu\.boundary\}/)
-  assert.match(chatPanel, /portal/)
+  assert.match(chatPanelBody, /boundary=\{agentSelectionMenu\.boundary\}/)
+  assert.match(chatPanelBody, /portal/)
   assert.match(chatMessages, /onAgentSelectionContextMenu/)
   assert.match(chatMessages, /window\.getSelection\(\)\?\.toString\(\)/)
   assert.match(chatMessages, /onContextMenu/)

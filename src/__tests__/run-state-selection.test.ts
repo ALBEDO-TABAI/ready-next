@@ -217,3 +217,25 @@ test('run_state selection emits a metric when directory traversal is skipped', (
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('run_state selection ignores schema-invalid candidates and emits schema metric', () => {
+  const root = mkdtempSync(join(tmpdir(), 'ready-run-state-invalid-schema-'))
+  const events: AgentMetricEvent[] = []
+  __setMetricSinkForTests((event) => events.push(event))
+  try {
+    const path = join(root, 'run_state.json')
+    writeFileSync(path, JSON.stringify({ status: 'mystery', task_id: 'dst-invalid' }), 'utf8')
+
+    const selected = selectRunStateCandidate({ rootDir: root, expectedTaskId: 'dst-invalid' })
+
+    assert.equal(selected.path, null)
+    assert.equal(selected.candidates.length, 0)
+    const event = events.find((item) => item.metric === TOOL_ERROR_METRICS.runStateSchemaInvalid)
+    assert.ok(event)
+    assert.equal(event.pathTag, 'run_state.json')
+    assert.equal(event.reason, 'invalid_status')
+  } finally {
+    __setMetricSinkForTests(null)
+    rmSync(root, { recursive: true, force: true })
+  }
+})

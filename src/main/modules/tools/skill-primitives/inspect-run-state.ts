@@ -193,6 +193,7 @@ function deriveReconciledLiveness(summary: RunStateSummary, artifactProgress: Sk
   if (['completed', 'success', 'done'].includes(status || '')) return 'done'
   if (['failed', 'failure', 'error'].includes(status || '')) return 'failed'
   if (['blocked', 'pending_review', 'awaiting_input'].includes(status || '')) return 'blocked'
+  if (['recoverable_paused', 'budget_paused'].includes(status || '')) return 'recoverable_paused'
   if (['running', 'waiting_for_batches', 'ready_to_finalize', 'paused'].includes(status || '')) {
     if (artifactProgress.hasEvidence) return 'recoverable_paused'
     return 'unknown'

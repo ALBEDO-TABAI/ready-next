@@ -134,32 +134,27 @@ async function fireHandler<P>(
         timeoutMs,
       })
       // Tell cooperative handlers to stop ASAP. Non-cooperative ones
-      // (ignoring the signal) will continue running; we watch for that
-      // below to fire the "unknown outcome" diagnostic metric.
+      // (ignoring the signal) may continue running; watch in the background
+      // so subsequent handlers are not blocked by the grace window.
       abortController.abort()
       let settledAfterAbort = false
-      const settledTracker = handlerPromise.then(() => {
+      const graceTimeoutId = setTimeout(() => {
+        if (!settledAfterAbort) {
+          options.emitMetric?.(HOOK_REGISTRY_METRICS.hookHandlerTimeoutWithUnknownOutcome, {
+            hookName,
+            handlerName: handler.name,
+            timeoutMs,
+            abortGraceMs: ABORT_GRACE_MS,
+          })
+        }
+      }, ABORT_GRACE_MS)
+      handlerPromise.then(() => {
         settledAfterAbort = true
+        clearTimeout(graceTimeoutId)
       }, () => {
         settledAfterAbort = true
+        clearTimeout(graceTimeoutId)
       })
-      const graceTimeoutPromise = new Promise<void>((resolve) => {
-        setTimeout(resolve, ABORT_GRACE_MS)
-      })
-      await Promise.race([settledTracker, graceTimeoutPromise])
-      if (!settledAfterAbort) {
-        options.emitMetric?.(HOOK_REGISTRY_METRICS.hookHandlerTimeoutWithUnknownOutcome, {
-          hookName,
-          handlerName: handler.name,
-          timeoutMs,
-          abortGraceMs: ABORT_GRACE_MS,
-        })
-      }
-      // Keep the promise alive but its result intentionally unobserved.
-      // The metric above is the diagnostic; we don't want to re-throw and
-      // break the hook loop for subsequent handlers.
-      // eslint-disable-next-line @typescript-eslint/no-unused-expressions
-      handlerPromise.then(() => undefined, () => undefined)
     }
   } catch (error) {
     options.emitMetric?.(HOOK_REGISTRY_METRICS.hookHandlerFailed, {

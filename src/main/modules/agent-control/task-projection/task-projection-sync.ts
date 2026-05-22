@@ -243,12 +243,12 @@ async function supersedeLegacySiblings(
   }
   for (const sibling of siblings) {
     if (sibling.taskId === next.taskId) continue
-    if (sibling.status === 'cancelled' || sibling.status === 'done') continue
+    if (sibling.status === 'killed' || sibling.status === 'completed') continue
     try {
       await store.update(
         sibling.taskId,
         {
-          status: 'cancelled',
+          status: 'killed',
           interactionState: 'suspended',
           waitingFor: 'none',
           blockedReason: null,
@@ -294,10 +294,10 @@ function resolveRecordInteractionState(
 ): TaskInteractionState {
   const interactionState = resolveInteractionState(summary)
   // Terminal status must never persist with `running` or `resuming` interaction
-  // state — both signal active work, which contradicts done/failed/cancelled.
+  // state — both signal active work, which contradicts completed/failed/killed.
   if (
     (interactionState === 'running' || interactionState === 'resuming')
-    && (status === 'done' || status === 'failed' || status === 'cancelled')
+    && (status === 'completed' || status === 'failed' || status === 'killed')
   ) {
     return 'suspended'
   }
@@ -327,9 +327,9 @@ function resolveStatus(summary: ScopeRunSummary): TaskProjectionRecord['status']
     return 'blocked'
   }
   if (summary.phase === 'error') return 'failed'
-  if (summary.phase === 'cancelled') return 'cancelled'
+  if (summary.phase === 'cancelled') return 'killed'
   if (summary.blockedReason) return 'blocked'
-  if (summary.phase === 'done') return 'done'
+  if (summary.phase === 'done') return 'completed'
   if (interactionState !== 'running') return 'blocked'
   return 'running'
 }
@@ -474,9 +474,9 @@ function buildArtifactSummary(artifacts: ScopeRunSummary['recentArtifacts'] | un
 }
 
 function formatChildTaskStatus(status: TaskProjectionRecord['status']): string {
-  if (status === 'done') return '已完成'
+  if (status === 'completed') return '已完成'
   if (status === 'failed') return '失败'
-  if (status === 'cancelled') return '已取消'
+  if (status === 'killed') return '已取消'
   if (status === 'blocked') return '待继续'
   if (status === 'queued') return '排队中'
   return '进行中'

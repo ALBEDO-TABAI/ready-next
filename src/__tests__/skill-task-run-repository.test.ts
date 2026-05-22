@@ -4,6 +4,7 @@ import test from 'node:test'
 
 import { createSkillChildRunId } from '../main/modules/agent-control/skills/skill-child-run-id'
 import type { SkillChildCloseEvent } from '../main/modules/agent-control/skills/skill-child-run-types'
+import { SkillChildRunTransitionError } from '../main/modules/agent-control/skills/skill-child-state-machine'
 import { runMigrations, type MigrationDatabase } from '../main/modules/migrations'
 import {
   SkillTaskRunRepository,
@@ -397,6 +398,44 @@ test('SkillTaskRunRepository finds detached task archive rows', () => {
 
   const byDetached = repository.findByDetachedTaskId('dst-123')
   assert.equal(byDetached?.id, 'str-detached')
+})
+
+test('updateChildRun rejects terminal status rewrites and preserves the stored child payload', () => {
+  const { repository } = createRepositoryHarness()
+  const input = makeChildInput()
+  repository.createChildRun(input)
+  repository.updateChildRun(input.childRunId, { status: 'running' })
+  repository.updateChildRun(input.childRunId, { status: 'completed' })
+
+  assert.throws(
+    () => repository.updateChildRun(input.childRunId, { status: 'running' }),
+    SkillChildRunTransitionError,
+  )
+  assert.throws(
+    () => repository.updateChildRun(input.childRunId, { status: 'failed' }),
+    SkillChildRunTransitionError,
+  )
+
+  const stored = repository.get(input.childRunId)
+  const payload = stored?.resumePayload?.childRun as { status?: string } | undefined
+  assert.equal(payload?.status, 'completed')
+  assert.equal(stored?.status, 'done')
+})
+
+test('updateChildRun allows same terminal refreshes for idempotent close writes', () => {
+  const { repository } = createRepositoryHarness()
+  const input = makeChildInput()
+  repository.createChildRun(input)
+  repository.updateChildRun(input.childRunId, { status: 'completed' })
+
+  assert.doesNotThrow(() => {
+    repository.updateChildRun(input.childRunId, { status: 'completed', outputDir: '/tmp/updated-output' })
+  })
+
+  const stored = repository.get(input.childRunId)
+  const payload = stored?.resumePayload?.childRun as { outputDir?: string; status?: string } | undefined
+  assert.equal(payload?.status, 'completed')
+  assert.equal(payload?.outputDir, '/tmp/updated-output')
 })
 
 test('terminal child lookup by outputDir still returns childRunId and close event', (t) => {

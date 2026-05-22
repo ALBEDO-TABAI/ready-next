@@ -83,7 +83,7 @@ test('unregistering collapses back to no-op', () => {
 })
 
 test('orchestrator emits on both the direct-read and tool_fallback paths', () => {
-  const src = readWorkspaceFile('src/main/modules/agent-control/skill-context-orchestrator.ts')
+  const src = readWorkspaceFile('src/main/modules/agent-control/skills/skill-context-orchestrator.ts')
   assert.match(src, /import\s*\{\s*emitSkillReferenceInlined\s*\}/)
   // There must be exactly 2 emit sites matching the 2 `logAgentMetric` sites
   // for `skill_reference_inlined`. If a future refactor moves one but not the

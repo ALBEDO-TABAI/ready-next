@@ -8,6 +8,8 @@ import {
   decodeStoredSkillChildTerminalReason,
   isSkillChildRunResumable,
   isSkillChildRunTerminalReason,
+  SkillChildRunTransitionError,
+  validateSkillChildRunTransition,
 } from '../main/modules/agent-control/skills/skill-child-state-machine'
 import type {
   ChildWaitResult,
@@ -186,4 +188,63 @@ test('budget_paused and recoverable_paused children are resumable', () => {
   assert.equal(classifySkillChildRunStatus('recoverable_paused'), 'paused')
   assert.equal(isSkillChildRunResumable('budget_paused'), true)
   assert.equal(isSkillChildRunResumable('recoverable_paused'), true)
+})
+
+test('child-run status transition validator permits active, paused, blocked, and terminal ingress', () => {
+  const nonTerminal: SkillChildRunStatus[] = [
+    'queued',
+    'running',
+    'recoverable_paused',
+    'budget_paused',
+    'blocked',
+  ]
+  const allStatuses: SkillChildRunStatus[] = [
+    ...nonTerminal,
+    'completed',
+    'failed',
+    'killed',
+  ]
+
+  for (const fromStatus of nonTerminal) {
+    for (const toStatus of allStatuses) {
+      assert.doesNotThrow(
+        () => validateSkillChildRunTransition(fromStatus, toStatus),
+        `${fromStatus} -> ${toStatus}`,
+      )
+    }
+  }
+})
+
+test('child-run status transition validator treats terminal statuses as final', () => {
+  for (const terminal of ['completed', 'failed', 'killed'] as const) {
+    assert.doesNotThrow(() => validateSkillChildRunTransition(terminal, terminal))
+    for (const next of [
+      'queued',
+      'running',
+      'recoverable_paused',
+      'budget_paused',
+      'blocked',
+      'completed',
+      'failed',
+      'killed',
+    ] as SkillChildRunStatus[]) {
+      if (next === terminal) continue
+      assert.throws(
+        () => validateSkillChildRunTransition(terminal, next),
+        SkillChildRunTransitionError,
+        `${terminal} -> ${next} should be rejected`,
+      )
+    }
+  }
+})
+
+test('child-run status transition validator rejects unknown stored status values', () => {
+  assert.throws(
+    () => validateSkillChildRunTransition('done', 'running'),
+    /invalid_from_status/,
+  )
+  assert.throws(
+    () => validateSkillChildRunTransition('running', 'cancelled'),
+    /invalid_to_status/,
+  )
 })

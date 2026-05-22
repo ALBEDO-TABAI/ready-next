@@ -56,10 +56,19 @@ function makeSlice(opts: {
   conversationId?: string | null
 } = {}): SessionSlice {
   return {
+    messages: [],
     pendingSendCount: 0,
     pendingSendFlushAt: null,
+    isStreaming: false,
+    foregroundBusy: false,
+    composerLocked: false,
+    streamingMessageId: null,
+    streamingRequestId: null,
+    scopeRunStates: {},
+    taskDisclosureState: {},
     state: opts.state ?? 'live',
     conversationId: opts.conversationId ?? null,
+    inputValue: '',
   }
 }
 

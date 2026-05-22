@@ -65,10 +65,12 @@ test('projectionStatusToUserLabel taskCard surface preserves existing labels', (
   const cases: Array<[TaskProjectionRecordData['status'] | undefined, string | null]> = [
     ['queued', '排队中'],
     ['running', '进行中'],
+    ['recoverable_paused', '等待继续'],
+    ['budget_paused', '等待继续'],
     ['blocked', '等待继续'],
-    ['done', '已完成'],
+    ['completed', '已完成'],
     ['failed', '失败'],
-    ['cancelled', '已停止'],
+    ['killed', '已停止'],
     [undefined, null],
   ]
   for (const [status, expected] of cases) {
@@ -82,10 +84,12 @@ test('projectionStatusToUserLabel taskPanel surface preserves existing TaskPanel
   const cases: Array<[TaskProjectionRecordData['status'] | undefined, string]> = [
     ['queued', '排队中'],
     ['running', '进行中'],
+    ['recoverable_paused', '待继续'],
+    ['budget_paused', '待继续'],
     ['blocked', '待继续'],
-    ['done', '已完成'],
+    ['completed', '已完成'],
     ['failed', '失败'],
-    ['cancelled', '已取消'],
+    ['killed', '已取消'],
     [undefined, '待命'],
   ]
   for (const [status, expected] of cases) {
@@ -113,15 +117,17 @@ function row(overrides: Partial<ActiveChildRunSummaryData> = {}): ActiveChildRun
 
 test('childRunToProjectionStatus maps closeStatus + status combinations', () => {
   // closeStatus wins over status
-  assert.equal(childRunToProjectionStatus(row({ closeStatus: 'completed', status: 'running' })), 'done')
+  assert.equal(childRunToProjectionStatus(row({ closeStatus: 'completed', status: 'running' })), 'completed')
   assert.equal(childRunToProjectionStatus(row({ closeStatus: 'failed', status: 'running' })), 'failed')
-  assert.equal(childRunToProjectionStatus(row({ closeStatus: 'killed', status: 'running' })), 'cancelled')
+  assert.equal(childRunToProjectionStatus(row({ closeStatus: 'killed', status: 'running' })), 'killed')
   assert.equal(childRunToProjectionStatus(row({ closeStatus: 'blocked', status: 'running' })), 'blocked')
 
   // status fallback when closeStatus null
-  assert.equal(childRunToProjectionStatus(row({ closeStatus: null, status: 'completed' })), 'done')
+  assert.equal(childRunToProjectionStatus(row({ closeStatus: null, status: 'completed' })), 'completed')
   assert.equal(childRunToProjectionStatus(row({ closeStatus: null, status: 'failed' })), 'failed')
-  assert.equal(childRunToProjectionStatus(row({ closeStatus: null, status: 'killed' })), 'cancelled')
+  assert.equal(childRunToProjectionStatus(row({ closeStatus: null, status: 'killed' })), 'killed')
+  assert.equal(childRunToProjectionStatus(row({ closeStatus: null, status: 'budget_paused' })), 'budget_paused')
+  assert.equal(childRunToProjectionStatus(row({ closeStatus: null, status: 'recoverable_paused' })), 'recoverable_paused')
   assert.equal(childRunToProjectionStatus(row({ closeStatus: null, status: 'blocked' })), 'blocked')
 
   // default running

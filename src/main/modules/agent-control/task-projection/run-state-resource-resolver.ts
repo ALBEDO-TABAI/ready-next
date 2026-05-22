@@ -2,6 +2,7 @@ import { existsSync, statSync, readFileSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join } from 'node:path'
 
 import type { RequestEnvelopeResource, RequestEnvelopeResourceRef } from '../contracts/request-envelope'
+import { parseRunStateJson } from './run-state-schema'
 
 const RUN_STATE_FILE = 'run_state.json'
 const MAX_RUN_STATE_BYTES = 64 * 1024
@@ -92,11 +93,11 @@ function parseRunState(path: string): ParseRunStateResult {
   }
 
   try {
-    const parsed = JSON.parse(raw) as unknown
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-      return { ok: false, error: 'run_state JSON must be an object' }
+    const parsed = parseRunStateJson(raw, { path, emitMetric: true })
+    if (!parsed.ok) {
+      return { ok: false, error: parsed.reason === 'parse_failed' ? 'run_state parse failed' : parsed.message }
     }
-    return { ok: true, value: parsed as Record<string, unknown> }
+    return { ok: true, value: parsed.value.raw }
   } catch {
     return { ok: false, error: 'run_state parse failed' }
   }

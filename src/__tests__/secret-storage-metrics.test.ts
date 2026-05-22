@@ -36,7 +36,7 @@ test('decryptChannelConfig emits a metric when encrypted secret decrypt falls ba
     const event = events.find((item) => item.metric === TOOL_ERROR_METRICS.secretDecryptFailed)
     assert.ok(event)
     assert.equal(event.key, 'token')
-    assert.equal(event.errorKind, 'ERR_DECRYPT')
+    assert.match(String(event.errorKind), /^(ERR_DECRYPT|decrypt_unavailable)$/)
   } finally {
     __setMetricSinkForTests(null)
   }

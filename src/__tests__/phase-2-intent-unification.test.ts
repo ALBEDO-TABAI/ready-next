@@ -21,9 +21,9 @@ import type { TaskProjectionRecord } from '../main/modules/agent-control/contrac
 // Source-pin contract tests live in phase-2-wiring.test.ts; this file is
 // the behavioral side.
 
-const RUNTIME_PATH = new URL('../main/modules/agent-control/runtime.ts', import.meta.url)
-const SKILL_DETECTION_PATH = new URL('../main/modules/agent-control/skill-detection-inputs.ts', import.meta.url)
-const CONTINUATION_STATE_PATH = new URL('../main/modules/agent-control/continuation-state.ts', import.meta.url)
+const RUNTIME_PATH = new URL('../main/modules/agent-control/runtime-core/runtime.ts', import.meta.url)
+const SKILL_DETECTION_PATH = new URL('../main/modules/agent-control/skills/skill-detection-inputs.ts', import.meta.url)
+const CONTINUATION_STATE_PATH = new URL('../main/modules/agent-control/contracts/continuation-state.ts', import.meta.url)
 
 void RUNTIME_PATH
 
@@ -303,7 +303,7 @@ test('Phase 2.5 — does not regress: blocked tasks sorted by updatedAt (newer f
 
 test('Phase 2 wiring — skill-detection-inputs.ts imports + uses matchesResumeIntent', () => {
   const source = readSource(SKILL_DETECTION_PATH)
-  assert.match(source, /from\s+'\.\/resume-lexicon'/)
+  assert.match(source, /from\s+'(?:\.\.\/contracts\/resume-lexicon|\.\/resume-lexicon)'/)
   assert.match(source, /matchesResumeIntent\(\s*normalized\s*,\s*'strict'\s*\)/)
   assert.match(source, /matchesResumeIntent\(\s*normalized\s*,\s*'liberal'\s*\)/)
   // Hard cap must be 48 (not 32) so liberal extension has room.

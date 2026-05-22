@@ -32,13 +32,13 @@ test('U4.v2-5 listTaskProjections / getTaskProjection record top-level fields ar
     runId: 'run-u4.v2-5',
     taskType: 'general',
     module: 'agent',
-    status: 'done',
+    status: 'completed',
     interactionState: 'running',
     createdAt: '2026-05-20T00:00:00.000Z',
     updatedAt: '2026-05-20T00:00:00.000Z',
   }
   assert.equal(sample.taskId, 'task-u4.v2-5')
-  assert.equal(sample.status, 'done')
+  assert.equal(sample.status, 'completed')
 })
 
 test('U4.v2-5 taskProjectionsChanged event payload is exactly wire shape', () => {
@@ -51,11 +51,11 @@ test('U4.v2-5 taskProjectionsChanged event payload is exactly wire shape', () =>
   assert.equal(evt.reason, 'update')
 })
 
-test('U4.v2-5 wire status union remains canonical 6-member set', () => {
+test('U4.v2-5 wire status union remains canonical child-run status set', () => {
   const expected: TaskProjectionRecordWire['status'][] = [
-    'queued', 'running', 'blocked', 'done', 'failed', 'cancelled',
+    'queued', 'running', 'recoverable_paused', 'budget_paused', 'blocked', 'completed', 'failed', 'killed',
   ]
-  assert.equal(expected.length, 6)
+  assert.equal(expected.length, 8)
 })
 
 test('U4.v2-5 wire reason union remains canonical 4-member set', () => {

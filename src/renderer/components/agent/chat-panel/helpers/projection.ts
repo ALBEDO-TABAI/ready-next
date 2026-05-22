@@ -126,8 +126,8 @@ export function isLiveProjectionCandidate(item: PersistedTaskProjection): boolea
 
 export function selectFallbackProjection(items: PersistedTaskProjection[]): PersistedTaskProjection | null {
   return items.find(isLiveProjectionCandidate)
-    || items.find((item) => item.status === 'done' && (item.recentArtifacts?.length || 0) > 0)
-    || items.find((item) => item.status === 'done')
+    || items.find((item) => item.status === 'completed' && (item.recentArtifacts?.length || 0) > 0)
+    || items.find((item) => item.status === 'completed')
     || items[0]
     || null
 }
@@ -222,7 +222,7 @@ export function activeChildRunDebugRow(row: ActiveChildRunSummaryData, fallbackS
       id: `child_run:${row.childRunId}`,
       title: row.progress?.stage || '后台技能执行',
       status:
-        status === 'done'
+        status === 'completed'
           ? 'done'
           : status === 'failed'
             ? 'error'

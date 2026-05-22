@@ -19,19 +19,86 @@ function activeSessionKeyFromState(state: any): string {
   return state?.activeSessionId || state?.sessionId || PRIMARY_SESSION_KEY
 }
 
+function makeEmptySessionSlice(conversationId: string | null = null): Record<string, unknown> {
+  return {
+    messages: [],
+    pendingSendCount: 0,
+    pendingSendFlushAt: null,
+    isStreaming: false,
+    foregroundBusy: false,
+    composerLocked: false,
+    streamingMessageId: null,
+    streamingRequestId: null,
+    scopeRunStates: {},
+    taskDisclosureState: {},
+    state: 'live',
+    conversationId,
+    inputValue: '',
+  }
+}
+
+function normalizeSessionSlice(slice: any): Record<string, any> {
+  const fallback = makeEmptySessionSlice(slice?.conversationId ?? null)
+  return {
+    ...fallback,
+    ...(slice || {}),
+    messages: slice?.messages ?? [],
+    scopeRunStates: slice?.scopeRunStates ?? {},
+    taskDisclosureState: slice?.taskDisclosureState ?? {},
+  }
+}
+
+function sessionKeyForScopeId(state: any, scopeId: string | null | undefined): string {
+  if (scopeId && state?.sessions) {
+    for (const [sessionId, sliceInput] of Object.entries(state.sessions as Record<string, unknown>)) {
+      const slice = normalizeSessionSlice(sliceInput)
+      if (slice.conversationId === scopeId) return sessionId
+    }
+  }
+  return activeSessionKeyFromState(state)
+}
+
+function withSessionSliceAndActiveRuntimeMirror(
+  state: any,
+  sessionId: string,
+  patch: Record<string, unknown>,
+): Record<string, unknown> {
+  const currentSlice = normalizeSessionSlice(state.sessions?.[sessionId])
+  const nextSlice = { ...currentSlice, ...patch }
+  const sessions = {
+    ...(state.sessions || {}),
+    [sessionId]: nextSlice,
+  }
+  if (activeSessionKeyFromState(state) !== sessionId) return { sessions }
+  const aliases = syncActiveScopeRunAliases({
+    currentScopeId: state.currentScopeId,
+    scopeRunStates: nextSlice.scopeRunStates || {},
+  })
+  const messages = Object.prototype.hasOwnProperty.call(patch, 'messages')
+    ? nextSlice.messages || []
+    : (currentSlice.messages?.length ? currentSlice.messages : state.messages || [])
+  return {
+    sessions,
+    messages,
+    scopeRunStates: nextSlice.scopeRunStates || {},
+    isStreaming: Boolean(nextSlice.isStreaming) || aliases.isStreaming,
+    foregroundBusy: Boolean(nextSlice.foregroundBusy) || aliases.foregroundBusy,
+    composerLocked: Boolean(nextSlice.composerLocked) || aliases.composerLocked,
+    streamingMessageId: nextSlice.streamingMessageId ?? null,
+    streamingRequestId: nextSlice.streamingRequestId ?? null,
+    toolTrace: aliases.toolTrace,
+    toolTraceStatus: aliases.toolTraceStatus,
+  }
+}
+
 function withActiveSessionMessagesMirror(state: any, messages: AgentMessage[]): { messages: AgentMessage[]; sessions: Record<string, unknown> } {
   const sessionId = activeSessionKeyFromState(state)
-  const currentSlice = (state.sessions && state.sessions[sessionId]) || {}
+  const currentSlice = normalizeSessionSlice(state.sessions?.[sessionId])
   return {
     messages,
     sessions: {
       ...(state.sessions || {}),
       [sessionId]: {
-        pendingSendCount: 0,
-        pendingSendFlushAt: null,
-        state: 'live',
-        conversationId: null,
-        inputValue: '',
         ...currentSlice,
         messages,
       },
@@ -134,7 +201,9 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     updater: (previous: ScopeRunState | null) => ScopeRunState,
   ): void {
     store.setState((state: any) => {
-      const previous = state.scopeRunStates[scopeId] || null
+      const sessionId = sessionKeyForScopeId(state, scopeId)
+      const currentSlice = normalizeSessionSlice(state.sessions?.[sessionId])
+      const previous = currentSlice.scopeRunStates[scopeId] || state.scopeRunStates?.[scopeId] || null
       const produced = updater(previous)
       const hasTerminalReasonField = Object.prototype.hasOwnProperty.call(produced, 'terminalReason')
       const sameRun = Boolean(
@@ -147,25 +216,23 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         ? { ...produced, terminalReason: previous.terminalReason }
         : produced
       const nextScopeRunStates = {
-        ...state.scopeRunStates,
+        ...currentSlice.scopeRunStates,
         [scopeId]: next,
       }
-      return {
+      return withSessionSliceAndActiveRuntimeMirror(state, sessionId, {
         scopeRunStates: nextScopeRunStates,
-        ...syncActiveScopeRunAliases({
-          currentScopeId: state.currentScopeId,
-          scopeRunStates: nextScopeRunStates,
-        }),
-      }
+      })
     })
   }
 
   function finalizeScopeRunAfterStreamDone(scopeId: string, fallbackRunState: ScopeRunState | null): void {
     store.setState((state: any) => {
-      const previous = state.scopeRunStates[scopeId] || fallbackRunState || null
+      const sessionId = sessionKeyForScopeId(state, scopeId)
+      const currentSlice = normalizeSessionSlice(state.sessions?.[sessionId])
+      const previous = currentSlice.scopeRunStates[scopeId] || state.scopeRunStates?.[scopeId] || fallbackRunState || null
       const nextScopeRunStates = previous
         ? {
-          ...state.scopeRunStates,
+          ...currentSlice.scopeRunStates,
           [scopeId]: {
             ...previous,
             scopeId,
@@ -174,21 +241,20 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             updatedAt: new Date().toISOString(),
           },
         }
-        : state.scopeRunStates
+        : currentSlice.scopeRunStates
 
-      return {
+      return withSessionSliceAndActiveRuntimeMirror(state, sessionId, {
         scopeRunStates: nextScopeRunStates,
-        ...(state.currentScopeId === scopeId
+        ...(currentSlice.conversationId === scopeId
           ? {
+            isStreaming: false,
+            foregroundBusy: false,
+            composerLocked: false,
             streamingMessageId: null,
             streamingRequestId: null,
           }
           : {}),
-        ...syncActiveScopeRunAliases({
-          currentScopeId: state.currentScopeId,
-          scopeRunStates: nextScopeRunStates,
-        }),
-      }
+      })
     })
   }
 
@@ -295,19 +361,23 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       const messages = current.messages.map((item: AgentMessage) =>
         item.id === runState.responseMessageId ? { ...item, content: `${item.content}${appended}` } : item,
       )
+      const sessionId = sessionKeyForScopeId(current, scopeId)
+      const slice = normalizeSessionSlice(current.sessions?.[sessionId])
       return {
-        ...withActiveSessionMessagesMirror(current, messages),
-        scopeRunStates: {
-          ...current.scopeRunStates,
-          [scopeId]: current.scopeRunStates[scopeId]
+        ...withSessionSliceAndActiveRuntimeMirror(current, sessionId, {
+          messages,
+          scopeRunStates: {
+            ...slice.scopeRunStates,
+            [scopeId]: slice.scopeRunStates[scopeId]
             ? {
-              ...current.scopeRunStates[scopeId],
-              responseBuffer: `${current.scopeRunStates[scopeId].responseBuffer || ''}${appended}`,
+              ...slice.scopeRunStates[scopeId],
+              responseBuffer: `${slice.scopeRunStates[scopeId].responseBuffer || ''}${appended}`,
               latestText: result.text.slice(-500),
               updatedAt: new Date().toISOString(),
             }
-            : current.scopeRunStates[scopeId],
-        },
+            : slice.scopeRunStates[scopeId],
+          },
+        }),
       }
     })
   }
@@ -379,7 +449,11 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             timestamp: new Date(),
             meta: { transient: true },
           })
-          store.setState({ streamingMessageId: targetResponseMessageId })
+          store.setState((state: any) => withSessionSliceAndActiveRuntimeMirror(
+            state,
+            sessionKeyForScopeId(state, scopeId),
+            { streamingMessageId: targetResponseMessageId },
+          ))
         }
       } else if (
         scopeId === currentState.currentScopeId &&
@@ -542,7 +616,20 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
           type: 'system',
           timestamp: new Date(),
         })
-        store.setState({ streamingMessageId: null, streamingRequestId: null, toolTraceStatus: 'error' })
+        store.setState((state: any) => ({
+          ...withSessionSliceAndActiveRuntimeMirror(
+            state,
+            sessionKeyForScopeId(state, scopeId),
+            {
+              isStreaming: false,
+              foregroundBusy: false,
+              composerLocked: false,
+              streamingMessageId: null,
+              streamingRequestId: null,
+            },
+          ),
+          toolTraceStatus: 'error',
+        }))
       }
 
       upsertScopeRunState(scopeId, (previous) => ({
@@ -1061,7 +1148,11 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         if (currentState.currentScopeId === event.scopeId) {
           const detachedJobEvent = event.module === 'skill' && event.executionKind === 'job' && String(event.taskId || '').startsWith('detached:')
           if (event.type === 'started' && !detachedJobEvent) {
-            store.setState({ streamingRequestId: event.runId || currentState.streamingRequestId })
+            store.setState((state: any) => withSessionSliceAndActiveRuntimeMirror(
+              state,
+              sessionKeyForScopeId(state, event.scopeId),
+              { streamingRequestId: event.runId || currentState.streamingRequestId },
+            ))
           }
           const terminalRunEvent = Boolean(
             store.getState().scopeRunStates[event.scopeId]?.terminalReason ||
@@ -1071,14 +1162,20 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
           )
           if (terminalRunEvent) {
             const latestRunState = store.getState().scopeRunStates[event.scopeId] || null
-            store.setState({
-              isStreaming: false,
-              foregroundBusy: false,
-              composerLocked: false,
-              streamingMessageId: null,
-              streamingRequestId: null,
+            store.setState((state: any) => ({
+              ...withSessionSliceAndActiveRuntimeMirror(
+                state,
+                sessionKeyForScopeId(state, event.scopeId),
+                {
+                  isStreaming: false,
+                  foregroundBusy: false,
+                  composerLocked: false,
+                  streamingMessageId: null,
+                  streamingRequestId: null,
+                },
+              ),
               toolTraceStatus: phaseToToolTraceStatus(latestRunState?.phase || event.phase),
-            })
+            }))
           }
         }
         if (

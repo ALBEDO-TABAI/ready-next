@@ -632,7 +632,15 @@ export class SkillsRuntimeManager {
     return this.externalServiceStore.buildVisionAgentContext(serviceId)
   }
 
+  private requiresExternalEnv(definition: SkillDefinition): boolean {
+    return definition.id === 'lets-go-rss'
+      || definition.id === 'video-copy-analyzer'
+      || definition.id === 'video-expert-analyzer'
+      || Boolean(definition.configuration?.serviceBindings?.length)
+  }
+
   private resolveExternalEnv(definition: SkillDefinition): Record<string, string> {
+    if (!this.requiresExternalEnv(definition)) return {}
     // U0.2 — fail-fast: previously these catches swallowed config-load failures
     // and let the sub-agent start with a partial / empty env, which consumed
     // VEA / RSS budget before crashing deep in the long task. Throwing here

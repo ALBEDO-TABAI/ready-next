@@ -34,16 +34,16 @@ test('rss feed keeps compact toolbar controls while article rows stay on the sha
 })
 
 test('chat composer keeps a visible shell and a primary send button after liquid glass restyle', () => {
-  const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
+  const chatPanelBody = readWorkspaceFile('src/renderer/components/agent/chat-panel/ChatPanelBody.tsx')
   const chatInput = readWorkspaceFile('src/renderer/components/agent/ChatInput.tsx')
 
-  assert.match(chatPanel, /const composerShellStyle = \{/)
+  assert.match(chatPanelBody, /const composerShellStyle = \{/)
   assert.match(chatInput, /data-chat-composer-shell="true"/)
-  assert.match(chatPanel, /background:\s*'var\(--input-slot-bg\)'/)
-  assert.match(chatPanel, /border: isDragOver \? '2px solid var\(--color-blue\)' : '1px solid var\(--input-slot-border\)'/)
-  assert.match(chatPanel, /boxShadow: isDragOver[\s\S]*var\(--input-slot-shadow-focus\)[\s\S]*: 'var\(--input-slot-shadow\)'/)
+  assert.match(chatPanelBody, /background:\s*'var\(--input-slot-bg\)'/)
+  assert.match(chatPanelBody, /border: isDragOver \? '2px solid var\(--color-blue\)' : '1px solid var\(--input-slot-border\)'/)
+  assert.match(chatPanelBody, /boxShadow: isDragOver[\s\S]*var\(--input-slot-shadow-focus\)[\s\S]*: 'var\(--input-slot-shadow\)'/)
   assert.match(chatInput, /background: 'var\(--color-blue\)'/)
-  assert.doesNotMatch(chatPanel, /id="chat-input-shell"/)
+  assert.doesNotMatch(chatPanelBody, /id="chat-input-shell"/)
 })
 
 test('browser and rss share one support panel width constant to reduce mode switching jump', () => {

@@ -29,7 +29,7 @@ const path = require('node:path')
 
 const ROOT = process.cwd()
 const REPO_REL = 'src/main/modules/repositories/skill-task-run-repository.ts'
-const TRACKER_REL = 'src/main/modules/agent-control/skill-task-tracker.ts'
+const TRACKER_REL = 'src/main/modules/agent-control/skills/skill-task-tracker.ts'
 const SCAN_DIRS = ['src/main/modules/']
 
 function listFiles(dirAbs) {

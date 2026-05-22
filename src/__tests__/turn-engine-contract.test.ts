@@ -338,7 +338,7 @@ test('phase3 routes single-turn execution through TurnEngine and shrinks DirectC
   const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
   const turnState = readWorkspaceFile('src/main/modules/agent-control/runtime-core/turn-state.ts')
   const turnTranscript = readWorkspaceFile('src/main/modules/agent-control/runtime-core/turn-transcript.ts')
-  const contracts = readWorkspaceFile('src/main/modules/agent-control/run-contracts.ts')
+  const contracts = readWorkspaceFile('src/main/modules/agent-control/contracts/run-contracts.ts')
 
   assertMatchesAll(contracts, [
     {

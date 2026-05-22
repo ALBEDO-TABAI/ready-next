@@ -21,9 +21,9 @@ import type { TaskProjectionRecord } from '../main/modules/agent-control/contrac
 // DB persistence flowed through OTHER paths (TurnTranscript.emitOutput,
 // chat:saveMessage IPC) that were untouched.
 
-const TURN_TRANSCRIPT_PATH = new URL('../main/modules/agent-control/turn-transcript.ts', import.meta.url)
-const IPC_HANDLER_PATH = new URL('../main/modules/claude-bridge/ipc-handler.ts', import.meta.url)
-const CONTINUATION_STATE_PATH = new URL('../main/modules/agent-control/continuation-state.ts', import.meta.url)
+const TURN_TRANSCRIPT_PATH = new URL('../main/modules/agent-control/runtime-core/turn-transcript.ts', import.meta.url)
+const CHAT_PERSISTENCE_GROUP_PATH = new URL('../main/modules/claude-bridge/ipc/chat-persistence-group.ts', import.meta.url)
+const CONTINUATION_STATE_PATH = new URL('../main/modules/agent-control/contracts/continuation-state.ts', import.meta.url)
 
 function readSource(url: URL): string {
   return readFileSync(url, 'utf8')
@@ -172,7 +172,7 @@ test('DIRECT PATH GUARD — tool-call-only text gets a visible fallback instead 
 })
 
 test('SCREENSHOT BUG wiring — chat:saveMessage IPC uses sanitizeAssistantText for assistant rows', () => {
-  const source = readSource(IPC_HANDLER_PATH)
+  const source = readSource(CHAT_PERSISTENCE_GROUP_PATH)
   // Find the chat:saveMessage handler block. The handler spans the IPC body
   // including both the sanitization branch and the hint-persist hook, so we
   // grab a wide enough window (up to next IPC handler registration).
@@ -289,12 +289,12 @@ test('SCREENSHOT BUG — blocked task still preferred over failed when both exis
   assert.equal(selected?.taskId, 'task-blocked')
 })
 
-test('SCREENSHOT BUG wiring — isTerminalProjection only blocks done + cancelled, NOT failed', () => {
+test('SCREENSHOT BUG wiring — isTerminalProjection only blocks completed + killed, NOT failed', () => {
   const source = readSource(CONTINUATION_STATE_PATH)
   const block = source.match(/function isTerminalProjection[\s\S]*?\n\}/)
   assert.ok(block)
-  assert.match(block![0], /projection\.status\s*===\s*'done'/)
-  assert.match(block![0], /projection\.status\s*===\s*'cancelled'/)
+  assert.match(block![0], /projection\.status\s*===\s*'completed'/)
+  assert.match(block![0], /projection\.status\s*===\s*'killed'/)
   // The previous version's `failed` membership must be gone.
   assert.doesNotMatch(block![0], /projection\.status\s*===\s*'failed'/)
 })
@@ -305,7 +305,7 @@ test('SCREENSHOT BUG wiring — isTerminalProjection only blocks done + cancelle
 
 test('SCREENSHOT BUG wiring — TurnTranscript.emitOutput calls sanitizeAssistantText for text type', () => {
   const source = readSource(TURN_TRANSCRIPT_PATH)
-  const block = source.match(/emitOutput\([\s\S]*?this\.emitters\.emitOutput\(/)
+  const block = source.match(/\n\s{2}emitOutput\([\s\S]*?this\.emitters\.emitOutput\(/)
   assert.ok(block)
   assert.match(block![0], /sanitizeAssistantText\(chunk,/)
   assert.match(block![0], /type\s*===\s*'text'/)

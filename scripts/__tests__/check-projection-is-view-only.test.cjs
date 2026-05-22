@@ -27,10 +27,10 @@ function writeProjectionFile(rootDir, rel, body) {
 
 function writeAllProjectionStubs(rootDir, body) {
   for (const rel of [
-    'src/main/modules/agent-control/run-projection.ts',
-    'src/main/modules/agent-control/task-projection-sync.ts',
+    'src/main/modules/agent-control/task-projection/run-projection.ts',
+    'src/main/modules/agent-control/task-projection/task-projection-sync.ts',
     'src/main/modules/repositories/task-projection-repository.ts',
-    'src/main/modules/agent-control/skill-running-projection.ts',
+    'src/main/modules/agent-control/skills/skill-running-projection.ts',
   ]) {
     writeProjectionFile(rootDir, rel, body)
   }
@@ -57,7 +57,7 @@ export const noop = () => null
 test('L3 gate fails when projection value-imports skill-task-run-repository', (t) => {
   const root = makeHarnessRoot(t)
   writeAllProjectionStubs(root, '// clean\n')
-  writeProjectionFile(root, 'src/main/modules/agent-control/run-projection.ts', `
+  writeProjectionFile(root, 'src/main/modules/agent-control/task-projection/run-projection.ts', `
 import { SkillTaskRunRepository } from '../repositories/skill-task-run-repository'
 export function bad(repo: SkillTaskRunRepository) { return repo }
 `)
@@ -69,7 +69,7 @@ export function bad(repo: SkillTaskRunRepository) { return repo }
 test('L3 gate fails when projection calls ledger writer .updateChildRun', (t) => {
   const root = makeHarnessRoot(t)
   writeAllProjectionStubs(root, '// clean\n')
-  writeProjectionFile(root, 'src/main/modules/agent-control/task-projection-sync.ts', `
+  writeProjectionFile(root, 'src/main/modules/agent-control/task-projection/task-projection-sync.ts', `
 export function bad(repo: any) {
   repo.updateChildRun('id', { status: 'done' })
 }
@@ -83,7 +83,7 @@ test('L3 gate fails when ledger imports a task-projection module', (t) => {
   const root = makeHarnessRoot(t)
   writeAllProjectionStubs(root, '// clean\n')
   writeProjectionFile(root, 'src/main/modules/repositories/skill-task-run-repository.ts', `
-import { syncTaskProjection } from '../agent-control/task-projection-sync'
+import { syncTaskProjection } from '../agent-control/task-projection/task-projection-sync'
 export const dummy = () => syncTaskProjection
 `)
   const r = runIn(root)
@@ -95,7 +95,7 @@ test('L3 gate ignores type-only ledger imports of task-projection', (t) => {
   const root = makeHarnessRoot(t)
   writeAllProjectionStubs(root, '// clean\n')
   writeProjectionFile(root, 'src/main/modules/repositories/skill-task-run-repository.ts', `
-import type { TaskProjectionRecord } from '../agent-control/task-projection-sync'
+import type { TaskProjectionRecord } from '../agent-control/task-projection/task-projection-sync'
 export type Foo = TaskProjectionRecord
 `)
   const r = runIn(root)

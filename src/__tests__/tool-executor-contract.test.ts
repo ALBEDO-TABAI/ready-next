@@ -101,7 +101,7 @@ test('tool-runtime no longer rethrows on unknown-kind errors', () => {
   assert.match(source, /logAgentMetric\((?:'tool_error_unknown_surfaced'|TOOL_ERROR_METRICS\.unknownSurfaced)/)
 
   // Import added.
-  assert.match(source, /from ['"]\.\.\/tools\/tool-errors['"]/)
+  assert.match(source, /from ['"]\.\.\/\.\.\/tools\/tool-errors['"]/)
 })
 
 test('tool-executor runs Zod validator for every tool domain via the unified registry', () => {

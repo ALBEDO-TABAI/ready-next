@@ -21,7 +21,7 @@ test('runtime host is split into run coordinator, run projection, and execution 
   const orchestrator = readWorkspaceFile('src/main/modules/agent-control/runtime-core/orchestrator.ts')
   const runCoordinator = readWorkspaceFile('src/main/modules/agent-control/task-projection/run-coordinator.ts')
   const runProjection = readWorkspaceFile('src/main/modules/agent-control/task-projection/run-projection.ts')
-  const contracts = readWorkspaceFile('src/main/modules/agent-control/run-contracts.ts')
+  const contracts = readWorkspaceFile('src/main/modules/agent-control/contracts/run-contracts.ts')
   const browserDomainOrchestrator = readWorkspaceFile('src/main/modules/agent-control/domain-adapters/browser-domain-orchestrator.ts')
   const browserDomainAdapter = readWorkspaceFile('src/main/modules/agent-control/domain-adapters/browser-domain-adapter.ts')
   const domainAdapter = readWorkspaceFile('src/main/modules/agent-control/domain-adapters/domain-adapter.ts')
@@ -48,8 +48,8 @@ test('runtime host is split into run coordinator, run projection, and execution 
   const executionLoopOrchestrator = readWorkspaceFile('src/main/modules/agent-control/runtime-core/execution-loop-orchestrator.ts')
   const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
   const directChat = readWorkspaceFile('src/main/modules/claude-bridge/direct-chat.ts')
-  const toolConfig = readWorkspaceFile('src/main/modules/agent-control/execution-tool-config.ts')
-  const toolPolicy = readWorkspaceFile('src/main/modules/agent-control/execution-tool-policy.ts')
+  const toolConfig = readWorkspaceFile('src/main/modules/agent-control/tool-policy/execution-tool-config.ts')
+  const toolPolicy = readWorkspaceFile('src/main/modules/agent-control/tool-policy/execution-tool-policy.ts')
 
   assert.match(contracts, /export interface RunCoordinatorRequest/)
   assert.match(contracts, /export interface RunCoordinatorResult/)
@@ -164,8 +164,8 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.match(toolConfig, /export function buildTextToolBridgeSystemPrompt\(/)
   assert.match(toolConfig, /export function buildTextToolBridgeCorrectionMessage\(/)
 
-  assert.match(runtime, /import \{ RunCoordinator \} from '\.\/task-projection\/run-coordinator'/)
-  assert.match(runtime, /import \{ RunProjection \} from '\.\/task-projection\/run-projection'/)
+  assert.match(runtime, /import \{ RunCoordinator \} from '\.\.\/task-projection\/run-coordinator'/)
+  assert.match(runtime, /import \{ RunProjection \} from '\.\.\/task-projection\/run-projection'/)
   assert.match(runtime, /private readonly runCoordinator: RunCoordinator/)
   assert.match(runtime, /private readonly runProjection: RunProjection/)
   assert.match(runtime, /(?:return|const\s+\w+\s*=\s*await)\s+this\.runCoordinator\.runScoped\(/)
@@ -174,7 +174,7 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.doesNotMatch(runtime, /const promptAssembly = await this\.promptAssembly\.buildForScopedRun\(/)
   assert.doesNotMatch(runtime, /const result = await this\.orchestrator\.sendAndCollect\(agent, promptPayload, scope\.id, requestId\)/)
 
-  assert.match(orchestrator, /import type \{ ExecutionHostRequest, ExecutionHostResult \} from '\.\/run-contracts'/)
+  assert.match(orchestrator, /import type \{ ExecutionHostRequest, ExecutionHostResult \} from '\.\.\/contracts\/run-contracts'/)
   assert.match(orchestrator, /async executeAndCollect\(request: ExecutionHostRequest\): Promise<ExecutionHostResult>/)
 
   assert.match(toolPolicy, /export function buildToolVisibilityPlan\(/)
@@ -204,7 +204,7 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.match(directChat, /import \{[\s\S]*OpenAIExecutionClient[\s\S]*\} from '\.\/openai-execution-client'/)
   assert.match(directChat, /import \{ BrowserDomainOrchestrator \} from '\.\.\/agent-control\/domain-adapters\/browser-domain-orchestrator'/)
   assert.match(directChat, /import \{ DesignToolLoopOrchestrator \} from '\.\.\/agent-control\/design-tool-loop-orchestrator'/)
-  assert.match(directChat, /import \{ DocumentToolLoopOrchestrator \} from '\.\.\/agent-control\/document-tool-loop-orchestrator'/)
+  assert.match(directChat, /import \{ DocumentToolLoopOrchestrator \} from '\.\.\/document-engine\/pipeline\/document-tool-loop-orchestrator'/)
   assert.match(directChat, /import \{ DocumentDomainOrchestrator \} from '\.\.\/agent-control\/domain-adapters\/document-domain-orchestrator'/)
   assert.match(directChat, /import \{ ExecutionLoopOrchestrator \} from '\.\.\/agent-control\/runtime-core\/execution-loop-orchestrator'/)
   assert.match(directChat, /private readonly browserDomainOrchestrator: BrowserDomainOrchestrator/)
@@ -225,8 +225,8 @@ test('runtime host is split into run coordinator, run projection, and execution 
   assert.doesNotMatch(directChat, /private async maybeRunDocumentTaskPlanShortcut\(/)
   assert.doesNotMatch(directChat, /private async maybeRunDocumentWidgetPipelineShortcut\(/)
   assert.doesNotMatch(directChat, /private readonly documentInsightCache = new DocumentInsightCache\(\)/)
-  assert.match(directChat, /import \{[\s\S]*buildTextToolBridgeCorrectionMessage[\s\S]*buildToolGuidance[\s\S]*\} from '\.\.\/agent-control\/execution-tool-config'/)
-  assert.doesNotMatch(directChat, /import \{ buildToolVisibilityPlan \} from '\.\.\/agent-control\/execution-tool-policy'/)
+  assert.match(directChat, /import \{[\s\S]*buildTextToolBridgeCorrectionMessage[\s\S]*buildToolGuidance[\s\S]*\} from '\.\.\/agent-control\/tool-policy\/execution-tool-config'/)
+  assert.doesNotMatch(directChat, /import \{ buildToolVisibilityPlan \} from '\.\.\/agent-control\/tool-policy\/execution-tool-policy'/)
   assert.doesNotMatch(directChat, /await this\.browserTaskPlanner\.buildContinuityContext\(/)
   assert.doesNotMatch(directChat, /interface ToolPolicy \{/)
   assert.doesNotMatch(directChat, /private getPolicyAnthropicTools\(/)
@@ -445,7 +445,7 @@ test('phase3 keeps runtime ownership split while DirectChatEngine delegates sing
   const orchestrator = readWorkspaceFile('src/main/modules/agent-control/runtime-core/orchestrator.ts')
   const directChat = readWorkspaceFile('src/main/modules/claude-bridge/direct-chat.ts')
   const turnEngine = readWorkspaceFile('src/main/modules/agent-control/turn-engine.ts')
-  const contracts = readWorkspaceFile('src/main/modules/agent-control/run-contracts.ts')
+  const contracts = readWorkspaceFile('src/main/modules/agent-control/contracts/run-contracts.ts')
 
   assertMatchesAll(contracts, [
     {

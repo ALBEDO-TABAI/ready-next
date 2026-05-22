@@ -10,7 +10,7 @@ const PIPELINE_PATH = resolve(
 
 test('document-task-pipeline 导入 logAgentMetric', () => {
   const source = readFileSync(PIPELINE_PATH, 'utf8')
-  assert.match(source, /import\s+\{\s*logAgentMetric\s*\}\s+from\s+'\.\/metrics'/)
+  assert.match(source, /import\s+\{\s*logAgentMetric\s*\}\s+from\s+'..\/..\/agent-control\/metrics'/)
 })
 
 test('document_list_widgets 分支在 return 前 emit list_widgets_summary_as_final_text', () => {

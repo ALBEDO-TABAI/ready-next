@@ -117,12 +117,12 @@ test('tool-registry imports skills-tools / system-tools at module top (not via l
 
   assert.match(
     source,
-    /^import \{[\s\S]*?getSkillAnthropicTools,[\s\S]*?getSkillOpenAITools,[\s\S]*?\} from '\.\.\/tools\/skills-tools'$/m,
+    /^import \{[\s\S]*?getSkillAnthropicTools,[\s\S]*?getSkillOpenAITools,[\s\S]*?\} from '\.\.\/\.\.\/tools\/skills-tools'$/m,
     'skills-tools must be imported at module top so electron-vite inlines it into the bundle',
   )
   assert.match(
     source,
-    /^import \{ getSystemAnthropicTools, getSystemOpenAITools \} from '\.\.\/tools\/system-tools'$/m,
+    /^import \{ getSystemAnthropicTools, getSystemOpenAITools \} from '\.\.\/\.\.\/tools\/system-tools'$/m,
     'system-tools must be imported at module top so electron-vite inlines it into the bundle',
   )
 })

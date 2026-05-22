@@ -13,6 +13,7 @@ import {
   type SkillTaskRunRecord,
 } from '../../repositories/skill-task-run-repository'
 import { selectRunStateCandidate, type RunStateCandidate, type RunStateSelection } from '../task-projection/run-state-selection'
+import { parseRunStateJson } from '../task-projection/run-state-schema'
 import { inspectSkillProgressArtifacts } from './skill-progress-artifacts'
 import { isConfiguredChildLoopSkillAction } from '../../tools/child-loop-skill-actions'
 import { canResumeShape } from '../contracts/resume-handle'
@@ -220,8 +221,8 @@ function numberValue(value: unknown): number | null {
 
 function readJson(path: string): Record<string, unknown> | null {
   try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown
-    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null
+    const parsed = parseRunStateJson(readFileSync(path, 'utf8'), { path, emitMetric: true })
+    return parsed.ok ? parsed.value.raw : null
   } catch {
     return null
   }

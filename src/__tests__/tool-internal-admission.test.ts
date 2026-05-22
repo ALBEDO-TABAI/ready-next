@@ -63,8 +63,7 @@ test('child internal action without ToolDefinition returns tool_not_registered',
 
   assert.equal(runtimeCalls, 0)
   assert.equal(result.skillRunResult, null)
-  assert.equal(result.data?.errorKind, 'host_unavailable')
-  assert.equal(result.data?.reason, 'tool_not_registered')
+  assert.equal(result.data?.errorKind, 'tool_not_registered')
 })
 
 test('child internal action with invalid args returns input_validation', async () => {

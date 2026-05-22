@@ -262,7 +262,7 @@ test('syncTaskProjection keeps a running child placeholder and then upgrades it 
   } as any)
 
   const parentAfterDone = records.get('parent-1')
-  assert.equal((parentAfterDone?.steps[0] as any)?.childTasks?.[0]?.status, 'done')
+  assert.equal((parentAfterDone?.steps[0] as any)?.childTasks?.[0]?.status, 'completed')
   assert.match(parentAfterDone?.steps[0]?.detail || '', /已收集完成/)
   assert.match(parentAfterDone?.steps[0]?.detail || '', /引用列表/)
 })

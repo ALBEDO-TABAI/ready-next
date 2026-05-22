@@ -21,7 +21,7 @@ function makeHarnessRoot(t) {
 
 function writeHelper(rootDir, body) {
   const helperPath = path.join(
-    rootDir, 'src/main/modules/agent-control/skill-child-close-event-freeze.ts',
+    rootDir, 'src/main/modules/agent-control/skills/skill-child-close-event-freeze.ts',
   )
   fs.mkdirSync(path.dirname(helperPath), { recursive: true })
   fs.writeFileSync(helperPath, body)

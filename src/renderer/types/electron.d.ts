@@ -447,7 +447,7 @@ type TaskInteractionStateData =
   | 'suspended'
   | 'resuming'
 
-type TaskProjectionStatusData = 'queued' | 'running' | 'blocked' | 'done' | 'failed' | 'cancelled'
+type TaskProjectionStatusData = 'queued' | 'running' | 'recoverable_paused' | 'budget_paused' | 'blocked' | 'completed' | 'failed' | 'killed'
 
 interface TaskBudgetData {
   taskType: TaskTypeData

@@ -19,7 +19,7 @@ import {
 // Phase 5 — diagnostics behavior tests + wiring contracts.
 
 const RUNTIME_MANAGER_PATH = new URL('../main/modules/skills-runtime/runtime-manager.ts', import.meta.url)
-const CONTINUATION_STATE_PATH = new URL('../main/modules/agent-control/continuation-state.ts', import.meta.url)
+const CONTINUATION_STATE_PATH = new URL('../main/modules/agent-control/contracts/continuation-state.ts', import.meta.url)
 const IPC_HANDLER_PATH = new URL('../main/modules/claude-bridge/ipc-handler.ts', import.meta.url)
 const PRELOAD_PATH = new URL('../preload/index.ts', import.meta.url)
 const CHAT_PANEL_PATH = new URL('../renderer/components/agent/ChatPanel.tsx', import.meta.url)

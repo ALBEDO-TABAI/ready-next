@@ -39,9 +39,9 @@ test('inactive input slots blend into their panel surface and rely on a faint ou
 })
 
 test('chat composer uses the shared inset slot treatment instead of the old raised glass treatment', () => {
-  const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
+  const chatPanelBody = readWorkspaceFile('src/renderer/components/agent/chat-panel/ChatPanelBody.tsx')
 
-  assert.match(chatPanel, /background: 'var\(--input-slot-bg\)'/)
-  assert.match(chatPanel, /border: isDragOver \? '2px solid var\(--color-blue\)' : '1px solid var\(--input-slot-border\)'/)
-  assert.match(chatPanel, /boxShadow: isDragOver[\s\S]*var\(--input-slot-shadow-focus\)[\s\S]*: 'var\(--input-slot-shadow\)'/)
+  assert.match(chatPanelBody, /background: 'var\(--input-slot-bg\)'/)
+  assert.match(chatPanelBody, /border: isDragOver \? '2px solid var\(--color-blue\)' : '1px solid var\(--input-slot-border\)'/)
+  assert.match(chatPanelBody, /boxShadow: isDragOver[\s\S]*var\(--input-slot-shadow-focus\)[\s\S]*: 'var\(--input-slot-shadow\)'/)
 })

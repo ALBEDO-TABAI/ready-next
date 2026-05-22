@@ -13,8 +13,9 @@ import { TOOL_ERROR_METRICS } from '../main/modules/agent-control/tools-runtime/
 // risk is regression by accident, and a contract test is the cheapest way
 // to catch a future refactor that drops one of these hooks.
 
-const RUNTIME_PATH = new URL('../main/modules/agent-control/runtime.ts', import.meta.url)
+const RUNTIME_PATH = new URL('../main/modules/agent-control/runtime-core/runtime.ts', import.meta.url)
 const IPC_HANDLER_PATH = new URL('../main/modules/claude-bridge/ipc-handler.ts', import.meta.url)
+const CHAT_PERSISTENCE_GROUP_PATH = new URL('../main/modules/claude-bridge/ipc/chat-persistence-group.ts', import.meta.url)
 const RUNTIME_MANAGER_PATH = new URL('../main/modules/skills-runtime/runtime-manager.ts', import.meta.url)
 const TOOL_ERROR_METRICS_PATH = new URL('../main/modules/agent-control/tools-runtime/tool-error-metrics.ts', import.meta.url)
 
@@ -47,7 +48,7 @@ test('Phase 1.1 — runtime exposes persistReferenceHintAfterAssistantMessage an
 })
 
 test('Phase 1.1 — chat:saveMessage IPC invokes the hook after persisting the row', () => {
-  const source = readSource(IPC_HANDLER_PATH)
+  const source = readSource(CHAT_PERSISTENCE_GROUP_PATH)
 
   // Find the chat:saveMessage handler block bounded by the next IPC handler.
   // (Screenshot-bug hotfix added a sanitize step before the saveMessage call,
@@ -59,18 +60,18 @@ test('Phase 1.1 — chat:saveMessage IPC invokes the hook after persisting the r
   const block = blockMatch[0]
   assert.match(
     block,
-    /chatRepository\.saveMessage\(/,
+    /deps\.saveMessage\(/,
     'saveMessage still writes the row',
   )
   assert.match(
     block,
-    /runtime\??\.persistReferenceHintAfterAssistantMessage\(\s*data\.conversationId\s*,\s*data\.role\s*\)/,
+    /deps\.persistReferenceHintAfterAssistantMessage\(\s*data\.conversationId\s*,\s*data\.role\s*\)/,
     'IPC calls the runtime hook with conversationId + role',
   )
 
   // Saving the row must NOT depend on the hook succeeding, but the hook MUST
   // run AFTER the row is written so the snapshot reflects the latest state.
-  const saveIdx = block.indexOf('chatRepository.saveMessage')
+  const saveIdx = block.indexOf('deps.saveMessage')
   const hookIdx = block.indexOf('persistReferenceHintAfterAssistantMessage')
   assert.ok(saveIdx >= 0 && hookIdx > saveIdx, 'hook fires after saveMessage')
 })

@@ -133,6 +133,8 @@ export const TOOL_ERROR_METRICS = {
   skillProjectionPartial: 'skill_projection_partial',
   /** H1 — run_state candidate traversal skipped an unreadable directory. */
   runStateSelectionDirSkipped: 'run_state_selection_dir_skipped',
+  /** Stage 6 deferred — run_state.json was parseable JSON but failed the recognized-field schema. */
+  runStateSchemaInvalid: 'run_state_schema_invalid',
   /**
    * Phase 3.2 — turn-engine 在把模型 assistant 文本写入 session.messages
    * 之前，检测到残留的 tool_call 标记（`<tool_call>` / `<function=` /

@@ -269,7 +269,7 @@ test('reconcileTaskProjections marks complete VEA output done and is idempotent'
   await reconcileTaskProjections({ store, records: Array.from(records.values()), now: '2026-05-04T10:05:00.000Z' })
 
   const updated = records.get('skill:run_state:done')!
-  assert.equal(updated.status, 'done')
+  assert.equal(updated.status, 'completed')
   assert.equal(updated.interactionState, 'suspended')
   assert.equal(updated.waitingFor, 'none')
   assert.deepEqual(updated.resumableActions, ['open_artifact'])
@@ -283,7 +283,7 @@ test('reconcileTaskProjections enriches completed child projections with deliver
     baseProjection({
       taskId: 'skill-child:vcr_done_enrich',
       runId: 'vcr_done_enrich',
-      status: 'done',
+      status: 'completed',
       interactionState: 'suspended',
       waitingFor: 'none',
       resumableActions: ['open_artifact'],
@@ -310,7 +310,7 @@ test('reconcileTaskProjections enriches completed child projections with deliver
   await reconcileTaskProjections({ store, records: Array.from(records.values()), now: NOW })
 
   const updated = records.get('skill-child:vcr_done_enrich')!
-  assert.equal(updated.status, 'done')
+  assert.equal(updated.status, 'completed')
   assert.equal(updated.blockedReason, null)
   assert.ok(updated.recentArtifacts?.some((item) => item.kind === 'delivery_report' && item.path === deliveryReportPath))
   assert.equal(updates.length, 1)
@@ -399,7 +399,7 @@ test('reconcileTaskProjections restores child-run handles from DB row and event 
   await reconcileTaskProjections(params)
 
   const updated = records.get('skill-child:vcr_db_done')!
-  assert.equal(updated.status, 'done')
+  assert.equal(updated.status, 'completed')
   assert.equal(updated.interactionState, 'suspended')
   assert.equal(updated.waitingFor, 'none')
   assert.equal(updated.continuationRef?.childRunId, 'vcr_db_done')

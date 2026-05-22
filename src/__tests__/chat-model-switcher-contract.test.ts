@@ -8,11 +8,11 @@ function readWorkspaceFile(path: string): string {
 }
 
 test('chat model switcher only lists allowed presets and keeps a hidden active preset discoverable', () => {
-  const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
+  const modelSelector = readWorkspaceFile('src/renderer/components/agent/chat-panel/model-selector/ModelSelector.tsx')
 
-  assert.match(chatPanel, /listChatSwitcherProfiles/)
-  assert.match(chatPanel, /当前使用中/)
-  assert.match(chatPanel, /visibleProfiles/)
-  assert.match(chatPanel, /管理显示项/)
-  assert.match(chatPanel, /showInChatSwitcher/)
+  assert.match(modelSelector, /listChatSwitcherProfiles/)
+  assert.match(modelSelector, /当前使用中/)
+  assert.match(modelSelector, /visibleProfiles/)
+  assert.match(modelSelector, /管理显示项/)
+  assert.match(modelSelector, /showInChatSwitcher/)
 })

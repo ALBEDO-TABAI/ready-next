@@ -111,7 +111,7 @@ test('document preview shows repair affordances instead of raw broken visual sou
 })
 
 test('document widget update policy keeps text replacement tools out of widget-update turns', () => {
-  const toolConfig = readWorkspaceFile('src/main/modules/agent-control/execution-tool-config.ts')
+  const toolConfig = readWorkspaceFile('src/main/modules/agent-control/tool-policy/execution-tool-config.ts')
   const widgetUpdateSet = toolConfig.slice(
     toolConfig.indexOf('const DOCUMENT_WIDGET_UPDATE_TOOL_NAMES'),
     toolConfig.indexOf('const DOCUMENT_WIDGET_REMOVE_TOOL_NAMES'),

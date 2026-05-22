@@ -10,7 +10,7 @@ function hasResumeAction(record: TaskProjectionRecord): boolean {
 }
 
 function projectionAllowsResume(record: TaskProjectionRecord): boolean {
-  if (record.status === 'done' || record.status === 'cancelled') return false
+  if (record.status === 'completed' || record.status === 'killed') return false
   return hasResumeAction(record)
 }
 

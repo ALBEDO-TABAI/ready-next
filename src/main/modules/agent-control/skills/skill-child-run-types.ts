@@ -14,19 +14,11 @@
 import type { TurnFramePatch } from '../runtime-core/turn-frame'
 import type { SkillChildRunKind } from './skill-child-run-id'
 import type { DeepReadonly } from '../../../../shared/deep-readonly'
+import type { SkillChildRunStatus } from '../../../../shared/skill-child-run-status'
 
 // Re-export for downstream consumers so they only need to import from one place.
 export type { SkillChildRunKind } from './skill-child-run-id'
-
-export type SkillChildRunStatus =
-  | 'queued'
-  | 'running'
-  | 'recoverable_paused'
-  | 'budget_paused'
-  | 'blocked'
-  | 'completed'
-  | 'failed'
-  | 'killed'
+export type { SkillChildRunStatus } from '../../../../shared/skill-child-run-status'
 
 /**
  * Terminal reason union per source plan §5.4. Order intentionally mirrors

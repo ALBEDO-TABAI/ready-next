@@ -266,7 +266,7 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
                   >
                     <Plus style={{ width: 13, height: 13, color: 'var(--color-red)' }} />
                   </button>
-                  <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-title)' }}>
+                  <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-title)' }}>
                     {headerTitle}
                   </span>
                   {isMock && (

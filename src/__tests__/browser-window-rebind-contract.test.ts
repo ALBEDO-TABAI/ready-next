@@ -14,6 +14,6 @@ test('browser controller rebinds to newly created windows instead of staying att
 
   assert.match(ipcHandler, /attachWindow\(mainWindow: BrowserWindow\): void/)
   assert.match(hostLayout, /setMainWindow\(mainWindow: BrowserWindow\): void/)
-  assert.match(mainIndex, /if \(!windowIPCRegistered\) \{[\s\S]*browserController = setupBrowserIPC\(mainWindow, ENABLE_MOCK_SERVICES\)[\s\S]*\} else \{[\s\S]*browserController\?\.attachWindow\(mainWindow\)/)
+  assert.match(mainIndex, /if \(!windowIPCRegistered\) \{[\s\S]*browserController = setupBrowserIPC\(mainWindow, ENABLE_MOCK_SERVICES, \{[\s\S]*windowIPCRegistered = true[\s\S]*\} else \{[\s\S]*browserController\?\.attachWindow\(mainWindow\)/)
   assert.match(mainIndex, /const closedWindow = mainWindow[\s\S]*mainWindow\.on\('closed', \(\) => \{[\s\S]*if \(mainWindow === closedWindow\) \{[\s\S]*mainWindow = null/)
 })

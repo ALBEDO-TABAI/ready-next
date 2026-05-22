@@ -7,7 +7,7 @@ import type {
   ScopeRunWaitingFor,
 } from '../contracts/types'
 import type { SkillTaskLifecycleReason } from '../contracts/run-contracts'
-import { normalizeRunStateStatus, type NormalizedRunStateStatus } from '../task-projection/run-state-selection'
+import { parseRunStateJson, type NormalizedRunStateStatus } from '../task-projection/run-state-schema'
 import { getRepositoryDatabase } from '../../repositories/database-accessor'
 import {
   SkillTaskRunRepository,
@@ -27,7 +27,14 @@ export type SkillParentTaskLifecycleState =
   | 'failed'
   | 'cancelled'
 export type SkillParentTaskLifecycleReason = SkillTaskLifecycleReason
-export type SkillTaskProjectionStatus = 'running' | 'blocked' | 'done' | 'failed' | 'cancelled'
+export type SkillTaskProjectionStatus =
+  | 'running'
+  | 'recoverable_paused'
+  | 'budget_paused'
+  | 'blocked'
+  | 'completed'
+  | 'failed'
+  | 'killed'
 
 export interface SkillTaskEvent {
   scopeId?: string
@@ -281,17 +288,18 @@ function lifecycleInteractionState(state: SkillParentTaskLifecycleState): SkillT
 }
 
 function lifecycleProjectionStatus(state: SkillParentTaskLifecycleState): SkillTaskProjectionStatus {
-  if (state === 'background_running' || state === 'budget_paused') return 'running'
+  if (state === 'background_running') return 'running'
+  if (state === 'budget_paused') return 'budget_paused'
   if (state === 'blocked') return 'blocked'
   if (state === 'failed') return 'failed'
-  if (state === 'cancelled') return 'cancelled'
-  return 'done'
+  if (state === 'cancelled') return 'killed'
+  return 'completed'
 }
 
 function eventProjectionStatus(status: SkillTaskEventStatus): SkillTaskProjectionStatus {
   if (status === 'blocked') return 'blocked'
   if (status === 'error') return 'failed'
-  if (status === 'done') return 'done'
+  if (status === 'done') return 'completed'
   return 'running'
 }
 
@@ -1001,8 +1009,9 @@ function readLiveRunStateStatus(runStatePath?: string | null, outputDir?: string
   for (const candidate of candidates) {
     try {
       if (!existsSync(candidate)) continue
-      const parsed = JSON.parse(readFileSync(candidate, 'utf8')) as Record<string, unknown>
-      const status = normalizeRunStateStatus(parsed.status ?? parsed.state ?? parsed.phase)
+      const parsed = parseRunStateJson(readFileSync(candidate, 'utf8'), { path: candidate, emitMetric: true })
+      if (!parsed.ok) continue
+      const status = parsed.value.status
       if (status === 'running' || status === 'blocked') return status
     } catch {
       continue

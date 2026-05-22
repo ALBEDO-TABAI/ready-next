@@ -68,7 +68,13 @@ function decryptValue(raw: string, key?: string): string {
   try {
     if (raw.startsWith(ENC_PREFIX)) {
       const b64 = raw.slice(ENC_PREFIX.length)
-      if (!safeStorage?.decryptString) return raw
+      if (!safeStorage?.decryptString) {
+        logAgentMetric(TOOL_ERROR_METRICS.secretDecryptFailed, {
+          key: key || 'unknown',
+          errorKind: 'decrypt_unavailable',
+        })
+        return raw
+      }
       const decrypted = safeStorage.decryptString(Buffer.from(b64, 'base64'))
       return decrypted
     }

@@ -294,7 +294,7 @@ test('runDocumentTaskPlanWithSubtasks stops on the first failing child and keeps
   const childRecords = Array.from(harness.records.values()).filter((record) => record.parentTaskId === 'parent-task')
   assert.equal(result.success, false)
   assert.equal(childRecords.length, 2)
-  assert.equal(childRecords.filter((record) => record.status === 'done').length, 1)
+  assert.equal(childRecords.filter((record) => record.status === 'completed').length, 1)
   assert.equal(childRecords.filter((record) => record.status === 'failed').length, 1)
   assert.match(result.error || '', /第二个 job 写入失败/)
 })

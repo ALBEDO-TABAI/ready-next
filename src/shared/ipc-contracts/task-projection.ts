@@ -18,6 +18,7 @@
  */
 
 import type { TaskType as SharedTaskType } from '../task-types'
+import type { SkillChildRunStatus } from '../skill-child-run-status'
 
 // ---------- task-type aliases ----------
 
@@ -31,13 +32,7 @@ export type TaskInteractionState =
   | 'suspended'
   | 'resuming'
 
-export type TaskProjectionStatus =
-  | 'queued'
-  | 'running'
-  | 'blocked'
-  | 'done'
-  | 'failed'
-  | 'cancelled'
+export type TaskProjectionStatus = SkillChildRunStatus
 
 // ---------- step + budget sub-shapes ----------
 

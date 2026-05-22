@@ -182,11 +182,13 @@ function projectionStatusTone(
   status: TaskProjectionRecordData['status'] | undefined,
 ): { bg: string; color: string } {
   switch (status) {
-    case 'done':
+    case 'completed':
       return { bg: 'var(--color-green-light)', color: 'var(--color-green)' }
     case 'failed':
-    case 'cancelled':
+    case 'killed':
       return { bg: 'rgba(224, 69, 72, 0.12)', color: 'var(--color-red)' }
+    case 'recoverable_paused':
+    case 'budget_paused':
     case 'blocked':
       return { bg: 'var(--color-orange-light)', color: 'var(--color-orange)' }
     default:
@@ -250,8 +252,8 @@ function isLiveProjectionCandidate(item: TaskProjectionRecordData): boolean {
 
 function selectFallbackProjection(items: TaskProjectionRecordData[]): TaskProjectionRecordData | null {
   return items.find(isLiveProjectionCandidate)
-    || items.find((item) => item.status === 'done' && (item.recentArtifacts?.length || 0) > 0)
-    || items.find((item) => item.status === 'done')
+    || items.find((item) => item.status === 'completed' && (item.recentArtifacts?.length || 0) > 0)
+    || items.find((item) => item.status === 'completed')
     || items[0]
     || null
 }
@@ -348,13 +350,15 @@ export default function TaskPanel() {
       scopeId: activeProjection.scopeId,
       taskId: activeProjection.taskId,
       phase:
-        activeProjection.status === 'done'
+        activeProjection.status === 'completed'
           ? 'done'
           : activeProjection.status === 'failed'
             ? 'error'
-            : activeProjection.status === 'cancelled'
+            : activeProjection.status === 'killed'
               ? 'cancelled'
               : activeProjection.status === 'blocked'
+                || activeProjection.status === 'recoverable_paused'
+                || activeProjection.status === 'budget_paused'
                 ? 'checkpoint'
                 : 'tool_running',
       status: activeProjection.status,

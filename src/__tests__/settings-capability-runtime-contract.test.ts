@@ -12,7 +12,7 @@ test('settings capability status is sourced from a main-process runtime snapshot
   const settingsPage = readWorkspaceFile('src/renderer/pages/Settings.tsx')
   const preload = readWorkspaceFile('src/preload/index.ts')
   const rendererTypes = readWorkspaceFile('src/renderer/types/electron.d.ts')
-  const agentIPC = readWorkspaceFile('src/main/modules/claude-bridge/ipc-handler.ts')
+  const agentIPC = readWorkspaceFile('src/main/modules/claude-bridge/ipc/agent-runtime-group.ts')
   const runtime = readWorkspaceFile('src/main/modules/agent-control/runtime-core/runtime.ts')
 
   assert.match(settingsPage, /window\.electronAPI\.agent\.getCapabilityRuntimeSnapshot\(capabilityRuntimeConfig\)/)

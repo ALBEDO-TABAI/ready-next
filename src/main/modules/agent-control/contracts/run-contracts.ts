@@ -69,6 +69,7 @@ import { isConfiguredChildLoopSkillAction } from '../../tools/child-loop-skill-a
 import type { SkillTaskRunRepository } from '../../repositories/skill-task-run-repository'
 import type { CapabilityGroupId } from '../../../../shared/ai-capability-groups'
 import type { AIModelConfig } from '../../../../shared/ai-providers'
+import type { SkillChildRunStatus as SharedSkillChildRunStatus } from '../../../../shared/skill-child-run-status'
 
 /**
  * ────────────────────────────────────────────────────────────────────────
@@ -354,7 +355,7 @@ export interface UnifiedTaskState {
   runId?: string | null
   scopeId?: string | null
   taskType: TaskType
-  status: 'queued' | 'running' | 'blocked' | 'done' | 'failed' | 'cancelled'
+  status: SharedSkillChildRunStatus
   interactionState: TaskInteractionState
   waitingFor: ScopeRunWaitingFor
   steps: TaskStep[]

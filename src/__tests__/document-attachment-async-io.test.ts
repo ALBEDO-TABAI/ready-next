@@ -16,20 +16,28 @@ import { describe, it } from 'node:test'
 describe('document engine attachment async IO', () => {
   const sourcePath = resolve(process.cwd(), 'src/main/modules/document-engine/ipc-handler.ts')
   const source = readFileSync(sourcePath, 'utf8')
+  const fileIoSource = readFileSync(
+    resolve(process.cwd(), 'src/main/modules/document-engine/ipc/file-io-group.ts'),
+    'utf8',
+  )
+  const fileMutationSource = readFileSync(
+    resolve(process.cwd(), 'src/main/modules/document-engine/ipc/file-mutation-group.ts'),
+    'utf8',
+  )
 
   it('imports the async fs/promises helpers used by the migrated handlers', () => {
     assert.match(
-      source,
+      `${fileIoSource}\n${fileMutationSource}`,
       /from 'fs\/promises'/,
     )
-    assert.match(source, /\breadFile\b/)
-    assert.match(source, /\bwriteFile\b/)
-    assert.match(source, /\brename\b/)
-    assert.match(source, /\bcp\b/)
-    assert.match(source, /\bmkdir\b/)
-    assert.match(source, /\bunlink\b/)
-    assert.match(source, /\brm\b/)
-    assert.match(source, /\bcopyFile\b/)
+    assert.match(fileIoSource, /\breadFile\b/)
+    assert.match(fileIoSource, /\bwriteFile\b/)
+    assert.match(fileMutationSource, /\brename\b/)
+    assert.match(fileMutationSource, /\bcp\b/)
+    assert.match(fileMutationSource, /\bmkdir\b/)
+    assert.match(fileMutationSource, /\bunlink\b/)
+    assert.match(fileMutationSource, /\brm\b/)
+    assert.match(fileMutationSource, /\bcopyFile\b/)
   })
 
   it('document:saveAs uses async writeFile for base64 + html branches', () => {
@@ -53,31 +61,31 @@ describe('document engine attachment async IO', () => {
   })
 
   it('document:copy uses await cp / await copyFile', () => {
-    assert.match(source, /ipcMain\.handle\('document:copy'[\s\S]*await cp\(src, dest, \{ recursive: true \}\)/)
-    assert.match(source, /ipcMain\.handle\('document:copy'[\s\S]*await copyFile\(src, dest\)/)
-    assert.doesNotMatch(source, /cpSync\(src, dest, \{ recursive: true \}\)/)
+    assert.match(fileMutationSource, /ipcMain\.handle\('document:copy'[\s\S]*await cp\(src, dest, \{ recursive: true \}\)/)
+    assert.match(fileMutationSource, /ipcMain\.handle\('document:copy'[\s\S]*await copyFile\(src, dest\)/)
+    assert.doesNotMatch(fileMutationSource, /cpSync\(src, dest, \{ recursive: true \}\)/)
   })
 
   it('document:move uses await rename', () => {
-    assert.match(source, /ipcMain\.handle\('document:move'[\s\S]*await rename\(src, dest\)/)
+    assert.match(fileMutationSource, /ipcMain\.handle\('document:move'[\s\S]*await rename\(src, dest\)/)
   })
 
   it('document:rename uses await rename instead of renameSync', () => {
     assert.match(
-      source,
+      fileMutationSource,
       /ipcMain\.handle\('document:rename'[\s\S]*await rename\(oldPath, newPath\)/,
     )
   })
 
   it('document:delete uses await stat / await rm / await unlink', () => {
-    assert.match(source, /ipcMain\.handle\('document:delete'[\s\S]*const stats = await stat\(path\)/)
-    assert.match(source, /ipcMain\.handle\('document:delete'[\s\S]*await rm\(path, \{ recursive: true, force: true \}\)/)
-    assert.match(source, /ipcMain\.handle\('document:delete'[\s\S]*await unlink\(path\)/)
+    assert.match(fileMutationSource, /ipcMain\.handle\('document:delete'[\s\S]*const stats = await stat\(path\)/)
+    assert.match(fileMutationSource, /ipcMain\.handle\('document:delete'[\s\S]*await rm\(path, \{ recursive: true, force: true \}\)/)
+    assert.match(fileMutationSource, /ipcMain\.handle\('document:delete'[\s\S]*await unlink\(path\)/)
   })
 
   it('document:mkdir / document:createFile use async fs/promises', () => {
-    assert.match(source, /ipcMain\.handle\('document:mkdir'[\s\S]*await mkdir\(path, \{ recursive: true \}\)/)
-    assert.match(source, /ipcMain\.handle\('document:createFile'[\s\S]*await writeFile\(path, '', 'utf-8'\)/)
+    assert.match(fileMutationSource, /ipcMain\.handle\('document:mkdir'[\s\S]*await mkdir\(path, \{ recursive: true \}\)/)
+    assert.match(fileIoSource, /ipcMain\.handle\('document:createFile'[\s\S]*await writeFile\(path, '', 'utf-8'\)/)
   })
 
   it('writeDocumentEditableText uses await writeFile (not writeFileSync)', () => {

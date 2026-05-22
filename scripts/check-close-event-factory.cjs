@@ -26,7 +26,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const ROOT = process.cwd()
-const HELPER_REL = 'src/main/modules/agent-control/skill-child-close-event-freeze.ts'
+const HELPER_REL = 'src/main/modules/agent-control/skills/skill-child-close-event-freeze.ts'
 const HELPER_PATH = path.join(ROOT, HELPER_REL)
 const SCAN_DIR = 'src/main/modules/'
 

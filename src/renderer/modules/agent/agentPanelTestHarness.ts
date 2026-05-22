@@ -471,9 +471,9 @@ function taskCardFromProjection(input: Record<string, unknown>): AgentPanelTaskC
 }
 
 function phaseFromProjectionStatus(status: TaskProjectionRecordData['status'] | null): ScopeRunState['phase'] {
-  if (status === 'done') return 'done'
+  if (status === 'completed') return 'done'
   if (status === 'failed') return 'error'
-  if (status === 'cancelled') return 'cancelled'
+  if (status === 'killed') return 'cancelled'
   if (status === 'running' || status === 'queued') return 'tool_running'
   return 'checkpoint'
 }

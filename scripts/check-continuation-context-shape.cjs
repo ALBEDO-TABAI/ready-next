@@ -7,7 +7,7 @@
  * Checks:
  *
  *   (A) `restoreContinuationTaskBudgetRuntime` declaration in
- *       `src/main/modules/agent-control/run-budget-policy.ts` includes
+ *       `src/main/modules/agent-control/task-projection/run-budget-policy.ts` includes
  *       both `projectionBudget` and `projectionBudgetRuntime` as named
  *       parameter fields.
  *
@@ -32,7 +32,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const ROOT = process.cwd()
-const HELPER_REL = 'src/main/modules/agent-control/run-budget-policy.ts'
+const HELPER_REL = 'src/main/modules/agent-control/task-projection/run-budget-policy.ts'
 const HELPER_PATH = path.join(ROOT, HELPER_REL)
 const ROUTER_REL = 'src/main/modules/agent-control/task-execution-router.ts'
 const ROUTER_PATH = path.join(ROOT, ROUTER_REL)
