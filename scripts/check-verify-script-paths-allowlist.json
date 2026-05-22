@@ -1,0 +1,20 @@
+{
+  "$schema": "Stage X meta-gate allowlist v1",
+  "comment": "Only add entries here when the verify script intentionally references a non-live fixture, snapshot, or planned-for-rename path. Stale moved sources do NOT belong here — fix the script instead. Every entry MUST have all five fields: path, reason, owner, expiresAt, addedBy. The meta-gate refuses to load an entry missing any field. Entries with expiresAt in the past are rejected outright (the gate fails fast so the allowlist cannot rot).",
+  "entries": [
+    {
+      "path": "src/main/modules/tools/browser-content-tools.ts",
+      "reason": "Optional candidate path inside check-web-tools-in-general-research-group-only.cjs candidatePaths[]; the script wraps the read in try{}catch{continue} and only fires the BROWSER_CONTENT_TASK_TOOL_NAMES assertion if the file exists. The live BROWSER_CONTENT_TASK_TOOL_NAMES table currently lives in src/main/modules/tools/browser-tool-catalog.ts (which IS read by the same loop), so this entry is preserved for the historical pre-Stage-U location only. Drop this entry if the candidate list is ever pruned to live paths only.",
+      "owner": "Stage X1 (handed to whichever stage prunes the candidatePaths[] list)",
+      "expiresAt": "2026-12-31",
+      "addedBy": "X1.5 — initial meta-gate landing"
+    },
+    {
+      "path": "src/main/modules/tools/browser-content-tool-defs.ts",
+      "reason": "Same rationale as browser-content-tools.ts above: optional fallback candidate inside check-web-tools-in-general-research-group-only.cjs candidatePaths[] wrapped in try{}catch{continue}. Preserved for historical pre-Stage-U location only.",
+      "owner": "Stage X1 (handed to whichever stage prunes the candidatePaths[] list)",
+      "expiresAt": "2026-12-31",
+      "addedBy": "X1.5 — initial meta-gate landing"
+    }
+  ]
+}
