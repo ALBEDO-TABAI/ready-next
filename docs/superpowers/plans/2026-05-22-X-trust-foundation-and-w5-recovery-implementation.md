@@ -111,7 +111,7 @@ Do not proceed from X1 to X2 until the deep-gate trust repair is complete. Other
 | X1 | X2, X4 | X3 | X1 inside can split into X1.1-X1.4 per `verify:*` chain (`c` / `r` / `s` / `t`), each owned by its own agent in parallel. The meta-gate is X1.5 and lands last. |
 | X2 | X4, X5 | X3 | X2 needs a real Ready dev run plus tests; do not parallelize X2 with X4 because both phases share live-app resources / evidence directory / W3.3 equipment (see § 4.1 second paragraph for full reasoning). |
 | X3 | X5 | X1, X2 | Pure infra add (CI yaml + taxonomy doc); no `src/` change. |
-| X4 | X5 | nothing | PR-shell-1 → PR-shell-2 → PR-shell-4 strict serial inside X4. Each PR requires live validation on the W3.3 equipment. |
+| X4 | X5 | nothing | PR-shell-1 → PR-shell-2 → PR-shell-4 strict serial inside X4. PR-shell-2 and PR-shell-4 require live validation on the W3.3 equipment; PR-shell-1 is a contract-only PR (BrowserViewIntent shape + behavior test) and needs no live UI evidence. |
 | X5 | nothing | nothing | Stage X closeout is the last work. |
 
 Cross-phase parallelism rule: only X1 + X3, or X2 + X3, may run at the same time. X2 and X4 must never run concurrently. The real reason is not that both phases touch BrowserView source files (X2's primary surface is `useAgent` / runtime driver / SessionTabs, which do not directly call BrowserView APIs). The real conflict is **shared live-app resources**:
@@ -737,7 +737,8 @@ Live validation:
 
 X4 done when:
 
-- PR-shell-1 / PR-shell-2 / PR-shell-4 each has code, tests, and live evidence.
+- PR-shell-1 / PR-shell-2 / PR-shell-4 each has code and tests. PR-shell-2 and PR-shell-4 additionally have live evidence (PR-shell-1 is contract-only per § 4.1 X4 row).
+- Any individual PR may be **explicitly deferred per § 3 exit criterion 7** with a written blocking reason and a replacement acceptance boundary in the closeout ledger; in that case § 3 criterion 7's "explicitly deferred" branch applies, and X4 close does not require evidence for the deferred PR.
 - W5 dogfood item 4 and item 5 rerun without new shell regressions.
 - `docs/superpowers/audits/2026-05-22-stage-x-closeout/workbench-shell-report.md` summarizes before/after measurements.
 
