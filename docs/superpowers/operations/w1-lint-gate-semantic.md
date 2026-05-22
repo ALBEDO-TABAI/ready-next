@@ -1,0 +1,25 @@
+---
+title: W1 lint gate semantic
+date: 2026-05-22
+stage: W0
+enforce: false
+parent_roadmap: docs/superpowers/plans/2026-05-22-W-ready-stabilization-roadmap.md
+applies_to: docs/superpowers/plans/2026-05-22-W1-lint-errors-and-baseline-drift-implementation.md
+---
+
+# W1 "lint green" definition
+
+`npm run lint:check` exits with no rule-level errors. The current warning
+count (~769 as of 2026-05-22, captured in
+`docs/superpowers/audits/2026-05-22-verification-snapshot/lint-check.out`)
+is W2 scope, not W1.
+
+A W1 PR that touches warnings but not errors is out of scope. A W1 PR that
+resolves errors and accidentally reduces warning count is fine but must not
+increase warnings beyond the snapshot baseline.
+
+Companion gate: `node scripts/check-eslint-baseline.cjs` must also exit 0
+(the 19 new / 16 stale entries captured in
+`docs/superpowers/audits/2026-05-22-verification-snapshot/baseline.out` are
+the W1 starting drift; W1 resolves them per-entry rather than blindly
+regenerating).
