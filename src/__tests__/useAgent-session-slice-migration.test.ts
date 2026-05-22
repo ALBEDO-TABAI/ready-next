@@ -1,13 +1,14 @@
 /**
- * Stage W W4.2 — useAgent V3.3b.3 streaming per-session slice mirror migration test.
+ * Stage W W4.2-W4.3 — useAgent V3.3b.3-4 per-session slice mirror migration test.
  *
  * Extends the V3.3b.1/V3.3b.2 mirror pattern (see
  * useagent-input-value-session-isolation.test.ts and multi-session-isolation.test.ts)
- * to the streaming flag group deferred from V3.3b:
+ * to the two field groups deferred from V3.3b:
  *
  *   W4.2 — `streaming` (the 5-field streaming group:
  *                       isStreaming, foregroundBusy, composerLocked,
  *                       streamingMessageId, streamingRequestId)
+ *   W4.3 — `scopeRuns` (per-session `scopeRunStates` map)
  *
  * The contract is the same single mirror invariant the V3.3b.1 / V3.3b.2
  * tests established:
@@ -19,10 +20,11 @@
  *      and leaves sessions[id].slice.<field> untouched (parked-session
  *      preservation).
  *
- * W4.3 (scopeRuns) and W4.4 (taskProjections) extend this file with two
- * additional sub-cases as they land.
+ * W4.4 (taskProjections) extends this file with one additional sub-case
+ * once it lands.
  *
- * Plan: docs/superpowers/plans/2026-05-22-W4-useagent-ownership-implementation.md §3.2
+ * Plan: docs/superpowers/plans/2026-05-22-W4-useagent-ownership-implementation.md
+ *       §3.2 / §3.3
  *
  * Test strategy: drive the store directly via `useAgent.setState` to seed a
  * known multi-session shape, then exercise the published action surface
@@ -40,6 +42,8 @@ import {
   useAgent,
   type SessionSlice,
 } from '../renderer/stores/useAgent'
+import { createEmptyScopeRunState } from '../renderer/modules/agent/scopeRunState'
+import type { ScopeRunState } from '../renderer/modules/agent/types'
 
 // --- jsdom shim ------------------------------------------------------------
 
@@ -195,6 +199,73 @@ test('W4.2 — streaming flags mirror top-level ↔ sessions[activeId].slice', (
     assert.equal(sliceAAfter.isStreaming, true, 'parked session-A keeps isStreaming=true')
     assert.equal(sliceAAfter.streamingMessageId, 'msg-A-1', 'parked session-A keeps streamingMessageId')
     assert.equal(sliceAAfter.streamingRequestId, 'req-A-1', 'parked session-A keeps streamingRequestId')
+  } finally {
+    dom.restore()
+  }
+})
+
+// ==========================================================================
+// W4.3 — scopeRuns (per-session scopeRunStates map)
+// ==========================================================================
+
+test('W4.3 — scopeRunStates mirror top-level ↔ sessions[activeId].slice', () => {
+  const dom = installDom()
+  try {
+    const runA: ScopeRunState = {
+      ...createEmptyScopeRunState({ scopeId: 'scope-A', agent: 'butler', phase: 'running' }),
+    }
+    const runB: ScopeRunState = {
+      ...createEmptyScopeRunState({ scopeId: 'scope-B', agent: 'butler', phase: 'done' }),
+    }
+    const scopeRunsA = { 'scope-A': runA }
+    const scopeRunsB = { 'scope-B': runB }
+
+    seedTwoSessions({
+      activeId: 'session-A',
+      sliceA: { scopeRunStates: scopeRunsA, conversationId: 'scope-A' },
+      sliceB: { scopeRunStates: scopeRunsB, conversationId: 'scope-B' },
+      topLevel: { scopeRunStates: scopeRunsA },
+    })
+
+    const before = useAgent.getState()
+    const sliceA = getSessionSlice(before, 'session-A')
+    assert.deepEqual(
+      Object.keys(before.scopeRunStates).sort(),
+      Object.keys(sliceA.scopeRunStates).sort(),
+      'top-level scopeRunStates keyset mirrors active slice',
+    )
+    assert.equal(
+      before.scopeRunStates['scope-A']?.phase,
+      sliceA.scopeRunStates['scope-A']?.phase,
+      'top-level scope-A run phase mirrors slice',
+    )
+
+    // Leg 2 — switch active to B; top-level must rewrite to B's map.
+    useAgent.getState().setActiveSessionId('session-B')
+
+    const after = useAgent.getState()
+    const sliceBAfter = getSessionSlice(after, 'session-B')
+    const sliceAAfter = getSessionSlice(after, 'session-A')
+
+    assert.equal(after.activeSessionId, 'session-B', 'activeSessionId switched to B')
+    assert.deepEqual(
+      Object.keys(after.scopeRunStates).sort(),
+      Object.keys(sliceBAfter.scopeRunStates).sort(),
+      'top-level scopeRunStates keyset now mirrors session-B slice',
+    )
+    assert.equal(
+      after.scopeRunStates['scope-B']?.phase,
+      'done',
+      'top-level reads session-B scope-B run phase',
+    )
+
+    // Parked session preservation — A's scopeRunStates unchanged.
+    assert.equal(
+      Object.keys(sliceAAfter.scopeRunStates).length,
+      1,
+      'parked session-A keeps its single scopeRunStates entry',
+    )
+    assert.equal(sliceAAfter.scopeRunStates['scope-A']?.phase, 'running')
   } finally {
     dom.restore()
   }
