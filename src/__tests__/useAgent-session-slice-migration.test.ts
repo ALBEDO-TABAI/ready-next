@@ -1,14 +1,15 @@
 /**
- * Stage W W4.2-W4.3 — useAgent V3.3b.3-4 per-session slice mirror migration test.
+ * Stage W W4.2-W4.4 — useAgent V3.3b.3-5 per-session slice mirror migration test.
  *
  * Extends the V3.3b.1/V3.3b.2 mirror pattern (see
  * useagent-input-value-session-isolation.test.ts and multi-session-isolation.test.ts)
- * to the two field groups deferred from V3.3b:
+ * to the three field groups deferred from V3.3b:
  *
- *   W4.2 — `streaming` (the 5-field streaming group:
- *                       isStreaming, foregroundBusy, composerLocked,
- *                       streamingMessageId, streamingRequestId)
- *   W4.3 — `scopeRuns` (per-session `scopeRunStates` map)
+ *   W4.2 — `streaming`        (the 5-field streaming group:
+ *                              isStreaming, foregroundBusy, composerLocked,
+ *                              streamingMessageId, streamingRequestId)
+ *   W4.3 — `scopeRuns`        (per-session `scopeRunStates` map)
+ *   W4.4 — `taskProjections`  (per-session `taskDisclosureState` map, merge-aware)
  *
  * The contract is the same single mirror invariant the V3.3b.1 / V3.3b.2
  * tests established:
@@ -19,18 +20,19 @@
  *      sessions[otherId].slice.<field> = Y rewrites the top-level mirror to Y
  *      and leaves sessions[id].slice.<field> untouched (parked-session
  *      preservation).
- *
- * W4.4 (taskProjections) extends this file with one additional sub-case
- * once it lands.
+ *   3. Merge-aware writes (W4.4 only): the action surface merges into the
+ *      per-session map rather than replacing it; the mirror reflects the
+ *      post-merge value.
  *
  * Plan: docs/superpowers/plans/2026-05-22-W4-useagent-ownership-implementation.md
- *       §3.2 / §3.3
+ *       §3.2 / §3.3 / §3.4
  *
  * Test strategy: drive the store directly via `useAgent.setState` to seed a
  * known multi-session shape, then exercise the published action surface
- * (`setActiveSessionId`) for the switch leg. Both legs read back through
- * `getSessionSlice` to confirm slice values, and through `useAgent.getState()`
- * to confirm the top-level mirror.
+ * (`setActiveSessionId` for the switch leg, `setTaskSectionExpanded` for the
+ * merge-aware leg). Both legs read back through `getSessionSlice` to confirm
+ * slice values, and through `useAgent.getState()` to confirm the top-level
+ * mirror.
  */
 
 import assert from 'node:assert/strict'
@@ -266,6 +268,66 @@ test('W4.3 — scopeRunStates mirror top-level ↔ sessions[activeId].slice', ()
       'parked session-A keeps its single scopeRunStates entry',
     )
     assert.equal(sliceAAfter.scopeRunStates['scope-A']?.phase, 'running')
+  } finally {
+    dom.restore()
+  }
+})
+
+// ==========================================================================
+// W4.4 — taskProjections (per-session taskDisclosureState; merge-aware)
+// ==========================================================================
+
+test('W4.4 — taskDisclosureState mirror top-level ↔ sessions[activeId].slice (merge-aware)', () => {
+  const dom = installDom()
+  try {
+    const disclosuresA = { 'task-1': { todos: true, evidence: false } }
+    const disclosuresB = { 'task-2': { todos: false, evidence: true } }
+
+    seedTwoSessions({
+      activeId: 'session-A',
+      sliceA: { taskDisclosureState: disclosuresA },
+      sliceB: { taskDisclosureState: disclosuresB },
+      topLevel: { taskDisclosureState: disclosuresA },
+    })
+
+    const before = useAgent.getState()
+    const sliceA = getSessionSlice(before, 'session-A')
+    assert.deepEqual(before.taskDisclosureState, sliceA.taskDisclosureState, 'top-level taskDisclosureState mirrors active slice')
+
+    // Exercise the merging action surface — setTaskSectionExpanded must
+    // merge into the slice (not replace) and the top-level mirror must
+    // reflect the merged value, not the pre-merge one.
+    useAgent.getState().setTaskSectionExpanded('task-1', 'evidence', true)
+    const afterMerge = useAgent.getState()
+    const sliceAfterMerge = getSessionSlice(afterMerge, 'session-A')
+    assert.equal(sliceAfterMerge.taskDisclosureState['task-1']?.todos, true, 'pre-existing todos disclosure preserved (merge, not replace)')
+    assert.equal(sliceAfterMerge.taskDisclosureState['task-1']?.evidence, true, 'evidence disclosure updated by action')
+    assert.equal(
+      afterMerge.taskDisclosureState['task-1']?.evidence,
+      true,
+      'top-level mirror reflects merged value for active session',
+    )
+
+    // Leg 2 — switch active to B; top-level must rewrite to B's map (not
+    // merge across sessions).
+    useAgent.getState().setActiveSessionId('session-B')
+
+    const after = useAgent.getState()
+    const sliceBAfter = getSessionSlice(after, 'session-B')
+    const sliceAAfter = getSessionSlice(after, 'session-A')
+
+    assert.equal(after.activeSessionId, 'session-B', 'activeSessionId switched to B')
+    assert.deepEqual(
+      after.taskDisclosureState,
+      sliceBAfter.taskDisclosureState,
+      'top-level taskDisclosureState now mirrors session-B slice (replaces, not merges across sessions)',
+    )
+    assert.equal(after.taskDisclosureState['task-1'], undefined, 'session-A task-1 not bled into B view')
+    assert.equal(after.taskDisclosureState['task-2']?.evidence, true, 'session-B task-2 evidence visible after switch')
+
+    // Parked session preservation — A's merged disclosure survives the switch.
+    assert.equal(sliceAAfter.taskDisclosureState['task-1']?.evidence, true, 'parked session-A keeps merged disclosure')
+    assert.equal(sliceAAfter.taskDisclosureState['task-1']?.todos, true, 'parked session-A keeps pre-existing disclosure')
   } finally {
     dom.restore()
   }
