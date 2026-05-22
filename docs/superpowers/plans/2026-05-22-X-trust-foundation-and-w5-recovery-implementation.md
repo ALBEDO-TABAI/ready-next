@@ -24,7 +24,7 @@ Stage X is the bridge between Stage W stabilization and Stage Y product-surface 
 
 In scope:
 
-- Repair stale deep verification scripts in the `verify:c` / `verify:r` / `verify:t` chain.
+- Repair stale deep verification scripts in the `verify:c` / `verify:r` / `verify:s` / `verify:t` chain (all four are Stage U/V-era deep gates with same staleness risk profile).
 - Add a small meta-gate that prevents future hard-coded script paths from silently drifting.
 - Fix the W5 item 3 multi-session failure: visible session tabs, session cap, completion toast, click-back into completed session, and composer unlock after failed sends.
 - Classify the provider `HTTP 402` part as configuration/account failure and make the UI recover cleanly from it.
@@ -61,7 +61,7 @@ This section records the facts that Stage X implementers must verify again befor
   - `react-refresh/only-export-components`: 17 / 17
   - unused disable directive: 3 / 3
 - Current deep-gate problem:
-  - `npm run verify:r` and `npm run verify:t` enter stale gate scripts.
+  - `npm run verify:r` and `npm run verify:t` enter stale gate scripts (`verify:c` and `verify:s` have the same risk profile and must be inventoried alongside).
   - Example failure: `scripts/check-identity-resolver-pure-read.cjs` looks for `src/main/modules/agent-control/skill-turn-identity.ts`, while the current implementation lives under the post-refactor module layout.
 - W5 item 3 root cause candidate is already proven at the store level:
   - `useAgent.getState().newSession()` from an empty `sessionOrder` creates an active session, but leaves `sessionOrder` empty.
@@ -78,7 +78,7 @@ This section records the facts that Stage X implementers must verify again befor
 
 Stage X is complete only when all of the following are true:
 
-1. `npm run verify:r` and `npm run verify:t` either pass, or any intentionally retired sub-gate is removed from the chain and recorded in the Stage X closeout ledger with a replacement gate.
+1. `npm run verify:c`, `npm run verify:r`, `npm run verify:s`, and `npm run verify:t` either pass, or any intentionally retired sub-gate is removed from the chain and recorded in the Stage X closeout ledger with a replacement gate.
 2. No deep gate fails because it cannot read a moved source file.
 3. A new or updated meta-gate catches stale hard-coded source paths in verification scripts.
 4. W5 item 3 is rerun in the live Ready app and passes with evidence.
@@ -180,11 +180,13 @@ node scripts/check-eslint-baseline.cjs
 npm run verify:ipc-contract
 npm run verify:native
 npm run test
+npm run verify:c
 npm run verify:r
+npm run verify:s
 npm run verify:t
 ```
 
-For each command, save stdout/stderr and exit code. For `verify:r` and `verify:t`, a non-zero start snapshot is acceptable only if the failure is recorded as a stale-gate repair target.
+For each command, save stdout/stderr and exit code. For `verify:c`, `verify:r`, `verify:s`, and `verify:t`, a non-zero start snapshot is acceptable only if the failure is recorded as a stale-gate repair target.
 
 Done when:
 
@@ -314,7 +316,7 @@ Allowlist file `scripts/check-verify-script-paths-allowlist.json`:
 ```
 
 The meta-gate's allowlist loader must:
-- Reject the allowlist if any entry is missing `reason`, `owner`, `expiresAt`, or `addedBy`.
+- Reject the allowlist if any entry is missing any of the five required fields: `path`, `reason`, `owner`, `expiresAt`, `addedBy`.
 - Reject entries where `expiresAt` is in the past (use `new Date(expiresAt) < new Date()`).
 - Print every active allowlist entry at the end of each run so reviewers see what is silenced.
 
@@ -326,6 +328,7 @@ Required verification:
 node scripts/check-verify-script-paths-current.cjs
 npm run verify:c
 npm run verify:r
+npm run verify:s
 npm run verify:t
 npm run typecheck
 npm run lint:check
@@ -335,7 +338,7 @@ npm run test
 
 Done when:
 
-- `verify:r` and `verify:t` no longer fail on missing moved files.
+- `verify:c`, `verify:r`, `verify:s`, and `verify:t` no longer fail on missing moved files.
 - Any still-red gate is a real product or contract failure, not a stale script path.
 - Warning count does not exceed 769.
 - The Stage X closeout contains `x1-gate-repair-report.md` listing every script touched and its before/after status.
@@ -514,7 +517,9 @@ npm run test
 Recommended second job after X1:
 
 ```bash
+npm run verify:c
 npm run verify:r
+npm run verify:s
 npm run verify:t
 ```
 
@@ -524,7 +529,7 @@ Rules:
 
 - CI must not use `continue-on-error` for merge-critical checks.
 - CI must not hide warning growth; `verify:lint-budget` is mandatory.
-- If `verify:r` or `verify:t` is not in the push gate, the taxonomy must say exactly when it runs.
+- If any of `verify:c` / `verify:r` / `verify:s` / `verify:t` is not in the push gate, the taxonomy must say exactly when each runs.
 
 ### 8.1 GitHub Actions concrete shape
 
@@ -618,11 +623,16 @@ Suggested `BrowserViewIntent` contract shape (renderer → main IPC payload):
 
 ```ts
 type BrowserViewIntent =
-  | { kind: 'show'; tabId: string; bounds: { x: number; y: number; w: number; h: number }; reason: 'mode-switch' | 'tab-activate' | 'split-promote' }
-  | { kind: 'hide'; tabId: string; reason: 'mode-switch' | 'overlay-open' | 'tab-deactivate' | 'split-collapse' }
-  | { kind: 'hide-all'; reason: 'overlay-open' | 'mode-switch-prepare' }
-  | { kind: 'set-bounds'; tabId: string; bounds: ... }
-  | { kind: 'secondary-set-bounds'; tabId: string; bounds: ... }
+  | { kind: 'show'; intentId: number; tabId: string; bounds: { x: number; y: number; w: number; h: number }; reason: 'mode-switch' | 'tab-activate' | 'split-promote' }
+  | { kind: 'hide'; intentId: number; tabId: string; reason: 'mode-switch' | 'overlay-open' | 'tab-deactivate' | 'split-collapse' }
+  | { kind: 'hide-all'; intentId: number; reason: 'overlay-open' | 'mode-switch-prepare' }
+  | { kind: 'set-bounds'; intentId: number; tabId: string; bounds: ... }
+  | { kind: 'secondary-set-bounds'; intentId: number; tabId: string; bounds: ... }
+
+// Every intent carries a monotonically increasing intentId so the main-side
+// ack can echo it back (see PR-shell-2 § "Ack failure protection"). PR-shell-1
+// introduces the field; PR-shell-2 wires the ack round-trip for `hide-all`
+// (and may later extend to `show` / `set-bounds` if those need ordering proofs).
 ```
 
 Renderer never calls `show()`/`hide()` directly; only emits intents. Main side `tab-shell-service.ts` is the single decision point that maps intent → actual `BrowserView` API calls. This eliminates the renderer-side guess that triggered FM-2 / FM-3 / FM-4.
@@ -749,7 +759,9 @@ npm run lint:check
 npm run verify:lint-budget
 node scripts/check-eslint-baseline.cjs
 npm run verify:ipc-contract
+npm run verify:c
 npm run verify:r
+npm run verify:s
 npm run verify:t
 npm run test
 npm run build
@@ -843,7 +855,7 @@ We are in /Users/user/实验田/ready-cowork on branch codex/readyguy.
 Implement Stage X from docs/superpowers/plans/2026-05-22-X-trust-foundation-and-w5-recovery-implementation.md.
 Start with X0 and X1 only:
 1. create the Stage X closeout scaffold and starting verification snapshot;
-2. inventory verify:c/r/t scripts;
+2. inventory verify:c/r/s/t scripts;
 3. repair stale-path deep gates;
 4. add the stale-path meta-gate;
 5. rerun the X1 required verification.
