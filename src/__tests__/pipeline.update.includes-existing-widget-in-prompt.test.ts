@@ -9,6 +9,7 @@ const EXECUTOR_PATH = resolve(
 )
 
 describe('pipeline update-mode existing widget prompt contract (P3 T2)', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- W1.1 exempt: the update-mode existing-widget prompt assembly (collectExistingWidgetsForPrompt, serializeExistingWidgetsForPrompt, buildWidgetDraftUserPrompt) lives inside the electron-coupled pipeline executor; the prompt builders are private methods with no electron-free seam. Tracked in lint-exemption-ledger 2026-05-22.
   const source = readFileSync(EXECUTOR_PATH, 'utf8')
 
   it('collects existing widgets only for update operation', () => {

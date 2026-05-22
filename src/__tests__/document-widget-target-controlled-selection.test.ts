@@ -55,6 +55,7 @@ const EXECUTOR_PATH = resolve(
 )
 
 test('executor 在 update 分支消费 envelope widget_target 作为 preferredTargetWidgetTitle', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- W1.1 exempt: document-task-pipeline-executor.ts transitively imports `electron` (via ../ipc-handler readDocumentEditableText) and has no electron-free seam to drive the update-branch consumption of envelope widget_target end-to-end. Tracked in lint-exemption-ledger 2026-05-22.
   const source = readFileSync(EXECUTOR_PATH, 'utf8')
   assert.match(
     source,

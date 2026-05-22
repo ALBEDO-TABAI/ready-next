@@ -1,0 +1,79 @@
+---
+title: Lint exemption ledger
+date: 2026-05-22
+stage: W1
+enforce: false
+parent_roadmap: docs/superpowers/plans/2026-05-22-W-ready-stabilization-roadmap.md
+applies_to: docs/superpowers/plans/2026-05-22-W1-lint-errors-and-baseline-drift-implementation.md
+---
+
+# Lint exemption ledger
+
+Single source of truth for "why a Ready custom lint rule was silenced at a
+specific file:line". Each row records the rule, the file:line, the reason,
+the owner, and an expiry date or removal condition.
+
+A new row is required whenever a W1 (or later) PR adds a
+`// eslint-disable-next-line <rule-name> -- <reason>` comment for a
+Ready-namespaced rule (`ready/no-source-grep-test`,
+`ready/no-legacy-backdoor`, `ready/no-subagent-leak`,
+`ready/no-migration-todo`). Generic ESLint suppressions
+(`@typescript-eslint/*`, `no-control-regex`, etc.) do not need a row unless
+the W-stage plan specifically asks.
+
+Removal condition shorthand:
+
+- **runtime-upgrade**: remove the exemption once the target code has an
+  electron-free seam that lets `node:test` exercise the assertion at
+  runtime (replace the source-grep test with a behavior test in the same
+  PR).
+- **stage-V/U-move-confirms**: remove the exemption once the prior
+  move-only Stage U or V batch is confirmed to have left the assertion
+  target in its current location for the rest of W.
+- **rule-boundary-update**: remove the exemption once `ready/<rule>` itself
+  is patched (and its `eslint-rules/__tests__/` test is updated) to
+  sanction this code shape.
+
+## Active exemptions
+
+| Rule | File:line | Reason | Owner | Expiry / removal condition |
+| --- | --- | --- | --- | --- |
+| ready/no-source-grep-test | src/__tests__/document-attachment-async-io.test.ts:19 | ipc-handler.ts registers handlers against the Electron `ipcMain` singleton on import; no electron-free seam for the saveAs / writeDocumentEditableText branches yet. | W1.1 | runtime-upgrade when ipc-handler is split into an electron-free helper module |
+| ready/no-source-grep-test | src/__tests__/document-attachment-async-io.test.ts:21 | file-io-group.ts imports `electron`'s IpcMain and registers IPC handlers at module load; async fs-promises migration asserted structurally because the module cannot be loaded from node:test. | W1.1 | runtime-upgrade when file-io-group is split into an electron-free helper module |
+| ready/no-source-grep-test | src/__tests__/document-attachment-async-io.test.ts:26 | file-mutation-group.ts imports `electron`'s IpcMain and registers IPC handlers at module load; async fs-promises migration on copy/move/delete/mkdir asserted structurally. | W1.1 | runtime-upgrade when file-mutation-group is split into an electron-free helper module |
+| ready/no-source-grep-test | src/__tests__/document-engine-async-handlers.test.ts:9 | file-io-group.ts imports `electron`'s IpcMain and registers document:read / document:list handlers at module load; node:test cannot import the module. | W1.1 | runtime-upgrade when file-io-group is split into an electron-free helper module |
+| ready/no-source-grep-test | src/__tests__/document-engine-async-handlers.test.ts:14 | parser-group.ts imports `electron`'s IpcMain and registers document:parseDocx / document:parseXlsx handlers at module load; node:test cannot import the module. | W1.1 | runtime-upgrade when parser-group is split into an electron-free helper module |
+| ready/no-source-grep-test | src/__tests__/document-insight-widget-window.test.ts:112 | document-task-pipeline-executor.ts transitively imports `electron` via ../ipc-handler (readDocumentEditableText); buildDocumentPipelineInsight has no electron-free seam. | W1.1 | runtime-upgrade when pipeline executor gets an electron-free harness |
+| ready/no-source-grep-test | src/__tests__/document-list-widgets-metric.test.ts:13 | document-task-pipeline.ts is reached only through the electron-coupled pipeline executor; the metrics-import shape is locked structurally until a runnable pipeline fixture exists (>50 LOC, out of W1 scope). | W1.1 | runtime-upgrade when pipeline gets an electron-free harness |
+| ready/no-source-grep-test | src/__tests__/document-list-widgets-metric.test.ts:19 | document_list_widgets branch lives inside runDocumentTaskPipeline; the metric-order assertion is held structurally until a runnable harness exists. | W1.1 | runtime-upgrade when pipeline gets an electron-free harness |
+| ready/no-source-grep-test | src/__tests__/document-widget-target-controlled-selection.test.ts:59 | document-task-pipeline-executor.ts transitively imports `electron` (via ../ipc-handler); the update-branch envelope widget_target consumption has no electron-free seam. | W1.1 | runtime-upgrade when pipeline executor gets an electron-free harness |
+| ready/no-source-grep-test | src/__tests__/patch-target-resolution-metric.test.ts:17 | document-task-pipeline-executor.ts transitively imports `electron` via ../ipc-handler; node:test cannot load the module to verify the metrics import wiring. | W1.1 | runtime-upgrade when pipeline executor gets an electron-free harness |
+| ready/no-source-grep-test | src/__tests__/patch-target-resolution-metric.test.ts:23 | writeDocumentWidget.update branch lives inside the electron-coupled pipeline executor; metric-payload shape asserted structurally. | W1.1 | runtime-upgrade when pipeline executor gets an electron-free harness |
+| ready/no-source-grep-test | src/__tests__/pipeline.update.includes-existing-widget-in-prompt.test.ts:13 | collectExistingWidgetsForPrompt / serializeExistingWidgetsForPrompt / buildWidgetDraftUserPrompt are private methods on DocumentTaskPipelineExecutor (electron-coupled). | W1.1 | runtime-upgrade when pipeline executor gets an electron-free harness |
+| ready/no-source-grep-test | src/__tests__/pipeline.widget-draft.cache-invalidation-on-failure.test.ts:13 | buildDocumentPipelineWidgetDraft / deleteCachedWidgetDraft are private methods on DocumentTaskPipelineExecutor (electron-coupled); the cache-invalidation contract for compose_widget's try/catch is asserted structurally. | W1.1 | runtime-upgrade when pipeline executor gets an electron-free harness |
+| ready/no-source-grep-test | src/__tests__/pipeline.widget-draft.reprompts-on-schema-error.test.ts:13 | The one-retry reprompt budget + zod-validator error injection live inside DocumentTaskPipelineExecutor's private methods (electron-coupled); attempt-1/attempt-2 ordering is asserted structurally. | W1.1 | runtime-upgrade when pipeline executor gets an electron-free harness |
+
+## How to add a row
+
+1. Run `npm run lint:check` (or `npx eslint <file>`) and confirm the rule
+   actually fires at the file:line you intend to silence.
+2. Add the `// eslint-disable-next-line <rule-name> -- <reason>` comment
+   immediately above the offending line.
+3. Append a row to the table above with the rule, file:line of the
+   disabled line itself (not the comment), reason, owner (the W-stage that
+   added it), and removal condition.
+4. Re-run `npm run lint:check` and confirm the targeted error is gone and
+   no other lint errors regressed.
+5. Re-run `node scripts/check-eslint-baseline.cjs` and confirm the
+   corresponding `new` entry disappeared (because the rule no longer
+   fires).
+
+## How to remove a row
+
+1. Confirm the removal condition listed in the row is satisfied (e.g.,
+   the runtime seam exists, the boundary-update PR landed).
+2. Delete the `// eslint-disable-next-line` comment in the test file.
+3. Delete the row from the table above.
+4. Re-run `npm run lint:check`; either the test must already be replaced
+   by a runtime behavior test, or the rule fires again and the PR must
+   reach `replace` / `delete` disposition before merging.

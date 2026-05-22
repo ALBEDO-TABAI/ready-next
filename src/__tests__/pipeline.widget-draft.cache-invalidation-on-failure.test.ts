@@ -9,6 +9,7 @@ const EXECUTOR_PATH = resolve(
 )
 
 describe('widget-draft cache invalidation on failure contract (P3 T6 · Gap M)', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- W1.1 exempt: buildDocumentPipelineWidgetDraft / deleteCachedWidgetDraft are private methods on DocumentTaskPipelineExecutor which transitively imports `electron`; the cache-invalidation contract is asserted structurally because no electron-free harness exists for compose_widget's try/catch flow. Tracked in lint-exemption-ledger 2026-05-22.
   const source = readFileSync(EXECUTOR_PATH, 'utf8')
 
   it('buildDocumentPipelineWidgetDraft returns {draft, cacheable} (not a bare draft)', () => {

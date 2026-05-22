@@ -5,10 +5,12 @@ import { describe, it } from 'node:test'
 
 describe('document engine async handlers', () => {
   it('keeps the main document read and parse handlers on async fs APIs', () => {
+    // eslint-disable-next-line ready/no-source-grep-test -- W1.1 exempt: file-io-group.ts imports `electron`'s IpcMain and registers document:read / document:list handlers at module load; node:test cannot import the module to assert async-fs usage at runtime. Tracked in lint-exemption-ledger 2026-05-22.
     const fileIoSource = readFileSync(
       resolve(process.cwd(), 'src/main/modules/document-engine/ipc/file-io-group.ts'),
       'utf8',
     )
+    // eslint-disable-next-line ready/no-source-grep-test -- W1.1 exempt: parser-group.ts imports `electron`'s IpcMain and registers document:parseDocx / document:parseXlsx handlers at module load; node:test cannot import the module to assert async readFile usage at runtime. Tracked in lint-exemption-ledger 2026-05-22.
     const parserSource = readFileSync(
       resolve(process.cwd(), 'src/main/modules/document-engine/ipc/parser-group.ts'),
       'utf8',

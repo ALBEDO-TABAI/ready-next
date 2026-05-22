@@ -9,11 +9,13 @@ const PIPELINE_PATH = resolve(
 )
 
 test('document-task-pipeline 导入 logAgentMetric', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- W1.1 exempt: document-task-pipeline.ts itself does not import electron, but the only live caller (document-task-pipeline-executor.ts) does (transitively via ipc-handler). The import-shape assertion locks structural placement of the metrics dependency; lifting this to a runtime test requires building a runnable pipeline fixture (>50 LOC), out of W1 scope. Tracked in lint-exemption-ledger 2026-05-22 with a "runtime-upgrade when pipeline gets an electron-free harness" trigger.
   const source = readFileSync(PIPELINE_PATH, 'utf8')
   assert.match(source, /import\s+\{\s*logAgentMetric\s*\}\s+from\s+'..\/..\/agent-control\/metrics'/)
 })
 
 test('document_list_widgets 分支在 return 前 emit list_widgets_summary_as_final_text', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- W1.1 exempt: same rationale as the previous test in this file — the document_list_widgets branch lives inside runDocumentTaskPipeline and can only be exercised by constructing a full DocumentTaskPipeline fixture with a real plan + snapshot + emit callbacks (>50 LOC); the metric-order assertion is held structurally until that runnable harness exists. Tracked in lint-exemption-ledger 2026-05-22.
   const source = readFileSync(PIPELINE_PATH, 'utf8')
   // 截取 document_list_widgets 分支的上下文
   const branchStart = source.indexOf("if (plan.taskType === 'document_list_widgets')")

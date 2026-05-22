@@ -15,11 +15,14 @@ import { describe, it } from 'node:test'
  */
 describe('document engine attachment async IO', () => {
   const sourcePath = resolve(process.cwd(), 'src/main/modules/document-engine/ipc-handler.ts')
+  // eslint-disable-next-line ready/no-source-grep-test -- W1.1 exempt: document-engine/ipc-handler.ts registers handlers against the Electron `ipcMain` singleton on import; no electron-free seam exists yet to exercise the saveAs/writeDocumentEditableText branches at runtime. Tracked in lint-exemption-ledger 2026-05-22; revisit when ipc-handler is split into an electron-free helper module.
   const source = readFileSync(sourcePath, 'utf8')
+  // eslint-disable-next-line ready/no-source-grep-test -- W1.1 exempt: file-io-group.ts imports `electron`'s IpcMain and registers IPC handlers at module load; the async-fs-promises migration is asserted structurally because the handlers cannot be loaded from node:test. Tracked in lint-exemption-ledger 2026-05-22.
   const fileIoSource = readFileSync(
     resolve(process.cwd(), 'src/main/modules/document-engine/ipc/file-io-group.ts'),
     'utf8',
   )
+  // eslint-disable-next-line ready/no-source-grep-test -- W1.1 exempt: file-mutation-group.ts imports `electron`'s IpcMain and registers IPC handlers at module load; the async-fs-promises migration on copy/move/delete/mkdir is asserted structurally because the handlers cannot be loaded from node:test. Tracked in lint-exemption-ledger 2026-05-22.
   const fileMutationSource = readFileSync(
     resolve(process.cwd(), 'src/main/modules/document-engine/ipc/file-mutation-group.ts'),
     'utf8',

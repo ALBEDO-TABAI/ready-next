@@ -9,6 +9,7 @@ const EXECUTOR_PATH = resolve(
 )
 
 describe('pipeline widget draft reprompt-on-schema-error contract (P3 T1)', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- W1.1 exempt: the one-retry reprompt budget + zod-validator error injection live inside DocumentTaskPipelineExecutor's private methods; the executor transitively imports `electron` via ../ipc-handler, so attempt-1/attempt-2 logging order is asserted structurally instead of by driving the model loop end-to-end. Tracked in lint-exemption-ledger 2026-05-22.
   const source = readFileSync(EXECUTOR_PATH, 'utf8')
 
   it('carries the zod validator errors verbatim into the reprompt user message', () => {

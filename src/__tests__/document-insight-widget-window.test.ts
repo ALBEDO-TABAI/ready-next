@@ -108,6 +108,7 @@ const EXECUTOR_PATH = resolve(
 )
 
 test('buildDocumentPipelineInsight 接收 targetWidgetTitle 并做窗口化', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- W1.1 exempt: document-task-pipeline-executor.ts transitively imports `electron` via ../ipc-handler (readDocumentEditableText), and the buildDocumentPipelineInsight method has no electron-free seam that lets node:test feed a snapshot with targetWidgetTitle/targetWidgetOccurrence and observe selectWidgetCenteredChunks call. Tracked in lint-exemption-ledger 2026-05-22.
   const source = readFileSync(EXECUTOR_PATH, 'utf8')
   assert.match(source, /targetWidgetTitle\?: string/)
   assert.match(source, /targetWidgetOccurrence\?: number/)

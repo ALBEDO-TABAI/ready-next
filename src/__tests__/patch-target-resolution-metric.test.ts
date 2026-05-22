@@ -13,11 +13,13 @@ const MODULE_EXECUTOR_PATH = resolve(
 )
 
 test('document-task-pipeline-executor 导入 logAgentMetric', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- W1.1 exempt: document-task-pipeline-executor.ts transitively imports `electron` via ../ipc-handler; node:test cannot load the module to verify the metrics import wiring at runtime. Tracked in lint-exemption-ledger 2026-05-22.
   const source = readFileSync(EXECUTOR_PATH, 'utf8')
   assert.match(source, /import\s+\{\s*logAgentMetric\s*\}\s+from\s+'..\/..\/agent-control\/metrics'/)
 })
 
 test('writeDocumentWidget.update 在 reason === target_not_resolved 时 emit patch_target_resolution_failed', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- W1.1 exempt: same rationale as the previous test in this file — the writeDocumentWidget.update branch lives inside the electron-coupled pipeline executor; asserting the metric-payload shape end-to-end would require a full pipeline harness (>50 LOC). Tracked in lint-exemption-ledger 2026-05-22.
   const source = readFileSync(EXECUTOR_PATH, 'utf8')
   // 条件必须在 update 分支里，且拿到 payload 之后
   assert.match(
