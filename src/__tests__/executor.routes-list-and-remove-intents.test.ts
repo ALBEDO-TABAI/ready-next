@@ -11,6 +11,7 @@ const EXECUTOR_PATH = resolve(
 )
 
 describe('executor routes list/remove structured intents (P3 T3)', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- only the tryExecute four-intent branch-order assertion needs the executor source; the other three it() blocks already run buildPipelinePhaseOrder at runtime. The structural assertion stays until an electron-free executor seam exists (mirrors W1.1 ledger for this executor).
   const source = readFileSync(EXECUTOR_PATH, 'utf8')
 
   it('tryExecute branches include both document_list_widgets and document_remove_widget', () => {

@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 
 function readWorkspaceFile(path: string): string {
+  // eslint-disable-next-line ready/no-source-grep-test -- PreviewBrowser.tsx is a React component with renderer-only hook/store deps (useHostedPreviewBounds, useWorkspace, react refs/effects); no electron-free seam and no JSDOM harness in scope for W1 (see ledger).
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 

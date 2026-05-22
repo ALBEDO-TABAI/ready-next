@@ -14,6 +14,7 @@ const EXECUTOR_PATH = resolve(
 )
 
 describe('document task pipeline executor · list/remove routing contract', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- document-task-pipeline-executor.ts transitively imports `electron` via ../ipc-handler; all five assertions in this file are structural routing contracts with no electron-free seam (mirrors W1.1 ledger for this executor).
   const executor = readFileSync(EXECUTOR_PATH, 'utf8')
 
   it('routes document_list_widgets intent into the widget pipeline', () => {

@@ -4,6 +4,7 @@ import { resolve } from 'node:path'
 import test from 'node:test'
 
 function readWorkspaceFile(path: string): string {
+  // eslint-disable-next-line ready/no-source-grep-test -- ModelSelector.tsx is a React component coupled to react-router-dom + Zustand useSettings store; no electron-free seam and no JSDOM harness in scope for W1 (see ledger).
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
