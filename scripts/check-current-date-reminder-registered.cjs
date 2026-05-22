@@ -35,7 +35,7 @@ if (reminder) {
   }
 }
 
-const registry = read('src/main/modules/agent-control/system-reminder-registry.ts')
+const registry = read('src/main/modules/agent-control/system-reminders/system-reminder-registry.ts')
 if (registry) {
   // Extract the ReminderTopic union and confirm 'current-date' appears.
   // Union may end at `;` or at the next top-level declaration (export ...).

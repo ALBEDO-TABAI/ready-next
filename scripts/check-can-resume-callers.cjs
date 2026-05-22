@@ -32,10 +32,10 @@ const {
 const REPO_DEFAULT = path.resolve(__dirname, '..')
 
 const TARGETS = [
-  'src/main/modules/agent-control/skill-task-lifecycle.ts',
-  'src/main/modules/agent-control/run-contracts.ts',
-  'src/main/modules/agent-control/task-projection-reconciler.ts',
-  'src/main/modules/agent-control/runtime.ts',
+  'src/main/modules/agent-control/skills/skill-task-lifecycle.ts',
+  'src/main/modules/agent-control/contracts/run-contracts.ts',
+  'src/main/modules/agent-control/task-projection/task-projection-reconciler.ts',
+  'src/main/modules/agent-control/runtime-core/runtime.ts',
 ]
 
 function parseRoot(argv) {

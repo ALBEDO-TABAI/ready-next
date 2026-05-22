@@ -21,9 +21,9 @@ const { resolve } = require('node:path')
 
 const TYPES_FILE = 'src/shared/skill-execution-types.ts'
 const COMPILER_FILE = 'src/main/modules/skills-runtime/skill-compiler.ts'
-const GATEWAY_FILE = 'src/main/modules/agent-control/tool-gateway.ts'
-const BUNDLE_FILE = 'src/main/modules/agent-control/execution-tool-config.ts'
-const CONTROLLER_FILE = 'src/main/modules/agent-control/run-capability-controller.ts'
+const GATEWAY_FILE = 'src/main/modules/agent-control/tools-runtime/tool-gateway.ts'
+const BUNDLE_FILE = 'src/main/modules/agent-control/tool-policy/execution-tool-config.ts'
+const CONTROLLER_FILE = 'src/main/modules/agent-control/domain-adapters/run-capability-controller.ts'
 
 main()
 

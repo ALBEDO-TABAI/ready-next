@@ -10,8 +10,8 @@ const SOURCE_EXT_RE = /\.(?:[cm]?[jt]sx?|mjs|cjs)$/
 const SUB_AGENT_DIR = 'src/main/modules/agent-control/sub-agent'
 const ALLOWED_AGENT_CONTROL_FILES = new Set([
   'src/main/modules/agent-control/metrics.ts',
-  'src/main/modules/agent-control/run-cleanup-registry.ts',
-  'src/main/modules/agent-control/tool-error-metrics.ts',
+  'src/main/modules/agent-control/task-projection/run-cleanup-registry.ts',
+  'src/main/modules/agent-control/tools-runtime/tool-error-metrics.ts',
 ])
 const BUILTINS = new Set([
   ...builtinModules,

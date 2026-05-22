@@ -3,7 +3,7 @@
 const { readFileSync } = require('node:fs')
 const { relative, resolve } = require('node:path')
 
-const DEFAULT_SOURCE = 'src/main/modules/agent-control/skill-child-runner.ts'
+const DEFAULT_SOURCE = 'src/main/modules/agent-control/skills/skill-child-runner.ts'
 
 main()
 

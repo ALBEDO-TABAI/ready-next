@@ -23,9 +23,9 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const REPO_DEFAULT = path.resolve(__dirname, '..')
-const GATEWAY_REL = 'src/main/modules/agent-control/tool-gateway.ts'
-const BUNDLE_REL = 'src/main/modules/agent-control/execution-tool-config.ts'
-const CONTROLLER_REL = 'src/main/modules/agent-control/run-capability-controller.ts'
+const GATEWAY_REL = 'src/main/modules/agent-control/tools-runtime/tool-gateway.ts'
+const BUNDLE_REL = 'src/main/modules/agent-control/tool-policy/execution-tool-config.ts'
+const CONTROLLER_REL = 'src/main/modules/agent-control/domain-adapters/run-capability-controller.ts'
 
 function checkVisionToolCapabilityGated({ root = REPO_DEFAULT } = {}) {
   const errors = []

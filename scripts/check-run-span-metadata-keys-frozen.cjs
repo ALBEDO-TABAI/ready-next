@@ -25,7 +25,7 @@ const REQUIRED_KEYS = [
   'session_id',
 ]
 
-const file = path.join(ROOT, 'src/main/modules/agent-control/run-span-metadata.ts')
+const file = path.join(ROOT, 'src/main/modules/agent-control/task-projection/run-span-metadata.ts')
 let body = ''
 try {
   body = fs.readFileSync(file, 'utf8')

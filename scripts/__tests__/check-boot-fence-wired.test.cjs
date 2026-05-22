@@ -15,7 +15,7 @@ const { join, resolve } = require('node:path')
 const test = require('node:test')
 
 const SCRIPT = resolve(__dirname, '../check-boot-fence-wired.cjs')
-const REL = 'src/main/modules/agent-control/runtime.ts'
+const REL = 'src/main/modules/agent-control/runtime-core/runtime.ts'
 
 function run(root) {
   return spawnSync(process.execPath, [SCRIPT, '--root', root], { encoding: 'utf8' })
@@ -23,7 +23,9 @@ function run(root) {
 
 function makeFixture(body) {
   const root = mkdtempSync(join(tmpdir(), 'ready-q-bootfence-gate-'))
-  const dir = join(root, 'src/main/modules/agent-control')
+  // runtime.ts lives under runtime-core/ after the Stage U module reshuffle;
+  // mirror the production layout so the gate finds the fixture.
+  const dir = join(root, 'src/main/modules/agent-control/runtime-core')
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, 'runtime.ts'), body)
   return root

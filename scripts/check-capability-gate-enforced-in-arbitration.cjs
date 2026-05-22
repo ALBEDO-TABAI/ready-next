@@ -19,7 +19,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const REPO_DEFAULT = path.resolve(__dirname, '..')
-const TARGET_REL = 'src/main/modules/agent-control/run-capability-controller.ts'
+const TARGET_REL = 'src/main/modules/agent-control/domain-adapters/run-capability-controller.ts'
 
 function checkCapabilityGateEnforcedInArbitration({ root = REPO_DEFAULT } = {}) {
   const errors = []

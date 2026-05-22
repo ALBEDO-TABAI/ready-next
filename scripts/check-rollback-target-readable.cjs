@@ -22,7 +22,7 @@ const path = require('node:path')
 const ROOT = process.cwd()
 const LOG_FILE = path.join(
   ROOT,
-  'src/main/modules/agent-control/skill-child-run-log.ts',
+  'src/main/modules/agent-control/skills/skill-child-run-log.ts',
 )
 const RENDERER_FILES = [
   'src/renderer/components/agent/ChatPanel.tsx',

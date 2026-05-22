@@ -17,7 +17,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const ROOT = process.cwd()
-const REL = 'src/main/modules/agent-control/run-feedback-repository.ts'
+const REL = 'src/main/modules/agent-control/task-projection/run-feedback-repository.ts'
 
 let src
 try {

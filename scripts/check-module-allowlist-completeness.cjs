@@ -11,8 +11,8 @@
  *     silently returns null instead of producing a typecheck error
  *
  * Locations checked:
- *   1. src/main/modules/agent-control/types.ts        ScopeRunTriggerHit.module
- *   2. src/main/modules/agent-control/types.ts        ScopeRunEventPayload.module
+ *   1. src/main/modules/agent-control/contracts/types.ts        ScopeRunTriggerHit.module
+ *   2. src/main/modules/agent-control/contracts/types.ts        ScopeRunEventPayload.module
  *   3. src/main/modules/agent-control/prompt-assembly.ts  PromptTriggerHit.module
  *   4. src/renderer/types/electron.d.ts               ScopeRunTriggerHitData.module
  *   5. src/renderer/types/electron.d.ts               ScopeRunEventData.module
@@ -58,7 +58,7 @@ function verifyContainsResearch(label, body, startMarker, endMarker) {
 }
 
 // 1 + 2: main types.ts (two unions)
-const mainTypes = readFile('src/main/modules/agent-control/types.ts')
+const mainTypes = readFile('src/main/modules/agent-control/contracts/types.ts')
 verifyContainsResearch(
   'main/types.ts ScopeRunTriggerHit.module',
   mainTypes,

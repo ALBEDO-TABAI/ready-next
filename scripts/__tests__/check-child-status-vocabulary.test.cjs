@@ -11,13 +11,27 @@ const {
 
 const SCRIPT_PATH = resolve(__dirname, '../check-child-status-vocabulary.cjs')
 
+// File-name → relative subdir mapping that mirrors the real Stage U module
+// reshuffle. The script under test scans agent-control/ recursively, so
+// fixtures must land at the same locations the production tree uses.
+const FIXTURE_SUBDIR_BY_FILE = {
+  'skill-child-run-types.ts': 'skills',
+  'skill-child-sub-agent.ts': 'skills',
+  'skill-child-runner.ts': 'skills',
+  'turn-frame-steering.ts': 'runtime-core',
+  'child-run-circuit-breaker.ts': 'child-run',
+}
+
 function withAgentControlFixture(files, callback) {
   const root = mkdtempSync(join(tmpdir(), 'ready-child-status-vocab-'))
   try {
     const agentControlDir = join(root, 'src/main/modules/agent-control')
     mkdirSync(agentControlDir, { recursive: true })
     for (const [relativePath, source] of Object.entries(files)) {
-      writeFileSync(join(agentControlDir, relativePath), source)
+      const subdir = FIXTURE_SUBDIR_BY_FILE[relativePath]
+      const targetDir = subdir ? join(agentControlDir, subdir) : agentControlDir
+      mkdirSync(targetDir, { recursive: true })
+      writeFileSync(join(targetDir, relativePath), source)
     }
     return callback(root)
   } finally {
@@ -66,7 +80,7 @@ test('rejects duplicate terminal close status set outside skill-child-run-types'
       const result = checkChildStatusVocabulary({ root })
       assert.equal(result.violations.length, 1)
       assert.match(result.violations[0].message, /duplicate TERMINAL_CHILD_CLOSE_STATUSES/)
-      assert.equal(result.violations[0].file, 'src/main/modules/agent-control/turn-frame-steering.ts')
+      assert.equal(result.violations[0].file, 'src/main/modules/agent-control/runtime-core/turn-frame-steering.ts')
     },
   )
 })

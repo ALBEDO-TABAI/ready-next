@@ -30,7 +30,7 @@ function readFile(rel) {
 const errors = []
 
 // 1. run-contracts.ts: TaskTypeResolution.preferredExecutor union must include 'research'
-const runContracts = readFile('src/main/modules/agent-control/run-contracts.ts')
+const runContracts = readFile('src/main/modules/agent-control/contracts/run-contracts.ts')
 const preferredExecutorMatch = runContracts.match(/preferredExecutor\?\s*:\s*([^\n]+)/)
 if (!preferredExecutorMatch) {
   errors.push('run-contracts.ts: TaskTypeResolution.preferredExecutor field not found')

@@ -22,7 +22,7 @@ const path = require('node:path')
 const { stripCodeStringsAndComments, indexToLine } = require('./_lib_strip_code_strings_and_comments.cjs')
 
 const REPO_DEFAULT = path.resolve(__dirname, '..')
-const TARGET_REL = 'src/main/modules/agent-control/runtime.ts'
+const TARGET_REL = 'src/main/modules/agent-control/runtime-core/runtime.ts'
 
 function findMethodBody(stripped, methodName) {
   // Match `methodName(` opener at typescript-ish method declaration

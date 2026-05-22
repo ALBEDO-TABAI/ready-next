@@ -37,7 +37,7 @@ const path = require('node:path')
 const REPO = path.resolve(__dirname, '..')
 
 const DEFAULT_TURN_ENGINE_FILE = path.join(REPO, 'src/main/modules/agent-control/turn-engine.ts')
-const DEFAULT_TURN_FRAME_STEERING_FILE = path.join(REPO, 'src/main/modules/agent-control/turn-frame-steering.ts')
+const DEFAULT_TURN_FRAME_STEERING_FILE = path.join(REPO, 'src/main/modules/agent-control/runtime-core/turn-frame-steering.ts')
 const DEFAULT_EMBEDDED_DIR = path.join(REPO, 'assets/embedded-skills')
 
 function loadEmbeddedChildLoopActions(rootDir) {

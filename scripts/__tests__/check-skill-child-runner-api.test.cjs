@@ -11,9 +11,9 @@ const {
 test('skill child runner API snapshot ignores internal test invariant markers', () => {
   const root = mkdtempSync(join(tmpdir(), 'ready-skill-child-api-'))
   try {
-    mkdirSync(join(root, 'src/main/modules/agent-control'), { recursive: true })
+    mkdirSync(join(root, 'src/main/modules/agent-control/skills'), { recursive: true })
     writeFileSync(
-      join(root, 'src/main/modules/agent-control/skill-child-runner.ts'),
+      join(root, 'src/main/modules/agent-control/skills/skill-child-runner.ts'),
       [
         "export const __breaksInvariants = ['singleton.reset'] as const",
         'export const __noProductionInvariantBreach = true',
@@ -25,7 +25,7 @@ test('skill child runner API snapshot ignores internal test invariant markers', 
 
     const actual = collectSkillChildRunnerApi({
       root,
-      source: 'src/main/modules/agent-control/skill-child-runner.ts',
+      source: 'src/main/modules/agent-control/skills/skill-child-runner.ts',
     })
 
     assert.deepEqual(

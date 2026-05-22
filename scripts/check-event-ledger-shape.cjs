@@ -28,11 +28,11 @@ const path = require('node:path')
 const ROOT = process.cwd()
 const TYPES_FILE = path.join(
   ROOT,
-  'src/main/modules/agent-control/skill-child-run-types.ts',
+  'src/main/modules/agent-control/skills/skill-child-run-types.ts',
 )
 const RUNNER_FILE = path.join(
   ROOT,
-  'src/main/modules/agent-control/skill-child-runner.ts',
+  'src/main/modules/agent-control/skills/skill-child-runner.ts',
 )
 
 function fail(violations) {

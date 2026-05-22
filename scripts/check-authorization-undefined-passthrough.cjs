@@ -22,13 +22,13 @@
  * is flagged just like the single-line form).
  *
  * Scope (extended in Stage 10 final review):
- *   - src/main/modules/agent-control/tool-registry.ts
- *   - src/main/modules/agent-control/tool-gateway.ts
- *   - src/main/modules/agent-control/execution-tool-config.ts
- *   - src/main/modules/agent-control/execution-tool-skill-filters.ts
+ *   - src/main/modules/agent-control/tools-runtime/tool-registry.ts
+ *   - src/main/modules/agent-control/tools-runtime/tool-gateway.ts
+ *   - src/main/modules/agent-control/tool-policy/execution-tool-config.ts
+ *   - src/main/modules/agent-control/tool-policy/execution-tool-skill-filters.ts
  *   - src/main/modules/tools/index.ts
- *   - src/main/modules/agent-control/tool-runtime.ts
- *   - src/main/modules/agent-control/execution-loop-orchestrator.ts
+ *   - src/main/modules/agent-control/tools-runtime/tool-runtime.ts
+ *   - src/main/modules/agent-control/runtime-core/execution-loop-orchestrator.ts
  *   - src/main/modules/tools/tool-executor.ts
  *
  * Forbidden patterns (line comments / block comments / string literals
@@ -58,13 +58,13 @@ const path = require('node:path')
 const REPO = path.resolve(__dirname, '..')
 
 const TARGET_REL_FILES = [
-  'src/main/modules/agent-control/tool-registry.ts',
-  'src/main/modules/agent-control/tool-gateway.ts',
-  'src/main/modules/agent-control/execution-tool-config.ts',
-  'src/main/modules/agent-control/execution-tool-skill-filters.ts',
+  'src/main/modules/agent-control/tools-runtime/tool-registry.ts',
+  'src/main/modules/agent-control/tools-runtime/tool-gateway.ts',
+  'src/main/modules/agent-control/tool-policy/execution-tool-config.ts',
+  'src/main/modules/agent-control/tool-policy/execution-tool-skill-filters.ts',
   'src/main/modules/tools/index.ts',
-  'src/main/modules/agent-control/tool-runtime.ts',
-  'src/main/modules/agent-control/execution-loop-orchestrator.ts',
+  'src/main/modules/agent-control/tools-runtime/tool-runtime.ts',
+  'src/main/modules/agent-control/runtime-core/execution-loop-orchestrator.ts',
   'src/main/modules/tools/tool-executor.ts',
 ]
 
@@ -116,7 +116,7 @@ const WHOLE_FILE_FORBIDDEN_PATTERNS = [
   },
 ]
 
-const SKILL_FILTERS_REL = 'src/main/modules/agent-control/execution-tool-skill-filters.ts'
+const SKILL_FILTERS_REL = 'src/main/modules/agent-control/tool-policy/execution-tool-skill-filters.ts'
 const SKILL_FILTERS_FORBIDDEN_PATTERNS = [
   {
     name: 'skill filter helper optional authorization parameter',

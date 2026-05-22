@@ -67,7 +67,7 @@ test('child control checker accepts the required IPC, preload, type, UI, and run
         cancelChildRun: async () => ({ success: true, data: {} }),
       }
     `)
-    write(root, 'src/main/modules/agent-control/skill-child-runner.ts', `
+    write(root, 'src/main/modules/agent-control/skills/skill-child-runner.ts', `
       interface ActiveRun {
         startedAt: string
       }

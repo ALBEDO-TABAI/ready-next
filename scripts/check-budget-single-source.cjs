@@ -28,9 +28,9 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const REPO = path.resolve(__dirname, '..')
-const STEERING_FILE = path.join(REPO, 'src/main/modules/agent-control/turn-frame-steering.ts')
+const STEERING_FILE = path.join(REPO, 'src/main/modules/agent-control/runtime-core/turn-frame-steering.ts')
 const TURN_ENGINE_FILE = path.join(REPO, 'src/main/modules/agent-control/turn-engine.ts')
-const LEASE_CONTROLLER_FILE = path.join(REPO, 'src/main/modules/agent-control/skill-budget-lease-controller.ts')
+const LEASE_CONTROLLER_FILE = path.join(REPO, 'src/main/modules/agent-control/skills/skill-budget-lease-controller.ts')
 
 function stripComments(line) {
   const idx = line.indexOf('//')

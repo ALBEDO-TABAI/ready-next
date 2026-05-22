@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import { registerHooks } from 'node:module'
 import { pathToFileURL } from 'node:url'
 
-import type { ToolDefinition } from '../src/main/modules/agent-control/tool-definition'
+import type { ToolDefinition } from '../src/main/modules/agent-control/tools-runtime/tool-definition'
 import type { AIModelConfig } from '../src/shared/ai-providers'
 
 interface AgentMetricEvent {
@@ -221,10 +221,10 @@ export async function runAgentVeaResumeProbe(options: ProbeOptions): Promise<Pro
     { _resetLastReferenceSkillHintsForTests },
     { __setSkillsRuntimeManagerForTests },
   ] = await Promise.all([
-    import('../src/main/modules/agent-control/orchestrator'),
-    import('../src/main/modules/agent-control/request-envelope'),
+    import('../src/main/modules/agent-control/runtime-core/orchestrator'),
+    import('../src/main/modules/agent-control/contracts/request-envelope'),
     import('../src/main/modules/agent-control/metrics'),
-    import('../src/main/modules/agent-control/skill-reference-hints'),
+    import('../src/main/modules/agent-control/skills/skill-reference-hints'),
     import('../src/main/modules/skills-runtime/runtime-manager'),
   ])
   const fixture = options.fixture || !options.runStatePath

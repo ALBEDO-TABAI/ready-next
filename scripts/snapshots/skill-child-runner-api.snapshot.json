@@ -1,7 +1,7 @@
 {
   "version": 1,
   "frozenAt": "Stage 4 W1.7 (2026-05-05) — added ResumeSkillChildRunOptions for agentContext propagation; turn-engine.ts:2030-2032 production caller passes the options",
-  "source": "src/main/modules/agent-control/skill-child-runner.ts",
+  "source": "src/main/modules/agent-control/skills/skill-child-runner.ts",
   "exports": [
     {
       "kind": "const",

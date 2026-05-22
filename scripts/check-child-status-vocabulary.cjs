@@ -6,7 +6,7 @@ const { join, relative, resolve } = require('node:path')
 const ts = require('typescript')
 
 const DEFAULT_SOURCE_DIR = 'src/main/modules/agent-control'
-const CANONICAL_TYPES_FILE = 'src/main/modules/agent-control/skill-child-run-types.ts'
+const CANONICAL_TYPES_FILE = 'src/main/modules/agent-control/skills/skill-child-run-types.ts'
 const TURN_ENGINE_FILE = 'src/main/modules/agent-control/turn-engine.ts'
 const CLOSE_STATUS_LITERALS = new Set([
   'completed',
@@ -256,13 +256,13 @@ function isW0WhitelistedStatusDecision(node, relativeFile) {
     return isInsideVariableNamed(node, 'turnTerminalReason')
   }
 
-  if (relativeFile === 'src/main/modules/agent-control/skill-child-sub-agent.ts') {
+  if (relativeFile === 'src/main/modules/agent-control/skills/skill-child-sub-agent.ts') {
     return enclosingFunctionName(node) === 'subAgentReasonForChildClose'
   }
 
   // Stage 6 — pure status→label/state mappers in skill-child-runner.ts are
   // allowed to switch on close.status (see W0_WHITELIST_FUNCTIONS rationale).
-  if (relativeFile === 'src/main/modules/agent-control/skill-child-runner.ts') {
+  if (relativeFile === 'src/main/modules/agent-control/skills/skill-child-runner.ts') {
     const functionName = enclosingFunctionName(node)
     if (functionName && W0_WHITELIST_FUNCTIONS.has(functionName)) return true
   }

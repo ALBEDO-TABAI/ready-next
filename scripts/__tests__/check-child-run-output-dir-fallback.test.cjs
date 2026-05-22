@@ -14,7 +14,7 @@ const SCRIPT_PATH = resolve(__dirname, '../check-child-run-output-dir-fallback.c
 function withRunnerSource(source, callback) {
   const root = mkdtempSync(join(tmpdir(), 'ready-child-output-dir-gate-'))
   try {
-    const file = join(root, 'src/main/modules/agent-control/skill-child-runner.ts')
+    const file = join(root, 'src/main/modules/agent-control/skills/skill-child-runner.ts')
     mkdirSync(resolve(file, '..'), { recursive: true })
     writeFileSync(file, source)
     return callback(root)

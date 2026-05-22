@@ -8,8 +8,8 @@
  * mode:'none' turn suddenly stops showing the tool.
  *
  * Scans:
- *   - src/main/modules/agent-control/skill-tool-authorization.ts
- *   - src/main/modules/agent-control/skill-turn-identity.ts
+ *   - src/main/modules/agent-control/skills/skill-tool-authorization.ts
+ *   - src/main/modules/agent-control/skills/skill-turn-identity.ts
  *   - src/main/modules/tools/skill-tool-session-gate.ts
  *
  * Allowlisted comment references (lines starting with `//` that merely
@@ -22,8 +22,8 @@ const { resolve } = require('node:path')
 
 const FROZEN_NAME = 'ask_user_questions'
 const SCAN_FILES = [
-  'src/main/modules/agent-control/skill-tool-authorization.ts',
-  'src/main/modules/agent-control/skill-turn-identity.ts',
+  'src/main/modules/agent-control/skills/skill-tool-authorization.ts',
+  'src/main/modules/agent-control/skills/skill-turn-identity.ts',
   'src/main/modules/tools/skill-tool-session-gate.ts',
 ]
 

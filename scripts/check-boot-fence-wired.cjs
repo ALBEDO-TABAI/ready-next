@@ -25,7 +25,7 @@ const {
 } = require('./_lib_strip_code_strings_and_comments.cjs')
 
 const REPO_DEFAULT = path.resolve(__dirname, '..')
-const TARGET_REL = 'src/main/modules/agent-control/runtime.ts'
+const TARGET_REL = 'src/main/modules/agent-control/runtime-core/runtime.ts'
 
 function parseRoot(argv) {
   let root = REPO_DEFAULT
@@ -82,18 +82,19 @@ function main() {
   //            bound to the original name `assertSkillTaskRunInvariantConsistency`
   //            so the wrapper's call resolves to the real import (not a
   //            local stub of the same name).
-  //      (iv) Path must be EXACTLY `./skill-task-tracker(.ext)?` (sibling
-  //            module). Sub-directory or parent-directory paths like
-  //            `./shim/skill-task-tracker` or `../skill-task-tracker`
-  //            are rejected. runtime.ts and skill-task-tracker.ts live
-  //            in the same `agent-control/` directory; any other shape
-  //            is suspicious.
+  //      (iv) Path must end in `/skill-task-tracker(.ext)?` and start with
+  //            `./` or `../<segment>/`. Stage U moved skill-task-tracker.ts
+  //            into `agent-control/skills/`, so runtime.ts (now in
+  //            `agent-control/runtime-core/`) imports it via
+  //            `'../skills/skill-task-tracker'`. Arbitrary deep paths like
+  //            `./shim/skill-task-tracker` remain rejected — only direct
+  //            sibling or one-up-one-down sibling-module paths are allowed.
   const importStripped = stripCommentsOnly(src)
   const insideString = buildIsInsideStringMask(src)
   // Specifier may be `assertSkillTaskRunInvariantConsistency` ONLY
   // (NOT `type X`, NOT `X as alias`).
-  // Path must be EXACTLY `./skill-task-tracker(\.[a-zA-Z]+)?` between quotes.
-  const importRe = /\bimport\s*\{(?:[^}]*?,)?\s*(?!type\s+)assertSkillTaskRunInvariantConsistency\b(?!\s+as\b)[^}]*\}\s*from\s*(['"])\.\/skill-task-tracker(?:\.[a-zA-Z]+)?\1/gs
+  // Path: `./skill-task-tracker(.ext)?` OR `../<single-dir-segment>/skill-task-tracker(.ext)?`.
+  const importRe = /\bimport\s*\{(?:[^}]*?,)?\s*(?!type\s+)assertSkillTaskRunInvariantConsistency\b(?!\s+as\b)[^}]*\}\s*from\s*(['"])(?:\.\/skill-task-tracker|\.\.\/[a-zA-Z0-9._-]+\/skill-task-tracker)(?:\.[a-zA-Z]+)?\1/gs
   let importOk = false
   let m
   while ((m = importRe.exec(importStripped)) !== null) {

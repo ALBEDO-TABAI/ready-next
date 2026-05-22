@@ -24,7 +24,9 @@ function run(root) {
 
 function makeFixtureRoot(supervisorBody) {
   const root = mkdtempSync(join(tmpdir(), 'ready-q-sup-gate-'))
-  const dir = join(root, 'src/main/modules/agent-control')
+  // skill-task-supervisor.ts lives under skills/ after the Stage U module
+  // reshuffle; mirror the production layout so the gate finds the fixture.
+  const dir = join(root, 'src/main/modules/agent-control/skills')
   mkdirSync(dir, { recursive: true })
   writeFileSync(join(dir, 'skill-task-supervisor.ts'), supervisorBody)
   return root

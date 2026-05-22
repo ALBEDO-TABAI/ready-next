@@ -16,7 +16,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const ROOT = process.cwd()
-const REL = 'src/main/modules/agent-control/clarification-turn-gap.ts'
+const REL = 'src/main/modules/agent-control/contracts/clarification-turn-gap.ts'
 const errors = []
 
 let src = ''

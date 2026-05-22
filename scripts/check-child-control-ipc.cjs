@@ -57,7 +57,7 @@ const REQUIRED = [
     ],
   },
   {
-    file: 'src/main/modules/agent-control/skill-child-runner.ts',
+    file: 'src/main/modules/agent-control/skills/skill-child-runner.ts',
     checks: [
       ['active summary method', /listActiveRuns\(/],
       ['active startedAt field', /startedAt:\s*string/],

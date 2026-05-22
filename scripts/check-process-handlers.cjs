@@ -32,7 +32,7 @@ function checkProcessHandlers(options = {}) {
   const index = read('src/main/index.ts')
   const handlers = read('src/main/process-handlers.ts')
   const metrics = read('src/main/utils/process-metrics.ts')
-  const toolErrorMetrics = read('src/main/modules/agent-control/tool-error-metrics.ts')
+  const toolErrorMetrics = read('src/main/modules/agent-control/tools-runtime/tool-error-metrics.ts')
 
   if (!handlers) errors.push('src/main/process-handlers.ts is missing')
   if (!metrics) errors.push('src/main/utils/process-metrics.ts is missing')

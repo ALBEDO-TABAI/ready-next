@@ -35,7 +35,7 @@ if (tool) {
   }
 }
 
-const registry = read('src/main/modules/agent-control/tool-registry.ts')
+const registry = read('src/main/modules/agent-control/tools-runtime/tool-registry.ts')
 const defs = read('src/main/modules/tools/general-research-tool-defs.ts')
 if (registry && !/\bgeneral_research\b/.test(registry)) {
   errors.push("tool-registry.ts: missing 'general_research' capability group wiring")

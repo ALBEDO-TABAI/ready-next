@@ -19,7 +19,7 @@ const { resolve } = require('node:path')
 const FROZEN_NAME = 'ask_user_questions'
 const TOOL_DEFS_FILE = 'src/main/modules/tools/agent-interaction-tool-defs.ts'
 const SCHEMAS_FILE = 'src/main/modules/tools/schemas/agent-interaction-schemas.ts'
-const PARALLELISM_FILE = 'src/main/modules/agent-control/tool-parallelism-policy.ts'
+const PARALLELISM_FILE = 'src/main/modules/agent-control/tools-runtime/tool-parallelism-policy.ts'
 const EXECUTOR_FILE = 'src/main/modules/tools/tool-executor.ts'
 const HANDLER_FILE = 'src/main/modules/tools/builtins/ask-user-questions.ts'
 

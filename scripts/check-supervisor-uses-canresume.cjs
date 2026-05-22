@@ -67,7 +67,7 @@ function main() {
       i++
     }
   }
-  const filePath = path.join(root, 'src/main/modules/agent-control/skill-task-supervisor.ts')
+  const filePath = path.join(root, 'src/main/modules/agent-control/skills/skill-task-supervisor.ts')
   if (!fs.existsSync(filePath)) {
     console.log('[check-supervisor-uses-canresume] OK (supervisor file absent)')
     return 0

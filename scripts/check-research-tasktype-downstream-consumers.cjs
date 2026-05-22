@@ -32,7 +32,7 @@ function readFile(rel) {
 const errors = []
 
 // 1. run-budget-policy.ts must include research preset key.
-const budgetPolicy = readFile('src/main/modules/agent-control/run-budget-policy.ts')
+const budgetPolicy = readFile('src/main/modules/agent-control/task-projection/run-budget-policy.ts')
 const presetMatch = budgetPolicy.match(/TASK_TYPE_BUDGET_PRESETS[\s\S]*?\{([\s\S]*?)\}\n/)
 if (!presetMatch) {
   errors.push('run-budget-policy.ts: TASK_TYPE_BUDGET_PRESETS literal not found')
@@ -41,13 +41,13 @@ if (!presetMatch) {
 }
 
 // 2. task-projection-sync.ts must call isTaskType helper.
-const projectionSync = readFile('src/main/modules/agent-control/task-projection-sync.ts')
+const projectionSync = readFile('src/main/modules/agent-control/task-projection/task-projection-sync.ts')
 if (!/\bisTaskType\s*\(/.test(projectionSync)) {
   errors.push('task-projection-sync.ts: must use `isTaskType()` helper instead of hard-coded literals')
 }
 
 // 3. continuation-state.ts must call isTaskType helper.
-const continuationState = readFile('src/main/modules/agent-control/continuation-state.ts')
+const continuationState = readFile('src/main/modules/agent-control/contracts/continuation-state.ts')
 if (!/\bisTaskType\s*\(/.test(continuationState)) {
   errors.push('continuation-state.ts: must use `isTaskType()` helper instead of hard-coded literals')
 }

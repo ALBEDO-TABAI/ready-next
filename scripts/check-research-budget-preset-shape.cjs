@@ -14,7 +14,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const ROOT = process.cwd()
-const FILE = path.join(ROOT, 'src/main/modules/agent-control/run-budget-policy.ts')
+const FILE = path.join(ROOT, 'src/main/modules/agent-control/task-projection/run-budget-policy.ts')
 
 let src
 try {

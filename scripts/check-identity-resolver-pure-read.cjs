@@ -20,7 +20,7 @@
 const { existsSync, readFileSync } = require('node:fs')
 const { resolve } = require('node:path')
 
-const RESOLVER_FILE = 'src/main/modules/agent-control/skill-turn-identity.ts'
+const RESOLVER_FILE = 'src/main/modules/agent-control/skills/skill-turn-identity.ts'
 // Module-relative-path → set of forbidden import names.
 const FORBIDDEN_IMPORTS = {
   './skill-reference-hints': [

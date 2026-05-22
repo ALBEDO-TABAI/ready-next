@@ -44,10 +44,14 @@ if (!namesMatch) {
 }
 
 // 2. browser-content-tools defs must NOT include any of these names.
+// BROWSER_CONTENT_TASK_TOOL_NAMES currently lives in browser-tool-catalog.ts
+// (Stage U move); the older candidates are kept in case a future refactor
+// re-creates them, but missing files are silently skipped per the try/catch.
 const candidatePaths = [
+  'src/main/modules/tools/browser-tool-catalog.ts',
   'src/main/modules/tools/browser-content-tools.ts',
   'src/main/modules/tools/browser-content-tool-defs.ts',
-  'src/main/modules/agent-control/tool-registry.ts',
+  'src/main/modules/agent-control/tools-runtime/tool-registry.ts',
 ]
 for (const rel of candidatePaths) {
   let body

@@ -21,8 +21,8 @@
 const { existsSync, readFileSync } = require('node:fs')
 const { resolve } = require('node:path')
 
-const HELPER_FILE = 'src/main/modules/agent-control/message-capability-filter.ts'
-const SDK_FILE = 'src/main/modules/agent-control/agent-sdk-runtime.ts'
+const HELPER_FILE = 'src/main/modules/agent-control/domain-adapters/message-capability-filter.ts'
+const SDK_FILE = 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts'
 const OPENAI_CLIENT_FILE = 'src/main/modules/claude-bridge/openai-execution-client.ts'
 const ANTHROPIC_CLIENT_FILE = 'src/main/modules/claude-bridge/anthropic-execution-client.ts'
 const DIRECT_CHAT_FILE = 'src/main/modules/claude-bridge/direct-chat.ts'

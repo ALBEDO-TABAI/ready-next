@@ -11,17 +11,17 @@ const {
 test('check-subagent-isolation accepts relative sub-agent imports and explicit allowlist files', () => {
   const root = makeFixture()
   try {
-    writeFile(root, 'src/main/modules/agent-control/run-cleanup-registry.ts', 'export const cleanup = 1\n')
+    writeFile(root, 'src/main/modules/agent-control/task-projection/run-cleanup-registry.ts', 'export const cleanup = 1\n')
     writeFile(root, 'src/main/modules/agent-control/metrics.ts', 'export const metrics = 1\n')
-    writeFile(root, 'src/main/modules/agent-control/tool-error-metrics.ts', 'export const metrics = 1\n')
+    writeFile(root, 'src/main/modules/agent-control/tools-runtime/tool-error-metrics.ts', 'export const metrics = 1\n')
     writeFile(root, 'src/main/modules/agent-control/sub-agent/nested/util.ts', 'export const util = 1\n')
     writeFile(root, 'src/main/modules/agent-control/sub-agent/sub-agent-types.ts', [
       "import { readFileSync } from 'node:fs'",
       "import path from 'path'",
       "import { util } from './nested/util'",
-      "import { cleanup } from '../run-cleanup-registry'",
+      "import { cleanup } from '../task-projection/run-cleanup-registry'",
       "import { metrics } from '../metrics'",
-      "export { metrics } from '../tool-error-metrics'",
+      "export { metrics } from '../tools-runtime/tool-error-metrics'",
       "export {",
       '  util',
       "} from './nested/util'",

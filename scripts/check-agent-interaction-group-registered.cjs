@@ -19,9 +19,9 @@ const { existsSync, readFileSync } = require('node:fs')
 const { resolve } = require('node:path')
 
 const GROUPS_FILE = 'src/shared/ai-capability-groups.ts'
-const REGISTRY_FILE = 'src/main/modules/agent-control/tool-registry.ts'
-const PARALLELISM_FILE = 'src/main/modules/agent-control/tool-parallelism-policy.ts'
-const TOOL_DEFINITION_FILE = 'src/main/modules/agent-control/tool-definition.ts'
+const REGISTRY_FILE = 'src/main/modules/agent-control/tools-runtime/tool-registry.ts'
+const PARALLELISM_FILE = 'src/main/modules/agent-control/tools-runtime/tool-parallelism-policy.ts'
+const TOOL_DEFINITION_FILE = 'src/main/modules/agent-control/tools-runtime/tool-definition.ts'
 
 function read(rel) {
   const path = resolve(__dirname, '..', rel)

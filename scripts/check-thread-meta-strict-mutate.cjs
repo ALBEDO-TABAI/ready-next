@@ -18,7 +18,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const ROOT = process.cwd()
-const REL = 'src/main/modules/agent-control/thread-meta-repository.ts'
+const REL = 'src/main/modules/agent-control/session/thread-meta-repository.ts'
 
 let src
 try {

@@ -42,7 +42,12 @@ const SQLITE_LOAD_FORMS = [
   /^\s*import\s+['"]better-sqlite3['"]/m,
 ]
 
-const NATIVE_SEED = ['src/main/modules/database.ts', 'src/main/modules/db-worker.ts']
+// Stage U moved db-worker.ts to database/worker.ts; the NATIVE_GREP_DIRS
+// sweep below picks the new file up automatically because it imports
+// better-sqlite3 literally. The seed list stays narrow (just database.ts)
+// so we do not change the C4-transitive coverage surface as a side effect
+// of recording the rename.
+const NATIVE_SEED = ['src/main/modules/database.ts']
 const NATIVE_GREP_DIRS = ['src/main', 'src/shared', 'src/preload']
 
 // Reuse the gate's expandGlob helper to avoid re-implementing.

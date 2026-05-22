@@ -14,7 +14,7 @@
  *        - forbid string literal `'not_set'` / `"not_set"` (raw, including
  *          comments — no whitelist)
  *        - forbid identifier `SKILL_TOOL_AUTHORIZATION_NOT_SET`
- *   2. `src/main/modules/agent-control/skill-tool-authorization.ts`:
+ *   2. `src/main/modules/agent-control/skills/skill-tool-authorization.ts`:
  *        - forbid `=== 'not_set'` / `!== 'not_set'`
  *        - forbid `'not_set'` literal anywhere in the reason union
  *
@@ -33,7 +33,7 @@ const REPO = path.resolve(__dirname, '..')
 const SCAN_DIR = path.join(REPO, 'src/main/modules')
 const AUTH_FILE = path.join(
   REPO,
-  'src/main/modules/agent-control/skill-tool-authorization.ts',
+  'src/main/modules/agent-control/skills/skill-tool-authorization.ts',
 )
 
 // Patterns that fail anywhere in `src/main/modules/`.
@@ -103,7 +103,7 @@ function checkNoNotSetAuthorization({ root = REPO } = {}) {
   const scanDir = path.join(root, 'src/main/modules')
   const authFile = path.join(
     root,
-    'src/main/modules/agent-control/skill-tool-authorization.ts',
+    'src/main/modules/agent-control/skills/skill-tool-authorization.ts',
   )
   const violations = []
   for (const file of listFiles(scanDir)) {

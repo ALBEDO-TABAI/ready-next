@@ -15,7 +15,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const ROOT = process.cwd()
-const REL = 'src/main/modules/agent-control/clarification-types.ts'
+const REL = 'src/main/modules/agent-control/contracts/clarification-types.ts'
 const errors = []
 
 let src = ''

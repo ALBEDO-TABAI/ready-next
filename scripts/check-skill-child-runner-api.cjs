@@ -5,7 +5,7 @@ const { relative, resolve } = require('node:path')
 
 const ts = require('typescript')
 
-const DEFAULT_SOURCE = 'src/main/modules/agent-control/skill-child-runner.ts'
+const DEFAULT_SOURCE = 'src/main/modules/agent-control/skills/skill-child-runner.ts'
 const DEFAULT_SNAPSHOT = 'scripts/snapshots/skill-child-runner-api.snapshot.json'
 const INTERNAL_TEST_MARKER_EXPORTS = new Set([
   '__breaksInvariants',

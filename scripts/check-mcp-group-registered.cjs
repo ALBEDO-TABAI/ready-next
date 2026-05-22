@@ -14,7 +14,7 @@ const { existsSync, readFileSync } = require('node:fs')
 const { resolve } = require('node:path')
 
 const GROUPS_FILE = 'src/shared/ai-capability-groups.ts'
-const REGISTRY_FILE = 'src/main/modules/agent-control/tool-registry.ts'
+const REGISTRY_FILE = 'src/main/modules/agent-control/tools-runtime/tool-registry.ts'
 
 function read(rel) {
   const path = resolve(__dirname, '..', rel)

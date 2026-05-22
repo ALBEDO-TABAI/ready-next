@@ -5,7 +5,7 @@ import { homedir, tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { createRequire, registerHooks } from 'node:module'
 import { pathToFileURL } from 'node:url'
-import { markSkillHandoffOutputCompleted } from '../src/main/modules/agent-control/skill-agent-handoff'
+import { markSkillHandoffOutputCompleted } from '../src/main/modules/agent-control/skills/skill-agent-handoff'
 
 const require = createRequire(import.meta.url)
 const { inspectVeaArtifacts } = require('./vea-assert-artifacts.cjs') as {
@@ -1153,7 +1153,7 @@ async function createRunner(opts: Options) {
     _driver,
   ] = await Promise.all([
     import('../src/main/modules/skills-runtime/runtime-manager'),
-    import('../src/main/modules/agent-control/skill-child-runner'),
+    import('../src/main/modules/agent-control/skills/skill-child-runner'),
     import('../src/main/modules/agent-control/video-expert-child-driver'),
   ])
   runner.__resetSkillChildRunnerForTests?.()

@@ -2,7 +2,7 @@
 /**
  * Stage U (PR 1) — every `errorKind` string literal that the ask_user_questions
  * IPC handlers / pure core / renderer can surface MUST be registered in
- * `src/main/modules/agent-control/error-kinds.ts` under `ASK_USER_ERROR_KINDS`.
+ * `src/main/modules/agent-control/contracts/error-kinds.ts` under `ASK_USER_ERROR_KINDS`.
  * Each registered entry must also EITHER reference a metric name from
  * `TOOL_ERROR_METRICS` OR carry `noMetric: true`.
  *
@@ -28,8 +28,8 @@
 const { existsSync, readFileSync } = require('node:fs')
 const { resolve } = require('node:path')
 
-const ERROR_KINDS_FILE = 'src/main/modules/agent-control/error-kinds.ts'
-const TOOL_ERROR_METRICS_FILE = 'src/main/modules/agent-control/tool-error-metrics.ts'
+const ERROR_KINDS_FILE = 'src/main/modules/agent-control/contracts/error-kinds.ts'
+const TOOL_ERROR_METRICS_FILE = 'src/main/modules/agent-control/tools-runtime/tool-error-metrics.ts'
 
 // ask-user-questions.ts is the pure core — IPC handler delegates everything
 // to it, so this single file owns every ask-user errorKind production site.

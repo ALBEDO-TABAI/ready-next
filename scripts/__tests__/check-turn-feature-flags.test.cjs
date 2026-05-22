@@ -28,7 +28,7 @@ function withFixture(files, callback) {
 test('accepts snapshot module and helper definition files', () => {
   withFixture(
     {
-      'src/main/modules/agent-control/turn-feature-flags.ts': [
+      'src/main/modules/agent-control/runtime-core/turn-feature-flags.ts': [
         "import { isChildResumeEnabled } from './skill-child-feature-flags'",
         "import { isChildInternalStrictAdmissionEnabled } from './tool-definition'",
         "import { isChildRunCircuitBreakerEnabled } from './child-run-circuit-breaker'",
@@ -41,15 +41,15 @@ test('accepts snapshot module and helper definition files', () => {
         '}',
         '',
       ].join('\n'),
-      'src/main/modules/agent-control/skill-child-feature-flags.ts': [
+      'src/main/modules/agent-control/skills/skill-child-feature-flags.ts': [
         'export function isChildResumeEnabled() { return true }',
         '',
       ].join('\n'),
-      'src/main/modules/agent-control/tool-definition.ts': [
+      'src/main/modules/agent-control/tools-runtime/tool-definition.ts': [
         'export function isChildInternalStrictAdmissionEnabled() { return true }',
         '',
       ].join('\n'),
-      'src/main/modules/agent-control/child-run-circuit-breaker.ts': [
+      'src/main/modules/agent-control/child-run/child-run-circuit-breaker.ts': [
         'export function isChildRunCircuitBreakerEnabled() { return true }',
         '',
       ].join('\n'),
@@ -70,7 +70,7 @@ test('accepts snapshot module and helper definition files', () => {
 test('rejects a direct strict admission helper call in tool-executor', () => {
   withFixture(
     {
-      'src/main/modules/agent-control/turn-feature-flags.ts': 'export {}\n',
+      'src/main/modules/agent-control/runtime-core/turn-feature-flags.ts': 'export {}\n',
       'src/main/modules/tools/tool-executor.ts': [
         "import { isChildInternalStrictAdmissionEnabled } from '../agent-control/tool-definition'",
         'export function executeToolCall() {',
@@ -91,7 +91,7 @@ test('rejects a direct strict admission helper call in tool-executor', () => {
 test('rejects a direct resume helper call in turn-engine body', () => {
   withFixture(
     {
-      'src/main/modules/agent-control/turn-feature-flags.ts': 'export {}\n',
+      'src/main/modules/agent-control/runtime-core/turn-feature-flags.ts': 'export {}\n',
       'src/main/modules/agent-control/turn-engine.ts': [
         "import { isChildResumeEnabled } from './skill-child-feature-flags'",
         'export class TurnEngine {',
@@ -115,7 +115,7 @@ test('rejects a direct resume helper call in turn-engine body', () => {
 test('supports CLI --root', () => {
   withFixture(
     {
-      'src/main/modules/agent-control/turn-feature-flags.ts': 'export function snapshotTurnFeatureFlags() { return Object.freeze({}) }\n',
+      'src/main/modules/agent-control/runtime-core/turn-feature-flags.ts': 'export function snapshotTurnFeatureFlags() { return Object.freeze({}) }\n',
       'src/main/modules/tools/tool-executor.ts': 'export {}\n',
     },
     (root) => {

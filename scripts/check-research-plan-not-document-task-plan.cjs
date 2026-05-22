@@ -13,7 +13,7 @@ const fs = require('node:fs')
 const path = require('node:path')
 
 const ROOT = process.cwd()
-const FILE = path.join(ROOT, 'src/main/modules/agent-control/research-domain-adapter.ts')
+const FILE = path.join(ROOT, 'src/main/modules/agent-control/domain-adapters/research-domain-adapter.ts')
 
 let src
 try {

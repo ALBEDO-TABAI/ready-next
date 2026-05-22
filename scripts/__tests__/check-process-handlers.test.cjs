@@ -28,7 +28,7 @@ test('fails when any required global handler is missing', () => {
 
 test('fails when process metrics are added to TOOL_ERROR_METRICS', () => {
   const files = validFiles()
-  files['src/main/modules/agent-control/tool-error-metrics.ts'] = "export const TOOL_ERROR_METRICS = { process: 'process_unhandled_rejection' }\n"
+  files['src/main/modules/agent-control/tools-runtime/tool-error-metrics.ts'] = "export const TOOL_ERROR_METRICS = { process: 'process_unhandled_rejection' }\n"
   withFixture(files, (root) => {
     const result = checkProcessHandlers({ root })
     assert.equal(result.ok, false)
@@ -54,7 +54,7 @@ function validFiles() {
       "'child_process_gone'",
       "'log_rotation_failed'",
     ].join('\n'),
-    'src/main/modules/agent-control/tool-error-metrics.ts': "export const TOOL_ERROR_METRICS = { surfaced: 'tool_error_surfaced' }\n",
+    'src/main/modules/agent-control/tools-runtime/tool-error-metrics.ts': "export const TOOL_ERROR_METRICS = { surfaced: 'tool_error_surfaced' }\n",
   }
 }
 

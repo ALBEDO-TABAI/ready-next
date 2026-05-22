@@ -20,10 +20,10 @@ const { existsSync, readFileSync } = require('node:fs')
 const { resolve } = require('node:path')
 
 const REGISTRY_FILE = 'src/main/modules/mcp/registry.ts'
-const TOOL_REGISTRY_FILE = 'src/main/modules/agent-control/tool-registry.ts'
-const TOOL_GATEWAY_FILE = 'src/main/modules/agent-control/tool-gateway.ts'
-const REQUEST_ENVELOPE_FILE = 'src/main/modules/agent-control/request-envelope.ts'
-const TOOL_POLICY_FILE = 'src/main/modules/agent-control/execution-tool-config.ts'
+const TOOL_REGISTRY_FILE = 'src/main/modules/agent-control/tools-runtime/tool-registry.ts'
+const TOOL_GATEWAY_FILE = 'src/main/modules/agent-control/tools-runtime/tool-gateway.ts'
+const REQUEST_ENVELOPE_FILE = 'src/main/modules/agent-control/contracts/request-envelope.ts'
+const TOOL_POLICY_FILE = 'src/main/modules/agent-control/tool-policy/execution-tool-config.ts'
 
 function read(rel) {
   const path = resolve(__dirname, '..', rel)

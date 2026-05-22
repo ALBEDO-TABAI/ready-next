@@ -38,7 +38,7 @@ test('positive: current repo passes', () => {
 test('positive: legitimate helper-based fallback in execution-tool-config passes', () => {
   withFixture(
     {
-      'src/main/modules/agent-control/execution-tool-config.ts': [
+      'src/main/modules/agent-control/tool-policy/execution-tool-config.ts': [
         "function resolvePolicyAuthorization(policy) {",
         "  return policy?.authorization ?? buildExplicitNoSkillAuthorization('no_skill_signal')",
         '}',
@@ -55,7 +55,7 @@ test('positive: legitimate helper-based fallback in execution-tool-config passes
 test('negative: authorization ?? null fails', () => {
   withFixture(
     {
-      'src/main/modules/agent-control/tool-registry.ts': [
+      'src/main/modules/agent-control/tools-runtime/tool-registry.ts': [
         'function f(authorization) {',
         '  return authorization ?? null',
         '}',
@@ -73,7 +73,7 @@ test('negative: authorization ?? null fails', () => {
 test('negative: authorization as any fails', () => {
   withFixture(
     {
-      'src/main/modules/agent-control/tool-gateway.ts': [
+      'src/main/modules/agent-control/tools-runtime/tool-gateway.ts': [
         'function f(authorization) {',
         '  return doSomething(authorization as any)',
         '}',
@@ -91,7 +91,7 @@ test('negative: authorization as any fails', () => {
 test('negative: policy?.authorization ?? null fails', () => {
   withFixture(
     {
-      'src/main/modules/agent-control/execution-tool-config.ts': [
+      'src/main/modules/agent-control/tool-policy/execution-tool-config.ts': [
         'function f(policy) {',
         '  return policy?.authorization ?? null',
         '}',
@@ -127,7 +127,7 @@ test('negative: filterToolsByAuthorization(tools, null) fails', () => {
 test('negative: comment containing the bad shape does NOT fail (comments stripped)', () => {
   withFixture(
     {
-      'src/main/modules/agent-control/tool-registry.ts': [
+      'src/main/modules/agent-control/tools-runtime/tool-registry.ts': [
         '// historical: authorization ?? null was the W3a default',
         'export const x = 1',
         '',
@@ -149,7 +149,7 @@ test('negative: comment containing the bad shape does NOT fail (comments strippe
 test('negative: authorization as unknown as SkillToolAuthorization fails', () => {
   withFixture(
     {
-      'src/main/modules/agent-control/tool-runtime.ts': [
+      'src/main/modules/agent-control/tools-runtime/tool-runtime.ts': [
         'function f(authorization) {',
         '  return doSomething(authorization as unknown as SkillToolAuthorization)',
         '}',
@@ -189,7 +189,7 @@ test('negative: multiline filterToolsByAuthorization with undefined fails', () =
 test('positive: ?? buildExplicitNoSkillAuthorization(...) helper fallback is allowed', () => {
   withFixture(
     {
-      'src/main/modules/agent-control/tool-runtime.ts': [
+      'src/main/modules/agent-control/tools-runtime/tool-runtime.ts': [
         "function f(context) {",
         "  return context?.authorization ?? buildExplicitNoSkillAuthorization('no_skill_signal')",
         '}',
@@ -224,7 +224,7 @@ test('negative: extended scope — `as any` in tool-executor.ts fails', () => {
 test('negative: extended scope — `as any` in execution-loop-orchestrator.ts fails', () => {
   withFixture(
     {
-      'src/main/modules/agent-control/execution-loop-orchestrator.ts': [
+      'src/main/modules/agent-control/runtime-core/execution-loop-orchestrator.ts': [
         'function f(authorization) {',
         '  return doSomething(authorization as any)',
         '}',
@@ -242,7 +242,7 @@ test('negative: extended scope — `as any` in execution-loop-orchestrator.ts fa
 test('negative: skill filter helper optional authorization parameter fails', () => {
   withFixture(
     {
-      'src/main/modules/agent-control/execution-tool-skill-filters.ts': [
+      'src/main/modules/agent-control/tool-policy/execution-tool-skill-filters.ts': [
         'function f(',
         '  authorization?: SkillToolAuthorization | null,',
         ') {',
@@ -262,7 +262,7 @@ test('negative: skill filter helper optional authorization parameter fails', () 
 test('negative: skill filter helper missing authorization passthrough fails', () => {
   withFixture(
     {
-      'src/main/modules/agent-control/execution-tool-skill-filters.ts': [
+      'src/main/modules/agent-control/tool-policy/execution-tool-skill-filters.ts': [
         'function f(authorization: SkillToolAuthorization) {',
         '  if (!authorization) return true',
         '  return false',

@@ -28,7 +28,7 @@ function read(rel) {
   }
 }
 
-const registry = read('src/main/modules/agent-control/tool-registry.ts')
+const registry = read('src/main/modules/agent-control/tools-runtime/tool-registry.ts')
 if (registry) {
   // Find listToolDefinitions implementation block; require collision
   // collection + throw within (or near, since it can be hoisted).
@@ -43,7 +43,7 @@ if (registry) {
   }
 }
 
-const runtime = read('src/main/modules/agent-control/runtime.ts')
+const runtime = read('src/main/modules/agent-control/runtime-core/runtime.ts')
 if (runtime) {
   if (!/defaultToolRegistry\.listToolDefinitions\s*\(/.test(runtime)) {
     errors.push('runtime.ts: boot path must call defaultToolRegistry.listToolDefinitions()')

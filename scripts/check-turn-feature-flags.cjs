@@ -14,10 +14,10 @@ const FLAG_HELPERS = new Set([
 const DEFAULT_AGENT_CONTROL_DIR = 'src/main/modules/agent-control'
 const TOOL_EXECUTOR_FILE = 'src/main/modules/tools/tool-executor.ts'
 const WHITELIST_FILES = new Set([
-  'src/main/modules/agent-control/turn-feature-flags.ts',
-  'src/main/modules/agent-control/skill-child-feature-flags.ts',
-  'src/main/modules/agent-control/tool-definition.ts',
-  'src/main/modules/agent-control/child-run-circuit-breaker.ts',
+  'src/main/modules/agent-control/runtime-core/turn-feature-flags.ts',
+  'src/main/modules/agent-control/skills/skill-child-feature-flags.ts',
+  'src/main/modules/agent-control/tools-runtime/tool-definition.ts',
+  'src/main/modules/agent-control/child-run/child-run-circuit-breaker.ts',
 ])
 
 main()
