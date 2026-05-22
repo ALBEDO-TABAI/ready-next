@@ -8,6 +8,7 @@ import {
   RULE_IDS,
   scanRuleViolations,
 } from './a0-rule-utils.mjs'
+import { createNoCrossAreaMutationRule } from './no-cross-area-mutation.mjs'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const baselinePath = resolve(__dirname, 'baseline.json')
@@ -668,6 +669,7 @@ const rules = {
   'no-inline-system-reminder-write': createNoInlineSystemReminderWriteRule(),
   'no-task-card-run-cast': createNoTaskCardRunCastRule(),
   'test-helper-must-declare-invariant-breach': createTestHelperMustDeclareInvariantBreachRule(),
+  'no-cross-area-mutation': createNoCrossAreaMutationRule(),
 }
 
 export default {
