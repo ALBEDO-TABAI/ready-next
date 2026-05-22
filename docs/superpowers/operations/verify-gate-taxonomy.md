@@ -42,18 +42,60 @@ node -e "const p=require('./package.json'); for(const k of Object.keys(p.scripts
 
 ## CI alignment
 
-`test -d .github/workflows && ls .github/workflows || echo "NO .github/workflows"`
-on this branch (2026-05-22) returns `NO .github/workflows`.
+CI present as of 2026-05-23: `.github/workflows/ready-merge-gates.yml`
+(landed by Stage X3 per
+`docs/superpowers/plans/2026-05-22-X-trust-foundation-and-w5-recovery-implementation.md`
+section 8 + 8.1).
 
-> **No CI present on this branch as of 2026-05-22; taxonomy is documentation-
-> only and must be re-aligned when CI is introduced.**
+Runner: `macos-latest` (arm64 Apple Silicon, matching the W3.3 measurement
+equipment). Node pinned to `20.19.1` to match the Electron-bundled Node from
+the W0 snapshot.
 
-When CI lands, the alignment rule is:
+Trigger conditions:
 
-- Only `merge` bucket scripts gate PR merge.
-- `release-only` scripts trigger on release branches / tags only.
-- `manual-deep` and `debt-dashboard` are on-demand workflows or scheduled
-  (debt-dashboard non-blocking).
+- `push` to `main` or `codex/readyguy`.
+- `pull_request` targeting `main` or `codex/readyguy`.
+- `concurrency.cancel-in-progress: true` on `ready-merge-${{ github.ref }}`
+  cancels stacked runs on the same ref.
+
+### Job `merge` (merge-critical, blocking)
+
+Runs the slim merge chain end-to-end on a clean macOS runner with `npm ci`:
+
+1. `npm run verify:native`
+2. `npm run typecheck`
+3. `npm run lint:check`
+4. `npm run verify:lint-budget`
+5. `node scripts/check-eslint-baseline.cjs`
+6. `npm run verify:ipc-contract`
+7. `npm run test`
+
+Failure of any step fails the job. No `continue-on-error` is used (plan
+section 8 rule). Branch protection should require `Ready merge gates / merge`
+as a required status check; this is a GitHub UI step and is out of X3 scope
+(noted in `docs/superpowers/audits/2026-05-22-stage-x-closeout/ci-gate-report.md`).
+
+### Job `deep-gates` (manual-deep, disabled pre-X1)
+
+Placeholder for `verify:c` / `verify:r` / `verify:s` / `verify:t`. Gated off
+via `if: false` until X1 lands all four chain repairs green; re-enabled by
+removing the guard once the X1 closeout shows green deep gates on this
+branch. Even when enabled, `deep-gates` is **not** in the merge contract —
+the taxonomy `manual-deep` bucket explicitly does not gate PR merge per the
+existing bucket definitions.
+
+### Bucket → CI mapping
+
+- `merge` bucket → all run in the `merge` job above.
+- `manual-deep` bucket → runs in `deep-gates` only after the X1 enablement
+  flip; remains opt-in for human-driven release / refactor preparation.
+- `release-only` bucket → not in any current workflow; Stage Z owns release
+  workflow.
+- `debt-dashboard` bucket → `verify:lint-budget` is intentionally promoted
+  into the `merge` job so warning growth is caught at PR time; this is
+  consistent with bucket definition ("Fails only on regression past the
+  recorded ceiling") because the script exits 0 unless the ceiling moves.
+- `archive` bucket → not run by CI.
 
 ## Cross-reference table
 

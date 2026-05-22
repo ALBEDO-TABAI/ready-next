@@ -1,0 +1,129 @@
+# Ready merge gates
+#
+# Stage X3 minimal CI per
+# docs/superpowers/plans/2026-05-22-X-trust-foundation-and-w5-recovery-implementation.md
+# section 8 and 8.1.
+#
+# Runner choice (per plan section 8.1): macos-latest is REQUIRED because
+# Ready's better-sqlite3 + Electron ABI proof is platform-coupled. As of
+# 2026-05, GitHub macos-latest resolves to arm64 (Apple Silicon M-series),
+# matching the developer machine and the W3.3 measurement equipment. Do not
+# switch to macos-13 (x64) unless cross-arch becomes a Stage Z requirement.
+# A separate Ubuntu / Windows runner is explicitly out of scope for Stage X
+# (plan section 8.1) and is Stage Z's concern.
+
+name: Ready merge gates
+
+on:
+  push:
+    branches:
+      - main
+      - codex/readyguy
+  pull_request:
+    branches:
+      - main
+      - codex/readyguy
+
+# Cancel in-flight runs on the same ref so rapid pushes do not stack minutes.
+concurrency:
+  group: ready-merge-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  merge:
+    name: merge
+    # macos-latest = arm64 Apple Silicon; matches W3.3 equipment. Do not change
+    # without revising plan section 8.1.
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          # Pinned to the Electron-bundled Node from W0 snapshot. If
+          # package.json engines or Electron bundle changes, update here too.
+          node-version: '20.19.1'
+          cache: 'npm'
+
+      - name: Cache build artifacts
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.npm
+            node_modules/.cache/tsc
+            node_modules/.cache/electron
+            node_modules/.cache/electron-builder
+          key: ready-${{ runner.os }}-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ready-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: npm ci
+
+      # --- Merge-critical chain (must exit 0; no continue-on-error). ---
+      # Mirror order is the same as plan section 8.1 "Verification of CI shape
+      # before merge" local equivalent, so a green run here means the local
+      # block also passed.
+
+      - name: verify:native
+        run: npm run verify:native
+
+      - name: typecheck
+        run: npm run typecheck
+
+      - name: lint:check
+        run: npm run lint:check
+
+      - name: verify:lint-budget
+        run: npm run verify:lint-budget
+
+      - name: check-eslint-baseline
+        run: node scripts/check-eslint-baseline.cjs
+
+      - name: verify:ipc-contract
+        run: npm run verify:ipc-contract
+
+      - name: test
+        run: npm run test
+
+  # Optional deep-gate job. Disabled until X1 lands the verify:c / verify:r /
+  # verify:s / verify:t chain repairs (plan section 8 second job + 4.1 phase
+  # scheduling). Once all four chains are green on this branch, set `if:` to
+  # true (or remove it) so this job actually runs on push and PR.
+  deep-gates:
+    name: deep-gates (disabled pre-X1)
+    if: false
+    runs-on: macos-latest
+    needs: merge
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.1'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Enable after X1 lands all four chains green; until then this job is
+      # gated off via `if: false` above so a red verify:c/r/s/t does not block
+      # PR merge while X1 is still in flight.
+      - name: verify:c
+        run: npm run verify:c
+
+      - name: verify:r
+        run: npm run verify:r
+
+      - name: verify:s
+        run: npm run verify:s
+
+      - name: verify:t
+        run: npm run verify:t
