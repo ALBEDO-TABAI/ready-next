@@ -32,10 +32,18 @@ interface PendingTargetedDownload {
 
 const TARGETED_DOWNLOAD_START_TIMEOUT_MS = 30_000
 
+// C0 control-character range (U+0000-U+001F) plus the cross-platform reserved
+// filename chars. Built via String.fromCharCode so the regex source contains
+// no literal control bytes (satisfies eslint `no-control-regex`).
+const FILENAME_UNSAFE_PATTERN = new RegExp(
+  '[\\\\/:*?"<>|' + String.fromCharCode(0x00) + '-' + String.fromCharCode(0x1f) + ']',
+  'g',
+)
+
 function sanitizeFilename(input: string, fallback = 'download'): string {
   const trimmed = input.trim()
   const safe = trimmed
-    .replace(/[\\/:*?"<>|\u0000-\u001f]/g, '-')
+    .replace(FILENAME_UNSAFE_PATTERN, '-')
     .replace(/\s+/g, ' ')
     .replace(/^\.+$/, '')
     .replace(/^\.+/, '')

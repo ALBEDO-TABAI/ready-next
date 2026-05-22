@@ -169,16 +169,6 @@ export interface SkillChildRunPayload {
   eventLogPath: string
   status: SkillChildRunStatus
   closeEvent: SkillChildCloseEvent | null
-  /**
-   * Bridge handles to legacy parent-visible state. New child runs may be
-   * created from a recovered legacy row; in that case these fields point
-   * at the legacy projection / task-run / detached-task ids.
-   */
-  legacy: {
-    taskRunId: string | null
-    detachedTaskId: string | null
-    projectionTaskId: string | null
-  }
 }
 
 /**

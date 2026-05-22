@@ -80,14 +80,6 @@
       "area": "ui-history"
     },
     {
-      "file": "src/__tests__/browser-runtime-hydration-contract.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "9ffaebda281d4b32",
-      "line": 7,
-      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
-      "area": "ui-history"
-    },
-    {
       "file": "src/__tests__/browser-startup-theme-contract.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "486f70a0c4e7ab9d",
@@ -248,14 +240,6 @@
       "area": "ui-history"
     },
     {
-      "file": "src/__tests__/chat-model-switcher-contract.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "20624337abc6c4ac",
-      "line": 7,
-      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
-      "area": "ui-history"
-    },
-    {
       "file": "src/__tests__/chat-panel-collapsed-rail-contract.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "57ca6c12eb92bfae",
@@ -296,27 +280,11 @@
       "area": "ui-history"
     },
     {
-      "file": "src/__tests__/document-attachment-async-io.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "a090066c2adf03e9",
-      "line": 18,
-      "snippet": "const source = readFileSync(sourcePath, 'utf8')",
-      "area": "ui-history"
-    },
-    {
       "file": "src/__tests__/document-editor-background-contract.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "4e018acce5e51785",
       "line": 7,
       "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
-      "area": "ui-history"
-    },
-    {
-      "file": "src/__tests__/document-engine-async-handlers.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "9cf0c073faf2e139",
-      "line": 8,
-      "snippet": "const source = readFileSync(",
       "area": "ui-history"
     },
     {
@@ -346,33 +314,9 @@
     {
       "file": "src/__tests__/document-insight-widget-window.test.ts",
       "rule": "ready/no-source-grep-test",
-      "snippetHash": "2551cf439501486e",
-      "line": 111,
-      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
-      "area": "ui-history"
-    },
-    {
-      "file": "src/__tests__/document-insight-widget-window.test.ts",
-      "rule": "ready/no-source-grep-test",
       "snippetHash": "ad11b77664e12c59",
       "line": 119,
       "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
-      "area": "ui-history"
-    },
-    {
-      "file": "src/__tests__/document-list-widgets-metric.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "3b766d788c3283a5",
-      "line": 12,
-      "snippet": "const source = readFileSync(PIPELINE_PATH, 'utf8')",
-      "area": "ui-history"
-    },
-    {
-      "file": "src/__tests__/document-list-widgets-metric.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "c83ed1f243725559",
-      "line": 17,
-      "snippet": "const source = readFileSync(PIPELINE_PATH, 'utf8')",
       "area": "ui-history"
     },
     {
@@ -642,14 +586,6 @@
     {
       "file": "src/__tests__/document-widget-target-controlled-selection.test.ts",
       "rule": "ready/no-source-grep-test",
-      "snippetHash": "9ffdc28a2a1d4379",
-      "line": 58,
-      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
-      "area": "ui-history"
-    },
-    {
-      "file": "src/__tests__/document-widget-target-controlled-selection.test.ts",
-      "rule": "ready/no-source-grep-test",
       "snippetHash": "d602fb71d6b59900",
       "line": 67,
       "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
@@ -669,22 +605,6 @@
       "snippetHash": "f8b9b3e5e3492f5d",
       "line": 7,
       "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
-      "area": "ui-history"
-    },
-    {
-      "file": "src/__tests__/executor-routes-list-and-remove-intents.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "92edcbf937f77a5d",
-      "line": 17,
-      "snippet": "const executor = readFileSync(EXECUTOR_PATH, 'utf8')",
-      "area": "ui-history"
-    },
-    {
-      "file": "src/__tests__/executor.routes-list-and-remove-intents.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "d844837a801c49d5",
-      "line": 14,
-      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
       "area": "ui-history"
     },
     {
@@ -786,22 +706,6 @@
     {
       "file": "src/__tests__/patch-target-resolution-metric.test.ts",
       "rule": "ready/no-source-grep-test",
-      "snippetHash": "e8a6c7fb8c863148",
-      "line": 16,
-      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
-      "area": "ui-history"
-    },
-    {
-      "file": "src/__tests__/patch-target-resolution-metric.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "63deb69dae93dcfe",
-      "line": 21,
-      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
-      "area": "ui-history"
-    },
-    {
-      "file": "src/__tests__/patch-target-resolution-metric.test.ts",
-      "rule": "ready/no-source-grep-test",
       "snippetHash": "3bb925e59885f0a0",
       "line": 34,
       "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
@@ -829,30 +733,6 @@
       "snippetHash": "eb5c25c50ea0db91",
       "line": 26,
       "snippet": "const source = readFileSync(SKELETON_PATH, 'utf8')",
-      "area": "ui-history"
-    },
-    {
-      "file": "src/__tests__/pipeline.update.includes-existing-widget-in-prompt.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "62ec5840a2f7de83",
-      "line": 12,
-      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
-      "area": "ui-history"
-    },
-    {
-      "file": "src/__tests__/pipeline.widget-draft.cache-invalidation-on-failure.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "a70867bdd006cc6f",
-      "line": 12,
-      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
-      "area": "ui-history"
-    },
-    {
-      "file": "src/__tests__/pipeline.widget-draft.reprompts-on-schema-error.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "18dec4f0cecdf540",
-      "line": 12,
-      "snippet": "const source = readFileSync(EXECUTOR_PATH, 'utf8')",
       "area": "ui-history"
     },
     {
@@ -1142,14 +1022,6 @@
       "line": 7,
       "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
       "area": "ui-history"
-    },
-    {
-      "file": "src/main/modules/agent-control/skill-child-run-types.ts",
-      "rule": "ready/no-legacy-backdoor",
-      "snippetHash": "37d79b230c69107f",
-      "line": 179,
-      "snippet": "legacy: {",
-      "area": "other-a0"
     }
   ]
 }

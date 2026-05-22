@@ -380,11 +380,6 @@ test('createSkillChildSubAgentFromPersisted reconstructs from durable payload', 
     eventLogPath: '/tmp/ready-child-persisted/child.jsonl',
     status: 'recoverable_paused',
     closeEvent: null,
-    legacy: {
-      taskRunId: null,
-      detachedTaskId: null,
-      projectionTaskId: null,
-    },
   }
   const subagent = await createSkillChildSubAgentFromPersisted({
     payload,

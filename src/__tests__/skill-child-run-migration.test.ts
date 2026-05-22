@@ -183,7 +183,6 @@ test('Phase 7: two skills sharing one outputDir do not supersede each other', ()
     eventLogPath: '/tmp/shared/.ready/child-runs/v.jsonl',
     status: 'running',
     closeEvent: null,
-    legacy: { taskRunId: null, detachedTaskId: null, projectionTaskId: null },
   }
   const veaRow: SkillTaskRunRecord = {
     id: veaChildRunId,
@@ -333,7 +332,6 @@ function makeCaseFRepository(): { repo: SkillTaskRunRepository; state: CaseFRepo
             eventLogPath: input.eventLogPath,
             status: input.status ?? 'running',
             closeEvent: null,
-            legacy: { taskRunId: null, detachedTaskId: null, projectionTaskId: null },
           },
         },
         createdAt: now,
@@ -512,11 +510,6 @@ test('Phase 4: child-run row takes precedence over legacy adoption fields', () =
     eventLogPath: '/tmp/legacy-output/.ready/child-runs/run.jsonl',
     status: 'running',
     closeEvent: null,
-    legacy: {
-      taskRunId: 'str-legacy-1',
-      detachedTaskId: null,
-      projectionTaskId: null,
-    },
   }
   const childRow: SkillTaskRunRecord = {
     id: childRunId,

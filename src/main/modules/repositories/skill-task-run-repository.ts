@@ -499,11 +499,6 @@ export class SkillTaskRunRepository {
       eventLogPath: input.eventLogPath,
       status,
       closeEvent: null,
-      legacy: {
-        taskRunId: null,
-        detachedTaskId: null,
-        projectionTaskId: null,
-      },
     }
 
     const record: SkillTaskRunRecord = {

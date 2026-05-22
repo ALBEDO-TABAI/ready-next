@@ -329,11 +329,6 @@ function makeChildOwnedSnapshot(params: {
         eventLogPath: '/tmp/ready/output/child-run.jsonl',
         status: params.status,
         closeEvent: typeof params.closeEvent === 'undefined' ? null : params.closeEvent,
-        legacy: {
-          taskRunId: 'str-loop',
-          detachedTaskId: 'dst-loop',
-          projectionTaskId: null,
-        },
       },
     },
   })

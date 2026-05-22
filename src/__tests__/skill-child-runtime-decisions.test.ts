@@ -90,7 +90,6 @@ function makeFakeRepository(): SkillTaskRunRepository {
             eventLogPath: input.eventLogPath,
             status: input.status ?? 'running',
             closeEvent: null,
-            legacy: { taskRunId: null, detachedTaskId: null, projectionTaskId: null },
           },
         },
         createdAt: now,
