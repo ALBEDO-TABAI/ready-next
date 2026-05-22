@@ -350,6 +350,65 @@ export function getSessionSlice(state: AgentState, sessionId?: string | null): S
   return normalizeSessionSlice(state.sessions[id])
 }
 
+// =============================================================================
+// W4.5 per-area selectors — declared narrow read paths per ownership area.
+// Each selector returns a referentially-stable narrow slice when the upstream
+// state has not changed; pinned by useAgent-area-selector-contract.test.ts.
+// =============================================================================
+
+/** W4.5 area S — direct field read for the active session's slice. */
+export function selectActiveSessionSlice(state: AgentState): SessionSlice {
+  return getSessionSlice(state)
+}
+
+/** W4.5 area S — direct field read for `sessionOrder`. */
+export function selectSessionOrder(state: AgentState): readonly string[] {
+  return state.sessionOrder
+}
+
+/** W4.5 area P — direct field read for the active session's coalescing counters. */
+export function selectPendingSendForActive(state: AgentState): {
+  count: number
+  flushAt: number | null
+} {
+  // Read the top-level mirror (the per-session source of truth is mirrored
+  // here on every coalescing write; see `withSessionSliceAndActiveMirror`).
+  // Returning a fresh object on every call is intentional: shallow-stability
+  // contract uses the upstream `pendingSendCount` / `pendingSendFlushAt`
+  // primitives as the equality check rather than the wrapper identity.
+  return { count: state.pendingSendCount, flushAt: state.pendingSendFlushAt }
+}
+
+/** W4.5 area J — direct field read for the active session's scopeRunStates map. */
+export function selectActiveScopeRunStates(state: AgentState): Record<string, ScopeRunState> {
+  return state.scopeRunStates
+}
+
+/** W4.5 area U — direct field read for the agents list. */
+export function selectAgents(state: AgentState): readonly Agent[] {
+  return state.agents
+}
+
+/** W4.5 area U — direct field read for the attachments list. */
+export function selectAttachments(state: AgentState): readonly ChatAttachment[] {
+  return state.attachments
+}
+
+/** W4.5 area U — direct field read for the file pool. */
+export function selectFilePool(state: AgentState): readonly ChatAttachment[] {
+  return state.filePool
+}
+
+/** W4.5 area D — direct field read for the conversations list. */
+export function selectConversations(state: AgentState): readonly ChatConversation[] {
+  return state.conversations
+}
+
+/** W4.5 area D — direct field read for the scopes list. */
+export function selectScopes(state: AgentState): readonly ConversationScope[] {
+  return state.scopes
+}
+
 /** V3.3a write-side helper used by the coalescing path. */
 function withSessionSlice(
   state: AgentState,
