@@ -125,11 +125,21 @@ export interface SendMessageResult {
 /**
  * Stage V V3.3a bootstrap half-step (delivered alongside V3.3c).
  *
- * Per-session slice of state. V3.3b.1 moved the composer draft here, and
- * V3.3b.2 moved visible messages here; streaming flags / scopeRunStates /
- * taskProjections remain follow-up atomic migrations. Top-level fields are
- * kept as read-through mirrors so existing ChatPanel/ChatInput selectors
- * and the agent-panel test harness keep working during the migration.
+ * Per-session slice of state. V3.3b.1 moved the composer draft (`inputValue`),
+ * V3.3b.2 moved visible messages, and the V3.3b.2 commit also landed the
+ * mirror helpers `withSessionSliceAndActiveMirror` and `mirrorFromSessionSlice`
+ * that project the streaming flags (`isStreaming` / `foregroundBusy` /
+ * `composerLocked` / `streamingMessageId` / `streamingRequestId`),
+ * `scopeRunStates`, and `taskDisclosureState` onto the active session's slice
+ * and back out to the top-level fields. Top-level fields are kept as
+ * read-through mirrors so existing ChatPanel/ChatInput selectors and the
+ * agent-panel test harness keep working without per-consumer migration.
+ *
+ * Stage W W4.2-W4.4 (V3.3b.3-5) did NOT add new fields here — the slice
+ * already owned them. Those commits added falsifiable behavior tests
+ * (`useAgent-session-slice-migration.test.ts`) that pin the mirror invariant
+ * so a future refactor cannot regress it silently. See
+ * `docs/superpowers/audits/2026-05-22-w4-useagent-ownership-map/`.
  *
  * V3.3d adds `state` + `conversationId` so the listener-side direct-setState
  * routing path (`routeCardToSession`) can validate a pushed card's
