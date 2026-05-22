@@ -109,7 +109,7 @@ Do not proceed from X1 to X2 until the deep-gate trust repair is complete. Other
 | --- | --- | --- | --- |
 | X0 | X1, X2, X3, X4 | nothing | Truth freeze is the entry point; everything else reads it. |
 | X1 | X2, X4 | X3 | X1 inside can split into X1.1-X1.4 per `verify:*` chain (`c` / `r` / `s` / `t`), each owned by its own agent in parallel. The meta-gate is X1.5 and lands last. |
-| X2 | X4 X5 | X3 | X2 needs a real Ready dev run plus tests; do not parallelize X2 with X4 because both touch live BrowserView. |
+| X2 | X4 X5 | X3 | X2 needs a real Ready dev run plus tests; do not parallelize X2 with X4 because both phases share live-app resources / evidence directory / W3.3 equipment (see § 4.1 second paragraph for full reasoning). |
 | X3 | X5 | X1, X2 | Pure infra add (CI yaml + taxonomy doc); no `src/` change. |
 | X4 | X5 | nothing | PR-shell-1 → PR-shell-2 → PR-shell-4 strict serial inside X4. Each PR requires live validation on the W3.3 equipment. |
 | X5 | nothing | nothing | Stage X closeout is the last work. |
@@ -131,7 +131,7 @@ If a future Stage X iteration finds a way to isolate live-app sessions per agent
 | X2 | An existing W4 test (`useAgent-*-contract.test.ts`) breaks; or the live dogfood rerun reveals a new failure mode. | `git revert <commit>`; reopen failing behavior test as a separate fix; do not bundle multiple session paths in one PR. |
 | X3 | CI workflow shape is wrong (e.g., `continue-on-error` accidentally added). | Edit workflow in a same-day follow-up commit; do not delete and rewrite from scratch — keep the run history. |
 | X4 | A shell PR breaks visible UI (flicker, blank, frozen mode switch) that did not exist before. | Immediately rerun live dogfood on the same equipment; if root cause cannot be identified within 1 hour, `git revert <commit>` and reopen the PR with the failing scenario added to the W3 failure-mode enumeration. |
-| X5 | Closeout bundle is missing any § 10 deliverable. | Do not commit the closeout statement until all 6 deliverables exist; this is the only phase where "no commit" is the correct action when incomplete. |
+| X5 | Closeout bundle is missing any § 10 deliverable. | Do not commit the closeout statement until all 9 deliverables in § 10 exist; this is the only phase where "no commit" is the correct action when incomplete. |
 
 ### 4.3 Agent dispatch time estimate (for scheduling, not contract)
 
@@ -255,11 +255,30 @@ const ALLOWLIST_PATH = path.join(__dirname, 'check-verify-script-paths-allowlist
 //   const PATH = 'src/...'
 const PATH_RE = /['"](src\/[\w./-]+\.[tj]sx?)['"]/g;
 
-const allowlist = new Set(
-  fs.existsSync(ALLOWLIST_PATH)
-    ? JSON.parse(fs.readFileSync(ALLOWLIST_PATH, 'utf8')).paths
-    : []
-);
+// Load and validate the allowlist (schema per § 6 allowlist file below).
+let allowlistEntries = [];
+if (fs.existsSync(ALLOWLIST_PATH)) {
+  const raw = JSON.parse(fs.readFileSync(ALLOWLIST_PATH, 'utf8'));
+  const now = new Date();
+  for (const e of raw.entries || []) {
+    for (const required of ['path', 'reason', 'owner', 'expiresAt', 'addedBy']) {
+      if (!e[required]) {
+        console.error(`ALLOWLIST INVALID: entry missing required field "${required}":`, e);
+        process.exit(2);
+      }
+    }
+    if (new Date(e.expiresAt) < now) {
+      console.error(`ALLOWLIST EXPIRED: ${e.path} expired ${e.expiresAt}`);
+      process.exit(2);
+    }
+    allowlistEntries.push(e);
+  }
+}
+const allowlist = new Set(allowlistEntries.map(e => e.path));
+// Print active allowlist for reviewer visibility on each run.
+for (const e of allowlistEntries) {
+  console.log(`ALLOWLIST: ${e.path} (owner=${e.owner}, expires=${e.expiresAt})`);
+}
 
 let drift = 0;
 for (const file of fs.readdirSync(VERIFY_SCRIPTS_DIR).filter(f => /^check-.+\.(cjs|mjs)$/.test(f))) {
@@ -353,7 +372,31 @@ Each of the following states must be independently re-asserted by behavior tests
 
 The HTTP 402 failure is provider/account, not a Ready bug — but Ready's response to it **is** a Ready bug. Split the handling into two layers and write tests for each:
 
-**Main-side (provider classification)**: in the relevant `claude-bridge` / agent-runtime layer, every provider error gets a typed `ProviderTerminalError` with shape `{ code: 'quota_exceeded' | 'auth_required' | 'rate_limited' | 'invalid_request' | 'network' | 'unknown', httpStatus?, providerMessage }`. HTTP 402 maps to `quota_exceeded`.
+**Main-side (provider classification)**: in the relevant `claude-bridge` / agent-runtime layer, every provider error gets a typed `ProviderTerminalError`:
+
+```ts
+type ProviderTerminalCode =
+  | 'quota_exceeded'              // 402, 429-with-quota-header
+  | 'auth_required'               // 401, 403
+  | 'rate_limited'                // 429-without-quota-header (retry-after present)
+  | 'invalid_request'             // 400, 422
+  | 'context_overflow'            // 400 with context-length error in body, or 413
+  | 'timeout_model'               // client-side stream timeout (no model token within N seconds)
+  | 'timeout_tool'                // tool execution exceeded budget
+  | 'transient'                   // 408, 425, 500, 502, 503, 504, ECONNRESET, EAI_AGAIN
+  | 'provider_thinking_echo_required' // provider rejects request lacking prior thinking blocks
+  | 'network'                     // DNS / TLS / connection refused
+  | 'unknown';                    // unrecognized
+
+type ProviderTerminalError = {
+  code: ProviderTerminalCode
+  httpStatus?: number
+  providerMessage: string
+  retryAfterSeconds?: number     // only set when code = 'rate_limited'
+}
+```
+
+HTTP 402 maps to `quota_exceeded`. The classification function must be a pure function from `(httpStatus, errorBody, signal)` to `ProviderTerminalCode`; add a behavior test covering every code with a representative fixture.
 
 **Renderer-side (UI recovery policy)**: the runtime driver classifies the terminal error and decides:
 
