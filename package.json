@@ -24,6 +24,7 @@
     "typecheck:clean": "rm -rf node_modules/.cache/tsc",
     "lint": "eslint . --ext .js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts --fix",
     "lint:check": "eslint . --ext .js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts",
+    "verify:lint-budget": "node scripts/check-lint-warning-budget.cjs",
     "test": "npm run test:parallel && npm run test:serial-skill-child",
     "test:parallel": "node scripts/run-parallel-tests.cjs src/__tests__/*.test.ts",
     "test:serial-skill-child": "npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/skill-child-*.test.ts",
