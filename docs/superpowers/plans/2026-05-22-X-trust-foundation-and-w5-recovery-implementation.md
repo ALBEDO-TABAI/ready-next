@@ -415,7 +415,9 @@ HTTP 402 maps to `quota_exceeded`. The classification function must be a pure fu
 | `transient` | 408, 425, 500, 502, 503, 504, ECONNRESET, EAI_AGAIN | unlock immediately | hide | "Provider transient error; try again" |
 | `provider_thinking_echo_required` | provider rejects request that lacks prior thinking blocks | unlock immediately | hide | "Provider requires reasoning replay; auto-retry with full context" (auto-retry once) |
 | `network` | DNS / TLS / connection refused | unlock immediately | hide | "Network error; check connection" |
-| `unknown` | unrecognized provider error | unlock after 60s safety timeout if no terminal event | show | generic error |
+| `unknown` | unrecognized provider error | unlock immediately (a typed ProviderTerminalError reached the runtime driver, so terminal handling fires normally) | hide | generic error |
+
+**Separate from the provider-error table — runtime driver safety timeout**: if **no terminal event of any code arrives within 60s of send** (i.e., not just "unknown" — none at all; the main process may have crashed, IPC dropped, or the request never reached the provider), the runtime driver fires an `infrastructure_timeout` recovery: unlock the composer for the originating session, hide Stop, and surface a "Ready lost track of this request; recovered automatically" toast. This path is independent of `ProviderTerminalError` because no error was ever delivered.
 
 Excluded from provider error policy (handled by separate paths, do not enter the table above):
 
@@ -739,7 +741,7 @@ X4 done when:
 
 - PR-shell-1 / PR-shell-2 / PR-shell-4 each has code and tests. PR-shell-2 and PR-shell-4 additionally have live evidence (PR-shell-1 is contract-only per § 4.1 X4 row).
 - Any individual PR may be **explicitly deferred per § 3 exit criterion 7** with a written blocking reason and a replacement acceptance boundary in the closeout ledger; in that case § 3 criterion 7's "explicitly deferred" branch applies, and X4 close does not require evidence for the deferred PR.
-- W5 dogfood item 4 and item 5 rerun without new shell regressions.
+- W5 dogfood items 4 and 5 (per `docs/superpowers/plans/2026-05-22-W5-live-dogfood-implementation.md` § 3.2: item 4 = "Toggle sidebar/chat panel + switch modes including a BrowserView mode transition"; item 5 = "Open real document, verify split/freeze behavior is not visibly broken") rerun on the W3.3 equipment without new shell regressions. X plan refers to W5 plan's numbering, not its own.
 - `docs/superpowers/audits/2026-05-22-stage-x-closeout/workbench-shell-report.md` summarizes before/after measurements.
 
 ## 10. Phase X5 - Stage X closeout and Stage Y handoff
