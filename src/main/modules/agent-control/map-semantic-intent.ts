@@ -22,6 +22,15 @@ const CACHE_TTL_MS = 30_000
 const CACHE_MAX = 200
 const LLM_TIMEOUT_MS = 1500
 const cache = new Map<string, CacheEntry>()
+const ENGLISH_UNSUPPORTED_TRANSIT_MODE_PATTERN = '(?:subway|metro|transit|bus|train|rail|railway|tram|streetcar|ferry|coach|public\\s+(?:transit|transport|transportation))'
+const ENGLISH_UNSUPPORTED_TRANSIT_PATTERNS = [
+  new RegExp(`\\b(?:by|using)\\s+(?:the\\s+)?${ENGLISH_UNSUPPORTED_TRANSIT_MODE_PATTERN}\\b`),
+  new RegExp(`\\bvia\\s+(?:the\\s+)?${ENGLISH_UNSUPPORTED_TRANSIT_MODE_PATTERN}\\b(?:\\s+(?:line|route|service))?(?=\\s*(?:[.?!,;:]|$))`),
+  new RegExp(`\\bon\\s+(?:the\\s+)?${ENGLISH_UNSUPPORTED_TRANSIT_MODE_PATTERN}\\b`),
+  new RegExp(`\\btake\\s+(?:the\\s+)?${ENGLISH_UNSUPPORTED_TRANSIT_MODE_PATTERN}\\b`),
+  new RegExp(`\\b${ENGLISH_UNSUPPORTED_TRANSIT_MODE_PATTERN}\\s+(?:from|to)\\b`),
+]
+const ENGLISH_NON_ROUTE_BEST_WAY_TO_PATTERN = /\b(?:best|fastest|quickest|shortest)\s+way\s+to\s+(?:translate|migrate|convert|configure|install|build|create|copy|move|map)\b/
 
 function cacheKey(prompt: string): string {
   return prompt.trim().slice(0, 2000)
@@ -84,7 +93,41 @@ function strongKeywordFallback(prompt: string): MapSemanticIntent | null {
 
 function hasPotentialMapSignal(prompt: string): boolean {
   const text = prompt.replace(/\s+/g, '')
+  const compactEnglish = prompt.toLowerCase().replace(/\s+/g, ' ')
+  const englishEndpointSignal =
+    /\bfrom\b.+\bto\b/.test(compactEnglish)
+    || /\bto\b.+\bfrom\b/.test(compactEnglish)
+    || /\bbetween\b.+\band\b/.test(compactEnglish)
+  const englishUnsupportedTransitSignal = ENGLISH_UNSUPPORTED_TRANSIT_PATTERNS.some((pattern) => pattern.test(compactEnglish))
+  const englishSupportedTravelSignal = /\b(walk|walking|drive|driving|bike|biking|bicycle|bicycling|cycling|taxi|cab|uber)\b/.test(compactEnglish)
+  const englishTechnicalRouteSignal =
+    /\b(api|sdk|code|function|database|query|schema|file|folder|dropbox|event bus|http|https|request|packet|router|webhook)\b/.test(compactEnglish)
+    || /\b(?:network|api|http|https|gateway)\s+traffic\b/.test(compactEnglish)
+    || /\bapi\s+gateway\b/.test(compactEnglish)
+  const englishDriveNounSignal = /\b(google drive|icloud drive|one drive|onedrive)\b/.test(compactEnglish)
+  const englishDriveVerbSignal = /\b(drive|driving)\s+(to|from)\b/.test(compactEnglish) && !englishDriveNounSignal
+  const englishRouteQuestionSignal =
+    englishEndpointSignal && (
+      /\bhow\s+(?:(?:do|can)\s+(?:i|we)\s+|to\s+)?get\s+(?:from|to)\b/.test(compactEnglish)
+      || /\bhow\s+long\s+(?:does|will|would)\s+it\s+take\s+to\s+get\s+(?:from|to)\b/.test(compactEnglish)
+      || /\bwhat(?:'s| is)\s+the\s+(?:best|fastest|quickest|shortest)\s+way\s+(?:from|between)\b/.test(compactEnglish)
+      || /\bwhat(?:'s| is)\s+the\s+(?:best|fastest|quickest|shortest)\s+way\s+to\s+get\s+(?:from|to)\b/.test(compactEnglish)
+      || (/\bwhat(?:'s| is)\s+the\s+(?:best|fastest|quickest|shortest)\s+way\s+to\b/.test(compactEnglish) && !ENGLISH_NON_ROUTE_BEST_WAY_TO_PATTERN.test(compactEnglish))
+      || /\b(?:best|fastest|quickest|shortest)\s+way\s+(?:from|between)\b/.test(compactEnglish)
+      || /\b(?:best|fastest|quickest|shortest)\s+way\s+to\s+get\s+(?:from|to)\b/.test(compactEnglish)
+      || (/\b(?:best|fastest|quickest|shortest)\s+way\s+to\b/.test(compactEnglish) && !ENGLISH_NON_ROUTE_BEST_WAY_TO_PATTERN.test(compactEnglish))
+    )
+  const englishRouteSignal =
+    !englishUnsupportedTransitSignal && (
+      (/\b(navigate|navigation|directions?|detour|waypoints?)\b/.test(compactEnglish) && (englishEndpointSignal || englishSupportedTravelSignal) && !englishTechnicalRouteSignal)
+      || (/\b(route|routing)\b/.test(compactEnglish) && (englishSupportedTravelSignal || englishEndpointSignal) && !englishTechnicalRouteSignal)
+      || (englishRouteQuestionSignal && !englishTechnicalRouteSignal)
+      || /\b(taxi|cab|uber)\s+(from|to)\b/.test(compactEnglish)
+      || /\b(walk|walking|bike|biking|bicycle|bicycling|cycling)\s+(to|from)\b/.test(compactEnglish)
+      || englishDriveVerbSignal
+    )
   return /(地图|导航|路线|怎么走|从.+到|附近|途经|途径|顺路|绕路|最省时间|最短|最优行程|多点|地点|路上|开车|步行|公交|地铁|打车|耗时|多久)/.test(text)
+    || englishRouteSignal
 }
 
 function buildPrompt(userPrompt: string): string {

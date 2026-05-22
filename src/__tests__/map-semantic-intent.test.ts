@@ -35,6 +35,101 @@ test('classifyMapSemanticIntent parses LLM JSON and caches by prompt', async () 
   assert.equal(isMapSemanticIntentActive(second), true)
 })
 
+test('classifyMapSemanticIntent calls the semantic classifier for English route requests', async () => {
+  _resetMapSemanticIntentCacheForTests()
+  let calls = 0
+  const prompts = [
+    'How do I get from Union Square to Brooklyn Bridge?',
+    'How do we get from Union Square to Brooklyn Bridge?',
+    'How to get from Union Square to Brooklyn Bridge?',
+    'What is the best way from Union Square to Brooklyn Bridge?',
+    'What is the best way to get from Union Square to Brooklyn Bridge?',
+    "What's the fastest way to Golden Gate Park from Union Square?",
+    "What's the best way to Brooklyn Bridge from Union Square?",
+    'Best route from Union Square to Brooklyn Bridge?',
+    'Fastest way from Union Square to Brooklyn Bridge?',
+    'Fastest way to Golden Gate Park from Union Square?',
+    'Fastest route from Union Square to Brooklyn Bridge avoiding traffic?',
+    'How long does it take to get from Union Square to Brooklyn Bridge?',
+    'How do I get from Gateway Arch to City Museum?',
+    'Cab directions from Union Square to Brooklyn Bridge.',
+    'Taxi from Union Square to Brooklyn Bridge.',
+    'Uber from Union Square to Brooklyn Bridge.',
+    'Drive from Union Square to the Port Authority Bus Terminal.',
+    'Drive from Union Square to Golden Gate Park via Ferry Building.',
+    'Walk from Union Square to Golden Gate Park via Train Station.',
+  ]
+  for (const prompt of prompts) {
+    const result = await classifyMapSemanticIntent({
+      prompt,
+      requestLLM: async () => {
+        calls += 1
+        return JSON.stringify({
+          isMapIntent: true,
+          primaryTask: 'route',
+          secondarySignals: [],
+          confidence: 0.88,
+        })
+      },
+    })
+
+    assert.equal(result?.isMapIntent, true)
+    assert.equal(result?.primaryTask, 'route')
+    assert.equal(isMapSemanticIntentActive(result), true)
+  }
+
+  assert.equal(calls, prompts.length)
+})
+
+test('classifyMapSemanticIntent does not call the semantic classifier for ordinary English non-route text', async () => {
+  _resetMapSemanticIntentCacheForTests()
+  let calls = 0
+  const requestLLM = async (): Promise<string> => {
+    calls += 1
+    return JSON.stringify({
+      isMapIntent: false,
+      primaryTask: 'none',
+      secondarySignals: [],
+      confidence: 0.1,
+    })
+  }
+
+  const prompts = [
+    'How do I get an API key?',
+    'How do I get from Union Square to Brooklyn Bridge by subway?',
+    'How do I get from Union Square to Brooklyn Bridge by train?',
+    'How do I get from Union Square to Brooklyn Bridge on the subway?',
+    'How do I get from Union Square to Brooklyn Bridge via train?',
+    'How do I get from Union Square to Brooklyn Bridge by public transport?',
+    'How do I get from Union Square to Brooklyn Bridge by public transit?',
+    'How do I get from Union Square to Brooklyn Bridge by public transportation?',
+    'How do I get from Union Square to Brooklyn Bridge on public transportation?',
+    'Take the bus from A to B.',
+    'Take the train from A to B.',
+    'Bus from A to B.',
+    'Train from A to B.',
+    'Move the file from Google Drive to Dropbox.',
+    'Route API traffic from service A to service B.',
+    'Route network traffic from service A to service B.',
+    'Route gateway traffic from service A to service B.',
+    'Route the event bus from service A to service B.',
+    'Follow these directions to configure the SDK.',
+    'What is the best way to translate from Chinese to English?',
+    'What is the best way to migrate from Chinese to English?',
+    'What is the best way to convert from CSV to JSON?',
+    'Translate this sentence from Chinese to English.',
+    'Walk me through this code.',
+    'Map these fields into the new schema.',
+    'Open the Google Drive file.',
+  ]
+  for (const prompt of prompts) {
+    const result = await classifyMapSemanticIntent({ prompt, requestLLM })
+    assert.equal(result, null)
+  }
+
+  assert.equal(calls, 0)
+})
+
 test('classifyMapSemanticIntent falls back to strong route keywords after LLM failure', async () => {
   _resetMapSemanticIntentCacheForTests()
   const result = await classifyMapSemanticIntent({
