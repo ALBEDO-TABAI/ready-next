@@ -12,14 +12,11 @@
 
 const test = require('node:test')
 const assert = require('node:assert/strict')
-const fs = require('node:fs')
 const path = require('node:path')
-const os = require('node:os')
 
 const { main } = require('../check-stage-x-known-regressions.cjs')
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..')
-const LEDGER_REL = 'docs/superpowers/audits/2026-05-22-stage-x-closeout/deferred-work-ledger.md'
 
 test('happy path: real repo passes the X1.8 regression-retirement gate', () => {
   const result = main({ root: REPO_ROOT })
@@ -68,41 +65,11 @@ test('happy path: real repo passes the X1.8 regression-retirement gate', () => {
 // `docs/superpowers/audits/2026-05-23-stage-y-closeout/y0-1-disposition-report.md`
 // §Rows[0] for the disposition record.
 
-// --- helpers -----------------------------------------------------------------
-
-function mkFakeRoot() {
-  // Mirror the minimum set of files the gate inspects: package.json,
-  // ledger, deferred + legacy test path markers.
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'stage-x-known-regressions-'))
-  copyFile(REPO_ROOT, tmp, 'package.json')
-  copyFile(REPO_ROOT, tmp, LEDGER_REL)
-  // Ensure the deferred markers exist in the fake root (so the "deferred
-  // file missing" guard doesn't trip in tests that don't touch them). Only
-  // sub-gates still listed in RETIRED_SUBGATES need this; the sqlite gate's
-  // deferred marker was removed at Stage Y0.1.1 (path-(a) re-arm).
-  ensureFile(
-    path.join(tmp, 'scripts/__tests__/check-stage-r-verify-switch.deferred.cjs'),
-    '// fixture\n',
-  )
-  return tmp
-}
-
-function rmFakeRoot(dir) {
-  try {
-    fs.rmSync(dir, { recursive: true, force: true })
-  } catch {
-    // ignore
-  }
-}
-
-function copyFile(srcRoot, dstRoot, rel) {
-  const src = path.join(srcRoot, rel)
-  const dst = path.join(dstRoot, rel)
-  fs.mkdirSync(path.dirname(dst), { recursive: true })
-  fs.copyFileSync(src, dst)
-}
-
-function ensureFile(absPath, content) {
-  fs.mkdirSync(path.dirname(absPath), { recursive: true })
-  if (!fs.existsSync(absPath)) fs.writeFileSync(absPath, content, 'utf8')
-}
+// --- helpers (mkFakeRoot / rmFakeRoot / copyFile / ensureFile removed at
+// Stage Y0.1.5 cleanup follow-up — the 3 tests that consumed them
+// (ledger-row-removal / chain-re-entry / legacy-.test.cjs-re-introduction)
+// were deleted at Y0.1.5 because Y0.1.2 path-(a-rewrite) re-armed
+// check-stage-r-verify-switch and check-stage-t-verify-switch in
+// verify:s/verify:t; both gates are no longer retired so those assertions
+// can never trigger. See `docs/superpowers/audits/2026-05-23-stage-y-closeout/
+// y0-1-2-stage-r-t-charter-decision.md`.)
