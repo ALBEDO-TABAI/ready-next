@@ -224,7 +224,7 @@ export class KimiCodingClient {
         httpStatus: resp.status,
         errorBody: errBody,
         messagePrefix: 'upload video failed:',
-        retryAfterSeconds: parseRetryAfterHeader(resp.headers.get('retry-after')),
+        retryAfterSeconds: parseRetryAfterHeader(resp.headers?.get('retry-after')),
       })
     }
 
@@ -299,7 +299,7 @@ export class KimiCodingClient {
       throw buildProviderHttpError({
         httpStatus: resp.status,
         errorBody: errBody,
-        retryAfterSeconds: parseRetryAfterHeader(resp.headers.get('retry-after')),
+        retryAfterSeconds: parseRetryAfterHeader(resp.headers?.get('retry-after')),
       })
     }
 

@@ -142,7 +142,7 @@ export class AnthropicExecutionClient {
         throw buildProviderHttpError({
           httpStatus: r.status,
           errorBody: errBody,
-          retryAfterSeconds: parseRetryAfterHeader(r.headers.get('retry-after')),
+          retryAfterSeconds: parseRetryAfterHeader(r.headers?.get('retry-after')),
         })
       }
       return r
@@ -237,7 +237,7 @@ export class AnthropicExecutionClient {
         throw buildProviderHttpError({
           httpStatus: r.status,
           errorBody: errBody,
-          retryAfterSeconds: parseRetryAfterHeader(r.headers.get('retry-after')),
+          retryAfterSeconds: parseRetryAfterHeader(r.headers?.get('retry-after')),
         })
       }
       return r
