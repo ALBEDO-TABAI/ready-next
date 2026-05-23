@@ -64,7 +64,7 @@
 | 利用连续性上下文（当前页 / 近期动作 / skill 结果 / 附件）减少兜圈子 | §3.4 | U7.1a/b e2e | 🟡 |
 | 视频输入不能一刀切关 tools；显式 skill / 手动阶段 / embedded python / 活跃 execution 必须保留 | §3.5 | `scripts/check-vision-tool-capability-gated.cjs`（已有） + `check-view-image-followup-injection.cjs`（已有） | ✅ |
 | Browser 阶段直接暴露给用户（任务卡 + 刷新后保留最近摘要） | §3.6 | `check-task-card-projection-only.cjs`（已有） + U7.1b 重开测试 | ✅ + 🟡 |
-| 浏览器统一层先立合同再迁逻辑 | §3.6b | 本计划 Phase 4 / Phase 5 整体策略 | 🟡 |
+| ~~浏览器统一层先立合同再迁逻辑~~ (Y0.6 retired 2026-05-23 — see release-handoff §4 R1) | §3.6b | 本计划 Phase 4 / Phase 5 整体策略 | ~~🟡~~ retired |
 | 结构化浏览器 task payload 与人读阶段文案并行 | §3.6c | `check-task-card-projection-only.cjs`（已有） | ✅ |
 | 浏览器诊断复用执行真相，不另起猜测 | §3.6d | `scripts/check-renderer-no-status-text-guess.cjs`（已有） | ✅ |
 | 先补 `RunCoordinator` 单轮执行 owner，再拆大文件 | §3.6e | 已在 V2 实现（agent-control/run-coordinator.ts） | ✅ |
@@ -102,8 +102,8 @@
 
 | 规则 | 出处 | 验收方式 | 状态 |
 |---|---|---|---|
-| 先合同后代码：架构 PR 必须有可机器验证合同 | 原则 1 | Stage U §9 全部 25+ gate | 🟡（整 Stage U） |
-| 修根因不修症状：bug 必须归类，不留 follow-up | 原则 2 | Stage U §11 PR 模板"受影响消费方"清单 | 🟡 |
+| ~~先合同后代码：架构 PR 必须有可机器验证合同~~ (Y0.6 retired 2026-05-23 — see release-handoff §4 R2; now enforced by CLAUDE.md §0.5 rule 1) | 原则 1 | Stage U §9 全部 25+ gate | ~~🟡（整 Stage U）~~ retired |
+| ~~修根因不修症状：bug 必须归类，不留 follow-up~~ (Y0.6 retired 2026-05-23 — see release-handoff §4 R3; now in CLAUDE.md §0.5 rule 2) | 原则 2 | Stage U §11 PR 模板"受影响消费方"清单 | ~~🟡~~ retired |
 | 拒绝 legacy 兼容分支：删除是合同一部分 | 原则 3 | U1.2 删 legacy agent IPC + U8.3 删 settings legacy key + `check-no-skill-executions-resurrection.cjs` | ✅ + 🟡 + ✅ |
 | 形态意识：抄外部模式前问需求形态是否一致 | 原则 4 | manual review at PR 时 | ⚠️ manual |
 | CI 强制 > 文档约束 > 人审 | 原则 5 | Stage U §0.5 + §0.7 配对表 | ✅ |
