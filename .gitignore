@@ -34,6 +34,9 @@ logs/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+# Stage Y dogfood evidence logs must be tracked even though they end in .log
+# (per plan §9.2 evidence schema: SHA-256-pinned artifacts including log tails)
+!docs/superpowers/audits/**/dogfood/evidence/*.log
 
 # Testing
 coverage/
