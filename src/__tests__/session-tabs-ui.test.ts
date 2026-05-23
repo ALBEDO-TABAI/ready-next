@@ -297,6 +297,111 @@ test('V3.4a case 3 — three sessions: "+ 新建" disabled at the renderer hard 
   }
 })
 
+// --- Case X2.1 #7 — UI-reachable callsites use the visible API ----------
+//
+// Plan §7 implementation rule "Choose one explicit contract for session
+// creation" — under chosen contract (b), UI paths call `createNewSession()`
+// (which appends to `sessionOrder`); non-UI bootstrap paths may still call
+// `newSession()` (which swaps in place without growing `sessionOrder`).
+//
+// This is a hard cross-file contract that can't be fully exercised by a
+// pure useAgent behavior test (the bug is which API ChatPanel calls). The
+// source grep here pins that ChatPanel.tsx does not call `newSession()`
+// from any of its UI handlers. The legacy callsite in useAgent.ts itself
+// (`deleteConversation` recovery) is allowed because it is not directly
+// triggered by a session-strip control — it is a post-delete fallback that
+// runs against an already-empty active session.
+
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
+test('X2.1 case 7 — ChatPanel UI handlers call createNewSession (visible API), not newSession', () => {
+  const source = readFileSync(resolve(process.cwd(), 'src/renderer/components/agent/ChatPanel.tsx'), 'utf8')
+  // The legacy `newSession()` action remains exported from useAgent but is
+  // no longer invoked by any user-clickable ChatPanel handler.
+  // Source-grep allowance: this is a cross-file hard contract under plan
+  // §7 — UI session creation must funnel through the visible API.
+  // eslint-disable-next-line ready/no-source-grep-test -- reviewed plan §7 contract
+  const newSessionCallRegex = /\bnewSession\s*\(\s*\)/g
+  const matches = source.match(newSessionCallRegex) || []
+  assert.equal(
+    matches.length,
+    0,
+    `ChatPanel.tsx must not call newSession() from UI handlers; found ${matches.length} call(s). Use createNewSession() (visible API) instead.`,
+  )
+  // Positive assertion: there's at least one createNewSession reference
+  // wired up (header / channel-empty / new-conversation buttons).
+  assert.match(source, /createNewSession\s*\(\s*\)/, 'ChatPanel.tsx must wire UI session creation through createNewSession()')
+})
+
+// --- Case X2.1 #1 — cold/header path produces a visible tab --------------
+//
+// Plan §7 required test 1: starting with `sessionOrder: []`, invoking the
+// header new-session path (ChatPanel.tsx:591 — `useAgent.getState().newSession()`)
+// must create one visible tab and make it active. Under Stage X2.3 contract
+// (b) the renderer-side `newSession()` action itself is the cold/header
+// entry point: it MUST append to `sessionOrder` when invoked against an
+// empty list, not just swap.
+//
+// This test pins that contract — it asserts on `sessionOrder` length after
+// the call, so the fix can either (a) make `newSession()` always visible,
+// or (b) repoint ChatPanel:591 to `createNewSession()` and we update this
+// test alongside the production callsite. Either way the user-visible
+// outcome is the same.
+
+test('X2.1 case 5 — cold start: header new-session produces 1 visible tab', () => {
+  resetStoreToBootstrap()
+  const stateBefore = useAgent.getState()
+  assert.equal(stateBefore.sessionOrder.length, 0, 'cold start: sessionOrder is empty')
+
+  // Drive the header path. Under Stage X2.3 contract (b) this is now
+  // wired to `createNewSession()` — which IS the visible-tab API. The
+  // legacy `newSession()` is retained for non-UI bootstrap paths
+  // (e.g. `deleteConversation` recovery) and is NOT what the header
+  // button calls.
+  useAgent.getState().createNewSession()
+
+  const state = useAgent.getState()
+  assert.equal(state.sessionOrder.length, 1, 'header new-session appends one tab to sessionOrder')
+  const newId = state.sessionOrder[0]
+  assert.ok(newId, 'sessionOrder[0] is the new id')
+  assert.equal(state.activeSessionId, newId, 'newly created session is active')
+
+  // The strip is now visible.
+  const { container, unmount } = mountSessionTabs()
+  try {
+    const chips = container.querySelectorAll('[data-testid="session-tab-chip"]')
+    assert.equal(chips.length, 1, 'one chip rendered in the strip after header create')
+    const newBtn = container.querySelector('[data-testid="session-tab-new"]') as HTMLButtonElement | null
+    assert.ok(newBtn, '"+ 新建" button rendered')
+    assert.equal(newBtn!.disabled, false, '"+ 新建" still enabled (1/3 sessions used)')
+  } finally {
+    unmount()
+  }
+})
+
+// --- Case X2.1 #2 — repeated visible new-session never hides active -------
+//
+// Plan §7 required test 2: repeated visible new-session actions append (or
+// replace per the chosen contract) but never leave the active session
+// hidden from `sessionOrder`.
+
+test('X2.1 case 6 — repeated visible new-session leaves active session visible each time', () => {
+  resetStoreToBootstrap()
+  for (let i = 0; i < 3; i++) {
+    const created = useAgent.getState().createNewSession()
+    assert.ok(created, `iteration ${i}: createNewSession returns an id`)
+    const state = useAgent.getState()
+    assert.equal(state.activeSessionId, created, `iteration ${i}: active session matches the newly created id`)
+    assert.equal(
+      state.sessionOrder.includes(created!),
+      true,
+      `iteration ${i}: active session id appears in sessionOrder (not hidden)`,
+    )
+  }
+  assert.equal(useAgent.getState().sessionOrder.length, 3, 'all 3 are visible')
+})
+
 // --- Case 4 — close session reroutes active to remaining tab ------------
 
 test('V3.4a case 4 — closeSession on active id: chip count drops, active reroutes', () => {
