@@ -220,7 +220,12 @@ export class KimiCodingClient {
 
     if (!resp.ok) {
       const errBody = await resp.text().catch(() => '')
-      throw new Error(`upload video failed: HTTP ${resp.status}: ${errBody.slice(0, 240)}`)
+      throw buildProviderHttpError({
+        httpStatus: resp.status,
+        errorBody: errBody,
+        messagePrefix: 'upload video failed:',
+        retryAfterSeconds: parseRetryAfterHeader(resp.headers.get('retry-after')),
+      })
     }
 
     const json = await parseJsonResponse(resp, { requestUrl: url }) as { id?: string }
