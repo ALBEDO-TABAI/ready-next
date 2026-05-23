@@ -286,12 +286,27 @@ function lintOneSurfaceFile(absMdPath, surfaceFileBase, errors, root) {
   }
 
   // 白 spot-check requirement.
+  // §9.2.3 r9 amendment (2026-05-24): mandatory-白 surfaces (operator_class
+  // = agent-with-bai-spotcheck or bai-only) follow a two-phase rhythm —
+  //   phase 1: agent baseline produces a coverage-gap record; status
+  //     MUST be `deferred-with-owner = 白`; the bai_spotcheck block STAYS
+  //     EMPTY because 白 has not yet observed the surface and inventing
+  //     spotcheck fields here would be fabrication.
+  //   phase 2: when 白 lands the spot-check evidence (mp4/gif/txt +
+  //     sign-off sentence) the surface flips to status = pass and the
+  //     bai_spotcheck block becomes REQUIRED.
+  // The lint rule therefore only enforces the bai_spotcheck block when
+  // status ∈ {pass, fail}; status = deferred-with-owner exempts the
+  // block while still requiring the deferred_owner + deferred_reason
+  // fields enforced separately above.
   const requiresSpotcheck =
-    fm.operator_class && fm.operator_class !== 'agent-only'
+    fm.operator_class &&
+    fm.operator_class !== 'agent-only' &&
+    fm.status !== 'deferred-with-owner'
   if (requiresSpotcheck) {
     if (!fm.bai_spotcheck || typeof fm.bai_spotcheck !== 'object') {
       localErrors.push(
-        `${surfaceFileBase}: operator_class=${fm.operator_class} requires bai_spotcheck block`,
+        `${surfaceFileBase}: operator_class=${fm.operator_class} with status=${fm.status} requires bai_spotcheck block (§9.2.3 r9 amendment: deferred-with-owner exempts the block; pass/fail require it)`,
       )
     } else {
       for (const k of REQUIRED_BAI_SPOTCHECK_SUBFIELDS) {
