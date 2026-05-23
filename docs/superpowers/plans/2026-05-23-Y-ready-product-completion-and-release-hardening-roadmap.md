@@ -2,7 +2,7 @@
 title: Stage Y — Ready product completion and release hardening implementation plan
 date: 2026-05-23
 stage: Y-entry
-status: refinement-r4 (codex r3 must-fix 1-4 + should-fix 1-5 + P2 1-2 addressed; ready for codex r4 round)
+status: refinement-r5 (codex r4 must-fix 1-4 + should-fix 1-3 + P2 1-2 addressed; ready for codex r5 round)
 enforce: false
 predecessors:
   - docs/superpowers/plans/2026-05-23-Y-product-surface-and-release-prep-seed.md
@@ -11,8 +11,9 @@ predecessors:
 refinement_history:
   - r0 (2026-05-23): initial roadmap draft (sections 0-10) by codex.
   - r1 (2026-05-23): Claude in-place refinement — added §3.x exit criteria precision, §4 phase ordering + parallelism table, §5 closeout-bundle file list, §6.x Y0.1 4-row disposition decision tree, §7 Y0.2 CI flip contract, §8 white-hardware live-evidence handoff schedule, §9 dogfood evidence schema + per-surface sub-plan template, §10 Stage U source discovery (Stage U closeout folder is missing; release checklist is the real source), §11 Y1.x scope locks, §12 Y2.x scope locks, §13 Stage Z entry contract, §14 verify-chain split (Y-entry vs Y-release-track), §15 expanded do-not list, §16 review cadence per phase, §17 rollback paths, §18 dispatch time estimate, §19 Stage Y closeout bundle structure (mirrors Stage X §10).
+  - r5 (2026-05-23): Codex r4 fix-and-recheck — 4 must-fix items addressed inline: (1) §9.2 frontmatter `build_commit_captured_at` "explicit capture moment" alternative REMOVED — now committer-date only; manifest example expanded to include `type: head-capture` artifact; evidence template body §9.2 updated to require the head-capture artifact entry. (2) §6.2 + §6.5 R/T factual correction — actual on-disk state is `check-stage-r-verify-switch.deferred.cjs` ONLY (T is not in `.deferred.cjs` form; codex r4 verified via `ls scripts/__tests__/`); §6.2 + §6.5 reworded; paired-row schema now allows split disposition_path via `disposition_path_r` + `disposition_path_t` sub-fields. (3) §4.3 budget recalculated realistically — Y0.5 dogfood = 60-80h (20 surfaces × 3-4h), Y0.7 + Y0.8 P0 implementation explicitly itemized (Y0.7 MCP 6-8h or 1h depending on path; Y0.8 cache quota 4-6h or 1h); total agent-time ~130-180h (was 75-115h, which omitted Y0.5 dogfood at scale and Y0.7/Y0.8 P0 work). (4) Stale "16 dogfood rows" at §4.1 line 158 corrected to "20 dogfood rows". Plus 3 should-fix: §9.2 frontmatter template adds row-13-specific note for 5 sub-flow markers; §20.3 Q8 + Q9 marked RESOLVED (answered at r3/r4 — keep for history but flag as closed); §20.3 Q11 reworded to a neutral keep-vs-renumber decision; stale "renaming §11.1/§11.2" in r3 changelog entry corrected to "reorganized §11.0a/§11.0b as P0 scope locks". Plus 2 P2: §9.2.1 head-capture.txt optionally records branch name + remote URL (kept simple; not required); §11.0a/§11.0b naming preserved (decision is recorded in resolution table — codex r4 P2 #2 explicitly accepted "not required if current legend is cleaned up").
   - r4 (2026-05-23): Codex r3 fix-and-recheck — 4 must-fix items addressed inline: (1) §3.1 acceptance links un-reversed — Y0.7 now correctly cites §11.0b (MCP scope lock) and Y0.8 cites §11.0a (cache quota scope lock); (2) §6.5 row-count ambiguity resolved by choosing "exactly 4 rows with paired gate_id `check-stage-r-verify-switch+check-stage-t-verify-switch` as a single row"; (3) §9.2.1 reflog branch removed (not portable across clones) — replaced with checksummed `head-capture.txt` artifact in evidence bundle; (4) §20.3 Q11 added explicitly (was dropped at r3 — Q11 covers §11.0a/§11.0b naming idiomaticity). Plus 5 should-fix: bai_spotcheck.performed_at tightened to 72h with same-build_commit fallback; §9.1 row 13 schema constraint added requiring 5 sub-flow evidence markers; §9.2.2 50% fallback removed (kept only ±30s); §4.3 budget table updated for 9 mandatory spot-checks + Y1.2 MCP budget zeroed; §11.2 RESERVED note expanded to cross-reference §4.3 + §11.0b. Plus 2 P2: §20.3 Q3 stale "8 of 20 / optional" cleaned; §11.0a/§11.0b kept (per Q11 ruling) with explicit downstream-reference legend.
-  - r3 (2026-05-23): Codex r2 fix-and-recheck — 5 must-fix items addressed inline: (1) Y0.7/Y0.8 P0/P1/Stage Z contradiction resolved by making Y0.7+Y0.8 non-deferrable P0 + renaming §11.1/§11.2 to "P0 scope locks (Y0.8/Y0.7)" + removing them from the §11 P1 group; (2) §9.2 schema adds `bai_spotcheck` field with required sub-evidence for mandatory-spot-check surfaces + surface 10 HTTP 402 mandatory; (3) §9.2 reproduction-window overlap check replaces ±5min loose check + build_commit ties to captured-HEAD evidence via reflog timestamp cross-reference; (4) §6.5 conditions made machine-checkable via strict `y0-1-disposition-report-schema.json` (4 gate IDs × required fields); (5) §9.1 row 13 expanded to cover FastCard translate / describe image / resolve video / overlay command paths per `src/preload/index.ts:13-19,394-404`. Plus 4 should-fix: §6.1 wording fixed to "anywhere in the file"; §6.2 verify-chain policy note + missing `.deferred.cjs` reference recorded; §0 line 36 + §4 line 181 + all "16 rows" references rewritten to "20 rows"; §9.1 rows 1/3/5/8/10/11 tightened to binary fixed-fixture spec. Plus 3 P2: §19 evidence bundle includes both JSON + `.checksums.txt`; §19 row 11 adds `inherits_to_z_phase` column; §11.5 fixed to use existing `npm run verify:f:e2e` (not invented `test:e2e`).
+  - r3 (2026-05-23): Codex r2 fix-and-recheck — 5 must-fix items addressed inline: (1) Y0.7/Y0.8 P0/P1/Stage Z contradiction resolved by making Y0.7+Y0.8 non-deferrable P0 + reorganizing §11 — added §11.0a (Y0.8 cache quota scope lock) + §11.0b (Y0.7 MCP scope lock); §11.1 narrowed to VEA-only; §11.2 RESERVED with cross-references to §11.0b + §4.3 + §13 — and removing them from the §11 P1 group; (r5 correction: r3 entry originally said "renaming §11.1/§11.2 to P0 scope locks" which was inaccurate — §11.1/§11.2 numbers were preserved; §11.0a/§11.0b are new sub-sections); (2) §9.2 schema adds `bai_spotcheck` field with required sub-evidence for mandatory-spot-check surfaces + surface 10 HTTP 402 mandatory; (3) §9.2 reproduction-window overlap check replaces ±5min loose check + build_commit ties to captured-HEAD evidence via reflog timestamp cross-reference; (4) §6.5 conditions made machine-checkable via strict `y0-1-disposition-report-schema.json` (4 gate IDs × required fields); (5) §9.1 row 13 expanded to cover FastCard translate / describe image / resolve video / overlay command paths per `src/preload/index.ts:13-19,394-404`. Plus 4 should-fix: §6.1 wording fixed to "anywhere in the file"; §6.2 verify-chain policy note + missing `.deferred.cjs` reference recorded; §0 line 36 + §4 line 181 + all "16 rows" references rewritten to "20 rows"; §9.1 rows 1/3/5/8/10/11 tightened to binary fixed-fixture spec. Plus 3 P2: §19 evidence bundle includes both JSON + `.checksums.txt`; §19 row 11 adds `inherits_to_z_phase` column; §11.5 fixed to use existing `npm run verify:f:e2e` (not invented `test:e2e`).
   - r2 (2026-05-23): Codex r1 fix-and-recheck — 8 must-fix items addressed inline: (1) §2 + §6.1 fixed C4-transitive prescription to file-level (per current `scripts/check-sqlite-test-skip-pattern.cjs:120-127` + `src/__tests__/utils/sqlite-skip.ts:10-16` contract); (2) §6.2 default flipped from "(b) delete" to "(a) current-charter rewrite or explicit replacement"; (3) §7 deep-gates flip relaxed to "stable disposition + represented commands" + split into Y0.2.a merge-job alignment vs Y0.2.b deep-gate enablement; (4) §6.5 + §14.2 keep `verify:stage-x-known-regressions` through Y0.1 + replace with Stage Y successor before deletion; (5) §9.1 dogfood matrix v3: split row 16 into 3 rows (16/17/18), added row 19 Obsidian web clip, row 20 agent_interaction routing, row 9 explicitly covers restart + crash + forced-quit resumability; (6) §9.2 evidence schema adds SHA-256 + timestamps + build_commit match + manifest validation; (7) §3.1 + §11.1/§11.2 release-blocking inconsistency resolved — Y1.1 + Y1.2 explicitly block Stage Z; (8) §2 entry HEAD updated to r1 commit 7f904fb5. Plus 5 should-fix: §6.3 testing-conventions content-level check, §6.4 overlap-fixture-first, §7 split, §13 verify:cloud handoff, §16 read-only-review disclaimer. Plus 3 P2: §9.2 evidence/manifest.json schema, §9.3 sub-plan "pre-existing coverage: none" requirement, §19 白-operator-runbook.
 ---
 
@@ -155,7 +156,7 @@ Any P0 row that is neither green nor explicitly deferred under these definitions
 | Y0.2 | nothing (CI flip is mostly infra) | Y0.1, Y0.6 | First-run URL capture needs repo-admin coordination; deep-gates flip needs Y0.1 outcomes only if the deep-gates job is restored to include the retired sub-gates. |
 | Y0.3 | nothing | Y0.4 only if 白 has W3.3 equipment available for both sessions back-to-back | White-hardware deferral per X plan §3.4 pattern; treated as Y0 entry-condition for Stage Y close but does not block Y1. |
 | Y0.4 | nothing | Y0.3 (same constraint as above) | Same handoff pattern. |
-| Y0.5 | Y0.0 | Y0.1 (for surfaces not depending on resolved regressions), Y0.2, Y0.6 | Each of the 16 dogfood rows is independently dispatchable per §9.3 sub-plan template. Some rows need 白's machine; treat those as deferred-with-owner. |
+| Y0.5 | Y0.0 | Y0.1 (for surfaces not depending on resolved regressions), Y0.2, Y0.6 | Each of the 20 dogfood rows (per §9.1 matrix v3) is independently dispatchable per §9.3 sub-plan template. 9 rows have mandatory 白 spot-check per §9.4; those serialize on 白's availability but agent baseline still parallelizes. |
 | Y0.6 | Y0.0 | Y0.1, Y0.2, Y0.5 | Reconciliation is pure-doc + small automation; no production code change expected. |
 | Y1.1-Y1.6 | All Y0 green-or-deferred | Each Y1 row can run in parallel with other Y1 rows once it has its own implementation plan | §11 phase slots. |
 | Y2.1-Y2.5 | All Y1 green | Each Y2 row independent | §12 phase slots; no row may start before §11 stable. |
@@ -182,7 +183,9 @@ Stage X learned that **shared live-app resources** are the real concurrency bott
 | Y0.2 (CI flip + first-run URL) | 1 h + repo-admin coordination | first-run trigger (~5 min by 白) |
 | Y0.3 (W5 item 3 live rerun) | n/a code | ~30 min by 白 on W3.3 |
 | Y0.4 (Workbench shell live measurement) | n/a code | ~30 min by 白 on W3.3 |
-| Y0.5 (dogfood matrix v3 × 20 surfaces) | 3-4 h per surface × 20 surfaces (parallelizable per §4.2); live surfaces add 15-30 min 白-time each | **9 mandatory 白 spot-check surfaces** (2, 3, 7, 10, 13, 16, 17, 18, 19 per §9.4) × 15-30 min each = **135-270 min** (~2.25-4.5 hours 白-time for spot-checks alone) |
+| Y0.5 (dogfood matrix v3 × 20 surfaces) | **60-80 agent-hours** (3-4 h per surface × 20 surfaces; parallelizable per §4.2 but the AGGREGATE work is at least this) | **9 mandatory 白 spot-check surfaces** (2, 3, 7, 10, 13, 16, 17, 18, 19 per §9.4) × 15-30 min each = **135-270 min** (~2.25-4.5 hours 白-time for spot-checks alone) |
+| Y0.7 (MCP transport or "not shipped" labeling) — non-deferrable P0 implementation per §11.0b (codex r4 must-fix #3 explicit itemization) | **6-8 h** (transport path: bundled server + install UI + tool round-trip + lifecycle) OR **1-2 h** (labeling path: UI label + Settings section adjustment) | 30 min 白 for hardware verification |
+| Y0.8 (Settings cache quota enforcement) — non-deferrable P0 implementation per §11.0a (codex r4 must-fix #3 explicit itemization) | **4-6 h** (eviction path: trigger + LRU + tests) OR **1-2 h** (relabel path: UI text + tracking row) | 30 min 白 for hardware verification |
 | Y0.6 (Stage U checklist sync) | 2-3 h | none |
 | Y1.1 (VEA/vision test reliability — narrowed; cache-quota moved to Y0.8 per §11.0a) | 2-3 h + sub-plan first | varies |
 | Y1.2 RESERVED — MCP moved to Y0.7 P0 per §11.0b; this slot zero-budgeted (codex r3 should-fix #4) | 0 h | n/a |
@@ -193,7 +196,9 @@ Stage X learned that **shared live-app resources** are the real concurrency bott
 | Y2.1-Y2.5 | Each ≥ 4 h; per §12 each needs its own micro-plan first | varies |
 | Stage Y closeout + review loop | 4-6 h + 2 PASS rounds with codex | review-loop time |
 
-Stage Y agent-time total: ~75-115 hours (was 80-120 in r3; Y1.2 zero-budget recovered ~5h; Y1.1 narrowed from 4-6h to 2-3h). 白-time total: ~5-7 hours (r3 underestimated at 2-4h; corrected for 9 mandatory dogfood spot-checks per §9.4 = 2.25-4.5h alone, plus Y0.3 ~30min + Y0.4 ~30min + first-CI-run ~5min + Y0.7/Y0.8 hardware verification ~30min each).
+Stage Y agent-time total: **~130-180 hours** (codex r4 must-fix #3 corrected; r4's 75-115h omitted (a) Y0.5 dogfood at scale: 60-80h, and (b) Y0.7 + Y0.8 P0 implementation: 5-14h depending on path branches). Breakdown: Y0.0 1h + Y0.1.x 4.5-6.5h + Y0.2 1h + Y0.3/Y0.4 n/a-code + Y0.5 60-80h + Y0.6 2-3h + Y0.7 1-8h + Y0.8 1-6h + Y1.1 2-3h + Y1.2 0h (reserved) + Y1.3 4-8h + Y1.4 3-4h + Y1.5 8-12h + Y1.6 4-6h + Y2.x ≥ 20h (each ≥ 4h × 5 = 20h floor; per §12 each needs own micro-plan first) + closeout/review 4-6h ≈ **115-167h** before Y2 upper-range padding; round to 130-180h to cover Y2 uncertainty.
+
+白-time total: ~5-7 hours (codex r3 corrected from r2's 2-4h; r4 keeps): 9 mandatory dogfood spot-checks (135-270 min = 2.25-4.5h) + Y0.3 (~30min) + Y0.4 (~30min) + first-CI-run trigger (~5min) + Y0.7 + Y0.8 hardware verification (~30min each).
 
 ## 5. Phase Y0.0 — Stage Y closeout scaffolding
 
@@ -270,7 +275,16 @@ Symptom: both gates hard-code `### 6.25` (Stage R) and `### 6.27` (Stage T) numb
 
 **r2 correction (codex r1 must-fix #2)**: pure deletion is now forbidden as the default. CLAUDE.md / AGENTS.md continue to point at Stage R/T plan files (CLAUDE.md §8 "协作文档索引" lines 95-107; AGENTS.md mirrored), and `verify:cloud` still embeds `verify:t` (`package.json:50`). The Stage R/T charter is still live; only the numbered-heading anchors went away. The correct default is therefore **(a) current-charter rewrite**, not deletion.
 
-**r3 amplification (codex r2 should-fix #2)**: the path-(a) rewrite implicitly relaxes the original Stage R/T contract from "main `verify` script must embed `verify:r`/`verify:t`" to "either `verify` OR `verify:cloud` embeds them". The current `package.json:44` plain `verify` does NOT embed either; only `verify:cloud` at line 50 embeds `verify:t`. This policy downgrade MUST be recorded explicitly in the §6.2 sub-plan (one paragraph + ledger row) so future stages do not silently treat the rewrite as "no policy change". Also: `scripts/__tests__/check-stage-t-verify-switch.deferred.cjs` is the renamed wildcard-test variant — if path (a) is chosen, rename it back to `.test.cjs`; if path (b) is chosen, leave the rename in place and update the schema reference.
+**r3 amplification (codex r2 should-fix #2) + r5 correction (codex r4 must-fix #2)**: the path-(a) rewrite implicitly relaxes the original Stage R/T contract from "main `verify` script must embed `verify:r`/`verify:t`" to "either `verify` OR `verify:cloud` embeds them". The current `package.json:44` plain `verify` does NOT embed either; only `verify:cloud` at line 50 embeds `verify:t`. This policy downgrade MUST be recorded explicitly in the §6.2 sub-plan (one paragraph + ledger row) so future stages do not silently treat the rewrite as "no policy change".
+
+**.deferred.cjs file-state correction**: r3 incorrectly named `check-stage-t-verify-switch.deferred.cjs` as the wildcard-test variant. Codex r4 verified via `ls scripts/__tests__/`: the ONLY `.deferred.cjs` file for this row is `scripts/__tests__/check-stage-r-verify-switch.deferred.cjs`. `check-stage-t-verify-switch` was retired via direct removal from the `verify:t` invocation list (per the X1.8 ledger row 2 mechanism noted: "removing its direct `node scripts/check-stage-t-verify-switch.cjs` invocation from `verify:t`"); there was never a wildcard-test variant for T. The sub-plan's rename action therefore differs per gate:
+
+- For path (a) on R: rename `scripts/__tests__/check-stage-r-verify-switch.deferred.cjs` back to `.test.cjs`.
+- For path (a) on T: restore the direct `node scripts/check-stage-t-verify-switch.cjs` invocation in `package.json` `verify:t`.
+- For path (b) on R: leave `.deferred.cjs` rename in place; add replacement gate.
+- For path (b) on T: leave the `verify:t` invocation removed; add replacement gate.
+
+The Y0.1.2 sub-plan must call out which path applies to R and which to T (the paired row schema supports split paths per §6.5 `disposition_path_r` / `disposition_path_t` sub-fields).
 
 Disposition default: **(a) current-charter rewrite**.
 
@@ -367,9 +381,13 @@ Deletion of `scripts/check-stage-x-known-regressions.cjs` is permitted ONLY when
       "gate_id": "check-sqlite-test-skip-pattern",     // one of the 4 original X1.8 IDs
       "original_script_path": "scripts/check-sqlite-test-skip-pattern.cjs",
       "original_ledger_link": "docs/superpowers/audits/2026-05-22-stage-x-closeout/deferred-work-ledger.md#row-1",
-      "disposition_path": "a-fix" | "a-rewrite" | "b-replacement-gate" | "b-retired-with-reason",
+      "disposition_path": "a-fix" | "a-rewrite" | "b-replacement-gate" | "b-retired-with-reason" | "split",
+      // when disposition_path = "split" (only valid for the paired R+T row), the following sub-fields are required:
+      "disposition_path_r": "a-fix" | "a-rewrite" | "b-replacement-gate" | "b-retired-with-reason" | null,
+      "disposition_path_t": "a-fix" | "a-rewrite" | "b-replacement-gate" | "b-retired-with-reason" | null,
       "outcome_commit": "<git sha of the disposition commit>",
       "rearmed_in_verify_chain": "verify:k" | "verify:r" | "verify:s" | "verify:t" | "verify:f" | null,
+      // for split R+T paths, multi-value form allowed: "verify:r;verify:t"
       "replacement_gate_path": "scripts/check-stage-y-known-regressions.cjs#<gate_id>" | null,
       "retire_reason": "<one paragraph>" | null,
       "rationale": "<one paragraph cross-referencing the §6.x decision tree branch chosen>"
@@ -518,8 +536,8 @@ date: YYYY-MM-DD
 operator: <name>                # primary operator: agent-id or 白
 operator_class: agent-only | agent-with-bai-spotcheck | bai-only   # MUST match §9.4 row class
 hardware: <macbook-pro-m5-pro-24gb / linux-x64 / other>
-build_commit: <git sha — MUST match the HEAD at evidence-capture time per §9.2.1 capture-HEAD rule>
-build_commit_captured_at: <ISO 8601 timestamp from `git log -1 --format=%cI <sha>` of the commit OR the explicit `git rev-parse HEAD` capture moment>
+build_commit: <git sha — MUST match the HEAD at evidence-capture time per §9.2.1 capture-HEAD rule + the value in head-capture.txt>
+build_commit_captured_at: <ISO 8601 committer-date from `git log -1 --format=%cI <sha>` — codex r4 must-fix #1: the r4 "explicit capture moment" alternative is REMOVED because reflog/capture-moment is non-portable; committer-date is the only accepted value>
 status: pass | fail | deferred-with-owner
 deferred_owner: <name, only if status=deferred-with-owner>
 deferred_reason: <one sentence, only if status=deferred-with-owner>
@@ -545,9 +563,11 @@ bai_spotcheck:                  # REQUIRED iff operator_class != agent-only
 - ...
 
 ## Evidence artifacts (listed verbatim in the manifest)
+- Head-capture: `evidence/<surface-slug>-head-capture.txt` (REQUIRED per §9.2.1); SHA-256 in manifest.
 - Screencap: `evidence/<surface-slug>-screencap.mp4` (or `.gif`); SHA-256 in manifest.
 - Log tail: `evidence/<surface-slug>-ready-tools.log` (or others as relevant); SHA-256 in manifest.
 - Console output: `evidence/<surface-slug>-console.txt`; SHA-256 in manifest.
+- **For surface 13 only** (codex r4 should-fix #1): the body MUST additionally contain 5 named markers `### Sub-flow 13.{a|b|c|d|e}` per §9.2.3 row-13 rule — each sub-flow either references a separate screencap or a time-range within a composite.
 
 ## Timestamp alignment
 - Reproduction window: `<ISO 8601 start>` → `<ISO 8601 end>`.
@@ -572,6 +592,13 @@ And `evidence/<surface-slug>-manifest.json` (per codex r1 P2 nice-to-have #1):
   "operator": "白",
   "hardware": "macbook-pro-m5-pro-24gb",
   "artifacts": [
+    {
+      "path": "evidence/file-manager-head-capture.txt",
+      "type": "head-capture",
+      "sha256": "...",
+      "bytes": 128,
+      "created_at": "2026-05-25T10:00:00Z"
+    },
     {
       "path": "evidence/file-manager-screencap.mp4",
       "type": "screencap",
@@ -1014,7 +1041,21 @@ These are Y0.0 entry-capture responsibilities. Any divergence between expected b
 | P2-1 | §20.3 Q3 stale "8 of 20 / optional" | §20.3 Q3 rewritten to reflect r3 resolution (9 of 20, mandatory for HTTP 402+429) |
 | P2-2 | Rename §11.0a/§11.0b to §11.1/§11.2 | NOT applied per r4 — kept current naming with explicit downstream-reference legend; codex r4 round may challenge this trade-off (see Q11) |
 
-### 20.3 Remaining r3 open questions for codex r3 round
+### 20.1d Resolution of codex r4 verdict items
+
+| # | r4 item | r5 resolution |
+| ---: | --- | --- |
+| MF1 | §9.2 schema contradiction (build_commit_captured_at alternative + manifest missing head-capture) | r4 frontmatter "explicit capture moment" alternative REMOVED — committer-date only; manifest example expanded to include `type: head-capture` entry; body Evidence Artifacts section template adds head-capture as REQUIRED |
+| MF2 | §6.2/§6.5 R/T factual error (T has no .deferred.cjs) | §6.2 reworded with per-gate rename rule (R uses .deferred.cjs rename; T uses direct-invocation removal); §6.5 paired-row schema adds `disposition_path_r` + `disposition_path_t` for split R/T outcomes + multi-value `rearmed_in_verify_chain` |
+| MF3 | §4.3 budget unsupported | Recalculated: Y0.5 explicit 60-80h row; Y0.7 + Y0.8 P0 implementation explicit rows (Y0.7 1-8h; Y0.8 1-6h); agent-time total 130-180h (was 75-115h); breakdown shows the math |
+| MF4 | "16 dogfood rows" stale | §4.1 line 158 corrected to "20 dogfood rows" |
+| SF1 | Row-13 5-sub-flow template note | §9.2 evidence-template body adds row-13-specific note |
+| SF2 | §20.3 Q8/Q9 stale (already answered); Q11 biased | Q8 + Q9 marked RESOLVED with answer cite; Q11 rewritten to neutral keep-vs-renumber framing |
+| SF3 | Stale "§11.1/§11.2 renumbered" in r3 changelog | Reworded to "reorganized §11.0a/§11.0b as P0 scope locks" |
+| P2-1 | head-capture.txt optional branch/remote | Kept optional; not required (SHA + clean tree is enough for correctness per codex r4) |
+| P2-2 | Renumber §11.0a/§11.0b consideration | Kept current naming with explicit downstream-reference legend (codex r4 P2 accepted "not required if legend is cleaned up"; r5 cleaned the legend) |
+
+### 20.3 Stage Y entry plan open questions (last updated at r5)
 
 1. **§9.1 row 9 — kill -9 + Cmd-Q + restart**: are all three durable-handle resume scenarios truly contractually required by CLAUDE.md §3 line 49-50, or is only "restart" (clean exit) required? If only restart, the row scope shrinks.
 2. **§9.1 row 19 — Obsidian web clip dependency on Y0.1.1**: row 19 lists `obsidian-web-clip-current-tab-ipc.test.ts` as a Y0.1.1 missing_helper file. If Y0.1.1 fix lands first, does that automatically validate row 19's surface? Or does row 19 still need its own live evidence?
@@ -1023,7 +1064,7 @@ These are Y0.0 entry-capture responsibilities. Any divergence between expected b
 5. **§19 row 12 — evidence checksum manifest format**: JSON-with-SHA-256 is the default. Should it be a `.checksums.txt` file in standard `sha256sum -c` format instead, for tooling compatibility?
 6. **§6.5 X gate removal**: r2 forbids outright deletion until 3 conditions are met. Is the "historical proof preserved in `y0-1-disposition-report.md`" condition sufficient, or should the X gate's content be inlined into the new Y successor gate as a comment block?
 7. **§11 Y1.x sub-plan timing**: r2 §3 promotes Y1.1 + Y1.2 to P0 (Y0.7 + Y0.8). The other 4 Y1 rows remain P1. Codex r1 didn't object, codex r2 said NO to promoting Y1.5 — accepted. Should any other Y1 row be promoted given r3's tighter dogfood evidence schema?
-8. **§9.2.2 reproduction-window 50%-overlap-or-±30s**: is the 50% threshold correct? A 60s reproduction window with 50% overlap means logs that share only 30s with the window pass — is that too generous? Codex should challenge whether ±30s should be the only branch (no 50% fallback).
-9. **§9.2 `bai_spotcheck.performed_at` 14-day window**: is 14 days too long? The agent baseline could capture state-X but 白 spot-checks state-X+14d worth of drift. Codex should challenge whether 7 days or even 72 hours is tighter.
-10. **§11.0a/§11.0b labeling vs §3 P0 status**: structurally, Y0.7 and Y0.8 are listed in §3.1 P0 rows but their scope locks live in §11. Should the scope locks be inlined into §3.1 instead, or is the §11 placement (mirroring how Y0.1-Y0.6 reference §6/§7/§8/§9/§10 for their scope locks) consistent? (Codex r3 answer: §11 placement is consistent; r3 kept it. r4 preserves.)
-11. **§11.0a/§11.0b naming idiomaticity** (codex r3 R2 risk + must-fix #4 — Q11 explicit per codex r3 ruling): codex r3 recommended renaming to standard integer subsections (§11.1 Y0.8, §11.2 Y0.7, shifting old §11.1/§11.2 to §11.3/§11.4) but marked as should-fix not must-fix. r4 kept §11.0a/§11.0b naming with the explicit downstream-reference legend in §11.2 RESERVED to avoid churn through all earlier `§11.1/§11.2` references in committed history. Codex r4 round should confirm or challenge this trade-off (renumber-now vs lock-naming-now).
+8. **§9.2.2 50% overlap fallback (RESOLVED at r4)**: codex r3 ruled the 50% fallback is too generous; r4 removed it. Only ±30s strict overlap remains. NO open question.
+9. **§9.2 `bai_spotcheck.performed_at` window (RESOLVED at r4)**: codex r3 ruled 14d is too long; r4 tightened to 72h with same-build_commit fallback for longer windows. NO open question.
+10. **§11.0a/§11.0b labeling vs §3 P0 status (RESOLVED at r3)**: codex r3 ruled §11 placement is consistent (mirrors Y0.1-Y0.6 → §6-§10 pattern). NO open question.
+11. **§11.0a/§11.0b naming idiomaticity (neutral framing at r5; codex r4 P2 accepted current naming)**: r4 kept current §11.0a/§11.0b naming. Codex r4 P2 #2 ruled "consider renumbering... but not required if the current legend is cleaned up". r5 cleaned the legend (§11.2 RESERVED now explicitly cross-references §4.3 + §13 + §11.0b). NEUTRAL FRAMING: the keep-vs-renumber trade-off is reader-clarity-now vs commit-history-stability vs future-stage-consistency. If codex r5 round still prefers renumbering despite legend cleanup, please specify the concrete reader-confusion scenarios that the legend does not cover.
