@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, type RefObject } from 'react'
-import type { BrowserBoundsSyncMode, BrowserHostLayoutPhase, BrowserViewRect } from '../../../shared/browser-view-layout'
+import type { BrowserBoundsSyncMode, BrowserHostLayoutPhase } from '../../../shared/browser-view-layout'
+import { nextIntentId } from '../../../shared/browser-view-intent'
 import { subscribeWorkbenchWindowResize } from '../workbench/windowResize'
 import { PANEL_RESIZE_STATE_EVENT, type PanelResizeReason, type PanelResizeStateDetail } from './resize-events'
 
@@ -148,21 +149,29 @@ export function useBrowserViewBounds({
     if (!options?.forceExact && lastBoundsKeyRef.current === boundsKey) return
 
     lastBoundsKeyRef.current = boundsKey
-    const secondaryBounds: BrowserViewRect | null = splitBounds
-      ? {
-          x: splitBounds.x,
-          y: splitBounds.y,
-          width: splitBounds.width,
-          height: splitBounds.height,
-        }
-      : null
-    await window.electronAPI?.browser?.updateBounds({
-      ...bounds,
-      tabId: activeTabId ?? null,
-      secondaryTabId: secondaryBounds ? splitTabId ?? null : null,
-      secondaryBounds,
-      syncMode: resolvedSyncMode,
-    })
+
+    // Stage X4 PR-shell-1 — emit declarative BrowserViewIntent. Primary
+    // and (when split is active and a secondary pane was measured)
+    // secondary fire within the same call so the main side applies both
+    // in one tick.
+    if (activeTabId) {
+      window.electronAPI?.browser?.sendIntent({
+        kind: 'set-bounds',
+        intentId: nextIntentId(),
+        tabId: activeTabId,
+        bounds: { x: bounds.x, y: bounds.y, w: bounds.width, h: bounds.height },
+        syncMode: resolvedSyncMode,
+      })
+    }
+    if (splitBounds && splitTabId && splitTabId !== activeTabId) {
+      window.electronAPI?.browser?.sendIntent({
+        kind: 'secondary-set-bounds',
+        intentId: nextIntentId(),
+        tabId: splitTabId,
+        bounds: { x: splitBounds.x, y: splitBounds.y, w: splitBounds.width, h: splitBounds.height },
+        syncMode: resolvedSyncMode,
+      })
+    }
   }, [activeTabId, measureBounds, measureSplitBounds, splitTabId])
 
   const stopDragBoundsSync = useCallback(() => {
@@ -251,18 +260,31 @@ export function useBrowserViewBounds({
 
     const requestToken = ++visibilitySyncTokenRef.current
 
+    // Stage X4 PR-shell-1 — emit declarative `hide-all` intent instead
+    // of directly calling main-side hideAll. Reason classifier maps the
+    // phase: explicit hidden / inactive / blocked / overlay-lock all
+    // collapse onto `overlay-open` (the closest existing reason); a
+    // dedicated `mode-inactive` reason can be added later if needed.
+    const emitHideAll = () => {
+      window.electronAPI?.browser?.sendIntent({
+        kind: 'hide-all',
+        intentId: nextIntentId(),
+        reason: 'overlay-open',
+      })
+    }
+
     if (phase === 'hidden') {
-      window.electronAPI?.browser?.hideAll()
+      emitHideAll()
       return
     }
 
     if (!isActiveRef.current) {
-      window.electronAPI?.browser?.hideAll()
+      emitHideAll()
       return
     }
 
     if (!isVisibleAllowedRef.current) {
-      window.electronAPI?.browser?.hideAll()
+      emitHideAll()
       return
     }
 
@@ -270,7 +292,7 @@ export function useBrowserViewBounds({
       !hasErrorRef.current && overlayLockCountRef.current === 0
 
     if (!hostVisibleRef.current || !shouldShowBrowserView) {
-      window.electronAPI?.browser?.hideAll()
+      emitHideAll()
       return
     }
 
@@ -294,12 +316,23 @@ export function useBrowserViewBounds({
     const shouldStillShowBrowserView =
       !hasErrorRef.current && overlayLockCountRef.current === 0
     if (!isActiveRef.current || !isVisibleAllowedRef.current || !hostVisibleRef.current || !shouldStillShowBrowserView) {
-      window.electronAPI?.browser?.hideAll()
+      emitHideAll()
       return
     }
 
-    await window.electronAPI?.browser?.showActive()
-  }, [hostVisibleRef, isElectron, sendBoundsImmediate])
+    if (activeTabId) {
+      const measured = measureBounds()
+      window.electronAPI?.browser?.sendIntent({
+        kind: 'show',
+        intentId: nextIntentId(),
+        tabId: activeTabId,
+        bounds: measured
+          ? { x: measured.x, y: measured.y, w: measured.width, h: measured.height }
+          : { x: 0, y: 0, w: 0, h: 0 },
+        reason: 'tab-activate',
+      })
+    }
+  }, [activeTabId, hostVisibleRef, isElectron, measureBounds, sendBoundsImmediate])
 
   const scheduleHostRecovery = useCallback(() => {
     if (!isElectron || !isActiveRef.current || !isVisibleAllowedRef.current) return

@@ -12,10 +12,16 @@ test('BrowserView show/hide decisions are consolidated inside useBrowserViewBoun
   const workbenchMode = readWorkspaceFile('src/renderer/pages/WorkbenchMode.tsx')
   const browserMode = readWorkspaceFile('src/renderer/pages/modes/BrowserMode.tsx')
 
-  // Hook: !isActive must hide before returning (no silent early-return).
+  // Stage X4 PR-shell-1 — Hook: !isActive must hide via the
+  // BrowserViewIntent boundary (`emitHideAll()` → `hide-all` intent)
+  // before returning. No silent early-return; no direct `browser.hideAll()`.
   assert.match(
     hook,
-    /if \(!isActiveRef\.current\) \{\s*window\.electronAPI\?\.browser\?\.hideAll\(\)\s*return\s*\}/,
+    /if \(!isActiveRef\.current\) \{\s*emitHideAll\(\)\s*return\s*\}/,
+  )
+  assert.match(
+    hook,
+    /sendIntent\(\{[\s\S]*kind: 'hide-all'[\s\S]*reason: 'overlay-open'[\s\S]*\}\)/,
   )
   // Hook: reactive effect re-fires syncBrowserVisibility when isActive or isVisibleAllowed flip.
   assert.match(
@@ -30,8 +36,14 @@ test('BrowserView show/hide decisions are consolidated inside useBrowserViewBoun
   )
   // WorkbenchMode: the visibleModes effect that duplicated hideAll is gone.
   assert.doesNotMatch(workbenchMode, /if \(!visibleModes\.includes\('browser'\)\) \{[\s\S]*?hideAll/)
-  // WorkbenchMode: unmount cleanup hideAll is preserved.
-  assert.match(workbenchMode, /useEffect\(\(\) => \{\s*return \(\) => \{\s*void window\.electronAPI\?\.browser\.hideAll\(\)/)
+  // Stage X4 PR-shell-1 — WorkbenchMode unmount cleanup emits a
+  // `hide-all` BrowserViewIntent (reason = `mode-switch-prepare`) in
+  // place of the legacy direct `browser.hideAll()` call.
+  assert.match(
+    workbenchMode,
+    /useEffect\(\(\) => \{\s*return \(\) => \{[\s\S]*sendIntent\(\{[\s\S]*kind: 'hide-all'[\s\S]*reason: 'mode-switch-prepare'/,
+  )
+  assert.doesNotMatch(workbenchMode, /window\.electronAPI\?\.browser\.hideAll\(\)/)
 
   // BrowserMode: the !isMotionSettled effect that redundantly hid the view is gone.
   assert.doesNotMatch(browserMode, /if \(!isElectron \|\| isMotionSettled\) return[\s\S]{0,80}hideAll/)

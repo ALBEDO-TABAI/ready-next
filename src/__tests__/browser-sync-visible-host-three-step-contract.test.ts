@@ -39,7 +39,10 @@ test('syncBrowserVisibility internalises bounds sync + double rAF when called as
     boundsHook,
     /phaseOrOptions\?: 'hidden' \| 'visible' \| \{ forceExact\?: boolean; syncMode\?: BrowserBoundsSyncMode; forceBoundsSync\?: boolean \}/,
   )
-  assert.match(boundsHook, /if \(phase === 'hidden'\) \{\s*window\.electronAPI\?\.browser\?\.hideAll\(\)/)
+  // Stage X4 PR-shell-1 — `hide-all` now goes through the
+  // BrowserViewIntent boundary instead of a direct `browser.hideAll()`.
+  assert.match(boundsHook, /if \(phase === 'hidden'\) \{\s*emitHideAll\(\)/)
+  assert.match(boundsHook, /sendIntent\(\{[\s\S]*kind: 'hide-all'[\s\S]*reason: 'overlay-open'[\s\S]*\}\)/)
   assert.match(
     boundsHook,
     /if \(options\.forceBoundsSync\) \{[\s\S]*window\.requestAnimationFrame\(\(\) => window\.requestAnimationFrame\(\(\) => resolve\(\)\)\)/,

@@ -1293,6 +1293,44 @@ export class BrowserController {
     return this.tabShellService.showActiveHost()
   }
 
+  /**
+   * Stage X4 PR-shell-1 — single intent boundary. Renderer pushes
+   * declarative BrowserViewIntent through `browser:intent`; this method
+   * is the only writer onto `tabShellService.applyIntent`. For
+   * `hide-all` and `show` intents we go through the same visibility
+   * monotonic-id gate used by the legacy preload endpoints so that ack
+   * ordering remains intact for PR-shell-2.
+   */
+  applyBrowserViewIntent(intent: import('../../../shared/browser-view-intent').BrowserViewIntent): { success: boolean } {
+    if (intent.kind === 'hide-all') {
+      if (!this.browserVisibilityState.applyHide(intent.intentId)) {
+        return { success: true }
+      }
+      this.logBrowserDiag(`[browser-host][intent] hide-all intentId=${intent.intentId} reason=${intent.reason}`)
+      return this.tabShellService.applyIntent(intent)
+    }
+    if (intent.kind === 'show') {
+      if (!this.browserVisibilityState.applyShow(intent.intentId)) {
+        return { success: true }
+      }
+      this.logBrowserDiag(`[browser-host][intent] show intentId=${intent.intentId} tab=${intent.tabId} reason=${intent.reason}`)
+      return this.tabShellService.applyIntent(intent)
+    }
+    if (intent.kind === 'hide') {
+      this.logBrowserDiag(`[browser-host][intent] hide intentId=${intent.intentId} tab=${intent.tabId} reason=${intent.reason}`)
+      return this.tabShellService.applyIntent(intent)
+    }
+    if (intent.kind === 'set-bounds') {
+      this.logBrowserDiag(`[browser-host][intent] set-bounds intentId=${intent.intentId} tab=${intent.tabId} x=${intent.bounds.x} y=${intent.bounds.y} w=${intent.bounds.w} h=${intent.bounds.h}`)
+      return this.tabShellService.applyIntent(intent)
+    }
+    if (intent.kind === 'secondary-set-bounds') {
+      this.logBrowserDiag(`[browser-host][intent] secondary-set-bounds intentId=${intent.intentId} tab=${intent.tabId} x=${intent.bounds.x} y=${intent.bounds.y} w=${intent.bounds.w} h=${intent.bounds.h}`)
+      return this.tabShellService.applyIntent(intent)
+    }
+    return { success: false }
+  }
+
   async fitActiveTabToBounds(tabId?: string | null): Promise<{ success: boolean; zoomFactor?: number; error?: string }> {
     try {
       const { view } = this.resolveTabView(tabId || null)

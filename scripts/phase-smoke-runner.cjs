@@ -60,19 +60,23 @@ function isElectronEnvAvailable() {
 }
 
 // Browser smoke — assert preload exposes the BrowserView IPC surface.
+//
+// Stage X4 PR-shell-1 — the legacy `browser:hideAll/showActive/updateBounds`
+// channels are retired and replaced by the single `browser:intent`
+// BrowserViewIntent boundary (+ `browser:intent-ack` echo). Smoke now
+// asserts the new surface; `createTab` is unchanged.
 function runBrowserSmoke() {
   const preloadPath = path.join(REPO, 'src/preload/index.ts')
   if (!fs.existsSync(preloadPath)) return { ok: false, reason: `preload entry not found at ${preloadPath}` }
   const src = fs.readFileSync(preloadPath, 'utf8')
   const required = [
     { name: 'browser:createTab', regex: /ipcRenderer\.invoke\(\s*['"]browser:createTab['"]/ },
-    { name: 'browser:updateBounds', regex: /ipcRenderer\.send\(\s*['"]browser:updateBounds['"]/ },
-    { name: 'browser:hideAll', regex: /ipcRenderer\.invoke\(\s*['"]browser:hideAll['"]/ },
-    { name: 'browser:showActive', regex: /ipcRenderer\.invoke\(\s*['"]browser:showActive['"]/ },
+    { name: 'browser:intent (BrowserViewIntent push)', regex: /ipcRenderer\.send\(\s*BROWSER_VIEW_INTENT_CHANNEL/ },
+    { name: 'browser:intent-ack listener', regex: /ipcRenderer\.on\(\s*['"]browser:intent-ack['"]/ },
   ]
   const missing = required.filter((r) => !r.regex.test(src)).map((r) => r.name)
   if (missing.length > 0) return { ok: false, reason: `preload missing browser IPC channels: ${missing.join(', ')}` }
-  return { ok: true, info: 'browser IPC surface (createTab/updateBounds/showActive/hideAll) wired' }
+  return { ok: true, info: 'browser IPC surface (createTab + BrowserViewIntent boundary) wired' }
 }
 
 // Agent smoke — mocked LLM provider drives one send; close event must be done.

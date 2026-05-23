@@ -20,6 +20,7 @@ import { PANEL_RESIZE_STATE_EVENT, type PanelResizeStateDetail } from '../module
 import { freezeVisibleDocumentLayoutWidths } from '../modules/document/documentLayoutFreeze'
 import { readStorage } from '../utils/storage'
 import type { BrowserHostLayoutPhase } from '../../shared/browser-view-layout'
+import { nextIntentId } from '../../shared/browser-view-intent'
 import { withRitual, setPanelResizingSignal } from '../modules/overlay/useRitualOverlay'
 
 const MIN_SIDE_PANEL_WIDTH = 220
@@ -389,7 +390,14 @@ export default function WorkbenchMode() {
 
   useEffect(() => {
     return () => {
-      void window.electronAPI?.browser.hideAll()
+      // Stage X4 PR-shell-1 — unmount cleanup hides all hosts via the
+      // BrowserViewIntent boundary; reason = `mode-switch-prepare`
+      // because the renderer is tearing down its mode-aware shell.
+      window.electronAPI?.browser?.sendIntent({
+        kind: 'hide-all',
+        intentId: nextIntentId(),
+        reason: 'mode-switch-prepare',
+      })
     }
   }, [])
 

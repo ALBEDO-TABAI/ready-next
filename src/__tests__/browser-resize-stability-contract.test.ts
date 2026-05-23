@@ -56,11 +56,17 @@ test('browser bounds syncing bypasses the extra renderer rAF during active drag 
 test('high-frequency browser bounds syncing uses a fire-and-forget IPC path instead of waiting on invoke round-trips', () => {
   const preload = readWorkspaceFile('src/preload/index.ts')
   const ipcShell = readWorkspaceFile('src/main/modules/browser-engine/ipc-shell.ts')
-  const electronTypes = readWorkspaceFile('src/renderer/types/electron.d.ts')
+  const boundsHook = readWorkspaceFile('src/renderer/modules/browser/useBrowserViewBounds.ts')
 
-  assert.match(preload, /updateBounds:\s*\(bounds: \{[\s\S]*x: number[\s\S]*y: number[\s\S]*width: number[\s\S]*height: number[\s\S]*syncMode\?: BrowserBoundsSyncMode[\s\S]*\}\)\s*=>\s*\{[\s\S]*ipcRenderer\.send\('browser:updateBounds', bounds\)/)
-  assert.match(electronTypes, /syncMode\?: BrowserBoundsSyncMode/)
-  assert.match(ipcShell, /ipcMain\.on\('browser:updateBounds', \(_, bounds: BrowserViewBoundsUpdate\) => \{/)
+  // Stage X4 PR-shell-1 — bounds now flow through the
+  // BrowserViewIntent boundary as `set-bounds` / `secondary-set-bounds`
+  // intents on the single `browser:intent` push channel. The legacy
+  // `browser:updateBounds` send channel is retired per plan §9.
+  assert.match(preload, /sendIntent:\s*\(intent: BrowserViewIntent\)[\s\S]*ipcRenderer\.send\(BROWSER_VIEW_INTENT_CHANNEL, intent\)/)
+  assert.match(boundsHook, /sendIntent\(\{[\s\S]*kind: 'set-bounds'[\s\S]*syncMode: resolvedSyncMode[\s\S]*\}\)/)
+  assert.match(ipcShell, /ipcMain\.on\(BROWSER_VIEW_INTENT_CHANNEL,\s*\(event, intent: BrowserViewIntent\)\s*=>\s*\{/)
+  assert.doesNotMatch(preload, /browser:updateBounds/)
+  assert.doesNotMatch(ipcShell, /browser:updateBounds/)
 })
 
 test('browser mode surface readiness uses captureStableFrame and hides chrome jank via the shared ritual overlay instead of per-mode freeze frames', () => {

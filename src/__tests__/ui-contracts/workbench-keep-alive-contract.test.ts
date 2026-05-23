@@ -65,8 +65,15 @@ test('workbench shell hides all browser hosts on unmount (show/hide during mode 
   // so WorkbenchMode no longer needs the visibleModes effect.
   assert.doesNotMatch(workbenchMode, /const visibleModes = \[workbenchMode, splitMode\]\.filter\(Boolean\)/)
   assert.doesNotMatch(workbenchMode, /if \(!visibleModes\.includes\('browser'\)\) \{[\s\S]*void window\.electronAPI\?\.browser\.hideAll\(\)/)
-  // Unmount cleanup is still the last-resort guard against stale native overlays.
-  assert.match(workbenchMode, /useEffect\(\(\) => \{[\s\S]*return \(\) => \{[\s\S]*void window\.electronAPI\?\.browser\.hideAll\(\)/)
+  // Stage X4 PR-shell-1 — Unmount cleanup emits the `hide-all`
+  // BrowserViewIntent (reason = `mode-switch-prepare`) in place of the
+  // legacy direct `browser.hideAll()` call. This stays the last-resort
+  // guard against stale native overlays.
+  assert.match(
+    workbenchMode,
+    /useEffect\(\(\) => \{[\s\S]*return \(\) => \{[\s\S]*sendIntent\(\{[\s\S]*kind: 'hide-all'[\s\S]*reason: 'mode-switch-prepare'/,
+  )
+  assert.doesNotMatch(workbenchMode, /browser\.hideAll\(\)/)
   assert.doesNotMatch(workbenchMode, /browser\.hideActiveHost\(\)/)
 })
 

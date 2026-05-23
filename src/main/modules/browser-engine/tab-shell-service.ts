@@ -1,5 +1,10 @@
 import type { BrowserBoundsSyncMode, BrowserHostView, BrowserRect, BrowserViewBoundsUpdate } from './host-types'
 import { isReadyBrowserBlankUrl } from '../../../shared/browser-defaults'
+import type { BrowserViewIntent, Rect } from '../../../shared/browser-view-intent'
+
+function rectToBrowserRect(rect: Rect): BrowserRect {
+  return { x: rect.x, y: rect.y, width: rect.w, height: rect.h }
+}
 
 interface BrowserShellNavigationHistory {
   canGoBack(): boolean
@@ -250,6 +255,64 @@ export class BrowserTabShellService {
       }
     }
     return { success: true }
+  }
+
+  /**
+   * Stage X4 PR-shell-1 — single decision point that maps every renderer
+   * BrowserViewIntent to existing BrowserView API calls. Renderer no
+   * longer calls `hideAll/showActive/updateBounds` directly; all 5 intent
+   * kinds funnel through here.
+   */
+  applyIntent(intent: BrowserViewIntent): { success: boolean } {
+    switch (intent.kind) {
+      case 'hide-all':
+        return this.hideAllHosts()
+      case 'show': {
+        const tab = this.host.tabs.get(intent.tabId)
+        if (!tab?.view) return { success: false }
+        const bounds = rectToBrowserRect(intent.bounds)
+        this.host.setViewBounds(bounds)
+        if (this.host.shouldPresentHosts()) {
+          this.host.showHost(tab.view, bounds)
+          this.host.applyBounds(tab.view, 'settled', bounds)
+        }
+        return { success: true }
+      }
+      case 'hide': {
+        const tab = this.host.tabs.get(intent.tabId)
+        if (!tab?.view) return { success: false }
+        this.host.hideHost(tab.view)
+        return { success: true }
+      }
+      case 'set-bounds': {
+        const bounds = rectToBrowserRect(intent.bounds)
+        const syncMode: BrowserBoundsSyncMode = intent.syncMode ?? 'settled'
+        this.host.setViewBounds(bounds)
+        if (!this.host.shouldPresentHosts()) return { success: true }
+        const tab = this.host.tabs.get(intent.tabId)
+        if (tab?.view) {
+          this.host.applyBounds(tab.view, syncMode, bounds)
+        }
+        return { success: true }
+      }
+      case 'secondary-set-bounds': {
+        const bounds = rectToBrowserRect(intent.bounds)
+        const syncMode: BrowserBoundsSyncMode = intent.syncMode ?? 'settled'
+        this.host.setSplitTabId(intent.tabId)
+        this.host.setSplitViewBounds(bounds)
+        if (!this.host.shouldPresentHosts()) return { success: true }
+        const tab = this.host.tabs.get(intent.tabId)
+        if (tab?.view) {
+          this.host.applyBounds(tab.view, syncMode, bounds)
+        }
+        return { success: true }
+      }
+      default: {
+        const _exhaustive: never = intent
+        void _exhaustive
+        return { success: false }
+      }
+    }
   }
 
   showActiveHost(): { success: boolean } {

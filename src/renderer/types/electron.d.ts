@@ -1,6 +1,6 @@
 import type { BrowserDiagnosticsData } from '../modules/browser/types'
 import type { BrowserUtilityMenuRequest } from '../../shared/browser-utility-menu'
-import type { BrowserBoundsSyncMode } from '../../shared/browser-view-layout'
+import type { BrowserViewIntent, BrowserViewIntentAck } from '../../shared/browser-view-intent'
 import type { NativeContextMenuRequest, NativeContextMenuResponse } from '../../shared/native-context-menu'
 import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runtime'
 import type { RendererAgentMetricName } from '../../shared/renderer-agent-metrics'
@@ -1192,24 +1192,12 @@ interface ElectronBrowserAPI {
   goBack: (tabId: string) => Promise<{ success: boolean; error?: string }>
   goForward: (tabId: string) => Promise<{ success: boolean; error?: string }>
   reload: (tabId: string) => Promise<{ success: boolean; error?: string }>
-  updateBounds: (bounds: {
-    x: number
-    y: number
-    width: number
-    height: number
-    tabId?: string | null
-    secondaryTabId?: string | null
-    secondaryBounds?: {
-      x: number
-      y: number
-      width: number
-      height: number
-    } | null
-    syncMode?: BrowserBoundsSyncMode
-  }) => Promise<{ success: boolean }>
-  hideAll: () => Promise<{ success: boolean }>
-  hideActiveHost: () => Promise<{ success: boolean }>
-  showActive: () => Promise<{ success: boolean }>
+  // Stage X4 PR-shell-1 — BrowserViewIntent boundary. Renderer pushes
+  // declarative intents through `browser:intent`; main is the single
+  // decision point. Replaces direct `updateBounds`, `hideAll`,
+  // `showActive`, `hideActiveHost` calls.
+  sendIntent: (intent: BrowserViewIntent) => { success: true }
+  onIntentAck: (callback: (ack: BrowserViewIntentAck) => void) => () => void
   fitActiveTabToBounds: (
     tabId?: string | null
   ) => Promise<{ success: boolean; zoomFactor?: number; error?: string }>

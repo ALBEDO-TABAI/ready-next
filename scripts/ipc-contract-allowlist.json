@@ -3,12 +3,6 @@
   "$identity": "Stage V V5 IPC contract gate allowlist. Each top-level array (other than non_literal_push) holds objects of shape { channel, reason, owner, expiry }. non_literal_push entries are { callsite: 'file:line', variable, channels[], reason, owner, expiry }. expiry is YYYY-MM-DD; expired entries fail the gate.",
   "invoke_only": [
     {
-      "channel": "browser:updateBounds",
-      "reason": "Channel is dual-registered as ipcMain.handle + ipcMain.on in src/main/modules/browser-engine/ipc-shell.ts:152-157; renderer (src/preload/index.ts:337) only uses ipcRenderer.send (fire-and-forget bounds sync per CLAUDE.md §2 BrowserView overlay rule). The orphan handle() pre-dates the fire-and-forget migration and is retained as a defensive request/response stub. Stage-W will remove the legacy handle() registration.",
-      "owner": "stage-v-bootstrap",
-      "expiry": "2026-08-21"
-    },
-    {
       "channel": "browser:previewUpdateBounds",
       "reason": "Same dual-registration pattern as browser:updateBounds at src/main/modules/browser-engine/ipc-shell.ts:217-226; renderer (src/preload/index.ts:360) uses ipcRenderer.send. Legacy handle() to be removed in stage-W cleanup.",
       "owner": "stage-v-bootstrap",
@@ -119,18 +113,18 @@
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:1403",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:1441",
       "variable": "channel",
       "channels": ["clip:backgroundUpdate"],
-      "reason": "Forwarder passed to setupBrowserClipDraggedTabIPC; the runner emits literal 'clip:backgroundUpdate' (clip-dragged-tab-runner.ts:304).",
+      "reason": "Forwarder passed to setupBrowserClipDraggedTabIPC; the runner emits literal 'clip:backgroundUpdate' (clip-dragged-tab-runner.ts:304). Line shifted from 1403 by Stage X4 PR-shell-1 BrowserViewIntent boundary addition.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },
     {
-      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:1406",
+      "callsite": "src/main/modules/browser-engine/ipc-handler.ts:1444",
       "variable": "channel",
       "channels": ["clip:contentStudyUpdate"],
-      "reason": "Forwarder passed to setupBrowserContentStudyIPC; the runner emits literal 'clip:contentStudyUpdate' (content-study-runner.ts:409) plus the spy-wrapped emit at content-study-runner.ts:182 (separately allowlisted below).",
+      "reason": "Forwarder passed to setupBrowserContentStudyIPC; the runner emits literal 'clip:contentStudyUpdate' (content-study-runner.ts:409) plus the spy-wrapped emit at content-study-runner.ts:182 (separately allowlisted below). Line shifted from 1406 by Stage X4 PR-shell-1 BrowserViewIntent boundary addition.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },

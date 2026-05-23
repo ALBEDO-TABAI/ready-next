@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
-import type { BrowserBoundsSyncMode } from '../shared/browser-view-layout'
+import {
+  BROWSER_VIEW_INTENT_ACK_CHANNEL,
+  BROWSER_VIEW_INTENT_CHANNEL,
+  type BrowserViewIntent,
+  type BrowserViewIntentAck,
+} from '../shared/browser-view-intent'
 import type { BrowserUtilityMenuRequest } from '../shared/browser-utility-menu'
 import type { NativeContextMenuRequest } from '../shared/native-context-menu'
 import type { RendererAgentMetricName } from '../shared/renderer-agent-metrics'
@@ -320,8 +325,6 @@ const memoryLifecycleAPI = {
 }
 
 // Browser API
-let browserVisibilityCommandId = 0
-
 const browserAPI = {
   createTab: (url: string) => ipcRenderer.invoke('browser:createTab', url),
   openForCaptureTarget: (url: string) => ipcRenderer.invoke('browser:openForCaptureTarget', url),
@@ -332,22 +335,20 @@ const browserAPI = {
   goBack: (tabId: string) => ipcRenderer.invoke('browser:goBack', tabId),
   goForward: (tabId: string) => ipcRenderer.invoke('browser:goForward', tabId),
   reload: (tabId: string) => ipcRenderer.invoke('browser:reload', tabId),
-  updateBounds: (bounds: {
-    x: number
-    y: number
-    width: number
-    height: number
-    tabId?: string | null
-    secondaryTabId?: string | null
-    secondaryBounds?: { x: number; y: number; width: number; height: number } | null
-    syncMode?: BrowserBoundsSyncMode
-  }) => {
-    ipcRenderer.send('browser:updateBounds', bounds)
-    return Promise.resolve({ success: true })
+  // Stage X4 PR-shell-1 — BrowserViewIntent boundary. Renderer pushes
+  // declarative intents; main is the single decision point. Replaces
+  // direct `updateBounds/hideAll/showActive/hideActiveHost` calls.
+  sendIntent: (intent: BrowserViewIntent) => {
+    ipcRenderer.send(BROWSER_VIEW_INTENT_CHANNEL, intent)
+    return { success: true as const }
   },
-  hideAll: () => ipcRenderer.invoke('browser:hideAll', { requestId: ++browserVisibilityCommandId }),
-  hideActiveHost: () => ipcRenderer.invoke('browser:hideActiveHost', { requestId: ++browserVisibilityCommandId }),
-  showActive: () => ipcRenderer.invoke('browser:showActive', { requestId: ++browserVisibilityCommandId }),
+  onIntentAck: (callback: (ack: BrowserViewIntentAck) => void) => {
+    const handler = (_: IpcRendererEvent, ack: BrowserViewIntentAck): void => callback(ack)
+    // Literal channel name — keep in sync with BROWSER_VIEW_INTENT_ACK_CHANNEL
+    // (the IPC contract gate's literal-PUSH scanner requires a literal here).
+    ipcRenderer.on('browser:intent-ack', handler)
+    return () => ipcRenderer.removeListener('browser:intent-ack', handler)
+  },
   fitActiveTabToBounds: (tabId?: string | null) => ipcRenderer.invoke('browser:fitActiveTabToBounds', tabId),
   captureWindowSnapshot: (bounds: { x: number; y: number; width: number; height: number }) =>
     ipcRenderer.invoke('browser:captureWindowSnapshot', bounds),

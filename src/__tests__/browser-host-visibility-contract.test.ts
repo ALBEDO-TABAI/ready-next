@@ -28,15 +28,31 @@ test('browser host visibility is explicitly gated and browser bounds keep Browse
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
   const styles = readWorkspaceFile('src/renderer/styles/index.css')
 
-  assert.match(preload, /let browserVisibilityCommandId = 0/)
-  assert.match(preload, /hideAll:\s*\(\)\s*=> ipcRenderer\.invoke\('browser:hideAll', \{ requestId: \+\+browserVisibilityCommandId \}\)/)
-  assert.match(electronTypes, /hideAll:\s*\(\)\s*=> Promise<\{ success: boolean \}>/)
-  assert.match(preload, /showActive:\s*\(\)\s*=> ipcRenderer\.invoke\('browser:showActive', \{ requestId: \+\+browserVisibilityCommandId \}\)/)
+  // Stage X4 PR-shell-1 — visibility goes through the single
+  // BrowserViewIntent boundary on `browser:intent`. The legacy
+  // `browser:hideAll`/`browser:showActive`/`browser:hideActiveHost`
+  // channels and the `browserVisibilityCommandId` counter are retired
+  // per plan §9 PR-shell-1 + CLAUDE.md §0.5 "拒绝 legacy 兼容分支".
+  assert.match(preload, /sendIntent:\s*\(intent: BrowserViewIntent\)\s*=>\s*\{[\s\S]*ipcRenderer\.send\(BROWSER_VIEW_INTENT_CHANNEL, intent\)/)
+  assert.match(preload, /onIntentAck:\s*\(callback:[\s\S]*\(ack: BrowserViewIntentAck\)[\s\S]*ipcRenderer\.on\('browser:intent-ack', handler\)/)
+  assert.match(electronTypes, /sendIntent:\s*\(intent: BrowserViewIntent\)\s*=>\s*\{ success: true \}/)
   assert.match(preload, /showUtilityMenu:\s*\(payload: BrowserUtilityMenuRequest\)\s*=> ipcRenderer\.invoke\('browser:showUtilityMenu', payload\)/)
   assert.match(electronTypes, /showUtilityMenu:\s*\(payload: BrowserUtilityMenuRequest\)\s*=> Promise<\{ success: boolean; error\?: string \}>/)
+  assert.match(ipcShell, /ipcMain\.on\(BROWSER_VIEW_INTENT_CHANNEL,\s*\(event, intent: BrowserViewIntent\)\s*=>\s*\{[\s\S]*controller\.applyBrowserViewIntent\(intent\)/)
+  assert.match(ipcShell, /event\.sender\.send\('browser:intent-ack',\s*\{ intentId: intent\.intentId \}\)/)
+  // Legacy preload + ipc-shell channels must NOT come back.
+  assert.doesNotMatch(preload, /browser:hideAll/)
+  assert.doesNotMatch(preload, /browser:showActive/)
+  assert.doesNotMatch(preload, /browser:updateBounds/)
+  assert.doesNotMatch(preload, /let browserVisibilityCommandId = 0/)
+  assert.doesNotMatch(ipcShell, /ipcMain\.handle\('browser:hideAll'/)
+  assert.doesNotMatch(ipcShell, /ipcMain\.handle\('browser:showActive'/)
+  assert.doesNotMatch(ipcShell, /ipcMain\.handle\('browser:hideActiveHost'/)
+  assert.doesNotMatch(ipcShell, /ipcMain\.handle\('browser:updateBounds'/)
+  // hideAllHosts still exists on the controller — it is now invoked
+  // only via applyBrowserViewIntent's `hide-all` branch.
   assert.match(ipcShell, /hideAllHosts\(payload\?: \{ requestId\?: number \}\): \{ success: boolean \}/)
-  assert.match(ipcShell, /ipcMain\.handle\('browser:hideAll', \(_, payload\?: \{ requestId\?: number \}\) => controller\.hideAllHosts\(payload\)\)/)
-  assert.match(ipcShell, /ipcMain\.handle\('browser:showActive', \(_, payload\?: \{ requestId\?: number \}\) => controller\.showActiveHost\(payload\)\)/)
+  assert.match(ipcShell, /applyBrowserViewIntent\(intent: BrowserViewIntent\): \{ success: boolean \}/)
   assert.match(ipcData, /ipcMain\.handle\('browser:showUtilityMenu'/)
   assert.match(visibilityState, /export class BrowserVisibilityCommandState/)
   assert.match(visibilityState, /applyHide\(requestId\?: number \| null\): boolean/)
@@ -61,7 +77,10 @@ test('browser host visibility is explicitly gated and browser bounds keep Browse
   assert.match(boundsHook, /const visibilitySyncTokenRef = useRef\(0\)/)
   assert.match(boundsHook, /const resolvedSyncMode = options\?\.syncMode \?\? \(layoutPhaseRef\.current === 'idle' \? 'settled' : 'transient'\)/)
   assert.match(boundsHook, /const shouldShowBrowserView =\s*!hasError(?:Ref\.current)? && overlayLockCountRef\.current === 0/)
-  assert.match(boundsHook, /if \(!hostVisibleRef\.current \|\| !shouldShowBrowserView\) \{[\s\S]*window\.electronAPI\?\.browser\?\.hideAll\(\)/)
+  // PR-shell-1: visibility decisions now emit a `hide-all` BrowserViewIntent
+  // instead of calling `browser.hideAll()` directly.
+  assert.match(boundsHook, /if \(!hostVisibleRef\.current \|\| !shouldShowBrowserView\) \{[\s\S]*emitHideAll\(\)/)
+  assert.match(boundsHook, /sendIntent\(\{[\s\S]*kind: 'hide-all'[\s\S]*reason: 'overlay-open'[\s\S]*\}\)/)
   assert.match(boundsHook, /const requestToken = \+\+visibilitySyncTokenRef\.current/)
   assert.match(boundsHook, /if \(requestToken !== visibilitySyncTokenRef\.current\) return/)
   assert.match(boundsHook, /const HOST_RECOVERY_SETTLE_MS = 120/)
@@ -103,7 +122,11 @@ test('browser host visibility is explicitly gated and browser bounds keep Browse
   assert.doesNotMatch(browserMode, /activePanel,/)
   assert.doesNotMatch(boundsHook, /activePanel:/)
   assert.doesNotMatch(browserShellLayout, /BrowserSidePanel/)
-  assert.match(workbenchMode, /browser\.hideAll\(\)/)
+  // PR-shell-1: WorkbenchMode unmount cleanup emits a `hide-all`
+  // intent (reason = `mode-switch-prepare`) rather than calling
+  // `browser.hideAll()` directly.
+  assert.match(workbenchMode, /sendIntent\(\{[\s\S]*kind: 'hide-all'[\s\S]*reason: 'mode-switch-prepare'[\s\S]*\}\)/)
+  assert.doesNotMatch(workbenchMode, /browser\.hideAll\(\)/)
   assert.doesNotMatch(workbenchMode, /browser\.hideActiveHost\(\)/)
   assert.doesNotMatch(runtimeHook, /browser\?\.showActive\(\)/)
   assert.doesNotMatch(runtimeHook, /browser\?\.hideAll\(\)/)

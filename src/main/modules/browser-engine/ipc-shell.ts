@@ -1,5 +1,10 @@
 import { ipcMain } from 'electron'
 import type { BrowserViewBoundsUpdate } from '../../../shared/browser-view-layout'
+import {
+  BROWSER_VIEW_INTENT_ACK_CHANNEL,
+  BROWSER_VIEW_INTENT_CHANNEL,
+  type BrowserViewIntent,
+} from '../../../shared/browser-view-intent'
 
 interface BrowserShellView {
   webContents: {
@@ -58,6 +63,7 @@ interface BrowserShellIPCController {
   hideAllHosts(payload?: { requestId?: number }): { success: boolean }
   hideActiveHost(payload?: { requestId?: number }): { success: boolean }
   showActiveHost(payload?: { requestId?: number }): { success: boolean }
+  applyBrowserViewIntent(intent: BrowserViewIntent): { success: boolean }
   fitActiveTabToBounds(tabId?: string | null): Promise<{ success: boolean; zoomFactor?: number; error?: string }>
   captureWindowSnapshot(bounds: { x: number; y: number; width: number; height: number }): Promise<{ success: boolean; data?: string; error?: string }>
   captureViewportSnapshot(tabId?: string | null): Promise<{ success: boolean; data?: string; error?: string }>
@@ -149,17 +155,27 @@ export function setupBrowserShellIPC(controller: BrowserShellIPCController): voi
     }
   })
 
-  ipcMain.handle('browser:updateBounds', (_, bounds: BrowserViewBoundsUpdate) => {
-    return controller.updateViewBounds(bounds)
+  // Stage X4 PR-shell-1 — single BrowserViewIntent channel. Renderer
+  // pushes declarative intents; main echoes the intentId back on
+  // `browser:intent-ack` for ack-bearing intents (PR-shell-2 wires the
+  // round-trip for `hide-all`). The legacy hideAll / showActive /
+  // hideActiveHost / updateBounds channels are retired per CLAUDE.md
+  // §0.5 "拒绝 legacy 兼容分支".
+  //
+  // The ack push uses the literal `'browser:intent-ack'` string so the
+  // IPC-contract gate's PUSH scanner can correlate emitter and listener
+  // (it AST-walks for string literals; non-literal channel emit sites
+  // need allowlist entries).
+  ipcMain.on(BROWSER_VIEW_INTENT_CHANNEL, (event, intent: BrowserViewIntent) => {
+    controller.applyBrowserViewIntent(intent)
+    try {
+      // Literal channel name — keep in sync with
+      // BROWSER_VIEW_INTENT_ACK_CHANNEL in shared/browser-view-intent.ts.
+      event.sender.send('browser:intent-ack', { intentId: intent.intentId })
+    } catch {
+      // sender may be gone (window closed during in-flight intent); fine
+    }
   })
-  ipcMain.on('browser:updateBounds', (_, bounds: BrowserViewBoundsUpdate) => {
-    controller.updateViewBounds(bounds)
-  })
-
-  ipcMain.handle('browser:hideAll', (_, payload?: { requestId?: number }) => controller.hideAllHosts(payload))
-  ipcMain.handle('browser:hideActiveHost', (_, payload?: { requestId?: number }) => controller.hideActiveHost(payload))
-
-  ipcMain.handle('browser:showActive', (_, payload?: { requestId?: number }) => controller.showActiveHost(payload))
   ipcMain.handle('browser:fitActiveTabToBounds', async (_, tabId?: string | null) => {
     try {
       return await controller.fitActiveTabToBounds(tabId)
