@@ -56,6 +56,7 @@ export default function PersonalityEditor() {
 
   useEffect(() => {
     void loadPersonalities()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only loader; see Y1.3 sub-plan §3.1
   }, [])
 
   useEffect(() => {

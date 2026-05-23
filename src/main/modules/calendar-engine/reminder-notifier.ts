@@ -79,7 +79,6 @@ export function buildReminderBody(payload: ReminderFirePayload, nowSeconds: numb
 function defaultNotificationCtor(): NotificationCtor | null {
   // Lazy require so this module loads cleanly in non-Electron Node (tests).
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const electron = require('electron') as typeof import('electron')
     if (!electron.Notification) return null
     if (typeof electron.Notification.isSupported === 'function'

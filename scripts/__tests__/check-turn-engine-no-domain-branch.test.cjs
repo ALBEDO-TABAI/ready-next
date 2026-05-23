@@ -12,7 +12,6 @@ function extractPatterns() {
   const m = source.match(/const FORBIDDEN_PATTERNS = \[([\s\S]*?)\n\]/)
   if (!m) throw new Error('cannot find FORBIDDEN_PATTERNS in gate source')
   const stripped = m[1].replace(/\/\/[^\n]*/g, '').trim()
-  // eslint-disable-next-line no-new-func
   return (new Function(`return [${stripped}]`))()
 }
 

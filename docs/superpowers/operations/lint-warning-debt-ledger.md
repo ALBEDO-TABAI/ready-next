@@ -5,6 +5,8 @@
 > Total warnings on capture: **769** (0 errors)
 >
 > This ledger is the **only** authoritative budget for `scripts/check-lint-warning-budget.cjs`. Budgets start equal to the captured count for each rule; the budget script fails if any rule's live warning count exceeds its row's `Budget`. Lowering a `Budget` is encouraged once warnings are paid down — raising one requires an explicit row in the deferred-work ledger.
+>
+> **Y1.3 first batch (2026-05-24)**: 6 warnings burned (3 `(eslint-core)/unused-disable-directive` retired + 3 `react-hooks/exhaustive-deps` converted to documented disables). New live total: 765. Per-rule budgets updated in the table below. Plan: `docs/superpowers/plans/2026-05-23-Y1-3-warning-burn-implementation.md`.
 
 ## Area definitions
 
@@ -24,11 +26,11 @@ Other paths (none observed in this capture) would land in an `other` bucket; the
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
 | @typescript-eslint/no-explicit-any | 551 | 396 | 55 | 37 | 63 | 0 | 551 | TBD | n/a |
 | @typescript-eslint/no-unused-vars | 182 | 26 | 93 | 41 | 2 | 20 | 182 | TBD | n/a |
-| react-hooks/exhaustive-deps | 18 | 0 | 0 | 18 | 0 | 0 | 18 | TBD | n/a |
+| react-hooks/exhaustive-deps | 15 | 0 | 0 | 15 | 0 | 0 | 15 | Stage Y1.3.N | n/a |
 | react-refresh/only-export-components | 17 | 0 | 0 | 17 | 0 | 0 | 17 | TBD | n/a |
-| (eslint-core)/unused-disable-directive | 3 | 1 | 1 | 0 | 0 | 1 | 3 | TBD | n/a |
+| (eslint-core)/unused-disable-directive | 0 | 0 | 0 | 0 | 0 | 0 | 0 | retired (Y1.3) | n/a |
 
-Row total = 771 (matches `npm run lint:check` summary).
+Row total = 765 (matches `npm run lint:check` summary after Y1.3 first batch).
 
 Stage X2 raised the `@typescript-eslint/no-unused-vars` budget from 180 → 182 (renderer 39 → 41). The +2 are stale imports left in `src/renderer/components/agent/ChatPanel.tsx` after the X2 ChatPanel refactor (commit `9cda9c49` 起的 X2.1–X2.8 链路裁剪了大段 JSX 与导入；剩余的两条未使用导入与 X2 主目标——session/composer/provider recovery——无关，留作 Stage Y P1 warning-burn 一并清理)，符合 `react-hooks/exhaustive-deps` + `react-refresh/only-export-components` 之外的 Stage Y P1 burn 顺位。
 
@@ -36,9 +38,9 @@ Stage X2 raised the `@typescript-eslint/no-unused-vars` budget from 180 → 182 
 
 - **@typescript-eslint/no-explicit-any** — Dominated by `src/__tests__/` (396 of 551). Policy decision for the test slice lives in `lint-any-in-tests-policy.md`; the budget here covers all areas so non-test growth still fails CI.
 - **@typescript-eslint/no-unused-vars** — Concentrated in `src/main/` (93). Several entries are imports retained for type-narrowing in service constructors; cleanup should follow per-module ownership rather than a bulk pass.
-- **react-hooks/exhaustive-deps** — Renderer only (18). Each occurrence is a deliberate dependency-list omission, typically guarded by a ref. Convert to documented `// eslint-disable-next-line ... -- reason` rather than silent suppression when paying down.
+- **react-hooks/exhaustive-deps** — Renderer only (15 remaining after Y1.3 first batch burned 3). Each occurrence is a deliberate dependency-list omission, typically guarded by a ref. Convert to documented `// eslint-disable-next-line ... -- reason` rather than silent suppression when paying down. Y1.3 first batch retired 3 (DraggableModeSwitch.tsx + PersonalityEditor.tsx + UserProfileEditor.tsx); 15 remain across AskUserQuestionsCard / ChatPanel / ModelSelector / SXMonthGridEvent / MarkdownEditor / MarkdownSelectionToolbar / WidgetRenderer / GraphView / FileTree / SkillAskUserPrompt / DocumentMode / RSSMode — owned by subsequent Y1.3.N PRs per sub-plan §3.2.
 - **react-refresh/only-export-components** — Renderer only (17). These warn for non-component named exports from `*.tsx` files (utilities, context factories). Plan: extract helpers into sibling `.ts` files when refactoring rather than a sweeping move.
-- **(eslint-core)/unused-disable-directive** — Three stale `// eslint-disable-...` directives whose underlying rule no longer fires. Cheapest debt to retire; deferred so W2 does not mutate `src/`. ESLint emits these without a trailing rule id; the budget script identifies them via the message prefix `Unused eslint-disable directive`.
+- **(eslint-core)/unused-disable-directive** — All 3 retired by Y1.3 first batch (Budget = 0). The three sites were `scripts/__tests__/check-turn-engine-no-domain-branch.test.cjs:15`, `src/__tests__/legacy-agent-ipc-removed.test.ts:25`, and `src/main/modules/calendar-engine/reminder-notifier.ts:82`; underlying disabled rules (`no-new-func`, `ready/no-source-grep-test`, `@typescript-eslint/no-require-imports`) either are not configured in `eslint.config.mjs` or are scanned through a custom `Program`-level path that does not honor eslint-disable comments. ESLint emits these without a trailing rule id; the budget script identifies them via the message prefix `Unused eslint-disable directive`.
 
 ## Reconciliation rules
 

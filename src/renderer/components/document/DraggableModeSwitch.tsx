@@ -24,12 +24,16 @@ export default function DraggableModeSwitch({ mode, onChange }: DraggableModeSwi
   const isDraggingRef = useRef(false)
   const activePointerIdRef = useRef<number | null>(null)
 
-  // Sync with external mode prop
+  // Sync with external mode prop. `startSpringAnimation` is a
+  // `useCallback(() => …, [])` declared below with stable identity for the
+  // component lifetime, so omitting it from the deps array is intentional
+  // (re-running on every render would restart the animation needlessly).
   useEffect(() => {
     if (!isDraggingRef.current) {
       targetRef.current = mode === 'edit' ? 0 : 1
       startSpringAnimation()
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mode-only sync; see Y1.3 sub-plan §3.1
   }, [mode])
 
   // Spring animation loop
