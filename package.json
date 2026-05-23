@@ -27,6 +27,8 @@
     "verify:lint-budget": "node scripts/check-lint-warning-budget.cjs",
     "verify:meta-paths": "node scripts/check-verify-script-paths-current.cjs",
     "verify:stage-x-known-regressions": "node scripts/check-stage-x-known-regressions.cjs",
+    "verify:stage-y-p0-ledger": "node scripts/check-stage-y-p0-ledger.cjs",
+    "verify:stage-y-dogfood-evidence": "node scripts/check-stage-y-dogfood-evidence.cjs",
     "test": "npm run test:parallel && npm run test:serial-skill-child",
     "test:parallel": "node scripts/run-parallel-tests.cjs src/__tests__/*.test.ts",
     "test:serial-skill-child": "npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/skill-child-*.test.ts",
