@@ -26,51 +26,18 @@ test('happy path: real repo passes the X1.8 regression-retirement gate', () => {
   assert.equal(result.ok, true, `errors:\n  - ${result.errors.join('\n  - ')}`)
 })
 
-test('ledger breakage: removing a retired-gate ledger row must fail the gate (stage-r-verify-switch)', () => {
-  const fakeRoot = mkFakeRoot()
-  try {
-    const ledgerAbs = path.join(fakeRoot, LEDGER_REL)
-    const original = fs.readFileSync(ledgerAbs, 'utf8')
-    // Strip the table row containing the still-retired stage-r-verify-switch
-    // ledger key. (The sqlite row was previously the sentinel here but Stage
-    // Y0.1.1 path-(a) re-armed the sqlite gate; the live verify:k invocation
-    // is now its proof, so it no longer appears in the RETIRED_SUBGATES list.)
-    const stripped = original
-      .split(/\r?\n/)
-      .filter((line) => !(line.startsWith('|') && line.includes('check-stage-r-verify-switch')))
-      .join('\n')
-    fs.writeFileSync(ledgerAbs, stripped, 'utf8')
-
-    const result = main({ root: fakeRoot })
-    assert.equal(result.ok, false)
-    assert.ok(
-      result.errors.some((e) => e.includes('check-stage-r-verify-switch')),
-      `expected an error mentioning the missing stage-r-verify-switch entry; got: ${result.errors.join('; ')}`,
-    )
-  } finally {
-    rmFakeRoot(fakeRoot)
-  }
-})
-
-test('chain re-entry: adding check-stage-r-verify-switch back into verify:r must fail the gate', () => {
-  const fakeRoot = mkFakeRoot()
-  try {
-    const pkgAbs = path.join(fakeRoot, 'package.json')
-    const pkg = JSON.parse(fs.readFileSync(pkgAbs, 'utf8'))
-    pkg.scripts['verify:r'] =
-      (pkg.scripts['verify:r'] || '') + ' && node scripts/check-stage-r-verify-switch.cjs'
-    fs.writeFileSync(pkgAbs, JSON.stringify(pkg, null, 2), 'utf8')
-
-    const result = main({ root: fakeRoot })
-    assert.equal(result.ok, false)
-    assert.ok(
-      result.errors.some((e) => e.includes('check-stage-r-verify-switch.cjs')),
-      `expected an error about the re-added sub-gate; got: ${result.errors.join('; ')}`,
-    )
-  } finally {
-    rmFakeRoot(fakeRoot)
-  }
-})
+// Note: the X1.8 retirement of `check-stage-r-verify-switch` AND
+// `check-stage-t-verify-switch` was reverted at Stage Y0.1.2 via
+// path-(a-rewrite) (both gates rewritten to current flat CLAUDE.md/
+// AGENTS.md §8 plan-file-link structure; R's `.deferred.cjs` renamed
+// back to `.test.cjs` and direct invocation restored in `verify:s`;
+// T's direct invocation restored in `verify:t`). The X1.8
+// "ledger row removal must fail" + "chain re-entry must fail" +
+// "legacy .test.cjs re-introduction must fail" tests have been
+// removed for the R/T pair because both gates are now legitimately
+// back in their verify chains and R's `.test.cjs` is intentionally
+// restored. See `docs/superpowers/audits/2026-05-23-stage-y-closeout/
+// y0-1-2-stage-r-t-charter-decision.md` for the disposition record.
 
 // Note: the X1.8 retirement of `check-sqlite-test-skip-pattern` was reverted
 // at Stage Y0.1.1 via path-(a) fix (16 test files gained the
@@ -82,22 +49,9 @@ test('chain re-entry: adding check-stage-r-verify-switch back into verify:r must
 // `docs/superpowers/audits/2026-05-23-stage-y-closeout/y0-1-disposition-report.md`
 // §Rows[0] for the disposition record.
 
-test('legacy .test.cjs re-introduction: recreating a still-retired test file must fail the gate (stage-r-verify-switch)', () => {
-  const fakeRoot = mkFakeRoot()
-  try {
-    const legacy = path.join(fakeRoot, 'scripts/__tests__/check-stage-r-verify-switch.test.cjs')
-    fs.writeFileSync(legacy, '// re-added legacy\n', 'utf8')
-
-    const result = main({ root: fakeRoot })
-    assert.equal(result.ok, false)
-    assert.ok(
-      result.errors.some((e) => e.includes('check-stage-r-verify-switch.test.cjs')),
-      `expected an error about the legacy test file re-introduction; got: ${result.errors.join('; ')}`,
-    )
-  } finally {
-    rmFakeRoot(fakeRoot)
-  }
-})
+// (legacy .test.cjs re-introduction test for stage-r-verify-switch was
+// removed at Stage Y0.1.5 — see Y0.1.2 disposition above. The `.test.cjs`
+// file is now intentionally present on disk per the re-arm action.)
 
 // Note: the X1.8 retirement of `check-testing-conventions-doc` was
 // reverted at Stage Y0.1.3 via path-(a) rewrite (gate rewritten with

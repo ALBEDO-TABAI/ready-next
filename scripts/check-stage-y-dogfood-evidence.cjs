@@ -227,7 +227,7 @@ function parseReproductionWindow(body) {
   if (idx === -1) return null
   const tail = body.slice(idx)
   const m = tail.match(
-    /Reproduction window:\s*([0-9TZ:.+\-]+)\s*(?:→|->|–|-)\s*([0-9TZ:.+\-]+)/,
+    /Reproduction window:\s*([0-9TZ:.+-]+)\s*(?:→|->|–|-)\s*([0-9TZ:.+-]+)/,
   )
   if (!m) return null
   const startMs = Date.parse(m[1])

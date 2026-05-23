@@ -46,13 +46,19 @@ const RETIRED_SUBGATES = [
   // docs/superpowers/audits/2026-05-22-stage-x-closeout/deferred-work-ledger.md
   // remains for provenance; new Y0.1.1 disposition row lives in the Stage Y
   // closeout bundle.
-  {
-    name: 'check-stage-r-verify-switch',
-    ledgerKey: 'check-stage-r-verify-switch',
-    scriptPath: 'scripts/check-stage-r-verify-switch.cjs',
-    deferredTestPath: 'scripts/__tests__/check-stage-r-verify-switch.deferred.cjs',
-    legacyTestPath: 'scripts/__tests__/check-stage-r-verify-switch.test.cjs',
-  },
+  // `check-stage-r-verify-switch` was dispositioned by Stage Y0.1.2 via
+  // path-(a-rewrite) + re-arm (gate rewritten to current flat CLAUDE.md/
+  // AGENTS.md §8 plan-file-link structure; .deferred.cjs renamed back to
+  // .test.cjs; direct invocation restored in verify:s). Per Y plan §6.5
+  // "Row went via path (a) rewrite" rule, the row is removed from this list —
+  // the live gate in verify:s is the proof. Historical ledger row in
+  // docs/superpowers/audits/2026-05-22-stage-x-closeout/deferred-work-ledger.md
+  // remains for provenance; new Y0.1.2 disposition row lives in the Stage Y
+  // closeout bundle.
+  // `check-stage-t-verify-switch` was dispositioned by Stage Y0.1.2 via the
+  // same path-(a-rewrite) + re-arm pattern as R (gate rewritten; direct
+  // invocation restored in verify:t; T never had a .deferred.cjs file per
+  // X1.8 ledger row 2 — retired via direct-invocation removal only).
   // `check-testing-conventions-doc` was dispositioned by Stage Y0.1.3 via
   // path-(a) rewrite + re-arm (gate rewritten with content-level + CLAUDE/AGENTS
   // sync enforcement, restored to verify:f). Per Y plan §6.5 "Row went via
@@ -82,8 +88,10 @@ const FORBIDDEN_DIRECT_INVOCATIONS = [
   // `scripts/check-sqlite-test-skip-pattern.cjs` removed at Stage Y0.1.1 —
   // path-(a) fix re-armed it in verify:k (16 test files now carry the
   // skipIfSqliteUnavailable helper; 2 stale c4Exempt rows removed).
-  'scripts/check-stage-r-verify-switch.cjs',
-  'scripts/check-stage-t-verify-switch.cjs',
+  // `scripts/check-stage-r-verify-switch.cjs` removed at Stage Y0.1.2 —
+  // path-(a-rewrite) re-armed it in verify:s.
+  // `scripts/check-stage-t-verify-switch.cjs` removed at Stage Y0.1.2 —
+  // path-(a-rewrite) re-armed it in verify:t.
   // `scripts/check-testing-conventions-doc.cjs` removed at Stage Y0.1.3 —
   // path-(a) rewrite re-armed it in verify:f.
   // `scripts/check-research-adapter-registered-in-host.cjs` removed at
