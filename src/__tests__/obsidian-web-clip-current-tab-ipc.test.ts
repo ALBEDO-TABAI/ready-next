@@ -6,6 +6,11 @@ import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
 import { runClipCurrentTab } from '../main/modules/browser-engine/ipc-clip'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('obsidian-web-clip-current-tab-ipc declares transitive sqlite coverage', (t) => {
+  skipIfSqliteUnavailable(t, 'obsidian-web-clip-current-tab-ipc transitive sqlite guard')
+})
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(__dirname, '../..')

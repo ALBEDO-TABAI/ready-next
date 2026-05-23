@@ -3,6 +3,13 @@ import { registerHooks } from 'node:module'
 import { describe, it } from 'node:test'
 
 import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+describe('document-task-pipeline-host-contract sqlite coverage', () => {
+  it('declares transitive sqlite coverage', (t) => {
+    skipIfSqliteUnavailable(t, 'document-task-pipeline-host-contract transitive sqlite guard')
+  })
+})
 
 registerHooks({
   resolve(specifier, context, nextResolve) {

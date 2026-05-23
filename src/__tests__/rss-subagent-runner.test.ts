@@ -2,6 +2,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { RSSSubagentRunner } from '../main/modules/rss-engine/subagent-runner'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('rss-subagent-runner declares transitive sqlite coverage', (t) => {
+  skipIfSqliteUnavailable(t, 'rss-subagent-runner transitive sqlite guard')
+})
 
 type CompletionRequest = {
   system: string

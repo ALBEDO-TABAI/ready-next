@@ -7,6 +7,11 @@ import test from 'node:test'
 
 import { BrowserDownloadService } from '../main/modules/browser-engine/download-service'
 import type { BrowserDataService } from '../main/modules/browser-engine/data-service'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('browser-download-service declares transitive sqlite coverage', (t) => {
+  skipIfSqliteUnavailable(t, 'browser-download-service transitive sqlite guard')
+})
 
 class FakeDownloadItem extends EventEmitter {
   private savePath = ''

@@ -13,6 +13,11 @@ import {
 } from '../shared/skill-configuration'
 import { compileSkillDefinition } from '../main/modules/skills-runtime/skill-compiler'
 import { executeWebFetch } from '../main/modules/tools/builtins/web-fetch'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('external-services-and-skill-config declares transitive sqlite coverage', (t) => {
+  skipIfSqliteUnavailable(t, 'external-services-and-skill-config transitive sqlite guard')
+})
 import { ExternalServiceStore } from '../main/modules/settings-engine/external-service-store'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', 'assets', 'embedded-skills')

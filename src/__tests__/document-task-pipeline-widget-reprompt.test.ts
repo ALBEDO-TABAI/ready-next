@@ -2,6 +2,14 @@ import assert from 'node:assert/strict'
 import { registerHooks } from 'node:module'
 import { describe, it } from 'node:test'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+describe('document-task-pipeline-widget-reprompt sqlite coverage', () => {
+  it('declares transitive sqlite coverage', (t) => {
+    skipIfSqliteUnavailable(t, 'document-task-pipeline-widget-reprompt transitive sqlite guard')
+  })
+})
+
 registerHooks({
   resolve(specifier, context, nextResolve) {
     if (specifier === 'electron') {

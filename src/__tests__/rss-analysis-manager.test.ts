@@ -5,6 +5,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import type { RSSAnalysisAction, RSSAnalysisJobStatus } from '../main/modules/database'
 import { findReusableVideoFile, isLikelyVideoLink } from '../main/modules/rss-engine/item-analysis-manager'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+describe('rss-analysis-manager sqlite coverage', () => {
+  it('declares transitive sqlite coverage', (t) => {
+    skipIfSqliteUnavailable(t, 'rss-analysis-manager transitive sqlite guard')
+  })
+})
 
 describe('RSS Analysis Contracts', () => {
   it('should cover supported actions and statuses', () => {

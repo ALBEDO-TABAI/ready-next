@@ -1,6 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { ExternalServiceStore } from '../main/modules/settings-engine/external-service-store'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('settings-no-legacy-key-read-after-migration declares transitive sqlite coverage', (t) => {
+  skipIfSqliteUnavailable(t, 'settings-no-legacy-key-read-after-migration transitive sqlite guard')
+})
 
 class InMemorySettingsRepository {
   private store = new Map<string, string>()

@@ -8,6 +8,11 @@ import { MAP_TOOL_TIMEOUT_MS, resolveToolExecutionTimeoutMs } from '../main/modu
 import { executeMapTool, getMapAnthropicTools, getMapOpenAITools } from '../main/modules/tools/map-tools'
 import { MapPlanRouteSchema } from '../main/modules/tools/schemas/map-schemas'
 import { TASK_TYPES } from '../shared/task-types'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('map-tool-contract declares transitive sqlite coverage', (t) => {
+  skipIfSqliteUnavailable(t, 'map-tool-contract transitive sqlite guard')
+})
 
 test('map_plan_route schema applies defaults and rejects too many waypoints', () => {
   const parsed = MapPlanRouteSchema.safeParse({

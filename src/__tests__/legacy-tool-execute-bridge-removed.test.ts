@@ -2,6 +2,12 @@ import assert from 'node:assert/strict'
 import { registerHooks } from 'node:module'
 import test from 'node:test'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('legacy-tool-execute-bridge-removed declares transitive sqlite coverage', (t) => {
+  skipIfSqliteUnavailable(t, 'legacy-tool-execute-bridge-removed transitive sqlite guard')
+})
+
 /**
  * Stage U0.1 — behavior contract for the legacy `tool_execute` bridge
  * retirement.

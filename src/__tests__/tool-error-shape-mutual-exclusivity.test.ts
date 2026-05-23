@@ -20,6 +20,11 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { executeToolCall, type ToolContext } from '../main/modules/tools/tool-executor'
 import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('tool-error-shape-mutual-exclusivity declares transitive sqlite coverage', (t) => {
+  skipIfSqliteUnavailable(t, 'tool-error-shape-mutual-exclusivity transitive sqlite guard')
+})
 
 function makeModelContext(overrides?: Partial<ToolContext>): Partial<ToolContext> {
   return {

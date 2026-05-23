@@ -2,6 +2,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { formatFastCardModelHttpError } from '../main/modules/browser-engine/fastcard-ai-service'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('fastcard-ai-service declares transitive sqlite coverage', (t) => {
+  skipIfSqliteUnavailable(t, 'fastcard-ai-service transitive sqlite guard')
+})
 
 test('FastCard model errors explain supplier 402 failures', () => {
   const message = formatFastCardModelHttpError(402, JSON.stringify({
