@@ -106,7 +106,30 @@ test('classifyProviderError recognizes 400 thinking echo failures', () => {
   assert.equal(classified?.recoverable, false)
 })
 
-test('withRetryBackoff wraps 400 thinking echo failures as provider_request_failed', async () => {
+test('withRetryBackoff auto-retries 400 thinking-echo once and succeeds on the second attempt', async () => {
+  // Stage X6.2 — plan §7.2 row 9. First call throws
+  // provider_thinking_echo_required, second call with the same payload
+  // succeeds. Total = 2 calls; result surfaces as the success value.
+  let calls = 0
+  const result = await withRetryBackoff(
+    async () => {
+      calls += 1
+      if (calls === 1) {
+        throw Object.assign(new Error('HTTP 400: extended thinking blocks must be preserved'), { status: 400 })
+      }
+      return 'ok'
+    },
+    { baseDelayMs: 1, maxAttempts: 3 },
+  )
+  assert.equal(result, 'ok')
+  assert.equal(calls, 2)
+})
+
+test('withRetryBackoff surfaces terminal provider_request_failed if both attempts hit thinking-echo', async () => {
+  // Stage X6.2 — plan §7.2 row 9. The auto-retry is one-shot. If the
+  // second attempt also fails with the same signal, surface as
+  // terminal ToolDomainError(provider_request_failed) and DO NOT make
+  // a third call.
   let calls = 0
   await assert.rejects(
     withRetryBackoff(
@@ -124,7 +147,7 @@ test('withRetryBackoff wraps 400 thinking echo failures as provider_request_fail
       return true
     },
   )
-  assert.equal(calls, 1)
+  assert.equal(calls, 2)
 })
 
 test('withRetryBackoff stops after maxAttempts and rethrows last error', async () => {
