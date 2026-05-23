@@ -150,6 +150,33 @@ append the URL to `ci-gate-report.md` § 3 and (if the run reveals any
 delta vs the local merge gate) record the delta in this seed plan or
 its successor.
 
+### P2.4 — Retire `.status` shim on provider-classified Errors
+
+`buildProviderHttpError` stamps `.status` as a non-enumerable own property
+to preserve backwards compat with the single existing consumer
+(`llm-resilience.ts:isRetryableError` reads `err.status`). Per codex r2 P2
+note, the shim is acceptable as documented + narrowly scoped, but the
+retirement path is: teach `isRetryableError` (and any other future
+consumer) to read `readProviderTerminalError(err)?.httpStatus` instead,
+then drop the `.status` stamping line from `buildProviderHttpError`. No
+behavior change expected; one fewer cross-field invariant to maintain.
+
+Files: `src/main/modules/claude-bridge/provider-terminal-error.ts`,
+`src/main/modules/claude-bridge/llm-resilience.ts`.
+
+### P2.5 — `provider-thinking-echo-retry` metric assertion
+
+X6.2 wires a `provider-thinking-echo-retry` metric event whenever the
+auto-retry-once path fires (`llm-resilience.ts:133-141`). Tests cover the
+retry behavior (call count + terminal error shape) but do not assert the
+metric event itself fires. Add a metric-bus stub to `llm-error-retry.test.ts`
+and assert the metric event is emitted exactly once in the happy-path
+retry case and exactly once even when the second attempt also throws.
+
+Files: `src/__tests__/llm-error-retry.test.ts`,
+`src/main/modules/claude-bridge/llm-resilience.ts` (no production change
+expected; test-only).
+
 ## How Stage Y opens
 
 A Stage Y entry plan should:
