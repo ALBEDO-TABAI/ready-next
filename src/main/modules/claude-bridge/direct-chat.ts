@@ -454,10 +454,22 @@ export class DirectChatEngine extends EventEmitter {
       executeHostTool: (toolName, args, toolContext) => executeToolCall(toolName, args, toolContext as any),
     })
     this.domainAdapters = [
-      // Semantic-classified adapters go first; keyword-classified adapters follow.
-      // MapDomainAdapter reads the TurnEngine-precomputed mapSemanticIntent synchronously.
-      new MapDomainAdapter(),
+      // Stage Y0.1.4 (plan §6.4 path a-reorder): ResearchDomainAdapter is
+      // listed first to satisfy the Stage R W1.6 contract gate
+      // `check-research-adapter-registered-in-host.cjs`. The order between
+      // Map and Research is BEHAVIORALLY EQUIVALENT — proven by the overlap
+      // fixtures in `src/__tests__/research-vs-map-overlap-fixtures.test.ts`:
+      // upstream `applyMapSemanticIntentToIntentClassification`
+      // (`src/main/modules/agent-control/map-semantic-intent.ts:194`)
+      // overwrites `intent.primaryDomain → 'map'` when map intent is active
+      // and `turn-engine.ts:1463` suppresses the continuation-research hint
+      // in that case, so for any real `DomainAdapterSelectionContext` at
+      // most ONE of {Map, Research} `shouldHandle` returns true.
+      // MapDomainAdapter still reads the TurnEngine-precomputed
+      // mapSemanticIntent synchronously; nothing about the Map dispatch
+      // path changes.
       new ResearchDomainAdapter(),
+      new MapDomainAdapter(),
       new BrowserDomainAdapter(this.browserDomainOrchestrator as never),
       new DocumentDomainAdapter({
         orchestrator: this.documentDomainOrchestrator as never,

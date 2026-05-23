@@ -36,13 +36,16 @@ const TRACKING_LINK_REQUIRED =
   'docs/superpowers/plans/2026-05-22-X-trust-foundation-and-w5-recovery-implementation.md#11-stage-y-seed-items'
 
 const RETIRED_SUBGATES = [
-  {
-    name: 'check-sqlite-test-skip-pattern',
-    ledgerKey: 'check-sqlite-test-skip-pattern',
-    scriptPath: 'scripts/check-sqlite-test-skip-pattern.cjs',
-    deferredTestPath: 'scripts/__tests__/check-sqlite-test-skip-pattern.deferred.cjs',
-    legacyTestPath: 'scripts/__tests__/check-sqlite-test-skip-pattern.test.cjs',
-  },
+  // `check-sqlite-test-skip-pattern` was dispositioned by Stage Y0.1.1 via
+  // path-(a) fix (16 missing_helper test files now import + call
+  // skipIfSqliteUnavailable; 2 stale c4Exempt rows removed; deferred test
+  // renamed back to .test.cjs and direct invocation re-armed in verify:k).
+  // Per Y plan §6.5 "Row went green via path (a)" rule, the row is removed
+  // from this list — the live gate in verify:k is the proof. Historical
+  // ledger row in
+  // docs/superpowers/audits/2026-05-22-stage-x-closeout/deferred-work-ledger.md
+  // remains for provenance; new Y0.1.1 disposition row lives in the Stage Y
+  // closeout bundle.
   {
     name: 'check-stage-r-verify-switch',
     ledgerKey: 'check-stage-r-verify-switch',
@@ -50,32 +53,41 @@ const RETIRED_SUBGATES = [
     deferredTestPath: 'scripts/__tests__/check-stage-r-verify-switch.deferred.cjs',
     legacyTestPath: 'scripts/__tests__/check-stage-r-verify-switch.test.cjs',
   },
-  {
-    name: 'check-testing-conventions-doc',
-    ledgerKey: 'check-testing-conventions-doc',
-    scriptPath: 'scripts/check-testing-conventions-doc.cjs',
-    // The .test.cjs file passes against fixtures (no live-repo assertion),
-    // so it stays as `.test.cjs` and is not renamed.
-    deferredTestPath: null,
-    legacyTestPath: null,
-  },
-  {
-    name: 'check-research-adapter-registered-in-host',
-    ledgerKey: 'check-research-adapter-registered-in-host',
-    scriptPath: 'scripts/check-research-adapter-registered-in-host.cjs',
-    deferredTestPath: null,
-    legacyTestPath: null,
-  },
+  // `check-testing-conventions-doc` was dispositioned by Stage Y0.1.3 via
+  // path-(a) rewrite + re-arm (gate rewritten with content-level + CLAUDE/AGENTS
+  // sync enforcement, restored to verify:f). Per Y plan §6.5 "Row went via
+  // path (a) rewrite" rule, the row is removed from this list — the rewritten
+  // gate is the live proof. Historical ledger row in
+  // docs/superpowers/audits/2026-05-22-stage-x-closeout/deferred-work-ledger.md
+  // remains for provenance; new Y0.1.3 disposition row lives in the Stage Y
+  // closeout bundle.
+  // `check-research-adapter-registered-in-host` was dispositioned by Stage
+  // Y0.1.4 via path-(a-reorder) + re-arm in verify:r (per Y plan §6.4,
+  // overlap-fixture-first investigation classified the conflict as APPARENT;
+  // ResearchDomainAdapter swapped to the first position in
+  // `src/main/modules/claude-bridge/direct-chat.ts` domainAdapters[];
+  // overlap fixtures at `src/__tests__/research-vs-map-overlap-fixtures.test.ts`
+  // prove the swap is behaviorally equivalent for the 4 representative
+  // queries). Per Y plan §6.5 "Row went green via path (a)" rule, the row is
+  // removed from this list — the live gate in verify:r is the proof.
+  // Historical ledger row in
+  // docs/superpowers/audits/2026-05-22-stage-x-closeout/deferred-work-ledger.md
+  // remains for provenance; new Y0.1.4 disposition row lives in the Stage Y
+  // closeout bundle.
 ]
 
 // Direct package.json verify:* script bodies (not test wildcards) must
 // not reference these literal `node scripts/<name>.cjs` invocations.
 const FORBIDDEN_DIRECT_INVOCATIONS = [
-  'scripts/check-sqlite-test-skip-pattern.cjs',
+  // `scripts/check-sqlite-test-skip-pattern.cjs` removed at Stage Y0.1.1 —
+  // path-(a) fix re-armed it in verify:k (16 test files now carry the
+  // skipIfSqliteUnavailable helper; 2 stale c4Exempt rows removed).
   'scripts/check-stage-r-verify-switch.cjs',
   'scripts/check-stage-t-verify-switch.cjs',
-  'scripts/check-testing-conventions-doc.cjs',
-  'scripts/check-research-adapter-registered-in-host.cjs',
+  // `scripts/check-testing-conventions-doc.cjs` removed at Stage Y0.1.3 —
+  // path-(a) rewrite re-armed it in verify:f.
+  // `scripts/check-research-adapter-registered-in-host.cjs` removed at
+  // Stage Y0.1.4 — path-(a-reorder) re-armed it in verify:r.
 ]
 
 // All verify:* scripts that can transitively embed a retired sub-gate.

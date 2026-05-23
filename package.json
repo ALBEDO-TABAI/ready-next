@@ -60,7 +60,7 @@
     "test:f:gates": "node --test eslint-rules/__tests__/*.test.mjs scripts/__tests__/*.test.cjs",
     "test:f:focus": "npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/tool-loop-dedup.test.ts",
     "debt:no-source-grep-test": "node scripts/check-eslint-baseline.cjs --area no-source-grep-test --max 142",
-    "verify:f": "npm run verify:e && npm run test:f:gates && npm run test:f:focus",
+    "verify:f": "npm run verify:e && node scripts/check-testing-conventions-doc.cjs && npm run test:f:gates && npm run test:f:focus",
     "test:g:gates": "node --test scripts/__tests__/check-child-status-vocabulary.test.cjs scripts/__tests__/check-child-control-ipc.test.cjs scripts/__tests__/check-turn-feature-flags.test.cjs",
     "test:g:focus": "npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/resume-fresh-contract-fields.test.ts src/__tests__/close-event-immutability.test.ts src/__tests__/turn-feature-flags.test.ts src/__tests__/active-child-run-ipc.test.ts src/__tests__/skill-child-runner-resume-lifecycle.test.ts src/__tests__/turn-engine-route.test.ts",
     "verify:g": "npm run verify:f && node scripts/check-child-status-vocabulary.cjs && node scripts/check-child-control-ipc.cjs && node scripts/check-turn-feature-flags.cjs && npm run test:g:gates && npm run test:g:focus",
