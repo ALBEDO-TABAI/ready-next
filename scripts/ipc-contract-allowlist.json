@@ -3,15 +3,9 @@
   "$identity": "Stage V V5 IPC contract gate allowlist. Each top-level array (other than non_literal_push) holds objects of shape { channel, reason, owner, expiry }. non_literal_push entries are { callsite: 'file:line', variable, channels[], reason, owner, expiry }. expiry is YYYY-MM-DD; expired entries fail the gate.",
   "invoke_only": [
     {
-      "channel": "browser:previewUpdateBounds",
-      "reason": "Same dual-registration pattern as browser:updateBounds at src/main/modules/browser-engine/ipc-shell.ts:217-226; renderer (src/preload/index.ts:360) uses ipcRenderer.send. Legacy handle() to be removed in stage-W cleanup.",
-      "owner": "stage-v-bootstrap",
-      "expiry": "2026-08-21"
-    },
-    {
       "channel": "document:cancelReindex",
-      "reason": "src/main/modules/search-engine/ipc-handler.ts:250 registers a defensive cancel-reindex handler intended for workspace-close / app-quit teardown. No renderer caller exists today; the UI path that should invoke it is part of the search-engine lifecycle work scheduled for stage-W. Removing the handler now would lose the cancel hook before its replacement lands.",
-      "owner": "stage-v-bootstrap",
+      "reason": "Stage Y Y1.4 keep-with-reason: defensive teardown hook registered by the 5-channel SourceIndexGroup at src/main/modules/search-engine/ipc/source-index-group.ts:183-193 (the group bundles document:listSources/indexDocument/reindexAllSources/reindexWorkspace/cancelReindex per Stage V V2.4a). The handler exists as the abort hook for in-flight worker reindex jobs (deps.getWorkerBridge().cancelReindex()); the renderer-side caller (workspace-close / app-quit teardown) is Stage Z workspace lifecycle work per the Stage Y roadmap §13 contract. Removing now would break the 5-channel group invariant + lose the defensive abort; the Stage Z lifecycle work will add the renderer caller without any IPC contract change.",
+      "owner": "stage-y-bootstrap",
       "expiry": "2026-08-21"
     }
   ],
@@ -25,7 +19,7 @@
       "callsite": "src/main/modules/browser-engine/ipc-handler.ts:149",
       "variable": "channel",
       "channels": ["browser:downloadUpdate"],
-      "reason": "Dependency-injection forwarder passed to BrowserDownloadService constructor; the service itself emits the literal channel 'browser:downloadUpdate' (download-service.ts:221, 260) which is captured by the literal scan.",
+      "reason": "Forwarder lambda passed to BrowserDownloadService constructor; the service itself emits literal 'browser:downloadUpdate' at download-service.ts:229,268 (covered by the literal PUSH_EMITTED scan). Stage Y Y1.4 re-verified the upstream literal is still present at the documented lines; removing this entry would require refactoring the DI forwarder pattern (12 sibling forwarders share the shape) which is out of Y1.4 reduction-only scope.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },
@@ -33,7 +27,7 @@
       "callsite": "src/main/modules/browser-engine/ipc-handler.ts:155",
       "variable": "channel",
       "channels": ["app:shortcut"],
-      "reason": "Forwarder passed to BrowserAppShortcutBridgeService; the service emits literal 'app:shortcut' (covered by main/index.ts:642-equivalent literal scan via the bridge).",
+      "reason": "Forwarder lambda passed to BrowserAppShortcutBridgeService; the service emits literal 'app:shortcut' at app-shortcut-service.ts:26 (covered by literal scan + behavior-tested in src/__tests__/browser-engine-services.test.ts BrowserAppShortcutBridgeService block). Stage Y Y1.4 re-verified; removing this entry requires forwarder-pattern refactor — out of Y1.4 reduction-only scope.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },
@@ -41,7 +35,7 @@
       "callsite": "src/main/modules/browser-engine/ipc-handler.ts:173",
       "variable": "channel",
       "channels": ["browser:fastCardContextAction"],
-      "reason": "Forwarder passed to BrowserContextMenuService; the service emits literal 'browser:fastCardContextAction' (context-menu-service.ts:401).",
+      "reason": "Forwarder lambda passed to BrowserContextMenuService; the service emits literal 'browser:fastCardContextAction' at context-menu-service.ts:401 (covered by literal scan). Stage Y Y1.4 re-verified; removing this entry requires forwarder-pattern refactor — out of Y1.4 reduction-only scope.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },
@@ -49,7 +43,7 @@
       "callsite": "src/main/modules/browser-engine/ipc-handler.ts:182",
       "variable": "channel",
       "channels": ["browser:bookmarksChanged"],
-      "reason": "Forwarder passed to BrowserBookmarkTransferService; the service emits literal 'browser:bookmarksChanged' (bookmark-transfer-service.ts:179, 221).",
+      "reason": "Forwarder lambda passed to BrowserBookmarkTransferService; the service emits literal 'browser:bookmarksChanged' at bookmark-transfer-service.ts:179,221 (covered by literal scan). Stage Y Y1.4 re-verified; removing this entry requires forwarder-pattern refactor — out of Y1.4 reduction-only scope.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },
@@ -57,7 +51,7 @@
       "callsite": "src/main/modules/browser-engine/ipc-handler.ts:198",
       "variable": "channel",
       "channels": ["browser:previewUpdate"],
-      "reason": "Forwarder passed to BrowserPreviewService; the service emits literal 'browser:previewUpdate' (preview-service.ts:68).",
+      "reason": "Forwarder lambda passed to BrowserPreviewService; the service emits literal 'browser:previewUpdate' at preview-service.ts:68 (covered by literal scan). Stage Y Y1.4 re-verified; removing this entry requires forwarder-pattern refactor — out of Y1.4 reduction-only scope.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },
@@ -65,7 +59,7 @@
       "callsite": "src/main/modules/browser-engine/ipc-handler.ts:228",
       "variable": "channel",
       "channels": ["browser:tabUpdate"],
-      "reason": "Forwarder passed to BrowserTabMetaService; the service emits literal 'browser:tabUpdate' (tab-meta-service.ts:65).",
+      "reason": "Forwarder lambda passed to BrowserTabMetaService; the service emits literal 'browser:tabUpdate' at tab-meta-service.ts:65 (covered by literal scan). Stage Y Y1.4 re-verified; removing this entry requires forwarder-pattern refactor — out of Y1.4 reduction-only scope.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },
@@ -73,7 +67,7 @@
       "callsite": "src/main/modules/browser-engine/ipc-handler.ts:247",
       "variable": "channel",
       "channels": ["browser:tabUpdate"],
-      "reason": "Forwarder passed to BrowserTabLifecycleService; the service emits literal 'browser:tabUpdate' across tab-lifecycle-service.ts:194/237/246/255/270.",
+      "reason": "Forwarder lambda passed to BrowserTabLifecycleService; the service emits literal 'browser:tabUpdate' across tab-lifecycle-service.ts:194,237,246,255,270 (all covered by literal scan). Stage Y Y1.4 re-verified; removing this entry requires forwarder-pattern refactor — out of Y1.4 reduction-only scope.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },
@@ -81,7 +75,7 @@
       "callsite": "src/main/modules/browser-engine/ipc-handler.ts:289",
       "variable": "channel",
       "channels": ["browser:adblockUpdate"],
-      "reason": "Forwarder passed to BrowserSessionPolicyService; the service emits literal 'browser:adblockUpdate' (session-policy-service.ts:173, 180).",
+      "reason": "Forwarder lambda passed to BrowserSessionPolicyService; the service emits literal 'browser:adblockUpdate' at session-policy-service.ts:173,180 (covered by literal scan). Stage Y Y1.4 re-verified; removing this entry requires forwarder-pattern refactor — out of Y1.4 reduction-only scope.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },
@@ -89,7 +83,7 @@
       "callsite": "src/main/modules/browser-engine/ipc-handler.ts:329",
       "variable": "channel",
       "channels": ["browser:bookmarksChanged", "browser:clipCurrentTabRequested"],
-      "reason": "Forwarder passed to BrowserUtilityMenuService; the service emits literals 'browser:bookmarksChanged' (utility-menu-service.ts:106, 109, 123) and 'browser:clipCurrentTabRequested' (utility-menu-service.ts:176).",
+      "reason": "Forwarder lambda passed to BrowserUtilityMenuService; the service emits literals 'browser:bookmarksChanged' at utility-menu-service.ts:106,109,123 and 'browser:clipCurrentTabRequested' at utility-menu-service.ts:176 (both covered by literal scan). Stage Y Y1.4 re-verified; removing this entry requires forwarder-pattern refactor — out of Y1.4 reduction-only scope.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },
@@ -108,7 +102,7 @@
         "clip:backgroundUpdate",
         "clip:contentStudyUpdate"
       ],
-      "reason": "BrowserHostController.sendToRenderer (ipc-handler.ts:418-422) is the central main->renderer dispatch used by all browser-engine sub-services and the clipping runners. All emitted channels are still literal at their original call sites and covered by the literal PUSH_EMITTED scan; this is a runtime forwarder, not a fan-out blind spot.",
+      "reason": "BrowserHostController.sendToRenderer (ipc-handler.ts:418-422) is the central main->renderer dispatch used by all browser-engine sub-services and the clipping runners. All emitted channels are still literal at their original call sites and covered by the literal PUSH_EMITTED scan; this is a runtime forwarder, not a fan-out blind spot. Stage Y Y1.4 re-verified the central dispatch shape — removing requires architectural refactor of the central-sendToRenderer surface, out of Y1.4 reduction-only scope.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },
@@ -116,7 +110,7 @@
       "callsite": "src/main/modules/browser-engine/ipc-handler.ts:1441",
       "variable": "channel",
       "channels": ["clip:backgroundUpdate"],
-      "reason": "Forwarder passed to setupBrowserClipDraggedTabIPC; the runner emits literal 'clip:backgroundUpdate' (clip-dragged-tab-runner.ts:304). Line shifted from 1403 by Stage X4 PR-shell-1 BrowserViewIntent boundary addition.",
+      "reason": "Forwarder lambda passed to setupBrowserClipDraggedTabIPC; the runner emits literal 'clip:backgroundUpdate' at clip-dragged-tab-runner.ts:304. Stage Y Y1.4 re-verified the upstream literal at the documented line; removing this entry requires forwarder-pattern refactor — out of Y1.4 reduction-only scope.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },
@@ -124,7 +118,7 @@
       "callsite": "src/main/modules/browser-engine/ipc-handler.ts:1444",
       "variable": "channel",
       "channels": ["clip:contentStudyUpdate"],
-      "reason": "Forwarder passed to setupBrowserContentStudyIPC; the runner emits literal 'clip:contentStudyUpdate' (content-study-runner.ts:409) plus the spy-wrapped emit at content-study-runner.ts:182 (separately allowlisted below). Line shifted from 1406 by Stage X4 PR-shell-1 BrowserViewIntent boundary addition.",
+      "reason": "Forwarder lambda passed to setupBrowserContentStudyIPC; the runner emits literal 'clip:contentStudyUpdate' at content-study-runner.ts:409 (plus the spy-wrapped emit at content-study-runner.ts:182, separately allowlisted below). Stage Y Y1.4 re-verified the upstream literal; removing requires forwarder-pattern refactor — out of Y1.4 reduction-only scope.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     },
@@ -132,7 +126,7 @@
       "callsite": "src/main/modules/clipping/content-study-runner.ts:182",
       "variable": "channel",
       "channels": ["clip:backgroundUpdate", "clip:contentStudyUpdate"],
-      "reason": "Spy wrapper used by the content-study runner to capture clip lifecycle events before forwarding to the real controller.sendToRenderer. Only clip background/content-study channels flow through this path; both are literal-emitted upstream by clip-dragged-tab-runner.ts:304 and content-study-runner.ts:409.",
+      "reason": "Spy wrapper used by the content-study runner to capture clip lifecycle events before forwarding to the real controller.sendToRenderer. Only clip background/content-study channels flow through this path; both are literal-emitted upstream by clip-dragged-tab-runner.ts:304 and content-study-runner.ts:409. Stage Y Y1.4 re-verified the upstream literals; the spy wrapper is intrinsic to the runner's phase-1 completion detection logic and cannot be removed without restructuring the content-study runner — out of Y1.4 reduction-only scope.",
       "owner": "stage-v-bootstrap",
       "expiry": "2026-08-21"
     }

@@ -230,10 +230,12 @@ export function setupBrowserShellIPC(controller: BrowserShellIPCController): voi
   ipcMain.handle('browser:previewGoBack', () => controller.previewGoBack())
   ipcMain.handle('browser:previewGoForward', () => controller.previewGoForward())
   ipcMain.handle('browser:previewReload', () => controller.previewReload())
-  ipcMain.handle(
-    'browser:previewUpdateBounds',
-    (_, bounds: { x: number; y: number; width: number; height: number }) => controller.previewUpdateBounds(bounds),
-  )
+  // Stage Y Y1.4 — IPC contract hardening (reduction-only): the legacy
+  // ipcMain handle-style dual registration for browser:previewUpdateBounds
+  // was removed. The preload (`src/preload/index.ts:368-371`) routes
+  // `previewUpdateBounds` through `ipcRenderer.send`, so only the
+  // `ipcMain.on(...)` listener below carries the live path. See
+  // `docs/superpowers/plans/2026-05-23-Y1-4-ipc-renderer-contract-hardening-implementation.md`.
   ipcMain.on(
     'browser:previewUpdateBounds',
     (_, bounds: { x: number; y: number; width: number; height: number }) => {
