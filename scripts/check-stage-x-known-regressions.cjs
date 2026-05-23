@@ -194,15 +194,10 @@ function main({ root = ROOT } = {}) {
       }
     }
 
-    // Defensive: test:k:gates must not list the sqlite skip-pattern test
-    // explicitly (orthogonal to the wildcard sweep above; this is the one
-    // place X1 directly listed the file).
-    const testKGates = scripts['test:k:gates'] || ''
-    if (testKGates.includes('check-sqlite-test-skip-pattern.test.cjs')) {
-      errors.push(
-        'package.json scripts["test:k:gates"] still lists check-sqlite-test-skip-pattern.test.cjs explicitly — remove it per ledger',
-      )
-    }
+    // Stage Y0.1.1 disposition: test:k:gates listing
+    // `check-sqlite-test-skip-pattern.test.cjs` explicitly is REQUIRED now
+    // that path-(a) fix re-armed the gate. The previous defensive sweep is
+    // removed (Y plan §6.5: row removal upon path-(a) re-arm).
   }
 
   return { ok: errors.length === 0, errors }
