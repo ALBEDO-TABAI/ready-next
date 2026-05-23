@@ -223,6 +223,14 @@ export function readProviderTerminalError(value: unknown): ProviderTerminalError
  * Build an Error pre-stamped with the classification derived from an
  * HTTP response. Used at provider fetch boundaries (OpenAI-compatible,
  * Anthropic, etc.) where we already have the raw HTTP status and body.
+ *
+ * Stage X6.1 — the returned Error also exposes `.status = httpStatus`
+ * as a non-enumerable own property so the legacy `withRetryBackoff`
+ * retry classifier (`llm-resilience.ts:isRetryableError` reading
+ * `error.status`) keeps working when this helper is wired into the
+ * legacy clients. Consumers that want the structured classification
+ * should call `readProviderTerminalError(error)` instead of reading
+ * `.status` directly.
  */
 export function buildProviderHttpError(input: {
   httpStatus: number
@@ -235,6 +243,38 @@ export function buildProviderHttpError(input: {
   const prefix = input.messagePrefix ? `${input.messagePrefix} ` : ''
   const message = `${prefix}HTTP ${input.httpStatus}: ${input.errorBody.slice(0, 300)}`.trim()
   const error = new Error(message)
+  Object.defineProperty(error, 'status', {
+    value: input.httpStatus,
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  })
   return attachProviderTerminalError(error, terminal)
+}
+
+/**
+ * Parse a `Retry-After` HTTP header value (RFC 7231 §7.1.3) into a
+ * seconds count. Returns `undefined` when:
+ *   - the header is absent
+ *   - the value is neither a positive integer nor a parseable HTTP-date
+ *   - the parsed delay is non-positive (already elapsed)
+ *
+ * Used at provider fetch boundaries to feed `buildProviderHttpError`'s
+ * `retryAfterSeconds` so 429 responses with a real wait window get
+ * classified as `rate_limited` (with countdown) instead of the unwound
+ * `unknown` fallback. Pure function — no side effects.
+ */
+export function parseRetryAfterHeader(rawValue: string | null | undefined): number | undefined {
+  if (!rawValue) return undefined
+  const trimmed = String(rawValue).trim()
+  if (!trimmed) return undefined
+  if (/^\d+$/.test(trimmed)) {
+    const seconds = Number(trimmed)
+    return Number.isFinite(seconds) && seconds > 0 ? seconds : undefined
+  }
+  const httpDateMs = Date.parse(trimmed)
+  if (!Number.isFinite(httpDateMs)) return undefined
+  const deltaSeconds = Math.ceil((httpDateMs - Date.now()) / 1000)
+  return deltaSeconds > 0 ? deltaSeconds : undefined
 }
 

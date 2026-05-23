@@ -20,6 +20,7 @@ import { TOOL_ERROR_METRICS } from '../agent-control/tools-runtime/tool-error-me
 import { parseJsonResponse } from '../openai-responses'
 import { annotateFallbackResult, type ExecutionFallbackInfo, resolveFallbackPlan } from './execution-fallback-policy'
 import { withRetryBackoff } from './llm-resilience'
+import { buildProviderHttpError, parseRetryAfterHeader } from './provider-terminal-error'
 import { resolveApiRequestTimeoutMs } from './request-timeout-policy'
 import { parseTextToolBridgeResponse } from './tool-bridge'
 
@@ -138,9 +139,11 @@ export class AnthropicExecutionClient {
       }, params.signal, 'anthropic simple', params.timeoutMs)
       if (!r.ok) {
         const errBody = await r.text().catch(() => '')
-        const err = new Error(`HTTP ${r.status}: ${errBody.slice(0, 300)}`) as Error & { status?: number }
-        err.status = r.status
-        throw err
+        throw buildProviderHttpError({
+          httpStatus: r.status,
+          errorBody: errBody,
+          retryAfterSeconds: parseRetryAfterHeader(r.headers.get('retry-after')),
+        })
       }
       return r
     })
@@ -231,9 +234,11 @@ export class AnthropicExecutionClient {
       }, params.signal, 'anthropic tools', timeoutMs)
       if (!r.ok) {
         const errBody = await r.text().catch(() => '')
-        const err = new Error(`HTTP ${r.status}: ${errBody.slice(0, 300)}`) as Error & { status?: number }
-        err.status = r.status
-        throw err
+        throw buildProviderHttpError({
+          httpStatus: r.status,
+          errorBody: errBody,
+          retryAfterSeconds: parseRetryAfterHeader(r.headers.get('retry-after')),
+        })
       }
       return r
     })

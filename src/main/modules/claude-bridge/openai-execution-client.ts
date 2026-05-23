@@ -18,6 +18,7 @@ import type { ToolSnapshot, TurnToolCallParseError } from '../agent-control/cont
 import type { ExecutionFallbackInfo } from './execution-fallback-policy'
 import { annotateFallbackResult, resolveFallbackPlan } from './execution-fallback-policy'
 import { withRetryBackoff } from './llm-resilience'
+import { buildProviderHttpError, parseRetryAfterHeader } from './provider-terminal-error'
 import { sanitizeOpenAICompatibleMessageHistory } from './openai-history-sanitization'
 import { resolveRegisteredToolNamesLazily } from './tool-registry-bridge'
 import { extractOpenAIMessageText } from './openai-message-text'
@@ -144,9 +145,11 @@ export class OpenAIExecutionClient {
         }, params.signal, 'openai simple responses', params.timeoutMs)
         if (!r.ok) {
           const errBody = await r.text().catch(() => '')
-          const err = new Error(`HTTP ${r.status}: ${errBody.slice(0, 300)}`) as Error & { status?: number }
-          err.status = r.status
-          throw err
+          throw buildProviderHttpError({
+            httpStatus: r.status,
+            errorBody: errBody,
+            retryAfterSeconds: parseRetryAfterHeader(r.headers.get('retry-after')),
+          })
         }
         return r
       })
@@ -185,9 +188,11 @@ export class OpenAIExecutionClient {
       }, params.signal, 'openai simple', params.timeoutMs)
       if (!r.ok) {
         const errBody = await r.text().catch(() => '')
-        const err = new Error(`HTTP ${r.status}: ${errBody.slice(0, 300)}`) as Error & { status?: number }
-        err.status = r.status
-        throw err
+        throw buildProviderHttpError({
+          httpStatus: r.status,
+          errorBody: errBody,
+          retryAfterSeconds: parseRetryAfterHeader(r.headers.get('retry-after')),
+        })
       }
       return r
     })
@@ -248,9 +253,11 @@ export class OpenAIExecutionClient {
         }, params.signal, 'openai text tool bridge responses')
         if (!r.ok) {
           const errBody = await r.text().catch(() => '')
-          const err = new Error(`HTTP ${r.status}: ${errBody.slice(0, 300)}`) as Error & { status?: number }
-          err.status = r.status
-          throw err
+          throw buildProviderHttpError({
+            httpStatus: r.status,
+            errorBody: errBody,
+            retryAfterSeconds: parseRetryAfterHeader(r.headers.get('retry-after')),
+          })
         }
         return r
       })
@@ -287,9 +294,11 @@ export class OpenAIExecutionClient {
       }, params.signal, 'openai text tool bridge')
       if (!r.ok) {
         const errBody = await r.text().catch(() => '')
-        const err = new Error(`HTTP ${r.status}: ${errBody.slice(0, 300)}`) as Error & { status?: number }
-        err.status = r.status
-        throw err
+        throw buildProviderHttpError({
+          httpStatus: r.status,
+          errorBody: errBody,
+          retryAfterSeconds: parseRetryAfterHeader(r.headers.get('retry-after')),
+        })
       }
       return r
     })
@@ -743,9 +752,11 @@ export class OpenAIExecutionClient {
       }, params.signal, 'openai responses tools', params.timeoutMs)
       if (!r.ok) {
         const errBody = await r.text().catch(() => '')
-        const err = new Error(`HTTP ${r.status}: ${errBody.slice(0, 300)}`) as Error & { status?: number }
-        err.status = r.status
-        throw err
+        throw buildProviderHttpError({
+          httpStatus: r.status,
+          errorBody: errBody,
+          retryAfterSeconds: parseRetryAfterHeader(r.headers.get('retry-after')),
+        })
       }
       return r
     })
@@ -806,9 +817,11 @@ export class OpenAIExecutionClient {
       }, params.signal, 'openai tools', params.timeoutMs)
       if (!r.ok) {
         const errBody = await r.text().catch(() => '')
-        const err = new Error(`HTTP ${r.status}: ${errBody.slice(0, 300)}`) as Error & { status?: number }
-        err.status = r.status
-        throw err
+        throw buildProviderHttpError({
+          httpStatus: r.status,
+          errorBody: errBody,
+          retryAfterSeconds: parseRetryAfterHeader(r.headers.get('retry-after')),
+        })
       }
       return r
     })

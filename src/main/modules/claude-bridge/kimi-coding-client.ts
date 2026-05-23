@@ -7,6 +7,7 @@ import { annotateFallbackResult, type ExecutionFallbackInfo, resolveFallbackPlan
 import { sanitizeOpenAICompatibleMessageHistory } from './openai-history-sanitization'
 import { resolveRegisteredToolNamesLazily } from './tool-registry-bridge'
 import { extractOpenAIMessageText } from './openai-message-text'
+import { buildProviderHttpError, parseRetryAfterHeader } from './provider-terminal-error'
 
 export interface KimiCodingSessionLike {
   messages: Array<{ role: 'user' | 'assistant' | 'system' | 'tool'; content: string | Array<Record<string, unknown>> }>
@@ -290,7 +291,11 @@ export class KimiCodingClient {
 
     if (!resp.ok) {
       const errBody = await resp.text().catch(() => '')
-      throw new Error(`HTTP ${resp.status}: ${errBody.slice(0, 300)}`)
+      throw buildProviderHttpError({
+        httpStatus: resp.status,
+        errorBody: errBody,
+        retryAfterSeconds: parseRetryAfterHeader(resp.headers.get('retry-after')),
+      })
     }
 
     const json = await parseJsonResponse(resp, { requestUrl: url }) as {
