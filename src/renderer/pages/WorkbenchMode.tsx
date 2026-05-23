@@ -21,6 +21,7 @@ import { freezeVisibleDocumentLayoutWidths } from '../modules/document/documentL
 import { readStorage } from '../utils/storage'
 import type { BrowserHostLayoutPhase } from '../../shared/browser-view-layout'
 import { nextIntentId } from '../../shared/browser-view-intent'
+import { createModeSwitchAckWaiter } from '../modules/browser/modeSwitchAckWaiter'
 import { withRitual, setPanelResizingSignal } from '../modules/overlay/useRitualOverlay'
 
 const MIN_SIDE_PANEL_WIDTH = 220
@@ -350,6 +351,11 @@ export default function WorkbenchMode() {
     setPanelResizingSignal(false)
   }, [])
 
+  // Stage X4 PR-shell-2 — in-flight mode-switch ack waiter. The ref
+  // holds the active waiter's `cancel` handle so a rapid second mode
+  // click orphans the first waiter (per plan §9 line 684).
+  const pendingModeSwitchAckCancelRef = useRef<(() => void) | null>(null)
+
   const handleWorkbenchModeChange = useCallback(async function handleWorkbenchModeChange(nextMode: WorkbenchModeType) {
     const strategy = resolveModeTransitionStrategy(workbenchMode, nextMode)
 
@@ -366,13 +372,43 @@ export default function WorkbenchMode() {
       return
     }
 
+    // Stage X4 PR-shell-2 — orphan any in-flight ack waiter from a
+    // previous click so its late ack is dropped per stale-id rule.
+    pendingModeSwitchAckCancelRef.current?.()
+    pendingModeSwitchAckCancelRef.current = null
+
     setIsMotionSettled(false)
     try {
-      await withRitual('mode-switch', ({ signalReady }) => {
+      await withRitual('mode-switch', async ({ signalReady }) => {
         const comingFromBrowser = transitionTargetModeRef.current === 'browser' && nextMode !== 'browser'
         const enteringBrowser = transitionTargetModeRef.current !== 'browser' && nextMode === 'browser'
         if (comingFromBrowser) setBrowserLayoutMotionPhase('leaving')
         else if (enteringBrowser) setBrowserLayoutMotionPhase('entering')
+
+        // PR-shell-2 ordered ritual: when leaving browser, emit
+        // `hide-all` first and wait for the matching ack (100 ms cap)
+        // BEFORE flipping renderer mode so the native BrowserView is
+        // off-top by the time the DOM-only overlay mounts.
+        if (comingFromBrowser) {
+          const ackSource = window.electronAPI?.browser?.onIntentAck
+          const intentId = nextIntentId()
+          window.electronAPI?.browser?.sendIntent({
+            kind: 'hide-all',
+            intentId,
+            reason: 'mode-switch-prepare',
+          })
+          if (ackSource) {
+            const waiter = createModeSwitchAckWaiter(ackSource, intentId)
+            pendingModeSwitchAckCancelRef.current = waiter.cancel
+            try {
+              await waiter.wait
+            } finally {
+              if (pendingModeSwitchAckCancelRef.current === waiter.cancel) {
+                pendingModeSwitchAckCancelRef.current = null
+              }
+            }
+          }
+        }
 
         transitionTargetModeRef.current = nextMode
         setWorkbenchMode(nextMode)
