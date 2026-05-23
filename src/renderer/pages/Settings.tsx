@@ -2142,7 +2142,10 @@ function externalServiceMissingRequirements(profile: PublicExternalServiceProfil
   return missing
 }
 
-function ExternalServicesSettingsPanel() {
+// Y1.1 §11.1: exported so the relabel behavior test can mount this panel in
+// jsdom without instantiating the full Settings shell (mirrors Y0.8
+// StorageSettingsPanel export precedent).
+export function ExternalServicesSettingsPanel() {
   const [profiles, setProfiles] = useState<PublicExternalServiceProfile[]>([])
   const [secretDrafts, setSecretDrafts] = useState<Record<string, Record<string, string>>>({})
   const [loading, setLoading] = useState(true)
@@ -2304,6 +2307,15 @@ function ExternalServicesSettingsPanel() {
   const isSelectedBusy = Boolean(selectedProfile && busyId === selectedProfile.id)
   const isSelectedTesting = Boolean(selectedProfile && testingId === selectedProfile.id)
   const selectedSummary = selectedProfile ? externalServiceDraftSummary(selectedProfile, selectedDraft) : ''
+  // Y1.1 §11.1 honest-label path: vision-model "test" only field-validates in
+  // main-process (`external-service-store.ts:342-344,390` — no HTTP probe).
+  // Renderer relabels the button so the user sees what the system actually does.
+  // Other kinds (amap / jina / rsshub / duckduckgo) DO probe and stay labeled `测试`.
+  const isSelectedVisionModel = selectedProfile?.kind === 'vision-model'
+  const visionMissingRequirements = isSelectedVisionModel && selectedProfile
+    ? externalServiceMissingRequirements(selectedProfile, selectedDraft)
+    : []
+  const isVisionTestDisabled = isSelectedVisionModel && visionMissingRequirements.length > 0
 
   return (
     <div className="flex flex-col gap-3">
@@ -2476,6 +2488,17 @@ function ExternalServicesSettingsPanel() {
                 )}
               </div>
 
+              {isSelectedVisionModel && (
+                <div
+                  data-vea-test-help
+                  className="text-[11px] leading-5"
+                  style={{ color: 'var(--text-light)' }}
+                >
+                  仅校验字段，不发起真实请求 / Validates fields only; no live request issued.
+                  {visionMissingRequirements.length > 0 ? `（缺少：${visionMissingRequirements.join('、')}）` : ''}
+                </div>
+              )}
+
               <div className="flex items-center justify-between gap-3 pt-0.5">
                 <button
                   type="button"
@@ -2490,13 +2513,19 @@ function ExternalServicesSettingsPanel() {
                 <div className="flex items-center gap-2">
                   <button
                     type="button"
+                    data-vea-test-button={isSelectedVisionModel ? 'fields-only' : 'probe'}
                     onClick={() => { void testProfile(selectedProfile) }}
-                    disabled={isSelectedTesting || isSelectedBusy}
+                    disabled={isSelectedTesting || isSelectedBusy || isVisionTestDisabled}
+                    title={isSelectedVisionModel
+                      ? '仅校验字段，不发起真实请求 / Validates fields only; no live request issued.'
+                      : undefined}
                     className="inline-flex items-center justify-center gap-1.5 text-[12px] font-medium transition-[border-color,color,background-color,opacity] duration-150"
-                    style={externalServiceButtonStyle('secondary', isSelectedTesting || isSelectedBusy)}
+                    style={externalServiceButtonStyle('secondary', isSelectedTesting || isSelectedBusy || isVisionTestDisabled)}
                   >
                     {isSelectedTesting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
-                    {isSelectedTesting ? '测试中' : '测试'}
+                    {isSelectedVisionModel
+                      ? (isSelectedTesting ? '校验中' : '仅校验字段')
+                      : (isSelectedTesting ? '测试中' : '测试')}
                   </button>
                   <button
                     type="button"
