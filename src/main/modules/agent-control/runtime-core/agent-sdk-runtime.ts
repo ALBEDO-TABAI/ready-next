@@ -74,6 +74,7 @@ import {
   buildChatCompletionsToolCalls,
   buildResponsesToolCalls,
 } from '../../claude-bridge/provider-tool-arguments'
+import { buildProviderHttpError } from '../../claude-bridge/provider-terminal-error'
 import { resolveOpenAIProviderRuntime } from '../provider-runtime-resolver'
 import {
   assertCurrentMessageCapability,
@@ -1710,7 +1711,7 @@ export class ReadyOpenAICompatibleModel implements Model {
       signal: request.signal,
     }, request.signal || new AbortController().signal, 'agents-sdk openai-compatible chat')
     const rawText = await response.text()
-    if (!response.ok) throw new Error(`HTTP ${response.status}: ${rawText.slice(0, 300)}`)
+    if (!response.ok) throw buildProviderHttpError({ httpStatus: response.status, errorBody: rawText })
     const json = JSON.parse(rawText || '{}') as Record<string, unknown>
     applyProviderResponsePatch(json, patchContext)
     const choices = Array.isArray(json.choices) ? json.choices as Array<Record<string, unknown>> : []
@@ -1771,7 +1772,7 @@ export class ReadyOpenAICompatibleModel implements Model {
     }, request.signal || new AbortController().signal, 'agents-sdk openai-compatible responses')
     if (!response.ok) {
       const rawError = await response.text().catch(() => '')
-      throw new Error(`HTTP ${response.status}: ${rawError.slice(0, 300)}`)
+      throw buildProviderHttpError({ httpStatus: response.status, errorBody: rawError })
     }
     const json = await parseJsonOrEventStreamResponse(response, { requestUrl: url }) as Record<string, unknown>
     applyProviderResponsePatch(json, patchContext)
@@ -2045,7 +2046,7 @@ export class ReadyAnthropicModel implements Model {
     }, request.signal || new AbortController().signal, 'agents-sdk anthropic model')
     const rawText = await resp.text()
     if (!resp.ok) {
-      throw new Error(`HTTP ${resp.status}: ${rawText.slice(0, 300)}`)
+      throw buildProviderHttpError({ httpStatus: resp.status, errorBody: rawText })
     }
     const json = JSON.parse(rawText || '{}') as Record<string, unknown>
     const usage = json.usage && typeof json.usage === 'object'

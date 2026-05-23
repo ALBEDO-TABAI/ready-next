@@ -256,6 +256,20 @@ interface AgentState {
   sendMessage: (content: string) => Promise<SendMessageResult>
   stopStreaming: () => void
   undoLastMessage: () => void
+  /**
+   * Stage X2.3 contract (b) — INTERNAL bootstrap path. Creates a fresh
+   * local conversation scope and swaps the currently-active session
+   * slice IN PLACE without growing `sessionOrder`. Used by:
+   *   - `deleteConversation` (post-delete recovery for the active scope)
+   *   - the `sendMessage` no-scope bootstrap (synchronizing a scope
+   *     before the first IPC).
+   *   - `undoLastMessage` (resets the active scope after undo).
+   *
+   * NOT to be called from UI controls — those go through
+   * `createNewSession()` (the visible tab API). Wiring UI to this method
+   * leaves the user with an "invisible" session (no chip in
+   * `SessionTabs`), which is exactly the W5 item 3 failure mode.
+   */
   newSession: () => void
   loadScopes: () => Promise<void>
   loadScope: (scopeId: string) => Promise<void>
@@ -290,6 +304,19 @@ interface AgentState {
    * renderer-side hard limit is reached (`sessionOrder.length >= 3`); the
    * caller can re-read `sessionOrder.length` after the call to detect this.
    * Returns the newly created session id, or `null` if rejected.
+   *
+   * Stage X2.3 contract (b) — VISIBLE TAB API. ALL UI-reachable session
+   * creation paths route through this method:
+   *   - SessionTabs "+ 新建" button.
+   *   - ChatPanel header `handleNewSession`.
+   *   - ChatPanel `handleChannelSelect` when landing on an empty local
+   *     channel.
+   *   - ChatPanel boot effect when `scopes.length === 0`.
+   *
+   * Two notes vs the legacy `newSession()`:
+   *   1. This appends to `sessionOrder` — the new tab is immediately
+   *      visible in `SessionTabs` (whereas `newSession()` swaps in place).
+   *   2. This respects the 3-session cap; `newSession()` does not.
    */
   createNewSession: () => string | null
   /**

@@ -163,7 +163,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     sendMessage,
     stopStreaming,
     undoLastMessage,
-    newSession,
+    createNewSession,
     // W2
     scopes,
     loadScopes,
@@ -587,8 +587,13 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
 
   useEffect(() => {
     void loadScopes().then(() => {
+      // Stage X2.3 — UI-reachable entry point: when the agent has no
+      // existing scopes after load, create a visible session via the
+      // tab-strip API. `createNewSession()` appends to `sessionOrder`
+      // so SessionTabs renders the new tab; the legacy `newSession()`
+      // only swaps in place and is reserved for non-UI bootstrap paths.
       if (useAgent.getState().scopes.length === 0) {
-        useAgent.getState().newSession()
+        useAgent.getState().createNewSession()
       }
     })
   }, [currentAgent, loadScopes])
@@ -712,8 +717,10 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
   }, [addAttachments, focusInputWithResize])
 
   const handleNewSession = useCallback(() => {
-    newSession()
-  }, [newSession])
+    // Stage X2.3 — header "new session" button goes through the visible
+    // tab API; see useAgent.createNewSession jsdoc for the contract.
+    createNewSession()
+  }, [createNewSession])
 
   const handleLoadConversation = useCallback(
     (convId: string) => {
@@ -740,10 +747,12 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
       }
 
       if (channel.sourceKind === 'local') {
-        newSession()
+        // Stage X2.3 — channel selection that lands on an empty local
+        // channel funnels through the visible tab API too.
+        createNewSession()
       }
     },
-    [getScopeChannelKey, loadConversation, newSession, scopes]
+    [getScopeChannelKey, loadConversation, createNewSession, scopes]
   )
 
   const handleDeleteConversation = useCallback(

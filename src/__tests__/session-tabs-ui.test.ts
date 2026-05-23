@@ -323,7 +323,12 @@ test('X2.1 case 7 — ChatPanel UI handlers call createNewSession (visible API),
   // §7 — UI session creation must funnel through the visible API.
   // eslint-disable-next-line ready/no-source-grep-test -- reviewed plan §7 contract
   const newSessionCallRegex = /\bnewSession\s*\(\s*\)/g
-  const matches = source.match(newSessionCallRegex) || []
+  // Strip comments first so the regex doesn't catch documentation
+  // references like "(see legacy newSession())".
+  const stripped = source
+    .replace(/\/\/[^\n]*/g, '')
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+  const matches = stripped.match(newSessionCallRegex) || []
   assert.equal(
     matches.length,
     0,
