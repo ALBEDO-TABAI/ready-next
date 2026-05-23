@@ -47,12 +47,16 @@ the check, (b) move into a written release-engineer checklist, or
 `docs/superpowers/audits/2026-05-19-stage-u-closeout/deferred-work-ledger.md`
 (or the equivalent location) is the start of this work.
 
-### P0.3 — W5 item 3 live evidence (carry from X2)
+### P0.3 — W5 item 3 live dogfood rerun on W3.3 hardware (carry from X2; deferred per amended §3.4 branch)
 
 `docs/superpowers/audits/2026-05-22-stage-x-closeout/w5-item-03-rerun/PENDING-USER-RUN.md`
-documents the exact reproduction steps. The code landed at X2.2-2.6; live
-re-measurement on the W3.3 equipment is 白's responsibility per X plan §3
-exit criterion 4 "explicitly deferred" branch.
+documents the exact reproduction steps (Step 0–Step 5, 5–10 minutes on
+the W3.3 equipment: MacBook Pro M5 Pro 24 GB / macOS 26.4). The code
+landed at X2.2-2.6 (4 commits); the rerun is explicitly deferred under
+Stage X plan §3 exit criterion 4's amended deferral branch (added in
+Stage X6.3 per codex r1 must-fix #1, symmetric to criterion 7's
+hardware-dependent deferral). Stage Y P0.3 is the live-evidence entry
+point.
 
 ### P0.4 — Workbench shell Scenario C + D live measurements (carry from X4)
 

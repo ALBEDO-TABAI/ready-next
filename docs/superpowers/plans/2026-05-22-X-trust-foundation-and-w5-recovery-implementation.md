@@ -81,7 +81,7 @@ Stage X is complete only when all of the following are true:
 1. `npm run verify:c`, `npm run verify:r`, `npm run verify:s`, and `npm run verify:t` either pass, or any intentionally retired sub-gate is removed from the chain and recorded in the Stage X closeout ledger with a replacement gate.
 2. No deep gate fails because it cannot read a moved source file.
 3. A new or updated meta-gate catches stale hard-coded source paths in verification scripts.
-4. W5 item 3 is rerun in the live Ready app and passes with evidence.
+4. W5 item 3 is rerun in the live Ready app and passes with evidence — OR — the rerun is explicitly deferred under § 3 criterion 7's pattern (live-hardware-dependent), with a written reason, the contract-side fixes already landed (X2 covers the code path), and reproduction steps in `docs/superpowers/audits/2026-05-22-stage-x-closeout/w5-item-03-rerun/PENDING-USER-RUN.md` sufficient for 白 to execute without further support. The deferred branch satisfies Stage X close; the live evidence becomes Stage Y P0 entry.
 5. A failed provider send, including quota/account failures, unlocks the composer without manual Stop.
 6. Minimal CI exists and runs the Stage X merge-critical checks.
 7. Workbench shell PR-shell-1 / PR-shell-2 / PR-shell-4 have either landed with evidence, or one is explicitly deferred with a new blocking reason and replacement acceptance boundary.
