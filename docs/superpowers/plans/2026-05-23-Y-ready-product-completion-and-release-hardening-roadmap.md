@@ -2,7 +2,7 @@
 title: Stage Y — Ready product completion and release hardening implementation plan
 date: 2026-05-23
 stage: Y-entry
-status: refinement-r5 (codex r4 must-fix 1-4 + should-fix 1-3 + P2 1-2 addressed; ready for codex r5 round)
+status: refinement-r6 (codex r5 must-fix 1-4 + should-fix 1-3 addressed; ready for codex r6 round)
 enforce: false
 predecessors:
   - docs/superpowers/plans/2026-05-23-Y-product-surface-and-release-prep-seed.md
@@ -11,7 +11,8 @@ predecessors:
 refinement_history:
   - r0 (2026-05-23): initial roadmap draft (sections 0-10) by codex.
   - r1 (2026-05-23): Claude in-place refinement — added §3.x exit criteria precision, §4 phase ordering + parallelism table, §5 closeout-bundle file list, §6.x Y0.1 4-row disposition decision tree, §7 Y0.2 CI flip contract, §8 white-hardware live-evidence handoff schedule, §9 dogfood evidence schema + per-surface sub-plan template, §10 Stage U source discovery (Stage U closeout folder is missing; release checklist is the real source), §11 Y1.x scope locks, §12 Y2.x scope locks, §13 Stage Z entry contract, §14 verify-chain split (Y-entry vs Y-release-track), §15 expanded do-not list, §16 review cadence per phase, §17 rollback paths, §18 dispatch time estimate, §19 Stage Y closeout bundle structure (mirrors Stage X §10).
-  - r5 (2026-05-23): Codex r4 fix-and-recheck — 4 must-fix items addressed inline: (1) §9.2 frontmatter `build_commit_captured_at` "explicit capture moment" alternative REMOVED — now committer-date only; manifest example expanded to include `type: head-capture` artifact; evidence template body §9.2 updated to require the head-capture artifact entry. (2) §6.2 + §6.5 R/T factual correction — actual on-disk state is `check-stage-r-verify-switch.deferred.cjs` ONLY (T is not in `.deferred.cjs` form; codex r4 verified via `ls scripts/__tests__/`); §6.2 + §6.5 reworded; paired-row schema now allows split disposition_path via `disposition_path_r` + `disposition_path_t` sub-fields. (3) §4.3 budget recalculated realistically — Y0.5 dogfood = 60-80h (20 surfaces × 3-4h), Y0.7 + Y0.8 P0 implementation explicitly itemized (Y0.7 MCP 6-8h or 1h depending on path; Y0.8 cache quota 4-6h or 1h); total agent-time ~130-180h (was 75-115h, which omitted Y0.5 dogfood at scale and Y0.7/Y0.8 P0 work). (4) Stale "16 dogfood rows" at §4.1 line 158 corrected to "20 dogfood rows". Plus 3 should-fix: §9.2 frontmatter template adds row-13-specific note for 5 sub-flow markers; §20.3 Q8 + Q9 marked RESOLVED (answered at r3/r4 — keep for history but flag as closed); §20.3 Q11 reworded to a neutral keep-vs-renumber decision; stale "renaming §11.1/§11.2" in r3 changelog entry corrected to "reorganized §11.0a/§11.0b as P0 scope locks". Plus 2 P2: §9.2.1 head-capture.txt optionally records branch name + remote URL (kept simple; not required); §11.0a/§11.0b naming preserved (decision is recorded in resolution table — codex r4 P2 #2 explicitly accepted "not required if current legend is cleaned up").
+  - r6 (2026-05-23): Codex r5 fix-and-recheck — 4 must-fix items addressed inline: (1) All r4-vintage 3-word phrase occurrences (in §refinement_history r5 entry, §9.2 frontmatter annotation, §20.1d MF1 row) purged from the file per codex r5 leftover-language-check rule — replaced everywhere with paraphrase "the previously-allowed r4 reflog-derived capture timestamp branch", including in this changelog entry. (2) §6.2 stale T `.deferred.cjs` rename wording corrected — the re-arm step now correctly says "rename R's `.deferred.cjs` back to `.test.cjs` AND restore T's direct `node scripts/check-stage-t-verify-switch.cjs` invocation in `verify:t`" (per §6.2 r5 fact correction). (3) §6.5 split-path schema tightened: (a) `rearmed_in_verify_chain` type explicitly typed as `string (semicolon-separated when disposition_path = "split") | null`; (b) explicit validator obligation bullet added: `check-y0-1-disposition-report.cjs` MUST reject `disposition_path = "split"` when either `disposition_path_r` or `disposition_path_t` is null. (4) §4.3 budget ceiling raised from 180h → 220h with explicit Y2 uncertainty note (Y2.1 large-file extraction alone could be 30-60h across 17 files in §12.1 inventory; Y2.2-Y2.5 each ≥4h floor; realistic Y2 ceiling 60-80h justifies raising the total). Plus 3 should-fix: §20.1b "renumbered §11.1/§11.2" → "reorganized §11.0a/§11.0b" stale wording cleaned; §20.1 r1 table SF stale "8 mandatory" → "8 of 20 (r1 baseline; codex r2 promoted to 9 of 20 at r3 — see §20.1b SF for current count)"; §9.2.3 explicit lint bullet added for `build_commit_captured_at = git log -1 --format=%cI <build_commit>` formula validation.
+  - r5 (2026-05-23): Codex r4 fix-and-recheck — 4 must-fix items addressed inline: (1) §9.2 frontmatter `build_commit_captured_at` r4 reflog-derived capture timestamp branch REMOVED — now committer-date only; manifest example expanded to include `type: head-capture` artifact; evidence template body §9.2 updated to require the head-capture artifact entry. (2) §6.2 + §6.5 R/T factual correction — actual on-disk state is `check-stage-r-verify-switch.deferred.cjs` ONLY (T is not in `.deferred.cjs` form; codex r4 verified via `ls scripts/__tests__/`); §6.2 + §6.5 reworded; paired-row schema now allows split disposition_path via `disposition_path_r` + `disposition_path_t` sub-fields. (3) §4.3 budget recalculated realistically — Y0.5 dogfood = 60-80h (20 surfaces × 3-4h), Y0.7 + Y0.8 P0 implementation explicitly itemized (Y0.7 MCP 6-8h or 1h depending on path; Y0.8 cache quota 4-6h or 1h); total agent-time ~130-180h (was 75-115h, which omitted Y0.5 dogfood at scale and Y0.7/Y0.8 P0 work). (4) Stale "16 dogfood rows" at §4.1 line 158 corrected to "20 dogfood rows". Plus 3 should-fix: §9.2 frontmatter template adds row-13-specific note for 5 sub-flow markers; §20.3 Q8 + Q9 marked RESOLVED (answered at r3/r4 — keep for history but flag as closed); §20.3 Q11 reworded to a neutral keep-vs-renumber decision; stale "renaming §11.1/§11.2" in r3 changelog entry corrected to "reorganized §11.0a/§11.0b as P0 scope locks". Plus 2 P2: §9.2.1 head-capture.txt optionally records branch name + remote URL (kept simple; not required); §11.0a/§11.0b naming preserved (decision is recorded in resolution table — codex r4 P2 #2 explicitly accepted "not required if current legend is cleaned up").
   - r4 (2026-05-23): Codex r3 fix-and-recheck — 4 must-fix items addressed inline: (1) §3.1 acceptance links un-reversed — Y0.7 now correctly cites §11.0b (MCP scope lock) and Y0.8 cites §11.0a (cache quota scope lock); (2) §6.5 row-count ambiguity resolved by choosing "exactly 4 rows with paired gate_id `check-stage-r-verify-switch+check-stage-t-verify-switch` as a single row"; (3) §9.2.1 reflog branch removed (not portable across clones) — replaced with checksummed `head-capture.txt` artifact in evidence bundle; (4) §20.3 Q11 added explicitly (was dropped at r3 — Q11 covers §11.0a/§11.0b naming idiomaticity). Plus 5 should-fix: bai_spotcheck.performed_at tightened to 72h with same-build_commit fallback; §9.1 row 13 schema constraint added requiring 5 sub-flow evidence markers; §9.2.2 50% fallback removed (kept only ±30s); §4.3 budget table updated for 9 mandatory spot-checks + Y1.2 MCP budget zeroed; §11.2 RESERVED note expanded to cross-reference §4.3 + §11.0b. Plus 2 P2: §20.3 Q3 stale "8 of 20 / optional" cleaned; §11.0a/§11.0b kept (per Q11 ruling) with explicit downstream-reference legend.
   - r3 (2026-05-23): Codex r2 fix-and-recheck — 5 must-fix items addressed inline: (1) Y0.7/Y0.8 P0/P1/Stage Z contradiction resolved by making Y0.7+Y0.8 non-deferrable P0 + reorganizing §11 — added §11.0a (Y0.8 cache quota scope lock) + §11.0b (Y0.7 MCP scope lock); §11.1 narrowed to VEA-only; §11.2 RESERVED with cross-references to §11.0b + §4.3 + §13 — and removing them from the §11 P1 group; (r5 correction: r3 entry originally said "renaming §11.1/§11.2 to P0 scope locks" which was inaccurate — §11.1/§11.2 numbers were preserved; §11.0a/§11.0b are new sub-sections); (2) §9.2 schema adds `bai_spotcheck` field with required sub-evidence for mandatory-spot-check surfaces + surface 10 HTTP 402 mandatory; (3) §9.2 reproduction-window overlap check replaces ±5min loose check + build_commit ties to captured-HEAD evidence via reflog timestamp cross-reference; (4) §6.5 conditions made machine-checkable via strict `y0-1-disposition-report-schema.json` (4 gate IDs × required fields); (5) §9.1 row 13 expanded to cover FastCard translate / describe image / resolve video / overlay command paths per `src/preload/index.ts:13-19,394-404`. Plus 4 should-fix: §6.1 wording fixed to "anywhere in the file"; §6.2 verify-chain policy note + missing `.deferred.cjs` reference recorded; §0 line 36 + §4 line 181 + all "16 rows" references rewritten to "20 rows"; §9.1 rows 1/3/5/8/10/11 tightened to binary fixed-fixture spec. Plus 3 P2: §19 evidence bundle includes both JSON + `.checksums.txt`; §19 row 11 adds `inherits_to_z_phase` column; §11.5 fixed to use existing `npm run verify:f:e2e` (not invented `test:e2e`).
   - r2 (2026-05-23): Codex r1 fix-and-recheck — 8 must-fix items addressed inline: (1) §2 + §6.1 fixed C4-transitive prescription to file-level (per current `scripts/check-sqlite-test-skip-pattern.cjs:120-127` + `src/__tests__/utils/sqlite-skip.ts:10-16` contract); (2) §6.2 default flipped from "(b) delete" to "(a) current-charter rewrite or explicit replacement"; (3) §7 deep-gates flip relaxed to "stable disposition + represented commands" + split into Y0.2.a merge-job alignment vs Y0.2.b deep-gate enablement; (4) §6.5 + §14.2 keep `verify:stage-x-known-regressions` through Y0.1 + replace with Stage Y successor before deletion; (5) §9.1 dogfood matrix v3: split row 16 into 3 rows (16/17/18), added row 19 Obsidian web clip, row 20 agent_interaction routing, row 9 explicitly covers restart + crash + forced-quit resumability; (6) §9.2 evidence schema adds SHA-256 + timestamps + build_commit match + manifest validation; (7) §3.1 + §11.1/§11.2 release-blocking inconsistency resolved — Y1.1 + Y1.2 explicitly block Stage Z; (8) §2 entry HEAD updated to r1 commit 7f904fb5. Plus 5 should-fix: §6.3 testing-conventions content-level check, §6.4 overlap-fixture-first, §7 split, §13 verify:cloud handoff, §16 read-only-review disclaimer. Plus 3 P2: §9.2 evidence/manifest.json schema, §9.3 sub-plan "pre-existing coverage: none" requirement, §19 白-operator-runbook.
@@ -196,7 +197,34 @@ Stage X learned that **shared live-app resources** are the real concurrency bott
 | Y2.1-Y2.5 | Each ≥ 4 h; per §12 each needs its own micro-plan first | varies |
 | Stage Y closeout + review loop | 4-6 h + 2 PASS rounds with codex | review-loop time |
 
-Stage Y agent-time total: **~130-180 hours** (codex r4 must-fix #3 corrected; r4's 75-115h omitted (a) Y0.5 dogfood at scale: 60-80h, and (b) Y0.7 + Y0.8 P0 implementation: 5-14h depending on path branches). Breakdown: Y0.0 1h + Y0.1.x 4.5-6.5h + Y0.2 1h + Y0.3/Y0.4 n/a-code + Y0.5 60-80h + Y0.6 2-3h + Y0.7 1-8h + Y0.8 1-6h + Y1.1 2-3h + Y1.2 0h (reserved) + Y1.3 4-8h + Y1.4 3-4h + Y1.5 8-12h + Y1.6 4-6h + Y2.x ≥ 20h (each ≥ 4h × 5 = 20h floor; per §12 each needs own micro-plan first) + closeout/review 4-6h ≈ **115-167h** before Y2 upper-range padding; round to 130-180h to cover Y2 uncertainty.
+Stage Y agent-time total: **~130-220 hours** (codex r5 must-fix #4 raised ceiling: r5's 130-180h padded only 13h above the 167h breakdown ceiling, which is implausible given Y2.1 large-file extraction alone can be 30-60h across the 17 files listed in §12.1 inventory).
+
+Breakdown:
+
+- Y0.0 1h
+- Y0.1.x 4.5-6.5h
+- Y0.2 1h
+- Y0.3/Y0.4 n/a-code (白-hardware only)
+- Y0.5 60-80h
+- Y0.6 2-3h
+- Y0.7 1-8h
+- Y0.8 1-6h
+- Y1.1 2-3h
+- Y1.2 0h (reserved)
+- Y1.3 4-8h
+- Y1.4 3-4h
+- Y1.5 8-12h
+- Y1.6 4-6h
+- Y2.1 large-file extraction wave: **30-60h** (17 files in §12.1; each extraction ≥ 2h floor + per-file integration cost; lower bound assumes only the 5 highest-priority files are touched in Stage Y, upper bound assumes the full wave)
+- Y2.2 useAgent split: 4-6h
+- Y2.3 db/migration harness: 4-6h
+- Y2.4 Windows parity groundwork: 4-8h
+- Y2.5 verify-chain simplification: 2-4h
+- closeout/review 4-6h
+- ≈ **138-218h** (Y2 lower-bound assumes minimal Y2.1 scope; upper-bound assumes full extraction wave)
+- Round to **130-220h** ceiling
+
+**Y2 uncertainty note (codex r5 must-fix #4 explicit)**: Y2.1 is the dominant variance source. The §12.1 inventory lists 17 large files; each extraction is a micro-plan that may reveal hidden coupling. If multiple files in the wave reveal cross-file contract violations during extraction, individual files can balloon from 2h to 6h+ each, pushing Y2.1 from 60h toward 100h+. Stage Y open-question Q12 in §20.3 may need to declare "Y2.1 scope cap" to bound this; if no cap is declared, the 220h ceiling may itself be exceeded.
 
 白-time total: ~5-7 hours (codex r3 corrected from r2's 2-4h; r4 keeps): 9 mandatory dogfood spot-checks (135-270 min = 2.25-4.5h) + Y0.3 (~30min) + Y0.4 (~30min) + first-CI-run trigger (~5min) + Y0.7 + Y0.8 hardware verification (~30min each).
 
@@ -295,7 +323,9 @@ Decision tree:
    - Replace `/###\s*6\.25/` with a search for the Stage R plan-file link (`docs/superpowers/plans/2026-05-08-R-stage12-implementation.md`) in CLAUDE.md §8 "协作文档索引".
    - Replace `/###\s*6\.27/` with a search for the Stage T plan-file link (`docs/superpowers/plans/2026-05-09-T-stage14-implementation.md`) in CLAUDE.md §8.
    - Keep the `verify` / `verify:cloud` chain-composition assertion intact but allow either `verify` OR `verify:cloud` to satisfy (current state: `verify:cloud` embeds `verify:t`, plain `verify` does not).
-3. Re-arm: restore `node scripts/check-stage-r-verify-switch.cjs` and `node scripts/check-stage-t-verify-switch.cjs` direct invocations in `verify:r` / `verify:t` (or `verify:s` if the chain is cleaner there); rename their `.deferred.cjs` test variants back to `.test.cjs`.
+3. Re-arm (codex r5 must-fix #2: per-gate split per actual on-disk state):
+   - For R: rename `scripts/__tests__/check-stage-r-verify-switch.deferred.cjs` back to `.test.cjs` (wildcard-test pickup) AND restore `node scripts/check-stage-r-verify-switch.cjs` direct invocation in `verify:r` (or `verify:s` if cleaner).
+   - For T: restore the direct `node scripts/check-stage-t-verify-switch.cjs` invocation in `verify:t` (T was retired via direct-invocation removal at X1.8, NOT via `.deferred.cjs` rename — no T-side rename is possible because no T-side `.deferred.cjs` file exists per `ls scripts/__tests__/`).
 
 Fallback **(b)** triggers only if the sub-plan concludes the underlying contract is obsolete (Stage R/T scope no longer needs gate-level enforcement) AND a one-paragraph written decision exists. Even then, pure deletion is forbidden — the gate must be replaced by either (i) an equivalent assertion in `verify:stage-y-known-regressions` (per §6.5), or (ii) a release-handoff row in `release-handoff.md` (per §10.3). The historical proof from X1.8 must not be silently removed.
 
@@ -382,13 +412,14 @@ Deletion of `scripts/check-stage-x-known-regressions.cjs` is permitted ONLY when
       "original_script_path": "scripts/check-sqlite-test-skip-pattern.cjs",
       "original_ledger_link": "docs/superpowers/audits/2026-05-22-stage-x-closeout/deferred-work-ledger.md#row-1",
       "disposition_path": "a-fix" | "a-rewrite" | "b-replacement-gate" | "b-retired-with-reason" | "split",
-      // when disposition_path = "split" (only valid for the paired R+T row), the following sub-fields are required:
+      // when disposition_path = "split" (only valid for the paired R+T row), the following two sub-fields are required AND must both be non-null; the gate rejects split-with-null-subfield:
       "disposition_path_r": "a-fix" | "a-rewrite" | "b-replacement-gate" | "b-retired-with-reason" | null,
       "disposition_path_t": "a-fix" | "a-rewrite" | "b-replacement-gate" | "b-retired-with-reason" | null,
       "outcome_commit": "<git sha of the disposition commit>",
-      "rearmed_in_verify_chain": "verify:k" | "verify:r" | "verify:s" | "verify:t" | "verify:f" | null,
-      // for split R+T paths, multi-value form allowed: "verify:r;verify:t"
-      "replacement_gate_path": "scripts/check-stage-y-known-regressions.cjs#<gate_id>" | null,
+      // type: string | null. When disposition_path = "split", value MUST be semicolon-separated form (e.g. "verify:r;verify:t"); the gate parses on `;` and validates each chain individually. Single-path rows MUST NOT contain `;`.
+      "rearmed_in_verify_chain": "verify:k" | "verify:r" | "verify:s" | "verify:t" | "verify:f" | "<chain1>;<chain2>" | null,
+      // type: string | null. When disposition_path = "split", value MUST be semicolon-separated form. Single-path rows MUST NOT contain `;`.
+      "replacement_gate_path": "scripts/check-stage-y-known-regressions.cjs#<gate_id>" | "<path1>;<path2>" | null,
       "retire_reason": "<one paragraph>" | null,
       "rationale": "<one paragraph cross-referencing the §6.x decision tree branch chosen>"
     },
@@ -405,6 +436,12 @@ Deletion of `scripts/check-stage-x-known-regressions.cjs` is permitted ONLY when
 - If `disposition_path = b-replacement-gate`: `replacement_gate_path` resolves on disk AND the gate is invoked by `scripts/check-stage-y-known-regressions.cjs`.
 - If `disposition_path = b-retired-with-reason`: `retire_reason` is non-empty AND a ledger row exists in `deferred-work-ledger.md` with matching gate_id.
 - Every gate's `rationale` cites at least one §6.x section anchor verbatim.
+- **Split-path validation (codex r5 must-fix #3)**: if any row has `disposition_path = "split"` (only valid for the paired R+T row), the gate MUST reject the report unless ALL of the following hold:
+  - `disposition_path_r` is non-null and ∈ {a-fix, a-rewrite, b-replacement-gate, b-retired-with-reason}
+  - `disposition_path_t` is non-null and ∈ {a-fix, a-rewrite, b-replacement-gate, b-retired-with-reason}
+  - `rearmed_in_verify_chain` contains `;` (semicolon-separated form required for split)
+  - `replacement_gate_path` is either null or contains `;` (if either sub-disposition is `b-replacement-gate`, the corresponding path segment must be present)
+- For single-path rows (`disposition_path` ≠ "split"): the gate MUST reject if `disposition_path_r` or `disposition_path_t` is non-null (these sub-fields are exclusively for the split branch), OR if `rearmed_in_verify_chain` / `replacement_gate_path` contain `;`.
 
 **Conditions for X gate removal**:
 
@@ -537,7 +574,7 @@ operator: <name>                # primary operator: agent-id or 白
 operator_class: agent-only | agent-with-bai-spotcheck | bai-only   # MUST match §9.4 row class
 hardware: <macbook-pro-m5-pro-24gb / linux-x64 / other>
 build_commit: <git sha — MUST match the HEAD at evidence-capture time per §9.2.1 capture-HEAD rule + the value in head-capture.txt>
-build_commit_captured_at: <ISO 8601 committer-date from `git log -1 --format=%cI <sha>` — codex r4 must-fix #1: the r4 "explicit capture moment" alternative is REMOVED because reflog/capture-moment is non-portable; committer-date is the only accepted value>
+build_commit_captured_at: <ISO 8601 committer-date from `git log -1 --format=%cI <sha>` — codex r4 must-fix #1 + codex r5 must-fix #1 cleanup: the r4 reflog-derived capture timestamp branch is REMOVED because reflog is non-portable across clones; committer-date is the only accepted value>
 status: pass | fail | deferred-with-owner
 deferred_owner: <name, only if status=deferred-with-owner>
 deferred_reason: <one sentence, only if status=deferred-with-owner>
@@ -664,6 +701,7 @@ For `type: log` artifacts, the gate enforces **strict overlap** with the reprodu
 - Each artifact in the manifest: file exists on disk, file size matches `bytes`, SHA-256 of file matches `sha256` field.
 - For `type: log` artifacts: enforced per §9.2.2 strict overlap.
 - Manifest's `build_commit` enforced per §9.2.1 capture-HEAD rule.
+- **`build_commit_captured_at` formula validation (codex r5 should-fix #3)**: the gate MUST run `git log -1 --format=%cI <build_commit>` and assert the returned ISO 8601 timestamp equals the frontmatter `build_commit_captured_at` value verbatim. Tolerance: 0 seconds (committer-date is deterministic per commit; any mismatch indicates the operator constructed the timestamp by hand or used the r4-vintage reflog-derived branch and is rejected).
 - If `status = pass` or `fail`: at least one screencap artifact AND one log artifact present.
 - A separate `evidence-checksums.txt` file is emitted alongside `evidence-checksum-manifest.json` (per §19 row 12 P2 P2 #1) for `sha256sum -c` tooling compatibility.
 
@@ -1012,7 +1050,7 @@ These are Y0.0 entry-capture responsibilities. Any divergence between expected b
 
 | # | r2 item | r3 resolution |
 | ---: | --- | --- |
-| MF1 | Y0.7/Y0.8 P0/P1/Stage Z contradiction | §3.1 + §3.2 non-deferrable carve-out + §11.0a/§11.0b P0 scope locks + §11.1/§11.2 renumbered; §13 explicitly excludes Y0.7/Y0.8 from deferrable bucket |
+| MF1 | Y0.7/Y0.8 P0/P1/Stage Z contradiction | §3.1 + §3.2 non-deferrable carve-out + §11.0a/§11.0b P0 scope locks added (§11.1/§11.2 numbers preserved, just reorganized — r6 corrected r3's stale "renumbered" word); §13 explicitly excludes Y0.7/Y0.8 from deferrable bucket |
 | MF2 | §9.2 spot-check machine-checkable + surface 10 HTTP 402 | §9.2 added `bai_spotcheck` block with 5 required sub-fields + §9.2.3 gate enforces existence + §9.4 lists surface 10 (HTTP 402/429) as mandatory spot-check |
 | MF3 | Timestamp/commit validation tightened | §9.2.1 capture-HEAD rule + §9.2.2 strict reproduction-window overlap (50% or ±30s) replace ±5min loose check |
 | MF4 | §6.5 conditions machine-checkable | §6.5 added `y0-1-disposition-report-schema.json` (4 rows × 9 fields) + `check-y0-1-disposition-report.cjs` gate |
@@ -1020,7 +1058,7 @@ These are Y0.0 entry-capture responsibilities. Any divergence between expected b
 | SF1 | §6.1 wording correction | "anywhere in the file" replaces "top of first test block" |
 | SF2 | §6.2 verify-chain policy + .deferred.cjs reference | §6.2 r3 amplification paragraph |
 | SF3 | "16 rows" → "20 rows" stale text | §0 + §4 fixed |
-| SF4 | Rows 1/3/5/8/10/11 binary fixed-fixture | All 6 rows rewritten with concrete fixtures and operator paths |
+| SF4 | Rows 1/3/5/8/10/11 binary fixed-fixture | All 6 rows rewritten with concrete fixtures and operator paths (r1-table baseline said "8 mandatory" spot-check surfaces; codex r2 promoted surface 10 HTTP 402/429 → 9 mandatory at r3; current §9.4 count is 9; r6 cleaned this stale r1 mention) |
 | P2-1 | JSON + sha256sum -c | §19 row 12 emits both `evidence-checksum-manifest.json` + `evidence-checksums.txt` |
 | P2-2 | inherits_to_z_phase column | §19 row 11 explicit |
 | P2-3 | test:e2e vs verify:f:e2e | §11.5 corrected to use existing `verify:f:e2e` |
@@ -1045,7 +1083,7 @@ These are Y0.0 entry-capture responsibilities. Any divergence between expected b
 
 | # | r4 item | r5 resolution |
 | ---: | --- | --- |
-| MF1 | §9.2 schema contradiction (build_commit_captured_at alternative + manifest missing head-capture) | r4 frontmatter "explicit capture moment" alternative REMOVED — committer-date only; manifest example expanded to include `type: head-capture` entry; body Evidence Artifacts section template adds head-capture as REQUIRED |
+| MF1 | §9.2 schema contradiction (build_commit_captured_at alternative + manifest missing head-capture) | r4 frontmatter reflog-derived-capture-timestamp branch REMOVED — committer-date only; manifest example expanded to include `type: head-capture` entry; body Evidence Artifacts section template adds head-capture as REQUIRED |
 | MF2 | §6.2/§6.5 R/T factual error (T has no .deferred.cjs) | §6.2 reworded with per-gate rename rule (R uses .deferred.cjs rename; T uses direct-invocation removal); §6.5 paired-row schema adds `disposition_path_r` + `disposition_path_t` for split R/T outcomes + multi-value `rearmed_in_verify_chain` |
 | MF3 | §4.3 budget unsupported | Recalculated: Y0.5 explicit 60-80h row; Y0.7 + Y0.8 P0 implementation explicit rows (Y0.7 1-8h; Y0.8 1-6h); agent-time total 130-180h (was 75-115h); breakdown shows the math |
 | MF4 | "16 dogfood rows" stale | §4.1 line 158 corrected to "20 dogfood rows" |
@@ -1055,7 +1093,19 @@ These are Y0.0 entry-capture responsibilities. Any divergence between expected b
 | P2-1 | head-capture.txt optional branch/remote | Kept optional; not required (SHA + clean tree is enough for correctness per codex r4) |
 | P2-2 | Renumber §11.0a/§11.0b consideration | Kept current naming with explicit downstream-reference legend (codex r4 P2 accepted "not required if legend is cleaned up"; r5 cleaned the legend) |
 
-### 20.3 Stage Y entry plan open questions (last updated at r5)
+### 20.1e Resolution of codex r5 verdict items
+
+| # | r5 item | r6 resolution |
+| ---: | --- | --- |
+| MF1 | r4-vintage 3-word capture-moment phrase leftovers (§refinement_history r5 entry + §9.2 frontmatter + §20.1d MF1) | All 3 leftover occurrences replaced with paraphrase "the previously-allowed r4 reflog-derived capture timestamp branch"; the exact 3-word phrase no longer appears anywhere in the file (codex r5 leftover-language-check satisfied; this resolution-table row also avoids quoting the phrase verbatim) |
+| MF2 | §6.2 stale T `.deferred.cjs` rename wording | §6.2 step 3 re-arm rewritten per-gate: R uses `.deferred.cjs` rename + verify chain restore; T uses verify chain restore only (no T-side `.deferred.cjs` exists) |
+| MF3 | §6.5 split schema unambiguous + validator obligation | rearmed_in_verify_chain / replacement_gate_path types tightened with explicit "semicolon-separated when split" annotation; new validator bullet rejects split-with-null-subfield AND non-split-with-semicolon |
+| MF4 | §4.3 budget ceiling unrealistic vs Y2.1 | Ceiling raised 180h → 220h; per-Y2-row breakdown added (Y2.1 30-60h explicit); Y2 uncertainty note flags Y2.1 as dominant variance source; §20.3 Q12 added for Y2.1 scope-cap decision |
+| SF1 | §20.1b stale "renumbered §11.1/§11.2" | MF1 row reworded to "P0 scope locks added (numbers preserved, just reorganized)" |
+| SF2 | §20.1 r1 table SF stale "8 mandatory" | SF4 row reworded to explicitly note r1-baseline-8 → codex-r2-promoted-9 evolution |
+| SF3 | §9.2.3 explicit committer-date lint bullet | Added: gate runs `git log -1 --format=%cI <build_commit>` and asserts equals frontmatter `build_commit_captured_at` with 0-second tolerance |
+
+### 20.3 Stage Y entry plan open questions (last updated at r6)
 
 1. **§9.1 row 9 — kill -9 + Cmd-Q + restart**: are all three durable-handle resume scenarios truly contractually required by CLAUDE.md §3 line 49-50, or is only "restart" (clean exit) required? If only restart, the row scope shrinks.
 2. **§9.1 row 19 — Obsidian web clip dependency on Y0.1.1**: row 19 lists `obsidian-web-clip-current-tab-ipc.test.ts` as a Y0.1.1 missing_helper file. If Y0.1.1 fix lands first, does that automatically validate row 19's surface? Or does row 19 still need its own live evidence?
@@ -1067,4 +1117,5 @@ These are Y0.0 entry-capture responsibilities. Any divergence between expected b
 8. **§9.2.2 50% overlap fallback (RESOLVED at r4)**: codex r3 ruled the 50% fallback is too generous; r4 removed it. Only ±30s strict overlap remains. NO open question.
 9. **§9.2 `bai_spotcheck.performed_at` window (RESOLVED at r4)**: codex r3 ruled 14d is too long; r4 tightened to 72h with same-build_commit fallback for longer windows. NO open question.
 10. **§11.0a/§11.0b labeling vs §3 P0 status (RESOLVED at r3)**: codex r3 ruled §11 placement is consistent (mirrors Y0.1-Y0.6 → §6-§10 pattern). NO open question.
-11. **§11.0a/§11.0b naming idiomaticity (neutral framing at r5; codex r4 P2 accepted current naming)**: r4 kept current §11.0a/§11.0b naming. Codex r4 P2 #2 ruled "consider renumbering... but not required if the current legend is cleaned up". r5 cleaned the legend (§11.2 RESERVED now explicitly cross-references §4.3 + §13 + §11.0b). NEUTRAL FRAMING: the keep-vs-renumber trade-off is reader-clarity-now vs commit-history-stability vs future-stage-consistency. If codex r5 round still prefers renumbering despite legend cleanup, please specify the concrete reader-confusion scenarios that the legend does not cover.
+11. **§11.0a/§11.0b naming idiomaticity (neutral framing at r5; codex r4 P2 accepted current naming)**: r4 kept current §11.0a/§11.0b naming. Codex r4 P2 #2 ruled "consider renumbering... but not required if the current legend is cleaned up". r5 cleaned the legend (§11.2 RESERVED now explicitly cross-references §4.3 + §13 + §11.0b). NEUTRAL FRAMING: the keep-vs-renumber trade-off is reader-clarity-now vs commit-history-stability vs future-stage-consistency. If codex r5+ rounds still prefer renumbering despite legend cleanup, please specify the concrete reader-confusion scenarios that the legend does not cover.
+12. **Y2.1 large-file extraction scope cap (NEW at r6 per codex r5 must-fix #4 §4.3 Y2 uncertainty note)**: Y2.1 inventory in §12.1 lists 17 large files. Without an explicit scope cap, the §4.3 220h ceiling can be exceeded if multiple files reveal cross-file contract violations during extraction. Options: (a) declare "Stage Y caps Y2.1 at the 5 highest-priority files; remaining 12 deferred to Stage Z scope" — gives a hard upper bound but leaves Stage Z holding most of the wave; (b) declare "Stage Y attempts the full wave but each individual extraction that exceeds 6h triggers a deferral check" — allows ambition but makes the timeline non-deterministic; (c) leave un-capped and accept the 220h ceiling as advisory. r6 default = (a) Stage Y caps at 5 highest-priority files per the §12.1 ordering. Codex r6 round should confirm or pick a different option.
