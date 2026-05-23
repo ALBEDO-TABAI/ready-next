@@ -2,7 +2,7 @@
 title: Stage Y — Ready product completion and release hardening implementation plan
 date: 2026-05-23
 stage: Y-entry
-status: refinement-r1 (in-place refinement of the 2026-05-23 entry roadmap; ready for codex review loop)
+status: refinement-r2 (codex r1 must-fix 1-8 + should-fix 1-5 + P2 1-3 addressed; ready for codex r2 round)
 enforce: false
 predecessors:
   - docs/superpowers/plans/2026-05-23-Y-product-surface-and-release-prep-seed.md
@@ -11,6 +11,7 @@ predecessors:
 refinement_history:
   - r0 (2026-05-23): initial roadmap draft (sections 0-10) by codex.
   - r1 (2026-05-23): Claude in-place refinement — added §3.x exit criteria precision, §4 phase ordering + parallelism table, §5 closeout-bundle file list, §6.x Y0.1 4-row disposition decision tree, §7 Y0.2 CI flip contract, §8 white-hardware live-evidence handoff schedule, §9 dogfood evidence schema + per-surface sub-plan template, §10 Stage U source discovery (Stage U closeout folder is missing; release checklist is the real source), §11 Y1.x scope locks, §12 Y2.x scope locks, §13 Stage Z entry contract, §14 verify-chain split (Y-entry vs Y-release-track), §15 expanded do-not list, §16 review cadence per phase, §17 rollback paths, §18 dispatch time estimate, §19 Stage Y closeout bundle structure (mirrors Stage X §10).
+  - r2 (2026-05-23): Codex r1 fix-and-recheck — 8 must-fix items addressed inline: (1) §2 + §6.1 fixed C4-transitive prescription to file-level (per current `scripts/check-sqlite-test-skip-pattern.cjs:120-127` + `src/__tests__/utils/sqlite-skip.ts:10-16` contract); (2) §6.2 default flipped from "(b) delete" to "(a) current-charter rewrite or explicit replacement"; (3) §7 deep-gates flip relaxed to "stable disposition + represented commands" + split into Y0.2.a merge-job alignment vs Y0.2.b deep-gate enablement; (4) §6.5 + §14.2 keep `verify:stage-x-known-regressions` through Y0.1 + replace with Stage Y successor before deletion; (5) §9.1 dogfood matrix v3: split row 16 into 3 rows (16/17/18), added row 19 Obsidian web clip, row 20 agent_interaction routing, row 9 explicitly covers restart + crash + forced-quit resumability; (6) §9.2 evidence schema adds SHA-256 + timestamps + build_commit match + manifest validation; (7) §3.1 + §11.1/§11.2 release-blocking inconsistency resolved — Y1.1 + Y1.2 explicitly block Stage Z; (8) §2 entry HEAD updated to r1 commit 7f904fb5. Plus 5 should-fix: §6.3 testing-conventions content-level check, §6.4 overlap-fixture-first, §7 split, §13 verify:cloud handoff, §16 read-only-review disclaimer. Plus 3 P2: §9.2 evidence/manifest.json schema, §9.3 sub-plan "pre-existing coverage: none" requirement, §19 白-operator-runbook.
 ---
 
 # Stage Y — Ready product completion and release hardening implementation plan
@@ -53,7 +54,7 @@ Stage Y is complete only when:
 
 ## 2. Current truth at Stage Y entry
 
-Captured 2026-05-23, branch `codex/readyguy`, HEAD `6031967d` (Stage X11 closeout-doc reconcile). Production code freeze remains `16bf0086` (X7.3); X8/X9/X10/X11 are doc-only.
+Captured 2026-05-23 at r1 entry, branch `codex/readyguy`, HEAD `7f904fb5` (Stage Y entry plan r1 commit; pre-r1 HEAD was `6031967d` = Stage X11 closeout-doc reconcile). Production code freeze remains `16bf0086` (X7.3); X8/X9/X10/X11 and r1/r2 plan commits are doc-only.
 
 Already green and not reopened here:
 
@@ -103,13 +104,16 @@ Still open at Y entry (these are the Y0 work items, not "extra surprises"):
 
 | ID | Work | Evidence | Acceptance |
 | --- | --- | --- | --- |
-| Y0.0 | Create Stage Y closeout source of truth | Seed at `2026-05-23-Y-product-surface-and-release-prep-seed.md` is inert once entry exists; no Stage Y closeout folder yet. | §19 bundle materialized: `docs/superpowers/audits/2026-05-23-stage-y-closeout/` with the 9 deliverables listed in §19. |
-| Y0.1 | Fix or formally retire the four X1.8 known regressions | `verify:stage-x-known-regressions` is green while the underlying scripts still fail per §2. | Per §6 disposition contract: each of the 4 rows resolves into (a) source-or-doc fix + gate re-armed in `verify:c|r|s|t`, or (b) gate removed entirely with replacement gate or retired-with-reason. Outcome appended to `deferred-work-ledger.md` of stage-y-closeout. |
-| Y0.2 | Make CI truthful | Merge job exists; deep-gates job is still `if: false`; first remote run URL is missing. | Per §7 contract: first real GitHub run URL recorded in `ci-report.md`; deep-gates policy is either enabled (with one real run URL) or explicitly kept manual with reason; merge job composition matches the §14 Y-release-track command list. |
+| Y0.0 | Create Stage Y closeout source of truth | Seed at `2026-05-23-Y-product-surface-and-release-prep-seed.md` is inert once entry exists; no Stage Y closeout folder yet. | §19 bundle materialized: `docs/superpowers/audits/2026-05-23-stage-y-closeout/` with the deliverables listed in §19. |
+| Y0.1 | Fix or formally dispose of the four X1.8 known regressions | `verify:stage-x-known-regressions` is green while the underlying scripts still fail per §2. | Per §6 disposition contract: each of the 4 rows resolves into (a) source-or-doc fix + gate re-armed in `verify:c|r|s|t`, or (b) gate rewritten with current-charter replacement, or (c) explicit retire-with-reason + ledger row + Stage Y successor gate per §6.5. Outcome appended to `deferred-work-ledger.md` of stage-y-closeout. |
+| Y0.2.a | CI merge-job alignment | Merge job exists; composition may not match §14.2 Y-release-track list. | Merge job step list matches §14.2 verbatim. Recorded in `ci-report.md` §2. |
+| Y0.2.b | CI deep-gates + first remote run | Deep-gates job is `if: false`; no remote run URL captured. | Per §7 contract: first real GitHub run URL recorded in `ci-report.md` §3. Deep-gates flipped to enabled-informational once Y0.1 dispositions are stable AND every command in the deep-gates job is either (i) currently passing, or (ii) represented by a passing replacement gate per §6.5. If a row remains red with no replacement, deep-gates stays `if: false` with one-paragraph rationale + Stage Z ledger row. |
 | Y0.3 | Rerun W5 item 3 multi-session/composer recovery | X2 code landed; live rerun is pending in `w5-item-03-rerun/PENDING-USER-RUN.md`. | On W3.3 hardware, run the exact steps; composer unlocks on every failure path; tab strip and visible session list survive cold start and provider switching. Evidence per §9.2 schema; flip Stage X closeout `w5-item-03-rerun/PENDING-USER-RUN.md` → `COMPLETED-USER-RUN.md` with screencast + log tail. |
 | Y0.4 | Close Workbench shell live evidence | X4 landed PR-shell-1/2/4 contracts; Scenario C/D tables still have pending markers. | Fill live p95 mode-switch and split-pane drag measurements; decide remaining W shell rows: overlay blanking, RSS preview race, width reconciliation, 60 Hz remeasure, first-open warm-up. Evidence per §9.2 schema; flip Stage X closeout `workbench-shell-report.md` frontmatter `status: skeleton → status: complete`. |
-| Y0.5 | Expand and execute product dogfood matrix v2 | Seed covers 9 surfaces; product has 16 real surfaces. | Run every row of §9.1 dogfood matrix. Each row produces an evidence file under `audits/<y-close>/dogfood/<surface>.md` matching §9.2 schema. Pass = all 16 rows have status `pass` or `deferred-with-owner`. |
-| Y0.6 | Reconcile Stage U release checklist | Expected Stage U deferred ledger path is missing per §10; `docs/release/u-stage-lessons-learned-checklist.md` is the actual source with 28 yellow + 16 manual rows. | Every yellow/manual row is now green, automated, copied into the §19 `release-handoff.md` checklist, or explicitly retired with proof. |
+| Y0.5 | Expand and execute product dogfood matrix v3 | Seed covers 9 surfaces; r1 matrix v2 had 16 rows; r2 matrix v3 expands to 20 rows (split visual-checklist + add Obsidian + agent_interaction). | Run every row of §9.1 dogfood matrix. Each row produces an evidence file under `audits/<y-close>/dogfood/<surface>.md` matching §9.2 schema. Pass = all 20 rows have status `pass` or `deferred-with-owner`. |
+| Y0.6 | Reconcile Stage U release checklist | Expected Stage U deferred ledger path is missing per §10; `docs/release/u-stage-lessons-learned-checklist.md` is the actual source with 28 yellow + 16 manual rows. | Every yellow/manual row is now green, automated, copied into the §19 `release-handoff.md` checklist, or explicitly retired with proof. No hard cap on manual-row count (codex r1 §20.6 confirmed). |
+| Y0.7 | MCP transport or "not shipped" labeling — promoted from P1 because X ledger row 10 classifies as Stage Y product-surface and §13 makes it Stage Z entry blocker | Stage T proved authorization; transport itself is the gap. | Per §11.2 acceptance: pick one transport (stdio recommended) and prove it end-to-end, OR add UI labeling "MCP not shipped". Implementation plan first per §11.2 scope lock. |
+| Y0.8 | Settings cache quota enforcement — promoted from P1 for same Stage Z entry reason | X ledger row 11; quota is persistence-only. | Per §11.1 acceptance: UI enforces eviction with measurable trigger OR relabeled "configured limit, not enforced". |
 
 ### 3.2 What "green" vs "deferred" means for §0 rule 2
 
@@ -128,12 +132,13 @@ Any P0 row that is neither green nor explicitly deferred under these definitions
 
 | Criterion | Verification |
 | --- | --- |
-| §0.1 closeout bundle materialized | `ls docs/superpowers/audits/$Y_CLOSE/` returns the 9 §19 files |
-| §0.2 every P0 row green or deferred | `node scripts/check-stage-y-p0-ledger.cjs` (added by Y0.0; validates every P0 row in §3.1 is either marked `green` with evidence path or appears in `deferred-work-ledger.md`) |
-| §0.3 dogfood matrix 16/16 | `ls docs/superpowers/audits/$Y_CLOSE/dogfood/` returns 16 files; same script as §0.2 cross-validates |
-| §0.4 known-regression resolution | Per §6.4: either `verify:stage-x-known-regressions` is removed from `package.json` (Y0.1.a path) or its ledger contents are entirely deferred (Y0.1.b path); a new gate `scripts/check-stage-y-known-regressions.cjs` enforces whichever decision was made |
-| §0.5 first remote CI URL recorded | Y0.2 deliverable; greppable in `ci-report.md` |
-| §0.6 evidence-schema compliance | `node scripts/check-stage-y-dogfood-evidence.cjs` (added by Y0.5; lints `dogfood/*.md` against the §9.2 schema) |
+| §0.1 closeout bundle materialized | `ls docs/superpowers/audits/$Y_CLOSE/` returns the §19 required deliverables |
+| §0.2 every P0 row green or deferred | `node scripts/check-stage-y-p0-ledger.cjs` (added by Y0.0; validates every P0 row in §3.1 is either marked `green` with evidence path or appears in `deferred-work-ledger.md` with bucket ∈ {Stage Z release-candidate, blocked-external}) |
+| §0.3 dogfood matrix 20/20 | `ls docs/superpowers/audits/$Y_CLOSE/dogfood/` returns ≥ 20 files (one per §9.1 surface); same script as §0.2 cross-validates |
+| §0.4 known-regression resolution | Per §6.5: `verify:stage-x-known-regressions` is replaced by `verify:stage-y-known-regressions` whose ledger reflects whichever path each of the 4 rows took. Outright deletion is forbidden by §6.5; the successor gate must exist before X gate is removed from `package.json`. |
+| §0.5 first remote CI URL recorded | Y0.2.b deliverable; greppable in `ci-report.md` §3 |
+| §0.6 evidence-schema compliance | `node scripts/check-stage-y-dogfood-evidence.cjs` (added by Y0.5; lints `dogfood/*.md` against the §9.2 schema, including SHA-256 manifest checks) |
+| §0.7 Y1.1 + Y1.2 release-blocking | Both `Y0.7` (MCP) and `Y0.8` (cache quota) rows green in P0 ledger per §3.2; the historical "P1" framing in §11.1/§11.2 remains for scope documentation but the disposition rule is the §3.1 P0 row |
 
 ## 4. Phase ordering and parallelism
 
@@ -232,12 +237,19 @@ Each row's disposition decision must be made BEFORE any source edit. The decisio
 
 Symptom: 16 `missing_helper` C4-transitive violations + 2 stale `c4Exempt` rows (see §2 for the file list).
 
-Disposition default: **(a) fix**. Each `missing_helper` file gets `skipIfSqliteUnavailable()` at the top of every outer `test()` block; each stale `c4Exempt` entry is removed from `scripts/test-coverage-exemptions.json`. If a file truly never lets the module load sqlite (only injects a fake DB), keep the `c4Exempt` entry but update its `reason` field.
+**r2 correction (codex r1 must-fix #1)**: per the live gate contract at `scripts/check-sqlite-test-skip-pattern.cjs:120-127` and the helper documentation at `src/__tests__/utils/sqlite-skip.ts:10-16`, the enforcement scope is:
+
+- **C3-direct** (file directly imports `better-sqlite3`): per-block — every outer `test(...)` / `it(...)` block must call `skipIfSqliteUnavailable()`.
+- **C4-transitive** (file reaches `nativeBackedModule` via value import chain, BFS depth ≤ 4): **file-level only** — the helper must be imported and called at least ONCE somewhere in the file; per-block guards are intentionally NOT required because most blocks use fake injection and per-block enforcement would lose host-Node coverage on fake-only paths.
+
+All 16 missing_helper rows at Y entry are tagged `C4-transitive` per the current script output (re-verified 2026-05-23 against the r1 HEAD). None are C3-direct.
+
+Disposition default: **(a) fix**. For each `missing_helper` file: add `import { skipIfSqliteUnavailable } from './utils/sqlite-skip'` and call it once at the top of the first `test()` block. For each stale `c4Exempt` entry: remove from `scripts/test-coverage-exemptions.json`. If a file truly never lets the module load sqlite (only injects a fake DB through every block), keep the `c4Exempt` entry but update its `reason` field to reflect the current import shape.
 
 Decision tree:
 
-1. For each `missing_helper` file: read the test file and trace whether it transitively loads `better-sqlite3` via a require chain. If yes → add helper call (path a). If no → it's a C4 false positive; promote to `c4Exempt` with reason (path a-variant).
-2. For each stale `c4Exempt` entry: confirm via fresh trace whether the file still injects fake DB only. If yes → keep + update reason. If no → remove the entry; the helper-call fix from step 1 already covers it.
+1. For each `missing_helper` file: verify via fresh BFS trace (re-run `node scripts/check-sqlite-test-skip-pattern.cjs` after the edit) that the file actually transitively loads `better-sqlite3` through a value import. If yes → add file-level helper call (path a). If the BFS evidence is wrong (false positive) → promote to `c4Exempt` with explicit reason (path a-variant).
+2. For each stale `c4Exempt` entry: confirm via fresh trace whether the file still injects fake DB only. If yes → keep + update reason. If no → remove the entry; the file-level helper-call fix from step 1 already covers it.
 3. Re-arm: rename `scripts/__tests__/check-sqlite-test-skip-pattern.deferred.cjs` → `.test.cjs` so wildcard pickup re-includes it; add direct `node scripts/check-sqlite-test-skip-pattern.cjs` invocation to `verify:k` (or whichever chain currently lacks it per X1.8 ledger row 1).
 
 Acceptance:
@@ -246,96 +258,153 @@ Acceptance:
 - `npm run verify:k` (or relevant chain) exits 0.
 - `deferred-work-ledger.md` row for this gate flips to status `green` with commit-hash pointer.
 
-Fallback **(b)** triggers if: the 16 files cannot be fixed without touching production code that violates Stage Y scope (e.g., requires rewriting `agent-sdk-runtime` to remove a transitive sqlite import). In that case, the disposition becomes a Y2 large-file extraction with the gate moved into `scripts/check-stage-y-known-regressions.cjs`.
+Fallback **(b)** triggers if: the 16 files cannot be made to satisfy the file-level helper contract without touching production code that violates Stage Y scope (e.g., requires rewriting `agent-sdk-runtime` to remove a transitive sqlite import to make the C4 BFS not reach native bind). In that case, the disposition becomes a Y2 large-file extraction with the gate moved into `scripts/check-stage-y-known-regressions.cjs` per §6.5.
 
 ### 6.2 Y0.1.2 — `check-stage-r-verify-switch` + `check-stage-t-verify-switch`
 
 Symptom: both gates hard-code `### 6.25` (Stage R) and `### 6.27` (Stage T) numbered CLAUDE.md sub-sections that the post-Stage-T CLAUDE.md reorganization removed (current CLAUDE.md uses §0-§12 flat structure). Both also assert `verify` / `verify:cloud` embed `verify:r` / `verify:t` directly.
 
-Disposition default: **(b) formal retire**. The numbered-heading convention was a Stage-R/T-era contract that the new flat-section CLAUDE.md replaced. Re-armng the gates against `### 6.25` etc. would force a CLAUDE.md regression. The correct path is:
+**r2 correction (codex r1 must-fix #2)**: pure deletion is now forbidden as the default. CLAUDE.md / AGENTS.md continue to point at Stage R/T plan files (CLAUDE.md §8 "协作文档索引" lines 95-107; AGENTS.md mirrored), and `verify:cloud` still embeds `verify:t` (`package.json:50`). The Stage R/T charter is still live; only the numbered-heading anchors went away. The correct default is therefore **(a) current-charter rewrite**, not deletion.
 
-1. Decide whether the underlying contract (Stage R/T scope must be findable in CLAUDE.md and `verify` must embed `verify:r`/`verify:t`) is still wanted.
-2. If wanted under new section naming: rewrite the gate to find Stage R/T content via the current section structure (likely §3 "Agent 与 Skill Runtime 速查" + §6 "测试与验证"); add a replacement gate file under `scripts/`; add to `verify:s` (Stage S+ chain).
-3. If not wanted: delete `scripts/check-stage-r-verify-switch.cjs` and `scripts/check-stage-t-verify-switch.cjs` (and their `.deferred.cjs` test variants); remove the ledger row; move on.
+Disposition default: **(a) current-charter rewrite**.
 
-The implementation plan must produce a one-paragraph "what does CLAUDE.md actually guarantee about Stage R/T now" written decision, signed by whoever runs Y0.1.2, before deleting or rewriting either gate.
+Decision tree:
+
+1. Decide whether the underlying contract (Stage R/T scope must be findable in CLAUDE.md/AGENTS.md, and one of `verify` / `verify:cloud` must embed `verify:r` / `verify:t`) is still wanted. The §1 "package.json" input row + the active links in CLAUDE.md §8 say yes; the sub-plan should re-confirm.
+2. Rewrite both gates to assert the live contract under the current section structure:
+   - Replace `/###\s*6\.25/` with a search for the Stage R plan-file link (`docs/superpowers/plans/2026-05-08-R-stage12-implementation.md`) in CLAUDE.md §8 "协作文档索引".
+   - Replace `/###\s*6\.27/` with a search for the Stage T plan-file link (`docs/superpowers/plans/2026-05-09-T-stage14-implementation.md`) in CLAUDE.md §8.
+   - Keep the `verify` / `verify:cloud` chain-composition assertion intact but allow either `verify` OR `verify:cloud` to satisfy (current state: `verify:cloud` embeds `verify:t`, plain `verify` does not).
+3. Re-arm: restore `node scripts/check-stage-r-verify-switch.cjs` and `node scripts/check-stage-t-verify-switch.cjs` direct invocations in `verify:r` / `verify:t` (or `verify:s` if the chain is cleaner there); rename their `.deferred.cjs` test variants back to `.test.cjs`.
+
+Fallback **(b)** triggers only if the sub-plan concludes the underlying contract is obsolete (Stage R/T scope no longer needs gate-level enforcement) AND a one-paragraph written decision exists. Even then, pure deletion is forbidden — the gate must be replaced by either (i) an equivalent assertion in `verify:stage-y-known-regressions` (per §6.5), or (ii) a release-handoff row in `release-handoff.md` (per §10.3). The historical proof from X1.8 must not be silently removed.
 
 Acceptance:
 
 - Decision document exists in the sub-plan.
-- Either both `.cjs` files are deleted + ledger row marked `retired-with-reason`, OR both rewritten gates exit 0.
-- `verify:s` (or relevant chain) exits 0 either way.
+- Either both gates are rewritten and exit 0 against current CLAUDE.md/AGENTS.md/`package.json`, OR both are demoted with a replacement gate / handoff row per fallback (b).
+- `verify:r` and `verify:t` (or the chosen replacement chain) exit 0.
 
 ### 6.3 Y0.1.3 — `check-testing-conventions-doc`
 
 Symptom: same `### 6.NN` numbered-section drift as §6.2. Asserts CLAUDE.md and AGENTS.md both contain `### 6.17`.
 
-Disposition default: **(a) fix via rewrite**. The testing-conventions contract is still actively referenced (CLAUDE.md §6 "测试与验证" carries it now); the gate just needs to update its regex to find the section under the current flat structure. Rewrite the gate to assert "CLAUDE.md contains §6 '测试与验证' and AGENTS.md contains the same section", then re-arm by restoring its `node scripts/check-testing-conventions-doc.cjs` direct invocation in `verify:f`.
+Disposition default: **(a) fix via rewrite** + **content-level enforcement** (codex r1 should-fix #1).
+
+The testing-conventions contract is still actively referenced (CLAUDE.md §6 "测试与验证" carries it now); the gate just needs to update its check to find the section AND assert the testing-convention substance is present.
+
+Rewrite scope:
+
+1. Replace the `/###\s*6\.17/` regex with a `### ` heading match against the current flat structure: CLAUDE.md must contain `## 6. 测试与验证` (or equivalent header) AND AGENTS.md must contain the mirror header.
+2. **Content-level**: beyond heading existence, assert that both files reference at minimum: (a) `npm run verify:native` requirement for SQLite-backed tests, (b) "no source-grep冒充行为验证" rule, (c) "no skip 当通过" rule. These are the testing-conventions invariants currently captured in CLAUDE.md §6 lines 124-131. The gate should grep for representative substrings.
+3. **CLAUDE/AGENTS sync**: per CLAUDE.md §12 "指引同步" (lines 134-136) and AGENTS.md §12 (mirrored), the two files must stay in sync on substance. The gate should additionally assert that the §6 testing-conventions paragraph content is identical (or equivalent) between CLAUDE.md and AGENTS.md.
+4. Re-arm: restore `node scripts/check-testing-conventions-doc.cjs` direct invocation in `verify:f`.
 
 Acceptance:
 
 - `node scripts/check-testing-conventions-doc.cjs` exits 0 against the current CLAUDE.md and AGENTS.md.
 - `npm run verify:f` exits 0.
-- Sub-plan documents the regex change and the rationale for keeping the contract.
+- The gate fails if CLAUDE.md §6 is removed, OR if AGENTS.md §6 diverges from CLAUDE.md §6 on testing-convention substance.
+- Sub-plan documents the content-substring choices and the CLAUDE/AGENTS-sync rationale.
 
 ### 6.4 Y0.1.4 — `check-research-adapter-registered-in-host`
 
-Symptom: `src/main/modules/claude-bridge/direct-chat.ts` places `MapDomainAdapter` first in `domainAdapters[]`; the Stage R W1.6 gate requires `ResearchDomainAdapter` to be first.
+Symptom: `src/main/modules/claude-bridge/direct-chat.ts:459-461` places `MapDomainAdapter` first in `domainAdapters[]`; the Stage R W1.6 gate requires `ResearchDomainAdapter` to be first.
 
-This is the only Y0.1 row that touches production source code (`src/main/`). Per §1 input note: research-vs-map routing is a real policy conflict — commit `012ec8a6` placed Map first because tests intentionally assert map intent wins for certain queries.
+This is the only Y0.1 row that touches production source code (`src/main/`). Per §1 input note + r2 verification: research-vs-map routing is a real policy conflict — commit `012ec8a6` placed Map first because tests intentionally assert map intent wins for certain queries; the inline comment at `direct-chat.ts:458` documents that "MapDomainAdapter reads the TurnEngine-precomputed mapSemanticIntent synchronously" (a tight signal-driven `shouldHandle`).
 
-Disposition default: **decision-required** (cannot pick (a) or (b) without product context).
+Confirmed at r2 (codex r1 must-fix #2 verification): `selectDomainAdapter` at `src/main/modules/agent-control/domain-adapters/domain-adapter.ts:264-272` uses `adapters.find((adapter) => adapter.shouldHandle(params))` — first matching wins. **Order does matter** when more than one adapter's `shouldHandle` returns true for the same query. Whether the conflict is theoretically reachable is the question Y0.1.4 must answer with overlap tests, not guesses.
+
+Disposition default: **decision-required after overlap-fixture-first investigation** (codex r1 should-fix #2).
 
 Decision tree:
 
-1. Read the test file(s) that assert map-wins behavior (`src/__tests__/*adapter*` + `src/main/modules/claude-bridge/__tests__/*`).
-2. Read `ResearchDomainAdapter` and `MapDomainAdapter` `classify()` functions to determine whether the conflict is real (both can fire on the same query) or apparent (their classification windows are disjoint and order does not affect outcome).
-3. If conflict is apparent: re-arm Stage R gate (path a) by reordering the array to put Research first; the map-wins tests will still pass because Map classifies on queries Research declines.
-4. If conflict is real: write a new "research-vs-map routing tiebreaker" contract in the sub-plan; either give Research priority (Stage R interpretation: research is meta-routing, map is one of many destination handlers) and update the map-wins tests to no longer assert map-first in the conflict overlap, OR keep Map first and rewrite the Stage R gate to assert "Research must appear in the array, position not specified" (path b).
+1. **Construct overlap fixtures FIRST** (before reading any existing test). Build a small fixture matrix:
+   - Query A: pure route planning ("how do I drive to Beijing Capital Airport"). Expected: Map wins (or should win) per current commit `012ec8a6` intent.
+   - Query B: pure research ("research the latest GPT-5 benchmarks"). Expected: Research wins.
+   - Query C: ambiguous overlap ("research the fastest route from Shanghai to Beijing — should I drive or fly"). Expected: undefined under current code; this is the conflict zone.
+   - Query D: research-with-map-keywords ("compare the COVID-19 case map across countries in 2024"). Expected: undefined; overlap zone.
+   Run each query through a real `DirectChatEngine.classify()` call (or equivalent test harness) with both orderings (Map-first per current code; Research-first per Stage R gate) and capture which adapter's `shouldHandle` returns true and which adapter `selectDomainAdapter` picks.
+2. Read the existing test files (`src/__tests__/*adapter*`, `src/main/modules/claude-bridge/__tests__/*`, `src/main/modules/agent-control/__tests__/*adapter*`) and identify any test that asserts a specific adapter wins for a specific query.
+3. Classify the conflict:
+   - **Apparent conflict** (no query has both Map and Research's `shouldHandle` return true): reorder the array to put Research first (path a); map-wins tests still pass because Map classifies on queries Research declines; re-arm Stage R gate.
+   - **Real conflict** (at least one fixture query has both shouldHandle return true): the conflict zone is real. Then:
+     - Path (a-priority-research): give Research priority per the Stage R interpretation (research is meta-routing, map is a destination handler); update the conflict-zone test fixtures to assert Research wins; document in the sub-plan that Map-only queries (queries A) still route via Map because Research's `shouldHandle` declines on them.
+     - Path (b-gate-rewrite): keep Map first and rewrite the Stage R gate to assert "Research must appear in the array at any position; the routing tiebreaker is defined elsewhere"; document the new tiebreaker contract in `direct-chat.ts` JSDoc.
 
-The sub-plan must include the test-fixture evidence for whichever conflict-state was found, the decision rationale, and the diff that implements it.
+The sub-plan must include the overlap fixture evidence (all 4 queries × 2 orderings = 8 outcomes), the decision rationale, and the diff that implements it. No edit lands without the fixture evidence first.
 
 Acceptance:
 
-- Either `node scripts/check-research-adapter-registered-in-host.cjs` exits 0 and all map/research adapter tests pass (path a), OR the gate is rewritten/replaced and exits 0 with the new contract (path b).
+- Overlap fixture evidence captured in the sub-plan.
+- Either `node scripts/check-research-adapter-registered-in-host.cjs` exits 0 with the original assertion (path a-* variants), OR the gate is rewritten and exits 0 with the new contract (path b).
 - `npm run verify:r` exits 0.
 - The disposition is recorded in `deferred-work-ledger.md` (even if green, the historical decision deserves a row).
 
-### 6.5 Cleanup of the replacement gate
+### 6.5 Cleanup of the replacement gate (codex r1 must-fix #4 + #7)
 
-After all 4 rows are dispositioned, `verify:stage-x-known-regressions` should:
+After all 4 rows are dispositioned, the X1.8 replacement gate is NEVER simply deleted. It is replaced by a Stage Y successor gate `scripts/check-stage-y-known-regressions.cjs` (wired as `npm run verify:stage-y-known-regressions`) that mirrors the X1.8 pattern: validates the Y deferred-work-ledger rows AND prevents silent re-introduction of any Y-retired sub-gate into the verify chains.
 
-- (Path a for any row): remove that row from `scripts/check-stage-x-known-regressions.cjs`'s required-ledger-entries list.
-- (Path b for any row): leave it in the X1.8 ledger but cross-link to the Y closeout row.
-- If all 4 rows are green: delete `scripts/check-stage-x-known-regressions.cjs` and remove `verify:stage-x-known-regressions` from `package.json`. Add a new `verify:stage-y-known-regressions` if §6.4(b) created any new deferral row.
+Per-row transition rules:
 
-## 7. Phase Y0.2 — CI truthful + first remote run
+- **Row went green via path (a)** (source/doc fix + gate re-armed): remove the row from `check-stage-x-known-regressions.cjs`'s required-ledger-entries list AND from the new Y successor gate's list — the gate is back in the live verify chain, so neither replacement gate needs to pin it.
+- **Row went via path (a) rewrite** (gate rewritten to current charter + re-armed): same as above; the rewritten gate is the live proof.
+- **Row went via path (b) explicit retire-with-reason**: move the row from X1.8 ledger to Stage Y ledger; add to `check-stage-y-known-regressions.cjs`'s required list; cross-link via tracking-link field.
 
-Goal: produce one real GitHub run URL and make sure the workflow the URL refers to is the one we want enforced.
+Deletion of `scripts/check-stage-x-known-regressions.cjs` is permitted ONLY when:
+
+1. All 4 X1.8 rows are dispositioned per the above, AND
+2. The new `check-stage-y-known-regressions.cjs` exists and runs green (its own ledger may be empty if all 4 rows went green via path a/a-rewrite; that is a valid terminal state), AND
+3. The X1.8 historical-proof content (which 4 sub-gates were retired and why) is preserved in `docs/superpowers/audits/2026-05-23-stage-y-closeout/y0-1-disposition-report.md`.
+
+Until conditions 1-3 are met, `verify:stage-x-known-regressions` stays in `package.json` AND in the CI merge-job step list (per §14.2 + §7 Y0.2.a).
+
+## 7. Phase Y0.2 — CI truthful (codex r1 must-fix #3 + should-fix #3: split into Y0.2.a + Y0.2.b)
+
+### 7.1 Y0.2.a — Merge-job step alignment
+
+Goal: bring `.github/workflows/ready-merge-gates.yml` merge job into structural agreement with §14.2 Y-release-track list. No remote run required at this sub-phase.
 
 Steps:
 
 1. Read `.github/workflows/ready-merge-gates.yml`.
-2. Compare merge-job step list against the §14.2 Y-release-track command list. Add any missing step (likely candidates per X3 deferral notes: `verify:meta-paths`, `verify:stage-x-known-regressions` — though the latter goes away if Y0.1 fully fixes the 4 rows).
-3. Decide deep-gates job disposition:
-   - If Y0.1 ends with all 4 rows green and `verify:c|r|s|t` chains are clean: flip `deep-gates` from `if: false` to `if: github.event_name == 'push'` (informational; not merge-required) AND add the deep-gates commands to a separate workflow file `.github/workflows/ready-deep-gates.yml` if the team prefers them isolated.
-   - If Y0.1 ends with some rows in path (b) deferral: keep `deep-gates` job `if: false` and write a one-paragraph rationale in `ci-report.md` documenting why; this becomes a Stage Z item.
-4. Coordinate with 白 (or repo admin) to:
+2. Compare merge-job step list against §14.2. Add any missing step:
+   - `npm run verify:meta-paths` (likely missing per X3 deferral note).
+   - `npm run verify:stage-x-known-regressions` (keep this in the merge job through Y0.1 work window per §6.5; remove only after Stage Y successor gate is in place).
+   - Any other §14.2 row that the merge job currently lacks.
+3. Record divergences (rows in §14.2 that intentionally do NOT make it into merge — e.g., `npm run build` may be Stage Z-only) in `ci-report.md` §2.
+
+Acceptance:
+
+- Merge-job step list matches §14.2 verbatim OR every divergence is documented in `ci-report.md` §2.
+- `verify:stage-x-known-regressions` is in the merge job until §6.5 conditions are met.
+
+### 7.2 Y0.2.b — Deep-gates enablement + first remote run
+
+Goal: produce one real GitHub run URL AND decide deep-gates disposition.
+
+Steps:
+
+1. Decide deep-gates job disposition (codex r1 must-fix #3 relaxation):
+   - Flip `deep-gates` from `if: false` to `if: github.event_name == 'push'` (informational; not merge-required) when BOTH (a) Y0.1 dispositions are stable (each of the 4 rows has a committed disposition per §6) AND (b) every command in the deep-gates job either passes currently OR is represented by a passing replacement gate per §6.5. Path-(b) dispositions are acceptable IF the deep-gates job invokes the replacement gate instead of the original.
+   - Otherwise, keep `deep-gates` `if: false` and write a one-paragraph rationale + Stage Z ledger row in `ci-report.md` §3.
+2. If deep-gates flipped: bundle the deep-gate commands into the existing workflow OR a separate `.github/workflows/ready-deep-gates.yml` file (team preference; either is acceptable).
+3. Coordinate with 白 (or repo admin) to:
    - Push the branch.
    - Trigger first run (push or PR trigger; PR is preferred because it exercises the `pull_request` trigger path documented in X3 ci-gate-report).
    - Capture the run URL.
    - If the run fails: classify as (i) real platform regression (file as new ledger row + fix), or (ii) workflow shape bug (fix yaml + retrigger; do not delete the run, keep history).
-5. Append to `ci-report.md`:
+4. Append to `ci-report.md` §3:
    - First run URL.
    - Per-step pass/fail outcome from that run.
    - Delta vs the local merge-gate equivalent (X3 captured this baseline at `MERGE_GATE_EXIT=0`); if any step diverges, write the delta as a ledger row.
-6. Branch protection step: per X3 ci-gate-report §4, configuring branch protection is repo-admin UI work. Document the exact required-status-check name (`Ready merge gates / merge`) and the "require up-to-date branches" toggle in `release-handoff.md` for Stage Z.
+5. Branch protection step: per X3 ci-gate-report §4, configuring branch protection is repo-admin UI work. Document the exact required-status-check name (`Ready merge gates / merge`) and the "require up-to-date branches" toggle in `release-handoff.md` for Stage Z.
 
 Acceptance:
 
 - `ci-report.md` §3 contains a real `https://github.com/...` run URL with a date.
-- The merge-job step list matches §14.2 verbatim, OR any divergence is documented as a ledger row.
-- Deep-gates disposition is decided and documented.
+- Deep-gates disposition is decided per the relaxed rule and documented.
+- Branch-protection handoff captured in `release-handoff.md`.
 
 ## 8. Phase Y0.3 + Y0.4 — White-hardware live evidence
 
@@ -369,11 +438,13 @@ Acceptance:
 
 Both phases serialize per §4.2. The implementation plan for Y0.3 and Y0.4 may be a single file `docs/superpowers/plans/2026-05-2x-Y0-3-Y0-4-white-hardware-live-evidence-implementation.md` that lists both as steps for the same 白-session.
 
-## 9. Phase Y0.5 — Product dogfood matrix v2
+## 9. Phase Y0.5 — Product dogfood matrix v3 (codex r1 must-fix #5: 16 → 20 rows)
 
-### 9.1 Surface inventory (16 rows)
+### 9.1 Surface inventory (20 rows)
 
 Each row needs reproduction steps, a 30-second screencap when visual, and the relevant log tail (`ready-directchat.log`, `ready-tools.log`, `ready-browser.log`, or app console output).
+
+r1 → r2 changes per codex must-fix #5: row 16 (Release visual checklist) split into 16 (BrowserView overlay + theme boot), 17 (dropdowns + tldraw + text editing), 18 (shell empty states + first-open warm-up); row 13 expanded to explicitly call out FastCard, clipping, content-study, AND Obsidian web clip / current-tab clip; row 9 now explicitly covers restart AND forced-quit AND crash resumability (CLAUDE.md §3 line 49-50 durable-handle requirement); new row 19 covers Obsidian web clip; new row 20 covers `agent_interaction` capability routing (CLAUDE.md §3 line 53 first-class capability dimension).
 
 | # | Surface | Minimum scenario | Must prove |
 | ---: | --- | --- | --- |
@@ -385,30 +456,35 @@ Each row needs reproduction steps, a 30-second screencap when visual, and the re
 | 6 | Calendar | Create event, recurring event, navigate day/week, accept one agent suggestion. | Timezone/recurrence render correctly; remote suggestion does not bypass scope rules. |
 | 7 | Agent panel | New chat, provider switch, failed send, retry, cold start, multi-tab session. | Composer unlocks; active/visible session lists stay consistent. |
 | 8 | Settings / external services | Edit/save/test providers: OpenAI-compatible, RSSHub, Jina, DuckDuckGo, Amap, VEA. | Save round-trip is real; disabled/missing-key states are understandable; tests are not fake green. |
-| 9 | Skills center | Install bundled skill, run one action, resume after app restart, inspect artifacts. | Child-run durable handle works; artifact paths survive restart. |
-| 10 | Provider failure recovery | Simulate timeout, 402, 429, 5xx, malformed stream, thinking-echo bug. | User sees clear failure; composer unlocks; retry policy is bounded. |
-| 11 | Remote IM / channel sidecar | Receive remote text + attachment, turn it into a scoped agent task. | Attachment is resource-layer first; tool logs do not enter transcript. |
-| 12 | Map / Amap workflow | Ask route planning with research/browser secondary signals. | Map intent wins only when it should; research intent is not swallowed by map. |
-| 13 | FastCard / clipping / content-study | Clip a browser page into note/card flow and ask agent to transform it. | Source URL, privacy sanitizer, and document target survive the handoff. |
+| 9 | Skills center (restart + crash + forced-quit resumability) | Install bundled skill, run one action that produces an artifact, then in three separate sessions: (a) clean app restart, (b) `kill -9` on Electron process mid-run, (c) Cmd-Q forced quit mid-run. After each, reopen app and verify the child-run handle resumes. | Child-run durable handle works in ALL THREE scenarios per CLAUDE.md §3; artifact paths survive; the projection UI shows the correct continuable state without renderer guessing. |
+| 10 | Provider failure recovery | Simulate timeout, 402, 429, 5xx, malformed stream, thinking-echo bug. | User sees clear failure; composer unlocks; retry policy is bounded per X2 provider-terminal-error 11-code table. |
+| 11 | Remote IM / channel sidecar | Receive remote text + attachment, turn it into a scoped agent task. | Attachment is resource-layer first; tool logs do not enter transcript (CLAUDE.md §2 hard constraint). |
+| 12 | Map / Amap workflow | Ask route planning with research/browser secondary signals. | Map intent wins only when it should; research intent is not swallowed by map (depends on Y0.1.4 disposition). |
+| 13 | FastCard + clipping + content-study (general clip flow) | Clip a browser page into note/card flow and ask agent to transform it. | Source URL, privacy sanitizer, and document target survive the handoff. |
 | 14 | Automation / schedules | Create, list, pause, resume, and fire one reminder/scheduled task. | Schedule state is durable; fired task links back to correct conversation/workspace. |
-| 15 | VEA / vision model | Configure a vision model, run image analysis, force missing-key/disabled state. | Test button performs a real probe or clearly says it only validates fields. |
-| 16 | Release visual checklist | Walk BrowserView overlay, theme boot, dropdowns, tldraw/text editing, shell empty states. | Manual rows from the old release checklist have dated owner evidence. |
+| 15 | VEA / vision model | Configure a vision model, run image analysis, force missing-key/disabled state. | Test button performs a real probe or clearly says it only validates fields (depends on Y1.1 / Y0.8 disposition). |
+| 16 | Release visual — BrowserView overlay + theme boot | Toggle BrowserView visibility under dropdown/modal overlay; cold-start app and observe theme application before first paint. | Overlay blanking behaves per X4.1 BrowserViewIntent contract (5 kinds); no white-flash on theme boot. |
+| 17 | Release visual — dropdowns + tldraw + text editing | Exercise every Settings dropdown, open a tldraw widget and draw, focus a text editor and type. | Dropdowns z-index correct over BrowserView; tldraw input does not lose focus; text editor IME composition works. |
+| 18 | Release visual — shell empty states + first-open warm-up | Cold-start app with empty user-data; observe each workbench-mode empty state; record first-open warm-up time (cold-start → ready-to-input). | Empty states render per spec; warm-up time p95 ≤ 3000ms on W3.3 hardware (carry-over from W3 chosen-layout-model). |
+| 19 | Obsidian web clip / current-tab clip | From an active BrowserView tab, trigger Obsidian web-clip IPC; verify clipped content lands in Obsidian; trigger the current-tab clip IPC variant. | Clip content shape matches Obsidian's expected payload; current-tab IPC does not regress per `src/__tests__/obsidian-web-clip-current-tab-ipc.test.ts` (listed in Y0.1.1 missing_helper rows; this surface depends on Y0.1.1 disposition). |
+| 20 | `agent_interaction` capability routing | Send a query that triggers `ask_user_questions` (the structured reverse-question tool); verify the routing path; verify the "1-per-turn + 1-pending-card-per-session" constraint from CLAUDE.md §5. | `agent_interaction` is its own capability dimension per CLAUDE.md §3 line 53; routing must not be confused with skill authorization. |
 
-### 9.2 Evidence schema (one file per surface)
+### 9.2 Evidence schema (one file per surface) — codex r1 must-fix #6 strengthened
 
 Each `audits/2026-05-23-stage-y-closeout/dogfood/<surface-slug>.md` MUST contain:
 
 ```markdown
 ---
 surface: <surface name, exactly matching §9.1>
-surface_id: <integer 1-16 from §9.1>
+surface_id: <integer 1-20 from §9.1>
 date: YYYY-MM-DD
 operator: <name>
 hardware: <macbook-pro-m5-pro-24gb / linux-x64 / other>
-build_commit: <git sha>
+build_commit: <git sha — MUST match `git rev-parse HEAD` at the time the evidence was captured>
 status: pass | fail | deferred-with-owner
 deferred_owner: <name, only if status=deferred-with-owner>
 deferred_reason: <one sentence, only if status=deferred-with-owner>
+artifact_manifest: evidence/<surface-slug>-manifest.json
 ---
 
 # <surface name> — dogfood evidence
@@ -423,10 +499,14 @@ deferred_reason: <one sentence, only if status=deferred-with-owner>
 ## Observed result
 - ...
 
-## Evidence artifacts
-- Screencap: `evidence/<surface-slug>-screencap.mp4` (or `.gif`)
-- Log tail: `evidence/<surface-slug>-ready-tools.log` (or others as relevant)
-- Console output: `evidence/<surface-slug>-console.txt`
+## Evidence artifacts (listed verbatim in the manifest)
+- Screencap: `evidence/<surface-slug>-screencap.mp4` (or `.gif`); SHA-256 in manifest.
+- Log tail: `evidence/<surface-slug>-ready-tools.log` (or others as relevant); SHA-256 in manifest.
+- Console output: `evidence/<surface-slug>-console.txt`; SHA-256 in manifest.
+
+## Timestamp alignment
+- Reproduction window: `<ISO 8601 start>` → `<ISO 8601 end>`.
+- Each log tail's earliest and latest timestamp falls within the reproduction window ± 30 seconds. The gate verifies overlap.
 
 ## Pass/fail rationale
 - One paragraph explaining how the evidence supports the status field.
@@ -435,35 +515,83 @@ deferred_reason: <one sentence, only if status=deferred-with-owner>
 - Any new bug found during this surface's exercise gets a row here AND a new entry in `deferred-work-ledger.md`. Do not squeeze the new defect into another surface's row.
 ```
 
+And `evidence/<surface-slug>-manifest.json` (per codex r1 P2 nice-to-have #1):
+
+```json
+{
+  "$schema": "Stage Y dogfood evidence manifest v1",
+  "surface_id": 1,
+  "surface": "File manager",
+  "captured_at": "2026-05-25T10:00:00Z",
+  "build_commit": "abcdef1234567890",
+  "operator": "白",
+  "hardware": "macbook-pro-m5-pro-24gb",
+  "artifacts": [
+    {
+      "path": "evidence/file-manager-screencap.mp4",
+      "type": "screencap",
+      "sha256": "...",
+      "bytes": 1234567,
+      "created_at": "2026-05-25T10:00:30Z"
+    },
+    {
+      "path": "evidence/file-manager-ready-tools.log",
+      "type": "log",
+      "sha256": "...",
+      "bytes": 8192,
+      "created_at": "2026-05-25T10:00:35Z",
+      "log_earliest_timestamp": "2026-05-25T10:00:01Z",
+      "log_latest_timestamp": "2026-05-25T10:00:29Z"
+    }
+  ]
+}
+```
+
 `scripts/check-stage-y-dogfood-evidence.cjs` lints every file in `audits/<y-close>/dogfood/` against this schema:
 
 - All frontmatter fields present.
 - `status` ∈ {`pass`, `fail`, `deferred-with-owner`}.
 - If `status = deferred-with-owner`: both `deferred_owner` and `deferred_reason` non-empty.
-- Body contains required sections (`## Reproduction steps`, `## Expected result`, `## Observed result`, `## Evidence artifacts`, `## Pass/fail rationale`).
-- Evidence artifact paths in the body resolve on disk (relative to the file's directory).
+- Body contains required sections (`## Reproduction steps`, `## Expected result`, `## Observed result`, `## Evidence artifacts`, `## Timestamp alignment`, `## Pass/fail rationale`).
+- `artifact_manifest` path resolves on disk.
+- Manifest JSON is valid AND its `surface_id`, `surface`, `build_commit`, `operator`, `hardware` fields match the frontmatter verbatim.
+- Each artifact in the manifest: file exists on disk, file size matches `bytes`, SHA-256 of file matches `sha256` field.
+- For `type: log` artifacts: `log_earliest_timestamp` and `log_latest_timestamp` fall within `[captured_at - 5min, captured_at + 5min]` (allows generous reproduction window).
+- Manifest's `build_commit` matches `git cat-file -e <sha>^{commit}` (the commit must exist in the local repo).
+- If `status = pass` or `fail`: at least one screencap artifact AND one log artifact present.
 
-### 9.3 Per-surface sub-plan template
+### 9.3 Per-surface sub-plan template (codex r1 P2 #2: "pre-existing coverage" required, not silent)
 
-For each of the 16 surfaces, create `docs/superpowers/plans/2026-05-2x-Y0-5-<surface-slug>-implementation.md` containing:
+For each of the 20 surfaces, create `docs/superpowers/plans/2026-05-2x-Y0-5-<surface-slug>-implementation.md` containing:
 
 - Surface name + §9.1 row reference.
 - Detailed reproduction steps (expand the §9.1 minimum scenario).
 - Expected result decomposition (test cases).
-- Pre-existing automated coverage (link to relevant tests/gates; if zero, say so).
-- Operator (agent vs 白) — most can run on Linux/CI-class hardware; a few need 白's box.
+- **Pre-existing automated coverage**: MUST contain explicit prose, even if "none yet — this surface has zero automated coverage" (silence is forbidden). When tests exist, link to specific test file paths + line ranges.
+- Operator (agent vs 白 per §9.4) — most can run on Linux/CI-class hardware; some are mandatory-白.
 - Evidence file path (`audits/<y-close>/dogfood/<slug>.md`).
 - Acceptance: per §9.1 "Must prove" + per-test-case checks.
 
-### 9.4 Operator assignment
+### 9.4 Operator assignment (codex r1 must-fix #5 + §20.3: tighten visual/timing-sensitive surfaces to mandatory-白 spot-check)
 
-| Surface | Default operator | Reason |
-| --- | --- | --- |
-| 1, 4, 5, 8, 9, 14, 15 | agent (CI-class hardware) | Pure interaction; no W3.3-specific behavior. |
-| 2, 6, 7, 10, 11, 12, 13, 16 | agent OR 白 (preference) | Visual/timing-sensitive; agent may produce evidence on CI-class, 白 should spot-check. |
-| 3 | agent + 白 spot-check | RSSHub network behavior varies; 白 should confirm against personal RSSHub instance. |
+| Surface | Default operator | Mandatory 白 spot-check? | Reason |
+| --- | --- | --- | --- |
+| 1, 4, 5, 8, 14, 15 | agent (CI-class hardware) | No (optional) | Pure interaction; no W3.3-specific behavior. |
+| 9 | agent | No, but the forced-quit / `kill -9` paths require careful evidence capture; agent may need to script them. | Resumability test; visual aspect is minimal. |
+| 6 | agent | No (optional) | Timezone correctness is verifiable from logs + screencap. |
+| 2, 7, 16, 17, 18 | agent produces baseline; **白 mandatory spot-check** | YES | BrowserView, Agent panel composer timing, visual checklist — all are visual/timing-sensitive in ways that CI-class hardware may mask. 白 must observe at least once before status=pass is signed. |
+| 3 | agent + **白 mandatory spot-check** | YES | RSSHub network behavior varies by personal RSSHub instance; only 白's box has the configured instance. |
+| 10 | agent (most paths reproducible via stub providers) | No (optional, but recommended for HTTP 402 because the failure mode is provider-side) | X2 already covered the 11-code matrix in unit tests; this surface re-verifies live. |
+| 11 | agent OR 白 | No (but 白 has the live Feishu sidecar configured; preferred operator if reachable) | Remote IM requires a live channel for attachment ingest evidence. |
+| 12 | agent (after Y0.1.4 disposition) | Optional | Map/research routing is deterministic once Y0.1.4 lands; agent can verify against the overlap fixtures. |
+| 13, 19 | agent + **白 mandatory spot-check** | YES (Obsidian) | Obsidian web clip needs a live Obsidian instance; only 白's box has it. FastCard/clipping (13) is visual; agent baseline + 白 spot-check. |
+| 20 | agent | No (optional) | `ask_user_questions` constraint enforcement is logic-testable; agent can run the fixture matrix. |
 
-Surfaces that must run on 白's W3.3 hardware: none mandatory; Y0.4 already owns the W3.3-specific shell evidence. Surfaces 2/7 may benefit from 120Hz observation but are not blocked.
+Surfaces that must run on 白's W3.3 hardware: 18 (first-open warm-up p95 ≤ 3000ms is W3.3-baseline-dependent). Y0.4 already owns the W3.3-specific shell mode-switch + split-pane drag evidence.
+
+Surfaces with mandatory 白 spot-check (status=pass not signable without 白's evidence): **2, 3, 7, 13, 16, 17, 18, 19** (8 of 20).
+
+The §9.3 sub-plan template's "operator" field must explicitly select one of: `agent-only`, `agent-with-bai-spotcheck`, `bai-only`.
 
 ## 10. Phase Y0.6 — Stage U release checklist reconciliation
 
@@ -628,7 +756,7 @@ node scripts/check-stage-t-verify-switch.cjs
 node scripts/check-testing-conventions-doc.cjs
 ```
 
-### 14.2 Y-release-track (must all exit 0 at Y closeout AND must be the workflow's merge-job step list per Y0.2)
+### 14.2 Y-release-track (must all exit 0 at Y closeout AND must be the workflow's merge-job step list per Y0.2.a)
 
 ```bash
 npm run verify:native
@@ -638,6 +766,7 @@ npm run verify:lint-budget
 node scripts/check-eslint-baseline.cjs
 npm run verify:ipc-contract
 npm run verify:meta-paths
+npm run verify:stage-x-known-regressions   # kept through Y0.1 per §6.5; removed AT Y closeout iff §6.5 conditions 1-3 are met
 npm run test
 npm run build
 ```
@@ -649,13 +778,17 @@ npm run verify:stage-y-p0-ledger
 npm run verify:stage-y-dogfood-evidence
 ```
 
-Plus (only if Y0.1 retains any retired-gate path):
+Plus (added by §6.5 at Y closeout):
 
 ```bash
 npm run verify:stage-y-known-regressions
 ```
 
-If Y0.1 makes all 4 X1.8 retired regressions green: `verify:stage-x-known-regressions` is REMOVED at Y closeout per §6.5.
+Per §6.5: `verify:stage-x-known-regressions` is REMOVED at Y closeout iff (1) all 4 X1.8 rows are dispositioned, (2) Stage Y successor gate exists and passes, (3) historical proof preserved in `y0-1-disposition-report.md`. Until then, it stays in both `package.json` and the merge job.
+
+### 14.3 Stage Z handoff context (codex r1 should-fix #4: `verify:cloud` status surfacing)
+
+`verify:cloud` currently embeds `verify:t` (`package.json:50`) but plain `verify` does not. Stage Z must decide whether `verify:cloud` becomes required for release branches or stays an opt-in dev command. Stage Y captures the current state in `release-handoff.md` for Stage Z to act on. Not a Y-entry or Y-closeout command.
 
 ## 15. Do not do
 
@@ -708,9 +841,9 @@ After all P0 + P1 + closeout bundle land, enter the codex terminal review loop:
 
 The Stage Y closeout commit message includes the codex round count and the final PASS-verdict text quoted verbatim.
 
-## 19. Stage Y closeout bundle structure
+## 19. Stage Y closeout bundle structure (codex r1 must-fix + should-fix + P2 promotions)
 
-`docs/superpowers/audits/2026-05-23-stage-y-closeout/` must contain:
+`docs/superpowers/audits/2026-05-23-stage-y-closeout/` must contain (REQUIRED — formerly "plus" items 1, 3, 4 now promoted to required per codex r1 §20.5):
 
 | # | Deliverable | Path | Source phase |
 | ---: | --- | --- | --- |
@@ -718,26 +851,52 @@ The Stage Y closeout commit message includes the codex round count and the final
 | 2 | Deferred-work ledger | `deferred-work-ledger.md` | Closeout (populated from Y0.1 + Y0.5 + Y0.6 outputs) |
 | 3 | No-drift statement | `no-drift.md` | Closeout |
 | 4 | Verification matrix | `verification-matrix.md` | Closeout |
-| 5 | Dogfood report | `dogfood/REPORT.md` (top-level index) + 16 per-surface files in `dogfood/` | Y0.5 |
-| 6 | CI report | `ci-report.md` | Y0.2 |
-| 7 | Release handoff | `release-handoff.md` | Y0.6 |
+| 5 | Dogfood report | `dogfood/REPORT.md` (top-level index) + **20** per-surface files in `dogfood/` + evidence manifests per §9.2 | Y0.5 |
+| 6 | CI report | `ci-report.md` (§1 workflow inventory, §2 merge-job alignment, §3 first remote run URL) | Y0.2 |
+| 7 | Release handoff | `release-handoff.md` (§10.3 sections 1-5) | Y0.6 |
 | 8 | Y entry truth + capture | `y0-entry-truth.md` + `verification-entry/` | Y0.0 |
 | 9 | Stage Z seed plan | linked from `CLOSE-NOTE.md`; file path `docs/superpowers/plans/2026-05-2x-Z-release-candidate-seed.md` | Closeout |
+| 10 | **Y0.1 disposition report** (NEW — codex r1 §20.5) | `y0-1-disposition-report.md` | Y0.1 (combines the 4 §6 decisions) |
+| 11 | **Y-to-Z handoff matrix** (NEW — codex r1 §20.5) | `y-to-z-handoff-matrix.md` (one row per Stage Y deliverable → what Stage Z inherits, what it adds, what it discards) | Closeout |
+| 12 | **Evidence checksum manifest** (NEW — codex r1 §20.5 + P2 #1) | `evidence-checksum-manifest.json` (aggregates the 20 per-surface manifests + verify-bundle.sh outputs into a single signed-or-checksummed bundle) | Closeout |
+| 13 | **`verify-bundle.sh`** (PROMOTED to required — codex r1 must-fix #12) | `verify-bundle.sh` (mirrors Stage X pattern; one-line invocation re-running §14.2 + closeout-specific commands; compares live exit codes against `verification-final/<name>.exit`) | Closeout |
+| 14 | **`verification-final/`** (PROMOTED to required — codex r1 must-fix #12) | `verification-final/<name>.out`, `.err`, `.exit` per §14.2 command + `SUMMARY.md` | Closeout |
+| 15 | **白 operator runbook** (NEW — codex r1 P2 #3) | `bai-operator-runbook.md` (step-by-step instructions for 白 spot-check sessions per §9.4; includes screencap-and-checksum capture commands) | Y0.5 |
 
-Plus stage-specific reports as needed:
+Plus stage-specific reports as needed (still optional):
 
-- `y0-1-disposition-report.md` (combines the 4 §6 decisions)
 - `bundled-skills-audit.md` (Y1.6)
-- `verify-bundle.sh` (mirrors Stage X pattern; one-line invocation that re-runs §14.2 + closeout-specific commands and compares against `verification-final/`)
-- `verification-final/` (frozen snapshot at Y closeout)
+- Per-surface dogfood sub-plans (each is a plans/ entry, not an audits/ entry)
 
-## 20. Open questions for codex review
+## 20. Codex r1 verdict resolution + r2 open questions
 
-The following are intentional choice-points that codex should challenge or confirm:
+### 20.1 Resolution of codex r1 open questions
 
-1. **§6 disposition default for Y0.1.2**: roadmap defaulted to "(b) formal retire" because the numbered-section CLAUDE.md convention is gone. Codex should challenge whether the underlying Stage R/T charter contract still deserves a rewritten gate (path a-rewrite) rather than retirement.
-2. **§7 deep-gates flip condition**: roadmap defers the flip to Y0.1 outcome. Codex should challenge whether the flip should happen regardless (deep-gates informational only, not merge-required, so flipping to `if: github.event_name == 'push'` is low-cost even if some sub-chains are red).
-3. **§9.4 operator assignment**: roadmap defaults most surfaces to "agent" (CI-class hardware). Codex should challenge whether visual-timing-sensitive surfaces (2, 7, 12) should require 白 mandatorily.
-4. **§14.2 Y-release-track list**: roadmap removed `verify:stage-x-known-regressions` from the merge job because Y0.1 either fixes the 4 rows (gate goes away) or creates a Y-specific replacement gate. Codex should challenge whether the merge job should temporarily include the X gate during the Y0.1 work window.
-5. **§19 deliverable count**: roadmap has 9 deliverables (mirrors X). Codex should challenge whether the Y closeout needs anything Stage X didn't, e.g., a "Stage Y → Stage Z handoff verification matrix" separate from `verification-matrix.md`.
-6. **§3.1 Y0.6 acceptance**: roadmap requires every Stage U yellow/manual row to be dispositioned. Codex should challenge whether a hard cap (e.g., "≤ 5 rows may remain manual into Stage Z") is more realistic than "every row dispositioned".
+| # | r1 question | codex r1 answer | r2 status |
+| ---: | --- | --- | --- |
+| 1 | §6 default for Y0.1.2 | "Default should be (a) current-charter rewrite, not (b) deletion" | §6.2 reset to default (a); deletion forbidden by §6.5 |
+| 2 | §7 deep-gates flip condition | "Too restrictive; flip when dispositions are stable and represented commands pass" | §7 split into Y0.2.a + Y0.2.b; flip rule relaxed |
+| 3 | §9.4 operator assignment | "Make 白 spot-check mandatory for visual/timing/personal-service surfaces" | §9.4 lists 8 mandatory-白-spot-check surfaces |
+| 4 | §14.2 keep X gate during Y0.1 | "Yes, keep until §6.5 successor gate exists" | §14.2 + §6.5 updated to keep X gate |
+| 5 | §19 closeout bundle | "Add Y0.1 disposition report, Y-to-Z handoff matrix, evidence checksum manifest, verify-bundle.sh required, verification-final/ required" | §19 expanded from 9 to 15 required deliverables |
+| 6 | §3.1 Y0.6 acceptance | "Every row dispositioned; no hard cap" | §3.1 + §10 retained "every row" rule |
+
+### 20.2 Read-only-review disclaimer (codex r1 should-fix #5)
+
+This plan's verification-matrix entries reference commands that codex has NOT run end-to-end as part of the planning review. In particular:
+
+- `npm run test` (full test matrix) — not run in this review.
+- Full Ready dev-mode app dogfood — not run; r0/r1/r2 are doc-only.
+- `npm run build` — not run.
+
+These are Y0.0 entry-capture responsibilities. Any divergence between expected behavior in this plan and actual behavior at Y0.0 capture becomes a Y entry-state ledger row.
+
+### 20.3 Remaining r2 open questions for codex r2 round
+
+1. **§9.1 row 9 — kill -9 + Cmd-Q + restart**: are all three durable-handle resume scenarios truly contractually required by CLAUDE.md §3 line 49-50, or is only "restart" (clean exit) required? If only restart, the row scope shrinks.
+2. **§9.1 row 19 — Obsidian web clip dependency on Y0.1.1**: row 19 lists `obsidian-web-clip-current-tab-ipc.test.ts` as a Y0.1.1 missing_helper file. If Y0.1.1 fix lands first, does that automatically validate row 19's surface? Or does row 19 still need its own live evidence?
+3. **§9.4 mandatory 白 spot-check surfaces (8 of 20)**: is this list complete? In particular, surface 10 (provider failure recovery) is marked "optional but recommended for HTTP 402". Should HTTP 402 specifically be promoted to mandatory because it's the X2 root-cause regression?
+4. **§19 row 11 — Y-to-Z handoff matrix**: is one-row-per-Stage-Y-deliverable the right granularity, or should it be one-row-per-§13 Stage Z phase?
+5. **§19 row 12 — evidence checksum manifest format**: JSON-with-SHA-256 is the default. Should it be a `.checksums.txt` file in standard `sha256sum -c` format instead, for tooling compatibility?
+6. **§6.5 X gate removal**: r2 forbids outright deletion until 3 conditions are met. Is the "historical proof preserved in `y0-1-disposition-report.md`" condition sufficient, or should the X gate's content be inlined into the new Y successor gate as a comment block?
+7. **§11 Y1.x sub-plan timing**: r2 §3 promotes Y1.1 + Y1.2 to P0 (Y0.7 + Y0.8). The other 4 Y1 rows remain P1. Codex r1 didn't object, but should §3 also promote Y1.5 (e2e suite) to P0 because the §9 dogfood matrix is partially a substitute for what a real e2e harness would catch?
