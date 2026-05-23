@@ -157,8 +157,14 @@ import type { SessionSlice } from '../renderer/stores/useAgent'
 const { useAgent, getSessionSlice } = await import('../renderer/stores/useAgent')
 const { createAgentRuntimeDriver } = await import('../renderer/modules/agent/runtimeDriver')
 
-const driver = createAgentRuntimeDriver(useAgent as unknown as { getState: () => any; setState: (partial: any) => void })
+const driver = createAgentRuntimeDriver(useAgent as unknown as { getState: () => unknown; setState: (partial: unknown) => void })
 driver.initAgentListeners()
+
+type DriverApi = {
+  armInfrastructureWatchdog: (scopeId: string, requestId: string, options?: { timeoutMs?: number }) => void
+  clearInfrastructureWatchdog: (scopeId: string, requestId: string | null | undefined) => void
+}
+const driverApi = driver as unknown as DriverApi
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -183,7 +189,7 @@ function makeLockedSlice(scopeId: string, requestId: string): SessionSlice {
         toolTrace: [],
         startedAt: '2026-05-22T00:00:00.000Z',
         updatedAt: '2026-05-22T00:00:01.000Z',
-      } as any,
+      } as unknown as SessionSlice['scopeRunStates'][string],
     },
     taskDisclosureState: {},
     state: 'live',
@@ -353,3 +359,101 @@ test('X2.1 #5 — mid-send scope switch: terminal still unlocks the originating 
   assert.equal(sliceB.composerLocked, false, 'session-B composer stays unlocked (never locked)')
   assert.equal(sliceB.streamingRequestId, null, 'session-B streamingRequestId untouched')
 })
+
+// ---------------------------------------------------------------------------
+// Test X2.6 — infrastructure_timeout safety net.
+//
+// Per plan §7.2 last paragraph: if no terminal event of any kind arrives
+// within 60s of send, fire infrastructure_timeout: unlock the originating
+// session's composer, hide Stop, and toast "Ready lost track of this
+// request; recovered automatically".
+//
+// The driver exposes `armInfrastructureWatchdog(scopeId, requestId,
+// { timeoutMs })` as a test seam so we can fire it on a 1ms budget
+// instead of actually waiting 60 seconds.
+// ---------------------------------------------------------------------------
+
+test('X2.6 — infrastructure_timeout fires after timeout with no terminal event', async () => {
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-A',
+  })
+
+  driverApi.armInfrastructureWatchdog('scope-A', 'req-A', { timeoutMs: 10 })
+
+  // Wait the timeout window (+ a little headroom for the timer callback
+  // and the React-style setState flush).
+  await new Promise((resolve) => setTimeout(resolve, 50))
+
+  const state = useAgent.getState()
+  const slice = getSessionSlice(state, 'session-A')
+  assert.equal(slice.composerLocked, false, 'infrastructure_timeout unlocks the originating session')
+  assert.equal(slice.isStreaming, false, 'infrastructure_timeout clears isStreaming')
+  assert.equal(slice.foregroundBusy, false, 'infrastructure_timeout clears foregroundBusy')
+  assert.equal(slice.streamingRequestId, null, 'infrastructure_timeout clears streamingRequestId (Stop button hidden)')
+
+  // A user-visible "lost track" system message lands in the active scope.
+  const lostTrackMsg = state.messages.find((m: { content: string }) =>
+    typeof m.content === 'string' && m.content.includes('Ready 跟丢了'))
+  assert.ok(lostTrackMsg, 'a "Ready 跟丢了" system message is appended for the active scope')
+})
+
+test('X2.6 — terminal event before timeout disarms the watchdog', async () => {
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-A',
+  })
+
+  driverApi.armInfrastructureWatchdog('scope-A', 'req-A', { timeoutMs: 20 })
+
+  // Fire a real terminal error BEFORE the timer expires.
+  fireOnError({
+    agent: 'butler',
+    sessionId: 'session-A',
+    scopeId: 'scope-A',
+    runId: 'req-A',
+    error: 'HTTP 402: insufficient balance',
+    type: 'runtime',
+    errorKind: 'quota_exceeded',
+    recoverable: false,
+  })
+
+  // Now wait past the watchdog window — it should not fire because the
+  // terminal handler cleared it.
+  await new Promise((resolve) => setTimeout(resolve, 80))
+
+  const state = useAgent.getState()
+  // The "Ready 跟丢了" message must NOT appear — the watchdog was
+  // disarmed by the terminal event.
+  const lostTrackMsg = state.messages.find((m: { content: string }) =>
+    typeof m.content === 'string' && m.content.includes('Ready 跟丢了'))
+  assert.equal(lostTrackMsg, undefined, 'no spurious infrastructure_timeout toast after a real terminal event')
+})
+
+test('X2.6 — explicit clearInfrastructureWatchdog disarms by scope', async () => {
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-A',
+  })
+
+  driverApi.armInfrastructureWatchdog('scope-A', 'req-A', { timeoutMs: 20 })
+  // Clear immediately (e.g. user clicked Stop).
+  driverApi.clearInfrastructureWatchdog('scope-A', 'req-A')
+
+  await new Promise((resolve) => setTimeout(resolve, 80))
+
+  const state = useAgent.getState()
+  const lostTrackMsg = state.messages.find((m: { content: string }) =>
+    typeof m.content === 'string' && m.content.includes('Ready 跟丢了'))
+  assert.equal(lostTrackMsg, undefined, 'clearInfrastructureWatchdog disarms the timer')
+})
+

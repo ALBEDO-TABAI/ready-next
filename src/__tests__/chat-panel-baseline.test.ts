@@ -348,6 +348,17 @@ function resetStores() {
     chatPanelVisible: true,
     chatPanelWidth: 380,
   })
+  // Stage X2.3 — the ChatPanel boot effect now appends to `sessionOrder`
+  // via `createNewSession()` when scopes are empty (this is what makes
+  // the cold/header path produce a visible tab — plan §7 required
+  // behavior). That write runs as a microtask AFTER the test under which
+  // it was triggered serializes, so its `sessions`/`sessionOrder` leak
+  // into the NEXT test's seed. Explicit zero here is the safest fix.
+  useAgent.setState({
+    sessions: {},
+    activeSessionId: null,
+    sessionOrder: [],
+  })
 }
 
 function seedEmptyAgent() {
@@ -377,6 +388,14 @@ function seedEmptyAgent() {
     pendingSendCount: 0,
     pendingSendFlushAt: null,
     taskDisclosureState: {},
+    // Stage X2.3 — the ChatPanel boot effect now calls createNewSession()
+    // when scopes are empty, which would otherwise leak a tab into the
+    // next test's `sessionOrder` via a microtask after this test's
+    // serialization. Explicitly zero `sessions`/`sessionOrder` so each
+    // fixture starts from a clean tab strip.
+    sessions: {},
+    activeSessionId: null,
+    sessionOrder: [],
   })
 }
 

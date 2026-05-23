@@ -10,6 +10,11 @@ export const RENDERER_AGENT_METRICS = [
   // cap while awaiting an ask_user_questions cancel IPC. The card stays
   // pending locally with `localDisabled=true` until the late cancel lands.
   'ask_user_questions_cancel_pre_send_timeout',
+  // Stage X2.6 — the runtime driver's 60s infrastructure-timeout
+  // safety net fired (no terminal event of any kind arrived after a
+  // send). The originating session is auto-unlocked and a "Ready lost
+  // track" toast is surfaced. See plan §7.2 last paragraph.
+  'renderer_infrastructure_timeout_fired',
 ] as const
 
 export type RendererAgentMetricName = typeof RENDERER_AGENT_METRICS[number]

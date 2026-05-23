@@ -1473,6 +1473,12 @@ export const useAgent = create<AgentState>((set, get) => ({
     if (typeof window !== 'undefined' && window.electronAPI) {
       window.electronAPI.agent.kill(currentAgent, currentScopeId || undefined).catch(console.error)
     }
+    // Stage X2.6 — user-initiated stop clears the infrastructure
+    // watchdog for the active scope (any in-flight requestId for this
+    // scope).
+    if (currentScopeId) {
+      agentRuntimeDriver.clearInfrastructureWatchdog(currentScopeId, null)
+    }
   },
 
   undoLastMessage: () => {
@@ -2175,6 +2181,16 @@ export const useAgent = create<AgentState>((set, get) => ({
       })
     })
 
+    // Stage X2.6 — arm the infrastructure-timeout watchdog. The runtime
+    // driver auto-clears the watchdog on any terminal IPC (onError /
+    // onStream done / onScopeRunEvent terminal phase). If 60s elapses
+    // with no terminal event of any kind (e.g. main crashed, IPC dropped,
+    // request never reached provider), the watchdog unlocks the
+    // originating session and surfaces a "Ready lost track of this
+    // request; recovered automatically" toast. See plan §7.2 last
+    // paragraph.
+    agentRuntimeDriver.armInfrastructureWatchdog(activeScopeId, requestId)
+
     try {
       if (typeof window !== 'undefined' && window.electronAPI) {
         const finalMessage = composedInput.message
@@ -2231,6 +2247,11 @@ export const useAgent = create<AgentState>((set, get) => ({
         }
 
         if (!result.success) {
+          // Stage X2.6 — local-failure unwind: the IPC returned an
+          // immediate failure (no terminal-event flow). Clear the
+          // infrastructure watchdog explicitly since the auto-clear
+          // path only fires on IPC terminal events.
+          agentRuntimeDriver.clearInfrastructureWatchdog(activeScopeId, requestId)
           if (get().streamingRequestId !== requestId) {
             return { success: false, shouldClearInput: false, preserveInput: true, errorKind: result.errorKind || 'stale_request' }
           }
@@ -2330,6 +2351,11 @@ export const useAgent = create<AgentState>((set, get) => ({
         return { success: true, shouldClearInput: true, preserveInput: false }
       }
     } catch (error) {
+      // Stage X2.6 — local-failure unwind: the IPC threw synchronously
+      // (e.g. preload not available, network refused before IPC). Clear
+      // the watchdog so it doesn't fire 60s later after a long-since
+      // failed send.
+      agentRuntimeDriver.clearInfrastructureWatchdog(activeScopeId, requestId)
       if (get().streamingRequestId !== requestId) {
         return { success: false, shouldClearInput: false, preserveInput: true, errorKind: 'stale_request' }
       }

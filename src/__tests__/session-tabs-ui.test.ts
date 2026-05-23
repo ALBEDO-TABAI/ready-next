@@ -316,12 +316,16 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 test('X2.1 case 7 — ChatPanel UI handlers call createNewSession (visible API), not newSession', () => {
-  const source = readFileSync(resolve(process.cwd(), 'src/renderer/components/agent/ChatPanel.tsx'), 'utf8')
   // The legacy `newSession()` action remains exported from useAgent but is
   // no longer invoked by any user-clickable ChatPanel handler.
   // Source-grep allowance: this is a cross-file hard contract under plan
-  // §7 — UI session creation must funnel through the visible API.
+  // §7 — UI session creation must funnel through the visible API. There
+  // is no behavior-test-friendly seam for "which API does ChatPanel's
+  // useCallback wire up", because the binding is captured at component
+  // mount; the closest behavior alternative would be a JSDOM mount of the
+  // full ChatPanel tree, which is far more brittle than this regex.
   // eslint-disable-next-line ready/no-source-grep-test -- reviewed plan §7 contract
+  const source = readFileSync(resolve(process.cwd(), 'src/renderer/components/agent/ChatPanel.tsx'), 'utf8')
   const newSessionCallRegex = /\bnewSession\s*\(\s*\)/g
   // Strip comments first so the regex doesn't catch documentation
   // references like "(see legacy newSession())".

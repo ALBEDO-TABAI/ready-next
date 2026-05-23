@@ -193,8 +193,117 @@ export function syncActiveScopeRunAliases(
   }
 }
 
+/**
+ * Stage X2.6 — infrastructure timeout safety net.
+ *
+ * Default window: 60s. If no terminal event of ANY kind (onError /
+ * onStream done / onScopeRunEvent terminal phase) arrives within this
+ * window after a send, the driver fires `infrastructure_timeout`:
+ * unlocks the originating session's composer, clears its in-flight
+ * request handle, and toasts "Ready lost track of this request;
+ * recovered automatically".
+ *
+ * Independent of `ProviderTerminalError` because no error was ever
+ * delivered (main process crashed, IPC dropped, etc.). See plan §7.2
+ * last paragraph.
+ */
+const INFRASTRUCTURE_TIMEOUT_MS = 60_000
+
+interface InfrastructureWatchdog {
+  scopeId: string
+  requestId: string
+  timer: ReturnType<typeof setTimeout>
+  startedAt: number
+}
+
 export function createAgentRuntimeDriver(store: AgentStoreLike) {
   let listenersInitialized = false
+
+  // Keyed by `${scopeId}::${requestId}` — at most one watchdog per
+  // in-flight send. Cleared by any terminal-event handler below.
+  const infrastructureWatchdogs = new Map<string, InfrastructureWatchdog>()
+  let lastInfrastructureToastAt = 0
+
+  function watchdogKey(scopeId: string, requestId: string): string {
+    return `${scopeId}::${requestId}`
+  }
+
+  function clearInfrastructureWatchdogForScope(scopeId: string): void {
+    for (const [key, watchdog] of infrastructureWatchdogs) {
+      if (watchdog.scopeId !== scopeId) continue
+      clearTimeout(watchdog.timer)
+      infrastructureWatchdogs.delete(key)
+    }
+  }
+
+  function clearInfrastructureWatchdog(scopeId: string, requestId: string | null | undefined): void {
+    if (!requestId) {
+      clearInfrastructureWatchdogForScope(scopeId)
+      return
+    }
+    const key = watchdogKey(scopeId, requestId)
+    const watchdog = infrastructureWatchdogs.get(key)
+    if (!watchdog) return
+    clearTimeout(watchdog.timer)
+    infrastructureWatchdogs.delete(key)
+  }
+
+  function fireInfrastructureTimeout(scopeId: string, requestId: string): void {
+    const key = watchdogKey(scopeId, requestId)
+    if (!infrastructureWatchdogs.has(key)) return
+    infrastructureWatchdogs.delete(key)
+    // Sanity: if the session is no longer streaming this request, nothing
+    // to recover. Could happen if a terminal event arrived in the same
+    // tick the timer fired.
+    const state = store.getState()
+    const runState = state.scopeRunStates?.[scopeId]
+    if (runState && runState.requestId !== requestId) return
+
+    store.setState((current: { currentScopeId?: string | null }) => ({
+      ...withSessionSliceAndActiveRuntimeMirror(
+        current,
+        sessionKeyForScopeId(current, scopeId),
+        {
+          isStreaming: false,
+          foregroundBusy: false,
+          composerLocked: false,
+          streamingMessageId: null,
+          streamingRequestId: null,
+        },
+      ),
+      ...(current.currentScopeId === scopeId ? { toolTraceStatus: 'error' as const } : {}),
+    }))
+
+    if (state.currentScopeId === scopeId && typeof state.addMessage === 'function') {
+      state.addMessage({
+        id: `infra-timeout-${Date.now()}`,
+        agent: state.currentAgent || 'butler',
+        content: 'Ready 跟丢了这次请求，已自动恢复，可重新发送。',
+        type: 'system',
+        timestamp: new Date(),
+      })
+    }
+    lastInfrastructureToastAt = Date.now()
+    emitRendererAgentMetric('renderer_infrastructure_timeout_fired', {
+      scopeId,
+      requestId,
+      elapsedMs: INFRASTRUCTURE_TIMEOUT_MS,
+    })
+  }
+
+  function armInfrastructureWatchdog(scopeId: string, requestId: string, options?: { timeoutMs?: number }): void {
+    if (!scopeId || !requestId) return
+    // Re-arming the same scope+requestId resets the timer.
+    clearInfrastructureWatchdog(scopeId, requestId)
+    const timeoutMs = options?.timeoutMs ?? INFRASTRUCTURE_TIMEOUT_MS
+    const timer = setTimeout(() => fireInfrastructureTimeout(scopeId, requestId), timeoutMs)
+    infrastructureWatchdogs.set(watchdogKey(scopeId, requestId), {
+      scopeId,
+      requestId,
+      timer,
+      startedAt: Date.now(),
+    })
+  }
 
   function upsertScopeRunState(
     scopeId: string,
@@ -394,7 +503,12 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       if (!scopeId) return
 
       if (data.type === 'done') {
-        const runState = store.getState().scopeRunStates[scopeId] || null
+        // Stage X2.6 — any terminal event for this scope clears the
+        // infrastructure-timeout watchdog so it doesn't fire a false
+        // positive after a normal completion.
+        const runStateForClear = store.getState().scopeRunStates[scopeId] || null
+        clearInfrastructureWatchdog(scopeId, runStateForClear?.requestId || (typeof data.runId === 'string' ? data.runId : null))
+        const runState = runStateForClear
         void (async () => {
           let finalized = false
           const finalize = () => {
@@ -530,6 +644,12 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
 
       const state = store.getState()
       const runState = state.scopeRunStates[scopeId] || null
+      // Stage X2.6 — clear infrastructure watchdog on any non-recoverable
+      // terminal error. Recoverable errors (soft capsule) leave the
+      // request in-flight so the watchdog must keep ticking.
+      if (!recoverable) {
+        clearInfrastructureWatchdog(scopeId, runState?.requestId || (typeof data.runId === 'string' ? data.runId : null))
+      }
 
       if (recoverable) {
         const friendly = mapBackendErrorToFriendly({
@@ -608,6 +728,38 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         agent: data.agent,
         errorKind: data.errorKind || 'unknown',
       })
+      // Stage X2.4 — terminal unwind targets the SESSION THAT OWNS THE
+      // SCOPE, not the active session. This is the explicit cross-state
+      // model the plan §0.5/§7.1 calls for: the "session that was locked
+      // at send start" is recovered via `sessionKeyForScopeId(state,
+      // scopeId)` (the scope→session map maintained by the session-slice
+      // contract). If the user clicked into another tab mid-send, the
+      // active session has moved but the lock unwind must still target
+      // the originating session so its composer becomes usable when the
+      // user clicks back into it. Stage X2.5: streamingRequestId clear
+      // hides the Stop button for the originating session too.
+      store.setState((state: any) => ({
+        ...withSessionSliceAndActiveRuntimeMirror(
+          state,
+          sessionKeyForScopeId(state, scopeId),
+          {
+            isStreaming: false,
+            foregroundBusy: false,
+            composerLocked: false,
+            streamingMessageId: null,
+            streamingRequestId: null,
+          },
+        ),
+        // Only mutate the visible top-level toolTraceStatus when the
+        // affected session is the active one — the parked-session
+        // tooltrace mirror is recomputed when the user switches to it.
+        ...(state.currentScopeId === scopeId ? { toolTraceStatus: 'error' as const } : {}),
+      }))
+      // The system-message error capsule is part of the visible
+      // transcript, so it only renders for the active scope. The
+      // originating session (when parked) still gets phase=error in its
+      // scope run state below, which the projection card surfaces when
+      // the user returns to the tab.
       if (state.currentScopeId === scopeId) {
         state.addMessage({
           id: `error-${Date.now()}`,
@@ -616,20 +768,6 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
           type: 'system',
           timestamp: new Date(),
         })
-        store.setState((state: any) => ({
-          ...withSessionSliceAndActiveRuntimeMirror(
-            state,
-            sessionKeyForScopeId(state, scopeId),
-            {
-              isStreaming: false,
-              foregroundBusy: false,
-              composerLocked: false,
-              streamingMessageId: null,
-              streamingRequestId: null,
-            },
-          ),
-          toolTraceStatus: 'error',
-        }))
       }
 
       upsertScopeRunState(scopeId, (previous) => ({
@@ -1145,38 +1283,58 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         })
 
         const currentState = store.getState()
-        if (currentState.currentScopeId === event.scopeId) {
-          const detachedJobEvent = event.module === 'skill' && event.executionKind === 'job' && String(event.taskId || '').startsWith('detached:')
-          if (event.type === 'started' && !detachedJobEvent) {
-            store.setState((state: any) => withSessionSliceAndActiveRuntimeMirror(
+        const detachedJobEvent = event.module === 'skill' && event.executionKind === 'job' && String(event.taskId || '').startsWith('detached:')
+        // Stage X2.4 — `started` mirror still keys off the active scope
+        // (the `streamingRequestId` mirror is the top-level alias and is
+        // only meaningful for the active session; parked sessions read
+        // their own slice's `streamingRequestId` directly).
+        if (
+          currentState.currentScopeId === event.scopeId &&
+          event.type === 'started' &&
+          !detachedJobEvent
+        ) {
+          store.setState((state: any) => withSessionSliceAndActiveRuntimeMirror(
+            state,
+            sessionKeyForScopeId(state, event.scopeId),
+            { streamingRequestId: event.runId || currentState.streamingRequestId },
+          ))
+        }
+        // Stage X2.4 — terminal events always unwind the originating
+        // session's slice, even when the user has switched away. See the
+        // onError comment block above for the rationale.
+        const terminalRunEvent = Boolean(
+          store.getState().scopeRunStates[event.scopeId]?.terminalReason ||
+          event.phase === 'done' ||
+          event.phase === 'error' ||
+          event.phase === 'cancelled',
+        )
+        if (terminalRunEvent) {
+          const latestRunState = store.getState().scopeRunStates[event.scopeId] || null
+          // Stage X2.6 — terminal scope-run event clears the
+          // infrastructure watchdog for this scope.
+          clearInfrastructureWatchdog(
+            event.scopeId,
+            latestRunState?.requestId || (typeof event.runId === 'string' ? event.runId : null),
+          )
+          store.setState((state: any) => ({
+            ...withSessionSliceAndActiveRuntimeMirror(
               state,
               sessionKeyForScopeId(state, event.scopeId),
-              { streamingRequestId: event.runId || currentState.streamingRequestId },
-            ))
-          }
-          const terminalRunEvent = Boolean(
-            store.getState().scopeRunStates[event.scopeId]?.terminalReason ||
-            event.phase === 'done' ||
-            event.phase === 'error' ||
-            event.phase === 'cancelled',
-          )
-          if (terminalRunEvent) {
-            const latestRunState = store.getState().scopeRunStates[event.scopeId] || null
-            store.setState((state: any) => ({
-              ...withSessionSliceAndActiveRuntimeMirror(
-                state,
-                sessionKeyForScopeId(state, event.scopeId),
-                {
-                  isStreaming: false,
-                  foregroundBusy: false,
-                  composerLocked: false,
-                  streamingMessageId: null,
-                  streamingRequestId: null,
-                },
-              ),
-              toolTraceStatus: phaseToToolTraceStatus(latestRunState?.phase || event.phase),
-            }))
-          }
+              {
+                isStreaming: false,
+                foregroundBusy: false,
+                composerLocked: false,
+                streamingMessageId: null,
+                streamingRequestId: null,
+              },
+            ),
+            // Top-level toolTraceStatus is the active-session mirror, so
+            // only refresh it when the terminal event belongs to the
+            // currently-visible scope.
+            ...(state.currentScopeId === event.scopeId
+              ? { toolTraceStatus: phaseToToolTraceStatus(latestRunState?.phase || event.phase) }
+              : {}),
+          }))
         }
         if (
           event.terminalReason ||
@@ -1262,5 +1420,11 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     initAgentListeners,
     upsertScopeRunState,
     resolveScopeIdForRunPayload,
+    armInfrastructureWatchdog,
+    clearInfrastructureWatchdog,
+    // Test seam: lets the X2.6 behavior test fire the watchdog with a
+    // short timeout (or 0) so it doesn't actually wait 60 seconds.
+    __getInfrastructureTimeoutMs: () => INFRASTRUCTURE_TIMEOUT_MS,
+    __getLastInfrastructureToastAt: () => lastInfrastructureToastAt,
   }
 }

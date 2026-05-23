@@ -94,10 +94,13 @@ test('runtimeDriver terminal branch clears stale softError', () => {
   const source = readWorkspaceFile('src/renderer/modules/agent/runtimeDriver.ts')
   // Terminal branch must include softError: null in the upsert payload.
   // We scope to the section after `// Terminal path` comment to the next
-  // top-level function / event listener end.
+  // top-level function / event listener end. Window grown to 6000 in
+  // Stage X2.4 after the always-fire (scope-keyed) unwind got an
+  // explanatory comment block + the message-add branch was hoisted into
+  // a separate conditional.
   const terminalIdx = source.indexOf('Terminal path')
   assert.ok(terminalIdx > 0, 'expected a "Terminal path" marker in the onError handler')
-  const terminalBlock = source.slice(terminalIdx, terminalIdx + 4000)
+  const terminalBlock = source.slice(terminalIdx, terminalIdx + 6000)
   assert.match(terminalBlock, /softError:\s*null/)
 })
 
