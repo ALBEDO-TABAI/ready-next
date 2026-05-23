@@ -2,7 +2,8 @@ import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties, 
 import {
   ChevronLeft, User, Bell, Shield, Database,
   Palette, Keyboard, Globe, Info, Moon, Sun, Bot, Monitor, Droplets,
-  ChevronRight, ExternalLink, HardDrive, Trash2, CheckCircle2, XCircle, Loader2, MessageSquare, Brain, Users, Sparkles, Cat
+  ChevronRight, ExternalLink, HardDrive, Trash2, CheckCircle2, XCircle, Loader2, MessageSquare, Brain, Users, Sparkles, Cat,
+  Plug2
 } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useTheme, type ThemeSkin } from '../stores/useTheme'
@@ -106,6 +107,13 @@ const settingsData: SettingSection[] = [
     icon: ExternalLink,
     description: '统一管理 Tavily、Jina、RSSHub、Bilibili、GitHub、高德地图与读图模型',
     settings: []
+  },
+  {
+    id: 'mcp',
+    title: 'MCP',
+    icon: Plug2,
+    description: '本版本暂未发布 MCP transport / MCP not shipped in this release',
+    settings: [] // Rendered dynamically via McpSettingsPanel — Y0.7 §11.0b labeling branch
   },
   {
     id: 'memory',
@@ -1644,7 +1652,11 @@ const ZERO_STATS: CacheStatsView = {
   sharedCacheBytes: 0,
 }
 
-function StorageSettingsPanel() {
+// Exported for the Y0.8 relabel behavior test (per sub-plan
+// docs/superpowers/plans/2026-05-23-Y0-8-cache-quota-relabel-implementation.md §6).
+// Mounting the full Settings page would require a ~200 line electronAPI proxy
+// harness; exporting this single panel keeps the test surgical.
+export function StorageSettingsPanel() {
   const [stats, setStats] = useState<CacheStatsView | null>(null)
   const [statsLoading, setStatsLoading] = useState<boolean>(true)
   const [statsError, setStatsError] = useState<string | null>(null)
@@ -1794,14 +1806,19 @@ function StorageSettingsPanel() {
         </div>
       </div>
 
-      {/* Quota selector (persistence only — TODO actual enforcement) */}
+      {/* Quota selector — relabel-only per Stage Y0.8 plan §11.0a path-(b).
+          The configured value still persists via cache_quota_bytes so it
+          carries forward into Stage Z's real eviction landing; this UI is
+          honest that no enforcement happens today. EN equivalent for future
+          locale work: "Cache size limit (configured but NOT enforced —
+          manual cleanup required)". */}
       <div className="flex items-center justify-between transition-colors">
         <div className="flex-1 min-w-0 mr-4">
           <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>
-            缓存配额
+            缓存大小上限
           </div>
           <div className="text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
-            目标上限（仅记录偏好，Chromium 当前不强制驱逐）
+            仅记录配置，未强制执行 — 需要手动清理（使用下方的「清除缓存」按钮）
           </div>
         </div>
         <select
@@ -2501,6 +2518,117 @@ function ExternalServicesSettingsPanel() {
   )
 }
 
+// Y0.7 §11.0b labeling branch: Settings MCP section renders a "not shipped" label
+// with all controls visibly inert. The Stage T authorization plumbing
+// (`src/main/modules/mcp/*` + `src/__tests__/mcp-tools-authorization.test.ts`)
+// stays in-tree; real transport landing is deferred to Stage Z per
+// `docs/superpowers/audits/2026-05-23-stage-y-closeout/release-handoff.md` §5b.
+function McpSettingsPanel() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <section
+        aria-labelledby="mcp-not-shipped-heading"
+        className="glass-surface-card rounded-2xl border"
+        style={{ ...SETTINGS_SUBTLE_CARD_STYLE, padding: '18px 20px' }}
+      >
+        <div className="flex items-start gap-3">
+          <div
+            className="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl"
+            style={{ background: 'var(--surface-muted)', color: 'var(--text-muted)' }}
+          >
+            <Plug2 className="h-4 w-4" strokeWidth={2} />
+          </div>
+          <div className="min-w-0">
+            <h3
+              id="mcp-not-shipped-heading"
+              className="text-[14px] font-semibold leading-6"
+              style={{ color: 'var(--text-title)', margin: 0 }}
+            >
+              MCP 暂未发布 / MCP not shipped in this release
+            </h3>
+            <p
+              className="text-[12px] leading-5"
+              style={{ color: 'var(--text-muted)', margin: '4px 0 0', maxWidth: 640 }}
+            >
+              本版本不包含 MCP 客户端 transport；真实接入计划在 Stage Z 路线图中落地。See Stage Z roadmap for transport landing.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section
+        aria-labelledby="mcp-install-disabled-heading"
+        aria-disabled="true"
+        className="rounded-2xl border"
+        style={{
+          ...SETTINGS_FLAT_CARD_STYLE,
+          padding: '16px 18px',
+          opacity: 0.55,
+          pointerEvents: 'none',
+        }}
+      >
+        <div className="min-w-0">
+          <h4
+            id="mcp-install-disabled-heading"
+            className="text-[13px] font-medium"
+            style={{ color: 'var(--text-title)', margin: 0 }}
+          >
+            MCP server install / configure (disabled)
+          </h4>
+          <p
+            className="text-[11px] leading-5"
+            style={{ color: 'var(--text-light)', margin: '4px 0 0', maxWidth: 640 }}
+          >
+            未发布期间不暴露安装与配置入口；占位组件保持未来界面的位置感，但所有操作不可点击。
+          </p>
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled
+            aria-disabled="true"
+            data-mcp-control="install-server"
+            className="inline-flex items-center gap-1.5 rounded-xl border text-[12px] font-medium"
+            style={{ ...SETTINGS_SECONDARY_BUTTON_STYLE, padding: '7px 12px', opacity: 0.6, cursor: 'not-allowed' }}
+          >
+            安装 MCP server（不可用）
+          </button>
+          <button
+            type="button"
+            disabled
+            aria-disabled="true"
+            data-mcp-control="configure-transport"
+            className="inline-flex items-center gap-1.5 rounded-xl border text-[12px] font-medium"
+            style={{ ...SETTINGS_SECONDARY_BUTTON_STYLE, padding: '7px 12px', opacity: 0.6, cursor: 'not-allowed' }}
+          >
+            配置 transport（不可用）
+          </button>
+        </div>
+      </section>
+
+      <section
+        aria-labelledby="mcp-stage-t-plumbing-heading"
+        className="rounded-2xl border"
+        style={{ ...SETTINGS_FLAT_CARD_STYLE, padding: '14px 16px' }}
+      >
+        <h4
+          id="mcp-stage-t-plumbing-heading"
+          className="text-[12px] font-semibold uppercase tracking-[0.16em]"
+          style={{ color: 'var(--text-light)', margin: 0 }}
+        >
+          Stage T authorization plumbing — visibly inert
+        </h4>
+        <p
+          className="text-[11px] leading-5"
+          style={{ color: 'var(--text-muted)', margin: '6px 0 0' }}
+        >
+          Stage T 已落地的 MCP 授权管道（<code>src/main/modules/mcp/*</code>）继续保留在仓库内并通过既有测试 <code>src/__tests__/mcp-tools-authorization.test.ts</code>。本版本不再向 UI 暴露任何 MCP 工具或登录入口；真实 transport 接入计划在 Stage Z 落地后再启用此处的入口。
+        </p>
+      </section>
+    </div>
+  )
+}
+
 function ActiveChildRunsDebug() {
   const [runs, setRuns] = useState<ActiveChildRunSummaryView[]>([])
   const [loading, setLoading] = useState(false)
@@ -2655,7 +2783,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
   }
 
   const isDynamicSection = currentSection
-    ? ['ai', 'remote-im', 'external-services', 'memory', 'personalities', 'user-profiles', 'pet', 'rss-storage', 'storage'].includes(currentSection.id)
+    ? ['ai', 'remote-im', 'external-services', 'mcp', 'memory', 'personalities', 'user-profiles', 'pet', 'rss-storage', 'storage'].includes(currentSection.id)
     : false
 
   return (
@@ -2787,6 +2915,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                 {currentSection.id === 'storage' && <StorageSettingsPanel />}
                 {currentSection.id === 'remote-im' && <RemoteIMSettingsPanel />}
                 {currentSection.id === 'external-services' && <ExternalServicesSettingsPanel />}
+                {currentSection.id === 'mcp' && <McpSettingsPanel />}
                 {currentSection.id === 'pet' && <PetSettingsPanel />}
                 {currentSection.id === 'memory' && (
                   <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
