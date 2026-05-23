@@ -87,6 +87,22 @@ jobs:
       - name: verify:ipc-contract
         run: npm run verify:ipc-contract
 
+      # Stage Y0.2.a — added per plan §7.1 to align merge job with §14.2
+      # Y-release-track. `verify:meta-paths` was deferred at X3 per the
+      # X3 deferral note; Y0.2.a closes that gap so a green merge job
+      # implies the §14.2 chain is structurally green.
+      - name: verify:meta-paths
+        run: npm run verify:meta-paths
+
+      # Stage Y0.2.a — added per plan §7.1 + §6.5: kept through Y0.1
+      # window. Removal is gated on §6.5 conditions (all 4 X1.8 rows
+      # dispositioned + Stage Y successor gate exists and passes +
+      # historical proof preserved in y0-1-disposition-report.md), which
+      # is deferred to Y0.7/Y0.8 closeout per Y0.2.a scope (alignment
+      # only; §6.5 cleanup is a separate phase).
+      - name: verify:stage-x-known-regressions
+        run: npm run verify:stage-x-known-regressions
+
       - name: test
         run: npm run test
 
