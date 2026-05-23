@@ -153,6 +153,7 @@ test('useBrowserViewBounds source code still emits both intents in the same code
   // structurally.
   const fs = await import('node:fs')
   const path = await import('node:path')
+  // eslint-disable-next-line ready/no-source-grep-test -- Stage X4.3 paired structural gate: the behavior test above proves dual-emit via test double; this regex pins the production hook's single-callback shape so a future refactor that splits the secondary emission into a different code path cannot silently break the "within one frame" property.
   const hookSrc = fs.readFileSync(
     path.resolve(process.cwd(), 'src/renderer/modules/browser/useBrowserViewBounds.ts'),
     'utf8',
