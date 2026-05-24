@@ -32,31 +32,68 @@
  */
 'use strict'
 
+const fs = require('node:fs')
+const path = require('node:path')
+const { execFileSync } = require('node:child_process')
+
+const ROOT = path.resolve(__dirname, '..')
+const REPORT_REL =
+  'docs/superpowers/audits/2026-05-23-stage-y-closeout/y0-1-disposition-report.md'
+const SCHEMA_REL =
+  'docs/superpowers/audits/2026-05-23-stage-y-closeout/y0-1-disposition-report-schema.json'
+
 // Stage Y successor pinned list — currently empty.
 // Add rows here ONLY if Stage Y produces a NEW retired-with-reason
 // disposition (path-b in §6 disposition tree). At Y closeout the list
 // is empty because all 4 Y0.1 rows went green via path-a variants.
 const STAGE_Y_KNOWN_REGRESSIONS = []
 
-function main() {
-  if (STAGE_Y_KNOWN_REGRESSIONS.length === 0) {
+function main({ root = ROOT } = {}) {
+  const errors = []
+
+  // (a) §6.5 condition 1+2+3 enforcement: the disposition report MUST
+  // exist + schema MUST exist + delegated validator MUST pass.
+  const reportAbs = path.join(root, REPORT_REL)
+  if (!fs.existsSync(reportAbs)) {
+    errors.push(`§6.5 condition 3 fail: y0-1-disposition-report.md missing (${REPORT_REL})`)
+  }
+  const schemaAbs = path.join(root, SCHEMA_REL)
+  if (!fs.existsSync(schemaAbs)) {
+    errors.push(`§6.5 schema missing: ${SCHEMA_REL}`)
+  }
+
+  // (b) Delegate to check-y0-1-disposition-report.cjs for full schema
+  // enforcement. We require that gate to also pass at this freeze.
+  try {
+    execFileSync('node', [path.join(__dirname, 'check-y0-1-disposition-report.cjs')], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+    })
+  } catch (e) {
+    errors.push(
+      `§6.5 disposition-report validator failed (check-y0-1-disposition-report.cjs exit ${e.status}); fix the report before deleting the X gate`,
+    )
+  }
+
+  // (c) Pinned-list validation: empty at this freeze (all 4 X1.8 rows went
+  // green via path-a variants). If non-empty, mirror the X1.8 pattern.
+  if (STAGE_Y_KNOWN_REGRESSIONS.length > 0) {
+    // (placeholder for future Stage Y retired-with-reason rows)
+    errors.push(`pinned-list validation not yet implemented for ${STAGE_Y_KNOWN_REGRESSIONS.length} row(s)`)
+  }
+
+  if (errors.length === 0) {
     console.log(
-      '[check-stage-y-known-regressions] OK (empty pinned list — no Stage Y retired-with-reason gates at Y closeout per §6.5)',
+      `[check-stage-y-known-regressions] OK (empty pinned list — all 4 X1.8 rows went green via path-a; §6.5 conditions 1+2+3 verified via delegated check-y0-1-disposition-report.cjs)`,
     )
     return { ok: true, errors: [] }
   }
-  // Pinned-list validation would mirror the X1.8 check-stage-x-known-
-  // regressions.cjs pattern: ledger entries intact + retired sub-gates
-  // not silently re-entering verify chains. Not exercised at Y closeout.
-  console.log(
-    `[check-stage-y-known-regressions] OK (${STAGE_Y_KNOWN_REGRESSIONS.length} pinned row(s))`,
-  )
-  return { ok: true, errors: [] }
+  return { ok: false, errors }
 }
 
 if (require.main === module) {
   const result = main()
   if (!result.ok) {
+    console.error('[check-stage-y-known-regressions] FAIL:')
     for (const e of result.errors) console.error(`  - ${e}`)
     process.exit(1)
   }

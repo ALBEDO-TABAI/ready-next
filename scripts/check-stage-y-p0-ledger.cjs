@@ -347,15 +347,54 @@ function main({ root = ROOT } = {}) {
     const rule = row.green_rule(state)
     if (rule.green) {
       notes.push(`${row.id} green: ${rule.why}`)
-      // Even if green, §0.7 forbids Y0.7/Y0.8 from being marked
-      // deferred in the ledger; we still apply that check.
+      // §3.2 carve-out enforcement (codex r1 closeout-review must-fix #3):
+      // For Y0.7/Y0.8 the ledger MUST NOT carry a deferral row that
+      // would short-circuit the green path. Two ways a row could
+      // appear: (1) case-sensitive includes(row.ledger_key) matches
+      // capitalized "Y0.7"/"Y0.8"; (2) lowercase form like "y0-7"/
+      // "y0-8" that the original ledger_key string-match bypasses.
+      // Check BOTH the literal ledger_key AND the lowercase-hyphenated
+      // form, AND additionally reject any row whose bucket is
+      // `deferred-with-owner` (the bucket forbidden by §3.2 carve-out
+      // for non-deferrable rows).
       if (row.nondeferrable) {
-        const conflict = ledgerRows.find((lr) =>
-          lr.item.includes(row.ledger_key),
-        )
-        if (conflict) {
+        const lowercaseSlug = row.ledger_key
+          .toLowerCase()
+          .replace(/\./g, '-')
+        const conflicts = ledgerRows.filter((lr) => {
+          const itemLower = lr.item.toLowerCase()
+          const matchesKey = lr.item.includes(row.ledger_key) ||
+            itemLower.includes(lowercaseSlug) ||
+            itemLower.includes(row.ledger_key.toLowerCase())
+          if (!matchesKey) return false
+          // Disregard pure-Stage-Z-followup rows (bucket Stage Z
+          // release-candidate) IF they explicitly mark themselves as
+          // FOLLOW-UP (not as Y0.7/Y0.8 deferrals themselves) by
+          // referring to a sibling Stage Z scope (transport landing,
+          // eviction landing, etc.). The §3.2 carve-out forbids
+          // Y0.7/Y0.8 itself from being deferred; it does NOT forbid
+          // a Stage Z FOLLOW-UP row for related future work.
+          const isStageZFollowUp = /follow-?up|transport landing|eviction landing|carry-over/i.test(
+            lr.reason || '',
+          ) && /stage z release-candidate/i.test(lr.bucket || '')
+          return !isStageZFollowUp
+        })
+        const deferredWithOwner = ledgerRows.find((lr) => {
+          const itemLower = lr.item.toLowerCase()
+          return (
+            (lr.item.includes(row.ledger_key) ||
+              itemLower.includes(lowercaseSlug)) &&
+            /deferred-with-owner/i.test(lr.bucket || '')
+          )
+        })
+        for (const c of conflicts) {
           errors.push(
-            `§3.2 carve-out violation: ${row.id} is non-deferrable but ledger row found: "${conflict.item}"`,
+            `§3.2 carve-out violation: ${row.id} is non-deferrable but ledger row found: "${c.item}" (bucket=${c.bucket})`,
+          )
+        }
+        if (deferredWithOwner) {
+          errors.push(
+            `§3.2 carve-out violation: ${row.id} ledger row "${deferredWithOwner.item}" uses bucket "deferred-with-owner" which is FORBIDDEN for non-deferrable P0 rows`,
           )
         }
       }
