@@ -27,6 +27,7 @@
     "verify:lint-budget": "node scripts/check-lint-warning-budget.cjs",
     "verify:meta-paths": "node scripts/check-verify-script-paths-current.cjs",
     "verify:stage-x-known-regressions": "node scripts/check-stage-x-known-regressions.cjs",
+    "verify:stage-y-known-regressions": "node scripts/check-stage-y-known-regressions.cjs",
     "verify:stage-y-p0-ledger": "node scripts/check-stage-y-p0-ledger.cjs",
     "verify:stage-y-dogfood-evidence": "node scripts/check-stage-y-dogfood-evidence.cjs",
     "test": "npm run test:parallel && npm run test:serial-skill-child",
