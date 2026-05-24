@@ -20,6 +20,7 @@ const SCHEMA_REL =
 const VALID_DISPOSITION_PATHS = new Set([
   'a-fix',
   'a-rewrite',
+  'a-reorder',
   'b-replacement-gate',
   'b-retired-with-reason',
   'split',
@@ -27,6 +28,7 @@ const VALID_DISPOSITION_PATHS = new Set([
 const VALID_SUB_PATHS = new Set([
   'a-fix',
   'a-rewrite',
+  'a-reorder',
   'b-replacement-gate',
   'b-retired-with-reason',
 ])
@@ -193,9 +195,9 @@ function main({ root = ROOT } = {}) {
     }
     if (!r.rationale || typeof r.rationale !== 'string' || r.rationale.trim().length === 0) {
       errors.push(`${prefix} (${r.gate_id}): rationale missing or empty`)
-    } else if (!/§6\.\d|§6\.x|plan §6/i.test(r.rationale)) {
+    } else if (!/§6\.\d/i.test(r.rationale)) {
       errors.push(
-        `${prefix} (${r.gate_id}): rationale must cite at least one §6.x anchor`,
+        `${prefix} (${r.gate_id}): rationale must cite at least one concrete §6.N anchor (e.g., §6.1, §6.3, §6.5); generic "plan §6" or "§6.x" no longer accepted (codex r2 closeout-review should-fix #1)`,
       )
     }
   }
