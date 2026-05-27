@@ -1,12 +1,72 @@
 import { writeFileSync } from 'node:fs'
+import { pathToFileURL } from 'node:url'
 
-const port = Number(process.env.READY_REMOTE_DEBUGGING_PORT || 9333)
-const label = process.argv[2] || ''
-const waitMs = Number(process.argv[3] || 2500)
-const outPath = process.argv[4] || ''
-const preAction = process.argv[5] || ''
+const API_ACTIONS_BY_LABEL = new Map([
+  ['继续生成报告', ['resumeRun']],
+  ['继续处理', ['resumeRun']],
+  ['继续运行', ['resumeRun']],
+  ['取消', ['cancelChildRun']],
+  ['取消后台任务', ['cancelDetachedSkillTask']],
+  ['暂停任务', ['suspendRun']],
+  ['确认继续', ['respondToInteraction']],
+  ['暂不继续', ['respondToInteraction']],
+])
 
-async function listTargets() {
+function hasApiCall(report, keys) {
+  return Array.isArray(report.apiCalls) && report.apiCalls.some((call) => keys.includes(call?.key))
+}
+
+function hasComposerChange(report) {
+  return report.before?.composer?.inputValue !== report.after?.composer?.inputValue
+    || report.before?.composer?.pendingSendCount !== report.after?.composer?.pendingSendCount
+}
+
+function hasOpenedScope(report) {
+  return Boolean(report.after?.currentScopeId)
+    && report.after.currentScopeId !== report.before?.currentScopeId
+    && report.after.messageCount > report.before?.messageCount
+}
+
+function hasGenericObservableEffect(report) {
+  return Array.isArray(report.apiCalls) && report.apiCalls.length > 0
+    || hasComposerChange(report)
+    || hasOpenedScope(report)
+    || report.after?.messageCount > report.before?.messageCount
+}
+
+export function evaluateTaskCardActionEffect(report) {
+  if (!report || report.ok !== true) return report
+  const label = String(report.label || '')
+  const expectedApiKeys = API_ACTIONS_BY_LABEL.get(label)
+  const effect = expectedApiKeys
+    ? {
+        ok: hasApiCall(report, expectedApiKeys),
+        expectation: `api:${expectedApiKeys.join('|')}`,
+      }
+    : label === '打开会话'
+      ? {
+          ok: hasOpenedScope(report),
+          expectation: 'state:opened-scope',
+        }
+      : label === '继续后台任务' || label === '重试'
+        ? {
+            ok: hasComposerChange(report),
+            expectation: 'state:composer-changed',
+          }
+        : {
+            ok: hasGenericObservableEffect(report),
+            expectation: 'generic-observable-effect',
+          }
+  if (effect.ok) return { ...report, effect }
+  return {
+    ...report,
+    ok: false,
+    error: 'no-action-effect',
+    effect,
+  }
+}
+
+async function listTargets(port) {
   const response = await fetch(`http://127.0.0.1:${port}/json/list`)
   if (!response.ok) throw new Error(`CDP target list failed: ${response.status}`)
   return response.json()
@@ -61,23 +121,29 @@ async function evaluate(client, expression) {
   return typeof value === 'string' ? JSON.parse(value) : value
 }
 
-if (!label.trim()) throw new Error('button label is required')
+async function main() {
+  const port = Number(process.env.READY_REMOTE_DEBUGGING_PORT || 9333)
+  const label = process.argv[2] || ''
+  const waitMs = Number(process.argv[3] || 2500)
+  const outPath = process.argv[4] || ''
+  const preAction = process.argv[5] || ''
+  if (!label.trim()) throw new Error('button label is required')
 
-const targets = await listTargets()
-const mainTarget = targets.find((target) => (
-  target.type === 'page'
-  && /localhost:5173\/?$/.test(target.url)
-  && !/browser-fastcard-overlay/.test(target.url)
-))
-if (!mainTarget) throw new Error('Ready workbench target not found')
+  const targets = await listTargets(port)
+  const mainTarget = targets.find((target) => (
+    target.type === 'page'
+    && /localhost:5173\/?$/.test(target.url)
+    && !/browser-fastcard-overlay/.test(target.url)
+  ))
+  if (!mainTarget) throw new Error('Ready workbench target not found')
 
-const client = await connect(mainTarget)
-try {
-  const report = await evaluate(client, `
-    (async () => {
-      const label = ${JSON.stringify(label)}
-      const waitMs = ${JSON.stringify(waitMs)}
-      const preAction = ${JSON.stringify(preAction)}
+  const client = await connect(mainTarget)
+  try {
+    const rawReport = await evaluate(client, `
+      (async () => {
+        const label = ${JSON.stringify(label)}
+        const waitMs = ${JSON.stringify(waitMs)}
+        const preAction = ${JSON.stringify(preAction)}
       const h = window.__READY_AGENT_TEST__
       if (!h) throw new Error('missing __READY_AGENT_TEST__')
       let preActionResult = null
@@ -106,6 +172,9 @@ try {
       }
       wrap(window.electronAPI?.agent, 'resumeRun')
       wrap(window.electronAPI?.agent, 'cancelChildRun')
+      wrap(window.electronAPI?.agent, 'cancelDetachedSkillTask')
+      wrap(window.electronAPI?.agent, 'suspendRun')
+      wrap(window.electronAPI?.agent, 'respondToInteraction')
       wrap(window.electronAPI?.agent, 'getConversationScopeMessages')
       const before = await h.snapshot()
       let buttons = [...document.querySelectorAll('button')]
@@ -163,12 +232,21 @@ try {
           })),
         },
       })
-    })()
-  `)
-  const serialized = JSON.stringify(report, null, 2)
-  if (outPath) writeFileSync(outPath, `${serialized}\n`)
-  console.log(serialized)
-  process.exit(report.ok ? 0 : 1)
-} finally {
-  client.ws.close()
+      })()
+    `)
+    const report = evaluateTaskCardActionEffect(rawReport)
+    const serialized = JSON.stringify(report, null, 2)
+    if (outPath) writeFileSync(outPath, `${serialized}\n`)
+    console.log(serialized)
+    process.exit(report.ok ? 0 : 1)
+  } finally {
+    client.ws.close()
+  }
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.stack || error.message : String(error))
+    process.exit(1)
+  })
 }
