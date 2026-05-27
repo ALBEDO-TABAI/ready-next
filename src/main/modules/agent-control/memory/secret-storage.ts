@@ -10,7 +10,8 @@ const electronModule = (() => {
     return {} as typeof import('electron')
   }
 })()
-const { app, safeStorage } = electronModule
+const { app } = electronModule
+let safeStorage = electronModule.safeStorage
 
 const SECRET_KEYS = new Set([
   'token',
@@ -118,3 +119,7 @@ export function decryptChannelConfig(config: Record<string, unknown>): Record<st
 
 export const encryptSecretConfig = encryptChannelConfig
 export const decryptSecretConfig = decryptChannelConfig
+
+export function __setSafeStorageForTests(nextSafeStorage: typeof safeStorage | null): void {
+  safeStorage = nextSafeStorage || electronModule.safeStorage
+}

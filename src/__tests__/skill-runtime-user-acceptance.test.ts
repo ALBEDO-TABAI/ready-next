@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { createRequire } from 'node:module'
-import test from 'node:test'
+import test, { type TestContext } from 'node:test'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -30,10 +30,34 @@ type SqliteDatabase = {
 type SqliteCtor = new (path: string) => SqliteDatabase
 
 const require = createRequire(import.meta.url)
+let sqliteUnavailableReason: string | null = null
 const Database = ((() => {
-  const mod = require('node:sqlite') as { DatabaseSync: SqliteCtor }
-  return mod.DatabaseSync
+  try {
+    const mod = require('node:sqlite') as { DatabaseSync: SqliteCtor }
+    return mod.DatabaseSync
+  } catch (error) {
+    sqliteUnavailableReason = error instanceof Error ? error.message : String(error)
+    return null
+  }
 })())
+
+function getDatabaseCtor(): SqliteCtor {
+  if (!Database) {
+    throw new Error(sqliteUnavailableReason || 'node:sqlite is unavailable')
+  }
+  return Database
+}
+
+function testWithSqlite(
+  name: string,
+  fn: (t: TestContext) => void | Promise<void>,
+): void {
+  if (!Database) {
+    test(name, { skip: `[ABI-SKIP][sqlite_runtime_error] ${name}: ${sqliteUnavailableReason}; covered by npm run verify:native` }, () => {})
+    return
+  }
+  test(name, fn)
+}
 
 const NOW = '2026-04-28T02:00:00.000Z'
 const SESSION_ID = 'scope-acceptance'
@@ -132,7 +156,8 @@ function setupSchema(db: SqliteDatabase): void {
 function createFixture(): AcceptanceFixture {
   const root = mkdtempSync(join(tmpdir(), 'ready-skill-runtime-acceptance-'))
   const dbPath = join(root, 'acceptance.sqlite')
-  const db = new Database(dbPath)
+  const Db = getDatabaseCtor()
+  const db = new Db(dbPath)
   setupSchema(db)
   const dbAccessor = { getRawDb: () => db }
   const outputDir = join(root, 'vea-output')
@@ -447,7 +472,7 @@ function assertAcceptanceEvidence(fixture: AcceptanceFixture, options: { expectD
   ))
 }
 
-test('Phase 6 accepts a healthy long skill task only after delivery_report and supervisor close', () => {
+testWithSqlite('Phase 6 accepts a healthy long skill task only after delivery_report and supervisor close', () => {
   const fixture = createFixture()
   try {
     const supervisor = createSupervisor(fixture)
@@ -518,7 +543,7 @@ test('Phase 6 accepts a healthy long skill task only after delivery_report and s
   }
 })
 
-test('Phase 6 pauses a stalled long skill loop without losing resume handles', () => {
+testWithSqlite('Phase 6 pauses a stalled long skill loop without losing resume handles', () => {
   const fixture = createFixture()
   try {
     const supervisor = createSupervisor(fixture)
@@ -571,7 +596,7 @@ test('Phase 6 pauses a stalled long skill loop without losing resume handles', (
   }
 })
 
-test('Phase 6 hands off live detached work to background instead of marking the parent done', () => {
+testWithSqlite('Phase 6 hands off live detached work to background instead of marking the parent done', () => {
   const fixture = createFixture()
   try {
     const supervisor = createSupervisor(fixture)
@@ -604,7 +629,7 @@ test('Phase 6 hands off live detached work to background instead of marking the 
   }
 })
 
-test('Phase 6 restart recovery keeps the same detached task identity and continuation anchor', () => {
+testWithSqlite('Phase 6 restart recovery keeps the same detached task identity and continuation anchor', () => {
   const fixture = createFixture()
   try {
     updateRunAndProjection(fixture, 'blocked', 'blocked', {
@@ -614,7 +639,8 @@ test('Phase 6 restart recovery keeps the same detached task identity and continu
     writeDetachedStorage(fixture, 'running')
     fixture.db.close()
 
-    const restartedDb = new Database(fixture.dbPath)
+    const Db = getDatabaseCtor()
+    const restartedDb = new Db(fixture.dbPath)
     fixture.db = restartedDb
     fixture.skillRuns = new SkillTaskRunRepository({ getRawDb: () => restartedDb })
     fixture.projections = new TaskProjectionRepository({ getRawDb: () => restartedDb })
@@ -648,7 +674,7 @@ test('Phase 6 restart recovery keeps the same detached task identity and continu
   }
 })
 
-test('Phase 6 normal chat does not expose skill primitives or resume stale VEA work', () => {
+testWithSqlite('Phase 6 normal chat does not expose skill primitives or resume stale VEA work', () => {
   const fixture = createFixture()
   try {
     const beforeRuns = fixture.db.prepare('SELECT COUNT(*) AS count FROM skill_task_runs').get<{ count: number }>()!.count
