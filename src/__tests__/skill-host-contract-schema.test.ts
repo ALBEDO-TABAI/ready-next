@@ -12,7 +12,7 @@
  *      manifest_version=1, blocked_values default array, error_values default
  *      array, concurrency.model='serialized').
  *   5. Out-of-range / unsafe values are rejected:
- *      - default_action_timeout_ms > 1h
+ *      - default_action_timeout_ms > 3h
  *      - default_action_timeout_ms < 1s
  *      - shell_allowlist_extensions with shell-meta chars (e.g. "rm; ls",
  *        "ls|wc", spaces)
@@ -175,9 +175,18 @@ test('SkillHostRequirementsSchema applies concurrency.model="serialized" default
   assert.equal(result.data.concurrency?.model, 'serialized')
 })
 
-test('SkillHostRequirementsSchema rejects default_action_timeout_ms above 1h', () => {
+test('SkillHostRequirementsSchema accepts long-running action timeout up to 3h', () => {
   const result = SkillHostRequirementsSchema.safeParse({
-    default_action_timeout_ms: 3_600_001,
+    default_action_timeout_ms: 10_800_000,
+  })
+  assert.equal(result.success, true, JSON.stringify(result.error?.issues))
+  if (!result.success) return
+  assert.equal(result.data.default_action_timeout_ms, 10_800_000)
+})
+
+test('SkillHostRequirementsSchema rejects default_action_timeout_ms above 3h', () => {
+  const result = SkillHostRequirementsSchema.safeParse({
+    default_action_timeout_ms: 10_800_001,
   })
   assert.equal(result.success, false)
 })

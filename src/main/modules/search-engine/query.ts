@@ -67,6 +67,9 @@ function classifyToken(raw: string): QueryToken | null {
 }
 
 const CJK_REGEX = /[㐀-鿿぀-ヿ가-힯]/
+const CJK_SEQUENCE_REGEX = /[㐀-鿿぀-ヿ가-힯]+/g
+
+export const SEARCH_INDEX_CONTENT_VERSION = 'fts-cjk-bigram-v1'
 
 function containsCjk(value: string): boolean {
   return CJK_REGEX.test(value)
@@ -83,6 +86,19 @@ function toBigrams(value: string): string[] {
     grams.push(value.slice(i, i + 2))
   }
   return grams
+}
+
+export function buildFtsSearchText(value: string): string {
+  const normalized = normalizeSearchText(value)
+  if (!containsCjk(normalized)) return value
+  const extra = new Set<string>()
+  for (const match of normalized.matchAll(CJK_SEQUENCE_REGEX)) {
+    for (const gram of toBigrams(match[0])) {
+      if (containsCjk(gram)) extra.add(gram)
+    }
+  }
+  if (extra.size === 0) return value
+  return `${value}\n${Array.from(extra).join(' ')}`
 }
 
 function termToFtsClauses(term: string): string {

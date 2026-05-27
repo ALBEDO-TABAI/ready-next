@@ -27,7 +27,7 @@ import type {
 import { AuthPopupManager } from './auth-popup-manager'
 import { BrowserBookmarkTransferService } from './bookmark-transfer-service'
 import { BrowserContextMenuService } from './context-menu-service'
-import { findReusableCaptureTabId, isReusableCaptureTabUrl } from './capture-url-utils'
+import { findReusableCaptureTabId } from './capture-url-utils'
 import { BrowserDataService, type BrowserAdblockState } from './data-service'
 import { BrowserDownloadService, type BrowserDownloadUrlToDirectoryPayload, type BrowserDownloadUrlToDirectoryResult } from './download-service'
 import {
@@ -46,6 +46,7 @@ import {
   type BrowserViewBoundsUpdate,
   type PreviewTabState,
 } from './host-types'
+import { resolveBrowserHostKindFromConfig } from './host-kind-config'
 import { setupBrowserClipIPC } from './ipc-clip'
 import { setupBrowserClipDraggedTabIPC } from './ipc-clip-dragged-tab'
 import { setupBrowserContentStudyIPC } from './ipc-content-study-dragged-tab'
@@ -141,9 +142,9 @@ export class BrowserController {
   constructor(mainWindow: BrowserWindow, useMock = false) {
     this.mainWindow = mainWindow
     this.useMock = useMock
+    this.dataService = new BrowserDataService()
     this.browserHostKind = this.resolveBrowserHostKind()
     this.browserUserAgent = toOAuthCompatibleUserAgent(mainWindow.webContents.getUserAgent())
-    this.dataService = new BrowserDataService()
     this.downloadService = new BrowserDownloadService({
       dataService: this.dataService,
       sendToRenderer: (channel, data) => this.sendToRenderer(channel, data),
@@ -156,12 +157,7 @@ export class BrowserController {
     })
     this.popupManager = new AuthPopupManager(
       mainWindow,
-      (url) => {
-        void this.createTab(url).catch((error) => {
-          this.logBrowserDiag(`[browser-v3][popup] create tab failed: ${String(error)}`)
-          shell.openExternal(url)
-        })
-      },
+      (url) => this.openPopupInTab(url),
       (message) => this.logBrowserDiag(message),
       this.browserUserAgent,
     )
@@ -331,9 +327,7 @@ export class BrowserController {
     this.sessionPolicyService.setupBrowserSessionPolicies()
     this.windowOpenService = new BrowserWindowOpenService({
       popupManager: this.popupManager,
-      requestNewTab: (url) => {
-        this.sendToRenderer('browser:newTabRequest', url)
-      },
+      openInTab: (url) => this.openPopupInTab(url),
       logBrowserDiag: (message) => this.logBrowserDiag(message),
       openExternal: (url) => {
         shell.openExternal(url)
@@ -349,18 +343,10 @@ export class BrowserController {
   // ── Internal helpers ──────────────────────────────────────────────
 
   private resolveBrowserHostKind(): BrowserHostKind {
-    const envRaw = process.env.READY_BROWSER_HOST_DRIVER
-    const normalizedEnv = typeof envRaw === 'string' ? envRaw.trim().toLowerCase() : ''
-    if (normalizedEnv === 'browserview') return 'browserView'
-    if (normalizedEnv === 'webcontentsview') return 'webContentsView'
-    try {
-      const raw = String(this.dataService.getSetting('browser_host_driver') || '').trim().toLowerCase()
-      if (raw === 'browserview') return 'browserView'
-      if (raw === 'webcontentsview') return 'webContentsView'
-    } catch {
-      // ignore persisted setting failures
-    }
-    return 'webContentsView'
+    return resolveBrowserHostKindFromConfig(
+      process.env.READY_BROWSER_HOST_DRIVER,
+      () => this.dataService.getSetting('browser_host_driver'),
+    )
   }
 
   private resolveOriginDomainForWebContentsId(webContentsId?: number): string {
@@ -372,6 +358,19 @@ export class BrowserController {
     }
     if (this.previewService.matchesWebContentsId(webContentsId)) {
       return extractBrowserDomain(this.previewService.getUrl())
+    }
+    return ''
+  }
+
+  private resolveUrlForWebContentsId(webContentsId?: number): string {
+    if (!webContentsId) return ''
+    for (const tab of this.tabs.values()) {
+      if (tab.view?.webContents.id === webContentsId) {
+        return tab.view.webContents.getURL() || tab.url
+      }
+    }
+    if (this.previewService.matchesWebContentsId(webContentsId)) {
+      return this.previewService.getUrl()
     }
     return ''
   }
@@ -419,6 +418,29 @@ export class BrowserController {
     if (!this.mainWindow.isDestroyed()) {
       this.mainWindow.webContents.send(channel, data)
     }
+  }
+
+  private openPopupInTab(url: string): void {
+    void this.createTab(url)
+      .then((result) => {
+        if (!result.success || !result.tabId) {
+          this.logBrowserDiag(`[browser-v3][popup] create tab failed: ${result.error || 'unknown error'}`)
+          shell.openExternal(url)
+          return
+        }
+
+        const tab = this.tabs.get(result.tabId)
+        if (!tab) {
+          this.logBrowserDiag(`[browser-v3][popup] created tab missing metadata tab=${result.tabId}`)
+          return
+        }
+
+        this.sendToRenderer('browser:tabOpened', this.tabMetaService.buildTabPayload(tab))
+      })
+      .catch((error) => {
+        this.logBrowserDiag(`[browser-v3][popup] create tab failed: ${String(error)}`)
+        shell.openExternal(url)
+      })
   }
 
   getMainWindow(): BrowserWindow | null {
@@ -717,7 +739,11 @@ export class BrowserController {
     action: 'allow' | 'deny'
     overrideBrowserWindowOptions?: Electron.BrowserWindowConstructorOptions
   } {
-    return this.windowOpenService.handle(details, source, sourceContentsId)
+    const referrerUrl = details.referrer?.url || this.resolveUrlForWebContentsId(sourceContentsId)
+    return this.windowOpenService.handle({
+      ...details,
+      referrer: referrerUrl ? { url: referrerUrl } : details.referrer,
+    }, source, sourceContentsId)
   }
 
   async importBookmarksFromDialog(): Promise<{

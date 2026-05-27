@@ -204,11 +204,14 @@ export default function MarkdownEditor({
   const { updateTabContent, markTabSaved, pendingReveal, setPendingReveal } = useDocTabs()
   const [isLoading, setIsLoading] = useState(!!tab.path)
   const [saveState, setSaveState] = useState<SaveState>('idle')
+  const [saveError, setSaveError] = useState<string | null>(null)
   const [contentReady, setContentReady] = useState(!tab.path || !!tab.content)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [widgetStates, setWidgetStates] = useState<Record<string, DocumentWidgetPersistedState>>(() => (
     extractWidgetStateMapFromContent(tab.content)
   ))
+  const widgetStatesRef = useRef(widgetStates)
+  const tabContentRef = useRef(tab.content)
   const rawEditorRef = useRef<HTMLTextAreaElement>(null)
   const editorSurfaceRef = useRef<HTMLDivElement>(null)
   const previewSurfaceRef = useRef<HTMLDivElement>(null)
@@ -325,10 +328,15 @@ export default function MarkdownEditor({
   }, [tab.path]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    setWidgetStates((prev) => ({
-      ...extractWidgetStateMapFromContent(tab.content),
-      ...prev,
-    }))
+    tabContentRef.current = tab.content
+    setWidgetStates((prev) => {
+      const next = {
+        ...extractWidgetStateMapFromContent(tab.content),
+        ...prev,
+      }
+      widgetStatesRef.current = next
+      return next
+    })
   }, [tab.content])
 
   // ─── Save logic ─────────────────────────────────────────────
@@ -336,19 +344,24 @@ export default function MarkdownEditor({
     if (!tab.path || !canSave || !tab.isDirty) return
     if (typeof window === 'undefined' || !window.electronAPI) return
     setSaveState('saving')
+    setSaveError(null)
     try {
-      const nextContent = mergeWidgetStateMapIntoContent(tab.content, widgetStates)
+      const baseContent = tabContentRef.current
+      const nextContent = mergeWidgetStateMapIntoContent(baseContent, widgetStatesRef.current)
       const result = (await window.electronAPI.document.writeFile(tab.path, nextContent)) as ReadResult
       if (!result.success) throw new Error(result.error || '保存失败')
-      if (nextContent !== tab.content) {
+      if (nextContent !== baseContent) {
+        tabContentRef.current = nextContent
         updateTabContent(tab.id, nextContent)
       }
       setSaveState('saved')
+      setSaveError(null)
       markTabSaved(tab.id)
-    } catch {
+    } catch (error) {
       setSaveState('error')
+      setSaveError(`保存失败：${error instanceof Error ? error.message : String(error)}`)
     }
-  }, [tab.path, tab.content, canSave, markTabSaved, tab.id, updateTabContent, widgetStates])
+  }, [tab.path, tab.isDirty, canSave, markTabSaved, tab.id, updateTabContent])
 
   // Cmd+S keyboard shortcut
   useEffect(() => {
@@ -587,11 +600,20 @@ export default function MarkdownEditor({
   }, [tab.path])
 
   const handleWidgetStateChange = useCallback((widgetTitle: string, widgetCode: string, widgetState: DocumentWidgetPersistedState) => {
-    setWidgetStates((prev) => ({
-      ...prev,
+    const nextWidgetStates = {
+      ...widgetStatesRef.current,
       [getWidgetPersistenceKey(widgetTitle, widgetCode)]: widgetState,
-    }))
-  }, [])
+    }
+    widgetStatesRef.current = nextWidgetStates
+    setWidgetStates(nextWidgetStates)
+    const baseContent = tabContentRef.current
+    const nextContent = mergeWidgetStateMapIntoContent(baseContent, nextWidgetStates)
+    if (nextContent !== baseContent) {
+      tabContentRef.current = nextContent
+      updateTabContent(tab.id, nextContent)
+    }
+    setSaveState('idle')
+  }, [tab.id, updateTabContent])
 
   const handleEditorSurfaceScroll = useCallback(() => {
     const surface = editorSurfaceRef.current
@@ -742,6 +764,20 @@ export default function MarkdownEditor({
 
   return (
     <div className="flex flex-col h-full" data-ready-document-scroll-key={documentScrollKey}>
+      {saveState === 'error' && saveError ? (
+        <div
+          role="alert"
+          className="mx-10 mt-3 rounded-[8px] border px-3 py-2 text-[13px]"
+          style={{
+            borderColor: 'var(--color-orange)',
+            color: 'var(--text-secondary)',
+            background: 'var(--workbench-module-surface-bg)',
+          }}
+        >
+          {saveError}
+        </div>
+      ) : null}
+
       {/* ── Content area ──────────────────────────────────── */}
       <div className="flex-1 overflow-hidden flex" style={{ background: 'var(--workbench-module-surface-bg)' }}>
         <>

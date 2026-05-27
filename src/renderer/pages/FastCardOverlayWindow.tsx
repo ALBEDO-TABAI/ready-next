@@ -18,9 +18,25 @@ export default function FastCardOverlayWindow() {
   }, [])
 
   useEffect(() => {
-    return window.electronAPI?.browser?.onFastCardOverlaySnapshot?.((next) => {
+    let cancelled = false
+    const browser = window.electronAPI?.browser
+    const cleanup = browser?.onFastCardOverlaySnapshot?.((next) => {
       setSnapshot(next)
+    }) ?? (() => undefined)
+
+    void browser?.getFastCardOverlaySnapshot?.().then((result) => {
+      if (cancelled) return
+      if (result?.success && result.data) {
+        setSnapshot(result.data)
+        return
+      }
+      void browser?.hideFastCardOverlay?.()
     })
+
+    return () => {
+      cancelled = true
+      cleanup()
+    }
   }, [])
 
   if (!snapshot) return <div className="browser-fastcard-overlay-root" />

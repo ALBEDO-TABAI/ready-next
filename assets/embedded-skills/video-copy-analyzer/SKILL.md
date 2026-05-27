@@ -302,8 +302,6 @@ python3 -u /tmp/run_funasr.py 2>&1 | tee /tmp/funasr_output.log
 
 <!-- 以下脚本暂未启用，需要浏览器 cookies 支持，目前因 macOS 钥匙串加密问题暂不可用 -->
 <!-- | [fetch_bilibili_subtitle.py](scripts/fetch_bilibili_subtitle.py) | B站API字幕获取（需cookies） | ⏸️ 暂停 | -->
-<!-- | [extract_subtitle.py](scripts/extract_subtitle.py) | Whisper 字幕提取（已被 FunASR 替代） | ⏸️ 暂停 | -->
-<!-- | [transcribe_audio.py](scripts/transcribe_audio.py) | Whisper 音频转录（已被 FunASR 替代） | ⏸️ 暂停 | -->
 
 ---
 

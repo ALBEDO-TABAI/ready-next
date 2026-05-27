@@ -43,6 +43,7 @@ interface TaskProjectionRow {
   blocked_reason: string | null
   resumable_actions_json: string | null
   continuation_ref_json: string | null
+  progress_json: string | null
   recent_artifacts_json: string | null
   created_at: string
   updated_at: string
@@ -157,8 +158,8 @@ export class TaskProjectionRepository implements TaskProjectionStore {
         task_id, scope_id, run_id, parent_task_id, parent_step_id, task_type, module, task_title, task_summary, status, interaction_state, waiting_for,
         steps_json, current_step_id, budget_json, budget_usage_percent, budget_warning_level,
         recovery_history_json, degradation_reason, blocked_reason, resumable_actions_json,
-        continuation_ref_json, recent_artifacts_json, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        continuation_ref_json, progress_json, recent_artifacts_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.taskId,
       record.scopeId,
@@ -182,6 +183,7 @@ export class TaskProjectionRepository implements TaskProjectionStore {
       record.blockedReason ?? null,
       record.resumableActions ? JSON.stringify(record.resumableActions) : null,
       record.continuationRef ? JSON.stringify(record.continuationRef) : null,
+      record.progress ? JSON.stringify(record.progress) : null,
       record.recentArtifacts ? JSON.stringify(record.recentArtifacts) : null,
       record.createdAt,
       record.updatedAt,
@@ -238,6 +240,7 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     if ('blockedReason' in patch) assign('blocked_reason', patch.blockedReason)
     if ('resumableActions' in patch) assign('resumable_actions_json', patch.resumableActions ? JSON.stringify(patch.resumableActions) : null)
     if ('continuationRef' in patch) assign('continuation_ref_json', patch.continuationRef ? JSON.stringify(patch.continuationRef) : null)
+    if ('progress' in patch) assign('progress_json', patch.progress ? JSON.stringify(patch.progress) : null)
     if ('recentArtifacts' in patch) assign('recent_artifacts_json', patch.recentArtifacts ? JSON.stringify(patch.recentArtifacts) : null)
     if ('createdAt' in patch) assign('created_at', patch.createdAt)
     if ('updatedAt' in patch) assign('updated_at', patch.updatedAt)
@@ -433,6 +436,7 @@ export class TaskProjectionRepository implements TaskProjectionStore {
       blockedReason: row.blocked_reason ?? null,
       resumableActions: safeParse(row.resumable_actions_json, []),
       continuationRef: safeParse(row.continuation_ref_json, null),
+      progress: safeParse(row.progress_json, null),
       recentArtifacts: safeParse(row.recent_artifacts_json, []),
       createdAt: row.created_at,
       updatedAt: row.updated_at,

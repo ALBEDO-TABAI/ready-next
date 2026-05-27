@@ -265,6 +265,755 @@ test('agent sdk runtime buffers native text before recovering XML tool calls', a
   assert.match(visibleText, /研究完成/)
 })
 
+test('agent sdk runtime asks for map place choice and retries with selected coordinates', async () => {
+  const mapTool = createToolDefinition({
+    name: 'map_plan_route',
+    groupId: 'map_planning',
+    domain: 'map',
+    kind: 'write',
+    description: 'Plan map route',
+    schema: {
+      type: 'object',
+      properties: {
+        city: { type: 'string' },
+        origin: {},
+        destination: {},
+        transportMode: { type: 'string' },
+      },
+      required: ['origin', 'destination'],
+      additionalProperties: false,
+    },
+  })
+  const askTool = createToolDefinition({
+    name: 'ask_user_questions',
+    groupId: 'agent_interaction',
+    domain: 'agent_interaction',
+    kind: 'write',
+    description: 'Ask user questions',
+    schema: {
+      type: 'object',
+      properties: { questions: { type: 'array' } },
+      required: ['questions'],
+      additionalProperties: false,
+    },
+  })
+  const calls: Array<{ toolName: string; args: Record<string, unknown> }> = []
+  let selectedOption = ''
+  let runCount = 0
+  const runtime = createRuntime({
+    loadAIConfig: () => ({
+      ok: true,
+      reason: 'present',
+      config: {
+        ...fakeConfig,
+        provider: 'openai-compatible',
+        baseUrl: 'https://token-plan-sgp.xiaomimimo.com/anthropic',
+        model: 'mimo-v2.5',
+        agentProtocol: 'anthropic',
+      },
+    }),
+    listToolDefinitions: () => [mapTool, askTool],
+    executeToolCall: async (toolName, args) => {
+      calls.push({ toolName, args })
+      if (toolName === 'map_plan_route') {
+        if (typeof args.destination === 'object' && args.destination !== null) {
+          assert.deepEqual(args.destination, {
+            name: '上海市闵行区上海虹桥火车站',
+            location: '121.320011,31.194416',
+          })
+          const routeData = {
+            ok: true,
+            origin: { name: '人民广场', location: '121.47519,31.228833' },
+            destination: args.destination,
+            selectedRoute: {
+              transportMode: 'driving',
+              distanceM: 21000,
+              durationSec: 2400,
+              polyline: '',
+              steps: [],
+            },
+          }
+          return createToolExecutionOutput(JSON.stringify(routeData), {
+            shape: 'json',
+            data: routeData,
+          })
+        }
+        const ambiguousData = {
+          ok: false,
+          errorKind: 'place_ambiguous',
+          message: '终点“上海虹桥火车站”存在多个可能地点，请选择一个。',
+          candidates: [
+            {
+              name: '上海市闵行区上海虹桥火车站',
+              address: '上海市闵行区上海虹桥火车站',
+              location: '121.320011,31.194416',
+              city: '上海市',
+              district: '闵行区',
+            },
+            {
+              name: '上海虹桥站',
+              address: '上海市闵行区申贵路',
+              location: '121.31881,31.19449',
+              city: '上海市',
+              district: '闵行区',
+            },
+          ],
+        }
+        return createToolExecutionOutput(JSON.stringify(ambiguousData), {
+          shape: 'json',
+          data: ambiguousData,
+        })
+      }
+      if (toolName === 'ask_user_questions') {
+        const questions = Array.isArray(args.questions) ? args.questions : []
+        assert.equal(questions.length, 1)
+        const question = questions[0] as { id?: string; kind?: string; options?: string[] }
+        assert.equal(question.id, 'map_place_choice')
+        assert.equal(question.kind, 'single_choice')
+        assert.ok(Array.isArray(question.options))
+        selectedOption = question.options![0]!
+        assert.match(selectedOption, /121\.320011,31\.194416/)
+        return createToolExecutionOutput(`用户回答了 1/1 个问题：${selectedOption}`, {
+          shape: 'json',
+          data: {
+            cardId: 'ask-card-1',
+            askedAt: Date.now(),
+            answeredAt: Date.now(),
+            answers: [{
+              id: 'map_place_choice',
+              question: '请选择地点',
+              kind: 'single_choice',
+              answer: selectedOption,
+            }],
+          },
+        })
+      }
+      throw new Error(`unexpected tool: ${toolName}`)
+    },
+    runAgent: async ({ input, onTextDelta }) => {
+      runCount += 1
+      if (runCount === 1) {
+        const toolCall = [
+          ':::tool_call',
+          JSON.stringify({
+            tool: 'map_plan_route',
+            args: {
+              city: '上海',
+              origin: '人民广场',
+              destination: '上海虹桥火车站',
+              transportMode: 'driving',
+            },
+          }),
+          ':::',
+        ].join('\n')
+        onTextDelta(toolCall)
+        return { finalText: toolCall }
+      }
+      assert.match(String(input), /ask_user_questions/)
+      assert.match(String(input), /121\.320011,31\.194416/)
+      onTextDelta('路线已经按你选择的虹桥火车站规划好。')
+      return { finalText: '路线已经按你选择的虹桥火车站规划好。' }
+    },
+  })
+  runtime.newSession('butler::scope-map-ambiguity', 'system prompt')
+
+  const result = await runtime.sendMessage('butler::scope-map-ambiguity', '从人民广场到虹桥火车站怎么走？', 'run-map-ambiguity', {
+    publicSessionId: 'scope-map-ambiguity',
+    taskId: 'task-map-ambiguity',
+  })
+
+  assert.equal(result.success, true)
+  assert.equal(runCount, 2)
+  assert.deepEqual(calls.map((call) => call.toolName), [
+    'map_plan_route',
+    'ask_user_questions',
+    'map_plan_route',
+  ])
+  assert.deepEqual(result.usedTools, [
+    'map_plan_route',
+    'ask_user_questions',
+    'map_plan_route',
+  ])
+  assert.match(result.finalText, /路线已经按你选择/)
+})
+
+test('agent sdk runtime closes failed map retry after place disambiguation', async () => {
+  const mapTool = createToolDefinition({
+    name: 'map_plan_route',
+    groupId: 'map_planning',
+    domain: 'map',
+    kind: 'write',
+    description: 'Plan map route',
+    schema: {
+      type: 'object',
+      properties: {
+        city: { type: 'string' },
+        origin: {},
+        destination: {},
+      },
+      required: ['origin', 'destination'],
+      additionalProperties: false,
+    },
+  })
+  const askTool = createToolDefinition({
+    name: 'ask_user_questions',
+    groupId: 'agent_interaction',
+    domain: 'agent_interaction',
+    kind: 'write',
+    description: 'Ask user questions',
+    schema: {
+      type: 'object',
+      properties: { questions: { type: 'array' } },
+      required: ['questions'],
+      additionalProperties: false,
+    },
+  })
+  const calls: Array<{ toolName: string; args: Record<string, unknown> }> = []
+  let runCount = 0
+  const runtime = createRuntime({
+    loadAIConfig: () => ({
+      ok: true,
+      reason: 'present',
+      config: {
+        ...fakeConfig,
+        provider: 'openai-compatible',
+        baseUrl: 'https://token-plan-sgp.xiaomimimo.com/anthropic',
+        model: 'mimo-v2.5',
+        agentProtocol: 'anthropic',
+      },
+    }),
+    listToolDefinitions: () => [mapTool, askTool],
+    executeToolCall: async (toolName, args) => {
+      calls.push({ toolName, args })
+      if (toolName === 'map_plan_route') {
+        if (typeof args.destination === 'object' && args.destination !== null) {
+          const data = {
+            ok: false,
+            errorKind: 'route_not_found',
+            message: '高德地图未返回可用路线。',
+          }
+          return createToolExecutionOutput(JSON.stringify(data), { shape: 'json', data })
+        }
+        const data = {
+          ok: false,
+          errorKind: 'place_ambiguous',
+          message: '终点“上海虹桥火车站”存在多个可能地点，请选择一个。',
+          candidates: [
+            {
+              name: '上海市闵行区上海虹桥火车站',
+              address: '上海市闵行区上海虹桥火车站',
+              location: '121.320011,31.194416',
+              city: '上海市',
+              district: '闵行区',
+            },
+            {
+              name: '上海虹桥站',
+              address: '上海市闵行区申贵路',
+              location: '121.31881,31.19449',
+              city: '上海市',
+              district: '闵行区',
+            },
+          ],
+        }
+        return createToolExecutionOutput(JSON.stringify(data), { shape: 'json', data })
+      }
+      if (toolName === 'ask_user_questions') {
+        const questions = Array.isArray(args.questions) ? args.questions : []
+        const question = questions[0] as { id?: string; options?: string[] }
+        const selected = question.options?.[0] || ''
+        assert.equal(question.id, 'map_place_choice')
+        assert.match(selected, /121\.320011,31\.194416/)
+        return createToolExecutionOutput(`用户回答了 1/1 个问题：${selected}`, {
+          shape: 'json',
+          data: {
+            answers: [{
+              id: 'map_place_choice',
+              question: '请选择地点',
+              kind: 'single_choice',
+              answer: selected,
+            }],
+          },
+        })
+      }
+      throw new Error(`unexpected tool: ${toolName}`)
+    },
+    runAgent: async ({ input, onTextDelta }) => {
+      runCount += 1
+      if (runCount > 1) {
+        throw new Error(`map retry failure should close before returning to the model: ${String(input)}`)
+      }
+      const toolCall = [
+        ':::tool_call',
+        JSON.stringify({
+          tool: 'map_plan_route',
+          args: {
+            city: '上海',
+            origin: '人民广场',
+            destination: '上海虹桥火车站',
+          },
+        }),
+        ':::',
+      ].join('\n')
+      onTextDelta(toolCall)
+      return { finalText: toolCall }
+    },
+  })
+  runtime.newSession('butler::scope-map-retry-failure', 'system prompt')
+
+  const result = await runtime.sendMessage('butler::scope-map-retry-failure', '从人民广场到虹桥火车站怎么走？', 'run-map-retry-failure', {
+    publicSessionId: 'scope-map-retry-failure',
+    taskId: 'task-map-retry-failure',
+  })
+
+  assert.equal(result.success, false)
+  assert.equal(result.terminalReason, 'blocked_tool_error')
+  assert.equal(result.error, '高德地图未返回可用路线。')
+  assert.equal(runCount, 1)
+  assert.deepEqual(calls.map((call) => call.toolName), [
+    'map_plan_route',
+    'ask_user_questions',
+    'map_plan_route',
+  ])
+})
+
+test('agent sdk native tool path asks for map place choice before returning to the model', async () => {
+  const mapTool = createToolDefinition({
+    name: 'map_plan_route',
+    groupId: 'map_planning',
+    domain: 'map',
+    kind: 'write',
+    description: 'Plan map route',
+    schema: {
+      type: 'object',
+      properties: {
+        city: { type: 'string' },
+        origin: {},
+        destination: {},
+      },
+      required: ['origin', 'destination'],
+      additionalProperties: false,
+    },
+  })
+  const askTool = createToolDefinition({
+    name: 'ask_user_questions',
+    groupId: 'agent_interaction',
+    domain: 'agent_interaction',
+    kind: 'write',
+    description: 'Ask user questions',
+    schema: {
+      type: 'object',
+      properties: { questions: { type: 'array' } },
+      required: ['questions'],
+      additionalProperties: false,
+    },
+  })
+  const calls: Array<{ toolName: string; args: Record<string, unknown> }> = []
+  const runtime = createRuntime({
+    listToolDefinitions: () => [mapTool, askTool],
+    executeToolCall: async (toolName, args) => {
+      calls.push({ toolName, args })
+      if (toolName === 'map_plan_route') {
+        if (typeof args.destination === 'object' && args.destination !== null) {
+          const data = {
+            ok: true,
+            origin: { name: '人民广场', location: '121.47519,31.228833' },
+            destination: args.destination,
+            selectedRoute: { transportMode: 'driving', distanceM: 18800, durationSec: 1920, polyline: '', steps: [] },
+          }
+          return createToolExecutionOutput(JSON.stringify(data), { shape: 'json', data })
+        }
+        const data = {
+          ok: false,
+          errorKind: 'place_ambiguous',
+          message: '终点“虹桥火车站”存在多个可能地点，请选择一个。',
+          candidates: [
+            {
+              name: '上海市闵行区虹桥火车站(地铁站)',
+              address: '上海市闵行区虹桥火车站(地铁站)',
+              location: '121.318910,31.193987',
+              city: '上海市',
+              district: '闵行区',
+            },
+            {
+              name: '虹桥火车站P9停车场',
+              address: '上海市闵行区申虹路',
+              location: '121.321110,31.194220',
+              city: '上海市',
+              district: '闵行区',
+            },
+          ],
+        }
+        return createToolExecutionOutput(JSON.stringify(data), { shape: 'json', data })
+      }
+      if (toolName === 'ask_user_questions') {
+        const questions = Array.isArray(args.questions) ? args.questions : []
+        const question = questions[0] as { id?: string; options?: string[] }
+        assert.equal(question.id, 'map_place_choice')
+        const selected = question.options?.[0] || ''
+        assert.match(selected, /121\.318910,31\.193987/)
+        return createToolExecutionOutput(`用户回答了 1/1 个问题：${selected}`, {
+          shape: 'json',
+          data: {
+            answers: [{
+              id: 'map_place_choice',
+              question: '请选择地点',
+              kind: 'single_choice',
+              answer: selected,
+            }],
+          },
+        })
+      }
+      throw new Error(`unexpected tool: ${toolName}`)
+    },
+    runAgent: async ({ tools, onTextDelta }) => {
+      const mapSdkTool = tools.find((item) => item.name === 'map_plan_route') as { invoke: (context: unknown, input: string) => Promise<string> } | undefined
+      assert.ok(mapSdkTool)
+      const toolOutput = await mapSdkTool.invoke({}, JSON.stringify({
+        city: '上海',
+        origin: '人民广场',
+        destination: '虹桥火车站',
+      }))
+      assert.match(toolOutput, /ask_user_questions/)
+      assert.match(toolOutput, /121\.318910,31\.193987/)
+      assert.match(toolOutput, /"ok":true/)
+      onTextDelta('已按用户选择的地点规划路线。')
+      return { finalText: '已按用户选择的地点规划路线。' }
+    },
+  })
+  runtime.newSession('butler::scope-map-native-ambiguity', 'system prompt')
+
+  const result = await runtime.sendMessage('butler::scope-map-native-ambiguity', '从人民广场到虹桥火车站怎么走？', 'run-map-native-ambiguity', {
+    publicSessionId: 'scope-map-native-ambiguity',
+    taskId: 'task-map-native-ambiguity',
+  })
+
+  assert.equal(result.success, true)
+  assert.deepEqual(calls.map((call) => call.toolName), [
+    'map_plan_route',
+    'ask_user_questions',
+    'map_plan_route',
+  ])
+  assert.match(result.finalText, /用户选择/)
+})
+
+test('agent sdk native tool path ignores malformed duplicate map ambiguity ask after card handling', async () => {
+  const mapTool = createToolDefinition({
+    name: 'map_plan_route',
+    groupId: 'map_planning',
+    domain: 'map',
+    kind: 'write',
+    description: 'Plan map route',
+    schema: {
+      type: 'object',
+      properties: {
+        city: { type: 'string' },
+        origin: {},
+        destination: {},
+      },
+      required: ['origin', 'destination'],
+      additionalProperties: false,
+    },
+  })
+  const askTool = createToolDefinition({
+    name: 'ask_user_questions',
+    groupId: 'agent_interaction',
+    domain: 'agent_interaction',
+    kind: 'write',
+    description: 'Ask user questions',
+    schema: {
+      type: 'object',
+      properties: { questions: { type: 'array' } },
+      required: ['questions'],
+      additionalProperties: false,
+    },
+  })
+  const calls: Array<{ toolName: string; args: Record<string, unknown> }> = []
+  const runtime = createRuntime({
+    listToolDefinitions: () => [mapTool, askTool],
+    executeToolCall: async (toolName, args) => {
+      calls.push({ toolName, args })
+      if (toolName === 'map_plan_route') {
+        if (typeof args.destination === 'object' && args.destination !== null) {
+          const data = {
+            ok: true,
+            origin: { name: '人民广场', location: '121.47519,31.228833' },
+            destination: args.destination,
+            selectedRoute: { transportMode: 'driving', distanceM: 18800, durationSec: 1920, polyline: '', steps: [] },
+          }
+          return createToolExecutionOutput(JSON.stringify(data), { shape: 'json', data })
+        }
+        const data = {
+          ok: false,
+          errorKind: 'place_ambiguous',
+          message: '终点“虹桥火车站”存在多个可能地点，请选择一个。',
+          candidates: [
+            {
+              name: '上海市闵行区虹桥火车站(地铁站)',
+              address: '上海市闵行区虹桥火车站(地铁站)',
+              location: '121.318910,31.193987',
+              city: '上海市',
+              district: '闵行区',
+            },
+            {
+              name: '虹桥火车站P9停车场',
+              address: '上海市闵行区申虹路',
+              location: '121.321110,31.194220',
+              city: '上海市',
+              district: '闵行区',
+            },
+          ],
+        }
+        return createToolExecutionOutput(JSON.stringify(data), { shape: 'json', data })
+      }
+      if (toolName === 'ask_user_questions') {
+        const questions = Array.isArray(args.questions) ? args.questions : []
+        const question = questions[0] as { id?: string; options?: string[] }
+        const selected = question.options?.[0] || ''
+        assert.equal(question.id, 'map_place_choice')
+        assert.match(selected, /121\.318910,31\.193987/)
+        return createToolExecutionOutput(`用户回答了 1/1 个问题：${selected}`, {
+          shape: 'json',
+          data: {
+            answers: [{
+              id: 'map_place_choice',
+              question: '请选择地点',
+              kind: 'single_choice',
+              answer: selected,
+            }],
+          },
+        })
+      }
+      throw new Error(`unexpected tool: ${toolName}`)
+    },
+    runAgent: async ({ tools, onTextDelta }) => {
+      const mapSdkTool = tools.find((item) => item.name === 'map_plan_route') as { invoke: (context: unknown, input: string) => Promise<string> } | undefined
+      const askSdkTool = tools.find((item) => item.name === 'ask_user_questions') as { invoke: (context: unknown, input: string) => Promise<string> } | undefined
+      assert.ok(mapSdkTool)
+      assert.ok(askSdkTool)
+      const routeOutput = await mapSdkTool.invoke({}, JSON.stringify({
+        city: '上海',
+        origin: '人民广场',
+        destination: '虹桥火车站',
+      }))
+      assert.match(routeOutput, /ask_user_questions/)
+      assert.match(routeOutput, /"ok":true/)
+
+      const duplicateAskOutput = await askSdkTool.invoke({}, JSON.stringify({
+        questions: '请选择一个虹桥火车站候选项',
+      }))
+      assert.match(duplicateAskOutput, /map_ambiguity_already_resolved/)
+
+      onTextDelta('已按用户选择的地点规划路线。')
+      return { finalText: '已按用户选择的地点规划路线。' }
+    },
+  })
+  runtime.newSession('butler::scope-map-native-duplicate-ask', 'system prompt')
+
+  const result = await runtime.sendMessage('butler::scope-map-native-duplicate-ask', '从人民广场到虹桥火车站怎么走？', 'run-map-native-duplicate-ask', {
+    publicSessionId: 'scope-map-native-duplicate-ask',
+    taskId: 'task-map-native-duplicate-ask',
+  })
+
+  assert.equal(result.success, true)
+  assert.deepEqual(calls.map((call) => call.toolName), [
+    'map_plan_route',
+    'ask_user_questions',
+    'map_plan_route',
+  ])
+  assert.match(result.finalText, /用户选择/)
+})
+
+test('agent sdk native tool path closes failed map retry after place disambiguation', async () => {
+  const mapTool = createToolDefinition({
+    name: 'map_plan_route',
+    groupId: 'map_planning',
+    domain: 'map',
+    kind: 'write',
+    description: 'Plan map route',
+    schema: {
+      type: 'object',
+      properties: {
+        city: { type: 'string' },
+        origin: {},
+        destination: {},
+      },
+      required: ['origin', 'destination'],
+      additionalProperties: false,
+    },
+  })
+  const askTool = createToolDefinition({
+    name: 'ask_user_questions',
+    groupId: 'agent_interaction',
+    domain: 'agent_interaction',
+    kind: 'write',
+    description: 'Ask user questions',
+    schema: {
+      type: 'object',
+      properties: { questions: { type: 'array' } },
+      required: ['questions'],
+      additionalProperties: false,
+    },
+  })
+  const calls: Array<{ toolName: string; args: Record<string, unknown> }> = []
+  const runtime = createRuntime({
+    listToolDefinitions: () => [mapTool, askTool],
+    executeToolCall: async (toolName, args) => {
+      calls.push({ toolName, args })
+      if (toolName === 'map_plan_route') {
+        if (typeof args.destination === 'object' && args.destination !== null) {
+          const data = {
+            ok: false,
+            errorKind: 'route_not_found',
+            message: '高德地图未返回可用路线。',
+          }
+          return createToolExecutionOutput(JSON.stringify(data), { shape: 'json', data })
+        }
+        const data = {
+          ok: false,
+          errorKind: 'place_ambiguous',
+          message: '终点“虹桥火车站”存在多个可能地点，请选择一个。',
+          candidates: [
+            {
+              name: '上海市闵行区虹桥火车站(地铁站)',
+              address: '上海市闵行区虹桥火车站(地铁站)',
+              location: '121.318910,31.193987',
+              city: '上海市',
+              district: '闵行区',
+            },
+            {
+              name: '虹桥火车站P9停车场',
+              address: '上海市闵行区申虹路',
+              location: '121.321110,31.194220',
+              city: '上海市',
+              district: '闵行区',
+            },
+          ],
+        }
+        return createToolExecutionOutput(JSON.stringify(data), { shape: 'json', data })
+      }
+      if (toolName === 'ask_user_questions') {
+        const questions = Array.isArray(args.questions) ? args.questions : []
+        const question = questions[0] as { id?: string; options?: string[] }
+        const selected = question.options?.[0] || ''
+        assert.equal(question.id, 'map_place_choice')
+        assert.match(selected, /121\.318910,31\.193987/)
+        return createToolExecutionOutput(`用户回答了 1/1 个问题：${selected}`, {
+          shape: 'json',
+          data: {
+            answers: [{
+              id: 'map_place_choice',
+              question: '请选择地点',
+              kind: 'single_choice',
+              answer: selected,
+            }],
+          },
+        })
+      }
+      throw new Error(`unexpected tool: ${toolName}`)
+    },
+    runAgent: async ({ tools, onTextDelta }) => {
+      const mapSdkTool = tools.find((item) => item.name === 'map_plan_route') as { invoke: (context: unknown, input: string) => Promise<string> } | undefined
+      assert.ok(mapSdkTool)
+      const toolOutput = await mapSdkTool.invoke({}, JSON.stringify({
+        city: '上海',
+        origin: '人民广场',
+        destination: '虹桥火车站',
+      }))
+      assert.match(toolOutput, /ask_user_questions/)
+      assert.match(toolOutput, /"ok":false/)
+      onTextDelta('已按用户选择的地点规划路线。')
+      return { finalText: '已按用户选择的地点规划路线。' }
+    },
+  })
+  runtime.newSession('butler::scope-map-native-retry-failure', 'system prompt')
+
+  const result = await runtime.sendMessage('butler::scope-map-native-retry-failure', '从人民广场到虹桥火车站怎么走？', 'run-map-native-retry-failure', {
+    publicSessionId: 'scope-map-native-retry-failure',
+    taskId: 'task-map-native-retry-failure',
+  })
+
+  assert.equal(result.success, false)
+  assert.equal(result.terminalReason, 'blocked_tool_error')
+  assert.equal(result.error, '高德地图未返回可用路线。')
+  assert.deepEqual(calls.map((call) => call.toolName), [
+    'map_plan_route',
+    'ask_user_questions',
+    'map_plan_route',
+  ])
+})
+
+test('agent sdk native tool path clears stale map failure after later success', async () => {
+  const mapTool = createToolDefinition({
+    name: 'map_plan_route',
+    groupId: 'map_planning',
+    domain: 'map',
+    kind: 'write',
+    description: 'Plan map route',
+    schema: {
+      type: 'object',
+      properties: {
+        origin: {},
+        destination: {},
+      },
+      required: ['origin', 'destination'],
+      additionalProperties: false,
+    },
+  })
+  const calls: Array<{ toolName: string; args: Record<string, unknown> }> = []
+  const runtime = createRuntime({
+    listToolDefinitions: () => [mapTool],
+    executeToolCall: async (toolName, args) => {
+      calls.push({ toolName, args })
+      if (toolName !== 'map_plan_route') {
+        throw new Error(`unexpected tool: ${toolName}`)
+      }
+      if (calls.length === 1) {
+        const data = {
+          ok: false,
+          errorKind: 'route_not_found',
+          message: '第一次路线失败。',
+        }
+        return createToolExecutionOutput(JSON.stringify(data), { shape: 'json', data })
+      }
+      const data = {
+        ok: true,
+        origin: { name: '人民广场', location: '121.47519,31.228833' },
+        destination: { name: '虹桥火车站', location: '121.31891,31.193987' },
+        selectedRoute: { transportMode: 'driving', distanceM: 18800, durationSec: 1920, polyline: '', steps: [] },
+      }
+      return createToolExecutionOutput(JSON.stringify(data), { shape: 'json', data })
+    },
+    runAgent: async ({ tools, onTextDelta }) => {
+      const mapSdkTool = tools.find((item) => item.name === 'map_plan_route') as { invoke: (context: unknown, input: string) => Promise<string> } | undefined
+      assert.ok(mapSdkTool)
+      const first = await mapSdkTool.invoke({}, JSON.stringify({
+        origin: '人民广场',
+        destination: '不存在的目的地',
+      }))
+      assert.match(first, /route_not_found/)
+      const second = await mapSdkTool.invoke({}, JSON.stringify({
+        origin: '人民广场',
+        destination: '虹桥火车站',
+      }))
+      assert.match(second, /"ok":true/)
+      onTextDelta('第二次路线已规划好。')
+      return { finalText: '第二次路线已规划好。' }
+    },
+  })
+  runtime.newSession('butler::scope-map-native-stale-close', 'system prompt')
+
+  const result = await runtime.sendMessage('butler::scope-map-native-stale-close', '先后尝试两条地图路线', 'run-map-native-stale-close', {
+    publicSessionId: 'scope-map-native-stale-close',
+    taskId: 'task-map-native-stale-close',
+  })
+
+  assert.equal(result.success, true)
+  assert.equal(result.terminalReason, 'done')
+  assert.equal(result.error, undefined)
+  assert.equal(result.finalText, '第二次路线已规划好。')
+  assert.deepEqual(calls.map((call) => call.toolName), ['map_plan_route', 'map_plan_route'])
+})
+
 test('agent sdk runtime emits tool trace truth and registers run cleanup', async () => {
   const toolDefinition = createToolDefinition({ description: 'Search the web' })
   const outputEvents: Array<Record<string, unknown>> = []
@@ -2264,6 +3013,117 @@ test('agent sdk runtime treats max-turn exhaustion after a valid saved target do
   } finally {
     await rm(tmpRoot, { recursive: true, force: true })
   }
+})
+
+test('agent sdk runtime checkpoints max-turn loops after a successful file excerpt', async () => {
+  const readExcerptDefinition = createToolDefinition({
+    name: 'file_read_excerpt',
+    groupId: 'file',
+    domain: 'file',
+    kind: 'read',
+    description: 'Read file excerpt',
+    schema: {
+      type: 'object',
+      properties: { path: { type: 'string' } },
+      required: ['path'],
+      additionalProperties: false,
+    },
+  })
+  const statuses: Array<Record<string, unknown>> = []
+  const errors: Array<Record<string, unknown>> = []
+  const runtime = createRuntime({
+    listToolDefinitions: () => [readExcerptDefinition],
+    executeToolCall: async () => createToolExecutionOutput(JSON.stringify({
+      ok: true,
+      path: '/tmp/events/北岸夜跑.md',
+      content: '# 北岸夜跑\n\n## 预算\n北岸夜跑预算共 4.0 万元，主要用于报备、物料、安保、摄影和应急。',
+    }), {
+      shape: 'json',
+      data: {
+        ok: true,
+        path: '/tmp/events/北岸夜跑.md',
+        content: '# 北岸夜跑\n\n## 预算\n北岸夜跑预算共 4.0 万元，主要用于报备、物料、安保、摄影和应急。',
+      },
+    }),
+    runAgent: async ({ tools }) => {
+      const readTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+      await readTool.invoke({}, JSON.stringify({ path: '/tmp/events/北岸夜跑.md' }))
+      throw new Error('Max turns (16) exceeded')
+    },
+  })
+  runtime.on('status', (event) => statuses.push(event as Record<string, unknown>))
+  runtime.on('error', (event) => errors.push(event as Record<string, unknown>))
+  runtime.newSession('butler::scope-file-max-turn', 'system prompt')
+
+  const result = await runtime.sendMessage('butler::scope-file-max-turn', '告诉我北岸夜跑预算数字', 'run-file-max-turn', {
+    publicSessionId: 'scope-file-max-turn',
+    taskId: 'task-file-max-turn',
+  })
+
+  assert.equal(result.success, true)
+  assert.equal(result.terminalReason, 'checkpoint_budget')
+  assert.match(result.finalText, /4\.0 万元/)
+  assert.deepEqual(result.usedTools, ['file_read_excerpt'])
+  assert.equal(errors.length, 0)
+  assert.deepEqual(
+    statuses.map((event) => [event.status, event.terminalReason]),
+    [
+      ['working', undefined],
+      ['checkpoint', 'checkpoint_budget'],
+    ],
+  )
+})
+
+test('agent sdk runtime does not checkpoint max-turn loops after a failed file excerpt', async () => {
+  const readExcerptDefinition = createToolDefinition({
+    name: 'file_read_excerpt',
+    groupId: 'file',
+    domain: 'file',
+    kind: 'read',
+    description: 'Read file excerpt',
+    schema: {
+      type: 'object',
+      properties: { path: { type: 'string' } },
+      required: ['path'],
+      additionalProperties: false,
+    },
+  })
+  const statuses: Array<Record<string, unknown>> = []
+  const errors: Array<Record<string, unknown>> = []
+  const runtime = createRuntime({
+    listToolDefinitions: () => [readExcerptDefinition],
+    executeToolCall: async () => createToolExecutionOutput(JSON.stringify({
+      ok: false,
+      path: '/tmp/events/missing.md',
+      error: 'path not in index',
+    }), {
+      shape: 'json',
+      data: {
+        ok: false,
+        path: '/tmp/events/missing.md',
+        error: 'path not in index',
+      },
+    }),
+    runAgent: async ({ tools }) => {
+      const readTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+      await readTool.invoke({}, JSON.stringify({ path: '/tmp/events/missing.md' }))
+      throw new Error('Max turns (16) exceeded')
+    },
+  })
+  runtime.on('status', (event) => statuses.push(event as Record<string, unknown>))
+  runtime.on('error', (event) => errors.push(event as Record<string, unknown>))
+  runtime.newSession('butler::scope-file-max-turn-failed-read', 'system prompt')
+
+  const result = await runtime.sendMessage('butler::scope-file-max-turn-failed-read', '告诉我缺失文件里的预算数字', 'run-file-max-turn-failed-read', {
+    publicSessionId: 'scope-file-max-turn-failed-read',
+    taskId: 'task-file-max-turn-failed-read',
+  })
+
+  assert.equal(result.success, false)
+  assert.equal(result.terminalReason, 'blocked_external')
+  assert.equal(result.finalText, '')
+  assert.equal(errors.length, 1)
+  assert.equal(statuses.some((event) => event.status === 'checkpoint'), false)
 })
 
 test('agent sdk runtime checkpoints max-turn target document turns with no effective mutation', async () => {

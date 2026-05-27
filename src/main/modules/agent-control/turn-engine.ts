@@ -350,6 +350,7 @@ import {
   buildAuthorizationFromIdentity,
   type SkillToolAuthorization,
 } from './skills/skill-tool-authorization'
+import { appendToolCapabilityLog } from '../tools/tool-event-log'
 import { PRIMITIVE_TOOL_DEFS } from '../tools/skill-primitives/tool-defs'
 import {
   createSkillBudgetLeaseState,
@@ -2288,7 +2289,9 @@ export class TurnEngine {
         allowedToolNames: preparedRunCapabilities.allowedToolNames,
         preferTextToolBridge: false,
       }))
-      host.log(`[tool_capability] stage=host_prepared ${preparedRunCapabilities.capabilityLogLine}`)
+      const preparedCapabilityLogLine = `[tool_capability] stage=host_prepared ${preparedRunCapabilities.capabilityLogLine}`
+      host.log(preparedCapabilityLogLine)
+      appendToolCapabilityLog(preparedCapabilityLogLine)
       appendLoggedToolResolution({
         state,
         host,
@@ -2405,7 +2408,9 @@ export class TurnEngine {
         allowedToolNames: reconciledRunCapabilities.allowedToolNames,
         preferTextToolBridge: false,
       }))
-      host.log(`[tool_capability] stage=host_effective ${reconciledRunCapabilities.capabilityLogLine}`)
+      const effectiveCapabilityLogLine = `[tool_capability] stage=host_effective ${reconciledRunCapabilities.capabilityLogLine}`
+      host.log(effectiveCapabilityLogLine)
+      appendToolCapabilityLog(effectiveCapabilityLogLine)
       appendLoggedToolResolution({
         state,
         host,

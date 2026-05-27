@@ -39,6 +39,6 @@ if (files.length === 0) {
   process.exit(0)
 }
 
-const args = ['tsx@^4.19.2', '--test', '--test-concurrency=10', ...files]
-const result = spawnSync('npx', args, { stdio: 'inherit', cwd: ROOT })
+const args = ['--import', 'tsx', '--test', '--test-concurrency=10', ...files]
+const result = spawnSync(process.execPath, args, { stdio: 'inherit', cwd: ROOT })
 process.exit(result.status ?? 1)

@@ -256,6 +256,30 @@ test('inspectSkillProgressArtifacts counts a completed receipt only when scenes 
   }
 })
 
+test('inspectSkillProgressArtifacts includes non-blocking VEA validation warnings in activity detail', () => {
+  const root = tempRoot()
+  try {
+    const scene = completeScene(1)
+    writeSceneScores(root, [scene])
+    writeHostBatch(root, scene, 'completed')
+    writeJson(join(root, 'auto_scoring_validation.json'), {
+      passed: true,
+      sample_scene_numbers: [1, 2, 3],
+      validation_warning_scene_numbers: [1, 3],
+      validation_failed_scene_numbers: [3],
+      blocking_scene_numbers: [],
+    })
+
+    const progress = inspectSkillProgressArtifacts({ outputDir: root })
+
+    assert.match(progress.activity?.summary || '', /抽样复核非阻断提醒 2 个/)
+    assert.match(progress.activity?.summary || '', /Scene 001、Scene 003/)
+    assert.match(progress.activity?.summary || '', /含 1 个图片探测失败/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('inspectSkillProgressArtifacts exposes structured pending audiovisual handoff state', () => {
   const root = tempRoot()
   try {
@@ -291,6 +315,50 @@ test('inspectSkillProgressArtifacts exposes structured pending audiovisual hando
     assert.equal(handoff?.lastErrorMessage, '报告生成超时，可继续重试')
     assert.ok(String(handoff?.taskPath || '').endsWith('audiovisual_handoff/body/task.md'))
     assert.ok(String(handoff?.outputPath || '').endsWith('audiovisual_handoff/body/output.md'))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('inspectSkillProgressArtifacts summarizes completed audiovisual handoff parts', () => {
+  const root = tempRoot()
+  try {
+    writeSceneScores(root, [completeScene(1)])
+    for (const taskName of ['body', 'diagram', 'illustrate']) {
+      const taskDir = join(root, 'audiovisual_handoff', taskName)
+      mkdirSync(taskDir, { recursive: true })
+      writeFileSync(join(taskDir, 'task.md'), `write ${taskName}`)
+      writeFileSync(join(taskDir, 'output.md'), `generated ${taskName}`)
+    }
+    writeJson(join(root, 'audiovisual_handoff', 'receipt.json'), {
+      updated_at: '2026-05-04T08:00:00.000Z',
+      tasks: {
+        body: {
+          status: 'completed',
+          task: 'audiovisual_handoff/body/task.md',
+          output: 'audiovisual_handoff/body/output.md',
+          updated_at: '2026-05-04T08:01:00.000Z',
+        },
+        diagram: {
+          status: 'completed',
+          task: 'audiovisual_handoff/diagram/task.md',
+          output: 'audiovisual_handoff/diagram/output.md',
+          updated_at: '2026-05-04T08:02:00.000Z',
+        },
+        illustrate: {
+          status: 'completed',
+          task: 'audiovisual_handoff/illustrate/task.md',
+          output: 'audiovisual_handoff/illustrate/output.md',
+          updated_at: '2026-05-04T08:03:00.000Z',
+        },
+      },
+    })
+
+    const progress = inspectSkillProgressArtifacts({ outputDir: root })
+
+    assert.equal(progress.handoff, null)
+    assert.equal(progress.handoffDetail, '视听报告分段内容已生成（正文、图表、插图说明）')
+    assert.equal(progress.hasEvidence, true)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

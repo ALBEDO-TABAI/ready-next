@@ -6,10 +6,10 @@
 // its own per-group deps; this file pins the two pieces of the group
 // contract that the V5 IPC contract gate cannot prove on its own:
 //
-//   1. `register` registers EXACTLY the 6 channel names the group owns
+//   1. `register` registers EXACTLY the channel names the group owns
 //      (no extras, no missing ones)
 //   2. The returned dispose handle calls `removeHandler` for each of those
-//      same 6 channels — so dev-reload re-registration does not leak
+//      same channels — so dev-reload re-registration does not leak
 //      listeners.
 //
 // Handler bodies are NOT exercised here (the V5 gate confirms the channel
@@ -18,6 +18,10 @@
 // MECHANISM, not handler semantics.
 
 import assert from 'node:assert/strict'
+import { existsSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import test from 'node:test'
 import type { IpcMain, IpcMainInvokeEvent } from 'electron'
 
@@ -54,16 +58,15 @@ function createMockIpc(): MockIpc {
 }
 
 function createMockDeps(): FileMutationGroupDeps {
-  // The 6 handler bodies only ever consulted `useMock` inline; the per-group
-  // deps interface therefore contains nothing else. We pick `false` so the
-  // handlers (if accidentally invoked) would hit the real fs path and fail
-  // loudly rather than silently returning the mock fixtures.
+  // Pick `false` so handlers hit the real fs path when a behavior test invokes
+  // them. Trash root stays inside the test temp directory unless overridden.
   return {
     useMock: false,
+    getDocumentTrashRoot: () => join(tmpdir(), 'ready-file-mutation-test-trash'),
   }
 }
 
-test('fileMutationGroup.register wires the 6 documented channels exactly once each', () => {
+test('fileMutationGroup.register wires the documented channels exactly once each', () => {
   const { ipc, handleCalls } = createMockIpc()
   fileMutationGroup.register(ipc, createMockDeps())
 
@@ -72,13 +75,13 @@ test('fileMutationGroup.register wires the 6 documented channels exactly once ea
   assert.deepEqual(
     registered,
     expected,
-    'register must subscribe to exactly the 6 document file-mutation channels',
+    'register must subscribe to exactly the document file-mutation channels',
   )
-  assert.equal(handleCalls.length, 6, 'each channel must be registered exactly once')
+  assert.equal(handleCalls.length, _fileMutationGroupChannelsForTest.length, 'each channel must be registered exactly once')
 
   // Spot-check the exact channel names per the plan (V2.3c, §3 V2.3) so
   // accidental renames trip this test even if the channel count happens
-  // to still be 6. The V5 IPC contract gate catches the renderer side;
+  // to still match the count. The V5 IPC contract gate catches the renderer side;
   // this pins the main-side literals.
   for (const required of [
     'document:mkdir',
@@ -87,6 +90,8 @@ test('fileMutationGroup.register wires the 6 documented channels exactly once ea
     'document:copy',
     'document:move',
     'document:stat',
+    'document:listTrash',
+    'document:restoreTrash',
   ]) {
     assert.ok(
       registered.includes(required),
@@ -102,7 +107,7 @@ test('fileMutationGroup namespace is the documented label so dispose ordering ca
   assert.equal(fileMutationGroup.namespace, 'document:fileMutation')
 })
 
-test('IpcDisposeHandle.dispose removes the same 6 channels that register added', () => {
+test('IpcDisposeHandle.dispose removes the same channels that register added', () => {
   const { ipc, removeHandlerCalls } = createMockIpc()
   const handle = fileMutationGroup.register(ipc, createMockDeps())
 
@@ -133,11 +138,63 @@ test('dispose is idempotent — calling twice does not throw and removes nothing
   // invocation must NOT throw. We allow the call to issue removeHandler
   // again — what we care about is no exception, no listener leak.
   assert.doesNotThrow(() => handle.dispose())
-  // Second dispose runs the same 6 removeHandler calls; total count grows
+  // Second dispose runs the same removeHandler calls; total count grows
   // by exactly the channel count, never more.
   assert.equal(
     removeHandlerCalls.length - afterFirst,
     _fileMutationGroupChannelsForTest.length,
     'second dispose issues at most one removeHandler per channel',
   )
+})
+
+test('document delete moves a file into Ready trash and restore returns it to the original path', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'ready-file-trash-'))
+  t.after(async () => {
+    await rm(root, { recursive: true, force: true })
+  })
+  const workspace = join(root, 'workspace')
+  const trashRoot = join(root, 'trash')
+  mkdirSync(workspace, { recursive: true })
+  const filePath = join(workspace, 'notes.md')
+  writeFileSync(filePath, '# Notes\n', 'utf8')
+
+  const { ipc, handleCalls } = createMockIpc()
+  fileMutationGroup.register(ipc, {
+    useMock: false,
+    getDocumentTrashRoot: () => trashRoot,
+  })
+  const handlers = new Map(handleCalls.map((entry) => [entry.channel, entry.handler]))
+
+  const deleteResult = await handlers.get('document:delete')?.({} as IpcMainInvokeEvent, filePath) as {
+    success: boolean
+    trashEntry?: { id: string; trashPath: string; originalPath: string }
+    error?: string
+  }
+  assert.equal(deleteResult.success, true, deleteResult.error)
+  assert.equal(existsSync(filePath), false, 'delete must remove the file from its original path')
+  assert.ok(deleteResult.trashEntry?.id, 'delete must return a restorable trash id')
+  assert.equal(deleteResult.trashEntry.originalPath, filePath)
+  assert.equal(existsSync(deleteResult.trashEntry.trashPath), true, 'trash payload must exist on disk')
+
+  const listResult = await handlers.get('document:listTrash')?.({} as IpcMainInvokeEvent) as {
+    success: boolean
+    items?: Array<{ id: string; originalPath: string }>
+  }
+  assert.equal(listResult.success, true)
+  assert.equal(listResult.items?.[0]?.id, deleteResult.trashEntry.id)
+
+  const restoreResult = await handlers.get('document:restoreTrash')?.(
+    {} as IpcMainInvokeEvent,
+    { id: deleteResult.trashEntry.id },
+  ) as { success: boolean; path?: string; error?: string }
+  assert.equal(restoreResult.success, true, restoreResult.error)
+  assert.equal(restoreResult.path, filePath)
+  assert.equal(readFileSync(filePath, 'utf8'), '# Notes\n')
+
+  const afterRestore = await handlers.get('document:listTrash')?.({} as IpcMainInvokeEvent) as {
+    success: boolean
+    items?: unknown[]
+  }
+  assert.equal(afterRestore.success, true)
+  assert.equal(afterRestore.items?.length, 0)
 })

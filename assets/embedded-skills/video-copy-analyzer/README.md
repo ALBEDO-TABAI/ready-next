@@ -18,7 +18,7 @@
 | Stage | Function | Description |
 |-------|----------|-------------|
 | 1️⃣ | **Video Download** | Download from Bilibili/YouTube/Douyin (yt-dlp + custom downloader) |
-| 2️⃣ | **Smart Subtitle Extraction** | Three-tier priority: Embedded → OCR (RapidOCR) → ASR (FunASR/Whisper) |
+| 2️⃣ | **Smart Subtitle Extraction** | Three-tier priority: Embedded → OCR (RapidOCR) → ASR (FunASR) |
 | 3️⃣ | **Smart Correction** | Context-based auto-correction of transcription errors |
 | 4️⃣ | **Three-Dimensional Analysis** | TextContent + Viral + Brainstorming |
 
@@ -42,10 +42,7 @@ pip install funasr modelscope
 # 5. RapidOCR (ONNX lightweight, for burned subtitle detection)
 pip install rapidocr-onnxruntime
 
-# 6. Whisper (Alternative for English/multilingual)
-pip install openai-whisper
-
-# 7. requests (for Douyin download)
+# 6. requests (for Douyin download)
 pip install requests
 ```
 
@@ -72,7 +69,7 @@ Video Input
     ↓ Not detected
 [2️⃣ Burned Subtitle OCR] ──→ RapidOCR Frame Sampling ──→ Detected ──→ Full Video OCR
     ↓ Not detected
-[3️⃣ Audio Transcription] ──→ FunASR (Chinese optimized) / Whisper (Multilingual)
+[3️⃣ Audio Transcription] ──→ FunASR
     ↓
 Output SRT Subtitles
 ```
@@ -84,7 +81,6 @@ Output SRT Subtitles
 | **L1** | Embedded Extract | Video has subtitle stream | ⭐⭐⭐⭐⭐ | ⚡ Fastest |
 | **L2** | RapidOCR | Subtitles burned into video | ⭐⭐⭐⭐ | 🚀 Fast |
 | **L3** | FunASR Nano | Chinese audio transcription | ⭐⭐⭐⭐ | � Medium |
-| **L3** | Whisper | English/multilingual audio | ⭐⭐⭐ | 🐢 Medium |
 
 ### Tech Stack
 
@@ -95,8 +91,8 @@ Output SRT Subtitles
   - ✨ High accuracy: Based on PaddleOCR
 
 - **FunASR Nano**: Alibaba open-source Chinese ASR model
-  - 🚀 Lightweight: ~100MB vs Whisper Large ~1.5GB
-  - 🎯 Chinese optimized: Better than Whisper for Chinese
+  - 🚀 Lightweight model cache compared with large ASR stacks
+  - 🎯 Chinese optimized
   - ⏱️ Timestamp: Word-level timestamps
   - 💨 Fast: Runs well on CPU
 
@@ -125,8 +121,8 @@ video-copy-analyzer/
 ├── scripts/
 │   ├── download_douyin.py            # Douyin video downloader (watermark-free)
 │   ├── extract_subtitle_funasr.py    # Smart subtitle extraction (FunASR + RapidOCR)
-│   ├── extract_subtitle.py           # Whisper-based extraction
-│   ├── transcribe_audio.py           # Audio transcription script
+│   ├── extract_subtitle.py           # Compatibility wrapper for FunASR extraction
+│   ├── transcribe_audio.py           # Compatibility wrapper for FunASR transcription
 │   └── check_environment.py          # Environment verification
 └── references/
     └── analysis-frameworks.md        # Analysis framework details

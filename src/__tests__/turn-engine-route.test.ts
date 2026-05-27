@@ -2772,7 +2772,9 @@ test('TurnEngine lets an explicit advisory skill override stale supervisor and c
         params: [{ name: 'input', required: true }],
       },
     ],
-    hostRequirements: {},
+    hostRequirements: {
+      expose_when_hint_armed: ['video_copy_analyze'],
+    },
   }
 
   __setMetricSinkForTests((event) => metrics.push(event))
@@ -2821,6 +2823,7 @@ test('TurnEngine lets an explicit advisory skill override stale supervisor and c
             return true
           },
           buildPreferredSkillToolNames: () => [
+            'skill_video_copy_analyze',
             'skill_ask_user',
             'skill_run_shell',
             'skill_write_artifact',
@@ -2851,6 +2854,7 @@ test('TurnEngine lets an explicit advisory skill override stale supervisor and c
     const result = await engine.execute(request)
 
     assert.equal(result.taskType, 'multi_step_task')
+    assert.ok(capturedAllowedToolNames.includes('skill_video_copy_analyze'))
     assert.ok(capturedAllowedToolNames.includes('skill_run_shell'))
     assert.ok(!capturedAllowedToolNames.includes('skill_video_expert_pipeline'))
     assert.ok(!capturedAllowedToolNames.includes('skill_video_expert_ai_analyze'))

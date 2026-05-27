@@ -1219,6 +1219,11 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
                 ? structured.taskTitle.trim()
                 : ''
           const toolText = structured ? (structuredText || '状态已更新') : (data.chunk || '')
+          const structuredHas = (key: string): boolean => Boolean(
+            structured
+            && Object.prototype.hasOwnProperty.call(structured, key)
+            && structured[key] !== undefined,
+          )
           const payload = {
             type: 'updated',
             scopeId: data.sessionId,
@@ -1235,17 +1240,23 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
             phase: 'tool_running',
             latestText: toolText,
             module: structured?.module === 'browser' || structured?.module === 'document' || structured?.module === 'design' || structured?.module === 'skill'
-              ? structured.module as any
+              ? structured.module as ScopeRunEventPayload['module']
               : undefined,
             taskTitle: typeof structured?.taskTitle === 'string' ? structured.taskTitle : undefined,
             taskSummary: typeof structured?.taskSummary === 'string' ? structured.taskSummary : undefined,
             steps: Array.isArray(structured?.steps) ? structured.steps : undefined,
             currentStepId: typeof structured?.currentStepId === 'string' ? structured.currentStepId : undefined,
-            waitingFor: typeof structured?.waitingFor === 'string' ? structured.waitingFor as any : undefined,
-            resumableActions: Array.isArray(structured?.resumableActions) ? structured.resumableActions as any : undefined,
-            blockedReason: typeof structured?.blockedReason === 'string' ? structured.blockedReason : undefined,
-            taskContinuation: structured?.taskContinuation && typeof structured.taskContinuation === 'object' ? structured.taskContinuation as any : undefined,
-            progress: structured?.progress && typeof structured.progress === 'object' ? structured.progress as any : undefined,
+            waitingFor: typeof structured?.waitingFor === 'string' ? structured.waitingFor as ScopeRunEventPayload['waitingFor'] : undefined,
+            resumableActions: Array.isArray(structured?.resumableActions) ? structured.resumableActions as ScopeRunEventPayload['resumableActions'] : undefined,
+            ...(structuredHas('blockedReason') && (typeof structured?.blockedReason === 'string' || structured?.blockedReason === null)
+              ? { blockedReason: typeof structured.blockedReason === 'string' ? structured.blockedReason : null }
+              : {}),
+            ...(structuredHas('taskContinuation') && (structured?.taskContinuation === null || (structured?.taskContinuation && typeof structured.taskContinuation === 'object'))
+              ? { taskContinuation: structured.taskContinuation && typeof structured.taskContinuation === 'object' ? structured.taskContinuation as ScopeRunEventPayload['taskContinuation'] : null }
+              : {}),
+            ...(structuredHas('progress') && (structured?.progress === null || (structured?.progress && typeof structured.progress === 'object'))
+              ? { progress: structured.progress && typeof structured.progress === 'object' ? structured.progress as ScopeRunEventPayload['progress'] : null }
+              : {}),
             recentArtifacts: Array.isArray(structured?.recentArtifacts) ? structured.recentArtifacts : undefined,
             toolEvent: {
               id: `${data.type}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -1266,16 +1277,53 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
           )
           mainWindow.webContents.send('agent:scopeRunEvent', payload)
         } else if (data.type === 'done') {
+          const structured = data.projectionPatch && typeof data.projectionPatch === 'object'
+            ? data.projectionPatch as Record<string, unknown>
+            : null
+          const structuredHas = (key: string): boolean => Boolean(
+            structured
+            && Object.prototype.hasOwnProperty.call(structured, key)
+            && structured[key] !== undefined,
+          )
           const payload = {
             type: 'finished',
             scopeId: data.sessionId,
             sessionId: data.sessionId, // Stage V V3.2
             agent: data.agent,
             runId: data.runId,
+            taskId: typeof data.taskId === 'string'
+              ? data.taskId
+              : structured?.taskContinuation && typeof structured.taskContinuation === 'object' && typeof (structured.taskContinuation as Record<string, unknown>).taskId === 'string'
+                ? (structured.taskContinuation as Record<string, unknown>).taskId as string
+                : undefined,
             phase: 'done',
+            taskTitle: typeof structured?.taskTitle === 'string' ? structured.taskTitle : undefined,
+            taskSummary: typeof structured?.taskSummary === 'string' ? structured.taskSummary : undefined,
+            steps: Array.isArray(structured?.steps) ? structured.steps : undefined,
+            currentStepId: typeof structured?.currentStepId === 'string' ? structured.currentStepId : undefined,
+            waitingFor: typeof structured?.waitingFor === 'string' ? structured.waitingFor as ScopeRunEventPayload['waitingFor'] : undefined,
+            resumableActions: Array.isArray(structured?.resumableActions) ? structured.resumableActions as ScopeRunEventPayload['resumableActions'] : undefined,
+            ...(structuredHas('blockedReason') && (typeof structured?.blockedReason === 'string' || structured?.blockedReason === null)
+              ? { blockedReason: typeof structured.blockedReason === 'string' ? structured.blockedReason : null }
+              : {}),
+            ...(structuredHas('taskContinuation') && (structured?.taskContinuation === null || (structured?.taskContinuation && typeof structured.taskContinuation === 'object'))
+              ? { taskContinuation: structured.taskContinuation && typeof structured.taskContinuation === 'object' ? structured.taskContinuation as ScopeRunEventPayload['taskContinuation'] : null }
+              : {}),
+            ...(structuredHas('progress') && (structured?.progress === null || (structured?.progress && typeof structured.progress === 'object'))
+              ? { progress: structured.progress && typeof structured.progress === 'object' ? structured.progress as ScopeRunEventPayload['progress'] : null }
+              : {}),
+            recentArtifacts: Array.isArray(structured?.recentArtifacts) ? structured.recentArtifacts : undefined,
             timestamp,
           } as const
-          runtime?.recordScopeRunEvent(payload)
+          runtime?.recordScopeRunEvent(
+            payload,
+            structured
+              ? {
+                projectionPatch: structured,
+                transcriptEvents: [{ kind: 'structured_payload', projectionPatch: structured }],
+              }
+              : null,
+          )
           mainWindow.webContents.send('agent:scopeRunEvent', payload)
         } else if (data.type === 'text') {
           const payload = {

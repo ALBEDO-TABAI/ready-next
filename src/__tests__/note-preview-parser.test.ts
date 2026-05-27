@@ -145,7 +145,10 @@ describe('buildStructuredNotePreview · bilibili iframe + metadata-leak fix', ()
     const bilibili = out.embeds.find((e) => e.kind === 'bilibili')
     assert.ok(bilibili, 'bilibili embed should be detected')
     assert.equal(bilibili!.videoId, 'BV1Uu5k6TETr')
-    assert.match(bilibili!.embedUrl || '', /^https:\/\/player\.bilibili\.com\/player\.html\?/)
+    assert.equal(
+      bilibili!.embedUrl,
+      'https://player.bilibili.com/player.html?isOutside=true&bvid=BV1Uu5k6TETr&p=1&autoplay=0',
+    )
     // No markdown block should still contain the raw iframe tag — it must be
     // consumed by the embed pipeline.
     const markdownBlocks = out.blocks.filter((b) => b.type === 'markdown')
@@ -156,6 +159,26 @@ describe('buildStructuredNotePreview · bilibili iframe + metadata-leak fix', ()
         'iframe must not leak into a markdown block',
       )
     }
+  })
+
+  it('canonicalizes b 站 player iframe URLs so tracked og:url values do not black-screen the preview', () => {
+    const md = [
+      '---',
+      'title: "演示"',
+      'source: "https://www.bilibili.com/video/BV1XX1XXXXX1/?spm_id_from=333.999.0.0"',
+      '---',
+      '',
+      '<iframe src="https://player.bilibili.com/player.html?isOutside=true&bvid=BV1XX1XXXXX1?spm_id_from=333.999.0.0&p=2" style="width:100%; height:500px;"></iframe>',
+      '',
+    ].join('\n')
+    const out = buildStructuredNotePreview(md)
+    const bilibili = out.embeds.find((e) => e.kind === 'bilibili')
+    assert.ok(bilibili, 'bilibili embed should be detected')
+    assert.equal(bilibili!.videoId, 'BV1XX1XXXXX1')
+    assert.equal(
+      bilibili!.embedUrl,
+      'https://player.bilibili.com/player.html?isOutside=true&bvid=BV1XX1XXXXX1&p=2&autoplay=0',
+    )
   })
 
   it('inline iframe attributes do NOT donate spurious metadata keys (height / src)', () => {

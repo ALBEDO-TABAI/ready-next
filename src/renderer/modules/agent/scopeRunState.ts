@@ -139,9 +139,24 @@ function normalizeTerminalReason(value: unknown): ScopeRunTerminalReason | null 
 }
 
 export function phaseToToolTraceStatus(
-  phase: ScopeRunState['phase'] | undefined
+  phase: ScopeRunState['phase'] | undefined,
+  terminalReason?: ScopeRunState['terminalReason'] | null
 ): 'idle' | 'running' | 'done' | 'error' | 'cancelled' {
   if (!phase || phase === 'idle') return 'idle'
+  if (terminalReason) {
+    if (terminalReason === 'done') return 'done'
+    if (terminalReason === 'cancelled_user' || terminalReason === 'cancelled_runtime') return 'cancelled'
+    if (
+      terminalReason === 'failed_skill'
+      || terminalReason === 'resume_launch_failed'
+      || terminalReason === 'persistence_failed'
+      || terminalReason === 'blocked_tool_error'
+      || terminalReason === 'infra_error'
+    ) {
+      return 'error'
+    }
+    return 'done'
+  }
   if (phase === 'error') return 'error'
   if (phase === 'cancelled') return 'cancelled'
   if (phase === 'done') return 'done'
@@ -487,7 +502,7 @@ function parseTaskContinuation(input: unknown): ScopeRunTaskContinuation | null 
   if (!input || typeof input !== 'object') return null
   const record = input as Record<string, unknown>
   const continuation: ScopeRunTaskContinuation = {}
-  const copyString = (key: keyof ScopeRunTaskContinuation): void => {
+  const copyString = (key: Exclude<keyof ScopeRunTaskContinuation, 'progress'>): void => {
     if (typeof record[key] !== 'string') return
     const value = String(record[key]).trim()
     if (value) continuation[key] = value
@@ -509,6 +524,8 @@ function parseTaskContinuation(input: unknown): ScopeRunTaskContinuation | null 
   copyString('runStatePath')
   copyString('outputDir')
   copyString('progressFingerprint')
+  const progress = parseSkillProgress(record.progress)
+  if (progress) continuation.progress = progress
   return Object.keys(continuation).length > 0 ? continuation : null
 }
 
@@ -774,6 +791,8 @@ export function deriveScopeRunStatePatch(
   const structuredResumableActions = event.resumableActions
     ? normalizeResumableActions(event.resumableActions)
     : []
+  const hasTaskContinuationPatch = Object.prototype.hasOwnProperty.call(event, 'taskContinuation')
+  const hasProgressPatch = Object.prototype.hasOwnProperty.call(event, 'progress')
   const structuredContinuation = parseTaskContinuation(event.taskContinuation)
   const structuredMemoryCapture = parseMemoryCapture(event.memoryCapture)
   const structuredExecutionDiagnostics = parseExecutionDiagnostics(event.executionDiagnostics)
@@ -799,7 +818,16 @@ export function deriveScopeRunStatePatch(
     !isNewRun
     && Boolean(previous?.requestId && eventRunId && previous?.requestId === eventRunId)
   const sameRunTerminalTail = isPreviousTerminal && isSameRunTail
-  const shouldClearStaleProgress = isNewRun || sameRunTerminalTail
+  const previousProgressIsTerminal =
+    previous?.progress?.stage === 'completed'
+    || previous?.progress?.stage === 'failed'
+    || (
+      previous?.progress?.total != null
+      && previous.progress.completed != null
+      && previous.progress.total > 0
+      && previous.progress.completed >= previous.progress.total
+    )
+  const shouldClearStaleProgress = isNewRun || (sameRunTerminalTail && !previousProgressIsTerminal)
   const patch: Partial<ScopeRunState> = {
     phase: event.phase,
     terminalReason: terminalReason || (isNewRun ? null : previous?.terminalReason || null),
@@ -877,11 +905,10 @@ export function deriveScopeRunStatePatch(
     recentArtifacts: buildRecentArtifacts(
       mergeArtifacts(previous?.recentArtifacts, structuredArtifacts)
     ),
-    taskContinuation:
-      structuredContinuation ||
-      previous?.taskContinuation ||
-      null,
-    progress: structuredProgress
+    taskContinuation: hasTaskContinuationPatch
+      ? structuredContinuation
+      : previous?.taskContinuation || null,
+    progress: hasProgressPatch
       ? structuredProgress
       : shouldClearStaleProgress
         ? null

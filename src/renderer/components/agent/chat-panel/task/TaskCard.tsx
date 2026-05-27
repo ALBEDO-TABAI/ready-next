@@ -51,7 +51,7 @@ export const TASK_ACTION_BUTTON_STYLE: React.CSSProperties = {
 export function TaskCard({
   run,
   taskKey,
-  sessionId: _sessionId,
+  sessionId,
   compact = false,
   expanded = false,
   disclosureState,
@@ -126,6 +126,7 @@ export function TaskCard({
   const isDetachedTask = typeof run.taskId === 'string' && run.taskId.startsWith('detached:')
   const childRunId = run.taskContinuation?.childRunId || null
   const isAgentHandoff = isInternalAgentHandoffTask(run)
+  const shouldShowOpenScopeButton = Boolean(compact && run.scopeId !== sessionId)
   const progressLabel = formatTaskProgressLabel(run.progress)
   const progressValue = progressPercent(run.progress)
   const progressLastError = run.progress?.lastError ? formatTaskUserFacingText(run.progress.lastError) : null
@@ -510,7 +511,7 @@ export function TaskCard({
       )}
 
       {expanded &&
-        (run.waitingFor !== 'none' || (run.resumableActions || []).length > 0 || compact) && (
+        (run.waitingFor !== 'none' || (run.resumableActions || []).length > 0 || shouldShowOpenScopeButton) && (
           <div className="flex flex-wrap gap-1.5">
             {!isDetachedTask && (run.phase === 'planning' || run.phase === 'tool_running' || run.phase === 'responding' || run.phase === 'resuming') && (
               <button
@@ -622,7 +623,7 @@ export function TaskCard({
                 重试
               </button>
             )}
-            {compact && (
+            {shouldShowOpenScopeButton && (
               <button
                 type="button"
                 onClick={() => onOpenScope?.(run.scopeId)}

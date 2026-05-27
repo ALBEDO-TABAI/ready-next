@@ -16,6 +16,7 @@ export interface PopupPolicyDecision {
     | 'oauth-path'
     | 'popup-disposition'
     | 'regular-http'
+    | 'regular-local-html'
     | 'external-protocol'
   authLike: boolean
 }
@@ -71,6 +72,11 @@ function isLocalHtmlBrowserURL(url: string): boolean {
   }
 }
 
+function isLocalHtmlPopupContext(context: PopupRequestContext): boolean {
+  if (!isLocalHtmlBrowserURL(context.url)) return false
+  return isLocalHtmlBrowserURL(String(context.referrer || ''))
+}
+
 export function isAllowedBrowserURL(url: string, options: BrowserUrlAllowanceOptions = {}): boolean {
   if (isReadyBrowserBlankUrl(url)) return true
   try {
@@ -99,6 +105,10 @@ export function decidePopupPolicy(context: PopupRequestContext): PopupPolicyDeci
   const url = String(context.url || '').trim()
   if (isAuthPopupBootstrapURL(url)) {
     return { mode: 'allow-popup', reason: 'auth-bootstrap', authLike: true }
+  }
+
+  if (isLocalHtmlPopupContext({ ...context, url })) {
+    return { mode: 'open-tab', reason: 'regular-local-html', authLike: false }
   }
 
   if (!isAllowedBrowserURL(url)) {

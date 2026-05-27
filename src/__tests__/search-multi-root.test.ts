@@ -126,6 +126,38 @@ test('search with workspaceRoots: [] returns no results — never falls back to 
   })
 })
 
+test('search matches Chinese CJK terms after workspace reindex', async (t) => {
+  if (skipIfSqliteUnavailable(t, 'search-multi-root: CJK FTS terms')) return
+  const Sqlite = loadSqliteCtor()!
+  await withTempRoot(async (tmp) => {
+    const dir = join(tmp, 'events'); mkdirSync(dir)
+    const notePath = writeMd(
+      dir,
+      '北岸夜跑.md',
+      '# 北岸夜跑\n\n## 预算\n北岸夜跑预算共 4.0 万元，主要用于报备、物料、安保、摄影和应急。\n',
+    )
+
+    const db = openSchemaDb(Sqlite)
+    try {
+      const fts5Available = probeFts5Availability(db)
+      if (!fts5Available) {
+        t.skip('[ABI-SKIP][sqlite_runtime_error] search-multi-root: FTS5 unavailable; covered by npm run verify:native')
+        return
+      }
+      const engine = new SearchEngine(db, { fts5Available })
+      await engine.reindexWorkspace({ root: dir })
+
+      const result = await engine.search('北岸夜跑预算', { workspaceRoot: dir })
+      assert.ok(
+        result.items.some((item) => item.path === notePath),
+        'CJK query should find the indexed markdown note',
+      )
+    } finally {
+      db.close()
+    }
+  })
+})
+
 // ---------------------------------------------------------------------------
 // Defense-in-depth: search never returns content from unsafe DB rows.
 // ---------------------------------------------------------------------------

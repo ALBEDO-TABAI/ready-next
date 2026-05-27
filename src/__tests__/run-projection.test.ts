@@ -3,7 +3,7 @@ import test from 'node:test'
 
 import { RunProjection } from '../main/modules/agent-control/task-projection/run-projection'
 import type { ProjectionTruthSnapshot } from '../main/modules/agent-control/contracts/run-contracts'
-import type { ConversationScope, ScopeRunSummary } from '../main/modules/agent-control/contracts/types'
+import type { ConversationScope, ScopeRunEventPayload, ScopeRunSummary } from '../main/modules/agent-control/contracts/types'
 
 function createScope(): ConversationScope {
   return {
@@ -193,4 +193,113 @@ test('RunProjection still prefers structured projection truth when legacy browse
   assert.equal(summary?.taskSummary, '上传附件：页面已出现上传卡片')
   assert.equal(summary?.currentStepId, 'ensure_upload')
   assert.deepEqual(summary?.steps.map((step) => step.id), ['ensure_upload'])
+})
+
+test('RunProjection clears stale skill blockers when projection truth explicitly sends null', () => {
+  const store = new Map<string, ScopeRunSummary>()
+  const projection = new RunProjection({
+    getScope: () => createScope(),
+    getPrevious: (scopeId) => store.get(scopeId),
+    setSummary: (scopeId, summary) => {
+      store.set(scopeId, summary)
+    },
+    toChannelKey: () => 'local:app',
+  })
+
+  projection.recordEvent({
+    type: 'updated',
+    scopeId: 'scope-1',
+    agent: 'butler',
+    phase: 'checkpoint',
+    taskId: 'task-vca',
+    blockedReason: '文案分析未完成',
+    taskContinuation: {
+      taskId: 'task-vca',
+      stepId: 'skill_video_copy_analyze#1',
+      blockerType: 'error',
+    },
+    progress: {
+      stage: 'running',
+      completed: 2,
+      total: 5,
+      coverage: 0.4,
+      fingerprint: 'video-copy:running:2',
+      updatedAt: '2026-04-10T01:00:00.000Z',
+      lastError: null,
+    },
+    timestamp: '2026-04-10T01:00:00.000Z',
+  })
+
+  const summary = projection.recordEvent({
+    type: 'updated',
+    scopeId: 'scope-1',
+    agent: 'butler',
+    phase: 'done',
+    taskId: 'task-vca',
+    timestamp: '2026-04-10T01:01:00.000Z',
+  }, {
+    projectionPatch: {
+      blockedReason: null,
+      taskContinuation: null,
+      progress: null,
+      waitingFor: 'none',
+      resumableActions: ['open_artifact'],
+    },
+    transcriptEvents: [],
+  })
+
+  assert.equal(summary?.blockedReason, null)
+  assert.equal(summary?.taskContinuation, null)
+  assert.equal(summary?.progress, null)
+})
+
+test('RunProjection ignores undefined run-state fields instead of clearing active progress', () => {
+  const store = new Map<string, ScopeRunSummary>()
+  const projection = new RunProjection({
+    getScope: () => createScope(),
+    getPrevious: (scopeId) => store.get(scopeId),
+    setSummary: (scopeId, summary) => {
+      store.set(scopeId, summary)
+    },
+    toChannelKey: () => 'local:app',
+  })
+
+  projection.recordEvent({
+    type: 'updated',
+    scopeId: 'scope-1',
+    agent: 'butler',
+    phase: 'checkpoint',
+    taskId: 'task-vca',
+    blockedReason: '后台任务仍在运行',
+    taskContinuation: {
+      taskId: 'task-vca',
+      blockerType: 'background_running',
+    },
+    progress: {
+      stage: 'transcribing',
+      completed: 3,
+      total: 8,
+      coverage: 0.375,
+      fingerprint: 'video-copy:transcribing:3',
+      updatedAt: '2026-04-10T01:00:00.000Z',
+      lastError: null,
+    },
+    timestamp: '2026-04-10T01:00:00.000Z',
+  })
+
+  const summary = projection.recordEvent({
+    type: 'updated',
+    scopeId: 'scope-1',
+    agent: 'butler',
+    phase: 'tool_running',
+    taskId: 'task-vca',
+    blockedReason: undefined,
+    taskContinuation: undefined,
+    progress: undefined,
+    timestamp: '2026-04-10T01:01:00.000Z',
+  } as ScopeRunEventPayload)
+
+  assert.equal(summary?.blockedReason, '后台任务仍在运行')
+  assert.equal(summary?.taskContinuation?.blockerType, 'background_running')
+  assert.equal(summary?.progress?.stage, 'transcribing')
 })

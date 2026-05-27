@@ -12,6 +12,7 @@ export function mapBackendErrorToFriendly(input: {
   const error = String(input.error || '').trim()
   const errorKind = String(input.errorKind || '').trim()
   const source = `${errorKind}\n${error}`
+  const normalized = source.toLowerCase()
 
   if (errorKind === 'scope_missing' || /Conversation scope not found:/i.test(error)) {
     return {
@@ -56,6 +57,100 @@ export function mapBackendErrorToFriendly(input: {
   if (/(^|\n)(host_unavailable|circuit_break)(\n|$)|ToolHostUnavailableError|circuit breaker/i.test(source)) {
     return {
       friendlyMessage: '服务暂时不可用，稍后重试',
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'auto',
+    }
+  }
+
+  if (
+    errorKind === 'quota_exceeded' ||
+    /\bhttp\s*402\b/i.test(source) ||
+    /insufficient[\s_-]*(balance|funds|credits|quota)|quota_exceeded|额度不足|余额不足|套餐|billing|payment_required/i.test(source)
+  ) {
+    return {
+      friendlyMessage: '模型额度不足，请检查外部服务配置或账号余额',
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'user_action',
+    }
+  }
+
+  if (
+    errorKind === 'auth_required' ||
+    errorKind === 'auth' ||
+    errorKind === 'blocked_config' ||
+    /\bhttp\s*(401|403)\b/i.test(source) ||
+    /invalid[\s_-]*(api[\s_-]*)?key|invalid_key|unauthorized|forbidden|permission_denied|api key/i.test(source)
+  ) {
+    return {
+      friendlyMessage: 'API Key 无效或没有权限，请检查设置里的模型配置',
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'user_action',
+    }
+  }
+
+  if (
+    errorKind === 'rate_limited' ||
+    errorKind === 'rate_limit' ||
+    /\bhttp\s*429\b/i.test(source) ||
+    /rate[\s_-]*limit|too many requests|retry-after|限流|请求过快/i.test(source)
+  ) {
+    return {
+      friendlyMessage: '模型服务限流，请稍后重试',
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'auto',
+    }
+  }
+
+  if (
+    errorKind === 'context_overflow' ||
+    /\bhttp\s*413\b/i.test(source) ||
+    /context[\s_-]*(length|window)|maximum[\s_-]*context|too[\s_-]*many[\s_-]*tokens|上下文|内容太长/i.test(source)
+  ) {
+    return {
+      friendlyMessage: '上下文太长，请缩短内容或先压缩后重试',
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'user_action',
+    }
+  }
+
+  if (
+    errorKind === 'timeout_model' ||
+    errorKind === 'timeout_tool' ||
+    /timeout|timed out|请求超时/i.test(source)
+  ) {
+    return {
+      friendlyMessage: '模型响应超时，请稍后重试',
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'auto',
+    }
+  }
+
+  if (
+    errorKind === 'provider_thinking_echo_required' ||
+    /thinking[\s_-]*block|extended[\s_-]*thinking|reasoning[\s_-]*replay|prior[\s_-]*thinking/i.test(source)
+  ) {
+    return {
+      friendlyMessage: '模型需要保留推理上下文，请重新发送或切换模型配置',
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'user_action',
+    }
+  }
+
+  if (
+    errorKind === 'network' ||
+    errorKind === 'transient' ||
+    errorKind === 'blocked_external' ||
+    /enotfound|econnrefused|econnreset|eai_again|tls|fetch failed|network|socket hang up/i.test(normalized)
+  ) {
+    return {
+      friendlyMessage: '模型服务暂时不可用，稍后重试',
       technicalDetails: error || undefined,
       recoverable: true,
       retryStrategy: 'auto',

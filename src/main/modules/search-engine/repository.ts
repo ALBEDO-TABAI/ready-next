@@ -1,5 +1,6 @@
 import type { DatabaseConnection, DatabaseStatement } from '../database'
 import type { WikilinkRef, MdlinkRef, AttachmentRef } from '../../../shared/document-graph-parse'
+import { buildFtsSearchText } from './query'
 
 export interface DocumentRow {
   id: number
@@ -390,6 +391,6 @@ export class SearchRepository {
   private writeFtsRow(documentId: number, name: string, body: string): void {
     if (!this.insertFtsStmt || !this.deleteFtsStmt) return
     this.deleteFtsStmt.run(documentId)
-    this.insertFtsStmt.run(documentId, name, body)
+    this.insertFtsStmt.run(documentId, buildFtsSearchText(name), buildFtsSearchText(body))
   }
 }

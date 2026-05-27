@@ -24,6 +24,15 @@ interface CopyDeliverables {
   report: string
 }
 
+export interface CopyDeliverableProgress {
+  message: string
+  completed: number
+}
+
+export interface CopyDeliverableOptions {
+  onProgress?: (progress: CopyDeliverableProgress) => void
+}
+
 interface VisualSummaryInput {
   title: string
   link: string
@@ -47,6 +56,59 @@ function hasCompleteCopySummaryShape(text: string): boolean {
   const normalized = text.trim()
   if (!normalized) return false
   return REQUIRED_COPY_HEADINGS.every((heading) => normalized.includes(heading))
+}
+
+function splitTranscriptSnippets(text: string): string[] {
+  return text
+    .replace(/\r/g, '\n')
+    .split(/(?<=[。！？!?])\s+|[.!?]\s+|\n+/u)
+    .map((item) => item.replace(/\s+/g, ' ').trim())
+    .filter((item) => item.length >= 6)
+}
+
+function pickSnippet(snippets: string[], index: number): string {
+  if (snippets.length === 0) return '文字稿内容较短，需结合完整转录继续判断。'
+  return snippets[Math.min(Math.max(index, 0), snippets.length - 1)]
+}
+
+function extractKeywordList(text: string): string {
+  const matches = text.match(/[\u4e00-\u9fa5]{2,}|[A-Za-z][A-Za-z'-]{3,}/g) || []
+  const keywords: string[] = []
+  for (const match of matches) {
+    const normalized = match.trim()
+    if (!normalized || keywords.includes(normalized)) continue
+    keywords.push(normalized)
+    if (keywords.length >= 12) break
+  }
+  return keywords.length ? keywords.join('、') : '见完整文字稿'
+}
+
+function buildFallbackCopySummary(input: CopySummaryInput): string {
+  const text = clipText(input.extractedText, 6_000)
+  const snippets = splitTranscriptSnippets(text)
+  const opening = pickSnippet(snippets, 0)
+  const middle = pickSnippet(snippets, Math.floor(snippets.length / 2))
+  const ending = pickSnippet(snippets, snippets.length - 1)
+  const keywords = extractKeywordList(text)
+
+  return [
+    '## 一、TextContent Analysis 视角',
+    `- 叙事结构分析（开场/发展/高潮/转折/结尾）：AI 深度分析未返回完整结果，当前报告基于文字稿自动保底整理。开场信息可参考“${opening}”；中段重点可参考“${middle}”；结尾收束可参考“${ending}”。`,
+    '- 叙事声音分析（基调/节奏/金句）：以原始口播为准，整体节奏和表达强弱需要结合完整视频复核。',
+    '- 修辞手法识别（比喻/反转/呼应/隐喻）：未做外延推断，仅保留文字稿中可见的表达线索。',
+    `- 词库提取（关键词 8-15 个）：${keywords}。`,
+    '',
+    '## 二、Viral-Abstract-Script 视角',
+    '- Viral-5D 诊断（Hook/Emotion/爆点/CTA/社交货币，分别 1-5 星并简评）：当前为保底报告，暂不虚构星级评分；建议人工复核开场吸引力、情绪推进、可传播句和行动号召。',
+    '- 风格定位（2-4 个标签）：基于文字稿可先归为口播叙事、经验分享、观点表达，最终标签需结合画面与账号定位确认。',
+    '- 爆款潜力评估（完播率/互动率/转发率）：缺少模型完整判断时不做确定结论；可优先检查开头 5 秒、情绪峰值和结尾互动设计。',
+    '- 优化建议（1-3 条，必须可执行）：补强开场钩子；压缩重复铺垫；在结尾加入明确互动或转发理由。',
+    '',
+    '## 三、Brainstorming 视角',
+    '- 核心价值拆解：以文字稿中的主要观点、经历或产品承诺为核心，避免扩展原文没有的信息。',
+    '- 创意方向探索（2-3 个）：可围绕开场冲突、过程反差、结尾总结分别做短版切条；也可把高信息密度片段拆成对比式脚本。',
+    '- 增量验证点（2-4 个可测试项）：测试不同开场句；测试结尾 CTA；测试标题关键词；测试字幕节奏和段落停顿。',
+  ].join('\n')
 }
 
 function getMarkdownBodyLength(text: string): number {
@@ -79,6 +141,25 @@ function formatCorrectedTranscript(title: string, text: string): string {
     '## 完整文稿',
     '',
     normalized,
+  ].join('\n')
+}
+
+function extractMarkdownBody(text: string): string {
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !/^#+\s+/.test(line))
+  return lines.join('\n\n').trim()
+}
+
+function buildFallbackStructuredTranscript(title: string, correctedTranscript: string): string {
+  const body = extractMarkdownBody(correctedTranscript)
+  return [
+    `# ${title} 结构化文字稿`,
+    '',
+    '## 一、完整口播',
+    '',
+    body || correctedTranscript.trim(),
   ].join('\n')
 }
 
@@ -189,17 +270,21 @@ export class RSSSubagentRunner {
     }
   }
 
-  async buildCopyDeliverables(input: CopySummaryInput): Promise<CopyDeliverables> {
+  async buildCopyDeliverables(input: CopySummaryInput, options: CopyDeliverableOptions = {}): Promise<CopyDeliverables> {
+    options.onProgress?.({ message: '文字稿已生成，正在校正文稿。', completed: 2 })
     const correctedTranscript = await this.correctCopyTranscript(input)
+    options.onProgress?.({ message: '校正文稿完成，正在生成三维度文案分析报告。', completed: 3 })
     const report = await this.summarizeCopy({
       ...input,
       extractedText: correctedTranscript,
     })
+    options.onProgress?.({ message: '文案分析报告完成，正在整理结构化文字稿。', completed: 4 })
     const structuredTranscript = await this.structureCopyTranscript({
       ...input,
       correctedTranscript,
       report,
     })
+    options.onProgress?.({ message: '文案分析报告和结构化文字稿已生成。', completed: 5 })
     return { correctedTranscript, structuredTranscript, report }
   }
 
@@ -260,7 +345,7 @@ export class RSSSubagentRunner {
       }
     }
 
-    throw new Error('文稿校正失败：AI 模型超时或返回内容不完整')
+    return formatCorrectedTranscript(input.title, input.extractedText)
   }
 
   async summarizeCopy(input: CopySummaryInput): Promise<string> {
@@ -317,21 +402,21 @@ export class RSSSubagentRunner {
     })
     if (hasCompleteCopySummaryShape(text)) return text
 
-    if (text) {
-      const retryText = await this.complete({
-        system,
-        user: [
-          summaryPrompt,
-          '',
-          '上一次输出不完整。请重新输出一份完整报告，必须包含上述三个一级章节和每个章节下的所有条目。',
-        ].join('\n'),
-        maxTokens: 3_200,
-        timeoutMs: 180_000,
-      })
-      if (hasCompleteCopySummaryShape(retryText)) return retryText
-    }
+    const retryText = await this.complete({
+      system,
+      user: [
+        summaryPrompt,
+        '',
+        text
+          ? '上一次输出不完整。请重新输出一份完整报告，必须包含上述三个一级章节和每个章节下的所有条目。'
+          : '上一次请求没有返回完整内容。请重新输出一份完整报告，必须包含上述三个一级章节和每个章节下的所有条目。',
+      ].join('\n'),
+      maxTokens: 3_200,
+      timeoutMs: text ? 180_000 : 240_000,
+    })
+    if (hasCompleteCopySummaryShape(retryText)) return retryText
 
-    throw new Error('文案分析失败：AI 模型超时或返回内容不完整')
+    return buildFallbackCopySummary(input)
   }
 
   private async structureCopyTranscript(input: CopySummaryInput & {
@@ -398,7 +483,7 @@ export class RSSSubagentRunner {
       if (hasStructuredTranscriptShape(retryText, input.correctedTranscript)) return retryText
     }
 
-    throw new Error('结构化文字稿生成失败：AI 模型超时或返回内容不完整')
+    return buildFallbackStructuredTranscript(input.title, input.correctedTranscript)
   }
 
   async summarizeVisual(input: VisualSummaryInput): Promise<string> {

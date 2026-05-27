@@ -234,6 +234,37 @@ describe('cleanJinaReaderMarkdown', () => {
 })
 
 describe('runClipPipeline · Jina-only fallback', () => {
+  it('writes a canonical Bilibili player iframe when og:url carries tracking parameters', async () => {
+    const outputsRoot = mkdtempSync(join(tmpdir(), 'ready-clip-bilibili-'))
+    const result = await runClipPipeline(
+      {
+        html: [
+          '<!doctype html>',
+          '<html>',
+          '<head>',
+          '<title>Bilibili Demo</title>',
+          '<meta property="og:url" content="https://www.bilibili.com/video/BV1XX1XXXXX1/?spm_id_from=333.999.0.0" />',
+          '<meta name="keywords" content="demo,bilibili" />',
+          '<meta name="author" content="Ready" />',
+          '</head>',
+          '<body><main><h1>Bilibili Demo</h1><p>Body</p></main></body>',
+          '</html>',
+        ].join(''),
+        url: 'https://www.bilibili.com/video/BV1XX1XXXXX1/?spm_id_from=333.999.0.0',
+      },
+      {
+        presetDir: PRESET_DIR,
+        preset: 'b站-clipper',
+        outputsRoot,
+      },
+    )
+
+    const saved = readFileSync(result.savedPath, 'utf-8')
+    const iframeLine = saved.split('\n').find((line) => line.includes('player.bilibili.com')) || ''
+    assert.ok(iframeLine.includes('bvid=BV1XX1XXXXX1&p=1&autoplay=0'))
+    assert.ok(!iframeLine.includes('spm_id_from'))
+  })
+
   it('writes a note when raw HTML is unavailable but Jina markdown is present', async () => {
     const outputsRoot = mkdtempSync(join(tmpdir(), 'ready-clip-jina-only-'))
     const result = await runClipPipeline(

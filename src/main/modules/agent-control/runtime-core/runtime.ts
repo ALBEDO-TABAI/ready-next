@@ -33,6 +33,7 @@ import {
 import { ReadyAgentOrchestrator } from './orchestrator'
 import { PromptAssemblyService } from '../prompt-assembly'
 import { RunCoordinator } from '../task-projection/run-coordinator'
+import { executeAgentSchedule, type ScheduleTriggerSource } from './schedule-execution'
 import type { DomainAdapter } from '../domain-adapters/domain-adapter'
 import {
   snapshotLastReferenceSkill,
@@ -99,6 +100,7 @@ import { decryptChannelConfig, encryptChannelConfig } from '../memory/secret-sto
 import { ToolGateway } from '../tools-runtime/tool-gateway'
 import { buildCapabilityRuntimeSnapshot } from '../domain-adapters/capability-runtime-snapshot'
 import { TaskProjectionRepository } from '../../repositories/task-projection-repository'
+import { appendToolCapabilityLog } from '../../tools/tool-event-log'
 import {
   DetachedSkillTaskTracker,
   registerDetachedSkillTaskTracker,
@@ -1603,10 +1605,7 @@ export class AgentControlRuntime extends EventEmitter {
   async runScheduleNow(id: string): Promise<{ success: boolean; error?: string }> {
     const schedule = this.db.getAgentSchedule(id)
     if (!schedule) return { success: false, error: `Schedule not found: ${id}` }
-    if (this.sidecar.isRunning()) {
-      await this.sidecar.runScheduleNow(id)
-    }
-    return await this.executeSchedule(schedule)
+    return await this.executeSchedule(schedule, 'manual')
   }
 
   async syncDatabaseToSidecar(): Promise<void> {
@@ -1687,7 +1686,7 @@ export class AgentControlRuntime extends EventEmitter {
           if (!scheduleId) continue
           const schedule = this.db.getAgentSchedule(scheduleId)
           if (!schedule || schedule.enabled === 0) continue
-          await this.executeSchedule(schedule)
+          await this.executeSchedule(schedule, 'cron')
           continue
         }
         if (evtType === 'channel.inbound') {
@@ -1724,16 +1723,17 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   private async executeSchedule(
-    schedule: AgentScheduleRecord
+    schedule: AgentScheduleRecord,
+    triggerSource: ScheduleTriggerSource = 'cron'
   ): Promise<{ success: boolean; error?: string }> {
-    const prompt = schedule.prompt.trim()
-    if (!prompt) return { success: false, error: 'Schedule prompt is empty' }
-    const wrapped = `[cron:${schedule.name}] ${prompt}`
-    const result = await this.orchestrator.send('butler', wrapped)
-    if (result.success) {
-      this.db.markAgentScheduleRun(schedule.id)
-    }
-    return result
+    return executeAgentSchedule(schedule, {
+      parseJson: (value, fallback) => this.tryParseJson<Record<string, unknown>>(value, fallback),
+      sendScoped: (payload) => this.sendScoped(payload),
+      sendUnscoped: (agent, message, requestId) =>
+        this.orchestrator.send(agent, message, undefined, requestId),
+      markRun: (scheduleId) => this.db.markAgentScheduleRun(scheduleId),
+      appendLog: appendToolCapabilityLog,
+    }, triggerSource)
   }
 
   private async handleInboundChannel(payload: Record<string, unknown>): Promise<void> {

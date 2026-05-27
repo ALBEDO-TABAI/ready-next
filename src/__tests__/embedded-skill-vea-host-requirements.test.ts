@@ -38,7 +38,7 @@ test('VEA manifest exposes host_requirements with VEA-specific config path', () 
   assert.equal(configFile!.preserve_existing, true, 'must merge into the user existing config, not clobber it')
 })
 
-test('VEA manifest declares wc allowlist extension and 30-min default timeout', () => {
+test('VEA manifest declares wc allowlist extension and long-running default timeout', () => {
   const def = compileSkillDefinition({ folderPath: SKILL_DIR, source: 'embedded' })
   const hr = def.hostRequirements
   assert.ok(hr)
@@ -50,8 +50,8 @@ test('VEA manifest declares wc allowlist extension and 30-min default timeout', 
   )
   assert.equal(
     hr!.default_action_timeout_ms,
-    3_600_000,
-    'VEA pipeline can span long child-run phases; host contract currently allows the 1h cap',
+    10_800_000,
+    'VEA pipeline can span long child-run phases and must not be cut off at the old 1h cap',
   )
 })
 

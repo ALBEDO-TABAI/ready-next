@@ -280,6 +280,23 @@ def _scene_image_paths(scene: Dict[str, Any]) -> List[Tuple[str, Path]]:
     return paths
 
 
+def _scene_image_attempt_sets(image_paths: Sequence[Tuple[str, Path]]) -> List[Tuple[str, List[Tuple[str, Path]]]]:
+    attempts: List[Tuple[str, List[Tuple[str, Path]]]] = [("all", list(image_paths))]
+    seen: set[str] = set()
+    unique_paths: List[Tuple[str, Path]] = []
+    for label, path in image_paths:
+        key = str(path.resolve())
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_paths.append((label, path))
+    if len(unique_paths) <= 1:
+        return attempts
+    for label, path in unique_paths:
+        attempts.append((f"{label}-only", [(label, path)]))
+    return attempts
+
+
 def _extract_text_from_response(response: Any) -> str:
     output_text = getattr(response, "output_text", "")
     if output_text:
@@ -411,52 +428,55 @@ def analyze_scene_with_attempts(
     attempts: Sequence[Dict[str, Any]],
     total_scenes: int,
 ) -> Dict[str, Any]:
-    image_paths = _scene_image_paths(scene)
+    image_attempt_sets = _scene_image_attempt_sets(_scene_image_paths(scene))
     prompt = _scene_prompt(scene, total_scenes=total_scenes)
     attempt_records: List[Dict[str, Any]] = []
     last_error = ""
 
     for attempt in attempts:
-        started = time.perf_counter()
-        error = ""
-        raw_response = ""
-        parsed = None
-        try:
-            api_style = attempt["api_style"]
-            provider_config = attempt["provider_config"]
-            model_config = attempt["model_config"]
-            if api_style == "anthropic-messages":
-                raw_response = _call_anthropic_messages(provider_config, model_config, prompt, image_paths)
-            elif api_style == "openai-responses":
-                raw_response = _call_openai_responses(provider_config, model_config, prompt, image_paths)
-            elif api_style == "openai-completions":
-                raw_response = _call_openai_completions(provider_config, model_config, prompt, image_paths)
-            else:
-                raise ValueError(f"暂不支持的 API 风格: {api_style}")
-            parsed = _parse_scene_response(raw_response, int(scene.get("scene_number", 0) or 0))
-            if parsed is None:
-                error = "模型响应未通过 JSON 校验"
-        except Exception as exc:  # pragma: no cover - exercised in live probe
-            error = f"{type(exc).__name__}: {exc}"
-        elapsed_s = round(time.perf_counter() - started, 3)
-        attempt_records.append(
-            {
-                "model_ref": attempt["model_ref"],
-                "declared_image_support": bool(attempt["declared_image_support"]),
-                "elapsed_s": elapsed_s,
-                "ok": parsed is not None,
-                "error": error,
-            }
-        )
-        if parsed is not None:
-            parsed["scene_number"] = int(scene.get("scene_number", 0) or 0)
-            return {
-                "scene_result": parsed,
-                "used_model": attempt["model_ref"],
-                "attempts": attempt_records,
-                "elapsed_s": round(sum(item["elapsed_s"] for item in attempt_records), 3),
-            }
-        last_error = error
+        for image_set_label, image_paths in image_attempt_sets:
+            started = time.perf_counter()
+            error = ""
+            raw_response = ""
+            parsed = None
+            try:
+                api_style = attempt["api_style"]
+                provider_config = attempt["provider_config"]
+                model_config = attempt["model_config"]
+                if api_style == "anthropic-messages":
+                    raw_response = _call_anthropic_messages(provider_config, model_config, prompt, image_paths)
+                elif api_style == "openai-responses":
+                    raw_response = _call_openai_responses(provider_config, model_config, prompt, image_paths)
+                elif api_style == "openai-completions":
+                    raw_response = _call_openai_completions(provider_config, model_config, prompt, image_paths)
+                else:
+                    raise ValueError(f"暂不支持的 API 风格: {api_style}")
+                parsed = _parse_scene_response(raw_response, int(scene.get("scene_number", 0) or 0))
+                if parsed is None:
+                    error = "模型响应未通过 JSON 校验"
+            except Exception as exc:  # pragma: no cover - exercised in live probe
+                error = f"{type(exc).__name__}: {exc}"
+            elapsed_s = round(time.perf_counter() - started, 3)
+            attempt_records.append(
+                {
+                    "model_ref": attempt["model_ref"],
+                    "declared_image_support": bool(attempt["declared_image_support"]),
+                    "image_set": image_set_label,
+                    "image_count": len(image_paths),
+                    "elapsed_s": elapsed_s,
+                    "ok": parsed is not None,
+                    "error": error,
+                }
+            )
+            if parsed is not None:
+                parsed["scene_number"] = int(scene.get("scene_number", 0) or 0)
+                return {
+                    "scene_result": parsed,
+                    "used_model": attempt["model_ref"],
+                    "attempts": attempt_records,
+                    "elapsed_s": round(sum(item["elapsed_s"] for item in attempt_records), 3),
+                }
+            last_error = error
 
     raise ProbeFailure(last_error or "所有候选模型都未返回有效结果", attempt_records)
 

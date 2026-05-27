@@ -63,7 +63,11 @@ export class BrowserHostLayoutService {
   }
 
   showHost(view: BrowserHostView, bounds: BrowserRect): void {
-    this.attachHost(view)
+    if (this.attachedHosts.has(view)) {
+      this.raiseHost(view)
+    } else {
+      this.attachHost(view)
+    }
     this.hiddenHosts.delete(view)
     this.appliedBoundsByView.delete(view)
     this.setHostBoundsNow(view, bounds)
@@ -101,6 +105,21 @@ export class BrowserHostLayoutService {
       this.mainWindow.addBrowserView(view as BrowserView)
     }
     this.attachedHosts.add(view)
+  }
+
+  private raiseHost(view: BrowserHostView): void {
+    const kind = this.hostKindByView.get(view) || 'browserView'
+    try {
+      if (kind === 'webContentsView') {
+        this.mainWindow.contentView.removeChildView(view as WebContentsView)
+        this.mainWindow.contentView.addChildView(view as WebContentsView)
+      } else {
+        this.mainWindow.removeBrowserView(view as BrowserView)
+        this.mainWindow.addBrowserView(view as BrowserView)
+      }
+    } catch {
+      // ignore host ordering failures; the bounds sync below still runs.
+    }
   }
 
   private setHostBoundsNow(view: BrowserHostView, bounds: BrowserRect): void {

@@ -61,12 +61,39 @@ function dedupePlaces(places: PlaceCandidate[]): PlaceCandidate[] {
   const seen = new Set<string>()
   const result: PlaceCandidate[] = []
   for (const place of places) {
-    const key = place.id || `${place.name}|${place.location}`
+    const key = place.id || place.location || `${place.name}|${place.address || ''}`
     if (seen.has(key)) continue
     seen.add(key)
     result.push(place)
   }
   return result
+}
+
+function normalizePlaceName(value: string): string {
+  return value
+    .replace(/\s+/g, '')
+    .replace(/[（）()]/g, '')
+    .toLowerCase()
+}
+
+function shouldCrossCheckPoiAmbiguity(text: string, place: PlaceCandidate): boolean {
+  const normalizedInput = normalizePlaceName(text)
+  const normalizedResolved = normalizePlaceName(place.name)
+  return /(火车站|高铁站|机场|公园|医院|学校|大学|商场|会场|园区|大厦)$/.test(normalizedInput)
+    || normalizedResolved !== normalizedInput
+}
+
+function ambiguousCandidatesFromPoiCrossCheck(
+  geocode: PlaceCandidate,
+  pois: PlaceCandidate[],
+): PlaceCandidate[] {
+  const candidates = dedupePlaces([geocode, ...pois])
+  if (candidates.length < 2) return []
+  const geocodeLocation = parseLocation(geocode.location)
+  if (!geocodeLocation) return candidates.slice(0, 5)
+  return candidates
+    .filter((candidate, index) => index === 0 || distanceMeters(geocode.location, candidate.location) <= 5000)
+    .slice(0, 5)
 }
 
 function closestPolylineDistance(place: PlaceCandidate, route: RouteSummary): number {
@@ -250,7 +277,19 @@ export class RoutePlanner {
       }
     }
     const geocodes = await this.client.geocode(text, city)
-    if (geocodes.length === 1) return geocodes[0]!
+    if (geocodes.length === 1) {
+      const geocode = geocodes[0]!
+      if (shouldCrossCheckPoiAmbiguity(text, geocode)) {
+        const candidates = ambiguousCandidatesFromPoiCrossCheck(
+          geocode,
+          await this.client.placeText(text, city),
+        )
+        if (candidates.length > 1) {
+          throw new MapPlannerError('place_ambiguous', `${label}“${text}”存在多个可能地点，请选择一个。`, candidates)
+        }
+      }
+      return geocode
+    }
     if (geocodes.length > 1) {
       throw new MapPlannerError('place_ambiguous', `${label}“${text}”存在多个可能地点，请选择一个。`, geocodes.slice(0, 5))
     }

@@ -125,7 +125,7 @@ test('embedded analysis and research skills declare user-facing configuration', 
   assert.equal(vea.configuration?.serviceBindings.some((binding) => binding.id === 'visionModel'), true)
   assert.equal(vea.configuration?.serviceBindings.some((binding) => binding.id === 'bilibili'), true)
   assert.equal(copy.configuration?.serviceBindings.some((binding) => binding.id === 'bilibili'), true)
-  assert.equal(copy.configuration?.fields.some((field) => field.id === 'subtitleModel'), true)
+  assert.equal(copy.configuration?.fields.some((field) => field.id === 'subtitleModel'), false)
   assert.equal(research.configuration?.serviceBindings.some((binding) => binding.id === 'searchService'), true)
   assert.equal(research.configuration?.serviceBindings.some((binding) => binding.id === 'fetchService'), true)
   assert.equal(rss.configuration?.serviceBindings.some((binding) => binding.id === 'rsshub'), true)

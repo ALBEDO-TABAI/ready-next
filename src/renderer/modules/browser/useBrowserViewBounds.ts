@@ -90,6 +90,7 @@ export function useBrowserViewBounds({
   const layoutPhaseRef = useRef(layoutPhase)
   const isVisibleAllowedRef = useRef(isVisibleAllowed)
   const hasErrorRef = useRef(hasError)
+  const splitTabIdRef = useRef(splitTabId && splitTabId !== activeTabId ? splitTabId : null)
 
   isActiveRef.current = isActive
   layoutPhaseRef.current = layoutPhase
@@ -116,6 +117,25 @@ export function useBrowserViewBounds({
   const measureSplitBounds = useCallback((): MeasuredBounds | null => (
     measureElementBounds(splitContentRef?.current || null)
   ), [measureElementBounds, splitContentRef])
+
+  useEffect(() => {
+    const currentSplitTabId = splitTabId && splitTabId !== activeTabId ? splitTabId : null
+    const previousSplitTabId = splitTabIdRef.current
+    if (
+      isElectron &&
+      previousSplitTabId &&
+      previousSplitTabId !== currentSplitTabId &&
+      previousSplitTabId !== activeTabId
+    ) {
+      window.electronAPI?.browser?.sendIntent({
+        kind: 'hide',
+        intentId: nextIntentId(),
+        tabId: previousSplitTabId,
+        reason: 'split-collapse',
+      })
+    }
+    splitTabIdRef.current = currentSplitTabId
+  }, [activeTabId, isElectron, splitTabId])
 
   const clearFrameSync = useCallback(() => {
     if (frameSyncRafRef.current !== null) {

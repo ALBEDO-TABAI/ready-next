@@ -26,6 +26,8 @@ import { useMode } from '../../stores/useMode'
 import { useRSSSession } from '../../stores/useRSSSession'
 import { isWorkbenchModePairActive } from '../../modules/workbench/mode-split'
 import { openRSSItemInBrowserTab } from '../../modules/rss/open-rss-item-in-browser'
+import { getRSSAnalysisPollState, type RSSAnalysisProgressPollResult } from '../../modules/rss/analysisPollState'
+import { getRSSAddSourceStatusMessage } from '../../modules/rss/add-source-status'
 import type { RSSItem, RSSSource } from '../../components/rss/RSSFeed'
 import type { AddSourceSuccessInfo } from '../../components/rss/AddSourceModal'
 import type { RSSBrowserOpenActionData } from '../../modules/rss/types'
@@ -300,22 +302,28 @@ export default function RSSMode({
     }
   }, [applyRSSSnapshot, hasHydrated, isActive, loadRSSData])
 
-  const fetchAnalysisProgress = useCallback(async (itemIds: string[]): Promise<boolean> => {
-    if (!window.electronAPI?.rss?.getItemAnalysisProgress) return true
+  const fetchAnalysisProgress = useCallback(async (itemIds: string[]): Promise<RSSAnalysisProgressPollResult> => {
+    if (!window.electronAPI?.rss?.getItemAnalysisProgress) return { ok: true, hasActiveWork: false }
     if (itemIds.length === 0) {
       setAnalysisProgressMap({})
-      return true
+      return { ok: true, hasActiveWork: false }
     }
 
     try {
       const result = await window.electronAPI.rss.getItemAnalysisProgress({ itemIds })
-      if (!result.success || !result.data) return false
-      setAnalysisProgressMap(result.data as Record<string, RSSItemAnalysisProgressState>)
-      return Object.values(result.data).some(
-        (entry) => entry.status === 'queued' || entry.status === 'running_script' || entry.status === 'running_subagent',
-      )
+      if (!result.success || !result.data) return { ok: false, hasActiveWork: false }
+      const progressMap = result.data as Record<string, RSSItemAnalysisProgressState>
+      setAnalysisProgressMap(progressMap)
+      return {
+        ok: true,
+        hasActiveWork: Object.values(progressMap).some(
+          (entry) =>
+            entry.status === 'queued' || entry.status === 'running_script' || entry.status === 'running_subagent',
+        ),
+      }
     } catch {
-      return false
+      // silent-catch: failure is surfaced by getRSSAnalysisPollState as the RSS background-warning banner.
+      return { ok: false, hasActiveWork: false }
     }
   }, [])
 
@@ -350,15 +358,12 @@ export default function RSSMode({
     let timer: ReturnType<typeof setTimeout> | null = null
 
     const tick = async () => {
-      const running = await fetchAnalysisProgress(visibleItemIds)
+      const progress = await fetchAnalysisProgress(visibleItemIds)
       const jobsOk = await fetchAnalysisJobs()
-      if (!running || !jobsOk) {
-        setBackgroundWarning('RSS 后台同步失败，部分状态可能过期。')
-      } else {
-        setBackgroundWarning(null)
-      }
+      const pollState = getRSSAnalysisPollState(progress, jobsOk)
+      setBackgroundWarning(pollState.backgroundWarning)
       if (disposed) return
-      timer = setTimeout(tick, running ? 1400 : 9000)
+      timer = setTimeout(tick, pollState.nextDelayMs)
     }
 
     void tick()
@@ -722,9 +727,8 @@ export default function RSSMode({
           selectedItemTitle: null,
         })
       }
-      if (source?.name) {
-        setStatusMessage(source.warning || `${source.name} 已添加`)
-      }
+      const statusMessage = getRSSAddSourceStatusMessage(source)
+      if (statusMessage) setStatusMessage(statusMessage)
     })
   }, [loadRSSData, setSelection])
 

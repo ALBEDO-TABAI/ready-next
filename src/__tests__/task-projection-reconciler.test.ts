@@ -134,6 +134,9 @@ function writeCompletedRun(outputDir: string, options: { includeAudiovisual: boo
   writeJson(runStatePath, {
     status: 'completed',
     current_stage: 'completed',
+    total_scenes: 64,
+    completed_scenes: 64,
+    coverage_ratio: 1,
     output_dir: outputDir,
   })
   writeFileSync(join(outputDir, 'scene_scores.json'), '{"scenes":[]}', 'utf8')
@@ -193,6 +196,8 @@ test('reconcileTaskProjections keeps blocked VEA projections resumable when run_
         action: 'video_expert_pipeline',
         outputDir,
         runStatePath,
+        blockerType: 'background_running',
+        pauseReason: 'background_running',
       },
     }),
   ])
@@ -272,7 +277,14 @@ test('reconcileTaskProjections marks complete VEA output done and is idempotent'
   assert.equal(updated.status, 'completed')
   assert.equal(updated.interactionState, 'suspended')
   assert.equal(updated.waitingFor, 'none')
+  assert.equal(updated.taskSummary, '技能任务已完成')
   assert.deepEqual(updated.resumableActions, ['open_artifact'])
+  assert.equal(updated.continuationRef?.blockerType, 'completed')
+  assert.equal(updated.continuationRef?.pauseReason, 'completed')
+  assert.equal(updated.continuationRef?.progress?.stage, 'completed')
+  assert.equal(updated.continuationRef?.progress?.completed, 64)
+  assert.equal(updated.continuationRef?.progress?.total, 64)
+  assert.equal(updated.progress?.lastError, null)
   assert.equal(updates.length, 1)
 })
 

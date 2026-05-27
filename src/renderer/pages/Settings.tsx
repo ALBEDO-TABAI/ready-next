@@ -2028,12 +2028,13 @@ function externalServiceDescription(profile: PublicExternalServiceProfile): stri
 function buildExternalServicePayload(
   profile: PublicExternalServiceProfile,
   secretDraft: Record<string, string> | undefined,
+  clearSecrets?: string[],
 ): ExternalServiceUpdateInput {
   const secrets: Record<string, string> = {}
   for (const [key, value] of Object.entries(secretDraft || {})) {
     if (value.trim()) secrets[key] = value.trim()
   }
-  return {
+  const payload: ExternalServiceUpdateInput = {
     id: profile.id,
     kind: profile.kind,
     name: profile.name,
@@ -2042,6 +2043,8 @@ function buildExternalServicePayload(
     options: profile.options,
     secrets,
   }
+  if (clearSecrets?.length) payload.clearSecrets = clearSecrets
+  return payload
 }
 
 function externalServiceStatusStyle(enabled: boolean): CSSProperties {
@@ -2105,7 +2108,12 @@ function externalServiceInputStyle(): CSSProperties {
   }
 }
 
-function externalServiceDraftSummary(profile: PublicExternalServiceProfile, secretDraft: Record<string, string> | undefined): string {
+function externalServiceDraftSummary(
+  profile: PublicExternalServiceProfile,
+  secretDraft: Record<string, string> | undefined,
+  clearSecrets: string[] = [],
+): string {
+  if (clearSecrets.length > 0) return `将清除 ${clearSecrets.length} 项密钥 · 保存后生效`
   const hasDraftSecret = Object.values(secretDraft || {}).some((value) => value.trim())
   if (hasDraftSecret) return '有未保存密钥 · 测试会使用当前输入 · 保存后生效'
   const secretKeys = serviceSecretKeys(profile)
@@ -2116,7 +2124,13 @@ function externalServiceDraftSummary(profile: PublicExternalServiceProfile, secr
   return '密钥未配置'
 }
 
-function hasExternalServiceSecret(profile: PublicExternalServiceProfile, secretDraft: Record<string, string> | undefined, key: string): boolean {
+function hasExternalServiceSecret(
+  profile: PublicExternalServiceProfile,
+  secretDraft: Record<string, string> | undefined,
+  key: string,
+  clearSecrets: string[] = [],
+): boolean {
+  if (clearSecrets.includes(key)) return Boolean(String(secretDraft?.[key] || '').trim())
   return Boolean(String(secretDraft?.[key] || '').trim()) || profile.secretStatus[key]?.configured === true
 }
 
@@ -2127,12 +2141,16 @@ function requiredExternalServiceSecretKeys(profile: PublicExternalServiceProfile
   return []
 }
 
-function externalServiceMissingRequirements(profile: PublicExternalServiceProfile, secretDraft: Record<string, string> | undefined): string[] {
+function externalServiceMissingRequirements(
+  profile: PublicExternalServiceProfile,
+  secretDraft: Record<string, string> | undefined,
+  clearSecrets: string[] = [],
+): string[] {
   const missing: string[] = []
   const baseUrl = String(profile.baseUrl || '').trim()
   if (serviceNeedsBaseUrl(profile) && !baseUrl) missing.push('服务地址')
   for (const key of requiredExternalServiceSecretKeys(profile)) {
-    if (!hasExternalServiceSecret(profile, secretDraft, key)) {
+    if (!hasExternalServiceSecret(profile, secretDraft, key, clearSecrets)) {
       missing.push(EXTERNAL_SERVICE_SECRET_LABELS[key] || key)
     }
   }
@@ -2148,6 +2166,7 @@ function externalServiceMissingRequirements(profile: PublicExternalServiceProfil
 export function ExternalServicesSettingsPanel() {
   const [profiles, setProfiles] = useState<PublicExternalServiceProfile[]>([])
   const [secretDrafts, setSecretDrafts] = useState<Record<string, Record<string, string>>>({})
+  const [secretClearRequests, setSecretClearRequests] = useState<Record<string, string[]>>({})
   const [loading, setLoading] = useState(true)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [testingId, setTestingId] = useState<string | null>(null)
@@ -2211,13 +2230,42 @@ export function ExternalServicesSettingsPanel() {
         [key]: value,
       },
     }))
+    if (value.trim()) {
+      setSecretClearRequests((prev) => ({
+        ...prev,
+        [id]: (prev[id] || []).filter((item) => item !== key),
+      }))
+    }
     setFeedback({ kind: 'info', serviceId: id, text: '有未保存更改。测试会使用当前表单值，保存后才会生效。' })
+  }, [])
+
+  const markSecretForClear = useCallback((id: string, key: string) => {
+    setSecretDrafts((prev) => ({
+      ...prev,
+      [id]: {
+        ...(prev[id] || {}),
+        [key]: '',
+      },
+    }))
+    setSecretClearRequests((prev) => ({
+      ...prev,
+      [id]: Array.from(new Set([...(prev[id] || []), key])),
+    }))
+    setFeedback({ kind: 'info', serviceId: id, text: '密钥已标记清除。测试会按清除后的表单值执行，保存后才会生效。' })
+  }, [])
+
+  const unmarkSecretForClear = useCallback((id: string, key: string) => {
+    setSecretClearRequests((prev) => ({
+      ...prev,
+      [id]: (prev[id] || []).filter((item) => item !== key),
+    }))
+    setFeedback({ kind: 'info', serviceId: id, text: '密钥将继续保留。' })
   }, [])
 
   const toggleProfileEnabled = useCallback((profile: PublicExternalServiceProfile) => {
     setSelectedId(profile.id)
     if (!profile.enabled) {
-      const missing = externalServiceMissingRequirements(profile, secretDrafts[profile.id])
+      const missing = externalServiceMissingRequirements(profile, secretDrafts[profile.id], secretClearRequests[profile.id] || [])
       if (missing.length > 0) {
         const text = `请先完成配置：${missing.join('、')}。`
         setFeedback({
@@ -2230,17 +2278,18 @@ export function ExternalServicesSettingsPanel() {
       }
     }
     patchProfile(profile.id, { enabled: !profile.enabled })
-  }, [patchProfile, secretDrafts])
+  }, [patchProfile, secretClearRequests, secretDrafts])
 
   const saveProfile = useCallback(async (profile: PublicExternalServiceProfile) => {
     if (!window.electronAPI?.settings?.updateExternalService) return
     setBusyId(profile.id)
     setFeedback({ kind: 'info', serviceId: profile.id, text: '正在保存配置...' })
     try {
-      const res = await window.electronAPI.settings.updateExternalService(buildExternalServicePayload(profile, secretDrafts[profile.id]))
+      const res = await window.electronAPI.settings.updateExternalService(buildExternalServicePayload(profile, secretDrafts[profile.id], secretClearRequests[profile.id] || []))
       if (res.success && res.data) {
         setProfiles((prev) => prev.map((item) => item.id === profile.id ? res.data as PublicExternalServiceProfile : item))
         setSecretDrafts((prev) => ({ ...prev, [profile.id]: {} }))
+        setSecretClearRequests((prev) => ({ ...prev, [profile.id]: [] }))
         setFeedback({ kind: 'success', serviceId: profile.id, text: `已保存：${profile.name}` })
       } else {
         setFeedback({ kind: 'error', serviceId: profile.id, text: res.error || `保存失败：${profile.name}` })
@@ -2250,7 +2299,7 @@ export function ExternalServicesSettingsPanel() {
     } finally {
       setBusyId(null)
     }
-  }, [secretDrafts])
+  }, [secretClearRequests, secretDrafts])
 
   const resetProfile = useCallback(async (profile: PublicExternalServiceProfile) => {
     if (!window.electronAPI?.settings?.resetExternalService) return
@@ -2261,6 +2310,7 @@ export function ExternalServicesSettingsPanel() {
       if (res.success && res.data) {
         setProfiles((prev) => prev.map((item) => item.id === profile.id ? res.data as PublicExternalServiceProfile : item))
         setSecretDrafts((prev) => ({ ...prev, [profile.id]: {} }))
+        setSecretClearRequests((prev) => ({ ...prev, [profile.id]: [] }))
         setFeedback({ kind: 'success', serviceId: profile.id, text: `已重置：${profile.name}` })
       } else {
         setFeedback({ kind: 'error', serviceId: profile.id, text: res.error || `重置失败：${profile.name}` })
@@ -2277,7 +2327,7 @@ export function ExternalServicesSettingsPanel() {
     setTestingId(profile.id)
     setFeedback({ kind: 'info', serviceId: profile.id, text: '正在测试当前表单配置...' })
     try {
-      const res = await window.electronAPI.settings.testExternalServiceDraft(buildExternalServicePayload(profile, secretDrafts[profile.id]))
+      const res = await window.electronAPI.settings.testExternalServiceDraft(buildExternalServicePayload(profile, secretDrafts[profile.id], secretClearRequests[profile.id] || []))
       const detail = res.data?.latencyMs ? `（${res.data.latencyMs}ms）` : ''
       setFeedback({
         kind: res.success ? 'success' : 'error',
@@ -2289,7 +2339,7 @@ export function ExternalServicesSettingsPanel() {
     } finally {
       setTestingId(null)
     }
-  }, [secretDrafts])
+  }, [secretClearRequests, secretDrafts])
 
   if (loading) {
     return (
@@ -2304,16 +2354,17 @@ export function ExternalServicesSettingsPanel() {
   const selectedSecretKeys = selectedProfile ? serviceSecretKeys(selectedProfile) : []
   const selectedFeedback = feedback && (!feedback.serviceId || feedback.serviceId === selectedProfile?.id) ? feedback : null
   const selectedDraft = selectedProfile ? secretDrafts[selectedProfile.id] : undefined
+  const selectedClearSecrets = selectedProfile ? secretClearRequests[selectedProfile.id] || [] : []
   const isSelectedBusy = Boolean(selectedProfile && busyId === selectedProfile.id)
   const isSelectedTesting = Boolean(selectedProfile && testingId === selectedProfile.id)
-  const selectedSummary = selectedProfile ? externalServiceDraftSummary(selectedProfile, selectedDraft) : ''
+  const selectedSummary = selectedProfile ? externalServiceDraftSummary(selectedProfile, selectedDraft, selectedClearSecrets) : ''
   // Y1.1 §11.1 honest-label path: vision-model "test" only field-validates in
   // main-process (`external-service-store.ts:342-344,390` — no HTTP probe).
   // Renderer relabels the button so the user sees what the system actually does.
   // Other kinds (amap / jina / rsshub / duckduckgo) DO probe and stay labeled `测试`.
   const isSelectedVisionModel = selectedProfile?.kind === 'vision-model'
   const visionMissingRequirements = isSelectedVisionModel && selectedProfile
-    ? externalServiceMissingRequirements(selectedProfile, selectedDraft)
+    ? externalServiceMissingRequirements(selectedProfile, selectedDraft, selectedClearSecrets)
     : []
   const isVisionTestDisabled = isSelectedVisionModel && visionMissingRequirements.length > 0
 
@@ -2463,16 +2514,31 @@ export function ExternalServicesSettingsPanel() {
 
               {selectedSecretKeys.map((key) => {
                 const status = selectedProfile.secretStatus[key]
+                const markedForClear = selectedClearSecrets.includes(key)
                 return (
                   <label key={key} className="flex flex-col gap-1.5 text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
                     {EXTERNAL_SERVICE_SECRET_LABELS[key] || key}
-                    <input
-                      type="password"
-                      value={secretDrafts[selectedProfile.id]?.[key] || ''}
-                      onChange={(event) => updateSecretDraft(selectedProfile.id, key, event.target.value)}
-                      style={externalServiceInputStyle()}
-                      placeholder={status?.configured ? `已配置 ${status.masked || ''}，留空则保留` : '未配置'}
-                    />
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={secretDrafts[selectedProfile.id]?.[key] || ''}
+                        onChange={(event) => updateSecretDraft(selectedProfile.id, key, event.target.value)}
+                        style={{ ...externalServiceInputStyle(), flex: 1 }}
+                        placeholder={markedForClear ? '保存后清除；输入新值可替换' : status?.configured ? `已配置 ${status.masked || ''}，留空则保留` : '未配置'}
+                      />
+                      {status?.configured ? (
+                        <button
+                          type="button"
+                          data-external-secret-clear={`${selectedProfile.id}:${key}`}
+                          onClick={() => markedForClear ? unmarkSecretForClear(selectedProfile.id, key) : markSecretForClear(selectedProfile.id, key)}
+                          className="inline-flex items-center justify-center text-[12px] font-medium transition-[border-color,color,background-color,opacity] duration-150"
+                          style={externalServiceButtonStyle('plain', isSelectedBusy || isSelectedTesting)}
+                          disabled={isSelectedBusy || isSelectedTesting}
+                        >
+                          {markedForClear ? '保留' : '清除'}
+                        </button>
+                      ) : null}
+                    </div>
                   </label>
                 )
               })}

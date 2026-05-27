@@ -531,13 +531,28 @@ def run_auto_scoring_validation(
             ],
         }
     )
+    order_matches_reference = bool(report_payload.get("order_matches_reference", True))
+    order_mismatch_numbers: List[int] = []
+    if not order_matches_reference:
+        for raw_number in report_payload.get("sample_scene_numbers", []):
+            try:
+                scene_number = int(raw_number)
+            except (TypeError, ValueError):
+                continue
+            if scene_number > 0:
+                order_mismatch_numbers.append(scene_number)
+        if not order_mismatch_numbers:
+            order_mismatch_numbers = [int(number) for number in sampled_numbers if int(number) > 0]
+    blocking_scene_numbers = sorted({*needs_review_numbers, *order_mismatch_numbers}) if not order_matches_reference else []
     report_payload.update(
         {
             "checked_at": datetime.now().isoformat(),
             "validation_run_items": run_items,
             "validation_failed_scene_numbers": failed_numbers,
             "needs_review_scene_numbers": needs_review_numbers,
-            "passed": not failed_numbers and bool(report_payload.get("order_matches_reference", True)),
+            "validation_warning_scene_numbers": needs_review_numbers,
+            "blocking_scene_numbers": blocking_scene_numbers,
+            "passed": not blocking_scene_numbers,
         }
     )
     report_path.write_text(json.dumps(report_payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -546,6 +561,8 @@ def run_auto_scoring_validation(
         "sample_scene_numbers": list(report_payload.get("sample_scene_numbers", [])),
         "needs_review_scene_numbers": needs_review_numbers,
         "validation_failed_scene_numbers": failed_numbers,
+        "validation_warning_scene_numbers": needs_review_numbers,
+        "blocking_scene_numbers": blocking_scene_numbers,
         "passed": bool(report_payload.get("passed")),
     }
 
@@ -1414,7 +1431,7 @@ def auto_score_scenes(
                         )
                         if not validation_summary.get("passed"):
                             needs_review_labels = _format_scene_number_labels(
-                                validation_summary.get("needs_review_scene_numbers", [])
+                                validation_summary.get("blocking_scene_numbers", [])
                             )
                             if needs_review_labels:
                                 blocking_problems.append(f"抽样校验发现需复核场景：{needs_review_labels}")
@@ -1469,12 +1486,15 @@ def auto_score_scenes(
                 f"{int(auto_summary.get('max_workers', DEFAULT_AUTO_SCORING_MAX_WORKERS) or DEFAULT_AUTO_SCORING_MAX_WORKERS)} 路并行"
             )
         if validation_summary is not None:
+            warning_scene_numbers = validation_summary.get("validation_warning_scene_numbers", [])
             print(
                 "   抽样校验: "
                 f"抽查 {len(validation_summary.get('sample_scene_numbers', []))} 个场景，"
-                f"{len(validation_summary.get('needs_review_scene_numbers', []))} 个需复核"
+                f"{len(warning_scene_numbers)} 个需复核"
             )
             print(f"   校验报告: {validation_summary.get('report_path', '')}")
+            if warning_scene_numbers and validation_summary.get("passed"):
+                print("   ⚠️ 抽样校验有非阻塞复核项，完整报告已记录。")
         if blocking_problems:
             print("   ❌ 当前阶段存在阻塞问题：")
             for problem in blocking_problems:
@@ -2084,6 +2104,11 @@ def _main_impl(argv: Optional[List[str]] = None) -> int:
             )
             suffix = "..." if len(verification["missing_sample_scenes"]) > 5 else ""
             problems.append(f"镜头样本缺失：{preview}{suffix}")
+        auto_blocking_scenes = verification.get("auto_scoring_blocking_scene_numbers") or []
+        if auto_blocking_scenes:
+            preview = ",".join(f"Scene {int(num):03d}" for num in auto_blocking_scenes[:5])
+            suffix = "..." if len(auto_blocking_scenes) > 5 else ""
+            problems.append(f"抽样校验存在阻断场景：{preview}{suffix}")
         if not problems:
             problems.append("最终核对未通过")
         print("\n❌ 最终核对未通过，已停止交付")

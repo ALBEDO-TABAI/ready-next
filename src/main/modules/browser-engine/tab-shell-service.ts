@@ -97,6 +97,17 @@ export class BrowserTabShellService {
     this.host.setSplitTabId(null)
   }
 
+  private replaceSplitHostState(nextSplitTabId: string | null, keepTabIds: ReadonlySet<string> = new Set()): void {
+    const previousSplitTabId = this.host.getSplitTabId()
+    if (previousSplitTabId && previousSplitTabId !== nextSplitTabId && !keepTabIds.has(previousSplitTabId)) {
+      const previousSplitTab = this.host.tabs.get(previousSplitTabId)
+      if (previousSplitTab?.view) {
+        this.host.detachHost(previousSplitTab.view)
+      }
+    }
+    this.host.setSplitTabId(nextSplitTabId)
+  }
+
   async navigate(tabId: string | null, url: string): Promise<{ success: boolean; error?: string }> {
     if (!this.host.isAllowedUrl(url)) {
       return { success: false, error: 'Blocked URL protocol. Only http:, https:, and local HTML files are allowed.' }
@@ -214,7 +225,10 @@ export class BrowserTabShellService {
       secondaryTabId && secondaryTabId !== resolvedPrimaryTabId && secondaryBounds
         ? secondaryTabId
         : null
-    this.host.setSplitTabId(resolvedSecondaryTabId)
+    this.replaceSplitHostState(
+      resolvedSecondaryTabId,
+      resolvedPrimaryTabId ? new Set([resolvedPrimaryTabId]) : new Set(),
+    )
     if (resolvedSecondaryTabId && secondaryBounds) {
       this.host.setSplitViewBounds(secondaryBounds)
     }
@@ -280,6 +294,17 @@ export class BrowserTabShellService {
       }
       case 'hide': {
         const tab = this.host.tabs.get(intent.tabId)
+        if (intent.reason === 'split-collapse') {
+          const activeTabId = this.host.getActiveTabId()
+          const isCurrentSplitTab = this.host.getSplitTabId() === intent.tabId
+          if (isCurrentSplitTab) {
+            this.host.setSplitTabId(null)
+          }
+          if (tab?.view && activeTabId !== intent.tabId) {
+            this.host.detachHost(tab.view)
+          }
+          return { success: true }
+        }
         if (!tab?.view) return { success: false }
         this.host.hideHost(tab.view)
         return { success: true }
@@ -298,11 +323,13 @@ export class BrowserTabShellService {
       case 'secondary-set-bounds': {
         const bounds = rectToBrowserRect(intent.bounds)
         const syncMode: BrowserBoundsSyncMode = intent.syncMode ?? 'settled'
-        this.host.setSplitTabId(intent.tabId)
+        const activeTabId = this.host.getActiveTabId()
+        this.replaceSplitHostState(intent.tabId, activeTabId ? new Set([activeTabId]) : new Set())
         this.host.setSplitViewBounds(bounds)
         if (!this.host.shouldPresentHosts()) return { success: true }
         const tab = this.host.tabs.get(intent.tabId)
         if (tab?.view) {
+          this.host.showHost(tab.view, bounds)
           this.host.applyBounds(tab.view, syncMode, bounds)
         }
         return { success: true }

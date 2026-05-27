@@ -286,6 +286,71 @@ def collect_audiovisual_handoff_status(video_dir: Path) -> Dict[str, object]:
     }
 
 
+def _coerce_int_list(value: object) -> List[int]:
+    if not isinstance(value, list):
+        return []
+    numbers: List[int] = []
+    for item in value:
+        try:
+            number = int(item)
+        except (TypeError, ValueError):
+            continue
+        if number > 0 and number not in numbers:
+            numbers.append(number)
+    return numbers
+
+
+def _format_scene_labels(scene_numbers: Sequence[int], limit: int = 6) -> str:
+    labels = [f"Scene {number:03d}" for number in scene_numbers[:limit]]
+    suffix = "；..." if len(scene_numbers) > limit else ""
+    return "；".join(labels) + suffix
+
+
+def collect_auto_scoring_validation_status(video_dir: Path) -> Tuple[Dict[str, object], List[str]]:
+    report_path = video_dir / "auto_scoring_validation.json"
+    if not report_path.exists():
+        return {}, []
+    payload = _read_json(report_path, {})
+    if not isinstance(payload, dict) or not payload:
+        return {}, []
+
+    warning_scene_numbers = _coerce_int_list(
+        payload.get("validation_warning_scene_numbers") or payload.get("needs_review_scene_numbers")
+    )
+    failed_scene_numbers = _coerce_int_list(payload.get("validation_failed_scene_numbers"))
+    blocking_scene_numbers = _coerce_int_list(payload.get("blocking_scene_numbers"))
+    sample_scene_numbers = _coerce_int_list(payload.get("sample_scene_numbers"))
+
+    summary: Dict[str, object] = {
+        "path": str(report_path),
+        "checked_at": str(payload.get("checked_at", "") or ""),
+        "passed": bool(payload.get("passed")),
+        "sample_scene_numbers": sample_scene_numbers,
+        "validation_warning_scene_numbers": warning_scene_numbers,
+        "validation_failed_scene_numbers": failed_scene_numbers,
+        "blocking_scene_numbers": blocking_scene_numbers,
+    }
+
+    if not warning_scene_numbers or blocking_scene_numbers:
+        return summary, []
+
+    details: List[str] = []
+    if sample_scene_numbers:
+        details.append(f"抽查 {len(sample_scene_numbers)} 个")
+    if failed_scene_numbers:
+        details.append(f"{len(failed_scene_numbers)} 个图片探测失败")
+    detail_text = f"（{'，'.join(details)}）" if details else ""
+    return summary, [
+        f"抽样复核有非阻断提醒：{_format_scene_labels(warning_scene_numbers)}{detail_text}"
+    ]
+
+
+def _auto_scoring_validation_blocks(summary: Dict[str, object]) -> bool:
+    if not summary:
+        return False
+    return bool(_coerce_int_list(summary.get("blocking_scene_numbers"))) or summary.get("passed") is False
+
+
 def format_host_batch_receipt_issue_messages(issues: Sequence[Dict[str, object]]) -> List[str]:
     messages: List[str] = []
     for item in issues:
@@ -319,6 +384,8 @@ def build_verification_payload(
 ) -> Dict[str, object]:
     resource_issues = collect_scene_resource_issues(data)
     batch_receipt_issues = collect_host_batch_receipt_issues(video_dir)
+    auto_scoring_validation, non_blocking_warnings = collect_auto_scoring_validation_status(video_dir)
+    auto_scoring_blocks = _auto_scoring_validation_blocks(auto_scoring_validation)
     missing_outputs: List[str] = []
     required_outputs: Dict[str, str] = {}
 
@@ -348,11 +415,15 @@ def build_verification_payload(
             if item.get("missing_samples")
         ],
         "blocked_batches": [str(item["batch_id"]) for item in batch_receipt_issues],
+        "auto_scoring_blocking_scene_numbers": _coerce_int_list(auto_scoring_validation.get("blocking_scene_numbers")),
+        "auto_scoring_validation": auto_scoring_validation,
+        "non_blocking_warnings": non_blocking_warnings,
         "checked_at": datetime.now().isoformat(),
         "passed": (
             not collect_incomplete_scenes(data)
             and not resource_issues
             and not batch_receipt_issues
+            and not auto_scoring_blocks
             and (not include_output_checks or not missing_outputs)
         ),
     }
@@ -372,6 +443,21 @@ def write_delivery_report(video_dir: Path, data: Dict, requested_formats: Sequen
     incomplete_scenes = collect_incomplete_scenes(data)
     batch_receipt_issues = collect_host_batch_receipt_issues(video_dir)
     audiovisual_handoff = collect_audiovisual_handoff_status(video_dir)
+    auto_scoring_validation, non_blocking_warnings = collect_auto_scoring_validation_status(video_dir)
+    auto_scoring_blocks = _auto_scoring_validation_blocks(auto_scoring_validation)
+    verification = state.get("verification", {})
+    verification = dict(verification) if isinstance(verification, dict) else {}
+    if auto_scoring_blocks:
+        verification["passed"] = False
+        verification["auto_scoring_validation_passed"] = False
+        verification["auto_scoring_blocking_scene_numbers"] = _coerce_int_list(
+            auto_scoring_validation.get("blocking_scene_numbers")
+        )
+    data_warnings = [
+        str(item)
+        for item in data.get("warnings", [])
+        if str(item).strip()
+    ] if isinstance(data.get("warnings"), list) else []
 
     report = {
         "video_id": data.get("video_id", "unknown"),
@@ -400,8 +486,11 @@ def write_delivery_report(video_dir: Path, data: Dict, requested_formats: Sequen
         "blocked_batches": [str(item["batch_id"]) for item in batch_receipt_issues],
         "incomplete_scene_numbers": [int(item["scene_number"]) for item in incomplete_scenes],
         "audiovisual_handoff": audiovisual_handoff,
+        "auto_scoring_validation": auto_scoring_validation,
+        "warnings": data_warnings + non_blocking_warnings,
+        "non_blocking_warnings": non_blocking_warnings,
         "last_error": state.get("last_error", ""),
-        "verification": state.get("verification", {}),
+        "verification": verification,
         "updated_at": datetime.now().isoformat(),
     }
     delivery_report_path_for(video_dir).write_text(

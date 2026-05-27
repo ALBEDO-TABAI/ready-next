@@ -19,6 +19,7 @@ interface AddSourceModalProps {
 export interface AddSourceSuccessInfo {
   id?: string
   name?: string
+  itemCount?: number
   warning?: string
 }
 

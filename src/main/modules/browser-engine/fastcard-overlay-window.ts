@@ -32,6 +32,12 @@ export class FastCardOverlayWindow {
   async show(snapshot: FastCardOverlaySnapshot): Promise<void> {
     this.snapshot = snapshot
     const window = await this.ensureWindow()
+    if (this.snapshot !== snapshot) {
+      if (!this.snapshot && !window.isDestroyed()) {
+        window.hide()
+      }
+      return
+    }
     this.applyBounds(snapshot)
     if (!window.isVisible()) window.showInactive()
     window.webContents.send('browser:fastCardOverlaySnapshot', snapshot)
@@ -45,8 +51,18 @@ export class FastCardOverlayWindow {
   }
 
   sendSnapshot(): void {
-    if (!this.snapshot || !this.window || this.window.isDestroyed()) return
+    if (!this.window || this.window.isDestroyed()) return
+    if (!this.snapshot) {
+      if (this.window.isVisible()) {
+        this.window.hide()
+      }
+      return
+    }
     this.window.webContents.send('browser:fastCardOverlaySnapshot', this.snapshot)
+  }
+
+  getSnapshot(): FastCardOverlaySnapshot | null {
+    return this.snapshot
   }
 
   destroy(): void {

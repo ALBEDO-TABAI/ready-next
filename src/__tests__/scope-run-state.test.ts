@@ -9,6 +9,7 @@ import {
   mergeArtifacts,
   phaseToToolTraceStatus
 } from '../renderer/modules/agent/scopeRunState'
+import type { ScopeRunState } from '../renderer/modules/agent/types'
 
 describe('scope run state helpers', () => {
   it('deduplicates artifacts by path and keeps unique entries', () => {
@@ -106,6 +107,8 @@ describe('scope run state helpers', () => {
     assert.strictEqual(isActiveScopePhase('responding'), true)
     assert.strictEqual(isActiveScopePhase('done'), false)
     assert.strictEqual(phaseToToolTraceStatus('checkpoint'), 'running')
+    assert.strictEqual(phaseToToolTraceStatus('checkpoint', 'blocked_config'), 'done')
+    assert.strictEqual(phaseToToolTraceStatus('checkpoint', 'blocked_tool_error'), 'error')
     assert.strictEqual(phaseToToolTraceStatus('cancelled'), 'cancelled')
   })
 
@@ -1078,6 +1081,32 @@ describe('scope run state helpers', () => {
     assert.strictEqual(patch.progress?.completed, 30)
   })
 
+  it('preserves completed progress when a same-run final text tail arrives', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        runId: 'run-tail',
+        phase: 'done',
+        timestamp: '2026-05-05T00:00:02.000Z'
+      } as any,
+      {
+        scopeId: 'scope-tail',
+        agent: 'assistant',
+        requestId: 'run-tail',
+        phase: 'done',
+        terminalReason: 'completed',
+        progress: { stage: 'completed', completed: 5, total: 5, detail: '报告已生成' },
+        toolTrace: [],
+        startedAt: '2026-05-05T00:00:00.000Z',
+        updatedAt: '2026-05-05T00:00:01.000Z',
+        responseBuffer: '',
+        stepMetrics: { toolCalls: 0, toolResults: 0, lastToolAt: null }
+      }
+    )
+
+    assert.strictEqual(patch.progress?.stage, 'completed')
+    assert.strictEqual(patch.progress?.completed, 5)
+  })
+
   it('preserves taskContinuation across same-run terminal tail', () => {
     const patch = deriveScopeRunStatePatch(
       {
@@ -1105,5 +1134,71 @@ describe('scope run state helpers', () => {
     )
     // taskContinuation is excluded from the W5 clear set; it persists across terminals.
     assert.strictEqual(patch.taskContinuation?.detachedTaskId, 'dst-skill')
+  })
+
+  it('clears taskContinuation and progress when a scope event explicitly sends null', () => {
+    const previous: ScopeRunState = {
+      scopeId: 'scope-clear',
+      agent: 'assistant',
+      requestId: 'run-clear',
+      phase: 'tool_running',
+      taskContinuation: {
+        detachedTaskId: 'dst-clear',
+        taskRunId: 'tr-clear',
+      },
+      progress: {
+        stage: 'running',
+        completed: 3,
+        total: 5,
+        coverage: 0.6,
+        fingerprint: 'fp-running',
+        updatedAt: '2026-05-05T00:00:00.500Z',
+        lastError: null,
+      },
+      toolTrace: [],
+      startedAt: '2026-05-05T00:00:00.000Z',
+      updatedAt: '2026-05-05T00:00:00.500Z',
+      responseBuffer: '',
+      stepMetrics: { toolCalls: 0, toolResults: 0, lastToolAt: null },
+    }
+    const patch = deriveScopeRunStatePatch(
+      {
+        runId: 'run-clear',
+        phase: 'done',
+        timestamp: '2026-05-05T00:00:01.000Z',
+        taskContinuation: null,
+        progress: null,
+      } satisfies Parameters<typeof deriveScopeRunStatePatch>[0],
+      previous,
+    )
+
+    assert.strictEqual(patch.taskContinuation, null)
+    assert.strictEqual(patch.progress, null)
+  })
+
+  it('parses persisted progress carried inside taskContinuation', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        runId: 'run-progress-continuation',
+        phase: 'done',
+        timestamp: '2026-05-05T00:00:01.000Z',
+        taskContinuation: {
+          taskId: 'task-progress-continuation',
+          blockerType: 'completed',
+          progress: {
+            stage: 'completed',
+            completed: 64,
+            total: 64,
+            coverage: 1,
+            fingerprint: 'fp-complete',
+            updatedAt: '2026-05-05T00:00:01.000Z',
+            lastError: null
+          }
+        }
+      } as any,
+      null
+    )
+    assert.strictEqual(patch.taskContinuation?.progress?.stage, 'completed')
+    assert.strictEqual(patch.taskContinuation?.progress?.completed, 64)
   })
 })

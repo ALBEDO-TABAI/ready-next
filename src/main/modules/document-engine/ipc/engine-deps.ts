@@ -120,6 +120,8 @@ export interface OpenWorkspaceFileDialogOptions {
 export interface EngineDeps {
   /** Whether the engine is running in mock mode (no SQLite, no dialogs). */
   readonly useMock: boolean
+  /** Host-owned document trash root under app userData. */
+  getDocumentTrashRoot(): string
   /**
    * Construct a fresh `DocumentMarksRepository` bound to the current SQLite
    * connection. The host owns the actual `getDatabase().getRawDb()` lookup

@@ -14,13 +14,13 @@ when-to-use: |
 
 ## 工具调用规约（必读 — 不照做会卡 10 分钟超时）
 
-下面 "主流程" 给的 `python3 scripts/...` 是脚本层入口；**Ready typed action 已经把输出准备、spawn 配置、30 分钟超时、`run_state.json` 状态追踪和任务投影都接好**。用户显式选择 VEA，或技能身份已高置信命中时，冷启动直接调用选定 typed action，不要先扫历史目录、`vnext_config.json` 或旧 `run_state.json`。
+下面 "主流程" 给的 `python3 scripts/...` 是脚本层入口；**Ready typed action 已经把输出准备、spawn 配置、3 小时超时、`run_state.json` 状态追踪和任务投影都接好**。用户显式选择 VEA，或技能身份已高置信命中时，冷启动直接调用选定 typed action，不要先扫历史目录、`vnext_config.json` 或旧 `run_state.json`。
 
 LLM 看到工具名时按下表对应：
 
 - **跑长链路（prepare / score_batches / finalize / 重跑 pipeline）→ 必须优先 typed action**
-  - `skill_video_expert_pipeline({url, outputDir?, sceneThreshold?, bestThreshold?})` — 包了 `pipeline_enhanced.py` / `orchestrate_vnext.py`，30 min 超时
-  - `skill_video_expert_ai_analyze({sceneScoresPath, mode?})` — 包了 `ai_analyzer.py --mode score_batches/merge_validate`，30 min 超时
+  - `skill_video_expert_pipeline({url, outputDir?, sceneThreshold?, bestThreshold?})` — 包了 `pipeline_enhanced.py` / `orchestrate_vnext.py`，3 小时超时
+  - `skill_video_expert_ai_analyze({sceneScoresPath, mode?})` — 包了 `ai_analyzer.py --mode score_batches/merge_validate`，3 小时超时
 - **续跑 / 查看进度 / 诊断 → 优先 `skill_inspect_run_state`**
   - 只在有显式句柄时使用：用户给了 `run_state.json` / `scene_scores.json` / 输出目录、点了任务卡继续、给了 childRunId，或明确要求查进度/历史。
   - 传 `runStatePath` 或 `outputDir`，让 Ready 判断 running / background_running / budget_paused / done，不要先绕 shell。
@@ -31,7 +31,7 @@ LLM 看到工具名时按下表对应：
 反模式（真踩过的坑，不要再重复）：
 - ❌ `skill_run_shell({"command": "python3 scripts/pipeline_enhanced.py <url>"})` — 必超时
 - ❌ `skill_run_shell({"command": "cd <dir> && python3 scripts/orchestrate_vnext.py ..."})` — 同上
-- ❌ typed action 失败后立刻改用 shell 重跑长链路 — 会丢失结构化状态与 30 分钟动作契约
+- ❌ typed action 失败后立刻改用 shell 重跑长链路 — 会丢失结构化状态与 3 小时动作契约
 - ❌ 看进度先 `cat run_state.json` 或 tail 日志 — 易错过 detached / projection / lease 状态
 - ❌ 新视频冷启动前先扫描旧输出目录或旧 `run_state.json` — 会把历史任务误当续跑
 - ✅ `skill_video_expert_pipeline({"url": "<url>", "outputDir": "<dir>"})`

@@ -80,10 +80,21 @@ describe('document engine attachment async IO', () => {
     )
   })
 
-  it('document:delete uses await stat / await rm / await unlink', () => {
+  it('document:delete moves into Ready trash with async filesystem operations', () => {
     assert.match(fileMutationSource, /ipcMain\.handle\('document:delete'[\s\S]*const stats = await stat\(path\)/)
-    assert.match(fileMutationSource, /ipcMain\.handle\('document:delete'[\s\S]*await rm\(path, \{ recursive: true, force: true \}\)/)
-    assert.match(fileMutationSource, /ipcMain\.handle\('document:delete'[\s\S]*await unlink\(path\)/)
+    assert.match(fileMutationSource, /ipcMain\.handle\('document:delete'[\s\S]*const trashRoot = deps\.getDocumentTrashRoot\(\)/)
+    assert.match(fileMutationSource, /ipcMain\.handle\('document:delete'[\s\S]*await movePath\(path, entry\.trashPath, entry\.isDirectory\)/)
+    assert.match(fileMutationSource, /ipcMain\.handle\('document:delete'[\s\S]*await writeTrashIndex\(trashRoot, index\)/)
+    assert.match(fileMutationSource, /ipcMain\.handle\('document:delete'[\s\S]*return \{ success: true, trashEntry: entry \}/)
+    assert.match(fileMutationSource, /async function movePath[\s\S]*await rm\(src, \{ recursive: true, force: true \}\)/)
+    assert.match(fileMutationSource, /async function movePath[\s\S]*await unlink\(src\)/)
+  })
+
+  it('document:restoreTrash uses async movePath to restore the original path', () => {
+    assert.match(fileMutationSource, /ipcMain\.handle\('document:restoreTrash'[\s\S]*const trashRoot = deps\.getDocumentTrashRoot\(\)/)
+    assert.match(fileMutationSource, /ipcMain\.handle\('document:restoreTrash'[\s\S]*await mkdir\(dirname\(entry\.originalPath\), \{ recursive: true \}\)/)
+    assert.match(fileMutationSource, /ipcMain\.handle\('document:restoreTrash'[\s\S]*await movePath\(entry\.trashPath, entry\.originalPath, entry\.isDirectory\)/)
+    assert.match(fileMutationSource, /ipcMain\.handle\('document:restoreTrash'[\s\S]*return \{ success: true, path: entry\.originalPath, trashEntry: entry \}/)
   })
 
   it('document:mkdir / document:createFile use async fs/promises', () => {

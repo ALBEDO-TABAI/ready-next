@@ -274,6 +274,10 @@ function fireOnError(data: Record<string, unknown>): void {
   for (const handler of captured.onError) handler(data)
 }
 
+function fireOnScopeRunEvent(data: Record<string, unknown>): void {
+  for (const handler of captured.onScopeRunEvent) handler(data)
+}
+
 // ---------------------------------------------------------------------------
 // Test X2.1 #4 — failed send unlocks composer for the originating session
 // even when user has NOT switched scopes (basic baseline).
@@ -394,11 +398,47 @@ test('X2.6 — infrastructure_timeout fires after timeout with no terminal event
   assert.equal(slice.isStreaming, false, 'infrastructure_timeout clears isStreaming')
   assert.equal(slice.foregroundBusy, false, 'infrastructure_timeout clears foregroundBusy')
   assert.equal(slice.streamingRequestId, null, 'infrastructure_timeout clears streamingRequestId (Stop button hidden)')
+  assert.equal(slice.scopeRunStates['scope-A']?.phase, 'error', 'infrastructure_timeout marks the active run terminal')
+  assert.equal(slice.scopeRunStates['scope-A']?.terminalReason, 'infra_error', 'infrastructure_timeout releases active-run aliases')
+  assert.equal(state.composerLocked, false, 'active mirror also unlocks after infrastructure_timeout')
+  assert.equal(state.foregroundBusy, false, 'active mirror foregroundBusy is not resurrected by a stale planning run')
 
   // A user-visible "lost track" system message lands in the active scope.
   const lostTrackMsg = state.messages.find((m: { content: string }) =>
     typeof m.content === 'string' && m.content.includes('Ready 跟丢了'))
   assert.ok(lostTrackMsg, 'a "Ready 跟丢了" system message is appended for the active scope')
+})
+
+test('X2.6 — runtime liveness extends the bootstrap watchdog window', async () => {
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-A',
+  })
+
+  driverApi.armInfrastructureWatchdog('scope-A', 'req-A', { timeoutMs: 20 })
+
+  fireOnScopeRunEvent({
+    type: 'started',
+    scopeId: 'scope-A',
+    sessionId: 'scope-A',
+    agent: 'butler',
+    runId: 'req-A',
+    phase: 'planning',
+    latestText: '正在理解需求',
+    timestamp: new Date().toISOString(),
+  })
+
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  driverApi.clearInfrastructureWatchdog('scope-A', 'req-A')
+
+  const state = useAgent.getState()
+  const lostTrackMsg = state.messages.find((m: { content: string }) =>
+    typeof m.content === 'string' && m.content.includes('Ready 跟丢了'))
+  assert.equal(lostTrackMsg, undefined, 'active runtime liveness does not trip the bootstrap lost-track toast')
+  assert.equal(getSessionSlice(state, 'session-A').scopeRunStates['scope-A']?.phase, 'planning')
 })
 
 test('X2.6 — terminal event before timeout disarms the watchdog', async () => {
@@ -456,4 +496,3 @@ test('X2.6 — explicit clearInfrastructureWatchdog disarms by scope', async () 
     typeof m.content === 'string' && m.content.includes('Ready 跟丢了'))
   assert.equal(lostTrackMsg, undefined, 'clearInfrastructureWatchdog disarms the timer')
 })
-

@@ -16,7 +16,7 @@ const electronModule = (() => {
   try { return createRequire(import.meta.url)('electron') as typeof import('electron') }
   catch { return {} as typeof import('electron') }
 })()
-const { app } = electronModule
+const { app, session } = electronModule
 import { getDatabase } from '../database'
 import { atomicWriteJson } from '../agent-control/atomic-write'
 import { getWhichCommand } from '../../utils/platform'
@@ -58,7 +58,9 @@ import {
 } from './skill-host-controller'
 import { spawnWithTreeKill, type SpawnWithTreeKillError } from '../process-cleanup/spawn-with-tree-kill'
 import {
+  buildReadyPythonRuntimeNotFoundMessage,
   buildReadyPythonCandidates,
+  isSupportedReadyPythonSslVersion,
   isSupportedReadyPythonVersion,
   parsePythonVersionText,
   type PythonVersionInfo,
@@ -198,6 +200,7 @@ interface PythonRuntimeState {
   venvId: string
   pythonPath: string
   pythonVersion: string
+  pythonSslVersion: string
   updatedAt: string
 }
 
@@ -639,7 +642,7 @@ export class SkillsRuntimeManager {
       || Boolean(definition.configuration?.serviceBindings?.length)
   }
 
-  private resolveExternalEnv(definition: SkillDefinition): Record<string, string> {
+  private async resolveExternalEnv(definition: SkillDefinition): Promise<Record<string, string>> {
     if (!this.requiresExternalEnv(definition)) return {}
     // U0.2 — fail-fast: previously these catches swallowed config-load failures
     // and let the sub-agent start with a partial / empty env, which consumed
@@ -695,9 +698,69 @@ export class SkillsRuntimeManager {
         const cookieFile = bilibili.options.cookieFile
         if (typeof cookieFile === 'string' && cookieFile.trim()) env.BILIBILI_COOKIE_FILE = cookieFile.trim()
       }
+      const youtubeCookieFile = await this.exportBrowserYoutubeCookies()
+      if (youtubeCookieFile) env.YOUTUBE_COOKIE_FILE = youtubeCookieFile
     }
 
     return env
+  }
+
+  private async exportBrowserYoutubeCookies(): Promise<string | null> {
+    if (!session?.fromPartition) return null
+    try {
+      const browserSession = session.fromPartition('persist:browser')
+      const cookies = await browserSession.cookies.get({})
+      const scoped = cookies.filter((cookie) => {
+        const domain = String(cookie.domain || '').toLowerCase()
+        return domain === 'youtube.com'
+          || domain.endsWith('.youtube.com')
+          || domain === 'google.com'
+          || domain.endsWith('.google.com')
+      })
+      if (scoped.length === 0) return null
+      const cookiePath = join(this.runtimeRoot, `.ready-youtube-cookies-${randomUUID()}.txt`)
+      const lines = [
+        '# Netscape HTTP Cookie File',
+        ...scoped.map((cookie) => {
+          const domain = String(cookie.domain || '')
+          const includeSubdomains = domain.startsWith('.') ? 'TRUE' : 'FALSE'
+          const path = cookie.path || '/'
+          const secure = cookie.secure ? 'TRUE' : 'FALSE'
+          const expires = typeof cookie.expirationDate === 'number' && Number.isFinite(cookie.expirationDate)
+            ? Math.floor(cookie.expirationDate)
+            : 0
+          return [
+            domain,
+            includeSubdomains,
+            path,
+            secure,
+            String(expires),
+            cookie.name,
+            cookie.value,
+          ].join('\t')
+        }),
+      ]
+      writeFileSync(cookiePath, `${lines.join('\n')}\n`, { encoding: 'utf-8', mode: 0o600 })
+      return cookiePath
+    } catch (error) {
+      logAgentMetric('runtime.youtube_cookie_export_failed', {
+        message: error instanceof Error ? error.message : String(error),
+      })
+      return null
+    }
+  }
+
+  private cleanupExportedYoutubeCookieFile(cookiePath: string | undefined): void {
+    if (!cookiePath || !cookiePath.startsWith(this.runtimeRoot) || !cookiePath.includes('.ready-youtube-cookies-')) return
+    try {
+      rmSync(cookiePath, { force: true })
+    } catch {
+      // silent-catch: best-effort cleanup for a per-run temporary cookie export.
+    }
+  }
+
+  private shouldPrepareSkillHost(requirements: import('../../../shared/skill-host-contract').SkillHostRequirements | null): boolean {
+    return Boolean(requirements?.spawn_context || requirements?.concurrency)
   }
 
   /**
@@ -898,14 +961,15 @@ export class SkillsRuntimeManager {
       // mapped 1:1 onto direct runs for Phase 2/3 migrated embedded skills
       // anyway, since there are no skill.workflow.json files left.
 
-      // B-arch-4 — Skill Host Contract wiring. When the skill manifest declares
-      // host_requirements, prepare the declarative spawn environment (config
+      // B-arch-4 — Skill Host Contract wiring. Only requirements that need a
+      // real host wrapper prepare the declarative spawn environment (config
       // file write, secondary files, env overrides, mutex acquisition) BEFORE
-      // running the action; restore exactly once on completion. Skills that
-      // don't opt into the contract bypass the wrap entirely so we don't pay
-      // the agent-context read cost when there's nothing to do.
+      // running the action. Timeout-only manifests still flow through
+      // getEffectiveActionTimeout / detectStatus, but skip the agent-context
+      // read cost.
       const controller = this.getHostController()
       const hostRequirements = resolved.definition.hostRequirements ?? null
+      const shouldPrepareHost = this.shouldPrepareSkillHost(hostRequirements)
       const skillAssetRoot = resolved.installResult.skillPath || ''
       const effectiveTimeout = Math.max(
         3_000,
@@ -921,19 +985,15 @@ export class SkillsRuntimeManager {
       const requestedOutputDir = typeof rawOutputDir === 'string' && rawOutputDir.trim()
         ? rawOutputDir.trim()
         : null
-      const preparedOutputDir = hostRequirements
+      const actionDeclaresOutputDir = action.inputMode === 'json'
+        && action.params.some((param) => param.name === 'outputDir')
+      const shouldPrepareOutputDir = shouldPrepareHost || Boolean(requestedOutputDir) || actionDeclaresOutputDir
+      const preparedOutputDir = shouldPrepareOutputDir
         ? this.resolveOutputDir(requestedOutputDir, resolved.definition.id, jobId)
         : undefined
       let actionParams = preparedOutputDir && action.inputMode === 'json' && !requestedOutputDir
         ? { ...(request.params || {}), outputDir: preparedOutputDir }
         : (request.params || {})
-      if (resolved.definition.id === 'video-copy-analyzer' && action.name === 'video_copy_analyze' && !actionParams.model) {
-        const values = this.skillConfigurationStore.getValues(resolved.definition)
-        const model = values.fields.subtitleModel
-        if (typeof model === 'string' && model.trim()) {
-          actionParams = { ...actionParams, model: model.trim() }
-        }
-      }
       const childRunContext = request.params?.__childRunContext && typeof request.params.__childRunContext === 'object'
         ? request.params.__childRunContext as Record<string, unknown>
         : null
@@ -942,7 +1002,7 @@ export class SkillsRuntimeManager {
         : ''
       const configuredAgentContext = this.resolveConfiguredAgentContext(resolved.definition)
       const effectiveAgentContext = configuredAgentContext ?? request.agentContext ?? null
-      if (hostRequirements) {
+      if (shouldPrepareHost) {
         spawnHandle = await controller.prepareSpawnContext(
           resolved.definition.id,
           resolved.definition.name,
@@ -954,9 +1014,10 @@ export class SkillsRuntimeManager {
         )
       }
 
+      const externalEnv = await this.resolveExternalEnv(resolved.definition)
       const mergedEnv = {
         ...(spawnHandle?.envOverrides || {}),
-        ...this.resolveExternalEnv(resolved.definition),
+        ...externalEnv,
         READY_SKILL_TASK_ID: jobId,
         ...(childRunId ? { READY_SKILL_CHILD_RUN_ID: childRunId } : {}),
         ...(request.env || {}),
@@ -976,6 +1037,7 @@ export class SkillsRuntimeManager {
         )
         return finish(result)
       } finally {
+        this.cleanupExportedYoutubeCookieFile(externalEnv.YOUTUBE_COOKIE_FILE)
         if (spawnHandle) {
           try {
             await controller.restoreSpawnContext(spawnHandle)
@@ -1855,17 +1917,20 @@ export class SkillsRuntimeManager {
     let previousVersionText: string | null = null
     if (existsSync(pythonPath)) {
       const version = await this.getPythonVersion(pythonPath)
-      if (isSupportedReadyPythonVersion(version)) {
-        if (!this.readPythonRuntimeState()?.venvId) {
+      const sslVersionText = await this.getPythonSslVersionText(pythonPath)
+      if (isSupportedReadyPythonVersion(version) && isSupportedReadyPythonSslVersion(sslVersionText)) {
+        const state = this.readPythonRuntimeState()
+        if (!state?.venvId || !state.pythonSslVersion) {
           await this.writePythonRuntimeState(pythonPath)
         }
         return pythonPath
       }
       // Phase 1.3 — capture the bad version BEFORE rmSync so the metric +
       // log can show what we replaced. Old behavior was a silent rm + rebuild.
-      previousVersionText = await this.getPythonVersionText(pythonPath)
+      const versionText = await this.getPythonVersionText(pythonPath)
+      previousVersionText = `${versionText || 'unknown'} / ${sslVersionText || 'ssl unknown'}`
       console.warn(
-        `[SkillsRuntimeManager] Python venv version unsupported (${previousVersionText || 'unknown'}); rebuilding to a Ready-supported version.`,
+        `[SkillsRuntimeManager] Python venv runtime unsupported (${previousVersionText || 'unknown'}); rebuilding to a Ready-supported runtime.`,
       )
       rmSync(this.venvRoot, { recursive: true, force: true })
     }
@@ -1920,13 +1985,15 @@ export class SkillsRuntimeManager {
       const pythonPath = await this.ensurePythonVenv()
       const state = this.readPythonRuntimeState()
       const version = state?.pythonVersion || (await this.getPythonVersionText(pythonPath)) || 'unknown'
-      console.log(`[SkillsRuntimeManager] Python runtime ready: ${version} at ${pythonPath}`)
+      const sslVersion = state?.pythonSslVersion || (await this.getPythonSslVersionText(pythonPath)) || 'unknown ssl'
+      console.log(`[SkillsRuntimeManager] Python runtime ready: ${version} / ${sslVersion} at ${pythonPath}`)
       // Phase 5.2 — observability counterpart to `python_runtime_rebuilt`.
       // Always emit so we can count total boots and detect "ensurePythonVenv
       // succeeded but no rebuilt event" (i.e. healthy boot). Pair with the
       // rebuilt metric to compute rebuild rate.
       logAgentMetric('python_runtime_ready', {
         version,
+        sslVersion,
         pythonPath,
         venvId: state?.venvId ?? null,
         configuredAt: state?.updatedAt ?? null,
@@ -1957,16 +2024,22 @@ export class SkillsRuntimeManager {
       configured = undefined
     }
     const candidates = buildReadyPythonCandidates(configured, process.env)
+    let sawSslIncompatibleCandidate = false
     for (const candidate of candidates) {
       try {
         const version = await this.getPythonVersion(candidate)
         if (!isSupportedReadyPythonVersion(version)) continue
+        const sslVersionText = await this.getPythonSslVersionText(candidate)
+        if (!isSupportedReadyPythonSslVersion(sslVersionText)) {
+          sawSslIncompatibleCandidate = true
+          continue
+        }
         return candidate
       } catch {
         // Continue trying candidates.
       }
     }
-    throw new Error('Python runtime not found. Please install Python 3.9-3.12 or set setting key `skills_python_path`.')
+    throw new Error(buildReadyPythonRuntimeNotFoundMessage({ sawSslIncompatibleCandidate }))
   }
 
   private readPythonRuntimeState(): PythonRuntimeState | null {
@@ -1980,10 +2053,12 @@ export class SkillsRuntimeManager {
 
   private async writePythonRuntimeState(venvPython: string, basePython = venvPython): Promise<PythonRuntimeState> {
     const version = await this.getPythonVersionText(venvPython)
+    const sslVersion = await this.getPythonSslVersionText(venvPython)
     const state: PythonRuntimeState = {
       venvId: randomUUID(),
       pythonPath: basePython,
       pythonVersion: version || 'unknown',
+      pythonSslVersion: sslVersion || 'unknown',
       updatedAt: new Date().toISOString(),
     }
     atomicWriteJson(join(this.venvRoot, PYTHON_RUNTIME_STATE_FILENAME), state)
@@ -1998,6 +2073,19 @@ export class SkillsRuntimeManager {
   private async getPythonVersionText(pythonBin: string): Promise<string | null> {
     try {
       const { stdout, stderr } = await execFileAsync(pythonBin, ['--version'], { timeout: 10_000, maxBuffer: 1_000_000 })
+      return `${stdout} ${stderr}`.trim()
+    } catch {
+      return null
+    }
+  }
+
+  private async getPythonSslVersionText(pythonBin: string): Promise<string | null> {
+    try {
+      const { stdout, stderr } = await execFileAsync(
+        pythonBin,
+        ['-c', 'import ssl; print(ssl.OPENSSL_VERSION)'],
+        { timeout: 10_000, maxBuffer: 1_000_000 },
+      )
       return `${stdout} ${stderr}`.trim()
     } catch {
       return null

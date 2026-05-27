@@ -87,8 +87,8 @@ export const SkillHostRequirementsSchema = z
       .number()
       .int()
       .min(1000)
-      .max(3_600_000)
-      .optional(), // 1s - 1h
+      .max(10_800_000)
+      .optional(), // 1s - 3h
     status_detection: StatusDetectionSchema.optional(),
     lifecycle: LifecycleSchema.optional(),
     concurrency: ConcurrencySchema.optional(),

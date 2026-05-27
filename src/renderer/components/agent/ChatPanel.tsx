@@ -3,6 +3,7 @@ import { AnimatePresence } from 'framer-motion'
 import {
   useAgent,
   initAgentListeners,
+  lookupSessionByConversation,
   type ChatAttachment,
   type ConversationScope,
   type ScopeRunState
@@ -185,6 +186,8 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     loadSendPreferences,
     taskDisclosureState,
     setTaskSectionExpanded,
+    sessions,
+    sessionOrder,
     dismissSoftError
   } = useAgent()
 
@@ -395,12 +398,26 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     return currentScopeTaskRuns.find((item) => !isBackgroundTaskRun(item)) || null
   }, [currentScopeTaskRuns])
 
+  const visibleTaskScopeIds = useMemo(() => {
+    const ids = new Set<string>()
+    if (currentScopeId) ids.add(currentScopeId)
+    for (const sessionId of sessionOrder) {
+      const conversationId = sessions[sessionId]?.conversationId
+      if (conversationId) ids.add(conversationId)
+    }
+    return ids
+  }, [currentScopeId, sessionOrder, sessions])
+
   const backgroundTaskRuns = useMemo(() => {
-    const foregroundKey = currentTaskRun ? getTaskRunDisplayKey(currentTaskRun) : null
+    const foregroundKey = currentTaskRun
+      ? `${currentTaskRun.scopeId}:${getTaskRunDisplayKey(currentTaskRun)}`
+      : null
     const byKey = new Map<string, TaskCardRun>()
-    for (const run of currentScopeTaskRuns) {
+    for (const run of mergedTaskRuns) {
+      if (!visibleTaskScopeIds.has(run.scopeId)) continue
+      if (!isTaskVisible(run)) continue
       if (!isBackgroundTaskRun(run)) continue
-      const key = getTaskRunDisplayKey(run)
+      const key = `${run.scopeId}:${getTaskRunDisplayKey(run)}`
       if (key === foregroundKey) continue
       const existing = byKey.get(key)
       if (!existing || new Date(run.updatedAt).getTime() >= new Date(existing.updatedAt).getTime()) {
@@ -410,7 +427,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     return Array.from(byKey.values()).sort(
       (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
     )
-  }, [currentScopeTaskRuns, currentTaskRun])
+  }, [currentTaskRun, mergedTaskRuns, visibleTaskScopeIds])
 
   const userVisibleToolTrace = useMemo(() => filterUserVisibleToolTraceEvents(toolTrace), [toolTrace])
 
@@ -724,7 +741,12 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
 
   const handleLoadConversation = useCallback(
     (convId: string) => {
-      loadConversation(convId)
+      const state = useAgent.getState()
+      const existingSessionId = lookupSessionByConversation(state, convId)
+      if (existingSessionId && existingSessionId !== state.activeSessionId) {
+        state.setActiveSessionId(existingSessionId)
+      }
+      void loadConversation(convId)
     },
     [loadConversation]
   )
@@ -878,6 +900,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
       onDismissMemoryCapture={handleDismissMemoryCapture}
       onUndoMemoryCapture={handleUndoMemoryCapture}
       onSupplementMemoryCapture={handleSupplementMemoryCapture}
+      onOpenScope={handleLoadConversation}
       onContinueTaskInput={handleContinueTaskInput}
       onSubmitTaskConfirmation={handleSubmitTaskConfirmation}
       onSubmitTaskAgentResult={handleSubmitTaskAgentResult}

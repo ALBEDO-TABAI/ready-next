@@ -381,15 +381,15 @@ const browserAPI = {
     ipcRenderer.on('browser:tabUpdate', handler)
     return () => ipcRenderer.removeListener('browser:tabUpdate', handler)
   },
+  onTabOpened: (callback: (data: unknown) => void) => {
+    const handler = (_: unknown, data: unknown): void => callback(data)
+    ipcRenderer.on('browser:tabOpened', handler)
+    return () => ipcRenderer.removeListener('browser:tabOpened', handler)
+  },
   onAdblockUpdate: (callback: (data: unknown) => void) => {
     const handler = (_: unknown, data: unknown): void => callback(data)
     ipcRenderer.on('browser:adblockUpdate', handler)
     return () => ipcRenderer.removeListener('browser:adblockUpdate', handler)
-  },
-  onNewTabRequest: (callback: (url: string) => void) => {
-    const handler = (_: unknown, url: string): void => callback(url)
-    ipcRenderer.on('browser:newTabRequest', handler)
-    return () => ipcRenderer.removeListener('browser:newTabRequest', handler)
   },
   onFastCardContextAction: (callback: (data: BrowserFastCardContextActionEvent) => void) => {
     const handler = (_: unknown, data: BrowserFastCardContextActionEvent): void => callback(data)
@@ -406,6 +406,8 @@ const browserAPI = {
     ipcRenderer.invoke('browser:fastCardOverlayShow', payload),
   hideFastCardOverlay: () =>
     ipcRenderer.invoke('browser:fastCardOverlayHide'),
+  getFastCardOverlaySnapshot: () =>
+    ipcRenderer.invoke('browser:fastCardOverlayGetSnapshot'),
   sendFastCardOverlayCommand: (command: FastCardOverlayCommand) =>
     ipcRenderer.invoke('browser:fastCardOverlayCommand', command),
   onFastCardOverlayCommand: (callback: (command: FastCardOverlayCommand) => void) => {
@@ -531,6 +533,8 @@ const documentAPI = {
   deleteItem: (path: string) => ipcRenderer.invoke('document:delete', path),
   copyItem: (src: string, dest: string) => ipcRenderer.invoke('document:copy', { src, dest }),
   moveItem: (src: string, dest: string) => ipcRenderer.invoke('document:move', { src, dest }),
+  listTrash: () => ipcRenderer.invoke('document:listTrash'),
+  restoreTrash: (payload: { id: string } | string) => ipcRenderer.invoke('document:restoreTrash', payload),
   stat: (path: string) => ipcRenderer.invoke('document:stat', path),
   openFolder: (payload?: { validateAsWorkspace?: boolean }) =>
     ipcRenderer.invoke('document:openFolder', payload),

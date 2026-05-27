@@ -60,6 +60,17 @@ function createSummary(): ScopeRunSummary {
         createdAt: '2026-04-16T11:00:00.000Z',
       },
     ],
+    progress: {
+      stage: 'running',
+      completed: 1,
+      total: 5,
+      coverage: 0.2,
+      overallCoverage: 0.2,
+      fingerprint: 'video-copy:running:1',
+      updatedAt: '2026-04-16T11:00:00.000Z',
+      lastError: null,
+      detail: '下载视频并提取字幕',
+    },
     executionDiagnostics: {
       budget: {
         maxIterations: 60,
@@ -141,6 +152,7 @@ test('syncTaskProjection creates and then updates projection records from scope 
   assert.equal(created?.budget?.stepBudget?.stepId, 'upload')
   assert.equal(created?.steps[0]?.status, 'running')
   assert.equal(created?.recentArtifacts?.[0]?.label, '页面截图')
+  assert.equal(created?.progress?.detail, '下载视频并提取字幕')
 
   const blockedSummary: ScopeRunSummary = {
     ...summary,
@@ -336,6 +348,55 @@ test('syncTaskProjection does not keep terminal projections in running interacti
 
   assert.equal(result?.status, 'completed')
   assert.equal(result?.interactionState, 'suspended')
+})
+
+test('syncTaskProjection maps blocked terminal reasons instead of keeping stale running state', async () => {
+  const records = new Map<string, TaskProjectionRecord>()
+  const store: TaskProjectionStore = {
+    create(record) {
+      records.set(record.taskId, record)
+    },
+    update(taskId, patch) {
+      records.set(taskId, {
+        ...records.get(taskId)!,
+        ...patch,
+      })
+    },
+    get(taskId) {
+      return records.get(taskId) || null
+    },
+    listByScope(scopeId) {
+      return Array.from(records.values()).filter((record) => record.scopeId === scopeId)
+    },
+    listByParentTask(parentTaskId) {
+      return Array.from(records.values()).filter((record) => record.parentTaskId === parentTaskId)
+    },
+  }
+
+  await syncTaskProjection(store, createSummary(), createPayload())
+
+  const result = await syncTaskProjection(store, {
+    ...createSummary(),
+    phase: 'checkpoint',
+    terminalReason: 'blocked_config',
+    interactionState: 'running',
+    waitingFor: 'none',
+    blockedReason: null,
+    resumableActions: ['cancel'],
+    taskSummary: '请求失败，需要修复配置',
+    updatedAt: '2026-04-28T01:11:00.000Z',
+  }, {
+    ...createPayload(),
+    phase: 'checkpoint',
+    terminalReason: 'blocked_config',
+    timestamp: '2026-04-28T01:11:00.000Z',
+  })
+
+  assert.equal(result?.status, 'blocked')
+  assert.equal(result?.interactionState, 'awaiting_clarification')
+  assert.equal(result?.waitingFor, 'input')
+  assert.equal(result?.blockedReason, '配置需要修复')
+  assert.deepEqual(result?.resumableActions, ['continue', 'cancel'])
 })
 
 test('syncTaskProjection keeps older blocked continuation snapshots when a newer task finishes', async () => {
@@ -1141,4 +1202,141 @@ test('T8: projection identity uses the EXACT child handle attached to the contra
     false,
     'T8: must never alias to a sibling child handle',
   )
+})
+
+test('syncTaskProjection clears stale continuation when truth patch explicitly sends null', async () => {
+  const records = new Map<string, TaskProjectionRecord>()
+  const existing: TaskProjectionRecord = {
+    taskId: 'task-vca',
+    scopeId: 'scope-1',
+    runId: 'run-vca',
+    taskType: 'short_task',
+    module: 'skill',
+    taskTitle: '技能执行 · Video Copy Analyzer',
+    taskSummary: '文案分析未完成',
+    status: 'failed',
+    interactionState: 'suspended',
+    waitingFor: 'none',
+    steps: [],
+    currentStepId: 'skill_video_copy_analyze#1',
+    budget: null,
+    budgetUsagePercent: null,
+    budgetWarningLevel: null,
+    blockedReason: '文案分析未完成',
+    resumableActions: ['retry', 'cancel'],
+    continuationRef: {
+      taskId: 'task-vca',
+      stepId: 'skill_video_copy_analyze#1',
+      blockerType: 'error',
+    },
+    progress: null,
+    recentArtifacts: [],
+    createdAt: '2026-05-25T17:39:00.000Z',
+    updatedAt: '2026-05-25T17:39:00.000Z',
+  }
+  records.set(existing.taskId, existing)
+  const store: TaskProjectionStore = {
+    create(record) { records.set(record.taskId, record) },
+    update(taskId, patch) {
+      records.set(taskId, {
+        ...records.get(taskId)!,
+        ...patch,
+      })
+    },
+    get(taskId) { return records.get(taskId) || null },
+    listByScope(scopeId) {
+      return Array.from(records.values()).filter((record) => record.scopeId === scopeId)
+    },
+    listByParentTask(parentTaskId) {
+      return Array.from(records.values()).filter((record) => record.parentTaskId === parentTaskId)
+    },
+  }
+
+  const result = await syncTaskProjection(store, {
+    ...createSummary(),
+    phase: 'done',
+    taskId: 'task-vca',
+    taskProjectionId: 'task-vca',
+    taskType: 'short_task',
+    blockedReason: null,
+    taskContinuation: null,
+    waitingFor: 'none',
+    resumableActions: ['open_artifact'],
+    updatedAt: '2026-05-25T17:42:00.000Z',
+  }, {
+    ...createPayload(),
+    phase: 'done',
+    taskId: 'task-vca',
+    runId: 'run-vca',
+    module: 'skill',
+    timestamp: '2026-05-25T17:42:00.000Z',
+  }, {
+    projectionPatch: {
+      blockedReason: null,
+      taskContinuation: null,
+      waitingFor: 'none',
+      resumableActions: ['open_artifact'],
+    },
+    transcriptEvents: [],
+  })
+
+  assert.equal(result?.status, 'completed')
+  assert.equal(result?.blockedReason, null)
+  assert.equal(result?.continuationRef, null)
+  assert.deepEqual(result?.resumableActions, ['open_artifact'])
+})
+
+test('syncTaskProjection clears stale progress when truth patch explicitly sends null', async () => {
+  const records = new Map<string, TaskProjectionRecord>()
+  const store: TaskProjectionStore = {
+    create(record) { records.set(record.taskId, record) },
+    update(taskId, patch) {
+      records.set(taskId, {
+        ...records.get(taskId)!,
+        ...patch,
+      })
+    },
+    get(taskId) { return records.get(taskId) || null },
+    listByScope(scopeId) {
+      return Array.from(records.values()).filter((record) => record.scopeId === scopeId)
+    },
+    listByParentTask(parentTaskId) {
+      return Array.from(records.values()).filter((record) => record.parentTaskId === parentTaskId)
+    },
+  }
+
+  await syncTaskProjection(store, {
+    ...createSummary(),
+    taskId: 'task-vca',
+    taskProjectionId: 'task-vca',
+  }, {
+    ...createPayload(),
+    taskId: 'task-vca',
+    runId: 'run-vca',
+    module: 'skill',
+  })
+
+  const result = await syncTaskProjection(store, {
+    ...createSummary(),
+    phase: 'done',
+    taskId: 'task-vca',
+    taskProjectionId: 'task-vca',
+    taskType: 'short_task',
+    progress: null,
+    updatedAt: '2026-05-25T17:42:00.000Z',
+  }, {
+    ...createPayload(),
+    phase: 'done',
+    taskId: 'task-vca',
+    runId: 'run-vca',
+    module: 'skill',
+    timestamp: '2026-05-25T17:42:00.000Z',
+  }, {
+    projectionPatch: {
+      progress: null,
+    },
+    transcriptEvents: [],
+  })
+
+  assert.equal(result?.progress, null)
 })

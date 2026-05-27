@@ -4,6 +4,12 @@ export interface PythonVersionInfo {
   patch?: number
 }
 
+export interface OpenSslVersionInfo {
+  major: number
+  minor: number
+  patch: number
+}
+
 const MIN_READY_PYTHON_MINOR = 9
 const MAX_READY_PYTHON_MINOR = 12
 
@@ -22,6 +28,33 @@ export function isSupportedReadyPythonVersion(version: PythonVersionInfo | null 
   return version.major === 3
     && version.minor >= MIN_READY_PYTHON_MINOR
     && version.minor <= MAX_READY_PYTHON_MINOR
+}
+
+export function parseOpenSslVersionText(value: string): OpenSslVersionInfo | null {
+  const match = String(value || '').match(/OpenSSL\s+(\d+)\.(\d+)\.(\d+)/i)
+  if (!match) return null
+  return {
+    major: Number(match[1]),
+    minor: Number(match[2]),
+    patch: Number(match[3]),
+  }
+}
+
+export function isSupportedReadyPythonSslVersion(value: string | null | undefined): boolean {
+  const version = parseOpenSslVersionText(value || '')
+  if (!version) return false
+  if (version.major > 1) return true
+  if (version.major < 1) return false
+  if (version.minor > 1) return true
+  if (version.minor < 1) return false
+  return version.patch >= 1
+}
+
+export function buildReadyPythonRuntimeNotFoundMessage(params: { sawSslIncompatibleCandidate?: boolean } = {}): string {
+  if (params.sawSslIncompatibleCandidate) {
+    return 'Python runtime not found. Please install Python 3.9-3.12 with OpenSSL 1.1.1+ support or set setting key `skills_python_path`.'
+  }
+  return 'Python runtime not found. Please install Python 3.9-3.12 or set setting key `skills_python_path`.'
 }
 
 export function buildReadyPythonCandidates(configured?: string | null, env: NodeJS.ProcessEnv = process.env): string[] {

@@ -69,6 +69,7 @@ export interface SkillTaskEvent {
   jobId?: string | null
   detachedTaskId?: string | null
   resumePayload?: Record<string, unknown> | null
+  progress?: ScopeRunSkillProgress | null
 }
 
 export interface SkillParentTaskLifecycleEvent {
@@ -833,6 +834,7 @@ export function recordSkillTaskEvent(event: SkillTaskEvent): { stepId: string } 
         todoTitle: step.title,
       }
       : null
+    if (event.progress) projection.progress = { ...event.progress }
   }
 
   const artifacts = [

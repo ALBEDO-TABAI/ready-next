@@ -379,10 +379,21 @@ function hasRecentArtifact(run: TaskCardRunLike): boolean {
 }
 
 function hasBackgroundSignal(run: TaskCardRunLike): boolean {
-  return run.waitingFor === 'background'
+  if (hasBlockedSignal(run)) return false
+  const activeBackground = run.waitingFor === 'background'
     || run.terminalReason === 'checkpoint_background'
-    || run.taskContinuation?.blockerType === 'background_running'
-    || hasActiveChildTask(run)
+  const activeChild = hasActiveChildTask(run)
+  if (activeBackground || activeChild) return true
+  if (isCompletedTerminalRun(run)) return false
+  return run.taskContinuation?.blockerType === 'background_running'
+}
+
+function isCompletedTerminalRun(run: TaskCardRunLike): boolean {
+  const status = run.status as string | null | undefined
+  const terminalReason = run.terminalReason as string | null | undefined
+  return status === 'completed'
+    || status === 'done'
+    || (run.phase === 'done' && (terminalReason === 'done' || terminalReason === 'completed'))
 }
 
 function hasBudgetPausedSignal(run: TaskCardRunLike): boolean {
@@ -395,6 +406,17 @@ function hasBudgetPausedSignal(run: TaskCardRunLike): boolean {
 function hasBlockedTerminalReason(run: TaskCardRunLike): boolean {
   return run.terminalReason === 'blocked_config'
     || run.terminalReason === 'blocked_external'
+}
+
+function hasBlockedContinuationReason(run: TaskCardRunLike): boolean {
+  const blockerType = run.taskContinuation?.blockerType
+  return blockerType === 'blocked'
+    || blockerType === 'blocked_config'
+    || blockerType === 'blocked_external'
+}
+
+function hasBlockedSignal(run: TaskCardRunLike): boolean {
+  return hasBlockedTerminalReason(run) || hasBlockedContinuationReason(run)
 }
 
 /**
@@ -462,7 +484,7 @@ export function deriveTaskCardRuntimeState(run: TaskCardRunLike): TaskCardRuntim
   }
   if (
     (run.waitingFor && run.waitingFor !== 'none')
-    || hasBlockedTerminalReason(run)
+    || hasBlockedSignal(run)
     || run.terminalReason === 'checkpoint_user_input'
     || run.status === 'blocked'
     || run.interactionState === 'awaiting_clarification'
@@ -480,6 +502,13 @@ export function deriveTaskCardRuntimeState(run: TaskCardRunLike): TaskCardRuntim
       actionSet: gateActionsByCanResume(baseActions, run.canResume, {
         allowUserInteractionContinue: isAwaitingUserInteractionState(run),
       }),
+    }
+  }
+  if (run.phase === 'cancelled' || run.status === 'killed') {
+    return {
+      visualState: 'done',
+      statusLabel: taskStatusLabel(run.status) || taskPhaseLabel(run.phase),
+      actionSet: [],
     }
   }
   if (run.phase === 'done' || run.status === 'completed') {

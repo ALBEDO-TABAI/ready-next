@@ -83,6 +83,7 @@ export interface TaskToolSnapshotProps {
   onDismissMemoryCapture: (scopeId: string) => void
   onUndoMemoryCapture: (scopeId: string) => void
   onSupplementMemoryCapture: (scopeId: string) => void
+  onOpenScope: (scopeId: string) => void
   onContinueTaskInput: (scopeId: string) => void
   onSubmitTaskConfirmation: (scopeId: string, confirmed: boolean) => void
   onSubmitTaskAgentResult: (scopeId: string) => void
@@ -114,6 +115,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
     onDismissMemoryCapture,
     onUndoMemoryCapture,
     onSupplementMemoryCapture,
+    onOpenScope,
     onContinueTaskInput,
     onSubmitTaskConfirmation,
     onSubmitTaskAgentResult,
@@ -151,6 +153,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
           onDismissMemoryCapture={onDismissMemoryCapture}
           onUndoMemoryCapture={onUndoMemoryCapture}
           onSupplementMemoryCapture={onSupplementMemoryCapture}
+          onOpenScope={onOpenScope}
           onContinueInput={onContinueTaskInput}
           onSubmitConfirmation={onSubmitTaskConfirmation}
           onSubmitAgentResult={onSubmitTaskAgentResult}
@@ -166,6 +169,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
     },
     [
       currentScopeId,
+      onOpenScope,
       onContinueTaskInput,
       onCancelDetachedTask,
       onCancelChildRun,
@@ -373,7 +377,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
         {effectiveForegroundActive && currentTaskRun
           ? renderTaskSnapshotCard(
               currentTaskRun,
-              `bottom-task-${getTaskRunDisplayKey(currentTaskRun)}`,
+              `bottom-task-${currentTaskRun.scopeId}-${getTaskRunDisplayKey(currentTaskRun)}`,
               true,
             )
           : null}
@@ -394,7 +398,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
             {backgroundTaskRuns.map((run) =>
               renderTaskSnapshotCard(
                 run,
-                `bottom-task-${getTaskRunDisplayKey(run)}`,
+                `bottom-task-${run.scopeId}-${getTaskRunDisplayKey(run)}`,
                 true,
               ),
             )}

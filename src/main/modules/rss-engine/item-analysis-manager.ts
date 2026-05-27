@@ -570,7 +570,6 @@ export class RSSItemAnalysisManager {
         params: {
           input: sourceVideoPath || payload.link,
           outputDir,
-          model: 'small',
           language: 'auto',
         },
         timeoutMs: 30 * 60 * 1000,

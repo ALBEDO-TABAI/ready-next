@@ -17,7 +17,7 @@
  */
 
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -360,6 +360,22 @@ function makeFakeRepository(): { repo: SkillTaskRunRepository; state: FakeRepoSt
         const child = (row.resumePayload as { childRun?: Record<string, unknown> } | null)?.childRun
         if (!child) continue
         if (child.singleFlightKey === key && ACTIVE.has(child.status as string)) return row
+      }
+      return null
+    },
+    findChildRunByRunStatePath: (opts: { runStatePath: string; skillId?: string | null }): SkillTaskRunRecord | null => {
+      for (const row of state.rows.values()) {
+        if (row.runStatePath !== opts.runStatePath) continue
+        if (opts.skillId && row.skillId !== opts.skillId) continue
+        return row
+      }
+      return null
+    },
+    findChildRunByOutputDir: (opts: { outputDir: string; skillId?: string | null }): SkillTaskRunRecord | null => {
+      for (const row of state.rows.values()) {
+        if (row.outputDir !== opts.outputDir) continue
+        if (opts.skillId && row.skillId !== opts.skillId) continue
+        return row
       }
       return null
     },
@@ -941,6 +957,68 @@ test('Worker B: state_observed reads run_state/artifact progress into projection
   assert.equal(close.progress.coverageRatio, 0.3)
 })
 
+test('Worker B: completed run_state clears stale progress error before close', async () => {
+  const outputDir = mkdtempSync(join(tmpdir(), 'ready-child-progress-clear-error-'))
+  const runStatePath = join(outputDir, 'run_state.json')
+  const taskProjectionStore = makeFakeTaskProjectionStore()
+  const { runtime } = setupRunner({
+    launchStuckGuardMs: 5_000,
+    progressPollIntervalMs: 10,
+    taskProjectionStore,
+  })
+  let releaseAction!: () => void
+  const actionHold = new Promise<void>((resolve) => { releaseAction = resolve })
+  runtime.manager.runSkill = (async (request: SkillRunRequest) => {
+    writeFileSync(runStatePath, JSON.stringify({
+      status: 'running',
+      current_stage: 'score_batches',
+      total_scenes: 2,
+      completed_scenes: 1,
+      coverage_ratio: 0.5,
+      updated_at: '2026-05-04T08:00:00.000Z',
+      last_error: 'temporary handoff pending',
+    }), 'utf8')
+    await actionHold
+    writeCompletedVeaArtifacts(outputDir)
+    return {
+      success: true,
+      skillId: request.skillId,
+      action: request.action,
+      stdout: '',
+      stderr: '',
+      command: [],
+    }
+  }) as never
+  registerStubDriver('test-skill-clear-progress-error', {
+    plans: [
+      { action: 'video_expert_pipeline', input: {} },
+      makeTerminalClose('test-skill-clear-progress-error', 'completed', 'completed'),
+    ],
+  })
+
+  const launch = await startSkillChildRun({
+    scopeId: 'scope-clear-progress-error',
+    sessionId: 'session-clear-progress-error',
+    skillId: 'test-skill-clear-progress-error',
+    action: 'video_expert_pipeline',
+    requestedInput: { outputDir },
+  })
+  await pollUntil(() => {
+    const active = getSkillChildRunner()?.listActiveRuns().find((item) => item.childRunId === launch.childRunId)
+    return active?.progress.lastError === 'temporary handoff pending' ? active : null
+  })
+
+  releaseAction()
+  const close = await pollUntil(() => getSkillChildRunCloseEvent(launch.childRunId))
+  assert.equal(close.progress.stage, 'completed')
+  assert.equal(close.progress.completedUnits, 2)
+  assert.equal(close.progress.totalUnits, 2)
+  assert.equal(close.error, null)
+  const row = taskProjectionStore.state.rows.get(`skill-child:${launch.childRunId}`)
+  assert.equal(row?.blockedReason, null)
+  assert.equal(row?.continuationRef?.progress?.lastError, null)
+})
+
 test('Worker B: progress poll claims a child-created output subdirectory by childRunId', async () => {
   const outputRoot = mkdtempSync(join(tmpdir(), 'ready-child-progress-root-'))
   const childOutputDir = join(outputRoot, 'video-title-output')
@@ -1176,10 +1254,19 @@ test('VEA task-card overall progress does not reset when prepare hands off to sc
   }
 
   writeRunState('prepare', 39, '2026-05-04T05:00:00.000Z')
+  writeFileSync(join(outputDir, 'scene_scores.json'), JSON.stringify({
+    scenes: Array.from({ length: 39 }, (_item, index) => ({
+      scene_number: index + 1,
+      scores: {},
+      storyboard: {},
+    })),
+  }), 'utf8')
   const prepared = await pollUntil(() => {
     const active = getSkillChildRunner()?.listActiveRuns().find((item) => item.childRunId === launch.childRunId)
     return active?.progress.stage === 'prepare' && active.progress.overallCoverage === 0.2 ? active.progress : null
   })
+  assert.equal(prepared.completed, 39)
+  assert.equal(prepared.total, 39)
   assert.equal(prepared.overallCoverage, 0.2)
 
   writeRunState('score_batches', 0, '2026-05-04T05:00:10.000Z')
@@ -1256,7 +1343,9 @@ test('Worker B: child close maps completed/blocked/failed/cancelled projections 
 
   for (const item of cases) {
     const skillId = `test-skill-projection-${item.name}`
-    const { runtime } = setupRunner({ launchStuckGuardMs: 5_000 })
+    const taskProjectionStore = makeFakeTaskProjectionStore()
+    let childRunId: string | null = null
+    const { runtime } = setupRunner({ launchStuckGuardMs: 5_000, taskProjectionStore })
     if (item.cancel) {
       let resolveStall!: () => void
       const stall = new Promise<void>((resolve) => { resolveStall = resolve })
@@ -1281,6 +1370,7 @@ test('Worker B: child close maps completed/blocked/failed/cancelled projections 
         action: 'do_thing',
         requestedInput: { url: `https://example.com/${item.name}` },
       })
+      childRunId = launch.childRunId
       await sleep(20)
       const closePromise = cancelSkillChildRun(launch.childRunId, 'user_cancelled_projection_case')
       resolveStall()
@@ -1294,6 +1384,7 @@ test('Worker B: child close maps completed/blocked/failed/cancelled projections 
         action: 'do_thing',
         requestedInput: { url: `https://example.com/${item.name}` },
       })
+      childRunId = launch.childRunId
       await pollUntil(() => getSkillChildRunCloseEvent(launch.childRunId))
     }
 
@@ -1305,6 +1396,11 @@ test('Worker B: child close maps completed/blocked/failed/cancelled projections 
     assert.equal((projection as unknown as { status?: string }).status, item.expectedStatus)
     assert.equal(currentProjectionStep(projection!)?.status, item.expectedStepStatus)
     assert.equal(projection!.waitingFor, item.expectedWaitingFor)
+    const childProjection = childRunId
+      ? taskProjectionStore.state.rows.get(`skill-child:${childRunId}`)
+      : null
+    assert.ok(childProjection, `${item.name} child task projection should exist`)
+    assert.equal(childProjection!.waitingFor, item.expectedWaitingFor)
     if (item.name === 'blocked') {
       assert.notEqual((projection as unknown as { status?: string }).status, 'completed')
       assert.ok(projection!.taskContinuation)
@@ -1680,6 +1776,153 @@ test('resumeSkillChildRun completes pending handoff for blocked_external child b
     assert.equal(runtime.calls.at(-1)?.action, 'video_expert_ai_analyze')
   } finally {
     globalThis.fetch = originalFetch
+  }
+})
+
+test('starting the same VEA outputDir resumes blocked finalize instead of minting a duplicate child run', async () => {
+  const outputDir = mkdtempSync(join(tmpdir(), 'ready-vea-blocked-finalize-dedupe-'))
+  const sceneScoresPath = join(outputDir, 'scene_scores.json')
+  writeFileSync(sceneScoresPath, JSON.stringify({ scenes: [] }), 'utf8')
+  writeFileSync(join(outputDir, 'run_state.json'), JSON.stringify({
+    status: 'blocked',
+    current_stage: 'finalize',
+    scores_path: 'scene_scores.json',
+    last_error: 'awaiting audiovisual handoff',
+  }), 'utf8')
+  mkdirSync(join(outputDir, 'audiovisual_handoff', 'body'), { recursive: true })
+  writeFileSync(join(outputDir, 'audiovisual_handoff', 'body', 'output.md'), 'already completed handoff body', 'utf8')
+  writeFileSync(join(outputDir, 'audiovisual_handoff', 'receipt.json'), JSON.stringify({
+    tasks: {
+      body: {
+        status: 'completed',
+        task: 'audiovisual_handoff/body/task.md',
+        output: 'audiovisual_handoff/body/output.md',
+      },
+    },
+  }), 'utf8')
+
+  const { repo } = setupRunner({ launchStuckGuardMs: 5_000 })
+  registerStubDriver('video-expert-analyzer', {
+    plans: [
+      makeTerminalClose('video-expert-analyzer', 'blocked', 'blocked_external'),
+    ],
+  })
+
+  const first = await startSkillChildRun({
+    scopeId: 'scope-vea-dedupe',
+    sessionId: 'session-vea-dedupe',
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    requestedInput: { outputDir },
+  })
+  await pollUntil(() => getSkillChildRunCloseEvent(first.childRunId))
+  assert.equal(repo.state.rows.size, 1)
+
+  registerStubDriver('video-expert-analyzer', {
+    plans: [
+      makeTerminalClose('video-expert-analyzer', 'completed', 'completed'),
+    ],
+  })
+
+  const resumed = await startSkillChildRun({
+    scopeId: 'scope-vea-dedupe',
+    sessionId: 'session-vea-dedupe',
+    skillId: 'video-expert-analyzer',
+    action: 'video_expert_pipeline',
+    requestedInput: { outputDir },
+    agentContext: {
+      provider: 'xiaomi',
+      model_id: 'mimo-v2.5',
+      base_url: 'https://example.test/v1',
+      api_key: 'test-key',
+      api_kind: 'openai-completions',
+      fallback_chain: [],
+      input_modes: ['text'],
+    },
+  })
+
+  assert.equal(resumed.childRunId, first.childRunId)
+  assert.equal(resumed.status, 'running')
+  assert.equal(repo.state.rows.size, 1)
+  const finalClose = await pollUntil(() => getSkillChildRunCloseEvent(first.childRunId))
+  assert.equal(finalClose.status, 'completed')
+})
+
+test('starting the same VEA outputDir matches canonical path aliases before minting a duplicate child run', async () => {
+  const realRoot = mkdtempSync(join(tmpdir(), 'ready-vea-real-root-'))
+  const aliasRoot = `${realRoot}-alias`
+  symlinkSync(realRoot, aliasRoot, 'dir')
+  try {
+    const realOutputDir = join(realpathSync.native(realRoot), 'output')
+    const aliasOutputDir = join(aliasRoot, 'output')
+    mkdirSync(realOutputDir, { recursive: true })
+    writeFileSync(join(realOutputDir, 'scene_scores.json'), JSON.stringify({ scenes: [] }), 'utf8')
+    writeFileSync(join(realOutputDir, 'run_state.json'), JSON.stringify({
+      status: 'blocked',
+      current_stage: 'finalize',
+      scores_path: 'scene_scores.json',
+      last_error: 'awaiting audiovisual handoff',
+    }), 'utf8')
+    mkdirSync(join(realOutputDir, 'audiovisual_handoff', 'body'), { recursive: true })
+    writeFileSync(join(realOutputDir, 'audiovisual_handoff', 'body', 'output.md'), 'already completed handoff body', 'utf8')
+    writeFileSync(join(realOutputDir, 'audiovisual_handoff', 'receipt.json'), JSON.stringify({
+      tasks: {
+        body: {
+          status: 'completed',
+          task: 'audiovisual_handoff/body/task.md',
+          output: 'audiovisual_handoff/body/output.md',
+        },
+      },
+    }), 'utf8')
+
+    const { repo } = setupRunner({ launchStuckGuardMs: 5_000 })
+    registerStubDriver('video-expert-analyzer', {
+      plans: [
+        makeTerminalClose('video-expert-analyzer', 'blocked', 'blocked_external'),
+      ],
+    })
+
+    const first = await startSkillChildRun({
+      scopeId: 'scope-vea-canon-dedupe',
+      sessionId: 'session-vea-canon-dedupe',
+      skillId: 'video-expert-analyzer',
+      action: 'video_expert_pipeline',
+      requestedInput: { outputDir: realOutputDir },
+    })
+    await pollUntil(() => getSkillChildRunCloseEvent(first.childRunId))
+    assert.equal(repo.state.rows.size, 1)
+
+    registerStubDriver('video-expert-analyzer', {
+      plans: [
+        makeTerminalClose('video-expert-analyzer', 'completed', 'completed'),
+      ],
+    })
+
+    const resumed = await startSkillChildRun({
+      scopeId: 'scope-vea-canon-dedupe-2',
+      sessionId: 'session-vea-canon-dedupe-2',
+      skillId: 'video-expert-analyzer',
+      action: 'video_expert_pipeline',
+      requestedInput: { outputDir: aliasOutputDir },
+      agentContext: {
+        provider: 'xiaomi',
+        model_id: 'mimo-v2.5',
+        base_url: 'https://example.test/v1',
+        api_key: 'test-key',
+        api_kind: 'openai-completions',
+        fallback_chain: [],
+        input_modes: ['text'],
+      },
+    })
+
+    assert.equal(resumed.childRunId, first.childRunId)
+    assert.equal(resumed.status, 'running')
+    assert.equal(repo.state.rows.size, 1)
+    const finalClose = await pollUntil(() => getSkillChildRunCloseEvent(first.childRunId))
+    assert.equal(finalClose.status, 'completed')
+  } finally {
+    rmSync(aliasRoot, { force: true })
+    rmSync(realRoot, { recursive: true, force: true })
   }
 })
 
@@ -2217,6 +2460,120 @@ test('T4 Case D: cancel on persisted-but-inactive row uses the row real skillId 
   // intent — Case E covers the observer-timeout distinction).
   assert.equal(close.status, 'killed')
   assert.equal(close.terminalReason, 'cancelled_user')
+})
+
+test('T4 Case E: cancel on inactive blocked child run overrides cached blocked close and updates projection', async () => {
+  const taskProjectionStore = makeFakeTaskProjectionStore()
+  const scopeRunEvents: ScopeRunEventPayload[] = []
+  setupRunner({
+    taskProjectionStore,
+    publishScopeRunEvent: (event) => scopeRunEvents.push(event),
+  })
+  registerStubDriver('test-skill-cancel-blocked', {
+    plans: [
+      makeTerminalClose('test-skill-cancel-blocked', 'blocked', 'blocked_external'),
+    ],
+  })
+  const result = await startSkillChildRun({
+    scopeId: 'scope-cancel-blocked',
+    sessionId: 'session-cancel-blocked',
+    skillId: 'test-skill-cancel-blocked',
+    action: 'do_thing',
+    requestedInput: { url: 'https://example.com/cancel-blocked' },
+  })
+  await pollUntil(() => getSkillChildRunCloseEvent(result.childRunId))
+
+  const taskId = `skill-child:${result.childRunId}`
+  const blockedProjection = taskProjectionStore.state.rows.get(taskId)
+  assert.equal(blockedProjection?.status, 'blocked')
+  const duplicateTaskId = 'task-duplicate-cancel-blocked'
+  taskProjectionStore.state.rows.set(duplicateTaskId, {
+    ...blockedProjection!,
+    taskId: duplicateTaskId,
+    continuationRef: {
+      ...(blockedProjection!.continuationRef || {}),
+      taskId: duplicateTaskId,
+      childRunId: result.childRunId,
+    },
+  })
+
+  const close = await cancelSkillChildRun(result.childRunId, {
+    source: 'ui_button',
+    reason: 'user_pressed_cancel',
+  })
+
+  assert.equal(close.status, 'killed')
+  assert.equal(close.terminalReason, 'cancelled_user')
+  const row = taskProjectionStore.state.rows.get(taskId)
+  assert.equal(row?.status, 'killed')
+  assert.equal(row?.waitingFor, 'none')
+  assert.deepEqual(row?.resumableActions, ['none'])
+  const duplicate = taskProjectionStore.state.rows.get(duplicateTaskId)
+  assert.equal(duplicate?.status, 'killed')
+  assert.equal(duplicate?.waitingFor, 'none')
+  assert.deepEqual(duplicate?.resumableActions, ['none'])
+  const staleDuplicateTaskId = 'task-stale-duplicate-after-killed'
+  taskProjectionStore.state.rows.set(staleDuplicateTaskId, {
+    ...blockedProjection!,
+    taskId: staleDuplicateTaskId,
+    continuationRef: {
+      ...(blockedProjection!.continuationRef || {}),
+      taskId: staleDuplicateTaskId,
+      childRunId: result.childRunId,
+    },
+  })
+  const repeatedClose = await cancelSkillChildRun(result.childRunId, {
+    source: 'ui_button',
+    reason: 'user_pressed_cancel_again',
+  })
+  assert.equal(repeatedClose.status, 'killed')
+  assert.equal(taskProjectionStore.state.rows.get(staleDuplicateTaskId)?.status, 'killed')
+  assert.deepEqual(taskProjectionStore.state.rows.get(staleDuplicateTaskId)?.resumableActions, ['none'])
+  const terminalEvent = scopeRunEvents.at(-1)
+  assert.equal(terminalEvent?.taskId, taskId)
+  assert.equal(terminalEvent?.phase, 'cancelled')
+  assert.equal(terminalEvent?.terminalReason, 'cancelled_user')
+})
+
+test('exact-target lookup resumes paused child run when canonical single-flight key changed', async () => {
+  const { repo } = setupRunner({ launchStuckGuardMs: 5_000 })
+  const skillId = 'test-skill-exact-target-paused'
+  const childRunId = 'exact-target-paused-child'
+  const outputDir = '/tmp/fake-runtime/outputs/test-skill-exact-target-paused/shared'
+  const runStatePath = `${outputDir}/run_state.json`
+
+  repo.repo.createChildRun({
+    childRunId,
+    scopeId: 'scope-exact-target',
+    sessionId: 'session-exact-target',
+    skillId,
+    skillName: null,
+    action: 'do_thing',
+    requestedInput: { url: 'https://example.com/original', outputDir },
+    singleFlightKey: 'legacy-single-flight-key',
+    parentNextHint: 'wait_for_close_event',
+    outputDir,
+    runStatePath,
+    eventLogPath: '/tmp/fake-runtime/exact-target-paused.jsonl',
+    status: 'recoverable_paused',
+  })
+  registerStubDriver(skillId, {
+    plans: [makeTerminalClose(skillId, 'completed', 'completed')],
+  })
+
+  const restarted = await startSkillChildRun({
+    scopeId: 'scope-exact-target',
+    sessionId: 'session-exact-target',
+    skillId,
+    action: 'do_thing',
+    requestedInput: { url: 'https://example.com/canonicalized', outputDir },
+  })
+
+  assert.equal(restarted.childRunId, childRunId)
+  assert.equal(restarted.status, 'running')
+  assert.equal(repo.state.rows.size, 1, 'paused exact target must not mint a duplicate row')
+  const close = await pollUntil(() => getSkillChildRunCloseEvent(childRunId))
+  assert.equal(close.status, 'completed')
 })
 
 test('T4 Case E: observer / launch timeout MUST NOT mark the child as killed / cancelled_user', async () => {

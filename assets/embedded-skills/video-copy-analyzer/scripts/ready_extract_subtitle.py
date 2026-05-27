@@ -1,15 +1,23 @@
 #!/usr/bin/env python3
 import json
 import os
-import subprocess
 import sys
 import uuid
+from contextlib import redirect_stderr, redirect_stdout
+from io import StringIO
 from pathlib import Path
 from typing import Optional
 
 
 SKILL_DIR = Path(__file__).resolve().parent.parent
+SCRIPTS_DIR = SKILL_DIR / "scripts"
 VIDEO_EXTENSIONS = [".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".flv"]
+
+sys.path.insert(0, str(SKILL_DIR))
+sys.path.insert(0, str(SCRIPTS_DIR))
+
+from main import download_video, extract_video_id, is_url  # noqa: E402
+from extract_subtitle_funasr import extract_with_funasr, smart_subtitle_extraction  # noqa: E402
 
 
 def load_payload() -> dict:
@@ -30,17 +38,42 @@ def emit(result: dict) -> None:
         print(result["logs"]["stderr"], file=sys.stderr)
 
 
-def find_latest(path: Path, suffix: str) -> Optional[Path]:
-    matches = sorted(path.glob(f"*{suffix}"), key=lambda item: item.stat().st_mtime, reverse=True)
-    return matches[0] if matches else None
-
-
-def find_latest_video(path: Path) -> Optional[Path]:
+def find_existing_video_for_input(source_input: str, output_dir: Path) -> Optional[Path]:
+    if not is_url(source_input):
+        video_path = Path(source_input).expanduser()
+        return video_path.resolve() if video_path.exists() and video_path.is_file() else None
+    video_id = extract_video_id(source_input)
     matches = []
     for ext in VIDEO_EXTENSIONS:
-        matches.extend(path.glob(f"*{ext}"))
-    matches = sorted(matches, key=lambda item: item.stat().st_mtime, reverse=True)
+        matches.extend(output_dir.glob(f"{video_id}{ext}"))
+    matches = sorted(
+        [item for item in matches if item.is_file() and item.stat().st_size > 0],
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
     return matches[0] if matches else None
+
+
+def find_existing_srt_for_video(video_path: Path, output_dir: Path) -> Optional[Path]:
+    video_mtime = video_path.stat().st_mtime
+    matches = list(output_dir.glob(f"{video_path.stem}.srt"))
+    matches.extend(output_dir.glob(f"{video_path.stem}_*.srt"))
+    matches = sorted(
+        [
+            item for item in matches
+            if item.is_file()
+            and item.stat().st_size > 0
+            and item.stat().st_mtime >= video_mtime
+        ],
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
+    return matches[0] if matches else None
+
+
+def find_transcript_for_srt(srt_path: Path) -> Optional[Path]:
+    transcript_path = srt_path.with_name(f"{srt_path.stem}_文字稿.md")
+    return transcript_path if transcript_path.is_file() and transcript_path.stat().st_size > 0 else None
 
 
 def build_transcript_from_srt(srt_path: Path) -> Path:
@@ -58,13 +91,27 @@ def build_transcript_from_srt(srt_path: Path) -> Path:
     return transcript_path
 
 
+def resolve_video(source_input: str, output_dir: Path) -> Path:
+    if is_url(source_input):
+        existing_video = find_existing_video_for_input(source_input, output_dir)
+        if existing_video:
+            return existing_video
+        video_path = download_video(source_input, output_dir)
+        if not video_path:
+            raise RuntimeError("Video download failed")
+        return Path(video_path)
+
+    video_path = Path(source_input).expanduser()
+    if not video_path.exists() or not video_path.is_file():
+        raise RuntimeError(f"Video file does not exist: {source_input}")
+    return video_path.resolve()
+
+
 def main() -> int:
     payload = load_payload()
     source_input = str(payload.get("sourceInput") or payload.get("input") or "").strip()
     output_dir = Path(str(payload.get("outputDir") or (Path.home() / "video-analysis")).strip())
     output_dir.mkdir(parents=True, exist_ok=True)
-    model = str(payload.get("model") or "medium").strip() or "medium"
-    language = str(payload.get("language") or "auto").strip() or "auto"
     force_mode = str(payload.get("forceSubtitleMode") or "auto").strip() or "auto"
     if not source_input:
         emit({
@@ -77,41 +124,35 @@ def main() -> int:
         })
         return 1
 
-    stdout = ""
-    stderr = ""
+    stdout_buffer = StringIO()
+    stderr_buffer = StringIO()
     try:
-        if force_mode == "funasr" and Path(source_input).exists():
-            srt_path = output_dir / f"{Path(source_input).stem}_{uuid.uuid4().hex[:8]}.srt"
-            command = [
-                sys.executable,
-                str(SKILL_DIR / "scripts" / "extract_subtitle_funasr.py"),
-                source_input,
-                str(srt_path),
-                source_input,
-            ]
-        else:
-            command = [
-                sys.executable,
-                str(SKILL_DIR / "main.py"),
-                source_input,
-                str(output_dir),
-                model,
-                language,
-            ]
-        completed = subprocess.run(command, capture_output=True, text=True, cwd=str(SKILL_DIR))
-        stdout = completed.stdout or ""
-        stderr = completed.stderr or ""
-        if completed.returncode != 0:
-            raise RuntimeError(stderr or stdout or "Subtitle extraction failed")
+        with redirect_stdout(stdout_buffer), redirect_stderr(stderr_buffer):
+            video_path = resolve_video(source_input, output_dir)
+            existing_srt_path = find_existing_srt_for_video(video_path, output_dir)
+            subtitle_mode = "cached"
+            if existing_srt_path:
+                srt_path = existing_srt_path
+            else:
+                srt_path = output_dir / f"{video_path.stem}_{uuid.uuid4().hex[:8]}.srt"
+                if force_mode == "funasr":
+                    success = extract_with_funasr(str(video_path), str(srt_path))
+                    subtitle_mode = "funasr" if success else "failed"
+                else:
+                    video_url = source_input if is_url(source_input) else ""
+                    success, subtitle_mode = smart_subtitle_extraction(str(video_path), str(srt_path), video_url)
+                if not success:
+                    raise RuntimeError("Subtitle extraction failed")
 
-        srt_path = find_latest(output_dir, ".srt")
-        transcript_path = find_latest(output_dir, "_文字稿.md")
-        source_path = Path(source_input).expanduser()
-        video_path = source_path.resolve() if source_path.exists() and source_path.is_file() else find_latest_video(output_dir)
-        if not transcript_path and srt_path and srt_path.exists():
-            transcript_path = build_transcript_from_srt(srt_path)
+        stdout = stdout_buffer.getvalue()
+        stderr = stderr_buffer.getvalue()
+
         if not srt_path or not srt_path.exists():
             raise RuntimeError("Missing generated SRT file")
+        video_path = video_path.resolve()
+        transcript_path = find_transcript_for_srt(srt_path)
+        if not transcript_path:
+            transcript_path = build_transcript_from_srt(srt_path)
         if not transcript_path or not transcript_path.exists():
             raise RuntimeError("Missing generated transcript file")
         if not video_path or not video_path.exists():
@@ -127,6 +168,8 @@ def main() -> int:
                 "srtPath": str(srt_path),
                 "transcriptPath": str(transcript_path),
                 "forceSubtitleMode": force_mode,
+                "subtitleEngine": subtitle_mode,
+                "asrEngine": "funasr",
             },
             "artifacts": [
                 {
@@ -155,6 +198,8 @@ def main() -> int:
         })
         return 0
     except Exception as error:
+        stdout = stdout_buffer.getvalue()
+        stderr = stderr_buffer.getvalue()
         emit({
             "ok": False,
             "status": "failed",

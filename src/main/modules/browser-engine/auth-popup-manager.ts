@@ -109,6 +109,15 @@ export class AuthPopupManager {
 
     contents.on('will-navigate', (event, url) => {
       if (this.knownPopupContents.has(contents.id) && /^https?:/i.test(url)) {
+        const decision = decidePopupPolicy({ url })
+        this.logger(`[browser-v3][popup] child-navigate id=${contents.id} mode=${decision.mode} reason=${decision.reason} url=${url}`)
+        if (decision.mode !== 'allow-popup') {
+          event.preventDefault()
+          if (decision.mode === 'open-tab') this.openInTab(url)
+          else shell.openExternal(url)
+          const owner = BrowserWindow.fromWebContents(contents)
+          if (owner && !owner.isDestroyed()) owner.close()
+        }
         return
       }
       if (!/^https?:/i.test(url)) {

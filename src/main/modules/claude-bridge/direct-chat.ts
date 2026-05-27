@@ -149,6 +149,7 @@ import { AttachmentLoadFailureThrottle } from './direct-chat-attachment-metrics'
 import { assertCurrentMessageCapability } from '../agent-control/domain-adapters/message-capability-filter'
 import { logAgentMetric } from '../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../agent-control/tools-runtime/tool-error-metrics'
+import { appendToolCapabilityLog } from '../tools/tool-event-log'
 
 const directChatLogger = createRotatingLogger('ready-directchat.log')
 const settingsRepository = new AppSettingsRepository()
@@ -1340,6 +1341,9 @@ export class DirectChatEngine extends EventEmitter {
     compressContext?: () => Promise<boolean> | boolean
     onBeforeRetry?: (result: unknown, attempt: number) => Promise<void> | void
   }): Promise<TurnModelResponse> {
+    if (params.capabilityLogLine) {
+      appendToolCapabilityLog(`[tool_capability] stage=direct_chat_tool_loop ${params.capabilityLogLine}`)
+    }
     const response = await this.executionLoopOrchestrator.requestToolLoopResponse({
       useAnthropicProtocol: params.providerContext.useAnthropicProtocol,
       hasVideoInputs: params.hasVideoInputs,

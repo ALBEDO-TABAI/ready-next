@@ -24,7 +24,11 @@ export interface RSSAnalysisProgressLike {
 }
 
 interface RSSApi {
-  addSource?: (payload: { name: string; url: string }) => Promise<{ success?: boolean; error?: string }>
+  addSource?: (payload: { name: string; url: string }) => Promise<{
+    success?: boolean
+    error?: string
+    data?: { warning?: string; itemCount?: number }
+  }>
   startItemAnalysis?: (payload: {
     itemId: string
     action: 'copy' | 'visual'
@@ -34,7 +38,17 @@ interface RSSApi {
     summary?: string
     source?: string
     force: boolean
-  }) => Promise<{ success?: boolean; error?: string; data?: { id?: string } }>
+  }) => Promise<{
+    success?: boolean
+    error?: string
+    data?: {
+      id?: string
+      itemId?: string
+      status?: RSSAnalysisStatus
+      outputDir?: string
+      reportPath?: string | null
+    }
+  }>
   getItemAnalysisProgress?: (payload: { itemIds: string[] }) => Promise<{
     success?: boolean
     error?: string
@@ -66,7 +80,6 @@ export interface RSSAgentHandlerDeps {
   getWorkspaceRoot: () => string | null
   rssApi: RSSApi | undefined
   documentApi: DocumentApi | undefined
-  sleep?: (ms: number) => Promise<void>
 }
 
 export function createRSSAgentHandler(deps: RSSAgentHandlerDeps): ModuleAgentActionHandler {
@@ -82,24 +95,16 @@ export function createRSSAgentHandler(deps: RSSAgentHandlerDeps): ModuleAgentAct
     return deps.selectedItem
   }
 
-  const sleep = deps.sleep || ((ms: number) => new Promise((resolve) => setTimeout(resolve, ms)))
-
-  const waitForAnalysisCompletion = async (
+  const readAnalysisProgress = async (
     itemId: string,
     jobId: string,
   ): Promise<RSSAnalysisProgressLike | null> => {
-    const startedAt = Date.now()
-    while (Date.now() - startedAt < 45_000) {
-      const result = await deps.rssApi?.getItemAnalysisProgress?.({ itemIds: [itemId] })
-      if (result?.success && result.data) {
-        const progress = result.data[itemId]
-        if (!progress) return null
-        deps.setAnalysisProgressMap((prev) => ({ ...prev, [itemId]: progress }))
-        if (progress.jobId === jobId && ['success', 'failed', 'skipped'].includes(progress.status)) {
-          return progress
-        }
-      }
-      await sleep(1500)
+    const result = await deps.rssApi?.getItemAnalysisProgress?.({ itemIds: [itemId] })
+    if (result?.success && result.data) {
+      const progress = result.data[itemId]
+      if (!progress || progress.jobId !== jobId) return null
+      deps.setAnalysisProgressMap((prev) => ({ ...prev, [itemId]: progress }))
+      return progress
     }
     return null
   }
@@ -129,10 +134,12 @@ export function createRSSAgentHandler(deps: RSSAgentHandlerDeps): ModuleAgentAct
         throw new Error(result?.error || '添加 RSS 源失败')
       }
       await deps.loadRSSData()
+      const sourceExists = result.data?.warning === 'source_exists'
       return {
         intent: 'add_rss_source',
         ownerResourceId: url,
-        summary: `已添加 RSS 源：${name}`,
+        status: sourceExists ? 'already_exists' : 'added',
+        summary: sourceExists ? `RSS 源已存在：${name}` : `已添加 RSS 源：${name}`,
       }
     }
 
@@ -179,32 +186,53 @@ export function createRSSAgentHandler(deps: RSSAgentHandlerDeps): ModuleAgentAct
         throw new Error(startResult?.error || '启动 RSS 分析失败')
       }
       const jobId = String(startResult.data.id || '')
+      const initialStatus = startResult.data.status || 'queued'
+      const initialOutputDir = startResult.data.outputDir || null
+      const initialReportPath = startResult.data.reportPath || null
       deps.setLastAnalysis({
         jobId,
         itemId: item.id,
-        status: 'queued',
-        reportPath: null,
-        manifestPath: null,
+        status: initialStatus,
+        reportPath: initialReportPath,
+        manifestPath: initialOutputDir ? `${initialOutputDir}/manifest.json` : null,
       })
-      const finalProgress = jobId ? await waitForAnalysisCompletion(item.id, jobId) : null
-      if (finalProgress) {
-        deps.setLastAnalysis({
-          jobId: finalProgress.jobId,
-          itemId: finalProgress.itemId,
-          status: finalProgress.status,
-          reportPath: finalProgress.reportPath,
-          manifestPath: finalProgress.outputDir ? `${finalProgress.outputDir}/manifest.json` : null,
-        })
-      }
-      const reportPath = finalProgress?.reportPath || null
-      const outputDir = finalProgress?.outputDir || null
+      const currentProgress = jobId ? await readAnalysisProgress(item.id, jobId) : null
+      const analysisState = currentProgress || {
+        itemId: item.id,
+        jobId,
+        action: analysisType as 'copy' | 'visual',
+        status: initialStatus,
+        progress: 5,
+        message: null,
+        error: null,
+        outputDir: initialOutputDir || '',
+        reportPath: initialReportPath,
+        updatedAt: new Date().toISOString(),
+      } satisfies RSSAnalysisProgressLike
+      deps.setLastAnalysis({
+        jobId: analysisState.jobId,
+        itemId: analysisState.itemId,
+        status: analysisState.status,
+        reportPath: analysisState.reportPath,
+        manifestPath: analysisState.outputDir ? `${analysisState.outputDir}/manifest.json` : null,
+      })
+      const reportPath = analysisState.reportPath || null
+      const outputDir = analysisState.outputDir || null
+      const failed = analysisState.status === 'failed'
       return {
         intent: 'analyze_rss_item',
         ownerResourceId: item.id,
         jobId,
-        summary: reportPath
-          ? `RSS 条目分析完成：《${item.title}》报告已生成。`
-          : `RSS 条目分析已启动：《${item.title}》。`,
+        status: analysisState.status,
+        ok: !failed,
+        error: failed ? analysisState.error || 'RSS 条目分析失败' : null,
+        summary: failed
+          ? `RSS 条目分析失败：《${item.title}》。`
+          : (
+              reportPath
+                ? `RSS 条目分析完成：《${item.title}》报告已生成。`
+                : `RSS 条目分析已启动：《${item.title}》。`
+            ),
         artifactRefs: reportPath
           ? [{
               kind: 'rss-report',

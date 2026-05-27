@@ -29,6 +29,7 @@ import {
   shouldPauseSilentBrowserRetry,
   type RSSBrowserOpenAction,
 } from './browser-handoff'
+import { findExistingRSSSourceByUrl } from './source-url'
 import {
   allowsRSSHubFallbackAfterBrowser,
   buildBenchmarkSummary,
@@ -831,8 +832,8 @@ async function loadLatestBenchmarkSnapshot(): Promise<{
 /**
  * Stage V V2.2a — `rss:addSource` initial-fetch pipeline lifted verbatim
  * from the inline handler so `sourceGroup` can stay focused on response
- * shaping + mock dispatch. Semantics are byte-for-byte identical to the
- * pre-extraction handler body: validate URL → detect platform → warm
+ * shaping + mock dispatch. Semantics follow the pre-extraction handler body:
+ * validate URL → detect existing source → detect platform → warm
  * RSSHub (with bilibili fallback) → scrape → persist → record route
  * diagnostics → return shaped result. Mock-mode short-circuits in the
  * group itself before this runs, so this function is only invoked in
@@ -845,6 +846,20 @@ async function runAddSourceCore(input: AddSourceCoreInput): Promise<AddSourceCor
     feedUrl = new URL(input.url).href
   } catch {
     return { ok: false, error: `Invalid URL: ${input.url}` }
+  }
+
+  const existingSource = findExistingRSSSourceByUrl(rssRepository.getRSSSources() as DBRSSSource[], feedUrl)
+  if (existingSource) {
+    return {
+      ok: true,
+      data: {
+        id: existingSource.id,
+        platform: normalizeSourcePlatform(existingSource),
+        name: existingSource.name,
+        itemCount: rssRepository.getAllRSSItems(existingSource.id).length,
+        warning: 'source_exists',
+      },
+    }
   }
 
   const platform = detectPlatform(feedUrl)

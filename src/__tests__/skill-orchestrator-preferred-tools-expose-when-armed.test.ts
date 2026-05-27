@@ -37,9 +37,12 @@ const VIDEO_COPY_SKILL = {
   name: 'Video Copy Analyzer',
   description: '视频分析与文案拆解',
   executionMode: 'advisory' as const,
+  hostRequirements: {
+    expose_when_hint_armed: ['video_copy_analyze'],
+  },
   actions: [
     { name: 'read_skill', visibility: 'internal', runtime: 'reference', params: [] },
-    { name: 'video_copy_analyze', visibility: 'public', runtime: 'subprocess', params: [] },
+    { name: 'video_copy_analyze', visibility: 'internal', runtime: 'subprocess', params: [] },
   ],
 }
 
@@ -152,6 +155,18 @@ describe('skill-resume G6 — buildPreferredSkillToolNames honors expose_when_hi
     assert.ok(tools.includes('skill_video_expert_pipeline'))
     assert.ok(tools.includes('skill_video_expert_ai_analyze'))
     assert.equal(tools.includes('skill_video_copy_analyze'), false)
+  })
+
+  it('includes Video Copy Analyzer typed action when that hint is armed', () => {
+    const sessionId = 'session-video-copy'
+    const orchestrator = makeOrchestratorWithCompetingVideoSkill()
+    const taskText = '用 Video Copy Analyzer 分析 https://www.youtube.com/watch?v=xLAPpTflZmk'
+
+    assert.equal(orchestrator.rememberExplicitReferenceSkillHint(taskText, sessionId), true)
+    const tools = orchestrator.buildPreferredSkillToolNames(taskText, sessionId)
+
+    assert.ok(tools.includes('skill_video_copy_analyze'))
+    assert.equal(tools.includes('skill_video_expert_pipeline'), false)
   })
 
   it('includes whitelisted internal actions when hint is armed for that skill', () => {

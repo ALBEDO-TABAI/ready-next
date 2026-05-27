@@ -458,7 +458,7 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
         // Partial success: surface a non-blocking note so the user knows at
         // least one root failed (e.g. ENOSPC, validation reject) while others
         // succeeded.
-        setIndexError(errors.join('; '))
+        setIndexError(`搜索结果可能不完整：${errors.join('; ')}`)
       }
     } catch (error) {
       setIndexError(error instanceof Error ? error.message : String(error))

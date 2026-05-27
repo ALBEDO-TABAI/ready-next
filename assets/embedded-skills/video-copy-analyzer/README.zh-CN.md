@@ -42,10 +42,7 @@ pip install funasr modelscope
 # 5. RapidOCR（ONNX轻量版，用于烧录字幕识别）
 pip install rapidocr-onnxruntime
 
-# 6. Whisper（英文/多语言备选方案）
-pip install openai-whisper
-
-# 7. requests（抖音下载需要）
+# 6. requests（抖音下载需要）
 pip install requests
 ```
 
@@ -72,7 +69,7 @@ Skill 会自动选择最佳提取方案：
     ↓ 未检测到
 [2️⃣ 烧录字幕检测] ──→ RapidOCR 采样帧识别 ──→ 检测到文字 ──→ 全视频 OCR 提取
     ↓ 未检测到
-[3️⃣ 语音转录] ──→ FunASR（中文优化）/ Whisper（多语言）
+[3️⃣ 语音转录] ──→ FunASR
     ↓
 输出 SRT 字幕
 ```
@@ -84,7 +81,6 @@ Skill 会自动选择最佳提取方案：
 | **L1** | 内嵌字幕提取 | 视频自带字幕流 | ⭐⭐⭐⭐⭐ | ⚡ 极快 |
 | **L2** | RapidOCR 烧录识别 | 字幕烧录在画面中 | ⭐⭐⭐⭐ | 🚀 快 |
 | **L3** | FunASR Nano | 中文语音转录 | ⭐⭐⭐⭐ | 🐢 中等 |
-| **L3** | Whisper | 英文/多语言语音 | ⭐⭐⭐ | 🐢 中等 |
 
 ### 技术栈说明
 
@@ -95,8 +91,8 @@ Skill 会自动选择最佳提取方案：
   - ✨ 高精度：基于 PaddleOCR 模型优化
 
 - **FunASR Nano**: 阿里开源中文语音识别模型
-  - 🚀 轻量级：~100MB vs Whisper Large ~1.5GB
-  - 🎯 中文优化：针对中文语音专门训练，效果优于 Whisper
+  - 🚀 轻量级：相比大型 ASR 栈模型缓存更小
+  - 🎯 中文优化：针对中文语音专门训练
   - ⏱️ 时间戳：支持字级别时间戳
   - 💨 速度快：CPU 上也能快速运行
 
@@ -125,8 +121,8 @@ video-copy-analyzer/
 ├── scripts/
 │   ├── download_douyin.py            # 抖音视频下载（无水印）
 │   ├── extract_subtitle_funasr.py    # 智能字幕提取（FunASR + RapidOCR）
-│   ├── extract_subtitle.py           # 基于 Whisper 的提取
-│   ├── transcribe_audio.py           # 音频转录脚本
+│   ├── extract_subtitle.py           # FunASR 提取兼容入口
+│   ├── transcribe_audio.py           # FunASR 转录兼容入口
 │   └── check_environment.py          # 环境检测脚本
 └── references/
     └── analysis-frameworks.md        # 分析框架详解

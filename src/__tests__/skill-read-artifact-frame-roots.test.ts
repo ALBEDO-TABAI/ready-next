@@ -134,6 +134,27 @@ test('skill_read_artifact resolves relative path against primary artifactRoot fi
   }
 })
 
+test('skill_read_artifact tries additional roots when a relative file is missing from primary root', async () => {
+  const env = setupEnv()
+  try {
+    writeFileSync(join(env.outsideRoot, 'run_state.json'), JSON.stringify({ status: 'running' }), 'utf-8')
+
+    const output = await executeReadArtifact(
+      { relativePath: 'run_state.json' },
+      {
+        skillId: 'video-expert-analyzer',
+        lookupSkillRoots: lookupRoots('video-expert-analyzer', env.artifactRoot),
+        additionalAllowedReadRoots: [env.outsideRoot],
+      },
+    )
+    const data = (output as any).data as Record<string, unknown>
+    assert.equal(data.absolutePath, join(env.outsideRoot, 'run_state.json'))
+    assert.match(String(data.content), /running/)
+  } finally {
+    env.cleanup()
+  }
+})
+
 /**
  * Phase 3 (skill-child-loop, Team 3) — same-turn live frame visibility.
  *

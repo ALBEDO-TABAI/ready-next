@@ -630,10 +630,24 @@ function extractBilibiliEmbed(line: string): { bvid: string; embedUrl: string; p
   if (!/^https?:\/\/player\.bilibili\.com\/player\.html\b/i.test(src)) return null
   const bvidMatch = src.match(/[?&]bvid=(BV[A-Za-z0-9]+)/)
   if (!bvidMatch) return null
+  const bvid = bvidMatch[1]
+  let page = '1'
+  try {
+    const parsed = new URL(src)
+    const rawPage = parsed.searchParams.get('p') || ''
+    if (/^\d+$/.test(rawPage)) page = rawPage
+  } catch {
+    page = '1'
+  }
+  const canonical = new URL('https://player.bilibili.com/player.html')
+  canonical.searchParams.set('isOutside', 'true')
+  canonical.searchParams.set('bvid', bvid)
+  canonical.searchParams.set('p', page)
+  canonical.searchParams.set('autoplay', '0')
   return {
-    bvid: bvidMatch[1],
-    embedUrl: src,
-    pageUrl: `https://www.bilibili.com/video/${bvidMatch[1]}/`,
+    bvid,
+    embedUrl: canonical.toString(),
+    pageUrl: `https://www.bilibili.com/video/${bvid}/`,
   }
 }
 

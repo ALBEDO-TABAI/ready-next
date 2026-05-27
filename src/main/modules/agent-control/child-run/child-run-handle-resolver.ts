@@ -104,6 +104,8 @@ function userGrantedRoots(): string[] {
     join(home, 'Downloads'),
     join(home, 'Movies'),
     tmpdir(),
+    '/tmp',
+    '/private/tmp',
   ].map((root) => safeCanonicalPath(root))
 }
 

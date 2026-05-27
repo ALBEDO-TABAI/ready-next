@@ -269,10 +269,7 @@ test('ToolRuntime uses the VEA typed action timeout instead of the generic skill
     },
   })
 
-  // Synced to manifest's current `default_action_timeout_ms: 3600000` (60min)
-  // per commit `99fc70b Fix VEA live acceptance resume loop`. The action
-  // descriptions in ready-skill.json were updated alongside.
-  assert.equal(resolvedTimeoutMs, 60 * 60 * 1000)
+  assert.equal(resolvedTimeoutMs, 3 * 60 * 60 * 1000)
 })
 
 test('skill action timeout falls back to host default action timeout', () => {

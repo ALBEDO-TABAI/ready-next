@@ -108,6 +108,32 @@ test('rank-50 — done with artifacts → open_artifact action', () => {
   assert.deepEqual(state.actionSet, ['open_artifact'])
 })
 
+test('rank-50 — completed projection ignores stale background continuation', () => {
+  const state = deriveTaskCardRuntimeState(makeRun({
+    phase: 'done',
+    terminalReason: 'done',
+    status: 'completed',
+    waitingFor: 'none',
+    taskContinuation: {
+      taskId: 'task-completed',
+      blockerType: 'background_running',
+      pauseReason: 'background_running',
+      outputDir: '/tmp/vea',
+      runStatePath: '/tmp/vea/run_state.json',
+    },
+    recentArtifacts: [{
+      id: 'a1',
+      module: 'skill',
+      kind: 'folder',
+      label: 'output',
+      path: '/tmp/vea',
+      createdAt: new Date().toISOString(),
+    }],
+  }))
+  assert.equal(state.visualState, 'done')
+  assert.deepEqual(state.actionSet, ['open_artifact'])
+})
+
 test('rank-10 — plain running, no signals', () => {
   const state = deriveTaskCardRuntimeState(makeRun({
     phase: 'tool_running',

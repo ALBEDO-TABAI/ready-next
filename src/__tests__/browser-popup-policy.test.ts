@@ -1,7 +1,13 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { READY_BROWSER_BLANK_URL } from '../shared/browser-defaults'
 import { decidePopupPolicy, isAllowedBrowserURL, shouldAllowBrowserPermission } from '../main/modules/browser-engine/popup-policy'
+
+function readWorkspaceFile(path: string): string {
+  return readFileSync(resolve(process.cwd(), path), 'utf8')
+}
 
 describe('browser popup policy', () => {
   it('should allow auth bootstrap popup', () => {
@@ -27,6 +33,20 @@ describe('browser popup policy', () => {
     assert.strictEqual(decision.mode, 'open-tab')
   })
 
+  it('should convert about:blank child popups to tabs when they navigate to regular websites', () => {
+    const manager = readWorkspaceFile('src/main/modules/browser-engine/auth-popup-manager.ts')
+    const childNavigateBlock = manager.slice(
+      manager.indexOf("contents.on('will-navigate'"),
+      manager.indexOf("if (!/^https?:/i.test(url))"),
+    )
+
+    assert.match(childNavigateBlock, /decidePopupPolicy\(\{ url \}\)/)
+    assert.match(childNavigateBlock, /decision\.mode !== 'allow-popup'/)
+    assert.match(childNavigateBlock, /this\.openInTab\(url\)/)
+    assert.match(childNavigateBlock, /BrowserWindow\.fromWebContents\(contents\)/)
+    assert.match(childNavigateBlock, /owner\.close\(\)/)
+  })
+
   it('should deny unsafe protocol and route external', () => {
     const decision = decidePopupPolicy({
       url: 'javascript:alert(1)',
@@ -45,6 +65,16 @@ describe('browser popup policy', () => {
     assert.strictEqual(isAllowedBrowserURL('file:///tmp/demo.html', { allowLocalHtml: true }), true)
     assert.strictEqual(isAllowedBrowserURL('local-file:///tmp/demo.htm', { allowLocalHtml: true }), true)
     assert.strictEqual(isAllowedBrowserURL('file:///tmp/demo.pdf', { allowLocalHtml: true }), false)
+  })
+
+  it('should keep local HTML popups inside Ready when opened from local HTML', () => {
+    const decision = decidePopupPolicy({
+      url: 'file:///tmp/popup.html',
+      referrer: 'file:///tmp/page-one.html',
+      disposition: 'foreground-tab',
+    })
+    assert.strictEqual(decision.mode, 'open-tab')
+    assert.strictEqual(decision.reason, 'regular-local-html')
   })
 
   it('should enforce media permission only on secure origin', () => {

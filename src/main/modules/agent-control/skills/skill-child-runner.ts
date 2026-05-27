@@ -27,8 +27,8 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, statSync } from 'node:fs'
-import { dirname, isAbsolute, join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { basename, dirname, isAbsolute, join } from 'node:path'
 
 import type {
   SkillRunResult,
@@ -78,6 +78,7 @@ import {
   isCompletedChildCloseStatus,
   isKilledChildCloseStatus,
   isRetainedLifecycleChildCloseStatus,
+  isTerminalChildCloseStatus,
   type ChildWaitResult,
   type MutableSkillChildCloseEvent,
   type SkillChildCloseEvent,
@@ -380,6 +381,20 @@ class SkillChildRunner {
         })
         if (recoveredOrReused) return recoveredOrReused
         // Fall through — record was unrecoverable; mint a new child run.
+      }
+      const targetExisting = this.findExistingChildRunForExactTarget({
+        runStatePath: runStatePathHint,
+        outputDir: requestedOutputDir,
+        skillId: params.skillId,
+      })
+      if (targetExisting) {
+        const targetPayload = (targetExisting.resumePayload as { childRun?: SkillChildRunPayload } | null)?.childRun
+        const recoveredOrResumed = await this.reconcileExactTargetChildRun({
+          existing: targetExisting,
+          existingPayload: targetPayload ?? null,
+          params,
+        })
+        if (recoveredOrResumed) return recoveredOrResumed
       }
     } catch (error) {
       // Repo unavailable — fall through and try to start, the create()
@@ -702,7 +717,8 @@ class SkillChildRunner {
     const agentContext = options.agentContext ?? null
     if (!agentContext) return null
     if (!payload.outputDir) return null
-    if (!this.hasCompletableHandoffTasks(payload.outputDir)) return null
+    if (!this.hasCompletableHandoffTasks(payload.outputDir)
+        && !isVeaFinalizeResumeCandidate(payload.skillId, payload.outputDir)) return null
     return { agentContext }
   }
 
@@ -789,7 +805,6 @@ class SkillChildRunner {
     if (!active) {
       // Already terminal — return the cached close if we have one.
       const cached = this.recentCloses.get(childRunId)
-      if (cached) return cached
 
       // Try the durable record before falling back to a synthesized close.
       // When the row exists, the cancel close event MUST use the row's real
@@ -797,6 +812,12 @@ class SkillChildRunner {
       // persisted row is a class-of-bug we explicitly guard against.
       const record = this.tryGetRecord(childRunId)
       const payload = (record?.resumePayload as { childRun?: SkillChildRunPayload } | null)?.childRun
+      if (cached && isTerminalChildCloseStatus(cached.status)) {
+        if (isKilledChildCloseStatus(cached.status)) {
+          this.publishInactiveChildRunClose({ record, payload, close: cached })
+        }
+        return cached
+      }
       // If the record already has a stored terminal close, return it.
       if (payload?.closeEvent && (
           payload.status === 'completed'
@@ -805,6 +826,9 @@ class SkillChildRunner {
         )) {
         const decodedClose = decodeStoredSkillChildCloseEvent(payload.closeEvent)
         this.recentCloses.set(childRunId, decodedClose)
+        if (isKilledChildCloseStatus(decodedClose.status)) {
+          this.publishInactiveChildRunClose({ record, payload, close: decodedClose })
+        }
         return decodedClose
       }
 
@@ -824,6 +848,11 @@ class SkillChildRunner {
           closeEvent: synth,
         })
         this.markChildRunInteractionSuspended(childRunId)
+        this.publishInactiveChildRunClose({
+          record,
+          payload,
+          close: synth,
+        })
       } catch {
         // already gone — ignore.
       }
@@ -890,6 +919,61 @@ class SkillChildRunner {
   // ------------------------------------------------------------------
   // Internal: existing-row reconciliation
   // ------------------------------------------------------------------
+
+  private findExistingChildRunForExactTarget(opts: {
+    runStatePath: string | null
+    outputDir: string | null
+    skillId: string
+  }): ReturnType<SkillTaskRunRepository['get']> | null {
+    if (opts.runStatePath) {
+      for (const runStatePath of pathLookupVariants(opts.runStatePath)) {
+        const byRunState = this.config.repository.findChildRunByRunStatePath({
+          runStatePath,
+          skillId: opts.skillId,
+        })
+        if (byRunState) return byRunState
+      }
+    }
+    if (opts.outputDir) {
+      for (const outputDir of pathLookupVariants(opts.outputDir)) {
+        const byOutputDir = this.config.repository.findChildRunByOutputDir({
+          outputDir,
+          skillId: opts.skillId,
+        })
+        if (byOutputDir) return byOutputDir
+      }
+    }
+    return null
+  }
+
+  private async reconcileExactTargetChildRun(opts: {
+    existing: ReturnType<SkillTaskRunRepository['get']> & object
+    existingPayload: SkillChildRunPayload | null
+    params: StartSkillChildRunParams
+  }): Promise<StartSkillChildRunResult | null> {
+    const { existing, existingPayload, params } = opts
+    if (!existingPayload) return null
+    if (existingPayload.skillId !== params.skillId) return null
+    if (existingPayload.requestedAction !== params.action) return null
+    const statusClass = classifySkillChildRunStatus(existingPayload.status)
+    if (statusClass === 'active' || statusClass === 'paused') {
+      return this.reconcileExistingChildRun(opts)
+    }
+    if (
+      existingPayload.status === 'blocked'
+      && existingPayload.skillId === 'video-expert-analyzer'
+      && existingPayload.outputDir
+      && (
+        this.hasCompletableHandoffTasks(existingPayload.outputDir)
+        || isVeaFinalizeResumeCandidate(existingPayload.skillId, existingPayload.outputDir)
+      )
+    ) {
+      return this.resumeSkillChildRun(existing.id, {
+        agentContext: params.agentContext ?? null,
+      })
+    }
+    return null
+  }
 
   /**
    * Decide what to do when `findLatestChildRunByKey` returned an existing row.
@@ -2057,6 +2141,161 @@ class SkillChildRunner {
     this.recentCloses.set(childRunId, frozenClose)
   }
 
+  private publishInactiveChildRunClose(args: {
+    record: ReturnType<SkillTaskRunRepository['get']>
+    payload: SkillChildRunPayload | null | undefined
+    close: SkillChildCloseEvent
+  }): void {
+    const record = args.record
+    const payload = args.payload
+    const scopeId = payload?.parentScopeId ?? record?.scopeId ?? record?.sessionId ?? null
+    if (!scopeId) return
+    const skillId = payload?.skillId ?? record?.skillId ?? args.close.skillId
+    const action = payload?.requestedAction ?? record?.action ?? 'unknown'
+    const outputDir = args.close.outputDir ?? payload?.outputDir ?? record?.outputDir ?? ''
+    const runStatePath = args.close.runStatePath ?? payload?.runStatePath ?? record?.runStatePath ?? ''
+    const active: ActiveRun = {
+      childRunId: args.close.childRunId,
+      skillId,
+      action,
+      scopeId,
+      sessionId: payload?.parentSessionId ?? record?.sessionId ?? null,
+      status: args.close.status,
+      startedAt: record?.createdAt ?? record?.updatedAt ?? new Date().toISOString(),
+      controller: new AbortController(),
+      closePromise: Promise.resolve(args.close),
+      resolveClose: () => {},
+      outputDir,
+      runStatePath,
+      eventLogPath: payload?.eventLogPath ?? (record ? this.deriveEventLogPathFromRecord(record) : ''),
+      parentNextHint: payload?.parentNextHint ?? 'wait_for_close_event',
+      singleFlightKey: payload?.singleFlightKey ?? `${scopeId}:${skillId}:${args.close.childRunId}`,
+      agentContext: null,
+      progress: emptyChildProgress(),
+      blockedReason: null,
+      lastSafeStepId: null,
+    }
+    const state = lifecycleStateForChildClose(args.close)
+    const reason = lifecycleReasonForChildClose(args.close)
+    const message = args.close.error?.message || closeMessage(args.close)
+    const taskId = childTaskProjectionTaskId(args.close.childRunId)
+    const now = new Date().toISOString()
+    const store = this.config.taskProjectionStore
+    const publish = (previous: TaskProjectionRecord | null): void => {
+      const progress = mergeProgressFromClose(previous?.progress ?? emptyChildProgress(), args.close.progress)
+      active.progress = progress
+      recordSkillParentTaskLifecycleEvent({
+        scopeId,
+        sessionId: active.sessionId ?? undefined,
+        skillId,
+        action,
+        state,
+        reason,
+        message,
+        stepId: childProjectionStepId(args.close.childRunId),
+        outputDir,
+        runStatePath,
+        sceneScoresPath: args.close.sceneScoresPath,
+        deliveryReportPath: args.close.deliveryReportPath,
+        childRunId: args.close.childRunId,
+        progressFingerprint: progress.fingerprint,
+        progress,
+      })
+      if (store) {
+        const next = buildChildTaskProjectionRecord({
+          active,
+          state,
+          reason,
+          message,
+          progress,
+          close: args.close,
+          scopeId,
+          taskId,
+          previous,
+          now,
+        })
+        if (previous) {
+          store.update(taskId, next)
+        } else {
+          store.create(next)
+        }
+        this.updateInactiveChildRunProjectionSiblings({
+          store,
+          active,
+          state,
+          reason,
+          message,
+          progress,
+          close: args.close,
+          scopeId,
+          canonicalTaskId: taskId,
+          now,
+        })
+      }
+      this.publishScopeRunClose(active, args.close, {
+        state,
+        reason,
+        message,
+        progress,
+      })
+      this.rememberChildRunSummary(this.summaryFromClose(active, args.close))
+    }
+    if (!store) {
+      publish(null)
+      return
+    }
+    const previous = store.get(taskId)
+    if (isPromiseLike(previous)) {
+      void previous.then(publish).catch((error) => this.logChildProjectionError('inactive_cancel_get', args.close.childRunId, error))
+      return
+    }
+    publish(previous)
+  }
+
+  private updateInactiveChildRunProjectionSiblings(args: {
+    store: TaskProjectionStore
+    active: ActiveRun
+    state: SkillParentTaskLifecycleState
+    reason: SkillParentTaskLifecycleReason
+    message: string
+    progress: ScopeRunSkillProgress
+    close: SkillChildCloseEvent
+    scopeId: string
+    canonicalTaskId: string
+    now: string
+  }): void {
+    const update = (records: TaskProjectionRecord[]): void => {
+      for (const previous of records) {
+        if (previous.taskId === args.canonicalTaskId) continue
+        if (!taskProjectionReferencesChildRun(previous, args.active.childRunId)) continue
+        if (isTerminalTaskProjectionStatus(previous.status)) continue
+        const next = buildChildTaskProjectionRecord({
+          active: args.active,
+          state: args.state,
+          reason: args.reason,
+          message: args.message,
+          progress: args.progress,
+          close: args.close,
+          scopeId: args.scopeId,
+          taskId: previous.taskId,
+          previous,
+          now: args.now,
+        })
+        args.store.update(previous.taskId, next)
+      }
+    }
+    try {
+      const records = args.store.listByScope(args.scopeId)
+      if (isPromiseLike(records)) {
+        void records.then(update).catch((error) => this.logChildProjectionError('inactive_cancel_siblings', args.active.childRunId, error))
+        return
+      }
+      update(records)
+    } catch (error) {
+      this.logChildProjectionError('inactive_cancel_siblings', args.active.childRunId, error)
+    }
+  }
+
   private markChildRunInteractionSuspended(childRunId: string): void {
     try {
       this.config.repository.update(childRunId, {
@@ -2223,6 +2462,17 @@ function childTaskProjectionTaskId(childRunId: string): string {
   return `skill-child:${childRunId}`
 }
 
+function taskProjectionReferencesChildRun(record: TaskProjectionRecord, childRunId: string): boolean {
+  const ref = record.continuationRef as { childRunId?: unknown } | null | undefined
+  return record.runId === childRunId
+    || record.taskId === childTaskProjectionTaskId(childRunId)
+    || ref?.childRunId === childRunId
+}
+
+function isTerminalTaskProjectionStatus(status: TaskProjectionRecord['status']): boolean {
+  return status === 'completed' || status === 'failed' || status === 'killed'
+}
+
 function isPromiseLike<T>(value: unknown): value is Promise<T> {
   return Boolean(value && typeof (value as { then?: unknown }).then === 'function')
 }
@@ -2274,7 +2524,8 @@ function childProjectionStepStatusForState(state: SkillParentTaskLifecycleState)
 }
 
 function childProjectionWaitingForState(state: SkillParentTaskLifecycleState): TaskProjectionRecord['waitingFor'] {
-  if (state === 'background_running' || state === 'budget_paused' || state === 'blocked') return 'background'
+  if (state === 'background_running' || state === 'budget_paused') return 'background'
+  if (state === 'blocked') return 'input'
   return 'none'
 }
 
@@ -2572,17 +2823,29 @@ function readChildProgressSnapshot(args: {
     sceneScoresPath: selectedOutputDir ? join(selectedOutputDir, 'scene_scores.json') : null,
   })
   const stage = runState.stage ?? args.payloadStage ?? args.previous.stage
-  const completed = artifactProgress.completedScenes ?? runState.completed ?? args.previous.completed
-  const total = artifactProgress.totalScenes ?? runState.total ?? args.previous.total
-  const coverage = artifactProgress.coverageRatio ?? runState.coverage ?? args.previous.coverage
+  const normalizedStage = String(stage || '').trim().toLowerCase()
+  const preferRunStateUnits = normalizedStage === 'prepare'
+  const completed = preferRunStateUnits
+    ? (runState.completed ?? artifactProgress.completedScenes ?? args.previous.completed)
+    : (artifactProgress.completedScenes ?? runState.completed ?? args.previous.completed)
+  const total = preferRunStateUnits
+    ? (runState.total ?? artifactProgress.totalScenes ?? args.previous.total)
+    : (artifactProgress.totalScenes ?? runState.total ?? args.previous.total)
+  const coverage = preferRunStateUnits
+    ? (runState.coverage ?? artifactProgress.coverageRatio ?? args.previous.coverage)
+    : (artifactProgress.coverageRatio ?? runState.coverage ?? args.previous.coverage)
   const activity = artifactProgress.activity
   const handoff = artifactProgress.handoff ?? null
+  const handoffDetail = artifactProgress.handoffDetail ?? null
   const activityCoverage = activityCoverageRatio(activity)
   const shouldUseActivityDetail = !stage || String(stage).toLowerCase() === 'score_batches'
-  const detail = shouldUseActivityDetail
+  const activityDetail = (shouldUseActivityDetail || handoffDetail)
     ? formatArtifactActivityDetail(activity)
     : null
+  const detail = [activityDetail, handoffDetail].filter((item): item is string => Boolean(item)).join('；') || null
   const activityUpdatedAt = activity?.updatedAt ?? args.previous.activityUpdatedAt ?? null
+  const runCompleted = isProgressCompleteStatus(runState.status) || isProgressCompleteStatus(stage)
+  const lastError = runCompleted ? null : (runState.lastError ?? args.previous.lastError)
   const overallCoverage = deriveOverallCoverage({
     skillId: args.skillId,
     outputDir: selectedOutputDir,
@@ -2611,12 +2874,17 @@ function readChildProgressSnapshot(args: {
       overallCoverage,
       fingerprint,
       updatedAt,
-      lastError: runState.lastError ?? args.previous.lastError,
+      lastError,
       ...(detail ? { detail } : {}),
       ...(activityUpdatedAt ? { activityUpdatedAt } : {}),
       handoff,
     },
   }
+}
+
+function isProgressCompleteStatus(value: string | null | undefined): boolean {
+  const normalized = String(value || '').trim().toLowerCase()
+  return normalized === 'completed' || normalized === 'complete' || normalized === 'done' || normalized === 'success'
 }
 
 function buildChildProgressFingerprint(args: {
@@ -2699,6 +2967,13 @@ function isVeaDeliveryComplete(outputDir: string): boolean {
     if ((value as Record<string, unknown>).ok === false) return false
   }
   return true
+}
+
+function isVeaFinalizeResumeCandidate(skillId: string, outputDir: string): boolean {
+  if (skillId !== 'video-expert-analyzer') return false
+  if (isVeaDeliveryComplete(outputDir)) return false
+  const state = readProgressRunState(join(outputDir, 'run_state.json'))
+  return state.status === 'blocked' && state.stage === 'finalize'
 }
 
 function deriveVeaOverallCoverage(args: {
@@ -3006,9 +3281,9 @@ interface ComputeDigestArgs {
 
 function computeTargetDigest(args: ComputeDigestArgs): string {
   const candidate = args.runStatePath
-    ? normalizePathLike(args.runStatePath)
+    ? canonicalizePathLike(args.runStatePath)
     : args.outputDir
-      ? normalizePathLike(args.outputDir)
+      ? canonicalizePathLike(args.outputDir)
       : null
   if (candidate) return shortHash(candidate)
   const url = trim(args.requestedInput.url as unknown)
@@ -3022,6 +3297,37 @@ function normalizePathLike(input: string): string {
   // doesn't always have a reliable cwd).
   if (!input) return ''
   return isAbsolute(input) ? input.replace(/\\/g, '/').replace(/\/+$/, '') : input.replace(/\\/g, '/').replace(/\/+$/, '')
+}
+
+function canonicalizePathLike(input: string): string {
+  const normalized = normalizePathLike(input)
+  if (!normalized || !isAbsolute(normalized)) return normalized
+  try {
+    return normalizePathLike(realpathSync.native(normalized))
+  } catch (error) {
+    // silent-catch: failed realpath only downgrades lookup to normalized path variants.
+    if ((error as NodeJS.ErrnoException)?.code !== 'ENOENT') return normalized
+  }
+  const parent = dirname(normalized)
+  if (!parent || parent === normalized) return normalized
+  const canonicalParent = canonicalizePathLike(parent)
+  return normalizePathLike(join(canonicalParent, basename(normalized)))
+}
+
+function pathLookupVariants(input: string): string[] {
+  const variants: string[] = []
+  const push = (value: string) => {
+    const normalized = normalizePathLike(value)
+    if (!normalized || variants.includes(normalized)) return
+    variants.push(normalized)
+  }
+  push(input)
+  push(canonicalizePathLike(input))
+  for (const variant of [...variants]) {
+    if (variant.startsWith('/tmp/')) push(`/private/tmp/${variant.slice('/tmp/'.length)}`)
+    if (variant.startsWith('/private/tmp/')) push(`/tmp/${variant.slice('/private/tmp/'.length)}`)
+  }
+  return variants
 }
 
 function shortHash(input: string): string {

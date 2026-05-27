@@ -1,7 +1,7 @@
 {
   "id": "video-copy-analyzer",
   "name": "Video Copy Analyzer",
-  "description": "Extract subtitles and generate transcript-oriented copy deliverables from a short video.",
+  "description": "Extract subtitles, generate a corrected transcript, and complete the three-part copy analysis deliverables for a short video.",
   "version": "2026.04.25",
   "defaultAction": "read_skill",
   "requirementsFile": "requirements.txt",
@@ -20,22 +20,7 @@
         "required": false
       }
     ],
-    "fields": [
-      {
-        "id": "subtitleModel",
-        "label": "默认字幕模型",
-        "description": "内部分析没有显式传入 model 时使用。",
-        "type": "select",
-        "defaultValue": "base",
-        "options": [
-          { "value": "tiny", "label": "tiny" },
-          { "value": "base", "label": "base" },
-          { "value": "small", "label": "small" },
-          { "value": "medium", "label": "medium" },
-          { "value": "large", "label": "large" }
-        ]
-      }
-    ]
+    "fields": []
   },
   "actions": [
     {
@@ -48,7 +33,7 @@
     },
     {
       "name": "video_copy_analyze",
-      "description": "运行视频字幕提取与 transcript 生成，供 RSS 视频分析等内部产品代码直接调用。",
+      "description": "完整运行视频文案分析：先提取字幕和文字稿，再生成三维度分析报告与结构化文字稿。",
       "runtime": "python",
       "entry": "scripts/ready_extract_subtitle.py",
       "visibility": "internal",
@@ -56,10 +41,13 @@
       "params": [
         { "name": "input", "type": "string", "description": "视频 URL 或本地文件路径", "required": true },
         { "name": "outputDir", "type": "string", "description": "输出目录", "required": false },
-        { "name": "model", "type": "string", "description": "whisper 模型", "required": false, "enum": ["tiny", "base", "small", "medium", "large"] },
         { "name": "language", "type": "string", "description": "语言 zh/en/auto", "required": false, "enum": ["zh", "en", "auto"] },
         { "name": "forceSubtitleMode", "type": "string", "description": "可选，强制字幕提取模式", "required": false, "enum": ["auto", "funasr"] }
       ]
     }
-  ]
+  ],
+  "host_requirements": {
+    "default_action_timeout_ms": 3600000,
+    "expose_when_hint_armed": ["video_copy_analyze"]
+  }
 }

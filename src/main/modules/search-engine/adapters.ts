@@ -6,6 +6,7 @@ import { createRotatingLogger } from '../../utils/rotating-logger'
 import { parseDocumentGraph } from '../../../shared/document-graph-parse'
 import { FS_SOURCE_TYPE } from '../../../shared/search-source-types'
 import type { SearchRepository } from './repository'
+import { SEARCH_INDEX_CONTENT_VERSION } from './query'
 
 const searchLogger = createRotatingLogger('ready-search.log')
 
@@ -386,7 +387,7 @@ export class FileSystemAdapter implements IndexSourceAdapter {
         size = Buffer.byteLength(raw, 'utf-8')
         mtime = Math.floor(Date.now())
       }
-      const contentHash = createHash('sha256').update(raw).digest('hex').slice(0, 16)
+      const contentHash = hashContent(raw)
       const graph = parseDocumentGraph(raw)
       const frontmatterJson = graph.frontmatter ? JSON.stringify(graph.frontmatter) : null
       return {
@@ -463,7 +464,7 @@ function stripHtml(html: string | null | undefined): string {
 }
 
 function hashContent(body: string): string {
-  return createHash('sha256').update(body).digest('hex').slice(0, 16)
+  return createHash('sha256').update(SEARCH_INDEX_CONTENT_VERSION).update('\0').update(body).digest('hex').slice(0, 16)
 }
 
 function syncShared(

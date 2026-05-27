@@ -155,6 +155,13 @@ export function resolveProjectionWaitingFor(
   return 'none'
 }
 
+export function resolveProjectionProgress(
+  projection: PersistedTaskProjection | null,
+): ScopeRunState['progress'] {
+  if (!projection) return null
+  return (projection.progress || projection.continuationRef?.progress || null) as ScopeRunState['progress']
+}
+
 // Stage O §1.6 — `resolveProjectionBlockedReason`,
 // `shouldPreferProjectionContinuation`, and `resolveTaskContinuationForProjection`
 // are retired. With projection-only field sourcing

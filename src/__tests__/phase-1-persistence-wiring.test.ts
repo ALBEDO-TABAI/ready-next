@@ -136,8 +136,8 @@ test('Phase 1.3 — ensurePythonVenv emits python_runtime_rebuilt only when an u
   )
   assert.match(
     block,
-    /console\.warn\([^)]*Python venv version unsupported/,
-    'warn surfaces version mismatch in startup logs',
+    /console\.warn\([^)]*Python venv runtime unsupported/,
+    'warn surfaces runtime mismatch in startup logs',
   )
   // Metric MUST be gated on previousVersionText so a fresh install (no prior
   // venv) does not falsely report a rebuild.

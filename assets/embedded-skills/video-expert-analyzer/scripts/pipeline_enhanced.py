@@ -124,6 +124,7 @@ URL_SCHEME_PATTERN = re.compile(r"^[a-zA-Z][a-zA-Z0-9+.-]*://")
 _FFMPEG_ENCODER_CACHE: Optional[set[str]] = None
 _UNAVAILABLE_SCENE_VIDEO_CODECS: set[str] = set()
 _YT_DLP_JS_RUNTIMES_SUPPORT_CACHE: Dict[Tuple[str, ...], bool] = {}
+_YT_DLP_REMOTE_COMPONENTS_SUPPORT_CACHE: Dict[Tuple[str, ...], bool] = {}
 
 
 @dataclass
@@ -690,7 +691,12 @@ def build_yt_dlp_command(*args: str) -> List[str]:
     runtime_args: List[str] = []
     if shutil.which("node") and yt_dlp_supports_js_runtimes(base_command):
         runtime_args = ["--js-runtimes", "node"]
-    return [*base_command, *runtime_args, *args]
+    remote_component_args: List[str] = []
+    if yt_dlp_supports_remote_components(base_command):
+        remote_component_args = ["--remote-components", "ejs:github"]
+    cookie_file = os.environ.get("YOUTUBE_COOKIE_FILE", "").strip()
+    cookie_args = ["--cookies", cookie_file] if cookie_file and Path(cookie_file).exists() else []
+    return [*base_command, *runtime_args, *remote_component_args, *cookie_args, *args]
 
 
 def yt_dlp_supports_js_runtimes(base_command: List[str]) -> bool:
@@ -712,6 +718,28 @@ def yt_dlp_supports_js_runtimes(base_command: List[str]) -> bool:
     output = f"{result.stdout}\n{result.stderr}"
     supported = result.returncode == 0 and "--js-runtimes" in output
     _YT_DLP_JS_RUNTIMES_SUPPORT_CACHE[cache_key] = supported
+    return supported
+
+
+def yt_dlp_supports_remote_components(base_command: List[str]) -> bool:
+    cache_key = tuple(base_command)
+    cached = _YT_DLP_REMOTE_COMPONENTS_SUPPORT_CACHE.get(cache_key)
+    if cached is not None:
+        return cached
+    try:
+        result = subprocess.run(
+            [*base_command, "--help"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+    except Exception:
+        _YT_DLP_REMOTE_COMPONENTS_SUPPORT_CACHE[cache_key] = False
+        return False
+
+    output = f"{result.stdout}\n{result.stderr}"
+    supported = result.returncode == 0 and "--remote-components" in output
+    _YT_DLP_REMOTE_COMPONENTS_SUPPORT_CACHE[cache_key] = supported
     return supported
 
 

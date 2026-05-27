@@ -744,14 +744,6 @@
       "area": "ui-history"
     },
     {
-      "file": "src/__tests__/rss-draft-store-ui-contract.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "60b649ef6ab45629",
-      "line": 7,
-      "snippet": "return readFileSync(resolve(process.cwd(), path), 'utf8')",
-      "area": "ui-history"
-    },
-    {
       "file": "src/__tests__/settings-ai-layout-contract.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "d4267527f5e2ac67",

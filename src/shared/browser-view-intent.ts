@@ -37,7 +37,7 @@ export type BrowserViewIntent =
  * Renderer-side monotonic counter. The renderer owns ordering; the main
  * side just echoes the id back on ack-bearing intents.
  */
-let intentIdCounter = 0
+let intentIdCounter = Date.now()
 export function nextIntentId(): number {
   intentIdCounter += 1
   return intentIdCounter

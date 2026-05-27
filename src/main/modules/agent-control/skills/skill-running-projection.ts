@@ -304,6 +304,10 @@ export function buildLongSkillRunningProjection(params: {
   const completedScenes = artifactProgress.completedScenes ?? (runState?.completedScenes ? Number(runState.completedScenes) : null)
   const coverageRatio = artifactProgress.coverageRatio ?? (runState?.coverageRatio ? Number(runState.coverageRatio) : null)
   const stageText = runState?.currentStage || runState?.currentStep || null
+  const progressDetail = [
+    artifactProgress.activity?.summary ?? null,
+    artifactProgress.handoffDetail ?? null,
+  ].filter((item): item is string => Boolean(item)).join('；') || null
   const progress = {
     stage: stageText,
     completed: completedScenes,
@@ -313,7 +317,7 @@ export function buildLongSkillRunningProjection(params: {
     fingerprint: artifactProgress.activity?.fingerprint ?? runState?.updatedAt ?? null,
     updatedAt: artifactProgress.activity?.updatedAt ?? runState?.updatedAt ?? updatedAt,
     lastError: runState?.lastError ?? null,
-    detail: artifactProgress.activity?.summary ?? null,
+    detail: progressDetail,
     activityUpdatedAt: artifactProgress.activity?.updatedAt ?? null,
     handoff: artifactProgress.handoff,
   }

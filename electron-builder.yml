@@ -7,6 +7,7 @@ files:
   - out/**/*
   - package.json
   - node_modules/**/*
+  - "!node_modules/**/build/node_gyp_bins/**"
 extraResources:
   - from: build/runtime-seeds/ai-settings.seed.json
     to: ai-settings.seed.json
@@ -14,6 +15,7 @@ extraResources:
     to: better-sqlite3/build
     filter:
       - "**/*"
+      - "!node_gyp_bins/**"
   - from: assets/embedded-skills
     to: embedded-skills
     filter:

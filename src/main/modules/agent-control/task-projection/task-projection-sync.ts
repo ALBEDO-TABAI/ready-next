@@ -44,6 +44,14 @@ function recordFromUnknown(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' ? value as Record<string, unknown> : null
 }
 
+function hasOwn(value: object | null | undefined, key: string): boolean {
+  return Boolean(value && Object.prototype.hasOwnProperty.call(value, key))
+}
+
+function hasDefinedOwn(value: object | null | undefined, key: string): boolean {
+  return hasOwn(value, key) && (value as Record<string, unknown>)[key] !== undefined
+}
+
 function truthContinuation(truthPatch: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
   return recordFromUnknown(truthPatch?.taskContinuation)
 }
@@ -280,12 +288,29 @@ function isTaskProjectionUniqueRace(error: unknown): boolean {
 }
 
 function resolveInteractionState(summary: ScopeRunSummary): TaskInteractionState {
+  const terminalInteractionState = resolveTerminalInteractionState(summary.terminalReason)
+  if (
+    terminalInteractionState
+    && (!summary.interactionState || summary.interactionState === 'running' || summary.interactionState === 'resuming')
+  ) {
+    return terminalInteractionState
+  }
   if (summary.interactionState) return summary.interactionState
   if (summary.phase === 'takeover') return 'human_takeover'
   if (summary.waitingFor === 'confirmation') return 'awaiting_confirmation'
   if (summary.waitingFor === 'input' || summary.waitingFor === 'clarification') return 'awaiting_clarification'
   if (summary.phase === 'resuming') return 'resuming'
   return 'running'
+}
+
+function resolveTerminalInteractionState(reason?: ScopeRunSummary['terminalReason'] | null): TaskInteractionState | null {
+  if (reason === 'blocked_config' || reason === 'blocked_external' || reason === 'checkpoint_user_input') {
+    return 'awaiting_clarification'
+  }
+  if (reason === 'blocked_tool_error' || reason === 'checkpoint_budget' || reason === 'checkpoint_background') {
+    return 'suspended'
+  }
+  return null
 }
 
 function resolveRecordInteractionState(
@@ -301,18 +326,40 @@ function resolveRecordInteractionState(
   ) {
     return 'suspended'
   }
+  if ((interactionState === 'running' || interactionState === 'resuming') && status === 'blocked') {
+    return 'suspended'
+  }
   return interactionState
+}
+
+function resolveTerminalWaitingFor(reason?: ScopeRunSummary['terminalReason'] | null): TaskProjectionRecord['waitingFor'] | null {
+  if (reason === 'blocked_config' || reason === 'blocked_external' || reason === 'checkpoint_user_input') {
+    return 'input'
+  }
+  if (reason === 'checkpoint_background') return 'background'
+  return null
 }
 
 function resolveWaitingFor(
   summary: ScopeRunSummary,
   previous?: TaskProjectionRecord | null,
 ): TaskProjectionRecord['waitingFor'] {
-  if (summary.waitingFor) return summary.waitingFor
-  return previous?.waitingFor || 'none'
+  const waitingFor = summary.waitingFor || previous?.waitingFor || 'none'
+  if (waitingFor !== 'none') return waitingFor
+  return resolveTerminalWaitingFor(summary.terminalReason) || 'none'
+}
+
+function resolveTerminalStatus(reason?: ScopeRunSummary['terminalReason'] | null): TaskProjectionRecord['status'] | null {
+  if (!reason) return null
+  if (reason === 'done') return 'completed'
+  if (reason === 'cancelled_user' || reason === 'cancelled_runtime') return 'killed'
+  if (reason === 'failed_skill' || reason === 'resume_launch_failed' || reason === 'persistence_failed') return 'failed'
+  return 'blocked'
 }
 
 function resolveStatus(summary: ScopeRunSummary): TaskProjectionRecord['status'] {
+  const terminalStatus = resolveTerminalStatus(summary.terminalReason)
+  if (terminalStatus) return terminalStatus
   const interactionState = resolveInteractionState(summary)
   const waitingForBlocker = Boolean(summary.waitingFor && summary.waitingFor !== 'none')
   if (summary.phase === 'queued') return 'queued'
@@ -334,11 +381,44 @@ function resolveStatus(summary: ScopeRunSummary): TaskProjectionRecord['status']
   return 'running'
 }
 
+function hasOnlyCancelAction(actions: ScopeRunSummary['resumableActions'] | undefined): boolean {
+  return Array.isArray(actions) && actions.length === 1 && actions[0] === 'cancel'
+}
+
+function resolveTerminalResumableActions(
+  summary: ScopeRunSummary,
+  previous?: TaskProjectionRecord | null,
+): ScopeRunSummary['resumableActions'] | null {
+  const reason = summary.terminalReason
+  if (reason === 'blocked_config' || reason === 'blocked_external' || reason === 'checkpoint_user_input') {
+    return ['continue', 'cancel']
+  }
+  if (reason === 'blocked_tool_error') return ['retry', 'cancel']
+  if (reason === 'checkpoint_budget' && (summary.taskContinuation || previous?.continuationRef)) {
+    return ['continue', 'retry', 'cancel']
+  }
+  if (reason === 'checkpoint_background' && (summary.taskContinuation || previous?.continuationRef)) {
+    return ['continue', 'cancel']
+  }
+  return null
+}
+
 function resolveResumableActions(
   summary: ScopeRunSummary,
   status: TaskProjectionRecord['status'],
   previous?: TaskProjectionRecord | null,
 ): ScopeRunSummary['resumableActions'] {
+  const terminalActions = resolveTerminalResumableActions(summary, previous)
+  if (
+    terminalActions
+    && (
+      !summary.resumableActions
+      || summary.resumableActions.length === 0
+      || hasOnlyCancelAction(summary.resumableActions)
+    )
+  ) {
+    return terminalActions
+  }
   if (summary.resumableActions && summary.resumableActions.length > 0) {
     if (
       status === 'blocked'
@@ -364,6 +444,16 @@ function resolveResumableActions(
     return ['cancel']
   }
   return []
+}
+
+function resolveTerminalBlockedReason(reason?: ScopeRunSummary['terminalReason'] | null): string | null {
+  if (reason === 'blocked_config') return '配置需要修复'
+  if (reason === 'blocked_external') return '等待外部条件'
+  if (reason === 'blocked_tool_error') return '工具执行遇到问题'
+  if (reason === 'checkpoint_user_input') return '等待补充信息'
+  if (reason === 'checkpoint_budget') return '预算已暂停'
+  if (reason === 'checkpoint_background') return '后台任务仍在运行'
+  return null
 }
 
 function resolveContinuationRef(
@@ -572,6 +662,9 @@ export function buildTaskProjectionRecord(
   const contract = readFrameContract(projectionTruth)
   const taskId = resolveTaskId(summary, payload, truthPatch, contract)
   if (!taskId) return null
+  const truthHasTaskContinuation = hasDefinedOwn(truthPatch, 'taskContinuation')
+  const truthHasProgress = hasDefinedOwn(truthPatch, 'progress')
+  const payloadHasProgress = hasDefinedOwn(payload, 'progress')
   const effectiveSummary: ScopeRunSummary = {
     ...summary,
     taskType: (
@@ -606,8 +699,10 @@ export function buildTaskProjectionRecord(
     resumableActions: Array.isArray(truthPatch?.resumableActions)
       ? truthPatch.resumableActions as ScopeRunSummary['resumableActions']
       : summary.resumableActions,
-    taskContinuation: truthPatch?.taskContinuation && typeof truthPatch.taskContinuation === 'object'
-      ? truthPatch.taskContinuation as ScopeRunSummary['taskContinuation']
+    taskContinuation: truthHasTaskContinuation
+      ? truthPatch?.taskContinuation && typeof truthPatch.taskContinuation === 'object'
+        ? truthPatch.taskContinuation as ScopeRunSummary['taskContinuation']
+        : null
       : summary.taskContinuation,
     blockedReason: typeof truthPatch?.blockedReason === 'string'
       ? truthPatch.blockedReason
@@ -617,8 +712,10 @@ export function buildTaskProjectionRecord(
     recentArtifacts: Array.isArray(truthPatch?.recentArtifacts)
       ? truthPatch.recentArtifacts as ScopeRunSummary['recentArtifacts']
       : summary.recentArtifacts,
-    progress: truthPatch?.progress && typeof truthPatch.progress === 'object'
-      ? truthPatch.progress as ScopeRunSummary['progress']
+    progress: truthHasProgress
+      ? truthPatch?.progress && typeof truthPatch.progress === 'object'
+        ? truthPatch.progress as ScopeRunSummary['progress']
+        : null
       : summary.progress,
   }
 
@@ -637,6 +734,7 @@ export function buildTaskProjectionRecord(
   const blockedReason =
     effectiveSummary.blockedReason
     || (status === 'blocked' && !blockedReasonWasCleared && !frameClearsStaleBlocker ? previous?.blockedReason : null)
+    || (status === 'blocked' ? resolveTerminalBlockedReason(effectiveSummary.terminalReason) : null)
     || null
 
   return {
@@ -686,7 +784,9 @@ export function buildTaskProjectionRecord(
     blockedReason,
     resumableActions: resolveResumableActions(effectiveSummary, status, previous),
     continuationRef: resolveContinuationRef(effectiveSummary, status, previous),
-    progress: effectiveSummary.progress ?? previous?.progress ?? null,
+    progress: truthHasProgress || payloadHasProgress
+      ? effectiveSummary.progress ?? null
+      : effectiveSummary.progress ?? previous?.progress ?? null,
     recentArtifacts: effectiveSummary.recentArtifacts || previous?.recentArtifacts || [],
     createdAt: previous?.createdAt || payload.timestamp,
     updatedAt: effectiveSummary.updatedAt,

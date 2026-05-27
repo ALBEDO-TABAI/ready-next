@@ -84,6 +84,21 @@ test('task type resolver routes platform public-ranking lookups into the browser
   assert.equal(result.preferredExecutor, 'browser')
 })
 
+test('task type resolver routes location-heavy comparison requests into research', () => {
+  const envelope = buildRequestEnvelope({
+    userText: '比较北京几个 IT 园区的产业特色和适合入驻的公司类型，位置可以提到，但不要做导航。',
+  })
+  const result = resolveTaskType({
+    intent: classifyIntent(envelope),
+    envelope,
+    capabilities: createCapabilities(),
+  })
+
+  assert.equal(result.taskType, 'research')
+  assert.equal(result.executionChain, 'domain_executor')
+  assert.equal(result.preferredExecutor, 'research')
+})
+
 test('task type resolver routes pet sticky note requests into the tool loop', () => {
   const envelope = buildRequestEnvelope({ userText: '贴到便利贴里面' })
   const result = resolveTaskType({

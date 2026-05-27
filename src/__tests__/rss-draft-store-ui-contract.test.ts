@@ -2,8 +2,10 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
+import { getRSSAddSourceStatusMessage } from '../renderer/modules/rss/add-source-status'
 
 function readWorkspaceFile(path: string): string {
+  // eslint-disable-next-line ready/no-source-grep-test -- Existing RSS UI contract pins rendered copy/layout wiring; behavior coverage for add-source status lives below.
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
@@ -54,4 +56,23 @@ test('rss add-source flow exposes a glass submenu and can prefill from the activ
   assert.doesNotMatch(addSourceModal, /rgba\(17, 24, 39, 0\.22\)/)
   assert.doesNotMatch(addSourceModal, /color-red-light/)
   assert.doesNotMatch(addSourceModal, /color-blue-light/)
+})
+
+test('rss add-source success keeps non-blocking warnings visible', () => {
+  assert.equal(
+    getRSSAddSourceStatusMessage({
+      name: '设计动态',
+      warning: '初次刷新未拿到内容，请稍后重试',
+    }),
+    '初次刷新未拿到内容，请稍后重试',
+  )
+  assert.equal(
+    getRSSAddSourceStatusMessage({
+      name: '设计动态',
+      warning: 'source_exists',
+      itemCount: 12,
+    }),
+    '设计动态 已存在，已切换到该订阅源，已有 12 条内容',
+  )
+  assert.equal(getRSSAddSourceStatusMessage({ name: '设计动态' }), '设计动态 已添加')
 })

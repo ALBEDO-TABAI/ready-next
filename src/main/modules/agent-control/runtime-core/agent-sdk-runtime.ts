@@ -107,6 +107,7 @@ import {
 import { snapshotTurnFeatureFlags } from './turn-feature-flags'
 import { buildAgentSpawnContextFromAIConfig } from '../../skills-runtime/agent-context-source'
 import { executeToolCall as executeReadyToolCall } from '../../tools'
+import { appendToolCapabilityLog } from '../../tools/tool-event-log'
 import { PRIMITIVE_TOOL_DEFS, PRIMITIVE_TOOL_NAME_SET } from '../../tools/skill-primitives/tool-defs'
 import {
   createToolExecutionOutput,
@@ -157,6 +158,13 @@ interface ReadyAgentSdkRunResult {
   finalText: string
 }
 
+interface MapToolFailureClose {
+  message: string
+  status: 'checkpoint' | 'error'
+  terminalReason: TurnTerminalReason
+  success: boolean
+}
+
 interface ToolBridgeRuntimeContext {
   agentName: string
   runId: string
@@ -164,6 +172,7 @@ interface ToolBridgeRuntimeContext {
   sessionId?: string
   signal: AbortSignal
   allowedToolNames: string[]
+  definitionByName: Map<string, ToolDefinition>
   authorization: SkillToolAuthorization
   activeFrame: ToolRuntimeActiveFrameContext
   agentContext?: AgentSpawnContext | null
@@ -171,6 +180,8 @@ interface ToolBridgeRuntimeContext {
   emitOutput: (chunk: string, type: string, projectionPatch?: Record<string, unknown> | null) => void
   emitToolAction: (toolName: string, args: Record<string, unknown>) => void
   recordToolResult: (toolName: string, output: ToolExecutionOutput) => void
+  nativeMapCriticalClose?: MapToolFailureClose | null
+  nativeMapAmbiguityResolved?: boolean
 }
 
 interface SdkLongSkillCheckpoint {
@@ -1116,6 +1127,241 @@ function stringifyToolResult(output: ToolExecutionOutput): string {
     framePatch: normalized.framePatch,
     interactionHint: normalized.interactionHint,
   })
+}
+
+function readStructuredResultRecord(output: ToolExecutionOutput): Record<string, unknown> {
+  const normalized = normalizeToolExecutionOutput(output)
+  if (normalized.data && typeof normalized.data === 'object' && !Array.isArray(normalized.data)) {
+    return normalized.data as Record<string, unknown>
+  }
+  if (normalized.text) {
+    try {
+      const parsed = JSON.parse(normalized.text)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>
+      }
+    } catch {
+      // silent-catch: malformed tool text falls back to an empty structured record.
+      return {}
+    }
+  }
+  return {}
+}
+
+interface ToolBridgeResultItem {
+  id: string
+  name: string
+  args: Record<string, unknown>
+  result: ToolExecutionOutput
+}
+
+interface MapCandidateChoice {
+  option: string
+  candidate: {
+    name: string
+    location: string
+    address?: string
+    city?: string
+    district?: string
+  }
+}
+
+interface MapPlaceAmbiguityPrompt {
+  source: ToolBridgeResultItem
+  message: string
+  field: { kind: 'origin' | 'destination' | 'waypoint'; index?: number } | null
+  choices: MapCandidateChoice[]
+  askArgs: {
+    questions: Array<{
+      id: string
+      question: string
+      kind: 'single_choice'
+      options: string[]
+      required: true
+    }>
+  }
+}
+
+const MAP_PLACE_AMBIGUITY_QUESTION_ID = 'map_place_choice'
+
+function readTextField(record: Record<string, unknown>, key: string): string | null {
+  const value = record[key]
+  const text = typeof value === 'string' ? value.trim() : ''
+  return text || null
+}
+
+function truncateForQuestionOption(value: string, maxLength: number): string {
+  const text = value.trim()
+  if (text.length <= maxLength) return text
+  if (maxLength <= 3) return text.slice(0, maxLength)
+  return `${text.slice(0, maxLength - 3).trimEnd()}...`
+}
+
+function normalizeMapCandidate(value: unknown): MapCandidateChoice['candidate'] | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const location = readTextField(record, 'location')
+  if (!location) return null
+  const name = readTextField(record, 'name')
+    || readTextField(record, 'address')
+    || location
+  return {
+    name,
+    location,
+    address: readTextField(record, 'address') || undefined,
+    city: readTextField(record, 'city') || undefined,
+    district: readTextField(record, 'district') || undefined,
+  }
+}
+
+function formatMapCandidateOption(candidate: MapCandidateChoice['candidate'], index: number): string {
+  const locationSuffix = ` | ${candidate.location}`
+  const parts = [
+    `${index + 1}. ${candidate.name}`,
+    candidate.district || candidate.city || '',
+    candidate.address && candidate.address !== candidate.name ? candidate.address : '',
+  ].filter((part, partIndex, arr) => part && arr.indexOf(part) === partIndex)
+  const prefix = parts.join(' | ')
+  const prefixLimit = Math.max(1, 80 - locationSuffix.length)
+  return `${truncateForQuestionOption(prefix, prefixLimit)}${locationSuffix}`.slice(0, 80)
+}
+
+function inferAmbiguousMapField(message: string): MapPlaceAmbiguityPrompt['field'] {
+  const normalized = message.trim()
+  if (normalized.startsWith('起点')) return { kind: 'origin' }
+  if (normalized.startsWith('终点')) return { kind: 'destination' }
+  const waypointMatch = normalized.match(/^途经点\s*(\d+)/)
+  if (waypointMatch) {
+    const index = Number(waypointMatch[1])
+    if (Number.isInteger(index) && index > 0) return { kind: 'waypoint', index: index - 1 }
+  }
+  return null
+}
+
+function findMapPlaceAmbiguityPrompt(
+  results: ToolBridgeResultItem[],
+): MapPlaceAmbiguityPrompt | null {
+  for (const item of results) {
+    if (item.name !== 'map_plan_route') continue
+    const normalized = normalizeToolExecutionOutput(item.result)
+    const data = readStructuredResultRecord(normalized)
+    if (data.ok !== false || data.errorKind !== 'place_ambiguous') continue
+    const message = readTextField(data, 'message') || normalized.text || '地点存在多个可能结果，请选择一个。'
+    const rawCandidates = Array.isArray(data.candidates) ? data.candidates : []
+    const seenOptions = new Set<string>()
+    const choices: MapCandidateChoice[] = []
+    for (const raw of rawCandidates) {
+      const candidate = normalizeMapCandidate(raw)
+      if (!candidate) continue
+      const baseOption = formatMapCandidateOption(candidate, choices.length)
+      let option = baseOption
+      let suffix = 2
+      while (seenOptions.has(option)) {
+        option = truncateForQuestionOption(`${baseOption} #${suffix}`, 80)
+        suffix += 1
+      }
+      seenOptions.add(option)
+      choices.push({ option, candidate })
+      if (choices.length >= 8) break
+    }
+    if (choices.length < 2) return null
+    return {
+      source: item,
+      message,
+      field: inferAmbiguousMapField(message),
+      choices,
+      askArgs: {
+        questions: [{
+          id: MAP_PLACE_AMBIGUITY_QUESTION_ID,
+          question: truncateForQuestionOption(`${message}\n请选择要用于路线规划的具体地点。`, 500),
+          kind: 'single_choice',
+          options: choices.map((choice) => choice.option),
+          required: true,
+        }],
+      },
+    }
+  }
+  return null
+}
+
+function readMapAmbiguityAnswer(output: ToolExecutionOutput): string | null {
+  const data = readStructuredResultRecord(output)
+  const answers = Array.isArray(data.answers) ? data.answers : []
+  for (const raw of answers) {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) continue
+    const answer = raw as Record<string, unknown>
+    if (answer.id !== MAP_PLACE_AMBIGUITY_QUESTION_ID) continue
+    return typeof answer.answer === 'string' && answer.answer.trim()
+      ? answer.answer.trim()
+      : null
+  }
+  return null
+}
+
+function buildMapRetryArgs(
+  originalArgs: Record<string, unknown>,
+  field: MapPlaceAmbiguityPrompt['field'],
+  candidate: MapCandidateChoice['candidate'],
+): Record<string, unknown> | null {
+  if (!field) return null
+  const place = { name: candidate.name, location: candidate.location }
+  if (field.kind === 'origin') {
+    return { ...originalArgs, origin: place }
+  }
+  if (field.kind === 'destination') {
+    return { ...originalArgs, destination: place }
+  }
+  const waypoints = Array.isArray(originalArgs.waypoints) ? [...originalArgs.waypoints] : []
+  if (typeof field.index !== 'number' || field.index < 0 || field.index >= waypoints.length) return null
+  waypoints[field.index] = place
+  return { ...originalArgs, waypoints }
+}
+
+function buildFileReadExcerptCheckpoint(output: ToolExecutionOutput): string | null {
+  const normalized = normalizeToolExecutionOutput(output)
+  const data = readStructuredResultRecord(normalized)
+  if (data.ok === false) return null
+  const content = readTextField(data, 'content')
+  if (!content) return null
+  const path = readTextField(data, 'path')
+  const excerpt = content.length > 1600
+    ? `${content.slice(0, 1600).trimEnd()}...`
+    : content
+  return [
+    '我已经读到相关文件，但模型在工具轮次内没有收口；先把已读到的关键片段给你，避免变成发送失败。',
+    path ? `文件：${path}` : '',
+    '',
+    excerpt,
+  ].filter((line) => line !== '').join('\n')
+}
+
+function mapToolFailureClose(
+  results: ToolBridgeResultItem[],
+): MapToolFailureClose | null {
+  for (const item of [...results].reverse()) {
+    if (item.name !== 'map_plan_route') continue
+    const normalized = normalizeToolExecutionOutput(item.result)
+    const data = readStructuredResultRecord(normalized)
+    if (data.ok !== false && typeof data.errorKind !== 'string') return null
+    const message = typeof data.message === 'string' && data.message.trim()
+      ? data.message.trim()
+      : normalized.text || '地图规划没有完成。'
+    if (data.errorKind === 'place_ambiguous') {
+      return {
+        message,
+        status: 'checkpoint',
+        terminalReason: 'checkpoint_user_input',
+        success: true,
+      }
+    }
+    return {
+      message,
+      status: 'error',
+      terminalReason: 'blocked_tool_error',
+      success: false,
+    }
+  }
+  return null
 }
 
 function toOpenAIToolSchemas(definitions: ToolDefinition[]): Array<Record<string, unknown>> {
@@ -2228,6 +2474,16 @@ export class AgentSdkRuntime extends EventEmitter {
         feishuConnected: params.feishuConnected,
       },
     })
+    appendToolCapabilityLog([
+      '[tool_capability]',
+      'stage=sdk_runtime_default_tools',
+      'profile=local_chat',
+      'preferredSkillTools=none',
+      `visibleCapabilityGroups=${capabilityResolution.visibleCapabilityGroupIds.join('|') || 'none'}`,
+      `suppressedCapabilityGroups=${capabilityResolution.suppressedCapabilityGroupIds.join('|') || 'none'}`,
+      `hostOnlyCapabilityGroups=${capabilityResolution.hostOnlyCapabilityIds.join('|') || 'none'}`,
+      `supportsVision=${capabilityResolution.supportsVision === true}`,
+    ].join(' '))
     const definitions = capabilityResolution.visibleCapabilityGroupIds.flatMap((groupId) =>
       defaultToolRegistry.getToolDefinitionsForGroup(
         groupId,
@@ -2308,6 +2564,7 @@ export class AgentSdkRuntime extends EventEmitter {
     let finalText = ''
     let documentTargetGuardForRecovery: DocumentTargetGuard | null = null
     let requiresLocalDocumentExcerptForRecovery = false
+    let fileReadExcerptCheckpointForRecovery: string | null = null
     let hasSuccessfulDocumentTargetMutation = false
     let lastDocumentSaveSuccessText: string | null = null
 
@@ -2499,7 +2756,10 @@ export class AgentSdkRuntime extends EventEmitter {
         toolDefinitions = toolDefinitions.filter((definition) => definition.name !== 'document_new_tab')
       }
       const hasVeaPipelineTool = toolDefinitions.some((definition) => definition.name === 'skill_video_expert_pipeline')
+      const hasMapAmbiguityQuestionTools = toolDefinitions.some((definition) => definition.name === 'map_plan_route')
+        && toolDefinitions.some((definition) => definition.name === 'ask_user_questions')
       const allowedToolNames = toolDefinitions.map((definition) => definition.name)
+      const definitionByName = new Map(toolDefinitions.map((definition) => [definition.name, definition]))
       let lastDocumentSaveFailure: string | null = null
       let newDocumentNeedsSave = false
       const toolBridgeRuntimeContext: ToolBridgeRuntimeContext = {
@@ -2509,6 +2769,7 @@ export class AgentSdkRuntime extends EventEmitter {
         sessionId,
         signal: abortController.signal,
         allowedToolNames,
+        definitionByName,
         authorization,
         activeFrame,
         documentTargetGuard,
@@ -2543,6 +2804,9 @@ export class AgentSdkRuntime extends EventEmitter {
               newDocumentNeedsSave = false
             }
           }
+          if (toolName === 'file_read_excerpt' && !documentToolFailed) {
+            fileReadExcerptCheckpointForRecovery = buildFileReadExcerptCheckpoint(normalized)
+          }
           applyContextModifier(toolBridgeRuntimeContext, normalized)
           longSkillCheckpoint = extractLongSkillCheckpoint(toolName, normalized, longSkillCheckpoint)
           if (normalized.projectionPatch) {
@@ -2551,7 +2815,6 @@ export class AgentSdkRuntime extends EventEmitter {
         },
         agentContext,
       }
-      const definitionByName = new Map(toolDefinitions.map((definition) => [definition.name, definition]))
       const sdkTools = useTextToolBridge
         ? []
         : toolDefinitions.map((definition) => this.buildSdkTool(definition, toolBridgeRuntimeContext))
@@ -2565,6 +2828,9 @@ export class AgentSdkRuntime extends EventEmitter {
           : '本轮没有开放工具；直接回答或说明缺口。',
         hasVeaPipelineTool
           ? '本轮 VEA 长任务必须优先调用 skill_video_expert_pipeline；不要用 skill_run_shell、手工建目录或口头说明替代真实启动。'
+          : '',
+        hasMapAmbiguityQuestionTools
+          ? '地图路线工具返回 errorKind=place_ambiguous 时，必须使用 ask_user_questions 让用户从候选地点中选择；不要把失败结果改写成路线成功。'
           : '',
         buildDocumentTargetInstruction(documentTargetGuard),
         buildLocalDocumentExcerptInstruction(requiresLocalDocumentExcerpt),
@@ -2651,6 +2917,29 @@ export class AgentSdkRuntime extends EventEmitter {
           },
         })
         const modelText = runResult.finalText || streamedText
+        const nativeMapCriticalClose = !useTextToolBridge
+          ? toolBridgeRuntimeContext.nativeMapCriticalClose ?? null
+          : null
+        if (nativeMapCriticalClose) {
+          finalText = nativeMapCriticalClose.message
+          emitOutput(
+            nativeMapCriticalClose.message,
+            nativeMapCriticalClose.status === 'error' ? 'error' : 'text',
+          )
+          emitOutput('', 'done')
+          emitStatus(nativeMapCriticalClose.status, nativeMapCriticalClose.terminalReason)
+          return this.buildResult({
+            success: nativeMapCriticalClose.success,
+            error: nativeMapCriticalClose.success ? undefined : nativeMapCriticalClose.message,
+            finalText,
+            cancelled: false,
+            taskId,
+            usedTools,
+            transcriptEvents,
+            projectionPatches,
+            terminalReason: nativeMapCriticalClose.terminalReason,
+          })
+        }
         if (!useTextToolBridge) {
           let leakedToolCall = /<tool_call>|<function=|<parameter=|:::tool_call/i.test(modelText)
             ? parseTextToolBridgeResponse(modelText)
@@ -2662,13 +2951,14 @@ export class AgentSdkRuntime extends EventEmitter {
             if (leakedToolCall.visibleText && !shouldSuppressVisibleTextOnToolCall(leakedToolCall.visibleText)) {
               emitOutput(leakedToolCall.visibleText, 'text')
             }
-            const bridgeResults: Array<{ id: string; name: string; result: ToolExecutionOutput }> = []
+            const bridgeResults: ToolBridgeResultItem[] = []
             for (const call of leakedToolCall.toolCalls) {
               const definition = definitionByName.get(call.name)
               if (!definition) {
                 bridgeResults.push({
                   id: `native-xml-recovery-${bridgeTurn}-${bridgeResults.length}`,
                   name: call.name,
+                  args: call.args,
                   result: createToolExecutionOutput(`工具 ${call.name} 未在本轮授权列表中。`, {
                     shape: 'json',
                     data: {
@@ -2692,8 +2982,37 @@ export class AgentSdkRuntime extends EventEmitter {
               bridgeResults.push({
                 id: `native-xml-recovery-${bridgeTurn}-${bridgeResults.length}`,
                 name: call.name,
+                args: call.args,
                 result: output,
               })
+            }
+            const handledMapAmbiguity = await this.resolveMapPlaceAmbiguityIfNeeded({
+              bridgeResults,
+              definitionByName,
+              runtimeContext: toolBridgeRuntimeContext,
+            })
+            const criticalClose = mapToolFailureClose(bridgeResults)
+            if (criticalClose) {
+              finalText = criticalClose.message
+              emitOutput(criticalClose.message, criticalClose.status === 'error' ? 'error' : 'text')
+              emitOutput('', 'done')
+              emitStatus(criticalClose.status, criticalClose.terminalReason)
+              return this.buildResult({
+                success: criticalClose.success,
+                error: criticalClose.success ? undefined : criticalClose.message,
+                finalText,
+                cancelled: false,
+                taskId,
+                usedTools,
+                transcriptEvents,
+                projectionPatches,
+                terminalReason: criticalClose.terminalReason,
+              })
+            }
+            if (handledMapAmbiguity) {
+              nextInput = buildTextToolResultMessage(bridgeResults)
+              finalText = leakedToolCall.visibleText
+              continue
             }
             nextInput = buildTextToolResultMessage(bridgeResults)
             finalText = leakedToolCall.visibleText
@@ -2807,13 +3126,14 @@ export class AgentSdkRuntime extends EventEmitter {
           break
         }
 
-        const bridgeResults: Array<{ id: string; name: string; result: ToolExecutionOutput }> = []
+        const bridgeResults: ToolBridgeResultItem[] = []
         for (const call of parsed.toolCalls) {
           const definition = definitionByName.get(call.name)
           if (!definition) {
             bridgeResults.push({
               id: `text-bridge-${bridgeTurn}-${bridgeResults.length}`,
               name: call.name,
+              args: call.args,
               result: createToolExecutionOutput(`工具 ${call.name} 未在本轮授权列表中。`, {
                 shape: 'json',
                 data: {
@@ -2837,8 +3157,37 @@ export class AgentSdkRuntime extends EventEmitter {
           bridgeResults.push({
             id: `text-bridge-${bridgeTurn}-${bridgeResults.length}`,
             name: call.name,
+            args: call.args,
             result: output,
           })
+        }
+        const handledMapAmbiguity = await this.resolveMapPlaceAmbiguityIfNeeded({
+          bridgeResults,
+          definitionByName,
+          runtimeContext: toolBridgeRuntimeContext,
+        })
+        const criticalClose = mapToolFailureClose(bridgeResults)
+        if (criticalClose) {
+          finalText = criticalClose.message
+          emitOutput(criticalClose.message, criticalClose.status === 'error' ? 'error' : 'text')
+          emitOutput('', 'done')
+          emitStatus(criticalClose.status, criticalClose.terminalReason)
+          return this.buildResult({
+            success: criticalClose.success,
+            error: criticalClose.success ? undefined : criticalClose.message,
+            finalText,
+            cancelled: false,
+            taskId,
+            usedTools,
+            transcriptEvents,
+            projectionPatches,
+            terminalReason: criticalClose.terminalReason,
+          })
+        }
+        if (handledMapAmbiguity) {
+          nextInput = buildTextToolResultMessage(bridgeResults)
+          finalText = parsed.visibleText
+          continue
         }
         nextInput = buildTextToolResultMessage(bridgeResults)
         finalText = parsed.visibleText
@@ -3082,6 +3431,24 @@ export class AgentSdkRuntime extends EventEmitter {
           terminalReason: 'checkpoint_budget',
         })
       }
+      if (
+        /Max turns \(\d+\) exceeded/i.test(message)
+        && fileReadExcerptCheckpointForRecovery
+      ) {
+        emitOutput(fileReadExcerptCheckpointForRecovery, 'text')
+        emitOutput('', 'done', this.mergeProjectionPatches(projectionPatches))
+        emitStatus('checkpoint', 'checkpoint_budget')
+        return this.buildResult({
+          success: true,
+          finalText: fileReadExcerptCheckpointForRecovery,
+          cancelled: false,
+          taskId,
+          usedTools,
+          transcriptEvents,
+          projectionPatches,
+          terminalReason: 'checkpoint_budget',
+        })
+      }
       const failure = classifySdkRuntimeError(error)
       emitOutput(`${failure.userMessagePrefix}: ${message}`, 'error')
       emitOutput('', 'done')
@@ -3108,6 +3475,59 @@ export class AgentSdkRuntime extends EventEmitter {
     }
   }
 
+  private async resolveMapPlaceAmbiguityIfNeeded(params: {
+    bridgeResults: ToolBridgeResultItem[]
+    definitionByName: Map<string, ToolDefinition>
+    runtimeContext: ToolBridgeRuntimeContext
+  }): Promise<boolean> {
+    const askDefinition = params.definitionByName.get('ask_user_questions')
+    if (!askDefinition) return false
+    const mapDefinition = params.definitionByName.get('map_plan_route')
+    let searchResults = params.bridgeResults
+    let handled = false
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const ambiguity = findMapPlaceAmbiguityPrompt(searchResults)
+      if (!ambiguity) return handled
+      handled = true
+
+      const askOutput = await this.executeReadyToolDefinition(
+        askDefinition,
+        ambiguity.askArgs,
+        params.runtimeContext,
+      )
+      params.bridgeResults.push({
+        id: `${ambiguity.source.id}-ask-user`,
+        name: 'ask_user_questions',
+        args: ambiguity.askArgs,
+        result: askOutput,
+      })
+
+      const answer = readMapAmbiguityAnswer(askOutput)
+      const selected = answer
+        ? ambiguity.choices.find((choice) => choice.option === answer) || null
+        : null
+      const retryArgs = selected && mapDefinition
+        ? buildMapRetryArgs(ambiguity.source.args, ambiguity.field, selected.candidate)
+        : null
+      if (!mapDefinition || !retryArgs) return true
+
+      const retryOutput = await this.executeReadyToolDefinition(
+        mapDefinition,
+        retryArgs,
+        params.runtimeContext,
+      )
+      const retryResult = {
+        id: `${ambiguity.source.id}-retry`,
+        name: 'map_plan_route',
+        args: retryArgs,
+        result: retryOutput,
+      }
+      params.bridgeResults.push(retryResult)
+      searchResults = [retryResult]
+    }
+    return handled
+  }
+
   private buildSdkTool(
     definition: ToolDefinition,
     runtimeContext: ToolBridgeRuntimeContext,
@@ -3125,7 +3545,48 @@ export class AgentSdkRuntime extends EventEmitter {
         const args = input && typeof input === 'object' && !Array.isArray(input)
           ? input as Record<string, unknown>
           : {}
+        if (
+          definition.name === 'ask_user_questions'
+          && runtimeContext.nativeMapAmbiguityResolved
+          && typeof args.questions === 'string'
+        ) {
+          return stringifyToolResult(createToolExecutionOutput(
+            '地图地点歧义已经通过结构化问题卡处理完成，无需再次反问。',
+            {
+              shape: 'json',
+              data: {
+                ok: true,
+                skipped: true,
+                reason: 'map_ambiguity_already_resolved',
+              },
+            },
+          ))
+        }
         const output = await this.executeReadyToolDefinition(definition, args, runtimeContext)
+        if (definition.name === 'map_plan_route') {
+          const bridgeResults: ToolBridgeResultItem[] = [{
+            id: `native-sdk-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+            name: definition.name,
+            args,
+            result: output,
+          }]
+          const handledMapAmbiguity = await this.resolveMapPlaceAmbiguityIfNeeded({
+            bridgeResults,
+            definitionByName: runtimeContext.definitionByName,
+            runtimeContext,
+          })
+          if (handledMapAmbiguity) {
+            runtimeContext.nativeMapAmbiguityResolved = true
+          }
+          const criticalClose = mapToolFailureClose(bridgeResults)
+          runtimeContext.nativeMapCriticalClose = criticalClose
+          if (criticalClose) {
+            return buildTextToolResultMessage(bridgeResults)
+          }
+          if (handledMapAmbiguity) {
+            return buildTextToolResultMessage(bridgeResults)
+          }
+        }
         return stringifyToolResult(output)
       },
       errorFunction: (_context, error) => stringifyToolResult(createToolExecutionOutput(

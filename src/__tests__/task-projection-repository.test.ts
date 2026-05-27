@@ -37,9 +37,10 @@ test('TaskProjectionRepository persists and updates structured task projection r
                   blocked_reason: params[19],
                   resumable_actions_json: params[20],
                   continuation_ref_json: params[21],
-                  recent_artifacts_json: params[22],
-                  created_at: params[23],
-                  updated_at: params[24],
+                  progress_json: params[22],
+                  recent_artifacts_json: params[23],
+                  created_at: params[24],
+                  updated_at: params[25],
                 })
                 return { changes: 1 }
               },
@@ -153,6 +154,12 @@ test('TaskProjectionRepository persists and updates structured task projection r
     blockedReason: null,
     resumableActions: ['cancel'],
     continuationRef: null,
+    progress: {
+      label: '采集中',
+      detail: '已采集 1 条',
+      completed: 1,
+      total: 3,
+    },
     recentArtifacts: [
       {
         id: 'artifact-1',
@@ -194,6 +201,7 @@ test('TaskProjectionRepository persists and updates structured task projection r
   assert.equal(stored?.degradationReason, 'browser unavailable')
   assert.equal(stored?.steps[0]?.status, 'running')
   assert.equal(stored?.blockedReason, '需要确认后继续')
+  assert.equal(stored?.progress?.label, '采集中')
   assert.equal(stored?.recentArtifacts?.[0]?.label, '采集记录')
   assert.equal(listed.length, 1)
 })
@@ -232,9 +240,10 @@ test('TaskProjectionRepository supports child-task lookup by parent task id', as
                   blocked_reason: params[19],
                   resumable_actions_json: params[20],
                   continuation_ref_json: params[21],
-                  recent_artifacts_json: params[22],
-                  created_at: params[23],
-                  updated_at: params[24],
+                  progress_json: params[22],
+                  recent_artifacts_json: params[23],
+                  created_at: params[24],
+                  updated_at: params[25],
                 })
                 return { changes: 1 }
               },

@@ -25,6 +25,12 @@ test('captureStableFrame is gated by a 2-second capture token — one capture pe
     browserMode,
     /if \(captureTokenConsumedRef\.current\) return\s*captureTokenConsumedRef\.current = true/,
   )
+  // If a handoff page finishes loading after the 2s capture token expires,
+  // the startup mask still releases instead of leaving the browser surface blank.
+  assert.match(
+    browserMode,
+    /if \(!captureTokenConsumedRef\.current\) return[\s\S]*setIsBrowserSurfaceReady\(true\)/,
+  )
   // Capture is immediate within the token window — no 180ms setTimeout wrapper.
   assert.doesNotMatch(
     browserMode,

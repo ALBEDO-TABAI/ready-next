@@ -115,6 +115,7 @@ interface ElectronAPIStubResult<T = unknown> {
 interface StubBag {
   profiles: PublicExternalServiceProfile[]
   testCalls: ExternalServiceUpdateInput[]
+  updateCalls?: ExternalServiceUpdateInput[]
 }
 
 function makeVisionProfile(overrides: Partial<PublicExternalServiceProfile> = {}): PublicExternalServiceProfile {
@@ -151,6 +152,7 @@ function installElectronAPIStub(dom: JSDOM, bag: StubBag): void {
       data: bag.profiles,
     }),
     updateExternalService: async (input: ExternalServiceUpdateInput): Promise<ElectronAPIStubResult<PublicExternalServiceProfile>> => {
+      bag.updateCalls?.push(input)
       const existing = bag.profiles.find((p) => p.id === input.id)
       return { success: true, data: existing }
     },
@@ -293,6 +295,62 @@ test('Y1.1 — non-vision-model profile (amap) keeps the original "测试" label
     // No vision-only help text leaks into non-vision profiles.
     const helpEl = handle.dom.window.document.querySelector('[data-vea-test-help]')
     assert.equal(helpEl, null, 'inline vision help text must NOT render for non-vision-model profile')
+  } finally {
+    root.unmount()
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    handle.restore()
+  }
+})
+
+test('Y1.1 — configured external-service secrets can be marked for clearing and draft-test/save carry clearSecrets', async () => {
+  const handle = installDomGlobals()
+  const bag: StubBag = {
+    profiles: [makeAmapProfile()],
+    testCalls: [],
+    updateCalls: [],
+  }
+  installElectronAPIStub(handle.dom, bag)
+
+  const { ExternalServicesSettingsPanel } = await import('../renderer/pages/Settings')
+
+  const root = createRoot(handle.dom.window.document.getElementById('root') as HTMLElement)
+  try {
+    flushSync(() => { root.render(createElement(ExternalServicesSettingsPanel)) })
+    await flushAsync()
+    flushSync(() => { /* drain */ })
+
+    const clearButton = handle.dom.window.document.querySelector('[data-external-secret-clear="amap-default:apiKey"]') as HTMLButtonElement | null
+    assert.ok(clearButton, 'configured Amap apiKey should render a clear button')
+    assert.equal(clearButton.textContent?.trim(), '清除')
+
+    clearButton.click()
+    await flushAsync()
+
+    const textAfterClear = handle.dom.window.document.body.textContent || ''
+    assert.ok(
+      textAfterClear.includes('将清除 1 项密钥'),
+      `clear intent should be visible in the panel summary; got: ${textAfterClear.slice(0, 500)}`,
+    )
+
+    const buttons = Array.from(handle.dom.window.document.querySelectorAll('button'))
+    const testButton = buttons.find((b) => (b as HTMLButtonElement).getAttribute('data-vea-test-button') === 'probe') as HTMLButtonElement | undefined
+    assert.ok(testButton, 'Amap probe button should render')
+    testButton.click()
+    await flushAsync()
+
+    assert.equal(bag.testCalls.length, 1)
+    assert.deepEqual(bag.testCalls[0].clearSecrets, ['apiKey'])
+    assert.deepEqual(bag.testCalls[0].secrets, {})
+
+    const saveButton = Array.from(handle.dom.window.document.querySelectorAll('button'))
+      .find((b) => (b.textContent || '').trim() === '保存') as HTMLButtonElement | undefined
+    assert.ok(saveButton, 'save button should render')
+    saveButton.click()
+    await flushAsync()
+
+    assert.equal(bag.updateCalls?.length, 1)
+    assert.deepEqual(bag.updateCalls?.[0].clearSecrets, ['apiKey'])
+    assert.deepEqual(bag.updateCalls?.[0].secrets, {})
   } finally {
     root.unmount()
     await new Promise((resolve) => setTimeout(resolve, 25))

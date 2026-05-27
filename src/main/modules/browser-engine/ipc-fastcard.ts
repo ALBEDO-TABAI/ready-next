@@ -91,6 +91,14 @@ export function setupBrowserFastCardIPC(options: BrowserFastCardIPCOptions): voi
     }
   })
 
+  ipcMain.handle('browser:fastCardOverlayGetSnapshot', (): FastCardIPCResult<FastCardOverlaySnapshot | null> => {
+    try {
+      return { success: true, data: overlayWindow?.getSnapshot() ?? null }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
   ipcMain.handle('browser:fastCardOverlayCommand', (_, command: FastCardOverlayCommand): FastCardIPCResult<void> => {
     try {
       const mainWindow = options.getMainWindow()

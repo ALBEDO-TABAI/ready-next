@@ -47,6 +47,39 @@ test('maps message persistence failures without raw sqlite text', () => {
   assert.doesNotMatch(result.friendlyMessage, /SQLITE/i)
 })
 
+test('maps provider quota failures to a recovery-specific message', () => {
+  const result = mapBackendErrorToFriendly({
+    error: 'HTTP 402: Insufficient balance',
+    errorKind: 'unknown',
+  })
+
+  assert.equal(result.friendlyMessage, '模型额度不足，请检查外部服务配置或账号余额')
+  assert.equal(result.recoverable, true)
+  assert.equal(result.retryStrategy, 'user_action')
+})
+
+test('maps provider auth failures to settings action', () => {
+  const result = mapBackendErrorToFriendly({
+    error: 'HTTP 401: invalid_api_key',
+    errorKind: 'blocked_config',
+  })
+
+  assert.equal(result.friendlyMessage, 'API Key 无效或没有权限，请检查设置里的模型配置')
+  assert.equal(result.recoverable, true)
+  assert.equal(result.retryStrategy, 'user_action')
+})
+
+test('maps provider rate limits to retry guidance', () => {
+  const result = mapBackendErrorToFriendly({
+    error: 'HTTP 429: Too Many Requests; Retry-After: 45',
+    errorKind: 'rate_limit',
+  })
+
+  assert.equal(result.friendlyMessage, '模型服务限流，请稍后重试')
+  assert.equal(result.recoverable, true)
+  assert.equal(result.retryStrategy, 'auto')
+})
+
 test('unknown errors fall back to generic copy with technical details separated', () => {
   const result = mapBackendErrorToFriendly({ error: 'opaque backend detail' })
 

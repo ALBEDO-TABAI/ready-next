@@ -1206,6 +1206,7 @@ const migrations: Migration[] = [
           blocked_reason TEXT,
           resumable_actions_json TEXT,
           continuation_ref_json TEXT,
+          progress_json TEXT,
           recent_artifacts_json TEXT,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL
@@ -1991,6 +1992,18 @@ const migrations: Migration[] = [
         END
         WHERE status IN ('done', 'cancelled')
       `)
+    }
+  },
+
+  // ------------------------------------------------------------------ 044
+  {
+    name: '044_add_task_projection_progress_json',
+    up: (db) => {
+      try {
+        db.exec('ALTER TABLE task_projections ADD COLUMN progress_json TEXT')
+      } catch {
+        // column already exists
+      }
     }
   }
 ]

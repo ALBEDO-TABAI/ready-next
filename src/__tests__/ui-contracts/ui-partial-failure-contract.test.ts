@@ -22,7 +22,7 @@ test('rss skills and global search surface partial failures instead of silently 
   assert.match(skillsPanel, /无法读取/)
   assert.match(skillsPanel, /pushMessage\(legacyFolders\.error\)/)
 
-  assert.match(globalSearch, /skippedDirectories/)
-  assert.match(globalSearch, /skippedFiles/)
+  assert.match(globalSearch, /reduceReindexResponse/)
+  assert.match(globalSearch, /if \(outcome\.error\) errors\.push\(outcome\.error\)/)
   assert.match(globalSearch, /搜索结果可能不完整/)
 })

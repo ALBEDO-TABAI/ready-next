@@ -2,7 +2,7 @@ import { readFileSync, statSync } from 'node:fs'
 import { dirname, isAbsolute, join, resolve } from 'node:path'
 
 import type { TaskProjectionRecord, TaskProjectionStore } from '../contracts/run-contracts'
-import type { ScopeRunResumableAction } from '../contracts/types'
+import type { ScopeRunResumableAction, ScopeRunSkillProgress } from '../contracts/types'
 import type { SkillTaskRunRecord } from '../../repositories/skill-task-run-repository'
 import { inspectSkillProgressArtifacts } from '../skills/skill-progress-artifacts'
 import { logAgentMetric } from '../metrics'
@@ -40,6 +40,19 @@ function asRecord(value: unknown): JsonRecord | null {
 
 function stringValue(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function numberValue(value: unknown): number | null {
+  const n = Number(value)
+  return Number.isFinite(n) ? n : null
+}
+
+function runStateString(runState: JsonRecord | null, ...keys: string[]): string | null {
+  for (const key of keys) {
+    const value = stringValue(runState?.[key])
+    if (value) return value
+  }
+  return null
 }
 
 /**
@@ -711,6 +724,46 @@ function mergeContinuationRef(
   }
 }
 
+function progressFromHandles(handles: ProjectionHandles): ScopeRunSkillProgress | null {
+  const outputDir = handles.outputDir
+  const runStatePath = handles.runStatePath || (outputDir ? join(outputDir, 'run_state.json') : null)
+  const runState = readRunStateJson(runStatePath)
+  const artifactProgress = inspectSkillProgressArtifacts({
+    outputDir,
+    sceneScoresPath: outputDir ? join(outputDir, 'scene_scores.json') : null,
+  })
+  if (!runState && !artifactProgress.hasEvidence) return null
+  return {
+    stage: runStateString(runState, 'current_stage', 'currentStage', 'stage', 'current_step', 'currentStep'),
+    completed: artifactProgress.completedScenes ?? numberValue(runState?.completed_scenes ?? runState?.completedScenes ?? runState?.completed),
+    total: artifactProgress.totalScenes ?? numberValue(runState?.total_scenes ?? runState?.totalScenes ?? runState?.total),
+    coverage: artifactProgress.coverageRatio ?? numberValue(runState?.coverage_ratio ?? runState?.coverageRatio ?? runState?.coverage),
+    overallCoverage: null,
+    fingerprint: artifactProgress.activity?.fingerprint ?? runStateString(runState, 'fingerprint', 'progress_fingerprint', 'progressFingerprint', 'updated_at', 'updatedAt'),
+    updatedAt: artifactProgress.activity?.updatedAt ?? runStateString(runState, 'updated_at', 'updatedAt', 'lastUpdated'),
+    lastError: null,
+    detail: artifactProgress.activity?.summary ?? null,
+    activityUpdatedAt: artifactProgress.activity?.updatedAt ?? null,
+    handoff: artifactProgress.handoff,
+  }
+}
+
+function completedContinuationRef(
+  record: TaskProjectionRecord,
+  handles: ProjectionHandles,
+  progress: ScopeRunSkillProgress | null,
+): TaskProjectionRecord['continuationRef'] {
+  const continuation = mergeContinuationRef(record, handles)
+  if (!continuation) return null
+  return {
+    ...continuation,
+    blockerType: 'completed',
+    pauseReason: 'completed',
+    progressFingerprint: progress?.fingerprint ?? continuation.progressFingerprint ?? null,
+    progress,
+  } as TaskProjectionRecord['continuationRef']
+}
+
 function mergeProjectionArtifacts(
   record: TaskProjectionRecord,
   handles: ProjectionHandles,
@@ -772,6 +825,12 @@ function patchSteps(
   })
 }
 
+function completedTaskSummary(record: TaskProjectionRecord): string {
+  const summary = String(record.taskSummary || '').trim()
+  if (!summary || summary.includes('进行中')) return '技能任务已完成'
+  return summary
+}
+
 function buildPatch(
   record: TaskProjectionRecord,
   now: string,
@@ -810,26 +869,32 @@ export function reconcileTaskProjections(params: ReconcileTaskProjectionsParams)
     let target: Partial<TaskProjectionRecord> | null = null
     if (record.status === 'completed') {
       if (!projectionIsDone(handles)) continue
+      const progress = progressFromHandles(handles)
       target = {
         status: 'completed',
         interactionState: 'suspended',
         waitingFor: 'none',
+        taskSummary: completedTaskSummary(record),
         blockedReason: null,
         degradationReason: null,
         resumableActions: ['open_artifact'],
-        continuationRef: mergeContinuationRef(record, handles),
+        continuationRef: completedContinuationRef(record, handles, progress),
+        progress,
         recentArtifacts: mergeProjectionArtifacts(record, handles, now),
         steps: patchSteps(record, 'completed', now),
       }
     } else if (projectionIsDone(handles)) {
+      const progress = progressFromHandles(handles)
       target = {
         status: 'completed',
         interactionState: 'suspended',
         waitingFor: 'none',
+        taskSummary: completedTaskSummary(record),
         blockedReason: null,
         degradationReason: null,
         resumableActions: ['open_artifact'],
-        continuationRef: mergeContinuationRef(record, handles),
+        continuationRef: completedContinuationRef(record, handles, progress),
+        progress,
         recentArtifacts: mergeProjectionArtifacts(record, handles, now),
         steps: patchSteps(record, 'completed', now),
       }

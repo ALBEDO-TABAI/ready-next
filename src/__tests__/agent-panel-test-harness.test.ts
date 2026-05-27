@@ -171,6 +171,49 @@ describe('agent panel test harness', () => {
     assert.ok(snapshot.infoCards.some((card) => card.kind === 'recent_artifact'))
   })
 
+  it('does not surface stale run errors on completed task snapshots', () => {
+    const snapshot = createAgentPanelSnapshot(baseState({
+      messages: [
+        message({ id: 'user-1', type: 'user', content: '分析视频' }),
+        message({
+          id: 'agent-1',
+          type: 'agent',
+          content: '已完成。',
+          meta: {
+            taskSnapshot: {
+              scopeId: 'scope-test',
+              taskId: 'skill-child:done',
+              taskTitle: '技能子任务',
+              taskSummary: '技能任务已完成',
+              phase: 'done',
+              status: 'completed',
+              terminalReason: 'done',
+              error: '技能任务进行中',
+            },
+          },
+        } as AgentMessage),
+      ],
+      scopeRunStates: {
+        'scope-test': run({
+          phase: 'done',
+          terminalReason: 'done',
+          taskId: 'skill-child:done',
+          taskTitle: '技能子任务',
+          taskSummary: '技能任务已完成',
+          error: '技能任务进行中',
+        }),
+      },
+    }))
+
+    assert.equal(snapshot.runtime.activeRun?.error, null)
+    assert.equal(snapshot.taskCards[0].error, null)
+    assert.equal(snapshot.taskCards[1].error, null)
+    assert.equal(
+      snapshot.diagnostics.some((item) => item.id === 'active_run_error'),
+      false,
+    )
+  })
+
   it('diagnoses send failures and unpaired tool calls with layer labels', () => {
     const snapshot = createAgentPanelSnapshot(baseState({
       messages: [

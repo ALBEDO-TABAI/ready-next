@@ -506,6 +506,24 @@ describe('useDocTabs Store', () => {
         assert.strictEqual(useDocTabs.getState().splitTabId, null)
     })
 
+    it('should remap document tab paths using normalized path identity', () => {
+        useDocTabs.setState({
+            tabs: [
+                { id: 'doc-1', path: 'C:\\Workspace\\Cafe\u0301\\draft.md', title: 'draft.md', content: '', isDirty: false },
+            ],
+            activeTabId: 'doc-1',
+            splitTabId: null,
+            documentSplitRatio: 50,
+            pendingReveal: null,
+        })
+
+        useDocTabs.getState().remapTabPaths('c:\\Workspace\\Café', 'c:\\Workspace\\Archive\\Café')
+
+        const tab = useDocTabs.getState().tabs[0]
+        assert.strictEqual(tab.path, 'c:\\Workspace\\Archive\\Café\\draft.md')
+        assert.strictEqual(tab.title, 'draft.md')
+    })
+
     it('should extract filename from path as tab title', () => {
         useDocTabs.getState().openTab('/a/b/c/deep-file.tsx')
         const tab = useDocTabs.getState().tabs[1]
@@ -712,7 +730,7 @@ describe('useAgent Store', () => {
     })
 
     it('should load scoped messages and sync current scope metadata', async () => {
-        ;(globalThis as any).window.electronAPI = {
+        ;(globalThis as typeof globalThis & { window: { electronAPI?: unknown } }).window.electronAPI = {
             agent: {
                 getConversationScopeMessages: async (_scopeId: string) => ({
                     success: true,
@@ -758,7 +776,7 @@ describe('useAgent Store', () => {
     })
 
     it('should not repopulate scoped conversations from old chat history when scoped loading is unavailable', async () => {
-        ;(globalThis as any).window.electronAPI = {
+        ;(globalThis as typeof globalThis & { window: { electronAPI?: unknown } }).window.electronAPI = {
             agent: {
                 listConversationScopes: async () => ({
                     success: false,
@@ -970,6 +988,96 @@ describe('useAgent Store', () => {
             agent: 'butler',
             scopeId: 'conv-local-test-send',
         }])
+    })
+
+    it('should unlock the scoped run when sendScoped succeeds without a terminal stream event', async () => {
+        const sendScopedCalls: Array<Record<string, unknown>> = []
+        ;(globalThis as any).window.electronAPI = {
+            agent: {
+                createLocalScope: async (_agent: string, scopeId?: string) => ({
+                    success: true,
+                    data: {
+                        id: scopeId || 'conv-local-success',
+                        agent: 'butler',
+                        title: '新对话',
+                        sourceKind: 'local',
+                        sourceId: 'app',
+                        threadKey: scopeId || 'conv-local-success',
+                        meta: { sourceLabel: '应用内', createdBy: 'app' },
+                        createdAt: '2026-04-15T10:00:00.000Z',
+                        updatedAt: '2026-04-15T10:00:00.000Z',
+                        lastMessageAt: null,
+                    },
+                }),
+                sendScoped: async (payload: Record<string, unknown>) => {
+                    sendScopedCalls.push(payload)
+                    return { success: true }
+                },
+                kill: async () => ({ success: true }),
+            },
+            chat: {
+                createConversation: async () => ({ success: true }),
+                saveMessage: async () => ({ success: true }),
+                updateConversationTitle: async () => ({ success: true }),
+            },
+            settings: {
+                getAIConfig: async () => ({ success: true, data: null }),
+            },
+        }
+
+        useAgent.setState({
+            currentAgent: 'butler',
+            currentScopeId: 'conv-local-success',
+            currentScope: {
+                id: 'conv-local-success',
+                agent: 'butler',
+                title: '新对话',
+                sourceKind: 'local',
+                sourceId: 'app',
+                threadKey: 'conv-local-success',
+                meta: { sourceLabel: '应用内', createdBy: 'app' },
+                createdAt: '2026-04-15T10:00:00.000Z',
+                updatedAt: '2026-04-15T10:00:00.000Z',
+                lastMessageAt: null,
+            },
+            scopes: [{
+                id: 'conv-local-success',
+                agent: 'butler',
+                title: '新对话',
+                sourceKind: 'local',
+                sourceId: 'app',
+                threadKey: 'conv-local-success',
+                meta: { sourceLabel: '应用内', createdBy: 'app' },
+                createdAt: '2026-04-15T10:00:00.000Z',
+                updatedAt: '2026-04-15T10:00:00.000Z',
+                lastMessageAt: null,
+            }],
+            conversations: [],
+            messages: [],
+            attachments: [],
+            filePool: [],
+            isStreaming: false,
+            foregroundBusy: false,
+            composerLocked: false,
+            streamingMessageId: null,
+            streamingRequestId: null,
+            sessions: {},
+            activeSessionId: '__primary__',
+            sessionId: '__primary__',
+            sendCoalescingEnabled: false,
+        })
+
+        const result = await useAgent.getState().sendMessage('hello')
+
+        const state = useAgent.getState()
+        assert.equal(result.success, true)
+        assert.equal(sendScopedCalls.length, 1)
+        assert.equal(state.isStreaming, false)
+        assert.equal(state.foregroundBusy, false)
+        assert.equal(state.composerLocked, false)
+        assert.equal(state.streamingRequestId, null)
+        assert.equal(state.scopeRunStates['conv-local-success']?.phase, 'done')
+        assert.equal(state.scopeRunStates['conv-local-success']?.terminalReason, 'done')
     })
 
     it('should retry once after rebuilding a missing local scope during send', async () => {
@@ -1632,8 +1740,19 @@ describe('useWorkspace Store', () => {
         assert.strictEqual(state.workspaceRoot, safeRoot)
         assert.strictEqual(state.currentPath, safeRoot)
         assert.strictEqual(state.selectedFile, null)
+        assert.deepStrictEqual(state.pinnedFolders, [safeRoot])
         // Should persist to localStorage
         assert.strictEqual(storage.get('ready-workspace-root'), safeRoot)
+        assert.deepStrictEqual(JSON.parse(storage.get('ready-pinned-folders') || '[]'), [safeRoot])
+    })
+
+    it('should keep workspace root visible in the file list when root is set directly', () => {
+        useWorkspace.getState().addPinnedFolder('/folder-a')
+        const safeRoot = '/Users/test/Documents/project'
+        const result = useWorkspace.getState().setWorkspaceRoot(safeRoot)
+        assert.strictEqual(result.ok, true, `setWorkspaceRoot rejected: ${result.message}`)
+        assert.deepStrictEqual(useWorkspace.getState().pinnedFolders, [safeRoot, '/folder-a'])
+        assert.deepStrictEqual(JSON.parse(storage.get('ready-pinned-folders') || '[]'), [safeRoot, '/folder-a'])
     })
 
     it('should set workspace root and populate mock files', () => {
@@ -1797,6 +1916,15 @@ describe('useWorkspace Store', () => {
     })
 
     it('should rename an item in mock mode', async () => {
+        useDocTabs.setState({
+            tabs: [
+                { id: 'doc-1', path: '/workspace/old.md', title: 'old.md', content: 'open', isDirty: false },
+            ],
+            activeTabId: 'doc-1',
+            splitTabId: null,
+            documentSplitRatio: 50,
+            pendingReveal: null,
+        })
         useWorkspace.setState({
             currentPath: '/workspace',
             files: [
@@ -1810,6 +1938,35 @@ describe('useWorkspace Store', () => {
         assert.ok(state.files.some(f => f.name === 'new.md'))
         assert.ok(!state.files.some(f => f.name === 'old.md'))
         assert.strictEqual(state.renamingPath, null)
+        const tab = useDocTabs.getState().tabs[0]
+        assert.strictEqual(tab.path, '/workspace/new.md')
+        assert.strictEqual(tab.title, 'new.md')
+    })
+
+    it('should remap open document tab paths when moving a file', async () => {
+        useDocTabs.setState({
+            tabs: [
+                { id: 'doc-1', path: '/workspace/old.md', title: 'old.md', content: 'open', isDirty: false },
+            ],
+            activeTabId: 'doc-1',
+            splitTabId: null,
+            documentSplitRatio: 50,
+            pendingReveal: null,
+        })
+        useWorkspace.setState({
+            currentPath: '/workspace',
+            files: [
+                { name: 'old.md', path: '/workspace/old.md', isDirectory: false, size: 100, modified: new Date() },
+            ],
+            selectedFile: '/workspace/old.md',
+        })
+
+        const result = await useWorkspace.getState().moveItem('/workspace/old.md', '/workspace/archive/old.md')
+
+        assert.strictEqual(result, true)
+        const tab = useDocTabs.getState().tabs[0]
+        assert.strictEqual(tab.path, '/workspace/archive/old.md')
+        assert.strictEqual(tab.title, 'old.md')
     })
 
     it('should delete an item in mock mode', async () => {

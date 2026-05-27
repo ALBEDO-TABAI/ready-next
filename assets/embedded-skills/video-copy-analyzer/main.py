@@ -12,6 +12,7 @@ import shutil
 from pathlib import Path
 
 _YT_DLP_JS_RUNTIMES_SUPPORT_CACHE = {}
+_YT_DLP_REMOTE_COMPONENTS_SUPPORT_CACHE = {}
 
 def get_script_dir():
     """获取脚本所在目录"""
@@ -51,11 +52,34 @@ def yt_dlp_supports_js_runtimes(base_command):
     _YT_DLP_JS_RUNTIMES_SUPPORT_CACHE[cache_key] = supported
     return supported
 
+def yt_dlp_supports_remote_components(base_command):
+    cache_key = tuple(base_command)
+    if cache_key in _YT_DLP_REMOTE_COMPONENTS_SUPPORT_CACHE:
+        return _YT_DLP_REMOTE_COMPONENTS_SUPPORT_CACHE[cache_key]
+    try:
+        result = subprocess.run(
+            [*base_command, "--help"],
+            capture_output=True,
+            text=True,
+            timeout=8,
+        )
+    except Exception:
+        _YT_DLP_REMOTE_COMPONENTS_SUPPORT_CACHE[cache_key] = False
+        return False
+
+    output = f"{result.stdout}\n{result.stderr}"
+    supported = result.returncode == 0 and "--remote-components" in output
+    _YT_DLP_REMOTE_COMPONENTS_SUPPORT_CACHE[cache_key] = supported
+    return supported
+
 def build_yt_dlp_command(*args):
     ytdlp = get_venv_ytdlp()
     base_command = [ytdlp] if shutil.which(ytdlp) or Path(ytdlp).exists() else [sys.executable, "-m", "yt_dlp"]
     runtime_args = ["--js-runtimes", "node"] if shutil.which("node") and yt_dlp_supports_js_runtimes(base_command) else []
-    return [*base_command, *runtime_args, *args]
+    remote_component_args = ["--remote-components", "ejs:github"] if yt_dlp_supports_remote_components(base_command) else []
+    cookie_file = os.environ.get("YOUTUBE_COOKIE_FILE", "").strip()
+    cookie_args = ["--cookies", cookie_file] if cookie_file and Path(cookie_file).exists() else []
+    return [*base_command, *runtime_args, *remote_component_args, *cookie_args, *args]
 
 def is_url(path):
     """判断是否为 URL"""
@@ -107,29 +131,33 @@ def download_video(url, output_dir):
     print("❌ 未找到下载的视频文件")
     return None
 
-def transcribe_video(video_path, output_dir, model="medium", language="auto"):
-    """使用 Whisper 转录视频"""
+def transcribe_video(video_path, output_dir):
+    """使用 FunASR 转录视频"""
     video_path = Path(video_path)
     video_id = video_path.stem
     srt_path = output_dir / f"{video_id}.srt"
-    
-    script_path = get_script_dir() / "scripts" / "transcribe_audio.py"
-    
+
+    script_dir = get_script_dir() / "scripts"
+    code = "\n".join([
+        "import sys",
+        f"sys.path.insert(0, {str(script_dir)!r})",
+        "from extract_subtitle_funasr import extract_with_funasr",
+        f"ok = extract_with_funasr({str(video_path)!r}, {str(srt_path)!r})",
+        "sys.exit(0 if ok else 1)",
+    ])
+
     cmd = [
         get_venv_python(),
-        str(script_path),
-        str(video_path),
-        str(srt_path),
-        model,
-        language,
-        "cpu"  # 默认使用 CPU，MacOS 上更稳定
+        "-u",
+        "-c",
+        code,
     ]
-    
+
     print(f"🎤 正在转录视频: {video_path}")
-    print(f"   使用模型: {model}, 语言: {language}")
-    
+    print("   使用模型: FunASR paraformer-zh")
+
     result = subprocess.run(cmd, capture_output=True, text=True)
-    
+
     if result.returncode != 0:
         print(f"❌ 转录失败: {result.stderr}")
         if result.stdout:
@@ -165,23 +193,19 @@ def read_srt_as_text(srt_path):
 
 def main():
     if len(sys.argv) < 2 or sys.argv[1] in ["-h", "--help"]:
-        print("用法: python main.py <视频URL或文件路径> [输出目录] [whisper模型] [语言]")
+        print("用法: python main.py <视频URL或文件路径> [输出目录]")
         print()
         print("参数:")
         print("  视频URL或文件路径  - B站/YouTube URL 或本地视频文件路径")
         print("  输出目录          - 可选，默认为 ~/video-analysis/")
-        print("  whisper模型       - 可选，tiny/base/small/medium/large，默认 medium")
-        print("  语言              - 可选，zh/en/auto，默认 auto")
         print()
         print("示例:")
         print("  python main.py https://www.bilibili.com/video/BVxxxx")
-        print("  python main.py ./my_video.mp4 ./output medium zh")
+        print("  python main.py ./my_video.mp4 ./output")
         sys.exit(0 if len(sys.argv) > 1 else 1)
     
     input_path = sys.argv[1]
     output_dir = Path(sys.argv[2] if len(sys.argv) > 2 else os.path.expanduser("~/video-analysis"))
-    model = sys.argv[3] if len(sys.argv) > 3 else "medium"
-    language = sys.argv[4] if len(sys.argv) > 4 else "auto"
     
     # 创建输出目录
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -202,8 +226,8 @@ def main():
             sys.exit(1)
         print(f"📁 使用本地视频: {video_path}")
     
-    # 阶段 2: Whisper 转录
-    srt_path = transcribe_video(video_path, output_dir, model, language)
+    # 阶段 2: FunASR 转录
+    srt_path = transcribe_video(video_path, output_dir)
     if not srt_path:
         sys.exit(1)
     
@@ -215,7 +239,7 @@ def main():
         f.write(f"# 视频语音转录文字稿\n\n")
         f.write(f"**视频来源**: {input_path}\n")
         f.write(f"**视频文件**: {video_path}\n")
-        f.write(f"**转录模型**: Whisper {model}\n\n")
+        f.write(f"**转录模型**: FunASR paraformer-zh\n\n")
         f.write("---\n\n")
         f.write("## 完整文字稿\n\n")
         f.write(text_content)
@@ -226,7 +250,7 @@ def main():
     # 完成报告
     print()
     print("=" * 60)
-    print("✅ 视频文案分析完成！")
+    print("✅ 字幕提取与文字稿生成完成！")
     print("=" * 60)
     print()
     print(f"📁 输出目录: {output_dir}")
@@ -236,7 +260,7 @@ def main():
     print(f"   - {srt_path.name} (字幕)")
     print(f"   - {transcript_path.name} (文字稿)")
     print()
-    print("💡 提示: 文字稿已准备好，可以进行三维度分析了！")
+    print("💡 提示: 文字稿已准备好，Ready 会继续生成三维度分析报告和结构化文字稿。")
 
 if __name__ == "__main__":
     main()

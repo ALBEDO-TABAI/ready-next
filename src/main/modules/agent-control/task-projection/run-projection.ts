@@ -25,6 +25,14 @@ function readProjectionTruthPatch(projectionTruth?: ProjectionTruthSnapshot | nu
   return patch as RunProjectionPatch
 }
 
+function hasOwn(value: object, key: string): boolean {
+  return Object.prototype.hasOwnProperty.call(value, key)
+}
+
+function hasDefinedOwn(value: object, key: string): boolean {
+  return hasOwn(value, key) && (value as Record<string, unknown>)[key] !== undefined
+}
+
 export class RunProjection {
   constructor(private readonly deps: {
     getScope: (scopeId: string) => ConversationScope | null
@@ -46,6 +54,12 @@ export class RunProjection {
       ),
     )
     const truthPatch = readProjectionTruthPatch(projectionTruth)
+    const payloadHasTaskContinuation = hasDefinedOwn(payload, 'taskContinuation')
+    const truthHasTaskContinuation = hasDefinedOwn(truthPatch, 'taskContinuation')
+    const payloadHasBlockedReason = hasDefinedOwn(payload, 'blockedReason')
+    const truthHasBlockedReason = hasDefinedOwn(truthPatch, 'blockedReason')
+    const payloadHasProgress = hasDefinedOwn(payload, 'progress')
+    const truthHasProgress = hasDefinedOwn(truthPatch, 'progress')
     const recentArtifacts = (payload.recentArtifacts || payload.artifactRefs || previous?.recentArtifacts || []).slice(-4)
     const activePhase =
       payload.phase === 'queued'
@@ -76,8 +90,16 @@ export class RunProjection {
       waitingFor: payload.waitingFor ?? truthPatch.waitingFor ?? previous?.waitingFor ?? 'none',
       resumableActions: payload.resumableActions ?? truthPatch.resumableActions ?? previous?.resumableActions ?? [],
       recentArtifacts,
-      taskContinuation: payload.taskContinuation ?? truthPatch.taskContinuation ?? previous?.taskContinuation ?? null,
-      progress: payload.progress ?? truthPatch.progress ?? previous?.progress ?? null,
+      taskContinuation: payloadHasTaskContinuation
+        ? payload.taskContinuation ?? null
+        : truthHasTaskContinuation
+          ? truthPatch.taskContinuation ?? null
+          : previous?.taskContinuation ?? null,
+      progress: payloadHasProgress
+        ? payload.progress ?? null
+        : truthHasProgress
+          ? truthPatch.progress ?? null
+          : previous?.progress ?? null,
       memoryCapture: payload.memoryCapture ?? previous?.memoryCapture ?? null,
       executionDiagnostics: payload.executionDiagnostics ?? previous?.executionDiagnostics ?? null,
       budgetUsagePercent:
@@ -112,7 +134,11 @@ export class RunProjection {
         ?? previous?.taskProjectionId
         ?? payload.runId
         ?? null,
-      blockedReason: payload.blockedReason ?? truthPatch.blockedReason ?? previous?.blockedReason ?? null,
+      blockedReason: payloadHasBlockedReason
+        ? payload.blockedReason ?? null
+        : truthHasBlockedReason
+          ? truthPatch.blockedReason ?? null
+          : previous?.blockedReason ?? null,
       error: payload.error ?? previous?.error ?? null,
       terminalReason: payload.terminalReason ?? (activePhase ? null : previous?.terminalReason ?? null),
       updatedAt: payload.timestamp,

@@ -29,3 +29,13 @@ export function appendToolEventLog(payload: ToolEventLogPayload): void {
     /* best-effort */
   }
 }
+
+export function appendToolCapabilityLog(message: string): void {
+  const line = String(message || '').trim()
+  if (!line) return
+  try {
+    logger.append(`[${new Date().toISOString()}] ${line}\n`)
+  } catch {
+    /* best-effort */
+  }
+}

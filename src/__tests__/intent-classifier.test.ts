@@ -69,6 +69,15 @@ test('intent classifier recognizes platform public-ranking lookups as browser in
   assert.ok(result.objectSignals.some((item) => /dynamic-public-ranking/.test(item)))
 })
 
+test('intent classifier treats location-heavy comparison requests as research, not map', () => {
+  const result = classifyIntent(buildRequestEnvelope({
+    userText: '比较北京几个 IT 园区的产业特色和适合入驻的公司类型，位置可以提到，但不要做导航。',
+  }))
+
+  assert.equal(result.primaryDomain, 'research')
+  assert.ok(result.actionSignals.includes('research-comparison-action'))
+})
+
 test('intent classifier does not treat local media adjustment superlatives as live info', () => {
   const result = classifyIntent(buildRequestEnvelope({
     userText: '把这个视频音量调到最高',

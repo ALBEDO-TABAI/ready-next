@@ -12,6 +12,22 @@ interface UseBrowserRuntimeEffectsParams {
   sendBoundsImmediate: (options?: { forceExact?: boolean }) => Promise<void>
 }
 
+interface BrowserTabOpenedEvent {
+  id: string
+  url: string
+  title?: string
+  domain?: string
+  favicon?: string | null
+  owner?: 'manual' | 'agent'
+  required?: boolean
+  activity?: 'idle' | 'running' | 'attention'
+  lastAuditedAt?: number | null
+  loading?: boolean
+  canGoBack?: boolean
+  canGoForward?: boolean
+  error?: string | null
+}
+
 export function useBrowserRuntimeEffects({
   isElectron,
   isActive,
@@ -210,30 +226,35 @@ export function useBrowserRuntimeEffects({
 
   useEffect(() => {
     if (!isElectron) return
-    const cleanup = window.electronAPI?.browser?.onNewTabRequest(async (url: string) => {
-      await sendBoundsImmediate({ forceExact: true })
-      await new Promise((resolve) => requestAnimationFrame(() => resolve(undefined)))
-      const result = await window.electronAPI?.browser?.createTab(url) as { success: boolean; tabId?: string } | undefined
-      if (result?.success && result.tabId) {
-        const newTab: BrowserTab = {
-          id: result.tabId,
-          url,
-          title: 'Loading...',
-          loading: true,
-          canGoBack: false,
-          canGoForward: false,
-          domain: extractBrowserDomain(url),
-          owner: 'manual',
-          required: false,
-          activity: 'idle',
-        }
-        useBrowserTabs.getState().addTab(newTab)
-        browserTabActivationSequencer.invalidate()
-        useBrowserTabs.getState().setActiveTabId(result.tabId)
-        useBrowserTabs.getState().setUrlInput(url === DEFAULT_BROWSER_URL ? '' : url)
-        hasHydratedRuntimeRef.current = true
-        requestAnimationFrame(() => sendBoundsImmediate({ forceExact: true }))
+    const cleanup = window.electronAPI?.browser?.onTabOpened((tab: BrowserTabOpenedEvent) => {
+      const openedTab: BrowserTab = {
+        id: tab.id,
+        url: tab.url,
+        title: tab.title || 'Loading...',
+        loading: Boolean(tab.loading),
+        canGoBack: Boolean(tab.canGoBack),
+        canGoForward: Boolean(tab.canGoForward),
+        domain: tab.domain || extractBrowserDomain(tab.url),
+        favicon: tab.favicon || undefined,
+        owner: tab.owner,
+        required: tab.required,
+        activity: tab.activity,
+        lastAuditedAt: tab.lastAuditedAt,
+        error: tab.error || undefined,
       }
+      const store = useBrowserTabs.getState()
+      const existing = store.tabs.some((item) => item.id === openedTab.id)
+      if (existing) {
+        store.updateTab(openedTab.id, openedTab)
+      } else {
+        store.addTab(openedTab)
+      }
+      browserTabActivationSequencer.invalidate()
+      store.setActiveTabId(openedTab.id)
+      store.setUrlInput(openedTab.url === DEFAULT_BROWSER_URL ? '' : openedTab.url)
+      hasHydratedRuntimeRef.current = true
+      setBrowserRuntimeReady(true)
+      requestAnimationFrame(() => sendBoundsImmediate({ forceExact: true }))
     })
     return () => { cleanup?.() }
   }, [isElectron, sendBoundsImmediate])

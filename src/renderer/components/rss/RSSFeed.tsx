@@ -19,6 +19,7 @@ import {
 } from 'lucide-react'
 import { WORKBENCH_HEADER_EDGE_X } from '../../modules/workbench/chrome'
 import { endRssItemDragSession, setRssItemDragPayload } from '../layout/fileTreeExternalDrop'
+import { compactAnalysisDetail } from '../../modules/rss/analysisLabels'
 
 export interface RSSItem {
   id: string
@@ -131,7 +132,7 @@ function progressLabel(entry: ItemAnalysisProgress | undefined): string {
     skipped: '已跳过'
   }
   const stage = stageText[entry.status] || entry.status
-  const detail = entry.error || entry.message || ''
+  const detail = compactAnalysisDetail(entry.error || entry.message)
   return detail ? `${stage} ${entry.progress}% · ${detail}` : `${stage} ${entry.progress}%`
 }
 
@@ -180,14 +181,14 @@ function taskStageTone(status: AnalysisStatus): { color: string; background: str
 }
 
 function taskDetailText(job: AnalysisJobItem): string {
-  if (job.error) return job.error
+  if (job.error) return compactAnalysisDetail(job.error)
 
   const message = (job.message || '').trim()
   if (!message || job.status === 'success') return ''
   if (job.progress >= 100 && /完成|已完成/.test(message)) return ''
   if (message === taskStageLabel(job.status)) return ''
 
-  return message
+  return compactAnalysisDetail(message)
 }
 
 function AnalysisProgressRing({

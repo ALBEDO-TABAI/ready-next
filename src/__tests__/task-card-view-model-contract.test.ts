@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import { buildTaskCardViewModel, deriveTaskCardRuntimeState } from '../renderer/modules/agent/taskCardViewModel'
 import { isStreamingScopeRunState } from '../renderer/modules/agent/scopeRunState'
+import { resolveProjectionProgress } from '../renderer/components/agent/chat-panel/helpers/projection'
 
 test('task card view model renders document tasks with generic step sections', () => {
   const vm = buildTaskCardViewModel({
@@ -25,6 +26,41 @@ test('task card view model renders document tasks with generic step sections', (
   assert.equal(vm.currentStep?.title, '章节改写')
   assert.equal(vm.sections.plan.count, 1)
   assert.equal(vm.sections.plan.summary, '当前：章节改写')
+})
+
+test('task projection progress falls back to continuation progress', () => {
+  const progress = resolveProjectionProgress({
+    taskId: 'skill-child:vcr_done',
+    scopeId: 'scope-vea',
+    runId: 'vcr_done',
+    taskType: 'multi_step_task',
+    module: 'skill',
+    status: 'completed',
+    interactionState: 'suspended',
+    waitingFor: 'none',
+    steps: [],
+    resumableActions: ['open_artifact'],
+    continuationRef: {
+      taskId: 'skill-child:vcr_done',
+      blockerType: 'completed',
+      progress: {
+        stage: 'completed',
+        completed: 64,
+        total: 64,
+        coverage: 1,
+        fingerprint: 'fp-complete',
+        updatedAt: '2026-05-25T14:37:28.398Z',
+        lastError: null,
+      },
+    },
+    recentArtifacts: [],
+    createdAt: '2026-05-25T14:00:00.000Z',
+    updatedAt: '2026-05-25T14:37:28.398Z',
+  } as any)
+
+  assert.equal(progress?.stage, 'completed')
+  assert.equal(progress?.completed, 64)
+  assert.equal(progress?.total, 64)
 })
 
 test('task card view model renders design tasks with generic step sections', () => {
@@ -166,6 +202,26 @@ test('task card view model does not show resumable background work as completed'
   assert.equal(vm.statusLabel, '后台运行中')
 })
 
+test('task card view model keeps explicit background signal above completed turn status', () => {
+  const vm = buildTaskCardViewModel({
+    scopeId: 'scope-background-completed-turn',
+    phase: 'done',
+    status: 'completed',
+    title: '视频分析',
+    taskTitle: '技能执行 · Video Expert Analyzer',
+    taskSummary: '当前回合已结束，后台任务仍在运行',
+    waitingFor: 'background',
+    taskContinuation: {
+      taskId: 'task-background-completed-turn',
+      blockerType: 'background_running',
+    },
+    resumableActions: ['continue', 'cancel'],
+    updatedAt: '2026-04-28T01:00:00.000Z',
+  }, undefined)
+
+  assert.equal(vm.statusLabel, '后台运行中')
+})
+
 test('task card view model does not show completed parent when a child task is still running', () => {
   const vm = buildTaskCardViewModel({
     scopeId: 'scope-parent-with-running-child',
@@ -272,6 +328,21 @@ test('task card runtime state distinguishes background running, budget paused, d
   })
 
   assert.deepEqual(deriveTaskCardRuntimeState({
+    scopeId: 'scope-cancelled',
+    phase: 'cancelled',
+    status: 'killed',
+    title: '已取消',
+    waitingFor: 'none',
+    resumableActions: ['none'],
+    canResume: false,
+    updatedAt: '2026-04-28T01:00:00.000Z',
+  }), {
+    visualState: 'done',
+    statusLabel: '已停止',
+    actionSet: [],
+  })
+
+  assert.deepEqual(deriveTaskCardRuntimeState({
     scopeId: 'scope-failed',
     phase: 'error',
     status: 'failed',
@@ -305,6 +376,31 @@ test('blocked terminal reasons show waiting instead of completed', () => {
       actionSet: ['continue', 'cancel'],
     })
   }
+})
+
+test('blocked child projections ignore stale background signals', () => {
+  const state = deriveTaskCardRuntimeState({
+    scopeId: 'scope-blocked-child-background',
+    phase: 'done',
+    status: 'blocked',
+    title: '视频分析',
+    terminalReason: 'blocked_external',
+    waitingFor: 'background',
+    taskContinuation: {
+      taskId: 'skill-child:vcr_blocked',
+      blockerType: 'blocked_external',
+      childRunId: 'vcr_blocked',
+    },
+    canResume: true,
+    resumableActions: ['continue', 'cancel'],
+    updatedAt: '2026-05-25T14:37:28.398Z',
+  } as any)
+
+  assert.deepEqual(state, {
+    visualState: 'waiting_input',
+    statusLabel: '等待补充',
+    actionSet: ['continue', 'cancel'],
+  })
 })
 
 test('budget exhausted pause uses the same terminal checkpoint truth for task card and typing state', () => {

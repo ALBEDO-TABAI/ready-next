@@ -1,6 +1,7 @@
 import { isForegroundBusyScopeRunState } from './scopeRunState'
 import { deriveTaskCardRuntimeState, type TaskCardAction } from './taskCardViewModel'
 import type { TaskCardVisualState } from './task-status-vocabulary'
+import { useWorkspace } from '../../stores/useWorkspace'
 import type { TaskProjectionRecordData } from '../../types/electron'
 import type {
   AgentArtifact,
@@ -36,6 +37,14 @@ type StoreState = {
   toolTraceStatus: 'idle' | 'running' | 'done' | 'error' | 'cancelled'
   attachments: ChatAttachment[]
   filePool: ChatAttachment[]
+  activeSessionId?: string | null
+  sessionOrder?: string[]
+  sessions?: Record<string, {
+    inputValue?: string
+    messages?: AgentMessage[]
+    conversationId?: string | null
+    state?: string
+  }>
   isStreaming: boolean
   foregroundBusy: boolean
   composerLocked: boolean
@@ -50,6 +59,8 @@ type StoreState = {
   addAttachments?: (files: ChatAttachment[]) => void
   clearAttachments?: () => void
   newSession?: () => void
+  createNewSession?: () => string | null
+  setActiveSessionId?: (id: string) => void
 }
 
 type StoreLike = {
@@ -85,6 +96,7 @@ export interface AgentPanelMessageSnapshot {
   timestamp: string
   attachmentNames: string[]
   metaKeys: string[]
+  askUserQuestionsStatus: string | null
 }
 
 export interface AgentPanelTaskCardSnapshot {
@@ -205,6 +217,8 @@ export interface AgentPanelSubmitOptions {
   attachments?: AgentPanelTestAttachmentInput[]
   expectedToolNames?: string[]
   forbiddenToolNames?: string[]
+  allowStoreFallback?: boolean
+  awaitStoreSend?: boolean
 }
 
 export interface AgentPanelSubmitResult {
@@ -233,15 +247,47 @@ export interface AgentPanelTestWorkspaceResult {
   error?: string
 }
 
+export interface AgentPanelSessionSummary {
+  activeSessionId: string | null
+  sessionOrder: string[]
+  currentScopeId: string | null
+  sessions: Array<{
+    id: string
+    conversationId: string | null
+    state: string | null
+    inputValue: string
+    messageCount: number
+    pendingAskUserCount: number
+  }>
+}
+
 export interface AgentPanelTestHarness {
   snapshot: () => Promise<AgentPanelSnapshot>
   diagnose: () => Promise<AgentPanelDiagnostic[]>
   submit: (text: string, options?: AgentPanelSubmitOptions) => Promise<AgentPanelSubmitResult>
+  answerPendingAskUserQuestions: (options?: {
+    strategy?: 'first'
+    freeText?: string
+  }) => Promise<{
+    success: boolean
+    cardId?: string
+    answers?: Array<{ id: string; answer: string | string[] }>
+    error?: string
+  }>
   attachFiles: (files: AgentPanelTestAttachmentInput[]) => Promise<ChatAttachment[]>
   clearAttachments: () => void
   newSession: () => Promise<AgentPanelSnapshot>
   prepareWorkspace: (root: string, options?: { reindex?: boolean }) => Promise<AgentPanelTestWorkspaceResult>
   waitForIdle: (options?: { timeoutMs?: number; pollMs?: number }) => Promise<AgentPanelSnapshot>
+  sessionSummary: () => AgentPanelSessionSummary
+  createVisibleSession: () => Promise<{ ok: boolean; id?: string | null; summary: AgentPanelSessionSummary; error?: string }>
+  activateSession: (id: string) => Promise<{
+    ok: boolean
+    id: string
+    summary: AgentPanelSessionSummary
+    snapshot: AgentPanelSnapshot
+    error?: string
+  }>
   events: () => AgentPanelHarnessEvent[]
   clearEvents: () => void
   dispose: () => void
@@ -276,7 +322,26 @@ function readText(value: unknown): string | null {
   return text || null
 }
 
+function isCompletedSnapshotState(
+  phase: string | null | undefined,
+  status?: string | null,
+  terminalReason?: string | null,
+): boolean {
+  const normalizedPhase = String(phase || '').trim()
+  const normalizedStatus = String(status || '').trim()
+  const normalizedTerminal = String(terminalReason || '').trim()
+  const done = normalizedPhase === 'done'
+    || normalizedStatus === 'completed'
+    || normalizedStatus === 'done'
+  const cleanTerminal = !normalizedTerminal
+    || normalizedTerminal === 'done'
+    || normalizedTerminal === 'completed'
+  return done && cleanTerminal
+}
+
 function serializeMessage(message: AgentMessage): AgentPanelMessageSnapshot {
+  const meta = asRecord(message.meta)
+  const askUserQuestionsMeta = asRecord(meta?.askUserQuestions)
   return {
     id: message.id,
     type: message.type,
@@ -285,6 +350,7 @@ function serializeMessage(message: AgentMessage): AgentPanelMessageSnapshot {
     timestamp: toIso(message.timestamp),
     attachmentNames: (message.attachments || []).map((attachment) => attachment.name),
     metaKeys: Object.keys(message.meta || {}).sort(),
+    askUserQuestionsStatus: message.askUserQuestions?.status || readText(askUserQuestionsMeta?.status),
   }
 }
 
@@ -307,6 +373,7 @@ function serializeToolTrace(
 
 function serializeRun(run: ScopeRunState | null): AgentPanelRunSnapshot | null {
   if (!run) return null
+  const completed = isCompletedSnapshotState(run.phase, null, run.terminalReason || null)
   return {
     scopeId: run.scopeId,
     agent: run.agent,
@@ -326,8 +393,8 @@ function serializeRun(run: ScopeRunState | null): AgentPanelRunSnapshot | null {
     },
     progress: run.progress || null,
     softError: run.softError || null,
-    error: run.error || null,
-    blockedReason: run.blockedReason || null,
+    error: completed ? null : run.error || null,
+    blockedReason: completed ? null : run.blockedReason || null,
     updatedAt: run.updatedAt || null,
   }
 }
@@ -362,6 +429,7 @@ function taskCardFromRun(run: ScopeRunState): AgentPanelTaskCardSnapshot {
     updatedAt: run.updatedAt || new Date().toISOString(),
     toolTrace: run.toolTrace || [],
   })
+  const completed = runtimeState.visualState === 'done'
   return {
     source: 'scopeRunState',
     scopeId: run.scopeId,
@@ -377,7 +445,7 @@ function taskCardFromRun(run: ScopeRunState): AgentPanelTaskCardSnapshot {
     progress: run.progress || null,
     recentArtifacts: run.recentArtifacts || run.artifactRefs || [],
     continuation: run.taskContinuation || null,
-    error: run.error || run.blockedReason || null,
+    error: completed ? null : run.error || run.blockedReason || null,
     updatedAt: run.updatedAt || null,
     visualState: runtimeState.visualState,
     statusLabel: runtimeState.statusLabel,
@@ -389,22 +457,26 @@ function taskCardFromMeta(message: AgentMessage): AgentPanelTaskCardSnapshot | n
   const meta = asRecord(message.meta)
   const taskSnapshot = asRecord(meta?.taskSnapshot)
   if (!taskSnapshot) return null
+  const phase = readText(taskSnapshot.phase)
+  const status = readText(taskSnapshot.status) || phase
+  const terminalReason = readText(taskSnapshot.terminalReason)
+  const completed = isCompletedSnapshotState(phase, status, terminalReason)
   return {
     source: 'messageMeta',
     scopeId: readText(taskSnapshot.scopeId),
     taskId: readText(taskSnapshot.taskId),
     title: readText(taskSnapshot.taskTitle) || readText(taskSnapshot.title) || '消息任务快照',
     summary: readText(taskSnapshot.taskSummary),
-    phase: readText(taskSnapshot.phase),
-    status: readText(taskSnapshot.phase),
-    terminalReason: readText(taskSnapshot.terminalReason),
+    phase,
+    status,
+    terminalReason,
     waitingFor: readText(taskSnapshot.waitingFor),
     canResume: null,
     steps: Array.isArray(taskSnapshot.steps) ? taskSnapshot.steps as ScopeRunTaskStep[] : [],
     progress: asRecord(taskSnapshot.progress) as ScopeRunSkillProgress | null,
     recentArtifacts: Array.isArray(taskSnapshot.recentArtifacts) ? taskSnapshot.recentArtifacts as AgentArtifact[] : [],
     continuation: asRecord(taskSnapshot.taskContinuation) as ScopeRunTaskContinuation | null,
-    error: readText(taskSnapshot.error) || readText(taskSnapshot.blockedReason),
+    error: completed ? null : readText(taskSnapshot.error) || readText(taskSnapshot.blockedReason),
     updatedAt: readText(taskSnapshot.updatedAt),
     visualState: null,
     statusLabel: null,
@@ -424,7 +496,7 @@ function taskCardFromProjection(input: Record<string, unknown>): AgentPanelTaskC
   const steps = Array.isArray(input.steps) ? input.steps as ScopeRunTaskStep[] : []
   const recentArtifacts = Array.isArray(input.recentArtifacts) ? input.recentArtifacts as AgentArtifact[] : []
   const continuation = asRecord(input.continuationRef) as ScopeRunTaskContinuation | null
-  const progress = asRecord(input.progress) as ScopeRunSkillProgress | null
+  const progress = (asRecord(input.progress) || asRecord(continuation?.progress)) as ScopeRunSkillProgress | null
   const error = readText(input.error) || readText(input.blockedReason)
   const updatedAt = readText(input.updatedAt)
   const canResume = typeof input.canResume === 'boolean' ? input.canResume : null
@@ -447,6 +519,7 @@ function taskCardFromProjection(input: Record<string, unknown>): AgentPanelTaskC
     error,
     updatedAt: updatedAt || new Date().toISOString(),
   })
+  const completed = runtimeState.visualState === 'done'
   return {
     source: 'taskProjection',
     scopeId,
@@ -462,7 +535,7 @@ function taskCardFromProjection(input: Record<string, unknown>): AgentPanelTaskC
     progress,
     recentArtifacts,
     continuation,
-    error,
+    error: completed ? null : error,
     updatedAt,
     visualState: runtimeState.visualState,
     statusLabel: runtimeState.statusLabel,
@@ -632,12 +705,12 @@ export function diagnoseAgentPanelSnapshot(snapshot: AgentPanelSnapshot): AgentP
     })
   }
 
-  if (lastMessage?.type === 'system' && /发送失败|发送出错|send failed/i.test(lastMessage.content)) {
+  if (lastMessage?.type === 'system' && /发送失败|发送出错|send failed|API Key|模型额度不足|模型服务限流|模型服务暂时不可用|上下文太长|模型响应超时/i.test(lastMessage.content)) {
     diagnostics.push({
       id: 'send_failed_message',
       severity: 'error',
       layer: 'send',
-      message: '面板出现发送失败消息，优先检查 sendScoped 返回值、会话持久化或供应商请求错误。',
+      message: '面板出现发送失败或供应商失败消息，优先检查 sendScoped 返回值、会话持久化或供应商请求错误。',
       evidence: { messageId: lastMessage.id, content: lastMessage.content.slice(0, 240) },
     })
   }
@@ -668,10 +741,26 @@ export function diagnoseAgentPanelSnapshot(snapshot: AgentPanelSnapshot): AgentP
     })
   }
 
-  const failedToolResult = snapshot.toolTrace.find((item) =>
+  const mapAmbiguityWasClarified = snapshot.toolTrace.some((item) =>
     item.kind === 'result'
-    && /(?:工具 .{0,60}失败|失败：|保存失败|Document action failed|failed|errorKind|escapes sandbox root|path_outside_outputs)/i.test(item.text),
+    && /^map_plan_route:/i.test(item.text)
+    && /"errorKind"\s*:\s*"place_ambiguous"|errorKind.?place_ambiguous/i.test(item.text),
+  ) && snapshot.toolTrace.some((item) =>
+    item.kind === 'call'
+    && /^ask_user_questions\s*(?:\(|:)/i.test(item.text),
   )
+  const failedToolResult = snapshot.toolTrace.find((item) => {
+    if (item.kind !== 'result') return false
+    const text = item.text
+    if (
+      mapAmbiguityWasClarified
+      && /^map_plan_route:/i.test(text)
+      && /"errorKind"\s*:\s*"place_ambiguous"|errorKind.?place_ambiguous/i.test(text)
+    ) {
+      return false
+    }
+    return /(?:工具 .{0,60}失败|失败：|保存失败|Document action failed|failed|errorKind|escapes sandbox root|path_outside_outputs)/i.test(text)
+  })
   if (failedToolResult) {
     diagnostics.push({
       id: 'tool_result_failure',
@@ -832,7 +921,16 @@ function buildTestAttachmentPathContext(attachments: ChatAttachment[]): string {
 
 async function setDomTextareaValue(text: string): Promise<boolean> {
   if (typeof document === 'undefined') return false
-  const textarea = document.querySelector('[data-ready-agent-input="true"]') as HTMLTextAreaElement | null
+  let textarea: HTMLTextAreaElement | null = null
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < 1_500) {
+    const candidate = document.querySelector('[data-ready-agent-input="true"]') as HTMLTextAreaElement | null
+    if (candidate && !candidate.disabled) {
+      textarea = candidate
+      break
+    }
+    await delay(50)
+  }
   if (!textarea) return false
   textarea.focus()
   const setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')?.set
@@ -841,7 +939,10 @@ async function setDomTextareaValue(text: string): Promise<boolean> {
   } else {
     textarea.value = text
   }
-  textarea.dispatchEvent(new Event('input', { bubbles: true }))
+  const inputEvent = typeof InputEvent === 'function'
+    ? new InputEvent('input', { bubbles: true, inputType: 'insertText', data: text })
+    : new Event('input', { bubbles: true })
+  textarea.dispatchEvent(inputEvent)
   await delay(0)
   return true
 }
@@ -849,8 +950,19 @@ async function setDomTextareaValue(text: string): Promise<boolean> {
 async function submitViaDom(text: string): Promise<boolean> {
   const changed = await setDomTextareaValue(text)
   if (!changed || typeof document === 'undefined') return false
-  const sendButton = document.querySelector('[data-ready-agent-send="true"]') as HTMLButtonElement | null
-  if (!sendButton || sendButton.disabled) return false
+  let sendButton: HTMLButtonElement | null = null
+  const startedAt = Date.now()
+  while (Date.now() - startedAt < 1_500) {
+    const candidate = document.querySelector('[data-ready-agent-send="true"]') as HTMLButtonElement | null
+    if (candidate && !candidate.disabled) {
+      sendButton = candidate
+      break
+    }
+    await delay(50)
+  }
+  if (!sendButton) return false
+  await delay(100)
+  if (sendButton.disabled) return false
   sendButton.click()
   await delay(0)
   return true
@@ -994,9 +1106,11 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
     const messageText = attachmentContext ? `${text.trim()}\n\n${attachmentContext}` : text
     const normalizedText = messageText.trim()
     const mode = options.mode || 'dom'
+    const allowStoreFallback = options.allowStoreFallback !== false
     let inputMode: 'dom' | 'store' = mode
     let sendResult: SendMessageResultLike | null = null
     let domSubmitted = false
+    let domClickSubmitted = false
     const coalescingState = store.getState()
     const canDisableCoalescing = typeof store.setState === 'function'
       && typeof coalescingState.sendCoalescingEnabled === 'boolean'
@@ -1010,17 +1124,30 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
 
     try {
       if (mode === 'dom') {
-        domSubmitted = await submitViaDom(messageText)
-        if (domSubmitted) {
-          domSubmitted = await waitForDomSubmitEvidence(store, before.messages.length, normalizedText)
+        const maxDomAttempts = allowStoreFallback ? 1 : 3
+        for (let attempt = 0; attempt < maxDomAttempts; attempt += 1) {
+          domClickSubmitted = await submitViaDom(messageText) || domClickSubmitted
+          if (domClickSubmitted) {
+            domSubmitted = await waitForDomSubmitEvidence(store, before.messages.length, normalizedText)
+          }
+          if (domSubmitted) break
+          await delay(250)
         }
       }
 
-      if (!domSubmitted) {
+      if ((!domClickSubmitted || !domSubmitted) && allowStoreFallback) {
         inputMode = 'store'
         const state = store.getState()
         state.setInputValue(messageText, { preserveContinuationIntent: true })
-        sendResult = await state.sendMessage(messageText)
+        const sendPromise = state.sendMessage(messageText)
+        if (options.awaitStoreSend === false) {
+          sendResult = { success: true, shouldClearInput: true, preserveInput: false }
+          void sendPromise.catch(() => {})
+        } else {
+          sendResult = await sendPromise
+        }
+      } else if (domClickSubmitted && domSubmitted) {
+        inputMode = 'dom'
       }
     } finally {
       if (canDisableCoalescing) {
@@ -1105,6 +1232,72 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
     }
   }
 
+  const answerPendingAskUserQuestions: AgentPanelTestHarness['answerPendingAskUserQuestions'] = async (options = {}) => {
+    const state = store.getState()
+    const message = [...state.messages].reverse().find((item) =>
+      item.type === 'ask_user_questions'
+      && item.askUserQuestions?.status === 'pending'
+      && Array.isArray(item.askUserQuestions.questions)
+      && item.askUserQuestions.questions.length > 0)
+    const card = message?.askUserQuestions
+    if (!card) return { success: false, error: 'no pending ask_user_questions card' }
+    const answers: Array<{ id: string; answer: string | string[] }> = []
+    for (const question of card.questions) {
+      if (question.kind === 'single_choice') {
+        const first = question.options?.[0]
+        if (first) answers.push({ id: question.id, answer: first })
+      } else if (question.kind === 'multi_choice') {
+        const first = question.options?.[0]
+        if (first) answers.push({ id: question.id, answer: [first] })
+      } else {
+        answers.push({ id: question.id, answer: options.freeText || '测试选择' })
+      }
+    }
+    const api = window.electronAPI?.agentInteraction
+    if (!api) return { success: false, cardId: card.cardId, answers, error: 'agentInteraction API not available' }
+    const result = await api.submitAskUserQuestions({ cardId: card.cardId, answers })
+    const response = result as { success?: boolean; error?: string }
+    if (response.success && store.setState) {
+      const answeredAt = Date.now()
+      const current = store.getState()
+      const markSubmitted = (messages: AgentMessage[]): AgentMessage[] => messages.map((item) => {
+        if (item.id !== card.cardId || item.type !== 'ask_user_questions' || !item.askUserQuestions) return item
+        return {
+          ...item,
+          askUserQuestions: {
+            ...item.askUserQuestions,
+            status: 'submitted' as const,
+            answers,
+            answeredAt,
+          },
+        }
+      })
+      let nextSessions = current.sessions
+      if (current.sessions) {
+        for (const [sessionId, session] of Object.entries(current.sessions)) {
+          if (!session.messages?.some((item) => item.id === card.cardId)) continue
+          nextSessions = {
+            ...nextSessions,
+            [sessionId]: {
+              ...session,
+              messages: markSubmitted(session.messages),
+            },
+          }
+        }
+      }
+      store.setState({
+        messages: markSubmitted(current.messages),
+        sessions: nextSessions,
+      })
+    }
+    return {
+      success: response.success === true,
+      cardId: card.cardId,
+      answers,
+      error: response.error,
+    }
+  }
+
   const attachFiles = async (files: AgentPanelTestAttachmentInput[]): Promise<ChatAttachment[]> => {
     const state = store.getState()
     if (!state.addAttachments) throw new Error('agent store does not expose addAttachments')
@@ -1126,6 +1319,12 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
       if (current.currentScopeId && current.currentScopeId !== beforeScopeId) break
       await delay(50)
     }
+    store.getState().setInputValue('', { preserveContinuationIntent: true })
+    const clearStartedAt = Date.now()
+    while (Date.now() - clearStartedAt < 1_500) {
+      if (!store.getState().inputValue) break
+      await delay(50)
+    }
     return snapshot()
   }
 
@@ -1142,6 +1341,14 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
       // localStorage may be unavailable in some renderer sandboxes and that just leaves the
       // hint unset for the next reload.
     }
+    const validation = useWorkspace.getState().setWorkspaceRoot(normalizedRoot)
+    if (!validation.ok) {
+      return {
+        ok: false,
+        root: normalizedRoot,
+        error: validation.message || validation.reason || 'workspace root rejected',
+      }
+    }
     if (options.reindex === false) return { ok: true, root: normalizedRoot }
     const reindex = await window.electronAPI?.document?.reindexWorkspace?.(normalizedRoot)
     if (!reindex?.success) {
@@ -1150,15 +1357,87 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
     return { ok: true, root: normalizedRoot, reindex }
   }
 
+  const sessionSummary = (): AgentPanelSessionSummary => {
+    const state = store.getState()
+    const order = Array.isArray(state.sessionOrder) ? state.sessionOrder : []
+    const sessions = state.sessions || {}
+    return {
+      activeSessionId: state.activeSessionId || null,
+      sessionOrder: [...order],
+      currentScopeId: state.currentScopeId || null,
+      sessions: order.map((id) => {
+        const session = sessions[id] || {}
+        const messages = Array.isArray(session.messages) ? session.messages : []
+        return {
+          id,
+          conversationId: session.conversationId || null,
+          state: session.state || null,
+          inputValue: session.inputValue || '',
+          messageCount: messages.length,
+          pendingAskUserCount: messages.filter((message) =>
+            message.type === 'ask_user_questions'
+            && message.askUserQuestions?.status === 'pending'
+          ).length,
+        }
+      }),
+    }
+  }
+
+  const createVisibleSession: AgentPanelTestHarness['createVisibleSession'] = async () => {
+    const createNewSession = store.getState().createNewSession
+    if (!createNewSession) {
+      return { ok: false, summary: sessionSummary(), error: 'createNewSession not available' }
+    }
+    const id = createNewSession()
+    if (!id) return { ok: false, id, summary: sessionSummary(), error: 'session limit reached' }
+    const startedAt = Date.now()
+    while (Date.now() - startedAt < 2_000) {
+      const summary = sessionSummary()
+      if (summary.activeSessionId === id && summary.sessionOrder.includes(id)) {
+        return { ok: true, id, summary }
+      }
+      await delay(50)
+    }
+    return { ok: false, id, summary: sessionSummary(), error: 'visible session did not become active' }
+  }
+
+  const activateSession: AgentPanelTestHarness['activateSession'] = async (id) => {
+    const normalizedId = String(id || '').trim()
+    if (!normalizedId) {
+      return { ok: false, id: normalizedId, summary: sessionSummary(), snapshot: await snapshot(), error: 'session id is required' }
+    }
+    const state = store.getState()
+    if (!state.sessionOrder?.includes(normalizedId)) {
+      return { ok: false, id: normalizedId, summary: sessionSummary(), snapshot: await snapshot(), error: 'session not visible' }
+    }
+    if (!state.setActiveSessionId) {
+      return { ok: false, id: normalizedId, summary: sessionSummary(), snapshot: await snapshot(), error: 'setActiveSessionId not available' }
+    }
+    state.setActiveSessionId(normalizedId)
+    const startedAt = Date.now()
+    while (Date.now() - startedAt < 2_000) {
+      const current = store.getState()
+      if (current.activeSessionId === normalizedId) {
+        return { ok: true, id: normalizedId, summary: sessionSummary(), snapshot: await snapshot() }
+      }
+      await delay(50)
+    }
+    return { ok: false, id: normalizedId, summary: sessionSummary(), snapshot: await snapshot(), error: 'session did not become active' }
+  }
+
   return {
     snapshot,
     diagnose: async () => (await snapshot()).diagnostics,
     submit,
+    answerPendingAskUserQuestions,
     attachFiles,
     clearAttachments,
     newSession,
     prepareWorkspace,
     waitForIdle,
+    sessionSummary,
+    createVisibleSession,
+    activateSession,
     events: () => [...events],
     clearEvents: () => {
       events.splice(0, events.length)

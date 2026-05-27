@@ -1,4 +1,4 @@
-import { deriveScopeRunStatePatch, getActiveScopeRunState, isForegroundBusyScopeRunState, isScopeRunPhase, mergeArtifacts, phaseToToolTraceStatus } from './scopeRunState'
+import { createEmptyScopeRunState, deriveScopeRunStatePatch, getActiveScopeRunState, isForegroundBusyScopeRunState, isScopeRunPhase, mergeArtifacts, phaseToToolTraceStatus } from './scopeRunState'
 import { persistAssistantMessage, extractAttachmentsFromMeta } from './messageComposer'
 import { executeModuleToolAction, handleModuleToolAction } from './moduleExecutor'
 import { cancelAllPendingWidgetWrites } from './documentActions'
@@ -189,16 +189,15 @@ export function syncActiveScopeRunAliases(
     foregroundBusy,
     composerLocked: foregroundBusy,
     toolTrace: activeRunState?.toolTrace || [],
-    toolTraceStatus: phaseToToolTraceStatus(activeRunState?.phase),
+    toolTraceStatus: phaseToToolTraceStatus(activeRunState?.phase, activeRunState?.terminalReason),
   }
 }
 
 /**
  * Stage X2.6 — infrastructure timeout safety net.
  *
- * Default window: 60s. If no terminal event of ANY kind (onError /
- * onStream done / onScopeRunEvent terminal phase) arrives within this
- * window after a send, the driver fires `infrastructure_timeout`:
+ * Default bootstrap window: 60s. If the send never produces any runtime
+ * liveness, the driver fires `infrastructure_timeout`:
  * unlocks the originating session's composer, clears its in-flight
  * request handle, and toasts "Ready lost track of this request;
  * recovered automatically".
@@ -208,12 +207,14 @@ export function syncActiveScopeRunAliases(
  * last paragraph.
  */
 const INFRASTRUCTURE_TIMEOUT_MS = 60_000
+const ACTIVE_RUN_INFRASTRUCTURE_TIMEOUT_MS = 5 * 60_000
 
 interface InfrastructureWatchdog {
   scopeId: string
   requestId: string
   timer: ReturnType<typeof setTimeout>
   startedAt: number
+  timeoutMs: number
 }
 
 export function createAgentRuntimeDriver(store: AgentStoreLike) {
@@ -250,7 +251,8 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
 
   function fireInfrastructureTimeout(scopeId: string, requestId: string): void {
     const key = watchdogKey(scopeId, requestId)
-    if (!infrastructureWatchdogs.has(key)) return
+    const watchdog = infrastructureWatchdogs.get(key)
+    if (!watchdog) return
     infrastructureWatchdogs.delete(key)
     // Sanity: if the session is no longer streaming this request, nothing
     // to recover. Could happen if a terminal event arrived in the same
@@ -259,20 +261,42 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     const runState = state.scopeRunStates?.[scopeId]
     if (runState && runState.requestId !== requestId) return
 
-    store.setState((current: { currentScopeId?: string | null }) => ({
-      ...withSessionSliceAndActiveRuntimeMirror(
-        current,
-        sessionKeyForScopeId(current, scopeId),
-        {
-          isStreaming: false,
-          foregroundBusy: false,
-          composerLocked: false,
-          streamingMessageId: null,
-          streamingRequestId: null,
-        },
-      ),
-      ...(current.currentScopeId === scopeId ? { toolTraceStatus: 'error' as const } : {}),
-    }))
+    store.setState((current: { currentScopeId?: string | null; sessions?: Record<string, unknown>; currentAgent?: string }) => {
+      const sessionId = sessionKeyForScopeId(current, scopeId)
+      const currentSlice = normalizeSessionSlice(current.sessions?.[sessionId])
+      const previousRun = currentSlice.scopeRunStates[scopeId] || runState || createEmptyScopeRunState({
+        scopeId,
+        agent: state.currentAgent || current.currentAgent || 'butler',
+        requestId,
+        phase: 'error',
+      })
+      return {
+        ...withSessionSliceAndActiveRuntimeMirror(
+          current,
+          sessionId,
+          {
+            isStreaming: false,
+            foregroundBusy: false,
+            composerLocked: false,
+            streamingMessageId: null,
+            streamingRequestId: null,
+            scopeRunStates: {
+              ...currentSlice.scopeRunStates,
+              [scopeId]: {
+                ...previousRun,
+                scopeId,
+                requestId,
+                phase: 'error',
+                terminalReason: 'infra_error',
+                error: 'Ready 跟丢了这次请求，已自动恢复，可重新发送。',
+                updatedAt: new Date().toISOString(),
+              },
+            },
+          },
+        ),
+        ...(current.currentScopeId === scopeId ? { toolTraceStatus: 'error' as const } : {}),
+      }
+    })
 
     if (state.currentScopeId === scopeId && typeof state.addMessage === 'function') {
       state.addMessage({
@@ -287,7 +311,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     emitRendererAgentMetric('renderer_infrastructure_timeout_fired', {
       scopeId,
       requestId,
-      elapsedMs: INFRASTRUCTURE_TIMEOUT_MS,
+      elapsedMs: watchdog.timeoutMs,
     })
   }
 
@@ -302,7 +326,31 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
       requestId,
       timer,
       startedAt: Date.now(),
+      timeoutMs,
     })
+  }
+
+  function refreshInfrastructureWatchdog(scopeId: string, requestId: string | null | undefined): void {
+    if (!scopeId || !requestId) return
+    const key = watchdogKey(scopeId, requestId)
+    const watchdog = infrastructureWatchdogs.get(key)
+    if (!watchdog) return
+    clearTimeout(watchdog.timer)
+    const timer = setTimeout(() => fireInfrastructureTimeout(scopeId, requestId), ACTIVE_RUN_INFRASTRUCTURE_TIMEOUT_MS)
+    infrastructureWatchdogs.set(key, {
+      ...watchdog,
+      timer,
+      timeoutMs: ACTIVE_RUN_INFRASTRUCTURE_TIMEOUT_MS,
+    })
+  }
+
+  function completeScopeRunAfterSendSuccess(scopeId: string, requestId: string): void {
+    clearInfrastructureWatchdog(scopeId, requestId)
+    const runState = store.getState().scopeRunStates[scopeId] || null
+    if (runState?.requestId && runState.requestId !== requestId) return
+    if (!runState || runState.terminalReason || !isForegroundBusyScopeRunState(runState)) return
+    finalizeScopeRunAfterStreamDone(scopeId, runState)
+    void persistAssistantMessageForRun(scopeId, store.getState().scopeRunStates[scopeId] || runState)
   }
 
   function upsertScopeRunState(
@@ -536,6 +584,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
 
       const currentState = store.getState()
       const runState = currentState.scopeRunStates[scopeId] || null
+      refreshInfrastructureWatchdog(scopeId, runState?.requestId || (typeof data.runId === 'string' ? data.runId : null))
       const previousMessage = runState?.responseMessageId
         ? currentState.messages.find((item: AgentMessage) => item.id === runState.responseMessageId) || null
         : null
@@ -1284,6 +1333,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
 
         const currentState = store.getState()
         const detachedJobEvent = event.module === 'skill' && event.executionKind === 'job' && String(event.taskId || '').startsWith('detached:')
+        refreshInfrastructureWatchdog(event.scopeId, event.runId || store.getState().scopeRunStates[event.scopeId]?.requestId || null)
         // Stage X2.4 — `started` mirror still keys off the active scope
         // (the `streamingRequestId` mirror is the top-level alias and is
         // only meaningful for the active session; parked sessions read
@@ -1332,7 +1382,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             // only refresh it when the terminal event belongs to the
             // currently-visible scope.
             ...(state.currentScopeId === event.scopeId
-              ? { toolTraceStatus: phaseToToolTraceStatus(latestRunState?.phase || event.phase) }
+              ? { toolTraceStatus: phaseToToolTraceStatus(latestRunState?.phase || event.phase, latestRunState?.terminalReason || event.terminalReason) }
               : {}),
           }))
         }
@@ -1422,6 +1472,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
     resolveScopeIdForRunPayload,
     armInfrastructureWatchdog,
     clearInfrastructureWatchdog,
+    completeScopeRunAfterSendSuccess,
     // Test seam: lets the X2.6 behavior test fire the watchdog with a
     // short timeout (or 0) so it doesn't actually wait 60 seconds.
     __getInfrastructureTimeoutMs: () => INFRASTRUCTURE_TIMEOUT_MS,

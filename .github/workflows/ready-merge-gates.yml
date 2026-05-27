@@ -106,13 +106,11 @@ jobs:
       - name: test
         run: npm run test
 
-  # Optional deep-gate job. Disabled until X1 lands the verify:c / verify:r /
-  # verify:s / verify:t chain repairs (plan section 8 second job + 4.1 phase
-  # scheduling). Once all four chains are green on this branch, set `if:` to
-  # true (or remove it) so this job actually runs on push and PR.
+  # Deep-gate job. Enabled after local verify:t proved the verify:c/r/s/t
+  # chain green on this branch.
   deep-gates:
-    name: deep-gates (disabled pre-X1)
-    if: false
+    name: deep-gates
+    if: true
     runs-on: macos-latest
     needs: merge
     timeout-minutes: 90
@@ -129,9 +127,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Enable after X1 lands all four chains green; until then this job is
-      # gated off via `if: false` above so a red verify:c/r/s/t does not block
-      # PR merge while X1 is still in flight.
       - name: verify:c
         run: npm run verify:c
 

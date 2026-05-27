@@ -32,6 +32,30 @@ test('document edit mode uses raw text editing while preview mode keeps rendered
   assert.doesNotMatch(mermaidLoadingBranch, /\{code\}/)
 })
 
+test('document save failures surface a visible alert and keep the tab dirty', () => {
+  const markdownEditor = readWorkspaceFile('src/renderer/components/document/MarkdownEditor.tsx')
+
+  assert.match(markdownEditor, /const \[saveError, setSaveError\] = useState<string \| null>\(null\)/)
+  assert.match(markdownEditor, /setSaveError\(`保存失败：/)
+  assert.match(markdownEditor, /role="alert"/)
+  assert.match(markdownEditor, /saveState === 'error' && saveError/)
+  assert.doesNotMatch(markdownEditor, /catch \{\s*setSaveState\('error'\)\s*\}/)
+})
+
+test('document widget-only state changes enter shared tab content so clean markdown can be saved', () => {
+  const markdownEditor = readWorkspaceFile('src/renderer/components/document/MarkdownEditor.tsx')
+
+  assert.match(markdownEditor, /if \(!tab\.path \|\| !canSave \|\| !tab\.isDirty\) return/)
+  assert.match(markdownEditor, /const widgetStatesRef = useRef\(widgetStates\)/)
+  assert.match(markdownEditor, /const tabContentRef = useRef\(tab\.content\)/)
+  assert.match(markdownEditor, /const nextWidgetStates = \{[\s\S]*\.\.\.widgetStatesRef\.current,[\s\S]*\[getWidgetPersistenceKey\(widgetTitle, widgetCode\)\]: widgetState,[\s\S]*\}/)
+  assert.match(markdownEditor, /widgetStatesRef\.current = nextWidgetStates/)
+  assert.match(markdownEditor, /const baseContent = tabContentRef\.current[\s\S]*const nextContent = mergeWidgetStateMapIntoContent\(baseContent, nextWidgetStates\)/)
+  assert.match(markdownEditor, /if \(nextContent !== baseContent\) \{[\s\S]*tabContentRef\.current = nextContent[\s\S]*updateTabContent\(tab\.id, nextContent\)[\s\S]*\}/)
+  assert.match(markdownEditor, /mergeWidgetStateMapIntoContent\(baseContent, widgetStatesRef\.current\)/)
+  assert.doesNotMatch(markdownEditor, /widgetStateDirty/)
+})
+
 test('document source editor soft-wraps long markdown lines inside narrow split panes', () => {
   const markdownEditor = readWorkspaceFile('src/renderer/components/document/MarkdownEditor.tsx')
   const styles = readWorkspaceFile('src/renderer/styles/index.css')

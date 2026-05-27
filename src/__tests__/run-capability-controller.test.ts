@@ -115,6 +115,45 @@ test('reconcileAfterBrowserDecision re-resolves browser capabilities without reb
   assert.ok(!reconciled.allowedToolNames.includes('browser_extract_structured'))
 })
 
+test('prepareInitialRun opens research tools for location-heavy comparison requests', () => {
+  const requestEnvelope = buildRequestEnvelope({
+    userText: '比较北京几个 IT 园区的产业特色和适合入驻的公司类型，位置可以提到，但不要做导航。',
+  })
+  const prepared = prepareInitialRun({
+    config: BASE_CONFIG,
+    capabilityProfile: 'local_chat',
+    supportsToolCalls: true,
+    hasVideoInputs: false,
+    hasIncomingVideo: false,
+    keepToolsWithVideo: false,
+    preferredSkillToolNames: null,
+    authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
+    executionIntentContext: {
+      requestEnvelope,
+      intentClassification: classifyIntent(requestEnvelope),
+      contextualUserInput: requestEnvelope.primaryInstruction,
+      userInstructionText: requestEnvelope.primaryInstruction,
+      hasDocumentEnvironment: false,
+      hasWidgetTargetContext: false,
+      explicitWidgetCreateIntent: false,
+      documentWidgetTaskKind: null,
+      documentWidgetProfile: null,
+    },
+    browserDecisionMode: 'free_tool_loop',
+    runtimeAvailability: {
+      browserHostAvailable: true,
+      feishuConnected: true,
+    },
+    hostContext: {
+      userText: requestEnvelope.primaryInstruction,
+    },
+  })
+
+  assert.ok(prepared.capabilityResolution.visibleCapabilityGroupIds.includes('general_research'))
+  assert.ok(prepared.allowedToolNames.includes('web_search'))
+  assert.ok(!prepared.allowedToolNames.includes('map_plan_route'))
+})
+
 test('prepareInitialRun suppresses skill tools unless the turn selected a skill', () => {
   const requestEnvelope = buildRequestEnvelope({
     userText: '顺便帮我查查未来 3 天广州天气',

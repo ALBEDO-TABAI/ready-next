@@ -39,6 +39,7 @@ interface DocTabsState {
     setSplitTab: (id: string | null) => void
     setDocumentSplitRatio: (ratio: number) => void
     setPendingReveal: (reveal: PendingDocReveal | null) => void
+    remapTabPaths: (fromPath: string, toPath: string) => void
 }
 
 let tabCounter = 0
@@ -65,6 +66,21 @@ function syncTabCounterFromTabs(tabs: DocTab[]) {
         return Number.isFinite(numeric) ? Math.max(max, numeric) : max
     }, 0)
     tabCounter = Math.max(tabCounter, maxId)
+}
+
+function remapDocTabPath(path: string | null, fromPath: string, toPath: string): string | null {
+    if (!path) return path
+    const pathKey = normalizeDocTabPathKey(path)
+    const fromKey = normalizeDocTabPathKey(fromPath)
+    if (!pathKey || !fromKey) return path
+    if (pathKey === fromKey) return toPath
+    if (pathKey.startsWith(`${fromKey}/`)) {
+        const separator = toPath.includes('\\') && !toPath.includes('/') ? '\\' : '/'
+        const base = toPath.replace(/[\\/]+$/, '')
+        const suffix = pathKey.slice(fromKey.length).replace(/\//g, separator)
+        return `${base}${suffix}`
+    }
+    return path
 }
 
 function ensureTabsState(state: Pick<DocTabsState, 'tabs' | 'activeTabId' | 'splitTabId' | 'documentSplitRatio'>) {
@@ -240,6 +256,20 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
 
     setPendingReveal: (reveal: PendingDocReveal | null) => {
         set({ pendingReveal: reveal })
+    },
+
+    remapTabPaths: (fromPath: string, toPath: string) => {
+        set({
+            tabs: get().tabs.map((tab) => {
+                const nextPath = remapDocTabPath(tab.path, fromPath, toPath)
+                if (nextPath === tab.path) return tab
+                return {
+                    ...tab,
+                    path: nextPath,
+                    title: nextPath ? getFilename(nextPath) : tab.title,
+                }
+            }),
+        })
     },
 }), {
     name: STORAGE_KEY,

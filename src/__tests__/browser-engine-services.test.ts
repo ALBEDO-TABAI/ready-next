@@ -860,7 +860,7 @@ describe('BrowserAppShortcutBridgeService', () => {
 })
 
 describe('BrowserWindowOpenService', () => {
-  it('routes regular popups through the renderer new-tab bridge when policy resolves to open-tab', () => {
+  it('opens regular popups as native tabs when policy resolves to open-tab', () => {
     const events: string[] = []
     const notifications: unknown[] = []
     const service = new BrowserWindowOpenService({
@@ -873,8 +873,8 @@ describe('BrowserWindowOpenService', () => {
           notifications.push(payload)
         },
       } as any,
-      requestNewTab: (url: string) => {
-        events.push(`request:${url}`)
+      openInTab: (url: string) => {
+        events.push(`open:${url}`)
       },
       logBrowserDiag: (message: string) => {
         events.push(`log:${message}`)
@@ -892,7 +892,7 @@ describe('BrowserWindowOpenService', () => {
 
     assert.deepStrictEqual(result, { action: 'deny' })
     assert.strictEqual(events[0].includes('source=tab mode=open-tab'), true)
-    assert.deepStrictEqual(events[1], 'request:https://example.com/popup')
+    assert.deepStrictEqual(events[1], 'open:https://example.com/popup')
     assert.deepStrictEqual(notifications, [
       {
         sourceContentsId: 42,

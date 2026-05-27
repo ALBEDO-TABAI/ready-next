@@ -119,6 +119,7 @@ function setupSchema(db: SqliteDatabase): void {
       blocked_reason TEXT,
       resumable_actions_json TEXT,
       continuation_ref_json TEXT,
+      progress_json TEXT,
       recent_artifacts_json TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL

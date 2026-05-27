@@ -15,7 +15,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { execFileSync } from 'node:child_process'
-import { existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -29,6 +30,19 @@ import {
 const __dirname = dirname(fileURLToPath(import.meta.url))
 // src/__tests__ → repo root → assets/embedded-skills/video-expert-analyzer
 const SKILL_DIR = join(__dirname, '..', '..', 'assets', 'embedded-skills', 'video-expert-analyzer')
+
+function runPythonCompile(scriptPaths: string[]): void {
+  const pycachePrefix = mkdtempSync(join(tmpdir(), 'ready-pycompile-'))
+  try {
+    execFileSync('python3', ['-m', 'py_compile', ...scriptPaths], {
+      cwd: SKILL_DIR,
+      stdio: 'pipe',
+      env: { ...process.env, PYTHONPYCACHEPREFIX: pycachePrefix },
+    })
+  } finally {
+    rmSync(pycachePrefix, { recursive: true, force: true })
+  }
+}
 
 test('manifest compiles to advisory with read_skill + internal compat actions', () => {
   const def = compileSkillDefinition({ folderPath: SKILL_DIR, source: 'embedded' })
@@ -64,6 +78,16 @@ test('compat adapter ready_compat.py is bundled', () => {
     true,
     'ready_compat.py must be present so legacy production callers can dispatch into vnext orchestrator',
   )
+})
+
+test('vnext YouTube download path supports Ready cookies and yt-dlp JS challenge components', () => {
+  const pipelinePath = join(SKILL_DIR, 'scripts', 'pipeline_enhanced.py')
+  // eslint-disable-next-line ready/no-source-grep-test -- Packaging contract: these yt-dlp flags are assembled inside the Python downloader, and exercising them directly would require a networked YouTube run.
+  const source = readFileSync(pipelinePath, 'utf-8')
+  assert.match(source, /YOUTUBE_COOKIE_FILE/, 'Ready-exported YouTube cookies must be passed to yt-dlp')
+  assert.match(source, /--js-runtimes/, 'yt-dlp JS runtime support must be enabled when available')
+  assert.match(source, /--remote-components/, 'yt-dlp remote challenge components must be enabled when available')
+  runPythonCompile([pipelinePath, join(SKILL_DIR, 'scripts', 'ready_compat.py')])
 })
 
 test('skill.workflow.json has been removed from disk', () => {
@@ -136,6 +160,64 @@ print(json.dumps({
   assert.equal(result.min, 1)
   assert.equal(result.has_one, true)
   assert.equal(result.has_three, false)
+})
+
+test('auto scoring sample validation keeps API probe failures non-blocking', () => {
+  const script = `
+import json
+import sys
+import tempfile
+import types
+from pathlib import Path
+
+sys.path.insert(0, str(Path.cwd() / "scripts"))
+
+fake_probe = types.ModuleType("openclaw_batch_probe")
+fake_probe.sample_scene_numbers = lambda numbers, sample_size: list(numbers)[:sample_size]
+fake_probe.analyze_scenes = lambda packets, attempts, max_workers: ([], [], [{"scene_number": packets[0]["scene_number"]}])
+fake_probe.build_validation_report = lambda generated_scenes, reference_scenes, sample_size, scene_packets: {
+    "sample_scene_numbers": [packet["scene_number"] for packet in scene_packets],
+    "order_matches_reference": True,
+    "samples": [],
+}
+sys.modules["openclaw_batch_probe"] = fake_probe
+
+import ai_analyzer
+
+ai_analyzer._build_auto_scoring_attempts = lambda config: [{"model": "fake"}]
+ai_analyzer._collect_batch_packets = lambda video_dir, scene_numbers, pending_only: (
+    [{"scene_number": int(number), "batch_id": "batch-001"} for number in scene_numbers],
+    {},
+)
+
+video_dir = Path(tempfile.mkdtemp())
+scores_path = video_dir / "scene_scores.json"
+scores_path.write_text(json.dumps({
+    "scenes": [{"scene_number": 1, "type_classification": "demo", "scores": {"impact": 8}}],
+}, ensure_ascii=False), encoding="utf-8")
+
+result = ai_analyzer.run_auto_scoring_validation(
+    scores_path,
+    video_dir,
+    {},
+    scored_scene_numbers=[1],
+    sample_size=1,
+)
+report = json.loads((video_dir / "auto_scoring_validation.json").read_text(encoding="utf-8"))
+print(json.dumps({"result": result, "report": report}, ensure_ascii=False))
+`
+  const raw = execFileSync('python3', ['-c', script], {
+    cwd: SKILL_DIR,
+    encoding: 'utf8',
+  })
+  const payload = JSON.parse(raw)
+
+  assert.equal(payload.result.passed, true)
+  assert.deepEqual(payload.result.validation_failed_scene_numbers, [1])
+  assert.deepEqual(payload.result.validation_warning_scene_numbers, [1])
+  assert.deepEqual(payload.result.blocking_scene_numbers, [])
+  assert.equal(payload.report.passed, true)
+  assert.deepEqual(payload.report.blocking_scene_numbers, [])
 })
 
 test('SKILL.md frontmatter declares name / description / when-to-use per Claude Skill protocol', () => {

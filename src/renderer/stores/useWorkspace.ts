@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { readJsonStorage, readStorage, removeStorage, writeJsonStorage, writeStorage } from '../utils/storage'
+import { useDocTabs } from './useDocTabs'
 import {
   validateWorkspaceRoot,
   type WorkspaceValidationResult,
@@ -607,8 +608,18 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       console.warn('[workspace] setWorkspaceRoot rejected:', validation.reason, validation.message)
       return validation
     }
-    set({ workspaceRoot: path, currentPath: path, expandedDirs: new Set(), dirChildren: new Map(), selectedFile: null })
+    const currentPins = get().pinnedFolders
+    const pinnedFolders = [path, ...currentPins.filter((folderPath) => folderPath !== path)]
+    set({
+      workspaceRoot: path,
+      currentPath: path,
+      expandedDirs: new Set(),
+      dirChildren: new Map(),
+      selectedFile: null,
+      pinnedFolders,
+    })
     writeStorage('ready-workspace-root', path)
+    writeJsonStorage('ready-pinned-folders', pinnedFolders)
     // Multi-root reconcile: starts watcher for the new primary (and any pinned
     // folders) while stopping watchers no longer in the desired set.
     void reconcileWatchers(computeDesiredRoots(get()))
@@ -931,6 +942,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       if (window.electronAPI) {
         const result = await window.electronAPI.document.rename(oldPath, newPath)
         if (result.success) {
+          useDocTabs.getState().remapTabPaths(oldPath, newPath)
           await get().refreshFiles()
           set({ renamingPath: null })
           return true
@@ -942,6 +954,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
           ),
           renamingPath: null
         }))
+        useDocTabs.getState().remapTabPaths(oldPath, newPath)
         return true
       }
     } catch (error) {
@@ -997,6 +1010,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
         const result = await window.electronAPI.document.moveItem(src, dest)
         if (!result.success) return false
 
+        useDocTabs.getState().remapTabPaths(src, dest)
         set((state) => {
           const remappedExpanded = new Set<string>()
           state.expandedDirs.forEach((dir) => {
@@ -1019,6 +1033,7 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       }
 
       // Mock fallback
+      useDocTabs.getState().remapTabPaths(src, dest)
       set((state) => ({
         files: state.files.map((f) => {
           if (f.path === src) {

@@ -16,7 +16,7 @@ function nonEmpty(value: unknown): string | null {
 
 function setStringField(
   target: ScopeRunTaskContinuation,
-  key: keyof ScopeRunTaskContinuation,
+  key: Exclude<keyof ScopeRunTaskContinuation, 'progress'>,
   value: unknown,
 ): void {
   const next = nonEmpty(value)

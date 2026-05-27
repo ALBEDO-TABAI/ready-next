@@ -5,6 +5,13 @@ import { describe, it } from 'node:test'
 
 const DRIVER_PATH = resolve(process.cwd(), 'src/renderer/modules/agent/runtimeDriver.ts')
 const PRELOAD_PATH = resolve(process.cwd(), 'src/preload/index.ts')
+const TURN_ENGINE_PATH = resolve(process.cwd(), 'src/main/modules/agent-control/turn-engine.ts')
+const DIRECT_CHAT_PATH = resolve(process.cwd(), 'src/main/modules/claude-bridge/direct-chat.ts')
+const AGENT_SDK_RUNTIME_PATH = resolve(process.cwd(), 'src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts')
+const CAPABILITY_CONTROLLER_PATH = resolve(
+  process.cwd(),
+  'src/main/modules/agent-control/domain-adapters/run-capability-controller.ts',
+)
 const IPC_HANDLER_PATH = resolve(
   process.cwd(),
   'src/main/modules/claude-bridge/ipc/tool-event-group.ts',
@@ -61,5 +68,20 @@ describe('G-Z12 runtimeDriver 事件接入 ready-tools.log', () => {
     // `getLogPath('ready-tools.log')` to the rotating-logger helper.
     assert.match(helperSource, /createRotatingLogger\('ready-tools\.log'\)/)
     assert.match(helperSource, /runtimeDriver type=/)
+  })
+
+  it('主进程能力裁决同步写入 ready-tools.log', () => {
+    const turnEngineSource = readFileSync(TURN_ENGINE_PATH, 'utf8')
+    const capabilityControllerSource = readFileSync(CAPABILITY_CONTROLLER_PATH, 'utf8')
+    const helperSource = readFileSync(LOG_HELPER_PATH, 'utf8')
+    assert.match(helperSource, /appendToolCapabilityLog/)
+    assert.match(turnEngineSource, /appendToolCapabilityLog\(preparedCapabilityLogLine\)/)
+    assert.match(turnEngineSource, /appendToolCapabilityLog\(effectiveCapabilityLogLine\)/)
+    const directChatSource = readFileSync(DIRECT_CHAT_PATH, 'utf8')
+    assert.match(directChatSource, /appendToolCapabilityLog\(`\[tool_capability\] stage=direct_chat_tool_loop/)
+    const agentSdkRuntimeSource = readFileSync(AGENT_SDK_RUNTIME_PATH, 'utf8')
+    assert.match(agentSdkRuntimeSource, /stage=sdk_runtime_default_tools/)
+    assert.match(agentSdkRuntimeSource, /visibleCapabilityGroups=\$\{capabilityResolution\.visibleCapabilityGroupIds/)
+    assert.match(capabilityControllerSource, /visibleCapabilityGroups=/)
   })
 })

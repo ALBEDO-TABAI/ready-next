@@ -16,6 +16,7 @@ registerHooks({
       return {
         url: [
           'data:text/javascript,',
+          'export const app={getPath:()=>"/tmp/ready-document-widget-test"};',
           'export const ipcMain={};',
           'export const dialog={};',
           'export const shell={};',

@@ -116,6 +116,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     onDismissMemoryCapture,
     onUndoMemoryCapture,
     onSupplementMemoryCapture,
+    onOpenScope,
     onContinueTaskInput,
     onSubmitTaskConfirmation,
     onSubmitTaskAgentResult,
@@ -262,6 +263,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
       onDismissMemoryCapture={onDismissMemoryCapture}
       onUndoMemoryCapture={onUndoMemoryCapture}
       onSupplementMemoryCapture={onSupplementMemoryCapture}
+      onOpenScope={onOpenScope}
       onContinueTaskInput={onContinueTaskInput}
       onSubmitTaskConfirmation={onSubmitTaskConfirmation}
       onSubmitTaskAgentResult={onSubmitTaskAgentResult}

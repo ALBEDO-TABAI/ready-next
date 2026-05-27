@@ -10,18 +10,18 @@ interface WindowOpenDetails {
 
 export class BrowserWindowOpenService {
   private readonly popupManager: AuthPopupManager
-  private readonly requestNewTab: (url: string) => void
+  private readonly openInTab: (url: string) => void
   private readonly logBrowserDiag: (message: string) => void
   private readonly openExternal: (url: string) => void
 
   constructor(deps: {
     popupManager: AuthPopupManager
-    requestNewTab: (url: string) => void
+    openInTab: (url: string) => void
     logBrowserDiag: (message: string) => void
     openExternal: (url: string) => void
   }) {
     this.popupManager = deps.popupManager
-    this.requestNewTab = deps.requestNewTab
+    this.openInTab = deps.openInTab
     this.logBrowserDiag = deps.logBrowserDiag
     this.openExternal = deps.openExternal
   }
@@ -59,7 +59,7 @@ export class BrowserWindowOpenService {
     }
 
     if (resolved.mode === 'open-tab') {
-      this.requestNewTab(details.url)
+      this.openInTab(details.url)
       return { action: 'deny' }
     }
 

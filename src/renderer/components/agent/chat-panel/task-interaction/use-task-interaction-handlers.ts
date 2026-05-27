@@ -45,7 +45,7 @@ export interface TaskInteractionHandlers {
   handleCancelDetachedTask: (scopeId: string, taskId?: string | null) => Promise<void>
   handleContinueDetachedTask: (scopeId: string, taskId?: string | null) => void
   handleCancelChildRun: (scopeId: string, childRunId: string) => Promise<void>
-  handleContinueChildRun: (scopeId: string, childRunId: string) => void
+  handleContinueChildRun: (scopeId: string, childRunId: string) => Promise<void>
   handleResumeTask: (scopeId: string) => Promise<void>
   handleRetryTask: (scopeId: string) => Promise<void>
   handleOpenTaskArtifact: (path: string) => Promise<void>
@@ -184,7 +184,9 @@ export function useTaskInteractionHandlers(
       scopeId,
       taskId: run?.taskId || undefined,
     })
-  }, [mergedTaskRuns])
+    void refreshPersistedScopeRuns()
+    void refreshPersistedTaskProjections()
+  }, [mergedTaskRuns, refreshPersistedScopeRuns, refreshPersistedTaskProjections])
 
   const handleCancelDetachedTask = useCallback(async (_scopeId: string, taskId?: string | null) => {
     const detachedTaskId = typeof taskId === 'string' && taskId.startsWith('detached:')
@@ -232,9 +234,11 @@ export function useTaskInteractionHandlers(
     await window.electronAPI.agent.cancelChildRun(childRunId).catch(() => null)
     const result = await window.electronAPI.agent.listActiveChildRuns?.().catch(() => null)
     if (result?.success && Array.isArray(result.data)) setActiveChildRuns(result.data)
-  }, [setActiveChildRuns])
+    void refreshPersistedScopeRuns()
+    void refreshPersistedTaskProjections()
+  }, [refreshPersistedScopeRuns, refreshPersistedTaskProjections, setActiveChildRuns])
 
-  const handleContinueChildRun = useCallback((scopeId: string, childRunId: string) => {
+  const handleContinueChildRun = useCallback(async (scopeId: string, childRunId: string) => {
     if (currentScopeId !== scopeId) {
       void loadConversation(scopeId)
     }
@@ -251,9 +255,14 @@ export function useTaskInteractionHandlers(
         blockerType: 'background_running',
       },
     }
-    setComposerDraft(`继续后台任务 ${childRunId}`, buildRunContinuationIntent(continuationRun) || null)
-    focusInputWithResize()
-  }, [buildRunContinuationIntent, currentScopeId, focusInputWithResize, loadConversation, mergedTaskRuns, setComposerDraft])
+    await window.electronAPI.agent.resumeRun({
+      scopeId,
+      taskId: continuationRun.taskId || undefined,
+      continuationIntent: buildRunContinuationIntent(continuationRun),
+    })
+    void refreshPersistedScopeRuns()
+    void refreshPersistedTaskProjections()
+  }, [buildRunContinuationIntent, currentScopeId, loadConversation, mergedTaskRuns, refreshPersistedScopeRuns, refreshPersistedTaskProjections])
 
   const handleResumeTask = useCallback(async (scopeId: string) => {
     const run =
@@ -264,7 +273,9 @@ export function useTaskInteractionHandlers(
       taskId: run?.taskId || undefined,
       continuationIntent: buildRunContinuationIntent(run),
     })
-  }, [buildRunContinuationIntent, mergedTaskRuns])
+    void refreshPersistedScopeRuns()
+    void refreshPersistedTaskProjections()
+  }, [buildRunContinuationIntent, mergedTaskRuns, refreshPersistedScopeRuns, refreshPersistedTaskProjections])
 
   const handleRetryTask = useCallback(
     async (scopeId: string) => {

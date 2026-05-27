@@ -44,6 +44,7 @@ function route(origin: PlaceCandidate, destination: PlaceCandidate, mode: Transp
 
 class FakeMapClient implements RoutePlannerClient {
   readonly places = new Map<string, PlaceCandidate[]>()
+  readonly textPlaces = new Map<string, PlaceCandidate[]>()
   aroundPlaces: PlaceCandidate[] = []
   matrix: number[][] = []
   directions: Array<[string, string]> = []
@@ -54,7 +55,7 @@ class FakeMapClient implements RoutePlannerClient {
   }
 
   async placeText(keyword: string): Promise<PlaceCandidate[]> {
-    return this.places.get(keyword) || []
+    return this.textPlaces.get(keyword) || this.places.get(keyword) || []
   }
 
   async placeAround(): Promise<PlaceCandidate[]> {
@@ -103,6 +104,29 @@ test('RoutePlanner returns ambiguous place candidates without inventing clarific
       assert.equal((error as MapPlannerError).errorKind, 'place_ambiguous')
       assert.equal((error as MapPlannerError).candidates?.length, 2)
       assert.equal('clarificationOptions' in (error as MapPlannerError), false)
+      return true
+    },
+  )
+})
+
+test('RoutePlanner cross-checks station-like geocode hits with POI candidates', async () => {
+  const client = new FakeMapClient()
+  client.places.set('人民广场', [place('人民广场', '1,1')])
+  client.places.set('虹桥火车站', [place('虹桥火车站(地铁站)', '2,2')])
+  client.textPlaces.set('虹桥火车站', [
+    place('虹桥火车站(地铁站)', '2,2'),
+    place('上海虹桥火车站', '2.001,2.001'),
+  ])
+  const planner = new RoutePlanner(client)
+  const input = MapPlanRouteSchema.parse({ city: '上海', origin: '人民广场', destination: '虹桥火车站' })
+
+  await assert.rejects(
+    () => planner.plan(input, 'plan-station-ambiguity'),
+    (error) => {
+      assert.equal(error instanceof MapPlannerError, true)
+      assert.equal((error as MapPlannerError).errorKind, 'place_ambiguous')
+      assert.equal((error as MapPlannerError).candidates?.length, 2)
+      assert.equal((error as MapPlannerError).message.includes('终点'), true)
       return true
     },
   )

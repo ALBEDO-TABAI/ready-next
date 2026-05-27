@@ -105,3 +105,41 @@ test('chat detached continue preserves structured continuation handles', () => {
   assert.match(taskInteraction, /setComposerDraft\(`继续后台任务 \$\{detachedTaskId\}`,\s*buildRunContinuationIntent\(continuationRun\) \|\| null\)/)
   assert.doesNotMatch(taskInteraction, /setInputValue\(`继续后台任务 \$\{detachedTaskId\}`/)
 })
+
+test('chat child-run continue button resumes directly instead of only drafting text', () => {
+  const taskInteraction = readWorkspaceFile(
+    'src/renderer/components/agent/chat-panel/task-interaction/use-task-interaction-handlers.ts',
+  )
+
+  assert.match(taskInteraction, /const handleContinueChildRun = useCallback\(async/)
+  assert.match(taskInteraction, /window\.electronAPI\.agent\.resumeRun\(\{/)
+  assert.match(taskInteraction, /taskId:\s*continuationRun\.taskId \|\| undefined/)
+  assert.match(taskInteraction, /continuationIntent:\s*buildRunContinuationIntent\(continuationRun\)/)
+  assert.doesNotMatch(taskInteraction, /setComposerDraft\(`继续后台任务 \$\{childRunId\}`/)
+})
+
+test('compact task open-session button is wired to load the owning conversation', () => {
+  const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
+  const chatPanelBody = readWorkspaceFile('src/renderer/components/agent/chat-panel/ChatPanelBody.tsx')
+  const taskCard = readWorkspaceFile('src/renderer/components/agent/chat-panel/task/TaskCard.tsx')
+  const taskToolSnapshot = readWorkspaceFile(
+    'src/renderer/components/agent/chat-panel/task-snapshot/TaskToolSnapshot.tsx',
+  )
+
+  assert.match(taskToolSnapshot, /onOpenScope: \(scopeId: string\) => void/)
+  assert.match(taskToolSnapshot, /onOpenScope={onOpenScope}/)
+  assert.match(chatPanelBody, /onOpenScope={onOpenScope}/)
+  assert.match(chatPanel, /onOpenScope={handleLoadConversation}/)
+  assert.match(chatPanel, /lookupSessionByConversation\(state, convId\)/)
+  assert.match(chatPanel, /state\.setActiveSessionId\(existingSessionId\)/)
+  assert.match(chatPanel, /void loadConversation\(convId\)/)
+  assert.match(chatPanel, /const visibleTaskScopeIds = useMemo/)
+  assert.match(chatPanel, /sessionOrder/)
+  assert.match(chatPanel, /sessions\[sessionId\]\?\.conversationId/)
+  assert.match(chatPanel, /if \(!visibleTaskScopeIds\.has\(run\.scopeId\)\) continue/)
+  assert.match(chatPanel, /for \(const run of mergedTaskRuns\)/)
+  assert.match(chatPanel, /\$\{run\.scopeId\}:\$\{getTaskRunDisplayKey\(run\)\}/)
+  assert.match(taskCard, /const shouldShowOpenScopeButton = Boolean\(compact && run\.scopeId !== sessionId\)/)
+  assert.match(taskCard, /shouldShowOpenScopeButton && \(/)
+  assert.doesNotMatch(taskCard, /\{compact && \(/)
+})

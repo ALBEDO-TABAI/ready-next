@@ -312,6 +312,7 @@ interface ScopeRunTaskContinuationData {
   runStatePath?: string | null
   outputDir?: string | null
   progressFingerprint?: string | null
+  progress?: ScopeRunSkillProgressData | null
 }
 
 interface ScopeRunSkillProgressData {
@@ -1094,6 +1095,8 @@ interface BrowserTabUpdateEvent {
   error?: string
 }
 
+type BrowserTabOpenedEvent = BrowserTabInfo
+
 interface BrowserBookmarkData {
   id: string
   url: string
@@ -1242,14 +1245,15 @@ interface ElectronBrowserAPI {
   previewGetState: () => Promise<BrowserPreviewState>
   onPreviewUpdate: (callback: (data: BrowserPreviewState) => void) => () => void
   onTabUpdate: (callback: (data: BrowserTabUpdateEvent) => void) => () => void
+  onTabOpened: (callback: (data: BrowserTabOpenedEvent) => void) => () => void
   onAdblockUpdate: (callback: (data: BrowserAdblockStateData) => void) => () => void
-  onNewTabRequest: (callback: (url: string) => void) => () => void
   onFastCardContextAction: (callback: (data: BrowserFastCardContextActionEvent) => void) => () => void
   translateFastCardSelection: (payload: FastCardTranslateRequest) => Promise<FastCardIPCResult<FastCardTranslateResult>>
   describeFastCardImage: (payload: FastCardDescribeImageRequest) => Promise<FastCardIPCResult<FastCardDescribeImageResult>>
   resolveFastCardVideo: (payload: FastCardResolveVideoRequest) => Promise<FastCardIPCResult<FastCardResolveVideoResult>>
   showFastCardOverlay: (payload: FastCardOverlaySnapshot) => Promise<FastCardIPCResult<void>>
   hideFastCardOverlay: () => Promise<FastCardIPCResult<void>>
+  getFastCardOverlaySnapshot: () => Promise<FastCardIPCResult<FastCardOverlaySnapshot | null>>
   sendFastCardOverlayCommand: (command: FastCardOverlayCommand) => Promise<FastCardIPCResult<void>>
   onFastCardOverlayCommand: (callback: (command: FastCardOverlayCommand) => void) => () => void
   onFastCardOverlaySnapshot: (callback: (snapshot: FastCardOverlaySnapshot) => void) => () => void
@@ -1650,6 +1654,25 @@ interface DocumentOperationResponse {
   success: boolean
   error?: string
   mock?: boolean
+  trashEntry?: DocumentTrashEntry
+  path?: string
+}
+
+interface DocumentTrashEntry {
+  id: string
+  name: string
+  originalPath: string
+  trashPath: string
+  isDirectory: boolean
+  size: number
+  deletedAt: string
+}
+
+interface DocumentTrashListResponse {
+  success: boolean
+  items?: DocumentTrashEntry[]
+  error?: string
+  mock?: boolean
 }
 
 /** Open folder dialog response */
@@ -1718,6 +1741,8 @@ interface ElectronDocumentAPI {
   deleteItem: (path: string) => Promise<DocumentOperationResponse>
   copyItem: (src: string, dest: string) => Promise<DocumentOperationResponse>
   moveItem: (src: string, dest: string) => Promise<DocumentOperationResponse>
+  listTrash: () => Promise<DocumentTrashListResponse>
+  restoreTrash: (payload: { id: string } | string) => Promise<DocumentOperationResponse>
   stat: (path: string) => Promise<DocumentStatResponse>
   openFolder: (payload?: { validateAsWorkspace?: boolean }) => Promise<DocumentOpenFolderResponse>
   exportWorkspace: (payload: { name: string; folders: string[] }) => Promise<

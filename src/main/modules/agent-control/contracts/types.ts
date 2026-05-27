@@ -257,6 +257,7 @@ export interface ScopeRunTaskContinuation {
   runStatePath?: string | null
   outputDir?: string | null
   progressFingerprint?: string | null
+  progress?: ScopeRunSkillProgress | null
 }
 
 export interface ScopeRunSkillProgress {

@@ -636,10 +636,20 @@ function setupGlobalIPC(): void {
 
 // --- Auto-updater setup (production only) ---
 
+let autoUpdaterConfigured = false
+let autoUpdaterStatusWindow: BrowserWindow | null = null
+
 function setupAutoUpdater(mainWindow: BrowserWindow): void {
+  autoUpdaterStatusWindow = mainWindow
+  if (autoUpdaterConfigured) return
+  autoUpdaterConfigured = true
+  const updaterConfigPath = join(process.resourcesPath, 'app-update.yml')
+  const updaterConfigAvailable = existsSync(updaterConfigPath)
+
   const sendStatus = (status: string, data?: Record<string, unknown>): void => {
-    if (!mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('update-status', { status, ...data })
+    const targetWindow = autoUpdaterStatusWindow
+    if (targetWindow && !targetWindow.isDestroyed()) {
+      targetWindow.webContents.send('update-status', { status, ...data })
     }
   }
 
@@ -677,6 +687,9 @@ function setupAutoUpdater(mainWindow: BrowserWindow): void {
 
   // IPC: manual check for update
   ipcMain.handle('app:check-update', async () => {
+    if (!updaterConfigAvailable) {
+      return { success: false, error: 'Update configuration is not available in this build.' }
+    }
     try {
       const result = await autoUpdater.checkForUpdates()
       return { success: true, version: result?.updateInfo?.version ?? null }
@@ -692,12 +705,14 @@ function setupAutoUpdater(mainWindow: BrowserWindow): void {
   })
 
   // Check for updates after a short delay to avoid slowing down startup
-  setTimeout(() => {
-    // fire-and-forget: background update check; failure is exposed via the manual app:check-update IPC the user can invoke from the menu.
-    autoUpdater.checkForUpdates().catch(() => {
-      // Silently ignore — user can manually check via app:check-update
-    })
-  }, 5_000)
+  if (updaterConfigAvailable) {
+    setTimeout(() => {
+      // fire-and-forget: background update check; failure is exposed via the manual app:check-update IPC the user can invoke from the menu.
+      autoUpdater.checkForUpdates().catch(() => {
+        // Silently ignore — user can manually check via app:check-update
+      })
+    }, 5_000)
+  }
 }
 
 // Register local-file as a privileged scheme BEFORE app.whenReady()
@@ -707,6 +722,10 @@ app.commandLine.appendSwitch('disable-popup-blocking')
 // FedCM can become a no-op inside BrowserView on some Electron builds.
 // Force legacy OAuth popup flow for stable third-party login behavior.
 app.commandLine.appendSwitch('disable-features', 'FedCm')
+const remoteDebuggingPort = process.env.READY_REMOTE_DEBUGGING_PORT?.trim()
+if (remoteDebuggingPort) {
+  app.commandLine.appendSwitch('remote-debugging-port', remoteDebuggingPort)
+}
 app.userAgentFallback = toOAuthCompatibleUserAgent(app.userAgentFallback)
 protocol.registerSchemesAsPrivileged([
   {

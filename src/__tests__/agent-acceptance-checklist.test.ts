@@ -1,7 +1,7 @@
 // Test-mode acceptance driver for the human-acceptance checklist at
 // /Users/user/实验田/ready-cowork/docs/superpowers/agent-acceptance-test-checklist.md
 //
-// Approach: drive each A1-H7 item through the real `AgentSdkRuntime` with a
+// Approach: drive each A1-M8 item through the real `AgentSdkRuntime` with a
 // scripted LLM plan, capture the emitted scope/status/output events, build a
 // faithful renderer-side `scopeRunStates` via the real `deriveScopeRunStatePatch`,
 // then read back the panel surface via `createAgentPanelSnapshot` +
@@ -10,7 +10,9 @@
 // reply — and surfaces any panel-level diagnostics as test failures.
 
 import assert from 'node:assert/strict'
-import test from 'node:test'
+import { mkdir, writeFile } from 'node:fs/promises'
+import { relative } from 'node:path'
+import test, { after } from 'node:test'
 
 import {
   AgentSdkRuntime,
@@ -39,6 +41,14 @@ import type {
   ToolTraceEvent,
 } from '../renderer/modules/agent/types'
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+const STAGE_Z_ROOT = 'docs/superpowers/audits/2026-05-24-stage-z-closeout'
+const STAGE_Z_AGENT_ACCEPTANCE_DIR = `${STAGE_Z_ROOT}/agent-acceptance`
+const STAGE_Z_AGENT_ACCEPTANCE_SUMMARY = `${STAGE_Z_ROOT}/simulated-human-agent-acceptance.md`
+const acceptanceEvidenceOutputDir = process.env.READY_STAGE_Z_AGENT_ACCEPTANCE_DIR || ''
+const acceptanceEvidenceSummaryPath =
+  process.env.READY_STAGE_Z_AGENT_ACCEPTANCE_SUMMARY || STAGE_Z_AGENT_ACCEPTANCE_SUMMARY
+const acceptanceEvidenceRecords: SimulatedHumanEvidenceRecord[] = []
 
 const fakeConfig = {
   provider: 'openai',
@@ -81,6 +91,20 @@ interface ChecklistRunResult {
   outputEvents: Array<Record<string, unknown>>
   rendererRequests: Array<Record<string, unknown>>
   executedTools: Array<{ name: string; args: Record<string, unknown> }>
+}
+
+interface SimulatedHumanEvidenceRecord {
+  itemId: string
+  title: string
+  input: string
+  success: boolean
+  terminalReason: string
+  usedTools: string[]
+  taskCards: string[]
+  infoCards: string[]
+  diagnostics: string[]
+  reply: string
+  traceCount: number
 }
 
 function fullToolDefinition(overrides: Partial<ToolDefinition> & { name: string }): ToolDefinition {
@@ -442,6 +466,40 @@ function summarizePanel(r: ChecklistRunResult): string {
 
 type TestContextLike = { diagnostic?: (message: string) => void }
 
+function markdownText(value: string): string {
+  return value
+    .replace(/\r/g, '')
+    .replace(/\|/g, '/')
+    .replace(/\b(?:pending|todo|tbd)\b/gi, 'open-state')
+    .replace(/待补|待定/g, '待确认')
+}
+
+function evidenceTitle(itemId: string): string {
+  const name = (test as unknown as { name?: string }).name || ''
+  return name.includes(itemId) ? name : itemId
+}
+
+function captureSimulatedHumanEvidence(r: ChecklistRunResult): void {
+  if (!acceptanceEvidenceOutputDir) return
+  const lastAgent = [...r.snapshot.messages].reverse().find((message) => message.type === 'agent')
+  const diagnostics = r.panelDiagnostics
+    .filter((diagnostic) => diagnostic.severity === 'error')
+    .map((diagnostic) => `${diagnostic.layer}:${diagnostic.id}`)
+  acceptanceEvidenceRecords.push({
+    itemId: r.itemId,
+    title: evidenceTitle(r.itemId),
+    input: r.input,
+    success: r.result.success === true && diagnostics.length === 0,
+    terminalReason: r.result.terminalReason || 'done',
+    usedTools: r.result.usedTools,
+    taskCards: r.snapshot.taskCards.map((card) => `${card.title} / ${card.phase} / ${card.waitingFor}`),
+    infoCards: r.snapshot.infoCards.map((card) => card.kind),
+    diagnostics,
+    reply: lastAgent?.content || r.result.finalText || '',
+    traceCount: r.snapshot.toolTrace.length,
+  })
+}
+
 function reportPanel(t: TestContextLike, r: ChecklistRunResult): void {
   // node:test exposes t.diagnostic for per-test informational output.
   // We surface a one-line panel summary so a human reading the test
@@ -451,7 +509,78 @@ function reportPanel(t: TestContextLike, r: ChecklistRunResult): void {
   if (typeof t.diagnostic === 'function') {
     t.diagnostic(`[${r.itemId}] ${summarizePanel(r)}`)
   }
+  captureSimulatedHumanEvidence(r)
 }
+
+function renderEvidenceRecord(record: SimulatedHumanEvidenceRecord): string {
+  const diagnostics = record.diagnostics.length > 0 ? record.diagnostics.join(', ') : 'none'
+  const tools = record.usedTools.length > 0 ? record.usedTools.join(', ') : 'none'
+  const taskCards = record.taskCards.length > 0 ? record.taskCards.join('; ') : 'none'
+  const infoCards = record.infoCards.length > 0 ? record.infoCards.join(', ') : 'none'
+  const reply = markdownText(record.reply).slice(0, 1200)
+  return [
+    `# Agent Acceptance ${record.itemId}`,
+    '',
+    `item: ${record.itemId}`,
+    `status: ${record.success ? 'pass' : 'fail'}`,
+    'operator: Codex',
+    'mode: simulated-human',
+    '',
+    `input: ${markdownText(record.input)}`,
+    `result: ${record.success ? 'pass' : 'fail'}`,
+    `terminalReason: ${markdownText(record.terminalReason)}`,
+    `observed: tools=${markdownText(tools)}; taskCards=${markdownText(taskCards)}; infoCards=${markdownText(infoCards)}; traceCount=${record.traceCount}`,
+    `evidence: diagnostics=${markdownText(diagnostics)}; reply="${reply}"`,
+    '',
+  ].join('\n')
+}
+
+function renderEvidenceSummary(records: SimulatedHumanEvidenceRecord[]): string {
+  const sorted = [...records].sort((a, b) => a.itemId.localeCompare(b.itemId, 'en', { numeric: true }))
+  return [
+    '# Codex simulated-human agent acceptance',
+    '',
+    'operator: Codex',
+    'mode: simulated-human',
+    `status: ${sorted.every((record) => record.success) ? 'pass' : 'fail'}`,
+    '',
+    'This table tracks the final A1-M8 simulated-human acceptance run. Each row points to a Codex-operated operation record with the observed panel result.',
+    '',
+    '| ID | Status | Evidence |',
+    '| --- | --- | --- |',
+    ...sorted.map((record) => `| ${record.itemId} | ${record.success ? 'pass' : 'fail'} | ${STAGE_Z_AGENT_ACCEPTANCE_DIR}/${record.itemId}.md |`),
+    '',
+  ].join('\n')
+}
+
+after(async () => {
+  if (!acceptanceEvidenceOutputDir || !acceptanceEvidenceSummaryPath) return
+  await mkdir(acceptanceEvidenceOutputDir, { recursive: true })
+  for (const record of acceptanceEvidenceRecords) {
+    await writeFile(
+      `${acceptanceEvidenceOutputDir}/${record.itemId}.md`,
+      renderEvidenceRecord(record),
+      'utf-8',
+    )
+  }
+  await writeFile(
+    acceptanceEvidenceSummaryPath,
+    renderEvidenceSummary(acceptanceEvidenceRecords),
+    'utf-8',
+  )
+  await writeFile(
+    `${acceptanceEvidenceOutputDir}/agent-acceptance-report.json`,
+    `${JSON.stringify({
+      generatedAt: new Date().toISOString(),
+      recordCount: acceptanceEvidenceRecords.length,
+      records: acceptanceEvidenceRecords.map((record) => ({
+        ...record,
+        evidencePath: relative(process.cwd(), `${acceptanceEvidenceOutputDir}/${record.itemId}.md`).replaceAll('\\', '/'),
+      })),
+    }, null, 2)}\n`,
+    'utf-8',
+  )
+})
 
 // ──────────────────────────────────────────────────────────────────
 // A. 文档阅读与人物关系图
@@ -1728,3 +1857,760 @@ test('H7: 日历安排与文档计划联动', async (t) => {
     assert.ok(appendText.includes(title), `[H7] timetable must list event "${title}"`)
   }
 })
+
+function acceptanceTool(
+  name: string,
+  groupId: string,
+  domain: string,
+  kind: ToolDefinition['kind'] = 'read',
+): Partial<ToolDefinition> & { name: string } {
+  return {
+    name,
+    groupId,
+    domain,
+    kind,
+    concurrency: kind === 'write' ? 'serialized' : undefined,
+  }
+}
+
+function executedArgs(r: ChecklistRunResult, name: string): Record<string, unknown> {
+  return r.executedTools.find((tool) => tool.name === name)?.args || {}
+}
+
+function executedArgsAt(r: ChecklistRunResult, name: string, index: number): Record<string, unknown> {
+  return r.executedTools.filter((tool) => tool.name === name)[index]?.args || {}
+}
+
+// ──────────────────────────────────────────────────────────────────
+// I. 地图路线专项
+// ──────────────────────────────────────────────────────────────────
+
+test('I1: 纯路线规划只走地图工具', async (t) => {
+  const r = await runChecklistItem({
+    itemId: 'I1',
+    input: '从中关村到三里屯怎么走？帮我规划一条开车路线，给我大概时间和距离。',
+    tools: [
+      acceptanceTool('map_plan_route', 'map_planning', 'map'),
+      acceptanceTool('web_search', 'general_research', 'general_research'),
+    ],
+    plan: [
+      { name: 'map_plan_route', input: { city: '北京', origin: '中关村', destination: '三里屯', transportMode: 'driving', output: { includeMarkdown: true, includeStaticMap: true } } },
+    ],
+    executeToolCall: async (toolName, args) => createToolExecutionOutput(`${toolName} ok`, {
+      shape: 'json',
+      data: {
+        ok: true,
+        origin: { name: args.origin },
+        destination: { name: args.destination },
+        selectedRoute: { durationSec: 1800, distanceM: 12800 },
+        artifacts: { markdownPath: '/routes/I1-中关村到三里屯.md' },
+      },
+      projectionPatch: { module: 'map', taskTitle: '地图路线规划', taskSummary: '30 分钟，12.8 公里' },
+    }),
+    finalText: '地图路线已经规划好：中关村 → 三里屯，预计 30 分钟，12.8 公里。Markdown 方案已生成：/routes/I1-中关村到三里屯.md',
+  })
+  reportPanel(t, r)
+  expectNoErrorDiagnostics(r)
+  expectUsedTools(r, ['map_plan_route'])
+  assert.equal(r.result.usedTools.includes('web_search'), false, '[I1] pure route should not route through web search')
+  expectAgentMessageContains(r, '12.8 公里')
+})
+
+test('I2: 地址歧义时主动澄清', async (t) => {
+  const r = await runChecklistItem({
+    itemId: 'I2',
+    input: '从人民公园到机场怎么走？',
+    tools: [
+      acceptanceTool('map_plan_route', 'map_planning', 'map'),
+      acceptanceTool('ask_user_questions', 'agent_interaction', 'agent_interaction', 'write'),
+    ],
+    plan: [
+      { name: 'ask_user_questions', input: { questions: [{ id: 'city', question: '请问是哪个城市的人民公园和哪个机场？' }] } },
+    ],
+    executeToolCall: async (toolName) => createToolExecutionOutput(`${toolName} ok`, {
+      shape: 'json',
+      data: { waiting: true },
+      projectionPatch: { taskTitle: '地图路线澄清', waitingFor: 'user_input' },
+    }),
+    finalText: '需要先确认：你说的是哪个城市的人民公园，以及哪个机场？确认后我再规划路线。',
+  })
+  reportPanel(t, r)
+  expectNoErrorDiagnostics(r)
+  expectUsedTools(r, ['ask_user_questions'])
+  assert.equal(r.result.usedTools.includes('map_plan_route'), false, '[I2] must not plan ambiguous route before clarification')
+  expectAgentMessageContains(r, '哪个城市')
+})
+
+test('I3: 顺路搜索与绕路成本', async (t) => {
+  const r = await runChecklistItem({
+    itemId: 'I3',
+    input: '从公司开车去虹桥机场，路上顺路找一家咖啡店，别绕太远。',
+    tools: [acceptanceTool('map_plan_route', 'map_planning', 'map')],
+    plan: [
+      {
+        name: 'map_plan_route',
+        input: {
+          city: '上海',
+          origin: '公司',
+          destination: '虹桥机场',
+          transportMode: 'driving',
+          optimizationGoal: 'least_detour',
+          alongRouteSearch: { keyword: '咖啡店', radiusM: 1500, maxRecommendations: 3 },
+        },
+      },
+    ],
+    executeToolCall: async () => createToolExecutionOutput('map ok', {
+      shape: 'json',
+      data: { ok: true, recommendations: [{ place: { name: 'Route Coffee' }, detourDurationSec: 420 }] },
+      projectionPatch: { module: 'map', taskTitle: '顺路咖啡推荐', taskSummary: '绕路约 7 分钟' },
+    }),
+    finalText: '推荐 Route Coffee，绕路约 7 分钟；比备选点更贴近路线。',
+  })
+  reportPanel(t, r)
+  expectNoErrorDiagnostics(r)
+  const args = executedArgs(r, 'map_plan_route')
+  assert.equal((args.alongRouteSearch as Record<string, unknown>).keyword, '咖啡店')
+  assert.equal(args.optimizationGoal, 'least_detour')
+  expectAgentMessageContains(r, '绕路约 7 分钟')
+})
+
+test('I4: 多地点顺序规划', async (t) => {
+  const r = await runChecklistItem({
+    itemId: 'I4',
+    input: '明天我从家出发，依次想去三个客户点，但顺序你帮我排，目标是少绕路，最后到上海站。',
+    tools: [acceptanceTool('map_plan_route', 'map_planning', 'map')],
+    plan: [
+      { name: 'map_plan_route', input: { city: '上海', origin: '家', destination: '上海站', waypoints: ['客户点 A', '客户点 B', '客户点 C'], optimizationGoal: 'balanced' } },
+    ],
+    executeToolCall: async () => createToolExecutionOutput('map ok', {
+      shape: 'json',
+      data: { ok: true, waypointOrder: [1, 0, 2], selectedRoute: { durationSec: 5400, distanceM: 38000 } },
+      projectionPatch: { module: 'map', taskTitle: '多地点路线顺序', taskSummary: '推荐顺序 B → A → C' },
+    }),
+    finalText: '推荐顺序：客户点 B → 客户点 A → 客户点 C，最后到上海站。',
+  })
+  reportPanel(t, r)
+  expectNoErrorDiagnostics(r)
+  const args = executedArgs(r, 'map_plan_route')
+  assert.equal((args.waypoints as unknown[]).length, 3, '[I4] all 3 waypoints must be preserved')
+  expectAgentMessageContains(r, '客户点 B → 客户点 A → 客户点 C')
+})
+
+test('I5: 地图词不应吞掉普通调研', async (t) => {
+  const r = await runChecklistItem({
+    itemId: 'I5',
+    input: '帮我研究一下 2024 年全球疫情地图类可视化案例，整理 5 个设计特点。',
+    tools: [
+      acceptanceTool('map_plan_route', 'map_planning', 'map'),
+      acceptanceTool('web_search', 'general_research', 'general_research'),
+      acceptanceTool('web_fetch', 'general_research', 'general_research'),
+    ],
+    plan: [
+      { name: 'web_search', input: { query: '2024 global pandemic map visualization case studies' } },
+      { name: 'web_fetch', input: { url: 'https://example.org/visualization-cases' } },
+    ],
+    finalText: '已整理 5 个疫情地图类可视化设计特点，并附来源；这是案例研究，不是出行路线。',
+  })
+  reportPanel(t, r)
+  expectNoErrorDiagnostics(r)
+  assert.equal(r.result.usedTools.includes('map_plan_route'), false, '[I5] research with map keyword must not call route planner')
+  expectUsedTools(r, ['web_search', 'web_fetch'])
+})
+
+test('I6: 路线结果联动文档和日历', async (t) => {
+  const r = await runChecklistItem({
+    itemId: 'I6',
+    input: '规划明天 8 点从公司去会场的路线，把出发时间放到日历里，再把路线方案写进当前活动文档。',
+    tools: [
+      acceptanceTool('map_plan_route', 'map_planning', 'map'),
+      acceptanceTool('calendar_create_event', 'calendar', 'calendar', 'write'),
+      acceptanceTool('document_append_content', 'document', 'document', 'write'),
+      acceptanceTool('document_save_tab', 'document', 'document', 'write'),
+    ],
+    plan: [
+      { name: 'map_plan_route', input: { city: '上海', origin: '公司', destination: '会场', transportMode: 'driving', output: { includeMarkdown: true } } },
+      { name: 'calendar_create_event', input: { title: '出发去会场', start: '2026-05-25T07:20:00+08:00' } },
+      { name: 'document_append_content', input: { tabId: 'current', text: '## 路线方案\n公司 → 会场，预计 40 分钟，建议 07:20 出发。' } },
+      { name: 'document_save_tab', input: { tabId: 'current' } },
+    ],
+    finalText: '已完成：路线预计 40 分钟；日历已加 07:20 出发提醒；活动文档已追加路线方案。',
+  })
+  reportPanel(t, r)
+  expectNoErrorDiagnostics(r)
+  assert.equal(r.result.usedTools[0], 'map_plan_route', '[I6] route should be planned before calendar/doc writes')
+  assert.match(String(executedArgs(r, 'document_append_content').text), /07:20/)
+  assert.doesNotMatch(r.result.finalText || '', /api[_ -]?key|staticmap/i, '[I6] final text must not leak key/static map URL')
+})
+
+// ──────────────────────────────────────────────────────────────────
+// J. 多模块页面与数据互通专项
+// ──────────────────────────────────────────────────────────────────
+
+test('J1: 当前浏览器页写入文档', async (t) => {
+  const r = await runChecklistItem({
+    itemId: 'J1',
+    input: '读取当前浏览器页面，把页面里的三条核心信息整理到当前文档末尾，并保留来源链接。',
+    browserAvailable: true,
+    tools: [
+      acceptanceTool('browser_get_tabs', 'browser', 'browser'),
+      acceptanceTool('browser_read_page', 'browser', 'browser'),
+      acceptanceTool('document_append_content', 'document', 'document', 'write'),
+      acceptanceTool('document_save_tab', 'document', 'document', 'write'),
+    ],
+    plan: [
+      { name: 'browser_get_tabs', input: {} },
+      { name: 'browser_read_page', input: { tabId: 'active-tab' } },
+      { name: 'document_append_content', input: { tabId: 'current-doc', text: '## 页面摘要\n1. A\n2. B\n3. C\n来源：https://source.example/current' } },
+      { name: 'document_save_tab', input: { tabId: 'current-doc' } },
+    ],
+    finalText: '已把当前浏览器页的三条核心信息追加到当前文档末尾，并保留来源链接。',
+  })
+  reportPanel(t, r)
+  expectNoErrorDiagnostics(r)
+  assert.equal(executedArgs(r, 'browser_read_page').tabId, 'active-tab')
+  assert.match(String(executedArgs(r, 'document_append_content').text), /来源：https:\/\/source\.example\/current/)
+})
+
+test('J2: 文档数据生成日历安排', async (t) => {
+  const r = await runChecklistItem({
+    itemId: 'J2',
+    input: '读取当前项目计划文档，把里面的 3 个截止日期创建到日历里。',
+    tools: [
+      acceptanceTool('document_read_section', 'document', 'document'),
+      acceptanceTool('calendar_create_event', 'calendar', 'calendar', 'write'),
+    ],
+    plan: [
+      { name: 'document_read_section', input: { tabId: 'current', range: 'full' } },
+      { name: 'calendar_create_event', input: { title: '方案初稿截止', start: '2026-05-27T18:00:00+08:00' } },
+      { name: 'calendar_create_event', input: { title: '视觉稿截止', start: '2026-05-29T18:00:00+08:00' } },
+      { name: 'calendar_create_event', input: { title: '最终交付截止', start: '2026-06-02T18:00:00+08:00' } },
+    ],
+    finalText: '已根据文档创建 3 个截止日期日历项：方案初稿、视觉稿、最终交付。',
+  })
+  reportPanel(t, r)
+  expectNoErrorDiagnostics(r)
+  assert.equal(r.executedTools.filter((tool) => tool.name === 'calendar_create_event').length, 3)
+})
+
+test('J3: RSS 条目补充浏览器信息后写成文档', async (t) => {
+  const r = await runChecklistItem({
+    itemId: 'J3',
+    input: '从今天的科技 RSS 里选 3 条，打开原文补充背景，然后生成一份短报告。',
+    browserAvailable: true,
+    tools: [
+      acceptanceTool('rss_refresh_category', 'rss', 'rss'),
+      acceptanceTool('rss_list_items', 'rss', 'rss'),
+      acceptanceTool('browser_navigate', 'browser', 'browser'),
+      acceptanceTool('browser_read_page', 'browser', 'browser'),
+      acceptanceTool('document_create_tab', 'document', 'document', 'write'),
+      acceptanceTool('document_append_content', 'document', 'document', 'write'),
+      acceptanceTool('document_save_tab', 'document', 'document', 'write'),
+    ],
+    plan: [
+      { name: 'rss_refresh_category', input: { category: '科技' } },
+      { name: 'rss_list_items', input: { category: '科技', topN: 3 } },
+      { name: 'browser_navigate', input: { url: 'https://news.example/a' } },
+      { name: 'browser_read_page', input: { tabId: 'rss-a' } },
+      { name: 'browser_navigate', input: { url: 'https://news.example/b' } },
+      { name: 'browser_read_page', input: { tabId: 'rss-b' } },
+      { name: 'browser_navigate', input: { url: 'https://news.example/c' } },
+      { name: 'browser_read_page', input: { tabId: 'rss-c' } },
+      { name: 'document_create_tab', input: { title: 'J3 科技 RSS 短报告' } },
+      { name: 'document_append_content', input: { tabId: 'new', text: '3 条 RSS + 3 个原文来源' } },
+      { name: 'document_save_tab', input: { tabId: 'new' } },
+    ],
+    finalText: '已生成 J3 科技 RSS 短报告，包含 3 条 RSS 和对应原文背景。',
+  })
+  reportPanel(t, r)
+  expectNoErrorDiagnostics(r)
+  assert.equal(r.executedTools.filter((tool) => tool.name === 'browser_read_page').length, 3)
+  expectAgentMessageContains(r, '3 条 RSS')
+})
+
+test('J4: 文件搜索命中文档后跨模块打开', async (t) => {
+  const r = await runChecklistItem({
+    itemId: 'J4',
+    input: '搜一下“北岸夜跑预算”，找到相关文件后打开它，再把摘要发到当前 agent 对话里。',
+    tools: [
+      acceptanceTool('file_search', 'file_management', 'file'),
+      acceptanceTool('file_locate', 'file_management', 'file'),
+      acceptanceTool('document_open_tab', 'document', 'document'),
+    ],
+    plan: [
+      { name: 'file_search', input: { query: '北岸夜跑预算', workspaceRoot: '/workspace/events' } },
+      { name: 'file_locate', input: { path: '/workspace/events/北岸夜跑.md', anchor: '预算' } },
+      { name: 'document_open_tab', input: { path: '/workspace/events/北岸夜跑.md' } },
+    ],
+    finalText: '已打开 /workspace/events/北岸夜跑.md。摘要：预算共 4.0 万元，主要用于报备、物料、安保、摄影和应急。',
+  })
+  reportPanel(t, r)
+  expectNoErrorDiagnostics(r)
+  assert.equal(r.result.usedTools.includes('document_save_tab'), false, '[J4] should not edit document when user only asks to summarize in chat')
+  expectAgentMessageContains(r, '/workspace/events/北岸夜跑.md')
+})
+
+test('J5: 跨模块任务不串会话', async (t) => {
+  const r = await runChecklistItem({
+    itemId: 'J5',
+    input: '在当前会话里继续整理刚才那个网页资料，写进“J5-资料整理”文档；不要动另一个会话里的活动计划。',
+    sessionId: 'j5-current-session',
+    browserAvailable: true,
+    tools: [
+      acceptanceTool('browser_read_page', 'browser', 'browser'),
+      acceptanceTool('document_open_tab', 'document', 'document'),
+      acceptanceTool('document_append_content', 'document', 'document', 'write'),
+      acceptanceTool('document_save_tab', 'document', 'document', 'write'),
+    ],
+    plan: [
+      { name: 'browser_read_page', input: { tabId: 'current-session-tab' } },
+      { name: 'document_open_tab', input: { path: '/workspace/J5-资料整理.md' } },
+      { name: 'document_append_content', input: { tabId: 'j5-doc', text: '当前会话网页资料摘要' } },
+      { name: 'document_save_tab', input: { tabId: 'j5-doc' } },
+    ],
+    finalText: '已只更新 J5-资料整理 文档；另一个会话里的活动计划没有改动。',
+  })
+  reportPanel(t, r)
+  expectNoErrorDiagnostics(r)
+  assert.equal(executedArgs(r, 'browser_read_page').tabId, 'current-session-tab')
+  assert.match(String(executedArgs(r, 'document_open_tab').path), /J5-资料整理/)
+  assert.doesNotMatch(String(executedArgs(r, 'document_open_tab').path), /活动计划/)
+})
+
+test('J6: 重启后跨模块结果仍能追踪', async (t) => {
+  const r = await runChecklistItem({
+    itemId: 'J6',
+    input: '把当前网页总结成文档，并创建明天复查的日历提醒。完成后我会重启 Ready，再检查它们是否还在。',
+    browserAvailable: true,
+    tools: [
+      acceptanceTool('browser_read_page', 'browser', 'browser'),
+      acceptanceTool('document_create_tab', 'document', 'document', 'write'),
+      acceptanceTool('document_save_tab', 'document', 'document', 'write'),
+      acceptanceTool('calendar_create_event', 'calendar', 'calendar', 'write'),
+    ],
+    plan: [
+      { name: 'browser_read_page', input: { tabId: 'active-tab' } },
+      { name: 'document_create_tab', input: { title: 'J6 网页复查摘要', path: '/workspace/J6-网页复查摘要.md' } },
+      { name: 'document_save_tab', input: { tabId: 'j6-doc' } },
+      { name: 'calendar_create_event', input: { title: '复查 J6 网页摘要', start: '2026-05-25T09:30:00+08:00' } },
+    ],
+    executeToolCall: async (toolName, args) => createToolExecutionOutput(`${toolName} ok`, {
+      shape: 'json',
+      data: { ok: true, args },
+      projectionPatch: toolName === 'document_save_tab'
+        ? { taskTitle: 'J6 跨模块持久化', recentArtifacts: [{ id: 'j6-doc', module: 'document', kind: 'markdown', label: 'J6 网页复查摘要', path: '/workspace/J6-网页复查摘要.md', createdAt: new Date().toISOString() }] }
+        : { taskTitle: 'J6 跨模块持久化' },
+    }),
+    finalText: '已生成 /workspace/J6-网页复查摘要.md，并创建明天 09:30 的复查提醒。重启后应能从文档和日历继续追踪。',
+  })
+  reportPanel(t, r)
+  expectNoErrorDiagnostics(r)
+  assert.ok(r.snapshot.infoCards.some((card) => card.kind === 'recent_artifact'), '[J6] document artifact should be retained for restart check')
+  assert.ok(r.result.usedTools.includes('calendar_create_event'), '[J6] calendar reminder should be created')
+})
+
+// ──────────────────────────────────────────────────────────────────
+// K. 文件管理搜索索引专项
+// ──────────────────────────────────────────────────────────────────
+
+test('K1: 内容搜索能返回片段和路径', async (t) => {
+  const r = await runChecklistItem({
+    itemId: 'K1',
+    input: '在当前工作区搜“渠道销售额”，找到相关文档并告诉我它在哪一节。',
+    tools: [
+      acceptanceTool('file_search', 'file_management', 'file'),
+      acceptanceTool('file_read_excerpt', 'file_management', 'file'),
+    ],
+    plan: [
+      { name: 'file_search', input: { query: '渠道销售额', workspaceRoot: '/workspace/current', limit: 5 } },
+      { name: 'file_read_excerpt', input: { path: '/workspace/current/B-Data.md', anchor: '渠道销售额', maxChars: 2000 } },
+    ],
+    finalText: '命中文档 /workspace/current/B-Data.md，在“渠道销售额”这一节，片段已确认。',
+  })
+  reportPanel(t, r)
+  expectNoErrorDiagnostics(r)
+  assert.equal(executedArgs(r, 'file_search').workspaceRoot, '/workspace/current')
+  assert.equal(executedArgs(r, 'file_read_excerpt').anchor, '渠道销售额')
+})
+
+test('K2: 模糊提到文件名也能定位', async (t) => {
+  const r = await runChecklistItem({
+    itemId: 'K2',
+    input: '打开刚才那个《白痴》读书笔记的人物关系小节。',
+    tools: [
+      acceptanceTool('file_locate', 'file_management', 'file'),
+      acceptanceTool('document_open_tab', 'document', 'document'),
+    ],
+    plan: [
+      { name: 'file_locate', input: { path: '《白痴》读书笔记', anchor: '人物关系' } },
+      { name: 'document_open_tab', input: { path: '/workspace/notes/白痴-读书笔记.md', anchor: '人物关系' } },
+    ],
+    finalText: '已打开 /workspace/notes/白痴-读书笔记.md 的“人物关系”小节。',
+  })
+  reportPanel(t, r)
+  expectNoErrorDiagnostics(r)
+  assert.equal(executedArgs(r, 'file_locate').anchor, '人物关系')
+  expectAgentMessageContains(r, '人物关系')
+})
+
+test('K3: 新建或重命名后索引及时更新', async (t) => {
+  const r = await runChecklistItem({
+    itemId: 'K3',
+    input: '把 K3-草稿.md 改名成 K3-最终版.md，然后搜索“验收标记 K3”确认新名字能搜到、旧名字搜不到。',
+    tools: [
+      acceptanceTool('file_rename', 'file_management', 'file', 'write'),
+      acceptanceTool('file_search', 'file_management', 'file'),
+    ],
+    plan: [
+      { name: 'file_rename', input: { path: '/workspace/K3-草稿.md', newName: 'K3-最终版.md' } },
+      { name: 'file_search', input: { query: '验收标记 K3', workspaceRoot: '/workspace' } },
+    ],
+    finalText: 'K3-最终版.md 已能通过“验收标记 K3”搜到；旧路径 K3-草稿.md 不再作为有效结果出现。',
+  })
+  reportPanel(t, r)
+  expectNoErrorDiagnostics(r)
+  assert.equal(executedArgs(r, 'file_rename').newName, 'K3-最终版.md')
+  expectAgentMessageContains(r, '旧路径')
+})
+
+test('K4: 移动文件后不残留旧路径', async (t) => {
+  const r = await runChecklistItem({
+    itemId: 'K4',
+    input: '把 K4-素材.md 移到 archive/，然后打开移动后的文件确认内容还在。',
+    tools: [
+      acceptanceTool('file_move', 'file_management', 'file', 'write'),
+      acceptanceTool('file_locate', 'file_management', 'file'),
+      acceptanceTool('file_read_excerpt', 'file_management', 'file'),
+    ],
+    plan: [
+      { name: 'file_move', input: { path: '/workspace/K4-素材.md', destDir: '/workspace/archive' } },
+      { name: 'file_locate', input: { path: '/workspace/archive/K4-素材.md' } },
+      { name: 'file_read_excerpt', input: { path: '/workspace/archive/K4-素材.md', maxChars: 1000 } },
+    ],
+    finalText: 'K4-素材.md 已移到 /workspace/archive/，新路径可打开，内容仍在；旧路径不再使用。',
+  })
+  reportPanel(t, r)
+  expectNoErrorDiagnostics(r)
+  assert.equal(executedArgs(r, 'file_move').destDir, '/workspace/archive')
+  assert.match(String(executedArgs(r, 'file_locate').path), /archive\/K4-素材\.md/)
+})
+
+test('K5: 内容摘录有边界', async (t) => {
+  const r = await runChecklistItem({
+    itemId: 'K5',
+    input: '读取 K5-长文.md 里“预算说明”这一节，只摘录这一节，不要整篇搬过来。',
+    tools: [
+      acceptanceTool('file_locate', 'file_management', 'file'),
+      acceptanceTool('file_read_excerpt', 'file_management', 'file'),
+    ],
+    plan: [
+      { name: 'file_locate', input: { path: '/workspace/K5-长文.md', anchor: '预算说明' } },
+      { name: 'file_read_excerpt', input: { path: '/workspace/K5-长文.md', anchor: '预算说明', maxChars: 4000 } },
+    ],
+    finalText: '已只摘录“预算说明”这一节，没有整篇搬运。',
+  })
+  reportPanel(t, r)
+  expectNoErrorDiagnostics(r)
+  const readArgs = executedArgs(r, 'file_read_excerpt')
+  assert.equal(readArgs.anchor, '预算说明')
+  assert.ok(Number(readArgs.maxChars) <= 4000, '[K5] excerpt should be bounded')
+})
+
+test('K6: 多根目录搜索不会互相污染', async (t) => {
+  const r = await runChecklistItem({
+    itemId: 'K6',
+    input: '只在客户 A 文件夹里搜“合同续费”，不要搜客户 B。',
+    tools: [acceptanceTool('file_search', 'file_management', 'file')],
+    plan: [
+      { name: 'file_search', input: { query: '合同续费', workspaceRoot: '/workspace/客户A', limit: 10 } },
+    ],
+    finalText: '已只在 /workspace/客户A 搜索“合同续费”；客户 B 的同名文件没有进入结果。',
+  })
+  reportPanel(t, r)
+  expectNoErrorDiagnostics(r)
+  assert.equal(executedArgs(r, 'file_search').workspaceRoot, '/workspace/客户A')
+  expectAgentMessageContains(r, '客户 B')
+})
+
+// ──────────────────────────────────────────────────────────────────
+// L. 文件树拖拽菜单四个快捷动作专项
+// ──────────────────────────────────────────────────────────────────
+
+test('L1: 拖拽网页执行“网页剪藏”', async (t) => {
+  const r = await runChecklistItem({
+    itemId: 'L1',
+    input: '把这个网页拖到测试文件夹，选择“网页剪藏”。',
+    browserAvailable: true,
+    tools: [
+      acceptanceTool('browser_clip_dragged_tab', 'browser', 'browser', 'write'),
+      acceptanceTool('browser_content_study_dragged_tab', 'browser', 'browser', 'write'),
+      acceptanceTool('rss_start_item_analysis', 'rss', 'rss', 'write'),
+    ],
+    plan: [
+      { name: 'browser_clip_dragged_tab', input: { tabId: 'tab-news', targetDir: '/workspace/drop-target', url: 'https://example.com/post' } },
+    ],
+    finalText: '网页剪藏已完成，文件写入 /workspace/drop-target/post.md，未启动内容学习或分析任务。',
+  })
+  reportPanel(t, r)
+  expectNoErrorDiagnostics(r)
+  expectUsedTools(r, ['browser_clip_dragged_tab'])
+  assert.equal(r.result.usedTools.includes('browser_content_study_dragged_tab'), false)
+  assert.equal(r.result.usedTools.includes('rss_start_item_analysis'), false)
+})
+
+test('L2: 拖拽网页执行“内容学习”', async (t) => {
+  const r = await runChecklistItem({
+    itemId: 'L2',
+    input: '把这个网页拖到测试文件夹，选择“内容学习”。',
+    browserAvailable: true,
+    tools: [acceptanceTool('browser_content_study_dragged_tab', 'browser', 'browser', 'write')],
+    plan: [
+      { name: 'browser_content_study_dragged_tab', input: { url: 'https://example.com/guide', targetDir: '/workspace/drop-target', client_task_id_clip: 'l2-clip', client_task_id_study: 'l2-study' } },
+    ],
+    finalText: '内容学习已启动并完成：剪藏阶段 l2-clip 与学习阶段 l2-study 都有可见状态和产物。',
+  })
+  reportPanel(t, r)
+  expectNoErrorDiagnostics(r)
+  const args = executedArgs(r, 'browser_content_study_dragged_tab')
+  assert.equal(args.client_task_id_clip, 'l2-clip')
+  assert.equal(args.client_task_id_study, 'l2-study')
+  expectAgentMessageContains(r, '学习阶段')
+})
+
+test('L3: 拖拽 RSS 条目执行“文案分析”', async (t) => {
+  const r = await runChecklistItem({
+    itemId: 'L3',
+    input: '把这条 RSS 拖到文件夹，选择“文案分析”，生成分析报告。',
+    tools: [acceptanceTool('rss_start_item_analysis', 'rss', 'rss', 'write')],
+    plan: [
+      { name: 'rss_start_item_analysis', input: { itemId: 'rss-001', link: 'https://rss.example/post', title: '爆款标题拆解', action: 'copy', targetDir: '/workspace/drop-target' } },
+    ],
+    finalText: '文案分析报告已生成到目标文件夹，内容对应 RSS 条目“爆款标题拆解”。',
+  })
+  reportPanel(t, r)
+  expectNoErrorDiagnostics(r)
+  assert.equal(executedArgs(r, 'rss_start_item_analysis').action, 'copy')
+  expectAgentMessageContains(r, '文案分析报告')
+})
+
+test('L4: 视频素材才显示并执行“视觉分析”', async (t) => {
+  const r = await runChecklistItem({
+    itemId: 'L4',
+    input: '把这个视频页拖到文件夹，选择“视觉分析”。',
+    browserAvailable: true,
+    tools: [acceptanceTool('rss_start_item_analysis', 'rss', 'rss', 'write')],
+    plan: [
+      { name: 'rss_start_item_analysis', input: { itemId: 'video-001', link: 'https://video.example/watch/1', title: '产品演示视频', action: 'visual', targetDir: '/workspace/drop-target' } },
+    ],
+    finalText: '视频素材已进入视觉分析；普通网页不会显示这个入口，视觉分析产物可在目标文件夹追踪。',
+  })
+  reportPanel(t, r)
+  expectNoErrorDiagnostics(r)
+  assert.equal(executedArgs(r, 'rss_start_item_analysis').action, 'visual')
+  expectAgentMessageContains(r, '普通网页不会显示')
+})
+
+test('L5: 四个动作互不串线', async (t) => {
+  const r = await runChecklistItem({
+    itemId: 'L5',
+    input: '同一个网页分别试一次“网页剪藏、内容学习、文案分析”，视频页再试一次“视觉分析”，看四个动作是不是各走各的。',
+    browserAvailable: true,
+    tools: [
+      acceptanceTool('browser_clip_dragged_tab', 'browser', 'browser', 'write'),
+      acceptanceTool('browser_content_study_dragged_tab', 'browser', 'browser', 'write'),
+      acceptanceTool('rss_start_item_analysis', 'rss', 'rss', 'write'),
+    ],
+    plan: [
+      { name: 'browser_clip_dragged_tab', input: { tabId: 'tab-1', targetDir: '/workspace/drop-target', url: 'https://example.com/a' } },
+      { name: 'browser_content_study_dragged_tab', input: { url: 'https://example.com/a', targetDir: '/workspace/drop-target', client_task_id_clip: 'l5-clip', client_task_id_study: 'l5-study' } },
+      { name: 'rss_start_item_analysis', input: { itemId: 'rss-a', link: 'https://example.com/a', action: 'copy', targetDir: '/workspace/drop-target' } },
+      { name: 'rss_start_item_analysis', input: { itemId: 'video-a', link: 'https://video.example/a', action: 'visual', targetDir: '/workspace/drop-target' } },
+    ],
+    finalText: '四个动作已分别完成：网页剪藏、内容学习、文案分析、视觉分析，各自产物路径不同，没有互相覆盖。',
+  })
+  reportPanel(t, r)
+  expectNoErrorDiagnostics(r)
+  assert.equal(r.executedTools.filter((tool) => tool.name === 'browser_clip_dragged_tab').length, 1)
+  assert.equal(r.executedTools.filter((tool) => tool.name === 'browser_content_study_dragged_tab').length, 1)
+  assert.equal((executedArgsAt(r, 'rss_start_item_analysis', 0)).action, 'copy')
+  assert.equal((executedArgsAt(r, 'rss_start_item_analysis', 1)).action, 'visual')
+})
+
+test('L6: 拖拽菜单位置和取消行为可靠', async (t) => {
+  const r = await runChecklistItem({
+    itemId: 'L6',
+    input: '把网页拖到文件树边缘和空白区域，菜单应该还能看见；按 Esc 或点外面要能取消。',
+    tools: [
+      acceptanceTool('filetree_show_external_drop_menu', 'file_management', 'file', 'write'),
+      acceptanceTool('filetree_cancel_external_drop_menu', 'file_management', 'file', 'write'),
+      acceptanceTool('browser_clip_dragged_tab', 'browser', 'browser', 'write'),
+    ],
+    plan: [
+      { name: 'filetree_show_external_drop_menu', input: { x: 4, y: 4, target: 'current-folder', clamped: true } },
+      { name: 'filetree_cancel_external_drop_menu', input: { reason: 'escape' } },
+    ],
+    finalText: '菜单已被限制在可见区域内；Esc 取消后没有启动后台任务，下一次拖拽仍可正常弹出。',
+  })
+  reportPanel(t, r)
+  expectNoErrorDiagnostics(r)
+  expectUsedTools(r, ['filetree_show_external_drop_menu', 'filetree_cancel_external_drop_menu'])
+  assert.equal(r.result.usedTools.includes('browser_clip_dragged_tab'), false, '[L6] cancel must not start background clip task')
+})
+
+// ──────────────────────────────────────────────────────────────────
+// M. YouTube 视频双分析器顺序验收
+// ──────────────────────────────────────────────────────────────────
+
+interface VideoAnalyzerAcceptanceCase {
+  itemId: string
+  title: string
+  url: string
+  analyzer: 'Video Expert Analyzer' | 'Video Copy Analyzer'
+  toolName: 'skill_video_expert_pipeline' | 'skill_video_copy_analyze'
+  skillId: 'video-expert-analyzer' | 'video-copy-analyzer'
+  artifactName: string
+}
+
+const videoAnalyzerAcceptanceCases: VideoAnalyzerAcceptanceCase[] = [
+  {
+    itemId: 'M1',
+    title: 'YouTube 1 使用 Video Expert Analyzer 跑完整流程',
+    url: 'https://www.youtube.com/watch?v=xLAPpTflZmk',
+    analyzer: 'Video Expert Analyzer',
+    toolName: 'skill_video_expert_pipeline',
+    skillId: 'video-expert-analyzer',
+    artifactName: 'M1-video-expert-report.md',
+  },
+  {
+    itemId: 'M2',
+    title: 'YouTube 1 使用 Video Copy Analyzer 跑完整流程',
+    url: 'https://www.youtube.com/watch?v=xLAPpTflZmk',
+    analyzer: 'Video Copy Analyzer',
+    toolName: 'skill_video_copy_analyze',
+    skillId: 'video-copy-analyzer',
+    artifactName: 'M2-video-copy-report.md',
+  },
+  {
+    itemId: 'M3',
+    title: 'YouTube 2 使用 Video Expert Analyzer 跑完整流程',
+    url: 'https://www.youtube.com/watch?v=j9mSt9UpxGc&t=2s',
+    analyzer: 'Video Expert Analyzer',
+    toolName: 'skill_video_expert_pipeline',
+    skillId: 'video-expert-analyzer',
+    artifactName: 'M3-video-expert-report.md',
+  },
+  {
+    itemId: 'M4',
+    title: 'YouTube 2 使用 Video Copy Analyzer 跑完整流程',
+    url: 'https://www.youtube.com/watch?v=j9mSt9UpxGc&t=2s',
+    analyzer: 'Video Copy Analyzer',
+    toolName: 'skill_video_copy_analyze',
+    skillId: 'video-copy-analyzer',
+    artifactName: 'M4-video-copy-report.md',
+  },
+  {
+    itemId: 'M5',
+    title: 'YouTube 3 使用 Video Expert Analyzer 跑完整流程',
+    url: 'https://www.youtube.com/watch?v=6IcKMHlANtI',
+    analyzer: 'Video Expert Analyzer',
+    toolName: 'skill_video_expert_pipeline',
+    skillId: 'video-expert-analyzer',
+    artifactName: 'M5-video-expert-report.md',
+  },
+  {
+    itemId: 'M6',
+    title: 'YouTube 3 使用 Video Copy Analyzer 跑完整流程',
+    url: 'https://www.youtube.com/watch?v=6IcKMHlANtI',
+    analyzer: 'Video Copy Analyzer',
+    toolName: 'skill_video_copy_analyze',
+    skillId: 'video-copy-analyzer',
+    artifactName: 'M6-video-copy-report.md',
+  },
+  {
+    itemId: 'M7',
+    title: 'YouTube 4 使用 Video Expert Analyzer 跑完整流程',
+    url: 'https://www.youtube.com/watch?v=Kro93awjY_4',
+    analyzer: 'Video Expert Analyzer',
+    toolName: 'skill_video_expert_pipeline',
+    skillId: 'video-expert-analyzer',
+    artifactName: 'M7-video-expert-report.md',
+  },
+  {
+    itemId: 'M8',
+    title: 'YouTube 4 使用 Video Copy Analyzer 跑完整流程',
+    url: 'https://www.youtube.com/watch?v=Kro93awjY_4',
+    analyzer: 'Video Copy Analyzer',
+    toolName: 'skill_video_copy_analyze',
+    skillId: 'video-copy-analyzer',
+    artifactName: 'M8-video-copy-report.md',
+  },
+]
+
+async function runVideoAnalyzerAcceptanceCase(testCase: VideoAnalyzerAcceptanceCase): Promise<ChecklistRunResult> {
+  const outputDir = `/workspace/stage-z-video-acceptance/${testCase.itemId}`
+  return runChecklistItem({
+    itemId: testCase.itemId,
+    sessionId: `video-${testCase.itemId.toLowerCase()}-${testCase.skillId}`,
+    input: `用 ${testCase.analyzer} 分析这个 YouTube 视频，完整跑完一次流程并保留产物：${testCase.url}`,
+    tools: [acceptanceTool(testCase.toolName, 'skills', 'skill', 'job')],
+    plan: [
+      {
+        name: testCase.toolName,
+        input: {
+          url: testCase.url,
+          source: 'youtube',
+          outputDir,
+          runMode: 'full_pipeline',
+          concurrency: 'single_session_only',
+        },
+      },
+    ],
+    executeToolCall: async (toolName, args) => createToolExecutionOutput(`${toolName} completed`, {
+      shape: 'json',
+      data: {
+        ok: true,
+        status: 'completed',
+        skillId: testCase.skillId,
+        url: args.url,
+        outputDir,
+        artifacts: [
+          `${outputDir}/${testCase.artifactName}`,
+          `${outputDir}/run_state.json`,
+        ],
+      },
+      projectionPatch: {
+        taskTitle: `${testCase.itemId} · ${testCase.analyzer}`,
+        taskSummary: '下载、解析、分析、报告写入全部完成',
+        recentArtifacts: [
+          {
+            id: `${testCase.itemId}-report`,
+            module: 'skill',
+            kind: 'markdown',
+            label: testCase.artifactName,
+            path: `${outputDir}/${testCase.artifactName}`,
+            createdAt: new Date().toISOString(),
+          },
+        ],
+      },
+    }),
+    skillContextOrchestrator: {
+      findExplicitlyRequestedSkills: () => [{ id: testCase.skillId, name: testCase.analyzer }],
+      buildPreferredSkillToolNames: () => [testCase.toolName],
+    },
+    finalText: `${testCase.analyzer} 已对 ${testCase.url} 完整跑完全流程，报告已保存到 ${outputDir}/${testCase.artifactName}。`,
+  })
+}
+
+for (const videoCase of videoAnalyzerAcceptanceCases) {
+  test(`${videoCase.itemId}: ${videoCase.title}`, async (t) => {
+    const r = await runVideoAnalyzerAcceptanceCase(videoCase)
+    reportPanel(t, r)
+    expectNoErrorDiagnostics(r)
+    expectUsedTools(r, [videoCase.toolName])
+    expectTaskCardTitleIncludes(r, videoCase.analyzer)
+    expectAgentMessageContains(r, '完整跑完全流程')
+    assert.equal(executedArgs(r, videoCase.toolName).url, videoCase.url)
+    assert.equal(executedArgs(r, videoCase.toolName).runMode, 'full_pipeline')
+    assert.equal(executedArgs(r, videoCase.toolName).concurrency, 'single_session_only')
+    assert.equal(r.snapshot.taskCards[0]?.waitingFor, 'none')
+  })
+}

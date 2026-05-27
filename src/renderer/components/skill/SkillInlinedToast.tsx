@@ -30,7 +30,11 @@ interface SkillsAPIShape {
 }
 
 function getSkillsAPI(): SkillsAPIShape | null {
-  const api = (window as unknown as { skillsAPI?: SkillsAPIShape }).skillsAPI
+  const api = (window as unknown as {
+    electronAPI?: { skills?: SkillsAPIShape }
+    skillsAPI?: SkillsAPIShape
+  }).electronAPI?.skills
+    || (window as unknown as { skillsAPI?: SkillsAPIShape }).skillsAPI
   return api || null
 }
 

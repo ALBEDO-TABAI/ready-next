@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test'
 import assert from 'node:assert/strict'
-import { parseSearchQuery } from '../main/modules/search-engine/query'
+import { buildFtsSearchText, parseSearchQuery } from '../main/modules/search-engine/query'
 
 describe('search-engine query planner', () => {
   it('classifies a mix of tag / wikilink / term tokens', () => {
@@ -30,6 +30,15 @@ describe('search-engine query planner', () => {
     const parsed = parseSearchQuery('机器学习')
     // "机器学习" → bigrams "机器" "器学" "学习"
     assert.equal(parsed.ftsMatch, '"机器" "器学" "学习"')
+  })
+
+  it('adds matching CJK bigrams to indexed FTS text', () => {
+    const indexed = buildFtsSearchText('北岸夜跑预算共 4.0 万元')
+    assert.match(indexed, /北岸/)
+    assert.match(indexed, /岸夜/)
+    assert.match(indexed, /夜跑/)
+    assert.match(indexed, /跑预/)
+    assert.match(indexed, /预算/)
   })
 
   it('collapses CJK phrases before bigram expansion', () => {

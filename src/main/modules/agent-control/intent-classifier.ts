@@ -75,6 +75,7 @@ const DOMAIN_ACTION_PATTERNS: Record<PatternIntentDomain, Array<[RegExp, string,
   ],
   research: [
     [/(研究|调研|综述|对比分析|调查|整理研究)/i, 'research-action', 2],
+    [/(?:比较|对比).{0,24}(?:特色|差异|优劣|适合|趋势|产业|公司类型|园区|商圈|市场|竞品)/i, 'research-comparison-action', 2],
     [/(^|[^a-z])(research|survey|compare|investigate|explain in depth)([^a-z]|$)/i, 'research-action-en', 2],
   ],
   browser: [

@@ -22,6 +22,7 @@ import type {
   SkillTaskSupervisorLiveness,
   SkillTaskSupervisorSnapshot,
 } from '../agent-control/skills/skill-task-supervisor'
+import type { ScopeRunSkillProgress } from '../agent-control/contracts/types'
 import type { TurnFramePatch } from '../agent-control/runtime-core/turn-frame'
 import {
   hasActiveSkillTaskRun,
@@ -51,6 +52,7 @@ import type { TurnFeatureFlags } from '../agent-control/runtime-core/turn-featur
 import { logAgentMetric } from '../agent-control/metrics'
 import { resolvePendingSkillHandoffWriteTargets } from '../agent-control/skills/skill-agent-handoff'
 import { isChildLoopSkillAction } from './child-loop-skill-actions'
+import { completeVideoCopyAnalyzeResult } from './video-copy-deliverable-postprocess'
 import { filterSkillPrimitivesBySession } from './skill-tool-session-gate'
 import { PRIMITIVE_TOOL_DEFS } from './skill-primitives/tool-defs'
 import {
@@ -907,7 +909,7 @@ function buildSkillRunArtifacts(result: {
   }
   const outputs = result.outputs || {}
   const entries = Object.entries(outputs)
-    .filter(([, value]) => typeof value === 'string' && value.trim().length > 0)
+    .filter(([key, value]) => isArtifactOutputKey(key) && typeof value === 'string' && value.trim().length > 0)
   if (result.outputDir && !entries.some(([key, value]) => key === 'outputDir' || value === result.outputDir)) {
     entries.unshift(['outputDir', result.outputDir])
   }
@@ -920,6 +922,26 @@ function buildSkillRunArtifacts(result: {
       toolName,
     },
   }))
+}
+
+function isArtifactOutputKey(key: string): boolean {
+  return key === 'outputDir' || key.endsWith('Path') || key.endsWith('Dir')
+}
+
+function videoCopyProgress(completed: number, detail: string, stage = 'running'): ScopeRunSkillProgress {
+  const total = 5
+  const boundedCompleted = Math.max(0, Math.min(total, completed))
+  return {
+    stage,
+    completed: boundedCompleted,
+    total,
+    coverage: boundedCompleted / total,
+    overallCoverage: boundedCompleted / total,
+    fingerprint: `video-copy:${stage}:${boundedCompleted}`,
+    updatedAt: new Date().toISOString(),
+    lastError: null,
+    detail,
+  }
 }
 
 function detachedTaskBelongsToSession(record: { scopeId?: string | null; sessionId?: string | null }, sessionId?: string): boolean {
@@ -1918,6 +1940,7 @@ export async function executeSkillTool(
   // Phase 4: execution_control (skill_get_state / skill_submit_* /
   // skill_restart_from_step / skill_cancel_execution) branch retired.
 
+  const isVideoCopyAnalyze = tool.skillId === 'video-copy-analyzer' && tool.action === 'video_copy_analyze'
   const started = recordSkillTaskEvent({
     scopeId: runtimeContext?.scopeId,
     sessionId,
@@ -1932,6 +1955,9 @@ export async function executeSkillTool(
     params: args,
     goalText: goalTextFromParams(toolName, tool.action || '', args),
     resourceRefs: resourceRefsFromParams(args),
+    progress: isVideoCopyAnalyze
+      ? videoCopyProgress(1, '下载视频并提取字幕')
+      : undefined,
   })
 
   // Phase 6 — child-loop routing. When the typed action belongs to a
@@ -1965,7 +1991,7 @@ export async function executeSkillTool(
   // here only fires for non-child-loop typed actions whose manifest
   // declares no `child_loop.actions[]`. See
   // `docs/architecture/skill-child-loop-boundary.md` §5.2.
-  const result = await getManager().runSkill({
+  let result = await getManager().runSkill({
     skillId: tool.skillId || '',
     action: tool.action || '',
     params: args,
@@ -1975,6 +2001,31 @@ export async function executeSkillTool(
     sessionId,
     agentContext,
   })
+  if (isVideoCopyAnalyze) {
+    result = await completeVideoCopyAnalyzeResult({
+      result,
+      args,
+      onProgress: (message, completed) => {
+        recordSkillTaskEvent({
+          scopeId: runtimeContext?.scopeId,
+          sessionId,
+          runId: runtimeContext?.runId,
+          agent: runtimeContext?.agent,
+          skillId: tool.skillId || undefined,
+          skillName: findSkillName(getManager(), tool.skillId),
+          toolName,
+          action: tool.action || '',
+          runKind: 'typed_action',
+          status: 'running',
+          stepId: started.stepId,
+          message,
+          outputDir: typeof result.outputs?.outputDir === 'string' ? result.outputs.outputDir : result.outputDir || null,
+          params: args,
+          progress: videoCopyProgress(completed, message, completed >= 5 ? 'completed' : 'running'),
+        })
+      },
+    })
+  }
   const formatted = formatRunResult(result)
   const runStatus = result.status ?? (result.success ? 'done' : 'error')
   const outputs = result.outputs && typeof result.outputs === 'object' ? result.outputs : {}
@@ -2015,6 +2066,19 @@ export async function executeSkillTool(
     resourceRefs: resourceRefsFromParams(args),
     jobId: result.jobId || null,
     detachedTaskId,
+    progress: isVideoCopyAnalyze
+      ? {
+        stage: result.success ? 'completed' : 'failed',
+        completed: result.success ? 5 : null,
+        total: 5,
+        coverage: result.success ? 1 : null,
+        overallCoverage: result.success ? 1 : null,
+        fingerprint: `video-copy:${result.success ? 'completed' : 'failed'}`,
+        updatedAt: new Date().toISOString(),
+        lastError: result.success ? null : result.error || result.stderr || '技能执行失败',
+        detail: result.success ? '文案分析报告和结构化文字稿已生成。' : result.error || result.stderr || '技能执行失败',
+      }
+      : undefined,
   })
   rememberSkillRun(sessionId, {
     toolName,
@@ -2183,6 +2247,7 @@ export const __skillsToolsInternalsForTests = {
   detachedStatusToSupervisorStatus,
   detachedStatusToLiveness,
   makeSupervisorSnapshotForContract,
+  buildSkillRunArtifacts,
 }
 
 /**

@@ -2316,6 +2316,7 @@ export const useAgent = create<AgentState>((set, get) => ({
             errorKind: result.errorKind || 'unknown',
           }
         }
+        agentRuntimeDriver.completeScopeRunAfterSendSuccess(activeScopeId, requestId)
         set({ pendingContinuationIntent: null, pendingContinuationDraftAnchor: null })
         // Stream data arrives via onStream listener
         // Persistence of assistant message happens in onStream 'done' handler

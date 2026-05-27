@@ -7,4 +7,3 @@ modelscope
 torch
 torchaudio
 rapidocr-onnxruntime
-openai-whisper

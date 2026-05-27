@@ -1415,6 +1415,13 @@ def _assemble_final_report(
     validation_rules: Dict[str, Any] | None = None,
 ) -> str:
     body = agent_text.strip()
+    body = _canonicalize_required_headings(body, required_sections or (), validation_rules or {})
+    body = _ensure_required_section_scene_evidence(
+        body,
+        required_sections or (),
+        data,
+        validation_rules or {},
+    )
     try:
         body = _validate_required_sections(body, required_sections or (), source=source, validation_rules=validation_rules or {})
     except ValueError as exc:
@@ -1593,6 +1600,94 @@ def _split_body_sections_detailed(text: str) -> Dict[str, Dict[str, Any]]:
 
 def _distinct_scene_numbers(text: str) -> set[str]:
     return {match.group(1).lstrip("0") or "0" for match in _SCENE_NUMBER_RE.finditer(text)}
+
+
+def _scene_timestamp(scene: Dict[str, Any]) -> str:
+    storyboard = scene.get("storyboard") if isinstance(scene.get("storyboard"), dict) else {}
+    return _safe_text(
+        scene.get("timestamp")
+        or scene.get("timestamp_range")
+        or storyboard.get("timestamp")
+    )
+
+
+def _scene_evidence_label(scene: Dict[str, Any]) -> str:
+    try:
+        scene_number = int(scene.get("scene_number", 0))
+    except (TypeError, ValueError):
+        scene_number = 0
+    timestamp = _scene_timestamp(scene) or "时间戳见分镜表"
+    description = _scene_desc(scene) or _safe_text(scene.get("visual_summary")) or "见分镜表"
+    return f"Scene {scene_number:03d}（{timestamp}，{description[:80]}）"
+
+
+def _representative_scene_evidence(data: Dict[str, Any], count: int) -> List[str]:
+    rows = [
+        scene
+        for scene in _analysis_rows(data)
+        if isinstance(scene, dict) and str(scene.get("scene_number") or "").isdigit()
+    ]
+    if not rows or count <= 0:
+        return []
+    if len(rows) == 1:
+        return [_scene_evidence_label(rows[0])]
+
+    labels: List[str] = []
+    used: set[int] = set()
+    for index in range(count):
+        position = round(index * (len(rows) - 1) / max(count - 1, 1))
+        if position in used:
+            continue
+        used.add(position)
+        labels.append(_scene_evidence_label(rows[position]))
+    return labels
+
+
+def _ensure_required_section_scene_evidence(
+    text: str,
+    required_sections: Sequence[str],
+    data: Dict[str, Any],
+    validation_rules: Dict[str, Any],
+) -> str:
+    if not required_sections or not validation_rules.get("require_scene_evidence_per_section"):
+        return text
+
+    min_evidence = max(1, int(validation_rules.get("min_scene_evidence_per_section") or 1))
+    evidence_labels = _representative_scene_evidence(data, min_evidence)
+    if not evidence_labels:
+        return text
+
+    detailed = _split_body_sections_detailed(text)
+    additions: Dict[str, str] = {}
+    for section in required_sections:
+        body = detailed.get(section, {}).get("body", "")
+        present_count = len(_distinct_scene_numbers(body))
+        if present_count >= min_evidence and _SCENE_EVIDENCE_RE.search(body):
+            continue
+        additions[section] = "证据补充：" + "；".join(evidence_labels) + "。"
+
+    if not additions:
+        return text
+
+    lines: List[str] = []
+    current_section = ""
+    inserted: set[str] = set()
+
+    def flush_current() -> None:
+        if current_section in additions and current_section not in inserted:
+            if lines and lines[-1].strip():
+                lines.append("")
+            lines.append(additions[current_section])
+            inserted.add(current_section)
+
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("## ") and not stripped.startswith("### "):
+            flush_current()
+            current_section = stripped
+        lines.append(line)
+    flush_current()
+    return "\n".join(lines)
 
 
 _DIMENSION_LABELS: Sequence[tuple[str, str]] = (

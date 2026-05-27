@@ -11,7 +11,7 @@ import { createToolExecutionOutput, type ToolExecutionOutput } from '../../agent
 import { ToolDomainError } from '../tool-errors'
 import { logAgentMetric } from '../../agent-control/metrics'
 import { TOOL_ERROR_METRICS } from '../../agent-control/tools-runtime/tool-error-metrics'
-import { PathSandboxError, resolveReadableWithinAnyRoot } from './path-sandbox'
+import { PathSandboxError, resolveReadableWithinRoot } from './path-sandbox'
 import { defaultLookupSkillRoots, type LookupSkillRoots } from './root-resolver'
 
 const DEFAULT_MAX_BYTES = 32_768
@@ -44,6 +44,56 @@ export interface ReadArtifactHandlerDeps {
   additionalAllowedReadRoots?: string[]
 }
 
+interface ReadArtifactPathResolution {
+  absPath: string
+  attemptedRoots: string[]
+  attemptedPaths: string[]
+}
+
+function resolveReadableExistingWithinAnyRoot(roots: string[], path: string): ReadArtifactPathResolution {
+  if (!Array.isArray(roots) || roots.length === 0) {
+    throw new PathSandboxError(
+      'no_root_match',
+      'No sandbox roots configured for read access',
+    )
+  }
+
+  const attemptedRoots: string[] = []
+  const attemptedPaths: string[] = []
+  let firstMissingPath: string | null = null
+  let lastPathEscape: PathSandboxError | null = null
+
+  for (const root of roots) {
+    if (typeof root !== 'string' || root.trim().length === 0) continue
+    attemptedRoots.push(root)
+    try {
+      const candidate = resolveReadableWithinRoot(root, path)
+      attemptedPaths.push(candidate)
+      if (existsSync(candidate)) {
+        return { absPath: candidate, attemptedRoots, attemptedPaths }
+      }
+      firstMissingPath ??= candidate
+    } catch (error) {
+      if (error instanceof PathSandboxError && error.reason === 'path_escape') {
+        lastPathEscape = error
+        continue
+      }
+      throw error
+    }
+  }
+
+  if (firstMissingPath) {
+    return { absPath: firstMissingPath, attemptedRoots, attemptedPaths }
+  }
+  if (attemptedRoots.length <= 1 && lastPathEscape) {
+    throw lastPathEscape
+  }
+  throw new PathSandboxError(
+    'no_root_match',
+    `Path ${typeof path === 'string' ? path : '(invalid)'} is not inside any of the allowed roots: ${attemptedRoots.join(', ') || '(none)'}`,
+  )
+}
+
 export async function executeReadArtifact(
   args: ReadArtifactArgs,
   deps: ReadArtifactHandlerDeps,
@@ -71,9 +121,9 @@ export async function executeReadArtifact(
     : []
   const candidateRoots = [roots.artifactRoot, ...additionalRoots]
 
-  let absPath: string
+  let resolution: ReadArtifactPathResolution
   try {
-    absPath = resolveReadableWithinAnyRoot(candidateRoots, args.relativePath)
+    resolution = resolveReadableExistingWithinAnyRoot(candidateRoots, args.relativePath)
   } catch (error) {
     if (error instanceof PathSandboxError) {
       logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
@@ -91,6 +141,7 @@ export async function executeReadArtifact(
     throw error
   }
 
+  const absPath = resolution.absPath
   if (!existsSync(absPath)) {
     logAgentMetric(TOOL_ERROR_METRICS.skillPrimitiveRejected, {
       primitive: 'skill_read_artifact',
@@ -100,7 +151,12 @@ export async function executeReadArtifact(
     throw new ToolDomainError(
       'not_found',
       `Artifact not found: ${args.relativePath}`,
-      { relativePath: args.relativePath, absolutePath: absPath },
+      {
+        relativePath: args.relativePath,
+        absolutePath: absPath,
+        attemptedRoots: resolution.attemptedRoots,
+        attemptedPaths: resolution.attemptedPaths,
+      },
     )
   }
 

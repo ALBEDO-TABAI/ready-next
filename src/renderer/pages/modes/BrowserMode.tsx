@@ -763,6 +763,32 @@ export default function BrowserMode({
   }, [activeTab?.loading, browserRuntimeReady, captureStableFrame, clearSurfaceReadyTimer, isActive, layoutPhase, tabs.length])
 
   useEffect(() => {
+    if (!isElectron || !isActive) return
+    if (!shouldRevealBrowserHost || !browserRuntimeReady || tabs.length === 0) return
+    if (layoutPhase !== 'idle' || activeTab?.loading || isBrowserSurfaceReady) return
+    if (!captureTokenConsumedRef.current) return
+
+    clearSurfaceReadyTimer()
+    surfaceReadyTimerRef.current = window.setTimeout(() => {
+      surfaceReadyTimerRef.current = null
+      setIsBrowserSurfaceReady(true)
+    }, 48)
+    return () => {
+      clearSurfaceReadyTimer()
+    }
+  }, [
+    activeTab?.loading,
+    browserRuntimeReady,
+    clearSurfaceReadyTimer,
+    isActive,
+    isBrowserSurfaceReady,
+    isElectron,
+    layoutPhase,
+    shouldRevealBrowserHost,
+    tabs.length,
+  ])
+
+  useEffect(() => {
     if (!isElectron) return
     if (!shouldPresentBrowserHost || !shouldRevealBrowserHost) return
 

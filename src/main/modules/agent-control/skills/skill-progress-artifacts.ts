@@ -47,6 +47,7 @@ export interface SkillProgressArtifacts {
   hostBatches: SkillHostBatchProgress | null
   activity: SkillActivityProgress | null
   handoff: ScopeRunSkillHandoff | null
+  handoffDetail: string | null
   hasEvidence: boolean
 }
 
@@ -73,9 +74,36 @@ function readJson(path: string): Record<string, unknown> | null {
   }
 }
 
-function firstHandoffTask(outputDir: string | null): ScopeRunSkillHandoff | null {
-  if (!outputDir) return null
-  return readSkillHandoffStates(outputDir).find((state) => state.status !== 'completed') || null
+const HANDOFF_TASK_LABELS: Record<string, string> = {
+  body: '正文',
+  diagram: '图表',
+  illustrate: '插图说明',
+  overview: '总览',
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values))
+}
+
+function summarizeCompletedHandoffs(states: ScopeRunSkillHandoff[]): string | null {
+  const labels = uniqueStrings(states
+    .filter((state) => state.status === 'completed')
+    .map((state) => HANDOFF_TASK_LABELS[state.taskName] || state.taskName)
+    .filter((label) => label.trim().length > 0))
+  if (labels.length === 0) return null
+  return `视听报告分段内容已生成（${labels.join('、')}）`
+}
+
+function inspectHandoffProgress(outputDir: string | null): {
+  current: ScopeRunSkillHandoff | null
+  detail: string | null
+} {
+  if (!outputDir) return { current: null, detail: null }
+  const states = readSkillHandoffStates(outputDir)
+  return {
+    current: states.find((state) => state.status !== 'completed') || null,
+    detail: summarizeCompletedHandoffs(states),
+  }
 }
 
 function fileExists(path: string | null): path is string {
@@ -295,12 +323,43 @@ function collectHostBatchProgress(outputDir: string | null): {
   }
 }
 
+function intList(value: unknown): number[] {
+  if (!Array.isArray(value)) return []
+  const numbers: number[] = []
+  for (const item of value) {
+    const number = Number(item)
+    if (!Number.isInteger(number) || number <= 0 || numbers.includes(number)) continue
+    numbers.push(number)
+  }
+  return numbers
+}
+
+function formatSceneLabels(sceneNumbers: number[], limit = 6): string {
+  const labels = sceneNumbers.slice(0, limit).map((number) => `Scene ${String(number).padStart(3, '0')}`)
+  return `${labels.join('、')}${sceneNumbers.length > limit ? '、...' : ''}`
+}
+
+function collectAutoScoringWarningSummary(outputDir: string | null): string | null {
+  if (!outputDir) return null
+  const payload = readJson(join(outputDir, 'auto_scoring_validation.json'))
+  if (!payload) return null
+  const warningSceneNumbers = intList(payload.validation_warning_scene_numbers || payload.needs_review_scene_numbers)
+  const blockingSceneNumbers = intList(payload.blocking_scene_numbers)
+  if (warningSceneNumbers.length === 0 || blockingSceneNumbers.length > 0) return null
+  const failedSceneNumbers = intList(payload.validation_failed_scene_numbers)
+  const details = failedSceneNumbers.length > 0
+    ? `，含 ${failedSceneNumbers.length} 个图片探测失败`
+    : ''
+  return `抽样复核非阻断提醒 ${warningSceneNumbers.length} 个：${formatSceneLabels(warningSceneNumbers)}${details}`
+}
+
 export function inspectSkillProgressArtifacts(params: InspectSkillProgressArtifactsParams): SkillProgressArtifacts {
   const outputDir = outputDirFromParams(params)
   const sceneScoresPath = sceneScoresPathFor(params)
   const sceneProgress = collectSceneProgress(sceneScoresPath)
   const hostBatchProgress = collectHostBatchProgress(outputDir)
-  const handoff = firstHandoffTask(outputDir)
+  const handoffProgress = inspectHandoffProgress(outputDir)
+  const autoScoringWarningSummary = collectAutoScoringWarningSummary(outputDir)
   const completedSceneNumbers = new Set<number>([
     ...sceneProgress.completedSceneNumbers,
     ...hostBatchProgress.completedSceneNumbers,
@@ -322,8 +381,14 @@ export function inspectSkillProgressArtifacts(params: InspectSkillProgressArtifa
     completedScenes,
     coverageRatio,
     hostBatches: hostBatchProgress.progress,
-    activity: hostBatchProgress.activity,
-    handoff,
-    hasEvidence: Boolean(sceneScoresPath || hostBatchProgress.indexPath || handoff),
+    activity: hostBatchProgress.activity && autoScoringWarningSummary
+      ? {
+          ...hostBatchProgress.activity,
+          summary: `${hostBatchProgress.activity.summary}；${autoScoringWarningSummary}`,
+        }
+      : hostBatchProgress.activity,
+    handoff: handoffProgress.current,
+    handoffDetail: handoffProgress.detail,
+    hasEvidence: Boolean(sceneScoresPath || hostBatchProgress.indexPath || handoffProgress.current || handoffProgress.detail),
   }
 }

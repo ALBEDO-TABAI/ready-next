@@ -63,7 +63,8 @@ def main():
     print("3️⃣ 检查 Python 依赖...")
     
     packages = {
-        "whisper": "openai-whisper",
+        "funasr": "funasr",
+        "modelscope": "modelscope",
         "pysrt": "pysrt",
         "dotenv": "python-dotenv",
         "torch": "torch"

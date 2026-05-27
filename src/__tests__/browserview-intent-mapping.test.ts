@@ -171,6 +171,58 @@ test('applyIntent kind=hide hides a specific tab view only', () => {
   assert.equal(calls.hidden[0].view, v2)
 })
 
+test('applyIntent kind=hide with split-collapse detaches the secondary host and clears split state', () => {
+  const v1 = makeStubView('t1')
+  const v2 = makeStubView('t2')
+  const { service, calls } = makeShellService({
+    tabs: [makeTab('t1', v1), makeTab('t2', v2)],
+    activeTabId: 't1',
+  })
+
+  service.applyIntent({
+    kind: 'secondary-set-bounds',
+    intentId: 5,
+    tabId: 't2',
+    bounds: { x: 400, y: 0, w: 400, h: 600 },
+  })
+  const result = service.applyIntent({
+    kind: 'hide',
+    intentId: 6,
+    tabId: 't2',
+    reason: 'split-collapse',
+  })
+
+  assert.equal(result.success, true)
+  assert.deepEqual(calls.detached.map((entry) => entry.view), [v2])
+  assert.equal(calls.splitTabId, null)
+})
+
+test('applyIntent kind=hide with split-collapse does not detach a promoted active tab', () => {
+  const v1 = makeStubView('t1')
+  const v2 = makeStubView('t2')
+  const { service, calls } = makeShellService({
+    tabs: [makeTab('t1', v1), makeTab('t2', v2)],
+    activeTabId: 't1',
+  })
+
+  service.applyIntent({
+    kind: 'secondary-set-bounds',
+    intentId: 7,
+    tabId: 't2',
+    bounds: { x: 400, y: 0, w: 400, h: 600 },
+  })
+  service.switchTab('t2')
+  const result = service.applyIntent({
+    kind: 'hide',
+    intentId: 8,
+    tabId: 't2',
+    reason: 'split-collapse',
+  })
+
+  assert.equal(result.success, true)
+  assert.equal(calls.detached.filter((entry) => entry.view === v2).length, 0)
+})
+
 test('applyIntent kind=set-bounds applies primary bounds and records viewBounds', () => {
   const v1 = makeStubView('t1')
   const { service, calls } = makeShellService({
@@ -223,6 +275,9 @@ test('applyIntent kind=secondary-set-bounds applies bounds to the secondary tab 
     syncMode: 'transient',
   }
   service.applyIntent(intent)
+  assert.equal(calls.shown.length, 1)
+  assert.equal(calls.shown[0].view, v2)
+  assert.deepEqual(calls.shown[0].bounds, { x: 400, y: 0, width: 400, height: 600 })
   assert.equal(calls.applied.length, 1)
   assert.equal(calls.applied[0].view, v2)
   assert.equal(calls.applied[0].syncMode, 'transient')
@@ -231,6 +286,33 @@ test('applyIntent kind=secondary-set-bounds applies bounds to the secondary tab 
   assert.deepEqual(calls.splitViewBounds, { x: 400, y: 0, width: 400, height: 600 })
   // Primary `viewBounds` is NOT clobbered by a secondary intent.
   assert.equal(calls.viewBounds, null)
+})
+
+test('applyIntent kind=secondary-set-bounds detaches the previous secondary tab when replacing split state', () => {
+  const v1 = makeStubView('t1')
+  const v2 = makeStubView('t2')
+  const v3 = makeStubView('t3')
+  const { service, calls } = makeShellService({
+    tabs: [makeTab('t1', v1), makeTab('t2', v2), makeTab('t3', v3)],
+    activeTabId: 't1',
+  })
+
+  service.applyIntent({
+    kind: 'secondary-set-bounds',
+    intentId: 8,
+    tabId: 't2',
+    bounds: { x: 400, y: 0, w: 400, h: 600 },
+  })
+  service.applyIntent({
+    kind: 'secondary-set-bounds',
+    intentId: 9,
+    tabId: 't3',
+    bounds: { x: 420, y: 0, w: 380, h: 600 },
+  })
+
+  assert.deepEqual(calls.detached.map((entry) => entry.view), [v2])
+  assert.equal(calls.splitTabId, 't3')
+  assert.equal(calls.shown.at(-1)?.view, v3)
 })
 
 test('applyIntent kind=secondary-set-bounds is a no-op for an unknown tab id', () => {

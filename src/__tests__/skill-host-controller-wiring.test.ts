@@ -112,6 +112,8 @@ function makeStubController(options: StubControllerOptions = {}): {
 
 interface SkillFixtureOptions {
   withHostRequirements: boolean
+  spawnContext?: boolean
+  outputDirParam?: boolean
 }
 
 function makeCustomSkillFixture(options: SkillFixtureOptions): {
@@ -147,7 +149,10 @@ function makeCustomSkillFixture(options: SkillFixtureOptions): {
         runtime: 'reference',
         entry: 'SKILL.md',
         visibility: 'internal',
-        params: [],
+        inputMode: options.outputDirParam ? 'json' : undefined,
+        params: options.outputDirParam
+          ? [{ name: 'outputDir', type: 'string', required: false }]
+          : [],
       },
     ],
     execution: { mode: 'advisory' },
@@ -160,6 +165,15 @@ function makeCustomSkillFixture(options: SkillFixtureOptions): {
       manifest_version: 1,
       shell_allowlist_extensions: ['ffmpeg'],
       default_action_timeout_ms: 90_000,
+      ...(options.spawnContext === false
+        ? {}
+        : {
+            spawn_context: {
+              env: {
+                WIRING_FIXTURE_OUTPUT_DIR: '${output_dir}',
+              },
+            },
+          }),
     } satisfies SkillHostRequirements
   }
 
@@ -233,6 +247,61 @@ test('runSkill SKIPS prepare/restore when manifest does NOT declare host_require
     assert.equal(methods.includes('restoreSpawnContext'), false, 'restoreSpawnContext should NOT be called without host_requirements')
     // detectStatus is still called (used to backfill SkillRunResult.status).
     assert.equal(methods.includes('detectStatus'), true)
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('runSkill prepares outputDir for json actions without requiring a spawn context', async () => {
+  const fx = makeCustomSkillFixture({ withHostRequirements: false, outputDirParam: true })
+  try {
+    const { controller, calls } = makeStubController()
+    const manager = new SkillsRuntimeManager({
+      runtimeRoot: fx.runtimeRoot,
+      embeddedSkillsRoot: fx.embeddedSkillsRoot,
+      startBackgroundTasks: false,
+      hostController: controller,
+    })
+
+    const result = await manager.runSkill({
+      skillId: fx.skillId,
+      action: 'read_skill',
+      params: {},
+    })
+
+    assert.equal(result.success, true)
+    assert.match(String(result.outputDir), new RegExp(`/outputs/${fx.skillId}/[0-9a-f-]{36}$`))
+    const methods = calls.map((c) => c.method)
+    assert.equal(methods.includes('prepareSpawnContext'), false, 'outputDir creation must not require spawn preparation')
+    assert.equal(methods.includes('restoreSpawnContext'), false, 'outputDir creation must not require spawn restoration')
+  } finally {
+    fx.cleanup()
+  }
+})
+
+test('runSkill uses timeout-only host_requirements without preparing spawn context', async () => {
+  const fx = makeCustomSkillFixture({ withHostRequirements: true, spawnContext: false })
+  try {
+    const { controller, calls } = makeStubController()
+    const manager = new SkillsRuntimeManager({
+      runtimeRoot: fx.runtimeRoot,
+      embeddedSkillsRoot: fx.embeddedSkillsRoot,
+      startBackgroundTasks: false,
+      hostController: controller,
+    })
+
+    const result = await manager.runSkill({
+      skillId: fx.skillId,
+      action: 'read_skill',
+      params: {},
+    })
+
+    assert.equal(result.success, true)
+    const methods = calls.map((c) => c.method)
+    assert.equal(methods.includes('getEffectiveActionTimeout'), true)
+    assert.equal(methods.includes('detectStatus'), true)
+    assert.equal(methods.includes('prepareSpawnContext'), false)
+    assert.equal(methods.includes('restoreSpawnContext'), false)
   } finally {
     fx.cleanup()
   }
