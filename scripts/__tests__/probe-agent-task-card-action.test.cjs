@@ -30,7 +30,7 @@ test('task card action probe rejects continue buttons without a resume call', as
 
   assert.equal(report.ok, false)
   assert.equal(report.error, 'no-action-effect')
-  assert.equal(report.effect.expectation, 'api:resumeRun')
+  assert.equal(report.effect.expectation, 'api:resumeRun|state:task-changed')
 })
 
 test('task card action probe accepts continue buttons with a resume call', async () => {
@@ -41,7 +41,22 @@ test('task card action probe accepts continue buttons with a resume call', async
   const checked = evaluateTaskCardActionEffect(report)
 
   assert.equal(checked.ok, true)
-  assert.equal(checked.effect.expectation, 'api:resumeRun')
+  assert.equal(checked.effect.expectation, 'api:resumeRun|state:task-changed')
+})
+
+test('task card action probe accepts continue buttons with task state change', async () => {
+  const { evaluateTaskCardActionEffect } = await probeModule
+  const report = baseReport('继续生成报告')
+  report.before.taskCards = [{ taskId: 'skill-child:child-1', status: 'blocked' }]
+  report.after.taskCards = [
+    { taskId: 'skill-child:child-1', status: 'blocked' },
+    { taskId: 'task-resume-1', status: 'running' },
+  ]
+
+  const checked = evaluateTaskCardActionEffect(report)
+
+  assert.equal(checked.ok, true)
+  assert.equal(checked.effect.expectation, 'api:resumeRun|state:task-changed')
 })
 
 test('task card action probe accepts open-session when the active scope changes', async () => {

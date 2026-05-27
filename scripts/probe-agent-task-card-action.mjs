@@ -27,10 +27,18 @@ function hasOpenedScope(report) {
     && report.after.messageCount > report.before?.messageCount
 }
 
+function hasTaskStateChange(report) {
+  return JSON.stringify(report.before?.taskCards || []) !== JSON.stringify(report.after?.taskCards || [])
+    || report.before?.runtime?.streamingRequestId !== report.after?.runtime?.streamingRequestId
+    || report.before?.runtime?.toolTraceStatus !== report.after?.runtime?.toolTraceStatus
+    || report.before?.runtime?.activeRun?.updatedAt !== report.after?.runtime?.activeRun?.updatedAt
+}
+
 function hasGenericObservableEffect(report) {
   return Array.isArray(report.apiCalls) && report.apiCalls.length > 0
     || hasComposerChange(report)
     || hasOpenedScope(report)
+    || hasTaskStateChange(report)
     || report.after?.messageCount > report.before?.messageCount
 }
 
@@ -40,8 +48,8 @@ export function evaluateTaskCardActionEffect(report) {
   const expectedApiKeys = API_ACTIONS_BY_LABEL.get(label)
   const effect = expectedApiKeys
     ? {
-        ok: hasApiCall(report, expectedApiKeys),
-        expectation: `api:${expectedApiKeys.join('|')}`,
+        ok: hasApiCall(report, expectedApiKeys) || hasTaskStateChange(report),
+        expectation: `api:${expectedApiKeys.join('|')}|state:task-changed`,
       }
     : label === '打开会话'
       ? {
@@ -158,9 +166,15 @@ async function main() {
         await new Promise((resolve) => setTimeout(resolve, 300))
       }
       const apiCalls = []
+      const instrumentation = []
       const restoreFns = []
       const wrap = (owner, key) => {
         if (!owner || typeof owner[key] !== 'function') return
+        const descriptor = Object.getOwnPropertyDescriptor(owner, key)
+        if (descriptor && descriptor.writable === false) {
+          instrumentation.push({ key, wrapped: false, reason: 'non-writable' })
+          return
+        }
         const original = owner[key].bind(owner)
         owner[key] = (...args) => {
           apiCalls.push({ key, args: args.map((arg) => {
@@ -168,6 +182,7 @@ async function main() {
           }) })
           return original(...args)
         }
+        instrumentation.push({ key, wrapped: true })
         restoreFns.push(() => { owner[key] = original })
       }
       wrap(window.electronAPI?.agent, 'resumeRun')
@@ -212,6 +227,7 @@ async function main() {
         preAction,
         preActionResult,
         apiCalls,
+        instrumentation,
         before: {
           currentScopeId: before.currentScopeId,
           messageCount: before.messages.length,
