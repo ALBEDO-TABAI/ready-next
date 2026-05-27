@@ -564,8 +564,9 @@ export function TaskCard({
             )}
             {/* Stage Q — generic 继续运行 button: previously triggered on
                 `interactionState === 'suspended'` alone; now also gated
-                by `canResume === true`. */}
-            {run.interactionState === 'suspended' && run.canResume === true && (
+                by `canResume === true`. Child-run and detached task cards
+                use their exact-id buttons above. */}
+            {run.interactionState === 'suspended' && run.canResume === true && !childRunId && !isDetachedTask && (
               <button
                 type="button"
                 onClick={() => onResumeRun?.(run.scopeId)}
