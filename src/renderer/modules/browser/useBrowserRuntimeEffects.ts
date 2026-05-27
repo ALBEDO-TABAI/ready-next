@@ -219,6 +219,18 @@ export function useBrowserRuntimeEffects({
             lastAuditedAt: event.lastAuditedAt,
           })
           break
+        case 'closed': {
+          const nextActiveTabId = typeof event.activeTabId === 'string' ? event.activeTabId : null
+          store.removeTab(event.tabId)
+          const nextStore = useBrowserTabs.getState()
+          if (nextActiveTabId && nextStore.tabs.some((tab) => tab.id === nextActiveTabId)) {
+            nextStore.setActiveTabId(nextActiveTabId)
+          }
+          const finalStore = useBrowserTabs.getState()
+          const activeTab = finalStore.tabs.find((tab) => tab.id === finalStore.activeTabId) || null
+          finalStore.setUrlInput(activeTab?.url === DEFAULT_BROWSER_URL ? '' : activeTab?.url || '')
+          break
+        }
       }
     })
     return () => { cleanup?.() }

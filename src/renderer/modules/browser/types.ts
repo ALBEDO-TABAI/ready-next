@@ -35,8 +35,9 @@ export interface DownloadItem {
 }
 
 export interface TabUpdateEvent {
-  type: 'title' | 'navigate' | 'loading' | 'error' | 'meta'
+  type: 'title' | 'navigate' | 'loading' | 'error' | 'meta' | 'closed'
   tabId: string
+  activeTabId?: string | null
   title?: string
   url?: string
   domain?: string

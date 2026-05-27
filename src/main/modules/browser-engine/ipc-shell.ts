@@ -99,9 +99,17 @@ export function setupBrowserShellIPC(controller: BrowserShellIPCController): voi
     }
   })
 
-  ipcMain.handle('browser:closeTab', (_, tabId: string) => {
+  ipcMain.handle('browser:closeTab', (event, tabId: string) => {
     try {
-      return controller.closeTab(tabId)
+      const result = controller.closeTab(tabId)
+      if (result.success) {
+        event.sender.send('browser:tabUpdate', {
+          type: 'closed',
+          tabId,
+          activeTabId: controller.activeTabId,
+        })
+      }
+      return result
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }

@@ -1079,8 +1079,9 @@ interface BrowserTabInfo {
 
 /** Tab update event pushed to renderer via browser:tabUpdate */
 interface BrowserTabUpdateEvent {
-  type: 'title' | 'navigate' | 'loading' | 'error' | 'meta'
+  type: 'title' | 'navigate' | 'loading' | 'error' | 'meta' | 'closed'
   tabId: string
+  activeTabId?: string | null
   title?: string
   url?: string
   domain?: string

@@ -264,6 +264,51 @@ function buildClipAgentExpression(fixtureUrl) {
   )()`
 }
 
+function buildCleanupSurface13TabsExpression(fixtureUrl) {
+  return `(
+    async () => {
+      const api = window.electronAPI.browser
+      const fixtureUrl = ${JSON.stringify(fixtureUrl)}
+      const isSurface13Fixture = (url) => (
+        url === fixtureUrl
+        || /^http:\\/\\/(?:127\\.0\\.0\\.1|localhost):\\d+\\/surface13-clip-agent\\.html(?:[?#].*)?$/.test(String(url || ''))
+        || /^file:\\/\\/\\/private\\/tmp\\/ready-stage-z-fixtures\\/surface13-clip-agent\\.html(?:[?#].*)?$/.test(String(url || ''))
+      )
+      const tabs = await api.getTabs()
+      const closing = tabs.filter((tab) => isSurface13Fixture(tab.url))
+      for (const tab of closing) {
+        await api.closeTab(tab.id)
+      }
+      await new Promise((resolve) => setTimeout(resolve, 150))
+      const after = await api.getTabs()
+      const remainingSurface13 = after
+        .filter((tab) => isSurface13Fixture(tab.url))
+        .map((tab) => ({ id: tab.id, url: tab.url, active: Boolean(tab.active) }))
+      return JSON.stringify({
+        ok: remainingSurface13.length === 0,
+        closed: closing.map((tab) => ({ id: tab.id, url: tab.url, active: Boolean(tab.active) })),
+        remainingSurface13,
+      })
+    }
+  )()`
+}
+
+async function cleanupSurface13FixtureTabs(fixtureUrl) {
+  const targets = await listTargets()
+  const mainTarget = targets.find((target) => (
+    target.type === 'page'
+    && /localhost:5173/.test(target.url)
+    && !/browser-fastcard-overlay/.test(target.url)
+  ))
+  if (!mainTarget) return { ok: false, error: 'Ready workbench target not found for cleanup' }
+  const client = await connect(mainTarget)
+  try {
+    return await evaluate(client, buildCleanupSurface13TabsExpression(fixtureUrl))
+  } finally {
+    client.ws.close()
+  }
+}
+
 const runProbeExpression = `(
   async () => {
     const api = window.electronAPI.browser
@@ -424,6 +469,7 @@ try {
     && target.url === report.clipAgent?.fixtureUrl
     && /Surface13 Clip Agent Fixture/.test(target.title || '')
   ))
+  report.fixtureTabCleanup = await cleanupSurface13FixtureTabs(fixtureServer.url)
 
   const agentText = report.clipAgent?.agent?.text || ''
   const observedToolNames = report.clipAgent?.agent?.observedToolNames || []
@@ -448,6 +494,7 @@ try {
     && /(三句|三条)/.test(agentText)
     && /浏览器.*剪藏/.test(agentText)
     && report.browserTargetAfterClipAgent
+    && report.fixtureTabCleanup?.ok
   )
   report.capturedAt = new Date().toISOString()
 
