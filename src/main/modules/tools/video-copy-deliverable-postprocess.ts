@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { SkillRunResult } from '../skills-runtime/runtime-manager'
 import { RSSSubagentRunner, type CopyDeliverableOptions } from '../rss-engine/subagent-runner'
@@ -17,6 +17,9 @@ interface CopyDeliverableBuilder {
     extractedText: string
   }, options?: CopyDeliverableOptions): Promise<CopyDeliverables>
 }
+
+const REQUIRED_REPORT_TOKENS = ['TextContent', 'Viral-Abstract-Script', 'Brainstorming']
+const FILE_TIME_TOLERANCE_MS = 1000
 
 export interface CompleteVideoCopyAnalyzeResultOptions {
   result: SkillRunResult
@@ -39,6 +42,54 @@ function stripTranscriptSuffix(path: string): string {
 
 function appendStdout(stdout: string, lines: string[]): string {
   return [stdout.trim(), ...lines.filter(Boolean)].filter(Boolean).join('\n')
+}
+
+function getMarkdownBodyLength(text: string): number {
+  return text
+    .replace(/^#+\s+.*$/gm, '')
+    .replace(/[*_`>#-]/g, '')
+    .replace(/\s+/g, '')
+    .trim()
+    .length
+}
+
+function readReusableText(path: string): string | null {
+  try {
+    const text = readFileSync(path, 'utf-8').trim()
+    return text || null
+  } catch {
+    return null
+  }
+}
+
+function hasReusableReportShape(text: string): boolean {
+  return REQUIRED_REPORT_TOKENS.every((token) => text.includes(token)) && getMarkdownBodyLength(text) >= 20
+}
+
+function hasReusableStructuredTranscriptShape(text: string): boolean {
+  return text.includes('结构化文字稿')
+    && /^##\s+/m.test(text)
+    && getMarkdownBodyLength(text) >= 12
+}
+
+function isFreshForTranscript(path: string, transcriptPath: string): boolean {
+  const fileMtime = statSync(path).mtimeMs
+  const transcriptMtime = statSync(transcriptPath).mtimeMs
+  return fileMtime + FILE_TIME_TOLERANCE_MS >= transcriptMtime
+}
+
+function canReuseDeliverables(input: {
+  analysisReportPath: string
+  structuredTranscriptPath: string
+  transcriptPath: string
+}): boolean {
+  if (!existsSync(input.analysisReportPath) || !existsSync(input.structuredTranscriptPath)) return false
+  const report = readReusableText(input.analysisReportPath)
+  const structuredTranscript = readReusableText(input.structuredTranscriptPath)
+  if (!report || !structuredTranscript) return false
+  if (!hasReusableReportShape(report) || !hasReusableStructuredTranscriptShape(structuredTranscript)) return false
+  return isFreshForTranscript(input.analysisReportPath, input.transcriptPath)
+    && isFreshForTranscript(input.structuredTranscriptPath, input.transcriptPath)
 }
 
 export async function completeVideoCopyAnalyzeResult(
@@ -68,7 +119,8 @@ export async function completeVideoCopyAnalyzeResult(
     const title = baseName || '视频文案'
     const analysisReportPath = join(outputDir, `${baseName}_分析报告.md`)
     const structuredTranscriptPath = join(outputDir, `${baseName}_结构化文字稿.md`)
-    if (existsSync(analysisReportPath) && existsSync(structuredTranscriptPath)) {
+    const hadExistingDeliverables = existsSync(analysisReportPath) || existsSync(structuredTranscriptPath)
+    if (canReuseDeliverables({ analysisReportPath, structuredTranscriptPath, transcriptPath })) {
       options.onProgress?.('文案分析报告和结构化文字稿已生成。', 5)
       return {
         ...result,
@@ -125,6 +177,7 @@ export async function completeVideoCopyAnalyzeResult(
         structuredTranscriptPath,
       },
       stdout: appendStdout(result.stdout, [
+        hadExistingDeliverables ? '↻ 已有文案分析产物不完整或早于当前文字稿，已重新生成。' : '',
         `✅ 文案分析报告已生成: ${analysisReportPath}`,
         `✅ 结构化文字稿已生成: ${structuredTranscriptPath}`,
       ]),

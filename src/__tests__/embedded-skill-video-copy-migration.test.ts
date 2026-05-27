@@ -56,6 +56,27 @@ function findPython39(): string | null {
   return null
 }
 
+function validCopyReport(body = '叙事结构完整，传播潜力明确，可做多个方向。'): string {
+  return [
+    '## 一、TextContent Analysis 视角',
+    body,
+    '## 二、Viral-Abstract-Script 视角',
+    body,
+    '## 三、Brainstorming 视角',
+    body,
+  ].join('\n')
+}
+
+function validStructuredTranscript(body = '已有完整结构化文字稿内容，已经覆盖主线表达。'): string {
+  return [
+    '# demo 结构化文字稿',
+    '',
+    '## 一、完整口播',
+    '',
+    body,
+  ].join('\n')
+}
+
 test('manifest compiles to advisory with read_skill default + retained internal video_copy_analyze action', () => {
   const def = compileSkillDefinition({ folderPath: SKILL_DIR, source: 'embedded' })
   assert.equal(def.executionMode, 'advisory', 'execution mode must be advisory post-migration')
@@ -436,8 +457,8 @@ test('video_copy_analyze postprocess reuses completed deliverables on retry', as
   const analysisReportPath = join(outputDir, 'demo_分析报告.md')
   const structuredTranscriptPath = join(outputDir, 'demo_结构化文字稿.md')
   writeFileSync(transcriptPath, '# demo 文字稿\n\n已有文字稿\n', 'utf-8')
-  writeFileSync(analysisReportPath, '# demo 文案分析报告\n\n已有报告\n', 'utf-8')
-  writeFileSync(structuredTranscriptPath, '# demo 结构化文字稿\n\n已有结构化文字稿\n', 'utf-8')
+  writeFileSync(analysisReportPath, `# demo 文案分析报告\n\n${validCopyReport()}\n`, 'utf-8')
+  writeFileSync(structuredTranscriptPath, `${validStructuredTranscript()}\n`, 'utf-8')
   let builderCalls = 0
 
   const result = await completeVideoCopyAnalyzeResult({
@@ -470,6 +491,106 @@ test('video_copy_analyze postprocess reuses completed deliverables on retry', as
   assert.equal(builderCalls, 0)
   assert.equal(result.outputs?.analysisReportPath, analysisReportPath)
   assert.equal(result.outputs?.structuredTranscriptPath, structuredTranscriptPath)
+})
+
+test('video_copy_analyze postprocess regenerates incomplete cached deliverables', async (t) => {
+  const outputDir = mkdtempSync(join(tmpdir(), 'ready-video-copy-incomplete-reuse-'))
+  t.after(() => rmSync(outputDir, { recursive: true, force: true }))
+  const transcriptPath = join(outputDir, 'demo_文字稿.md')
+  const analysisReportPath = join(outputDir, 'demo_分析报告.md')
+  const structuredTranscriptPath = join(outputDir, 'demo_结构化文字稿.md')
+  writeFileSync(transcriptPath, '# demo 文字稿\n\n新的文字稿内容，需要完整文案分析。\n', 'utf-8')
+  writeFileSync(analysisReportPath, '# demo 文案分析报告\n\n已有报告\n', 'utf-8')
+  writeFileSync(structuredTranscriptPath, '# demo 结构化文字稿\n\n已有结构化文字稿\n', 'utf-8')
+  let builderCalls = 0
+
+  const result = await completeVideoCopyAnalyzeResult({
+    result: {
+      success: true,
+      skillId: 'video-copy-analyzer',
+      action: 'video_copy_analyze',
+      stdout: 'transcript ready',
+      stderr: '',
+      outputDir,
+      outputs: {
+        outputDir,
+        sourceInput: 'https://example.com/watch?v=demo',
+        transcriptPath,
+      },
+      command: ['python', 'ready_extract_subtitle.py'],
+      status: 'done',
+      mode: 'direct',
+    },
+    args: {},
+    builder: {
+      async buildCopyDeliverables() {
+        builderCalls += 1
+        return {
+          correctedTranscript: '# demo 校正文稿\n\n## 完整文稿\n\n新的校正文稿内容',
+          report: validCopyReport('新生成报告内容完整覆盖三类分析视角。'),
+          structuredTranscript: validStructuredTranscript('新的结构化文字稿内容已经重新整理。'),
+        }
+      },
+    },
+  })
+
+  assert.equal(result.success, true)
+  assert.equal(builderCalls, 1)
+  assert.match(result.stdout, /已重新生成/)
+  assert.match(readFileSync(analysisReportPath, 'utf-8'), /新生成报告内容/)
+  assert.match(readFileSync(structuredTranscriptPath, 'utf-8'), /新的结构化文字稿内容/)
+})
+
+test('video_copy_analyze postprocess regenerates cached deliverables older than the transcript', async (t) => {
+  const outputDir = mkdtempSync(join(tmpdir(), 'ready-video-copy-stale-report-'))
+  t.after(() => rmSync(outputDir, { recursive: true, force: true }))
+  const transcriptPath = join(outputDir, 'demo_文字稿.md')
+  const analysisReportPath = join(outputDir, 'demo_分析报告.md')
+  const structuredTranscriptPath = join(outputDir, 'demo_结构化文字稿.md')
+  writeFileSync(transcriptPath, '# demo 文字稿\n\n新的文字稿内容，需要覆盖旧报告。\n', 'utf-8')
+  writeFileSync(analysisReportPath, `# demo 文案分析报告\n\n${validCopyReport('旧报告内容虽然完整，但属于旧文字稿。')}\n`, 'utf-8')
+  writeFileSync(structuredTranscriptPath, `${validStructuredTranscript('旧结构化文字稿虽然完整，但属于旧文字稿。')}\n`, 'utf-8')
+  const oldTime = new Date(Date.now() - 20_000)
+  const newTime = new Date(Date.now() + 20_000)
+  utimesSync(analysisReportPath, oldTime, oldTime)
+  utimesSync(structuredTranscriptPath, oldTime, oldTime)
+  utimesSync(transcriptPath, newTime, newTime)
+  let builderCalls = 0
+
+  const result = await completeVideoCopyAnalyzeResult({
+    result: {
+      success: true,
+      skillId: 'video-copy-analyzer',
+      action: 'video_copy_analyze',
+      stdout: 'transcript ready',
+      stderr: '',
+      outputDir,
+      outputs: {
+        outputDir,
+        sourceInput: 'https://example.com/watch?v=demo',
+        transcriptPath,
+      },
+      command: ['python', 'ready_extract_subtitle.py'],
+      status: 'done',
+      mode: 'direct',
+    },
+    args: {},
+    builder: {
+      async buildCopyDeliverables() {
+        builderCalls += 1
+        return {
+          correctedTranscript: '# demo 校正文稿\n\n## 完整文稿\n\n新的校正文稿内容',
+          report: validCopyReport('新报告按更新后的文字稿重新生成。'),
+          structuredTranscript: validStructuredTranscript('新结构化文字稿按更新后的文字稿重新生成。'),
+        }
+      },
+    },
+  })
+
+  assert.equal(result.success, true)
+  assert.equal(builderCalls, 1)
+  assert.match(readFileSync(analysisReportPath, 'utf-8'), /新报告按更新后的文字稿/)
+  assert.match(readFileSync(structuredTranscriptPath, 'utf-8'), /新结构化文字稿按更新后的文字稿/)
 })
 
 test('skill.workflow.json has been removed from disk', () => {
