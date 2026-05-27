@@ -68,6 +68,10 @@ const { execFileSync } = require('node:child_process')
 const ROOT = path.resolve(__dirname, '..')
 const DOGFOOD_DIR_REL =
   'docs/superpowers/audits/2026-05-23-stage-y-closeout/dogfood'
+const CHECKSUM_JSON_REL =
+  'docs/superpowers/audits/2026-05-23-stage-y-closeout/evidence-checksum-manifest.json'
+const CHECKSUM_TXT_REL =
+  'docs/superpowers/audits/2026-05-23-stage-y-closeout/evidence-checksums.txt'
 
 // §9.4 operator-class table. Keys are surface_id (1..20); value
 // is one of agent-only | agent-with-bai-spotcheck | bai-only.
@@ -155,6 +159,78 @@ function gitCommitExists(root, sha) {
   } catch {
     return false
   }
+}
+
+function isInsideRoot(root, targetAbs) {
+  const normalizedRoot = path.resolve(root)
+  const normalizedTarget = path.resolve(targetAbs)
+  return (
+    normalizedTarget === normalizedRoot ||
+    normalizedTarget.startsWith(normalizedRoot + path.sep)
+  )
+}
+
+function validateChecksumBundle(root = ROOT) {
+  const errors = []
+  const notes = []
+  const checksumJsonAbs = path.join(root, CHECKSUM_JSON_REL)
+  const checksumTxtAbs = path.join(root, CHECKSUM_TXT_REL)
+
+  if (!fs.existsSync(checksumJsonAbs)) {
+    return { ok: true, errors, notes }
+  }
+  if (!fs.existsSync(checksumTxtAbs)) {
+    errors.push(
+      `${CHECKSUM_JSON_REL} exists but companion ${CHECKSUM_TXT_REL} missing (§9.2.3 + plan §19 row 12)`,
+    )
+    return { ok: false, errors, notes }
+  }
+
+  const lines = fs.readFileSync(checksumTxtAbs, 'utf8').split(/\r?\n/)
+  let checkedCount = 0
+  for (const [index, line] of lines.entries()) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) continue
+
+    const match = line.match(/^([a-fA-F0-9]{64})\s+(.+)$/)
+    if (!match) {
+      errors.push(`${CHECKSUM_TXT_REL}:${index + 1}: invalid sha256 checksum line`)
+      continue
+    }
+
+    const expected = match[1].toLowerCase()
+    const relPath = match[2].trim()
+    if (!relPath || path.isAbsolute(relPath)) {
+      errors.push(`${CHECKSUM_TXT_REL}:${index + 1}: checksum path must be repository-relative`)
+      continue
+    }
+
+    const targetAbs = path.resolve(root, relPath)
+    if (!isInsideRoot(root, targetAbs)) {
+      errors.push(`${CHECKSUM_TXT_REL}:${index + 1}: checksum path escapes repository root: ${relPath}`)
+      continue
+    }
+    if (!fs.existsSync(targetAbs)) {
+      errors.push(`${CHECKSUM_TXT_REL}:${index + 1}: checksum target missing: ${relPath}`)
+      continue
+    }
+
+    checkedCount += 1
+    const actual = sha256OfFile(targetAbs)
+    if (actual !== expected) {
+      errors.push(
+        `${CHECKSUM_TXT_REL}:${index + 1}: sha256 mismatch for ${relPath} (expected=${expected}, actual=${actual})`,
+      )
+    }
+  }
+
+  if (checkedCount === 0) {
+    errors.push(`${CHECKSUM_TXT_REL}: no checksum entries found`)
+  } else {
+    notes.push(`validated ${checkedCount} checksum entr${checkedCount === 1 ? 'y' : 'ies'} in ${CHECKSUM_TXT_REL}`)
+  }
+
+  return { ok: errors.length === 0, errors, notes }
 }
 
 function parseFrontmatter(text) {
@@ -644,17 +720,9 @@ function main({ root = ROOT } = {}) {
 
   // Closeout-level checksum bundle companion file check
   // (§9.2.3 last bullet + plan §19 row 12 P2 #1).
-  const checksumJsonRel =
-    'docs/superpowers/audits/2026-05-23-stage-y-closeout/evidence-checksum-manifest.json'
-  const checksumTxtRel =
-    'docs/superpowers/audits/2026-05-23-stage-y-closeout/evidence-checksums.txt'
-  if (fs.existsSync(path.join(root, checksumJsonRel))) {
-    if (!fs.existsSync(path.join(root, checksumTxtRel))) {
-      errors.push(
-        `${checksumJsonRel} exists but companion ${checksumTxtRel} missing (§9.2.3 + plan §19 row 12)`,
-      )
-    }
-  }
+  const checksumResult = validateChecksumBundle(root)
+  errors.push(...checksumResult.errors)
+  notes.push(...checksumResult.notes)
 
   return { ok: errors.length === 0, errors, notes }
 }
@@ -681,6 +749,9 @@ module.exports = {
   REQUIRED_FRONTMATTER_KEYS,
   REQUIRED_BODY_SECTIONS,
   REQUIRED_BAI_SPOTCHECK_SUBFIELDS,
+  CHECKSUM_JSON_REL,
+  CHECKSUM_TXT_REL,
   parseFrontmatter,
   parseReproductionWindow,
+  validateChecksumBundle,
 }
