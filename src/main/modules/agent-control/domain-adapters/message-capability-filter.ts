@@ -80,12 +80,25 @@ const VIDEO_KIND_NAMES = new Set([
   'video_url',
 ])
 
+const VIDEO_FILE_EXTENSIONS = /\.(mp4|m4v|mov|webm|avi|mkv)$/i
+
 function isImageBlock(block: CapabilityBlock): boolean {
   return IMAGE_KIND_NAMES.has(block.type)
 }
 
+function isVideoInputFileBlock(block: CapabilityBlock): boolean {
+  if (block.type !== 'input_file') return false
+  for (const key of ['mime_type', 'mimeType', 'media_type']) {
+    const value = block[key]
+    if (typeof value === 'string' && value.toLowerCase().startsWith('video/')) return true
+  }
+  if (typeof block.file_data === 'string' && /^data:video\//i.test(block.file_data)) return true
+  if (typeof block.filename === 'string' && VIDEO_FILE_EXTENSIONS.test(block.filename)) return true
+  return false
+}
+
 function isVideoBlock(block: CapabilityBlock): boolean {
-  return VIDEO_KIND_NAMES.has(block.type)
+  return VIDEO_KIND_NAMES.has(block.type) || isVideoInputFileBlock(block)
 }
 
 function makePlaceholderText(removedImages: number, removedVideos: number): string {

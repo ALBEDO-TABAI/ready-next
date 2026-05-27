@@ -26,7 +26,7 @@ export const def: AIProviderDef = {
       label: 'o3-mini',
       category: 'chat',
       description: '高效推理',
-      capabilityOverrides: { supportsThinking: true, supportsVision: false },
+      capabilityOverrides: { supportsThinking: true, supportsVision: false, supportsNativeVideo: false },
     },
     { id: 'gpt-4-turbo', label: 'GPT-4 Turbo', category: 'chat', contextWindow: 128000 },
     { id: 'codex-mini-latest', label: 'Codex Mini', category: 'chat', description: '代码优化' },
@@ -38,6 +38,7 @@ export const def: AIProviderDef = {
 
 export const capabilityClass: ProviderCapabilityClass = {
   supportsVision: true,
+  supportsNativeVideo: true,
   supportsThinking: false,
   supportsLongContext: true,
 }

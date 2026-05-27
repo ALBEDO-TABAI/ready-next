@@ -53,6 +53,7 @@ export interface AIModelDef {
    */
   capabilityOverrides?: {
     supportsVision?: boolean
+    supportsNativeVideo?: boolean
     supportsThinking?: boolean
     supportsLongContext?: boolean
     multiTurnThinkingPolicy?: MultiTurnThinkingPolicy
@@ -80,6 +81,7 @@ export interface AIProviderDef {
    */
   capabilityClass?: {
     supportsVision?: boolean
+    supportsNativeVideo?: boolean
     supportsThinking?: boolean
     supportsLongContext?: boolean
     multiTurnThinkingPolicy?: MultiTurnThinkingPolicy
@@ -481,6 +483,8 @@ export function resolveAIConfigCapabilities(config: AIModelConfig | null | undef
   const visionDefault = isXiaomiMimoVisionModel
     ? true
     : (modelCap.supportsVision ?? providerCap.supportsVision ?? (agentProtocol === 'anthropic' || agentProtocol === 'openai'))
+  const nativeVideoDefault = isKimiCoding
+    || (modelCap.supportsNativeVideo ?? (visionDefault ? providerCap.supportsNativeVideo ?? false : false))
   const thinkingDefault = modelCap.supportsThinking ?? providerCap.supportsThinking ?? false
   const longContextDefault = modelCap.supportsLongContext ?? providerCap.supportsLongContext ?? ((modelDef?.contextWindow ?? 0) >= 128000)
   const multiTurnThinkingPolicy = modelCap.multiTurnThinkingPolicy ?? providerCap.multiTurnThinkingPolicy ?? 'unknown'
@@ -498,7 +502,7 @@ export function resolveAIConfigCapabilities(config: AIModelConfig | null | undef
     supportsVision: applyCapabilityMode(normalizeCapabilityMode(normalizedConfig.visionMode), visionDefault),
     supportsNativeVideo: applyCapabilityMode(
       normalizeCapabilityMode(normalizedConfig.nativeVideoMode),
-      isKimiCoding || (agentProtocol === 'openai' && !baseUrl.includes('/coding'))
+      nativeVideoDefault,
     ),
     supportsToolChoice: agentProtocol === 'anthropic' || wireApi === 'chat/completions',
     isKimiCoding,

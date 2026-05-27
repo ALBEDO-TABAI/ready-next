@@ -26,6 +26,7 @@ describe('resolveAIConfigCapabilities', () => {
     // `agentProtocol === 'openai'`. This is the conservative-default
     // contract — unsupported providers no longer silently pass through.
     assert.strictEqual(capabilities?.supportsVision, false)
+    assert.strictEqual(capabilities?.supportsNativeVideo, false)
   })
 
   it('supports explicit anthropic agent protocol on custom providers', () => {
@@ -47,5 +48,6 @@ describe('resolveAIConfigCapabilities', () => {
     assert.strictEqual(capabilities?.supportsNativeToolCalls, true)
     assert.strictEqual(capabilities?.toolCallTransport, 'native')
     assert.strictEqual(capabilities?.supportsVision, false)
+    assert.strictEqual(capabilities?.supportsNativeVideo, false)
   })
 })

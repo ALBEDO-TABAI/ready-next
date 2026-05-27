@@ -95,6 +95,39 @@ test('video-off + video block → video removed, count = 1', () => {
   assert.equal(content[0].type, 'text')
 })
 
+test('video-off + responses input_file video block → video removed, count = 1', () => {
+  const messages: CapabilityMessage[] = [
+    {
+      role: 'user',
+      content: [
+        { type: 'text', text: 'check this' },
+        { type: 'input_file', file_data: 'data:video/mp4;base64,AAAA', filename: 'upload.mp4' },
+      ],
+    },
+  ]
+  const out = sanitizeHistoricalMessagesByCapability(messages, VISION_ON_VIDEO_OFF)
+  assert.equal(out.removedVideoBlocks, 1)
+  assert.equal(out.removedImageBlocks, 0)
+  const content = out.filtered[0].content as Array<{ type: string }>
+  assert.equal(content.length, 1)
+  assert.equal(content[0].type, 'text')
+})
+
+test('video-off + non-video input_file block passes through unchanged', () => {
+  const messages: CapabilityMessage[] = [
+    {
+      role: 'user',
+      content: [
+        { type: 'input_file', file_data: 'data:application/pdf;base64,AAAA', filename: 'brief.pdf' },
+        { type: 'text', text: 'brief' },
+      ],
+    },
+  ]
+  const out = sanitizeHistoricalMessagesByCapability(messages, VISION_ON_VIDEO_OFF)
+  assert.equal(out.removedVideoBlocks, 0)
+  assert.equal(out.filtered[0].content, messages[0].content)
+})
+
 test('multiple block-type names recognized: image / image_url / input_image', () => {
   const messages: CapabilityMessage[] = [
     {
@@ -191,6 +224,17 @@ test('current turn: video-off + video block → throws with 视频 in the messag
   assert.throws(
     () => assertCurrentMessageCapability(
       [{ type: 'video', source: 'v' }],
+      VISION_ON_VIDEO_OFF,
+    ),
+    (err: unknown) => err instanceof ToolDomainError && err.errorKind === 'provider_request_failed'
+      && /视频/.test(err.message),
+  )
+})
+
+test('current turn: video-off + responses input_file video block → throws with 视频 in the message', () => {
+  assert.throws(
+    () => assertCurrentMessageCapability(
+      [{ type: 'input_file', file_data: 'data:video/mp4;base64,AAAA', filename: 'upload.mp4' }],
       VISION_ON_VIDEO_OFF,
     ),
     (err: unknown) => err instanceof ToolDomainError && err.errorKind === 'provider_request_failed'

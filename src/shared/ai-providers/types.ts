@@ -19,6 +19,7 @@ export type MultiTurnThinkingPolicy =
 
 export interface ProviderCapabilityClass {
   supportsVision?: boolean
+  supportsNativeVideo?: boolean
   supportsThinking?: boolean
   supportsLongContext?: boolean
   multiTurnThinkingPolicy?: MultiTurnThinkingPolicy

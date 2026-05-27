@@ -2,6 +2,11 @@ import type { ChatAttachment, ConversationScope } from './types'
 import { buildActiveDocumentContext } from './documentActions'
 import { useMode } from '../../stores/useMode'
 import { refreshDocumentWidgetTargetSnapshot } from './widget-target-attachment'
+import {
+  normalizeProviderId,
+  resolveAIConfigCapabilities,
+  type AIModelConfig,
+} from '../../../shared/ai-providers'
 
 export type MultimodalBlock = { type: 'text' | 'image' | 'video'; text?: string; base64?: string; mimeType?: string }
 
@@ -21,6 +26,43 @@ export interface ComposedAgentInputDiagnostics {
 export interface ComposedAgentInputResult {
   message: string | MultimodalBlock[]
   diagnostics: ComposedAgentInputDiagnostics
+}
+
+interface RendererAIConfigForCapabilities {
+  provider: string
+  baseUrl: string
+  apiKey: string
+  model: string
+  modelIds?: string[]
+  displayName?: string
+  agentProtocol?: 'anthropic' | 'openai'
+  wireApi?: 'chat/completions' | 'responses'
+  reasoningEffort?: 'minimal' | 'low' | 'medium' | 'high'
+  toolUseMode?: 'auto' | 'on' | 'off'
+  visionMode?: 'auto' | 'on' | 'off'
+  nativeVideoMode?: 'auto' | 'on' | 'off'
+  endpointId?: string
+}
+
+function normalizeRendererAIConfigForCapabilities(config: RendererAIConfigForCapabilities | null | undefined): AIModelConfig | null {
+  if (!config) return null
+  const provider = normalizeProviderId(config.provider, config.baseUrl)
+  if (!provider) return null
+  return {
+    provider,
+    baseUrl: config.baseUrl,
+    apiKey: config.apiKey,
+    model: config.model,
+    modelIds: config.modelIds,
+    agentProtocol: config.agentProtocol,
+    wireApi: config.wireApi,
+    reasoningEffort: config.reasoningEffort,
+    toolUseMode: config.toolUseMode,
+    visionMode: config.visionMode,
+    nativeVideoMode: config.nativeVideoMode,
+    endpointId: config.endpointId,
+    displayName: config.displayName,
+  }
 }
 
 function shouldKeepDocumentWidgetTargetAttachment(content: string, attachment: ChatAttachment): { kept: boolean; reason: string } {
@@ -464,9 +506,8 @@ export async function buildComposedAgentInputWithDiagnostics(params: {
     ? await window.electronAPI.settings.getAIConfig().catch(() => ({ success: false } as const))
     : ({ success: false } as const)
   const aiConfig = aiConfigRes.success ? aiConfigRes.data : null
-  const normalizedBaseUrl = aiConfig?.baseUrl?.replace(/\/+$/, '') || ''
-  const isKimiCoding = !!aiConfig && normalizedBaseUrl.includes('api.kimi.com/coding')
-  const supportsNativeVideo = !!aiConfig && (isKimiCoding || (aiConfig.provider !== 'anthropic' && !normalizedBaseUrl.includes('/coding')))
+  const capabilities = resolveAIConfigCapabilities(normalizeRendererAIConfigForCapabilities(aiConfig))
+  const supportsNativeVideo = capabilities?.supportsNativeVideo === true
 
   if (effectiveAttachments.length > 0) {
     const blocks: MultimodalBlock[] = []

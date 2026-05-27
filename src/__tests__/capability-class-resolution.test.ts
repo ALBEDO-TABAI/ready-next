@@ -66,6 +66,7 @@ describe('resolveAIConfigCapabilities — three-layer capabilityClass merge', ()
       const caps = resolveAIConfigCapabilities(configFor('openai'))
       assert.ok(caps)
       assert.strictEqual(caps?.supportsVision, true)
+      assert.strictEqual(caps?.supportsNativeVideo, true)
       assert.strictEqual(caps?.supportsThinking, false)
       assert.strictEqual(caps?.supportsLongContext, true)
     })
@@ -82,6 +83,7 @@ describe('resolveAIConfigCapabilities — three-layer capabilityClass merge', ()
       const caps = resolveAIConfigCapabilities(configFor('volcengine'))
       assert.ok(caps)
       assert.strictEqual(caps?.supportsVision, false)
+      assert.strictEqual(caps?.supportsNativeVideo, false)
       assert.strictEqual(caps?.supportsThinking, false)
       assert.strictEqual(caps?.supportsLongContext, false)
     })
@@ -90,6 +92,7 @@ describe('resolveAIConfigCapabilities — three-layer capabilityClass merge', ()
       const caps = resolveAIConfigCapabilities(configFor('openai-compatible'))
       assert.ok(caps)
       assert.strictEqual(caps?.supportsVision, false)
+      assert.strictEqual(caps?.supportsNativeVideo, false)
       assert.strictEqual(caps?.supportsThinking, false)
       assert.strictEqual(caps?.supportsLongContext, false)
     })
@@ -103,11 +106,12 @@ describe('resolveAIConfigCapabilities — three-layer capabilityClass merge', ()
       const provider = AI_PROVIDERS.find(p => p.id === 'anthropic')!
       const model = provider.models.find(m => m.id === 'claude-haiku-3-5-20241022')!
       const previous = model.capabilityOverrides
-      model.capabilityOverrides = { supportsVision: false, supportsThinking: false, supportsLongContext: false }
+      model.capabilityOverrides = { supportsVision: false, supportsNativeVideo: false, supportsThinking: false, supportsLongContext: false }
       try {
         const caps = resolveAIConfigCapabilities(configFor('anthropic', 'claude-haiku-3-5-20241022'))
         assert.ok(caps)
         assert.strictEqual(caps?.supportsVision, false, 'model override must win over provider class')
+        assert.strictEqual(caps?.supportsNativeVideo, false)
         assert.strictEqual(caps?.supportsThinking, false)
         assert.strictEqual(caps?.supportsLongContext, false)
       } finally {
@@ -153,6 +157,12 @@ describe('resolveAIConfigCapabilities — three-layer capabilityClass merge', ()
       const caps = resolveAIConfigCapabilities(configFor('volcengine', undefined, { visionMode: 'on' }))
       assert.ok(caps)
       assert.strictEqual(caps?.supportsVision, true)
+    })
+
+    it('nativeVideoMode=on forces native video true even if provider class is false', () => {
+      const caps = resolveAIConfigCapabilities(configFor('openai-compatible', undefined, { nativeVideoMode: 'on' }))
+      assert.ok(caps)
+      assert.strictEqual(caps?.supportsNativeVideo, true)
     })
 
     it('xiaomi mimo pro custom profile does not inherit image support by model prefix', () => {

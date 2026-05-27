@@ -959,7 +959,7 @@ export class DirectChatEngine extends EventEmitter {
     const normalizedBaseUrl = capabilities?.baseUrl || config.baseUrl.replace(/\/+$/, '')
     const isKimiCoding = !!capabilities?.isKimiCoding
     const useAnthropicProtocol = capabilities?.agentProtocol === 'anthropic'
-    const supportsVideoBlock = capabilities?.supportsNativeVideo ?? (!normalizedBaseUrl.includes('/coding'))
+    const supportsVideoBlock = capabilities?.supportsNativeVideo === true
     const hasRawVideoInIncoming = Array.isArray(normalizedContent) && normalizedContent.some((block) => block.type === 'video')
 
     // PR 2 Phase C.3 — current-turn capability pre-check at the legacy
