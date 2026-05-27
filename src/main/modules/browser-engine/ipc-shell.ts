@@ -5,6 +5,7 @@ import {
   BROWSER_VIEW_INTENT_CHANNEL,
   type BrowserViewIntent,
 } from '../../../shared/browser-view-intent'
+import { closeBrowserTabAndNotify } from './tab-close-notifier'
 
 interface BrowserShellView {
   webContents: {
@@ -100,19 +101,7 @@ export function setupBrowserShellIPC(controller: BrowserShellIPCController): voi
   })
 
   ipcMain.handle('browser:closeTab', (event, tabId: string) => {
-    try {
-      const result = controller.closeTab(tabId)
-      if (result.success) {
-        event.sender.send('browser:tabUpdate', {
-          type: 'closed',
-          tabId,
-          activeTabId: controller.activeTabId,
-        })
-      }
-      return result
-    } catch (error) {
-      return { success: false, error: error instanceof Error ? error.message : String(error) }
-    }
+    return closeBrowserTabAndNotify(controller, event.sender, tabId)
   })
 
   ipcMain.handle('browser:switchTab', (_, tabId: string) => {
