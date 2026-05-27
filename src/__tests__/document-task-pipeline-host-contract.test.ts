@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import { registerHooks } from 'node:module'
 import { describe, it } from 'node:test'
 
 import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
@@ -9,26 +8,6 @@ describe('document-task-pipeline-host-contract sqlite coverage', () => {
   it('declares transitive sqlite coverage', (t) => {
     skipIfSqliteUnavailable(t, 'document-task-pipeline-host-contract transitive sqlite guard')
   })
-})
-
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    if (specifier === 'electron') {
-      return {
-        url: [
-          'data:text/javascript,',
-          'export const app={getPath:()=>"/tmp/ready-document-widget-test"};',
-          'export const ipcMain={};',
-          'export const dialog={};',
-          'export const shell={};',
-          'export const BrowserWindow=class{};',
-          'export const WebContents=class{};',
-        ].join(''),
-        shortCircuit: true,
-      }
-    }
-    return nextResolve(specifier, context)
-  },
 })
 
 const { DocumentTaskPipelineExecutor } = await import(

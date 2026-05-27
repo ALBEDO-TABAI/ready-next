@@ -20,7 +20,6 @@ import {
   type DocumentWidgetRecord,
 } from '../../../../shared/document-widget-parse'
 import { resolveControlledWidgetTarget } from '../../../../shared/document-widget-target'
-import { readDocumentEditableText } from '../ipc-handler'
 import { documentCommitRegistry } from '../document-commit-registry'
 import { type DomainAdapterDispatchResult } from '../../agent-control/domain-adapters/domain-adapter'
 import { classifyStructuredDocumentIntent } from './document-task-types'
@@ -105,6 +104,9 @@ interface DocumentTaskPipelineExecutorDeps {
     projectionTruth?: ProjectionTruthSnapshot | null,
   ) => void | Promise<void>
   createSubtaskRuntime?: () => SubtaskRuntime
+  readDocumentEditableText?: (
+    filePath: string,
+  ) => Promise<{ success: boolean; content: string; error?: string }>
   acquireWidgetEditLease?: (params: {
     agent: string
     sessionId?: string | null
@@ -167,6 +169,16 @@ export class DocumentTaskPipelineExecutor {
   }>>()
 
   constructor(private readonly deps: DocumentTaskPipelineExecutorDeps) {}
+
+  private async readDocumentEditableText(
+    filePath: string,
+  ): Promise<{ success: boolean; content: string; error?: string }> {
+    if (this.deps.readDocumentEditableText) {
+      return this.deps.readDocumentEditableText(filePath)
+    }
+    const { readDocumentEditableText } = await import('../ipc-handler')
+    return readDocumentEditableText(filePath)
+  }
 
   clearSessionCache(sessionId: string): void {
     this.sessionInsightCaches.delete(sessionId)
@@ -1153,7 +1165,7 @@ export class DocumentTaskPipelineExecutor {
     }
     const verifyPath = refreshedSnapshot.path || params.targetResource.documentPath || params.targetResource.path
     if (verifyPath) {
-      const readResult = await readDocumentEditableText(verifyPath)
+      const readResult = await this.readDocumentEditableText(verifyPath)
       if (!readResult.success) {
         throw new Error(`写入后未能重新读取磁盘文件：${verifyPath}`)
       }
@@ -2043,7 +2055,7 @@ export class DocumentTaskPipelineExecutor {
     }
 
     if (targetPath) {
-      const readResult = await readDocumentEditableText(targetPath)
+      const readResult = await this.readDocumentEditableText(targetPath)
       if (readResult.success) {
         return {
           tabId: null,

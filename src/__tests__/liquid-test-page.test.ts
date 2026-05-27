@@ -45,6 +45,7 @@ const matchMediaMock = (_query: string) => ({
 type TestWindow = typeof globalThis & {
   localStorage: typeof localStorageMock
   document: typeof documentMock
+  navigator: { userAgent: string }
   window: TestWindow
   matchMedia: typeof matchMediaMock
   addEventListener: () => void
@@ -56,6 +57,10 @@ const testWindow = globalThis as TestWindow
 
 testWindow.localStorage = localStorageMock
 testWindow.document = documentMock
+Object.defineProperty(testWindow, 'navigator', {
+  value: { userAgent: 'ready-test' },
+  configurable: true,
+})
 
 if (typeof testWindow.window === 'undefined') {
   testWindow.window = testWindow

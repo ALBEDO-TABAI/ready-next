@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import { registerHooks } from 'node:module'
 import test from 'node:test'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
@@ -36,28 +35,6 @@ test('legacy-tool-execute-bridge-removed declares transitive sqlite coverage', (
  * `check-no-ipcmain-emit-truthy.cjs` gate (Stage U0.1) protects the file
  * shape against re-introduction of the calendar-style fake-success call.
  */
-
-// Stub the `electron` module so we can import the file under test without
-// booting the runtime. `AgentManager` indirectly depends on `electron` via
-// `WorktreePool` → `app.getPath('userData')`.
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    if (specifier === 'electron') {
-      return {
-        url: [
-          'data:text/javascript,',
-          'export const app={getPath:()=>"/tmp/ready-u0-1-test"};',
-          'export const ipcMain={emit:()=>true,handle:()=>undefined,removeHandler:()=>undefined};',
-          'export const BrowserWindow=class{};',
-          'export const dialog={};',
-          'export const safeStorage={isEncryptionAvailable:()=>false,encryptString:()=>Buffer.alloc(0),decryptString:()=>""};',
-        ].join(''),
-        shortCircuit: true,
-      }
-    }
-    return nextResolve(specifier, context)
-  },
-})
 
 test('AgentManager never emits "tool_execute" on construction', async () => {
   const { AgentManager } = await import('../main/modules/claude-bridge/agent-manager')

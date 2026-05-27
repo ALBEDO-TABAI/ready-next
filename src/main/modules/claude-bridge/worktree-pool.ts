@@ -1,7 +1,21 @@
 import { execSync, ExecSyncOptions } from 'child_process'
 import { mkdirSync, existsSync, copyFileSync, writeFileSync, rmSync } from 'fs'
 import { join } from 'path'
-import { app } from 'electron'
+import { createRequire } from 'node:module'
+
+const require = createRequire(import.meta.url)
+
+function getElectronUserDataPath(): string | null {
+  try {
+    const electron = require('electron') as { app?: { getPath?: (name: string) => string } } | string
+    if (typeof electron === 'object') {
+      return electron.app?.getPath?.('userData') || null
+    }
+  } catch {
+    return null
+  }
+  return null
+}
 
 export interface Worktree {
   path: string
@@ -24,11 +38,7 @@ export class WorktreePool {
 
   constructor(useMock = false) {
     this.useMock = useMock
-    try {
-      this.basePath = app.getPath('userData')
-    } catch {
-      this.basePath = join(process.cwd(), '.ready-data')
-    }
+    this.basePath = getElectronUserDataPath() || join(process.cwd(), '.ready-data')
     this.worktreesDir = join(this.basePath, '.worktrees')
     this.agentsDir = join(this.basePath, 'agents')
     this.ensureDirectories()
