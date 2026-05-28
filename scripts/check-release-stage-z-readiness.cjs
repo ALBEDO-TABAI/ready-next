@@ -171,6 +171,11 @@ function validateCiReport(text, errors) {
   if (/\bpending\b/i.test(section)) {
     errors.push(`${CI_REPORT_REL}: §3 still contains pending first-remote-run language`)
   }
+  if (/\bcurrent authoritative remote CI proof\b/i.test(section)) {
+    errors.push(
+      `${CI_REPORT_REL}: §3 must not describe a historical first run as the current authoritative remote CI proof`,
+    )
+  }
 }
 
 function validateDeepGatesWorkflow(text, errors) {

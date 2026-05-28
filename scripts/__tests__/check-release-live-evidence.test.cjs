@@ -20,8 +20,10 @@ test('accepts release-ready pass records with required Bai spotcheck fields', ()
   const records = Array.from({ length: 20 }, (_, i) =>
 	    record(`surface-${String(i + 1).padStart(2, '0')}-x.md`, {
 	      surface_id: i + 1,
-	      status: 'pass',
+	      status: i === 10 ? 'deferred-with-owner' : 'pass',
 	      operator_class: i === 1 ? 'agent-with-bai-spotcheck' : 'agent-only',
+      deferred_owner: i === 10 ? '白' : undefined,
+      deferred_reason: i === 10 ? 'remote channel out of scope' : undefined,
       bai_spotcheck:
         i === 1
           ? {
@@ -41,7 +43,7 @@ test('accepts release-ready pass records with required Bai spotcheck fields', ()
   assert.equal(result.passCount, 19)
   assert.equal(result.total, 19)
   assert.deepEqual(result.outOfScopeSurfaceIds, [11])
-  assert.deepEqual(result.statusCounts, { pass: 20 })
+  assert.deepEqual(result.statusCounts, { pass: 19, 'deferred-with-owner': 1 })
 })
 
 test('allows out-of-scope remote surface 11 to remain deferred', () => {
@@ -51,6 +53,7 @@ test('allows out-of-scope remote surface 11 to remain deferred', () => {
 	      status: i === 10 ? 'deferred-with-owner' : 'pass',
 	      operator_class: 'agent-only',
       deferred_owner: i === 10 ? '白' : undefined,
+      deferred_reason: i === 10 ? 'remote channel out of scope' : undefined,
     }),
   )
 
@@ -63,13 +66,35 @@ test('allows out-of-scope remote surface 11 to remain deferred', () => {
   assert.deepEqual(result.statusCounts, { pass: 19, 'deferred-with-owner': 1 })
 })
 
+test('rejects out-of-scope remote surface when it is marked pass', () => {
+  const records = Array.from({ length: 20 }, (_, i) =>
+	    record(`surface-${String(i + 1).padStart(2, '0')}-x.md`, {
+	      surface_id: i + 1,
+	      status: 'pass',
+	      operator_class: 'agent-only',
+    }),
+  )
+
+  const result = evaluateLiveEvidence(records)
+
+  assert.equal(result.ok, false)
+  assert.equal(result.passCount, 19)
+  assert.equal(result.total, 20)
+  assert.deepEqual(result.outOfScopeSurfaceIds, [])
+  assert.match(
+    result.errors.join('\n'),
+    /surface-11-x\.md: out-of-scope remote surface must remain status=deferred-with-owner/,
+  )
+})
+
 test('rejects deferred records for release readiness', () => {
   const records = Array.from({ length: 20 }, (_, i) =>
 	    record(`surface-${String(i + 1).padStart(2, '0')}-x.md`, {
 	      surface_id: i + 1,
-	      status: i === 0 ? 'deferred-with-owner' : 'pass',
+	      status: i === 0 || i === 10 ? 'deferred-with-owner' : 'pass',
 	      operator_class: 'agent-only',
-      deferred_owner: i === 0 ? '白' : undefined,
+      deferred_owner: i === 0 || i === 10 ? '白' : undefined,
+      deferred_reason: i === 10 ? 'remote channel out of scope' : undefined,
     }),
   )
 
@@ -106,8 +131,10 @@ test('rejects duplicate or missing surface id coverage even when 20 records pass
     const id = i === 19 ? 1 : i + 1
     return record(`surface-${String(id).padStart(2, '0')}-x-${i}.md`, {
       surface_id: id,
-      status: 'pass',
+      status: id === 11 ? 'deferred-with-owner' : 'pass',
       operator_class: 'agent-only',
+      deferred_owner: id === 11 ? '白' : undefined,
+      deferred_reason: id === 11 ? 'remote channel out of scope' : undefined,
     })
   })
 

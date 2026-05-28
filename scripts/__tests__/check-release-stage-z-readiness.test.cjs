@@ -90,6 +90,14 @@ function writePassingDogfoodSurface(root, dogfoodDir, id, gitInfo) {
   const operatorClass = SURFACE_OPERATOR_CLASS[id]
   const windowStart = gitInfo.date
   const windowEnd = addMs(gitInfo.date, 10_000)
+  const status = id === 11 ? 'deferred-with-owner' : 'pass'
+  const deferredLines =
+    id === 11
+      ? [
+          'deferred_owner: 白',
+          'deferred_reason: Remote channel surfaces are out of scope for this release goal.',
+        ]
+      : []
 
   write(root, screenRel, `screen ${id}\n`)
   write(root, logRel, `${windowStart} surface ${id}\n${windowEnd} surface ${id}\n`)
@@ -180,7 +188,8 @@ function writePassingDogfoodSurface(root, dogfoodDir, id, gitInfo) {
       'hardware: test-runner',
       `build_commit: ${gitInfo.sha}`,
       `build_commit_captured_at: ${gitInfo.date}`,
-      'status: pass',
+      `status: ${status}`,
+      ...deferredLines,
       `artifact_manifest: evidence/${slug}/manifest.json`,
       ...spotcheckLines,
       '---',
@@ -203,7 +212,7 @@ function writePassingDogfoodSurface(root, dogfoodDir, id, gitInfo) {
       `Reproduction window: ${windowStart} → ${windowEnd}`,
       '',
       '## Pass/fail rationale',
-      'status: pass',
+      `status: ${status}`,
       ...surfaceSpecific,
       '',
     ].join('\n'),
@@ -545,6 +554,31 @@ test('rejects CI reports that keep a pending placeholder after adding a run URL'
 
   assert.equal(result.ok, false)
   assert.match(result.errors.join('\n'), /pending first-remote-run language/)
+})
+
+test('rejects CI reports that call a historical run current authoritative proof', () => {
+  const root = makeRoot()
+  writePassingFixture(root)
+  write(
+    root,
+    CI_REPORT_REL,
+    [
+      '# CI report',
+      '',
+      '## §3 First remote run URL (Y0.2.b)',
+      '',
+      '- First run URL: https://github.com/example/ready/actions/runs/123456789',
+      '- The final recorded run above is the current authoritative remote CI proof.',
+    ].join('\n'),
+  )
+
+  const result = main({ root })
+
+  assert.equal(result.ok, false)
+  assert.match(
+    result.errors.join('\n'),
+    /must not describe a historical first run as the current authoritative remote CI proof/,
+  )
 })
 
 test('rejects unresolved Stage Z handoff evidence without depending on the live workspace', () => {

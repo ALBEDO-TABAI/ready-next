@@ -129,7 +129,13 @@ function evaluateLiveEvidence(records) {
     const status = fm.status || '(missing)'
     statusCounts.set(status, (statusCounts.get(status) || 0) + 1)
     if (OUT_OF_SCOPE_REMOTE_SURFACE_IDS.has(surfaceId)) {
-      outOfScopeSurfaceIds.add(surfaceId)
+      if (status === 'deferred-with-owner' && fm.deferred_owner && fm.deferred_reason) {
+        outOfScopeSurfaceIds.add(surfaceId)
+      } else {
+        errors.push(
+          `${fileName}: out-of-scope remote surface must remain status=deferred-with-owner with owner and reason, got ${status}`,
+        )
+      }
       continue
     }
     if (status === 'pass') {
