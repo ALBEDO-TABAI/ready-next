@@ -24,13 +24,15 @@ Other paths (none observed in this capture) would land in an `other` bucket; the
 
 | Rule | Total | tests | main | renderer | shared | scripts | Budget | Owner | Target date |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- | --- |
-| @typescript-eslint/no-explicit-any | 551 | 396 | 55 | 37 | 63 | 0 | 551 | TBD | n/a |
-| @typescript-eslint/no-unused-vars | 182 | 26 | 93 | 41 | 2 | 20 | 182 | TBD | n/a |
+| @typescript-eslint/no-explicit-any | 544 | 394 | 50 | 37 | 63 | 0 | 544 | TBD | n/a |
+| @typescript-eslint/no-unused-vars | 179 | 26 | 93 | 38 | 2 | 20 | 179 | TBD | n/a |
 | react-hooks/exhaustive-deps | 15 | 0 | 0 | 15 | 0 | 0 | 15 | Stage Y1.3.N | n/a |
 | react-refresh/only-export-components | 17 | 0 | 0 | 17 | 0 | 0 | 17 | TBD | n/a |
 | (eslint-core)/unused-disable-directive | 0 | 0 | 0 | 0 | 0 | 0 | 0 | retired (Y1.3) | n/a |
 
-Row total = 765 (matches `npm run lint:check` summary after Y1.3 first batch).
+Row total = 755 (matches `npm run lint:check` summary; see 2026-05-29 reconciliation below).
+
+**2026-05-29 reconciliation (pre-release lint gate).** `@typescript-eslint/no-explicit-any` 551 → **544**: typed the 8 structural stub params (`SpawnOptions` + `(code: number) => void`) in `src/__tests__/skill-primitive-run-shell.test.ts`, clearing the +1 over-budget regression that commit `2f0abc6b` introduced (this was the actual red `verify:lint-budget` gate on `codex/readyguy`). `@typescript-eslint/no-unused-vars` 182 → **179**: reconciled to the live source-only count — `eslint.config.mjs` now ignores the build-output dirs `exports/**` and `Packer/.staging/**` (vendored Python site-package JS like torch/sklearn was being linted *locally only*, inflating the local count by ~45; the CI merge job never saw it because it lints a clean checkout with no build step before `lint:check`), and the dead import `BROWSER_VIEW_INTENT_ACK_CHANNEL` in `src/preload/index.ts` was removed (renderer 41 → 38 reflects renderer cleanup that landed since the X2 snapshot). Both budgets lowered to the measured actuals per the reconciliation rules below.
 
 Stage X2 raised the `@typescript-eslint/no-unused-vars` budget from 180 → 182 (renderer 39 → 41). The +2 are stale imports left in `src/renderer/components/agent/ChatPanel.tsx` after the X2 ChatPanel refactor (commit `9cda9c49` 起的 X2.1–X2.8 链路裁剪了大段 JSX 与导入；剩余的两条未使用导入与 X2 主目标——session/composer/provider recovery——无关，留作 Stage Y P1 warning-burn 一并清理)，符合 `react-hooks/exhaustive-deps` + `react-refresh/only-export-components` 之外的 Stage Y P1 burn 顺位。
 

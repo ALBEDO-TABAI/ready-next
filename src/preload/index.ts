@@ -1,6 +1,5 @@
 import { contextBridge, ipcRenderer, webUtils, type IpcRendererEvent } from 'electron'
 import {
-  BROWSER_VIEW_INTENT_ACK_CHANNEL,
   BROWSER_VIEW_INTENT_CHANNEL,
   type BrowserViewIntent,
   type BrowserViewIntentAck,

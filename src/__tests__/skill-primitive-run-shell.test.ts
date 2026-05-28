@@ -94,7 +94,7 @@ test('script wrappers are invoked through bash/python rather than direct ./scrip
   const fx = makeFixture()
   try {
     const captured: { bin?: string; args?: string[]; cwd?: string } = {}
-    const fakeSpawn = ((bin: string, args: string[], options: any) => {
+    const fakeSpawn = ((bin: string, args: string[], options: import('node:child_process').SpawnOptions) => {
       captured.bin = bin
       captured.args = args
       captured.cwd = options?.cwd
@@ -105,7 +105,7 @@ test('script wrappers are invoked through bash/python rather than direct ./scrip
         stdin: { write: () => {}, end: () => {} },
         stdout: { setEncoding: () => {}, on: () => {} },
         stderr: { setEncoding: () => {}, on: () => {} },
-        on: (event: string, cb: any) => {
+        on: (event: string, cb: (code: number) => void) => {
           if (event === 'close') {
             closeCb = cb
             setImmediate(() => closeCb?.(0))
@@ -252,7 +252,7 @@ test('shell compatibility uses non-login bash so injected PATH remains authorita
   const venvBinDir = realpathSync.native(mkdtempSync(join(tmpdir(), 'skill-prim-venv-bin-')))
   try {
     const captured: { args?: string[]; env?: NodeJS.ProcessEnv } = {}
-    const fakeSpawn = ((bin: string, args: string[], options: any) => {
+    const fakeSpawn = ((bin: string, args: string[], options: import('node:child_process').SpawnOptions) => {
       captured.args = args
       captured.env = options?.env
       let closeCb: ((code: number) => void) | null = null
@@ -262,7 +262,7 @@ test('shell compatibility uses non-login bash so injected PATH remains authorita
         stdin: { write: () => {}, end: () => {} },
         stdout: { setEncoding: () => {}, on: () => {} },
         stderr: { setEncoding: () => {}, on: () => {} },
-        on: (event: string, cb: any) => {
+        on: (event: string, cb: (code: number) => void) => {
           if (event === 'close') {
             closeCb = cb
             setImmediate(() => closeCb?.(0))
@@ -512,7 +512,7 @@ test('venvBinDir, when provided, prepends onto spawn env.PATH', async () => {
   try {
     const captured: { env?: NodeJS.ProcessEnv } = {}
     // Minimal spawn stub: capture env, then emit close(0) synchronously.
-    const fakeSpawn = ((_bin: string, _args: string[], options: any) => {
+    const fakeSpawn = ((_bin: string, _args: string[], options: import('node:child_process').SpawnOptions) => {
       captured.env = options?.env
       let closeCb: ((code: number) => void) | null = null
       return {
@@ -521,7 +521,7 @@ test('venvBinDir, when provided, prepends onto spawn env.PATH', async () => {
         stdin: { write: () => {}, end: () => {} },
         stdout: { setEncoding: () => {}, on: () => {} },
         stderr: { setEncoding: () => {}, on: () => {} },
-        on: (event: string, cb: any) => {
+        on: (event: string, cb: (code: number) => void) => {
           if (event === 'close') {
             closeCb = cb
             setImmediate(() => closeCb?.(0))
@@ -574,7 +574,7 @@ test('baseEnv replaces process.env for packaged shell executions', async () => {
   process.env.PYTHONHOME = '/host/python'
   try {
     const captured: { env?: NodeJS.ProcessEnv } = {}
-    const fakeSpawn = ((_bin: string, _args: string[], options: any) => {
+    const fakeSpawn = ((_bin: string, _args: string[], options: import('node:child_process').SpawnOptions) => {
       captured.env = options?.env
       let closeCb: ((code: number) => void) | null = null
       return {
@@ -583,7 +583,7 @@ test('baseEnv replaces process.env for packaged shell executions', async () => {
         stdin: { write: () => {}, end: () => {} },
         stdout: { setEncoding: () => {}, on: () => {} },
         stderr: { setEncoding: () => {}, on: () => {} },
-        on: (event: string, cb: any) => {
+        on: (event: string, cb: (code: number) => void) => {
           if (event === 'close') {
             closeCb = cb
             setImmediate(() => closeCb?.(0))
