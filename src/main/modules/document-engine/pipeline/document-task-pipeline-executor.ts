@@ -176,7 +176,7 @@ export class DocumentTaskPipelineExecutor {
     if (this.deps.readDocumentEditableText) {
       return this.deps.readDocumentEditableText(filePath)
     }
-    const { readDocumentEditableText } = await import('../ipc-handler')
+    const { readDocumentEditableText } = await import('../document-editable-text')
     return readDocumentEditableText(filePath)
   }
 

@@ -288,14 +288,6 @@
       "area": "ui-history"
     },
     {
-      "file": "src/__tests__/document-engine-async-read.test.ts",
-      "rule": "ready/no-source-grep-test",
-      "snippetHash": "dcac375baf3c8da5",
-      "line": 8,
-      "snippet": "const source = readFileSync(",
-      "area": "ui-history"
-    },
-    {
       "file": "src/__tests__/document-insight-cache-host-contract.test.ts",
       "rule": "ready/no-source-grep-test",
       "snippetHash": "be55f5a26010ad45",

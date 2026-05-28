@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, wri
 import { writeFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
-import { createRequire, registerHooks } from 'node:module'
+import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { markSkillHandoffOutputCompleted } from '../src/main/modules/agent-control/skills/skill-agent-handoff'
 
@@ -11,46 +11,6 @@ const require = createRequire(import.meta.url)
 const { inspectVeaArtifacts } = require('./vea-assert-artifacts.cjs') as {
   inspectVeaArtifacts: (outputDir: string) => VeaAssertReport
 }
-
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    if (specifier === 'electron') {
-      const userData = `${homedir()}/Library/Application Support/ready`
-      const source = [
-        'const noop=()=>{};',
-        `const userData=${JSON.stringify(userData)};`,
-        'class StubWindow{',
-        'static getAllWindows(){return []}',
-        'static fromWebContents(){return null}',
-        'static getFocusedWindow(){return null}',
-        'constructor(){this.webContents={send:noop,on:noop,once:noop,off:noop,isDestroyed:()=>false};}',
-        'isDestroyed(){return false}',
-        'on(){return this} once(){return this} off(){return this}',
-        'show(){} hide(){} close(){} setBounds(){} loadURL(){return Promise.resolve()}',
-        '}',
-        'export const app={getPath:(name)=>name==="userData"?userData:"/tmp/ready-agent-live-acceptance",whenReady:()=>Promise.resolve(),isReady:()=>true,on:noop,once:noop,quit:noop,exit:noop,getName:()=>"Ready"};',
-        'export const ipcMain={handle:noop,on:noop,removeHandler:noop,removeAllListeners:noop};',
-        'export const dialog={showErrorBox:noop,showMessageBox:()=>Promise.resolve({response:0}),showOpenDialog:()=>Promise.resolve({canceled:true,filePaths:[]}),showSaveDialog:()=>Promise.resolve({canceled:true})};',
-        'export const shell={openExternal:()=>Promise.resolve(),openPath:()=>Promise.resolve("")};',
-        'export const BrowserWindow=StubWindow;',
-        'export const BrowserView=StubWindow;',
-        'export const WebContentsView=StubWindow;',
-        'export const WebContents=class{};',
-        'export const Menu={buildFromTemplate:()=>({popup:noop}),setApplicationMenu:noop};',
-        'export const nativeImage={createFromPath:()=>({isEmpty:()=>true,resize(){return this}})};',
-        'export const nativeTheme={shouldUseDarkColors:false,on:noop,off:noop};',
-        'export const protocol={handle:noop,registerFileProtocol:noop};',
-        'export const session={defaultSession:{webRequest:{onHeadersReceived:noop},cookies:{get:()=>Promise.resolve([])}}};',
-        'export const safeStorage={isEncryptionAvailable:()=>false,encryptString:(value)=>Buffer.from(String(value)),decryptString:(value)=>Buffer.from(value).toString("utf8")};',
-      ].join('')
-      return {
-        url: `data:text/javascript,${encodeURIComponent(source)}`,
-        shortCircuit: true,
-      }
-    }
-    return nextResolve(specifier, context)
-  },
-})
 
 type Mode = 'resume' | 'fresh' | 'both' | 'fresh-resume'
 type HandoffMode = 'observe' | 'complete'

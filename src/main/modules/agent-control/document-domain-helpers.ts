@@ -1,5 +1,5 @@
 import type { AIModelConfig } from '../../../shared/ai-providers'
-import { readDocumentEditableText, writeDocumentEditableText } from '../document-engine/ipc-handler'
+import { readDocumentEditableText, writeDocumentEditableText } from '../document-engine/document-editable-text'
 
 export interface DocumentChatSessionLike {
   messages: Array<{ role: string; content: string | Array<Record<string, unknown>> }>

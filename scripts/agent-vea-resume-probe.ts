@@ -2,7 +2,6 @@ import { mkdtempSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, dirname, basename } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { registerHooks } from 'node:module'
 import { pathToFileURL } from 'node:url'
 
 import type { ToolDefinition } from '../src/main/modules/agent-control/tools-runtime/tool-definition'
@@ -13,46 +12,6 @@ interface AgentMetricEvent {
   metric: string
   [key: string]: unknown
 }
-
-registerHooks({
-  resolve(specifier, context, nextResolve) {
-    if (specifier === 'electron') {
-      const source = [
-        'const noop=()=>{};',
-        'class StubWindow{',
-        'static getAllWindows(){return []}',
-        'static fromWebContents(){return null}',
-        'static getFocusedWindow(){return null}',
-        'constructor(){this.webContents={send:noop,on:noop,once:noop,off:noop,isDestroyed:()=>false};}',
-        'isDestroyed(){return false}',
-        'on(){return this}',
-        'once(){return this}',
-        'off(){return this}',
-        'show(){} hide(){} close(){} setBounds(){} loadURL(){return Promise.resolve()}',
-        '}',
-        'export const app={getPath:()=>"/tmp/ready-agent-probe",whenReady:()=>Promise.resolve(),isReady:()=>true,on:noop,once:noop,quit:noop,exit:noop,getName:()=>"Ready"};',
-        'export const ipcMain={handle:noop,on:noop,removeHandler:noop,removeAllListeners:noop};',
-        'export const dialog={showErrorBox:noop,showMessageBox:()=>Promise.resolve({response:0}),showOpenDialog:()=>Promise.resolve({canceled:true,filePaths:[]}),showSaveDialog:()=>Promise.resolve({canceled:true})};',
-        'export const shell={openExternal:()=>Promise.resolve(),openPath:()=>Promise.resolve("")};',
-        'export const BrowserWindow=StubWindow;',
-        'export const BrowserView=StubWindow;',
-        'export const WebContentsView=StubWindow;',
-        'export const WebContents=class{};',
-        'export const Menu={buildFromTemplate:()=>({popup:noop}),setApplicationMenu:noop};',
-        'export const nativeImage={createFromPath:()=>({isEmpty:()=>true,resize(){return this}})};',
-        'export const nativeTheme={shouldUseDarkColors:false,on:noop,off:noop};',
-        'export const protocol={handle:noop,registerFileProtocol:noop};',
-        'export const session={defaultSession:{webRequest:{onHeadersReceived:noop},cookies:{get:()=>Promise.resolve([])}}};',
-        'export const safeStorage={isEncryptionAvailable:()=>false,encryptString:(value)=>Buffer.from(String(value)),decryptString:(value)=>Buffer.from(value).toString("utf8")};',
-      ].join('')
-      return {
-        url: `data:text/javascript,${encodeURIComponent(source)}`,
-        shortCircuit: true,
-      }
-    }
-    return nextResolve(specifier, context)
-  },
-})
 
 interface ProbeOptions {
   json: boolean

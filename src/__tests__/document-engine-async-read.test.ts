@@ -1,22 +1,39 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { describe, it } from 'node:test'
 
-describe('document engine async read path', () => {
-  it('uses async file reads in the editable document hot path', () => {
-    const source = readFileSync(
-      resolve(process.cwd(), 'src/main/modules/document-engine/ipc-handler.ts'),
-      'utf8',
-    )
+import { readDocumentEditableText } from '../main/modules/document-engine/document-editable-text'
 
-    assert.match(source, /async function readDocxRawText\(path: string\): Promise<string>/)
-    assert.match(source, /const buffer = await readFile\(path\)/)
-    assert.match(source, /export async function readDocumentEditableText\(/)
-    assert.match(source, /const content = await readFile\(filePath, 'utf-8'\)/)
-    assert.doesNotMatch(
-      source,
-      /export async function readDocumentEditableText[\s\S]*readFileSync\(filePath, 'utf-8'\)/,
-    )
+describe('document engine editable text read path', () => {
+  it('reads editable text through the electron-free helper', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ready-doc-read-'))
+    try {
+      const path = join(dir, 'note.md')
+      await writeFile(path, '# Note\n正文', 'utf8')
+
+      const result = await readDocumentEditableText(path)
+
+      assert.equal(result.success, true)
+      assert.equal(result.content, '# Note\n正文')
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects binary files from the editable text path', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'ready-doc-read-'))
+    try {
+      const path = join(dir, 'image.png')
+      await writeFile(path, new Uint8Array([0x89, 0x50, 0x4e, 0x47]))
+
+      const result = await readDocumentEditableText(path)
+
+      assert.equal(result.success, false)
+      assert.match(result.error || '', /不支持直接编辑二进制文件/)
+    } finally {
+      await rm(dir, { recursive: true, force: true })
+    }
   })
 })
