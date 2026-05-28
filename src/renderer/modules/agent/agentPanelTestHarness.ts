@@ -985,31 +985,36 @@ async function waitForDomSubmitEvidence(
   store: StoreLike,
   beforeMessageCount: number,
   normalizedText: string,
-): Promise<boolean> {
+): Promise<{ submitted: boolean; started: boolean }> {
   const startedAt = Date.now()
   while (Date.now() - startedAt < 1_500) {
     const state = store.getState()
     const currentRun = state.currentScopeId ? state.scopeRunStates[state.currentScopeId] || null : null
+    if (hasSubmittedUserMessage(state.messages, beforeMessageCount, normalizedText)) {
+      return { submitted: true, started: true }
+    }
     if (
-      hasSubmittedUserMessage(state.messages, beforeMessageCount, normalizedText)
-      || state.pendingSendCount > 0
+      state.pendingSendCount > 0
       || state.isStreaming
       || state.foregroundBusy
       || Boolean(currentRun?.requestId)
       || Boolean(currentRun?.taskId)
     ) {
-      return true
+      return { submitted: false, started: true }
     }
     await delay(50)
   }
-  return false
+  return { submitted: false, started: false }
 }
 
 async function loadProjectionCards(scopeId: string | null): Promise<AgentPanelTaskCardSnapshot[]> {
   if (!scopeId || typeof window === 'undefined') return []
   const listTaskProjections = window.electronAPI?.agent?.listTaskProjections
   if (!listTaskProjections) return []
-  const result = await listTaskProjections(scopeId).catch(() => null)
+  const result = await Promise.race([
+    listTaskProjections(scopeId).catch(() => null),
+    delay(1_500).then(() => null),
+  ])
   if (!result?.success || !Array.isArray(result.data)) return []
   return result.data
     .map((item) => asRecord(item))
@@ -1111,6 +1116,7 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
     let sendResult: SendMessageResultLike | null = null
     let domSubmitted = false
     let domClickSubmitted = false
+    let domRunStarted = false
     const coalescingState = store.getState()
     const canDisableCoalescing = typeof store.setState === 'function'
       && typeof coalescingState.sendCoalescingEnabled === 'boolean'
@@ -1128,14 +1134,16 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
         for (let attempt = 0; attempt < maxDomAttempts; attempt += 1) {
           domClickSubmitted = await submitViaDom(messageText) || domClickSubmitted
           if (domClickSubmitted) {
-            domSubmitted = await waitForDomSubmitEvidence(store, before.messages.length, normalizedText)
+            const evidence = await waitForDomSubmitEvidence(store, before.messages.length, normalizedText)
+            domSubmitted = evidence.submitted
+            domRunStarted = domRunStarted || evidence.started
           }
           if (domSubmitted) break
           await delay(250)
         }
       }
 
-      if ((!domClickSubmitted || !domSubmitted) && allowStoreFallback) {
+      if ((!domClickSubmitted || (!domSubmitted && !domRunStarted)) && allowStoreFallback) {
         inputMode = 'store'
         const state = store.getState()
         state.setInputValue(messageText, { preserveContinuationIntent: true })
@@ -1147,7 +1155,7 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
         } else {
           sendResult = await sendPromise
         }
-      } else if (domClickSubmitted && domSubmitted) {
+      } else if (domClickSubmitted && (domSubmitted || domRunStarted)) {
         inputMode = 'dom'
       }
     } finally {

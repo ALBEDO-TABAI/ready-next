@@ -202,6 +202,10 @@ export function TaskCard({
 
   return (
     <div
+      data-ready-task-card="true"
+      data-ready-task-scope-id={run.scopeId || undefined}
+      data-ready-task-id={run.taskId || undefined}
+      data-ready-task-child-run-id={childRunId || undefined}
       style={{
         borderRadius: 12,
         border: '1px solid var(--border-default)',
@@ -547,6 +551,10 @@ export function TaskCard({
             {childRunId && run.canResume === true && (run.resumableActions || []).includes('continue') && (
               <button
                 type="button"
+                data-ready-task-action="continue-child-run"
+                data-ready-task-scope-id={run.scopeId || undefined}
+                data-ready-task-id={run.taskId || undefined}
+                data-ready-task-child-run-id={childRunId}
                 onClick={() => onContinueChildRun?.(run.scopeId, childRunId)}
                 style={{ ...TASK_ACTION_BUTTON_STYLE }}
               >
@@ -556,6 +564,10 @@ export function TaskCard({
             {childRunId && (run.resumableActions || []).includes('cancel') && (
               <button
                 type="button"
+                data-ready-task-action="cancel-child-run"
+                data-ready-task-scope-id={run.scopeId || undefined}
+                data-ready-task-id={run.taskId || undefined}
+                data-ready-task-child-run-id={childRunId}
                 onClick={() => onCancelChildRun?.(run.scopeId, childRunId)}
                 style={{ ...TASK_ACTION_BUTTON_STYLE }}
               >

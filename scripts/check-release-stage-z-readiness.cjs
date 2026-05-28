@@ -14,6 +14,8 @@ const RELEASE_HANDOFF_REL =
   'docs/superpowers/audits/2026-05-23-stage-y-closeout/release-handoff.md'
 const WORKFLOW_REL = '.github/workflows/ready-merge-gates.yml'
 const AUDITS_REL = 'docs/superpowers/audits'
+const SURFACE09_LIVE_INNER_REL = 'live/surface-09-skills-center-resumability.md'
+const SURFACE20_LIVE_INNER_REL = 'live/surface-20-agent-interaction-routing.md'
 const EXPECTED_MANUAL_IDS = Array.from({ length: 19 }, (_, i) => `M${i + 1}`)
 const EXPECTED_AGENT_ACCEPTANCE_IDS = [
   ...Array.from({ length: 3 }, (_, i) => `A${i + 1}`),
@@ -40,6 +42,13 @@ const EVIDENCE_PATH_RE =
 const PLACEHOLDER_RE = /<[^>]+>|\bpending\b|\btodo\b|\btbd\b|待补|待定/i
 const AUTOMATED_ONLY_AGENT_ACCEPTANCE_RE =
   /\b(?:npm\s+run|node\s+--import|tsx|--test|verify:agent-acceptance-checklist|agent-acceptance-checklist(?:\.test)?|automated(?:[-\s]+)?test|自动测试)\b/i
+const EXPECTED_SURFACE20_DOM_CASE_IDS = [
+  'surface20-session-a-pending-card',
+  'surface20-session-b-pending-card',
+  'surface20-two-session-pending-isolation',
+  'surface20-answer-active-session-resolves-card',
+  'surface20-background-session-card-survives-and-resolves',
+]
 
 function readRel(root, rel, errors) {
   const abs = path.join(root, rel)
@@ -81,6 +90,14 @@ function stageZFileCandidates(root, fileNames) {
     if (fs.existsSync(abs)) candidates.push(abs)
   }
   return candidates.sort()
+}
+
+function latestStageZFile(root, innerRel) {
+  const directories = stageZDirectories(root)
+  const currentDir = directories[directories.length - 1]
+  if (!currentDir) return null
+  const abs = path.join(currentDir, innerRel)
+  return fs.existsSync(abs) ? abs : null
 }
 
 function rel(root, abs) {
@@ -466,6 +483,142 @@ function validatePlatformParity(root, errors, notes) {
   notes.push(`platform parity: ${rel(root, matched)}`)
 }
 
+function parseJsonEvidence(root, evidencePath, errors) {
+  try {
+    return JSON.parse(fs.readFileSync(path.join(root, evidencePath), 'utf8'))
+  } catch (error) {
+    errors.push(
+      `${evidencePath}: evidence JSON is not parseable: ${error instanceof Error ? error.message : String(error)}`,
+    )
+    return null
+  }
+}
+
+function surface20ReportIsDomOnly(report, errors, evidencePath) {
+  const cases = Array.isArray(report?.cases) ? report.cases : []
+  const byId = new Map(cases.map((item) => [item?.id, item]))
+  let ok = true
+  for (const id of EXPECTED_SURFACE20_DOM_CASE_IDS) {
+    const item = byId.get(id)
+    if (!item) {
+      errors.push(`${evidencePath}: missing ${id}`)
+      ok = false
+      continue
+    }
+    if (item.ok !== true) {
+      errors.push(`${evidencePath}: ${id} must pass`)
+      ok = false
+    }
+    if (item.inputMode !== 'dom') {
+      errors.push(`${evidencePath}: ${id} must use inputMode=dom, got ${item.inputMode || '(missing)'}`)
+      ok = false
+    }
+  }
+  const logCase = byId.get('surface20-tools-log-capability')
+  if (!logCase || logCase.ok !== true || logCase.inputMode !== 'log') {
+    errors.push(`${evidencePath}: surface20-tools-log-capability must pass with inputMode=log`)
+    ok = false
+  }
+  return ok
+}
+
+function validateSurface20DomEvidence(root, errors, notes) {
+  const abs = latestStageZFile(root, SURFACE20_LIVE_INNER_REL)
+  if (!abs) {
+    errors.push(`${AUDITS_REL}/*stage-z*/${SURFACE20_LIVE_INNER_REL}: missing current Surface20 live evidence`)
+    return
+  }
+  const relPath = rel(root, abs)
+  const text = fs.readFileSync(abs, 'utf8')
+  if (/store fallback/i.test(text)) {
+    errors.push(`${relPath}: Surface20 evidence must not rely on store fallback`)
+  }
+  const evidencePaths = existingEvidencePaths(root, text)
+    .filter((evidencePath) => /agent-panel-mimo-acceptance\.json$/.test(evidencePath))
+  if (evidencePaths.length === 0) {
+    errors.push(`${relPath}: missing Surface20 JSON report evidence`)
+    return
+  }
+  const candidateResults = evidencePaths.map((evidencePath) => {
+    const localErrors = []
+    const report = parseJsonEvidence(root, evidencePath, localErrors)
+    if (report) surface20ReportIsDomOnly(report, localErrors, evidencePath)
+    return { evidencePath, errors: localErrors }
+  })
+  const passing = candidateResults.find((candidate) => candidate.errors.length === 0)
+  if (passing) {
+    notes.push(`Surface20 DOM evidence: ${passing.evidencePath}`)
+    return
+  }
+  errors.push(`${relPath}: no DOM-only Surface20 report found`)
+  errors.push(...candidateResults[candidateResults.length - 1].errors)
+}
+
+function hasTaskCardButtonResumeProof(report) {
+  const scenarios = Array.isArray(report?.scenarios) ? report.scenarios : []
+  return scenarios.some((scenario) => {
+    const resume = scenario?.resume
+    if (!resume || resume.via !== 'task-card-button') return false
+    if (resume.success !== true || resume.effect?.ok !== true || resume.clicked !== true) return false
+    if (resume.targetMatched !== true) return false
+    const label = String(resume.label || '')
+    if (label !== '继续生成报告' && label !== '继续处理') return false
+    const scopeId = String(resume.scopeId || '')
+    const taskId = String(resume.taskId || '')
+    const childRunId = String(resume.childRunId || '')
+    if (!scopeId || !taskId || !childRunId) return false
+    const apiCallObserved = Array.isArray(resume.apiCalls)
+      && resume.apiCalls.some((call) => {
+        const arg = call?.args?.[0] || {}
+        return call?.key === 'resumeRun'
+          && call.result?.success === true
+          && arg.scopeId === scopeId
+          && arg.taskId === taskId
+          && arg.continuationIntent?.childRunId === childRunId
+      })
+    const taskActionObserved = Array.isArray(resume.taskActionEvents)
+      && resume.taskActionEvents.some((event) =>
+        event?.action === 'continue-child-run'
+        && event?.observed === 'resumeRun'
+        && event?.scopeId === scopeId
+        && event?.taskId === taskId
+        && event?.childRunId === childRunId
+        && event?.success === true)
+    return apiCallObserved || taskActionObserved
+  })
+}
+
+function validateTaskCardButtonEvidence(root, errors, notes) {
+  const abs = latestStageZFile(root, SURFACE09_LIVE_INNER_REL)
+  if (!abs) {
+    errors.push(`${AUDITS_REL}/*stage-z*/${SURFACE09_LIVE_INNER_REL}: missing current Surface09 live evidence`)
+    return
+  }
+  const relPath = rel(root, abs)
+  const currentStageZDirRel = rel(root, path.dirname(path.dirname(abs)))
+  const text = fs.readFileSync(abs, 'utf8')
+  const evidencePaths = existingEvidencePaths(root, text)
+    .filter((evidencePath) =>
+      evidencePath.startsWith(`${currentStageZDirRel}/`)
+      && /surface-09-skills-center-resumability-stage-z-cycles-.+\.json$/.test(evidencePath))
+  if (evidencePaths.length === 0) {
+    errors.push(`${relPath}: missing current Stage Z Surface09 resumability JSON report evidence`)
+    return
+  }
+  const passing = evidencePaths.find((evidencePath) => {
+    const localErrors = []
+    const report = parseJsonEvidence(root, evidencePath, localErrors)
+    return report && hasTaskCardButtonResumeProof(report)
+  })
+  if (passing) {
+    notes.push(`task-card button resume evidence: ${passing}`)
+    return
+  }
+  errors.push(
+    `${relPath}: Surface09 evidence must prove resume was triggered by the visible task-card button`,
+  )
+}
+
 function validateLiveSurfaceEvidence(root, errors, notes) {
   const liveResult = checkReleaseLiveEvidence({ root })
   if (!liveResult.ok) {
@@ -495,6 +648,8 @@ function main({ root = ROOT } = {}) {
   validateSimulatedHumanAcceptance(root, errors, notes)
   validateBranchProtection(root, errors, notes)
   validatePlatformParity(root, errors, notes)
+  validateSurface20DomEvidence(root, errors, notes)
+  validateTaskCardButtonEvidence(root, errors, notes)
   validateLiveSurfaceEvidence(root, errors, notes)
 
   return { ok: errors.length === 0, errors, notes }

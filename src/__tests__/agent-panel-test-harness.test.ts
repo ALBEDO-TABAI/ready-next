@@ -286,12 +286,13 @@ describe('agent panel test harness', () => {
       }
     }
     let domClickCount = 0
+    let onDomClick = () => {
+      domClickCount += 1
+    }
     const fakeTextarea = new FakeTextarea()
     const fakeButton = {
       disabled: false,
-      click: () => {
-        domClickCount += 1
-      },
+      click: () => onDomClick(),
     }
     const testWindow = {
       location: { search: '' },
@@ -355,6 +356,18 @@ describe('agent panel test harness', () => {
     assert.equal(domClickCount, 1)
     assert.equal(domFallback.inputMode, 'store')
     assert.equal(domFallback.sendResult?.success, true)
+
+    onDomClick = () => {
+      domClickCount += 1
+      const previous = state
+      state = { ...state, pendingSendCount: 1 }
+      notify(state, previous)
+    }
+    const domStarted = await harness.submit('DOM 已启动提交', { mode: 'dom', waitForIdle: false })
+    assert.equal(domStarted.inputMode, 'dom')
+    assert.equal(domStarted.sendResult, null)
+    assert.ok(domStarted.diagnostics.some((item) => item.id === 'send_returned_without_user_message'))
+    state = { ...state, pendingSendCount: 0 }
 
     const missingTool = await harness.submit('模拟 VEA 输入', {
       mode: 'store',

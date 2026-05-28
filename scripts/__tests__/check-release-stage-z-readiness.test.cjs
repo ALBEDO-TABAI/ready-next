@@ -370,6 +370,72 @@ function writePassingFixture(root) {
       ...EXPECTED_AGENT_ACCEPTANCE_IDS.map((id) => `| ${id} | pass | ${zDir}/agent-acceptance/${id}.md |`),
     ].join('\n'),
   )
+  write(
+    root,
+    path.join(zDir, 'evidence/agent-panel-surface20-live-dom-only/agent-panel-mimo-acceptance.json'),
+    `${JSON.stringify({
+      cases: [
+        ...[
+          'surface20-session-a-pending-card',
+          'surface20-session-b-pending-card',
+          'surface20-two-session-pending-isolation',
+          'surface20-answer-active-session-resolves-card',
+          'surface20-background-session-card-survives-and-resolves',
+        ].map((id) => ({ id, ok: true, inputMode: 'dom' })),
+        { id: 'surface20-tools-log-capability', ok: true, inputMode: 'log' },
+      ],
+    }, null, 2)}\n`,
+  )
+  write(
+    root,
+    path.join(zDir, 'live/surface-20-agent-interaction-routing.md'),
+    [
+      '# Surface20',
+      '',
+      `Report: ${zDir}/evidence/agent-panel-surface20-live-dom-only/agent-panel-mimo-acceptance.json`,
+      'status: pass',
+    ].join('\n'),
+  )
+  write(
+    root,
+    path.join(zDir, 'evidence/surface-09-skills-center-resumability-stage-z-cycles-dom-button.json'),
+    `${JSON.stringify({
+      scenarios: [{
+        name: 'clean',
+        ok: true,
+        resume: {
+          via: 'task-card-button',
+          scopeId: 'conv-a',
+          taskId: 'skill-child:vchild01',
+          childRunId: 'vchild01',
+          label: '继续生成报告',
+          success: true,
+          clicked: true,
+          targetMatched: true,
+          effect: { ok: true, expectation: 'api:resumeRun|message:continuation-started|state:task-changed' },
+          apiCalls: [],
+          taskActionEvents: [{
+            action: 'continue-child-run',
+            observed: 'resumeRun',
+            scopeId: 'conv-a',
+            taskId: 'skill-child:vchild01',
+            childRunId: 'vchild01',
+            success: true,
+          }],
+        },
+      }],
+    }, null, 2)}\n`,
+  )
+  write(
+    root,
+    path.join(zDir, 'live/surface-09-skills-center-resumability.md'),
+    [
+      '# Surface09',
+      '',
+      `Report: ${zDir}/evidence/surface-09-skills-center-resumability-stage-z-cycles-dom-button.json`,
+      'status: pass',
+    ].join('\n'),
+  )
   for (let id = 1; id <= 20; id += 1) {
     writePassingDogfoodSurface(root, dogfoodDir, id, gitInfo)
   }
@@ -509,6 +575,138 @@ test('rejects deep-gates conditions that cannot run on push', () => {
 
   assert.equal(result.ok, false)
   assert.match(result.errors.join('\n'), /deep-gates if condition must allow push events/)
+})
+
+test('rejects Surface20 evidence that falls back to store input', () => {
+  const root = makeRoot()
+  writePassingFixture(root)
+  const zDir = 'docs/superpowers/audits/2026-05-24-stage-z-closeout'
+  write(
+    root,
+    path.join(zDir, 'evidence/agent-panel-surface20-live-dom-only/agent-panel-mimo-acceptance.json'),
+    `${JSON.stringify({
+      cases: [
+        { id: 'surface20-session-a-pending-card', ok: true, inputMode: 'dom' },
+        { id: 'surface20-session-b-pending-card', ok: true, inputMode: 'store' },
+        { id: 'surface20-two-session-pending-isolation', ok: true, inputMode: 'dom' },
+        { id: 'surface20-answer-active-session-resolves-card', ok: true, inputMode: 'dom' },
+        { id: 'surface20-background-session-card-survives-and-resolves', ok: true, inputMode: 'dom' },
+        { id: 'surface20-tools-log-capability', ok: true, inputMode: 'log' },
+      ],
+    }, null, 2)}\n`,
+  )
+  write(
+    root,
+    path.join(zDir, 'live/surface-20-agent-interaction-routing.md'),
+    [
+      '# Surface20',
+      '',
+      `Report: ${zDir}/evidence/agent-panel-surface20-live-dom-only/agent-panel-mimo-acceptance.json`,
+      'Caveat: store fallback was used.',
+    ].join('\n'),
+  )
+
+  const result = main({ root })
+
+  assert.equal(result.ok, false)
+  assert.match(result.errors.join('\n'), /must not rely on store fallback/)
+  assert.match(result.errors.join('\n'), /surface20-session-b-pending-card must use inputMode=dom/)
+})
+
+test('rejects Surface09 resumability evidence without a task-card button resume proof', () => {
+  const root = makeRoot()
+  writePassingFixture(root)
+  const zDir = 'docs/superpowers/audits/2026-05-24-stage-z-closeout'
+  write(
+    root,
+    path.join(zDir, 'evidence/surface-09-skills-center-resumability-stage-z-cycles-dom-button.json'),
+    `${JSON.stringify({
+      scenarios: [{
+        name: 'clean',
+        ok: true,
+        resume: {
+          via: 'task-card-button',
+          scopeId: 'conv-a',
+          taskId: 'skill-child:vchild01',
+          childRunId: 'vchild01',
+          label: '继续处理',
+          clicked: true,
+          targetMatched: true,
+          success: true,
+          effect: { ok: true },
+          apiCalls: [{
+            key: 'resumeRun',
+            args: [{
+              scopeId: 'conv-a',
+              taskId: 'skill-child:vchild01',
+              continuationIntent: { childRunId: 'vchild01' },
+            }],
+            result: { success: false, error: 'not resumable' },
+          }],
+          taskActionEvents: [],
+          continuationMessageObserved: true,
+        },
+      }],
+    }, null, 2)}\n`,
+  )
+
+  const result = main({ root })
+
+  assert.equal(result.ok, false)
+  assert.match(result.errors.join('\n'), /must prove resume was triggered by the visible task-card button/)
+})
+
+test('rejects Surface09 proof that is referenced from the historical Stage Y bundle', () => {
+  const root = makeRoot()
+  writePassingFixture(root)
+  const zDir = 'docs/superpowers/audits/2026-05-24-stage-z-closeout'
+  const historicalReport =
+    'docs/superpowers/audits/2026-05-23-stage-y-closeout/dogfood/evidence/surface-09-skills-center-resumability-stage-z-cycles-historical.json'
+  write(
+    root,
+    historicalReport,
+    `${JSON.stringify({
+      scenarios: [{
+        name: 'clean',
+        ok: true,
+        resume: {
+          via: 'task-card-button',
+          scopeId: 'conv-a',
+          taskId: 'skill-child:vchild01',
+          childRunId: 'vchild01',
+          label: '继续处理',
+          success: true,
+          clicked: true,
+          targetMatched: true,
+          effect: { ok: true },
+          apiCalls: [],
+          taskActionEvents: [{
+            action: 'continue-child-run',
+            observed: 'resumeRun',
+            scopeId: 'conv-a',
+            taskId: 'skill-child:vchild01',
+            childRunId: 'vchild01',
+            success: true,
+          }],
+        },
+      }],
+    }, null, 2)}\n`,
+  )
+  write(
+    root,
+    path.join(zDir, 'live/surface-09-skills-center-resumability.md'),
+    [
+      '# Surface09',
+      '',
+      `Report: ${historicalReport}`,
+      'status: pass',
+    ].join('\n'),
+  )
+
+  const result = main({ root })
+
+  assert.equal(result.ok, false)
+  assert.match(result.errors.join('\n'), /current Stage Z Surface09 resumability JSON/)
 })
 
 test('accepts always-on deep-gates condition', () => {

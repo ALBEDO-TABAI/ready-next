@@ -10,7 +10,7 @@ import {
 } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 
-const DEFAULT_OUT_DIR = 'docs/superpowers/audits/2026-05-23-stage-y-closeout/dogfood/evidence'
+const DEFAULT_OUT_DIR = 'docs/superpowers/audits/2026-05-24-stage-z-closeout/evidence/surface-09-task-card-resume-strict-final'
 const DEFAULT_USER_DATA_DIR = '/private/tmp/ready-stage-z-surface09-resumability-userdata'
 const DEFAULT_WORKSPACE_ROOT = '/tmp/ready-stage-z-surface09-resumability/workspaces/current'
 
@@ -276,6 +276,7 @@ async function resumeProbeRun(restart) {
       (${pageResumeProbeRun.toString()})(${JSON.stringify({
         scopeId: restart.visibleTaskCard.scopeId,
         taskId: restart.visibleTaskCard.taskId,
+        childRunId: restart.visibleTaskCard.continuation?.childRunId || restart.matchingChildRun?.childRunId || null,
         waitMs: options.resumeWaitMs,
       })})
     `)
@@ -707,31 +708,174 @@ function pageResumeProbeRun(input) {
   if (!h) throw new Error('missing __READY_AGENT_TEST__')
   return (async () => {
     const before = await h.snapshot()
-    const response = await window.electronAPI.agent.resumeRun({
-      scopeId: input.scopeId,
-      taskId: input.taskId,
-      responseText: '继续当前任务。',
-    })
-    await new Promise((resolve) => setTimeout(resolve, input.waitMs))
-    const after = await h.snapshot()
-    return {
-      success: response?.success === true,
-      response,
-      before: {
-        currentScopeId: before.currentScopeId,
-        runtime: before.runtime,
-        taskCards: before.taskCards.slice(0, 6),
-      },
-      after: {
-        currentScopeId: after.currentScopeId,
-        runtime: after.runtime,
-        taskCards: after.taskCards.slice(0, 6),
-        toolTrace: after.toolTrace.slice(-8),
-        messages: after.messages.slice(-4).map((message) => ({
-          type: message.type,
-          content: String(message.content || '').slice(0, 800),
-        })),
-      },
+    const apiCalls = []
+    const instrumentation = []
+    const restoreFns = []
+    const previousTaskActionEvents = window.__READY_AGENT_TASK_ACTION_EVENTS__
+    window.__READY_AGENT_TASK_ACTION_EVENTS__ = []
+    const wrap = (owner, key) => {
+      if (!owner || typeof owner[key] !== 'function') return
+      const original = owner[key].bind(owner)
+      owner[key] = (...args) => {
+        const entry = { key, args: args.map((arg) => {
+          try { return JSON.parse(JSON.stringify(arg)) } catch { return String(arg) }
+        }) }
+        apiCalls.push(entry)
+        try {
+          const result = original(...args)
+          if (result && typeof result.then === 'function') {
+            return result.then(
+              (value) => {
+                entry.result = cloneForReport(value)
+                return value
+              },
+              (error) => {
+                entry.error = String(error?.message || error)
+                throw error
+              },
+            )
+          }
+          entry.result = cloneForReport(result)
+          return result
+        } catch (error) {
+          entry.error = String(error?.message || error)
+          throw error
+        }
+      }
+      instrumentation.push({ key, wrapped: true })
+      restoreFns.push(() => { owner[key] = original })
+    }
+    wrap(window.electronAPI?.agent, 'resumeRun')
+
+    try {
+      let targetCard = findTargetTaskCard(input)
+      let button = targetCard ? findActionButton(targetCard, ['继续生成报告', '继续处理']) : null
+      if (targetCard && !button) {
+        targetCard.querySelector('button')?.click()
+        await new Promise((resolve) => setTimeout(resolve, 250))
+        targetCard = findTargetTaskCard(input)
+        button = targetCard ? findActionButton(targetCard, ['继续生成报告', '继续处理']) : null
+      }
+      const visibleButtonsBeforeClick = [...document.querySelectorAll('button')]
+        .map((candidate) => candidate.innerText.trim())
+        .filter(Boolean)
+      let clicked = false
+      let label = null
+      if (button) {
+        label = button.innerText.trim()
+        button.click()
+        clicked = true
+      }
+      await new Promise((resolve) => setTimeout(resolve, input.waitMs))
+      const taskActionEvents = Array.isArray(window.__READY_AGENT_TASK_ACTION_EVENTS__)
+        ? [...window.__READY_AGENT_TASK_ACTION_EVENTS__]
+        : []
+      const after = await h.snapshot()
+      const taskStateChanged = JSON.stringify(before.taskCards || []) !== JSON.stringify(after.taskCards || [])
+        || before.runtime?.streamingRequestId !== after.runtime?.streamingRequestId
+        || before.runtime?.toolTraceStatus !== after.runtime?.toolTraceStatus
+        || before.runtime?.activeRun?.updatedAt !== after.runtime?.activeRun?.updatedAt
+      const continuationMessageObserved = after.messages.some((message) =>
+        /正在继续技能任务|已继续技能任务|继续后台任务/.test(String(message.content || '')))
+      const resumeCallSucceeded = observedSuccessfulResumeRun(apiCalls, input)
+      const taskActionResumeObserved = observedTaskActionResume(taskActionEvents, input)
+      const effect = {
+        ok: Boolean(clicked && targetCard && (resumeCallSucceeded || taskActionResumeObserved)),
+        expectation: 'targeted-task-card-button+resumeRun',
+        taskStateChanged,
+      }
+      return {
+        success: effect.ok,
+        via: 'task-card-button',
+        scopeId: input.scopeId,
+        taskId: input.taskId,
+        childRunId: input.childRunId,
+        label,
+        clicked,
+        targetMatched: Boolean(targetCard),
+        apiCalls,
+        taskActionEvents,
+        instrumentation,
+        effect,
+        continuationMessageObserved,
+        visibleButtonsBeforeClick,
+        targetCardText: targetCard?.innerText?.slice(0, 1200) || null,
+        before: {
+          currentScopeId: before.currentScopeId,
+          runtime: before.runtime,
+          taskCards: before.taskCards.slice(0, 6),
+        },
+        after: {
+          currentScopeId: after.currentScopeId,
+          runtime: after.runtime,
+          taskCards: after.taskCards.slice(0, 6),
+          toolTrace: after.toolTrace.slice(-8),
+          messages: after.messages.slice(-4).map((message) => ({
+            type: message.type,
+            content: String(message.content || '').slice(0, 800),
+          })),
+        },
+      }
+    } finally {
+      restoreFns.reverse().forEach((restore) => restore())
+      if (previousTaskActionEvents === undefined) {
+        delete window.__READY_AGENT_TASK_ACTION_EVENTS__
+      } else {
+        window.__READY_AGENT_TASK_ACTION_EVENTS__ = previousTaskActionEvents
+      }
     }
   })()
+
+  function cssAttrValue(value) {
+    return String(value || '').replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+  }
+
+  function findTargetTaskCard(target) {
+    const selectors = []
+    if (target.scopeId && target.taskId) {
+      selectors.push(
+        `[data-ready-task-card="true"][data-ready-task-scope-id="${cssAttrValue(target.scopeId)}"][data-ready-task-id="${cssAttrValue(target.taskId)}"]`,
+      )
+    }
+    if (target.scopeId && target.childRunId) {
+      selectors.push(
+        `[data-ready-task-card="true"][data-ready-task-scope-id="${cssAttrValue(target.scopeId)}"][data-ready-task-child-run-id="${cssAttrValue(target.childRunId)}"]`,
+      )
+    }
+    for (const selector of selectors) {
+      const card = document.querySelector(selector)
+      if (card) return card
+    }
+    return null
+  }
+
+  function findActionButton(card, labels) {
+    return [...card.querySelectorAll('button[data-ready-task-action="continue-child-run"]')]
+      .find((candidate) => labels.includes(candidate.innerText.trim())) || null
+  }
+
+  function cloneForReport(value) {
+    try { return JSON.parse(JSON.stringify(value)) } catch { return String(value) }
+  }
+
+  function observedSuccessfulResumeRun(calls, target) {
+    return calls.some((call) => {
+      if (call?.key !== 'resumeRun') return false
+      const arg = call.args?.[0] || {}
+      return call.result?.success === true
+        && arg.scopeId === target.scopeId
+        && (!target.taskId || arg.taskId === target.taskId)
+        && (!target.childRunId || arg.continuationIntent?.childRunId === target.childRunId)
+    })
+  }
+
+  function observedTaskActionResume(events, target) {
+    return events.some((event) =>
+      event?.action === 'continue-child-run'
+      && event?.observed === 'resumeRun'
+      && event?.scopeId === target.scopeId
+      && (!target.taskId || event?.taskId === target.taskId)
+      && (!target.childRunId || event?.childRunId === target.childRunId)
+      && event?.success === true)
+  }
 }

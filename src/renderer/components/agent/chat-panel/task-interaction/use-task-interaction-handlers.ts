@@ -29,6 +29,30 @@ type RunForContinuation = Pick<
   'taskId' | 'taskContinuation' | 'blockedReason'
 >
 
+type ReadyTaskActionTestEvent = {
+  action: string
+  observed: string
+  scopeId: string
+  taskId: string | null
+  childRunId?: string
+  success: boolean
+  at: string
+}
+
+type ReadyTaskActionTestWindow = Window & typeof globalThis & {
+  __READY_AGENT_TASK_ACTION_EVENTS__?: ReadyTaskActionTestEvent[]
+}
+
+function recordTaskActionTestEvent(event: Omit<ReadyTaskActionTestEvent, 'at'>) {
+  if (typeof window === 'undefined') return
+  const target = window as ReadyTaskActionTestWindow
+  if (!Array.isArray(target.__READY_AGENT_TASK_ACTION_EVENTS__)) return
+  target.__READY_AGENT_TASK_ACTION_EVENTS__.push({
+    ...event,
+    at: new Date().toISOString(),
+  })
+}
+
 export interface TaskInteractionHandlers {
   patchScopeRun: (
     scopeId: string,
@@ -255,10 +279,18 @@ export function useTaskInteractionHandlers(
         blockerType: 'background_running',
       },
     }
-    await window.electronAPI.agent.resumeRun({
+    const resumeResult = await window.electronAPI.agent.resumeRun({
       scopeId,
       taskId: continuationRun.taskId || undefined,
       continuationIntent: buildRunContinuationIntent(continuationRun),
+    })
+    recordTaskActionTestEvent({
+      action: 'continue-child-run',
+      observed: 'resumeRun',
+      scopeId,
+      taskId: continuationRun.taskId || null,
+      childRunId,
+      success: resumeResult?.success === true,
     })
     void refreshPersistedScopeRuns()
     void refreshPersistedTaskProjections()

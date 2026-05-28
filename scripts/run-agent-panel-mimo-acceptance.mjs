@@ -588,16 +588,24 @@ async function pageRunner(input) {
       const submitResult = await harness.submit(text, {
         mode: 'dom',
         waitForIdle: false,
-        allowStoreFallback: true,
+        allowStoreFallback: false,
         awaitStoreSend: false,
       })
       const pending = await waitForPendingAskCard(360000)
       const diagnostics = submitResult.diagnostics.filter((item) =>
         item.id !== 'send_returned_without_run_evidence'
         && item.id !== 'send_coalescing_pending'
-        && item.id !== 'send_returned_without_user_message'
         && item.id !== 'tool_call_without_result'
         && item.id !== 'non_done_terminal_reason')
+      if (submitResult.inputMode !== 'dom') {
+        diagnostics.push({
+          id: 'surface20_requires_dom_input',
+          severity: 'error',
+          layer: 'renderer',
+          message: `Surface20 必须通过真实 Agent 输入面板提交，实际输入模式为 ${submitResult.inputMode || 'unknown'}。`,
+          evidence: { inputMode: submitResult.inputMode },
+        })
+      }
       if (!pending.pendingCard) {
         diagnostics.push({
           id: 'pending_ask_user_card_missing',
@@ -690,6 +698,31 @@ async function pageRunner(input) {
     if (!secondScopePrepared) {
       await harness.newSession()
       await new Promise((resolveDelay) => setTimeout(resolveDelay, 500))
+    }
+    const preparedSessionB = harness.sessionSummary().activeSessionId || secondSession.id
+    if (preparedSessionB) {
+      const activationB = await harness.activateSession(preparedSessionB)
+      if (!activationB.ok) {
+        cases.push({
+          id: 'surface20-activate-second-visible-session',
+          ok: false,
+          inputMode: 'dom',
+          observedToolNames: [],
+          diagnostics: [{
+            id: 'second_session_activation_failed',
+            severity: 'error',
+            layer: 'renderer',
+            message: `提交第二条请求前无法激活第二个可见会话：${activationB.error || 'unknown'}`,
+            evidence: { summary: activationB.summary },
+          }],
+          before: null,
+          after: null,
+          assistantMessages: [],
+          events: harness.events(),
+          extra: {},
+        })
+        return { ok: false, config, cases, events: harness.events() }
+      }
     }
 
     const second = await runPendingAskCase({
