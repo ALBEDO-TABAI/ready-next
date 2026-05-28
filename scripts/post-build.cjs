@@ -2,6 +2,11 @@ const { execSync } = require('child_process');
 const path = require('path');
 
 exports.default = async function(context) {
+  if (process.platform !== 'darwin') {
+    console.log('Skipping macOS ad-hoc signing on non-darwin platform');
+    return;
+  }
+
   const appPath = path.join(context.appOutDir, `${context.packager.appInfo.productFilename}.app`);
 
   console.log('🔐 开始 ad-hoc 签名...');

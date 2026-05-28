@@ -1,0 +1,50 @@
+name: Ready Windows packaged smoke
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - codex/readyguy
+
+concurrency:
+  group: ready-windows-packaged-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows-packaged-smoke:
+    name: windows-packaged-smoke
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.19.1'
+          cache: 'npm'
+
+      - name: Setup Python for native rebuild
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build renderer and main process
+        run: npm run build
+
+      - name: Package Windows app directory
+        run: npx electron-builder --config electron-builder.yml --win --dir
+
+      - name: Run packaged smoke
+        run: node scripts/run-packaged-smoke.cjs --platform win32 --port 9335 --timeout 90000 --out test-results/windows-packaged-smoke.json
+
+      - name: Upload smoke report
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-packaged-smoke
+          path: test-results/windows-packaged-smoke.json
