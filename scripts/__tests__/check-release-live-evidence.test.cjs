@@ -38,8 +38,29 @@ test('accepts release-ready pass records with required Bai spotcheck fields', ()
   const result = evaluateLiveEvidence(records)
 
   assert.equal(result.ok, true)
-  assert.equal(result.passCount, 20)
+  assert.equal(result.passCount, 19)
+  assert.equal(result.total, 19)
+  assert.deepEqual(result.outOfScopeSurfaceIds, [11])
   assert.deepEqual(result.statusCounts, { pass: 20 })
+})
+
+test('allows out-of-scope remote surface 11 to remain deferred', () => {
+  const records = Array.from({ length: 20 }, (_, i) =>
+	    record(`surface-${String(i + 1).padStart(2, '0')}-x.md`, {
+	      surface_id: i + 1,
+	      status: i === 10 ? 'deferred-with-owner' : 'pass',
+	      operator_class: 'agent-only',
+      deferred_owner: i === 10 ? '白' : undefined,
+    }),
+  )
+
+  const result = evaluateLiveEvidence(records)
+
+  assert.equal(result.ok, true)
+  assert.equal(result.passCount, 19)
+  assert.equal(result.total, 19)
+  assert.deepEqual(result.outOfScopeSurfaceIds, [11])
+  assert.deepEqual(result.statusCounts, { pass: 19, 'deferred-with-owner': 1 })
 })
 
 test('rejects deferred records for release readiness', () => {
@@ -55,7 +76,8 @@ test('rejects deferred records for release readiness', () => {
   const result = evaluateLiveEvidence(records)
 
   assert.equal(result.ok, false)
-  assert.equal(result.passCount, 19)
+  assert.equal(result.passCount, 18)
+  assert.equal(result.total, 19)
   assert.match(
     result.errors.join('\n'),
     /surface-01-x\.md: release requires status=pass, got deferred-with-owner owner=白/,
@@ -92,7 +114,8 @@ test('rejects duplicate or missing surface id coverage even when 20 records pass
   const result = evaluateLiveEvidence(records)
 
   assert.equal(result.ok, false)
-  assert.equal(result.passCount, 20)
+  assert.equal(result.passCount, 19)
+  assert.equal(result.total, 19)
   assert.match(result.errors.join('\n'), /filename: missing surface id\(s\) 20/)
   assert.match(result.errors.join('\n'), /filename: duplicate surface id\(s\) 1/)
   assert.match(
@@ -125,6 +148,6 @@ test('main requires full Stage Y evidence lint, not only pass status', () => {
   const result = main({ root })
 
   assert.equal(result.ok, false)
-  assert.equal(result.passCount, 20)
+  assert.equal(result.passCount, 19)
   assert.match(result.errors.join('\n'), /frontmatter missing key "surface"/)
 })

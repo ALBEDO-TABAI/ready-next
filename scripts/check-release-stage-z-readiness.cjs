@@ -465,12 +465,16 @@ function validateLiveSurfaceEvidence(root, errors, notes) {
   const liveResult = checkReleaseLiveEvidence({ root })
   if (!liveResult.ok) {
     errors.push(
-      `release live evidence is not complete: ${liveResult.passCount}/${liveResult.total} surfaces pass`,
+      `release live evidence is not complete: ${liveResult.passCount}/${liveResult.total} in-scope surfaces pass`,
     )
     errors.push(...liveResult.errors)
     return
   }
-  notes.push(`release live evidence: ${liveResult.passCount}/${liveResult.total} surfaces pass`)
+  const outOfScope =
+    liveResult.outOfScopeSurfaceIds?.length
+      ? `; out-of-scope remote surfaces: ${liveResult.outOfScopeSurfaceIds.join(', ')}`
+      : ''
+  notes.push(`release live evidence: ${liveResult.passCount}/${liveResult.total} in-scope surfaces pass${outOfScope}`)
 }
 
 function main({ root = ROOT } = {}) {

@@ -811,28 +811,28 @@ test('rejects platform parity when macOS and Windows point to the same proof art
   assert.match(result.errors.join('\n'), /missing pass evidence for macOS and Windows packaged smokes/)
 })
 
-test('rejects deferred release live evidence even when Stage Z documents are otherwise complete', () => {
+test('allows deferred out-of-scope remote live evidence when Stage Z documents are otherwise complete', () => {
   const root = makeRoot()
   writePassingFixture(root)
+  const surface11Rel =
+    'docs/superpowers/audits/2026-05-23-stage-y-closeout/dogfood/surface-11-test.md'
   write(
     root,
-    'docs/superpowers/audits/2026-05-23-stage-y-closeout/dogfood/surface-11-test.md',
-    [
-      '---',
-      'surface: Surface 11',
-      'surface_id: 11',
-      'status: deferred-with-owner',
-      'deferred_owner: 白',
-      'operator_class: agent-only',
-      '---',
-      '',
-      '# Surface 11',
-    ].join('\n'),
+    surface11Rel,
+    fs
+      .readFileSync(path.join(root, surface11Rel), 'utf8')
+      .replace(
+        'status: pass',
+        [
+          'status: deferred-with-owner',
+          'deferred_owner: 白',
+          'deferred_reason: Remote channel surfaces are out of scope for this release goal.',
+        ].join('\n'),
+      ),
   )
 
   const result = main({ root })
 
-  assert.equal(result.ok, false)
-  assert.match(result.errors.join('\n'), /release live evidence is not complete: 19\/20 surfaces pass/)
-  assert.match(result.errors.join('\n'), /surface-11-test\.md: release requires status=pass/)
+  assert.equal(result.ok, true)
+  assert.match(result.notes.join('\n'), /release live evidence: 19\/19 in-scope surfaces pass; out-of-scope remote surfaces: 11/)
 })

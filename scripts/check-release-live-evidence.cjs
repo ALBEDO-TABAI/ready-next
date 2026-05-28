@@ -4,9 +4,9 @@
  *
  * Stage Y's dogfood gate accepts `deferred-with-owner` records because its
  * job is to prove the closeout bundle is complete. This gate is stricter:
- * a release candidate must have live pass evidence for every Stage Y dogfood
- * surface, so deferred records are a red light instead of an acceptable
- * Stage Y handoff state.
+ * a release candidate must have live pass evidence for every in-scope Stage Y
+ * dogfood surface, so deferred records are a red light except for product
+ * surfaces deliberately excluded from the current release goal.
  */
 'use strict'
 
@@ -27,6 +27,7 @@ const EXPECTED_SURFACE_IDS = Array.from(
   { length: EXPECTED_SURFACE_COUNT },
   (_, i) => i + 1,
 )
+const OUT_OF_SCOPE_REMOTE_SURFACE_IDS = new Set([11])
 
 function listSurfaceFiles(root = ROOT) {
   const dirAbs = path.join(root, DOGFOOD_DIR_REL)
@@ -114,6 +115,7 @@ function evaluateLiveEvidence(records) {
   const errors = []
   const statusCounts = new Map()
   let passCount = 0
+  const outOfScopeSurfaceIds = new Set()
 
   for (const { fileName, fm } of records) {
     if (!fm) {
@@ -121,8 +123,15 @@ function evaluateLiveEvidence(records) {
       continue
     }
 
+    const surfaceId = Number.isInteger(Number(fm.surface_id))
+      ? Number(fm.surface_id)
+      : surfaceIdFromFileName(fileName)
     const status = fm.status || '(missing)'
     statusCounts.set(status, (statusCounts.get(status) || 0) + 1)
+    if (OUT_OF_SCOPE_REMOTE_SURFACE_IDS.has(surfaceId)) {
+      outOfScopeSurfaceIds.add(surfaceId)
+      continue
+    }
     if (status === 'pass') {
       passCount += 1
     } else {
@@ -155,7 +164,8 @@ function evaluateLiveEvidence(records) {
     ok: errors.length === 0,
     errors,
     passCount,
-    total: records.length,
+    total: records.length - outOfScopeSurfaceIds.size,
+    outOfScopeSurfaceIds: Array.from(outOfScopeSurfaceIds).sort((a, b) => a - b),
     statusCounts: Object.fromEntries(statusCounts),
   }
 }
@@ -188,12 +198,18 @@ if (require.main === module) {
 
   if (result.ok) {
     console.log('[check-release-live-evidence] OK')
-    console.log(`  live pass surfaces: ${result.passCount}/${result.total}`)
+    console.log(`  in-scope live pass surfaces: ${result.passCount}/${result.total}`)
+    if (result.outOfScopeSurfaceIds?.length) {
+      console.log(`  out-of-scope remote surfaces: ${result.outOfScopeSurfaceIds.join(', ')}`)
+    }
     process.exit(0)
   }
 
   console.error('[check-release-live-evidence] FAIL:')
-  console.error(`  live pass surfaces: ${result.passCount}/${result.total}`)
+  console.error(`  in-scope live pass surfaces: ${result.passCount}/${result.total}`)
+  if (result.outOfScopeSurfaceIds?.length) {
+    console.error(`  out-of-scope remote surfaces: ${result.outOfScopeSurfaceIds.join(', ')}`)
+  }
   if (statusSummary) console.error(`  status summary: ${statusSummary}`)
   for (const e of result.errors.slice(0, 30)) console.error('  - ' + e)
   if (result.errors.length > 30) {
@@ -205,6 +221,7 @@ if (require.main === module) {
 module.exports = {
   DOGFOOD_DIR_REL,
   EXPECTED_SURFACE_COUNT,
+  OUT_OF_SCOPE_REMOTE_SURFACE_IDS,
   evaluateLiveEvidence,
   listSurfaceFiles,
   main,
