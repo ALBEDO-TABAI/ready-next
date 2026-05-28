@@ -12,8 +12,9 @@ test('ToolRuntime wraps legacy string results into structured outputs while pres
   const runtime = new ToolRuntime({ log: () => {} })
   const starts: string[] = []
   const finishes: string[] = []
+  const releaseById = new Map<string, () => void>()
 
-  const result = await runtime.executeBatch({
+  const resultPromise = runtime.executeBatch({
     toolCalls: [
       { id: '1', name: 'memory_search', input: { q: 'first' } },
       { id: '2', name: 'document_list_widgets', input: { tabId: 'tab-1' } },
@@ -21,17 +22,25 @@ test('ToolRuntime wraps legacy string results into structured outputs while pres
     ],
     executeTool: async (toolCall) => {
       starts.push(toolCall.id)
-      // Use larger gaps to keep the ordering deterministic under
-      // concurrency/scheduler jitter (the original 30/10/5ms gaps were
-      // flaky on busy CI runs and during full-suite runs where the
-      // event loop is contended).
-      await new Promise((resolve) => setTimeout(resolve, toolCall.id === '1' ? 200 : toolCall.id === '2' ? 80 : 20))
+      await new Promise<void>((resolve) => {
+        releaseById.set(toolCall.id, resolve)
+      })
       finishes.push(toolCall.id)
       return `${toolCall.name}:ok`
     },
   })
 
+  for (let attempt = 0; attempt < 100 && starts.length < 3; attempt += 1) {
+    await new Promise((resolve) => setImmediate(resolve))
+  }
+
   assert.deepEqual(starts, ['1', '2', '3'])
+  releaseById.get('3')?.()
+  releaseById.get('2')?.()
+  releaseById.get('1')?.()
+
+  const result = await resultPromise
+
   assert.equal(finishes.length, 3)
   assert.equal(finishes[2], '1')
   assert.deepEqual(new Set(finishes), new Set(['1', '2', '3']))
