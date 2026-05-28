@@ -223,6 +223,110 @@ function normalizeRruleString(rawRule: string, eventStartUnix: number): string {
   return `DTSTART:${formatUtcRruleDate(eventStartUnix)}\n${body}`
 }
 
+function parseSimpleRruleBody(rawRule: string): {
+  freq: 'DAILY' | 'WEEKLY'
+  interval: number
+  count: number | null
+  until: number | null
+} | null {
+  const trimmed = rawRule.trim()
+  if (!trimmed || /(^|\n)DTSTART/i.test(trimmed)) return null
+
+  const lines = trimmed
+    .split(/\r?\n/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0)
+  if (lines.length !== 1) return null
+
+  const line = lines[0]
+  if (!line) return null
+
+  const body = line.replace(/^RRULE:/i, '')
+  const fields = new Map<string, string>()
+  for (const token of body.split(';')) {
+    const parts = token.split('=')
+    if (parts.length !== 2) return null
+    const [rawKey, rawValue] = parts
+    const key = rawKey?.trim().toUpperCase()
+    const value = rawValue?.trim()
+    if (!key || value == null || value.length === 0 || fields.has(key)) return null
+    fields.set(key, value)
+  }
+
+  for (const key of fields.keys()) {
+    if (key !== 'FREQ' && key !== 'INTERVAL' && key !== 'COUNT' && key !== 'UNTIL') return null
+  }
+
+  const freq = fields.get('FREQ')?.toUpperCase()
+  if (freq !== 'DAILY' && freq !== 'WEEKLY') return null
+
+  const interval = fields.has('INTERVAL') ? Number(fields.get('INTERVAL')) : 1
+  if (!Number.isSafeInteger(interval) || interval < 1) return null
+
+  let count: number | null = null
+  if (fields.has('COUNT')) {
+    count = Number(fields.get('COUNT'))
+    if (!Number.isSafeInteger(count) || count < 0) return null
+  }
+
+  let until: number | null = null
+  const untilValue = fields.get('UNTIL')
+  if (untilValue) {
+    const match = /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/i.exec(untilValue)
+    if (!match) return null
+    const year = Number(match[1])
+    const month = Number(match[2])
+    const day = Number(match[3])
+    const hour = Number(match[4])
+    const minute = Number(match[5])
+    const second = Number(match[6])
+    const untilMs = Date.UTC(year, month - 1, day, hour, minute, second)
+    const untilDate = new Date(untilMs)
+    if (
+      untilDate.getUTCFullYear() !== year ||
+      untilDate.getUTCMonth() + 1 !== month ||
+      untilDate.getUTCDate() !== day ||
+      untilDate.getUTCHours() !== hour ||
+      untilDate.getUTCMinutes() !== minute ||
+      untilDate.getUTCSeconds() !== second
+    ) {
+      return null
+    }
+    until = Math.floor(untilMs / 1000)
+  }
+
+  return { freq, interval, count, until }
+}
+
+function expandSimpleRecurringEvent(
+  event: CalendarEvent,
+  windowStartUnix: number,
+  windowEndUnix: number,
+  overrideByOcc: Map<number, EventOverride>,
+): EventInstance[] | null {
+  if (event.recurrence_rule == null) return null
+  const parsed = parseSimpleRruleBody(event.recurrence_rule)
+  if (!parsed) return null
+
+  const stepSeconds = (parsed.freq === 'DAILY' ? 24 * 3600 : 7 * 24 * 3600) * parsed.interval
+  const seriesEnd = parsed.until == null ? windowEndUnix : Math.min(windowEndUnix, parsed.until)
+  if (seriesEnd < event.start_time || windowEndUnix < event.start_time) return []
+
+  const firstIndex = Math.max(0, Math.ceil((windowStartUnix - event.start_time) / stepSeconds))
+  let lastIndex = Math.floor((seriesEnd - event.start_time) / stepSeconds)
+  if (parsed.count != null) lastIndex = Math.min(lastIndex, parsed.count - 1)
+  if (lastIndex < firstIndex) return []
+
+  const out: EventInstance[] = []
+  for (let index = firstIndex; index <= lastIndex; index++) {
+    const occurrenceStart = event.start_time + index * stepSeconds
+    const override = overrideByOcc.get(occurrenceStart) ?? null
+    const inst = buildInstance(event, occurrenceStart, override)
+    if (inst) out.push(inst)
+  }
+  return out
+}
+
 /** Build a fresh EventInstance from a parent event with the given occurrence start. */
 function buildInstance(
   event: CalendarEvent,
@@ -327,6 +431,14 @@ export function expandRecurringEvent(
     const inst = buildInstance(event, event.start_time, override)
     return inst ? [inst] : []
   }
+
+  const simpleInstances = expandSimpleRecurringEvent(
+    event,
+    windowStartUnix,
+    windowEndUnix,
+    overrideByOcc,
+  )
+  if (simpleInstances) return simpleInstances
 
   // Parse RRULE. On parse failure we degrade to a single instance + warn.
   let parsed: RRule | null = null
