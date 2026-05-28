@@ -34,8 +34,9 @@ test('tokenize splits on && / ; and recombines `npm run X`', () => {
   assert.ok(tokens.includes('src/__tests__/foo.test.ts'))
 })
 
-test('looksLikeTestPath recognizes 4 extensions + glob forms', () => {
+test('looksLikeTestPath recognizes TS/TSX/CJS/MJS test paths + glob forms', () => {
   assert.equal(looksLikeTestPath('src/__tests__/foo.test.ts'), true)
+  assert.equal(looksLikeTestPath('src/__tests__/foo.test.tsx'), true)
   assert.equal(looksLikeTestPath('src/__tests__/e2e/foo.e2e.ts'), true)
   assert.equal(looksLikeTestPath('eslint-rules/__tests__/x.test.mjs'), true)
   assert.equal(looksLikeTestPath('scripts/__tests__/x.test.cjs'), true)

@@ -8,7 +8,7 @@
 //   document:rename  (rename a file or directory; refuses if target exists)
 //   document:delete  (move a file or directory tree into Ready trash)
 //   document:copy    (copy a file or directory tree)
-//   document:move    (move via rename; refuses if source missing)
+//   document:move    (move a file or directory; refuses if source missing or target exists)
 //   document:listTrash / document:restoreTrash (Ready trash listing/restore)
 //   document:stat    (read size/mtime/btime/isDirectory/extension)
 //
@@ -203,7 +203,9 @@ export const fileMutationGroup: IpcChannelGroup<FileMutationGroupDeps> = {
       try {
         if (deps.useMock) return { success: true, mock: true }
         if (!existsSync(src)) return { success: false, error: 'Source not found' }
-        await rename(src, dest)
+        if (existsSync(dest)) return { success: false, error: 'Target already exists' }
+        const stats = await stat(src)
+        await movePath(src, dest, stats.isDirectory())
         return { success: true }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }

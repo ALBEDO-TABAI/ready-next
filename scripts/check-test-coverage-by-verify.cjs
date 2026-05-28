@@ -18,6 +18,7 @@ const EXEMPTIONS_PATH = path.join(ROOT, 'scripts/test-coverage-exemptions.json')
 
 const TEST_EXTENSIONS = [
   'src/__tests__/**/*.test.ts',
+  'src/__tests__/**/*.test.tsx',
   'src/__tests__/**/*.e2e.ts',
   'eslint-rules/__tests__/**/*.test.{mjs,ts}',
   'scripts/__tests__/**/*.test.cjs',
@@ -189,6 +190,7 @@ function tokenize(value) {
 function looksLikeTestPath(tok) {
   return (
     tok.endsWith('.test.ts') ||
+    tok.endsWith('.test.tsx') ||
     tok.endsWith('.e2e.ts') ||
     tok.endsWith('.test.mjs') ||
     tok.endsWith('.test.cjs') ||

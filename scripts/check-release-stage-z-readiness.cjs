@@ -3,6 +3,9 @@
 
 const fs = require('node:fs')
 const path = require('node:path')
+const {
+  main: checkReleaseLiveEvidence,
+} = require('./check-release-live-evidence.cjs')
 
 const ROOT = path.resolve(__dirname, '..')
 const CI_REPORT_REL =
@@ -26,6 +29,10 @@ const EXPECTED_AGENT_ACCEPTANCE_IDS = [
   ...Array.from({ length: 6 }, (_, i) => `K${i + 1}`),
   ...Array.from({ length: 6 }, (_, i) => `L${i + 1}`),
   ...Array.from({ length: 8 }, (_, i) => `M${i + 1}`),
+]
+const REQUIRED_BRANCH_PROTECTION_CHECKS = [
+  'Ready merge gates / merge',
+  'Ready Windows packaged smoke / windows-packaged-smoke',
 ]
 const STAGE_Z_EVIDENCE_PATH_RE = /docs\/superpowers\/audits\/[^\s|)]+stage-z[^\s|)]*/gi
 const EVIDENCE_PATH_RE =
@@ -371,6 +378,34 @@ function validateSimulatedHumanAcceptance(root, errors, notes) {
   errors.push(...latestCandidate.errors)
 }
 
+function branchProtectionContexts(payload) {
+  const checks = payload?.required_status_checks
+  if (Array.isArray(checks)) return checks.map(String)
+  if (!checks || typeof checks !== 'object') return []
+  const contexts = Array.isArray(checks.contexts) ? checks.contexts : []
+  const appChecks = Array.isArray(checks.checks)
+    ? checks.checks.map((check) => check?.context).filter(Boolean)
+    : []
+  return [...contexts, ...appChecks].map(String)
+}
+
+function hasValidBranchProtectionApi(root, evidencePaths) {
+  for (const evidencePath of evidencePaths) {
+    if (!/branch-protection-api\.json$/.test(evidencePath)) continue
+    try {
+      const payload = JSON.parse(fs.readFileSync(path.join(root, evidencePath), 'utf8'))
+      const contexts = new Set(branchProtectionContexts(payload))
+      const strict = payload?.required_status_checks?.strict === true
+      if (strict && REQUIRED_BRANCH_PROTECTION_CHECKS.every((check) => contexts.has(check))) {
+        return true
+      }
+    } catch {
+      // Invalid API JSON is not usable proof.
+    }
+  }
+  return false
+}
+
 function validateBranchProtection(root, errors, notes) {
   const candidates = stageZFileCandidates(root, [
     'branch-protection.md',
@@ -379,17 +414,18 @@ function validateBranchProtection(root, errors, notes) {
   ])
   const matched = candidates.find((abs) => {
     const text = fs.readFileSync(abs, 'utf8')
+    const evidencePaths = existingEvidencePaths(root, text)
     return (
       /(?:status|branch_protection_status)\s*:\s*pass/i.test(text) &&
-      /Ready merge gates\s*\/\s*merge/.test(text) &&
+      REQUIRED_BRANCH_PROTECTION_CHECKS.every((check) => text.includes(check)) &&
       /Require branches to be up to date/i.test(text) &&
       !hasPlaceholder(text) &&
-      existingEvidencePaths(root, text).length > 0
+      hasValidBranchProtectionApi(root, evidencePaths)
     )
   })
   if (!matched) {
     errors.push(
-      `${AUDITS_REL}/*stage-z*/branch-protection.md: missing pass evidence for required status check + up-to-date branch protection`,
+      `${AUDITS_REL}/*stage-z*/branch-protection.md: missing pass evidence for required merge and Windows smoke status checks + up-to-date branch protection`,
     )
     return
   }
@@ -425,6 +461,18 @@ function validatePlatformParity(root, errors, notes) {
   notes.push(`platform parity: ${rel(root, matched)}`)
 }
 
+function validateLiveSurfaceEvidence(root, errors, notes) {
+  const liveResult = checkReleaseLiveEvidence({ root })
+  if (!liveResult.ok) {
+    errors.push(
+      `release live evidence is not complete: ${liveResult.passCount}/${liveResult.total} surfaces pass`,
+    )
+    errors.push(...liveResult.errors)
+    return
+  }
+  notes.push(`release live evidence: ${liveResult.passCount}/${liveResult.total} surfaces pass`)
+}
+
 function main({ root = ROOT } = {}) {
   const errors = []
   const notes = []
@@ -438,6 +486,7 @@ function main({ root = ROOT } = {}) {
   validateSimulatedHumanAcceptance(root, errors, notes)
   validateBranchProtection(root, errors, notes)
   validatePlatformParity(root, errors, notes)
+  validateLiveSurfaceEvidence(root, errors, notes)
 
   return { ok: errors.length === 0, errors, notes }
 }

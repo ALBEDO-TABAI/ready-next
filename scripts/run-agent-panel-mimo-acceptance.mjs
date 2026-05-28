@@ -4,7 +4,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
-const DEFAULT_OUT_DIR = 'docs/superpowers/audits/2026-05-24-stage-z-closeout/evidence/agent-panel-mimo'
+const DEFAULT_OUT_DIR = 'docs/superpowers/audits/2026-05-24-stage-z-closeout/evidence/agent-panel-mimo-rerun-after-projection-tooltrace-fix'
 const DEFAULT_FIXTURE_ROOT = '/tmp/ready-stage-z-agent-panel-fixture/workspaces/current'
 const DEFAULT_SUITE = 'mimo'
 

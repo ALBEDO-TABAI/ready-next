@@ -75,6 +75,104 @@ function requestJson(url) {
   })
 }
 
+function getWebSocketConstructor() {
+  if (typeof globalThis.WebSocket === 'function') return globalThis.WebSocket
+  // Node 20 on GitHub runners may not expose the browser-compatible global.
+  // `ws` is already available in this workspace dependency graph.
+  return require('ws')
+}
+
+function addSocketListener(socket, eventName, handler) {
+  if (typeof socket.addEventListener === 'function') {
+    socket.addEventListener(eventName, handler)
+    return
+  }
+  socket.on(eventName, handler)
+}
+
+function socketMessageData(eventOrData) {
+  if (eventOrData && typeof eventOrData === 'object' && 'data' in eventOrData) {
+    return eventOrData.data
+  }
+  return eventOrData
+}
+
+function openCdpClient(webSocketDebuggerUrl, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const WebSocketCtor = getWebSocketConstructor()
+    const socket = new WebSocketCtor(webSocketDebuggerUrl)
+    const pending = new Map()
+    let nextId = 1
+    let opened = false
+    const openTimer = setTimeout(() => {
+      reject(new Error(`Timed out opening DevTools websocket: ${webSocketDebuggerUrl}`))
+      try { socket.close() } catch { /* ignore */ }
+    }, Math.min(timeoutMs, 10000))
+
+    function failAll(error) {
+      for (const { reject: rejectPending } of pending.values()) rejectPending(error)
+      pending.clear()
+    }
+
+    addSocketListener(socket, 'open', () => {
+      opened = true
+      clearTimeout(openTimer)
+      resolve({
+        send(method, params = {}) {
+          return new Promise((resolveCommand, rejectCommand) => {
+            const id = nextId++
+            const commandTimer = setTimeout(() => {
+              pending.delete(id)
+              rejectCommand(new Error(`Timed out waiting for CDP method ${method}`))
+            }, Math.min(timeoutMs, 10000))
+            pending.set(id, {
+              resolve: (value) => {
+                clearTimeout(commandTimer)
+                resolveCommand(value)
+              },
+              reject: (error) => {
+                clearTimeout(commandTimer)
+                rejectCommand(error)
+              },
+            })
+            socket.send(JSON.stringify({ id, method, params }))
+          })
+        },
+        close() {
+          try { socket.close() } catch { /* ignore */ }
+        },
+      })
+    })
+
+    addSocketListener(socket, 'message', (eventOrData) => {
+      const data = socketMessageData(eventOrData)
+      let message
+      try {
+        message = JSON.parse(String(data))
+      } catch {
+        return
+      }
+      if (!message || typeof message.id !== 'number') return
+      const waiter = pending.get(message.id)
+      if (!waiter) return
+      pending.delete(message.id)
+      if (message.error) {
+        waiter.reject(new Error(message.error.message || JSON.stringify(message.error)))
+      } else {
+        waiter.resolve(message)
+      }
+    })
+
+    addSocketListener(socket, 'error', (error) => {
+      if (!opened) {
+        clearTimeout(openTimer)
+        reject(error)
+      }
+      failAll(error)
+    })
+  })
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
@@ -99,6 +197,61 @@ async function pollTarget(port, timeoutMs) {
     await sleep(1000)
   }
   throw new Error(`Ready renderer target did not appear before timeout. Last error: ${lastError?.message || 'none'}`)
+}
+
+async function evaluateRendererDom(page, timeoutMs) {
+  if (!page.webSocketDebuggerUrl) {
+    throw new Error('Ready renderer target is missing webSocketDebuggerUrl; cannot verify DOM readiness')
+  }
+  const client = await openCdpClient(page.webSocketDebuggerUrl, timeoutMs)
+  try {
+    await client.send('Runtime.enable')
+    const deadline = Date.now() + timeoutMs
+    let lastSnapshot = null
+    while (Date.now() < deadline) {
+      const evaluated = await client.send('Runtime.evaluate', {
+        awaitPromise: true,
+        returnByValue: true,
+        expression: `(() => {
+          const root = document.getElementById('root');
+          const bodyText = (document.body?.innerText || '').replace(/\\s+/g, ' ').trim();
+          const interactiveCount = document.querySelectorAll('button,[role="button"],a,input,textarea,select').length;
+          const title = document.title || '';
+          const hasBootstrapError =
+            Boolean(document.querySelector('[data-ready-bootstrap-error]')) ||
+            /启动失败|bootstrap failed|白屏/i.test(bodyText);
+          return {
+            readyState: document.readyState,
+            title,
+            url: location.href,
+            rootChildCount: root?.childElementCount || 0,
+            bodyTextLength: bodyText.length,
+            bodyTextSample: bodyText.slice(0, 500),
+            interactiveCount,
+            hasBootstrapError
+          };
+        })()`,
+      })
+      if (evaluated.exceptionDetails) {
+        throw new Error(`Renderer DOM evaluation failed: ${evaluated.exceptionDetails.text || 'exception'}`)
+      }
+      lastSnapshot = evaluated.result?.result?.value || null
+      if (
+        lastSnapshot &&
+        lastSnapshot.readyState !== 'loading' &&
+        lastSnapshot.rootChildCount > 0 &&
+        lastSnapshot.bodyTextLength > 20 &&
+        lastSnapshot.interactiveCount > 0 &&
+        !lastSnapshot.hasBootstrapError
+      ) {
+        return lastSnapshot
+      }
+      await sleep(500)
+    }
+    throw new Error(`Ready renderer DOM did not become interactive before timeout. Last snapshot: ${JSON.stringify(lastSnapshot)}`)
+  } finally {
+    client.close()
+  }
 }
 
 function stopApp(child, platform) {
@@ -134,6 +287,7 @@ async function main(argv = process.argv.slice(2)) {
 
   try {
     const { page, targets } = await pollTarget(options.port, options.timeoutMs)
+    const renderer = await evaluateRendererDom(page, options.timeoutMs)
     const report = {
       status: 'pass',
       platform: options.platform,
@@ -148,6 +302,7 @@ async function main(argv = process.argv.slice(2)) {
         title: page.title,
         url: page.url,
       },
+      renderer,
       targetCount: Array.isArray(targets) ? targets.length : 0,
       logTail: logs.join('').split(/\r?\n/).filter(Boolean).slice(-40),
     }

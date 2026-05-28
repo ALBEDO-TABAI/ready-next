@@ -74,8 +74,8 @@ describe('document engine attachment async IO', () => {
     assert.doesNotMatch(fileMutationSource, /cpSync\(src, dest, \{ recursive: true \}\)/)
   })
 
-  it('document:move uses await rename', () => {
-    assert.match(fileMutationSource, /ipcMain\.handle\('document:move'[\s\S]*await rename\(src, dest\)/)
+  it('document:move uses async movePath so cross-device moves can fall back to copy/remove', () => {
+    assert.match(fileMutationSource, /ipcMain\.handle\('document:move'[\s\S]*if \(!existsSync\(src\)\)[\s\S]*if \(existsSync\(dest\)\) return \{ success: false, error: 'Target already exists' \}[\s\S]*await stat\(src\)[\s\S]*await movePath\(src, dest, stats\.isDirectory\(\)\)/)
   })
 
   it('document:rename uses await rename instead of renameSync', () => {

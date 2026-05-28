@@ -1,6 +1,8 @@
 'use strict'
 
 const assert = require('node:assert/strict')
+const crypto = require('node:crypto')
+const { execFileSync } = require('node:child_process')
 const fs = require('node:fs')
 const os = require('node:os')
 const path = require('node:path')
@@ -25,6 +27,189 @@ function write(root, rel, text) {
   fs.writeFileSync(abs, text)
 }
 
+function sha256(root, rel) {
+  return crypto
+    .createHash('sha256')
+    .update(fs.readFileSync(path.join(root, rel)))
+    .digest('hex')
+}
+
+function bytes(root, rel) {
+  return fs.statSync(path.join(root, rel)).size
+}
+
+function addMs(iso, ms) {
+  return new Date(Date.parse(iso) + ms).toISOString()
+}
+
+function initGitBaseline(root) {
+  execFileSync('git', ['init'], { cwd: root, stdio: 'ignore' })
+  execFileSync('git', ['config', 'user.email', 'ready-tests@example.invalid'], { cwd: root })
+  execFileSync('git', ['config', 'user.name', 'Ready Tests'], { cwd: root })
+  write(root, '.gitkeep', '')
+  execFileSync('git', ['add', '.gitkeep'], { cwd: root })
+  execFileSync('git', ['commit', '-m', 'baseline'], { cwd: root, stdio: 'ignore' })
+  return {
+    sha: execFileSync('git', ['log', '-1', '--format=%H'], { cwd: root }).toString().trim(),
+    date: execFileSync('git', ['log', '-1', '--format=%cI'], { cwd: root }).toString().trim(),
+  }
+}
+
+const SURFACE_OPERATOR_CLASS = {
+  1: 'agent-only',
+  2: 'agent-with-bai-spotcheck',
+  3: 'agent-with-bai-spotcheck',
+  4: 'agent-only',
+  5: 'agent-only',
+  6: 'agent-only',
+  7: 'agent-with-bai-spotcheck',
+  8: 'agent-only',
+  9: 'agent-only',
+  10: 'agent-with-bai-spotcheck',
+  11: 'agent-only',
+  12: 'agent-only',
+  13: 'agent-with-bai-spotcheck',
+  14: 'agent-only',
+  15: 'agent-only',
+  16: 'agent-with-bai-spotcheck',
+  17: 'agent-with-bai-spotcheck',
+  18: 'agent-with-bai-spotcheck',
+  19: 'agent-with-bai-spotcheck',
+  20: 'agent-only',
+}
+
+function writePassingDogfoodSurface(root, dogfoodDir, id, gitInfo) {
+  const padded = String(id).padStart(2, '0')
+  const slug = `surface-${padded}-test`
+  const surface = `Surface ${id}`
+  const artifactDir = `${dogfoodDir}/evidence/${slug}`
+  const screenRel = `${artifactDir}/screen.png`
+  const logRel = `${artifactDir}/app.log`
+  const headRel = `${artifactDir}/head-capture.txt`
+  const manifestRel = `${artifactDir}/manifest.json`
+  const operatorClass = SURFACE_OPERATOR_CLASS[id]
+  const windowStart = gitInfo.date
+  const windowEnd = addMs(gitInfo.date, 10_000)
+
+  write(root, screenRel, `screen ${id}\n`)
+  write(root, logRel, `${windowStart} surface ${id}\n${windowEnd} surface ${id}\n`)
+  write(
+    root,
+    headRel,
+    [
+      `build_commit=${gitInfo.sha}`,
+      `captured_at=${gitInfo.date}`,
+      'git_status_porcelain=0',
+      '',
+    ].join('\n'),
+  )
+
+  const artifacts = [
+    {
+      type: 'screencap',
+      path: 'screen.png',
+      bytes: bytes(root, screenRel),
+      sha256: sha256(root, screenRel),
+    },
+    {
+      type: 'log',
+      path: 'app.log',
+      bytes: bytes(root, logRel),
+      sha256: sha256(root, logRel),
+      log_earliest_timestamp: windowStart,
+      log_latest_timestamp: windowEnd,
+    },
+    {
+      type: 'head-capture',
+      path: 'head-capture.txt',
+      bytes: bytes(root, headRel),
+      sha256: sha256(root, headRel),
+    },
+  ]
+
+  const spotcheckLines = []
+  if (operatorClass !== 'agent-only') {
+    const spotRel = `${artifactDir}/spotcheck.txt`
+    write(root, spotRel, `spotcheck ${id}\n`)
+    artifacts.push({
+      type: 'spotcheck',
+      path: 'spotcheck.txt',
+      bytes: bytes(root, spotRel),
+      sha256: sha256(root, spotRel),
+    })
+    spotcheckLines.push(
+      'bai_spotcheck:',
+      '  performed_by: 白',
+      `  performed_at: ${gitInfo.date}`,
+      `  spotcheck_evidence: evidence/${slug}/spotcheck.txt`,
+      `  spotcheck_sha256: ${sha256(root, spotRel)}`,
+      '  spotcheck_signoff_text: looks good',
+    )
+  }
+
+  write(
+    root,
+    manifestRel,
+    `${JSON.stringify({
+      surface_id: id,
+      surface,
+      build_commit: gitInfo.sha,
+      operator: 'Codex',
+      hardware: 'test-runner',
+      captured_at: gitInfo.date,
+      artifacts,
+    }, null, 2)}\n`,
+  )
+
+  const surfaceSpecific = []
+  if (id === 10) surfaceSpecific.push('HTTP 402 was covered.')
+  if (id === 13) {
+    surfaceSpecific.push('### Sub-flow 13.a', '### Sub-flow 13.b', '### Sub-flow 13.c', '### Sub-flow 13.d', '### Sub-flow 13.e')
+  }
+
+  write(
+    root,
+    path.join(dogfoodDir, `${slug}.md`),
+    [
+      '---',
+      `surface: ${surface}`,
+      `surface_id: ${id}`,
+      'date: 2026-05-28',
+      'operator: Codex',
+      `operator_class: ${operatorClass}`,
+      'hardware: test-runner',
+      `build_commit: ${gitInfo.sha}`,
+      `build_commit_captured_at: ${gitInfo.date}`,
+      'status: pass',
+      `artifact_manifest: evidence/${slug}/manifest.json`,
+      ...spotcheckLines,
+      '---',
+      '',
+      `# ${surface}`,
+      '',
+      '## Reproduction steps',
+      'Run the surface.',
+      '',
+      '## Expected result',
+      'The surface works.',
+      '',
+      '## Observed result',
+      'The surface worked.',
+      '',
+      '## Evidence artifacts',
+      `See evidence/${slug}/manifest.json.`,
+      '',
+      '## Timestamp alignment',
+      `Reproduction window: ${windowStart} → ${windowEnd}`,
+      '',
+      '## Pass/fail rationale',
+      'status: pass',
+      ...surfaceSpecific,
+      '',
+    ].join('\n'),
+  )
+}
+
 function baseReleaseHandoff() {
   return [
     '# Handoff',
@@ -44,6 +229,8 @@ function baseReleaseHandoff() {
 
 function writePassingFixture(root) {
   const zDir = 'docs/superpowers/audits/2026-05-24-stage-z-closeout'
+  const dogfoodDir = 'docs/superpowers/audits/2026-05-23-stage-y-closeout/dogfood'
+  const gitInfo = initGitBaseline(root)
   for (const id of EXPECTED_MANUAL_IDS) {
     write(
       root,
@@ -77,7 +264,19 @@ function writePassingFixture(root) {
   write(
     root,
     path.join(zDir, 'branch-protection-api.json'),
-    '{"required_status_checks":["Ready merge gates / merge"],"strict":true}',
+    JSON.stringify({
+      required_status_checks: {
+        strict: true,
+        contexts: [
+          'Ready merge gates / merge',
+          'Ready Windows packaged smoke / windows-packaged-smoke',
+        ],
+        checks: [
+          { context: 'Ready merge gates / merge' },
+          { context: 'Ready Windows packaged smoke / windows-packaged-smoke' },
+        ],
+      },
+    }),
   )
   write(
     root,
@@ -133,6 +332,7 @@ function writePassingFixture(root) {
       'status: pass',
       '',
       '- Required check: Ready merge gates / merge',
+      '- Required check: Ready Windows packaged smoke / windows-packaged-smoke',
       '- Require branches to be up to date before merging',
       `- Evidence: ${zDir}/branch-protection-api.json`,
     ].join('\n'),
@@ -161,6 +361,9 @@ function writePassingFixture(root) {
       ...EXPECTED_AGENT_ACCEPTANCE_IDS.map((id) => `| ${id} | pass | ${zDir}/agent-acceptance/${id}.md |`),
     ].join('\n'),
   )
+  for (let id = 1; id <= 20; id += 1) {
+    writePassingDogfoodSurface(root, dogfoodDir, id, gitInfo)
+  }
 }
 
 function writeUnresolvedFixture(root) {
@@ -197,7 +400,7 @@ test('accepts complete Stage Z release-readiness evidence', () => {
 
   const result = main({ root })
 
-  assert.equal(result.ok, true)
+  assert.equal(result.ok, true, result.errors.join('\n'))
   assert.deepEqual(result.errors, [])
 })
 
@@ -218,7 +421,7 @@ test('accepts a complete manual checklist when older candidates are incomplete',
 
   const result = main({ root })
 
-  assert.equal(result.ok, true)
+  assert.equal(result.ok, true, result.errors.join('\n'))
   assert(
     result.notes.some((note) =>
       note.includes('2026-05-24-stage-z-closeout/release-manual-checklist.md'),
@@ -246,7 +449,7 @@ test('rejects stale Stage Z pass evidence when the latest candidate is incomplet
   assert.equal(result.ok, false)
   assert.match(result.errors.join('\n'), /missing executed M2 row/)
   assert.match(result.errors.join('\n'), /Codex-operated simulated-human/)
-  assert.match(result.errors.join('\n'), /missing pass evidence for required status check/)
+  assert.match(result.errors.join('\n'), /missing pass evidence for required merge and Windows smoke status checks/)
   assert.match(result.errors.join('\n'), /missing pass evidence for macOS and Windows packaged smokes/)
   assert(
     result.notes.every((note) => !note.includes('2026-05-24-stage-z-closeout')),
@@ -318,7 +521,7 @@ test('accepts always-on deep-gates condition', () => {
 
   const result = main({ root })
 
-  assert.equal(result.ok, true)
+  assert.equal(result.ok, true, result.errors.join('\n'))
 })
 
 test('rejects CI reports that keep a pending placeholder after adding a run URL', () => {
@@ -355,8 +558,9 @@ test('rejects unresolved Stage Z handoff evidence without depending on the live 
   assert.match(result.errors.join('\n'), /deep-gates is still disabled/)
   assert.match(result.errors.join('\n'), /missing executed Stage Z manual checklist/)
   assert.match(result.errors.join('\n'), /missing Codex-operated simulated-human/)
-  assert.match(result.errors.join('\n'), /missing pass evidence for required status check/)
+  assert.match(result.errors.join('\n'), /missing pass evidence for required merge and Windows smoke status checks/)
   assert.match(result.errors.join('\n'), /missing pass evidence for macOS and Windows packaged smokes/)
+  assert.match(result.errors.join('\n'), /dogfood directory missing/)
 })
 
 test('rejects incomplete or placeholder manual checklist evidence', () => {
@@ -480,7 +684,7 @@ test('accepts Markdown-quoted Stage Z operation record paths', () => {
 
   const result = main({ root })
 
-  assert.equal(result.ok, true)
+  assert.equal(result.ok, true, result.errors.join('\n'))
 })
 
 test('rejects empty per-item Stage Z operation record files', () => {
@@ -557,7 +761,18 @@ test('rejects keyword-only branch protection evidence', () => {
   const result = main({ root })
 
   assert.equal(result.ok, false)
-  assert.match(result.errors.join('\n'), /missing pass evidence for required status check/)
+  assert.match(result.errors.join('\n'), /missing pass evidence for required merge and Windows smoke status checks/)
+})
+
+test('rejects branch protection prose without API evidence for required checks', () => {
+  const root = makeRoot()
+  writePassingFixture(root)
+  write(root, 'docs/superpowers/audits/2026-05-24-stage-z-closeout/branch-protection-api.json', '{}')
+
+  const result = main({ root })
+
+  assert.equal(result.ok, false)
+  assert.match(result.errors.join('\n'), /missing pass evidence for required merge and Windows smoke status checks/)
 })
 
 test('rejects keyword-only platform parity evidence', () => {
@@ -594,4 +809,30 @@ test('rejects platform parity when macOS and Windows point to the same proof art
 
   assert.equal(result.ok, false)
   assert.match(result.errors.join('\n'), /missing pass evidence for macOS and Windows packaged smokes/)
+})
+
+test('rejects deferred release live evidence even when Stage Z documents are otherwise complete', () => {
+  const root = makeRoot()
+  writePassingFixture(root)
+  write(
+    root,
+    'docs/superpowers/audits/2026-05-23-stage-y-closeout/dogfood/surface-11-test.md',
+    [
+      '---',
+      'surface: Surface 11',
+      'surface_id: 11',
+      'status: deferred-with-owner',
+      'deferred_owner: 白',
+      'operator_class: agent-only',
+      '---',
+      '',
+      '# Surface 11',
+    ].join('\n'),
+  )
+
+  const result = main({ root })
+
+  assert.equal(result.ok, false)
+  assert.match(result.errors.join('\n'), /release live evidence is not complete: 19\/20 surfaces pass/)
+  assert.match(result.errors.join('\n'), /surface-11-test\.md: release requires status=pass/)
 })

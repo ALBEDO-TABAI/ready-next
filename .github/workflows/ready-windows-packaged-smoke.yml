@@ -4,7 +4,11 @@ on:
   workflow_dispatch:
   push:
     branches:
-      - codex/readyguy
+      - main
+      - 'codex/**'
+  pull_request:
+    branches:
+      - main
 
 concurrency:
   group: ready-windows-packaged-smoke-${{ github.ref }}

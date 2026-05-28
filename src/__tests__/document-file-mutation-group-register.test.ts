@@ -198,3 +198,30 @@ test('document delete moves a file into Ready trash and restore returns it to th
   assert.equal(afterRestore.success, true)
   assert.equal(afterRestore.items?.length, 0)
 })
+
+test('document move refuses an existing destination before copy/remove fallback can run', async (t) => {
+  const root = mkdtempSync(join(tmpdir(), 'ready-file-move-'))
+  t.after(async () => {
+    await rm(root, { recursive: true, force: true })
+  })
+  const sourceDir = join(root, 'source')
+  const destDir = join(root, 'dest')
+  mkdirSync(sourceDir, { recursive: true })
+  mkdirSync(destDir, { recursive: true })
+  writeFileSync(join(sourceDir, 'a.md'), 'source\n', 'utf8')
+  writeFileSync(join(destDir, 'a.md'), 'dest\n', 'utf8')
+
+  const { ipc, handleCalls } = createMockIpc()
+  fileMutationGroup.register(ipc, createMockDeps())
+  const handlers = new Map(handleCalls.map((entry) => [entry.channel, entry.handler]))
+
+  const moveResult = await handlers.get('document:move')?.(
+    {} as IpcMainInvokeEvent,
+    { src: sourceDir, dest: destDir },
+  ) as { success: boolean; error?: string }
+
+  assert.equal(moveResult.success, false)
+  assert.equal(moveResult.error, 'Target already exists')
+  assert.equal(readFileSync(join(sourceDir, 'a.md'), 'utf8'), 'source\n')
+  assert.equal(readFileSync(join(destDir, 'a.md'), 'utf8'), 'dest\n')
+})
