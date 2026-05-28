@@ -67,6 +67,7 @@ export interface RunShellHandlerDeps {
   skillId: string
   signal?: AbortSignal
   lookupSkillRoots?: LookupSkillRoots
+  baseEnv?: NodeJS.ProcessEnv
   runtimeBinDir?: string | null
   venvBinDir?: string | null
   // Test injection — swap the actual spawn for a mock.
@@ -325,7 +326,7 @@ export async function executeRunShell(
     HARD_CAP_TIMEOUT_MS,
   )
 
-  const env = buildEnv(process.env, roots, deps.runtimeBinDir, deps.venvBinDir)
+  const env = buildEnv(deps.baseEnv ?? process.env, roots, deps.runtimeBinDir, deps.venvBinDir)
   const spawnFn = deps.spawnFn || spawn
   const started = Date.now()
 

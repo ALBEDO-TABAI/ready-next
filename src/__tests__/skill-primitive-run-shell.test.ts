@@ -567,3 +567,55 @@ test('venvBinDir, when provided, prepends onto spawn env.PATH', async () => {
     fx.cleanup()
   }
 })
+
+test('baseEnv replaces process.env for packaged shell executions', async () => {
+  const fx = makeFixture()
+  const previousPythonHome = process.env.PYTHONHOME
+  process.env.PYTHONHOME = '/host/python'
+  try {
+    const captured: { env?: NodeJS.ProcessEnv } = {}
+    const fakeSpawn = ((_bin: string, _args: string[], options: any) => {
+      captured.env = options?.env
+      let closeCb: ((code: number) => void) | null = null
+      return {
+        pid: 1,
+        killed: false,
+        stdin: { write: () => {}, end: () => {} },
+        stdout: { setEncoding: () => {}, on: () => {} },
+        stderr: { setEncoding: () => {}, on: () => {} },
+        on: (event: string, cb: any) => {
+          if (event === 'close') {
+            closeCb = cb
+            setImmediate(() => closeCb?.(0))
+          }
+        },
+        kill: () => {},
+      }
+    }) as unknown as typeof import('node:child_process').spawn
+
+    await executeRunShell(
+      { command: 'python3 --version' },
+      {
+        skillId: 'test-skill',
+        lookupSkillRoots: fx.lookup,
+        baseEnv: {
+          PATH: '/packaged/bin',
+          MODELSCOPE_CACHE: '/packaged/cache/modelscope',
+          MODELSCOPE_OFFLINE: '1',
+          PYTHONNOUSERSITE: '1',
+        },
+        spawnFn: fakeSpawn,
+      },
+    )
+
+    assert.equal(captured.env?.PYTHONHOME, undefined)
+    assert.equal(captured.env?.MODELSCOPE_CACHE, '/packaged/cache/modelscope')
+    assert.equal(captured.env?.MODELSCOPE_OFFLINE, '1')
+    assert.equal(captured.env?.PYTHONNOUSERSITE, '1')
+    assert.equal(captured.env?.PATH, '/packaged/bin')
+  } finally {
+    if (previousPythonHome === undefined) delete process.env.PYTHONHOME
+    else process.env.PYTHONHOME = previousPythonHome
+    fx.cleanup()
+  }
+})

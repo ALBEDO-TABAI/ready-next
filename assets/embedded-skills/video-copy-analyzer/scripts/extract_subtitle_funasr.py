@@ -204,8 +204,7 @@ def check_burned_subtitle(frame_path: str) -> bool:
             return text_count >= 2
         return False
     except ImportError:
-        print("⚠️ RapidOCR 未安装，跳过烧录字幕检测")
-        print("   安装命令: pip install rapidocr-onnxruntime")
+        print("⚠️ Ready 发行运行时缺少 RapidOCR，跳过烧录字幕检测")
         return False
     except Exception as e:
         print(f"⚠️ OCR 检测失败: {e}")
@@ -370,7 +369,7 @@ def extract_with_funasr(video_path: str, output_srt: str) -> bool:
 
         print("🎤 使用 FunASR 进行语音转录...")
         print("   ASR 模型: paraformer-zh (含 VAD + 标点)")
-        print("   ⚠️ 首次运行需下载约 2-3GB 模型文件，请耐心等待")
+        print("   发行包应已预置模型缓存，若长时间停在这里请检查发行运行时")
 
         # 提取音频
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
@@ -434,8 +433,7 @@ def extract_with_funasr(video_path: str, output_srt: str) -> bool:
         return subtitle_count > 0
 
     except ImportError:
-        print("❌ FunASR 未安装")
-        print("   安装命令: pip install funasr modelscope torchaudio")
+        print("❌ Ready 发行运行时缺少 FunASR / ModelScope / TorchAudio")
         return False
     except Exception as e:
         print(f"❌ FunASR 转录失败: {e}")

@@ -1020,7 +1020,7 @@ def call_vision_api(
     try:
         from openai import OpenAI
     except ImportError:
-        print("   ⚠️  需要安装 openai 库: pip install openai")
+        print("   ⚠️  Ready 发行运行时缺少 openai 客户端库")
         return None
 
     if not api_key:

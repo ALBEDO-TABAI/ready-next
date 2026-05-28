@@ -205,8 +205,8 @@ def _get_ffmpeg_encoder_names() -> set[str]:
         )
     except FileNotFoundError:
         print(
-            "⚠️ 未找到 ffmpeg 可执行文件，硬件编码器探测跳过；"
-            "请安装 ffmpeg（macOS: `brew install ffmpeg`；Windows: 从 https://www.gyan.dev/ffmpeg/builds/ 下载并加入 PATH）。"
+            "⚠️ Ready 发行运行时缺少 ffmpeg，硬件编码器探测跳过；"
+            "请重新安装完整发行包或联系维护者。"
         )
         _FFMPEG_ENCODER_CACHE = set()
     except subprocess.CalledProcessError as exc:
@@ -550,8 +550,7 @@ def _run_ffmpeg_trim(
         except FileNotFoundError as exc:
             raise RuntimeError(
                 f"未找到 ffmpeg 可执行文件（{ffmpeg_binary}）；"
-                "请安装 ffmpeg 并确保它在 PATH 中（macOS: `brew install ffmpeg`；"
-                "Windows: 从 https://www.gyan.dev/ffmpeg/builds/ 下载并加入 PATH）。"
+                "Ready 发行运行时不完整，请重新安装完整发行包或联系维护者。"
             ) from exc
         if result.returncode == 0:
             return {
@@ -1295,7 +1294,7 @@ class VideoAnalysisPipeline:
             except FileNotFoundError as exc:
                 raise RuntimeError(
                     "未找到 yt-dlp 可执行文件，且 `python -m yt_dlp` 也不可用；"
-                    "请运行 `pip install yt-dlp` 或确保 yt-dlp 在 PATH 中。"
+                    "Ready 发行运行时不完整，请重新安装完整发行包或联系维护者。"
                 ) from exc
             except subprocess.CalledProcessError as exc:
                 stderr = (exc.stderr or exc.stdout or "").strip()
@@ -1586,7 +1585,7 @@ class VideoAnalysisPipeline:
     @staticmethod
     def _funasr_to_segments(funasr_result) -> List[Dict]:
         """
-        将 FunASR 返回结果转换为 Whisper 兼容的 segments 格式
+        将 FunASR 返回结果转换为通用 segments 格式
         每个 segment: {"start": float_seconds, "end": float_seconds, "text": str}
         """
         segments = []

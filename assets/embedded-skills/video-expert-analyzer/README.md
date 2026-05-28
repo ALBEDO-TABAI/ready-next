@@ -31,7 +31,7 @@
 | ⚡ **Parallel Batch Scoring** | Frames sent to AI providers in parallel batches, with auto-retry and stale detection |
 | 🔄 **Resumable Pipeline** | Crash-safe staged execution — automatically picks up where it left off |
 | 🎯 **19-Type Video Classifier** | Dual-axis routing (Visual Source × Audio Dominance) maps to specialized analysis templates |
-| 🎤 **Smart Subtitle Extraction** | 4-tier fallback: Platform API → Embedded → RapidOCR → FunASR/mlx-whisper |
+| 🎤 **Smart Subtitle Extraction** | 4-tier fallback: Platform API → Embedded → RapidOCR → FunASR Nano |
 | ⭐ **Best Shots** | Auto-select highlight clips (score ≥ 7.5) to `best_shots/` |
 | 🌐 **Bilingual Reports** | Reports generated in your chosen language (zh-CN, en-US, ja-JP, etc.) |
 
@@ -327,7 +327,6 @@ A shot with genuine emotion but slight shake is better than a perfect but empty 
 | [PySceneDetect](https://github.com/Breakthrough/PySceneDetect) | Scene detection |
 | [FFmpeg](https://ffmpeg.org/) | Media processing |
 | [FunASR](https://github.com/modelscope/FunASR) | Chinese speech recognition |
-| [mlx-whisper](https://github.com/ml-explore/mlx-examples) | Local ASR (Apple Silicon) |
 | [RapidOCR](https://github.com/RapidAI/RapidOCR) | Burned subtitle OCR |
 
 ## 📖 References
@@ -382,7 +381,7 @@ A shot with genuine emotion but slight shake is better than a perfect but empty 
 | ⚡ **并行批次评分** | 画面帧并行发送到 AI 供应商，自动重试和超时检测 |
 | 🔄 **可续跑流水线** | 崩溃安全的分段执行 — 自动从上次中断处继续 |
 | 🎯 **19 类视频分类器** | 双轴路由（视觉来源 × 听觉主导）映射到专属分析模板 |
-| 🎤 **智能字幕提取** | 四级降级：平台 API → 内嵌字幕 → RapidOCR → FunASR/mlx-whisper |
+| 🎤 **智能字幕提取** | 四级降级：平台 API → 内嵌字幕 → RapidOCR → FunASR Nano |
 | ⭐ **精选镜头** | 自动筛选高分片段（≥7.5）到 `best_shots/` |
 | 🌐 **多语言报告** | 支持指定报告语言（zh-CN、en-US、ja-JP 等） |
 
@@ -678,7 +677,6 @@ VNext 对每个视频沿两个轴进行分类，然后选择对应的专属分�
 | [PySceneDetect](https://github.com/Breakthrough/PySceneDetect) | 场景检测 |
 | [FFmpeg](https://ffmpeg.org/) | 媒体处理 |
 | [FunASR](https://github.com/modelscope/FunASR) | 中文语音识别 |
-| [mlx-whisper](https://github.com/ml-explore/mlx-examples) | 本地 ASR（Apple Silicon） |
 | [RapidOCR](https://github.com/RapidAI/RapidOCR) | 烧录字幕 OCR |
 
 ## 📖 参考文献

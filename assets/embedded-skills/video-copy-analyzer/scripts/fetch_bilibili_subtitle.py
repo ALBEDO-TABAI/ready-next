@@ -33,7 +33,7 @@ from pathlib import Path
 try:
     import requests
 except ImportError:
-    print("❌ requests 未安装: pip install requests")
+    print("❌ Ready 发行运行时缺少 requests，请重新安装完整发行包或联系维护者")
     sys.exit(1)
 
 
@@ -155,7 +155,7 @@ def get_cookies_via_browser_cookie3(browser: str = "chrome") -> dict:
             return {}
 
     except ImportError:
-        print(f"   ⚠️ browser_cookie3 未安装，跳过 (pip install browser_cookie3)")
+        print("   ⚠️ Ready 发行运行时缺少 browser_cookie3，跳过浏览器 cookies 读取")
         return {}
     except Exception as e:
         print(f"   ⚠️ browser_cookie3 获取失败: {e}")
@@ -420,9 +420,8 @@ Cookies 获取优先级:
     if not cookies.get("SESSDATA"):
         print("\n❌ 无法获取 B站 cookies，请确保：")
         print("   1. 已在浏览器中登录 bilibili.com")
-        print("   2. 已安装 yt-dlp: pip install yt-dlp")
-        print("   3. 或安装 browser_cookie3: pip install browser_cookie3")
-        print("   4. 或手动设置: export BILIBILI_SESSDATA='你的值'")
+        print("   2. Ready 发行运行时包含 yt-dlp 和 browser_cookie3")
+        print("   3. 当前会话已提供有效 B站 cookie")
         sys.exit(1)
 
     # 获取字幕

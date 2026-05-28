@@ -9,9 +9,15 @@ import { SidecarStatus } from './contracts/types'
 import { atomicWriteJson } from './atomic-write'
 import {
   buildReadyPythonCandidates,
+  isSupportedReadyPythonSslVersion,
   isSupportedReadyPythonVersion,
   parsePythonVersionText,
 } from '../skills-runtime/python-runtime-version'
+import {
+  buildPackagedSkillRuntimeEnv,
+  getPackagedSkillPythonPath,
+  resolvePackagedSkillRuntimeRoot,
+} from '../skills-runtime/packaged-runtime'
 
 const execFileAsync = promisify(execFile)
 
@@ -45,6 +51,7 @@ export class SidecarManager {
   private readonly runtimeStatePath: string
   private readonly sidecarSourceRoot: string
   private readonly sidecarPkgRoot: string
+  private readonly packagedRuntimeRoot: string | null
   private token: string | null = null
   private heartbeatTimer: NodeJS.Timeout | null = null
 
@@ -59,6 +66,7 @@ export class SidecarManager {
       ? join(process.resourcesPath, 'sidecar')
       : join(app.getAppPath(), 'src', 'python')
     this.sidecarPkgRoot = join(this.sidecarSourceRoot, 'ready_sidecar')
+    this.packagedRuntimeRoot = resolvePackagedSkillRuntimeRoot(process.resourcesPath)
 
     this.status = {
       state: 'stopped',
@@ -112,7 +120,7 @@ export class SidecarManager {
           cwd: this.sidecarSourceRoot,
           stdio: ['ignore', 'pipe', 'pipe'],
           env: {
-            ...process.env,
+            ...this.getPythonRuntimeEnv(),
             PYTHONPATH: pythonPath,
             READY_SIDECAR_AUTH_TOKEN: this.token,
             READY_SIDECAR_HOST: this.host,
@@ -378,6 +386,9 @@ export class SidecarManager {
   }
 
   private async ensurePythonRuntime(): Promise<string> {
+    const packagedPythonPath = await this.resolvePackagedPythonPath()
+    if (packagedPythonPath) return packagedPythonPath
+
     const venvPython = this.getVenvPythonPath()
     const requirementsPath = join(this.sidecarPkgRoot, 'requirements.txt')
     const digest = existsSync(requirementsPath)
@@ -396,7 +407,8 @@ export class SidecarManager {
 
     if (existsSync(venvPython)) {
       const venvVersion = await this.getPythonVersion(venvPython)
-      if (!isSupportedReadyPythonVersion(venvVersion)) {
+      const venvSslVersionText = await this.getPythonSslVersionText(venvPython)
+      if (!isSupportedReadyPythonVersion(venvVersion) || !isSupportedReadyPythonSslVersion(venvSslVersionText)) {
         rmSync(this.venvRoot, { recursive: true, force: true })
       }
     }
@@ -445,6 +457,8 @@ export class SidecarManager {
         const { stdout, stderr } = await execFileAsync(candidate, ['--version'], { timeout: 5_000 })
         const versionText = `${stdout} ${stderr}`.trim()
         if (!isSupportedReadyPythonVersion(parsePythonVersionText(versionText))) continue
+        const sslVersionText = await this.getPythonSslVersionText(candidate)
+        if (!isSupportedReadyPythonSslVersion(sslVersionText)) continue
         return candidate
       } catch {
         // try next
@@ -453,11 +467,59 @@ export class SidecarManager {
     throw new Error('No usable Python 3.9-3.12 interpreter found for sidecar runtime')
   }
 
-  private async getPythonVersion(pythonBin: string): Promise<{ major: number; minor: number } | null> {
+  private async resolvePackagedPythonPath(): Promise<string | null> {
+    if (!this.packagedRuntimeRoot) return null
+    const pythonPath = getPackagedSkillPythonPath(this.packagedRuntimeRoot)
+    if (!existsSync(pythonPath)) {
+      throw new Error(`Packaged Python runtime is missing: ${pythonPath}`)
+    }
+    const runtimeEnv = this.getPythonRuntimeEnv()
+    const version = await this.getPythonVersion(pythonPath, runtimeEnv)
+    if (!isSupportedReadyPythonVersion(version)) {
+      throw new Error(`Packaged Python runtime has unsupported sidecar version: ${await this.getPythonVersionText(pythonPath, runtimeEnv) || 'unknown'}`)
+    }
+    const sslVersionText = await this.getPythonSslVersionText(pythonPath, runtimeEnv)
+    if (!isSupportedReadyPythonSslVersion(sslVersionText)) {
+      throw new Error(`Packaged Python runtime has unsupported sidecar OpenSSL: ${sslVersionText || 'unknown'}`)
+    }
+    return pythonPath
+  }
+
+  private getPythonRuntimeEnv(): NodeJS.ProcessEnv {
+    if (!this.packagedRuntimeRoot) {
+      return {
+        ...process.env,
+        ...SIDECAR_PIP_ENV,
+      }
+    }
+    return {
+      ...buildPackagedSkillRuntimeEnv(this.packagedRuntimeRoot),
+      ...SIDECAR_PIP_ENV,
+    }
+  }
+
+  private async getPythonVersion(pythonBin: string, env?: NodeJS.ProcessEnv): Promise<{ major: number; minor: number } | null> {
+    const versionText = await this.getPythonVersionText(pythonBin, env)
+    return parsePythonVersionText(versionText || '')
+  }
+
+  private async getPythonVersionText(pythonBin: string, env?: NodeJS.ProcessEnv): Promise<string | null> {
     try {
-      const { stdout, stderr } = await execFileAsync(pythonBin, ['--version'], { timeout: 5_000 })
-      const versionText = `${stdout} ${stderr}`.trim()
-      return parsePythonVersionText(versionText)
+      const { stdout, stderr } = await execFileAsync(pythonBin, ['--version'], { timeout: 5_000, env })
+      return `${stdout} ${stderr}`.trim()
+    } catch {
+      return null
+    }
+  }
+
+  private async getPythonSslVersionText(pythonBin: string, env?: NodeJS.ProcessEnv): Promise<string | null> {
+    try {
+      const { stdout, stderr } = await execFileAsync(
+        pythonBin,
+        ['-c', 'import ssl; print(ssl.OPENSSL_VERSION)'],
+        { timeout: 5_000, env },
+      )
+      return `${stdout} ${stderr}`.trim()
     } catch {
       return null
     }

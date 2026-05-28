@@ -1696,6 +1696,7 @@ export async function executeSkillTool(
         const referenceSkillId = sessionId ? (getLastReferenceSkill(sessionId)?.id ?? null) : null
         const activeSkillId = resolveActiveSkillContext({ sessionId })?.skillId ?? null
         const skillDef = listSkillsSafely().find((skill) => skill.id === skillId)
+        const allowPackagedRuntime = skillDef?.source === 'embedded'
         const hostRequirements = skillDef?.hostRequirements ?? null
         const effectiveAllowlist = getSkillHostController().getEffectiveShellAllowlist(
           sessionId,
@@ -1712,8 +1713,9 @@ export async function executeSkillTool(
           {
             skillId,
             signal: abortSignal,
-            runtimeBinDir: getManager().getRuntimeBinDir(),
-            venvBinDir: getManager().getSharedVenvBinDir(),
+            baseEnv: getManager().getRuntimeEnv({ allowPackaged: allowPackagedRuntime }),
+            runtimeBinDir: getManager().getRuntimeBinDir({ allowPackaged: allowPackagedRuntime }),
+            venvBinDir: getManager().getSharedVenvBinDir({ allowPackaged: allowPackagedRuntime }),
             effectiveAllowlist,
           },
         )

@@ -16,13 +16,11 @@ when-to-use: |
 
 ## 安装部署
 
-### 系统要求
+### Ready 内置运行时
 
-- Python 3.9+
-- FFmpeg（用于音视频处理）
-- 约 3GB 磁盘空间（FunASR 模型缓存）
+Ready 发行包必须随包提供共享技能运行时：Python、FFmpeg/ffprobe、yt-dlp、FunASR、RapidOCR 和所需模型缓存都应预置。不要在用户已安装的 Ready 里要求用户手动 brew / pip / 下载模型；如果缺依赖，应报告“发行运行时不完整”，而不是让用户回头装依赖。
 
-### 一键安装
+### 开发环境安装
 
 ```bash
 # 1. 基础工具
@@ -38,7 +36,7 @@ pip install rapidocr-onnxruntime
 
 ### ⚠️ FunASR 首次运行注意事项
 
-FunASR 首次运行时会**自动下载约 2-3GB 模型文件**到 `~/.cache/modelscope/`：
+仅在开发环境缺少预置模型缓存时，FunASR 可能自动下载模型文件到本机缓存。正式发行包应已预置，用户不应看到这一步：
 
 | 模型 | 大小 | 用途 |
 |------|------|------|
@@ -46,9 +44,8 @@ FunASR 首次运行时会**自动下载约 2-3GB 模型文件**到 `~/.cache/mod
 | fsmn-vad | ~20MB | 语音活动检测（长音频分段） |
 | ct-punc | ~1GB | 标点恢复 |
 
-- **首次下载可能需要 1-5 分钟**（取决于网速），期间看起来像是卡住，请耐心等待
-- 下载完成后会缓存到本地，后续运行秒级加载
-- 如果下载失败，可手动从 ModelScope 下载模型放到 `~/.cache/modelscope/hub/models/iic/` 目录
+- 开发机首次下载可能需要 1-5 分钟（取决于网速）
+- 发行包验收必须确认模型缓存已随包携带，不能把下载失败留给用户处理
 
 ### 环境验证
 
@@ -137,7 +134,7 @@ python3 -u /tmp/run_funasr.py 2>&1 | tee /tmp/funasr_output.log
 
 **注意事项**：
 - 必须使用**绝对路径**，不要使用相对路径
-- 首次运行需下载 2-3GB 模型，耐心等待（后续秒级加载）
+- Ready 发行包应使用预置模型缓存；开发环境缺缓存时才可能触发模型下载
 - 转录速度极快：10 分钟音频约 22 秒完成
 - 命令运行后需要等待 30-120 秒（取决于视频长度）
 
@@ -340,10 +337,10 @@ result = model.generate(
 ## 故障排除
 
 ### FunASR 首次运行很慢 / 看起来卡住
-首次运行需下载约 2-3GB 模型文件，这是正常现象。在网速 30MB/s 的环境下约需 1-2 分钟。下载完成后后续运行秒级加载。
+如果发生在正式发行包，优先判断为发行运行时不完整。只有开发环境缺少模型缓存时，才按模型下载问题处理。
 
 ### FunASR 模型下载失败
-如果 ModelScope 下载速度慢或中断，可手动从 [ModelScope](https://www.modelscope.cn/models) 下载以下模型到 `~/.cache/modelscope/hub/models/iic/` 目录：
+开发环境中如果 ModelScope 下载速度慢或中断，可从 [ModelScope](https://www.modelscope.cn/models) 下载以下模型到本机缓存目录；正式发行包应由打包流程预置：
 - `speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch`
 - `speech_fsmn_vad_zh-cn-16k-common-pytorch`
 - `punc_ct-transformer_cn-en-common-vocab471067-large`

@@ -105,7 +105,7 @@ def main():
         except Exception:
             print("   ⚠️  无法检测硬件编解码能力，运行时会自动回退")
     else:
-        print(f"   ❌ ffmpeg 未安装 → brew install ffmpeg / 下载 FFmpeg")
+        print("   ❌ Ready 发行运行时缺少 ffmpeg")
         all_ok = False
     
     # 检查 yt-dlp (支持多种调用方式)
@@ -131,7 +131,7 @@ def main():
     if ok:
         print(f"   ✅ yt-dlp: {version}")
     else:
-        print(f"   ❌ yt-dlp 未安装 → pip3 install yt-dlp")
+        print("   ❌ Ready 发行运行时缺少 yt-dlp")
         all_ok = False
     
     # ── 2. 核心 Python 依赖（必需） ──
@@ -151,24 +151,11 @@ def main():
             missing_pips.append(pip_name)
             all_ok = False
     
-    # ── 3. 语音转录依赖（智能选择） ──
-    print("\n3️⃣  语音转录 (智能选择)")
+    # ── 3. 语音转录依赖（FunASR Nano） ──
+    print("\n3️⃣  语音转录 (FunASR Nano)")
+    print("   推荐: FunASR Nano (通用高性能)")
 
-    import platform
-    system = platform.system()
-    print(f"   系统: {system}")
-
-    if system == "Darwin":  # macOS
-        print("   推荐: MLX Whisper (Apple Silicon 优化)")
-        if check_python_package("mlx_whisper"):
-            print("   ✅ mlx-whisper")
-        else:
-            print("   ⚠️  mlx-whisper 未安装 (推荐)")
-            print("      安装: pip install mlx-whisper")
-    else:  # Windows, Linux
-        print("   推荐: FunASR (通用高性能)")
-
-    # 检查 FunASR (所有系统都可用作备选)
+    # 检查 FunASR
     funasr_packages = {
         "funasr": "funasr",
         "modelscope": "modelscope",
@@ -202,7 +189,7 @@ def main():
         if check_python_package(import_name):
             print(f"   ✅ {pip_name} ({desc})")
         else:
-            print(f"   ⚠️  {pip_name} 未安装 ({desc}) → pip3 install {pip_name}")
+            print(f"   ⚠️  Ready 发行运行时缺少 {pip_name} ({desc})")
 
     # ── 5. GPU 加速 ──
     print("\n5️⃣  GPU 加速")
@@ -228,15 +215,14 @@ def main():
         print("  python3 scripts/pipeline_enhanced.py --setup")
         print("  python3 scripts/pipeline_enhanced.py <视频URL>")
     else:
-        print("❌ 存在缺失依赖，请执行以下命令安装：")
+        print("❌ Ready 发行运行时不完整，缺少以下依赖：")
         print()
         if missing_pips:
-            print(f"  pip3 install {' '.join(missing_pips)}")
+            print(f"  Python 模块: {', '.join(missing_pips)}")
         for cmd in missing_cmds:
             print(f"  {cmd}")
         print()
-        print("或一键安装所有依赖：")
-        print("  pip3 install -r requirements.txt")
+        print("请重新安装完整发行包或联系维护者。开发环境请参考 SKILL.md 的依赖说明。")
     
     print("=" * 55)
     return 0 if all_ok else 1

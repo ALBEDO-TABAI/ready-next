@@ -46,7 +46,7 @@ def main():
         print(f"   ✅ yt-dlp: {version}")
     else:
         print("   ❌ yt-dlp 未安装")
-        missing.append("pip install yt-dlp")
+        missing.append("yt-dlp")
         all_ok = False
     
     # 2. 检查 FFmpeg
@@ -56,7 +56,7 @@ def main():
         print(f"   ✅ FFmpeg: {version[:50]}...")
     else:
         print("   ❌ FFmpeg 未安装")
-        missing.append("下载 FFmpeg: https://ffmpeg.org/download.html")
+        missing.append("FFmpeg")
         all_ok = False
     
     # 3. 检查 Python 依赖
@@ -96,13 +96,12 @@ def main():
     if all_ok:
         print("✅ 所有依赖已满足，可以使用 video-copy-analyzer！")
     else:
-        print("❌ 存在缺失依赖，请执行以下命令安装：")
+        print("❌ Ready 发行运行时不完整，缺少以下依赖：")
         print()
         if pip_install:
-            print(f"   pip install {' '.join(pip_install)}")
+            print(f"   Python 模块: {', '.join(pip_install)}")
         for cmd in missing:
-            if not cmd.startswith("pip"):
-                print(f"   {cmd}")
+            print(f"   工具: {cmd}")
     
     print("=" * 50)
     return 0 if all_ok else 1

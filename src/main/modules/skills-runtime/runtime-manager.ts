@@ -65,6 +65,16 @@ import {
   parsePythonVersionText,
   type PythonVersionInfo,
 } from './python-runtime-version'
+import {
+  buildPackagedSkillRuntimeEnv,
+  getPackagedSkillPythonBinDir,
+  getPackagedSkillPythonPath,
+  getPackagedSkillRuntimeBinDir,
+  getPackagedSkillRuntimeToolCandidates,
+  readPackagedSkillRuntimeManifest,
+  resolvePackagedSkillRuntimeRoot,
+  type PackagedSkillRuntimeManifest,
+} from './packaged-runtime'
 import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 import { ExternalServiceStore } from '../settings-engine/external-service-store'
 import { SkillConfigurationStore } from './skill-configuration-store'
@@ -202,11 +212,13 @@ interface PythonRuntimeState {
   pythonVersion: string
   pythonSslVersion: string
   updatedAt: string
+  packaged?: boolean
 }
 
 export interface SkillsRuntimeManagerOptions {
   runtimeRoot?: string
   embeddedSkillsRoot?: string
+  packagedRuntimeRoot?: string | null
   startBackgroundTasks?: boolean
   /**
    * B-arch-4 — inject a SkillHostController for tests. Production path uses
@@ -421,6 +433,8 @@ export class SkillsRuntimeManager {
   private readonly modelscopeCache: string
   private readonly pipCache: string
   private readonly outputsRoot: string
+  private readonly packagedRuntimeRoot: string | null
+  private readonly packagedRuntimeManifest: PackagedSkillRuntimeManifest | null
   private readonly embeddedSkillsRootOverride?: string
   private readonly hostControllerOverride?: SkillHostController
   private readonly externalServiceStore = new ExternalServiceStore()
@@ -452,6 +466,13 @@ export class SkillsRuntimeManager {
     this.modelscopeCache = join(this.cacheRoot, 'modelscope')
     this.pipCache = join(this.cacheRoot, 'pip')
     this.outputsRoot = join(this.runtimeRoot, 'outputs')
+    this.packagedRuntimeRoot = resolvePackagedSkillRuntimeRoot(
+      (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath,
+      options.packagedRuntimeRoot,
+    )
+    this.packagedRuntimeManifest = this.packagedRuntimeRoot
+      ? readPackagedSkillRuntimeManifest(this.packagedRuntimeRoot)
+      : null
     this.embeddedSkillsRootOverride = options.embeddedSkillsRoot
     this.hostControllerOverride = options.hostController
     this.retiredEmbeddedSkillIdsOverride = options.retiredEmbeddedSkillIds
@@ -771,14 +792,26 @@ export class SkillsRuntimeManager {
    * harmless, and pre-installing the venv on every boot just to satisfy
    * this getter would add startup latency for no gain.
    */
-  getSharedVenvBinDir(): string {
+  getSharedVenvBinDir(options: { allowPackaged?: boolean } = {}): string {
+    const allowPackaged = options.allowPackaged ?? true
+    if (allowPackaged && this.packagedRuntimeRoot) {
+      return getPackagedSkillPythonBinDir(this.packagedRuntimeRoot)
+    }
     return process.platform === 'win32'
       ? join(this.venvRoot, 'Scripts')
       : join(this.venvRoot, 'bin')
   }
 
-  getRuntimeBinDir(): string {
+  getRuntimeBinDir(options: { allowPackaged?: boolean } = {}): string {
+    const allowPackaged = options.allowPackaged ?? true
+    if (allowPackaged && this.packagedRuntimeRoot) {
+      return getPackagedSkillRuntimeBinDir(this.packagedRuntimeRoot)
+    }
     return this.runtimeBin
+  }
+
+  getRuntimeEnv(options: { allowPackaged?: boolean } = {}): NodeJS.ProcessEnv {
+    return this.getBaseEnv(options)
   }
 
   // Phase 4: the skill_executions state machine is retired. The following
@@ -1174,11 +1207,41 @@ export class SkillsRuntimeManager {
         if (!venvPython) {
           return this.invalidParams(definition.id, action.name, 'Python skill runtime is unavailable')
         }
-        result = await this.runDirectScript(definition.id, skillPath, action, venvPython, [entryPath, ...args], timeoutMs, envOverrides, signal)
+        result = await this.runDirectScript(
+          definition.id,
+          skillPath,
+          action,
+          venvPython,
+          [entryPath, ...args],
+          timeoutMs,
+          envOverrides,
+          signal,
+          definition.source === 'embedded',
+        )
       } else if (action.runtime === 'node') {
-        result = await this.runDirectScript(definition.id, skillPath, action, 'node', [entryPath, ...args], timeoutMs, envOverrides, signal)
+        result = await this.runDirectScript(
+          definition.id,
+          skillPath,
+          action,
+          'node',
+          [entryPath, ...args],
+          timeoutMs,
+          envOverrides,
+          signal,
+          definition.source === 'embedded',
+        )
       } else {
-        result = await this.runDirectScript(definition.id, skillPath, action, entryPath, args, timeoutMs, envOverrides, signal)
+        result = await this.runDirectScript(
+          definition.id,
+          skillPath,
+          action,
+          entryPath,
+          args,
+          timeoutMs,
+          envOverrides,
+          signal,
+          definition.source === 'embedded',
+        )
       }
     }
 
@@ -1227,6 +1290,7 @@ export class SkillsRuntimeManager {
     timeoutMs: number,
     envOverrides?: Record<string, string>,
     signal?: AbortSignal,
+    allowPackagedRuntime?: boolean,
   ): Promise<SkillRunResult> {
     const executed = await this.executeProcessWithStructuredResult({
       skillId,
@@ -1238,6 +1302,7 @@ export class SkillsRuntimeManager {
       timeoutMs,
       envOverrides,
       signal,
+      allowPackagedRuntime,
       preferStructuredResult: true,
     })
     return this.toDirectRunResult(skillId, action.name, executed)
@@ -1263,6 +1328,7 @@ export class SkillsRuntimeManager {
     timeoutMs: number
     envOverrides?: Record<string, string>
     signal?: AbortSignal
+    allowPackagedRuntime?: boolean
     preferStructuredResult: boolean
   }): Promise<{
     success: boolean
@@ -1287,7 +1353,7 @@ export class SkillsRuntimeManager {
     const command = [params.commandBin, ...params.commandArgs]
     const resultPath = params.preferStructuredResult ? this.createStructuredResultPath(params.skillId, params.actionName) : null
     const env = {
-      ...this.getBaseEnv(),
+      ...this.getBaseEnv({ allowPackaged: params.allowPackagedRuntime ?? true }),
       ...(params.envOverrides || {}),
       ...(resultPath ? { READY_SKILL_RESULT_PATH: resultPath } : {}),
     }
@@ -1767,9 +1833,13 @@ export class SkillsRuntimeManager {
       }
 
       try {
-        await this.ensureRuntimeToolchain()
-        if (existsSync(requirementsPath)) {
-          await this.installRequirements(venvPython, requirementsPath)
+        if (this.packagedRuntimeRoot) {
+          this.assertPackagedRuntimeCoversEmbeddedSkill(manifest.id)
+        } else {
+          await this.ensureRuntimeToolchain()
+          if (existsSync(requirementsPath)) {
+            await this.installRequirements(venvPython, requirementsPath)
+          }
         }
         const state: SkillInstallState = {
           version: manifest.version,
@@ -1798,8 +1868,8 @@ export class SkillsRuntimeManager {
     const requiresPython = customSkill.runtime === 'python' || customSkill.actions.some((action) => action.runtime === 'python')
     const requirementsPath = customSkill.requirementsFile ? join(customSkill.managedPath, customSkill.requirementsFile) : ''
     const digest = customSkill.requirementsFile ? requirementsDigest(requirementsPath) : 'none'
-    const venvPython = requiresPython ? await this.ensurePythonVenv() : undefined
-    const venvState = requiresPython ? this.readPythonRuntimeState() : null
+    const venvPython = requiresPython ? await this.ensurePythonVenv({ allowPackaged: false }) : undefined
+    const venvState = requiresPython ? this.readPythonRuntimeState({ allowPackaged: false }) : null
 
     if (!force && existsSync(statePath)) {
       try {
@@ -1821,9 +1891,9 @@ export class SkillsRuntimeManager {
         if (!venvPython) {
           throw new Error('Python skill runtime is unavailable')
         }
-        await this.ensureRuntimeToolchain()
+        await this.ensureRuntimeToolchain({ allowPackaged: false })
         if (customSkill.requirementsFile && existsSync(requirementsPath)) {
-          await this.installRequirements(venvPython, requirementsPath)
+          await this.installRequirements(venvPython, requirementsPath, { allowPackaged: false })
         }
       }
       const state: SkillInstallState = {
@@ -1912,14 +1982,20 @@ export class SkillsRuntimeManager {
     return join(this.skillsRoot, skillId)
   }
 
-  private async ensurePythonVenv(): Promise<string> {
+  private async ensurePythonVenv(options: { allowPackaged?: boolean } = {}): Promise<string> {
+    const allowPackaged = options.allowPackaged ?? true
+    if (allowPackaged) {
+      const packagedPythonPath = await this.resolvePackagedPythonPath()
+      if (packagedPythonPath) return packagedPythonPath
+    }
+
     const pythonPath = this.getVenvPythonPath()
     let previousVersionText: string | null = null
     if (existsSync(pythonPath)) {
       const version = await this.getPythonVersion(pythonPath)
       const sslVersionText = await this.getPythonSslVersionText(pythonPath)
       if (isSupportedReadyPythonVersion(version) && isSupportedReadyPythonSslVersion(sslVersionText)) {
-        const state = this.readPythonRuntimeState()
+        const state = this.readPythonRuntimeState({ allowPackaged })
         if (!state?.venvId || !state.pythonSslVersion) {
           await this.writePythonRuntimeState(pythonPath)
         }
@@ -1939,14 +2015,14 @@ export class SkillsRuntimeManager {
     await execFileAsync(basePython, ['-m', 'venv', this.venvRoot], {
       timeout: 180_000,
       maxBuffer: MAX_COMMAND_BUFFER,
-      env: this.getBaseEnv(),
+      env: this.getBaseEnv({ allowPackaged }),
     })
 
     const venvPython = this.getVenvPythonPath()
     await execFileAsync(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '--upgrade', 'pip', 'setuptools', 'wheel'], {
       timeout: 300_000,
       maxBuffer: MAX_COMMAND_BUFFER,
-      env: this.getBaseEnv(),
+      env: this.getBaseEnv({ allowPackaged }),
     })
     const state = await this.writePythonRuntimeState(venvPython, basePython)
     if (previousVersionText) {
@@ -2042,7 +2118,44 @@ export class SkillsRuntimeManager {
     throw new Error(buildReadyPythonRuntimeNotFoundMessage({ sawSslIncompatibleCandidate }))
   }
 
-  private readPythonRuntimeState(): PythonRuntimeState | null {
+  private async resolvePackagedPythonPath(): Promise<string | null> {
+    if (!this.packagedRuntimeRoot) return null
+    const pythonPath = getPackagedSkillPythonPath(this.packagedRuntimeRoot)
+    if (!existsSync(pythonPath)) {
+      throw new Error(`Packaged Python runtime is missing: ${pythonPath}`)
+    }
+    const runtimeEnv = this.getBaseEnv({ allowPackaged: true })
+    const version = await this.getPythonVersion(pythonPath, runtimeEnv)
+    const sslVersionText = await this.getPythonSslVersionText(pythonPath, runtimeEnv)
+    if (!isSupportedReadyPythonVersion(version)) {
+      throw new Error(`Packaged Python runtime has unsupported version: ${await this.getPythonVersionText(pythonPath, runtimeEnv) || 'unknown'}`)
+    }
+    if (!isSupportedReadyPythonSslVersion(sslVersionText)) {
+      throw new Error(`Packaged Python runtime has unsupported OpenSSL: ${sslVersionText || 'unknown'}`)
+    }
+    return pythonPath
+  }
+
+  private assertPackagedRuntimeCoversEmbeddedSkill(skillId: EmbeddedSkillId): void {
+    const covered = this.packagedRuntimeManifest?.embeddedSkillIds || []
+    if (!covered.includes(skillId)) {
+      throw new Error(`Packaged skill runtime does not declare dependency coverage for embedded skill: ${skillId}`)
+    }
+  }
+
+  private readPythonRuntimeState(options: { allowPackaged?: boolean } = {}): PythonRuntimeState | null {
+    const allowPackaged = options.allowPackaged ?? true
+    if (allowPackaged && this.packagedRuntimeRoot) {
+      const manifest = this.packagedRuntimeManifest
+      return {
+        venvId: `packaged:${manifest?.runtimeId || manifest?.createdAt || 'unknown'}`,
+        pythonPath: getPackagedSkillPythonPath(this.packagedRuntimeRoot),
+        pythonVersion: manifest?.pythonVersion || 'packaged',
+        pythonSslVersion: manifest?.pythonSslVersion || 'packaged',
+        updatedAt: manifest?.createdAt || 'packaged',
+        packaged: true,
+      }
+    }
     try {
       const statePath = join(this.venvRoot, PYTHON_RUNTIME_STATE_FILENAME)
       return JSON.parse(readFileSync(statePath, 'utf-8')) as PythonRuntimeState
@@ -2065,26 +2178,26 @@ export class SkillsRuntimeManager {
     return state
   }
 
-  private async getPythonVersion(pythonBin: string): Promise<PythonVersionInfo | null> {
-    const versionText = await this.getPythonVersionText(pythonBin)
+  private async getPythonVersion(pythonBin: string, env?: NodeJS.ProcessEnv): Promise<PythonVersionInfo | null> {
+    const versionText = await this.getPythonVersionText(pythonBin, env)
     return parsePythonVersionText(versionText || '')
   }
 
-  private async getPythonVersionText(pythonBin: string): Promise<string | null> {
+  private async getPythonVersionText(pythonBin: string, env?: NodeJS.ProcessEnv): Promise<string | null> {
     try {
-      const { stdout, stderr } = await execFileAsync(pythonBin, ['--version'], { timeout: 10_000, maxBuffer: 1_000_000 })
+      const { stdout, stderr } = await execFileAsync(pythonBin, ['--version'], { timeout: 10_000, maxBuffer: 1_000_000, env })
       return `${stdout} ${stderr}`.trim()
     } catch {
       return null
     }
   }
 
-  private async getPythonSslVersionText(pythonBin: string): Promise<string | null> {
+  private async getPythonSslVersionText(pythonBin: string, env?: NodeJS.ProcessEnv): Promise<string | null> {
     try {
       const { stdout, stderr } = await execFileAsync(
         pythonBin,
         ['-c', 'import ssl; print(ssl.OPENSSL_VERSION)'],
-        { timeout: 10_000, maxBuffer: 1_000_000 },
+        { timeout: 10_000, maxBuffer: 1_000_000, env },
       )
       return `${stdout} ${stderr}`.trim()
     } catch {
@@ -2092,15 +2205,29 @@ export class SkillsRuntimeManager {
     }
   }
 
-  private async installRequirements(venvPython: string, requirementsPath: string): Promise<void> {
+  private async installRequirements(
+    venvPython: string,
+    requirementsPath: string,
+    options: { allowPackaged?: boolean } = {},
+  ): Promise<void> {
     await execFileAsync(venvPython, ['-m', 'pip', 'install', '--disable-pip-version-check', '-r', requirementsPath], {
       timeout: 3_600_000,
       maxBuffer: MAX_COMMAND_BUFFER,
-      env: this.getBaseEnv(),
+      env: this.getBaseEnv(options),
     })
   }
 
-  private async ensureRuntimeToolchain(): Promise<void> {
+  private async ensureRuntimeToolchain(options: { allowPackaged?: boolean } = {}): Promise<void> {
+    const allowPackaged = options.allowPackaged ?? true
+    if (allowPackaged && this.packagedRuntimeRoot) {
+      for (const binaryName of ['ffmpeg', 'ffprobe']) {
+        const candidates = getPackagedSkillRuntimeToolCandidates(this.packagedRuntimeRoot, binaryName)
+        if (!candidates.some((candidate) => existsSync(candidate))) {
+          throw new Error(`Packaged skill runtime is missing required binary: ${binaryName}`)
+        }
+      }
+      return
+    }
     await this.linkIfFound('ffmpeg')
     await this.linkIfFound('ffprobe')
   }
@@ -2120,7 +2247,15 @@ export class SkillsRuntimeManager {
     }
   }
 
-  private getBaseEnv(): NodeJS.ProcessEnv {
+  private getBaseEnv(options: { allowPackaged?: boolean } = {}): NodeJS.ProcessEnv {
+    const usePackaged = (options.allowPackaged ?? true) && !!this.packagedRuntimeRoot
+    if (usePackaged && this.packagedRuntimeRoot) {
+      return {
+        ...buildPackagedSkillRuntimeEnv(this.packagedRuntimeRoot),
+        PYTHONUTF8: '1',
+        PYTHONIOENCODING: 'utf-8',
+      }
+    }
     const venvBinDir = process.platform === 'win32'
       ? join(this.venvRoot, 'Scripts')
       : join(this.venvRoot, 'bin')
@@ -2129,7 +2264,7 @@ export class SkillsRuntimeManager {
       PATH: [this.runtimeBin, venvBinDir, process.env.PATH || ''].join(delimiter),
       PIP_CACHE_DIR: this.pipCache,
       XDG_CACHE_HOME: this.cacheRoot,
-      MODELSCOPE_CACHE: this.modelscopeCache,
+      MODELSCOPE_CACHE: join(this.cacheRoot, 'modelscope'),
       HF_HOME: join(this.cacheRoot, 'huggingface'),
       PYTHONUTF8: '1',
       PYTHONIOENCODING: 'utf-8',
