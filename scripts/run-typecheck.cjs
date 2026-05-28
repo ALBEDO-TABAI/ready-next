@@ -15,6 +15,8 @@ function runNpmScript(scriptName) {
     const child = spawn(npmBin, ['run', scriptName], {
       cwd: process.cwd(),
       stdio: 'inherit',
+      shell: process.platform === 'win32',
+      windowsHide: true,
     })
 
     child.on('error', (error) => {
