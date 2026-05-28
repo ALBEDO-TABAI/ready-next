@@ -12,8 +12,9 @@ const API_ACTIONS_BY_LABEL = new Map([
   ['暂不继续', ['respondToInteraction']],
 ])
 
-function hasApiCall(report, keys) {
-  return Array.isArray(report.apiCalls) && report.apiCalls.some((call) => keys.includes(call?.key))
+function hasSuccessfulApiCall(report, keys) {
+  return Array.isArray(report.apiCalls) && report.apiCalls.some((call) =>
+    keys.includes(call?.key) && call?.result?.success === true)
 }
 
 function hasComposerChange(report) {
@@ -48,8 +49,8 @@ export function evaluateTaskCardActionEffect(report) {
   const expectedApiKeys = API_ACTIONS_BY_LABEL.get(label)
   const effect = expectedApiKeys
     ? {
-        ok: hasApiCall(report, expectedApiKeys) || hasTaskStateChange(report),
-        expectation: `api:${expectedApiKeys.join('|')}|state:task-changed`,
+        ok: hasSuccessfulApiCall(report, expectedApiKeys),
+        expectation: `api-success:${expectedApiKeys.join('|')}`,
       }
     : label === '打开会话'
       ? {
@@ -168,6 +169,9 @@ async function main() {
       const apiCalls = []
       const instrumentation = []
       const restoreFns = []
+      const serialize = (value) => {
+        try { return JSON.parse(JSON.stringify(value)) } catch { return String(value) }
+      }
       const wrap = (owner, key) => {
         if (!owner || typeof owner[key] !== 'function') return
         const descriptor = Object.getOwnPropertyDescriptor(owner, key)
@@ -177,10 +181,28 @@ async function main() {
         }
         const original = owner[key].bind(owner)
         owner[key] = (...args) => {
-          apiCalls.push({ key, args: args.map((arg) => {
-            try { return JSON.parse(JSON.stringify(arg)) } catch { return String(arg) }
-          }) })
-          return original(...args)
+          const entry = { key, args: args.map((arg) => serialize(arg)) }
+          apiCalls.push(entry)
+          try {
+            const result = original(...args)
+            if (result && typeof result.then === 'function') {
+              return result.then(
+                (value) => {
+                  entry.result = serialize(value)
+                  return value
+                },
+                (error) => {
+                  entry.error = error instanceof Error ? error.message : String(error)
+                  throw error
+                },
+              )
+            }
+            entry.result = serialize(result)
+            return result
+          } catch (error) {
+            entry.error = error instanceof Error ? error.message : String(error)
+            throw error
+          }
         }
         instrumentation.push({ key, wrapped: true })
         restoreFns.push(() => { owner[key] = original })

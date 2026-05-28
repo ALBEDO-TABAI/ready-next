@@ -12,6 +12,7 @@ const {
   CI_REPORT_REL,
   EXPECTED_AGENT_ACCEPTANCE_IDS,
   EXPECTED_MANUAL_IDS,
+  EXPECTED_SURFACE20_DOM_CASE_IDS,
   RELEASE_HANDOFF_REL,
   WORKFLOW_REL,
   main,
@@ -611,6 +612,39 @@ test('rejects Surface20 evidence that falls back to store input', () => {
   assert.equal(result.ok, false)
   assert.match(result.errors.join('\n'), /must not rely on store fallback/)
   assert.match(result.errors.join('\n'), /surface20-session-b-pending-card must use inputMode=dom/)
+})
+
+test('rejects Surface20 proof that is referenced from a historical Stage Y bundle', () => {
+  const root = makeRoot()
+  writePassingFixture(root)
+  const zDir = 'docs/superpowers/audits/2026-05-24-stage-z-closeout'
+  const historicalReport =
+    'docs/superpowers/audits/2026-05-23-stage-y-closeout/dogfood/evidence/agent-panel-mimo-acceptance.json'
+  write(
+    root,
+    historicalReport,
+    `${JSON.stringify({
+      cases: [
+        ...EXPECTED_SURFACE20_DOM_CASE_IDS.map((id) => ({ id, ok: true, inputMode: 'dom' })),
+        { id: 'surface20-tools-log-capability', ok: true, inputMode: 'log' },
+      ],
+    }, null, 2)}\n`,
+  )
+  write(
+    root,
+    path.join(zDir, 'live/surface-20-agent-interaction-routing.md'),
+    [
+      '# Surface20',
+      '',
+      `Report: ${historicalReport}`,
+      'status: pass',
+    ].join('\n'),
+  )
+
+  const result = main({ root })
+
+  assert.equal(result.ok, false)
+  assert.match(result.errors.join('\n'), /current Stage Z Surface20 JSON/)
 })
 
 test('rejects Surface09 resumability evidence without a task-card button resume proof', () => {

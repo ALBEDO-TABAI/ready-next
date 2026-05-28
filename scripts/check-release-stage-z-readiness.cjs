@@ -529,14 +529,17 @@ function validateSurface20DomEvidence(root, errors, notes) {
     return
   }
   const relPath = rel(root, abs)
+  const currentStageZDirRel = rel(root, path.dirname(path.dirname(abs)))
   const text = fs.readFileSync(abs, 'utf8')
   if (/store fallback/i.test(text)) {
     errors.push(`${relPath}: Surface20 evidence must not rely on store fallback`)
   }
   const evidencePaths = existingEvidencePaths(root, text)
-    .filter((evidencePath) => /agent-panel-mimo-acceptance\.json$/.test(evidencePath))
+    .filter((evidencePath) =>
+      evidencePath.startsWith(`${currentStageZDirRel}/`)
+      && /agent-panel-mimo-acceptance\.json$/.test(evidencePath))
   if (evidencePaths.length === 0) {
-    errors.push(`${relPath}: missing Surface20 JSON report evidence`)
+    errors.push(`${relPath}: missing current Stage Z Surface20 JSON report evidence`)
     return
   }
   const candidateResults = evidencePaths.map((evidencePath) => {
@@ -678,6 +681,7 @@ module.exports = {
   WORKFLOW_REL,
   EXPECTED_AGENT_ACCEPTANCE_IDS,
   EXPECTED_MANUAL_IDS,
+  EXPECTED_SURFACE20_DOM_CASE_IDS,
   main,
   parseExecutedAgentAcceptanceRows,
   parseExecutedManualRows,

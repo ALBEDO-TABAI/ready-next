@@ -30,21 +30,25 @@ test('task card action probe rejects continue buttons without a resume call', as
 
   assert.equal(report.ok, false)
   assert.equal(report.error, 'no-action-effect')
-  assert.equal(report.effect.expectation, 'api:resumeRun|state:task-changed')
+  assert.equal(report.effect.expectation, 'api-success:resumeRun')
 })
 
-test('task card action probe accepts continue buttons with a resume call', async () => {
+test('task card action probe accepts continue buttons with a successful resume call', async () => {
   const { evaluateTaskCardActionEffect } = await probeModule
   const report = baseReport('继续运行')
-  report.apiCalls.push({ key: 'resumeRun', args: [{ scopeId: 'conv-before' }] })
+  report.apiCalls.push({
+    key: 'resumeRun',
+    args: [{ scopeId: 'conv-before' }],
+    result: { success: true },
+  })
 
   const checked = evaluateTaskCardActionEffect(report)
 
   assert.equal(checked.ok, true)
-  assert.equal(checked.effect.expectation, 'api:resumeRun|state:task-changed')
+  assert.equal(checked.effect.expectation, 'api-success:resumeRun')
 })
 
-test('task card action probe accepts continue buttons with task state change', async () => {
+test('task card action probe rejects continue buttons when only task state changes', async () => {
   const { evaluateTaskCardActionEffect } = await probeModule
   const report = baseReport('继续生成报告')
   report.before.taskCards = [{ taskId: 'skill-child:child-1', status: 'blocked' }]
@@ -55,8 +59,25 @@ test('task card action probe accepts continue buttons with task state change', a
 
   const checked = evaluateTaskCardActionEffect(report)
 
-  assert.equal(checked.ok, true)
-  assert.equal(checked.effect.expectation, 'api:resumeRun|state:task-changed')
+  assert.equal(checked.ok, false)
+  assert.equal(checked.error, 'no-action-effect')
+  assert.equal(checked.effect.expectation, 'api-success:resumeRun')
+})
+
+test('task card action probe rejects failed API results', async () => {
+  const { evaluateTaskCardActionEffect } = await probeModule
+  const report = baseReport('取消')
+  report.apiCalls.push({
+    key: 'cancelChildRun',
+    args: [{ childRunId: 'vchild01' }],
+    result: { success: false, error: 'not found' },
+  })
+
+  const checked = evaluateTaskCardActionEffect(report)
+
+  assert.equal(checked.ok, false)
+  assert.equal(checked.error, 'no-action-effect')
+  assert.equal(checked.effect.expectation, 'api-success:cancelChildRun')
 })
 
 test('task card action probe accepts open-session when the active scope changes', async () => {
