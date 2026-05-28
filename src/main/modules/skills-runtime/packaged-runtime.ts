@@ -27,6 +27,7 @@ export function readPackagedSkillRuntimeManifest(root: string): PackagedSkillRun
   try {
     return JSON.parse(readFileSync(join(root, PACKAGED_SKILL_RUNTIME_MANIFEST), 'utf-8')) as PackagedSkillRuntimeManifest
   } catch {
+    // silent-catch: the manifest file is already existence-gated by resolvePackagedSkillRuntimeRoot, so a throw here means a corrupt/unreadable manifest. All manifest fields are optional metadata hints, so degrade to null ("runtime present, metadata unknown") rather than crashing boot.
     return null
   }
 }

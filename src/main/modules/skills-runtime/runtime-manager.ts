@@ -854,6 +854,7 @@ export class SkillsRuntimeManager {
       try {
         return !statSync(join(modelDir, file)).isFile()
       } catch {
+        // silent-catch: statSync throws (ENOENT) when the path is absent; an absent path is exactly a missing required model file, so report it as missing.
         return true
       }
     })
