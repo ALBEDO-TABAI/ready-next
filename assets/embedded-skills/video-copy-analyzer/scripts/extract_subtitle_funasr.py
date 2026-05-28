@@ -17,6 +17,12 @@ import tempfile
 from pathlib import Path
 import json
 
+FUNASR_NANO_MODEL_ID = os.environ.get("READY_FUNASR_NANO_MODEL_ID", "FunAudioLLM/Fun-ASR-Nano-2512")
+FUNASR_NANO_REQUIRED_FILES = ("model.pt", "config.yaml")
+FUNASR_FALLBACK_ASR_MODEL_ID = "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch"
+FUNASR_FALLBACK_VAD_MODEL_ID = "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch"
+FUNASR_FALLBACK_PUNC_MODEL_ID = "iic/punc_ct-transformer_cn-en-common-vocab471067-large"
+
 
 # ============================================================
 # L0: B站 API 字幕获取（最高优先级）
@@ -356,6 +362,85 @@ def _split_text_by_punctuation(text: str, timestamps: list) -> list:
     return sentences
 
 
+def _configured_funasr_nano_model_path() -> str:
+    for env_name in ("READY_FUNASR_NANO_MODEL_DIR", "FUNASR_NANO_MODEL_DIR"):
+        raw = os.environ.get(env_name, "").strip()
+        if not raw:
+            continue
+        model_dir = Path(raw).expanduser()
+        missing = [name for name in FUNASR_NANO_REQUIRED_FILES if not (model_dir / name).is_file()]
+        if not missing:
+            return str(model_dir)
+        print(f"   ⚠️  FunASR Nano 本地目录缺少文件 {missing}: {model_dir}")
+    return ""
+
+
+def _allow_funasr_nano_download() -> bool:
+    value = os.environ.get("READY_FUNASR_NANO_AUTO_DOWNLOAD", "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _modelscope_cache_root():
+    raw = os.environ.get("MODELSCOPE_CACHE", "").strip()
+    if raw:
+        return Path(raw).expanduser()
+    runtime_root = os.environ.get("READY_PACKAGED_SKILL_RUNTIME_ROOT", "").strip()
+    if runtime_root:
+        return Path(runtime_root).expanduser() / "cache" / "modelscope"
+    return None
+
+
+def _local_modelscope_model_path(model_id: str) -> str:
+    root = _modelscope_cache_root()
+    if root is None:
+        return ""
+    model_dir = root / "models" / model_id
+    if (model_dir / "model.pt").is_file() and (model_dir / "config.yaml").is_file():
+        return str(model_dir)
+    return ""
+
+
+def _load_funasr_model():
+    from funasr import AutoModel
+
+    try:
+        local_model = _configured_funasr_nano_model_path()
+        if local_model:
+            model_py = Path(local_model) / "model.py"
+            kwargs = {
+                "model": local_model,
+                "hub": "hf",
+                "trust_remote_code": True,
+                "disable_update": True,
+            }
+            if model_py.is_file():
+                kwargs["remote_code"] = str(model_py)
+            return AutoModel(**kwargs), "Fun-ASR-Nano-2512"
+
+        if _allow_funasr_nano_download():
+            return AutoModel(
+                model=FUNASR_NANO_MODEL_ID,
+                hub="hf",
+                trust_remote_code=True,
+                disable_update=True,
+            ), "Fun-ASR-Nano-2512"
+
+        raise RuntimeError("FunASR Nano model is not prepared; configure a local model dir or use the Ready download button")
+    except Exception as exc:
+        print(f"   ⚠️  Fun-ASR-Nano-2512 当前环境不可直接使用: {exc}")
+        print("   ↩️  自动回退到稳定版 paraformer-zh")
+        fallback_model = _local_modelscope_model_path(FUNASR_FALLBACK_ASR_MODEL_ID) or "paraformer-zh"
+        fallback_vad = _local_modelscope_model_path(FUNASR_FALLBACK_VAD_MODEL_ID) or "fsmn-vad"
+        fallback_punc = _local_modelscope_model_path(FUNASR_FALLBACK_PUNC_MODEL_ID) or "ct-punc"
+        return AutoModel(
+            model=fallback_model,
+            vad_model=fallback_vad,
+            vad_kwargs={"max_single_segment_time": 60000},
+            punc_model=fallback_punc,
+            disable_update=True,
+        ), "paraformer-zh"
+
+
 def extract_with_funasr(video_path: str, output_srt: str) -> bool:
     """
     使用 FunASR 进行语音转录
@@ -365,11 +450,9 @@ def extract_with_funasr(video_path: str, output_srt: str) -> bool:
     https://github.com/modelscope/FunASR/blob/main/examples/industrial_data_pretraining/paraformer/demo.py
     """
     try:
-        from funasr import AutoModel
-
         print("🎤 使用 FunASR 进行语音转录...")
-        print("   ASR 模型: paraformer-zh (含 VAD + 标点)")
-        print("   发行包应已预置模型缓存，若长时间停在这里请检查发行运行时")
+        print("   ASR 模型: 优先使用本地 Fun-ASR-Nano-2512；未准备则回退到 paraformer-zh")
+        print("   Nano 权重不随应用内置，可在 Ready Skill 配置中下载或指定本地目录")
 
         # 提取音频
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
@@ -378,21 +461,18 @@ def extract_with_funasr(video_path: str, output_srt: str) -> bool:
         if not extract_audio(video_path, audio_path):
             return False
 
-        # 加载 FunASR 模型（官方推荐的短名称 + VAD + 标点）
-        model = AutoModel(
-            model="paraformer-zh",
-            vad_model="fsmn-vad",
-            vad_kwargs={"max_single_segment_time": 60000},
-            punc_model="ct-punc",
-            disable_update=True,
-        )
+        model, resolved_model_name = _load_funasr_model()
+        print(f"   已加载模型: {resolved_model_name}")
 
         # 转录（VAD 自动分段，标点自动恢复，cache={} 是官方推荐参数）
-        result = model.generate(
-            input=audio_path,
-            batch_size_s=300,
-            cache={},
-        )
+        if resolved_model_name == "Fun-ASR-Nano-2512":
+            result = model.generate(input=[audio_path], itn=True, language="中文")
+        else:
+            result = model.generate(
+                input=audio_path,
+                batch_size_s=300,
+                cache={},
+            )
 
         # 生成 SRT
         subtitle_count = 0

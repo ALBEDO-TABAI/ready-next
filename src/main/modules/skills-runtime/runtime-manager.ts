@@ -1,8 +1,8 @@
-import { execFile } from 'child_process'
+import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'child_process'
 import { promisify } from 'util'
 import { createHash, randomUUID } from 'crypto'
 import { createRequire } from 'module'
-import { join, delimiter } from 'path'
+import { join, delimiter, isAbsolute, resolve } from 'path'
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'fs'
 
 // See database.ts for the full rationale. Electron's Node entry is a CJS
@@ -86,6 +86,8 @@ const INSTALL_STATE_FILENAME = '.ready-install-state.json'
 const EMBEDDED_SYNC_STATE_FILENAME = '.ready-embedded-sync-state.json'
 const PYTHON_RUNTIME_STATE_FILENAME = '.ready-python-runtime-state.json'
 const MAX_COMMAND_BUFFER = 24 * 1024 * 1024
+const FUNASR_NANO_MODEL_ID = 'FunAudioLLM/Fun-ASR-Nano-2512'
+const FUNASR_NANO_REQUIRED_FILES = ['model.pt', 'config.yaml'] as const
 /**
  * C6 — per-stream in-memory cap before output spills to a `.logs/` artifact
  * under `<runtimeRoot>/outputs/<skillId>/`. Long-running video / audio skills
@@ -282,6 +284,27 @@ export interface SkillRunResult {
   stderrArtifactError?: string
 }
 
+export interface FunasrNanoModelDownloadStatus {
+  running: boolean
+  targetDir: string | null
+  startedAt: string | null
+  updatedAt: string | null
+  completedAt: string | null
+  error: string | null
+  lastMessage: string | null
+  progressPercent: number | null
+}
+
+export interface FunasrNanoModelStatus {
+  modelId: string
+  defaultModelDir: string
+  configuredModelDir: string | null
+  activeModelDir: string
+  available: boolean
+  missingFiles: string[]
+  download: FunasrNanoModelDownloadStatus
+}
+
 export interface SkillRunRequest {
   skillId: SkillId
   action: string
@@ -449,6 +472,17 @@ export class SkillsRuntimeManager {
   private outputDirSweepIntervalTimer: NodeJS.Timeout | null = null
   private runningScheduleIds = new Set<string>()
   private orphanCleanupRan = false
+  private funasrNanoDownloadProcess: ChildProcessWithoutNullStreams | null = null
+  private funasrNanoDownloadStatus: FunasrNanoModelDownloadStatus = {
+    running: false,
+    targetDir: null,
+    startedAt: null,
+    updatedAt: null,
+    completedAt: null,
+    error: null,
+    lastMessage: null,
+    progressPercent: null,
+  }
 
   // Phase 4: reference-skill hint TTL sweep runs independently of the retired
   // skill_executions state machine. Boot delay prevents blocking startup; the
@@ -649,6 +683,214 @@ export class SkillsRuntimeManager {
     }
   }
 
+  getFunasrNanoModelStatus(input: { targetDir?: string | null } = {}): FunasrNanoModelStatus {
+    this.ensureRuntimeDirs()
+    const configuredModelDir = this.getConfiguredFunasrNanoModelDir()
+    const defaultModelDir = this.getDefaultFunasrNanoModelDir()
+    const activeModelDir = this.normalizeUserModelDir(input.targetDir)
+      || configuredModelDir
+      || defaultModelDir
+    const missingFiles = this.getMissingFunasrNanoFiles(activeModelDir)
+    return {
+      modelId: FUNASR_NANO_MODEL_ID,
+      defaultModelDir,
+      configuredModelDir,
+      activeModelDir,
+      available: missingFiles.length === 0,
+      missingFiles,
+      download: { ...this.funasrNanoDownloadStatus },
+    }
+  }
+
+  async startFunasrNanoModelDownload(
+    input: { targetDir?: string | null } = {},
+    onUpdate?: (status: FunasrNanoModelStatus) => void,
+  ): Promise<FunasrNanoModelStatus> {
+    this.ensureRuntimeDirs()
+    if (this.funasrNanoDownloadProcess) {
+      return this.getFunasrNanoModelStatus({ targetDir: this.funasrNanoDownloadStatus.targetDir })
+    }
+
+    const targetDir = this.normalizeUserModelDir(input.targetDir)
+      || this.getConfiguredFunasrNanoModelDir()
+      || this.getDefaultFunasrNanoModelDir()
+    mkdirSync(targetDir, { recursive: true })
+
+    const ready = this.getMissingFunasrNanoFiles(targetDir).length === 0
+    if (ready) {
+      const now = new Date().toISOString()
+      this.funasrNanoDownloadStatus = {
+        running: false,
+        targetDir,
+        startedAt: now,
+        updatedAt: now,
+        completedAt: now,
+        error: null,
+        lastMessage: '模型已存在',
+        progressPercent: 100,
+      }
+      return this.getFunasrNanoModelStatus({ targetDir })
+    }
+
+    const install = await this.ensureSkillInstalled('video-expert-analyzer')
+    if (!install.success) {
+      throw new Error(install.error || '无法准备视频分析运行时')
+    }
+    const python = await this.ensurePythonVenv()
+    const now = new Date().toISOString()
+    this.funasrNanoDownloadStatus = {
+      running: true,
+      targetDir,
+      startedAt: now,
+      updatedAt: now,
+      completedAt: null,
+      error: null,
+      lastMessage: '开始下载 FunASR Nano 模型',
+      progressPercent: null,
+    }
+
+    const script = [
+      'import json, pathlib, sys',
+      'from huggingface_hub import snapshot_download',
+      'target = pathlib.Path(sys.argv[1]).expanduser().resolve()',
+      'target.mkdir(parents=True, exist_ok=True)',
+      `path = snapshot_download(${JSON.stringify(FUNASR_NANO_MODEL_ID)}, local_dir=str(target), max_workers=4)`,
+      'print("__READY_FUNASR_NANO_DONE__" + json.dumps({"path": path}, ensure_ascii=False), flush=True)',
+    ].join('\n')
+
+    const env = this.getFunasrNanoDownloadEnv(targetDir)
+    const child = spawn(python, ['-c', script, targetDir], {
+      cwd: this.runtimeRoot,
+      env,
+    })
+    this.funasrNanoDownloadProcess = child
+
+    const publish = (): void => {
+      onUpdate?.(this.getFunasrNanoModelStatus({ targetDir }))
+    }
+    const ingest = (chunk: Buffer): void => {
+      const text = chunk.toString('utf8')
+      const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+      const lastLine = lines[lines.length - 1]
+      if (!lastLine) return
+      this.funasrNanoDownloadStatus = {
+        ...this.funasrNanoDownloadStatus,
+        updatedAt: new Date().toISOString(),
+        lastMessage: lastLine.replace(/^__READY_FUNASR_NANO_DONE__/, ''),
+        progressPercent: this.parseDownloadProgressPercent(lastLine) ?? this.funasrNanoDownloadStatus.progressPercent,
+      }
+      publish()
+    }
+
+    child.stdout.on('data', ingest)
+    child.stderr.on('data', ingest)
+    child.on('error', (error) => {
+      this.funasrNanoDownloadProcess = null
+      this.funasrNanoDownloadStatus = {
+        ...this.funasrNanoDownloadStatus,
+        running: false,
+        updatedAt: new Date().toISOString(),
+        completedAt: null,
+        error: error.message,
+        lastMessage: error.message,
+      }
+      publish()
+    })
+    child.on('close', (code) => {
+      this.funasrNanoDownloadProcess = null
+      const missingFiles = this.getMissingFunasrNanoFiles(targetDir)
+      const completedAt = new Date().toISOString()
+      const success = code === 0 && missingFiles.length === 0
+      const error = success
+        ? null
+        : code === 0
+          ? `模型下载完成但缺少文件: ${missingFiles.join(', ')}`
+          : `模型下载失败，退出码 ${code ?? 'unknown'}`
+      this.funasrNanoDownloadStatus = {
+        ...this.funasrNanoDownloadStatus,
+        running: false,
+        updatedAt: completedAt,
+        completedAt,
+        error,
+        lastMessage: error || 'FunASR Nano 模型已准备好',
+        progressPercent: success ? 100 : this.funasrNanoDownloadStatus.progressPercent,
+      }
+      publish()
+    })
+
+    publish()
+    return this.getFunasrNanoModelStatus({ targetDir })
+  }
+
+  private getDefaultFunasrNanoModelDir(): string {
+    return join(this.runtimeRoot, 'models', 'funasr-nano-2512')
+  }
+
+  private normalizeUserModelDir(value: unknown): string | null {
+    const raw = typeof value === 'string' ? value.trim() : ''
+    if (!raw) return null
+    const home = process.env.HOME || ''
+    const expanded = raw === '~'
+      ? home
+      : raw.startsWith('~/') && home
+        ? join(home, raw.slice(2))
+        : raw
+    return isAbsolute(expanded) ? expanded : resolve(this.runtimeRoot, expanded)
+  }
+
+  private getConfiguredFunasrNanoModelDir(): string | null {
+    for (const skillId of ['video-expert-analyzer', 'video-copy-analyzer'] as const) {
+      const definition = this.getSkillLoader().loadSkill(skillId)
+      if (!definition) continue
+      const value = this.skillConfigurationStore.getValues(definition).fields.funasrNanoModelDir
+      const normalized = this.normalizeUserModelDir(value)
+      if (normalized) return normalized
+    }
+    return null
+  }
+
+  private getMissingFunasrNanoFiles(modelDir: string): string[] {
+    return FUNASR_NANO_REQUIRED_FILES.filter((file) => {
+      try {
+        return !statSync(join(modelDir, file)).isFile()
+      } catch {
+        return true
+      }
+    })
+  }
+
+  private buildFunasrNanoRuntimeEnv(modelDir = this.getDefaultFunasrNanoModelDir()): Record<string, string> {
+    return {
+      READY_FUNASR_NANO_MODEL_ID: FUNASR_NANO_MODEL_ID,
+      READY_FUNASR_NANO_MODEL_DIR: modelDir,
+      READY_FUNASR_NANO_AUTO_DOWNLOAD: '0',
+    }
+  }
+
+  private getFunasrNanoDownloadEnv(targetDir = this.getDefaultFunasrNanoModelDir()): NodeJS.ProcessEnv {
+    const env: NodeJS.ProcessEnv = {
+      ...this.getBaseEnv(),
+      ...this.buildFunasrNanoRuntimeEnv(targetDir),
+      HF_HOME: join(this.cacheRoot, 'huggingface'),
+      XDG_CACHE_HOME: this.cacheRoot,
+      MODELSCOPE_CACHE: join(this.cacheRoot, 'modelscope'),
+    }
+    delete env.HF_HUB_OFFLINE
+    delete env.TRANSFORMERS_OFFLINE
+    delete env.MODELSCOPE_OFFLINE
+    delete env.PIP_NO_INDEX
+    return env
+  }
+
+  private parseDownloadProgressPercent(line: string): number | null {
+    const match = line.match(/(\d{1,3})%\|/)
+      || line.match(/(\d{1,3})%/)
+    if (!match) return null
+    const parsed = Number(match[1])
+    if (!Number.isFinite(parsed)) return null
+    return Math.max(0, Math.min(100, parsed))
+  }
+
   private resolveConfiguredAgentContext(definition: SkillDefinition): AgentSpawnContext | null {
     if (definition.id !== 'video-expert-analyzer') return null
     const values = this.skillConfigurationStore.getValues(definition)
@@ -721,6 +963,10 @@ export class SkillsRuntimeManager {
       }
       const youtubeCookieFile = await this.exportBrowserYoutubeCookies()
       if (youtubeCookieFile) env.YOUTUBE_COOKIE_FILE = youtubeCookieFile
+      Object.assign(
+        env,
+        this.buildFunasrNanoRuntimeEnv(this.getConfiguredFunasrNanoModelDir() || this.getDefaultFunasrNanoModelDir()),
+      )
     }
 
     return env
@@ -2252,6 +2498,7 @@ export class SkillsRuntimeManager {
     if (usePackaged && this.packagedRuntimeRoot) {
       return {
         ...buildPackagedSkillRuntimeEnv(this.packagedRuntimeRoot),
+        ...this.buildFunasrNanoRuntimeEnv(),
         PYTHONUTF8: '1',
         PYTHONIOENCODING: 'utf-8',
       }
@@ -2266,6 +2513,7 @@ export class SkillsRuntimeManager {
       XDG_CACHE_HOME: this.cacheRoot,
       MODELSCOPE_CACHE: join(this.cacheRoot, 'modelscope'),
       HF_HOME: join(this.cacheRoot, 'huggingface'),
+      ...this.buildFunasrNanoRuntimeEnv(),
       PYTHONUTF8: '1',
       PYTHONIOENCODING: 'utf-8',
     }

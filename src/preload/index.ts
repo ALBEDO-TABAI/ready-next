@@ -797,6 +797,15 @@ const skillsAPI = {
     serviceBindings?: Record<string, string>
     fields?: Record<string, string | number | boolean | null>
   }) => ipcRenderer.invoke('skills:configuration:update', payload),
+  getFunasrNanoStatus: (payload?: { targetDir?: string | null }) =>
+    ipcRenderer.invoke('skills:funasrNano:status', payload || {}),
+  startFunasrNanoDownload: (payload?: { targetDir?: string | null }) =>
+    ipcRenderer.invoke('skills:funasrNano:download', payload || {}),
+  onFunasrNanoDownloadUpdate: (handler: (status: unknown) => void) => {
+    const listener = (_event: unknown, status: unknown) => handler(status)
+    ipcRenderer.on('skills:funasrNano:downloadUpdate', listener)
+    return () => ipcRenderer.removeListener('skills:funasrNano:downloadUpdate', listener)
+  },
   // Phase 4: skills:executions:* preload methods retired along with the
   // skill_executions state machine (listExecutions / getExecution /
   // submitInput / submitConfirmation / submitAgentResult / restartFromStep /

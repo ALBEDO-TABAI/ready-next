@@ -2693,6 +2693,27 @@ interface SkillReferenceInlinedEvent {
   at: number
 }
 
+interface FunasrNanoModelDownloadStatusData {
+  running: boolean
+  targetDir: string | null
+  startedAt: string | null
+  updatedAt: string | null
+  completedAt: string | null
+  error: string | null
+  lastMessage: string | null
+  progressPercent: number | null
+}
+
+interface FunasrNanoModelStatusData {
+  modelId: string
+  defaultModelDir: string
+  configuredModelDir: string | null
+  activeModelDir: string
+  available: boolean
+  missingFiles: string[]
+  download: FunasrNanoModelDownloadStatusData
+}
+
 interface ElectronSkillsAPI {
   list: () => Promise<IPCResponse<SkillState[]>>
   runtimeInfo: () => Promise<IPCResponse<SkillsRuntimeInfo>>
@@ -2721,6 +2742,9 @@ interface ElectronSkillsAPI {
     serviceBindings?: Record<string, string>
     fields?: Record<string, SkillConfigValueData>
   }) => Promise<IPCResponse<SkillConfigurationViewData>>
+  getFunasrNanoStatus: (payload?: { targetDir?: string | null }) => Promise<IPCResponse<FunasrNanoModelStatusData>>
+  startFunasrNanoDownload: (payload?: { targetDir?: string | null }) => Promise<IPCResponse<FunasrNanoModelStatusData>>
+  onFunasrNanoDownloadUpdate?: (handler: (status: FunasrNanoModelStatusData) => void) => () => void
   // Phase 4: skills:executions:* API surface retired along with the
   // skill_executions state machine. Removed: listExecutions / getExecution /
   // submitInput / submitConfirmation / submitAgentResult / restartFromStep /

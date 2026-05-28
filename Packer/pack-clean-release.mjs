@@ -96,6 +96,8 @@ const REQUIRED_RUNTIME_MODULES = [
   'fastapi',
   'ffmpeg',
   'funasr',
+  'huggingface_hub',
+  'humanfriendly',
   'httpx',
   'lark_oapi',
   'modelscope',
@@ -109,28 +111,26 @@ const REQUIRED_RUNTIME_MODULES = [
   'scenedetect',
   'torch',
   'torchaudio',
+  'transformers',
+  'tiktoken',
+  'safetensors',
+  'tokenizers',
   'uvicorn',
   'yt_dlp',
   'rapidocr_onnxruntime',
 ]
 const REQUIRED_RUNTIME_ASR_MODELS = [
   {
-    name: 'FunASR Nano',
-    kwargs: {
-      model: 'FunAudioLLM/Fun-ASR-Nano-2512',
-      disable_update: true,
-    },
-  },
-  {
     name: 'FunASR paraformer fallback',
     kwargs: {
-      model: 'paraformer-zh',
-      vad_model: 'fsmn-vad',
-      punc_model: 'ct-punc',
+      model: ['cache', 'modelscope', 'models', 'iic', 'speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch'],
+      vad_model: ['cache', 'modelscope', 'models', 'iic', 'speech_fsmn_vad_zh-cn-16k-common-pytorch'],
+      punc_model: ['cache', 'modelscope', 'models', 'iic', 'punc_ct-transformer_cn-en-common-vocab471067-large'],
       disable_update: true,
     },
   },
 ]
+const OPTIONAL_FUNASR_NANO_MODEL_ID = 'FunAudioLLM/Fun-ASR-Nano-2512'
 const RUNTIME_SKIP_DIR_NAMES = new Set([
   ...SKIP_DIR_NAMES,
   'skills',
@@ -464,9 +464,10 @@ function runtimeToolCandidates(runtimeRoot, tool) {
 function verifyRuntimeTool(runtimeRoot, tool) {
   const candidates = runtimeToolCandidates(runtimeRoot, tool)
   const failures = []
+  const versionArgs = tool === 'ffmpeg' || tool === 'ffprobe' ? ['-version'] : ['--version']
   for (const candidate of candidates) {
     if (!existsSync(candidate)) continue
-    const result = spawnSync(candidate, ['--version'], {
+    const result = spawnSync(candidate, versionArgs, {
       cwd: runtimeRoot,
       encoding: 'utf8',
       timeout: 30_000,
@@ -578,21 +579,17 @@ function verifyPythonRuntimeGate(python, runtimeRoot) {
 }
 
 function verifyAsrModelCaches(python, runtimeRoot) {
+  const resolveRuntimeModelPath = (value) => Array.isArray(value) ? join(runtimeRoot, ...value) : value
+  const models = REQUIRED_RUNTIME_ASR_MODELS.map((item) => ({
+    ...item,
+    kwargs: Object.fromEntries(
+      Object.entries(item.kwargs).map(([key, value]) => [key, resolveRuntimeModelPath(value)]),
+    ),
+  }))
   const modelProbe = [
-    'import importlib.util, json, pathlib, sys',
-    'import funasr',
-    'package_root = pathlib.Path(getattr(funasr, "__file__", "")).resolve().parent',
-    'nano_model = package_root / "models" / "fun_asr_nano" / "model.py"',
-    'if nano_model.exists():',
-    '    nano_dir = str(nano_model.parent)',
-    '    if nano_dir not in sys.path:',
-    '        sys.path.insert(0, nano_dir)',
-    '    spec = importlib.util.spec_from_file_location("_ready_release_funasr_nano_model", nano_model)',
-    '    module = importlib.util.module_from_spec(spec)',
-    '    sys.modules["_ready_release_funasr_nano_model"] = module',
-    '    spec.loader.exec_module(module)',
+    'import json',
     'from funasr import AutoModel',
-    `models = json.loads(${JSON.stringify(JSON.stringify(REQUIRED_RUNTIME_ASR_MODELS))})`,
+    `models = json.loads(${JSON.stringify(JSON.stringify(models))})`,
     'failures = []',
     'for item in models:',
     '    try:',
@@ -612,6 +609,19 @@ function verifyAsrModelCaches(python, runtimeRoot) {
   }
 }
 
+function verifyNoBundledFunasrNanoWeights(runtimeRoot) {
+  const forbidden = collectFiles(runtimeRoot).filter((file) => {
+    const normalized = relative(runtimeRoot, file).split(sep).join('/').toLowerCase()
+    return (normalized.includes('fun-asr-nano-2512') || normalized.includes('funasr-nano-2512'))
+      && (normalized.endsWith('/model.pt') || normalized.endsWith('/model.safetensors'))
+  })
+  if (forbidden.length > 0) {
+    throw new Error(
+      `FunASR Nano weights must not be bundled in the initial app package (${OPTIONAL_FUNASR_NANO_MODEL_ID}). Remove: ${forbidden.slice(0, 5).map((file) => relative(runtimeRoot, file).split(sep).join('/')).join(', ')}`,
+    )
+  }
+}
+
 function verifyNoEscapingSymlinks(runtimeRoot) {
   const rootReal = realpathSync(runtimeRoot)
   for (const file of collectFiles(runtimeRoot)) {
@@ -627,6 +637,7 @@ function verifyNoEscapingSymlinks(runtimeRoot) {
 function verifyRuntimeSource(runtimeRoot) {
   verifyRuntimeManifest(runtimeRoot)
   verifyNoEscapingSymlinks(runtimeRoot)
+  verifyNoBundledFunasrNanoWeights(runtimeRoot)
 
   const python = runtimePythonPath(runtimeRoot)
   if (!existsSync(python)) throw new Error(`Packaged runtime missing Python: ${python}`)

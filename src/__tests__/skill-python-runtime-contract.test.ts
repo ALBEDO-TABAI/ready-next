@@ -154,6 +154,8 @@ test('release packaging is pinned to a shared offline skill runtime', () => {
     'fastapi',
     'ffmpeg',
     'funasr',
+    'huggingface_hub',
+    'humanfriendly',
     'httpx',
     'lark_oapi',
     'modelscope',
@@ -167,6 +169,10 @@ test('release packaging is pinned to a shared offline skill runtime', () => {
     'scenedetect',
     'torch',
     'torchaudio',
+    'transformers',
+    'tiktoken',
+    'safetensors',
+    'tokenizers',
     'uvicorn',
     'yt_dlp',
     'rapidocr_onnxruntime',
@@ -178,7 +184,8 @@ test('release packaging is pinned to a shared offline skill runtime', () => {
   assert.match(packer, /verifyPythonRuntimeGate/)
   assert.match(packer, /verifyAsrModelCaches/)
   assert.match(packer, /verifyRuntimeTool/)
-  assert.match(packer, /spawnSync\(candidate,\s*\['--version'\]/)
+  assert.match(packer, /versionArgs = tool === 'ffmpeg' \|\| tool === 'ffprobe' \? \['-version'\] : \['--version'\]/)
+  assert.match(packer, /spawnSync\(candidate,\s*versionArgs/)
   assert.match(packer, /verifyRuntimeSource\(cleanPackagedRuntimeRoot\)/)
   assert.match(packer, /rewriteRuntimePythonShebangs\(cleanPackagedRuntimeRoot\)/)
   assert.match(packer, /assertRuntimePythonShebangsAreRelocatable\(cleanPackagedRuntimeRoot\)/)
@@ -186,6 +193,7 @@ test('release packaging is pinned to a shared offline skill runtime', () => {
   assert.match(packer, /PYTHONNOUSERSITE:\s*'1'/)
   assert.match(packer, /MODELSCOPE_OFFLINE:\s*'1'/)
   assert.match(packer, /FunAudioLLM\/Fun-ASR-Nano-2512/)
+  assert.match(packer, /verifyNoBundledFunasrNanoWeights/)
   assert.match(runtimeManager, /assertPackagedRuntimeCoversEmbeddedSkill/)
   assert.match(runtimeManager, /ensurePythonVenv\(\{ allowPackaged: false \}\)/)
   assert.match(runtimeManager, /installRequirements\(venvPython, requirementsPath, \{ allowPackaged: false \}\)/)

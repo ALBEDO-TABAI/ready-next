@@ -9,6 +9,12 @@ anthropic>=0.20
 funasr>=1.0
 modelscope>=1.9
 torch>=2.0
+transformers>=4.40
+huggingface-hub>=0.23
+tiktoken>=0.7
+humanfriendly>=10
+safetensors>=0.4
+tokenizers>=0.19
 
 # OCR & imaging
 rapidocr-onnxruntime>=1.3

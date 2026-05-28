@@ -35,8 +35,12 @@ TRUSTED_SUBTITLE_MODES = {
     "platform_subtitles",
 }
 
-FUNASR_NANO_MODEL_ID = "FunAudioLLM/Fun-ASR-Nano-2512"
+FUNASR_NANO_MODEL_ID = os.environ.get("READY_FUNASR_NANO_MODEL_ID", "FunAudioLLM/Fun-ASR-Nano-2512")
 FUNASR_FALLBACK_MODEL_ID = "paraformer-zh"
+FUNASR_NANO_REQUIRED_FILES = ("model.pt", "config.yaml")
+FUNASR_FALLBACK_ASR_MODEL_ID = "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch"
+FUNASR_FALLBACK_VAD_MODEL_ID = "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch"
+FUNASR_FALLBACK_PUNC_MODEL_ID = "iic/punc_ct-transformer_cn-en-common-vocab471067-large"
 
 
 def choose_subtitle_strategy(title: str = "", url: str = "") -> str:
@@ -129,43 +133,92 @@ def _preload_funasr_nano_runtime() -> tuple[bool, str]:
         return False, str(exc)
 
 
-def _is_funasr_nano_registration_error(exc: Exception) -> bool:
-    message = f"{type(exc).__name__}: {exc}".lower()
-    return (
-        "funasrnano" in message
-        and "is not registered" in message
-        or "no module named 'model'" in message
-        or "loading remote code failed" in message
-    )
+def _configured_funasr_nano_model_path() -> str:
+    for env_name in ("READY_FUNASR_NANO_MODEL_DIR", "FUNASR_NANO_MODEL_DIR"):
+        raw = os.environ.get(env_name, "").strip()
+        if not raw:
+            continue
+        model_dir = Path(raw).expanduser()
+        missing = [name for name in FUNASR_NANO_REQUIRED_FILES if not (model_dir / name).is_file()]
+        if not missing:
+            return str(model_dir)
+        print(f"   ⚠️  FunASR Nano 本地目录缺少文件 {missing}: {model_dir}")
+    return ""
+
+
+def _allow_funasr_nano_download() -> bool:
+    value = os.environ.get("READY_FUNASR_NANO_AUTO_DOWNLOAD", "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _modelscope_cache_root():
+    raw = os.environ.get("MODELSCOPE_CACHE", "").strip()
+    if raw:
+        return Path(raw).expanduser()
+    runtime_root = os.environ.get("READY_PACKAGED_SKILL_RUNTIME_ROOT", "").strip()
+    if runtime_root:
+        return Path(runtime_root).expanduser() / "cache" / "modelscope"
+    return None
+
+
+def _local_modelscope_model_path(model_id: str) -> str:
+    root = _modelscope_cache_root()
+    if root is None:
+        return ""
+    model_dir = root / "models" / model_id
+    if (model_dir / "model.pt").is_file() and (model_dir / "config.yaml").is_file():
+        return str(model_dir)
+    return ""
 
 
 def _load_funasr_model():
     from funasr import AutoModel
 
     device = _funasr_device()
-    preload_ok, preload_error = _preload_funasr_nano_runtime()
-    if preload_ok:
-        print("   ✅ 已预加载 FunASR Nano 本地实现")
-    elif preload_error:
-        print(f"   ⚠️  FunASR Nano 预加载失败，继续尝试直连模型: {preload_error}")
 
     try:
+        local_model = _configured_funasr_nano_model_path()
+        if local_model:
+            model_py = Path(local_model) / "model.py"
+            kwargs = {
+                "model": local_model,
+                "hub": "hf",
+                "trust_remote_code": True,
+                "device": device,
+                "disable_update": True,
+            }
+            if model_py.is_file():
+                kwargs["remote_code"] = str(model_py)
+            model = AutoModel(**kwargs)
+            return model, "Fun-ASR-Nano-2512", device
+
+        if not _allow_funasr_nano_download():
+            raise RuntimeError("FunASR Nano model is not prepared; configure a local model dir or use the Ready download button")
+
+        preload_ok, preload_error = _preload_funasr_nano_runtime()
+        if preload_ok:
+            print("   ✅ 已预加载 FunASR Nano 本地实现")
+        elif preload_error:
+            print(f"   ⚠️  FunASR Nano 预加载失败，继续尝试 HF 模型: {preload_error}")
+
         model = AutoModel(
             model=FUNASR_NANO_MODEL_ID,
+            hub="hf",
+            trust_remote_code=True,
             device=device,
             disable_update=True,
         )
         return model, "Fun-ASR-Nano-2512", device
     except Exception as exc:
-        if not _is_funasr_nano_registration_error(exc):
-            raise
-
         print(f"   ⚠️  Fun-ASR-Nano-2512 当前环境不可直接使用: {exc}")
         print("   ↩️  自动回退到稳定版 paraformer-zh")
+        fallback_model = _local_modelscope_model_path(FUNASR_FALLBACK_ASR_MODEL_ID) or FUNASR_FALLBACK_MODEL_ID
+        fallback_vad = _local_modelscope_model_path(FUNASR_FALLBACK_VAD_MODEL_ID) or "fsmn-vad"
+        fallback_punc = _local_modelscope_model_path(FUNASR_FALLBACK_PUNC_MODEL_ID) or "ct-punc"
         model = AutoModel(
-            model=FUNASR_FALLBACK_MODEL_ID,
-            vad_model="fsmn-vad",
-            punc_model="ct-punc",
+            model=fallback_model,
+            vad_model=fallback_vad,
+            punc_model=fallback_punc,
             device=device,
             disable_update=True,
         )
@@ -704,8 +757,8 @@ def extract_with_funasr(video_path: str, output_srt: str) -> bool:
     """
     try:
         print("🎤 使用 FunASR 进行语音转录...")
-        print("   ASR 模型: Fun-ASR-Nano-2512 (新一代高性能模型)")
-        print("   发行包应预置模型缓存；开发环境缺缓存时 FunASR 可能自行拉取")
+        print("   ASR 模型: 优先使用本地 Fun-ASR-Nano-2512；未准备则回退到 paraformer-zh")
+        print("   Nano 权重不随应用内置，可在 Ready Skill 配置中下载或指定本地目录")
 
         # 提取音频
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:

@@ -128,6 +128,27 @@ export function setupSkillsIPC(): void {
     }
   })
 
+  ipcMain.handle('skills:funasrNano:status', (_, payload?: { targetDir?: string | null }): SkillsIPCResponse => {
+    try {
+      return { success: true, data: manager.getFunasrNanoModelStatus(payload || {}) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('skills:funasrNano:download', async (event, payload?: { targetDir?: string | null }): Promise<SkillsIPCResponse> => {
+    try {
+      const result = await manager.startFunasrNanoModelDownload(payload || {}, (status) => {
+        if (!event.sender.isDestroyed()) {
+          event.sender.send('skills:funasrNano:downloadUpdate', status)
+        }
+      })
+      return { success: true, data: result }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
   // Phase 4: skills:executions:* IPC channels retired along with the
   // skill_executions state machine. The 7 removed handlers were:
   //   skills:executions:list / :get / :submitInput / :submitConfirmation

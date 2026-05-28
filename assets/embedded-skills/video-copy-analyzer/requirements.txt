@@ -6,4 +6,10 @@ funasr
 modelscope
 torch
 torchaudio
+transformers
+huggingface-hub
+tiktoken
+humanfriendly
+safetensors
+tokenizers
 rapidocr-onnxruntime
