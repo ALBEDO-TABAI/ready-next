@@ -1142,6 +1142,7 @@ export function createAgentPanelTestHarness(store: StoreLike): AgentPanelTestHar
         const sendPromise = state.sendMessage(messageText)
         if (options.awaitStoreSend === false) {
           sendResult = { success: true, shouldClearInput: true, preserveInput: false }
+          // fire-and-forget: caller intentionally probes non-blocking store send behavior.
           void sendPromise.catch(() => {})
         } else {
           sendResult = await sendPromise

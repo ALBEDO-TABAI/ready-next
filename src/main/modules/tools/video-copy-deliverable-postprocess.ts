@@ -58,6 +58,7 @@ function readReusableText(path: string): string | null {
     const text = readFileSync(path, 'utf-8').trim()
     return text || null
   } catch {
+    // silent-catch: reusable VCA report/transcript sidecars are optional cache inputs.
     return null
   }
 }

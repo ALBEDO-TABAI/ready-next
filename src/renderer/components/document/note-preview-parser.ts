@@ -637,6 +637,7 @@ function extractBilibiliEmbed(line: string): { bvid: string; embedUrl: string; p
     const rawPage = parsed.searchParams.get('p') || ''
     if (/^\d+$/.test(rawPage)) page = rawPage
   } catch {
+    // silent-catch: invalid trusted-player URLs fall back to page 1 while preserving the BVID.
     page = '1'
   }
   const canonical = new URL('https://player.bilibili.com/player.html')
