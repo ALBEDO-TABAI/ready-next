@@ -7,6 +7,35 @@ files:
   - out/**/*
   - package.json
   - node_modules/**/*
+  # Renderer-only packages are already bundled into out/renderer assets by Vite.
+  # Keep main-process runtime deps in node_modules; only exclude packages that
+  # src/main and src/preload never import dynamically.
+  - "!node_modules/@mermaid-js/**"
+  - "!node_modules/@napi-rs/canvas"
+  - "!node_modules/@napi-rs/canvas/**"
+  - "!node_modules/**/@napi-rs/canvas-darwin-arm64"
+  - "!node_modules/**/@napi-rs/canvas-darwin-arm64/**"
+  - "!node_modules/@remotion/**"
+  - "!node_modules/@schedule-x/**"
+  - "!node_modules/@tiptap/**"
+  - "!node_modules/@tldraw/**"
+  - "!node_modules/@univerjs/**"
+  - "!node_modules/@univerjs-pro/**"
+  - "!node_modules/artplayer/**"
+  - "!node_modules/foliate-js/**"
+  - "!node_modules/framer-motion/**"
+  - "!node_modules/liquid-glass-react/**"
+  - "!node_modules/lucide-react/**"
+  - "!node_modules/mediabunny/**"
+  - "!node_modules/mermaid/**"
+  - "!node_modules/motion-dom/**"
+  - "!node_modules/motion-utils/**"
+  - "!node_modules/pdfjs-dist/**"
+  - "!node_modules/photoswipe/**"
+  - "!node_modules/react-dom/**"
+  - "!node_modules/react-pdf/**"
+  - "!node_modules/remotion/**"
+  - "!node_modules/tldraw/**"
   - "!node_modules/**/build/node_gyp_bins/**"
 extraResources:
   - from: build/runtime-seeds/ai-settings.seed.json

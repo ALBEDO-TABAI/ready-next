@@ -8,6 +8,14 @@ import { registerMainProcessHandlers } from '../main/process-handlers'
 type ProcessEvent = 'unhandledRejection' | 'uncaughtException'
 type AppEvent = 'render-process-gone' | 'child-process-gone'
 
+async function waitFor(predicate: () => boolean, timeoutMs = 500): Promise<void> {
+  const deadline = Date.now() + timeoutMs
+  while (!predicate()) {
+    if (Date.now() >= deadline) return
+    await new Promise((resolve) => setTimeout(resolve, 5))
+  }
+}
+
 function createHarness() {
   const processTarget = new EventEmitter()
   const appTarget = new EventEmitter()
@@ -117,7 +125,7 @@ test('fatal process cleanup timeout still exits', async () => {
   })
 
   processTarget.emit('uncaughtException', new Error('fatal'))
-  await new Promise((resolve) => setTimeout(resolve, 20))
+  await waitFor(() => exits.length > 0)
 
   assert.deepEqual(exits, [1])
 })
