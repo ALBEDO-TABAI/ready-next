@@ -86,7 +86,7 @@ export function useScheduleXCalendar({
         locale: 'zh-CN',
         isResponsive: false,
         selectedDate: toPlainDateLike(currentDate),
-        dayBoundaries: { start: '06:00', end: '21:00' },
+        dayBoundaries: { start: '00:00', end: '24:00' },
         // L4-A — schedule-x supports `timezone` natively as a config
         // value (`$app.config.timezone.value` is the reactive seam). We
         // pass `displayTimezone` from the store; if for any reason it's

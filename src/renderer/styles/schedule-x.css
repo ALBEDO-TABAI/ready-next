@@ -239,15 +239,11 @@ html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-grid__time-axis,
 .sx__week-grid__time-axis {
   background-color: transparent !important;
   background-image:
-    linear-gradient(to right, var(--sx-ready-time-grid-line-color) 0 var(--sx-ready-grid-line-width), transparent var(--sx-ready-grid-line-width)),
-    linear-gradient(to bottom, var(--sx-ready-time-grid-line-color) 0 var(--sx-ready-grid-line-width), transparent var(--sx-ready-grid-line-width)) !important;
+    linear-gradient(to right, var(--sx-ready-time-grid-line-color) 0 var(--sx-ready-grid-line-width), transparent var(--sx-ready-grid-line-width)) !important;
   background-size:
-    calc(100% / var(--sx-ready-visible-day-count, 7)) 100%,
-    100% var(--sx-week-grid-hour-height) !important;
-  background-position:
-    0 0,
-    0 var(--sx-week-grid-hour-height) !important;
-  background-repeat: repeat, repeat !important;
+    calc(100% / var(--sx-ready-visible-day-count, 7)) 100% !important;
+  background-position: 0 0 !important;
+  background-repeat: repeat !important;
 }
 
 html[data-skin='liquid-glass'] .sx__week-grid__time-axis .sx__week-grid__hour,
@@ -262,9 +258,11 @@ html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-grid__time-axis .sx_
   font-weight: 400 !important;
 }
 
-/* Grid hour lines */
+/* Grid hour lines — native border-top stays inside the day-column body
+   (time-axis is inset by the gutter) and the hidden first child means no
+   line lands at the very top, so it never doubles the all-day separator. */
 .sx__week-grid__hour {
-  border-top: none !important;
+  border-top: var(--sx-ready-grid-line-width) solid var(--sx-ready-time-grid-line-color) !important;
 }
 
 .sx__week-grid__hour:first-child {
@@ -273,6 +271,13 @@ html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-grid__time-axis .sx_
 
 .sx__week-grid__hour:first-child .sx__week-grid__hour-text {
   visibility: hidden !important;
+}
+
+/* Hour labels sit centered within their row cell (not on the divider line),
+   so each label reads as belonging to that hour block. */
+.sx__week-grid__hour-text {
+  top: 50% !important;
+  transform: translateY(-50%) !important;
 }
 
 /* Day column borders */
@@ -311,9 +316,7 @@ html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-grid__time-axis .sx_
 }
 
 .sx__week-grid__date-axis::after,
-.sx__date-grid::after,
-.sx__week-grid__date::before,
-.sx__date-grid-day::before {
+.sx__date-grid::after {
   content: '';
   position: absolute;
   pointer-events: none;
@@ -322,24 +325,33 @@ html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-grid__time-axis .sx_
 
 .sx__week-grid__date-axis::after,
 .sx__date-grid::after {
-  left: var(--sx-calendar-week-grid-padding-left);
+  left: 0;
   right: 0;
   bottom: 0;
   height: var(--sx-ready-grid-line-width);
   background: var(--sx-ready-grid-line-color);
 }
 
-.sx__week-grid__date::before,
-.sx__date-grid-day::before {
-  top: 0;
-  bottom: 0;
-  width: var(--sx-ready-grid-line-width);
-  background: var(--sx-ready-time-grid-line-color);
+/* All-day lane is always a visible row carrying a 全天 label in the gutter,
+   centered like the hour labels below it. */
+.sx__date-grid {
+  min-height: 28px !important;
 }
 
-.sx__week-grid__date::before,
-.sx__date-grid-day::before {
+.sx__date-grid::before {
+  content: '全天';
+  position: absolute;
   left: 0;
+  top: 0;
+  bottom: 0;
+  width: var(--sx-calendar-week-grid-padding-left);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--text-light);
+  pointer-events: none;
+  z-index: 2;
 }
 
 .sx__week-grid__day-name {
@@ -399,14 +411,19 @@ html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-grid__time-axis .sx_
 .sx__month-grid-wrapper {
   background: var(--sx-ready-grid-surface) !important;
   border-bottom: var(--sx-ready-grid-line-width) solid var(--sx-ready-grid-line-color) !important;
+  /* Reserve a top band for the weekday-name header so the day columns
+     (and their vertical separators) start below it. */
+  padding-top: 24px !important;
 }
 
 .sx__month-grid-week {
   border-top: var(--sx-ready-grid-line-width) solid var(--sx-ready-grid-line-color) !important;
 }
 
+/* First week keeps a top border — it is the full-width line that sits just
+   below the weekday names, dividing the header band from the date grid. */
 .sx__month-grid-week:first-child {
-  border-top: none !important;
+  border-top: var(--sx-ready-grid-line-width) solid var(--sx-ready-grid-line-color) !important;
 }
 
 .sx__month-grid-day:not(:last-child) {
@@ -458,10 +475,23 @@ html[data-skin='liquid-glass'] .sx__month-grid-day--not-in-month {
   padding: 0 !important;
 }
 
-.sx__month-grid-wrapper .sx__month-grid-week-day-name {
+/* Weekday names (周一…周日) are lifted up into the reserved header band so
+   no vertical day separator runs alongside them; the band sits above the
+   first-week date cells, and the first-week top border is the line below. */
+.sx__month-grid-day__header-day-name {
+  position: absolute !important;
+  left: 0 !important;
+  right: 0 !important;
+  top: -24px !important;
+  height: 24px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  margin: 0 !important;
   font-size: 11px !important;
   font-weight: 500 !important;
   color: var(--text-gray) !important;
+  pointer-events: none !important;
 }
 
 /* ========== Current time indicator ========== */

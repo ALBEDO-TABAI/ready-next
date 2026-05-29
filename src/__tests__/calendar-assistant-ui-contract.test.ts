@@ -142,20 +142,32 @@ test('calendar grid lines share one line-width variable across week chrome', () 
   assert.match(scheduleCss, /\.calendar-schedule-view-day \{[\s\S]*--sx-ready-visible-day-count:\s*1;/)
   assert.match(scheduleCss, /\.calendar-schedule-view-week \{[\s\S]*--sx-ready-visible-day-count:\s*7;/)
   assert.match(scheduleCss, /\.sx__week-grid__time-axis \{[\s\S]*left:\s*var\(--sx-calendar-week-grid-padding-left\) !important;[\s\S]*right:\s*0 !important;[\s\S]*width:\s*auto !important;[\s\S]*z-index:\s*3;[\s\S]*pointer-events:\s*none;/)
-  assert.match(scheduleCss, /html\[data-skin='liquid-glass'\] \.sx__week-grid__time-axis,\s*html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.sx__week-grid__time-axis,\s*\.sx__week-grid__time-axis \{[\s\S]*background-image:[\s\S]*linear-gradient\(to right,\s*var\(--sx-ready-time-grid-line-color\)[\s\S]*linear-gradient\(to bottom,\s*var\(--sx-ready-time-grid-line-color\)/)
+  assert.match(scheduleCss, /html\[data-skin='liquid-glass'\] \.sx__week-grid__time-axis,\s*html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.sx__week-grid__time-axis,\s*\.sx__week-grid__time-axis \{[\s\S]*background-image:[\s\S]*linear-gradient\(to right,\s*var\(--sx-ready-time-grid-line-color\)/)
+  assert.doesNotMatch(scheduleCss, /linear-gradient\(to bottom,\s*var\(--sx-ready-time-grid-line-color\)/)
   assert.doesNotMatch(scheduleCss, /linear-gradient\(to left,\s*var\(--sx-ready-time-grid-line-color\)/)
-  assert.match(scheduleCss, /html\[data-skin='liquid-glass'\] \.sx__week-grid__time-axis,\s*html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.sx__week-grid__time-axis,\s*\.sx__week-grid__time-axis \{[\s\S]*background-size:[\s\S]*calc\(100% \/ var\(--sx-ready-visible-day-count,\s*7\)\) 100%,[\s\S]*100% var\(--sx-week-grid-hour-height\) !important;/)
-  assert.match(scheduleCss, /html\[data-skin='liquid-glass'\] \.sx__week-grid__time-axis,\s*html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.sx__week-grid__time-axis,\s*\.sx__week-grid__time-axis \{[\s\S]*background-position:[\s\S]*0 0,[\s\S]*0 var\(--sx-week-grid-hour-height\) !important;/)
+  assert.match(scheduleCss, /html\[data-skin='liquid-glass'\] \.sx__week-grid__time-axis,\s*html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.sx__week-grid__time-axis,\s*\.sx__week-grid__time-axis \{[\s\S]*background-size:[\s\S]*calc\(100% \/ var\(--sx-ready-visible-day-count,\s*7\)\) 100% !important;/)
+  assert.match(scheduleCss, /html\[data-skin='liquid-glass'\] \.sx__week-grid__time-axis,\s*html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.sx__week-grid__time-axis,\s*\.sx__week-grid__time-axis \{[\s\S]*background-position:\s*0 0 !important;/)
   assert.match(scheduleCss, /html\[data-skin='liquid-glass'\] \.sx__week-grid__time-axis \.sx__week-grid__hour,\s*html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.sx__week-grid__time-axis \.sx__week-grid__hour,\s*\.sx__week-grid__time-axis \.sx__week-grid__hour \{[\s\S]*background:\s*transparent !important;/)
-  assert.match(scheduleCss, /\.sx__week-grid__hour \{[\s\S]*border-top:\s*none !important;/)
+  // Hour rows carry the horizontal division lines via the native border-top; the time-axis is
+  // inset by the gutter so the lines stay inside the day-column body, and the hidden first child
+  // means no line lands at the very top (so it never doubles the all-day separator).
+  assert.match(scheduleCss, /\.sx__week-grid__hour \{[\s\S]*border-top:\s*var\(--sx-ready-grid-line-width\) solid var\(--sx-ready-time-grid-line-color\) !important;/)
   assert.match(scheduleCss, /\.sx__week-grid__hour:first-child \{[\s\S]*visibility:\s*hidden !important;/)
   assert.match(scheduleCss, /\.sx__week-grid__hour:first-child \.sx__week-grid__hour-text \{[\s\S]*visibility:\s*hidden !important;/)
+  // Hour labels are centered within their row cell rather than pinned to the divider line.
+  assert.match(scheduleCss, /\.sx__week-grid__hour-text \{[\s\S]*top:\s*50% !important;[\s\S]*transform:\s*translateY\(-50%\) !important;/)
   assert.match(scheduleCss, /\.sx__time-grid-day,\s*\.sx__week-grid__date,\s*\.sx__date-grid-day \{[\s\S]*border-left:\s*none !important;/)
   assert.match(scheduleCss, /\.sx__time-grid-day:last-child,\s*\.sx__week-grid__date:last-child,\s*\.sx__date-grid-day:last-child \{[\s\S]*border-right:\s*none !important;/)
-  assert.match(scheduleCss, /\.sx__week-grid__date-axis::after,[\s\S]*\.sx__date-grid-day::before \{[\s\S]*z-index:\s*2;/)
-  assert.match(scheduleCss, /\.sx__week-grid__date-axis::after,\s*\.sx__date-grid::after \{[\s\S]*height:\s*var\(--sx-ready-grid-line-width\);[\s\S]*background:\s*var\(--sx-ready-grid-line-color\);/)
-  assert.match(scheduleCss, /\.sx__week-grid__date::before,\s*\.sx__date-grid-day::before \{[\s\S]*width:\s*var\(--sx-ready-grid-line-width\);[\s\S]*background:\s*var\(--sx-ready-time-grid-line-color\);/)
-  assert.match(scheduleCss, /\.sx__week-grid__date::before,\s*\.sx__date-grid-day::before \{[\s\S]*left:\s*0;/)
+  assert.match(scheduleCss, /\.sx__week-grid__date-axis::after,\s*\.sx__date-grid::after \{[\s\S]*z-index:\s*2;/)
+  // The all-day separator is the only full-width horizontal rule (it crosses the time gutter);
+  // the hour-division lines above are body-only and never reach into the gutter.
+  assert.match(scheduleCss, /\.sx__week-grid__date-axis::after,\s*\.sx__date-grid::after \{[\s\S]*left:\s*0;[\s\S]*right:\s*0;[\s\S]*height:\s*var\(--sx-ready-grid-line-width\);[\s\S]*background:\s*var\(--sx-ready-grid-line-color\);/)
+  // The all-day lane is always a visible row and carries a 全天 label centered in the time gutter.
+  assert.match(scheduleCss, /\.sx__date-grid \{[\s\S]*min-height:\s*28px !important;/)
+  assert.match(scheduleCss, /\.sx__date-grid::before \{[\s\S]*content:\s*'全天';[\s\S]*width:\s*var\(--sx-calendar-week-grid-padding-left\);/)
+  // No vertical lines cross the weekday header or the all-day row.
+  assert.doesNotMatch(scheduleCss, /\.sx__week-grid__date::before/)
+  assert.doesNotMatch(scheduleCss, /\.sx__date-grid-day::before/)
   assert.doesNotMatch(scheduleCss, /\.sx__week-grid__date:last-child::after/)
   assert.doesNotMatch(scheduleCss, /\.sx__date-grid-day:last-child::after/)
   assert.match(scheduleCss, /\.sx__time-grid-event \{[\s\S]*z-index:\s*4 !important;/)
@@ -172,6 +184,12 @@ test('calendar month view uses neutral grid line variables instead of default bl
   assert.match(scheduleCss, /\.sx__month-grid-cell \{[\s\S]*border:\s*var\(--sx-ready-grid-line-width\) solid var\(--sx-ready-grid-line-color\) !important;/)
   assert.match(scheduleCss, /\.sx__month-grid-day \{[\s\S]*border-bottom:\s*none !important;/)
   assert.doesNotMatch(scheduleCss, /\.sx__month-grid(?:-[^{]+)?[^{]*\{[\s\S]*var\(--border-default\)/)
+  // A top band is reserved on the wrapper; the first week keeps a top border that becomes the
+  // full-width line below the weekday names, and the names are lifted up into the band (absolute,
+  // negative top) so the vertical day separators never run beside them.
+  assert.match(scheduleCss, /\.sx__month-grid-wrapper \{[\s\S]*padding-top:\s*24px !important;/)
+  assert.match(scheduleCss, /\.sx__month-grid-week:first-child \{[\s\S]*border-top:\s*var\(--sx-ready-grid-line-width\) solid var\(--sx-ready-grid-line-color\) !important;/)
+  assert.match(scheduleCss, /\.sx__month-grid-day__header-day-name \{[\s\S]*position:\s*absolute !important;[\s\S]*top:\s*-24px !important;/)
 })
 
 test('calendar top toolbar uses the same surface as the grid header band', () => {

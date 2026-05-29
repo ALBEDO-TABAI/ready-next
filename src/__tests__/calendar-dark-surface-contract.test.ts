@@ -53,7 +53,7 @@ test('dark liquid calendar shell reuses the rss surface tone and keeps a complet
   )
   assert.match(
     scheduleCss,
-    /\.sx__week-grid__hour \{[\s\S]*border-top:\s*none !important;/,
+    /\.sx__week-grid__hour \{[\s\S]*border-top:\s*var\(--sx-ready-grid-line-width\) solid var\(--sx-ready-time-grid-line-color\) !important;/,
   )
   assert.match(
     scheduleCss,
@@ -61,17 +61,18 @@ test('dark liquid calendar shell reuses the rss surface tone and keeps a complet
   )
   assert.match(
     scheduleCss,
-    /html\[data-skin='liquid-glass'\] \.sx__week-grid__time-axis,\s*html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.sx__week-grid__time-axis,\s*\.sx__week-grid__time-axis \{[\s\S]*background-image:[\s\S]*linear-gradient\(to right,\s*var\(--sx-ready-time-grid-line-color\)[\s\S]*linear-gradient\(to bottom,\s*var\(--sx-ready-time-grid-line-color\)/,
+    /html\[data-skin='liquid-glass'\] \.sx__week-grid__time-axis,\s*html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.sx__week-grid__time-axis,\s*\.sx__week-grid__time-axis \{[\s\S]*background-image:[\s\S]*linear-gradient\(to right,\s*var\(--sx-ready-time-grid-line-color\)/,
   )
+  assert.doesNotMatch(scheduleCss, /linear-gradient\(to bottom,\s*var\(--sx-ready-time-grid-line-color\)/)
   assert.doesNotMatch(scheduleCss, /linear-gradient\(to left,\s*var\(--sx-ready-time-grid-line-color\)/)
   assert.match(
     scheduleCss,
     /\.sx__week-grid\s*\{[\s\S]*isolation:\s*isolate;/,
   )
-  assert.match(
-    scheduleCss,
-    /\.sx__week-grid__date::before,\s*\.sx__date-grid-day::before \{[\s\S]*background:\s*var\(--sx-ready-time-grid-line-color\);/,
-  )
+  // Header/all-day vertical ::before lines were removed; vertical lines now come only from the
+  // time-axis column gradient (asserted above), keeping a single consistent line color.
+  assert.doesNotMatch(scheduleCss, /\.sx__week-grid__date::before/)
+  assert.doesNotMatch(scheduleCss, /\.sx__date-grid-day::before/)
   assert.doesNotMatch(scheduleCss, /\.sx__week-grid__date:last-child::after/)
   assert.doesNotMatch(scheduleCss, /\.sx__date-grid-day:last-child::after/)
   assert.match(
