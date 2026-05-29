@@ -181,7 +181,9 @@ test('calendar month view uses neutral grid line variables instead of default bl
   assert.match(scheduleCss, /\.sx__month-grid-wrapper \{[\s\S]*border-bottom:\s*var\(--sx-ready-grid-line-width\) solid var\(--sx-ready-grid-line-color\) !important;/)
   assert.match(scheduleCss, /\.sx__month-grid-week \{[\s\S]*border-top:\s*var\(--sx-ready-grid-line-width\) solid var\(--sx-ready-grid-line-color\) !important;/)
   assert.match(scheduleCss, /\.sx__month-grid-day:not\(:last-child\) \{[\s\S]*border-inline-end:\s*var\(--sx-ready-grid-line-width\) solid var\(--sx-ready-grid-line-color\) !important;/)
-  assert.match(scheduleCss, /\.sx__month-grid-cell \{[\s\S]*border:\s*var\(--sx-ready-grid-line-width\) solid var\(--sx-ready-grid-line-color\) !important;/)
+  // .sx__month-grid-cell is applied to empty blocker placeholders (alignment spacers) as well as
+  // real events, so it must NOT carry a border — otherwise empty slots render as gray outlined boxes.
+  assert.doesNotMatch(scheduleCss, /\.sx__month-grid-cell \{[^}]*border:/)
   assert.match(scheduleCss, /\.sx__month-grid-day \{[\s\S]*border-bottom:\s*none !important;/)
   assert.doesNotMatch(scheduleCss, /\.sx__month-grid(?:-[^{]+)?[^{]*\{[\s\S]*var\(--border-default\)/)
   // A top band is reserved on the wrapper; the first week keeps a top border that becomes the

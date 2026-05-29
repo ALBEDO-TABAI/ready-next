@@ -430,10 +430,6 @@ html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-grid__time-axis .sx_
   border-inline-end: var(--sx-ready-grid-line-width) solid var(--sx-ready-grid-line-color) !important;
 }
 
-.sx__month-grid-cell {
-  border: var(--sx-ready-grid-line-width) solid var(--sx-ready-grid-line-color) !important;
-}
-
 .sx__month-grid-day {
   border-bottom: none !important;
 }
