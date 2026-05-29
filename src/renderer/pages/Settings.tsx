@@ -1662,7 +1662,7 @@ const ZERO_STATS: CacheStatsView = {
 }
 
 // Exported for the Y0.8 relabel behavior test (per sub-plan
-// docs/superpowers/plans/2026-05-23-Y0-8-cache-quota-relabel-implementation.md §6).
+// docs/superpowers/plans/archive/2026-05-23-Y0-8-cache-quota-relabel-implementation.md §6).
 // Mounting the full Settings page would require a ~200 line electronAPI proxy
 // harness; exporting this single panel keeps the test surgical.
 export function StorageSettingsPanel() {

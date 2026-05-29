@@ -4,7 +4,7 @@ date: 2026-05-09
 enforce: true
 status: approved v18 — Codex round 18 converged 2026-05-09 (18 rounds × 30+ 瑕疵 cleared)
 predecessor: 2026-05-09-S-stage13-implementation.md
-roadmap: 2026-05-08-deerflow-borrowing-roadmap.md
+roadmap: archive/2026-05-08-deerflow-borrowing-roadmap.md
 revision_history:
   - v1 (2026-05-09): initial implementation plan from roadmap v13; covers W0.3 / W7.1-W7.3 / W9.1-W9.2 / T-B / T-C with 13 CI gates
   - v2 (2026-05-09): incorporated Codex round 1 — 5 瑕疵（2 Contract Gap + 3 Major）：(R1-#1) 行号修正——`tool-registry.ts:673` `GROUP_TOOL_PROVIDERS` 实测 14 provider entries（Stage R `general_research` + Stage S 7 子模块路径，见 capability groups list 14 元）；`run-budget-policy.ts:16-46` 不是 16-43。(R1-#2 Contract Gap W7.1) `run-shell.ts:239` `shouldUseShell` 路径走 `bash -c "<full cmd>"` 直接 spawn，**绕过** `parseCommand` —— `parseCommand 后注入` 漏审 `| sh / 重定向类 / $(curl ...)` 整个复合命令族。修：审计层在 `executeRunShell` 入口（`:236-300` 之间）调 `auditBashCommand(args.command)`，**先于** `shouldUseShell` 分支判断；两条分支统一审。(R1-#3 W9.1) JSONL 写位真实位置在 `skill-child-run-log.ts:61-68 appendChildRunEvent`（`fs.appendFile`），不在 skill-child-runner；runner `:624, :1473` 是 caller。修：W9.1 落点改 `appendChildRunEvent` 内 event shape + caller 调用位带 event_kind/terminal_reason/rollback_target。(R1-#7) PR-T1 verify:t 串引用 T2-T5 未存在 gate → 改 verify:t 串接 gates 在 PR-T6 收尾时一次拼齐；PR-T1 仅含 check-verify-t-defined.cjs；T2-T5 各 PR 在落 gate 时同步把脚本名追加到 verify:t（实施时 1 处 atomic edit）。(R1-#8 minor) roadmap 文件在 main repo 的 `docs/superpowers/plans/`，worktree 只 land plan + implementation；与 Stage R/S 同款形态，不修。

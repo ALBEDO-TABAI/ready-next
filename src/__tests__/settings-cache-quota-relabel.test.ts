@@ -1,7 +1,7 @@
 /**
  * Stage Y0.8 — Settings cache quota relabel behavior test (path-(b) per plan §11.0a).
  *
- * Sub-plan: docs/superpowers/plans/2026-05-23-Y0-8-cache-quota-relabel-implementation.md
+ * Sub-plan: docs/superpowers/plans/archive/2026-05-23-Y0-8-cache-quota-relabel-implementation.md
  *
  * Path-(b) (relabel) is the chosen disposition for Y0.8 — the Settings cache
  * quota row gets honest "configured but NOT enforced; manual cleanup required"

@@ -4,8 +4,8 @@ stage: W5
 date: 2026-05-22
 status: implementation-draft
 enforce: false
-parent_roadmap: docs/superpowers/plans/2026-05-22-W-ready-stabilization-roadmap.md
-predecessor_phase: docs/superpowers/plans/2026-05-22-W4-useagent-ownership-implementation.md
+parent_roadmap: docs/superpowers/plans/archive/2026-05-22-W-ready-stabilization-roadmap.md
+predecessor_phase: docs/superpowers/plans/archive/2026-05-22-W4-useagent-ownership-implementation.md
 ---
 
 # W5 — Live Ready dogfood implementation plan

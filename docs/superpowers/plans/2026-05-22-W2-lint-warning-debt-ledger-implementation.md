@@ -4,8 +4,8 @@ stage: W2
 date: 2026-05-22
 status: implementation-draft
 enforce: false
-parent_roadmap: docs/superpowers/plans/2026-05-22-W-ready-stabilization-roadmap.md
-predecessor_phase: docs/superpowers/plans/2026-05-22-W1-lint-errors-and-baseline-drift-implementation.md
+parent_roadmap: docs/superpowers/plans/archive/2026-05-22-W-ready-stabilization-roadmap.md
+predecessor_phase: docs/superpowers/plans/archive/2026-05-22-W1-lint-errors-and-baseline-drift-implementation.md
 ---
 
 # W2 — Lint warning debt ledger implementation plan

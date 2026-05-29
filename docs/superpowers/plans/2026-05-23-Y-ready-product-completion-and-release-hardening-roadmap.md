@@ -5,7 +5,7 @@ stage: Y-entry
 status: refinement-r9 (post-r8 parallel-orchestration follow-up amendment to §9.2.3; not a contract change, only a clarification that the "bai_spotcheck REQUIRED whenever operator_class != agent-only" rule was written assuming the surface would land at status=pass directly, but the parallel Y0.5 dispatch reality is that mandatory-白 surfaces land first at status=deferred-with-owner from the agent baseline — block exempt then; later flipped to status=pass with bai_spotcheck block required at that flip)
 enforce: false
 predecessors:
-  - docs/superpowers/plans/2026-05-23-Y-product-surface-and-release-prep-seed.md
+  - docs/superpowers/plans/archive/2026-05-23-Y-product-surface-and-release-prep-seed.md
   - docs/superpowers/audits/2026-05-22-stage-x-closeout/CLOSE-NOTE.md
   - docs/superpowers/audits/2026-05-22-stage-x-closeout/deferred-work-ledger.md
 refinement_history:
@@ -23,7 +23,7 @@ refinement_history:
 
 # Stage Y — Ready product completion and release hardening implementation plan
 
-This file supersedes the inert seed at `docs/superpowers/plans/2026-05-23-Y-product-surface-and-release-prep-seed.md` without editing the seed in place. Its r0 version was authored by codex as a draft roadmap; r1 (this revision) is Claude's in-place refinement carrying it from roadmap to entry-implementation plan and is the artifact that enters the planning-review loop with codex.
+This file supersedes the inert seed at `docs/superpowers/plans/archive/2026-05-23-Y-product-surface-and-release-prep-seed.md` without editing the seed in place. Its r0 version was authored by codex as a draft roadmap; r1 (this revision) is Claude's in-place refinement carrying it from roadmap to entry-implementation plan and is the artifact that enters the planning-review loop with codex.
 
 The goal is not only to clear the Stage X ledger. The goal is to move Ready toward a product-complete, release-prepared state: real product surfaces dogfooded, known regressions either fixed or explicitly retired, CI made truthful, and release-only work separated into Stage Z.
 
@@ -51,7 +51,7 @@ Stage Y is complete only when:
 | --- | --- |
 | `docs/superpowers/audits/2026-05-22-stage-w-closeout/deferred-work-ledger.md` | W left product and shell work, not only documentation work: W5 item 3, Workbench shell failure modes, `useAgent` extraction, lint/source-grep budgets, IPC allowlist expiry. |
 | `docs/superpowers/audits/2026-05-22-stage-x-closeout/deferred-work-ledger.md` | X classified 15 rows: 9 Stage Y, 4 Stage Z, 2 debt-warning-burn. This is necessary but not sufficient for product completion. |
-| `docs/superpowers/plans/2026-05-23-Y-product-surface-and-release-prep-seed.md` | Seed lists useful P0/P1/P2 items, but P0.1 dogfood matrix is too narrow and P0.2 points to a missing Stage U ledger path. |
+| `docs/superpowers/plans/archive/2026-05-23-Y-product-surface-and-release-prep-seed.md` | Seed lists useful P0/P1/P2 items, but P0.1 dogfood matrix is too narrow and P0.2 points to a missing Stage U ledger path. |
 | `docs/release/u-stage-lessons-learned-checklist.md` | Still has 28 yellow rows and 16 manual release rows; it says yellow rows must become green at Stage U close, but they were not reconciled here. **This is the real source for Y0.6** because no Stage U closeout folder exists (see §10). |
 | `.github/workflows/ready-merge-gates.yml` | Merge CI exists, but deep gates are still `if: false`; Stage X was green locally, not yet proven by first real remote run. |
 | `package.json` | `verify:meta-paths` and `verify:stage-x-known-regressions` exist but are not part of `verify` or the merge workflow; Y0.2 decides the wiring. |

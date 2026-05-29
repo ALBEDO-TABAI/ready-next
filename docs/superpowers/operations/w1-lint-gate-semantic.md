@@ -3,8 +3,8 @@ title: W1 lint gate semantic
 date: 2026-05-22
 stage: W0
 enforce: false
-parent_roadmap: docs/superpowers/plans/2026-05-22-W-ready-stabilization-roadmap.md
-applies_to: docs/superpowers/plans/2026-05-22-W1-lint-errors-and-baseline-drift-implementation.md
+parent_roadmap: docs/superpowers/plans/archive/2026-05-22-W-ready-stabilization-roadmap.md
+applies_to: docs/superpowers/plans/archive/2026-05-22-W1-lint-errors-and-baseline-drift-implementation.md
 ---
 
 # W1 "lint green" definition

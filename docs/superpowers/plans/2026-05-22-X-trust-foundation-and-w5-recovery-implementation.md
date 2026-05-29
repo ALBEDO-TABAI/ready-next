@@ -5,7 +5,7 @@ date: 2026-05-22
 status: implementation-draft
 enforce: false
 predecessor_closeout: docs/superpowers/audits/2026-05-22-stage-w-closeout/CLOSE-NOTE.md
-predecessor_roadmap: docs/superpowers/plans/2026-05-22-W-ready-stabilization-roadmap.md
+predecessor_roadmap: docs/superpowers/plans/archive/2026-05-22-W-ready-stabilization-roadmap.md
 ---
 
 # Stage X - Trust foundation and W5 recovery implementation plan
@@ -741,7 +741,7 @@ X4 done when:
 
 - PR-shell-1 / PR-shell-2 / PR-shell-4 each has code and tests. PR-shell-2 and PR-shell-4 additionally have live evidence (PR-shell-1 is contract-only per § 4.1 X4 row).
 - Any individual PR may be **explicitly deferred per § 3 exit criterion 7** with a written blocking reason and a replacement acceptance boundary in the closeout ledger; in that case § 3 criterion 7's "explicitly deferred" branch applies, and X4 close does not require evidence for the deferred PR.
-- W5 dogfood items 4 and 5 (per `docs/superpowers/plans/2026-05-22-W5-live-dogfood-implementation.md` § 3.2: item 4 = "Toggle sidebar/chat panel + switch modes including a BrowserView mode transition"; item 5 = "Open real document, verify split/freeze behavior is not visibly broken") rerun on the W3.3 equipment without new shell regressions. X plan refers to W5 plan's numbering, not its own.
+- W5 dogfood items 4 and 5 (per `docs/superpowers/plans/archive/2026-05-22-W5-live-dogfood-implementation.md` § 3.2: item 4 = "Toggle sidebar/chat panel + switch modes including a BrowserView mode transition"; item 5 = "Open real document, verify split/freeze behavior is not visibly broken") rerun on the W3.3 equipment without new shell regressions. X plan refers to W5 plan's numbering, not its own.
 - `docs/superpowers/audits/2026-05-22-stage-x-closeout/workbench-shell-report.md` summarizes before/after measurements.
 
 ## 10. Phase X5 - Stage X closeout and Stage Y handoff

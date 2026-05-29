@@ -9,7 +9,7 @@
  *   Fixture 2 (accepted): a file importing only setInputValue + a selector
  *                         from the same / no area. Must NOT fire.
  *
- * Plan: docs/superpowers/plans/2026-05-22-W4-useagent-ownership-implementation.md §3.6
+ * Plan: docs/superpowers/plans/archive/2026-05-22-W4-useagent-ownership-implementation.md §3.6
  */
 
 import test from 'node:test'

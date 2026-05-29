@@ -1,8 +1,18 @@
 # Ready 开发进展
 
-> 更新时间: 2026-04-28
+> 更新时间: 2026-05-29
 
 ## 当前真值摘要
+
+- `2026-05-29` **预发布收尾：安装包瘦身（2.7GB→616MB）+ 按需模型包管理器，并把 readyguy 收为主线**：
+  - **主线切换（仅本地）**：`codex/readyguy` 重命名为 `main`（相对旧 `main` 与 `origin/main` 均为 fast-forward，无 force、零丢提交）；旧 `main`（db765146）收为 `backup/main-20260529`（已包含 `origin/main` 6cb8cdf2）。清扫 39 条历史支线 + 失效 worktree，仅保留 `main` / `backup/main-20260529` / 一条仍有未提交工作的 locked agent worktree（`worktree-agent-a9c1e838…`）。`origin` 未改动，待后续推送。
+  - **安装包瘦身**：把 FunASR fallback 权重（paraformer ~1GB、`cn-en` 大标点 ~1.1GB）从打包运行时外置为按需模型包，安装包从 2.7GB 降到 **616MB**（`exports/Ready-0.1.0-arm64.dmg`，约 -78%）；Python 解释器 + ML site-packages 与小体积 fsmn-vad 仍随包离线可用。标点 fallback 默认评估后改用更小更快的 **ct-punc-c**（`punc_ct-transformer_zh-cn-common-vocab272727-pytorch`，~292MB），id 仍可环境覆盖。
+  - **统一模型包管理器**：退役 Nano 专用方法/IPC，泛化为注册表（`funasr-nano / funasr-fallback-asr / funasr-punc-ctc`）+ 通用方法（`listModelPacks / getModelPackStatus / startModelPackDownload / cancelModelPackDownload`）；下载落在可写 `runtimeRoot/models/<packId>`，`.partial` 暂存 + requiredFiles（`model.pt`+`config.yaml`）校验 + 原子 rename。
+  - **国内/国外源自动切换 + 断点续传**：domestic=ModelScope，overseas=HuggingFace（HF-only 走 hf-mirror.com）；`自动/国内/国外` 设置持久化，自动模式按可达性探测选源；`snapshot_download` 重复调用即续传，取消保留 partial。
+  - **设置「模型与运行时」独立页 + 缺失即引导**：新增 Settings 页（每包状态/进度/下载-取消 + 全局来源选择 + 存储位置），`SkillsCenterPanel` 的 Nano 下载块改指向该页，单一下载入口；任意 skill/功能缺模型/依赖时回灌结构化 `missing runtime dependency`（feature / missingPacks / settingsDeepLink），渲染端提示「前往设置›模型与运行时下载」并深链。
+  - **下载自检模式**：不拉全量权重即可校验补充下载“准确有效”——逐包逐源探测可达性/坐标解析，并在临时目录演练断点续传保留 + 原子安装。
+  - **CI 根因修复**：之前误报的“GitHub 错误”实为红色 `verify:lint-budget` 闸门（测试新增 `any` 触发 ratchet）；按根因给 stub 补真实类型（非抬预算）并重基线 lint-warning-debt-ledger；外置过程中又定位修复两处 CI 专属回归（`verify:c` sqlite-test-skip-pattern、`verify:r` silent-catch）。HEAD `9e039755` 的 merge / deep-gates / Windows smoke 全绿。
+  - **二期（未做）**：sha256 完整性清单、两份重复 Python 抽取为共享模块、运行时清单包清单、并行多文件续传 UI、site-package 进一步瘦身。
 
 - `2026-04-28` **Skill Runtime Phase 5：长任务 UI 状态 + continuation durable handle 收口**：
   - Phase 0-4 缺口已回填到执行面：`run_state` 选择改为 expected task id 优先，恢复路径 / tracker fallback / root `run_state.json` 不再把身份不匹配的输出当成功。

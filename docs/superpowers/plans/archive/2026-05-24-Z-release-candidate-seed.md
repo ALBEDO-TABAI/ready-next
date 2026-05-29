@@ -20,13 +20,13 @@ hand-off per Y plan §13 + the Y-to-Z handoff matrix at
 ## Predecessor
 
 Stage Y closeout: see
-[`docs/superpowers/audits/2026-05-23-stage-y-closeout/CLOSE-NOTE.md`](../audits/2026-05-23-stage-y-closeout/CLOSE-NOTE.md).
+[`docs/superpowers/audits/2026-05-23-stage-y-closeout/CLOSE-NOTE.md`](../../audits/2026-05-23-stage-y-closeout/CLOSE-NOTE.md).
 
 Stage Y verification freeze: 11 / 11 commands at exit 0 per
-[`no-drift.md`](../audits/2026-05-23-stage-y-closeout/no-drift.md).
+[`no-drift.md`](../../audits/2026-05-23-stage-y-closeout/no-drift.md).
 
 Stage Y deferred-work ledger entry-points: see
-[`deferred-work-ledger.md`](../audits/2026-05-23-stage-y-closeout/deferred-work-ledger.md);
+[`deferred-work-ledger.md`](../../audits/2026-05-23-stage-y-closeout/deferred-work-ledger.md);
 filter by `bucket = "Stage Z release-candidate"`.
 
 ## Stage Z entry conditions (verified)
@@ -154,7 +154,7 @@ A Stage Z entry plan should:
 
 1. Read this seed.
 2. Read the Y-to-Z handoff matrix verbatim
-   ([`y-to-z-handoff-matrix.md`](../audits/2026-05-23-stage-y-closeout/y-to-z-handoff-matrix.md)).
+   ([`y-to-z-handoff-matrix.md`](../../audits/2026-05-23-stage-y-closeout/y-to-z-handoff-matrix.md)).
 3. For each P0 row, write a dedicated `YYYY-MM-DD-Z-<id>-<slug>-implementation.md`.
 4. Dispatch codex Z plan-review loop (mirror Y plan r1-r7 + 2 consecutive PASS rule).
 5. Open a Stage Z closeout bundle at

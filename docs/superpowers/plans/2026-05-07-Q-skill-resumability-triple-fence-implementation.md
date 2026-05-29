@@ -4,8 +4,8 @@ date: 2026-05-07
 enforce: true
 status: approved (v4 — Codex round 4 returned ready-to-implement 2026-05-07)
 predecessor: 2026-05-07-P-stage-10-transitional-bridge-retirement-implementation.md
-roadmap: 2026-05-07-Q-skill-resumability-triple-fence-roadmap.md
-audit: 2026-05-07-agent-resumability-root-cause-audit.md
+roadmap: archive/2026-05-07-Q-skill-resumability-triple-fence-roadmap.md
+audit: archive/2026-05-07-agent-resumability-root-cause-audit.md
 revision_history:
   - v1 (2026-05-07): initial implementation draft based on roadmap v3
   - v2 (2026-05-07): incorporated Codex review round 1 — fixed migration column names, Q.2 caller coverage + flag threading, TaskPanel+getTaskProjection canResume surface, runKind key migration / supersede, full hasActiveSkillExecution retirement scope, verify:q runner partition (cjs gates vs tsx focus), exact hard-fail insertion point, action-specific reference check (mixed skills like lets-go-rss), stat-style fs probe, PR consolidation (8→6)

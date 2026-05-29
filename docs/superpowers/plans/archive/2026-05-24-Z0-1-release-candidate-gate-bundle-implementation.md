@@ -4,7 +4,7 @@ stage: Z0.1
 date: 2026-05-24
 status: implementation-draft
 enforce: false
-parent_seed: docs/superpowers/plans/2026-05-24-Z-release-candidate-seed.md
+parent_seed: docs/superpowers/plans/archive/2026-05-24-Z-release-candidate-seed.md
 predecessor_closeout: docs/superpowers/audits/2026-05-23-stage-y-closeout/CLOSE-NOTE.md
 scope_lock: release-candidate gate bundle only
 ---

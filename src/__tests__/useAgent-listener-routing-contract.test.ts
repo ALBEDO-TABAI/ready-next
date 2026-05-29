@@ -23,7 +23,7 @@
  * level 2 then level 3, with the metric tagged
  * `stale-or-terminated-session`.
  *
- * Plan: docs/superpowers/plans/2026-05-22-W4-useagent-ownership-implementation.md §3.7
+ * Plan: docs/superpowers/plans/archive/2026-05-22-W4-useagent-ownership-implementation.md §3.7
  */
 
 import assert from 'node:assert/strict'

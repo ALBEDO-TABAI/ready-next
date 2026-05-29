@@ -2,7 +2,7 @@
  * Stage Y1.1 — Settings vision-model test button honest relabel behavior test
  * (path-(b) per plan §11.1).
  *
- * Sub-plan: docs/superpowers/plans/2026-05-23-Y1-1-vea-test-reliability-implementation.md
+ * Sub-plan: docs/superpowers/plans/archive/2026-05-23-Y1-1-vea-test-reliability-implementation.md
  *
  * Path-(b) (honest label) is the chosen disposition for Y1.1 — the Settings
  * external-services `测试` button for `kind === 'vision-model'` profiles

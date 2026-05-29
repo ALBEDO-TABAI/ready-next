@@ -4,7 +4,7 @@ date: 2026-05-08
 enforce: true
 status: approved v15 — Codex round 15 converged 2026-05-09 (15 rounds × 50 瑕疵 cleared, no Contract Gap)
 predecessor: 2026-05-07-Q-skill-resumability-triple-fence-implementation.md
-roadmap: 2026-05-08-deerflow-borrowing-roadmap.md
+roadmap: archive/2026-05-08-deerflow-borrowing-roadmap.md
 external_source: https://github.com/bytedance/deer-flow (local clone at `_research/deer-flow/`)
 revision_history:
   - v1 (2026-05-08): initial implementation plan from roadmap v13; covers W0.1 / W1.1-W1.6 / W2.1-W2.3 / W5.1+W5.4 / W6.4 / W10.4 with 29 CI gates
@@ -1084,7 +1084,7 @@ W10.4: check-correction-detector-fixtures.cjs
 **自动化检查命令**（实施期验证 gate 数）：
 
 ```bash
-awk '/^## 11\./,/^## 12\./' docs/superpowers/plans/2026-05-08-deerflow-borrowing-roadmap.md \
+awk '/^## 11\./,/^## 12\./' docs/superpowers/plans/archive/2026-05-08-deerflow-borrowing-roadmap.md \
   | grep -oE 'check-[a-zA-Z0-9-]+\.cjs' | sort -u | wc -l
 ```
 

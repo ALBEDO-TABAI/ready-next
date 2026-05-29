@@ -622,7 +622,7 @@ supportsLongContext: applyCapabilityMode('auto' as AICapabilityMode, longContext
 | T-B | `check-parallel-branch-frame-merge.cjs` + `check-parallel-branch-hard-cap.cjs` |
 | T-C | `check-mcp-tools-go-through-authorization.cjs` + `check-deferred-tool-promotion-after-authorization.cjs` + `check-deferred-registry-per-turn-reset.cjs` |
 
-**总计**：29 (R) + 37 (S) + 12 (T) = 78 个 unique CI gate（不含 fixture matrix 与 verify:native 内嵌；通过 `awk '/^## 11\./,/^## 12\./' docs/superpowers/plans/2026-05-08-deerflow-borrowing-roadmap.md | grep -oE 'check-[a-zA-Z0-9-]+\.cjs' | sort -u | wc -l` 验证）。
+**总计**：29 (R) + 37 (S) + 12 (T) = 78 个 unique CI gate（不含 fixture matrix 与 verify:native 内嵌；通过 `awk '/^## 11\./,/^## 12\./' docs/superpowers/plans/archive/2026-05-08-deerflow-borrowing-roadmap.md | grep -oE 'check-[a-zA-Z0-9-]+\.cjs' | sort -u | wc -l` 验证）。
 
 ## 12. 协作文档同步要求
 

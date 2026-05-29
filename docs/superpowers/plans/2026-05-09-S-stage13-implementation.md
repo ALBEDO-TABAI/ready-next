@@ -4,7 +4,7 @@ date: 2026-05-09
 enforce: true
 status: approved v5 — Codex round 5 converged 2026-05-09 (5 rounds × 11 瑕疵 cleared)
 predecessor: 2026-05-08-R-stage12-implementation.md
-roadmap: 2026-05-08-deerflow-borrowing-roadmap.md
+roadmap: archive/2026-05-08-deerflow-borrowing-roadmap.md
 revision_history:
   - v1 (2026-05-09): initial implementation plan from roadmap v13; covers W0.2 / W3.0-W3.5 / W4.0-W4.5 / W5.2+W5.3 / W6.1-W6.3 / W8.1-W8.2 / W10.1-W10.3 / W11.1-W11.2 with 37 CI gates
   - v2 (2026-05-09): incorporated Codex round 1 — 7 瑕疵（3 Contract Gap + 3 Major + 1 Minor）：(#1) provider-parity gate `extra` 白名单加 `model-capability-resolver`（W4.5 新建文件）；(#2) vllm patch profile 不再"占位"——改为本 stage 实装最简 matchPredicate + stream_usage default patcher（避免 W3.1 4-profile coverage gate 红）；(#3) capabilityClass 字段名统一 `supportsVision / supportsThinking / supportsLongContext`（不是 `vision / thinking / longContext`）；(#4) thinking capability 不通过 `CapabilityModeMap.capabilityModes.thinking`（`CapabilityModeMap` keys 限定为 `CapabilityGroupId`，无 `thinking`）——改为通过 `AIModelConfig.thinkingMode?: AICapabilityMode` 独立字段或读 `AIModelDef.capabilityOverrides.supportsThinking` 直返；(#5) clarification 落点真实路径 `src/main/modules/tools/skill-primitives/ask-user.ts`（实测文件名，无 `-bridge` 后缀）；(#6) migration 034/035/036 SQL DDL 用 `IF NOT EXISTS`（与 `src/main/modules/migrations.ts` 现有约定一致）；(#7) gate 总数实测 38，不是 37（公式漏算 W3.0 parity gate）

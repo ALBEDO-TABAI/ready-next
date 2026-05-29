@@ -24,7 +24,7 @@
  *      per-session map rather than replacing it; the mirror reflects the
  *      post-merge value.
  *
- * Plan: docs/superpowers/plans/2026-05-22-W4-useagent-ownership-implementation.md
+ * Plan: docs/superpowers/plans/archive/2026-05-22-W4-useagent-ownership-implementation.md
  *       §3.2 / §3.3 / §3.4
  *
  * Test strategy: drive the store directly via `useAgent.setState` to seed a

@@ -3,7 +3,7 @@ title: Verify gate taxonomy v0
 date: 2026-05-22
 stage: W0
 enforce: false
-parent_roadmap: docs/superpowers/plans/2026-05-22-W-ready-stabilization-roadmap.md
+parent_roadmap: docs/superpowers/plans/archive/2026-05-22-W-ready-stabilization-roadmap.md
 formalized_in: W6 (release gate reconciliation)
 ---
 

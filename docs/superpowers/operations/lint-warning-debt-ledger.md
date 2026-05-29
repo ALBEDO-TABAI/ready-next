@@ -6,7 +6,7 @@
 >
 > This ledger is the **only** authoritative budget for `scripts/check-lint-warning-budget.cjs`. Budgets start equal to the captured count for each rule; the budget script fails if any rule's live warning count exceeds its row's `Budget`. Lowering a `Budget` is encouraged once warnings are paid down — raising one requires an explicit row in the deferred-work ledger.
 >
-> **Y1.3 first batch (2026-05-24)**: 6 warnings burned (3 `(eslint-core)/unused-disable-directive` retired + 3 `react-hooks/exhaustive-deps` converted to documented disables). New live total: 765. Per-rule budgets updated in the table below. Plan: `docs/superpowers/plans/2026-05-23-Y1-3-warning-burn-implementation.md`.
+> **Y1.3 first batch (2026-05-24)**: 6 warnings burned (3 `(eslint-core)/unused-disable-directive` retired + 3 `react-hooks/exhaustive-deps` converted to documented disables). New live total: 765. Per-rule budgets updated in the table below. Plan: `docs/superpowers/plans/archive/2026-05-23-Y1-3-warning-burn-implementation.md`.
 
 ## Area definitions
 

@@ -8,7 +8,7 @@
  * directly, runs it against a violating fixture string, and asserts the
  * rule fires with the expected message id.
  *
- * Plan: docs/superpowers/plans/2026-05-22-W4-useagent-ownership-implementation.md §3.6
+ * Plan: docs/superpowers/plans/archive/2026-05-22-W4-useagent-ownership-implementation.md §3.6
  */
 
 import assert from 'node:assert/strict'

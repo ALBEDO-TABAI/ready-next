@@ -1,5 +1,30 @@
 # Ready V5 - 更新日志
 
+## [Unreleased] - 2026-05-29
+
+### 预发布瘦身 — FunASR fallback 权重外置为按需模型包
+
+- **安装包 2.7GB → 616MB（约 -78%）**：paraformer（~1GB）与 `cn-en` 大标点（~1.1GB）从打包运行时移除，改为按需下载；Python 解释器 + ML site-packages 与小体积 fsmn-vad 仍随包离线可用。
+- **标点 fallback 默认改用 ct-punc-c**：`iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch`（~292MB，约 1/4 体积、加载/推理更快），`READY_FUNASR_PUNC_MODEL_ID` 仍可覆盖；ASR id 也补 `READY_FUNASR_ASR_MODEL_ID` 覆盖。Nano（主引擎）自带标点，本变更只影响 fallback 路径。
+- **统一模型包管理器**：退役 Nano 专用方法/IPC，泛化为注册表（`funasr-nano / funasr-fallback-asr / funasr-punc-ctc`）+ `listModelPacks / getModelPackStatus / startModelPackDownload / cancelModelPackDownload`；下载落 `runtimeRoot/models/<packId>`，`.partial` 暂存 + requiredFiles（`model.pt`+`config.yaml`）校验 + 原子 rename。
+- **国内/国外源自动切换 + 断点续传**：ModelScope（国内）/ HuggingFace（国外，HF-only 走 hf-mirror.com）；`自动/国内/国外` 设置持久化，自动模式按可达性探测选源；`snapshot_download` 续传，取消保留 partial。
+- **设置「模型与运行时」独立页**：每包状态/进度/下载-取消 + 全局来源选择 + 存储位置；`SkillsCenterPanel` 的 Nano 下载块改指向该页，单一下载入口。
+- **缺失依赖即引导**：skill/功能缺模型时回灌结构化 `missing runtime dependency`（feature / missingPacks / settingsDeepLink），渲染端提示并深链到设置页。
+- **下载自检模式**：不拉全量权重即校验逐包逐源可达性、坐标解析、断点续传保留与原子安装。
+- **Packer 协同**：`RUNTIME_SKIP_RELATIVE_PREFIXES` 排除两类权重；`verifyAsrModelCaches` 改为对 VAD 做轻量文件存在性校验；新增 staged-only 缺权重断言，证明安装包确实变小。
+- **二期未做**：sha256 完整性清单、Python 双份抽取共享模块、运行时清单包清单、并行多文件续传 UI、site-package 进一步瘦身。
+
+### CI — 根因修复 `verify:lint-budget` 等三处闸门
+
+- **`verify:lint-budget` 红闸**：测试新增 `any` 把 `@typescript-eslint/no-explicit-any` 顶过预算；按根因给 stub 补真实类型（非抬预算）并重基线 lint-warning-debt-ledger。
+- **外置过程中两处 CI 专属回归**：`verify:c` sqlite-test-skip-pattern（model-pack 测试 C4 透传）补 `c4Exempt`；`verify:r` silent-catch（model-pack 新代码两处 catch）补准确 `silent-catch:` 注释（错误经返回值上抛到 UI，throw 反而会中断自检/续传）。
+- HEAD `9e039755`：merge / deep-gates / Windows smoke 全绿。
+
+### 仓库 — readyguy 收为主线（仅本地）
+
+- `codex/readyguy` → `main`（对旧 `main`/`origin/main` 均 fast-forward，无 force、零丢提交）；旧 `main`（db765146）→ `backup/main-20260529`。
+- 清扫 39 条历史支线 + 失效 worktree；保留 `main` / `backup/main-20260529` / 一条仍有未提交工作的 locked agent worktree。`origin` 未改动。
+
 ## [Unreleased] - 2026-05-07
 
 ### Stage 10 (P) — `'not_set'` authorization 兼容短路退役

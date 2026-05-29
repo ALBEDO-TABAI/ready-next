@@ -70,7 +70,7 @@ Out-of-scope (Stage Z):
 | `src/__tests__/settings-cache-quota-relabel.test.ts` | New test file — assert relabel text appears + quota select still renders. |
 | `docs/superpowers/audits/2026-05-23-stage-y-closeout/release-handoff.md` | Populate §5c "Cache quota carry-over (Y0.8 path-(b))" — replace the `_(pending)_` placeholder with the relabel decision + Stage Z scope handoff. |
 | `docs/superpowers/audits/2026-05-23-stage-y-closeout/deferred-work-ledger.md` | Append follow-up row `y0-8-cache-quota-relabel-disposition`. |
-| `docs/superpowers/plans/2026-05-23-Y0-8-cache-quota-relabel-implementation.md` | This sub-plan (created now per plan §11 sub-plan-first rule). |
+| `docs/superpowers/plans/archive/2026-05-23-Y0-8-cache-quota-relabel-implementation.md` | This sub-plan (created now per plan §11 sub-plan-first rule). |
 
 No main-process changes. No new IPC channels. No new preload surface.
 No lint-budget raise. No new dependencies.

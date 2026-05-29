@@ -3,7 +3,7 @@ title: Verify gate taxonomy v1
 date: 2026-05-22
 stage: W6
 enforce: false
-parent_roadmap: docs/superpowers/plans/2026-05-22-W-ready-stabilization-roadmap.md
+parent_roadmap: docs/superpowers/plans/archive/2026-05-22-W-ready-stabilization-roadmap.md
 predecessor: docs/superpowers/operations/verify-gate-taxonomy-v0.md
 inventory: docs/superpowers/operations/w6-script-inventory.txt
 scripts_diff: docs/superpowers/operations/w6-scripts-diff.md

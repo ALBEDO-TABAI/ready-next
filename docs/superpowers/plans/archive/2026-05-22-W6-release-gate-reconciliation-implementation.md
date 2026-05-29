@@ -4,8 +4,8 @@ stage: W6
 date: 2026-05-22
 status: implementation-draft
 enforce: false
-parent_roadmap: docs/superpowers/plans/2026-05-22-W-ready-stabilization-roadmap.md
-predecessor_phase: docs/superpowers/plans/2026-05-22-W0-current-truth-freeze-implementation.md
+parent_roadmap: docs/superpowers/plans/archive/2026-05-22-W-ready-stabilization-roadmap.md
+predecessor_phase: docs/superpowers/plans/archive/2026-05-22-W0-current-truth-freeze-implementation.md
 ---
 
 # W6 — Release gate reconciliation implementation plan

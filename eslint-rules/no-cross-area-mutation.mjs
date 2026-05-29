@@ -24,7 +24,7 @@
  * insufficient because a later import in the same file would still cross
  * the line — see plan §3.6.
  *
- * Plan: docs/superpowers/plans/2026-05-22-W4-useagent-ownership-implementation.md §3.6
+ * Plan: docs/superpowers/plans/archive/2026-05-22-W4-useagent-ownership-implementation.md §3.6
  * Areas map: docs/superpowers/audits/2026-05-22-w4-useagent-ownership-map/ownership-areas.md
  */
 

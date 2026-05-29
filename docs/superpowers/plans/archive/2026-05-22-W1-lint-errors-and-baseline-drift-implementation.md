@@ -4,7 +4,7 @@ stage: W1
 date: 2026-05-22
 status: implementation-draft
 enforce: false
-parent_roadmap: docs/superpowers/plans/2026-05-22-W-ready-stabilization-roadmap.md
+parent_roadmap: docs/superpowers/plans/archive/2026-05-22-W-ready-stabilization-roadmap.md
 predecessor_review: docs/superpowers/audits/2026-05-22-ready-recent-change-review-and-next-roadmap.md
 ---
 

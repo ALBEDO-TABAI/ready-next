@@ -20,7 +20,7 @@
  *      helper (`withSessionSliceAndActiveMirror`) must not be reachable
  *      from outside the store module.
  *
- * Plan: docs/superpowers/plans/2026-05-22-W4-useagent-ownership-implementation.md
+ * Plan: docs/superpowers/plans/archive/2026-05-22-W4-useagent-ownership-implementation.md
  *       §3.5
  *
  * Test strategy: import only the declared selector surface, drive the
