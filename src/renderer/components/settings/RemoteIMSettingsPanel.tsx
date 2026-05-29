@@ -125,11 +125,13 @@ export default function RemoteIMSettingsPanel() {
 
   const refresh = useCallback(async () => {
     if (!window.electronAPI?.agent) return
-    const [channelsRes, runtimeRes, cacheRes] = await Promise.all([
-      window.electronAPI.agent.listChannels(),
-      window.electronAPI.agent.getRuntimeStatus(),
-      window.electronAPI.agent.getRemoteAttachmentCacheStats(),
-    ])
+    // Fire all three concurrently, but await in priority order so the channel config UI paints
+    // immediately instead of waiting on getRemoteAttachmentCacheStats' synchronous fs walk.
+    const channelsPromise = window.electronAPI.agent.listChannels()
+    const runtimePromise = window.electronAPI.agent.getRuntimeStatus()
+    const cachePromise = window.electronAPI.agent.getRemoteAttachmentCacheStats()
+
+    const channelsRes = await channelsPromise
     if (channelsRes.success && channelsRes.data) {
       const list = channelsRes.data as unknown as ChannelData[]
       setChannels(list)
@@ -156,9 +158,11 @@ export default function RemoteIMSettingsPanel() {
         if (defaultTarget) setWechatDefaultTarget(defaultTarget)
       }
     }
+    const runtimeRes = await runtimePromise
     if (runtimeRes.success && runtimeRes.data) {
       setRuntimeStatus(runtimeRes.data as unknown as RuntimeStatusData)
     }
+    const cacheRes = await cachePromise
     if (cacheRes?.success && cacheRes.data) {
       setCacheStats(cacheRes.data as RemoteAttachmentCacheStatsData)
     }

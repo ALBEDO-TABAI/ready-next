@@ -7,7 +7,7 @@ import {
 } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useTheme, type ThemeSkin } from '../stores/useTheme'
-import { resolveAIConfigCapabilities } from '../../shared/ai-providers'
+import { resolveAIConfigCapabilities, getActiveAIProfile } from '../../shared/ai-providers'
 import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runtime'
 import { listSettingsCapabilityGroups, type CapabilityGroupId } from '../../shared/ai-capability-groups'
 import { useSettings, getProviderDef } from '../stores/useSettings'
@@ -381,10 +381,30 @@ function AISettingsSwitch({
 }
 
 // ── AI Settings Panel (dynamic, wired to backend) ──────────────────────────
+const compactSelectStyle = {
+  ...SETTINGS_FLAT_INPUT_STYLE,
+  borderRadius: 14,
+  padding: '8px 28px 8px 12px',
+}
+const stackedInputStyle = {
+  ...SETTINGS_FLAT_INPUT_STYLE,
+  borderRadius: 16,
+  padding: '11px 14px',
+  width: '100%',
+  textAlign: 'left' as const,
+}
+const stackedSelectStyle = {
+  ...SETTINGS_FLAT_INPUT_STYLE,
+  borderRadius: 16,
+  padding: '11px 34px 11px 14px',
+  width: '100%',
+}
+
 function AISettingsPanel() {
   const {
     config: activeConfig,
     workspace,
+    selectedProfileId,
     loaded,
     testStatus,
     testMessage,
@@ -404,8 +424,6 @@ function AISettingsPanel() {
     addModelId,
     removeModelId,
     testConnection,
-    getSelectedProfile,
-    getActiveProfile,
   } = useSettings()
 
   const [showKey, setShowKey] = useState(false)
@@ -429,12 +447,15 @@ function AISettingsPanel() {
   const [capabilityRuntimeSnapshot, setCapabilityRuntimeSnapshot] = useState<CapabilityRuntimeSnapshot | null>(null)
   const requestedCapabilitySnapshotKey = useRef<string | null>(null)
 
-  const selectedProfile = getSelectedProfile()
-  const activeProfile = getActiveProfile()
+  const selectedProfile = useMemo(
+    () => workspace.profiles.find((profile) => profile.id === (selectedProfileId || workspace.activeProfileId)) || null,
+    [workspace, selectedProfileId]
+  )
+  const activeProfile = useMemo(() => getActiveAIProfile(workspace), [workspace])
   const selectedConfig = selectedProfile?.config || activeConfig
   const activeCategory = (selectedProfile?.category || 'custom') as AIProviderCategory
   const currentProvider = getProviderDef(selectedConfig.provider, selectedConfig.baseUrl)
-  const capabilities = resolveAIConfigCapabilities(selectedConfig)
+  const capabilities = useMemo(() => resolveAIConfigCapabilities(selectedConfig), [selectedConfig])
   const models = currentProvider?.models || []
   const showReasoningEffort = capabilities?.agentProtocol === 'openai' && capabilities?.wireApi === 'responses'
   const capabilityGroups = listSettingsCapabilityGroups()
@@ -445,24 +466,6 @@ function AISettingsPanel() {
     : capabilities?.wireApi === 'responses'
       ? 'OpenAI /responses'
       : 'OpenAI /chat/completions'
-  const compactSelectStyle = {
-    ...SETTINGS_FLAT_INPUT_STYLE,
-    borderRadius: 14,
-    padding: '8px 28px 8px 12px',
-  }
-  const stackedInputStyle = {
-    ...SETTINGS_FLAT_INPUT_STYLE,
-    borderRadius: 16,
-    padding: '11px 14px',
-    width: '100%',
-    textAlign: 'left' as const,
-  }
-  const stackedSelectStyle = {
-    ...SETTINGS_FLAT_INPUT_STYLE,
-    borderRadius: 16,
-    padding: '11px 34px 11px 14px',
-    width: '100%',
-  }
   const capabilityRuntimeConfig = useMemo(() => ({
     ...selectedConfig,
     apiKey: '',

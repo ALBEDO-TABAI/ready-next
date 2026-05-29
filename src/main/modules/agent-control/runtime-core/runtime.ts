@@ -336,6 +336,10 @@ export class AgentControlRuntime extends EventEmitter {
   private pollTimer: NodeJS.Timeout | null = null
   private readonly scopeRunSummaries = new Map<string, ScopeRunSummary>()
   private lastSidecarRestartAttemptAt = 0
+  // Channel connected/error counts are fetched from the sidecar over HTTP, which is too slow
+  // to do on every getRuntimeStatus() call (it is on the Settings render path). Cache the last
+  // values and refresh them from the 3s poll loop instead.
+  private channelStateCache = { connected: 0, errors: 0 }
   private readonly lastAdapterRestartAttemptAt = new Map<string, number>()
   private heartbeat: HeartbeatSnapshot = {
     sidecar: { status: 'stopped' },
@@ -559,11 +563,9 @@ export class AgentControlRuntime extends EventEmitter {
       lastBeatAt: new Date().toISOString()
     }
 
-    const channelState = this.sidecar.isRunning()
-      ? await this.sidecar.getChannelState().catch(() => ({}))
-      : {}
-    const connected = Number((channelState as { connected?: number }).connected || 0)
-    const errors = Number((channelState as { errors?: number }).errors || 0)
+    const { connected, errors } = this.sidecar.isRunning()
+      ? this.channelStateCache
+      : { connected: 0, errors: 0 }
 
     return {
       orchestrator: this.orchestrator.getRuntimeKernel(),
@@ -1676,6 +1678,14 @@ export class AgentControlRuntime extends EventEmitter {
         error: typeof item.error === 'string' ? item.error : undefined
       }))
       await this.reviveErroredAdapters()
+
+      const channelState = await this.sidecar.getChannelState().catch(() => null)
+      if (channelState) {
+        this.channelStateCache = {
+          connected: Number((channelState as { connected?: number }).connected || 0),
+          errors: Number((channelState as { errors?: number }).errors || 0)
+        }
+      }
 
       const events = await this.sidecar.pullEvents(24)
       for (const evt of events) {
