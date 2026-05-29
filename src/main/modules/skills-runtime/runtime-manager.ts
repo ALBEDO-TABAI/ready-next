@@ -936,6 +936,10 @@ export class SkillsRuntimeManager {
       }
       return { ok: true, detail: '断点续传与原子安装路径正常' }
     } catch (error) {
+      // silent-catch: a filesystem failure during the scratch check IS the finding —
+      // it is surfaced to the caller as integrityOk=false with this message in the
+      // self-test report (not swallowed), and one pack's failure must not abort the
+      // rest of the report; the finally still removes the throwaway scratch dir.
       return { ok: false, detail: error instanceof Error ? error.message : String(error) }
     } finally {
       rmSync(base, { recursive: true, force: true })
@@ -984,6 +988,9 @@ export class SkillsRuntimeManager {
       renameSync(partialDir, targetDir)
       return null
     } catch (error) {
+      // silent-catch: a rename/cleanup failure is surfaced to the caller as the
+      // returned error string (which becomes the pack's download error in status/UI),
+      // and the partial dir is intentionally left in place so a re-invocation resumes.
       return error instanceof Error ? error.message : String(error)
     }
   }
