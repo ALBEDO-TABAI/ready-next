@@ -18,7 +18,7 @@ test('rss feed keeps compact toolbar controls while article rows stay on the sha
   assert.match(rssFeed, /className="rss-toolbar-actions flex items-center"/)
   assert.match(rssFeed, /className="rss-toolbar-select appearance-none cursor-pointer/)
   assert.match(rssFeed, /className="rss-toolbar-icon-button"/)
-  assert.match(rssFeed, /<ListTodo className="h-\[16px\] w-\[16px\]"/)
+  assert.match(rssFeed, /<ListTodo className="h-\[14px\] w-\[14px\]"/)
   assert.match(rssFeed, /<RefreshCw/)
   assert.match(rssFeed, /rss-toolbar-active-dot/)
   assert.match(styles, /\.rss-toolbar-icon-button \{/)

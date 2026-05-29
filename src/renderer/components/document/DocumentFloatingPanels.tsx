@@ -191,7 +191,7 @@ export function DocumentPanelToggleButtons({
         title="内容速览"
         aria-pressed={outlineOpen}
       >
-        <ListTree className="h-[15px] w-[15px]" strokeWidth={1.8} />
+        <ListTree className="h-[14px] w-[14px]" strokeWidth={2} />
       </button>
       <button
         type="button"
@@ -200,7 +200,7 @@ export function DocumentPanelToggleButtons({
         title="书签和笔记"
         aria-pressed={marksOpen}
       >
-        <Bookmark className="h-[15px] w-[15px]" strokeWidth={1.8} />
+        <Bookmark className="h-[14px] w-[14px]" strokeWidth={2} />
       </button>
     </div>
   )

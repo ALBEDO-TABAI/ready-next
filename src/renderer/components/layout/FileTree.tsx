@@ -2044,8 +2044,7 @@ export default function FileTree({
           <span style={{ fontSize: 13 }} className="text-[var(--text-light)] mb-4 text-center">拖入文件夹或点击下方按钮打开</span>
           <button
             onClick={openFolderDialog}
-            className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-white text-[13px] font-medium active:scale-[0.98] transition-[filter,transform] duration-200 ease-out"
-            style={{ background: 'var(--color-blue)' }}
+            className="ready-glass-button text-[13px]"
           >
             <FolderOpen style={{ width: 14, height: 14 }} strokeWidth={2} />
             打开文件夹

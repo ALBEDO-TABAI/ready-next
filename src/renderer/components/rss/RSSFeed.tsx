@@ -660,7 +660,7 @@ export default function RSSFeed({
             aria-label="添加 RSS 源"
             title="添加 RSS 源"
           >
-            <Plus className="h-[16px] w-[16px]" strokeWidth={2} />
+            <Plus className="h-[14px] w-[14px]" strokeWidth={2} />
           </button>
 
           {/* 任务下拉列表 */}
@@ -675,7 +675,7 @@ export default function RSSFeed({
               }
               title={taskMenuOpen ? undefined : '查看分析任务'}
             >
-              <ListTodo className="h-[16px] w-[16px]" strokeWidth={2} />
+              <ListTodo className="h-[14px] w-[14px]" strokeWidth={2} />
               {activeJobsCount > 0 ? <span className="rss-toolbar-active-dot" /> : null}
             </button>
             {taskMenuPanel}
@@ -695,7 +695,7 @@ export default function RSSFeed({
             }
           >
             <RefreshCw
-              className={`h-[16px] w-[16px] ${refreshing ? 'animate-spin' : ''}`}
+              className={`h-[14px] w-[14px] ${refreshing ? 'animate-spin' : ''}`}
               strokeWidth={2}
             />
           </button>
@@ -707,7 +707,7 @@ export default function RSSFeed({
             aria-label="清空当前筛选范围中的全部内容"
             title="清空当前筛选范围中的全部内容"
           >
-            <Trash2 className="h-[16px] w-[16px]" strokeWidth={2} />
+            <Trash2 className="h-[14px] w-[14px]" strokeWidth={2} />
           </button>
 
           <button
@@ -722,7 +722,7 @@ export default function RSSFeed({
             aria-pressed={settingsOpen}
             title={settingsOpen ? undefined : '打开 RSS 设置'}
           >
-            <Settings className="h-[16px] w-[16px]" strokeWidth={2} />
+            <Settings className="h-[14px] w-[14px]" strokeWidth={2} />
           </button>
         </div>
       </div>

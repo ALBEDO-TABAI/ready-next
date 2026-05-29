@@ -310,7 +310,7 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
                     title="今天"
                     onClick={onGoToToday}
                   >
-                    <CalendarDays style={{ width: 16, height: 16 }} />
+                    <CalendarDays style={{ width: 14, height: 14 }} />
                   </button>
                   <button
                     type="button"
@@ -318,7 +318,7 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
                     aria-label="上一段时间"
                     onClick={() => onNavigateDate(-1)}
                   >
-                    <ChevronLeft style={{ width: 16, height: 16 }} />
+                    <ChevronLeft style={{ width: 14, height: 14 }} />
                   </button>
                   <button
                     type="button"
@@ -326,7 +326,7 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
                     aria-label="下一段时间"
                     onClick={() => onNavigateDate(1)}
                   >
-                    <ChevronRight style={{ width: 16, height: 16 }} />
+                    <ChevronRight style={{ width: 14, height: 14 }} />
                   </button>
                   <button
                     type="button"
@@ -335,7 +335,7 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
                     aria-pressed={assistantOpen}
                     onClick={onToggleAssistant}
                   >
-                    <PanelRightOpen style={{ width: 16, height: 16 }} />
+                    <PanelRightOpen style={{ width: 14, height: 14 }} />
                   </button>
                 </div>
               </div>

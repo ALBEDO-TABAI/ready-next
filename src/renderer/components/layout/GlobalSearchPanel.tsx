@@ -752,14 +752,7 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
       <button
         type="button"
         onClick={handleBuildIndexClick}
-        className="border px-[14px] flex items-center gap-[6px] text-[12px] font-semibold transition-colors"
-        style={{
-          height: 32,
-          borderRadius: 10,
-          borderColor: 'transparent',
-          background: PANEL_COLORS.blue,
-          color: '#FFFFFF',
-        }}
+        className="ready-glass-button text-[12px]"
       >
         <Database className="h-3.5 w-3.5" />
         构建索引

@@ -243,10 +243,10 @@ export default function DocumentTabRail({
               <button
                 type="button"
                 onClick={() => void onNewTab()}
-                className="ml-[6px] flex h-[26px] w-[26px] flex-shrink-0 items-center justify-center rounded-[8px] transition-colors hover:bg-[var(--bg-hover)]"
+                className="ml-[6px] flex h-[28px] w-[28px] flex-shrink-0 items-center justify-center rounded-[8px] transition-colors hover:bg-[var(--bg-hover)]"
                 title="新建"
               >
-                <Plus style={{ width: 14, height: 14 }} className="text-[var(--text-muted)]" strokeWidth={2} />
+                <Plus style={{ width: 14, height: 14 }} className="text-[var(--text-light)]" strokeWidth={2} />
               </button>
             </MorphTabStrip>
           </div>
