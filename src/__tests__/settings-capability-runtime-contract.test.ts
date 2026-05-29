@@ -37,5 +37,4 @@ test('settings runtime panel does not expose the retired Claude SDK label', () =
   assert.doesNotMatch(settingsPage, /Claude SDK/)
   assert.doesNotMatch(rendererTypes, /claude-sdk/)
   assert.match(runtime, /orchestrator:\s*this\.orchestrator\.getRuntimeKernel\(\)/)
-  assert.match(settingsPage, /Ready Agent SDK/)
 })

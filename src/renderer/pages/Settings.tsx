@@ -284,35 +284,6 @@ function AISettingsFieldCard({
   )
 }
 
-function AISettingsCapabilityChip({
-  label,
-  value,
-  tone = 'default',
-}: {
-  label: string
-  value: string
-  tone?: 'default' | 'positive' | 'muted'
-}) {
-  const color = tone === 'positive'
-    ? 'var(--color-green)'
-    : tone === 'muted'
-      ? 'var(--text-muted)'
-      : 'var(--color-blue)'
-
-  return (
-    <div
-      className="settings-ai-light-chip flex items-center gap-2 rounded-full border"
-      style={{
-        ...SETTINGS_FLAT_CHIP_STYLE,
-        padding: '7px 11px',
-      }}
-    >
-      <span className="text-[10px]" style={{ color: 'var(--text-light)' }}>{label}</span>
-      <span className="text-[11px] font-semibold" style={{ color }}>{value}</span>
-    </div>
-  )
-}
-
 function AISettingsInfoChip({
   label,
   value,
@@ -399,6 +370,20 @@ const stackedSelectStyle = {
   padding: '11px 34px 11px 14px',
   width: '100%',
 }
+// Inner control slot for the "label-on-top" field cards (合并窗口 / Bind Host / Bind Port).
+// Borderless filled slot (no second stroke against the surrounding card) with comfortable
+// left padding so the value no longer hugs the card edge.
+const fieldSlotStyle = {
+  ...SETTINGS_FLAT_INPUT_STYLE,
+  marginTop: 6,
+  border: '1px solid transparent',
+  borderRadius: 12,
+  background: 'color-mix(in srgb, var(--surface-floating-bg) 58%, transparent)',
+  boxShadow: 'none',
+  padding: '8px 12px',
+  fontSize: 12,
+  width: '100%',
+}
 
 function AISettingsPanel() {
   const {
@@ -429,21 +414,9 @@ function AISettingsPanel() {
   const [showKey, setShowKey] = useState(false)
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [pendingModelId, setPendingModelId] = useState('')
-  const [remoteChannelsEnabled, setRemoteChannelsEnabled] = useState(true)
-  const [sidecarAutostart, setSidecarAutostart] = useState(true)
-  const [sidecarHost, setSidecarHost] = useState('127.0.0.1')
-  const [sidecarPort, setSidecarPort] = useState('auto')
+  const [detailExpanded, setDetailExpanded] = useState(false)
   const [messageCoalesceEnabled, setMessageCoalesceEnabled] = useState(true)
   const [messageCoalesceWindowMs, setMessageCoalesceWindowMs] = useState('1200')
-  const [runtimeSummary, setRuntimeSummary] = useState<{
-    orchestrator?: 'ready-agent-sdk'
-    sidecarStatus?: string
-    sidecarPort?: number
-    channelCount?: number
-    scheduleCount?: number
-    activeTasks?: number
-    feishuConnected?: boolean
-  } | null>(null)
   const [capabilityRuntimeSnapshot, setCapabilityRuntimeSnapshot] = useState<CapabilityRuntimeSnapshot | null>(null)
   const requestedCapabilitySnapshotKey = useRef<string | null>(null)
 
@@ -482,11 +455,6 @@ function AISettingsPanel() {
     reasoningEffort: capabilityRuntimeConfig.reasoningEffort,
     capabilityModes: capabilityRuntimeConfig.capabilityModes || {},
   })
-  const toolTransportLabel = capabilities?.toolCallTransport === 'text'
-    ? '文本桥接'
-    : capabilities?.toolCallTransport === 'native'
-      ? '原生'
-      : '关闭'
   const knownModel = models.find((model) => model.id === selectedConfig.model)
   const managedModelIds = selectedConfig.modelIds || (selectedConfig.model ? [selectedConfig.model] : [])
   const managedModelIdSet = new Set(managedModelIds)
@@ -494,38 +462,10 @@ function AISettingsPanel() {
     || !knownModel
     || selectedConfig.model === '__custom__'
     || selectedConfig.model === 'custom'
-  const runtimeKernelLabel = runtimeSummary?.orchestrator === 'ready-agent-sdk'
-    ? 'Ready Agent SDK'
-    : 'Ready Agent Runtime'
-
-  const safeHostname = (() => {
-    try {
-      return selectedConfig.baseUrl ? new URL(selectedConfig.baseUrl).hostname : '未配置'
-    } catch {
-      return selectedConfig.baseUrl || '未配置'
-    }
-  })()
 
   const persistBridgeSetting = useCallback((key: string, value: string) => {
     if (typeof window === 'undefined' || !window.electronAPI?.settings) return
     void window.electronAPI.settings.set(key, value)
-  }, [])
-
-  const refreshRuntimeSummary = useCallback(async () => {
-    if (typeof window === 'undefined' || !window.electronAPI?.agent) return
-    const result = await window.electronAPI.agent.getRuntimeStatus()
-    if (!result.success || !result.data) return
-    setRuntimeSummary({
-      orchestrator: result.data.orchestrator,
-      sidecarStatus: result.data.sidecar.status,
-      sidecarPort: result.data.sidecar.port,
-      channelCount: result.data.channels.total,
-      scheduleCount: result.data.schedules.total,
-      activeTasks: result.data.heartbeat.orchestrator.activeTasks,
-      feishuConnected: Array.isArray(result.data.heartbeat.adapters)
-        ? result.data.heartbeat.adapters.some((adapter) => adapter.type === 'feishu-app' && adapter.healthy)
-        : false,
-    })
   }, [])
 
   const refreshCapabilityRuntimeSnapshot = useCallback(async () => {
@@ -548,30 +488,28 @@ function AISettingsPanel() {
       if (cancelled) return
 
       const settings = allSettingsResult?.success && allSettingsResult.data ? allSettingsResult.data : {}
-      if (settings.remote_channels_enabled) setRemoteChannelsEnabled(settings.remote_channels_enabled !== 'false')
-      if (settings.sidecar_autostart) setSidecarAutostart(settings.sidecar_autostart !== 'false')
-      if (settings.sidecar_bind_host) setSidecarHost(settings.sidecar_bind_host)
-      if (settings.sidecar_bind_port) setSidecarPort(settings.sidecar_bind_port)
       if (settings.agent_message_coalesce_enabled) setMessageCoalesceEnabled(settings.agent_message_coalesce_enabled !== 'false')
       if (settings.agent_message_coalesce_window_ms) setMessageCoalesceWindowMs(settings.agent_message_coalesce_window_ms)
-      await refreshRuntimeSummary()
     })()
 
     return () => { cancelled = true }
-  }, [loaded, refreshRuntimeSummary])
+  }, [loaded])
 
   useEffect(() => {
-    if (!loaded) return
+    // 配置详情默认折叠，折叠时不渲染能力分组，也无需拉取运行态快照；
+    // 仅在用户展开详情后才按当前 key 拉取，避免切入页面时的同步重渲染卡顿。
+    if (!loaded || !detailExpanded) return
     if (requestedCapabilitySnapshotKey.current === capabilitySnapshotKey) return
     requestedCapabilitySnapshotKey.current = capabilitySnapshotKey
     const timer = window.setTimeout(() => {
       void refreshCapabilityRuntimeSnapshot()
     }, 80)
     return () => window.clearTimeout(timer)
-  }, [loaded, capabilitySnapshotKey, refreshCapabilityRuntimeSnapshot])
+  }, [loaded, detailExpanded, capabilitySnapshotKey, refreshCapabilityRuntimeSnapshot])
 
   useEffect(() => {
     setShowAdvanced(false)
+    setDetailExpanded(false)
   }, [selectedProfile?.id])
 
   useEffect(() => {
@@ -602,7 +540,7 @@ function AISettingsPanel() {
 
   const resolveCapabilityRuntimeDisplay = useCallback((groupId: CapabilityGroupId) => {
     const snapshot = capabilityRuntimeSnapshot?.groups[groupId]
-    if (!snapshot) return { label: '读取中', tone: 'muted' as const }
+    if (!snapshot) return { label: '待刷新', tone: 'muted' as const }
     if (snapshot.status === 'inactive') return { label: '保留占位', tone: 'muted' as const }
     if (snapshot.status === 'host_only') return { label: '宿主内部', tone: 'muted' as const }
     if (snapshot.status === 'environment_unavailable') return { label: '因环境不可用而关闭', tone: 'muted' as const }
@@ -675,7 +613,7 @@ function AISettingsPanel() {
                   ...(isActive ? {
                     borderColor: 'color-mix(in srgb, var(--color-blue) 34%, var(--lg-border-soft) 66%)',
                     background: 'color-mix(in srgb, var(--color-blue-light) 74%, var(--surface-card-bg) 26%)',
-                    boxShadow: 'var(--lg-shadow-contact), inset 0 0 0 1px color-mix(in srgb, var(--color-blue) 20%, transparent)',
+                    boxShadow: 'var(--lg-shadow-contact)',
                   } : SETTINGS_FLAT_CARD_STYLE),
                 }}
               >
@@ -786,13 +724,52 @@ function AISettingsPanel() {
             }}
           >
             <div className="flex items-start justify-between gap-5 flex-wrap">
-              <div className="min-w-0">
-                <div className="text-[15px] font-semibold" style={{ color: 'var(--text-title)' }}>{selectedProfile.name}</div>
-                <div className="text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)', maxWidth: 620 }}>
-                  {activeProfile?.id === selectedProfile.id ? '当前默认正在使用这个预设。' : '你可以先调整这里的内容，再决定是否设为当前默认。'}
-                </div>
-              </div>
+              <button
+                type="button"
+                onClick={() => setDetailExpanded((value) => !value)}
+                aria-expanded={detailExpanded}
+                className="min-w-0 flex items-start gap-2 text-left"
+              >
+                <ChevronRight
+                  className="w-4 h-4 mt-0.5 shrink-0 transition-transform duration-200"
+                  style={{ color: 'var(--text-light)', transform: detailExpanded ? 'rotate(90deg)' : 'none' }}
+                />
+                <span className="min-w-0">
+                  <span className="block text-[15px] font-semibold" style={{ color: 'var(--text-title)' }}>{selectedProfile.name}</span>
+                  <span className="block text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)', maxWidth: 620 }}>
+                    {detailExpanded
+                      ? (activeProfile?.id === selectedProfile.id ? '当前默认正在使用这个预设。' : '你可以先调整这里的内容，再决定是否设为当前默认。')
+                      : '点击展开模型配置详情进行调整。'}
+                  </span>
+                </span>
+              </button>
               <div className="flex items-center gap-2">
+                <button
+                  onClick={() => testConnection(selectedProfile.id)}
+                  disabled={testStatus === 'testing'}
+                  title={testMessage || '验证当前地址、密钥和模型是否能通。'}
+                  className="flex items-center gap-1.5 rounded-full text-[12px] font-semibold transition-[filter,transform,opacity] duration-200 hover:brightness-95 active:scale-[0.98] disabled:opacity-50"
+                  style={{
+                    ...SETTINGS_FLAT_BUTTON_STYLE,
+                    padding: '9px 14px',
+                    color:
+                      testStatus === 'success'
+                        ? 'var(--color-green)'
+                        : testStatus === 'error'
+                          ? 'var(--color-red)'
+                          : 'var(--text-body)',
+                  }}
+                >
+                  {testStatus === 'testing' && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                  {testStatus === 'success' && <CheckCircle2 className="w-3.5 h-3.5" />}
+                  {testStatus === 'error' && <XCircle className="w-3.5 h-3.5" />}
+                  {testStatus === 'testing' ? '测试中...' : '测试'}
+                  {typeof testLatency === 'number' && testStatus === 'success' && (
+                    <span className="text-[11px] font-normal" style={{ color: 'var(--text-muted)' }}>
+                      {testLatency}ms
+                    </span>
+                  )}
+                </button>
                 {activeProfile?.id !== selectedProfile.id && (
                   <button
                     onClick={() => activateProfile(selectedProfile.id)}
@@ -823,13 +800,7 @@ function AISettingsPanel() {
               </div>
             </div>
 
-            <div className="mt-4 flex flex-wrap gap-2">
-              <AISettingsCapabilityChip label="接口" value={resolvedAgentInterfaceLabel} />
-              <AISettingsCapabilityChip label="工具传输" value={toolTransportLabel} tone={capabilities?.supportsToolCalls ? 'positive' : 'muted'} />
-              <AISettingsCapabilityChip label="聊天可见" value={selectedProfile.showInChatSwitcher ? '显示' : '隐藏'} tone={selectedProfile.showInChatSwitcher ? 'positive' : 'muted'} />
-              <AISettingsCapabilityChip label="当前主机" value={safeHostname} tone="muted" />
-            </div>
-
+            {detailExpanded && (
             <div className="mt-5 grid gap-3 md:grid-cols-2">
             <AISettingsFieldCard
               title="预设名称"
@@ -958,36 +929,43 @@ function AISettingsPanel() {
               description="给当前预设维护多个模型 ID；“设为默认”会切换实际调用的主模型。"
               control={(
                 <div className="flex flex-col gap-3">
-                  <div className="flex flex-wrap gap-2">
+                  <div className="flex flex-wrap gap-2.5">
                     {managedModelIds.length > 0 ? managedModelIds.map((modelId) => {
                       const isDefaultModel = selectedConfig.model === modelId
                       return (
                         <div
                           key={modelId}
-                          className="settings-ai-light-chip flex items-center gap-2 rounded-full border px-3 py-1.5"
+                          className="settings-ai-light-chip flex items-center gap-2.5 rounded-full border"
                           style={{
                             ...SETTINGS_FLAT_CHIP_STYLE,
+                            padding: '5px 8px 5px 14px',
                           }}
                         >
                           <span className="text-[11px] font-mono" style={{ color: 'var(--text-body)' }}>{modelId}</span>
-                          {isDefaultModel ? (
-                            <span className="text-[10px] font-semibold" style={{ color: 'var(--color-green)' }}>默认</span>
-                          ) : (
+                          <span
+                            aria-hidden
+                            style={{ width: 1, alignSelf: 'stretch', margin: '3px 0', background: 'color-mix(in srgb, var(--surface-border) 58%, transparent)' }}
+                          />
+                          <div className="flex items-center gap-1">
+                            {isDefaultModel ? (
+                              <span className="rounded-full text-[10px] font-semibold" style={{ color: 'var(--color-green)', background: 'color-mix(in srgb, var(--color-green-light) 58%, transparent)', padding: '2px 8px' }}>默认</span>
+                            ) : (
+                              <button
+                                onClick={() => updateField('model', modelId)}
+                                className="rounded-full text-[10px] font-semibold transition-colors hover:bg-[var(--bg-hover)]"
+                                style={{ color: 'var(--color-blue)', padding: '2px 8px' }}
+                              >
+                                设为默认
+                              </button>
+                            )}
                             <button
-                              onClick={() => updateField('model', modelId)}
-                              className="text-[10px] font-semibold transition-colors hover:opacity-80"
-                              style={{ color: 'var(--color-blue)' }}
+                              onClick={() => removeModelId(modelId)}
+                              className="rounded-full text-[10px] font-semibold transition-colors hover:bg-[var(--bg-hover)]"
+                              style={{ color: 'var(--text-muted)', padding: '2px 8px' }}
                             >
-                              设为默认
+                              删除
                             </button>
-                          )}
-                          <button
-                            onClick={() => removeModelId(modelId)}
-                            className="text-[10px] font-semibold transition-colors hover:opacity-80"
-                            style={{ color: 'var(--text-muted)' }}
-                          >
-                            删除
-                          </button>
+                          </div>
                         </div>
                       )
                     }) : (
@@ -1058,8 +1036,11 @@ function AISettingsPanel() {
               />
             )}
           </div>
+          )}
           </div>
 
+          {detailExpanded && (
+          <>
           <div
             className="glass-surface-card rounded-2xl border"
             style={{
@@ -1243,38 +1224,6 @@ function AISettingsPanel() {
             </div>
           </div>
 
-          <AISettingsFieldCard
-            wide
-            title="测试连接"
-            description="验证当前地址、密钥和模型是否能通。"
-            control={(
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-[11px] flex items-center gap-1.5 min-w-0" style={{ color: testStatus === 'success' ? 'var(--color-green)' : testStatus === 'error' ? 'var(--color-red)' : 'var(--text-light)' }}>
-                  {testStatus === 'testing' && <Loader2 className="w-3 h-3 animate-spin shrink-0" />}
-                  {testStatus === 'success' && <CheckCircle2 className="w-3 h-3 shrink-0" />}
-                  {testStatus === 'error' && <XCircle className="w-3 h-3 shrink-0" />}
-                  <span className="truncate">{testMessage || '验证当前预设是否可用'}</span>
-                  {typeof testLatency === 'number' && testStatus === 'success' && (
-                    <span className="shrink-0" style={{ color: 'var(--text-muted)' }}>{testLatency} ms</span>
-                  )}
-                </div>
-                <button
-                  onClick={() => testConnection(selectedProfile.id)}
-                  disabled={testStatus === 'testing'}
-                  className="flex-shrink-0 flex items-center gap-1.5 rounded-full text-[12px] font-semibold transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-95 active:scale-[0.98] disabled:opacity-50"
-                  style={{
-                    ...SETTINGS_FLAT_BUTTON_STYLE,
-                    background: 'color-mix(in srgb, var(--color-blue) 84%, var(--surface-floating-bg) 16%)',
-                    color: '#fff',
-                    padding: '10px 18px',
-                  }}
-                >
-                  {testStatus === 'testing' ? '测试中...' : '测试'}
-                </button>
-              </div>
-            )}
-          />
-
           {remoteModels.length > 0 && (
             <div
               className="glass-surface-card rounded-2xl border"
@@ -1312,6 +1261,8 @@ function AISettingsPanel() {
               </div>
             </div>
           )}
+          </>
+          )}
         </>
       )}
 
@@ -1347,8 +1298,8 @@ function AISettingsPanel() {
                 setMessageCoalesceWindowMs(event.target.value)
                 persistBridgeSetting('agent_message_coalesce_window_ms', event.target.value)
               }}
-              className="mt-1 w-full bg-transparent text-[12px] outline-none cursor-pointer"
-              style={{ color: 'var(--text-body)' }}
+              className="w-full text-[12px] outline-none cursor-pointer"
+              style={{ ...fieldSlotStyle, padding: '8px 28px 8px 12px' }}
             >
               <option value="600">0.6 秒</option>
               <option value="1000">1.0 秒</option>
@@ -1357,98 +1308,6 @@ function AISettingsPanel() {
               <option value="2500">2.5 秒</option>
             </select>
           </label>
-        </div>
-      </div>
-
-      <div
-        className="glass-surface-card rounded-2xl border overflow-hidden"
-        style={SETTINGS_CARD_STYLE}
-      >
-        <div className="flex items-start justify-between gap-5 flex-wrap" style={{ padding: '18px 20px 16px', borderBottom: '1px solid color-mix(in srgb, var(--lg-border-soft) 88%, transparent)' }}>
-          <div className="flex-1 min-w-0 mr-4">
-            <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>Agent Runtime</div>
-            <div className="text-[11px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
-              Ready Agent SDK 编排，Python sidecar 提供 Channels / Heartbeat / cron
-            </div>
-          </div>
-          <button
-            className="rounded-full border text-[12px] font-semibold hover:bg-[var(--bg-hover)] transition-colors"
-            style={{
-              ...SETTINGS_SECONDARY_BUTTON_STYLE,
-              padding: '9px 14px',
-            }}
-            onClick={() => {
-              void refreshRuntimeSummary()
-            }}
-          >
-            刷新状态
-          </button>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2" style={{ padding: '16px 20px', borderBottom: '1px solid color-mix(in srgb, var(--lg-border-soft) 88%, transparent)' }}>
-          <div className="glass-surface-card flex items-center justify-between gap-3 rounded-2xl border px-4 py-3" style={SETTINGS_SUBTLE_CARD_STYLE}>
-            <span className="text-[12px]" style={{ color: 'var(--text-body)' }}>启用远程 Channels</span>
-            <AISettingsSwitch
-              checked={remoteChannelsEnabled}
-              onChange={(next) => {
-                setRemoteChannelsEnabled(next)
-                persistBridgeSetting('remote_channels_enabled', String(next))
-              }}
-            />
-          </div>
-          <div className="glass-surface-card flex items-center justify-between gap-3 rounded-2xl border px-4 py-3" style={SETTINGS_SUBTLE_CARD_STYLE}>
-            <span className="text-[12px]" style={{ color: 'var(--text-body)' }}>启动时自动拉起 Sidecar</span>
-            <AISettingsSwitch
-              checked={sidecarAutostart}
-              onChange={(next) => {
-                setSidecarAutostart(next)
-                persistBridgeSetting('sidecar_autostart', String(next))
-              }}
-            />
-          </div>
-        </div>
-        <div className="grid gap-3 md:grid-cols-2" style={{ padding: '16px 20px', borderBottom: '1px solid color-mix(in srgb, var(--lg-border-soft) 88%, transparent)' }}>
-          <div className="glass-surface-card rounded-2xl border px-4 py-3" style={SETTINGS_SUBTLE_CARD_STYLE}>
-            <div className="text-[10px]" style={{ color: 'var(--text-light)' }}>Bind Host</div>
-            <input
-              type="text"
-              value={sidecarHost}
-              onChange={(event) => setSidecarHost(event.target.value)}
-              onBlur={() => persistBridgeSetting('sidecar_bind_host', sidecarHost)}
-              className="mt-1.5 w-full bg-transparent text-[12px] outline-none"
-              style={{ color: 'var(--text-body)' }}
-            />
-          </div>
-          <div className="glass-surface-card rounded-2xl border px-4 py-3" style={SETTINGS_SUBTLE_CARD_STYLE}>
-            <div className="text-[10px]" style={{ color: 'var(--text-light)' }}>Bind Port</div>
-            <input
-              type="text"
-              value={sidecarPort}
-              onChange={(event) => setSidecarPort(event.target.value)}
-              onBlur={() => persistBridgeSetting('sidecar_bind_port', sidecarPort)}
-              className="mt-1.5 w-full bg-transparent text-[12px] outline-none"
-              style={{ color: 'var(--text-body)' }}
-            />
-          </div>
-        </div>
-        <div style={{ padding: '16px 20px 18px' }}>
-          <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-            <AISettingsInfoChip
-              label="编排内核"
-              value={<span style={{ color: 'var(--color-blue)' }}>{runtimeKernelLabel}</span>}
-            />
-            <AISettingsInfoChip
-              label="Sidecar"
-              value={`${runtimeSummary?.sidecarStatus || 'unknown'}${runtimeSummary?.sidecarPort ? ` · ${runtimeSummary.sidecarPort}` : ''}`}
-            />
-            <AISettingsInfoChip
-              label="Channels / Schedules"
-              value={`${runtimeSummary?.channelCount ?? 0} / ${runtimeSummary?.scheduleCount ?? 0}`}
-            />
-            <AISettingsInfoChip
-              label="活跃任务"
-              value={String(runtimeSummary?.activeTasks ?? 0)}
-            />
-          </div>
         </div>
       </div>
 
