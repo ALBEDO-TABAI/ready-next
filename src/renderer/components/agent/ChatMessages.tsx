@@ -348,23 +348,13 @@ export default function ChatMessages({
             </div>
 
             {taskSnapshot ? (
-              <div
-                data-chat-message-task-snapshot={msg.id}
-                style={{
-                  paddingLeft: msg.type === 'agent' ? 10 : 0,
-                }}
-              >
+              <div data-chat-message-task-snapshot={msg.id}>
                 {taskSnapshot}
               </div>
             ) : null}
 
             {toolTraceSnapshot ? (
-              <div
-                data-chat-message-tool-trace={msg.id}
-                style={{
-                  paddingLeft: msg.type === 'agent' ? 10 : 0,
-                }}
-              >
+              <div data-chat-message-tool-trace={msg.id}>
                 {toolTraceSnapshot}
               </div>
             ) : null}

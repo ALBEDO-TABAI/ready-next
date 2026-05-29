@@ -353,7 +353,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
 
           <div
             style={{
-              padding: '10px 0 0',
+              padding: '10px 16px 0',
               borderTop: '1px solid transparent',
               display: 'flex',
               flexDirection: 'column',

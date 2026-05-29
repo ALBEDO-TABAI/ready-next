@@ -30,12 +30,10 @@ export default function ChatAttachments({
         return (
           <div
             key={att.id}
-            className="relative flex-shrink-0 flex items-center gap-1.5"
+            className="relative flex-shrink-0 flex items-center gap-1.5 chat-reference-chip"
             style={{
               padding: '5px 8px',
-              borderRadius: 6,
-              background: att.source === 'document-quote' ? 'var(--color-blue-light)' : 'var(--bg-hover)',
-              border: '1px solid var(--border-default)',
+              borderRadius: 8,
               maxWidth: att.source === 'document-quote' ? 240 : 168,
             }}
           >
@@ -75,7 +73,7 @@ export default function ChatAttachments({
                 <span
                   style={{
                     fontSize: 10,
-                    color: att.source === 'document-quote' ? 'var(--color-blue)' : 'var(--text-body)',
+                    color: 'var(--text-body)',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
@@ -91,8 +89,8 @@ export default function ChatAttachments({
                       lineHeight: 1.1,
                       padding: '2px 6px',
                       borderRadius: 999,
-                      background: att.source === 'document-quote' ? 'rgba(255,255,255,0.58)' : 'rgba(0,0,0,0.05)',
-                      color: att.source === 'document-quote' ? 'var(--color-blue)' : 'var(--text-light)',
+                      background: 'rgba(0,0,0,0.05)',
+                      color: 'var(--text-light)',
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
