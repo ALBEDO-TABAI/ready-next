@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from 'react'
-import { CheckCircle2, Download, Folder, FolderInput, FolderOpen, Loader2, Pen, RefreshCw, Settings2, Trash2 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { Boxes, Folder, FolderInput, FolderOpen, Loader2, Pen, Settings2, Trash2 } from 'lucide-react'
+import { MODELS_RUNTIME_SETTINGS_SECTION } from '../../../shared/model-pack-types'
 import ContextMenu, { type ContextMenuItem } from './ContextMenu'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { readStorage, removeStorage, writeStorage } from '../../utils/storage'
@@ -37,25 +39,6 @@ interface SkillState {
 interface SkillsRuntimeInfo {
   skillsRoot: string
   customSkillsRoot: string
-}
-
-interface FunasrNanoModelStatus {
-  modelId: string
-  defaultModelDir: string
-  configuredModelDir: string | null
-  activeModelDir: string
-  available: boolean
-  missingFiles: string[]
-  download: {
-    running: boolean
-    targetDir: string | null
-    startedAt: string | null
-    updatedAt: string | null
-    completedAt: string | null
-    error: string | null
-    lastMessage: string | null
-    progressPercent: number | null
-  }
 }
 
 interface LegacyImportedSkillFolder {
@@ -944,10 +927,8 @@ function SkillConfigurationDialog({
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [nanoStatus, setNanoStatus] = useState<FunasrNanoModelStatus | null>(null)
-  const [nanoLoading, setNanoLoading] = useState(false)
-  const [nanoDownloadStarting, setNanoDownloadStarting] = useState(false)
-  const supportsFunasrNanoModel = skill?.id === 'video-expert-analyzer' || skill?.id === 'video-copy-analyzer'
+  const navigate = useNavigate()
+  const usesSubtitleModels = skill?.id === 'video-expert-analyzer' || skill?.id === 'video-copy-analyzer'
 
   useEffect(() => {
     if (!open || !skill) return
@@ -977,35 +958,6 @@ function SkillConfigurationDialog({
     })()
     return () => { cancelled = true }
   }, [open, skill])
-
-  const loadNanoStatus = useCallback(async (targetDir?: string | null) => {
-    if (!supportsFunasrNanoModel) return
-    setNanoLoading(true)
-    try {
-      const res = await window.electronAPI.skills.getFunasrNanoStatus({ targetDir })
-      if (res.success && res.data) {
-        setNanoStatus(res.data as FunasrNanoModelStatus)
-      } else if (res.error) {
-        setError(res.error)
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setNanoLoading(false)
-    }
-  }, [supportsFunasrNanoModel])
-
-  useEffect(() => {
-    if (!open || !supportsFunasrNanoModel) return
-    void loadNanoStatus()
-  }, [loadNanoStatus, open, supportsFunasrNanoModel])
-
-  useEffect(() => {
-    if (!open || !supportsFunasrNanoModel || !window.electronAPI.skills.onFunasrNanoDownloadUpdate) return undefined
-    return window.electronAPI.skills.onFunasrNanoDownloadUpdate((status) => {
-      setNanoStatus(status as FunasrNanoModelStatus)
-    })
-  }, [open, supportsFunasrNanoModel])
 
   useEffect(() => {
     if (!open) return
@@ -1067,27 +1019,10 @@ function SkillConfigurationDialog({
     }
   }, [onSaved, skill, view])
 
-  const startNanoDownload = useCallback(async () => {
-    if (!supportsFunasrNanoModel) return
-    const targetDirValue = view?.values.fields.funasrNanoModelDir
-    const targetDir = typeof targetDirValue === 'string' && targetDirValue.trim()
-      ? targetDirValue.trim()
-      : undefined
-    setNanoDownloadStarting(true)
-    setError(null)
-    try {
-      const res = await window.electronAPI.skills.startFunasrNanoDownload({ targetDir })
-      if (res.success && res.data) {
-        setNanoStatus(res.data as FunasrNanoModelStatus)
-      } else {
-        setError(res.error || '模型下载启动失败')
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setNanoDownloadStarting(false)
-    }
-  }, [supportsFunasrNanoModel, view])
+  const openModelsRuntimeSettings = useCallback(() => {
+    onClose()
+    navigate(`/settings?section=${MODELS_RUNTIME_SETTINGS_SECTION}`)
+  }, [navigate, onClose])
 
   if (!open || !skill) return null
 
@@ -1223,12 +1158,13 @@ function SkillConfigurationDialog({
             )
           })}
 
-          {!loading && supportsFunasrNanoModel && (
+          {!loading && usesSubtitleModels && (
             <div
               style={{
                 display: 'flex',
-                flexDirection: 'column',
-                gap: 8,
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 10,
                 padding: 12,
                 border: '1px solid var(--border-default)',
                 borderRadius: 10,
@@ -1238,82 +1174,32 @@ function SkillConfigurationDialog({
                 lineHeight: 1.5,
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                  {nanoStatus?.available ? (
-                    <CheckCircle2 size={15} color="var(--color-green)" />
-                  ) : nanoStatus?.download.running ? (
-                    <Loader2 size={15} className="animate-spin" />
-                  ) : (
-                    <Download size={15} />
-                  )}
-                  <span style={{ fontWeight: 600, color: 'var(--text-body)' }}>
-                    FunASR Nano 模型
-                  </span>
-                </div>
-                <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
-                  <button
-                    type="button"
-                    onClick={() => loadNanoStatus(typeof view?.values.fields.funasrNanoModelDir === 'string' ? view.values.fields.funasrNanoModelDir : null)}
-                    disabled={nanoLoading}
-                    title="刷新模型状态"
-                    style={{
-                      width: 30,
-                      height: 30,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      border: '1px solid var(--border-input)',
-                      borderRadius: 8,
-                      background: 'var(--bg-primary)',
-                      color: 'var(--text-body)',
-                      cursor: nanoLoading ? 'not-allowed' : 'pointer',
-                    }}
-                  >
-                    <RefreshCw size={14} className={nanoLoading ? 'animate-spin' : undefined} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={startNanoDownload}
-                    disabled={nanoDownloadStarting || Boolean(nanoStatus?.download.running)}
-                    style={{
-                      height: 30,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 6,
-                      padding: '0 10px',
-                      border: '1px solid var(--border-input)',
-                      borderRadius: 8,
-                      background: 'var(--bg-primary)',
-                      color: 'var(--text-body)',
-                      cursor: nanoDownloadStarting || nanoStatus?.download.running ? 'not-allowed' : 'pointer',
-                    }}
-                  >
-                    {nanoDownloadStarting || nanoStatus?.download.running ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />}
-                    下载
-                  </button>
-                </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                <Boxes size={15} />
+                <span style={{ overflowWrap: 'anywhere' }}>
+                  字幕识别依赖按需下载的语音模型，可在「设置 › 模型与运行时」中下载或更新。
+                </span>
               </div>
-              <div style={{ color: nanoStatus?.available ? 'var(--color-green)' : 'var(--text-secondary)' }}>
-                {nanoStatus?.available
-                  ? '已准备好，分析时会优先使用本地 Nano 模型。'
-                  : nanoStatus?.download.running
-                    ? `下载中${typeof nanoStatus.download.progressPercent === 'number' ? `：${nanoStatus.download.progressPercent}%` : ''}`
-                    : '未准备时会自动回退到 paraformer，不会阻塞分析流程。'}
-              </div>
-              <div style={{ overflowWrap: 'anywhere' }}>
-                路径：{nanoStatus?.activeModelDir || nanoStatus?.defaultModelDir || '读取中...'}
-              </div>
-              {nanoStatus?.download.lastMessage && (
-                <div style={{ overflowWrap: 'anywhere' }}>
-                  进度：{nanoStatus.download.lastMessage}
-                </div>
-              )}
-              {nanoStatus?.download.error && (
-                <div style={{ color: 'var(--color-red)', overflowWrap: 'anywhere' }}>
-                  {nanoStatus.download.error}
-                </div>
-              )}
+              <button
+                type="button"
+                onClick={openModelsRuntimeSettings}
+                style={{
+                  height: 30,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '0 10px',
+                  flexShrink: 0,
+                  border: '1px solid var(--border-input)',
+                  borderRadius: 8,
+                  background: 'var(--bg-primary)',
+                  color: 'var(--text-body)',
+                  cursor: 'pointer',
+                }}
+              >
+                <Settings2 size={14} />
+                前往设置
+              </button>
             </div>
           )}
         </div>

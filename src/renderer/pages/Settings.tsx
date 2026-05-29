@@ -3,7 +3,7 @@ import {
   ChevronLeft, User, Bell, Shield, Database,
   Palette, Keyboard, Globe, Info, Moon, Sun, Bot, Monitor, Droplets,
   ChevronRight, ExternalLink, HardDrive, Trash2, CheckCircle2, XCircle, Loader2, MessageSquare, Brain, Users, Sparkles, Cat,
-  Plug2
+  Plug2, Boxes
 } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useTheme, type ThemeSkin } from '../stores/useTheme'
@@ -15,6 +15,8 @@ import type { AIProviderCategory } from '../stores/useSettings'
 import type { ExternalServiceOptionValue, ExternalServiceUpdateInput, PublicExternalServiceProfile } from '../../shared/external-services'
 import RemoteIMSettingsPanel from '../components/settings/RemoteIMSettingsPanel'
 import PetSettingsPanel from '../components/settings/PetSettingsPanel'
+import ModelsRuntimeSettingsPanel from '../components/settings/ModelsRuntimeSettingsPanel'
+import { MODELS_RUNTIME_SETTINGS_SECTION } from '../../shared/model-pack-types'
 import {
   SETTINGS_CARD_STYLE,
   SETTINGS_DANGER_BUTTON_STYLE,
@@ -148,6 +150,13 @@ const settingsData: SettingSection[] = [
     title: 'RSS 底稿',
     icon: HardDrive,
     description: '管理 RSS 底稿仓库、增量收件箱和刷新重置',
+    settings: []
+  },
+  {
+    id: MODELS_RUNTIME_SETTINGS_SECTION,
+    title: '模型与运行时',
+    icon: Boxes,
+    description: '按需下载语音识别与标点模型，支持国内 / 国外源自动切换与断点续传',
     settings: []
   },
   {
@@ -2878,7 +2887,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
   }
 
   const isDynamicSection = currentSection
-    ? ['ai', 'remote-im', 'external-services', 'mcp', 'memory', 'personalities', 'user-profiles', 'pet', 'rss-storage', 'storage'].includes(currentSection.id)
+    ? ['ai', 'remote-im', 'external-services', 'mcp', 'memory', 'personalities', 'user-profiles', 'pet', 'rss-storage', MODELS_RUNTIME_SETTINGS_SECTION, 'storage'].includes(currentSection.id)
     : false
 
   return (
@@ -3007,6 +3016,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                 {/* AI Settings Panel — dynamic, wired to backend */}
                 {currentSection.id === 'ai' && <AISettingsPanel />}
                 {currentSection.id === 'rss-storage' && <RSSDraftStoreSettingsPanel />}
+                {currentSection.id === MODELS_RUNTIME_SETTINGS_SECTION && <ModelsRuntimeSettingsPanel />}
                 {currentSection.id === 'storage' && <StorageSettingsPanel />}
                 {currentSection.id === 'remote-im' && <RemoteIMSettingsPanel />}
                 {currentSection.id === 'external-services' && <ExternalServicesSettingsPanel />}

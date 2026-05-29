@@ -193,7 +193,11 @@ test('release packaging is pinned to a shared offline skill runtime', () => {
   assert.match(packer, /PYTHONNOUSERSITE:\s*'1'/)
   assert.match(packer, /MODELSCOPE_OFFLINE:\s*'1'/)
   assert.match(packer, /FunAudioLLM\/Fun-ASR-Nano-2512/)
-  assert.match(packer, /verifyNoBundledFunasrNanoWeights/)
+  // 兜底 ASR + 标点权重改为按需下载：staged 树剔除并断言缺席，证明安装包瘦身。
+  assert.match(packer, /verifyNoBundledModelWeights/)
+  assert.match(packer, /STAGED_FORBIDDEN_BUNDLED_WEIGHTS/)
+  assert.match(packer, /speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch/)
+  assert.match(packer, /punc_ct-transformer_cn-en-common-vocab471067-large/)
   assert.match(runtimeManager, /assertPackagedRuntimeCoversEmbeddedSkill/)
   assert.match(runtimeManager, /ensurePythonVenv\(\{ allowPackaged: false \}\)/)
   assert.match(runtimeManager, /installRequirements\(venvPython, requirementsPath, \{ allowPackaged: false \}\)/)

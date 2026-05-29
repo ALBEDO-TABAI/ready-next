@@ -119,18 +119,26 @@ const REQUIRED_RUNTIME_MODULES = [
   'yt_dlp',
   'rapidocr_onnxruntime',
 ]
+// 仅 fsmn-vad 随运行时内置（体积小）。ASR/标点权重改为按需下载，因此这里只做
+// 轻量文件存在性校验，不再用 funasr.AutoModel 实际加载重权重。
 const REQUIRED_RUNTIME_ASR_MODELS = [
   {
-    name: 'FunASR paraformer fallback',
-    kwargs: {
-      model: ['cache', 'modelscope', 'models', 'iic', 'speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch'],
-      vad_model: ['cache', 'modelscope', 'models', 'iic', 'speech_fsmn_vad_zh-cn-16k-common-pytorch'],
-      punc_model: ['cache', 'modelscope', 'models', 'iic', 'punc_ct-transformer_cn-en-common-vocab471067-large'],
-      disable_update: true,
-    },
+    name: 'FunASR fsmn-vad (bundled)',
+    dir: ['cache', 'modelscope', 'models', 'iic', 'speech_fsmn_vad_zh-cn-16k-common-pytorch'],
+    requiredFiles: ['model.pt', 'config.yaml'],
   },
 ]
 const OPTIONAL_FUNASR_NANO_MODEL_ID = 'FunAudioLLM/Fun-ASR-Nano-2512'
+// 初始安装包绝不内置的按需权重：Nano 在 source/staged 两处都不应出现；
+// 兜底 ASR + 各标点模型仅在「已 staged」的树中断言缺席（source 合法保留）。
+const ALWAYS_FORBIDDEN_BUNDLED_WEIGHTS = [
+  { label: OPTIONAL_FUNASR_NANO_MODEL_ID, fragments: ['fun-asr-nano-2512', 'funasr-nano-2512'] },
+]
+const STAGED_FORBIDDEN_BUNDLED_WEIGHTS = [
+  { label: 'iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch', fragments: ['speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch'] },
+  { label: 'iic/punc_ct-transformer_cn-en-common-vocab471067-large', fragments: ['punc_ct-transformer_cn-en-common-vocab471067-large'] },
+  { label: 'iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch', fragments: ['punc_ct-transformer_zh-cn-common-vocab272727-pytorch'] },
+]
 const RUNTIME_SKIP_DIR_NAMES = new Set([
   ...SKIP_DIR_NAMES,
   'skills',
@@ -139,9 +147,15 @@ const RUNTIME_SKIP_DIR_NAMES = new Set([
   'results',
   '.ready',
 ])
+const MODELSCOPE_MODEL_PREFIX = `cache${sep}modelscope${sep}models${sep}iic`
+// 兜底 ASR/标点权重改为按需下载（设置 › 模型与运行时），不随安装包内置；
+// fsmn-vad 体积小，仍随运行时保留。
 const RUNTIME_SKIP_RELATIVE_PREFIXES = [
   `cache${sep}pip`,
   `cache${sep}whisper`,
+  `${MODELSCOPE_MODEL_PREFIX}${sep}speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch`,
+  `${MODELSCOPE_MODEL_PREFIX}${sep}punc_ct-transformer_cn-en-common-vocab471067-large`,
+  `${MODELSCOPE_MODEL_PREFIX}${sep}punc_ct-transformer_zh-cn-common-vocab272727-pytorch`,
 ]
 
 function logStep(title, detail) {
@@ -380,6 +394,9 @@ function preparePackagedRuntime() {
   const rewrittenPythonLaunchers = rewriteRuntimePythonShebangs(cleanPackagedRuntimeRoot)
   assertRuntimePythonShebangsAreRelocatable(cleanPackagedRuntimeRoot)
   verifyRuntimeSource(cleanPackagedRuntimeRoot)
+  // 仅对已 staged 的树断言重权重缺席：source 仍合法保留这些权重，staged 已剔除，
+  // 以此证明安装包确实瘦身（兜底 ASR + 各标点权重不再内置）。
+  verifyNoBundledModelWeights(cleanPackagedRuntimeRoot, STAGED_FORBIDDEN_BUNDLED_WEIGHTS)
   return {
     source: releaseRuntimeSource,
     staged: cleanPackagedRuntimeRoot,
@@ -578,47 +595,35 @@ function verifyPythonRuntimeGate(python, runtimeRoot) {
   }
 }
 
-function verifyAsrModelCaches(python, runtimeRoot) {
-  const resolveRuntimeModelPath = (value) => Array.isArray(value) ? join(runtimeRoot, ...value) : value
-  const models = REQUIRED_RUNTIME_ASR_MODELS.map((item) => ({
-    ...item,
-    kwargs: Object.fromEntries(
-      Object.entries(item.kwargs).map(([key, value]) => [key, resolveRuntimeModelPath(value)]),
-    ),
-  }))
-  const modelProbe = [
-    'import json',
-    'from funasr import AutoModel',
-    `models = json.loads(${JSON.stringify(JSON.stringify(models))})`,
-    'failures = []',
-    'for item in models:',
-    '    try:',
-    '        AutoModel(**item["kwargs"])',
-    '    except Exception as exc:',
-    '        failures.append("{}: {}: {}".format(item["name"], type(exc).__name__, exc))',
-    'raise SystemExit("\\n".join(failures) if failures else 0)',
-  ].join('\n')
-  const result = spawnSync(python, ['-c', modelProbe], {
-    cwd: runtimeRoot,
-    encoding: 'utf8',
-    timeout: 600_000,
-    env: buildRuntimeProbeEnv(runtimeRoot),
-  })
-  if (result.status !== 0) {
-    throw new Error(`Packaged runtime ASR model cache probe failed:\n${collectProbeOutput(result)}`)
+function verifyAsrModelCaches(runtimeRoot) {
+  // funasr 可导入性已由 import 探针覆盖；这里只确认内置 VAD 权重在场。
+  // 兜底 ASR/标点权重不再内置（按需下载），故不做 AutoModel 实际加载。
+  for (const model of REQUIRED_RUNTIME_ASR_MODELS) {
+    const baseDir = join(runtimeRoot, ...model.dir)
+    for (const file of model.requiredFiles) {
+      const filePath = join(baseDir, file)
+      if (!existsSync(filePath)) {
+        throw new Error(
+          `Packaged runtime missing bundled model file (${model.name}): ${relative(runtimeRoot, filePath).split(sep).join('/')}`,
+        )
+      }
+    }
   }
 }
 
-function verifyNoBundledFunasrNanoWeights(runtimeRoot) {
-  const forbidden = collectFiles(runtimeRoot).filter((file) => {
-    const normalized = relative(runtimeRoot, file).split(sep).join('/').toLowerCase()
-    return (normalized.includes('fun-asr-nano-2512') || normalized.includes('funasr-nano-2512'))
-      && (normalized.endsWith('/model.pt') || normalized.endsWith('/model.safetensors'))
-  })
-  if (forbidden.length > 0) {
-    throw new Error(
-      `FunASR Nano weights must not be bundled in the initial app package (${OPTIONAL_FUNASR_NANO_MODEL_ID}). Remove: ${forbidden.slice(0, 5).map((file) => relative(runtimeRoot, file).split(sep).join('/')).join(', ')}`,
-    )
+function verifyNoBundledModelWeights(runtimeRoot, specs) {
+  const files = collectFiles(runtimeRoot)
+  for (const spec of specs) {
+    const forbidden = files.filter((file) => {
+      const normalized = relative(runtimeRoot, file).split(sep).join('/').toLowerCase()
+      return spec.fragments.some((fragment) => normalized.includes(fragment))
+        && (normalized.endsWith('/model.pt') || normalized.endsWith('/model.safetensors'))
+    })
+    if (forbidden.length > 0) {
+      throw new Error(
+        `Model weights must not be bundled in the initial app package (${spec.label}). Remove: ${forbidden.slice(0, 5).map((file) => relative(runtimeRoot, file).split(sep).join('/')).join(', ')}`,
+      )
+    }
   }
 }
 
@@ -637,7 +642,7 @@ function verifyNoEscapingSymlinks(runtimeRoot) {
 function verifyRuntimeSource(runtimeRoot) {
   verifyRuntimeManifest(runtimeRoot)
   verifyNoEscapingSymlinks(runtimeRoot)
-  verifyNoBundledFunasrNanoWeights(runtimeRoot)
+  verifyNoBundledModelWeights(runtimeRoot, ALWAYS_FORBIDDEN_BUNDLED_WEIGHTS)
 
   const python = runtimePythonPath(runtimeRoot)
   if (!existsSync(python)) throw new Error(`Packaged runtime missing Python: ${python}`)
@@ -660,7 +665,7 @@ function verifyRuntimeSource(runtimeRoot) {
   if (result.status !== 0) {
     throw new Error(`Packaged runtime Python import probe failed:\n${result.stdout || ''}${result.stderr || ''}`)
   }
-  verifyAsrModelCaches(python, runtimeRoot)
+  verifyAsrModelCaches(runtimeRoot)
 }
 
 function verifyPackagedRuntime(runtimeRoot) {

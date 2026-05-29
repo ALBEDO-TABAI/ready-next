@@ -2,8 +2,8 @@ import { execFile, spawn, type ChildProcessWithoutNullStreams } from 'child_proc
 import { promisify } from 'util'
 import { createHash, randomUUID } from 'crypto'
 import { createRequire } from 'module'
-import { join, delimiter, isAbsolute, resolve } from 'path'
-import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'fs'
+import { join, delimiter } from 'path'
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'fs'
 
 // See database.ts for the full rationale. Electron's Node entry is a CJS
 // string-export, so ESM `import { app } from 'electron'` breaks tsx/ESM tests
@@ -79,6 +79,28 @@ import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 import { ExternalServiceStore } from '../settings-engine/external-service-store'
 import { SkillConfigurationStore } from './skill-configuration-store'
 import type { SkillConfigurationUpdateInput, SkillConfigurationView } from '../../../shared/skill-configuration'
+import {
+  MODEL_PACK_IDS,
+  createDefaultModelPackDownloadStatus,
+  detectMissingRuntimeDependency,
+  type MissingRuntimeDependency,
+  type ModelPackDownloadRequest,
+  type ModelPackDownloadStatus,
+  type ModelPackId,
+  type ModelPackSelfTestEntry,
+  type ModelPackSelfTestReport,
+  type ModelPackSourceProbe,
+  type ModelPackStatus,
+} from '../../../shared/model-pack-types'
+import {
+  MODEL_PACK_DONE_MARKER,
+  buildModelPackDownloadScript,
+  getModelPackDescriptor,
+  resolveExplicitModelProvider,
+  resolveModelProvider,
+  resolvedProviderEndpoint,
+  type ResolvedModelProvider,
+} from './model-pack-registry'
 
 const execFileAsync = promisify(execFile)
 
@@ -86,8 +108,6 @@ const INSTALL_STATE_FILENAME = '.ready-install-state.json'
 const EMBEDDED_SYNC_STATE_FILENAME = '.ready-embedded-sync-state.json'
 const PYTHON_RUNTIME_STATE_FILENAME = '.ready-python-runtime-state.json'
 const MAX_COMMAND_BUFFER = 24 * 1024 * 1024
-const FUNASR_NANO_MODEL_ID = 'FunAudioLLM/Fun-ASR-Nano-2512'
-const FUNASR_NANO_REQUIRED_FILES = ['model.pt', 'config.yaml'] as const
 /**
  * C6 — per-stream in-memory cap before output spills to a `.logs/` artifact
  * under `<runtimeRoot>/outputs/<skillId>/`. Long-running video / audio skills
@@ -282,27 +302,14 @@ export interface SkillRunResult {
   stderrArtifactPath?: string
   stdoutArtifactError?: string
   stderrArtifactError?: string
-}
-
-export interface FunasrNanoModelDownloadStatus {
-  running: boolean
-  targetDir: string | null
-  startedAt: string | null
-  updatedAt: string | null
-  completedAt: string | null
-  error: string | null
-  lastMessage: string | null
-  progressPercent: number | null
-}
-
-export interface FunasrNanoModelStatus {
-  modelId: string
-  defaultModelDir: string
-  configuredModelDir: string | null
-  activeModelDir: string
-  available: boolean
-  missingFiles: string[]
-  download: FunasrNanoModelDownloadStatus
+  /**
+   * Phase 1 (model packs) — set when the run failed because an on-demand model
+   * pack/dependency is absent (the subtitle extractor printed the structured
+   * `__READY_ASR_MODEL_PACK_MISSING__` marker). Detected once in `runSkill` so
+   * every caller (inline + child-loop) carries the same signal; the renderer
+   * uses it to deep-link the user into Settings › Models & Runtime.
+   */
+  missingRuntimeDependency?: MissingRuntimeDependency
 }
 
 export interface SkillRunRequest {
@@ -472,17 +479,9 @@ export class SkillsRuntimeManager {
   private outputDirSweepIntervalTimer: NodeJS.Timeout | null = null
   private runningScheduleIds = new Set<string>()
   private orphanCleanupRan = false
-  private funasrNanoDownloadProcess: ChildProcessWithoutNullStreams | null = null
-  private funasrNanoDownloadStatus: FunasrNanoModelDownloadStatus = {
-    running: false,
-    targetDir: null,
-    startedAt: null,
-    updatedAt: null,
-    completedAt: null,
-    error: null,
-    lastMessage: null,
-    progressPercent: null,
-  }
+  // One in-flight download per pack so packs download independently.
+  private modelPackDownloads = new Map<ModelPackId, ChildProcessWithoutNullStreams>()
+  private modelPackDownloadStatuses = new Map<ModelPackId, ModelPackDownloadStatus>()
 
   // Phase 4: reference-skill hint TTL sweep runs independently of the retired
   // skill_executions state machine. Boot delay prevents blocking startup; the
@@ -683,53 +682,54 @@ export class SkillsRuntimeManager {
     }
   }
 
-  getFunasrNanoModelStatus(input: { targetDir?: string | null } = {}): FunasrNanoModelStatus {
+  getModelPackStatus(id: ModelPackId): ModelPackStatus {
     this.ensureRuntimeDirs()
-    const configuredModelDir = this.getConfiguredFunasrNanoModelDir()
-    const defaultModelDir = this.getDefaultFunasrNanoModelDir()
-    const activeModelDir = this.normalizeUserModelDir(input.targetDir)
-      || configuredModelDir
-      || defaultModelDir
-    const missingFiles = this.getMissingFunasrNanoFiles(activeModelDir)
+    const descriptor = getModelPackDescriptor(id)
+    const targetDir = this.getModelPackTargetDir(id)
+    const missingFiles = this.getMissingModelPackFiles(id, targetDir)
     return {
-      modelId: FUNASR_NANO_MODEL_ID,
-      defaultModelDir,
-      configuredModelDir,
-      activeModelDir,
+      id,
+      displayName: descriptor.displayName,
+      sizeEstimate: descriptor.sizeEstimate,
+      targetDir,
       available: missingFiles.length === 0,
       missingFiles,
-      download: { ...this.funasrNanoDownloadStatus },
+      download: { ...this.getModelPackDownloadState(id) },
     }
   }
 
-  async startFunasrNanoModelDownload(
-    input: { targetDir?: string | null } = {},
-    onUpdate?: (status: FunasrNanoModelStatus) => void,
-  ): Promise<FunasrNanoModelStatus> {
+  listModelPacks(): ModelPackStatus[] {
+    return MODEL_PACK_IDS.map((id) => this.getModelPackStatus(id))
+  }
+
+  async startModelPackDownload(
+    request: ModelPackDownloadRequest,
+    onUpdate?: (status: ModelPackStatus) => void,
+  ): Promise<ModelPackStatus> {
     this.ensureRuntimeDirs()
-    if (this.funasrNanoDownloadProcess) {
-      return this.getFunasrNanoModelStatus({ targetDir: this.funasrNanoDownloadStatus.targetDir })
+    const { id } = request
+    const descriptor = getModelPackDescriptor(id)
+    if (this.modelPackDownloads.has(id)) {
+      return this.getModelPackStatus(id)
     }
 
-    const targetDir = this.normalizeUserModelDir(input.targetDir)
-      || this.getConfiguredFunasrNanoModelDir()
-      || this.getDefaultFunasrNanoModelDir()
-    mkdirSync(targetDir, { recursive: true })
+    const source = request.source ?? 'auto'
+    const targetDir = this.getModelPackTargetDir(id)
+    const partialDir = this.getModelPackPartialDir(id)
 
-    const ready = this.getMissingFunasrNanoFiles(targetDir).length === 0
-    if (ready) {
+    if (this.getMissingModelPackFiles(id, targetDir).length === 0) {
       const now = new Date().toISOString()
-      this.funasrNanoDownloadStatus = {
-        running: false,
+      this.modelPackDownloadStatuses.set(id, {
+        ...createDefaultModelPackDownloadStatus(),
+        source,
         targetDir,
         startedAt: now,
         updatedAt: now,
         completedAt: now,
-        error: null,
         lastMessage: '模型已存在',
         progressPercent: 100,
-      }
-      return this.getFunasrNanoModelStatus({ targetDir })
+      })
+      return this.getModelPackStatus(id)
     }
 
     const install = await this.ensureSkillInstalled('video-expert-analyzer')
@@ -737,122 +737,227 @@ export class SkillsRuntimeManager {
       throw new Error(install.error || '无法准备视频分析运行时')
     }
     const python = await this.ensurePythonVenv()
+    const resolved = await resolveModelProvider(descriptor, source, (url) => this.probeEndpointLatency(url))
+
+    mkdirSync(partialDir, { recursive: true })
     const now = new Date().toISOString()
-    this.funasrNanoDownloadStatus = {
+    this.modelPackDownloadStatuses.set(id, {
       running: true,
+      source,
+      resolvedProvider: resolved.provider,
       targetDir,
       startedAt: now,
       updatedAt: now,
       completedAt: null,
       error: null,
-      lastMessage: '开始下载 FunASR Nano 模型',
+      lastMessage: `开始下载 ${descriptor.displayName}（来源：${this.describeModelProvider(resolved)}）`,
       progressPercent: null,
-    }
-
-    const script = [
-      'import json, pathlib, sys',
-      'from huggingface_hub import snapshot_download',
-      'target = pathlib.Path(sys.argv[1]).expanduser().resolve()',
-      'target.mkdir(parents=True, exist_ok=True)',
-      `path = snapshot_download(${JSON.stringify(FUNASR_NANO_MODEL_ID)}, local_dir=str(target), max_workers=4)`,
-      'print("__READY_FUNASR_NANO_DONE__" + json.dumps({"path": path}, ensure_ascii=False), flush=True)',
-    ].join('\n')
-
-    const env = this.getFunasrNanoDownloadEnv(targetDir)
-    const child = spawn(python, ['-c', script, targetDir], {
-      cwd: this.runtimeRoot,
-      env,
     })
-    this.funasrNanoDownloadProcess = child
+
+    const script = buildModelPackDownloadScript(resolved.provider, resolved.repoId)
+    const env = this.buildModelPackDownloadEnv(resolved)
+    const child = spawn(python, ['-c', script, partialDir], { cwd: this.runtimeRoot, env })
+    this.modelPackDownloads.set(id, child)
 
     const publish = (): void => {
-      onUpdate?.(this.getFunasrNanoModelStatus({ targetDir }))
+      onUpdate?.(this.getModelPackStatus(id))
+    }
+    const patch = (next: Partial<ModelPackDownloadStatus>): void => {
+      this.modelPackDownloadStatuses.set(id, { ...this.getModelPackDownloadState(id), ...next })
     }
     const ingest = (chunk: Buffer): void => {
-      const text = chunk.toString('utf8')
-      const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+      const lines = chunk.toString('utf8').split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
       const lastLine = lines[lines.length - 1]
       if (!lastLine) return
-      this.funasrNanoDownloadStatus = {
-        ...this.funasrNanoDownloadStatus,
+      patch({
         updatedAt: new Date().toISOString(),
-        lastMessage: lastLine.replace(/^__READY_FUNASR_NANO_DONE__/, ''),
-        progressPercent: this.parseDownloadProgressPercent(lastLine) ?? this.funasrNanoDownloadStatus.progressPercent,
-      }
+        lastMessage: lastLine.startsWith(MODEL_PACK_DONE_MARKER) ? lastLine.slice(MODEL_PACK_DONE_MARKER.length) : lastLine,
+        progressPercent: this.parseDownloadProgressPercent(lastLine) ?? this.getModelPackDownloadState(id).progressPercent,
+      })
       publish()
     }
 
     child.stdout.on('data', ingest)
     child.stderr.on('data', ingest)
     child.on('error', (error) => {
-      this.funasrNanoDownloadProcess = null
-      this.funasrNanoDownloadStatus = {
-        ...this.funasrNanoDownloadStatus,
+      this.modelPackDownloads.delete(id)
+      patch({
         running: false,
         updatedAt: new Date().toISOString(),
         completedAt: null,
         error: error.message,
         lastMessage: error.message,
-      }
+      })
       publish()
     })
     child.on('close', (code) => {
-      this.funasrNanoDownloadProcess = null
-      const missingFiles = this.getMissingFunasrNanoFiles(targetDir)
+      this.modelPackDownloads.delete(id)
       const completedAt = new Date().toISOString()
-      const success = code === 0 && missingFiles.length === 0
-      const error = success
-        ? null
-        : code === 0
-          ? `模型下载完成但缺少文件: ${missingFiles.join(', ')}`
-          : `模型下载失败，退出码 ${code ?? 'unknown'}`
-      this.funasrNanoDownloadStatus = {
-        ...this.funasrNanoDownloadStatus,
+      const installError = this.finalizeModelPackDownload(id, code)
+      const success = installError === null
+      patch({
         running: false,
         updatedAt: completedAt,
         completedAt,
-        error,
-        lastMessage: error || 'FunASR Nano 模型已准备好',
-        progressPercent: success ? 100 : this.funasrNanoDownloadStatus.progressPercent,
-      }
+        error: installError,
+        lastMessage: installError || `${descriptor.displayName} 已准备好`,
+        progressPercent: success ? 100 : this.getModelPackDownloadState(id).progressPercent,
+      })
       publish()
     })
 
     publish()
-    return this.getFunasrNanoModelStatus({ targetDir })
+    return this.getModelPackStatus(id)
   }
 
-  private getDefaultFunasrNanoModelDir(): string {
-    return join(this.runtimeRoot, 'models', 'funasr-nano-2512')
-  }
-
-  private normalizeUserModelDir(value: unknown): string | null {
-    const raw = typeof value === 'string' ? value.trim() : ''
-    if (!raw) return null
-    const home = process.env.HOME || ''
-    const expanded = raw === '~'
-      ? home
-      : raw.startsWith('~/') && home
-        ? join(home, raw.slice(2))
-        : raw
-    return isAbsolute(expanded) ? expanded : resolve(this.runtimeRoot, expanded)
-  }
-
-  private getConfiguredFunasrNanoModelDir(): string | null {
-    for (const skillId of ['video-expert-analyzer', 'video-copy-analyzer'] as const) {
-      const definition = this.getSkillLoader().loadSkill(skillId)
-      if (!definition) continue
-      const value = this.skillConfigurationStore.getValues(definition).fields.funasrNanoModelDir
-      const normalized = this.normalizeUserModelDir(value)
-      if (normalized) return normalized
+  cancelModelPackDownload(id: ModelPackId): ModelPackStatus {
+    const child = this.modelPackDownloads.get(id)
+    if (child) {
+      child.kill()
+      this.modelPackDownloads.delete(id)
+      this.modelPackDownloadStatuses.set(id, {
+        ...this.getModelPackDownloadState(id),
+        running: false,
+        updatedAt: new Date().toISOString(),
+        lastMessage: '已取消下载（已保留断点，可继续）',
+      })
     }
-    return null
+    return this.getModelPackStatus(id)
   }
 
-  private getMissingFunasrNanoFiles(modelDir: string): string[] {
-    return FUNASR_NANO_REQUIRED_FILES.filter((file) => {
+  // Lightweight diagnostic for the Settings supplementary-download feature: per
+  // pack × per source it resolves the provider coordinates, probes the endpoint
+  // for reachability/latency, and confirms the download script builds — proving
+  // the 国内/国外 auto-switch is wired correctly WITHOUT pulling any weights. It
+  // also exercises the resume-preserve + atomic-install path on a scratch dir
+  // (never touching real packs). The latency probe is injected so the test is
+  // network-free; endpoint URLs are de-duplicated within a run.
+  async selfTestModelPacks(
+    probe: (url: string) => Promise<number | null> = (url) => this.probeEndpointLatency(url),
+  ): Promise<ModelPackSelfTestReport> {
+    this.ensureRuntimeDirs()
+    const startedAt = new Date().toISOString()
+    const latencyByUrl = new Map<string, number | null>()
+    const probeOnce = async (url: string): Promise<number | null> => {
+      if (latencyByUrl.has(url)) return latencyByUrl.get(url) ?? null
+      const latency = await probe(url)
+      latencyByUrl.set(url, latency)
+      return latency
+    }
+
+    const entries: ModelPackSelfTestEntry[] = []
+    for (const id of MODEL_PACK_IDS) {
+      const descriptor = getModelPackDescriptor(id)
+      const probes: ModelPackSourceProbe[] = []
+      for (const source of ['domestic', 'overseas'] as const) {
+        let coordinatesOk = false
+        let endpoint = ''
+        let provider: ModelPackSourceProbe['provider'] = 'modelscope'
+        let latencyMs: number | null = null
+        try {
+          const resolved = resolveExplicitModelProvider(descriptor, source)
+          provider = resolved.provider
+          endpoint = resolvedProviderEndpoint(resolved)
+          const script = buildModelPackDownloadScript(resolved.provider, resolved.repoId)
+          coordinatesOk = resolved.repoId.length > 0 && script.includes(resolved.repoId)
+          latencyMs = await probeOnce(endpoint)
+        } catch {
+          // silent-catch: a source with no provider or a script-build failure is
+          // a self-test finding, captured as coordinatesOk=false on this probe
+          // row; it must not abort the rest of the report.
+          coordinatesOk = false
+        }
+        probes.push({
+          source,
+          provider,
+          endpoint,
+          reachable: latencyMs !== null,
+          latencyMs,
+          coordinatesOk,
+        })
+      }
+      const integrity = this.runModelPackIntegrityScratchCheck(descriptor.requiredFiles)
+      entries.push({
+        id,
+        displayName: descriptor.displayName,
+        probes,
+        anyReachable: probes.some((p) => p.reachable),
+        integrityOk: integrity.ok,
+        integrityDetail: integrity.detail,
+      })
+    }
+
+    return { startedAt, finishedAt: new Date().toISOString(), entries }
+  }
+
+  // Proves the resume-preserve + atomic-install filesystem path works in this
+  // environment, on a throwaway scratch dir under models/ — mirroring
+  // finalizeModelPackDownload's semantics (incomplete partial is detected and
+  // kept; a complete partial renames into place and the partial disappears)
+  // without ever touching a real pack dir.
+  private runModelPackIntegrityScratchCheck(
+    requiredFiles: readonly string[],
+  ): { ok: boolean; detail: string } {
+    const base = join(this.runtimeRoot, 'models', `.selftest-${randomUUID()}`)
+    const partial = `${join(base, 'pack')}.partial`
+    const target = join(base, 'pack')
+    const missingIn = (dir: string): string[] =>
+      requiredFiles.filter((file) => {
+        try {
+          return !statSync(join(dir, file)).isFile()
+        } catch {
+          // silent-catch: an absent path is exactly a missing required file.
+          return true
+        }
+      })
+    try {
+      mkdirSync(partial, { recursive: true })
+      // Resume-preserve: an incomplete partial must be detected as missing files
+      // and the partial dir kept (so a re-invocation resumes), never installed.
+      if (requiredFiles.length > 0) {
+        writeFileSync(join(partial, requiredFiles[0]), 'selftest')
+      }
+      if (missingIn(partial).length === 0 && requiredFiles.length > 1) {
+        return { ok: false, detail: '完整性自检异常：不完整下载未被识别为缺失' }
+      }
+      if (!existsSync(partial)) {
+        return { ok: false, detail: '断点续传自检失败：未完成的下载目录被提前删除' }
+      }
+      // Atomic install: a complete partial renames into place; partial disappears.
+      for (const file of requiredFiles) writeFileSync(join(partial, file), 'selftest')
+      if (existsSync(target)) rmSync(target, { recursive: true, force: true })
+      renameSync(partial, target)
+      const installedMissing = missingIn(target)
+      if (installedMissing.length > 0) {
+        return { ok: false, detail: `原子安装自检失败：安装目录缺少 ${installedMissing.join('、')}` }
+      }
+      if (existsSync(partial)) {
+        return { ok: false, detail: '原子安装自检失败：安装后仍残留未完成目录' }
+      }
+      return { ok: true, detail: '断点续传与原子安装路径正常' }
+    } catch (error) {
+      return { ok: false, detail: error instanceof Error ? error.message : String(error) }
+    } finally {
+      rmSync(base, { recursive: true, force: true })
+    }
+  }
+
+  private getModelPackTargetDir(id: ModelPackId): string {
+    return join(this.runtimeRoot, 'models', getModelPackDescriptor(id).targetSubdir)
+  }
+
+  private getModelPackPartialDir(id: ModelPackId): string {
+    return `${this.getModelPackTargetDir(id)}.partial`
+  }
+
+  private getModelPackDownloadState(id: ModelPackId): ModelPackDownloadStatus {
+    return this.modelPackDownloadStatuses.get(id) ?? createDefaultModelPackDownloadStatus()
+  }
+
+  private getMissingModelPackFiles(id: ModelPackId, targetDir: string): string[] {
+    return getModelPackDescriptor(id).requiredFiles.filter((file) => {
       try {
-        return !statSync(join(modelDir, file)).isFile()
+        return !statSync(join(targetDir, file)).isFile()
       } catch {
         // silent-catch: statSync throws (ENOENT) when the path is absent; an absent path is exactly a missing required model file, so report it as missing.
         return true
@@ -860,18 +965,103 @@ export class SkillsRuntimeManager {
     })
   }
 
-  private buildFunasrNanoRuntimeEnv(modelDir = this.getDefaultFunasrNanoModelDir()): Record<string, string> {
-    return {
-      READY_FUNASR_NANO_MODEL_ID: FUNASR_NANO_MODEL_ID,
-      READY_FUNASR_NANO_MODEL_DIR: modelDir,
-      READY_FUNASR_NANO_AUTO_DOWNLOAD: '0',
+  // Atomic install on a clean download: verify the partial dir holds every
+  // required file, then swap it into place. A non-zero exit keeps the partial
+  // dir so a re-invocation of snapshot_download resumes. Returns an error string
+  // on failure, or null on a successful install.
+  private finalizeModelPackDownload(id: ModelPackId, code: number | null): string | null {
+    const targetDir = this.getModelPackTargetDir(id)
+    const partialDir = this.getModelPackPartialDir(id)
+    if (code !== 0) {
+      return `下载进程以退出码 ${code ?? 'null'} 结束（已保留断点，可继续）`
+    }
+    const missing = this.getMissingModelPackFiles(id, partialDir)
+    if (missing.length > 0) {
+      return `下载已结束但缺少必要文件：${missing.join('、')}`
+    }
+    try {
+      if (existsSync(targetDir)) rmSync(targetDir, { recursive: true, force: true })
+      renameSync(partialDir, targetDir)
+      return null
+    } catch (error) {
+      return error instanceof Error ? error.message : String(error)
     }
   }
 
-  private getFunasrNanoDownloadEnv(targetDir = this.getDefaultFunasrNanoModelDir()): NodeJS.ProcessEnv {
+  private describeModelProvider(resolved: ResolvedModelProvider): string {
+    if (resolved.provider === 'modelscope') return 'ModelScope（国内）'
+    return resolved.mirrorEndpoint ? 'HuggingFace 镜像（国内）' : 'HuggingFace（国外）'
+  }
+
+  // Reachability/latency probe used by 'auto' source resolution. A HEAD request
+  // with a short deadline; failures (timeout/DNS/offline) resolve to null so the
+  // provider resolver treats the endpoint as unreachable and tries the next one.
+  private async probeEndpointLatency(url: string): Promise<number | null> {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), 2500)
+    const start = Date.now()
+    try {
+      await fetch(url, { method: 'HEAD', signal: controller.signal })
+      return Date.now() - start
+    } catch {
+      // silent-catch: a probe miss just means this endpoint is not a viable 'auto' source; resolveModelProvider treats null as unreachable and falls back to the next candidate. There is no user-facing state to surface for a single probe failure.
+      return null
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  // Nano runtime env (registry-derived). The model id always points the Python
+  // loader at the right repo; the absolute dir is injected only when the pack is
+  // actually installed so offline mode resolves the local weights, while dev
+  // mode (pack absent) can still fall through to its own resolution.
+  private buildFunasrNanoRuntimeEnv(): Record<string, string> {
+    const descriptor = getModelPackDescriptor('funasr-nano')
+    const repoId = descriptor.providers.find((p) => p.provider === 'huggingface')?.repoId
+      ?? descriptor.providers[0].repoId
+    const env: Record<string, string> = {
+      READY_FUNASR_NANO_MODEL_ID: repoId,
+      READY_FUNASR_NANO_AUTO_DOWNLOAD: '0',
+    }
+    const modelDir = this.getModelPackTargetDir('funasr-nano')
+    if (this.getMissingModelPackFiles('funasr-nano', modelDir).length === 0) {
+      env.READY_FUNASR_NANO_MODEL_DIR = modelDir
+    }
+    return env
+  }
+
+  // Fallback ASR + punctuation env. Mirrors the Nano bridge: model ids are
+  // always exported (so the Python defaults stay in sync with the registry),
+  // absolute dirs only when each pack is installed. In packaged mode we also set
+  // REQUIRE_LOCAL_MODELS so the Python side emits a structured missing-pack
+  // signal instead of silently reaching for the network shorthands.
+  private buildFunasrFallbackModelEnv(options: { packaged: boolean }): Record<string, string> {
+    const asr = getModelPackDescriptor('funasr-fallback-asr')
+    const punc = getModelPackDescriptor('funasr-punc-ctc')
+    const env: Record<string, string> = {
+      READY_FUNASR_ASR_MODEL_ID: asr.providers[0].repoId,
+      READY_FUNASR_PUNC_MODEL_ID: punc.providers[0].repoId,
+    }
+    const asrDir = this.getModelPackTargetDir('funasr-fallback-asr')
+    if (this.getMissingModelPackFiles('funasr-fallback-asr', asrDir).length === 0) {
+      env.READY_FUNASR_ASR_MODEL_DIR = asrDir
+    }
+    const puncDir = this.getModelPackTargetDir('funasr-punc-ctc')
+    if (this.getMissingModelPackFiles('funasr-punc-ctc', puncDir).length === 0) {
+      env.READY_FUNASR_PUNC_MODEL_DIR = puncDir
+    }
+    if (options.packaged) {
+      env.READY_FUNASR_REQUIRE_LOCAL_MODELS = '1'
+    }
+    return env
+  }
+
+  // Online download env for a resolved provider: start from the base env, drop
+  // every offline flag, point caches at the writable runtime cache, and route
+  // HuggingFace through the mirror endpoint when the domestic HF route is chosen.
+  private buildModelPackDownloadEnv(resolved: ResolvedModelProvider): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = {
       ...this.getBaseEnv(),
-      ...this.buildFunasrNanoRuntimeEnv(targetDir),
       HF_HOME: join(this.cacheRoot, 'huggingface'),
       XDG_CACHE_HOME: this.cacheRoot,
       MODELSCOPE_CACHE: join(this.cacheRoot, 'modelscope'),
@@ -880,6 +1070,9 @@ export class SkillsRuntimeManager {
     delete env.TRANSFORMERS_OFFLINE
     delete env.MODELSCOPE_OFFLINE
     delete env.PIP_NO_INDEX
+    if (resolved.provider === 'huggingface' && resolved.mirrorEndpoint) {
+      env.HF_ENDPOINT = resolved.mirrorEndpoint
+    }
     return env
   }
 
@@ -966,7 +1159,8 @@ export class SkillsRuntimeManager {
       if (youtubeCookieFile) env.YOUTUBE_COOKIE_FILE = youtubeCookieFile
       Object.assign(
         env,
-        this.buildFunasrNanoRuntimeEnv(this.getConfiguredFunasrNanoModelDir() || this.getDefaultFunasrNanoModelDir()),
+        this.buildFunasrNanoRuntimeEnv(),
+        this.buildFunasrFallbackModelEnv({ packaged: !!this.packagedRuntimeRoot }),
       )
     }
 
@@ -1784,7 +1978,7 @@ export class SkillsRuntimeManager {
         .map(([key, value]) => `${key}: ${value}`),
     ].filter(Boolean).join('\n')
 
-    return {
+    const result: SkillRunResult = {
       success,
       skillId,
       action: actionName,
@@ -1801,6 +1995,23 @@ export class SkillsRuntimeManager {
       stdoutArtifactError: executed.stdoutArtifactError,
       stderrArtifactError: executed.stderrArtifactError,
     }
+
+    // Phase 1 (model packs) — single detection point for the structured
+    // `__READY_ASR_MODEL_PACK_MISSING__` marker the subtitle extractor prints
+    // when required on-demand models are absent in packaged (offline) mode.
+    // Every typed-action caller (inline `video_copy_analyze` + child-loop
+    // `video_expert_pipeline`) builds its result here, so both surface the same
+    // signal. The detailed subprocess error stays in `stderr`; we rewrite
+    // `error` to actionable guidance that points the user at the download page.
+    if (!result.success) {
+      const missing = detectMissingRuntimeDependency(`${result.stdout}\n${result.stderr}`)
+      if (missing) {
+        result.missingRuntimeDependency = missing
+        result.error = '缺少字幕识别所需的本地语音模型，请前往「设置 › 模型与运行时」下载后重试。'
+      }
+    }
+
+    return result
   }
 
   // Phase 4: toWorkflowRunResult removed along with the skill_executions
@@ -2500,6 +2711,7 @@ export class SkillsRuntimeManager {
       return {
         ...buildPackagedSkillRuntimeEnv(this.packagedRuntimeRoot),
         ...this.buildFunasrNanoRuntimeEnv(),
+        ...this.buildFunasrFallbackModelEnv({ packaged: true }),
         PYTHONUTF8: '1',
         PYTHONIOENCODING: 'utf-8',
       }
@@ -2515,6 +2727,7 @@ export class SkillsRuntimeManager {
       MODELSCOPE_CACHE: join(this.cacheRoot, 'modelscope'),
       HF_HOME: join(this.cacheRoot, 'huggingface'),
       ...this.buildFunasrNanoRuntimeEnv(),
+      ...this.buildFunasrFallbackModelEnv({ packaged: false }),
       PYTHONUTF8: '1',
       PYTHONIOENCODING: 'utf-8',
     }

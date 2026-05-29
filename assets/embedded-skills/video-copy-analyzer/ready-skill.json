@@ -20,16 +20,7 @@
         "required": false
       }
     ],
-    "fields": [
-      {
-        "id": "funasrNanoModelDir",
-        "label": "FunASR Nano 本地模型目录",
-        "description": "可留空使用 Ready 管理目录；也可以填写已下载的 FunAudioLLM/Fun-ASR-Nano-2512 目录，需包含 model.pt 与 config.yaml。",
-        "type": "text",
-        "required": false,
-        "defaultValue": ""
-      }
-    ]
+    "fields": []
   },
   "actions": [
     {

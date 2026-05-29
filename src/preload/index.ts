@@ -7,6 +7,7 @@ import {
 import type { BrowserUtilityMenuRequest } from '../shared/browser-utility-menu'
 import type { NativeContextMenuRequest } from '../shared/native-context-menu'
 import type { RendererAgentMetricName } from '../shared/renderer-agent-metrics'
+import type { ModelPackDownloadUpdate, ModelPackId, ModelSource } from '../shared/model-pack-types'
 import type { PetActivitySnapshot, PetSettings, PetStickyNoteInput, PetWindowSnapshot } from '../shared/pet'
 import type {
   BrowserFastCardContextActionEvent,
@@ -796,14 +797,18 @@ const skillsAPI = {
     serviceBindings?: Record<string, string>
     fields?: Record<string, string | number | boolean | null>
   }) => ipcRenderer.invoke('skills:configuration:update', payload),
-  getFunasrNanoStatus: (payload?: { targetDir?: string | null }) =>
-    ipcRenderer.invoke('skills:funasrNano:status', payload || {}),
-  startFunasrNanoDownload: (payload?: { targetDir?: string | null }) =>
-    ipcRenderer.invoke('skills:funasrNano:download', payload || {}),
-  onFunasrNanoDownloadUpdate: (handler: (status: unknown) => void) => {
-    const listener = (_event: unknown, status: unknown) => handler(status)
-    ipcRenderer.on('skills:funasrNano:downloadUpdate', listener)
-    return () => ipcRenderer.removeListener('skills:funasrNano:downloadUpdate', listener)
+  listModelPacks: () => ipcRenderer.invoke('modelPacks:list'),
+  getModelPackStatus: (payload: { id: ModelPackId }) =>
+    ipcRenderer.invoke('modelPacks:status', payload),
+  startModelPackDownload: (payload: { id: ModelPackId; source?: ModelSource }) =>
+    ipcRenderer.invoke('modelPacks:download', payload),
+  cancelModelPackDownload: (payload: { id: ModelPackId }) =>
+    ipcRenderer.invoke('modelPacks:cancel', payload),
+  selfTestModelPacks: () => ipcRenderer.invoke('modelPacks:selfTest'),
+  onModelPackDownloadUpdate: (handler: (update: ModelPackDownloadUpdate) => void) => {
+    const listener = (_event: unknown, update: ModelPackDownloadUpdate) => handler(update)
+    ipcRenderer.on('modelPacks:downloadUpdate', listener)
+    return () => ipcRenderer.removeListener('modelPacks:downloadUpdate', listener)
   },
   // Phase 4: skills:executions:* preload methods retired along with the
   // skill_executions state machine (listExecutions / getExecution /

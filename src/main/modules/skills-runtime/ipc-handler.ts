@@ -1,5 +1,6 @@
 import { ipcMain } from 'electron'
 import { getSkillsRuntimeManager } from './runtime-manager'
+import { MODEL_PACK_IDS, type ModelPackId, type ModelSource } from '../../../shared/model-pack-types'
 
 interface SkillsIPCResponse<T = unknown> {
   success: boolean
@@ -128,22 +129,52 @@ export function setupSkillsIPC(): void {
     }
   })
 
-  ipcMain.handle('skills:funasrNano:status', (_, payload?: { targetDir?: string | null }): SkillsIPCResponse => {
+  const isModelPackId = (value: unknown): value is ModelPackId =>
+    typeof value === 'string' && (MODEL_PACK_IDS as readonly string[]).includes(value)
+
+  ipcMain.handle('modelPacks:list', (): SkillsIPCResponse => {
     try {
-      return { success: true, data: manager.getFunasrNanoModelStatus(payload || {}) }
+      return { success: true, data: manager.listModelPacks() }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
   })
 
-  ipcMain.handle('skills:funasrNano:download', async (event, payload?: { targetDir?: string | null }): Promise<SkillsIPCResponse> => {
+  ipcMain.handle('modelPacks:status', (_, payload?: { id?: string }): SkillsIPCResponse => {
     try {
-      const result = await manager.startFunasrNanoModelDownload(payload || {}, (status) => {
+      if (!isModelPackId(payload?.id)) return { success: false, error: 'Unknown model pack id' }
+      return { success: true, data: manager.getModelPackStatus(payload.id) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('modelPacks:download', async (event, payload?: { id?: string; source?: ModelSource }): Promise<SkillsIPCResponse> => {
+    try {
+      if (!isModelPackId(payload?.id)) return { success: false, error: 'Unknown model pack id' }
+      const result = await manager.startModelPackDownload({ id: payload.id, source: payload.source }, (status) => {
         if (!event.sender.isDestroyed()) {
-          event.sender.send('skills:funasrNano:downloadUpdate', status)
+          event.sender.send('modelPacks:downloadUpdate', { id: status.id, status })
         }
       })
       return { success: true, data: result }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('modelPacks:cancel', (_, payload?: { id?: string }): SkillsIPCResponse => {
+    try {
+      if (!isModelPackId(payload?.id)) return { success: false, error: 'Unknown model pack id' }
+      return { success: true, data: manager.cancelModelPackDownload(payload.id) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('modelPacks:selfTest', async (): Promise<SkillsIPCResponse> => {
+    try {
+      return { success: true, data: await manager.selfTestModelPacks() }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }

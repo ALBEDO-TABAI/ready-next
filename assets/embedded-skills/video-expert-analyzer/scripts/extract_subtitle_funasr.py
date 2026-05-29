@@ -37,10 +37,23 @@ TRUSTED_SUBTITLE_MODES = {
 
 FUNASR_NANO_MODEL_ID = os.environ.get("READY_FUNASR_NANO_MODEL_ID", "FunAudioLLM/Fun-ASR-Nano-2512")
 FUNASR_FALLBACK_MODEL_ID = "paraformer-zh"
-FUNASR_NANO_REQUIRED_FILES = ("model.pt", "config.yaml")
-FUNASR_FALLBACK_ASR_MODEL_ID = "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch"
+FUNASR_REQUIRED_MODEL_FILES = ("model.pt", "config.yaml")
+FUNASR_NANO_REQUIRED_FILES = FUNASR_REQUIRED_MODEL_FILES
+FUNASR_FALLBACK_ASR_MODEL_ID = os.environ.get(
+    "READY_FUNASR_ASR_MODEL_ID",
+    "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
+)
 FUNASR_FALLBACK_VAD_MODEL_ID = "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch"
-FUNASR_FALLBACK_PUNC_MODEL_ID = "iic/punc_ct-transformer_cn-en-common-vocab471067-large"
+# 默认改用 ct-punc-c（zh，约 292MB），相比 cn-en-large（约 1.1GB）更小更快；
+# 仍可用 READY_FUNASR_PUNC_MODEL_ID 指回双语大模型。
+FUNASR_FALLBACK_PUNC_MODEL_ID = os.environ.get(
+    "READY_FUNASR_PUNC_MODEL_ID",
+    "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
+)
+
+# 打包(离线)模式下，主进程会把已下载的模型包目录通过下列 env 注入；缺失时发出
+# 结构化信号，引导用户去「设置 › 模型与运行时」下载，而不是静默走联网兜底。
+ASR_MODEL_PACK_MISSING_MARKER = "__READY_ASR_MODEL_PACK_MISSING__"
 
 
 def choose_subtitle_strategy(title: str = "", url: str = "") -> str:
@@ -171,6 +184,34 @@ def _local_modelscope_model_path(model_id: str) -> str:
     return ""
 
 
+def _require_local_models() -> bool:
+    value = os.environ.get("READY_FUNASR_REQUIRE_LOCAL_MODELS", "").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _resolved_model_dir(env_key: str, model_id: str) -> str:
+    """解析按需下载的模型目录：优先读主进程注入的绝对路径(env_key)，
+    校验必需文件后返回；否则回退到内置 ModelScope 缓存；都没有则返回空串。"""
+    raw = os.environ.get(env_key, "").strip()
+    if raw:
+        model_dir = Path(raw).expanduser()
+        missing = [name for name in FUNASR_REQUIRED_MODEL_FILES if not (model_dir / name).is_file()]
+        if not missing:
+            return str(model_dir)
+        print(f"   ⚠️  模型目录缺少文件 {missing}: {model_dir}")
+    return _local_modelscope_model_path(model_id)
+
+
+def _emit_model_pack_missing(missing_roles: list[str]) -> None:
+    """向 skill 运行态/stderr 发出结构化缺包信号，由主进程映射为可引导下载的报错。"""
+    payload = {"feature": "video-subtitle-asr", "missing": missing_roles}
+    print(f"{ASR_MODEL_PACK_MISSING_MARKER} {json.dumps(payload, ensure_ascii=False)}", file=sys.stderr)
+    print(
+        "❌ 缺少本地语音识别模型，请在 Ready「设置 › 模型与运行时」下载字幕识别模型后重试。",
+        file=sys.stderr,
+    )
+
+
 def _load_funasr_model():
     from funasr import AutoModel
 
@@ -211,14 +252,25 @@ def _load_funasr_model():
         return model, "Fun-ASR-Nano-2512", device
     except Exception as exc:
         print(f"   ⚠️  Fun-ASR-Nano-2512 当前环境不可直接使用: {exc}")
+        fallback_asr = _resolved_model_dir("READY_FUNASR_ASR_MODEL_DIR", FUNASR_FALLBACK_ASR_MODEL_ID)
+        fallback_punc = _resolved_model_dir("READY_FUNASR_PUNC_MODEL_DIR", FUNASR_FALLBACK_PUNC_MODEL_ID)
+        fallback_vad = _local_modelscope_model_path(FUNASR_FALLBACK_VAD_MODEL_ID)
+
+        # 离线打包模式缺少回退包时，发出结构化信号并中止，绝不静默联网兜底。
+        if _require_local_models() and (not fallback_asr or not fallback_punc):
+            missing_roles = []
+            if not fallback_asr:
+                missing_roles.append("asr")
+            if not fallback_punc:
+                missing_roles.append("punc")
+            _emit_model_pack_missing(missing_roles)
+            raise RuntimeError(f"缺少本地语音模型包: {', '.join(missing_roles)}") from exc
+
         print("   ↩️  自动回退到稳定版 paraformer-zh")
-        fallback_model = _local_modelscope_model_path(FUNASR_FALLBACK_ASR_MODEL_ID) or FUNASR_FALLBACK_MODEL_ID
-        fallback_vad = _local_modelscope_model_path(FUNASR_FALLBACK_VAD_MODEL_ID) or "fsmn-vad"
-        fallback_punc = _local_modelscope_model_path(FUNASR_FALLBACK_PUNC_MODEL_ID) or "ct-punc"
         model = AutoModel(
-            model=fallback_model,
-            vad_model=fallback_vad,
-            punc_model=fallback_punc,
+            model=fallback_asr or FUNASR_FALLBACK_MODEL_ID,
+            vad_model=fallback_vad or "fsmn-vad",
+            punc_model=fallback_punc or "ct-punc",
             device=device,
             disable_update=True,
         )
