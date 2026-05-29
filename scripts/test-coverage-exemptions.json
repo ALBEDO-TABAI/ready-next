@@ -698,6 +698,12 @@
       "reason": "Stage calendar UI verification cleanup: static C4 scan reaches native-backed modules through shared wrappers, but this test exercises pure contracts or fake-injected paths and does not open better-sqlite3 under host Node.",
       "since": "2026-05-17",
       "owner": "calendar-ui-assistant-verification"
+    },
+    {
+      "path": "src/__tests__/model-pack-manager.test.ts",
+      "reason": "Pre-release model-pack manager: tests construct SkillsRuntimeManager with startBackgroundTasks:false and exercise only the model-pack methods (listModelPacks/getModelPackStatus/startModelPackDownload with fake spawn/cancelModelPackDownload/selfTestModelPacks) plus getBaseEnv env injection over mkdtemp filesystem fixtures. Transitive value-import reaches native-backed runtime-manager, but the constructor gates all SQLite jobs/schedules work behind startBackgroundTasks and no model-pack code path calls a db.prepare method, so better-sqlite3 is never loaded. Verified passing on host-Node.",
+      "since": "2026-05-29",
+      "owner": "readyguy-prerelease-model-packs"
     }
   ]
 }
