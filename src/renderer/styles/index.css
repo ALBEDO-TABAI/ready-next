@@ -3724,6 +3724,10 @@ html[data-theme='dark'] .ready-design-tool-button:hover {
   background: var(--bg-hover) !important;
 }
 
+.ready-memory-card[data-selected='false']:hover {
+  background: var(--bg-hover) !important;
+}
+
 .ready-design-number-shell {
   transition: border-color 140ms ease, box-shadow 140ms ease;
 }

@@ -2,22 +2,10 @@ import { useState } from 'react'
 import { useMemories } from '../../hooks/useMemory'
 import type { MemoryQueryFilters, MemoryEntry } from '../../types/electron'
 import { Trash2, Layers, Tag, Clock, Eye } from 'lucide-react'
-import {
-  SETTINGS_CARD_STYLE,
-  SETTINGS_INPUT_STYLE,
-  SETTINGS_SECONDARY_BUTTON_STYLE
-} from '../settings/settings-theme'
-
-const panelCardStyle = {
-  ...SETTINGS_CARD_STYLE
-}
+import { SETTINGS_INPUT_STYLE } from '../settings/settings-theme'
 
 const fieldStyle = {
   ...SETTINGS_INPUT_STYLE
-}
-
-const secondaryButtonStyle = {
-  ...SETTINGS_SECONDARY_BUTTON_STYLE
 }
 
 function memorySourceLabel(sourceType: MemoryEntry['sourceType'] | undefined): string {
@@ -159,16 +147,14 @@ export default function MemoryListPanel() {
             {memories.map((memory) => (
               <div
                 key={memory.id}
-                className="glass-surface-card border mb-3 cursor-pointer transition-[background-color,border-color,color] duration-200"
+                data-selected={selectedMemory?.id === memory.id ? 'true' : 'false'}
+                className="ready-memory-card mb-2 cursor-pointer transition-[background-color,color] duration-200"
                 style={{
-                  ...panelCardStyle,
-                  borderRadius: 16,
-                  padding: '16px 18px',
+                  borderRadius: 12,
+                  padding: '12px 14px',
                   ...(selectedMemory?.id === memory.id && {
-                    borderColor:
-                      'color-mix(in srgb, var(--color-blue) 34%, var(--lg-border-soft) 66%)',
                     background:
-                      'color-mix(in srgb, var(--color-blue-light) 74%, var(--surface-card-bg) 26%)'
+                      'color-mix(in srgb, var(--color-blue-light) 60%, transparent)'
                   })
                 }}
                 onClick={() => setSelectedMemory(memory)}
@@ -177,40 +163,27 @@ export default function MemoryListPanel() {
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-2">
                       <span
-                        className="text-[11px] font-medium px-2 py-0.5 rounded"
-                        style={{
-                          background: 'var(--color-blue-light)',
-                          color: 'var(--color-blue)'
-                        }}
+                        className="text-[11px] font-medium"
+                        style={{ color: 'var(--color-blue)' }}
                       >
                         {memory.layer}
                       </span>
                       <span
-                        className="text-[11px] font-medium px-2 py-0.5 rounded"
-                        style={{
-                          background: 'var(--color-orange-light)',
-                          color: 'var(--color-orange)'
-                        }}
+                        className="text-[11px] font-medium"
+                        style={{ color: 'var(--color-orange)' }}
                       >
                         {memorySourceLabel(memory.sourceType)}
                       </span>
                       <span
-                        className="text-[11px] font-medium px-2 py-0.5 rounded"
-                        style={{
-                          background: 'var(--color-green-light)',
-                          color: 'var(--color-green)'
-                        }}
+                        className="text-[11px] font-medium"
+                        style={{ color: 'var(--color-green)' }}
                       >
                         {memory.category}
                       </span>
                       {memory.archivedAt && (
                         <span
-                          className="text-[11px] font-medium px-2 py-0.5 rounded"
-                          style={{
-                            background:
-                              'color-mix(in srgb, var(--surface-panel-bg) 62%, transparent)',
-                            color: 'var(--text-muted)'
-                          }}
+                          className="text-[11px] font-medium"
+                          style={{ color: 'var(--text-muted)' }}
                         >
                           已归档
                         </span>
@@ -255,11 +228,8 @@ export default function MemoryListPanel() {
                       e.stopPropagation()
                       void handleDelete(memory.id)
                     }}
-                    className="border rounded-lg transition-[opacity,background-color] duration-200 hover:opacity-70"
-                    style={{
-                      ...secondaryButtonStyle,
-                      padding: '6px 10px'
-                    }}
+                    className="shrink-0 p-1 rounded-md transition-colors duration-200 hover:bg-[var(--bg-hover)]"
+                    aria-label="删除记忆"
                   >
                     <Trash2 className="w-3.5 h-3.5" style={{ color: 'var(--color-red)' }} />
                   </button>
