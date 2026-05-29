@@ -123,41 +123,46 @@ export default function RemoteIMSettingsPanel() {
 
   const isBusy = (actionKey: string): boolean => busyAction === actionKey
 
-  const refresh = useCallback(async () => {
+  const applyChannelList = useCallback((list: ChannelData[]) => {
+    setChannels(list)
+    const tg = list.find((item) => item.type === 'telegram-bot')
+    const fs = list.find((item) => item.type === 'feishu-app')
+    const wx = list.find((item) => item.type === 'wechat-openclaw')
+    if (tg) {
+      const token = String(tg.config?.token || tg.config?.botToken || '')
+      if (token) setTelegramToken(token)
+    }
+    if (fs) {
+      const appId = String(fs.config?.appId || '')
+      const appSecret = String(fs.config?.appSecret || '')
+      const verificationToken = String(fs.config?.verificationToken || '')
+      const encryptKey = String(fs.config?.encryptKey || '')
+      if (appId) setFeishuAppId(appId)
+      if (appSecret) setFeishuAppSecret(appSecret)
+      if (verificationToken) setFeishuVerificationToken(verificationToken)
+      if (encryptKey) setFeishuEncryptKey(encryptKey)
+      if (verificationToken || encryptKey) setShowFeishuAdvanced(true)
+    }
+    if (wx) {
+      const defaultTarget = String(wx.config?.defaultTarget || '')
+      if (defaultTarget) setWechatDefaultTarget(defaultTarget)
+    }
+  }, [])
+
+  // 进入页面时只加载频道配置（listChannels 轻量），让表单立即可用。
+  const loadChannelConfig = useCallback(async () => {
     if (!window.electronAPI?.agent) return
-    // Fire all three concurrently, but await in priority order so the channel config UI paints
-    // immediately instead of waiting on getRemoteAttachmentCacheStats' synchronous fs walk.
-    const channelsPromise = window.electronAPI.agent.listChannels()
+    const channelsRes = await window.electronAPI.agent.listChannels()
+    if (channelsRes.success && channelsRes.data) {
+      applyChannelList(channelsRes.data as unknown as ChannelData[])
+    }
+  }, [applyChannelList])
+
+  // 运行态 + 远程附件缓存统计（后者触发主进程同步 fs 遍历），仅手动刷新时执行，避免切入页面卡顿。
+  const refreshStatus = useCallback(async () => {
+    if (!window.electronAPI?.agent) return
     const runtimePromise = window.electronAPI.agent.getRuntimeStatus()
     const cachePromise = window.electronAPI.agent.getRemoteAttachmentCacheStats()
-
-    const channelsRes = await channelsPromise
-    if (channelsRes.success && channelsRes.data) {
-      const list = channelsRes.data as unknown as ChannelData[]
-      setChannels(list)
-      const tg = list.find((item) => item.type === 'telegram-bot')
-      const fs = list.find((item) => item.type === 'feishu-app')
-      const wx = list.find((item) => item.type === 'wechat-openclaw')
-      if (tg) {
-        const token = String(tg.config?.token || tg.config?.botToken || '')
-        if (token) setTelegramToken(token)
-      }
-      if (fs) {
-        const appId = String(fs.config?.appId || '')
-        const appSecret = String(fs.config?.appSecret || '')
-        const verificationToken = String(fs.config?.verificationToken || '')
-        const encryptKey = String(fs.config?.encryptKey || '')
-        if (appId) setFeishuAppId(appId)
-        if (appSecret) setFeishuAppSecret(appSecret)
-        if (verificationToken) setFeishuVerificationToken(verificationToken)
-        if (encryptKey) setFeishuEncryptKey(encryptKey)
-        if (verificationToken || encryptKey) setShowFeishuAdvanced(true)
-      }
-      if (wx) {
-        const defaultTarget = String(wx.config?.defaultTarget || '')
-        if (defaultTarget) setWechatDefaultTarget(defaultTarget)
-      }
-    }
     const runtimeRes = await runtimePromise
     if (runtimeRes.success && runtimeRes.data) {
       setRuntimeStatus(runtimeRes.data as unknown as RuntimeStatusData)
@@ -168,9 +173,13 @@ export default function RemoteIMSettingsPanel() {
     }
   }, [])
 
+  const refresh = useCallback(async () => {
+    await Promise.all([loadChannelConfig(), refreshStatus()])
+  }, [loadChannelConfig, refreshStatus])
+
   useEffect(() => {
-    void refresh()
-  }, [refresh])
+    void loadChannelConfig()
+  }, [loadChannelConfig])
 
   const feishuChannel = useMemo(
     () => channels.find((item) => item.type === 'feishu-app'),
