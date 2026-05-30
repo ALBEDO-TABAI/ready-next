@@ -25,6 +25,8 @@ export interface ModalProps {
   onConfirm?: (value?: string) => void
   /** Called when the user cancels or closes the modal */
   onCancel?: () => void
+  /** Dim the page behind the dialog with an overlay backdrop (default true) */
+  dimBackdrop?: boolean
 }
 
 /**
@@ -55,6 +57,7 @@ export default function Modal({
   danger = false,
   onConfirm,
   onCancel,
+  dimBackdrop = true,
 }: ModalProps) {
   const [inputValue, setInputValue] = useState(defaultValue)
   const [isClosing, setIsClosing] = useState(false)
@@ -153,7 +156,7 @@ export default function Modal({
     <div
       className="fixed inset-0 z-[9999] flex items-center justify-center"
       style={{
-        background: 'var(--overlay-bg)',
+        background: dimBackdrop ? 'var(--overlay-bg)' : 'transparent',
         animation: isClosing
           ? 'modalFadeOut var(--duration-fast) ease-in forwards'
           : 'modalFadeIn var(--duration-normal) ease-out',

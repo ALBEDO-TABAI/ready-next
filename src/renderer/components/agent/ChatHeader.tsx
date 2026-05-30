@@ -692,6 +692,7 @@ export default function ChatHeader({
             onClick={() => {
               setPendingRenameSession({ conversationId: rowMenu.conversationId, title: rowMenu.title })
               setRowMenu(null)
+              setShowHistory(false)
             }}
             className="chat-header-floating-menu-item ready-floating-menu-item w-full flex items-center gap-2 active:scale-[0.98] transition-[background-color,border-color,box-shadow,transform] duration-150"
             style={buildChatHeaderMenuItemStyle()}
@@ -704,6 +705,7 @@ export default function ChatHeader({
             onClick={() => {
               setPendingDeleteSession({ conversationId: rowMenu.conversationId, title: rowMenu.title })
               setRowMenu(null)
+              setShowHistory(false)
             }}
             className="chat-header-floating-menu-item ready-floating-menu-item w-full flex items-center gap-2 active:scale-[0.98] transition-[background-color,border-color,box-shadow,transform] duration-150"
             style={buildChatHeaderMenuItemStyle()}
@@ -719,6 +721,7 @@ export default function ChatHeader({
         open={pendingDeleteSession !== null}
         mode="confirm"
         danger
+        dimBackdrop={false}
         title="删除会话"
         message={pendingDeleteSession ? `确定删除会话 "${pendingDeleteSession.title}" 吗？此操作不可撤销。` : ''}
         confirmLabel="删除"
@@ -735,6 +738,7 @@ export default function ChatHeader({
       <Modal
         open={pendingRenameSession !== null}
         mode="prompt"
+        dimBackdrop={false}
         title="重命名会话"
         message="为这个会话取一个新名称："
         defaultValue={pendingRenameSession?.title ?? ''}
