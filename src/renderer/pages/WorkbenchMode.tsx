@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useRef, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useWorkspace, type SidePanelWidthKey, reconcileWorkspaceWatchersFromStore } from '../stores/useWorkspace'
+import { useWorkspace, type SidePanelWidthKey, reconcileWorkspaceWatchersFromStore, getNextSidePanelVariant } from '../stores/useWorkspace'
 import { useMode, type WorkbenchMode as WorkbenchModeType } from '../stores/useMode'
 import { useDocTabs } from '../stores/useDocTabs'
 import TopBar from '../components/layout/TopBar'
@@ -471,6 +471,14 @@ export default function WorkbenchMode() {
       event.preventDefault()
       if (handledAction === 'toggle-sidebar') {
         handleToggleSidebarWithResize()
+        return
+      }
+      if (handledAction === 'cycle-side-panel') {
+        const { sidePanelVariant: current, sidebarVisible: visible, setSidePanelVariant: applyVariant } = useWorkspace.getState()
+        applyVariant(getNextSidePanelVariant(current))
+        if (!visible) {
+          handleToggleSidebarWithResize()
+        }
         return
       }
       handleToggleChatPanelWithResize()

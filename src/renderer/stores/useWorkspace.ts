@@ -17,6 +17,17 @@ export interface FileItem {
 export type SidePanelWidthKey = 'files' | 'search' | 'skills' | 'backlinks' | 'graph'
 export type WorkspaceSidePanelVariant = SidePanelWidthKey | 'hidden'
 
+// Icon-rail order the Ctrl+Tab shortcut cycles through (文件→搜索→技能→链接→图谱→文件).
+export const SIDE_PANEL_CYCLE_ORDER: SidePanelWidthKey[] = ['files', 'search', 'skills', 'backlinks', 'graph']
+
+// Next rail variant when cycling forward. A 'hidden'/unknown current (no real
+// selection) starts the cycle at 'files', matching the rail's default highlight.
+export function getNextSidePanelVariant(current: WorkspaceSidePanelVariant): SidePanelWidthKey {
+  const index = SIDE_PANEL_CYCLE_ORDER.indexOf(current as SidePanelWidthKey)
+  if (index === -1) return SIDE_PANEL_CYCLE_ORDER[0]
+  return SIDE_PANEL_CYCLE_ORDER[(index + 1) % SIDE_PANEL_CYCLE_ORDER.length]
+}
+
 interface SidePanelWidths {
   // 三个面板共享一个宽度，避免切换时跳跃
   shared: number

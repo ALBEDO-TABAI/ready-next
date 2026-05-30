@@ -79,6 +79,47 @@ test('modifier keys and Shift+Tab do not trigger panel shortcuts', () => {
   }), null)
 })
 
+test('Ctrl+Tab cycles the side panel, even from an editable target', () => {
+  assert.strictEqual(resolveWorkbenchPanelShortcutAction({
+    key: 'Tab',
+    ctrlKey: true,
+    selectionText: '',
+    target: { tagName: 'DIV' } as unknown as EventTarget,
+  }), 'cycle-side-panel')
+
+  // Carries a modifier and isn't a typing key, so it still fires inside inputs.
+  assert.strictEqual(resolveWorkbenchPanelShortcutAction({
+    key: 'Tab',
+    ctrlKey: true,
+    selectionText: '',
+    target: { tagName: 'TEXTAREA' } as unknown as EventTarget,
+  }), 'cycle-side-panel')
+})
+
+test('Ctrl+Tab with extra modifiers does not cycle, and plain Tab still toggles chat', () => {
+  assert.strictEqual(resolveWorkbenchPanelShortcutAction({
+    key: 'Tab',
+    ctrlKey: true,
+    shiftKey: true,
+    selectionText: '',
+    target: { tagName: 'DIV' } as unknown as EventTarget,
+  }), null)
+
+  assert.strictEqual(resolveWorkbenchPanelShortcutAction({
+    key: 'Tab',
+    ctrlKey: true,
+    altKey: true,
+    selectionText: '',
+    target: { tagName: 'DIV' } as unknown as EventTarget,
+  }), null)
+
+  assert.strictEqual(resolveWorkbenchPanelShortcutAction({
+    key: 'Tab',
+    selectionText: '',
+    target: { tagName: 'BUTTON' } as unknown as EventTarget,
+  }), 'toggle-chat')
+})
+
 test('shortcuts stay disabled during input method composition', () => {
   assert.strictEqual(resolveWorkbenchPanelShortcutAction({
     key: 'Tab',
