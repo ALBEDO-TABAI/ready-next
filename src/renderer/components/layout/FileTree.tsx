@@ -4,10 +4,11 @@ import {
   ChevronRight, ChevronDown, Minus, Plus,
   FileText, Folder, FolderOpen, Image, Film, FileSpreadsheet, Pen, Music2, Globe, BookOpen,
   FilePlus2, FolderPlus, Copy, RefreshCw, Trash2, Loader2, AlertTriangle, Check, ListMinus,
-  RotateCcw,
+  RotateCcw, AtSign,
 } from 'lucide-react'
 import Modal from '../ui/Modal'
 import { useWorkspace, type FileItem } from '../../stores/useWorkspace'
+import { addReadyContextReferenceToAgentInput } from '../../modules/agent/chat-input-bridge'
 import { useDocTabs } from '../../stores/useDocTabs'
 import { useMode, type WorkbenchMode } from '../../stores/useMode'
 import { toLocalFileUrl } from '../../utils/dragDrop'
@@ -2773,6 +2774,20 @@ function ContextMenuBridge({
           onClick: () => onOpenFile(item)
         }
       ]),
+      {
+        id: 'referenceToInput',
+        label: '引用到输入框',
+        icon: <AtSign style={{ width: 16, height: 16 }} />,
+        onClick: () => {
+          void addReadyContextReferenceToAgentInput({
+            type: 'file',
+            name: item.name,
+            path: item.path,
+            size: item.size,
+            isDirectory: item.isDirectory,
+          })
+        },
+      },
       { id: 'sep1', label: '', separator: true },
       {
         id: 'rename',
@@ -2838,6 +2853,7 @@ function ContextMenuBridge({
   const toNativeContextItems = useCallback((items: ContextMenuItem[]): NativeContextMenuItem[] => {
     const iconTextById: Record<string, string> = {
       open: '↩',
+      referenceToInput: '@',
       rename: '✎',
       copyPath: '⧉',
       newFile: '+',

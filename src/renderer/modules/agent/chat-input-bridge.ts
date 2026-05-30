@@ -1,6 +1,7 @@
 import { useAgent } from '../../stores/useAgent'
 import { useWorkspace } from '../../stores/useWorkspace'
 import type { ChatAttachment } from '../../stores/useAgent'
+import { createLocalPathAttachment } from '../../components/agent/chat-panel/attachments-helpers'
 import {
   buildWidgetTargetUpdatePrompt,
   createDocumentWidgetTargetAttachment,
@@ -68,11 +69,21 @@ export interface ReadySkillReference {
   defaultAction?: string
 }
 
+export interface ReadyFileReference {
+  type: 'file'
+  name: string
+  path: string
+  ext?: string
+  size?: number
+  isDirectory?: boolean
+}
+
 export type ReadyContextReference =
   | ReadyBrowserTabReference
   | ReadyDocumentTabReference
   | ReadyCalendarEventReference
   | ReadySkillReference
+  | ReadyFileReference
 
 export function appendToAgentInput(snippet: string): void {
   const trimmed = snippet.trim()
@@ -150,6 +161,16 @@ export function createSkillReferenceAttachment(skill: ReadySkillReference): Chat
 async function createReadyContextAttachment(reference: ReadyContextReference): Promise<ChatAttachment> {
   if (reference.type === 'skill-folder') {
     return createSkillReferenceAttachment(reference)
+  }
+
+  if (reference.type === 'file') {
+    return createLocalPathAttachment({
+      name: reference.name,
+      path: reference.path,
+      ext: reference.ext,
+      size: reference.size,
+      isDirectory: reference.isDirectory,
+    })
   }
 
   if (reference.type === 'browser-tab') {

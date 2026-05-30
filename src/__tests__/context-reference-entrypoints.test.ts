@@ -199,6 +199,52 @@ test('browser, document, calendar, and skill references become agent attachments
   }
 })
 
+test('file and folder references become local-path agent attachments and open the chat panel', async () => {
+  const { restore } = installDom()
+  try {
+    useAgent.setState({ attachments: [], filePool: [], inputValue: '' })
+    useWorkspace.setState({ chatPanelVisible: false })
+    let focusEvents = 0
+    window.addEventListener(READY_FOCUS_CHAT_INPUT_EVENT, () => {
+      focusEvents += 1
+    })
+
+    await addReadyContextReferenceToAgentInput({
+      type: 'file',
+      name: 'report.md',
+      path: '/workspace/report.md',
+      size: 2048,
+    })
+    await addReadyContextReferenceToAgentInput({
+      type: 'file',
+      name: 'assets',
+      path: '/workspace/assets',
+      isDirectory: true,
+    })
+
+    const attachments = useAgent.getState().attachments
+    assert.equal(useWorkspace.getState().chatPanelVisible, true)
+    assert.equal(focusEvents, 2)
+    assert.equal(attachments.length, 2)
+    assert.deepEqual(attachments.map((attachment) => attachment.source), ['file', 'file'])
+
+    assert.equal(attachments[0]?.name, 'report.md')
+    assert.equal(attachments[0]?.path, '/workspace/report.md')
+    assert.equal(attachments[0]?.type, 'text')
+    assert.equal(attachments[0]?.isDirectory, false)
+    assert.equal(attachments[0]?.size, 2048)
+
+    assert.equal(attachments[1]?.name, 'assets')
+    assert.equal(attachments[1]?.path, '/workspace/assets')
+    assert.equal(attachments[1]?.isDirectory, true)
+    assert.equal(attachments[1]?.type, 'other')
+  } finally {
+    useAgent.setState({ attachments: [], filePool: [], inputValue: '' })
+    useWorkspace.setState({ chatPanelVisible: true })
+    restore()
+  }
+})
+
 test('slash skill helpers rank matches and replace slash input with a skill reference', () => {
   const skills: SkillMenuItem[] = [
     {
