@@ -3,7 +3,7 @@ import { MotionConfig, motion, useReducedMotion } from 'framer-motion'
 import '../../styles/workbench-sliders.css'
 import {
   REDUCED_MOTION_TRANSITION,
-  WORKBENCH_SLIDER_MOTION_TRANSITION,
+  WORKBENCH_SLIDER_CLICK_TRANSITION,
 } from '../../modules/workbench/slider-motion'
 
 interface RailItem {
@@ -34,7 +34,7 @@ export default function MorphIconRailGroup({
   style,
 }: MorphIconRailGroupProps) {
   const reduceMotion = useReducedMotion()
-  const transition = reduceMotion ? REDUCED_MOTION_TRANSITION : WORKBENCH_SLIDER_MOTION_TRANSITION
+  const transition = reduceMotion ? REDUCED_MOTION_TRANSITION : WORKBENCH_SLIDER_CLICK_TRANSITION
   const thumbIndex = Math.max(items.findIndex(({ id }) => id === activeId), 0)
   const thumbOffset = thumbIndex * ICON_RAIL_ITEM_PITCH
 
@@ -49,6 +49,7 @@ export default function MorphIconRailGroup({
         <motion.span
           aria-hidden="true"
           className="icon-rail-slider__thumb-shell"
+          initial={false}
           animate={{ y: thumbOffset }}
           transition={transition}
         >
