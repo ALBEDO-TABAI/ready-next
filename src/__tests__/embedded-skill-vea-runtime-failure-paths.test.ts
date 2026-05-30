@@ -9,6 +9,11 @@ import { fileURLToPath } from 'node:url'
 import { SkillsRuntimeManager } from '../main/modules/skills-runtime/runtime-manager'
 import { SkillHostController } from '../main/modules/skills-runtime/skill-host-controller'
 import type { SkillHostRequirements } from '../shared/skill-host-contract'
+import {
+  ASR_MODEL_PACK_MISSING_MARKER,
+  MODELS_RUNTIME_SETTINGS_SECTION,
+  detectMissingRuntimeDependency,
+} from '../shared/model-pack-types'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = join(__dirname, '..', '..')
@@ -28,6 +33,40 @@ const PIPELINE_ENHANCED = join(
   'scripts',
   'pipeline_enhanced.py',
 )
+const EXTRACT_SUBTITLE_FUNASR = join(
+  REPO_ROOT,
+  'assets',
+  'embedded-skills',
+  'video-expert-analyzer',
+  'scripts',
+  'extract_subtitle_funasr.py',
+)
+
+// Run the REAL Python `_emit_model_pack_missing` and return exactly what it wrote
+// to stderr. Captured via redirect_stderr so the test sees the genuine marker line
+// the packaged extractor prints — the cross-language format the TS detector parses.
+function emitModelPackMissing(roles: string[]): string {
+  const root = mkdtempSync(join(tmpdir(), 'vea-asr-missing-'))
+  try {
+    const harness = join(root, 'harness.py')
+    writeFileSync(harness, [
+      'import contextlib, importlib.util, io, sys',
+      `spec = importlib.util.spec_from_file_location("extract_subtitle_funasr", ${JSON.stringify(EXTRACT_SUBTITLE_FUNASR)})`,
+      'module = importlib.util.module_from_spec(spec)',
+      'assert spec.loader is not None',
+      'spec.loader.exec_module(module)',
+      'roles = [r for r in sys.argv[1].split(",") if r] if len(sys.argv) > 1 else []',
+      'buf = io.StringIO()',
+      'with contextlib.redirect_stderr(buf):',
+      '    module._emit_model_pack_missing(roles)',
+      'sys.stdout.write(buf.getvalue())',
+      '',
+    ].join('\n'), 'utf8')
+    return execFileSync('python3', [harness, roles.join(',')], { encoding: 'utf8' })
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+}
 const VEA_STATUS_DETECTION: SkillHostRequirements = {
   manifest_version: 1,
   status_detection: {
@@ -740,4 +779,28 @@ test('VEA run_state provider_missing is not mistaken for done just because the s
     assert.equal(status.status, 'error')
     assert.equal(status.detail, 'failed')
   })
+})
+
+// The packaged extractor and the renderer-facing detector are coupled by an exact
+// stderr string the TS unit tests only exercise with a synthetic fixture. Pin the
+// REAL Python emitter to the REAL TS parser so a marker/JSON-key drift fails here
+// instead of degrading into a raw traceback that only the installed build hits.
+test('real Python missing-model marker is parsed by the TS detector into the fallback packs', () => {
+  const output = emitModelPackMissing(['asr', 'punc'])
+  assert.ok(
+    output.includes(ASR_MODEL_PACK_MISSING_MARKER),
+    'Python must print the marker constant the TS detector scans for',
+  )
+
+  const detected = detectMissingRuntimeDependency(output)
+  assert.ok(detected, 'detector must recognize the real emitter output')
+  assert.equal(detected.feature, 'video-subtitle-asr')
+  assert.equal(detected.settingsSection, MODELS_RUNTIME_SETTINGS_SECTION)
+  assert.deepEqual([...detected.missingPacks].sort(), ['funasr-fallback-asr', 'funasr-punc-ctc'])
+})
+
+test('real Python missing-model marker maps a single missing role to its one pack', () => {
+  const detected = detectMissingRuntimeDependency(emitModelPackMissing(['punc']))
+  assert.ok(detected)
+  assert.deepEqual(detected.missingPacks, ['funasr-punc-ctc'])
 })
