@@ -11,6 +11,7 @@ import {
   getModelPackDescriptor,
   listModelPackDescriptors,
   probeFastestModelProvider,
+  reduceDownloadProgressChunk,
   resolveExplicitModelProvider,
   resolveModelProvider,
 } from '../main/modules/skills-runtime/model-pack-registry'
@@ -93,6 +94,58 @@ test('download script is selected per provider and prints the done marker', () =
   const hf = buildModelPackDownloadScript('huggingface', 'org/model')
   assert.match(hf, /from huggingface_hub import snapshot_download/)
   assert.match(hf, /max_workers=4/)
+})
+
+// ---------------------------------------------------------------------------
+// Progress reducer: tqdm streams \r-separated in-place frames, so a chunk must
+// be reduced to its LATEST frame (the old split(/\r?\n/) concatenated stale
+// frames and looked frozen). HF's aggregate file-count bar drives a monotonic
+// headline; sequential per-file packs follow the latest byte bar.
+// ---------------------------------------------------------------------------
+
+test('progress reducer reads the latest carriage-return frame, not the first', () => {
+  // A single chunk with three \r-separated frames and NO newline — the exact
+  // shape that defeated split(/\r?\n/).
+  const chunk = 'model.pt:  10%|# | 80M/800M\rmodel.pt:  40%|#### | 320M/800M\rmodel.pt:  70%|####### | 560M/800M'
+  const frame = reduceDownloadProgressChunk(chunk, { percent: null, sawAggregateBar: false })
+  assert.equal(frame.percent, 70, 'headline tracks the newest frame in the chunk')
+  assert.match(frame.message || '', /70%/)
+  assert.equal(frame.sawAggregateBar, false)
+  assert.equal(frame.done, false)
+})
+
+test('progress reducer prefers the aggregate file-count bar and keeps it monotonic', () => {
+  // The aggregate "Fetching N files" bar establishes a sticky, monotonic headline.
+  const seen = reduceDownloadProgressChunk('Fetching 5 files:  90%|#### | 4/5 [00:30<00:03]', {
+    percent: null,
+    sawAggregateBar: false,
+  })
+  assert.equal(seen.percent, 90)
+  assert.equal(seen.sawAggregateBar, true)
+
+  // A later chunk that carries only a per-file byte bar must not drag it back down.
+  const next = reduceDownloadProgressChunk('model.pt:   5%|# | 40M/800M', {
+    percent: seen.percent,
+    sawAggregateBar: seen.sawAggregateBar,
+  })
+  assert.equal(next.percent, 90, 'aggregate headline stays monotonic; per-file noise ignored')
+  assert.equal(next.sawAggregateBar, true)
+})
+
+test('progress reducer finalizes on the done marker and holds state on empty chunks', () => {
+  const done = reduceDownloadProgressChunk(`${MODEL_PACK_DONE_MARKER}{"path":"/x"}`, {
+    percent: 90,
+    sawAggregateBar: true,
+  })
+  assert.equal(done.percent, 100)
+  assert.equal(done.done, true)
+  assert.equal(done.message, '正在校验并安装…')
+
+  // A whitespace-only chunk carries no frame -> caller skips it, state is preserved.
+  const hold = reduceDownloadProgressChunk('\r\n   \r', { percent: 42, sawAggregateBar: true })
+  assert.equal(hold.message, null)
+  assert.equal(hold.percent, 42)
+  assert.equal(hold.sawAggregateBar, true)
 })
 
 // ---------------------------------------------------------------------------

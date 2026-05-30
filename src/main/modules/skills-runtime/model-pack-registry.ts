@@ -187,3 +187,73 @@ export function buildModelPackDownloadScript(provider: ModelProvider, repoId: st
     `print(${JSON.stringify(MODEL_PACK_DONE_MARKER)} + json.dumps({"path": str(path)}, ensure_ascii=False), flush=True)`,
   ].join('\n')
 }
+
+// Parse a single tqdm bar line's percent. tqdm prints "<pct>%|<bar>"; the second
+// form catches lines that only carry "<pct>%" without the bar glyph.
+export function parseDownloadProgressPercent(line: string): number | null {
+  const match = line.match(/(\d{1,3})%\|/) || line.match(/(\d{1,3})%/)
+  if (!match) return null
+  const parsed = Number(match[1])
+  if (!Number.isFinite(parsed)) return null
+  return Math.max(0, Math.min(100, parsed))
+}
+
+export interface DownloadProgressFrame {
+  // The latest human-readable bar frame (live byte/ETA counters), or null when
+  // the chunk carried nothing printable.
+  message: string | null
+  percent: number | null
+  // Sticky once an aggregate "Fetching N files" bar has been seen in the stream.
+  sawAggregateBar: boolean
+  // The clean-finish marker appeared in this chunk.
+  done: boolean
+}
+
+// Reduce a raw stdout/stderr chunk into the next download progress frame. tqdm
+// writes in-place bar updates with carriage returns (no newline until a bar
+// finishes), so one chunk can carry many frames separated by \r — split on either
+// and read the LATEST frame instead of concatenating stale ones (the old bug that
+// made progress look frozen).
+//
+// Headline percent tracks the aggregate "Fetching N files" bar when present (HF's
+// multi-worker fetch prints it and it only ever rises as whole files complete, so
+// keep it monotonic); packs that stream only a single per-file byte bar (the
+// ModelScope packs download sequentially) fall back to the latest byte-bar percent
+// so the bar still advances. The message always reflects the newest frame so the
+// panel keeps visibly moving even while a file-count bar holds on one large file.
+export function reduceDownloadProgressChunk(
+  chunkText: string,
+  prev: { percent: number | null; sawAggregateBar: boolean },
+): DownloadProgressFrame {
+  const frames = chunkText.split(/[\r\n]+/).map((f) => f.trim()).filter(Boolean)
+  if (frames.length === 0) {
+    return { message: null, percent: prev.percent, sawAggregateBar: prev.sawAggregateBar, done: false }
+  }
+  const doneFrame = frames.find((f) => f.startsWith(MODEL_PACK_DONE_MARKER))
+
+  let sawAggregateBar = prev.sawAggregateBar
+  let aggregatePercent: number | null = null
+  let perFilePercent: number | null = null
+  for (const frame of frames) {
+    if (frame.startsWith(MODEL_PACK_DONE_MARKER)) continue
+    if (/Fetching\s+\d+\s+files/i.test(frame)) {
+      sawAggregateBar = true
+      aggregatePercent = parseDownloadProgressPercent(frame) ?? aggregatePercent
+    } else {
+      perFilePercent = parseDownloadProgressPercent(frame) ?? perFilePercent
+    }
+  }
+
+  let percent: number | null
+  if (doneFrame) {
+    percent = 100
+  } else if (sawAggregateBar) {
+    percent = aggregatePercent === null ? prev.percent : Math.max(aggregatePercent, prev.percent ?? 0)
+  } else {
+    percent = perFilePercent ?? prev.percent
+  }
+
+  const lastFrame = doneFrame ?? frames[frames.length - 1]
+  const message = lastFrame.startsWith(MODEL_PACK_DONE_MARKER) ? '正在校验并安装…' : lastFrame
+  return { message, percent, sawAggregateBar, done: Boolean(doneFrame) }
+}

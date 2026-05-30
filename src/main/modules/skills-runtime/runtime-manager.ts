@@ -93,9 +93,9 @@ import {
   type ModelPackStatus,
 } from '../../../shared/model-pack-types'
 import {
-  MODEL_PACK_DONE_MARKER,
   buildModelPackDownloadScript,
   getModelPackDescriptor,
+  reduceDownloadProgressChunk,
   resolveExplicitModelProvider,
   resolveModelProvider,
   resolvedProviderEndpoint,
@@ -732,26 +732,57 @@ export class SkillsRuntimeManager {
       return this.getModelPackStatus(id)
     }
 
-    const install = await this.ensureSkillInstalled('video-expert-analyzer')
-    if (!install.success) {
-      throw new Error(install.error || '无法准备视频分析运行时')
+    const publish = (): void => {
+      onUpdate?.(this.getModelPackStatus(id))
     }
-    const python = await this.ensurePythonVenv()
-    const resolved = await resolveModelProvider(descriptor, source, (url) => this.probeEndpointLatency(url))
+    const patch = (next: Partial<ModelPackDownloadStatus>): void => {
+      this.modelPackDownloadStatuses.set(id, { ...this.getModelPackDownloadState(id), ...next })
+    }
 
-    mkdirSync(partialDir, { recursive: true })
-    const now = new Date().toISOString()
+    // Publish an optimistic running status immediately so the click registers in
+    // the UI before the (possibly slow) runtime install + venv build + source
+    // probe run; otherwise the row sits idle for seconds and feels unresponsive.
+    const startedAt = new Date().toISOString()
     this.modelPackDownloadStatuses.set(id, {
+      ...createDefaultModelPackDownloadStatus(),
       running: true,
       source,
-      resolvedProvider: resolved.provider,
       targetDir,
-      startedAt: now,
-      updatedAt: now,
-      completedAt: null,
-      error: null,
+      startedAt,
+      updatedAt: startedAt,
+      lastMessage: '正在准备运行时…',
+    })
+    publish()
+
+    let resolved: ResolvedModelProvider
+    let python: string
+    try {
+      const install = await this.ensureSkillInstalled('video-expert-analyzer')
+      if (!install.success) {
+        throw new Error(install.error || '无法准备视频分析运行时')
+      }
+      python = await this.ensurePythonVenv()
+      patch({ updatedAt: new Date().toISOString(), lastMessage: '正在选择下载来源…' })
+      publish()
+      resolved = await resolveModelProvider(descriptor, source, (url) => this.probeEndpointLatency(url))
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      patch({
+        running: false,
+        updatedAt: new Date().toISOString(),
+        completedAt: null,
+        error: message,
+        lastMessage: message,
+      })
+      publish()
+      throw error instanceof Error ? error : new Error(message)
+    }
+
+    mkdirSync(partialDir, { recursive: true })
+    patch({
+      resolvedProvider: resolved.provider,
+      updatedAt: new Date().toISOString(),
       lastMessage: `开始下载 ${descriptor.displayName}（来源：${this.describeModelProvider(resolved)}）`,
-      progressPercent: null,
     })
 
     const script = buildModelPackDownloadScript(resolved.provider, resolved.repoId)
@@ -759,20 +790,22 @@ export class SkillsRuntimeManager {
     const child = spawn(python, ['-c', script, partialDir], { cwd: this.runtimeRoot, env })
     this.modelPackDownloads.set(id, child)
 
-    const publish = (): void => {
-      onUpdate?.(this.getModelPackStatus(id))
-    }
-    const patch = (next: Partial<ModelPackDownloadStatus>): void => {
-      this.modelPackDownloadStatuses.set(id, { ...this.getModelPackDownloadState(id), ...next })
-    }
+    // tqdm emits in-place bar frames separated by carriage returns; reduce each
+    // chunk to the latest frame + a monotonic headline percent so progress moves
+    // smoothly instead of looking frozen on stale frames (see reducer comment).
+    let sawAggregateBar = false
     const ingest = (chunk: Buffer): void => {
-      const lines = chunk.toString('utf8').split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
-      const lastLine = lines[lines.length - 1]
-      if (!lastLine) return
+      const current = this.getModelPackDownloadState(id)
+      const frame = reduceDownloadProgressChunk(chunk.toString('utf8'), {
+        percent: current.progressPercent,
+        sawAggregateBar,
+      })
+      sawAggregateBar = frame.sawAggregateBar
+      if (frame.message === null) return
       patch({
         updatedAt: new Date().toISOString(),
-        lastMessage: lastLine.startsWith(MODEL_PACK_DONE_MARKER) ? lastLine.slice(MODEL_PACK_DONE_MARKER.length) : lastLine,
-        progressPercent: this.parseDownloadProgressPercent(lastLine) ?? this.getModelPackDownloadState(id).progressPercent,
+        lastMessage: frame.message,
+        progressPercent: frame.percent,
       })
       publish()
     }
@@ -1081,15 +1114,6 @@ export class SkillsRuntimeManager {
       env.HF_ENDPOINT = resolved.mirrorEndpoint
     }
     return env
-  }
-
-  private parseDownloadProgressPercent(line: string): number | null {
-    const match = line.match(/(\d{1,3})%\|/)
-      || line.match(/(\d{1,3})%/)
-    if (!match) return null
-    const parsed = Number(match[1])
-    if (!Number.isFinite(parsed)) return null
-    return Math.max(0, Math.min(100, parsed))
   }
 
   private resolveConfiguredAgentContext(definition: SkillDefinition): AgentSpawnContext | null {
