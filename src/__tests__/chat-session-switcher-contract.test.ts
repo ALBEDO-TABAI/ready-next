@@ -25,14 +25,21 @@ test('chat header keeps channel switching separate while folding history browsin
   assert.match(chatHeader, /width:\s*recallActionRailWidth,\s*flexShrink:\s*0/)
   assert.match(chatHeader, /width:\s*44,\s*height:\s*32/)
   assert.match(chatHeader, /gap:\s*8,\s*maxHeight:\s*300,\s*overflow:\s*'auto'/)
-  assert.match(chatHeader, /minHeight:\s*84/)
+  assert.match(chatHeader, /minHeight:\s*64/)
   assert.match(chatHeader, /const conversationSummary =/)
   assert.match(chatHeader, /lineHeight:\s*1\.3/)
   assert.match(chatHeader, /paddingRight:\s*4/)
-  assert.match(chatHeader, /display:\s*'-webkit-box'/)
-  assert.match(chatHeader, /WebkitLineClamp:\s*2/)
-  assert.match(chatHeader, /WebkitBoxOrient:\s*'vertical'/)
-  assert.match(chatHeader, /conversationSummary && \([\s\S]*formatTime\(conv\.updatedAt\)/)
+  // The conversation summary renders as a single line that fades out on the
+  // right (mask gradient) rather than wrapping/clamping to two lines.
+  assert.doesNotMatch(chatHeader, /WebkitLineClamp/)
+  assert.doesNotMatch(chatHeader, /WebkitBoxOrient/)
+  assert.match(chatHeader, /maskImage: 'linear-gradient\(to right, #000 calc\(100% - 24px\), transparent 100%\)'/)
+  // Each row carries a status dot (color-keyed) left of the title and a
+  // "更多" menu (rename/delete) replacing the bare delete button.
+  assert.match(chatHeader, /SESSION_DOT_COLOR\[dotStatus\]/)
+  assert.match(chatHeader, /data-row-menu-trigger="true"/)
+  assert.match(chatHeader, /重命名/)
+  assert.match(chatHeader, /formatTime\(conv\.updatedAt\)[\s\S]*conversationSummary && \(/)
   assert.match(chatHeader, /History/)
   assert.doesNotMatch(chatHeader, /ios-segmented-control/)
   assert.doesNotMatch(chatHeader, /filteredScopes\.map/)

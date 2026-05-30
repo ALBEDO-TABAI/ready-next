@@ -3,7 +3,7 @@
  *
  * Plan §7.1 (docs/superpowers/plans/2026-05-22-X-trust-foundation-and-w5-recovery-implementation.md)
  * three-state failure decomposition:
- *   - Session visibility — covered in session-tabs-ui.test.ts (X2.1 #5/#6).
+ *   - Session visibility — covered in multi-session-isolation.test.ts (V3.3b.2).
  *   - Composer lock — THIS file. Terminal events must unlock the session
  *     whose send originated the streaming, even if `currentScopeId`
  *     changes mid-send.

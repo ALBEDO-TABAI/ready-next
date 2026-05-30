@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { History, Plus, ChevronDown, X, PanelRightClose } from 'lucide-react'
+import { AtSign, History, Plus, ChevronDown, MoreHorizontal, Pencil, Trash2, PanelRightClose } from 'lucide-react'
 import { IconButton } from '../ui/IconButton'
 import Modal from '../ui/Modal'
 import type { SessionRecallHit } from '../../../shared/session-recall'
+import { SESSION_DOT_COLOR, type SessionDotStatus } from './chat-panel/helpers/session-status'
 import {
   CHAT_HEADER_MENU_DELETE_BUTTON_STYLE,
   CHAT_HEADER_MENU_META_STYLE,
@@ -29,6 +30,8 @@ interface ChatHeaderProps {
   onNewSession: () => void
   onLoadConversation: (convId: string) => void
   onDeleteConversation: (convId: string) => void
+  onRenameConversation?: (conversationId: string, title: string) => void
+  sessionStatusByConversationId?: Record<string, SessionDotStatus>
   sessionRecallQuery: string
   sessionRecallResults: SessionRecallHit[]
   sessionRecallSearching: boolean
@@ -39,6 +42,7 @@ interface ChatHeaderProps {
   onSessionRecallSearch: () => void
   onAttachSessionRecall: (conversationId: string) => void
   onHistoryOpen?: () => void
+  sessionTitle?: string
   formatTime: (time: string) => string
 }
 
@@ -55,6 +59,8 @@ export default function ChatHeader({
   onNewSession,
   onLoadConversation,
   onDeleteConversation,
+  onRenameConversation,
+  sessionStatusByConversationId,
   sessionRecallQuery,
   sessionRecallResults,
   sessionRecallSearching,
@@ -65,6 +71,7 @@ export default function ChatHeader({
   onSessionRecallSearch,
   onAttachSessionRecall,
   onHistoryOpen,
+  sessionTitle,
   formatTime,
 }: ChatHeaderProps) {
   const [showScopeSelect, setShowScopeSelect] = useState(false)
@@ -72,10 +79,14 @@ export default function ChatHeader({
   const [scopeMenuPosition, setScopeMenuPosition] = useState<FloatingMenuPosition | null>(null)
   const [historyMenuPosition, setHistoryMenuPosition] = useState<FloatingMenuPosition | null>(null)
   const [pendingDeleteSession, setPendingDeleteSession] = useState<{ conversationId: string; title: string } | null>(null)
+  const [pendingRenameSession, setPendingRenameSession] = useState<{ conversationId: string; title: string } | null>(null)
+  const [rowMenu, setRowMenu] = useState<{ conversationId: string; title: string; position: FloatingMenuPosition } | null>(null)
   const scopeTriggerRef = useRef<HTMLButtonElement>(null)
   const historyTriggerRef = useRef<HTMLButtonElement>(null)
+  const titleTriggerRef = useRef<HTMLButtonElement>(null)
   const scopeMenuRef = useRef<HTMLDivElement>(null)
   const historyMenuRef = useRef<HTMLDivElement>(null)
+  const rowMenuRef = useRef<HTMLDivElement>(null)
   const portalRoot = typeof document !== 'undefined' ? document.body : null
   const historyMenuWidth = 340
   const recallActionRailWidth = 72
@@ -108,7 +119,9 @@ export default function ChatHeader({
       )
       const clickedHistory = !!(
         historyTriggerRef.current?.contains(target) ||
-        historyMenuRef.current?.contains(target)
+        historyMenuRef.current?.contains(target) ||
+        titleTriggerRef.current?.contains(target) ||
+        rowMenuRef.current?.contains(target)
       )
 
       if (showScopeSelect && !clickedScope) {
@@ -119,10 +132,23 @@ export default function ChatHeader({
         setShowHistory(false)
         setHistoryMenuPosition(null)
       }
+      if (rowMenu) {
+        const clickedRowMenu = !!(
+          rowMenuRef.current?.contains(target) ||
+          (target instanceof Element && target.closest('[data-row-menu-trigger="true"]'))
+        )
+        if (!clickedRowMenu) setRowMenu(null)
+      }
     }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
-  }, [showHistory, showScopeSelect])
+  }, [showHistory, showScopeSelect, rowMenu])
+
+  // Close the per-row "更多" menu whenever the history dropdown closes, so a
+  // detached menu never lingers after the list it belongs to is gone.
+  useEffect(() => {
+    if (!showHistory) setRowMenu(null)
+  }, [showHistory])
 
   const handleHistoryToggle = useCallback(() => {
     setShowHistory((prev) => {
@@ -131,6 +157,16 @@ export default function ChatHeader({
       return next
     })
   }, [computeMenuPosition, historyMenuWidth])
+
+  // Shared by the History icon button and the session-title button: opening
+  // (re)loads the history list, and closing the scope menu keeps a single
+  // floating menu open at a time.
+  const handleHistoryButtonClick = useCallback(() => {
+    if (!showHistory) onHistoryOpen?.()
+    handleHistoryToggle()
+    setShowScopeSelect(false)
+    setScopeMenuPosition(null)
+  }, [showHistory, onHistoryOpen, handleHistoryToggle])
 
   const handleScopeToggle = useCallback(() => {
     setShowScopeSelect((prev) => {
@@ -144,6 +180,8 @@ export default function ChatHeader({
     if (!showScopeSelect && !showHistory) return
 
     const syncMenuPositions = () => {
+      // A fixed-positioned row menu detaches from its trigger on scroll/resize.
+      setRowMenu(null)
       if (showScopeSelect) {
         setScopeMenuPosition(computeMenuPosition(scopeTriggerRef.current, 300, 'left'))
       }
@@ -237,6 +275,48 @@ export default function ChatHeader({
           </button>
         </div>
 
+        {sessionTitle ? (
+          <button
+            ref={titleTriggerRef}
+            type="button"
+            onClick={handleHistoryButtonClick}
+            title={sessionTitle}
+            aria-label={`当前会话：${sessionTitle}，点击查看历史对话`}
+            className="active:scale-[0.99] transition-transform duration-150"
+            style={{
+              flex: 1,
+              minWidth: 0,
+              margin: '0 10px',
+              display: 'flex',
+              alignItems: 'center',
+              height: '100%',
+              border: 'none',
+              background: 'transparent',
+              padding: 0,
+              cursor: 'pointer',
+              overflow: 'hidden',
+            }}
+          >
+            <span
+              style={{
+                display: 'block',
+                width: '100%',
+                fontSize: 12.5,
+                fontWeight: 500,
+                color: 'var(--text-light)',
+                textAlign: 'left',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'clip',
+                WebkitMaskImage: 'linear-gradient(to right, #000 calc(100% - 28px), transparent 100%)',
+                maskImage: 'linear-gradient(to right, #000 calc(100% - 28px), transparent 100%)',
+              }}
+            >
+              {sessionTitle}
+            </span>
+          </button>
+        ) : null}
+
         <div className="flex items-center" style={{ gap: 4 }} data-chat-session-menu="true">
           <IconButton
             icon={<PanelRightClose style={{ width: 14, height: 14 }} strokeWidth={2} />}
@@ -247,13 +327,7 @@ export default function ChatHeader({
           <div className="relative">
             <IconButton
               icon={<History style={{ width: 14, height: 14 }} strokeWidth={2} />}
-              onClick={() => {
-                const next = !showHistory
-                if (next) onHistoryOpen?.()
-                handleHistoryToggle()
-                setShowScopeSelect(false)
-                setScopeMenuPosition(null)
-              }}
+              onClick={handleHistoryButtonClick}
               title="历史对话"
               active={showHistory}
               ref={historyTriggerRef}
@@ -419,6 +493,8 @@ export default function ChatHeader({
                   conv.latestTaskSummary?.trim() ||
                   conv.resumeTitle?.trim() ||
                   ''
+                const dotStatus: SessionDotStatus = sessionStatusByConversationId?.[conv.conversationId] ?? 'off'
+                const dotColor = SESSION_DOT_COLOR[dotStatus]
                 return (
                   <div
                     key={conv.conversationId}
@@ -429,8 +505,8 @@ export default function ChatHeader({
                       gridTemplateColumns: 'minmax(0, 1fr) auto',
                       alignItems: 'stretch',
                       gap: 12,
-                      minHeight: 84,
-                      padding: '12px 12px 11px',
+                      minHeight: 64,
+                      padding: '12px 12px',
                       overflow: 'hidden',
                     }}
                   >
@@ -452,108 +528,137 @@ export default function ChatHeader({
                         width: '100%',
                         display: 'flex',
                         flexDirection: 'column',
-                        justifyContent: 'flex-start',
+                        justifyContent: 'center',
                         overflow: 'hidden',
                       }}
                     >
                       <div style={{ minWidth: 0, width: '100%', overflow: 'hidden' }}>
-                        <div
-                          style={{
-                            fontSize: 12.5,
-                            fontWeight: 600,
-                            lineHeight: 1.3,
-                            color: 'var(--text-body)',
-                            paddingRight: 4,
-                            maxWidth: '100%',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap'
-                          }}
-                        >
-                          {conv.title || '新对话'}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0, width: '100%' }}>
+                          <span
+                            aria-hidden="true"
+                            style={{
+                              width: 7,
+                              height: 7,
+                              borderRadius: '50%',
+                              flexShrink: 0,
+                              background: dotColor,
+                              boxShadow: dotStatus === 'off' ? 'none' : `0 0 5px ${dotColor}`,
+                            }}
+                          />
+                          <div
+                            style={{
+                              flex: 1,
+                              minWidth: 0,
+                              fontSize: 12.5,
+                              fontWeight: 600,
+                              lineHeight: 1.3,
+                              color: 'var(--text-body)',
+                              paddingRight: 4,
+                              overflow: 'hidden',
+                              textOverflow: 'clip',
+                              whiteSpace: 'nowrap',
+                              WebkitMaskImage: 'linear-gradient(to right, #000 calc(100% - 24px), transparent 100%)',
+                              maskImage: 'linear-gradient(to right, #000 calc(100% - 24px), transparent 100%)'
+                            }}
+                          >
+                            {conv.title || '新对话'}
+                          </div>
+                          <div
+                            style={{
+                              ...CHAT_HEADER_MENU_META_STYLE,
+                              marginTop: 0,
+                              flexShrink: 0,
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            {formatTime(conv.updatedAt)}
+                          </div>
                         </div>
                         {conversationSummary && (
                           <div
                             style={{
+                              marginLeft: 14,
                               fontSize: 11,
                               color: 'var(--text-light)',
                               marginTop: 4,
                               lineHeight: 1.45,
-                              paddingRight: 4,
-                              maxWidth: '100%',
-                              display: '-webkit-box',
-                              WebkitLineClamp: 2,
-                              WebkitBoxOrient: 'vertical',
+                              whiteSpace: 'nowrap',
                               overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              maxHeight: '3.1em',
-                              whiteSpace: 'normal',
-                              wordBreak: 'break-word',
-                              overflowWrap: 'anywhere'
+                              textOverflow: 'clip',
+                              WebkitMaskImage: 'linear-gradient(to right, #000 calc(100% - 24px), transparent 100%)',
+                              maskImage: 'linear-gradient(to right, #000 calc(100% - 24px), transparent 100%)'
                             }}
                           >
                             {conversationSummary}
                           </div>
                         )}
-                        <div
-                          style={{
-                            ...CHAT_HEADER_MENU_META_STYLE,
-                            marginTop: conversationSummary ? 6 : 4,
-                            maxWidth: '100%',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          {formatTime(conv.updatedAt)}
-                        </div>
                       </div>
                     </button>
                     <div
                       className="flex items-center"
                       style={{
-                        width: recallActionRailWidth,
                         flexShrink: 0,
-                        alignSelf: 'flex-start',
-                        gap: 6,
-                        paddingTop: 2
+                        alignSelf: 'center',
+                        gap: 2,
                       }}
                     >
                       <button
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation()
+                          if (attached) return
                           onAttachSessionRecall(conv.conversationId)
                         }}
                         disabled={attached}
-                        className="rounded-[10px] border transition-[background-color,border-color,color,opacity]"
+                        className="chat-header-menu-delete-button transition-[background-color,color,opacity]"
                         style={{
-                          width: 44,
-                          height: 32,
-                          borderColor: 'var(--border-default)',
-                          background: attached ? 'var(--bg-hover)' : 'transparent',
-                          color: attached ? 'var(--text-light)' : 'var(--text-body)',
-                          fontSize: 11.5,
-                          fontWeight: 600,
-                          opacity: attached ? 0.8 : 1
+                          ...CHAT_HEADER_MENU_DELETE_BUTTON_STYLE,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          cursor: attached ? 'default' : 'pointer',
+                          color: attached ? 'var(--color-blue)' : 'var(--text-gray)',
+                          opacity: attached ? 0.95 : 0.72,
                         }}
+                        title={attached ? '已引用到本轮' : '引用到本轮'}
+                        aria-label={attached ? '已引用到本轮' : '引用到本轮'}
                       >
-                        {attached ? '已引用' : '引用'}
+                        <AtSign style={{ width: 13, height: 13 }} strokeWidth={2} />
                       </button>
                       <button
                         type="button"
+                        data-row-menu-trigger="true"
                         onClick={(event) => {
                           event.stopPropagation()
-                          setPendingDeleteSession({
-                            conversationId: conv.conversationId,
-                            title: conv.title || '新对话',
+                          const rect = event.currentTarget.getBoundingClientRect()
+                          setRowMenu((prev) => {
+                            if (prev?.conversationId === conv.conversationId) return null
+                            const menuWidth = 140
+                            const margin = 8
+                            const left = Math.max(
+                              margin,
+                              Math.min(rect.right - menuWidth, window.innerWidth - menuWidth - margin),
+                            )
+                            return {
+                              conversationId: conv.conversationId,
+                              title: conv.title || '新对话',
+                              position: { left: Math.round(left), top: Math.round(rect.bottom + 6) },
+                            }
                           })
                         }}
-                        className="chat-header-menu-delete-button group-hover:opacity-100 transition-[background-color,opacity]"
-                        style={CHAT_HEADER_MENU_DELETE_BUTTON_STYLE}
-                        title="删除对话"
+                        className="chat-header-menu-delete-button transition-[background-color,color,opacity]"
+                        style={{
+                          ...CHAT_HEADER_MENU_DELETE_BUTTON_STYLE,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: 'var(--text-gray)',
+                          opacity: 0.72,
+                        }}
+                        title="更多"
+                        aria-label="更多操作"
                       >
-                        <X style={{ width: 12, height: 12 }} className="text-[var(--text-gray)]" strokeWidth={2} />
+                        <MoreHorizontal style={{ width: 13, height: 13 }} strokeWidth={2} />
                       </button>
                     </div>
                   </div>
@@ -561,6 +666,51 @@ export default function ChatHeader({
               })}
             </div>
           )}
+        </div>,
+        document.body,
+      )}
+
+      {portalRoot && showHistory && rowMenu && createPortal(
+        <div
+          ref={rowMenuRef}
+          className="glass-surface-floating chat-header-floating-menu ready-floating-menu"
+          style={{
+            ...buildChatHeaderFloatingMenuStyle(140),
+            position: 'fixed',
+            top: rowMenu.position.top,
+            left: rowMenu.position.left,
+            padding: 6,
+            maxHeight: undefined,
+            zIndex: 260,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 2,
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => {
+              setPendingRenameSession({ conversationId: rowMenu.conversationId, title: rowMenu.title })
+              setRowMenu(null)
+            }}
+            className="chat-header-floating-menu-item ready-floating-menu-item w-full flex items-center gap-2 active:scale-[0.98] transition-[background-color,border-color,box-shadow,transform] duration-150"
+            style={buildChatHeaderMenuItemStyle()}
+          >
+            <Pencil style={{ width: 13, height: 13, flexShrink: 0, color: 'var(--text-light)' }} strokeWidth={2} />
+            <span style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--text-body)' }}>重命名</span>
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setPendingDeleteSession({ conversationId: rowMenu.conversationId, title: rowMenu.title })
+              setRowMenu(null)
+            }}
+            className="chat-header-floating-menu-item ready-floating-menu-item w-full flex items-center gap-2 active:scale-[0.98] transition-[background-color,border-color,box-shadow,transform] duration-150"
+            style={buildChatHeaderMenuItemStyle()}
+          >
+            <Trash2 style={{ width: 13, height: 13, flexShrink: 0, color: 'var(--color-red)' }} strokeWidth={2} />
+            <span style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--color-red)' }}>删除</span>
+          </button>
         </div>,
         document.body,
       )}
@@ -580,6 +730,25 @@ export default function ChatHeader({
           setPendingDeleteSession(null)
         }}
         onCancel={() => setPendingDeleteSession(null)}
+      />
+
+      <Modal
+        open={pendingRenameSession !== null}
+        mode="prompt"
+        title="重命名会话"
+        message="为这个会话取一个新名称："
+        defaultValue={pendingRenameSession?.title ?? ''}
+        placeholder="会话名称"
+        confirmLabel="保存"
+        cancelLabel="取消"
+        onConfirm={(value) => {
+          const next = (value ?? '').trim()
+          if (pendingRenameSession && next) {
+            onRenameConversation?.(pendingRenameSession.conversationId, next)
+          }
+          setPendingRenameSession(null)
+        }}
+        onCancel={() => setPendingRenameSession(null)}
       />
     </>
   )

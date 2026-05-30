@@ -58,12 +58,9 @@ import {
 // to `./chat-panel/layout/MotionLayer`. Both are pure React with zero
 // `useAgent` / store / IPC dependencies; signatures preserved byte-for-byte.
 import { ChatPanelMotionLayer, CollapsedChatRail } from './chat-panel/layout/MotionLayer'
-// Stage V V3.4a — visible session tab strip. Renders `null` when the
-// `useAgent.sessionOrder` Record is empty (the cold-start state the V6
-// fixture locks), so this import does not change the chat-panel-baseline
-// snapshot until a session is explicitly created.
-import SessionTabs from './chat-panel/session-tabs/SessionTabs'
 import SessionCompleteToast from './chat-panel/session-tabs/SessionCompleteToast'
+import { resolveChatSessionTitle } from './chat-panel/helpers/session-title'
+import { resolveSessionDotStatus, type SessionDotStatus } from './chat-panel/helpers/session-status'
 import {
   AttachmentPreviewModal
 } from './chat-panel/attachments-preview'
@@ -170,6 +167,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     loadScopes,
     loadConversation,
     deleteConversation,
+    renameConversation,
     toolTrace,
     toolTraceStatus,
     // W3
@@ -429,6 +427,26 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     )
   }, [currentTaskRun, mergedTaskRuns, visibleTaskScopeIds])
 
+  // Status-dot color per conversation for the history panel. Only currently-open
+  // scopes carry a live status: the foreground scope reads green when idle
+  // (激活) and follows its run phase / streaming otherwise; open background
+  // scopes light up by their own phase (done→green, working→orange, error→red).
+  // Conversations absent from this map are pure history and render unlit.
+  const sessionStatusByConversationId = useMemo(() => {
+    const map: Record<string, SessionDotStatus> = {}
+    if (currentScopeId) {
+      map[currentScopeId] = resolveSessionDotStatus(
+        currentTaskRun?.phase ?? scopeRunStates[currentScopeId]?.phase,
+        { isActive: true, isStreaming },
+      )
+    }
+    for (const run of backgroundTaskRuns) {
+      if (run.scopeId === currentScopeId) continue
+      map[run.scopeId] = resolveSessionDotStatus(run.phase, { isActive: false })
+    }
+    return map
+  }, [currentScopeId, currentTaskRun, scopeRunStates, isStreaming, backgroundTaskRuns])
+
   const userVisibleToolTrace = useMemo(() => filterUserVisibleToolTraceEvents(toolTrace), [toolTrace])
 
   const showToolTraceCapsule =
@@ -605,10 +623,10 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
   useEffect(() => {
     void loadScopes().then(() => {
       // Stage X2.3 — UI-reachable entry point: when the agent has no
-      // existing scopes after load, create a visible session via the
-      // tab-strip API. `createNewSession()` appends to `sessionOrder`
-      // so SessionTabs renders the new tab; the legacy `newSession()`
-      // only swaps in place and is reserved for non-UI bootstrap paths.
+      // existing scopes after load, create a session via the visible
+      // `createNewSession()` (appends to `sessionOrder`); the legacy
+      // `newSession()` only swaps in place and is reserved for non-UI
+      // bootstrap paths.
       if (useAgent.getState().scopes.length === 0) {
         useAgent.getState().createNewSession()
       }
@@ -788,6 +806,20 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     [deleteConversation, runSessionRecallSearch, sessionRecallQuery]
   )
 
+  const handleRenameConversation = useCallback(
+    async (convId: string, title: string) => {
+      const nextTitle = title.trim()
+      if (!nextTitle) return
+      await renameConversation(convId, nextTitle)
+      // 乐观更新历史列表标题，再异步对齐后端（重命名会 bump updated_at，排序随之变化）
+      setSessionRecallResults((prev) =>
+        prev.map((hit) => (hit.conversationId === convId ? { ...hit, title: nextTitle } : hit)),
+      )
+      void runSessionRecallSearch(sessionRecallQuery)
+    },
+    [renameConversation, runSessionRecallSearch, sessionRecallQuery, setSessionRecallResults]
+  )
+
   const {
     handleContinueTaskInput,
     handleSubmitTaskConfirmation,
@@ -846,13 +878,11 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     focusInputWithResize
   })
 
-  // Stage V V3.4a — SessionTabs above the channel selector. The strip renders
-  // `null` when `sessionOrder` is empty (cold start), so the V6 baseline
-  // markers (`data-chat-panel-root` / `data-liquid-shell`) are unaffected
-  // until the user explicitly creates a session.
+  // Blank until the current scope carries a real (non-placeholder) title —
+  // i.e. until the user has actually started a conversation.
+  const sessionTitle = resolveChatSessionTitle(currentScope?.title)
+
   const expandedPanelHeader = (
-    <>
-      <SessionTabs />
     <ChatHeader
       currentChannel={currentChannel}
       channelOptions={channelOptions}
@@ -861,6 +891,8 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
       onNewSession={handleNewSession}
       onLoadConversation={handleLoadConversation}
       onDeleteConversation={handleDeleteConversation}
+      onRenameConversation={handleRenameConversation}
+      sessionStatusByConversationId={sessionStatusByConversationId}
       sessionRecallQuery={sessionRecallQuery}
       sessionRecallResults={visibleSessionRecallResults}
       sessionRecallSearching={sessionRecallSearching}
@@ -878,9 +910,9 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
         void loadScopes()
         void runSessionRecallSearch(sessionRecallQuery)
       }}
+      sessionTitle={sessionTitle}
       formatTime={formatTime}
     />
-    </>
   )
 
   const expandedPanelBody = (

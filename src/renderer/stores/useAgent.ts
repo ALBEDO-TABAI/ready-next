@@ -281,6 +281,12 @@ interface AgentState {
   loadConversations: () => Promise<void>
   loadConversation: (convId: string) => Promise<void>
   deleteConversation: (convId: string) => Promise<void>
+  /**
+   * Rename a conversation. Awaits the persisting IPC (so a failure leaves the
+   * old title visibly intact rather than silently diverging), then mirrors the
+   * new title onto any open scope. Trims input; a blank title is a no-op.
+   */
+  renameConversation: (convId: string, title: string) => Promise<void>
   addAttachments: (files: ChatAttachment[]) => void
   removeAttachment: (id: string) => void
   clearAttachments: () => void
@@ -1756,6 +1762,29 @@ export const useAgent = create<AgentState>((set, get) => ({
       if (currentScopeId === convId) {
         get().newSession()
       }
+    } catch { /* ignore */ }
+  },
+
+  renameConversation: async (convId: string, title: string) => {
+    if (typeof window === 'undefined' || !window.electronAPI?.chat) return
+    const nextTitle = title.trim()
+    if (!nextTitle) return
+    try {
+      await window.electronAPI.chat.updateConversationTitle({ id: convId, title: nextTitle })
+      // DB bumps updated_at on rename (database.ts updateConversationTitle), so
+      // mirror that here to keep the optimistic in-memory ordering in sync.
+      const now = new Date().toISOString()
+      const { scopes, currentScope } = get()
+      const updatedScopes = scopes.map((scope) =>
+        scope.id === convId ? { ...scope, title: nextTitle, updatedAt: now } : scope,
+      )
+      set({
+        scopes: updatedScopes,
+        currentScope: currentScope && currentScope.id === convId
+          ? { ...currentScope, title: nextTitle, updatedAt: now }
+          : currentScope,
+        conversations: updatedScopes.map(mapScopeToConversation),
+      })
     } catch { /* ignore */ }
   },
 
