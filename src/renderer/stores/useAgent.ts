@@ -2475,7 +2475,7 @@ function makeMessageFromPushedCard(
   }
 }
 
-function initAgentInteractionListeners(): () => void {
+export function initAgentInteractionListeners(): () => void {
   const api = typeof window !== 'undefined' ? window.electronAPI?.agentInteraction : null
   if (!api) return () => {}
   // Hydrate any pending cards left from a mid-flight renderer reload.
@@ -2566,7 +2566,16 @@ function initAgentInteractionListeners(): () => void {
       // Mirror into top-level `messages` only when the routed target is the
       // active session. Background-session cards stay parked in that slice
       // and surface when the user switches tabs.
-      if (decision.targetSessionId === prev.activeSessionId) {
+      //
+      // Compare against `activeSessionKey(prev)`, NOT the raw `activeSessionId`
+      // field: top-level `messages` is the mirror of `sessions[activeSessionKey]`,
+      // and `activeSessionKey` falls back to `sessionId`/`PRIMARY_SESSION_KEY`
+      // when `activeSessionId` is null (the normal state after `loadScope`,
+      // which never assigns `activeSessionId`). Comparing against the raw
+      // null field left the routed card stranded in the active slice with no
+      // top-level mirror, so it only surfaced once an unrelated active-slice
+      // write (e.g. expanding a tool-trace section) re-ran the mirror.
+      if (decision.targetSessionId === activeSessionKey(prev)) {
         return {
           ...sessionsPatch,
           messages: nextMessages,
