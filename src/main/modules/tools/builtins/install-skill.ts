@@ -181,7 +181,6 @@ export async function executeInstallSkill(
     `已只读解析（未安装）。来源：${describeSource(resolution.source)}`,
     riskLine,
     resolution.license ? `许可证：${resolution.license}` : null,
-    resolution.requiresPython === true ? '需要 Python 依赖（安装时会用应用内置 Python 在线部署）' : null,
     `下一步：${nextStep}`,
   ].filter(Boolean).join('\n')
 

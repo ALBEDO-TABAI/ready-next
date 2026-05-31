@@ -90,6 +90,25 @@ function assertGzipMagic(buffer: Buffer): void {
   }
 }
 
+// Reject archive members that would escape the extraction dir — an absolute path
+// (leading `/` or a Windows drive letter) or any `..` component — before we write
+// anything to disk. The post-extraction security scan only inspects in-tree
+// files, so this is the guard for the untrusted `tar -xzf` write itself; we do
+// not rely on each tar flavour's default escape handling.
+function assertSafeArchiveEntries(listing: string): void {
+  for (const line of listing.split('\n')) {
+    const entry = line.trim()
+    if (!entry) continue
+    const normalized = entry.replace(/\\/g, '/')
+    if (normalized.startsWith('/') || /^[a-zA-Z]:/.test(normalized)) {
+      throw new Error(`压缩包包含绝对路径条目，已拒绝：${entry}`)
+    }
+    if (normalized.split('/').some((segment) => segment === '..')) {
+      throw new Error(`压缩包包含越界路径（..），已拒绝：${entry}`)
+    }
+  }
+}
+
 async function streamToBuffer(
   url: string,
   options: FetchSkillOptions,
@@ -168,7 +187,7 @@ function locateSkillRoot(extractDir: string, subdir?: string): string {
   if (existsSync(join(extractDir, 'SKILL.md'))) return extractDir
   const entries = readdirSync(extractDir, { withFileTypes: true }).filter((e) => !e.name.startsWith('.'))
   const dirs = entries.filter((e) => e.isDirectory())
-  if (!existsSync(join(extractDir, 'SKILL.md')) && entries.length === 1 && dirs.length === 1) {
+  if (entries.length === 1 && dirs.length === 1) {
     const descended = join(extractDir, dirs[0].name)
     if (existsSync(join(descended, 'SKILL.md'))) return descended
     return descended
@@ -233,6 +252,14 @@ export async function fetchSkillToStaging(options: FetchSkillOptions): Promise<F
 
   const tarBinary = resolveTarBinary(options.tarBinary)
   const stripComponents = options.stripComponents ?? 0
+
+  const listing = await execFileAsync(
+    tarBinary,
+    ['-tzf', archivePath],
+    { timeout: 120_000, maxBuffer: 10 * 1024 * 1024 },
+  )
+  assertSafeArchiveEntries(listing.stdout)
+
   await execFileAsync(
     tarBinary,
     ['-xzf', archivePath, '-C', extractDir, `--strip-components=${stripComponents}`],

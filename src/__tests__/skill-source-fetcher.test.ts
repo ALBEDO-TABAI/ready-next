@@ -121,6 +121,32 @@ test('fetchSkillToStaging rejects a .zip payload with a clear message', async ()
   }
 })
 
+test('fetchSkillToStaging rejects an archive whose member escapes the staging dir', async () => {
+  const cacheRoot = scratch('ready-cache-')
+  const srcDir = scratch('ready-evil-src-')
+  try {
+    const abs = join(srcDir, 'escape.txt')
+    writeFileSync(abs, 'pwned')
+    const out = join(scratch('ready-evil-out-'), 'evil.tar.gz')
+    // -P preserves the absolute path as the stored member (bsdtar + GNU tar), so
+    // the tarball carries a path that would escape the extraction dir.
+    await execFileAsync('tar', ['-czPf', out, abs])
+    await assert.rejects(
+      () =>
+        fetchSkillToStaging({
+          url: 'https://example.com/evil.tar.gz',
+          requestId: 'req-evil',
+          cacheRoot,
+          fetchImpl: serve(readFileSync(out)),
+        }),
+      /绝对路径|越界/,
+    )
+  } finally {
+    rmSync(cacheRoot, { recursive: true, force: true })
+    rmSync(srcDir, { recursive: true, force: true })
+  }
+})
+
 test('fetchSkillToStaging enforces the aggregate size cap', async () => {
   const cacheRoot = scratch('ready-cache-')
   try {
