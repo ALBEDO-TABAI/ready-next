@@ -82,6 +82,7 @@ export default function CalendarMode({
   const mainViewRef = useRef<HTMLDivElement>(null)
   const createButtonRef = useRef<HTMLButtonElement>(null)
   const becameVisibleRef = useRef(false)
+  const lastFetchedWindowRef = useRef<string | null>(null)
   const remoteSuggestionSeenRef = useRef<Set<string>>(new Set())
 
   const eventsRef = useRef(events)
@@ -208,6 +209,54 @@ export default function CalendarMode({
     onQuickCardRequest: openQuickCardFromSX,
   })
 
+  // Single path that pulls events for a window into renderer state. The grid
+  // hook only re-renders the `events` it is handed, so every visible-window
+  // change (initial load, month navigation, post-mutation refresh) flows
+  // through here. Sources/mock load separately in loadCalendarData so a
+  // navigation refetch never re-runs setSources and clobbers the user's local
+  // source toggles. Returns the response mock flag, or undefined when the
+  // fetch failed (loadError is already set in that case).
+  const fetchEventsForWindow = useCallback(async (start: Date, end: Date): Promise<boolean | undefined> => {
+    if (typeof window === 'undefined' || !window.electronAPI) return undefined
+    const result = await window.electronAPI.calendar.getEvents(start, end)
+    if (!result.success) {
+      setLoadError(result.error || '日历事件加载失败。')
+      return undefined
+    }
+    if (result.data) {
+      // Boundary-layer normalization: every event from the IPC channel
+      // is a `CalendarEventWire`. Convert through `parseEventFromWire`
+      // to get JS `Date` objects + null-normalized fields. This is the
+      // single place the renderer constructs `Date` from event time —
+      // prior to this fix the `new Date(unixSeconds)` shape produced
+      // 1970-era events on every refresh.
+      setEvents(result.data.map((rawEvent: any) => {
+        const parsed = parseEventFromWire(serializeEventToWire(rawEvent))
+        return {
+          id: parsed.id || `event-${Math.random().toString(36).slice(2, 8)}`,
+          title: parsed.title,
+          startTime: parsed.startTime,
+          endTime: parsed.endTime,
+          calendarId: parsed.calendarId,
+          color: typeof rawEvent.color === 'string' ? rawEvent.color : '#5B8DEF',
+          description: parsed.description ?? undefined,
+          location: parsed.location ?? undefined,
+          allDay: parsed.allDay,
+          contentType: rawEvent.contentType ?? undefined,
+          platform: rawEvent.platform ?? undefined,
+          publishStatus: rawEvent.publishStatus ?? undefined,
+          reminders: parsed.reminders ?? undefined,
+          recurrenceRule: parsed.recurrenceRule ?? undefined,
+          instanceOf: parsed.instanceOf,
+          occurrenceStart: Math.floor(parsed.occurrenceStart.getTime() / 1000),
+          overrideKind: parsed.overrideKind ?? undefined,
+        }
+      }))
+    }
+    lastFetchedWindowRef.current = `${start.getTime()}-${end.getTime()}`
+    return Boolean(result.mock)
+  }, [])
+
   const loadCalendarData = useCallback(async (force = false) => {
     if (!hasActivated) return
     if (dataLoaded && !force) return
@@ -223,44 +272,17 @@ export default function CalendarMode({
         return
       }
 
-      const { start, end } = getDateRange(new Date(), 'month')
-      const result = await window.electronAPI.calendar.getEvents(start, end)
-      if (!result.success) {
+      // Fetch the window around the currently-viewed date (not today): the
+      // month grid for any view is covered by currentDate's month range, so
+      // reopening on a persisted date or refreshing after a mutation loads
+      // the right window instead of always snapping back to today's month.
+      const { start, end } = getDateRange(currentDate, 'month')
+      const eventsMock = await fetchEventsForWindow(start, end)
+      if (eventsMock === undefined) {
         setIsMock(false)
         setSessionIsMock(false)
-        setLoadError(result.error || '日历事件加载失败。')
         setDataLoaded(true)
         return
-      }
-      if (result.data) {
-        // Boundary-layer normalization: every event from the IPC channel
-        // is a `CalendarEventWire`. Convert through `parseEventFromWire`
-        // to get JS `Date` objects + null-normalized fields. This is the
-        // single place the renderer constructs `Date` from event time —
-        // prior to this fix the `new Date(unixSeconds)` shape produced
-        // 1970-era events on every refresh.
-        setEvents(result.data.map((rawEvent: any) => {
-          const parsed = parseEventFromWire(serializeEventToWire(rawEvent))
-          return {
-            id: parsed.id || `event-${Math.random().toString(36).slice(2, 8)}`,
-            title: parsed.title,
-            startTime: parsed.startTime,
-            endTime: parsed.endTime,
-            calendarId: parsed.calendarId,
-            color: typeof rawEvent.color === 'string' ? rawEvent.color : '#5B8DEF',
-            description: parsed.description ?? undefined,
-            location: parsed.location ?? undefined,
-            allDay: parsed.allDay,
-            contentType: rawEvent.contentType ?? undefined,
-            platform: rawEvent.platform ?? undefined,
-            publishStatus: rawEvent.publishStatus ?? undefined,
-            reminders: parsed.reminders ?? undefined,
-            recurrenceRule: parsed.recurrenceRule ?? undefined,
-            instanceOf: parsed.instanceOf,
-            occurrenceStart: Math.floor(parsed.occurrenceStart.getTime() / 1000),
-            overrideKind: parsed.overrideKind ?? undefined,
-          }
-        }))
       }
 
       const sourcesResult = await window.electronAPI.calendar.getSources()
@@ -280,7 +302,7 @@ export default function CalendarMode({
       // being mock means the entire calendar view is mock. Push the flag
       // into both local state (for cache snapshot) and the session store
       // (so the workbench shell badge can subscribe without prop drilling).
-      const mockActive = Boolean(result.mock) || Boolean(sourcesResult.mock)
+      const mockActive = Boolean(eventsMock) || Boolean(sourcesResult.mock)
       setIsMock(mockActive)
       setSessionIsMock(mockActive)
     } catch (error) {
@@ -291,7 +313,7 @@ export default function CalendarMode({
     }
 
     setDataLoaded(true)
-  }, [dataLoaded, hasActivated, setSessionIsMock])
+  }, [currentDate, dataLoaded, fetchEventsForWindow, hasActivated, setSessionIsMock])
 
   useEffect(() => {
     if (!isActive) {
@@ -303,6 +325,19 @@ export default function CalendarMode({
     becameVisibleRef.current = true
     void loadCalendarData(dataLoaded)
   }, [dataLoaded, hasActivated, isActive, loadCalendarData])
+
+  // Refetch events when the user navigates to a different month. The grid only
+  // renders the `events` it is handed, so without this every month except the
+  // initially-loaded one shows empty even though the events exist in the DB.
+  // Keyed on the month window (via lastFetchedWindowRef) so day/week stepping
+  // inside a month doesn't refetch, and the run triggered right after the
+  // initial load is a no-op because loadCalendarData already primed the ref.
+  useEffect(() => {
+    if (!hasActivated || !isActive || !dataLoaded) return
+    const { start, end } = getDateRange(currentDate, 'month')
+    if (lastFetchedWindowRef.current === `${start.getTime()}-${end.getTime()}`) return
+    void fetchEventsForWindow(start, end)
+  }, [currentDate, dataLoaded, fetchEventsForWindow, hasActivated, isActive])
 
   useCalendarAgentAdapter({
     enabled: hasActivated,
