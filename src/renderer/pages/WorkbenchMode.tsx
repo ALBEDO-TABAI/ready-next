@@ -114,15 +114,20 @@ export default function WorkbenchMode() {
     toggleSidebar,
     toggleChatPanel,
     setSidePanelWidth,
-    sidePanelWidths,
+    sidePanelWidths: rawSidePanelWidths,
     sidebarVisible,
     chatPanelVisible,
-    chatPanelWidth,
+    chatPanelWidth: rawChatPanelWidth,
     sidePanelVariant,
     setSidePanelVariant,
     renamingPath,
     creatingType,
   } = useWorkspace()
+  const chatPanelWidth = clampWorkbenchChatPanelWidth(rawChatPanelWidth)
+  const sidePanelWidths = useMemo(
+    () => ({ ...rawSidePanelWidths, shared: clampWorkbenchSidePanelWidth(rawSidePanelWidths.shared) }),
+    [rawSidePanelWidths],
+  )
   const { workbenchMode, splitMode, workbenchSplitRatio, setWorkbenchSplitRatio, setWorkbenchMode } = useMode()
   const documentSplitTabId = useDocTabs(s => s.splitTabId)
   const navigate = useNavigate()

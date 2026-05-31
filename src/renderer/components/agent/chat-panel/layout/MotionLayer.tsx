@@ -42,7 +42,8 @@ export function ChatPanelMotionLayer({
         <div
           className="grid h-full min-h-0"
           style={{
-            gridTemplateRows: `${WORKBENCH_TOPBAR_HEIGHT}px minmax(0, 1fr)`
+            gridTemplateRows: `${WORKBENCH_TOPBAR_HEIGHT}px minmax(0, 1fr)`,
+            gridTemplateColumns: 'minmax(0, 1fr)'
           }}
         >
           <div className="relative overflow-visible" style={{ zIndex: 4 }}>
