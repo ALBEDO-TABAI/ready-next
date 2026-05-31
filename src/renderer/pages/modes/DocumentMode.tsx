@@ -671,7 +671,7 @@ export default function DocumentMode({
             })}
             onTabClick={(id, event) => handleTabClick(id, event)}
             onTabClose={(id) => closeTab(id)}
-            onNewTab={() => openTab('')}
+            onNewTab={() => { openTab('') }}
             onTabDragStart={(event, id) => {
               const index = tabs.findIndex((tab) => tab.id === id)
               if (index >= 0) handleDragStart(event, index)

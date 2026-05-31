@@ -1,13 +1,15 @@
 // Geometry source of truth for workbench chrome.
 // Keep only dimensions and alignment numbers here; do not place visual colors or surface styling in this file.
 export const WORKBENCH_EDGE_RAIL_SIZE = 44
+export const WORKBENCH_EDGE_RAIL_SLOT_INSET_X = 6
+export const WORKBENCH_EDGE_RAIL_SLOT_SIZE = WORKBENCH_EDGE_RAIL_SIZE - WORKBENCH_EDGE_RAIL_SLOT_INSET_X
 export const WORKBENCH_EDGE_ICON_INSET = 14.5
 export const WORKBENCH_TAB_ROW_HEIGHT = 38
 export const WORKBENCH_TOOLBAR_ROW_HEIGHT = 38
 export const WORKBENCH_TOPBAR_HEIGHT = WORKBENCH_EDGE_RAIL_SIZE
 export const WORKBENCH_STATUSBAR_HEIGHT = WORKBENCH_EDGE_RAIL_SIZE
 export const WORKBENCH_ROW_PADDING_X = 12
-export const WORKBENCH_CANVAS_OUTER_PADDING_X = 10
+export const WORKBENCH_CANVAS_OUTER_PADDING_X = 6
 export const WORKBENCH_CANVAS_OUTER_PADDING_TOP = 6
 export const WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM = 10
 // Keep mode headers aligned with the files panel header rail ("Connected" badge edge).

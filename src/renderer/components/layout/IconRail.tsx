@@ -1,7 +1,12 @@
 import { Folder, Search, Puzzle, Link2, Network, Settings } from 'lucide-react'
+import type { CSSProperties } from 'react'
 import { motion } from 'framer-motion'
 import MorphIconRailGroup from '../motion/MorphIconRailGroup'
-import { WORKBENCH_EDGE_RAIL_SIZE } from '../../modules/workbench/chrome'
+import {
+  WORKBENCH_EDGE_RAIL_SIZE,
+  WORKBENCH_EDGE_RAIL_SLOT_INSET_X,
+  WORKBENCH_EDGE_RAIL_SLOT_SIZE,
+} from '../../modules/workbench/chrome'
 
 interface IconRailProps {
   activeIcon?: string
@@ -32,8 +37,10 @@ export default function IconRail({ activeIcon = 'folder', onIconClick, hidden = 
       style={{
         width: WORKBENCH_EDGE_RAIL_SIZE,
         minWidth: WORKBENCH_EDGE_RAIL_SIZE,
+        '--icon-rail-slot-inset-x': `${WORKBENCH_EDGE_RAIL_SLOT_INSET_X}px`,
+        '--icon-rail-slot-size': `${WORKBENCH_EDGE_RAIL_SLOT_SIZE}px`,
         background: 'transparent',
-      }}
+      } as CSSProperties}
     >
       {/* Top Icons */}
       <div className="flex flex-col items-center gap-[6px]">
