@@ -4,6 +4,7 @@
   justify-content: flex-start;
   width: 100%;
   padding-left: var(--icon-rail-slot-inset-x, 6px);
+  margin-top: 6px;
 }
 
 .icon-rail-slider {
