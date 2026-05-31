@@ -19,6 +19,8 @@ export interface PendingDocReveal {
     requestedAt: number
 }
 
+export type DocumentPaneTarget = 'primary' | 'split'
+
 interface DocTabsState {
     tabs: DocTab[]
     activeTabId: string
@@ -27,6 +29,7 @@ interface DocTabsState {
     pendingReveal: PendingDocReveal | null
 
     openTab: (path: string) => void
+    openTabInPane: (path: string, pane: DocumentPaneTarget) => string | null
     closeTab: (id: string) => void
     setActiveTab: (id: string) => void
     renameTab: (id: string, title: string) => void
@@ -83,6 +86,30 @@ function remapDocTabPath(path: string | null, fromPath: string, toPath: string):
     return path
 }
 
+function ensureDocumentTabForPath(tabs: DocTab[], path: string): { tabs: DocTab[]; id: string } {
+    const pathKey = normalizeDocTabPathKey(path)
+    const existing = pathKey ? tabs.find(t => normalizeDocTabPathKey(t.path) === pathKey) : undefined
+    if (existing) {
+        return { tabs, id: existing.id }
+    }
+
+    const id = makeId()
+    const title = getFilename(path)
+    return {
+        tabs: [
+            ...tabs,
+            {
+                id,
+                path,
+                title,
+                content: '',
+                isDirty: false,
+            },
+        ],
+        id,
+    }
+}
+
 function ensureTabsState(state: Pick<DocTabsState, 'tabs' | 'activeTabId' | 'splitTabId' | 'documentSplitRatio'>) {
     const tabs = state.tabs.length > 0
         ? state.tabs
@@ -132,26 +159,57 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
             return
         }
 
-        const pathKey = normalizeDocTabPathKey(path)
-        const existing = pathKey ? tabs.find(t => normalizeDocTabPathKey(t.path) === pathKey) : undefined
-        if (existing) {
-            set({ activeTabId: existing.id })
-            return
-        }
-        // Create new tab
-        const id = makeId()
-        const title = getFilename(path)
-        const newTab: DocTab = {
-            id,
-            path,
-            title,
-            content: '',  // Will be loaded by DocumentEditor
-            isDirty: false,
-        }
+        const next = ensureDocumentTabForPath(tabs, path)
         set({
-            tabs: [...tabs, newTab],
-            activeTabId: id,
+            tabs: next.tabs,
+            activeTabId: next.id,
         })
+    },
+
+    openTabInPane: (path: string, pane: DocumentPaneTarget) => {
+        if (!path) return null
+
+        const { tabs, activeTabId, splitTabId } = get()
+        const next = ensureDocumentTabForPath(tabs, path)
+
+        if (pane === 'primary') {
+            if (next.id === splitTabId) {
+                set({
+                    tabs: next.tabs,
+                    activeTabId: next.id,
+                    splitTabId: activeTabId,
+                })
+                return next.id
+            }
+
+            set({
+                tabs: next.tabs,
+                activeTabId: next.id,
+            })
+            return next.id
+        }
+
+        if (next.id === activeTabId) {
+            if (splitTabId) {
+                set({
+                    tabs: next.tabs,
+                    activeTabId: splitTabId,
+                    splitTabId: next.id,
+                })
+            } else {
+                set({
+                    tabs: next.tabs,
+                    activeTabId: next.id,
+                })
+            }
+            return next.id
+        }
+
+        set({
+            tabs: next.tabs,
+            splitTabId: next.id,
+        })
+        return next.id
     },
 
     closeTab: (id: string) => {

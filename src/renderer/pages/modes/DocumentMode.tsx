@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { FileText, Loader2 } from 'lucide-react'
 import { useWorkspace } from '../../stores/useWorkspace'
-import { useDocTabs, type DocTab } from '../../stores/useDocTabs'
+import { useDocTabs, type DocTab, type DocumentPaneTarget } from '../../stores/useDocTabs'
 import MarkdownEditor from '../../components/document/MarkdownEditor'
 import DocumentTabRail from '../../components/document/DocumentTabRail'
 import FilePreview from '../../components/document/FilePreview'
@@ -30,6 +30,10 @@ import {
   isReloadableTextDocumentPath,
   shouldRefreshDocumentTabForDirectoryChange,
 } from '../../modules/document/documentExternalRefresh'
+import {
+  canAcceptDocumentPaneDrop,
+  getDocumentPaneDropPath,
+} from '../../modules/document/documentPaneDrop'
 import { getFileExtension } from '../../utils/path'
 import { isEbookExtension } from '../../../shared/ebook'
 import { isLocalHtmlFilePath } from '../../modules/browser/localHtmlFileOpen'
@@ -292,7 +296,7 @@ export default function DocumentMode({
   const {
     tabs, activeTabId, splitTabId, documentSplitRatio,
     openTab, closeTab, setActiveTab, setSplitTab, setDocumentSplitRatio,
-    reorderTabs, updateTabContent, markTabSaved, setPendingReveal,
+    reorderTabs, updateTabContent, markTabSaved, setPendingReveal, openTabInPane,
   } = useDocTabs()
 
   const splitContainerRef = useRef<HTMLDivElement>(null)
@@ -308,6 +312,7 @@ export default function DocumentMode({
   const [marksPanelOpen, setMarksPanelOpen] = useState(() => readDocumentPanelOpenState('ready-document-marks-panel-open'))
   const [panelTargetTabId, setPanelTargetTabId] = useState<string | null>(activeTabId)
   const [visibleLineByTabId, setVisibleLineByTabId] = useState<Record<string, number | null>>({})
+  const [documentPaneDropTarget, setDocumentPaneDropTarget] = useState<DocumentPaneTarget | null>(null)
 
   useEffect(() => {
     if (isActive) {
@@ -360,6 +365,16 @@ export default function DocumentMode({
     }
     window.addEventListener(READY_DOCUMENT_REVEAL_EVENT, handler as EventListener)
     return () => window.removeEventListener(READY_DOCUMENT_REVEAL_EVENT, handler as EventListener)
+  }, [])
+
+  useEffect(() => {
+    const clearDropTarget = () => setDocumentPaneDropTarget(null)
+    window.addEventListener('dragend', clearDropTarget)
+    window.addEventListener('drop', clearDropTarget)
+    return () => {
+      window.removeEventListener('dragend', clearDropTarget)
+      window.removeEventListener('drop', clearDropTarget)
+    }
   }, [])
 
   const activeTab = tabs.find(t => t.id === activeTabId)
@@ -542,6 +557,41 @@ export default function DocumentMode({
     setPanelTargetTabId(tabId)
   }, [])
 
+  const replaceDocumentPaneFromDrop = useCallback(async (path: string, pane: DocumentPaneTarget) => {
+    const result = await window.electronAPI?.document?.stat?.(path).catch(() => null)
+    const isDirectory = result?.data?.isDirectory ?? result?.stat?.isDirectory ?? false
+    if (result?.success && isDirectory) return
+
+    captureVisibleDocumentScrollPositions()
+    const nextTabId = openTabInPane(path, pane)
+    if (nextTabId) {
+      setPanelTargetTabId(nextTabId)
+    }
+  }, [captureVisibleDocumentScrollPositions, openTabInPane])
+
+  const handleDocumentPaneDragOver = useCallback((event: React.DragEvent<HTMLDivElement>, pane: DocumentPaneTarget) => {
+    if (!canAcceptDocumentPaneDrop(event.dataTransfer)) return
+    event.preventDefault()
+    event.stopPropagation()
+    event.dataTransfer.dropEffect = 'move'
+    setDocumentPaneDropTarget(pane)
+  }, [])
+
+  const handleDocumentPaneDragLeave = useCallback((event: React.DragEvent<HTMLDivElement>, pane: DocumentPaneTarget) => {
+    const nextTarget = event.relatedTarget as Node | null
+    if (nextTarget && event.currentTarget.contains(nextTarget)) return
+    setDocumentPaneDropTarget((current) => (current === pane ? null : current))
+  }, [])
+
+  const handleDocumentPaneDrop = useCallback((event: React.DragEvent<HTMLDivElement>, pane: DocumentPaneTarget) => {
+    const path = getDocumentPaneDropPath(event.dataTransfer)
+    if (!path) return
+    event.preventDefault()
+    event.stopPropagation()
+    setDocumentPaneDropTarget(null)
+    void replaceDocumentPaneFromDrop(path, pane)
+  }, [replaceDocumentPaneFromDrop])
+
   // Tab click handler
   const handleTabClick = useCallback((id: string, e: React.MouseEvent) => {
     captureVisibleDocumentScrollPositions()
@@ -569,6 +619,7 @@ export default function DocumentMode({
         name: tab.title,
         ext: ext ? `.${ext}` : undefined,
       })
+      e.dataTransfer.setData('application/x-ready-document-tab', data)
       e.dataTransfer.setData('application/x-ready-drag', data)
     }
   }, [tabs])
@@ -729,10 +780,13 @@ export default function DocumentMode({
               <div className="h-full flex min-w-0 overflow-hidden" ref={splitContainerRef} style={{ gap: 0 }}>
                 <div
                   ref={primarySplitPaneRef}
-                  className="flex flex-col min-w-0 overflow-hidden"
+                  className={`document-pane-drop-target flex flex-col min-w-0 overflow-hidden${documentPaneDropTarget === 'primary' ? ' is-document-pane-drop-target' : ''}`}
                   style={{ flexBasis: `${documentSplitRatio}%`, flexShrink: 0, flexGrow: 0 }}
                   onFocusCapture={() => handlePaneActivate(activeTab.id)}
                   onPointerDownCapture={() => handlePaneActivate(activeTab.id)}
+                  onDragOverCapture={(event) => handleDocumentPaneDragOver(event, 'primary')}
+                  onDragLeaveCapture={(event) => handleDocumentPaneDragLeave(event, 'primary')}
+                  onDropCapture={(event) => handleDocumentPaneDrop(event, 'primary')}
                 >
                   <DocumentEditor
                     key={activeTab.id}
@@ -748,9 +802,12 @@ export default function DocumentMode({
                   onResizeStateChange={handleSplitResizeStateChange}
                 />
                 <div
-                  className="flex-1 flex flex-col min-w-0 overflow-hidden"
+                  className={`document-pane-drop-target flex-1 flex flex-col min-w-0 overflow-hidden${documentPaneDropTarget === 'split' ? ' is-document-pane-drop-target' : ''}`}
                   onFocusCapture={() => handlePaneActivate(splitTab.id)}
                   onPointerDownCapture={() => handlePaneActivate(splitTab.id)}
+                  onDragOverCapture={(event) => handleDocumentPaneDragOver(event, 'split')}
+                  onDragLeaveCapture={(event) => handleDocumentPaneDragLeave(event, 'split')}
+                  onDropCapture={(event) => handleDocumentPaneDrop(event, 'split')}
                 >
                   <DocumentEditor
                     key={splitTab.id}
