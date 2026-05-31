@@ -455,6 +455,22 @@ export default function RSSMode({
     setShowAddModal(true)
   }, [activeBrowserPageLabel, activeBrowserTab])
 
+  const handleDeleteSource = useCallback(async (sourceId: string) => {
+    if (typeof window === 'undefined' || !window.electronAPI) return
+    const result = await window.electronAPI.rss.removeSource(sourceId)
+    if (!result.success) {
+      setStatusMessage(result.error ? `删除源失败：${result.error}` : '删除源失败')
+      return
+    }
+    // `removeRSSSource` cascades to the source's items, so drop both from
+    // local state to mirror main. The selectedSourceId effect resets the
+    // filter to 全部源 when the active source disappears, so selection needs
+    // no explicit handling here.
+    setItems((prev) => prev.filter((item) => item.sourceId !== sourceId))
+    setSources((prev) => prev.filter((source) => source.id !== sourceId))
+    setSelectedItem((prev) => (prev?.sourceId === sourceId ? null : prev))
+  }, [])
+
   const handleItemClick = useCallback((item: RSSItem) => {
     if (shouldOpenItemsInBrowserPane) {
       setSelectedItem(null)
@@ -795,6 +811,7 @@ export default function RSSMode({
               onOpenAnalysisOutput={handleOpenAnalysisOutput}
               onRefresh={handleRefresh}
               onAddSource={handleAddSource}
+              onDeleteSource={handleDeleteSource}
               onClearRead={handleClearRead}
               onOpenSettings={() => setSettingsOpen((open) => !open)}
               onPauseAnalysisJob={handlePauseAnalysisJob}

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Filter,
   Star,
@@ -20,6 +20,8 @@ import {
 import { WORKBENCH_HEADER_EDGE_X } from '../../modules/workbench/chrome'
 import { endRssItemDragSession, setRssItemDragPayload } from '../layout/fileTreeExternalDrop'
 import { compactAnalysisDetail } from '../../modules/rss/analysisLabels'
+import Modal from '../ui/Modal'
+import { useModal } from '../ui/useModal'
 
 export interface RSSItem {
   id: string
@@ -102,6 +104,7 @@ interface RSSFeedProps {
   onOpenAnalysisOutput: (itemId: string) => void
   onRefresh: () => void
   onAddSource: () => void
+  onDeleteSource: (sourceId: string) => void
   onClearRead: () => void
   onOpenSettings: () => void
   onPauseAnalysisJob: (jobId: string) => void
@@ -277,6 +280,7 @@ export default function RSSFeed({
   onOpenAnalysisOutput,
   onRefresh,
   onAddSource,
+  onDeleteSource,
   onClearRead,
   onOpenSettings,
   onPauseAnalysisJob,
@@ -285,6 +289,22 @@ export default function RSSFeed({
   settingsOpen,
 }: RSSFeedProps) {
   const [taskMenuOpen, setTaskMenuOpen] = useState(false)
+  const [sourceMenuOpen, setSourceMenuOpen] = useState(false)
+  // A destructive source delete routes through a modal confirm (danger styled)
+  // so an accidental click on the row's X can't drop a feed and its articles.
+  const { modalProps, showConfirm } = useModal()
+  const sourceMenuRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!sourceMenuOpen) return
+    const handler = (event: MouseEvent) => {
+      if (sourceMenuRef.current && !sourceMenuRef.current.contains(event.target as Node)) {
+        setSourceMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [sourceMenuOpen])
 
   // Apply filters
   const filteredItems = items.filter((item) => {
@@ -581,30 +601,32 @@ export default function RSSFeed({
 
         {/* Right: Action Controls */}
         <div className="rss-toolbar-actions flex items-center" style={{ gap: 8 }}>
-          {/* Secondary dropdown: 全部源 */}
-          <div className="relative">
-            <select
-              value={selectedSource || ''}
-              onChange={(e) => onSourceChange(e.target.value || null)}
-              className="rss-toolbar-select appearance-none cursor-pointer transition-colors duration-150"
+          {/* Secondary dropdown: 全部源. Custom menu (not a native <select>)
+              so each source row can carry an inline delete control — native
+              <option> can't host a button. */}
+          <div className="relative" ref={sourceMenuRef}>
+            <button
+              type="button"
+              onClick={() => setSourceMenuOpen((prev) => !prev)}
+              className="rss-toolbar-select cursor-pointer transition-colors duration-150"
               style={{
                 ...calendarPillButtonStyle,
+                justifyContent: 'flex-start',
                 padding: '4px 28px 4px 12px',
                 width: sourceSelectWidth,
                 minWidth: sourceSelectWidth,
                 maxWidth: sourceSelectWidth,
                 whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis'
+                overflow: 'hidden'
               }}
+              title={selectedSourceEntry ? selectedSourceEntry.name : '全部源'}
+              aria-haspopup="listbox"
+              aria-expanded={sourceMenuOpen}
             >
-              <option value="">全部源</option>
-              {sources.map((source) => (
-                <option key={source.id} value={source.id}>
-                  {source.name}
-                </option>
-              ))}
-            </select>
+              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {selectedSourceEntry ? selectedSourceEntry.name : '全部源'}
+              </span>
+            </button>
             <ChevronDown
               style={{
                 width: 14,
@@ -618,6 +640,119 @@ export default function RSSFeed({
               }}
               strokeWidth={2}
             />
+            {sourceMenuOpen && (
+              <div
+                className="glass-surface-floating overflow-hidden rounded-[14px] border"
+                role="listbox"
+                style={{
+                  position: 'absolute',
+                  top: 'calc(100% + 8px)',
+                  right: 0,
+                  zIndex: 30,
+                  width: 300,
+                  maxWidth: 'calc(100vw - 48px)',
+                  background:
+                    'color-mix(in srgb, var(--surface-floating-bg) 92%, rgba(255, 255, 255, 0.12))',
+                  borderColor: 'color-mix(in srgb, var(--border-default) 74%, transparent)',
+                  boxShadow: '0 20px 52px rgba(24, 33, 49, 0.18)',
+                  backdropFilter: 'blur(var(--surface-blur)) saturate(var(--surface-saturate))',
+                  WebkitBackdropFilter: 'blur(var(--surface-blur)) saturate(var(--surface-saturate))'
+                }}
+              >
+                <div
+                  className="rss-feed-scroll"
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'minmax(0, 1fr)',
+                    gap: 2,
+                    maxHeight: 320,
+                    overflowY: 'auto',
+                    overscrollBehavior: 'contain',
+                    padding: 6
+                  }}
+                >
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={!selectedSource}
+                    onClick={() => { onSourceChange(null); setSourceMenuOpen(false) }}
+                    className="flex items-center gap-2 rounded-[10px] transition-colors hover:bg-[var(--bg-hover)]"
+                    style={{ padding: '7px 10px', textAlign: 'left' }}
+                  >
+                    <Check
+                      className="h-[13px] w-[13px] shrink-0"
+                      style={{ color: 'var(--color-blue)', opacity: selectedSource ? 0 : 1 }}
+                      strokeWidth={2.5}
+                    />
+                    <span style={{ flex: 1, fontSize: 12, fontWeight: 500, color: 'var(--text-body)' }}>
+                      全部源
+                    </span>
+                  </button>
+                  {sources.map((source) => {
+                    const isSelected = source.id === selectedSource
+                    return (
+                      <div
+                        key={source.id}
+                        className="flex min-w-0 items-center gap-1 rounded-[10px] transition-colors hover:bg-[var(--bg-hover)]"
+                        style={{ padding: '0 4px 0 10px' }}
+                      >
+                        <button
+                          type="button"
+                          role="option"
+                          aria-selected={isSelected}
+                          onClick={() => { onSourceChange(source.id); setSourceMenuOpen(false) }}
+                          className="flex min-w-0 flex-1 items-center gap-2"
+                          style={{ padding: '7px 0', textAlign: 'left' }}
+                          title={source.name}
+                        >
+                          <Check
+                            className="h-[13px] w-[13px] shrink-0"
+                            style={{ color: 'var(--color-blue)', opacity: isSelected ? 1 : 0 }}
+                            strokeWidth={2.5}
+                          />
+                          <span
+                            className="min-w-0 flex-1"
+                            style={{
+                              fontSize: 12,
+                              fontWeight: 500,
+                              color: 'var(--text-body)',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap'
+                            }}
+                          >
+                            {source.name}
+                          </span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={async (e) => {
+                            e.stopPropagation()
+                            setSourceMenuOpen(false)
+                            const confirmed = await showConfirm(
+                              `删除订阅源「${source.name}」后，其下文章会一并移除，且无法恢复。确定删除吗？`,
+                              '删除订阅源',
+                            )
+                            if (confirmed) onDeleteSource(source.id)
+                          }}
+                          className="flex h-6 w-6 shrink-0 items-center justify-center rounded-[8px] transition-colors hover:bg-[var(--bg-hover)]"
+                          style={{ color: 'var(--text-muted)' }}
+                          title="删除该源"
+                          aria-label={`删除 ${source.name}`}
+                        >
+                          <X className="h-[13px] w-[13px]" strokeWidth={2.5} />
+                        </button>
+                      </div>
+                    )
+                  })}
+                  {sources.length === 0 && (
+                    <div className="px-3 py-6 text-center text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                      暂无订阅源
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Secondary dropdown-style: 全部/未读/收藏 */}
@@ -946,6 +1081,7 @@ export default function RSSFeed({
           )}
         </div>
       </div>
+      <Modal {...modalProps} danger confirmLabel="删除" />
     </div>
   )
 }
