@@ -24,13 +24,13 @@ interface DocumentToolDef {
 const DOCUMENT_TOOLS: DocumentToolDef[] = [
   {
     name: 'document_new_tab',
-    description: '在文档模式中新建一个标签页，可选指定标题。',
+    description: '新建一个文档标签页，可选指定标题或目标保存路径；默认不切换当前可见文档。',
     action: 'document.newTab',
     params: zodObjectToParamList(DOCUMENT_SCHEMAS.document_new_tab) as ToolParam[],
   },
   {
     name: 'document_open_tab',
-    description: '按绝对路径打开一个文档文件标签页。',
+    description: '按绝对路径准备一个文档文件标签页；默认不切换当前可见文档。',
     action: 'document.openTab',
     params: zodObjectToParamList(DOCUMENT_SCHEMAS.document_open_tab) as ToolParam[],
   },
@@ -108,7 +108,7 @@ const DOCUMENT_TOOLS: DocumentToolDef[] = [
   },
   {
     name: 'document_save_tab',
-    description: '保存当前或指定文档标签。',
+    description: '保存当前、指定或最近工具目标文档标签，可选直接保存到目标路径。',
     action: 'document.saveTab',
     params: zodObjectToParamList(DOCUMENT_SCHEMAS.document_save_tab) as ToolParam[],
   },

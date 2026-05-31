@@ -15,6 +15,7 @@ import { z } from 'zod'
 
 export const DocumentNewTabSchema = z.object({
   title: z.string().optional().describe('新标签标题（可选）'),
+  path: z.string().optional().describe('可选，目标保存路径；提供后创建或复用该路径的后台标签'),
 })
 
 export const DocumentOpenTabSchema = z.object({
@@ -117,6 +118,7 @@ export const DocumentRewriteSectionSchema = z.object({
 
 export const DocumentSaveTabSchema = z.object({
   tabId: z.string().optional().describe('可选，目标标签 ID'),
+  path: z.string().optional().describe('可选，直接保存到该绝对路径'),
 })
 
 export type DocumentToolName =

@@ -57,6 +57,77 @@ async function writeMinimalEpub(
   await writeFile(path, buffer)
 }
 
+async function writeTocEpub(path: string): Promise<void> {
+  const zip = new JSZip()
+  zip.file('mimetype', 'application/epub+zip')
+  zip.file('META-INF/container.xml', `<?xml version="1.0"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`)
+  zip.file('OEBPS/content.opf', `<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>层级书</dc:title>
+  </metadata>
+  <manifest>
+    <item id="toc" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="part2" href="Text/part0020.xhtml" media-type="application/xhtml+xml"/>
+    <item id="part2-1" href="Text/part0021.xhtml" media-type="application/xhtml+xml"/>
+    <item id="part2-2" href="Text/part0022.xhtml" media-type="application/xhtml+xml"/>
+    <item id="part3" href="Text/part0030.xhtml" media-type="application/xhtml+xml"/>
+    <item id="part3-1" href="Text/part0031.xhtml" media-type="application/xhtml+xml"/>
+    <item id="cover" href="Text/cover.png" media-type="image/png"/>
+  </manifest>
+  <spine toc="toc">
+    <itemref idref="part2"/>
+    <itemref idref="part2-1"/>
+    <itemref idref="part2-2"/>
+    <itemref idref="part3"/>
+    <itemref idref="part3-1"/>
+  </spine>
+</package>`)
+  zip.file('OEBPS/toc.ncx', `<?xml version="1.0" encoding="UTF-8"?>
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/">
+  <navMap>
+    <navPoint id="part2" playOrder="1">
+      <navLabel><text>第二部</text></navLabel>
+      <content src="Text/part0020.xhtml"/>
+      <navPoint id="part2-1" playOrder="2">
+        <navLabel><text>一</text></navLabel>
+        <content src="Text/part0021.xhtml#b017"/>
+      </navPoint>
+      <navPoint id="part2-2" playOrder="3">
+        <navLabel><text>二</text></navLabel>
+        <content src="Text/part0022.xhtml#b018"/>
+      </navPoint>
+    </navPoint>
+    <navPoint id="part3" playOrder="4">
+      <navLabel><text>第三部</text></navLabel>
+      <content src="Text/part0030.xhtml"/>
+      <navPoint id="part3-1" playOrder="5">
+        <navLabel><text>一</text></navLabel>
+        <content src="Text/part0031.xhtml#b021"/>
+      </navPoint>
+    </navPoint>
+  </navMap>
+</ncx>`)
+  zip.file('OEBPS/Text/part0020.xhtml', `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>第二部</title></head><body><p><img src="cover.png" alt="part"/></p></body></html>`)
+  zip.file('OEBPS/Text/part0021.xhtml', `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>一</title></head><body><h2 id="b017">一</h2><p>第二部第一章正文。</p></body></html>`)
+  zip.file('OEBPS/Text/part0022.xhtml', `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>二</title></head><body><h2 id="b018">二</h2><p>第二部第二章正文。</p></body></html>`)
+  zip.file('OEBPS/Text/part0030.xhtml', `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>第三部</title></head><body><p>第三部封面。</p></body></html>`)
+  zip.file('OEBPS/Text/part0031.xhtml', `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml"><head><title>一</title></head><body><h2 id="b021">一</h2><p>第三部第一章正文。</p></body></html>`)
+  zip.file('OEBPS/Text/cover.png', Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))
+  const buffer = await zip.generateAsync({ type: 'nodebuffer', mimeType: 'application/epub+zip' })
+  await writeFile(path, buffer)
+}
+
 test('ebook extensions are binary so indexing skips them', async () => {
   for (const ext of ['.epub', '.mobi', '.azw', '.azw3', '.fb2', '.cbz']) {
     assert.equal(BINARY_EXTENSIONS.has(ext), true, `${ext} should be binary`)
@@ -183,6 +254,27 @@ test('importEpubAsMarkdown converts EPUB footnotes to markdown notes', async () 
     const markdown = await readFile(result.indexPath!, 'utf-8')
     assert.match(markdown, /Claim\[\^1\]/)
     assert.match(markdown, /\[\^1\]: Footnote text\./)
+  } finally {
+    await rm(dir, { recursive: true, force: true })
+  }
+})
+
+test('importEpubAsMarkdown preserves toc.ncx part and chapter hierarchy', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'ready-ebook-toc-'))
+  try {
+    const epubPath = join(dir, '层级书.epub')
+    await writeTocEpub(epubPath)
+
+    const result = await importEpubAsMarkdown(epubPath)
+    assert.equal(result.success, true, result.error)
+    const markdown = await readFile(result.indexPath!, 'utf-8')
+
+    assert.match(markdown, /^## 第二部$/m)
+    assert.match(markdown, /^### 一$/m)
+    assert.match(markdown, /第二部第一章正文。/)
+    assert.match(markdown, /^## 第三部$/m)
+    assert.match(markdown, /第三部第一章正文。/)
+    assert.doesNotMatch(markdown, /^第二部$/m)
   } finally {
     await rm(dir, { recursive: true, force: true })
   }

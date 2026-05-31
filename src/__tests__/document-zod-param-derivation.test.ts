@@ -22,6 +22,12 @@ const TAB_ID_OPTIONAL: SkillParamDefinition = {
 test('derives document_new_tab params', () => {
   const expected: SkillParamDefinition[] = [
     { name: 'title', type: 'string', description: '新标签标题（可选）', required: false },
+    {
+      name: 'path',
+      type: 'string',
+      description: '可选，目标保存路径；提供后创建或复用该路径的后台标签',
+      required: false,
+    },
   ]
   assert.deepEqual(zodObjectToParamList(DOCUMENT_SCHEMAS.document_new_tab), expected)
 })
@@ -225,6 +231,9 @@ test('derives document_rewrite_section params', () => {
 })
 
 test('derives document_save_tab params', () => {
-  const expected: SkillParamDefinition[] = [TAB_ID_OPTIONAL]
+  const expected: SkillParamDefinition[] = [
+    TAB_ID_OPTIONAL,
+    { name: 'path', type: 'string', description: '可选，直接保存到该绝对路径', required: false },
+  ]
   assert.deepEqual(zodObjectToParamList(DOCUMENT_SCHEMAS.document_save_tab), expected)
 })

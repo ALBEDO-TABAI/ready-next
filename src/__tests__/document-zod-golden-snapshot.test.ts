@@ -12,20 +12,27 @@ import {
 } from '../main/modules/tools/document-tools'
 
 const TAB_ID = { type: 'string', description: '可选，目标标签 ID' }
+const SAVE_PATH = { type: 'string', description: '可选，直接保存到该绝对路径' }
 
 const EXPECTED_ANTHROPIC = [
   {
     name: 'document_new_tab',
-    description: '在文档模式中新建一个标签页，可选指定标题。',
+    description: '新建一个文档标签页，可选指定标题或目标保存路径；默认不切换当前可见文档。',
     input_schema: {
       type: 'object',
-      properties: { title: { type: 'string', description: '新标签标题（可选）' } },
+      properties: {
+        title: { type: 'string', description: '新标签标题（可选）' },
+        path: {
+          type: 'string',
+          description: '可选，目标保存路径；提供后创建或复用该路径的后台标签',
+        },
+      },
       required: [],
     },
   },
   {
     name: 'document_open_tab',
-    description: '按绝对路径打开一个文档文件标签页。',
+    description: '按绝对路径准备一个文档文件标签页；默认不切换当前可见文档。',
     input_schema: {
       type: 'object',
       properties: { path: { type: 'string', description: '文档绝对路径' } },
@@ -221,10 +228,10 @@ const EXPECTED_ANTHROPIC = [
   },
   {
     name: 'document_save_tab',
-    description: '保存当前或指定文档标签。',
+    description: '保存当前、指定或最近工具目标文档标签，可选直接保存到目标路径。',
     input_schema: {
       type: 'object',
-      properties: { tabId: TAB_ID },
+      properties: { tabId: TAB_ID, path: SAVE_PATH },
       required: [],
     },
   },

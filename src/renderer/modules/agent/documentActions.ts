@@ -61,9 +61,13 @@ const pendingToolDocumentWrites = new Map<string, {
   updatedAt: number
 }>()
 
+const RECENT_TOOL_TARGET_TTL_MS = 10 * 60 * 1000
+let recentToolTargetTab: { tabId: string; updatedAt: number } | null = null
+
 function rememberPendingToolDocumentWrite(tabId: string, content: string, action: string, baseContent: string): void {
   if (!tabId) return
   pendingToolDocumentWrites.set(tabId, { content, baseContent, action, updatedAt: Date.now() })
+  rememberToolTargetTab(tabId)
 }
 
 function getPendingToolDocumentWrite(tabId: string): {
@@ -78,6 +82,16 @@ function getPendingToolDocumentWrite(tabId: string): {
 function clearPendingToolDocumentWrite(tabId: string): void {
   if (!tabId) return
   pendingToolDocumentWrites.delete(tabId)
+}
+
+function rememberToolTargetTab(tabId: string): void {
+  if (!tabId) return
+  recentToolTargetTab = { tabId, updatedAt: Date.now() }
+}
+
+function clearRecentToolTargetTab(tabId?: string): void {
+  if (!recentToolTargetTab) return
+  if (!tabId || recentToolTargetTab.tabId === tabId) recentToolTargetTab = null
 }
 
 // Per-tab epoch: bumped whenever a pending widget write for that tab should be
@@ -440,6 +454,20 @@ function resolveDocTab(target?: string): ReturnType<typeof getActiveDocTab> {
   }
   const lower = trimmed.toLowerCase()
   return store.tabs.find((tab) => tab.title.toLowerCase().includes(lower)) || null
+}
+
+function resolveDocActionTab(action: DocActionPayload): ReturnType<typeof getActiveDocTab> {
+  const explicitTabId = typeof action.tabId === 'string' ? action.tabId : ''
+  if (explicitTabId.trim()) return resolveDocTab(explicitTabId)
+
+  if (recentToolTargetTab && Date.now() - recentToolTargetTab.updatedAt <= RECENT_TOOL_TARGET_TTL_MS) {
+    const store = useDocTabs.getState()
+    const target = store.tabs.find((tab) => tab.id === recentToolTargetTab?.tabId)
+    if (target) return target
+    recentToolTargetTab = null
+  }
+
+  return getActiveDocTab()
 }
 
 function normalizeText(input: string): string {
@@ -1296,25 +1324,31 @@ export function getActiveDocumentSnapshot(tabId?: string): ActiveDocumentSnapsho
 
 export async function performDocAction(action: DocActionPayload): Promise<string> {
   const docStore = useDocTabs.getState()
-  useMode.getState().setWorkbenchMode('document')
 
   const type = String(action.type || '').trim()
   if (!type) return '文档动作缺少 type 字段'
 
   if (type === 'new_tab') {
-    docStore.openTab('')
     const title = typeof action.title === 'string' ? action.title.trim() : ''
-    const created = getActiveDocTab()
-    if (created && title) docStore.renameTab(created.id, title)
-    return `已创建文档标签：${title || created?.title || '新文档'}`
+    const path = typeof action.path === 'string' ? action.path.trim() : ''
+    const createdId = path
+      ? docStore.ensureTabForPath(path)
+      : docStore.createBackgroundTab({ title })
+    if (!createdId) return '创建文档标签失败'
+    if (title && !path) docStore.renameTab(createdId, title)
+    rememberToolTargetTab(createdId)
+    const created = useDocTabs.getState().tabs.find((tab) => tab.id === createdId)
+    return `已创建文档标签：${created?.title || title || '新文档'}${path ? `（${path}）` : ''}`
   }
 
   if (type === 'open_tab') {
     const path = typeof action.path === 'string' ? action.path.trim() : ''
     if (!path) return 'open_tab 缺少 path'
-    docStore.openTab(path)
+    const openedId = docStore.ensureTabForPath(path)
+    if (!openedId) return `已打开文档：${path}`
+    rememberToolTargetTab(openedId)
     const currentStore = useDocTabs.getState()
-    const opened = currentStore.tabs.find((tab) => tab.path === path) || getActiveDocTab()
+    const opened = currentStore.tabs.find((tab) => tab.id === openedId)
     if (!opened) return `已打开文档：${path}`
 
     let loaded: Awaited<ReturnType<typeof loadDocumentContentForEditing>>
@@ -1336,14 +1370,16 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     const target = typeof action.target === 'string' ? action.target : typeof action.tabId === 'string' ? action.tabId : undefined
     const tab = resolveDocTab(target)
     if (!tab) return `未找到文档标签：${target || '(空)'}`
+    useMode.getState().setWorkbenchMode('document')
     docStore.setActiveTab(tab.id)
+    rememberToolTargetTab(tab.id)
     return `已切换到文档：${tab.title}`
   }
 
   if (type === 'rename_tab') {
     const title = typeof action.title === 'string' ? action.title.trim() : ''
     if (!title) return 'rename_tab 缺少 title'
-    const tab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
+    const tab = resolveDocActionTab(action)
     if (!tab) return '没有可重命名的文档标签'
     docStore.renameTab(tab.id, title)
     return `已重命名标签：${title}`
@@ -1351,7 +1387,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
 
   if (type === 'set_content') {
     const content = typeof action.content === 'string' ? normalizePotentialWidgetPayloadContent(action.content) : ''
-    const tab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
+    const tab = resolveDocActionTab(action)
     if (!tab) return '没有可写入的文档标签'
     const visualSyntaxRejection = await buildVisualSyntaxRejection('文档写入', content)
     if (visualSyntaxRejection) return visualSyntaxRejection
@@ -1363,7 +1399,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
 
   if (type === 'append_content') {
     const content = typeof action.content === 'string' ? normalizePotentialWidgetPayloadContent(action.content) : ''
-    const tab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
+    const tab = resolveDocActionTab(action)
     if (!tab) return '没有可追加的文档标签'
     if (!content) return `追加内容为空，已跳过：${tab.title}`
     const visualSyntaxRejection = await buildVisualSyntaxRejection('文档追加', content)
@@ -1404,7 +1440,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     if ('error' in resolvedWidget) return `widget 写入已拒绝：${resolvedWidget.error}`
     const widgetValidation = validateWidgetCode(resolvedWidget.widgetCode)
     if (!widgetValidation.valid) return `widget 写入已拒绝：${widgetValidation.reason}`
-    const tab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
+    const tab = resolveDocActionTab(action)
     if (!tab) return '没有可插入 widget 的文档标签'
     const inserted = insertWidgetIntoDocument(tab.content, title, resolvedWidget.widgetCode, position, sectionTitle, resolvedWidget.componentSpec)
     if (!inserted.inserted) return inserted.error || 'widget 插入失败'
@@ -1424,7 +1460,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
   }
 
   if (type === 'list_widgets') {
-    const tab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
+    const tab = resolveDocActionTab(action)
     if (!tab) return '没有可读取 widget 的文档标签'
     const widgets = collectDocumentWidgets(tab.content)
     if (widgets.length === 0) return `当前文档没有 widget（${tab.title}）`
@@ -1454,7 +1490,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     const nextTitle = typeof action.title === 'string' ? action.title.trim() : ''
     const occurrence = typeof action.occurrence === 'number' ? action.occurrence : undefined
     if (!target) return 'update_widget 缺少 target'
-    const tab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
+    const tab = resolveDocActionTab(action)
     if (!tab) return '没有可更新 widget 的文档标签'
 
     const tabId = tab.id
@@ -1463,7 +1499,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
       if ((widgetWriteEpoch.get(tabId) || 0) !== startEpoch) {
         return `update_widget 已取消：对标签 ${tabId} 的待写入请求已被更高优先级的抢占取消`
       }
-      const liveTab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
+      const liveTab = resolveDocActionTab(action)
       if (!liveTab || liveTab.id !== tabId) {
         return `update_widget 已取消：目标文档标签已切换（expected=${tabId}）`
       }
@@ -1564,7 +1600,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     const target = typeof action.target === 'string' ? action.target.trim() : ''
     const occurrence = typeof action.occurrence === 'number' ? action.occurrence : undefined
     if (!target) return 'remove_widget 缺少 target'
-    const tab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
+    const tab = resolveDocActionTab(action)
     if (!tab) return '没有可删除 widget 的文档标签'
     const removed = removeWidgetFromDocument(tab.content, target, occurrence)
     if (!removed.found) return removed.error || 'widget 删除失败'
@@ -1582,7 +1618,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     const from = typeof action.from === 'string' ? action.from : ''
     const to = typeof action.to === 'string' ? action.to : ''
     if (!from) return 'replace_text 缺少 from'
-    const tab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
+    const tab = resolveDocActionTab(action)
     if (!tab) return '没有可替换的文档标签'
     if (!tab.content.includes(from)) return `未匹配到替换目标“${from}”，未做改动`
     const widgetBoundaryRejection = buildWidgetBoundaryRejectionForRanges(
@@ -1605,7 +1641,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     const replacement = typeof action.replacement === 'string' ? action.replacement : ''
     const occurrence = typeof action.occurrence === 'number' ? action.occurrence : undefined
     if (!target) return 'replace_exact 缺少 target'
-    const tab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
+    const tab = resolveDocActionTab(action)
     if (!tab) return '没有可精准替换的文档标签'
     const replaced = replaceExactTextInDocument(tab.content, target, replacement, occurrence)
     if (!replaced.found) return replaced.error || '未匹配到目标片段'
@@ -1624,7 +1660,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
   if (type === 'format_section') {
     const sectionTitle = typeof action.sectionTitle === 'string' ? action.sectionTitle.trim() : ''
     if (!sectionTitle) return 'format_section 缺少 sectionTitle'
-    const tab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
+    const tab = resolveDocActionTab(action)
     if (!tab) return '没有可格式化章节的文档标签'
     const formatted = formatSectionInDocument(tab.content, sectionTitle)
     if (!formatted.found) return `未找到章节“${sectionTitle}”，未做改动`
@@ -1638,7 +1674,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     const sectionTitle = typeof action.sectionTitle === 'string' ? action.sectionTitle.trim() : ''
     const content = typeof action.content === 'string' ? action.content : ''
     if (!sectionTitle) return 'rewrite_section 缺少 sectionTitle'
-    const tab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
+    const tab = resolveDocActionTab(action)
     if (!tab) return '没有可重写章节的文档标签'
     const rewritten = rewriteSectionInDocument(tab.content, sectionTitle, content, { appendIfMissing: false })
     if (!rewritten.found) return `未找到章节“${sectionTitle}”，未做改动`
@@ -1651,13 +1687,19 @@ export async function performDocAction(action: DocActionPayload): Promise<string
   }
 
   if (type === 'save_tab') {
-    const tab = resolveDocTab(typeof action.tabId === 'string' ? action.tabId : undefined)
+    const tab = resolveDocActionTab(action)
     if (!tab) return '没有可保存的文档标签'
-    if (!tab.path) {
+    const requestedPath = typeof action.path === 'string' ? action.path.trim() : ''
+    const targetPath = requestedPath || tab.path || ''
+    if (requestedPath && requestedPath !== tab.path) {
+      docStore.setTabPath(tab.id, requestedPath)
+    }
+    if (!targetPath) {
       const saved = await saveTabWithDialog(tab.id, tab.title, tab.content, null)
+      if (saved.success) clearRecentToolTargetTab(tab.id)
       return saved.success ? `已另存文档：${saved.path}` : `保存失败：${saved.error || tab.title}`
     }
-    const saveBlockedReason = getDirectSaveBlockReason(tab.path)
+    const saveBlockedReason = getDirectSaveBlockReason(targetPath)
     if (saveBlockedReason) return saveBlockedReason
     if (typeof window === 'undefined' || !window.electronAPI?.document?.writeFile) return '当前环境不支持保存文档'
     const pendingToolWrite = getPendingToolDocumentWrite(tab.id)
@@ -1666,23 +1708,25 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     )
     const contentToSave = shouldUsePendingToolWrite && pendingToolWrite ? pendingToolWrite.content : tab.content
     if (!tab.isDirty || shouldUsePendingToolWrite) {
-      const disk = await window.electronAPI.document.readFile?.(tab.path).catch(() => null)
+      const disk = await window.electronAPI.document.readFile?.(targetPath).catch(() => null)
       const diskContent = disk && typeof disk === 'object' && 'success' in disk && disk.success
         ? String(disk.content || '')
         : null
       if (diskContent === null || diskContent === contentToSave) {
         if (pendingToolWrite) clearPendingToolDocumentWrite(tab.id)
-        return `文档未改动，已跳过保存：${tab.path}`
+        clearRecentToolTargetTab(tab.id)
+        return `文档未改动，已跳过保存：${targetPath}`
       }
     }
-    const result = await window.electronAPI.document.writeFile(tab.path, contentToSave)
+    const result = await window.electronAPI.document.writeFile(targetPath, contentToSave)
     if (!result.success) return `保存失败：${result.error || tab.title}`
     if (contentToSave !== tab.content) {
       docStore.setTabContent(tab.id, contentToSave)
     }
     docStore.markTabSaved(tab.id)
     clearPendingToolDocumentWrite(tab.id)
-    return `已保存文档：${tab.path}`
+    clearRecentToolTargetTab(tab.id)
+    return `已保存文档：${targetPath}`
   }
 
   return `不支持的文档动作：${type}`
@@ -1713,7 +1757,7 @@ export function classifyDocActionFailureReason(
 export function mapToolActionToDocAction(tool: string, args: Record<string, unknown>): DocActionPayload | null {
   switch (tool) {
     case 'document.newTab':
-      return { type: 'new_tab', title: args.title }
+      return { type: 'new_tab', title: args.title, path: args.path }
     case 'document.openTab':
     case 'document.openFile':
       return { type: 'open_tab', path: args.path }
@@ -1764,7 +1808,7 @@ export function mapToolActionToDocAction(tool: string, args: Record<string, unkn
     case 'document.rewriteSection':
       return { type: 'rewrite_section', sectionTitle: args.sectionTitle, content: args.content, tabId: args.tabId }
     case 'document.saveTab':
-      return { type: 'save_tab', tabId: args.tabId }
+      return { type: 'save_tab', tabId: args.tabId, path: args.path }
     default:
       return null
   }

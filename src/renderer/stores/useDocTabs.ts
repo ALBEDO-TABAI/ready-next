@@ -30,6 +30,8 @@ interface DocTabsState {
 
     openTab: (path: string) => void
     openTabInPane: (path: string, pane: DocumentPaneTarget) => string | null
+    createBackgroundTab: (options?: { title?: string; path?: string | null; content?: string }) => string
+    ensureTabForPath: (path: string) => string | null
     closeTab: (id: string) => void
     setActiveTab: (id: string) => void
     renameTab: (id: string, title: string) => void
@@ -209,6 +211,33 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
             tabs: next.tabs,
             splitTabId: next.id,
         })
+        return next.id
+    },
+
+    createBackgroundTab: (options) => {
+        const path = options?.path || null
+        const title = path ? getFilename(path) : (options?.title?.trim() || '新文档')
+        const id = makeId()
+        set({
+            tabs: [
+                ...get().tabs,
+                {
+                    id,
+                    path,
+                    title,
+                    content: options?.content || '',
+                    isDirty: Boolean(options?.content),
+                },
+            ],
+        })
+        return id
+    },
+
+    ensureTabForPath: (path: string) => {
+        if (!path) return null
+        const { tabs } = get()
+        const next = ensureDocumentTabForPath(tabs, path)
+        if (next.tabs !== tabs) set({ tabs: next.tabs })
         return next.id
     },
 

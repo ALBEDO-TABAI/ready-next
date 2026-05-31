@@ -210,6 +210,89 @@ describe('performDocAction · save_tab disk drift', () => {
   })
 })
 
+describe('performDocAction · background document targets', () => {
+  it('creates and writes a target document without stealing the visible panes', async () => {
+    const previousWindow = (globalThis as { window?: unknown }).window
+    const writes: Array<{ path: string; content: string }> = []
+    ;(globalThis as { window?: unknown }).window = {
+      electronAPI: {
+        document: {
+          readFile: async () => ({ success: true, content: '' }),
+          writeFile: async (path: string, content: string) => {
+            writes.push({ path, content })
+            return { success: true }
+          },
+        },
+      },
+    }
+    try {
+      useDocTabs.setState({
+        tabs: [
+          { id: 'doc-a', path: '/tmp/A.md', title: 'A.md', content: '# A\n', isDirty: false },
+          { id: 'doc-b', path: '/tmp/B.md', title: 'B.md', content: '# B\n', isDirty: false },
+        ],
+        activeTabId: 'doc-a',
+        splitTabId: 'doc-b',
+      })
+
+      const created = await performDocAction({
+        type: 'new_tab',
+        title: 'C',
+        path: '/tmp/C.md',
+      })
+      assert.match(created, /C\.md/)
+      assert.equal(useDocTabs.getState().activeTabId, 'doc-a')
+      assert.equal(useDocTabs.getState().splitTabId, 'doc-b')
+
+      await performDocAction({ type: 'set_content', content: '# C\n' })
+      const target = useDocTabs.getState().tabs.find((item) => item.path === '/tmp/C.md')
+      assert.equal(target?.content, '# C\n')
+      assert.equal(useDocTabs.getState().activeTabId, 'doc-a')
+      assert.equal(useDocTabs.getState().splitTabId, 'doc-b')
+
+      const saved = await performDocAction({ type: 'save_tab' })
+      assert.match(saved, /已保存文档/)
+      assert.deepEqual(writes, [{ path: '/tmp/C.md', content: '# C\n' }])
+      assert.equal(useDocTabs.getState().activeTabId, 'doc-a')
+      assert.equal(useDocTabs.getState().splitTabId, 'doc-b')
+    } finally {
+      ;(globalThis as { window?: unknown }).window = previousWindow
+    }
+  })
+
+  it('refreshes an already visible split-pane target without changing the primary pane', async () => {
+    const previousWindow = (globalThis as { window?: unknown }).window
+    ;(globalThis as { window?: unknown }).window = {
+      electronAPI: {
+        document: {
+          readFile: async () => ({ success: true, content: '# B refreshed\n' }),
+        },
+      },
+    }
+    try {
+      useDocTabs.setState({
+        tabs: [
+          { id: 'doc-a', path: '/tmp/A.md', title: 'A.md', content: '# A\n', isDirty: false },
+          { id: 'doc-b', path: '/tmp/B.md', title: 'B.md', content: '# B old\n', isDirty: false },
+        ],
+        activeTabId: 'doc-a',
+        splitTabId: 'doc-b',
+      })
+
+      const opened = await performDocAction({ type: 'open_tab', path: '/tmp/B.md' })
+
+      assert.match(opened, /已打开并载入文档/)
+      const split = useDocTabs.getState().tabs.find((item) => item.id === 'doc-b')
+      assert.equal(split?.content, '# B refreshed\n')
+      assert.equal(split?.isDirty, false)
+      assert.equal(useDocTabs.getState().activeTabId, 'doc-a')
+      assert.equal(useDocTabs.getState().splitTabId, 'doc-b')
+    } finally {
+      ;(globalThis as { window?: unknown }).window = previousWindow
+    }
+  })
+})
+
 describe('shouldApplyAsyncDocumentLoad', () => {
   it('异步加载完成前标签已被写入时不覆盖现有内容', () => {
     const initial = { id: 'tab-1', path: '/tmp/新文档.md', content: '', isDirty: false }

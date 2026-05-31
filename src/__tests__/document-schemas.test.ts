@@ -29,6 +29,7 @@ import {
 test('DocumentNewTabSchema accepts empty + title-only', () => {
   assert.equal(DocumentNewTabSchema.safeParse({}).success, true)
   assert.equal(DocumentNewTabSchema.safeParse({ title: '我的文档' }).success, true)
+  assert.equal(DocumentNewTabSchema.safeParse({ title: '我的文档', path: '/tmp/我的文档.md' }).success, true)
   assert.equal(DocumentNewTabSchema.safeParse({ title: 42 }).success, false)
 })
 
@@ -132,4 +133,7 @@ test('DocumentRewriteSectionSchema requires sectionTitle + content', () => {
 
 test('DocumentSaveTabSchema accepts empty object', () => {
   assert.equal(DocumentSaveTabSchema.safeParse({}).success, true)
+  assert.equal(DocumentSaveTabSchema.safeParse({ tabId: 'tab-1' }).success, true)
+  assert.equal(DocumentSaveTabSchema.safeParse({ path: '/tmp/new.md' }).success, true)
+  assert.equal(DocumentSaveTabSchema.safeParse({ tabId: 7 }).success, false)
 })

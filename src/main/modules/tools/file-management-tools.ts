@@ -2,9 +2,9 @@ import { readFile, realpath, rename, stat } from 'fs/promises'
 import { dirname, isAbsolute, join, relative, resolve as resolvePath } from 'path'
 import { fileURLToPath } from 'url'
 import type { SearchEngine } from '../search-engine/indexer'
-import { getSearchEngine } from '../search-engine/ipc-handler'
 import { getWorkerDbBridge } from '../database/worker-bridge'
 import { parseDocumentGraph } from '../../../shared/document-graph-parse'
+import { resolveDocumentSectionAnchor } from '../../../shared/document-sectioning'
 import {
   resolveIndexedDocumentCandidate as resolveIndexedDocumentCandidateFromDb,
   type IndexedDocumentRow,
@@ -139,7 +139,7 @@ export async function executeFileManagementTool(
   args: Record<string, unknown>,
   context?: FileManagementToolContext,
 ): Promise<string> {
-  const engine = context?.searchEngine ?? getSearchEngine()
+  const engine = context?.searchEngine ?? await getDefaultSearchEngine()
   if (!engine) return 'Error: search engine unavailable'
 
   if (context?.abortSignal?.aborted) {
@@ -168,6 +168,11 @@ export async function executeFileManagementTool(
     default:
       return `Unknown file management tool: ${toolName}`
   }
+}
+
+async function getDefaultSearchEngine(): Promise<SearchEngine | null> {
+  const { getSearchEngine } = await import('../search-engine/ipc-handler')
+  return getSearchEngine()
 }
 
 async function runFileSearch(args: Record<string, unknown>, engine: SearchEngine): Promise<string> {
@@ -230,6 +235,15 @@ async function runFileLocate(args: Record<string, unknown>, engine: SearchEngine
     const content = await readFile(path, 'utf-8')
     const lines = content.split('\n')
     if (!anchor) return toJsonString({ ok: true, path, line: 1, sectionTitle: null })
+    const section = resolveDocumentSectionAnchor(content, anchor)
+    if (section) {
+      return toJsonString({
+        ok: true,
+        path,
+        line: section.line + 1,
+        sectionTitle: section.displayTitle,
+      })
+    }
     const anchorLower = anchor.toLowerCase()
     let sectionTitle: string | null = null
     for (let i = 0; i < lines.length; i += 1) {
@@ -348,6 +362,7 @@ function boundedExcerpt(
 }
 
 function resolveExcerptRange(
+  content: string,
   lines: string[],
   args: Record<string, unknown>,
 ): { ok: true; startIndex: number; endExclusive: number; anchorLine: number | null; sectionTitle: string | null }
@@ -366,6 +381,17 @@ function resolveExcerptRange(
 
   if (!anchor) {
     return { ok: true, startIndex: 0, endExclusive: lines.length, anchorLine: null, sectionTitle: null }
+  }
+
+  const section = resolveDocumentSectionAnchor(content, anchor)
+  if (section) {
+    return {
+      ok: true,
+      startIndex: section.line,
+      endExclusive: Math.max(section.line + 1, Math.min(lines.length, section.endLine)),
+      anchorLine: section.line + 1,
+      sectionTitle: section.displayTitle,
+    }
   }
 
   const anchorLower = anchor.toLowerCase()
@@ -420,7 +446,7 @@ async function runFileReadExcerpt(args: Record<string, unknown>, engine: SearchE
   try {
     const content = await readFile(resolved.readPath, 'utf-8')
     const lines = content.split(/\r?\n/)
-    const range = resolveExcerptRange(lines, args)
+    const range = resolveExcerptRange(content, lines, args)
     if (!range.ok) return toJsonString({ ...range.output, path: resolved.path })
     const maxChars = Math.max(
       1,

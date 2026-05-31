@@ -32,6 +32,14 @@ interface ParsedPackage {
   baseDir: string
   manifest: Map<string, ManifestItem>
   spine: SpineItem[]
+  tocPath?: string
+  navPath?: string
+}
+
+interface EbookTocEntry {
+  path: string
+  title: string
+  level: number
 }
 
 const IMAGE_MEDIA_TYPES = new Set([
@@ -161,11 +169,21 @@ function parsePackage(opfXml: string, opfPath: string): ParsedPackage {
     .map((item) => ({ idref: typeof item.idref === 'string' ? item.idref : '' }))
     .filter((item) => item.idref)
 
+  const baseDir = posix.dirname(normalizeZipPath(opfPath)).replace(/^\.$/, '')
+  const spineTocId = typeof spineNode.toc === 'string' ? spineNode.toc : ''
+  const tocItem = (spineTocId ? manifest.get(spineTocId) : undefined)
+    || Array.from(manifest.values()).find((item) => item.mediaType === 'application/x-dtbncx+xml')
+  const navItem = Array.from(manifest.values()).find((item) =>
+    item.properties?.split(/\s+/).includes('nav'),
+  )
+
   return {
     title,
-    baseDir: posix.dirname(normalizeZipPath(opfPath)).replace(/^\.$/, ''),
+    baseDir,
     manifest,
     spine,
+    tocPath: tocItem ? resolveZipPath(baseDir, tocItem.href) : undefined,
+    navPath: navItem ? resolveZipPath(baseDir, navItem.href) : undefined,
   }
 }
 
@@ -187,6 +205,67 @@ async function findOpfPath(zip: JSZip): Promise<string> {
   return normalizeZipPath(opfPath)
 }
 
+function extractNavLabelText(value: unknown): string {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return extractText(value)
+  const record = value as Record<string, unknown>
+  return extractText(record.text) || extractText(record)
+}
+
+function parseNcxToc(ncxXml: string, tocBaseDir: string): EbookTocEntry[] {
+  const parser = new XMLParser({
+    ignoreAttributes: false,
+    attributeNamePrefix: '',
+    removeNSPrefix: true,
+  })
+  const parsed = parser.parse(ncxXml) as Record<string, unknown>
+  const ncx = (parsed.ncx || {}) as Record<string, unknown>
+  const navMap = (ncx.navMap || {}) as Record<string, unknown>
+  const entries: EbookTocEntry[] = []
+
+  const walk = (points: unknown, level: number) => {
+    for (const point of asArray(points as Record<string, unknown> | Record<string, unknown>[] | undefined)) {
+      if (!point || typeof point !== 'object') continue
+      const record = point as Record<string, unknown>
+      const title = normalizeTitleText(extractNavLabelText(record.navLabel))
+      const content = record.content && typeof record.content === 'object'
+        ? record.content as Record<string, unknown>
+        : null
+      const src = typeof content?.src === 'string' ? content.src : ''
+      const path = src ? resolveZipPath(tocBaseDir, src) : ''
+      if (title && path) entries.push({ path, title, level })
+      walk(record.navPoint, level + 1)
+    }
+  }
+
+  walk(navMap.navPoint, 2)
+  return entries
+}
+
+function parseNavToc(navHtml: string, navBaseDir: string): EbookTocEntry[] {
+  const tocNav = navHtml.match(/<nav\b[^>]*(?:epub:type|type)\s*=\s*(['"])toc\1[^>]*>([\s\S]*?)<\/nav>/i)?.[2]
+    || navHtml
+  const entries: EbookTocEntry[] = []
+  for (const match of tocNav.matchAll(/<a\b[^>]*\bhref\s*=\s*(['"])(.*?)\1[^>]*>([\s\S]*?)<\/a>/gi)) {
+    const href = match[2] || ''
+    const title = normalizeTitleText(stripHtmlTags(match[3] || ''))
+    const path = href ? resolveZipPath(navBaseDir, href) : ''
+    if (title && path) entries.push({ path, title, level: 2 })
+  }
+  return entries
+}
+
+async function readEpubToc(zip: JSZip, pkg: ParsedPackage): Promise<EbookTocEntry[]> {
+  if (pkg.tocPath) {
+    const tocFile = zip.file(pkg.tocPath)
+    if (tocFile) return parseNcxToc(await tocFile.async('text'), posix.dirname(pkg.tocPath).replace(/^\.$/, ''))
+  }
+  if (pkg.navPath) {
+    const navFile = zip.file(pkg.navPath)
+    if (navFile) return parseNavToc(await navFile.async('text'), posix.dirname(pkg.navPath).replace(/^\.$/, ''))
+  }
+  return []
+}
+
 function stripUnsafeHtml(html: string): string {
   return html
     .replace(/<script\b[\s\S]*?<\/script>/gi, '')
@@ -196,6 +275,37 @@ function stripUnsafeHtml(html: string): string {
     .replace(/\s+(href|src|xlink:href)\s*=\s*javascript:[^\s>]+/gi, ' $1="#"')
     .replace(/\s+class\s*=\s*(['"]).*?\1/gi, '')
     .replace(/\s+style\s*=\s*(['"]).*?\1/gi, '')
+}
+
+function stripHtmlTags(value: string): string {
+  return value.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+}
+
+function escapeHtmlText(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+}
+
+function extractHtmlBody(html: string): string {
+  const match = html.match(/<body\b[^>]*>([\s\S]*?)<\/body>/i)
+  return match?.[1] ? match[1] : html
+}
+
+function hasHeadingNamed(html: string, title: string): boolean {
+  const target = normalizeTitleText(title)
+  if (!target) return false
+  for (const match of html.matchAll(/<h[1-6]\b[^>]*>([\s\S]*?)<\/h[1-6]>/gi)) {
+    if (normalizeTitleText(stripHtmlTags(match[1] || '')) === target) return true
+  }
+  return false
+}
+
+function prependTocHeading(html: string, entry: EbookTocEntry | undefined): string {
+  if (!entry?.title || hasHeadingNamed(html, entry.title)) return html
+  const headingTag = entry.level <= 2 ? 'h1' : 'h2'
+  return `<${headingTag}>${escapeHtmlText(entry.title)}</${headingTag}>\n${html}`
 }
 
 function normalizeFootnotes(html: string): string {
@@ -347,6 +457,11 @@ export async function importEpubAsMarkdown(sourcePath: string): Promise<EbookMar
     const warnings: string[] = []
     const sections: string[] = []
     let assetCount = 0
+    const tocEntries = await readEpubToc(zip, pkg)
+    const tocByPath = new Map<string, EbookTocEntry>()
+    for (const entry of tocEntries) {
+      if (!tocByPath.has(entry.path)) tocByPath.set(entry.path, entry)
+    }
 
     for (const spineItem of pkg.spine) {
       const manifestItem = pkg.manifest.get(spineItem.idref)
@@ -362,7 +477,8 @@ export async function importEpubAsMarkdown(sourcePath: string): Promise<EbookMar
       }
       const chapterBase = posix.dirname(chapterPath).replace(/^\.$/, '')
       const rawHtml = stripUnsafeHtml(normalizeFootnotes(await chapterFile.async('text')))
-      const rewritten = await rewriteAssets(zip, rawHtml, chapterBase, assetsDir, usedAssetNames, warnings)
+      const bodyHtml = prependTocHeading(extractHtmlBody(rawHtml), tocByPath.get(chapterPath))
+      const rewritten = await rewriteAssets(zip, bodyHtml, chapterBase, assetsDir, usedAssetNames, warnings)
       assetCount += rewritten.assetCount
       const markdown = demoteMarkdownHeadings(normalizeMarkdownFootnotes(turndown.turndown(rewritten.html)))
         .replace(/\n{3,}/g, '\n\n')
