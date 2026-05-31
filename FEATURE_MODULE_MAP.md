@@ -26,8 +26,9 @@
 
 ## 技能分层
 - 系统级技能：embedded skills，随应用资产一起分发
-- 用户级技能：custom skills，支持导入、移除、说明更新与运行调度
+- 用户级技能：custom skills，支持本地目录导入、从 GitHub / tarball 链接安装、移除、说明更新与运行调度
 - Skill tools：由 `skills-runtime` 动态转换为 `skill_*` 工具，供 Agent 直接调用
+- 远程安装：技能中心 URL 输入框 + Agent `install_skill` 工具两条前门汇入单一 `installSkillFromSource`，`trustAck` 确认后由宿主下载/扫描/安装；风险源经 `ask_user_questions` 呈现具体原因（`skill-source-registry.ts`、`skill-source-fetcher.ts`、`shared/skill-source-types.ts`、`tools/builtins/install-skill.ts`）
 
 ## 重要现状
 - 旧 `image` 模式已下线，统一为 `design`

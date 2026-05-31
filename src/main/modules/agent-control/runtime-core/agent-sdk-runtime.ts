@@ -2356,6 +2356,9 @@ function scopeRunModuleForTool(definition: ToolDefinition): ScopeRunEventPayload
     // pause, not a domain-owned action) — bucket it under `system` so the
     // scope-run timeline still captures the tool call for observability.
     || definition.domain === 'agent_interaction'
+    // skill_install is a host-driven install action (not a product domain) —
+    // same bucketing rationale as agent_interaction.
+    || definition.domain === 'skill_install'
   ) {
     return 'system'
   }

@@ -39,6 +39,7 @@ import { executeDocumentTool } from './document-tools'
 import { executeGeneralResearchTool } from './general-research-tools'
 import { executeMapTool } from './map-tools'
 import { executeAskUserQuestions } from './builtins/ask-user-questions'
+import { executeInstallSkill } from './builtins/install-skill'
 import {
   getAskUserQuestionsCardEmitter,
   getAskUserQuestionsCardPersistor,
@@ -450,6 +451,14 @@ export async function executeToolCall(
             signal: context.abortSignal,
             emitAskUserQuestionsCard: getAskUserQuestionsCardEmitter(),
             persistCardPending: getAskUserQuestionsCardPersistor(),
+          })
+
+        case 'skill_install':
+          // Two-phase remote skill installer. Phase 1 resolves read-only; phase 2
+          // installs only with trustAck after the user approved via
+          // ask_user_questions. The manager enforces the trustAck invariant.
+          return executeInstallSkill(args as Parameters<typeof executeInstallSkill>[0], {
+            manager: getSkillsRuntimeManager(),
           })
 
         default:

@@ -779,7 +779,7 @@ const skillsAPI = {
   runtimeInfo: () => ipcRenderer.invoke('skills:runtimeInfo'),
   importCustomSkill: (payload: { path: string }) => ipcRenderer.invoke('skills:importCustomSkill', payload),
   removeCustomSkill: (payload: { skillId: string }) => ipcRenderer.invoke('skills:removeCustomSkill', payload),
-  updateCustomSkillDescription: (payload: { skillId: string; description: string }) =>
+  updateCustomSkillDescription: (payload: { skillId: string; description: string; name?: string }) =>
     ipcRenderer.invoke('skills:updateCustomSkillDescription', payload),
   install: (payload: { skillId: string; force?: boolean }) => ipcRenderer.invoke('skills:install', payload),
   run: (payload: {
@@ -810,6 +810,8 @@ const skillsAPI = {
     ipcRenderer.on('modelPacks:downloadUpdate', listener)
     return () => ipcRenderer.removeListener('modelPacks:downloadUpdate', listener)
   },
+  // Skill-source diagnostics (reachability self-test for the agent install path).
+  selfTestSkillSources: () => ipcRenderer.invoke('skills:sourcesSelfTest'),
   // Phase 4: skills:executions:* preload methods retired along with the
   // skill_executions state machine (listExecutions / getExecution /
   // submitInput / submitConfirmation / submitAgentResult / restartFromStep /

@@ -39,6 +39,7 @@ test('capability groups define required reserved and host-only entries', () => {
     'design_reserved',
     'mcp',
     'agent_interaction',
+    'skill_install',
   ])
 
   assert.equal(getCapabilityGroup('system_host')?.exposure, 'host_only')
@@ -48,6 +49,10 @@ test('capability groups define required reserved and host-only entries', () => {
   assert.equal(getCapabilityGroup('agent_interaction')?.exposure, 'model_visible')
   assert.equal(getCapabilityGroup('agent_interaction')?.defaultMode, 'on')
   assert.deepEqual(getCapabilityGroup('agent_interaction')?.defaultProfiles, ['local_chat'])
+  assert.equal(getCapabilityGroup('skill_install')?.exposure, 'model_visible')
+  assert.equal(getCapabilityGroup('skill_install')?.defaultMode, 'on')
+  assert.equal(getCapabilityGroup('skill_install')?.settingsVisible, false)
+  assert.deepEqual(getCapabilityGroup('skill_install')?.defaultProfiles, ['local_chat'])
 })
 
 test('resolver suppresses all model-visible groups when provider tool calling is disabled', () => {

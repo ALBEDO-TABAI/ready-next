@@ -162,6 +162,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
   const [editingSkill, setEditingSkill] = useState<SkillState | null>(null)
   const [configuringSkill, setConfiguringSkill] = useState<SkillState | null>(null)
   const [descriptionDraft, setDescriptionDraft] = useState('')
+  const [nameDraft, setNameDraft] = useState('')
   const [savingDescription, setSavingDescription] = useState(false)
 
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -378,26 +379,29 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
     pushMessage(`移除失败：${res.error || skill.name}`)
   }, [pushMessage, refreshSkills])
 
-  const handleSaveDescription = useCallback(async () => {
+  const handleSaveSkillEdits = useCallback(async () => {
     if (!editingSkill || typeof window === 'undefined' || !window.electronAPI?.skills?.updateCustomSkillDescription) return
     setSavingDescription(true)
     try {
       const res = await window.electronAPI.skills.updateCustomSkillDescription({
         skillId: editingSkill.id,
         description: descriptionDraft,
+        name: nameDraft,
       })
       if (res.success && res.data) {
-        setSkills((prev) => prev.map((item) => item.id === editingSkill.id ? (res.data as SkillState) : item))
+        const updated = res.data as SkillState
+        setSkills((prev) => prev.map((item) => item.id === editingSkill.id ? updated : item))
         setEditingSkill(null)
         setDescriptionDraft('')
-        pushMessage(`已更新技能说明：${editingSkill.name}`)
+        setNameDraft('')
+        pushMessage(`已更新技能：${updated.name}`)
         return
       }
       pushMessage(`更新失败：${res.error || editingSkill.name}`)
     } finally {
       setSavingDescription(false)
     }
-  }, [descriptionDraft, editingSkill, pushMessage])
+  }, [descriptionDraft, nameDraft, editingSkill, pushMessage])
 
   const handleSplitterMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     e.preventDefault()
@@ -478,11 +482,12 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
       items.push(
         {
           id: 'edit-description',
-          label: '编辑技能说明',
+          label: '编辑技能',
           icon: <Pen style={{ width: 16, height: 16 }} />,
           onClick: () => {
             setEditingSkill(skill)
             setDescriptionDraft(skill.description || '')
+            setNameDraft(skill.name || '')
           },
         },
         { id: 'sep-1', label: '', separator: true },
@@ -736,7 +741,8 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
 
       <DescriptionEditorDialog
         open={Boolean(editingSkill)}
-        skillName={editingSkill?.name || ''}
+        nameValue={nameDraft}
+        onNameChange={setNameDraft}
         value={descriptionDraft}
         saving={savingDescription}
         onChange={setDescriptionDraft}
@@ -744,8 +750,9 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
           if (savingDescription) return
           setEditingSkill(null)
           setDescriptionDraft('')
+          setNameDraft('')
         }}
-        onSave={() => { void handleSaveDescription() }}
+        onSave={() => { void handleSaveSkillEdits() }}
       />
 
       <SkillConfigurationDialog
@@ -777,7 +784,8 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
 
 function DescriptionEditorDialog({
   open,
-  skillName,
+  nameValue,
+  onNameChange,
   value,
   saving,
   onChange,
@@ -785,7 +793,8 @@ function DescriptionEditorDialog({
   onSave,
 }: {
   open: boolean
-  skillName: string
+  nameValue: string
+  onNameChange: (value: string) => void
   value: string
   saving: boolean
   onChange: (value: string) => void
@@ -825,7 +834,7 @@ function DescriptionEditorDialog({
   return (
     <div
       className="absolute inset-[8px] z-[260] flex items-center justify-center"
-      style={{ background: 'var(--overlay-bg)' }}
+      style={{ background: 'transparent' }}
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose()
       }}
@@ -842,11 +851,32 @@ function DescriptionEditorDialog({
         }}
       >
         <h3 style={{ margin: 0, fontSize: 16, fontWeight: 600, color: 'var(--text-title)' }}>
-          编辑技能说明
+          编辑技能
         </h3>
-        <p style={{ margin: '8px 0 0', fontSize: 12, lineHeight: 1.6, color: 'var(--text-secondary)' }}>
-          {skillName}
-        </p>
+        <label style={{ display: 'block', margin: '14px 0 6px', fontSize: 12, fontWeight: 500, color: 'var(--text-secondary)' }}>
+          技能名称
+        </label>
+        <input
+          type="text"
+          value={nameValue}
+          onChange={(event) => onNameChange(event.target.value)}
+          placeholder="为技能取一个清晰的名字"
+          style={{
+            width: '100%',
+            padding: '8px 12px',
+            fontSize: 13,
+            lineHeight: 1.5,
+            color: 'var(--text-body)',
+            background: 'var(--bg-editor)',
+            border: '1px solid var(--border-input)',
+            borderRadius: 10,
+            outline: 'none',
+            boxSizing: 'border-box',
+          }}
+        />
+        <label style={{ display: 'block', margin: '14px 0 6px', fontSize: 12, fontWeight: 500, color: 'var(--text-secondary)' }}>
+          技能说明
+        </label>
         <textarea
           ref={textareaRef}
           value={value}
@@ -855,7 +885,6 @@ function DescriptionEditorDialog({
           style={{
             width: '100%',
             minHeight: 140,
-            marginTop: 14,
             resize: 'vertical',
             padding: '10px 12px',
             fontSize: 13,
@@ -1032,7 +1061,7 @@ function SkillConfigurationDialog({
   return (
     <div
       className="fixed inset-0 z-[10020] flex items-center justify-center"
-      style={{ background: 'rgba(0,0,0,0.28)' }}
+      style={{ background: 'transparent' }}
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose()
       }}

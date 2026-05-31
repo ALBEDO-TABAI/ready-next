@@ -45,10 +45,10 @@ export function setupSkillsIPC(): void {
     }
   })
 
-  ipcMain.handle('skills:updateCustomSkillDescription', (_, payload: { skillId: string; description: string }): SkillsIPCResponse => {
+  ipcMain.handle('skills:updateCustomSkillDescription', (_, payload: { skillId: string; description: string; name?: string }): SkillsIPCResponse => {
     try {
       if (!payload?.skillId) return { success: false, error: 'Missing skillId' }
-      return { success: true, data: manager.updateCustomSkillDescription(payload.skillId, payload.description || '') }
+      return { success: true, data: manager.updateCustomSkillDescription(payload.skillId, payload.description || '', payload.name) }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }
@@ -124,6 +124,16 @@ export function setupSkillsIPC(): void {
       const skillId = payload?.skillId
       if (!skillId) return { success: false, error: 'Missing skillId' }
       return { success: true, data: manager.updateSkillConfiguration(payload) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  // Skill-source diagnostics: probe github.com + 国内 mirror reachability so the
+  // agent install path's fetch is observable. No install side effects.
+  ipcMain.handle('skills:sourcesSelfTest', async (): Promise<SkillsIPCResponse> => {
+    try {
+      return { success: true, data: await manager.selfTestSkillSources() }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }

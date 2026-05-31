@@ -56,6 +56,20 @@ function slugify(input: string): string {
     .replace(/^-+|-+$/g, '') || 'custom-skill'
 }
 
+// Slug for id-priority chains: returns null (instead of the 'custom-skill'
+// fallback) when the input has no ASCII slug characters, so a degenerate value
+// (e.g. a CJK-only frontmatter name) falls through to the next candidate rather
+// than short-circuiting the whole chain to the generic default.
+function safeSlug(input: string | null | undefined): string | null {
+  if (typeof input !== 'string') return null
+  const slug = input
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  return slug.length > 0 ? slug : null
+}
+
 function readJson(path: string): unknown {
   return JSON.parse(readFileSync(path, 'utf-8'))
 }
@@ -316,10 +330,25 @@ export function loadCustomSkillManifestFromFolder(folderPath: string): CustomSki
 
   if (!manifestPath && documentEntry) {
     const folderName = basename(folderPath)
+    // Reference skills (SKILL.md, no JSON manifest) carry their canonical id in
+    // the YAML frontmatter `name:` (kebab-case, e.g. `video-expert-analyzer`).
+    // The folder basename is unreliable — the remote-install pipeline hands us a
+    // staging dir named `extract`, `<repo>-<sha>`, or a UUID — so derive id/name
+    // from the frontmatter first, only falling back to the folder when absent.
+    const documentPath = join(folderPath, documentEntry)
+    let frontmatter: Record<string, string> = {}
+    try {
+      frontmatter = parseMarkdownFrontmatter(readFileSync(documentPath, 'utf-8')).metadata
+    } catch {
+      // silent-catch: an unreadable SKILL.md just means no frontmatter id/name;
+      // we fall back to the folder basename below, same as before this fix.
+    }
+    const name = asString(frontmatter.name) || folderName
+    const id = asString(frontmatter.id) || safeSlug(frontmatter.name) || slugify(folderName)
     return {
-      id: slugify(folderName),
-      name: folderName,
-      description: guessDescriptionFromMarkdown(join(folderPath, documentEntry), folderName, slugify(folderName)),
+      id,
+      name,
+      description: guessDescriptionFromMarkdown(documentPath, name, id),
       version: '1.0.0',
       source: 'custom',
       runtime: 'reference',
@@ -468,13 +497,23 @@ export function removeManagedCustomSkill(customSkillsRoot: string, skillId: stri
   return true
 }
 
-export function updateManagedCustomSkillDescription(customSkillsRoot: string, skillId: string, description: string): RegisteredCustomSkill {
+export function updateManagedCustomSkillDescription(
+  customSkillsRoot: string,
+  skillId: string,
+  description: string,
+  name?: string,
+): RegisteredCustomSkill {
   const current = getManagedCustomSkill(customSkillsRoot, skillId)
   if (!current) {
     throw new Error(`Custom skill not found: ${skillId}`)
   }
+  // Rename only touches the display `name`; the `id` (and therefore the managed
+  // folder + `skill_<id>_*` tool names + any persisted refs) stays stable. A
+  // blank name is treated as "no change" so clearing the field can't wipe it.
+  const nextName = typeof name === 'string' && name.trim().length > 0 ? name.trim() : current.name
   return writeManagedCustomSkillManifest(current.managedPath, {
     ...current,
+    name: nextName,
     description: description.trim(),
   })
 }

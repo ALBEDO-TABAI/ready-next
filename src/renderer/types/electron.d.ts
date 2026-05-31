@@ -5,6 +5,7 @@ import type { NativeContextMenuRequest, NativeContextMenuResponse } from '../../
 import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runtime'
 import type { RendererAgentMetricName } from '../../shared/renderer-agent-metrics'
 import type { ModelPackDownloadUpdate, ModelPackId, ModelPackSelfTestReport, ModelPackStatus, ModelSource } from '../../shared/model-pack-types'
+import type { SkillSourceSelfTestReport } from '../../shared/skill-source-types'
 import type {
   PetActivitySnapshot,
   PetDefinition,
@@ -2702,6 +2703,7 @@ interface ElectronSkillsAPI {
   updateCustomSkillDescription: (payload: {
     skillId: string
     description: string
+    name?: string
   }) => Promise<IPCResponse<SkillState>>
   install: (payload: {
     skillId: string
@@ -2728,6 +2730,8 @@ interface ElectronSkillsAPI {
   cancelModelPackDownload: (payload: { id: ModelPackId }) => Promise<IPCResponse<ModelPackStatus>>
   selfTestModelPacks: () => Promise<IPCResponse<ModelPackSelfTestReport>>
   onModelPackDownloadUpdate?: (handler: (update: ModelPackDownloadUpdate) => void) => () => void
+  // Skill-source diagnostics (reachability self-test for the agent install path).
+  selfTestSkillSources: () => Promise<IPCResponse<SkillSourceSelfTestReport>>
   // Phase 4: skills:executions:* API surface retired along with the
   // skill_executions state machine. Removed: listExecutions / getExecution /
   // submitInput / submitConfirmation / submitAgentResult / restartFromStep /

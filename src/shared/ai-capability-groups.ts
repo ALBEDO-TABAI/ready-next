@@ -16,6 +16,7 @@ export type CapabilityGroupId =
   | 'design_reserved'
   | 'mcp'
   | 'agent_interaction'
+  | 'skill_install'
 
 export type CapabilityProfileId =
   | 'local_chat'
@@ -220,6 +221,17 @@ export const CAPABILITY_GROUPS: CapabilityGroupDefinition[] = [
     id: 'agent_interaction',
     label: '反问用户',
     description: '主 agent 在意图含糊时主动向用户反问多个结构化问题（inline 卡片，预渲染 + 前进后退导航）。仅 local_chat。',
+    exposure: 'model_visible',
+    availability: 'active',
+    defaultMode: 'on',
+    defaultProfiles: ['local_chat'],
+    executionKinds: ['interactive'],
+    settingsVisible: false,
+  },
+  {
+    id: 'skill_install',
+    label: '安装技能',
+    description: '识别用户的技能安装意图，先只读解析出真实下载地址 + 风险分级（不安装），由用户通过反问卡确认后再交由宿主下载、扫描并安装。仅 local_chat。',
     exposure: 'model_visible',
     availability: 'active',
     defaultMode: 'on',

@@ -56,7 +56,7 @@ export interface ParallelToolGroup {
 }
 
 export interface ToolResourceTag {
-  domain: 'browser' | 'document' | 'file' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'memory' | 'session' | 'pet' | 'system' | 'general_research' | 'map' | 'mcp' | 'agent_interaction'
+  domain: 'browser' | 'document' | 'file' | 'rss' | 'calendar' | 'feishu' | 'skill' | 'memory' | 'session' | 'pet' | 'system' | 'general_research' | 'map' | 'mcp' | 'agent_interaction' | 'skill_install'
   accessMode: 'read' | 'write' | 'interactive'
 }
 
@@ -197,6 +197,11 @@ export function getToolResourceTag(toolName: string): ToolResourceTag {
   // to answer N inline question cards. Serialized so the same session never
   // has two ask_user_questions cards pending in parallel.
   if (normalized === 'ask_user_questions') return { domain: 'agent_interaction', accessMode: 'interactive' }
+  // skill_install group — the main-agent two-phase remote-install tool. Name
+  // has no `skill_` prefix on purpose (so skill authorization never strips it).
+  // Interactive: phase 1 does network resolve, phase 2 drives a host download +
+  // install, neither parallel-safe.
+  if (normalized === 'install_skill') return { domain: 'skill_install', accessMode: 'interactive' }
   return { domain: 'system', accessMode: 'interactive' }
 }
 

@@ -31,6 +31,11 @@ import {
   getAgentInteractionOpenAITools,
 } from '../../tools/agent-interaction-tool-defs'
 import {
+  SKILL_INSTALL_TOOL_NAMES,
+  getSkillInstallAnthropicTools,
+  getSkillInstallOpenAITools,
+} from '../../tools/skill-install-tool-defs'
+import {
   BROWSER_CONTENT_TASK_TOOL_NAMES,
   BROWSER_INTERACTION_TOOL_NAMES,
   getBrowserAnthropicTools,
@@ -833,6 +838,32 @@ const GROUP_TOOL_PROVIDERS: Record<CapabilityGroupId, ToolRegistryProvider> = {
         return getAgentInteractionOpenAITools()
       } catch {
         return AGENT_INTERACTION_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'openai'))
+      }
+    },
+  },
+  // skill_install — main-agent remote skill installer. Like agent_interaction
+  // it lives outside the skill domain on purpose: the tool name has no `skill_`
+  // prefix so `filterToolsByAuthorization` never strips it on the main agent's
+  // turn. Two-phase (resolve → confirm via ask_user_questions → trustAck install).
+  skill_install: {
+    staticToolNames: SKILL_INSTALL_TOOL_NAMES,
+    getToolDefinitions: () => buildToolDefinitions('skill_install', SKILL_INSTALL_TOOL_NAMES),
+    getAnthropicTools: () => {
+      try {
+        return getSkillInstallAnthropicTools()
+      } catch {
+        // silent-catch: a tool-def build failure must still expose the capability —
+        // fall back to the static schema so install_skill never silently vanishes.
+        return SKILL_INSTALL_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'anthropic'))
+      }
+    },
+    getOpenAITools: () => {
+      try {
+        return getSkillInstallOpenAITools()
+      } catch {
+        // silent-catch: a tool-def build failure must still expose the capability —
+        // fall back to the static schema so install_skill never silently vanishes.
+        return SKILL_INSTALL_TOOL_NAMES.map((name) => createStaticFallbackSchema(name, 'openai'))
       }
     },
   },

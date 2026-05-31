@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Activity, CheckCircle2, Download, HardDrive, Loader2, RefreshCw, XCircle } from 'lucide-react'
 import type { ModelPackId, ModelPackSelfTestReport, ModelPackStatus, ModelSource } from '../../../shared/model-pack-types'
+import type { SkillSourceSelfTestReport } from '../../../shared/skill-source-types'
 import { MODEL_SOURCES } from '../../../shared/model-pack-types'
 import {
   SETTINGS_CARD_STYLE,
@@ -38,6 +39,8 @@ export default function ModelsRuntimeSettingsPanel() {
   const [busyId, setBusyId] = useState<ModelPackId | null>(null)
   const [selfTest, setSelfTest] = useState<ModelPackSelfTestReport | null>(null)
   const [selfTesting, setSelfTesting] = useState(false)
+  const [skillSourceTest, setSkillSourceTest] = useState<SkillSourceSelfTestReport | null>(null)
+  const [skillSourceTesting, setSkillSourceTesting] = useState(false)
 
   const refresh = useCallback(async () => {
     setLoading(true)
@@ -118,6 +121,23 @@ export default function ModelsRuntimeSettingsPanel() {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
       setSelfTesting(false)
+    }
+  }, [])
+
+  const runSkillSourceSelfTest = useCallback(async () => {
+    setSkillSourceTesting(true)
+    setError(null)
+    try {
+      const res = await window.electronAPI.skills.selfTestSkillSources()
+      if (res.success && res.data) {
+        setSkillSourceTest(res.data)
+      } else {
+        setError(res.error || '技能来源自检失败')
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSkillSourceTesting(false)
     }
   }, [])
 
@@ -331,6 +351,66 @@ export default function ModelsRuntimeSettingsPanel() {
             ))}
             <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 2 }}>
               自检完成于 {new Date(selfTest.finishedAt).toLocaleTimeString()}
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="glass-surface-card rounded-2xl border" style={{ ...SETTINGS_CARD_STYLE, padding: '18px 20px' }}>
+        <div className="flex items-center justify-between gap-3" style={{ marginBottom: skillSourceTest ? 14 : 0 }}>
+          <div>
+            <div style={SETTINGS_TITLE_STYLE}>技能来源自检</div>
+            <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 4 }}>
+              校验从链接安装技能的国内 / 国外下载节点可达性、GitHub 提交溯源解析与暂存目录读写，不会真正下载技能。
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => void runSkillSourceSelfTest()}
+            disabled={skillSourceTesting}
+            className="inline-flex items-center gap-1.5"
+            style={{ ...SETTINGS_FLAT_BUTTON_STYLE, minWidth: 0, padding: '8px 12px', opacity: skillSourceTesting ? 0.6 : 1 }}
+          >
+            {skillSourceTesting ? <Loader2 size={13} className="animate-spin" /> : <Activity size={13} />}
+            运行自检
+          </button>
+        </div>
+        {skillSourceTest && (
+          <div className="flex flex-col gap-2">
+            <div className="rounded-xl border" style={{ ...SETTINGS_SUBTLE_CARD_STYLE, padding: '12px 14px' }}>
+              <div className="flex flex-col gap-1.5">
+                {skillSourceTest.probes.map((probe) => (
+                  <div key={probe.source} className="flex items-center gap-2" style={{ fontSize: 11, color: 'var(--text-body)' }}>
+                    {probe.reachable ? (
+                      <CheckCircle2 size={13} color="var(--color-green)" />
+                    ) : (
+                      <XCircle size={13} color="var(--color-red)" />
+                    )}
+                    <span style={{ minWidth: 52 }}>{SOURCE_LABELS[probe.source]}</span>
+                    <span style={{ color: 'var(--text-muted)', overflowWrap: 'anywhere' }}>
+                      {probe.endpoint}
+                      {probe.reachable && probe.latencyMs !== null ? ` · ${probe.latencyMs}ms` : ' · 不可达'}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <div
+                className="flex items-center gap-2"
+                style={{ fontSize: 11, marginTop: 8, color: skillSourceTest.refResolveOk ? 'var(--color-green)' : 'var(--color-red)' }}
+              >
+                {skillSourceTest.refResolveOk ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
+                提交溯源：{skillSourceTest.refResolveDetail}
+              </div>
+              <div
+                className="flex items-center gap-2"
+                style={{ fontSize: 11, marginTop: 6, color: skillSourceTest.stagingOk ? 'var(--color-green)' : 'var(--color-red)' }}
+              >
+                {skillSourceTest.stagingOk ? <CheckCircle2 size={13} /> : <XCircle size={13} />}
+                暂存目录：{skillSourceTest.stagingDetail}
+              </div>
+            </div>
+            <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 2 }}>
+              自检完成于 {new Date(skillSourceTest.finishedAt).toLocaleTimeString()}
             </div>
           </div>
         )}
