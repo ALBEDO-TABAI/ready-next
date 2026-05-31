@@ -35,5 +35,5 @@ test('document mode uses a browser-style document tab rail with hover hints and 
   assert.match(documentTabRail, /className="absolute left-\[8px\] top-1\/2 flex items-center justify-center"/)
   assert.match(documentTabRail, /className="absolute right-\[8px\] top-1\/2 flex items-center justify-center/)
   assert.match(documentTabRail, /document-tab-rail-scroll[\s\S]*?onClick=\{\(\) => void onNewTab\(\)\}/)
-  assert.match(documentTabRail, /className="ml-\[6px\] flex h-\[26px\] w-\[26px\] flex-shrink-0 items-center justify-center rounded-\[8px\] transition-colors hover:bg-\[var\(--bg-hover\)\]"/)
+  assert.match(documentTabRail, /className="ml-\[6px\] flex h-\[28px\] w-\[28px\] flex-shrink-0 items-center justify-center rounded-\[8px\] transition-colors hover:bg-\[var\(--bg-hover\)\]"/)
 })
