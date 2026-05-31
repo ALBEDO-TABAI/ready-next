@@ -326,6 +326,28 @@ export function sourcesToCalendars(
 }
 
 /**
+ * Re-derive each event's display color from its category (calendarId →
+ * source.color). `color` is a denormalized projection: the wire carries no
+ * color and the DB has no color column, so a freshly-loaded or
+ * agent-recategorized event keeps its last-stamped color until re-saved.
+ * Resolving it here keeps the grid / mini-calendar / assistant color in sync
+ * with the event's current category without a manual re-save. Events whose
+ * calendarId has no matching source keep their existing color; identity is
+ * preserved when nothing changes so React memo consumers don't churn.
+ */
+export function resolveEventColors(
+  events: CalendarEvent[],
+  sources: CalendarSource[],
+): CalendarEvent[] {
+  if (sources.length === 0) return events
+  const colorByCalendarId = new Map(sources.map((source) => [source.id, source.color]))
+  return events.map((event) => {
+    const sourceColor = colorByCalendarId.get(event.calendarId)
+    return sourceColor && sourceColor !== event.color ? { ...event, color: sourceColor } : event
+  })
+}
+
+/**
  * View type mapping between our app and Schedule-X.
  * Our 'month' maps to SX's 'month-grid'.
  */

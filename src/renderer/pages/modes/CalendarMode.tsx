@@ -10,6 +10,7 @@ import EventModal from '../../components/calendar/EventModal'
 import type { EventModalData } from '../../components/calendar/EventModal'
 import type { CalendarSource } from '../../components/calendar/CalendarSources'
 import type { CalendarEvent, ViewType } from '../../components/calendar/schedule-x-utils'
+import { resolveEventColors } from '../../components/calendar/schedule-x-utils'
 import type { Reminder, ReminderFirePayload } from '../../../shared/calendar-types'
 import type { RemoteCalendarEventSuggestion } from '../../../shared/calendar-remote-channel'
 import { serializeEventToWire, parseEventFromWire } from '../../../shared/calendar-wire'
@@ -190,6 +191,14 @@ export default function CalendarMode({
     [sources],
   )
 
+  // `color` is a denormalized projection of an event's category
+  // (calendarId → source.color); the wire carries no color and the events
+  // table has no color column, so a freshly-loaded or agent-recategorized
+  // event keeps its last-stamped color (blue fallback on load) until the
+  // user re-saves it through the modal. Derive the display color from the
+  // current source list here so a category change recolors immediately.
+  const coloredEvents = useMemo(() => resolveEventColors(events, sources), [events, sources])
+
   const {
     sxContainerRef,
     customPortalNodes,
@@ -200,7 +209,7 @@ export default function CalendarMode({
     currentDate,
     viewType,
     sources,
-    events,
+    events: coloredEvents,
     eventsRef,
     enabledSourceIds,
     displayTimezone,
@@ -884,10 +893,10 @@ export default function CalendarMode({
   )
 
   const eventsForMiniCalendar = useMemo(
-    () => events
+    () => coloredEvents
       .filter((event) => enabledSourceIds.has(event.calendarId))
       .map((event) => ({ startTime: event.startTime, color: event.color })),
-    [events, enabledSourceIds],
+    [coloredEvents, enabledSourceIds],
   )
 
   const headerTitle = useMemo(() => {
@@ -911,7 +920,7 @@ export default function CalendarMode({
       color: event.color,
       allDay: event.allDay,
     })
-    const activeEvents = events
+    const activeEvents = coloredEvents
       .filter((event) => enabledSourceIds.has(event.calendarId))
       .slice()
       .sort((a, b) => a.startTime.getTime() - b.startTime.getTime())
@@ -947,7 +956,7 @@ export default function CalendarMode({
       weekTotalHours: Math.round((weekTotalMinutes / 60) * 10) / 10,
       weekCalendarCount,
     }
-  }, [currentDate, enabledSourceIds, events, sources])
+  }, [coloredEvents, currentDate, enabledSourceIds, sources])
 
   const handleCalendarAssistantAskAgent = useCallback((instruction: string) => {
     const trimmed = instruction.trim()
