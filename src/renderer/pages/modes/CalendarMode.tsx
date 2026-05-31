@@ -339,8 +339,13 @@ export default function CalendarMode({
     void fetchEventsForWindow(start, end)
   }, [currentDate, dataLoaded, fetchEventsForWindow, hasActivated, isActive])
 
+  // Register the agent handler whenever this (always-mounted) scene exists,
+  // not only after the calendar becomes the visible mode. This lets the agent
+  // run calendar tools in the background while the user stays in another mode —
+  // moduleExecutor no longer force-switches to calendar to make the handler
+  // appear. Heavy grid init stays gated on `hasActivated` (see useScheduleXCalendar).
   useCalendarAgentAdapter({
-    enabled: hasActivated,
+    enabled: true,
     currentDate,
     viewType,
     editingEvent,
