@@ -372,6 +372,7 @@ export type ScopeRunTerminalReason =
   | 'persistence_failed'
   | 'cancelled_user'
   | 'cancelled_runtime'
+  | 'context_overflow'
   // Legacy persisted events are normalized on read, but renderer keeps
   // this for older scope-run payloads still in memory.
   | 'infra_error'

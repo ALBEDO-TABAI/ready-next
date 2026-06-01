@@ -109,7 +109,21 @@ describe('scope run state helpers', () => {
     assert.strictEqual(phaseToToolTraceStatus('checkpoint'), 'running')
     assert.strictEqual(phaseToToolTraceStatus('checkpoint', 'blocked_config'), 'done')
     assert.strictEqual(phaseToToolTraceStatus('checkpoint', 'blocked_tool_error'), 'error')
+    assert.strictEqual(phaseToToolTraceStatus('error', 'context_overflow'), 'error')
     assert.strictEqual(phaseToToolTraceStatus('cancelled'), 'cancelled')
+  })
+
+  it('preserves context overflow as a terminal reason instead of downgrading to null', () => {
+    const patch = deriveScopeRunStatePatch(
+      {
+        phase: 'error',
+        terminalReason: 'context_overflow',
+        timestamp: '2026-03-07T00:00:00.000Z',
+      },
+      null
+    )
+
+    assert.strictEqual(patch.terminalReason, 'context_overflow')
   })
 
   it('does not treat detached skill jobs as chat streaming', () => {

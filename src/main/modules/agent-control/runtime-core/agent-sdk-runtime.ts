@@ -3793,6 +3793,10 @@ export class AgentSdkRuntime extends EventEmitter {
       })
     } catch (error) {
       if (isAbortError(error)) {
+        const abortReason = abortController.signal.reason
+        const preemptedByNewerSend =
+          abortReason instanceof Error && abortReason.message === 'process_restarted'
+        const latestRunId = this.sessions.get(name)?.currentRun?.runId
         emitOutput('', 'done')
         emitStatus('cancelled', 'cancelled_runtime')
         return this.buildResult({
@@ -3804,6 +3808,13 @@ export class AgentSdkRuntime extends EventEmitter {
           transcriptEvents,
           projectionPatches,
           terminalReason: 'cancelled_runtime',
+          scopeRunAuthority: preemptedByNewerSend
+            ? {
+              state: 'lost',
+              reason: 'preempted_by_newer_send',
+              currentRunId: latestRunId && latestRunId !== runId ? latestRunId : null,
+            }
+            : undefined,
         })
       }
       const message = errorMessage(error)

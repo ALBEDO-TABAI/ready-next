@@ -667,6 +667,7 @@ type ScopeRunTerminalReasonData =
   | 'persistence_failed'
   | 'cancelled_user'
   | 'cancelled_runtime'
+  | 'context_overflow'
   | 'infra_error'
 
 interface ScopeRunEventData {

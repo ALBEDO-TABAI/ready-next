@@ -205,8 +205,47 @@ test('agent sdk runtime preempts old run and cancels pending renderer actions', 
   assert.equal(firstSignal?.aborted, true)
   assert.equal(cancelCount, 1)
   assert.equal(firstResult.cancelled, true)
+  assert.deepEqual(firstResult.scopeRunAuthority, {
+    state: 'lost',
+    reason: 'preempted_by_newer_send',
+    currentRunId: null,
+  })
   assert.equal(second.success, true)
   assert.equal(second.finalText, '第二轮完成')
+})
+
+test('agent sdk runtime does not mark user cancellation as preempted', async () => {
+  let firstSignal: AbortSignal | null = null
+  let signalReadyResolve!: () => void
+  const signalReady = new Promise<void>((resolve) => {
+    signalReadyResolve = resolve
+  })
+  const runtime = createRuntime({
+    runAgent: ({ signal }) => {
+      firstSignal = signal
+      signalReadyResolve()
+      return new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => {
+          const error = new Error('cancelled_user')
+          error.name = 'AbortError'
+          reject(error)
+        }, { once: true })
+      })
+    },
+  })
+  runtime.newSession('butler::scope-user-cancel', 'system prompt')
+
+  const pending = runtime.sendMessage('butler::scope-user-cancel', '第一轮', 'run-cancelled', {
+    publicSessionId: 'scope-user-cancel',
+    taskId: 'task-cancelled',
+  })
+  await signalReady
+  runtime.stopGeneration('butler::scope-user-cancel')
+  const result = await pending
+
+  assert.equal(firstSignal?.aborted, true)
+  assert.equal(result.cancelled, true)
+  assert.equal(result.scopeRunAuthority, undefined)
 })
 
 test('agent sdk runtime exposes Ready tool definitions and preserves structured patches', async () => {
