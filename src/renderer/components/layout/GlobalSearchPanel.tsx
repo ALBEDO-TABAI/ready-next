@@ -9,6 +9,7 @@ import { readJsonStorage, writeJsonStorage, removeStorage } from '../../utils/st
 import { GLOBAL_SEARCH_DIMENSIONS, PANEL_TOKENS } from './panelTokens'
 import Modal from '../ui/Modal'
 import { isLocalHtmlFilePath, openLocalHtmlFileInBrowser } from '../../modules/browser/localHtmlFileOpen'
+import { requestWorkbenchModeChange } from '../../modules/workbench/mode-transition'
 
 interface SearchResultItem {
   path: string
@@ -642,7 +643,7 @@ export default function GlobalSearchPanel({ resetSignal = 0, children }: GlobalS
         if (isLocalHtmlFilePath(item.path)) {
           selectFile(item.path)
           void openLocalHtmlFileInBrowser(item.path, item.name).then((opened) => {
-            if (opened) setWorkbenchMode('browser')
+            if (opened) requestWorkbenchModeChange('browser')
           })
           return
         }

@@ -61,7 +61,7 @@ function viewId(view: unknown): string {
     : ''
 }
 
-test('browser tabs keep a secondary split tab until ordinary activation clears it', () => {
+test('browser tabs keep a secondary split tab while switching the primary tab', () => {
   useBrowserTabs.setState({
     tabs: [makeBrowserTab('tab-a'), makeBrowserTab('tab-b'), makeBrowserTab('tab-c')],
     activeTabId: 'tab-a',
@@ -78,6 +78,10 @@ test('browser tabs keep a secondary split tab until ordinary activation clears i
 
   useBrowserTabs.getState().setActiveTabId('tab-c')
   assert.equal(useBrowserTabs.getState().activeTabId, 'tab-c')
+  assert.equal(useBrowserTabs.getState().splitTabId, 'tab-b')
+
+  useBrowserTabs.getState().setActiveTabId('tab-b')
+  assert.equal(useBrowserTabs.getState().activeTabId, 'tab-b')
   assert.equal(useBrowserTabs.getState().splitTabId, null)
 
   useBrowserTabs.getState().setSplitTabId('tab-b')
@@ -151,7 +155,7 @@ test('BrowserTabShellService shows primary and secondary hosts with separate bou
   ])
 })
 
-test('BrowserTabShellService clears split hosts on ordinary tab switch', () => {
+test('BrowserTabShellService preserves split hosts on primary tab switch', () => {
   const tabs = new Map<string, BrowserShellTabRecord>([
     ['tab-a', makeShellTab('tab-a')],
     ['tab-b', makeShellTab('tab-b')],
@@ -161,6 +165,7 @@ test('BrowserTabShellService clears split hosts on ordinary tab switch', () => {
   let splitTabId: string | null = 'tab-b'
   const detached: string[] = []
   const shown: string[] = []
+  const applied: Array<{ id: string; bounds?: BrowserRect; syncMode?: string }> = []
 
   const service = new BrowserTabShellService({
     tabs,
@@ -177,7 +182,9 @@ test('BrowserTabShellService clears split hosts on ordinary tab switch', () => {
     createTab: async () => ({ success: false, error: 'not used' }),
     detachHost: (view) => { detached.push(viewId(view)) },
     showHost: (view) => { shown.push(viewId(view)) },
-    applyBounds: () => undefined,
+    applyBounds: (view, syncMode, bounds) => {
+      applied.push({ id: viewId(view), syncMode, bounds })
+    },
     hideHost: () => undefined,
     detachPreviewView: () => undefined,
     restoreActiveTabHost: () => undefined,
@@ -187,7 +194,11 @@ test('BrowserTabShellService clears split hosts on ordinary tab switch', () => {
 
   assert.equal(result.success, true)
   assert.equal(activeTabId, 'tab-c')
-  assert.equal(splitTabId, null)
-  assert.deepEqual(shown, ['tab-c'])
-  assert.deepEqual(detached, ['tab-a', 'tab-b'])
+  assert.equal(splitTabId, 'tab-b')
+  assert.deepEqual(shown, ['tab-c', 'tab-b'])
+  assert.deepEqual(detached, ['tab-a'])
+  assert.deepEqual(applied, [
+    { id: 'tab-c', syncMode: undefined, bounds: undefined },
+    { id: 'tab-b', syncMode: 'settled', bounds: { x: 0, y: 0, width: 400, height: 600 } },
+  ])
 })

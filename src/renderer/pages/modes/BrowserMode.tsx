@@ -9,6 +9,8 @@ import { useBrowserPanelData } from '../../modules/browser/useBrowserPanelData'
 import { useBrowserResizeFreeze } from '../../modules/browser/useBrowserResizeFreeze'
 import { useBrowserRuntimeEffects } from '../../modules/browser/useBrowserRuntimeEffects'
 import { useBrowserTabActions } from '../../modules/browser/useBrowserTabActions'
+import { getBrowserTabFitKey, isFitted, markFitted } from '../../modules/browser/browserTabFitRegistry'
+import { planBrowserHostPresentation } from '../../modules/browser/browserHostPresentation'
 import { useBrowserViewBounds } from '../../modules/browser/useBrowserViewBounds'
 import {
   extractBrowserDomain,
@@ -150,12 +152,12 @@ export default function BrowserMode({
   const [isBrowserSurfaceReady, setIsBrowserSurfaceReady] = useState(false)
   const isAddressEditingRef = useRef(false)
   const hostVisibleRef = useRef(false)
+  const hostPresentedRef = useRef(false)
   const surfaceReadyTimerRef = useRef<number | null>(null)
   const postActivationHostResyncTimerRef = useRef<number | null>(null)
   const captureTokenConsumedRef = useRef(false)
   const captureTokenExpiryTimerRef = useRef<number | null>(null)
   const wasActiveRef = useRef<boolean>(isActive)
-  const previousTabCountRef = useRef(tabs.length)
   const modeRootRef = useRef<HTMLDivElement>(null)
   const shellRef = useRef<HTMLDivElement>(null)
   const browserContentFrameRef = useRef<HTMLDivElement>(null)
@@ -351,7 +353,6 @@ export default function BrowserMode({
       setSplitTabId(id)
       return
     }
-    setSplitTabId(null)
     void handleSwitchTab(id)
   }, [activeTabId, handleSwitchTab, setSplitTabId])
 
@@ -708,6 +709,23 @@ export default function BrowserMode({
     }
   }, [])
 
+  const getFitKeyForTab = useCallback((tabId?: string | null) => {
+    if (!tabId) return null
+    const element = tabId === splitTab?.id ? splitContentRef.current : contentRef.current
+    if (!element) return null
+    return getBrowserTabFitKey(element.getBoundingClientRect())
+  }, [splitTab?.id])
+
+  const fitBrowserTabIfNeeded = useCallback(async (tabId?: string | null) => {
+    if (!tabId) return
+    const fitKey = getFitKeyForTab(tabId)
+    if (fitKey && isFitted(tabId, fitKey)) return
+    const result = await window.electronAPI?.browser?.fitActiveTabToBounds(tabId)
+    if (result?.success && fitKey) {
+      markFitted(tabId, fitKey)
+    }
+  }, [getFitKeyForTab])
+
   const CAPTURE_TOKEN_WINDOW_MS = 2000
   const clearCaptureTokenExpiryTimer = useCallback(() => {
     if (captureTokenExpiryTimerRef.current) {
@@ -789,38 +807,59 @@ export default function BrowserMode({
   ])
 
   useEffect(() => {
+    if (!shouldRevealBrowserHost || !browserRuntimeReady || tabs.length === 0 || shouldHideAllBrowserHosts) {
+      hostPresentedRef.current = false
+    }
+  }, [browserRuntimeReady, shouldHideAllBrowserHosts, shouldRevealBrowserHost, tabs.length])
+
+  useEffect(() => {
     if (!isElectron) return
     if (!shouldPresentBrowserHost || !shouldRevealBrowserHost) return
 
-    const previousTabCount = previousTabCountRef.current
-    previousTabCountRef.current = tabs.length
-    const tabCountChangedWhileHostAlreadyPresent = previousTabCount > 0 && tabs.length > 0 && previousTabCount !== tabs.length
+    const presentationPlan = planBrowserHostPresentation({
+      shouldPresentBrowserHost,
+      shouldRevealBrowserHost,
+      canShowBrowserHost: !shouldHideAllBrowserHosts,
+      browserRuntimeReady,
+      tabCount: tabs.length,
+      activeTabId,
+      splitTabId: splitTab?.id || null,
+      hostAlreadyPresented: hostPresentedRef.current,
+    })
+    let cancelled = false
 
     const syncVisibleHost = async () => {
-      if (!browserRuntimeReady || tabs.length === 0) {
+      if (presentationPlan.action === 'skip') return
+      if (presentationPlan.action === 'hide') {
+        hostPresentedRef.current = false
         await syncBrowserVisibility('hidden')
         return
       }
-      if (tabCountChangedWhileHostAlreadyPresent) {
+      await fitBrowserTabIfNeeded(presentationPlan.fitActiveTabId)
+      if (presentationPlan.fitSplitTabId) {
+        await fitBrowserTabIfNeeded(presentationPlan.fitSplitTabId)
+      }
+      if (cancelled) return
+      if (presentationPlan.action === 'sync-bounds') {
+        await sendBoundsImmediate({ forceExact: true })
         return
       }
-      await syncBrowserVisibility('hidden')
-      if (activeTabId) {
-        await window.electronAPI?.browser?.fitActiveTabToBounds(activeTabId)
-      }
-      if (splitTab?.id) {
-        await window.electronAPI?.browser?.fitActiveTabToBounds(splitTab.id)
-      }
-      await syncBrowserVisibility('visible', { forceBoundsSync: true })
+      await syncBrowserVisibility('visible', { forceExact: true })
+      if (cancelled) return
+      hostPresentedRef.current = true
     }
 
     // fire-and-forget: BrowserView visibility/bounds sync; failures self-correct on the next visibility transition or layout effect (BrowserView is a native overlay and is rebuilt on layout change).
     void syncVisibleHost().catch(() => undefined)
-  }, [activeTabId, browserRuntimeReady, isElectron, splitTab?.id, syncBrowserVisibility, shouldPresentBrowserHost, shouldRevealBrowserHost, tabs.length])
+    return () => {
+      cancelled = true
+    }
+  }, [activeTabId, browserRuntimeReady, fitBrowserTabIfNeeded, isElectron, sendBoundsImmediate, shouldHideAllBrowserHosts, splitTab?.id, syncBrowserVisibility, shouldPresentBrowserHost, shouldRevealBrowserHost, tabs.length])
 
   useEffect(() => {
     if (!isElectron || !isActive) return
     if (!shouldPresentBrowserHost || !shouldRevealBrowserHost) return
+    if (hostPresentedRef.current) return
     if (!browserRuntimeReady || tabs.length === 0 || !activeTabId) return
     if (layoutPhase !== 'idle') return
 
@@ -829,11 +868,12 @@ export default function BrowserMode({
       postActivationHostResyncTimerRef.current = null
       // fire-and-forget: post-activation BrowserView resync; next layout effect re-issues the bounds sync if this attempt drops.
       void (async () => {
-        await window.electronAPI?.browser?.fitActiveTabToBounds(activeTabId)
+        await fitBrowserTabIfNeeded(activeTabId)
         if (splitTab?.id) {
-          await window.electronAPI?.browser?.fitActiveTabToBounds(splitTab.id)
+          await fitBrowserTabIfNeeded(splitTab.id)
         }
         await syncBrowserVisibility('visible', { forceExact: true, forceBoundsSync: true })
+        hostPresentedRef.current = true
       })().catch(() => undefined)
     }, 180)
 
@@ -844,6 +884,7 @@ export default function BrowserMode({
     activeTabId,
     browserRuntimeReady,
     clearPostActivationHostResyncTimer,
+    fitBrowserTabIfNeeded,
     isActive,
     isElectron,
     layoutPhase,

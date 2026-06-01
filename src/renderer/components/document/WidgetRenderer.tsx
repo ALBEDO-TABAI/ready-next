@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
-import { browserTabActivationSequencer } from '../../modules/browser/browserTabActivationSequencer'
-import { useBrowserTabs } from '../../stores/useBrowserTabs'
-import { useMode } from '../../stores/useMode'
+import { openWebpageInBrowser } from '../../modules/browser/openWebpageInBrowser'
 import {
   getWidgetIframeStyleBlock,
   resolveWidgetThemePayload,
@@ -76,29 +74,7 @@ export default function WidgetRenderer({
     return buildWidgetReceiverSrcdoc(styleBlock, themePayload.isDark, sanitizedWidgetCode, widgetTokenRef.current)
   }, [sanitizedWidgetCode, themePayload, resolvedBackgroundMode])
   const openHref = useCallback(async (href: string) => {
-    if (window.electronAPI?.browser?.createTab) {
-      const result = await window.electronAPI.browser.createTab(href)
-      if (result?.success && result.tabId) {
-        const browserTabs = useBrowserTabs.getState()
-        if (!browserTabs.tabs.some((tab) => tab.id === result.tabId)) {
-          browserTabs.addTab({
-            id: result.tabId,
-            url: href,
-            title: result.title || href,
-            loading: true,
-            canGoBack: false,
-            canGoForward: false,
-          })
-        }
-        browserTabActivationSequencer.invalidate()
-        browserTabs.setActiveTabId(result.tabId)
-        browserTabs.setUrlInput(href)
-        useMode.getState().setWorkbenchMode('browser')
-        return
-      }
-    }
-
-    window.open(href, '_blank', 'noopener,noreferrer')
+    await openWebpageInBrowser(href)
   }, [])
   const postTheme = useCallback(() => {
     const iframe = iframeRef.current

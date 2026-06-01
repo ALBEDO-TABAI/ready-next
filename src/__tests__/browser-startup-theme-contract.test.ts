@@ -58,9 +58,10 @@ test('browser startup gates chrome until host restoration completes and main pro
   assert.doesNotMatch(browserMode, /setIsAddressEditing/)
   assert.match(browserMode, /const shouldPresentBrowserHost = isActive && isMotionSettled/)
   assert.match(browserMode, /useEffect\(\(\) => \{[\s\S]*if \(!isElectron\) return[\s\S]*if \(!shouldPresentBrowserHost \|\| !shouldRevealBrowserHost\) return/)
-  assert.match(browserMode, /if \(!browserRuntimeReady \|\| tabs\.length === 0\) \{[\s\S]*await syncBrowserVisibility\('hidden'\)/)
-  assert.match(browserMode, /await syncBrowserVisibility\('hidden'\)[\s\S]*if \(activeTabId\) \{[\s\S]*fitActiveTabToBounds\(activeTabId\)[\s\S]*await syncBrowserVisibility\('visible', \{ forceBoundsSync: true \}\)/)
-  assert.match(browserMode, /if \(activeTabId\) \{[\s\S]*fitActiveTabToBounds\(activeTabId\)/)
+  assert.match(browserMode, /const presentationPlan = planBrowserHostPresentation\(\{[\s\S]*hostAlreadyPresented: hostPresentedRef\.current/)
+  assert.match(browserMode, /if \(presentationPlan\.action === 'hide'\) \{[\s\S]*await syncBrowserVisibility\('hidden'\)/)
+  assert.match(browserMode, /await fitBrowserTabIfNeeded\(presentationPlan\.fitActiveTabId\)[\s\S]*if \(presentationPlan\.action === 'sync-bounds'\) \{[\s\S]*await sendBoundsImmediate\(\{ forceExact: true \}\)[\s\S]*await syncBrowserVisibility\('visible', \{ forceExact: true \}\)/)
+  assert.match(browserMode, /await fitBrowserTabIfNeeded\(activeTabId\)/)
   // Trailing resync is now driven reactively by layoutPhase === 'idle' instead of a 180ms setTimeout chain.
   assert.doesNotMatch(browserMode, /startupHostResyncTimerRef/)
   assert.match(browserMode, /if \(layoutPhase !== 'idle'\) return\s*void syncBrowserVisibility\(\{ forceExact: true \}\)/)

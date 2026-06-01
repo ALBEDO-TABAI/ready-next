@@ -1,27 +1,56 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import test from 'node:test'
 
-function readWorkspaceFile(path: string): string {
-  return readFileSync(resolve(process.cwd(), path), 'utf8')
-}
+import { planBrowserHostPresentation } from '../renderer/modules/browser/browserHostPresentation'
 
-test('browser mode keeps startup host recovery separate from ordinary tab switches so tab activation does not hide the browser host first', () => {
-  const browserMode = readWorkspaceFile('src/renderer/pages/modes/BrowserMode.tsx')
+test('ordinary browser tab activation resyncs bounds instead of hiding and re-showing the native host', () => {
+  const plan = planBrowserHostPresentation({
+    shouldPresentBrowserHost: true,
+    shouldRevealBrowserHost: true,
+    canShowBrowserHost: true,
+    browserRuntimeReady: true,
+    tabCount: 2,
+    activeTabId: 'next-tab',
+    splitTabId: null,
+    hostAlreadyPresented: true,
+  })
 
-  assert.match(
-    browserMode,
-    /useEffect\(\(\) => \{\s*if \(!isElectron\) return\s*if \(!shouldPresentBrowserHost \|\| !shouldRevealBrowserHost\) return[\s\S]*const syncVisibleHost = async \(\) => \{[\s\S]*await syncBrowserVisibility\('hidden'\)[\s\S]*await syncBrowserVisibility\('visible', \{ forceBoundsSync: true \}\)/,
-  )
+  assert.equal(plan.action, 'sync-bounds')
+  assert.equal(plan.fitActiveTabId, 'next-tab')
+  assert.equal(plan.fitSplitTabId, null)
+})
 
-  assert.match(
-    browserMode,
-    /useEffect\(\(\) => \{\s*if \(!isElectron \|\| !isActive\) return\s*if \(!shouldPresentBrowserHost \|\| !shouldRevealBrowserHost\) return\s*if \(!browserRuntimeReady \|\| tabs\.length === 0 \|\| !activeTabId\) return[\s\S]*fitActiveTabToBounds\(activeTabId\)[\s\S]*syncBrowserVisibility\('visible', \{ forceExact: true, forceBoundsSync: true \}\)/,
-  )
+test('first browser presentation still shows the native host once after fitting the active tab', () => {
+  const plan = planBrowserHostPresentation({
+    shouldPresentBrowserHost: true,
+    shouldRevealBrowserHost: true,
+    canShowBrowserHost: true,
+    browserRuntimeReady: true,
+    tabCount: 1,
+    activeTabId: 'first-tab',
+    splitTabId: null,
+    hostAlreadyPresented: false,
+  })
 
-  assert.doesNotMatch(
-    browserMode,
-    /\}, \[activeTabId, browserRuntimeReady, isElectron, syncBrowserVisibility, shouldPresentBrowserHost, shouldRevealBrowserHost, tabs.length\]\)/,
-  )
+  assert.equal(plan.action, 'show')
+  assert.equal(plan.fitActiveTabId, 'first-tab')
+})
+
+test('split browser presentation fits both panes while staying on the bounds-sync path', () => {
+  const plan = planBrowserHostPresentation({
+    shouldPresentBrowserHost: true,
+    shouldRevealBrowserHost: true,
+    canShowBrowserHost: true,
+    browserRuntimeReady: true,
+    tabCount: 2,
+    activeTabId: 'primary-tab',
+    splitTabId: 'secondary-tab',
+    hostAlreadyPresented: true,
+  })
+
+  assert.deepEqual(plan, {
+    action: 'sync-bounds',
+    fitActiveTabId: 'primary-tab',
+    fitSplitTabId: 'secondary-tab',
+  })
 })

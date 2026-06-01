@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 
 import type { TabUpdateEvent } from './types'
 import { browserTabActivationSequencer } from './browserTabActivationSequencer'
+import { clearFitted, shouldClearFittedForTabUpdate } from './browserTabFitRegistry'
 import { DEFAULT_BROWSER_URL, extractBrowserDomain } from './url-utils'
 import { useBrowserTabs, type BrowserTab } from '../../stores/useBrowserTabs'
 
@@ -189,6 +190,9 @@ export function useBrowserRuntimeEffects({
           store.updateTab(event.tabId, { title: event.title || '' })
           break
         case 'navigate':
+          if (shouldClearFittedForTabUpdate(event)) {
+            clearFitted(event.tabId)
+          }
           store.updateTab(event.tabId, {
             url: event.url || '',
             domain: event.domain,
@@ -201,6 +205,9 @@ export function useBrowserRuntimeEffects({
           }
           break
         case 'loading':
+          if (shouldClearFittedForTabUpdate(event)) {
+            clearFitted(event.tabId)
+          }
           store.updateTab(event.tabId, { loading: event.loading || false })
           break
         case 'error':
@@ -220,6 +227,9 @@ export function useBrowserRuntimeEffects({
           })
           break
         case 'closed': {
+          if (shouldClearFittedForTabUpdate(event)) {
+            clearFitted(event.tabId)
+          }
           const nextActiveTabId = typeof event.activeTabId === 'string' ? event.activeTabId : null
           store.removeTab(event.tabId)
           const nextStore = useBrowserTabs.getState()

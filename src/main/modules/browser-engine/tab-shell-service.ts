@@ -187,13 +187,26 @@ export class BrowserTabShellService {
   switchTab(tabId: string): BrowserTabSwitchResult {
     const nextTab = this.host.tabs.get(tabId)
     if (!nextTab?.view) return { success: false, error: 'Tab not found' }
-    this.clearSplitHostState()
+    const currentSplitTabId = this.host.getSplitTabId()
+    const nextSplitTabId = currentSplitTabId && currentSplitTabId !== tabId && this.host.tabs.get(currentSplitTabId)?.view
+      ? currentSplitTabId
+      : null
+    this.host.setSplitTabId(nextSplitTabId)
     this.host.setActiveTabId(tabId)
     if (this.host.shouldPresentHosts()) {
       this.host.showHost(nextTab.view, this.host.getViewBounds())
       this.host.applyBounds(nextTab.view)
+      if (nextSplitTabId) {
+        const splitTab = this.host.tabs.get(nextSplitTabId)
+        if (splitTab?.view) {
+          this.host.showHost(splitTab.view, this.host.getSplitViewBounds())
+          this.host.applyBounds(splitTab.view, 'settled', this.host.getSplitViewBounds())
+        }
+      }
     }
-    this.detachNonTargetHosts(new Set([tabId]))
+    const visibleTabIds = new Set([tabId])
+    if (nextSplitTabId) visibleTabIds.add(nextSplitTabId)
+    this.detachNonTargetHosts(visibleTabIds)
 
     return {
       success: true,

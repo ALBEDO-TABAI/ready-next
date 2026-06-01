@@ -99,7 +99,7 @@ test('browser mode surface readiness uses captureStableFrame and hides chrome ja
   assert.match(browserMode, /const surfaceReadyTimerRef = useRef<number \| null>\(null\)/)
   assert.match(browserMode, /const clearSurfaceReadyTimer = useCallback\(\(\) => \{/)
   assert.match(browserMode, /setIsBrowserSurfaceReady\(false\)/)
-  assert.match(browserMode, /await syncBrowserVisibility\('visible', \{ forceBoundsSync: true \}\)/)
+  assert.match(browserMode, /await syncBrowserVisibility\('visible', \{ forceExact: true, forceBoundsSync: true \}\)/)
   assert.match(browserMode, /const hostHasVisibleFrame = await captureStableFrame\(\)/)
   assert.match(browserMode, /if \(hostHasVisibleFrame\) \{[\s\S]*setIsBrowserSurfaceReady\(true\)/)
   assert.doesNotMatch(browserMode, /const BROWSER_SURFACE_READY_DELAY_MS = 16/)

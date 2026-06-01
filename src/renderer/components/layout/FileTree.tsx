@@ -39,6 +39,7 @@ import {
 import { getActiveBrowserTabDragPayload } from '../../modules/browser/browserTabDragSession'
 import { EBOOK_EXTENSIONS, isEbookExtension } from '../../../shared/ebook'
 import { isLocalHtmlFilePath, openLocalHtmlFileInBrowser } from '../../modules/browser/localHtmlFileOpen'
+import { requestWorkbenchModeChange } from '../../modules/workbench/mode-transition'
 import './filesPanelFloatingMenu.css'
 
 const ALLOWED_EXTENSIONS = new Set([
@@ -1455,7 +1456,7 @@ export default function FileTree({
     selectFile(item.path)
     if (isLocalHtmlFilePath(item.path)) {
       void openLocalHtmlFileInBrowser(item.path, item.name).then((opened) => {
-        if (opened) setWorkbenchMode('browser')
+        if (opened) requestWorkbenchModeChange('browser')
       })
       return
     }

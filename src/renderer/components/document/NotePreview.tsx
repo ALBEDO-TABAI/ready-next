@@ -17,10 +17,8 @@ import {
   ExternalLink,
   Wrench,
 } from 'lucide-react'
-import { browserTabActivationSequencer } from '../../modules/browser/browserTabActivationSequencer'
+import { openWebpageInBrowser } from '../../modules/browser/openWebpageInBrowser'
 import { appendToAgentInput } from '../../modules/agent/chat-input-bridge'
-import { useBrowserTabs } from '../../stores/useBrowserTabs'
-import { useMode } from '../../stores/useMode'
 import { EBOOK_MARKDOWN_MARKER } from '../../../shared/ebook'
 import {
   buildStructuredNotePreview,
@@ -465,29 +463,7 @@ function NotePreview({
       return
     }
 
-    if (window.electronAPI?.browser?.createTab) {
-      const result = await window.electronAPI.browser.createTab(href)
-      if (result?.success && result.tabId) {
-        const browserTabs = useBrowserTabs.getState()
-        if (!browserTabs.tabs.some((tab) => tab.id === result.tabId)) {
-          browserTabs.addTab({
-            id: result.tabId,
-            url: href,
-            title: result.title || href,
-            loading: true,
-            canGoBack: false,
-            canGoForward: false,
-          })
-        }
-        browserTabActivationSequencer.invalidate()
-        browserTabs.setActiveTabId(result.tabId)
-        browserTabs.setUrlInput(href)
-        useMode.getState().setWorkbenchMode('browser')
-        return
-      }
-    }
-
-    window.open(href, '_blank', 'noopener,noreferrer')
+    await openWebpageInBrowser(href)
   }, [])
 
   const handleCopyChip = useCallback(async (value: string, id: string) => {

@@ -126,11 +126,10 @@ export const useBrowserTabs = create<BrowserTabsState>((set) => ({
   setActiveTabId: (idOrUpdater) =>
     set((state) => {
       const nextActiveTabId = typeof idOrUpdater === 'function' ? idOrUpdater(state.activeTabId) : idOrUpdater
-      const activeTabChanged = nextActiveTabId !== state.activeTabId
       const nextState = sanitizeSnapshot({
         tabs: state.tabs,
         activeTabId: nextActiveTabId,
-        splitTabId: activeTabChanged ? null : state.splitTabId,
+        splitTabId: state.splitTabId,
         browserSplitRatio: state.browserSplitRatio,
         urlInput: state.urlInput,
       })

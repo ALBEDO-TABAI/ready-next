@@ -1,50 +1,39 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
 import test from 'node:test'
 
-function readWorkspaceFile(path: string): string {
-  return readFileSync(resolve(process.cwd(), path), 'utf8')
-}
+import {
+  clearAll,
+  clearFitted,
+  getBrowserTabFitKey,
+  isFitted,
+  markFitted,
+  shouldClearFittedForTabUpdate,
+} from '../renderer/modules/browser/browserTabFitRegistry'
 
-test('BrowserMode syncVisibleHost collapses to three explicit steps: hidden → fitActiveTabToBounds → visible(forceBoundsSync)', () => {
-  const browserMode = readWorkspaceFile('src/renderer/pages/modes/BrowserMode.tsx')
+test('browser tab fit cache is scoped to the measured host bounds', () => {
+  clearAll()
+  const wide = getBrowserTabFitKey({ width: 900, height: 640 })
+  const narrow = getBrowserTabFitKey({ width: 520, height: 640 })
+  assert.equal(wide, '900x640')
+  assert.equal(narrow, '520x640')
 
-  assert.match(
-    browserMode,
-    /const syncVisibleHost = async \(\) => \{[\s\S]*await syncBrowserVisibility\('hidden'\)[\s\S]*if \(activeTabId\) \{[\s\S]*fitActiveTabToBounds\(activeTabId\)[\s\S]*\}[\s\S]*await syncBrowserVisibility\('visible', \{ forceBoundsSync: true \}\)/,
-  )
+  assert.ok(wide)
+  markFitted('tab-a', wide)
 
-  // The old pre-hide + double sendBoundsImmediate pair is gone.
-  assert.doesNotMatch(
-    browserMode,
-    /await window\.electronAPI\?\.browser\?\.hideAll\?\.\(\)\s*\n\s*await sendBoundsImmediate\(\{ forceExact: true \}\)/,
-  )
-  assert.doesNotMatch(
-    browserMode,
-    /await sendBoundsImmediate\(\{ forceExact: true \}\)\s*\n\s*await syncBrowserVisibility\(\{ forceExact: true \}\)/,
-  )
+  assert.equal(isFitted('tab-a', wide), true)
+  assert.ok(narrow)
+  assert.equal(isFitted('tab-a', narrow), false)
 
-  // The double-rAF wait moved into syncBrowserVisibility when forceBoundsSync is set.
-  assert.doesNotMatch(
-    browserMode,
-    /await new Promise\(\(resolve\) => requestAnimationFrame\(\(\) => requestAnimationFrame\(\(\) => resolve\(undefined\)\)\)\)/,
-  )
+  clearFitted('tab-a')
+  assert.equal(isFitted('tab-a', wide), false)
 })
 
-test('syncBrowserVisibility internalises bounds sync + double rAF when called as visible(forceBoundsSync)', () => {
-  const boundsHook = readWorkspaceFile('src/renderer/modules/browser/useBrowserViewBounds.ts')
+test('browser tab fit cache clears only for updates that can change page layout or tab lifetime', () => {
+  assert.equal(shouldClearFittedForTabUpdate({ type: 'navigate' }), true)
+  assert.equal(shouldClearFittedForTabUpdate({ type: 'loading', loading: true }), true)
+  assert.equal(shouldClearFittedForTabUpdate({ type: 'closed' }), true)
 
-  assert.match(
-    boundsHook,
-    /phaseOrOptions\?: 'hidden' \| 'visible' \| \{ forceExact\?: boolean; syncMode\?: BrowserBoundsSyncMode; forceBoundsSync\?: boolean \}/,
-  )
-  // Stage X4 PR-shell-1 — `hide-all` now goes through the
-  // BrowserViewIntent boundary instead of a direct `browser.hideAll()`.
-  assert.match(boundsHook, /if \(phase === 'hidden'\) \{\s*emitHideAll\(\)/)
-  assert.match(boundsHook, /sendIntent\(\{[\s\S]*kind: 'hide-all'[\s\S]*reason: 'overlay-open'[\s\S]*\}\)/)
-  assert.match(
-    boundsHook,
-    /if \(options\.forceBoundsSync\) \{[\s\S]*window\.requestAnimationFrame\(\(\) => window\.requestAnimationFrame\(\(\) => resolve\(\)\)\)/,
-  )
+  assert.equal(shouldClearFittedForTabUpdate({ type: 'title' }), false)
+  assert.equal(shouldClearFittedForTabUpdate({ type: 'meta' }), false)
+  assert.equal(shouldClearFittedForTabUpdate({ type: 'loading', loading: false }), false)
 })
