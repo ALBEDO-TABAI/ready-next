@@ -8,20 +8,6 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('file tree exposes a visible trash recovery entry outside the right-click menu', () => {
-  const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
-  const marker = 'aria-label="打开回收站"'
-  const markerIndex = source.indexOf(marker)
-  assert.ok(markerIndex > 0, 'file tree must expose a visible trash entry')
-
-  const visibleBlock = source.slice(Math.max(0, markerIndex - 500), markerIndex + 500)
-  assert.match(visibleBlock, /onClick=\{openTrashPanel\}/)
-  assert.match(visibleBlock, />\s*回收站\s*</)
-
-  const contextBridgeIndex = source.indexOf('<ContextMenuBridge')
-  assert.ok(contextBridgeIndex > markerIndex, 'visible trash entry must render before the context menu bridge')
-})
-
 test('file tree right-click menu keeps remove-from-list available for top-level folders', () => {
   const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
   assert.match(source, /workspaceRoot=\{workspaceRoot\}/)
@@ -30,14 +16,16 @@ test('file tree right-click menu keeps remove-from-list available for top-level 
   assert.match(source, /if \(pendingDelete\.path === workspaceRoot\)/)
 })
 
-test('file tree distinguishes permanent delete from delete-to-trash', () => {
+test('file tree keeps direct delete and removes trash affordances', () => {
   const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
-  assert.match(source, /label: '删除到回收站'/)
-  assert.match(source, /onRequestTrash\(\{ path: item\.path, name: item\.name \}\)/)
   assert.match(source, /label: '删除'/)
   assert.match(source, /onRequestDelete\(\{ path: item\.path, name: item\.name \}\)/)
-  assert.match(source, /清空回收站/)
-  assert.match(source, /deleteTrashItemPermanently/)
+  assert.doesNotMatch(source, /aria-label="打开回收站"/)
+  assert.doesNotMatch(source, /label: '回收站'/)
+  assert.doesNotMatch(source, /label: '删除到回收站'/)
+  assert.doesNotMatch(source, /onRequestTrash/)
+  assert.doesNotMatch(source, /openTrashPanel/)
+  assert.doesNotMatch(source, /listTrash|restoreTrash|deleteTrashItem|clearTrash/)
 })
 
 test('file tree internal native drags can drop without a system Files dataTransfer type', () => {

@@ -59,10 +59,9 @@ function createMockIpc(): MockIpc {
 
 function createMockDeps(): FileMutationGroupDeps {
   // Pick `false` so handlers hit the real fs path when a behavior test invokes
-  // them. Trash root stays inside the test temp directory unless overridden.
+  // them.
   return {
     useMock: false,
-    getDocumentTrashRoot: () => join(tmpdir(), 'ready-file-mutation-test-trash'),
   }
 }
 
@@ -86,15 +85,10 @@ test('fileMutationGroup.register wires the documented channels exactly once each
   for (const required of [
     'document:mkdir',
     'document:rename',
-    'document:delete',
     'document:deletePermanent',
     'document:copy',
     'document:move',
     'document:stat',
-    'document:listTrash',
-    'document:restoreTrash',
-    'document:deleteTrashItem',
-    'document:clearTrash',
   ]) {
     assert.ok(
       registered.includes(required),
@@ -150,22 +144,18 @@ test('dispose is idempotent — calling twice does not throw and removes nothing
   )
 })
 
-test('document deletePermanent removes a file without creating a trash entry', async (t) => {
+test('document deletePermanent removes a file directly', async (t) => {
   const root = mkdtempSync(join(tmpdir(), 'ready-file-delete-permanent-'))
   t.after(async () => {
     await rm(root, { recursive: true, force: true })
   })
   const workspace = join(root, 'workspace')
-  const trashRoot = join(root, 'trash')
   mkdirSync(workspace, { recursive: true })
   const filePath = join(workspace, 'notes.md')
   writeFileSync(filePath, '# Notes\n', 'utf8')
 
   const { ipc, handleCalls } = createMockIpc()
-  fileMutationGroup.register(ipc, {
-    useMock: false,
-    getDocumentTrashRoot: () => trashRoot,
-  })
+  fileMutationGroup.register(ipc, createMockDeps())
   const handlers = new Map(handleCalls.map((entry) => [entry.channel, entry.handler]))
 
   const deleteResult = await handlers.get('document:deletePermanent')?.(
@@ -174,130 +164,6 @@ test('document deletePermanent removes a file without creating a trash entry', a
   ) as { success: boolean; error?: string }
   assert.equal(deleteResult.success, true, deleteResult.error)
   assert.equal(existsSync(filePath), false)
-
-  const listResult = await handlers.get('document:listTrash')?.({} as IpcMainInvokeEvent) as {
-    success: boolean
-    items?: unknown[]
-  }
-  assert.equal(listResult.success, true)
-  assert.equal(listResult.items?.length, 0)
-})
-
-test('document delete moves a file into Ready trash and restore returns it to the original path', async (t) => {
-  const root = mkdtempSync(join(tmpdir(), 'ready-file-trash-'))
-  t.after(async () => {
-    await rm(root, { recursive: true, force: true })
-  })
-  const workspace = join(root, 'workspace')
-  const trashRoot = join(root, 'trash')
-  mkdirSync(workspace, { recursive: true })
-  const filePath = join(workspace, 'notes.md')
-  writeFileSync(filePath, '# Notes\n', 'utf8')
-
-  const { ipc, handleCalls } = createMockIpc()
-  fileMutationGroup.register(ipc, {
-    useMock: false,
-    getDocumentTrashRoot: () => trashRoot,
-  })
-  const handlers = new Map(handleCalls.map((entry) => [entry.channel, entry.handler]))
-
-  const deleteResult = await handlers.get('document:delete')?.({} as IpcMainInvokeEvent, filePath) as {
-    success: boolean
-    trashEntry?: { id: string; trashPath: string; originalPath: string }
-    error?: string
-  }
-  assert.equal(deleteResult.success, true, deleteResult.error)
-  assert.equal(existsSync(filePath), false, 'delete must remove the file from its original path')
-  assert.ok(deleteResult.trashEntry?.id, 'delete must return a restorable trash id')
-  assert.equal(deleteResult.trashEntry.originalPath, filePath)
-  assert.equal(existsSync(deleteResult.trashEntry.trashPath), true, 'trash payload must exist on disk')
-
-  const listResult = await handlers.get('document:listTrash')?.({} as IpcMainInvokeEvent) as {
-    success: boolean
-    items?: Array<{ id: string; originalPath: string }>
-  }
-  assert.equal(listResult.success, true)
-  assert.equal(listResult.items?.[0]?.id, deleteResult.trashEntry.id)
-
-  const restoreResult = await handlers.get('document:restoreTrash')?.(
-    {} as IpcMainInvokeEvent,
-    { id: deleteResult.trashEntry.id },
-  ) as { success: boolean; path?: string; error?: string }
-  assert.equal(restoreResult.success, true, restoreResult.error)
-  assert.equal(restoreResult.path, filePath)
-  assert.equal(readFileSync(filePath, 'utf8'), '# Notes\n')
-
-  const afterRestore = await handlers.get('document:listTrash')?.({} as IpcMainInvokeEvent) as {
-    success: boolean
-    items?: unknown[]
-  }
-  assert.equal(afterRestore.success, true)
-  assert.equal(afterRestore.items?.length, 0)
-})
-
-test('document trash items can be permanently deleted individually or cleared in bulk', async (t) => {
-  const root = mkdtempSync(join(tmpdir(), 'ready-file-trash-empty-'))
-  t.after(async () => {
-    await rm(root, { recursive: true, force: true })
-  })
-  const workspace = join(root, 'workspace')
-  const trashRoot = join(root, 'trash')
-  mkdirSync(workspace, { recursive: true })
-  const firstPath = join(workspace, 'first.md')
-  const secondPath = join(workspace, 'second.md')
-  writeFileSync(firstPath, 'first\n', 'utf8')
-  writeFileSync(secondPath, 'second\n', 'utf8')
-
-  const { ipc, handleCalls } = createMockIpc()
-  fileMutationGroup.register(ipc, {
-    useMock: false,
-    getDocumentTrashRoot: () => trashRoot,
-  })
-  const handlers = new Map(handleCalls.map((entry) => [entry.channel, entry.handler]))
-
-  const firstDelete = await handlers.get('document:delete')?.({} as IpcMainInvokeEvent, firstPath) as {
-    success: boolean
-    trashEntry?: { id: string; trashPath: string }
-    error?: string
-  }
-  const secondDelete = await handlers.get('document:delete')?.({} as IpcMainInvokeEvent, secondPath) as {
-    success: boolean
-    trashEntry?: { id: string; trashPath: string }
-    error?: string
-  }
-  assert.equal(firstDelete.success, true, firstDelete.error)
-  assert.equal(secondDelete.success, true, secondDelete.error)
-  assert.ok(firstDelete.trashEntry)
-  assert.ok(secondDelete.trashEntry)
-
-  const singleDelete = await handlers.get('document:deleteTrashItem')?.(
-    {} as IpcMainInvokeEvent,
-    { id: firstDelete.trashEntry.id },
-  ) as { success: boolean; error?: string }
-  assert.equal(singleDelete.success, true, singleDelete.error)
-  assert.equal(existsSync(firstDelete.trashEntry.trashPath), false)
-
-  const afterSingle = await handlers.get('document:listTrash')?.({} as IpcMainInvokeEvent) as {
-    success: boolean
-    items?: Array<{ id: string }>
-  }
-  assert.equal(afterSingle.items?.length, 1)
-  assert.equal(afterSingle.items?.[0]?.id, secondDelete.trashEntry.id)
-
-  const clearResult = await handlers.get('document:clearTrash')?.({} as IpcMainInvokeEvent) as {
-    success: boolean
-    deleted?: number
-    error?: string
-  }
-  assert.equal(clearResult.success, true, clearResult.error)
-  assert.equal(clearResult.deleted, 1)
-  assert.equal(existsSync(secondDelete.trashEntry.trashPath), false)
-
-  const afterClear = await handlers.get('document:listTrash')?.({} as IpcMainInvokeEvent) as {
-    success: boolean
-    items?: unknown[]
-  }
-  assert.equal(afterClear.items?.length, 0)
 })
 
 test('document move refuses an existing destination before copy/remove fallback can run', async (t) => {

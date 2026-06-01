@@ -85,7 +85,6 @@ interface WorkspaceState {
   createFolder: (name: string) => Promise<boolean>
   renameItem: (oldPath: string, newName: string) => Promise<boolean>
   deleteItem: (path: string) => Promise<boolean>
-  trashItem: (path: string) => Promise<boolean>
   moveItem: (src: string, dest: string) => Promise<boolean>
   showInFolder: (path: string) => Promise<void>
   copyPathToClipboard: (path: string) => void
@@ -1014,28 +1013,6 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       }
     } catch (error) {
       console.error('Failed to delete:', error)
-    }
-    return false
-  },
-
-  trashItem: async (path) => {
-    try {
-      if (window.electronAPI) {
-        const result = await window.electronAPI.document.trashItem(path)
-        const alreadyGone = !result.success && /not found|enoent/i.test(String(result.error || ''))
-        if (result.success || alreadyGone) {
-          await cleanupRemovedWorkspacePath(path)
-          return true
-        }
-      } else {
-        set((state) => ({
-          files: state.files.filter(f => f.path !== path),
-          selectedFile: state.selectedFile === path ? null : state.selectedFile
-        }))
-        return true
-      }
-    } catch (error) {
-      console.error('Failed to move to trash:', error)
     }
     return false
   },

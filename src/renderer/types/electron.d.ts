@@ -1657,26 +1657,7 @@ interface DocumentOperationResponse {
   success: boolean
   error?: string
   mock?: boolean
-  trashEntry?: DocumentTrashEntry
   path?: string
-  deleted?: number
-}
-
-interface DocumentTrashEntry {
-  id: string
-  name: string
-  originalPath: string
-  trashPath: string
-  isDirectory: boolean
-  size: number
-  deletedAt: string
-}
-
-interface DocumentTrashListResponse {
-  success: boolean
-  items?: DocumentTrashEntry[]
-  error?: string
-  mock?: boolean
 }
 
 /** Open folder dialog response */
@@ -1743,13 +1724,8 @@ interface ElectronDocumentAPI {
   mkdir: (path: string) => Promise<DocumentOperationResponse>
   rename: (oldPath: string, newPath: string) => Promise<DocumentOperationResponse>
   deleteItem: (path: string) => Promise<DocumentOperationResponse>
-  trashItem: (path: string) => Promise<DocumentOperationResponse>
   copyItem: (src: string, dest: string) => Promise<DocumentOperationResponse>
   moveItem: (src: string, dest: string) => Promise<DocumentOperationResponse>
-  listTrash: () => Promise<DocumentTrashListResponse>
-  restoreTrash: (payload: { id: string } | string) => Promise<DocumentOperationResponse>
-  deleteTrashItem: (payload: { id: string } | string) => Promise<DocumentOperationResponse>
-  clearTrash: () => Promise<DocumentOperationResponse>
   stat: (path: string) => Promise<DocumentStatResponse>
   openFolder: (payload?: { validateAsWorkspace?: boolean }) => Promise<DocumentOpenFolderResponse>
   exportWorkspace: (payload: { name: string; folders: string[] }) => Promise<
