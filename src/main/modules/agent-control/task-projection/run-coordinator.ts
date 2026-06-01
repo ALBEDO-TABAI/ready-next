@@ -278,7 +278,11 @@ export class RunCoordinator {
 
     if (!result.success) {
       await hooks?.onFailure?.(result.error || 'Agent execution failed', result)
-      return { success: false, error: result.error || 'Agent execution failed' }
+      return {
+        success: false,
+        error: result.error || 'Agent execution failed',
+        scopeRunAuthority: result.scopeRunAuthority,
+      }
     }
 
     await hooks?.onSuccess?.(result)

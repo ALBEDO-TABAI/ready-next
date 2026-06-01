@@ -140,6 +140,7 @@ test('release packaging is pinned to a shared offline skill runtime', () => {
     'study-notes',
     'image-analysis-router',
     'image-reverse-descriptor',
+    'context-compact',
     'fastnote',
   ]) {
     assert.match(packer, new RegExp(`'${skillId}'`), `release runtime must cover ${skillId}`)

@@ -25,6 +25,13 @@ export const PRIMITIVE_TOOL_DEFS: SkillToolDef[] = [
     params: zodObjectToParamList(SKILL_PRIMITIVE_SCHEMAS.skill_ask_user),
   },
   {
+    name: 'skill_compact_context',
+    description:
+      '压缩当前 Agent 会话的模型上下文。仅在用户明确要求整理/压缩上下文，或当前选中的 context-compact skill 要执行手动压缩时调用；不要把它当作普通任务工具或后台维护动作。',
+    kind: 'primitive',
+    params: zodObjectToParamList(SKILL_PRIMITIVE_SCHEMAS.skill_compact_context),
+  },
+  {
     name: 'skill_run_shell',
     description:
       '在技能沙箱内执行一次 shell 命令。cwd=技能 managedPath；env 注入 CLAUDE_SKILL_DIR（managedPath）与 CLAUDE_SKILL_OUTPUT_DIR（per-skill output 目录）。支持 cd、$VAR、&&、管道、重定向、bash/sh 包裹的 POSIX 单引号写法，以及 python/node/grep/find/awk/sed 这类脚本探针里的单引号片段；受白名单限制，只允许 python/python3/node/bash/sh/curl/cat/ls/head/tail/grep/find/which/mkdir/pwd/echo/awk/sed，禁止 rm/cp/mv。脚本优先通过 bash scripts/x.sh 或 python scripts/x.py 调用。stdout/stderr 超过 8K 字符会被截断并落到 artifact 文件。',

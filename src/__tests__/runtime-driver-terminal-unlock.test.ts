@@ -441,6 +441,74 @@ test('X2.6 — runtime liveness extends the bootstrap watchdog window', async ()
   assert.equal(getSessionSlice(state, 'session-A').scopeRunStates['scope-A']?.phase, 'planning')
 })
 
+test('scope run events ignore stale non-started run ids but allow takeover and started handoff', () => {
+  seedTwoSessions({
+    activeSessionId: 'session-A',
+    lockedSessionId: 'session-A',
+    lockedScopeId: 'scope-A',
+    otherScopeId: 'scope-B',
+    requestId: 'req-new',
+  })
+
+  fireOnScopeRunEvent({
+    type: 'started',
+    scopeId: 'scope-A',
+    sessionId: 'scope-A',
+    agent: 'butler',
+    runId: 'req-new',
+    phase: 'planning',
+    taskSummary: 'new run planning',
+    timestamp: '2026-05-31T00:00:00.000Z',
+  })
+
+  fireOnScopeRunEvent({
+    type: 'updated',
+    scopeId: 'scope-A',
+    sessionId: 'scope-A',
+    agent: 'butler',
+    runId: 'req-old',
+    phase: 'checkpoint',
+    taskSummary: 'stale run checkpoint',
+    timestamp: '2026-05-31T00:00:01.000Z',
+  })
+
+  const afterStale = getSessionSlice(useAgent.getState(), 'session-A').scopeRunStates['scope-A']
+  assert.equal(afterStale?.requestId, 'req-new')
+  assert.equal(afterStale?.phase, 'planning')
+  assert.equal(afterStale?.taskSummary, 'new run planning')
+
+  fireOnScopeRunEvent({
+    type: 'updated',
+    scopeId: 'scope-A',
+    sessionId: 'scope-A',
+    agent: 'butler',
+    phase: 'takeover',
+    taskSummary: 'paused by user',
+    timestamp: '2026-05-31T00:00:02.000Z',
+  })
+
+  const afterTakeover = getSessionSlice(useAgent.getState(), 'session-A').scopeRunStates['scope-A']
+  assert.equal(afterTakeover?.requestId, 'req-new')
+  assert.equal(afterTakeover?.phase, 'takeover')
+  assert.equal(afterTakeover?.taskSummary, 'paused by user')
+
+  fireOnScopeRunEvent({
+    type: 'started',
+    scopeId: 'scope-A',
+    sessionId: 'scope-A',
+    agent: 'butler',
+    runId: 'req-next',
+    phase: 'planning',
+    taskSummary: 'next run planning',
+    timestamp: '2026-05-31T00:00:03.000Z',
+  })
+
+  const afterStarted = getSessionSlice(useAgent.getState(), 'session-A').scopeRunStates['scope-A']
+  assert.equal(afterStarted?.requestId, 'req-next')
+  assert.equal(afterStarted?.phase, 'planning')
+  assert.equal(afterStarted?.taskSummary, 'next run planning')
+})
+
 test('X2.6 — terminal event before timeout disarms the watchdog', async () => {
   seedTwoSessions({
     activeSessionId: 'session-A',

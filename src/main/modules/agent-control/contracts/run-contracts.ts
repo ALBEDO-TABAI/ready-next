@@ -528,9 +528,16 @@ export interface RunCoordinatorRequest {
   continuationIntent?: ContinuationIntent | null
 }
 
+export type ScopeRunAuthority = {
+  state: 'lost'
+  reason: 'superseded_by_newer_send' | 'preempted_by_newer_send'
+  currentRunId?: string | null
+}
+
 export interface RunCoordinatorResult {
   success: boolean
   error?: string
+  scopeRunAuthority?: ScopeRunAuthority
 }
 
 export interface ExecutionHostRequest {
@@ -568,6 +575,7 @@ export interface ExecutionHostResult {
   projectionTruth?: ProjectionTruthSnapshot | null
   skillTaskLifecycle?: SkillTaskLifecycleSignal | null
   terminalReason?: TurnTerminalReason | null
+  scopeRunAuthority?: ScopeRunAuthority
 }
 
 export interface ExecutionTurnResult {
@@ -585,6 +593,7 @@ export interface ExecutionTurnResult {
   projectionTruth?: ProjectionTruthSnapshot | null
   skillTaskLifecycle?: SkillTaskLifecycleSignal | null
   terminalReason?: TurnTerminalReason | null
+  scopeRunAuthority?: ScopeRunAuthority
 }
 
 export type SkillTaskLifecycleState =

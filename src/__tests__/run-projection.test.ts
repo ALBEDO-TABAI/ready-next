@@ -303,3 +303,60 @@ test('RunProjection ignores undefined run-state fields instead of clearing activ
   assert.equal(summary?.taskContinuation?.blockerType, 'background_running')
   assert.equal(summary?.progress?.stage, 'transcribing')
 })
+
+test('RunProjection ignores stale non-started runId events without blocking takeover updates', () => {
+  const store = new Map<string, ScopeRunSummary>()
+  let writes = 0
+  const projection = new RunProjection({
+    getScope: () => createScope(),
+    getPrevious: (scopeId) => store.get(scopeId),
+    setSummary: (scopeId, summary) => {
+      writes += 1
+      store.set(scopeId, summary)
+    },
+    toChannelKey: () => 'local:app',
+  })
+
+  const started = projection.recordEvent({
+    type: 'started',
+    scopeId: 'scope-1',
+    agent: 'butler',
+    runId: 'run-new',
+    phase: 'planning',
+    taskSummary: 'new run planning',
+    timestamp: '2026-04-10T02:00:00.000Z',
+  })
+
+  assert.equal(started?.runId, 'run-new')
+  assert.equal(writes, 1)
+
+  const stale = projection.recordEvent({
+    type: 'updated',
+    scopeId: 'scope-1',
+    agent: 'butler',
+    runId: 'run-old',
+    phase: 'checkpoint',
+    taskSummary: 'stale run checkpoint',
+    timestamp: '2026-04-10T02:00:01.000Z',
+  })
+
+  assert.equal(stale, null)
+  assert.equal(writes, 1)
+  assert.equal(store.get('scope-1')?.runId, 'run-new')
+  assert.equal(store.get('scope-1')?.phase, 'planning')
+  assert.equal(store.get('scope-1')?.taskSummary, 'new run planning')
+
+  const takeover = projection.recordEvent({
+    type: 'updated',
+    scopeId: 'scope-1',
+    agent: 'butler',
+    phase: 'takeover',
+    taskSummary: 'paused by user',
+    timestamp: '2026-04-10T02:00:02.000Z',
+  })
+
+  assert.equal(takeover?.runId, 'run-new')
+  assert.equal(takeover?.phase, 'takeover')
+  assert.equal(takeover?.taskSummary, 'paused by user')
+  assert.equal(writes, 2)
+})

@@ -58,6 +58,8 @@ const agentAPI = {
   // legacy AgentManager wrappers. Zero renderer callers (verified via grep).
   // Use `getRuntimeStatus` + `getCapabilityRuntimeSnapshot` for diagnostics.
   kill: (agent: string, sessionId?: string) => ipcRenderer.invoke('agent:kill', { agent, sessionId }),
+  compactSession: (agent: string, sessionId?: string) =>
+    ipcRenderer.invoke('agent:compactSession', { agent, sessionId }),
   getRuntimeStatus: () => ipcRenderer.invoke('agent:getRuntimeStatus'),
   getCapabilityRuntimeSnapshot: (config?: unknown) => ipcRenderer.invoke('agent:getCapabilityRuntimeSnapshot', config),
   listChannels: () => ipcRenderer.invoke('agent:listChannels'),

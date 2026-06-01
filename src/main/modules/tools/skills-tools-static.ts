@@ -53,6 +53,7 @@ export const STATIC_SKILL_ACTIONS_BY_TOOL_NAME: Record<string, { skillId: string
 // isn't ready yet (boot path).
 const PRIMITIVE_TOOL_NAMES: string[] = [
   'skill_ask_user',
+  'skill_compact_context',
   'skill_run_shell',
   'skill_write_artifact',
   'skill_read_artifact',

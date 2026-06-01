@@ -12,6 +12,7 @@ export type EmbeddedSkillId =
   | 'study-notes'
   | 'image-analysis-router'
   | 'image-reverse-descriptor'
+  | 'context-compact'
   | 'fastnote'
 
 export interface EmbeddedSkillManifest {
@@ -112,6 +113,13 @@ export const EMBEDDED_SKILLS: EmbeddedSkillManifest[] = [
     name: 'Image Reverse Descriptor',
     description: '网页图片反推描述词：主体 / 场景 / 构图 / 光线 / 色彩 / 材质 / 风格关键词',
     version: '2026.05.21',
+    requirementsFile: 'requirements.txt',
+  },
+  {
+    id: 'context-compact',
+    name: 'Context Compact',
+    description: '手动压缩当前 Agent 会话上下文，释放模型上下文窗口',
+    version: '2026.05.31',
     requirementsFile: 'requirements.txt',
   },
   {

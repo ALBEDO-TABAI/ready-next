@@ -41,6 +41,8 @@ const REFERENCE_SKILL_PRIMITIVE_TOOL_NAMES = [
   // so reference-skill turns didn't surface it as a recommended next step.
   'skill_inspect_run_state',
 ]
+const CONTEXT_COMPACT_SKILL_ID = 'context-compact'
+const CONTEXT_COMPACT_PRIMITIVE_TOOL_NAME = 'skill_compact_context'
 
 const DESCRIPTION_MATCH_STOP_TERMS = new Set([
   '帮我',
@@ -187,6 +189,13 @@ export class SkillContextOrchestrator {
       if (armedSkill && !skillCandidates.some((skill) => skill.id === armedSkill.id)) {
         skillCandidates.push(armedSkill)
       }
+    }
+
+    if (
+      skillCandidates.some((skill) => skill.id === CONTEXT_COMPACT_SKILL_ID)
+      || armedHint?.id === CONTEXT_COMPACT_SKILL_ID
+    ) {
+      toolNames.add(CONTEXT_COMPACT_PRIMITIVE_TOOL_NAME)
     }
 
     for (const skill of skillCandidates) {

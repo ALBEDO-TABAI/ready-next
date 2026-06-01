@@ -83,6 +83,7 @@ const REQUIRED_RUNTIME_SKILLS = [
   'study-notes',
   'image-analysis-router',
   'image-reverse-descriptor',
+  'context-compact',
   'fastnote',
 ]
 const REQUIRED_RUNTIME_TOOLS = ['ffmpeg', 'ffprobe', 'yt-dlp']

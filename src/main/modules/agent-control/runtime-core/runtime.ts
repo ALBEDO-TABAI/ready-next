@@ -1250,7 +1250,9 @@ export class AgentControlRuntime extends EventEmitter {
         )
         return {
           ...result,
-          errorKind: result.success ? undefined : classifySendScopedError(result.error, 'run'),
+          errorKind: result.scopeRunAuthority?.state === 'lost'
+            ? 'superseded'
+            : result.success ? undefined : classifySendScopedError(result.error, 'run'),
           persistence,
         }
       },

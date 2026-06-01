@@ -47,6 +47,17 @@ test('maps message persistence failures without raw sqlite text', () => {
   assert.doesNotMatch(result.friendlyMessage, /SQLITE/i)
 })
 
+test('maps superseded sends to a user-action handoff message', () => {
+  const result = mapBackendErrorToFriendly({
+    error: 'newer send took ownership',
+    errorKind: 'superseded',
+  })
+
+  assert.equal(result.friendlyMessage, '已由新消息接管，可以继续发送')
+  assert.equal(result.recoverable, true)
+  assert.equal(result.retryStrategy, 'user_action')
+})
+
 test('maps provider quota failures to a recovery-specific message', () => {
   const result = mapBackendErrorToFriendly({
     error: 'HTTP 402: Insufficient balance',

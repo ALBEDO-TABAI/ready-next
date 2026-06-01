@@ -4,6 +4,7 @@ export type SendScopedErrorKind =
   | 'attachment_unavailable'
   | 'host_unavailable'
   | 'circuit_break'
+  | 'superseded'
   | 'unknown'
 
 export type SendScopedScopeStatus = 'pre-existing' | 'lazy-created' | 'failed'

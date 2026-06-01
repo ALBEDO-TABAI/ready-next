@@ -45,6 +45,15 @@ export function mapBackendErrorToFriendly(input: {
     }
   }
 
+  if (errorKind === 'superseded') {
+    return {
+      friendlyMessage: '已由新消息接管，可以继续发送',
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'user_action',
+    }
+  }
+
   if (/scope_id is required/i.test(error)) {
     return {
       friendlyMessage: '操作失败，请刷新会话',

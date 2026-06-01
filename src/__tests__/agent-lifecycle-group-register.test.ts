@@ -1,22 +1,23 @@
 // Stage V V2.1c — behavior test for `agentLifecycleGroup.register` /
 // `IpcDisposeHandle.dispose()`.
 //
-// V2.1c extracts the 4 agent-loop lifecycle channels from claude-bridge's
+// V2.1c extracts the agent-loop lifecycle channels from claude-bridge's
 // `setupAgentIPC`:
 //
 //   agent:send        (push a turn at a global agent + sessionId)
 //   agent:newSession  (clear in-flight state + start a fresh session)
 //   agent:kill        (stop generation for an agent + sessionId)
 //   agent:sendScoped  (push a turn at a scope-run + optional continuation)
+//   agent:compactSession (manual memory-session compaction)
 //
 // The V5 IPC contract gate proves the channel literals still exist on the
 // renderer side, but it cannot prove:
 //
-//   1. `register` wires EXACTLY the 4 channel names the group owns via
-//      `ipcMain.handle` (no extras, no missing ones — all 4 are invoke /
+//   1. `register` wires EXACTLY the channel names the group owns via
+//      `ipcMain.handle` (no extras, no missing ones — all are invoke /
 //      Promise so they all live on the handle slot, not the listener slot).
 //   2. The returned dispose handle calls `removeHandler` for each of those
-//      same 4 channels — so dev-reload re-registration and
+//      same channels — so dev-reload re-registration and
 //      `cleanupAgentRuntime` shutdown don't leak handler slots.
 //
 // Handler bodies are NOT exercised here — those are covered by pre-existing
@@ -77,6 +78,7 @@ function createMockDeps(): AgentLifecycleGroupDeps {
       send: fail('orchestrator.send'),
       newSession: fail('orchestrator.newSession'),
       kill: fail('orchestrator.kill'),
+      compactSession: fail('orchestrator.compactSession'),
     } as unknown as AgentLifecycleGroupDeps['orchestrator'],
     sendScoped: fail('sendScoped') as AgentLifecycleGroupDeps['sendScoped'],
     cancelToolActionRequestsBySession: fail('cancelToolActionRequestsBySession'),
@@ -88,7 +90,7 @@ function createMockDeps(): AgentLifecycleGroupDeps {
   }
 }
 
-test('agentLifecycleGroup.register wires the 4 documented channels exactly once each via ipcMain.handle', () => {
+test('agentLifecycleGroup.register wires the documented channels exactly once each via ipcMain.handle', () => {
   const { ipc, handleCalls } = createMockIpc()
   agentLifecycleGroup.register(ipc, createMockDeps())
 
@@ -97,9 +99,9 @@ test('agentLifecycleGroup.register wires the 4 documented channels exactly once 
   assert.deepEqual(
     registered,
     expected,
-    'register must subscribe to exactly the 4 agent-lifecycle channels',
+    'register must subscribe to exactly the agent-lifecycle channels',
   )
-  assert.equal(handleCalls.length, 4, 'each channel must be registered exactly once')
+  assert.equal(handleCalls.length, _agentLifecycleGroupChannelsForTest.length, 'each channel must be registered exactly once')
 
   // Spot-check the exact channel literals per the plan (V2.1c, §3 V2.1) so
   // accidental renames trip this test even if the channel count happens to
@@ -110,6 +112,7 @@ test('agentLifecycleGroup.register wires the 4 documented channels exactly once 
     'agent:newSession',
     'agent:kill',
     'agent:sendScoped',
+    'agent:compactSession',
   ]) {
     assert.ok(
       registered.includes(required),
@@ -125,7 +128,30 @@ test('agentLifecycleGroup namespace is the documented label so dispose ordering 
   assert.equal(agentLifecycleGroup.namespace, 'agent:lifecycle')
 })
 
-test('IpcDisposeHandle.dispose removes the same 4 channels that register added', () => {
+test('agent:compactSession handler forwards the public tuple without composing the internal key in IPC', async () => {
+  const { ipc, handleCalls } = createMockIpc()
+  const calls: Array<{ agent: string; sessionId?: string }> = []
+  const deps = createMockDeps()
+  deps.orchestrator = {
+    ...deps.orchestrator,
+    compactSession: async (agent: string, sessionId?: string) => {
+      calls.push({ agent, sessionId })
+      return { status: 'queued' }
+    },
+  } as unknown as AgentLifecycleGroupDeps['orchestrator']
+
+  agentLifecycleGroup.register(ipc, deps)
+
+  const compactHandler = handleCalls.find((entry) => entry.channel === 'agent:compactSession')?.handler
+  assert.ok(compactHandler, 'agent:compactSession handler must be registered')
+
+  const result = await compactHandler({} as IpcMainInvokeEvent, { agent: 'butler', sessionId: 'session-1' })
+
+  assert.deepEqual(calls, [{ agent: 'butler', sessionId: 'session-1' }])
+  assert.deepEqual(result, { success: true, data: { status: 'queued' } })
+})
+
+test('IpcDisposeHandle.dispose removes the same channels that register added', () => {
   const { ipc, removeHandlerCalls } = createMockIpc()
   const handle = agentLifecycleGroup.register(ipc, createMockDeps())
 
@@ -156,7 +182,7 @@ test('dispose is idempotent — calling twice does not throw and stays bounded',
   // invocation must NOT throw. We allow the call to issue removeHandler
   // again — what we care about is no exception, no handler-slot leak.
   assert.doesNotThrow(() => handle.dispose())
-  // Second dispose runs the same 4 removeHandler calls; total count grows by
+  // Second dispose runs the same removeHandler calls; total count grows by
   // exactly the channel count, never more.
   assert.equal(
     removeHandlerCalls.length - afterFirst,

@@ -57,9 +57,14 @@ import {
   getProviderDef,
   normalizeAIConfig,
   resolveAIConfigCapabilities,
+  type AIModelDef,
   type AIModelConfig,
   type AIProviderDef,
 } from '../../../../shared/ai-providers'
+import {
+  DEFAULT_CONTEXT_WINDOW,
+  resolveModelContextWindow,
+} from '../../../../shared/context-budget-types'
 import {
   applyProviderRequestPatch,
   applyProviderResponsePatch,
@@ -116,11 +121,20 @@ import {
 } from '../tools-runtime/tool-result-types'
 import type { AgentSpawnContext } from '../../../../shared/skill-host-contract'
 import { findDocumentVisualSyntaxIssue } from '../../../../shared/document-visual-syntax'
+import {
+  compactAgentInputItems,
+  normalizeSessionSnapshotForSeed,
+  type CompactResult,
+} from '../compaction/compact-agent-input'
 import { createRotatingLogger } from '../../../utils/rotating-logger'
 
 const agentSdkLogger = createRotatingLogger('ready-agent-sdk.log')
 const settingsRepository = new AppSettingsRepository()
 const SDK_CHILD_RESUME_AWAIT_TIMEOUT_MS = 1_500
+const DEFAULT_AGENT_SDK_MAX_TURNS = 16
+const LOCAL_DOCUMENT_WRITE_MAX_TURNS = 32
+const PREEMPT_SETTLE_TIMEOUT_MS = 4_000
+const MAX_ORPHAN_RUNS = 3
 
 function log(message: string): void {
   try {
@@ -133,11 +147,38 @@ function log(message: string): void {
 
 interface AgentSdkSession {
   sdkSession: MemorySession
-  abortController: AbortController | null
   systemPrompt: string
   generation: number
-  activeRunId: string | null
+  currentRun: RunHandle | null
+  orphanCount: number
+  pendingCompact: PendingCompact | null
+  contextWindowTokens: number
+  lastUsageTokens: number
 }
+
+interface RunHandle {
+  runId: string
+  runGeneration: number
+  abortController: AbortController | null
+  settled: Promise<void>
+  resolveSettled: () => void
+  capturedSession: MemorySession
+}
+
+interface PendingCompact {
+  reason: CompactReason
+}
+
+type CompactReason = 'overflow' | 'manual' | 'queued'
+
+type CompactSessionResult =
+  | { status: 'compacted' | 'noop'; report: CompactResult['report'] }
+  | { status: 'queued' }
+  | { status: 'not_found' | 'superseded'; message: string }
+
+type BeginRunResult =
+  | { ok: true; session: AgentSdkSession; runHandle: RunHandle; abortController: AbortController; runGeneration: number }
+  | { ok: false; reason: 'superseded' | 'orphan_limit'; message: string; currentRunId?: string | null }
 
 interface ReadyAgentSdkRunParams {
   agentName: string
@@ -151,11 +192,19 @@ interface ReadyAgentSdkRunParams {
   session: MemorySession
   tools: AgentSdkTool[]
   signal: AbortSignal
+  maxTurns: number
+  contextWindowTokens: number
   onTextDelta: (delta: string) => void
 }
 
 interface ReadyAgentSdkRunResult {
   finalText: string
+  usage?: {
+    inputTokens: number
+    outputTokens: number
+    totalTokens: number
+  }
+  lastResponseId?: string
 }
 
 interface MapToolFailureClose {
@@ -182,6 +231,7 @@ interface ToolBridgeRuntimeContext {
   recordToolResult: (toolName: string, output: ToolExecutionOutput) => void
   nativeMapCriticalClose?: MapToolFailureClose | null
   nativeMapAmbiguityResolved?: boolean
+  runHandle: RunHandle
 }
 
 interface SdkLongSkillCheckpoint {
@@ -871,6 +921,13 @@ function shouldRequireLocalDocumentExcerpt(message: RunMessage, requestEnvelope?
   return documentResourceKeys.size > 1 && /(?:总结|梳理|分析|人物|关系)/i.test(primary)
 }
 
+function shouldRequireLocalDocumentWriteOutput(message: RunMessage, requestEnvelope?: unknown): boolean {
+  if (!shouldUseLocalDocumentToolSet(message, requestEnvelope)) return false
+  const envelopeRefs = parseEnvelopeResourceReferences(requestEnvelope)
+  const primary = envelopeRefs.primaryInstruction || primaryInstructionText(message)
+  return /(?:新建|创建|另存|保存|写入|写到|写进|整理到|放到|输出到|目录下|文件夹下|@\[[^\]]+\](?:目录|文件夹)|生成(?:一个|一份)?.{0,20}文档|文档.{0,12}(?:保存|写好|写完)|笔记.{0,12}保存)/i.test(primary)
+}
+
 function buildLocalDocumentExcerptInstruction(required: boolean): string {
   if (!required) return ''
   return [
@@ -878,6 +935,7 @@ function buildLocalDocumentExcerptInstruction(required: boolean): string {
     '如果用户限定“前几章/某几章”，先用 file_locate 定位章节，再用 file_read_excerpt 读取对应章节正文。',
     '只根据读取到的片段写结果；不要使用书本常识、后续剧情或附件外信息。不确定的关系要标注“不确定”。',
     '不要写“后续待展开”“后续剧情”“日后”“未来”等超出指定章节的提示语；章节外内容一律省略。',
+    '如果用户要求新建、写入或保存文档，读取到足够章节依据后要优先写入并保存目标文档；不要为了读完整本或整章而无限继续读取。',
     '除非用户明确要求 widget、信息卡、卡片或交互式图表，否则关系图优先用 Markdown 表格、文本框图或 Mermaid，不要生成 show-widget。',
   ].join('\n')
 }
@@ -963,6 +1021,20 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+async function raceWithTimeout(promise: Promise<unknown>, timeoutMs: number): Promise<'settled' | 'timeout'> {
+  let timeout: ReturnType<typeof setTimeout> | null = null
+  try {
+    return await Promise.race([
+      promise.then(() => 'settled' as const),
+      new Promise<'timeout'>((resolve) => {
+        timeout = setTimeout(() => resolve('timeout'), timeoutMs)
+      }),
+    ])
+  } finally {
+    if (timeout) clearTimeout(timeout)
+  }
+}
+
 async function defaultFetchWithTimeout(
   url: string,
   init: RequestInit,
@@ -983,6 +1055,12 @@ function classifySdkRuntimeError(error: unknown): {
     return {
       terminalReason: 'blocked_config',
       userMessagePrefix: 'SDK 配置失败',
+    }
+  }
+  if (/(?:context[\s_-]*(?:length|window)|maximum context|prompt (?:is )?too long|too many tokens|context_length_exceeded|request too large|http 413|\b413\b)/i.test(message)) {
+    return {
+      terminalReason: 'context_overflow',
+      userMessagePrefix: 'SDK 上下文已超限',
     }
   }
   if (/(?:quota|rate limit|429|fetch failed|network|timeout|timed out|ENOTFOUND|ECONN|ETIMEDOUT)/i.test(message)) {
@@ -1045,6 +1123,11 @@ function resolveAgentSdkProvider(
   }
 }
 
+function resolveConfiguredModelDef(config: AIModelConfig, baseUrl?: string): AIModelDef | null {
+  const providerDef = getProviderDef(config.provider, String(baseUrl || config.baseUrl || '').trim())
+  return providerDef?.models.find((modelDef) => modelDef.id === config.model) || null
+}
+
 function extractToolCallFromStreamEvent(event: RunStreamEvent): {
   name: string
   args: Record<string, unknown>
@@ -1091,29 +1174,56 @@ async function runWithOpenAIAgentsSdk(
     stream: true,
     signal: params.signal,
     session: params.session,
-    maxTurns: 16,
+    maxTurns: params.maxTurns,
+    callModelInputFilter: async ({ modelData }) => {
+      const result = await compactAgentInputItems(modelData.input, {
+        windowTokens: params.contextWindowTokens,
+      })
+      return result.compacted
+        ? { ...modelData, input: result.items }
+        : modelData
+    },
     toolExecution: {
       maxFunctionToolConcurrency: 1,
     },
   })
-  for await (const event of stream) {
-    if (
-      event.type === 'raw_model_stream_event'
-      && event.data.type === 'output_text_delta'
-      && typeof event.data.delta === 'string'
-    ) {
-      params.onTextDelta(event.data.delta)
-      continue
+  try {
+    for await (const event of stream) {
+      if (
+        event.type === 'raw_model_stream_event'
+        && event.data.type === 'output_text_delta'
+        && typeof event.data.delta === 'string'
+      ) {
+        params.onTextDelta(event.data.delta)
+        continue
+      }
+      const toolCall = extractToolCallFromStreamEvent(event)
+      if (toolCall) {
+        log(`sdk tool_called name=${toolCall.name}`)
+      }
     }
-    const toolCall = extractToolCallFromStreamEvent(event)
-    if (toolCall) {
-      log(`sdk tool_called name=${toolCall.name}`)
-    }
+    await stream.completed
+  } finally {
+    const streamLoopPromise = (stream as { _getStreamLoopPromise?: () => Promise<unknown> })
+      ._getStreamLoopPromise?.()
+    if (streamLoopPromise) await streamLoopPromise
   }
-  await stream.completed
   if (stream.error) throw stream.error
+  const rawResponses = stream.rawResponses
+  const lastResponse = rawResponses[rawResponses.length - 1]
   return {
     finalText: typeof stream.finalOutput === 'string' ? stream.finalOutput : '',
+    usage: usageFromModelResponse(lastResponse),
+    lastResponseId: stream.lastResponseId,
+  }
+}
+
+function usageFromModelResponse(response: ModelResponse | undefined): ReadyAgentSdkRunResult['usage'] {
+  if (!response?.usage) return undefined
+  return {
+    inputTokens: response.usage.inputTokens,
+    outputTokens: response.usage.outputTokens,
+    totalTokens: response.usage.totalTokens,
   }
 }
 
@@ -1333,6 +1443,13 @@ function buildFileReadExcerptCheckpoint(output: ToolExecutionOutput): string | n
     '',
     excerpt,
   ].filter((line) => line !== '').join('\n')
+}
+
+function buildLocalDocumentWriteBudgetCheckpoint(): string {
+  return [
+    '已经读取源文档，但这轮工具调用次数用完了，目标文档还没有确认写入并保存。',
+    '请继续这项任务，我会从已读取的依据接着写入目标文档；不会把原文贴到聊天里。',
+  ].join('\n')
 }
 
 function mapToolFailureClose(
@@ -2380,6 +2497,8 @@ function formatToolResultTrace(toolName: string, output: ToolExecutionOutput): s
 
 export class AgentSdkRuntime extends EventEmitter {
   private readonly sessions = new Map<string, AgentSdkSession>()
+  private readonly sessionLocks = new Map<string, Promise<void>>()
+  private readonly sessionLockCounts = new Map<string, number>()
   private readonly domainAdapters: ReadonlyArray<DomainAdapter>
   private readonly loadAIConfig: () => AIConfigLoad
   private readonly runAgent: (params: ReadyAgentSdkRunParams) => Promise<ReadyAgentSdkRunResult>
@@ -2504,10 +2623,13 @@ export class AgentSdkRuntime extends EventEmitter {
     this.stopGeneration(name)
     this.sessions.set(name, {
       sdkSession: new MemorySession({ sessionId: name }),
-      abortController: null,
       systemPrompt: systemPrompt || defaultSystemPrompt(),
       generation: 0,
-      activeRunId: null,
+      currentRun: null,
+      orphanCount: 0,
+      pendingCompact: null,
+      contextWindowTokens: DEFAULT_CONTEXT_WINDOW,
+      lastUsageTokens: 0,
     })
   }
 
@@ -2523,27 +2645,299 @@ export class AgentSdkRuntime extends EventEmitter {
   stopGeneration(name: string): void {
     const session = this.sessions.get(name)
     if (!session) return
-    const runId = session.activeRunId
+    const currentRun = session.currentRun
     session.generation += 1
-    if (session.abortController) {
+    if (currentRun?.abortController) {
       try {
         this.cancelPendingToolActions?.(name)
       } catch (error) {
         log(`cancelPendingToolActions failed: ${errorMessage(error)}`)
       }
-      session.abortController.abort(new Error('cancelled_user'))
-      session.abortController = null
+      currentRun.abortController.abort(new Error('cancelled_user'))
+      currentRun.abortController = null
     }
-    if (runId) {
+    if (currentRun?.runId) {
       this.emit('status', {
         agent: name,
-        runId,
+        runId: currentRun.runId,
         status: 'cancelled',
         terminalReason: 'cancelled_user',
         isMock: false,
       })
-      session.activeRunId = null
     }
+  }
+
+  async compactSession(name: string, reason: CompactReason = 'manual'): Promise<CompactSessionResult> {
+    return this.withSessionLock(name, async () => {
+      const session = this.sessions.get(name)
+      if (!session) return { status: 'not_found', message: 'session not found' }
+      if (session.currentRun) {
+        session.pendingCompact = { reason }
+        return { status: 'queued' }
+      }
+      return this.compactMemorySession(
+        session.sdkSession,
+        session.contextWindowTokens,
+        undefined,
+        reason === 'manual',
+      )
+    })
+  }
+
+  private async withSessionLock<T>(name: string, fn: () => Promise<T> | T): Promise<T> {
+    const previous = this.sessionLocks.get(name) ?? Promise.resolve()
+    let release!: () => void
+    const current = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    this.sessionLockCounts.set(name, (this.sessionLockCounts.get(name) ?? 0) + 1)
+    this.sessionLocks.set(name, previous.catch(() => undefined).then(() => current))
+    await previous.catch(() => undefined)
+    try {
+      return await fn()
+    } finally {
+      release()
+      const nextCount = (this.sessionLockCounts.get(name) ?? 1) - 1
+      if (nextCount > 0) {
+        this.sessionLockCounts.set(name, nextCount)
+      } else {
+        this.sessionLockCounts.delete(name)
+      }
+    }
+  }
+
+  private createRunHandle(params: {
+    runId: string
+    runGeneration: number
+    abortController: AbortController
+    capturedSession: MemorySession
+  }): RunHandle {
+    let resolveSettled!: () => void
+    const settled = new Promise<void>((resolve) => {
+      resolveSettled = resolve
+    })
+    return {
+      ...params,
+      settled,
+      resolveSettled,
+    }
+  }
+
+  private async beginRun(params: {
+    name: string
+    runId: string
+    sessionId?: string
+  }): Promise<BeginRunResult> {
+    const idleSession = this.sessions.get(params.name)
+    if (
+      idleSession
+      && !idleSession.currentRun
+      && (this.sessionLockCounts.get(params.name) ?? 0) === 0
+    ) {
+      if (idleSession.orphanCount >= MAX_ORPHAN_RUNS) {
+        return {
+          ok: false,
+          reason: 'orphan_limit',
+          message: '上一轮仍在取消中，请稍后重试。',
+        }
+      }
+      idleSession.generation += 1
+      const abortController = new AbortController()
+      const runHandle = this.createRunHandle({
+        runId: params.runId,
+        runGeneration: idleSession.generation,
+        abortController,
+        capturedSession: idleSession.sdkSession,
+      })
+      idleSession.currentRun = runHandle
+      return {
+        ok: true,
+        session: idleSession,
+        runHandle,
+        abortController,
+        runGeneration: idleSession.generation,
+      }
+    }
+
+    let started: Extract<BeginRunResult, { ok: true }> | null = null
+    let capturedOld: RunHandle | null = null
+    let myGeneration = 0
+    let blockedByOrphans = false
+
+    await this.withSessionLock(params.name, async () => {
+      const session = this.sessions.get(params.name)
+      if (!session) return
+      if (session.orphanCount >= MAX_ORPHAN_RUNS) {
+        blockedByOrphans = true
+        return
+      }
+      if (!session.currentRun) {
+        session.generation += 1
+        const abortController = new AbortController()
+        const runHandle = this.createRunHandle({
+          runId: params.runId,
+          runGeneration: session.generation,
+          abortController,
+          capturedSession: session.sdkSession,
+        })
+        session.currentRun = runHandle
+        started = {
+          ok: true,
+          session,
+          runHandle,
+          abortController,
+          runGeneration: session.generation,
+        }
+        return
+      }
+
+      capturedOld = session.currentRun
+      try {
+        this.cancelPendingToolActions?.(params.name, params.sessionId)
+      } catch (error) {
+        log(`preempt cancelPendingToolActions failed: ${errorMessage(error)}`)
+      }
+      session.generation += 1
+      myGeneration = session.generation
+      if (capturedOld.abortController) {
+        capturedOld.abortController.abort(new Error('process_restarted'))
+        capturedOld.abortController = null
+      }
+      log(`preempted previous SDK run agent=${params.name}`)
+    })
+
+    if (started) return started
+
+    if (blockedByOrphans) {
+      return {
+        ok: false,
+        reason: 'orphan_limit',
+        message: '上一轮仍在取消中，请稍后重试。',
+      }
+    }
+
+    const oldRun = capturedOld as RunHandle | null
+    if (oldRun) {
+      await raceWithTimeout(oldRun.settled, PREEMPT_SETTLE_TIMEOUT_MS)
+    }
+
+    return this.withSessionLock(params.name, async () => {
+      let session = this.sessions.get(params.name)
+      if (!session || session.generation !== myGeneration) {
+        return {
+          ok: false,
+          reason: 'superseded',
+          message: '本轮已被更新的发送接管。',
+          currentRunId: session?.currentRun?.runId ?? null,
+        }
+      }
+      if (oldRun && session.currentRun === oldRun) {
+        const carried = normalizeSessionSnapshotForSeed(await oldRun.capturedSession.getItems())
+        session = {
+          sdkSession: new MemorySession({ sessionId: params.name, initialItems: carried }),
+          systemPrompt: session.systemPrompt,
+          generation: session.generation,
+          currentRun: null,
+          orphanCount: session.orphanCount + 1,
+          pendingCompact: session.pendingCompact,
+          contextWindowTokens: session.contextWindowTokens,
+          lastUsageTokens: session.lastUsageTokens,
+        }
+        this.sessions.set(params.name, session)
+      }
+      const abortController = new AbortController()
+      const runHandle = this.createRunHandle({
+        runId: params.runId,
+        runGeneration: session.generation,
+        abortController,
+        capturedSession: session.sdkSession,
+      })
+      session.currentRun = runHandle
+      return {
+        ok: true,
+        session,
+        runHandle,
+        abortController,
+        runGeneration: session.generation,
+      }
+    })
+  }
+
+  private async finalizeRun(name: string, session: AgentSdkSession, runHandle: RunHandle): Promise<void> {
+    try {
+      await this.withSessionLock(name, async () => {
+        const latest = this.sessions.get(name)
+        if (latest === session && latest.currentRun?.runId === runHandle.runId) {
+          latest.currentRun = null
+          await this.drainPendingCompactLocked(latest)
+          return
+        }
+        if (latest && latest !== session && latest.orphanCount > 0) {
+          latest.orphanCount -= 1
+        }
+      })
+    } finally {
+      runHandle.resolveSettled()
+    }
+  }
+
+  private async drainPendingCompactLocked(session: AgentSdkSession): Promise<void> {
+    while (session.pendingCompact) {
+      const pending = session.pendingCompact
+      session.pendingCompact = null
+      await this.compactMemorySession(
+        session.sdkSession,
+        session.contextWindowTokens,
+        undefined,
+        pending.reason === 'manual',
+      )
+    }
+  }
+
+  private async compactMemorySession(
+    sdkSession: MemorySession,
+    windowTokens: number,
+    baseItems?: AgentInputItem[],
+    force = false,
+  ): Promise<CompactSessionResult> {
+    const sourceItems = baseItems ?? await sdkSession.getItems()
+    const result = await compactAgentInputItems(sourceItems, { windowTokens, force })
+    if (!result.compacted) {
+      return { status: 'noop', report: result.report }
+    }
+    await sdkSession.clearSession()
+    await sdkSession.addItems(result.items)
+    return { status: 'compacted', report: result.report }
+  }
+
+  private async compactCapturedSession(
+    name: string,
+    runHandle: RunHandle,
+    baseItems: AgentInputItem[] | undefined,
+    reason: CompactReason,
+    windowTokens: number,
+  ): Promise<CompactSessionResult> {
+    return this.withSessionLock(name, async () => {
+      const session = this.sessions.get(name)
+      if (
+        !session
+        || session.generation !== runHandle.runGeneration
+        || session.currentRun?.runId !== runHandle.runId
+      ) {
+        return { status: 'superseded', message: 'run no longer owns this session' }
+      }
+      const result = await this.compactMemorySession(
+        runHandle.capturedSession,
+        windowTokens,
+        baseItems,
+        reason === 'overflow' || reason === 'manual',
+      )
+      if (result.status === 'compacted') {
+        session.pendingCompact = null
+        log(`context compacted agent=${name} reason=${reason} before=${result.report.beforeTokens} after=${result.report.afterTokens}`)
+      }
+      return result
+    })
   }
 
   async sendMessage(
@@ -2556,7 +2950,6 @@ export class AgentSdkRuntime extends EventEmitter {
     if (!this.sessions.has(name)) {
       this.newSession(name)
     }
-    const session = this.sessions.get(name)!
     const taskId = executionOptions?.taskId || `task-${runId}`
     const sessionId = executionOptions?.publicSessionId || this.extractSessionIdFromInternalName(name)
     const transcriptEvents: TurnTranscriptEvent[] = []
@@ -2567,32 +2960,37 @@ export class AgentSdkRuntime extends EventEmitter {
     let finalText = ''
     let documentTargetGuardForRecovery: DocumentTargetGuard | null = null
     let requiresLocalDocumentExcerptForRecovery = false
+    let requiresLocalDocumentWriteForRecovery = false
     let fileReadExcerptCheckpointForRecovery: string | null = null
     let hasSuccessfulDocumentTargetMutation = false
     let lastDocumentSaveSuccessText: string | null = null
 
-    if (session.abortController) {
-      const previousAbortController = session.abortController
-      try {
-        this.cancelPendingToolActions?.(name, sessionId)
-      } catch (error) {
-        log(`preempt cancelPendingToolActions failed: ${errorMessage(error)}`)
-      }
-      session.generation += 1
-      previousAbortController.abort(new Error('process_restarted'))
-      session.abortController = null
-      log(`preempted previous SDK run agent=${name}`)
+    const begin = await this.beginRun({ name, runId, sessionId })
+    if (!begin.ok) {
+      return this.buildResult({
+        success: false,
+        error: begin.message,
+        finalText: '',
+        cancelled: false,
+        taskId,
+        usedTools,
+        transcriptEvents,
+        projectionPatches,
+        terminalReason: 'blocked_external',
+        scopeRunAuthority: begin.reason === 'superseded'
+          ? {
+            state: 'lost',
+            reason: 'superseded_by_newer_send',
+            currentRunId: begin.currentRunId ?? null,
+          }
+          : undefined,
+      })
     }
-
-    session.generation += 1
-    const runGeneration = session.generation
-    session.activeRunId = runId
-    const abortController = new AbortController()
-    session.abortController = abortController
+    const { session, runHandle, abortController, runGeneration } = begin
 
     const isCurrentRun = (): boolean => {
       const latest = this.sessions.get(name)
-      return Boolean(latest && latest.generation === runGeneration && latest.activeRunId === runId)
+      return Boolean(latest && latest.generation === runGeneration && latest.currentRun?.runId === runId)
     }
     const emitOutput = (chunk: string, type: string, projectionPatch?: Record<string, unknown> | null): void => {
       if (!isCurrentRun()) return
@@ -2681,6 +3079,9 @@ export class AgentSdkRuntime extends EventEmitter {
         fetchWithTimeout: this.fetchWithTimeout,
       })
       const capabilities = resolveAIConfigCapabilities(normalizedConfig)
+      const modelDef = resolveConfiguredModelDef(normalizedConfig, capabilities?.baseUrl)
+      const contextWindowTokens = resolveModelContextWindow(normalizedConfig, modelDef)
+      session.contextWindowTokens = contextWindowTokens
       const useTextToolBridge = capabilities?.toolCallTransport === 'text'
       const agentContext = buildAgentSpawnContextFromAIConfig(normalizedConfig, {
         baseUrl: String(capabilities?.baseUrl || normalizedConfig.baseUrl || '').trim(),
@@ -2741,6 +3142,11 @@ export class AgentSdkRuntime extends EventEmitter {
         executionOptions?.requestEnvelope,
       )
       requiresLocalDocumentExcerptForRecovery = requiresLocalDocumentExcerpt
+      const requiresLocalDocumentWrite = shouldRequireLocalDocumentWriteOutput(
+        content as RunMessage,
+        executionOptions?.requestEnvelope,
+      )
+      requiresLocalDocumentWriteForRecovery = requiresLocalDocumentWrite
       let toolDefinitions = this.listToolDefinitionsForTurn({
         message: content as RunMessage,
         sessionId,
@@ -2817,6 +3223,7 @@ export class AgentSdkRuntime extends EventEmitter {
           }
         },
         agentContext,
+        runHandle,
       }
       const sdkTools = useTextToolBridge
         ? []
@@ -2900,25 +3307,65 @@ export class AgentSdkRuntime extends EventEmitter {
         && (normalizedConfig.provider !== 'openai' || capabilities?.agentProtocol === 'anthropic')
       for (let bridgeTurn = 0; bridgeTurn < (useTextToolBridge ? 4 : 3); bridgeTurn += 1) {
         let streamedText = ''
-        const runResult = await this.runAgent({
-          agentName: name,
-          runId,
-          taskId,
-          sessionId,
-          input: nextInput,
-          instructions,
-          model,
-          provider,
-          session: session.sdkSession,
-          tools: sdkTools,
-          signal: abortController.signal,
-          onTextDelta: (delta) => {
-            streamedText += delta
-            if (!useTextToolBridge && !bufferNativeTextUntilParsed) {
-              emitOutput(delta, 'text')
+        let contextCompressedForBridgeTurn = false
+        let runResult: ReadyAgentSdkRunResult | null = null
+        while (true) {
+          streamedText = ''
+          const baseItems = await runHandle.capturedSession.getItems()
+          try {
+            if (abortController.signal.aborted) {
+              const error = abortController.signal.reason instanceof Error
+                ? abortController.signal.reason
+                : new Error('aborted')
+              error.name = 'AbortError'
+              throw error
             }
-          },
-        })
+            runResult = await this.runAgent({
+              agentName: name,
+              runId,
+              taskId,
+              sessionId,
+              input: nextInput,
+              instructions,
+              model,
+              provider,
+              session: runHandle.capturedSession,
+              tools: sdkTools,
+              signal: abortController.signal,
+              maxTurns: requiresLocalDocumentWrite ? LOCAL_DOCUMENT_WRITE_MAX_TURNS : DEFAULT_AGENT_SDK_MAX_TURNS,
+              contextWindowTokens,
+              onTextDelta: (delta) => {
+                streamedText += delta
+                if (!useTextToolBridge && !bufferNativeTextUntilParsed) {
+                  emitOutput(delta, 'text')
+                }
+              },
+            })
+            if (runResult.usage) {
+              session.lastUsageTokens = runResult.usage.totalTokens
+            }
+            break
+          } catch (error) {
+            if (
+              classifySdkRuntimeError(error).terminalReason === 'context_overflow'
+              && !contextCompressedForBridgeTurn
+            ) {
+              const compacted = await this.compactCapturedSession(
+                name,
+                runHandle,
+                baseItems,
+                'overflow',
+                contextWindowTokens,
+              )
+              if (compacted.status === 'compacted' || compacted.status === 'noop') {
+                contextCompressedForBridgeTurn = true
+                continue
+              }
+            }
+            throw error
+          }
+        }
+        if (!runResult) throw new Error('SDK run did not produce a result.')
         const modelText = runResult.finalText || streamedText
         const nativeMapCriticalClose = !useTextToolBridge
           ? toolBridgeRuntimeContext.nativeMapCriticalClose ?? null
@@ -3437,6 +3884,27 @@ export class AgentSdkRuntime extends EventEmitter {
       if (
         /Max turns \(\d+\) exceeded/i.test(message)
         && fileReadExcerptCheckpointForRecovery
+        && requiresLocalDocumentWriteForRecovery
+        && !lastDocumentSaveSuccessText
+      ) {
+        const checkpointText = buildLocalDocumentWriteBudgetCheckpoint()
+        emitOutput(checkpointText, 'text')
+        emitOutput('', 'done', this.mergeProjectionPatches(projectionPatches))
+        emitStatus('checkpoint', 'checkpoint_budget')
+        return this.buildResult({
+          success: true,
+          finalText: checkpointText,
+          cancelled: false,
+          taskId,
+          usedTools,
+          transcriptEvents,
+          projectionPatches,
+          terminalReason: 'checkpoint_budget',
+        })
+      }
+      if (
+        /Max turns \(\d+\) exceeded/i.test(message)
+        && fileReadExcerptCheckpointForRecovery
       ) {
         emitOutput(fileReadExcerptCheckpointForRecovery, 'text')
         emitOutput('', 'done', this.mergeProjectionPatches(projectionPatches))
@@ -3469,12 +3937,7 @@ export class AgentSdkRuntime extends EventEmitter {
         terminalReason: failure.terminalReason,
       })
     } finally {
-      if (session.abortController === abortController) {
-        session.abortController = null
-      }
-      if (session.activeRunId === runId) {
-        session.activeRunId = null
-      }
+      await this.finalizeRun(name, session, runHandle)
     }
   }
 
@@ -3760,6 +4223,47 @@ export class AgentSdkRuntime extends EventEmitter {
     args: Record<string, unknown>,
     runtimeContext: ToolBridgeRuntimeContext,
   ): Promise<ToolExecutionOutput> {
+    if (definition.name === 'skill_compact_context') {
+      const callTrace = formatToolCallTrace(definition.name, args)
+      runtimeContext.emitOutput(callTrace, 'tool_use')
+      this.publishSdkToolEvent({
+        runtimeContext,
+        definition,
+        kind: 'call',
+        text: callTrace,
+      })
+      runtimeContext.emitToolAction(definition.name, args)
+      const compacted = await this.compactCapturedSession(
+        runtimeContext.agentName,
+        runtimeContext.runHandle,
+        undefined,
+        'manual',
+        this.sessions.get(runtimeContext.agentName)?.contextWindowTokens ?? DEFAULT_CONTEXT_WINDOW,
+      )
+      const output = createToolExecutionOutput(
+        compacted.status === 'superseded'
+          ? '当前运行已被新消息接管，未压缩新的会话。'
+          : compacted.status === 'compacted'
+            ? `已压缩当前会话上下文：${compacted.report.beforeTokens} → ${compacted.report.afterTokens} tokens。`
+            : compacted.status === 'noop'
+              ? '当前会话上下文尚未达到压缩阈值。'
+              : '已排队，当前运行结束后会压缩上下文。',
+        {
+          shape: 'json',
+          data: compacted,
+        },
+      )
+      runtimeContext.recordToolResult(definition.name, output)
+      const resultTrace = formatToolResultTrace(definition.name, output)
+      runtimeContext.emitOutput(resultTrace, 'tool_result')
+      this.publishSdkToolEvent({
+        runtimeContext,
+        definition,
+        kind: 'result',
+        text: resultTrace,
+      })
+      return output
+    }
     const guard = runtimeContext.documentTargetGuard
     if (guard && definition.name === 'document_new_tab') {
       return createToolExecutionOutput(
@@ -3942,6 +4446,7 @@ export class AgentSdkRuntime extends EventEmitter {
     projectionPatches: Record<string, unknown>[]
     terminalReason: TurnTerminalReason
     error?: string
+    scopeRunAuthority?: ExecutionTurnResult['scopeRunAuthority']
   }): ExecutionTurnResult {
     const taskType = this.resolveTaskTypeFromTools(params.usedTools)
     return {
@@ -3964,6 +4469,7 @@ export class AgentSdkRuntime extends EventEmitter {
         transcriptEvents: params.transcriptEvents,
       },
       terminalReason: params.terminalReason,
+      scopeRunAuthority: params.scopeRunAuthority,
     }
   }
 

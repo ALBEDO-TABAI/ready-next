@@ -1258,6 +1258,14 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         if (!isScopeRunPhase(event.phase) || event.phase === 'idle') return
 
         upsertScopeRunState(event.scopeId, (previous) => {
+          if (
+            event.type !== 'started'
+            && event.runId
+            && previous?.requestId
+            && previous.requestId !== event.runId
+          ) {
+            return previous
+          }
           const currentState = store.getState()
           const activeMessage = previous?.responseMessageId
             ? currentState.messages.find((item: AgentMessage) => item.id === previous.responseMessageId) || null

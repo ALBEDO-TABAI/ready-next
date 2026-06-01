@@ -6,6 +6,7 @@ import {
   getLastReferenceSkill,
   _resetLastReferenceSkillHintsForTests,
 } from '../main/modules/agent-control/skills/skill-reference-hints'
+import type { SkillState } from '../main/modules/skills-runtime/runtime-manager'
 
 function createOrchestrator() {
   return new SkillContextOrchestrator({
@@ -62,6 +63,44 @@ test('SkillContextOrchestrator builds preferred skill tool names from explicit s
   ]) {
     assert.ok(toolNames.includes(primitive), `${primitive} should be preferred for explicit reference-skill turns`)
   }
+  assert.equal(
+    toolNames.includes('skill_compact_context'),
+    false,
+    'skill_compact_context must stay limited to the context-compact skill',
+  )
+})
+
+test('SkillContextOrchestrator only prefers compact primitive for context-compact skill turns', () => {
+  const contextCompactSkill: SkillState = {
+    id: 'context-compact',
+    name: 'Context Compact',
+    description: '手动压缩当前 Agent 会话上下文，释放模型上下文窗口',
+    version: 'test',
+    installed: true,
+    installStatePath: '',
+    source: 'embedded',
+    manifestValid: true,
+    defaultAction: 'read_skill',
+    executionMode: 'advisory',
+    actions: [{
+      name: 'read_skill',
+      description: 'Read skill instructions',
+      visibility: 'internal',
+      runtime: 'reference',
+      entry: 'SKILL.md',
+      params: [],
+    }],
+  }
+  const orchestrator = new SkillContextOrchestrator({
+    extractPrimaryUserInstruction: (raw) => raw,
+    listSkills: () => [contextCompactSkill],
+    resolveSkillToolByAction: (_skillId, action) => ({ name: `skill_${action}`, action }),
+  })
+
+  const toolNames = orchestrator.buildPreferredSkillToolNames('使用 context compact 压缩当前上下文', 'scope-compact')
+
+  assert.ok(toolNames.includes('skill_compact_context'))
+  assert.equal(toolNames.includes('skill_context_compact_read_skill'), false)
 })
 
 test('SkillContextOrchestrator does not prefer the legacy embedded-python runner for reference skills', () => {

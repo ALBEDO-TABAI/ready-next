@@ -20,6 +20,8 @@ import test from 'node:test'
 import { getToolInputSchemas } from '../main/modules/tools/schemas'
 import { resolveToolInputSchemaForExecution } from '../main/modules/agent-control/tools-runtime/tool-registry'
 import { SKILL_PRIMITIVE_SCHEMAS } from '../main/modules/tools/skill-primitives/primitive-schemas'
+import { PRIMITIVE_TOOL_DEFS } from '../main/modules/tools/skill-primitives/tool-defs'
+import { STATIC_SKILL_TOOL_NAMES } from '../main/modules/tools/skills-tools-static'
 
 test('getToolInputSchemas includes every skill primitive', () => {
   const registry = getToolInputSchemas()
@@ -64,6 +66,16 @@ test('resolveToolInputSchemaForExecution returns the same schema as the static r
     assert.ok(resolved, `resolver missing schema for primitive ${name}`)
     assert.strictEqual(resolved, registry[name], `resolver and registry diverged for ${name}`)
   }
+})
+
+test('skill_compact_context is registered as an argument-free skill primitive', () => {
+  assert.equal(STATIC_SKILL_TOOL_NAMES.includes('skill_compact_context'), true)
+  assert.ok(PRIMITIVE_TOOL_DEFS.some((def) => def.name === 'skill_compact_context'))
+
+  const schema = resolveToolInputSchemaForExecution('skill_compact_context')
+  assert.strictEqual(schema, SKILL_PRIMITIVE_SCHEMAS.skill_compact_context)
+  assert.equal(schema?.safeParse({}).success, true)
+  assert.equal(schema?.safeParse({ unexpected: true }).success, true)
 })
 
 test('resolveToolInputSchemaForExecution returns schemas for static-manifest VEA actions', () => {

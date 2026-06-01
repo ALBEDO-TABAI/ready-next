@@ -435,6 +435,7 @@ function AISettingsPanel() {
     capabilityModes: capabilityRuntimeConfig.capabilityModes || {},
   })
   const knownModel = models.find((model) => model.id === selectedConfig.model)
+  const contextWindowPlaceholder = String(knownModel?.contextWindow ?? 200_000)
   const managedModelIds = selectedConfig.modelIds || (selectedConfig.model ? [selectedConfig.model] : [])
   const managedModelIdSet = new Set(managedModelIds)
   const isCustomModelInput = selectedProfile?.category === 'custom'
@@ -516,6 +517,18 @@ function AISettingsPanel() {
     const current = selectedConfig.capabilityModes?.[groupId]
     return current === 'on' || current === 'off' || current === 'auto' ? current : 'auto'
   }, [selectedConfig.capabilityModes])
+
+  const updateContextWindowOverride = useCallback((rawValue: string) => {
+    const trimmed = rawValue.trim()
+    if (!trimmed) {
+      updateField('contextWindowOverride', undefined)
+      return
+    }
+    const parsed = Number(trimmed)
+    if (!Number.isFinite(parsed)) return
+    const clamped = Math.min(2_000_000, Math.max(1, Math.floor(parsed)))
+    updateField('contextWindowOverride', clamped)
+  }, [updateField])
 
   const resolveCapabilityRuntimeDisplay = useCallback((groupId: CapabilityGroupId) => {
     const snapshot = capabilityRuntimeSnapshot?.groups[groupId]
@@ -1029,7 +1042,7 @@ function AISettingsPanel() {
               <div>
                 <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>高级设置</div>
                 <div className="text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)', maxWidth: 680 }}>
-                  接口形式、工具调用、网页视觉和思考强度默认收起，需要时再展开。
+                  接口形式、工具调用、网页视觉、上下文窗口和思考强度默认收起，需要时再展开。
                 </div>
               </div>
               <ChevronRight
@@ -1094,6 +1107,24 @@ function AISettingsPanel() {
                       <option value="on">强制开启</option>
                       <option value="off">关闭</option>
                     </select>
+                  )}
+                />
+
+                <AISettingsFieldCard
+                  title="上下文窗口"
+                  description="覆盖这个模型的上下文 token 上限；留空则使用模型默认值。"
+                  control={(
+                    <input
+                      type="number"
+                      min={1}
+                      max={2_000_000}
+                      step={1000}
+                      value={selectedConfig.contextWindowOverride ?? ''}
+                      onChange={(event) => updateContextWindowOverride(event.target.value)}
+                      placeholder={contextWindowPlaceholder}
+                      className="rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-[box-shadow,border-color,background-color] duration-200 font-mono"
+                      style={stackedInputStyle}
+                    />
                   )}
                 />
 

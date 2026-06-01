@@ -45,6 +45,14 @@ export class RunProjection {
     const scope = this.deps.getScope(payload.scopeId)
     if (!scope) return null
     const previous = this.deps.getPrevious(payload.scopeId)
+    if (
+      payload.type !== 'started'
+      && payload.runId
+      && previous?.runId
+      && previous.runId !== payload.runId
+    ) {
+      return null
+    }
     const resolvedTaskId = payload.taskId ?? previous?.taskId ?? payload.taskProjectionId ?? previous?.taskProjectionId ?? payload.runId ?? null
     const isSameTaskAsPrevious = Boolean(
       resolvedTaskId
@@ -78,6 +86,7 @@ export class RunProjection {
       channelKey: this.deps.toChannelKey(scope),
       threadKey: scope.threadKey,
       phase: payload.phase,
+      runId: payload.runId ?? previous?.runId ?? null,
       taskId: resolvedTaskId,
       parentTaskId: payload.parentTaskId ?? (isSameTaskAsPrevious ? previous?.parentTaskId : null) ?? null,
       parentStepId: payload.parentStepId ?? (isSameTaskAsPrevious ? previous?.parentStepId : null) ?? null,

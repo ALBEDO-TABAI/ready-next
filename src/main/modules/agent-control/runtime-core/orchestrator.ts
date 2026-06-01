@@ -44,6 +44,30 @@ interface ReadyAgentOrchestratorOptions {
   agentSdkRuntimeDeps?: AgentSdkRuntimeDeps
 }
 
+type SendAndCollectExecutionResult = SendAndCollectResult & {
+  scopeRunAuthority?: ExecutionHostResult['scopeRunAuthority']
+}
+
+interface CompactSessionReport {
+  beforeTokens: number
+  afterTokens: number
+  droppedItems: number
+  truncatedToolResults: number
+  summarized: boolean
+}
+
+export type CompactSessionResult =
+  | { status: 'compacted' | 'noop'; report: CompactSessionReport }
+  | { status: 'queued' }
+  | { status: 'not_found' | 'superseded'; message: string }
+
+type CompactableAgentSdkRuntime = AgentSdkRuntime & {
+  compactSession?: (
+    name: string,
+    reason?: string,
+  ) => CompactSessionResult | Promise<CompactSessionResult>
+}
+
 export class ReadyAgentOrchestrator extends EventEmitter {
   /**
    * Stage V V3.5 — hard cap on concurrent live sessions enforced at the
@@ -321,6 +345,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     executionDiagnostics?: ExecutionHostResult['executionDiagnostics']
     projectionTruth?: ExecutionHostResult['projectionTruth']
     terminalReason?: ExecutionHostResult['terminalReason']
+    scopeRunAuthority?: ExecutionHostResult['scopeRunAuthority']
   }> {
     const effectiveRequestId = requestId || randomUUID()
     const effectiveSessionId = sessionIdOverride || sessionId
@@ -382,7 +407,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     continuationIntent?: ContinuationIntent | null,
     continuationState?: ContinuationState | null,
     sessionIdOverride?: string,
-  ): Promise<SendAndCollectResult> {
+  ): Promise<SendAndCollectExecutionResult> {
     const collector = createScopedRunCollector({ agent, sessionId, requestId })
     const cleanupFns: Array<() => void> = []
 
@@ -400,6 +425,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     let taskProjectionId: ExecutionHostResult['taskProjectionId']
     let projectionTruth: ExecutionHostResult['projectionTruth']
     let terminalReason: ExecutionHostResult['terminalReason']
+    let scopeRunAuthority: ExecutionHostResult['scopeRunAuthority']
     let usedToolsFromExecution: string[] | null = null
     const sendResultPromise = this.send(
       agent,
@@ -424,6 +450,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
       taskProjectionId = result.taskProjectionId
       projectionTruth = result.projectionTruth
       terminalReason = result.terminalReason
+      scopeRunAuthority = result.scopeRunAuthority
       usedToolsFromExecution = result.usedTools || null
       if (!result.success) {
         collector.handleError({
@@ -478,6 +505,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
             executionDiagnostics: executionDiagnostics || executionResult.executionDiagnostics || null,
             projectionTruth: projectionTruth || executionResult.projectionTruth,
             terminalReason: terminalReason || executionResult.terminalReason || (executionResult.cancelled ? 'cancelled_runtime' : null),
+            scopeRunAuthority: scopeRunAuthority || executionResult.scopeRunAuthority,
           }
         }
         return {
@@ -500,6 +528,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
         executionDiagnostics,
         projectionTruth,
         terminalReason,
+        scopeRunAuthority,
       }
     } finally {
       while (cleanupFns.length > 0) {
@@ -540,6 +569,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
       executionDiagnostics: result.executionDiagnostics || null,
       projectionTruth: result.projectionTruth || null,
       terminalReason: result.terminalReason || null,
+      scopeRunAuthority: result.scopeRunAuthority,
     }
   }
 
@@ -586,6 +616,15 @@ export class ReadyAgentOrchestrator extends EventEmitter {
       this.activeRunIds.delete(taskKey)
       void this.drainRunCleanup(runId)
     }
+  }
+
+  async compactSession(agent: string, sessionId?: string): Promise<CompactSessionResult> {
+    const internalKey = this.toInternalSessionKey(agent, sessionId)
+    const compact = (this.sdkEngine as CompactableAgentSdkRuntime).compactSession
+    if (typeof compact !== 'function') {
+      throw new Error('compact_session_unavailable')
+    }
+    return compact.call(this.sdkEngine, internalKey, 'manual')
   }
 
   getSessionManager(): AgentSessionManager {

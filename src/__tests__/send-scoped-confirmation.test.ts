@@ -23,6 +23,13 @@ test('message persistence failures classify to message_persist_failed', () => {
   )
 })
 
+test('superseded is not inferred from free-form run error text', () => {
+  assert.equal(
+    classifySendScopedError(new Error('superseded_by_newer_send'), 'run'),
+    'unknown',
+  )
+})
+
 test('attachment confirmation separates metadata and model-input state', () => {
   const confirmation = resolveAttachmentConfirmation({
     selectedCount: 2,

@@ -165,6 +165,19 @@ interface AgentRuntimeStatusData {
   heartbeat: AgentHeartbeatSnapshot
 }
 
+interface AgentCompactSessionReportData {
+  beforeTokens: number
+  afterTokens: number
+  droppedItems: number
+  truncatedToolResults: number
+  summarized: boolean
+}
+
+type AgentCompactSessionData =
+  | { status: 'compacted' | 'noop'; report: AgentCompactSessionReportData }
+  | { status: 'queued' }
+  | { status: 'not_found' | 'superseded'; message: string }
+
 type CapabilityRuntimeSnapshotData = CapabilityRuntimeSnapshot
 
 type ConversationSourceKind = 'local' | 'channel'
@@ -760,6 +773,10 @@ interface ElectronAgentAPI {
   // Stage U PR U1.2 — removed `orchestrate / getStatus / getAll / getDiagnostics`
   // legacy AgentManager wrappers. Use `getRuntimeStatus` / `getCapabilityRuntimeSnapshot`.
   kill: (agent: string, sessionId?: string) => Promise<{ success: boolean; error?: string }>
+  compactSession: (
+    agent: string,
+    sessionId?: string
+  ) => Promise<IPCResponse<AgentCompactSessionData>>
   getRuntimeStatus: () => Promise<IPCResponse<AgentRuntimeStatusData>>
   getCapabilityRuntimeSnapshot: (config?: unknown) => Promise<IPCResponse<CapabilityRuntimeSnapshotData>>
   listChannels: () => Promise<IPCResponse<AgentChannelConfigData[]>>
@@ -2828,6 +2845,7 @@ interface AIModelConfigData {
   visionMode?: 'auto' | 'on' | 'off'
   nativeVideoMode?: 'auto' | 'on' | 'off'
   capabilityModes?: Record<string, 'auto' | 'on' | 'off'>
+  contextWindowOverride?: number
   endpointId?: string
 }
 

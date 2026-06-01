@@ -165,6 +165,34 @@ describe('AI provider workspace', () => {
 
     assert.deepEqual(config.modelIds, ['gpt-5.4', 'gpt-4o'])
   })
+
+  it('preserves context window overrides through workspace normalization and legacy export', () => {
+    const customProfile = createCustomAIProviderProfile({
+      provider: 'openai-compatible',
+      baseUrl: 'https://example.com/v1',
+      apiKey: 'sk-test',
+      model: 'long-context-model',
+      contextWindowOverride: 1_000_000,
+    }, {
+      id: 'custom-long-context',
+      name: 'Long Context',
+    })
+
+    const workspace = normalizeAIWorkspace({
+      ...createDefaultAIWorkspace(),
+      activeProfileId: customProfile.id,
+      profiles: [
+        ...createDefaultAIWorkspace().profiles,
+        customProfile,
+      ],
+    })
+    const activeConfig = getActiveAIConfig(workspace)
+    const legacy = deriveLegacyAISettingsPayload(workspace)
+
+    assert.equal(activeConfig?.contextWindowOverride, 1_000_000)
+    assert.equal(legacy.aiModelConfig?.contextWindowOverride, 1_000_000)
+    assert.equal(legacy.aiSavedConfigs?.['openai-compatible']?.contextWindowOverride, 1_000_000)
+  })
 })
 
 describe('applyProfileActiveModel', () => {

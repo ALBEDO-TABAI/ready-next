@@ -104,6 +104,8 @@ export interface AIModelConfig {
   endpointId?: string
   /** 配置命名槽 - 在前台显示的名称 */
   displayName?: string
+  /** Optional user override for this model's context window, in tokens. */
+  contextWindowOverride?: number
   /** 业务能力分组开关 */
   capabilityModes?: CapabilityModeMap
   /**

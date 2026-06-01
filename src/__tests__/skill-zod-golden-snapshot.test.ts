@@ -1,7 +1,7 @@
 /**
  * Golden snapshot — locks the LLM-facing Anthropic/OpenAI tool JSONSchema
  * for the current skill primitives (skill_ask_user / skill_run_shell /
- * artifact / config / detached-run tools). Replaces the B Phase 0
+ * artifact / config / detached-run / context compact tools). Replaces the B Phase 0
  * 6-control-tool snapshot after Phase 4 PR2 retired the state machine.
  *
  * Pure — imports only skill-tool-types + skill-primitives/tool-defs, no
@@ -19,6 +19,7 @@ test('PRIMITIVE_TOOL_DEFS covers exactly the primitive names with kind=primitive
   assert.deepEqual(names, [
     'skill_ask_user',
     'skill_cancel_detached',
+    'skill_compact_context',
     'skill_inspect_detached',
     'skill_inspect_run_state',
     'skill_patch_config',

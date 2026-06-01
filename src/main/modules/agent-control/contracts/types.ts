@@ -372,6 +372,7 @@ export interface ScopeRunSummary {
   channelKey: string
   threadKey: string
   phase: ScopeRunEventPayload['phase']
+  runId?: string | null
   taskId?: string | null
   parentTaskId?: string | null
   parentStepId?: string | null

@@ -24,6 +24,7 @@ export const SKILL_PRIMITIVE_SCHEMAS = {
       .optional()
       .describe('自由输入框的 placeholder 文案'),
   }),
+  skill_compact_context: z.object({}),
   skill_run_shell: z.object({
     command: TRIMMED_STRING.describe(
       '要在技能沙箱内执行的 shell 命令。cwd 为技能 managedPath，env 含 CLAUDE_SKILL_DIR 和 CLAUDE_SKILL_OUTPUT_DIR。支持 cd、$VAR、&&、管道、重定向、bash/sh 包裹的 POSIX 单引号写法，以及 python/node/grep/find/awk/sed 这类脚本探针里的单引号片段；受白名单限制，只允许 python / python3 / node / bash / sh / curl / cat / ls / head / tail / grep / find / which / mkdir / pwd / echo / awk / sed，禁止 rm / cp / mv。脚本优先通过 bash scripts/x.sh 或 python scripts/x.py 调用。',

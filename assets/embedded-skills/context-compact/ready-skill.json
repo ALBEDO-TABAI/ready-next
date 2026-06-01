@@ -1,0 +1,15 @@
+{
+  "id": "context-compact",
+  "name": "context-compact",
+  "displayName": "Context Compact",
+  "description": "手动压缩当前 Agent 会话上下文，释放模型上下文窗口",
+  "version": "0.1.0",
+  "runtime": "reference",
+  "execution": { "mode": "advisory" },
+  "actions": {
+    "read_skill": {
+      "runtime": "reference",
+      "visibility": "internal"
+    }
+  }
+}

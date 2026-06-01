@@ -223,3 +223,27 @@ test('V3.1 orchestrator source declares closeSession with correct cleanup sequen
   assert.match(source, /!!prior && prior\.state !== 'closed'/, 'must treat already-`closed` state as a no-op')
   assert.match(source, /return\s*\{\s*closed:\s*wasLive\s*\}/, 'return value must reflect whether this call performed the close')
 })
+
+test('orchestrator compactSession maps public agent/sessionId before delegating to the SDK runtime', () => {
+  // eslint-disable-next-line ready/no-source-grep-test -- paired with agent-lifecycle handler behavior; the real orchestrator imports electron-only runtime deps under node tests
+  const source = readFileSync(
+    resolve(REPO_ROOT, 'src/main/modules/agent-control/runtime-core/orchestrator.ts'),
+    'utf8',
+  )
+
+  assert.match(
+    source,
+    /async compactSession\(agent: string, sessionId\?: string\)/,
+    'compactSession must be public on the orchestrator',
+  )
+  assert.match(
+    source,
+    /const internalKey = this\.toInternalSessionKey\(agent, sessionId\)/,
+    'compactSession must map the public tuple inside the orchestrator',
+  )
+  assert.match(
+    source,
+    /compact\.call\(this\.sdkEngine, internalKey, 'manual'\)/,
+    'compactSession must delegate with the internal key rather than making IPC compose it',
+  )
+})

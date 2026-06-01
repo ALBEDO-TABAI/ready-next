@@ -12,6 +12,7 @@ export type TurnTerminalReason =
   | 'checkpoint_user_input'
   | 'blocked_config'
   | 'blocked_external'
+  | 'context_overflow'
   | 'blocked_tool_error'
   | 'failed_skill'
   | 'resume_launch_failed'
@@ -283,6 +284,7 @@ const TURN_TERMINAL_REASON_RANK: Record<TurnTerminalReason, number> = {
   persistence_failed: 75,
   blocked_config: 70,
   blocked_external: 65,
+  context_overflow: 65,
   blocked_tool_error: 60,
   resume_launch_failed: 55,
   done: 50,

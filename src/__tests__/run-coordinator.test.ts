@@ -311,3 +311,49 @@ test('RunCoordinator creates a stable task id when execution host does not provi
   assert.equal(events[0]?.taskId, events.at(-1)?.taskId)
   assert.equal(events[0]?.taskProjectionId, events[0]?.taskId)
 })
+
+test('RunCoordinator preserves typed scope run authority on failed execution', async () => {
+  const coordinator = new RunCoordinator({
+    promptAssembly: {
+      buildForScopedRun: async () => ({
+        systemPrompt: 'system prompt',
+        bootstrapMessages: [],
+        memoryRefs: [],
+        triggerHits: [],
+        contextBudget: { totalChars: 20, l0Chars: 10, l1Chars: 10, l2Chars: 0, droppedRefs: [] },
+      }),
+      applyToMessage: (message) => message,
+      recordRunOutcome: () => {},
+    },
+    executeAndCollect: async () => ({
+      success: false,
+      finalText: '',
+      cancelled: false,
+      usedTools: [],
+      error: 'newer send took ownership',
+      terminalReason: 'blocked_external',
+      scopeRunAuthority: {
+        state: 'lost',
+        reason: 'superseded_by_newer_send',
+        currentRunId: 'req-new',
+      },
+    }),
+    emitScopeRunEvent: () => {},
+    reflectOnConversation: async (): Promise<ScopeRunMemoryCapture | null> => null,
+  })
+
+  const result = await coordinator.runScoped({
+    scope: createScope(),
+    message: 'hello',
+    requestId: 'req-old',
+    coordinators: [],
+  })
+
+  assert.equal(result.success, false)
+  assert.equal(result.error, 'newer send took ownership')
+  assert.deepEqual(result.scopeRunAuthority, {
+    state: 'lost',
+    reason: 'superseded_by_newer_send',
+    currentRunId: 'req-new',
+  })
+})

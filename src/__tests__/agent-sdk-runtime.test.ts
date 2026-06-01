@@ -71,6 +71,54 @@ function createToolDefinition(overrides: Partial<ToolDefinition> = {}): ToolDefi
   }
 }
 
+async function seedSdkSession(
+  runtime: AgentSdkRuntime,
+  name: string,
+  items: AgentInputItem[],
+): Promise<void> {
+  const sessions = (runtime as unknown as {
+    sessions: Map<string, { sdkSession: { addItems: (items: AgentInputItem[]) => Promise<void> } }>
+  }).sessions
+  const session = sessions.get(name)
+  assert.ok(session, `missing test session ${name}`)
+  await session.sdkSession.addItems(items)
+}
+
+async function readSdkSessionItems(runtime: AgentSdkRuntime, name: string): Promise<AgentInputItem[]> {
+  const sessions = (runtime as unknown as {
+    sessions: Map<string, { sdkSession: { getItems: () => Promise<AgentInputItem[]> } }>
+  }).sessions
+  const session = sessions.get(name)
+  assert.ok(session, `missing test session ${name}`)
+  return session.sdkSession.getItems()
+}
+
+function historyTextItems(prefix: string, count: number): AgentInputItem[] {
+  const items: AgentInputItem[] = []
+  for (let index = 0; index < count; index += 1) {
+    items.push({
+      role: index % 2 === 0 ? 'user' : 'assistant',
+      content: `${prefix}-${index} ${'长上下文片段 '.repeat(80)}`,
+    } as AgentInputItem)
+  }
+  return items
+}
+
+function chatCompletionResponse(text: string): Response {
+  return new Response(JSON.stringify({
+    id: `chatcmpl-${Date.now()}`,
+    choices: [{
+      message: { content: text },
+      finish_reason: 'stop',
+    }],
+    usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+  }), { status: 200 })
+}
+
+function countOccurrences(source: string, needle: string): number {
+  return source.split(needle).length - 1
+}
+
 test('agent sdk runtime streams text and closes with terminal reason', async () => {
   const events: Array<Record<string, unknown>> = []
   const runtime = createRuntime({
@@ -3074,6 +3122,142 @@ test('agent sdk runtime checkpoints max-turn loops after a successful file excer
   )
 })
 
+test('agent sdk runtime does not expose source excerpts when a local document write hits max turns', async () => {
+  const sourceContent = [
+    '# 第二部第一章',
+    '',
+    'SENSITIVE_SOURCE: 动辄发怒的原文章节内容，只能作为写文档依据，不能贴回聊天。',
+  ].join('\n')
+  const readExcerptDefinition = createToolDefinition({
+    name: 'file_read_excerpt',
+    groupId: 'file',
+    domain: 'file',
+    kind: 'read',
+    description: 'Read file excerpt',
+    schema: {
+      type: 'object',
+      properties: { path: { type: 'string' } },
+      required: ['path'],
+      additionalProperties: false,
+    },
+  })
+  const newTabDefinition = createToolDefinition({
+    name: 'document_new_tab',
+    groupId: 'document',
+    domain: 'document',
+    kind: 'write',
+    concurrency: 'serialized',
+    timeoutProfile: 'document_write',
+    description: 'Create document',
+    schema: {
+      type: 'object',
+      properties: { title: { type: 'string' } },
+      required: ['title'],
+      additionalProperties: false,
+    },
+  })
+  const setContentDefinition = createToolDefinition({
+    name: 'document_set_content',
+    groupId: 'document',
+    domain: 'document',
+    kind: 'write',
+    concurrency: 'serialized',
+    timeoutProfile: 'document_write',
+    description: 'Set document content',
+    schema: {
+      type: 'object',
+      properties: { content: { type: 'string' } },
+      required: ['content'],
+      additionalProperties: false,
+    },
+  })
+  const saveDefinition = createToolDefinition({
+    name: 'document_save_tab',
+    groupId: 'document',
+    domain: 'document',
+    kind: 'write',
+    concurrency: 'serialized',
+    timeoutProfile: 'document_write',
+    description: 'Save document',
+    schema: {
+      type: 'object',
+      properties: {},
+      additionalProperties: false,
+    },
+  })
+  const statuses: Array<Record<string, unknown>> = []
+  const errors: Array<Record<string, unknown>> = []
+  const runtime = createRuntime({
+    listToolDefinitions: () => [readExcerptDefinition, newTabDefinition, setContentDefinition, saveDefinition],
+    executeToolCall: async () => createToolExecutionOutput(JSON.stringify({
+      ok: true,
+      path: '/tmp/library/白痴.md',
+      content: sourceContent,
+    }), {
+      shape: 'json',
+      data: {
+        ok: true,
+        path: '/tmp/library/白痴.md',
+        content: sourceContent,
+      },
+    }),
+    runAgent: async ({ tools, maxTurns }) => {
+      assert.equal(maxTurns, 32)
+      const byName = new Map(tools.map((tool) => [tool.name, tool as { invoke: (context: unknown, input: string) => Promise<string> }]))
+      await byName.get('file_read_excerpt')?.invoke({}, JSON.stringify({
+        path: '/tmp/library/白痴.md',
+        anchor: '第二部第一章',
+      }))
+      throw new Error('Max turns (32) exceeded')
+    },
+  })
+  runtime.on('status', (event) => statuses.push(event as Record<string, unknown>))
+  runtime.on('error', (event) => errors.push(event as Record<string, unknown>))
+  runtime.newSession('butler::scope-doc-write-max-turn-source', 'system prompt')
+
+  const instruction = '@[白痴.md]看一下第二部第一章，同样新建一个文档在@[白痴笔记]目录下写章节笔记并保存好'
+  const result = await runtime.sendMessage(
+    'butler::scope-doc-write-max-turn-source',
+    [
+      instruction,
+      '',
+      '--- 附件: 白痴.md ---',
+      '- 路径: /tmp/library/白痴.md',
+      '',
+      '--- 附件: 白痴笔记 ---',
+      '- 路径: /tmp/library/白痴笔记',
+    ].join('\n'),
+    'run-doc-write-max-turn-source',
+    {
+      publicSessionId: 'scope-doc-write-max-turn-source',
+      taskId: 'task-doc-write-max-turn-source',
+      requestEnvelope: {
+        primaryInstruction: instruction,
+        resources: [
+          { name: '白痴.md', path: '/tmp/library/白痴.md' },
+          { name: '白痴笔记', path: '/tmp/library/白痴笔记' },
+        ],
+      },
+    },
+  )
+
+  assert.equal(result.success, true)
+  assert.equal(result.terminalReason, 'checkpoint_budget')
+  assert.match(result.finalText, /已经读取源文档/)
+  assert.match(result.finalText, /不会把原文贴到聊天里/)
+  assert.doesNotMatch(result.finalText, /SENSITIVE_SOURCE/)
+  assert.doesNotMatch(result.finalText, /动辄发怒/)
+  assert.deepEqual(result.usedTools, ['file_read_excerpt'])
+  assert.equal(errors.length, 0)
+  assert.deepEqual(
+    statuses.map((event) => [event.status, event.terminalReason]),
+    [
+      ['working', undefined],
+      ['checkpoint', 'checkpoint_budget'],
+    ],
+  )
+})
+
 test('agent sdk runtime does not checkpoint max-turn loops after a failed file excerpt', async () => {
   const readExcerptDefinition = createToolDefinition({
     name: 'file_read_excerpt',
@@ -3323,6 +3507,178 @@ test('agent sdk runtime honors Ready OpenAI-compatible responses wire API', asyn
   assert.equal(requests.length, 1)
   assert.equal(requests[0].url, 'https://code.newcli.com/codex/v1/responses')
   assert.equal((requests[0].body as { stream?: boolean }).stream, false)
+})
+
+test('agent sdk runtime compacts oversized session history before sending wire input', async () => {
+  const requests: Array<Record<string, unknown>> = []
+  const runtime = new AgentSdkRuntime({
+    loadAIConfig: () => ({
+      ok: true,
+      reason: 'present',
+      config: {
+        ...fakeConfig,
+        provider: 'openai-compatible',
+        baseUrl: 'https://compat.example/v1',
+        model: 'compat-chat',
+        agentProtocol: 'openai',
+        wireApi: 'chat/completions',
+        contextWindowOverride: 900,
+      },
+    }),
+    fetchWithTimeout: async (_url, init) => {
+      requests.push(JSON.parse(String(init.body || '{}')) as Record<string, unknown>)
+      return chatCompletionResponse('压缩后完成')
+    },
+  })
+  runtime.newSession('butler::scope-presend-compact', 'system prompt')
+  await seedSdkSession(runtime, 'butler::scope-presend-compact', [
+    ...historyTextItems('old-hidden-context', 16),
+    { role: 'user', content: 'recent-tail-marker' } as AgentInputItem,
+  ])
+
+  const result = await runtime.sendMessage('butler::scope-presend-compact', 'CURRENT_INPUT_UNIQUE', 'run-presend-compact', {
+    publicSessionId: 'scope-presend-compact',
+    taskId: 'task-presend-compact',
+  })
+
+  assert.equal(result.success, true)
+  assert.equal(requests.length, 1)
+  const bodyText = JSON.stringify(requests[0])
+  assert.match(bodyText, /ready:context-compacted/)
+  assert.doesNotMatch(bodyText, /old-hidden-context-4/)
+  assert.match(bodyText, /recent-tail-marker/)
+  assert.equal(countOccurrences(bodyText, 'CURRENT_INPUT_UNIQUE'), 1)
+})
+
+test('agent sdk runtime retries context overflow after compacting the captured session', async () => {
+  const requests: Array<Record<string, unknown>> = []
+  const runtime = new AgentSdkRuntime({
+    loadAIConfig: () => ({
+      ok: true,
+      reason: 'present',
+      config: {
+        ...fakeConfig,
+        provider: 'openai-compatible',
+        baseUrl: 'https://compat.example/v1',
+        model: 'compat-chat',
+        agentProtocol: 'openai',
+        wireApi: 'chat/completions',
+        contextWindowOverride: 100_000,
+      },
+    }),
+    fetchWithTimeout: async (_url, init) => {
+      requests.push(JSON.parse(String(init.body || '{}')) as Record<string, unknown>)
+      if (requests.length === 1) {
+        return new Response(JSON.stringify({
+          error: {
+            code: 'context_length_exceeded',
+            message: 'prompt is too long',
+          },
+        }), { status: 413 })
+      }
+      return chatCompletionResponse('重试成功')
+    },
+  })
+  runtime.newSession('butler::scope-overflow-retry', 'system prompt')
+  await seedSdkSession(runtime, 'butler::scope-overflow-retry', historyTextItems('overflow-history', 24))
+
+  const result = await runtime.sendMessage('butler::scope-overflow-retry', 'CURRENT_OVERFLOW_INPUT', 'run-overflow-retry', {
+    publicSessionId: 'scope-overflow-retry',
+    taskId: 'task-overflow-retry',
+  })
+
+  assert.equal(result.success, true)
+  assert.equal(result.finalText, '重试成功')
+  assert.equal(requests.length, 2)
+  const firstBody = JSON.stringify(requests[0])
+  const secondBody = JSON.stringify(requests[1])
+  assert.ok(secondBody.length < firstBody.length, `expected retry body to shrink (${firstBody.length} -> ${secondBody.length})`)
+  assert.match(secondBody, /ready:context-compacted/)
+  assert.equal(countOccurrences(secondBody, 'CURRENT_OVERFLOW_INPUT'), 1)
+})
+
+test('agent sdk runtime compact primitive compresses the run-bound captured session', async () => {
+  const compactDefinition = createToolDefinition({
+    name: 'skill_compact_context',
+    groupId: 'skill',
+    domain: 'skill',
+    kind: 'write',
+    description: 'Compact context',
+    schema: { type: 'object', properties: {}, additionalProperties: false },
+  })
+  const runtime = createRuntime({
+    listToolDefinitions: () => [compactDefinition],
+    runAgent: async ({ tools }) => {
+      const compactTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+      const output = await compactTool.invoke({}, JSON.stringify({}))
+      assert.match(output, /context compacted|上下文|压缩/)
+      return { finalText: '已压缩' }
+    },
+  })
+  runtime.newSession('butler::scope-compact-primitive', 'system prompt')
+  await seedSdkSession(runtime, 'butler::scope-compact-primitive', historyTextItems('primitive-history', 20))
+
+  const result = await runtime.sendMessage('butler::scope-compact-primitive', '使用 context compact 压缩当前上下文', 'run-compact-primitive', {
+    publicSessionId: 'scope-compact-primitive',
+    taskId: 'task-compact-primitive',
+  })
+  const items = await readSdkSessionItems(runtime, 'butler::scope-compact-primitive')
+
+  assert.equal(result.success, true)
+  assert.deepEqual(result.usedTools, ['skill_compact_context'])
+  assert.ok(items.length < 20)
+  assert.match(JSON.stringify(items), /ready:context-compacted/)
+})
+
+test('agent sdk runtime waits for idle manual compaction before starting a new run', async () => {
+  let runStarted = false
+  let releaseCompact!: () => void
+  let compactEntered!: () => void
+  const compactEnteredPromise = new Promise<void>((resolve) => {
+    compactEntered = resolve
+  })
+  const releaseCompactPromise = new Promise<void>((resolve) => {
+    releaseCompact = resolve
+  })
+  const runtime = createRuntime({
+    runAgent: async () => {
+      runStarted = true
+      return { finalText: 'done' }
+    },
+  })
+  const name = 'butler::scope-compact-lock'
+  runtime.newSession(name, 'system prompt')
+  await seedSdkSession(runtime, name, historyTextItems('lock-history', 20))
+
+  const sessions = (runtime as unknown as {
+    sessions: Map<string, { sdkSession: { clearSession: () => Promise<void> } }>
+  }).sessions
+  const session = sessions.get(name)
+  assert.ok(session, `missing test session ${name}`)
+  const originalClearSession = session.sdkSession.clearSession.bind(session.sdkSession)
+  session.sdkSession.clearSession = async () => {
+    compactEntered()
+    await releaseCompactPromise
+    await originalClearSession()
+  }
+
+  const compactPromise = runtime.compactSession(name, 'manual')
+  await compactEnteredPromise
+  const sendPromise = runtime.sendMessage(name, 'hello after compact', 'run-compact-lock', {
+    publicSessionId: 'scope-compact-lock',
+    taskId: 'task-compact-lock',
+  })
+
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.equal(runStarted, false)
+
+  releaseCompact()
+  const compactResult = await compactPromise
+  const sendResult = await sendPromise
+
+  assert.equal(compactResult.status, 'compacted')
+  assert.equal(sendResult.success, true)
+  assert.equal(runStarted, true)
 })
 
 test('agent sdk runtime forwards renderer-mediated tool requests', async () => {

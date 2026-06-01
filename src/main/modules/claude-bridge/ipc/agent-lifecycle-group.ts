@@ -1,18 +1,19 @@
 // Stage V V2.1c — AgentLifecycle channel group.
 //
-// Bundles the 4 channels that drive the agent-loop lifecycle from the
+// Bundles the 5 channels that drive the agent-loop lifecycle from the
 // renderer:
 //
 //   agent:send        (push a turn at a global agent + sessionId)
 //   agent:newSession  (clear in-flight state + start a fresh session)
 //   agent:kill        (stop generation for an agent + sessionId)
 //   agent:sendScoped  (push a turn at a scope-run + optional continuation)
+//   agent:compactSession (manual memory-session compaction for a public session)
 //
 // Handler bodies are lifted VERBATIM from `ipc-handler.ts` (V2.1c is a pure
 // move — semantics must be byte-for-byte identical so the V5 IPC contract
 // gate stays green and downstream renderer flows do not notice the refactor).
 //
-// All four channels live in one group because they share:
+// All five channels live in one group because they share:
 //   • the same domain concept (agent-loop lifecycle from the renderer side)
 //   • the same dispose lifecycle (renderer treats them as one boot phase)
 //   • a closely-coupled dep surface (orchestrator + runtime + per-session
@@ -162,6 +163,7 @@ const CHANNELS = [
   'agent:newSession',
   'agent:kill',
   'agent:sendScoped',
+  'agent:compactSession',
 ] as const
 
 export const agentLifecycleGroup: IpcChannelGroup<AgentLifecycleGroupDeps> = {
@@ -246,6 +248,20 @@ export const agentLifecycleGroup: IpcChannelGroup<AgentLifecycleGroupDeps> = {
         deps.cancelSkillSessionPendingInteractions(sessionId, 'Agent generation was stopped')
         deps.orchestrator.kill(agent, sessionId)
         return { success: true, data: { killed: true } }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : String(error)
+        return { success: false, error: errorMessage }
+      }
+    })
+
+    ipcMain.handle('agent:compactSession', async (_, payload: { agent?: string; sessionId?: string }): Promise<IPCResponse> => {
+      try {
+        const agent = typeof payload?.agent === 'string' ? payload.agent : ''
+        if (!agent) {
+          return { success: false, error: 'agent_required' }
+        }
+        const result = await deps.orchestrator.compactSession(agent, payload.sessionId)
+        return { success: true, data: result || {} }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error)
         return { success: false, error: errorMessage }
