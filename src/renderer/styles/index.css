@@ -44,6 +44,8 @@
   /* Semantic colors */
   --color-blue: #5B8DEF;
   --color-blue-light: rgba(91, 141, 239, 0.1);
+  --accent-primary: var(--color-blue);
+  --accent-primary-light: var(--color-blue-light);
   --color-green: #34D399;
   --color-green-light: rgba(52, 211, 153, 0.1);
   --color-green-medium: rgba(52, 211, 153, 0.18);
@@ -542,6 +544,10 @@ html[data-skin='liquid-glass'] .ready-app-shell {
 .ready-app-content {
   position: relative;
   z-index: 2;
+}
+
+.settings-ai-provider-tab {
+  border-top-color: transparent !important;
 }
 
 .ready-theme-ritual-tint {

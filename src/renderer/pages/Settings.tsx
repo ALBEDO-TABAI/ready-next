@@ -6,7 +6,7 @@ import {
   Plug2, Boxes
 } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
-import { useTheme, type ThemeSkin } from '../stores/useTheme'
+import { useTheme, type ThemeAccent, type ThemeSkin } from '../stores/useTheme'
 import { resolveAIConfigCapabilities, getActiveAIProfile } from '../../shared/ai-providers'
 import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runtime'
 import { listSettingsCapabilityGroups, type CapabilityGroupId } from '../../shared/ai-capability-groups'
@@ -284,27 +284,6 @@ function AISettingsFieldCard({
   )
 }
 
-function AISettingsInfoChip({
-  label,
-  value,
-}: {
-  label: string
-  value: ReactNode
-}) {
-  return (
-    <div
-      className="settings-ai-light-chip rounded-2xl border"
-      style={{
-        ...SETTINGS_FLAT_CHIP_STYLE,
-        padding: '10px 14px',
-      }}
-    >
-      <div className="text-[10px]" style={{ color: 'var(--text-light)' }}>{label}</div>
-      <div className="mt-1 text-[12px] font-medium leading-5" style={{ color: 'var(--text-body)' }}>{value}</div>
-    </div>
-  )
-}
-
 function AISettingsSwitch({
   checked,
   onChange,
@@ -370,7 +349,7 @@ const stackedSelectStyle = {
   padding: '11px 34px 11px 14px',
   width: '100%',
 }
-// Inner control slot for the "label-on-top" field cards (合并窗口 / Bind Host / Bind Port).
+// Inner control slot for compact settings controls and label-on-top field cards.
 // Borderless filled slot (no second stroke against the surrounding card) with comfortable
 // left padding so the value no longer hugs the card edge.
 const fieldSlotStyle = {
@@ -586,17 +565,10 @@ function AISettingsPanel() {
           padding: '22px 24px',
         }}
       >
-        <div className="flex items-start justify-between gap-5 flex-wrap">
+        <div className="flex items-start justify-between gap-5 flex-wrap" style={{ minHeight: 36 }}>
           <div className="min-w-0">
             <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>模型入口</div>
-            <div className="text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)', maxWidth: 680 }}>
-              只保留 OpenAI、Anthropic、Gemini 三个内置入口，其他供应商统一放进自定义预设。每个预设都可以决定是否在聊天切换面板显示。
-            </div>
           </div>
-          <AISettingsInfoChip
-            label="聊天切换可见项"
-            value={`${workspace.profiles.filter((profile) => profile.showInChatSwitcher).length} 个预设`}
-          />
         </div>
 
         <div className="mt-5 grid grid-cols-2 gap-3 xl:grid-cols-4">
@@ -606,7 +578,7 @@ function AISettingsPanel() {
               <button
                 key={tab.id}
                 onClick={() => selectCategory(tab.id)}
-                className="settings-ai-light-card min-h-[76px] rounded-2xl border text-left transition-[background-color,border-color,color] duration-200"
+                className="settings-ai-light-card settings-ai-provider-tab flex min-h-[76px] flex-col items-center justify-center rounded-2xl border text-center transition-[background-color,border-color,color] duration-200"
                 style={{
                   ...SETTINGS_FLAT_CARD_STYLE,
                   padding: '15px 17px',
@@ -614,7 +586,9 @@ function AISettingsPanel() {
                     borderColor: 'color-mix(in srgb, var(--color-blue) 34%, var(--lg-border-soft) 66%)',
                     background: 'color-mix(in srgb, var(--color-blue-light) 74%, var(--surface-card-bg) 26%)',
                     boxShadow: 'var(--lg-shadow-contact)',
-                  } : SETTINGS_FLAT_CARD_STYLE),
+                  } : {
+                    boxShadow: 'none',
+                  }),
                 }}
               >
                 <div className="text-[13px] font-semibold" style={{ color: isActive ? 'var(--color-blue)' : 'var(--text-title)' }}>{tab.label}</div>
@@ -636,9 +610,6 @@ function AISettingsPanel() {
           <div className="flex items-start justify-between gap-5 flex-wrap">
             <div className="min-w-0">
               <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>自定义预设</div>
-              <div className="text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)', maxWidth: 620 }}>
-                用来管理 Kimi、FoxCode、火山方舟或你自己的任意模型供应商。
-              </div>
             </div>
             <button
               onClick={() => addCustomProfile()}
@@ -689,7 +660,9 @@ function AISettingsPanel() {
                             className="rounded-full px-2 py-0.5 text-[10px] font-semibold"
                             style={{
                               color: 'var(--color-green)',
+                      borderTopColor: 'transparent',
                               background: 'color-mix(in srgb, var(--color-green-light) 72%, transparent)',
+                      boxShadow: 'none',
                             }}
                           >
                             当前生效
@@ -748,7 +721,7 @@ function AISettingsPanel() {
                   onClick={() => testConnection(selectedProfile.id)}
                   disabled={testStatus === 'testing'}
                   title={testMessage || '验证当前地址、密钥和模型是否能通。'}
-                  className="flex items-center gap-1.5 rounded-full text-[12px] font-semibold transition-[filter,transform,opacity] duration-200 hover:brightness-95 active:scale-[0.98] disabled:opacity-50"
+                  className="flex items-center justify-center gap-1.5 rounded-full text-[12px] font-semibold transition-[filter,transform,opacity] duration-200 hover:brightness-95 active:scale-[0.98] disabled:opacity-50"
                   style={{
                     ...SETTINGS_FLAT_BUTTON_STYLE,
                     padding: '9px 14px',
@@ -802,6 +775,7 @@ function AISettingsPanel() {
 
             {detailExpanded && (
             <div className="mt-5 grid gap-3 md:grid-cols-2">
+                      borderTopColor: 'transparent',
             <AISettingsFieldCard
               title="预设名称"
               description="聊天区和设置页里看到的名字。"
@@ -817,19 +791,19 @@ function AISettingsPanel() {
               )}
             />
 
-            <AISettingsFieldCard
-              title="在切换面板显示"
-              description="决定它是否会出现在 Agent 聊天区的快速切换面板。"
-              control={(
-                <div className="settings-ai-light-card flex items-center justify-between gap-3 rounded-2xl border px-4 py-3" style={SETTINGS_FLAT_CARD_STYLE}>
-                  <span className="text-[12px]" style={{ color: 'var(--text-body)' }}>显示在聊天切换面板</span>
-                  <AISettingsSwitch
-                    checked={selectedProfile.showInChatSwitcher}
-                    onChange={(checked) => setProfileVisibility(selectedProfile.id, checked)}
-                  />
-                </div>
-              )}
-            />
+            <div
+              className="settings-ai-light-card flex items-center justify-between gap-3 rounded-2xl border"
+              style={{
+                ...SETTINGS_FLAT_CARD_STYLE,
+                padding: '16px 18px',
+              }}
+            >
+              <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>在切换面板显示</div>
+              <AISettingsSwitch
+                checked={selectedProfile.showInChatSwitcher}
+                onChange={(checked) => setProfileVisibility(selectedProfile.id, checked)}
+              />
+            </div>
 
             {selectedProfile.category === 'custom' && (
               <AISettingsFieldCard
@@ -1231,6 +1205,9 @@ function AISettingsPanel() {
                 ...SETTINGS_CARD_STYLE,
                 padding: '18px 20px',
               }}
+                          padding: '8px 28px',
+                          textAlign: 'center',
+                          textAlignLast: 'center',
             >
               <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>
                 远端返回的模型列表
@@ -1273,14 +1250,14 @@ function AISettingsPanel() {
           padding: '18px 20px',
         }}
       >
-        <div className="flex-1 min-w-0">
+        <div className="flex-1 min-w-0" style={{ minHeight: 36 }}>
           <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>对话发送</div>
-          <div className="text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)', maxWidth: 680 }}>
-            当用户在很短时间内连续发送多条消息时，先合并再统一交给 Agent，减少逐次等待。
-          </div>
         </div>
-        <div className="mt-4 grid gap-3 md:grid-cols-[minmax(0,1.2fr)_minmax(180px,0.8fr)]">
-          <div className="flex items-center justify-between gap-3 rounded-2xl border px-4 py-3" style={SETTINGS_SUBTLE_CARD_STYLE}>
+        <div className="mt-5 grid gap-3 md:grid-cols-[minmax(0,1.2fr)_minmax(260px,0.8fr)]">
+          <div
+            className="flex items-center justify-between gap-3 rounded-2xl border"
+            style={{ ...SETTINGS_SUBTLE_CARD_STYLE, padding: '14px 18px' }}
+          >
             <span className="text-[12px]" style={{ color: 'var(--text-body)' }}>启用连续消息合并</span>
             <AISettingsSwitch
               checked={messageCoalesceEnabled}
@@ -1290,16 +1267,26 @@ function AISettingsPanel() {
               }}
             />
           </div>
-          <label className="rounded-2xl border px-4 py-3" style={SETTINGS_SUBTLE_CARD_STYLE}>
-            <div className="text-[10px]" style={{ color: 'var(--text-light)' }}>合并窗口</div>
+          <label
+            className="flex items-center justify-between gap-3 rounded-2xl border"
+            style={{ ...SETTINGS_SUBTLE_CARD_STYLE, padding: '14px 18px' }}
+          >
+            <span className="text-[12px] shrink-0" style={{ color: 'var(--text-body)' }}>合并窗口</span>
             <select
               value={messageCoalesceWindowMs}
               onChange={(event) => {
                 setMessageCoalesceWindowMs(event.target.value)
                 persistBridgeSetting('agent_message_coalesce_window_ms', event.target.value)
               }}
-              className="w-full text-[12px] outline-none cursor-pointer"
-              style={{ ...fieldSlotStyle, padding: '8px 28px 8px 12px' }}
+              className="min-w-0 text-[12px] outline-none cursor-pointer"
+              style={{
+                ...fieldSlotStyle,
+                width: 152,
+                marginTop: 0,
+                padding: '8px 28px',
+                textAlign: 'center',
+                textAlignLast: 'center',
+              }}
             >
               <option value="600">0.6 秒</option>
               <option value="1000">1.0 秒</option>
@@ -2717,7 +2704,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
   const routeSection = new URLSearchParams(location.search).get('section') || undefined
   const [activeSection, setActiveSection] = useState(initialSection || routeSection || 'account')
   const [settings, setSettings] = useState(settingsData)
-  const { theme, setTheme, skin, setSkin } = useTheme()
+  const { theme, setTheme, skin, setSkin, accent, setAccent } = useTheme()
 
   const currentSection = settings.find(s => s.id === activeSection)
 
@@ -2919,7 +2906,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                 {/* Theme Switcher — only in Appearance section */}
                 {currentSection.id === 'appearance' && (
                   <>
-                    <div className="mb-8">
+                    <div style={{ marginBottom: 40 }}>
                       <h4
                         className="text-[12px] font-semibold uppercase tracking-[0.18em] mb-4"
                         style={{ color: 'var(--text-light)' }}
@@ -2973,7 +2960,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                       </div>
                     </div>
 
-                    <div className="mb-8">
+                    <div style={{ marginBottom: 40 }}>
                       <h4
                         className="text-[12px] font-semibold uppercase tracking-[0.18em] mb-4"
                         style={{ color: 'var(--text-light)' }}
@@ -3109,9 +3096,16 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                       {setting.type === 'text' && (
                         <input
                           type={setting.id === 'apiKey' ? 'password' : 'text'}
-                          value={setting.value as string}
-                          onChange={(e) => updateSetting(currentSection.id, setting.id, e.target.value)}
-                          className="flex-shrink-0 rounded-lg border text-[12px] text-right focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-[box-shadow,border-color,background-color] duration-200"
+                          value={currentSection.id === 'appearance' && setting.id === 'theme' ? accent : setting.value as string}
+                          onChange={(e) => {
+                            const nextValue = e.target.value
+                            if (currentSection.id === 'appearance' && setting.id === 'theme') {
+                              setAccent(nextValue as ThemeAccent)
+                              return
+                            }
+                            updateSetting(currentSection.id, setting.id, nextValue)
+                          }}
+                          className="flex-shrink-0 rounded-lg border text-[12px] text-center focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-[box-shadow,border-color,background-color] duration-200"
                           style={{
                             ...SETTINGS_INPUT_STYLE,
                             padding: '9px 14px',
