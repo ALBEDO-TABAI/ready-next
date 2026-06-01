@@ -647,7 +647,9 @@ function AISettingsPanel() {
                     padding: '14px 18px',
                     ...(isSelected ? {
                       borderColor: 'color-mix(in srgb, var(--color-blue) 32%, var(--lg-border-soft) 68%)',
+                      borderTopColor: 'transparent',
                       background: 'color-mix(in srgb, var(--color-blue-light) 72%, var(--surface-card-bg) 28%)',
+                      boxShadow: 'none',
                     } : SETTINGS_FLAT_CARD_STYLE),
                   }}
                 >
@@ -660,9 +662,7 @@ function AISettingsPanel() {
                             className="rounded-full px-2 py-0.5 text-[10px] font-semibold"
                             style={{
                               color: 'var(--color-green)',
-                      borderTopColor: 'transparent',
                               background: 'color-mix(in srgb, var(--color-green-light) 72%, transparent)',
-                      boxShadow: 'none',
                             }}
                           >
                             当前生效
@@ -762,6 +762,7 @@ function AISettingsPanel() {
                     style={{
                       ...SETTINGS_FLAT_BUTTON_STYLE,
                       borderColor: 'color-mix(in srgb, var(--color-red) 34%, var(--surface-border) 66%)',
+                      borderTopColor: 'transparent',
                       background: 'color-mix(in srgb, var(--color-red-light) 70%, var(--surface-card-bg) 30%)',
                       color: 'var(--color-red)',
                       padding: '9px 14px',
@@ -775,7 +776,6 @@ function AISettingsPanel() {
 
             {detailExpanded && (
             <div className="mt-5 grid gap-3 md:grid-cols-2">
-                      borderTopColor: 'transparent',
             <AISettingsFieldCard
               title="预设名称"
               description="聊天区和设置页里看到的名字。"
@@ -1174,6 +1174,9 @@ function AISettingsPanel() {
                         style={{
                           ...compactSelectStyle,
                           width: 112,
+                          padding: '8px 28px',
+                          textAlign: 'center',
+                          textAlignLast: 'center',
                         }}
                       >
                         <option value="auto">自动</option>
@@ -1205,9 +1208,6 @@ function AISettingsPanel() {
                 ...SETTINGS_CARD_STYLE,
                 padding: '18px 20px',
               }}
-                          padding: '8px 28px',
-                          textAlign: 'center',
-                          textAlignLast: 'center',
             >
               <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>
                 远端返回的模型列表
@@ -3075,8 +3075,15 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                       {/* Select */}
                       {setting.type === 'select' && (
                         <select
-                          value={setting.value as string}
-                          onChange={(e) => updateSetting(currentSection.id, setting.id, e.target.value)}
+                          value={currentSection.id === 'appearance' && setting.id === 'theme' ? accent : setting.value as string}
+                          onChange={(e) => {
+                            const nextValue = e.target.value
+                            if (currentSection.id === 'appearance' && setting.id === 'theme') {
+                              setAccent(nextValue as ThemeAccent)
+                              return
+                            }
+                            updateSetting(currentSection.id, setting.id, nextValue)
+                          }}
                           className="flex-shrink-0 rounded-lg border text-[12px] focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-[box-shadow,border-color,background-color] duration-200 cursor-pointer"
                           style={{
                             ...SETTINGS_INPUT_STYLE,
@@ -3096,15 +3103,8 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                       {setting.type === 'text' && (
                         <input
                           type={setting.id === 'apiKey' ? 'password' : 'text'}
-                          value={currentSection.id === 'appearance' && setting.id === 'theme' ? accent : setting.value as string}
-                          onChange={(e) => {
-                            const nextValue = e.target.value
-                            if (currentSection.id === 'appearance' && setting.id === 'theme') {
-                              setAccent(nextValue as ThemeAccent)
-                              return
-                            }
-                            updateSetting(currentSection.id, setting.id, nextValue)
-                          }}
+                          value={setting.value as string}
+                          onChange={(e) => updateSetting(currentSection.id, setting.id, e.target.value)}
                           className="flex-shrink-0 rounded-lg border text-[12px] text-center focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)]/30 transition-[box-shadow,border-color,background-color] duration-200"
                           style={{
                             ...SETTINGS_INPUT_STYLE,
