@@ -68,7 +68,7 @@ html[data-theme='dark'][data-skin='liquid-glass'] {
   --sx-ready-liquid-neutral-bg: color-mix(in srgb, var(--workbench-module-surface-bg) 85%, rgba(255, 255, 255, 0.18) 15%);
   --sx-ready-grid-surface: transparent;
   --sx-ready-week-solid-surface: var(--bg-editor);
-  --sx-ready-grid-chrome-surface: var(--sx-ready-week-solid-surface);
+  --sx-ready-grid-chrome-surface: var(--sx-ready-grid-surface);
   --sx-ready-grid-line-color: color-mix(in srgb, var(--text-gray) 34%, transparent);
   --sx-ready-time-grid-line-color: var(--sx-ready-grid-line-color);
 }
@@ -182,9 +182,9 @@ html[data-skin='liquid-glass'] .sx-react-calendar-wrapper {
   --sx-ready-visible-day-count: 7;
 }
 
-/* In dark liquid week view, keep one solid base layer and let inner grid layers stay transparent. */
+/* In dark liquid week view, let the time grid share the toolbar's canvas surface. */
 html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-wrapper {
-  background: var(--sx-ready-week-solid-surface) !important;
+  background: var(--sx-ready-grid-surface) !important;
 }
 
 html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-header,
@@ -410,7 +410,7 @@ html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-grid__time-axis .sx_
 /* ========== Month grid ========== */
 .sx__month-grid-wrapper {
   background: var(--sx-ready-grid-surface) !important;
-  border-bottom: var(--sx-ready-grid-line-width) solid var(--sx-ready-grid-line-color) !important;
+  border-bottom: none !important;
   /* Reserve a top band for the weekday-name header so the day columns
      (and their vertical separators) start below it. */
   padding-top: 24px !important;

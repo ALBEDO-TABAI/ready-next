@@ -7,16 +7,16 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('dark liquid week view uses one solid visual surface and keeps header/grid tones aligned', () => {
+test('dark liquid week view keeps header, all-day lane, and time grid aligned with the toolbar surface', () => {
   const scheduleCss = readWorkspaceFile('src/renderer/styles/schedule-x.css')
 
   assert.match(
     scheduleCss,
-    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\s*\{[\s\S]*--sx-ready-week-solid-surface:\s*var\(--bg-editor\);/,
+    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\s*\{[\s\S]*--sx-ready-grid-chrome-surface:\s*var\(--sx-ready-grid-surface\);/,
   )
   assert.match(
     scheduleCss,
-    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.sx__week-wrapper \{[\s\S]*background:\s*var\(--sx-ready-week-solid-surface\) !important;/,
+    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.sx__week-wrapper \{[\s\S]*background:\s*var\(--sx-ready-grid-surface\) !important;/,
   )
   assert.match(
     scheduleCss,

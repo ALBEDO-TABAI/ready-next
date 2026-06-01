@@ -124,13 +124,14 @@ test('calendar theme variables cover transparent and stable glass combinations',
   assert.match(styles, /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\[data-glass-backdrop='native'\] \.calendar-mode-shell \{/)
   assert.match(styles, /\.calendar-mode-shell \{[\s\S]*--calendar-sidebar-bg:\s*var\(--calendar-canvas-bg\);/)
   assert.match(styles, /html\[data-skin='liquid-glass'\]\[data-glass-backdrop='ready'\] \.calendar-mode-shell \{/)
-  assert.match(styles, /html\[data-skin='liquid-glass'\]\[data-glass-backdrop='ready'\] \.calendar-mode-shell \{[\s\S]*--calendar-canvas-bg:\s*var\(--workbench-liquid-chrome-bg,\s*var\(--workbench-module-surface-bg\)\);/)
+  assert.match(styles, /\.calendar-mode-shell \{[\s\S]*--calendar-canvas-bg:\s*rgba\(247,\s*248,\s*251,\s*0\.96\);/)
+  assert.match(styles, /html\[data-skin='liquid-glass'\]\[data-glass-backdrop='ready'\] \.calendar-mode-shell \{[\s\S]*--calendar-canvas-bg:\s*rgba\(247,\s*248,\s*251,\s*0\.96\);/)
   assert.match(styles, /html\[data-skin='liquid-glass'\]\[data-glass-backdrop='ready'\] \.calendar-mode-shell \{[\s\S]*--calendar-sidebar-bg:\s*var\(--calendar-canvas-bg\);/)
   assert.match(styles, /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\[data-glass-backdrop='ready'\] \.calendar-mode-shell \{/)
   assert.match(scheduleCss, /html\[data-skin='liquid-glass'\]\[data-glass-backdrop='ready'\] \{/)
   assert.match(scheduleCss, /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\[data-glass-backdrop='ready'\] \{/)
   assert.match(scheduleCss, /:root \{[\s\S]*--sx-ready-grid-chrome-surface:\s*var\(--sx-ready-grid-surface\);/)
-  assert.match(scheduleCss, /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \{[\s\S]*--sx-ready-grid-chrome-surface:\s*var\(--sx-ready-week-solid-surface\);/)
+  assert.match(scheduleCss, /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \{[\s\S]*--sx-ready-grid-chrome-surface:\s*var\(--sx-ready-grid-surface\);/)
   assert.match(styles, /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\[data-glass-backdrop='ready'\] \.calendar-mode-shell \{/)
 })
 
@@ -178,7 +179,7 @@ test('calendar month view uses neutral grid line variables instead of default bl
   const scheduleCss = readWorkspaceFile('src/renderer/styles/schedule-x.css')
 
   assert.match(scheduleCss, /\.sx__month-grid-wrapper \{[\s\S]*background:\s*var\(--sx-ready-grid-surface\) !important;/)
-  assert.match(scheduleCss, /\.sx__month-grid-wrapper \{[\s\S]*border-bottom:\s*var\(--sx-ready-grid-line-width\) solid var\(--sx-ready-grid-line-color\) !important;/)
+  assert.match(scheduleCss, /\.sx__month-grid-wrapper \{[\s\S]*border-bottom:\s*none !important;/)
   assert.match(scheduleCss, /\.sx__month-grid-week \{[\s\S]*border-top:\s*var\(--sx-ready-grid-line-width\) solid var\(--sx-ready-grid-line-color\) !important;/)
   assert.match(scheduleCss, /\.sx__month-grid-day:not\(:last-child\) \{[\s\S]*border-inline-end:\s*var\(--sx-ready-grid-line-width\) solid var\(--sx-ready-grid-line-color\) !important;/)
   // .sx__month-grid-cell is applied to empty blocker placeholders (alignment spacers) as well as
@@ -194,11 +195,11 @@ test('calendar month view uses neutral grid line variables instead of default bl
   assert.match(scheduleCss, /\.sx__month-grid-day__header-day-name \{[\s\S]*position:\s*absolute !important;[\s\S]*top:\s*-24px !important;/)
 })
 
-test('calendar top toolbar uses the same surface as the grid header band', () => {
+test('calendar top toolbar uses the same surface as the calendar grid', () => {
   const shell = readWorkspaceFile('src/renderer/components/calendar/CalendarWorkbenchShell.tsx')
   const scheduleCss = readWorkspaceFile('src/renderer/styles/schedule-x.css')
 
   assert.match(shell, /className="calendar-schedule-toolbar flex items-center justify-between flex-shrink-0"/)
-  assert.match(shell, /background:\s*'var\(--sx-ready-grid-chrome-surface\)'/)
+  assert.match(shell, /background:\s*'var\(--sx-ready-grid-surface\)'/)
   assert.match(scheduleCss, /\.sx__week-header,[\s\S]*\.sx__date-grid-day \{[\s\S]*background:\s*var\(--sx-ready-grid-chrome-surface\) !important;/)
 })

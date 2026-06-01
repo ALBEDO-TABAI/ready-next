@@ -184,7 +184,7 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
           className="workbench-canvas-shell flex h-full min-h-0 overflow-hidden"
           style={{
             gap: 0,
-            background: 'rgba(241, 244, 249, 0.94)',
+            background: 'var(--calendar-canvas-bg)',
             backdropFilter: 'blur(20px) saturate(0%)',
             WebkitBackdropFilter: 'blur(20px) saturate(0%)',
             position: 'relative',
@@ -252,7 +252,7 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
                 style={{
                   height: WORKBENCH_TOOLBAR_ROW_HEIGHT,
                   padding: `0 ${WORKBENCH_HEADER_EDGE_X}px`,
-                  background: 'var(--sx-ready-grid-chrome-surface)',
+                  background: 'var(--sx-ready-grid-surface)',
                   boxSizing: 'border-box',
                 }}
               >

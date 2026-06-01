@@ -2348,7 +2348,7 @@ html[data-theme='dark'][data-skin='liquid-glass'] .glass-surface-card {
 }
 
 .calendar-mode-shell {
-  --calendar-canvas-bg: rgba(241, 244, 249, 0.94);
+  --calendar-canvas-bg: rgba(247, 248, 251, 0.96);
   --calendar-canvas-border: rgba(224, 230, 240, 0.96);
   --calendar-sidebar-bg: var(--calendar-canvas-bg);
   --calendar-control-bg: color-mix(in srgb, var(--surface-card-bg) 34%, transparent);
@@ -2362,7 +2362,7 @@ html[data-theme='dark'][data-skin='liquid-glass'] .glass-surface-card {
 }
 
 html[data-skin='liquid-glass'][data-glass-backdrop='native'] .calendar-mode-shell {
-  --calendar-canvas-bg: rgba(241, 244, 249, 0.94);
+  --calendar-canvas-bg: rgba(247, 248, 251, 0.96);
   --calendar-canvas-border: rgba(224, 230, 240, 0.96);
   --calendar-assistant-bg: rgba(241, 244, 249, 0.96);
   --calendar-assistant-card-bg: rgba(255, 255, 255, 0.34);
@@ -2381,7 +2381,7 @@ html[data-theme='dark'][data-skin='liquid-glass'][data-glass-backdrop='native'] 
 }
 
 html[data-skin='liquid-glass'][data-glass-backdrop='ready'] .calendar-mode-shell {
-  --calendar-canvas-bg: var(--workbench-liquid-chrome-bg, var(--workbench-module-surface-bg));
+  --calendar-canvas-bg: rgba(247, 248, 251, 0.96);
   --calendar-canvas-border: color-mix(in srgb, var(--border-default) 92%, transparent);
   --calendar-sidebar-bg: var(--calendar-canvas-bg);
   --calendar-control-bg: color-mix(in srgb, var(--bg-primary) 82%, var(--bg-panel) 18%);

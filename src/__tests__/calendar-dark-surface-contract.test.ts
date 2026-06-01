@@ -29,7 +29,7 @@ test('dark liquid calendar shell reuses the rss surface tone and keeps a complet
   )
   assert.match(
     scheduleCss,
-    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\s*\{[\s\S]*--sx-ready-grid-chrome-surface:\s*var\(--sx-ready-week-solid-surface\);/,
+    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\s*\{[\s\S]*--sx-ready-grid-chrome-surface:\s*var\(--sx-ready-grid-surface\);/,
   )
   assert.match(
     scheduleCss,
@@ -42,6 +42,10 @@ test('dark liquid calendar shell reuses the rss surface tone and keeps a complet
   assert.match(
     scheduleCss,
     /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.sx__calendar-wrapper \{[\s\S]*background:\s*transparent !important;[\s\S]*backdrop-filter:\s*none !important;[\s\S]*-webkit-backdrop-filter:\s*none !important;/,
+  )
+  assert.match(
+    scheduleCss,
+    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.sx__week-wrapper \{[\s\S]*background:\s*var\(--sx-ready-grid-surface\) !important;/,
   )
   assert.match(
     scheduleCss,

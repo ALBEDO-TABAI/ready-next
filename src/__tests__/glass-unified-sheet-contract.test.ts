@@ -24,5 +24,5 @@ test('liquid workbench surfaces remove prominent borders and heavy highlights', 
 
   assert.match(topBar, /borderBottom: '1px solid transparent'/)
   assert.match(statusBar, /borderTop: '1px solid transparent'/)
-  assert.match(calendarShell, /background: 'rgba\(241, 244, 249, 0\.94\)'/)
+  assert.match(calendarShell, /background: 'var\(--calendar-canvas-bg\)'/)
 })
