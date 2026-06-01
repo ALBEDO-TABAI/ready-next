@@ -32,6 +32,8 @@ import {
   settingsListItemStyle,
 } from '../components/settings/settings-theme'
 import { MemoryListPanel, TriggerManager, MemoryStatsCard, MemoryCreator } from '../components/memory'
+import { useMemories, useMemoryLifecycle, useMemoryStats } from '../hooks/useMemory'
+import type { MemoryQueryFilters } from '../types/electron'
 import PersonalityEditor from '../components/personality/PersonalityEditor'
 import UserProfileEditor from '../components/profile/UserProfileEditor'
 
@@ -65,17 +67,6 @@ interface RSSDraftStoreSourceRow {
   starredCount: number
   refreshMode: 'full' | 'incremental'
   lastFetchedAt: string | null
-}
-
-interface ActiveChildRunSummaryView {
-  childRunId: string
-  skillId: string
-  sessionId: string | null
-  scopeId: string | null
-  status: string
-  startedAt: string
-  outputDir: string
-  runStatePath: string
 }
 
 const settingsData: SettingSection[] = [
@@ -121,21 +112,21 @@ const settingsData: SettingSection[] = [
     id: 'memory',
     title: '记忆系统',
     icon: Brain,
-    description: '管理 Agent 的记忆和触发器',
+    description: '查看 Agent 已沉淀的记忆，高级工具按需展开',
     settings: [] // Rendered dynamically via Memory components
   },
   {
     id: 'personalities',
     title: 'Agent 人格',
     icon: Sparkles,
-    description: '定义每个 Agent 的人格和行为特征',
+    description: '定义聊天面板可切换 Agent 的人格和语气',
     settings: [] // Rendered dynamically via PersonalityEditor
   },
   {
     id: 'user-profiles',
-    title: '用户档案',
+    title: '我的偏好',
     icon: Users,
-    description: '管理用户偏好和个性化设置',
+    description: '保存本机默认用户的语言、风格和长期偏好',
     settings: [] // Rendered dynamically via UserProfileEditor
   },
   {
@@ -2613,114 +2604,166 @@ function McpSettingsPanel() {
   )
 }
 
-function ActiveChildRunsDebug() {
-  const [runs, setRuns] = useState<ActiveChildRunSummaryView[]>([])
-  const [loading, setLoading] = useState(false)
-  const [busyId, setBusyId] = useState<string | null>(null)
-  const [message, setMessage] = useState<string | null>(null)
+function MemorySettingsSection() {
+  const [filters, setFilters] = useState<MemoryQueryFilters>({ limit: 50 })
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const memories = useMemories(filters)
+  const stats = useMemoryStats()
+  const lifecycle = useMemoryLifecycle()
 
-  const refresh = useCallback(async () => {
-    setLoading(true)
-    setMessage(null)
-    try {
-      const response = await window.electronAPI.agent.listActiveChildRuns()
-      if (!response.success) {
-        setMessage(response.error || '读取 active child runs 失败')
-        return
-      }
-      setRuns(response.data || [])
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error))
-    } finally {
-      setLoading(false)
-    }
-  }, [])
+  const refreshMemorySection = useCallback(async () => {
+    await Promise.all([memories.refresh(), stats.refresh()])
+  }, [memories.refresh, stats.refresh])
 
-  useEffect(() => {
-    void refresh()
-  }, [refresh])
+  const handleRunMaintenance = useCallback(async () => {
+    const result = await lifecycle.runMaintenance()
+    await refreshMemorySection()
+    return result
+  }, [lifecycle.runMaintenance, refreshMemorySection])
 
-  const cancelRun = useCallback(async (childRunId: string) => {
-    setBusyId(childRunId)
-    setMessage(null)
-    try {
-      const response = await window.electronAPI.agent.cancelChildRun(childRunId)
-      if (!response.success) {
-        setMessage(response.error || '取消 child run 失败')
-        return
-      }
-      await refresh()
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : String(error))
-    } finally {
-      setBusyId(null)
-    }
-  }, [refresh])
+  const handleDeleteMemory = useCallback(async (id: string) => {
+    await memories.deleteMemory(id)
+    await stats.refresh()
+  }, [memories.deleteMemory, stats.refresh])
 
   return (
-    <div className="glass-surface-card rounded-2xl border" style={{ ...SETTINGS_SUBTLE_CARD_STYLE, padding: '14px 16px' }}>
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h4 className="text-[12px] font-semibold uppercase tracking-[0.16em]" style={{ color: 'var(--text-light)', margin: 0 }}>
-            Child Runs
-          </h4>
-          <p className="text-[12px] leading-5" style={{ color: 'var(--text-muted)', margin: '3px 0 0' }}>
-            当前活跃的技能子运行
-          </p>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      <div
+        className="glass-surface-card border"
+        style={{
+          ...SETTINGS_CARD_STYLE,
+          borderRadius: 24,
+          padding: '18px 22px'
+        }}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h3 className="text-[16px] font-semibold" style={{ color: 'var(--text-title)', margin: 0 }}>
+              最近记住了什么
+            </h3>
+            <p className="text-[12px] leading-5" style={{ color: 'var(--text-muted)', margin: '6px 0 0' }}>
+              Agent 自动沉淀的偏好、任务经验和长期事实会出现在这里。
+            </p>
+          </div>
+          {stats.stats && (
+            <div
+              className="text-[12px] rounded-xl"
+              style={{
+                color: 'var(--text-body)',
+                background: 'color-mix(in srgb, var(--surface-panel-bg) 66%, transparent)',
+                padding: '8px 12px'
+              }}
+            >
+              共 {stats.stats.totalMemories} 条
+            </div>
+          )}
         </div>
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 340px) minmax(0, 1fr)', gap: 24, alignItems: 'start' }}>
+        <MemoryStatsCard
+          stats={stats.stats}
+          statsLoading={stats.loading}
+          statsError={stats.error}
+          status={lifecycle.status}
+          lifecycleLoading={lifecycle.loading}
+          lifecycleError={lifecycle.error}
+          maintenanceRunning={lifecycle.maintenanceRunning}
+          onRunMaintenance={handleRunMaintenance}
+        />
+        <div
+          className="glass-surface-card border"
+          style={{
+            ...SETTINGS_CARD_STYLE,
+            borderRadius: 24,
+            minHeight: 520,
+            overflow: 'hidden'
+          }}
+        >
+          <MemoryListPanel
+            memories={memories.memories}
+            loading={memories.loading}
+            error={memories.error}
+            filters={filters}
+            onFiltersChange={setFilters}
+            onDeleteMemory={handleDeleteMemory}
+          />
+        </div>
+      </div>
+
+      <section
+        className="glass-surface-card border"
+        style={{
+          ...SETTINGS_CARD_STYLE,
+          borderRadius: 24,
+          overflow: 'hidden'
+        }}
+      >
         <button
           type="button"
-          onClick={() => void refresh()}
-          disabled={loading}
-          className="inline-flex items-center gap-2 rounded-xl border text-[12px] font-medium transition-colors"
-          style={{ ...SETTINGS_SECONDARY_BUTTON_STYLE, padding: '7px 10px', opacity: loading ? 0.7 : 1 }}
+          onClick={() => setAdvancedOpen((current) => !current)}
+          className="w-full flex items-center justify-between gap-3 text-left"
+          style={{ padding: '16px 20px' }}
+          aria-expanded={advancedOpen}
         >
-          {loading ? <Loader2 size={14} className="animate-spin" /> : null}
-          刷新
-        </button>
-      </div>
-      <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {runs.length === 0 ? (
-          <div className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
-            暂无 active child run
+          <div>
+            <h3 className="text-[15px] font-medium" style={{ color: 'var(--text-title)', margin: 0 }}>
+              高级记忆工具
+            </h3>
+            <p className="text-[12px] leading-5" style={{ color: 'var(--text-muted)', margin: '4px 0 0' }}>
+              手动创建、原始详情和触发规则放在这里。
+            </p>
           </div>
-        ) : runs.map((run) => (
+          <ChevronRight
+            className="w-4 h-4 transition-transform"
+            style={{
+              color: 'var(--text-muted)',
+              transform: advancedOpen ? 'rotate(90deg)' : 'rotate(0deg)'
+            }}
+          />
+        </button>
+        {advancedOpen && (
           <div
-            key={run.childRunId}
-            className="rounded-xl border"
-            style={{ borderColor: 'var(--border-subtle)', padding: '10px 12px', background: 'var(--surface-muted)' }}
+            className="border-t"
+            style={{ borderColor: 'var(--border-default)', padding: 20 }}
           >
-            <div className="flex items-start justify-between gap-3">
-              <div style={{ minWidth: 0 }}>
-                <div className="text-[12px] font-medium truncate" style={{ color: 'var(--text-title)' }}>
-                  {run.skillId} · {run.status}
-                </div>
-                <div className="text-[11px] leading-5 truncate" style={{ color: 'var(--text-muted)' }}>
-                  {run.childRunId} · {new Date(run.startedAt).toLocaleString()}
-                </div>
-                <div className="text-[11px] leading-5 truncate" style={{ color: 'var(--text-light)' }}>
-                  {run.scopeId || run.sessionId || 'no scope'} · {run.outputDir}
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => void cancelRun(run.childRunId)}
-                disabled={busyId === run.childRunId}
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-xl border text-[12px] font-medium transition-colors"
-                style={{ ...SETTINGS_DANGER_BUTTON_STYLE, padding: '7px 10px', opacity: busyId === run.childRunId ? 0.7 : 1 }}
+            <div style={{ display: 'grid', gridTemplateColumns: 'minmax(300px, 340px) minmax(0, 1fr)', gap: 20, alignItems: 'start' }}>
+              <MemoryCreator onCreated={refreshMemorySection} />
+              <div
+                className="border"
+                style={{
+                  ...SETTINGS_SUBTLE_CARD_STYLE,
+                  borderRadius: 18,
+                  minHeight: 420,
+                  overflow: 'hidden'
+                }}
               >
-                {busyId === run.childRunId ? <Loader2 size={13} className="animate-spin" /> : <XCircle size={13} />}
-                取消
-              </button>
+                <MemoryListPanel
+                  memories={memories.memories}
+                  loading={memories.loading}
+                  error={memories.error}
+                  filters={filters}
+                  onFiltersChange={setFilters}
+                  onDeleteMemory={handleDeleteMemory}
+                  showAdvancedDetails
+                />
+              </div>
+            </div>
+            <div
+              className="border"
+              style={{
+                ...SETTINGS_SUBTLE_CARD_STYLE,
+                borderRadius: 18,
+                marginTop: 20,
+                minHeight: 360,
+                overflow: 'hidden'
+              }}
+            >
+              <TriggerManager />
             </div>
           </div>
-        ))}
-      </div>
-      {message && (
-        <div className="text-[12px] leading-5" style={{ color: 'var(--color-red)', marginTop: 10 }}>
-          {message}
-        </div>
-      )}
+        )}
+      </section>
     </div>
   )
 }
@@ -2903,21 +2946,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                 {currentSection.id === 'mcp' && <McpSettingsPanel />}
                 {currentSection.id === 'pet' && <PetSettingsPanel />}
                 {currentSection.id === 'memory' && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-                    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(320px, 360px) minmax(0, 1fr)', gap: 24, alignItems: 'start' }}>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
-                        <MemoryStatsCard />
-                        <MemoryCreator />
-                      </div>
-                      <div style={{ minHeight: 500 }}>
-                        <MemoryListPanel />
-                      </div>
-                    </div>
-                    <div style={{ minHeight: 400 }}>
-                      <TriggerManager />
-                    </div>
-                    <ActiveChildRunsDebug />
-                  </div>
+                  <MemorySettingsSection />
                 )}
 
                 {/* Agent Personalities — custom layout */}

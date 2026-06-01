@@ -7,6 +7,8 @@
  * partially-migrated databases.
  */
 
+import { DEFAULT_AGENT_PERSONAS } from './claude-bridge/default-personas'
+
 // Minimal interface compatible with DatabaseConnection from database.ts.
 // Defined locally to avoid circular imports.
 export interface MigrationDatabase {
@@ -21,6 +23,13 @@ interface Migration {
   name: string
   up: (db: MigrationDatabase) => void
 }
+
+const DEFAULT_AGENT_PERSONA_SEEDS = [
+  { agentName: 'butler', displayName: '管家', emoji: '🤖' },
+  { agentName: 'copywriter', displayName: '文案', emoji: '✍️' },
+  { agentName: 'video-editor', displayName: '剪辑', emoji: '🎬' },
+  { agentName: 'analyst', displayName: '分析', emoji: '📊' },
+] as const
 
 const migrations: Migration[] = [
   // ------------------------------------------------------------------ 001
@@ -2003,6 +2012,33 @@ const migrations: Migration[] = [
         db.exec('ALTER TABLE task_projections ADD COLUMN progress_json TEXT')
       } catch {
         // column already exists
+      }
+    }
+  },
+
+  // ------------------------------------------------------------------ 045
+  {
+    name: '045_seed_default_agent_personas',
+    up: (db) => {
+      const now = Date.now()
+      const insert = db.prepare(`
+        INSERT INTO agent_personalities (
+          id, agent_name, display_name, personality_text, tone, meta_json, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(agent_name) DO NOTHING
+      `)
+
+      for (const seed of DEFAULT_AGENT_PERSONA_SEEDS) {
+        insert.run(
+          `default-persona-${seed.agentName}`,
+          seed.agentName,
+          seed.displayName,
+          DEFAULT_AGENT_PERSONAS[seed.agentName],
+          null,
+          JSON.stringify({ emoji: seed.emoji }),
+          now,
+          now,
+        )
       }
     }
   }

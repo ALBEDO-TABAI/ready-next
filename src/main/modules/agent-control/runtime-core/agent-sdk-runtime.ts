@@ -306,7 +306,7 @@ export interface AgentSdkRuntimeDeps {
   skillContextOrchestrator?: SkillContextOrchestratorLike | null
 }
 
-function defaultSystemPrompt(): string {
+export function defaultSystemPrompt(): string {
   return '你是 Ready 应用中的 AI 助手，面向自媒体创作者。你擅长内容策划、文案写作、数据分析和创意建议。请使用简洁清晰的中文回答。'
 }
 

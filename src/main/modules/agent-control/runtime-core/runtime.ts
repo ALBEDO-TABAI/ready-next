@@ -31,6 +31,8 @@ import {
   type UpsertConversationScopeMode,
 } from '../../database'
 import { ReadyAgentOrchestrator } from './orchestrator'
+import { defaultSystemPrompt } from './agent-sdk-runtime'
+import { composePersonaSystemPrompt } from './persona-system-prompt'
 import { PromptAssemblyService } from '../prompt-assembly'
 import { RunCoordinator } from '../task-projection/run-coordinator'
 import { executeAgentSchedule, type ScheduleTriggerSource } from './schedule-execution'
@@ -370,6 +372,14 @@ export class AgentControlRuntime extends EventEmitter {
       browserController,
       sidecarManager: this.sidecar
     })
+    this.orchestrator.setPersonaResolver((agent) =>
+      composePersonaSystemPrompt(
+        agent,
+        this.agentPersonalityRepository,
+        this.userProfileRepository,
+        defaultSystemPrompt,
+      )
+    )
     this.orchestrator.setRuntime(this)
     this.runCoordinator = new RunCoordinator({
       promptAssembly: this.promptAssembly,
@@ -1114,6 +1124,7 @@ export class AgentControlRuntime extends EventEmitter {
     const { row, mode } = this.db.upsertConversationScope({
       id: scopeId,
       agent,
+      userId: 'default-user',
       title: '新对话',
       sourceKind: 'local',
       sourceId: 'app',

@@ -14,7 +14,11 @@ const primaryButtonStyle = {
   ...SETTINGS_PRIMARY_BUTTON_STYLE
 }
 
-export default function MemoryCreator() {
+interface MemoryCreatorProps {
+  onCreated?: () => void | Promise<void>
+}
+
+export default function MemoryCreator({ onCreated }: MemoryCreatorProps) {
   const [scopeId, setScopeId] = useState('')
   const [category, setCategory] = useState<'summary' | 'learning'>('summary')
   const [title, setTitle] = useState('')
@@ -45,6 +49,7 @@ export default function MemoryCreator() {
 
       if (result.success && result.data) {
         setMessage(`✓ 记忆创建成功: ${result.data.memoryId}`)
+        await onCreated?.()
         // Reset form
         setTitle('')
         setContent('')

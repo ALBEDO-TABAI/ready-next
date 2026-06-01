@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { useMemories } from '../../hooks/useMemory'
 import type { MemoryQueryFilters, MemoryEntry } from '../../types/electron'
 import { Trash2, Layers, Tag, Clock, Eye } from 'lucide-react'
 import { SETTINGS_INPUT_STYLE } from '../settings/settings-theme'
@@ -11,27 +10,98 @@ const fieldStyle = {
 function memorySourceLabel(sourceType: MemoryEntry['sourceType'] | undefined): string {
   switch (sourceType) {
     case 'resident_agent':
-      return '常驻记忆'
+      return 'Agent 主动记住'
     case 'resident_user':
-      return '用户偏好'
+      return '关于你的偏好'
     case 'scope_memory':
-      return '当前任务'
+      return '来自任务'
     case 'trigger_rule':
-      return '触发规则'
+      return '按需唤起'
     default:
       return '未分类'
   }
 }
 
-export default function MemoryListPanel() {
-  const [filters, setFilters] = useState<MemoryQueryFilters>({ limit: 50 })
-  const { memories, loading, error, deleteMemory } = useMemories(filters)
+function memoryCategoryLabel(category: MemoryEntry['category'] | undefined): string {
+  switch (category) {
+    case 'summary':
+      return '任务摘要'
+    case 'learning':
+      return '经验沉淀'
+    case 'trigger':
+      return '唤起线索'
+    case 'rule':
+      return '工作规则'
+    case 'user_preference':
+      return '用户偏好'
+    case 'global_fact':
+      return '长期事实'
+    case 'personality_trait':
+      return '协作习惯'
+    default:
+      return '未分类'
+  }
+}
+
+function memoryLayerLabel(layer: MemoryEntry['layer'] | undefined): string {
+  switch (layer) {
+    case 'l0':
+      return '长期保留'
+    case 'l1':
+      return '任务沉淀'
+    case 'l2':
+      return '按需唤起'
+    default:
+      return '未分类'
+  }
+}
+
+function stringMeta(memory: MemoryEntry, keys: string[]): string | null {
+  for (const key of keys) {
+    const value = memory.meta?.[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return null
+}
+
+function memoryOriginLabel(memory: MemoryEntry): string {
+  if (memory.sourceType === 'scope_memory') {
+    const taskName = stringMeta(memory, ['taskTitle', 'conversationTitle', 'scopeTitle', 'sourceTitle'])
+    return taskName ? `来自任务：${taskName}` : '来自一次任务'
+  }
+  return memorySourceLabel(memory.sourceType)
+}
+
+interface MemoryListPanelProps {
+  memories: MemoryEntry[]
+  loading: boolean
+  error: Error | null
+  filters: MemoryQueryFilters
+  onFiltersChange: (filters: MemoryQueryFilters) => void
+  onDeleteMemory: (id: string) => Promise<void>
+  showAdvancedDetails?: boolean
+}
+
+export default function MemoryListPanel({
+  memories,
+  loading,
+  error,
+  filters,
+  onFiltersChange,
+  onDeleteMemory,
+  showAdvancedDetails = false
+}: MemoryListPanelProps) {
   const [selectedMemory, setSelectedMemory] = useState<MemoryEntry | null>(null)
 
-  const handleDelete = async (id: string) => {
+  const updateFilters = (updates: Partial<MemoryQueryFilters>) => {
+    onFiltersChange({ ...filters, ...updates, offset: undefined })
+  }
+
+  const handleDelete = async (memory: MemoryEntry) => {
     if (confirm('确定要删除这条记忆吗？')) {
       try {
-        await deleteMemory(id)
+        await onDeleteMemory(memory.id)
+        if (selectedMemory?.id === memory.id) setSelectedMemory(null)
       } catch (err) {
         alert(`删除失败: ${err instanceof Error ? err.message : String(err)}`)
       }
@@ -60,9 +130,8 @@ export default function MemoryListPanel() {
 
   return (
     <div className="flex flex-col h-full">
-      {/* Filter Bar */}
       <div
-        className="border-b flex items-center gap-3"
+        className="border-b flex items-center gap-3 flex-wrap"
         style={{
           borderColor: 'var(--border-default)',
           padding: '16px 20px'
@@ -75,30 +144,36 @@ export default function MemoryListPanel() {
             padding: '8px 12px'
           }}
           value={filters.sourceType || ''}
-          onChange={(e) =>
-            setFilters({ ...filters, sourceType: (e.target.value as any) || undefined })
+          onChange={(event) =>
+            updateFilters({
+              sourceType: (event.target.value as MemoryEntry['sourceType']) || undefined
+            })
           }
         >
           <option value="">所有来源</option>
-          <option value="resident_agent">常驻记忆</option>
-          <option value="resident_user">用户偏好</option>
-          <option value="scope_memory">当前任务</option>
-          <option value="trigger_rule">触发规则</option>
+          <option value="resident_agent">Agent 主动记住</option>
+          <option value="resident_user">关于你的偏好</option>
+          <option value="scope_memory">来自任务</option>
+          <option value="trigger_rule">按需唤起</option>
         </select>
-        <select
-          className="text-[13px] border rounded-lg transition-[box-shadow,border-color,background-color] duration-200"
-          style={{
-            ...fieldStyle,
-            padding: '8px 12px'
-          }}
-          value={filters.layer || ''}
-          onChange={(e) => setFilters({ ...filters, layer: (e.target.value as any) || undefined })}
-        >
-          <option value="">所有层级</option>
-          <option value="l0">L0 - 常量</option>
-          <option value="l1">L1 - 会话</option>
-          <option value="l2">L2 - 触发器</option>
-        </select>
+        {showAdvancedDetails && (
+          <select
+            className="text-[13px] border rounded-lg transition-[box-shadow,border-color,background-color] duration-200"
+            style={{
+              ...fieldStyle,
+              padding: '8px 12px'
+            }}
+            value={filters.layer || ''}
+            onChange={(event) =>
+              updateFilters({ layer: (event.target.value as MemoryEntry['layer']) || undefined })
+            }
+          >
+            <option value="">所有层级</option>
+            <option value="l0">L0 - 长期保留</option>
+            <option value="l1">L1 - 任务沉淀</option>
+            <option value="l2">L2 - 按需唤起</option>
+          </select>
+        )}
         <select
           className="text-[13px] border rounded-lg transition-[box-shadow,border-color,background-color] duration-200"
           style={{
@@ -106,18 +181,18 @@ export default function MemoryListPanel() {
             padding: '8px 12px'
           }}
           value={filters.category || ''}
-          onChange={(e) =>
-            setFilters({ ...filters, category: (e.target.value as any) || undefined })
+          onChange={(event) =>
+            updateFilters({ category: (event.target.value as MemoryEntry['category']) || undefined })
           }
         >
           <option value="">所有类别</option>
-          <option value="summary">摘要</option>
-          <option value="learning">学习</option>
-          <option value="trigger">触发器</option>
-          <option value="rule">规则</option>
+          <option value="summary">任务摘要</option>
+          <option value="learning">经验沉淀</option>
+          <option value="trigger">唤起线索</option>
+          <option value="rule">工作规则</option>
           <option value="user_preference">用户偏好</option>
-          <option value="global_fact">全局事实</option>
-          <option value="personality_trait">人格特征</option>
+          <option value="global_fact">长期事实</option>
+          <option value="personality_trait">协作习惯</option>
         </select>
         <label
           className="flex items-center gap-2 text-[13px]"
@@ -126,14 +201,13 @@ export default function MemoryListPanel() {
           <input
             type="checkbox"
             checked={filters.includeArchived || false}
-            onChange={(e) => setFilters({ ...filters, includeArchived: e.target.checked })}
+            onChange={(event) => updateFilters({ includeArchived: event.target.checked })}
             className="rounded"
           />
           包含已归档
         </label>
       </div>
 
-      {/* Memory List */}
       <div className="flex-1 overflow-y-auto">
         {memories.length === 0 ? (
           <div
@@ -161,36 +235,36 @@ export default function MemoryListPanel() {
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span
-                        className="text-[11px] font-medium"
-                        style={{ color: 'var(--color-blue)' }}
-                      >
-                        {memory.layer}
-                      </span>
+                    <div className="flex items-center gap-2 mb-2 flex-wrap">
+                      {showAdvancedDetails && (
+                        <span
+                          className="text-[11px] font-medium"
+                          style={{ color: 'var(--color-blue)' }}
+                        >
+                          {memory.layer}
+                        </span>
+                      )}
                       <span
                         className="text-[11px] font-medium"
                         style={{ color: 'var(--color-orange)' }}
                       >
-                        {memorySourceLabel(memory.sourceType)}
+                        {memoryOriginLabel(memory)}
                       </span>
                       <span
                         className="text-[11px] font-medium"
                         style={{ color: 'var(--color-green)' }}
                       >
-                        {memory.category}
+                        {memoryCategoryLabel(memory.category)}
                       </span>
-                      {memory.archivedAt && (
-                        <span
-                          className="text-[11px] font-medium"
-                          style={{ color: 'var(--text-muted)' }}
-                        >
-                          已归档
-                        </span>
-                      )}
+                      <span
+                        className="text-[11px] font-medium"
+                        style={{ color: memory.archivedAt ? 'var(--text-muted)' : 'var(--color-blue)' }}
+                      >
+                        {memory.archivedAt ? '已归档' : '保留中'}
+                      </span>
                     </div>
                     <div
-                      className="text-[13px] font-medium mb-1 truncate"
+                      className="text-[13px] font-medium mb-1"
                       style={{ color: 'var(--text-title)' }}
                     >
                       {memory.title}
@@ -207,14 +281,18 @@ export default function MemoryListPanel() {
                       className="flex items-center gap-4 text-[11px]"
                       style={{ color: 'var(--text-muted)' }}
                     >
-                      <span className="flex items-center gap-1">
-                        <Layers className="w-3 h-3" />
-                        优先级 {memory.priority}
-                      </span>
-                      <span className="flex items-center gap-1">
-                        <Eye className="w-3 h-3" />
-                        访问 {memory.accessCount} 次
-                      </span>
+                      {showAdvancedDetails && (
+                        <>
+                          <span className="flex items-center gap-1">
+                            <Layers className="w-3 h-3" />
+                            {memoryLayerLabel(memory.layer)}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Eye className="w-3 h-3" />
+                            访问 {memory.accessCount} 次
+                          </span>
+                        </>
+                      )}
                       {memory.lastAccessedAt && (
                         <span className="flex items-center gap-1">
                           <Clock className="w-3 h-3" />
@@ -224,9 +302,9 @@ export default function MemoryListPanel() {
                     </div>
                   </div>
                   <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      void handleDelete(memory.id)
+                    onClick={(event) => {
+                      event.stopPropagation()
+                      void handleDelete(memory)
                     }}
                     className="shrink-0 p-1 rounded-md transition-colors duration-200 hover:bg-[var(--bg-hover)]"
                     aria-label="删除记忆"
@@ -240,7 +318,6 @@ export default function MemoryListPanel() {
         )}
       </div>
 
-      {/* Selected Memory Details */}
       {selectedMemory && (
         <div
           className="border-t"
@@ -254,17 +331,28 @@ export default function MemoryListPanel() {
             className="text-[11px] font-semibold uppercase tracking-wider mb-3"
             style={{ color: 'var(--text-light)' }}
           >
-            记忆详情
+            {showAdvancedDetails ? '记忆详情' : '这条记忆'}
           </div>
           <div className="space-y-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-            <div>ID: {selectedMemory.id}</div>
-            <div>来源: {memorySourceLabel(selectedMemory.sourceType)}</div>
-            <div>内容键: {selectedMemory.contentKey}</div>
-            <div>作用域: {selectedMemory.scopeId || '全局'}</div>
-            <div>创建时间: {new Date(selectedMemory.createdAt * 1000).toLocaleString()}</div>
-            <div>更新时间: {new Date(selectedMemory.updatedAt * 1000).toLocaleString()}</div>
-            {selectedMemory.expiresAt && (
-              <div>过期时间: {new Date(selectedMemory.expiresAt * 1000).toLocaleString()}</div>
+            {showAdvancedDetails ? (
+              <>
+                <div>ID: {selectedMemory.id}</div>
+                <div>层级: {selectedMemory.layer}</div>
+                <div>来源: {memorySourceLabel(selectedMemory.sourceType)}</div>
+                <div>内容键: {selectedMemory.contentKey}</div>
+                <div>作用域: {selectedMemory.scopeId || '全局'}</div>
+                <div>创建时间: {new Date(selectedMemory.createdAt * 1000).toLocaleString()}</div>
+                <div>更新时间: {new Date(selectedMemory.updatedAt * 1000).toLocaleString()}</div>
+                {selectedMemory.expiresAt && (
+                  <div>过期时间: {new Date(selectedMemory.expiresAt * 1000).toLocaleString()}</div>
+                )}
+              </>
+            ) : (
+              <>
+                <div>{memoryOriginLabel(selectedMemory)}</div>
+                <div>类型: {memoryCategoryLabel(selectedMemory.category)}</div>
+                <div>创建时间: {new Date(selectedMemory.createdAt * 1000).toLocaleString()}</div>
+              </>
             )}
             {selectedMemory.tags && selectedMemory.tags.length > 0 && (
               <div className="flex items-center gap-1">

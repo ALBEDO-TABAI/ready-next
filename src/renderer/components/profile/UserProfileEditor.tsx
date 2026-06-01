@@ -1,21 +1,17 @@
-import { useEffect, useMemo, useState } from 'react'
-import { AlertCircle, CheckCircle2, Globe2, Plus, Save, Trash2, UserRound, UserSquare2 } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { AlertCircle, CheckCircle2, Globe2, Save, UserSquare2 } from 'lucide-react'
 import {
   SETTINGS_BADGE_STYLE,
   SETTINGS_CARD_STYLE,
-  SETTINGS_DANGER_BUTTON_STYLE,
   SETTINGS_FIELD_HINT_STYLE,
   SETTINGS_FIELD_LABEL_STYLE,
   SETTINGS_INPUT_STYLE,
   SETTINGS_MUTED_CARD_STYLE,
   SETTINGS_PLAIN_SECTION_STYLE,
   SETTINGS_PRIMARY_BUTTON_STYLE,
-  SETTINGS_READONLY_STYLE,
-  SETTINGS_SECONDARY_BUTTON_STYLE,
   SETTINGS_SECTION_LEAD_STYLE,
   SETTINGS_SUBTLE_CARD_STYLE,
   SETTINGS_TITLE_STYLE,
-  settingsListItemStyle,
   settingsNoticeStyle,
 } from '../settings/settings-theme'
 
@@ -29,6 +25,22 @@ interface UserProfile {
   createdAt: number
   updatedAt: number
 }
+
+type UserProfilePayload = {
+  id?: string
+  name?: string
+  preferredLanguage?: string
+  communicationStyle?: string
+  preferencesJson?: Record<string, unknown>
+}
+
+type UserProfileAPIWithPreferences = {
+  get: (userId: string) => Promise<{ success: boolean; data?: UserProfile | null; error?: string }>
+  create: (profile: UserProfilePayload) => Promise<{ success: boolean; data?: UserProfile; error?: string }>
+  update: (userId: string, updates: UserProfilePayload) => Promise<{ success: boolean; error?: string }>
+}
+
+const DEFAULT_USER_ID = 'default-user'
 
 const languageOptions = [
   { value: 'zh', label: '简体中文' },
@@ -53,62 +65,51 @@ function styleLabel(value?: string): string {
   return communicationStyles.find((item) => item.value === (value || ''))?.label || '默认风格'
 }
 
+function getProfileAPI(): UserProfileAPIWithPreferences {
+  return window.electronAPI.userProfile as unknown as UserProfileAPIWithPreferences
+}
+
+function getLongTermPreferences(profile: UserProfile | null): string {
+  const value = profile?.preferencesJson?.longTermPreferences
+  if (typeof value === 'string') {
+    return value
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item)).join('\n')
+  }
+  return value == null ? '' : String(value)
+}
+
 export default function UserProfileEditor() {
-  const [profiles, setProfiles] = useState<UserProfile[]>([])
-  const [selectedUser, setSelectedUser] = useState<string | null>(null)
+  const [profile, setProfile] = useState<UserProfile | null>(null)
   const [name, setName] = useState('')
-  const [avatarUrl, setAvatarUrl] = useState('')
   const [preferredLanguage, setPreferredLanguage] = useState('zh')
   const [communicationStyle, setCommunicationStyle] = useState('')
+  const [longTermPreferences, setLongTermPreferences] = useState('')
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [successMessage, setSuccessMessage] = useState<string | null>(null)
 
   useEffect(() => {
-    void loadProfiles()
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount-only loader; see Y1.3 sub-plan §3.1
+    void loadProfile()
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fixed default-user mount loader
   }, [])
 
-  useEffect(() => {
-    if (!selectedUser) return
-    void loadProfile(selectedUser)
-  }, [selectedUser])
-
-  const selectedProfile = useMemo(
-    () => profiles.find((item) => item.id === selectedUser) || null,
-    [profiles, selectedUser],
-  )
-
-  const loadProfiles = async () => {
+  const loadProfile = async () => {
     setLoading(true)
     setError(null)
     try {
-      const result = await window.electronAPI.userProfile.list()
-      const next = result.data || []
-      setProfiles(next)
-      if (next.length > 0 && !selectedUser) {
-        setSelectedUser(next[0].id)
+      const result = await getProfileAPI().get(DEFAULT_USER_ID)
+      if (!result.success) {
+        throw new Error(result.error || '读取默认档案失败')
       }
-    } catch (err) {
-      setError(`加载用户档案失败：${err instanceof Error ? err.message : String(err)}`)
-    } finally {
-      setLoading(false)
-    }
-  }
-
-  const loadProfile = async (userId: string) => {
-    setLoading(true)
-    setError(null)
-    try {
-      const result = await window.electronAPI.userProfile.get(userId)
-      const profile = result.data
-      if (profile) {
-        setName(profile.name || '')
-        setAvatarUrl(profile.avatarUrl || '')
-        setPreferredLanguage(profile.preferredLanguage)
-        setCommunicationStyle(profile.communicationStyle || '')
-      }
+      const nextProfile = result.data || null
+      setProfile(nextProfile)
+      setName(nextProfile?.name || '')
+      setPreferredLanguage(nextProfile?.preferredLanguage || 'zh')
+      setCommunicationStyle(nextProfile?.communicationStyle || '')
+      setLongTermPreferences(getLongTermPreferences(nextProfile))
     } catch (err) {
       setError(`读取用户档案失败：${err instanceof Error ? err.message : String(err)}`)
     } finally {
@@ -117,71 +118,51 @@ export default function UserProfileEditor() {
   }
 
   const handleSave = async () => {
-    if (!selectedUser) return
-
     setSaving(true)
     setError(null)
     setSuccessMessage(null)
 
     try {
-      await window.electronAPI.userProfile.update(selectedUser, {
-        name: name || undefined,
-        avatarUrl: avatarUrl || undefined,
-        preferredLanguage,
-        communicationStyle: communicationStyle || undefined,
-      })
+      const latest = await getProfileAPI().get(DEFAULT_USER_ID)
+      if (!latest.success) {
+        throw new Error(latest.error || '保存前读取默认档案失败')
+      }
 
-      setSuccessMessage('用户档案已保存。')
-      await loadProfiles()
-      setTimeout(() => setSuccessMessage(null), 3000)
+      const preferencesJson = {
+        ...(latest.data?.preferencesJson || {}),
+      }
+      const nextLongTermPreferences = longTermPreferences.trim()
+      if (nextLongTermPreferences) {
+        preferencesJson.longTermPreferences = nextLongTermPreferences
+      } else {
+        delete preferencesJson.longTermPreferences
+      }
+
+      const payload: UserProfilePayload = {
+        name: name.trim(),
+        preferredLanguage,
+        communicationStyle,
+        preferencesJson,
+      }
+
+      const result = latest.data
+        ? await getProfileAPI().update(DEFAULT_USER_ID, payload)
+        : await getProfileAPI().create({
+          id: DEFAULT_USER_ID,
+          ...payload,
+        })
+
+      if (!result.success) {
+        throw new Error(result.error || '保存默认档案失败')
+      }
+
+      setSuccessMessage('我的偏好已保存。')
+      await loadProfile()
     } catch (err) {
       setError(`保存失败：${err instanceof Error ? err.message : String(err)}`)
     } finally {
       setSaving(false)
     }
-  }
-
-  const handleDelete = async () => {
-    if (!selectedUser) return
-    if (selectedUser === 'default-user') {
-      setError('默认用户档案不可删除。')
-      return
-    }
-    if (!confirm(`确定删除 ${name || selectedUser} 这个用户档案吗？`)) {
-      return
-    }
-
-    setSaving(true)
-    setError(null)
-
-    try {
-      await window.electronAPI.userProfile.delete(selectedUser)
-      setSuccessMessage('用户档案已删除。')
-      setName('')
-      setAvatarUrl('')
-      setPreferredLanguage('zh')
-      setCommunicationStyle('')
-      setSelectedUser(null)
-      await loadProfiles()
-      setTimeout(() => setSuccessMessage(null), 3000)
-    } catch (err) {
-      setError(`删除失败：${err instanceof Error ? err.message : String(err)}`)
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  const handleCreateNew = () => {
-    const userId = prompt('输入新的用户标识：', 'creator-mode')
-    if (!userId) return
-
-    setSelectedUser(userId)
-    setName('')
-    setAvatarUrl('')
-    setPreferredLanguage('zh')
-    setCommunicationStyle('')
-    setSuccessMessage(null)
-    setError(null)
   }
 
   return (
@@ -212,25 +193,16 @@ export default function UserProfileEditor() {
                 color: 'var(--text-muted)',
               }}
             >
-              {profiles.length} 个档案
+              本机默认档案
             </span>
           </div>
           <div>
-            <div style={SETTINGS_TITLE_STYLE}>让不同用户上下文拥有自己的沟通偏好</div>
+            <div style={SETTINGS_TITLE_STYLE}>我的偏好</div>
             <div style={{ ...SETTINGS_SECTION_LEAD_STYLE, marginTop: 6, maxWidth: 620 }}>
-              用户档案适合保存语言、沟通方式、称呼习惯等长期偏好。Agent 在切换用户上下文时，可以据此调整回复方式与协作细节。
+              保存昵称、语言、回复风格和长期偏好，让 Ready 在本机默认档案下保持一致的协作方式。
             </div>
           </div>
         </div>
-        <button
-          onClick={handleCreateNew}
-          disabled={loading}
-          className="inline-flex items-center gap-2 hover:brightness-95 active:scale-[0.98] disabled:opacity-50"
-          style={SETTINGS_PRIMARY_BUTTON_STYLE}
-        >
-          <Plus className="w-4 h-4" />
-          新建用户
-        </button>
       </div>
 
       {error && (
@@ -248,254 +220,133 @@ export default function UserProfileEditor() {
       )}
 
       <div
-        className="grid gap-5 items-start"
-        style={{ gridTemplateColumns: '280px minmax(0, 1fr)' }}
+        className="flex flex-col gap-5 min-w-0"
+        style={{
+          ...SETTINGS_CARD_STYLE,
+          padding: '20px',
+        }}
       >
         <div
-          className="flex flex-col gap-3"
+          className="grid gap-4"
           style={{
-            ...SETTINGS_CARD_STYLE,
-            padding: '18px 16px',
+            ...SETTINGS_PLAIN_SECTION_STYLE,
+            padding: '0 0 4px',
+            gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
           }}
         >
-          <div className="flex items-center justify-between gap-3 px-1">
-            <div>
-              <div className="text-[13px] font-semibold" style={{ color: 'var(--text-title)' }}>
-                用户列表
-              </div>
-              <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 4 }}>
-                选择一个用户上下文继续编辑偏好。
+          <div style={{ gridColumn: '1 / -1' }}>
+            <div className="flex items-center gap-2">
+              <Globe2 className="w-4 h-4" style={{ color: 'var(--color-blue)' }} />
+              <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>
+                偏好设置
               </div>
             </div>
-            <UserRound className="w-4 h-4" style={{ color: 'var(--text-light)' }} />
+            <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 6 }}>
+              这份偏好固定保存到本机默认档案，不再提供多用户切换。
+            </div>
           </div>
 
-          <div className="flex flex-col gap-2">
-            {profiles.map((profile) => {
-              const isActive = selectedUser === profile.id
-              return (
-                <button
-                  key={profile.id}
-                  onClick={() => setSelectedUser(profile.id)}
-                  className="text-left transition-[transform,background-color,border-color] duration-200 hover:-translate-y-[1px]"
-                  style={settingsListItemStyle(isActive)}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <div
-                        className="text-[13px] font-semibold truncate"
-                        style={{ color: isActive ? 'var(--color-blue)' : 'var(--text-title)' }}
-                      >
-                        {profile.name || profile.id}
-                      </div>
-                      <div className="text-[11px] mt-1" style={{ color: 'var(--text-muted)' }}>
-                        {profile.id}
-                      </div>
-                    </div>
-                    <span
-                      style={{
-                        ...SETTINGS_BADGE_STYLE,
-                        background: isActive ? 'var(--color-blue)' : 'color-mix(in srgb, var(--surface-card-bg) 82%, var(--bg-canvas) 18%)',
-                        color: isActive ? '#fff' : 'var(--text-muted)',
-                      }}
-                    >
-                      {styleLabel(profile.communicationStyle)}
-                    </span>
-                  </div>
-                  <div className="text-[11px] mt-3" style={{ color: 'var(--text-light)' }}>
-                    更新于 {new Date(profile.updatedAt * 1000).toLocaleDateString()}
-                  </div>
-                </button>
-              )
-            })}
+          <div>
+            <div style={SETTINGS_FIELD_LABEL_STYLE}>昵称</div>
+            <input
+              aria-label="昵称"
+              type="text"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="例如：Maijiahui"
+              style={SETTINGS_INPUT_STYLE}
+            />
+          </div>
 
-            {!loading && profiles.length === 0 && (
-              <div
-                className="flex items-center justify-center text-center"
-                style={{
-                  ...SETTINGS_SUBTLE_CARD_STYLE,
-                  minHeight: 148,
-                  padding: '20px 16px',
-                  color: 'var(--text-muted)',
-                }}
-              >
-                还没有任何用户档案。<br />点击右上角创建一个新的用户上下文。
-              </div>
-            )}
+          <div>
+            <div style={SETTINGS_FIELD_LABEL_STYLE}>语言</div>
+            <select
+              aria-label="语言"
+              value={preferredLanguage}
+              onChange={(event) => setPreferredLanguage(event.target.value)}
+              style={SETTINGS_INPUT_STYLE}
+            >
+              {languageOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div style={{ gridColumn: '1 / -1' }}>
+            <div style={SETTINGS_FIELD_LABEL_STYLE}>回复风格</div>
+            <select
+              aria-label="回复风格"
+              value={communicationStyle}
+              onChange={(event) => setCommunicationStyle(event.target.value)}
+              style={SETTINGS_INPUT_STYLE}
+            >
+              {communicationStyles.map((option) => (
+                <option key={option.value || 'default'} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+            <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 6 }}>
+              {communicationStyles.find((item) => item.value === communicationStyle)?.description || communicationStyles[0].description}
+            </div>
+          </div>
+
+          <div style={{ gridColumn: '1 / -1' }}>
+            <div style={SETTINGS_FIELD_LABEL_STYLE}>长期偏好</div>
+            <textarea
+              aria-label="长期偏好"
+              value={longTermPreferences}
+              onChange={(event) => setLongTermPreferences(event.target.value)}
+              placeholder="例如：先给结论；涉及实现时保留关键证据；中文回复。"
+              style={{
+                ...SETTINGS_INPUT_STYLE,
+                minHeight: 132,
+                lineHeight: 1.6,
+                resize: 'vertical',
+              }}
+            />
           </div>
         </div>
 
-        {selectedUser ? (
-          <div className="flex flex-col gap-5 min-w-0">
-            <div
-              className="grid gap-4"
+        <div
+          className="flex items-center justify-between gap-4"
+          style={{
+            ...SETTINGS_SUBTLE_CARD_STYLE,
+            padding: '14px 16px',
+          }}
+        >
+          <div className="flex items-center gap-2">
+            <span
               style={{
-                ...SETTINGS_PLAIN_SECTION_STYLE,
-                padding: '0 0 4px',
-                gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-              }}
-            >
-              <div style={{ gridColumn: '1 / -1' }}>
-                <div className="flex items-center gap-2">
-                  <Globe2 className="w-4 h-4" style={{ color: 'var(--color-blue)' }} />
-                  <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>
-                    档案基础设置
-                  </div>
-                </div>
-                <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 6 }}>
-                  为当前用户上下文定义显示名称、首选语言与整体沟通风格，方便 Agent 在不同语境下切换表达方式。
-                </div>
-              </div>
-
-              <div>
-                <div style={SETTINGS_FIELD_LABEL_STYLE}>用户标识</div>
-                <input value={selectedUser} disabled style={SETTINGS_READONLY_STYLE} />
-              </div>
-
-              <div>
-                <div style={SETTINGS_FIELD_LABEL_STYLE}>首选语言</div>
-                <select
-                  value={preferredLanguage}
-                  onChange={(event) => setPreferredLanguage(event.target.value)}
-                  style={SETTINGS_INPUT_STYLE}
-                >
-                  {languageOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <div style={SETTINGS_FIELD_LABEL_STYLE}>显示名称</div>
-                <input
-                  type="text"
-                  value={name}
-                  onChange={(event) => setName(event.target.value)}
-                  placeholder="例如：Maijiahui / 内容创作模式"
-                  style={SETTINGS_INPUT_STYLE}
-                />
-              </div>
-
-              <div>
-                <div style={SETTINGS_FIELD_LABEL_STYLE}>沟通风格</div>
-                <select
-                  value={communicationStyle}
-                  onChange={(event) => setCommunicationStyle(event.target.value)}
-                  style={SETTINGS_INPUT_STYLE}
-                >
-                  {communicationStyles.map((option) => (
-                    <option key={option.value || 'default'} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 6 }}>
-                  {communicationStyles.find((item) => item.value === communicationStyle)?.description || communicationStyles[0].description}
-                </div>
-              </div>
-
-              <div style={{ gridColumn: '1 / -1' }}>
-                <div style={SETTINGS_FIELD_LABEL_STYLE}>头像地址</div>
-                <input
-                  type="text"
-                  value={avatarUrl}
-                  onChange={(event) => setAvatarUrl(event.target.value)}
-                  placeholder="https://example.com/avatar.jpg"
-                  style={SETTINGS_INPUT_STYLE}
-                />
-                <div style={{ ...SETTINGS_FIELD_HINT_STYLE, marginTop: 6 }}>
-                  可选，用于在多用户场景中更快区分上下文。
-                </div>
-              </div>
-            </div>
-
-            <div
-              className="flex items-center justify-between gap-4"
-              style={{
-                ...SETTINGS_SUBTLE_CARD_STYLE,
-                padding: '14px 16px',
-              }}
-            >
-              <div className="flex items-center gap-2">
-                <span
-                  style={{
-                    ...SETTINGS_BADGE_STYLE,
-                    background: 'var(--color-blue-light)',
-                    color: 'var(--color-blue)',
-                  }}
-                >
-                  {styleLabel(communicationStyle)}
-                </span>
-                <span className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
-                  最近更新于 {selectedProfile ? new Date(selectedProfile.updatedAt * 1000).toLocaleString() : '刚刚'}
-                </span>
-              </div>
-              <span className="text-[12px]" style={{ color: 'var(--text-light)' }}>
-                创建于 {selectedProfile ? new Date(selectedProfile.createdAt * 1000).toLocaleDateString() : '刚刚'}
-              </span>
-            </div>
-
-            <div className="flex items-center justify-end gap-3">
-              <button
-                onClick={handleSave}
-                disabled={saving || loading}
-                className="inline-flex items-center gap-2 hover:brightness-95 active:scale-[0.98] disabled:opacity-50"
-                style={SETTINGS_PRIMARY_BUTTON_STYLE}
-              >
-                <Save className="w-4 h-4" />
-                {saving ? '保存中...' : '保存档案'}
-              </button>
-              {selectedUser !== 'default-user' && (
-                <button
-                  onClick={handleDelete}
-                  disabled={saving || loading}
-                  className="inline-flex items-center gap-2 hover:brightness-95 active:scale-[0.98] disabled:opacity-50"
-                  style={SETTINGS_DANGER_BUTTON_STYLE}
-                >
-                  <Trash2 className="w-4 h-4" />
-                  删除
-                </button>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div
-            className="flex flex-col items-center justify-center text-center"
-            style={{
-              ...SETTINGS_PLAIN_SECTION_STYLE,
-              minHeight: 420,
-              padding: '48px 24px',
-            }}
-          >
-            <div
-              className="flex items-center justify-center"
-              style={{
-                width: 52,
-                height: 52,
-                borderRadius: 18,
+                ...SETTINGS_BADGE_STYLE,
                 background: 'var(--color-blue-light)',
                 color: 'var(--color-blue)',
               }}
             >
-              <UserRound className="w-5 h-5" />
-            </div>
-            <div className="text-[16px] font-semibold mt-4" style={{ color: 'var(--text-title)' }}>
-              选择一个用户开始编辑
-            </div>
-            <div style={{ ...SETTINGS_SECTION_LEAD_STYLE, marginTop: 8, maxWidth: 420 }}>
-              左侧可以切换已存在的用户档案。每个档案都能保存自己偏好的语言和沟通风格，方便 Agent 在不同协作对象之间切换。
-            </div>
-            <button
-              onClick={handleCreateNew}
-              style={{ ...SETTINGS_SECONDARY_BUTTON_STYLE, marginTop: 18 }}
-              className="hover:brightness-95 active:scale-[0.98]"
-            >
-              新建用户
-            </button>
+              {styleLabel(communicationStyle)}
+            </span>
+            <span className="text-[12px]" style={{ color: 'var(--text-muted)' }}>
+              {profile ? '已加载默认档案' : '保存后创建默认档案'}
+            </span>
           </div>
-        )}
+          <span className="text-[12px]" style={{ color: 'var(--text-light)' }}>
+            default-user
+          </span>
+        </div>
+
+        <div className="flex items-center justify-end gap-3">
+          <button
+            onClick={handleSave}
+            disabled={saving || loading}
+            className="inline-flex items-center gap-2 hover:brightness-95 active:scale-[0.98] disabled:opacity-50"
+            style={SETTINGS_PRIMARY_BUTTON_STYLE}
+          >
+            <Save className="w-4 h-4" />
+            {saving ? '保存中...' : '保存偏好'}
+          </button>
+        </div>
       </div>
     </div>
   )

@@ -1015,12 +1015,14 @@ const userProfileAPI = {
     avatarUrl?: string
     preferredLanguage?: string
     communicationStyle?: string
+    preferencesJson?: Record<string, unknown>
   }) => ipcRenderer.invoke('userProfile:create', profile),
   update: (userId: string, updates: {
     name?: string
     avatarUrl?: string
     preferredLanguage?: string
     communicationStyle?: string
+    preferencesJson?: Record<string, unknown>
   }) => ipcRenderer.invoke('userProfile:update', userId, updates),
   delete: (userId: string) => ipcRenderer.invoke('userProfile:delete', userId),
 }
@@ -1034,11 +1036,13 @@ const agentPersonalityAPI = {
     displayName?: string
     personalityText: string
     tone?: string
+    metaJson?: Record<string, unknown>
   }) => ipcRenderer.invoke('agentPersonality:create', personality),
   update: (agentName: string, updates: {
     displayName?: string
     personalityText?: string
     tone?: string
+    metaJson?: Record<string, unknown>
   }) => ipcRenderer.invoke('agentPersonality:update', agentName, updates),
   delete: (agentName: string) => ipcRenderer.invoke('agentPersonality:delete', agentName),
 }

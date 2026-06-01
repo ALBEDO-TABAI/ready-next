@@ -14,6 +14,7 @@ export function useMemories(filters: MemoryQueryFilters) {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<Error | null>(null)
   const filtersRef = useRef(filters)
+  const filtersKey = JSON.stringify(filters)
   filtersRef.current = filters
 
   const refresh = useCallback(async () => {
@@ -31,7 +32,7 @@ export function useMemories(filters: MemoryQueryFilters) {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [filtersKey])
 
   useEffect(() => {
     void refresh()

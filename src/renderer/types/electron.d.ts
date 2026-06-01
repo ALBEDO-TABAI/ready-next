@@ -3045,6 +3045,7 @@ interface ElectronUserProfileAPI {
     avatarUrl?: string
     preferredLanguage?: string
     communicationStyle?: string
+    preferencesJson?: Record<string, unknown>
   }) => Promise<{ success: boolean; data?: UserProfileData; error?: string }>
   update: (
     userId: string,
@@ -3053,6 +3054,7 @@ interface ElectronUserProfileAPI {
       avatarUrl?: string
       preferredLanguage?: string
       communicationStyle?: string
+      preferencesJson?: Record<string, unknown>
     }
   ) => Promise<{ success: boolean; error?: string }>
   delete: (userId: string) => Promise<{ success: boolean; error?: string }>
@@ -3083,6 +3085,7 @@ interface ElectronAgentPersonalityAPI {
     displayName?: string
     personalityText: string
     tone?: string
+    metaJson?: Record<string, unknown>
   }) => Promise<{ success: boolean; data?: AgentPersonalityData; error?: string }>
   update: (
     agentName: string,
@@ -3090,6 +3093,7 @@ interface ElectronAgentPersonalityAPI {
       displayName?: string
       personalityText?: string
       tone?: string
+      metaJson?: Record<string, unknown>
     }
   ) => Promise<{ success: boolean; error?: string }>
   delete: (agentName: string) => Promise<{ success: boolean; error?: string }>
@@ -3179,8 +3183,11 @@ interface MemoryLifecycleStatus {
 }
 
 interface MemoryMaintenanceResult {
-  archivedCount: number
+  archivedL1Count: number
+  archivedL2Count: number
   prunedCount: number
+  optimizedTriggers: number
+  timestamp: string
 }
 
 interface ElectronMemoryAPI {

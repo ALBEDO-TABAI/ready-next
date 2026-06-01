@@ -1,5 +1,5 @@
-import { useMemoryStats, useMemoryLifecycle } from '../../hooks/useMemory'
-import { Database, Layers, Tag, Archive, Activity, Play, CheckCircle2, Loader2 } from 'lucide-react'
+import { Database, Layers, Tag, Archive, Activity, Play, Loader2 } from 'lucide-react'
+import type { MemoryLifecycleStatus, MemoryMaintenanceResult, MemoryStats } from '../../types/electron'
 import { SETTINGS_CARD_STYLE, SETTINGS_PRIMARY_BUTTON_STYLE } from '../settings/settings-theme'
 
 const panelCardStyle = {
@@ -10,20 +10,33 @@ const primaryButtonStyle = {
   ...SETTINGS_PRIMARY_BUTTON_STYLE
 }
 
-export default function MemoryStatsCard() {
-  const { stats, loading: statsLoading, error: statsError } = useMemoryStats()
-  const {
-    status,
-    loading: lifecycleLoading,
-    error: lifecycleError,
-    maintenanceRunning,
-    runMaintenance
-  } = useMemoryLifecycle()
+interface MemoryStatsCardProps {
+  stats: MemoryStats | null
+  statsLoading: boolean
+  statsError: Error | null
+  status: MemoryLifecycleStatus | null
+  lifecycleLoading: boolean
+  lifecycleError: Error | null
+  maintenanceRunning: boolean
+  onRunMaintenance: () => Promise<MemoryMaintenanceResult>
+}
 
+export default function MemoryStatsCard({
+  stats,
+  statsLoading,
+  statsError,
+  status,
+  lifecycleLoading,
+  lifecycleError,
+  maintenanceRunning,
+  onRunMaintenance
+}: MemoryStatsCardProps) {
   const handleRunMaintenance = async () => {
     try {
-      const result = await runMaintenance()
-      alert(`维护完成:\n- 已归档: ${result.archivedCount}\n- 已清理: ${result.prunedCount}`)
+      const result = await onRunMaintenance()
+      alert(
+        `维护完成:\n- 已归档（任务/按需）: ${result.archivedL1Count} / ${result.archivedL2Count}\n- 已清理: ${result.prunedCount}`
+      )
     } catch (err) {
       alert(`维护失败: ${err instanceof Error ? err.message : String(err)}`)
     }
@@ -101,23 +114,23 @@ export default function MemoryStatsCard() {
               style={{ color: 'var(--text-light)' }}
             >
               <Layers className="w-3 h-3 inline mr-1" />
-              按层级分布
+              记忆分布
             </div>
             <div className="space-y-2">
               <div className="flex justify-between items-center text-[13px]">
-                <span style={{ color: 'var(--text-body)' }}>L0 (常量)</span>
+                <span style={{ color: 'var(--text-body)' }}>长期保留</span>
                 <span className="font-medium" style={{ color: 'var(--text-title)' }}>
                   {stats.byLayer.l0}
                 </span>
               </div>
               <div className="flex justify-between items-center text-[13px]">
-                <span style={{ color: 'var(--text-body)' }}>L1 (会话)</span>
+                <span style={{ color: 'var(--text-body)' }}>任务沉淀</span>
                 <span className="font-medium" style={{ color: 'var(--text-title)' }}>
                   {stats.byLayer.l1}
                 </span>
               </div>
               <div className="flex justify-between items-center text-[13px]">
-                <span style={{ color: 'var(--text-body)' }}>L2 (触发器)</span>
+                <span style={{ color: 'var(--text-body)' }}>按需唤起</span>
                 <span className="font-medium" style={{ color: 'var(--text-title)' }}>
                   {stats.byLayer.l2}
                 </span>
@@ -152,7 +165,7 @@ export default function MemoryStatsCard() {
                 </span>
               </div>
               <div className="flex justify-between items-center text-[13px]">
-                <span style={{ color: 'var(--text-body)' }}>触发规则</span>
+                <span style={{ color: 'var(--text-body)' }}>按需唤起</span>
                 <span className="font-medium" style={{ color: 'var(--text-title)' }}>
                   {stats.bySourceType.trigger_rule}
                 </span>
@@ -182,7 +195,7 @@ export default function MemoryStatsCard() {
                 </span>
               </div>
               <div className="flex justify-between items-center text-[13px]">
-                <span style={{ color: 'var(--text-body)' }}>触发器</span>
+                <span style={{ color: 'var(--text-body)' }}>唤起线索</span>
                 <span className="font-medium" style={{ color: 'var(--text-title)' }}>
                   {stats.byCategory.trigger}
                 </span>

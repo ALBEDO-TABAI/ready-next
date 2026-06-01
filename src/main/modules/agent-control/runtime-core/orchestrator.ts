@@ -48,6 +48,8 @@ type SendAndCollectExecutionResult = SendAndCollectResult & {
   scopeRunAuthority?: ExecutionHostResult['scopeRunAuthority']
 }
 
+type PersonaSystemPromptResolver = (agent: string) => Promise<string | undefined>
+
 interface CompactSessionReport {
   beforeTokens: number
   afterTokens: number
@@ -89,6 +91,7 @@ export class ReadyAgentOrchestrator extends EventEmitter {
   private readonly descriptors = new Map<string, SessionDescriptor>()
   private readonly runCleanupRegistry = new RunCleanupRegistry()
   private readonly activeRunIds = new Map<string, string>()
+  private personaResolver: PersonaSystemPromptResolver | null = null
 
   constructor(options?: ReadyAgentOrchestratorOptions) {
     super()
@@ -317,6 +320,10 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     this.sdkEngine.setCancelPendingToolActions(canceller)
   }
 
+  setPersonaResolver(resolver: PersonaSystemPromptResolver | null): void {
+    this.personaResolver = resolver
+  }
+
   async send(
     agent: string,
     message: string | MultimodalBlock[],
@@ -365,10 +372,23 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     this.descriptors.set(internalKey, { agent, sessionId })
     this.sessions.setState(taskKey, 'queued')
     this.activeRunIds.set(taskKey, effectiveRequestId)
-    if (systemPrompt) {
-      this.sdkEngine.setSystemPrompt(internalKey, systemPrompt)
-    }
     try {
+      let resolvedSystemPrompt = systemPrompt
+      if (systemPrompt === undefined && this.personaResolver) {
+        try {
+          resolvedSystemPrompt = await this.personaResolver(agent)
+        } catch (error) {
+          this.sessions.setState(
+            taskKey,
+            'failed',
+            error instanceof Error ? error.message : String(error),
+          )
+          throw error
+        }
+      }
+      if (resolvedSystemPrompt) {
+        this.sdkEngine.setSystemPrompt(internalKey, resolvedSystemPrompt)
+      }
       const result = await this.sdkEngine.sendMessage(internalKey, message, effectiveRequestId, {
         taskId,
         publicSessionId: sessionId,

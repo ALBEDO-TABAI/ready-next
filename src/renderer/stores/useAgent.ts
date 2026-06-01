@@ -115,6 +115,54 @@ interface AgentSendResult {
   } | null
 }
 
+const FALLBACK_AGENTS: readonly Agent[] = [
+  { name: 'butler', displayName: '管家', avatar: '🤖', status: 'idle', selected: true },
+  { name: 'copywriter', displayName: '文案', avatar: '✍️', status: 'idle', selected: false },
+  { name: 'video-editor', displayName: '剪辑', avatar: '🎬', status: 'idle', selected: false },
+  { name: 'analyst', displayName: '分析', avatar: '📊', status: 'idle', selected: false },
+]
+
+interface AgentPersonalityListItem {
+  agentName: string
+  displayName?: string
+  metaJson?: Record<string, unknown>
+}
+
+function cloneFallbackAgents(): Agent[] {
+  return FALLBACK_AGENTS.map((agent) => ({ ...agent }))
+}
+
+function readPersonalityEmoji(metaJson?: Record<string, unknown>): string {
+  const emoji = metaJson?.emoji
+  return typeof emoji === 'string' && emoji.trim() ? emoji : '🤖'
+}
+
+function mapPersonalitiesToAgents(
+  personalities: AgentPersonalityListItem[],
+  previousAgents: Agent[],
+  currentAgent: string,
+): { agents: Agent[]; currentAgent: string } {
+  const source = personalities.length > 0 ? personalities : cloneFallbackAgents().map((agent) => ({
+    agentName: agent.name,
+    displayName: agent.displayName,
+    metaJson: { emoji: agent.avatar },
+  }))
+  const nextCurrentAgent = source.some((item) => item.agentName === currentAgent)
+    ? currentAgent
+    : source[0].agentName
+  const agents = source.map((item) => {
+    const previous = previousAgents.find((agent) => agent.name === item.agentName)
+    return {
+      name: item.agentName,
+      displayName: item.displayName || item.agentName,
+      avatar: readPersonalityEmoji(item.metaJson),
+      status: 'idle' as const,
+      selected: previous?.selected ?? item.agentName === nextCurrentAgent,
+    }
+  })
+  return { agents, currentAgent: nextCurrentAgent }
+}
+
 export interface SendMessageResult {
   success: boolean
   shouldClearInput: boolean
@@ -245,6 +293,7 @@ interface AgentState {
   taskDisclosureState: Record<string, TaskDisclosureState>
 
   setAgents: (agents: Agent[]) => void
+  reloadAgents: () => Promise<void>
   selectAgent: (name: string) => void
   toggleAgentSelection: (name: string) => void
   addMessage: (message: AgentMessage) => void
@@ -1129,12 +1178,7 @@ async function flushPendingSendBuffer(sessionId?: string | null) {
 }
 
 export const useAgent = create<AgentState>((set, get) => ({
-  agents: [
-    { name: 'butler', displayName: '管家', avatar: '🤖', status: 'idle', selected: true },
-    { name: 'copywriter', displayName: '文案', avatar: '✍️', status: 'idle', selected: false },
-    { name: 'video-editor', displayName: '剪辑', avatar: '🎬', status: 'idle', selected: false },
-    { name: 'analyst', displayName: '分析', avatar: '📊', status: 'idle', selected: false }
-  ],
+  agents: cloneFallbackAgents(),
   messages: [
     {
       id: 'welcome',
@@ -1180,6 +1224,27 @@ export const useAgent = create<AgentState>((set, get) => ({
   taskDisclosureState: {},
 
   setAgents: (agents) => set({ agents }),
+
+  reloadAgents: async () => {
+    const previousState = get()
+    let personalities: AgentPersonalityListItem[] = []
+    try {
+      const api = typeof window !== 'undefined' ? window.electronAPI?.agentPersonality : undefined
+      const result = await api?.list?.()
+      if (result?.success && Array.isArray(result.data)) {
+        personalities = result.data
+      }
+    } catch {
+      personalities = []
+    }
+
+    const { agents, currentAgent } = mapPersonalitiesToAgents(
+      personalities,
+      previousState.agents,
+      previousState.currentAgent,
+    )
+    set({ agents, currentAgent })
+  },
 
   selectAgent: (name) => set({ currentAgent: name }),
 
@@ -2624,6 +2689,7 @@ export function initAgentInteractionListeners(): () => void {
 }
 
 export function initAgentListeners(): () => void {
+  void useAgent.getState().reloadAgents()
   const offRuntime = agentRuntimeDriver.initAgentListeners()
   const offAgentInteraction = initAgentInteractionListeners()
   return () => {

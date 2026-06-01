@@ -44,6 +44,7 @@ export function setupMemoryManagementIPC(): void {
     avatarUrl?: string
     preferredLanguage?: string
     communicationStyle?: string
+    preferencesJson?: Record<string, unknown>
   }): Promise<IPCResponse> => {
     try {
       const created = await userProfileRepo.createProfile(profile)
@@ -58,6 +59,7 @@ export function setupMemoryManagementIPC(): void {
     avatarUrl?: string
     preferredLanguage?: string
     communicationStyle?: string
+    preferencesJson?: Record<string, unknown>
   }): Promise<IPCResponse> => {
     try {
       await userProfileRepo.updateProfile(userId, updates)
@@ -103,6 +105,7 @@ export function setupMemoryManagementIPC(): void {
     displayName?: string
     personalityText: string
     tone?: string
+    metaJson?: Record<string, unknown>
   }): Promise<IPCResponse> => {
     try {
       const created = await agentPersonalityRepo.createPersonality(personality)
@@ -116,6 +119,7 @@ export function setupMemoryManagementIPC(): void {
     displayName?: string
     personalityText?: string
     tone?: string
+    metaJson?: Record<string, unknown>
   }): Promise<IPCResponse> => {
     try {
       await agentPersonalityRepo.updatePersonality(agentName, updates)

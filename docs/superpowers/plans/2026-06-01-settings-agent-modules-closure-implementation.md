@@ -1,7 +1,7 @@
 ---
 title: 设置三模块收口（记忆 / Agent 人格 / 用户档案）——接通活跃 Agent
 date: 2026-06-01
-status: ready-for-construction
+status: approved-ready-for-construction  # R3 双方无异议通过（2026-06-01）
 owner: 白
 executor: Codex（调度 subagents 施工），Claude 复审
 enforce: true
@@ -16,6 +16,11 @@ references_external:
 
 > 本文是给 **Codex 调度 subagents 施工** 用的详细计划。Claude 已完成独立审查与 Hermes 调研，施工完成后由 Claude 复审结果。
 > 阅读顺序：先读 §1 前因后果建立心智 → §2 已核实事实（带 file:line）→ §3 目标设计 → §4 工作包（每个 = 一个 subagent 任务）→ §6 验收。
+>
+> **审查轮次**：
+> - **R1（2026-06-01）**：Codex 计划审查完成。5 条事实抽查全 ✅；提出 WP0/WP1/WP2/WP3/WP5 契约缺口 + 依赖错标，结论「需补全后再施工」。Claude 已逐条用真实代码核实并补全（见 §2.8 与各 WP 内 **【R1 修订/决策】** 标记、§5、§7）。
+> - **R2（2026-06-01）**：Codex 定向复核补全。WP1/WP2/WP3/WP5 四项判 ✅已闭合、§5 依赖放松与 WP0 测试拆分均确认到位；剩 2 项：①WP0 幂等表述、②远程 scope 无害声明。Claude 复核后**对 ①采取更优解**——经核实 `setSystemPrompt` 为纯字段写、同值不破缓存，**直接删除整个幂等优化**（过度设计，见 §2.8 F2 / WP0 点 2 **【R2 修订】**）；②补齐运行时零回归论证（WP0 点 4 / §7）。
+> - **R3（2026-06-01）— ✅ 通过**：Codex 终审两点全 ✅：确认点 1 `setSystemPrompt`（agent-sdk-runtime.ts:2641-2642）纯字段写无副作用，删幂等无回归；确认点 2 全仓无非 default-user 的 userId upsert、消费点（runtime.ts:313/2090）容错 null，远程 scope 零回归成立。**结论：计划通过，可施工。双方无异议，进入施工阶段（由用户交 Codex 开发，Claude 复审结果）。**
 
 ---
 
@@ -140,6 +145,14 @@ agent:send IPC (agent-lifecycle-group.ts:181-189)
 - `src/renderer/components/personality/PersonalityEditor.tsx` — `handleSave`（约 `:111-149`）正确分支 create/update **但从不查 `result.success`**；`handleCreateNew`（约 `:176-186`）`prompt(...)` 只改本地 state，不调 create API。
 - `src/renderer/components/profile/UserProfileEditor.tsx` — `handleSave`（约 `:119-142`）**永远调 `userProfile.update`**（从不 create）→ 新用户存不进；`handleCreateNew`（约 `:174-185`）只改本地 state；均不查 `result.success`；`default-user` 特判不可删（约 `:146-149, :450`）。
 
+### 2.8 Round-1 复审已核实的补充事实（Codex 审查 + Claude 逐行核实，2026-06-01）
+> 以下五条是第一轮 Codex 计划审查提出、Claude 已用真实代码核实的**新增/修正事实**，直接影响下方 WP 契约。前 5 条事实抽查（§1.5 链路、send 入口仅两处、两仓库签名、四套人格论点、按钮 bug）Codex 全部判 ✅符合，地基稳。
+- **F1｜第二处建 scope 漏带 userId**：除 `createLocalScopeWithMode`（runtime.ts:1109-1127）外，`ensureChannelScope`（**runtime.ts:2116-2140**）也走 `upsertConversationScope` 且**未带 userId**。但 channel scope 代表**远程发送者**（`sender`），不是本地 `default-user`——故**刻意排除**，不要给它塞 default-user（见 WP0 决策）。
+- **F2｜无需任何「仅当不同才 set」优化（R2 定稿）**：`AgentSdkRuntime.sessions` 为 private Map、无 getter；`setSystemPrompt`（:2636-2643）已核实是**纯字段写、无副作用**。由于 instructions 每轮按 `session.systemPrompt` 重建，**同值写既不破前缀缓存也不触发 rebuild** → R1 设想的「比较后才 set / 内部幂等早退」是过度设计，**整体删除**：orchestrator 每轮直接调 `setSystemPrompt`（见 WP0 点 2）。
+- **F3｜`getDefaultPersona` 不可外部调用**：它是 `WorktreePool` 的 **private 实例方法**（worktree-pool.ts:176），仅 :166 内部用；migration **无法直接调**。WP1 必须明确取源方式（见 WP1 决策：抽公共常量）。
+- **F4｜表与唯一约束已就绪**：`agent_personalities` 表及 `agent_name TEXT NOT NULL UNIQUE` 已在 migrations.ts:694-696 建好；WP1 **无需改 schema**，直接 `INSERT ... ON CONFLICT(agent_name) DO NOTHING`。种子 INSERT 模板见 migrations.ts:730-737（default-user 写法）。
+- **F5｜`defaultSystemPrompt` 为模块私有函数**：agent-sdk-runtime.ts:309-311 定义，:2626/:2642 内部引用；合成器需要它作 fallback → **导出复用**（不要复刻，避免双份漂移）。
+
 ---
 
 ## 3. 目标设计（施工后应呈现）
@@ -190,48 +203,54 @@ agent:send IPC (agent-lifecycle-group.ts:181-189)
    - 若 `tone` 存在，追加一行 `语气：<tone>`。
    - 取 `userProfileRepo.getProfile('default-user')`：拼一段「用户档案（关于当前用户）」块（昵称/语言/回复风格/长期偏好，存在的字段才写）。Hermes 风格表头，便于模型识别。
    - 返回 `personaPart + '\n\n' + userProfileBlock`（任一为空则跳过）。
-2. `orchestrator.send`：当**调用方未显式传 `systemPrompt`** 且已注入 `personaResolver` 时，`systemPrompt = await personaResolver(agent)`。仅当结果与 `session` 现有 systemPrompt 不同才 `setSystemPrompt`（避免每轮无谓重置、保前缀缓存）。显式传入的 systemPrompt 优先级最高（保留现有契约）。
+2. `orchestrator.send`：当**调用方未显式传 `systemPrompt`** 且已注入 `personaResolver` 时，`systemPrompt = await personaResolver(agent)`，再正常调 `setSystemPrompt`。显式传入的 systemPrompt 优先级最高（保留现有契约）。
    - 提供 `setPersonaResolver(fn)` 注入点；resolver 形如 `(agent: string) => Promise<string | undefined>`。
+   - **【R2 修订·F2】不加幂等保护（删掉 R1 的「仅当不同才 set」）**：已核实 `setSystemPrompt`（agent-sdk-runtime.ts:2636-2643）是**纯字段写、无副作用**；resolver 对同一 agent 是确定性输出，每轮 set 相同串，instructions 每轮按 `session.systemPrompt` 重建 → **同值写不破前缀缓存、不触发任何 rebuild**。故 orchestrator 每次 send 直接「解析 persona + 调 setSystemPrompt」即可，**不需要**比较、不需要 getter、不需要在 `setSystemPrompt` 内加早退（属过度设计，依「简单优先」删除）。session 不存在分支由现有 `newSession` 兜底。
 3. `runtime.ts` 构造时：`orchestrator.setPersonaResolver(agent => composePersonaSystemPrompt(agent, this.agentPersonalityRepository, this.userProfileRepository, defaultSystemPrompt))`。
-   - 注意 `defaultSystemPrompt` 当前是 `agent-sdk-runtime.ts` 内的模块私有函数；导出它或在合成器内复刻同一句（择一，优先导出复用，避免双份漂移）。
-4. `createLocalScopeWithMode`（runtime.ts:1109-1127）`upsertConversationScope` 入参补 `userId: 'default-user'`。
+   - **【R1 修订·F5】导出 `defaultSystemPrompt`**：它是 `agent-sdk-runtime.ts:309-311` 的模块私有函数；**导出复用**（不复刻，避免双份漂移），合成器与 runtime 都 import 同一份。
+4. **【R1 修订·F1 / R2 补充无害声明】scope.userId 归属（仅本地）**：`createLocalScopeWithMode`（runtime.ts:1109-1127）`upsertConversationScope` 入参补 `userId: 'default-user'`。`ensureChannelScope`（runtime.ts:2116-2140，远程 channel scope）**刻意不补**——它代表远程 `sender`，非本地 owner。
+   - **运行时无害论证（R2）**：已核实当前代码**所有** scope 的 `userId` 都是 null（无任何 upsert 写它），消费点 runtime.ts:313 / 2090 已按 null/undefined 容错运行至今。本方案**只新增**「给本地 scope 写 default-user」，channel scope 保持 null **与今天完全一致** → 纯增量、**零回归**，远程 userId 缺位不影响现有任何功能。远程 sender→身份映射是单独课题，明确**超本方案范围**（见 §7 红线）。仅有两处真实 upsert 站点（`createLocalScopeWithMode` + `ensureChannelScope`；`createLocalScope`:1096 只委托前者，无第三处）。
+   - 注意区分两件事：①**systemPrompt 注入**（人格+档案，经 resolver）对所有 send 路径生效（含远程，agent 应在任何渠道保持人格）；②**scope.userId 归属**只给本地 scope，用于本地记忆归属。
 5. **可选优化（非阻塞）**：按 agent 缓存合成结果，档案/人格写入时失效。v1 可不做（两次带索引 SQLite 读，开销可忽略）。
-**验收**：
-- 行为测试：构造 runtime（最小替身），对一个种子 agent 触发一次 send，断言传入 SDK 的 instructions 含该 agent 的 `personalityText` 片段 **且** 含 `default-user` 档案字段；切换到另一 agent 断言换成另一段人格。
-- 显式传 systemPrompt 时仍优先（回归）。
+**验收（【R1 修订】测试拆两层，避开 sdkEngine 难替身化）**：
+- **L1 合成器纯单测（主）**：直接测纯函数 `composePersonaSystemPrompt(agentName, fakePersonaRepo, fakeProfileRepo, fallback)`——用内存/假仓库注入；断言：①有人格时输出含 `personalityText`（有 `tone` 则含「语气：」行）；②含 `default-user` 档案块（昵称/语言/风格/偏好，存在字段才出现）；③换 agentName 输出换人格；④无人格时回退 `fallback()`。无需构造 runtime。
+- **L2 接线行为测（薄）**：构造 orchestrator（最小替身 sdkEngine，仅捕获 `setSystemPrompt` 入参），注入一个返回固定串的 resolver，触发一次未显式传 systemPrompt 的 send，断言 `setSystemPrompt` 收到 resolver 输出；再传显式 systemPrompt 断言优先级更高（回归）。
 - `npm run typecheck` 通过。
-**依赖**：无（地基）。WP1 落地后此 WP 的人格分支才有真实数据，但 WP0 可先用临时插入的人格行写测试。
+**依赖**：无（地基）。WP1 落地后此 WP 的人格分支才有真实数据，但 WP0 的 L1 单测可用假仓库先写。
 
 ### WP1 —【后端·迁移】种子四个内置人格
 **目标**：把 `worktree-pool.getDefaultPersona()` 的四段 markdown 落入 `agent_personalities`，供切换器与 WP0 读取。
-**涉及文件**：`src/main/modules/migrations.ts`（仿 `:730-737` default-user 种子写法新增一段）。
+**涉及文件**：
+- 新增 `src/main/modules/claude-bridge/default-personas.ts`（导出 `DEFAULT_AGENT_PERSONAS: Record<string, string>`，把 worktree-pool 里那段 markdown **原样搬出来**）。
+- 改 `src/main/modules/claude-bridge/worktree-pool.ts`：`getDefaultPersona` 改为从 `DEFAULT_AGENT_PERSONAS` 读（**行为不变的纯常量外提**）。
+- 改 `src/main/modules/migrations.ts`（仿 `:730-737` default-user 种子写法新增一段，import 同一份常量）。
 **契约 / 实现要点**：
-- 幂等插入 butler/copywriter/`video-editor`/analyst 四行：`agent_name` = 这四个 id；`personality_text` = 对应 `getDefaultPersona` 文案（**逐字复用**）；`display_name` = 管家/文案/剪辑/分析；`tone` 可留空或给一句；`meta_json` = `{"emoji":"🤖|✍️|🎬|📊"}`。
-- 用 `INSERT ... ON CONFLICT(agent_name) DO NOTHING`（或先查后插），不得覆盖用户已改人格。
-- 确认 `agent_personalities` 表已在既有 migration 建好；若 `agent_name` 无唯一约束，按现有迁移风格补 UNIQUE（仅在必要且不破坏既有数据时）。
-**验收**：`npm run verify:native` 通过；启动后 `agentPersonality.list()` 返回 ≥4 行且文案非空；重复启动不产生重复行。
+- **【R1 决策·F3】取源方式 = 抽公共常量**：`getDefaultPersona` 是 `WorktreePool` 的 private 实例方法（worktree-pool.ts:176），migration 无法直接调。故把四段 markdown 外提到 `default-personas.ts` 导出常量，worktree-pool 与 migration 都 import 它——**消除「逐字复制 → 漂移」风险，且 worktree-pool 行为不变**（这属 §7 红线允许的「只读常量外提」例外，已在 §7 标注）。
+- 幂等插入 butler/copywriter/`video-editor`/analyst 四行：`agent_name` = 这四个 id；`personality_text` = `DEFAULT_AGENT_PERSONAS[id]`；`display_name` = 管家/文案/剪辑/分析；`tone` 可留空或给一句；`meta_json` = `{"emoji":"🤖|✍️|🎬|📊"}`（逐一对应）。
+- **【R1 修订·F4】schema 已就绪**：`agent_personalities` 表及 `agent_name TEXT NOT NULL UNIQUE` 已在 migrations.ts:694-696 建好——**无需改 schema**，直接 `INSERT ... ON CONFLICT(agent_name) DO NOTHING`，不覆盖用户已改人格。
+**验收**：`npm run verify:native` 通过；启动后 `agentPersonality.list()` 返回 ≥4 行且文案非空；重复启动不产生重复行；`getDefaultPersona` 外提后 worktree 子系统行为回归一致（抽查文案逐字相同）。
 **依赖**：无。建议先于 WP2 落地（让切换器有真实数据），但 WP2 有兜底。
 
 ### WP2 —【前端】聊天切换器由人格仓库驱动
 **目标**：聊天面板 agent 列表来自 `agentPersonality.list()`，新建人格即可切换。
 **涉及文件**：`src/renderer/stores/useAgent.ts`（`agents` 初始化与加载）、`components/agent/ChatPanel.tsx`/`chat-panel/ChatPanelBody.tsx`（确认消费 `store.agents`）。
 **契约 / 实现要点**：
-- 启动/打开聊天时调用 `window.electronAPI.agentPersonality.list()`，映射为 `{ name: agentName, displayName, avatar: metaJson?.emoji ?? '🤖', status:'idle' }` 写入 `store.agents`。
-- 保留 `currentAgent` 默认 `'butler'`；列表为空（极端情况）时回退到现有四项硬编码，避免空切换器。
-- 新建/编辑人格后（WP3）刷新该列表。
+- **【R1 修订】定义刷新契约 = store action**：`useAgent` 暴露一个 `reloadAgents()`（async）——内部调 `window.electronAPI.agentPersonality.list()`，映射为 `{ name: agentName, displayName, avatar: metaJson?.emoji ?? '🤖', status:'idle' }` 写入 `store.agents`。**不引入事件总线**；WP3 编辑器在每次保存/删除成功后直接调 `useAgent.getState().reloadAgents()`。
+- 启动/打开聊天时调用一次 `reloadAgents()`。
+- 保留 `currentAgent` 默认 `'butler'`；列表为空（极端情况）或 `list()` 失败时回退到现有四项硬编码，避免空切换器；若 `currentAgent` 在新列表里不存在则回落到第一项。
 **验收**：手动——切换器显示种子四项；在设置新建一个人格后回到聊天，切换器出现该项且可选中发消息；选不同 agent 时模型自我介绍/语气随人格变化（结合 WP0）。`npm run typecheck` 通过。
-**依赖**：WP1（数据）、WP0（切换后真的换人格）。
+**依赖**：WP1（数据）、WP0（切换后真的换人格）。`reloadAgents` 是 WP2 提供、WP3 调用的契约点。
 
 ### WP3 —【前端】人格编辑器闭环
 **目标**：人格列表/编辑/新建/删除全闭环；与切换器联动。
 **涉及文件**：`src/renderer/components/personality/PersonalityEditor.tsx`、`src/renderer/pages/Settings.tsx`（人格区文案）。
 **契约 / 实现要点**：
 - `handleCreateNew`：真调 `agentPersonality.create({ agentName, personalityText, displayName, tone, metaJson:{emoji} })`；agentName 校验（小写、唯一、非保留冲突可提示）。
-- `handleSave`：`create`/`update` 后**检查 `result.success`**，失败给明确错误，不再假成功。
-- 保存/新建/删除成功后刷新本地列表，并通知 WP2 的切换器刷新（事件或重新 list）。
+- `handleSave`：`create`/`update` 后**检查返回的 `{success,error}`**（IPC 不 throw、统一返回结构对象，见 §2.5），`success===false` 给明确错误，不再假成功；删除同理检查返回值。**不靠 try/catch 推断成功**。
+- 保存/新建/删除成功后刷新本地列表，并调 `useAgent.getState().reloadAgents()`（WP2 契约点）同步切换器。
 - 文案：按钮叫「新建人格 / 编辑人格」；明确「人格 = 聊天面板可切换 agent」。`tone` 字段保留（已被 WP0 使用）；移除纯展示无效字段（若有）。
 **验收**：手动——新建人格持久化（重启仍在）；保存失败（如重名）显示失败；删除后切换器与列表同步消失。`npm run typecheck` 通过。
-**依赖**：WP2（联动刷新）、WP0（语义真生效）。
+**依赖（【R1 修订】放松）**：编辑器闭环本体（真调 create / 检查 `result.success` / 删除检查）**不依赖 WP2**，可与 WP2 并行先做；**只有**「保存后切换器同步刷新」这一行依赖 WP2 的 `reloadAgents` 存在。语义真生效依赖 WP0。
 
 ### WP4 —【前端】用户档案降为单用户「我的偏好」
 **目标**：去掉多用户 CRUD，单 `default-user` 偏好编辑并真接通。
@@ -250,9 +269,9 @@ agent:send IPC (agent-lifecycle-group.ts:181-189)
 **契约 / 实现要点**：
 1. **结构**：记忆区分「普通视图」（列表 hero：记住了什么 / 来自哪次任务（人话来源）/ 删除·保留）与「高级」（折叠/开发者开关后显示：原始 layer/contentKey、`TriggerManager`、手动 `MemoryCreator`）。
 2. `ActiveChildRunsDebug` 从记忆区移除（移到开发者/调试区或删其在此处的渲染）。
-3. **D1 筛选刷新**：`useMemory.ts` 的 `useMemories` 让查询随 `filters` 变化重跑（`refresh` 依赖 `filters`，或 effect 依赖序列化后的 filters）；注意避免无限循环（filters 引用稳定化）。
+3. **D1 筛选刷新**：`useMemory.ts` 的 `useMemories` 让查询随 `filters` 变化重跑（`refresh` 依赖 `filters`，或 effect 依赖序列化后的 filters）；注意避免无限循环（filters 引用稳定化——如对 filters 做 `JSON.stringify` 作 effect 依赖，或 `useMemo` 稳定化引用）。
 4. **D2 维护字段**：`MemoryStatsCard.tsx:26` 改读真实字段：`已归档（L1/L2）: ${result.archivedL1Count} / ${result.archivedL2Count}`、`已清理: ${result.prunedCount}`；同步修正 `MemoryMaintenanceResult` 渲染类型与后端 `MaintenanceResult` 一致。
-5. **D3 维护后刷新**：`runMaintenance` 成功后刷新 `useMemoryStats` 与列表（共享一个 refresh，或维护后显式触发统计+列表重查）。
+5. **D3 维护后刷新（【R1 修订】定义统一刷新通道）**：列表来自 `useMemory`、统计来自 `useMemoryStats`，两 hook 分离、无现成共享刷新。约定**由记忆区父组件（Settings 记忆 section）协调**：父组件同时持有两 hook 暴露的 `refresh`（`memories.refresh()` + `stats.refresh()`），维护/创建/删除成功后**显式同时调两者**。不新建跨 hook 全局刷新机制；若某 hook 未暴露 `refresh` 则补一个最小 `refresh()`。这样避免「只刷一半」。
 6. **D6 手动创建**：普通路径不再要求 scopeId（手动 `MemoryCreator` 整体移入高级区；普通用户不需要它）。若保留常驻记忆手动入口，去掉「必须先有真实会话」的前置（改走不依赖 `listConversationScopes` 的常驻写入路径，或在 UI 隐藏直至高级区）。
 7. **标签人话化**：`MemoryListPanel` 普通视图把 layer/contentKey/source 映射为用户可懂文案（如 l0→「常驻」、来源→任务名）。
 **验收**：手动——切筛选列表即时刷新；点维护提示显示正确数字且统计/列表随后更新；普通视图无 scopeId/L0-L2/contentKey/Child Runs；创建/删除后列表+统计同步。`npm run typecheck` + `npm run verify:native`（若触及 memory IPC 读写）通过。
@@ -260,16 +279,17 @@ agent:send IPC (agent-lifecycle-group.ts:181-189)
 
 ---
 
-## 5. 依赖与并行顺序
+## 5. 依赖与并行顺序（【R1 修订】放松 WP3）
 ```
-WP0 (地基·后端) ──┬──▶ WP3 (人格编辑器)
-WP1 (种子·迁移) ──┴──▶ WP2 (切换器)  ── 联动 ── WP3
-WP0 ───────────────────▶ WP4 (用户档案)
+WP0 (地基·后端) ───────▶ WP4 (用户档案接通)
+WP1 (种子·迁移) ──▶ WP2 (切换器·reloadAgents)
+WP3 编辑器闭环本体 ── 独立可并行；其「保存后 reloadAgents」一行 ── 依赖 ── WP2
+WP3 人格语义真生效 ── 依赖 ── WP0
 WP5 (记忆 UI) ── 独立，可全程并行
 ```
-- **可立即并行**：WP0、WP1、WP5（彼此独立）。
-- WP2 需 WP1（数据）+WP0（语义）；WP3 需 WP2+WP0；WP4 需 WP0。
-- 建议批次：第一批 WP0+WP1+WP5 并行；第二批 WP2+WP4；第三批 WP3 收尾联动。
+- **可立即并行**：WP0、WP1、WP5（彼此独立）；**WP3 的编辑器闭环本体**（真调 create / 检查 `result.success` / 删除检查）也可立即开工，不必等 WP2/WP0。
+- WP2 需 WP1（数据）+WP0（切换后语义）；WP4 需 WP0；WP3 仅「切换器同步刷新」依赖 WP2 的 `reloadAgents`、「人格真生效」依赖 WP0。
+- 建议批次：第一批 WP0+WP1+WP5+（WP3 闭环本体）并行；第二批 WP2+WP4；第三批 WP3 收尾接 `reloadAgents` 联动。
 
 ## 6. 验收与 verify 链（整体）
 - `npm run typecheck` 全绿（每个 WP 完成即跑）。
@@ -286,7 +306,8 @@ WP5 (记忆 UI) ── 独立，可全程并行
 - ❌ 不复活 `turn-engine.ts` / `DirectChatEngine`（活跃路径是 `AgentSdkRuntime`）。
 - ❌ 不复活 `PromptAssemblyService.assemble()` 整套 loadSOUL/loadUSER/loadL0；本方案走轻量合成器即可。
 - ❌ 不做 profile 整目录隔离（重量级，超范围）。
-- ❌ 不改 `worktree-pool` / `AgentManager.spawnAgent` 旧子系统行为（只**读取**其人格文案作种子源）。
+- ❌ 不改 `worktree-pool` / `AgentManager.spawnAgent` 旧子系统**行为**。**【R1 例外·F3】** 允许 WP1 把 `getDefaultPersona` 的人格文案**外提为只读共享常量** `DEFAULT_AGENT_PERSONAS`（worktree-pool 改为 import 它，**行为逐字不变**）——这是行为保持的纯常量外提，不算「改行为」。
+- ❌ **【R1 明确·F1 / R2 无害声明】** 不处理远程会话身份：`ensureChannelScope` 的 channel scope 不补 `default-user`，远程 sender → 本地档案的映射超本方案范围。**无害理由**：当前所有 scope.userId 本就为 null（无人写），channel 保持 null 与现状一致 → 零回归（详见 WP0 点 4）。
 - ❌ 不顺手重排/重命名无关代码；只碰每个 WP 列出的文件。
 - ❌ 记忆不引入新层级/新内部概念；只做隐藏与人话化。
 

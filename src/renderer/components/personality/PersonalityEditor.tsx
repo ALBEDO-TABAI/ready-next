@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { AlertCircle, Bot, CheckCircle2, Fingerprint, Plus, Save, Sparkles, Trash2 } from 'lucide-react'
+import { AlertCircle, Bot, CheckCircle2, Fingerprint, Plus, Save, Sparkles, Trash2, X } from 'lucide-react'
 import {
   SETTINGS_BADGE_STYLE,
   SETTINGS_CARD_STYLE,
@@ -19,6 +19,7 @@ import {
   settingsListItemStyle,
   settingsNoticeStyle,
 } from '../settings/settings-theme'
+import { useAgent } from '../../stores/useAgent'
 
 interface AgentPersonality {
   id: string
@@ -26,6 +27,7 @@ interface AgentPersonality {
   displayName?: string
   personalityText: string
   tone?: string
+  metaJson?: Record<string, unknown>
   createdAt: number
   updatedAt: number
 }
@@ -43,9 +45,43 @@ function toneLabel(value?: string): string {
   return toneOptions.find((item) => item.value === (value || ''))?.label || '默认语气'
 }
 
+function normalizeAgentName(value: string): string {
+  return value.trim().toLowerCase()
+}
+
+function isValidAgentName(value: string): boolean {
+  return /^[a-z0-9][a-z0-9-]*$/.test(value)
+}
+
+function resultError(result: { error?: string }, fallback: string): string {
+  return result.error || fallback
+}
+
+function defaultPersonalityText(agentName: string, displayName: string): string {
+  const title = displayName || agentName
+  return [
+    `# ${title}`,
+    '',
+    '你是 Ready 工作台中的一个可切换 Agent。',
+    '请用清晰、稳定、符合当前人格定位的方式协助用户完成创作和分析任务。',
+  ].join('\n')
+}
+
+function nextDraftAgentName(personalities: AgentPersonality[]): string {
+  const base = 'designer'
+  if (!personalities.some((item) => item.agentName === base)) return base
+  for (let index = 2; index < 100; index += 1) {
+    const candidate = `${base}-${index}`
+    if (!personalities.some((item) => item.agentName === candidate)) return candidate
+  }
+  return `designer-${Date.now()}`
+}
+
 export default function PersonalityEditor() {
   const [personalities, setPersonalities] = useState<AgentPersonality[]>([])
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null)
+  const [isCreating, setIsCreating] = useState(false)
+  const [draftAgentName, setDraftAgentName] = useState('')
   const [personalityText, setPersonalityText] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [tone, setTone] = useState('')
@@ -60,24 +96,33 @@ export default function PersonalityEditor() {
   }, [])
 
   useEffect(() => {
+    if (isCreating) return
     if (!selectedAgent) return
     void loadPersonality(selectedAgent)
-  }, [selectedAgent])
+  }, [isCreating, selectedAgent])
 
   const selectedPersonality = useMemo(
-    () => personalities.find((item) => item.agentName === selectedAgent) || null,
-    [personalities, selectedAgent],
+    () => isCreating ? null : personalities.find((item) => item.agentName === selectedAgent) || null,
+    [isCreating, personalities, selectedAgent],
   )
 
-  const loadPersonalities = async () => {
+  const loadPersonalities = async (preferredAgentName?: string | null) => {
     setLoading(true)
     setError(null)
     try {
       const result = await window.electronAPI.agentPersonality.list()
+      if (!result.success) {
+        throw new Error(resultError(result, '后端没有返回成功状态'))
+      }
       const next = result.data || []
       setPersonalities(next)
-      if (next.length > 0 && !selectedAgent) {
-        setSelectedAgent(next[0].agentName)
+      const nextSelectedAgent = preferredAgentName && next.some((item) => item.agentName === preferredAgentName)
+        ? preferredAgentName
+        : selectedAgent && next.some((item) => item.agentName === selectedAgent)
+          ? selectedAgent
+          : next[0]?.agentName || null
+      if (nextSelectedAgent !== selectedAgent) {
+        setSelectedAgent(nextSelectedAgent)
       }
     } catch (err) {
       setError(`加载人格配置失败：${err instanceof Error ? err.message : String(err)}`)
@@ -91,6 +136,9 @@ export default function PersonalityEditor() {
     setError(null)
     try {
       const result = await window.electronAPI.agentPersonality.get(agentName)
+      if (!result.success) {
+        throw new Error(resultError(result, '后端没有返回成功状态'))
+      }
       const personality = result.data
       if (personality) {
         setPersonalityText(personality.personalityText)
@@ -108,8 +156,52 @@ export default function PersonalityEditor() {
     }
   }
 
+  const refreshAgentSwitcher = async () => {
+    await useAgent.getState().reloadAgents()
+  }
+
+  const handleSelectPersonality = (agentName: string) => {
+    setIsCreating(false)
+    setDraftAgentName('')
+    setSelectedAgent(agentName)
+    setSuccessMessage(null)
+    setError(null)
+  }
+
+  const handleStartCreate = () => {
+    const agentName = nextDraftAgentName(personalities)
+    setIsCreating(true)
+    setDraftAgentName(agentName)
+    setSelectedAgent(null)
+    setDisplayName(agentName)
+    setTone('')
+    setPersonalityText(defaultPersonalityText(agentName, agentName))
+    setSuccessMessage(null)
+    setError(null)
+  }
+
+  const handleCancelCreate = () => {
+    setIsCreating(false)
+    setDraftAgentName('')
+    setPersonalityText('')
+    setDisplayName('')
+    setTone('')
+    setSelectedAgent(personalities[0]?.agentName || null)
+    setSuccessMessage(null)
+    setError(null)
+  }
+
   const handleSave = async () => {
-    if (!selectedAgent) return
+    const agentName = isCreating ? normalizeAgentName(draftAgentName) : selectedAgent
+    if (!agentName) return
+    if (isCreating && !isValidAgentName(agentName)) {
+      setError('Agent 标识只能使用小写字母、数字和连字符，并且必须以字母或数字开头。')
+      return
+    }
+    if (isCreating && personalities.some((item) => item.agentName === agentName)) {
+      setError(`Agent 标识 ${agentName} 已存在。`)
+      return
+    }
     if (!personalityText.trim()) {
       setError('请先填写人格定义，再保存。')
       return
@@ -120,26 +212,40 @@ export default function PersonalityEditor() {
     setSuccessMessage(null)
 
     try {
-      const existingResult = await window.electronAPI.agentPersonality.get(selectedAgent)
+      const existingResult: { success: boolean; data?: AgentPersonality | null; error?: string } = isCreating
+        ? { success: true, data: null as AgentPersonality | null }
+        : await window.electronAPI.agentPersonality.get(agentName)
+      if (!existingResult.success) {
+        throw new Error(resultError(existingResult, '读取当前人格失败'))
+      }
       const existing = existingResult.data
 
+      let result: { success: boolean; error?: string }
       if (existing) {
-        await window.electronAPI.agentPersonality.update(selectedAgent, {
+        result = await window.electronAPI.agentPersonality.update(agentName, {
           personalityText,
           displayName: displayName || undefined,
           tone: tone || undefined,
         })
       } else {
-        await window.electronAPI.agentPersonality.create({
-          agentName: selectedAgent,
+        result = await window.electronAPI.agentPersonality.create({
+          agentName,
           personalityText,
-          displayName: displayName || undefined,
+          displayName: displayName || agentName,
           tone: tone || undefined,
+          metaJson: { emoji: '🤖' },
         })
+      }
+      if (!result.success) {
+        throw new Error(resultError(result, '后端保存失败'))
       }
 
       setSuccessMessage('人格配置已保存。')
-      await loadPersonalities()
+      setIsCreating(false)
+      setDraftAgentName('')
+      setSelectedAgent(agentName)
+      await loadPersonalities(agentName)
+      await refreshAgentSwitcher()
       setTimeout(() => setSuccessMessage(null), 3000)
     } catch (err) {
       setError(`保存失败：${err instanceof Error ? err.message : String(err)}`)
@@ -149,6 +255,10 @@ export default function PersonalityEditor() {
   }
 
   const handleDelete = async () => {
+    if (isCreating) {
+      handleCancelCreate()
+      return
+    }
     if (!selectedAgent) return
     if (!confirm(`确定删除 ${selectedAgent} 的人格配置吗？`)) {
       return
@@ -158,31 +268,23 @@ export default function PersonalityEditor() {
     setError(null)
 
     try {
-      await window.electronAPI.agentPersonality.delete(selectedAgent)
+      const result = await window.electronAPI.agentPersonality.delete(selectedAgent)
+      if (!result.success) {
+        throw new Error(resultError(result, '后端删除失败'))
+      }
       setSuccessMessage('人格配置已删除。')
       setPersonalityText('')
       setDisplayName('')
       setTone('')
       setSelectedAgent(null)
       await loadPersonalities()
+      await refreshAgentSwitcher()
       setTimeout(() => setSuccessMessage(null), 3000)
     } catch (err) {
       setError(`删除失败：${err instanceof Error ? err.message : String(err)}`)
     } finally {
       setSaving(false)
     }
-  }
-
-  const handleCreateNew = () => {
-    const agentName = prompt('输入新的 Agent 标识：', 'designer')
-    if (!agentName) return
-
-    setSelectedAgent(agentName)
-    setPersonalityText('')
-    setDisplayName('')
-    setTone('')
-    setSuccessMessage(null)
-    setError(null)
   }
 
   return (
@@ -224,13 +326,13 @@ export default function PersonalityEditor() {
           </div>
         </div>
         <button
-          onClick={handleCreateNew}
-          disabled={loading}
+          onClick={handleStartCreate}
+          disabled={loading || saving}
           className="inline-flex items-center gap-2 hover:brightness-95 active:scale-[0.98] disabled:opacity-50"
           style={SETTINGS_PRIMARY_BUTTON_STYLE}
         >
           <Plus className="w-4 h-4" />
-          新建 Agent
+          新建人格
         </button>
       </div>
 
@@ -277,7 +379,7 @@ export default function PersonalityEditor() {
               return (
                 <button
                   key={personality.id}
-                  onClick={() => setSelectedAgent(personality.agentName)}
+                  onClick={() => handleSelectPersonality(personality.agentName)}
                   className="text-left transition-[transform,background-color,border-color] duration-200 hover:-translate-y-[1px]"
                   style={settingsListItemStyle(isActive)}
                 >
@@ -326,7 +428,7 @@ export default function PersonalityEditor() {
           </div>
         </div>
 
-        {selectedAgent ? (
+        {selectedAgent || isCreating ? (
           <div className="flex flex-col gap-5 min-w-0">
             <div
               className="grid gap-4"
@@ -350,12 +452,19 @@ export default function PersonalityEditor() {
 
               <div>
                 <div style={SETTINGS_FIELD_LABEL_STYLE}>Agent 标识</div>
-                <input value={selectedAgent} disabled style={SETTINGS_READONLY_STYLE} />
+                <input
+                  aria-label="Agent 标识"
+                  value={isCreating ? draftAgentName : selectedAgent || ''}
+                  disabled={!isCreating}
+                  onChange={(event) => setDraftAgentName(normalizeAgentName(event.target.value))}
+                  style={isCreating ? SETTINGS_INPUT_STYLE : SETTINGS_READONLY_STYLE}
+                />
               </div>
 
               <div>
                 <div style={SETTINGS_FIELD_LABEL_STYLE}>推荐语气</div>
                 <select
+                  aria-label="推荐语气"
                   value={tone}
                   onChange={(event) => setTone(event.target.value)}
                   style={SETTINGS_INPUT_STYLE}
@@ -374,6 +483,7 @@ export default function PersonalityEditor() {
               <div style={{ gridColumn: '1 / -1' }}>
                 <div style={SETTINGS_FIELD_LABEL_STYLE}>展示名称</div>
                 <input
+                  aria-label="展示名称"
                   type="text"
                   value={displayName}
                   onChange={(event) => setDisplayName(event.target.value)}
@@ -411,6 +521,7 @@ export default function PersonalityEditor() {
               </div>
 
               <textarea
+                aria-label="人格定义"
                 value={personalityText}
                 onChange={(event) => setPersonalityText(event.target.value)}
                 placeholder="例如：你是一个极其挑剔但有品味的设计审稿师，先判断整体层级是否成立，再检查留白、比例、字重、信息密度是否统一……"
@@ -455,10 +566,10 @@ export default function PersonalityEditor() {
                 onClick={handleDelete}
                 disabled={saving || loading}
                 className="inline-flex items-center gap-2 hover:brightness-95 active:scale-[0.98] disabled:opacity-50"
-                style={SETTINGS_DANGER_BUTTON_STYLE}
+                style={isCreating ? SETTINGS_SECONDARY_BUTTON_STYLE : SETTINGS_DANGER_BUTTON_STYLE}
               >
-                <Trash2 className="w-4 h-4" />
-                删除
+                {isCreating ? <X className="w-4 h-4" /> : <Trash2 className="w-4 h-4" />}
+                {isCreating ? '取消新建' : '删除'}
               </button>
             </div>
           </div>
@@ -490,9 +601,10 @@ export default function PersonalityEditor() {
               左侧可以切换已有人格，或者新建一个 Agent。保存之后，这份人格会持续影响它在聊天和执行任务时的语气与行为。
             </div>
             <button
-              onClick={handleCreateNew}
+              onClick={handleStartCreate}
+              disabled={loading || saving}
               style={{ ...SETTINGS_SECONDARY_BUTTON_STYLE, marginTop: 18 }}
-              className="hover:brightness-95 active:scale-[0.98]"
+              className="hover:brightness-95 active:scale-[0.98] disabled:opacity-50"
             >
               新建人格
             </button>
