@@ -3,6 +3,8 @@ import { AtSign, Plus, Send, Square, Undo2, ChevronDown, Puzzle } from 'lucide-r
 import { IconButton } from '../ui/IconButton'
 import type { ChatAttachment } from '../../stores/useAgent'
 import type { ReadySkillReference } from '../../modules/agent/chat-input-bridge'
+import type { NativeContextMenuItem } from '../../../shared/native-context-menu'
+import { chatMenuItemStyle, chatMenuSurfaceStyle } from './chatMenuStyles'
 import {
   buildSlashSkillInsertion,
   filterSlashSkills,
@@ -68,6 +70,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   ModelSelector,
 }: ChatInputProps, ref) {
   const [showAgentSelect, setShowAgentSelect] = useState(false)
+  const [agentNativeMenuOpen, setAgentNativeMenuOpen] = useState(false)
   const [showAtMenu, setShowAtMenu] = useState(false)
   const [atFilter, setAtFilter] = useState('')
   const [showSlashMenu, setShowSlashMenu] = useState(false)
@@ -233,6 +236,52 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     setSlashFilter('')
   }, [inputValue, onInputChange, onSkillReference])
 
+  const showNativeAgentMenu = useCallback(async (button: HTMLButtonElement) => {
+    if (isChannelScope) return
+    const api = typeof window !== 'undefined' ? window.electronAPI?.ui : null
+    if (!api?.showNativeContextMenu) {
+      setShowAgentSelect((value) => !value)
+      return
+    }
+
+    const items: NativeContextMenuItem[] = agents.map((agent) => {
+      const label = (agent.displayName || agent.name).trim()
+      return {
+        id: agent.name,
+        label: agent.status === 'working' ? `${label}    工作中` : label,
+        iconText: agent.avatar,
+        checked: agent.name === currentAgent,
+      }
+    })
+    if (items.length === 0) return
+
+    const rect = button.getBoundingClientRect()
+    const estimatedHeight = Math.min(items.length, 8) * 28 + 10
+    setShowAgentSelect(false)
+    setShowAtMenu(false)
+    setAtFilter('')
+    setShowSlashMenu(false)
+    setSlashFilter('')
+    setAgentNativeMenuOpen(true)
+
+    let selectedId = ''
+    try {
+      const result = await api.showNativeContextMenu({
+        x: Math.max(8, Math.round(rect.left)),
+        y: Math.max(8, Math.round(rect.top - estimatedHeight - 6)),
+        items,
+      }).catch(() => null)
+      selectedId = typeof result?.selectedId === 'string' ? result.selectedId : ''
+    } finally {
+      setAgentNativeMenuOpen(false)
+    }
+
+    if (selectedId && agents.some((agent) => agent.name === selectedId)) {
+      onAgentSelect(selectedId)
+    }
+    setTimeout(() => textareaRef.current?.focus(), 0)
+  }, [agents, currentAgent, isChannelScope, onAgentSelect])
+
   const handleInputChange = (value: string, cursorPos: number) => {
     onInputChange(value)
     const textBeforeCursor = value.slice(0, cursorPos)
@@ -373,8 +422,8 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
           {showAtMenu && filteredFilePool.length > 0 && (
             <div
               ref={atMenuRef}
-              className="glass-surface-floating"
               style={{
+                ...chatMenuSurfaceStyle,
                 position: 'absolute',
                 bottom: '100%',
                 left: 0,
@@ -382,11 +431,6 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                 width: '100%',
                 maxHeight: 200,
                 overflowY: 'auto',
-                background: 'color-mix(in srgb, var(--surface-floating-bg) 32%, transparent)',
-                border: '1px solid var(--border-default)',
-                borderRadius: 8,
-                boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
-                padding: 4,
                 zIndex: 200,
               }}
             >
@@ -397,13 +441,9 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                 <button
                   key={file.id}
                   onClick={() => insertAtReference(file)}
-                  className="w-full flex items-center gap-2 hover:bg-black/5 active:scale-[0.98] transition-[background-color,transform] duration-150"
+                  className="ready-floating-menu-item w-full flex items-center gap-2 active:scale-[0.98] transition-[background-color,transform] duration-150"
                   style={{
-                    padding: '6px 10px',
-                    borderRadius: 6,
-                    border: 'none',
-                    background: 'transparent',
-                    cursor: 'pointer',
+                    ...chatMenuItemStyle,
                     textAlign: 'left',
                   }}
                 >
@@ -452,8 +492,9 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
           {showSlashMenu && (
             <div
               ref={slashMenuRef}
-              className="glass-surface-floating panel-hover-scrollbar"
+              className="panel-hover-scrollbar"
               style={{
+                ...chatMenuSurfaceStyle,
                 position: 'absolute',
                 bottom: '100%',
                 left: 0,
@@ -461,11 +502,6 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                 width: '100%',
                 maxHeight: 240,
                 overflowY: 'auto',
-                background: 'color-mix(in srgb, var(--surface-floating-bg) 34%, transparent)',
-                border: '1px solid var(--border-default)',
-                borderRadius: 8,
-                boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
-                padding: 4,
                 zIndex: 210,
               }}
             >
@@ -480,13 +516,9 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                     insertSlashSkillReference(skill)
                   }}
                   onPointerEnter={() => setSlashSelectedIndex(index)}
-                  className="w-full flex items-center gap-2 active:scale-[0.98] transition-[background-color,transform] duration-150"
+                  className={`ready-floating-menu-item w-full flex items-center gap-2 active:scale-[0.98] transition-[background-color,transform] duration-150 ${index === slashSelectedIndex ? 'is-selected' : ''}`}
                   style={{
-                    padding: '7px 10px',
-                    borderRadius: 6,
-                    border: 'none',
-                    background: index === slashSelectedIndex ? 'var(--bg-hover)' : 'transparent',
-                    cursor: 'pointer',
+                    ...chatMenuItemStyle,
                     textAlign: 'left',
                   }}
                 >
@@ -549,7 +581,9 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
           <div className="relative" ref={dropdownRef}>
             <button
               disabled={isChannelScope}
-              onClick={() => setShowAgentSelect(!showAgentSelect)}
+              onClick={(event) => {
+                void showNativeAgentMenu(event.currentTarget)
+              }}
               className="flex items-center active:scale-[0.98] transition-[opacity,transform] duration-200 ease-out"
               style={{
                 padding: '3px 8px',
@@ -567,26 +601,22 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                 style={{
                   width: 10,
                   height: 10,
-                  transform: showAgentSelect ? 'rotate(180deg)' : 'rotate(0deg)',
+                  transform: (showAgentSelect || agentNativeMenuOpen) ? 'rotate(180deg)' : 'rotate(0deg)',
                   transition: 'transform 200ms ease',
                 }}
                 className="text-[var(--text-light)]"
               />
             </button>
 
-            {showAgentSelect && !isChannelScope && (
+            {showAgentSelect && !agentNativeMenuOpen && !isChannelScope && (
               <div
                 style={{
+                  ...chatMenuSurfaceStyle,
                   position: 'absolute',
                   bottom: '100%',
                   left: 0,
                   marginBottom: 4,
                   minWidth: 160,
-                  background: 'color-mix(in srgb, var(--bg-panel) 24%, transparent)',
-                  border: '1px solid var(--border-default)',
-                  borderRadius: 8,
-                  boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
-                  padding: 4,
                   zIndex: 100,
                 }}
               >
@@ -597,13 +627,9 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                       onAgentSelect(agent.name)
                       setShowAgentSelect(false)
                     }}
-                    className="w-full flex items-center gap-2 hover:bg-black/5 active:scale-[0.98] transition-[background-color,transform] duration-150"
+                    className={`ready-floating-menu-item w-full flex items-center gap-2 active:scale-[0.98] transition-[background-color,transform] duration-150 ${agent.name === currentAgent ? 'is-selected' : ''}`}
                     style={{
-                      padding: '6px 10px',
-                      borderRadius: 6,
-                      border: 'none',
-                      background: agent.name === currentAgent ? 'var(--bg-hover)' : 'transparent',
-                      cursor: 'pointer',
+                      ...chatMenuItemStyle,
                     }}
                   >
                     <span style={{ fontSize: 14 }}>{agent.avatar}</span>

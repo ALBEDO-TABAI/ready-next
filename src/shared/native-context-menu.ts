@@ -3,6 +3,7 @@ export interface NativeContextMenuItem {
   label: string
   enabled?: boolean
   separator?: boolean
+  checked?: boolean
   iconText?: string
   accelerator?: string
 }

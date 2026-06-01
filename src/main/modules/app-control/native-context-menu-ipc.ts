@@ -13,6 +13,7 @@ function normalizeItem(item: unknown): NativeContextMenuItem | null {
     label,
     separator,
     enabled: source.enabled === false ? false : true,
+    checked: source.checked === true,
     iconText: typeof source.iconText === 'string' ? source.iconText.trim().slice(0, 4) : undefined,
     accelerator: typeof source.accelerator === 'string' ? source.accelerator.trim() : undefined,
   }
@@ -49,6 +50,8 @@ function popupNativeContextMenu(window: BrowserWindow, request: NativeContextMen
     const template: MenuItemConstructorOptions[] = request.items.map((item) => {
       if (item.separator) return { type: 'separator' }
       return {
+        type: item.checked ? 'checkbox' : 'normal',
+        checked: item.checked ? true : undefined,
         label: itemLabel(item),
         enabled: item.enabled ?? true,
         accelerator: item.accelerator || undefined,

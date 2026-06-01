@@ -6,6 +6,7 @@ import {
   listChatSwitcherProfiles,
   getProviderDef,
 } from '../../../../stores/useSettings'
+import { chatMenuItemStyle, chatMenuSurfaceStyle } from '../../chatMenuStyles'
 
 // Model Selector (wired to useSettings store)
 export default function ModelSelector() {
@@ -102,18 +103,18 @@ export default function ModelSelector() {
 
       {open && (
         <div
+          className="panel-hover-scrollbar"
           style={{
+            ...chatMenuSurfaceStyle,
             position: 'absolute',
             bottom: '100%',
             left: 0,
             marginBottom: 4,
             minWidth: 248,
-            background: 'var(--bg-panel)',
-            border: '1px solid var(--border-default)',
-            borderRadius: 12,
-            boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
-            padding: 8,
-            zIndex: 100
+            maxWidth: 'min(480px, calc(100vw - 32px))',
+            maxHeight: 'min(640px, calc(100vh - 96px))',
+            overflowY: 'auto',
+            zIndex: 100,
           }}
         >
           <div
@@ -127,10 +128,11 @@ export default function ModelSelector() {
             当前模型
           </div>
           <div
+            className="ready-floating-menu-item is-selected"
             style={{
-              padding: '6px 10px',
-              borderRadius: 6,
-              background: 'var(--bg-hover)'
+              ...chatMenuItemStyle,
+              cursor: 'default',
+              textAlign: 'left',
             }}
           >
             <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-body)' }}>
@@ -158,12 +160,10 @@ export default function ModelSelector() {
                   activateProfile(currentHiddenProfile.id)
                   setOpen(false)
                 }}
-                className="w-full text-left hover:bg-black/5 transition-colors"
+                className="ready-floating-menu-item is-selected w-full text-left transition-colors"
                 style={{
-                  padding: '8px 10px',
-                  borderRadius: 8,
-                  border: '1px solid var(--border-default)',
-                  background: 'transparent',
+                  ...chatMenuItemStyle,
+                  textAlign: 'left',
                 }}
               >
                 <div style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-body)' }}>
@@ -202,12 +202,10 @@ export default function ModelSelector() {
                           activateProfile(profile.id)
                           setOpen(false)
                         }}
-                        className="w-full text-left hover:bg-black/5 transition-colors"
+                        className={`ready-floating-menu-item w-full text-left transition-colors ${isActiveProfile ? 'is-selected' : ''}`}
                         style={{
-                          padding: '8px 10px',
-                          borderRadius: 8,
-                          border: isActiveProfile ? '1px solid color-mix(in srgb, var(--color-blue) 28%, transparent)' : '1px solid transparent',
-                          background: isActiveProfile ? 'var(--bg-hover)' : 'transparent',
+                          ...chatMenuItemStyle,
+                          textAlign: 'left',
                         }}
                       >
                         <div className="flex items-center justify-between gap-2">
@@ -229,12 +227,14 @@ export default function ModelSelector() {
                                     return next
                                   })
                                 }}
-                                className="hover:bg-black/10"
+                                className="ready-floating-menu-item"
                                 style={{
                                   display: 'inline-flex',
                                   alignItems: 'center',
                                   padding: 2,
                                   borderRadius: 4,
+                                  border: '1px solid transparent',
+                                  background: 'transparent',
                                   cursor: 'pointer',
                                 }}
                               >
@@ -275,11 +275,11 @@ export default function ModelSelector() {
                                 onClick={() => {
                                   activateProfileWithModel(profile.id, modelId)
                                 }}
-                                className="w-full text-left hover:bg-black/5 transition-colors"
+                                className={`ready-floating-menu-item w-full text-left transition-colors ${isActiveModel ? 'is-selected' : ''}`}
                                 style={{
+                                  ...chatMenuItemStyle,
                                   padding: '6px 10px',
-                                  borderRadius: 6,
-                                  background: isActiveModel ? 'var(--bg-hover)' : 'transparent',
+                                  textAlign: 'left',
                                 }}
                               >
                                 <div className="flex items-center justify-between gap-2">
@@ -321,13 +321,10 @@ export default function ModelSelector() {
               navigate('/settings?section=ai')
               setOpen(false)
             }}
-            className="w-full flex items-center justify-center gap-2 hover:bg-black/5 transition-colors"
+            className="ready-floating-menu-item w-full flex items-center justify-center gap-2 transition-colors"
             style={{
+              ...chatMenuItemStyle,
               marginTop: 8,
-              padding: '8px 10px',
-              borderRadius: 8,
-              border: '1px solid var(--border-default)',
-              background: 'transparent',
               fontSize: 11,
               color: 'var(--text-muted)',
             }}
