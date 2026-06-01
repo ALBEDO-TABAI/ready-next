@@ -80,6 +80,7 @@ const applyAccent = (accent: ThemeAccent, resolved: ResolvedTheme) => {
     const palette = accentPalettes[accent][resolved]
     const root = document.documentElement
     root.setAttribute('data-accent', accent)
+    if (!root.style?.setProperty) return
     root.style.setProperty('--color-blue', palette.color)
     root.style.setProperty('--color-blue-light', palette.light)
     root.style.setProperty('--accent-primary', palette.color)
