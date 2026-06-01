@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { AtSign, History, Plus, ChevronDown, MoreHorizontal, Pencil, Trash2, PanelRightClose } from 'lucide-react'
+import { AtSign, ChevronDown, MessageSquare, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react'
 import { IconButton } from '../ui/IconButton'
 import Modal from '../ui/Modal'
 import type { SessionRecallHit } from '../../../shared/session-recall'
@@ -26,7 +26,6 @@ interface ChatHeaderProps {
   currentChannel: ConversationChannelOption
   channelOptions: ConversationChannelOption[]
   onChannelSelect: (channel: ConversationChannelOption) => void
-  onTogglePanel: () => void
   onNewSession: () => void
   onLoadConversation: (convId: string) => void
   onDeleteConversation: (convId: string) => void
@@ -55,7 +54,6 @@ export default function ChatHeader({
   currentChannel,
   channelOptions,
   onChannelSelect,
-  onTogglePanel,
   onNewSession,
   onLoadConversation,
   onDeleteConversation,
@@ -82,7 +80,6 @@ export default function ChatHeader({
   const [pendingRenameSession, setPendingRenameSession] = useState<{ conversationId: string; title: string } | null>(null)
   const [rowMenu, setRowMenu] = useState<{ conversationId: string; title: string; position: FloatingMenuPosition } | null>(null)
   const scopeTriggerRef = useRef<HTMLButtonElement>(null)
-  const historyTriggerRef = useRef<HTMLButtonElement>(null)
   const titleTriggerRef = useRef<HTMLButtonElement>(null)
   const scopeMenuRef = useRef<HTMLDivElement>(null)
   const historyMenuRef = useRef<HTMLDivElement>(null)
@@ -118,7 +115,6 @@ export default function ChatHeader({
         scopeMenuRef.current?.contains(target)
       )
       const clickedHistory = !!(
-        historyTriggerRef.current?.contains(target) ||
         historyMenuRef.current?.contains(target) ||
         titleTriggerRef.current?.contains(target) ||
         rowMenuRef.current?.contains(target)
@@ -153,14 +149,13 @@ export default function ChatHeader({
   const handleHistoryToggle = useCallback(() => {
     setShowHistory((prev) => {
       const next = !prev
-      setHistoryMenuPosition(next ? computeMenuPosition(historyTriggerRef.current, historyMenuWidth, 'right') : null)
+      setHistoryMenuPosition(next ? computeMenuPosition(titleTriggerRef.current, historyMenuWidth, 'left') : null)
       return next
     })
   }, [computeMenuPosition, historyMenuWidth])
 
-  // Shared by the History icon button and the session-title button: opening
-  // (re)loads the history list, and closing the scope menu keeps a single
-  // floating menu open at a time.
+  // The session title opens the history list; closing the source menu keeps a
+  // single floating menu open at a time.
   const handleHistoryButtonClick = useCallback(() => {
     if (!showHistory) onHistoryOpen?.()
     handleHistoryToggle()
@@ -171,7 +166,7 @@ export default function ChatHeader({
   const handleScopeToggle = useCallback(() => {
     setShowScopeSelect((prev) => {
       const next = !prev
-      setScopeMenuPosition(next ? computeMenuPosition(scopeTriggerRef.current, 300, 'left') : null)
+      setScopeMenuPosition(next ? computeMenuPosition(scopeTriggerRef.current, 300, 'right') : null)
       return next
     })
   }, [computeMenuPosition])
@@ -183,10 +178,10 @@ export default function ChatHeader({
       // A fixed-positioned row menu detaches from its trigger on scroll/resize.
       setRowMenu(null)
       if (showScopeSelect) {
-        setScopeMenuPosition(computeMenuPosition(scopeTriggerRef.current, 300, 'left'))
+        setScopeMenuPosition(computeMenuPosition(scopeTriggerRef.current, 300, 'right'))
       }
       if (showHistory) {
-        setHistoryMenuPosition(computeMenuPosition(historyTriggerRef.current, historyMenuWidth, 'right'))
+        setHistoryMenuPosition(computeMenuPosition(titleTriggerRef.current, historyMenuWidth, 'left'))
       }
     }
 
@@ -232,105 +227,72 @@ export default function ChatHeader({
           boxShadow: 'none',
         }}
       >
-        <div className="relative" data-chat-session-switcher="true">
-          <button
-            ref={scopeTriggerRef}
-            onClick={() => {
-              handleScopeToggle()
-              setShowHistory(false)
-              setHistoryMenuPosition(null)
-            }}
-            className="flex items-center active:scale-[0.98] transition-[background-color,transform] duration-200 ease-out"
-            style={{
-              gap: 6,
-              padding: '6px 10px 6px 2px',
-              borderRadius: 10,
-              border: '1px solid transparent',
-              background: 'transparent',
-              maxWidth: 200,
-            }}
-          >
-            <span
+        <div className="min-w-0 flex-1" data-chat-session-title="true">
+          {sessionTitle ? (
+            <button
+              ref={titleTriggerRef}
+              type="button"
+              onClick={handleHistoryButtonClick}
+              title={sessionTitle}
+              aria-label={`当前会话：${sessionTitle}，点击查看历史对话`}
+              className="active:scale-[0.99] transition-transform duration-150"
               style={{
-                fontSize: 12.5,
-                fontWeight: 600,
-                color: 'var(--text-title)',
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                maxWidth: '100%',
+                height: '100%',
+                border: 'none',
+                background: 'transparent',
+                padding: '6px 10px 6px 0',
+                cursor: 'pointer',
                 overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
               }}
             >
-              {currentChannel.label}
-            </span>
-            <ChevronDown
-              style={{
-                width: 12,
-                height: 12,
-                flexShrink: 0,
-                transform: showScopeSelect ? 'rotate(180deg)' : 'rotate(0deg)',
-                transition: 'transform 200ms ease',
-                color: 'var(--text-light)',
-              }}
-            />
-          </button>
+              <ChevronDown
+                style={{
+                  width: 12,
+                  height: 12,
+                  flexShrink: 0,
+                  transform: showHistory ? 'rotate(180deg)' : 'rotate(0deg)',
+                  transition: 'transform 200ms ease',
+                  color: 'var(--text-body)',
+                }}
+              />
+              <span
+                style={{
+                  display: 'block',
+                  minWidth: 0,
+                  flex: 1,
+                  fontSize: 12.5,
+                  fontWeight: 500,
+                  color: 'var(--text-body)',
+                  textAlign: 'left',
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'clip',
+                  WebkitMaskImage: 'linear-gradient(to right, #000 calc(100% - 28px), transparent 100%)',
+                  maskImage: 'linear-gradient(to right, #000 calc(100% - 28px), transparent 100%)',
+                }}
+              >
+                {sessionTitle}
+              </span>
+            </button>
+          ) : null}
         </div>
 
-        {sessionTitle ? (
-          <button
-            ref={titleTriggerRef}
-            type="button"
-            onClick={handleHistoryButtonClick}
-            title={sessionTitle}
-            aria-label={`当前会话：${sessionTitle}，点击查看历史对话`}
-            className="active:scale-[0.99] transition-transform duration-150"
-            style={{
-              flex: 1,
-              minWidth: 0,
-              margin: '0 10px',
-              display: 'flex',
-              alignItems: 'center',
-              height: '100%',
-              border: 'none',
-              background: 'transparent',
-              padding: 0,
-              cursor: 'pointer',
-              overflow: 'hidden',
-            }}
-          >
-            <span
-              style={{
-                display: 'block',
-                width: '100%',
-                fontSize: 12.5,
-                fontWeight: 500,
-                color: 'var(--text-light)',
-                textAlign: 'left',
-                whiteSpace: 'nowrap',
-                overflow: 'hidden',
-                textOverflow: 'clip',
-                WebkitMaskImage: 'linear-gradient(to right, #000 calc(100% - 28px), transparent 100%)',
-                maskImage: 'linear-gradient(to right, #000 calc(100% - 28px), transparent 100%)',
-              }}
-            >
-              {sessionTitle}
-            </span>
-          </button>
-        ) : null}
-
         <div className="flex items-center" style={{ gap: 4 }} data-chat-session-menu="true">
-          <IconButton
-            icon={<PanelRightClose style={{ width: 14, height: 14 }} strokeWidth={2} />}
-            onClick={onTogglePanel}
-            title="折叠聊天面板"
-          />
-
-          <div className="relative">
+          <div className="relative" data-chat-session-switcher="true">
             <IconButton
-              icon={<History style={{ width: 14, height: 14 }} strokeWidth={2} />}
-              onClick={handleHistoryButtonClick}
-              title="历史对话"
-              active={showHistory}
-              ref={historyTriggerRef}
+              icon={<MessageSquare style={{ width: 14, height: 14 }} strokeWidth={2} />}
+              onClick={() => {
+                handleScopeToggle()
+                setShowHistory(false)
+                setHistoryMenuPosition(null)
+              }}
+              title="会话来源"
+              active={showScopeSelect}
+              ref={scopeTriggerRef}
             />
           </div>
 

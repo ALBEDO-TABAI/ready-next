@@ -887,7 +887,6 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
       currentChannel={currentChannel}
       channelOptions={channelOptions}
       onChannelSelect={handleChannelSelect}
-      onTogglePanel={toggleChatPanel}
       onNewSession={handleNewSession}
       onLoadConversation={handleLoadConversation}
       onDeleteConversation={handleDeleteConversation}
