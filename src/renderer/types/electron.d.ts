@@ -1659,6 +1659,7 @@ interface DocumentOperationResponse {
   mock?: boolean
   trashEntry?: DocumentTrashEntry
   path?: string
+  deleted?: number
 }
 
 interface DocumentTrashEntry {
@@ -1742,10 +1743,13 @@ interface ElectronDocumentAPI {
   mkdir: (path: string) => Promise<DocumentOperationResponse>
   rename: (oldPath: string, newPath: string) => Promise<DocumentOperationResponse>
   deleteItem: (path: string) => Promise<DocumentOperationResponse>
+  trashItem: (path: string) => Promise<DocumentOperationResponse>
   copyItem: (src: string, dest: string) => Promise<DocumentOperationResponse>
   moveItem: (src: string, dest: string) => Promise<DocumentOperationResponse>
   listTrash: () => Promise<DocumentTrashListResponse>
   restoreTrash: (payload: { id: string } | string) => Promise<DocumentOperationResponse>
+  deleteTrashItem: (payload: { id: string } | string) => Promise<DocumentOperationResponse>
+  clearTrash: () => Promise<DocumentOperationResponse>
   stat: (path: string) => Promise<DocumentStatResponse>
   openFolder: (payload?: { validateAsWorkspace?: boolean }) => Promise<DocumentOpenFolderResponse>
   exportWorkspace: (payload: { name: string; folders: string[] }) => Promise<

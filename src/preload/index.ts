@@ -530,11 +530,14 @@ const documentAPI = {
   // File management
   mkdir: (path: string) => ipcRenderer.invoke('document:mkdir', path),
   rename: (oldPath: string, newPath: string) => ipcRenderer.invoke('document:rename', { oldPath, newPath }),
-  deleteItem: (path: string) => ipcRenderer.invoke('document:delete', path),
+  deleteItem: (path: string) => ipcRenderer.invoke('document:deletePermanent', path),
+  trashItem: (path: string) => ipcRenderer.invoke('document:delete', path),
   copyItem: (src: string, dest: string) => ipcRenderer.invoke('document:copy', { src, dest }),
   moveItem: (src: string, dest: string) => ipcRenderer.invoke('document:move', { src, dest }),
   listTrash: () => ipcRenderer.invoke('document:listTrash'),
   restoreTrash: (payload: { id: string } | string) => ipcRenderer.invoke('document:restoreTrash', payload),
+  deleteTrashItem: (payload: { id: string } | string) => ipcRenderer.invoke('document:deleteTrashItem', payload),
+  clearTrash: () => ipcRenderer.invoke('document:clearTrash'),
   stat: (path: string) => ipcRenderer.invoke('document:stat', path),
   openFolder: (payload?: { validateAsWorkspace?: boolean }) =>
     ipcRenderer.invoke('document:openFolder', payload),

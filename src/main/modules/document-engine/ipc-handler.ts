@@ -372,9 +372,10 @@ export function setupDocumentIPC(useMock = false): void {
   })
 
   // Stage V V2.3c — file-management channels (`document:mkdir`,
-  // `document:rename`, `document:delete`, `document:copy`, `document:move`,
-  // `document:stat`) moved into `fileMutationGroup`; Stage Z extends the same
-  // cluster with Ready trash list/restore.
+  // `document:rename`, `document:delete`, `document:deletePermanent`,
+  // `document:copy`, `document:move`, `document:stat`) moved into
+  // `fileMutationGroup`; Stage Z extends the same cluster with Ready trash
+  // list/restore/delete/clear.
   if (fileMutationGroupDispose) {
     try { fileMutationGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
     fileMutationGroupDispose = null
@@ -423,8 +424,9 @@ export function setupDocumentIPC(useMock = false): void {
 
   // --- File Management IPC Handlers ---
   // Stage V V2.3c — `document:mkdir`, `document:rename`, `document:delete`,
-  // `document:copy`, `document:move`, `document:stat`, Ready trash channels moved into
-  // `fileMutationGroup`. See breadcrumb + registration block above.
+  // `document:deletePermanent`, `document:copy`, `document:move`,
+  // `document:stat`, Ready trash channels moved into `fileMutationGroup`.
+  // See breadcrumb + registration block above.
 
   // Stage V V2.3b — `document:openFolder` moved into `fileIoGroup`. The
   // group injects the workspace-validation context (homeDir + accessSync

@@ -138,6 +138,48 @@ describe('document sectioning', () => {
     assert.equal(bareFirst?.displayTitle, '第一部第一章')
   })
 
+  it('treats markdown part headings as part anchors before numbered chapters', () => {
+    const content = [
+      '# 白痴',
+      '',
+      '## 第一部',
+      '',
+      '### 一',
+      '',
+      '第一部第一章正文。',
+      '',
+      '### 二',
+      '',
+      '第一部第二章正文。',
+      '',
+      '## 第二部',
+      '',
+      '### 一',
+      '',
+      '第二部第一章正文，真正目标。',
+      '',
+      '### 二',
+      '',
+      '第二部第二章正文。',
+    ].join('\n')
+
+    const index = buildDocumentSectionIndex(content)
+    const secondPartFirst = resolveDocumentSectionAnchor(index, '第二部第一章')
+    const focused = buildFocusedDocumentContext({
+      question: '看一下第二部第一章',
+      content,
+      maxCharsPerChunk: 120,
+      maxSelectedChunks: 1,
+    })
+
+    assert.equal(secondPartFirst?.displayTitle, '第二部第一章')
+    assert.equal(secondPartFirst?.line, 14)
+    assert.equal(secondPartFirst?.endLine, 18)
+    assert.equal(focused.selectedChunks[0]?.sectionTitle, '第二部第一章')
+    assert.match(focused.promptText, /真正目标/)
+    assert.doesNotMatch(focused.promptText, /第一部第一章正文/)
+  })
+
   it('uses the shared section index when selecting focused document chunks', () => {
     const content = [
       '# 白痴',

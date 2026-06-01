@@ -30,6 +30,16 @@ test('file tree right-click menu keeps remove-from-list available for top-level 
   assert.match(source, /if \(pendingDelete\.path === workspaceRoot\)/)
 })
 
+test('file tree distinguishes permanent delete from delete-to-trash', () => {
+  const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
+  assert.match(source, /label: '删除到回收站'/)
+  assert.match(source, /onRequestTrash\(\{ path: item\.path, name: item\.name \}\)/)
+  assert.match(source, /label: '删除'/)
+  assert.match(source, /onRequestDelete\(\{ path: item\.path, name: item\.name \}\)/)
+  assert.match(source, /清空回收站/)
+  assert.match(source, /deleteTrashItemPermanently/)
+})
+
 test('file tree internal native drags can drop without a system Files dataTransfer type', () => {
   const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
   assert.match(source, /function hasRememberedNativeFileDrag\(/)

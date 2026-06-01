@@ -85,6 +85,7 @@ interface WorkspaceState {
   createFolder: (name: string) => Promise<boolean>
   renameItem: (oldPath: string, newName: string) => Promise<boolean>
   deleteItem: (path: string) => Promise<boolean>
+  trashItem: (path: string) => Promise<boolean>
   moveItem: (src: string, dest: string) => Promise<boolean>
   showInFolder: (path: string) => Promise<void>
   copyPathToClipboard: (path: string) => void
@@ -476,6 +477,27 @@ const remapPathAfterMove = (value: string | null, src: string, dest: string): st
 export const useWorkspace = create<WorkspaceState>((set, get) => {
   const initialVariant = loadSidePanelVariantFromStorage()
   console.log('[SidePanelVariant] Store initialized with variant:', initialVariant)
+
+  const cleanupRemovedWorkspacePath = async (path: string): Promise<void> => {
+    const state = get()
+    const parentPath = getDirName(path)
+    if (isSameOrDescendantPath(state.currentPath, path)) {
+      set({ currentPath: parentPath })
+    }
+    await get().refreshFiles()
+    const currentState = get()
+    const cleanedExpanded = new Set<string>()
+    currentState.expandedDirs.forEach((dir) => {
+      if (!isSameOrDescendantPath(dir, path)) {
+        cleanedExpanded.add(dir)
+      }
+    })
+    set({
+      selectedFile: currentState.selectedFile && isSameOrDescendantPath(currentState.selectedFile, path) ? null : currentState.selectedFile,
+      expandedDirs: cleanedExpanded,
+    })
+    await get().loadDirChildren(parentPath)
+  }
 
   return {
   workspaceRoot: null,
@@ -977,27 +999,10 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
   deleteItem: async (path) => {
     try {
       if (window.electronAPI) {
-        const state = get()
-        const parentPath = getDirName(path)
         const result = await window.electronAPI.document.deleteItem(path)
         const alreadyGone = !result.success && /not found|enoent/i.test(String(result.error || ''))
         if (result.success || alreadyGone) {
-          if (isSameOrDescendantPath(state.currentPath, path)) {
-            set({ currentPath: parentPath })
-          }
-          await get().refreshFiles()
-          const currentState = get()
-          const cleanedExpanded = new Set<string>()
-          currentState.expandedDirs.forEach((dir) => {
-            if (!isSameOrDescendantPath(dir, path)) {
-              cleanedExpanded.add(dir)
-            }
-          })
-          set({
-            selectedFile: currentState.selectedFile && isSameOrDescendantPath(currentState.selectedFile, path) ? null : currentState.selectedFile,
-            expandedDirs: cleanedExpanded,
-          })
-          await get().loadDirChildren(parentPath)
+          await cleanupRemovedWorkspacePath(path)
           return true
         }
       } else {
@@ -1009,6 +1014,28 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
       }
     } catch (error) {
       console.error('Failed to delete:', error)
+    }
+    return false
+  },
+
+  trashItem: async (path) => {
+    try {
+      if (window.electronAPI) {
+        const result = await window.electronAPI.document.trashItem(path)
+        const alreadyGone = !result.success && /not found|enoent/i.test(String(result.error || ''))
+        if (result.success || alreadyGone) {
+          await cleanupRemovedWorkspacePath(path)
+          return true
+        }
+      } else {
+        set((state) => ({
+          files: state.files.filter(f => f.path !== path),
+          selectedFile: state.selectedFile === path ? null : state.selectedFile
+        }))
+        return true
+      }
+    } catch (error) {
+      console.error('Failed to move to trash:', error)
     }
     return false
   },

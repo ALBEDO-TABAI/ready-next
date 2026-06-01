@@ -135,6 +135,14 @@ interface ParsedSectionHeading {
   ordinal?: number
 }
 
+function parsePartHeadingTitle(title: string): { title: string; ordinal?: number } | null {
+  const partHeading = title.trim().match(new RegExp(`^第?(${CHINESE_NUMERAL_PATTERN})部$`))
+  if (!partHeading) return null
+  const ordinal = parseChineseSectionNumber(partHeading[1])
+  const normalizedTitle = ordinal ? `第${toChineseSectionNumber(ordinal)}部` : title.trim()
+  return { title: normalizedTitle, ordinal: ordinal || undefined }
+}
+
 function parseSectionHeading(line: string): ParsedSectionHeading | null {
   const trimmed = line.trim()
   if (!trimmed) return null
@@ -142,6 +150,15 @@ function parseSectionHeading(line: string): ParsedSectionHeading | null {
   const markdownHeading = trimmed.match(/^#{1,6}\s+(.+?)\s*$/)
   if (markdownHeading?.[1]) {
     const title = markdownHeading[1].trim()
+    const part = parsePartHeadingTitle(title)
+    if (part) {
+      return {
+        level: (trimmed.match(/^#{1,6}/)?.[0].length) || 1,
+        title: part.title,
+        kind: 'part',
+        ordinal: part.ordinal,
+      }
+    }
     const ordinal = new RegExp(`^${CHINESE_NUMERAL_PATTERN}$`).test(title)
       ? parseChineseSectionNumber(title)
       : null
@@ -153,11 +170,9 @@ function parseSectionHeading(line: string): ParsedSectionHeading | null {
     }
   }
 
-  const partHeading = trimmed.match(new RegExp(`^第?(${CHINESE_NUMERAL_PATTERN})部$`))
+  const partHeading = parsePartHeadingTitle(trimmed)
   if (partHeading) {
-    const ordinal = parseChineseSectionNumber(partHeading[1])
-    const normalizedTitle = ordinal ? `第${toChineseSectionNumber(ordinal)}部` : trimmed
-    return { level: 2, title: normalizedTitle, kind: 'part', ordinal: ordinal || undefined }
+    return { level: 2, title: partHeading.title, kind: 'part', ordinal: partHeading.ordinal }
   }
 
   const ordinalHeading = trimmed.match(new RegExp(`^(第(${CHINESE_NUMERAL_PATTERN})(部分|章|节)|引言|摘要|结论|结语|前言)\\s*([：:]\\s*.+)?$`))

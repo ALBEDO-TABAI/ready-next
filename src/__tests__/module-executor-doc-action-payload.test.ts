@@ -78,6 +78,62 @@ describe('classifyDocActionFailureReason', () => {
   })
 })
 
+describe('performDocAction · document target safety', () => {
+  it('rejects set_content without an explicit tool target instead of overwriting a saved visible document', async () => {
+    useDocTabs.setState({
+      tabs: [
+        { id: 'doc-source', path: '/tmp/source-book.md', title: 'source-book.md', content: '# Source\n\nOriginal text\n', isDirty: false },
+      ],
+      activeTabId: 'doc-source',
+      splitTabId: null,
+    })
+
+    const result = await performDocAction({ type: 'set_content', content: '# Notes\n' })
+
+    assert.match(result, /文档写入已拒绝/)
+    assert.equal(useDocTabs.getState().tabs[0]?.content, '# Source\n\nOriginal text\n')
+  })
+
+  it('rejects other mutating writes without an explicit tool target on a saved visible document', async () => {
+    useDocTabs.setState({
+      tabs: [
+        { id: 'doc-source', path: '/tmp/source-book.md', title: 'source-book.md', content: '# Source\n\nOriginal text\n', isDirty: false },
+      ],
+      activeTabId: 'doc-source',
+      splitTabId: null,
+    })
+
+    const result = await performDocAction({ type: 'append_content', content: '\n# Notes\n' })
+
+    assert.match(result, /文档写入已拒绝/)
+    assert.equal(useDocTabs.getState().tabs[0]?.content, '# Source\n\nOriginal text\n')
+  })
+
+  it('does not fall back to the visible document when the remembered tool target disappears', async () => {
+    useDocTabs.setState({
+      tabs: [
+        { id: 'doc-source', path: '/tmp/source-book.md', title: 'source-book.md', content: '# Source\n\nOriginal text\n', isDirty: false },
+      ],
+      activeTabId: 'doc-source',
+      splitTabId: null,
+    })
+
+    await performDocAction({ type: 'new_tab', title: 'target', path: '/tmp/target.md' })
+    useDocTabs.setState({
+      tabs: [
+        { id: 'doc-source', path: '/tmp/source-book.md', title: 'source-book.md', content: '# Source\n\nOriginal text\n', isDirty: false },
+      ],
+      activeTabId: 'doc-source',
+      splitTabId: null,
+    })
+
+    const result = await performDocAction({ type: 'set_content', content: '# Notes\n' })
+
+    assert.match(result, /文档写入已拒绝/)
+    assert.equal(useDocTabs.getState().tabs[0]?.content, '# Source\n\nOriginal text\n')
+  })
+})
+
 describe('executeModuleToolAction · document.updateWidget payload 合约', () => {
   function makeParams(tool: string, args: Record<string, unknown>) {
     return {
@@ -140,6 +196,38 @@ describe('executeModuleToolAction · document.updateWidget payload 合约', () =
 })
 
 describe('performDocAction · save_tab disk drift', () => {
+  it('目标路径还不存在时不能把读取失败当成已保存，必须写出文件', async () => {
+    const previousWindow = (globalThis as { window?: unknown }).window
+    const writes: Array<{ path: string; content: string }> = []
+    ;(globalThis as { window?: unknown }).window = {
+      electronAPI: {
+        document: {
+          readFile: async () => ({ success: false, error: 'ENOENT' }),
+          writeFile: async (path: string, content: string) => {
+            writes.push({ path, content })
+            return { success: true }
+          },
+        },
+      },
+    }
+    try {
+      useDocTabs.setState({
+        tabs: [
+          { id: 'doc-target', path: '/tmp/new-target.md', title: 'new-target.md', content: '# 新笔记\n', isDirty: false },
+        ],
+        activeTabId: 'doc-target',
+        splitTabId: null,
+      })
+
+      const result = await performDocAction({ type: 'save_tab', tabId: 'doc-target' })
+
+      assert.match(result, /已保存文档/)
+      assert.deepEqual(writes, [{ path: '/tmp/new-target.md', content: '# 新笔记\n' }])
+    } finally {
+      ;(globalThis as { window?: unknown }).window = previousWindow
+    }
+  })
+
   it('dirty 标记已清但磁盘内容不同步时仍会写回文件', async () => {
     const previousWindow = (globalThis as { window?: unknown }).window
     const writes: Array<{ path: string; content: string }> = []
@@ -211,6 +299,88 @@ describe('performDocAction · save_tab disk drift', () => {
 })
 
 describe('performDocAction · background document targets', () => {
+  it('simulates a read-then-write task without letting an early ambiguous write touch visible panes', async () => {
+    const previousWindow = (globalThis as { window?: unknown }).window
+    const writes: Array<{ path: string; content: string }> = []
+    ;(globalThis as { window?: unknown }).window = {
+      electronAPI: {
+        document: {
+          readFile: async () => ({ success: false, error: 'ENOENT' }),
+          writeFile: async (path: string, content: string) => {
+            writes.push({ path, content })
+            return { success: true }
+          },
+        },
+      },
+    }
+    try {
+      useDocTabs.setState({
+        tabs: [
+          { id: 'doc-a', path: '/tmp/visible-source.md', title: 'visible-source.md', content: '# Source\n\nKeep this.\n', isDirty: false },
+          { id: 'doc-b', path: '/tmp/visible-side.md', title: 'visible-side.md', content: '# Side\n\nKeep this too.\n', isDirty: false },
+        ],
+        activeTabId: 'doc-a',
+        splitTabId: 'doc-b',
+      })
+
+      const earlyWrite = await performDocAction({ type: 'set_content', content: '# Wrong target\n' })
+      assert.match(earlyWrite, /文档写入已拒绝/)
+      assert.equal(useDocTabs.getState().tabs.find((item) => item.id === 'doc-a')?.content, '# Source\n\nKeep this.\n')
+      assert.equal(useDocTabs.getState().tabs.find((item) => item.id === 'doc-b')?.content, '# Side\n\nKeep this too.\n')
+
+      await performDocAction({ type: 'new_tab', title: 'target-note', path: '/tmp/target-note.md' })
+      await performDocAction({ type: 'set_content', content: '# Target note\n\nFinished.\n' })
+      const saved = await performDocAction({ type: 'save_tab' })
+
+      assert.match(saved, /已保存文档/)
+      assert.deepEqual(writes, [{ path: '/tmp/target-note.md', content: '# Target note\n\nFinished.\n' }])
+      assert.equal(useDocTabs.getState().activeTabId, 'doc-a')
+      assert.equal(useDocTabs.getState().splitTabId, 'doc-b')
+      assert.equal(useDocTabs.getState().tabs.find((item) => item.id === 'doc-a')?.content, '# Source\n\nKeep this.\n')
+      assert.equal(useDocTabs.getState().tabs.find((item) => item.id === 'doc-b')?.content, '# Side\n\nKeep this too.\n')
+    } finally {
+      ;(globalThis as { window?: unknown }).window = previousWindow
+    }
+  })
+
+  it('updates a visible split-pane target when the tool carries that tab id', async () => {
+    const previousWindow = (globalThis as { window?: unknown }).window
+    const writes: Array<{ path: string; content: string }> = []
+    ;(globalThis as { window?: unknown }).window = {
+      electronAPI: {
+        document: {
+          readFile: async (path: string) => ({ success: true, content: path.endsWith('B.md') ? '# B old\n' : '' }),
+          writeFile: async (path: string, content: string) => {
+            writes.push({ path, content })
+            return { success: true }
+          },
+        },
+      },
+    }
+    try {
+      useDocTabs.setState({
+        tabs: [
+          { id: 'doc-a', path: '/tmp/A.md', title: 'A.md', content: '# A\n', isDirty: false },
+          { id: 'doc-b', path: '/tmp/B.md', title: 'B.md', content: '# B old\n', isDirty: false },
+        ],
+        activeTabId: 'doc-a',
+        splitTabId: 'doc-b',
+      })
+
+      await performDocAction({ type: 'set_content', tabId: 'doc-b', content: '# B updated\n' })
+      const saved = await performDocAction({ type: 'save_tab', tabId: 'doc-b' })
+
+      assert.match(saved, /已保存文档/)
+      assert.deepEqual(writes, [{ path: '/tmp/B.md', content: '# B updated\n' }])
+      assert.equal(useDocTabs.getState().activeTabId, 'doc-a')
+      assert.equal(useDocTabs.getState().splitTabId, 'doc-b')
+      assert.equal(useDocTabs.getState().tabs.find((item) => item.id === 'doc-a')?.content, '# A\n')
+      assert.equal(useDocTabs.getState().tabs.find((item) => item.id === 'doc-b')?.content, '# B updated\n')
+    } finally {
+      ;(globalThis as { window?: unknown }).window = previousWindow
+    }
+  })
+
   it('creates and writes a target document without stealing the visible panes', async () => {
     const previousWindow = (globalThis as { window?: unknown }).window
     const writes: Array<{ path: string; content: string }> = []

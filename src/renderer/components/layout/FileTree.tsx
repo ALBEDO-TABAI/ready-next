@@ -1135,6 +1135,7 @@ export default function FileTree({
     loadDirChildren,
     refreshFiles,
     deleteItem,
+    trashItem,
     removePinnedFolder,
     clearWorkspace,
     loadSavedWorkspace,
@@ -1143,7 +1144,7 @@ export default function FileTree({
   const { setWorkbenchMode } = useMode()
 
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: FileItem | null } | null>(null)
-  const [pendingDelete, setPendingDelete] = useState<{ kind: 'fs' | 'unpin'; path: string; name: string } | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<{ kind: 'fs' | 'trash' | 'unpin'; path: string; name: string } | null>(null)
   const [trashPanelOpen, setTrashPanelOpen] = useState(false)
   const [trashItems, setTrashItems] = useState<FileTreeTrashEntry[]>([])
   const [trashBusyId, setTrashBusyId] = useState<string | null>(null)
@@ -1321,6 +1322,43 @@ export default function FileTree({
       setTrashBusyId(null)
     }
   }, [flashCompletedPath, loadDirChildren, loadTrashItems, refreshFiles, selectFile])
+
+  const deleteTrashItemPermanently = useCallback(async (entry: FileTreeTrashEntry) => {
+    if (!window.confirm(`确定彻底删除 "${entry.name}" 吗？此操作不可恢复。`)) return
+    setTrashBusyId(entry.id)
+    setTrashError(null)
+    try {
+      const result = await window.electronAPI?.document?.deleteTrashItem?.({ id: entry.id })
+      if (!result?.success) {
+        setTrashError(result?.error || '删除失败')
+        return
+      }
+      await loadTrashItems()
+    } catch (error) {
+      setTrashError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setTrashBusyId(null)
+    }
+  }, [loadTrashItems])
+
+  const clearTrash = useCallback(async () => {
+    if (trashItems.length === 0) return
+    if (!window.confirm(`确定清空回收站中的 ${trashItems.length} 个项目吗？此操作不可恢复。`)) return
+    setTrashBusyId('__clear__')
+    setTrashError(null)
+    try {
+      const result = await window.electronAPI?.document?.clearTrash?.()
+      if (!result?.success) {
+        setTrashError(result?.error || '清空失败')
+        return
+      }
+      await loadTrashItems()
+    } catch (error) {
+      setTrashError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setTrashBusyId(null)
+    }
+  }, [loadTrashItems, trashItems.length])
 
   useEffect(() => {
     const cleanupStudy = window.electronAPI?.browser?.onContentStudyUpdate?.((data) => {
@@ -2392,6 +2430,7 @@ export default function FileTree({
           onOpenFile={handleOpenFile}
           onOpenTrash={openTrashPanel}
           onRequestDelete={({ path, name }) => setPendingDelete({ kind: 'fs', path, name })}
+          onRequestTrash={({ path, name }) => setPendingDelete({ kind: 'trash', path, name })}
           onRequestUnpin={({ path, name }) => setPendingDelete({ kind: 'unpin', path, name })}
           workspaceRoot={workspaceRoot}
         />
@@ -2401,20 +2440,32 @@ export default function FileTree({
         open={pendingDelete !== null}
         mode="confirm"
         danger
-        title={pendingDelete?.kind === 'unpin' ? '从列表中移除' : '删除文件'}
+        title={pendingDelete?.kind === 'unpin'
+          ? '从列表中移除'
+          : pendingDelete?.kind === 'trash'
+            ? '删除到回收站'
+            : '删除文件'}
         message={
           pendingDelete?.kind === 'unpin'
             ? `确定从文件管理列表里移除 "${pendingDelete.name}" 吗？不会删除磁盘上的实际文件夹。`
-            : pendingDelete
-              ? `确定将 "${pendingDelete.name}" 移入回收站吗？稍后可以从回收站恢复。`
+            : pendingDelete?.kind === 'trash'
+              ? `确定将 "${pendingDelete.name}" 删除到回收站吗？稍后可以从回收站恢复。`
+              : pendingDelete
+                ? `确定删除 "${pendingDelete.name}" 吗？此操作不可恢复。`
               : ''
         }
-        confirmLabel={pendingDelete?.kind === 'unpin' ? '移除' : '移入回收站'}
+        confirmLabel={pendingDelete?.kind === 'unpin'
+          ? '移除'
+          : pendingDelete?.kind === 'trash'
+            ? '删除到回收站'
+            : '删除'}
         cancelLabel="取消"
         onConfirm={() => {
           if (!pendingDelete) return
           if (pendingDelete.kind === 'fs') {
             void deleteItem(pendingDelete.path)
+          } else if (pendingDelete.kind === 'trash') {
+            void trashItem(pendingDelete.path)
           } else {
             const nextPinnedFolders = pinnedFolders.filter((folderPath) => folderPath !== pendingDelete.path)
             if (pendingDelete.path === workspaceRoot) {
@@ -2466,14 +2517,32 @@ export default function FileTree({
               <h2 id="ready-trash-title" className="text-[15px] font-semibold" style={{ color: 'var(--text-title)' }}>
                 回收站
               </h2>
-              <button
-                type="button"
-                className="px-3 py-1.5 rounded-[8px] text-[12px] border"
-                style={{ borderColor: 'var(--border-default)', color: 'var(--text-muted)' }}
-                onClick={() => setTrashPanelOpen(false)}
-              >
-                关闭
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  disabled={trashItems.length === 0 || trashBusyId !== null}
+                  className="inline-flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-[12px] border"
+                  style={{
+                    borderColor: 'var(--border-default)',
+                    color: trashItems.length === 0 || trashBusyId !== null ? 'var(--text-light)' : 'var(--color-red)',
+                    background: 'var(--bg-primary)',
+                  }}
+                  onClick={() => void clearTrash()}
+                >
+                  {trashBusyId === '__clear__'
+                    ? <Loader2 className="w-[13px] h-[13px] animate-spin" />
+                    : <Trash2 className="w-[13px] h-[13px]" />}
+                  清空回收站
+                </button>
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-[8px] text-[12px] border"
+                  style={{ borderColor: 'var(--border-default)', color: 'var(--text-muted)' }}
+                  onClick={() => setTrashPanelOpen(false)}
+                >
+                  关闭
+                </button>
+              </div>
             </div>
 
             {trashError && (
@@ -2529,6 +2598,22 @@ export default function FileTree({
                           ? <Loader2 className="w-[13px] h-[13px] animate-spin" />
                           : <RotateCcw className="w-[13px] h-[13px]" />}
                         恢复
+                      </button>
+                      <button
+                        type="button"
+                        disabled={trashBusyId === entry.id}
+                        className="inline-flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-[12px] border"
+                        style={{
+                          borderColor: 'var(--border-default)',
+                          color: trashBusyId === entry.id ? 'var(--text-light)' : 'var(--color-red)',
+                          background: 'var(--bg-primary)',
+                        }}
+                        onClick={() => void deleteTrashItemPermanently(entry)}
+                      >
+                        {trashBusyId === entry.id
+                          ? <Loader2 className="w-[13px] h-[13px] animate-spin" />
+                          : <Trash2 className="w-[13px] h-[13px]" />}
+                        删除
                       </button>
                     </div>
                   ))}
@@ -2710,6 +2795,7 @@ function ContextMenuBridge({
   onOpenFile,
   onOpenTrash,
   onRequestDelete,
+  onRequestTrash,
   onRequestUnpin,
   workspaceRoot,
 }: {
@@ -2719,6 +2805,7 @@ function ContextMenuBridge({
   onOpenFile: (item: FileItem) => void
   onOpenTrash: () => void
   onRequestDelete: (info: { path: string; name: string }) => void
+  onRequestTrash: (info: { path: string; name: string }) => void
   onRequestUnpin: (info: { path: string; name: string }) => void
   workspaceRoot: string | null
 }) {
@@ -2824,10 +2911,10 @@ function ContextMenuBridge({
         onClick: () => void showInFolder(item.path)
       },
       {
-        id: 'trash',
-        label: '回收站',
+        id: 'deleteToTrash',
+        label: '删除到回收站',
         icon: <Trash2 style={{ width: 16, height: 16 }} />,
-        onClick: onOpenTrash,
+        onClick: () => onRequestTrash({ path: item.path, name: item.name }),
       },
       ...(pinnedFolderSet.has(item.path) || item.path === workspaceRoot ? [
         {
@@ -2846,7 +2933,7 @@ function ContextMenuBridge({
         onClick: () => onRequestDelete({ path: item.path, name: item.name })
       }
     ]
-  }, [onOpenFile, onOpenTrash, startRenaming, copyPathToClipboard, startCreating, showInFolder, refreshFiles, pinnedFolderSet, workspaceRoot, onRequestDelete, onRequestUnpin])
+  }, [onOpenFile, onOpenTrash, startRenaming, copyPathToClipboard, startCreating, showInFolder, refreshFiles, pinnedFolderSet, workspaceRoot, onRequestDelete, onRequestTrash, onRequestUnpin])
 
   const contextItems = useMemo(() => getContextItems(contextMenu.item), [contextMenu.item, getContextItems])
 
@@ -2862,6 +2949,7 @@ function ContextMenuBridge({
       refresh: '↻',
       removeFromList: '−',
       delete: '⌫',
+      deleteToTrash: '♻',
       trash: '♻',
     }
     const acceleratorById: Record<string, string> = {

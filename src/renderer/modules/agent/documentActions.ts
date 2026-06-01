@@ -456,18 +456,39 @@ function resolveDocTab(target?: string): ReturnType<typeof getActiveDocTab> {
   return store.tabs.find((tab) => tab.title.toLowerCase().includes(lower)) || null
 }
 
+function getFreshRecentToolTargetTab(): ReturnType<typeof getActiveDocTab> {
+  if (!recentToolTargetTab) return null
+  if (Date.now() - recentToolTargetTab.updatedAt > RECENT_TOOL_TARGET_TTL_MS) {
+    recentToolTargetTab = null
+    return null
+  }
+  const store = useDocTabs.getState()
+  const target = store.tabs.find((tab) => tab.id === recentToolTargetTab?.tabId)
+  if (!target) recentToolTargetTab = null
+  return target || null
+}
+
 function resolveDocActionTab(action: DocActionPayload): ReturnType<typeof getActiveDocTab> {
   const explicitTabId = typeof action.tabId === 'string' ? action.tabId : ''
   if (explicitTabId.trim()) return resolveDocTab(explicitTabId)
 
-  if (recentToolTargetTab && Date.now() - recentToolTargetTab.updatedAt <= RECENT_TOOL_TARGET_TTL_MS) {
-    const store = useDocTabs.getState()
-    const target = store.tabs.find((tab) => tab.id === recentToolTargetTab?.tabId)
-    if (target) return target
-    recentToolTargetTab = null
-  }
+  const recentTarget = getFreshRecentToolTargetTab()
+  if (recentTarget) return recentTarget
 
   return getActiveDocTab()
+}
+
+function hasExplicitOrRecentDocActionTarget(action: DocActionPayload): boolean {
+  const explicitTabId = typeof action.tabId === 'string' ? action.tabId.trim() : ''
+  if (explicitTabId) return true
+  return Boolean(getFreshRecentToolTargetTab())
+}
+
+function rejectAmbiguousVisibleDocumentMutation(action: DocActionPayload): string | null {
+  if (hasExplicitOrRecentDocActionTarget(action)) return null
+  const active = getActiveDocTab()
+  if (!active?.path || active.content.trim().length === 0) return null
+  return `文档写入已拒绝：没有明确的目标标签，不能覆盖当前可见文档 ${active.title}。请先新建或打开目标文档。`
 }
 
 function normalizeText(input: string): string {
@@ -1387,6 +1408,8 @@ export async function performDocAction(action: DocActionPayload): Promise<string
 
   if (type === 'set_content') {
     const content = typeof action.content === 'string' ? normalizePotentialWidgetPayloadContent(action.content) : ''
+    const ambiguousTargetRejection = rejectAmbiguousVisibleDocumentMutation(action)
+    if (ambiguousTargetRejection) return ambiguousTargetRejection
     const tab = resolveDocActionTab(action)
     if (!tab) return '没有可写入的文档标签'
     const visualSyntaxRejection = await buildVisualSyntaxRejection('文档写入', content)
@@ -1399,6 +1422,8 @@ export async function performDocAction(action: DocActionPayload): Promise<string
 
   if (type === 'append_content') {
     const content = typeof action.content === 'string' ? normalizePotentialWidgetPayloadContent(action.content) : ''
+    const ambiguousTargetRejection = rejectAmbiguousVisibleDocumentMutation(action)
+    if (ambiguousTargetRejection) return ambiguousTargetRejection
     const tab = resolveDocActionTab(action)
     if (!tab) return '没有可追加的文档标签'
     if (!content) return `追加内容为空，已跳过：${tab.title}`
@@ -1427,6 +1452,8 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     const position = action.position === 'after_section' ? 'after_section' : 'append_end'
     const sectionTitle = typeof action.sectionTitle === 'string' ? action.sectionTitle.trim() : ''
     if (!title) return 'insert_widget 缺少 title'
+    const ambiguousTargetRejection = rejectAmbiguousVisibleDocumentMutation(action)
+    if (ambiguousTargetRejection) return ambiguousTargetRejection
     let resolvedWidget: Awaited<ReturnType<typeof resolveWidgetCodeInput>>
     try {
       resolvedWidget = await raceWithTimeout(
@@ -1490,6 +1517,8 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     const nextTitle = typeof action.title === 'string' ? action.title.trim() : ''
     const occurrence = typeof action.occurrence === 'number' ? action.occurrence : undefined
     if (!target) return 'update_widget 缺少 target'
+    const ambiguousTargetRejection = rejectAmbiguousVisibleDocumentMutation(action)
+    if (ambiguousTargetRejection) return ambiguousTargetRejection
     const tab = resolveDocActionTab(action)
     if (!tab) return '没有可更新 widget 的文档标签'
 
@@ -1600,6 +1629,8 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     const target = typeof action.target === 'string' ? action.target.trim() : ''
     const occurrence = typeof action.occurrence === 'number' ? action.occurrence : undefined
     if (!target) return 'remove_widget 缺少 target'
+    const ambiguousTargetRejection = rejectAmbiguousVisibleDocumentMutation(action)
+    if (ambiguousTargetRejection) return ambiguousTargetRejection
     const tab = resolveDocActionTab(action)
     if (!tab) return '没有可删除 widget 的文档标签'
     const removed = removeWidgetFromDocument(tab.content, target, occurrence)
@@ -1618,6 +1649,8 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     const from = typeof action.from === 'string' ? action.from : ''
     const to = typeof action.to === 'string' ? action.to : ''
     if (!from) return 'replace_text 缺少 from'
+    const ambiguousTargetRejection = rejectAmbiguousVisibleDocumentMutation(action)
+    if (ambiguousTargetRejection) return ambiguousTargetRejection
     const tab = resolveDocActionTab(action)
     if (!tab) return '没有可替换的文档标签'
     if (!tab.content.includes(from)) return `未匹配到替换目标“${from}”，未做改动`
@@ -1641,6 +1674,8 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     const replacement = typeof action.replacement === 'string' ? action.replacement : ''
     const occurrence = typeof action.occurrence === 'number' ? action.occurrence : undefined
     if (!target) return 'replace_exact 缺少 target'
+    const ambiguousTargetRejection = rejectAmbiguousVisibleDocumentMutation(action)
+    if (ambiguousTargetRejection) return ambiguousTargetRejection
     const tab = resolveDocActionTab(action)
     if (!tab) return '没有可精准替换的文档标签'
     const replaced = replaceExactTextInDocument(tab.content, target, replacement, occurrence)
@@ -1660,6 +1695,8 @@ export async function performDocAction(action: DocActionPayload): Promise<string
   if (type === 'format_section') {
     const sectionTitle = typeof action.sectionTitle === 'string' ? action.sectionTitle.trim() : ''
     if (!sectionTitle) return 'format_section 缺少 sectionTitle'
+    const ambiguousTargetRejection = rejectAmbiguousVisibleDocumentMutation(action)
+    if (ambiguousTargetRejection) return ambiguousTargetRejection
     const tab = resolveDocActionTab(action)
     if (!tab) return '没有可格式化章节的文档标签'
     const formatted = formatSectionInDocument(tab.content, sectionTitle)
@@ -1674,6 +1711,8 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     const sectionTitle = typeof action.sectionTitle === 'string' ? action.sectionTitle.trim() : ''
     const content = typeof action.content === 'string' ? action.content : ''
     if (!sectionTitle) return 'rewrite_section 缺少 sectionTitle'
+    const ambiguousTargetRejection = rejectAmbiguousVisibleDocumentMutation(action)
+    if (ambiguousTargetRejection) return ambiguousTargetRejection
     const tab = resolveDocActionTab(action)
     if (!tab) return '没有可重写章节的文档标签'
     const rewritten = rewriteSectionInDocument(tab.content, sectionTitle, content, { appendIfMissing: false })
@@ -1712,7 +1751,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
       const diskContent = disk && typeof disk === 'object' && 'success' in disk && disk.success
         ? String(disk.content || '')
         : null
-      if (diskContent === null || diskContent === contentToSave) {
+      if (diskContent === contentToSave) {
         if (pendingToolWrite) clearPendingToolDocumentWrite(tab.id)
         clearRecentToolTargetTab(tab.id)
         return `文档未改动，已跳过保存：${targetPath}`

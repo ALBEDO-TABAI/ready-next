@@ -7,9 +7,11 @@
 //   document:mkdir   (create a directory recursively)
 //   document:rename  (rename a file or directory; refuses if target exists)
 //   document:delete  (move a file or directory tree into Ready trash)
+//   document:deletePermanent (permanently delete a file or directory tree)
 //   document:copy    (copy a file or directory tree)
 //   document:move    (move a file or directory; refuses if source missing or target exists)
-//   document:listTrash / document:restoreTrash (Ready trash listing/restore)
+//   document:listTrash / document:restoreTrash / document:deleteTrashItem /
+//   document:clearTrash (Ready trash management)
 //   document:stat    (read size/mtime/btime/isDirectory/extension)
 //
 // Handler bodies are lifted VERBATIM from `ipc-handler.ts` (V2.3c follows
@@ -47,11 +49,14 @@ const CHANNELS = [
   'document:mkdir',
   'document:rename',
   'document:delete',
+  'document:deletePermanent',
   'document:copy',
   'document:move',
   'document:stat',
   'document:listTrash',
   'document:restoreTrash',
+  'document:deleteTrashItem',
+  'document:clearTrash',
 ] as const
 
 export interface DocumentTrashEntry {
@@ -181,6 +186,17 @@ export const fileMutationGroup: IpcChannelGroup<FileMutationGroupDeps> = {
       }
     })
 
+    ipcMain.handle('document:deletePermanent', async (_, path: string) => {
+      try {
+        if (deps.useMock) return { success: true, mock: true }
+        if (!existsSync(path)) return { success: false, error: 'Not found' }
+        await rm(path, { recursive: true })
+        return { success: true }
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    })
+
     // Copy file/directory
     ipcMain.handle('document:copy', async (_, { src, dest }: { src: string; dest: string }) => {
       try {
@@ -280,6 +296,41 @@ export const fileMutationGroup: IpcChannelGroup<FileMutationGroupDeps> = {
           items: index.items.filter((item) => item.id !== id),
         })
         return { success: true, path: entry.originalPath, trashEntry: entry }
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    })
+
+    ipcMain.handle('document:deleteTrashItem', async (_, payload: { id?: string } | string) => {
+      try {
+        if (deps.useMock) return { success: true, mock: true }
+        const id = typeof payload === 'string' ? payload : payload?.id
+        if (!id) return { success: false, error: 'Missing trash item id' }
+        const trashRoot = deps.getDocumentTrashRoot()
+        const index = await readTrashIndex(trashRoot)
+        const entry = index.items.find((item) => item.id === id)
+        if (!entry) return { success: false, error: 'Trash item not found' }
+        await rm(entry.trashPath, { recursive: true, force: true })
+        await writeTrashIndex(trashRoot, {
+          items: index.items.filter((item) => item.id !== id),
+        })
+        return { success: true, trashEntry: entry }
+      } catch (error) {
+        return { success: false, error: error instanceof Error ? error.message : String(error) }
+      }
+    })
+
+    ipcMain.handle('document:clearTrash', async () => {
+      try {
+        if (deps.useMock) return { success: true, deleted: 0, mock: true }
+        const trashRoot = deps.getDocumentTrashRoot()
+        const index = await readTrashIndex(trashRoot)
+        const items = index.items.filter((item) => existsSync(item.trashPath))
+        for (const entry of items) {
+          await rm(entry.trashPath, { recursive: true, force: true })
+        }
+        await writeTrashIndex(trashRoot, { items: [] })
+        return { success: true, deleted: items.length }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }
       }
