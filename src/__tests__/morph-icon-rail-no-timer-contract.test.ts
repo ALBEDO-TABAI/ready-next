@@ -20,14 +20,11 @@ test('MorphIconRailGroup no longer drives thumb state through setTimeout chains'
   assert.match(source, /data-expanded=\{expanded \? 'true' : 'false'\}/)
 })
 
-test('workbench-sliders.css drives thumb visuals from :active and [data-expanded] rather than JS-set classes', () => {
+test('workbench-sliders.css only sinks the icon rail thumb when the side panel is collapsed', () => {
   const css = readWorkspaceFile('src/renderer/styles/workbench-sliders.css')
 
-  assert.match(
-    css,
-    /\.icon-rail-slider:has\(\.icon-rail-slider__button:active\) \.icon-rail-slider__thumb/,
-  )
   assert.match(css, /\.icon-rail-slider\[data-expanded='false'\] \.icon-rail-slider__thumb/)
+  assert.doesNotMatch(css, /\.icon-rail-slider:has\(\.icon-rail-slider__button:active\) \.icon-rail-slider__thumb/)
   assert.doesNotMatch(css, /\.icon-rail-slider__thumb\.is-pressing/)
   assert.doesNotMatch(css, /\.icon-rail-slider__thumb\.is-resting/)
   assert.doesNotMatch(css, /\.icon-rail-slider__thumb\.is-elevated/)
