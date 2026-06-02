@@ -157,20 +157,19 @@ export async function enrichBilibiliBrowserItems(items: ScrapedItem[]): Promise<
         : `https://api.bilibili.com/x/web-interface/view?aid=${encodeURIComponent(identity.aid || '')}`
 
       try {
-        const response = await fetch(apiUrl, {
-          headers: {
-            ...BROWSER_ACQUISITION_HEADERS,
-            Accept: 'application/json, text/plain, */*',
-          },
-        })
-        const payload = await response.json() as {
+        const payload = await fetchJsonWithTimeout<{
           code?: number
           data?: {
             desc?: string
             pubdate?: number
             stat?: { view?: number }
           }
-        }
+        }>(apiUrl, {
+          headers: {
+            ...BROWSER_ACQUISITION_HEADERS,
+            Accept: 'application/json, text/plain, */*',
+          },
+        })
         if (payload?.code !== 0 || !payload.data) return item
 
         const desc = clipText(payload.data.desc, 500)
@@ -197,6 +196,20 @@ const BROWSER_ACQUISITION_HEADERS: Record<string, string> = {
   Connection: 'keep-alive',
 }
 
+async function fetchJsonWithTimeout<T>(url: string, init: RequestInit, timeoutMs = 6_000): Promise<T> {
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const response = await fetch(url, {
+      ...init,
+      signal: controller.signal,
+    })
+    return await response.json() as T
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
 async function resolveFinalUrl(url: string, timeoutMs = 12_000): Promise<string> {
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), timeoutMs)
@@ -207,6 +220,7 @@ async function resolveFinalUrl(url: string, timeoutMs = 12_000): Promise<string>
       headers: BROWSER_ACQUISITION_HEADERS,
       signal: controller.signal,
     })
+    void response.body?.cancel().catch(() => undefined)
     return response.url || url
   } finally {
     clearTimeout(timer)
@@ -263,13 +277,12 @@ async function resolveBilibiliUserId(url: string): Promise<string | null> {
     ? `https://api.bilibili.com/x/web-interface/view?bvid=${encodeURIComponent(bvid)}`
     : `https://api.bilibili.com/x/web-interface/view?aid=${encodeURIComponent(aid || '')}`
   try {
-    const response = await fetch(apiUrl, {
+    const payload = await fetchJsonWithTimeout<{ data?: { owner?: { mid?: number | string } } }>(apiUrl, {
       headers: {
         ...BROWSER_ACQUISITION_HEADERS,
         Accept: 'application/json, text/plain, */*',
       },
     })
-    const payload = await response.json() as { data?: { owner?: { mid?: number | string } } }
     const mid = payload?.data?.owner?.mid
     return mid ? String(mid) : null
   } catch {

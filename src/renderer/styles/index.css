@@ -546,6 +546,21 @@ html[data-skin='liquid-glass'] .ready-app-shell {
   z-index: 2;
 }
 
+.settings-page-shell {
+  position: relative;
+  isolation: isolate;
+  background: transparent;
+}
+
+html[data-skin='liquid-glass'] [data-liquid-shell='settings-sidebar'],
+html[data-skin='liquid-glass'] [data-liquid-shell='settings-content'],
+html[data-skin='liquid-glass'] [data-liquid-scroll-root] {
+  contain: paint;
+  isolation: isolate;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
 .settings-ai-provider-tab {
   border-top-color: transparent !important;
 }

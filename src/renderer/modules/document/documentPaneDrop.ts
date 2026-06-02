@@ -71,6 +71,7 @@ function parseReadyPayload(raw: string): ReadyPayloadResult {
     if (!OPENABLE_DOCUMENT_PANE_EXTS.has(ext)) return { accepted: false }
     return { accepted: true, path: parsed.path }
   } catch {
+    // silent-catch: malformed drag payload is simply not accepted as a document drop.
     return { accepted: false }
   }
 }

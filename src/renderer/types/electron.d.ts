@@ -2758,6 +2758,7 @@ interface ElectronWindowAPI {
   minimize: () => Promise<void>
   maximize: () => Promise<void>
   close: () => Promise<void>
+  refreshTransparentSurface: () => Promise<void>
   /** macOS fullscreen lifecycle push from main; Stage 2 onwards 才有事件，Stage 1 是空订阅 */
   onFullscreenChanged: (listener: (isFullscreen: boolean) => void) => () => void
 }

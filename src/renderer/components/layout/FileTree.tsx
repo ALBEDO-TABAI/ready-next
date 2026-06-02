@@ -2291,6 +2291,7 @@ export default function FileTree({
   return (
     <div
       ref={treeRootRef}
+      data-liquid-scroll-root="file-tree"
       className="panel-hover-scrollbar flex-1 overflow-auto relative"
       style={{ padding: '6px 8px' }}
       onDragOver={handleDragOver}

@@ -6,12 +6,10 @@ import { AskUserQuestionsCard } from './AskUserQuestionsCard'
 import { submitAskUserQuestionsAnswers, cancelAskUserQuestionsCard } from '../../stores/useAgent'
 
 // The session-tab strip + chat header overflow ~24px into the top of this
-// scroll region (MotionLayer's header row is a fixed 44px). Fade the content
-// to transparent there so messages slip under the header chrome instead of
-// colliding with the channel label / history+new icons; the matching top
-// padding parks the first message just below the fade when scrolled to top.
+// scroll region (MotionLayer's header row is a fixed 44px). The top padding
+// parks the first message below that chrome without using mask-image, which is
+// unstable with transparent vibrancy windows on Chromium 148.
 const CHAT_SCROLL_TOP_FADE = 38
-const CHAT_SCROLL_TOP_MASK = `linear-gradient(to bottom, transparent 0px, transparent 14px, rgba(0,0,0,1) ${CHAT_SCROLL_TOP_FADE}px)`
 
 interface ChatMessagesProps {
   messages: AgentMessage[]
@@ -88,11 +86,10 @@ export default function ChatMessages({
 
   return (
     <div
+      data-liquid-scroll-root="chat-messages"
       className="panel-hover-scrollbar flex-1 overflow-auto"
       style={{
         padding: `${CHAT_SCROLL_TOP_FADE}px 16px 16px`,
-        WebkitMaskImage: CHAT_SCROLL_TOP_MASK,
-        maskImage: CHAT_SCROLL_TOP_MASK,
         display: 'flex',
         flexDirection: 'column',
         gap: 14,

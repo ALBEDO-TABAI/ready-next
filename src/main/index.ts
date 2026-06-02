@@ -193,6 +193,7 @@ function resolveNativeFileDragIcon(): NativeImage {
 function ensureDockIconVisible(): void {
   if (process.platform !== 'darwin') return
   ensureRegularDockApp()
+  if (!app.dock) return
   void app.dock.show().catch((error) => {
     console.warn('[app] Failed to show dock icon:', error instanceof Error ? error.message : String(error))
   })
@@ -203,7 +204,7 @@ function applyAppIcon(): void {
   const icon = nativeImage.createFromPath(resolveAppIconPath())
   if (icon.isEmpty()) return
 
-  if (process.platform === 'darwin') {
+  if (process.platform === 'darwin' && app.dock) {
     app.dock.setIcon(icon)
   }
 }
@@ -339,6 +340,51 @@ async function showMainWindow(): Promise<void> {
   mainWindow.focus()
 }
 
+const MAIN_WINDOW_RENDERER_RETRY_DELAY_MS = 500
+const TRANSPARENT_SURFACE_REFRESH_DELAY_MS = 50
+let transparentSurfaceRefreshInFlight = false
+
+async function refreshMainWindowTransparentSurface(): Promise<void> {
+  const window = mainWindow
+  if (!window || window.isDestroyed()) return
+  if (transparentSurfaceRefreshInFlight) return
+
+  if (window.isFullScreen() || window.isMaximized() || window.isMinimized()) {
+    if (process.platform === 'darwin') window.invalidateShadow()
+    return
+  }
+
+  transparentSurfaceRefreshInFlight = true
+  const bounds = window.getBounds()
+  try {
+    window.setBounds({ ...bounds, width: bounds.width + 1 }, false)
+    await new Promise((resolve) => setTimeout(resolve, TRANSPARENT_SURFACE_REFRESH_DELAY_MS))
+    if (window.isDestroyed()) return
+    window.setBounds(bounds, false)
+    if (process.platform === 'darwin') window.invalidateShadow()
+  } finally {
+    transparentSurfaceRefreshInFlight = false
+  }
+}
+
+async function loadMainWindowRenderer(window: BrowserWindow): Promise<void> {
+  const devRendererUrl = is.dev ? process.env['ELECTRON_RENDERER_URL'] : undefined
+  if (devRendererUrl) {
+    try {
+      await window.loadURL(devRendererUrl)
+      return
+    } catch (error) {
+      console.warn('[main-window] renderer load failed; retrying once:', error instanceof Error ? error.message : String(error))
+      await new Promise((resolve) => setTimeout(resolve, MAIN_WINDOW_RENDERER_RETRY_DELAY_MS))
+      if (window.isDestroyed()) return
+      await window.loadURL(devRendererUrl)
+      return
+    }
+  }
+
+  await window.loadFile(join(__dirname, '../renderer/index.html'))
+}
+
 async function createWindow(): Promise<void> {
   nativeTheme.themeSource = resolveStoredThemeSource()
   ensureDockIconVisible()
@@ -407,6 +453,9 @@ async function createWindow(): Promise<void> {
   mainWindow.on('ready-to-show', () => {
     mainWindow?.webContents.setZoomFactor(1)
     mainWindow?.show()
+    setTimeout(() => {
+      void refreshMainWindowTransparentSurface()
+    }, TRANSPARENT_SURFACE_REFRESH_DELAY_MS)
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -429,11 +478,9 @@ async function createWindow(): Promise<void> {
   }
   // HMR for renderer base on electron-vite cli.
   // Load the remote URL for development or the local html file for production.
-  if (is.dev && process.env['ELECTRON_RENDERER_URL']) {
-    void mainWindow.loadURL(process.env['ELECTRON_RENDERER_URL'])
-  } else {
-    void mainWindow.loadFile(join(__dirname, '../renderer/index.html'))
-  }
+  void loadMainWindowRenderer(mainWindow).catch((error) => {
+    console.error('[main-window] renderer load failed:', error instanceof Error ? error.message : String(error))
+  })
 
   // Auto-updater — only in production builds
   if (app.isPackaged) {
@@ -563,6 +610,7 @@ function setupGlobalIPC(): void {
   ipcMain.handle('window:close', () => {
     mainWindow?.close()
   })
+  ipcMain.handle('window:refreshTransparentSurface', () => refreshMainWindowTransparentSurface())
 
   ipcMain.on('app:startNativeFileDrag', (event, paths: unknown) => {
     try {

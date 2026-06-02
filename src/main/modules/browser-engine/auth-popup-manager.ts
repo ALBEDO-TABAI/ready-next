@@ -1,5 +1,6 @@
 import { BrowserWindow, shell, WebContents } from 'electron'
 import { decidePopupPolicy, type PopupRequestContext } from './popup-policy'
+import { withHtmlInCanvasWebPreferences } from '../app-control/html-in-canvas-feature'
 
 type OpenInTabHandler = (url: string) => void
 type Logger = (message: string) => void
@@ -37,14 +38,14 @@ export class AuthPopupManager {
       autoHideMenuBar: true,
       parent: this.mainWindow,
       titleBarStyle: 'default',
-      webPreferences: {
+      webPreferences: withHtmlInCanvasWebPreferences({
         sandbox: false,
         contextIsolation: true,
         nodeIntegration: false,
         partition: 'persist:browser',
         webSecurity: true,
         spellcheck: true,
-      },
+      }),
     }
   }
 

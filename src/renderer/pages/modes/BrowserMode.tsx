@@ -841,7 +841,9 @@ export default function BrowserMode({
       }
       if (cancelled) return
       if (presentationPlan.action === 'sync-bounds') {
-        await sendBoundsImmediate({ forceExact: true })
+        await syncBrowserVisibility('visible', { forceExact: true })
+        if (cancelled) return
+        hostPresentedRef.current = true
         return
       }
       await syncBrowserVisibility('visible', { forceExact: true })

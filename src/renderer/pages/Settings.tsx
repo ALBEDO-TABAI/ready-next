@@ -8,6 +8,7 @@ import {
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useTheme, type ThemeAccent, type ThemeSkin } from '../stores/useTheme'
 import { resolveAIConfigCapabilities, getActiveAIProfile } from '../../shared/ai-providers'
+import { nextIntentId } from '../../shared/browser-view-intent'
 import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runtime'
 import { listSettingsCapabilityGroups, type CapabilityGroupId } from '../../shared/ai-capability-groups'
 import { useSettings, getProviderDef } from '../stores/useSettings'
@@ -2779,8 +2780,17 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
   const [activeSection, setActiveSection] = useState(initialSection || routeSection || 'account')
   const [settings, setSettings] = useState(settingsData)
   const { theme, setTheme, skin, setSkin, accent, setAccent } = useTheme()
+  const didMountRef = useRef(false)
 
   const currentSection = settings.find(s => s.id === activeSection)
+
+  useEffect(() => {
+    window.electronAPI?.browser?.sendIntent({
+      kind: 'hide-all',
+      intentId: nextIntentId(),
+      reason: 'overlay-open',
+    })
+  }, [])
 
   useEffect(() => {
     const nextSection = initialSection || routeSection
@@ -2790,6 +2800,20 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
       setActiveSection(nextSection)
     }
   }, [initialSection, routeSection])
+
+  useEffect(() => {
+    if (!didMountRef.current) {
+      didMountRef.current = true
+      return
+    }
+    const refresh = window.electronAPI?.window?.refreshTransparentSurface
+    if (!refresh) return
+
+    const frameId = window.requestAnimationFrame(() => {
+      void refresh()
+    })
+    return () => window.cancelAnimationFrame(frameId)
+  }, [activeSection])
 
   const updateSetting = (sectionId: string, settingId: string, value: boolean | string) => {
     setSettings(settings.map(section =>
@@ -2814,7 +2838,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
     : false
 
   return (
-    <div className="flex h-full flex-col overflow-hidden" style={{ background: 'transparent' }}>
+    <div className="settings-page-shell flex h-full flex-col overflow-hidden">
       {/* Header — macOS traffic light clearance with paddingLeft: 72 */}
       <div
         data-liquid-shell="settings-header"
@@ -2904,7 +2928,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
             <div className="flex items-center gap-2 px-1">
               <HardDrive className="w-3 h-3" style={{ color: 'var(--text-light)' }} />
               <span className="text-[10px]" style={{ color: 'var(--text-light)' }}>
-                Ready v0.1.0 · Electron 34
+                Ready v0.1.0 · Electron 42
               </span>
             </div>
           </div>
@@ -2913,9 +2937,9 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
         {/* Settings Content Panel */}
         <div className="flex-1 min-w-0 overflow-hidden">
           <div
+            key={currentSection?.id || 'unknown'}
             data-liquid-shell="settings-content"
             className="h-full overflow-auto"
-            style={{ background: 'transparent' }}
           >
           <div className="w-full max-w-[1040px] mx-auto" style={{ padding: '30px 34px 64px' }}>
                 {currentSection && (

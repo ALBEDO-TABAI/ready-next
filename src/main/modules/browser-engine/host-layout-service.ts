@@ -1,6 +1,7 @@
 import { BrowserView, BrowserWindow, WebContentsView } from 'electron'
 
 import { type BrowserBoundsSyncMode, type BrowserHostKind, type BrowserHostView, type BrowserRect } from './host-types'
+import { withHtmlInCanvasWebPreferences } from '../app-control/html-in-canvas-feature'
 
 const HOST_BORDER_RADIUS = 18
 
@@ -24,13 +25,13 @@ export class BrowserHostLayoutService {
 
   createHost(partition: string): BrowserHostView {
     const options = {
-      webPreferences: {
+      webPreferences: withHtmlInCanvasWebPreferences({
         nodeIntegration: false,
         contextIsolation: true,
         partition,
         spellcheck: true,
         webSecurity: true,
-      },
+      }),
     }
     const view = this.browserHostKind === 'webContentsView'
       ? new WebContentsView(options)

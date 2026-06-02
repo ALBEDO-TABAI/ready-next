@@ -62,6 +62,7 @@ import { BrowserTabShellService } from './tab-shell-service'
 import { BrowserTaskPersistenceService } from './task-persistence-service'
 import { BrowserUtilityMenuService } from './utility-menu-service'
 import { BrowserWindowOpenService } from './window-open-service'
+import { withHtmlInCanvasWebPreferences } from '../app-control/html-in-canvas-feature'
 import {
   isAllowedBrowserURL,
   toOAuthCompatibleUserAgent,
@@ -962,14 +963,14 @@ export class BrowserController {
       paintWhenInitiallyHidden: true,
       autoHideMenuBar: true,
       backgroundColor: '#ffffff',
-      webPreferences: {
+      webPreferences: withHtmlInCanvasWebPreferences({
         partition: 'persist:browser',
         nodeIntegration: false,
         contextIsolation: true,
         spellcheck: true,
         webSecurity: true,
         backgroundThrottling: false,
-      },
+      }),
     })
     probeWindow.setMenuBarVisibility(false)
     probeWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))

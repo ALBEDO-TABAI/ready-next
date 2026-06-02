@@ -1235,6 +1235,7 @@ export const useAgent = create<AgentState>((set, get) => ({
         personalities = result.data
       }
     } catch {
+      // silent-catch: agent personalities are optional; fall back to built-in agents if the bridge is unavailable.
       personalities = []
     }
 

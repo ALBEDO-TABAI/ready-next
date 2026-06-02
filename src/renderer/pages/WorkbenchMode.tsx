@@ -29,6 +29,7 @@ const MAX_SIDE_PANEL_WIDTH = 420
 const MIN_CHAT_PANEL_WIDTH = 280
 const MAX_CHAT_PANEL_WIDTH = 600
 const INSTANT_PANEL_TOGGLE_SETTLE_MS = 80
+const TRANSPARENT_SURFACE_REFRESH_DELAYS_MS = [240, 900] as const
 
 function clampWorkbenchSidePanelWidth(width: number): number {
   if (!Number.isFinite(width)) return MIN_SIDE_PANEL_WIDTH
@@ -153,6 +154,20 @@ export default function WorkbenchMode() {
   useEffect(() => {
     transitionTargetModeRef.current = workbenchMode
   }, [workbenchMode])
+
+  useEffect(() => {
+    const refresh = window.electronAPI?.window?.refreshTransparentSurface
+    if (!refresh) return
+
+    const timers = TRANSPARENT_SURFACE_REFRESH_DELAYS_MS.map((delay) => (
+      window.setTimeout(() => {
+        void refresh()
+      }, delay)
+    ))
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer))
+    }
+  }, [])
 
   useEffect(() => {
     const nextWidth = clampWorkbenchSidePanelWidth(sidePanelWidths.shared)

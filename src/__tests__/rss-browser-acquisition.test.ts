@@ -87,29 +87,41 @@ describe('RSS browser acquisition', () => {
   })
 
   it('accepts bilibili video links returned by browser capture', async () => {
-    const controller = {
-      captureBackgroundPage: async () => ({
-        title: 'UP主空间',
-        finalUrl: 'https://space.bilibili.com/39627524/upload/video',
-        items: [
-          {
-            title: '最新视频',
-            link: 'https://www.bilibili.com/video/BV1fr421M7y7',
-            description: '视频简介',
-          },
-        ],
-      }),
+    const originalFetch = globalThis.fetch
+    let capturedSignal: AbortSignal | undefined
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      capturedSignal = init?.signal as AbortSignal | undefined
+      throw new Error('network disabled for test')
+    }) as typeof fetch
+
+    try {
+      const controller = {
+        captureBackgroundPage: async () => ({
+          title: 'UP主空间',
+          finalUrl: 'https://space.bilibili.com/39627524/upload/video',
+          items: [
+            {
+              title: '最新视频',
+              link: 'https://www.bilibili.com/video/BV1fr421M7y7',
+              description: '视频简介',
+            },
+          ],
+        }),
+      }
+
+      const result = await fetchFeedViaBrowserSession(
+        controller as any,
+        'bilibili' as any,
+        'https://space.bilibili.com/39627524/upload/video',
+      )
+
+      assert.equal(result.items.length, 1)
+      assert.equal(result.items[0]?.link, 'https://www.bilibili.com/video/BV1fr421M7y7')
+      assert.equal(result.error, undefined)
+      assert.ok(capturedSignal instanceof AbortSignal)
+    } finally {
+      globalThis.fetch = originalFetch
     }
-
-    const result = await fetchFeedViaBrowserSession(
-      controller as any,
-      'bilibili' as any,
-      'https://space.bilibili.com/39627524/upload/video',
-    )
-
-    assert.equal(result.items.length, 1)
-    assert.equal(result.items[0]?.link, 'https://www.bilibili.com/video/BV1fr421M7y7')
-    assert.equal(result.error, undefined)
   })
 
   it('enriches bilibili browser items with view count and exact publish time', async () => {
@@ -296,25 +308,35 @@ describe('RSS browser acquisition', () => {
   })
 
   it('normalizes browser acquisition URLs into canonical profile routes', async () => {
-    const douyin = await normalizeBrowserAcquisitionUrl(
-      'douyin',
-      'https://www.iesdouyin.com/share/user/demo?sec_uid=MS4wLjABAAAATEST',
-    )
-    const xiaohongshu = await normalizeBrowserAcquisitionUrl(
-      'xiaohongshu',
-      'https://www.xiaohongshu.com/user/profile/5b6af7459e8ccb000181bd60?foo=bar',
-    )
-    const weibo = await normalizeBrowserAcquisitionUrl(
-      'weibo',
-      'https://m.weibo.cn/profile/6182606334',
-    )
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = (async () => ({
+      url: 'https://weibo.com/u/6182606334',
+      body: { cancel: async () => undefined },
+    })) as typeof fetch
 
-    assert.equal(
-      douyin,
-      'https://www.iesdouyin.com/share/user/demo?sec_uid=MS4wLjABAAAATEST',
-    )
-    assert.equal(xiaohongshu, 'https://www.xiaohongshu.com/user/profile/5b6af7459e8ccb000181bd60')
-    assert.equal(weibo, 'https://weibo.com/u/6182606334')
+    try {
+      const douyin = await normalizeBrowserAcquisitionUrl(
+        'douyin',
+        'https://www.iesdouyin.com/share/user/demo?sec_uid=MS4wLjABAAAATEST',
+      )
+      const xiaohongshu = await normalizeBrowserAcquisitionUrl(
+        'xiaohongshu',
+        'https://www.xiaohongshu.com/user/profile/5b6af7459e8ccb000181bd60?foo=bar',
+      )
+      const weibo = await normalizeBrowserAcquisitionUrl(
+        'weibo',
+        'https://m.weibo.cn/profile/6182606334',
+      )
+
+      assert.equal(
+        douyin,
+        'https://www.iesdouyin.com/share/user/demo?sec_uid=MS4wLjABAAAATEST',
+      )
+      assert.equal(xiaohongshu, 'https://www.xiaohongshu.com/user/profile/5b6af7459e8ccb000181bd60')
+      assert.equal(weibo, 'https://weibo.com/u/6182606334')
+    } finally {
+      globalThis.fetch = originalFetch
+    }
   })
 
   it('compiles the xiaohongshu browser extraction script', () => {

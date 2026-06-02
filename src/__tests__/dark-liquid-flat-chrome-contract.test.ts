@@ -39,6 +39,7 @@ test('the four-mode switch track kills the old top sheen through shared dark liq
   const themeStyles = readWorkspaceFile('src/renderer/styles/index.css')
   const styles = readWorkspaceFile('src/renderer/styles/workbench-sliders.css')
 
+  assert.doesNotMatch(themeStyles, /--lg-surface-elevated\s*:/)
   assert.match(
     styles,
     /\.draggable-mode-tabs::before\s*\{[\s\S]*?background:\s*var\(--workbench-rail-slot-overlay\)/,
@@ -48,7 +49,27 @@ test('the four-mode switch track kills the old top sheen through shared dark liq
     /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-overlay:\s*none;/,
   )
   assert.match(
+    themeStyles,
+    /html\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-bg:\s*color-mix\(in srgb, var\(--surface-panel-bg\) 92%, rgba\(150, 160, 180, 0\.12\)\);/,
+  )
+  assert.match(
+    themeStyles,
+    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-bg:\s*color-mix\(in srgb, var\(--bg-toolbar\) 78%, transparent\);/,
+  )
+  assert.match(
     styles,
     /\.icon-rail-slider__track\s*\{[\s\S]*?background:\s*var\(--workbench-rail-slot-overlay\)/,
+  )
+  assert.match(
+    styles,
+    /html\[data-skin='liquid-glass'\] \.icon-rail-slider\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--lg-surface-elevated\) 85%, rgba\(150, 160, 180, 0\.18\)\);[\s\S]*?backdrop-filter:\s*blur\(calc\(var\(--lg-blur-soft\) \* 0\.25\)\) saturate\(calc\(var\(--surface-saturate\) - 8%\)\);/,
+  )
+  assert.match(
+    themeStyles,
+    /html\[data-skin='liquid-glass'\] \.draggable-mode-tabs\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--lg-surface-elevated\) 85%, rgba\(150, 160, 180, 0\.18\)\);[\s\S]*?backdrop-filter:\s*blur\(calc\(var\(--lg-blur-soft\) \* 0\.25\)\) saturate\(calc\(var\(--surface-saturate\) - 8%\)\);/,
+  )
+  assert.match(
+    styles,
+    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.icon-rail-slider,[\s\S]*?html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.draggable-mode-tabs\s*\{[\s\S]*?backdrop-filter:\s*blur\(calc\(var\(--lg-blur-soft\) \* 0\.18\)\) saturate\(calc\(var\(--surface-saturate\) - 20%\)\);/,
   )
 })

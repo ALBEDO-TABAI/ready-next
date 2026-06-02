@@ -60,7 +60,8 @@ test('browser startup gates chrome until host restoration completes and main pro
   assert.match(browserMode, /useEffect\(\(\) => \{[\s\S]*if \(!isElectron\) return[\s\S]*if \(!shouldPresentBrowserHost \|\| !shouldRevealBrowserHost\) return/)
   assert.match(browserMode, /const presentationPlan = planBrowserHostPresentation\(\{[\s\S]*hostAlreadyPresented: hostPresentedRef\.current/)
   assert.match(browserMode, /if \(presentationPlan\.action === 'hide'\) \{[\s\S]*await syncBrowserVisibility\('hidden'\)/)
-  assert.match(browserMode, /await fitBrowserTabIfNeeded\(presentationPlan\.fitActiveTabId\)[\s\S]*if \(presentationPlan\.action === 'sync-bounds'\) \{[\s\S]*await sendBoundsImmediate\(\{ forceExact: true \}\)[\s\S]*await syncBrowserVisibility\('visible', \{ forceExact: true \}\)/)
+  assert.match(browserMode, /await fitBrowserTabIfNeeded\(presentationPlan\.fitActiveTabId\)[\s\S]*if \(presentationPlan\.action === 'sync-bounds'\) \{[\s\S]*await syncBrowserVisibility\('visible', \{ forceExact: true \}\)[\s\S]*hostPresentedRef\.current = true[\s\S]*return/)
+  assert.doesNotMatch(browserMode, /if \(presentationPlan\.action === 'sync-bounds'\) \{\s*await sendBoundsImmediate\(\{ forceExact: true \}\)\s*return\s*\}/)
   assert.match(browserMode, /await fitBrowserTabIfNeeded\(activeTabId\)/)
   // Trailing resync is now driven reactively by layoutPhase === 'idle' instead of a 180ms setTimeout chain.
   assert.doesNotMatch(browserMode, /startupHostResyncTimerRef/)
@@ -95,6 +96,11 @@ test('browser startup gates chrome until host restoration completes and main pro
   assert.doesNotMatch(mainIndex, /flushWindowReveal/)
   assert.doesNotMatch(mainIndex, /rendererReadyToShow/)
   assert.match(mainIndex, /nativeTheme\.themeSource = resolveStoredThemeSource\(\)/)
+  assert.match(mainIndex, /const MAIN_WINDOW_RENDERER_RETRY_DELAY_MS = 500/)
+  assert.match(mainIndex, /async function loadMainWindowRenderer\(window: BrowserWindow\): Promise<void>/)
+  assert.match(mainIndex, /await window\.loadURL\(devRendererUrl\)[\s\S]*renderer load failed; retrying once/)
+  assert.match(mainIndex, /void loadMainWindowRenderer\(mainWindow\)\.catch/)
+  assert.doesNotMatch(mainIndex, /void mainWindow\.loadURL\(process\.env\['ELECTRON_RENDERER_URL'\]\)/)
   assert.match(mainIndex, /getDatabase\(\)\.setSetting\(THEME_SETTING_KEY, nextTheme\)/)
   // Theme transitions are now orchestrated by the shared ritual overlay; see theme-ritual-orchestration-contract.test.ts.
   // Legacy data-theme-transitioning attribute is fully removed (store no longer defines or touches it).

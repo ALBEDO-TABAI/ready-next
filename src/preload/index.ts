@@ -919,6 +919,7 @@ const windowAPI = {
   minimize: () => ipcRenderer.invoke('window:minimize'),
   maximize: () => ipcRenderer.invoke('window:maximize'),
   close: () => ipcRenderer.invoke('window:close'),
+  refreshTransparentSurface: () => ipcRenderer.invoke('window:refreshTransparentSurface'),
   /**
    * 订阅主进程的 `window:fullscreen-changed` push。Stage 2 起会从 will-enter/leave-full-screen
    * lifecycle handlers 推送；Stage 1 阶段没有推送源，订阅了也不会收到事件，但订阅链路本身有效，
