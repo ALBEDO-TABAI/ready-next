@@ -1864,6 +1864,21 @@ body.resizing .workbench-split-resize-handle__grip {
   background: transparent;
 }
 
+.browser-split-resize-handle::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    180deg,
+    var(--workbench-liquid-chrome-bg, var(--surface-panel-bg)) 0,
+    var(--workbench-liquid-chrome-bg, var(--surface-panel-bg)) var(--workbench-canvas-radius),
+    color-mix(in srgb, var(--workbench-liquid-chrome-bg, var(--surface-panel-bg)) 74%, transparent) 42%,
+    transparent calc(100% - var(--workbench-canvas-radius)),
+    transparent 100%
+  );
+}
+
 .browser-split-resize-handle__grip {
   position: absolute;
   top: 50%;
@@ -1875,6 +1890,7 @@ body.resizing .workbench-split-resize-handle__grip {
   background: color-mix(in srgb, var(--text-gray) 56%, transparent);
   border-radius: 999px;
   transition: opacity 0.15s;
+  display: none;
 }
 
 .browser-split-resize-handle:hover,
@@ -1884,7 +1900,7 @@ body.resizing .browser-split-resize-handle {
 
 .browser-split-resize-handle:hover .browser-split-resize-handle__grip,
 body.resizing .browser-split-resize-handle__grip {
-  opacity: 0.58;
+  opacity: 0;
 }
 
 .browser-fastcard-drawer {
