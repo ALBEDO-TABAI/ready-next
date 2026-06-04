@@ -306,3 +306,33 @@ Matrix 的 agent 浏览器是**独立隐藏进程**（browser-v2，visibility se
 ### Round 3（2026-06-04，Codex 终审 → AGREE）
 
 4 条修复逐条 PASS，无新阻塞。Codex 结论："无补充，达成一致，可以开始开发。" 实现期需用测试钉住 url 形态旧绕路（extract_structured(url)/scroll_collect(url)/visible_collect(url)）——facade 拒 url、navigate(agentTabId)-first。计划评审循环结束，进入开发。
+
+## 11. 实施记录（Claude，2026-06-05，待 Codex 结果评审）
+
+### 11.1 关键架构偏离（需 Codex 审）：执行层走 content-task-runner，不走 SkillChildDriver child-run
+
+计划 §3.3/§3.4/WP3 规定子 agent 是 `SkillChildDriver` child-run，action 经 ScopedBrowserFacade。实现时**改为把"执行"挂到现有 `BrowserContentTaskRunner` 的新 `note_collect` 后台任务**，理由：
+
+- **§1.1/§3.8 的 preempt 根因在 child-run 本身**（`skill-child-runner.ts:1358` linkParentAbort）。`content-task-runner` 的后台任务**天然不绑 chat-turn abort**（`activeRuns` map，SQLite 持久化，与 visible_collect 同机制），直接满足"不被 preempt"，无需新写 §3.8 的后台 abort 策略，规避了 §3.4 evidence 指出的最大风险点（gateway 不给 child 传 browserController）。
+- **执行是确定性的**：主 agent 产出 `CollectionPlan`（判断题），引擎跑 `planNextNote → collectNote → recordNoteResult`（状态机）。不需要 child 内再开 LLM 循环 → 对齐"模型只做判断题"原则。
+- content-task-runner 已有 start/checkpoint/resume/cancel + 自持租约 + lease-loss 检测（proven by visible_collect）。
+- **三道硬边界仍由 ScopedBrowserFacade + AgentTabControlGate + agent-view lease 保住**：`note_collect` 经注入的 CollectorFacadeFactory 拿到绑定 agentTabId/agent-view/leaseId/子集/control-gate 的 facade（executeBrowserTool 懒加载避免静态环）。url 形态旧绕路由 facade 拒绝（scoped-browser-facade.test.ts 已钉）。
+
+代价：放弃了 child-run 的 24-action 分段（§3.10）与"子 agent 即 LLM 循环"的形态；进度也未走 TaskProjection（content-task 不投影到 renderer），改为 supervision 面板**轮询** `browser:getAgentSupervisionState`。请 Codex 判断该偏离是否可接受，或是否必须回到 child-run。
+
+### 11.2 已落地（6 commit，typecheck 绿，全量 4786 pass / 2 known liquid-glass fail）
+
+- **WP0/WP2 合同**：`agent-collection-plan`（CollectionPlan Zod + 逐篇 loop）、`ScopedBrowserFacade`（子集/freeze/url 拒绝/定向）、`AgentTabControlGate`（active/pending_confirm/frozen，独立于 lease）、navigate/search 补 tab_id + 定向、extractStructured sourceUrl 从 agentTabId 取。
+- **执行核心**：`collectNote`（单篇 navigate→collect_images→cookie-aware download）、`runBrowserCollection`（确定性 loop，可从 checkpoint 续跑，shouldStop 探针）、`note_collect`（自持 agent-view 租约 + 引擎 + 每篇 checkpoint，停于 cancel/freeze='cancelled'/takeover='lease_lost'）。
+- **曝光**：`browser_collect_notes` 工具（schema/catalog/写分类 ALWAYS_WRITE/采集子集）。
+- **解耦**：`ensureAgentTab`（建 owner:'agent' 后台标签页 + 还原用户 active tab）。
+- **监督 UI**：agent 标签页发光（TabRail）、`AgentBrowserSupervisionPanel`（嵌套子 agent 卡 + 二级确认中断）、supervision IPC 桥。
+- **WP5**：高风控限量（≤60 篇/≤20min）+ 逐篇 1.5s 限速。
+- **测试**：collectNote(5)、engine(6 含 pacing/resume/stop)、note_collect runner(6 含 lease/freeze/takeover)、collect_notes dispatch(2)、控制门(7)、facade(6)。
+
+### 11.3 待实测（dev app 验证项）
+
+- agent 标签页是否真不抢前台（ensureAgentTab 还原 active tab 的实际效果）。
+- supervision 面板在 native BrowserView 上的可见性/定位（与 BrowserDiagnosticsDock 同框，待确认是否被遮挡或需 hideAll）。
+- freeze → 引擎下一篇 shouldStop 命中的实际时延。
+- 登录态下对真实小红书主页逐篇采集的端到端跑通。
