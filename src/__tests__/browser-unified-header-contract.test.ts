@@ -122,7 +122,9 @@ test('inactive tabs get the same hover hint affordance without entering the acti
   assert.match(tabRail, /onMouseEnter=\{\(\) => setHoveredTabId\(tab\.id\)\}/)
   assert.match(tabRail, /onMouseLeave=\{\(\) => setHoveredTabId\(\(current\) => current === tab\.id \? null : current\)\}/)
   assert.match(tabRail, /borderColor: isDragOver\s*\? 'var\(--color-blue\)'\s*:\s*isHovered/)
-  assert.match(tabRail, /boxShadow: isHovered/)
+  // Agent-owned tabs glow (plan §3.6); non-agent tabs keep the hover-hint box shadow.
+  assert.match(tabRail, /boxShadow: tab\.owner === 'agent'/)
+  assert.match(tabRail, /: isHovered\s*\?\s*'0 0 0 1px color-mix\(in srgb, var\(--color-blue\) 18%/)
 })
 
 test('browser shell layout adds corner fillers so the header chrome visually meets the page surface', () => {
