@@ -102,6 +102,7 @@ import { resolveCapabilityResolution } from '../domain-adapters/capability-resol
 import {
   resolveBrowserCollectionIntent,
   isBrowserCollectionSubsetTool,
+  stepCollectionIntentTtl,
 } from '../../../../shared/browser-collection-intent'
 import { createBrowserTurnLease } from '../../browser-engine/agent-browser-turn-lease'
 import { filterToolsByVisionCapability } from '../tools-runtime/tool-gateway'
@@ -295,6 +296,7 @@ export interface AgentSdkRuntimeDeps {
     browserHostAvailable: boolean
     feishuConnected: boolean
     authorization: SkillToolAuthorization
+    recentCollectionIntent?: boolean
   }) => ToolDefinition[]
   executeToolCall?: (
     toolName: string,
@@ -348,6 +350,20 @@ function allowedPrimitiveToolsForSdkSkillTurn(): string[] {
   return PRIMITIVE_TOOL_DEFS
     .map((definition) => definition.name)
     .filter((name) => safeSkillPrimitives.has(name))
+}
+
+/**
+ * Whether THIS message expresses browser collection intent. Two signals:
+ *   - the "### 浏览页面引用" marker — the user attached a browser-page reference,
+ *     a legitimate signal that primaryInstructionText would otherwise strip;
+ *   - the collection-intent predicate over the PRIMARY instruction text only —
+ *     NOT the full text, so platform words inside context markers (环境信息 /
+ *     最近会话摘要 / scope, which primaryInstructionText cuts) cannot falsely
+ *     trigger exposure (Codex: over-exposure fix).
+ */
+function messageHasBrowserCollectionIntent(message: RunMessage): boolean {
+  if (messageToText(message).includes('### 浏览页面引用')) return true
+  return resolveBrowserCollectionIntent(primaryInstructionText(message))
 }
 
 function primaryInstructionText(message: RunMessage): string {
@@ -2583,6 +2599,35 @@ export class AgentSdkRuntime extends EventEmitter {
     this.cancelPendingToolActions = canceller
   }
 
+  /**
+   * Per-session browser-collection-intent TTL (continuity). Synchronous — never
+   * adds an `await` to the run() hot path. Awaiting session history here used to
+   * create a window where a preempting run could abort the controller before
+   * runAgent attached its abort listener (missed abort → hang); a sync TTL map
+   * avoids that ordering hazard entirely.
+   *
+   * When a turn's message expresses collection intent, the surface stays exposed
+   * for the next few turns so a bare follow-up ("再试一次") keeps the browser
+   * tools available, then decays.
+   */
+  private readonly collectionIntentTtl = new Map<string, number>()
+  private static readonly COLLECTION_INTENT_TTL_TURNS = 6
+
+  /** Update the TTL for THIS turn and return whether a recent turn (incl. now) had intent. */
+  private trackCollectionIntent(sessionId: string | undefined, currentMessageHasIntent: boolean): boolean {
+    const sid = sessionId || ''
+    if (!sid) return currentMessageHasIntent
+    const prior = this.collectionIntentTtl.get(sid) ?? 0
+    const { recent, nextTtl } = stepCollectionIntentTtl(
+      prior,
+      currentMessageHasIntent,
+      AgentSdkRuntime.COLLECTION_INTENT_TTL_TURNS,
+    )
+    if (nextTtl > 0) this.collectionIntentTtl.set(sid, nextTtl)
+    else this.collectionIntentTtl.delete(sid)
+    return recent
+  }
+
   private listDefaultToolDefinitionsForTurn(params: {
     message: RunMessage
     sessionId?: string
@@ -2591,17 +2636,23 @@ export class AgentSdkRuntime extends EventEmitter {
     browserHostAvailable: boolean
     feishuConnected: boolean
     authorization: SkillToolAuthorization
+    /** Continuity: a recent turn in this session expressed collection intent. */
+    recentCollectionIntent?: boolean
   }): ToolDefinition[] {
     const browserDecisionMode = resolveBrowserDecisionMode(params.message, params.browserHostAvailable)
     // WP1: decouple browser collection exposure from the deterministic workflow
-    // decision. When the turn expresses collection/download intent on a web/
-    // platform surface (and the decision mode is NOT already a browser workflow),
-    // expose the browser groups via intentGroupModes WITHOUT changing the
-    // decision mode, then narrow to the collection subset below.
+    // decision. Expose the browser groups (via intentGroupModes, WITHOUT changing
+    // the decision mode) when this turn — or a recent turn — shows browser
+    // collection intent. messageHasBrowserCollectionIntent uses the "### 浏览页面
+    // 引用" reference marker plus the predicate over the PRIMARY instruction text
+    // (not the full text, so context markers don't over-trigger); recentCollection
+    // Intent carries the TTL continuity so a bare follow-up ("再试一次") stays
+    // exposed.
     const collectionExposure =
       params.browserHostAvailable &&
       browserDecisionMode === 'free_tool_loop' &&
-      resolveBrowserCollectionIntent(primaryInstructionText(params.message))
+      (messageHasBrowserCollectionIntent(params.message) ||
+        params.recentCollectionIntent === true)
     const capabilityResolution = resolveCapabilityResolution({
       config: params.config,
       profile: 'local_chat',
@@ -3176,6 +3227,12 @@ export class AgentSdkRuntime extends EventEmitter {
         executionOptions?.requestEnvelope,
       )
       requiresLocalDocumentWriteForRecovery = requiresLocalDocumentWrite
+      // Synchronous continuity (no await in the run hot path): track this turn's
+      // collection intent and decay the TTL so bare follow-ups stay exposed.
+      const recentCollectionIntent = this.trackCollectionIntent(
+        sessionId,
+        messageHasBrowserCollectionIntent(content as RunMessage),
+      )
       let toolDefinitions = this.listToolDefinitionsForTurn({
         message: content as RunMessage,
         sessionId,
@@ -3184,6 +3241,7 @@ export class AgentSdkRuntime extends EventEmitter {
         browserHostAvailable: this.hasBrowserController(),
         feishuConnected: this.runtime?.isChannelTypeAvailable?.('feishu-app') ?? false,
         authorization,
+        recentCollectionIntent,
       })
       if (shouldUseLocalDocumentToolSet(content as RunMessage, executionOptions?.requestEnvelope)) {
         toolDefinitions = toolDefinitions.filter(isLocalDocumentToolDefinition)

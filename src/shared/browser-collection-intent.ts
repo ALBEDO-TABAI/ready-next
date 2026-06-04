@@ -8,8 +8,10 @@
  * and are then narrowed to a curated collection subset so high-risk script /
  * form-write tools are not exposed on the self-serve surface.
  *
- * Pure module — no Electron, no IO. The SDK passes in the extracted
- * primary-instruction text.
+ * Pure module — no Electron, no IO. The SDK checks the predicate over the
+ * PRIMARY instruction text (so platform words inside context markers don't
+ * falsely trigger) plus an explicit "### 浏览页面引用" reference marker, and
+ * keeps the exposure alive across follow-up turns via stepCollectionIntentTtl.
  */
 
 /**
@@ -94,6 +96,23 @@ export function resolveBrowserCollectionIntent(text: string | null | undefined):
 /** Platform pattern reused by the execution-layer high-control policy (§4.4). */
 export function isHighControlPlatformText(text: string | null | undefined): boolean {
   return PLATFORM_PATTERN.test(String(text || ''))
+}
+
+/**
+ * Per-session collection-intent TTL step (continuity across follow-up turns).
+ * A turn that expresses intent refreshes the TTL to `ttlTurns`; otherwise it
+ * decays by one. `recent` is true when this turn — or a recent turn within the
+ * window — had intent, so a bare follow-up ("再试一次") keeps the tools exposed
+ * until the window decays to zero. Pure — the caller owns the per-session map.
+ */
+export function stepCollectionIntentTtl(
+  priorTtl: number,
+  currentHasIntent: boolean,
+  ttlTurns: number,
+): { recent: boolean; nextTtl: number } {
+  const recent = priorTtl > 0 || currentHasIntent
+  const nextTtl = currentHasIntent ? ttlTurns : Math.max(0, priorTtl - 1)
+  return { recent, nextTtl }
 }
 
 export { PLATFORM_PATTERN as HIGH_CONTROL_PLATFORM_PATTERN }

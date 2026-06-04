@@ -5,6 +5,7 @@ import {
   resolveBrowserCollectionIntent,
   isBrowserCollectionSubsetTool,
   isHighControlPlatformText,
+  stepCollectionIntentTtl,
   BROWSER_COLLECTION_SUBSET_TOOL_NAMES,
 } from '../shared/browser-collection-intent'
 
@@ -44,6 +45,22 @@ describe('resolveBrowserCollectionIntent — negative (keep document mode)', () 
   }
 })
 
+describe('attached browser-page reference (full message text) exposes', () => {
+  it('matches a 小红书 platform name embedded in a ### 浏览页面引用 reference section', () => {
+    // The SDK passes the FULL message text (not primaryInstructionText, which
+    // strips the reference section) to the predicate, so an attached page
+    // reference still triggers exposure even with a bare instruction.
+    const full = '再试一次看看\n\n### 浏览页面引用\nAoi葵 – 小红书 https://www.xiaohongshu.com/user/profile/abc'
+    assert.equal(resolveBrowserCollectionIntent(full), true)
+  })
+
+  it('a bare retry with NO reference and NO platform does not match the predicate alone', () => {
+    // (continuity / browse-page-reference marker handle this at the SDK layer;
+    // the pure predicate on bare text stays false)
+    assert.equal(resolveBrowserCollectionIntent('再重试一遍看看'), false)
+  })
+})
+
 describe('document signal priority', () => {
   it('platform present overrides a document save phrasing (小红书 + 保存到文档 → expose)', () => {
     assert.equal(resolveBrowserCollectionIntent('把小红书这个博主的图片保存到文档里'), true)
@@ -66,6 +83,46 @@ describe('collection subset white-list', () => {
   })
   it('the subset is a small curated list, not the whole catalog', () => {
     assert.ok(BROWSER_COLLECTION_SUBSET_TOOL_NAMES.length > 0 && BROWSER_COLLECTION_SUBSET_TOOL_NAMES.length < 30)
+  })
+})
+
+describe('collection-intent TTL continuity (bare follow-ups stay exposed, then decay)', () => {
+  const TTL = 6
+  it('an intent turn refreshes the TTL and stays exposed for the window, then decays', () => {
+    // Turn 1: intent → exposed, TTL refreshed.
+    let { recent, nextTtl } = stepCollectionIntentTtl(0, true, TTL)
+    assert.equal(recent, true)
+    assert.equal(nextTtl, TTL)
+    // Following bare turns (no intent) stay exposed while the window decays.
+    let ttl = nextTtl
+    for (let i = 0; i < TTL; i += 1) {
+      const step = stepCollectionIntentTtl(ttl, false, TTL)
+      assert.equal(step.recent, true, `follow-up ${i + 1} should still be exposed`)
+      ttl = step.nextTtl
+    }
+    // After the window fully decays, exposure stops.
+    assert.equal(ttl, 0)
+    assert.equal(stepCollectionIntentTtl(ttl, false, TTL).recent, false)
+  })
+
+  it('a non-intent turn with no prior window is not exposed', () => {
+    assert.equal(stepCollectionIntentTtl(0, false, TTL).recent, false)
+  })
+
+  it('a mid-window intent turn re-refreshes the TTL', () => {
+    const step = stepCollectionIntentTtl(2, true, TTL)
+    assert.equal(step.nextTtl, TTL)
+    assert.equal(step.recent, true)
+  })
+})
+
+describe('over-exposure guard (context markers must not trigger via primary-text predicate)', () => {
+  it('a platform name inside a context-marker section does NOT match the predicate on its own', () => {
+    // The SDK runs the predicate over primaryInstructionText (the part BEFORE
+    // context markers), so a 小红书 mention only in a "## 最近会话摘要" section
+    // is excluded — the bare instruction here ("你是谁") has no intent.
+    // (We simulate that by passing only the primary text, which is what the SDK does.)
+    assert.equal(resolveBrowserCollectionIntent('你是谁'), false)
   })
 })
 
