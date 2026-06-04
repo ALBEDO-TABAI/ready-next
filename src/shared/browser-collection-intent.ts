@@ -35,6 +35,7 @@ export const BROWSER_COLLECTION_SUBSET_TOOL_NAMES: readonly string[] = [
   'browser_extract_structured',
   'browser_scroll_collect',
   'browser_visible_collect',
+  'browser_collect_notes',
   'browser_download_urls',
   'browser_aggregate_results',
   'browser_get_task',

@@ -57,6 +57,7 @@ export const BROWSER_CONTENT_TASK_TOOL_NAMES = [
   'browser_run_workflow',
   'browser_execute_js',
   'browser_visible_collect',
+  'browser_collect_notes',
 ] as const
 
 export const BROWSER_TOOLS: BrowserToolDef[] = [
@@ -249,6 +250,11 @@ export const BROWSER_TOOLS: BrowserToolDef[] = [
     name: 'browser_visible_collect',
     description: '可见页面采集器：在当前可见、可到达的页面上分轮提取条目、跨轮去重、逐屏滚动，并按轮保存进度，适合信息流/评论区/长列表。后台任务，返回任务句柄。',
     params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_visible_collect) as ToolParamSchemaSpec[],
+  },
+  {
+    name: 'browser_collect_notes',
+    description: '后台逐篇采集子 agent：先浏览主页规划出笔记列表，再把列表交给本工具，它在独立后台标签页（不抢占你的当前浏览界面、不绑定本轮对话）用你的登录态逐篇打开笔记、采集图片、按笔记建文件夹下载，按篇保存进度，可在任务卡查看/二级确认中断。返回后台任务句柄。',
+    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_collect_notes) as ToolParamSchemaSpec[],
   },
   {
     name: 'browser_go_back',

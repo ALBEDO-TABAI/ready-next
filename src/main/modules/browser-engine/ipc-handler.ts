@@ -15,6 +15,10 @@ import type {
   BrowserWaitForConditionOptions,
 } from './capability-types'
 import { BrowserContentTaskRunner } from './content-task-runner'
+import { ScopedBrowserFacade } from './scoped-browser-facade'
+import { AgentTabControlGate } from './agent-tab-control-gate'
+import { getBrowserWriteLeaseService } from './agent-browser-lease-singleton'
+import type { AgentBrowserSurface } from './agent-browser-errors'
 import type {
   BrowserCDPErrorCode,
   BrowserKeyEventPayload,
@@ -132,6 +136,10 @@ export class BrowserController {
   private readonly automationService: BrowserAutomationService
   private readonly capabilityService: BrowserCapabilityService
   private readonly contentTaskRunner: BrowserContentTaskRunner
+  /** Freeze-then-confirm supervision gate for the background agent tab (plan §3.6). */
+  private readonly agentTabControlGate = new AgentTabControlGate()
+  /** The dedicated background tab the collector sub-agent drives (plan §3.5/§3.9). */
+  private agentTabId: string | null = null
   private readonly tabLifecycleService: BrowserTabLifecycleService
   private readonly tabMetaService: BrowserTabMetaService<Tab>
   private readonly tabShellService: BrowserTabShellService
@@ -218,6 +226,28 @@ export class BrowserController {
     this.contentTaskRunner = new BrowserContentTaskRunner(
       this.capabilityService,
       new BrowserTaskPersistenceService(),
+      getBrowserWriteLeaseService(),
+      // The collector facade is built per-task here (the controller owns
+      // executeBrowserTool + the control gate); executeBrowserTool is imported
+      // lazily to avoid a static cycle with tools/browser-tools (plan §3.4).
+      ({ agentTabId, leaseId, surface }) => ({
+        facade: new ScopedBrowserFacade({
+          agentTabId,
+          leaseService: getBrowserWriteLeaseService(),
+          leaseId,
+          controlGate: this.agentTabControlGate,
+          surface,
+          execute: async (toolName, args, gateSurface, gateLeaseId) => {
+            const { executeBrowserTool } = await import('../tools/browser-tools')
+            return executeBrowserTool(toolName, args, this, undefined, undefined, {
+              service: getBrowserWriteLeaseService(),
+              surface: gateSurface,
+              leaseId: gateLeaseId,
+            })
+          },
+        }),
+        isControlFrozen: () => this.agentTabControlGate.isWriteBlocked(),
+      }),
     )
     this.tabMetaService = new BrowserTabMetaService({
       tabs: this.tabs,
@@ -707,6 +737,64 @@ export class BrowserController {
 
   async cancelTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
     return this.contentTaskRunner.cancelTask(taskId)
+  }
+
+  /**
+   * Ensure the dedicated background tab the collector sub-agent drives (plan
+   * §3.5/§3.9), WITHOUT stealing the user's foreground. We create the tab,
+   * tag it owner:'agent', and restore whatever tab the user had active so the
+   * agent never preempts the visible browser.
+   */
+  async ensureAgentTab(): Promise<string> {
+    if (this.agentTabId && this.tabs.has(this.agentTabId)) return this.agentTabId
+    const previousActive = this.activeTabId
+    const created = await this.createTab('about:blank')
+    if (!created.success || !created.tabId) {
+      throw new Error(created.error || 'failed to create agent tab')
+    }
+    this.agentTabId = created.tabId
+    this.updateTabRuntimeState(created.tabId, { owner: 'agent', activity: 'running' })
+    if (previousActive && previousActive !== created.tabId && this.tabs.has(previousActive)) {
+      this.switchTab(previousActive)
+    }
+    return created.tabId
+  }
+
+  getAgentTabId(): string | null {
+    return this.agentTabId && this.tabs.has(this.agentTabId) ? this.agentTabId : null
+  }
+
+  /**
+   * Start a background note-collection task on the agent tab (plan §3.3). The
+   * caller supplies the validated note list (the main agent plans 判断题); the
+   * task acquires its own agent-view lease and runs the deterministic engine.
+   */
+  async startNoteCollection(plan: Record<string, unknown>): Promise<BrowserCapabilityTaskHandle> {
+    const agentTabId = await this.ensureAgentTab()
+    return this.contentTaskRunner.startTask({
+      kind: 'note_collect',
+      payload: { agentTabId, surface: 'agent-view' as AgentBrowserSurface, plan },
+    })
+  }
+
+  /** Supervision (plan §3.6): two-step interrupt of the agent's browser control. */
+  requestAgentInterruption(): { state: ReturnType<AgentTabControlGate['getState']>; pending: boolean } {
+    const pending = this.agentTabControlGate.requestInterruption()
+    return { state: this.agentTabControlGate.getState(), pending }
+  }
+
+  confirmAgentInterruption(): { state: ReturnType<AgentTabControlGate['getState']>; frozen: boolean } {
+    const frozen = this.agentTabControlGate.confirmInterruption()
+    return { state: this.agentTabControlGate.getState(), frozen }
+  }
+
+  dismissAgentInterruption(): { state: ReturnType<AgentTabControlGate['getState']> } {
+    this.agentTabControlGate.dismissInterruption()
+    return { state: this.agentTabControlGate.getState() }
+  }
+
+  getAgentControlState(): ReturnType<AgentTabControlGate['getState']> {
+    return this.agentTabControlGate.getState()
   }
 
   private createBrowserError(code: BrowserCDPErrorCode, message: string): Error {

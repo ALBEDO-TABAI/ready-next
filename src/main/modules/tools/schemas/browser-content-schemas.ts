@@ -143,6 +143,23 @@ export const BrowserExecuteJsSchema = z.object({
   tab_id: TabIdOptional,
 })
 
+export const BrowserCollectNotesSchema = z.object({
+  target_profile_url: z.string().describe('博主主页 URL（用于建根目录与展示）'),
+  notes: z
+    .array(
+      z.object({
+        url: z.string().describe('笔记详情页 URL'),
+        title: z.string().optional().describe('笔记标题（用于建文件夹/进度展示）'),
+      }),
+    )
+    .min(1)
+    .describe('要逐篇后台采集的笔记列表（由主 agent 先浏览主页后规划得出）'),
+  output_root_dir: z.string().optional().describe('采集输出根目录，默认 ~/Documents 下的采集目录'),
+  max_notes: z.number().optional().describe('最多采集篇数（高控平台默认更保守）'),
+  max_duration_ms: z.number().optional().describe('最长运行时长（毫秒）'),
+  max_consecutive_failures: z.number().optional().describe('连续失败上限，超过即停'),
+})
+
 export type BrowserContentToolName =
   | 'browser_collect_images'
   | 'browser_download_urls'
@@ -158,6 +175,7 @@ export type BrowserContentToolName =
   | 'browser_run_workflow'
   | 'browser_execute_js'
   | 'browser_visible_collect'
+  | 'browser_collect_notes'
 
 export const BROWSER_CONTENT_SCHEMAS: Record<
   BrowserContentToolName,
@@ -177,4 +195,5 @@ export const BROWSER_CONTENT_SCHEMAS: Record<
   browser_run_workflow: BrowserRunWorkflowSchema,
   browser_execute_js: BrowserExecuteJsSchema,
   browser_visible_collect: BrowserVisibleCollectSchema,
+  browser_collect_notes: BrowserCollectNotesSchema,
 }

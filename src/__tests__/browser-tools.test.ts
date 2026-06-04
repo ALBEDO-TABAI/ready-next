@@ -379,3 +379,53 @@ describe('browser-tools v2', () => {
     )
   })
 })
+
+describe('browser_collect_notes (background sub-agent dispatch)', () => {
+  it('parses the planned notes and dispatches startNoteCollection with a valid plan', async () => {
+    const started: Array<Record<string, unknown>> = []
+    const controller = createControllerMock({
+      startNoteCollection: async (plan: Record<string, unknown>) => {
+        started.push(plan)
+        return { taskId: 'task-note-1', kind: 'note_collect', status: 'queued', progress: { total: 0, completed: 0, failed: 0, currentLabel: null } } as never
+      },
+    })
+    const result = await executeBrowserTool(
+      'browser_collect_notes',
+      {
+        target_profile_url: 'https://www.xiaohongshu.com/user/profile/abc123',
+        notes: [
+          { url: 'https://www.xiaohongshu.com/note/1', title: '笔记一' },
+          { url: 'not-a-url' }, // dropped (no http)
+          { url: 'https://www.xiaohongshu.com/note/2' },
+        ],
+        max_notes: 50,
+      },
+      controller,
+    )
+    const handle = JSON.parse(result) as { taskId: string }
+    assert.equal(handle.taskId, 'task-note-1')
+    assert.equal(started.length, 1)
+    const plan = started[0] as { notes: Array<{ url: string }>; targetProfileUrl: string; outputRootDir: string; stopConditions?: { maxNotes?: number } }
+    assert.equal(plan.notes.length, 2, 'the non-http note is dropped')
+    assert.deepEqual(plan.notes.map((n) => n.url), ['https://www.xiaohongshu.com/note/1', 'https://www.xiaohongshu.com/note/2'])
+    assert.equal(plan.stopConditions?.maxNotes, 50)
+    assert.ok(plan.outputRootDir.includes('abc123'), 'derives the output folder from the profile slug')
+  })
+
+  it('refuses when no valid note URL is supplied (does not dispatch a task)', async () => {
+    let dispatched = false
+    const controller = createControllerMock({
+      startNoteCollection: async () => {
+        dispatched = true
+        return {} as never
+      },
+    })
+    const result = await executeBrowserTool(
+      'browser_collect_notes',
+      { target_profile_url: 'https://www.xiaohongshu.com/user/profile/abc', notes: [{ url: 'ftp://x' }] },
+      controller,
+    )
+    assert.match(result, /至少一条/)
+    assert.equal(dispatched, false)
+  })
+})

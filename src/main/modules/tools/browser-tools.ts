@@ -4098,6 +4098,44 @@ export async function executeBrowserTool(
         return JSON.stringify(result, null, 2)
       }
 
+      case 'browser_collect_notes': {
+        // Dispatch a background note-collection sub-agent (plan §3.3). The main
+        // agent supplies the planned note list; the controller ensures a
+        // dedicated background agent tab (no foreground preemption) and the task
+        // acquires its own agent-view lease. Returns the task handle to poll.
+        const rawNotes = Array.isArray(args.notes) ? args.notes : []
+        const notes = rawNotes
+          .map((n) => {
+            const obj = (n && typeof n === 'object' ? n : {}) as Record<string, unknown>
+            return { url: String(obj.url || '').trim(), title: typeof obj.title === 'string' ? obj.title : undefined }
+          })
+          .filter((n) => /^https?:\/\//i.test(n.url))
+        if (notes.length === 0) {
+          return 'Error: browser_collect_notes 需要至少一条带 http(s) URL 的笔记。'
+        }
+        const stopConditions: Record<string, number> = {}
+        if (Number(args.max_notes || 0) > 0) stopConditions.maxNotes = Number(args.max_notes)
+        if (Number(args.max_duration_ms || 0) > 0) stopConditions.maxDurationMs = Number(args.max_duration_ms)
+        if (Number(args.max_consecutive_failures || 0) > 0) stopConditions.maxConsecutiveFailures = Number(args.max_consecutive_failures)
+        const profileUrl = String(args.target_profile_url || '').trim()
+        let profileSlug = 'profile'
+        try {
+          profileSlug = new URL(profileUrl).pathname.split('/').filter(Boolean).pop() || 'profile'
+        } catch {
+          // keep the default slug for a non-URL profile string
+        }
+        const plan = {
+          targetProfileUrl: profileUrl,
+          notes,
+          outputRootDir: typeof args.output_root_dir === 'string' && args.output_root_dir.trim()
+            ? args.output_root_dir.trim()
+            : `Ready采集/${profileSlug}`,
+          ...(Object.keys(stopConditions).length > 0 ? { stopConditions } : {}),
+        }
+        const result = await controller.startNoteCollection(plan)
+        return JSON.stringify(result, null, 2)
+      }
+
       case 'browser_go_back': {
         const tabId = (args.tab_id as string) || null
         const result = controller.goBack(tabId)

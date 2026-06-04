@@ -64,6 +64,7 @@ const ALWAYS_WRITE = new Set<string>([
   'browser_execute_js', // arbitrary code — undecidable, never a false read-only promise
   'browser_act_on_target',
   'browser_visible_collect',
+  'browser_collect_notes', // ensures a background agent tab + launches page-mutating collection
 ])
 
 /**
