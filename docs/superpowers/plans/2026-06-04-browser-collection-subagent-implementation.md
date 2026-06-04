@@ -348,3 +348,7 @@ Codex 接受架构偏离方向，但要求守住配套硬边界。5 条必改逐
 5. **高风控预算**：新增全局并发 cap（高风控限 1 并发 → 同域串行 = per-domain 频控）+ 逐篇 1.5s 限速 + 下载量预算（`maxTotalImages`=400，引擎累计图片数到顶停 `max_images`；字节级预算需下载层报告字节数，留作后续）。
 
 新增/更新测试：engine `max_images`、runner freeze/takeover 终态 `cancelled`。typecheck 绿，全量通过（仅 2 个既有 liquid-glass 失败）。仍待实测：before-input-event 冻结、background tab 不抢前台、面板遮挡。
+
+复审残留（commit 1df2026a）：#1 的 `pending_confirm` 也被 `isWriteBlocked` 判 true，runner 在 pending 阶段就 cancelled——拆分探针：新增 `AgentTabControlGate.isFrozen()`（仅 frozen）供 runner cancel，`isWriteBlocked()`（pending+frozen）仍供 facade 阻塞写。pending 只阻塞写 + 弹二级确认，确认→frozen→cancelTask 才取消。
+
+**结果评审 Round 2（2026-06-05，Codex → APPROVE）**：5 条全部 PASS，残留已清。本轮结果评审循环结束。仍存上述 dev app 实测项（need live verification）。
