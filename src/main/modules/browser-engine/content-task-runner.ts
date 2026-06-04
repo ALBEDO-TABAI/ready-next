@@ -66,6 +66,12 @@ export class BrowserContentTaskRunner {
     return this.persistenceService.getTask(taskId)
   }
 
+  /** Active (queued/running/paused) tasks, optionally filtered to one kind. */
+  async listTasks(kind?: BrowserCapabilityTaskKind): Promise<BrowserCapabilityTaskHandle[]> {
+    const pending = this.persistenceService.listPendingTasks()
+    return kind ? pending.filter((task) => task.kind === kind) : pending
+  }
+
   async resumeTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
     const current = this.persistenceService.getTask(taskId)
     const payload = this.persistenceService.getTaskPayload(taskId)

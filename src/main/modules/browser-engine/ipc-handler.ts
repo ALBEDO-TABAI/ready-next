@@ -57,6 +57,7 @@ import { setupBrowserContentStudyIPC } from './ipc-content-study-dragged-tab'
 import { setupBrowserDataIPC } from './ipc-data'
 import { setupBrowserFastCardIPC } from './ipc-fastcard'
 import { setupBrowserShellIPC } from './ipc-shell'
+import { setupBrowserSupervisionIPC } from './ipc-supervision'
 import { BrowserPreviewService } from './preview-service'
 import { BrowserPageBackgroundService } from './page-background-service'
 import { BrowserSessionPolicyService } from './session-policy-service'
@@ -762,6 +763,11 @@ export class BrowserController {
 
   getAgentTabId(): string | null {
     return this.agentTabId && this.tabs.has(this.agentTabId) ? this.agentTabId : null
+  }
+
+  /** Active background note-collection tasks (for the supervision panel). */
+  async listAgentCollectionTasks(): Promise<BrowserCapabilityTaskHandle[]> {
+    return this.contentTaskRunner.listTasks('note_collect')
   }
 
   /**
@@ -1529,6 +1535,7 @@ export function setupBrowserIPC(
   const controller = new BrowserController(mainWindow, useMock)
   const browserDataService = new BrowserDataService()
   setupBrowserShellIPC(controller)
+  setupBrowserSupervisionIPC(controller)
   setupBrowserDataIPC(controller, browserDataService)
   setupBrowserClipIPC({
     getActiveTab: () => {

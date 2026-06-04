@@ -458,9 +458,16 @@ export default function TabRail({
                         : isHovered
                           ? 'color-mix(in srgb, var(--color-blue) 28%, transparent)'
                           : 'transparent',
-                      boxShadow: isHovered
-                        ? '0 0 0 1px color-mix(in srgb, var(--color-blue) 18%, transparent)'
-                        : 'none',
+                      // Agent-owned tabs glow blue so the user can see the agent
+                      // is driving this surface (plan §3.6); brighter when it is
+                      // the active tab.
+                      boxShadow: tab.owner === 'agent'
+                        ? (isActive
+                            ? '0 0 0 1px color-mix(in srgb, var(--color-blue) 55%, transparent), 0 0 12px color-mix(in srgb, var(--color-blue) 45%, transparent)'
+                            : '0 0 0 1px color-mix(in srgb, var(--color-blue) 32%, transparent), 0 0 8px color-mix(in srgb, var(--color-blue) 26%, transparent)')
+                        : isHovered
+                          ? '0 0 0 1px color-mix(in srgb, var(--color-blue) 18%, transparent)'
+                          : 'none',
                     }}
                     contentClassName="relative z-[1] flex min-w-0 flex-1 items-center justify-center"
                   >

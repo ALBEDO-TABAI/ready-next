@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from 'react'
 import BrowserModeEmptyState from '../../components/browser/BrowserModeEmptyState'
 import BrowserDiagnosticsDock from '../../components/browser/BrowserDiagnosticsDock'
+import { AgentBrowserSupervisionPanel } from '../../components/browser/AgentBrowserSupervisionPanel'
 import BrowserHeader from '../../components/browser/BrowserHeader'
 import BrowserShellLayout from '../../components/browser/BrowserShellLayout'
 import { appendToAgentInput } from '../../modules/agent/chat-input-bridge'
@@ -1036,6 +1037,7 @@ export default function BrowserMode({
               onOpenTarget={handleOpenBrowserTarget}
               onRefresh={() => void refreshAdblockState()}
             />
+            <AgentBrowserSupervisionPanel />
           </div>
 
           {/* 浏览器过渡遮罩 - 动画结束后但浏览器未准备好时显示 */}

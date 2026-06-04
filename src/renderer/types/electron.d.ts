@@ -6,6 +6,7 @@ import type { CapabilityRuntimeSnapshot } from '../../shared/ai-capability-runti
 import type { RendererAgentMetricName } from '../../shared/renderer-agent-metrics'
 import type { ModelPackDownloadUpdate, ModelPackId, ModelPackSelfTestReport, ModelPackStatus, ModelSource } from '../../shared/model-pack-types'
 import type { SkillSourceSelfTestReport } from '../../shared/skill-source-types'
+import type { AgentBrowserControlState, AgentBrowserCollectionTask } from '../modules/browser/useAgentBrowserSupervision'
 import type {
   PetActivitySnapshot,
   PetDefinition,
@@ -1241,6 +1242,16 @@ interface ElectronBrowserAPI {
     error?: string
   }>
   getDiagnostics: () => Promise<{ success: boolean; data?: BrowserDiagnosticsData; error?: string }>
+  // Agent-browser supervision (plan §3.6): two-step interrupt + task listing.
+  getAgentSupervisionState: () => Promise<{
+    controlState: AgentBrowserControlState
+    agentTabId: string | null
+    tasks: AgentBrowserCollectionTask[]
+    error?: string
+  }>
+  requestAgentInterruption: () => Promise<{ state: AgentBrowserControlState; pending: boolean; error?: string }>
+  confirmAgentInterruption: () => Promise<{ state: AgentBrowserControlState; frozen: boolean; error?: string }>
+  dismissAgentInterruption: () => Promise<{ state: AgentBrowserControlState; error?: string }>
   setAdblockEnabled: (
     enabled: boolean,
     scope?: 'main' | 'preview' | 'all'

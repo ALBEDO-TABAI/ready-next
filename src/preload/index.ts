@@ -358,6 +358,11 @@ const browserAPI = {
   getTabs: () => ipcRenderer.invoke('browser:getTabs'),
   getAdblockState: () => ipcRenderer.invoke('browser:getAdblockState'),
   getDiagnostics: () => ipcRenderer.invoke('browser:getDiagnostics'),
+  // Agent-browser supervision (plan §3.6): two-step interrupt + task listing.
+  getAgentSupervisionState: () => ipcRenderer.invoke('browser:getAgentSupervisionState'),
+  requestAgentInterruption: () => ipcRenderer.invoke('browser:requestAgentInterruption'),
+  confirmAgentInterruption: () => ipcRenderer.invoke('browser:confirmAgentInterruption'),
+  dismissAgentInterruption: () => ipcRenderer.invoke('browser:dismissAgentInterruption'),
   setAdblockEnabled: (enabled: boolean, scope?: 'main' | 'preview' | 'all') =>
     ipcRenderer.invoke('browser:setAdblockEnabled', { enabled, scope }),
   toggleAdblockDomain: (domain: string) => ipcRenderer.invoke('browser:toggleAdblockDomain', { domain }),
