@@ -2992,30 +2992,40 @@ export async function executeBrowserTool(
       case 'browser_navigate': {
         const url = args.url as string
         if (!url) return 'Error: url is required'
+        // Tool-layer tab targeting (plan §7.8): navigate the given tab when set
+        // (the scoped agent facade forces agentTabId), else the active tab.
+        const navTabId = (args.tab_id as string) || null
         const allowRepeat = args.allow_repeat === true
         const duplicate = !allowRepeat ? findRecentBrowserAction(sessionId, 'navigate', url) : null
-        const activeBefore = controller.getActiveTab()
+        const activeBefore = navTabId
+          ? controller.getTabList().find((t) => t.id === navTabId)
+          : controller.getActiveTab()
         if (duplicate && activePageLikelyMatchesTarget(activeBefore?.url, url)) {
           const secondsAgo = Math.max(1, Math.round((Date.now() - duplicate.updatedAt) / 1000))
           return `Skipped duplicate navigation to ${url}. The same navigation already succeeded ${secondsAgo}s ago and the current page still matches it. Read or verify the current page before navigating again.`
         }
-        const result = await controller.navigate(null, url)
+        const result = await controller.navigate(navTabId, url)
         if (!result.success) return `Error: ${result.error}`
         rememberBrowserAction(sessionId, 'navigate', url)
         // Wait a moment for page to start loading
         await sleepWithAbort(1500, abortSignal)
         const tabs = controller.getTabList()
-        const active = tabs.find(t => t.active)
-        return `Navigated to ${url}\nCurrent page: ${active?.title || 'Loading...'} (${active?.url || url})`
+        const target = navTabId ? tabs.find((t) => t.id === navTabId) : tabs.find((t) => t.active)
+        return `Navigated to ${url}\nCurrent page: ${target?.title || 'Loading...'} (${target?.url || url})`
       }
 
       case 'browser_search': {
         const query = args.query as string
         if (!query) return 'Error: query is required'
+        const searchTabId = (args.tab_id as string) || null
         const allowRepeat = args.allow_repeat === true
         const duplicate = !allowRepeat ? findRecentBrowserAction(sessionId, 'search', query) : null
-        const activeBefore = controller.getActiveTab()
-        if (duplicate && /search|google|bing|duckduckgo|baidu/i.test(String(activeBefore?.url || ''))) {
+        // Duplicate-check must inspect the SEARCH tab, not the active tab, so a
+        // targeted search (tab_id set) isn't skipped based on the user's page.
+        const searchBefore = searchTabId
+          ? controller.getTabList().find((t) => t.id === searchTabId)
+          : controller.getActiveTab()
+        if (duplicate && /search|google|bing|duckduckgo|baidu/i.test(String(searchBefore?.url || ''))) {
           const secondsAgo = Math.max(1, Math.round((Date.now() - duplicate.updatedAt) / 1000))
           return `Skipped duplicate search for "${query}". The same search already ran ${secondsAgo}s ago. Reuse the current results page or read it before searching again.`
         }
@@ -3028,14 +3038,14 @@ export async function executeBrowserTool(
         const errors: string[] = []
         for (const engine of uniq) {
           const targetUrl = searchUrl(engine, query)
-          const result = await controller.navigate(null, targetUrl)
+          const result = await controller.navigate(searchTabId, targetUrl)
           if (!result.success) {
             errors.push(`${engine}: ${result.error || 'navigate failed'}`)
             continue
           }
           rememberBrowserAction(sessionId, 'search', query)
-          const waitResult = await waitForReady(controller, null, 10_000, undefined, abortSignal)
-          const rows = await extractSearchResults(controller, null)
+          const waitResult = await waitForReady(controller, searchTabId, 10_000, undefined, abortSignal)
+          const rows = await extractSearchResults(controller, searchTabId)
           if (rows.length > 0) {
             return [
               `Searched "${query}" via ${engine}`,
@@ -3044,7 +3054,7 @@ export async function executeBrowserTool(
               ...rows.map((row, index) => `${index + 1}. ${row.title}\n   ${row.url}${row.snippet ? `\n   ${row.snippet}` : ''}`),
             ].join('\n')
           }
-          const content = await controller.getPageContent(null).catch(() => '')
+          const content = await controller.getPageContent(searchTabId).catch(() => '')
           if (content.trim().length > 0) {
             return `Searched "${query}" via ${engine}\nNo structured results parsed, fallback page text:\n${truncate(content, 6000)}`
           }

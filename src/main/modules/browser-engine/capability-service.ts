@@ -383,8 +383,18 @@ export class BrowserCapabilityService {
       await this.waitForCondition(tabId, options.wait)
     }
     const raw = await this.host.executeJS(tabId, buildStructuredExtractionScript(options))
-    const activeTab = this.host.getActiveTab()
-    const sourceUrl = activeTab?.url || ''
+    // The source URL must come from the tab being extracted, not the active tab
+    // (plan §3.5 / Codex R2 #3): an agent-tab background collection must not
+    // attribute the user's current page as the source and pollute relative links.
+    let sourceUrl = ''
+    if (tabId) {
+      try {
+        sourceUrl = String(await this.host.executeJS(tabId, 'location.href') || '')
+      } catch {
+        sourceUrl = ''
+      }
+    }
+    if (!sourceUrl) sourceUrl = this.host.getActiveTab()?.url || ''
     return {
       template: options.template,
       items: normalizeStructuredItems(sourceUrl, raw),

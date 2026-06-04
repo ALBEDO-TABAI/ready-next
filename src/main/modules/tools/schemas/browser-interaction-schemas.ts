@@ -19,6 +19,7 @@ const TabIdOptional = z.string().optional().describe('标签页 ID，留空则�
 
 export const BrowserNavigateSchema = z.object({
   url: z.string().describe('要导航到的完整 URL (http/https)'),
+  tab_id: z.string().optional().describe('可选：在指定标签页导航（留空使用当前活跃页）'),
 })
 
 export const BrowserSearchSchema = z.object({
@@ -27,6 +28,7 @@ export const BrowserSearchSchema = z.object({
     .enum(['auto', 'google', 'duckduckgo', 'bing', 'baidu'])
     .optional()
     .describe('搜索引擎：auto/google/duckduckgo/bing/baidu，默认 auto'),
+  tab_id: z.string().optional().describe('可选：在指定标签页搜索（留空使用当前活跃页）'),
 })
 
 export const BrowserGetTabsSchema = z.object({})

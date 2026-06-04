@@ -29,6 +29,7 @@ const TAB_ID: SkillParamDefinition = {
 test('browser_navigate', () => {
   assert.deepEqual(zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_navigate), [
     { name: 'url', type: 'string', description: '要导航到的完整 URL (http/https)', required: true },
+    { name: 'tab_id', type: 'string', description: '可选：在指定标签页导航（留空使用当前活跃页）', required: false },
   ])
 })
 
@@ -42,6 +43,7 @@ test('browser_search', () => {
       required: false,
       enum: ['auto', 'google', 'duckduckgo', 'bing', 'baidu'],
     },
+    { name: 'tab_id', type: 'string', description: '可选：在指定标签页搜索（留空使用当前活跃页）', required: false },
   ])
 })
 
