@@ -25,6 +25,7 @@ import {
   getBrowserOpenAITools,
 } from './browser-tool-catalog'
 import type { BrowserStructuredFieldMapping } from '../browser-engine/capability-types'
+import { beginLeaseGate, type BrowserLeaseGate } from '../browser-engine/agent-browser-lease-gate'
 
 const logger = createRotatingLogger('ready-tools.log')
 function log(msg: string) {
@@ -2871,8 +2872,15 @@ export async function executeBrowserTool(
   controller: BrowserController,
   abortSignal?: AbortSignal,
   sessionId?: string,
+  leaseGate?: BrowserLeaseGate,
 ): Promise<string> {
   log(`executeBrowserTool: ${toolName} args=${JSON.stringify(args).slice(0, 200)}`)
+
+  const gate = beginLeaseGate(leaseGate, toolName, args)
+  if (gate.deniedMessage !== null) {
+    log(`Browser tool lease-denied: ${toolName} ${gate.deniedMessage}`)
+    return gate.deniedMessage
+  }
 
   try {
     throwIfAborted(abortSignal)
@@ -3917,6 +3925,26 @@ export async function executeBrowserTool(
         return truncate(resultStr ?? 'undefined')
       }
 
+      case 'browser_visible_collect': {
+        const result = await controller.startTask({
+          kind: 'visible_collect',
+          payload: {
+            url: typeof args.url === 'string' ? args.url : undefined,
+            tabId: typeof args.tab_id === 'string' ? args.tab_id : undefined,
+            template: typeof args.template === 'string' ? args.template : undefined,
+            itemSelector: typeof args.item_selector === 'string' ? args.item_selector : undefined,
+            maxItems: Number(args.max_items || 0) || undefined,
+            maxRounds: Number(args.max_rounds || 0) || undefined,
+            maxDurationMs: Number(args.max_duration_ms || 0) || undefined,
+            // Inherit the active lane lease so the background loop keeps writing
+            // under the SAME lease and stops the instant the user takes over.
+            surface: leaseGate?.surface,
+            leaseId: leaseGate?.leaseId ?? undefined,
+          },
+        })
+        return JSON.stringify(result, null, 2)
+      }
+
       case 'browser_go_back': {
         const tabId = (args.tab_id as string) || null
         const result = controller.goBack(tabId)
@@ -3931,5 +3959,7 @@ export async function executeBrowserTool(
     const msg = error instanceof Error ? error.message : String(error)
     log(`Browser tool error: ${msg}`)
     return `Error executing ${toolName}: ${msg}`
+  } finally {
+    gate.end()
   }
 }

@@ -95,9 +95,9 @@ test('browser_start_task (payload has additionalProperties:true at field level)'
     {
       name: 'kind',
       type: 'string',
-      description: '任务类型：download_urls/scroll_collect/research',
+      description: '任务类型：download_urls/scroll_collect/research/visible_collect',
       required: true,
-      enum: ['download_urls', 'scroll_collect', 'research'],
+      enum: ['download_urls', 'scroll_collect', 'research', 'visible_collect'],
     },
     {
       name: 'payload',

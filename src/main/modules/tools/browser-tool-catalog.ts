@@ -56,6 +56,7 @@ export const BROWSER_CONTENT_TASK_TOOL_NAMES = [
   'browser_research_topic',
   'browser_run_workflow',
   'browser_execute_js',
+  'browser_visible_collect',
 ] as const
 
 export const BROWSER_TOOLS: BrowserToolDef[] = [
@@ -243,6 +244,11 @@ export const BROWSER_TOOLS: BrowserToolDef[] = [
     name: 'browser_execute_js',
     description: '在页面中执行任意 JavaScript 代码并返回结果。代码运行在页面沙箱中，与 Node.js 隔离。',
     params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_execute_js) as ToolParamSchemaSpec[],
+  },
+  {
+    name: 'browser_visible_collect',
+    description: '可见页面采集器：在当前可见、可到达的页面上分轮提取条目、跨轮去重、逐屏滚动，并按轮保存进度，适合信息流/评论区/长列表。后台任务，返回任务句柄。',
+    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_visible_collect) as ToolParamSchemaSpec[],
   },
   {
     name: 'browser_go_back',

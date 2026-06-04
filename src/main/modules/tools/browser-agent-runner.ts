@@ -1,6 +1,9 @@
 import type { BrowserController } from '../browser-engine/ipc-handler'
 import { rememberBrowserWorkflowState } from '../agent-control/session/session-continuity'
 import { executeBrowserTool } from './browser-tools'
+import { getBrowserWriteLeaseService } from '../browser-engine/agent-browser-lease-singleton'
+import { runUnderUserViewLease } from '../browser-engine/agent-browser-lane'
+import type { BrowserLeaseGate } from '../browser-engine/agent-browser-lease-gate'
 import { createRotatingLogger } from '../../utils/rotating-logger'
 import { BrowserAgentRuntimeAdapter } from '../browser-engine/agent-runtime-adapter'
 import { BrowserPageStateService } from '../browser-engine/page-state-service'
@@ -279,6 +282,9 @@ export class BrowserAgentRunner {
   private readonly emitToolEvent?: (type: 'tool_use' | 'tool_result', text: string) => void
   private activePlan: BrowserTaskPlanLike | null = null
   private state: BrowserAgentSessionState = 'queued'
+  /** Lane-A user-view write lease gate, set for the duration of a run (WP1). */
+  private leaseGate: BrowserLeaseGate | undefined = undefined
+  private leaseHeartbeat: (() => void) | undefined = undefined
   private readonly workflowSnapshotCache = new Map<string, { snapshot: WorkflowSnapshot; createdAt: number }>()
   private readonly visionHintCache = new Map<string, { targets: WorkflowActionTarget[]; createdAt: number }>()
   private promptAnchorLock: {
@@ -770,12 +776,16 @@ export class BrowserAgentRunner {
     if (!options?.silent) {
       this.emitToolEvent?.('tool_use', `${toolName}(${JSON.stringify(args).slice(0, 160)})`)
     }
+    // Lane-A: refresh the user-view lease before each tool so a long run does
+    // not expire mid-loop, then gate the call through the lease.
+    this.leaseHeartbeat?.()
     const result = await executeBrowserTool(
       toolName,
       args,
       this.controller,
       this.abortSignal,
       this.sessionId,
+      this.leaseGate,
     )
     if (!options?.silent) {
       this.emitToolEvent?.('tool_result', result.slice(0, 220))
@@ -2380,7 +2390,35 @@ export class BrowserAgentRunner {
 
     try {
       if (decision.mode === 'browser_upload_workflow' || decision.mode === 'browser_workflow') {
-        return await this.runUploadWorkflow(trimmed)
+        // Lane-A: hold the user-view write lease for the whole workflow so the
+        // agent's writes are gated and a user takeover instantly suspends them.
+        const runId = this.sessionId || `browser-run-${activeTabId || 'no-tab'}`
+        const outcome = await runUnderUserViewLease(
+          getBrowserWriteLeaseService(),
+          { taskId: runId, runId, tabId: activeTabId },
+          async (gate, heartbeat) => {
+            this.leaseGate = gate
+            this.leaseHeartbeat = heartbeat
+            try {
+              return await this.runUploadWorkflow(trimmed)
+            } finally {
+              this.leaseGate = undefined
+              this.leaseHeartbeat = undefined
+            }
+          },
+        )
+        if (!outcome.ok) {
+          this.state = 'partial'
+          return {
+            handled: true,
+            state: this.state,
+            message: outcome.blocked.errorCode === 'lease_takeover'
+              ? '你正在操作这个浏览器页面，我先停下，等你完成后再继续。'
+              : '这个浏览器页面正被另一个任务使用，我先不打断它。',
+            details: { errorCode: outcome.blocked.errorCode },
+          }
+        }
+        return outcome.value
       }
     } catch (error) {
       if ((error as Error).name === 'AbortError') {

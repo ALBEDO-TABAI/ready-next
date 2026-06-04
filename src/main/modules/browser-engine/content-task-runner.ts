@@ -7,6 +7,21 @@ import type {
   BrowserStructuredItem,
 } from './capability-types'
 import { BrowserTaskPersistenceService } from './task-persistence-service'
+import {
+  DEFAULT_VISIBLE_COLLECT_LIMITS,
+  VisibleCollectDeduper,
+  evaluateStop,
+  type VisibleCollectItem,
+  type VisibleCollectLimits,
+} from './agent-browser-collect'
+import { getBrowserWriteLeaseService } from './agent-browser-lease-singleton'
+import { isAgentBrowserError, type AgentBrowserSurface } from './agent-browser-errors'
+import type { BrowserWriteLeaseService } from './browser-write-lease'
+
+function toNumberOr(value: unknown, fallback: number): number {
+  const n = Number(value)
+  return Number.isFinite(n) && n > 0 ? n : fallback
+}
 
 function toStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map((item) => String(item || '').trim()).filter(Boolean) : []
@@ -19,6 +34,7 @@ export class BrowserContentTaskRunner {
   constructor(
     private readonly capabilityService: BrowserCapabilityService,
     private readonly persistenceService = new BrowserTaskPersistenceService(),
+    private readonly leaseService: BrowserWriteLeaseService = getBrowserWriteLeaseService(),
   ) {}
 
   async startTask(request: BrowserStartTaskRequest): Promise<BrowserCapabilityTaskHandle> {
@@ -70,6 +86,196 @@ export class BrowserContentTaskRunner {
         this.activeRuns.delete(taskId)
       })
     this.activeRuns.set(taskId, run)
+  }
+
+  /**
+   * Visible-collect loop (counterplan §5.5, WP4): extract current items → dedup
+   * across rounds → scroll one screen → checkpoint EVERY round (fixing the
+   * legacy "checkpoint only on completion"). Stop conditions are hard budgets
+   * via evaluateStop. Resumable from the last cursor via resumePendingTasks.
+   */
+  private async runVisibleCollect(taskId: string, payload: Record<string, unknown>): Promise<void> {
+    // Lease handling (counterplan §5.2/§5.5): the background loop writes the page
+    // (scroll), so every round must hold a valid write lease and stop with
+    // lease_lost the instant the user takes over or the lease expires.
+    //   - inherited leaseId (started from a lane-A run that holds the lease):
+    //     check + heartbeat it, do NOT acquire/release (the run owns it).
+    //   - standalone (no inherited lease, e.g. resumed after restart): acquire
+    //     our own user-view lease for the task duration and release at the end.
+    const surface = (typeof payload.surface === 'string' ? payload.surface : 'user-view') as AgentBrowserSurface
+    const inheritedLeaseId = typeof payload.leaseId === 'string' ? payload.leaseId : null
+    let leaseId = inheritedLeaseId
+    let ownsLease = false
+    if (!leaseId) {
+      const acquired = this.leaseService.acquire({ surface, taskId, runId: taskId })
+      if (isAgentBrowserError(acquired)) {
+        this.persistenceService.updateProgress(taskId, { currentLabel: null }, {
+          status: 'failed',
+          error: `visible_collect could not acquire ${surface} lease: ${acquired.errorCode}`,
+          finishedAt: new Date().toISOString(),
+        })
+        return
+      }
+      leaseId = acquired.leaseId
+      ownsLease = true
+    }
+
+    try {
+      await this.runVisibleCollectLoop(taskId, payload, surface, leaseId)
+    } finally {
+      if (ownsLease && leaseId) this.leaseService.release(leaseId)
+    }
+  }
+
+  private async runVisibleCollectLoop(
+    taskId: string,
+    payload: Record<string, unknown>,
+    surface: AgentBrowserSurface,
+    leaseId: string,
+  ): Promise<void> {
+    // Guard BEFORE the first page write: opening/navigating the target page is
+    // itself a write. If an inherited lease is already lost (user took over),
+    // stop with lease_lost without touching the page (counterplan §5.5).
+    if (this.leaseService.checkWrite({ surface, leaseId }) !== null) {
+      this.persistenceService.updateProgress(taskId, { total: 0, completed: 0, failed: 0, currentLabel: null }, {
+        status: 'completed',
+        checkpoint: { taskId, stage: 'completed', cursor: null, partialResults: [] },
+        result: { items: [], rounds: 0, stopReason: 'lease_lost' },
+        finishedAt: new Date().toISOString(),
+      })
+      return
+    }
+
+    const targetUrl = String(payload.url || '').trim()
+    const tabId = targetUrl
+      ? (await this.capabilityService.openTarget(targetUrl, 'prefer_reuse')).tabId || null
+      : (typeof payload.tabId === 'string' ? payload.tabId : null)
+
+    const limits: VisibleCollectLimits = {
+      maxItems: toNumberOr(payload.maxItems, DEFAULT_VISIBLE_COLLECT_LIMITS.maxItems),
+      maxRounds: toNumberOr(payload.maxRounds, DEFAULT_VISIBLE_COLLECT_LIMITS.maxRounds),
+      maxExpandsPerRound: toNumberOr(payload.maxExpandsPerRound, DEFAULT_VISIBLE_COLLECT_LIMITS.maxExpandsPerRound),
+      maxDurationMs: toNumberOr(payload.maxDurationMs, DEFAULT_VISIBLE_COLLECT_LIMITS.maxDurationMs),
+      emptyRoundsToStop: toNumberOr(payload.emptyRoundsToStop, DEFAULT_VISIBLE_COLLECT_LIMITS.emptyRoundsToStop),
+    }
+    const template = String(payload.template || 'card_list') as never
+    const itemSelector = typeof payload.itemSelector === 'string' ? payload.itemSelector : undefined
+
+    const deduper = new VisibleCollectDeduper()
+    const collected: BrowserStructuredItem[] = []
+    const startedAt = Date.now()
+    let round = 0
+    let consecutiveEmptyRounds = 0
+    let stopReason: string = 'no_new_content'
+
+    // Resume: seed from the last round checkpoint so we continue from where we
+    // stopped (counterplan §5.5 "恢复后从 checkpoint 继续"), not from scratch.
+    const existing = this.persistenceService.getTask(taskId)
+    const checkpoint = existing?.checkpoint
+    if (checkpoint?.stage === 'visible_collect_round' && Array.isArray(checkpoint.partialResults)) {
+      const prior = checkpoint.partialResults as BrowserStructuredItem[]
+      for (const item of prior) {
+        deduper.addBatch([{ link: item.link, text: item.title || item.summary, containerPath: item.sourceUrl }])
+      }
+      collected.push(...prior)
+      round = Number(checkpoint.cursor || 0) || 0
+    }
+
+    while (true) {
+      // Before any page write this round, confirm we still hold the lease; a
+      // user takeover or expiry stops the loop with lease_lost (counterplan
+      // §5.5). Heartbeat so a long collection does not expire mid-run.
+      const leaseDenied = this.leaseService.checkWrite({ surface, leaseId })
+      const stop = evaluateStop(
+        {
+          collectedCount: collected.length,
+          round,
+          consecutiveEmptyRounds,
+          elapsedMs: Date.now() - startedAt,
+          cancelled: this.cancelledTasks.has(taskId),
+          leaseLost: leaseDenied !== null,
+        },
+        limits,
+      )
+      if (stop) {
+        stopReason = stop
+        break
+      }
+      this.leaseService.heartbeat(leaseId)
+      round += 1
+
+      const extracted = await this.capabilityService.extractStructured(tabId, {
+        template,
+        itemSelector,
+        limit: limits.maxItems,
+      })
+      const freshOriginals: BrowserStructuredItem[] = []
+      for (const item of extracted.items) {
+        const identityInput: VisibleCollectItem = {
+          link: item.link,
+          text: item.title || item.summary,
+          containerPath: item.sourceUrl,
+        }
+        if (deduper.addBatch([identityInput]).length > 0) {
+          freshOriginals.push(item)
+        }
+      }
+      if (freshOriginals.length === 0) {
+        consecutiveEmptyRounds += 1
+      } else {
+        consecutiveEmptyRounds = 0
+        collected.push(...freshOriginals)
+      }
+
+      // Checkpoint EVERY round so a crash/cancel resumes from here.
+      this.persistenceService.updateProgress(taskId, {
+        total: collected.length,
+        completed: collected.length,
+        failed: 0,
+        currentLabel: `round ${round}`,
+      }, {
+        checkpoint: {
+          taskId,
+          stage: 'visible_collect_round',
+          cursor: String(round),
+          partialResults: collected,
+        },
+      })
+
+      if (this.cancelledTasks.has(taskId)) {
+        stopReason = 'cancelled'
+        break
+      }
+
+      const scroll = await this.capabilityService.scrollViewportOnce(tabId)
+      if (scroll.atBottom) {
+        // One more extract pass already happened; let an empty round confirm end.
+        consecutiveEmptyRounds += 1
+      }
+    }
+
+    if (this.cancelledTasks.has(taskId)) return
+
+    this.persistenceService.updateProgress(taskId, {
+      total: collected.length,
+      completed: collected.length,
+      failed: 0,
+      currentLabel: null,
+    }, {
+      status: 'completed',
+      checkpoint: {
+        taskId,
+        stage: 'completed',
+        cursor: null,
+        partialResults: collected,
+      },
+      result: {
+        items: collected,
+        rounds: round,
+        stopReason,
+      },
+      finishedAt: new Date().toISOString(),
+    })
   }
 
   private async runTask(taskId: string, kind: BrowserCapabilityTaskKind, payload: Record<string, unknown>): Promise<void> {
@@ -170,6 +376,11 @@ export class BrowserContentTaskRunner {
         },
         finishedAt: new Date().toISOString(),
       })
+      return
+    }
+
+    if (kind === 'visible_collect') {
+      await this.runVisibleCollect(taskId, payload)
       return
     }
 

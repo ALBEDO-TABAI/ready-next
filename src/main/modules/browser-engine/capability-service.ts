@@ -392,6 +392,29 @@ export class BrowserCapabilityService {
     }
   }
 
+  /**
+   * Scroll one viewport-height down (counterplan §5.5 visible-collect loop).
+   * Returns the new scroll position and whether the page bottom is reached.
+   * NOTE: the humanized-input migration (WP5) will route this through the
+   * unified write channel; today it is a single instant scroll step.
+   */
+  async scrollViewportOnce(tabId: string | null): Promise<{ scrollY: number; atBottom: boolean }> {
+    const raw = await this.host.executeJS(
+      tabId,
+      `
+        (() => {
+          const before = window.scrollY || 0
+          const viewport = window.innerHeight || 800
+          window.scrollBy({ top: Math.round(viewport * 0.9), left: 0, behavior: 'instant' })
+          const after = window.scrollY || 0
+          const maxScroll = Math.max(0, (document.body?.scrollHeight || 0) - viewport)
+          return { scrollY: after, atBottom: after >= maxScroll - 2 || after === before }
+        })()
+      `,
+    ) as { scrollY?: number; atBottom?: boolean } | null
+    return { scrollY: Number(raw?.scrollY || 0), atBottom: Boolean(raw?.atBottom) }
+  }
+
   async captureFromUrl(url: string, options: { customScript: string; timeoutMs?: number; settleMs?: number; preferReuse?: boolean }): Promise<unknown | null> {
     if (options.preferReuse !== false && typeof this.host.captureLiveTabPage === 'function') {
       try {

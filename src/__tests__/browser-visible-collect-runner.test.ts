@@ -1,0 +1,300 @@
+import assert from 'node:assert/strict'
+import { describe, it } from 'node:test'
+
+import { BrowserContentTaskRunner } from '../main/modules/browser-engine/content-task-runner'
+import { BrowserWriteLeaseService } from '../main/modules/browser-engine/browser-write-lease'
+import type { BrowserCapabilityService } from '../main/modules/browser-engine/capability-service'
+import type {
+  BrowserCapabilityTaskHandle,
+  BrowserCapabilityTaskProgress,
+  BrowserCapabilityTaskStatus,
+  BrowserStartTaskRequest,
+  BrowserTaskCheckpoint,
+} from '../main/modules/browser-engine/capability-types'
+
+interface StoredTask {
+  taskId: string
+  kind: string
+  status: BrowserCapabilityTaskStatus
+  payload: Record<string, unknown>
+  progress: BrowserCapabilityTaskProgress
+  checkpoint?: BrowserTaskCheckpoint | null
+  result?: unknown
+  error?: string | null
+  checkpointHistory: BrowserTaskCheckpoint[]
+}
+
+/** In-memory persistence so the runner can be exercised without SQLite. */
+class FakePersistence {
+  store = new Map<string, StoredTask>()
+  private seq = 0
+
+  createTask(request: BrowserStartTaskRequest): BrowserCapabilityTaskHandle {
+    const taskId = `task-${(this.seq += 1)}`
+    this.store.set(taskId, {
+      taskId,
+      kind: request.kind,
+      status: 'queued',
+      payload: request.payload || {},
+      progress: { total: 0, completed: 0, failed: 0, currentLabel: null },
+      checkpointHistory: [],
+    })
+    return this.getTask(taskId) as BrowserCapabilityTaskHandle
+  }
+
+  getTask(taskId: string): BrowserCapabilityTaskHandle | null {
+    const t = this.store.get(taskId)
+    if (!t) return null
+    return {
+      taskId: t.taskId,
+      kind: t.kind as never,
+      status: t.status,
+      progress: t.progress,
+      checkpoint: t.checkpoint ?? null,
+      result: t.result ?? null,
+      error: t.error ?? null,
+    }
+  }
+
+  getTaskPayload(taskId: string): Record<string, unknown> | null {
+    return this.store.get(taskId)?.payload ?? null
+  }
+
+  updateProgress(
+    taskId: string,
+    progress: Partial<BrowserCapabilityTaskProgress>,
+    extras?: {
+      checkpoint?: BrowserTaskCheckpoint | null
+      status?: BrowserCapabilityTaskStatus
+      error?: string | null
+      result?: unknown
+      startedAt?: string | null
+      finishedAt?: string | null
+    },
+  ): BrowserCapabilityTaskHandle | null {
+    const t = this.store.get(taskId)
+    if (!t) return null
+    t.progress = {
+      total: progress.total ?? t.progress.total,
+      completed: progress.completed ?? t.progress.completed,
+      failed: progress.failed ?? t.progress.failed,
+      currentLabel: progress.currentLabel ?? t.progress.currentLabel ?? null,
+    }
+    if (extras?.status) t.status = extras.status
+    if (extras?.checkpoint !== undefined) {
+      t.checkpoint = extras.checkpoint
+      if (extras.checkpoint) t.checkpointHistory.push(extras.checkpoint)
+    }
+    if (extras?.result !== undefined) t.result = extras.result
+    if (extras?.error !== undefined) t.error = extras.error
+    return this.getTask(taskId)
+  }
+
+  listPendingTasks(): BrowserCapabilityTaskHandle[] {
+    return [...this.store.values()]
+      .filter((t) => ['queued', 'running', 'paused'].includes(t.status))
+      .map((t) => this.getTask(t.taskId) as BrowserCapabilityTaskHandle)
+  }
+}
+
+/** Capability fake that serves N rounds of feed items then settles at the bottom. */
+function createCapability(pages: Array<Array<{ link: string; title: string }>>) {
+  let round = -1
+  let bottom = false
+  const capability = {
+    openTarget: async () => ({ success: true, tabId: 'tab-1' }),
+    extractStructured: async () => {
+      const items = (pages[Math.min(round + 1, pages.length - 1)] || []).map((it) => ({
+        sourceUrl: 'https://example.com/feed',
+        title: it.title,
+        link: it.link,
+      }))
+      return { template: 'card_list' as const, items, sourceUrl: 'https://example.com/feed' }
+    },
+    scrollViewportOnce: async () => {
+      round += 1
+      if (round >= pages.length - 1) bottom = true
+      return { scrollY: round * 800, atBottom: bottom }
+    },
+  }
+  return capability as unknown as BrowserCapabilityService
+}
+
+async function waitForStatus(persistence: FakePersistence, taskId: string, statuses: BrowserCapabilityTaskStatus[], timeoutMs = 2_000) {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    const task = persistence.getTask(taskId)
+    if (task && statuses.includes(task.status)) return task
+    await new Promise((r) => setTimeout(r, 5))
+  }
+  throw new Error(`task ${taskId} did not reach ${statuses.join('/')} in time`)
+}
+
+describe('visible_collect task runner', () => {
+  it('collects across rounds, dedupes, and writes a checkpoint every round', async () => {
+    const persistence = new FakePersistence()
+    const capability = createCapability([
+      [{ link: 'https://example.com/1', title: 'One' }, { link: 'https://example.com/2', title: 'Two' }],
+      [{ link: 'https://example.com/2', title: 'Two' }, { link: 'https://example.com/3', title: 'Three' }],
+      [{ link: 'https://example.com/3', title: 'Three' }],
+    ])
+    const runner = new BrowserContentTaskRunner(capability, persistence as never, new BrowserWriteLeaseService())
+
+    const handle = await runner.startTask({
+      kind: 'visible_collect',
+      payload: { url: 'https://example.com/feed', template: 'card_list', maxRounds: 10 },
+    })
+    const done = await waitForStatus(persistence, handle.taskId, ['completed'])
+
+    const result = done.result as { items: Array<{ link: string }>; rounds: number; stopReason: string }
+    const links = result.items.map((i) => i.link).sort()
+    assert.deepEqual(links, ['https://example.com/1', 'https://example.com/2', 'https://example.com/3'], 'deduped union across rounds')
+
+    const stored = persistence.store.get(handle.taskId)!
+    const roundCheckpoints = stored.checkpointHistory.filter((c) => c.stage === 'visible_collect_round')
+    assert.ok(roundCheckpoints.length >= 2, 'must checkpoint every round, not only on completion')
+    assert.equal(done.status, 'completed')
+  })
+
+  it('stops with no_new_content when the feed stops producing new items', async () => {
+    const persistence = new FakePersistence()
+    const capability = createCapability([
+      [{ link: 'https://example.com/1', title: 'One' }],
+      [{ link: 'https://example.com/1', title: 'One' }],
+      [{ link: 'https://example.com/1', title: 'One' }],
+    ])
+    const runner = new BrowserContentTaskRunner(capability, persistence as never, new BrowserWriteLeaseService())
+    const handle = await runner.startTask({
+      kind: 'visible_collect',
+      payload: { template: 'card_list', tabId: 'tab-1', maxRounds: 50 },
+    })
+    const done = await waitForStatus(persistence, handle.taskId, ['completed'])
+    const result = done.result as { stopReason: string; items: unknown[] }
+    assert.equal(result.stopReason, 'no_new_content')
+    assert.equal(result.items.length, 1)
+  })
+
+  it('cancellation leaves the task queryable with cancelled status', async () => {
+    const persistence = new FakePersistence()
+    // A feed that never runs dry, so the loop relies on cancellation to stop.
+    const endless = {
+      openTarget: async () => ({ success: true, tabId: 'tab-1' }),
+      extractStructured: async () => {
+        const id = Math.random().toString(36).slice(2)
+        return {
+          template: 'card_list' as const,
+          items: [{ sourceUrl: 'u', title: id, link: `https://example.com/${id}` }],
+          sourceUrl: 'u',
+        }
+      },
+      scrollViewportOnce: async () => ({ scrollY: 0, atBottom: false }),
+    } as unknown as BrowserCapabilityService
+    const runner = new BrowserContentTaskRunner(endless, persistence as never, new BrowserWriteLeaseService())
+    const handle = await runner.startTask({
+      kind: 'visible_collect',
+      payload: { template: 'card_list', tabId: 'tab-1', maxRounds: 100000, maxDurationMs: 60000 },
+    })
+    await new Promise((r) => setTimeout(r, 10))
+    await runner.cancelTask(handle.taskId)
+    const task = await waitForStatus(persistence, handle.taskId, ['cancelled'])
+    assert.equal(task.status, 'cancelled')
+  })
+
+  it('resumes from the last round checkpoint instead of restarting from scratch', async () => {
+    const persistence = new FakePersistence()
+    // Seed a task that already collected items 1-3 across 2 rounds, then paused.
+    const seeded = persistence.createTask({ kind: 'visible_collect', payload: { template: 'card_list', tabId: 'tab-1', maxRounds: 50 } })
+    const priorItems = [
+      { sourceUrl: 'u', title: 'One', link: 'https://example.com/1' },
+      { sourceUrl: 'u', title: 'Two', link: 'https://example.com/2' },
+      { sourceUrl: 'u', title: 'Three', link: 'https://example.com/3' },
+    ]
+    persistence.updateProgress(seeded.taskId, { total: 3, completed: 3 }, {
+      status: 'paused',
+      checkpoint: { taskId: seeded.taskId, stage: 'visible_collect_round', cursor: '2', partialResults: priorItems },
+    })
+
+    // On resume the feed re-serves item 3 (already seen) plus a new item 4.
+    const capability = {
+      openTarget: async () => ({ success: true, tabId: 'tab-1' }),
+      extractStructured: async () => ({
+        template: 'card_list' as const,
+        items: [
+          { sourceUrl: 'u', title: 'Three', link: 'https://example.com/3' },
+          { sourceUrl: 'u', title: 'Four', link: 'https://example.com/4' },
+        ],
+        sourceUrl: 'u',
+      }),
+      scrollViewportOnce: async () => ({ scrollY: 0, atBottom: true }),
+    } as unknown as BrowserCapabilityService
+    const runner = new BrowserContentTaskRunner(capability, persistence as never, new BrowserWriteLeaseService())
+
+    await runner.resumeTask(seeded.taskId)
+    const done = await waitForStatus(persistence, seeded.taskId, ['completed'])
+    const result = done.result as { items: Array<{ link: string }>; rounds: number }
+    const links = result.items.map((i) => i.link).sort()
+    // Prior 3 are retained (not re-collected as duplicates) and only item 4 is added.
+    assert.deepEqual(links, ['https://example.com/1', 'https://example.com/2', 'https://example.com/3', 'https://example.com/4'])
+    assert.ok(result.rounds > 2, 'round counter continued from the checkpoint cursor (2), not from 0')
+  })
+
+  it('the background loop stops with lease_lost when the user takes over (no bypass of the lease)', async () => {
+    const persistence = new FakePersistence()
+    const lease = new BrowserWriteLeaseService()
+    // An agent run holds the user-view lease, then the user takes over.
+    const held = lease.acquire({ surface: 'user-view', taskId: 'agent-run', runId: 'agent-run' })
+    if ('errorCode' in held) throw new Error('expected lease')
+    lease.recordUserSignal({ surface: 'user-view', source: 'keyboard' })
+
+    // An endless feed: only the lease check can stop it.
+    let extractCalls = 0
+    const endless = {
+      openTarget: async () => ({ success: true, tabId: 'tab-1' }),
+      extractStructured: async () => {
+        extractCalls += 1
+        const id = Math.random().toString(36).slice(2)
+        return { template: 'card_list' as const, items: [{ sourceUrl: 'u', title: id, link: `https://example.com/${id}` }], sourceUrl: 'u' }
+      },
+      scrollViewportOnce: async () => ({ scrollY: 0, atBottom: false }),
+    } as unknown as BrowserCapabilityService
+    const runner = new BrowserContentTaskRunner(endless, persistence as never, lease)
+
+    const handle = await runner.startTask({
+      kind: 'visible_collect',
+      // Inherit the (now taken-over) lease so the loop must detect the takeover.
+      payload: { template: 'card_list', tabId: 'tab-1', maxRounds: 100000, surface: 'user-view', leaseId: held.leaseId },
+    })
+    const done = await waitForStatus(persistence, handle.taskId, ['completed'])
+    const result = done.result as { stopReason: string; items: unknown[] }
+    assert.equal(result.stopReason, 'lease_lost', 'must stop because the lease was lost to the user')
+    assert.equal(extractCalls, 0, 'must not perform any page write/extract after losing the lease')
+  })
+
+  it('does NOT open/navigate the url when an inherited lease is already taken over', async () => {
+    const persistence = new FakePersistence()
+    const lease = new BrowserWriteLeaseService()
+    const held = lease.acquire({ surface: 'user-view', taskId: 'agent-run', runId: 'agent-run' })
+    if ('errorCode' in held) throw new Error('expected lease')
+    lease.recordUserSignal({ surface: 'user-view', source: 'keyboard' })
+
+    let openTargetCalls = 0
+    let extractCalls = 0
+    const capability = {
+      openTarget: async () => { openTargetCalls += 1; return { success: true, tabId: 'tab-1' } },
+      extractStructured: async () => { extractCalls += 1; return { template: 'card_list' as const, items: [], sourceUrl: 'u' } },
+      scrollViewportOnce: async () => ({ scrollY: 0, atBottom: false }),
+    } as unknown as BrowserCapabilityService
+    const runner = new BrowserContentTaskRunner(capability, persistence as never, lease)
+
+    const handle = await runner.startTask({
+      kind: 'visible_collect',
+      // url path + inherited lease that is already taken over.
+      payload: { url: 'https://example.com/feed', template: 'card_list', surface: 'user-view', leaseId: held.leaseId },
+    })
+    const done = await waitForStatus(persistence, handle.taskId, ['completed'])
+    const result = done.result as { stopReason: string }
+    assert.equal(result.stopReason, 'lease_lost')
+    assert.equal(openTargetCalls, 0, 'must not open/navigate the page after the lease was lost')
+    assert.equal(extractCalls, 0)
+  })
+})

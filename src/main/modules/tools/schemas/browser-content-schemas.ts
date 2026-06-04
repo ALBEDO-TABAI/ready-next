@@ -61,12 +61,25 @@ export const BrowserScrollCollectSchema = z.object({
 
 export const BrowserStartTaskSchema = z.object({
   kind: z
-    .enum(['download_urls', 'scroll_collect', 'research'])
-    .describe('任务类型：download_urls/scroll_collect/research'),
+    .enum(['download_urls', 'scroll_collect', 'research', 'visible_collect'])
+    .describe('任务类型：download_urls/scroll_collect/research/visible_collect'),
   payload: z
     .record(z.string(), z.unknown())
     .describe('任务参数对象')
     .meta({ additionalProperties: true }),
+})
+
+export const BrowserVisibleCollectSchema = z.object({
+  url: z.string().optional().describe('可选：先打开或复用该 URL 再采集；留空则采集当前页'),
+  tab_id: TabIdOptional,
+  template: z
+    .enum(['article_list', 'image_gallery', 'link_list', 'card_list', 'custom'])
+    .optional()
+    .describe('提取模板，默认 card_list'),
+  item_selector: z.string().optional().describe('可选：限定采集项选择器'),
+  max_items: z.number().optional().describe('最多采集条数（硬上限）'),
+  max_rounds: z.number().optional().describe('最大轮数（硬上限）'),
+  max_duration_ms: z.number().optional().describe('最长运行毫秒（硬上限）'),
 })
 
 export const BrowserGetTaskSchema = z.object({
@@ -144,6 +157,7 @@ export type BrowserContentToolName =
   | 'browser_research_topic'
   | 'browser_run_workflow'
   | 'browser_execute_js'
+  | 'browser_visible_collect'
 
 export const BROWSER_CONTENT_SCHEMAS: Record<
   BrowserContentToolName,
@@ -162,4 +176,5 @@ export const BROWSER_CONTENT_SCHEMAS: Record<
   browser_research_topic: BrowserResearchTopicSchema,
   browser_run_workflow: BrowserRunWorkflowSchema,
   browser_execute_js: BrowserExecuteJsSchema,
+  browser_visible_collect: BrowserVisibleCollectSchema,
 }

@@ -74,7 +74,7 @@ export interface BrowserCapabilityTaskProgress {
   currentLabel?: string | null
 }
 
-export type BrowserCapabilityTaskKind = 'download_urls' | 'scroll_collect' | 'research'
+export type BrowserCapabilityTaskKind = 'download_urls' | 'scroll_collect' | 'research' | 'visible_collect'
 export type BrowserCapabilityTaskStatus =
   | 'queued'
   | 'running'
