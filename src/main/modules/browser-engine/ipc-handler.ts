@@ -248,7 +248,10 @@ export class BrowserController {
             })
           },
         }),
-        isControlFrozen: () => this.agentTabControlGate.isWriteBlocked(),
+        // Only a CONFIRMED freeze cancels the background task; pending_confirm
+        // blocks writes (via the facade's isWriteBlocked) but must not cancel
+        // before the user confirms (Codex result-review #1 residual).
+        isControlFrozen: () => this.agentTabControlGate.isFrozen(),
       }),
     )
     this.tabMetaService = new BrowserTabMetaService({

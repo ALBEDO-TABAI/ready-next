@@ -34,6 +34,16 @@ export class AgentTabControlGate {
   }
 
   /**
+   * Whether the user has CONFIRMED the interruption. Distinct from
+   * isWriteBlocked: `pending_confirm` blocks writes but must NOT cancel the
+   * background task — only a confirmed freeze does (Codex result-review #1
+   * residual). The runner's stop probe consumes this, not isWriteBlocked.
+   */
+  isFrozen(): boolean {
+    return this.state === 'frozen'
+  }
+
+  /**
    * A user interaction with the agent tab (page click/input/navigate/close) or
    * an explicit stop/takeover button. Freezes agent writes pending the
    * secondary confirmation. Returns true if it transitioned active→pending.

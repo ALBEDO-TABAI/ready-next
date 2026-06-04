@@ -55,4 +55,31 @@ describe('AgentTabControlGate (freeze-then-confirm, §3.6)', () => {
     assert.equal(gate.getState(), 'active')
     assert.equal(gate.isWriteBlocked(), false)
   })
+
+  it('pending_confirm blocks writes but is NOT frozen — only confirm cancels the task', () => {
+    // Codex result-review #1 residual: the runner's cancel probe (isFrozen) must
+    // not fire while merely pending, or the task would cancel before the user
+    // confirms. Writes are still blocked during pending (isWriteBlocked).
+    const gate = new AgentTabControlGate()
+    assert.equal(gate.isFrozen(), false)
+    assert.equal(gate.isWriteBlocked(), false)
+
+    gate.requestInterruption()
+    assert.equal(gate.getState(), 'pending_confirm')
+    assert.equal(gate.isWriteBlocked(), true, 'pending blocks writes')
+    assert.equal(gate.isFrozen(), false, 'pending must NOT cancel the task')
+
+    gate.confirmInterruption()
+    assert.equal(gate.getState(), 'frozen')
+    assert.equal(gate.isWriteBlocked(), true)
+    assert.equal(gate.isFrozen(), true, 'only a confirmed freeze cancels')
+  })
+
+  it('dismiss from pending clears both write-block and frozen', () => {
+    const gate = new AgentTabControlGate()
+    gate.requestInterruption()
+    gate.dismissInterruption()
+    assert.equal(gate.isWriteBlocked(), false)
+    assert.equal(gate.isFrozen(), false)
+  })
 })
