@@ -6,6 +6,16 @@ function applyRoundedViewport(_view: BrowserHostView): void {
   // Rounded clipping is handled at the native host view layer.
 }
 
+/**
+ * Transient/placeholder titles that must never be persisted as a page's name in
+ * history (they are the cause of the "Loading…" / "New Tab" history entries).
+ */
+function isPlaceholderTitle(title: string | null | undefined): boolean {
+  const t = String(title || '').trim()
+  if (!t) return true
+  return /^(loading…?|loading\.\.\.|new tab|untitled|about:blank|新标签页|加载中…?)$/i.test(t)
+}
+
 export type BrowserLifecycleTabOwner = 'manual' | 'agent'
 export type BrowserLifecycleTabActivity = 'idle' | 'running' | 'attention'
 
@@ -67,6 +77,7 @@ interface BrowserTabLifecycleHost {
     transition?: string | null
     sessionId?: string | null
   }): void
+  updateHistoryEntryTitle(url: string, title: string, favicon?: string | null): void
   browserUserAgent: string
   useMock: boolean
 }
@@ -193,6 +204,16 @@ export class BrowserTabLifecycleService {
       tab.title = title
       this.host.sendToRenderer('browser:tabUpdate', { type: 'title', tabId, title })
       this.host.emitTabMeta(tabId)
+      // Backfill the history row written at did-navigate time, when the new
+      // page's real title was not yet known (it was still the previous page's
+      // title or a "Loading…"/"New Tab" placeholder).
+      if (!isReadyBrowserBlankUrl(tab.url) && !isPlaceholderTitle(title)) {
+        try {
+          this.host.updateHistoryEntryTitle(tab.url, title, tab.favicon)
+        } catch {
+          // ignore history write failures
+        }
+      }
     })
 
     view.webContents.on('page-favicon-updated', (_event, favicons) => {
@@ -208,7 +229,11 @@ export class BrowserTabLifecycleService {
       tab.error = null
       if (!isReadyBrowserBlankUrl(newUrl)) {
         try {
-          this.host.addHistoryEntry(newUrl, tab.title, {
+          // At navigation-commit time the new document's title has not loaded
+          // yet (`tab.title` still holds the previous page's title or a
+          // placeholder), so persist an empty title and let page-title-updated
+          // backfill the real one; the menu falls back to the URL until then.
+          this.host.addHistoryEntry(newUrl, '', {
             favicon: tab.favicon,
             transition: 'navigate',
             sessionId: tabId,

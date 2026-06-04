@@ -1958,6 +1958,25 @@ export class DatabaseManager {
     return id
   }
 
+  updateHistoryEntryTitle(url: string, title: string, favicon?: string | null): void {
+    if (!this.db) return
+    const trimmed = String(title || '').trim()
+    if (!trimmed) return
+    // Backfill the most recent visit for this URL with the real page title (and
+    // favicon, when provided) once it becomes available after navigation.
+    if (favicon !== undefined) {
+      this.db.prepare(
+        `UPDATE browser_history SET title = ?, favicon = ?
+         WHERE id = (SELECT id FROM browser_history WHERE url = ? ORDER BY visited_at DESC LIMIT 1)`
+      ).run(trimmed, favicon ?? null, url)
+    } else {
+      this.db.prepare(
+        `UPDATE browser_history SET title = ?
+         WHERE id = (SELECT id FROM browser_history WHERE url = ? ORDER BY visited_at DESC LIMIT 1)`
+      ).run(trimmed, url)
+    }
+  }
+
   getHistory(limit?: number): BrowserHistoryEntry[] {
     if (!this.db) return []
     const sql = limit

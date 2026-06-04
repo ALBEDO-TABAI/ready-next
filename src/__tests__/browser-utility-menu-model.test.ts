@@ -77,3 +77,26 @@ test('more utility menu nests recent history inside the menu tree instead of ope
   assert.equal(model.items.some((item) => item.label === '打印'), true)
   assert.equal(model.items.some((item) => item.label === '外部浏览器打开'), true)
 })
+
+test('history entries with placeholder titles fall back to a readable URL instead of showing "Loading…"/"New Tab"', () => {
+  const model = buildBrowserUtilityMenuModel('more', createState({
+    history: [
+      { id: 'h1', title: 'Loading...', url: 'https://github.com/openai/codex', visited_at: 5 },
+      { id: 'h2', title: 'New Tab', url: 'https://example.com/feed?page=2', visited_at: 4 },
+      { id: 'h3', title: '加载中…', url: 'https://news.ycombinator.com/', visited_at: 3 },
+      { id: 'h4', title: 'Real Title', url: 'https://real.example.com/post', visited_at: 2 },
+    ],
+  }))
+  const historyItem = model.items.find((item) => item.label === '历史记录')
+  const labels = (historyItem?.items ?? []).map((i) => i.label)
+
+  // No placeholder strings leak into the menu.
+  for (const bad of ['Loading...', 'New Tab', '加载中…']) {
+    assert.equal(labels.includes(bad), false, `placeholder "${bad}" must not be shown`)
+  }
+  // Placeholder rows render their URL (host + path); real titles are kept.
+  assert.equal(labels.includes('github.com/openai/codex'), true)
+  assert.equal(labels.includes('example.com/feed?page=2'), true)
+  assert.equal(labels.includes('news.ycombinator.com'), true)
+  assert.equal(labels.includes('Real Title'), true)
+})

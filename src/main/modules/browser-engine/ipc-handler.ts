@@ -250,6 +250,7 @@ export class BrowserController {
       handleWindowOpen: (details, source, sourceContentsId) => this.handleWindowOpen(details, source, sourceContentsId),
       ensureDownloadSession: (targetSession) => this.downloadService.ensureRegistered(targetSession),
       addHistoryEntry: (url, title, metadata) => this.dataService.addHistoryEntry(url, title, metadata),
+      updateHistoryEntryTitle: (url, title, favicon) => this.dataService.updateHistoryEntryTitle(url, title, favicon),
       browserUserAgent: this.browserUserAgent,
       useMock: this.useMock,
     })

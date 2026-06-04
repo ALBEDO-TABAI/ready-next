@@ -146,6 +146,22 @@ function buildDownloadsMenu(state: BrowserUtilityMenuState): BrowserUtilityMenuM
   }
 }
 
+function isPlaceholderHistoryTitle(title: string | null | undefined): boolean {
+  const t = String(title || '').trim()
+  if (!t) return true
+  return /^(loading…?|loading\.\.\.|new tab|untitled|about:blank|新标签页|加载中…?)$/i.test(t)
+}
+
+function prettyHistoryUrl(url: string): string {
+  try {
+    const u = new URL(url)
+    const path = (u.pathname + u.search).replace(/\/$/, '')
+    return path && path !== '/' ? `${u.hostname}${path}` : u.hostname
+  } catch {
+    return url
+  }
+}
+
 function buildHistorySubmenu(state: BrowserUtilityMenuState): BrowserUtilityMenuItem {
   const historyItems: BrowserUtilityMenuItem[] = state.history
     .slice()
@@ -153,7 +169,11 @@ function buildHistorySubmenu(state: BrowserUtilityMenuState): BrowserUtilityMenu
     .slice(0, 10)
     .map((item) => ({
       type: 'action',
-      label: truncateMenuLabel(item.title || item.url || '未命名页面'),
+      // Fall back to a readable URL when the stored title is a placeholder, so
+      // older "Loading…"/"New Tab" rows also display cleanly.
+      label: truncateMenuLabel(
+        isPlaceholderHistoryTitle(item.title) ? prettyHistoryUrl(item.url) : item.title,
+      ),
       action: 'open-history-entry',
       payload: { url: item.url },
     }))

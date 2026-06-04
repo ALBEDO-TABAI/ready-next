@@ -127,6 +127,10 @@ export class BrowserDataService {
     return this.repository.addHistoryEntry(url, title, metadata)
   }
 
+  updateHistoryEntryTitle(url: string, title: string, favicon?: string | null): void {
+    this.repository.updateHistoryEntryTitle(url, title, favicon)
+  }
+
   getHistory(limit?: number): BrowserHistoryEntry[] {
     return this.repository.getHistory(limit)
   }

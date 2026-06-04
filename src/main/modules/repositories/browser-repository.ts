@@ -43,6 +43,10 @@ export class BrowserRepository {
     return getDatabase().addHistoryEntry(url, title, metadata)
   }
 
+  updateHistoryEntryTitle(url: string, title: string, favicon?: string | null): void {
+    getDatabase().updateHistoryEntryTitle(url, title, favicon)
+  }
+
   getHistory(limit?: number): BrowserHistoryEntry[] {
     return getDatabase().getHistory(limit)
   }
