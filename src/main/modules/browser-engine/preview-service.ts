@@ -1,5 +1,6 @@
 import type { WebContents } from 'electron'
 import { isAllowedBrowserURL } from './popup-policy'
+import { loadUrlIgnoringAbort } from './load-url-safe'
 import { type BrowserHostView, type BrowserRect, createDefaultPreviewState, type PreviewTabState } from './host-types'
 
 function applyRoundedPreviewViewport(_view: BrowserHostView): void {
@@ -170,7 +171,8 @@ export class BrowserPreviewService {
       error: undefined,
     }
     this.sendPreviewUpdate()
-    await view.webContents.loadURL(url)
+    const opened = await loadUrlIgnoringAbort(view.webContents, url)
+    if (!opened.ok) return { success: false, error: opened.error }
     return { success: true }
   }
 
@@ -187,7 +189,8 @@ export class BrowserPreviewService {
     const view = this.ensurePreviewView()
     this.shouldRestoreActiveTab = this.deps.hideActiveTab() || this.shouldRestoreActiveTab
     this.deps.showHost(view, this.deps.getPreviewBounds())
-    await view.webContents.loadURL(url)
+    const loaded = await loadUrlIgnoringAbort(view.webContents, url)
+    if (!loaded.ok) return { success: false, error: loaded.error }
     return { success: true }
   }
 

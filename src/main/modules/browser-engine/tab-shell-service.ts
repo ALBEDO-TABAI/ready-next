@@ -1,5 +1,6 @@
 import type { BrowserBoundsSyncMode, BrowserHostView, BrowserRect, BrowserViewBoundsUpdate } from './host-types'
 import { isReadyBrowserBlankUrl } from '../../../shared/browser-defaults'
+import { loadUrlIgnoringAbort } from './load-url-safe'
 import type { BrowserViewIntent, Rect } from '../../../shared/browser-view-intent'
 
 function rectToBrowserRect(rect: Rect): BrowserRect {
@@ -122,7 +123,8 @@ export class BrowserTabShellService {
     if (!tab?.view) return { success: false, error: 'Tab not found' }
 
     const shouldClearBlankHistory = isReadyBrowserBlankUrl(tab.url) && !isReadyBrowserBlankUrl(url)
-    await tab.view.webContents.loadURL(url)
+    const loaded = await loadUrlIgnoringAbort(tab.view.webContents, url)
+    if (!loaded.ok) return { success: false, error: loaded.error }
     if (shouldClearBlankHistory) {
       tab.view.webContents.navigationHistory.clear?.()
     }
