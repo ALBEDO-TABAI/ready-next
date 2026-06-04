@@ -57,9 +57,15 @@ export function useAgentBrowserSupervision(): AgentBrowserSupervisionState & {
     mounted.current = true
     void refresh()
     const id = window.setInterval(refresh, POLL_MS)
+    // Push: refresh immediately when the control gate changes (e.g. the user
+    // touches the agent tab → pending_confirm) instead of waiting for the poll.
+    const off = window.electronAPI?.browser?.onAgentControlChanged?.(() => {
+      void refresh()
+    })
     return () => {
       mounted.current = false
       window.clearInterval(id)
+      off?.()
     }
   }, [refresh])
 

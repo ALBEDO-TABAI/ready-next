@@ -336,3 +336,15 @@ Matrix 的 agent 浏览器是**独立隐藏进程**（browser-v2，visibility se
 - supervision 面板在 native BrowserView 上的可见性/定位（与 BrowserDiagnosticsDock 同框，待确认是否被遮挡或需 hideAll）。
 - freeze → 引擎下一篇 shouldStop 命中的实际时延。
 - 登录态下对真实小红书主页逐篇采集的端到端跑通。
+
+### 11.4 结果评审 Round 1（2026-06-05，Codex → REQUEST-CHANGES，5 条已修）
+
+Codex 接受架构偏离方向，但要求守住配套硬边界。5 条必改逐条修复：
+
+1. **二级确认后立即取消任务**：`confirmAgentInterruption` 现在 freeze 后立即 `cancelTask` 所有 note_collect 任务（不等下一循环）；`runNoteCollect` 终态按 stopReason 写 `cancelled`（freeze/lease takeover 不再写成 completed）。
+2. **agent tab 用户交互触发冻结**：`ensureAgentTab` 给 agent tab webContents 挂 `before-input-event`——用户真实键入（agent 自身经 CDP/loadURL 不触发）→ requestInterruption + preventDefault 拦截，直到二级确认；新增 `browser:agentControlChanged` 推送，面板即时刷新。
+3. **scrollCollect 定向 sourceUrl**：`scrollCollect` 的 sourceUrl 改从目标 tabId 取（与 extractStructured 一致），不再污染为 active tab。
+4. **ensureAgentTab 真不抢前台**：`createTab` 新增 `background` 形态——后台标签页不 setActive、不 showHost、不 finalizeSwap，页面后台加载、零闪烁；ensureAgentTab 改用 background:true。
+5. **高风控预算**：新增全局并发 cap（高风控限 1 并发 → 同域串行 = per-domain 频控）+ 逐篇 1.5s 限速 + 下载量预算（`maxTotalImages`=400，引擎累计图片数到顶停 `max_images`；字节级预算需下载层报告字节数，留作后续）。
+
+新增/更新测试：engine `max_images`、runner freeze/takeover 终态 `cancelled`。typecheck 绿，全量通过（仅 2 个既有 liquid-glass 失败）。仍待实测：before-input-event 冻结、background tab 不抢前台、面板遮挡。

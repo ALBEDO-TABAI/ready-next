@@ -85,10 +85,17 @@ interface BrowserTabLifecycleHost {
 export class BrowserTabLifecycleService {
   constructor(private readonly host: BrowserTabLifecycleHost) {}
 
-  async createTab(url: string): Promise<{ success: boolean; tabId?: string; error?: string }> {
+  async createTab(
+    url: string,
+    options?: { background?: boolean },
+  ): Promise<{ success: boolean; tabId?: string; error?: string }> {
     if (!this.host.isAllowedUrl(url)) {
       return { success: false, error: 'Blocked URL protocol. Only http:, https:, and local HTML files are allowed.' }
     }
+    // background tabs (e.g. the agent collection tab) load WITHOUT becoming the
+    // active tab or being presented, so they never preempt the user's foreground
+    // (Codex result-review #4 — no flicker from create-then-switch-back).
+    const background = options?.background === true
 
     const tabId = this.host.getNextTabId()
     if (this.host.useMock) {
@@ -108,7 +115,7 @@ export class BrowserTabLifecycleService {
         error: null,
       }
       this.host.tabs.set(tabId, tab)
-      this.host.setActiveTabId(tabId)
+      if (!background) this.host.setActiveTabId(tabId)
       return { success: true, tabId }
     }
 
@@ -185,8 +192,13 @@ export class BrowserTabLifecycleService {
       finalizeSwap(true)
     })
 
-    this.host.setActiveTabId(tabId)
-    finalizeSwap(true)
+    // background: do NOT activate or present. finalizeSwap no-ops while the tab
+    // isn't active, so did-stop-loading won't show it either; the page still
+    // loads in the background. Switching to it later (user choice) presents it.
+    if (!background) {
+      this.host.setActiveTabId(tabId)
+      finalizeSwap(true)
+    }
     // fire-and-forget: load failures already surface via the `did-fail-load` webContents event which the host listens to; the catch here just prevents an unhandledRejection.
     view.webContents.loadURL(url).catch(() => {
       // handled by did-fail-load

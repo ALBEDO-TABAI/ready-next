@@ -363,6 +363,11 @@ const browserAPI = {
   requestAgentInterruption: () => ipcRenderer.invoke('browser:requestAgentInterruption'),
   confirmAgentInterruption: () => ipcRenderer.invoke('browser:confirmAgentInterruption'),
   dismissAgentInterruption: () => ipcRenderer.invoke('browser:dismissAgentInterruption'),
+  onAgentControlChanged: (callback: (data: { state: string }) => void) => {
+    const handler = (_event: unknown, data: { state: string }) => callback(data)
+    ipcRenderer.on('browser:agentControlChanged', handler)
+    return () => ipcRenderer.removeListener('browser:agentControlChanged', handler)
+  },
   setAdblockEnabled: (enabled: boolean, scope?: 'main' | 'preview' | 'all') =>
     ipcRenderer.invoke('browser:setAdblockEnabled', { enabled, scope }),
   toggleAdblockDomain: (domain: string) => ipcRenderer.invoke('browser:toggleAdblockDomain', { domain }),

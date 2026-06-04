@@ -41,6 +41,12 @@ export interface BrowserCollectionDeps {
   interNoteDelayMs?: number
   /** Injected sleep so pacing is unit-testable without real timers. */
   sleep?: (ms: number) => Promise<void>
+  /**
+   * Download-volume budget (plan §4.4): stop once this many images have been
+   * saved across all notes. A practical proxy for a byte budget — the download
+   * layer reports counts, not bytes. 0/undefined = no budget.
+   */
+  maxTotalImages?: number
 }
 
 function defaultSleep(ms: number): Promise<void> {
@@ -69,13 +75,19 @@ export async function runBrowserCollection(
 ): Promise<BrowserCollectionResult> {
   let state = initialState ?? createCollectionLoopState(deps.now())
   let rounds = 0
+  let totalImages = 0
   const sleep = deps.sleep ?? defaultSleep
   const interNoteDelayMs = deps.interNoteDelayMs && deps.interNoteDelayMs > 0 ? deps.interNoteDelayMs : 0
+  const maxTotalImages = deps.maxTotalImages && deps.maxTotalImages > 0 ? deps.maxTotalImages : 0
 
   while (true) {
     const external = deps.shouldStop?.() ?? null
     if (external) {
       return { collected: state.collected, failed: state.failed, rounds, stopReason: external }
+    }
+    if (maxTotalImages > 0 && totalImages >= maxTotalImages) {
+      deps.onProgress?.(progressOf(plan, state, null, 'max_images'))
+      return { collected: state.collected, failed: state.failed, rounds, stopReason: 'max_images' }
     }
     const step = planNextNote(plan, state, deps.now())
     if (step.stop || !step.note) {
@@ -102,6 +114,7 @@ export async function runBrowserCollection(
       { noteUrl: note.url, title: note.title, outputDir: plan.outputRootDir },
       deps.pathJoin,
     )
+    totalImages += result.imageCount
     state = recordNoteResult(state, note, { success: result.success, reason: result.reason })
     await deps.onCheckpoint?.(state, progressOf(plan, state, note.title ?? note.url, null))
   }

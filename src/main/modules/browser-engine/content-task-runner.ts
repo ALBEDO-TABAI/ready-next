@@ -359,6 +359,9 @@ export class BrowserContentTaskRunner {
         }
       : parsed.plan
     const interNoteDelayMs = isHighControl ? 1_500 : 0
+    // Download-volume budget on high-control platforms (Codex result-review #5):
+    // a safety ceiling on total images saved across the collection.
+    const maxTotalImages = isHighControl ? 400 : 0
 
     // Own an agent-view lease for the whole task, tied to the agent tab, so the
     // background loop never collides with the user's foreground writes.
@@ -390,6 +393,7 @@ export class BrowserContentTaskRunner {
           pathJoin: (...parts) => parts.join('/'),
           now: () => Date.now(),
           interNoteDelayMs,
+          maxTotalImages,
           shouldStop: () => {
             if (this.cancelledTasks.has(taskId)) return 'cancelled'
             // A user freeze (AgentTabControlGate) stops the agent cleanly, not as
@@ -422,15 +426,22 @@ export class BrowserContentTaskRunner {
         initialState,
       )
 
+      // cancelTask() (incl. the confirm→cancel path) already wrote 'cancelled';
+      // don't overwrite it with a completion.
       if (this.cancelledTasks.has(taskId)) return
+      // A user freeze or a lease takeover is NOT a successful completion (Codex
+      // result-review #1): reflect the interruption in the task status.
+      const finalStatus = result.stopReason === 'cancelled' || result.stopReason === 'lease_lost'
+        ? 'cancelled'
+        : 'completed'
       this.persistenceService.updateProgress(taskId, {
         total: plan.notes.length,
         completed: result.collected.length,
         failed: result.failed.length,
         currentLabel: null,
       }, {
-        status: 'completed',
-        checkpoint: { taskId, stage: 'completed', cursor: null, partialResults: null },
+        status: finalStatus,
+        checkpoint: { taskId, stage: finalStatus === 'completed' ? 'completed' : 'cancelled', cursor: null, partialResults: null },
         result: { collected: result.collected, failed: result.failed, rounds: result.rounds, stopReason: result.stopReason },
         finishedAt: new Date().toISOString(),
       })

@@ -64,6 +64,8 @@ export type CollectionStopReason =
   | 'max_notes'
   | 'max_duration'
   | 'too_many_failures'
+  // Download-volume budget (high-control safety ceiling).
+  | 'max_images'
   // External stops surfaced by the runner via the engine's shouldStop probe.
   | 'cancelled'
   | 'lease_lost'

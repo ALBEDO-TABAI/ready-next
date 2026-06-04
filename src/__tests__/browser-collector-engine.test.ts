@@ -103,6 +103,26 @@ describe('runBrowserCollection (background per-note loop)', () => {
     assert.deepEqual(sleeps, [1500, 1500], 'paces before notes 2 and 3, not before note 1')
   })
 
+  it('stops with max_images once the download-volume budget is exhausted', async () => {
+    const plan = planOf(10)
+    // Each note saves 3 images; a budget of 5 should stop after the 2nd note
+    // (6 images > 5), having collected at most a couple notes.
+    const res = await runBrowserCollection(plan, {
+      facade: {
+        run: async (tool) => {
+          if (tool === 'browser_collect_images') return JSON.stringify({ count: 3, images: [{ url: 'https://img/a.jpg' }, { url: 'https://img/b.jpg' }, { url: 'https://img/c.jpg' }] })
+          if (tool === 'browser_download_urls') return JSON.stringify({ success: 3 })
+          return JSON.stringify({ ok: true })
+        },
+      },
+      pathJoin: join,
+      now: fixedClock(),
+      maxTotalImages: 5,
+    })
+    assert.equal(res.stopReason, 'max_images')
+    assert.ok(res.collected.length >= 1 && res.collected.length < 10, 'stops before exhausting all notes')
+  })
+
   it('does not pace when interNoteDelayMs is 0 / unset', async () => {
     const plan = planOf(3)
     const sleeps: number[] = []

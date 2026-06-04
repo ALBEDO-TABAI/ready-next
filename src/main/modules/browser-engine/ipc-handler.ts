@@ -19,6 +19,7 @@ import { ScopedBrowserFacade } from './scoped-browser-facade'
 import { AgentTabControlGate } from './agent-tab-control-gate'
 import { getBrowserWriteLeaseService } from './agent-browser-lease-singleton'
 import type { AgentBrowserSurface } from './agent-browser-errors'
+import { isHighControlPlatformText } from '../../../shared/browser-collection-intent'
 import type {
   BrowserCDPErrorCode,
   BrowserKeyEventPayload,
@@ -748,17 +749,50 @@ export class BrowserController {
    */
   async ensureAgentTab(): Promise<string> {
     if (this.agentTabId && this.tabs.has(this.agentTabId)) return this.agentTabId
+    // Create the agent tab in the BACKGROUND so it never becomes active or gets
+    // presented — no foreground preemption, no create-then-switch-back flicker
+    // (Codex result-review #4). Belt-and-suspenders: if the host ever activates
+    // it anyway, restore the user's tab.
     const previousActive = this.activeTabId
-    const created = await this.createTab('about:blank')
+    const created = await this.createTab('about:blank', { background: true })
     if (!created.success || !created.tabId) {
       throw new Error(created.error || 'failed to create agent tab')
     }
     this.agentTabId = created.tabId
     this.updateTabRuntimeState(created.tabId, { owner: 'agent', activity: 'running' })
-    if (previousActive && previousActive !== created.tabId && this.tabs.has(previousActive)) {
+    if (previousActive && this.activeTabId === created.tabId && this.tabs.has(previousActive)) {
       this.switchTab(previousActive)
     }
+    this.attachAgentTabSupervision(created.tabId)
     return created.tabId
+  }
+
+  /**
+   * Wire real user interaction with the agent tab to the freeze-confirm flow
+   * (Codex result-review #2). before-input-event fires only for genuine user
+   * keyboard input — the agent's own writes go through CDP/executeJS/loadURL and
+   * never trigger it. So a keypress here means the user is trying to take over:
+   * raise the interruption (→ pending_confirm), notify the renderer, and BLOCK
+   * the keystroke until the user explicitly confirms (the second confirmation).
+   * Once frozen (confirmed), input passes through — the user has control.
+   */
+  private attachAgentTabSupervision(tabId: string): void {
+    const webContents = this.tabs.get(tabId)?.view?.webContents
+    if (!webContents) return
+    webContents.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown' && input.type !== 'keyUp' && input.type !== 'char') return
+      const state = this.agentTabControlGate.getState()
+      if (state === 'frozen') return // user has taken over — allow input through
+      if (state === 'active') {
+        this.agentTabControlGate.requestInterruption()
+        this.notifyAgentControlChanged()
+      }
+      event.preventDefault() // agent still controls until the 2nd confirmation
+    })
+  }
+
+  private notifyAgentControlChanged(): void {
+    this.sendToRenderer('browser:agentControlChanged', { state: this.agentTabControlGate.getState() })
   }
 
   getAgentTabId(): string | null {
@@ -776,6 +810,19 @@ export class BrowserController {
    * task acquires its own agent-view lease and runs the deterministic engine.
    */
   async startNoteCollection(plan: Record<string, unknown>): Promise<BrowserCapabilityTaskHandle> {
+    // Global concurrency cap (Codex result-review #5): bound how many background
+    // collections run at once. High-control platforms get a cap of 1 so same-
+    // domain collections serialize (the per-domain rate control), on top of the
+    // per-note pacing the runner already applies.
+    const isHighControl = isHighControlPlatformText(JSON.stringify(plan))
+    const cap = isHighControl ? 1 : 2
+    const active = (await this.contentTaskRunner.listTasks('note_collect'))
+      .filter((task) => task.status === 'running' || task.status === 'queued')
+    if (active.length >= cap) {
+      throw new Error(
+        `已有 ${active.length} 个后台采集任务在运行（上限 ${cap}${isHighControl ? '，高风控平台限单并发' : ''}），请等当前任务完成后再发起。`,
+      )
+    }
     const agentTabId = await this.ensureAgentTab()
     return this.contentTaskRunner.startTask({
       kind: 'note_collect',
@@ -786,16 +833,26 @@ export class BrowserController {
   /** Supervision (plan §3.6): two-step interrupt of the agent's browser control. */
   requestAgentInterruption(): { state: ReturnType<AgentTabControlGate['getState']>; pending: boolean } {
     const pending = this.agentTabControlGate.requestInterruption()
+    this.notifyAgentControlChanged()
     return { state: this.agentTabControlGate.getState(), pending }
   }
 
-  confirmAgentInterruption(): { state: ReturnType<AgentTabControlGate['getState']>; frozen: boolean } {
+  async confirmAgentInterruption(): Promise<{ state: ReturnType<AgentTabControlGate['getState']>; frozen: boolean }> {
     const frozen = this.agentTabControlGate.confirmInterruption()
+    // Don't wait for the next loop tick: on confirm, immediately cancel the
+    // running collection tasks so "确认后立即中断" is real (Codex result-review
+    // #1). The freeze probe is still the backstop for the in-flight note.
+    if (frozen) {
+      const tasks = await this.contentTaskRunner.listTasks('note_collect')
+      await Promise.all(tasks.map((task) => this.contentTaskRunner.cancelTask(task.taskId)))
+    }
+    this.notifyAgentControlChanged()
     return { state: this.agentTabControlGate.getState(), frozen }
   }
 
   dismissAgentInterruption(): { state: ReturnType<AgentTabControlGate['getState']> } {
     this.agentTabControlGate.dismissInterruption()
+    this.notifyAgentControlChanged()
     return { state: this.agentTabControlGate.getState() }
   }
 
@@ -908,9 +965,12 @@ export class BrowserController {
   /**
    * Create a new tab and navigate to URL. Returns the tab ID.
    */
-  async createTab(url: string): Promise<{ success: boolean; tabId?: string; error?: string }> {
-    this.clearSplitTabHost()
-    return this.tabLifecycleService.createTab(url)
+  async createTab(
+    url: string,
+    options?: { background?: boolean },
+  ): Promise<{ success: boolean; tabId?: string; error?: string }> {
+    if (!options?.background) this.clearSplitTabHost()
+    return this.tabLifecycleService.createTab(url, options)
   }
 
   async openForCaptureTarget(

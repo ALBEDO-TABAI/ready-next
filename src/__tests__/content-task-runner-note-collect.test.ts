@@ -176,7 +176,8 @@ describe('note_collect background task (content-task-runner)', () => {
     )
     const taskId = await runToCompletion(runner, planPayload(5))
     const task = tasks.get(taskId)!
-    assert.equal(task.status, 'completed')
+    // A user freeze is NOT a successful completion — the task ends 'cancelled'.
+    assert.equal(task.status, 'cancelled')
     const result = task.result as { collected: string[]; stopReason: string }
     assert.equal(result.stopReason, 'cancelled')
     assert.equal(result.collected.length, 0, 'a freeze before the first note collects nothing')
@@ -208,5 +209,6 @@ describe('note_collect background task (content-task-runner)', () => {
     const task = tasks.get(taskId)!
     const result = task.result as { stopReason: string }
     assert.equal(result.stopReason, 'lease_lost')
+    assert.equal(task.status, 'cancelled', 'a lease takeover is not a successful completion')
   })
 })

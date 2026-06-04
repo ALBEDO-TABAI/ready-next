@@ -1252,6 +1252,7 @@ interface ElectronBrowserAPI {
   requestAgentInterruption: () => Promise<{ state: AgentBrowserControlState; pending: boolean; error?: string }>
   confirmAgentInterruption: () => Promise<{ state: AgentBrowserControlState; frozen: boolean; error?: string }>
   dismissAgentInterruption: () => Promise<{ state: AgentBrowserControlState; error?: string }>
+  onAgentControlChanged: (callback: (data: { state: AgentBrowserControlState }) => void) => () => void
   setAdblockEnabled: (
     enabled: boolean,
     scope?: 'main' | 'preview' | 'all'

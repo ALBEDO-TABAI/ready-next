@@ -16,7 +16,7 @@ export type AgentControlState = 'active' | 'pending_confirm' | 'frozen'
 
 export interface BrowserSupervisionIPCController {
   requestAgentInterruption(): { state: AgentControlState; pending: boolean }
-  confirmAgentInterruption(): { state: AgentControlState; frozen: boolean }
+  confirmAgentInterruption(): Promise<{ state: AgentControlState; frozen: boolean }>
   dismissAgentInterruption(): { state: AgentControlState }
   getAgentControlState(): AgentControlState
   getAgentTabId(): string | null
@@ -32,9 +32,9 @@ export function setupBrowserSupervisionIPC(controller: BrowserSupervisionIPCCont
     }
   })
 
-  ipcMain.handle('browser:confirmAgentInterruption', () => {
+  ipcMain.handle('browser:confirmAgentInterruption', async () => {
     try {
-      return controller.confirmAgentInterruption()
+      return await controller.confirmAgentInterruption()
     } catch (error) {
       return { state: 'active' as AgentControlState, frozen: false, error: error instanceof Error ? error.message : String(error) }
     }

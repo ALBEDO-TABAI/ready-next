@@ -514,11 +514,18 @@ export class BrowserCapabilityService {
       `,
     ) as { items?: unknown[]; reachedEnd?: boolean; scrolls?: number } | null
 
-    const activeTab = this.host.getActiveTab()
+    // Attribute sourceUrl to the TARGET tab, not the user's active tab: a
+    // sub-agent collecting in the agent tab must not mis-source results (Codex
+    // result-review #3). Fall back to the active tab only when no tabId is given.
+    let sourceUrl = ''
+    if (tabId) {
+      sourceUrl = String((await this.host.executeJS(tabId, 'location.href')) || '')
+    }
+    if (!sourceUrl) sourceUrl = this.host.getActiveTab()?.url || ''
     return {
       template: options.template,
-      items: normalizeStructuredItems(activeTab?.url || '', raw?.items || []),
-      sourceUrl: activeTab?.url || '',
+      items: normalizeStructuredItems(sourceUrl, raw?.items || []),
+      sourceUrl,
       reachedEnd: Boolean(raw?.reachedEnd),
       scrolls: Number(raw?.scrolls || 0),
     }
