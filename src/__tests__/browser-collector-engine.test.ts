@@ -89,6 +89,32 @@ describe('runBrowserCollection (background per-note loop)', () => {
     assert.ok(res.failed.length >= 5)
   })
 
+  it('paces between notes (not before the first) on high-control platforms', async () => {
+    const plan = planOf(3)
+    const sleeps: number[] = []
+    const res = await runBrowserCollection(plan, {
+      facade: facadeAlwaysOk(),
+      pathJoin: join,
+      now: fixedClock(),
+      interNoteDelayMs: 1500,
+      sleep: async (ms) => { sleeps.push(ms) },
+    })
+    assert.equal(res.stopReason, 'completed')
+    assert.deepEqual(sleeps, [1500, 1500], 'paces before notes 2 and 3, not before note 1')
+  })
+
+  it('does not pace when interNoteDelayMs is 0 / unset', async () => {
+    const plan = planOf(3)
+    const sleeps: number[] = []
+    await runBrowserCollection(plan, {
+      facade: facadeAlwaysOk(),
+      pathJoin: join,
+      now: fixedClock(),
+      sleep: async (ms) => { sleeps.push(ms) },
+    })
+    assert.deepEqual(sleeps, [], 'no pacing without a delay')
+  })
+
   it('resumes from a prior checkpoint state instead of restarting', async () => {
     const plan = planOf(4)
     // Simulate the first two notes already collected (a prior run / checkpoint).

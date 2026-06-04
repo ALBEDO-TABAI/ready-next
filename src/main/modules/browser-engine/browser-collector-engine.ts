@@ -37,6 +37,14 @@ export interface BrowserCollectionDeps {
   onProgress?: (progress: BrowserCollectionProgress) => void
   /** Cooperative cancel/lease-loss probe checked before each note. */
   shouldStop?: () => CollectionStopReason | null
+  /** Pace between notes on high-control platforms (plan §4.4 限速). 0 = no pace. */
+  interNoteDelayMs?: number
+  /** Injected sleep so pacing is unit-testable without real timers. */
+  sleep?: (ms: number) => Promise<void>
+}
+
+function defaultSleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
 export interface BrowserCollectionResult {
@@ -61,6 +69,8 @@ export async function runBrowserCollection(
 ): Promise<BrowserCollectionResult> {
   let state = initialState ?? createCollectionLoopState(deps.now())
   let rounds = 0
+  const sleep = deps.sleep ?? defaultSleep
+  const interNoteDelayMs = deps.interNoteDelayMs && deps.interNoteDelayMs > 0 ? deps.interNoteDelayMs : 0
 
   while (true) {
     const external = deps.shouldStop?.() ?? null
@@ -75,6 +85,15 @@ export async function runBrowserCollection(
     }
 
     const note = step.note
+    // Pace between notes (not before the first) so high-control platforms see
+    // human-like spacing. Re-check shouldStop after sleeping (cancel during wait).
+    if (rounds > 0 && interNoteDelayMs > 0) {
+      await sleep(interNoteDelayMs)
+      const afterSleep = deps.shouldStop?.() ?? null
+      if (afterSleep) {
+        return { collected: state.collected, failed: state.failed, rounds, stopReason: afterSleep }
+      }
+    }
     rounds += 1
     deps.onProgress?.(progressOf(plan, state, note.title ?? note.url, null))
 

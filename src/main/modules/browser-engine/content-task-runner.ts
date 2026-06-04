@@ -17,9 +17,10 @@ import {
 import { getBrowserWriteLeaseService } from './agent-browser-lease-singleton'
 import { isAgentBrowserError, type AgentBrowserSurface } from './agent-browser-errors'
 import type { BrowserWriteLeaseService } from './browser-write-lease'
-import { parseCollectionPlan, type CollectionLoopState } from './agent-collection-plan'
+import { parseCollectionPlan, type CollectionLoopState, type CollectionPlan } from './agent-collection-plan'
 import { runBrowserCollection } from './browser-collector-engine'
 import type { NoteCollectFacade } from './browser-collector-actions'
+import { isHighControlPlatformText } from '../../../shared/browser-collection-intent'
 
 /**
  * Per-task collector binding (plan §3.4). The controller provides this factory
@@ -344,7 +345,20 @@ export class BrowserContentTaskRunner {
       })
       return
     }
-    const plan = parsed.plan
+    // High-control platforms (小红书/抖音/…): clamp volume + pace between notes
+    // (plan §4.4 限速限量). Explicit lower caller caps still win.
+    const isHighControl = isHighControlPlatformText(parsed.plan.targetProfileUrl) || parsed.plan.notes.some((n) => isHighControlPlatformText(n.url))
+    const plan: CollectionPlan = isHighControl
+      ? {
+          ...parsed.plan,
+          stopConditions: {
+            ...parsed.plan.stopConditions,
+            maxNotes: Math.min(parsed.plan.stopConditions?.maxNotes ?? 60, 60),
+            maxDurationMs: Math.min(parsed.plan.stopConditions?.maxDurationMs ?? 20 * 60_000, 20 * 60_000),
+          },
+        }
+      : parsed.plan
+    const interNoteDelayMs = isHighControl ? 1_500 : 0
 
     // Own an agent-view lease for the whole task, tied to the agent tab, so the
     // background loop never collides with the user's foreground writes.
@@ -375,6 +389,7 @@ export class BrowserContentTaskRunner {
           facade,
           pathJoin: (...parts) => parts.join('/'),
           now: () => Date.now(),
+          interNoteDelayMs,
           shouldStop: () => {
             if (this.cancelledTasks.has(taskId)) return 'cancelled'
             // A user freeze (AgentTabControlGate) stops the agent cleanly, not as
