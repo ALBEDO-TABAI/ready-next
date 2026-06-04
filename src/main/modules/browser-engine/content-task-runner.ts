@@ -17,6 +17,24 @@ import {
 import { getBrowserWriteLeaseService } from './agent-browser-lease-singleton'
 import { isAgentBrowserError, type AgentBrowserSurface } from './agent-browser-errors'
 import type { BrowserWriteLeaseService } from './browser-write-lease'
+import { parseCollectionPlan, type CollectionLoopState } from './agent-collection-plan'
+import { runBrowserCollection } from './browser-collector-engine'
+import type { NoteCollectFacade } from './browser-collector-actions'
+
+/**
+ * Per-task collector binding (plan §3.4). The controller provides this factory
+ * (it owns executeBrowserTool + the AgentTabControlGate); the runner stays
+ * decoupled from tools/ and only sees the NoteCollectFacade + a freeze probe.
+ */
+export interface CollectorFacadeBundle {
+  facade: NoteCollectFacade
+  isControlFrozen: () => boolean
+}
+export type CollectorFacadeFactory = (opts: {
+  agentTabId: string
+  leaseId: string
+  surface: AgentBrowserSurface
+}) => CollectorFacadeBundle
 
 function toNumberOr(value: unknown, fallback: number): number {
   const n = Number(value)
@@ -35,6 +53,7 @@ export class BrowserContentTaskRunner {
     private readonly capabilityService: BrowserCapabilityService,
     private readonly persistenceService = new BrowserTaskPersistenceService(),
     private readonly leaseService: BrowserWriteLeaseService = getBrowserWriteLeaseService(),
+    private readonly collectorFacadeFactory: CollectorFacadeFactory | null = null,
   ) {}
 
   async startTask(request: BrowserStartTaskRequest): Promise<BrowserCapabilityTaskHandle> {
@@ -293,6 +312,112 @@ export class BrowserContentTaskRunner {
     })
   }
 
+  /**
+   * note_collect loop (plan §3.3/§3.4): the background browser-collection
+   * sub-agent. Acquires its OWN agent-view lease tied to the agent tab, then
+   * runs the deterministic per-note engine through the ScopedBrowserFacade.
+   * Decoupled from the chat turn (a background task), so a preempting chat run
+   * never aborts it; it stops only on its own cancel / lease loss / user freeze.
+   */
+  private async runNoteCollect(taskId: string, payload: Record<string, unknown>): Promise<void> {
+    if (!this.collectorFacadeFactory) {
+      this.persistenceService.updateProgress(taskId, { currentLabel: null }, {
+        status: 'failed',
+        error: 'note_collect is not available: no collector facade factory wired',
+        finishedAt: new Date().toISOString(),
+      })
+      return
+    }
+    const agentTabId = typeof payload.agentTabId === 'string' ? payload.agentTabId : ''
+    const parsed = parseCollectionPlan(payload.plan)
+    if (!agentTabId || !parsed.ok) {
+      this.persistenceService.updateProgress(taskId, { currentLabel: null }, {
+        status: 'failed',
+        error: !agentTabId ? 'note_collect requires an agentTabId' : `invalid collection plan: ${parsed.ok ? '' : parsed.issues.join('; ')}`,
+        finishedAt: new Date().toISOString(),
+      })
+      return
+    }
+    const plan = parsed.plan
+
+    // Own an agent-view lease for the whole task, tied to the agent tab, so the
+    // background loop never collides with the user's foreground writes.
+    const surface: AgentBrowserSurface = 'agent-view'
+    const acquired = this.leaseService.acquire({ surface, taskId, runId: taskId, tabId: agentTabId })
+    if (isAgentBrowserError(acquired)) {
+      this.persistenceService.updateProgress(taskId, { currentLabel: null }, {
+        status: 'failed',
+        error: `note_collect could not acquire ${surface} lease: ${acquired.errorCode}`,
+        finishedAt: new Date().toISOString(),
+      })
+      return
+    }
+    const leaseId = acquired.leaseId
+    const { facade, isControlFrozen } = this.collectorFacadeFactory({ agentTabId, leaseId, surface })
+
+    try {
+      // Resume from the last per-note checkpoint if one exists.
+      const existing = this.persistenceService.getTask(taskId)
+      const checkpoint = existing?.checkpoint
+      const initialState = checkpoint?.stage === 'note_collect_round' && checkpoint.partialResults
+        ? (checkpoint.partialResults as CollectionLoopState)
+        : undefined
+
+      const result = await runBrowserCollection(
+        plan,
+        {
+          facade,
+          pathJoin: (...parts) => parts.join('/'),
+          now: () => Date.now(),
+          shouldStop: () => {
+            if (this.cancelledTasks.has(taskId)) return 'cancelled'
+            // A user freeze (AgentTabControlGate) stops the agent cleanly, not as
+            // a string of write failures. Freeze is NOT a lease state (Codex R2).
+            if (isControlFrozen()) return 'cancelled'
+            // Lease loss (expiry, or a takeover by another surface) stops writing.
+            if (this.leaseService.checkWrite({ surface, leaseId }) !== null) return 'lease_lost'
+            this.leaseService.heartbeat(leaseId)
+            return null
+          },
+          onProgress: (progress) => {
+            this.persistenceService.updateProgress(taskId, {
+              total: progress.total,
+              completed: progress.completed,
+              failed: progress.failed,
+              currentLabel: progress.currentTitle,
+            })
+          },
+          onCheckpoint: (state, progress) => {
+            this.persistenceService.updateProgress(taskId, {
+              total: progress.total,
+              completed: progress.completed,
+              failed: progress.failed,
+              currentLabel: progress.currentTitle,
+            }, {
+              checkpoint: { taskId, stage: 'note_collect_round', cursor: String(state.cursor), partialResults: state },
+            })
+          },
+        },
+        initialState,
+      )
+
+      if (this.cancelledTasks.has(taskId)) return
+      this.persistenceService.updateProgress(taskId, {
+        total: plan.notes.length,
+        completed: result.collected.length,
+        failed: result.failed.length,
+        currentLabel: null,
+      }, {
+        status: 'completed',
+        checkpoint: { taskId, stage: 'completed', cursor: null, partialResults: null },
+        result: { collected: result.collected, failed: result.failed, rounds: result.rounds, stopReason: result.stopReason },
+        finishedAt: new Date().toISOString(),
+      })
+    } finally {
+      this.leaseService.release(leaseId)
+    }
+  }
+
   private async runTask(taskId: string, kind: BrowserCapabilityTaskKind, payload: Record<string, unknown>): Promise<void> {
     this.persistenceService.updateProgress(taskId, {}, {
       status: 'running',
@@ -396,6 +521,11 @@ export class BrowserContentTaskRunner {
 
     if (kind === 'visible_collect') {
       await this.runVisibleCollect(taskId, payload)
+      return
+    }
+
+    if (kind === 'note_collect') {
+      await this.runNoteCollect(taskId, payload)
       return
     }
 

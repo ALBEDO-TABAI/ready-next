@@ -64,6 +64,9 @@ export type CollectionStopReason =
   | 'max_notes'
   | 'max_duration'
   | 'too_many_failures'
+  // External stops surfaced by the runner via the engine's shouldStop probe.
+  | 'cancelled'
+  | 'lease_lost'
   | null
 
 /**
