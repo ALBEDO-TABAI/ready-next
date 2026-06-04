@@ -297,6 +297,7 @@ export interface AgentSdkRuntimeDeps {
     feishuConnected: boolean
     authorization: SkillToolAuthorization
     recentCollectionIntent?: boolean
+    requestEnvelope?: unknown
   }) => ToolDefinition[]
   executeToolCall?: (
     toolName: string,
@@ -356,14 +357,22 @@ function allowedPrimitiveToolsForSdkSkillTurn(): string[] {
  * Whether THIS message expresses browser collection intent. Two signals:
  *   - the "### 浏览页面引用" marker — the user attached a browser-page reference,
  *     a legitimate signal that primaryInstructionText would otherwise strip;
- *   - the collection-intent predicate over the PRIMARY instruction text only —
+ *   - the collection-intent predicate over the user's PRIMARY instruction only —
  *     NOT the full text, so platform words inside context markers (环境信息 /
- *     最近会话摘要 / scope, which primaryInstructionText cuts) cannot falsely
- *     trigger exposure (Codex: over-exposure fix).
+ *     最近会话摘要 / scope) cannot falsely trigger exposure (Codex: over-exposure).
+ *
+ * The primary instruction comes from the request envelope's canonical
+ * `primaryInstruction` when available. The local `primaryInstructionText` is a
+ * stale fallback that assumes the user's text LEADS the message; the current
+ * envelope layout leads with bootstrap sections (## L1 会话上下文 / ## L2 …) and
+ * trails the user instruction, so without the envelope the predicate sees only
+ * the bootstrap preamble (no intent) and collection exposure silently fails.
  */
-function messageHasBrowserCollectionIntent(message: RunMessage): boolean {
+function messageHasBrowserCollectionIntent(message: RunMessage, requestEnvelope?: unknown): boolean {
   if (messageToText(message).includes('### 浏览页面引用')) return true
-  return resolveBrowserCollectionIntent(primaryInstructionText(message))
+  const envelopePrimary = parseEnvelopeResourceReferences(requestEnvelope).primaryInstruction
+  const primary = envelopePrimary || primaryInstructionText(message)
+  return resolveBrowserCollectionIntent(primary)
 }
 
 function primaryInstructionText(message: RunMessage): string {
@@ -2638,6 +2647,8 @@ export class AgentSdkRuntime extends EventEmitter {
     authorization: SkillToolAuthorization
     /** Continuity: a recent turn in this session expressed collection intent. */
     recentCollectionIntent?: boolean
+    /** Request envelope — used to read the canonical user instruction. */
+    requestEnvelope?: unknown
   }): ToolDefinition[] {
     const browserDecisionMode = resolveBrowserDecisionMode(params.message, params.browserHostAvailable)
     // WP1: decouple browser collection exposure from the deterministic workflow
@@ -2648,11 +2659,19 @@ export class AgentSdkRuntime extends EventEmitter {
     // (not the full text, so context markers don't over-trigger); recentCollection
     // Intent carries the TTL continuity so a bare follow-up ("再试一次") stays
     // exposed.
+    const msgIntent = messageHasBrowserCollectionIntent(params.message, params.requestEnvelope)
     const collectionExposure =
       params.browserHostAvailable &&
       browserDecisionMode === 'free_tool_loop' &&
-      (messageHasBrowserCollectionIntent(params.message) ||
-        params.recentCollectionIntent === true)
+      (msgIntent || params.recentCollectionIntent === true)
+    appendToolCapabilityLog([
+      '[collection_exposure]',
+      `host=${params.browserHostAvailable}`,
+      `mode=${browserDecisionMode}`,
+      `msgIntent=${msgIntent}`,
+      `recentIntent=${params.recentCollectionIntent === true}`,
+      `exposure=${collectionExposure}`,
+    ].join(' '))
     const capabilityResolution = resolveCapabilityResolution({
       config: params.config,
       profile: 'local_chat',
@@ -3231,7 +3250,7 @@ export class AgentSdkRuntime extends EventEmitter {
       // collection intent and decay the TTL so bare follow-ups stay exposed.
       const recentCollectionIntent = this.trackCollectionIntent(
         sessionId,
-        messageHasBrowserCollectionIntent(content as RunMessage),
+        messageHasBrowserCollectionIntent(content as RunMessage, executionOptions?.requestEnvelope),
       )
       let toolDefinitions = this.listToolDefinitionsForTurn({
         message: content as RunMessage,
@@ -3242,6 +3261,7 @@ export class AgentSdkRuntime extends EventEmitter {
         feishuConnected: this.runtime?.isChannelTypeAvailable?.('feishu-app') ?? false,
         authorization,
         recentCollectionIntent,
+        requestEnvelope: executionOptions?.requestEnvelope,
       })
       if (shouldUseLocalDocumentToolSet(content as RunMessage, executionOptions?.requestEnvelope)) {
         toolDefinitions = toolDefinitions.filter(isLocalDocumentToolDefinition)

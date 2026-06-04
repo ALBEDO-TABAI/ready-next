@@ -8,6 +8,7 @@ import {
   stepCollectionIntentTtl,
   BROWSER_COLLECTION_SUBSET_TOOL_NAMES,
 } from '../shared/browser-collection-intent'
+import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
 
 describe('resolveBrowserCollectionIntent — positive (expose browser collection)', () => {
   const positives = [
@@ -58,6 +59,29 @@ describe('attached browser-page reference (full message text) exposes', () => {
     // (continuity / browse-page-reference marker handle this at the SDK layer;
     // the pure predicate on bare text stays false)
     assert.equal(resolveBrowserCollectionIntent('再重试一遍看看'), false)
+  })
+})
+
+describe('bootstrap-leading envelope must not hide collection intent (regression)', () => {
+  it('extracts the trailing user instruction past a ## L1 会话上下文 prefix and detects intent', () => {
+    // The live bug: the prompt envelope leads with bootstrap sections (## L1 会话
+    // 上下文 / ## L2…) and TRAILS the user instruction. The runtime's stale
+    // primaryInstructionText assumed the instruction LEADS, so it saw only the
+    // bootstrap preamble (no intent) and browser collection silently failed.
+    // The fix routes the predicate through the envelope's canonical
+    // primaryInstruction, which correctly extracts the trailing instruction.
+    const userText = [
+      '## L1 会话上下文',
+      '（记忆内容）',
+      '',
+      '## 最近会话摘要',
+      '用户之前提到小红书博主 Aoi 葵',
+      '',
+      '把你能看到的这个博主的笔记，每篇笔记都新建一个独立文件夹，把笔记内的图片保存到@[ao’i]这个文件夹下的对应文件夹中',
+    ].join('\n')
+    const envelope = buildRequestEnvelope({ userText })
+    assert.match(envelope.primaryInstruction, /这个博主的笔记/, 'envelope extracts the trailing instruction, not the bootstrap')
+    assert.equal(resolveBrowserCollectionIntent(envelope.primaryInstruction), true)
   })
 })
 
