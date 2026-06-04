@@ -158,6 +158,17 @@ export class BrowserContentTaskRunner {
       maxDurationMs: toNumberOr(payload.maxDurationMs, DEFAULT_VISIBLE_COLLECT_LIMITS.maxDurationMs),
       emptyRoundsToStop: toNumberOr(payload.emptyRoundsToStop, DEFAULT_VISIBLE_COLLECT_LIMITS.emptyRoundsToStop),
     }
+    // High-control platforms (小红书/抖音/…): cap volume/rounds/duration to a more
+    // conservative ceiling and pace rounds (plan §4.4 限速限量). Explicit caller
+    // limits still win when they are lower than the conservative ceiling.
+    const highControl = payload.highControl === true
+    let interRoundDelayMs = 0
+    if (highControl) {
+      limits.maxItems = Math.min(limits.maxItems, 60)
+      limits.maxRounds = Math.min(limits.maxRounds, 12)
+      limits.maxDurationMs = Math.min(limits.maxDurationMs, 90_000)
+      interRoundDelayMs = 1_200
+    }
     const template = String(payload.template || 'card_list') as never
     const itemSelector = typeof payload.itemSelector === 'string' ? payload.itemSelector : undefined
 
@@ -251,6 +262,10 @@ export class BrowserContentTaskRunner {
       if (scroll.atBottom) {
         // One more extract pass already happened; let an empty round confirm end.
         consecutiveEmptyRounds += 1
+      }
+      // Pace rounds on high-control platforms (plan §4.4 限速).
+      if (interRoundDelayMs > 0 && !this.cancelledTasks.has(taskId)) {
+        await new Promise((resolve) => setTimeout(resolve, interRoundDelayMs))
       }
     }
 

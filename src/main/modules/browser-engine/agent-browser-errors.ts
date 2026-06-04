@@ -26,6 +26,8 @@ export type AgentBrowserErrorCode =
   | 'target_not_found'
   /** A login wall blocked an agent-view (lane B) collection. */
   | 'login_required'
+  /** A high-control platform refused a script-hard tool / script param (§4.4). */
+  | 'script_blocked'
 
 export interface AgentBrowserStructuredError {
   ok: false

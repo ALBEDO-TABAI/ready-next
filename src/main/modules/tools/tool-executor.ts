@@ -34,6 +34,10 @@ import {
   type ToolInteractionHint,
 } from '../agent-control/tools-runtime/tool-result-types'
 import { executeBrowserTool } from './browser-tools'
+import { classifyBrowserToolCall } from '../browser-engine/browser-tool-write-classification'
+import { isAgentBrowserError } from '../browser-engine/agent-browser-errors'
+import type { BrowserLeaseGate } from '../browser-engine/agent-browser-lease-gate'
+import type { BrowserTurnLease } from '../browser-engine/agent-browser-turn-lease'
 import { executeCalendarTool } from './calendar-tools'
 import { executeDocumentTool } from './document-tools'
 import { executeGeneralResearchTool } from './general-research-tools'
@@ -87,6 +91,12 @@ export interface ToolContext {
   frameSkillId?: string | null
   registerRunCleanup?: (cleanup: () => void | Promise<void>) => void
   agentContext?: AgentSpawnContext | null
+  /**
+   * WP2 — turn-level user-view write lease for free-tool-loop browser writes.
+   * Set by the SDK runtime's buildExecutorContext when a browser host exists.
+   * The browser dispatch acquires/gates writes through it; run cleanup releases.
+   */
+  browserLease?: BrowserTurnLease | null
   /**
    * Phase 3 (skill-child-loop) — same-turn live active-frame slot. Forwarded
    * by `toToolExecutorContext` so domain dispatchers (notably
@@ -280,11 +290,35 @@ export async function executeToolCall(
   try {
     const rawResult = await (async () => {
       switch (definition.domain) {
-        case 'browser':
+        case 'browser': {
           if (!context.browserController) {
             return 'Browser controller is not available'
           }
-          return executeBrowserTool(toolName, args, context.browserController, context.abortSignal, context.sessionId)
+          // WP2 — gate free-tool-loop browser writes through the turn lease.
+          let browserLeaseGate: BrowserLeaseGate | undefined
+          const turnLease = context.browserLease
+          if (turnLease) {
+            if (toolName === 'browser_visible_collect') {
+              // Hand the surface to the background collect task (single writer):
+              // release the turn lease so the task can acquire its own.
+              turnLease.releaseForBackgroundHandoff()
+            } else if (classifyBrowserToolCall(toolName, args) === 'write') {
+              const ensured = turnLease.ensureGate()
+              if (isAgentBrowserError(ensured)) {
+                return JSON.stringify(ensured)
+              }
+              browserLeaseGate = ensured
+            }
+          }
+          return executeBrowserTool(
+            toolName,
+            args,
+            context.browserController,
+            context.abortSignal,
+            context.sessionId,
+            browserLeaseGate,
+          )
+        }
 
         case 'document':
           return executeDocumentTool(toolName, args, {

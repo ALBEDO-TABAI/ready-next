@@ -26,6 +26,8 @@ import {
 } from './browser-tool-catalog'
 import type { BrowserStructuredFieldMapping } from '../browser-engine/capability-types'
 import { beginLeaseGate, type BrowserLeaseGate } from '../browser-engine/agent-browser-lease-gate'
+import { isHighControlPlatformText } from '../../../shared/browser-collection-intent'
+import { agentBrowserError } from '../browser-engine/agent-browser-errors'
 
 const logger = createRotatingLogger('ready-tools.log')
 function log(msg: string) {
@@ -41,6 +43,97 @@ function createBrowserAgentHelpers(controller: BrowserController) {
 
 function uniqueStrings(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean)))
+}
+
+/**
+ * WP3 — high-control platform script blacklist (plan §4.4). On strong-detection
+ * platforms (小红书/抖音/微博/…), script-hard tools and script params are refused;
+ * only visible / template DOM collection is allowed. Returns a structured
+ * rejection string when blocked, or null when permitted.
+ */
+/**
+ * Every URL this call could actually operate on: the active tab, the tab the
+ * call explicitly targets via `tab_id`, an explicit `args.url`, and any target
+ * URL inside `run_workflow` steps. Used by both the high-control script guard
+ * and the visible_collect rate-limit decision so neither can be bypassed by
+ * leaving a benign page active while pointing the call at a high-control page.
+ */
+function resolveCandidateTargetUrls(
+  args: Record<string, unknown>,
+  controller: BrowserController,
+): string[] {
+  const urls: string[] = []
+  try {
+    const active = controller.getActiveTab?.()?.url
+    if (active) urls.push(active)
+  } catch { /* ignore */ }
+  if (typeof args.tab_id === 'string') {
+    try {
+      const tab = controller.getTabList?.().find((t) => t.id === args.tab_id)
+      if (tab?.url) urls.push(tab.url)
+    } catch { /* ignore */ }
+  }
+  if (typeof args.url === 'string') urls.push(args.url)
+  if (Array.isArray(args.steps)) {
+    for (const step of args.steps) {
+      if (step && typeof step === 'object') {
+        const s = step as Record<string, unknown>
+        for (const key of ['url', 'target', 'href']) {
+          if (typeof s[key] === 'string') urls.push(s[key] as string)
+        }
+      }
+    }
+  }
+  // browser_start_task / thin task adapters carry the target URL(s) inside payload.
+  const payload = args.payload && typeof args.payload === 'object' ? (args.payload as Record<string, unknown>) : null
+  if (payload) {
+    if (typeof payload.url === 'string') urls.push(payload.url)
+    if (Array.isArray(payload.urls)) {
+      for (const u of payload.urls) if (typeof u === 'string') urls.push(u)
+    }
+  }
+  return urls
+}
+
+/** True when a start_task payload carries a page-executing script param. */
+function startTaskPayloadHasScript(args: Record<string, unknown>): boolean {
+  const payload = args.payload && typeof args.payload === 'object' ? (args.payload as Record<string, unknown>) : null
+  if (!payload) return false
+  if (typeof payload.customScript === 'string' && payload.customScript.trim().length > 0) return true
+  const wait = payload.wait && typeof payload.wait === 'object' ? (payload.wait as Record<string, unknown>) : null
+  if (wait) {
+    if (wait.condition === 'custom_js') return true
+    if (typeof wait.customJs === 'string' && (wait.customJs as string).trim().length > 0) return true
+  }
+  return false
+}
+
+function highControlScriptGuard(
+  toolName: string,
+  args: Record<string, unknown>,
+  candidateUrls: string[],
+): string | null {
+  if (!candidateUrls.some((url) => isHighControlPlatformText(url))) return null
+  const hasCustomScript = typeof args.custom_script === 'string' && args.custom_script.trim().length > 0
+  const hasCustomJs =
+    args.condition === 'custom_js' || (typeof args.custom_js === 'string' && (args.custom_js as string).trim().length > 0)
+  const blocked =
+    toolName === 'browser_execute_js' ||
+    toolName === 'browser_run_workflow' ||
+    ((toolName === 'browser_extract_structured' || toolName === 'browser_scroll_collect') && hasCustomScript) ||
+    (toolName === 'browser_wait_for_condition' && hasCustomJs) ||
+    // browser_start_task wraps scroll_collect/research and can carry a page
+    // script in payload.customScript / payload.wait.customJs (Codex R3) — block
+    // it on high-control platforms so the start_task wrapper can't bypass.
+    (toolName === 'browser_start_task' && startTaskPayloadHasScript(args))
+  if (!blocked) return null
+  return JSON.stringify(
+    agentBrowserError(
+      'script_blocked',
+      '该平台为强检测平台，已禁用脚本硬操作（execute_js / run_workflow / custom_script / custom_js）。请改用可见采集：browser_read_page、browser_collect_images、browser_visible_collect（模板路径）、browser_capture_viewport、滚动。',
+      { highControlPlatform: true, tool: toolName },
+    ),
+  )
 }
 
 function activePageLikelyMatchesTarget(activeUrl: string | undefined, target: string): boolean {
@@ -2876,6 +2969,17 @@ export async function executeBrowserTool(
 ): Promise<string> {
   log(`executeBrowserTool: ${toolName} args=${JSON.stringify(args).slice(0, 200)}`)
 
+  // WP3 — high-control platform script blacklist: on 小红书/抖音/微博/… do not
+  // run script-hard tools / script params; only visible/DOM collection is
+  // allowed (plan §4.4). Checked against the active tab's URL, before the lease
+  // gate so a rejected tool never opens an action window.
+  const candidateTargetUrls = resolveCandidateTargetUrls(args, controller)
+  const highControlDenied = highControlScriptGuard(toolName, args, candidateTargetUrls)
+  if (highControlDenied) {
+    log(`Browser tool high-control-denied: ${toolName}`)
+    return highControlDenied
+  }
+
   const gate = beginLeaseGate(leaseGate, toolName, args)
   if (gate.deniedMessage !== null) {
     log(`Browser tool lease-denied: ${toolName} ${gate.deniedMessage}`)
@@ -3604,6 +3708,36 @@ export async function executeBrowserTool(
             continue
           }
 
+          // WP4 — cookie-aware download first: route through the browser's
+          // persist:browser session (session.downloadURL carries the page's
+          // login cookies + Referer), so login-walled / 防盗链 images on
+          // high-control platforms actually download. Fall back to a plain fetch
+          // only when the session download path is unavailable or fails.
+          let downloadedViaSession = false
+          if (typeof controller.downloadUrlToDirectory === 'function') {
+            try {
+              const sessionResult = await controller.downloadUrlToDirectory({
+                url,
+                targetDir: directory,
+                sourcePageUrl: referer || null,
+                suggestedName: filenamePrefix ? `${filenamePrefix}-${index + 1}` : null,
+              })
+              if (sessionResult.success) {
+                downloadedViaSession = true
+                results.push({
+                  url,
+                  success: true,
+                  path: sessionResult.savePath,
+                  filename: sessionResult.filename,
+                  via: 'browser_session',
+                })
+              }
+            } catch {
+              // fall through to fetch fallback
+            }
+          }
+          if (downloadedViaSession) continue
+
           try {
             const response = await fetch(url, {
               headers: {
@@ -3616,6 +3750,7 @@ export async function executeBrowserTool(
                 url,
                 success: false,
                 error: `http_${response.status}`,
+                via: 'fetch',
               })
               continue
             }
@@ -3633,12 +3768,14 @@ export async function executeBrowserTool(
               path: filePath,
               size: buffer.byteLength,
               content_type: contentType,
+              via: 'fetch',
             })
           } catch (error) {
             results.push({
               url,
               success: false,
               error: error instanceof Error ? error.message : String(error),
+              via: 'fetch',
             })
           }
         }
@@ -3926,6 +4063,9 @@ export async function executeBrowserTool(
       }
 
       case 'browser_visible_collect': {
+        // Reuse the same full target-URL set as the script guard (active tab,
+        // tab_id, url) so high-control rate limits can't be bypassed via tab_id.
+        const highControl = candidateTargetUrls.some((u) => isHighControlPlatformText(u))
         const result = await controller.startTask({
           kind: 'visible_collect',
           payload: {
@@ -3936,6 +4076,9 @@ export async function executeBrowserTool(
             maxItems: Number(args.max_items || 0) || undefined,
             maxRounds: Number(args.max_rounds || 0) || undefined,
             maxDurationMs: Number(args.max_duration_ms || 0) || undefined,
+            // High-control platforms get conservative default rate/volume limits
+            // (plan §4.4) applied in the runner.
+            highControl,
             // Inherit the active lane lease so the background loop keeps writing
             // under the SAME lease and stops the instant the user takes over.
             surface: leaseGate?.surface,

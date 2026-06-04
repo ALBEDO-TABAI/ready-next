@@ -106,6 +106,41 @@ test('resolver differentiates browser interaction and browser content task visib
   assert.ok(researchResolution.visibleCapabilityGroupIds.includes('browser_content_tasks'))
 })
 
+test('collection intent exposes browser groups via intentGroupModes WITHOUT a browser_workflow decision (WP1 decoupling)', () => {
+  // free_tool_loop decision mode: by default browser groups are suppressed…
+  const withoutIntent = resolveCapabilityResolution({
+    config: BASE_CONFIG,
+    profile: 'local_chat',
+    browserDecisionMode: 'free_tool_loop',
+    runtimeAvailability: { browserHostAvailable: true, feishuConnected: false },
+  })
+  assert.ok(!withoutIntent.visibleCapabilityGroupIds.includes('browser_interaction'))
+  assert.ok(!withoutIntent.visibleCapabilityGroupIds.includes('browser_content_tasks'))
+
+  // …but collection intent surfaces them via intentGroupModes, decision mode unchanged.
+  const withIntent = resolveCapabilityResolution({
+    config: BASE_CONFIG,
+    profile: 'local_chat',
+    browserDecisionMode: 'free_tool_loop',
+    runtimeAvailability: { browserHostAvailable: true, feishuConnected: false },
+    intentGroupModes: { browser_interaction: true, browser_content_tasks: true },
+  })
+  assert.ok(withIntent.visibleCapabilityGroupIds.includes('browser_interaction'))
+  assert.ok(withIntent.visibleCapabilityGroupIds.includes('browser_content_tasks'))
+})
+
+test('collection intent never overrides host availability (no browser host → still hidden)', () => {
+  const noHost = resolveCapabilityResolution({
+    config: BASE_CONFIG,
+    profile: 'local_chat',
+    browserDecisionMode: 'free_tool_loop',
+    runtimeAvailability: { browserHostAvailable: false, feishuConnected: false },
+    intentGroupModes: { browser_interaction: true, browser_content_tasks: true },
+  })
+  assert.ok(!noHost.visibleCapabilityGroupIds.includes('browser_interaction'))
+  assert.ok(!noHost.visibleCapabilityGroupIds.includes('browser_content_tasks'))
+})
+
 test('resolver marks feishu group unavailable when channel runtime is disconnected', () => {
   const resolution = resolveCapabilityResolution({
     config: {
