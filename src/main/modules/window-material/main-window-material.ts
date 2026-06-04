@@ -151,6 +151,8 @@ export function applyNonDarwinPlatformExtras(window: BrowserWindow, platform: Su
 export interface WindowMaterialControllerOptions {
   window: BrowserWindow
   platform: SupportedPlatform
+  /** 已由 BrowserWindow 构造参数应用的材料；传入后 controller 不重复 set 同值。 */
+  initialMaterial?: MaterialOutputs | null
   /** 实时读取，每次 sync 拉一次（非 darwin 上让 theme 切换刷新 bg） */
   getTheme: () => { skin: ThemeSkin; resolvedTheme: ResolvedTheme }
   /** fullscreen 状态改变后通知 renderer，让 renderer 设置 data-native-fullscreen attr */
@@ -169,10 +171,10 @@ export interface WindowMaterialController {
 }
 
 export function createWindowMaterialController(options: WindowMaterialControllerOptions): WindowMaterialController {
-  const { window, platform, getTheme, notifyFullscreenChanged } = options
+  const { window, platform, initialMaterial = null, getTheme, notifyFullscreenChanged } = options
 
   let materialFullscreenState = false
-  let lastAppliedMaterial: MaterialOutputs | null = null
+  let lastAppliedMaterial: MaterialOutputs | null = initialMaterial
 
   const sync = (): void => {
     if (window.isDestroyed()) return

@@ -46,6 +46,7 @@ import { toOAuthCompatibleUserAgent } from './modules/browser-engine/popup-polic
 import { registerMainProcessHandlers } from './process-handlers'
 import {
   createWindowMaterialController,
+  DARWIN_LIQUID_GLASS_TRANSPARENT,
   type ThemeSkin,
   type ResolvedTheme as MaterialResolvedTheme,
   type SupportedPlatform,
@@ -346,22 +347,13 @@ let transparentSurfaceRefreshInFlight = false
 
 async function refreshMainWindowTransparentSurface(): Promise<void> {
   const window = mainWindow
-  if (!window || window.isDestroyed()) return
+  if (!window || window.isDestroyed() || window.isMinimized()) return
   if (transparentSurfaceRefreshInFlight) return
 
-  if (window.isFullScreen() || window.isMaximized() || window.isMinimized()) {
-    if (process.platform === 'darwin') window.invalidateShadow()
-    return
-  }
-
   transparentSurfaceRefreshInFlight = true
-  const bounds = window.getBounds()
   try {
-    window.setBounds({ ...bounds, width: bounds.width + 1 }, false)
-    await new Promise((resolve) => setTimeout(resolve, TRANSPARENT_SURFACE_REFRESH_DELAY_MS))
-    if (window.isDestroyed()) return
-    window.setBounds(bounds, false)
     if (process.platform === 'darwin') window.invalidateShadow()
+    window.webContents.invalidate()
   } finally {
     transparentSurfaceRefreshInFlight = false
   }
@@ -388,11 +380,13 @@ async function loadMainWindowRenderer(window: BrowserWindow): Promise<void> {
 async function createWindow(): Promise<void> {
   nativeTheme.themeSource = resolveStoredThemeSource()
   ensureDockIconVisible()
-  // 首帧色：保留 baseline 行为——macOS 透明（让 vibrancy 优先），非 macOS 用主题匹配色避免白闪。
-  // controller.applyInitial() 紧接着会按状态表 sync() 一次，把 macOS bg 切到 '#00000000'
-  // 并打开 vibrancy；非 macOS 也会 diff 应用一次（通常 no-op）。Stage 2 可能调整首帧色策略。
+  // 首帧材料：macOS 从构造期就是透明 under-window，非 macOS 用主题匹配色避免白闪。
+  // controller.applyInitial() 仍接管后续材料状态，但不会重复设置构造期已经应用的 macOS 值。
   const platform = resolveSupportedPlatform()
   const nonMacFirstFrameBg = nativeTheme.shouldUseDarkColors ? '#1A1B1E' : '#F7F9FC'
+  const constructorMaterial = platform === 'darwin'
+    ? { backgroundColor: DARWIN_LIQUID_GLASS_TRANSPARENT, vibrancy: 'under-window' as const }
+    : null
   // Create the browser window.
   mainWindow = new BrowserWindow({
     width: 1440,
@@ -401,7 +395,8 @@ async function createWindow(): Promise<void> {
     show: false,
     autoHideMenuBar: true,
     titleBarStyle: 'hiddenInset',
-    backgroundColor: process.platform === 'darwin' ? '#00000000' : nonMacFirstFrameBg,
+    backgroundColor: constructorMaterial?.backgroundColor ?? nonMacFirstFrameBg,
+    vibrancy: constructorMaterial?.vibrancy,
     visualEffectState: platform === 'darwin' ? 'active' : undefined,
     webPreferences: {
       preload: join(__dirname, '../preload/index.mjs'),
@@ -415,6 +410,7 @@ async function createWindow(): Promise<void> {
   windowMaterialController = createWindowMaterialController({
     window: mainWindow,
     platform,
+    initialMaterial: constructorMaterial,
     getTheme: () => ({
       skin: resolveStoredThemeSkin(),
       resolvedTheme: resolveResolvedTheme(),

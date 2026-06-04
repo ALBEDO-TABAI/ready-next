@@ -164,6 +164,33 @@ test('controller exposes isFullscreen() flag, not mainWindow.isFullScreen()', ()
   assert.deepEqual(setters.vibrancy, ['under-window'], 'initial sync should set under-window vibrancy')
 })
 
+test('controller preserves constructor-applied darwin material without duplicate setters', () => {
+  const setters: { bg: string[]; vibrancy: (string | null)[]; buttonPos: number } = {
+    bg: [],
+    vibrancy: [],
+    buttonPos: 0,
+  }
+  const fakeWindow = {
+    isDestroyed: () => false,
+    setBackgroundColor: (c: string) => { setters.bg.push(c) },
+    setVibrancy: (v: 'under-window' | null) => { setters.vibrancy.push(v) },
+    setWindowButtonPosition: () => { setters.buttonPos += 1 },
+  } as unknown as Parameters<typeof createWindowMaterialController>[0]['window']
+
+  const controller = createWindowMaterialController({
+    window: fakeWindow,
+    platform: 'darwin',
+    initialMaterial: { backgroundColor: '#00000000', vibrancy: 'under-window' },
+    getTheme: () => ({ skin: 'liquid-glass', resolvedTheme: 'light' }),
+  })
+
+  controller.applyInitial()
+  controller.sync()
+  assert.deepEqual(setters.bg, [], 'constructor-applied transparent bg should not be set again')
+  assert.deepEqual(setters.vibrancy, [], 'constructor-applied vibrancy should not be set again')
+  assert.equal(setters.buttonPos, 1, 'traffic light position still applies on initial setup')
+})
+
 test('验证 2 — controller.sync() on darwin is no-op regardless of theme/skin (no setter calls after applyInitial)', () => {
   let currentSkin: 'liquid-glass' | 'ready-glass' = 'liquid-glass'
   let currentTheme: 'light' | 'dark' = 'light'

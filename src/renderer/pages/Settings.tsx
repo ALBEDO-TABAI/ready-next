@@ -70,6 +70,8 @@ interface RSSDraftStoreSourceRow {
   lastFetchedAt: string | null
 }
 
+const SETTINGS_SURFACE_REFRESH_DELAY_MS = 120
+
 const settingsData: SettingSection[] = [
   {
     id: 'account',
@@ -2781,6 +2783,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
   const [settings, setSettings] = useState(settingsData)
   const { theme, setTheme, skin, setSkin, accent, setAccent } = useTheme()
   const didMountRef = useRef(false)
+  const settingsSurfaceRefreshTimerRef = useRef<number | null>(null)
 
   const currentSection = settings.find(s => s.id === activeSection)
 
@@ -2801,19 +2804,50 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
     }
   }, [initialSection, routeSection])
 
+  const requestSettingsSurfaceRefresh = useCallback(() => {
+    const refresh = window.electronAPI?.window?.refreshTransparentSurface
+    if (!refresh) return
+    void refresh()
+  }, [])
+
+  const scheduleSettingsSurfaceRefresh = useCallback(() => {
+    if (settingsSurfaceRefreshTimerRef.current !== null) {
+      window.clearTimeout(settingsSurfaceRefreshTimerRef.current)
+    }
+    settingsSurfaceRefreshTimerRef.current = window.setTimeout(() => {
+      settingsSurfaceRefreshTimerRef.current = null
+      requestSettingsSurfaceRefresh()
+    }, SETTINGS_SURFACE_REFRESH_DELAY_MS)
+  }, [requestSettingsSurfaceRefresh])
+
+  const handleSettingsSurfaceScroll = useCallback(() => {
+    scheduleSettingsSurfaceRefresh()
+  }, [scheduleSettingsSurfaceRefresh])
+
+  const handleSettingsSurfaceMotion = useCallback(() => {
+    scheduleSettingsSurfaceRefresh()
+  }, [scheduleSettingsSurfaceRefresh])
+
+  useEffect(() => {
+    return () => {
+      if (settingsSurfaceRefreshTimerRef.current !== null) {
+        window.clearTimeout(settingsSurfaceRefreshTimerRef.current)
+        settingsSurfaceRefreshTimerRef.current = null
+      }
+    }
+  }, [])
+
   useEffect(() => {
     if (!didMountRef.current) {
       didMountRef.current = true
       return
     }
-    const refresh = window.electronAPI?.window?.refreshTransparentSurface
-    if (!refresh) return
 
     const frameId = window.requestAnimationFrame(() => {
-      void refresh()
+      requestSettingsSurfaceRefresh()
     })
     return () => window.cancelAnimationFrame(frameId)
-  }, [activeSection])
+  }, [activeSection, requestSettingsSurfaceRefresh])
 
   const updateSetting = (sectionId: string, settingId: string, value: boolean | string) => {
     setSettings(settings.map(section =>
@@ -2879,6 +2913,9 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
             padding: '10px 8px',
             scrollbarGutter: 'stable',
           }}
+          onMouseMove={handleSettingsSurfaceMotion}
+          onScroll={handleSettingsSurfaceScroll}
+          onMouseLeave={scheduleSettingsSurfaceRefresh}
         >
           <div className="flex flex-col gap-1">
             {settings.map((section) => {

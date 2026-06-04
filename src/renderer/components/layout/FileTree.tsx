@@ -58,6 +58,8 @@ const ALLOWED_EXTENSIONS = new Set([
   'log', 'lock', 'tldr',
 ])
 
+const FILE_TREE_SURFACE_REFRESH_DELAY_MS = 120
+
 const DOCUMENT_EXTS = new Set(['md', 'txt', 'pdf', 'doc', 'docx', 'rtf', 'odt', 'html', 'htm', ...EBOOK_EXTENSIONS])
 const CODE_EXTS = new Set(['ts', 'tsx', 'js', 'jsx', 'json', 'css', 'scss', 'less', 'py', 'go', 'rs', 'java', 'kt', 'swift', 'c', 'cpp', 'h', 'yaml', 'yml', 'toml', 'xml', 'sql', 'sh', 'bash', 'zsh', 'vue', 'svelte', 'astro', 'ini', 'cfg', 'conf', 'properties', 'log'])
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'ico', 'tiff', 'svg'])
@@ -1151,6 +1153,7 @@ export default function FileTree({
   const gridPreviewLoadingRef = useRef(new Set<string>())
   const activeNativeFileDragRef = useRef<WorkspaceDragPayload | null>(null)
   const nativeFileDragClearTimerRef = useRef<number | null>(null)
+  const fileTreeSurfaceRefreshTimerRef = useRef<number | null>(null)
   const queryLower = query.trim().toLowerCase()
   const effectiveGridPath = gridPath !== undefined ? gridPath : internalGridPath
   const setEffectiveGridPath = onGridPathChange ?? setInternalGridPath
@@ -1182,6 +1185,39 @@ export default function FileTree({
     clearFileTreeDragState()
     clearNativeFileDragSource()
   }, [clearFileTreeDragState, clearNativeFileDragSource])
+
+  const requestFileTreeSurfaceRefresh = useCallback(() => {
+    const refresh = window.electronAPI?.window?.refreshTransparentSurface
+    if (!refresh) return
+    void refresh()
+  }, [])
+
+  const scheduleFileTreeSurfaceRefresh = useCallback(() => {
+    if (fileTreeSurfaceRefreshTimerRef.current !== null) {
+      window.clearTimeout(fileTreeSurfaceRefreshTimerRef.current)
+    }
+    fileTreeSurfaceRefreshTimerRef.current = window.setTimeout(() => {
+      fileTreeSurfaceRefreshTimerRef.current = null
+      requestFileTreeSurfaceRefresh()
+    }, FILE_TREE_SURFACE_REFRESH_DELAY_MS)
+  }, [requestFileTreeSurfaceRefresh])
+
+  const handleFileTreeSurfaceScroll = useCallback(() => {
+    scheduleFileTreeSurfaceRefresh()
+  }, [scheduleFileTreeSurfaceRefresh])
+
+  const handleFileTreeSurfaceMotion = useCallback(() => {
+    scheduleFileTreeSurfaceRefresh()
+  }, [scheduleFileTreeSurfaceRefresh])
+
+  useEffect(() => {
+    return () => {
+      if (fileTreeSurfaceRefreshTimerRef.current !== null) {
+        window.clearTimeout(fileTreeSurfaceRefreshTimerRef.current)
+        fileTreeSurfaceRefreshTimerRef.current = null
+      }
+    }
+  }, [])
 
   useEffect(() => {
     pendingClipsRef.current = pendingClips
@@ -2297,6 +2333,9 @@ export default function FileTree({
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
+      onMouseMove={handleFileTreeSurfaceMotion}
+      onScroll={handleFileTreeSurfaceScroll}
+      onMouseLeave={scheduleFileTreeSurfaceRefresh}
     >
       {isDragOver && (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-[var(--color-blue-light)] border-2 border-dashed border-[var(--color-blue)] rounded-lg m-1 pointer-events-none">

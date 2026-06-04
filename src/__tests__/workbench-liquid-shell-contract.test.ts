@@ -65,6 +65,17 @@ test('workbench and liquid test share the same scene foundation', () => {
   assert.match(chatPanel, /data-liquid-shell="chat-panel"/)
 })
 
+test('workbench refreshes the native transparent surface after async shell paint', () => {
+  const workbenchMode = readWorkspaceFile('src/renderer/pages/WorkbenchMode.tsx')
+
+  assert.match(workbenchMode, /TRANSPARENT_SURFACE_REFRESH_DELAYS_MS\s*=\s*\[240, 900\] as const/)
+  assert.match(workbenchMode, /window\.electronAPI\?\.window\?\.refreshTransparentSurface/)
+  assert.match(workbenchMode, /scheduleWorkbenchSurfaceRefresh/)
+  assert.match(workbenchMode, /window\.setTimeout\(\(\) => \{[\s\S]*?void refresh\(\)/)
+  assert.match(workbenchMode, /workbenchSurfaceRefreshTimersRef\.current\.forEach\(\(timer\) => window\.clearTimeout\(timer\)\)/)
+  assert.match(workbenchMode, /if \(didCommitModeChange\) scheduleWorkbenchSurfaceRefresh\(\)/)
+})
+
 test('main window uses native material via window-material controller', () => {
   const mainIndex = readWorkspaceFile('src/main/index.ts')
   const materialModule = readWorkspaceFile('src/main/modules/window-material/main-window-material.ts')
@@ -74,7 +85,9 @@ test('main window uses native material via window-material controller', () => {
   assert.match(mainIndex, /windowMaterialController\?\.sync\(\)|windowMaterialController\.applyInitial\(\)/)
   assert.match(materialModule, /setVibrancy\(target\.vibrancy\)/)
 
-  // visualEffectState 'active' 仍由 BrowserWindow 构造保留（macOS vibrancy 配套）
+  // macOS vibrancy 必须从 BrowserWindow 构造期进入，避免透明层第一帧走非 translucent 路径。
+  assert.match(mainIndex, /vibrancy:\s*constructorMaterial\?\.vibrancy/)
+  assert.match(mainIndex, /initialMaterial:\s*constructorMaterial/)
   assert.match(mainIndex, /visualEffectState:\s*platform === 'darwin' \? 'active' : undefined/)
 })
 

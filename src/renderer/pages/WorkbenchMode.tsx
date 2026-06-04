@@ -142,6 +142,7 @@ export default function WorkbenchMode() {
   const [isPanelResizing, setIsPanelResizing] = useState(false)
   const [browserLayoutMotionPhase, setBrowserLayoutMotionPhase] = useState<BrowserHostLayoutPhase>('idle')
   const transitionTargetModeRef = useRef<WorkbenchModeType>(workbenchMode)
+  const workbenchSurfaceRefreshTimersRef = useRef<number[]>([])
   const browserLayoutPhase = isPanelResizing ? 'dragging' : browserLayoutMotionPhase
 
   const isSidebarContentVisible = sidebarVisible
@@ -155,19 +156,27 @@ export default function WorkbenchMode() {
     transitionTargetModeRef.current = workbenchMode
   }, [workbenchMode])
 
-  useEffect(() => {
+  const clearScheduledWorkbenchSurfaceRefresh = useCallback(() => {
+    workbenchSurfaceRefreshTimersRef.current.forEach((timer) => window.clearTimeout(timer))
+    workbenchSurfaceRefreshTimersRef.current = []
+  }, [])
+
+  const scheduleWorkbenchSurfaceRefresh = useCallback(() => {
+    clearScheduledWorkbenchSurfaceRefresh()
     const refresh = window.electronAPI?.window?.refreshTransparentSurface
     if (!refresh) return
 
-    const timers = TRANSPARENT_SURFACE_REFRESH_DELAYS_MS.map((delay) => (
+    workbenchSurfaceRefreshTimersRef.current = TRANSPARENT_SURFACE_REFRESH_DELAYS_MS.map((delay) => (
       window.setTimeout(() => {
         void refresh()
       }, delay)
     ))
-    return () => {
-      timers.forEach((timer) => window.clearTimeout(timer))
-    }
-  }, [])
+  }, [clearScheduledWorkbenchSurfaceRefresh])
+
+  useEffect(() => {
+    scheduleWorkbenchSurfaceRefresh()
+    return clearScheduledWorkbenchSurfaceRefresh
+  }, [clearScheduledWorkbenchSurfaceRefresh, scheduleWorkbenchSurfaceRefresh])
 
   useEffect(() => {
     const nextWidth = clampWorkbenchSidePanelWidth(sidePanelWidths.shared)
@@ -381,6 +390,7 @@ export default function WorkbenchMode() {
 
     if (splitMode) {
       setWorkbenchMode(nextMode)
+      scheduleWorkbenchSurfaceRefresh()
       return
     }
 
@@ -389,6 +399,7 @@ export default function WorkbenchMode() {
     if (strategy === 'dom-only') {
       transitionTargetModeRef.current = nextMode
       setWorkbenchMode(nextMode)
+      scheduleWorkbenchSurfaceRefresh()
       return
     }
 
@@ -398,6 +409,7 @@ export default function WorkbenchMode() {
     pendingModeSwitchAckCancelRef.current = null
 
     setIsMotionSettled(false)
+    let didCommitModeChange = false
     try {
       await withRitual('mode-switch', async ({ signalReady }) => {
         const comingFromBrowser = transitionTargetModeRef.current === 'browser' && nextMode !== 'browser'
@@ -432,6 +444,7 @@ export default function WorkbenchMode() {
 
         transitionTargetModeRef.current = nextMode
         setWorkbenchMode(nextMode)
+        didCommitModeChange = true
         signalReady()
       })
     } catch (error) {
@@ -441,8 +454,9 @@ export default function WorkbenchMode() {
     } finally {
       setBrowserLayoutMotionPhase('idle')
       setIsMotionSettled(true)
+      if (didCommitModeChange) scheduleWorkbenchSurfaceRefresh()
     }
-  }, [setWorkbenchMode, splitMode, workbenchMode])
+  }, [scheduleWorkbenchSurfaceRefresh, setWorkbenchMode, splitMode, workbenchMode])
 
   useEffect(() => {
     return () => {

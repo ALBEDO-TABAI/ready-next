@@ -1,6 +1,6 @@
 # Ready 经验文档
 
-> 更新时间: 2026-05-07
+> 更新时间: 2026-06-04
 
 ## -2. Stage 10 (P) — Transitional bridge retirement (2026-05-07)
 
@@ -47,6 +47,18 @@ Stage 4 W3 引入 `SkillToolAuthorization` 三层分离时，留了一个显式�
 - 固化规则：
   - ritual / overlay / mask 这类演出层要有专门的语义 token（如 `--ritual-overlay-bg`），并通过 `:root` 间接层代理到"画布色"而不是内容色，未来改画布不会顺带改演出、反之亦然。
   - 切换演出不仅要关心"颜色正不正"，还要关心"与用户当前视野里那块主色的色温是否一致"；肉眼层级的差别比十六进制差别更重要。
+
+### 0.2 Electron 42 的 macOS 液态玻璃残影，要从窗口构造期修
+- 现象：Electron 42 / Chromium 148 下，透明 `BrowserWindow` + macOS `vibrancy: under-window` + 大量 glass surface / `backdrop-filter` / 滚动 hover，会在文件树、设置导航、模块切换后留下旧 hover 白块或旧内容鬼影。React state 没卡住；手动把窗口宽度 +1 再还原会立刻清掉，但高频 `setBounds` / resize / filter toggle 会造成窗口抖动；把玻璃调到 0.9+ 不透明也只是遮住问题，会破坏真实半透明玻璃。
+- 这次验证到的关键点：
+  - 单独给 DOM 加 `contain: paint`、`isolation`、`translateZ(0)`，或者把 hover 改成独立伪元素，都不能稳定解决。
+  - `webContents.invalidate()` / `invalidateShadow()` 可以作为低频兜底，但如果窗口不是从首帧就按 macOS 透明材料创建，真实 Electron 窗口里仍可能残留旧内容鬼影。
+  - 决定性修复是：在 `BrowserWindow` 构造时就传入透明 `backgroundColor` 和 `vibrancy: 'under-window'`，让 macOS compositor 从第一帧进入正确的半透明窗口路径；后续窗口材料控制器要用同一份初始材料做幂等记录，避免启动后再重复打一遍 `setVibrancy` / `setBackgroundColor`。
+- 固化规则：
+  - 不要用“不透明玻璃”“resize 抖一下”“高频强制刷新”当正式方案。
+  - macOS 液态玻璃的窗口级材料必须在窗口构造期落下，后续 `setVibrancy` 只适合作为状态切换，不适合补首帧路径。
+  - 滚动、hover、模块切换后的刷新只能低频、防抖、交互结束后触发，用来兜交互脏区，不承担根因修复。
+  - 验收必须重启真实 Electron 窗口并肉眼扫文件树、设置页、模块切换；只跑源码合同测试或浏览器预览不足以证明这个问题已消失。
 
 ## 1. 架构经验
 ### 1.0 Electron 开发态里，原生依赖 ABI 不匹配会把“设置丢失 / 历史空白 / scope not found”伪装成前端问题
