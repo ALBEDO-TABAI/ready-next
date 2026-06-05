@@ -14,7 +14,7 @@ import type {
   BrowserStartTaskRequest,
   BrowserWaitForConditionOptions,
 } from './capability-types'
-import { BrowserContentTaskRunner } from './content-task-runner'
+import { BrowserContentTaskRunner, type BrowserTaskProjectionSink } from './content-task-runner'
 import { ScopedBrowserFacade } from './scoped-browser-facade'
 import { AgentTabControlGate } from './agent-tab-control-gate'
 import { getBrowserWriteLeaseService } from './agent-browser-lease-singleton'
@@ -807,12 +807,17 @@ export class BrowserController {
     return this.contentTaskRunner.listTasks('note_collect')
   }
 
+  /** Wire the chat task-projection sink (set by setupAgentIPC, plan §3.3). */
+  setTaskProjectionSink(sink: BrowserTaskProjectionSink | null): void {
+    this.contentTaskRunner.setTaskProjectionSink(sink)
+  }
+
   /**
    * Start a background note-collection task on the agent tab (plan §3.3). The
    * caller supplies the validated note list (the main agent plans 判断题); the
    * task acquires its own agent-view lease and runs the deterministic engine.
    */
-  async startNoteCollection(plan: Record<string, unknown>): Promise<BrowserCapabilityTaskHandle> {
+  async startNoteCollection(plan: Record<string, unknown>, scopeId?: string): Promise<BrowserCapabilityTaskHandle> {
     // Global concurrency cap (Codex result-review #5): bound how many background
     // collections run at once. High-control platforms get a cap of 1 so same-
     // domain collections serialize (the per-domain rate control), on top of the
@@ -829,7 +834,14 @@ export class BrowserController {
     const agentTabId = await this.ensureAgentTab()
     return this.contentTaskRunner.startTask({
       kind: 'note_collect',
-      payload: { agentTabId, surface: 'agent-view' as AgentBrowserSurface, plan },
+      payload: {
+        agentTabId,
+        surface: 'agent-view' as AgentBrowserSurface,
+        plan,
+        // Bind the task to the dispatching conversation so it projects into
+        // that chat (plan §3.2); absent for non-chat callers (skip projection).
+        ...(scopeId && scopeId.trim() ? { scopeId: scopeId.trim() } : {}),
+      },
     })
   }
 

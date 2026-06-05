@@ -37,6 +37,39 @@ export type CollectorFacadeFactory = (opts: {
   surface: AgentBrowserSurface
 }) => CollectorFacadeBundle
 
+/**
+ * Minimal projection input the runner emits for a note_collect task (plan §3).
+ * The runtime-backed sink (wired in setupAgentIPC) maps this onto a full
+ * TaskProjectionRecord, so browser-engine stays decoupled from agent-control.
+ */
+export interface BrowserTaskProjectionInput {
+  taskId: string
+  scopeId: string
+  title: string
+  summary: string
+  state: 'running' | 'completed' | 'cancelled' | 'failed'
+  total: number
+  completed: number
+  failed: number
+}
+export interface BrowserTaskProjectionSink {
+  upsert(input: BrowserTaskProjectionInput): void
+}
+
+function noteCollectState(status: string): BrowserTaskProjectionInput['state'] {
+  if (status === 'completed') return 'completed'
+  if (status === 'failed') return 'failed'
+  if (status === 'cancelled') return 'cancelled'
+  return 'running'
+}
+
+function noteCollectSummary(total: number, completed: number, failed: number, current: string | null, state: BrowserTaskProjectionInput['state']): string {
+  if (state === 'completed') return `采集完成：成功 ${completed}${failed > 0 ? ` · 失败 ${failed}` : ''}，共 ${total} 篇`
+  if (state === 'cancelled') return `已中断：已采集 ${completed}/${total} 篇`
+  if (state === 'failed') return `采集失败：已采集 ${completed}/${total} 篇`
+  return `已采集 ${completed}/${total} 篇${current ? ` · 当前：${current}` : ''}`
+}
+
 function toNumberOr(value: unknown, fallback: number): number {
   const n = Number(value)
   return Number.isFinite(n) && n > 0 ? n : fallback
@@ -56,6 +89,63 @@ export class BrowserContentTaskRunner {
     private readonly leaseService: BrowserWriteLeaseService = getBrowserWriteLeaseService(),
     private readonly collectorFacadeFactory: CollectorFacadeFactory | null = null,
   ) {}
+
+  /** Set/replace the projection sink and re-project active note_collect tasks. */
+  setTaskProjectionSink(sink: BrowserTaskProjectionSink | null): void {
+    this.taskProjectionSink = sink
+    // §3.6: resumePendingTasks runs in the controller constructor, before the
+    // sink is wired — re-project active note_collect tasks now so chat cards
+    // appear for tasks that were already running/resumed when the sink arrived.
+    if (sink) void this.reprojectActiveNoteCollect()
+  }
+
+  private taskProjectionSink: BrowserTaskProjectionSink | null = null
+
+  private async reprojectActiveNoteCollect(): Promise<void> {
+    const sink = this.taskProjectionSink
+    if (!sink) return
+    for (const task of await this.listTasks('note_collect')) {
+      const payload = this.persistenceService.getTaskPayload(task.taskId)
+      const scopeId = typeof payload?.scopeId === 'string' ? payload.scopeId.trim() : ''
+      if (!scopeId) continue
+      const state = noteCollectState(task.status)
+      const { total, completed, failed, currentLabel } = task.progress
+      sink.upsert({
+        taskId: task.taskId,
+        scopeId,
+        title: '浏览器逐篇采集',
+        summary: noteCollectSummary(total, completed, failed, currentLabel ?? null, state),
+        state,
+        total,
+        completed,
+        failed,
+      })
+    }
+  }
+
+  /** Emit a projection for a note_collect task (no-op without sink or scopeId). */
+  private projectNoteCollect(
+    taskId: string,
+    scopeId: string,
+    state: BrowserTaskProjectionInput['state'],
+    total: number,
+    completed: number,
+    failed: number,
+    current: string | null,
+  ): void {
+    const sink = this.taskProjectionSink
+    if (!sink || !scopeId) return
+    sink.upsert({
+      taskId,
+      scopeId,
+      title: '浏览器逐篇采集',
+      summary: noteCollectSummary(total, completed, failed, current, state),
+      state,
+      total,
+      completed,
+      failed,
+    })
+  }
 
   async startTask(request: BrowserStartTaskRequest): Promise<BrowserCapabilityTaskHandle> {
     const handle = this.persistenceService.createTask(request)
@@ -84,10 +174,19 @@ export class BrowserContentTaskRunner {
 
   async cancelTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
     this.cancelledTasks.add(taskId)
-    return this.persistenceService.updateProgress(taskId, {}, {
+    const handle = this.persistenceService.updateProgress(taskId, {}, {
       status: 'cancelled',
       finishedAt: new Date().toISOString(),
     })
+    // Reflect the cancel in the chat card immediately, even if the loop already
+    // exited (race) so the terminal projection never fires.
+    if (handle?.kind === 'note_collect') {
+      const payload = this.persistenceService.getTaskPayload(taskId)
+      const scopeId = typeof payload?.scopeId === 'string' ? payload.scopeId.trim() : ''
+      const p = handle.progress
+      this.projectNoteCollect(taskId, scopeId, 'cancelled', p.total, p.completed, p.failed, null)
+    }
+    return handle
   }
 
   async resumePendingTasks(): Promise<void> {
@@ -327,12 +426,14 @@ export class BrowserContentTaskRunner {
    * never aborts it; it stops only on its own cancel / lease loss / user freeze.
    */
   private async runNoteCollect(taskId: string, payload: Record<string, unknown>): Promise<void> {
+    const scopeId = typeof payload.scopeId === 'string' ? payload.scopeId.trim() : ''
     if (!this.collectorFacadeFactory) {
       this.persistenceService.updateProgress(taskId, { currentLabel: null }, {
         status: 'failed',
         error: 'note_collect is not available: no collector facade factory wired',
         finishedAt: new Date().toISOString(),
       })
+      this.projectNoteCollect(taskId, scopeId, 'failed', 0, 0, 0, null)
       return
     }
     const agentTabId = typeof payload.agentTabId === 'string' ? payload.agentTabId : ''
@@ -343,6 +444,7 @@ export class BrowserContentTaskRunner {
         error: !agentTabId ? 'note_collect requires an agentTabId' : `invalid collection plan: ${parsed.ok ? '' : parsed.issues.join('; ')}`,
         finishedAt: new Date().toISOString(),
       })
+      this.projectNoteCollect(taskId, scopeId, 'failed', 0, 0, 0, null)
       return
     }
     // High-control platforms (小红书/抖音/…): clamp volume + pace between notes
@@ -373,10 +475,13 @@ export class BrowserContentTaskRunner {
         error: `note_collect could not acquire ${surface} lease: ${acquired.errorCode}`,
         finishedAt: new Date().toISOString(),
       })
+      this.projectNoteCollect(taskId, scopeId, 'failed', plan.notes.length, 0, 0, null)
       return
     }
     const leaseId = acquired.leaseId
     const { facade, isControlFrozen } = this.collectorFacadeFactory({ agentTabId, leaseId, surface })
+    // Project a running card as soon as the collection starts (plan §3.4).
+    this.projectNoteCollect(taskId, scopeId, 'running', plan.notes.length, 0, 0, null)
 
     try {
       // Resume from the last per-note checkpoint if one exists.
@@ -421,6 +526,8 @@ export class BrowserContentTaskRunner {
             }, {
               checkpoint: { taskId, stage: 'note_collect_round', cursor: String(state.cursor), partialResults: state },
             })
+            // Live progress in the chat card after every note (plan §3.6).
+            this.projectNoteCollect(taskId, scopeId, 'running', progress.total, progress.completed, progress.failed, progress.currentTitle)
           },
         },
         initialState,
@@ -428,7 +535,10 @@ export class BrowserContentTaskRunner {
 
       // cancelTask() (incl. the confirm→cancel path) already wrote 'cancelled';
       // don't overwrite it with a completion.
-      if (this.cancelledTasks.has(taskId)) return
+      if (this.cancelledTasks.has(taskId)) {
+        this.projectNoteCollect(taskId, scopeId, 'cancelled', plan.notes.length, result.collected.length, result.failed.length, null)
+        return
+      }
       // A user freeze or a lease takeover is NOT a successful completion (Codex
       // result-review #1): reflect the interruption in the task status.
       const finalStatus = result.stopReason === 'cancelled' || result.stopReason === 'lease_lost'
@@ -445,6 +555,7 @@ export class BrowserContentTaskRunner {
         result: { collected: result.collected, failed: result.failed, rounds: result.rounds, stopReason: result.stopReason },
         finishedAt: new Date().toISOString(),
       })
+      this.projectNoteCollect(taskId, scopeId, finalStatus, plan.notes.length, result.collected.length, result.failed.length, null)
     } finally {
       this.leaseService.release(leaseId)
     }

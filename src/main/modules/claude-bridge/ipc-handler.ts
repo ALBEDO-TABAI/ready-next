@@ -8,6 +8,8 @@ import { AgentManager } from './agent-manager'
 // (`agent:getCapabilityRuntimeSnapshot` payload type) moved into
 // `agentRuntimeGroup`.
 import { BrowserController } from '../browser-engine/ipc-handler'
+import type { BrowserTaskProjectionSink } from '../browser-engine/content-task-runner'
+import type { TaskProjectionRecord } from '../agent-control/contracts/run-contracts'
 import { readFileSync, statSync } from 'fs'
 import { basename, extname } from 'path'
 import { AgentControlRuntime } from '../agent-control/runtime-core/runtime'
@@ -562,6 +564,51 @@ export async function cleanupAgentRuntime(): Promise<void> {
   registerSkillReferenceInlinedEmitter(null)
 }
 
+/**
+ * Project a note_collect background task into the agent TaskProjection store so
+ * it shows as a native task card in the dispatching conversation's chat
+ * (chat-side-collection-task-indicator plan §3.3). browser-engine stays
+ * decoupled: it emits a minimal BrowserTaskProjectionInput; this maps it to a
+ * TaskProjectionRecord. waitingFor:'background' puts the card in the chat's
+ * background pile while running.
+ */
+function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime): BrowserTaskProjectionSink {
+  return {
+    upsert(input): void {
+      if (!input.scopeId) return
+      const store = activeRuntime.getTaskProjectionStore()
+      const now = new Date().toISOString()
+      const status: TaskProjectionRecord['status'] = input.state === 'running'
+        ? 'running'
+        : input.state === 'completed'
+          ? 'completed'
+          : input.state === 'failed'
+            ? 'failed'
+            : 'killed'
+      const existing = store.get(input.taskId)
+      // Progress is conveyed via taskSummary; the strict ScopeRunSkillProgress
+      // shape is not a natural fit for note-count progress, so we omit it.
+      const record: TaskProjectionRecord = {
+        taskId: input.taskId,
+        scopeId: input.scopeId,
+        runId: input.taskId,
+        taskType: 'multi_step_task',
+        module: 'browser',
+        taskTitle: input.title,
+        taskSummary: input.summary,
+        status,
+        interactionState: 'running',
+        waitingFor: input.state === 'running' ? 'background' : 'none',
+        steps: [],
+        createdAt: existing?.createdAt || now,
+        updatedAt: now,
+      }
+      if (existing) store.update(input.taskId, record)
+      else store.create(record)
+    },
+  }
+}
+
 export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWindow, browserController?: BrowserController): void {
   if (!runtime) {
     runtime = new AgentControlRuntime(agentManager, browserController)
@@ -574,6 +621,11 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     void getSkillsRuntimeManager().ensurePythonRuntimeReady()
   } else if (browserController) {
     runtime.getOrchestrator().setBrowserController(browserController)
+  }
+  // Wire the note_collect → chat task-projection sink (plan §3.3). setting it
+  // re-projects any already-running/resumed collection so its card appears.
+  if (browserController) {
+    browserController.setTaskProjectionSink(makeNoteCollectProjectionSink(runtime))
   }
   // B Phase 1 PR2 T1-7: wire `skill_ask_user` to push questions to the
   // renderer. The bridge keeps the handler independent of electron so it can

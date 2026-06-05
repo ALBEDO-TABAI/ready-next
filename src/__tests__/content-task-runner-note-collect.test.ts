@@ -212,3 +212,46 @@ describe('note_collect background task (content-task-runner)', () => {
     assert.equal(task.status, 'cancelled', 'a lease takeover is not a successful completion')
   })
 })
+
+describe('note_collect → chat task projection (scope-bound)', () => {
+  type Upsert = { taskId: string; scopeId: string; state: string; total: number; completed: number; summary: string }
+  function fakeSink() {
+    const upserts: Upsert[] = []
+    return { sink: { upsert: (i: Upsert) => upserts.push(i) }, upserts }
+  }
+  const scopedPayload = (n: number) => ({ ...planPayload(n), scopeId: 'conv-abc' })
+
+  it('projects running on start, on each note, and completed at the end — all bound to the scope', async () => {
+    const { svc: persistence } = fakePersistence()
+    const { svc: lease } = fakeLease()
+    const { sink, upserts } = fakeSink()
+    const runner = new BrowserContentTaskRunner({} as never, persistence as never, lease as never, okFacadeFactory())
+    runner.setTaskProjectionSink(sink as never)
+    await runToCompletion(runner, scopedPayload(2))
+    assert.ok(upserts.length >= 3, 'start + per-note + terminal projections')
+    assert.ok(upserts.every((u) => u.scopeId === 'conv-abc'), 'every projection bound to the dispatching scope')
+    assert.equal(upserts[0].state, 'running', 'first projection is running')
+    assert.equal(upserts[upserts.length - 1].state, 'completed', 'final projection is completed')
+    assert.equal(upserts[upserts.length - 1].total, 2)
+  })
+
+  it('does NOT project when no scopeId is supplied (non-chat dispatch)', async () => {
+    const { svc: persistence } = fakePersistence()
+    const { svc: lease } = fakeLease()
+    const { sink, upserts } = fakeSink()
+    const runner = new BrowserContentTaskRunner({} as never, persistence as never, lease as never, okFacadeFactory())
+    runner.setTaskProjectionSink(sink as never)
+    await runToCompletion(runner, planPayload(2)) // no scopeId
+    assert.equal(upserts.length, 0, 'no scopeId → no projection, no cross-talk')
+  })
+
+  it('projects cancelled (not completed) when the user freezes control', async () => {
+    const { svc: persistence } = fakePersistence()
+    const { svc: lease } = fakeLease()
+    const { sink, upserts } = fakeSink()
+    const runner = new BrowserContentTaskRunner({} as never, persistence as never, lease as never, okFacadeFactory({ isFrozen: () => true }))
+    runner.setTaskProjectionSink(sink as never)
+    await runToCompletion(runner, scopedPayload(5))
+    assert.equal(upserts[upserts.length - 1].state, 'cancelled', 'a freeze projects a cancelled card, not completed')
+  })
+})

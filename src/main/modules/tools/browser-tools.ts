@@ -4132,7 +4132,9 @@ export async function executeBrowserTool(
             : `Ready采集/${profileSlug}`,
           ...(Object.keys(stopConditions).length > 0 ? { stopConditions } : {}),
         }
-        const result = await controller.startNoteCollection(plan)
+        // Pass the agent's session/scope so the background task projects into
+        // THIS conversation's chat (plan §3.2). sessionId ≈ scopeId.
+        const result = await controller.startNoteCollection(plan, sessionId)
         return JSON.stringify(result, null, 2)
       }
 
