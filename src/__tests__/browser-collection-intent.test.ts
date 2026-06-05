@@ -6,6 +6,7 @@ import {
   isBrowserCollectionSubsetTool,
   isHighControlPlatformText,
   stepCollectionIntentTtl,
+  isBareContinuationInstruction,
   BROWSER_COLLECTION_SUBSET_TOOL_NAMES,
 } from '../shared/browser-collection-intent'
 import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
@@ -147,6 +148,34 @@ describe('over-exposure guard (context markers must not trigger via primary-text
     // is excluded — the bare instruction here ("你是谁") has no intent.
     // (We simulate that by passing only the primary text, which is what the SDK does.)
     assert.equal(resolveBrowserCollectionIntent('你是谁'), false)
+  })
+})
+
+describe('bare continuation resumes a browser collection (continuation + recalled context)', () => {
+  it('recognizes bare continue/retry instructions', () => {
+    for (const t of ['继续', '重试一下，继续', '再试一次', '接着采', 'continue', 'retry', '再来一次']) {
+      assert.equal(isBareContinuationInstruction(t), true, `${t} should be a bare continuation`)
+    }
+  })
+  it('does NOT treat a substantive instruction as a bare continuation', () => {
+    for (const t of ['把小红书这个博主的笔记都采集了', '你是谁', '帮我润色这段文档', '把这张图保存到桌面']) {
+      assert.equal(isBareContinuationInstruction(t), false, `${t} is not a bare continuation`)
+    }
+  })
+  it('a bare 继续 with browser-collection in the recalled summary exposes via the continuation path', () => {
+    // The SDK composition: isBareContinuationInstruction(primary) &&
+    // resolveBrowserCollectionIntent(fullText). The primary alone has no intent,
+    // but the recalled summary carries the platform — so a resume exposes.
+    const primary = '重试一下，继续'
+    const fullText = '重试一下，继续\n\n## 最近会话摘要\n用户之前要采集小红书博主 Aoi 葵 的全部笔记'
+    assert.equal(isBareContinuationInstruction(primary), true)
+    assert.equal(resolveBrowserCollectionIntent(primary), false, 'primary alone has no intent')
+    assert.equal(resolveBrowserCollectionIntent(fullText), true, 'recalled summary supplies the platform')
+  })
+  it('a bare 继续 with NO browser context in recall does NOT expose', () => {
+    const fullText = '继续\n\n## 最近会话摘要\n用户在写一份周报文档'
+    assert.equal(isBareContinuationInstruction('继续'), true)
+    assert.equal(resolveBrowserCollectionIntent(fullText), false, 'no platform/web surface in recall → no expose')
   })
 })
 

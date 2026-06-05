@@ -103,6 +103,7 @@ import {
   resolveBrowserCollectionIntent,
   isBrowserCollectionSubsetTool,
   stepCollectionIntentTtl,
+  isBareContinuationInstruction,
 } from '../../../../shared/browser-collection-intent'
 import { createBrowserTurnLease } from '../../browser-engine/agent-browser-turn-lease'
 import { filterToolsByVisionCapability } from '../tools-runtime/tool-gateway'
@@ -369,10 +370,19 @@ function allowedPrimitiveToolsForSdkSkillTurn(): string[] {
  * the bootstrap preamble (no intent) and collection exposure silently fails.
  */
 function messageHasBrowserCollectionIntent(message: RunMessage, requestEnvelope?: unknown): boolean {
-  if (messageToText(message).includes('### 浏览页面引用')) return true
+  const fullText = messageToText(message)
+  if (fullText.includes('### 浏览页面引用')) return true
   const envelopePrimary = parseEnvelopeResourceReferences(requestEnvelope).primaryInstruction
   const primary = envelopePrimary || primaryInstructionText(message)
-  return resolveBrowserCollectionIntent(primary)
+  if (resolveBrowserCollectionIntent(primary)) return true
+  // A bare continuation ("继续" / "重试一下") of an earlier browser collection has
+  // no web object in the instruction itself, and the per-session TTL is gone
+  // when the user resumes in a new conversation or after a long gap. For these
+  // — and ONLY these — consult the full envelope (incl. ## 最近会话摘要) so the
+  // user can resume a collection without re-typing the request. Substantive
+  // messages still use primary text only, so context markers can't over-expose.
+  if (isBareContinuationInstruction(primary) && resolveBrowserCollectionIntent(fullText)) return true
+  return false
 }
 
 function primaryInstructionText(message: RunMessage): string {

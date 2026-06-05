@@ -99,6 +99,22 @@ export function isHighControlPlatformText(text: string | null | undefined): bool
   return PLATFORM_PATTERN.test(String(text || ''))
 }
 
+const BARE_CONTINUATION_PATTERN =
+  /(?:继续|接着|接续|重试|再试|再来|再跑|再采|go on|continue|retry|keep going|try again|resume|carry on)/i
+
+/**
+ * True when the instruction is just a short "continue / retry" follow-up
+ * ("继续" / "重试一下" / "再试一次") with no task content of its own. Used to
+ * decide whether a bare follow-up should consult the recalled session context
+ * for browser-collection intent — only bare continuations do, so a substantive
+ * unrelated message can never over-expose from a platform word in the summary.
+ */
+export function isBareContinuationInstruction(text: string | null | undefined): boolean {
+  const t = String(text || '').trim()
+  if (!t || t.length > 24) return false
+  return BARE_CONTINUATION_PATTERN.test(t)
+}
+
 /**
  * Per-session collection-intent TTL step (continuity across follow-up turns).
  * A turn that expresses intent refreshes the TTL to `ttlTurns`; otherwise it
