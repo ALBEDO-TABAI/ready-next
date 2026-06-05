@@ -107,7 +107,12 @@ export function resolveProjectionForTaskRun(
     if (matched) return matched
   }
 
-  return selectFallbackProjection(items)
+  // Exclude browser background-task projections (e.g. note_collect) from the
+  // foreground fallback: they own their own card via the merge's pass-4
+  // synthesis. Without this, a running note_collect projection gets grabbed as
+  // the projection for an unrelated foreground card and the separate background
+  // card is then deduped away (Codex result-review #B cross-talk).
+  return selectFallbackProjection(items.filter((item) => item.module !== 'browser'))
 }
 
 export function isStalePausedProjection(item: PersistedTaskProjection): boolean {

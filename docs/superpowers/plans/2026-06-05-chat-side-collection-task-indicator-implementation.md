@@ -109,3 +109,10 @@ Codex 深入只读审查确认：projection store 可吃任意 module 并 emit c
 - **WP4 渲染（核对，零改动）**：读 use-task-run-merge 确认第 4 pass 为 persistedTaskProjections 里**每条** projection 合成卡片，key=`${scopeId}:task:${taskId}`（browser 任务 taskId 与主任务不同→不撞键、不去重），status 'running'→'tool_running' phase + waitingFor:'background'→background_running→后台堆；ChatPanel 已订阅 agent:taskProjectionsChanged 刷新 → 无需改 renderer。
 - **WP5 测试**：content-task-runner-note-collect.test 新增投影 3 例（start+逐篇+终态 scope 绑定、无 scopeId 不投影、freeze→cancelled 卡）。typecheck 绿。
 - **待实测**：真实从聊天派发后该会话出现采集卡 + 实时进度 + 完成/中断收尾；其它会话不串台；重启后恢复任务回投。
+
+### 结果评审 Round 1（2026-06-05，Codex → REQUEST-CHANGES，3 条已修）
+Codex 确认 scopeId 串接、sink 解耦、生命周期投影、deleteByScope 清理基本到位，但揪出 3 个真实缺陷（推翻了"渲染零改动"）：
+1. **未捕获异常卡在 running**：runBrowserCollection 若在 running 投影后抛错，scheduleTask 外层 catch 只标 browser task failed，聊天卡永远停在 background_running。→ runNoteCollect 增 catch，抛错时同时标 task failed + 投影 'failed'。
+2. **前台串台**：projection.ts selectFallbackProjection 在无 taskId 命中时会兜底抓同 scope 任一 live projection——running note_collect 会被某前台卡抓走，pass 4 又因键已存在跳过后台卡。→ resolveProjectionForTaskRun 的兜底过滤掉 module:'browser'（它走 pass 4 自己的卡）。
+3. **完成即消失**：终态 waitingFor:'none' + 'completed' 被 isCompletedTerminalRun 立刻移出后台堆，且无 responseMessageId 无法落前台快照卡 → 采集一完成卡片就消失。→ sink 终态先 dwell（保持 background + ✓ 完成 summary）30s，再 settle 到真终态；settle 步 createIfMissing=false，避免 deleteByScope 后被 late timer 复活。
+测试：runner 抛错→failed 投影 1 例；projection.ts 兜底排除 browser 3 例。typecheck 绿。

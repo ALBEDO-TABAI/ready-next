@@ -556,6 +556,16 @@ export class BrowserContentTaskRunner {
         finishedAt: new Date().toISOString(),
       })
       this.projectNoteCollect(taskId, scopeId, finalStatus, plan.notes.length, result.collected.length, result.failed.length, null)
+    } catch (error) {
+      // An uncaught throw from runBrowserCollection would otherwise leave the
+      // chat card stuck in 'running' forever (Codex result-review #A). Mark the
+      // browser task AND the chat projection failed.
+      this.persistenceService.updateProgress(taskId, { currentLabel: null }, {
+        status: 'failed',
+        error: error instanceof Error ? error.message : String(error),
+        finishedAt: new Date().toISOString(),
+      })
+      this.projectNoteCollect(taskId, scopeId, 'failed', plan.notes.length, 0, 0, null)
     } finally {
       this.leaseService.release(leaseId)
     }

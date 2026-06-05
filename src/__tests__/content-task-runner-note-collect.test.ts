@@ -254,4 +254,18 @@ describe('note_collect → chat task projection (scope-bound)', () => {
     await runToCompletion(runner, scopedPayload(5))
     assert.equal(upserts[upserts.length - 1].state, 'cancelled', 'a freeze projects a cancelled card, not completed')
   })
+
+  it('projects failed (not stuck running) when the collection loop throws (Codex #A)', async () => {
+    const { svc: persistence } = fakePersistence()
+    const { svc: lease } = fakeLease()
+    const { sink, upserts } = fakeSink()
+    const throwingFactory = () => ({
+      facade: { run: async () => { throw new Error('boom') } },
+      isControlFrozen: () => false,
+    })
+    const runner = new BrowserContentTaskRunner({} as never, persistence as never, lease as never, throwingFactory as never)
+    runner.setTaskProjectionSink(sink as never)
+    await runToCompletion(runner, scopedPayload(3))
+    assert.equal(upserts[upserts.length - 1].state, 'failed', 'an uncaught throw must settle the card to failed, not leave it running')
+  })
 })

@@ -572,39 +572,64 @@ export async function cleanupAgentRuntime(): Promise<void> {
  * TaskProjectionRecord. waitingFor:'background' puts the card in the chat's
  * background pile while running.
  */
+const NOTE_COLLECT_TERMINAL_DWELL_MS = 30_000
+
 function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime): BrowserTaskProjectionSink {
+  // Write a projection. `createIfMissing=false` (the delayed settle step) skips
+  // a card the user already cleared (deleteByScope) so a late timer can't
+  // resurrect it (Codex result-review — no zombie projections).
+  const write = (
+    input: { taskId: string; scopeId: string; title: string; summary: string },
+    status: TaskProjectionRecord['status'],
+    waitingFor: 'background' | 'none',
+    createIfMissing: boolean,
+  ): void => {
+    const store = activeRuntime.getTaskProjectionStore()
+    const existing = store.get(input.taskId)
+    if (!existing && !createIfMissing) return
+    const now = new Date().toISOString()
+    // Progress is conveyed via taskSummary; the strict ScopeRunSkillProgress
+    // shape is not a natural fit for note-count progress, so we omit it.
+    const record: TaskProjectionRecord = {
+      taskId: input.taskId,
+      scopeId: input.scopeId,
+      runId: input.taskId,
+      taskType: 'multi_step_task',
+      module: 'browser',
+      taskTitle: input.title,
+      taskSummary: input.summary,
+      status,
+      interactionState: 'running',
+      waitingFor,
+      steps: [],
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+    }
+    if (existing) store.update(input.taskId, record)
+    else store.create(record)
+  }
   return {
     upsert(input): void {
       if (!input.scopeId) return
-      const store = activeRuntime.getTaskProjectionStore()
-      const now = new Date().toISOString()
-      const status: TaskProjectionRecord['status'] = input.state === 'running'
-        ? 'running'
-        : input.state === 'completed'
-          ? 'completed'
-          : input.state === 'failed'
-            ? 'failed'
-            : 'killed'
-      const existing = store.get(input.taskId)
-      // Progress is conveyed via taskSummary; the strict ScopeRunSkillProgress
-      // shape is not a natural fit for note-count progress, so we omit it.
-      const record: TaskProjectionRecord = {
-        taskId: input.taskId,
-        scopeId: input.scopeId,
-        runId: input.taskId,
-        taskType: 'multi_step_task',
-        module: 'browser',
-        taskTitle: input.title,
-        taskSummary: input.summary,
-        status,
-        interactionState: 'running',
-        waitingFor: input.state === 'running' ? 'background' : 'none',
-        steps: [],
-        createdAt: existing?.createdAt || now,
-        updatedAt: now,
+      if (input.state === 'running') {
+        write(input, 'running', 'background', true)
+        return
       }
-      if (existing) store.update(input.taskId, record)
-      else store.create(record)
+      // Terminal: a 'completed' status is short-circuited out of the chat's
+      // background pile immediately, so the card would vanish the instant
+      // collection finishes (Codex result-review #C). Dwell it in the pile
+      // (still 'running', completion conveyed via the ✓ summary) for a brief
+      // window so the user sees it finish, then settle to the real terminal
+      // status (leaves the pile).
+      write(input, 'running', 'background', true)
+      const terminal: TaskProjectionRecord['status'] = input.state === 'completed'
+        ? 'completed'
+        : input.state === 'failed'
+          ? 'failed'
+          : 'killed'
+      setTimeout(() => {
+        write(input, terminal, 'none', false)
+      }, NOTE_COLLECT_TERMINAL_DWELL_MS)
     },
   }
 }
