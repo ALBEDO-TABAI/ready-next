@@ -119,7 +119,11 @@ export default function TabRail({
   const layoutMetrics = getTabRailLayoutMetrics(displayTabs.length)
   const activeSurfaceMetrics = getActiveTabSurfaceMetrics(layoutMetrics, activeTabMode)
   const activeSlotMetrics = getActiveTabSlotMetrics(layoutMetrics, activeTabMode, refreshDockMode)
-  const refreshDockVisible = activeTabMode === 'expanded' || activeTabMode === 'editing' || refreshDockMode !== 'idle'
+  // Show the refresh dock as soon as the active tab is hovered ('primed'), not
+  // only after it is expanded/edited — so hovering the current tab reveals the
+  // refresh button, and the dock stays open (via refreshDockMode) as the pointer
+  // moves onto it to reach forward/back. (Only rendered for the active tab.)
+  const refreshDockVisible = activeTabMode !== 'compact' || refreshDockMode !== 'idle'
 
   const setBrowserTabDragPayload = useCallback((event: React.DragEvent, tab: BrowserTab) => {
     const payload = {
