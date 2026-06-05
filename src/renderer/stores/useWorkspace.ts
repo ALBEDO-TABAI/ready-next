@@ -595,9 +595,19 @@ export const useWorkspace = create<WorkspaceState>((set, get) => {
           })
           return items
         }
+        set((state) => {
+          const next = new Map(state.dirChildren)
+          next.set(dirPath, [])
+          return { dirChildren: next }
+        })
       }
     } catch (error) {
       console.warn('Failed to load dir children:', dirPath, error)
+      set((state) => {
+        const next = new Map(state.dirChildren)
+        next.set(dirPath, [])
+        return { dirChildren: next }
+      })
     }
     return []
   },

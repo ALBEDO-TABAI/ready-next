@@ -1,6 +1,7 @@
 import { domainsLikelyMatch, getBrowserWorkflowState, getLatestSkillRun, getRecentBrowserActions } from '../session/session-continuity'
 import type { AttachmentResourceList, BrowserTaskAttachmentResource, BrowserTaskDecision, BrowserTaskPlan, BrowserTaskPlanContinuity } from '../../../../shared/browser-agent-task'
 import { detectLiveInfoIntent } from '../live-info-intent'
+import { resolveBrowserCollectionIntent } from '../../../../shared/browser-collection-intent'
 
 interface PlannerTabLike {
   id: string
@@ -220,8 +221,10 @@ export class BrowserTaskPlanner {
     userText?: string
     attachmentResourceList?: AttachmentResourceList
   }): BrowserTaskPlan {
-    const liveInfoIntent = detectLiveInfoIntent(String(context?.userText || decision.promptIntent?.raw || ''))
-    const links = this.extractLinks(String(context?.userText || decision.promptIntent?.raw || ''))
+    const planText = String(context?.userText || decision.promptIntent?.raw || '')
+    const liveInfoIntent = detectLiveInfoIntent(planText)
+    const collectionIntent = resolveBrowserCollectionIntent(planText)
+    const links = this.extractLinks(planText)
     const attachmentResourceList = context?.attachmentResourceList ?? this.getSessionAttachmentResourceList(context?.sessionId)
     const persistedAttachments = attachmentResourceList
       ? attachmentResourceList.ok ? attachmentResourceList.resources : []
@@ -329,6 +332,8 @@ export class BrowserTaskPlanner {
       ? '目标页面已挂载指定附件、提示词已进入正确输入区，并且页面已进入生成或处理状态。'
       : liveInfoIntent.needsLiveInfo
         ? '已从网页读取到与用户问题匹配的最新外部信息，并完成核对。'
+        : collectionIntent
+          ? '已启动浏览器采集任务，并返回可查询、可取消的浏览器任务句柄。'
         : '目标页面已完成用户要求的网页操作。'
 
     return {
@@ -337,6 +342,8 @@ export class BrowserTaskPlanner {
         ? '使用当前会话中的附件，在目标网页中完成上传、填写提示词并提交生成任务。'
         : liveInfoIntent.needsLiveInfo
           ? '根据用户问题获取最新外部信息，并通过网页结果完成核对。'
+          : collectionIntent
+            ? '浏览器逐篇采集'
           : '根据用户指令完成网页操作，并按顺序验证结果。',
       expectedOutcome,
       resources: {
@@ -483,12 +490,14 @@ export class BrowserTaskPlanner {
       return decision
     }
 
+    const collectionIntent = resolveBrowserCollectionIntent(text)
     const effectiveBrowserIntent =
       (hasExplicitBrowserAction && links.length > 0) ||
       Boolean(requestedSite && hasExplicitBrowserAction) ||
       (attachments.count > 0 && (hasUploadIntent || hasGenerationIntent)) ||
       (hasContinuationIntent && activeTabLooksCreative) ||
-      liveInfoIntent.needsLiveInfo
+      liveInfoIntent.needsLiveInfo ||
+      collectionIntent
 
     if (!effectiveBrowserIntent) return { mode: 'free_tool_loop', reason: 'no_browser_intent' }
 
@@ -509,7 +518,11 @@ export class BrowserTaskPlanner {
 
     const decision: BrowserTaskDecision = {
       mode: 'browser_workflow',
-      reason: liveInfoIntent.needsLiveInfo ? 'live_information_lookup' : 'generic_browser_workflow',
+      reason: liveInfoIntent.needsLiveInfo
+        ? 'live_information_lookup'
+        : collectionIntent
+          ? 'browser_collection'
+          : 'generic_browser_workflow',
       attachmentSelection: attachments.count > 0 ? attachments : undefined,
       promptIntent,
     }

@@ -298,9 +298,9 @@ export async function executeToolCall(
           let browserLeaseGate: BrowserLeaseGate | undefined
           const turnLease = context.browserLease
           if (turnLease) {
-            if (toolName === 'browser_visible_collect') {
-              // Hand the surface to the background collect task (single writer):
-              // release the turn lease so the task can acquire its own.
+            if (toolName === 'browser_visible_collect' || toolName === 'browser_collect_notes') {
+              // Hand the surface to a background browser task (single writer):
+              // release the turn lease so the task can acquire or use its own lane.
               turnLease.releaseForBackgroundHandoff()
             } else if (classifyBrowserToolCall(toolName, args) === 'write') {
               const ensured = turnLease.ensureGate()

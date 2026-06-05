@@ -14,6 +14,7 @@ function createController(overrides?: Partial<BrowserController>): BrowserContro
     getPageContent: async () => 'visible feed text',
     goBack: () => ({ success: true }),
     startTask: async () => ({ taskId: 'task-1', kind: 'visible_collect', status: 'queued', progress: { total: 0, completed: 0, failed: 0, currentLabel: null } }) as never,
+    startNoteCollection: async () => ({ taskId: 'browser-task-note-1', kind: 'note_collect', status: 'queued', progress: { total: 0, completed: 0, failed: 0, currentLabel: null } }) as never,
     ...(overrides || {}),
   }
   return mock as BrowserController
@@ -91,6 +92,31 @@ describe('free-loop browser dispatch lease gating (WP2)', () => {
     // Launching a background collect releases the turn lease so the task can own it.
     await executeToolCall('browser_visible_collect', { template: 'card_list' }, ctx(controller, turnLease))
     assert.equal(service.getState('user-view'), 'idle', 'surface handed off to the background task')
+  })
+
+  it('browser_collect_notes hands off instead of being blocked by the turn user-view lease', async () => {
+    const service = new BrowserWriteLeaseService()
+    const turnLease = new BrowserTurnLease({ taskId: 't', runId: 'r1' }, 'user-view', service)
+    const started: Array<Record<string, unknown>> = []
+    const controller = createController({
+      startNoteCollection: async (plan: Record<string, unknown>) => {
+        started.push(plan)
+        return { taskId: 'browser-task-note-1', kind: 'note_collect', status: 'queued', progress: { total: 0, completed: 0, failed: 0, currentLabel: null } } as never
+      },
+    })
+    await executeToolCall('browser_go_back', {}, ctx(controller, turnLease))
+    assert.equal(service.getState('user-view'), 'held')
+
+    const out = await executeToolCall('browser_collect_notes', {
+      target_profile_url: 'https://www.xiaohongshu.com/user/profile/abc',
+      notes: [{ url: 'https://www.xiaohongshu.com/note/1', title: '笔记一' }],
+      output_root_dir: '/tmp/out',
+    }, ctx(controller, turnLease))
+
+    assert.equal(parseError(out), null, `collect_notes must not return a lease error: ${outputText(out)}`)
+    assert.match(outputText(out), /browser-task-note-1/)
+    assert.equal(started.length, 1)
+    assert.equal(service.getState('user-view'), 'idle', 'surface handed off before dispatching the agent-view task')
   })
 
   it('when visible_collect is the turn FIRST action, a later takeover is NOT stolen back', async () => {

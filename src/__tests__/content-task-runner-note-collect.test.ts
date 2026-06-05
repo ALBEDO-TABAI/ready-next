@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 import { BrowserContentTaskRunner, type CollectorFacadeFactory } from '../main/modules/browser-engine/content-task-runner'
 import type { NoteCollectFacade } from '../main/modules/browser-engine/browser-collector-actions'
@@ -104,7 +106,7 @@ function planPayload(noteCount: number) {
     plan: {
       targetProfileUrl: 'https://www.xiaohongshu.com/user/profile/abc',
       notes: Array.from({ length: noteCount }, (_, i) => ({ url: `https://www.xiaohongshu.com/note/${i}`, title: `笔记${i}` })),
-      outputRootDir: '/out',
+      outputRootDir: join(tmpdir(), 'ready-note-collect-test'),
     },
   }
 }
@@ -211,6 +213,107 @@ describe('note_collect background task (content-task-runner)', () => {
     assert.equal(result.stopReason, 'lease_lost')
     assert.equal(task.status, 'cancelled', 'a lease takeover is not a successful completion')
   })
+
+  it('marks an incomplete collection as failed instead of completed', async () => {
+    const { svc: persistence, tasks } = fakePersistence()
+    const { svc: lease } = fakeLease()
+    const failingFactory: CollectorFacadeFactory = () => ({
+      facade: {
+        run: async (tool) => {
+          if (tool === 'browser_navigate') return JSON.stringify({ ok: false, errorCode: 'navigation_failed', message: 'x' })
+          return JSON.stringify({ ok: true })
+        },
+      },
+      isControlFrozen: () => false,
+    })
+    const runner = new BrowserContentTaskRunner({} as never, persistence as never, lease as never, failingFactory)
+    const taskId = await runToCompletion(runner, planPayload(10))
+    const task = tasks.get(taskId)!
+    const result = task.result as { stopReason: string; collected: string[]; failed: unknown[] }
+    assert.equal(task.status, 'failed')
+    assert.equal(result.stopReason, 'too_many_failures')
+    assert.equal(result.collected.length, 0)
+    assert.equal(result.failed.length, 3, 'high-control collections clamp the consecutive failure budget')
+  })
+
+  it('pauses for verification without marking the current note failed, then resumes from the same cursor', async () => {
+    const { svc: persistence, tasks } = fakePersistence()
+    const { svc: lease } = fakeLease()
+    let verifyOnce = true
+    const navigated: string[] = []
+    const factory: CollectorFacadeFactory = () => ({
+      facade: {
+        run: async (tool, args) => {
+          if (tool === 'browser_navigate') navigated.push(String(args?.url))
+          if (tool === 'browser_read_page' && verifyOnce) {
+            verifyOnce = false
+            return '请扫码登录后继续查看内容'
+          }
+          if (tool === 'browser_collect_images') return imagesJson
+          if (tool === 'browser_download_urls') return JSON.stringify({ success: 1 })
+          return JSON.stringify({ ok: true })
+        },
+      },
+      isControlFrozen: () => false,
+    })
+    const runner = new BrowserContentTaskRunner({} as never, persistence as never, lease as never, factory)
+
+    const handle = await runner.startTask({ kind: 'note_collect', payload: planPayload(2) })
+    let run = (runner as unknown as { activeRuns: Map<string, Promise<void>> }).activeRuns.get(handle.taskId)
+    if (run) await run
+
+    const paused = tasks.get(handle.taskId)!
+    assert.equal(paused.status, 'waiting_human')
+    assert.equal(paused.progress.completed, 0)
+    assert.equal(paused.progress.failed, 0)
+    const pausedResult = paused.result as { status?: string; remaining?: number; resumeFromCursor?: number; stopReason?: string }
+    assert.equal(pausedResult.status, 'paused_verification')
+    assert.equal(pausedResult.stopReason, 'needs_verification')
+    assert.equal(pausedResult.remaining, 2)
+    assert.equal(pausedResult.resumeFromCursor, 0)
+    assert.equal((paused.checkpoint as { cursor?: string; stage?: string })?.stage, 'note_collect_round')
+    assert.equal((paused.checkpoint as { cursor?: string })?.cursor, '0')
+
+    await runner.resumeTask(handle.taskId)
+    run = (runner as unknown as { activeRuns: Map<string, Promise<void>> }).activeRuns.get(handle.taskId)
+    if (run) await run
+
+    const done = tasks.get(handle.taskId)!
+    assert.equal(done.status, 'completed')
+    const doneResult = done.result as { collected: string[]; remaining?: number }
+    assert.equal(doneResult.collected.length, 2)
+    assert.equal(doneResult.remaining, 0)
+    assert.deepEqual(navigated, [
+      'https://www.xiaohongshu.com/note/0',
+      'https://www.xiaohongshu.com/note/0',
+      'https://www.xiaohongshu.com/note/1',
+    ])
+  })
+
+  it('does not let cancel overwrite a task paused for verification', async () => {
+    const { svc: persistence, tasks } = fakePersistence()
+    const { svc: lease } = fakeLease()
+    const factory: CollectorFacadeFactory = () => ({
+      facade: {
+        run: async (tool) => {
+          if (tool === 'browser_read_page') return '请扫码登录后继续查看内容'
+          return JSON.stringify({ ok: true })
+        },
+      },
+      isControlFrozen: () => false,
+    })
+    const runner = new BrowserContentTaskRunner({} as never, persistence as never, lease as never, factory)
+    const taskId = await runToCompletion(runner, planPayload(1))
+    const before = tasks.get(taskId)!
+    assert.equal(before.status, 'waiting_human')
+
+    await runner.cancelTask(taskId)
+    const after = tasks.get(taskId)!
+    assert.equal(after.status, 'waiting_human')
+    const result = after.result as { status?: string; stopReason?: string }
+    assert.equal(result.status, 'paused_verification')
+    assert.equal(result.stopReason, 'needs_verification')
+  })
 })
 
 describe('note_collect → chat task projection (scope-bound)', () => {
@@ -253,6 +356,26 @@ describe('note_collect → chat task projection (scope-bound)', () => {
     runner.setTaskProjectionSink(sink as never)
     await runToCompletion(runner, scopedPayload(5))
     assert.equal(upserts[upserts.length - 1].state, 'cancelled', 'a freeze projects a cancelled card, not completed')
+  })
+
+  it('projects paused when verification is required', async () => {
+    const { svc: persistence } = fakePersistence()
+    const { svc: lease } = fakeLease()
+    const { sink, upserts } = fakeSink()
+    const factory: CollectorFacadeFactory = () => ({
+      facade: {
+        run: async (tool) => {
+          if (tool === 'browser_read_page') return '请扫码登录后继续查看内容'
+          return JSON.stringify({ ok: true })
+        },
+      },
+      isControlFrozen: () => false,
+    })
+    const runner = new BrowserContentTaskRunner({} as never, persistence as never, lease as never, factory)
+    runner.setTaskProjectionSink(sink as never)
+    await runToCompletion(runner, scopedPayload(1))
+    assert.equal(upserts[upserts.length - 1].state, 'paused')
+    assert.match(upserts[upserts.length - 1].summary, /等待验证/)
   })
 
   it('cancels stale note_collect on restart instead of resuming (lease safety)', async () => {

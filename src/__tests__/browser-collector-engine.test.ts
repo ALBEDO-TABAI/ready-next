@@ -89,6 +89,29 @@ describe('runBrowserCollection (background per-note loop)', () => {
     assert.ok(res.failed.length >= 5)
   })
 
+  it('stops the whole collection when a note page needs verification', async () => {
+    const plan = planOf(10)
+    const navigated: string[] = []
+    const res = await runBrowserCollection(plan, {
+      facade: {
+        run: async (tool, args) => {
+          if (tool === 'browser_navigate') navigated.push(String(args?.url))
+          if (tool === 'browser_read_page') return '请扫码登录后继续查看内容'
+          if (tool === 'browser_collect_images') return okImages
+          if (tool === 'browser_download_urls') return JSON.stringify({ success: 1 })
+          return JSON.stringify({ ok: true })
+        },
+      },
+      pathJoin: join,
+      now: fixedClock(),
+    })
+    assert.equal(res.stopReason, 'needs_verification')
+    assert.equal(res.collected.length, 0)
+    assert.equal(res.failed.length, 0)
+    assert.equal(res.state.cursor, 0, 'verification pauses before advancing, so resume retries the same note')
+    assert.equal(navigated.length, 1, 'must not continue through the frozen target list after a verification wall')
+  })
+
   it('paces between notes (not before the first) on high-control platforms', async () => {
     const plan = planOf(3)
     const sleeps: number[] = []

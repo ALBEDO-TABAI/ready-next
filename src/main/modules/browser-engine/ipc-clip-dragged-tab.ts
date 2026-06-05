@@ -69,6 +69,7 @@ export function buildDefaultDeps(): ClipDraggedTabRunnerDeps {
             sandboxMdPath,
             targetDir,
             abortSignal: options?.abortSignal,
+            sourcePageUrl: options?.sourcePageUrl,
           },
           buildRealMaterializeDeps(),
         )

@@ -428,4 +428,329 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
     assert.match(result, /至少一条/)
     assert.equal(dispatched, false)
   })
+
+  it('loads the frozen target list from source_task_id instead of relying on restated notes', async () => {
+    const started: Array<Record<string, unknown>> = []
+    const controller = createControllerMock({
+      getTask: async () => ({
+        taskId: 'browser-task-visible-1',
+        kind: 'visible_collect',
+        status: 'completed',
+        progress: { total: 2, completed: 2, failed: 0, currentLabel: null },
+        result: {
+          discoveryStatus: 'complete',
+          stopReason: 'no_new_content',
+          noteCandidates: [
+            { url: 'https://example.com/post/one', title: 'One', sourceId: 'one' },
+            { url: 'https://example.com/post/two', title: 'Two', sourceId: 'two' },
+          ],
+        },
+      }) as never,
+      startNoteCollection: async (plan: Record<string, unknown>) => {
+        started.push(plan)
+        return { taskId: 'task-note-2', kind: 'note_collect', status: 'queued', progress: { total: 0, completed: 0, failed: 0, currentLabel: null } } as never
+      },
+    })
+
+    const result = await executeBrowserTool(
+      'browser_collect_notes',
+      {
+        target_profile_url: 'https://example.com/profile/abc',
+        source_task_id: 'browser-task-visible-1',
+        expected_count: 2,
+        notes: [{ url: 'https://example.com/post/one' }, { url: 'https://example.com/post/two' }],
+      },
+      controller,
+    )
+
+    assert.equal((JSON.parse(result) as { taskId: string }).taskId, 'task-note-2')
+    const plan = started[0] as { notes: Array<{ url: string; canonicalUrl?: string; openUrl?: string; title?: string; sourceId?: string; order?: number }>; sourceTaskId?: string; expectedCount?: number }
+    assert.equal(plan.sourceTaskId, 'browser-task-visible-1')
+    assert.equal(plan.expectedCount, 2)
+    assert.deepEqual(plan.notes.map((note) => ({
+      url: note.url,
+      canonicalUrl: note.canonicalUrl,
+      openUrl: note.openUrl,
+      title: note.title,
+      sourceId: note.sourceId,
+      order: note.order,
+    })), [
+      { url: 'https://example.com/post/one', canonicalUrl: 'https://example.com/post/one', openUrl: 'https://example.com/post/one', title: 'One', sourceId: 'one', order: 1 },
+      { url: 'https://example.com/post/two', canonicalUrl: 'https://example.com/post/two', openUrl: 'https://example.com/post/two', title: 'Two', sourceId: 'two', order: 2 },
+    ])
+  })
+
+  it('refuses source_task_id handoff when the discovery source is only partial', async () => {
+    let dispatched = false
+    const controller = createControllerMock({
+      getTask: async () => ({
+        taskId: 'browser-task-visible-1',
+        kind: 'visible_collect',
+        status: 'paused',
+        progress: { total: 60, completed: 60, failed: 0, currentLabel: null },
+        result: {
+          discoveryStatus: 'partial',
+          stopReason: 'max_items',
+          continueTaskId: 'browser-task-visible-1',
+          noteCandidates: [{ url: 'https://example.com/post/one', title: 'One', sourceId: 'one' }],
+        },
+      }) as never,
+      startNoteCollection: async () => {
+        dispatched = true
+        return {} as never
+      },
+    })
+
+    const result = await executeBrowserTool(
+      'browser_collect_notes',
+      {
+        target_profile_url: 'https://example.com/profile/abc',
+        source_task_id: 'browser-task-visible-1',
+      },
+      controller,
+    )
+
+    assert.match(result, /不是完整全量/)
+    assert.match(result, /browser_resume_task/)
+    assert.equal(dispatched, false)
+  })
+
+  it('refuses to start when expected_count does not match the frozen list', async () => {
+    let dispatched = false
+    const controller = createControllerMock({
+      getTask: async () => ({
+        taskId: 'browser-task-visible-1',
+        kind: 'visible_collect',
+        status: 'completed',
+        progress: { total: 1, completed: 1, failed: 0, currentLabel: null },
+        result: {
+          discoveryStatus: 'complete',
+          stopReason: 'no_new_content',
+          noteCandidates: [{ url: 'https://example.com/post/one', title: 'One' }],
+        },
+      }) as never,
+      startNoteCollection: async () => {
+        dispatched = true
+        return {} as never
+      },
+    })
+
+    const result = await executeBrowserTool(
+      'browser_collect_notes',
+      {
+        target_profile_url: 'https://example.com/profile/abc',
+        source_task_id: 'browser-task-visible-1',
+        expected_count: 2,
+      },
+      controller,
+    )
+
+    assert.match(result, /数量不一致/)
+    assert.equal(dispatched, false)
+  })
+
+  it('refuses direct notes when a recent larger frozen collection exists', async () => {
+    let dispatched = false
+    const frozenNotes = Array.from({ length: 31 }, (_item, index) => ({
+      url: `https://example.com/post/${index + 1}`,
+      title: `Post ${index + 1}`,
+    }))
+    const controller = createControllerMock({
+      listAgentCollectionTasks: async () => [{
+        taskId: 'browser-task-visible-large',
+        kind: 'visible_collect',
+        status: 'cancelled',
+        progress: { total: 31, completed: 31, failed: 0, currentLabel: null },
+        result: { noteCandidates: frozenNotes },
+        updatedAt: new Date().toISOString(),
+      }] as never,
+      startNoteCollection: async () => {
+        dispatched = true
+        return {} as never
+      },
+    })
+
+    const result = await executeBrowserTool(
+      'browser_collect_notes',
+      {
+        target_profile_url: 'https://example.com/profile/abc',
+        notes: frozenNotes.slice(0, 12),
+      },
+      controller,
+    )
+
+    assert.match(result, /source_task_id/)
+    assert.match(result, /31/)
+    assert.match(result, /12/)
+    assert.equal(dispatched, false)
+  })
+
+  it('allows direct notes when partial collection is explicit', async () => {
+    const started: Array<Record<string, unknown>> = []
+    const frozenNotes = Array.from({ length: 31 }, (_item, index) => ({
+      url: `https://example.com/post/${index + 1}`,
+      title: `Post ${index + 1}`,
+    }))
+    const controller = createControllerMock({
+      listAgentCollectionTasks: async () => [{
+        taskId: 'browser-task-visible-large',
+        kind: 'visible_collect',
+        status: 'completed',
+        progress: { total: 31, completed: 31, failed: 0, currentLabel: null },
+        result: { noteCandidates: frozenNotes },
+        updatedAt: new Date().toISOString(),
+      }] as never,
+      startNoteCollection: async (plan: Record<string, unknown>) => {
+        started.push(plan)
+        return { taskId: 'task-note-partial', kind: 'note_collect', status: 'queued', progress: { total: 0, completed: 0, failed: 0, currentLabel: null } } as never
+      },
+    })
+
+    const result = await executeBrowserTool(
+      'browser_collect_notes',
+      {
+        target_profile_url: 'https://example.com/profile/abc',
+        notes: frozenNotes.slice(0, 12),
+        allow_partial: true,
+      },
+      controller,
+    )
+
+    assert.equal((JSON.parse(result) as { taskId: string }).taskId, 'task-note-partial')
+    assert.equal((started[0] as { notes: unknown[] }).notes.length, 12)
+  })
+})
+
+describe('high-control browser tools (agent tab routing)', () => {
+  const profileUrl = 'https://www.xiaohongshu.com/user/profile/abc'
+
+  it('routes high-control navigation to the agent tab instead of the user tab', async () => {
+    const navigations: Array<{ tabId: string | null; url: string }> = []
+    let ensured = 0
+    const controller = createControllerMock({
+      getActiveTab: () => ({ id: 'tab-4', title: 'XHS', url: profileUrl, active: true, owner: 'manual' }) as never,
+      getTabList: () => [
+        { id: 'tab-4', title: 'XHS', url: profileUrl, active: true, owner: 'manual' },
+        { id: 'agent-tab', title: 'Agent', url: 'https://example.com/blank', active: false, owner: 'agent' },
+      ] as never,
+      ensureAgentTab: async () => {
+        ensured += 1
+        return 'agent-tab'
+      },
+      navigate: async (tabId, url) => {
+        navigations.push({ tabId: tabId || null, url })
+        return { success: true }
+      },
+    } as Partial<BrowserController>)
+
+    await executeBrowserTool('browser_navigate', { url: profileUrl, tab_id: 'tab-4' }, controller)
+
+    assert.equal(ensured, 1)
+    assert.deepEqual(navigations, [{ tabId: 'agent-tab', url: profileUrl }])
+  })
+
+  it('routes high-control visual reads from a user tab through the agent tab', async () => {
+    const navigations: Array<{ tabId: string | null; url: string }> = []
+    let screenshotTabId: string | null = null
+    const controller = createControllerMock({
+      getActiveTab: () => ({ id: 'tab-4', title: 'XHS', url: profileUrl, active: true, owner: 'manual' }) as never,
+      getTabList: () => [
+        { id: 'tab-4', title: 'XHS', url: profileUrl, active: true, owner: 'manual' },
+        { id: 'agent-tab', title: 'Agent', url: 'https://example.com/blank', active: false, owner: 'agent' },
+      ] as never,
+      ensureAgentTab: async () => 'agent-tab',
+      navigate: async (tabId, url) => {
+        navigations.push({ tabId: tabId || null, url })
+        return { success: true }
+      },
+      screenshotAdvanced: async (tabId) => {
+        screenshotTabId = tabId
+        return 'base64-image'
+      },
+    } as Partial<BrowserController>)
+
+    await executeBrowserTool('browser_capture_viewport', { tab_id: 'tab-4' }, controller)
+
+    assert.deepEqual(navigations, [{ tabId: 'agent-tab', url: profileUrl }])
+    assert.equal(screenshotTabId, 'agent-tab')
+  })
+
+  it('routes high-control URL extraction through the agent tab task surface', async () => {
+    const navigations: Array<{ tabId: string | null; url: string }> = []
+    let extractedTabId: string | null = null
+    let extractFromUrlCalled = false
+    const controller = createControllerMock({
+      getActiveTab: () => ({ id: 'tab-4', title: 'XHS', url: profileUrl, active: true, owner: 'manual' }) as never,
+      getTabList: () => [
+        { id: 'tab-4', title: 'XHS', url: profileUrl, active: true, owner: 'manual' },
+        { id: 'agent-tab', title: 'Agent', url: 'https://example.com/blank', active: false, owner: 'agent' },
+      ] as never,
+      ensureAgentTab: async () => 'agent-tab',
+      navigate: async (tabId, url) => {
+        navigations.push({ tabId: tabId || null, url })
+        return { success: true }
+      },
+      extractStructuredFromUrl: async () => {
+        extractFromUrlCalled = true
+        return { items: [], template: 'card_list' } as never
+      },
+      extractStructured: async (tabId, options) => {
+        extractedTabId = tabId
+        return { items: [], template: options?.template || 'card_list' }
+      },
+    } as Partial<BrowserController>)
+
+    await executeBrowserTool('browser_extract_structured', { url: profileUrl, template: 'card_list' }, controller)
+
+    assert.deepEqual(navigations, [{ tabId: 'agent-tab', url: profileUrl }])
+    assert.equal(extractedTabId, 'agent-tab')
+    assert.equal(extractFromUrlCalled, false)
+  })
+})
+
+describe('browser_visible_collect (agent pane dispatch)', () => {
+  it('dispatches visible collection through the agent-tab entrypoint with output dir', async () => {
+    const started: Array<{ payload: Record<string, unknown>; scopeId?: string }> = []
+    const controller = createControllerMock({
+      getActiveTab: () => ({ id: 'tab-1', title: 'XHS', url: 'https://www.xiaohongshu.com/user/profile/abc', active: true }) as never,
+      getTabList: () => [{ id: 'tab-1', title: 'XHS', url: 'https://www.xiaohongshu.com/user/profile/abc', active: true }] as never,
+      startVisibleCollection: async (payload: Record<string, unknown>, scopeId?: string) => {
+        started.push({ payload, scopeId })
+        return { taskId: 'browser-task-visible-1', kind: 'visible_collect', status: 'queued', progress: { total: 0, completed: 0, failed: 0, currentLabel: null } } as never
+      },
+    } as Partial<BrowserController>)
+
+    const result = await executeBrowserTool(
+      'browser_visible_collect',
+      {
+        url: 'https://www.xiaohongshu.com/user/profile/abc',
+        template: 'article_list',
+        output_root_dir: '/tmp/ao-i',
+      },
+      controller,
+      undefined,
+      'scope-collection-1',
+    )
+
+    const handle = JSON.parse(result) as { taskId: string }
+    assert.equal(handle.taskId, 'browser-task-visible-1')
+    assert.equal(started.length, 1)
+    assert.equal(started[0]?.scopeId, 'scope-collection-1')
+    assert.equal(started[0]?.payload.outputRootDir, '/tmp/ao-i')
+    assert.equal(started[0]?.payload.highControl, true)
+  })
+})
+
+describe('browser task id guardrails', () => {
+  it('rejects chat task ids for browser_get_task / browser_cancel_task with an actionable status', async () => {
+    const controller = createControllerMock({
+      getTask: async () => null,
+      cancelTask: async () => null,
+    })
+    const getResult = await executeBrowserTool('browser_get_task', { task_id: 'task-chat-1' }, controller)
+    const cancelResult = await executeBrowserTool('browser_cancel_task', { task_id: 'task-chat-1' }, controller)
+
+    assert.equal((JSON.parse(getResult) as { status: string }).status, 'wrong_id_type')
+    assert.equal((JSON.parse(cancelResult) as { status: string }).status, 'wrong_id_type')
+  })
 })

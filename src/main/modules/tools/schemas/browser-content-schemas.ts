@@ -19,6 +19,7 @@ export const BrowserCollectImagesSchema = z.object({
   keyword: z.string().optional().describe('可选关键词，按图片 URL/alt/title 过滤'),
   limit: z.number().optional().describe('最多返回条数，默认 20，最大 60'),
   min_width: z.number().optional().describe('最小宽度像素过滤，默认 120'),
+  include_hidden: z.boolean().optional().describe('是否包含页面中已加载但当前不可见的候选大图，默认 false'),
   tab_id: TabIdOptional,
 })
 
@@ -80,6 +81,7 @@ export const BrowserVisibleCollectSchema = z.object({
   max_items: z.number().optional().describe('最多采集条数（硬上限）'),
   max_rounds: z.number().optional().describe('最大轮数（硬上限）'),
   max_duration_ms: z.number().optional().describe('最长运行毫秒（硬上限）'),
+  output_root_dir: z.string().optional().describe('可选：最终保存根目录；未传则后续逐篇采集使用 ~/Documents/Ready采集/<账号标识>'),
 })
 
 export const BrowserGetTaskSchema = z.object({
@@ -145,14 +147,22 @@ export const BrowserExecuteJsSchema = z.object({
 
 export const BrowserCollectNotesSchema = z.object({
   target_profile_url: z.string().describe('博主主页 URL（用于建根目录与展示）'),
+  source_task_id: z.string().optional().describe('可选：从 browser_visible_collect 返回的任务 ID 接力，优先使用该任务冻结的候选清单'),
+  expected_count: z.number().optional().describe('可选：上一步确认的目标数量；若实际清单不一致则拒绝启动'),
+  allow_partial: z.boolean().optional().describe('可选：用户明确只要采集部分目标时才传 true；默认会阻止绕过最近冻结的更大清单'),
   notes: z
     .array(
       z.object({
         url: z.string().describe('笔记详情页 URL'),
+        canonicalUrl: z.string().optional().describe('稳定来源 URL，用于去重与清单追踪'),
+        openUrl: z.string().optional().describe('实际打开 URL，优先用于详情页访问'),
         title: z.string().optional().describe('笔记标题（用于建文件夹/进度展示）'),
+        sourceId: z.string().optional().describe('来源稳定标识（可选，用于文件夹防重名）'),
+        titleConfidence: z.enum(['none', 'low', 'medium', 'high']).optional().describe('标题可信度；低可信标题可被详情页标题兜底'),
+        order: z.number().optional().describe('冻结清单中的顺序'),
       }),
     )
-    .min(1)
+    .optional()
     .describe('要逐篇后台采集的笔记列表（由主 agent 先浏览主页后规划得出）'),
   output_root_dir: z.string().optional().describe('采集输出根目录，默认 ~/Documents 下的采集目录'),
   max_notes: z.number().optional().describe('最多采集篇数（高控平台默认更保守）'),

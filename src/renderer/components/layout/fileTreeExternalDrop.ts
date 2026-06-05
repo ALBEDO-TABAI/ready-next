@@ -447,6 +447,7 @@ export interface FileTreeExternalDropPlaceholderPatch {
   status?: 'running' | 'completed' | 'failed'
   copiedPath?: string
   errorMessage?: string
+  message?: string | null
 }
 
 export type FileTreeAnalysisPlaceholderStatus =
@@ -634,6 +635,9 @@ export async function dispatchFileTreeExternalDropAction({
         onPlaceholderUpdate?.(clientTaskId, {
           status: 'completed',
           copiedPath: result.copiedPath || result.savedPath,
+          message: result.imageDownloadFailures && result.imageDownloadFailures > 0
+            ? `图片未全部保存：${result.imageDownloadFailures} 张仍为远程链接`
+            : null,
         })
         return
       }

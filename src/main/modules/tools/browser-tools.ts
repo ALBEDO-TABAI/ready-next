@@ -24,10 +24,14 @@ import {
   getBrowserAnthropicTools,
   getBrowserOpenAITools,
 } from './browser-tool-catalog'
-import type { BrowserStructuredFieldMapping } from '../browser-engine/capability-types'
+import type {
+  BrowserCapabilityTaskHandle,
+  BrowserStructuredFieldMapping,
+} from '../browser-engine/capability-types'
 import { beginLeaseGate, type BrowserLeaseGate } from '../browser-engine/agent-browser-lease-gate'
 import { isHighControlPlatformText } from '../../../shared/browser-collection-intent'
 import { agentBrowserError } from '../browser-engine/agent-browser-errors'
+import { normalizeCollectionTargets, targetsFromTask, type BrowserCollectionTarget } from '../browser-engine/collection-targets'
 
 const logger = createRotatingLogger('ready-tools.log')
 function log(msg: string) {
@@ -43,6 +47,97 @@ function createBrowserAgentHelpers(controller: BrowserController) {
 
 function uniqueStrings(values: string[]): string[] {
   return Array.from(new Set(values.filter(Boolean)))
+}
+
+function originOfUrl(value: string): string | null {
+  try {
+    return new URL(value).origin
+  } catch {
+    return null
+  }
+}
+
+function browserTaskTimestampMs(task: BrowserCapabilityTaskHandle): number {
+  const raw = task.updatedAt || task.createdAt || ''
+  const parsed = raw ? Date.parse(raw) : Number.NaN
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function resultObject(task: BrowserCapabilityTaskHandle | null): Record<string, unknown> | null {
+  return task?.result && typeof task.result === 'object' ? task.result as Record<string, unknown> : null
+}
+
+function sourceTaskDiscoveryStatus(task: BrowserCapabilityTaskHandle | null): 'complete' | 'partial' | 'paused' | 'unknown' {
+  const result = resultObject(task)
+  const explicit = String(result?.discoveryStatus || '').trim()
+  if (explicit === 'complete' || explicit === 'partial' || explicit === 'paused') return explicit
+  const stopReason = String(result?.stopReason || '').trim()
+  if (stopReason === 'no_new_content') return 'complete'
+  if (stopReason === 'cancelled' || stopReason === 'lease_lost') return 'paused'
+  if (stopReason) return 'partial'
+  return 'unknown'
+}
+
+function isCompleteSourceTask(task: BrowserCapabilityTaskHandle | null): boolean {
+  return Boolean(task && task.kind === 'visible_collect' && task.status === 'completed' && sourceTaskDiscoveryStatus(task) === 'complete')
+}
+
+function hasSharedOrigin(
+  left: Array<{ url: string }>,
+  right: Array<{ url: string }>,
+): boolean {
+  const origins = new Set(left.map((item) => originOfUrl(item.url)).filter(Boolean))
+  if (origins.size === 0) return false
+  return right.some((item) => {
+    const origin = originOfUrl(item.url)
+    return Boolean(origin && origins.has(origin))
+  })
+}
+
+async function findLargerRecentFrozenCollection(
+  controller: BrowserController,
+  notes: Array<{ url: string }>,
+): Promise<{ taskId: string; count: number } | null> {
+  const listTasks = (controller as { listAgentCollectionTasks?: () => Promise<BrowserCapabilityTaskHandle[]> }).listAgentCollectionTasks
+  if (typeof listTasks !== 'function' || notes.length === 0) return null
+
+  const now = Date.now()
+  const tasks = await listTasks.call(controller)
+  for (const task of tasks) {
+    if (task.kind !== 'visible_collect') continue
+    const timestamp = browserTaskTimestampMs(task)
+    if (timestamp > 0 && now - timestamp > RECENT_COLLECTION_HANDOFF_WINDOW_MS) continue
+    const frozen = targetsFromTask(task)
+    if (frozen.length <= notes.length) continue
+    if (!hasSharedOrigin(frozen, notes)) continue
+    return { taskId: task.taskId, count: frozen.length }
+  }
+  return null
+}
+
+function noteTitleKey(note: BrowserCollectionTarget): string {
+  return String(note.title || '').replace(/\s+/g, ' ').trim().toLowerCase()
+}
+
+function buildCollectionPlanNotes(notes: BrowserCollectionTarget[]): Array<Record<string, unknown>> {
+  const titleCounts = new Map<string, number>()
+  for (const note of notes) {
+    const key = noteTitleKey(note)
+    if (key) titleCounts.set(key, (titleCounts.get(key) || 0) + 1)
+  }
+  return notes.map((note, index) => {
+    const key = noteTitleKey(note)
+    return {
+      url: note.openUrl || note.url,
+      canonicalUrl: note.canonicalUrl || note.url,
+      openUrl: note.openUrl || note.url,
+      title: note.title,
+      sourceId: note.sourceId,
+      titleConfidence: note.titleConfidence,
+      order: note.order || index + 1,
+      duplicateTitle: key ? (titleCounts.get(key) || 0) > 1 : false,
+    }
+  })
 }
 
 /**
@@ -93,6 +188,62 @@ function resolveCandidateTargetUrls(
     }
   }
   return urls
+}
+
+function resolvePrimaryBrowserTargetUrl(
+  args: Record<string, unknown>,
+  controller: BrowserController,
+): string {
+  if (typeof args.url === 'string' && args.url.trim()) return args.url.trim()
+  const tabId = typeof args.tab_id === 'string' ? args.tab_id : ''
+  try {
+    if (tabId) {
+      const tab = controller.getTabList?.().find((item) => item.id === tabId)
+      if (tab?.url) return tab.url
+    }
+  } catch { /* ignore */ }
+  try {
+    return controller.getActiveTab?.()?.url || ''
+  } catch {
+    return ''
+  }
+}
+
+async function resolveHighControlAgentTab(
+  controller: BrowserController,
+  args: Record<string, unknown>,
+  options?: { navigateToTarget?: boolean; signal?: AbortSignal },
+): Promise<{ tabId: string | null; redirected: boolean }> {
+  const requestedTabId = typeof args.tab_id === 'string' ? args.tab_id : null
+  const targetUrl = resolvePrimaryBrowserTargetUrl(args, controller)
+  if (!isHighControlPlatformText(targetUrl)) {
+    return { tabId: requestedTabId, redirected: false }
+  }
+
+  try {
+    const requestedTab = requestedTabId
+      ? controller.getTabList?.().find((item) => item.id === requestedTabId)
+      : null
+    if (requestedTab?.owner === 'agent') {
+      return { tabId: requestedTabId, redirected: false }
+    }
+  } catch { /* ignore */ }
+
+  const ensureAgentTab = (controller as { ensureAgentTab?: () => Promise<string> }).ensureAgentTab
+  if (typeof ensureAgentTab !== 'function') {
+    return { tabId: requestedTabId, redirected: false }
+  }
+
+  const agentTabId = await ensureAgentTab.call(controller)
+  if (options?.navigateToTarget !== false && targetUrl) {
+    const agentTab = controller.getTabList?.().find((item) => item.id === agentTabId)
+    if (!activePageLikelyMatchesTarget(agentTab?.url, targetUrl)) {
+      const nav = await controller.navigate(agentTabId, targetUrl)
+      if (!nav.success) throw new Error(nav.error || 'failed to navigate agent tab')
+      await waitForReady(controller, agentTabId, 10_000, undefined, options?.signal).catch(() => null)
+    }
+  }
+  return { tabId: agentTabId, redirected: true }
 }
 
 /** True when a start_task payload carries a page-executing script param. */
@@ -164,6 +315,7 @@ const BROWSER_V2_WAIT_AFTER_NAV_MS = 250
 const BROWSER_V2_STOP_LOADING_TIMEOUT_MS = 15_000
 const BROWSER_V3_ACTION_SETTLE_MS = 220
 const TOOL_CONTROLLER_ID = 'primary-browser-controller'
+const RECENT_COLLECTION_HANDOFF_WINDOW_MS = 30 * 60 * 1000
 
 const screenshotCache = new Map<string, { base64: string; width: number; height: number; createdAt: number }>()
 const SCREENSHOT_CACHE_MAX = 30
@@ -2994,7 +3146,11 @@ export async function executeBrowserTool(
         if (!url) return 'Error: url is required'
         // Tool-layer tab targeting (plan §7.8): navigate the given tab when set
         // (the scoped agent facade forces agentTabId), else the active tab.
-        const navTabId = (args.tab_id as string) || null
+        let navTabId = (args.tab_id as string) || null
+        navTabId = (await resolveHighControlAgentTab(controller, args, {
+          navigateToTarget: false,
+          signal: abortSignal,
+        })).tabId
         const allowRepeat = args.allow_repeat === true
         const duplicate = !allowRepeat ? findRecentBrowserAction(sessionId, 'navigate', url) : null
         const activeBefore = navTabId
@@ -3072,7 +3228,8 @@ export async function executeBrowserTool(
       }
 
       case 'browser_read_page': {
-        const tabId = (args.tab_id as string) || null
+        let tabId = (args.tab_id as string) || null
+        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const content = await controller.getPageContent(tabId)
         if (!content || content.trim().length === 0) {
           return 'Page content is empty or still loading.'
@@ -3083,7 +3240,8 @@ export async function executeBrowserTool(
       case 'browser_click': {
         const selector = args.selector as string
         if (!selector) return 'Error: selector is required'
-        const tabId = (args.tab_id as string) || null
+        let tabId = (args.tab_id as string) || null
+        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const clickJs = `
           (function() {
             const el = document.querySelector(${JSON.stringify(selector)});
@@ -3100,7 +3258,8 @@ export async function executeBrowserTool(
         const text = String(args.text || '').trim()
         if (!text) return 'Error: text is required'
         const exact = args.exact === true
-        const tabId = (args.tab_id as string) || null
+        let tabId = (args.tab_id as string) || null
+        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const result = await controller.executeJS(tabId, buildClickByTextJs(text, exact))
         return String(result)
       }
@@ -3110,7 +3269,8 @@ export async function executeBrowserTool(
         const text = args.text as string
         if (!selector || text === undefined) return 'Error: selector and text are required'
         const clearFirst = args.clear_first !== false // default true
-        const tabId = (args.tab_id as string) || null
+        let tabId = (args.tab_id as string) || null
+        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const typeJs = `
           (function() {
             const el = document.querySelector(${JSON.stringify(selector)});
@@ -3172,7 +3332,8 @@ export async function executeBrowserTool(
       }
 
       case 'browser_capture_viewport': {
-        const tabId = (args.tab_id as string) || null
+        let tabId = (args.tab_id as string) || null
+        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const mode = String(args.mode || 'viewport') as 'viewport' | 'clip' | 'full_page'
         const clipRaw = args.clip
         const clip = clipRaw && typeof clipRaw === 'object'
@@ -3622,10 +3783,12 @@ export async function executeBrowserTool(
       }
 
       case 'browser_collect_images': {
-        const tabId = (args.tab_id as string) || null
+        let tabId = (args.tab_id as string) || null
+        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const keyword = String(args.keyword || '').trim().toLowerCase()
         const limit = Math.max(1, Math.min(60, Number(args.limit || 20)))
         const minWidth = Math.max(1, Math.min(4000, Number(args.min_width || 120)))
+        const includeHidden = args.include_hidden === true
         const rows = await controller.executeJS(
           tabId,
           `
@@ -3633,7 +3796,9 @@ export async function executeBrowserTool(
               const keyword = ${JSON.stringify(keyword)}
               const maxCount = ${JSON.stringify(limit)}
               const minWidth = ${JSON.stringify(minWidth)}
+              const includeHidden = ${JSON.stringify(includeHidden)}
               const normalize = (s) => String(s || '').replace(/\\s+/g, ' ').trim()
+              const urlsFromSrcset = (srcset) => normalize(srcset).split(',').map((part) => normalize(part).split(/\\s+/)[0]).filter(Boolean)
               const isVisible = (el) => {
                 if (!(el instanceof Element)) return false
                 const rect = el.getBoundingClientRect()
@@ -3644,24 +3809,52 @@ export async function executeBrowserTool(
               }
               const items = []
               const seen = new Set()
+              const push = (rawUrl, alt, width, height) => {
+                const src = normalize(rawUrl)
+                if (!src || !/^https?:\\/\\//i.test(src)) return
+                if (seen.has(src)) return
+                const w = Math.round(Number(width || 0))
+                const h = Math.round(Number(height || 0))
+                if ((w > 0 && w < minWidth) || (h > 0 && h < 40)) return
+                const scoreText = (src + ' ' + normalize(alt)).toLowerCase()
+                if (keyword && !scoreText.includes(keyword)) return
+                seen.add(src)
+                items.push({ url: src, alt: normalize(alt), width: w, height: h })
+              }
               const imgs = Array.from(document.querySelectorAll('img'))
               for (const img of imgs) {
                 if (!(img instanceof HTMLImageElement)) continue
-                if (!isVisible(img)) continue
-                const src = normalize(img.currentSrc || img.src || img.getAttribute('data-src') || '')
-                if (!src || !/^https?:\\/\\//i.test(src)) continue
-                if (seen.has(src)) continue
                 const alt = normalize(img.alt || img.getAttribute('title') || '')
-                const scoreText = (src + ' ' + alt).toLowerCase()
-                if (keyword && !scoreText.includes(keyword)) continue
-                seen.add(src)
-                items.push({
-                  url: src,
-                  alt,
-                  width: Math.round(img.naturalWidth || img.width || img.getBoundingClientRect().width || 0),
-                  height: Math.round(img.naturalHeight || img.height || img.getBoundingClientRect().height || 0),
-                })
+                const rect = img.getBoundingClientRect()
+                const visible = isVisible(img)
+                if (!visible && !includeHidden) continue
+                const width = img.naturalWidth || img.width || rect.width || 0
+                const height = img.naturalHeight || img.height || rect.height || 0
+                const candidates = [
+                  img.currentSrc,
+                  img.src,
+                  img.getAttribute('data-src'),
+                  img.getAttribute('data-original'),
+                  img.getAttribute('data-lazy-src'),
+                  ...urlsFromSrcset(img.srcset || img.getAttribute('data-srcset') || ''),
+                ]
+                for (const candidate of candidates) push(candidate, alt, width, height)
                 if (items.length >= maxCount) break
+              }
+              if (includeHidden && items.length < maxCount) {
+                for (const source of Array.from(document.querySelectorAll('source[srcset]'))) {
+                  for (const candidate of urlsFromSrcset(source.getAttribute('srcset') || '')) {
+                    push(candidate, source.getAttribute('type') || '', 0, 0)
+                    if (items.length >= maxCount) break
+                  }
+                  if (items.length >= maxCount) break
+                }
+              }
+              if (includeHidden && items.length < maxCount) {
+                for (const meta of Array.from(document.querySelectorAll('meta[property="og:image"], meta[name="twitter:image"], link[rel="image_src"]'))) {
+                  push(meta.getAttribute('content') || meta.getAttribute('href') || '', meta.getAttribute('property') || meta.getAttribute('name') || '', 0, 0)
+                  if (items.length >= maxCount) break
+                }
               }
               return items
             })()
@@ -3688,7 +3881,7 @@ export async function executeBrowserTool(
         const urls = rawUrls
           .map((item) => String(item || '').trim())
           .filter((item) => item.length > 0)
-          .slice(0, 20)
+          .slice(0, 100)
         if (urls.length === 0) return 'Error: urls is required and must be a non-empty array'
 
         const tabId = (args.tab_id as string) || null
@@ -3804,7 +3997,8 @@ export async function executeBrowserTool(
         const x = Number(args.x)
         const y = Number(args.y)
         if (!Number.isFinite(x) || !Number.isFinite(y)) return 'Error: x and y are required numbers'
-        const tabId = (args.tab_id as string) || null
+        let tabId = (args.tab_id as string) || null
+        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const point = await dispatchClickAt(controller, tabId, x, y)
         await settleAfterAction(controller, tabId, abortSignal)
         return JSON.stringify({
@@ -3821,7 +4015,8 @@ export async function executeBrowserTool(
         const text = String(args.text || '')
         if (!Number.isFinite(x) || !Number.isFinite(y)) return 'Error: x and y are required numbers'
         if (!text) return 'Error: text is required'
-        const tabId = (args.tab_id as string) || null
+        let tabId = (args.tab_id as string) || null
+        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const pressEnter = args.press_enter !== false
         const clearBeforeTyping = args.clear_before_typing !== false
         const useShiftEnter = args.use_shift_enter_for_newline === true
@@ -3844,7 +4039,8 @@ export async function executeBrowserTool(
       }
 
       case 'browser_scroll_at': {
-        const tabId = (args.tab_id as string) || null
+        let tabId = (args.tab_id as string) || null
+        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const x = Number(args.x ?? 500)
         const y = Number(args.y ?? 500)
         const direction = String(args.direction || '').toLowerCase()
@@ -3902,13 +4098,15 @@ export async function executeBrowserTool(
       case 'browser_wait': {
         const timeoutMs = Number(args.timeout_ms || 8000)
         const selector = typeof args.selector === 'string' ? args.selector : undefined
-        const tabId = (args.tab_id as string) || null
+        let tabId = (args.tab_id as string) || null
+        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const ready = await waitForReady(controller, tabId, Math.max(500, Math.min(timeoutMs, 30_000)), selector, abortSignal)
         return `Wait result: ready=${ready.ready}, selectorMatched=${ready.matchedSelector}, elapsed=${ready.elapsedMs}ms`
       }
 
       case 'browser_wait_for_condition': {
-        const tabId = (args.tab_id as string) || null
+        let tabId = (args.tab_id as string) || null
+        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const result = await controller.waitForCondition(tabId, {
           condition: String(args.condition || 'page_readable') as never,
           selector: typeof args.selector === 'string' ? args.selector : undefined,
@@ -3923,7 +4121,9 @@ export async function executeBrowserTool(
       case 'browser_extract_structured': {
         const template = String(args.template || 'article_list') as never
         const url = String(args.url || '').trim()
-        const tabId = (args.tab_id as string) || null
+        let tabId = (args.tab_id as string) || null
+        const scoped = await resolveHighControlAgentTab(controller, args, { signal: abortSignal })
+        tabId = scoped.tabId
         const fields = Array.isArray(args.fields)
           ? (args.fields
               .filter((item) => item && typeof item === 'object' && typeof (item as { name?: unknown }).name === 'string')
@@ -3937,7 +4137,7 @@ export async function executeBrowserTool(
           minWidth: Number(args.min_width || 0) || undefined,
           customScript: typeof args.custom_script === 'string' ? args.custom_script : undefined,
         }
-        const result = url
+        const result = url && !scoped.redirected
           ? await controller.extractStructuredFromUrl(url, options)
           : await controller.extractStructured(tabId, options)
         return JSON.stringify(result, null, 2)
@@ -3980,6 +4180,13 @@ export async function executeBrowserTool(
         const taskId = String(args.task_id || '').trim()
         if (!taskId) return 'Error: task_id is required'
         const result = await controller.getTask(taskId)
+        if (!result && taskId.startsWith('task-')) {
+          return JSON.stringify({
+            taskId,
+            status: 'wrong_id_type',
+            message: 'browser_get_task 只能查询 browser-task-*。这是聊天任务或锁持有者 id，请使用 browser_collect_notes / browser_visible_collect 返回的 taskId。',
+          }, null, 2)
+        }
         return JSON.stringify(result || { taskId, status: 'missing' }, null, 2)
       }
 
@@ -3994,6 +4201,13 @@ export async function executeBrowserTool(
         const taskId = String(args.task_id || '').trim()
         if (!taskId) return 'Error: task_id is required'
         const result = await controller.cancelTask(taskId)
+        if (!result && taskId.startsWith('task-')) {
+          return JSON.stringify({
+            taskId,
+            status: 'wrong_id_type',
+            message: 'browser_cancel_task 只能取消 browser-task-*。这是聊天任务或锁持有者 id，请使用浏览器任务返回的 taskId。',
+          }, null, 2)
+        }
         return JSON.stringify(result || { taskId, status: 'missing' }, null, 2)
       }
 
@@ -4076,60 +4290,99 @@ export async function executeBrowserTool(
         // Reuse the same full target-URL set as the script guard (active tab,
         // tab_id, url) so high-control rate limits can't be bypassed via tab_id.
         const highControl = candidateTargetUrls.some((u) => isHighControlPlatformText(u))
-        const result = await controller.startTask({
-          kind: 'visible_collect',
-          payload: {
-            url: typeof args.url === 'string' ? args.url : undefined,
-            tabId: typeof args.tab_id === 'string' ? args.tab_id : undefined,
-            template: typeof args.template === 'string' ? args.template : undefined,
-            itemSelector: typeof args.item_selector === 'string' ? args.item_selector : undefined,
-            maxItems: Number(args.max_items || 0) || undefined,
-            maxRounds: Number(args.max_rounds || 0) || undefined,
-            maxDurationMs: Number(args.max_duration_ms || 0) || undefined,
-            // High-control platforms get conservative default rate/volume limits
-            // (plan §4.4) applied in the runner.
-            highControl,
-            // Inherit the active lane lease so the background loop keeps writing
-            // under the SAME lease and stops the instant the user takes over.
-            surface: leaseGate?.surface,
-            leaseId: leaseGate?.leaseId ?? undefined,
-          },
-        })
+        const payload = {
+          url: typeof args.url === 'string' ? args.url : undefined,
+          tabId: typeof args.tab_id === 'string' ? args.tab_id : undefined,
+          template: typeof args.template === 'string' ? args.template : undefined,
+          itemSelector: typeof args.item_selector === 'string' ? args.item_selector : undefined,
+          maxItems: Number(args.max_items || 0) || undefined,
+          maxRounds: Number(args.max_rounds || 0) || undefined,
+          maxDurationMs: Number(args.max_duration_ms || 0) || undefined,
+          outputRootDir: typeof args.output_root_dir === 'string' && args.output_root_dir.trim()
+            ? args.output_root_dir.trim()
+            : undefined,
+          // High-control platforms get conservative default rate/volume limits
+          // (plan §4.4) applied in the runner.
+          highControl,
+          // Fallback for non-controller tests/hosts. Production controllers use
+          // startVisibleCollection, which rewrites these to agent-view.
+          surface: leaseGate?.surface,
+          leaseId: leaseGate?.leaseId ?? undefined,
+        }
+        const startVisibleCollection = (controller as { startVisibleCollection?: (payload: Record<string, unknown>, scopeId?: string) => Promise<unknown> }).startVisibleCollection
+        const result = startVisibleCollection
+          ? await startVisibleCollection.call(controller, payload, sessionId)
+          : await controller.startTask({ kind: 'visible_collect', payload })
         return JSON.stringify(result, null, 2)
       }
 
       case 'browser_collect_notes': {
         // Dispatch a background note-collection sub-agent (plan §3.3). The main
-        // agent supplies the planned note list; the controller ensures a
-        // dedicated background agent tab (no foreground preemption) and the task
-        // acquires its own agent-view lease. Returns the task handle to poll.
-        const rawNotes = Array.isArray(args.notes) ? args.notes : []
-        const notes = rawNotes
-          .map((n) => {
-            const obj = (n && typeof n === 'object' ? n : {}) as Record<string, unknown>
-            return { url: String(obj.url || '').trim(), title: typeof obj.title === 'string' ? obj.title : undefined }
-          })
-          .filter((n) => /^https?:\/\//i.test(n.url))
+        // agent either supplies a frozen source_task_id from browser_visible_collect
+        // or a direct planned list; source_task_id is the stronger contract so
+        // the model cannot accidentally drop targets while restating the list.
+        const sourceTaskId = String(args.source_task_id || '').trim()
+        const expectedCount = Math.max(0, Number(args.expected_count || 0) || 0)
+        const rawNotes = Array.isArray(args.notes) ? args.notes as Array<Record<string, unknown>> : []
+        const allowPartial = args.allow_partial === true
+        let notes = normalizeCollectionTargets(rawNotes)
+        let sourceTask: BrowserCapabilityTaskHandle | null = null
+        if (sourceTaskId) {
+          sourceTask = await controller.getTask(sourceTaskId)
+          const frozenNotes = targetsFromTask(sourceTask)
+          if (!sourceTask) return `Error: source_task_id ${sourceTaskId} 不存在，无法接力采集。`
+          if (frozenNotes.length === 0) {
+            return `Error: source_task_id ${sourceTaskId} 没有可接力的冻结目标清单。`
+          }
+          if (!isCompleteSourceTask(sourceTask) && !allowPartial) {
+            const status = sourceTaskDiscoveryStatus(sourceTask)
+            const result = resultObject(sourceTask)
+            const stopReason = String(result?.stopReason || sourceTask.status || 'unknown')
+            const continueTaskId = typeof result?.continueTaskId === 'string' ? result.continueTaskId : sourceTaskId
+            return `Error: source_task_id ${sourceTaskId} 的发现清单不是完整全量（discoveryStatus=${status}, stopReason=${stopReason}, 已冻结 ${frozenNotes.length} 条）。请先用 browser_resume_task 继续发现：${continueTaskId}；如果用户明确只采当前这部分，请传 allow_partial=true。`
+          }
+          if (notes.length > 0 && notes.length !== frozenNotes.length) {
+            return `Error: browser_collect_notes 数量不一致：source_task_id ${sourceTaskId} 有 ${frozenNotes.length} 条，传入 notes 有 ${notes.length} 条。请直接使用 source_task_id 接力。`
+          }
+          notes = frozenNotes
+        }
         if (notes.length === 0) {
-          return 'Error: browser_collect_notes 需要至少一条带 http(s) URL 的笔记。'
+          return 'Error: browser_collect_notes 需要 source_task_id，或至少一条带 http(s) URL 的 notes。'
+        }
+        if (!sourceTaskId && args.allow_partial !== true) {
+          const largerFrozen = await findLargerRecentFrozenCollection(controller, notes)
+          if (largerFrozen) {
+            return `Error: browser_collect_notes 检测到最近的 browser_visible_collect (${largerFrozen.taskId}) 已冻结 ${largerFrozen.count} 条目标，但当前只传入 ${notes.length} 条。请改用 source_task_id 接力；若用户明确只要部分采集，请传 allow_partial=true。`
+          }
+        }
+        if (expectedCount > 0 && notes.length !== expectedCount) {
+          return `Error: browser_collect_notes 数量不一致：预期 ${expectedCount} 条，实际冻结清单 ${notes.length} 条。`
+        }
+        const requestedMaxNotes = Math.max(0, Number(args.max_notes || 0) || 0)
+        if (requestedMaxNotes > 0 && requestedMaxNotes < notes.length) {
+          notes = notes.slice(0, requestedMaxNotes)
         }
         const stopConditions: Record<string, number> = {}
-        if (Number(args.max_notes || 0) > 0) stopConditions.maxNotes = Number(args.max_notes)
+        if (requestedMaxNotes > 0) stopConditions.maxNotes = requestedMaxNotes
         if (Number(args.max_duration_ms || 0) > 0) stopConditions.maxDurationMs = Number(args.max_duration_ms)
         if (Number(args.max_consecutive_failures || 0) > 0) stopConditions.maxConsecutiveFailures = Number(args.max_consecutive_failures)
         const profileUrl = String(args.target_profile_url || '').trim()
+          || (typeof resultObject(sourceTask)?.targetUrl === 'string' ? String(resultObject(sourceTask)?.targetUrl) : '')
         let profileSlug = 'profile'
         try {
           profileSlug = new URL(profileUrl).pathname.split('/').filter(Boolean).pop() || 'profile'
         } catch {
           // keep the default slug for a non-URL profile string
         }
+        const outputRootDir = typeof args.output_root_dir === 'string' && args.output_root_dir.trim()
+          ? expandHomePath(args.output_root_dir.trim())
+          : join(homedir(), 'Documents', 'Ready采集', sanitizeFilename(profileSlug, 'profile'))
         const plan = {
           targetProfileUrl: profileUrl,
-          notes,
-          outputRootDir: typeof args.output_root_dir === 'string' && args.output_root_dir.trim()
-            ? args.output_root_dir.trim()
-            : `Ready采集/${profileSlug}`,
+          notes: buildCollectionPlanNotes(notes),
+          ...(expectedCount > 0 ? { expectedCount } : {}),
+          ...(sourceTaskId ? { sourceTaskId } : {}),
+          outputRootDir,
           ...(Object.keys(stopConditions).length > 0 ? { stopConditions } : {}),
         }
         // Pass the agent's session/scope so the background task projects into

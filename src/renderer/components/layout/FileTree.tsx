@@ -823,7 +823,7 @@ function PendingClipRow({
             </div>
           )}
 
-          {isAnalysis && message && !isFailure && (
+          {message && !isFailure && (
             <div
               title={message}
               style={{
@@ -1383,10 +1383,19 @@ export default function FileTree({
         // first renders with isFlashing=true.
         setPendingClips((prev) =>
           prev.map((p) =>
-            p.taskId === completed.taskId ? { ...p, status: 'completed', copiedPath: completed.copiedPath } : p,
+            p.taskId === completed.taskId
+              ? {
+                  ...p,
+                  status: 'completed',
+                  copiedPath: completed.copiedPath,
+                  message: completed.imageDownloadFailures && completed.imageDownloadFailures > 0
+                    ? `图片未全部保存：${completed.imageDownloadFailures} 张仍为远程链接`
+                    : null,
+                }
+              : p,
           ),
         )
-        schedulePlaceholderRemoval(completed.taskId, 1200)
+        schedulePlaceholderRemoval(completed.taskId, completed.imageDownloadFailures && completed.imageDownloadFailures > 0 ? 4000 : 1200)
         flashCompletedPath(completed.copiedPath)
       } else if (update.status === 'failed') {
         const failed = data as { taskId: string; errorKind: string; recoverable: boolean; errorDetail?: { message?: string } }

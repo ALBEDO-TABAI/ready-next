@@ -153,8 +153,11 @@ const DEFAULT_FILES: Record<string, string> = {
   'docs/browser-collect-rules.md': [
     '# 浏览器逐篇采集流程（博主多篇笔记 → 每篇建文件夹 → 下载图片）',
     '- 这是"先规划、后台执行"的浏览器采集任务，不是文档改写：用户说"保存到某文件夹"指的是下载目录，不是写文档。',
-    '- 第 1 步（收集清单）：浏览博主主页并滚动加载，用 browser_visible_collect 或 browser_extract_structured 收集所有笔记的链接(url)与标题(title)。',
-    '- 第 2 步（必须执行）：调用 browser_collect_notes(target_profile_url, notes=[{url,title}…], output_root_dir) 启动后台逐篇采集——它在独立后台标签页逐篇打开笔记、按标题建文件夹、下载图片，返回后台任务句柄。',
+    '- 第 1 步（收集清单）：浏览博主主页并滚动加载，用 browser_visible_collect 或 browser_extract_structured 收集所有笔记的链接(url)与标题(title)；若用户给了保存文件夹，browser_visible_collect 要带 output_root_dir。',
+    '- 第 2 步（必须执行）：优先用 browser_visible_collect 返回的 suggestedNextTool/source_task_id 调用 browser_collect_notes(target_profile_url, source_task_id, expected_count, output_root_dir) 启动后台逐篇采集；不要把清单重新手工截断或改写。',
+    '- 如果 browser_visible_collect 返回 discoveryStatus=partial/paused 或 suggestedContinueTool，先 browser_resume_task 继续发现；除非用户明确只采当前部分，否则不要启动 browser_collect_notes。',
+    '- browser_collect_notes 会在独立后台标签页逐篇打开目标、按标题建文件夹、保存图片并写 note.md/manifest.json，返回后台任务句柄。',
+    '- 若任务状态是 waiting_human/paused_verification，用户说"好了/已验证/继续"时，优先对同一个 browser-task-* 调用 browser_resume_task；不要改用 click_text、collect_images、download_urls 临时补救。',
     '- 仅收集到链接/信息不算完成：没有调用 browser_collect_notes 就没有真正开始采集。拿到清单后立刻 dispatch，不要只描述"将开始采集"。',
     '- 采集在后台运行，可继续对话；用 browser_get_task(taskId) 查询进度，必要时 browser_cancel_task 取消。',
   ].join('\n'),

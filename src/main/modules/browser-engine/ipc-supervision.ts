@@ -16,7 +16,7 @@ export type AgentControlState = 'active' | 'pending_confirm' | 'frozen'
 
 export interface BrowserSupervisionIPCController {
   requestAgentInterruption(): { state: AgentControlState; pending: boolean }
-  confirmAgentInterruption(): Promise<{ state: AgentControlState; frozen: boolean }>
+  confirmAgentInterruption(): Promise<{ state: AgentControlState; frozen: boolean; takeoverTabId?: string | null }>
   dismissAgentInterruption(): { state: AgentControlState }
   getAgentControlState(): AgentControlState
   getAgentTabId(): string | null

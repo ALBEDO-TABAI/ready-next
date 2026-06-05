@@ -43,7 +43,7 @@ export interface ClipDraggedTabRunnerDeps {
   materializeToTargetDir: (
     sandboxMdPath: string,
     targetDir: string,
-    options?: { abortSignal?: AbortSignal },
+    options?: { abortSignal?: AbortSignal; sourcePageUrl?: string | null },
   ) => Promise<
     | { ok: true; result: MaterializeResult }
     | { ok: false; error: { kind: MaterializeError['kind']; message: string } }
@@ -228,7 +228,9 @@ export async function runClipDraggedTabBackground(
     let copyError: ClipBackgroundUpdateCompleted['copyError']
     let savedPathAfterMaterialize = result.savedPath
     if (args.target_dir && args.target_dir.trim().length > 0) {
-      const materialized = await deps.materializeToTargetDir(result.savedPath, args.target_dir)
+      const materialized = await deps.materializeToTargetDir(result.savedPath, args.target_dir, {
+        sourcePageUrl: fetched.finalUrl || args.url,
+      })
       if (materialized.ok) {
         copiedPath = materialized.result.finalMdPath
         assetPaths = materialized.result.assetPaths

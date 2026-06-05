@@ -283,9 +283,10 @@ describe('runClipDraggedTabBackground · materialize to target_dir', () => {
       { url: 'https://example.com/x', target_dir: '/Users/me/Notes' },
       controller,
       makeDeps({
-        materializeToTargetDir: async (savedPath, targetDir) => {
+        materializeToTargetDir: async (savedPath, targetDir, options) => {
           assert.equal(savedPath, '/tmp/outputs/obsidian-web-clip/foo.md')
           assert.equal(targetDir, '/Users/me/Notes')
+          assert.equal(options?.sourcePageUrl, 'https://example.com/foo')
           return {
             ok: true,
             result: {

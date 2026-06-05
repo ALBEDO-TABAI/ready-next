@@ -1,4 +1,6 @@
 import { BrowserCapabilityService } from './capability-service'
+import { mkdir, writeFile } from 'fs/promises'
+import { join } from 'path'
 import type {
   BrowserCapabilityTaskHandle,
   BrowserCapabilityTaskKind,
@@ -21,6 +23,7 @@ import { parseCollectionPlan, type CollectionLoopState, type CollectionPlan } fr
 import { runBrowserCollection } from './browser-collector-engine'
 import type { NoteCollectFacade } from './browser-collector-actions'
 import { isHighControlPlatformText } from '../../../shared/browser-collection-intent'
+import { deriveCollectionTargets } from './collection-targets'
 
 /**
  * Per-task collector binding (plan §3.4). The controller provides this factory
@@ -47,7 +50,7 @@ export interface BrowserTaskProjectionInput {
   scopeId: string
   title: string
   summary: string
-  state: 'running' | 'completed' | 'cancelled' | 'failed'
+  state: 'running' | 'paused' | 'completed' | 'cancelled' | 'failed'
   total: number
   completed: number
   failed: number
@@ -60,19 +63,170 @@ function noteCollectState(status: string): BrowserTaskProjectionInput['state'] {
   if (status === 'completed') return 'completed'
   if (status === 'failed') return 'failed'
   if (status === 'cancelled') return 'cancelled'
+  if (status === 'paused' || status === 'waiting_human') return 'paused'
   return 'running'
 }
 
 function noteCollectSummary(total: number, completed: number, failed: number, current: string | null, state: BrowserTaskProjectionInput['state']): string {
   if (state === 'completed') return `采集完成：成功 ${completed}${failed > 0 ? ` · 失败 ${failed}` : ''}，共 ${total} 篇`
+  if (state === 'paused') return `采集已暂停：成功 ${completed}/${total}${failed > 0 ? ` · 失败 ${failed}` : ''}，等待验证或继续`
   if (state === 'cancelled') return `已中断：已采集 ${completed}/${total} 篇`
   if (state === 'failed') return `采集失败：已采集 ${completed}/${total} 篇`
   return `已采集 ${completed}/${total} 篇${current ? ` · 当前：${current}` : ''}`
 }
 
+function visibleCollectSummary(total: number, current: string | null, state: BrowserTaskProjectionInput['state']): string {
+  if (state === 'completed') return `可见页面采集完成：找到 ${total} 条`
+  if (state === 'paused') return `可见页面采集已暂停：找到 ${total} 条，可能还没到底`
+  if (state === 'cancelled') return `可见页面采集已中断：已找到 ${total} 条`
+  if (state === 'failed') return `可见页面采集失败：已找到 ${total} 条`
+  return `正在滚动采集页面${current ? ` · ${current}` : ''}`
+}
+
 function toNumberOr(value: unknown, fallback: number): number {
   const n = Number(value)
   return Number.isFinite(n) && n > 0 ? n : fallback
+}
+
+function discoveryStatusFor(stopReason: string): 'complete' | 'partial' | 'paused' {
+  if (stopReason === 'no_new_content') return 'complete'
+  if (stopReason === 'cancelled' || stopReason === 'lease_lost') return 'paused'
+  return 'partial'
+}
+
+function visibleCollectResult(taskId: string, items: BrowserStructuredItem[], rounds: number, stopReason: string, targetUrl: string, outputRootDir: unknown) {
+  const noteCandidates = deriveCollectionTargets(items)
+  const discoveryStatus = discoveryStatusFor(stopReason)
+  const canStartNoteCollect = discoveryStatus === 'complete'
+  return {
+    items,
+    rounds,
+    stopReason,
+    targetUrl,
+    discoveryStatus,
+    hasMoreLikely: discoveryStatus !== 'complete',
+    frozenCount: noteCandidates.length,
+    noteCandidates,
+    candidateCount: noteCandidates.length,
+    sourceTaskId: taskId,
+    ...(discoveryStatus !== 'complete' ? { continueTaskId: taskId } : {}),
+    ...(discoveryStatus !== 'complete'
+      ? {
+          suggestedContinueTool: {
+            name: 'browser_resume_task',
+            args: { task_id: taskId },
+          },
+        }
+      : {}),
+    ...(canStartNoteCollect && noteCandidates.length > 0
+      ? {
+          suggestedNextTool: {
+            name: 'browser_collect_notes',
+            args: {
+              target_profile_url: targetUrl,
+              source_task_id: taskId,
+              expected_count: noteCandidates.length,
+              ...(typeof outputRootDir === 'string' && outputRootDir.trim()
+                ? { output_root_dir: outputRootDir.trim() }
+                : {}),
+            },
+          },
+        }
+      : {}),
+  }
+}
+
+function completedAllExpected(expected: number, completed: number, failed: number, stopReason: string | null): boolean {
+  return stopReason === 'completed' && expected > 0 && completed === expected && failed === 0
+}
+
+function finalNoteCollectError(expected: number, completed: number, failed: number, stopReason: string | null): string | null {
+  if (completedAllExpected(expected, completed, failed, stopReason)) return null
+  if (stopReason === 'cancelled' || stopReason === 'lease_lost' || stopReason === 'needs_verification') return null
+  return `collection incomplete: expected ${expected}, collected ${completed}, failed ${failed}, stopReason ${stopReason || 'unknown'}`
+}
+
+function publicNoteCollectStatus(taskStatus: BrowserCapabilityTaskHandle['status'], collected: number): 'completed' | 'partial' | 'paused_verification' | 'failed' | 'cancelled' {
+  if (taskStatus === 'completed') return 'completed'
+  if (taskStatus === 'waiting_human') return 'paused_verification'
+  if (taskStatus === 'cancelled') return 'cancelled'
+  if (collected > 0) return 'partial'
+  return 'failed'
+}
+
+async function writeCollectionSummaryArtifacts(args: {
+  plan: CollectionPlan
+  taskId: string
+  taskStatus: BrowserCapabilityTaskHandle['status']
+  state: CollectionLoopState
+  rounds: number
+  stopReason: string | null
+  sourceTaskId?: string
+}): Promise<{ collectionManifestPath?: string; collectionReportPath?: string }> {
+  const { plan, taskId, taskStatus, state, rounds, stopReason, sourceTaskId } = args
+  const outputRootDir = plan.outputRootDir
+  if (!outputRootDir) return {}
+  await mkdir(outputRootDir, { recursive: true })
+  const remaining = plan.notes.slice(state.cursor).map((note, index) => ({
+    order: note.order ?? state.cursor + index + 1,
+    url: note.canonicalUrl || note.url,
+    openUrl: note.openUrl || note.url,
+    title: note.title,
+    sourceId: note.sourceId,
+  }))
+  const status = publicNoteCollectStatus(taskStatus, state.collected.length)
+  const manifestPath = join(outputRootDir, 'collection-manifest.json')
+  const reportPath = join(outputRootDir, '采集报告.md')
+  const manifest = {
+    taskId,
+    status,
+    taskStatus,
+    targetProfileUrl: plan.targetProfileUrl,
+    expectedCount: plan.expectedCount ?? plan.notes.length,
+    total: plan.notes.length,
+    completed: state.collected.length,
+    failed: state.failed.length,
+    remaining: remaining.length,
+    resumeFromCursor: state.cursor,
+    rounds,
+    stopReason,
+    outputRootDir,
+    sourceTaskId,
+    notes: state.outputs,
+    failures: state.failed,
+    remainingTargets: remaining,
+    updatedAt: new Date().toISOString(),
+  }
+  await writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf8')
+  const successfulLines = state.outputs.filter((item) => item.success).map((item) => `- ${item.order ?? ''} ${item.title || item.url}：${item.imageCount} 张`)
+  const failedLines = state.failed.map((item) => `- ${item.url}：${item.reason}`)
+  const remainingLines = remaining.map((item) => `- ${item.order} ${item.title || item.url}`)
+  const report = [
+    '# 采集报告',
+    '',
+    `任务状态：${status}`,
+    `目标总数：${plan.notes.length}`,
+    `成功：${state.collected.length}`,
+    `失败：${state.failed.length}`,
+    `剩余：${remaining.length}`,
+    `停止原因：${stopReason || 'unknown'}`,
+    `输出目录：${outputRootDir}`,
+    '',
+    '## 成功结果',
+    '',
+    ...(successfulLines.length > 0 ? successfulLines : ['无']),
+    '',
+    '## 失败或待处理',
+    '',
+    ...(failedLines.length > 0 ? failedLines : ['无']),
+    '',
+    '## 剩余目标',
+    '',
+    ...(remainingLines.length > 0 ? remainingLines : ['无']),
+    '',
+  ].join('\n')
+  await writeFile(reportPath, report, 'utf8')
+  return { collectionManifestPath: manifestPath, collectionReportPath: reportPath }
 }
 
 function toStringArray(value: unknown): string[] {
@@ -94,32 +248,37 @@ export class BrowserContentTaskRunner {
   setTaskProjectionSink(sink: BrowserTaskProjectionSink | null): void {
     this.taskProjectionSink = sink
     // §3.6: resumePendingTasks runs in the controller constructor, before the
-    // sink is wired — re-project active note_collect tasks now so chat cards
+    // sink is wired — re-project active browser collection tasks now so chat cards
     // appear for tasks that were already running/resumed when the sink arrived.
-    if (sink) void this.reprojectActiveNoteCollect()
+    if (sink) void this.reprojectActiveBrowserCollect()
   }
 
   private taskProjectionSink: BrowserTaskProjectionSink | null = null
 
-  private async reprojectActiveNoteCollect(): Promise<void> {
+  private async reprojectActiveBrowserCollect(): Promise<void> {
     const sink = this.taskProjectionSink
     if (!sink) return
-    for (const task of await this.listTasks('note_collect')) {
+    for (const task of await this.listTasks()) {
+      if (task.kind !== 'note_collect' && task.kind !== 'visible_collect') continue
       const payload = this.persistenceService.getTaskPayload(task.taskId)
       const scopeId = typeof payload?.scopeId === 'string' ? payload.scopeId.trim() : ''
       if (!scopeId) continue
       const state = noteCollectState(task.status)
       const { total, completed, failed, currentLabel } = task.progress
-      sink.upsert({
-        taskId: task.taskId,
-        scopeId,
-        title: '浏览器逐篇采集',
-        summary: noteCollectSummary(total, completed, failed, currentLabel ?? null, state),
-        state,
-        total,
-        completed,
-        failed,
-      })
+      if (task.kind === 'note_collect') {
+        sink.upsert({
+          taskId: task.taskId,
+          scopeId,
+          title: '浏览器逐篇采集',
+          summary: noteCollectSummary(total, completed, failed, currentLabel ?? null, state),
+          state,
+          total,
+          completed,
+          failed,
+        })
+      } else {
+        this.projectVisibleCollect(task.taskId, scopeId, state, total, currentLabel ?? null)
+      }
     }
   }
 
@@ -147,6 +306,27 @@ export class BrowserContentTaskRunner {
     })
   }
 
+  private projectVisibleCollect(
+    taskId: string,
+    scopeId: string,
+    state: BrowserTaskProjectionInput['state'],
+    total: number,
+    current: string | null,
+  ): void {
+    const sink = this.taskProjectionSink
+    if (!sink || !scopeId) return
+    sink.upsert({
+      taskId,
+      scopeId,
+      title: '浏览器可见页面采集',
+      summary: visibleCollectSummary(total, current, state),
+      state,
+      total,
+      completed: total,
+      failed: 0,
+    })
+  }
+
   async startTask(request: BrowserStartTaskRequest): Promise<BrowserCapabilityTaskHandle> {
     const handle = this.persistenceService.createTask(request)
     this.scheduleTask(handle.taskId, request.kind, request.payload)
@@ -157,22 +337,36 @@ export class BrowserContentTaskRunner {
     return this.persistenceService.getTask(taskId)
   }
 
-  /** Active (queued/running/paused) tasks, optionally filtered to one kind. */
+  /** All known tasks when the persistence layer supports it, optionally filtered to one kind. */
   async listTasks(kind?: BrowserCapabilityTaskKind): Promise<BrowserCapabilityTaskHandle[]> {
-    const pending = this.persistenceService.listPendingTasks()
-    return kind ? pending.filter((task) => task.kind === kind) : pending
+    const persistence = this.persistenceService as BrowserTaskPersistenceService & {
+      listTasks?: () => BrowserCapabilityTaskHandle[]
+    }
+    const tasks = typeof persistence.listTasks === 'function'
+      ? persistence.listTasks()
+      : this.persistenceService.listPendingTasks()
+    return kind ? tasks.filter((task) => task.kind === kind) : tasks
+  }
+
+  getTaskPayload(taskId: string): Record<string, unknown> | null {
+    return this.persistenceService.getTaskPayload(taskId)
   }
 
   async resumeTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
     const current = this.persistenceService.getTask(taskId)
     const payload = this.persistenceService.getTaskPayload(taskId)
     if (!current || !payload) return null
+    if (current.status === 'completed' || current.status === 'failed') return current
     this.cancelledTasks.delete(taskId)
     this.scheduleTask(taskId, current.kind, payload)
     return this.persistenceService.getTask(taskId)
   }
 
   async cancelTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
+    const current = this.persistenceService.getTask(taskId)
+    if (current && (current.status === 'completed' || current.status === 'failed' || current.status === 'waiting_human')) {
+      return current
+    }
     this.cancelledTasks.add(taskId)
     const handle = this.persistenceService.updateProgress(taskId, {}, {
       status: 'cancelled',
@@ -185,6 +379,10 @@ export class BrowserContentTaskRunner {
       const scopeId = typeof payload?.scopeId === 'string' ? payload.scopeId.trim() : ''
       const p = handle.progress
       this.projectNoteCollect(taskId, scopeId, 'cancelled', p.total, p.completed, p.failed, null)
+    } else if (handle?.kind === 'visible_collect') {
+      const payload = this.persistenceService.getTaskPayload(taskId)
+      const scopeId = typeof payload?.scopeId === 'string' ? payload.scopeId.trim() : ''
+      this.projectVisibleCollect(taskId, scopeId, 'cancelled', handle.progress.total, null)
     }
     return handle
   }
@@ -237,6 +435,7 @@ export class BrowserContentTaskRunner {
    * via evaluateStop. Resumable from the last cursor via resumePendingTasks.
    */
   private async runVisibleCollect(taskId: string, payload: Record<string, unknown>): Promise<void> {
+    const scopeId = typeof payload.scopeId === 'string' ? payload.scopeId.trim() : ''
     // Lease handling (counterplan §5.2/§5.5): the background loop writes the page
     // (scroll), so every round must hold a valid write lease and stop with
     // lease_lost the instant the user takes over or the lease expires.
@@ -256,6 +455,7 @@ export class BrowserContentTaskRunner {
           error: `visible_collect could not acquire ${surface} lease: ${acquired.errorCode}`,
           finishedAt: new Date().toISOString(),
         })
+        this.projectVisibleCollect(taskId, scopeId, 'failed', 0, null)
         return
       }
       leaseId = acquired.leaseId
@@ -280,18 +480,36 @@ export class BrowserContentTaskRunner {
     // stop with lease_lost without touching the page (counterplan §5.5).
     if (this.leaseService.checkWrite({ surface, leaseId }) !== null) {
       this.persistenceService.updateProgress(taskId, { total: 0, completed: 0, failed: 0, currentLabel: null }, {
-        status: 'completed',
-        checkpoint: { taskId, stage: 'completed', cursor: null, partialResults: [] },
-        result: { items: [], rounds: 0, stopReason: 'lease_lost' },
+        status: 'cancelled',
+        checkpoint: { taskId, stage: 'cancelled', cursor: null, partialResults: [] },
+        result: visibleCollectResult(taskId, [], 0, 'lease_lost', '', payload.outputRootDir),
         finishedAt: new Date().toISOString(),
       })
+      const scopeId = typeof payload.scopeId === 'string' ? payload.scopeId.trim() : ''
+      this.projectVisibleCollect(taskId, scopeId, 'cancelled', 0, null)
       return
     }
 
     const targetUrl = String(payload.url || '').trim()
-    const tabId = targetUrl
-      ? (await this.capabilityService.openTarget(targetUrl, 'prefer_reuse')).tabId || null
-      : (typeof payload.tabId === 'string' ? payload.tabId : null)
+    const requestedTabId = typeof payload.tabId === 'string' ? payload.tabId : null
+    const tabId = await (async () => {
+      if (!targetUrl) return requestedTabId
+      if (requestedTabId) {
+        const opened = await this.capabilityService.navigateTargetTab(requestedTabId, targetUrl)
+        return opened.success ? opened.tabId || requestedTabId : null
+      }
+      return (await this.capabilityService.openTarget(targetUrl, 'prefer_reuse')).tabId || null
+    })()
+    const scopeId = typeof payload.scopeId === 'string' ? payload.scopeId.trim() : ''
+    if (targetUrl && requestedTabId && !tabId) {
+      this.persistenceService.updateProgress(taskId, { currentLabel: null }, {
+        status: 'failed',
+        error: `visible_collect could not navigate agent tab: ${requestedTabId}`,
+        finishedAt: new Date().toISOString(),
+      })
+      this.projectVisibleCollect(taskId, scopeId, 'failed', 0, null)
+      return
+    }
 
     const limits: VisibleCollectLimits = {
       maxItems: toNumberOr(payload.maxItems, DEFAULT_VISIBLE_COLLECT_LIMITS.maxItems),
@@ -333,6 +551,8 @@ export class BrowserContentTaskRunner {
       collected.push(...prior)
       round = Number(checkpoint.cursor || 0) || 0
     }
+    const batchStartCount = collected.length
+    const batchStartRound = round
 
     while (true) {
       // Before any page write this round, confirm we still hold the lease; a
@@ -341,8 +561,8 @@ export class BrowserContentTaskRunner {
       const leaseDenied = this.leaseService.checkWrite({ surface, leaseId })
       const stop = evaluateStop(
         {
-          collectedCount: collected.length,
-          round,
+          collectedCount: Math.max(0, collected.length - batchStartCount),
+          round: Math.max(0, round - batchStartRound),
           consecutiveEmptyRounds,
           elapsedMs: Date.now() - startedAt,
           cancelled: this.cancelledTasks.has(taskId),
@@ -394,6 +614,7 @@ export class BrowserContentTaskRunner {
           partialResults: collected,
         },
       })
+      this.projectVisibleCollect(taskId, scopeId, 'running', collected.length, `round ${round}`)
 
       if (this.cancelledTasks.has(taskId)) {
         stopReason = 'cancelled'
@@ -411,28 +632,33 @@ export class BrowserContentTaskRunner {
       }
     }
 
-    if (this.cancelledTasks.has(taskId)) return
-
+    const discoveryStatus = discoveryStatusFor(stopReason)
+    const finalStatus = stopReason === 'cancelled' || stopReason === 'lease_lost'
+      ? 'cancelled'
+      : discoveryStatus === 'complete'
+        ? 'completed'
+        : 'paused'
+    const finalCheckpointStage = finalStatus === 'paused' || finalStatus === 'cancelled'
+      ? 'visible_collect_round'
+      : finalStatus
+    const finalResult = visibleCollectResult(taskId, collected, round, stopReason, targetUrl, payload.outputRootDir)
     this.persistenceService.updateProgress(taskId, {
       total: collected.length,
       completed: collected.length,
       failed: 0,
       currentLabel: null,
     }, {
-      status: 'completed',
+      status: finalStatus,
       checkpoint: {
         taskId,
-        stage: 'completed',
-        cursor: null,
+        stage: finalCheckpointStage,
+        cursor: finalCheckpointStage === 'visible_collect_round' ? String(round) : null,
         partialResults: collected,
       },
-      result: {
-        items: collected,
-        rounds: round,
-        stopReason,
-      },
+      result: finalResult,
       finishedAt: new Date().toISOString(),
     })
+    this.projectVisibleCollect(taskId, scopeId, finalStatus, collected.length, null)
   }
 
   /**
@@ -474,6 +700,7 @@ export class BrowserContentTaskRunner {
             ...parsed.plan.stopConditions,
             maxNotes: Math.min(parsed.plan.stopConditions?.maxNotes ?? 60, 60),
             maxDurationMs: Math.min(parsed.plan.stopConditions?.maxDurationMs ?? 20 * 60_000, 20 * 60_000),
+            maxConsecutiveFailures: Math.min(parsed.plan.stopConditions?.maxConsecutiveFailures ?? 3, 3),
           },
         }
       : parsed.plan
@@ -512,7 +739,11 @@ export class BrowserContentTaskRunner {
         plan,
         {
           facade,
-          pathJoin: (...parts) => parts.join('/'),
+          pathJoin: (...parts) => join(...parts),
+          fileOps: {
+            ensureDir: async (path) => { await mkdir(path, { recursive: true }) },
+            writeTextFile: (path, content) => writeFile(path, content, 'utf8'),
+          },
           now: () => Date.now(),
           interNoteDelayMs,
           maxTotalImages,
@@ -551,16 +782,69 @@ export class BrowserContentTaskRunner {
       )
 
       // cancelTask() (incl. the confirm→cancel path) already wrote 'cancelled';
-      // don't overwrite it with a completion.
+      // keep it cancelled, but persist the partial result so the task can be
+      // inspected/resumed instead of becoming an empty cancelled shell.
       if (this.cancelledTasks.has(taskId)) {
+        const artifacts = await writeCollectionSummaryArtifacts({
+          plan,
+          taskId,
+          taskStatus: 'cancelled',
+          state: result.state,
+          rounds: result.rounds,
+          stopReason: result.stopReason,
+          sourceTaskId: plan.sourceTaskId,
+        }).catch(() => ({}))
+        this.persistenceService.updateProgress(taskId, {
+          total: plan.notes.length,
+          completed: result.collected.length,
+          failed: result.failed.length,
+          currentLabel: null,
+        }, {
+          status: 'cancelled',
+          checkpoint: { taskId, stage: 'note_collect_round', cursor: String(result.state.cursor), partialResults: result.state },
+          result: {
+            status: publicNoteCollectStatus('cancelled', result.collected.length),
+            collected: result.collected,
+            failed: result.failed,
+            notes: result.notes,
+            rounds: result.rounds,
+            stopReason: result.stopReason,
+            expectedCount: plan.expectedCount ?? plan.notes.length,
+            sourceTaskId: plan.sourceTaskId,
+            outputRootDir: plan.outputRootDir,
+            remaining: Math.max(0, plan.notes.length - result.state.cursor),
+            resumeFromCursor: result.state.cursor,
+            ...artifacts,
+          },
+          finishedAt: new Date().toISOString(),
+        })
         this.projectNoteCollect(taskId, scopeId, 'cancelled', plan.notes.length, result.collected.length, result.failed.length, null)
         return
       }
       // A user freeze or a lease takeover is NOT a successful completion (Codex
       // result-review #1): reflect the interruption in the task status.
-      const finalStatus = result.stopReason === 'cancelled' || result.stopReason === 'lease_lost'
-        ? 'cancelled'
-        : 'completed'
+      const incompleteError = finalNoteCollectError(plan.notes.length, result.collected.length, result.failed.length, result.stopReason)
+      const finalStatus: BrowserCapabilityTaskHandle['status'] = result.stopReason === 'needs_verification'
+        ? 'waiting_human'
+        : result.stopReason === 'cancelled' || result.stopReason === 'lease_lost'
+          ? 'cancelled'
+          : incompleteError && result.collected.length > 0 && ['max_notes', 'max_duration', 'max_images'].includes(String(result.stopReason))
+            ? 'paused'
+            : incompleteError
+              ? 'failed'
+              : 'completed'
+      const checkpointStage = finalStatus === 'waiting_human' || finalStatus === 'paused'
+        ? 'note_collect_round'
+        : finalStatus
+      const artifacts = await writeCollectionSummaryArtifacts({
+        plan,
+        taskId,
+        taskStatus: finalStatus,
+        state: result.state,
+        rounds: result.rounds,
+        stopReason: result.stopReason,
+        sourceTaskId: plan.sourceTaskId,
+      }).catch(() => ({}))
       this.persistenceService.updateProgress(taskId, {
         total: plan.notes.length,
         completed: result.collected.length,
@@ -568,11 +852,30 @@ export class BrowserContentTaskRunner {
         currentLabel: null,
       }, {
         status: finalStatus,
-        checkpoint: { taskId, stage: finalStatus === 'completed' ? 'completed' : 'cancelled', cursor: null, partialResults: null },
-        result: { collected: result.collected, failed: result.failed, rounds: result.rounds, stopReason: result.stopReason },
+        checkpoint: {
+          taskId,
+          stage: checkpointStage,
+          cursor: finalStatus === 'waiting_human' || finalStatus === 'paused' ? String(result.state.cursor) : null,
+          partialResults: finalStatus === 'waiting_human' || finalStatus === 'paused' ? result.state : null,
+        },
+        result: {
+          status: publicNoteCollectStatus(finalStatus, result.collected.length),
+          collected: result.collected,
+          failed: result.failed,
+          notes: result.notes,
+          rounds: result.rounds,
+          stopReason: result.stopReason,
+          expectedCount: plan.expectedCount ?? plan.notes.length,
+          sourceTaskId: plan.sourceTaskId,
+          outputRootDir: plan.outputRootDir,
+          remaining: Math.max(0, plan.notes.length - result.state.cursor),
+          resumeFromCursor: result.state.cursor,
+          ...artifacts,
+        },
+        error: finalStatus === 'waiting_human' ? null : incompleteError,
         finishedAt: new Date().toISOString(),
       })
-      this.projectNoteCollect(taskId, scopeId, finalStatus, plan.notes.length, result.collected.length, result.failed.length, null)
+      this.projectNoteCollect(taskId, scopeId, noteCollectState(finalStatus), plan.notes.length, result.collected.length, result.failed.length, null)
     } catch (error) {
       // An uncaught throw from runBrowserCollection would otherwise leave the
       // chat card stuck in 'running' forever (Codex result-review #A). Mark the

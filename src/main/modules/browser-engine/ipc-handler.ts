@@ -75,6 +75,7 @@ import {
 } from './popup-policy'
 import { BrowserVisibilityCommandState } from './visibility-command-state'
 import type { BrowserUtilityMenuRequest } from '../../../shared/browser-utility-menu'
+import { READY_BROWSER_BLANK_URL } from '../../../shared/browser-defaults'
 
 interface Tab extends BrowserTabMetaRecord {
   id: string
@@ -732,6 +733,24 @@ export class BrowserController {
     return this.contentTaskRunner.startTask(request)
   }
 
+  async startVisibleCollection(payload: Record<string, unknown>, scopeId?: string): Promise<BrowserCapabilityTaskHandle> {
+    const requestedTabId = typeof payload.tabId === 'string' ? payload.tabId : null
+    const tabUrl = requestedTabId ? this.tabs.get(requestedTabId)?.url || '' : ''
+    const targetUrl = String(payload.url || tabUrl || this.getActiveTab()?.url || '').trim()
+    const agentTabId = await this.ensureAgentTab()
+    return this.contentTaskRunner.startTask({
+      kind: 'visible_collect',
+      payload: {
+        ...payload,
+        url: targetUrl || undefined,
+        tabId: agentTabId,
+        surface: 'agent-view' as AgentBrowserSurface,
+        leaseId: undefined,
+        ...(scopeId && scopeId.trim() ? { scopeId: scopeId.trim() } : {}),
+      },
+    })
+  }
+
   async getTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
     return this.contentTaskRunner.getTask(taskId)
   }
@@ -751,17 +770,25 @@ export class BrowserController {
    * agent never preempts the visible browser.
    */
   async ensureAgentTab(): Promise<string> {
-    if (this.agentTabId && this.tabs.has(this.agentTabId)) return this.agentTabId
+    if (this.agentTabId) {
+      const agentTab = this.tabs.get(this.agentTabId)
+      if (agentTab?.owner === 'agent') {
+        this.agentTabControlGate.reset()
+        this.updateTabRuntimeState(this.agentTabId, { activity: 'running' })
+        return this.agentTabId
+      }
+    }
     // Create the agent tab in the BACKGROUND so it never becomes active or gets
     // presented — no foreground preemption, no create-then-switch-back flicker
     // (Codex result-review #4). Belt-and-suspenders: if the host ever activates
     // it anyway, restore the user's tab.
     const previousActive = this.activeTabId
-    const created = await this.createTab('about:blank', { background: true })
+    const created = await this.createTab(READY_BROWSER_BLANK_URL, { background: true })
     if (!created.success || !created.tabId) {
       throw new Error(created.error || 'failed to create agent tab')
     }
     this.agentTabId = created.tabId
+    this.agentTabControlGate.reset()
     this.updateTabRuntimeState(created.tabId, { owner: 'agent', activity: 'running' })
     if (previousActive && this.activeTabId === created.tabId && this.tabs.has(previousActive)) {
       this.switchTab(previousActive)
@@ -782,8 +809,7 @@ export class BrowserController {
   private attachAgentTabSupervision(tabId: string): void {
     const webContents = this.tabs.get(tabId)?.view?.webContents
     if (!webContents) return
-    webContents.on('before-input-event', (event, input) => {
-      if (input.type !== 'keyDown' && input.type !== 'keyUp' && input.type !== 'char') return
+    const blockUserInputUntilConfirmed = (event: { preventDefault: () => void }): void => {
       const state = this.agentTabControlGate.getState()
       if (state === 'frozen') return // user has taken over — allow input through
       if (state === 'active') {
@@ -791,6 +817,21 @@ export class BrowserController {
         this.notifyAgentControlChanged()
       }
       event.preventDefault() // agent still controls until the 2nd confirmation
+    }
+    webContents.on('before-input-event', (event, input) => {
+      if (input.type !== 'keyDown' && input.type !== 'keyUp' && input.type !== 'char') return
+      blockUserInputUntilConfirmed(event)
+    })
+    webContents.on('before-mouse-event', (event, mouse) => {
+      if (
+        mouse.type !== 'mouseDown'
+        && mouse.type !== 'mouseUp'
+        && mouse.type !== 'mouseWheel'
+        && mouse.type !== 'contextMenu'
+      ) {
+        return
+      }
+      blockUserInputUntilConfirmed(event)
     })
   }
 
@@ -799,12 +840,22 @@ export class BrowserController {
   }
 
   getAgentTabId(): string | null {
-    return this.agentTabId && this.tabs.has(this.agentTabId) ? this.agentTabId : null
+    const tab = this.agentTabId ? this.tabs.get(this.agentTabId) : null
+    return tab?.owner === 'agent' ? this.agentTabId : null
   }
 
-  /** Active background note-collection tasks (for the supervision panel). */
+  /** Agent-owned browser collection tasks (for the supervision panel). */
   async listAgentCollectionTasks(): Promise<BrowserCapabilityTaskHandle[]> {
-    return this.contentTaskRunner.listTasks('note_collect')
+    const [visible, notes] = await Promise.all([
+      this.contentTaskRunner.listTasks('visible_collect'),
+      this.contentTaskRunner.listTasks('note_collect'),
+    ])
+    return [...visible, ...notes]
+      .filter((task) => {
+        const payload = this.contentTaskRunner.getTaskPayload(task.taskId)
+        return payload?.surface === 'agent-view'
+      })
+      .sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')))
   }
 
   /** Wire the chat task-projection sink (set by setupAgentIPC, plan §3.3). */
@@ -852,17 +903,31 @@ export class BrowserController {
     return { state: this.agentTabControlGate.getState(), pending }
   }
 
-  async confirmAgentInterruption(): Promise<{ state: ReturnType<AgentTabControlGate['getState']>; frozen: boolean }> {
+  async confirmAgentInterruption(): Promise<{ state: ReturnType<AgentTabControlGate['getState']>; frozen: boolean; takeoverTabId?: string | null }> {
     const frozen = this.agentTabControlGate.confirmInterruption()
     // Don't wait for the next loop tick: on confirm, immediately cancel the
     // running collection tasks so "确认后立即中断" is real (Codex result-review
     // #1). The freeze probe is still the backstop for the in-flight note.
     if (frozen) {
-      const tasks = await this.contentTaskRunner.listTasks('note_collect')
+      const tasks = [
+        ...(await this.contentTaskRunner.listTasks('visible_collect')),
+        ...(await this.contentTaskRunner.listTasks('note_collect')),
+      ].filter((task) => {
+        const payload = this.contentTaskRunner.getTaskPayload(task.taskId)
+        return payload?.surface === 'agent-view'
+          && (task.status === 'queued' || task.status === 'running' || task.status === 'paused')
+      })
       await Promise.all(tasks.map((task) => this.contentTaskRunner.cancelTask(task.taskId)))
+      const takeoverTabId = this.agentTabId
+      if (takeoverTabId && this.tabs.has(takeoverTabId)) {
+        this.updateTabRuntimeState(takeoverTabId, { owner: 'manual', activity: 'attention' })
+        this.agentTabId = null
+      }
+      this.notifyAgentControlChanged()
+      return { state: this.agentTabControlGate.getState(), frozen, takeoverTabId }
     }
     this.notifyAgentControlChanged()
-    return { state: this.agentTabControlGate.getState(), frozen }
+    return { state: this.agentTabControlGate.getState(), frozen, takeoverTabId: null }
   }
 
   dismissAgentInterruption(): { state: ReturnType<AgentTabControlGate['getState']> } {

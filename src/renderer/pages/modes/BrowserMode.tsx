@@ -9,11 +9,13 @@ import { useBrowserDiagnosticsState } from '../../modules/browser/useBrowserDiag
 import { useBrowserPanelData } from '../../modules/browser/useBrowserPanelData'
 import { useBrowserResizeFreeze } from '../../modules/browser/useBrowserResizeFreeze'
 import { useBrowserRuntimeEffects } from '../../modules/browser/useBrowserRuntimeEffects'
+import { useAgentBrowserSupervision } from '../../modules/browser/useAgentBrowserSupervision'
 import { useBrowserTabActions } from '../../modules/browser/useBrowserTabActions'
 import { getBrowserTabFitKey, isFitted, markFitted } from '../../modules/browser/browserTabFitRegistry'
 import { planBrowserHostPresentation } from '../../modules/browser/browserHostPresentation'
 import { useBrowserViewBounds } from '../../modules/browser/useBrowserViewBounds'
 import {
+  DEFAULT_BROWSER_URL,
   extractBrowserDomain,
   isReadyBrowserBlankUrl,
   normalizeBrowserUrlInput,
@@ -177,12 +179,32 @@ export default function BrowserMode({
   const chatPanelVisible = useWorkspace(s => s.chatPanelVisible)
   const chatPanelWidth = useWorkspace(s => s.chatPanelWidth)
   const effectiveSidePanelWidth = sidePanelWidths.shared
+  const agentSupervision = useAgentBrowserSupervision()
+  const [agentPaneCollapsed, setAgentPaneCollapsed] = useState(false)
+  const [dismissedAgentTaskId, setDismissedAgentTaskId] = useState<string | null>(null)
+  const lastAgentPaneTaskIdRef = useRef<string | null>(null)
   const activeTab = tabs.find(t => t.id === activeTabId) || null
   const splitTab = splitTabId && splitTabId !== activeTabId ? tabs.find(t => t.id === splitTabId) || null : null
+  const activeAgentTasks = agentSupervision.tasks.filter((task) => task.status === 'running' || task.status === 'queued' || task.status === 'paused')
+  const terminalAgentTasks = agentSupervision.tasks.filter((task) => task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled')
+  const visibleAgentTask = activeAgentTasks[0] || terminalAgentTasks[0] || null
+  const agentRuntimeTab = agentSupervision.agentTabId
+    ? tabs.find(t => t.id === agentSupervision.agentTabId) || null
+    : null
+  const agentPaneTaskId = visibleAgentTask?.taskId || (agentRuntimeTab?.activity === 'running' && agentSupervision.agentTabId
+    ? `agent-tab:${agentSupervision.agentTabId}`
+    : null)
+  const agentPaneVisible = Boolean(agentSupervision.agentTabId && agentPaneTaskId && agentPaneTaskId !== dismissedAgentTaskId)
+  const agentPaneOpen = agentPaneVisible && !agentPaneCollapsed
+  const agentPaneCollapsedVisible = agentPaneVisible && agentPaneCollapsed
+  const agentTab = agentPaneOpen ? agentRuntimeTab : null
+  const visibleSplitTab = agentTab || splitTab
+  const isAgentSplitVisible = Boolean(agentTab)
+  const shouldRenderSplitLayout = Boolean(activeTab && (visibleSplitTab || agentPaneCollapsedVisible))
   const currentDomain = activeTab?.domain || extractBrowserDomain(activeTab?.url || '')
   const hasError = !!activeTab?.error
   const isReadyBlankTab = activeTab ? isReadyBrowserBlankUrl(activeTab.url) : false
-  const splitTabHasNativeSurface = splitTab ? !splitTab.error && !isReadyBrowserBlankUrl(splitTab.url) : false
+  const splitTabHasNativeSurface = visibleSplitTab ? !visibleSplitTab.error && !isReadyBrowserBlankUrl(visibleSplitTab.url) : false
   const shouldHideAllBrowserHosts = (hasError || isReadyBlankTab) && !splitTabHasNativeSurface
   const fastCardItems = useFastCard(s => s.items)
   const fastCardPanelOpen = useFastCard(s => s.panelOpen && !s.collapsed)
@@ -218,7 +240,7 @@ export default function BrowserMode({
     contentRef,
     splitContentRef,
     activeTabId,
-    splitTabId: splitTab?.id || null,
+    splitTabId: visibleSplitTab?.id || null,
     isActive: shouldPrepareBrowserHost,
     layoutPhase,
     isVisibleAllowed: isMotionSettled, // D方案：水平滚动动画期间禁止 BrowserView 显示
@@ -232,6 +254,22 @@ export default function BrowserMode({
     chatPanelWidth,
     hasError: shouldHideAllBrowserHosts,
   })
+
+  useEffect(() => {
+    if (!agentPaneTaskId || agentPaneTaskId === lastAgentPaneTaskIdRef.current) return
+    lastAgentPaneTaskIdRef.current = agentPaneTaskId
+    setAgentPaneCollapsed(false)
+    setDismissedAgentTaskId(null)
+  }, [agentPaneTaskId])
+
+  useEffect(() => {
+    const agentTabId = agentSupervision.agentTabId
+    if (!agentTabId || activeTabId !== agentTabId) return
+    const fallback = tabs.find((tab) => tab.id !== agentTabId && tab.owner !== 'agent')
+    if (!fallback) return
+    setActiveTabId(fallback.id)
+    setUrlInput(fallback.url === DEFAULT_BROWSER_URL ? '' : fallback.url)
+  }, [activeTabId, agentSupervision.agentTabId, setActiveTabId, setUrlInput, tabs])
 
   useEffect(() => {
     const nextRatio = clampBrowserSplitRatio(browserSplitRatio)
@@ -950,7 +988,7 @@ export default function BrowserMode({
             isActive={isActive}
             tabs={tabs}
             activeTabId={activeTabId}
-            splitTabId={splitTab?.id || null}
+            splitTabId={visibleSplitTab?.id || null}
             urlInput={urlInput}
             loading={activeTab?.loading || false}
             canGoBack={activeTab?.canGoBack || false}
@@ -986,12 +1024,12 @@ export default function BrowserMode({
             }}
             className="flex min-h-0 flex-1"
           >
-            {splitTab && activeTab ? (
+            {shouldRenderSplitLayout && activeTab ? (
               <div className="flex h-full min-w-0 flex-1 overflow-hidden" ref={splitContainerRef} style={{ gap: 0 }}>
                 <div
                   ref={primarySplitPaneRef}
                   className="flex min-w-0 flex-col overflow-hidden"
-                  style={{ flexBasis: `${browserSplitRatio}%`, flexShrink: 0, flexGrow: 0 }}
+                  style={{ flexBasis: agentPaneCollapsedVisible ? 'calc(100% - 164px)' : `${browserSplitRatio}%`, flexShrink: 0, flexGrow: 0 }}
                 >
                   <BrowserShellLayout
                     isElectron={isElectron}
@@ -1003,21 +1041,84 @@ export default function BrowserMode({
                     onRetry={() => void handleRetry(activeTab.id)}
                   />
                 </div>
-                <BrowserSplitResizeHandle
-                  onResize={handleSplitResize}
-                  onResizeStateChange={handleSplitResizeStateChange}
-                />
-                <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-                  <BrowserShellLayout
-                    isElectron={isElectron}
-                    contentRef={splitContentRef}
-                    activeTab={splitTab}
-                    toastVisible={false}
-                    onDragOver={handleContentDragOver}
-                    onDrop={(event) => handleContentDrop(event, splitTab.id)}
-                    onRetry={() => void handleRetry(splitTab.id)}
+                {!agentPaneCollapsedVisible && (
+                  <BrowserSplitResizeHandle
+                    onResize={handleSplitResize}
+                    onResizeStateChange={handleSplitResizeStateChange}
                   />
-                </div>
+                )}
+                {agentPaneCollapsedVisible ? (
+                  <div
+                    className="relative flex h-full w-[164px] flex-shrink-0 items-start justify-center overflow-hidden px-2 pt-3"
+                    style={{
+                      background: 'color-mix(in srgb, var(--surface-card-bg) 90%, transparent)',
+                      boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--color-blue) 26%, transparent)',
+                    }}
+                  >
+                    <AgentBrowserSupervisionPanel
+                      controlState={agentSupervision.controlState}
+                      tasks={agentSupervision.tasks}
+                      requestInterruption={agentSupervision.requestInterruption}
+                      confirmInterruption={agentSupervision.confirmInterruption}
+                      dismissInterruption={agentSupervision.dismissInterruption}
+                      variant="collapsedRail"
+                      onExpand={() => setAgentPaneCollapsed(false)}
+                    />
+                    <div
+                      aria-hidden
+                      className="pointer-events-none absolute inset-0"
+                      style={{
+                        borderRadius: '0 0 var(--workbench-canvas-radius) 0',
+                        boxShadow: 'inset 0 0 18px color-mix(in srgb, var(--color-blue) 12%, transparent)',
+                      }}
+                    />
+                  </div>
+                ) : visibleSplitTab ? (
+                  <div
+                    className="relative flex min-w-0 flex-1 flex-col overflow-hidden"
+                    style={isAgentSplitVisible
+                      ? {
+                          background: 'color-mix(in srgb, var(--surface-card-bg) 88%, transparent)',
+                          boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--color-blue) 36%, transparent), inset 0 0 18px color-mix(in srgb, var(--color-blue) 16%, transparent)',
+                        }
+                      : undefined}
+                  >
+                    {isAgentSplitVisible && (
+                      <AgentBrowserSupervisionPanel
+                        controlState={agentSupervision.controlState}
+                        tasks={agentSupervision.tasks}
+                        requestInterruption={agentSupervision.requestInterruption}
+                        confirmInterruption={agentSupervision.confirmInterruption}
+                        dismissInterruption={agentSupervision.dismissInterruption}
+                        variant="pane"
+                        onCollapse={() => setAgentPaneCollapsed(true)}
+                        onClose={() => {
+                          setDismissedAgentTaskId(agentPaneTaskId)
+                          setAgentPaneCollapsed(false)
+                        }}
+                      />
+                    )}
+                    <BrowserShellLayout
+                      isElectron={isElectron}
+                      contentRef={splitContentRef}
+                      activeTab={visibleSplitTab}
+                      toastVisible={false}
+                      onDragOver={handleContentDragOver}
+                      onDrop={(event) => handleContentDrop(event, visibleSplitTab.id)}
+                      onRetry={() => void handleRetry(visibleSplitTab.id)}
+                    />
+                    {isAgentSplitVisible && (
+                      <div
+                        aria-hidden
+                        className="pointer-events-none absolute inset-0"
+                        style={{
+                          borderRadius: '0 0 var(--workbench-canvas-radius) 0',
+                          boxShadow: 'inset 0 0 0 1px color-mix(in srgb, var(--color-blue) 42%, transparent), inset 0 0 24px color-mix(in srgb, var(--color-blue) 18%, transparent)',
+                        }}
+                      />
+                    )}
+                  </div>
+                ) : null}
               </div>
             ) : (
               <BrowserShellLayout
@@ -1037,7 +1138,6 @@ export default function BrowserMode({
               onOpenTarget={handleOpenBrowserTarget}
               onRefresh={() => void refreshAdblockState()}
             />
-            <AgentBrowserSupervisionPanel />
           </div>
 
           {/* 浏览器过渡遮罩 - 动画结束后但浏览器未准备好时显示 */}

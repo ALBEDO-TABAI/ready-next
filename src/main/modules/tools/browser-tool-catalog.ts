@@ -248,12 +248,12 @@ export const BROWSER_TOOLS: BrowserToolDef[] = [
   },
   {
     name: 'browser_visible_collect',
-    description: '可见页面采集器：在当前可见、可到达的页面上分轮提取条目、跨轮去重、逐屏滚动，并按轮保存进度，适合信息流/评论区/长列表。后台任务，返回任务句柄。',
+    description: 'Agent 右侧分屏可见页面采集器：在 Agent 标签页分轮提取条目、跨轮去重、逐屏滚动，并按轮保存进度，适合信息流/评论区/长列表。后台任务，返回任务句柄。用于逐篇保存时，这一步只负责冻结目标清单；只有 discoveryStatus=complete 且拿到 suggestedNextTool/source_task_id 后才继续调用 browser_collect_notes。若返回 partial/paused 或 suggestedContinueTool，先 browser_resume_task 继续发现。',
     params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_visible_collect) as ToolParamSchemaSpec[],
   },
   {
     name: 'browser_collect_notes',
-    description: '后台逐篇采集子 agent：先浏览主页规划出笔记列表，再把列表交给本工具，它在独立后台标签页（不抢占你的当前浏览界面、不绑定本轮对话）用你的登录态逐篇打开笔记、采集图片、按笔记建文件夹下载，按篇保存进度，可在任务卡查看/二级确认中断。返回后台任务句柄。',
+    description: '后台逐篇采集子 agent：优先传 browser_visible_collect 返回的 source_task_id/expected_count 接力完整冻结清单；来源清单不是 complete 时默认拒绝，除非用户明确只采部分并传 allow_partial=true。它在独立后台标签页逐篇打开目标、采集详情和图片，按“序号 - 标题”建目录，写 note.md/manifest.json/assets，并按篇保存进度。数量不一致会拒绝启动。返回后台任务句柄。',
     params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_collect_notes) as ToolParamSchemaSpec[],
   },
   {

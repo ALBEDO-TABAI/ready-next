@@ -21,6 +21,7 @@ class FakeDownloadItem extends EventEmitter {
   constructor(
     private readonly url: string,
     private readonly filename: string,
+    private readonly mimeType = 'image/jpeg',
   ) {
     super()
   }
@@ -34,7 +35,7 @@ class FakeDownloadItem extends EventEmitter {
   }
 
   getMimeType(): string {
-    return 'image/jpeg'
+    return this.mimeType
   }
 
   canResume(): boolean {
@@ -115,6 +116,35 @@ test('downloadUrlToDirectory sets a unique save path inside the target directory
     assert.equal(result.success, true)
     assert.equal(result.savePath, join(dir, 'photo (1).jpg'))
     assert.equal(result.filename, 'photo (1).jpg')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('downloadUrlToDirectory appends an inferred extension to extensionless suggested names', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ready-download-'))
+  try {
+    const service = createDownloadService()
+    const session = new FakeSession()
+    const promise = service.downloadUrlToDirectory(session as never, {
+      url: 'https://sns-webpic-qc.xhscdn.com/notes_pre_post/abc!nc_n_webp_prv_1',
+      targetDir: dir,
+      suggestedName: 'image-1',
+    })
+
+    const item = new FakeDownloadItem(
+      'https://sns-webpic-qc.xhscdn.com/notes_pre_post/abc!nc_n_webp_prv_1',
+      'abc!nc_n_webp_prv_1',
+      'image/webp',
+    )
+    session.emit('will-download', {}, item)
+    assert.equal(item.getSavePath(), join(dir, 'image-1.webp'))
+    item.finish('completed')
+
+    const result = await promise
+    assert.equal(result.success, true)
+    assert.equal(result.savePath, join(dir, 'image-1.webp'))
+    assert.equal(result.filename, 'image-1.webp')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

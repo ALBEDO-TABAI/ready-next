@@ -133,4 +133,25 @@ export class BrowserTaskPersistenceService {
         updatedAt: record.updated_at,
       }))
   }
+
+  listTasks(): BrowserCapabilityTaskHandle[] {
+    return this.repository
+      .listTasks()
+      .map((record) => ({
+        taskId: record.id,
+        kind: record.kind as BrowserCapabilityTaskKind,
+        status: record.status as BrowserCapabilityTaskStatus,
+        progress: {
+          total: Number(record.progress_total || 0),
+          completed: Number(record.progress_completed || 0),
+          failed: Number(record.progress_failed || 0),
+          currentLabel: record.current_label,
+        },
+        checkpoint: parseJSON<BrowserTaskCheckpoint | null>(record.checkpoint_json, null),
+        result: parseJSON<unknown>(record.result_json, null),
+        error: record.error,
+        createdAt: record.created_at,
+        updatedAt: record.updated_at,
+      }))
+  }
 }

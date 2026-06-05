@@ -62,6 +62,27 @@ function filenameFromUrl(url: string): string {
   }
 }
 
+function extensionFromMimeType(mimeType: string | null | undefined): string {
+  const normalized = (String(mimeType || '').toLowerCase().split(';')[0] || '').trim()
+  const table: Record<string, string> = {
+    'image/jpeg': '.jpg',
+    'image/jpg': '.jpg',
+    'image/png': '.png',
+    'image/webp': '.webp',
+    'image/gif': '.gif',
+    'image/avif': '.avif',
+    'image/svg+xml': '.svg',
+  }
+  return table[normalized] || ''
+}
+
+function withInferredExtension(requestedName: string, fallbackName: string, mimeType: string | null | undefined): string {
+  if (extname(requestedName)) return requestedName
+  const fallbackExt = extname(fallbackName)
+  const inferredExt = fallbackExt || extensionFromMimeType(mimeType)
+  return inferredExt ? `${requestedName}${inferredExt}` : requestedName
+}
+
 function uniquePathForDownload(targetDir: string, requestedName: string): string {
   const safeName = sanitizeFilename(basename(requestedName), 'download')
   const ext = extname(safeName)
@@ -177,11 +198,16 @@ export class BrowserDownloadService {
       const pendingTarget = this.takePendingTargetedDownload(item.getURL(), item.getURLChain())
       let savePath = item.getSavePath() || ''
       let filename = item.getFilename()
+      const mimeType = typeof item.getMimeType === 'function' ? item.getMimeType() : null
       if (pendingTarget) {
         try {
           savePath = uniquePathForDownload(
             pendingTarget.targetDir,
-            pendingTarget.suggestedName || filename || filenameFromUrl(pendingTarget.requestedUrl),
+            withInferredExtension(
+              pendingTarget.suggestedName || filename || filenameFromUrl(pendingTarget.requestedUrl),
+              filename || filenameFromUrl(pendingTarget.requestedUrl),
+              mimeType,
+            ),
           )
           item.setSavePath(savePath)
           filename = basename(savePath)
@@ -193,7 +219,6 @@ export class BrowserDownloadService {
       }
       const totalBytes = item.getTotalBytes()
       const startedAt = Math.floor(Date.now() / 1000)
-      const mimeType = typeof item.getMimeType === 'function' ? item.getMimeType() : null
       const canResume = typeof item.canResume === 'function' ? item.canResume() : false
 
       try {

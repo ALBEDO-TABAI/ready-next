@@ -579,7 +579,7 @@ function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime): Brow
   // a card the user already cleared (deleteByScope) so a late timer can't
   // resurrect it (Codex result-review — no zombie projections).
   const write = (
-    input: { taskId: string; scopeId: string; title: string; summary: string },
+    input: { taskId: string; scopeId: string; title: string; summary: string; total?: number; completed?: number; failed?: number },
     status: TaskProjectionRecord['status'],
     waitingFor: 'background' | 'none',
     createIfMissing: boolean,
@@ -599,9 +599,19 @@ function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime): Brow
       taskTitle: input.title,
       taskSummary: input.summary,
       status,
-      interactionState: 'running',
+      interactionState: waitingFor === 'background' ? 'running' : 'suspended',
       waitingFor,
       steps: [],
+      progress: {
+        stage: status,
+        total: input.total ?? 0,
+        completed: input.completed ?? 0,
+        coverage: input.total ? (input.completed ?? 0) / input.total : null,
+        fingerprint: null,
+        updatedAt: now,
+        lastError: status === 'failed' ? input.summary : null,
+        detail: `失败 ${input.failed ?? 0}`,
+      },
       createdAt: existing?.createdAt || now,
       updatedAt: now,
     }
@@ -613,6 +623,10 @@ function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime): Brow
       if (!input.scopeId) return
       if (input.state === 'running') {
         write(input, 'running', 'background', true)
+        return
+      }
+      if (input.state === 'paused') {
+        write(input, 'recoverable_paused', 'none', true)
         return
       }
       // Terminal: a 'completed' status is short-circuited out of the chat's

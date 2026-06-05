@@ -130,6 +130,27 @@ async function waitForStatus(persistence: FakePersistence, taskId: string, statu
   throw new Error(`task ${taskId} did not reach ${statuses.join('/')} in time`)
 }
 
+async function waitForResult<T>(persistence: FakePersistence, taskId: string, predicate: (result: T | null) => boolean, timeoutMs = 2_000) {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    const task = persistence.getTask(taskId)
+    const result = (task?.result ?? null) as T | null
+    if (predicate(result)) return task!
+    await new Promise((r) => setTimeout(r, 5))
+  }
+  throw new Error(`task ${taskId} did not publish the expected result in time`)
+}
+
+async function waitForProgress(persistence: FakePersistence, taskId: string, predicate: (task: BrowserCapabilityTaskHandle | null) => boolean, timeoutMs = 2_000) {
+  const start = Date.now()
+  while (Date.now() - start < timeoutMs) {
+    const task = persistence.getTask(taskId)
+    if (predicate(task)) return task!
+    await new Promise((r) => setTimeout(r, 5))
+  }
+  throw new Error(`task ${taskId} did not reach expected progress in time`)
+}
+
 describe('visible_collect task runner', () => {
   it('collects across rounds, dedupes, and writes a checkpoint every round', async () => {
     const persistence = new FakePersistence()
@@ -174,6 +195,86 @@ describe('visible_collect task runner', () => {
     assert.equal(result.items.length, 1)
   })
 
+  it('navigates the supplied agent tab for url-based visible collect', async () => {
+    const persistence = new FakePersistence()
+    const navigations: Array<{ tabId: string; url: string }> = []
+    let openTargetCalls = 0
+    const capability = {
+      openTarget: async () => { openTargetCalls += 1; return { success: true, tabId: 'user-tab' } },
+      navigateTargetTab: async (tabId: string, url: string) => {
+        navigations.push({ tabId, url })
+        return { success: true, tabId, reused: true, url }
+      },
+      extractStructured: async () => ({
+        template: 'article_list' as const,
+        items: [{ sourceUrl: 'u', title: 'One', link: 'https://example.com/1' }],
+        sourceUrl: 'u',
+      }),
+      scrollViewportOnce: async () => ({ scrollY: 0, atBottom: true }),
+    } as unknown as BrowserCapabilityService
+    const runner = new BrowserContentTaskRunner(capability, persistence as never, new BrowserWriteLeaseService())
+
+    const handle = await runner.startTask({
+      kind: 'visible_collect',
+      payload: {
+        url: 'https://www.xiaohongshu.com/user/profile/abc',
+        tabId: 'agent-tab-1',
+        surface: 'agent-view',
+        template: 'article_list',
+      },
+    })
+    await waitForStatus(persistence, handle.taskId, ['completed'])
+
+    assert.deepEqual(navigations, [{ tabId: 'agent-tab-1', url: 'https://www.xiaohongshu.com/user/profile/abc' }])
+    assert.equal(openTargetCalls, 0, 'agent-tab visible collect must not open/reuse the foreground tab')
+  })
+
+  it('adds xiaohongshu note candidates and a collect_notes suggestion to completed results', async () => {
+    const persistence = new FakePersistence()
+    const capability = {
+      navigateTargetTab: async (tabId: string, url: string) => ({ success: true, tabId, reused: true, url }),
+      extractStructured: async () => ({
+        template: 'article_list' as const,
+        items: [
+          { sourceUrl: 'https://www.xiaohongshu.com/user/profile/abc', title: '首页', link: 'https://www.xiaohongshu.com/explore?channel_id=homefeed_recommend' },
+          { sourceUrl: 'https://www.xiaohongshu.com/user/profile/abc', title: '门主', link: 'https://www.xiaohongshu.com/explore/6a0987c5000000003601f3f5' },
+          { sourceUrl: 'https://www.xiaohongshu.com/user/profile/abc', title: '同一篇重复', link: 'https://www.xiaohongshu.com/explore/6a0987c5000000003601f3f5' },
+          { sourceUrl: 'https://www.xiaohongshu.com/user/profile/abc', title: '外站', link: 'https://example.com/not-note' },
+        ],
+        sourceUrl: 'https://www.xiaohongshu.com/user/profile/abc',
+      }),
+      scrollViewportOnce: async () => ({ scrollY: 0, atBottom: true }),
+    } as unknown as BrowserCapabilityService
+    const runner = new BrowserContentTaskRunner(capability, persistence as never, new BrowserWriteLeaseService())
+
+    const handle = await runner.startTask({
+      kind: 'visible_collect',
+      payload: {
+        url: 'https://www.xiaohongshu.com/user/profile/abc',
+        tabId: 'agent-tab-1',
+        surface: 'agent-view',
+        template: 'article_list',
+        outputRootDir: '/tmp/ao-i',
+      },
+    })
+    const done = await waitForStatus(persistence, handle.taskId, ['completed'])
+    const result = done.result as { discoveryStatus?: string; noteCandidates: Array<{ url: string; openUrl: string; title?: string; sourceId?: string }>; suggestedNextTool?: { name: string; args: { output_root_dir?: string; source_task_id?: string; expected_count?: number } } }
+
+    assert.equal(result.discoveryStatus, 'complete')
+    assert.deepEqual(result.noteCandidates.map((target) => ({ url: target.url, openUrl: target.openUrl, title: target.title, sourceId: target.sourceId })), [
+      {
+        url: 'https://www.xiaohongshu.com/explore/6a0987c5000000003601f3f5',
+        openUrl: 'https://www.xiaohongshu.com/explore/6a0987c5000000003601f3f5',
+        title: '门主',
+        sourceId: '6a0987c5000000003601f3f5',
+      },
+    ])
+    assert.equal(result.suggestedNextTool?.name, 'browser_collect_notes')
+    assert.equal(result.suggestedNextTool?.args.output_root_dir, '/tmp/ao-i')
+    assert.equal(result.suggestedNextTool?.args.source_task_id, handle.taskId)
+    assert.equal(result.suggestedNextTool?.args.expected_count, 1)
+  })
+
   it('cancellation leaves the task queryable with cancelled status', async () => {
     const persistence = new FakePersistence()
     // A feed that never runs dry, so the loop relies on cancellation to stop.
@@ -192,12 +293,115 @@ describe('visible_collect task runner', () => {
     const runner = new BrowserContentTaskRunner(endless, persistence as never, new BrowserWriteLeaseService())
     const handle = await runner.startTask({
       kind: 'visible_collect',
-      payload: { template: 'card_list', tabId: 'tab-1', maxRounds: 100000, maxDurationMs: 60000 },
+      payload: { template: 'card_list', tabId: 'tab-1', maxItems: 100000, maxRounds: 100000, maxDurationMs: 60000 },
     })
-    await new Promise((r) => setTimeout(r, 10))
+    await waitForProgress(persistence, handle.taskId, (task) => (task?.progress.total || 0) > 0)
     await runner.cancelTask(handle.taskId)
     const task = await waitForStatus(persistence, handle.taskId, ['cancelled'])
     assert.equal(task.status, 'cancelled')
+  })
+
+  it('cancellation preserves partial items and frozen collect candidates for handoff', async () => {
+    const persistence = new FakePersistence()
+    let seq = 0
+    let releaseScroll: (() => void) | null = null
+    const scrollGate = new Promise<void>((resolve) => { releaseScroll = resolve })
+    const endless = {
+      openTarget: async () => ({ success: true, tabId: 'tab-1' }),
+      extractStructured: async () => {
+        await new Promise((r) => setTimeout(r, 0))
+        seq += 1
+        return {
+          template: 'card_list' as const,
+          items: [
+            { sourceUrl: 'https://example.com/feed', title: `Post ${seq}`, link: `https://example.com/post/${seq}` },
+          ],
+          sourceUrl: 'https://example.com/feed',
+        }
+      },
+      scrollViewportOnce: async () => {
+        await scrollGate
+        return { scrollY: 0, atBottom: false }
+      },
+    } as unknown as BrowserCapabilityService
+    const runner = new BrowserContentTaskRunner(endless, persistence as never, new BrowserWriteLeaseService())
+    const handle = await runner.startTask({
+      kind: 'visible_collect',
+      payload: { template: 'card_list', tabId: 'tab-1', maxItems: 100000, maxRounds: 100000, maxDurationMs: 60000 },
+    })
+    await waitForProgress(persistence, handle.taskId, (task) => (task?.progress.total || 0) > 0)
+    await runner.cancelTask(handle.taskId)
+    releaseScroll?.()
+    const task = await waitForResult<{ stopReason?: string; noteCandidates?: unknown[] }>(
+      persistence,
+      handle.taskId,
+      (result) => result?.stopReason === 'cancelled' && Array.isArray(result.noteCandidates) && result.noteCandidates.length > 0,
+    )
+
+    assert.equal(task.status, 'cancelled')
+    const result = task.result as {
+      discoveryStatus?: string
+      noteCandidates: Array<{ url: string }>
+      suggestedNextTool?: { args?: { source_task_id?: string } }
+      suggestedContinueTool?: { name?: string; args?: { task_id?: string } }
+    }
+    assert.equal(result.discoveryStatus, 'paused')
+    assert.ok(result.noteCandidates.length > 0)
+    assert.equal(result.suggestedNextTool, undefined)
+    assert.equal(result.suggestedContinueTool?.name, 'browser_resume_task')
+    assert.equal(result.suggestedContinueTool?.args?.task_id, handle.taskId)
+  })
+
+  it('treats the high-control 60 item ceiling as a partial batch, not a full completion', async () => {
+    const persistence = new FakePersistence()
+    let next = 0
+    const capability = {
+      openTarget: async () => ({ success: true, tabId: 'tab-1' }),
+      extractStructured: async () => ({
+        template: 'card_list' as const,
+        items: Array.from({ length: 60 }, () => {
+          next += 1
+          return { sourceUrl: 'https://example.com/feed', title: `Post ${next}`, link: `https://example.com/post/${next}` }
+        }),
+        sourceUrl: 'https://example.com/feed',
+      }),
+      scrollViewportOnce: async () => ({ scrollY: 0, atBottom: false }),
+    } as unknown as BrowserCapabilityService
+    const runner = new BrowserContentTaskRunner(capability, persistence as never, new BrowserWriteLeaseService())
+
+    const handle = await runner.startTask({
+      kind: 'visible_collect',
+      payload: { template: 'card_list', tabId: 'tab-1', highControl: true, maxItems: 120 },
+    })
+    const done = await waitForStatus(persistence, handle.taskId, ['paused'])
+    const result = done.result as {
+      discoveryStatus?: string
+      stopReason?: string
+      frozenCount?: number
+      hasMoreLikely?: boolean
+      suggestedNextTool?: unknown
+      suggestedContinueTool?: { name?: string; args?: { task_id?: string } }
+    }
+
+    assert.equal(result.stopReason, 'max_items')
+    assert.equal(result.discoveryStatus, 'partial')
+    assert.equal(result.frozenCount, 60)
+    assert.equal(result.hasMoreLikely, true)
+    assert.equal(result.suggestedNextTool, undefined)
+    assert.equal(result.suggestedContinueTool?.name, 'browser_resume_task')
+    assert.equal(result.suggestedContinueTool?.args?.task_id, handle.taskId)
+
+    await runner.resumeTask(handle.taskId)
+    const resumed = await waitForResult<{ frozenCount?: number; stopReason?: string; discoveryStatus?: string }>(
+      persistence,
+      handle.taskId,
+      (nextResult) => nextResult?.frozenCount === 120 && nextResult.stopReason === 'max_items',
+      3_000,
+    )
+    const resumedResult = resumed.result as { discoveryStatus?: string; frozenCount?: number }
+    assert.equal(resumed.status, 'paused')
+    assert.equal(resumedResult.discoveryStatus, 'partial')
+    assert.equal(resumedResult.frozenCount, 120)
   })
 
   it('resumes from the last round checkpoint instead of restarting from scratch', async () => {
@@ -264,7 +468,7 @@ describe('visible_collect task runner', () => {
       // Inherit the (now taken-over) lease so the loop must detect the takeover.
       payload: { template: 'card_list', tabId: 'tab-1', maxRounds: 100000, surface: 'user-view', leaseId: held.leaseId },
     })
-    const done = await waitForStatus(persistence, handle.taskId, ['completed'])
+    const done = await waitForStatus(persistence, handle.taskId, ['cancelled'])
     const result = done.result as { stopReason: string; items: unknown[] }
     assert.equal(result.stopReason, 'lease_lost', 'must stop because the lease was lost to the user')
     assert.equal(extractCalls, 0, 'must not perform any page write/extract after losing the lease')
@@ -291,7 +495,7 @@ describe('visible_collect task runner', () => {
       // url path + inherited lease that is already taken over.
       payload: { url: 'https://example.com/feed', template: 'card_list', surface: 'user-view', leaseId: held.leaseId },
     })
-    const done = await waitForStatus(persistence, handle.taskId, ['completed'])
+    const done = await waitForStatus(persistence, handle.taskId, ['cancelled'])
     const result = done.result as { stopReason: string }
     assert.equal(result.stopReason, 'lease_lost')
     assert.equal(openTargetCalls, 0, 'must not open/navigate the page after the lease was lost')

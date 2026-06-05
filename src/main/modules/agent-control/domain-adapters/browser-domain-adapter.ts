@@ -155,7 +155,7 @@ export class BrowserDomainAdapter implements DomainAdapter {
           {
             path: 'docs/browser-collect-rules.md',
             title: '浏览器逐篇采集流程',
-            summary: '收集笔记清单后必须调用 browser_collect_notes 启动后台逐篇采集',
+            summary: '收集清单后优先用 browser_visible_collect 的 source_task_id 调用 browser_collect_notes；保存目录先随 browser_visible_collect.output_root_dir 传递',
           },
         ],
       },

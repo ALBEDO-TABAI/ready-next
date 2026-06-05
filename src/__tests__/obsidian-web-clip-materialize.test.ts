@@ -200,6 +200,34 @@ describe('materializeToVault · move semantics + image bundling', () => {
     assert.match(md, /!\[Bad\]\(https:\/\/cdn\.example\.com\/bad\.jpg\)/, 'failed download keeps remote URL')
   })
 
+  it('treats a text/html response for a jpg URL as a failed image download', async () => {
+    const initialMd = [
+      '# Weibo',
+      '',
+      '![Main](https://wx1.sinaimg.cn/large/example.jpg)',
+    ].join('\n')
+    const { deps, writtenFiles } = makeMemoryDeps({
+      initialMd,
+      imageBytesByUrl: {
+        'https://wx1.sinaimg.cn/large/example.jpg': {
+          bytes: new TextEncoder().encode('<html>blocked</html>'),
+          contentType: 'text/html; charset=utf-8',
+        },
+      },
+    })
+
+    const result = await materializeToVault(
+      { sandboxMdPath: '/sandbox/note.md', targetDir: '/Users/me/Notes' },
+      deps,
+    )
+
+    assert.equal(result.imageDownloadFailures, 1)
+    assert.equal(result.assetPaths.length, 0)
+    assert.match(result.failureMessages[0] || '', /non-image response/)
+    const md = String(writtenFiles.get('/Users/me/Notes/note.md'))
+    assert.match(md, /!\[Main\]\(https:\/\/wx1\.sinaimg\.cn\/large\/example\.jpg\)/)
+  })
+
   it('dedupes identical URLs so each image is downloaded only once', async () => {
     const initialMd = [
       '![One](https://cdn.example.com/same.jpg)',

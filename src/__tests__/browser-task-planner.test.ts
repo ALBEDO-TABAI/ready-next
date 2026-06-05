@@ -395,4 +395,39 @@ describe('BrowserTaskPlanner', () => {
     assert.equal(decision.reason, 'generic_browser_workflow')
     assert.equal(decision.plan?.targetSearchQuery, 'Pinterest official website')
   })
+
+  it('routes platform note collection with image saving to browser collection', () => {
+    const planner = new BrowserTaskPlanner({
+      getSessionAttachmentHints: () => ({ count: 0 }),
+      getIncomingAttachmentHints: () => ({ count: 0 }),
+      getActiveTab: () => ({
+        id: 'tab-xhs-profile',
+        url: 'https://www.xiaohongshu.com/user/profile/abc123',
+        title: 'Aoi葵 - 小红书',
+        domain: 'xiaohongshu.com',
+        active: true,
+        owner: 'manual',
+        required: false,
+        activity: 'idle',
+        lastAuditedAt: null,
+        loading: false,
+        canGoBack: false,
+        canGoForward: false,
+        error: null,
+        favicon: null,
+      }),
+      getTabContext: async () => null,
+    })
+
+    const decision = planner.decideTask({
+      userText: "采集这个博主 @Aoi葵 - 小红书 的笔记，每篇建文件夹保存图片到 @[ao'i]",
+      sessionMessages: [],
+      sessionId: 'scope-xhs-collect',
+    })
+
+    assert.equal(decision.mode, 'browser_workflow')
+    assert.equal(decision.reason, 'browser_collection')
+    assert.equal(decision.plan?.taskGoal, '浏览器逐篇采集')
+    assert.equal(decision.plan?.expectedOutcome, '已启动浏览器采集任务，并返回可查询、可取消的浏览器任务句柄。')
+  })
 })

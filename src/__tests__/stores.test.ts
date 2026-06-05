@@ -2039,6 +2039,27 @@ describe('useWorkspace Store', () => {
         assert.deepStrictEqual(state.dirChildren.get('/workspace')?.map((item) => item.path), ['/workspace/keep.md'])
     })
 
+    it('should clear cached children when an expanded directory no longer loads', async () => {
+        ;(globalThis as any).window.electronAPI = {
+            document: {
+                listFiles: async () => ({ success: false, error: 'missing' }),
+            },
+        }
+
+        useWorkspace.setState({
+            dirChildren: new Map([
+                ['/workspace/ghost', [
+                    { name: 'stale.md', path: '/workspace/ghost/stale.md', isDirectory: false, size: 100, modified: new Date() },
+                ]],
+            ]),
+        })
+
+        const result = await useWorkspace.getState().loadDirChildren('/workspace/ghost')
+
+        assert.deepStrictEqual(result, [])
+        assert.deepStrictEqual(useWorkspace.getState().dirChildren.get('/workspace/ghost'), [])
+    })
+
     it('should set currentPath and trigger mock file loading', () => {
         useWorkspace.getState().setCurrentPath('/test/dir')
         const state = useWorkspace.getState()

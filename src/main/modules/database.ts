@@ -2157,10 +2157,12 @@ export class DatabaseManager {
     const setClauses: string[] = []
     const values: unknown[] = []
     for (const [key, value] of Object.entries(updates)) {
+      if (value === undefined) continue
       setClauses.push(`${key} = ?`)
       values.push(value ?? null)
     }
-    if (!('updated_at' in updates)) {
+    if (setClauses.length === 0) return
+    if (updates.updated_at === undefined) {
       setClauses.push('updated_at = ?')
       values.push(new Date().toISOString())
     }

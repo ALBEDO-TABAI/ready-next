@@ -13,7 +13,14 @@ import { z } from 'zod'
 
 export const CollectionNoteSchema = z.object({
   url: z.string().describe('笔记详情页 URL'),
+  canonicalUrl: z.string().optional().describe('稳定来源 URL，用于去重和清单追踪'),
+  openUrl: z.string().optional().describe('实际打开 URL，优先用于详情页访问'),
   title: z.string().optional().describe('笔记标题（用于建文件夹/进度展示）'),
+  sourceId: z.string().optional().describe('来源稳定标识（用于文件夹防重名/恢复）'),
+  titleConfidence: z.enum(['none', 'low', 'medium', 'high']).optional(),
+  order: z.number().int().positive().optional(),
+  folderName: z.string().optional(),
+  duplicateTitle: z.boolean().optional(),
 })
 
 export const CollectionStopConditionsSchema = z.object({
@@ -27,6 +34,8 @@ export const CollectionPlanSchema = z.object({
   notes: z.array(CollectionNoteSchema).min(1).describe('要逐篇采集的笔记列表'),
   stopConditions: CollectionStopConditionsSchema.optional(),
   outputRootDir: z.string().describe('采集输出根目录（每篇一个子文件夹）'),
+  expectedCount: z.number().int().positive().optional().describe('上游冻结清单的预期数量'),
+  sourceTaskId: z.string().optional().describe('生成本清单的可见采集任务 ID'),
 })
 
 export type CollectionNote = z.infer<typeof CollectionNoteSchema>
@@ -51,12 +60,29 @@ export interface CollectionLoopState {
   cursor: number
   collected: string[]
   failed: Array<{ url: string; reason: string }>
+  outputs: CollectionNoteOutput[]
   consecutiveFailures: number
   startedAt: number
 }
 
+export interface CollectionNoteOutput {
+  url: string
+  canonicalUrl?: string
+  openUrl?: string
+  title?: string
+  sourceId?: string
+  order?: number
+  success: boolean
+  savedDir: string
+  imageCount: number
+  notePath?: string
+  manifestPath?: string
+  files?: string[]
+  reason?: string
+}
+
 export function createCollectionLoopState(now: number): CollectionLoopState {
-  return { cursor: 0, collected: [], failed: [], consecutiveFailures: 0, startedAt: now }
+  return { cursor: 0, collected: [], failed: [], outputs: [], consecutiveFailures: 0, startedAt: now }
 }
 
 export type CollectionStopReason =
@@ -64,6 +90,7 @@ export type CollectionStopReason =
   | 'max_notes'
   | 'max_duration'
   | 'too_many_failures'
+  | 'needs_verification'
   // Download-volume budget (high-control safety ceiling).
   | 'max_images'
   // External stops surfaced by the runner via the engine's shouldStop probe.
@@ -99,12 +126,13 @@ export function planNextNote(
 export function recordNoteResult(
   state: CollectionLoopState,
   note: CollectionNote,
-  outcome: { success: boolean; reason?: string },
+  outcome: { success: boolean; reason?: string; output?: CollectionNoteOutput },
 ): CollectionLoopState {
   const next: CollectionLoopState = {
     cursor: state.cursor + 1,
     collected: state.collected.slice(),
     failed: state.failed.slice(),
+    outputs: Array.isArray(state.outputs) ? state.outputs.slice() : [],
     consecutiveFailures: outcome.success ? 0 : state.consecutiveFailures + 1,
     startedAt: state.startedAt,
   }
@@ -113,5 +141,14 @@ export function recordNoteResult(
   } else {
     next.failed.push({ url: note.url, reason: outcome.reason ?? 'unknown' })
   }
+  next.outputs.push(outcome.output ?? {
+    url: note.url,
+    title: note.title,
+    sourceId: note.sourceId,
+    success: outcome.success,
+    savedDir: '',
+    imageCount: 0,
+    reason: outcome.reason,
+  })
   return next
 }

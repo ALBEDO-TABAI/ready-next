@@ -216,6 +216,7 @@ export async function runClipCurrentTab(
           {
             sandboxMdPath: result.savedPath,
             targetDir: args.target_dir,
+            sourcePageUrl: decoded.result.url,
           },
           buildMaterialize(),
         )

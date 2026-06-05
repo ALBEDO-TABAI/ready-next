@@ -312,6 +312,13 @@ export class BrowserCapabilityService {
       : { success: false, error: created.error || reusable.error }
   }
 
+  async navigateTargetTab(tabId: string, url: string): Promise<BrowserOpenTargetResult> {
+    const result = await this.host.navigate(tabId, url)
+    return result.success
+      ? { success: true, tabId, reused: true, url }
+      : { success: false, tabId, reused: true, url, error: result.error }
+  }
+
   async waitForCondition(tabId: string | null, options: BrowserWaitForConditionOptions): Promise<{ matched: boolean; elapsedMs: number; value?: unknown }> {
     const startedAt = Date.now()
     const timeoutMs = Math.max(500, Math.min(60_000, Number(options.timeoutMs || 8_000)))

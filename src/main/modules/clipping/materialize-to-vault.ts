@@ -52,7 +52,7 @@ export interface MaterializeDeps {
   /** HTTP fetch for an image. Returns bytes + content-type or null on failure. */
   fetchImage: (
     url: string,
-    options: { signal?: AbortSignal; maxBytes: number; timeoutMs: number },
+    options: { signal?: AbortSignal; maxBytes: number; timeoutMs: number; sourcePageUrl?: string | null },
   ) => Promise<{ bytes: Uint8Array; contentType: string } | null>
   /** Path join — injected so tests can use posix path on Windows. */
   joinPath: (...segments: string[]) => string
@@ -77,6 +77,8 @@ export interface MaterializeInput {
   parallelism?: number
   /** Optional AbortSignal for the whole materialization. */
   abortSignal?: AbortSignal
+  /** Source page for cookie/referrer-sensitive image hosts. */
+  sourcePageUrl?: string | null
 }
 
 export interface MaterializeResult {
@@ -177,9 +179,14 @@ export async function materializeToVault(
               signal: input.abortSignal,
               maxBytes: max,
               timeoutMs,
+              sourcePageUrl: input.sourcePageUrl,
             })
             if (!fetched || fetched.bytes.byteLength === 0) {
               failureMessages.push(`empty body: ${url}`)
+              return [url, null] as const
+            }
+            if (!isImageResponse(fetched.contentType, fetched.bytes)) {
+              failureMessages.push(`non-image response (${fetched.contentType || 'unknown'}): ${url}`)
               return [url, null] as const
             }
             const ext = inferExtension(url, fetched.contentType)
@@ -302,6 +309,40 @@ const MIME_TO_EXT: Record<string, string> = {
 }
 
 const ALLOWED_EXTS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif', '.svg', '.bmp', '.tiff', '.ico'])
+
+function looksLikeImageBytes(bytes: Uint8Array): boolean {
+  if (bytes.byteLength < 4) return false
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return true
+  if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return true
+  if (bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) return true
+  if (
+    bytes.byteLength >= 12
+    && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46
+    && bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50
+  ) {
+    return true
+  }
+  if (
+    bytes.byteLength >= 12
+    && bytes[4] === 0x66 && bytes[5] === 0x74 && bytes[6] === 0x79 && bytes[7] === 0x70
+    && bytes[8] === 0x61 && bytes[9] === 0x76 && bytes[10] === 0x69 && (bytes[11] === 0x66 || bytes[11] === 0x73)
+  ) {
+    return true
+  }
+  if (bytes[0] === 0x42 && bytes[1] === 0x4d) return true
+  const prefix = new TextDecoder().decode(bytes.slice(0, Math.min(bytes.byteLength, 128))).trimStart().toLowerCase()
+  return prefix.startsWith('<svg')
+}
+
+function isImageResponse(contentType: string, bytes: Uint8Array): boolean {
+  const ct = (contentType || '').toLowerCase().split(';')[0].trim()
+  if (!ct) return looksLikeImageBytes(bytes)
+  if (ct.startsWith('image/')) return true
+  if (ct === 'application/octet-stream' || ct === 'binary/octet-stream') {
+    return looksLikeImageBytes(bytes)
+  }
+  return false
+}
 
 export function inferExtension(url: string, contentType: string): string {
   // 1. MIME map first — content-type is authoritative when present.

@@ -16,9 +16,10 @@ import {
   createCollectionLoopState,
   type CollectionPlan,
   type CollectionLoopState,
+  type CollectionNoteOutput,
   type CollectionStopReason,
 } from './agent-collection-plan'
-import { collectNote, type NoteCollectFacade } from './browser-collector-actions'
+import { collectNote, type NoteCollectFacade, type NoteCollectFileOps } from './browser-collector-actions'
 
 export interface BrowserCollectionProgress {
   total: number
@@ -41,6 +42,7 @@ export interface BrowserCollectionDeps {
   interNoteDelayMs?: number
   /** Injected sleep so pacing is unit-testable without real timers. */
   sleep?: (ms: number) => Promise<void>
+  fileOps?: NoteCollectFileOps
   /**
    * Download-volume budget (plan §4.4): stop once this many images have been
    * saved across all notes. A practical proxy for a byte budget — the download
@@ -56,12 +58,18 @@ function defaultSleep(ms: number): Promise<void> {
 export interface BrowserCollectionResult {
   collected: string[]
   failed: Array<{ url: string; reason: string }>
+  notes: CollectionNoteOutput[]
   rounds: number
   stopReason: CollectionStopReason
+  state: CollectionLoopState
 }
 
 function progressOf(plan: CollectionPlan, state: CollectionLoopState, currentTitle: string | null, stopReason: CollectionStopReason): BrowserCollectionProgress {
   return { total: plan.notes.length, completed: state.collected.length, failed: state.failed.length, currentTitle, stopReason }
+}
+
+function normalizedTitle(value: string | undefined): string {
+  return String(value || '').replace(/\s+/g, ' ').trim().toLowerCase()
 }
 
 /**
@@ -79,21 +87,26 @@ export async function runBrowserCollection(
   const sleep = deps.sleep ?? defaultSleep
   const interNoteDelayMs = deps.interNoteDelayMs && deps.interNoteDelayMs > 0 ? deps.interNoteDelayMs : 0
   const maxTotalImages = deps.maxTotalImages && deps.maxTotalImages > 0 ? deps.maxTotalImages : 0
+  const titleCounts = new Map<string, number>()
+  for (const note of plan.notes) {
+    const title = normalizedTitle(note.title)
+    if (title) titleCounts.set(title, (titleCounts.get(title) || 0) + 1)
+  }
 
   while (true) {
     const external = deps.shouldStop?.() ?? null
     if (external) {
-      return { collected: state.collected, failed: state.failed, rounds, stopReason: external }
+      return { collected: state.collected, failed: state.failed, notes: state.outputs || [], rounds, stopReason: external, state }
     }
     if (maxTotalImages > 0 && totalImages >= maxTotalImages) {
       deps.onProgress?.(progressOf(plan, state, null, 'max_images'))
-      return { collected: state.collected, failed: state.failed, rounds, stopReason: 'max_images' }
+      return { collected: state.collected, failed: state.failed, notes: state.outputs || [], rounds, stopReason: 'max_images', state }
     }
     const step = planNextNote(plan, state, deps.now())
     if (step.stop || !step.note) {
       const stopReason = step.stop ?? 'completed'
       deps.onProgress?.(progressOf(plan, state, null, stopReason))
-      return { collected: state.collected, failed: state.failed, rounds, stopReason }
+      return { collected: state.collected, failed: state.failed, notes: state.outputs || [], rounds, stopReason, state }
     }
 
     const note = step.note
@@ -103,19 +116,57 @@ export async function runBrowserCollection(
       await sleep(interNoteDelayMs)
       const afterSleep = deps.shouldStop?.() ?? null
       if (afterSleep) {
-        return { collected: state.collected, failed: state.failed, rounds, stopReason: afterSleep }
+        return { collected: state.collected, failed: state.failed, notes: state.outputs || [], rounds, stopReason: afterSleep, state }
       }
     }
     rounds += 1
     deps.onProgress?.(progressOf(plan, state, note.title ?? note.url, null))
 
+    const canonicalUrl = note.canonicalUrl || note.url
+    const openUrl = note.openUrl || note.url
+    const noteTitle = normalizedTitle(note.title)
     const result = await collectNote(
       deps.facade,
-      { noteUrl: note.url, title: note.title, outputDir: plan.outputRootDir },
+      {
+        noteUrl: openUrl,
+        canonicalUrl,
+        openUrl,
+        title: note.title,
+        titleConfidence: note.titleConfidence,
+        sourceId: note.sourceId,
+        order: note.order ?? step.index + 1,
+        folderName: note.folderName,
+        duplicateTitle: note.duplicateTitle ?? (noteTitle ? (titleCounts.get(noteTitle) || 0) > 1 : false),
+        outputDir: plan.outputRootDir,
+      },
       deps.pathJoin,
+      deps.fileOps,
     )
+    if (result.reason === 'needs_verification') {
+      await deps.onCheckpoint?.(state, progressOf(plan, state, note.title ?? note.url, 'needs_verification'))
+      deps.onProgress?.(progressOf(plan, state, null, 'needs_verification'))
+      return { collected: state.collected, failed: state.failed, notes: state.outputs || [], rounds, stopReason: 'needs_verification', state }
+    }
     totalImages += result.imageCount
-    state = recordNoteResult(state, note, { success: result.success, reason: result.reason })
+    state = recordNoteResult(state, note, {
+      success: result.success,
+      reason: result.reason,
+      output: {
+        url: result.canonicalUrl || canonicalUrl,
+        canonicalUrl: result.canonicalUrl || canonicalUrl,
+        openUrl: result.openUrl || openUrl,
+        title: result.title,
+        sourceId: result.sourceId,
+        order: result.order,
+        success: result.success,
+        savedDir: result.savedDir,
+        imageCount: result.imageCount,
+        notePath: result.notePath,
+        manifestPath: result.manifestPath,
+        files: result.files,
+        reason: result.reason,
+      },
+    })
     await deps.onCheckpoint?.(state, progressOf(plan, state, note.title ?? note.url, null))
   }
 }

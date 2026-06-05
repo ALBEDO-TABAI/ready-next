@@ -27,12 +27,24 @@ export function buildRealMaterializeDeps(): MaterializeDeps {
       const linkAbort = () => controller.abort()
       if (options.signal) options.signal.addEventListener('abort', linkAbort, { once: true })
       try {
+        const headers: Record<string, string> = {
+          'user-agent': IMAGE_USER_AGENT,
+          accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
+        }
+        const referrer = String(options.sourcePageUrl || '').trim()
+        if (referrer) {
+          try {
+            const parsedReferrer = new URL(referrer)
+            if (parsedReferrer.protocol === 'http:' || parsedReferrer.protocol === 'https:') {
+              headers.referer = referrer
+            }
+          } catch {
+            // ignore invalid referrer
+          }
+        }
         const response = await fetch(url, {
           method: 'GET',
-          headers: {
-            'user-agent': IMAGE_USER_AGENT,
-            accept: 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
-          },
+          headers,
           redirect: 'follow',
           signal: controller.signal,
         })
