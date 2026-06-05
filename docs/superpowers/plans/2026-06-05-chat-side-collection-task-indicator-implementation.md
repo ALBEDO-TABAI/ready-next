@@ -116,3 +116,6 @@ Codex 确认 scopeId 串接、sink 解耦、生命周期投影、deleteByScope �
 2. **前台串台**：projection.ts selectFallbackProjection 在无 taskId 命中时会兜底抓同 scope 任一 live projection——running note_collect 会被某前台卡抓走，pass 4 又因键已存在跳过后台卡。→ resolveProjectionForTaskRun 的兜底过滤掉 module:'browser'（它走 pass 4 自己的卡）。
 3. **完成即消失**：终态 waitingFor:'none' + 'completed' 被 isCompletedTerminalRun 立刻移出后台堆，且无 responseMessageId 无法落前台快照卡 → 采集一完成卡片就消失。→ sink 终态先 dwell（保持 background + ✓ 完成 summary）30s，再 settle 到真终态；settle 步 createIfMissing=false，避免 deleteByScope 后被 late timer 复活。
 测试：runner 抛错→failed 投影 1 例；projection.ts 兜底排除 browser 3 例。typecheck 绿。
+
+### 结果评审 Round 2（2026-06-05，Codex → APPROVE）
+3 条逐条 PASS（带 file:line）：#1 content-task-runner.ts:559 catch / :564 status failed / :568 投影 failed / :570 finally release；#2 projection.ts:107 exact 命中不变 / :116 兜底 filter module!=='browser'；#3 ipc-handler.ts:624 dwell write / :575 setTimeout 30s / :631 settle / :589 createIfMissing:false skip。本轮结果评审循环结束。仍存上述 dev app 实测项。
