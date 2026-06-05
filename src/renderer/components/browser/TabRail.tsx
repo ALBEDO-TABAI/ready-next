@@ -386,6 +386,12 @@ export default function TabRail({
                       gap: refreshDockVisible ? 6 : 0,
                       opacity: isDragging ? 0.72 : 1,
                     }}
+                    // Treat the refresh dock + tab surface as ONE hover zone so the
+                    // refresh button stays visible while the pointer moves between
+                    // them (the surface's own leave is no-op'd below). Only leaving
+                    // the whole zone resets.
+                    onMouseEnter={onHotspotEnter}
+                    onMouseLeave={onHotspotLeave}
                   >
                     <RefreshDock
                       loading={loading}
@@ -412,8 +418,11 @@ export default function TabRail({
                       onDragEnd={handleDragEnd}
                       onUrlChange={onUrlChange}
                       onExpandRequest={onExpandRequest}
+                      // The container (above) now owns the hover zone; the surface
+                      // must NOT reset on its own leave, or moving left to the
+                      // refresh dock would hide the dock before reaching it.
                       onHotspotEnter={onHotspotEnter}
-                      onHotspotLeave={onHotspotLeave}
+                      onHotspotLeave={() => undefined}
                       onInputFocus={onInputFocus}
                       onInputBlur={onInputBlur}
                       onCommitNavigation={onCommitNavigation}

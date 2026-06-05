@@ -191,6 +191,23 @@ export class BrowserContentTaskRunner {
 
   async resumePendingTasks(): Promise<void> {
     for (const task of this.persistenceService.listPendingTasks()) {
+      // note_collect is bound to a session-specific agent tab (ensureAgentTab).
+      // After an app restart that tab is gone, so resuming would re-acquire an
+      // agent-view lease against a dead tab and block new collections (it never
+      // makes progress, just holds the lease until it fails out). Cancel these
+      // stale collections on startup instead of resuming them.
+      if (task.kind === 'note_collect') {
+        const payload = this.persistenceService.getTaskPayload(task.taskId)
+        const scopeId = typeof payload?.scopeId === 'string' ? payload.scopeId.trim() : ''
+        this.persistenceService.updateProgress(task.taskId, { currentLabel: null }, {
+          status: 'cancelled',
+          error: 'note_collect not resumable across app restart (agent tab gone)',
+          finishedAt: new Date().toISOString(),
+        })
+        const p = task.progress
+        this.projectNoteCollect(task.taskId, scopeId, 'cancelled', p.total, p.completed, p.failed, null)
+        continue
+      }
       const payload = this.persistenceService.getTaskPayload(task.taskId)
       if (!payload) continue
       this.scheduleTask(task.taskId, task.kind, payload)

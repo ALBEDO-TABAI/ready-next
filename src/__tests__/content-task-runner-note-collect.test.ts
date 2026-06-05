@@ -255,6 +255,20 @@ describe('note_collect → chat task projection (scope-bound)', () => {
     assert.equal(upserts[upserts.length - 1].state, 'cancelled', 'a freeze projects a cancelled card, not completed')
   })
 
+  it('cancels stale note_collect on restart instead of resuming (lease safety)', async () => {
+    const { svc: persistence, tasks } = fakePersistence()
+    const { svc: lease, released } = fakeLease()
+    const runner = new BrowserContentTaskRunner({} as never, persistence as never, lease as never, okFacadeFactory())
+    // Seed a pending note_collect as if left over from a previous session whose
+    // agent tab is now gone. resumePendingTasks must NOT resume it (which would
+    // re-acquire a lease against a dead tab and block new collections).
+    const handle = persistence.createTask({ kind: 'note_collect', payload: scopedPayload(3) })
+    await runner.resumePendingTasks()
+    const task = tasks.get(handle.taskId)!
+    assert.equal(task.status, 'cancelled', 'stale note_collect is cancelled, not resumed')
+    assert.equal(released.length, 0, 'no lease acquired/held for the stale task')
+  })
+
   it('projects failed (not stuck running) when the collection loop throws (Codex #A)', async () => {
     const { svc: persistence } = fakePersistence()
     const { svc: lease } = fakeLease()
