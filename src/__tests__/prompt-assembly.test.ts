@@ -257,6 +257,30 @@ describe('PromptAssemblyService', () => {
     rmSync(root, { recursive: true, force: true })
   })
 
+  it('a blogger-notes collection ("每篇建文件夹保存图片") triggers browser-collect-notes, not document-write', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'ready-prompt-collect-trigger-'))
+    mkdirSync(join(root, 'docs'), { recursive: true })
+    mkdirSync(join(root, 'memory'), { recursive: true })
+
+    const service = new PromptAssemblyService({
+      getMemoryRoot: () => root,
+      getScopeMessages: () => [],
+      now: () => new Date('2026-04-24T10:00:00.000Z')
+    })
+
+    const result = await service.buildForScopedRun({
+      scope: createScope(),
+      message: '把你能看到的这个博主的笔记，每篇笔记都新建一个独立文件夹，把笔记内的图片保存到 ao’i 这个文件夹下的对应文件夹中',
+      coordinators: [createBrowserAdapter(), createDocumentAdapter()],
+    })
+    // The browser-collect workflow guidance fires; the document-write false
+    // match on "文件夹...保存" is gone (folder is not a file-write signal).
+    assert.equal(countTrigger(result, 'browser-collect-notes'), 1)
+    assert.equal(countTrigger(result, 'document-write'), 0)
+
+    rmSync(root, { recursive: true, force: true })
+  })
+
   it('drops low-priority l2 refs when trigger payload exceeds budget and records writebacks', async () => {
     const root = mkdtempSync(join(tmpdir(), 'ready-prompt-budget-'))
     mkdirSync(join(root, 'docs'), { recursive: true })

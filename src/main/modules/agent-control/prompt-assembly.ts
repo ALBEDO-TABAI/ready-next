@@ -150,6 +150,14 @@ const DEFAULT_FILES: Record<string, string> = {
     '\n'
   ),
   'docs/browser-rules.md': ['# 浏览器规则', '- 上传/输入/提交按阶段执行并逐步验证。'].join('\n'),
+  'docs/browser-collect-rules.md': [
+    '# 浏览器逐篇采集流程（博主多篇笔记 → 每篇建文件夹 → 下载图片）',
+    '- 这是"先规划、后台执行"的浏览器采集任务，不是文档改写：用户说"保存到某文件夹"指的是下载目录，不是写文档。',
+    '- 第 1 步（收集清单）：浏览博主主页并滚动加载，用 browser_visible_collect 或 browser_extract_structured 收集所有笔记的链接(url)与标题(title)。',
+    '- 第 2 步（必须执行）：调用 browser_collect_notes(target_profile_url, notes=[{url,title}…], output_root_dir) 启动后台逐篇采集——它在独立后台标签页逐篇打开笔记、按标题建文件夹、下载图片，返回后台任务句柄。',
+    '- 仅收集到链接/信息不算完成：没有调用 browser_collect_notes 就没有真正开始采集。拿到清单后立刻 dispatch，不要只描述"将开始采集"。',
+    '- 采集在后台运行，可继续对话；用 browser_get_task(taskId) 查询进度，必要时 browser_cancel_task 取消。',
+  ].join('\n'),
   'docs/rss-rules.md': ['# RSS 规则', '- 先确认源和条目，再运行分析 pipeline。'].join('\n'),
   'docs/calendar-rules.md': ['# 日程规则', '- 写入前先检查时间歧义和冲突。'].join('\n')
 }

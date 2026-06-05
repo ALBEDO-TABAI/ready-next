@@ -1,5 +1,6 @@
 import type { BrowserExecutionPreparation, BrowserToolLoopState } from './browser-domain-orchestrator'
 import type { DomainAdapter, DomainAdapterApplyResult, DomainAdapterDispatchResult, DomainAdapterPrepareResult } from './domain-adapter'
+import { resolveBrowserCollectionIntent } from '../../../../shared/browser-collection-intent'
 
 interface BrowserDomainOrchestratorLike {
   prepareBrowserExecution: (params: Record<string, unknown>) => Promise<BrowserExecutionPreparation>
@@ -138,6 +139,26 @@ export class BrowserDomainAdapter implements DomainAdapter {
 
   contributePromptFragment(): ReturnType<DomainAdapter['contributePromptFragment']> {
     return [
+      {
+        // Collection-workflow guidance: when the user wants to collect a
+        // blogger's notes (每篇建文件夹下载图片), tell the agent to dispatch
+        // browser_collect_notes after gathering the list — otherwise it gathers
+        // links with extract_structured and "completes" without starting the
+        // background task. Higher priority than browser-upload + document-write
+        // so the task is labelled as collection, not document rewrite.
+        id: 'browser-collect-notes',
+        label: '浏览器逐篇采集',
+        priority: 60,
+        matches: ({ userText }) => resolveBrowserCollectionIntent(userText),
+        blocking: false,
+        refs: [
+          {
+            path: 'docs/browser-collect-rules.md',
+            title: '浏览器逐篇采集流程',
+            summary: '收集笔记清单后必须调用 browser_collect_notes 启动后台逐篇采集',
+          },
+        ],
+      },
       {
         id: 'browser-upload',
         label: '浏览器上传流程',

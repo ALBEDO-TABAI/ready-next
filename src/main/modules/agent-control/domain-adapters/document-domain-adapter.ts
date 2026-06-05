@@ -139,7 +139,10 @@ function buildUserMessage(content: string | null | undefined) {
   return content ? [{ role: 'user' as const, content }] : []
 }
 
-const DOCUMENT_WRITE_TRIGGER_PATTERN = /(文档|文件).*(写|改|保存|格式)/i
+// 文件(?!夹): a 文件夹 (folder, e.g. a download directory) is NOT a file-write
+// signal — "把图片保存到某文件夹" is a browser collection task, not a document
+// rewrite, so it must not match here (handled by the browser-collect fragment).
+const DOCUMENT_WRITE_TRIGGER_PATTERN = /(文档|文件(?!夹)).*(写|改|保存|格式)/i
 
 export class DocumentDomainAdapter implements DomainAdapter {
   readonly id = 'document'
