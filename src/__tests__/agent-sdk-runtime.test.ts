@@ -161,6 +161,40 @@ test('agent sdk runtime streams text and closes with terminal reason', async () 
   )
 })
 
+test('agent sdk runtime scales max turns for long reading resources', async () => {
+  const longText = '字'.repeat(81_916)
+  const runtime = createRuntime({
+    runAgent: async ({ maxTurns }) => {
+      assert.equal(maxTurns, 40)
+      return { finalText: '长文预算已放宽' }
+    },
+  })
+  runtime.newSession('butler::scope-long-reading-budget', 'system prompt')
+
+  const result = await runtime.sendMessage(
+    'butler::scope-long-reading-budget',
+    '@[study-notes]带我学一下这篇文章@[long-images-transcribed.md]',
+    'run-long-reading-budget',
+    {
+      publicSessionId: 'scope-long-reading-budget',
+      taskId: 'task-long-reading-budget',
+      requestEnvelope: {
+        primaryInstruction: '@[study-notes]带我学一下这篇文章@[long-images-transcribed.md]',
+        resources: [
+          {
+            name: 'long-images-transcribed.md',
+            path: '/tmp/long-images-transcribed.md',
+            text: longText,
+          },
+        ],
+      },
+    },
+  )
+
+  assert.equal(result.success, true)
+  assert.equal(result.finalText, '长文预算已放宽')
+})
+
 test('agent sdk runtime preempts old run and cancels pending renderer actions', async () => {
   let cancelCount = 0
   let firstSignal: AbortSignal | null = null
@@ -1535,6 +1569,8 @@ test('agent sdk runtime keeps browser tools hidden for local document attachment
       )
       assert.equal(toolNames.includes('file_read_excerpt'), true)
       assert.match(String(body.system || ''), /必须先调用 file_read_excerpt/)
+      assert.match(String(body.system || ''), /顺序大块读取/)
+      assert.match(String(body.system || ''), /不要反复读取互相重叠/)
       if (requests.length === 1) {
         return new Response(JSON.stringify({
           id: 'msg-doc-tools-1',
@@ -3161,6 +3197,65 @@ test('agent sdk runtime checkpoints max-turn loops after a successful file excer
   )
 })
 
+test('agent sdk runtime checkpoints max-turn loops after generic successful tool progress', async () => {
+  const readExcerptDefinition = createToolDefinition({
+    name: 'file_read_excerpt',
+    groupId: 'file',
+    domain: 'file',
+    kind: 'read',
+    description: 'Read file excerpt',
+    schema: {
+      type: 'object',
+      properties: { path: { type: 'string' } },
+      required: ['path'],
+      additionalProperties: false,
+    },
+  })
+  const statuses: Array<Record<string, unknown>> = []
+  const errors: Array<Record<string, unknown>> = []
+  const runtime = createRuntime({
+    listToolDefinitions: () => [readExcerptDefinition],
+    executeToolCall: async () => createToolExecutionOutput(JSON.stringify({
+      ok: true,
+      path: '/tmp/notes/long-images-transcribed.md',
+      bytesRead: 4096,
+    }), {
+      shape: 'json',
+      data: {
+        ok: true,
+        path: '/tmp/notes/long-images-transcribed.md',
+        bytesRead: 4096,
+      },
+    }),
+    runAgent: async ({ tools }) => {
+      const readTool = tools[0] as { invoke: (context: unknown, input: string) => Promise<string> }
+      await readTool.invoke({}, JSON.stringify({ path: '/tmp/notes/long-images-transcribed.md' }))
+      throw new Error('Max turns (16) exceeded')
+    },
+  })
+  runtime.on('status', (event) => statuses.push(event as Record<string, unknown>))
+  runtime.on('error', (event) => errors.push(event as Record<string, unknown>))
+  runtime.newSession('butler::scope-generic-progress-max-turn', 'system prompt')
+
+  const result = await runtime.sendMessage('butler::scope-generic-progress-max-turn', '@[study-notes]带我学一下这篇文章', 'run-generic-progress-max-turn', {
+    publicSessionId: 'scope-generic-progress-max-turn',
+    taskId: 'task-generic-progress-max-turn',
+  })
+
+  assert.equal(result.success, true)
+  assert.equal(result.terminalReason, 'checkpoint_budget')
+  assert.match(result.finalText, /工具调用次数已用完/)
+  assert.deepEqual(result.usedTools, ['file_read_excerpt'])
+  assert.equal(errors.length, 0)
+  assert.deepEqual(
+    statuses.map((event) => [event.status, event.terminalReason]),
+    [
+      ['working', undefined],
+      ['checkpoint', 'checkpoint_budget'],
+    ],
+  )
+})
+
 test('agent sdk runtime does not expose source excerpts when a local document write hits max turns', async () => {
   const sourceContent = [
     '# 第二部第一章',
@@ -3241,13 +3336,13 @@ test('agent sdk runtime does not expose source excerpts when a local document wr
       },
     }),
     runAgent: async ({ tools, maxTurns }) => {
-      assert.equal(maxTurns, 32)
+      assert.equal(maxTurns, 40)
       const byName = new Map(tools.map((tool) => [tool.name, tool as { invoke: (context: unknown, input: string) => Promise<string> }]))
       await byName.get('file_read_excerpt')?.invoke({}, JSON.stringify({
         path: '/tmp/library/白痴.md',
         anchor: '第二部第一章',
       }))
-      throw new Error('Max turns (32) exceeded')
+      throw new Error('Max turns (40) exceeded')
     },
   })
   runtime.on('status', (event) => statuses.push(event as Record<string, unknown>))

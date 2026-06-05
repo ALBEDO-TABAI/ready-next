@@ -138,8 +138,12 @@ import { createRotatingLogger } from '../../../utils/rotating-logger'
 const agentSdkLogger = createRotatingLogger('ready-agent-sdk.log')
 const settingsRepository = new AppSettingsRepository()
 const SDK_CHILD_RESUME_AWAIT_TIMEOUT_MS = 1_500
-const DEFAULT_AGENT_SDK_MAX_TURNS = 16
-const LOCAL_DOCUMENT_WRITE_MAX_TURNS = 32
+const DEFAULT_AGENT_SDK_MAX_TURNS = 24
+const LOCAL_DOCUMENT_WRITE_MAX_TURNS = 40
+const LONG_READING_TRIGGER_CHARS = 12_000
+const LONG_READING_EXCERPT_BATCH_CHARS = 32_000
+const LONG_READING_EXTRA_TURNS_PER_BATCH = 8
+const LONG_READING_MAX_TURNS = 48
 const PREEMPT_SETTLE_TIMEOUT_MS = 4_000
 const MAX_ORPHAN_RUNS = 3
 
@@ -325,6 +329,56 @@ function messageToText(message: RunMessage): string {
     .map((block) => typeof block.text === 'string' ? block.text : '')
     .join('\n')
     .trim()
+}
+
+function countReadableContentUnits(text: string): number {
+  const stripped = String(text || '')
+    .replace(/!\[[^\]]*]\([^)]*\)/g, '')
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/[\s*_`~#[\]()|>-]/g, '')
+  const cjkChars = (stripped.match(/[\u3400-\u9FFF\uF900-\uFAFF]/g) || []).length
+  const latinWords = (stripped.match(/[A-Za-z0-9]+/g) || []).length
+  return cjkChars + latinWords
+}
+
+function countReadableContentChars(text: string): number {
+  return String(text || '')
+    .replace(/!\[[^\]]*]\([^)]*\)/g, '')
+    .replace(/```[\s\S]*?```/g, '')
+    .length
+}
+
+function requestEnvelopeResourceText(envelope: unknown): string {
+  const record = asRecord(envelope)
+  if (!record || !Array.isArray(record.resources)) return ''
+  return record.resources
+    .map((item) => asRecord(item))
+    .filter((item): item is Record<string, unknown> => Boolean(item))
+    .map((item) => typeof item.text === 'string' ? item.text : '')
+    .filter((text) => text.trim().length > 0)
+    .join('\n')
+}
+
+function resolveAgentSdkMaxTurns(params: {
+  message: RunMessage
+  requestEnvelope?: unknown
+  requiresLocalDocumentWrite: boolean
+}): number {
+  const baseTurns = params.requiresLocalDocumentWrite
+    ? LOCAL_DOCUMENT_WRITE_MAX_TURNS
+    : DEFAULT_AGENT_SDK_MAX_TURNS
+  const readableUnits = Math.max(
+    countReadableContentUnits(messageToText(params.message)),
+    countReadableContentUnits(requestEnvelopeResourceText(params.requestEnvelope)),
+  )
+  const readableChars = Math.max(
+    countReadableContentChars(messageToText(params.message)),
+    countReadableContentChars(requestEnvelopeResourceText(params.requestEnvelope)),
+  )
+  if (readableUnits < LONG_READING_TRIGGER_CHARS && readableChars < LONG_READING_TRIGGER_CHARS) return baseTurns
+  const estimatedReadBatches = Math.max(1, Math.ceil(readableChars / LONG_READING_EXCERPT_BATCH_CHARS))
+  const estimatedTurns = baseTurns + Math.max(0, estimatedReadBatches - 1) * LONG_READING_EXTRA_TURNS_PER_BATCH
+  return Math.max(baseTurns, Math.min(LONG_READING_MAX_TURNS, estimatedTurns))
 }
 
 const SDK_CONTEXT_MARKERS = [
@@ -973,6 +1027,8 @@ function buildLocalDocumentExcerptInstruction(required: boolean): string {
   return [
     '本轮是本地文档依据任务：生成结论前必须先调用 file_read_excerpt 读取用户指定章节或片段。',
     '如果用户限定“前几章/某几章”，先用 file_locate 定位章节，再用 file_read_excerpt 读取对应章节正文。',
+    '如果用户要求学习、总结、重排或分析整篇长文，优先顺序大块读取：第一次不要传 lineStart/lineEnd，让 file_read_excerpt 返回默认大块和 nextLine；如果 truncated=true，再从 nextLine 接着读。',
+    '不要反复读取互相重叠的小行段；只有核对特定章节、标题或引用时才缩小范围。',
     '只根据读取到的片段写结果；不要使用书本常识、后续剧情或附件外信息。不确定的关系要标注“不确定”。',
     '不要写“后续待展开”“后续剧情”“日后”“未来”等超出指定章节的提示语；章节外内容一律省略。',
     '如果用户要求新建、写入或保存文档，读取到足够章节依据后要优先写入并保存目标文档；不要为了读完整本或整章而无限继续读取。',
@@ -1489,6 +1545,14 @@ function buildLocalDocumentWriteBudgetCheckpoint(): string {
   return [
     '已经读取源文档，但这轮工具调用次数用完了，目标文档还没有确认写入并保存。',
     '请继续这项任务，我会从已读取的依据接着写入目标文档；不会把原文贴到聊天里。',
+  ].join('\n')
+}
+
+function buildToolProgressBudgetCheckpoint(usedTools: string[]): string {
+  const toolCount = usedTools.length
+  return [
+    '本轮工具调用次数已用完，任务还没完全收口。',
+    toolCount > 0 ? `已完成 ${toolCount} 次工具操作；请继续这项任务，我会沿着当前进度接着处理。` : '请继续这项任务，我会沿着当前进度接着处理。',
   ].join('\n')
 }
 
@@ -3072,6 +3136,7 @@ export class AgentSdkRuntime extends EventEmitter {
     let requiresLocalDocumentWriteForRecovery = false
     let fileReadExcerptCheckpointForRecovery: string | null = null
     let hasSuccessfulDocumentTargetMutation = false
+    let hasSuccessfulToolProgress = false
     let lastDocumentSaveSuccessText: string | null = null
 
     const begin = await this.beginRun({ name, runId, sessionId })
@@ -3310,7 +3375,12 @@ export class AgentSdkRuntime extends EventEmitter {
         recordToolResult: (toolName, output) => {
           usedTools.push(toolName)
           const normalized = normalizeToolExecutionOutput(output)
+          const structuredData = readStructuredResultRecord(normalized)
           const documentToolFailed = this.isDocumentToolFailure(normalized)
+          const toolReportedFailure = documentToolFailed || structuredData.ok === false
+          if (!toolReportedFailure) {
+            hasSuccessfulToolProgress = true
+          }
           const documentToolChangedContent = DOCUMENT_TARGET_MUTATION_TOOL_NAMES.has(toolName)
             && !documentToolFailed
             && documentToolMutatedContent(normalized)
@@ -3423,6 +3493,11 @@ export class AgentSdkRuntime extends EventEmitter {
         }
       }
       let nextInput = toSdkInput(content as RunMessage)
+      const agentSdkMaxTurns = resolveAgentSdkMaxTurns({
+        message: content as RunMessage,
+        requestEnvelope: executionOptions?.requestEnvelope,
+        requiresLocalDocumentWrite,
+      })
       let documentTargetRepairAttempts = 0
       let documentTargetContinuationRepairAttempts = 0
       let documentTargetContentRepairAttempts = 0
@@ -3459,7 +3534,7 @@ export class AgentSdkRuntime extends EventEmitter {
               session: runHandle.capturedSession,
               tools: sdkTools,
               signal: abortController.signal,
-              maxTurns: requiresLocalDocumentWrite ? LOCAL_DOCUMENT_WRITE_MAX_TURNS : DEFAULT_AGENT_SDK_MAX_TURNS,
+              maxTurns: agentSdkMaxTurns,
               contextWindowTokens,
               onTextDelta: (delta) => {
                 streamedText += delta
@@ -4050,6 +4125,25 @@ export class AgentSdkRuntime extends EventEmitter {
         return this.buildResult({
           success: true,
           finalText: fileReadExcerptCheckpointForRecovery,
+          cancelled: false,
+          taskId,
+          usedTools,
+          transcriptEvents,
+          projectionPatches,
+          terminalReason: 'checkpoint_budget',
+        })
+      }
+      if (
+        /Max turns \(\d+\) exceeded/i.test(message)
+        && hasSuccessfulToolProgress
+      ) {
+        const checkpointText = buildToolProgressBudgetCheckpoint(usedTools)
+        emitOutput(checkpointText, 'text')
+        emitOutput('', 'done', this.mergeProjectionPatches(projectionPatches))
+        emitStatus('checkpoint', 'checkpoint_budget')
+        return this.buildResult({
+          success: true,
+          finalText: checkpointText,
           cancelled: false,
           taskId,
           usedTools,

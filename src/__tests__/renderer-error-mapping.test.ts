@@ -91,6 +91,18 @@ test('maps provider rate limits to retry guidance', () => {
   assert.equal(result.retryStrategy, 'auto')
 })
 
+test('maps local max-turn exhaustion without calling it model unavailable', () => {
+  const result = mapBackendErrorToFriendly({
+    error: 'Max turns (16) exceeded',
+    errorKind: 'blocked_external',
+  })
+
+  assert.equal(result.friendlyMessage, '本轮步骤已用完，请继续这项任务')
+  assert.equal(result.recoverable, true)
+  assert.equal(result.retryStrategy, 'user_action')
+  assert.doesNotMatch(result.friendlyMessage, /模型服务|暂时不可用/)
+})
+
 test('unknown errors fall back to generic copy with technical details separated', () => {
   const result = mapBackendErrorToFriendly({ error: 'opaque backend detail' })
 

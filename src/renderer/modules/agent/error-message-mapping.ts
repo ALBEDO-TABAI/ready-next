@@ -128,6 +128,18 @@ export function mapBackendErrorToFriendly(input: {
   }
 
   if (
+    errorKind === 'checkpoint_budget' ||
+    /Max turns \(\d+\) exceeded|工具调用次数已用完|任务步骤已用完|budget_exhausted/i.test(source)
+  ) {
+    return {
+      friendlyMessage: '本轮步骤已用完，请继续这项任务',
+      technicalDetails: error || undefined,
+      recoverable: true,
+      retryStrategy: 'user_action',
+    }
+  }
+
+  if (
     errorKind === 'timeout_model' ||
     errorKind === 'timeout_tool' ||
     /timeout|timed out|请求超时/i.test(source)
