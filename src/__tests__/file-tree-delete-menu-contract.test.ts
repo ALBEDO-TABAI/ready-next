@@ -18,14 +18,22 @@ test('file tree right-click menu keeps remove-from-list available for top-level 
 
 test('file tree keeps direct delete and removes trash affordances', () => {
   const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
-  assert.match(source, /label: '删除'/)
-  assert.match(source, /onRequestDelete\(\{ path: item\.path, name: item\.name \}\)/)
+  assert.match(source, /label: deleteTargets\.length > 1 \? `删除 \$\{deleteTargets\.length\} 项` : '删除'/)
+  assert.match(source, /onRequestDelete\(deleteTargets\)/)
   assert.doesNotMatch(source, /aria-label="打开回收站"/)
   assert.doesNotMatch(source, /label: '回收站'/)
   assert.doesNotMatch(source, /label: '删除到回收站'/)
   assert.doesNotMatch(source, /onRequestTrash/)
   assert.doesNotMatch(source, /openTrashPanel/)
   assert.doesNotMatch(source, /listTrash|restoreTrash|deleteTrashItem|clearTrash/)
+})
+
+test('file tree delete action receives selected targets for bulk deletion', () => {
+  const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
+  assert.match(source, /selectedDeleteTargets=\{selectedDeleteTargets\}/)
+  assert.match(source, /selectedDeleteTargets\.length > 1 && selectedDeleteTargetSet\.has\(item\.path\)/)
+  assert.match(source, /for \(const target of targets\)/)
+  assert.match(source, /await deleteItem\(target\.path\)/)
 })
 
 test('file tree internal native drags can drop without a system Files dataTransfer type', () => {

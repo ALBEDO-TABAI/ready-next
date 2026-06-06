@@ -40,6 +40,11 @@ import { getActiveBrowserTabDragPayload } from '../../modules/browser/browserTab
 import { EBOOK_EXTENSIONS, isEbookExtension } from '../../../shared/ebook'
 import { isLocalHtmlFilePath, openLocalHtmlFileInBrowser } from '../../modules/browser/localHtmlFileOpen'
 import { requestWorkbenchModeChange } from '../../modules/workbench/mode-transition'
+import {
+  compactFileTreeDeleteTargets,
+  computeNextFileTreeSelection,
+  type FileTreeDeleteTarget,
+} from './fileTreeSelection'
 import './filesPanelFloatingMenu.css'
 
 const ALLOWED_EXTENSIONS = new Set([
@@ -263,6 +268,30 @@ function hasMatchingDescendant(
   return false
 }
 
+function getVisibleTreeItems(
+  items: FileItem[],
+  expandedDirs: Set<string>,
+  dirChildren: Map<string, FileItem[]>,
+  queryLower: string,
+  filters: FileFilterMap,
+): FileItem[] {
+  const result: FileItem[] = []
+  for (const item of items) {
+    if (!isFileAllowed(item)) continue
+    if (!passesFilter(item, filters)) continue
+    if (queryLower && !item.name.toLowerCase().includes(queryLower) && !(
+      item.isDirectory && hasMatchingDescendant(item.path, queryLower, filters, dirChildren)
+    )) {
+      continue
+    }
+    result.push(item)
+    if (item.isDirectory && expandedDirs.has(item.path)) {
+      result.push(...getVisibleTreeItems(dirChildren.get(item.path) || [], expandedDirs, dirChildren, queryLower, filters))
+    }
+  }
+  return result
+}
+
 function InlineInput({
   defaultValue,
   onConfirm,
@@ -314,6 +343,7 @@ function FileTreeItem({
   depth,
   onToggleDir,
   onOpenFile,
+  onSelectFile,
   onContextMenu,
   onDragStart,
   onDragEnd,
@@ -337,6 +367,7 @@ function FileTreeItem({
   depth: number
   onToggleDir: () => void
   onOpenFile: () => void
+  onSelectFile: (e: React.MouseEvent) => void
   onContextMenu: (e: React.MouseEvent) => void
   onDragStart?: (e: React.DragEvent) => void
   onDragEnd?: (e: React.DragEvent) => void
@@ -367,7 +398,13 @@ function FileTreeItem({
       onDrop={onDrop}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      onClick={() => onOpenFile()}
+      onClick={(e) => {
+        if (e.shiftKey || e.metaKey || e.ctrlKey) {
+          onSelectFile(e)
+          return
+        }
+        onOpenFile()
+      }}
       onContextMenu={onContextMenu}
       className={`
         flex items-center gap-[6px] rounded-[8px] text-[13px] cursor-pointer
@@ -524,6 +561,7 @@ function GridItemCard({
   folderChildrenLoaded,
   dragMovable,
   onOpen,
+  onSelect,
   onDoubleClick,
   onContextMenu,
   onDragStart,
@@ -542,6 +580,7 @@ function GridItemCard({
   folderChildrenLoaded?: boolean
   dragMovable?: boolean
   onOpen: () => void
+  onSelect: (e: React.MouseEvent) => void
   onDoubleClick?: () => void
   onContextMenu: (e: React.MouseEvent) => void
   onDragStart?: (e: React.DragEvent) => void
@@ -571,7 +610,13 @@ function GridItemCard({
       onDragOver={onDragOver}
       onDragLeave={onDragLeave}
       onDrop={onDrop}
-      onClick={onOpen}
+      onClick={(e) => {
+        if (e.shiftKey || e.metaKey || e.ctrlKey) {
+          onSelect(e)
+          return
+        }
+        onOpen()
+      }}
       onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu}
       className="content-surface-card rounded-[10px] border text-left transition-[background-color,border-color] hover:bg-[var(--bg-hover)]"
@@ -926,6 +971,8 @@ function FileTreeRecursive({
   containerPath,
   depth,
   selectedFile,
+  selectedPaths,
+  orderedPaths,
   expandedDirs,
   dirChildren,
   renamingPath,
@@ -939,6 +986,7 @@ function FileTreeRecursive({
   pendingClips,
   onToggleDir,
   onOpenFile,
+  onSelectFile,
   onContextMenu,
   onItemDragStart,
   onItemDragEnd,
@@ -955,6 +1003,8 @@ function FileTreeRecursive({
   containerPath: string
   depth: number
   selectedFile: string | null
+  selectedPaths: ReadonlySet<string>
+  orderedPaths: readonly string[]
   expandedDirs: Set<string>
   dirChildren: Map<string, FileItem[]>
   renamingPath: string | null
@@ -968,6 +1018,7 @@ function FileTreeRecursive({
   pendingClips: PendingClipPlaceholder[]
   onToggleDir: (path: string) => Promise<void>
   onOpenFile: (item: FileItem) => void
+  onSelectFile: (e: React.MouseEvent, item: FileItem, orderedPaths: readonly string[]) => void
   onContextMenu: (e: React.MouseEvent, item: FileItem) => void
   onItemDragStart: () => void
   onItemDragEnd: () => void
@@ -1028,7 +1079,7 @@ function FileTreeRecursive({
           <div key={item.path}>
             <FileTreeItem
               item={item}
-              isActive={selectedFile === item.path}
+              isActive={selectedPaths.size > 0 ? selectedPaths.has(item.path) : selectedFile === item.path}
               isExpanded={isExpanded}
               isRenaming={renamingPath === item.path}
               isDropTarget={item.isDirectory && moveDropTargetDir === item.path}
@@ -1040,6 +1091,7 @@ function FileTreeRecursive({
               depth={depth}
               onToggleDir={() => onToggleDir(item.path)}
               onOpenFile={() => onOpenFile(item)}
+              onSelectFile={(e) => onSelectFile(e, item, orderedPaths)}
               onContextMenu={(e) => onContextMenu(e, item)}
               onDragStart={onItemDragStart}
               onDragEnd={onItemDragEnd}
@@ -1056,6 +1108,8 @@ function FileTreeRecursive({
                 containerPath={item.path}
                 depth={depth + 1}
                 selectedFile={selectedFile}
+                selectedPaths={selectedPaths}
+                orderedPaths={orderedPaths}
                 expandedDirs={expandedDirs}
                 dirChildren={dirChildren}
                 renamingPath={renamingPath}
@@ -1069,6 +1123,7 @@ function FileTreeRecursive({
                 pendingClips={pendingClips}
                 onToggleDir={onToggleDir}
                 onOpenFile={onOpenFile}
+                onSelectFile={onSelectFile}
                 onContextMenu={onContextMenu}
                 onItemDragStart={onItemDragStart}
                 onItemDragEnd={onItemDragEnd}
@@ -1131,7 +1186,11 @@ export default function FileTree({
   const { setWorkbenchMode } = useMode()
 
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: FileItem | null } | null>(null)
-  const [pendingDelete, setPendingDelete] = useState<{ kind: 'fs' | 'unpin'; path: string; name: string } | null>(null)
+  const [pendingDelete, setPendingDelete] = useState<
+    | { kind: 'fs'; targets: FileTreeDeleteTarget[] }
+    | { kind: 'unpin'; path: string; name: string }
+    | null
+  >(null)
   const [externalDropMenu, setExternalDropMenu] = useState<FileTreeExternalDropMenuState | null>(null)
   const [flashingTargetPath, setFlashingTargetPath] = useState<string | null>(null)
   const flashClearTimerRef = useRef<number | null>(null)
@@ -1154,6 +1213,8 @@ export default function FileTree({
   const activeNativeFileDragRef = useRef<WorkspaceDragPayload | null>(null)
   const nativeFileDragClearTimerRef = useRef<number | null>(null)
   const fileTreeSurfaceRefreshTimerRef = useRef<number | null>(null)
+  const selectionAnchorPathRef = useRef<string | null>(null)
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
   const queryLower = query.trim().toLowerCase()
   const effectiveGridPath = gridPath !== undefined ? gridPath : internalGridPath
   const setEffectiveGridPath = onGridPathChange ?? setInternalGridPath
@@ -1271,6 +1332,28 @@ export default function FileTree({
   useEffect(() => {
     onResultCountChange?.(filteredCurrentItems.length)
   }, [filteredCurrentItems.length, onResultCountChange])
+
+  const treeOrderedItems = useMemo(() => {
+    if (pinnedFolders.length > 0) {
+      const pinnedItems = pinnedFolders.map((folderPath) => ({
+        name: folderPath.split('/').pop() || folderPath,
+        path: folderPath,
+        isDirectory: true,
+        size: 0,
+        modified: new Date(),
+      }))
+      return getVisibleTreeItems(pinnedItems, expandedDirs, dirChildren, queryLower, filters)
+    }
+    return getVisibleTreeItems(filteredCurrentItems, expandedDirs, dirChildren, queryLower, filters)
+  }, [dirChildren, expandedDirs, filteredCurrentItems, filters, pinnedFolders, queryLower])
+
+  const treeOrderedPaths = useMemo(() => treeOrderedItems.map((item) => item.path), [treeOrderedItems])
+
+  useEffect(() => {
+    if (!selectedFile || selectedPaths.has(selectedFile)) return
+    selectionAnchorPathRef.current = selectedFile
+    setSelectedPaths(new Set([selectedFile]))
+  }, [selectedFile, selectedPaths])
 
   // Background task subscribers keep file-tree placeholders in sync with work
   // that runs outside the right-side agent chat.
@@ -1489,6 +1572,9 @@ export default function FileTree({
   }, [activeAnalysisJobKey, flashCompletedPath, schedulePlaceholderRemoval])
 
   const handleOpenFile = useCallback((item: FileItem) => {
+    selectionAnchorPathRef.current = item.path
+    setSelectedPaths(new Set([item.path]))
+
     if (item.isDirectory) {
       selectFile(item.path)
       if (viewMode === 'tree') {
@@ -1520,6 +1606,32 @@ export default function FileTree({
       setWorkbenchMode(modeMap[ext])
     }
   }, [selectFile, setWorkbenchMode, toggleDir, viewMode])
+
+  const handleSelectFile = useCallback((event: React.MouseEvent, item: FileItem, orderedPaths: readonly string[]) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const baseSelectedPaths = selectedPaths.size > 0
+      ? selectedPaths
+      : selectedFile
+        ? new Set([selectedFile])
+        : selectedPaths
+    const next = computeNextFileTreeSelection(
+      {
+        selectedPaths: baseSelectedPaths,
+        anchorPath: selectionAnchorPathRef.current,
+      },
+      {
+        path: item.path,
+        orderedPaths,
+        metaKey: event.metaKey,
+        ctrlKey: event.ctrlKey,
+        shiftKey: event.shiftKey,
+      },
+    )
+    selectionAnchorPathRef.current = next.anchorPath
+    setSelectedPaths(next.selectedPaths)
+    if (next.selectedPaths.size === 0) selectFile(null)
+  }, [selectFile, selectedFile, selectedPaths])
 
   const moveWorkspaceItem = useCallback(async (payload: WorkspaceDragPayload, targetDir: string) => {
     if (!canMoveToDirectory(payload, targetDir)) return
@@ -1949,7 +2061,7 @@ export default function FileTree({
           <div key={folderPath}>
             <FileTreeItem
               item={pinnedItem}
-              isActive={selectedFile === folderPath}
+              isActive={selectedPaths.size > 0 ? selectedPaths.has(folderPath) : selectedFile === folderPath}
               isExpanded={isExpanded}
               isRenaming={renamingPath === folderPath}
               isDropTarget={moveDropTargetDir === folderPath}
@@ -1962,6 +2074,7 @@ export default function FileTree({
               depth={0}
               onToggleDir={() => toggleDir(folderPath)}
               onOpenFile={() => handleOpenFile(pinnedItem)}
+              onSelectFile={(e) => handleSelectFile(e, pinnedItem, treeOrderedPaths)}
               onContextMenu={(e) => {
                 e.preventDefault()
                 e.stopPropagation()
@@ -1982,6 +2095,8 @@ export default function FileTree({
                 containerPath={folderPath}
                 depth={1}
                 selectedFile={selectedFile}
+                selectedPaths={selectedPaths}
+                orderedPaths={treeOrderedPaths}
                 expandedDirs={expandedDirs}
                 dirChildren={dirChildren}
                 renamingPath={renamingPath}
@@ -1995,6 +2110,7 @@ export default function FileTree({
                 pendingClips={pendingClips}
                 onToggleDir={toggleDir}
                 onOpenFile={handleOpenFile}
+                onSelectFile={handleSelectFile}
                 onContextMenu={(e, item) => {
                   e.preventDefault()
                   e.stopPropagation()
@@ -2043,6 +2159,8 @@ export default function FileTree({
         containerPath={currentPath}
         depth={0}
         selectedFile={selectedFile}
+        selectedPaths={selectedPaths}
+        orderedPaths={treeOrderedPaths}
         expandedDirs={expandedDirs}
         dirChildren={dirChildren}
         renamingPath={renamingPath}
@@ -2056,6 +2174,7 @@ export default function FileTree({
         pendingClips={pendingClips}
         onToggleDir={toggleDir}
         onOpenFile={handleOpenFile}
+        onSelectFile={handleSelectFile}
         onContextMenu={(e, item) => {
           e.preventDefault()
           e.stopPropagation()
@@ -2115,6 +2234,19 @@ export default function FileTree({
     return effectiveGridPath.split('/').pop() || effectiveGridPath
   }, [effectiveGridPath])
   const gridContainerPath = effectiveGridPath ?? currentPath
+  const gridOrderedPaths = useMemo(() => gridItems.map((item) => item.path), [gridItems])
+  const visibleItemsByPath = useMemo(() => {
+    const items = viewMode === 'grid' ? gridItems : treeOrderedItems
+    return new Map(items.map((item) => [item.path, item]))
+  }, [gridItems, treeOrderedItems, viewMode])
+  const selectedDeleteTargets = useMemo(() => {
+    const targets: FileTreeDeleteTarget[] = []
+    for (const path of selectedPaths) {
+      const item = visibleItemsByPath.get(path)
+      if (item) targets.push({ path: item.path, name: item.name })
+    }
+    return compactFileTreeDeleteTargets(targets)
+  }, [selectedPaths, visibleItemsByPath])
   const gridFolderPreviewKey = useMemo(
     () => gridItems.filter((item) => item.isDirectory).map((item) => item.path).join('\u0000'),
     [gridItems],
@@ -2293,7 +2425,7 @@ export default function FileTree({
               <GridItemCard
                 key={item.path}
                 item={item}
-                isActive={selectedFile === item.path}
+                isActive={selectedPaths.size > 0 ? selectedPaths.has(item.path) : selectedFile === item.path}
                 isDropTarget={
                   item.isDirectory &&
                   (
@@ -2313,6 +2445,7 @@ export default function FileTree({
                     handleOpenFile(item)
                   }
                 }}
+                onSelect={(e) => handleSelectFile(e, item, gridOrderedPaths)}
                 onDoubleClick={item.isDirectory ? () => { void gridNavigateInto(item.path) } : undefined}
                 onContextMenu={(e) => {
                   e.preventDefault()
@@ -2363,7 +2496,8 @@ export default function FileTree({
           pinnedFolders={pinnedFolders}
           onClose={() => setContextMenu(null)}
           onOpenFile={handleOpenFile}
-          onRequestDelete={({ path, name }) => setPendingDelete({ kind: 'fs', path, name })}
+          selectedDeleteTargets={selectedDeleteTargets}
+          onRequestDelete={(targets) => setPendingDelete({ kind: 'fs', targets })}
           onRequestUnpin={({ path, name }) => setPendingDelete({ kind: 'unpin', path, name })}
           workspaceRoot={workspaceRoot}
         />
@@ -2375,12 +2509,16 @@ export default function FileTree({
         danger
         title={pendingDelete?.kind === 'unpin'
           ? '从列表中移除'
-          : '删除文件'}
+          : pendingDelete && pendingDelete.targets.length > 1
+            ? `删除 ${pendingDelete.targets.length} 项`
+            : '删除文件'}
         message={
           pendingDelete?.kind === 'unpin'
             ? `确定从文件管理列表里移除 "${pendingDelete.name}" 吗？不会删除磁盘上的实际文件夹。`
             : pendingDelete
-              ? `确定删除 "${pendingDelete.name}" 吗？此操作不可恢复。`
+              ? pendingDelete.targets.length > 1
+                ? `确定删除选中的 ${pendingDelete.targets.length} 项吗？此操作不可恢复。`
+                : `确定删除 "${pendingDelete.targets[0]?.name || '所选项目'}" 吗？此操作不可恢复。`
               : ''
         }
         confirmLabel={pendingDelete?.kind === 'unpin'
@@ -2390,7 +2528,15 @@ export default function FileTree({
         onConfirm={() => {
           if (!pendingDelete) return
           if (pendingDelete.kind === 'fs') {
-            void deleteItem(pendingDelete.path)
+            const targets = pendingDelete.targets
+            void (async () => {
+              for (const target of targets) {
+                await deleteItem(target.path)
+              }
+              setSelectedPaths(new Set())
+              selectionAnchorPathRef.current = null
+              selectFile(null)
+            })()
           } else {
             const nextPinnedFolders = pinnedFolders.filter((folderPath) => folderPath !== pendingDelete.path)
             if (pendingDelete.path === workspaceRoot) {
@@ -2583,6 +2729,7 @@ function ContextMenuBridge({
   pinnedFolders,
   onClose,
   onOpenFile,
+  selectedDeleteTargets,
   onRequestDelete,
   onRequestUnpin,
   workspaceRoot,
@@ -2591,7 +2738,8 @@ function ContextMenuBridge({
   pinnedFolders: string[]
   onClose: () => void
   onOpenFile: (item: FileItem) => void
-  onRequestDelete: (info: { path: string; name: string }) => void
+  selectedDeleteTargets: FileTreeDeleteTarget[]
+  onRequestDelete: (targets: FileTreeDeleteTarget[]) => void
   onRequestUnpin: (info: { path: string; name: string }) => void
   workspaceRoot: string | null
 }) {
@@ -2632,6 +2780,10 @@ function ContextMenuBridge({
         },
       ]
     }
+    const selectedDeleteTargetSet = new Set(selectedDeleteTargets.map((target) => target.path))
+    const deleteTargets = selectedDeleteTargets.length > 1 && selectedDeleteTargetSet.has(item.path)
+      ? selectedDeleteTargets
+      : [{ path: item.path, name: item.name }]
     return [
       ...(item.isDirectory ? [] : [
         {
@@ -2701,13 +2853,13 @@ function ContextMenuBridge({
       { id: 'sep4', label: '', separator: true },
       {
         id: 'delete',
-        label: '删除',
+        label: deleteTargets.length > 1 ? `删除 ${deleteTargets.length} 项` : '删除',
         icon: <Trash2 style={{ width: 16, height: 16 }} />,
         danger: true,
-        onClick: () => onRequestDelete({ path: item.path, name: item.name })
+        onClick: () => onRequestDelete(deleteTargets)
       }
     ]
-  }, [onOpenFile, startRenaming, copyPathToClipboard, startCreating, showInFolder, refreshFiles, pinnedFolderSet, workspaceRoot, onRequestDelete, onRequestUnpin])
+  }, [onOpenFile, startRenaming, copyPathToClipboard, startCreating, showInFolder, refreshFiles, pinnedFolderSet, workspaceRoot, selectedDeleteTargets, onRequestDelete, onRequestUnpin])
 
   const contextItems = useMemo(() => getContextItems(contextMenu.item), [contextMenu.item, getContextItems])
 
