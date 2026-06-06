@@ -829,6 +829,8 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
     handleContinueDetachedTask,
     handleCancelChildRun,
     handleContinueChildRun,
+    handleResumeBrowserTask,
+    handleConfirmBrowserCollectionConsent,
     handleResumeTask,
     handleRetryTask,
     handleOpenTaskArtifact,
@@ -938,6 +940,8 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
       onRetryTask={handleRetryTask}
       onSuspendTask={handleSuspendTask}
       onResumeTask={handleResumeTask}
+      onResumeBrowserTask={handleResumeBrowserTask}
+      onConfirmBrowserCollectionConsent={handleConfirmBrowserCollectionConsent}
       onCancelDetachedTask={handleCancelDetachedTask}
       onContinueDetachedTask={handleContinueDetachedTask}
       onCancelChildRun={handleCancelChildRun}

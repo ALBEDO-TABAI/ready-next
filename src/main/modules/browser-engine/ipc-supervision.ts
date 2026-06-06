@@ -51,10 +51,11 @@ export function setupBrowserSupervisionIPC(controller: BrowserSupervisionIPCCont
   ipcMain.handle('browser:getAgentSupervisionState', async () => {
     try {
       const tasks = await controller.listAgentCollectionTasks()
+      const activeTasks = tasks.filter((task) => task.status === 'running' || task.status === 'queued' || task.status === 'paused')
       return {
         controlState: controller.getAgentControlState(),
-        agentTabId: controller.getAgentTabId(),
-        tasks,
+        agentTabId: activeTasks.length > 0 ? controller.getAgentTabId() : null,
+        tasks: activeTasks,
       }
     } catch (error) {
       return { controlState: 'active' as AgentControlState, agentTabId: null, tasks: [], error: error instanceof Error ? error.message : String(error) }

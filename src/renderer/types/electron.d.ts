@@ -299,7 +299,7 @@ interface ScopeRunContextBudgetData {
 }
 
 type ScopeRunTaskStepStatusData = 'pending' | 'running' | 'blocked' | 'done' | 'error'
-type ScopeRunWaitingForData = 'input' | 'confirmation' | 'agent_result' | 'background' | 'none'
+type ScopeRunWaitingForData = 'input' | 'confirmation' | 'agent_result' | 'background' | 'verification' | 'none'
 type ScopeRunResumableActionData = 'continue' | 'retry' | 'open_artifact' | 'cancel' | 'none'
 
 interface ScopeRunTaskStepData {
@@ -343,6 +343,17 @@ interface ScopeRunSkillProgressData {
   detail?: string | null
   activityUpdatedAt?: string | null
   handoff?: ScopeRunSkillHandoffData | null
+  browserCollectionConsent?: BrowserCollectionConsentProgressData | null
+}
+
+interface BrowserCollectionConsentProgressData {
+  requestId: string
+  consentKind: 'partial_collection' | 'high_control_url_batch_downgrade'
+  sourceTaskId: string
+  targetHost?: string | null
+  warningText?: string | null
+  message?: string | null
+  createdAt?: string | null
 }
 
 interface ScopeRunSkillHandoffData {
@@ -1252,6 +1263,13 @@ interface ElectronBrowserAPI {
   requestAgentInterruption: () => Promise<{ state: AgentBrowserControlState; pending: boolean; error?: string }>
   confirmAgentInterruption: () => Promise<{ state: AgentBrowserControlState; frozen: boolean; takeoverTabId?: string | null; error?: string }>
   dismissAgentInterruption: () => Promise<{ state: AgentBrowserControlState; error?: string }>
+  confirmCollectionConsent: (payload: {
+    requestId: string
+    confirmedVia: 'ask_user_questions' | 'ui_action'
+  }) => Promise<{ success: boolean; data?: unknown; error?: string }>
+  resumeTask: (payload: {
+    taskId: string
+  }) => Promise<{ success: boolean; data?: unknown; error?: string }>
   onAgentControlChanged: (callback: (data: { state: AgentBrowserControlState }) => void) => () => void
   setAdblockEnabled: (
     enabled: boolean,

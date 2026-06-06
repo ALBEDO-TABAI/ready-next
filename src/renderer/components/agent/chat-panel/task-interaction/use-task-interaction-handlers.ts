@@ -70,6 +70,8 @@ export interface TaskInteractionHandlers {
   handleContinueDetachedTask: (scopeId: string, taskId?: string | null) => void
   handleCancelChildRun: (scopeId: string, childRunId: string) => Promise<void>
   handleContinueChildRun: (scopeId: string, childRunId: string) => Promise<void>
+  handleResumeBrowserTask: (scopeId: string, taskId: string) => Promise<void>
+  handleConfirmBrowserCollectionConsent: (scopeId: string, requestId: string) => Promise<void>
   handleResumeTask: (scopeId: string) => Promise<void>
   handleRetryTask: (scopeId: string) => Promise<void>
   handleOpenTaskArtifact: (path: string) => Promise<void>
@@ -296,6 +298,43 @@ export function useTaskInteractionHandlers(
     void refreshPersistedTaskProjections()
   }, [buildRunContinuationIntent, currentScopeId, loadConversation, mergedTaskRuns, refreshPersistedScopeRuns, refreshPersistedTaskProjections])
 
+  const handleResumeBrowserTask = useCallback(async (scopeId: string, taskId: string) => {
+    const normalizedTaskId = String(taskId || '').trim()
+    if (!normalizedTaskId || !window.electronAPI?.browser?.resumeTask) return
+    if (currentScopeId !== scopeId) {
+      void loadConversation(scopeId)
+    }
+    const resumeResult = await window.electronAPI.browser.resumeTask({ taskId: normalizedTaskId }).catch(() => null)
+    recordTaskActionTestEvent({
+      action: 'resume-browser-task',
+      observed: 'browser.resumeTask',
+      scopeId,
+      taskId: normalizedTaskId,
+      success: resumeResult?.success === true,
+    })
+    void refreshPersistedTaskProjections()
+  }, [currentScopeId, loadConversation, refreshPersistedTaskProjections])
+
+  const handleConfirmBrowserCollectionConsent = useCallback(async (scopeId: string, requestId: string) => {
+    const normalizedRequestId = String(requestId || '').trim()
+    if (!normalizedRequestId || !window.electronAPI?.browser?.confirmCollectionConsent) return
+    if (currentScopeId !== scopeId) {
+      void loadConversation(scopeId)
+    }
+    const result = await window.electronAPI.browser.confirmCollectionConsent({
+      requestId: normalizedRequestId,
+      confirmedVia: 'ui_action',
+    }).catch(() => null)
+    recordTaskActionTestEvent({
+      action: 'confirm-browser-collection-consent',
+      observed: 'browser.confirmCollectionConsent',
+      scopeId,
+      taskId: normalizedRequestId,
+      success: result?.success === true,
+    })
+    void refreshPersistedTaskProjections()
+  }, [currentScopeId, loadConversation, refreshPersistedTaskProjections])
+
   const handleResumeTask = useCallback(async (scopeId: string) => {
     const run =
       useAgent.getState().scopeRunStates[scopeId] ||
@@ -415,6 +454,8 @@ export function useTaskInteractionHandlers(
     handleContinueDetachedTask,
     handleCancelChildRun,
     handleContinueChildRun,
+    handleResumeBrowserTask,
+    handleConfirmBrowserCollectionConsent,
     handleResumeTask,
     handleRetryTask,
     handleOpenTaskArtifact,

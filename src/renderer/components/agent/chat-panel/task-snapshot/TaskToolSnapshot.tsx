@@ -94,9 +94,23 @@ export interface TaskToolSnapshotProps {
   onContinueDetachedTask: (scopeId: string, taskId?: string | null) => void
   onCancelChildRun: (scopeId: string, childRunId: string) => void
   onContinueChildRun: (scopeId: string, childRunId: string) => void
+  onResumeBrowserTask: (scopeId: string, taskId: string) => void
+  onConfirmBrowserCollectionConsent: (scopeId: string, requestId: string) => void
 
   // --- Render-prop ---
   children: (values: TaskToolSnapshotRenderValues) => React.ReactNode
+}
+
+export const MAX_BOTTOM_BACKGROUND_TASK_CARDS = 2
+
+export function selectBottomBackgroundTaskRuns<T>(
+  runs: readonly T[],
+): { visibleRuns: T[]; hiddenCount: number } {
+  const visibleRuns = runs.slice(0, MAX_BOTTOM_BACKGROUND_TASK_CARDS)
+  return {
+    visibleRuns,
+    hiddenCount: Math.max(0, runs.length - visibleRuns.length),
+  }
 }
 
 export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactElement {
@@ -126,6 +140,8 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
     onContinueDetachedTask,
     onCancelChildRun,
     onContinueChildRun,
+    onResumeBrowserTask,
+    onConfirmBrowserCollectionConsent,
     children,
   } = props
 
@@ -164,6 +180,8 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
           onContinueDetachedTask={onContinueDetachedTask}
           onCancelChildRun={onCancelChildRun}
           onContinueChildRun={onContinueChildRun}
+          onResumeBrowserTask={onResumeBrowserTask}
+          onConfirmBrowserCollectionConsent={onConfirmBrowserCollectionConsent}
         />
       )
     },
@@ -175,6 +193,8 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
       onCancelChildRun,
       onContinueDetachedTask,
       onContinueChildRun,
+      onConfirmBrowserCollectionConsent,
+      onResumeBrowserTask,
       onDismissMemoryCapture,
       onOpenTaskArtifact,
       onRetryTask,
@@ -368,6 +388,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
     const effectiveForegroundActive = foregroundActive && !suppressForeground
 
     if (!effectiveForegroundActive && backgroundTaskRuns.length === 0) return null
+    const { visibleRuns: visibleBackgroundTaskRuns, hiddenCount } = selectBottomBackgroundTaskRuns(backgroundTaskRuns)
     return (
       // width:100% + box-sizing so the card visually pairs with the
       // composer chrome (which is also `w-full`). Without the explicit
@@ -382,7 +403,16 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
             )
           : null}
         {backgroundTaskRuns.length > 0 && (
-          <div className="flex flex-col" style={{ gap: 6, width: '100%' }}>
+          <div
+            className="panel-hover-scrollbar flex flex-col"
+            style={{
+              gap: 6,
+              width: '100%',
+              maxHeight: 'min(38vh, 260px)',
+              overflowY: 'auto',
+              paddingRight: hiddenCount > 0 ? 2 : 0,
+            }}
+          >
             {(effectiveForegroundActive || backgroundTaskRuns.length > 1) && (
               <div
                 style={{
@@ -395,12 +425,26 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
                 后台任务
               </div>
             )}
-            {backgroundTaskRuns.map((run) =>
+            {visibleBackgroundTaskRuns.map((run) =>
               renderTaskSnapshotCard(
                 run,
                 `bottom-task-${run.scopeId}-${getTaskRunDisplayKey(run)}`,
                 true,
               ),
+            )}
+            {hiddenCount > 0 && (
+              <div
+                style={{
+                  border: '1px solid var(--border-default)',
+                  borderRadius: 8,
+                  padding: '6px 8px',
+                  fontSize: 11.5,
+                  color: 'var(--text-light)',
+                  background: 'color-mix(in srgb, var(--surface-panel-bg) 38%, transparent)',
+                }}
+              >
+                还有 {hiddenCount} 个后台任务，可在任务面板查看
+              </div>
             )}
           </div>
         )}

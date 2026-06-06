@@ -228,6 +228,7 @@ export type ScopeRunWaitingFor =
   | 'agent_result'
   | 'clarification'
   | 'background'
+  | 'verification'
   | 'none'
 export type ScopeRunResumableAction = 'continue' | 'retry' | 'open_artifact' | 'cancel' | 'none'
 
@@ -272,6 +273,17 @@ export interface ScopeRunSkillProgress {
   detail?: string | null
   activityUpdatedAt?: string | null
   handoff?: ScopeRunSkillHandoff | null
+  browserCollectionConsent?: BrowserCollectionConsentProgress | null
+}
+
+export interface BrowserCollectionConsentProgress {
+  requestId: string
+  consentKind: 'partial_collection' | 'high_control_url_batch_downgrade'
+  sourceTaskId: string
+  targetHost?: string | null
+  warningText?: string | null
+  message?: string | null
+  createdAt?: string | null
 }
 
 export interface ScopeRunSkillHandoff {

@@ -158,6 +158,7 @@ const DEFAULT_FILES: Record<string, string> = {
     '- 如果 browser_visible_collect 返回 discoveryStatus=partial/paused 或 suggestedContinueTool，先 browser_resume_task 继续发现；除非用户明确只采当前部分，否则不要启动 browser_collect_notes。',
     '- browser_collect_notes 会在独立后台标签页逐篇打开目标、按标题建文件夹、保存图片并写 note.md/manifest.json，返回后台任务句柄。',
     '- 若任务状态是 waiting_human/paused_verification，用户说"好了/已验证/继续"时，优先对同一个 browser-task-* 调用 browser_resume_task；不要改用 click_text、collect_images、download_urls 临时补救。',
+    '- 多篇网页采集必须先用 browser_visible_collect 冻结清单（用户直接给 URL 列表除外），再调用 browser_collect_notes 并声明 strategy：用户要求"逐个点开/低频/像人工浏览"时用 strategy=card_loop；普通低风险网页可用 strategy=url_batch。',
     '- 仅收集到链接/信息不算完成：没有调用 browser_collect_notes 就没有真正开始采集。拿到清单后立刻 dispatch，不要只描述"将开始采集"。',
     '- 采集在后台运行，可继续对话；用 browser_get_task(taskId) 查询进度，必要时 browser_cancel_task 取消。',
   ].join('\n'),

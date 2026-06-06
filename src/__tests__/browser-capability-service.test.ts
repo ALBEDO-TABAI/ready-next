@@ -6,6 +6,7 @@ import { BrowserCapabilityService } from '../main/modules/browser-engine/capabil
 function createCapabilityHost() {
   const calls: Array<{ type: string; payload?: unknown }> = []
   let currentUrl = 'https://example.com/feed'
+  let lastExtractScript = ''
 
   return {
     calls,
@@ -33,6 +34,7 @@ function createCapabilityHost() {
           }
         }
         if (code.includes('__READY_EXTRACT_TEMPLATE__')) {
+          lastExtractScript = code
           return [
             {
               sourceUrl: currentUrl,
@@ -54,6 +56,7 @@ function createCapabilityHost() {
         return null
       },
     },
+    getLastExtractScript: () => lastExtractScript,
   }
 }
 
@@ -70,6 +73,18 @@ describe('BrowserCapabilityService', () => {
     assert.strictEqual(result.items.length, 2)
     assert.strictEqual(result.items[0]?.title, 'First post')
     assert.strictEqual(result.items[1]?.link, 'https://example.com/posts/2')
+  })
+
+  it('prefers visible card anchors over hidden fallback links in the extraction script', async () => {
+    const harness = createCapabilityHost()
+    const service = new BrowserCapabilityService(harness.host as any)
+
+    await service.extractStructured('tab-1', { template: 'card_list', limit: 10 })
+
+    const script = harness.getLastExtractScript()
+    assert.ok(script.includes("Array.from(node.querySelectorAll('a[href]'))"))
+    assert.ok(script.includes('area: isVisible(item)'))
+    assert.ok(script.includes('.sort((a, b) => b.area - a.area)'))
   })
 
   it('waits for a complex condition before extracting from a target url', async () => {

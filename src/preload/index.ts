@@ -363,6 +363,9 @@ const browserAPI = {
   requestAgentInterruption: () => ipcRenderer.invoke('browser:requestAgentInterruption'),
   confirmAgentInterruption: () => ipcRenderer.invoke('browser:confirmAgentInterruption'),
   dismissAgentInterruption: () => ipcRenderer.invoke('browser:dismissAgentInterruption'),
+  confirmCollectionConsent: (payload: { requestId: string; confirmedVia: 'ask_user_questions' | 'ui_action' }) =>
+    ipcRenderer.invoke('browser:confirmCollectionConsent', payload),
+  resumeTask: (payload: { taskId: string }) => ipcRenderer.invoke('browser:resumeTask', payload),
   onAgentControlChanged: (callback: (data: { state: string }) => void) => {
     const handler = (_event: unknown, data: { state: string }) => callback(data)
     ipcRenderer.on('browser:agentControlChanged', handler)

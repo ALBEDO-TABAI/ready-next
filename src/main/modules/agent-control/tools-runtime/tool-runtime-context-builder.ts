@@ -55,6 +55,7 @@ export function buildToolRuntimeContext(params: {
   abortSignal: AbortSignal
   sessionId?: string
   scopeId?: string
+  currentUserText?: string
   runId?: string
   taskId?: string
   parentTaskId?: string
@@ -90,6 +91,7 @@ export function buildToolRuntimeContext(params: {
     abortSignal: params.abortSignal,
     sessionId: params.sessionId,
     scopeId,
+    currentUserText: params.currentUserText,
     runId: params.runId,
     taskId: params.taskId,
     parentTaskId: params.parentTaskId,
@@ -116,6 +118,7 @@ export function toToolExecutorContext(context: ToolRuntimeContext): ToolContext 
     abortSignal: context.abortSignal,
     sessionId: context.sessionId,
     scopeId: context.scopeId || context.scope?.id || context.sessionId,
+    currentUserText: context.currentUserText,
     runId: context.runId,
     taskId: context.taskId,
     parentTaskId: context.parentTaskId,

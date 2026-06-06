@@ -989,7 +989,7 @@ export interface RunProjectionPatch {
   taskSummary?: string | null
   steps?: ScopeRunTaskStep[]
   currentStepId?: string | null
-  waitingFor?: 'input' | 'confirmation' | 'agent_result' | 'background' | 'clarification' | 'none'
+  waitingFor?: 'input' | 'confirmation' | 'agent_result' | 'background' | 'clarification' | 'verification' | 'none'
   resumableActions?: ScopeRunResumableAction[]
   taskContinuation?: ScopeRunTaskContinuation | null
   blockedReason?: string | null

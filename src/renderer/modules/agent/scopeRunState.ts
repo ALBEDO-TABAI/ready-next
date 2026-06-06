@@ -545,6 +545,9 @@ function parseSkillProgress(input: unknown): ScopeRunSkillProgress | null {
   const handoffRecord = record.handoff && typeof record.handoff === 'object' && !Array.isArray(record.handoff)
     ? record.handoff as Record<string, unknown>
     : null
+  const browserConsentRecord = record.browserCollectionConsent && typeof record.browserCollectionConsent === 'object' && !Array.isArray(record.browserCollectionConsent)
+    ? record.browserCollectionConsent as Record<string, unknown>
+    : null
   const readHandoffString = (key: string): string | null => {
     const value = handoffRecord?.[key]
     return typeof value === 'string' && value.trim() ? value.trim() : null
@@ -579,6 +582,31 @@ function parseSkillProgress(input: unknown): ScopeRunSkillProgress | null {
       updatedAt: readHandoffString('updatedAt'),
     } satisfies ScopeRunSkillProgress['handoff']
     : null
+  const browserConsentKind = browserConsentRecord?.consentKind
+  const browserCollectionConsent = browserConsentRecord
+    && typeof browserConsentRecord.requestId === 'string'
+    && browserConsentRecord.requestId.trim()
+    && (browserConsentKind === 'partial_collection' || browserConsentKind === 'high_control_url_batch_downgrade')
+    && typeof browserConsentRecord.sourceTaskId === 'string'
+    && browserConsentRecord.sourceTaskId.trim()
+    ? {
+      requestId: browserConsentRecord.requestId.trim(),
+      consentKind: browserConsentKind,
+      sourceTaskId: browserConsentRecord.sourceTaskId.trim(),
+      targetHost: typeof browserConsentRecord.targetHost === 'string' && browserConsentRecord.targetHost.trim()
+        ? browserConsentRecord.targetHost.trim()
+        : null,
+      warningText: typeof browserConsentRecord.warningText === 'string' && browserConsentRecord.warningText.trim()
+        ? browserConsentRecord.warningText.trim()
+        : null,
+      message: typeof browserConsentRecord.message === 'string' && browserConsentRecord.message.trim()
+        ? browserConsentRecord.message.trim()
+        : null,
+      createdAt: typeof browserConsentRecord.createdAt === 'string' && browserConsentRecord.createdAt.trim()
+        ? browserConsentRecord.createdAt.trim()
+        : null,
+    } satisfies ScopeRunSkillProgress['browserCollectionConsent']
+    : null
   return {
     stage: readString('stage'),
     completed: readNumber('completed'),
@@ -591,6 +619,7 @@ function parseSkillProgress(input: unknown): ScopeRunSkillProgress | null {
     detail: readString('detail'),
     activityUpdatedAt: readString('activityUpdatedAt'),
     ...(handoff ? { handoff } : {}),
+    ...(browserCollectionConsent ? { browserCollectionConsent } : {}),
   }
 }
 

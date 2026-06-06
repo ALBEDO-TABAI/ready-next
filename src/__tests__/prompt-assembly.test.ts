@@ -277,6 +277,9 @@ describe('PromptAssemblyService', () => {
     // match on "文件夹...保存" is gone (folder is not a file-write signal).
     assert.equal(countTrigger(result, 'browser-collect-notes'), 1)
     assert.equal(countTrigger(result, 'document-write'), 0)
+    const joinedBootstrap = result.bootstrapMessages.join('\n\n')
+    assert.match(joinedBootstrap, /逐个点开/)
+    assert.match(joinedBootstrap, /strategy=card_loop/)
 
     rmSync(root, { recursive: true, force: true })
   })

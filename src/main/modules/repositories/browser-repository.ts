@@ -15,6 +15,14 @@ export class BrowserRepository {
     getDatabase().setSetting(key, value)
   }
 
+  deleteSetting(key: string): void {
+    getDatabase().deleteSetting(key)
+  }
+
+  getAllSettings(): Record<string, string> {
+    return getDatabase().getAllSettings()
+  }
+
   addBookmark(url: string, title: string, favicon?: string): string {
     return getDatabase().addBookmark(url, title, favicon)
   }

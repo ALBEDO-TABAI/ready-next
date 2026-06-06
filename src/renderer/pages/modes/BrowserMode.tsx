@@ -186,8 +186,7 @@ export default function BrowserMode({
   const activeTab = tabs.find(t => t.id === activeTabId) || null
   const splitTab = splitTabId && splitTabId !== activeTabId ? tabs.find(t => t.id === splitTabId) || null : null
   const activeAgentTasks = agentSupervision.tasks.filter((task) => task.status === 'running' || task.status === 'queued' || task.status === 'paused')
-  const terminalAgentTasks = agentSupervision.tasks.filter((task) => task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled')
-  const visibleAgentTask = activeAgentTasks[0] || terminalAgentTasks[0] || null
+  const visibleAgentTask = activeAgentTasks[0] || null
   const agentRuntimeTab = agentSupervision.agentTabId
     ? tabs.find(t => t.id === agentSupervision.agentTabId) || null
     : null

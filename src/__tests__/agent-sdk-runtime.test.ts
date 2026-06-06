@@ -20,6 +20,11 @@ import {
   __resetMcpOAuthForTests,
 } from '../main/modules/mcp/oauth'
 import {
+  __resetBrowserWriteLeaseServiceForTests,
+} from '../main/modules/browser-engine/agent-browser-lease-singleton'
+import { isAgentBrowserError } from '../main/modules/browser-engine/agent-browser-errors'
+import type { BrowserTurnLease } from '../main/modules/browser-engine/agent-browser-turn-lease'
+import {
   clearLastReferenceSkill,
   rememberLastReferenceSkill,
 } from '../main/modules/agent-control/skills/skill-reference-hints'
@@ -193,6 +198,60 @@ test('agent sdk runtime scales max turns for long reading resources', async () =
 
   assert.equal(result.success, true)
   assert.equal(result.finalText, '长文预算已放宽')
+})
+
+test('agent sdk runtime exposes only background collection workflow tools for multi-note browser collection', async () => {
+  let toolNames: string[] = []
+  const runtime = createRuntime({
+    runAgent: async ({ tools }) => {
+      toolNames = tools.map((tool) => tool.name)
+      return { finalText: '采集工具已收窄' }
+    },
+  })
+  runtime.setBrowserController({} as never)
+  runtime.newSession('butler::scope-browser-batch-collect-tools', 'system prompt')
+
+  const result = await runtime.sendMessage(
+    'butler::scope-browser-batch-collect-tools',
+    '把这个博主的每篇笔记都采集下来并保存图片',
+    'run-browser-batch-collect-tools',
+    {
+      publicSessionId: 'scope-browser-batch-collect-tools',
+      taskId: 'task-browser-batch-collect-tools',
+      requestEnvelope: {
+        primaryInstruction: '把这个博主的每篇笔记都采集下来并保存图片',
+        resources: [],
+      },
+    },
+  )
+
+  assert.equal(result.success, true)
+  for (const name of ['browser_visible_collect', 'browser_collect_notes', 'browser_resume_task', 'browser_get_task']) {
+    assert.ok(toolNames.includes(name), `${name} should be exposed`)
+  }
+  for (const name of ['browser_navigate', 'browser_click_text', 'browser_collect_images', 'browser_resolve_video', 'browser_download_urls', 'browser_extract_structured']) {
+    assert.ok(!toolNames.includes(name), `${name} should be hidden for batch collection`)
+  }
+
+  toolNames = []
+  const followUp = await runtime.sendMessage(
+    'butler::scope-browser-batch-collect-tools',
+    '继续',
+    'run-browser-batch-collect-tools-follow-up',
+    {
+      publicSessionId: 'scope-browser-batch-collect-tools',
+      taskId: 'task-browser-batch-collect-tools-follow-up',
+      requestEnvelope: {
+        primaryInstruction: '继续',
+        resources: [],
+      },
+    },
+  )
+  assert.equal(followUp.success, true)
+  assert.ok(toolNames.includes('browser_visible_collect'))
+  assert.ok(toolNames.includes('browser_collect_notes'))
+  assert.ok(!toolNames.includes('browser_click_text'))
+  assert.ok(!toolNames.includes('browser_download_urls'))
 })
 
 test('agent sdk runtime preempts old run and cancels pending renderer actions', async () => {
@@ -4401,6 +4460,88 @@ test('agent sdk runtime exposes browser, feishu, file, pet, and research tools w
     'present_file',
   ]) {
     assert.ok(seenToolNames.includes(expected), `${expected} should be SDK-visible`)
+  }
+})
+
+test('agent sdk runtime reuses one browser write lease across consecutive tool calls in a run', async () => {
+  __resetBrowserWriteLeaseServiceForTests()
+  try {
+    const goBackDefinition = createToolDefinition({
+      name: 'browser_go_back',
+      groupId: 'browser',
+      domain: 'browser',
+      kind: 'write',
+      concurrency: 'serialized',
+      description: 'Go back',
+      schema: {
+        type: 'object',
+        properties: {},
+        additionalProperties: false,
+      },
+    })
+    const navigateDefinition = createToolDefinition({
+      name: 'browser_navigate',
+      groupId: 'browser',
+      domain: 'browser',
+      kind: 'write',
+      concurrency: 'serialized',
+      description: 'Navigate',
+      schema: {
+        type: 'object',
+        properties: {
+          url: { type: 'string' },
+        },
+        required: ['url'],
+        additionalProperties: false,
+      },
+    })
+    const leaseIds: string[] = []
+    const runtime = createRuntime({
+      listToolDefinitions: () => [goBackDefinition, navigateDefinition],
+      executeToolCall: async (toolName, _args, context) => {
+        const turnLease = (context as { browserLease?: BrowserTurnLease | null }).browserLease
+        assert.ok(turnLease, 'browser tools must receive a turn lease')
+        const gate = turnLease.ensureGate()
+        if (isAgentBrowserError(gate)) {
+          return createToolExecutionOutput(gate.message, {
+            shape: 'json',
+            data: gate,
+          })
+        }
+        leaseIds.push(gate.leaseId)
+        return createToolExecutionOutput(`${toolName} ok`, {
+          shape: 'json',
+          data: { ok: true, leaseId: gate.leaseId },
+        })
+      },
+      runAgent: async ({ tools, onTextDelta }) => {
+        const byName = new Map(tools.map((tool) => [tool.name, tool as { invoke: (context: unknown, input: string) => Promise<string> }]))
+        const first = await byName.get('browser_go_back')?.invoke({}, '{}')
+        const second = await byName.get('browser_navigate')?.invoke({}, JSON.stringify({ url: 'https://example.com' }))
+        assert.doesNotMatch(first || '', /lease_held/)
+        assert.doesNotMatch(second || '', /lease_held/)
+        onTextDelta('浏览器操作完成')
+        return { finalText: '浏览器操作完成' }
+      },
+    })
+    runtime.setBrowserController({} as never)
+    runtime.newSession('butler::scope-browser-lease-reuse', 'system prompt')
+
+    const result = await runtime.sendMessage(
+      'butler::scope-browser-lease-reuse',
+      '打开网页并返回',
+      'run-browser-lease-reuse',
+      {
+        publicSessionId: 'scope-browser-lease-reuse',
+        taskId: 'task-browser-lease-reuse',
+      },
+    )
+
+    assert.equal(result.success, true)
+    assert.equal(leaseIds.length, 2)
+    assert.equal(leaseIds[0], leaseIds[1], 'one SDK run must reuse the same browser lease')
+  } finally {
+    __resetBrowserWriteLeaseServiceForTests()
   }
 })
 

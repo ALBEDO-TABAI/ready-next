@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { createRequire } from 'node:module'
+import { homedir } from 'node:os'
+import { delimiter, dirname, join } from 'node:path'
 import { promisify } from 'node:util'
 import type {
   BrowserFastCardVideoTarget,
@@ -10,14 +12,36 @@ import type {
 } from '../../../shared/fastcard'
 
 const execFileAsync = promisify(execFile)
+const electronModule = (() => {
+  try {
+    return createRequire(import.meta.url)('electron') as { app?: { getPath(name: string): string } }
+  } catch {
+    return {} as { app?: { getPath(name: string): string } }
+  }
+})()
 
 interface CommandResult {
   stdout: string
   stderr: string
 }
 
+interface CommandOptions {
+  timeout?: number
+  maxBuffer?: number
+  cwd?: string
+  env?: NodeJS.ProcessEnv
+}
+
+interface CommandCandidate {
+  file: string
+  args: string[]
+  cwd?: string
+  env?: NodeJS.ProcessEnv
+}
+
 interface VideoResolverDeps {
-  runCommand?: (file: string, args: string[], options?: { timeout?: number; maxBuffer?: number }) => Promise<CommandResult>
+  runCommand?: (file: string, args: string[], options?: CommandOptions) => Promise<CommandResult>
+  pythonCandidates?: string[]
 }
 
 function firstNonEmpty(...values: Array<string | undefined | null>): string | undefined {
@@ -139,37 +163,172 @@ function findSkillScript(name: string): string | null {
   return null
 }
 
-async function defaultRunCommand(file: string, args: string[], options?: { timeout?: number; maxBuffer?: number }): Promise<CommandResult> {
+function uniqueStrings(values: Array<string | undefined | null>): string[] {
+  const seen = new Set<string>()
+  const result: string[] = []
+  for (const value of values) {
+    const item = String(value || '').trim()
+    if (!item || seen.has(item)) continue
+    seen.add(item)
+    result.push(item)
+  }
+  return result
+}
+
+function electronUserDataPath(): string | null {
+  try {
+    return electronModule.app?.getPath('userData') || null
+  } catch {
+    return null
+  }
+}
+
+function skillRuntimeRootCandidates(): string[] {
+  const processWithResources = process as NodeJS.Process & { resourcesPath?: string }
+  const userData = electronUserDataPath()
+  const home = homedir()
+  return uniqueStrings([
+    process.env.READY_VIDEO_RESOLVER_SKILL_RUNTIME_ROOT,
+    process.env.READY_SKILL_RUNTIME_ROOT,
+    process.env.READY_PACKAGED_SKILL_RUNTIME_ROOT,
+    process.env.READY_RELEASE_SKILL_RUNTIME_ROOT,
+    processWithResources.resourcesPath ? join(processWithResources.resourcesPath, 'skill-runtime') : undefined,
+    userData ? join(userData, 'skill-runtime') : undefined,
+    process.platform === 'darwin' ? join(home, 'Library', 'Application Support', 'Ready', 'skill-runtime') : undefined,
+    process.platform === 'win32' && process.env.APPDATA ? join(process.env.APPDATA, 'Ready', 'skill-runtime') : undefined,
+    process.platform !== 'darwin' && process.platform !== 'win32' ? join(home, '.config', 'Ready', 'skill-runtime') : undefined,
+  ]).filter((candidate) => existsSync(candidate))
+}
+
+function skillRuntimeBinDir(root: string): string {
+  return process.platform === 'win32'
+    ? join(root, 'python', 'Scripts')
+    : join(root, 'python', 'bin')
+}
+
+function skillRuntimePythonCandidates(): string[] {
+  const suffix = process.platform === 'win32' ? '.exe' : ''
+  return skillRuntimeRootCandidates().flatMap((root) => {
+    const sharedBin = skillRuntimeBinDir(root)
+    const customBin = process.platform === 'win32'
+      ? join(root, 'custom-venvs', 'video-expert-analyzer', 'Scripts')
+      : join(root, 'custom-venvs', 'video-expert-analyzer', 'bin')
+    return [
+      join(customBin, `python${suffix}`),
+      join(sharedBin, `python${suffix}`),
+      join(sharedBin, `python3${suffix}`),
+    ]
+  }).filter((candidate) => existsSync(candidate))
+}
+
+function pythonCandidates(deps: VideoResolverDeps): string[] {
+  return uniqueStrings([
+    ...(deps.pythonCandidates || []),
+    ...skillRuntimePythonCandidates(),
+    'python3',
+    'python',
+  ])
+}
+
+function toolCandidates(tool: string): string[] {
+  const suffixes = process.platform === 'win32' ? ['', '.exe', '.cmd'] : ['']
+  const runtimeTools = skillRuntimeRootCandidates().flatMap((root) => {
+    const runtimeBin = join(root, 'bin')
+    const pythonBin = skillRuntimeBinDir(root)
+    return suffixes.flatMap((suffix) => [
+      join(runtimeBin, `${tool}${suffix}`),
+      join(pythonBin, `${tool}${suffix}`),
+    ])
+  }).filter((candidate) => existsSync(candidate))
+  return uniqueStrings([...runtimeTools, tool])
+}
+
+function commandEnv(file: string): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    PYTHONUTF8: '1',
+    PYTHONIOENCODING: 'utf-8',
+  }
+  if (file.includes('/') || file.includes('\\')) {
+    env.PATH = [dirname(file), env.PATH || ''].join(delimiter)
+  }
+  return env
+}
+
+function parseJsonStdout(stdout: string): Record<string, unknown> {
+  const trimmed = stdout.trim()
+  try {
+    return JSON.parse(trimmed) as Record<string, unknown>
+  } catch {
+    const line = trimmed
+      .split(/\r?\n/)
+      .map((item) => item.trim())
+      .reverse()
+      .find((item) => item.startsWith('{') && item.endsWith('}'))
+    if (line) return JSON.parse(line) as Record<string, unknown>
+    throw new Error('命令未输出 JSON')
+  }
+}
+
+function compactOutput(value: unknown): string {
+  return String(value || '').trim().replace(/\s+/g, ' ').slice(0, 500)
+}
+
+function formatCommandFailure(candidate: CommandCandidate, error: unknown): string {
+  const err = error as Error & { stdout?: string; stderr?: string }
+  const parts = [`${candidate.file}: ${err?.message || String(error)}`]
+  const stderr = compactOutput(err?.stderr)
+  const stdout = compactOutput(err?.stdout)
+  if (stderr) parts.push(`stderr=${stderr}`)
+  if (stdout) parts.push(`stdout=${stdout}`)
+  return parts.join(' ')
+}
+
+async function defaultRunCommand(file: string, args: string[], options?: CommandOptions): Promise<CommandResult> {
   const { stdout, stderr } = await execFileAsync(file, args, {
     timeout: options?.timeout || 15_000,
     maxBuffer: options?.maxBuffer || 2 * 1024 * 1024,
+    cwd: options?.cwd,
+    env: options?.env,
   })
   return { stdout, stderr }
 }
 
 async function runJsonCommand(
   deps: VideoResolverDeps,
-  candidates: Array<{ file: string; args: string[] }>,
+  candidates: CommandCandidate[],
   timeout = 15_000,
 ): Promise<Record<string, unknown>> {
   const runCommand = deps.runCommand || defaultRunCommand
-  let lastError: unknown
+  const failures: string[] = []
   for (const candidate of candidates) {
     try {
-      const result = await runCommand(candidate.file, candidate.args, { timeout, maxBuffer: 4 * 1024 * 1024 })
-      return JSON.parse(result.stdout) as Record<string, unknown>
+      const result = await runCommand(candidate.file, candidate.args, {
+        timeout,
+        maxBuffer: 4 * 1024 * 1024,
+        cwd: candidate.cwd,
+        env: candidate.env,
+      })
+      return parseJsonStdout(result.stdout)
     } catch (error) {
-      lastError = error
+      failures.push(formatCommandFailure(candidate, error))
     }
   }
-  throw lastError instanceof Error ? lastError : new Error(String(lastError || 'command_failed'))
+  throw new Error(failures.length ? failures.join(' | ') : 'command_failed')
 }
 
 async function resolveWithYtDlp(url: string, deps: VideoResolverDeps): Promise<FastCardVideoMeta> {
   const info = await runJsonCommand(deps, [
-    { file: 'yt-dlp', args: ['--dump-single-json', '--no-download', '--no-warnings', url] },
-    { file: 'python3', args: ['-m', 'yt_dlp', '--dump-single-json', '--no-download', '--no-warnings', url] },
-    { file: 'python', args: ['-m', 'yt_dlp', '--dump-single-json', '--no-download', '--no-warnings', url] },
+    ...toolCandidates('yt-dlp').map((file) => ({
+      file,
+      args: ['--dump-single-json', '--no-download', '--no-warnings', url],
+      env: commandEnv(file),
+    })),
+    ...pythonCandidates(deps).map((file) => ({
+      file,
+      args: ['-m', 'yt_dlp', '--dump-single-json', '--no-download', '--no-warnings', url],
+      env: commandEnv(file),
+    })),
   ])
   return normalizeYtDlpVideoInfo(info, url)
 }
@@ -188,10 +347,15 @@ render = mod.extract_render_data(resolved)
 video = mod.extract_video_url(render) if render else None
 print(json.dumps({"resolved_url": resolved, "video_url": video}, ensure_ascii=False))
 `
-  const info = await runJsonCommand(deps, [
-    { file: 'python3', args: ['-c', py, script, url] },
-    { file: 'python', args: ['-c', py, script, url] },
-  ])
+  const info = await runJsonCommand(
+    deps,
+    pythonCandidates(deps).map((file) => ({
+      file,
+      args: ['-c', py, script, url],
+      cwd: dirname(script),
+      env: commandEnv(file),
+    })),
+  )
   return normalizeDouyinInfo(info, url)
 }
 
@@ -208,10 +372,15 @@ downloader = mod.XiaohongshuDownloader()
 info = downloader.get_note_info(url)
 print(json.dumps(info, ensure_ascii=False))
 `
-  const info = await runJsonCommand(deps, [
-    { file: 'python3', args: ['-c', py, script, url] },
-    { file: 'python', args: ['-c', py, script, url] },
-  ])
+  const info = await runJsonCommand(
+    deps,
+    pythonCandidates(deps).map((file) => ({
+      file,
+      args: ['-c', py, script, url],
+      cwd: dirname(script),
+      env: commandEnv(file),
+    })),
+  )
   return normalizeXiaohongshuInfo(info, url)
 }
 

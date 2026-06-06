@@ -10,11 +10,13 @@ export interface BrowserCollectionTarget {
   url: string
   canonicalUrl: string
   openUrl: string
+  stableHref: string
   title?: string
   sourceId: string
   titleConfidence: 'none' | 'low' | 'medium' | 'high'
   order: number
-  kind: 'content'
+  kind: 'content' | 'video'
+  excludedReason?: string
   confidence: number
 }
 
@@ -191,6 +193,13 @@ function numericOr(value: unknown, fallback: number): number {
   return Number.isFinite(n) ? n : fallback
 }
 
+function targetKindFrom(rawKind: unknown, url: string, title: string): BrowserCollectionTarget['kind'] {
+  const explicit = String(rawKind || '').trim()
+  if (explicit === 'video') return 'video'
+  const haystack = `${url} ${title}`.toLowerCase()
+  return /(?:\/video\/|video|短视频|视频)/i.test(haystack) ? 'video' : 'content'
+}
+
 export function normalizeCollectionTargets(rawTargets: Array<{
   url?: unknown
   canonicalUrl?: unknown
@@ -230,10 +239,11 @@ export function normalizeCollectionTargets(rawTargets: Array<{
       url: canonicalUrl,
       canonicalUrl,
       openUrl,
+      stableHref: openUrl,
       sourceId,
       titleConfidence: titleConfidenceFor(title, raw.titleConfidence),
       order: Math.max(1, Math.trunc(numericOr(raw.order, index + 1))),
-      kind: 'content',
+      kind: targetKindFrom(raw.kind, canonicalUrl, title),
       confidence: Math.max(0, Math.min(1, numericOr(raw.confidence, 0.72))),
     }
     if (title) target.title = title
@@ -243,7 +253,7 @@ export function normalizeCollectionTargets(rawTargets: Array<{
 }
 
 export function deriveCollectionTargets(items: BrowserStructuredItem[]): BrowserCollectionTarget[] {
-  const candidates: Array<{ url: string; canonicalUrl: string; openUrl: string; title?: string; sourceId: string; order: number; titleConfidence: BrowserCollectionTarget['titleConfidence']; confidence: number }> = []
+  const candidates: Array<{ url: string; canonicalUrl: string; openUrl: string; stableHref: string; title?: string; sourceId: string; order: number; titleConfidence: BrowserCollectionTarget['titleConfidence']; kind: BrowserCollectionTarget['kind']; confidence: number }> = []
   for (let index = 0; index < items.length; index += 1) {
     const item = items[index]
     const parsed = parseTargetUrl(item)
@@ -256,9 +266,11 @@ export function deriveCollectionTargets(items: BrowserStructuredItem[]): Browser
       url: canonicalUrl,
       canonicalUrl,
       openUrl,
+      stableHref: openUrl,
       sourceId,
       order: index + 1,
       titleConfidence: titleConfidenceFor(title),
+      kind: targetKindFrom((item.rawFields as Record<string, unknown> | undefined)?.kind, canonicalUrl, title),
       confidence: title || (Array.isArray(item.media) && item.media.length > 0) ? 0.82 : 0.62,
       ...(title ? { title } : {}),
     })

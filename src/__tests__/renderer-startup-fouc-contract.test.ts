@@ -41,7 +41,11 @@ test('renderer first frame already carries data-theme + data-skin to prevent FOU
   // doesn't flash white before the renderer paints.
   assert.match(
     mainIndex,
-    /backgroundColor:\s*process\.platform === 'darwin' \? '#00000000' : nonMacFirstFrameBg/,
+    /constructorMaterial = platform === 'darwin'[\s\S]*backgroundColor: DARWIN_LIQUID_GLASS_TRANSPARENT/,
+  )
+  assert.match(
+    mainIndex,
+    /backgroundColor:\s*constructorMaterial\?\.backgroundColor \?\? nonMacFirstFrameBg/,
   )
   assert.match(mainIndex, /nonMacFirstFrameBg = nativeTheme\.shouldUseDarkColors \? '#1A1B1E' : '#F7F9FC'/)
 })

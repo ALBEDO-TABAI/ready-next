@@ -48,7 +48,7 @@ export type CoordinatorTextDecorationPhase = 'pre_dispatch' | 'post_dispatch'
 export interface DomainAdapterProjection {
   phase: DomainAdapterProjectionPhase
   summary: string
-  waitingFor?: 'none' | 'input' | 'confirmation' | 'agent_result' | 'background' | 'clarification'
+  waitingFor?: 'none' | 'input' | 'confirmation' | 'agent_result' | 'background' | 'clarification' | 'verification'
   resumableActions?: Array<'continue' | 'retry' | 'open_artifact' | 'cancel' | 'none'>
   blockedReason?: string | null
 }

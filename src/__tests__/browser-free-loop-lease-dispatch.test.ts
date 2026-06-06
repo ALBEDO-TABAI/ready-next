@@ -99,9 +99,15 @@ describe('free-loop browser dispatch lease gating (WP2)', () => {
     const turnLease = new BrowserTurnLease({ taskId: 't', runId: 'r1' }, 'user-view', service)
     const started: Array<Record<string, unknown>> = []
     const controller = createController({
-      startNoteCollection: async (plan: Record<string, unknown>) => {
+      createSyntheticVisibleCollection: async () => ({
+        taskId: 'browser-task-synthetic-lease',
+        kind: 'visible_collect',
+        status: 'completed',
+        progress: { total: 1, completed: 0, failed: 0, currentLabel: null },
+      }) as never,
+      startCardLoopCollection: async (plan: Record<string, unknown>) => {
         started.push(plan)
-        return { taskId: 'browser-task-note-1', kind: 'note_collect', status: 'queued', progress: { total: 0, completed: 0, failed: 0, currentLabel: null } } as never
+        return { taskId: 'browser-task-card-1', kind: 'card_loop', status: 'queued', progress: { total: 0, completed: 0, failed: 0, currentLabel: null } } as never
       },
     })
     await executeToolCall('browser_go_back', {}, ctx(controller, turnLease))
@@ -111,12 +117,35 @@ describe('free-loop browser dispatch lease gating (WP2)', () => {
       target_profile_url: 'https://www.xiaohongshu.com/user/profile/abc',
       notes: [{ url: 'https://www.xiaohongshu.com/note/1', title: '笔记一' }],
       output_root_dir: '/tmp/out',
-    }, ctx(controller, turnLease))
+    }, {
+      ...ctx(controller, turnLease),
+      currentUserText: '请采集 https://www.xiaohongshu.com/note/1',
+    })
 
     assert.equal(parseError(out), null, `collect_notes must not return a lease error: ${outputText(out)}`)
-    assert.match(outputText(out), /browser-task-note-1/)
+    assert.match(outputText(out), /browser-task-card-1/)
     assert.equal(started.length, 1)
     assert.equal(service.getState('user-view'), 'idle', 'surface handed off before dispatching the agent-view task')
+  })
+
+  it('browser_resume_task hands off instead of locking the task it resumes', async () => {
+    const service = new BrowserWriteLeaseService()
+    const turnLease = new BrowserTurnLease({ taskId: 't', runId: 'r1' }, 'user-view', service)
+    const resumed: string[] = []
+    const controller = createController({
+      resumeTask: async (taskId: string) => {
+        resumed.push(taskId)
+        return { taskId, kind: 'card_loop', status: 'queued', progress: { total: 0, completed: 0, failed: 0, currentLabel: null } } as never
+      },
+    })
+    await executeToolCall('browser_go_back', {}, ctx(controller, turnLease))
+    assert.equal(service.getState('user-view'), 'held')
+
+    const out = await executeToolCall('browser_resume_task', { task_id: 'browser-task-card-1' }, ctx(controller, turnLease))
+
+    assert.equal(parseError(out), null, `resume_task must not return a lease error: ${outputText(out)}`)
+    assert.deepEqual(resumed, ['browser-task-card-1'])
+    assert.equal(service.getState('user-view'), 'idle', 'surface handed off before resuming the background task')
   })
 
   it('when visible_collect is the turn FIRST action, a later takeover is NOT stolen back', async () => {

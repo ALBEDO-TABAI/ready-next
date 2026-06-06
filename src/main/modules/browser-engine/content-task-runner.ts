@@ -23,7 +23,7 @@ import { parseCollectionPlan, type CollectionLoopState, type CollectionPlan } fr
 import { runBrowserCollection } from './browser-collector-engine'
 import type { NoteCollectFacade } from './browser-collector-actions'
 import { isHighControlPlatformText } from '../../../shared/browser-collection-intent'
-import { deriveCollectionTargets } from './collection-targets'
+import { deriveCollectionTargets, type BrowserCollectionTarget } from './collection-targets'
 
 /**
  * Per-task collector binding (plan §3.4). The controller provides this factory
@@ -33,6 +33,7 @@ import { deriveCollectionTargets } from './collection-targets'
 export interface CollectorFacadeBundle {
   facade: NoteCollectFacade
   isControlFrozen: () => boolean
+  releaseLayoutLock?: () => void
 }
 export type CollectorFacadeFactory = (opts: {
   agentTabId: string
@@ -47,13 +48,24 @@ export type CollectorFacadeFactory = (opts: {
  */
 export interface BrowserTaskProjectionInput {
   taskId: string
+  sourceTaskId?: string
   scopeId: string
   title: string
   summary: string
   state: 'running' | 'paused' | 'completed' | 'cancelled' | 'failed'
+  publicStatus?: 'paused_verification' | 'partial' | 'completed' | 'failed' | 'cancelled'
+  waitingFor?: 'verification' | 'background' | 'none'
   total: number
   completed: number
   failed: number
+  discovered?: number
+  userExpectedTotal?: number
+  saved?: number
+  remaining?: number
+  hasMoreLikely?: boolean
+  completedSourceIds?: string[]
+  failedSourceIds?: string[]
+  terminalDwell?: boolean
 }
 export interface BrowserTaskProjectionSink {
   upsert(input: BrowserTaskProjectionInput): void
@@ -67,6 +79,14 @@ function noteCollectState(status: string): BrowserTaskProjectionInput['state'] {
   return 'running'
 }
 
+function shouldReprojectBrowserCollectTask(status: BrowserCapabilityTaskHandle['status']): boolean {
+  return status === 'queued' || status === 'running' || status === 'paused' || status === 'waiting_human'
+}
+
+function shouldReprojectLinkedTerminalCollectionTask(status: BrowserCapabilityTaskHandle['status']): boolean {
+  return status === 'completed' || status === 'failed' || status === 'cancelled'
+}
+
 function noteCollectSummary(total: number, completed: number, failed: number, current: string | null, state: BrowserTaskProjectionInput['state']): string {
   if (state === 'completed') return `采集完成：成功 ${completed}${failed > 0 ? ` · 失败 ${failed}` : ''}，共 ${total} 篇`
   if (state === 'paused') return `采集已暂停：成功 ${completed}/${total}${failed > 0 ? ` · 失败 ${failed}` : ''}，等待验证或继续`
@@ -75,17 +95,58 @@ function noteCollectSummary(total: number, completed: number, failed: number, cu
   return `已采集 ${completed}/${total} 篇${current ? ` · 当前：${current}` : ''}`
 }
 
-function visibleCollectSummary(total: number, current: string | null, state: BrowserTaskProjectionInput['state']): string {
-  if (state === 'completed') return `可见页面采集完成：找到 ${total} 条`
-  if (state === 'paused') return `可见页面采集已暂停：找到 ${total} 条，可能还没到底`
+function visibleCollectSummary(total: number, current: string | null, state: BrowserTaskProjectionInput['state'], opts?: { hasMoreLikely?: boolean; userExpectedTotal?: number }): string {
+  const expected = opts?.userExpectedTotal && opts.userExpectedTotal > 0 ? opts.userExpectedTotal : null
+  const incomplete = opts?.hasMoreLikely === true || (expected !== null && total < expected)
+  const expectedSuffix = expected !== null ? ` / 用户目标 ${expected}` : ''
+  if (state === 'completed' && !incomplete) return `可见页面发现完成：已冻结 ${total} 条${expectedSuffix}；尚未开始逐篇保存`
+  if (state === 'completed') return `可见页面发现未完整：已冻结 ${total} 条${expectedSuffix}，可能还有更多；尚未开始逐篇保存`
+  if (state === 'paused') return `可见页面发现已暂停：已冻结 ${total} 条${expectedSuffix}，可能还没到底；尚未开始逐篇保存`
   if (state === 'cancelled') return `可见页面采集已中断：已找到 ${total} 条`
   if (state === 'failed') return `可见页面采集失败：已找到 ${total} 条`
-  return `正在滚动采集页面${current ? ` · ${current}` : ''}`
+  return `正在发现页面目标${current ? ` · ${current}` : ''}`
 }
 
 function toNumberOr(value: unknown, fallback: number): number {
   const n = Number(value)
   return Number.isFinite(n) && n > 0 ? n : fallback
+}
+
+function resultObject(task: BrowserCapabilityTaskHandle | null): Record<string, unknown> | null {
+  return task?.result && typeof task.result === 'object' ? task.result as Record<string, unknown> : null
+}
+
+function browserToolErrorCode(output: string): string | null {
+  try {
+    const parsed = JSON.parse(output)
+    return isAgentBrowserError(parsed) ? parsed.errorCode : null
+  } catch {
+    return null
+  }
+}
+
+function sourceTaskIdFromPayload(payload: Record<string, unknown> | null | undefined): string | undefined {
+  const plan = payload?.plan && typeof payload.plan === 'object' ? payload.plan as Record<string, unknown> : null
+  const sourceTaskId = String(plan?.sourceTaskId || '').trim()
+  return sourceTaskId || undefined
+}
+
+function sourceIdsFromOutputs(outputs: Array<{ sourceId?: string; success?: boolean }> | null | undefined): {
+  completedSourceIds: string[]
+  failedSourceIds: string[]
+} {
+  const completedSourceIds = new Set<string>()
+  const failedSourceIds = new Set<string>()
+  for (const output of outputs || []) {
+    const sourceId = String(output?.sourceId || '').trim()
+    if (!sourceId) continue
+    if (output.success) completedSourceIds.add(sourceId)
+    else failedSourceIds.add(sourceId)
+  }
+  return {
+    completedSourceIds: Array.from(completedSourceIds),
+    failedSourceIds: Array.from(failedSourceIds),
+  }
 }
 
 function discoveryStatusFor(stopReason: string): 'complete' | 'partial' | 'paused' {
@@ -94,9 +155,11 @@ function discoveryStatusFor(stopReason: string): 'complete' | 'partial' | 'pause
   return 'partial'
 }
 
-function visibleCollectResult(taskId: string, items: BrowserStructuredItem[], rounds: number, stopReason: string, targetUrl: string, outputRootDir: unknown) {
+function visibleCollectResult(taskId: string, items: BrowserStructuredItem[], rounds: number, stopReason: string, targetUrl: string, outputRootDir: unknown, userExpectedTotal?: number) {
   const noteCandidates = deriveCollectionTargets(items)
-  const discoveryStatus = discoveryStatusFor(stopReason)
+  const rawDiscoveryStatus = discoveryStatusFor(stopReason)
+  const expectedIncomplete = Boolean(userExpectedTotal && userExpectedTotal > 0 && noteCandidates.length < userExpectedTotal)
+  const discoveryStatus = rawDiscoveryStatus === 'complete' && expectedIncomplete ? 'partial' : rawDiscoveryStatus
   const canStartNoteCollect = discoveryStatus === 'complete'
   return {
     items,
@@ -105,10 +168,14 @@ function visibleCollectResult(taskId: string, items: BrowserStructuredItem[], ro
     targetUrl,
     discoveryStatus,
     hasMoreLikely: discoveryStatus !== 'complete',
+    ...(userExpectedTotal && userExpectedTotal > 0 ? { userExpectedTotal } : {}),
     frozenCount: noteCandidates.length,
     noteCandidates,
     candidateCount: noteCandidates.length,
     sourceTaskId: taskId,
+    ...(typeof outputRootDir === 'string' && outputRootDir.trim()
+      ? { outputRootDir: outputRootDir.trim() }
+      : {}),
     ...(discoveryStatus !== 'complete' ? { continueTaskId: taskId } : {}),
     ...(discoveryStatus !== 'complete'
       ? {
@@ -140,8 +207,25 @@ function completedAllExpected(expected: number, completed: number, failed: numbe
   return stopReason === 'completed' && expected > 0 && completed === expected && failed === 0
 }
 
-function finalNoteCollectError(expected: number, completed: number, failed: number, stopReason: string | null): string | null {
+const TERMINAL_NOTE_SKIP_REASONS = new Set(['skipped_video', 'unavailable'])
+
+function finalNoteCollectError(
+  expected: number,
+  completed: number,
+  failed: number,
+  stopReason: string | null,
+  failures: Array<{ reason?: string }> = [],
+): string | null {
   if (completedAllExpected(expected, completed, failed, stopReason)) return null
+  if (
+    stopReason === 'completed' &&
+    expected > 0 &&
+    completed + failed === expected &&
+    failures.length === failed &&
+    failures.every((item) => TERMINAL_NOTE_SKIP_REASONS.has(String(item.reason || '')))
+  ) {
+    return null
+  }
   if (stopReason === 'cancelled' || stopReason === 'lease_lost' || stopReason === 'needs_verification') return null
   return `collection incomplete: expected ${expected}, collected ${completed}, failed ${failed}, stopReason ${stopReason || 'unknown'}`
 }
@@ -152,6 +236,20 @@ function publicNoteCollectStatus(taskStatus: BrowserCapabilityTaskHandle['status
   if (taskStatus === 'cancelled') return 'cancelled'
   if (collected > 0) return 'partial'
   return 'failed'
+}
+
+export function normalizeHighControlCollectionPlan(plan: CollectionPlan): CollectionPlan {
+  const isHighControl = isHighControlPlatformText(plan.targetProfileUrl) || plan.notes.some((n) => isHighControlPlatformText(n.url))
+  if (!isHighControl) return plan
+  const isCardLoop = plan.strategy === 'card_loop'
+  return {
+    ...plan,
+    stopConditions: {
+      ...plan.stopConditions,
+      maxDurationMs: Math.min(plan.stopConditions?.maxDurationMs ?? 20 * 60_000, 20 * 60_000),
+      maxConsecutiveFailures: Math.min(plan.stopConditions?.maxConsecutiveFailures ?? (isCardLoop ? 8 : 3), isCardLoop ? 8 : 3),
+    },
+  }
 }
 
 async function writeCollectionSummaryArtifacts(args: {
@@ -198,7 +296,11 @@ async function writeCollectionSummaryArtifacts(args: {
     updatedAt: new Date().toISOString(),
   }
   await writeFile(manifestPath, JSON.stringify(manifest, null, 2), 'utf8')
-  const successfulLines = state.outputs.filter((item) => item.success).map((item) => `- ${item.order ?? ''} ${item.title || item.url}：${item.imageCount} 张`)
+  const successfulLines = state.outputs.filter((item) => item.success).map((item) => {
+    const videoCount = Number(item.videoCount || 0)
+    const label = videoCount > 0 ? `${videoCount} 个视频` : `${item.imageCount} 张`
+    return `- ${item.order ?? ''} ${item.title || item.url}：${label}`
+  })
   const failedLines = state.failed.map((item) => `- ${item.url}：${item.reason}`)
   const remainingLines = remaining.map((item) => `- ${item.order} ${item.title || item.url}`)
   const report = [
@@ -258,26 +360,48 @@ export class BrowserContentTaskRunner {
   private async reprojectActiveBrowserCollect(): Promise<void> {
     const sink = this.taskProjectionSink
     if (!sink) return
-    for (const task of await this.listTasks()) {
-      if (task.kind !== 'note_collect' && task.kind !== 'visible_collect') continue
+    const tasks = (await this.listTasks()).slice().sort((a, b) => {
+      const aTime = new Date(a.updatedAt || 0).getTime()
+      const bTime = new Date(b.updatedAt || 0).getTime()
+      return (Number.isFinite(bTime) ? bTime : 0) - (Number.isFinite(aTime) ? aTime : 0)
+    })
+    const projectedSourceTaskIds = new Set<string>()
+    for (const task of tasks) {
+      if (task.kind !== 'note_collect' && task.kind !== 'visible_collect' && task.kind !== 'card_loop') continue
       const payload = this.persistenceService.getTaskPayload(task.taskId)
       const scopeId = typeof payload?.scopeId === 'string' ? payload.scopeId.trim() : ''
       if (!scopeId) continue
       const state = noteCollectState(task.status)
       const { total, completed, failed, currentLabel } = task.progress
-      if (task.kind === 'note_collect') {
+      if (task.kind === 'note_collect' || task.kind === 'card_loop') {
+        const sourceTaskId = sourceTaskIdFromPayload(payload)
+        const shouldProject = shouldReprojectBrowserCollectTask(task.status)
+          || (sourceTaskId && shouldReprojectLinkedTerminalCollectionTask(task.status))
+        if (!shouldProject) continue
+        if (sourceTaskId && projectedSourceTaskIds.has(sourceTaskId)) continue
         sink.upsert({
           taskId: task.taskId,
+          sourceTaskId,
           scopeId,
-          title: '浏览器逐篇采集',
+          title: task.kind === 'card_loop' ? '浏览器逐张点开采集' : '浏览器逐篇采集',
           summary: noteCollectSummary(total, completed, failed, currentLabel ?? null, state),
           state,
           total,
           completed,
           failed,
+          waitingFor: task.status === 'waiting_human' ? 'verification' : undefined,
+          publicStatus: publicNoteCollectStatus(task.status, completed),
+          terminalDwell: shouldReprojectLinkedTerminalCollectionTask(task.status) ? false : undefined,
         })
+        if (sourceTaskId) projectedSourceTaskIds.add(sourceTaskId)
       } else {
-        this.projectVisibleCollect(task.taskId, scopeId, state, total, currentLabel ?? null)
+        if (!shouldReprojectBrowserCollectTask(task.status)) continue
+        if (projectedSourceTaskIds.has(task.taskId)) continue
+        const result = resultObject(task)
+        this.projectVisibleCollect(task.taskId, scopeId, state, total, currentLabel ?? null, {
+          hasMoreLikely: result?.hasMoreLikely === true,
+          userExpectedTotal: Number(result?.userExpectedTotal || payload?.userExpectedTotal || 0) || undefined,
+        })
       }
     }
   }
@@ -291,18 +415,34 @@ export class BrowserContentTaskRunner {
     completed: number,
     failed: number,
     current: string | null,
+    opts?: {
+      waitingFor?: BrowserTaskProjectionInput['waitingFor']
+      publicStatus?: BrowserTaskProjectionInput['publicStatus']
+      sourceTaskId?: string
+      title?: string
+      completedSourceIds?: string[]
+      failedSourceIds?: string[]
+    },
   ): void {
     const sink = this.taskProjectionSink
     if (!sink || !scopeId) return
+    const sourceTaskId = opts?.sourceTaskId ?? sourceTaskIdFromPayload(this.persistenceService.getTaskPayload(taskId))
     sink.upsert({
       taskId,
+      sourceTaskId,
       scopeId,
-      title: '浏览器逐篇采集',
+      title: opts?.title || '浏览器逐篇采集',
       summary: noteCollectSummary(total, completed, failed, current, state),
       state,
+      waitingFor: opts?.waitingFor ?? (state === 'running' ? 'background' : 'none'),
+      publicStatus: opts?.publicStatus,
       total,
       completed,
       failed,
+      saved: completed,
+      remaining: Math.max(0, total - completed - failed),
+      completedSourceIds: opts?.completedSourceIds,
+      failedSourceIds: opts?.failedSourceIds,
     })
   }
 
@@ -312,6 +452,7 @@ export class BrowserContentTaskRunner {
     state: BrowserTaskProjectionInput['state'],
     total: number,
     current: string | null,
+    opts?: { hasMoreLikely?: boolean; userExpectedTotal?: number },
   ): void {
     const sink = this.taskProjectionSink
     if (!sink || !scopeId) return
@@ -319,11 +460,17 @@ export class BrowserContentTaskRunner {
       taskId,
       scopeId,
       title: '浏览器可见页面采集',
-      summary: visibleCollectSummary(total, current, state),
+      summary: visibleCollectSummary(total, current, state, opts),
       state,
+      waitingFor: state === 'running' ? 'background' : 'none',
       total,
-      completed: total,
+      completed: 0,
       failed: 0,
+      discovered: total,
+      saved: 0,
+      remaining: total,
+      hasMoreLikely: opts?.hasMoreLikely,
+      userExpectedTotal: opts?.userExpectedTotal,
     })
   }
 
@@ -335,6 +482,55 @@ export class BrowserContentTaskRunner {
 
   async getTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
     return this.persistenceService.getTask(taskId)
+  }
+
+  createSyntheticVisibleCollection(params: {
+    scopeId?: string
+    targets: BrowserCollectionTarget[]
+    targetUrl?: string
+    outputRootDir?: string
+    sourceMessageIds?: string[]
+  }): BrowserCapabilityTaskHandle {
+    const handle = this.persistenceService.createTask({
+      kind: 'visible_collect',
+      payload: {
+        synthetic: true,
+        source: 'user_provided_urls',
+        targetUrl: params.targetUrl || undefined,
+        outputRootDir: params.outputRootDir || undefined,
+        sourceMessageIds: params.sourceMessageIds || [],
+        ...(params.scopeId && params.scopeId.trim() ? { scopeId: params.scopeId.trim() } : {}),
+      },
+    })
+    const targets = params.targets.map((target, index) => ({ ...target, order: index + 1 }))
+    const result = {
+      status: 'completed',
+      synthetic: true,
+      source: 'user_provided_urls',
+      discoveryStatus: 'complete',
+      frozenCount: targets.length,
+      noteCandidates: targets,
+      targetUrl: params.targetUrl || '',
+      outputRootDir: params.outputRootDir || '',
+      sourceMessageIds: params.sourceMessageIds || [],
+      hasMoreLikely: false,
+      summary: `用户直接提供 URL 列表，已合成冻结清单 ${targets.length} 条。`,
+    }
+    this.persistenceService.updateProgress(handle.taskId, {
+      total: targets.length,
+      completed: 0,
+      failed: 0,
+      currentLabel: null,
+    }, {
+      status: 'completed',
+      checkpoint: { taskId: handle.taskId, stage: 'visible_collect_round', cursor: null, partialResults: [] },
+      result,
+      finishedAt: new Date().toISOString(),
+    })
+    if (params.scopeId) {
+      this.projectVisibleCollect(handle.taskId, params.scopeId, 'completed', targets.length, null, { hasMoreLikely: false })
+    }
+    return this.persistenceService.getTask(handle.taskId) || handle
   }
 
   /** All known tasks when the persistence layer supports it, optionally filtered to one kind. */
@@ -374,7 +570,7 @@ export class BrowserContentTaskRunner {
     })
     // Reflect the cancel in the chat card immediately, even if the loop already
     // exited (race) so the terminal projection never fires.
-    if (handle?.kind === 'note_collect') {
+    if (handle?.kind === 'note_collect' || handle?.kind === 'card_loop') {
       const payload = this.persistenceService.getTaskPayload(taskId)
       const scopeId = typeof payload?.scopeId === 'string' ? payload.scopeId.trim() : ''
       const p = handle.progress
@@ -394,7 +590,7 @@ export class BrowserContentTaskRunner {
       // agent-view lease against a dead tab and block new collections (it never
       // makes progress, just holds the lease until it fails out). Cancel these
       // stale collections on startup instead of resuming them.
-      if (task.kind === 'note_collect') {
+      if (task.kind === 'note_collect' || task.kind === 'card_loop') {
         const payload = this.persistenceService.getTaskPayload(task.taskId)
         const scopeId = typeof payload?.scopeId === 'string' ? payload.scopeId.trim() : ''
         this.persistenceService.updateProgress(task.taskId, { currentLabel: null }, {
@@ -480,13 +676,13 @@ export class BrowserContentTaskRunner {
     // stop with lease_lost without touching the page (counterplan §5.5).
     if (this.leaseService.checkWrite({ surface, leaseId }) !== null) {
       this.persistenceService.updateProgress(taskId, { total: 0, completed: 0, failed: 0, currentLabel: null }, {
-        status: 'cancelled',
-        checkpoint: { taskId, stage: 'cancelled', cursor: null, partialResults: [] },
-        result: visibleCollectResult(taskId, [], 0, 'lease_lost', '', payload.outputRootDir),
+        status: 'paused',
+        checkpoint: { taskId, stage: 'visible_collect_round', cursor: null, partialResults: [] },
+        result: visibleCollectResult(taskId, [], 0, 'lease_lost', '', payload.outputRootDir, Number(payload.userExpectedTotal || 0) || undefined),
         finishedAt: new Date().toISOString(),
       })
       const scopeId = typeof payload.scopeId === 'string' ? payload.scopeId.trim() : ''
-      this.projectVisibleCollect(taskId, scopeId, 'cancelled', 0, null)
+      this.projectVisibleCollect(taskId, scopeId, 'paused', 0, null, { hasMoreLikely: true, userExpectedTotal: Number(payload.userExpectedTotal || 0) || undefined })
       return
     }
 
@@ -518,15 +714,13 @@ export class BrowserContentTaskRunner {
       maxDurationMs: toNumberOr(payload.maxDurationMs, DEFAULT_VISIBLE_COLLECT_LIMITS.maxDurationMs),
       emptyRoundsToStop: toNumberOr(payload.emptyRoundsToStop, DEFAULT_VISIBLE_COLLECT_LIMITS.emptyRoundsToStop),
     }
-    // High-control platforms (小红书/抖音/…): cap volume/rounds/duration to a more
-    // conservative ceiling and pace rounds (plan §4.4 限速限量). Explicit caller
-    // limits still win when they are lower than the conservative ceiling.
     const highControl = payload.highControl === true
     let interRoundDelayMs = 0
     if (highControl) {
-      limits.maxItems = Math.min(limits.maxItems, 60)
-      limits.maxRounds = Math.min(limits.maxRounds, 12)
-      limits.maxDurationMs = Math.min(limits.maxDurationMs, 90_000)
+      const expectedMinimum = Number(payload.userExpectedTotal || 0) || DEFAULT_VISIBLE_COLLECT_LIMITS.maxItems
+      limits.maxItems = Math.max(limits.maxItems, expectedMinimum)
+      limits.maxRounds = Math.max(limits.maxRounds, DEFAULT_VISIBLE_COLLECT_LIMITS.maxRounds)
+      limits.maxDurationMs = Math.max(limits.maxDurationMs, DEFAULT_VISIBLE_COLLECT_LIMITS.maxDurationMs)
       interRoundDelayMs = 1_200
     }
     const template = String(payload.template || 'card_list') as never
@@ -601,9 +795,10 @@ export class BrowserContentTaskRunner {
       }
 
       // Checkpoint EVERY round so a crash/cancel resumes from here.
+      const frozenCount = deriveCollectionTargets(collected).length
       this.persistenceService.updateProgress(taskId, {
-        total: collected.length,
-        completed: collected.length,
+        total: frozenCount,
+        completed: 0,
         failed: 0,
         currentLabel: `round ${round}`,
       }, {
@@ -614,7 +809,7 @@ export class BrowserContentTaskRunner {
           partialResults: collected,
         },
       })
-      this.projectVisibleCollect(taskId, scopeId, 'running', collected.length, `round ${round}`)
+      this.projectVisibleCollect(taskId, scopeId, 'running', frozenCount, `round ${round}`, { hasMoreLikely: true, userExpectedTotal: Number(payload.userExpectedTotal || 0) || undefined })
 
       if (this.cancelledTasks.has(taskId)) {
         stopReason = 'cancelled'
@@ -632,19 +827,22 @@ export class BrowserContentTaskRunner {
       }
     }
 
-    const discoveryStatus = discoveryStatusFor(stopReason)
-    const finalStatus = stopReason === 'cancelled' || stopReason === 'lease_lost'
+    const userExpectedTotal = Number(payload.userExpectedTotal || 0) || undefined
+    const finalResult = visibleCollectResult(taskId, collected, round, stopReason, targetUrl, payload.outputRootDir, userExpectedTotal)
+    const discoveryStatus = String(finalResult.discoveryStatus || discoveryStatusFor(stopReason))
+    const finalStatus = stopReason === 'cancelled'
       ? 'cancelled'
+      : stopReason === 'lease_lost'
+        ? 'paused'
       : discoveryStatus === 'complete'
         ? 'completed'
         : 'paused'
-    const finalCheckpointStage = finalStatus === 'paused' || finalStatus === 'cancelled'
+    const finalCheckpointStage = finalStatus === 'paused'
       ? 'visible_collect_round'
       : finalStatus
-    const finalResult = visibleCollectResult(taskId, collected, round, stopReason, targetUrl, payload.outputRootDir)
     this.persistenceService.updateProgress(taskId, {
-      total: collected.length,
-      completed: collected.length,
+      total: Number(finalResult.frozenCount || 0),
+      completed: 0,
       failed: 0,
       currentLabel: null,
     }, {
@@ -658,7 +856,10 @@ export class BrowserContentTaskRunner {
       result: finalResult,
       finishedAt: new Date().toISOString(),
     })
-    this.projectVisibleCollect(taskId, scopeId, finalStatus, collected.length, null)
+    this.projectVisibleCollect(taskId, scopeId, finalStatus, Number(finalResult.frozenCount || 0), null, {
+      hasMoreLikely: finalResult.hasMoreLikely === true,
+      userExpectedTotal,
+    })
   }
 
   /**
@@ -690,28 +891,15 @@ export class BrowserContentTaskRunner {
       this.projectNoteCollect(taskId, scopeId, 'failed', 0, 0, 0, null)
       return
     }
-    // High-control platforms (小红书/抖音/…): clamp volume + pace between notes
-    // (plan §4.4 限速限量). Explicit lower caller caps still win.
-    const isHighControl = isHighControlPlatformText(parsed.plan.targetProfileUrl) || parsed.plan.notes.some((n) => isHighControlPlatformText(n.url))
-    const plan: CollectionPlan = isHighControl
-      ? {
-          ...parsed.plan,
-          stopConditions: {
-            ...parsed.plan.stopConditions,
-            maxNotes: Math.min(parsed.plan.stopConditions?.maxNotes ?? 60, 60),
-            maxDurationMs: Math.min(parsed.plan.stopConditions?.maxDurationMs ?? 20 * 60_000, 20 * 60_000),
-            maxConsecutiveFailures: Math.min(parsed.plan.stopConditions?.maxConsecutiveFailures ?? 3, 3),
-          },
-        }
-      : parsed.plan
-    const interNoteDelayMs = isHighControl ? 1_500 : 0
+    const strategy = parsed.plan.strategy === 'card_loop' ? 'card_loop' : 'url_batch'
+    const plan = normalizeHighControlCollectionPlan(parsed.plan)
+    const isHighControl = plan !== parsed.plan
+    const interNoteDelayMs = isHighControl ? 3_000 : 0
     // Download-volume budget on high-control platforms (Codex result-review #5):
     // a safety ceiling on total images saved across the collection.
-    const maxTotalImages = isHighControl ? 400 : 0
+    const maxTotalImages = 0
 
-    // Own an agent-view lease for the whole task, tied to the agent tab, so the
-    // background loop never collides with the user's foreground writes.
-    const surface: AgentBrowserSurface = 'agent-view'
+    const surface = (typeof payload.surface === 'string' ? payload.surface : 'agent-view') as AgentBrowserSurface
     const acquired = this.leaseService.acquire({ surface, taskId, runId: taskId, tabId: agentTabId })
     if (isAgentBrowserError(acquired)) {
       this.persistenceService.updateProgress(taskId, { currentLabel: null }, {
@@ -723,11 +911,18 @@ export class BrowserContentTaskRunner {
       return
     }
     const leaseId = acquired.leaseId
-    const { facade, isControlFrozen } = this.collectorFacadeFactory({ agentTabId, leaseId, surface })
+    const { facade, isControlFrozen, releaseLayoutLock } = this.collectorFacadeFactory({ agentTabId, leaseId, surface })
     // Project a running card as soon as the collection starts (plan §3.4).
     this.projectNoteCollect(taskId, scopeId, 'running', plan.notes.length, 0, 0, null)
 
     try {
+      if (strategy === 'card_loop' && plan.targetProfileUrl) {
+        const navOut = await facade.run('browser_navigate', { url: plan.targetProfileUrl })
+        const navErr = browserToolErrorCode(navOut)
+        if (navErr) throw new Error(`card_loop profile navigation failed: ${navErr}`)
+        await facade.run('browser_wait', { ms: isHighControl ? 1500 : 500 }).catch(() => '')
+      }
+
       // Resume from the last per-note checkpoint if one exists.
       const existing = this.persistenceService.getTask(taskId)
       const checkpoint = existing?.checkpoint
@@ -747,11 +942,12 @@ export class BrowserContentTaskRunner {
           now: () => Date.now(),
           interNoteDelayMs,
           maxTotalImages,
+          strategy,
           shouldStop: () => {
             if (this.cancelledTasks.has(taskId)) return 'cancelled'
             // A user freeze (AgentTabControlGate) stops the agent cleanly, not as
             // a string of write failures. Freeze is NOT a lease state (Codex R2).
-            if (isControlFrozen()) return 'cancelled'
+            if (surface === 'agent-view' && isControlFrozen()) return 'cancelled'
             // Lease loss (expiry, or a takeover by another surface) stops writing.
             if (this.leaseService.checkWrite({ surface, leaseId }) !== null) return 'lease_lost'
             this.leaseService.heartbeat(leaseId)
@@ -775,7 +971,7 @@ export class BrowserContentTaskRunner {
               checkpoint: { taskId, stage: 'note_collect_round', cursor: String(state.cursor), partialResults: state },
             })
             // Live progress in the chat card after every note (plan §3.6).
-            this.projectNoteCollect(taskId, scopeId, 'running', progress.total, progress.completed, progress.failed, progress.currentTitle)
+            this.projectNoteCollect(taskId, scopeId, 'running', progress.total, progress.completed, progress.failed, progress.currentTitle, sourceIdsFromOutputs(state.outputs))
           },
         },
         initialState,
@@ -818,16 +1014,18 @@ export class BrowserContentTaskRunner {
           },
           finishedAt: new Date().toISOString(),
         })
-        this.projectNoteCollect(taskId, scopeId, 'cancelled', plan.notes.length, result.collected.length, result.failed.length, null)
+        this.projectNoteCollect(taskId, scopeId, 'cancelled', plan.notes.length, result.collected.length, result.failed.length, null, sourceIdsFromOutputs(result.notes))
         return
       }
       // A user freeze or a lease takeover is NOT a successful completion (Codex
       // result-review #1): reflect the interruption in the task status.
-      const incompleteError = finalNoteCollectError(plan.notes.length, result.collected.length, result.failed.length, result.stopReason)
+      const incompleteError = finalNoteCollectError(plan.notes.length, result.collected.length, result.failed.length, result.stopReason, result.failed)
       const finalStatus: BrowserCapabilityTaskHandle['status'] = result.stopReason === 'needs_verification'
         ? 'waiting_human'
-        : result.stopReason === 'cancelled' || result.stopReason === 'lease_lost'
+        : result.stopReason === 'cancelled'
           ? 'cancelled'
+          : result.stopReason === 'lease_lost'
+            ? 'paused'
           : incompleteError && result.collected.length > 0 && ['max_notes', 'max_duration', 'max_images'].includes(String(result.stopReason))
             ? 'paused'
             : incompleteError
@@ -875,7 +1073,11 @@ export class BrowserContentTaskRunner {
         error: finalStatus === 'waiting_human' ? null : incompleteError,
         finishedAt: new Date().toISOString(),
       })
-      this.projectNoteCollect(taskId, scopeId, noteCollectState(finalStatus), plan.notes.length, result.collected.length, result.failed.length, null)
+      this.projectNoteCollect(taskId, scopeId, noteCollectState(finalStatus), plan.notes.length, result.collected.length, result.failed.length, null, {
+        waitingFor: finalStatus === 'waiting_human' ? 'verification' : undefined,
+        publicStatus: publicNoteCollectStatus(finalStatus, result.collected.length),
+        ...sourceIdsFromOutputs(result.notes),
+      })
     } catch (error) {
       // An uncaught throw from runBrowserCollection would otherwise leave the
       // chat card stuck in 'running' forever (Codex result-review #A). Mark the
@@ -887,6 +1089,7 @@ export class BrowserContentTaskRunner {
       })
       this.projectNoteCollect(taskId, scopeId, 'failed', plan.notes.length, 0, 0, null)
     } finally {
+      releaseLayoutLock?.()
       this.leaseService.release(leaseId)
     }
   }
@@ -997,7 +1200,7 @@ export class BrowserContentTaskRunner {
       return
     }
 
-    if (kind === 'note_collect') {
+    if (kind === 'note_collect' || kind === 'card_loop') {
       await this.runNoteCollect(taskId, payload)
       return
     }

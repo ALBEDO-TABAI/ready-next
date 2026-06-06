@@ -134,6 +134,25 @@ test('rank-50 — completed projection ignores stale background continuation', (
   assert.deepEqual(state.actionSet, ['open_artifact'])
 })
 
+test('rank-50 — cancelled projection ignores stale background signals', () => {
+  const state = deriveTaskCardRuntimeState(makeRun({
+    phase: 'cancelled',
+    status: 'killed',
+    waitingFor: 'background',
+    taskContinuation: {
+      taskId: 'task-cancelled',
+      blockerType: 'background_running',
+      pauseReason: 'background_running',
+      outputDir: '/tmp/browser-collection',
+      runStatePath: '/tmp/browser-collection/run_state.json',
+    },
+    canResume: false,
+  }))
+  assert.equal(state.visualState, 'done')
+  assert.equal(state.statusLabel, '已停止')
+  assert.deepEqual(state.actionSet, [])
+})
+
 test('rank-10 — plain running, no signals', () => {
   const state = deriveTaskCardRuntimeState(makeRun({
     phase: 'tool_running',

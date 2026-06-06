@@ -230,7 +230,14 @@ function buildStructuredExtractionScript(options: BrowserExtractStructuredOption
 
       for (const node of candidates) {
         if (!(node instanceof HTMLElement) || !isVisible(node)) continue
-        const anchor = node.querySelector('a[href]')
+        const anchors = Array.from(node.querySelectorAll('a[href]'))
+          .filter((item) => item instanceof HTMLAnchorElement)
+        const anchor = anchors
+          .map((item) => {
+            const rect = item.getBoundingClientRect()
+            return { item, area: isVisible(item) ? Math.max(0, rect.width) * Math.max(0, rect.height) : 0 }
+          })
+          .sort((a, b) => b.area - a.area)[0]?.item || anchors[0]
         const title = normalize(
           node.querySelector('h1,h2,h3,h4,strong,[data-testid*="title" i],[class*="title"]')?.textContent ||
           anchor?.textContent ||

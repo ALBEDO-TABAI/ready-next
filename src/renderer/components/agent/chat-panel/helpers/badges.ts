@@ -109,6 +109,7 @@ export function isBackgroundTaskRun(run: TaskCardRun | null | undefined): boolea
     taskId.startsWith('detached:'),
   )
   const visualState = deriveTaskCardRuntimeState(run).visualState
+  if (visualState === 'done') return false
   return (
     visualState === 'background_running'
     || visualState === 'budget_paused'

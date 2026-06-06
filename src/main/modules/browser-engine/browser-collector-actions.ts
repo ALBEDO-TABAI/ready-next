@@ -28,6 +28,7 @@ export interface CollectNoteInput {
   order?: number
   folderName?: string
   duplicateTitle?: boolean
+  skipNavigate?: boolean
   outputDir: string
 }
 
@@ -40,6 +41,8 @@ export interface NoteCollectResult {
   sourceId?: string
   order?: number
   imageCount: number
+  videoCount?: number
+  mediaKind?: 'image' | 'video'
   savedDir: string
   notePath?: string
   manifestPath?: string
@@ -58,6 +61,22 @@ interface ImageCandidate {
   width?: number
   height?: number
 }
+
+interface VideoCandidate {
+  url: string
+  posterUrl?: string
+  width?: number
+  height?: number
+}
+
+interface MediaCollection {
+  images: ImageCandidate[]
+  videos: VideoCandidate[]
+  videoCount: number
+  scope?: string
+}
+
+const MAX_NOTE_IMAGE_CANDIDATES = 24
 
 const FOLDER_UNSAFE_PATTERN = new RegExp(
   '[\\\\/:*?"<>|' + String.fromCharCode(0x00) + '-' + String.fromCharCode(0x1f) + ']',
@@ -95,11 +114,31 @@ function parseFacadeError(out: string): string | null {
   }
 }
 
-function extractImages(collectOutput: string): ImageCandidate[] {
+function extractMediaCollection(collectOutput: string): MediaCollection {
   try {
     const parsed = JSON.parse(collectOutput)
     const images = Array.isArray(parsed?.images) ? parsed.images : []
-    return images
+    const rawVideos = Array.isArray(parsed?.videos) ? parsed.videos : []
+    const videos = rawVideos
+      .map((item: unknown) => {
+        const obj = item && typeof item === 'object'
+          ? item as { url?: unknown; posterUrl?: unknown; width?: unknown; height?: unknown }
+          : null
+        return {
+          url: String(obj?.url || ''),
+          posterUrl: String(obj?.posterUrl || ''),
+          width: Number(obj?.width || 0),
+          height: Number(obj?.height || 0),
+        }
+      })
+    const videoCount = rawVideos.length > 0
+      ? videos.length
+      : Math.max(0, Number(parsed?.videoCount || 0))
+      return {
+        videoCount,
+        scope: typeof parsed?.scope === 'string' ? parsed.scope : undefined,
+        videos,
+        images: images
       .map((img: unknown) => {
         const obj = img && typeof img === 'object' ? img as { url?: unknown; alt?: unknown; width?: unknown; height?: unknown } : null
         const url = String(obj?.url || '')
@@ -110,10 +149,15 @@ function extractImages(collectOutput: string): ImageCandidate[] {
           height: Number(obj?.height || 0),
         }
       })
-      .filter((img: ImageCandidate) => /^https?:\/\//i.test(img.url))
+        .filter((img: ImageCandidate) => /^https?:\/\//i.test(img.url)),
+    }
   } catch {
-    return []
+    return { images: [], videos: [], videoCount: 0 }
   }
+}
+
+function extractImages(collectOutput: string): ImageCandidate[] {
+  return extractMediaCollection(collectOutput).images
 }
 
 function extractDetail(collectOutput: string): { title?: string; summary?: string } {
@@ -168,6 +212,56 @@ function relativeToNoteDir(noteDir: string, file: string): string {
   return normalizedFile
 }
 
+function uniqueStrings(values: Array<string | undefined | null>): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const value of values) {
+    const trimmed = String(value || '').trim()
+    if (!trimmed || seen.has(trimmed)) continue
+    seen.add(trimmed)
+    out.push(trimmed)
+  }
+  return out
+}
+
+function isLikelyDirectVideoUrl(url: string): boolean {
+  const value = String(url || '').trim()
+  if (!/^https?:\/\//i.test(value)) return false
+  const lower = value.toLowerCase()
+  if (/\.(?:jpe?g|png|webp|gif|avif)(?:[?#]|$)/i.test(lower)) return false
+  return (
+    /(?:^|[.-])sns-video[.-]/i.test(lower)
+    || /\.(?:mp4|m4v|mov|webm|m3u8)(?:[?#]|$)/i.test(lower)
+  )
+}
+
+function activeUrlFromTabsOutput(tabsOutput: string): string | null {
+  const lines = String(tabsOutput || '').split(/\r?\n/)
+  const activeIndex = lines.findIndex((line) => line.trimStart().startsWith('▶'))
+  const candidates = activeIndex >= 0 ? [lines[activeIndex + 1] || ''] : lines
+  for (const candidate of candidates) {
+    const match = candidate.match(/https?:\/\/\S+/i)
+    if (match) return match[0]
+  }
+  return null
+}
+
+function xiaohongshuExploreUrlFromSourceId(sourceId: string | undefined): string | null {
+  const id = String(sourceId || '').trim()
+  if (!/^[a-f0-9]{8,}$/i.test(id)) return null
+  return `https://www.xiaohongshu.com/explore/${id}`
+}
+
+function videoPageUrlCandidates(input: CollectNoteInput, tabsOutput: string): string[] {
+  return uniqueStrings([
+    activeUrlFromTabsOutput(tabsOutput),
+    input.openUrl,
+    input.canonicalUrl,
+    input.noteUrl,
+    isXiaohongshuTarget(input) ? xiaohongshuExploreUrlFromSourceId(input.sourceId) : null,
+  ]).filter((value) => /^https?:\/\//i.test(value))
+}
+
 function buildFolderName(input: CollectNoteInput, title: string, sourceId: string): string {
   if (input.folderName && input.folderName.trim()) {
     return sanitizeFolderName(input.folderName, `note-${sourceId}`)
@@ -199,6 +293,17 @@ const ACCESS_BLOCK_TEXT_PATTERNS = [
 
 const ACCESS_BLOCK_TITLES = new Set(['消息', '登录', '登陆', 'login', 'log in', 'sign in', 'messages', 'notifications'])
 
+const UNAVAILABLE_TEXT_PATTERNS = [
+  /当前笔记暂时无法浏览/u,
+  /你访问的页面不见了/u,
+  /页面不见了/u,
+  /内容不存在/u,
+  /笔记不存在/u,
+  /error_code=300031/i,
+]
+
+const UNAVAILABLE_TITLES = new Set(['小红书 - 你访问的页面不见了'])
+
 function normalizeText(value: string | undefined): string {
   return String(value || '').replace(/\s+/g, ' ').trim()
 }
@@ -206,6 +311,11 @@ function normalizeText(value: string | undefined): string {
 function containsAccessBlockText(value: string | undefined): boolean {
   const text = normalizeText(value)
   return text.length > 0 && ACCESS_BLOCK_TEXT_PATTERNS.some((pattern) => pattern.test(text))
+}
+
+function containsUnavailableText(value: string | undefined): boolean {
+  const text = normalizeText(value)
+  return text.length > 0 && UNAVAILABLE_TEXT_PATTERNS.some((pattern) => pattern.test(text))
 }
 
 function isLikelyPlatformAssetUrl(rawUrl: string): boolean {
@@ -217,6 +327,70 @@ function isLikelyPlatformAssetUrl(rawUrl: string): boolean {
   } catch {
     return false
   }
+}
+
+function isLikelyAvatarAssetUrl(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl)
+    const haystack = `${url.hostname} ${url.pathname}`.toLowerCase()
+    return /(^|[.-])sns-avatar[.-]/.test(url.hostname.toLowerCase())
+      || /\b(avatar|profile|default-avatar|defaultavatar|user-icon)\b/.test(haystack)
+  } catch {
+    return false
+  }
+}
+
+function isLikelyCommentAssetUrl(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl)
+    return /(^|\/)(comment)(\/|$)/i.test(url.pathname)
+  } catch {
+    return false
+  }
+}
+
+function imageDedupeKey(rawUrl: string): string {
+  try {
+    const url = new URL(rawUrl)
+    const path = url.pathname.replace(/!.+$/u, '')
+    return `${url.hostname}${path}`.toLowerCase()
+  } catch {
+    return rawUrl.toLowerCase()
+  }
+}
+
+function hasTinyKnownDimensions(image: ImageCandidate): boolean {
+  const width = Number(image.width || 0)
+  const height = Number(image.height || 0)
+  return width > 0 && height > 0 && (width < 96 || height < 96)
+}
+
+function isLikelyNoteContentImageUrl(rawUrl: string): boolean {
+  try {
+    const url = new URL(rawUrl)
+    const haystack = `${url.hostname} ${url.pathname}`.toLowerCase()
+    return /(^|[.-])(sns-webpic|sns-img|ci)[.-]/.test(url.hostname.toLowerCase())
+      || /\b(notes_pre_post|spectrum|note_image|note-img|imagevault)\b/.test(haystack)
+  } catch {
+    return false
+  }
+}
+
+function filterNoteImageCandidates(images: ImageCandidate[], maxItems = MAX_NOTE_IMAGE_CANDIDATES): ImageCandidate[] {
+  const seen = new Set<string>()
+  const usable: ImageCandidate[] = []
+  for (const image of images) {
+    if (!/^https?:\/\//i.test(image.url)) continue
+    if (isLikelyPlatformAssetUrl(image.url) || isLikelyAvatarAssetUrl(image.url)) continue
+    if (isLikelyCommentAssetUrl(image.url)) continue
+    if (hasTinyKnownDimensions(image)) continue
+    const key = imageDedupeKey(image.url)
+    if (seen.has(key)) continue
+    seen.add(key)
+    usable.push(image)
+  }
+  const preferred = usable.filter((image) => isLikelyNoteContentImageUrl(image.url))
+  return (preferred.length > 0 ? preferred : usable).slice(0, maxItems)
 }
 
 function hasOnlyPlaceholderImages(images: ImageCandidate[] | undefined): boolean {
@@ -244,16 +418,123 @@ function detectAccessBlock(input: {
   return null
 }
 
+function detectTerminalPageBlock(input: {
+  pageText?: string
+  title?: string
+  summary?: string
+  images?: ImageCandidate[]
+}): string | null {
+  const title = normalizeText(input.title)
+  if (
+    containsUnavailableText(input.pageText)
+    || containsUnavailableText(input.title)
+    || containsUnavailableText(input.summary)
+    || UNAVAILABLE_TITLES.has(title)
+  ) {
+    return 'unavailable'
+  }
+  return detectAccessBlock(input)
+}
+
+function isXiaohongshuTarget(input: { canonicalUrl?: string; noteUrl?: string; openUrl?: string }): boolean {
+  return [input.canonicalUrl, input.noteUrl, input.openUrl]
+    .some((value) => /xiaohongshu\.com/i.test(String(value || '')))
+}
+
+function isLikelyXiaohongshuProfileListPage(pageText: string, input: { canonicalUrl?: string; noteUrl?: string; openUrl?: string }): boolean {
+  if (!isXiaohongshuTarget(input)) return false
+  const text = normalizeText(pageText)
+  if (!text) return false
+  const profileMarkers = ['小红书号', '粉丝', '获赞与收藏', '笔记 收藏']
+  return profileMarkers.every((marker) => text.includes(marker))
+}
+
+function isLikelyListSurfacePage(pageText: string, input: { canonicalUrl?: string; noteUrl?: string; openUrl?: string }): boolean {
+  if (isLikelyXiaohongshuProfileListPage(pageText, input)) return true
+  const text = normalizeText(pageText)
+  return /(?:主页列表|用户主页|profile list|feed list)/i.test(text)
+}
+
+function detailMatchesTarget(pageText: string, input: { title?: string; sourceId?: string; canonicalUrl?: string; noteUrl?: string }): boolean {
+  const haystack = normalizeText(pageText).toLowerCase()
+  const markers = [
+    input.sourceId,
+    input.title,
+    input.canonicalUrl,
+    input.noteUrl,
+  ]
+    .map((value) => normalizeText(value).toLowerCase())
+    .filter((value) => value.length >= 3)
+  if (markers.length === 0) return true
+  return markers.some((marker) => haystack.includes(marker))
+}
+
+function tabsOutputContainsTargetUrl(tabsOutput: string, input: { sourceId?: string; canonicalUrl?: string; noteUrl?: string }): boolean {
+  const haystack = normalizeText(tabsOutput).toLowerCase()
+  const markers = [
+    input.sourceId,
+    input.canonicalUrl,
+    input.noteUrl,
+  ]
+    .map((value) => normalizeText(value).toLowerCase())
+    .filter((value) => value.length >= 6)
+  if (markers.length === 0) return true
+  return markers.some((marker) => haystack.includes(marker))
+}
+
+function activeTabOutputContainsTargetUrl(tabsOutput: string, input: { sourceId?: string; canonicalUrl?: string; noteUrl?: string }): boolean {
+  const lines = String(tabsOutput || '').split(/\r?\n/)
+  const activeIndex = lines.findIndex((line) => line.trimStart().startsWith('▶'))
+  if (activeIndex < 0) return tabsOutputContainsTargetUrl(tabsOutput, input)
+  const activeBlock = [lines[activeIndex] || '', lines[activeIndex + 1] || ''].join('\n')
+  return tabsOutputContainsTargetUrl(activeBlock, input)
+}
+
+const CARD_DETAIL_OPEN_TIMEOUT_MS = 8000
+const CARD_DETAIL_OPEN_POLL_MS = 500
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+async function waitForTargetDetailTab(
+  facade: NoteCollectFacade,
+  input: { title?: string; sourceId?: string; canonicalUrl?: string; noteUrl?: string; openUrl?: string },
+): Promise<{ opened: boolean; tabsOut: string }> {
+  const deadline = Date.now() + CARD_DETAIL_OPEN_TIMEOUT_MS
+  let lastTabsOut = ''
+  while (Date.now() <= deadline) {
+    lastTabsOut = await facade.run('browser_get_tabs').catch(() => '')
+    if (activeTabOutputContainsTargetUrl(lastTabsOut, input)) return { opened: true, tabsOut: lastTabsOut }
+    const pageOut = await facade.run('browser_read_page').catch(() => '')
+    if (
+      pageOut
+      && !parseFacadeError(pageOut)
+      && !isLikelyListSurfacePage(pageOut, input)
+      && detailMatchesTarget(pageOut, input)
+    ) {
+      return { opened: true, tabsOut: lastTabsOut }
+    }
+    await sleep(CARD_DETAIL_OPEN_POLL_MS)
+  }
+  return { opened: false, tabsOut: lastTabsOut }
+}
+
 function noteMarkdown(input: {
   title: string
   url: string
   canonicalUrl?: string
   summary?: string
   imageCount: number
+  videoCount?: number
+  mediaKind?: 'image' | 'video'
   success: boolean
   reason?: string
   files: string[]
 }): string {
+  const fileLines = input.files.map((file) => input.mediaKind === 'video'
+    ? `[视频文件](${file})`
+    : `![图片](${file})`)
   return [
     `# ${input.title}`,
     '',
@@ -261,10 +542,11 @@ function noteMarkdown(input: {
     `打开链接：${input.url}`,
     `状态：${input.success ? '成功' : '失败'}`,
     `图片数量：${input.imageCount}`,
+    ...(input.videoCount ? [`视频数量：${input.videoCount}`] : []),
     ...(input.reason ? [`失败原因：${input.reason}`] : []),
     '',
     ...(input.summary ? [input.summary, ''] : []),
-    ...input.files.map((file) => `![图片](${file})`),
+    ...fileLines,
     '',
   ].join('\n')
 }
@@ -279,7 +561,7 @@ async function writeArtifacts(
   fileOps: NoteCollectFileOps | undefined,
   pathJoin: (...parts: string[]) => string,
   result: NoteCollectResult,
-  extra: { summary?: string; imageUrls?: string[] },
+  extra: { summary?: string; imageUrls?: string[]; videoUrls?: string[] },
 ): Promise<NoteCollectResult> {
   if (!fileOps) return result
   if (!result.success && result.imageCount <= 0) {
@@ -294,8 +576,11 @@ async function writeArtifacts(
       order: result.order,
       success: false,
       imageCount: result.imageCount,
+      videoCount: result.videoCount || 0,
+      mediaKind: result.mediaKind,
       reason: result.reason,
       imageUrls: extra.imageUrls || [],
+      videoUrls: extra.videoUrls || [],
       savedAt: new Date().toISOString(),
     }, null, 2))
     return { ...result, savedDir: failedDir, manifestPath: failurePath }
@@ -312,6 +597,8 @@ async function writeArtifacts(
     canonicalUrl: result.canonicalUrl,
     summary: extra.summary,
     imageCount: result.imageCount,
+    videoCount: result.videoCount,
+    mediaKind: result.mediaKind,
     success: result.success,
     reason: result.reason,
     files: result.files || [],
@@ -325,12 +612,157 @@ async function writeArtifacts(
     success: result.success,
     savedDir: result.savedDir,
     imageCount: result.imageCount,
+    videoCount: result.videoCount || 0,
+    mediaKind: result.mediaKind || 'image',
     files: result.files || [],
     imageUrls: extra.imageUrls || [],
+    videoUrls: extra.videoUrls || [],
     reason: result.reason,
     savedAt: new Date().toISOString(),
   }, null, 2))
   return { ...result, notePath, manifestPath }
+}
+
+function parseVideoResolveOutput(out: string): { downloadUrl?: string; videoUrl?: string; posterUrl?: string; error?: string } {
+  const err = parseFacadeError(out)
+  if (err) return { error: err }
+  try {
+    const parsed = JSON.parse(out)
+    const video = parsed?.video && typeof parsed.video === 'object' ? parsed.video as Record<string, unknown> : null
+    const downloadUrl = String(video?.downloadUrl || video?.playableUrl || '').trim()
+    if (isLikelyDirectVideoUrl(downloadUrl)) {
+      return {
+        downloadUrl,
+        videoUrl: String(video?.pageUrl || video?.originalUrl || '').trim(),
+        posterUrl: String(video?.posterUrl || '').trim(),
+      }
+    }
+    return {
+      error: String(video?.error || parsed?.error || 'video_resolve_failed'),
+      posterUrl: String(video?.posterUrl || '').trim(),
+    }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+async function resolveNoteVideo(
+  facade: NoteCollectFacade,
+  input: CollectNoteInput,
+  title: string,
+  media: MediaCollection,
+): Promise<{ downloadUrl?: string; videoUrl?: string; posterUrl?: string; error?: string }> {
+  const directVideoUrl = media.videos.map((video) => video.url).find(isLikelyDirectVideoUrl)
+  const posterUrl = media.videos.map((video) => video.posterUrl || video.url).find((url) => /^https?:\/\//i.test(String(url || '')))
+  const tabsOut = await facade.run('browser_get_tabs').catch(() => '')
+  const pageUrls = videoPageUrlCandidates(input, tabsOut)
+  const sources = media.videos.map((video) => video.url).filter(isLikelyDirectVideoUrl)
+  const attempts = directVideoUrl && pageUrls.length === 0 ? [''] : pageUrls
+  let lastError = ''
+
+  for (const pageUrl of attempts) {
+    const out = await facade.run('browser_resolve_video', {
+      ...(pageUrl ? { page_url: pageUrl } : {}),
+      ...(directVideoUrl ? { video_url: directVideoUrl } : {}),
+      ...(posterUrl ? { poster_url: posterUrl } : {}),
+      ...(title ? { title } : {}),
+      ...(sources.length > 0 ? { sources } : {}),
+    })
+    const resolved = parseVideoResolveOutput(out)
+    if (resolved.downloadUrl) return resolved
+    lastError = resolved.error || lastError
+    if (directVideoUrl) break
+  }
+
+  return { error: lastError || 'video_resolve_failed' }
+}
+
+async function downloadVideoNote(
+  facade: NoteCollectFacade,
+  input: CollectNoteInput,
+  pathJoin: (...parts: string[]) => string,
+  fileOps: NoteCollectFileOps | undefined,
+  args: {
+    title: string
+    sourceId: string
+    noteDir: string
+    openUrl: string
+    canonicalUrl: string
+    summary?: string
+    media: MediaCollection
+  },
+): Promise<NoteCollectResult> {
+  const resolved = await resolveNoteVideo(facade, input, args.title, args.media)
+  if (!resolved.downloadUrl) {
+    return writeArtifacts(fileOps, pathJoin, {
+      success: false,
+      noteUrl: input.noteUrl,
+      canonicalUrl: args.canonicalUrl,
+      openUrl: args.openUrl,
+      title: args.title,
+      sourceId: args.sourceId,
+      order: input.order,
+      imageCount: 0,
+      savedDir: input.outputDir,
+      reason: `video_resolve:${resolved.error || 'failed'}`,
+    }, { summary: args.summary, videoUrls: resolved.videoUrl ? [resolved.videoUrl] : [] })
+  }
+
+  const assetsDir = pathJoin(args.noteDir, 'assets')
+  const dlOut = await facade.run('browser_download_urls', { urls: [resolved.downloadUrl], directory: assetsDir, filename_prefix: 'video' })
+  const dlErr = parseFacadeError(dlOut)
+  if (dlErr) {
+    return writeArtifacts(fileOps, pathJoin, {
+      success: false,
+      noteUrl: input.noteUrl,
+      canonicalUrl: args.canonicalUrl,
+      openUrl: args.openUrl,
+      title: args.title,
+      sourceId: args.sourceId,
+      order: input.order,
+      imageCount: 0,
+      savedDir: input.outputDir,
+      reason: `video_download:${dlErr}`,
+    }, { summary: args.summary, videoUrls: [resolved.downloadUrl] })
+  }
+
+  let savedCount = 1
+  let files = successfulDownloadFiles(dlOut).map((file) => relativeToNoteDir(args.noteDir, file))
+  try {
+    const parsed = JSON.parse(dlOut)
+    if (typeof parsed?.success === 'number') savedCount = parsed.success
+  } catch {
+    // keep optimistic count
+  }
+  if (savedCount <= 0) {
+    return writeArtifacts(fileOps, pathJoin, {
+      success: false,
+      noteUrl: input.noteUrl,
+      canonicalUrl: args.canonicalUrl,
+      openUrl: args.openUrl,
+      title: args.title,
+      sourceId: args.sourceId,
+      order: input.order,
+      imageCount: 0,
+      savedDir: input.outputDir,
+      reason: 'video_download_failed',
+    }, { summary: args.summary, videoUrls: [resolved.downloadUrl] })
+  }
+  if (files.length === 0) files = [resolved.downloadUrl]
+  return writeArtifacts(fileOps, pathJoin, {
+    success: true,
+    noteUrl: input.noteUrl,
+    canonicalUrl: args.canonicalUrl,
+    openUrl: args.openUrl,
+    title: args.title,
+    sourceId: args.sourceId,
+    order: input.order,
+    imageCount: 0,
+    videoCount: savedCount,
+    mediaKind: 'video',
+    savedDir: args.noteDir,
+    files,
+  }, { summary: args.summary, videoUrls: [resolved.downloadUrl] })
 }
 
 /**
@@ -351,27 +783,44 @@ export async function collectNote(
   const folderForTitle = (title: string) => pathJoin(input.outputDir, buildFolderName(input, title, sourceId))
   const initialNoteDir = input.outputDir
 
-  // 1. Navigate the agent tab to the note (facade forces agentTabId).
-  const navOut = await facade.run('browser_navigate', { url: openUrl })
-  const navErr = parseFacadeError(navOut)
-  if (navErr) {
+  // 1. Navigate the agent tab to the note (facade forces agentTabId). card_loop
+  // callers set skipNavigate after opening the card from the list naturally.
+  if (!input.skipNavigate) {
+    const navOut = await facade.run('browser_navigate', { url: openUrl })
+    const navErr = parseFacadeError(navOut)
+    if (navErr) {
+      return writeArtifacts(fileOps, pathJoin, {
+        success: false,
+        noteUrl: input.noteUrl,
+        canonicalUrl,
+        openUrl,
+        title: initialTitle,
+        sourceId,
+        order: input.order,
+        imageCount: 0,
+        savedDir: initialNoteDir,
+        reason: `navigate:${navErr}`,
+      }, {})
+    }
+  }
+  const pageOut = await facade.run('browser_read_page')
+  const pageErr = parseFacadeError(pageOut)
+  let pageText = pageErr ? '' : pageOut
+  if (!input.skipNavigate && isLikelyXiaohongshuProfileListPage(pageText, input)) {
     return writeArtifacts(fileOps, pathJoin, {
       success: false,
       noteUrl: input.noteUrl,
       canonicalUrl,
       openUrl,
-      title: initialTitle,
+      title: requestedTitle || initialTitle,
       sourceId,
       order: input.order,
       imageCount: 0,
       savedDir: initialNoteDir,
-      reason: `navigate:${navErr}`,
+      reason: 'detail_not_opened',
     }, {})
   }
-  const pageOut = await facade.run('browser_read_page')
-  const pageErr = parseFacadeError(pageOut)
-  const pageText = pageErr ? '' : pageOut
-  const pageAccessBlock = detectAccessBlock({ pageText, title: requestedTitle || initialTitle })
+  const pageAccessBlock = detectTerminalPageBlock({ pageText, title: requestedTitle || initialTitle })
   if (pageAccessBlock) {
     return writeArtifacts(fileOps, pathJoin, {
       success: false,
@@ -397,7 +846,7 @@ export async function collectNote(
     ? requestedTitle
     : detail.title || requestedTitle || initialTitle
   const noteDir = folderForTitle(title)
-  const detailAccessBlock = detectAccessBlock({ pageText, title: detail.title || title, summary: detail.summary })
+  const detailAccessBlock = detectTerminalPageBlock({ pageText, title: detail.title || title, summary: detail.summary })
   if (detailAccessBlock) {
     return writeArtifacts(fileOps, pathJoin, {
       success: false,
@@ -413,9 +862,9 @@ export async function collectNote(
     }, { summary: detail.summary })
   }
 
-  // 3. Collect image candidates on the note page. include_hidden lets a detail
-  // page expose preloaded carousel images without depending on one site shape.
-  const imagesOut = await facade.run('browser_collect_images', { include_hidden: true, limit: 60 })
+  // 3. Collect image candidates on the note page. Prefer visible images so a
+  // modal detail page does not download the profile grid behind it.
+  let imagesOut = await facade.run('browser_collect_images', { include_hidden: false, limit: 36 })
   const collectErr = parseFacadeError(imagesOut)
   if (collectErr) {
     return writeArtifacts(fileOps, pathJoin, {
@@ -431,9 +880,16 @@ export async function collectNote(
       reason: `collect:${collectErr}`,
     }, { summary: detail.summary })
   }
-  const images = extractImages(imagesOut)
-  const imageUrls = images.map((img) => img.url)
-  if (imageUrls.length === 0) {
+  let media = extractMediaCollection(imagesOut)
+  let rawImages = media.images
+  let videoCount = media.videoCount
+  let images = filterNoteImageCandidates(rawImages)
+  let rawImagesForAccessBlock = rawImages
+  if (
+    input.skipNavigate
+    && isLikelyXiaohongshuProfileListPage(pageText, input)
+    && media.scope !== 'xiaohongshu-detail'
+  ) {
     return writeArtifacts(fileOps, pathJoin, {
       success: false,
       noteUrl: input.noteUrl,
@@ -444,10 +900,132 @@ export async function collectNote(
       order: input.order,
       imageCount: 0,
       savedDir: input.outputDir,
-      reason: 'no_images',
+      reason: 'detail_not_opened',
+    }, { summary: detail.summary, imageUrls: rawImages.map((img) => img.url) })
+  }
+  if (images.length === 0) {
+    const visibleAccessBlock = detectTerminalPageBlock({ pageText, title: detail.title || title, summary: detail.summary, images: rawImages })
+    if (visibleAccessBlock) {
+      return writeArtifacts(fileOps, pathJoin, {
+        success: false,
+        noteUrl: input.noteUrl,
+        canonicalUrl,
+        openUrl,
+        title,
+        sourceId,
+        order: input.order,
+        imageCount: 0,
+        savedDir: input.outputDir,
+        reason: visibleAccessBlock,
+      }, { summary: detail.summary, imageUrls: rawImages.map((img) => img.url) })
+    }
+    imagesOut = await facade.run('browser_collect_images', { include_hidden: true, limit: 36 })
+    const hiddenCollectErr = parseFacadeError(imagesOut)
+    if (hiddenCollectErr) {
+      return writeArtifacts(fileOps, pathJoin, {
+        success: false,
+        noteUrl: input.noteUrl,
+        canonicalUrl,
+        openUrl,
+        title,
+        sourceId,
+        order: input.order,
+        imageCount: 0,
+        savedDir: input.outputDir,
+        reason: `collect:${hiddenCollectErr}`,
+      }, { summary: detail.summary })
+    }
+    media = extractMediaCollection(imagesOut)
+    rawImages = media.images
+    videoCount = Math.max(videoCount, media.videoCount)
+    rawImagesForAccessBlock = rawImages
+    if (
+      input.skipNavigate
+      && isLikelyXiaohongshuProfileListPage(pageText, input)
+      && media.scope !== 'xiaohongshu-detail'
+    ) {
+      return writeArtifacts(fileOps, pathJoin, {
+        success: false,
+        noteUrl: input.noteUrl,
+        canonicalUrl,
+        openUrl,
+        title,
+        sourceId,
+        order: input.order,
+        imageCount: 0,
+        savedDir: input.outputDir,
+        reason: 'detail_not_opened',
+      }, { summary: detail.summary, imageUrls: rawImages.map((img) => img.url) })
+    }
+    images = filterNoteImageCandidates(rawImages)
+  }
+  if (images.length === 0 && videoCount === 0 && input.skipNavigate && isXiaohongshuTarget(input)) {
+    for (const waitMs of [1000, 1500, 2500]) {
+      await facade.run('browser_wait', { ms: waitMs }).catch(() => '')
+      const retryPageOut = await facade.run('browser_read_page').catch(() => '')
+      if (retryPageOut && !parseFacadeError(retryPageOut)) {
+        pageText = retryPageOut
+        const retryPageBlock = detectTerminalPageBlock({ pageText, title: detail.title || title, summary: detail.summary, images: rawImagesForAccessBlock })
+        if (retryPageBlock) {
+          return writeArtifacts(fileOps, pathJoin, {
+            success: false,
+            noteUrl: input.noteUrl,
+            canonicalUrl,
+            openUrl,
+            title,
+            sourceId,
+            order: input.order,
+            imageCount: 0,
+            savedDir: input.outputDir,
+            reason: retryPageBlock,
+          }, { summary: detail.summary, imageUrls: rawImagesForAccessBlock.map((img) => img.url) })
+        }
+      }
+      const retryVisibleOut = await facade.run('browser_collect_images', { include_hidden: false, limit: 36 })
+      if (parseFacadeError(retryVisibleOut)) break
+      let retryMedia = extractMediaCollection(retryVisibleOut)
+      rawImages = retryMedia.images
+      videoCount = Math.max(videoCount, retryMedia.videoCount)
+      rawImagesForAccessBlock = rawImages
+      images = filterNoteImageCandidates(rawImages)
+      if (images.length > 0 || videoCount > 0) break
+      const retryHiddenOut = await facade.run('browser_collect_images', { include_hidden: true, limit: 36 })
+      if (parseFacadeError(retryHiddenOut)) break
+      retryMedia = extractMediaCollection(retryHiddenOut)
+      rawImages = retryMedia.images
+      videoCount = Math.max(videoCount, retryMedia.videoCount)
+      rawImagesForAccessBlock = rawImages
+      images = filterNoteImageCandidates(rawImages)
+      if (images.length > 0 || videoCount > 0) break
+    }
+  }
+  const imageUrls = images.map((img) => img.url)
+  if (imageUrls.length === 0) {
+    if (videoCount > 0) {
+      return downloadVideoNote(facade, input, pathJoin, fileOps, {
+        title,
+        sourceId,
+        noteDir,
+        openUrl,
+        canonicalUrl,
+        summary: detail.summary,
+        media,
+      })
+    }
+    return writeArtifacts(fileOps, pathJoin, {
+      success: false,
+      noteUrl: input.noteUrl,
+      canonicalUrl,
+      openUrl,
+      title,
+      sourceId,
+      order: input.order,
+      imageCount: 0,
+      savedDir: input.outputDir,
+      reason: videoCount > 0 ? 'skipped_video' : 'no_images',
     }, { summary: detail.summary })
   }
-  const imageAccessBlock = detectAccessBlock({ pageText, title: detail.title || title, summary: detail.summary, images })
+  const imageAccessBlock = detectTerminalPageBlock({ pageText, title: detail.title || title, summary: detail.summary, images: images.length > 0 ? images : rawImagesForAccessBlock })
   if (imageAccessBlock) {
     return writeArtifacts(fileOps, pathJoin, {
       success: false,
@@ -517,4 +1095,147 @@ export async function collectNote(
     savedDir: noteDir,
     files,
   }, { summary: detail.summary, imageUrls })
+}
+
+export async function collectCardNote(
+  facade: NoteCollectFacade,
+  input: CollectNoteInput,
+  pathJoin: (...parts: string[]) => string,
+  fileOps?: NoteCollectFileOps,
+): Promise<NoteCollectResult> {
+  const title = String(input.title || '').replace(/\s+/g, ' ').trim()
+  const sourceId = sanitizeId(input.sourceId || sourceIdFromUrl(input.canonicalUrl || input.noteUrl))
+  if (!title) {
+    return writeArtifacts(fileOps, pathJoin, {
+      success: false,
+      noteUrl: input.noteUrl,
+      canonicalUrl: input.canonicalUrl || input.noteUrl,
+      openUrl: input.openUrl || input.noteUrl,
+      title: `note-${sourceId}`,
+      sourceId,
+      order: input.order,
+      imageCount: 0,
+      savedDir: input.outputDir,
+      reason: 'card_not_found',
+    }, {})
+  }
+
+  const clickOut = await facade.run('browser_click_text', { text: title, exact: false, ...(sourceId ? { href_contains: sourceId } : {}) })
+  const clickErr = parseFacadeError(clickOut)
+  if (clickErr) {
+    return writeArtifacts(fileOps, pathJoin, {
+      success: false,
+      noteUrl: input.noteUrl,
+      canonicalUrl: input.canonicalUrl || input.noteUrl,
+      openUrl: input.openUrl || input.noteUrl,
+      title,
+      sourceId,
+      order: input.order,
+      imageCount: 0,
+      savedDir: input.outputDir,
+      reason: `open_card:${clickErr}`,
+    }, {})
+  }
+  const detailTarget = {
+    title,
+    sourceId,
+    canonicalUrl: input.canonicalUrl || input.noteUrl,
+    noteUrl: input.noteUrl,
+    openUrl: input.openUrl || input.noteUrl,
+  }
+  const detailTab = await waitForTargetDetailTab(facade, detailTarget)
+  const activeTargetConfirmed = activeTabOutputContainsTargetUrl(detailTab.tabsOut, detailTarget)
+  if (!detailTab.opened) {
+    await facade.run('browser_go_back').catch(() => '')
+    return writeArtifacts(fileOps, pathJoin, {
+      success: false,
+      noteUrl: input.noteUrl,
+      canonicalUrl: input.canonicalUrl || input.noteUrl,
+      openUrl: input.openUrl || input.noteUrl,
+      title,
+      sourceId,
+      order: input.order,
+      imageCount: 0,
+      savedDir: input.outputDir,
+      reason: 'detail_not_opened',
+    }, {})
+  }
+  let detailOut = await facade.run('browser_read_page')
+  const detailErr = parseFacadeError(detailOut)
+  if (detailErr) {
+    await facade.run('browser_go_back').catch(() => '')
+    return writeArtifacts(fileOps, pathJoin, {
+      success: false,
+      noteUrl: input.noteUrl,
+      canonicalUrl: input.canonicalUrl || input.noteUrl,
+      openUrl: input.openUrl || input.noteUrl,
+      title,
+      sourceId,
+      order: input.order,
+      imageCount: 0,
+      savedDir: input.outputDir,
+      reason: `verify_detail:${detailErr}`,
+    }, {})
+  }
+  if (isLikelyXiaohongshuProfileListPage(detailOut, input) && !activeTargetConfirmed) {
+    await facade.run('browser_go_back').catch(() => '')
+    return writeArtifacts(fileOps, pathJoin, {
+      success: false,
+      noteUrl: input.noteUrl,
+      canonicalUrl: input.canonicalUrl || input.noteUrl,
+      openUrl: input.openUrl || input.noteUrl,
+      title,
+      sourceId,
+      order: input.order,
+      imageCount: 0,
+      savedDir: input.outputDir,
+      reason: 'detail_not_opened',
+    }, {})
+  }
+  if (!detailMatchesTarget(detailOut, {
+    title,
+    sourceId,
+    canonicalUrl: input.canonicalUrl || input.noteUrl,
+    noteUrl: input.noteUrl,
+  })) {
+    const confirmedTabsOut = await facade.run('browser_get_tabs').catch(() => detailTab.tabsOut)
+    if (!activeTabOutputContainsTargetUrl(confirmedTabsOut, detailTarget)) {
+      await facade.run('browser_go_back').catch(() => '')
+      return writeArtifacts(fileOps, pathJoin, {
+        success: false,
+        noteUrl: input.noteUrl,
+        canonicalUrl: input.canonicalUrl || input.noteUrl,
+        openUrl: input.openUrl || input.noteUrl,
+        title,
+        sourceId,
+        order: input.order,
+        imageCount: 0,
+        savedDir: input.outputDir,
+        reason: 'detail_mismatch',
+      }, {})
+    }
+  }
+  const result = await collectNote(facade, { ...input, skipNavigate: true }, pathJoin, fileOps)
+  const returnOut = await facade.run('browser_go_back').catch((error) => JSON.stringify({
+    ok: false,
+    errorCode: 'return_failed',
+    message: error instanceof Error ? error.message : String(error),
+  }))
+  const returnErr = parseFacadeError(returnOut)
+  if (returnErr) {
+    return writeArtifacts(fileOps, pathJoin, {
+      success: false,
+      noteUrl: input.noteUrl,
+      canonicalUrl: input.canonicalUrl || input.noteUrl,
+      openUrl: input.openUrl || input.noteUrl,
+      title: result.title || title,
+      sourceId,
+      order: input.order,
+      imageCount: 0,
+      savedDir: input.outputDir,
+      reason: `return_list:${returnErr}`,
+    }, {})
+  }
+  await facade.run('browser_wait', { ms: 500 }).catch(() => '')
+  return result
 }

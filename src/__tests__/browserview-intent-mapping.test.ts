@@ -33,7 +33,12 @@ function makeStubView(label: string): BrowserHostView {
   return { __label: label } as unknown as BrowserHostView
 }
 
-function makeShellService(opts: { tabs: BrowserShellTabRecord[]; activeTabId: string | null; shouldPresent?: boolean }) {
+function makeShellService(opts: {
+  tabs: BrowserShellTabRecord[]
+  activeTabId: string | null
+  shouldPresent?: boolean
+  getFrozenBounds?: (tabId: string) => BrowserRect | null
+}) {
   const tabsMap = new Map(opts.tabs.map((t) => [t.id, t]))
   const calls: HostCalls = {
     shown: [],
@@ -69,6 +74,7 @@ function makeShellService(opts: { tabs: BrowserShellTabRecord[]; activeTabId: st
       splitViewBounds = b
       calls.splitViewBounds = b
     },
+    getFrozenBounds: opts.getFrozenBounds,
     shouldPresentHosts: () => opts.shouldPresent !== false,
     isAllowedUrl: () => true,
     createTab: async () => ({ success: true, tabId: 'created' }),
@@ -260,6 +266,26 @@ test('applyIntent kind=set-bounds defaults syncMode to settled when omitted', ()
   assert.equal(calls.applied[0].syncMode, 'settled')
 })
 
+test('applyIntent kind=set-bounds preserves frozen tab bounds during collection', () => {
+  const v1 = makeStubView('t1')
+  const frozen = { x: 8, y: 9, width: 640, height: 480 }
+  const { service, calls } = makeShellService({
+    tabs: [makeTab('t1', v1)],
+    activeTabId: 't1',
+    getFrozenBounds: (tabId) => tabId === 't1' ? frozen : null,
+  })
+  service.applyIntent({
+    kind: 'set-bounds',
+    intentId: 7,
+    tabId: 't1',
+    bounds: { x: 100, y: 200, w: 320, h: 240 },
+    syncMode: 'transient',
+  })
+
+  assert.deepEqual(calls.applied[0].bounds, frozen)
+  assert.deepEqual(calls.viewBounds, { x: 100, y: 200, width: 320, height: 240 })
+})
+
 test('applyIntent kind=secondary-set-bounds applies bounds to the secondary tab and records split state', () => {
   const v1 = makeStubView('t1')
   const v2 = makeStubView('t2')
@@ -286,6 +312,29 @@ test('applyIntent kind=secondary-set-bounds applies bounds to the secondary tab 
   assert.deepEqual(calls.splitViewBounds, { x: 400, y: 0, width: 400, height: 600 })
   // Primary `viewBounds` is NOT clobbered by a secondary intent.
   assert.equal(calls.viewBounds, null)
+})
+
+test('applyIntent kind=secondary-set-bounds preserves frozen split tab bounds during collection', () => {
+  const v1 = makeStubView('t1')
+  const v2 = makeStubView('t2')
+  const frozen = { x: 420, y: 12, width: 580, height: 620 }
+  const { service, calls } = makeShellService({
+    tabs: [makeTab('t1', v1), makeTab('t2', v2)],
+    activeTabId: 't1',
+    getFrozenBounds: (tabId) => tabId === 't2' ? frozen : null,
+  })
+
+  service.applyIntent({
+    kind: 'secondary-set-bounds',
+    intentId: 8,
+    tabId: 't2',
+    bounds: { x: 200, y: 0, w: 300, h: 600 },
+    syncMode: 'transient',
+  })
+
+  assert.deepEqual(calls.shown[0].bounds, frozen)
+  assert.deepEqual(calls.applied[0].bounds, frozen)
+  assert.deepEqual(calls.splitViewBounds, { x: 200, y: 0, width: 300, height: 600 })
 })
 
 test('applyIntent kind=secondary-set-bounds detaches the previous secondary tab when replacing split state', () => {

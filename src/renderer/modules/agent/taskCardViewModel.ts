@@ -44,6 +44,7 @@ export interface TaskCardRunLike {
   memoryCapture?: ScopeRunMemoryCapture | null
   executionDiagnostics?: ScopeRunState['executionDiagnostics']
   taskType?: TaskProjectionRecordData['taskType']
+  module?: TaskProjectionRecordData['module'] | null
   interactionState?: TaskProjectionRecordData['interactionState']
   budgetUsagePercent?: number | null
   stepBudget?: {
@@ -380,6 +381,7 @@ function hasRecentArtifact(run: TaskCardRunLike): boolean {
 
 function hasBackgroundSignal(run: TaskCardRunLike): boolean {
   if (hasBlockedSignal(run)) return false
+  if (run.phase === 'cancelled' || run.status === 'killed') return false
   const activeBackground = run.waitingFor === 'background'
     || run.terminalReason === 'checkpoint_background'
   const activeChild = hasActiveChildTask(run)
@@ -482,6 +484,13 @@ export function deriveTaskCardRuntimeState(run: TaskCardRunLike): TaskCardRuntim
       actionSet: gateActionsByCanResume(['continue', 'retry', 'cancel'], run.canResume),
     }
   }
+  if (run.phase === 'cancelled' || run.status === 'killed') {
+    return {
+      visualState: 'done',
+      statusLabel: taskStatusLabel(run.status) || taskPhaseLabel(run.phase),
+      actionSet: [],
+    }
+  }
   if (
     (run.waitingFor && run.waitingFor !== 'none')
     || hasBlockedSignal(run)
@@ -502,13 +511,6 @@ export function deriveTaskCardRuntimeState(run: TaskCardRunLike): TaskCardRuntim
       actionSet: gateActionsByCanResume(baseActions, run.canResume, {
         allowUserInteractionContinue: isAwaitingUserInteractionState(run),
       }),
-    }
-  }
-  if (run.phase === 'cancelled' || run.status === 'killed') {
-    return {
-      visualState: 'done',
-      statusLabel: taskStatusLabel(run.status) || taskPhaseLabel(run.phase),
-      actionSet: [],
     }
   }
   if (run.phase === 'done' || run.status === 'completed') {

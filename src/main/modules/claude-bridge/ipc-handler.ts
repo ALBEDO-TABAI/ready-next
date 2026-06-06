@@ -8,8 +8,7 @@ import { AgentManager } from './agent-manager'
 // (`agent:getCapabilityRuntimeSnapshot` payload type) moved into
 // `agentRuntimeGroup`.
 import { BrowserController } from '../browser-engine/ipc-handler'
-import type { BrowserTaskProjectionSink } from '../browser-engine/content-task-runner'
-import type { TaskProjectionRecord } from '../agent-control/contracts/run-contracts'
+import { makeNoteCollectProjectionSink } from './browser-collection-projection-sink'
 import { readFileSync, statSync } from 'fs'
 import { basename, extname } from 'path'
 import { AgentControlRuntime } from '../agent-control/runtime-core/runtime'
@@ -562,90 +561,6 @@ export async function cleanupAgentRuntime(): Promise<void> {
   // and prevent GC. Idempotent — safe to call when no emitter was set.
   setReferenceHintChangeEmitter(null)
   registerSkillReferenceInlinedEmitter(null)
-}
-
-/**
- * Project a note_collect background task into the agent TaskProjection store so
- * it shows as a native task card in the dispatching conversation's chat
- * (chat-side-collection-task-indicator plan §3.3). browser-engine stays
- * decoupled: it emits a minimal BrowserTaskProjectionInput; this maps it to a
- * TaskProjectionRecord. waitingFor:'background' puts the card in the chat's
- * background pile while running.
- */
-const NOTE_COLLECT_TERMINAL_DWELL_MS = 30_000
-
-function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime): BrowserTaskProjectionSink {
-  // Write a projection. `createIfMissing=false` (the delayed settle step) skips
-  // a card the user already cleared (deleteByScope) so a late timer can't
-  // resurrect it (Codex result-review — no zombie projections).
-  const write = (
-    input: { taskId: string; scopeId: string; title: string; summary: string; total?: number; completed?: number; failed?: number },
-    status: TaskProjectionRecord['status'],
-    waitingFor: 'background' | 'none',
-    createIfMissing: boolean,
-  ): void => {
-    const store = activeRuntime.getTaskProjectionStore()
-    const existing = store.get(input.taskId)
-    if (!existing && !createIfMissing) return
-    const now = new Date().toISOString()
-    // Progress is conveyed via taskSummary; the strict ScopeRunSkillProgress
-    // shape is not a natural fit for note-count progress, so we omit it.
-    const record: TaskProjectionRecord = {
-      taskId: input.taskId,
-      scopeId: input.scopeId,
-      runId: input.taskId,
-      taskType: 'multi_step_task',
-      module: 'browser',
-      taskTitle: input.title,
-      taskSummary: input.summary,
-      status,
-      interactionState: waitingFor === 'background' ? 'running' : 'suspended',
-      waitingFor,
-      steps: [],
-      progress: {
-        stage: status,
-        total: input.total ?? 0,
-        completed: input.completed ?? 0,
-        coverage: input.total ? (input.completed ?? 0) / input.total : null,
-        fingerprint: null,
-        updatedAt: now,
-        lastError: status === 'failed' ? input.summary : null,
-        detail: `失败 ${input.failed ?? 0}`,
-      },
-      createdAt: existing?.createdAt || now,
-      updatedAt: now,
-    }
-    if (existing) store.update(input.taskId, record)
-    else store.create(record)
-  }
-  return {
-    upsert(input): void {
-      if (!input.scopeId) return
-      if (input.state === 'running') {
-        write(input, 'running', 'background', true)
-        return
-      }
-      if (input.state === 'paused') {
-        write(input, 'recoverable_paused', 'none', true)
-        return
-      }
-      // Terminal: a 'completed' status is short-circuited out of the chat's
-      // background pile immediately, so the card would vanish the instant
-      // collection finishes (Codex result-review #C). Dwell it in the pile
-      // (still 'running', completion conveyed via the ✓ summary) for a brief
-      // window so the user sees it finish, then settle to the real terminal
-      // status (leaves the pile).
-      write(input, 'running', 'background', true)
-      const terminal: TaskProjectionRecord['status'] = input.state === 'completed'
-        ? 'completed'
-        : input.state === 'failed'
-          ? 'failed'
-          : 'killed'
-      setTimeout(() => {
-        write(input, terminal, 'none', false)
-      }, NOTE_COLLECT_TERMINAL_DWELL_MS)
-    },
-  }
 }
 
 export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWindow, browserController?: BrowserController): void {

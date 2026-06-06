@@ -32,6 +32,7 @@ export const BROWSER_COLLECTION_SUBSET_TOOL_NAMES: readonly string[] = [
   'browser_wait',
   'browser_wait_for_condition',
   'browser_collect_images',
+  'browser_resolve_video',
   'browser_extract_structured',
   'browser_scroll_collect',
   'browser_visible_collect',
@@ -50,6 +51,21 @@ export function isBrowserCollectionSubsetTool(toolName: string): boolean {
   return BROWSER_COLLECTION_SUBSET_SET.has(toolName)
 }
 
+export const BROWSER_BATCH_COLLECTION_WORKFLOW_TOOL_NAMES: readonly string[] = [
+  'browser_visible_collect',
+  'browser_collect_notes',
+  'browser_get_task',
+  'browser_resume_task',
+  'browser_cancel_task',
+  'browser_ask_user_takeover',
+]
+
+const BROWSER_BATCH_COLLECTION_WORKFLOW_TOOL_SET = new Set(BROWSER_BATCH_COLLECTION_WORKFLOW_TOOL_NAMES)
+
+export function isBrowserBatchCollectionWorkflowTool(toolName: string): boolean {
+  return BROWSER_BATCH_COLLECTION_WORKFLOW_TOOL_SET.has(toolName)
+}
+
 // High-risk-control / login-walled platforms where collection is the primary
 // value. Used both for intent detection and (downstream) for the execution-layer
 // script blacklist (plan §4.4).
@@ -66,6 +82,12 @@ const COLLECTION_VERB = /(?:采集|抓取|爬取|爬|收集|下载|保存|整理
 // browser surface (which are checked separately).
 const WEB_OBJECT =
   /(?:页面|网页|帖子|笔记|视频|短视频|评论|博主|主页|账号|feed|信息流|图集|动态|作品|话题|标签)/
+
+const BATCH_CONTENT_OBJECT =
+  /(?:笔记|帖子|作品|动态|短视频|视频|图集|内容|页面|卡片|列表|信息流|feed)/
+
+const BATCH_SCOPE_SIGNAL =
+  /(?:每篇|逐篇|一篇篇|逐个|每个|全部|所有|全量|批量|多篇|多条|主页|账号|博主|列表|信息流|feed|冻结目标清单|后台采集|逐篇采集)/
 
 // Strong document signals that should keep the turn in document mode even when
 // it mentions images/downloads (avoids mis-exposing browser on doc tasks).
@@ -92,6 +114,16 @@ export function resolveBrowserCollectionIntent(text: string | null | undefined):
   }
 
   return hasPlatform || hasExplicitBrowser || hasCollectionOnWeb
+}
+
+export function resolveBrowserBatchCollectionIntent(text: string | null | undefined): boolean {
+  const t = String(text || '')
+  if (!resolveBrowserCollectionIntent(t)) return false
+  return (
+    (BATCH_SCOPE_SIGNAL.test(t) && BATCH_CONTENT_OBJECT.test(t))
+    || /(?:主页|账号|博主|这个号).{0,32}(?:笔记|帖子|作品|动态|短视频|视频|内容)/i.test(t)
+    || /(?:笔记|帖子|作品|动态|短视频|视频|内容).{0,32}(?:每篇|逐篇|全部|所有|全量|批量|多篇|多条)/i.test(t)
+  )
 }
 
 /** Platform pattern reused by the execution-layer high-control policy (§4.4). */

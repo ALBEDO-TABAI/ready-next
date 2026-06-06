@@ -1,4 +1,4 @@
-import { BrowserWindow, shell, session } from 'electron'
+import { BrowserWindow, ipcMain, shell, session } from 'electron'
 import { join } from 'node:path'
 import { BrowserAppShortcutBridgeService } from './app-shortcut-service'
 import { BrowserAutomationService } from './automation-service'
@@ -16,6 +16,7 @@ import type {
 } from './capability-types'
 import { BrowserContentTaskRunner, type BrowserTaskProjectionSink } from './content-task-runner'
 import { ScopedBrowserFacade } from './scoped-browser-facade'
+import type { BrowserCollectionTarget } from './collection-targets'
 import { AgentTabControlGate } from './agent-tab-control-gate'
 import { getBrowserWriteLeaseService } from './agent-browser-lease-singleton'
 import type { AgentBrowserSurface } from './agent-browser-errors'
@@ -68,6 +69,9 @@ import { BrowserTabShellService } from './tab-shell-service'
 import { BrowserTaskPersistenceService } from './task-persistence-service'
 import { BrowserUtilityMenuService } from './utility-menu-service'
 import { BrowserWindowOpenService } from './window-open-service'
+import { BrowserCollectionConsentStore, type BrowserCollectionConsentVia } from './browser-collection-consent'
+import { buildCollectionHandoffPlanFromTask } from './collection-handoff'
+import { resolveHighControlCollectionTarget, resolveSourceCollectionTarget } from './collection-routing'
 import { withHtmlInCanvasWebPreferences } from '../app-control/html-in-canvas-feature'
 import {
   isAllowedBrowserURL,
@@ -122,6 +126,7 @@ export class BrowserController {
   viewBounds: BrowserRect = { x: 0, y: 0, width: 800, height: 600 }
   splitViewBounds: BrowserRect = { x: 0, y: 0, width: 800, height: 600 }
   previewBounds: BrowserRect = { x: 0, y: 0, width: 800, height: 600 }
+  private readonly frozenBoundsByTab = new Map<string, { bounds: BrowserRect; tokens: Set<string> }>()
   private readonly browserVisibilityState = new BrowserVisibilityCommandState()
   private readonly browserHostKind: BrowserHostKind
   private mainWindow: BrowserWindow
@@ -137,6 +142,7 @@ export class BrowserController {
   private readonly hostLayoutService: BrowserHostLayoutService
   private readonly pageBackgroundService: BrowserPageBackgroundService
   private readonly automationService: BrowserAutomationService
+  private readonly collectionConsentStore = new BrowserCollectionConsentStore()
   private readonly capabilityService: BrowserCapabilityService
   private readonly contentTaskRunner: BrowserContentTaskRunner
   /** Freeze-then-confirm supervision gate for the background agent tab (plan §3.6). */
@@ -233,8 +239,10 @@ export class BrowserController {
       // The collector facade is built per-task here (the controller owns
       // executeBrowserTool + the control gate); executeBrowserTool is imported
       // lazily to avoid a static cycle with tools/browser-tools (plan §3.4).
-      ({ agentTabId, leaseId, surface }) => ({
-        facade: new ScopedBrowserFacade({
+      ({ agentTabId, leaseId, surface }) => {
+        const releaseLayoutLock = this.acquireTabBoundsLock(agentTabId, `collection:${leaseId}`)
+        return {
+          facade: new ScopedBrowserFacade({
           agentTabId,
           leaseService: getBrowserWriteLeaseService(),
           leaseId,
@@ -248,12 +256,14 @@ export class BrowserController {
               leaseId: gateLeaseId,
             })
           },
-        }),
-        // Only a CONFIRMED freeze cancels the background task; pending_confirm
-        // blocks writes (via the facade's isWriteBlocked) but must not cancel
-        // before the user confirms (Codex result-review #1 residual).
-        isControlFrozen: () => this.agentTabControlGate.isFrozen(),
-      }),
+          }),
+          // Only a CONFIRMED freeze cancels the background task; pending_confirm
+          // blocks writes (via the facade's isWriteBlocked) but must not cancel
+          // before the user confirms (Codex result-review #1 residual).
+          isControlFrozen: () => this.agentTabControlGate.isFrozen(),
+          releaseLayoutLock,
+        }
+      },
     )
     this.tabMetaService = new BrowserTabMetaService({
       tabs: this.tabs,
@@ -308,6 +318,7 @@ export class BrowserController {
       setSplitViewBounds: (bounds) => {
         this.splitViewBounds = bounds
       },
+      getFrozenBounds: (tabId) => this.getFrozenBoundsForTab(tabId),
       shouldPresentHosts: () => this.browserVisibilityState.shouldPresentHosts(),
       isAllowedUrl: (url) => isAllowedBrowserURL(url, { allowLocalHtml: true }),
       createTab: (url) => this.createTab(url),
@@ -513,6 +524,62 @@ export class BrowserController {
       this.showHost(activeTab.view, this.viewBounds)
       this.applyBounds(activeTab.view, 'settled')
     }
+  }
+
+  private currentBoundsForTab(tabId: string): BrowserRect {
+    if (tabId === this.splitTabId) return { ...this.splitViewBounds }
+    if (tabId === this.activeTabId) return { ...this.viewBounds }
+    const tab = this.tabs.get(tabId)
+    const readBounds = (tab?.view as unknown as { getBounds?: () => BrowserRect })?.getBounds
+    if (typeof readBounds === 'function') {
+      try {
+        const bounds = readBounds.call(tab?.view)
+        if (
+          bounds &&
+          Number(bounds.width) > 20 &&
+          Number(bounds.height) > 20 &&
+          Number(bounds.x) > -10000 &&
+          Number(bounds.y) > -10000
+        ) {
+          return {
+            x: Math.round(Number(bounds.x)),
+            y: Math.round(Number(bounds.y)),
+            width: Math.round(Number(bounds.width)),
+            height: Math.round(Number(bounds.height)),
+          }
+        }
+      } catch {
+        // silent-catch: fall back to the last primary BrowserView bounds.
+      }
+    }
+    return { ...this.viewBounds }
+  }
+
+  private acquireTabBoundsLock(tabId: string, token: string): () => void {
+    const existing = this.frozenBoundsByTab.get(tabId)
+    if (existing) {
+      existing.tokens.add(token)
+      this.logBrowserDiag(`[browser-host][bounds-lock] reuse tab=${tabId} token=${token} x=${existing.bounds.x} y=${existing.bounds.y} w=${existing.bounds.width} h=${existing.bounds.height}`)
+      return () => this.releaseTabBoundsLock(tabId, token)
+    }
+    const bounds = this.currentBoundsForTab(tabId)
+    this.frozenBoundsByTab.set(tabId, { bounds, tokens: new Set([token]) })
+    this.logBrowserDiag(`[browser-host][bounds-lock] acquire tab=${tabId} token=${token} x=${bounds.x} y=${bounds.y} w=${bounds.width} h=${bounds.height}`)
+    return () => this.releaseTabBoundsLock(tabId, token)
+  }
+
+  private releaseTabBoundsLock(tabId: string, token: string): void {
+    const existing = this.frozenBoundsByTab.get(tabId)
+    if (!existing) return
+    existing.tokens.delete(token)
+    if (existing.tokens.size > 0) return
+    this.frozenBoundsByTab.delete(tabId)
+    this.logBrowserDiag(`[browser-host][bounds-lock] release tab=${tabId} token=${token}`)
+  }
+
+  private getFrozenBoundsForTab(tabId: string): BrowserRect | null {
+    const existing = this.frozenBoundsByTab.get(tabId)
+    return existing ? { ...existing.bounds } : null
   }
 
   private clearSplitTabHost(): void {
@@ -736,23 +803,86 @@ export class BrowserController {
   async startVisibleCollection(payload: Record<string, unknown>, scopeId?: string): Promise<BrowserCapabilityTaskHandle> {
     const requestedTabId = typeof payload.tabId === 'string' ? payload.tabId : null
     const tabUrl = requestedTabId ? this.tabs.get(requestedTabId)?.url || '' : ''
-    const targetUrl = String(payload.url || tabUrl || this.getActiveTab()?.url || '').trim()
-    const agentTabId = await this.ensureAgentTab()
+    const activeTab = this.getActiveTab()
+    const targetUrl = String(payload.url || tabUrl || activeTab?.url || '').trim()
+    const highControl = payload.highControl === true || isHighControlPlatformText(targetUrl || tabUrl || activeTab?.url || '')
+    const visibleTarget = resolveHighControlCollectionTarget({
+      highControl,
+      requestedTabId,
+      activeTabId: activeTab?.id || null,
+      activeTabUrl: activeTab?.url || null,
+    })
+    const executionTarget = visibleTarget ?? {
+      tabId: await this.ensureAgentTab(),
+      surface: 'agent-view' as AgentBrowserSurface,
+      usesVisibleTab: false,
+    }
     return this.contentTaskRunner.startTask({
       kind: 'visible_collect',
       payload: {
         ...payload,
         url: targetUrl || undefined,
-        tabId: agentTabId,
-        surface: 'agent-view' as AgentBrowserSurface,
+        tabId: executionTarget.tabId,
+        surface: executionTarget.surface,
         leaseId: undefined,
         ...(scopeId && scopeId.trim() ? { scopeId: scopeId.trim() } : {}),
       },
     })
   }
 
+  createSyntheticVisibleCollection(payload: {
+    targets: BrowserCollectionTarget[]
+    targetUrl?: string
+    outputRootDir?: string
+    sourceMessageIds?: string[]
+  }, scopeId?: string): BrowserCapabilityTaskHandle {
+    return this.contentTaskRunner.createSyntheticVisibleCollection({
+      ...payload,
+      scopeId: scopeId?.trim() || undefined,
+    })
+  }
+
   async getTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
     return this.contentTaskRunner.getTask(taskId)
+  }
+
+  getTaskPayload(taskId: string): Record<string, unknown> | null {
+    return this.contentTaskRunner.getTaskPayload(taskId)
+  }
+
+  async findCollectionTaskBySourceTaskId(sourceTaskId: string): Promise<BrowserCapabilityTaskHandle | null> {
+    const sourceId = sourceTaskId.trim()
+    if (!sourceId) return null
+    const tasks = [
+      ...(await this.contentTaskRunner.listTasks('card_loop')),
+      ...(await this.contentTaskRunner.listTasks('note_collect')),
+    ]
+    const matches = tasks.filter((task) => {
+      const payload = this.contentTaskRunner.getTaskPayload(task.taskId)
+      const plan = payload?.plan && typeof payload.plan === 'object' ? payload.plan as Record<string, unknown> : null
+      const result = task.result && typeof task.result === 'object' ? task.result as Record<string, unknown> : null
+      const status = task.status
+      if (status === 'cancelled' || status === 'failed') return false
+      return plan?.sourceTaskId === sourceId || result?.sourceTaskId === sourceId
+    })
+    return matches.sort((a, b) => String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')))[0] || null
+  }
+
+  private async startCollectionFromCompletedVisibleTask(
+    sourceTask: BrowserCapabilityTaskHandle,
+  ): Promise<BrowserCapabilityTaskHandle | null> {
+    const handoff = buildCollectionHandoffPlanFromTask(sourceTask)
+    if (!handoff) return null
+    const existing = await this.findCollectionTaskBySourceTaskId(sourceTask.taskId)
+    if (existing) return existing
+    const sourcePayload = this.contentTaskRunner.getTaskPayload(sourceTask.taskId)
+    const scopeId = typeof sourcePayload?.scopeId === 'string' && sourcePayload.scopeId.trim()
+      ? sourcePayload.scopeId.trim()
+      : undefined
+    if (handoff.strategy === 'card_loop') {
+      return this.startCardLoopCollection(handoff.plan, scopeId)
+    }
+    return this.startNoteCollection(handoff.plan, scopeId)
   }
 
   async resumeTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
@@ -846,11 +976,12 @@ export class BrowserController {
 
   /** Agent-owned browser collection tasks (for the supervision panel). */
   async listAgentCollectionTasks(): Promise<BrowserCapabilityTaskHandle[]> {
-    const [visible, notes] = await Promise.all([
+    const [visible, notes, cardLoop] = await Promise.all([
       this.contentTaskRunner.listTasks('visible_collect'),
       this.contentTaskRunner.listTasks('note_collect'),
+      this.contentTaskRunner.listTasks('card_loop'),
     ])
-    return [...visible, ...notes]
+    return [...visible, ...notes, ...cardLoop]
       .filter((task) => {
         const payload = this.contentTaskRunner.getTaskPayload(task.taskId)
         return payload?.surface === 'agent-view'
@@ -896,6 +1027,33 @@ export class BrowserController {
     })
   }
 
+  async startCardLoopCollection(plan: Record<string, unknown>, scopeId?: string): Promise<BrowserCapabilityTaskHandle> {
+    const withStrategy: Record<string, unknown> = { ...plan, strategy: 'card_loop' }
+    const isHighControl = isHighControlPlatformText(JSON.stringify(withStrategy))
+    const cap = isHighControl ? 1 : 2
+    const active = (await this.contentTaskRunner.listTasks('card_loop'))
+      .filter((task) => task.status === 'running' || task.status === 'queued')
+    if (active.length >= cap) {
+      throw new Error(
+        `已有 ${active.length} 个逐张点开采集任务在运行（上限 ${cap}${isHighControl ? '，高风控平台限单并发' : ''}），请等当前任务完成后再发起。`,
+      )
+    }
+    const sourceTaskId = typeof withStrategy.sourceTaskId === 'string' ? withStrategy.sourceTaskId.trim() : ''
+    const sourcePayload = sourceTaskId ? this.contentTaskRunner.getTaskPayload(sourceTaskId) : null
+    const sourceTarget = resolveSourceCollectionTarget({ highControl: isHighControl, sourcePayload })
+    const agentTabId = sourceTarget?.tabId ?? await this.ensureAgentTab()
+    const surface = sourceTarget?.surface ?? 'agent-view'
+    return this.contentTaskRunner.startTask({
+      kind: 'card_loop',
+      payload: {
+        agentTabId,
+        surface,
+        plan: withStrategy,
+        ...(scopeId && scopeId.trim() ? { scopeId: scopeId.trim() } : {}),
+      },
+    })
+  }
+
   /** Supervision (plan §3.6): two-step interrupt of the agent's browser control. */
   requestAgentInterruption(): { state: ReturnType<AgentTabControlGate['getState']>; pending: boolean } {
     const pending = this.agentTabControlGate.requestInterruption()
@@ -912,6 +1070,7 @@ export class BrowserController {
       const tasks = [
         ...(await this.contentTaskRunner.listTasks('visible_collect')),
         ...(await this.contentTaskRunner.listTasks('note_collect')),
+        ...(await this.contentTaskRunner.listTasks('card_loop')),
       ].filter((task) => {
         const payload = this.contentTaskRunner.getTaskPayload(task.taskId)
         return payload?.surface === 'agent-view'
@@ -1665,6 +1824,30 @@ export class BrowserController {
   ): Promise<BrowserDownloadUrlToDirectoryResult> {
     return this.downloadService.downloadUrlToDirectory(session.fromPartition('persist:browser'), payload)
   }
+
+  confirmCollectionConsent(payload: {
+    requestId?: string
+    confirmedVia?: BrowserCollectionConsentVia
+  }): { success: boolean; data?: unknown; error?: string } {
+    const requestId = String(payload?.requestId || '').trim()
+    const confirmedVia = String(payload?.confirmedVia || '').trim()
+    if (!requestId) return { success: false, error: 'Missing requestId' }
+    if (confirmedVia !== 'ask_user_questions' && confirmedVia !== 'ui_action') {
+      return { success: false, error: 'Invalid confirmedVia' }
+    }
+    const record = this.collectionConsentStore.confirmPendingRequest(requestId, confirmedVia)
+    if (!record) return { success: false, error: 'Collection consent request not found' }
+    return { success: true, data: record }
+  }
+
+  async resumeBrowserTask(payload: { taskId?: string }): Promise<{ success: boolean; data?: unknown; error?: string }> {
+    const taskId = String(payload?.taskId || '').trim()
+    if (!taskId) return { success: false, error: 'Missing taskId' }
+    const task = await this.resumeTask(taskId)
+    if (!task) return { success: false, error: 'Browser task not found' }
+    const downstreamTask = await this.startCollectionFromCompletedVisibleTask(task)
+    return { success: true, data: downstreamTask || task }
+  }
 }
 
 export function setupBrowserIPC(
@@ -1701,15 +1884,29 @@ export function setupBrowserIPC(
     executeJS: (tabId, code) => controller.executeJS(tabId, code),
   })
   setupBrowserClipDraggedTabIPC({
-    sendToRenderer: (channel, data) => controller.sendToRenderer(channel, data),
+    sendToRenderer: (_channel, data) => controller.sendToRenderer('clip:backgroundUpdate', data),
   })
   setupBrowserContentStudyIPC({
-    sendToRenderer: (channel, data) => controller.sendToRenderer(channel, data),
+    sendToRenderer: (channel, data) => {
+      if (channel === 'clip:backgroundUpdate') {
+        controller.sendToRenderer('clip:backgroundUpdate', data)
+        return
+      }
+      if (channel === 'clip:contentStudyUpdate') {
+        controller.sendToRenderer('clip:contentStudyUpdate', data)
+      }
+    },
   })
   setupBrowserFastCardIPC({
     getMainWindow: () => controller.getMainWindow(),
     preloadPath: options?.preloadPath || join(__dirname, '../preload/index.mjs'),
     rendererFile: options?.rendererFile || join(__dirname, '../renderer/index.html'),
+  })
+  ipcMain.handle('browser:confirmCollectionConsent', (_, payload: { requestId?: string; confirmedVia?: BrowserCollectionConsentVia }) => {
+    return controller.confirmCollectionConsent(payload)
+  })
+  ipcMain.handle('browser:resumeTask', (_, payload: { taskId?: string }) => {
+    return controller.resumeBrowserTask(payload)
   })
 
   return controller

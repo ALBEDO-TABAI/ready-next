@@ -15,11 +15,12 @@ import {
   recordNoteResult,
   createCollectionLoopState,
   type CollectionPlan,
+  type CollectionNote,
   type CollectionLoopState,
   type CollectionNoteOutput,
   type CollectionStopReason,
 } from './agent-collection-plan'
-import { collectNote, type NoteCollectFacade, type NoteCollectFileOps } from './browser-collector-actions'
+import { collectCardNote, collectNote, type NoteCollectFacade, type NoteCollectFileOps, type NoteCollectResult } from './browser-collector-actions'
 
 export interface BrowserCollectionProgress {
   total: number
@@ -49,6 +50,7 @@ export interface BrowserCollectionDeps {
    * layer reports counts, not bytes. 0/undefined = no budget.
    */
   maxTotalImages?: number
+  strategy?: 'url_batch' | 'card_loop'
 }
 
 function defaultSleep(ms: number): Promise<void> {
@@ -125,7 +127,8 @@ export async function runBrowserCollection(
     const canonicalUrl = note.canonicalUrl || note.url
     const openUrl = note.openUrl || note.url
     const noteTitle = normalizedTitle(note.title)
-    const result = await collectNote(
+    const collectOne = deps.strategy === 'card_loop' ? collectCardNote : collectNote
+    let result = await collectOne(
       deps.facade,
       {
         noteUrl: openUrl,
@@ -142,6 +145,27 @@ export async function runBrowserCollection(
       deps.pathJoin,
       deps.fileOps,
     )
+    if (deps.strategy === 'card_loop' && result.reason === 'detail_not_opened' && plan.targetProfileUrl) {
+      await deps.facade.run('browser_navigate', { url: plan.targetProfileUrl }).catch(() => '')
+      await sleep(Math.max(800, Math.min(1500, interNoteDelayMs || 1000)))
+      result = await collectOne(
+        deps.facade,
+        {
+          noteUrl: openUrl,
+          canonicalUrl,
+          openUrl,
+          title: note.title,
+          titleConfidence: note.titleConfidence,
+          sourceId: note.sourceId,
+          order: note.order ?? step.index + 1,
+          folderName: note.folderName,
+          duplicateTitle: note.duplicateTitle ?? (noteTitle ? (titleCounts.get(noteTitle) || 0) > 1 : false),
+          outputDir: plan.outputRootDir,
+        },
+        deps.pathJoin,
+        deps.fileOps,
+      )
+    }
     if (result.reason === 'needs_verification') {
       await deps.onCheckpoint?.(state, progressOf(plan, state, note.title ?? note.url, 'needs_verification'))
       deps.onProgress?.(progressOf(plan, state, null, 'needs_verification'))
@@ -161,10 +185,13 @@ export async function runBrowserCollection(
         success: result.success,
         savedDir: result.savedDir,
         imageCount: result.imageCount,
+        videoCount: result.videoCount,
+        mediaKind: result.mediaKind,
         notePath: result.notePath,
         manifestPath: result.manifestPath,
         files: result.files,
         reason: result.reason,
+        kind: result.mediaKind === 'video' ? 'video' : note.kind,
       },
     })
     await deps.onCheckpoint?.(state, progressOf(plan, state, note.title ?? note.url, null))

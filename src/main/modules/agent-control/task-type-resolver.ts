@@ -1,4 +1,5 @@
 import type { CapabilityRuntimeSnapshot } from '../../../shared/ai-capability-runtime'
+import { resolveBrowserBatchCollectionIntent } from '../../../shared/browser-collection-intent'
 import type { IntentClassification } from './intent-classifier'
 import type { RequestEnvelope } from './contracts/request-envelope'
 import type { TaskTypeResolution } from './contracts/run-contracts'
@@ -24,11 +25,30 @@ export function resolveTaskType(params: {
   const normalized = userText.toLowerCase()
   const browserAvailable = params.capabilities.environment.browserHostAvailable
   const feishuConnected = params.capabilities.environment.feishuConnected
+  const hasBrowserBatchCollection = resolveBrowserBatchCollectionIntent(userText)
   const hasConcreteBrowserWork =
     params.intent.actionSignals.length > 0
     || params.envelope.environmentHints.hasAttachments
     || /https?:\/\/|www\./i.test(userText)
     || params.intent.objectSignals.some((signal) => /browser-live-info/i.test(signal))
+
+  if (hasBrowserBatchCollection) {
+    if (!browserAvailable) {
+      return {
+        taskType: 'direct_answer',
+        executionChain: 'direct',
+        degradationReason: 'browser_host_unavailable',
+        requiresPlanner: false,
+        preferredExecutor: 'none',
+      }
+    }
+    return {
+      taskType: 'multi_step_task',
+      executionChain: 'tool_loop',
+      requiresPlanner: false,
+      preferredExecutor: 'browser',
+    }
+  }
 
   if (params.intent.primaryDomain === 'generic' && params.intent.confidence === 'low' && params.intent.actionSignals.length === 0) {
     return {

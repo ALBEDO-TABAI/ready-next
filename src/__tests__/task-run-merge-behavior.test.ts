@@ -81,3 +81,47 @@ test('mergeTaskRuns keeps multiple persisted projections in the same scope visib
   assert.deepEqual(byChildRunId.get('child-a')?.resumableActions, ['continue', 'cancel'])
   assert.deepEqual(byChildRunId.get('child-b')?.resumableActions, ['continue', 'cancel'])
 })
+
+test('mergeTaskRuns preserves browser module on persisted browser collection projections', () => {
+  const browserProjection: PersistedTaskProjection = {
+    taskId: 'browser-task-visible-1',
+    scopeId: 'scope-1',
+    runId: 'browser-task-card-1',
+    taskType: 'multi_step_task',
+    module: 'browser',
+    taskTitle: '浏览器逐张点开采集',
+    taskSummary: '等待验证后继续',
+    status: 'recoverable_paused',
+    interactionState: 'suspended',
+    waitingFor: 'verification',
+    steps: [],
+    currentStepId: null,
+    budget: null,
+    budgetUsagePercent: null,
+    budgetWarningLevel: null,
+    recoveryHistory: [],
+    degradationReason: null,
+    blockedReason: null,
+    resumableActions: [],
+    continuationRef: null,
+    progress: { stage: 'recoverable_paused', total: 5, completed: 2, coverage: 0.4, fingerprint: null, updatedAt: '2026-05-27T00:00:00.000Z' },
+    recentArtifacts: [],
+    canResume: false,
+    createdAt: '2026-05-27T00:00:00.000Z',
+    updatedAt: '2026-05-27T00:00:00.000Z',
+  }
+
+  const runs = mergeTaskRuns({
+    activeChildRuns: [],
+    currentScopeId: 'scope-1',
+    filteredScopes: [makeScope()],
+    inMemoryTaskRuns: [],
+    persistedScopeRuns: [],
+    persistedTaskProjections: { 'scope-1': [browserProjection] },
+  })
+
+  assert.equal(runs.length, 1)
+  assert.equal(runs[0].module, 'browser')
+  assert.equal(runs[0].taskId, 'browser-task-visible-1')
+  assert.equal(runs[0].waitingFor, 'verification')
+})

@@ -32,7 +32,7 @@ test('WorkbenchMode.tsx routes mode switches through the strategy function and o
   assert.match(source, /import \{ resolveModeTransitionStrategy \} from '\.\.\/modules\/workbench\/modeTransitionStrategy'/)
   assert.match(source, /const strategy = resolveModeTransitionStrategy\(workbenchMode, nextMode\)/)
   assert.match(source, /if \(strategy === 'same-mode'\) return/)
-  const splitCollapseIndex = source.indexOf("if (splitMode) {\n      setWorkbenchMode(nextMode)\n      return\n    }")
+  const splitCollapseIndex = source.search(/if \(splitMode\) \{[\s\S]*?setWorkbenchMode\(nextMode\)[\s\S]*?return[\s\S]*?\}/)
   const sameModeReturnIndex = source.indexOf("if (strategy === 'same-mode') return")
   assert.notEqual(splitCollapseIndex, -1)
   assert.notEqual(sameModeReturnIndex, -1)

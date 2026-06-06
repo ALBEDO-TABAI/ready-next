@@ -123,10 +123,12 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     onRetryTask,
     onSuspendTask,
     onResumeTask,
+    onResumeBrowserTask,
     onCancelDetachedTask,
     onContinueDetachedTask,
     onCancelChildRun,
     onContinueChildRun,
+    onConfirmBrowserCollectionConsent,
     toolTrace,
     toolTraceStatus,
     toolTraceExpanded,
@@ -270,10 +272,12 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
       onRetryTask={onRetryTask}
       onSuspendTask={onSuspendTask}
       onResumeTask={onResumeTask}
+      onResumeBrowserTask={onResumeBrowserTask}
       onCancelDetachedTask={onCancelDetachedTask}
       onContinueDetachedTask={onContinueDetachedTask}
       onCancelChildRun={onCancelChildRun}
       onContinueChildRun={onContinueChildRun}
+      onConfirmBrowserCollectionConsent={onConfirmBrowserCollectionConsent}
     >
       {({
         messageTaskSnapshots,

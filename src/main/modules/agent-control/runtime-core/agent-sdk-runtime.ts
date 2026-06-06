@@ -102,10 +102,12 @@ import { resolveCapabilityResolution } from '../domain-adapters/capability-resol
 import {
   resolveBrowserCollectionIntent,
   isBrowserCollectionSubsetTool,
+  resolveBrowserBatchCollectionIntent,
+  isBrowserBatchCollectionWorkflowTool,
   stepCollectionIntentTtl,
   isBareContinuationInstruction,
 } from '../../../../shared/browser-collection-intent'
-import { createBrowserTurnLease } from '../../browser-engine/agent-browser-turn-lease'
+import { createBrowserTurnLease, type BrowserTurnLease } from '../../browser-engine/agent-browser-turn-lease'
 import { filterToolsByVisionCapability } from '../tools-runtime/tool-gateway'
 import {
   buildToolRuntimeContext,
@@ -230,6 +232,7 @@ interface ToolBridgeRuntimeContext {
   runId: string
   taskId: string
   sessionId?: string
+  currentUserText?: string
   signal: AbortSignal
   allowedToolNames: string[]
   definitionByName: Map<string, ToolDefinition>
@@ -243,6 +246,7 @@ interface ToolBridgeRuntimeContext {
   nativeMapCriticalClose?: MapToolFailureClose | null
   nativeMapAmbiguityResolved?: boolean
   runHandle: RunHandle
+  browserTurnLease?: BrowserTurnLease | null
 }
 
 interface SdkLongSkillCheckpoint {
@@ -302,6 +306,7 @@ export interface AgentSdkRuntimeDeps {
     feishuConnected: boolean
     authorization: SkillToolAuthorization
     recentCollectionIntent?: boolean
+    recentBatchCollectionIntent?: boolean
     requestEnvelope?: unknown
   }) => ToolDefinition[]
   executeToolCall?: (
@@ -436,6 +441,15 @@ function messageHasBrowserCollectionIntent(message: RunMessage, requestEnvelope?
   // user can resume a collection without re-typing the request. Substantive
   // messages still use primary text only, so context markers can't over-expose.
   if (isBareContinuationInstruction(primary) && resolveBrowserCollectionIntent(fullText)) return true
+  return false
+}
+
+function messageHasBrowserBatchCollectionIntent(message: RunMessage, requestEnvelope?: unknown): boolean {
+  const fullText = messageToText(message)
+  const envelopePrimary = parseEnvelopeResourceReferences(requestEnvelope).primaryInstruction
+  const primary = envelopePrimary || primaryInstructionText(message)
+  if (resolveBrowserBatchCollectionIntent(primary)) return true
+  if (isBareContinuationInstruction(primary) && resolveBrowserBatchCollectionIntent(fullText)) return true
   return false
 }
 
@@ -2694,21 +2708,34 @@ export class AgentSdkRuntime extends EventEmitter {
    * tools available, then decays.
    */
   private readonly collectionIntentTtl = new Map<string, number>()
+  private readonly batchCollectionIntentTtl = new Map<string, number>()
   private static readonly COLLECTION_INTENT_TTL_TURNS = 6
 
   /** Update the TTL for THIS turn and return whether a recent turn (incl. now) had intent. */
-  private trackCollectionIntent(sessionId: string | undefined, currentMessageHasIntent: boolean): boolean {
+  private trackIntentTtl(
+    ttlMap: Map<string, number>,
+    sessionId: string | undefined,
+    currentMessageHasIntent: boolean,
+  ): boolean {
     const sid = sessionId || ''
     if (!sid) return currentMessageHasIntent
-    const prior = this.collectionIntentTtl.get(sid) ?? 0
+    const prior = ttlMap.get(sid) ?? 0
     const { recent, nextTtl } = stepCollectionIntentTtl(
       prior,
       currentMessageHasIntent,
       AgentSdkRuntime.COLLECTION_INTENT_TTL_TURNS,
     )
-    if (nextTtl > 0) this.collectionIntentTtl.set(sid, nextTtl)
-    else this.collectionIntentTtl.delete(sid)
+    if (nextTtl > 0) ttlMap.set(sid, nextTtl)
+    else ttlMap.delete(sid)
     return recent
+  }
+
+  private trackCollectionIntent(sessionId: string | undefined, currentMessageHasIntent: boolean): boolean {
+    return this.trackIntentTtl(this.collectionIntentTtl, sessionId, currentMessageHasIntent)
+  }
+
+  private trackBatchCollectionIntent(sessionId: string | undefined, currentMessageHasIntent: boolean): boolean {
+    return this.trackIntentTtl(this.batchCollectionIntentTtl, sessionId, currentMessageHasIntent)
   }
 
   private listDefaultToolDefinitionsForTurn(params: {
@@ -2721,6 +2748,8 @@ export class AgentSdkRuntime extends EventEmitter {
     authorization: SkillToolAuthorization
     /** Continuity: a recent turn in this session expressed collection intent. */
     recentCollectionIntent?: boolean
+    /** Continuity: a recent turn expressed multi-item collection intent. */
+    recentBatchCollectionIntent?: boolean
     /** Request envelope — used to read the canonical user instruction. */
     requestEnvelope?: unknown
   }): ToolDefinition[] {
@@ -2734,17 +2763,22 @@ export class AgentSdkRuntime extends EventEmitter {
     // Intent carries the TTL continuity so a bare follow-up ("再试一次") stays
     // exposed.
     const msgIntent = messageHasBrowserCollectionIntent(params.message, params.requestEnvelope)
+    const msgBatchIntent = messageHasBrowserBatchCollectionIntent(params.message, params.requestEnvelope)
     const collectionExposure =
       params.browserHostAvailable &&
       browserDecisionMode === 'free_tool_loop' &&
       (msgIntent || params.recentCollectionIntent === true)
+    const batchCollectionExposure = collectionExposure && (msgBatchIntent || params.recentBatchCollectionIntent === true)
     appendToolCapabilityLog([
       '[collection_exposure]',
       `host=${params.browserHostAvailable}`,
       `mode=${browserDecisionMode}`,
       `msgIntent=${msgIntent}`,
       `recentIntent=${params.recentCollectionIntent === true}`,
+      `batchIntent=${msgBatchIntent}`,
+      `recentBatch=${params.recentBatchCollectionIntent === true}`,
       `exposure=${collectionExposure}`,
+      `batchExposure=${batchCollectionExposure}`,
     ].join(' '))
     const capabilityResolution = resolveCapabilityResolution({
       config: params.config,
@@ -2783,6 +2817,7 @@ export class AgentSdkRuntime extends EventEmitter {
       definitions = definitions.filter((definition) => {
         const name = (definition as { name?: unknown }).name
         if (typeof name !== 'string' || !name.startsWith('browser_')) return true
+        if (batchCollectionExposure) return isBrowserBatchCollectionWorkflowTool(name)
         return isBrowserCollectionSubsetTool(name)
       })
     }
@@ -3327,6 +3362,10 @@ export class AgentSdkRuntime extends EventEmitter {
         sessionId,
         messageHasBrowserCollectionIntent(content as RunMessage, executionOptions?.requestEnvelope),
       )
+      const recentBatchCollectionIntent = this.trackBatchCollectionIntent(
+        sessionId,
+        messageHasBrowserBatchCollectionIntent(content as RunMessage, executionOptions?.requestEnvelope),
+      )
       let toolDefinitions = this.listToolDefinitionsForTurn({
         message: content as RunMessage,
         sessionId,
@@ -3336,6 +3375,7 @@ export class AgentSdkRuntime extends EventEmitter {
         feishuConnected: this.runtime?.isChannelTypeAvailable?.('feishu-app') ?? false,
         authorization,
         recentCollectionIntent,
+        recentBatchCollectionIntent,
         requestEnvelope: executionOptions?.requestEnvelope,
       })
       if (shouldUseLocalDocumentToolSet(content as RunMessage, executionOptions?.requestEnvelope)) {
@@ -3360,6 +3400,7 @@ export class AgentSdkRuntime extends EventEmitter {
         runId,
         taskId,
         sessionId,
+        currentUserText: messageToText(content as RunMessage),
         signal: abortController.signal,
         allowedToolNames,
         definitionByName,
@@ -4328,6 +4369,7 @@ export class AgentSdkRuntime extends EventEmitter {
       abortSignal: runtimeContext.signal,
       sessionId: runtimeContext.sessionId,
       scopeId: runtimeContext.sessionId,
+      currentUserText: runtimeContext.currentUserText,
       runId: runtimeContext.runId,
       taskId: runtimeContext.taskId,
       parentTaskId: runtimeContext.taskId,
@@ -4346,12 +4388,20 @@ export class AgentSdkRuntime extends EventEmitter {
     // writes are gated and a user takeover suspends them. Lazy (no acquire until
     // a write); released on run cleanup (normal end / cancel / session close).
     if (this.browserController && runtimeContext.runId) {
-      const turnLease = createBrowserTurnLease({
-        taskId: runtimeContext.taskId ?? runtimeContext.runId,
-        runId: runtimeContext.runId,
-      })
-      executorContext.browserLease = turnLease
-      this.runCleanupRegistry?.registerRunCleanup(runtimeContext.runId, () => turnLease.release())
+      if (!runtimeContext.browserTurnLease) {
+        const turnLease = createBrowserTurnLease({
+          taskId: runtimeContext.taskId ?? runtimeContext.runId,
+          runId: runtimeContext.runId,
+        })
+        runtimeContext.browserTurnLease = turnLease
+        this.runCleanupRegistry?.registerRunCleanup(runtimeContext.runId, () => {
+          turnLease.release()
+          if (runtimeContext.browserTurnLease === turnLease) {
+            runtimeContext.browserTurnLease = null
+          }
+        })
+      }
+      executorContext.browserLease = runtimeContext.browserTurnLease
     }
     return executorContext
   }

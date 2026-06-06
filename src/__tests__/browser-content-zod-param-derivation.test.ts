@@ -26,6 +26,7 @@ test('browser_collect_images', () => {
     { name: 'keyword', type: 'string', description: '可选关键词，按图片 URL/alt/title 过滤', required: false },
     { name: 'limit', type: 'number', description: '最多返回条数，默认 20，最大 60', required: false },
     { name: 'min_width', type: 'number', description: '最小宽度像素过滤，默认 120', required: false },
+    { name: 'include_hidden', type: 'boolean', description: '是否包含页面中已加载但当前不可见的候选大图，默认 false', required: false },
     TAB_ID_OPTIONAL,
   ])
 })
@@ -43,6 +44,23 @@ test('browser_download_urls', () => {
     { name: 'filename_prefix', type: 'string', description: '文件名前缀（可选）', required: false },
     { name: 'overwrite', type: 'boolean', description: '同名是否覆盖，默认 false', required: false },
     { name: 'tab_id', type: 'string', description: '可选标签页 ID（用于带 Referer 下载）', required: false },
+  ])
+})
+
+test('browser_resolve_video', () => {
+  assert.deepEqual(zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_resolve_video), [
+    { name: 'page_url', type: 'string', description: '视频所在页面 URL；留空时尝试使用当前标签页 URL', required: false },
+    { name: 'video_url', type: 'string', description: '页面已暴露的直接视频 URL（可选）', required: false },
+    { name: 'poster_url', type: 'string', description: '视频封面 URL（可选）', required: false },
+    { name: 'title', type: 'string', description: '视频或笔记标题（可选）', required: false },
+    {
+      name: 'sources',
+      type: 'array',
+      description: '候选 source URL 数组（可选）',
+      required: false,
+      items: { type: 'string' },
+    },
+    { name: 'tab_id', type: 'string', description: '可选标签页 ID，用于补充当前页面 URL/标题', required: false },
   ])
 })
 

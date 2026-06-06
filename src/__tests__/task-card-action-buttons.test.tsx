@@ -184,3 +184,78 @@ test('task card suspended and cross-scope buttons invoke resume and open handler
     ['open', 'conv-c'],
   ])
 })
+
+test('task card browser collection button invokes browser resume handler instead of generic resume', () => {
+  const calls: Array<[string, string, string]> = []
+  const run = makeRun({
+    scopeId: 'conv-browser',
+    taskId: 'browser-task-visible-1',
+    module: 'browser',
+    interactionState: 'suspended',
+    waitingFor: 'verification',
+    resumableActions: [],
+    canResume: false,
+  })
+  const { container, unmount } = mountTaskCard(run, {
+    onResumeBrowserTask: (scopeId: string, taskId: string) => calls.push(['browser', scopeId, taskId]),
+    onResumeRun: (scopeId: string) => calls.push(['generic', scopeId, '']),
+  })
+  try {
+    const generic = Array.from(container.querySelectorAll('button'))
+      .find((button) => button.textContent?.trim() === '继续运行')
+    assert.equal(generic, undefined)
+    const button = container.querySelector('[data-ready-task-action="resume-browser-task"]')
+    assert.equal(button?.getAttribute('data-ready-task-id'), 'browser-task-visible-1')
+    clickButton(container, '继续浏览器采集')
+    assert.deepEqual(calls, [['browser', 'conv-browser', 'browser-task-visible-1']])
+  } finally {
+    unmount()
+  }
+})
+
+test('task card pending browser collection consent invokes consent handler and hides generic confirmation', () => {
+  const calls: Array<[string, string, string]> = []
+  const run = makeRun({
+    scopeId: 'conv-browser',
+    taskId: 'browser-task-visible-consent',
+    module: 'browser',
+    interactionState: 'awaiting_confirmation',
+    waitingFor: 'confirmation',
+    resumableActions: [],
+    canResume: false,
+    progress: {
+      stage: 'pending_consent',
+      completed: 12,
+      total: 31,
+      coverage: 12 / 31,
+      fingerprint: 'browser-consent-test-1',
+      updatedAt: '2026-06-06T00:00:00.000Z',
+      lastError: null,
+      browserCollectionConsent: {
+        requestId: 'browser-consent-test-1',
+        consentKind: 'partial_collection',
+        sourceTaskId: 'browser-task-visible-consent',
+        message: '需要确认部分采集',
+        createdAt: '2026-06-06T00:00:00.000Z',
+      },
+    },
+  })
+  const { container, unmount } = mountTaskCard(run, {
+    onConfirmBrowserCollectionConsent: (scopeId: string, requestId: string) => calls.push(['consent', scopeId, requestId]),
+    onSubmitConfirmation: (scopeId: string, confirmed: boolean) => calls.push(['generic', scopeId, String(confirmed)]),
+  })
+  try {
+    const generic = Array.from(container.querySelectorAll('button'))
+      .find((button) => button.textContent?.trim() === '确认继续')
+    assert.equal(generic, undefined)
+    const button = container.querySelector('[data-ready-task-action="confirm-browser-collection-consent"]')
+    assert.equal(button?.getAttribute('data-ready-task-scope-id'), 'conv-browser')
+    assert.equal(button?.getAttribute('data-ready-task-id'), 'browser-task-visible-consent')
+    assert.equal(button?.getAttribute('data-ready-task-consent-kind'), 'partial_collection')
+    assert.equal(button?.getAttribute('data-ready-task-consent-request-id'), 'browser-consent-test-1')
+    clickButton(container, '确认部分采集')
+    assert.deepEqual(calls, [['consent', 'conv-browser', 'browser-consent-test-1']])
+  } finally {
+    unmount()
+  }
+})

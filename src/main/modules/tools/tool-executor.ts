@@ -83,6 +83,7 @@ export interface ToolContext {
   abortSignal?: AbortSignal
   sessionId?: string
   scopeId?: string
+  currentUserText?: string
   runId?: string
   taskId?: string
   parentTaskId?: string
@@ -298,7 +299,7 @@ export async function executeToolCall(
           let browserLeaseGate: BrowserLeaseGate | undefined
           const turnLease = context.browserLease
           if (turnLease) {
-            if (toolName === 'browser_visible_collect' || toolName === 'browser_collect_notes') {
+            if (toolName === 'browser_visible_collect' || toolName === 'browser_collect_notes' || toolName === 'browser_resume_task') {
               // Hand the surface to a background browser task (single writer):
               // release the turn lease so the task can acquire or use its own lane.
               turnLease.releaseForBackgroundHandoff()
@@ -317,6 +318,8 @@ export async function executeToolCall(
             context.abortSignal,
             context.sessionId,
             browserLeaseGate,
+            context.currentUserText,
+            context.runtime,
           )
         }
 

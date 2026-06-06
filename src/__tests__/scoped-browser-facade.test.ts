@@ -6,10 +6,11 @@ import { AgentTabControlGate } from '../main/modules/browser-engine/agent-tab-co
 import { BrowserWriteLeaseService } from '../main/modules/browser-engine/browser-write-lease'
 import { isAgentBrowserError } from '../main/modules/browser-engine/agent-browser-errors'
 
-function makeFacade(overrides?: { controlGate?: AgentTabControlGate }) {
+function makeFacade(overrides?: { controlGate?: AgentTabControlGate; surface?: 'agent-view' | 'user-view' }) {
   const calls: Array<{ tool: string; args: Record<string, unknown>; surface: string; leaseId: string }> = []
   const leaseService = new BrowserWriteLeaseService()
-  const lease = leaseService.acquire({ surface: 'agent-view', taskId: 'collect', runId: 'r1' })
+  const surface = overrides?.surface ?? 'agent-view'
+  const lease = leaseService.acquire({ surface, taskId: 'collect', runId: 'r1' })
   if ('errorCode' in lease) throw new Error('expected lease')
   const controlGate = overrides?.controlGate ?? new AgentTabControlGate()
   const facade = new ScopedBrowserFacade({
@@ -17,6 +18,7 @@ function makeFacade(overrides?: { controlGate?: AgentTabControlGate }) {
     leaseService,
     leaseId: lease.leaseId,
     controlGate,
+    surface,
     execute: async (tool, args, surface, leaseId) => {
       calls.push({ tool, args, surface, leaseId })
       return JSON.stringify({ ok: true, tool })
@@ -63,6 +65,17 @@ describe('ScopedBrowserFacade (§3.4 dispatch keystone)', () => {
     const out = await facade.run('browser_navigate', { url: 'https://x' })
     assert.equal(parseErr(out)?.errorCode, 'lease_takeover')
     assert.equal(calls.length, 0, 'frozen write must not dispatch')
+  })
+
+  it('does not let an agent-view freeze block user-view collection writes', async () => {
+    const gate = new AgentTabControlGate()
+    const { facade, calls } = makeFacade({ controlGate: gate, surface: 'user-view' })
+    gate.requestInterruption()
+    const out = await facade.run('browser_click_text', { text: '笔记一' })
+    assert.equal(parseErr(out), null)
+    assert.equal(calls.length, 1, 'user-view writes are governed by the user-view lease, not the agent-view freeze gate')
+    assert.equal(calls[0].surface, 'user-view')
+    assert.equal(calls[0].args.collection_surface, 'user-view')
   })
 
   it('allows reads even while frozen (reads are not blocked by the gate)', async () => {

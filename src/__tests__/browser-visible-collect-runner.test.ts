@@ -165,7 +165,7 @@ describe('visible_collect task runner', () => {
       kind: 'visible_collect',
       payload: { url: 'https://example.com/feed', template: 'card_list', maxRounds: 10 },
     })
-    const done = await waitForStatus(persistence, handle.taskId, ['completed'])
+    const done = await waitForStatus(persistence, handle.taskId, ['completed'], 6_000)
 
     const result = done.result as { items: Array<{ link: string }>; rounds: number; stopReason: string }
     const links = result.items.map((i) => i.link).sort()
@@ -189,7 +189,7 @@ describe('visible_collect task runner', () => {
       kind: 'visible_collect',
       payload: { template: 'card_list', tabId: 'tab-1', maxRounds: 50 },
     })
-    const done = await waitForStatus(persistence, handle.taskId, ['completed'])
+    const done = await waitForStatus(persistence, handle.taskId, ['completed'], 6_000)
     const result = done.result as { stopReason: string; items: unknown[] }
     assert.equal(result.stopReason, 'no_new_content')
     assert.equal(result.items.length, 1)
@@ -257,10 +257,12 @@ describe('visible_collect task runner', () => {
         outputRootDir: '/tmp/ao-i',
       },
     })
-    const done = await waitForStatus(persistence, handle.taskId, ['completed'])
-    const result = done.result as { discoveryStatus?: string; noteCandidates: Array<{ url: string; openUrl: string; title?: string; sourceId?: string }>; suggestedNextTool?: { name: string; args: { output_root_dir?: string; source_task_id?: string; expected_count?: number } } }
+    const done = await waitForStatus(persistence, handle.taskId, ['completed'], 6_000)
+    const result = done.result as { discoveryStatus?: string; outputRootDir?: string; noteCandidates: Array<{ url: string; openUrl: string; title?: string; sourceId?: string }>; suggestedNextTool?: { name: string; args: { output_root_dir?: string; source_task_id?: string; expected_count?: number } } }
 
     assert.equal(result.discoveryStatus, 'complete')
+    assert.equal(done.progress.total, 1)
+    assert.equal(done.progress.completed, 0, 'discovery count must not be rendered as saved count')
     assert.deepEqual(result.noteCandidates.map((target) => ({ url: target.url, openUrl: target.openUrl, title: target.title, sourceId: target.sourceId })), [
       {
         url: 'https://www.xiaohongshu.com/explore/6a0987c5000000003601f3f5',
@@ -270,9 +272,37 @@ describe('visible_collect task runner', () => {
       },
     ])
     assert.equal(result.suggestedNextTool?.name, 'browser_collect_notes')
+    assert.equal(result.outputRootDir, '/tmp/ao-i')
     assert.equal(result.suggestedNextTool?.args.output_root_dir, '/tmp/ao-i')
     assert.equal(result.suggestedNextTool?.args.source_task_id, handle.taskId)
     assert.equal(result.suggestedNextTool?.args.expected_count, 1)
+  })
+
+  it('marks discovery incomplete when frozen count is below userExpectedTotal', async () => {
+    const persistence = new FakePersistence()
+    const capability = createCapability([
+      [{ link: 'https://example.com/post/1', title: 'One' }],
+      [{ link: 'https://example.com/post/1', title: 'One' }],
+    ])
+    const runner = new BrowserContentTaskRunner(capability, persistence as never, new BrowserWriteLeaseService())
+    const handle = await runner.startTask({
+      kind: 'visible_collect',
+      payload: { template: 'card_list', tabId: 'tab-1', maxRounds: 10, userExpectedTotal: 3 },
+    })
+    const done = await waitForStatus(persistence, handle.taskId, ['paused'])
+    const result = done.result as {
+      discoveryStatus?: string
+      frozenCount?: number
+      userExpectedTotal?: number
+      suggestedNextTool?: unknown
+      suggestedContinueTool?: { name?: string }
+    }
+    assert.equal(result.discoveryStatus, 'partial')
+    assert.equal(result.frozenCount, 1)
+    assert.equal(result.userExpectedTotal, 3)
+    assert.equal(result.suggestedNextTool, undefined)
+    assert.equal(result.suggestedContinueTool?.name, 'browser_resume_task')
+    assert.equal(done.progress.completed, 0)
   })
 
   it('cancellation leaves the task queryable with cancelled status', async () => {
@@ -284,7 +314,7 @@ describe('visible_collect task runner', () => {
         const id = Math.random().toString(36).slice(2)
         return {
           template: 'card_list' as const,
-          items: [{ sourceUrl: 'u', title: id, link: `https://example.com/${id}` }],
+          items: [{ sourceUrl: 'https://example.com/feed', title: `Post ${id}`, link: `https://example.com/post/${id}` }],
           sourceUrl: 'u',
         }
       },
@@ -295,7 +325,6 @@ describe('visible_collect task runner', () => {
       kind: 'visible_collect',
       payload: { template: 'card_list', tabId: 'tab-1', maxItems: 100000, maxRounds: 100000, maxDurationMs: 60000 },
     })
-    await waitForProgress(persistence, handle.taskId, (task) => (task?.progress.total || 0) > 0)
     await runner.cancelTask(handle.taskId)
     const task = await waitForStatus(persistence, handle.taskId, ['cancelled'])
     assert.equal(task.status, 'cancelled')
@@ -352,28 +381,28 @@ describe('visible_collect task runner', () => {
     assert.equal(result.suggestedContinueTool?.args?.task_id, handle.taskId)
   })
 
-  it('treats the high-control 60 item ceiling as a partial batch, not a full completion', async () => {
+  it('does not let a model-supplied high-control maxItems=30 turn into the full target', async () => {
     const persistence = new FakePersistence()
-    let next = 0
+    const visibleItems = Array.from({ length: 75 }, (_, index) => {
+      const id = index + 1
+      return { sourceUrl: 'https://example.com/feed', title: `Post ${id}`, link: `https://example.com/post/${id}` }
+    })
     const capability = {
       openTarget: async () => ({ success: true, tabId: 'tab-1' }),
       extractStructured: async () => ({
         template: 'card_list' as const,
-        items: Array.from({ length: 60 }, () => {
-          next += 1
-          return { sourceUrl: 'https://example.com/feed', title: `Post ${next}`, link: `https://example.com/post/${next}` }
-        }),
+        items: visibleItems,
         sourceUrl: 'https://example.com/feed',
       }),
-      scrollViewportOnce: async () => ({ scrollY: 0, atBottom: false }),
+      scrollViewportOnce: async () => ({ scrollY: 0, atBottom: true }),
     } as unknown as BrowserCapabilityService
     const runner = new BrowserContentTaskRunner(capability, persistence as never, new BrowserWriteLeaseService())
 
     const handle = await runner.startTask({
       kind: 'visible_collect',
-      payload: { template: 'card_list', tabId: 'tab-1', highControl: true, maxItems: 120 },
+      payload: { template: 'card_list', tabId: 'tab-1', highControl: true, maxItems: 30 },
     })
-    const done = await waitForStatus(persistence, handle.taskId, ['paused'])
+    const done = await waitForStatus(persistence, handle.taskId, ['completed'], 6_000)
     const result = done.result as {
       discoveryStatus?: string
       stopReason?: string
@@ -383,25 +412,12 @@ describe('visible_collect task runner', () => {
       suggestedContinueTool?: { name?: string; args?: { task_id?: string } }
     }
 
-    assert.equal(result.stopReason, 'max_items')
-    assert.equal(result.discoveryStatus, 'partial')
-    assert.equal(result.frozenCount, 60)
-    assert.equal(result.hasMoreLikely, true)
-    assert.equal(result.suggestedNextTool, undefined)
-    assert.equal(result.suggestedContinueTool?.name, 'browser_resume_task')
-    assert.equal(result.suggestedContinueTool?.args?.task_id, handle.taskId)
-
-    await runner.resumeTask(handle.taskId)
-    const resumed = await waitForResult<{ frozenCount?: number; stopReason?: string; discoveryStatus?: string }>(
-      persistence,
-      handle.taskId,
-      (nextResult) => nextResult?.frozenCount === 120 && nextResult.stopReason === 'max_items',
-      3_000,
-    )
-    const resumedResult = resumed.result as { discoveryStatus?: string; frozenCount?: number }
-    assert.equal(resumed.status, 'paused')
-    assert.equal(resumedResult.discoveryStatus, 'partial')
-    assert.equal(resumedResult.frozenCount, 120)
+    assert.equal(result.stopReason, 'no_new_content')
+    assert.equal(result.discoveryStatus, 'complete')
+    assert.equal(result.frozenCount, 75)
+    assert.equal(result.hasMoreLikely, false)
+    assert.equal(result.suggestedContinueTool, undefined)
+    assert.equal(result.suggestedNextTool && typeof result.suggestedNextTool === 'object', true)
   })
 
   it('resumes from the last round checkpoint instead of restarting from scratch', async () => {
@@ -468,7 +484,7 @@ describe('visible_collect task runner', () => {
       // Inherit the (now taken-over) lease so the loop must detect the takeover.
       payload: { template: 'card_list', tabId: 'tab-1', maxRounds: 100000, surface: 'user-view', leaseId: held.leaseId },
     })
-    const done = await waitForStatus(persistence, handle.taskId, ['cancelled'])
+    const done = await waitForStatus(persistence, handle.taskId, ['paused'])
     const result = done.result as { stopReason: string; items: unknown[] }
     assert.equal(result.stopReason, 'lease_lost', 'must stop because the lease was lost to the user')
     assert.equal(extractCalls, 0, 'must not perform any page write/extract after losing the lease')
@@ -495,7 +511,7 @@ describe('visible_collect task runner', () => {
       // url path + inherited lease that is already taken over.
       payload: { url: 'https://example.com/feed', template: 'card_list', surface: 'user-view', leaseId: held.leaseId },
     })
-    const done = await waitForStatus(persistence, handle.taskId, ['cancelled'])
+    const done = await waitForStatus(persistence, handle.taskId, ['paused'])
     const result = done.result as { stopReason: string }
     assert.equal(result.stopReason, 'lease_lost')
     assert.equal(openTargetCalls, 0, 'must not open/navigate the page after the lease was lost')

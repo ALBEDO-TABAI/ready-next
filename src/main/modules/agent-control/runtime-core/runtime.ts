@@ -78,6 +78,7 @@ import {
   selectContinuationProjection,
   type ContinuationIntent,
 } from '../contracts/continuation-state'
+import { BrowserCollectionConsentStore } from '../../browser-engine/browser-collection-consent'
 import { forgetSession } from '../session/session-continuity'
 import { isRetryOnlyTurn } from '../skills/skill-detection-inputs'
 import { logAgentMetric } from '../metrics'
@@ -992,6 +993,11 @@ export class AgentControlRuntime extends EventEmitter {
     this.scopeRunSummaries.delete(scopeId)
     forgetSession(scopeId)
     this.taskProjectionStore.deleteByScope(scopeId)
+    try {
+      new BrowserCollectionConsentStore().deleteByScope(scopeId)
+    } catch (error) {
+      console.warn('[Runtime] Failed to clear browser collection consent scope:', error)
+    }
     this.db.deleteConversation(scopeId)
   }
 

@@ -45,6 +45,7 @@ export const BROWSER_INTERACTION_TOOL_NAMES = [
 export const BROWSER_CONTENT_TASK_TOOL_NAMES = [
   'browser_collect_images',
   'browser_download_urls',
+  'browser_resolve_video',
   'browser_extract_structured',
   'browser_scroll_collect',
   'browser_start_task',
@@ -58,6 +59,7 @@ export const BROWSER_CONTENT_TASK_TOOL_NAMES = [
   'browser_execute_js',
   'browser_visible_collect',
   'browser_collect_notes',
+  'browser_confirm_collection_consent',
 ] as const
 
 export const BROWSER_TOOLS: BrowserToolDef[] = [
@@ -150,6 +152,11 @@ export const BROWSER_TOOLS: BrowserToolDef[] = [
     name: 'browser_download_urls',
     description: '批量下载 URL 到本地目录（默认 ~/Documents），可用于一次性保存多张图片。',
     params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_download_urls) as ToolParamSchemaSpec[],
+  },
+  {
+    name: 'browser_resolve_video',
+    description: '解析当前页面或指定页面里的视频直链。小红书会复用内嵌 Video Expert Analyzer 的小红书解析器；下载仍交给 browser_download_urls。',
+    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_resolve_video) as ToolParamSchemaSpec[],
   },
   {
     name: 'browser_click_at',
@@ -253,8 +260,13 @@ export const BROWSER_TOOLS: BrowserToolDef[] = [
   },
   {
     name: 'browser_collect_notes',
-    description: '后台逐篇采集子 agent：优先传 browser_visible_collect 返回的 source_task_id/expected_count 接力完整冻结清单；来源清单不是 complete 时默认拒绝，除非用户明确只采部分并传 allow_partial=true。它在独立后台标签页逐篇打开目标、采集详情和图片，按“序号 - 标题”建目录，写 note.md/manifest.json/assets，并按篇保存进度。数量不一致会拒绝启动。返回后台任务句柄。',
+    description: '后台逐篇采集子 agent：优先传 browser_visible_collect 返回的 source_task_id/expected_count 接力完整冻结清单；来源清单不是 complete 时默认拒绝，allow_partial 只会被记录为提示，不能替代持久用户确认。用户直接提供 URL 列表时必须来自当前用户消息原文，系统会先合成 source task 再接力。它在独立后台标签页逐篇打开目标，或按 strategy=card_loop 从列表页逐张点开，采集详情和图片，按“序号 - 标题”建目录，写 note.md/manifest.json/assets，并按篇保存进度。数量不一致会拒绝启动。返回后台任务句柄。',
     params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_collect_notes) as ToolParamSchemaSpec[],
+  },
+  {
+    name: 'browser_confirm_collection_consent',
+    description: '确认浏览器采集的 pending consent request。只接受 browser_collect_notes 返回的 requestId 和确认来源，用于写入持久确认记录；不要解析用户自然语言来替代 requestId。',
+    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_confirm_collection_consent) as ToolParamSchemaSpec[],
   },
   {
     name: 'browser_go_back',

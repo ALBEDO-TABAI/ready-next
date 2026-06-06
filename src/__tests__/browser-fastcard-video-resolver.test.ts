@@ -71,8 +71,58 @@ test('generic URL uses yt-dlp dump json and returns only metadata links', async 
   assert.equal(result.video.playableUrl, 'https://media.example.com/remote.mp4')
 })
 
+test('Xiaohongshu URL uses the embedded VEA downloader parser', async () => {
+  const result = await resolveFastCardVideo({ target: makeTarget({ pageUrl: 'https://www.xiaohongshu.com/explore/69df5244000000001a02a0f8' }) }, {
+    pythonCandidates: ['python3'],
+    runCommand: async (file, args) => {
+      assert.equal(file, 'python3')
+      assert.equal(args[0], '-c')
+      assert.match(args[1], /XiaohongshuDownloader/)
+      assert.match(args[2], /xiaohongshu_downloader\.py$/)
+      return {
+        stdout: JSON.stringify({
+          success: true,
+          title: '小红书视频',
+          uploader: 'Aoi葵',
+          video_url: 'https://sns-video.xhscdn.com/video.mp4',
+          cover_url: 'https://sns-webpic-qc.xhscdn.com/poster.webp',
+        }),
+        stderr: '',
+      }
+    },
+  })
+
+  assert.equal(result.video.parseStatus, 'resolved')
+  assert.equal(result.video.platform, 'xiaohongshu')
+  assert.equal(result.video.title, '小红书视频')
+  assert.equal(result.video.author, 'Aoi葵')
+  assert.equal(result.video.downloadUrl, 'https://sns-video.xhscdn.com/video.mp4')
+  assert.equal(result.video.posterUrl, 'https://sns-webpic-qc.xhscdn.com/poster.webp')
+})
+
+test('resolver keeps every attempted Python failure visible', async () => {
+  const result = await resolveFastCardVideo({ target: makeTarget({ pageUrl: 'https://www.xiaohongshu.com/explore/69df5244000000001a02a0f8' }) }, {
+    pythonCandidates: ['python3', 'python'],
+    runCommand: async (file) => {
+      if (file === 'python3') {
+        const error = new Error('command failed') as Error & { stderr?: string }
+        error.stderr = 'ModuleNotFoundError: No module named requests'
+        throw error
+      }
+      throw new Error('spawn python ENOENT')
+    },
+  })
+
+  assert.equal(result.video.parseStatus, 'failed')
+  assert.match(result.video.error || '', /python3/)
+  assert.match(result.video.error || '', /ModuleNotFoundError/)
+  assert.match(result.video.error || '', /python/)
+  assert.match(result.video.error || '', /ENOENT/)
+})
+
 test('parser failure is kept as a visible FastCard video state', async () => {
   const result = await resolveFastCardVideo({ target: makeTarget({ pageUrl: 'https://video.example.com/watch/3' }) }, {
+    pythonCandidates: ['python3'],
     runCommand: async () => {
       throw new Error('yt-dlp missing')
     },

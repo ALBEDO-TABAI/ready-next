@@ -58,6 +58,29 @@ test('task type resolver routes browser upload intents into media tasks only whe
   assert.match(degraded.degradationReason || '', /browser/i)
 })
 
+test('task type resolver routes multi-note browser collection into a multi-step browser task', () => {
+  const envelope = buildRequestEnvelope({ userText: '把这个博主的每篇笔记都采集下来并保存图片' })
+  const intent = classifyIntent(envelope)
+
+  const available = resolveTaskType({
+    intent,
+    envelope,
+    capabilities: createCapabilities({ browserHostAvailable: true }),
+  })
+  assert.equal(available.taskType, 'multi_step_task')
+  assert.equal(available.executionChain, 'tool_loop')
+  assert.equal(available.preferredExecutor, 'browser')
+
+  const degraded = resolveTaskType({
+    intent,
+    envelope,
+    capabilities: createCapabilities({ browserHostAvailable: false }),
+  })
+  assert.equal(degraded.taskType, 'direct_answer')
+  assert.equal(degraded.executionChain, 'direct')
+  assert.match(degraded.degradationReason || '', /browser/i)
+})
+
 test('task type resolver routes live external info lookups into the browser tool loop', () => {
   const envelope = buildRequestEnvelope({ userText: '帮我看看今天广州天气怎么样' })
   const result = resolveTaskType({

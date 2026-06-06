@@ -76,6 +76,7 @@ export interface ToolRuntimeContext {
   abortSignal?: AbortSignal
   sessionId?: string
   scopeId?: string
+  currentUserText?: string
   runId?: string
   taskId?: string
   parentTaskId?: string

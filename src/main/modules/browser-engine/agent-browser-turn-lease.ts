@@ -69,6 +69,8 @@ export class BrowserTurnLease {
       this.leaseId = lease.leaseId
       this.hasAcquiredOnce = true
     }
+    const renewed = this.service.heartbeat(this.leaseId)
+    if (isAgentBrowserError(renewed)) return renewed
     return { service: this.service, surface: this.surface, leaseId: this.leaseId }
   }
 

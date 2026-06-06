@@ -3,24 +3,100 @@ import assert from 'node:assert'
 import { rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { executeBrowserTool } from '../main/modules/tools/browser-tools'
+import { JSDOM } from 'jsdom'
+import { __setBrowserCollectionConsentStoreForTests, executeBrowserTool } from '../main/modules/tools/browser-tools'
 import { BrowserTaskPlanner } from '../main/modules/agent-control/domain-adapters/browser-task-planner'
 import {
   __resetSessionContinuityForTests,
   __setSessionContinuityStoragePathForTests,
 } from '../main/modules/agent-control/session/session-continuity'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
+import type {
+  BrowserCollectionConsentKind,
+  BrowserCollectionConsentVia,
+  PendingBrowserCollectionConsentRequest,
+} from '../main/modules/browser-engine/browser-collection-consent'
+import type { TaskProjectionRecord, TaskProjectionStore } from '../main/modules/agent-control/contracts/run-contracts'
 
 const TEST_CONTINUITY_PATH = join(tmpdir(), 'ready-browser-tools-continuity.json')
+
+function createConsentStoreMock() {
+  const consents = new Set<string>()
+  const pending = new Map<string, PendingBrowserCollectionConsentRequest>()
+  const key = (kind: BrowserCollectionConsentKind, scopeId: string, sourceTaskId: string, host = '') => [kind, scopeId || 'global', sourceTaskId, host].join(':')
+  return {
+    hasConsent: (kind: BrowserCollectionConsentKind, scopeId: string, sourceTaskId: string, host = '') => consents.has(key(kind, scopeId, sourceTaskId, host)),
+    readConsent: () => null,
+    createPendingRequest: (input: {
+      scopeId: string
+      sourceTaskId: string
+      consentKind: BrowserCollectionConsentKind
+      targetHost?: string
+      warningText?: string
+      ttlMs?: number
+    }) => {
+      const request: PendingBrowserCollectionConsentRequest = {
+        requestId: `browser-consent-test-${pending.size + 1}`,
+        scopeId: input.scopeId,
+        sourceTaskId: input.sourceTaskId,
+        consentKind: input.consentKind,
+        createdAt: new Date(0).toISOString(),
+        ...(input.targetHost ? { targetHost: input.targetHost } : {}),
+        ...(input.warningText ? { warningText: input.warningText } : {}),
+      }
+      pending.set(request.requestId, request)
+      return request
+    },
+    readPendingRequest: (requestId: string) => pending.get(requestId) || null,
+    confirmPendingRequest: (requestId: string, confirmedVia: BrowserCollectionConsentVia) => {
+      const request = pending.get(requestId)
+      if (!request) return null
+      consents.add(key(request.consentKind, request.scopeId, request.sourceTaskId, request.targetHost || ''))
+      return {
+        scopeId: request.scopeId,
+        sourceTaskId: request.sourceTaskId,
+        consentKind: request.consentKind,
+        targetHost: request.targetHost,
+        warningText: request.warningText,
+        confirmedVia,
+        confirmedAt: new Date(0).toISOString(),
+      }
+    },
+  } as never
+}
+
+function createRuntimeProjectionStore() {
+  const records = new Map<string, TaskProjectionRecord>()
+  const store: Pick<TaskProjectionStore, 'create' | 'update' | 'get'> = {
+    create(record) {
+      records.set(record.taskId, record)
+    },
+    update(taskId, patch) {
+      const current = records.get(taskId)
+      records.set(taskId, { ...(current as TaskProjectionRecord), ...patch })
+    },
+    get(taskId) {
+      return records.get(taskId) || null
+    },
+  }
+  return {
+    records,
+    runtime: {
+      getTaskProjectionStore: () => store,
+    },
+  }
+}
 
 beforeEach(() => {
   __setSessionContinuityStoragePathForTests(TEST_CONTINUITY_PATH)
   __resetSessionContinuityForTests()
+  __setBrowserCollectionConsentStoreForTests(createConsentStoreMock())
 })
 
 afterEach(() => {
   __resetSessionContinuityForTests()
   __setSessionContinuityStoragePathForTests(null)
+  __setBrowserCollectionConsentStoreForTests(null)
   rmSync(TEST_CONTINUITY_PATH, { force: true })
 })
 
@@ -100,6 +176,220 @@ describe('browser-tools v2', () => {
     assert.strictEqual(payload.normalized.x, 0)
     assert.strictEqual(payload.normalized.y, 999)
     assert.ok(controller.calls.mouse.length >= 3)
+  })
+
+  it('browser_click_text should locate text with JS but click through trusted mouse events', async () => {
+    const controller = createControllerMock({
+      executeJS: async (_tabId, code) => {
+        const source = String(code || '')
+        if (source.includes('const target = "笔记一"')) {
+          return { ok: true, text: '笔记一', cssX: 500, cssY: 320, width: 1000, height: 800 }
+        }
+        return null
+      },
+    })
+    const result = await executeBrowserTool('browser_click_text', { text: '笔记一' }, controller)
+    const payload = JSON.parse(result) as { ok: boolean; normalized: { x: number; y: number } }
+
+    assert.strictEqual(payload.ok, true)
+    assert.deepStrictEqual(payload.normalized, { x: 500, y: 400 })
+    assert.ok(controller.calls.mouse.length >= 3)
+  })
+
+  it('browser_click_text prefers the largest visible matching href when a card link marker is provided', async () => {
+    let locateCode = ''
+    const controller = createControllerMock({
+      executeJS: async (_tabId, code) => {
+        const source = String(code || '')
+        if (source.includes('const target = "笔记一"')) {
+          locateCode = source
+          return { ok: true, text: 'card anchor', clickedDirect: false, cssX: 640, cssY: 360, width: 1000, height: 800 }
+        }
+        return null
+      },
+    })
+    const result = await executeBrowserTool('browser_click_text', { text: '笔记一', href_contains: 'source-1' }, controller)
+    const payload = JSON.parse(result) as { ok: boolean; clickedDirect: boolean; normalized: { x: number; y: number } }
+
+    assert.strictEqual(payload.ok, true)
+    assert.strictEqual(payload.clickedDirect, false)
+    assert.ok(locateCode.includes('hrefCandidates'))
+    assert.ok(locateCode.includes("matched.setAttribute('target', '_self')"))
+    assert.ok(locateCode.includes('.sort((a, b) => b.area - a.area)'))
+    assert.deepStrictEqual(payload.normalized, { x: 640, y: 450 })
+    assert.ok(controller.calls.mouse.length >= 3)
+  })
+
+  it('browser_collect_images filters images that are covered by a foreground detail layer', async () => {
+    let collectCode = ''
+    const controller = createControllerMock({
+	      executeJS: async (_tabId, code) => {
+	        const source = String(code || '')
+	        if (source.includes("const imgs = queryAll('img')")) {
+	          collectCode = source
+	          return { images: [], videos: [], scope: 'xiaohongshu-detail' }
+	        }
+	        return null
+	      },
+	    })
+	    const result = await executeBrowserTool('browser_collect_images', { include_hidden: false }, controller)
+	    const payload = JSON.parse(result) as { count: number; scope?: string }
+
+	    assert.equal(payload.count, 0)
+	    assert.equal(payload.scope, 'xiaohongshu-detail')
+	    assert.ok(collectCode.includes('elementFromPoint'))
+	    assert.ok(collectCode.includes('isTopHit(img, rect)'))
+	    assert.ok(collectCode.includes("querySelector('.note-container')"))
+	    assert.ok(collectCode.includes("const imgs = queryAll('img')"))
+	  })
+
+  it('browser_collect_images keeps all Xiaohongshu carousel images inside the detail media scope', async () => {
+    const dom = new JSDOM(`
+      <div class="note-container">
+        <div class="media-container">
+          <img id="hero" src="https://sns-webpic-qc.xhscdn.com/notes_pre_post/hero!nc_n_webp_mw_1" />
+          <div style="display:none">
+            <img id="second" src="https://sns-webpic-qc.xhscdn.com/notes_pre_post/second!nc_n_webp_mw_1" />
+          </div>
+        </div>
+        <div class="comments-container">
+          <img id="comment" src="https://sns-webpic-qc.xhscdn.com/comment/comment-1!nc_n_webp_mw_1" />
+        </div>
+      </div>
+      <img id="avatar" src="https://sns-avatar-qc.xhscdn.com/avatar/user.webp" />
+    `, { url: 'https://www.xiaohongshu.com/explore/69f5db6300000000360185ba' })
+
+    try {
+      for (const img of Array.from(dom.window.document.querySelectorAll('img'))) {
+        Object.defineProperty(img, 'naturalWidth', { configurable: true, value: 1200 })
+        Object.defineProperty(img, 'naturalHeight', { configurable: true, value: 1600 })
+        img.getBoundingClientRect = () => ({
+          left: 0,
+          top: 0,
+          right: 600,
+          bottom: 800,
+          width: 600,
+          height: 800,
+          x: 0,
+          y: 0,
+          toJSON: () => ({}),
+        })
+      }
+
+      const controller = createControllerMock({
+        executeJS: async (_tabId, code) => dom.window.Function('code', 'with (this) { return eval(code) }').call(dom.window, String(code || '')),
+      })
+      const result = await executeBrowserTool('browser_collect_images', { include_hidden: false, limit: 10 }, controller)
+      const payload = JSON.parse(result) as { count: number; scope?: string; images: Array<{ url: string }> }
+      const urls = payload.images.map((item) => item.url)
+
+      assert.equal(payload.scope, 'xiaohongshu-detail')
+      assert.equal(payload.count, 2)
+      assert.deepEqual(urls, [
+        'https://sns-webpic-qc.xhscdn.com/notes_pre_post/hero!nc_n_webp_mw_1',
+        'https://sns-webpic-qc.xhscdn.com/notes_pre_post/second!nc_n_webp_mw_1',
+      ])
+    } finally {
+      dom.window.close()
+    }
+  })
+
+  it('browser_collect_images reports Xiaohongshu player-only details as videos', async () => {
+    const dom = new JSDOM(`
+      <div class="note-container">
+        <div class="media-container">
+          <div class="xgplayer video-player" poster="https://sns-webpic-qc.xhscdn.com/poster.webp"></div>
+        </div>
+      </div>
+    `, { url: 'https://www.xiaohongshu.com/explore/69df5244000000001a02a0f8' })
+
+    try {
+      const player = dom.window.document.querySelector('.xgplayer') as HTMLElement
+      player.getBoundingClientRect = () => ({
+        left: 0,
+        top: 0,
+        right: 600,
+        bottom: 800,
+        width: 600,
+        height: 800,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      })
+      const controller = createControllerMock({
+        executeJS: async (_tabId, code) => dom.window.Function('code', 'with (this) { return eval(code) }').call(dom.window, String(code || '')),
+      })
+      const result = await executeBrowserTool('browser_collect_images', { include_hidden: false, limit: 10 }, controller)
+      const payload = JSON.parse(result) as { count: number; videoCount: number; scope?: string; videos: Array<{ posterUrl?: string }> }
+
+      assert.equal(payload.scope, 'xiaohongshu-detail')
+      assert.equal(payload.count, 0)
+      assert.equal(payload.videoCount, 1)
+      assert.equal(payload.videos[0]?.posterUrl, 'https://sns-webpic-qc.xhscdn.com/poster.webp')
+    } finally {
+      dom.window.close()
+    }
+  })
+
+  it('browser_collect_images extracts Xiaohongshu video URLs already exposed in page scripts', async () => {
+    const dom = new JSDOM(`
+      <div class="note-container">
+        <div class="media-container">
+          <div class="xgplayer video-player"></div>
+        </div>
+      </div>
+      <script>
+        window.__BOOT__ = {"asset":"https:\\\\/\\\\/fe-video-qc.xhscdn.com\\\\/fe-platform\\\\/app.js"};
+        window.__INITIAL_STATE__ = {"video":{"media":{"stream":{"h264":[{"masterUrl":"https:\\\\/\\\\/sns-video.xhscdn.com\\\\/video.mp4?token=abc"}]}}}};
+      </script>
+    `, { url: 'https://www.xiaohongshu.com/explore/69df5244000000001a02a0f8' })
+
+    try {
+      const player = dom.window.document.querySelector('.xgplayer') as HTMLElement
+      player.getBoundingClientRect = () => ({
+        left: 0,
+        top: 0,
+        right: 600,
+        bottom: 800,
+        width: 600,
+        height: 800,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      })
+      const controller = createControllerMock({
+        executeJS: async (_tabId, code) => dom.window.Function('code', 'with (this) { return eval(code) }').call(dom.window, String(code || '')),
+      })
+      const result = await executeBrowserTool('browser_collect_images', { include_hidden: false, limit: 10 }, controller)
+      const payload = JSON.parse(result) as { videoCount: number; videos: Array<{ url?: string }> }
+
+      assert.equal(payload.videoCount, 1)
+      assert.equal(payload.videos[0]?.url, 'https://sns-video.xhscdn.com/video.mp4?token=abc')
+    } finally {
+      dom.window.close()
+    }
+  })
+
+  it('browser_resolve_video resolves a direct page video without external parsing', async () => {
+    const controller = createControllerMock({
+      getTabList: () => [{ id: 'tab-1', title: '视频页', url: 'https://www.xiaohongshu.com/explore/69df5244000000001a02a0f8', active: true }],
+    })
+    const result = await executeBrowserTool(
+      'browser_resolve_video',
+      {
+        video_url: 'https://sns-video.xhscdn.com/video.mp4',
+        poster_url: 'https://sns-webpic-qc.xhscdn.com/poster.webp',
+        title: '视频笔记',
+      },
+      controller,
+    )
+    const payload = JSON.parse(result) as { ok: boolean; video: { parseStatus: string; downloadUrl?: string; posterUrl?: string; platform?: string } }
+
+    assert.equal(payload.ok, true)
+    assert.equal(payload.video.parseStatus, 'not_needed')
+    assert.equal(payload.video.downloadUrl, 'https://sns-video.xhscdn.com/video.mp4')
+    assert.equal(payload.video.posterUrl, 'https://sns-webpic-qc.xhscdn.com/poster.webp')
+    assert.equal(payload.video.platform, 'xiaohongshu')
   })
 
   it('browser_type_at should clear, type and send enter by default', async () => {
@@ -279,6 +569,128 @@ describe('browser-tools v2', () => {
     assert.strictEqual((JSON.parse(aggregateResult) as Array<{ title?: string }>).length, 1)
   })
 
+  it('browser_resume_task starts card_loop when resuming a completed high-control discovery task', async () => {
+    const started: Array<Record<string, unknown>> = []
+    const controller = createControllerMock({
+      getTask: async () => ({
+        taskId: 'browser-task-visible-xhs-resume',
+        kind: 'visible_collect',
+        status: 'completed',
+        progress: { total: 2, completed: 0, failed: 0, currentLabel: null },
+        result: {
+          discoveryStatus: 'complete',
+          targetUrl: 'https://www.xiaohongshu.com/user/profile/abc',
+          outputRootDir: '/tmp/ready-xhs-out',
+          noteCandidates: [
+            { url: 'https://www.xiaohongshu.com/explore/one', title: 'One', sourceId: 'one' },
+            { url: 'https://www.xiaohongshu.com/explore/two', title: 'Two', sourceId: 'two' },
+          ],
+        },
+      }) as never,
+      startCardLoopCollection: async (plan: Record<string, unknown>, scopeId?: string) => {
+        started.push({ ...plan, scopeId })
+        return { taskId: 'browser-task-card-from-resume', kind: 'card_loop', status: 'running', progress: { total: 2, completed: 0, failed: 0, currentLabel: 'One' } } as never
+      },
+      resumeTask: async () => {
+        throw new Error('completed visible discovery should not call plain resumeTask')
+      },
+    } as Partial<BrowserController>)
+
+    const result = await executeBrowserTool(
+      'browser_resume_task',
+      { task_id: 'browser-task-visible-xhs-resume' },
+      controller,
+      undefined,
+      'scope-xhs-resume',
+    )
+
+    assert.equal((JSON.parse(result) as { taskId?: string }).taskId, 'browser-task-card-from-resume')
+    assert.equal(started.length, 1)
+    const plan = started[0] as { strategy?: string; expectedCount?: number; sourceTaskId?: string; outputRootDir?: string; notes?: unknown[]; scopeId?: string }
+    assert.equal(plan.strategy, 'card_loop')
+    assert.equal(plan.expectedCount, 2)
+    assert.equal(plan.sourceTaskId, 'browser-task-visible-xhs-resume')
+    assert.equal(plan.outputRootDir, '/tmp/ready-xhs-out')
+    assert.equal(plan.notes?.length, 2)
+    assert.equal(plan.scopeId, 'scope-xhs-resume')
+  })
+
+  it('browser_get_task hands off a completed high-control discovery task to card_loop', async () => {
+    const started: Array<Record<string, unknown>> = []
+    const controller = createControllerMock({
+      getTask: async () => ({
+        taskId: 'browser-task-visible-xhs-get',
+        kind: 'visible_collect',
+        status: 'completed',
+        progress: { total: 2, completed: 0, failed: 0, currentLabel: null },
+        result: {
+          discoveryStatus: 'complete',
+          targetUrl: 'https://www.xiaohongshu.com/user/profile/abc',
+          outputRootDir: '/tmp/ready-xhs-out',
+          noteCandidates: [
+            { url: 'https://www.xiaohongshu.com/explore/one', title: 'One', sourceId: 'one' },
+            { url: 'https://www.xiaohongshu.com/explore/two', title: 'Two', sourceId: 'two' },
+          ],
+        },
+      }) as never,
+      startCardLoopCollection: async (plan: Record<string, unknown>, scopeId?: string) => {
+        started.push({ ...plan, scopeId })
+        return { taskId: 'browser-task-card-from-get', kind: 'card_loop', status: 'running', progress: { total: 2, completed: 0, failed: 0, currentLabel: 'One' } } as never
+      },
+    } as Partial<BrowserController>)
+
+    const result = await executeBrowserTool(
+      'browser_get_task',
+      { task_id: 'browser-task-visible-xhs-get' },
+      controller,
+      undefined,
+      'scope-xhs-get',
+    )
+
+    assert.equal((JSON.parse(result) as { taskId?: string }).taskId, 'browser-task-card-from-get')
+    assert.equal(started.length, 1)
+    const plan = started[0] as { strategy?: string; sourceTaskId?: string; outputRootDir?: string; scopeId?: string }
+    assert.equal(plan.strategy, 'card_loop')
+    assert.equal(plan.sourceTaskId, 'browser-task-visible-xhs-get')
+    assert.equal(plan.outputRootDir, '/tmp/ready-xhs-out')
+    assert.equal(plan.scopeId, 'scope-xhs-get')
+  })
+
+  it('browser_get_task reuses an existing downstream collection for a completed discovery task', async () => {
+    const controller = createControllerMock({
+      getTask: async () => ({
+        taskId: 'browser-task-visible-xhs-existing',
+        kind: 'visible_collect',
+        status: 'completed',
+        progress: { total: 1, completed: 0, failed: 0, currentLabel: null },
+        result: {
+          discoveryStatus: 'complete',
+          targetUrl: 'https://www.xiaohongshu.com/user/profile/abc',
+          noteCandidates: [
+            { url: 'https://www.xiaohongshu.com/explore/one', title: 'One', sourceId: 'one' },
+          ],
+        },
+      }) as never,
+      findCollectionTaskBySourceTaskId: async () => ({
+        taskId: 'browser-task-card-existing',
+        kind: 'card_loop',
+        status: 'running',
+        progress: { total: 1, completed: 0, failed: 0, currentLabel: 'One' },
+      }) as never,
+      startCardLoopCollection: async () => {
+        throw new Error('existing downstream collection should be reused')
+      },
+    } as Partial<BrowserController>)
+
+    const result = await executeBrowserTool(
+      'browser_get_task',
+      { task_id: 'browser-task-visible-xhs-existing' },
+      controller,
+    )
+
+    assert.equal((JSON.parse(result) as { taskId?: string }).taskId, 'browser-task-card-existing')
+  })
+
   it('browser_download_gallery and browser_research_topic should offer thin task adapters for agents', async () => {
     const controller = createControllerMock({
       startTask: async (request) => {
@@ -383,7 +795,18 @@ describe('browser-tools v2', () => {
 describe('browser_collect_notes (background sub-agent dispatch)', () => {
   it('parses the planned notes and dispatches startNoteCollection with a valid plan', async () => {
     const started: Array<Record<string, unknown>> = []
+    const synthetic: Array<Record<string, unknown>> = []
     const controller = createControllerMock({
+      createSyntheticVisibleCollection: async (payload: Record<string, unknown>) => {
+        synthetic.push(payload)
+        return {
+          taskId: 'browser-task-synthetic-1',
+          kind: 'visible_collect',
+          status: 'completed',
+          progress: { total: 2, completed: 0, failed: 0, currentLabel: null },
+          result: { discoveryStatus: 'complete', noteCandidates: payload.targets },
+        } as never
+      },
       startNoteCollection: async (plan: Record<string, unknown>) => {
         started.push(plan)
         return { taskId: 'task-note-1', kind: 'note_collect', status: 'queued', progress: { total: 0, completed: 0, failed: 0, currentLabel: null } } as never
@@ -392,24 +815,62 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
     const result = await executeBrowserTool(
       'browser_collect_notes',
       {
-        target_profile_url: 'https://www.xiaohongshu.com/user/profile/abc123',
+        target_profile_url: 'https://example.com/user/profile/abc123',
         notes: [
-          { url: 'https://www.xiaohongshu.com/note/1', title: '笔记一' },
+          { url: 'https://example.com/note/1', title: '笔记一' },
           { url: 'not-a-url' }, // dropped (no http)
-          { url: 'https://www.xiaohongshu.com/note/2' },
+          { url: 'https://example.com/note/2' },
         ],
         max_notes: 50,
       },
       controller,
+      undefined,
+      undefined,
+      undefined,
+      '请采集 https://example.com/note/1 和 https://example.com/note/2',
     )
     const handle = JSON.parse(result) as { taskId: string }
     assert.equal(handle.taskId, 'task-note-1')
+    assert.equal(synthetic.length, 1)
     assert.equal(started.length, 1)
-    const plan = started[0] as { notes: Array<{ url: string }>; targetProfileUrl: string; outputRootDir: string; stopConditions?: { maxNotes?: number } }
+    const plan = started[0] as { notes: Array<{ url: string }>; targetProfileUrl: string; outputRootDir: string; sourceTaskId?: string; stopConditions?: { maxNotes?: number } }
+    assert.equal(plan.sourceTaskId, 'browser-task-synthetic-1')
     assert.equal(plan.notes.length, 2, 'the non-http note is dropped')
-    assert.deepEqual(plan.notes.map((n) => n.url), ['https://www.xiaohongshu.com/note/1', 'https://www.xiaohongshu.com/note/2'])
+    assert.deepEqual(plan.notes.map((n) => n.url), ['https://example.com/note/1', 'https://example.com/note/2'])
     assert.equal(plan.stopConditions?.maxNotes, 50)
     assert.ok(plan.outputRootDir.includes('abc123'), 'derives the output folder from the profile slug')
+  })
+
+  it('refuses direct notes when URLs cannot be proven from current user text', async () => {
+    let dispatched = false
+    const controller = createControllerMock({
+      createSyntheticVisibleCollection: async () => {
+        dispatched = true
+        return {} as never
+      },
+      startNoteCollection: async () => {
+        dispatched = true
+        return {} as never
+      },
+    })
+
+    const result = await executeBrowserTool(
+      'browser_collect_notes',
+      {
+        target_profile_url: 'https://example.com/user/profile/abc123',
+        notes: [{ url: 'https://example.com/note/not-from-user', title: '笔记一' }],
+      },
+      controller,
+      undefined,
+      undefined,
+      undefined,
+      '请采集 https://example.com/note/other',
+    )
+
+    const parsed = JSON.parse(result) as { errorCode?: string; missingUrls?: string[] }
+    assert.equal(parsed.errorCode, 'url_provenance_required')
+    assert.deepEqual(parsed.missingUrls, ['https://example.com/note/not-from-user'])
+    assert.equal(dispatched, false)
   })
 
   it('refuses when no valid note URL is supplied (does not dispatch a task)', async () => {
@@ -480,6 +941,89 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
     ])
   })
 
+  it('refuses source_task_id handoff from another scope or output directory', async () => {
+    let dispatched = false
+    const controller = createControllerMock({
+      getTask: async () => ({
+        taskId: 'browser-task-visible-old',
+        kind: 'visible_collect',
+        status: 'completed',
+        progress: { total: 1, completed: 0, failed: 0, currentLabel: null },
+        result: {
+          discoveryStatus: 'complete',
+          stopReason: 'no_new_content',
+          outputRootDir: '/tmp/old-run',
+          noteCandidates: [{ url: 'https://example.com/post/one', title: 'One', sourceId: 'one' }],
+        },
+      }) as never,
+      getTaskPayload: () => ({
+        scopeId: 'old-scope',
+        outputRootDir: '/tmp/old-run',
+      }),
+      startNoteCollection: async () => {
+        dispatched = true
+        return {} as never
+      },
+    })
+
+    const result = await executeBrowserTool(
+      'browser_collect_notes',
+      {
+        target_profile_url: 'https://example.com/profile/abc',
+        source_task_id: 'browser-task-visible-old',
+        expected_count: 1,
+        output_root_dir: '/tmp/new-run',
+      },
+      controller,
+      undefined,
+      'current-scope',
+    )
+
+    const parsed = JSON.parse(result) as { ok: boolean; errorCode: string }
+    assert.equal(parsed.ok, false)
+    assert.equal(parsed.errorCode, 'stale_source_task_scope')
+    assert.equal(dispatched, false)
+
+    const outputMismatchController = createControllerMock({
+      getTask: async () => ({
+        taskId: 'browser-task-visible-old',
+        kind: 'visible_collect',
+        status: 'completed',
+        progress: { total: 1, completed: 0, failed: 0, currentLabel: null },
+        result: {
+          discoveryStatus: 'complete',
+          stopReason: 'no_new_content',
+          outputRootDir: '/tmp/old-run',
+          noteCandidates: [{ url: 'https://example.com/post/one', title: 'One', sourceId: 'one' }],
+        },
+      }) as never,
+      getTaskPayload: () => ({
+        scopeId: 'current-scope',
+        outputRootDir: '/tmp/old-run',
+      }),
+      startNoteCollection: async () => {
+        dispatched = true
+        return {} as never
+      },
+    })
+    const outputMismatchResult = await executeBrowserTool(
+      'browser_collect_notes',
+      {
+        target_profile_url: 'https://example.com/profile/abc',
+        source_task_id: 'browser-task-visible-old',
+        expected_count: 1,
+        output_root_dir: '/tmp/new-run',
+      },
+      outputMismatchController,
+      undefined,
+      'current-scope',
+    )
+    const outputMismatch = JSON.parse(outputMismatchResult) as { ok: boolean; errorCode: string }
+    assert.equal(outputMismatch.ok, false)
+    assert.equal(outputMismatch.errorCode, 'stale_source_task_output')
+    assert.equal(dispatched, false)
+  })
+
   it('refuses source_task_id handoff when the discovery source is only partial', async () => {
     let dispatched = false
     const controller = createControllerMock({
@@ -513,6 +1057,68 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
     assert.match(result, /不是完整全量/)
     assert.match(result, /browser_resume_task/)
     assert.equal(dispatched, false)
+  })
+
+  it('allows partial source_task_id handoff after confirming the pending consent request', async () => {
+    const started: Array<Record<string, unknown>> = []
+    const controller = createControllerMock({
+      getTask: async () => ({
+        taskId: 'browser-task-visible-partial-consent',
+        kind: 'visible_collect',
+        status: 'paused',
+        progress: { total: 1, completed: 0, failed: 0, currentLabel: null },
+        result: {
+          discoveryStatus: 'partial',
+          stopReason: 'max_items',
+          continueTaskId: 'browser-task-visible-partial-consent',
+          noteCandidates: [{ url: 'https://example.com/post/one', title: 'One', sourceId: 'one' }],
+        },
+      }) as never,
+      startNoteCollection: async (plan: Record<string, unknown>) => {
+        started.push(plan)
+        return { taskId: 'task-note-after-consent', kind: 'note_collect', status: 'queued', progress: { total: 0, completed: 0, failed: 0, currentLabel: null } } as never
+      },
+    })
+
+    const first = await executeBrowserTool(
+      'browser_collect_notes',
+      {
+        target_profile_url: 'https://example.com/profile/abc',
+        source_task_id: 'browser-task-visible-partial-consent',
+      },
+      controller,
+      undefined,
+      'scope-consent',
+    )
+    const pending = (JSON.parse(first) as { pendingConsentRequest?: { requestId?: string } }).pendingConsentRequest
+    assert.match(pending?.requestId || '', /^browser-consent-/)
+
+    const confirmed = await executeBrowserTool(
+      'browser_confirm_collection_consent',
+      {
+        request_id: pending?.requestId,
+        confirmed_via: 'ask_user_questions',
+      },
+      controller,
+      undefined,
+      'scope-consent',
+    )
+    assert.equal((JSON.parse(confirmed) as { ok?: boolean }).ok, true)
+
+    const second = await executeBrowserTool(
+      'browser_collect_notes',
+      {
+        target_profile_url: 'https://example.com/profile/abc',
+        source_task_id: 'browser-task-visible-partial-consent',
+      },
+      controller,
+      undefined,
+      'scope-consent',
+    )
+
+    assert.equal((JSON.parse(second) as { taskId?: string }).taskId, 'task-note-after-consent')
+    assert.equal(started.length, 1)
+    assert.equal((started[0] as { sourceTaskId?: string }).sourceTaskId, 'browser-task-visible-partial-consent')
   })
 
   it('refuses to start when expected_count does not match the frozen list', async () => {
@@ -585,8 +1191,8 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
     assert.equal(dispatched, false)
   })
 
-  it('allows direct notes when partial collection is explicit', async () => {
-    const started: Array<Record<string, unknown>> = []
+  it('does not trust allow_partial for direct notes when a larger frozen collection exists', async () => {
+    let dispatched = false
     const frozenNotes = Array.from({ length: 31 }, (_item, index) => ({
       url: `https://example.com/post/${index + 1}`,
       title: `Post ${index + 1}`,
@@ -600,9 +1206,9 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
         result: { noteCandidates: frozenNotes },
         updatedAt: new Date().toISOString(),
       }] as never,
-      startNoteCollection: async (plan: Record<string, unknown>) => {
-        started.push(plan)
-        return { taskId: 'task-note-partial', kind: 'note_collect', status: 'queued', progress: { total: 0, completed: 0, failed: 0, currentLabel: null } } as never
+      startNoteCollection: async () => {
+        dispatched = true
+        return {} as never
       },
     })
 
@@ -616,8 +1222,218 @@ describe('browser_collect_notes (background sub-agent dispatch)', () => {
       controller,
     )
 
-    assert.equal((JSON.parse(result) as { taskId: string }).taskId, 'task-note-partial')
-    assert.equal((started[0] as { notes: unknown[] }).notes.length, 12)
+    const parsed = JSON.parse(result) as {
+      errorCode?: string
+      allowPartialIgnored?: boolean
+      pendingConsentRequest?: { requestId?: string; consentKind?: string; sourceTaskId?: string }
+    }
+    assert.equal(parsed.errorCode, 'partial_collection_consent_required')
+    assert.equal(parsed.allowPartialIgnored, true)
+    assert.match(parsed.pendingConsentRequest?.requestId || '', /^browser-consent-/)
+    assert.equal(parsed.pendingConsentRequest?.consentKind, 'partial_collection')
+    assert.equal(parsed.pendingConsentRequest?.sourceTaskId, 'browser-task-visible-large')
+    assert.equal(dispatched, false)
+  })
+
+  it('projects pending collection consent and clears it after ui confirmation', async () => {
+    const frozenNotes = Array.from({ length: 31 }, (_item, index) => ({
+      url: `https://example.com/post/${index + 1}`,
+      title: `Post ${index + 1}`,
+    }))
+    const controller = createControllerMock({
+      listAgentCollectionTasks: async () => [{
+        taskId: 'browser-task-visible-large',
+        kind: 'visible_collect',
+        status: 'completed',
+        progress: { total: 31, completed: 31, failed: 0, currentLabel: null },
+        result: { noteCandidates: frozenNotes },
+        updatedAt: new Date().toISOString(),
+      }] as never,
+    })
+    const { records, runtime } = createRuntimeProjectionStore()
+
+    const first = await executeBrowserTool(
+      'browser_collect_notes',
+      {
+        target_profile_url: 'https://example.com/profile/abc',
+        notes: frozenNotes.slice(0, 12),
+      },
+      controller,
+      undefined,
+      'scope-consent-ui',
+      undefined,
+      undefined,
+      runtime as never,
+    )
+
+    const parsed = JSON.parse(first) as {
+      pendingConsentRequest?: { requestId?: string }
+    }
+    const requestId = parsed.pendingConsentRequest?.requestId || ''
+    assert.match(requestId, /^browser-consent-/)
+    const projected = records.get('browser-task-visible-large')
+    assert.equal(projected?.interactionState, 'awaiting_confirmation')
+    assert.equal(projected?.waitingFor, 'confirmation')
+    assert.equal(projected?.progress?.browserCollectionConsent?.requestId, requestId)
+    assert.equal(projected?.progress?.browserCollectionConsent?.consentKind, 'partial_collection')
+
+    await executeBrowserTool(
+      'browser_confirm_collection_consent',
+      { request_id: requestId, confirmed_via: 'ui_action' },
+      controller,
+      undefined,
+      'scope-consent-ui',
+      undefined,
+      undefined,
+      runtime as never,
+    )
+
+    const cleared = records.get('browser-task-visible-large')
+    assert.equal(cleared?.interactionState, 'suspended')
+    assert.equal(cleared?.waitingFor, 'none')
+    assert.equal(cleared?.progress?.browserCollectionConsent, null)
+  })
+
+  it('rejects high-control url_batch without downgrade consent', async () => {
+    let dispatched = false
+    const controller = createControllerMock({
+      getTask: async () => ({
+        taskId: 'browser-task-visible-xhs',
+        kind: 'visible_collect',
+        status: 'completed',
+        progress: { total: 1, completed: 0, failed: 0, currentLabel: null },
+        result: {
+          discoveryStatus: 'complete',
+          noteCandidates: [{ url: 'https://www.xiaohongshu.com/explore/abc', title: 'XHS Note', sourceId: 'abc' }],
+        },
+      }) as never,
+      startNoteCollection: async () => {
+        dispatched = true
+        return {} as never
+      },
+    })
+
+    const result = await executeBrowserTool(
+      'browser_collect_notes',
+      {
+        target_profile_url: 'https://www.xiaohongshu.com/user/profile/abc',
+        source_task_id: 'browser-task-visible-xhs',
+        strategy: 'url_batch',
+      },
+      controller,
+      undefined,
+      'scope-xhs',
+    )
+
+    const parsed = JSON.parse(result) as {
+      errorCode?: string
+      strategy?: string
+      pendingConsentRequest?: { requestId?: string; consentKind?: string; sourceTaskId?: string; targetHost?: string }
+    }
+    assert.equal(parsed.errorCode, 'high_control_url_batch_denied')
+    assert.equal(parsed.strategy, 'url_batch')
+    assert.match(parsed.pendingConsentRequest?.requestId || '', /^browser-consent-/)
+    assert.equal(parsed.pendingConsentRequest?.consentKind, 'high_control_url_batch_downgrade')
+    assert.equal(parsed.pendingConsentRequest?.sourceTaskId, 'browser-task-visible-xhs')
+    assert.equal(parsed.pendingConsentRequest?.targetHost, 'www.xiaohongshu.com')
+    assert.equal(dispatched, false)
+  })
+
+  it('allows high-control url_batch after confirming downgrade consent', async () => {
+    const started: Array<Record<string, unknown>> = []
+    const controller = createControllerMock({
+      getTask: async () => ({
+        taskId: 'browser-task-visible-xhs-confirm',
+        kind: 'visible_collect',
+        status: 'completed',
+        progress: { total: 1, completed: 0, failed: 0, currentLabel: null },
+        result: {
+          discoveryStatus: 'complete',
+          noteCandidates: [{ url: 'https://www.xiaohongshu.com/explore/abc', title: 'XHS Note', sourceId: 'abc' }],
+        },
+      }) as never,
+      startNoteCollection: async (plan: Record<string, unknown>) => {
+        started.push(plan)
+        return { taskId: 'task-xhs-url-batch', kind: 'note_collect', status: 'queued', progress: { total: 0, completed: 0, failed: 0, currentLabel: null } } as never
+      },
+    })
+
+    const first = await executeBrowserTool(
+      'browser_collect_notes',
+      {
+        target_profile_url: 'https://www.xiaohongshu.com/user/profile/abc',
+        source_task_id: 'browser-task-visible-xhs-confirm',
+        strategy: 'url_batch',
+      },
+      controller,
+      undefined,
+      'scope-xhs-confirm',
+    )
+    const pending = (JSON.parse(first) as { pendingConsentRequest?: { requestId?: string } }).pendingConsentRequest
+    assert.match(pending?.requestId || '', /^browser-consent-/)
+
+    await executeBrowserTool(
+      'browser_confirm_collection_consent',
+      {
+        request_id: pending?.requestId,
+        confirmed_via: 'ask_user_questions',
+      },
+      controller,
+      undefined,
+      'scope-xhs-confirm',
+    )
+
+    const second = await executeBrowserTool(
+      'browser_collect_notes',
+      {
+        target_profile_url: 'https://www.xiaohongshu.com/user/profile/abc',
+        source_task_id: 'browser-task-visible-xhs-confirm',
+        strategy: 'url_batch',
+      },
+      controller,
+      undefined,
+      'scope-xhs-confirm',
+    )
+
+    assert.equal((JSON.parse(second) as { taskId?: string }).taskId, 'task-xhs-url-batch')
+    assert.equal(started.length, 1)
+    assert.equal((started[0] as { strategy?: string }).strategy, 'url_batch')
+  })
+
+  it('starts card_loop for high-control collection when requested', async () => {
+    const started: Array<Record<string, unknown>> = []
+    const controller = createControllerMock({
+      getTask: async () => ({
+        taskId: 'browser-task-visible-xhs',
+        kind: 'visible_collect',
+        status: 'completed',
+        progress: { total: 1, completed: 0, failed: 0, currentLabel: null },
+        result: {
+          discoveryStatus: 'complete',
+          noteCandidates: [{ url: 'https://www.xiaohongshu.com/explore/abc', title: 'XHS Note', sourceId: 'abc' }],
+        },
+      }) as never,
+      startCardLoopCollection: async (plan: Record<string, unknown>) => {
+        started.push(plan)
+        return { taskId: 'task-card-loop', kind: 'card_loop', status: 'queued', progress: { total: 0, completed: 0, failed: 0, currentLabel: null } } as never
+      },
+    } as Partial<BrowserController>)
+
+    const result = await executeBrowserTool(
+      'browser_collect_notes',
+      {
+        target_profile_url: 'https://www.xiaohongshu.com/user/profile/abc',
+        source_task_id: 'browser-task-visible-xhs',
+        strategy: 'card_loop',
+      },
+      controller,
+      undefined,
+      'scope-xhs',
+    )
+
+    assert.equal((JSON.parse(result) as { taskId?: string }).taskId, 'task-card-loop')
+    assert.equal(started.length, 1)
+    assert.equal((started[0] as { strategy?: string }).strategy, 'card_loop')
   })
 })
 
@@ -673,6 +1489,52 @@ describe('high-control browser tools (agent tab routing)', () => {
 
     assert.deepEqual(navigations, [{ tabId: 'agent-tab', url: profileUrl }])
     assert.equal(screenshotTabId, 'agent-tab')
+  })
+
+  it('keeps user-view high-control collection clicks on the requested visible tab', async () => {
+    let ensured = 0
+    const switched: string[] = []
+    const controller = createControllerMock({
+      getActiveTab: () => ({ id: 'tab-4', title: 'XHS', url: profileUrl, active: true, owner: 'manual' }) as never,
+      getTabList: () => [
+        { id: 'tab-4', title: 'XHS', url: profileUrl, active: true, owner: 'manual' },
+      ] as never,
+      ensureAgentTab: async () => {
+        ensured += 1
+        return 'agent-tab'
+      },
+      switchTab: (tabId: string) => {
+        switched.push(tabId)
+        return { success: true }
+      },
+      executeJS: async (_tabId, code) => {
+        const source = String(code || '')
+        if (source.includes('buildLocateTextTargetJs')) return null
+        if (source.includes('hrefContains')) {
+          assert.ok(source.includes('const directHrefClick = false'))
+          return { ok: true, text: '笔记一', clickedDirect: false, cssX: 120, cssY: 220, width: 1000, height: 800 }
+        }
+        if (source.includes('readyState') && source.includes('bodyTextLen')) {
+          return { readyState: 'complete', bodyTextLen: 200, matched: true }
+        }
+        return null
+      },
+    } as Partial<BrowserController>)
+
+    await executeBrowserTool(
+      'browser_click_text',
+      {
+        text: '笔记一',
+        href_contains: 'source-1',
+        tab_id: 'tab-4',
+        collection_surface: 'user-view',
+      },
+      controller,
+    )
+
+    assert.equal(ensured, 0)
+    assert.deepEqual(switched, ['tab-4'])
+    assert.ok(controller.calls.mouse.length >= 3)
   })
 
   it('routes high-control URL extraction through the agent tab task surface', async () => {

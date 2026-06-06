@@ -72,6 +72,8 @@ export function TaskCard({
   onContinueDetachedTask,
   onCancelChildRun,
   onContinueChildRun,
+  onResumeBrowserTask,
+  onConfirmBrowserCollectionConsent,
 }: {
   run: TaskCardRun
   taskKey: string
@@ -101,6 +103,8 @@ export function TaskCard({
   onContinueDetachedTask?: (scopeId: string, taskId?: string | null) => void
   onCancelChildRun?: (scopeId: string, childRunId: string) => void
   onContinueChildRun?: (scopeId: string, childRunId: string) => void
+  onResumeBrowserTask?: (scopeId: string, taskId: string) => void
+  onConfirmBrowserCollectionConsent?: (scopeId: string, requestId: string) => void
 }) {
   const vm = buildTaskCardViewModel(run, disclosureState)
   const legacyHandoffReportedRef = useRef<Set<string>>(new Set())
@@ -127,6 +131,15 @@ export function TaskCard({
   const childRunId = run.taskContinuation?.childRunId || null
   const isAgentHandoff = isInternalAgentHandoffTask(run)
   const shouldShowOpenScopeButton = Boolean(compact && run.scopeId !== sessionId)
+  const browserTaskId = run.module === 'browser' && typeof run.taskId === 'string' && run.taskId.startsWith('browser-task-')
+    ? run.taskId
+    : null
+  const browserCollectionConsent = run.module === 'browser'
+    ? run.progress?.browserCollectionConsent || null
+    : null
+  const browserCollectionConsentLabel = browserCollectionConsent?.consentKind === 'high_control_url_batch_downgrade'
+    ? '确认降级采集'
+    : '确认部分采集'
   const progressLabel = formatTaskProgressLabel(run.progress)
   const progressValue = progressPercent(run.progress)
   const progressLastError = run.progress?.lastError ? formatTaskUserFacingText(run.progress.lastError) : null
@@ -515,7 +528,7 @@ export function TaskCard({
       )}
 
       {expanded &&
-        (run.waitingFor !== 'none' || (run.resumableActions || []).length > 0 || shouldShowOpenScopeButton) && (
+        (run.waitingFor !== 'none' || (run.resumableActions || []).length > 0 || shouldShowOpenScopeButton || browserCollectionConsent) && (
           <div className="flex flex-wrap gap-1.5">
             {!isDetachedTask && (run.phase === 'planning' || run.phase === 'tool_running' || run.phase === 'responding' || run.phase === 'resuming') && (
               <button
@@ -578,7 +591,33 @@ export function TaskCard({
                 `interactionState === 'suspended'` alone; now also gated
                 by `canResume === true`. Child-run and detached task cards
                 use their exact-id buttons above. */}
-            {run.interactionState === 'suspended' && run.canResume === true && !childRunId && !isDetachedTask && (
+            {browserTaskId && (run.interactionState === 'suspended' || run.waitingFor === 'verification') && (
+              <button
+                type="button"
+                data-ready-task-action="resume-browser-task"
+                data-ready-task-scope-id={run.scopeId || undefined}
+                data-ready-task-id={browserTaskId}
+                onClick={() => onResumeBrowserTask?.(run.scopeId, browserTaskId)}
+                style={{ ...TASK_ACTION_BUTTON_STYLE }}
+              >
+                继续浏览器采集
+              </button>
+            )}
+            {browserCollectionConsent?.requestId && (
+              <button
+                type="button"
+                data-ready-task-action="confirm-browser-collection-consent"
+                data-ready-task-scope-id={run.scopeId || undefined}
+                data-ready-task-id={run.taskId || undefined}
+                data-ready-task-consent-kind={browserCollectionConsent.consentKind}
+                data-ready-task-consent-request-id={browserCollectionConsent.requestId}
+                onClick={() => onConfirmBrowserCollectionConsent?.(run.scopeId, browserCollectionConsent.requestId)}
+                style={{ ...TASK_ACTION_BUTTON_STYLE }}
+              >
+                {browserCollectionConsentLabel}
+              </button>
+            )}
+            {run.interactionState === 'suspended' && run.canResume === true && !childRunId && !isDetachedTask && !browserTaskId && (
               <button
                 type="button"
                 onClick={() => onResumeRun?.(run.scopeId)}
@@ -596,7 +635,7 @@ export function TaskCard({
                 补充后继续
               </button>
             )}
-            {run.waitingFor === 'confirmation' && (
+            {run.waitingFor === 'confirmation' && !browserCollectionConsent && (
               <>
                 <button
                   type="button"

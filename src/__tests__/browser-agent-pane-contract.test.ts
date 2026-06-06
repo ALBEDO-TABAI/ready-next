@@ -8,13 +8,19 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('agent browser pane opens when the agent tab is running even before a task card exists', () => {
+test('agent browser pane only opens for active agent-view supervision tasks', () => {
   const browserMode = readWorkspaceFile('src/renderer/pages/modes/BrowserMode.tsx')
   const panel = readWorkspaceFile('src/renderer/components/browser/AgentBrowserSupervisionPanel.tsx')
+  const supervision = readWorkspaceFile('src/main/modules/browser-engine/ipc-supervision.ts')
 
   assert.match(browserMode, /agentRuntimeTab\?\.activity === 'running'/)
   assert.match(browserMode, /`agent-tab:\$\{agentSupervision\.agentTabId\}`/)
   assert.match(browserMode, /agentPaneVisible = Boolean\(agentSupervision\.agentTabId && agentPaneTaskId/)
+  assert.doesNotMatch(browserMode, /terminalAgentTasks/)
+  assert.match(browserMode, /const visibleAgentTask = activeAgentTasks\[0\] \|\| null/)
+  assert.match(supervision, /const activeTasks = tasks\.filter/)
+  assert.match(supervision, /agentTabId: activeTasks\.length > 0 \? controller\.getAgentTabId\(\) : null/)
+  assert.match(supervision, /tasks: activeTasks/)
   assert.match(panel, /variant === 'collapsedRail'/)
   assert.match(panel, /controlState === 'active'[\s\S]*\? '浏览中'/)
 })

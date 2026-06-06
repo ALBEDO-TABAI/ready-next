@@ -31,6 +31,15 @@ export const BrowserDownloadUrlsSchema = z.object({
   tab_id: z.string().optional().describe('可选标签页 ID（用于带 Referer 下载）'),
 })
 
+export const BrowserResolveVideoSchema = z.object({
+  page_url: z.string().optional().describe('视频所在页面 URL；留空时尝试使用当前标签页 URL'),
+  video_url: z.string().optional().describe('页面已暴露的直接视频 URL（可选）'),
+  poster_url: z.string().optional().describe('视频封面 URL（可选）'),
+  title: z.string().optional().describe('视频或笔记标题（可选）'),
+  sources: z.array(z.string()).optional().describe('候选 source URL 数组（可选）'),
+  tab_id: z.string().optional().describe('可选标签页 ID，用于补充当前页面 URL/标题'),
+})
+
 export const BrowserExtractStructuredSchema = z.object({
   template: z
     .enum(['article_list', 'image_gallery', 'link_list', 'card_list', 'custom'])
@@ -81,6 +90,7 @@ export const BrowserVisibleCollectSchema = z.object({
   max_items: z.number().optional().describe('最多采集条数（硬上限）'),
   max_rounds: z.number().optional().describe('最大轮数（硬上限）'),
   max_duration_ms: z.number().optional().describe('最长运行毫秒（硬上限）'),
+  user_expected_total: z.number().optional().describe('可选：用户明确声明的目标总数；若冻结数不足，发现阶段不得标记为完整'),
   output_root_dir: z.string().optional().describe('可选：最终保存根目录；未传则后续逐篇采集使用 ~/Documents/Ready采集/<账号标识>'),
 })
 
@@ -149,7 +159,8 @@ export const BrowserCollectNotesSchema = z.object({
   target_profile_url: z.string().describe('博主主页 URL（用于建根目录与展示）'),
   source_task_id: z.string().optional().describe('可选：从 browser_visible_collect 返回的任务 ID 接力，优先使用该任务冻结的候选清单'),
   expected_count: z.number().optional().describe('可选：上一步确认的目标数量；若实际清单不一致则拒绝启动'),
-  allow_partial: z.boolean().optional().describe('可选：用户明确只要采集部分目标时才传 true；默认会阻止绕过最近冻结的更大清单'),
+  strategy: z.enum(['card_loop', 'url_batch']).optional().describe('逐篇采集策略：card_loop=在列表页逐个点开；url_batch=逐个打开详情 URL'),
+  allow_partial: z.boolean().optional().describe('可选提示位：用户明确只要采集部分目标时可传 true，但不能放行；真正放行必须已有持久用户确认记录'),
   notes: z
     .array(
       z.object({
@@ -170,9 +181,15 @@ export const BrowserCollectNotesSchema = z.object({
   max_consecutive_failures: z.number().optional().describe('连续失败上限，超过即停'),
 })
 
+export const BrowserConfirmCollectionConsentSchema = z.object({
+  request_id: z.string().describe('browser_collect_notes 返回的 pendingConsentRequest.requestId'),
+  confirmed_via: z.enum(['ask_user_questions', 'ui_action']).describe('确认来源：ask_user_questions 或 ui_action'),
+})
+
 export type BrowserContentToolName =
   | 'browser_collect_images'
   | 'browser_download_urls'
+  | 'browser_resolve_video'
   | 'browser_extract_structured'
   | 'browser_scroll_collect'
   | 'browser_start_task'
@@ -186,6 +203,7 @@ export type BrowserContentToolName =
   | 'browser_execute_js'
   | 'browser_visible_collect'
   | 'browser_collect_notes'
+  | 'browser_confirm_collection_consent'
 
 export const BROWSER_CONTENT_SCHEMAS: Record<
   BrowserContentToolName,
@@ -193,6 +211,7 @@ export const BROWSER_CONTENT_SCHEMAS: Record<
 > = {
   browser_collect_images: BrowserCollectImagesSchema,
   browser_download_urls: BrowserDownloadUrlsSchema,
+  browser_resolve_video: BrowserResolveVideoSchema,
   browser_extract_structured: BrowserExtractStructuredSchema,
   browser_scroll_collect: BrowserScrollCollectSchema,
   browser_start_task: BrowserStartTaskSchema,
@@ -206,4 +225,5 @@ export const BROWSER_CONTENT_SCHEMAS: Record<
   browser_execute_js: BrowserExecuteJsSchema,
   browser_visible_collect: BrowserVisibleCollectSchema,
   browser_collect_notes: BrowserCollectNotesSchema,
+  browser_confirm_collection_consent: BrowserConfirmCollectionConsentSchema,
 }

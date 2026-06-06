@@ -21,6 +21,7 @@ export const CollectionNoteSchema = z.object({
   order: z.number().int().positive().optional(),
   folderName: z.string().optional(),
   duplicateTitle: z.boolean().optional(),
+  kind: z.enum(['content', 'video']).optional(),
 })
 
 export const CollectionStopConditionsSchema = z.object({
@@ -32,6 +33,7 @@ export const CollectionStopConditionsSchema = z.object({
 export const CollectionPlanSchema = z.object({
   targetProfileUrl: z.string().describe('博主主页 URL'),
   notes: z.array(CollectionNoteSchema).min(1).describe('要逐篇采集的笔记列表'),
+  strategy: z.enum(['url_batch', 'card_loop']).optional(),
   stopConditions: CollectionStopConditionsSchema.optional(),
   outputRootDir: z.string().describe('采集输出根目录（每篇一个子文件夹）'),
   expectedCount: z.number().int().positive().optional().describe('上游冻结清单的预期数量'),
@@ -75,11 +77,16 @@ export interface CollectionNoteOutput {
   success: boolean
   savedDir: string
   imageCount: number
+  videoCount?: number
+  mediaKind?: 'image' | 'video'
   notePath?: string
   manifestPath?: string
   files?: string[]
   reason?: string
+  kind?: 'content' | 'video'
 }
+
+const NON_FATAL_FAILURE_REASONS = new Set(['skipped_video', 'unavailable'])
 
 export function createCollectionLoopState(now: number): CollectionLoopState {
   return { cursor: 0, collected: [], failed: [], outputs: [], consecutiveFailures: 0, startedAt: now }
@@ -133,7 +140,7 @@ export function recordNoteResult(
     collected: state.collected.slice(),
     failed: state.failed.slice(),
     outputs: Array.isArray(state.outputs) ? state.outputs.slice() : [],
-    consecutiveFailures: outcome.success ? 0 : state.consecutiveFailures + 1,
+    consecutiveFailures: outcome.success || NON_FATAL_FAILURE_REASONS.has(String(outcome.reason || '')) ? 0 : state.consecutiveFailures + 1,
     startedAt: state.startedAt,
   }
   if (outcome.success) {
@@ -145,6 +152,7 @@ export function recordNoteResult(
     url: note.url,
     title: note.title,
     sourceId: note.sourceId,
+    kind: note.kind,
     success: outcome.success,
     savedDir: '',
     imageCount: 0,

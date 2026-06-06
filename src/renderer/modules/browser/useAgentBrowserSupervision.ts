@@ -115,7 +115,7 @@ export function useAgentBrowserSupervision(): AgentBrowserSupervisionState & {
         setState({ controlState: next.controlState, agentTabId: next.agentTabId, tasks: next.tasks ?? [] })
       }
     } catch {
-      // transient IPC failure — keep the last known state
+      // silent-catch: transient IPC failure keeps the last known supervision state.
     }
   }, [])
 

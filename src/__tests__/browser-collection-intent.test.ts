@@ -3,11 +3,14 @@ import { describe, it } from 'node:test'
 
 import {
   resolveBrowserCollectionIntent,
+  resolveBrowserBatchCollectionIntent,
   isBrowserCollectionSubsetTool,
+  isBrowserBatchCollectionWorkflowTool,
   isHighControlPlatformText,
   stepCollectionIntentTtl,
   isBareContinuationInstruction,
   BROWSER_COLLECTION_SUBSET_TOOL_NAMES,
+  BROWSER_BATCH_COLLECTION_WORKFLOW_TOOL_NAMES,
 } from '../shared/browser-collection-intent'
 import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
 
@@ -97,7 +100,7 @@ describe('document signal priority', () => {
 
 describe('collection subset white-list', () => {
   it('includes navigation/read/collect/download/task tools', () => {
-    for (const name of ['browser_navigate', 'browser_read_page', 'browser_visible_collect', 'browser_download_urls', 'browser_get_task']) {
+    for (const name of ['browser_navigate', 'browser_read_page', 'browser_visible_collect', 'browser_resolve_video', 'browser_download_urls', 'browser_get_task']) {
       assert.equal(isBrowserCollectionSubsetTool(name), true, `${name} should be in subset`)
     }
   })
@@ -108,6 +111,25 @@ describe('collection subset white-list', () => {
   })
   it('the subset is a small curated list, not the whole catalog', () => {
     assert.ok(BROWSER_COLLECTION_SUBSET_TOOL_NAMES.length > 0 && BROWSER_COLLECTION_SUBSET_TOOL_NAMES.length < 30)
+  })
+})
+
+describe('batch collection workflow subset', () => {
+  it('detects multi-note/profile collection separately from ordinary single-page collection', () => {
+    assert.equal(resolveBrowserBatchCollectionIntent('把这个博主的每篇笔记都保存图片'), true)
+    assert.equal(resolveBrowserBatchCollectionIntent('继续\n\n## 最近会话摘要\n用户要采集小红书博主全部笔记'), true)
+    assert.equal(resolveBrowserBatchCollectionIntent('下载当前页面里这张图片'), false)
+  })
+
+  it('keeps only background collection workflow tools for batch note collection', () => {
+    for (const name of ['browser_visible_collect', 'browser_collect_notes', 'browser_resume_task', 'browser_get_task']) {
+      assert.equal(isBrowserBatchCollectionWorkflowTool(name), true, `${name} should stay available`)
+    }
+    for (const name of ['browser_navigate', 'browser_click_text', 'browser_collect_images', 'browser_resolve_video', 'browser_download_urls', 'browser_extract_structured']) {
+      assert.equal(isBrowserBatchCollectionWorkflowTool(name), false, `${name} must not be available for batch workflow`)
+    }
+    assert.ok(BROWSER_BATCH_COLLECTION_WORKFLOW_TOOL_NAMES.length > 0)
+    assert.ok(BROWSER_BATCH_COLLECTION_WORKFLOW_TOOL_NAMES.length < BROWSER_COLLECTION_SUBSET_TOOL_NAMES.length)
   })
 })
 

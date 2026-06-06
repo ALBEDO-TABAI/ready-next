@@ -2759,7 +2759,7 @@ export class TurnEngine {
           : 'system'
       const emitRuntimeTaskPayload = (options: {
         summary: string
-        waitingFor?: 'input' | 'confirmation' | 'agent_result' | 'background' | 'clarification' | 'none'
+        waitingFor?: 'input' | 'confirmation' | 'agent_result' | 'background' | 'clarification' | 'verification' | 'none'
         resumableActions?: Array<'continue' | 'retry' | 'open_artifact' | 'cancel' | 'none'>
         blockedReason?: string | null
       }) => {

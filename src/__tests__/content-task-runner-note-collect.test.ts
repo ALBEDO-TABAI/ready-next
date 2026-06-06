@@ -2,8 +2,9 @@ import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { mkdtemp, readFile } from 'node:fs/promises'
 
-import { BrowserContentTaskRunner, type CollectorFacadeFactory } from '../main/modules/browser-engine/content-task-runner'
+import { BrowserContentTaskRunner, normalizeHighControlCollectionPlan, type CollectorFacadeFactory } from '../main/modules/browser-engine/content-task-runner'
 import type { NoteCollectFacade } from '../main/modules/browser-engine/browser-collector-actions'
 
 // --- In-memory fakes (no SQLite / no Electron) ----------------------------------
@@ -48,6 +49,9 @@ function fakePersistence() {
     listPendingTasks() {
       return [...tasks.values()].filter((t) => ['queued', 'running', 'paused'].includes(t.status))
     },
+    listTasks() {
+      return [...tasks.values()]
+    },
     updateProgress(taskId: string, progress: Partial<FakeTask['progress']>, extras?: Record<string, unknown>) {
       const t = tasks.get(taskId)
       if (!t) return null
@@ -66,10 +70,12 @@ function fakePersistence() {
 
 function fakeLease(opts: { acquireFails?: boolean; writeDeniedAfter?: () => boolean } = {}) {
   const released: string[] = []
+  const acquired: Array<{ surface?: string; taskId?: string; runId?: string; tabId?: string }> = []
   const svc = {
-    acquire() {
+    acquire(input?: { surface?: string; taskId?: string; runId?: string; tabId?: string }) {
       if (opts.acquireFails) return { ok: false, errorCode: 'lease_held', message: 'held' }
-      return { leaseId: 'lease-xyz', surface: 'agent-view', acquiredAt: 0, expiresAt: 0 }
+      acquired.push(input || {})
+      return { leaseId: 'lease-xyz', surface: input?.surface || 'agent-view', acquiredAt: 0, expiresAt: 0 }
     },
     checkWrite() {
       return opts.writeDeniedAfter && opts.writeDeniedAfter() ? { ok: false, errorCode: 'lease_takeover', message: 'gone' } : null
@@ -81,7 +87,7 @@ function fakeLease(opts: { acquireFails?: boolean; writeDeniedAfter?: () => bool
       released.push(leaseId)
     },
   }
-  return { svc, released }
+  return { svc, released, acquired }
 }
 
 const imagesJson = JSON.stringify({ count: 1, images: [{ url: 'https://img.xhscdn.com/a.jpg' }] })
@@ -90,12 +96,32 @@ function okFacadeFactory(extra?: { isFrozen?: () => boolean }): CollectorFacadeF
   return () => {
     const facade: NoteCollectFacade = {
       run: async (tool) => {
+        if (tool === 'browser_get_tabs') return [
+          '[tab-agent-1] 详情页',
+          '    https://www.xiaohongshu.com/note/0',
+          '    https://www.xiaohongshu.com/note/1',
+          '    https://www.xiaohongshu.com/note/2',
+          '    https://www.xiaohongshu.com/note/3',
+          '    https://www.xiaohongshu.com/note/4',
+        ].join('\n')
+        if (tool === 'browser_read_page') return '详情页：笔记0 笔记1 笔记2'
         if (tool === 'browser_collect_images') return imagesJson
         if (tool === 'browser_download_urls') return JSON.stringify({ success: 1 })
         return JSON.stringify({ ok: true })
       },
     }
     return { facade, isControlFrozen: extra?.isFrozen ?? (() => false) }
+  }
+}
+
+function layoutLockFacadeFactory(events: string[]): CollectorFacadeFactory {
+  return () => {
+    const base = okFacadeFactory()({ agentTabId: 'tab-agent-1', leaseId: 'lease-xyz', surface: 'agent-view' })
+    events.push('lock')
+    return {
+      ...base,
+      releaseLayoutLock: () => events.push('release'),
+    }
   }
 }
 
@@ -136,6 +162,70 @@ describe('note_collect background task (content-task-runner)', () => {
     assert.equal(result.collected.length, 3)
     assert.equal(result.stopReason, 'completed')
     assert.deepEqual(released, ['lease-xyz'], 'lease released exactly once')
+  })
+
+  it('holds a layout lock for the agent tab while note collection is running', async () => {
+    const { svc: persistence, tasks } = fakePersistence()
+    const { svc: lease } = fakeLease()
+    const layoutLockEvents: string[] = []
+    const runner = new BrowserContentTaskRunner(
+      {} as never,
+      persistence as never,
+      lease as never,
+      layoutLockFacadeFactory(layoutLockEvents),
+    )
+    const taskId = await runToCompletion(runner, planPayload(2))
+    const task = tasks.get(taskId)!
+
+    assert.equal(task.status, 'completed')
+    assert.deepEqual(layoutLockEvents, ['lock', 'release'])
+  })
+
+  it('uses a user-view lease when card_loop inherits the visible profile tab', async () => {
+    const { svc: persistence, tasks } = fakePersistence()
+    const { svc: lease, acquired, released } = fakeLease()
+    const runner = new BrowserContentTaskRunner(
+      {} as never,
+      persistence as never,
+      lease as never,
+      okFacadeFactory(),
+    )
+    const payload = {
+      ...planPayload(2),
+      agentTabId: 'tab-profile-1',
+      surface: 'user-view',
+      plan: {
+        ...planPayload(2).plan,
+        strategy: 'card_loop',
+        sourceTaskId: 'visible-source-1',
+      },
+    }
+    const taskId = await runToCompletion(runner, payload)
+    const task = tasks.get(taskId)!
+
+    assert.equal(task.status, 'completed')
+    assert.equal(acquired[0]?.surface, 'user-view')
+    assert.equal(acquired[0]?.tabId, 'tab-profile-1')
+    assert.deepEqual(released, ['lease-xyz'])
+  })
+
+  it('does not add a hidden maxNotes=60 clamp to high-control plans', () => {
+    const rawPlan = planPayload(75).plan
+    const plan = normalizeHighControlCollectionPlan(rawPlan)
+
+    assert.equal(plan.notes.length, 75)
+    assert.equal(plan.stopConditions?.maxNotes, undefined)
+    assert.equal(plan.stopConditions?.maxConsecutiveFailures, 3)
+  })
+
+  it('allows more consecutive failures for high-control card_loop plans', () => {
+    const rawPlan = {
+      ...planPayload(75).plan,
+      strategy: 'card_loop' as const,
+    }
+    const plan = normalizeHighControlCollectionPlan(rawPlan)
+
+    assert.equal(plan.stopConditions?.maxConsecutiveFailures, 8)
   })
 
   it('fails cleanly when no collector facade factory is wired', async () => {
@@ -211,7 +301,7 @@ describe('note_collect background task (content-task-runner)', () => {
     const task = tasks.get(taskId)!
     const result = task.result as { stopReason: string }
     assert.equal(result.stopReason, 'lease_lost')
-    assert.equal(task.status, 'cancelled', 'a lease takeover is not a successful completion')
+    assert.equal(task.status, 'paused', 'a lease takeover is a recoverable pause, not a successful completion')
   })
 
   it('marks an incomplete collection as failed instead of completed', async () => {
@@ -234,6 +324,242 @@ describe('note_collect background task (content-task-runner)', () => {
     assert.equal(result.stopReason, 'too_many_failures')
     assert.equal(result.collected.length, 0)
     assert.equal(result.failed.length, 3, 'high-control collections clamp the consecutive failure budget')
+  })
+
+  it('card_loop clicks a card and returns without navigating directly to the detail URL', async () => {
+    const { svc: persistence, tasks } = fakePersistence()
+    const { svc: lease } = fakeLease()
+    const calls: Array<{ tool: string; args: Record<string, unknown> }> = []
+    const factory: CollectorFacadeFactory = () => ({
+      facade: {
+        run: async (tool, args = {}) => {
+          calls.push({ tool, args })
+          if (tool === 'browser_get_tabs') return '[tab-agent-1] 详情页\n    https://www.xiaohongshu.com/note/0'
+          if (tool === 'browser_read_page') return '详情页：笔记0 source 0'
+          if (tool === 'browser_collect_images') return imagesJson
+          if (tool === 'browser_download_urls') return JSON.stringify({ success: 1 })
+          return JSON.stringify({ ok: true })
+        },
+      },
+      isControlFrozen: () => false,
+    })
+    const runner = new BrowserContentTaskRunner({} as never, persistence as never, lease as never, factory)
+    const payload = {
+      ...planPayload(1),
+      plan: {
+        ...planPayload(1).plan,
+        strategy: 'card_loop',
+        notes: [{ url: 'https://www.xiaohongshu.com/note/0', title: '笔记0', sourceId: '0' }],
+      },
+    }
+    const handle = await runner.startTask({ kind: 'card_loop', payload })
+    const run = (runner as unknown as { activeRuns: Map<string, Promise<void>> }).activeRuns.get(handle.taskId)
+    if (run) await run
+
+    const task = tasks.get(handle.taskId)!
+    assert.equal(task.status, 'completed')
+    assert.ok(calls.some((call) => call.tool === 'browser_click_text'), 'card_loop must open via a visible card click')
+    assert.ok(calls.some((call) => call.tool === 'browser_go_back'), 'card_loop must return to the list after collecting')
+    const navigations = calls.filter((call) => call.tool === 'browser_navigate')
+    assert.deepEqual(navigations.map((call) => call.args.url), ['https://www.xiaohongshu.com/user/profile/abc'])
+    assert.ok(navigations.every((call) => !String(call.args.url || '').includes('/note/')), 'card_loop must not hard-jump detail URLs')
+  })
+
+  it('card_loop completes a 120-card local fixture without URL jumping and writes root artifacts', async () => {
+    const { svc: persistence, tasks } = fakePersistence()
+    const { svc: lease } = fakeLease()
+    const outputRootDir = await mkdtemp(join(tmpdir(), 'ready-card-loop-120-'))
+    const clickedTitles: string[] = []
+    const calls: Array<{ tool: string; args: Record<string, unknown> }> = []
+    let currentTitle = ''
+    const factory: CollectorFacadeFactory = () => ({
+      facade: {
+        run: async (tool, args = {}) => {
+          calls.push({ tool, args })
+          if (tool === 'browser_click_text') {
+            currentTitle = String(args?.text || '')
+            clickedTitles.push(currentTitle)
+            return JSON.stringify({ ok: true })
+          }
+          if (tool === 'browser_get_tabs') return `[tab-agent-1] 详情页\n    ${notes.find((note) => note.title === currentTitle)?.url || ''}`
+          if (tool === 'browser_read_page') return `详情页：${currentTitle}`
+          if (tool === 'browser_collect_images') return imagesJson
+          if (tool === 'browser_download_urls') return JSON.stringify({ success: 1 })
+          return JSON.stringify({ ok: true })
+        },
+      },
+      isControlFrozen: () => false,
+    })
+    const runner = new BrowserContentTaskRunner({} as never, persistence as never, lease as never, factory)
+    const notes = Array.from({ length: 120 }, (_, i) => ({
+      url: `https://fixture.example.test/note/${i}`,
+      title: `Fixture Note ${String(i + 1).padStart(3, '0')}`,
+      sourceId: `fixture-${i}`,
+      order: i + 1,
+      kind: 'content',
+    }))
+    const handle = await runner.startTask({
+      kind: 'card_loop',
+      payload: {
+        agentTabId: 'tab-agent-1',
+        surface: 'agent-view',
+        plan: {
+          targetProfileUrl: 'https://fixture.example.test/profile/local',
+          strategy: 'card_loop',
+          notes,
+          outputRootDir,
+        },
+      },
+    })
+    const run = (runner as unknown as { activeRuns: Map<string, Promise<void>> }).activeRuns.get(handle.taskId)
+    if (run) await run
+
+    const task = tasks.get(handle.taskId)!
+    const result = task.result as { collected: string[]; failed: unknown[]; stopReason: string; collectionManifestPath?: string; collectionReportPath?: string }
+    assert.equal(task.status, 'completed')
+    assert.equal(result.stopReason, 'completed')
+    assert.equal(result.collected.length, 120)
+    assert.equal(result.failed.length, 0)
+    assert.equal(clickedTitles.length, 120)
+    assert.equal(calls.filter((call) => call.tool === 'browser_click_text').length, 120)
+    assert.equal(calls.filter((call) => call.tool === 'browser_go_back').length, 120)
+    const navigations = calls.filter((call) => call.tool === 'browser_navigate')
+    assert.deepEqual(navigations.map((call) => call.args.url), ['https://fixture.example.test/profile/local'])
+    assert.ok(navigations.every((call) => !String(call.args.url || '').includes('/note/')), 'card_loop must not navigate to fixture detail URLs')
+    assert.ok(result.collectionManifestPath, 'root collection manifest path is recorded')
+    assert.ok(result.collectionReportPath, 'root collection report path is recorded')
+    const manifest = JSON.parse(await readFile(result.collectionManifestPath!, 'utf8')) as { completed?: number; failed?: number; total?: number }
+    const report = await readFile(result.collectionReportPath!, 'utf8')
+    assert.equal(manifest.total, 120)
+    assert.equal(manifest.completed, 120)
+    assert.equal(manifest.failed, 0)
+    assert.match(report, /成功：120/)
+  })
+
+  it('downloads video targets without collecting covers or failing the whole batch', async () => {
+    const { svc: persistence, tasks } = fakePersistence()
+    const { svc: lease } = fakeLease()
+    const calls: string[] = []
+    let collectCalls = 0
+    const factory: CollectorFacadeFactory = () => ({
+      facade: {
+        run: async (tool) => {
+          calls.push(tool)
+          if (tool === 'browser_collect_images') {
+            collectCalls += 1
+            return collectCalls <= 2
+              ? JSON.stringify({
+                count: 0,
+                images: [],
+                videoCount: 1,
+                videos: [{ url: 'https://sns-video.xhscdn.com/video.mp4', width: 716, height: 378 }],
+              })
+              : imagesJson
+          }
+          if (tool === 'browser_resolve_video') {
+            return JSON.stringify({ ok: true, video: { parseStatus: 'not_needed', downloadUrl: 'https://sns-video.xhscdn.com/video.mp4' } })
+          }
+          if (tool === 'browser_download_urls') return JSON.stringify({ success: 1, results: [{ success: true, path: '/out/assets/video-1.mp4' }] })
+          return JSON.stringify({ ok: true })
+        },
+      },
+      isControlFrozen: () => false,
+    })
+    const runner = new BrowserContentTaskRunner({} as never, persistence as never, lease as never, factory)
+    const payload = {
+      ...planPayload(2),
+      plan: {
+        ...planPayload(2).plan,
+        notes: [
+          { url: 'https://www.xiaohongshu.com/video/0', title: '视频0', sourceId: 'v0', kind: 'video' },
+          { url: 'https://www.xiaohongshu.com/note/1', title: '笔记1', sourceId: 'n1', kind: 'content' },
+        ],
+      },
+    }
+
+    const taskId = await runToCompletion(runner, payload)
+    const task = tasks.get(taskId)!
+    const result = task.result as { collected: string[]; failed: Array<{ reason: string }>; stopReason: string }
+
+    assert.equal(task.status, 'completed')
+    assert.equal(result.stopReason, 'completed')
+    assert.equal(result.collected.length, 2)
+    assert.deepEqual(result.failed.map((item) => item.reason), [])
+    assert.equal(calls.filter((tool) => tool === 'browser_resolve_video').length, 1)
+    assert.equal(calls.filter((tool) => tool === 'browser_collect_images').length, 3)
+  })
+
+  it('treats discovered video-only details as downloadable without failing the whole batch', async () => {
+    const { svc: persistence, tasks } = fakePersistence()
+    const { svc: lease } = fakeLease()
+    let collectCalls = 0
+    const factory: CollectorFacadeFactory = () => ({
+      facade: {
+        run: async (tool) => {
+          if (tool === 'browser_collect_images') {
+            collectCalls += 1
+            return collectCalls <= 2
+              ? JSON.stringify({
+                count: 0,
+                images: [],
+                videoCount: 1,
+                videos: [{ url: 'https://sns-video.xhscdn.com/video.mp4', width: 716, height: 378 }],
+              })
+              : imagesJson
+          }
+          if (tool === 'browser_resolve_video') {
+            return JSON.stringify({ ok: true, video: { parseStatus: 'not_needed', downloadUrl: 'https://sns-video.xhscdn.com/video.mp4' } })
+          }
+          if (tool === 'browser_download_urls') return JSON.stringify({ success: 1, results: [{ success: true, path: '/out/assets/video-1.mp4' }] })
+          return JSON.stringify({ ok: true })
+        },
+      },
+      isControlFrozen: () => false,
+    })
+    const runner = new BrowserContentTaskRunner({} as never, persistence as never, lease as never, factory)
+
+    const taskId = await runToCompletion(runner, planPayload(2))
+    const task = tasks.get(taskId)!
+    const result = task.result as { collected: string[]; failed: Array<{ reason: string }>; stopReason: string }
+
+    assert.equal(task.status, 'completed')
+    assert.equal(task.error, null)
+    assert.equal(result.stopReason, 'completed')
+    assert.equal(result.collected.length, 2)
+    assert.deepEqual(result.failed.map((item) => item.reason), [])
+  })
+
+  it('treats unavailable details as terminal skips without failing the whole batch', async () => {
+    const { svc: persistence, tasks } = fakePersistence()
+    const { svc: lease } = fakeLease()
+    let pageReads = 0
+    const factory: CollectorFacadeFactory = () => ({
+      facade: {
+        run: async (tool) => {
+          if (tool === 'browser_read_page') {
+            pageReads += 1
+            return pageReads === 1
+              ? '小红书 - 你访问的页面不见了 当前笔记暂时无法浏览'
+              : JSON.stringify({ ok: true })
+          }
+          if (tool === 'browser_collect_images') return imagesJson
+          if (tool === 'browser_download_urls') return JSON.stringify({ success: 1 })
+          return JSON.stringify({ ok: true })
+        },
+      },
+      isControlFrozen: () => false,
+    })
+    const runner = new BrowserContentTaskRunner({} as never, persistence as never, lease as never, factory)
+
+    const taskId = await runToCompletion(runner, planPayload(2))
+    const task = tasks.get(taskId)!
+    const result = task.result as { collected: string[]; failed: Array<{ reason: string }>; stopReason: string }
+
+    assert.equal(task.status, 'completed')
+    assert.equal(task.error, null)
+    assert.equal(result.stopReason, 'completed')
+    assert.equal(result.collected.length, 1)
+    assert.deepEqual(result.failed.map((item) => item.reason), ['unavailable'])
   })
 
   it('pauses for verification without marking the current note failed, then resumes from the same cursor', async () => {
@@ -358,6 +684,22 @@ describe('note_collect → chat task projection (scope-bound)', () => {
     assert.equal(upserts[upserts.length - 1].state, 'cancelled', 'a freeze projects a cancelled card, not completed')
   })
 
+  it('does not let a stale agent-view freeze cancel user-view card_loop collection', async () => {
+    const { svc: persistence, tasks } = fakePersistence()
+    const { svc: lease } = fakeLease()
+    const runner = new BrowserContentTaskRunner({} as never, persistence as never, lease as never, okFacadeFactory({ isFrozen: () => true }))
+    const base = scopedPayload(1)
+    const payload = {
+      ...base,
+      surface: 'user-view',
+      plan: { ...(base.plan as Record<string, unknown>), strategy: 'card_loop' },
+    }
+    const handle = await runner.startTask({ kind: 'card_loop', payload })
+    const run = (runner as unknown as { activeRuns: Map<string, Promise<void>> }).activeRuns.get(handle.taskId)
+    if (run) await run
+    assert.equal(tasks.get(handle.taskId)?.status, 'completed')
+  })
+
   it('projects paused when verification is required', async () => {
     const { svc: persistence } = fakePersistence()
     const { svc: lease } = fakeLease()
@@ -376,6 +718,40 @@ describe('note_collect → chat task projection (scope-bound)', () => {
     await runToCompletion(runner, scopedPayload(1))
     assert.equal(upserts[upserts.length - 1].state, 'paused')
     assert.match(upserts[upserts.length - 1].summary, /等待验证/)
+  })
+
+  it('reprojects linked terminal collection tasks on sink reattach without reviving standalone terminal tasks', async () => {
+    const { svc: persistence } = fakePersistence()
+    const { svc: lease } = fakeLease()
+    const { sink, upserts } = fakeSink()
+    const completed = persistence.createTask({ kind: 'note_collect', payload: scopedPayload(1) })
+    persistence.updateProgress(completed.taskId, { total: 1, completed: 1, failed: 0 }, { status: 'completed' })
+    const failed = persistence.createTask({ kind: 'note_collect', payload: scopedPayload(1) })
+    persistence.updateProgress(failed.taskId, { total: 1, completed: 0, failed: 1 }, { status: 'failed' })
+    const cancelled = persistence.createTask({ kind: 'visible_collect', payload: scopedPayload(1) })
+    persistence.updateProgress(cancelled.taskId, { total: 1, completed: 0, failed: 0 }, { status: 'cancelled' })
+    const running = persistence.createTask({ kind: 'note_collect', payload: scopedPayload(2) })
+    persistence.updateProgress(running.taskId, { total: 2, completed: 1, failed: 0 }, { status: 'running' })
+    const linkedFailed = persistence.createTask({
+      kind: 'card_loop',
+      payload: {
+        ...scopedPayload(3),
+        plan: {
+          ...(scopedPayload(3).plan as Record<string, unknown>),
+          strategy: 'card_loop',
+          sourceTaskId: 'browser-task-visible-source',
+        },
+      },
+    })
+    persistence.updateProgress(linkedFailed.taskId, { total: 3, completed: 0, failed: 3 }, { status: 'failed' })
+
+    const runner = new BrowserContentTaskRunner({} as never, persistence as never, lease as never, okFacadeFactory())
+    runner.setTaskProjectionSink(sink as never)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    assert.deepEqual(upserts.map((item) => item.taskId), [running.taskId, linkedFailed.taskId])
+    assert.equal(upserts[0].state, 'running')
+    assert.equal(upserts[1].state, 'failed')
   })
 
   it('cancels stale note_collect on restart instead of resuming (lease safety)', async () => {
