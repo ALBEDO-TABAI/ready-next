@@ -2041,6 +2041,59 @@ const migrations: Migration[] = [
         )
       }
     }
+  },
+
+  // ------------------------------------------------------------------ 046
+  {
+    name: '046_file_activity_events',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS file_activity_events (
+          id TEXT PRIMARY KEY,
+          path TEXT NOT NULL,
+          workspace_root TEXT,
+          event_type TEXT NOT NULL,
+          source TEXT NOT NULL,
+          weight REAL NOT NULL DEFAULT 1,
+          meta_json TEXT,
+          created_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_file_activity_path_time
+          ON file_activity_events(path, created_at DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_file_activity_workspace_time
+          ON file_activity_events(workspace_root, created_at DESC);
+      `)
+    }
+  },
+
+  // ------------------------------------------------------------------ 047
+  {
+    name: '047_document_reading_sessions',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS document_reading_sessions (
+          id TEXT PRIMARY KEY,
+          path TEXT NOT NULL,
+          workspace_root TEXT,
+          source TEXT NOT NULL,
+          started_at INTEGER NOT NULL,
+          ended_at INTEGER NOT NULL,
+          active_ms INTEGER NOT NULL,
+          progress_start REAL,
+          progress_end REAL,
+          progress_kind TEXT,
+          meta_json TEXT
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_document_reading_sessions_path_time
+          ON document_reading_sessions(path, ended_at DESC);
+
+        CREATE INDEX IF NOT EXISTS idx_document_reading_sessions_workspace_time
+          ON document_reading_sessions(workspace_root, ended_at DESC);
+      `)
+    }
   }
 ]
 

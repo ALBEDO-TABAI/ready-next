@@ -25,6 +25,12 @@ import type {
 } from '../modules/rss/types'
 import type { ThemeOption, ResolvedTheme, ThemeSkin } from '../stores/useTheme'
 import type { TaskType } from '../../shared/task-types'
+import type {
+  FileEmergenceGetSnapshotPayload,
+  FileEmergenceRecordActivityPayload,
+  FileEmergenceRecordReadingSessionPayload,
+  FileEmergenceSnapshot,
+} from '../../shared/file-emergence'
 // Stage U PR U4.v2-2 / U4.v2-3 — TaskProjectionRecordData +
 // TaskProjectionChangeEventData both derive from the canonical wire
 // contract instead of hand-mirroring it. ScopeRun* sub-fields keep
@@ -3329,6 +3335,14 @@ interface ElectronAgentInteractionAPI {
   onAskUserQuestionsCard: (handler: (event: AskUserQuestionsCardPushEvent) => void) => () => void
 }
 
+interface ElectronFileEmergenceAPI {
+  getSnapshot: (payload: FileEmergenceGetSnapshotPayload) => Promise<IPCResponse<FileEmergenceSnapshot>>
+  recordActivity: (payload: FileEmergenceRecordActivityPayload) => Promise<IPCResponse>
+  recordReadingSession: (payload: FileEmergenceRecordReadingSessionPayload) => Promise<IPCResponse>
+  onFlushReadingSessions: (handler: (requestId: string) => void) => () => void
+  ackReadingSessionsFlushed: (requestId: string) => void
+}
+
 interface ElectronAPI {
   agent: ElectronAgentAPI
   memory: ElectronMemoryAPI
@@ -3343,6 +3357,7 @@ interface ElectronAPI {
   window: ElectronWindowAPI
   theme: ElectronThemeAPI
   settings: ElectronSettingsAPI
+  fileEmergence: ElectronFileEmergenceAPI
   pet: ElectronPetAPI
   chat: ElectronChatAPI
   userProfile: ElectronUserProfileAPI

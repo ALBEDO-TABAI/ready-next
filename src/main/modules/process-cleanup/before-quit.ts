@@ -32,6 +32,12 @@ export interface BeforeQuitCleanupDeps {
    */
   cleanupManagedBrowsers?: () => Promise<void> | void
   /**
+   * Asks renderer windows to flush in-memory document reading sessions before
+   * the DB is closed. Optional because headless tests and crash cleanup paths
+   * may have no renderer windows.
+   */
+  cleanupRendererReadingSessions?: () => Promise<void> | void
+  /**
    * Tears down the DB worker_thread (perf-rescue B1). Runs in parallel with
    * the other runtime cleanups so a stuck worker can't block quit beyond
    * `timeoutMs`. Optional for tests / environments without the worker.
@@ -104,6 +110,9 @@ export async function runBeforeQuitCleanup(
   ]
   if (deps.cleanupManagedBrowsers) {
     tasks.push(safeInvoke(deps.cleanupManagedBrowsers, 'cleanupManagedBrowsers', logger))
+  }
+  if (deps.cleanupRendererReadingSessions) {
+    tasks.push(safeInvoke(deps.cleanupRendererReadingSessions, 'cleanupRendererReadingSessions', logger))
   }
   if (deps.cleanupDbWorker) {
     tasks.push(safeInvoke(deps.cleanupDbWorker, 'cleanupDbWorker', logger))

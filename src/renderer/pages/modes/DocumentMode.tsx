@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { FileText, Loader2 } from 'lucide-react'
-import { useWorkspace } from '../../stores/useWorkspace'
+import { computeDesiredRoots, useWorkspace } from '../../stores/useWorkspace'
 import { useDocTabs, type DocTab, type DocumentPaneTarget } from '../../stores/useDocTabs'
 import MarkdownEditor from '../../components/document/MarkdownEditor'
 import DocumentTabRail from '../../components/document/DocumentTabRail'
@@ -36,7 +36,16 @@ import {
 } from '../../modules/document/documentPaneDrop'
 import { getFileExtension } from '../../utils/path'
 import { isEbookExtension } from '../../../shared/ebook'
+import type { FileEmergenceReadingProgressKind } from '../../../shared/file-emergence'
 import { isLocalHtmlFilePath } from '../../modules/browser/localHtmlFileOpen'
+import {
+  recordFileEmergenceActivity,
+  recordFileEmergenceReadingSession,
+} from '../../modules/file-emergence/fileEmergenceClient'
+import {
+  isReadingSessionPath,
+  readProgressForPath,
+} from '../../modules/file-emergence/readingIntentContext'
 
 const UniverSheet = lazy(() => import('../../components/document/UniverSheet'))
 
@@ -66,6 +75,29 @@ function getElementContentOffset(container: HTMLElement, child: HTMLElement, con
   const resolvedContainerTop = containerTop ?? container.getBoundingClientRect().top
   const childRect = child.getBoundingClientRect()
   return childRect.top - resolvedContainerTop + container.scrollTop
+}
+
+type ReadingSessionDraft = {
+  path: string
+  startedAt: number
+  lastInteractionAt: number
+  activeMs: number
+  progressStart: number | null
+  progressKind: FileEmergenceReadingProgressKind | null
+}
+
+const READING_SESSION_IDLE_TIMEOUT_MS = 120_000
+const READING_SESSION_MIN_ACTIVE_MS = 30_000
+
+function captureReadingProgress(path: string): {
+  ratio: number | null
+  kind: FileEmergenceReadingProgressKind | null
+} {
+  const progress = readProgressForPath(path)
+  return {
+    ratio: typeof progress?.progressRatio === 'number' ? progress.progressRatio : null,
+    kind: progress?.kind ?? null,
+  }
 }
 
 function capturePreviewAnchor(element: HTMLElement): Pick<DocumentScrollAnchorSnapshot, 'anchorTitle' | 'anchorOrdinal' | 'anchorProgress'> | null {
@@ -292,7 +324,7 @@ export default function DocumentMode({
   isActive = true,
   isMotionSettled = true,
 }: DocumentModeProps) {
-  const { selectedFile } = useWorkspace()
+  const { selectedFile, workspaceRoot, pinnedFolders } = useWorkspace()
   const {
     tabs, activeTabId, splitTabId, documentSplitRatio,
     openTab, closeTab, setActiveTab, setSplitTab, setDocumentSplitRatio,
@@ -313,6 +345,16 @@ export default function DocumentMode({
   const [panelTargetTabId, setPanelTargetTabId] = useState<string | null>(activeTabId)
   const [visibleLineByTabId, setVisibleLineByTabId] = useState<Record<string, number | null>>({})
   const [documentPaneDropTarget, setDocumentPaneDropTarget] = useState<DocumentPaneTarget | null>(null)
+  const documentWorkspaceRoots = useMemo(
+    () => computeDesiredRoots({ workspaceRoot, pinnedFolders }),
+    [pinnedFolders, workspaceRoot],
+  )
+  const documentWorkspaceRootsRef = useRef<string[]>(documentWorkspaceRoots)
+  const readingSessionRef = useRef<ReadingSessionDraft | null>(null)
+
+  useEffect(() => {
+    documentWorkspaceRootsRef.current = documentWorkspaceRoots
+  }, [documentWorkspaceRoots])
 
   useEffect(() => {
     if (isActive) {
@@ -353,13 +395,19 @@ export default function DocumentMode({
       if (!disposed && result?.success && !isDirectory && !isLocalHtmlFilePath(selectedFile)) {
         setEditorMode('preview')
         openTab(selectedFile)
+        await recordFileEmergenceActivity({
+          path: selectedFile,
+          eventType: 'open',
+          source: 'document_mode',
+          workspaceRoots: documentWorkspaceRoots,
+        })
       }
     })()
 
     return () => {
       disposed = true
     }
-  }, [hasActivated, selectedFile, openTab])
+  }, [documentWorkspaceRoots, hasActivated, selectedFile, openTab])
 
   useEffect(() => {
     const handler = () => {
@@ -397,6 +445,90 @@ export default function DocumentMode({
     const visibleIds = [activeTab?.id, splitTab?.id].filter((id): id is string => Boolean(id))
     setPanelTargetTabId((current) => (current && visibleIds.includes(current) ? current : activeTab?.id ?? splitTab?.id ?? null))
   }, [activeTab?.id, splitTab?.id])
+
+  const markReadingSessionInteraction = useCallback(() => {
+    const session = readingSessionRef.current
+    if (!session) return
+    const now = Date.now()
+    const delta = Math.max(0, now - session.lastInteractionAt)
+    session.activeMs += Math.min(delta, READING_SESSION_IDLE_TIMEOUT_MS)
+    session.lastInteractionAt = now
+  }, [])
+
+  const flushReadingSession = useCallback(async () => {
+    const session = readingSessionRef.current
+    if (!session) return
+    markReadingSessionInteraction()
+    readingSessionRef.current = null
+    if (session.activeMs < READING_SESSION_MIN_ACTIVE_MS) return
+    const progressEnd = captureReadingProgress(session.path)
+    await recordFileEmergenceReadingSession({
+      path: session.path,
+      source: 'document_mode',
+      workspaceRoots: documentWorkspaceRootsRef.current,
+      startedAt: session.startedAt,
+      endedAt: Date.now(),
+      activeMs: session.activeMs,
+      progressStart: session.progressStart,
+      progressEnd: progressEnd.ratio,
+      progressKind: progressEnd.kind ?? session.progressKind,
+    })
+  }, [markReadingSessionInteraction])
+
+  useEffect(() => {
+    if (!isActive || !activeTab?.path || !isReadingSessionPath(activeTab.path)) return undefined
+    const startedAt = Date.now()
+    const progress = captureReadingProgress(activeTab.path)
+    readingSessionRef.current = {
+      path: activeTab.path,
+      startedAt,
+      lastInteractionAt: startedAt,
+      activeMs: 0,
+      progressStart: progress.ratio,
+      progressKind: progress.kind,
+    }
+    return () => {
+      void flushReadingSession()
+    }
+  }, [activeTab?.path, flushReadingSession, isActive])
+
+  useEffect(() => {
+    if (!isActive) return undefined
+    const handleInteraction = () => markReadingSessionInteraction()
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') void flushReadingSession()
+      else handleInteraction()
+    }
+    const handleFlush = () => { void flushReadingSession() }
+    window.addEventListener('keydown', handleInteraction)
+    window.addEventListener('pointerdown', handleInteraction)
+    window.addEventListener('pointermove', handleInteraction)
+    window.addEventListener('scroll', handleInteraction, true)
+    window.addEventListener('pagehide', handleFlush)
+    window.addEventListener('beforeunload', handleFlush)
+    document.addEventListener('selectionchange', handleInteraction)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      window.removeEventListener('keydown', handleInteraction)
+      window.removeEventListener('pointerdown', handleInteraction)
+      window.removeEventListener('pointermove', handleInteraction)
+      window.removeEventListener('scroll', handleInteraction, true)
+      window.removeEventListener('pagehide', handleFlush)
+      window.removeEventListener('beforeunload', handleFlush)
+      document.removeEventListener('selectionchange', handleInteraction)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [flushReadingSession, isActive, markReadingSessionInteraction])
+
+  useEffect(() => {
+    const api = window.electronAPI?.fileEmergence
+    if (!api?.onFlushReadingSessions || !api.ackReadingSessionsFlushed) return undefined
+    return api.onFlushReadingSessions((requestId) => {
+      void flushReadingSession().finally(() => {
+        api.ackReadingSessionsFlushed(requestId)
+      })
+    })
+  }, [flushReadingSession])
 
   useEffect(() => {
     const openIds = new Set(tabs.map((tab) => tab.id))

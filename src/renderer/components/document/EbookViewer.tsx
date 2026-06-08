@@ -10,6 +10,7 @@ import {
 } from 'lucide-react'
 import { type DocTab, useDocTabs } from '../../stores/useDocTabs'
 import { useWorkspace } from '../../stores/useWorkspace'
+import { EBOOK_READING_STATE_KEY } from '../../modules/file-emergence/readingIntentContext'
 import { isEpubExtension } from '../../../shared/ebook'
 
 type FoliateViewElement = HTMLElement & {
@@ -50,7 +51,6 @@ interface EbookViewerProps {
   currentExt: string
 }
 
-const READING_STATE_KEY = 'ready-ebook-reading-state-v1'
 const MAX_READING_STATES = 500
 const DEFAULT_FONT_SIZE = 17
 
@@ -117,7 +117,7 @@ async function makeBookFromLocalFile(
 
 function readStateStore(): ReaderState[] {
   try {
-    const parsed = JSON.parse(localStorage.getItem(READING_STATE_KEY) || '[]') as unknown
+    const parsed = JSON.parse(localStorage.getItem(EBOOK_READING_STATE_KEY) || '[]') as unknown
     if (!Array.isArray(parsed)) return []
     return parsed.filter((item): item is ReaderState => (
       typeof item === 'object' &&
@@ -145,7 +145,7 @@ function saveReaderState(next: ReaderState): void {
     const merged = [next, ...rest]
       .sort((a, b) => b.updatedAt - a.updatedAt)
       .slice(0, MAX_READING_STATES)
-    localStorage.setItem(READING_STATE_KEY, JSON.stringify(merged))
+    localStorage.setItem(EBOOK_READING_STATE_KEY, JSON.stringify(merged))
   } catch {
     // silent-catch: reading state is a convenience cache and may be unavailable.
     // Reading state is a convenience cache; failure should not break reading.

@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
 import { getDatabase } from '../database'
-import { setDocumentWriteIndexHook } from '../document-engine/ipc-handler'
+import { addDocumentWriteListener } from '../document-engine/ipc-handler'
 import { getWorkerDbBridge } from '../database/worker-bridge'
 import {
   SearchEngine,
@@ -69,6 +69,7 @@ let searchQueryGroupDispose: IpcDisposeHandle | null = null
  * (sourceIndex × 5 / query × 3 / watcher × 2).
  */
 let watcherGroupDispose: IpcDisposeHandle | null = null
+let documentWriteIndexDispose: (() => void) | null = null
 
 export function setupSearchIPC(): void {
   const rawDb = getDatabase().getRawDb()
@@ -83,7 +84,11 @@ export function setupSearchIPC(): void {
     }
   }
 
-  setDocumentWriteIndexHook((path, content) => {
+  if (documentWriteIndexDispose) {
+    try { documentWriteIndexDispose() } catch { /* ignore */ }
+    documentWriteIndexDispose = null
+  }
+  documentWriteIndexDispose = addDocumentWriteListener((path, content) => {
     if (!searchEngine) return
     const root = searchEngine.findWorkspaceRootForPath(path)
     if (!root) return

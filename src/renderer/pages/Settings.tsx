@@ -18,6 +18,7 @@ import RemoteIMSettingsPanel from '../components/settings/RemoteIMSettingsPanel'
 import PetSettingsPanel from '../components/settings/PetSettingsPanel'
 import ModelsRuntimeSettingsPanel from '../components/settings/ModelsRuntimeSettingsPanel'
 import { MODELS_RUNTIME_SETTINGS_SECTION } from '../../shared/model-pack-types'
+import { FILE_EMERGENCE_SETTING_KEY } from '../../shared/file-emergence'
 import {
   SETTINGS_CARD_STYLE,
   SETTINGS_DANGER_BUTTON_STYLE,
@@ -183,6 +184,13 @@ const settingsData: SettingSection[] = [
     icon: Shield,
     description: '管理数据收集和隐私偏好',
     settings: [
+      {
+        id: FILE_EMERGENCE_SETTING_KEY,
+        label: '文件涌现',
+        description: '根据日程、文件活动、最近对话和浏览记录，在文件管理顶部显示可能相关的项目。',
+        type: 'toggle',
+        value: true,
+      },
       { id: 'analytics', label: '使用分析', description: '帮助我们改善产品体验（匿名数据）', type: 'toggle', value: false },
       { id: 'crashReports', label: '崩溃报告', description: '自动发送崩溃信息协助排查问题', type: 'toggle', value: true }
     ]
@@ -1649,6 +1657,7 @@ export function StorageSettingsPanel() {
         setDiagnosticResult({ error: result.error || '导出失败' })
       }
     } catch (err) {
+      // silent-catch: export failures are surfaced in the diagnostics panel.
       setDiagnosticResult({ error: err instanceof Error ? err.message : String(err) })
     } finally {
       setDiagnosticExporting(false)
@@ -2845,6 +2854,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
   const routeSection = new URLSearchParams(location.search).get('section') || undefined
   const [activeSection, setActiveSection] = useState(initialSection || routeSection || 'account')
   const [settings, setSettings] = useState(settingsData)
+  const [settingErrors, setSettingErrors] = useState<Record<string, string>>({})
   const { theme, setTheme, skin, setSkin, accent, setAccent } = useTheme()
   const didMountRef = useRef(false)
   const settingsSurfaceRefreshTimerRef = useRef<number | null>(null)
@@ -2913,8 +2923,21 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
     return () => window.cancelAnimationFrame(frameId)
   }, [activeSection, requestSettingsSurfaceRefresh])
 
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.electronAPI?.settings?.get) return
+    let cancelled = false
+    void (async () => {
+      const result = await window.electronAPI.settings.get(FILE_EMERGENCE_SETTING_KEY)
+      if (cancelled) return
+      if (result?.success) {
+        updateSetting('privacy', FILE_EMERGENCE_SETTING_KEY, result.data !== 'false')
+      }
+    })()
+    return () => { cancelled = true }
+  }, [])
+
   const updateSetting = (sectionId: string, settingId: string, value: boolean | string) => {
-    setSettings(settings.map(section =>
+    setSettings((current) => current.map(section =>
       section.id === sectionId
         ? {
           ...section,
@@ -2924,6 +2947,32 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
         }
         : section
     ))
+  }
+
+  const handleToggleSetting = async (sectionId: string, setting: SettingItem) => {
+    const nextValue = !setting.value
+    if (setting.id !== FILE_EMERGENCE_SETTING_KEY) {
+      updateSetting(sectionId, setting.id, nextValue)
+      return
+    }
+    if (typeof window === 'undefined' || !window.electronAPI?.settings?.set) {
+      setSettingErrors((prev) => ({ ...prev, [setting.id]: '设置 IPC 不可用' }))
+      return
+    }
+    const result = await window.electronAPI.settings.set(
+      FILE_EMERGENCE_SETTING_KEY,
+      nextValue ? 'true' : 'false',
+    )
+    if (result.success) {
+      setSettingErrors((prev) => {
+        const next = { ...prev }
+        delete next[setting.id]
+        return next
+      })
+      updateSetting(sectionId, setting.id, nextValue)
+    } else {
+      setSettingErrors((prev) => ({ ...prev, [setting.id]: result.error || '设置保存失败' }))
+    }
   }
 
   const getSettingControlWidth = (setting: SettingItem): number | undefined => {
@@ -3227,7 +3276,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                       {/* Toggle */}
                       {setting.type === 'toggle' && (
                         <button
-                          onClick={() => updateSetting(currentSection.id, setting.id, !setting.value)}
+                          onClick={() => { void handleToggleSetting(currentSection.id, setting) }}
                           className="flex-shrink-0 transition-colors duration-200"
                           style={{
                             width: 48,
@@ -3255,6 +3304,11 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                             }}
                           />
                         </button>
+                      )}
+                      {settingErrors[setting.id] && (
+                        <div className="ml-3 text-[11px]" style={{ color: 'var(--color-red, #d44)' }}>
+                          {settingErrors[setting.id]}
+                        </div>
                       )}
 
                       {/* Select */}

@@ -7,7 +7,7 @@ import {
   AtSign,
 } from 'lucide-react'
 import Modal from '../ui/Modal'
-import { useWorkspace, type FileItem } from '../../stores/useWorkspace'
+import { computeDesiredRoots, useWorkspace, type FileItem } from '../../stores/useWorkspace'
 import { addReadyContextReferenceToAgentInput } from '../../modules/agent/chat-input-bridge'
 import { useDocTabs } from '../../stores/useDocTabs'
 import { useMode, type WorkbenchMode } from '../../stores/useMode'
@@ -45,6 +45,19 @@ import {
   computeNextFileTreeSelection,
   type FileTreeDeleteTarget,
 } from './fileTreeSelection'
+import FileEmergenceSection from './FileEmergenceSection'
+import { buildFileEmergenceViewModel } from './fileEmergenceViewModel'
+import { recordFileEmergenceActivity, readFileEmergenceEnabled } from '../../modules/file-emergence/fileEmergenceClient'
+import {
+  buildCurrentDocumentContext,
+  readWorkspaceReadingProgress,
+} from '../../modules/file-emergence/readingIntentContext'
+import type {
+  FileEmergenceReadingProgress,
+  FileEmergenceProject,
+  FileEmergenceSnapshot,
+  FileEmergenceRecordActivityPayload,
+} from '../../../shared/file-emergence'
 import './filesPanelFloatingMenu.css'
 
 const ALLOWED_EXTENSIONS = new Set([
@@ -1216,6 +1229,18 @@ export default function FileTree({
   const selectionAnchorPathRef = useRef<string | null>(null)
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
   const queryLower = query.trim().toLowerCase()
+  const safeWorkspaceRoots = useMemo(
+    () => computeDesiredRoots({ workspaceRoot, pinnedFolders }),
+    [workspaceRoot, pinnedFolders],
+  )
+  const safeWorkspaceRootsKey = safeWorkspaceRoots.join('\n')
+  const [fileEmergenceEnabled, setFileEmergenceEnabled] = useState<boolean | null>(null)
+  const [fileEmergenceSnapshot, setFileEmergenceSnapshot] = useState<FileEmergenceSnapshot | null>(null)
+  const [fileEmergenceReadingProgress, setFileEmergenceReadingProgress] = useState<FileEmergenceReadingProgress[]>([])
+  const [fileEmergenceRefreshing, setFileEmergenceRefreshing] = useState(false)
+  const docTabs = useDocTabs((state) => state.tabs)
+  const activeDocTabId = useDocTabs((state) => state.activeTabId)
+  const splitDocTabId = useDocTabs((state) => state.splitTabId)
   const effectiveGridPath = gridPath !== undefined ? gridPath : internalGridPath
   const setEffectiveGridPath = onGridPathChange ?? setInternalGridPath
   const activeAnalysisJobKey = useMemo(() => buildAnalysisJobKey(pendingClips), [pendingClips])
@@ -1283,6 +1308,70 @@ export default function FileTree({
   useEffect(() => {
     pendingClipsRef.current = pendingClips
   }, [pendingClips])
+
+  useEffect(() => {
+    let disposed = false
+    void (async () => {
+      const enabled = await readFileEmergenceEnabled()
+      if (!disposed) setFileEmergenceEnabled(enabled)
+    })()
+    return () => { disposed = true }
+  }, [])
+
+  const refreshFileEmergenceSnapshot = useCallback(async (forceRefresh = false) => {
+    if (
+      fileEmergenceEnabled !== true ||
+      safeWorkspaceRoots.length === 0 ||
+      viewMode !== 'tree' ||
+      queryLower
+    ) {
+      return
+    }
+    if (typeof window === 'undefined' || !window.electronAPI?.fileEmergence?.getSnapshot) return
+    setFileEmergenceRefreshing(true)
+    try {
+      const result = await window.electronAPI.fileEmergence.getSnapshot({
+        workspaceRoots: safeWorkspaceRoots,
+        forceRefresh,
+      })
+      if (result.success && result.data) {
+        setFileEmergenceSnapshot(result.data)
+      } else if (forceRefresh) {
+        console.warn('[file-emergence] getSnapshot failed', result.error)
+      }
+    } finally {
+      setFileEmergenceRefreshing(false)
+    }
+  }, [fileEmergenceEnabled, queryLower, safeWorkspaceRoots, viewMode])
+
+  const recordFileActivity = useCallback((payload: Omit<FileEmergenceRecordActivityPayload, 'workspaceRoots'>) => {
+    if (fileEmergenceEnabled !== true || safeWorkspaceRoots.length === 0) return
+    void (async () => {
+      await recordFileEmergenceActivity({
+        ...payload,
+        workspaceRoots: safeWorkspaceRoots,
+      })
+      await refreshFileEmergenceSnapshot(true)
+    })()
+  }, [fileEmergenceEnabled, refreshFileEmergenceSnapshot, safeWorkspaceRoots])
+
+  useEffect(() => {
+    void refreshFileEmergenceSnapshot(false)
+  }, [refreshFileEmergenceSnapshot, safeWorkspaceRootsKey])
+
+  useEffect(() => {
+    if (fileEmergenceEnabled !== true || safeWorkspaceRoots.length === 0) {
+      setFileEmergenceReadingProgress([])
+      return undefined
+    }
+    let disposed = false
+    void readWorkspaceReadingProgress({ workspaceRoots: safeWorkspaceRoots }).then((records) => {
+      if (!disposed) setFileEmergenceReadingProgress(records)
+    })
+    return () => {
+      disposed = true
+    }
+  }, [fileEmergenceEnabled, safeWorkspaceRoots, safeWorkspaceRootsKey, activeDocTabId, splitDocTabId, docTabs.length])
 
   useEffect(() => {
     const handleDragCleanup = () => clearAllFileTreeDragState()
@@ -1571,7 +1660,7 @@ export default function FileTree({
     }
   }, [activeAnalysisJobKey, flashCompletedPath, schedulePlaceholderRemoval])
 
-  const handleOpenFile = useCallback((item: FileItem) => {
+  const handleOpenFile = useCallback((item: FileItem, source: 'file_tree' | 'emergence' = 'file_tree') => {
     selectionAnchorPathRef.current = item.path
     setSelectedPaths(new Set([item.path]))
 
@@ -1587,7 +1676,14 @@ export default function FileTree({
     selectFile(item.path)
     if (isLocalHtmlFilePath(item.path)) {
       void openLocalHtmlFileInBrowser(item.path, item.name).then((opened) => {
-        if (opened) requestWorkbenchModeChange('browser')
+        if (opened) {
+          recordFileActivity({
+            path: item.path,
+            eventType: 'open',
+            source,
+          })
+          requestWorkbenchModeChange('browser')
+        }
       })
       return
     }
@@ -1603,9 +1699,14 @@ export default function FileTree({
     }
     if (modeMap[ext]) {
       useDocTabs.getState().openTab(item.path)
+      recordFileActivity({
+        path: item.path,
+        eventType: 'open',
+        source,
+      })
       setWorkbenchMode(modeMap[ext])
     }
-  }, [selectFile, setWorkbenchMode, toggleDir, viewMode])
+  }, [recordFileActivity, selectFile, setWorkbenchMode, toggleDir, viewMode])
 
   const handleSelectFile = useCallback((event: React.MouseEvent, item: FileItem, orderedPaths: readonly string[]) => {
     event.preventDefault()
@@ -2022,6 +2123,15 @@ export default function FileTree({
   )
 
   const renderTreeContent = () => {
+    const emergenceNode = fileEmergenceViewModel ? (
+      <FileEmergenceSection
+        viewModel={fileEmergenceViewModel}
+        isRefreshing={fileEmergenceRefreshing}
+        onRefresh={() => { void refreshFileEmergenceSnapshot(true) }}
+        onOpenFile={handleOpenEmergenceFile}
+      />
+    ) : null
+
     if (pinnedFolders.length > 0) {
       const visiblePinned = pinnedFolders.filter((folderPath) => {
         const folderName = folderPath.split('/').pop() || folderPath
@@ -2033,14 +2143,20 @@ export default function FileTree({
 
       if (visiblePinned.length === 0 && !creatingType) {
         return (
-          <div className="flex flex-col items-center justify-center py-12 px-4 text-[var(--text-light)]">
-            <FileText style={{ width: 28, height: 28 }} className="mb-2 opacity-40" strokeWidth={1.5} />
-            <span className="text-[12px] text-[var(--text-muted)]">没有匹配当前筛选的文件</span>
-          </div>
+          <>
+            {emergenceNode}
+            <div className="flex flex-col items-center justify-center py-12 px-4 text-[var(--text-light)]">
+              <FileText style={{ width: 28, height: 28 }} className="mb-2 opacity-40" strokeWidth={1.5} />
+              <span className="text-[12px] text-[var(--text-muted)]">没有匹配当前筛选的文件</span>
+            </div>
+          </>
         )
       }
 
-      return visiblePinned.map((folderPath) => {
+      return (
+        <>
+          {emergenceNode}
+          {visiblePinned.map((folderPath) => {
         const folderName = folderPath.split('/').pop() || folderPath
         const isExpanded = expandedDirs.has(folderPath)
         const children = dirChildren.get(folderPath) || []
@@ -2133,67 +2249,75 @@ export default function FileTree({
             )}
           </div>
         )
-      })
+      })}
+        </>
+      )
     }
 
     if (filteredCurrentItems.length === 0 && !creatingType) {
       return (
-        <div className="flex flex-col items-center justify-center py-12 px-4 text-[var(--text-light)]">
-          <FolderOpen style={{ width: 32, height: 32 }} className="mb-3 opacity-40" strokeWidth={1.5} />
-          <span style={{ fontSize: 15, fontWeight: 600 }} className="text-[var(--text-muted)] mb-1">还没有打开的文件夹</span>
-          <span style={{ fontSize: 13 }} className="text-[var(--text-light)] mb-4 text-center">拖入文件夹或点击下方按钮打开</span>
-          <button
-            onClick={openFolderDialog}
-            className="ready-glass-button text-[13px]"
-          >
-            <FolderOpen style={{ width: 14, height: 14 }} strokeWidth={2} />
-            打开文件夹
-          </button>
-        </div>
+        <>
+          {emergenceNode}
+          <div className="flex flex-col items-center justify-center py-12 px-4 text-[var(--text-light)]">
+            <FolderOpen style={{ width: 32, height: 32 }} className="mb-3 opacity-40" strokeWidth={1.5} />
+            <span style={{ fontSize: 15, fontWeight: 600 }} className="text-[var(--text-muted)] mb-1">还没有打开的文件夹</span>
+            <span style={{ fontSize: 13 }} className="text-[var(--text-light)] mb-4 text-center">拖入文件夹或点击下方按钮打开</span>
+            <button
+              onClick={openFolderDialog}
+              className="ready-glass-button text-[13px]"
+            >
+              <FolderOpen style={{ width: 14, height: 14 }} strokeWidth={2} />
+              打开文件夹
+            </button>
+          </div>
+        </>
       )
     }
 
     return (
-      <FileTreeRecursive
-        items={filteredCurrentItems}
-        containerPath={currentPath}
-        depth={0}
-        selectedFile={selectedFile}
-        selectedPaths={selectedPaths}
-        orderedPaths={treeOrderedPaths}
-        expandedDirs={expandedDirs}
-        dirChildren={dirChildren}
-        renamingPath={renamingPath}
-        creatingType={creatingType}
-        creatingPath={creatingPath}
-        queryLower={queryLower}
-        filters={filters}
-        moveDropTargetDir={moveDropTargetDir}
-        fileTreeDropTarget={fileTreeDropTarget}
-        flashingPath={flashingTargetPath}
-        pendingClips={pendingClips}
-        onToggleDir={toggleDir}
-        onOpenFile={handleOpenFile}
-        onSelectFile={handleSelectFile}
-        onContextMenu={(e, item) => {
-          e.preventDefault()
-          e.stopPropagation()
-          setContextMenu({ x: e.clientX, y: e.clientY, item })
-        }}
-        onItemDragStart={clearFileTreeDragState}
-        onItemDragEnd={clearAllFileTreeDragState}
-        onNativeFileDragStart={rememberNativeFileDragSource}
-        onItemDragOver={handleItemDragOver}
-        onItemDragLeave={handleItemDragLeave}
-        onItemDrop={handleItemDrop}
-        onRenameConfirm={(path, newName) => renameItem(path, newName)}
-        onRenameCancel={cancelRenaming}
-        onCreateConfirm={(newName) => {
-          if (creatingType === 'folder') void createFolder(newName)
-          else if (creatingType === 'file') void createFile(newName)
-        }}
-        onCreateCancel={cancelCreating}
-      />
+      <>
+        {emergenceNode}
+        <FileTreeRecursive
+          items={filteredCurrentItems}
+          containerPath={currentPath}
+          depth={0}
+          selectedFile={selectedFile}
+          selectedPaths={selectedPaths}
+          orderedPaths={treeOrderedPaths}
+          expandedDirs={expandedDirs}
+          dirChildren={dirChildren}
+          renamingPath={renamingPath}
+          creatingType={creatingType}
+          creatingPath={creatingPath}
+          queryLower={queryLower}
+          filters={filters}
+          moveDropTargetDir={moveDropTargetDir}
+          fileTreeDropTarget={fileTreeDropTarget}
+          flashingPath={flashingTargetPath}
+          pendingClips={pendingClips}
+          onToggleDir={toggleDir}
+          onOpenFile={handleOpenFile}
+          onSelectFile={handleSelectFile}
+          onContextMenu={(e, item) => {
+            e.preventDefault()
+            e.stopPropagation()
+            setContextMenu({ x: e.clientX, y: e.clientY, item })
+          }}
+          onItemDragStart={clearFileTreeDragState}
+          onItemDragEnd={clearAllFileTreeDragState}
+          onNativeFileDragStart={rememberNativeFileDragSource}
+          onItemDragOver={handleItemDragOver}
+          onItemDragLeave={handleItemDragLeave}
+          onItemDrop={handleItemDrop}
+          onRenameConfirm={(path, newName) => renameItem(path, newName)}
+          onRenameCancel={cancelRenaming}
+          onCreateConfirm={(newName) => {
+            if (creatingType === 'folder') void createFolder(newName)
+            else if (creatingType === 'file') void createFile(newName)
+          }}
+          onCreateCancel={cancelCreating}
+        />
+      </>
     )
   }
 
@@ -2251,6 +2375,46 @@ export default function FileTree({
     () => gridItems.filter((item) => item.isDirectory).map((item) => item.path).join('\u0000'),
     [gridItems],
   )
+  const fileEmergenceViewModel = useMemo(
+    () => buildFileEmergenceViewModel({
+      snapshot: fileEmergenceSnapshot,
+      query,
+      viewMode,
+      workspaceRoots: safeWorkspaceRoots,
+      filters,
+      currentDocumentContext: fileEmergenceEnabled === true
+        ? buildCurrentDocumentContext({
+            tabs: docTabs,
+            activeTabId: activeDocTabId,
+            splitTabId: splitDocTabId,
+            workspaceRoots: safeWorkspaceRoots,
+          })
+        : null,
+      readingProgress: fileEmergenceEnabled === true ? fileEmergenceReadingProgress : [],
+    }),
+    [
+      activeDocTabId,
+      docTabs,
+      fileEmergenceEnabled,
+      fileEmergenceReadingProgress,
+      fileEmergenceSnapshot,
+      filters,
+      query,
+      safeWorkspaceRoots,
+      splitDocTabId,
+      viewMode,
+    ],
+  )
+  const handleOpenEmergenceFile = useCallback((path: string, _project: FileEmergenceProject) => {
+    const name = path.split('/').pop() || path
+    handleOpenFile({
+      name,
+      path,
+      isDirectory: false,
+      size: 0,
+      modified: new Date(),
+    }, 'emergence')
+  }, [handleOpenFile])
 
   useEffect(() => {
     if (viewMode !== 'grid') return

@@ -604,6 +604,7 @@ function safeHostname(input: string): string | undefined {
   try {
     return new URL(input).hostname
   } catch {
+    // silent-catch: malformed URL input simply has no hostname for filename hints.
     return undefined
   }
 }

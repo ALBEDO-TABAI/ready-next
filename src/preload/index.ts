@@ -10,6 +10,11 @@ import type { RendererAgentMetricName } from '../shared/renderer-agent-metrics'
 import type { ModelPackDownloadUpdate, ModelPackId, ModelSource } from '../shared/model-pack-types'
 import type { PetActivitySnapshot, PetSettings, PetStickyNoteInput, PetWindowSnapshot } from '../shared/pet'
 import type {
+  FileEmergenceGetSnapshotPayload,
+  FileEmergenceRecordActivityPayload,
+  FileEmergenceRecordReadingSessionPayload,
+} from '../shared/file-emergence'
+import type {
   BrowserFastCardContextActionEvent,
   FastCardOverlayCommand,
   FastCardOverlaySnapshot,
@@ -984,6 +989,22 @@ const settingsAPI = {
   testExternalServiceDraft: (input: unknown) => ipcRenderer.invoke('settings:testExternalServiceDraft', input),
 }
 
+const fileEmergenceAPI = {
+  getSnapshot: (payload: FileEmergenceGetSnapshotPayload) =>
+    ipcRenderer.invoke('fileEmergence:getSnapshot', payload),
+  recordActivity: (payload: FileEmergenceRecordActivityPayload) =>
+    ipcRenderer.invoke('fileEmergence:recordActivity', payload),
+  recordReadingSession: (payload: FileEmergenceRecordReadingSessionPayload) =>
+    ipcRenderer.invoke('fileEmergence:recordReadingSession', payload),
+  onFlushReadingSessions: (handler: (requestId: string) => void) => {
+    const listener = (_event: IpcRendererEvent, requestId: string) => handler(requestId)
+    ipcRenderer.on('fileEmergence:flushReadingSessions', listener)
+    return () => ipcRenderer.removeListener('fileEmergence:flushReadingSessions', listener)
+  },
+  ackReadingSessionsFlushed: (requestId: string) =>
+    ipcRenderer.send('fileEmergence:readingSessionsFlushed', requestId),
+}
+
 const petAPI = {
   getSettings: () => ipcRenderer.invoke('pet:getSettings'),
   updateSettings: (patch: Partial<PetSettings>) => ipcRenderer.invoke('pet:updateSettings', patch),
@@ -1128,6 +1149,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   window: windowAPI,
   theme: themeAPI,
   settings: settingsAPI,
+  fileEmergence: fileEmergenceAPI,
   pet: petAPI,
   chat: chatAPI,
   userProfile: userProfileAPI,
@@ -1158,6 +1180,7 @@ declare global {
       window: typeof windowAPI
       theme: typeof themeAPI
       settings: typeof settingsAPI
+      fileEmergence: typeof fileEmergenceAPI
       pet: typeof petAPI
       chat: typeof chatAPI
       userProfile: typeof userProfileAPI

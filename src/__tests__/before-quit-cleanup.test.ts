@@ -59,6 +59,26 @@ test('runBeforeQuitCleanup awaits all three async cleanups before closing DB', a
   assert.ok(order.includes('rss'))
 })
 
+test('runBeforeQuitCleanup awaits renderer reading session flush before closing DB', async () => {
+  const order: string[] = []
+  const { logger } = makeLogger()
+
+  await runBeforeQuitCleanup({
+    cleanupAgentRuntime: () => { order.push('runtime') },
+    cleanupAgentManager: () => { order.push('agent') },
+    cleanupRsshubManager: () => { order.push('rss') },
+    cleanupRendererReadingSessions: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5))
+      order.push('renderer-reading')
+    },
+    closeDatabase: () => { order.push('db') },
+    logger,
+  }, { timeoutMs: 1_000 })
+
+  assert.ok(order.includes('renderer-reading'))
+  assert.equal(order[order.length - 1], 'db')
+})
+
 test('runBeforeQuitCleanup honours the timeout when one cleanup hangs', async () => {
   const order: string[] = []
   const { logger, rec } = makeLogger()
@@ -164,6 +184,7 @@ test('index.ts before-quit handler installs a re-entry guard and awaits cleanup'
 
   // Cleanup must be invoked through the awaitable helper, not as `void cleanupAgentRuntime()`.
   assert.match(src, /runBeforeQuitCleanup\(\{[\s\S]*cleanupAgentRuntime[\s\S]*closeDatabase[\s\S]*\}\)/)
+  assert.match(src, /cleanupRendererReadingSessions:\s*\(\)\s*=>\s*requestRendererReadingSessionFlush\(\)/)
   assert.doesNotMatch(src, /\bvoid cleanupAgentRuntime\(\)/, 'fire-and-forget cleanup regression')
 
   // Quit must be re-triggered after cleanup so the app actually exits; the

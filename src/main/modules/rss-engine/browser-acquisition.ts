@@ -220,7 +220,9 @@ async function resolveFinalUrl(url: string, timeoutMs = 12_000): Promise<string>
       headers: BROWSER_ACQUISITION_HEADERS,
       signal: controller.signal,
     })
-    void response.body?.cancel().catch(() => undefined)
+    void response.body?.cancel().catch((error) => {
+      console.warn('[rss-browser-acquisition] response body cancel failed', error)
+    })
     return response.url || url
   } finally {
     clearTimeout(timer)

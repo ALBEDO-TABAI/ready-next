@@ -113,10 +113,24 @@ function shouldHideInternalBackup(name: string): boolean {
 
 export type DocumentWriteIndexHook = (path: string, content: string) => void
 
-let documentWriteIndexHook: DocumentWriteIndexHook | null = null
+const documentWriteListeners = new Set<DocumentWriteIndexHook>()
+
+const documentWriteIndexHook: DocumentWriteIndexHook = (path, content) => {
+  for (const listener of Array.from(documentWriteListeners)) {
+    listener(path, content)
+  }
+}
+
+export function addDocumentWriteListener(listener: DocumentWriteIndexHook): () => void {
+  documentWriteListeners.add(listener)
+  return () => {
+    documentWriteListeners.delete(listener)
+  }
+}
 
 export function setDocumentWriteIndexHook(hook: DocumentWriteIndexHook | null): void {
-  documentWriteIndexHook = hook
+  documentWriteListeners.clear()
+  if (hook) documentWriteListeners.add(hook)
 }
 
 function resolveDialogWindow(parentWindow?: BrowserWindow | null): BrowserWindow | null {

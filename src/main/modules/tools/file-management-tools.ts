@@ -127,6 +127,7 @@ async function authorizeRoot(rawRootPath: string, engine: SearchEngine): Promise
     }
     return { ok: true, rootPath, rootRealPath, workspaceRoot: guard.root }
   } catch (error) {
+    // silent-catch: root authorization failures are returned as structured tool errors.
     return { ok: false, output: { ok: false, rootPath, error: error instanceof Error ? error.message : String(error) } }
   }
 }
@@ -145,6 +146,7 @@ async function resolveExistingPathInsideRoot(
     if (!isPathInsideRoot(real, auth.rootRealPath)) return { ok: false, error: 'path escapes authorized root via symlink' }
     return { ok: true, path, realPath: real }
   } catch (error) {
+    // silent-catch: path resolution failures are returned as structured tool errors.
     return { ok: false, error: error instanceof Error ? error.message : String(error) }
   }
 }
@@ -181,7 +183,7 @@ async function getOrganizeStoreDir(context?: FileManagementToolContext): Promise
     const userData = electron.app?.getPath?.('userData')
     if (userData) return join(userData, 'file-organizer')
   } catch {
-    // Tests and non-Electron callers fall back to a temp-backed store.
+    // silent-catch: tests and non-Electron callers fall back to a temp-backed store.
   }
   return join(tmpdir(), 'ready-file-organizer')
 }
@@ -842,6 +844,7 @@ async function extractTextFromPath(path: string): Promise<{ ok: true; text: stri
     const text = await readFile(path, 'utf-8')
     return { ok: true, kind: ext ? ext.slice(1) : 'text', text }
   } catch (error) {
+    // silent-catch: extraction failures are returned to the model as tool output.
     return { ok: false, kind: ext ? ext.slice(1) : 'unknown', error: error instanceof Error ? error.message : String(error) }
   }
 }
@@ -928,6 +931,7 @@ async function runFileInventory(args: Record<string, unknown>, engine: SearchEng
       items,
     })
   } catch (error) {
+    // silent-catch: list failures are returned as structured tool errors.
     return toJsonString({ ok: false, rootPath: auth.rootPath, error: error instanceof Error ? error.message : String(error) })
   }
 }
@@ -945,6 +949,7 @@ async function runFileCreateFolder(args: Record<string, unknown>, engine: Search
     await mkdir(target.path, { recursive: true })
     return toJsonString({ ok: true, path: target.path, relativePath: target.relativePath })
   } catch (error) {
+    // silent-catch: folder creation failures are returned as structured tool errors.
     return toJsonString({ ok: false, path: target.path, error: error instanceof Error ? error.message : String(error) })
   }
 }
@@ -1092,7 +1097,7 @@ function deleteIndexedPath(engine: SearchEngine, workspaceRoot: string, path: st
     const workspaceId = repo.ensureWorkspace(workspaceRoot)
     repo.deletePath(workspaceId, path)
   } catch {
-    // Best-effort index cleanup; the filesystem operation already succeeded.
+    // silent-catch: best-effort index cleanup; the filesystem operation already succeeded.
   }
 }
 
@@ -1100,7 +1105,7 @@ async function indexPathIfPossible(engine: SearchEngine, workspaceRoot: string, 
   try {
     await engine.indexDocument(workspaceRoot, path)
   } catch {
-    // Best-effort eager index sync; watcher/reindex can reconcile later.
+    // silent-catch: best-effort eager index sync; watcher/reindex can reconcile later.
   }
 }
 
@@ -1160,6 +1165,7 @@ async function runFileOrganizeApply(
     await writeJsonFile(journalPath(storeDir, journal.journalId), journal)
     return toJsonString({ ok: true, planId, journalId: journal.journalId, executed: journal.operations.length })
   } catch (error) {
+    // silent-catch: partial apply failures are journaled and returned as structured tool output.
     await writeJsonFile(journalPath(storeDir, journal.journalId), journal)
     return toJsonString({
       ok: false,
@@ -1211,6 +1217,7 @@ async function runFileOrganizeUndo(
       note: 'created folders are left in place to avoid deleting user-created content',
     })
   } catch (error) {
+    // silent-catch: rollback failures are returned with the best restored-path evidence available.
     return toJsonString({
       ok: false,
       journalId,

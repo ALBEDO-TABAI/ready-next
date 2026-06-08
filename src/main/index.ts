@@ -15,6 +15,7 @@ import { AgentManager } from './modules/claude-bridge/agent-manager'
 import { setupBrowserIPC, type BrowserController } from './modules/browser-engine/ipc-handler'
 import { setupDocumentIPC } from './modules/document-engine/ipc-handler'
 import { setupSearchIPC, shutdownFileWatchers } from './modules/search-engine/ipc-handler'
+import { requestRendererReadingSessionFlush, setupFileEmergenceIPC } from './modules/file-emergence/ipc-handler'
 import { setupRSSIPC, setRSSBrowserController } from './modules/rss-engine/ipc-handler'
 import { setupCalendarIPC } from './modules/calendar-engine/ipc-handler'
 import {
@@ -290,6 +291,7 @@ function runFatalProcessCleanup(): Promise<void> {
         console.warn('[process-handlers] closeAllBrowsers errors', result.errors)
       }
     },
+    cleanupRendererReadingSessions: () => requestRendererReadingSessionFlush(),
     cleanupDbWorker: () => shutdownWorkerDbBridge(),
     cleanupFileWatchers: () => shutdownFileWatchers().then(() => undefined),
     closeDatabase: () => getDatabase().close(),
@@ -490,6 +492,7 @@ function setupGlobalIPC(): void {
   // Module IPC handlers (no window dependency)
   setupDocumentIPC(DOCUMENT_USE_MOCK)  // Always real fs
   setupSearchIPC()
+  setupFileEmergenceIPC()
   setupRSSIPC(RSS_USE_MOCK)
   // Reminder runtime: notifier closes over the mainWindow accessor (window
   // may be created after this point on cold start; closure defers reads).
@@ -1094,6 +1097,7 @@ app.on('before-quit', (event) => {
         console.warn('[before-quit] closeAllBrowsers errors', result.errors)
       }
     },
+    cleanupRendererReadingSessions: () => requestRendererReadingSessionFlush(),
     cleanupDbWorker: () => shutdownWorkerDbBridge(),
     cleanupFileWatchers: () => shutdownFileWatchers().then(() => undefined),
     closeDatabase: () => getDatabase().close(),
