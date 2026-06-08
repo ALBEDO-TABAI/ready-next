@@ -15,7 +15,7 @@ import {
   Upload,
 } from 'lucide-react'
 
-import { useWorkspace } from '../../stores/useWorkspace'
+import { computeDesiredRoots, useWorkspace } from '../../stores/useWorkspace'
 import FileTree, { DEFAULT_FILE_FILTERS, type FileFilterMap, type FileViewMode } from './FileTree'
 import Modal from '../ui/Modal'
 import { computeNextGridHistory, type GridNavigationEntry } from './gridNavigation'
@@ -98,6 +98,28 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
     if (typeof window === 'undefined') return false
     return !!window.electronAPI
   }, [workspaceRoot])
+
+  const safeRoots = useMemo(
+    () => computeDesiredRoots({ workspaceRoot, pinnedFolders }),
+    [workspaceRoot, pinnedFolders],
+  )
+  const folderStatus = useMemo(() => {
+    if (!workspaceRoot && pinnedFolders.length === 0) return null
+    if (safeRoots.length > 0) {
+      return {
+        label: '整理可用',
+        title: '安全工作区已接入搜索和 agent 文件整理',
+        color: 'var(--color-green)',
+        background: 'var(--color-green-subtle)',
+      }
+    }
+    return {
+      label: '仅浏览',
+      title: '该位置过宽或不安全，只在文件管理中浏览，不开放给搜索和 agent 整理',
+      color: PANEL_TOKENS.mutedStrong,
+      background: 'var(--bg-hover)',
+    }
+  }, [pinnedFolders.length, safeRoots.length, workspaceRoot])
 
   useEffect(() => {
     if (!showFilterMenu && !showMoreMenu) return
@@ -347,27 +369,42 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
       <span className="text-[13px] font-semibold" style={{ color: PANEL_TOKENS.title }}>
         文件管理
       </span>
-      <button
-        type="button"
-        onClick={handleConnectedRefresh}
-        className="group inline-flex items-center gap-1 rounded-[10px] text-[10px] font-medium transition-colors"
-        style={{
-          padding: '3px 8px',
-          background: isConnected ? 'var(--color-green-subtle)' : 'var(--bg-hover)',
-          color: isConnected ? 'var(--color-green)' : PANEL_TOKENS.mutedStrong,
-        }}
-        title={isConnected ? '点击刷新文件状态' : '当前离线'}
-      >
-        <span
-          className="h-[6px] w-[6px] rounded-full"
-          style={{ background: isConnected ? 'var(--color-green)' : PANEL_TOKENS.mutedStrong }}
-        />
-        {isConnected ? 'Connected' : 'Offline'}
-        <RefreshCw
-          className={`h-[10px] w-[10px] ${isRefreshing ? 'animate-spin' : 'opacity-0 group-hover:opacity-70'}`}
-          style={{ color: isConnected ? 'var(--color-green)' : PANEL_TOKENS.mutedStrong }}
-        />
-      </button>
+      <div className="flex items-center gap-1.5">
+        {folderStatus && (
+          <span
+            className="inline-flex items-center rounded-[8px] text-[10px] font-medium"
+            style={{
+              padding: '3px 7px',
+              background: folderStatus.background,
+              color: folderStatus.color,
+            }}
+            title={folderStatus.title}
+          >
+            {folderStatus.label}
+          </span>
+        )}
+        <button
+          type="button"
+          onClick={handleConnectedRefresh}
+          className="group inline-flex items-center gap-1 rounded-[10px] text-[10px] font-medium transition-colors"
+          style={{
+            padding: '3px 8px',
+            background: isConnected ? 'var(--color-green-subtle)' : 'var(--bg-hover)',
+            color: isConnected ? 'var(--color-green)' : PANEL_TOKENS.mutedStrong,
+          }}
+          title={isConnected ? '点击刷新文件状态' : '当前离线'}
+        >
+          <span
+            className="h-[6px] w-[6px] rounded-full"
+            style={{ background: isConnected ? 'var(--color-green)' : PANEL_TOKENS.mutedStrong }}
+          />
+          {isConnected ? 'Connected' : 'Offline'}
+          <RefreshCw
+            className={`h-[10px] w-[10px] ${isRefreshing ? 'animate-spin' : 'opacity-0 group-hover:opacity-70'}`}
+            style={{ color: isConnected ? 'var(--color-green)' : PANEL_TOKENS.mutedStrong }}
+          />
+        </button>
+      </div>
     </div>
   )
 

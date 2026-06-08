@@ -1,5 +1,8 @@
-import { readFile, realpath, rename, stat } from 'fs/promises'
-import { dirname, isAbsolute, join, relative, resolve as resolvePath } from 'path'
+import { mkdir, readFile, readdir, realpath, rename, stat, writeFile } from 'fs/promises'
+import { existsSync } from 'fs'
+import { randomUUID } from 'crypto'
+import { tmpdir } from 'os'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve as resolvePath } from 'path'
 import { fileURLToPath } from 'url'
 import type { SearchEngine } from '../search-engine/indexer'
 import { getWorkerDbBridge } from '../database/worker-bridge'
@@ -23,10 +26,72 @@ export {
 interface FileManagementToolContext {
   searchEngine?: SearchEngine | null
   abortSignal?: AbortSignal
+  organizeStoreDir?: string | null
 }
 
 const DEFAULT_EXCERPT_CHARS = 32_000
 const MAX_EXCERPT_CHARS = 40_000
+const DEFAULT_EXTRACT_CHARS = 20_000
+const MAX_EXTRACT_CHARS = 40_000
+const DEFAULT_INVENTORY_LIMIT = 100
+const MAX_INVENTORY_LIMIT = 500
+const DEFAULT_INVENTORY_DEPTH = 2
+const MAX_INVENTORY_DEPTH = 5
+const ORGANIZE_PLAN_TTL_MS = 30 * 60 * 1000
+
+type OrganizeOperationInput = {
+  path: string
+  destDir: string
+  newName?: string
+}
+
+type OrganizeOperation = OrganizeOperationInput & {
+  targetPath: string
+}
+
+type OrganizeConflict = {
+  kind: string
+  path?: string
+  targetPath?: string
+  message: string
+}
+
+type OrganizePlan = {
+  planId: string
+  rootPath: string
+  workspaceRoot: string
+  createFolders: string[]
+  operations: OrganizeOperation[]
+  conflicts: OrganizeConflict[]
+  confirmed: boolean
+  createdAt: string
+  expiresAt: string
+}
+
+type JournalMove = {
+  type: 'move'
+  sourcePath: string
+  targetPath: string
+}
+
+type JournalFolder = {
+  type: 'mkdir'
+  path: string
+}
+
+type OrganizeJournal = {
+  journalId: string
+  planId: string
+  rootPath: string
+  workspaceRoot: string
+  executedAt: string
+  undoneAt: string | null
+  operations: Array<JournalMove | JournalFolder>
+}
+
+type AuthorizedRoot =
+  | { ok: true; rootPath: string; rootRealPath: string; workspaceRoot: string }
+  | { ok: false; output: Record<string, unknown> }
 
 function assertInsideWorkspace(target: string, engine: SearchEngine): { ok: true; root: string } | { ok: false; error: string } {
   if (!isAbsolute(target)) {
@@ -38,6 +103,108 @@ function assertInsideWorkspace(target: string, engine: SearchEngine): { ok: true
   const rel = relative(root, resolved)
   if (rel.startsWith('..')) return { ok: false, error: `path escapes workspace root: ${rel}` }
   return { ok: true, root }
+}
+
+function isPathInsideRoot(target: string, root: string): boolean {
+  const rel = relative(root, target)
+  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel))
+}
+
+async function authorizeRoot(rawRootPath: string, engine: SearchEngine): Promise<AuthorizedRoot> {
+  const raw = String(rawRootPath || '').trim()
+  if (!raw) return { ok: false, output: { ok: false, error: 'rootPath is required' } }
+  const rootPath = resolvePath(raw)
+  if (!isAbsolute(rootPath)) return { ok: false, output: { ok: false, error: 'rootPath must be absolute' } }
+  const guard = assertInsideWorkspace(rootPath, engine)
+  if (!guard.ok) return { ok: false, output: { ok: false, error: guard.error } }
+  try {
+    const rootStat = await stat(rootPath)
+    if (!rootStat.isDirectory()) return { ok: false, output: { ok: false, error: 'rootPath must be a directory', rootPath } }
+    const workspaceRealPath = await realpath(guard.root)
+    const rootRealPath = await realpath(rootPath)
+    if (!isPathInsideRoot(rootRealPath, workspaceRealPath)) {
+      return { ok: false, output: { ok: false, error: 'rootPath escapes workspace via symlink', rootPath } }
+    }
+    return { ok: true, rootPath, rootRealPath, workspaceRoot: guard.root }
+  } catch (error) {
+    return { ok: false, output: { ok: false, rootPath, error: error instanceof Error ? error.message : String(error) } }
+  }
+}
+
+async function resolveExistingPathInsideRoot(
+  rawPath: string,
+  auth: Extract<AuthorizedRoot, { ok: true }>,
+): Promise<{ ok: true; path: string; realPath: string } | { ok: false; error: string }> {
+  const raw = String(rawPath || '').trim()
+  if (!raw) return { ok: false, error: 'path is required' }
+  const path = resolvePath(raw)
+  if (!isAbsolute(path)) return { ok: false, error: 'path must be absolute' }
+  if (!isPathInsideRoot(path, auth.rootPath)) return { ok: false, error: 'path is outside authorized root' }
+  try {
+    const real = await realpath(path)
+    if (!isPathInsideRoot(real, auth.rootRealPath)) return { ok: false, error: 'path escapes authorized root via symlink' }
+    return { ok: true, path, realPath: real }
+  } catch (error) {
+    return { ok: false, error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+function resolvePlannedPathInsideRoot(
+  rawPath: string,
+  auth: Extract<AuthorizedRoot, { ok: true }>,
+): { ok: true; path: string } | { ok: false; error: string } {
+  const raw = String(rawPath || '').trim()
+  if (!raw) return { ok: false, error: 'path is required' }
+  const path = resolvePath(raw)
+  if (!isAbsolute(path)) return { ok: false, error: 'path must be absolute' }
+  if (!isPathInsideRoot(path, auth.rootPath)) return { ok: false, error: 'path is outside authorized root' }
+  return { ok: true, path }
+}
+
+function resolveRelativeFolderInsideRoot(
+  rawRelativePath: string,
+  auth: Extract<AuthorizedRoot, { ok: true }>,
+): { ok: true; path: string; relativePath: string } | { ok: false; error: string } {
+  const relativePath = String(rawRelativePath || '').trim()
+  if (!relativePath) return { ok: false, error: 'relativePath is required' }
+  if (isAbsolute(relativePath)) return { ok: false, error: 'relativePath must not be absolute' }
+  const target = resolvePath(auth.rootPath, relativePath)
+  if (!isPathInsideRoot(target, auth.rootPath)) return { ok: false, error: 'relativePath escapes authorized root' }
+  return { ok: true, path: target, relativePath }
+}
+
+async function getOrganizeStoreDir(context?: FileManagementToolContext): Promise<string> {
+  const fromContext = context?.organizeStoreDir ? String(context.organizeStoreDir).trim() : ''
+  if (fromContext) return fromContext
+  try {
+    const electron = await import('electron')
+    const userData = electron.app?.getPath?.('userData')
+    if (userData) return join(userData, 'file-organizer')
+  } catch {
+    // Tests and non-Electron callers fall back to a temp-backed store.
+  }
+  return join(tmpdir(), 'ready-file-organizer')
+}
+
+async function writeJsonFile(path: string, value: unknown): Promise<void> {
+  await mkdir(dirname(path), { recursive: true })
+  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, 'utf-8')
+}
+
+async function readJsonFile<T>(path: string): Promise<T | null> {
+  try {
+    return JSON.parse(await readFile(path, 'utf-8')) as T
+  } catch {
+    return null
+  }
+}
+
+function planPath(storeDir: string, planId: string): string {
+  return join(storeDir, 'plans', `${planId}.json`)
+}
+
+function journalPath(storeDir: string, journalId: string): string {
+  return join(storeDir, 'journals', `${journalId}.json`)
 }
 
 function toJsonString(value: unknown): string {
@@ -165,6 +332,18 @@ export async function executeFileManagementTool(
       return runFileRename(args, engine)
     case 'file_move':
       return runFileMove(args, engine)
+    case 'file_inventory':
+      return runFileInventory(args, engine)
+    case 'file_extract_text':
+      return runFileExtractText(args, engine)
+    case 'file_create_folder':
+      return runFileCreateFolder(args, engine)
+    case 'file_organize_preview':
+      return runFileOrganizePreview(args, engine, context)
+    case 'file_organize_apply':
+      return runFileOrganizeApply(args, engine, context)
+    case 'file_organize_undo':
+      return runFileOrganizeUndo(args, engine, context)
     default:
       return `Unknown file management tool: ${toolName}`
   }
@@ -579,6 +758,466 @@ async function runFileClassify(args: Record<string, unknown>, engine: SearchEngi
     return toJsonString({ ok: true, path, tags: mergedTags, frontmatter: updatedFm })
   } catch (error) {
     return toJsonString({ ok: false, error: error instanceof Error ? error.message : String(error) })
+  }
+}
+
+function boundedText(content: string, offsetValue: unknown, maxCharsValue: unknown): {
+  offset: number
+  maxChars: number
+  text: string
+  truncated: boolean
+  nextOffset: number | null
+} {
+  const offset = typeof offsetValue === 'number' && Number.isFinite(offsetValue)
+    ? Math.max(0, Math.floor(offsetValue))
+    : 0
+  const maxChars = typeof maxCharsValue === 'number' && Number.isFinite(maxCharsValue)
+    ? Math.max(1, Math.min(MAX_EXTRACT_CHARS, Math.floor(maxCharsValue)))
+    : DEFAULT_EXTRACT_CHARS
+  const text = content.slice(offset, offset + maxChars)
+  const nextOffset = offset + text.length < content.length ? offset + text.length : null
+  return {
+    offset,
+    maxChars,
+    text,
+    truncated: nextOffset !== null,
+    nextOffset,
+  }
+}
+
+async function extractTextFromPath(path: string): Promise<{ ok: true; text: string; kind: string } | { ok: false; error: string; kind: string }> {
+  const ext = extname(path).toLowerCase()
+  try {
+    if (ext === '.docx') {
+      const mammoth = await import('mammoth')
+      const buffer = await readFile(path)
+      const mammothMod = (mammoth as unknown as { default?: typeof import('mammoth') }).default || mammoth
+      const result = await mammothMod.extractRawText({ buffer })
+      return { ok: true, kind: 'docx', text: result.value || '' }
+    }
+    if (ext === '.xlsx' || ext === '.xls') {
+      const xlsx = await import('xlsx')
+      const buffer = await readFile(path)
+      const xlsxMod = (xlsx as unknown as { default?: typeof import('xlsx') }).default || xlsx
+      const workbook = xlsxMod.read(buffer, { type: 'buffer' })
+      const parts: string[] = []
+      for (const sheetName of workbook.SheetNames) {
+        const sheet = workbook.Sheets[sheetName]
+        const rows = xlsxMod.utils.sheet_to_json(sheet, { header: 1 }) as unknown[][]
+        parts.push(`# ${sheetName}`)
+        for (const row of rows.slice(0, 200)) {
+          parts.push(row.map((cell) => String(cell ?? '')).join('\t').trimEnd())
+        }
+      }
+      return { ok: true, kind: 'spreadsheet', text: parts.join('\n') }
+    }
+    if (ext === '.pdf') {
+      const previousDisableLogs = process.env.PDF2JSON_DISABLE_LOGS
+      process.env.PDF2JSON_DISABLE_LOGS = '1'
+      try {
+        const { default: PDFParser } = await import('pdf2json')
+        const buffer = await readFile(path)
+        const text = await new Promise<string>((resolve, reject) => {
+          const parser = new PDFParser(null, true)
+          const timer = setTimeout(() => reject(new Error('PDF text extraction timed out')), 15_000)
+          parser.on('pdfParser_dataError', (errData: Error | { parserError: Error }) => {
+            clearTimeout(timer)
+            reject(errData instanceof Error ? errData : errData.parserError)
+          })
+          parser.on('pdfParser_dataReady', () => {
+            clearTimeout(timer)
+            resolve(parser.getRawTextContent())
+          })
+          parser.parseBuffer(buffer)
+        })
+        return { ok: true, kind: 'pdf', text }
+      } finally {
+        if (previousDisableLogs === undefined) {
+          delete process.env.PDF2JSON_DISABLE_LOGS
+        } else {
+          process.env.PDF2JSON_DISABLE_LOGS = previousDisableLogs
+        }
+      }
+    }
+    const text = await readFile(path, 'utf-8')
+    return { ok: true, kind: ext ? ext.slice(1) : 'text', text }
+  } catch (error) {
+    return { ok: false, kind: ext ? ext.slice(1) : 'unknown', error: error instanceof Error ? error.message : String(error) }
+  }
+}
+
+async function runFileExtractText(args: Record<string, unknown>, engine: SearchEngine): Promise<string> {
+  const rawPath = typeof args.path === 'string' ? args.path : ''
+  const resolved = await resolveReadableDocumentPath(rawPath, engine)
+  if (!resolved.ok) return toJsonString(resolved.output)
+  const extracted = await extractTextFromPath(resolved.readPath)
+  if (!extracted.ok) return toJsonString({ ok: false, path: resolved.path, kind: extracted.kind, error: extracted.error })
+  return toJsonString({
+    ok: true,
+    path: resolved.path,
+    kind: extracted.kind,
+    ...boundedText(extracted.text, args.offset, args.maxChars),
+  })
+}
+
+async function collectInventory(
+  dir: string,
+  auth: Extract<AuthorizedRoot, { ok: true }>,
+  recursive: boolean,
+  maxDepth: number,
+  depth = 0,
+): Promise<Array<{ path: string; name: string; kind: 'file' | 'directory'; size: number | null; mtimeMs: number | null; depth: number }>> {
+  const entries = await readdir(dir, { withFileTypes: true })
+  const sorted = entries.sort((a, b) => a.name.localeCompare(b.name))
+  const items: Array<{ path: string; name: string; kind: 'file' | 'directory'; size: number | null; mtimeMs: number | null; depth: number }> = []
+  for (const entry of sorted) {
+    const path = join(dir, entry.name)
+    if (!isPathInsideRoot(path, auth.rootPath)) continue
+    const stats = await stat(path).catch(() => null)
+    const kind = entry.isDirectory() ? 'directory' : 'file'
+    items.push({
+      path,
+      name: entry.name,
+      kind,
+      size: stats?.isFile() ? stats.size : null,
+      mtimeMs: stats?.mtimeMs ?? null,
+      depth,
+    })
+    if (recursive && entry.isDirectory() && depth + 1 < maxDepth) {
+      const childReal = await realpath(path).catch(() => null)
+      if (childReal && isPathInsideRoot(childReal, auth.rootRealPath)) {
+        items.push(...await collectInventory(path, auth, recursive, maxDepth, depth + 1))
+      }
+    }
+  }
+  return items
+}
+
+async function runFileInventory(args: Record<string, unknown>, engine: SearchEngine): Promise<string> {
+  const auth = await authorizeRoot(typeof args.rootPath === 'string' ? args.rootPath : '', engine)
+  if (!auth.ok) return toJsonString(auth.output)
+  const limit = typeof args.limit === 'number'
+    ? Math.max(1, Math.min(MAX_INVENTORY_LIMIT, Math.floor(args.limit)))
+    : DEFAULT_INVENTORY_LIMIT
+  const cursor = typeof args.cursor === 'string' ? Math.max(0, Number.parseInt(args.cursor, 10) || 0) : 0
+  const recursive = args.recursive === true
+  const maxDepth = typeof args.maxDepth === 'number'
+    ? Math.max(1, Math.min(MAX_INVENTORY_DEPTH, Math.floor(args.maxDepth)))
+    : DEFAULT_INVENTORY_DEPTH
+  const includeSummaries = args.includeSummaries === true
+  try {
+    const allItems = await collectInventory(auth.rootPath, auth, recursive, maxDepth)
+    const page = allItems.slice(cursor, cursor + limit)
+    const items: Array<Record<string, unknown>> = []
+    for (const item of page) {
+      let summary: string | null = null
+      let summaryError: string | null = null
+      if (includeSummaries && item.kind === 'file') {
+        const extracted = await extractTextFromPath(item.path)
+        if (extracted.ok) summary = extracted.text.slice(0, 600)
+        else summaryError = extracted.error
+      }
+      items.push({ ...item, summary, summaryError })
+    }
+    return toJsonString({
+      ok: true,
+      rootPath: auth.rootPath,
+      total: allItems.length,
+      returned: items.length,
+      nextCursor: cursor + items.length < allItems.length ? String(cursor + items.length) : null,
+      items,
+    })
+  } catch (error) {
+    return toJsonString({ ok: false, rootPath: auth.rootPath, error: error instanceof Error ? error.message : String(error) })
+  }
+}
+
+async function runFileCreateFolder(args: Record<string, unknown>, engine: SearchEngine): Promise<string> {
+  const auth = await authorizeRoot(typeof args.rootPath === 'string' ? args.rootPath : '', engine)
+  if (!auth.ok) return toJsonString(auth.output)
+  const target = resolveRelativeFolderInsideRoot(typeof args.relativePath === 'string' ? args.relativePath : '', auth)
+  if (!target.ok) return toJsonString({ ok: false, error: target.error })
+  const parentReal = await realpath(dirname(target.path)).catch(() => null)
+  if (parentReal && !isPathInsideRoot(parentReal, auth.rootRealPath)) {
+    return toJsonString({ ok: false, error: 'folder parent escapes authorized root via symlink' })
+  }
+  try {
+    await mkdir(target.path, { recursive: true })
+    return toJsonString({ ok: true, path: target.path, relativePath: target.relativePath })
+  } catch (error) {
+    return toJsonString({ ok: false, path: target.path, error: error instanceof Error ? error.message : String(error) })
+  }
+}
+
+function parseOrganizeOperations(value: unknown): OrganizeOperationInput[] {
+  if (!Array.isArray(value)) return []
+  return value
+    .filter((item): item is Record<string, unknown> => item !== null && typeof item === 'object' && !Array.isArray(item))
+    .map((item) => ({
+      path: typeof item.path === 'string' ? item.path : '',
+      destDir: typeof item.destDir === 'string' ? item.destDir : '',
+      newName: typeof item.newName === 'string' ? item.newName : undefined,
+    }))
+}
+
+async function validateOrganizePlan(
+  rootPath: string,
+  createFoldersInput: unknown,
+  operationsInput: unknown,
+  engine: SearchEngine,
+): Promise<{ ok: true; plan: OrganizePlan } | { ok: false; output: Record<string, unknown> }> {
+  const auth = await authorizeRoot(rootPath, engine)
+  if (!auth.ok) return { ok: false, output: auth.output }
+  const conflicts: OrganizeConflict[] = []
+  const createFolders = Array.isArray(createFoldersInput)
+    ? createFoldersInput.filter((item): item is string => typeof item === 'string').map((item) => item.trim()).filter(Boolean)
+    : []
+  const folderTargets = new Map<string, string>()
+  for (const relativeFolder of createFolders) {
+    const target = resolveRelativeFolderInsideRoot(relativeFolder, auth)
+    if (!target.ok) {
+      conflicts.push({ kind: 'folder_invalid', message: target.error })
+      continue
+    }
+    const existing = await stat(target.path).catch(() => null)
+    if (existing && !existing.isDirectory()) {
+      conflicts.push({ kind: 'folder_target_is_file', targetPath: target.path, message: 'folder target exists as a file' })
+    }
+    folderTargets.set(target.path, target.relativePath)
+  }
+
+  const operations: OrganizeOperation[] = []
+  const targetPaths = new Set<string>()
+  for (const op of parseOrganizeOperations(operationsInput)) {
+    const source = await resolveExistingPathInsideRoot(op.path, auth)
+    if (!source.ok) {
+      conflicts.push({ kind: 'source_invalid', path: op.path, message: source.error })
+      continue
+    }
+    const sourceStat = await stat(source.realPath).catch(() => null)
+    if (!sourceStat?.isFile()) {
+      conflicts.push({ kind: 'source_not_file', path: source.path, message: 'source must be a file' })
+      continue
+    }
+    const dest = resolvePlannedPathInsideRoot(op.destDir, auth)
+    if (!dest.ok) {
+      conflicts.push({ kind: 'dest_invalid', path: op.destDir, message: dest.error })
+      continue
+    }
+    const destStat = await stat(dest.path).catch(() => null)
+    if (destStat && !destStat.isDirectory()) {
+      conflicts.push({ kind: 'dest_not_directory', path: dest.path, message: 'destDir is not a directory' })
+      continue
+    }
+    if (!destStat && !folderTargets.has(dest.path)) {
+      conflicts.push({ kind: 'dest_missing', path: dest.path, message: 'destDir does not exist and is not listed in createFolders' })
+      continue
+    }
+    const name = op.newName?.trim() || basename(source.path)
+    if (!name || name.includes('/') || name.includes('\\')) {
+      conflicts.push({ kind: 'new_name_invalid', path: source.path, message: 'newName must be a file name without path separators' })
+      continue
+    }
+    const targetPath = join(dest.path, name)
+    const target = resolvePlannedPathInsideRoot(targetPath, auth)
+    if (!target.ok) {
+      conflicts.push({ kind: 'target_invalid', path: source.path, targetPath, message: target.error })
+      continue
+    }
+    if (target.path === source.path) {
+      conflicts.push({ kind: 'noop', path: source.path, targetPath: target.path, message: 'source and target are the same path' })
+      continue
+    }
+    if (targetPaths.has(target.path)) {
+      conflicts.push({ kind: 'duplicate_target', path: source.path, targetPath: target.path, message: 'multiple operations target the same path' })
+      continue
+    }
+    const existingTarget = await stat(target.path).catch(() => null)
+    if (existingTarget) {
+      conflicts.push({ kind: 'target_exists', path: source.path, targetPath: target.path, message: 'target already exists' })
+      continue
+    }
+    targetPaths.add(target.path)
+    operations.push({ path: source.path, destDir: dest.path, newName: op.newName, targetPath: target.path })
+  }
+
+  const now = new Date()
+  return {
+    ok: true,
+    plan: {
+      planId: `file-plan-${randomUUID()}`,
+      rootPath: auth.rootPath,
+      workspaceRoot: auth.workspaceRoot,
+      createFolders,
+      operations,
+      conflicts,
+      confirmed: false,
+      createdAt: now.toISOString(),
+      expiresAt: new Date(now.getTime() + ORGANIZE_PLAN_TTL_MS).toISOString(),
+    },
+  }
+}
+
+async function runFileOrganizePreview(
+  args: Record<string, unknown>,
+  engine: SearchEngine,
+  context?: FileManagementToolContext,
+): Promise<string> {
+  const rootPath = typeof args.rootPath === 'string' ? args.rootPath : ''
+  const validated = await validateOrganizePlan(rootPath, args.createFolders, args.operations, engine)
+  if (!validated.ok) return toJsonString(validated.output)
+  const plan = validated.plan
+  const storeDir = await getOrganizeStoreDir(context)
+  await writeJsonFile(planPath(storeDir, plan.planId), plan)
+  return toJsonString({
+    ok: plan.conflicts.length === 0,
+    planId: plan.planId,
+    rootPath: plan.rootPath,
+    operations: plan.operations,
+    createFolders: plan.createFolders,
+    conflicts: plan.conflicts,
+    impact: {
+      createFolderCount: plan.createFolders.length,
+      moveCount: plan.operations.length,
+    },
+    confirmed: false,
+    expiresAt: plan.expiresAt,
+    requiresConfirmation: true,
+  })
+}
+
+function deleteIndexedPath(engine: SearchEngine, workspaceRoot: string, path: string): void {
+  try {
+    const repo = engine.getRepository()
+    const workspaceId = repo.ensureWorkspace(workspaceRoot)
+    repo.deletePath(workspaceId, path)
+  } catch {
+    // Best-effort index cleanup; the filesystem operation already succeeded.
+  }
+}
+
+async function indexPathIfPossible(engine: SearchEngine, workspaceRoot: string, path: string): Promise<void> {
+  try {
+    await engine.indexDocument(workspaceRoot, path)
+  } catch {
+    // Best-effort eager index sync; watcher/reindex can reconcile later.
+  }
+}
+
+async function runFileOrganizeApply(
+  args: Record<string, unknown>,
+  engine: SearchEngine,
+  context?: FileManagementToolContext,
+): Promise<string> {
+  const planId = typeof args.planId === 'string' ? args.planId : ''
+  const confirmed = args.confirmed === true
+  const confirmedVia = typeof args.confirmedVia === 'string' ? args.confirmedVia : ''
+  if (!planId) return toJsonString({ ok: false, error: 'planId is required' })
+  if (!confirmed || (confirmedVia !== 'ask_user_questions' && confirmedVia !== 'ui_action')) {
+    return toJsonString({ ok: false, planId, error: 'file_organize_apply requires explicit user confirmation' })
+  }
+  const storeDir = await getOrganizeStoreDir(context)
+  const plan = await readJsonFile<OrganizePlan & { appliedJournalId?: string }>(planPath(storeDir, planId))
+  if (!plan) return toJsonString({ ok: false, planId, error: 'plan not found' })
+  if (plan.appliedJournalId) return toJsonString({ ok: false, planId, error: 'plan already applied', journalId: plan.appliedJournalId })
+  if (new Date(plan.expiresAt).getTime() < Date.now()) return toJsonString({ ok: false, planId, error: 'plan expired' })
+  if (plan.conflicts.length > 0) return toJsonString({ ok: false, planId, error: 'plan has conflicts', conflicts: plan.conflicts })
+  const auth = await authorizeRoot(plan.rootPath, engine)
+  if (!auth.ok) return toJsonString(auth.output)
+
+  const journal: OrganizeJournal = {
+    journalId: `file-journal-${randomUUID()}`,
+    planId,
+    rootPath: plan.rootPath,
+    workspaceRoot: plan.workspaceRoot,
+    executedAt: new Date().toISOString(),
+    undoneAt: null,
+    operations: [],
+  }
+  try {
+    for (const relativeFolder of plan.createFolders) {
+      const folder = resolveRelativeFolderInsideRoot(relativeFolder, auth)
+      if (!folder.ok) throw new Error(folder.error)
+      const existed = existsSync(folder.path)
+      await mkdir(folder.path, { recursive: true })
+      if (!existed) journal.operations.push({ type: 'mkdir', path: folder.path })
+    }
+    for (const op of plan.operations) {
+      const source = await resolveExistingPathInsideRoot(op.path, auth)
+      if (!source.ok) throw new Error(`source invalid: ${source.error}`)
+      const target = resolvePlannedPathInsideRoot(op.targetPath, auth)
+      if (!target.ok) throw new Error(`target invalid: ${target.error}`)
+      if (existsSync(target.path)) throw new Error(`target already exists: ${target.path}`)
+      await mkdir(dirname(target.path), { recursive: true })
+      await rename(source.path, target.path)
+      journal.operations.push({ type: 'move', sourcePath: source.path, targetPath: target.path })
+      deleteIndexedPath(engine, plan.workspaceRoot, source.path)
+      await indexPathIfPossible(engine, plan.workspaceRoot, target.path)
+    }
+    plan.confirmed = true
+    plan.appliedJournalId = journal.journalId
+    await writeJsonFile(planPath(storeDir, planId), plan)
+    await writeJsonFile(journalPath(storeDir, journal.journalId), journal)
+    return toJsonString({ ok: true, planId, journalId: journal.journalId, executed: journal.operations.length })
+  } catch (error) {
+    await writeJsonFile(journalPath(storeDir, journal.journalId), journal)
+    return toJsonString({
+      ok: false,
+      planId,
+      journalId: journal.journalId,
+      executed: journal.operations.length,
+      error: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
+async function runFileOrganizeUndo(
+  args: Record<string, unknown>,
+  engine: SearchEngine,
+  context?: FileManagementToolContext,
+): Promise<string> {
+  const journalId = typeof args.journalId === 'string' ? args.journalId : ''
+  if (!journalId) return toJsonString({ ok: false, error: 'journalId is required' })
+  const storeDir = await getOrganizeStoreDir(context)
+  const journal = await readJsonFile<OrganizeJournal>(journalPath(storeDir, journalId))
+  if (!journal) return toJsonString({ ok: false, journalId, error: 'journal not found' })
+  if (journal.undoneAt) return toJsonString({ ok: false, journalId, error: 'journal already undone', undoneAt: journal.undoneAt })
+  const auth = await authorizeRoot(journal.rootPath, engine)
+  if (!auth.ok) return toJsonString(auth.output)
+  const undone: string[] = []
+  try {
+    const reverseMoves = journal.operations
+      .filter((op): op is JournalMove => op.type === 'move')
+      .reverse()
+    for (const op of reverseMoves) {
+      const source = resolvePlannedPathInsideRoot(op.sourcePath, auth)
+      const target = await resolveExistingPathInsideRoot(op.targetPath, auth)
+      if (!source.ok) throw new Error(`source restore path invalid: ${source.error}`)
+      if (!target.ok) throw new Error(`moved file missing: ${op.targetPath}`)
+      if (existsSync(source.path)) throw new Error(`restore target already exists: ${source.path}`)
+      await mkdir(dirname(source.path), { recursive: true })
+      await rename(target.path, source.path)
+      deleteIndexedPath(engine, journal.workspaceRoot, target.path)
+      await indexPathIfPossible(engine, journal.workspaceRoot, source.path)
+      undone.push(source.path)
+    }
+    journal.undoneAt = new Date().toISOString()
+    await writeJsonFile(journalPath(storeDir, journalId), journal)
+    return toJsonString({
+      ok: true,
+      journalId,
+      restored: undone.length,
+      restoredPaths: undone,
+      note: 'created folders are left in place to avoid deleting user-created content',
+    })
+  } catch (error) {
+    return toJsonString({
+      ok: false,
+      journalId,
+      restored: undone.length,
+      restoredPaths: undone,
+      error: error instanceof Error ? error.message : String(error),
+    })
   }
 }
 

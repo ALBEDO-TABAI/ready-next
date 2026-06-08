@@ -14,6 +14,12 @@ import {
   FileClassifySchema,
   FileRenameSchema,
   FileMoveSchema,
+  FileInventorySchema,
+  FileExtractTextSchema,
+  FileCreateFolderSchema,
+  FileOrganizePreviewSchema,
+  FileOrganizeApplySchema,
+  FileOrganizeUndoSchema,
 } from '../main/modules/tools/schemas/file-management-schemas'
 
 test('FileSearchSchema requires query; sources must be string[]', () => {
@@ -79,4 +85,32 @@ test('FileMoveSchema requires path + destDir', () => {
     FileMoveSchema.safeParse({ path: '/x', destDir: '/y', overwrite: 'yes' }).success,
     false,
   )
+})
+
+test('file organization schemas cover inventory, extraction, preview, apply, undo', () => {
+  assert.equal(FileInventorySchema.safeParse({ rootPath: '/x', recursive: true, limit: 50 }).success, true)
+  assert.equal(FileInventorySchema.safeParse({ recursive: true }).success, false)
+  assert.equal(FileExtractTextSchema.safeParse({ path: '/x/report.docx', offset: 100 }).success, true)
+  assert.equal(FileExtractTextSchema.safeParse({ offset: 100 }).success, false)
+  assert.equal(FileCreateFolderSchema.safeParse({ rootPath: '/x', relativePath: '分类/A' }).success, true)
+  assert.equal(FileCreateFolderSchema.safeParse({ rootPath: '/x' }).success, false)
+  assert.equal(
+    FileOrganizePreviewSchema.safeParse({
+      rootPath: '/x',
+      createFolders: ['分类'],
+      operations: [{ path: '/x/a.md', destDir: '/x/分类', newName: 'A.md' }],
+    }).success,
+    true,
+  )
+  assert.equal(FileOrganizePreviewSchema.safeParse({ rootPath: '/x', operations: ['bad'] }).success, false)
+  assert.equal(
+    FileOrganizeApplySchema.safeParse({
+      planId: 'file-plan-1',
+      confirmed: true,
+      confirmedVia: 'ask_user_questions',
+    }).success,
+    true,
+  )
+  assert.equal(FileOrganizeApplySchema.safeParse({ planId: 'file-plan-1', confirmed: true }).success, false)
+  assert.equal(FileOrganizeUndoSchema.safeParse({ journalId: 'file-journal-1' }).success, true)
 })

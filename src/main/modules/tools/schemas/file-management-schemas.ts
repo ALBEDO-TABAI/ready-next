@@ -72,6 +72,48 @@ export const FileMoveSchema = z.object({
   overwrite: z.boolean().optional().describe('可选：目标存在时是否覆盖（默认 false）'),
 })
 
+const OrganizeOperationSchema = z.object({
+  path: z.string().describe('原文件绝对路径'),
+  destDir: z.string().describe('目标目录绝对路径'),
+  newName: z.string().optional().describe('可选：新文件名'),
+})
+
+export const FileInventorySchema = z.object({
+  rootPath: z.string().describe('要盘点的授权文件夹绝对路径'),
+  cursor: z.string().optional().describe('可选：上一页返回的 nextCursor'),
+  limit: z.number().optional().describe('可选：返回上限（默认 100，上限 500）'),
+  recursive: z.boolean().optional().describe('可选：是否递归扫描（默认 false）'),
+  maxDepth: z.number().optional().describe('可选：递归最大深度（默认 2，上限 5）'),
+  includeSummaries: z.boolean().optional().describe('可选：是否为支持的文件返回短摘要（默认 false）'),
+})
+
+export const FileExtractTextSchema = z.object({
+  path: z.string().describe('要抽取文本的文件绝对路径'),
+  offset: z.number().optional().describe('可选：从第几个字符开始返回（默认 0）'),
+  maxChars: z.number().optional().describe('可选：最大返回字符数（默认 20000，上限 40000）'),
+})
+
+export const FileCreateFolderSchema = z.object({
+  rootPath: z.string().describe('授权工作区根目录绝对路径'),
+  relativePath: z.string().describe('要创建的相对文件夹路径'),
+})
+
+export const FileOrganizePreviewSchema = z.object({
+  rootPath: z.string().describe('授权工作区根目录绝对路径'),
+  createFolders: z.array(z.string()).optional().describe('要创建的相对文件夹路径列表'),
+  operations: z.array(OrganizeOperationSchema).describe('要预览的移动/改名操作列表'),
+})
+
+export const FileOrganizeApplySchema = z.object({
+  planId: z.string().describe('file_organize_preview 返回的 planId'),
+  confirmed: z.boolean().describe('用户已确认该预览方案时传 true'),
+  confirmedVia: z.enum(['ask_user_questions', 'ui_action']).describe('确认来源'),
+})
+
+export const FileOrganizeUndoSchema = z.object({
+  journalId: z.string().describe('file_organize_apply 返回的 journalId'),
+})
+
 export type FileManagementToolName =
   | 'file_search'
   | 'file_locate'
@@ -81,6 +123,12 @@ export type FileManagementToolName =
   | 'file_classify'
   | 'file_rename'
   | 'file_move'
+  | 'file_inventory'
+  | 'file_extract_text'
+  | 'file_create_folder'
+  | 'file_organize_preview'
+  | 'file_organize_apply'
+  | 'file_organize_undo'
 
 export const FILE_MANAGEMENT_SCHEMAS: Record<FileManagementToolName, z.ZodObject<z.ZodRawShape>> = {
   file_search: FileSearchSchema,
@@ -91,4 +139,10 @@ export const FILE_MANAGEMENT_SCHEMAS: Record<FileManagementToolName, z.ZodObject
   file_classify: FileClassifySchema,
   file_rename: FileRenameSchema,
   file_move: FileMoveSchema,
+  file_inventory: FileInventorySchema,
+  file_extract_text: FileExtractTextSchema,
+  file_create_folder: FileCreateFolderSchema,
+  file_organize_preview: FileOrganizePreviewSchema,
+  file_organize_apply: FileOrganizeApplySchema,
+  file_organize_undo: FileOrganizeUndoSchema,
 }

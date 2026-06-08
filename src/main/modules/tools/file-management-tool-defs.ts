@@ -22,6 +22,7 @@ interface ToolParam {
   type: string
   description: string
   required: boolean
+  items?: Record<string, unknown>
 }
 
 export interface FileManagementToolDef {
@@ -78,13 +79,49 @@ export const FILE_MANAGEMENT_TOOLS: FileManagementToolDef[] = [
       '把文件移动到另一个目录，可选同时改名。源路径与目标目录都必须在同一 workspace 根内。',
     params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.file_move) as ToolParam[],
   },
+  {
+    name: 'file_inventory',
+    description:
+      '盘点授权文件夹内的文件和子文件夹。支持分页、浅层递归和可选短摘要；用于批量整理前先了解目录内容。',
+    params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.file_inventory) as ToolParam[],
+  },
+  {
+    name: 'file_extract_text',
+    description:
+      '按需抽取授权 workspace 内单个文件的可读文本，支持文本、Markdown、DOCX、XLSX、PDF；返回截断状态和继续读取游标。',
+    params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.file_extract_text) as ToolParam[],
+  },
+  {
+    name: 'file_create_folder',
+    description:
+      '在授权 workspace 根内创建文件夹。只接受相对路径，不允许越界；用于批量整理前创建分类目录。',
+    params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.file_create_folder) as ToolParam[],
+  },
+  {
+    name: 'file_organize_preview',
+    description:
+      '校验批量整理方案并生成预览，不修改磁盘。返回 planId、冲突和待确认操作；执行前必须让用户确认。',
+    params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.file_organize_preview) as ToolParam[],
+  },
+  {
+    name: 'file_organize_apply',
+    description:
+      '执行用户已确认的 file_organize_preview 方案。未确认、过期、有冲突或越界的计划会被拒绝。',
+    params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.file_organize_apply) as ToolParam[],
+  },
+  {
+    name: 'file_organize_undo',
+    description:
+      '撤销一次已执行的批量整理日志。遇到目标冲突或源文件缺失会停止并报告，不删除用户新文件。',
+    params: zodObjectToParamList(FILE_MANAGEMENT_SCHEMAS.file_organize_undo) as ToolParam[],
+  },
 ]
 
 export const FILE_MANAGEMENT_TOOL_NAMES = FILE_MANAGEMENT_TOOLS.map((tool) => tool.name)
 
 function toSchemaParam(param: ToolParam): Record<string, unknown> {
   const base: Record<string, unknown> = { type: param.type, description: param.description }
-  if (param.type === 'array') base.items = { type: 'string' }
+  if (param.type === 'array') base.items = param.items || { type: 'string' }
   return base
 }
 

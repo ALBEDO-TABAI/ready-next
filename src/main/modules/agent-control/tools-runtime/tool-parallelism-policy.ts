@@ -128,7 +128,15 @@ export function getToolResourceTag(toolName: string): ToolResourceTag {
     }
   }
   if (normalized.startsWith('file_')) {
-    const writeFileTools = new Set(['file_classify', 'file_rename', 'file_move'])
+    const writeFileTools = new Set([
+      'file_classify',
+      'file_rename',
+      'file_move',
+      'file_create_folder',
+      'file_organize_preview',
+      'file_organize_apply',
+      'file_organize_undo',
+    ])
     return {
       domain: 'file',
       accessMode: writeFileTools.has(normalized) ? 'write' : 'read',

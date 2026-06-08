@@ -159,6 +159,98 @@ const EXPECTED_ANTHROPIC = [
       required: ['path', 'destDir'],
     },
   },
+  {
+    name: 'file_inventory',
+    description:
+      '盘点授权文件夹内的文件和子文件夹。支持分页、浅层递归和可选短摘要；用于批量整理前先了解目录内容。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        rootPath: { type: 'string', description: '要盘点的授权文件夹绝对路径' },
+        cursor: { type: 'string', description: '可选：上一页返回的 nextCursor' },
+        limit: { type: 'number', description: '可选：返回上限（默认 100，上限 500）' },
+        recursive: { type: 'boolean', description: '可选：是否递归扫描（默认 false）' },
+        maxDepth: { type: 'number', description: '可选：递归最大深度（默认 2，上限 5）' },
+        includeSummaries: { type: 'boolean', description: '可选：是否为支持的文件返回短摘要（默认 false）' },
+      },
+      required: ['rootPath'],
+    },
+  },
+  {
+    name: 'file_extract_text',
+    description:
+      '按需抽取授权 workspace 内单个文件的可读文本，支持文本、Markdown、DOCX、XLSX、PDF；返回截断状态和继续读取游标。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        path: { type: 'string', description: '要抽取文本的文件绝对路径' },
+        offset: { type: 'number', description: '可选：从第几个字符开始返回（默认 0）' },
+        maxChars: { type: 'number', description: '可选：最大返回字符数（默认 20000，上限 40000）' },
+      },
+      required: ['path'],
+    },
+  },
+  {
+    name: 'file_create_folder',
+    description:
+      '在授权 workspace 根内创建文件夹。只接受相对路径，不允许越界；用于批量整理前创建分类目录。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        rootPath: { type: 'string', description: '授权工作区根目录绝对路径' },
+        relativePath: { type: 'string', description: '要创建的相对文件夹路径' },
+      },
+      required: ['rootPath', 'relativePath'],
+    },
+  },
+  {
+    name: 'file_organize_preview',
+    description:
+      '校验批量整理方案并生成预览，不修改磁盘。返回 planId、冲突和待确认操作；执行前必须让用户确认。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        rootPath: { type: 'string', description: '授权工作区根目录绝对路径' },
+        createFolders: {
+          type: 'array',
+          description: '要创建的相对文件夹路径列表',
+          items: { type: 'string' },
+        },
+        operations: {
+          type: 'array',
+          description: '要预览的移动/改名操作列表',
+          items: { type: 'object' },
+        },
+      },
+      required: ['rootPath', 'operations'],
+    },
+  },
+  {
+    name: 'file_organize_apply',
+    description:
+      '执行用户已确认的 file_organize_preview 方案。未确认、过期、有冲突或越界的计划会被拒绝。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        planId: { type: 'string', description: 'file_organize_preview 返回的 planId' },
+        confirmed: { type: 'boolean', description: '用户已确认该预览方案时传 true' },
+        confirmedVia: { type: 'string', description: '确认来源' },
+      },
+      required: ['planId', 'confirmed', 'confirmedVia'],
+    },
+  },
+  {
+    name: 'file_organize_undo',
+    description:
+      '撤销一次已执行的批量整理日志。遇到目标冲突或源文件缺失会停止并报告，不删除用户新文件。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        journalId: { type: 'string', description: 'file_organize_apply 返回的 journalId' },
+      },
+      required: ['journalId'],
+    },
+  },
 ]
 
 test('getFileManagementAnthropicTools matches the locked LLM-facing payload', () => {
