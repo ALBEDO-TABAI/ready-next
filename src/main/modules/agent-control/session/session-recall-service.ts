@@ -49,6 +49,7 @@ interface SessionRecallVectorRow {
 }
 
 const SESSION_RECALL_VECTOR_VERSION = 'hashing-v1'
+const SESSION_RECALL_RESULT_LIMIT_MAX = 80
 // D4: Cap session_recall_vectors growth — keep at most this many most-recent
 // rows per write. vector_json can be sizable (per-conv hashing vectors); without
 // a cap, table grows linearly with conversation count for the lifetime of the app.
@@ -531,7 +532,9 @@ export class SessionRecallService {
         grouped.set(hit.lineageRootId, hit)
       }
     }
-    const max = Number.isFinite(Number(limit)) ? Math.max(1, Math.min(20, Number(limit))) : 5
+    const max = Number.isFinite(Number(limit))
+      ? Math.max(1, Math.min(SESSION_RECALL_RESULT_LIMIT_MAX, Number(limit)))
+      : 5
     return Array.from(grouped.values())
       .sort((a, b) => {
         if (b.score !== a.score) return b.score - a.score

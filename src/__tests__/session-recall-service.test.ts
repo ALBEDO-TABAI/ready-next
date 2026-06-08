@@ -310,6 +310,37 @@ test('SessionRecallService returns grouped recent sessions and builds recall cap
   assert.deepEqual(capsule?.attachmentNames, ['brand-board.pdf'])
 })
 
+test('SessionRecallService recent history is not capped to a single dense test day', () => {
+  const denseDayConversations = Array.from({ length: 30 }, (_, index) => {
+    const minute = String(index).padStart(2, '0')
+    return createConversation({
+      id: `conv-dense-${index}`,
+      title: `密集测试 ${index}`,
+      updatedAt: `2026-06-06T10:${minute}:00.000Z`,
+    })
+  })
+  const olderConversation = createConversation({
+    id: 'conv-older',
+    title: '更早测试记录',
+    updatedAt: '2026-06-04T10:00:00.000Z',
+  })
+  const conversations = [...denseDayConversations, olderConversation]
+  const metadata = conversations.map((conversation) =>
+    createMetadata({
+      conversation_id: conversation.id,
+      title: conversation.title,
+      preview_text: `${conversation.title} 摘要`,
+      updated_at: conversation.updated_at,
+    })
+  )
+  const db = new FakeSessionRecallDb(conversations, metadata, [], [])
+  const service = new SessionRecallService(db)
+
+  const recent = service.listRecentSessions({ limit: 60 })
+
+  assert.ok(recent.some((item) => item.conversationId === 'conv-older'))
+})
+
 test('SessionRecallService shows conversations even when recall metadata is missing', () => {
   const db = new FakeSessionRecallDb(
     [

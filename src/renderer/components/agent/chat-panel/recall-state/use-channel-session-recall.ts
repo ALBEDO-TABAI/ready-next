@@ -5,6 +5,8 @@ import type { Agent } from '../../../../modules/agent/types'
 import type { SessionRecallCapsule, SessionRecallHit } from '../../../../../shared/session-recall'
 import { mapScopeToConversation } from '../helpers/projection'
 
+const SESSION_RECALL_HISTORY_LIMIT = 60
+
 // Stage V V1.9a — channel + session-recall state, derivations, effects and
 // callbacks extracted from ChatPanel.tsx (original L396-664 + L1011-1018
 // region after V1.7-V1.9c extractions). All store/IPC deps are injected via
@@ -187,7 +189,7 @@ export function useChannelSessionRecall(
           .searchSessionRecall({
             query: normalized || undefined,
             currentScopeId: currentScopeId || undefined,
-            limit: 12
+            limit: SESSION_RECALL_HISTORY_LIMIT
           })
           .catch(() => null)
         if (!result?.success || !Array.isArray(result.data)) {
