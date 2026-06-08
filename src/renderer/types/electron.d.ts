@@ -2857,6 +2857,17 @@ interface ElectronAppAPI {
     error?: string
     data?: { clearedBytes: number; errors: string[] }
   }>
+  exportDiagnosticPack: () => Promise<{
+    success: boolean
+    error?: string
+    data?: {
+      path: string
+      fileName: string
+      bytes: number
+      includedLogs: string[]
+      skippedLogs: Array<{ name: string; reason: string }>
+    }
+  }>
 }
 
 // =============================================================================

@@ -1,5 +1,17 @@
-import type { ComponentType, DragEvent, ReactNode, RefObject } from 'react'
+import { useMemo, type ComponentType, type DragEvent, type ReactNode, type RefObject } from 'react'
 import { CalendarDays, ChevronLeft, ChevronRight, Info, PanelRightOpen, Plus } from 'lucide-react'
+import {
+  addDays,
+  eachDayOfInterval,
+  endOfMonth,
+  endOfWeek,
+  format,
+  isSameDay,
+  isSameMonth,
+  isToday,
+  startOfMonth,
+  startOfWeek,
+} from 'date-fns'
 
 import MiniCalendar from './MiniCalendar'
 import CalendarAssistantPanel from './CalendarAssistantPanel'
@@ -22,6 +34,111 @@ export interface CalendarPortalDescriptor {
   component: ComponentType<any>
   props: any
   wrapper: HTMLElement
+}
+
+const MONTH_WEEKDAY_LABELS = ['周一', '周二', '周三', '周四', '周五', '周六', '周日']
+
+function buildMonthGridDays(currentDate: Date) {
+  const monthStart = startOfMonth(currentDate)
+  const monthEnd = endOfMonth(currentDate)
+  const gridStart = startOfWeek(monthStart, { weekStartsOn: 1 })
+  const gridEnd = endOfWeek(monthEnd, { weekStartsOn: 1 })
+  const days = eachDayOfInterval({ start: gridStart, end: gridEnd })
+
+  while (days.length < 35) {
+    days.push(addDays(days[days.length - 1], 1))
+  }
+
+  const weeks: Date[][] = []
+  for (let i = 0; i < days.length; i += 7) {
+    weeks.push(days.slice(i, i + 7))
+  }
+  return weeks
+}
+
+function ReadyMonthGridFallback({
+  currentDate,
+  selectedDate,
+  events,
+  onSelectDate,
+}: {
+  currentDate: Date
+  selectedDate: Date | null
+  events: { startTime: Date; color: string }[]
+  onSelectDate: (date: Date) => void
+}) {
+  const weeks = useMemo(() => buildMonthGridDays(currentDate), [currentDate])
+  const eventDotMap = useMemo(() => {
+    const map = new Map<string, string[]>()
+    for (const event of events) {
+      const key = format(event.startTime, 'yyyy-MM-dd')
+      const colors = map.get(key) ?? []
+      if (!colors.includes(event.color)) colors.push(event.color)
+      map.set(key, colors)
+    }
+    return map
+  }, [events])
+
+  return (
+    <div
+      className="sx__month-grid-wrapper ready-month-grid-fallback"
+      data-ready-calendar-month-fallback="true"
+      aria-label={format(currentDate, 'yyyy年M月')}
+    >
+      {weeks.map((week, weekIndex) => (
+        <div className="sx__month-grid-week" key={week.map((day) => format(day, 'yyyy-MM-dd')).join('|')}>
+          {week.map((day, dayIndex) => {
+            const dateKey = format(day, 'yyyy-MM-dd')
+            const inMonth = isSameMonth(day, currentDate)
+            const selected = selectedDate ? isSameDay(day, selectedDate) : false
+            const today = isToday(day)
+            const dots = eventDotMap.get(dateKey) ?? []
+            const className = [
+              'sx__month-grid-day',
+              !inMonth ? 'sx__month-grid-day--not-in-month is-leading-or-trailing' : '',
+              selected ? 'is-selected' : '',
+            ].filter(Boolean).join(' ')
+
+            return (
+              <button
+                type="button"
+                className={className}
+                data-date={dateKey}
+                aria-label={format(day, 'yyyy年M月d日')}
+                key={dateKey}
+                onClick={() => onSelectDate(day)}
+              >
+                <div className="sx__month-grid-day__header">
+                  {weekIndex === 0 && (
+                    <div className="sx__month-grid-day__header-day-name">
+                      {MONTH_WEEKDAY_LABELS[dayIndex]}
+                    </div>
+                  )}
+                  <div
+                    className={[
+                      'sx__month-grid-day__header-date',
+                      today ? 'sx__month-grid-day__header-date--is-today sx__is-today' : '',
+                    ].filter(Boolean).join(' ')}
+                  >
+                    {format(day, 'd')}
+                  </div>
+                </div>
+                <div className="sx__month-grid-day__events" aria-hidden="true">
+                  {dots.slice(0, 3).map((color, index) => (
+                    <span
+                      key={`${color}-${index}`}
+                      className="ready-month-grid-dot"
+                      style={{ background: color }}
+                    />
+                  ))}
+                </div>
+              </button>
+            )
+          })}
+        </div>
+      ))}
+    </div>
+  )
 }
 
 interface CalendarWorkbenchShellProps {
@@ -364,6 +481,14 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
                       className={`sx-react-calendar-wrapper calendar-schedule-view calendar-schedule-view-${viewType}`}
                       style={{ width: '100%', height: '100%' }}
                     />
+                    {viewType === 'month' && (
+                      <ReadyMonthGridFallback
+                        currentDate={currentDate}
+                        selectedDate={selectedDate}
+                        events={eventsForMiniCalendar}
+                        onSelectDate={onSelectDate}
+                      />
+                    )}
                     {customPortalNodes}
                     {calendarDropActive && (
                       <div

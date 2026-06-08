@@ -5,7 +5,8 @@
  * `cache-stats-core.ts`. The core handles fs walking + size aggregation +
  * directory removal; this wrapper just supplies real Electron + Node deps.
  */
-import { ipcMain, app, session } from 'electron'
+import { tmpdir } from 'node:os'
+import { ipcMain, app, session, shell } from 'electron'
 
 import {
   getCacheStatsCore,
@@ -13,6 +14,8 @@ import {
   type CacheStats,
   type CacheClearResult,
 } from './cache-stats-core'
+import { createDiagnosticPack, type DiagnosticPackResult, type DiagnosticRawDb } from './diagnostic-pack-core'
+import { getDatabase } from '../database'
 
 interface IPCResponse<T> {
   success: boolean
@@ -53,4 +56,35 @@ export function setupAppCacheIPC(): void {
       }
     },
   )
+
+  ipcMain.handle('app:exportDiagnosticPack', async (): Promise<IPCResponse<DiagnosticPackResult>> => {
+    try {
+      let rawDb: DiagnosticRawDb | null = null
+      try {
+        rawDb = getDatabase().getRawDb()
+      } catch {
+        rawDb = null
+      }
+      const result = await createDiagnosticPack({
+        outputDir: app.getPath('downloads'),
+        logDir: tmpdir(),
+        appInfo: {
+          appName: app.getName(),
+          appVersion: app.getVersion(),
+          isPackaged: app.isPackaged,
+          appPath: app.getAppPath(),
+          userDataPath: app.getPath('userData'),
+          logsPath: tmpdir(),
+          platform: process.platform,
+          arch: process.arch,
+          versions: process.versions,
+        },
+        rawDb,
+      })
+      shell.showItemInFolder(result.path)
+      return { success: true, data: result }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
 }

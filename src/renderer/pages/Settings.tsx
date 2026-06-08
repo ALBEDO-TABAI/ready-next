@@ -3,7 +3,7 @@ import {
   ChevronLeft, User, Bell, Shield, Database,
   Palette, Keyboard, Globe, Info, Moon, Sun, Bot, Monitor, Droplets,
   ChevronRight, ExternalLink, HardDrive, Trash2, CheckCircle2, XCircle, Loader2, MessageSquare, Brain, Users, Sparkles, Cat,
-  Plug2, Boxes
+  Plug2, Boxes, FileArchive
 } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useTheme, type ThemeAccent, type ThemeSkin } from '../stores/useTheme'
@@ -1546,6 +1546,8 @@ export function StorageSettingsPanel() {
   const [clearing, setClearing] = useState<'none' | 'standard' | 'puppeteer'>('none')
   const [confirmKind, setConfirmKind] = useState<'standard' | 'puppeteer' | null>(null)
   const [lastResult, setLastResult] = useState<{ kind: 'standard' | 'puppeteer'; clearedBytes: number; errors: string[] } | null>(null)
+  const [diagnosticExporting, setDiagnosticExporting] = useState<boolean>(false)
+  const [diagnosticResult, setDiagnosticResult] = useState<{ path?: string; bytes?: number; error?: string } | null>(null)
   const [quota, setQuota] = useState<CacheQuotaOption>(DEFAULT_CACHE_QUOTA)
 
   const refreshStats = useCallback(async () => {
@@ -1629,6 +1631,30 @@ export function StorageSettingsPanel() {
     }
   }, [refreshStats])
 
+  const exportDiagnosticPack = useCallback(async () => {
+    if (typeof window === 'undefined' || !window.electronAPI?.app?.exportDiagnosticPack) {
+      setDiagnosticResult({ error: 'IPC 不可用' })
+      return
+    }
+    setDiagnosticExporting(true)
+    setDiagnosticResult(null)
+    try {
+      const result = await window.electronAPI.app.exportDiagnosticPack()
+      if (result.success && result.data) {
+        setDiagnosticResult({
+          path: result.data.path,
+          bytes: result.data.bytes,
+        })
+      } else {
+        setDiagnosticResult({ error: result.error || '导出失败' })
+      }
+    } catch (err) {
+      setDiagnosticResult({ error: err instanceof Error ? err.message : String(err) })
+    } finally {
+      setDiagnosticExporting(false)
+    }
+  }, [])
+
   const totalBytes = stats
     ? stats.codeCacheBytes + stats.cacheBytes + stats.puppeteerCacheBytes + stats.sharedCacheBytes
     : 0
@@ -1687,6 +1713,44 @@ export function StorageSettingsPanel() {
             </div>
           ))}
         </div>
+      </div>
+
+      <div className="flex items-center justify-between transition-colors">
+        <div className="flex-1 min-w-0 mr-4">
+          <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>
+            报错信息包
+          </div>
+          <div className="text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
+            导出最近日志、运行状态和脱敏配置，方便定位打包版问题
+          </div>
+          {diagnosticResult && (
+            <div
+              className="mt-2 text-[11px] leading-5 break-all"
+              style={{ color: diagnosticResult.error ? 'var(--color-red, #d44)' : 'var(--text-muted)' }}
+            >
+              {diagnosticResult.error
+                ? diagnosticResult.error
+                : `已导出：${diagnosticResult.path}${diagnosticResult.bytes ? `（${formatBytes(diagnosticResult.bytes)}）` : ''}`}
+            </div>
+          )}
+        </div>
+        <button
+          onClick={() => { void exportDiagnosticPack() }}
+          disabled={diagnosticExporting}
+          className="flex-shrink-0 flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-95 active:scale-[0.98]"
+          style={{
+            ...SETTINGS_SECONDARY_BUTTON_STYLE,
+            width: SETTING_SLOT_WIDTHS.short,
+            justifyContent: 'center',
+            opacity: diagnosticExporting ? 0.6 : 1,
+            cursor: diagnosticExporting ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {diagnosticExporting
+            ? <Loader2 className="w-3 h-3 animate-spin" />
+            : <FileArchive className="w-3 h-3" />}
+          {diagnosticExporting ? '导出中…' : '导出'}
+        </button>
       </div>
 
       {/* Quota selector — relabel-only per Stage Y0.8 plan §11.0a path-(b).

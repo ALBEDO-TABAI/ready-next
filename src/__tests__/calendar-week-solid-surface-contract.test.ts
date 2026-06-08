@@ -35,7 +35,19 @@ test('dark liquid week view keeps header, all-day lane, and time grid aligned wi
   assert.doesNotMatch(scheduleCss, /linear-gradient\(to left,\s*var\(--sx-ready-time-grid-line-color\)/)
   assert.match(
     scheduleCss,
-    /html\[data-skin='liquid-glass'\] \.sx__week-grid__time-axis,\s*html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.sx__week-grid__time-axis,\s*\.sx__week-grid__time-axis \{[\s\S]*background-size:[\s\S]*calc\(100% \/ var\(--sx-ready-visible-day-count,\s*7\)\) 100% !important;/,
+    /html\[data-skin='liquid-glass'\] \.sx__week-grid__time-axis,\s*html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.sx__week-grid__time-axis,\s*\.sx__week-grid__time-axis \{[\s\S]*background-size:[\s\S]*calc\(100% \/ var\(--sx-ready-visible-day-count,\s*7\)\) 100%,[\s\S]*100% var\(--sx-week-grid-hour-height\) !important;/,
+  )
+  assert.match(
+    scheduleCss,
+    /\.sx__date-grid \{[\s\S]*background-size:[\s\S]*calc\(\(100% - var\(--sx-calendar-week-grid-padding-left\)\) \/ var\(--sx-ready-visible-day-count,\s*7\)\) 100% !important;/,
+  )
+  assert.match(
+    scheduleCss,
+    /\.sx__date-grid \{[\s\S]*background-position:[\s\S]*calc\([\s\S]*var\(--sx-calendar-week-grid-padding-left\)[\s\S]*\+\s*[\s\S]*\(\(100% - var\(--sx-calendar-week-grid-padding-left\)\) \/ var\(--sx-ready-visible-day-count,\s*7\)\)[\s\S]*\) 0 !important;/,
+  )
+  assert.match(
+    scheduleCss,
+    /\.sx__date-grid::before \{[\s\S]*left:\s*calc\(-1 \* var\(--sx-ready-grid-line-width\)\);[\s\S]*width:\s*calc\(var\(--sx-calendar-week-grid-padding-left\) \+ \(2 \* var\(--sx-ready-grid-line-width\)\)\);[\s\S]*background:\s*var\(--sx-ready-grid-chrome-surface\);/,
   )
   assert.match(
     scheduleCss,

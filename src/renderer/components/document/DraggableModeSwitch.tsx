@@ -5,6 +5,8 @@ interface DraggableModeSwitchProps {
   onChange: (mode: 'edit' | 'preview') => void
 }
 
+const getPositionForMode = (mode: 'edit' | 'preview') => (mode === 'preview' ? 0 : 1)
+
 // Spring physics - softer, slower, less bounce
 const SPRING_STIFFNESS = 120
 const SPRING_DAMPING = 40
@@ -12,15 +14,15 @@ const SPRING_MASS = 1.8
 
 export default function DraggableModeSwitch({ mode, onChange }: DraggableModeSwitchProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const [position, setPosition] = useState(mode === 'edit' ? 0 : 1)
+  const [position, setPosition] = useState(getPositionForMode(mode))
   const [isDragging, setIsDragging] = useState(false)
 
   const dragStartXRef = useRef(0)
   const dragStartPosRef = useRef(0)
   const rafRef = useRef<number | null>(null)
   const velocityRef = useRef(0)
-  const targetRef = useRef(mode === 'edit' ? 0 : 1)
-  const currentRef = useRef(mode === 'edit' ? 0 : 1)
+  const targetRef = useRef(getPositionForMode(mode))
+  const currentRef = useRef(getPositionForMode(mode))
   const isDraggingRef = useRef(false)
   const activePointerIdRef = useRef<number | null>(null)
 
@@ -30,7 +32,7 @@ export default function DraggableModeSwitch({ mode, onChange }: DraggableModeSwi
   // (re-running on every render would restart the animation needlessly).
   useEffect(() => {
     if (!isDraggingRef.current) {
-      targetRef.current = mode === 'edit' ? 0 : 1
+      targetRef.current = getPositionForMode(mode)
       startSpringAnimation()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- mode-only sync; see Y1.3 sub-plan §3.1
@@ -75,7 +77,7 @@ export default function DraggableModeSwitch({ mode, onChange }: DraggableModeSwi
 
   // Smooth text styles - avoid font-weight changes which cause blur
   const getEditStyle = useCallback(() => {
-    const distance = Math.abs(position - 0)
+    const distance = Math.abs(position - 1)
     const proximity = Math.max(0, 1 - distance)
 
     // Use opacity and color only - no font-weight or scale changes to avoid blur
@@ -88,7 +90,7 @@ export default function DraggableModeSwitch({ mode, onChange }: DraggableModeSwi
   }, [position])
 
   const getPreviewStyle = useCallback(() => {
-    const distance = Math.abs(position - 1)
+    const distance = Math.abs(position - 0)
     const proximity = Math.max(0, 1 - distance)
 
     return {
@@ -105,7 +107,7 @@ export default function DraggableModeSwitch({ mode, onChange }: DraggableModeSwi
     isDraggingRef.current = false
     activePointerIdRef.current = null
     setIsDragging(false)
-    targetRef.current = mode === 'edit' ? 0 : 1
+    targetRef.current = getPositionForMode(mode)
     currentRef.current = targetRef.current
     setPosition(targetRef.current)
     startSpringAnimation()
@@ -118,10 +120,10 @@ export default function DraggableModeSwitch({ mode, onChange }: DraggableModeSwi
     activePointerIdRef.current = null
     setIsDragging(false)
 
-    const snapToEdit = currentRef.current < 0.5
-    targetRef.current = snapToEdit ? 0 : 1
+    const snapToPreview = currentRef.current < 0.5
+    targetRef.current = snapToPreview ? 0 : 1
 
-    const newMode = snapToEdit ? 'edit' : 'preview'
+    const newMode = snapToPreview ? 'preview' : 'edit'
     if (newMode !== mode) {
       onChange(newMode)
     }
@@ -221,21 +223,21 @@ export default function DraggableModeSwitch({ mode, onChange }: DraggableModeSwi
       {/* Labels - fixed font-weight to avoid blur */}
       <button
         type="button"
-        className={`draggable-mode-switch__label draggable-mode-switch__label--edit ${position < 0.5 ? 'is-active' : ''}`}
-        style={getEditStyle()}
-        onPointerDown={(e) => e.stopPropagation()}
-        onClick={(e) => handleLabelClick('edit', e)}
-      >
-        编辑
-      </button>
-      <button
-        type="button"
-        className={`draggable-mode-switch__label draggable-mode-switch__label--preview ${position >= 0.5 ? 'is-active' : ''}`}
+        className={`draggable-mode-switch__label draggable-mode-switch__label--preview ${position < 0.5 ? 'is-active' : ''}`}
         style={getPreviewStyle()}
         onPointerDown={(e) => e.stopPropagation()}
         onClick={(e) => handleLabelClick('preview', e)}
       >
         预览
+      </button>
+      <button
+        type="button"
+        className={`draggable-mode-switch__label draggable-mode-switch__label--edit ${position >= 0.5 ? 'is-active' : ''}`}
+        style={getEditStyle()}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => handleLabelClick('edit', e)}
+      >
+        编辑
       </button>
     </div>
   )

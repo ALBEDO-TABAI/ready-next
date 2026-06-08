@@ -3,13 +3,13 @@ import { createPortal } from 'react-dom'
 import { createViewWeek, createViewMonthGrid, createViewDay, createCalendar } from '@schedule-x/calendar'
 import { createCurrentTimePlugin } from '@schedule-x/current-time'
 import { createCalendarControlsPlugin } from '@schedule-x/calendar-controls'
-import { Temporal } from '@js-temporal/polyfill'
 
 import type { CalendarPortalDescriptor } from '../../components/calendar/CalendarWorkbenchShell'
 import type { CalendarSource } from '../../components/calendar/CalendarSources'
 import SXTimeGridEvent from '../../components/calendar/SXTimeGridEvent'
 import SXMonthGridEvent from '../../components/calendar/SXMonthGridEvent'
 import {
+  dateToSXPlainDate,
   eventToSX,
   sxEventToEvent,
   sourcesToCalendars,
@@ -18,12 +18,33 @@ import {
 } from '../../components/calendar/schedule-x-utils'
 import type { CalendarEvent, ViewType } from '../../components/calendar/schedule-x-utils'
 
-function toPlainDateLike(date: Date) {
-  return Temporal.PlainDate.from({
-    year: date.getFullYear(),
-    month: date.getMonth() + 1,
-    day: date.getDate(),
-  })
+const WEEK_HOURS = Array.from({ length: 23 }, (_, index) => index + 1)
+
+function formatWeekHourLabel(hour: number) {
+  if (hour === 12) return '12PM'
+  if (hour < 12) return `${hour}AM`
+  return `${hour - 12}PM`
+}
+
+function installWeekHourLabels(container: HTMLElement) {
+  const weekGrid = container.querySelector<HTMLElement>('.sx__week-grid')
+  if (!weekGrid) return false
+
+  weekGrid.querySelector('.ready-week-hour-labels')?.remove()
+  const wrapper = document.createElement('div')
+  wrapper.className = 'ready-week-hour-labels'
+  wrapper.setAttribute('aria-hidden', 'true')
+
+  for (const hour of WEEK_HOURS) {
+    const label = document.createElement('span')
+    label.className = 'ready-week-hour-label'
+    label.style.top = `${(hour / 24) * 100}%`
+    label.textContent = formatWeekHourLabel(hour)
+    wrapper.appendChild(label)
+  }
+
+  weekGrid.appendChild(wrapper)
+  return true
 }
 
 interface UseScheduleXCalendarParams {
@@ -85,8 +106,16 @@ export function useScheduleXCalendar({
         calendars: sourcesToCalendars(sources),
         locale: 'zh-CN',
         isResponsive: false,
-        selectedDate: toPlainDateLike(currentDate),
+        selectedDate: dateToSXPlainDate(currentDate),
         dayBoundaries: { start: '00:00', end: '24:00' },
+        weekOptions: {
+          gridHeight: 1600,
+          nDays: 7,
+          eventWidth: 100,
+          timeAxisFormatOptions: { hour: 'numeric' },
+          eventOverlap: true,
+          gridStep: 60,
+        },
         // L4-A — schedule-x supports `timezone` natively as a config
         // value (`$app.config.timezone.value` is the reactive seam). We
         // pass `displayTimezone` from the store; if for any reason it's
@@ -239,10 +268,40 @@ export function useScheduleXCalendar({
   }, [isActive, viewType, sxReady])
 
   useEffect(() => {
+    const container = sxContainerRef.current
+    if (!container || !isActive || !sxReady || viewType === 'month') return undefined
+
+    let frame = 0
+    let retryTimer = 0
+    const syncLabels = () => {
+      if (!installWeekHourLabels(container)) {
+        retryTimer = window.setTimeout(() => {
+          installWeekHourLabels(container)
+        }, 100)
+      }
+    }
+
+    frame = window.requestAnimationFrame(syncLabels)
+    const observer = new MutationObserver(() => {
+      if (!container.querySelector('.sx__week-grid .ready-week-hour-labels')) {
+        syncLabels()
+      }
+    })
+    observer.observe(container, { childList: true, subtree: true })
+
+    return () => {
+      window.cancelAnimationFrame(frame)
+      window.clearTimeout(retryTimer)
+      observer.disconnect()
+      container.querySelector('.sx__week-grid .ready-week-hour-labels')?.remove()
+    }
+  }, [isActive, sxReady, viewType])
+
+  useEffect(() => {
     const plugin = controlsPluginRef.current
     if (!plugin || !isActive) return
     try {
-      plugin.setDate(toPlainDateLike(currentDate) as any)
+      plugin.setDate(dateToSXPlainDate(currentDate) as any)
     } catch (err) {
       console.warn('SX setDate error:', err)
     }

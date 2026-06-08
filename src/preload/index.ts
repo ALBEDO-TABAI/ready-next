@@ -917,6 +917,7 @@ const appAPI = {
   getCacheStats: () => ipcRenderer.invoke('app:getCacheStats'),
   clearCache: (opts?: { includePuppeteer?: boolean }) =>
     ipcRenderer.invoke('app:clearCache', opts ?? {}),
+  exportDiagnosticPack: () => ipcRenderer.invoke('app:exportDiagnosticPack'),
 }
 
 // Window API

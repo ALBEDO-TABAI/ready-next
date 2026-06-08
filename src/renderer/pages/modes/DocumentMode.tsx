@@ -305,7 +305,7 @@ export default function DocumentMode({
   const documentSplitRatioRef = useRef(documentSplitRatio)
   const liveDocumentSplitRatioRef = useRef(documentSplitRatio)
   const restoreDocumentLayoutFreezeRef = useRef<(() => void) | null>(null)
-  const [editorMode, setEditorMode] = useState<'edit' | 'preview'>('edit')
+  const [editorMode, setEditorMode] = useState<'edit' | 'preview'>('preview')
   const [previewFocusWidgetTitle, setPreviewFocusWidgetTitle] = useState<string | null>(null)
   const [hasActivated, setHasActivated] = useState(isActive)
   const [outlinePanelOpen, setOutlinePanelOpen] = useState(() => readDocumentPanelOpenState('ready-document-outline-panel-open'))
@@ -344,12 +344,14 @@ export default function DocumentMode({
     let disposed = false
     void (async () => {
       if (!window.electronAPI?.document?.stat) {
+        setEditorMode('preview')
         openTab(selectedFile)
         return
       }
       const result = await window.electronAPI.document.stat(selectedFile).catch(() => null)
       const isDirectory = result?.data?.isDirectory ?? result?.stat?.isDirectory ?? false
       if (!disposed && result?.success && !isDirectory && !isLocalHtmlFilePath(selectedFile)) {
+        setEditorMode('preview')
         openTab(selectedFile)
       }
     })()
@@ -563,6 +565,7 @@ export default function DocumentMode({
     if (result?.success && isDirectory) return
 
     captureVisibleDocumentScrollPositions()
+    setEditorMode('preview')
     const nextTabId = openTabInPane(path, pane)
     if (nextTabId) {
       setPanelTargetTabId(nextTabId)
@@ -722,7 +725,10 @@ export default function DocumentMode({
             })}
             onTabClick={(id, event) => handleTabClick(id, event)}
             onTabClose={(id) => closeTab(id)}
-            onNewTab={() => { openTab('') }}
+            onNewTab={() => {
+              setEditorMode('preview')
+              openTab('')
+            }}
             onTabDragStart={(event, id) => {
               const index = tabs.findIndex((tab) => tab.id === id)
               if (index >= 0) handleDragStart(event, index)

@@ -101,7 +101,8 @@ interface ElectronAPIStubResult<T = unknown> {
   error?: string
 }
 
-function installElectronAPIStub(dom: JSDOM): void {
+function installElectronAPIStub(dom: JSDOM): { getExportCalls: () => number } {
+  let exportCalls = 0
   const settings = {
     get: async (_key: string): Promise<ElectronAPIStubResult<string>> => ({ success: false }),
     set: async (_key: string, _value: unknown): Promise<ElectronAPIStubResult> => ({ success: true }),
@@ -117,8 +118,22 @@ function installElectronAPIStub(dom: JSDOM): void {
       },
     }),
     clearCache: async (): Promise<ElectronAPIStubResult> => ({ success: true }),
+    exportDiagnosticPack: async (): Promise<ElectronAPIStubResult<{ path: string; fileName: string; bytes: number; includedLogs: string[]; skippedLogs: Array<{ name: string; reason: string }> }>> => {
+      exportCalls += 1
+      return {
+        success: true,
+        data: {
+          path: '/tmp/Ready-diagnostics.zip',
+          fileName: 'Ready-diagnostics.zip',
+          bytes: 2048,
+          includedLogs: ['ready-agent-sdk.log (100 bytes)'],
+          skippedLogs: [],
+        },
+      }
+    },
   }
   ;(dom.window as Window & { electronAPI?: unknown }).electronAPI = { settings, app }
+  return { getExportCalls: () => exportCalls }
 }
 
 test('Y0.8 — StorageSettingsPanel renders the honest "not enforced; manual cleanup" relabel', async () => {
@@ -164,6 +179,38 @@ test('Y0.8 — StorageSettingsPanel renders the honest "not enforced; manual cle
     // Drain any in-flight promises from the panel's mount-effect IPC calls
     // BEFORE restoring globals; otherwise post-resolve setState handlers can
     // throw `window is not defined` after the jsdom window is closed.
+    await new Promise((resolve) => setTimeout(resolve, 25))
+    handle.restore()
+  }
+})
+
+test('StorageSettingsPanel exposes one-click diagnostic pack export', async () => {
+  const handle = installDomGlobals()
+  const stub = installElectronAPIStub(handle.dom)
+
+  const { StorageSettingsPanel } = await import('../renderer/pages/Settings')
+
+  const root = createRoot(handle.dom.window.document.getElementById('root') as HTMLElement)
+  try {
+    flushSync(() => { root.render(createElement(StorageSettingsPanel)) })
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    flushSync(() => { /* drain */ })
+
+    const text = handle.dom.window.document.body.textContent || ''
+    assert.ok(text.includes('报错信息包'), 'diagnostic pack row must render in storage panel')
+
+    const exportButton = Array.from(handle.dom.window.document.querySelectorAll('button'))
+      .find((button) => button.textContent?.includes('导出')) as HTMLButtonElement | undefined
+    assert.ok(exportButton, 'diagnostic export button must render')
+
+    exportButton.click()
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    flushSync(() => { /* drain export state */ })
+
+    assert.equal(stub.getExportCalls(), 1)
+    assert.match(handle.dom.window.document.body.textContent || '', /已导出：\/tmp\/Ready-diagnostics\.zip/)
+  } finally {
+    root.unmount()
     await new Promise((resolve) => setTimeout(resolve, 25))
     handle.restore()
   }

@@ -237,11 +237,18 @@ html[data-skin='liquid-glass'] .sx__date-grid-day {
 html[data-skin='liquid-glass'] .sx__week-grid__time-axis,
 html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-grid__time-axis,
 .sx__week-grid__time-axis {
+  min-height: var(--sx-week-grid-height) !important;
   background-color: transparent !important;
   background-image:
-    linear-gradient(to right, var(--sx-ready-time-grid-line-color) 0 var(--sx-ready-grid-line-width), transparent var(--sx-ready-grid-line-width)) !important;
+    linear-gradient(to right, var(--sx-ready-time-grid-line-color) 0 var(--sx-ready-grid-line-width), transparent var(--sx-ready-grid-line-width)),
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0 calc(var(--sx-week-grid-hour-height) - var(--sx-ready-grid-line-width)),
+      var(--sx-ready-time-grid-line-color) calc(var(--sx-week-grid-hour-height) - var(--sx-ready-grid-line-width)) var(--sx-week-grid-hour-height)
+    ) !important;
   background-size:
-    calc(100% / var(--sx-ready-visible-day-count, 7)) 100% !important;
+    calc(100% / var(--sx-ready-visible-day-count, 7)) 100%,
+    100% var(--sx-week-grid-hour-height) !important;
   background-position: 0 0 !important;
   background-repeat: repeat !important;
 }
@@ -284,12 +291,9 @@ html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-grid__time-axis .sx_
 .sx__time-grid-day,
 .sx__week-grid__date,
 .sx__date-grid-day {
+  border-inline-start: none !important;
+  border-inline-end: none !important;
   border-left: none !important;
-}
-
-.sx__time-grid-day:last-child,
-.sx__week-grid__date:last-child,
-.sx__date-grid-day:last-child {
   border-right: none !important;
 }
 
@@ -334,24 +338,59 @@ html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-grid__time-axis .sx_
 
 /* All-day lane is always a visible row carrying a 全天 label in the gutter,
    centered like the hour labels below it. */
+html[data-skin='liquid-glass'] .sx__date-grid,
+html[data-theme='dark'][data-skin='liquid-glass'] .sx__date-grid,
 .sx__date-grid {
   min-height: 28px !important;
+  background-image:
+    linear-gradient(to right, var(--sx-ready-time-grid-line-color) 0 var(--sx-ready-grid-line-width), transparent var(--sx-ready-grid-line-width)) !important;
+  background-size:
+    calc((100% - var(--sx-calendar-week-grid-padding-left)) / var(--sx-ready-visible-day-count, 7)) 100% !important;
+  background-position:
+    calc(
+      var(--sx-calendar-week-grid-padding-left) +
+      ((100% - var(--sx-calendar-week-grid-padding-left)) / var(--sx-ready-visible-day-count, 7))
+    ) 0 !important;
+  background-repeat: repeat !important;
 }
 
 .sx__date-grid::before {
   content: '全天';
   position: absolute;
-  left: 0;
+  left: calc(-1 * var(--sx-ready-grid-line-width));
   top: 0;
   bottom: 0;
-  width: var(--sx-calendar-week-grid-padding-left);
+  width: calc(var(--sx-calendar-week-grid-padding-left) + (2 * var(--sx-ready-grid-line-width)));
   display: flex;
   align-items: center;
   justify-content: center;
+  background: var(--sx-ready-grid-chrome-surface);
   font-size: 10px;
   color: var(--text-light);
   pointer-events: none;
-  z-index: 2;
+  z-index: 1;
+}
+
+.ready-week-hour-labels {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: var(--sx-calendar-week-grid-padding-left, 75px);
+  height: var(--sx-week-grid-height, 1600px);
+  pointer-events: none;
+  z-index: 5;
+}
+
+.ready-week-hour-label {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  transform: translateY(-50%);
+  text-align: center;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 1;
+  color: var(--text-light);
 }
 
 .sx__week-grid__day-name {
@@ -416,6 +455,49 @@ html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-grid__time-axis .sx_
   padding-top: 24px !important;
 }
 
+.ready-month-grid-fallback {
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 4;
+}
+
+.ready-month-grid-fallback .sx__month-grid-day {
+  appearance: none;
+  border: none;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: var(--sx-spacing-padding2) 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ready-month-grid-fallback .sx__month-grid-day__header {
+  flex: 0 0 auto;
+  justify-content: flex-start;
+}
+
+.ready-month-grid-fallback .sx__month-grid-day:not(:last-child) {
+  border-inline-end: var(--sx-ready-grid-line-width) solid var(--sx-ready-grid-line-color) !important;
+}
+
+.ready-month-grid-fallback .sx__month-grid-day__events {
+  display: flex;
+  justify-content: center;
+  gap: 3px;
+  min-height: 8px;
+  padding: 2px 4px 0;
+}
+
+.ready-month-grid-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
 .sx__month-grid-week {
   border-top: var(--sx-ready-grid-line-width) solid var(--sx-ready-grid-line-color) !important;
 }
@@ -440,7 +522,8 @@ html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-grid__time-axis .sx_
   color: var(--text-title) !important;
 }
 
-.sx__month-grid-day__header-date--is-today {
+.sx__month-grid-day__header-date--is-today,
+.sx__month-grid-day__header-date.sx__is-today {
   background: var(--color-red) !important;
   color: #FFFFFF !important;
   border-radius: 12px !important;

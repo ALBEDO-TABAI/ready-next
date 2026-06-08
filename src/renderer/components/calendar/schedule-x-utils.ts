@@ -89,17 +89,22 @@ export function dateToSXString(date: Date): string {
   return `${y}-${m}-${d} ${h}:${min}`
 }
 
-function dateToTemporalPlainDate(date: Date): Temporal.PlainDate {
-  return Temporal.PlainDate.from({
+function getScheduleXTemporal(): typeof Temporal {
+  return ((globalThis as { Temporal?: typeof Temporal }).Temporal ?? Temporal)
+}
+
+export function dateToSXPlainDate(date: Date): Temporal.PlainDate {
+  return getScheduleXTemporal().PlainDate.from({
     year: date.getFullYear(),
     month: date.getMonth() + 1,
     day: date.getDate(),
-  })
+  }) as Temporal.PlainDate
 }
 
 function dateToTemporalZonedDateTime(date: Date): Temporal.ZonedDateTime {
+  const ScheduleXTemporal = getScheduleXTemporal()
   const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
-  return Temporal.ZonedDateTime.from({
+  return ScheduleXTemporal.ZonedDateTime.from({
     timeZone,
     year: date.getFullYear(),
     month: date.getMonth() + 1,
@@ -108,7 +113,7 @@ function dateToTemporalZonedDateTime(date: Date): Temporal.ZonedDateTime {
     minute: date.getMinutes(),
     second: date.getSeconds(),
     millisecond: date.getMilliseconds(),
-  })
+  }) as Temporal.ZonedDateTime
 }
 
 /**
@@ -164,10 +169,10 @@ export function eventToSX(event: CalendarEvent): SXEvent {
   const sxEvent: SXEvent = {
     id: event.id,
     start: event.allDay
-      ? dateToTemporalPlainDate(event.startTime)
+      ? dateToSXPlainDate(event.startTime)
       : dateToTemporalZonedDateTime(event.startTime),
     end: event.allDay
-      ? dateToTemporalPlainDate(event.endTime)
+      ? dateToSXPlainDate(event.endTime)
       : dateToTemporalZonedDateTime(event.endTime),
     title: event.title,
     calendarId: event.calendarId,

@@ -73,8 +73,8 @@ test('dark liquid calendar shell reuses the rss surface tone and keeps a complet
     scheduleCss,
     /\.sx__week-grid\s*\{[\s\S]*isolation:\s*isolate;/,
   )
-  // Header/all-day vertical ::before lines were removed; vertical lines now come only from the
-  // time-axis column gradient (asserted above), keeping a single consistent line color.
+  // Header/all-day vertical ::before lines were removed; vertical lines now come from matched
+  // all-day and time-axis gradients, keeping one consistent line color.
   assert.doesNotMatch(scheduleCss, /\.sx__week-grid__date::before/)
   assert.doesNotMatch(scheduleCss, /\.sx__date-grid-day::before/)
   assert.doesNotMatch(scheduleCss, /\.sx__week-grid__date:last-child::after/)
