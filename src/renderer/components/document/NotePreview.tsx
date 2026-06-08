@@ -414,6 +414,75 @@ function isMermaidPreChildren(children: ReactNode): boolean {
   return isValidElement<{ className?: string }>(onlyChild) && isMermaidLanguage(onlyChild.props.className)
 }
 
+function isMarkdownSourceLanguage(className?: string): boolean {
+  return /\blanguage-(md|markdown)\b/i.test(className || '')
+}
+
+function getPreCodeChild(children: ReactNode): { className?: string; code: string } | null {
+  const onlyChild = Children.toArray(children)[0]
+  if (!isValidElement<{ className?: string; children?: ReactNode }>(onlyChild)) return null
+  return {
+    className: onlyChild.props.className,
+    code: extractMarkdownText(onlyChild.props.children),
+  }
+}
+
+function shouldRenderMarkdownCodeAsDocument(code: string): boolean {
+  return code.split('\n').some((line) => (
+    /^[ \t]{0,3}#{1,6}\s+\S/.test(line)
+    || /^[ \t]{0,3}[-*_]{3,}[ \t]*$/.test(line)
+    || /^[ \t]{0,3}(`{3,}|~{3,})/.test(line)
+    || /^<details(\s+open)?\s*>$/i.test(line.trim())
+  ))
+}
+
+function MarkdownSourceBlock({ code }: { code: string }) {
+  return (
+    <div className="note-preview-markdown-source-rendered" data-ready-markdown-source-rendered="true">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          h1: ({ children }) => <h1 className="note-preview-markdown-h1" data-ready-heading-level="1" data-ready-heading-title={extractMarkdownText(children)}>{children}</h1>,
+          h2: ({ children }) => <h2 className="note-preview-markdown-h2" data-ready-heading-level="2" data-ready-heading-title={extractMarkdownText(children)}>{children}</h2>,
+          h3: ({ children }) => <h3 className="note-preview-markdown-h3" data-ready-heading-level="3" data-ready-heading-title={extractMarkdownText(children)}>{children}</h3>,
+          h4: ({ children }) => <h4 className="note-preview-markdown-h4" data-ready-heading-level="4" data-ready-heading-title={extractMarkdownText(children)}>{children}</h4>,
+          p: ({ children }) => <p className="note-preview-markdown-p">{children}</p>,
+          hr: () => <hr className="note-preview-markdown-hr" />,
+          blockquote: ({ children }) => <blockquote className="note-preview-markdown-quote">{children}</blockquote>,
+          ul: ({ children, node: _node, className, ...props }) => (
+            <ul className={mergeMarkdownClassName(className, 'note-preview-markdown-ul')} {...props}>{children}</ul>
+          ),
+          ol: ({ children, node: _node, className, ...props }) => (
+            <ol className={mergeMarkdownClassName(className, 'note-preview-markdown-ol')} {...props}>{children}</ol>
+          ),
+          li: ({ children, node: _node, className, ...props }) => (
+            <li className={mergeMarkdownClassName(className, 'note-preview-markdown-li')} {...props}>{children}</li>
+          ),
+          pre: ({ children }) => {
+            if (isMermaidPreChildren(children)) return <>{children}</>
+            const codeChild = getPreCodeChild(children)
+            if (
+              codeChild
+              && isMarkdownSourceLanguage(codeChild.className)
+              && shouldRenderMarkdownCodeAsDocument(codeChild.code)
+            ) {
+              return <MarkdownSourceBlock code={codeChild.code} />
+            }
+            return <pre className="note-preview-markdown-pre">{children}</pre>
+          },
+          code: ({ children, className, ...props }) => (
+            <code className={className ? `${className} note-preview-markdown-code` : 'note-preview-markdown-code'} {...props}>
+              {children}
+            </code>
+          ),
+        }}
+      >
+        {code}
+      </ReactMarkdown>
+    </div>
+  )
+}
+
 function NotePreview({
   content,
   notePath,
@@ -475,94 +544,121 @@ function NotePreview({
     }
   }, [])
 
+  const markdownComponents = useMemo(() => ({
+    h1: ({ children }: { children?: ReactNode }) => <h1 className="note-preview-markdown-h1" data-ready-heading-level="1" data-ready-heading-title={extractMarkdownText(children)}>{children}</h1>,
+    h2: ({ children }: { children?: ReactNode }) => <h2 className="note-preview-markdown-h2" data-ready-heading-level="2" data-ready-heading-title={extractMarkdownText(children)}>{children}</h2>,
+    h3: ({ children }: { children?: ReactNode }) => <h3 className="note-preview-markdown-h3" data-ready-heading-level="3" data-ready-heading-title={extractMarkdownText(children)}>{children}</h3>,
+    h4: ({ children }: { children?: ReactNode }) => <h4 className="note-preview-markdown-h4" data-ready-heading-level="4" data-ready-heading-title={extractMarkdownText(children)}>{children}</h4>,
+    p: ({ children }: { children?: ReactNode }) => <p className="note-preview-markdown-p">{children}</p>,
+    em: ({ children, node: _node, ...props }: { children?: ReactNode; node?: unknown }) => <em className="note-preview-markdown-em" {...props}>{children}</em>,
+    hr: () => <hr className="note-preview-markdown-hr" />,
+    blockquote: ({ children }: { children?: ReactNode }) => <blockquote className="note-preview-markdown-quote">{children}</blockquote>,
+    ul: ({ children, node: _node, className, ...props }: { children?: ReactNode; node?: unknown; className?: string }) => (
+      <ul className={mergeMarkdownClassName(className, 'note-preview-markdown-ul')} {...props}>{children}</ul>
+    ),
+    ol: ({ children, node: _node, className, ...props }: { children?: ReactNode; node?: unknown; className?: string }) => (
+      <ol className={mergeMarkdownClassName(className, 'note-preview-markdown-ol')} {...props}>{children}</ol>
+    ),
+    li: ({ children, node: _node, className, ...props }: { children?: ReactNode; node?: unknown; className?: string }) => (
+      <li className={mergeMarkdownClassName(className, 'note-preview-markdown-li')} {...props}>{children}</li>
+    ),
+    table: ({ children, node: _node, ...props }: { children?: ReactNode; node?: unknown }) => (
+      <div className="note-preview-table-scroll" data-note-preview-table="true">
+        <table className="note-preview-markdown-table" {...props}>{children}</table>
+      </div>
+    ),
+    thead: ({ children, node: _node, ...props }: { children?: ReactNode; node?: unknown }) => <thead className="note-preview-markdown-thead" {...props}>{children}</thead>,
+    tbody: ({ children, node: _node, ...props }: { children?: ReactNode; node?: unknown }) => <tbody className="note-preview-markdown-tbody" {...props}>{children}</tbody>,
+    tr: ({ children, node: _node, ...props }: { children?: ReactNode; node?: unknown }) => <tr className="note-preview-markdown-tr" {...props}>{children}</tr>,
+    th: ({ children, node: _node, className, ...props }: { children?: ReactNode; node?: unknown; className?: string }) => (
+      <th className={className ? `${className} note-preview-markdown-th` : 'note-preview-markdown-th'} {...props}>
+        {children}
+      </th>
+    ),
+    td: ({ children, node: _node, className, ...props }: { children?: ReactNode; node?: unknown; className?: string }) => (
+      <td className={className ? `${className} note-preview-markdown-td` : 'note-preview-markdown-td'} {...props}>
+        {children}
+      </td>
+    ),
+    pre: ({ children }: { children?: ReactNode }) => (
+      (() => {
+        if (isMermaidPreChildren(children)) return <>{children}</>
+        const codeChild = getPreCodeChild(children)
+        if (
+          codeChild
+          && isMarkdownSourceLanguage(codeChild.className)
+          && shouldRenderMarkdownCodeAsDocument(codeChild.code)
+        ) {
+          return <MarkdownSourceBlock code={codeChild.code} />
+        }
+        return <pre className="note-preview-markdown-pre">{children}</pre>
+      })()
+    ),
+    code: ({ children, className, ...props }: { children?: ReactNode; className?: string }) => {
+      if (isMermaidLanguage(className)) {
+        return <MermaidBlock code={extractMarkdownText(children).trim()} />
+      }
+      return (
+        <code className={className ? `${className} note-preview-markdown-code` : 'note-preview-markdown-code'} {...props}>
+          {children}
+        </code>
+      )
+    },
+    a: ({ href, children }: { href?: string; children?: ReactNode }) => {
+      const reference = href || ''
+      const resolved = resolvePreviewReference(reference, notePath)
+      return (
+        <a
+          href={resolved.resolvedUrl}
+          className="note-preview-markdown-link"
+          onClick={(event) => {
+            event.preventDefault()
+            void openHref(resolved.resolvedUrl, resolved.localPath)
+          }}
+        >
+          <span>{children}</span>
+          <ExternalLink style={{ width: 11, height: 11 }} strokeWidth={2} />
+        </a>
+      )
+    },
+    img: ({ src, alt }: { src?: string; alt?: string }) => {
+      const reference = src || ''
+      const resolved = resolvePreviewReference(reference, notePath)
+      return (
+        <img
+          src={resolved.resolvedUrl}
+          alt={alt || 'embedded media'}
+          className="note-preview-image"
+        />
+      )
+    },
+  }), [notePath, openHref])
+
   const renderMarkdownBlock = useCallback((block: Extract<PreviewBlock, { type: 'markdown' }>) => (
     <ReactMarkdown
       key={block.id}
       remarkPlugins={[remarkGfm]}
-      components={{
-        h1: ({ children }) => <h1 className="note-preview-markdown-h1" data-ready-heading-level="1" data-ready-heading-title={extractMarkdownText(children)}>{children}</h1>,
-        h2: ({ children }) => <h2 className="note-preview-markdown-h2" data-ready-heading-level="2" data-ready-heading-title={extractMarkdownText(children)}>{children}</h2>,
-        h3: ({ children }) => <h3 className="note-preview-markdown-h3" data-ready-heading-level="3" data-ready-heading-title={extractMarkdownText(children)}>{children}</h3>,
-        h4: ({ children }) => <h4 className="note-preview-markdown-h4" data-ready-heading-level="4" data-ready-heading-title={extractMarkdownText(children)}>{children}</h4>,
-        p: ({ children }) => <p className="note-preview-markdown-p">{children}</p>,
-        em: ({ children, node: _node, ...props }) => <em className="note-preview-markdown-em" {...props}>{children}</em>,
-        hr: () => <hr className="note-preview-markdown-hr" />,
-        blockquote: ({ children }) => <blockquote className="note-preview-markdown-quote">{children}</blockquote>,
-        ul: ({ children, node: _node, className, ...props }) => (
-          <ul className={mergeMarkdownClassName(className, 'note-preview-markdown-ul')} {...props}>{children}</ul>
-        ),
-        ol: ({ children, node: _node, className, ...props }) => (
-          <ol className={mergeMarkdownClassName(className, 'note-preview-markdown-ol')} {...props}>{children}</ol>
-        ),
-        li: ({ children, node: _node, className, ...props }) => (
-          <li className={mergeMarkdownClassName(className, 'note-preview-markdown-li')} {...props}>{children}</li>
-        ),
-        table: ({ children, node: _node, ...props }) => (
-          <div className="note-preview-table-scroll" data-note-preview-table="true">
-            <table className="note-preview-markdown-table" {...props}>{children}</table>
-          </div>
-        ),
-        thead: ({ children, node: _node, ...props }) => <thead className="note-preview-markdown-thead" {...props}>{children}</thead>,
-        tbody: ({ children, node: _node, ...props }) => <tbody className="note-preview-markdown-tbody" {...props}>{children}</tbody>,
-        tr: ({ children, node: _node, ...props }) => <tr className="note-preview-markdown-tr" {...props}>{children}</tr>,
-        th: ({ children, node: _node, className, ...props }) => (
-          <th className={className ? `${className} note-preview-markdown-th` : 'note-preview-markdown-th'} {...props}>
-            {children}
-          </th>
-        ),
-        td: ({ children, node: _node, className, ...props }) => (
-          <td className={className ? `${className} note-preview-markdown-td` : 'note-preview-markdown-td'} {...props}>
-            {children}
-          </td>
-        ),
-        pre: ({ children }) => (
-          isMermaidPreChildren(children)
-            ? <>{children}</>
-            : <pre className="note-preview-markdown-pre">{children}</pre>
-        ),
-        code: ({ children, className, ...props }) => {
-          if (isMermaidLanguage(className)) {
-            return <MermaidBlock code={extractMarkdownText(children).trim()} />
-          }
-          return (
-            <code className={className ? `${className} note-preview-markdown-code` : 'note-preview-markdown-code'} {...props}>
-              {children}
-            </code>
-          )
-        },
-        a: ({ href, children }) => {
-          const reference = href || ''
-          const resolved = resolvePreviewReference(reference, notePath)
-          return (
-            <a
-              href={resolved.resolvedUrl}
-              className="note-preview-markdown-link"
-              onClick={(event) => {
-                event.preventDefault()
-                void openHref(resolved.resolvedUrl, resolved.localPath)
-              }}
-            >
-              <span>{children}</span>
-              <ExternalLink style={{ width: 11, height: 11 }} strokeWidth={2} />
-            </a>
-          )
-        },
-        img: ({ src, alt }) => {
-          const reference = src || ''
-          const resolved = resolvePreviewReference(reference, notePath)
-          return (
-            <img
-              src={resolved.resolvedUrl}
-              alt={alt || 'embedded media'}
-              className="note-preview-image"
-            />
-          )
-        },
-      }}
+      components={markdownComponents}
     >
       {block.markdown}
     </ReactMarkdown>
-  ), [notePath, openHref])
+  ), [markdownComponents])
+
+  const renderDetailsBlock = useCallback((block: Extract<PreviewBlock, { type: 'details' }>) => (
+    <details key={block.id} className="note-preview-details" open={block.open || undefined}>
+      <summary className="note-preview-details-summary">{block.summary}</summary>
+      {block.markdown ? (
+        <div className="note-preview-details-body">
+          <ReactMarkdown
+            remarkPlugins={[remarkGfm]}
+            components={markdownComponents}
+          >
+            {block.markdown}
+          </ReactMarkdown>
+        </div>
+      ) : null}
+    </details>
+  ), [markdownComponents])
 
   return (
     <div className={isEbookMarkdown ? 'note-preview-shell note-preview-shell--ebook' : 'note-preview-shell'}>
@@ -596,6 +692,10 @@ function NotePreview({
         {preview.blocks.map((block) => {
           if (block.type === 'markdown') {
             return renderMarkdownBlock(block)
+          }
+
+          if (block.type === 'details') {
+            return renderDetailsBlock(block)
           }
 
           if (block.type === 'chips') {

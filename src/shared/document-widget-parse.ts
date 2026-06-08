@@ -75,6 +75,148 @@ export interface DocumentWidgetSummary {
 
 const SHOW_WIDGET_FENCE_REGEX = /```show-widget\s*\n?([\s\S]*?)\n?\s*```/g
 
+interface MarkdownFenceRange {
+  start: number
+  end: number
+}
+
+interface BareWidgetTextPart {
+  content: string
+  hasTrailingSeparator: boolean
+}
+
+function getMarkdownFenceOpening(line: string): { marker: '`' | '~'; length: number } | null {
+  const match = line.match(/^[ \t]{0,3}(`{3,}|~{3,})/)
+  if (!match) return null
+  const fence = match[1]
+  return {
+    marker: fence[0] as '`' | '~',
+    length: fence.length,
+  }
+}
+
+function isMarkdownFenceClosing(
+  line: string,
+  fence: { marker: '`' | '~'; length: number },
+): boolean {
+  const regex = fence.marker === '`'
+    ? /^[ \t]{0,3}(`{3,})[ \t]*$/
+    : /^[ \t]{0,3}(~{3,})[ \t]*$/
+  const match = line.match(regex)
+  return Boolean(match && match[1].length >= fence.length)
+}
+
+function collectMarkdownFenceRanges(text: string): MarkdownFenceRange[] {
+  const ranges: MarkdownFenceRange[] = []
+  let activeFence: ({ marker: '`' | '~'; length: number; start: number }) | null = null
+  let offset = 0
+
+  for (const line of text.split('\n')) {
+    const lineStart = offset
+    const lineEnd = lineStart + line.length
+
+    if (activeFence) {
+      if (isMarkdownFenceClosing(line, activeFence)) {
+        ranges.push({ start: activeFence.start, end: lineEnd })
+        activeFence = null
+      }
+    } else {
+      const opening = getMarkdownFenceOpening(line)
+      if (opening) {
+        activeFence = { ...opening, start: lineStart }
+      }
+    }
+
+    offset = lineEnd + 1
+  }
+
+  if (activeFence) {
+    ranges.push({ start: activeFence.start, end: text.length })
+  }
+
+  return ranges
+}
+
+function isDetailsOpeningLine(line: string): boolean {
+  return /^<details(\s+open)?\s*>$/i.test(line.trim())
+}
+
+function isDetailsClosingLine(line: string): boolean {
+  return /^<\/details>$/i.test(line.trim())
+}
+
+function collectMarkdownDetailsRanges(text: string): MarkdownFenceRange[] {
+  const ranges: MarkdownFenceRange[] = []
+  let activeFence: ({ marker: '`' | '~'; length: number }) | null = null
+  let activeDetailsStart: number | null = null
+  let offset = 0
+
+  for (const line of text.split('\n')) {
+    const lineStart = offset
+    const lineEnd = lineStart + line.length
+
+    if (activeFence) {
+      if (isMarkdownFenceClosing(line, activeFence)) {
+        activeFence = null
+      }
+      offset = lineEnd + 1
+      continue
+    }
+
+    const openingFence = getMarkdownFenceOpening(line)
+    if (openingFence) {
+      activeFence = openingFence
+      offset = lineEnd + 1
+      continue
+    }
+
+    if (activeDetailsStart == null && isDetailsOpeningLine(line)) {
+      activeDetailsStart = lineStart
+    } else if (activeDetailsStart != null && isDetailsClosingLine(line)) {
+      ranges.push({ start: activeDetailsStart, end: lineEnd })
+      activeDetailsStart = null
+    }
+
+    offset = lineEnd + 1
+  }
+
+  if (activeDetailsStart != null) {
+    ranges.push({ start: activeDetailsStart, end: text.length })
+  }
+
+  return ranges
+}
+
+function splitBareWidgetTextParts(text: string): BareWidgetTextPart[] {
+  const protectedRanges = [
+    ...collectMarkdownFenceRanges(text),
+    ...collectMarkdownDetailsRanges(text),
+  ]
+  const parts: BareWidgetTextPart[] = []
+  let lastIndex = 0
+
+  for (const match of text.matchAll(/\n{2,}/g)) {
+    const separatorStart = match.index ?? 0
+    const isProtectedSeparator = protectedRanges.some((range) => (
+      separatorStart >= range.start && separatorStart < range.end
+    ))
+    if (isProtectedSeparator) continue
+
+    parts.push({
+      content: text.slice(lastIndex, separatorStart),
+      hasTrailingSeparator: true,
+    })
+    lastIndex = separatorStart + match[0].length
+  }
+
+  parts.push({
+    content: text.slice(lastIndex),
+    hasTrailingSeparator: false,
+  })
+
+  return parts
+}
+
 function hashWidgetIdentity(value: string): string {
   let hash = 2166136261
   for (let index = 0; index < value.length; index += 1) {
@@ -235,11 +377,11 @@ export function parseShowWidgetFences(text: string): DocumentWidgetSegment[] {
 export function parseBareWidgetPayloadSegments(text: string): DocumentWidgetSegment[] {
   if (!text.trim()) return []
 
-  const parts = text.split(/\n{2,}/)
+  const parts = splitBareWidgetTextParts(text)
   const segments: DocumentWidgetSegment[] = []
 
   parts.forEach((part, index) => {
-    const trimmed = part.trim()
+    const trimmed = part.content.trim()
     const widget = trimmed.startsWith('{') && trimmed.endsWith('}')
       ? tryParseWidgetPayload(trimmed, trimmed)
       : null
@@ -258,7 +400,7 @@ export function parseBareWidgetPayloadSegments(text: string): DocumentWidgetSegm
         },
       })
     } else {
-      const content = index < parts.length - 1 ? `${part}\n\n` : part
+      const content = part.hasTrailingSeparator ? `${part.content}\n\n` : part.content
       if (content) {
         segments.push({ type: 'text', content })
       }

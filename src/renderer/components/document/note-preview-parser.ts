@@ -40,6 +40,7 @@ export interface PreviewEmbed {
 
 export type PreviewBlock =
   | { id: string; type: 'markdown'; markdown: string }
+  | { id: string; type: 'details'; summary: string; markdown: string; open: boolean }
   | { id: string; type: 'embed'; embedId: string }
   | { id: string; type: 'chips'; chips: PreviewTag[] }
   | { id: string; type: 'widget'; widgetId: string }
@@ -986,11 +987,17 @@ function shouldPromoteToSectionHeading(line: string): boolean {
   return true
 }
 
+type MarkdownFenceMarker = { marker: '`' | '~'; length: number }
+
+function normalizeMarkdownBlockSource(lines: string[]): string {
+  return normalizeObsidianMarkdownEmbeds(
+    lines.join('\n').replace(/\n{3,}/g, '\n\n').trim(),
+  )
+}
+
 function flushMarkdownBlock(buffer: string[], blocks: PreviewBlock[], indexRef: { value: number }): void {
   if (buffer.length === 0) return
-  const markdown = normalizeObsidianMarkdownEmbeds(
-    buffer.join('\n').replace(/\n{3,}/g, '\n\n').trim(),
-  )
+  const markdown = normalizeMarkdownBlockSource(buffer)
   buffer.length = 0
   if (!markdown) return
 
@@ -1000,6 +1007,65 @@ function flushMarkdownBlock(buffer: string[], blocks: PreviewBlock[], indexRef: 
     markdown,
   })
   indexRef.value += 1
+}
+
+function getMarkdownFenceMarker(line: string): MarkdownFenceMarker | null {
+  const match = line.match(/^[ \t]{0,3}(`{3,}|~{3,})/)
+  if (!match) return null
+  const fence = match[1]
+  return {
+    marker: fence[0] as '`' | '~',
+    length: fence.length,
+  }
+}
+
+function isMarkdownFenceClosing(line: string, fence: MarkdownFenceMarker): boolean {
+  const regex = fence.marker === '`'
+    ? /^[ \t]{0,3}(`{3,})[ \t]*$/
+    : /^[ \t]{0,3}(~{3,})[ \t]*$/
+  const match = line.match(regex)
+  return Boolean(match && match[1].length >= fence.length)
+}
+
+function parseDetailsOpenLine(line: string): { open: boolean } | null {
+  const match = line.match(/^<details(\s+open)?\s*>$/i)
+  if (!match) return null
+  return { open: Boolean(match[1]) }
+}
+
+function parseDetailsSummaryLine(line: string): string | null {
+  const match = line.match(/^<summary>\s*([\s\S]*?)\s*<\/summary>$/i)
+  return match ? match[1].trim() : null
+}
+
+function isDetailsCloseLine(line: string): boolean {
+  return /^<\/details>$/i.test(line)
+}
+
+function findDetailsCloseLineIndex(lines: string[], startIndex: number): number {
+  let activeFence: MarkdownFenceMarker | null = null
+
+  for (let index = startIndex; index < lines.length; index += 1) {
+    const line = lines[index]
+    if (activeFence) {
+      if (isMarkdownFenceClosing(line, activeFence)) {
+        activeFence = null
+      }
+      continue
+    }
+
+    const openingFence = getMarkdownFenceMarker(line)
+    if (openingFence) {
+      activeFence = openingFence
+      continue
+    }
+
+    if (isDetailsCloseLine(line.trim())) {
+      return index
+    }
+  }
+
+  return -1
 }
 
 function parseBodyBlocks(
@@ -1055,48 +1121,93 @@ function parseBodyBlocks(
 
       const lines = subsegment.content.split('\n')
       const markdownBuffer: string[] = []
+      let activeFence: MarkdownFenceMarker | null = null
 
-      lines.forEach((line) => {
+      for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+        const line = lines[lineIndex]
         const trimmed = line.trim()
 
-      const tagLine = parseStandaloneTagLine(trimmed)
-      if (tagLine) {
-        flushMarkdownBlock(markdownBuffer, blocks, blockIndex)
-        const dedupedTags = dedupeChips(tagLine)
-        blocks.push({
-          id: makeId('chips', dedupedTags.map((tag) => tag.label).join('-'), blockIndex.value),
-          type: 'chips',
-          chips: dedupedTags,
-        })
-        tags.push(...dedupedTags)
-        blockIndex.value += 1
-        return
-      }
-
-      const embed = parseStandaloneEmbedLine(trimmed, notePath)
-      if (embed) {
-        const duplicate = [...existingEmbeds, ...embeds].some((item) => item.kind === embed.kind && item.displayUrl === embed.displayUrl)
-        if (!duplicate) {
-          flushMarkdownBlock(markdownBuffer, blocks, blockIndex)
-          const nextEmbed = { ...embed, id: makeId('embed', embed.displayUrl, embeds.length) }
-          embeds.push(nextEmbed)
-          blocks.push({
-            id: makeId('embed-block', nextEmbed.displayUrl, blockIndex.value),
-            type: 'embed',
-            embedId: nextEmbed.id,
-          })
-          blockIndex.value += 1
-          return
+        if (activeFence) {
+          markdownBuffer.push(line)
+          if (isMarkdownFenceClosing(line, activeFence)) {
+            activeFence = null
+          }
+          continue
         }
-      }
 
-      if (shouldPromoteToSectionHeading(trimmed)) {
-        markdownBuffer.push(`## ${trimmed}`)
-        return
-      }
+        const openingFence = getMarkdownFenceMarker(line)
+        if (openingFence) {
+          activeFence = openingFence
+          markdownBuffer.push(line)
+          continue
+        }
+
+        const detailsOpen = parseDetailsOpenLine(trimmed)
+        if (detailsOpen) {
+          const closeIndex = findDetailsCloseLineIndex(lines, lineIndex + 1)
+          if (closeIndex >= 0) {
+            const detailsLines = lines.slice(lineIndex + 1, closeIndex)
+            const summaryLineIndex = detailsLines.findIndex((item) => item.trim().length > 0)
+            const summary = summaryLineIndex >= 0
+              ? parseDetailsSummaryLine(detailsLines[summaryLineIndex].trim())
+              : null
+            const markdownLines = summary == null
+              ? detailsLines
+              : detailsLines.slice(summaryLineIndex + 1)
+            const markdown = normalizeMarkdownBlockSource(markdownLines)
+
+            flushMarkdownBlock(markdownBuffer, blocks, blockIndex)
+            blocks.push({
+              id: makeId('details', summary || `details-${blockIndex.value}`, blockIndex.value),
+              type: 'details',
+              summary: summary || '详情',
+              markdown,
+              open: detailsOpen.open,
+            })
+            blockIndex.value += 1
+            lineIndex = closeIndex
+            continue
+          }
+        }
+
+        const tagLine = parseStandaloneTagLine(trimmed)
+        if (tagLine) {
+          flushMarkdownBlock(markdownBuffer, blocks, blockIndex)
+          const dedupedTags = dedupeChips(tagLine)
+          blocks.push({
+            id: makeId('chips', dedupedTags.map((tag) => tag.label).join('-'), blockIndex.value),
+            type: 'chips',
+            chips: dedupedTags,
+          })
+          tags.push(...dedupedTags)
+          blockIndex.value += 1
+          continue
+        }
+
+        const embed = parseStandaloneEmbedLine(trimmed, notePath)
+        if (embed) {
+          const duplicate = [...existingEmbeds, ...embeds].some((item) => item.kind === embed.kind && item.displayUrl === embed.displayUrl)
+          if (!duplicate) {
+            flushMarkdownBlock(markdownBuffer, blocks, blockIndex)
+            const nextEmbed = { ...embed, id: makeId('embed', embed.displayUrl, embeds.length) }
+            embeds.push(nextEmbed)
+            blocks.push({
+              id: makeId('embed-block', nextEmbed.displayUrl, blockIndex.value),
+              type: 'embed',
+              embedId: nextEmbed.id,
+            })
+            blockIndex.value += 1
+            continue
+          }
+        }
+
+        if (shouldPromoteToSectionHeading(trimmed)) {
+          markdownBuffer.push(`## ${trimmed}`)
+          continue
+        }
 
         markdownBuffer.push(line)
-      })
+      }
 
       flushMarkdownBlock(markdownBuffer, blocks, blockIndex)
     })

@@ -53,6 +53,175 @@ test('NotePreview renders mermaid fences through a dedicated diagram block', () 
   assert.doesNotMatch(html, /<pre class="note-preview-markdown-pre"><div class="note-preview-mermaid/)
 })
 
+test('NotePreview keeps fenced markdown blocks with blank lines intact', () => {
+  const markdown = [
+    '### 5. 参考帧',
+    '',
+    '```md',
+    'assets/shot01-line-art-v1.png',
+    '',
+    '时长：3s',
+    '主动作：A 对镜自拍检查脸部状态。',
+    '镜头运动：handheld mirror selfie',
+    '音频：厕所环境声，轻微叹气',
+    '```',
+  ].join('\n')
+
+  const html = renderToStaticMarkup(
+    React.createElement(NotePreview, {
+      content: markdown,
+      notePath: '/tmp/reference-frame.md',
+    }),
+  )
+
+  assert.equal(html.match(/note-preview-markdown-pre/g)?.length, 1)
+  assert.doesNotMatch(html, /data-ready-markdown-source-rendered="true"/)
+  assert.match(html, /assets\/shot01-line-art-v1\.png/)
+  assert.match(html, /时长：3s/)
+  assert.match(html, /主动作：A 对镜自拍检查脸部状态。/)
+})
+
+test('NotePreview renders longer outer markdown fences as formatted markdown', () => {
+  const markdown = [
+    '````md',
+    '## Shot 01 / 3s',
+    '',
+    '### 1. 画面',
+    '```text',
+    'A 在厕所镜前自拍检查脸。',
+    '```',
+    '',
+    '### 2. 镜头',
+    '```text',
+    '手机前置镜头感，中近景。',
+    '```',
+    '````',
+  ].join('\n')
+
+  const html = renderToStaticMarkup(
+    React.createElement(NotePreview, {
+      content: markdown,
+      notePath: '/tmp/shot-template.md',
+    }),
+  )
+
+  assert.match(html, /data-ready-markdown-source-rendered="true"/)
+  assert.equal(html.match(/note-preview-markdown-pre/g)?.length, 2)
+  assert.match(html, /data-ready-heading-title="Shot 01 \/ 3s"/)
+  assert.match(html, /data-ready-heading-title="1\. 画面"/)
+  assert.match(html, /data-ready-heading-title="2\. 镜头"/)
+  assert.match(html, /A 在厕所镜前自拍检查脸。/)
+  assert.doesNotMatch(html, /```text/)
+})
+
+test('NotePreview renders nested markdown source fences as formatted markdown', () => {
+  const markdown = [
+    '`````md',
+    '---',
+    '',
+    '## Shot 01 / 3s',
+    '',
+    '### 1. 画面',
+    '```text',
+    'A 在厕所镜前自拍检查脸。',
+    '```',
+    '',
+    '---',
+    '',
+    '````md',
+    '## Shot 02 / 3s',
+    '',
+    '### 1. 画面',
+    '```text',
+    '手机前置镜头感，中近景。',
+    '```',
+    '````',
+    '`````',
+  ].join('\n')
+
+  const html = renderToStaticMarkup(
+    React.createElement(NotePreview, {
+      content: markdown,
+      notePath: '/tmp/nested-shot-template.md',
+    }),
+  )
+
+  assert.equal(html.match(/data-ready-markdown-source-rendered="true"/g)?.length, 2)
+  assert.equal(html.match(/note-preview-markdown-pre/g)?.length, 2)
+  assert.match(html, /data-ready-heading-title="Shot 01 \/ 3s"/)
+  assert.match(html, /data-ready-heading-title="Shot 02 \/ 3s"/)
+  assert.match(html, /手机前置镜头感，中近景。/)
+  assert.doesNotMatch(html, /## Shot 02/)
+  assert.doesNotMatch(html, /```text/)
+  assert.doesNotMatch(html, /````md/)
+})
+
+test('NotePreview renders shot sections with separate real code blocks', () => {
+  const markdown = [
+    '---',
+    '',
+    '## Shot 01 / 3s',
+    '',
+    '### 1. 画面',
+    '```text',
+    'A 在厕所镜前自拍检查脸，脸色疲惫，表情崩溃。',
+    '```',
+    '',
+    '### 2. 镜头',
+    '```text',
+    '手机前置镜头感，中近景，镜面反射构图。',
+    '```',
+    '',
+    '---',
+  ].join('\n')
+
+  const html = renderToStaticMarkup(
+    React.createElement(NotePreview, {
+      content: markdown,
+      notePath: '/tmp/shot-sections.md',
+    }),
+  )
+
+  assert.equal(html.match(/note-preview-markdown-pre/g)?.length, 2)
+  assert.match(html, /note-preview-markdown-hr/)
+  assert.match(html, /data-ready-heading-title="Shot 01 \/ 3s"/)
+  assert.match(html, /data-ready-heading-title="1\. 画面"/)
+  assert.match(html, /data-ready-heading-title="2\. 镜头"/)
+})
+
+test('NotePreview renders GitHub-style details blocks with markdown inside', () => {
+  const markdown = [
+    '<details>',
+    '<summary>Shot 01 / 3s</summary>',
+    '',
+    '### 1. 画面',
+    '```text',
+    'A 在厕所镜前自拍检查脸，脸色疲惫。',
+    '```',
+    '',
+    '### 2. 镜头',
+    '```text',
+    '手机前置镜头感，中近景。',
+    '```',
+    '',
+    '</details>',
+  ].join('\n')
+
+  const html = renderToStaticMarkup(
+    React.createElement(NotePreview, {
+      content: markdown,
+      notePath: '/tmp/shot-details.md',
+    }),
+  )
+
+  assert.match(html, /<details class="note-preview-details">/)
+  assert.match(html, /<summary class="note-preview-details-summary">Shot 01 \/ 3s<\/summary>/)
+  assert.equal(html.match(/note-preview-markdown-pre/g)?.length, 2)
+  assert.match(html, /data-ready-heading-title="1\. 画面"/)
+  assert.match(html, /data-ready-heading-title="2\. 镜头"/)
+  assert.doesNotMatch(html, /&lt;details&gt;/)
+})
+
 test('NotePreview preserves ordered, unordered and nested markdown list structure', () => {
   const markdown = [
     '3. 有序列表第一项',

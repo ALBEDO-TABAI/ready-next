@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {
   collectDocumentWidgets,
   getWidgetRenderMode,
+  parseBareWidgetPayloadSegments,
   parseShowWidgetFences,
   tryParseWidgetPayload,
 } from '../shared/document-widget-parse'
@@ -79,5 +80,57 @@ describe('shared document-widget-parse', () => {
     const widgets = collectDocumentWidgets(FIXTURE)
     const widgetSegmentCount = segments.filter((segment) => segment.type === 'widget').length
     assert.equal(widgetSegmentCount, widgets.length)
+  })
+
+  it('parseBareWidgetPayloadSegments keeps blank lines inside markdown fences', () => {
+    const heading = '### 5. 参考帧'
+    const fencedBlock = [
+      '```md',
+      'assets/shot01-line-art-v1.png',
+      '',
+      '时长：3s',
+      '主动作：A 对镜自拍检查脸部状态。',
+      '镜头运动：handheld mirror selfie',
+      '音频：厕所环境声，轻微叹气',
+      '```',
+    ].join('\n')
+    const source = [
+      heading,
+      '',
+      fencedBlock,
+    ].join('\n')
+
+    const segments = parseBareWidgetPayloadSegments(source)
+
+    assert.equal(segments.length, 2)
+    assert.equal(segments[0].type, 'text')
+    assert.equal(segments[0].content, `${heading}\n\n`)
+    assert.equal(segments[1].type, 'text')
+    assert.equal(segments[1].content, fencedBlock)
+  })
+
+  it('parseBareWidgetPayloadSegments keeps blank lines inside details blocks', () => {
+    const source = [
+      '<details>',
+      '<summary>Shot 01 / 3s</summary>',
+      '',
+      '### 1. 画面',
+      '```text',
+      'A 在厕所镜前自拍检查脸，脸色疲惫。',
+      '```',
+      '',
+      '### 2. 镜头',
+      '```text',
+      '手机前置镜头感，中近景。',
+      '```',
+      '',
+      '</details>',
+    ].join('\n')
+
+    const segments = parseBareWidgetPayloadSegments(source)
+
+    assert.equal(segments.length, 1)
+    assert.equal(segments[0].type, 'text')
+    assert.equal(segments[0].content, source)
   })
 })

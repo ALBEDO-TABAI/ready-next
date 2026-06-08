@@ -1494,12 +1494,67 @@ html[data-theme='dark'] .ready-app-bg::after {
   color: var(--text-secondary);
 }
 
+.note-preview-details {
+  margin: 0 0 14px;
+  border: 1px solid color-mix(in srgb, var(--border-default) 62%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-canvas) 88%, white 12%);
+  overflow: hidden;
+}
+
+.note-preview-details-summary {
+  padding: 12px 14px;
+  color: var(--text-title);
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+}
+
+.note-preview-details-summary:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--color-blue) 68%, transparent);
+  outline-offset: -2px;
+}
+
+.note-preview-details-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 0 14px 14px;
+}
+
+.note-preview-details-body > :last-child {
+  margin-bottom: 0;
+}
+
+.note-preview-details-body .note-preview-markdown-pre {
+  border: 1px solid color-mix(in srgb, var(--border-default) 56%, transparent);
+  background: color-mix(in srgb, var(--surface-card-bg) 82%, white 18%);
+}
+
 .note-preview-markdown-pre {
   margin: 0 0 14px;
   padding: 14px 16px;
+  border: 1px solid color-mix(in srgb, var(--border-default) 56%, transparent);
   border-radius: 14px;
   background: color-mix(in srgb, var(--bg-canvas) 88%, white 12%);
   overflow-x: auto;
+}
+
+.note-preview-markdown-source-rendered {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin: 0 0 14px;
+  padding: 16px;
+  border: 1px solid color-mix(in srgb, var(--border-default) 56%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-canvas) 88%, white 12%);
+  overflow-x: auto;
+}
+
+.note-preview-markdown-source-rendered > :last-child {
+  margin-bottom: 0;
 }
 
 .note-preview-markdown-code {
