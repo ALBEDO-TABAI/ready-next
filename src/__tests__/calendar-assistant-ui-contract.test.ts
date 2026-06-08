@@ -38,6 +38,7 @@ test('calendar shell exposes assistant drawer and keeps timezone in the sidebar'
     currentDate: new Date('2026-05-17T00:00:00+08:00'),
     selectedDate: null,
     eventsForMiniCalendar: [],
+    eventsForMonthGrid: [],
     sources: [],
     headerTitle: '五月 2026',
     viewType: 'week',
@@ -62,6 +63,8 @@ test('calendar shell exposes assistant drawer and keeps timezone in the sidebar'
     onAssistantAskAgent: () => {},
     onDateChange: () => {},
     onSelectDate: () => {},
+    onOpenMonthEvent: () => {},
+    onCreateMonthEvent: () => {},
     onToggleSource: () => {},
     onAddSource: () => {},
     onUpdateSource: () => {},
@@ -208,11 +211,20 @@ test('calendar month view uses neutral grid line variables instead of default bl
   assert.match(shellSource, /className="sx__month-grid-wrapper ready-month-grid-fallback"/)
   assert.match(shellSource, /className="sx__month-grid-week"/)
   assert.match(shellSource, /'sx__month-grid-day'/)
+  assert.match(shellSource, /data-ready-month-event-id=\{calendarEvent\.id\}/)
+  assert.match(shellSource, /className="ready-month-grid-event-title"/)
+  assert.match(shellSource, /onDoubleClick=\{\(event\) => openCreateForDay\(event, day\)\}/)
+  assert.match(shellSource, /onContextMenu=\{\(event\) => openCreateForDay\(event, day\)\}/)
   assert.match(scheduleCss, /\.sx__month-grid-wrapper \{[\s\S]*background:\s*var\(--sx-ready-grid-surface\) !important;/)
   assert.match(scheduleCss, /\.sx__month-grid-wrapper \{[\s\S]*border-bottom:\s*none !important;/)
   assert.match(scheduleCss, /\.ready-month-grid-fallback \{[\s\S]*position:\s*absolute !important;[\s\S]*inset:\s*0 !important;[\s\S]*z-index:\s*4;/)
-  assert.match(scheduleCss, /\.ready-month-grid-fallback \.sx__month-grid-day \{[\s\S]*appearance:\s*none;[\s\S]*border:\s*none;/)
+  assert.match(scheduleCss, /\.ready-month-grid-fallback \.sx__month-grid-week \{[\s\S]*display:\s*flex;[\s\S]*min-width:\s*0;/)
+  assert.match(scheduleCss, /\.ready-month-grid-fallback \.sx__month-grid-day \{[\s\S]*appearance:\s*none;[\s\S]*border:\s*none;[\s\S]*flex:\s*1 1 0;[\s\S]*min-width:\s*0;[\s\S]*overflow:\s*hidden;/)
   assert.match(scheduleCss, /\.ready-month-grid-fallback \.sx__month-grid-day:not\(:last-child\) \{[\s\S]*border-inline-end:\s*var\(--sx-ready-grid-line-width\) solid var\(--sx-ready-grid-line-color\) !important;/)
+  assert.match(scheduleCss, /\.ready-month-grid-fallback \.sx__month-grid-day__events \{[\s\S]*min-width:\s*0;[\s\S]*overflow:\s*hidden;/)
+  assert.match(scheduleCss, /\.ready-month-grid-event \{[\s\S]*display:\s*flex;[\s\S]*width:\s*100%;[\s\S]*max-width:\s*100%;[\s\S]*min-width:\s*0;[\s\S]*overflow:\s*hidden;/)
+  assert.match(scheduleCss, /\.ready-month-grid-event-title \{[\s\S]*text-overflow:\s*clip;[\s\S]*mask-image:\s*linear-gradient\(to right, #000 calc\(100% - 14px\), transparent\);/)
+  assert.doesNotMatch(scheduleCss, /\.ready-month-grid-dot/)
   assert.match(scheduleCss, /\.sx__month-grid-week \{[\s\S]*border-top:\s*var\(--sx-ready-grid-line-width\) solid var\(--sx-ready-grid-line-color\) !important;/)
   assert.match(scheduleCss, /\.sx__month-grid-day:not\(:last-child\) \{[\s\S]*border-inline-end:\s*var\(--sx-ready-grid-line-width\) solid var\(--sx-ready-grid-line-color\) !important;/)
   // .sx__month-grid-cell is applied to empty blocker placeholders (alignment spacers) as well as

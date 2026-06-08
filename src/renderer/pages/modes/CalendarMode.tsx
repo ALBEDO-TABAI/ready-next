@@ -899,6 +899,11 @@ export default function CalendarMode({
     [coloredEvents, enabledSourceIds],
   )
 
+  const eventsForMonthGrid = useMemo(
+    () => coloredEvents.filter((event) => enabledSourceIds.has(event.calendarId)),
+    [coloredEvents, enabledSourceIds],
+  )
+
   const headerTitle = useMemo(() => {
     if (viewType === 'day') {
       return format(currentDate, 'yyyy年 M月d日 EEEE', { locale: zhCN })
@@ -1007,6 +1012,7 @@ export default function CalendarMode({
           currentDate={currentDate}
           selectedDate={selectedDate}
           eventsForMiniCalendar={eventsForMiniCalendar}
+          eventsForMonthGrid={eventsForMonthGrid}
           sources={sources}
           headerTitle={headerTitle}
           viewType={viewType}
@@ -1032,6 +1038,8 @@ export default function CalendarMode({
           onAssistantAskAgent={handleCalendarAssistantAskAgent}
           onDateChange={setCurrentDate}
           onSelectDate={handleSelectDate}
+          onOpenMonthEvent={handleOpenEditModal}
+          onCreateMonthEvent={openQuickCardFromSX}
           onToggleSource={toggleSource}
           onAddSource={addSource}
           onUpdateSource={updateSource}

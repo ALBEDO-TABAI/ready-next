@@ -9,6 +9,7 @@ import {
   isSameDay,
   isSameMonth,
   isToday,
+  startOfDay,
   startOfMonth,
   startOfWeek,
 } from 'date-fns'
@@ -20,7 +21,7 @@ import CalendarViewSelector from './CalendarViewSelector'
 import CalendarTimezoneSelector from './CalendarTimezoneSelector'
 import { NewEventCard, NewEventMenu } from './NewEventMenu'
 import type { CalendarAssistantSummary } from './CalendarAssistantPanel'
-import type { ViewType } from './schedule-x-utils'
+import type { CalendarEvent, ViewType } from './schedule-x-utils'
 import {
   WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM,
   WORKBENCH_CANVAS_OUTER_PADDING_TOP,
@@ -61,23 +62,42 @@ function ReadyMonthGridFallback({
   selectedDate,
   events,
   onSelectDate,
+  onOpenEvent,
+  onCreateAtDate,
 }: {
   currentDate: Date
   selectedDate: Date | null
-  events: { startTime: Date; color: string }[]
+  events: CalendarEvent[]
   onSelectDate: (date: Date) => void
+  onOpenEvent: (event: CalendarEvent) => void
+  onCreateAtDate: (payload: { date: Date; hour?: number }) => void
 }) {
   const weeks = useMemo(() => buildMonthGridDays(currentDate), [currentDate])
-  const eventDotMap = useMemo(() => {
-    const map = new Map<string, string[]>()
+  const eventsByDate = useMemo(() => {
+    const map = new Map<string, CalendarEvent[]>()
     for (const event of events) {
-      const key = format(event.startTime, 'yyyy-MM-dd')
-      const colors = map.get(key) ?? []
-      if (!colors.includes(event.color)) colors.push(event.color)
-      map.set(key, colors)
+      let day = startOfDay(event.startTime)
+      const end = startOfDay(event.endTime)
+      while (day.getTime() <= end.getTime()) {
+        const key = format(day, 'yyyy-MM-dd')
+        const items = map.get(key) ?? []
+        items.push(event)
+        map.set(key, items)
+        day = addDays(day, 1)
+      }
+    }
+    for (const items of map.values()) {
+      items.sort((a, b) => a.startTime.getTime() - b.startTime.getTime())
     }
     return map
   }, [events])
+
+  const openCreateForDay = (event: { preventDefault?: () => void; stopPropagation?: () => void }, day: Date) => {
+    event.preventDefault?.()
+    event.stopPropagation?.()
+    onSelectDate(day)
+    onCreateAtDate({ date: day, hour: 9 })
+  }
 
   return (
     <div
@@ -92,7 +112,7 @@ function ReadyMonthGridFallback({
             const inMonth = isSameMonth(day, currentDate)
             const selected = selectedDate ? isSameDay(day, selectedDate) : false
             const today = isToday(day)
-            const dots = eventDotMap.get(dateKey) ?? []
+            const dayEvents = eventsByDate.get(dateKey) ?? []
             const className = [
               'sx__month-grid-day',
               !inMonth ? 'sx__month-grid-day--not-in-month is-leading-or-trailing' : '',
@@ -100,13 +120,21 @@ function ReadyMonthGridFallback({
             ].filter(Boolean).join(' ')
 
             return (
-              <button
-                type="button"
+              <div
+                role="button"
+                tabIndex={0}
                 className={className}
                 data-date={dateKey}
                 aria-label={format(day, 'yyyy年M月d日')}
                 key={dateKey}
                 onClick={() => onSelectDate(day)}
+                onDoubleClick={(event) => openCreateForDay(event, day)}
+                onContextMenu={(event) => openCreateForDay(event, day)}
+                onKeyDown={(event) => {
+                  if (event.key !== 'Enter' && event.key !== ' ') return
+                  event.preventDefault()
+                  onSelectDate(day)
+                }}
               >
                 <div className="sx__month-grid-day__header">
                   {weekIndex === 0 && (
@@ -123,16 +151,42 @@ function ReadyMonthGridFallback({
                     {format(day, 'd')}
                   </div>
                 </div>
-                <div className="sx__month-grid-day__events" aria-hidden="true">
-                  {dots.slice(0, 3).map((color, index) => (
-                    <span
-                      key={`${color}-${index}`}
-                      className="ready-month-grid-dot"
-                      style={{ background: color }}
-                    />
+                <div className="sx__month-grid-day__events">
+                  {dayEvents.slice(0, 3).map((calendarEvent) => (
+                    <button
+                      type="button"
+                      key={`${dateKey}-${calendarEvent.id}`}
+                      className="ready-month-grid-event"
+                      data-ready-month-event-id={calendarEvent.id}
+                      title={calendarEvent.title || '无标题日程'}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onOpenEvent(calendarEvent)
+                      }}
+                      onDoubleClick={(event) => {
+                        event.stopPropagation()
+                        onOpenEvent(calendarEvent)
+                      }}
+                      onContextMenu={(event) => {
+                        event.preventDefault()
+                        event.stopPropagation()
+                        onOpenEvent(calendarEvent)
+                      }}
+                    >
+                      <span
+                        className="ready-month-grid-event-color"
+                        style={{ background: calendarEvent.color }}
+                      />
+                      <span className="ready-month-grid-event-title">
+                        {calendarEvent.title || '无标题日程'}
+                      </span>
+                    </button>
                   ))}
+                  {dayEvents.length > 3 && (
+                    <span className="ready-month-grid-more">+{dayEvents.length - 3}</span>
+                  )}
                 </div>
-              </button>
+              </div>
             )
           })}
         </div>
@@ -147,6 +201,7 @@ interface CalendarWorkbenchShellProps {
   currentDate: Date
   selectedDate: Date | null
   eventsForMiniCalendar: { startTime: Date; color: string }[]
+  eventsForMonthGrid: CalendarEvent[]
   sources: CalendarSource[]
   headerTitle: string
   viewType: ViewType
@@ -177,6 +232,8 @@ interface CalendarWorkbenchShellProps {
   onAssistantAskAgent: (instruction: string) => void
   onDateChange: (date: Date) => void
   onSelectDate: (date: Date) => void
+  onOpenMonthEvent: (event: CalendarEvent) => void
+  onCreateMonthEvent: (payload: { date: Date; hour?: number }) => void
   onToggleSource: (id: string) => void
   onAddSource: (source: CalendarSource) => void
   onUpdateSource: (id: string, updates: Partial<CalendarSource>) => void
@@ -222,6 +279,7 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
     currentDate,
     selectedDate,
     eventsForMiniCalendar,
+    eventsForMonthGrid,
     sources,
     headerTitle,
     viewType,
@@ -247,6 +305,8 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
     onAssistantAskAgent,
     onDateChange,
     onSelectDate,
+    onOpenMonthEvent,
+    onCreateMonthEvent,
     onToggleSource,
     onAddSource,
     onUpdateSource,
@@ -485,8 +545,10 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
                       <ReadyMonthGridFallback
                         currentDate={currentDate}
                         selectedDate={selectedDate}
-                        events={eventsForMiniCalendar}
+                        events={eventsForMonthGrid}
                         onSelectDate={onSelectDate}
+                        onOpenEvent={onOpenMonthEvent}
+                        onCreateAtDate={onCreateMonthEvent}
                       />
                     )}
                     {customPortalNodes}
