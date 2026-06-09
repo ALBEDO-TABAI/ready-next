@@ -1,4 +1,5 @@
 import type { BrowserCapabilityTaskKind } from './capability-types'
+import { enqueueBackgroundTaskTerminalReminderFromBridge } from '../agent-control/system-reminders/background-task-terminal-reminder'
 
 export type TaskEventBridgeStatus =
   | 'completed'
@@ -75,4 +76,4 @@ class TaskEventBridge {
 
 export const taskEventBridge = new TaskEventBridge()
 
-taskEventBridge.registerAgentNotifier(() => {})
+taskEventBridge.registerAgentNotifier(enqueueBackgroundTaskTerminalReminderFromBridge)

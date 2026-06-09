@@ -159,6 +159,12 @@ import {
 } from './action-announcement-guard'
 import { createSystemReminderRegistry } from '../system-reminders/system-reminder-registry'
 import { registerActionAnnouncementSteerReminder } from '../system-reminders/action-announcement-steer-reminder'
+import {
+  beginBackgroundTaskTerminalReminderRun,
+  drainBackgroundTaskTerminalReminders,
+  prependSystemReminderInput,
+  registerBackgroundTaskTerminalReminder,
+} from '../system-reminders/background-task-terminal-reminder'
 
 const agentSdkLogger = createRotatingLogger('ready-agent-sdk.log')
 const settingsRepository = new AppSettingsRepository()
@@ -3549,6 +3555,7 @@ export class AgentSdkRuntime extends EventEmitter {
       })
     }
     const { session, runHandle, abortController, runGeneration } = begin
+    const finishBackgroundTaskTerminalReminderRun = beginBackgroundTaskTerminalReminderRun(sessionId, taskId)
     const effectiveExecutionOptions: AgentSdkExecutionOptions | undefined = checkpointRestore
       ? {
         ...(executionOptions || {}),
@@ -4128,6 +4135,15 @@ export class AgentSdkRuntime extends EventEmitter {
                 : new Error('aborted')
               error.name = 'AbortError'
               throw error
+            }
+            const terminalReminderTexts = drainBackgroundTaskTerminalReminders(sessionId)
+            if (terminalReminderTexts.length > 0) {
+              const registry = createSystemReminderRegistry()
+              registerBackgroundTaskTerminalReminder(registry, terminalReminderTexts)
+              const reminderText = registry.compose()
+              if (reminderText) {
+                nextInput = prependSystemReminderInput(nextInput, reminderText)
+              }
             }
             runResult = await this.runAgent({
               agentName: name,
@@ -4873,6 +4889,7 @@ export class AgentSdkRuntime extends EventEmitter {
         })
         await this.finalizeRun(name, session, runHandle)
       } finally {
+        finishBackgroundTaskTerminalReminderRun()
         if (ownsBudgetCheckpointFlight) releaseBudgetCheckpointFlight(budgetCheckpointFlightKey)
       }
     }
