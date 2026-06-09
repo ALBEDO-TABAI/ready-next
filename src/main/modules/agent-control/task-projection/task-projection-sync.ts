@@ -8,6 +8,7 @@ import type {
 } from '../contracts/run-contracts'
 import { isTaskType } from '../../../../shared/task-types'
 import { buildContinuationStateFromProjection } from '../contracts/continuation-state'
+import { buildTerminalProjectionPatch } from '../runtime-core/run-finalizer'
 import { clearContinuationState, rememberContinuationState } from '../session/session-continuity'
 import type { ScopeRunEventPayload, ScopeRunSummary } from '../contracts/types'
 import type { RecoveryRecord } from '../contracts/run-contracts'
@@ -93,26 +94,6 @@ function artifactPathEnding(
 
 function stableProjectionHash(parts: string[]): string {
   return createHash('sha1').update(parts.join('\0')).digest('hex').slice(0, 16)
-}
-
-function buildTerminalProjectionPatch(params: {
-  kind: 'sibling_superseded'
-  nextTaskId: string
-  updatedAt: string
-}): Partial<TaskProjectionRecord> {
-  return {
-    status: 'killed',
-    interactionState: 'suspended',
-    waitingFor: 'none',
-    taskSummary: '已被新消息接管',
-    blockedReason: '已被新消息接管',
-    resumableActions: ['none'],
-    continuationRef: {
-      taskId: params.nextTaskId,
-      blockerType: 'superseded',
-    },
-    updatedAt: params.updatedAt,
-  }
 }
 
 /**
@@ -276,7 +257,6 @@ async function supersedeLegacySiblings(
       await store.update(
         sibling.taskId,
         buildTerminalProjectionPatch({
-          kind: 'sibling_superseded',
           nextTaskId: next.taskId,
           updatedAt: next.updatedAt,
         }),

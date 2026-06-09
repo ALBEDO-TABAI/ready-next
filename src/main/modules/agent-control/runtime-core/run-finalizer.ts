@@ -1,4 +1,5 @@
 import { logAgentMetric } from '../metrics'
+import type { TaskProjectionRecord } from '../contracts/run-contracts'
 
 export interface RunCloseMetric {
   runId: string
@@ -71,6 +72,25 @@ export function writeRunCloseMetric(metric: RunCloseMetric): void {
 
 export const defaultRunFinalizerDeps: RunFinalizerDeps = {
   writeRunCloseMetric,
+}
+
+export function buildTerminalProjectionPatch(params: {
+  nextTaskId: string
+  updatedAt: string
+}): Partial<TaskProjectionRecord> {
+  return {
+    status: 'killed',
+    interactionState: 'suspended',
+    waitingFor: 'none',
+    taskSummary: '已被新消息接管',
+    blockedReason: '已被新消息接管',
+    resumableActions: ['none'],
+    continuationRef: {
+      taskId: params.nextTaskId,
+      blockerType: 'superseded',
+    },
+    updatedAt: params.updatedAt,
+  }
 }
 
 export async function finalizeRunOutcome(outcome: RunOutcome, deps: RunFinalizerDeps): Promise<void> {
