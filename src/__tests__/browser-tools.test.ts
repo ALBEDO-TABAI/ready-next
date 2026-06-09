@@ -4,7 +4,11 @@ import { rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { JSDOM } from 'jsdom'
-import { __setBrowserCollectionConsentStoreForTests, executeBrowserTool } from '../main/modules/tools/browser-tools'
+import {
+  __resetBrowserAgentPageMapForTests,
+  __setBrowserCollectionConsentStoreForTests,
+  executeBrowserTool,
+} from '../main/modules/tools/browser-tools'
 import { BrowserTaskPlanner } from '../main/modules/agent-control/domain-adapters/browser-task-planner'
 import {
   __resetSessionContinuityForTests,
@@ -88,12 +92,14 @@ function createRuntimeProjectionStore() {
 }
 
 beforeEach(() => {
+  __resetBrowserAgentPageMapForTests()
   __setSessionContinuityStoragePathForTests(TEST_CONTINUITY_PATH)
   __resetSessionContinuityForTests()
   __setBrowserCollectionConsentStoreForTests(createConsentStoreMock())
 })
 
 afterEach(() => {
+  __resetBrowserAgentPageMapForTests()
   __resetSessionContinuityForTests()
   __setSessionContinuityStoragePathForTests(null)
   __setBrowserCollectionConsentStoreForTests(null)
@@ -168,6 +174,195 @@ function createControllerMock(overrides?: Partial<BrowserController>): BrowserCo
 }
 
 describe('browser-tools v2', () => {
+  it('browser_read_page_map returns a generation, targets, and ambiguity groups', async () => {
+    const controller = createControllerMock({
+      executeJS: async (_tabId, code) => {
+        const source = String(code || '')
+        if (source.includes('__READY_AGENT_PAGE_MAP__')) {
+          return {
+            identity: { url: 'https://example.com/form', title: 'Example Form' },
+            viewport: { width: 1000, height: 800 },
+            bodyText: 'Search Search',
+            rawRoots: [
+              {
+                role: 'generic',
+                children: [
+                  { role: 'button', name: 'Search', backendDOMNodeId: 1, frameId: '0' },
+                  { role: 'button', name: 'Search', backendDOMNodeId: 2, frameId: '0' },
+                  { role: 'textbox', name: 'Query', backendDOMNodeId: 3, frameId: '0' },
+                ],
+              },
+            ],
+            riskFlags: { fileInputCount: 0, externalLinkCount: 1 },
+          }
+        }
+        return null
+      },
+    })
+
+    const result = await executeBrowserTool('browser_read_page_map', {}, controller)
+    const payload = JSON.parse(result) as {
+      pageIdentity: { generation: number; title: string }
+      pageMap: {
+        targets: Array<{ targetId: string; name: string }>
+        structureHints: { iframes: unknown[]; shadowRoots: unknown[]; hiddenLoaded: unknown[] }
+      }
+      ambiguityGroups: Array<{ name: string; targetIds: string[] }>
+      riskFlags: { externalLinkCount?: number }
+      evidence: { generation: number; targetSource: string; targetCount: number; truncated: boolean }
+    }
+
+    assert.strictEqual(payload.pageIdentity.generation, 1)
+    assert.strictEqual(payload.pageIdentity.title, 'Example Form')
+    assert.strictEqual(payload.pageMap.targets.length, 3)
+    assert.strictEqual(payload.pageMap.targets[0]?.targetId, '1:0:1')
+    assert.deepStrictEqual(payload.pageMap.structureHints, { iframes: [], shadowRoots: [], hiddenLoaded: [] })
+    assert.strictEqual(payload.ambiguityGroups.length, 1)
+    assert.strictEqual(payload.ambiguityGroups[0]?.name, 'Search')
+    assert.deepStrictEqual(payload.ambiguityGroups[0]?.targetIds, ['1:0:1', '1:0:2'])
+    assert.strictEqual(payload.riskFlags.externalLinkCount, 1)
+    assert.deepStrictEqual(payload.evidence, {
+      generation: 1,
+      targetSource: 'dom-target-library',
+      targetCount: 3,
+      truncated: false,
+    })
+  })
+
+  it('browser_probe_readonly requires a fresh page-map generation before probing', async () => {
+    const controller = createControllerMock({
+      executeJS: async (_tabId, code) => {
+        const source = String(code || '')
+        if (source.includes('__READY_AGENT_PAGE_MAP__')) {
+          return {
+            identity: { url: 'https://example.com/form', title: 'Example Form' },
+            viewport: { width: 1000, height: 800 },
+            rawRoots: [{ role: 'generic', children: [{ role: 'textbox', name: 'Query', backendDOMNodeId: 1, frameId: '0' }] }],
+            riskFlags: {},
+          }
+        }
+        if (source.includes('__READY_READONLY_PROBE__')) {
+          return {
+            ok: true,
+            generation: 1,
+            query: 'query',
+            scope: 'forms',
+            riskDecision: 'allowed',
+            summary: 'scope=forms returned=1',
+            counts: {
+              totalCandidates: 1,
+              returned: 1,
+              hiddenLoaded: 0,
+              forms: 1,
+              fileInputs: 0,
+              links: 0,
+              media: 0,
+              frames: 0,
+              shadowRoots: 0,
+            },
+            nodes: [{ kind: 'input', text: 'Query', inputType: 'text' }],
+            failureKind: null,
+            nextAllowedActions: ['read map again'],
+          }
+        }
+        return null
+      },
+    })
+
+    const stale = await executeBrowserTool('browser_probe_readonly', { generation: 1, query: 'query', scope: 'forms' }, controller)
+    const stalePayload = JSON.parse(stale) as { ok: boolean; errorCode: string }
+    assert.strictEqual(stalePayload.ok, false)
+    assert.strictEqual(stalePayload.errorCode, 'stale_page_map')
+
+    await executeBrowserTool('browser_read_page_map', {}, controller)
+    const result = await executeBrowserTool('browser_probe_readonly', { generation: 1, query: 'query', scope: 'forms' }, controller)
+    const payload = JSON.parse(result) as { ok: boolean; scope: string; nodes: Array<{ text: string }> }
+    assert.strictEqual(payload.ok, true)
+    assert.strictEqual(payload.scope, 'forms')
+    assert.strictEqual(payload.nodes[0]?.text, 'Query')
+  })
+
+  it('browser_act_on_target rejects a target that belongs to an ambiguity group without disambiguation', async () => {
+    const controller = createControllerMock({
+      executeJS: async (_tabId, code) => {
+        const source = String(code || '')
+        if (source.includes('__READY_AGENT_PAGE_MAP__')) {
+          return {
+            identity: { url: 'https://example.com/form', title: 'Example Form' },
+            viewport: { width: 1000, height: 800 },
+            rawRoots: [
+              {
+                role: 'generic',
+                children: [
+                  { role: 'button', name: 'Search', backendDOMNodeId: 1, frameId: '0' },
+                  { role: 'button', name: 'Search', backendDOMNodeId: 2, frameId: '0' },
+                ],
+              },
+            ],
+            riskFlags: {},
+          }
+        }
+        if (source.includes('__READY_AGENT_TARGET_PROBE__')) {
+          return { matchCount: 1, disabled: false, target: { role: 'button', name: 'Search' } }
+        }
+        return null
+      },
+    })
+
+    await executeBrowserTool('browser_read_page_map', {}, controller)
+    const result = await executeBrowserTool('browser_act_on_target', { target_id: '1:0:1', action: 'click' }, controller)
+    const payload = JSON.parse(result) as { ok: boolean; errorCode: string; detail?: Record<string, unknown> }
+
+    assert.strictEqual(payload.ok, false)
+    assert.strictEqual(payload.errorCode, 'ambiguous_target')
+    assert.deepStrictEqual(payload.detail?.ambiguityGroup, { role: 'button', name: 'Search', targetIds: ['1:0:1', '1:0:2'] })
+  })
+
+  it('browser_act_on_target requires a fresh page map and then performs a target action', async () => {
+    const calls: string[] = []
+    const controller = createControllerMock({
+      executeJS: async (_tabId, code) => {
+        const source = String(code || '')
+        calls.push(source)
+        if (source.includes('__READY_AGENT_PAGE_MAP__')) {
+          return {
+            identity: { url: 'https://example.com/form', title: 'Example Form' },
+            viewport: { width: 1000, height: 800 },
+            rawRoots: [{ role: 'generic', children: [{ role: 'textbox', name: 'Query', backendDOMNodeId: 1, frameId: '0' }] }],
+            riskFlags: {},
+          }
+        }
+        if (source.includes('__READY_AGENT_TARGET_PROBE__')) {
+          return { matchCount: 1, disabled: false, target: { role: 'textbox', name: 'Query' } }
+        }
+        if (source.includes('__READY_AGENT_ACT_ON_TARGET__')) {
+          return { ok: true, action: 'fill', target: { role: 'textbox', name: 'Query' } }
+        }
+        if (source.includes('bodyText: String(document.body')) {
+          return { url: 'https://example.com/form', title: 'Example Form', bodyText: 'filled' }
+        }
+        return null
+      },
+    })
+
+    const stale = await executeBrowserTool('browser_act_on_target', { target_id: '1:0:1', action: 'fill', value: 'hello' }, controller)
+    const stalePayload = JSON.parse(stale) as { ok: boolean; errorCode: string }
+    assert.strictEqual(stalePayload.ok, false)
+    assert.strictEqual(stalePayload.errorCode, 'stale_page_map')
+
+    await executeBrowserTool('browser_read_page_map', {}, controller)
+    const result = await executeBrowserTool('browser_act_on_target', { target_id: '1:0:1', action: 'fill', value: 'hello' }, controller)
+    const payload = JSON.parse(result) as { ok: boolean; action: string; readBack: string; changed: boolean; failureKind: string | null; result: { ok?: boolean } }
+
+    assert.strictEqual(payload.ok, true)
+    assert.strictEqual(payload.action, 'fill')
+    assert.strictEqual(payload.readBack, 'delta')
+    assert.strictEqual(payload.changed, false)
+    assert.strictEqual(payload.failureKind, null)
+    assert.strictEqual(payload.result.ok, true)
+    assert.ok(calls.some((source) => source.includes('__READY_AGENT_ACT_ON_TARGET__')))
+  })
+
   it('browser_click_at should clamp normalized coordinates', async () => {
     const controller = createControllerMock()
     const result = await executeBrowserTool('browser_click_at', { x: -20, y: 1800 }, controller)
@@ -288,6 +483,48 @@ describe('browser-tools v2', () => {
       assert.deepEqual(urls, [
         'https://sns-webpic-qc.xhscdn.com/notes_pre_post/hero!nc_n_webp_mw_1',
         'https://sns-webpic-qc.xhscdn.com/notes_pre_post/second!nc_n_webp_mw_1',
+      ])
+    } finally {
+      dom.window.close()
+    }
+  })
+
+  it('browser_collect_images reports Xiaohongshu carousel total when only the active image is loaded', async () => {
+    const dom = new JSDOM(`
+      <div class="note-container">
+        <div class="media-container">
+          <img id="hero" src="https://sns-webpic-qc.xhscdn.com/notes_pre_post/hero!nc_n_webp_mw_1" />
+          <div class="swiper-pagination">1 / 10</div>
+        </div>
+      </div>
+    `, { url: 'https://www.xiaohongshu.com/explore/69f5db6300000000360185ba' })
+
+    try {
+      const img = dom.window.document.querySelector('img') as HTMLImageElement
+      Object.defineProperty(img, 'naturalWidth', { configurable: true, value: 1200 })
+      Object.defineProperty(img, 'naturalHeight', { configurable: true, value: 1600 })
+      img.getBoundingClientRect = () => ({
+        left: 0,
+        top: 0,
+        right: 600,
+        bottom: 800,
+        width: 600,
+        height: 800,
+        x: 0,
+        y: 0,
+        toJSON: () => ({}),
+      })
+
+      const controller = createControllerMock({
+        executeJS: async (_tabId, code) => dom.window.Function('code', 'with (this) { return eval(code) }').call(dom.window, String(code || '')),
+      })
+      const result = await executeBrowserTool('browser_collect_images', { include_hidden: false, limit: 20 }, controller)
+      const payload = JSON.parse(result) as { count: number; expectedImageCount?: number; images: Array<{ url: string }> }
+
+      assert.equal(payload.count, 1)
+      assert.equal(payload.expectedImageCount, 10)
+      assert.deepEqual(payload.images.map((item) => item.url), [
+        'https://sns-webpic-qc.xhscdn.com/notes_pre_post/hero!nc_n_webp_mw_1',
       ])
     } finally {
       dom.window.close()

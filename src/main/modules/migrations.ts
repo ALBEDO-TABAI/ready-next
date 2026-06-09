@@ -2094,6 +2094,60 @@ const migrations: Migration[] = [
           ON document_reading_sessions(workspace_root, ended_at DESC);
       `)
     }
+  },
+
+  // ------------------------------------------------------------------ 048
+  {
+    name: '048_browser_site_experience',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS browser_site_experience (
+          id TEXT PRIMARY KEY,
+          domain TEXT NOT NULL,
+          path_pattern TEXT,
+          applies_to_task_kinds_json TEXT NOT NULL,
+          aliases_json TEXT NOT NULL,
+          reliable_entry_patterns_json TEXT NOT NULL,
+          generated_link_patterns_json TEXT NOT NULL,
+          known_traps_json TEXT NOT NULL,
+          selectors_or_target_hints_json TEXT NOT NULL,
+          frame_hints_json TEXT NOT NULL,
+          risk_level TEXT NOT NULL CHECK (risk_level IN ('low','medium','high')),
+          confidence REAL NOT NULL,
+          source TEXT NOT NULL CHECK (source IN ('manual','successful-task','test-fixture')),
+          last_verified_at TEXT NOT NULL,
+          expires_at TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_browser_site_experience_domain
+          ON browser_site_experience(domain, updated_at DESC);
+      `)
+    }
+  },
+
+  // ------------------------------------------------------------------ 049
+  {
+    name: '049_extend_run_meta_long_task_diagnostics',
+    up: (db) => {
+      const addColumn = (sql: string): void => {
+        try {
+          db.exec(sql)
+        } catch {
+          // column already exists
+        }
+      }
+      addColumn('ALTER TABLE run_meta ADD COLUMN task_type TEXT')
+      addColumn('ALTER TABLE run_meta ADD COLUMN terminal_reason TEXT')
+      addColumn('ALTER TABLE run_meta ADD COLUMN provider_protocol TEXT')
+      addColumn('ALTER TABLE run_meta ADD COLUMN wire_api TEXT')
+      addColumn('ALTER TABLE run_meta ADD COLUMN context_window INTEGER')
+      addColumn('ALTER TABLE run_meta ADD COLUMN provider_diagnostics_json TEXT')
+      addColumn('ALTER TABLE run_meta ADD COLUMN budget_json TEXT')
+      addColumn('ALTER TABLE run_meta ADD COLUMN continuation_ref_json TEXT')
+      addColumn('ALTER TABLE run_meta ADD COLUMN recovery_history_json TEXT')
+    }
   }
 ]
 

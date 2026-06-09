@@ -4,6 +4,7 @@ import type {
   BrowserTaskProjectionPayload,
   BrowserTaskPlanContinuity,
 } from '../../../../shared/browser-agent-task'
+import type { BrowserSiteExperienceHint } from '../../../../shared/browser-site-experience'
 import type { RunBudgetHint } from '../contracts/run-contracts'
 import type { BrowserController } from '../../browser-engine/ipc-handler'
 import { BrowserAgentRunner, type BrowserAgentRunResult } from '../../tools/browser-agent-runner'
@@ -31,12 +32,22 @@ export interface BrowserToolLoopProgress {
   checkpointMessage: string | null
 }
 
+interface BrowserTaskEvidence {
+  kind: 'page_observed' | 'upload_complete' | 'prompt_complete' | 'submit_confirmed' | 'action_completed'
+  toolName: string
+  summary: string
+}
+
 export interface BrowserExecutionDispatch {
   kind: 'none' | 'clarify' | 'deterministic' | 'tool_loop'
   continuityInstruction: string | null
   responseText: string | null
   toolLoopMessage: string | null
   fallbackLog: string | null
+}
+
+interface BrowserSiteExperienceStoreLike {
+  queryHints(params: { url: string; taskKind?: string; highControlPlatform?: boolean }): BrowserSiteExperienceHint[]
 }
 
 function resolveBrowserTaskTitle(decision: BrowserTaskDecision): string {
@@ -65,8 +76,85 @@ function compactRecentEvidence(recentEvidence: string[] | null | undefined): str
   return deduped
 }
 
+function parseToolJson(text: string): Record<string, unknown> | null {
+  const trimmed = String(text || '').trim()
+  if (!trimmed.startsWith('{') || !trimmed.endsWith('}')) return null
+  try {
+    const parsed = JSON.parse(trimmed)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : null
+  } catch {
+    return null
+  }
+}
+
+function collectBrowserTaskEvidence(
+  results: Array<{ toolName: string; resultText: string }> | null | undefined,
+): BrowserTaskEvidence[] {
+  const evidence: BrowserTaskEvidence[] = []
+  for (const item of results || []) {
+    const toolName = String(item.toolName || '')
+    const resultText = String(item.resultText || '')
+    if (!toolName || /^(Error:|Search failed|Page content is empty)/i.test(resultText.trim())) continue
+    const parsed = parseToolJson(resultText)
+    const parsedText = JSON.stringify(parsed || {})
+    if (toolName === 'browser_read_page_map' && parsed?.pageIdentity) {
+      evidence.push({ kind: 'page_observed', toolName, summary: 'page map captured' })
+      continue
+    }
+    if (toolName === 'browser_probe_readonly' && parsed?.ok === true) {
+      evidence.push({ kind: 'page_observed', toolName, summary: String(parsed.summary || 'readonly probe captured') })
+      if (/input_has_files|attachment_name_matched|fileInput/i.test(parsedText)) {
+        evidence.push({ kind: 'upload_complete', toolName, summary: 'upload evidence in readonly probe' })
+      }
+      if (/prompt_matched|prompt_filled|textarea|textbox|input/i.test(parsedText)) {
+        evidence.push({ kind: 'prompt_complete', toolName, summary: 'prompt/input evidence in readonly probe' })
+      }
+      continue
+    }
+    if (toolName === 'browser_upload_scope_attachment' && !/^Error:/i.test(resultText)) {
+      evidence.push({ kind: 'upload_complete', toolName, summary: resultText.slice(0, 160) })
+      continue
+    }
+    if (toolName === 'browser_act_on_target' && parsed?.ok === true) {
+      const action = String(parsed.action || '')
+      evidence.push({ kind: 'action_completed', toolName, summary: `target action ${action || 'done'}` })
+      if (action === 'fill' || action === 'choose') {
+        evidence.push({ kind: 'prompt_complete', toolName, summary: `target action ${action}` })
+      }
+      if (action === 'click') {
+        evidence.push({ kind: 'submit_confirmed', toolName, summary: 'target click completed' })
+      }
+      continue
+    }
+    if (['browser_type', 'browser_type_smart', 'browser_compose_message'].includes(toolName)) {
+      evidence.push({ kind: 'prompt_complete', toolName, summary: resultText.slice(0, 160) })
+      continue
+    }
+    if (['browser_navigate', 'browser_search', 'browser_read_page'].includes(toolName)) {
+      evidence.push({ kind: 'page_observed', toolName, summary: resultText.slice(0, 160) })
+    }
+  }
+  return evidence
+}
+
+function evidenceSatisfiesStep(step: BrowserPlanStep, evidence: BrowserTaskEvidence[]): boolean {
+  if (evidence.length === 0) return false
+  const text = `${step.id} ${step.goal} ${step.verify.join(' ')}`.toLowerCase()
+  const has = (kind: BrowserTaskEvidence['kind']) => evidence.some((item) => item.kind === kind)
+  if (/(resolve|navigate|target|page|页面|目标页|打开|进入)/i.test(text)) return has('page_observed')
+  if (/(upload|attachment|file|附件|上传|素材|文件)/i.test(text)) return has('upload_complete')
+  if (/(prompt|input|fill|提示词|输入|填写)/i.test(text)) return has('prompt_complete')
+  if (/(submit|send|running|提交|发送|运行态|生成中)/i.test(text)) return has('submit_confirmed') || has('action_completed')
+  return false
+}
+
 export class BrowserDomainOrchestrator {
-  constructor(private readonly planner: BrowserTaskPlanner) {}
+  constructor(
+    private readonly planner: BrowserTaskPlanner,
+    private readonly siteExperienceStore?: BrowserSiteExperienceStoreLike | null,
+  ) {}
 
   createToolLoopState(decision: BrowserTaskDecision): BrowserToolLoopState {
     return {
@@ -129,7 +217,7 @@ export class BrowserDomainOrchestrator {
     return {
       browserDecision,
       browserContinuity,
-      browserContinuityInstruction: this.planner.buildContinuityInstruction(browserContinuity),
+      browserContinuityInstruction: this.buildContinuityAndSiteExperienceInstruction(browserContinuity, browserDecision),
       clarifyText,
       shouldInspectAmbiguousModeEntry,
       canUseDeterministicBrowserRunner,
@@ -140,6 +228,7 @@ export class BrowserDomainOrchestrator {
     state: BrowserToolLoopState
     responseText?: string | null
     executedBrowserToolsThisIteration: number
+    browserToolResultsThisIteration?: Array<{ toolName: string; resultText: string }> | null
   }): BrowserToolLoopProgress {
     if (!params.state.isBrowserTask || params.executedBrowserToolsThisIteration <= 0) {
       return {
@@ -152,16 +241,12 @@ export class BrowserDomainOrchestrator {
     let stepIndex = params.state.stepIndex
     let browserToolCallCount = params.state.browserToolCallCount
     let advancedStepIndex: number | null = null
+    const evidence = collectBrowserTaskEvidence(params.browserToolResultsThisIteration)
 
-    if (params.responseText) {
-      const stepCompleteMatch = params.responseText.match(/步骤\s*(\d+)\s*完成/)
-      if (stepCompleteMatch) {
-        const completedStep = parseInt(stepCompleteMatch[1], 10) - 1
-        if (completedStep >= stepIndex && completedStep < params.state.steps.length) {
-          stepIndex = completedStep + 1
-          advancedStepIndex = stepIndex
-        }
-      }
+    const stepUnderReview = params.state.steps[stepIndex]
+    if (stepUnderReview && evidenceSatisfiesStep(stepUnderReview, evidence)) {
+      stepIndex += 1
+      advancedStepIndex = stepIndex
     }
 
     browserToolCallCount += params.executedBrowserToolsThisIteration
@@ -192,9 +277,10 @@ export class BrowserDomainOrchestrator {
         currentStep ? `当前步骤: ${stepIndex + 1}/${params.state.steps.length} — ${currentStep.id}: ${currentStep.goal}` : '',
         currentStep ? `验证条件: ${currentStep.verify.join('；')}` : '',
         nextStep ? `下一步骤: ${nextStep.id}: ${nextStep.goal}` : '已是最后步骤',
+        evidence.length > 0 ? `最近证据: ${evidence.map((item) => `${item.toolName}:${item.kind}`).join('；')}` : '最近证据: 暂无可推进步骤的结构化证据',
         ``,
-        `请确认当前步骤的验证条件是否已满足。如果满足，明确说"步骤 ${stepIndex + 1} 完成"并继续下一步。`,
-        `如果未满足且还有重试机会，继续尝试。`,
+        `请用页面地图、只读探针或动作 readBack 复查当前步骤。`,
+        `如果证据已满足，继续下一步；如果未满足且还有重试机会，换一条证据路径继续尝试。`,
         `如果未满足且无法继续，报告失败原因。`,
       ].filter(Boolean).join('\n'),
     }
@@ -447,5 +533,30 @@ export class BrowserDomainOrchestrator {
       '- 如果没有稳定输入锚点，不要先点发送按钮',
       '- 不要点击历史记录的"重新生成"按钮',
     ].join('\n')
+  }
+
+  private buildContinuityAndSiteExperienceInstruction(
+    continuity: BrowserTaskPlanContinuity | null,
+    decision: BrowserTaskDecision,
+  ): string | null {
+    const base = this.planner.buildContinuityInstruction(continuity)
+    const targetUrl = continuity?.activePage?.url || decision.plan?.targetUrl || ''
+    if (!targetUrl || !this.siteExperienceStore) return base
+    let hints: BrowserSiteExperienceHint[] = []
+    try {
+      hints = this.siteExperienceStore.queryHints({
+        url: targetUrl,
+        taskKind: decision.plan?.taskKind,
+      })
+    } catch {
+      hints = []
+    }
+    if (hints.length === 0) return base
+    const siteHint = [
+      '## 站点经验提示',
+      '以下内容只是 hint，必须用当前页面地图、只读探针或动作复查证据验证；不能降低高风控限制。',
+      ...hints.slice(0, 4).map((hint, index) => `${index + 1}. ${hint.domain} risk=${hint.riskLevel} confidence=${hint.confidence.toFixed(2)} — ${hint.hint}`),
+    ].join('\n')
+    return [base, siteHint].filter(Boolean).join('\n\n')
   }
 }

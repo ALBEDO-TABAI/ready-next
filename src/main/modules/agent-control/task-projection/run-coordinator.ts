@@ -10,6 +10,7 @@ import type {
   RunCoordinatorResult,
   RunMessage,
   RunBudgetUsage,
+  TaskType,
 } from '../contracts/run-contracts'
 import {
   createRunBudgetSeed,
@@ -27,6 +28,17 @@ function phaseFromTerminalReason(reason: TurnTerminalReason | null | undefined):
   if (reason === 'cancelled_runtime' || reason === 'cancelled_user') return 'cancelled'
   if (reason === 'failed_skill' || reason === 'resume_launch_failed' || reason === 'persistence_failed') return 'error'
   return 'checkpoint'
+}
+
+function resolveInitialTaskTypeFromPrepared(prepared: PreparedRunPayload): TaskType {
+  const primaryDomain = prepared.intentClassification?.primaryDomain
+  if (primaryDomain === 'research') return 'research'
+  if (primaryDomain === 'skill') return 'multi_step_task'
+
+  const modules = new Set((prepared.triggerHits || []).map((trigger) => String(trigger.module || '').trim()))
+  if (modules.has('research')) return 'research'
+  if (modules.has('skill')) return 'multi_step_task'
+  return 'short_task'
 }
 
 export class RunCoordinator {
@@ -75,21 +87,22 @@ export class RunCoordinator {
     hooks?: RunCompletionHooks & ReflectionResultHook,
   ): Promise<RunCoordinatorResult> {
     const taskId = request.taskId || `task-${randomUUID()}`
-    const budget = request.budget || createRunBudgetSeed()
+    const prepared = await this.deps.promptAssembly.buildForScopedRun({
+      scope: request.scope,
+      message: request.message,
+      coordinators: request.coordinators,
+    })
+    const initialTaskType = request.budget ? 'short_task' : resolveInitialTaskTypeFromPrepared(prepared)
+    const budget = request.budget || createRunBudgetSeed(initialTaskType)
     const budgetState: RunBudgetUsage = {
       iterationsUsed: 0,
       toolCallsUsed: 0,
       parallelToolGroupsUsed: 0,
     }
-    const taskBudgetRuntime = createTaskBudgetRuntime('short_task', {
+    const taskBudgetRuntime = createTaskBudgetRuntime(initialTaskType, {
       budget,
       usage: { ...budgetState },
-      bootstrapBudget: !request.budget,
-    })
-    const prepared = await this.deps.promptAssembly.buildForScopedRun({
-      scope: request.scope,
-      message: request.message,
-      coordinators: request.coordinators,
+      bootstrapBudget: !request.budget && initialTaskType === 'short_task',
     })
     const messageWithBootstrap = this.deps.promptAssembly.applyToMessage(request.message, prepared)
 

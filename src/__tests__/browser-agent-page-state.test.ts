@@ -25,35 +25,73 @@ function createRuntime(): BrowserAgentRuntime {
           activeElement: 'textarea:prompt',
         }
       }
-      if (source.includes('__READY_UPLOAD_STATE__')) {
+      if (source.includes('__READY_READONLY_PROBE__') && source.includes('scope = "forms"')) {
         return {
-          complete: true,
-          evidence: ['preview_visible', 'attachment_name_matched'],
-          inputHasFiles: true,
-          previewVisible: true,
-          attachmentNameMatched: true,
-          removeActionVisible: true,
+          ok: true,
+          generation: 0,
+          query: '',
+          scope: 'forms',
+          riskDecision: 'allowed',
+          summary: 'scope=forms returned=3 fileInputs=1',
+          counts: {
+            totalCandidates: 3,
+            returned: 3,
+            hiddenLoaded: 0,
+            forms: 1,
+            fileInputs: 1,
+            links: 0,
+            media: 1,
+            frames: 0,
+            shadowRoots: 0,
+          },
+          nodes: [
+            {
+              kind: 'input',
+              text: '上传 poster.png',
+              inputType: 'file',
+              fileNames: ['poster.png'],
+            },
+            {
+              kind: 'input',
+              text: 'prompt',
+              inputType: 'textarea',
+              valuePreview: '做一张温暖的美食海报',
+            },
+            {
+              kind: 'text',
+              text: '立即生成',
+              role: 'button',
+            },
+          ],
+          failureKind: null,
+          nextAllowedActions: ['read map again'],
         }
       }
-      if (source.includes('__READY_PROMPT_STATE__')) {
+      if (source.includes('__READY_READONLY_PROBE__') && source.includes('scope = "document"')) {
         return {
-          promptMatched: true,
-          promptFilled: true,
-          promptText: '做一张温暖的美食海报',
-          generating: false,
-          submitEvidence: ['prompt_matched'],
-          sendButtonCount: 1,
-          sendButtonDisabled: false,
-          uploadChipVisible: true,
-        }
-      }
-      if (source.includes('__READY_DOM_STATE__')) {
-        return {
-          inputCandidateCount: 1,
-          sendCandidateCount: 1,
-          uploadCandidateCount: 1,
-          modalVisible: false,
-          bodyStateText: '提示词 输入框 上传图片 立即生成',
+          ok: true,
+          generation: 0,
+          query: '',
+          scope: 'document',
+          riskDecision: 'allowed',
+          summary: 'scope=document returned=2 media=1',
+          counts: {
+            totalCandidates: 2,
+            returned: 2,
+            hiddenLoaded: 0,
+            forms: 1,
+            fileInputs: 1,
+            links: 0,
+            media: 1,
+            frames: 0,
+            shadowRoots: 0,
+          },
+          nodes: [
+            { kind: 'media', text: 'poster.png preview', src: 'blob:poster' },
+            { kind: 'text', text: '提示词 输入框 上传图片 立即生成 poster.png' },
+          ],
+          failureKind: null,
+          nextAllowedActions: ['read map again'],
         }
       }
       return null

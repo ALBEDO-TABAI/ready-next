@@ -195,6 +195,34 @@ describe('visible_collect task runner', () => {
     assert.equal(result.items.length, 1)
   })
 
+  it('counts image_gallery visible collection items instead of note candidates', async () => {
+    const persistence = new FakePersistence()
+    const capability = {
+      openTarget: async () => ({ success: true, tabId: 'tab-1' }),
+      extractStructured: async () => ({
+        template: 'image_gallery' as const,
+        items: [
+          { sourceUrl: 'https://example.com/gallery', link: 'https://img.example.com/1.webp', media: ['https://img.example.com/1.webp'] },
+          { sourceUrl: 'https://example.com/gallery', link: 'https://img.example.com/2.webp', media: ['https://img.example.com/2.webp'] },
+        ],
+        sourceUrl: 'https://example.com/gallery',
+      }),
+      scrollViewportOnce: async () => ({ scrollY: 0, atBottom: true }),
+    } as unknown as BrowserCapabilityService
+    const runner = new BrowserContentTaskRunner(capability, persistence as never, new BrowserWriteLeaseService())
+    const handle = await runner.startTask({
+      kind: 'visible_collect',
+      payload: { template: 'image_gallery', tabId: 'tab-1', maxRounds: 4 },
+    })
+    const done = await waitForStatus(persistence, handle.taskId, ['completed'], 6_000)
+    const result = done.result as { frozenCount?: number; candidateCount?: number; noteCandidates?: unknown[] }
+
+    assert.equal(done.progress.total, 2)
+    assert.equal(result.frozenCount, 2)
+    assert.equal(result.candidateCount, 0)
+    assert.deepEqual(result.noteCandidates, [])
+  })
+
   it('navigates the supplied agent tab for url-based visible collect', async () => {
     const persistence = new FakePersistence()
     const navigations: Array<{ tabId: string; url: string }> = []

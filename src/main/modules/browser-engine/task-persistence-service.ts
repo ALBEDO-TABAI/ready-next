@@ -79,6 +79,13 @@ export class BrowserTaskPersistenceService {
     return parseJSON<Record<string, unknown>>(record.payload_json, {})
   }
 
+  updateTaskPayload(taskId: string, payload: Record<string, unknown>): void {
+    this.repository.updateTask(taskId, {
+      payload_json: JSON.stringify(payload || {}),
+      updated_at: new Date().toISOString(),
+    })
+  }
+
   updateProgress(taskId: string, progress: Partial<BrowserCapabilityTaskProgress>, extras?: {
     checkpoint?: BrowserTaskCheckpoint | null
     status?: BrowserCapabilityTaskStatus

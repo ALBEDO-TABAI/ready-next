@@ -2141,6 +2141,7 @@ export class DatabaseManager {
     id: string,
     updates: {
       status?: string
+      payload_json?: string | null
       checkpoint_json?: string | null
       result_json?: string | null
       progress_total?: number

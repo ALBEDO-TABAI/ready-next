@@ -290,10 +290,27 @@ export function consumeIterationBudget(input: RunBudgetUsage | TaskBudgetRuntime
   }
 }
 
-export function consumeToolCallBudget(usage: RunBudgetUsage, amount = 1): RunBudgetUsage {
+export function consumeToolCallBudget(usage: RunBudgetUsage, amount?: number): RunBudgetUsage
+export function consumeToolCallBudget(runtime: TaskBudgetRuntime, amount?: number): TaskBudgetRuntime
+export function consumeToolCallBudget(input: RunBudgetUsage | TaskBudgetRuntime, amount = 1): RunBudgetUsage | TaskBudgetRuntime {
+  const increment = Math.max(0, amount)
+  if ('budget' in input) {
+    if (input.frozen) return input
+    const next = {
+      ...input,
+      usage: {
+        ...input.usage,
+        toolCallsUsed: input.usage.toolCallsUsed + increment,
+      },
+    }
+    return {
+      ...next,
+      warningLevel: getBudgetWarningLevel(getBudgetUsagePercent(next)),
+    }
+  }
   return {
-    ...usage,
-    toolCallsUsed: usage.toolCallsUsed + Math.max(0, amount),
+    ...input,
+    toolCallsUsed: input.toolCallsUsed + increment,
   }
 }
 

@@ -23,13 +23,13 @@ describe('browser tool write classification', () => {
   })
 
   it('treats obvious page mutations as writes', () => {
-    for (const name of ['browser_navigate', 'browser_click', 'browser_type', 'browser_click_at', 'browser_scroll_at', 'browser_upload_scope_attachment', 'browser_go_back']) {
+    for (const name of ['browser_navigate', 'browser_click', 'browser_type', 'browser_click_at', 'browser_scroll_at', 'browser_upload_scope_attachment', 'browser_go_back', 'browser_act_on_target']) {
       assert.equal(classifyBrowserToolCall(name), 'write', `${name} should be write`)
     }
   })
 
   it('treats pure observation as reads (free of the lease)', () => {
-    for (const name of ['browser_read_page', 'browser_get_tabs', 'browser_capture_viewport', 'browser_probe_workflow_state', 'browser_get_task', 'browser_aggregate_results']) {
+  for (const name of ['browser_read_page', 'browser_read_page_map', 'browser_probe_readonly', 'browser_get_tabs', 'browser_capture_viewport', 'browser_probe_workflow_state', 'browser_get_task', 'browser_aggregate_results']) {
       assert.equal(classifyBrowserToolCall(name), 'read', `${name} should be read`)
     }
   })
@@ -58,5 +58,10 @@ describe('browser tool write classification', () => {
   it('fails closed: an unknown tool defaults to write', () => {
     assert.equal(classifyBrowserToolCall('browser_some_new_mutator', {}), 'write')
     assert.equal(isClassifiedBrowserTool('browser_some_new_mutator'), false)
+  })
+
+  it('does not keep browser_visual_step as an unregistered ghost tool', () => {
+    assert.equal(isClassifiedBrowserTool('browser_visual_step'), false)
+    assert.equal(classifyBrowserToolCall('browser_visual_step'), 'write')
   })
 })

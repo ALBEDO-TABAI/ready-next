@@ -376,6 +376,7 @@ export class BrowserDomainAdapter implements DomainAdapter {
         state: state.browserToolLoopState,
         responseText: params.responseText,
         executedBrowserToolsThisIteration: params.toolBatch?.executedBrowserToolsThisIteration || 0,
+        browserToolResultsThisIteration: params.toolBatch?.browserToolResultsThisIteration || [],
       })
       const nextState = {
         ...state,

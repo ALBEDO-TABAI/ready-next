@@ -1,4 +1,9 @@
 import type { BrowserActionTarget, BrowserPageState } from '../../../shared/browser-agent-task'
+import {
+  buildBrowserReadonlyProbeJs,
+  type BrowserReadonlyProbeNode,
+  type BrowserReadonlyProbeResult,
+} from '../../../shared/browser-readonly-probe'
 import type { BrowserAgentRuntime } from './agent-runtime-adapter'
 
 function asTargets(input: unknown): BrowserActionTarget[] {
@@ -134,27 +139,142 @@ export class BrowserPageStateService {
     candidates?: Partial<BrowserPageState['candidates']>
     continuity?: Partial<BrowserPageState['continuity']>
   }): Promise<BrowserPageState> {
-    const [page, upload, prompt, dom] = await Promise.all([
+    const [page, formsProbe, documentProbe] = await Promise.all([
       this.getPageIdentity(),
-      this.runtime.executeJS(null, `(() => { const __READY_UPLOAD_STATE__ = true; return null })()`),
-      this.runtime.executeJS(null, `(() => { const __READY_PROMPT_STATE__ = true; return null })()`),
-      this.runtime.executeJS(null, `(() => { const __READY_DOM_STATE__ = true; return null })()`),
+      this.runtime.executeJS(null, buildBrowserReadonlyProbeJs({
+        generation: 0,
+        scope: 'forms',
+        maxNodes: 60,
+        includeHidden: true,
+      })),
+      this.runtime.executeJS(null, buildBrowserReadonlyProbeJs({
+        generation: 0,
+        scope: 'document',
+        maxNodes: 60,
+        includeHidden: true,
+      })),
     ])
 
-    const uploadRecord = upload && typeof upload === 'object' ? upload as Record<string, unknown> : {}
-    const promptRecord = prompt && typeof prompt === 'object' ? prompt as Record<string, unknown> : {}
-    const domRecord = dom && typeof dom === 'object' ? dom as Record<string, unknown> : {}
+    const derived = derivePageStateFromReadonlyProbe({
+      formsProbe: coerceReadonlyProbe(formsProbe),
+      documentProbe: coerceReadonlyProbe(documentProbe),
+      promptCandidate: params.promptCandidate,
+      attachmentName: params.attachmentName,
+    })
 
     return this.composePageState({
       page,
       promptCandidate: params.promptCandidate,
       attachmentName: params.attachmentName,
       targetUrl: params.targetUrl,
-      upload: uploadRecord,
-      prompt: promptRecord,
-      dom: domRecord,
+      upload: derived.upload,
+      prompt: derived.prompt,
+      dom: derived.dom,
+      evidence: { recentEvidence: derived.recentEvidence },
       candidates: params.candidates,
       continuity: params.continuity,
     })
+  }
+}
+
+function coerceReadonlyProbe(input: unknown): BrowserReadonlyProbeResult | null {
+  if (!input || typeof input !== 'object') return null
+  const record = input as BrowserReadonlyProbeResult
+  return record.ok === true && Array.isArray(record.nodes) ? record : null
+}
+
+function normalizeProbeText(value: unknown): string {
+  return String(value || '').replace(/\s+/g, ' ').trim().toLowerCase()
+}
+
+function nodeText(node: BrowserReadonlyProbeNode): string {
+  return [
+    node.text,
+    node.href,
+    node.src,
+    node.selectorHint,
+    node.inputType,
+    node.valuePreview,
+    ...(Array.isArray(node.fileNames) ? node.fileNames : []),
+  ].map((value) => String(value || '')).filter(Boolean).join(' ')
+}
+
+function derivePageStateFromReadonlyProbe(params: {
+  formsProbe: BrowserReadonlyProbeResult | null
+  documentProbe: BrowserReadonlyProbeResult | null
+  promptCandidate: string
+  attachmentName?: string
+}): {
+  upload: Partial<BrowserPageState['upload']>
+  prompt: Partial<BrowserPageState['prompt']>
+  dom: Partial<BrowserPageState['dom']>
+  recentEvidence: string[]
+} {
+  const formNodes = params.formsProbe?.nodes || []
+  const documentNodes = params.documentProbe?.nodes || []
+  const allText = normalizeProbeText([...formNodes, ...documentNodes].map(nodeText).join(' '))
+  const promptNeedle = normalizeProbeText(params.promptCandidate)
+  const attachmentNeedle = normalizeProbeText(params.attachmentName)
+  const inputNodes = formNodes.filter((node) => node.kind === 'input')
+  const fileInputs = inputNodes.filter((node) => normalizeProbeText(node.inputType) === 'file')
+  const editableInputs = inputNodes.filter((node) => {
+    const type = normalizeProbeText(node.inputType || 'text')
+    return !['file', 'hidden', 'button', 'submit', 'reset', 'checkbox', 'radio'].includes(type)
+  })
+  const sendTargets = formNodes.filter((node) => {
+    const text = normalizeProbeText(nodeText(node))
+    return /(send|submit|generate|发送|提交|生成|发布|运行)/.test(text)
+  })
+  const fileNames = fileInputs.flatMap((node) => Array.isArray(node.fileNames) ? node.fileNames : [])
+  const inputHasFiles = fileNames.length > 0
+  const attachmentNameMatched = Boolean(
+    attachmentNeedle &&
+    (fileNames.some((name) => normalizeProbeText(name).includes(attachmentNeedle)) || allText.includes(attachmentNeedle))
+  )
+  const promptText = editableInputs
+    .map((node) => String(node.valuePreview || '').trim())
+    .find((value) => value.length > 0) || ''
+  const promptMatched = Boolean(promptNeedle && normalizeProbeText(promptText).includes(promptNeedle))
+  const promptFilled = Boolean(promptText)
+  const bodyStateText = [
+    params.documentProbe?.summary || '',
+    ...documentNodes.slice(0, 12).map((node) => node.text),
+  ].join(' ').slice(0, 1200)
+  const modalVisible = /(dialog|modal|弹窗|验证码|登录|sign in|captcha)/i.test(bodyStateText)
+  const recentEvidence = [
+    params.formsProbe ? 'readonly_probe_forms' : '',
+    params.documentProbe ? 'readonly_probe_document' : '',
+    inputHasFiles ? 'input_has_files' : '',
+    attachmentNameMatched ? 'attachment_name_matched' : '',
+    promptMatched ? 'prompt_matched' : promptFilled ? 'prompt_filled' : '',
+  ].filter(Boolean)
+
+  return {
+    upload: {
+      complete: Boolean(inputHasFiles && (attachmentNameMatched || !attachmentNeedle)),
+      evidence: recentEvidence,
+      inputHasFiles,
+      previewVisible: Boolean(attachmentNameMatched && (params.documentProbe?.counts.media || 0) > 0),
+      attachmentNameMatched,
+      removeActionVisible: /(remove|delete|clear|close|删除|移除|清除)/.test(allText),
+    },
+    prompt: {
+      promptMatched,
+      promptFilled,
+      promptText,
+      generating: /(generating|running|排队|生成中|处理中)/.test(allText),
+      submitEvidence: sendTargets.length > 0 ? ['send_target_detected'] : [],
+      sendButtonCount: sendTargets.length,
+      sendButtonDisabled: false,
+      uploadChipVisible: attachmentNameMatched,
+    },
+    dom: {
+      inputCandidateCount: editableInputs.length,
+      sendCandidateCount: sendTargets.length,
+      uploadCandidateCount: fileInputs.length,
+      modalVisible,
+      bodyStateText,
+    },
+    recentEvidence,
   }
 }

@@ -155,10 +155,16 @@ function discoveryStatusFor(stopReason: string): 'complete' | 'partial' | 'pause
   return 'partial'
 }
 
-function visibleCollectResult(taskId: string, items: BrowserStructuredItem[], rounds: number, stopReason: string, targetUrl: string, outputRootDir: unknown, userExpectedTotal?: number) {
+function visibleCollectFrozenCount(items: BrowserStructuredItem[], template: string): number {
+  if (template === 'image_gallery') return items.length
+  return deriveCollectionTargets(items).length
+}
+
+function visibleCollectResult(taskId: string, items: BrowserStructuredItem[], rounds: number, stopReason: string, targetUrl: string, outputRootDir: unknown, userExpectedTotal?: number, template = 'card_list') {
   const noteCandidates = deriveCollectionTargets(items)
+  const frozenCount = visibleCollectFrozenCount(items, template)
   const rawDiscoveryStatus = discoveryStatusFor(stopReason)
-  const expectedIncomplete = Boolean(userExpectedTotal && userExpectedTotal > 0 && noteCandidates.length < userExpectedTotal)
+  const expectedIncomplete = Boolean(userExpectedTotal && userExpectedTotal > 0 && frozenCount < userExpectedTotal)
   const discoveryStatus = rawDiscoveryStatus === 'complete' && expectedIncomplete ? 'partial' : rawDiscoveryStatus
   const canStartNoteCollect = discoveryStatus === 'complete'
   return {
@@ -169,7 +175,7 @@ function visibleCollectResult(taskId: string, items: BrowserStructuredItem[], ro
     discoveryStatus,
     hasMoreLikely: discoveryStatus !== 'complete',
     ...(userExpectedTotal && userExpectedTotal > 0 ? { userExpectedTotal } : {}),
-    frozenCount: noteCandidates.length,
+    frozenCount,
     noteCandidates,
     candidateCount: noteCandidates.length,
     sourceTaskId: taskId,
@@ -548,6 +554,10 @@ export class BrowserContentTaskRunner {
     return this.persistenceService.getTaskPayload(taskId)
   }
 
+  updateTaskPayload(taskId: string, payload: Record<string, unknown>): void {
+    this.persistenceService.updateTaskPayload(taskId, payload)
+  }
+
   async resumeTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
     const current = this.persistenceService.getTask(taskId)
     const payload = this.persistenceService.getTaskPayload(taskId)
@@ -593,13 +603,33 @@ export class BrowserContentTaskRunner {
       if (task.kind === 'note_collect' || task.kind === 'card_loop') {
         const payload = this.persistenceService.getTaskPayload(task.taskId)
         const scopeId = typeof payload?.scopeId === 'string' ? payload.scopeId.trim() : ''
+        const hasCursor = task.checkpoint?.stage === 'note_collect_round'
+          && task.checkpoint.partialResults
+          && task.checkpoint.cursor !== null
+          && task.checkpoint.cursor !== undefined
         this.persistenceService.updateProgress(task.taskId, { currentLabel: null }, {
-          status: 'cancelled',
-          error: 'note_collect not resumable across app restart (agent tab gone)',
-          finishedAt: new Date().toISOString(),
+          status: hasCursor ? 'paused' : 'cancelled',
+          error: hasCursor
+            ? 'Ready restarted; explicit continue will reopen an agent tab and resume from the saved cursor.'
+            : 'note_collect not resumable across app restart (missing saved cursor)',
+          finishedAt: hasCursor ? null : new Date().toISOString(),
         })
         const p = task.progress
-        this.projectNoteCollect(task.taskId, scopeId, 'cancelled', p.total, p.completed, p.failed, null)
+        this.projectNoteCollect(
+          task.taskId,
+          scopeId,
+          hasCursor ? 'paused' : 'cancelled',
+          p.total,
+          p.completed,
+          p.failed,
+          null,
+          hasCursor
+            ? {
+                waitingFor: 'background',
+                publicStatus: publicNoteCollectStatus('paused', p.completed),
+              }
+            : undefined,
+        )
         continue
       }
       const payload = this.persistenceService.getTaskPayload(task.taskId)
@@ -678,7 +708,7 @@ export class BrowserContentTaskRunner {
       this.persistenceService.updateProgress(taskId, { total: 0, completed: 0, failed: 0, currentLabel: null }, {
         status: 'paused',
         checkpoint: { taskId, stage: 'visible_collect_round', cursor: null, partialResults: [] },
-        result: visibleCollectResult(taskId, [], 0, 'lease_lost', '', payload.outputRootDir, Number(payload.userExpectedTotal || 0) || undefined),
+        result: visibleCollectResult(taskId, [], 0, 'lease_lost', '', payload.outputRootDir, Number(payload.userExpectedTotal || 0) || undefined, String(payload.template || 'card_list')),
         finishedAt: new Date().toISOString(),
       })
       const scopeId = typeof payload.scopeId === 'string' ? payload.scopeId.trim() : ''
@@ -795,7 +825,7 @@ export class BrowserContentTaskRunner {
       }
 
       // Checkpoint EVERY round so a crash/cancel resumes from here.
-      const frozenCount = deriveCollectionTargets(collected).length
+      const frozenCount = visibleCollectFrozenCount(collected, template)
       this.persistenceService.updateProgress(taskId, {
         total: frozenCount,
         completed: 0,
@@ -828,7 +858,7 @@ export class BrowserContentTaskRunner {
     }
 
     const userExpectedTotal = Number(payload.userExpectedTotal || 0) || undefined
-    const finalResult = visibleCollectResult(taskId, collected, round, stopReason, targetUrl, payload.outputRootDir, userExpectedTotal)
+    const finalResult = visibleCollectResult(taskId, collected, round, stopReason, targetUrl, payload.outputRootDir, userExpectedTotal, template)
     const discoveryStatus = String(finalResult.discoveryStatus || discoveryStatusFor(stopReason))
     const finalStatus = stopReason === 'cancelled'
       ? 'cancelled'

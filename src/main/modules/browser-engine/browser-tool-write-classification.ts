@@ -23,6 +23,7 @@ const ALWAYS_READ = new Set<string>([
   'browser_get_tabs',
   'browser_read_page',
   'browser_read_page_map',
+  'browser_probe_readonly',
   'browser_capture_viewport',
   'browser_probe_workflow_state',
   'browser_locate_action_targets',
@@ -38,7 +39,6 @@ const ALWAYS_READ = new Set<string>([
   'browser_confirm_collection_consent',
   'browser_ask_user_takeover',
   'browser_wait',
-  'browser_visual_step',
 ])
 
 /** Tools that always mutate page/tab state (navigate, click, type, scroll, upload, run code, launch page-mutating work). */

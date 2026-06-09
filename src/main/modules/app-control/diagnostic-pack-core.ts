@@ -31,6 +31,7 @@ const SUMMARY_TABLES = [
   'calendar_sources',
   'calendar_events',
   'skill_task_runs',
+  'run_meta',
 ] as const
 
 const SECRET_KEY_PATTERN = /(api[_-]?key|secret|token|password|authorization|cookie|sessdata|bili[_-]?jct|csrf)/i
@@ -196,14 +197,45 @@ function collectDatabaseSummary(rawDb: DiagnosticRawDb | null | undefined): Reco
      FROM task_projections
      ORDER BY updated_at DESC
      LIMIT 60`,
+  ).map((row) => {
+    const continuationRef = parseMaybeJson(String(row.continuation_ref_json || '{}'))
+    const resumableActions = parseMaybeJson(String(row.resumable_actions_json || '[]'))
+    const frozenLegacy =
+      row.status === 'blocked'
+      && row.interaction_state === 'suspended'
+      && (!Array.isArray(resumableActions) || resumableActions.length === 0)
+      && (!continuationRef || typeof continuationRef !== 'object' || Object.keys(continuationRef as Record<string, unknown>).length === 0)
+    return {
+      ...row,
+      task_summary: previewText(row.task_summary || ''),
+      blocked_reason: previewText(row.blocked_reason || ''),
+      resumable_actions_json: sanitizeValue(resumableActions),
+      continuation_ref_json: sanitizeValue(continuationRef),
+      progress_json: sanitizeValue(parseMaybeJson(String(row.progress_json || '{}'))),
+      recent_artifacts_json: sanitizeValue(parseMaybeJson(String(row.recent_artifacts_json || '[]'))),
+      legacy_continuation_state: frozenLegacy ? 'legacy_not_resumable' : 'normal',
+    }
+  })
+  const runMeta = safeAll<Record<string, unknown>>(
+    rawDb,
+    `SELECT run_id, task_id, scope_id, agent_id, status, task_type, terminal_reason,
+            provider_protocol, wire_api, context_window, provider_diagnostics_json,
+            budget_json, continuation_ref_json, recovery_history_json,
+            input_tokens, output_tokens, total_tokens,
+            first_message_text, last_message_text, follow_up_text,
+            created_at, updated_at
+     FROM run_meta
+     ORDER BY updated_at DESC
+     LIMIT 40`,
   ).map((row) => ({
     ...row,
-    task_summary: previewText(row.task_summary || ''),
-    blocked_reason: previewText(row.blocked_reason || ''),
-    resumable_actions_json: sanitizeValue(parseMaybeJson(String(row.resumable_actions_json || '[]'))),
+    provider_diagnostics_json: sanitizeValue(parseMaybeJson(String(row.provider_diagnostics_json || '{}'))),
+    budget_json: sanitizeValue(parseMaybeJson(String(row.budget_json || '{}'))),
     continuation_ref_json: sanitizeValue(parseMaybeJson(String(row.continuation_ref_json || '{}'))),
-    progress_json: sanitizeValue(parseMaybeJson(String(row.progress_json || '{}'))),
-    recent_artifacts_json: sanitizeValue(parseMaybeJson(String(row.recent_artifacts_json || '[]'))),
+    recovery_history_json: sanitizeValue(parseMaybeJson(String(row.recovery_history_json || '[]'))),
+    first_message_text: previewText(redactString(String(row.first_message_text || ''))),
+    last_message_text: previewText(redactString(String(row.last_message_text || ''))),
+    follow_up_text: previewText(redactString(String(row.follow_up_text || ''))),
   }))
   const channels = safeAll<Record<string, unknown>>(
     rawDb,
@@ -222,6 +254,7 @@ function collectDatabaseSummary(rawDb: DiagnosticRawDb | null | undefined): Reco
     recentConversations: conversations,
     recentMessageMarkers: messages,
     recentTaskProjections: projections,
+    recentRunMeta: runMeta,
     channels,
   }
 }

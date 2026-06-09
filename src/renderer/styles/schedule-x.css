@@ -337,21 +337,12 @@ html[data-theme='dark'][data-skin='liquid-glass'] .sx__week-grid__time-axis .sx_
 }
 
 /* All-day lane is always a visible row carrying a 全天 label in the gutter,
-   centered like the hour labels below it. */
+   centered like the hour labels below it, without day-column dividers. */
 html[data-skin='liquid-glass'] .sx__date-grid,
 html[data-theme='dark'][data-skin='liquid-glass'] .sx__date-grid,
 .sx__date-grid {
   min-height: 28px !important;
-  background-image:
-    linear-gradient(to right, var(--sx-ready-time-grid-line-color) 0 var(--sx-ready-grid-line-width), transparent var(--sx-ready-grid-line-width)) !important;
-  background-size:
-    calc((100% - var(--sx-calendar-week-grid-padding-left)) / var(--sx-ready-visible-day-count, 7)) 100% !important;
-  background-position:
-    calc(
-      var(--sx-calendar-week-grid-padding-left) +
-      ((100% - var(--sx-calendar-week-grid-padding-left)) / var(--sx-ready-visible-day-count, 7))
-    ) 0 !important;
-  background-repeat: repeat !important;
+  background-image: none !important;
 }
 
 .sx__date-grid::before {

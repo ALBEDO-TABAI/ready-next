@@ -6,12 +6,11 @@
  *   - cumulative token usage (input / output / total)
  *   - first / last / follow-up message text snapshots
  *
- * Constructor takes a `better-sqlite3` `Database` directly so the repository
- * can be unit-tested against an in-memory DB without the main-process
- * `DatabaseManager` dependency graph. Production wiring (the agent-control
- * runtime) supplies the same connection used by other repositories.
+ * Constructor takes the same minimal database connection shape used by the
+ * main-process DatabaseManager, while remaining structurally compatible with
+ * better-sqlite3 in tests.
  */
-import type Database from 'better-sqlite3'
+import type { DatabaseConnection } from '../../database'
 
 export interface RunMetaRecord {
   runId: string
@@ -19,6 +18,15 @@ export interface RunMetaRecord {
   scopeId: string | null
   agentId: string | null
   status: string
+  taskType: string | null
+  terminalReason: string | null
+  providerProtocol: string | null
+  wireApi: string | null
+  contextWindow: number | null
+  providerDiagnostics: Record<string, unknown> | null
+  budget: Record<string, unknown> | null
+  continuationRef: Record<string, unknown> | null
+  recoveryHistory: unknown[] | null
   inputTokens: number
   outputTokens: number
   totalTokens: number
@@ -35,6 +43,15 @@ export interface RunMetaCreateInput {
   scopeId?: string | null
   agentId?: string | null
   status: string
+  taskType?: string | null
+  terminalReason?: string | null
+  providerProtocol?: string | null
+  wireApi?: string | null
+  contextWindow?: number | null
+  providerDiagnostics?: Record<string, unknown> | null
+  budget?: Record<string, unknown> | null
+  continuationRef?: Record<string, unknown> | null
+  recoveryHistory?: unknown[] | null
   inputTokens?: number
   outputTokens?: number
   totalTokens?: number
@@ -65,6 +82,15 @@ interface RunMetaRow {
   scope_id: string | null
   agent_id: string | null
   status: string
+  task_type?: string | null
+  terminal_reason?: string | null
+  provider_protocol?: string | null
+  wire_api?: string | null
+  context_window?: number | null
+  provider_diagnostics_json?: string | null
+  budget_json?: string | null
+  continuation_ref_json?: string | null
+  recovery_history_json?: string | null
   input_tokens: number | null
   output_tokens: number | null
   total_tokens: number | null
@@ -75,6 +101,20 @@ interface RunMetaRow {
   updated_at: number
 }
 
+function parseJson<T>(raw: string | null | undefined, fallback: T): T {
+  if (!raw) return fallback
+  try {
+    return JSON.parse(raw) as T
+  } catch {
+    return fallback
+  }
+}
+
+function jsonOrNull(value: unknown): string | null {
+  if (value === undefined || value === null) return null
+  return JSON.stringify(value)
+}
+
 function rowToRecord(row: RunMetaRow): RunMetaRecord {
   return {
     runId: row.run_id,
@@ -82,6 +122,15 @@ function rowToRecord(row: RunMetaRow): RunMetaRecord {
     scopeId: row.scope_id,
     agentId: row.agent_id,
     status: row.status,
+    taskType: row.task_type ?? null,
+    terminalReason: row.terminal_reason ?? null,
+    providerProtocol: row.provider_protocol ?? null,
+    wireApi: row.wire_api ?? null,
+    contextWindow: row.context_window ?? null,
+    providerDiagnostics: parseJson<Record<string, unknown> | null>(row.provider_diagnostics_json, null),
+    budget: parseJson<Record<string, unknown> | null>(row.budget_json, null),
+    continuationRef: parseJson<Record<string, unknown> | null>(row.continuation_ref_json, null),
+    recoveryHistory: parseJson<unknown[] | null>(row.recovery_history_json, null),
     inputTokens: row.input_tokens ?? 0,
     outputTokens: row.output_tokens ?? 0,
     totalTokens: row.total_tokens ?? 0,
@@ -94,7 +143,7 @@ function rowToRecord(row: RunMetaRow): RunMetaRecord {
 }
 
 export class RunMetaRepository {
-  constructor(private readonly db: Database.Database) {}
+  constructor(private readonly db: DatabaseConnection) {}
 
   create(input: RunMetaCreateInput, now: number = Date.now()): RunMetaRecord {
     const record: RunMetaRecord = {
@@ -103,6 +152,15 @@ export class RunMetaRepository {
       scopeId: input.scopeId ?? null,
       agentId: input.agentId ?? null,
       status: input.status,
+      taskType: input.taskType ?? null,
+      terminalReason: input.terminalReason ?? null,
+      providerProtocol: input.providerProtocol ?? null,
+      wireApi: input.wireApi ?? null,
+      contextWindow: input.contextWindow ?? null,
+      providerDiagnostics: input.providerDiagnostics ?? null,
+      budget: input.budget ?? null,
+      continuationRef: input.continuationRef ?? null,
+      recoveryHistory: input.recoveryHistory ?? null,
       inputTokens: input.inputTokens ?? 0,
       outputTokens: input.outputTokens ?? 0,
       totalTokens: input.totalTokens ?? 0,
@@ -116,10 +174,12 @@ export class RunMetaRepository {
       .prepare(
         `INSERT INTO run_meta (
           run_id, task_id, scope_id, agent_id, status,
+          task_type, terminal_reason, provider_protocol, wire_api, context_window,
+          provider_diagnostics_json, budget_json, continuation_ref_json, recovery_history_json,
           input_tokens, output_tokens, total_tokens,
           first_message_text, last_message_text, follow_up_text,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         record.runId,
@@ -127,6 +187,15 @@ export class RunMetaRepository {
         record.scopeId,
         record.agentId,
         record.status,
+        record.taskType,
+        record.terminalReason,
+        record.providerProtocol,
+        record.wireApi,
+        record.contextWindow,
+        jsonOrNull(record.providerDiagnostics),
+        jsonOrNull(record.budget),
+        jsonOrNull(record.continuationRef),
+        jsonOrNull(record.recoveryHistory),
         record.inputTokens,
         record.outputTokens,
         record.totalTokens,
@@ -162,6 +231,8 @@ export class RunMetaRepository {
       .prepare(
         `UPDATE run_meta SET
           task_id = ?, scope_id = ?, agent_id = ?, status = ?,
+          task_type = ?, terminal_reason = ?, provider_protocol = ?, wire_api = ?, context_window = ?,
+          provider_diagnostics_json = ?, budget_json = ?, continuation_ref_json = ?, recovery_history_json = ?,
           input_tokens = ?, output_tokens = ?, total_tokens = ?,
           first_message_text = ?, last_message_text = ?, follow_up_text = ?,
           updated_at = ?
@@ -172,6 +243,15 @@ export class RunMetaRepository {
         merged.scopeId,
         merged.agentId,
         merged.status,
+        merged.taskType,
+        merged.terminalReason,
+        merged.providerProtocol,
+        merged.wireApi,
+        merged.contextWindow,
+        jsonOrNull(merged.providerDiagnostics),
+        jsonOrNull(merged.budget),
+        jsonOrNull(merged.continuationRef),
+        jsonOrNull(merged.recoveryHistory),
         merged.inputTokens,
         merged.outputTokens,
         merged.totalTokens,

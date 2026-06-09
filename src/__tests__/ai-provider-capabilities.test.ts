@@ -50,4 +50,34 @@ describe('resolveAIConfigCapabilities', () => {
     assert.strictEqual(capabilities?.supportsVision, false)
     assert.strictEqual(capabilities?.supportsNativeVideo, false)
   })
+
+  it('infers anthropic protocol from custom anthropic base url path', () => {
+    const config: AIModelConfig = {
+      provider: 'openai-compatible',
+      baseUrl: 'https://example.com/anthropic',
+      apiKey: 'test-key',
+      model: 'custom-model',
+    }
+
+    const capabilities = resolveAIConfigCapabilities(config)
+    assert.ok(capabilities)
+    assert.strictEqual(capabilities?.agentProtocol, 'anthropic')
+    assert.strictEqual(capabilities?.wireApi, undefined)
+    assert.strictEqual(capabilities?.supportsNativeToolCalls, true)
+  })
+
+  it('infers anthropic protocol from v1 messages base url', () => {
+    const config: AIModelConfig = {
+      provider: 'openai-compatible',
+      baseUrl: 'https://example.com/v1/messages',
+      apiKey: 'test-key',
+      model: 'custom-model',
+    }
+
+    const capabilities = resolveAIConfigCapabilities(config)
+    assert.ok(capabilities)
+    assert.strictEqual(capabilities?.agentProtocol, 'anthropic')
+    assert.strictEqual(capabilities?.wireApi, undefined)
+    assert.strictEqual(capabilities?.supportsNativeToolCalls, true)
+  })
 })

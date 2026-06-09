@@ -1,7 +1,8 @@
 import { EventEmitter } from 'events'
 import { randomUUID } from 'crypto'
-import { readFile } from 'fs/promises'
-import { basename } from 'path'
+import { mkdir, readFile, writeFile } from 'fs/promises'
+import { tmpdir } from 'os'
+import { basename, join } from 'path'
 import {
   Agent,
   MemorySession,
@@ -24,8 +25,12 @@ import type { SidecarManager } from '../sidecar-manager'
 import type { AgentControlRuntime } from './runtime'
 import type { DomainAdapter } from '../domain-adapters/domain-adapter'
 import type {
+  BudgetWarningLevel,
   ExecutionTurnResult,
+  RunBudgetSeed,
+  RunBudgetUsage,
   RunMessage,
+  TaskBudgetRuntime,
   TaskType,
   TurnTranscriptEvent,
 } from '../contracts/run-contracts'
@@ -61,6 +66,7 @@ import {
   type AIModelConfig,
   type AIProviderDef,
 } from '../../../../shared/ai-providers'
+import type { CapabilityGroupId } from '../../../../shared/ai-capability-groups'
 import {
   DEFAULT_CONTEXT_WINDOW,
   resolveModelContextWindow,
@@ -135,6 +141,14 @@ import {
   normalizeSessionSnapshotForSeed,
   type CompactResult,
 } from '../compaction/compact-agent-input'
+import {
+  consumeToolCallBudget,
+  createTaskBudgetRuntime,
+  getBudgetUsagePercent,
+  getBudgetWarningLevel,
+  rebindTaskBudgetRuntime,
+  resumeBudgetRuntime,
+} from '../task-projection/run-budget-policy'
 import { createRotatingLogger } from '../../../utils/rotating-logger'
 
 const agentSdkLogger = createRotatingLogger('ready-agent-sdk.log')
@@ -148,6 +162,7 @@ const LONG_READING_EXTRA_TURNS_PER_BATCH = 8
 const LONG_READING_MAX_TURNS = 48
 const PREEMPT_SETTLE_TIMEOUT_MS = 4_000
 const MAX_ORPHAN_RUNS = 3
+const activeBudgetCheckpointFlights = new Set<string>()
 
 function log(message: string): void {
   try {
@@ -247,6 +262,8 @@ interface ToolBridgeRuntimeContext {
   nativeMapAmbiguityResolved?: boolean
   runHandle: RunHandle
   browserTurnLease?: BrowserTurnLease | null
+  taskBudgetRuntime: TaskBudgetRuntime | null
+  budgetWarningMessages: BudgetWarningLevel[]
 }
 
 interface SdkLongSkillCheckpoint {
@@ -259,14 +276,44 @@ interface SdkLongSkillCheckpoint {
   terminalReason: TurnTerminalReason
 }
 
+interface AgentSdkBudgetCheckpoint {
+  outputDir: string
+  runStatePath: string
+  projectionPatch: Record<string, unknown>
+}
+
+interface AgentSdkBudgetCheckpointRestore {
+  sessionSnapshot: AgentInputItem[]
+  taskBudgetRuntime: TaskBudgetRuntime
+  requiredCapabilityGroups: string[]
+  requiredToolNames: string[]
+  usedToolNames: string[]
+  runStatePath: string
+}
+
+interface AgentSdkProviderDiagnostics {
+  provider: string | null
+  agentProtocol: string | null
+  wireApi: string | null
+  contextWindow: number | null
+  protocolSource: 'explicit' | 'inferred' | null
+  contextWindowSource: 'explicit' | 'model' | 'fallback' | null
+}
+
+interface RunMetaRepositoryLike {
+  get(runId: string): unknown | null
+  create(input: Record<string, unknown>): unknown
+  update(runId: string, patch: Record<string, unknown>): unknown
+}
+
 interface AgentSdkExecutionOptions {
   taskId?: string
   publicSessionId?: string
   requestEnvelope?: unknown
   intentClassification?: unknown
-  budget?: unknown
-  budgetState?: unknown
-  taskBudgetRuntime?: unknown
+  budget?: RunBudgetSeed | null
+  budgetState?: RunBudgetUsage | null
+  taskBudgetRuntime?: TaskBudgetRuntime | null
   continuationIntent?: ContinuationIntent | null
   continuationState?: ContinuationState | null
 }
@@ -368,10 +415,14 @@ function resolveAgentSdkMaxTurns(params: {
   message: RunMessage
   requestEnvelope?: unknown
   requiresLocalDocumentWrite: boolean
+  taskBudgetRuntime?: TaskBudgetRuntime | null
 }): number {
+  const budgetSafetyTurns = params.taskBudgetRuntime
+    ? params.taskBudgetRuntime.budget.maxToolCalls + Math.max(8, Math.ceil(params.taskBudgetRuntime.budget.maxToolCalls * 0.25))
+    : DEFAULT_AGENT_SDK_MAX_TURNS
   const baseTurns = params.requiresLocalDocumentWrite
     ? LOCAL_DOCUMENT_WRITE_MAX_TURNS
-    : DEFAULT_AGENT_SDK_MAX_TURNS
+    : budgetSafetyTurns
   const readableUnits = Math.max(
     countReadableContentUnits(messageToText(params.message)),
     countReadableContentUnits(requestEnvelopeResourceText(params.requestEnvelope)),
@@ -383,7 +434,199 @@ function resolveAgentSdkMaxTurns(params: {
   if (readableUnits < LONG_READING_TRIGGER_CHARS && readableChars < LONG_READING_TRIGGER_CHARS) return baseTurns
   const estimatedReadBatches = Math.max(1, Math.ceil(readableChars / LONG_READING_EXCERPT_BATCH_CHARS))
   const estimatedTurns = baseTurns + Math.max(0, estimatedReadBatches - 1) * LONG_READING_EXTRA_TURNS_PER_BATCH
-  return Math.max(baseTurns, Math.min(LONG_READING_MAX_TURNS, estimatedTurns))
+  const longReadingTurns = Math.max(baseTurns, Math.min(LONG_READING_MAX_TURNS, estimatedTurns))
+  return params.taskBudgetRuntime
+    ? Math.max(longReadingTurns, params.taskBudgetRuntime.budget.maxToolCalls + 8)
+    : longReadingTurns
+}
+
+function cloneTaskBudgetRuntime(runtime: TaskBudgetRuntime): TaskBudgetRuntime {
+  return {
+    ...runtime,
+    budget: { ...runtime.budget },
+    usage: { ...runtime.usage },
+    stepBudget: runtime.stepBudget ? { ...runtime.stepBudget } : null,
+    lease: runtime.lease
+      ? {
+        ...runtime.lease,
+        renewedFingerprints: [...runtime.lease.renewedFingerprints],
+      }
+      : null,
+  }
+}
+
+function resolveTaskTypeFromToolDefinitions(definitions: ToolDefinition[]): TaskType | null {
+  if (definitions.some((definition) => definition.domain === 'general_research' || definition.name === 'browser_research_topic')) {
+    return 'research'
+  }
+  if (definitions.some((definition) => definition.domain === 'skill' || definition.name.startsWith('skill_'))) {
+    return 'multi_step_task'
+  }
+  if (definitions.some((definition) => definition.domain === 'browser')) {
+    return 'short_task'
+  }
+  return null
+}
+
+function resolveAgentSdkTaskBudgetRuntime(params: {
+  options?: AgentSdkExecutionOptions
+  inferredTaskType?: TaskType | null
+}): TaskBudgetRuntime | null {
+  const inherited = params.options?.taskBudgetRuntime
+    ? cloneTaskBudgetRuntime(params.options.taskBudgetRuntime)
+    : null
+  const inferredTaskType = params.inferredTaskType || inherited?.taskType || 'short_task'
+  const unfrozen = inherited?.frozen ? resumeBudgetRuntime(inherited) : inherited
+
+  if (unfrozen) {
+    if (unfrozen.bootstrapBudget && inferredTaskType !== unfrozen.taskType) {
+      return rebindTaskBudgetRuntime(unfrozen, inferredTaskType, { bootstrapBudget: false })
+    }
+    return inferredTaskType !== unfrozen.taskType && unfrozen.bootstrapBudget
+      ? rebindTaskBudgetRuntime(unfrozen, inferredTaskType, { bootstrapBudget: false })
+      : unfrozen
+  }
+
+  const seed = params.options?.budget || null
+  if (!seed) return null
+  return createTaskBudgetRuntime(inferredTaskType, {
+    budget: seed,
+    usage: params.options?.budgetState || null,
+    bootstrapBudget: inferredTaskType === 'short_task',
+  })
+}
+
+function restoreCheckpointToolSurface(params: {
+  toolDefinitions: ToolDefinition[]
+  checkpointRestore: AgentSdkBudgetCheckpointRestore | null
+  sessionId?: string
+  scopeId?: string
+  authorization: SkillToolAuthorization
+}): { toolDefinitions: ToolDefinition[]; missingToolNames: string[] } {
+  const restore = params.checkpointRestore
+  if (!restore) return { toolDefinitions: params.toolDefinitions, missingToolNames: [] }
+  const byName = new Map(params.toolDefinitions.map((definition) => [definition.name, definition]))
+  for (const groupId of restore.requiredCapabilityGroups) {
+    if (!groupId || typeof groupId !== 'string') continue
+    try {
+      for (const definition of defaultToolRegistry.getToolDefinitionsForGroup(
+        groupId as CapabilityGroupId,
+        params.sessionId,
+        params.authorization,
+        params.scopeId,
+      )) {
+        if (!byName.has(definition.name)) byName.set(definition.name, definition)
+      }
+    } catch {
+      // Missing groups are reported below as missing required tool names.
+    }
+  }
+  const requiredToolNames = restore.requiredToolNames.length > 0
+    ? restore.requiredToolNames
+    : restore.usedToolNames
+  const missingToolNames = requiredToolNames.filter((name) => !byName.has(name))
+  return {
+    toolDefinitions: Array.from(byName.values()),
+    missingToolNames,
+  }
+}
+
+function taskBudgetDiagnostics(runtime: TaskBudgetRuntime | null): {
+  budget: Partial<RunBudgetSeed & RunBudgetUsage> | null
+  budgetUsagePercent: number | null
+  budgetWarningLevel: BudgetWarningLevel | null
+} {
+  if (!runtime) {
+    return {
+      budget: null,
+      budgetUsagePercent: null,
+      budgetWarningLevel: null,
+    }
+  }
+  const usagePercent = getBudgetUsagePercent(runtime)
+  return {
+    budget: {
+      ...runtime.budget,
+      ...runtime.usage,
+    },
+    budgetUsagePercent: usagePercent,
+    budgetWarningLevel: runtime.warningLevel || getBudgetWarningLevel(usagePercent),
+  }
+}
+
+function buildBudgetWarningSteering(level: BudgetWarningLevel): string {
+  if (level === 'warning') {
+    return '预算提醒：工具预算已接近上限。下一步请优先收敛结果，避免展开新分支。'
+  }
+  if (level === 'converge') {
+    return '预算提醒：工具预算已经很紧。除非缺少关键证据，否则请总结当前结果；如必须继续，请说明需要用户确认继续。'
+  }
+  return ''
+}
+
+function appendBudgetWarningSteering(
+  output: ToolExecutionOutput,
+  runtimeContext: ToolBridgeRuntimeContext,
+): ToolExecutionOutput {
+  const nextWarning = runtimeContext.budgetWarningMessages.shift()
+  const steering = nextWarning ? buildBudgetWarningSteering(nextWarning) : ''
+  if (!steering) return output
+  const normalized = normalizeToolExecutionOutput(output)
+  return createToolExecutionOutput(
+    [normalized.text, steering].filter(Boolean).join('\n\n'),
+    {
+      shape: normalized.shape,
+      data: {
+        ...(normalized.data && typeof normalized.data === 'object' && !Array.isArray(normalized.data)
+          ? normalized.data as Record<string, unknown>
+          : {}),
+        budgetWarningLevel: nextWarning,
+        budgetSteeringInjected: true,
+      },
+      projectionPatch: normalized.projectionPatch || undefined,
+      interactionHint: normalized.interactionHint || undefined,
+      framePatch: normalized.framePatch || undefined,
+      contextModifier: normalized.contextModifier || undefined,
+    },
+  )
+}
+
+function resolveAgentSdkProviderDiagnostics(params: {
+  config: AIModelConfig
+  capabilities: NonNullable<ReturnType<typeof resolveAIConfigCapabilities>>
+  modelDef?: AIModelDef | null
+  contextWindowTokens: number
+}): AgentSdkProviderDiagnostics {
+  return {
+    provider: params.config.provider || null,
+    agentProtocol: params.capabilities.agentProtocol || null,
+    wireApi: params.capabilities.wireApi || null,
+    contextWindow: params.contextWindowTokens,
+    protocolSource: params.config.agentProtocol ? 'explicit' : 'inferred',
+    contextWindowSource: params.config.contextWindowOverride
+      ? 'explicit'
+      : params.modelDef?.contextWindow
+        ? 'model'
+        : 'fallback',
+  }
+}
+
+function safeContinuationPathSegment(value: string): string {
+  const cleaned = String(value || '').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '')
+  return cleaned || 'run'
+}
+
+function acquireBudgetCheckpointFlight(runStatePath: string): boolean {
+  const key = String(runStatePath || '').trim()
+  if (!key) return true
+  if (activeBudgetCheckpointFlights.has(key)) return false
+  activeBudgetCheckpointFlights.add(key)
+  return true
+}
+
+function releaseBudgetCheckpointFlight(runStatePath: string | null): void {
+  const key = String(runStatePath || '').trim()
+  if (key) activeBudgetCheckpointFlights.delete(key)
 }
 
 const SDK_CONTEXT_MARKERS = [
@@ -1703,6 +1946,11 @@ function continuationChildRunId(options?: AgentSdkExecutionOptions): string | nu
     || nonEmptyString(options?.continuationState?.continuationRef?.childRunId)
 }
 
+function continuationRunStatePath(options?: AgentSdkExecutionOptions): string | null {
+  return nonEmptyString(options?.continuationIntent?.runStatePath)
+    || nonEmptyString(options?.continuationState?.continuationRef?.runStatePath)
+}
+
 function projectionPatchFromChildClose(close: SkillChildCloseEvent | null): Record<string, unknown> | null {
   const patch = asRecord(close?.projectionPatch)
   return patch ? { ...patch } : null
@@ -2120,6 +2368,23 @@ function toOpenAIFunctionCallOutput(
   } as AgentOutputItem))
 }
 
+function isEventStreamLikeResponse(response: Response, rawText: string): boolean {
+  const contentType = response.headers.get('content-type')?.toLowerCase() || ''
+  if (contentType.includes('text/event-stream')) return true
+  const trimmed = rawText.trimStart()
+  return trimmed.startsWith('event:') || trimmed.startsWith('data:') || trimmed.startsWith(':')
+}
+
+function buildProviderProtocolMismatchError(requestUrl: string): Error {
+  const error = new Error(
+    `供应商协议不匹配：当前按 OpenAI chat/completions 请求，但 ${requestUrl} 返回了事件流。请把供应商协议切到 Anthropic，或把 API 地址改成 OpenAI chat/completions 兼容地址。`,
+  )
+  const typed = error as Error & { code?: string; terminalReason?: string }
+  typed.code = 'provider_protocol_mismatch'
+  typed.terminalReason = 'provider_protocol_mismatch'
+  return error
+}
+
 // PR 2 (review patch) — test seam: the Model classes are exported under a
 // `__forTests` namespace so behavior tests can mount them directly with a
 // fake fetch and assert the actual outbound request body. Production code
@@ -2193,6 +2458,7 @@ export class ReadyOpenAICompatibleModel implements Model {
     }, request.signal || new AbortController().signal, 'agents-sdk openai-compatible chat')
     const rawText = await response.text()
     if (!response.ok) throw buildProviderHttpError({ httpStatus: response.status, errorBody: rawText })
+    if (isEventStreamLikeResponse(response, rawText)) throw buildProviderProtocolMismatchError(url)
     const json = JSON.parse(rawText || '{}') as Record<string, unknown>
     applyProviderResponsePatch(json, patchContext)
     const choices = Array.isArray(json.choices) ? json.choices as Array<Record<string, unknown>> : []
@@ -3173,9 +3439,50 @@ export class AgentSdkRuntime extends EventEmitter {
     let hasSuccessfulDocumentTargetMutation = false
     let hasSuccessfulToolProgress = false
     let lastDocumentSaveSuccessText: string | null = null
+    let runMetaStatus: string = 'running'
+    let runMetaTerminalReason: TurnTerminalReason | null = null
+    let runMetaBudgetRuntime: TaskBudgetRuntime | null = null
+    let runMetaProviderDiagnostics: AgentSdkProviderDiagnostics | null = null
+    let runMetaContinuationRef: Record<string, unknown> | null = null
+    let runMetaUsage: ReadyAgentSdkRunResult['usage'] | null = null
+    const checkpointRestore = await this.loadBudgetCheckpointState(executionOptions)
+    const budgetCheckpointFlightKey = checkpointRestore?.runStatePath || null
+    let ownsBudgetCheckpointFlight = false
+
+    if (budgetCheckpointFlightKey) {
+      ownsBudgetCheckpointFlight = acquireBudgetCheckpointFlight(budgetCheckpointFlightKey)
+      if (!ownsBudgetCheckpointFlight) {
+        const restore = checkpointRestore
+        if (!restore) {
+          return this.buildResult({
+            success: false,
+            error: '续跑检查点不可用',
+            finalText: '',
+            cancelled: false,
+            taskId,
+            usedTools,
+            transcriptEvents,
+            projectionPatches,
+            terminalReason: 'persistence_failed',
+          })
+        }
+        return this.buildResult({
+          success: true,
+          finalText: '这项任务已经在继续执行，请等待当前续跑完成。',
+          cancelled: false,
+          taskId,
+          usedTools,
+          transcriptEvents,
+          projectionPatches,
+          terminalReason: 'checkpoint_budget',
+          taskBudgetRuntime: restore.taskBudgetRuntime,
+        })
+      }
+    }
 
     const begin = await this.beginRun({ name, runId, sessionId })
     if (!begin.ok) {
+      if (ownsBudgetCheckpointFlight) releaseBudgetCheckpointFlight(budgetCheckpointFlightKey)
       return this.buildResult({
         success: false,
         error: begin.message,
@@ -3196,6 +3503,20 @@ export class AgentSdkRuntime extends EventEmitter {
       })
     }
     const { session, runHandle, abortController, runGeneration } = begin
+    const effectiveExecutionOptions: AgentSdkExecutionOptions | undefined = checkpointRestore
+      ? {
+        ...(executionOptions || {}),
+        taskBudgetRuntime: checkpointRestore.taskBudgetRuntime,
+      }
+      : executionOptions
+    if (checkpointRestore) {
+      const restoredSession = new MemorySession({
+        sessionId: name,
+        initialItems: checkpointRestore.sessionSnapshot,
+      })
+      session.sdkSession = restoredSession
+      runHandle.capturedSession = restoredSession
+    }
 
     const isCurrentRun = (): boolean => {
       const latest = this.sessions.get(name)
@@ -3216,6 +3537,8 @@ export class AgentSdkRuntime extends EventEmitter {
     }
     const emitStatus = (status: string, terminalReason?: TurnTerminalReason | null): void => {
       if (!isCurrentRun()) return
+      runMetaStatus = status
+      if (terminalReason !== undefined) runMetaTerminalReason = terminalReason || null
       transcriptEvents.push({ kind: 'status', status, terminalReason: terminalReason || null })
       this.emit('status', {
         agent: name,
@@ -3291,11 +3614,19 @@ export class AgentSdkRuntime extends EventEmitter {
       const modelDef = resolveConfiguredModelDef(normalizedConfig, capabilities?.baseUrl)
       const contextWindowTokens = resolveModelContextWindow(normalizedConfig, modelDef)
       session.contextWindowTokens = contextWindowTokens
+      if (capabilities) {
+        runMetaProviderDiagnostics = resolveAgentSdkProviderDiagnostics({
+          config: normalizedConfig,
+          capabilities,
+          modelDef,
+          contextWindowTokens,
+        })
+      }
       const useTextToolBridge = capabilities?.toolCallTransport === 'text'
       const agentContext = buildAgentSpawnContextFromAIConfig(normalizedConfig, {
         baseUrl: String(capabilities?.baseUrl || normalizedConfig.baseUrl || '').trim(),
       })
-      const resumeChildRunId = continuationChildRunId(executionOptions)
+      const resumeChildRunId = continuationChildRunId(effectiveExecutionOptions)
       if (resumeChildRunId) {
         usedTools.push('skill_child_resume')
         transcriptEvents.push({
@@ -3341,30 +3672,30 @@ export class AgentSdkRuntime extends EventEmitter {
         })
       }
       const authorization = this.resolveSkillAuthorizationForTurn(content as RunMessage, sessionId)
-      const documentTargetGuard = resolveDocumentTargetGuard(content as RunMessage, executionOptions?.requestEnvelope)
+      const documentTargetGuard = resolveDocumentTargetGuard(content as RunMessage, effectiveExecutionOptions?.requestEnvelope)
       documentTargetGuardForRecovery = documentTargetGuard
       if (documentTargetGuard?.preserveExistingContent) {
         await hydrateDocumentTargetPreservation(documentTargetGuard)
       }
       const requiresLocalDocumentExcerpt = shouldRequireLocalDocumentExcerpt(
         content as RunMessage,
-        executionOptions?.requestEnvelope,
+        effectiveExecutionOptions?.requestEnvelope,
       )
       requiresLocalDocumentExcerptForRecovery = requiresLocalDocumentExcerpt
       const requiresLocalDocumentWrite = shouldRequireLocalDocumentWriteOutput(
         content as RunMessage,
-        executionOptions?.requestEnvelope,
+        effectiveExecutionOptions?.requestEnvelope,
       )
       requiresLocalDocumentWriteForRecovery = requiresLocalDocumentWrite
       // Synchronous continuity (no await in the run hot path): track this turn's
       // collection intent and decay the TTL so bare follow-ups stay exposed.
       const recentCollectionIntent = this.trackCollectionIntent(
         sessionId,
-        messageHasBrowserCollectionIntent(content as RunMessage, executionOptions?.requestEnvelope),
+        messageHasBrowserCollectionIntent(content as RunMessage, effectiveExecutionOptions?.requestEnvelope),
       )
       const recentBatchCollectionIntent = this.trackBatchCollectionIntent(
         sessionId,
-        messageHasBrowserBatchCollectionIntent(content as RunMessage, executionOptions?.requestEnvelope),
+        messageHasBrowserBatchCollectionIntent(content as RunMessage, effectiveExecutionOptions?.requestEnvelope),
       )
       let toolDefinitions = this.listToolDefinitionsForTurn({
         message: content as RunMessage,
@@ -3376,15 +3707,42 @@ export class AgentSdkRuntime extends EventEmitter {
         authorization,
         recentCollectionIntent,
         recentBatchCollectionIntent,
-        requestEnvelope: executionOptions?.requestEnvelope,
+        requestEnvelope: effectiveExecutionOptions?.requestEnvelope,
       })
-      if (shouldUseLocalDocumentToolSet(content as RunMessage, executionOptions?.requestEnvelope)) {
+      if (shouldUseLocalDocumentToolSet(content as RunMessage, effectiveExecutionOptions?.requestEnvelope)) {
         toolDefinitions = toolDefinitions.filter(isLocalDocumentToolDefinition)
       }
       if (documentTargetGuard) {
         documentTargetGuard.openToolDefinition = toolDefinitions.find((definition) => definition.name === 'document_open_tab')
         documentTargetGuard.saveToolDefinition = toolDefinitions.find((definition) => definition.name === 'document_save_tab')
         toolDefinitions = toolDefinitions.filter((definition) => definition.name !== 'document_new_tab')
+      }
+      const restoredToolSurface = restoreCheckpointToolSurface({
+        toolDefinitions,
+        checkpointRestore,
+        sessionId,
+        scopeId: sessionId,
+        authorization,
+      })
+      toolDefinitions = restoredToolSurface.toolDefinitions
+      if (restoredToolSurface.missingToolNames.length > 0) {
+        const message = `续跑所需工具已经变化，无法安全继续：${restoredToolSurface.missingToolNames.join(', ')}`
+        emitOutput(message, 'error')
+        emitOutput('', 'done')
+        emitStatus('error', 'blocked_tool_error')
+        return this.buildResult({
+          success: false,
+          error: message,
+          finalText: '',
+          cancelled: false,
+          taskId,
+          usedTools,
+          transcriptEvents,
+          projectionPatches,
+          terminalReason: 'blocked_tool_error',
+          taskBudgetRuntime: runMetaBudgetRuntime,
+          providerDiagnostics: runMetaProviderDiagnostics,
+        })
       }
       const hasVeaPipelineTool = toolDefinitions.some((definition) => definition.name === 'skill_video_expert_pipeline')
       const hasMapAmbiguityQuestionTools = toolDefinitions.some((definition) => definition.name === 'map_plan_route')
@@ -3393,6 +3751,12 @@ export class AgentSdkRuntime extends EventEmitter {
         && toolDefinitions.some((definition) => definition.name === 'ask_user_questions')
       const allowedToolNames = toolDefinitions.map((definition) => definition.name)
       const definitionByName = new Map(toolDefinitions.map((definition) => [definition.name, definition]))
+      const requiredCapabilityGroups = Array.from(new Set(toolDefinitions.map((definition) => definition.groupId)))
+      let liveTaskBudgetRuntime = resolveAgentSdkTaskBudgetRuntime({
+        options: effectiveExecutionOptions,
+        inferredTaskType: resolveTaskTypeFromToolDefinitions(toolDefinitions),
+      })
+      runMetaBudgetRuntime = liveTaskBudgetRuntime
       let lastDocumentSaveFailure: string | null = null
       let newDocumentNeedsSave = false
       const toolBridgeRuntimeContext: ToolBridgeRuntimeContext = {
@@ -3415,6 +3779,24 @@ export class AgentSdkRuntime extends EventEmitter {
         },
         recordToolResult: (toolName, output) => {
           usedTools.push(toolName)
+          if (toolBridgeRuntimeContext.taskBudgetRuntime) {
+            const previousWarning = toolBridgeRuntimeContext.taskBudgetRuntime.warningLevel
+            const nextRuntime = consumeToolCallBudget(toolBridgeRuntimeContext.taskBudgetRuntime)
+            toolBridgeRuntimeContext.taskBudgetRuntime = nextRuntime
+            liveTaskBudgetRuntime = nextRuntime
+            runMetaBudgetRuntime = nextRuntime
+            const nextWarning = nextRuntime.warningLevel
+            if (
+              nextWarning !== 'none'
+              && nextWarning !== previousWarning
+              && !toolBridgeRuntimeContext.budgetWarningMessages.includes(nextWarning)
+            ) {
+              toolBridgeRuntimeContext.budgetWarningMessages.push(nextWarning)
+              projectionPatches.push({
+                budgetWarningLevel: nextWarning,
+              })
+            }
+          }
           const normalized = normalizeToolExecutionOutput(output)
           const structuredData = readStructuredResultRecord(normalized)
           const documentToolFailed = this.isDocumentToolFailure(normalized)
@@ -3454,6 +3836,43 @@ export class AgentSdkRuntime extends EventEmitter {
         },
         agentContext,
         runHandle,
+        taskBudgetRuntime: liveTaskBudgetRuntime,
+        budgetWarningMessages: [],
+      }
+      const finishBudgetCheckpointIfNeeded = async (): Promise<ExecutionTurnResult | null> => {
+        if (!liveTaskBudgetRuntime || liveTaskBudgetRuntime.warningLevel !== 'exhausted') return null
+        const checkpoint = await this.writeBudgetCheckpointState({
+          agentName: name,
+          sessionId,
+          runId,
+          taskId,
+          taskBudgetRuntime: liveTaskBudgetRuntime,
+          runHandle,
+          usedTools,
+          requiredCapabilityGroups,
+          requiredToolNames: allowedToolNames,
+          lastUserMessage: messageToText(content as RunMessage),
+        })
+        runMetaContinuationRef = checkpoint.projectionPatch.taskContinuation && typeof checkpoint.projectionPatch.taskContinuation === 'object'
+          ? checkpoint.projectionPatch.taskContinuation as Record<string, unknown>
+          : null
+        projectionPatches.push(checkpoint.projectionPatch)
+        finalText = '本轮工具预算已用完，我已保存续跑检查点，可以继续。'
+        emitOutput(finalText, 'text', checkpoint.projectionPatch)
+        emitOutput('', 'done', checkpoint.projectionPatch)
+        emitStatus('checkpoint', 'checkpoint_budget')
+        return this.buildResult({
+          success: true,
+          finalText,
+          cancelled: false,
+          taskId,
+          usedTools,
+          transcriptEvents,
+          projectionPatches,
+          terminalReason: 'checkpoint_budget',
+          taskBudgetRuntime: liveTaskBudgetRuntime,
+          providerDiagnostics: runMetaProviderDiagnostics,
+        })
       }
       const sdkTools = useTextToolBridge
         ? []
@@ -3536,8 +3955,9 @@ export class AgentSdkRuntime extends EventEmitter {
       let nextInput = toSdkInput(content as RunMessage)
       const agentSdkMaxTurns = resolveAgentSdkMaxTurns({
         message: content as RunMessage,
-        requestEnvelope: executionOptions?.requestEnvelope,
+        requestEnvelope: effectiveExecutionOptions?.requestEnvelope,
         requiresLocalDocumentWrite,
+        taskBudgetRuntime: liveTaskBudgetRuntime,
       })
       let documentTargetRepairAttempts = 0
       let documentTargetContinuationRepairAttempts = 0
@@ -3586,6 +4006,7 @@ export class AgentSdkRuntime extends EventEmitter {
             })
             if (runResult.usage) {
               session.lastUsageTokens = runResult.usage.totalTokens
+              runMetaUsage = runResult.usage
             }
             break
           } catch (error) {
@@ -3706,6 +4127,10 @@ export class AgentSdkRuntime extends EventEmitter {
               nextInput = buildTextToolResultMessage(bridgeResults)
               finalText = leakedToolCall.visibleText
               continue
+            }
+            {
+              const checkpointResult = await finishBudgetCheckpointIfNeeded()
+              if (checkpointResult) return checkpointResult
             }
             nextInput = buildTextToolResultMessage(bridgeResults)
             finalText = leakedToolCall.visibleText
@@ -3882,6 +4307,10 @@ export class AgentSdkRuntime extends EventEmitter {
           finalText = parsed.visibleText
           continue
         }
+        {
+          const checkpointResult = await finishBudgetCheckpointIfNeeded()
+          if (checkpointResult) return checkpointResult
+        }
         nextInput = buildTextToolResultMessage(bridgeResults)
         finalText = parsed.visibleText
       }
@@ -4021,6 +4450,10 @@ export class AgentSdkRuntime extends EventEmitter {
           : '工具已执行完成。'
         emitOutput(finalText, 'text')
       }
+      {
+        const checkpointResult = await finishBudgetCheckpointIfNeeded()
+        if (checkpointResult) return checkpointResult
+      }
       const finalProjectionPatch = this.mergeProjectionPatches(projectionPatches)
       emitOutput('', 'done', finalProjectionPatch)
       emitStatus('done', 'done')
@@ -4033,6 +4466,8 @@ export class AgentSdkRuntime extends EventEmitter {
         transcriptEvents,
         projectionPatches,
         terminalReason: 'done',
+        taskBudgetRuntime: liveTaskBudgetRuntime,
+        providerDiagnostics: runMetaProviderDiagnostics,
       })
     } catch (error) {
       if (isAbortError(error)) {
@@ -4210,7 +4645,83 @@ export class AgentSdkRuntime extends EventEmitter {
         terminalReason: failure.terminalReason,
       })
     } finally {
-      await this.finalizeRun(name, session, runHandle)
+      try {
+        await this.persistRunMetaSnapshot({
+          agentName: name,
+          runId,
+          taskId,
+          scopeId: sessionId || null,
+          status: runMetaStatus,
+          terminalReason: runMetaTerminalReason,
+          taskBudgetRuntime: runMetaBudgetRuntime,
+          providerDiagnostics: runMetaProviderDiagnostics,
+          continuationRef: runMetaContinuationRef,
+          usage: runMetaUsage,
+          firstMessageText: messageToText(content as RunMessage),
+          finalText,
+        })
+        await this.finalizeRun(name, session, runHandle)
+      } finally {
+        if (ownsBudgetCheckpointFlight) releaseBudgetCheckpointFlight(budgetCheckpointFlightKey)
+      }
+    }
+  }
+
+  private async persistRunMetaSnapshot(params: {
+    agentName: string
+    runId: string
+    taskId: string
+    scopeId: string | null
+    status: string
+    terminalReason: TurnTerminalReason | null
+    taskBudgetRuntime: TaskBudgetRuntime | null
+    providerDiagnostics: AgentSdkProviderDiagnostics | null
+    continuationRef: Record<string, unknown> | null
+    usage: ReadyAgentSdkRunResult['usage'] | null
+    firstMessageText: string
+    finalText: string
+  }): Promise<void> {
+    let repository: RunMetaRepositoryLike | null = null
+    try {
+      repository = (this.runtime?.getRunMetaRepository?.() || null) as RunMetaRepositoryLike | null
+    } catch {
+      repository = null
+    }
+    if (!repository) return
+    const budgetDiagnostics = taskBudgetDiagnostics(params.taskBudgetRuntime)
+    const status = params.status || (params.terminalReason === 'done' ? 'done' : 'running')
+    const input = {
+      runId: params.runId,
+      taskId: params.taskId,
+      scopeId: params.scopeId,
+      agentId: publicAgentName(params.agentName),
+      status,
+      taskType: params.taskBudgetRuntime?.taskType || null,
+      terminalReason: params.terminalReason,
+      providerProtocol: params.providerDiagnostics?.agentProtocol || null,
+      wireApi: params.providerDiagnostics?.wireApi || null,
+      contextWindow: params.providerDiagnostics?.contextWindow || null,
+      providerDiagnostics: params.providerDiagnostics,
+      budget: budgetDiagnostics.budget as Record<string, unknown> | null,
+      continuationRef: params.continuationRef,
+      recoveryHistory: [],
+      inputTokens: params.usage?.inputTokens ?? 0,
+      outputTokens: params.usage?.outputTokens ?? 0,
+      totalTokens: params.usage?.totalTokens ?? 0,
+      firstMessageText: params.firstMessageText.slice(0, 2_000),
+      lastMessageText: params.finalText.slice(0, 2_000),
+      followUpText: params.terminalReason === 'checkpoint_budget'
+        ? 'checkpoint_budget'
+        : null,
+    }
+    try {
+      if (repository.get(params.runId)) {
+        repository.update(params.runId, input)
+      } else {
+        repository.create(input)
+      }
+    } catch (error) {
+      log(`persist run_meta failed runId=${params.runId}: ${errorMessage(error)}`)
     }
   }
 
@@ -4426,7 +4937,8 @@ export class AgentSdkRuntime extends EventEmitter {
       this.buildExecutorContext(runtimeContext),
     )
     runtimeContext.recordToolResult(definition.name, output)
-    const normalized = normalizeToolExecutionOutput(output)
+    const outputWithSteering = appendBudgetWarningSteering(output, runtimeContext)
+    const normalized = normalizeToolExecutionOutput(outputWithSteering)
     const resultTrace = formatToolResultTrace(definition.name, normalized)
     runtimeContext.emitOutput(resultTrace, 'tool_result', normalized.projectionPatch || null)
     this.publishSdkToolEvent({
@@ -4436,7 +4948,7 @@ export class AgentSdkRuntime extends EventEmitter {
       text: resultTrace,
       projectionPatch: normalized.projectionPatch,
     })
-    return output
+    return outputWithSteering
   }
 
   private isDocumentToolFailure(output: ToolExecutionOutput): boolean {
@@ -4548,7 +5060,8 @@ export class AgentSdkRuntime extends EventEmitter {
         },
       )
       runtimeContext.recordToolResult(definition.name, output)
-      const resultTrace = formatToolResultTrace(definition.name, output)
+      const outputWithSteering = appendBudgetWarningSteering(output, runtimeContext)
+      const resultTrace = formatToolResultTrace(definition.name, outputWithSteering)
       runtimeContext.emitOutput(resultTrace, 'tool_result')
       this.publishSdkToolEvent({
         runtimeContext,
@@ -4556,7 +5069,7 @@ export class AgentSdkRuntime extends EventEmitter {
         kind: 'result',
         text: resultTrace,
       })
-      return output
+      return outputWithSteering
     }
     const guard = runtimeContext.documentTargetGuard
     if (guard && definition.name === 'document_new_tab') {
@@ -4605,7 +5118,8 @@ export class AgentSdkRuntime extends EventEmitter {
       : null
     if (preservationBlocker) {
       runtimeContext.recordToolResult(definition.name, preservationBlocker)
-      const resultTrace = formatToolResultTrace(definition.name, normalizeToolExecutionOutput(preservationBlocker))
+      const blockerWithSteering = appendBudgetWarningSteering(preservationBlocker, runtimeContext)
+      const resultTrace = formatToolResultTrace(definition.name, normalizeToolExecutionOutput(blockerWithSteering))
       runtimeContext.emitOutput(resultTrace, 'tool_result')
       this.publishSdkToolEvent({
         runtimeContext,
@@ -4613,7 +5127,7 @@ export class AgentSdkRuntime extends EventEmitter {
         kind: 'result',
         text: resultTrace,
       })
-      return preservationBlocker
+      return blockerWithSteering
     }
     runtimeContext.emitToolAction(definition.name, effectiveArgs)
     const output = await this.executeToolCall(
@@ -4622,7 +5136,8 @@ export class AgentSdkRuntime extends EventEmitter {
       this.buildExecutorContext(runtimeContext),
     )
     runtimeContext.recordToolResult(definition.name, output)
-    const normalized = normalizeToolExecutionOutput(output)
+    const outputWithSteering = appendBudgetWarningSteering(output, runtimeContext)
+    const normalized = normalizeToolExecutionOutput(outputWithSteering)
     if (
       guard
       && definition.name === 'document_open_tab'
@@ -4650,7 +5165,7 @@ export class AgentSdkRuntime extends EventEmitter {
       const saveBlocker = await this.ensureExplicitDocumentTargetSaved(runtimeContext)
       if (saveBlocker) return saveBlocker
     }
-    return output
+    return outputWithSteering
   }
 
   private resolveSkillAuthorizationForTurn(
@@ -4730,6 +5245,103 @@ export class AgentSdkRuntime extends EventEmitter {
     return patches.reduce<Record<string, unknown>>((acc, patch) => ({ ...acc, ...patch }), {})
   }
 
+  private async writeBudgetCheckpointState(params: {
+    agentName: string
+    sessionId?: string
+    runId: string
+    taskId: string
+    taskBudgetRuntime: TaskBudgetRuntime
+    runHandle: RunHandle
+    usedTools: string[]
+    requiredCapabilityGroups: string[]
+    requiredToolNames: string[]
+    lastUserMessage: string
+  }): Promise<AgentSdkBudgetCheckpoint> {
+    const outputDir = join(
+      tmpdir(),
+      'ready-agent-continuations',
+      safeContinuationPathSegment(params.taskId),
+      safeContinuationPathSegment(params.runId),
+    )
+    await mkdir(outputDir, { recursive: true })
+    const runStatePath = join(outputDir, 'run_state.json')
+    const sessionSnapshot = normalizeSessionSnapshotForSeed(await params.runHandle.capturedSession.getItems())
+    const now = new Date().toISOString()
+    const state = {
+      version: 1,
+      kind: 'agent_sdk_budget_checkpoint',
+      scopeId: params.sessionId || null,
+      taskId: params.taskId,
+      runId: params.runId,
+      agentName: params.agentName,
+      taskType: params.taskBudgetRuntime.taskType,
+      budgetRuntime: params.taskBudgetRuntime,
+      terminalReason: 'checkpoint_budget',
+      lastUserMessageSummary: params.lastUserMessage.slice(0, 500),
+      sessionSnapshot,
+      usedToolNames: [...params.usedTools],
+      requiredCapabilityGroups: [...params.requiredCapabilityGroups],
+      requiredToolNames: [...params.requiredToolNames],
+      createdAt: now,
+      updatedAt: now,
+    }
+    await writeFile(runStatePath, JSON.stringify(state, null, 2), 'utf8')
+    return {
+      outputDir,
+      runStatePath,
+      projectionPatch: {
+        interactionState: 'suspended',
+        waitingFor: 'background',
+        resumableActions: ['continue', 'retry', 'cancel'],
+        blockedReason: '本轮工具预算已用完，已保存续跑检查点。',
+        taskContinuation: {
+          taskId: params.taskId,
+          blockerType: 'budget_exhausted',
+          pauseReason: 'budget_exhausted',
+          outputDir,
+          runStatePath,
+        },
+      },
+    }
+  }
+
+  private async loadBudgetCheckpointState(options?: AgentSdkExecutionOptions): Promise<AgentSdkBudgetCheckpointRestore | null> {
+    const runStatePath = continuationRunStatePath(options)
+    if (!runStatePath) return null
+    let raw = ''
+    try {
+      raw = await readFile(runStatePath, 'utf8')
+    } catch {
+      return null
+    }
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw) as unknown
+    } catch {
+      return null
+    }
+    const record = asRecord(parsed)
+    const budgetRuntime = asRecord(record?.budgetRuntime) as unknown as TaskBudgetRuntime | null
+    if (!budgetRuntime?.budget || !budgetRuntime.usage) return null
+    const rawSnapshot = Array.isArray(record?.sessionSnapshot)
+      ? record.sessionSnapshot as AgentInputItem[]
+      : []
+    return {
+      sessionSnapshot: normalizeSessionSnapshotForSeed(rawSnapshot),
+      taskBudgetRuntime: resumeBudgetRuntime(budgetRuntime),
+      requiredCapabilityGroups: Array.isArray(record?.requiredCapabilityGroups)
+        ? record.requiredCapabilityGroups.map((item) => String(item || '').trim()).filter(Boolean)
+        : [],
+      requiredToolNames: Array.isArray(record?.requiredToolNames)
+        ? record.requiredToolNames.map((item) => String(item || '').trim()).filter(Boolean)
+        : [],
+      usedToolNames: Array.isArray(record?.usedToolNames)
+        ? record.usedToolNames.map((item) => String(item || '').trim()).filter(Boolean)
+        : [],
+      runStatePath,
+    }
+  }
+
   private buildResult(params: {
     success: boolean
     finalText: string
@@ -4739,13 +5351,20 @@ export class AgentSdkRuntime extends EventEmitter {
     transcriptEvents: TurnTranscriptEvent[]
     projectionPatches: Record<string, unknown>[]
     terminalReason: TurnTerminalReason
+    taskBudgetRuntime?: TaskBudgetRuntime | null
+    providerDiagnostics?: AgentSdkProviderDiagnostics | null
     error?: string
     scopeRunAuthority?: ExecutionTurnResult['scopeRunAuthority']
   }): ExecutionTurnResult {
     const taskType = this.resolveTaskTypeFromTools(params.usedTools)
+    const budgetDiagnostics = taskBudgetDiagnostics(params.taskBudgetRuntime || null)
     return {
       success: params.success,
-      status: params.cancelled ? 'cancelled' : params.success ? 'done' : 'error',
+      status: params.cancelled
+        ? 'cancelled'
+        : params.terminalReason === 'checkpoint_budget' || params.terminalReason === 'checkpoint_background' || params.terminalReason === 'checkpoint_user_input'
+          ? 'checkpoint'
+          : params.success ? 'done' : 'error',
       finalText: params.finalText,
       cancelled: params.cancelled,
       usedTools: [...params.usedTools],
@@ -4756,6 +5375,11 @@ export class AgentSdkRuntime extends EventEmitter {
       taskProjectionId: params.taskId,
       executionDiagnostics: {
         taskId: params.taskId,
+        taskBudgetRuntime: params.taskBudgetRuntime || null,
+        budget: budgetDiagnostics.budget,
+        budgetUsagePercent: budgetDiagnostics.budgetUsagePercent,
+        budgetWarningLevel: budgetDiagnostics.budgetWarningLevel,
+        providerDiagnostics: params.providerDiagnostics || null,
         toolSnapshots: null,
       },
       projectionTruth: {

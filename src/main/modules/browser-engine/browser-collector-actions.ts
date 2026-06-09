@@ -74,6 +74,7 @@ interface MediaCollection {
   videos: VideoCandidate[]
   videoCount: number
   scope?: string
+  expectedImageCount?: number
 }
 
 const MAX_NOTE_IMAGE_CANDIDATES = 24
@@ -137,6 +138,9 @@ function extractMediaCollection(collectOutput: string): MediaCollection {
       return {
         videoCount,
         scope: typeof parsed?.scope === 'string' ? parsed.scope : undefined,
+        expectedImageCount: Number.isFinite(Number(parsed?.expectedImageCount)) && Number(parsed?.expectedImageCount) > 0
+          ? Number(parsed.expectedImageCount)
+          : undefined,
         videos,
         images: images
       .map((img: unknown) => {
@@ -393,6 +397,61 @@ function filterNoteImageCandidates(images: ImageCandidate[], maxItems = MAX_NOTE
   return (preferred.length > 0 ? preferred : usable).slice(0, maxItems)
 }
 
+function mergeImageCandidates(...sets: ImageCandidate[][]): ImageCandidate[] {
+  const seen = new Set<string>()
+  const out: ImageCandidate[] = []
+  for (const images of sets) {
+    for (const image of images) {
+      if (!/^https?:\/\//i.test(image.url)) continue
+      const key = imageDedupeKey(image.url)
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push(image)
+    }
+  }
+  return out
+}
+
+function extractImagesFromStructuredGallery(output: string): ImageCandidate[] {
+  try {
+    const parsed = JSON.parse(output)
+    const items = Array.isArray(parsed?.items) ? parsed.items : []
+    const images: ImageCandidate[] = []
+    for (const item of items) {
+      if (!item || typeof item !== 'object') continue
+      const record = item as Record<string, unknown>
+      const media = Array.isArray(record.media) ? record.media : []
+      const urls = [
+        ...media,
+        record.link,
+        record.image,
+        (record.rawFields && typeof record.rawFields === 'object' ? (record.rawFields as Record<string, unknown>).link : undefined),
+      ]
+      for (const value of urls) {
+        const url = String(value || '').trim()
+        if (/^https?:\/\//i.test(url)) images.push({ url })
+      }
+    }
+    return images
+  } catch {
+    return []
+  }
+}
+
+async function collectXiaohongshuGalleryFallback(facade: NoteCollectFacade): Promise<ImageCandidate[]> {
+  const out = await facade.run('browser_extract_structured', {
+    template: 'image_gallery',
+    limit: 60,
+    min_width: 120,
+  }).catch(() => '')
+  if (parseFacadeError(out)) return []
+  return extractImagesFromStructuredGallery(out)
+}
+
+function isPartialImagesReason(reason: string | undefined): boolean {
+  return String(reason || '').startsWith('partial_images')
+}
+
 function hasOnlyPlaceholderImages(images: ImageCandidate[] | undefined): boolean {
   if (!images || images.length === 0 || images.length > 3) return false
   return images.every((img) => isLikelyPlatformAssetUrl(img.url))
@@ -564,7 +623,7 @@ async function writeArtifacts(
   extra: { summary?: string; imageUrls?: string[]; videoUrls?: string[] },
 ): Promise<NoteCollectResult> {
   if (!fileOps) return result
-  if (!result.success && result.imageCount <= 0) {
+  if (!result.success && (result.imageCount <= 0 || isPartialImagesReason(result.reason))) {
     const failedDir = pathJoin(result.savedDir, '_failed')
     await fileOps.ensureDir(failedDir)
     const failurePath = pathJoin(failedDir, failureFilename(result))
@@ -883,6 +942,7 @@ export async function collectNote(
   let media = extractMediaCollection(imagesOut)
   let rawImages = media.images
   let videoCount = media.videoCount
+  let expectedImageCount = media.expectedImageCount || 0
   let images = filterNoteImageCandidates(rawImages)
   let rawImagesForAccessBlock = rawImages
   if (
@@ -938,6 +998,7 @@ export async function collectNote(
     media = extractMediaCollection(imagesOut)
     rawImages = media.images
     videoCount = Math.max(videoCount, media.videoCount)
+    expectedImageCount = Math.max(expectedImageCount, media.expectedImageCount || 0)
     rawImagesForAccessBlock = rawImages
     if (
       input.skipNavigate
@@ -958,6 +1019,14 @@ export async function collectNote(
       }, { summary: detail.summary, imageUrls: rawImages.map((img) => img.url) })
     }
     images = filterNoteImageCandidates(rawImages)
+  }
+  if (isXiaohongshuTarget(input) && (media.scope === 'xiaohongshu-detail' || input.skipNavigate) && images.length <= 1) {
+    const galleryImages = await collectXiaohongshuGalleryFallback(facade)
+    if (galleryImages.length > 0) {
+      rawImages = mergeImageCandidates(rawImages, galleryImages)
+      rawImagesForAccessBlock = rawImages
+      images = filterNoteImageCandidates(rawImages)
+    }
   }
   if (images.length === 0 && videoCount === 0 && input.skipNavigate && isXiaohongshuTarget(input)) {
     for (const waitMs of [1000, 1500, 2500]) {
@@ -986,6 +1055,7 @@ export async function collectNote(
       let retryMedia = extractMediaCollection(retryVisibleOut)
       rawImages = retryMedia.images
       videoCount = Math.max(videoCount, retryMedia.videoCount)
+      expectedImageCount = Math.max(expectedImageCount, retryMedia.expectedImageCount || 0)
       rawImagesForAccessBlock = rawImages
       images = filterNoteImageCandidates(rawImages)
       if (images.length > 0 || videoCount > 0) break
@@ -994,9 +1064,32 @@ export async function collectNote(
       retryMedia = extractMediaCollection(retryHiddenOut)
       rawImages = retryMedia.images
       videoCount = Math.max(videoCount, retryMedia.videoCount)
+      expectedImageCount = Math.max(expectedImageCount, retryMedia.expectedImageCount || 0)
       rawImagesForAccessBlock = rawImages
       images = filterNoteImageCandidates(rawImages)
       if (images.length > 0 || videoCount > 0) break
+    }
+  }
+  if (
+    expectedImageCount > images.length
+    && images.length > 0
+    && isXiaohongshuTarget(input)
+    && (media.scope === 'xiaohongshu-detail' || input.skipNavigate)
+  ) {
+    await facade.run('browser_wait', { ms: 1200 }).catch(() => '')
+    const retryHiddenOut = await facade.run('browser_collect_images', { include_hidden: true, limit: 60 }).catch(() => '')
+    if (retryHiddenOut && !parseFacadeError(retryHiddenOut)) {
+      const retryMedia = extractMediaCollection(retryHiddenOut)
+      expectedImageCount = Math.max(expectedImageCount, retryMedia.expectedImageCount || 0)
+      rawImages = mergeImageCandidates(rawImages, retryMedia.images)
+      rawImagesForAccessBlock = rawImages
+      images = filterNoteImageCandidates(rawImages)
+    }
+    const retryGalleryImages = await collectXiaohongshuGalleryFallback(facade)
+    if (retryGalleryImages.length > 0) {
+      rawImages = mergeImageCandidates(rawImages, retryGalleryImages)
+      rawImagesForAccessBlock = rawImages
+      images = filterNoteImageCandidates(rawImages)
     }
   }
   const imageUrls = images.map((img) => img.url)
@@ -1024,6 +1117,20 @@ export async function collectNote(
       savedDir: input.outputDir,
       reason: videoCount > 0 ? 'skipped_video' : 'no_images',
     }, { summary: detail.summary })
+  }
+  if (expectedImageCount > imageUrls.length) {
+    return writeArtifacts(fileOps, pathJoin, {
+      success: false,
+      noteUrl: input.noteUrl,
+      canonicalUrl,
+      openUrl,
+      title,
+      sourceId,
+      order: input.order,
+      imageCount: imageUrls.length,
+      savedDir: input.outputDir,
+      reason: `partial_images:${imageUrls.length}/${expectedImageCount}`,
+    }, { summary: detail.summary, imageUrls })
   }
   const imageAccessBlock = detectTerminalPageBlock({ pageText, title: detail.title || title, summary: detail.summary, images: images.length > 0 ? images : rawImagesForAccessBlock })
   if (imageAccessBlock) {

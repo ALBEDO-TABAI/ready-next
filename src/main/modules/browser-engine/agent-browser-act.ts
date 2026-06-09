@@ -25,6 +25,7 @@ export interface ActOnTargetRequest {
   targetId: string
   action: AgentBrowserAction
   value?: string
+  disambiguation?: string
   readBack?: AgentBrowserReadBack
   expectedChange?: string
   maxWaitMs?: number
@@ -43,7 +44,12 @@ export interface ResolvedTargetRef {
  */
 export function gateActOnTarget(
   request: ActOnTargetRequest,
-  context: { currentGeneration: number; matchCount: number; candidates?: unknown[] },
+  context: {
+    currentGeneration: number
+    matchCount: number
+    candidates?: unknown[]
+    ambiguityGroup?: { role: string; name: string; targetIds: string[] } | null
+  },
 ): ResolvedTargetRef | AgentBrowserStructuredError {
   const parsed = parseTargetId(request.targetId)
   if (!parsed) {
@@ -61,6 +67,13 @@ export function gateActOnTarget(
       'target_not_found',
       `Action "${request.action}" requires a value.`,
       { action: request.action },
+    )
+  }
+  if (context.ambiguityGroup && !String(request.disambiguation || '').trim()) {
+    return agentBrowserError(
+      'ambiguous_target',
+      `Target ${request.targetId} belongs to an ambiguity group. Provide disambiguation before acting.`,
+      { ambiguityGroup: context.ambiguityGroup },
     )
   }
   if (context.matchCount <= 0) {

@@ -74,6 +74,10 @@ function normalizedTitle(value: string | undefined): string {
   return String(value || '').replace(/\s+/g, ' ').trim().toLowerCase()
 }
 
+function isPartialImagesReason(reason: string | undefined): boolean {
+  return String(reason || '').startsWith('partial_images')
+}
+
 /**
  * Run the collection. `initialState` lets a resumed task continue from the last
  * checkpoint instead of restarting.
@@ -166,7 +170,7 @@ export async function runBrowserCollection(
         deps.fileOps,
       )
     }
-    if (result.reason === 'needs_verification') {
+    if (result.reason === 'needs_verification' || isPartialImagesReason(result.reason)) {
       await deps.onCheckpoint?.(state, progressOf(plan, state, note.title ?? note.url, 'needs_verification'))
       deps.onProgress?.(progressOf(plan, state, null, 'needs_verification'))
       return { collected: state.collected, failed: state.failed, notes: state.outputs || [], rounds, stopReason: 'needs_verification', state }

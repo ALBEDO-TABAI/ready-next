@@ -9,6 +9,7 @@ import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
 import { AIModelConfig, getProviderDef, normalizeAIConfig, resolveAIConfigCapabilities } from '../../../shared/ai-providers'
 import { BrowserController } from '../browser-engine/ipc-handler'
+import { BrowserSiteExperienceStore } from '../browser-engine/browser-site-experience-store'
 import type { SidecarManager } from '../agent-control/sidecar-manager'
 import { BrowserDomainOrchestrator } from '../agent-control/domain-adapters/browser-domain-orchestrator'
 import { BrowserDomainAdapter } from '../agent-control/domain-adapters/browser-domain-adapter'
@@ -212,10 +213,12 @@ export interface MultimodalBlock {
 
 const TOOL_SYSTEM_PROMPT = `
 你可以使用浏览器工具来帮助用户：导航网页、搜索信息、阅读页面内容、点击元素、输入文字和执行JavaScript。
+浏览页面时，默认先用 browser_read_page_map 获取页面地图，再用 browser_probe_readonly 做必要的只读结构探针，然后用 browser_act_on_target 对 fresh target_id 执行动作；动作后必须读取页面证据复查。browser_read_page 只作为正文补充，browser_click/browser_click_text/browser_type/browser_type_smart/browser_click_at/browser_type_at/browser_send_keys/browser_compose_message 只作为 fallback，不要绕开 target_id + generation 校验成为首选路径。
+不要把平台错误页、空正文或 "content not found" 直接判成目标不存在；先复查 URL、站内生成链接、动态渲染、隐藏 DOM、iframe/Shadow DOM 线索和当前页面状态。若同一路径失败，不要反复重试同一个搜索、导航或点击，换一种证据路径或明确停止原因。
 当用户需要网页操作时，主动使用这些工具。搜索信息时，优先用 browser_search（支持多引擎回退）；如果是多步骤复杂任务，优先用 browser_run_workflow 一次执行多个步骤。
 当任务是“读网页结构化内容”“滚动采集整页”“批量下载”“长时间后台任务”时，优先用 browser_extract_structured、browser_scroll_collect、browser_wait_for_condition、browser_start_task、browser_get_task，而不是把所有逻辑都塞进 browser_execute_js 或 browser_run_workflow。
 如果任务本质上是“整页图集/画板下载”，优先用 browser_download_gallery；如果任务本质上是“围绕一个主题跨网页研究”，优先用 browser_research_topic。
-当 selector 不稳定或你不确定 DOM 结构时，优先用 browser_click_text / browser_type_smart，而不是盲猜 CSS 选择器。
+当 selector 不稳定或你不确定 DOM 结构时，先重新读取 page map 或使用 browser_probe_readonly；仍无法建立 target_id 时，才把 browser_click_text / browser_type_smart 作为 fallback。
 在聊天类网页中，优先验证“是否真实提交并出现响应内容”，不要只把文本写入输入框就结束。
 若一次提交未成功，按“DOM 定位 -> 可编辑区探测 -> 坐标输入 -> 键盘提交 -> 等待并复核”的顺序回退；每一步都要读取页面证据后再继续。
 如果同一输入框中已经存在与目标完全相同的文本，不要重复输入，优先直接提交并验证响应。
@@ -338,7 +341,13 @@ export class DirectChatEngine extends EventEmitter {
       getTabContext: async (tabId) => this.browserController?.getTabContext(tabId) || null,
       extractPrimaryUserInstruction: (raw) => this.extractPrimaryUserInstruction(raw),
     })
-    this.browserDomainOrchestrator = new BrowserDomainOrchestrator(browserTaskPlanner)
+    let browserSiteExperienceStore: BrowserSiteExperienceStore | null = null
+    try {
+      browserSiteExperienceStore = new BrowserSiteExperienceStore()
+    } catch {
+      browserSiteExperienceStore = null
+    }
+    this.browserDomainOrchestrator = new BrowserDomainOrchestrator(browserTaskPlanner, browserSiteExperienceStore)
     this.skillContextOrchestrator = new SkillContextOrchestrator({
       extractPrimaryUserInstruction: (raw) => this.extractPrimaryUserInstruction(raw),
       listSkills: () => getSkillsRuntimeManager().listSkills(),

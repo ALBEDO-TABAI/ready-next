@@ -37,6 +37,23 @@ export const BrowserReadPageSchema = z.object({
   tab_id: TabIdOptional,
 })
 
+export const BrowserReadPageMapSchema = z.object({
+  tab_id: TabIdOptional,
+  max_bytes: z.number().optional().describe('页面地图文本最大字节数，默认 32768'),
+})
+
+export const BrowserProbeReadonlySchema = z.object({
+  generation: z.number().describe('browser_read_page_map 返回的当前 generation'),
+  query: z.string().optional().describe('只读观察目标的文字描述，不作为脚本执行'),
+  scope: z
+    .enum(['document', 'visible', 'forms', 'links', 'media', 'frames', 'shadow-dom'])
+    .optional()
+    .describe('固定只读观察范围，默认 document'),
+  max_nodes: z.number().optional().describe('最多返回节点数，默认 24，最大 80'),
+  include_hidden: z.boolean().optional().describe('是否包含隐藏但已加载的节点摘要，默认 false'),
+  tab_id: TabIdOptional,
+})
+
 export const BrowserClickSchema = z.object({
   selector: z.string().describe('CSS 选择器，例如 "button.submit" 或 "#search-btn"'),
   tab_id: TabIdOptional,
@@ -45,6 +62,23 @@ export const BrowserClickSchema = z.object({
 export const BrowserClickTextSchema = z.object({
   text: z.string().describe('要点击的可见文本（支持部分匹配）'),
   exact: z.boolean().optional().describe('是否精确匹配文本，默认 false'),
+  tab_id: TabIdOptional,
+})
+
+export const BrowserActOnTargetSchema = z.object({
+  target_id: z.string().describe('browser_read_page_map 返回的 targetId，包含 page-map generation'),
+  action: z
+    .enum(['click', 'expand', 'choose', 'fill', 'hover'])
+    .describe('目标动作：click/expand/choose/fill/hover。type 映射为 fill，select 映射为 choose'),
+  value: z.string().optional().describe('fill/choose 动作需要的输入值'),
+  disambiguation: z
+    .string()
+    .optional()
+    .describe('当目标属于重复文本/角色歧义组时，说明为什么选择这个 target_id'),
+  read_back: z
+    .enum(['none', 'delta', 'map'])
+    .optional()
+    .describe('动作后复查方式：none/delta/map，默认 delta'),
   tab_id: TabIdOptional,
 })
 
@@ -215,8 +249,11 @@ export type BrowserInteractionToolName =
   | 'browser_search'
   | 'browser_get_tabs'
   | 'browser_read_page'
+  | 'browser_read_page_map'
+  | 'browser_probe_readonly'
   | 'browser_click'
   | 'browser_click_text'
+  | 'browser_act_on_target'
   | 'browser_type'
   | 'browser_type_smart'
   | 'browser_compose_message'
@@ -245,8 +282,11 @@ export const BROWSER_INTERACTION_SCHEMAS: Record<
   browser_search: BrowserSearchSchema,
   browser_get_tabs: BrowserGetTabsSchema,
   browser_read_page: BrowserReadPageSchema,
+  browser_read_page_map: BrowserReadPageMapSchema,
+  browser_probe_readonly: BrowserProbeReadonlySchema,
   browser_click: BrowserClickSchema,
   browser_click_text: BrowserClickTextSchema,
+  browser_act_on_target: BrowserActOnTargetSchema,
   browser_type: BrowserTypeSchema,
   browser_type_smart: BrowserTypeSmartSchema,
   browser_compose_message: BrowserComposeMessageSchema,

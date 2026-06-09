@@ -103,6 +103,7 @@ import { decryptChannelConfig, encryptChannelConfig } from '../memory/secret-sto
 import { ToolGateway } from '../tools-runtime/tool-gateway'
 import { buildCapabilityRuntimeSnapshot } from '../domain-adapters/capability-runtime-snapshot'
 import { TaskProjectionRepository } from '../../repositories/task-projection-repository'
+import { RunMetaRepository } from '../task-projection/run-meta-repository'
 import { appendToolCapabilityLog } from '../../tools/tool-event-log'
 import {
   DetachedSkillTaskTracker,
@@ -505,6 +506,7 @@ export class AgentControlRuntime extends EventEmitter {
 
   async start(): Promise<void> {
     this.cleanupLegacyCopawSettings()
+    this.reconcileStaleSkillRunsOnStartup()
     this.publishRestoredDetachedSkillTasks()
 
     // Start memory lifecycle manager
@@ -686,6 +688,11 @@ export class AgentControlRuntime extends EventEmitter {
    */
   getTaskProjectionStore(): TaskProjectionRepository {
     return this.taskProjectionStore
+  }
+
+  getRunMetaRepository(): RunMetaRepository | null {
+    const rawDb = this.db.getRawDb()
+    return rawDb ? new RunMetaRepository(rawDb) : null
   }
 
   listTaskProjections(scopeId: string): TaskProjectionRecord[] {
@@ -2553,6 +2560,19 @@ export class AgentControlRuntime extends EventEmitter {
           + 'constraint on skill_task_runs. To restore legacy matching, write a forward-fix '
           + 'migration that drops the CHECK before disabling the flag.',
       )
+    }
+  }
+
+  private reconcileStaleSkillRunsOnStartup(): void {
+    try {
+      const result = this.skillTaskRunRepository.reconcileRunningRowsOnStartup()
+      if (result.scanned > 0) {
+        logAgentMetric('skill_task_runs.startup_reconciled', { ...result })
+      }
+    } catch (error) {
+      logAgentMetric('skill_task_runs.startup_reconcile_failed', {
+        error: error instanceof Error ? error.message : String(error),
+      })
     }
   }
 

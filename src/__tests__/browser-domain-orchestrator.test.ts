@@ -52,7 +52,7 @@ function createDecision(): BrowserTaskDecision {
   }
 }
 
-test('BrowserDomainOrchestrator tracks tool-loop step advancement and checkpoint prompts', () => {
+test('BrowserDomainOrchestrator does not advance steps from narration alone', () => {
   const orchestrator = new BrowserDomainOrchestrator({} as BrowserTaskPlanner)
   const initialState = orchestrator.createToolLoopState(createDecision())
 
@@ -60,12 +60,32 @@ test('BrowserDomainOrchestrator tracks tool-loop step advancement and checkpoint
     state: initialState,
     responseText: '步骤 1 完成，继续下一步',
     executedBrowserToolsThisIteration: 2,
+    browserToolResultsThisIteration: [],
+  })
+
+  assert.equal(progress.state.stepIndex, 0)
+  assert.equal(progress.advancedStepIndex, null)
+  assert.match(progress.checkpointMessage || '', /当前步骤: 1\/2 — resolve_target_page: 确认目标页/)
+  assert.match(progress.checkpointMessage || '', /最近证据: 暂无可推进步骤的结构化证据/)
+})
+
+test('BrowserDomainOrchestrator advances steps from browser tool evidence', () => {
+  const orchestrator = new BrowserDomainOrchestrator({} as BrowserTaskPlanner)
+  const initialState = orchestrator.createToolLoopState(createDecision())
+
+  const progress = orchestrator.recordToolLoopProgress({
+    state: initialState,
+    executedBrowserToolsThisIteration: 2,
+    browserToolResultsThisIteration: [{
+      toolName: 'browser_read_page_map',
+      resultText: JSON.stringify({ pageIdentity: { url: 'https://example.com', generation: 1 } }),
+    }],
   })
 
   assert.equal(progress.state.stepIndex, 1)
   assert.equal(progress.advancedStepIndex, 1)
   assert.match(progress.checkpointMessage || '', /当前步骤: 2\/2 — ensure_upload: 上传附件/)
-  assert.match(progress.checkpointMessage || '', /验证条件: 附件已挂载/)
+  assert.match(progress.checkpointMessage || '', /最近证据: browser_read_page_map:page_observed/)
 })
 
 test('BrowserDomainOrchestrator builds limit reminder from current browser step', () => {
@@ -90,6 +110,59 @@ test('BrowserDomainOrchestrator delegates tool-loop plan text and iteration budg
 
   assert.equal(message, 'structured plan')
   assert.equal(budget, 33)
+})
+
+test('BrowserDomainOrchestrator injects site experience as evidence-only hints', async () => {
+  const decision = createDecision()
+  const planner = {
+    buildContinuityContext: async () => ({
+      canReuseCurrentPage: true,
+      reuseReason: 'same page',
+      activePage: {
+        url: 'https://example.com/shop/list',
+        title: 'Example Shop',
+        heading: '',
+        selection: '',
+        excerpt: '',
+        capturedAt: Date.now(),
+        domain: 'example.com',
+      },
+      rememberedWorkflow: null,
+      recentSkill: null,
+      recentActions: [],
+      forcedRules: ['先复查当前页面证据'],
+    }),
+    applyContinuityToDecision: (value: BrowserTaskDecision) => value,
+    buildContinuityInstruction: () => 'base continuity',
+    shouldInspectAmbiguousCreativeEntry: () => false,
+    shouldUseDeterministicRunner: () => false,
+  } as unknown as BrowserTaskPlanner
+  const store = {
+    queryHints: () => [{
+      id: 'hint-1',
+      domain: 'example.com',
+      riskLevel: 'medium' as const,
+      confidence: 0.8,
+      source: 'test-fixture' as const,
+      hint: 'Use site-generated product links; content not found can be a soft 404.',
+      lastVerifiedAt: '2026-06-09T00:00:00.000Z',
+    }],
+  }
+  const orchestrator = new BrowserDomainOrchestrator(planner, store)
+
+  const prepared = await orchestrator.prepareBrowserExecution({
+    hasTools: true,
+    browserControllerAvailable: true,
+    browserAgentEnabled: true,
+    userText: '打开商品页',
+    pureUserInput: '打开商品页',
+    sessionMessages: [],
+    decision,
+  })
+
+  assert.match(prepared.browserContinuityInstruction || '', /站点经验提示/)
+  assert.match(prepared.browserContinuityInstruction || '', /必须用当前页面地图/)
+  assert.match(prepared.browserContinuityInstruction || '', /site-generated product links/)
 })
 
 test('BrowserDomainOrchestrator exposes budget hints for upload workflows without owning counters', () => {

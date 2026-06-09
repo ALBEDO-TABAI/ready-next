@@ -483,6 +483,14 @@ export interface ExecutionRunDiagnostics {
   } | null
   budgetUsagePercent?: number | null
   budgetWarningLevel?: BudgetWarningLevel | null
+  providerDiagnostics?: {
+    provider?: string | null
+    agentProtocol?: string | null
+    wireApi?: string | null
+    contextWindow?: number | null
+    protocolSource?: 'explicit' | 'inferred' | null
+    contextWindowSource?: 'explicit' | 'model' | 'fallback' | null
+  } | null
   budgetLease?: {
     leaseId: string
     decision: SkillBudgetLeaseDecision

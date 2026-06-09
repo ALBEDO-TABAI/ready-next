@@ -158,6 +158,22 @@ function createRepositoryHarness() {
             }
           }
 
+          if (sql.includes("WHERE status = 'running'")) {
+            return {
+              run() {
+                return { changes: 0 }
+              },
+              get() {
+                return undefined
+              },
+              all() {
+                return Array.from(rows.values())
+                  .filter((row) => row.status === 'running')
+                  .sort((left, right) => String(left.updated_at).localeCompare(String(right.updated_at))) as any[]
+              },
+            }
+          }
+
           if (sql.includes('WHERE detached_task_id = ?')) {
             return {
               run() {
@@ -317,8 +333,65 @@ function createTerminalChildRun(repository: SkillTaskRunRepository, overrides: P
 }
 
 function getChildPayload(record: SkillTaskRunRecord | null) {
-  return (record?.resumePayload as { childRun?: { childRunId?: string; closeEvent?: SkillChildCloseEvent | null } } | null)?.childRun
+  return (record?.resumePayload as { childRun?: { childRunId?: string; status?: string; closeEvent?: SkillChildCloseEvent | null } } | null)?.childRun
 }
+
+test('SkillTaskRunRepository reconciles stale running rows on startup', () => {
+  const { repository } = createRepositoryHarness()
+  repository.create(makeRun({
+    id: 'run-with-handle',
+    outputDir: '/tmp/ready-skill-with-handle',
+    runStatePath: '/tmp/ready-skill-with-handle/run_state.json',
+    updatedAt: '2026-06-09T08:00:00.000Z',
+    resumePayload: {
+      childRun: {
+        childRunId: 'run-with-handle',
+        status: 'running',
+        outputDir: '/tmp/ready-skill-with-handle',
+        runStatePath: '/tmp/ready-skill-with-handle/run_state.json',
+      },
+    },
+  }))
+  repository.create(makeRun({
+    id: 'run-without-handle',
+    outputDir: '',
+    runStatePath: '',
+    updatedAt: '2026-06-09T08:00:00.000Z',
+    resumePayload: null,
+  }))
+  repository.create(makeRun({
+    id: 'fresh-running',
+    outputDir: null,
+    runStatePath: null,
+    updatedAt: '2026-06-09T08:09:50.000Z',
+    resumePayload: null,
+  }))
+
+  const result = repository.reconcileRunningRowsOnStartup({
+    now: new Date('2026-06-09T08:10:00.000Z'),
+    staleAfterMs: 60_000,
+  })
+
+  assert.deepEqual(result, {
+    scanned: 3,
+    recoverablePaused: 1,
+    failedWithoutHandle: 1,
+    ignoredFresh: 1,
+  })
+  const recoverable = repository.get('run-with-handle')!
+  assert.equal(recoverable.status, 'blocked')
+  assert.equal(recoverable.interactionState, 'suspended')
+  assert.equal(recoverable.failureKind, 'process_restarted')
+  assert.equal(getChildPayload(recoverable)?.status, 'recoverable_paused')
+
+  const failed = repository.get('run-without-handle')!
+  assert.equal(failed.status, 'failed')
+  assert.equal(failed.failureKind, 'stale_running_without_handle')
+
+  const fresh = repository.get('fresh-running')!
+  assert.equal(fresh.status, 'running')
+  assert.equal(fresh.failureKind, null)
+})
 
 test('SkillTaskRunRepository persists and updates recoverable skill task runs', () => {
   const { repository } = createRepositoryHarness()

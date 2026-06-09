@@ -180,6 +180,36 @@ test('SDK OpenAI chat: vision-on model → image blocks pass through unchanged (
   assert.equal(hasImage, true, 'image_url must survive when supportsVision resolves to true')
 })
 
+test('SDK OpenAI chat: event-stream response fails with provider protocol mismatch', async () => {
+  const config = {
+    provider: 'openai-compatible',
+    model: 'custom-model',
+    apiKey: 'sk-test',
+    baseUrl: 'https://example.invalid/v1',
+    agentProtocol: 'openai',
+    wireApi: 'chat/completions',
+  } as unknown as AIModelConfig
+  const model = new ReadyOpenAICompatibleModel({
+    config,
+    baseUrl: 'https://example.invalid/v1',
+    fetchWithTimeout: async () => new Response('event: message\ndata: {"type":"message"}\n\n', {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream' },
+    }),
+  })
+
+  await assert.rejects(
+    model.getResponse(makeModelRequest([{ role: 'user', content: 'hello' }]) as never),
+    (error) => {
+      const typed = error as Error & { code?: string; terminalReason?: string }
+      assert.equal(typed.code, 'provider_protocol_mismatch')
+      assert.equal(typed.terminalReason, 'provider_protocol_mismatch')
+      assert.match(typed.message, /供应商协议不匹配/)
+      return true
+    },
+  )
+})
+
 // ============================================================================
 // Anthropic wire
 // ============================================================================

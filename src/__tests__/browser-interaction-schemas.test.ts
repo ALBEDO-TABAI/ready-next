@@ -15,6 +15,7 @@ import {
   BrowserClickTextSchema,
   BrowserTypeSchema,
   BrowserCaptureViewportSchema,
+  BrowserProbeReadonlySchema,
   BrowserLocateActionTargetsSchema,
   BrowserAnalyzeViewportSchema,
   BrowserUploadScopeAttachmentSchema,
@@ -63,6 +64,15 @@ test('BrowserCaptureViewportSchema accepts optional mode + clip object', () => {
     true,
   )
   assert.equal(BrowserCaptureViewportSchema.safeParse({ clip: 'not-object' }).success, false)
+})
+
+test('BrowserProbeReadonlySchema requires generation and fixed scope enum', () => {
+  assert.equal(
+    BrowserProbeReadonlySchema.safeParse({ generation: 1, scope: 'forms', query: 'upload' }).success,
+    true,
+  )
+  assert.equal(BrowserProbeReadonlySchema.safeParse({ scope: 'forms' }).success, false)
+  assert.equal(BrowserProbeReadonlySchema.safeParse({ generation: 1, scope: 'eval' }).success, false)
 })
 
 test('BrowserLocateActionTargetsSchema enforces action enum', () => {

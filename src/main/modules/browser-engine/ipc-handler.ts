@@ -886,6 +886,18 @@ export class BrowserController {
   }
 
   async resumeTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
+    const current = await this.contentTaskRunner.getTask(taskId)
+    if (current?.kind === 'note_collect' || current?.kind === 'card_loop') {
+      const payload = this.contentTaskRunner.getTaskPayload(taskId)
+      if (payload) {
+        const agentTabId = await this.ensureAgentTab()
+        this.contentTaskRunner.updateTaskPayload(taskId, {
+          ...payload,
+          agentTabId,
+          surface: payload.surface || 'agent-view',
+        })
+      }
+    }
     return this.contentTaskRunner.resumeTask(taskId)
   }
 

@@ -71,7 +71,7 @@ function rowsFor(sql: string): Row[] {
       task_title: '继续旧会话',
       task_summary: 'old session resume',
       status: 'blocked',
-      interaction_state: 'none',
+      interaction_state: 'suspended',
       waiting_for: null,
       degradation_reason: null,
       blocked_reason: 'infra_error stale_request',
@@ -81,6 +81,32 @@ function rowsFor(sql: string): Row[] {
       recent_artifacts_json: '[]',
       created_at: '2026-06-08T02:00:00.000Z',
       updated_at: '2026-06-08T02:01:00.000Z',
+    }]
+  }
+  if (sql.includes('FROM run_meta')) {
+    return [{
+      run_id: 'run-1',
+      task_id: 'task-1',
+      scope_id: 'conv-1',
+      agent_id: 'butler',
+      status: 'checkpoint',
+      task_type: 'research',
+      terminal_reason: 'checkpoint_budget',
+      provider_protocol: 'anthropic',
+      wire_api: null,
+      context_window: 96000,
+      provider_diagnostics_json: JSON.stringify({ apiKey: 'sk-supersecretreadydiagnostic123', contextWindowSource: 'explicit' }),
+      budget_json: JSON.stringify({ maxToolCalls: 60, toolCallsUsed: 60 }),
+      continuation_ref_json: JSON.stringify({ outputDir: '/tmp/out', runStatePath: '/tmp/out/run_state.json' }),
+      recovery_history_json: '[]',
+      input_tokens: 10,
+      output_tokens: 5,
+      total_tokens: 15,
+      first_message_text: '查资料',
+      last_message_text: '预算暂停',
+      follow_up_text: 'checkpoint_budget',
+      created_at: 1780000000000,
+      updated_at: 1780000001000,
     }]
   }
   if (sql.includes('FROM agent_channels')) {
@@ -162,6 +188,11 @@ test('diagnostic pack exports logs and redacted state summaries', async () => {
     assert.equal(summary.recentMessageMarkers[0].content_preview, 'Ready 跟丢了这次请求，Bearer [REDACTED]')
     assert.equal(summary.recentMessageMarkers[1].content_preview, '[user message omitted]')
     assert.equal(summary.recentTaskProjections[0].blocked_reason, 'infra_error stale_request')
+    assert.equal(summary.recentTaskProjections[0].legacy_continuation_state, 'legacy_not_resumable')
+    assert.equal(summary.recentRunMeta[0].terminal_reason, 'checkpoint_budget')
+    assert.equal(summary.recentRunMeta[0].provider_diagnostics_json.apiKey, '[REDACTED]')
+    assert.equal(summary.recentRunMeta[0].budget_json.toolCallsUsed, 60)
+    assert.equal(summary.recentRunMeta[0].continuation_ref_json.runStatePath, '/tmp/out/run_state.json')
     assert.deepEqual(result.skippedLogs, [])
   } finally {
     await rm(root, { recursive: true, force: true })

@@ -104,6 +104,73 @@ test('RunCoordinator seeds scoped runs with a bootstrap budget and rebinds it af
   assert.equal(finalEvent?.executionDiagnostics?.budget?.maxToolCalls, 8)
 })
 
+test('RunCoordinator seeds research runs with the research budget when the trigger proves the task type', async () => {
+  let executionRuntime: {
+    taskType: string
+    bootstrapBudget: boolean
+    budget: { maxIterations: number; maxToolCalls: number }
+  } | null = null
+
+  const coordinator = new RunCoordinator({
+    promptAssembly: {
+      buildForScopedRun: async () => ({
+        systemPrompt: 'system prompt',
+        bootstrapMessages: [],
+        memoryRefs: [],
+        triggerHits: [{
+          id: 'research-trigger',
+          label: '资料研究',
+          module: 'research',
+          blocking: false,
+          refs: [],
+        }],
+        contextBudget: { totalChars: 0, l0Chars: 0, l1Chars: 0, l2Chars: 0, droppedRefs: [] },
+      }),
+      applyToMessage: (message) => message,
+      recordRunOutcome: () => {},
+    },
+    executeAndCollect: async (request) => {
+      executionRuntime = request.taskBudgetRuntime
+        ? {
+          taskType: request.taskBudgetRuntime.taskType,
+          bootstrapBudget: request.taskBudgetRuntime.bootstrapBudget,
+          budget: {
+            maxIterations: request.taskBudgetRuntime.budget.maxIterations,
+            maxToolCalls: request.taskBudgetRuntime.budget.maxToolCalls,
+          },
+        }
+        : null
+      return {
+        success: true,
+        finalText: 'done',
+        cancelled: false,
+        usedTools: ['web_search'],
+        taskType: 'research',
+        taskBudgetRuntime: request.taskBudgetRuntime,
+      }
+    },
+    emitScopeRunEvent: () => {},
+    reflectOnConversation: async () => null,
+  })
+
+  const result = await coordinator.runScoped({
+    scope: createScope(),
+    message: '查资料',
+    requestId: 'req-budget-research',
+    coordinators: []
+  })
+
+  assert.equal(result.success, true)
+  assert.deepEqual(executionRuntime, {
+    taskType: 'research',
+    bootstrapBudget: false,
+    budget: {
+      maxIterations: 60,
+      maxToolCalls: 60,
+    },
+  })
+})
+
 test('RunCoordinator memory reflection event does not overwrite task summary', async () => {
   const events: ScopeRunEventPayload[] = []
   let memoryCaptured: (() => void) | null = null

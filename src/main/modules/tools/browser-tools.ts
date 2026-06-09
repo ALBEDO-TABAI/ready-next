@@ -30,7 +30,13 @@ import type {
 } from '../browser-engine/capability-types'
 import { beginLeaseGate, type BrowserLeaseGate } from '../browser-engine/agent-browser-lease-gate'
 import { isHighControlPlatformText } from '../../../shared/browser-collection-intent'
-import { agentBrowserError } from '../browser-engine/agent-browser-errors'
+import {
+  buildBrowserReadonlyProbeJs,
+  normalizeBrowserReadonlyProbeRequest,
+} from '../../../shared/browser-readonly-probe'
+import { agentBrowserError, isAgentBrowserError } from '../browser-engine/agent-browser-errors'
+import { buildPageMap, parseTargetId, type PageMap, type RawAxNode } from '../browser-engine/agent-browser-page-map'
+import { gateActOnTarget, type AgentBrowserAction, type AgentBrowserReadBack } from '../browser-engine/agent-browser-act'
 import { normalizeCollectionTargets, targetsFromTask, type BrowserCollectionTarget } from '../browser-engine/collection-targets'
 import { buildCollectionHandoffPlanFromTask, buildCollectionPlanNotes } from '../browser-engine/collection-handoff'
 import {
@@ -49,9 +55,377 @@ function log(msg: string) {
 }
 
 let collectionConsentStore = new BrowserCollectionConsentStore()
+const browserPageMapGenerationByTab = new Map<string, number>()
+const browserPageMapAmbiguityByTab = new Map<string, Map<string, { role: string; name: string; targetIds: string[] }>>()
 
 export function __setBrowserCollectionConsentStoreForTests(store: BrowserCollectionConsentStore | null): void {
   collectionConsentStore = store || new BrowserCollectionConsentStore()
+}
+
+export function __resetBrowserAgentPageMapForTests(): void {
+  browserPageMapGenerationByTab.clear()
+  browserPageMapAmbiguityByTab.clear()
+}
+
+function resolveBrowserToolTabKey(controller: BrowserController, tabId: string | null): string {
+  return tabId || controller.getActiveTab?.()?.id || '__active__'
+}
+
+function nextBrowserPageMapGeneration(controller: BrowserController, tabId: string | null): number {
+  const key = resolveBrowserToolTabKey(controller, tabId)
+  const next = (browserPageMapGenerationByTab.get(key) || 0) + 1
+  browserPageMapGenerationByTab.set(key, next)
+  return next
+}
+
+function currentBrowserPageMapGeneration(controller: BrowserController, tabId: string | null): number | null {
+  return browserPageMapGenerationByTab.get(resolveBrowserToolTabKey(controller, tabId)) ?? null
+}
+
+function rememberBrowserPageMapAmbiguity(
+  controller: BrowserController,
+  tabId: string | null,
+  groups: Array<{ role: string; name: string; targetIds: string[] }>,
+): void {
+  const byTarget = new Map<string, { role: string; name: string; targetIds: string[] }>()
+  for (const group of groups) {
+    for (const targetId of group.targetIds) {
+      byTarget.set(targetId, group)
+    }
+  }
+  browserPageMapAmbiguityByTab.set(resolveBrowserToolTabKey(controller, tabId), byTarget)
+}
+
+function currentBrowserPageMapAmbiguity(
+  controller: BrowserController,
+  tabId: string | null,
+  targetId: string,
+): { role: string; name: string; targetIds: string[] } | null {
+  return browserPageMapAmbiguityByTab.get(resolveBrowserToolTabKey(controller, tabId))?.get(targetId) || null
+}
+
+function buildBrowserDomTargetLibraryJs(): string {
+  return `
+    const READY_AGENT_TARGET_SELECTOR = [
+      'a[href]',
+      'button',
+      'input',
+      'textarea',
+      'select',
+      '[role]',
+      'summary',
+      '[contenteditable="true"]',
+      '[contenteditable=""]',
+      'h1',
+      'h2',
+      'h3',
+      'h4',
+      'h5',
+      'h6'
+    ].join(',');
+    function readyCleanText(value) {
+      return String(value || '').replace(/\\s+/g, ' ').trim();
+    }
+    function readyLabelFor(el) {
+      const aria = readyCleanText(el.getAttribute('aria-label'));
+      if (aria) return aria;
+      const labelledBy = readyCleanText(el.getAttribute('aria-labelledby'));
+      if (labelledBy) {
+        const text = labelledBy.split(/\\s+/).map((id) => readyCleanText(document.getElementById(id)?.innerText)).filter(Boolean).join(' ');
+        if (text) return text;
+      }
+      const id = el.getAttribute('id');
+      if (id) {
+        const label = document.querySelector('label[for="' + CSS.escape(id) + '"]');
+        const labelText = readyCleanText(label?.innerText || label?.textContent);
+        if (labelText) return labelText;
+      }
+      const ownText = readyCleanText(el.innerText || el.textContent);
+      if (ownText) return ownText.slice(0, 160);
+      const title = readyCleanText(el.getAttribute('title'));
+      if (title) return title;
+      const placeholder = readyCleanText(el.getAttribute('placeholder'));
+      if (placeholder) return placeholder;
+      const alt = readyCleanText(el.getAttribute('alt'));
+      if (alt) return alt;
+      const name = readyCleanText(el.getAttribute('name'));
+      if (name) return name;
+      if (el instanceof HTMLInputElement && el.type === 'file') return 'file input';
+      return '';
+    }
+    function readyRoleFor(el) {
+      const explicit = readyCleanText(el.getAttribute('role'));
+      if (explicit) return explicit;
+      const tag = el.tagName.toLowerCase();
+      if (tag === 'a') return 'link';
+      if (tag === 'button' || tag === 'summary') return 'button';
+      if (tag === 'textarea') return 'textbox';
+      if (tag === 'select') return 'combobox';
+      if (tag === 'h1' || tag === 'h2' || tag === 'h3' || tag === 'h4' || tag === 'h5' || tag === 'h6') return 'heading';
+      if (tag === 'input') {
+        const type = String(el.getAttribute('type') || 'text').toLowerCase();
+        if (type === 'checkbox') return 'checkbox';
+        if (type === 'radio') return 'radio';
+        if (type === 'range') return 'slider';
+        if (type === 'search') return 'searchbox';
+        if (type === 'file') return 'button';
+        return 'textbox';
+      }
+      if (el.isContentEditable) return 'textbox';
+      return 'generic';
+    }
+    function readyStatesFor(el) {
+      const states = {};
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement || el instanceof HTMLButtonElement) {
+        if (el.disabled) states.disabled = true;
+      }
+      const expanded = el.getAttribute('aria-expanded');
+      if (expanded) states.expanded = expanded;
+      const checked = el.getAttribute('aria-checked');
+      if (checked) states.checked = checked;
+      if (el instanceof HTMLInputElement && (el.type === 'checkbox' || el.type === 'radio') && el.checked) states.checked = true;
+      const selected = el.getAttribute('aria-selected');
+      if (selected) states.selected = selected;
+      return states;
+    }
+    function readyTargetElements() {
+      return Array.from(document.querySelectorAll(READY_AGENT_TARGET_SELECTOR));
+    }
+    function readyTargetRecord(el, index) {
+      const rect = el.getBoundingClientRect();
+      const box = rect && Number.isFinite(rect.width) && Number.isFinite(rect.height)
+        ? { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) }
+        : undefined;
+      return {
+        role: readyRoleFor(el),
+        name: readyLabelFor(el),
+        value: el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement || el instanceof HTMLSelectElement ? readyCleanText(el.value).slice(0, 160) : undefined,
+        states: Object.assign(
+          readyStatesFor(el),
+          el instanceof HTMLInputElement && el.type === 'file' ? { fileInput: true } : {}
+        ),
+        backendDOMNodeId: index + 1,
+        frameId: '0',
+        box
+      };
+    }
+  `
+}
+
+function buildBrowserPageMapProbeJs(): string {
+  return `(() => {
+    const __READY_AGENT_PAGE_MAP__ = true;
+    ${buildBrowserDomTargetLibraryJs()}
+    const elements = readyTargetElements();
+    const rawTargets = elements.map((el, index) => readyTargetRecord(el, index));
+    const clean = (value) => String(value || '').replace(/\\s+/g, ' ').trim();
+    const visible = (el) => {
+      if (!(el instanceof Element)) return false;
+      const rect = el.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return false;
+      const style = getComputedStyle(el);
+      return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || '1') > 0;
+    };
+    const externalLinks = Array.from(document.querySelectorAll('a[href]')).filter((a) => {
+      try { return new URL(a.href, location.href).origin !== location.origin; } catch { return false; }
+    }).length;
+    const iframes = Array.from(document.querySelectorAll('iframe,frame')).slice(0, 20).map((frame, index) => {
+      let readable = false;
+      let reason = 'cross_origin_or_unavailable';
+      try {
+        const doc = frame.contentDocument;
+        readable = Boolean(doc);
+        reason = doc ? 'same_origin_readable' : 'cross_origin_or_unavailable';
+      } catch {
+        readable = false;
+        reason = 'cross_origin_unreadable';
+      }
+      return {
+        index,
+        title: clean(frame.getAttribute('title') || frame.getAttribute('aria-label') || ''),
+        src: String(frame.getAttribute('src') || ''),
+        readable,
+        reason,
+        hidden: !visible(frame)
+      };
+    });
+    const shadowRoots = Array.from(document.querySelectorAll('*')).filter((el) => Boolean(el.shadowRoot)).slice(0, 20).map((el, index) => ({
+      index,
+      host: String(el.tagName || '').toLowerCase(),
+      label: clean(el.getAttribute('aria-label') || el.getAttribute('title') || el.id || ''),
+      childCount: el.shadowRoot ? el.shadowRoot.childElementCount : 0,
+      hidden: !visible(el)
+    }));
+    const hiddenLoaded = Array.from(document.querySelectorAll('button,a,input,textarea,select,[role],section,article,dialog,[hidden],[aria-hidden="true"]'))
+      .filter((el) => !visible(el) && clean(el.textContent || el.getAttribute('aria-label') || el.getAttribute('title') || el.getAttribute('placeholder')).length > 0)
+      .slice(0, 20)
+      .map((el, index) => ({
+        index,
+        role: readyRoleFor(el),
+        label: readyLabelFor(el).slice(0, 160),
+        reason: el.hasAttribute('hidden') ? 'hidden_attribute' : el.getAttribute('aria-hidden') === 'true' ? 'aria_hidden' : 'css_hidden'
+      }));
+    return {
+      identity: { url: String(location.href || ''), title: String(document.title || '') },
+      viewport: { width: Math.round(window.innerWidth || 0), height: Math.round(window.innerHeight || 0) },
+      bodyText: String(document.body?.innerText || '').slice(0, 4000),
+      rawRoots: [{ role: 'generic', name: '', children: rawTargets }],
+      structureHints: { iframes, shadowRoots, hiddenLoaded },
+      riskFlags: {
+        fileInputCount: document.querySelectorAll('input[type="file"]').length,
+        passwordInputCount: document.querySelectorAll('input[type="password"]').length,
+        externalLinkCount: externalLinks,
+        iframeCount: document.querySelectorAll('iframe').length,
+        shadowHostCount: Array.from(document.querySelectorAll('*')).filter((el) => Boolean(el.shadowRoot)).length
+      }
+    };
+  })()`
+}
+
+function buildBrowserTargetProbeJs(nodeId: string): string {
+  return `(() => {
+    const __READY_AGENT_TARGET_PROBE__ = true;
+    ${buildBrowserDomTargetLibraryJs()}
+    const nodeId = ${JSON.stringify(nodeId)};
+    const nodeIndex = /^\\d+$/.test(nodeId) ? Number(nodeId) - 1 : -1;
+    const elements = readyTargetElements();
+    const el = nodeIndex >= 0 ? elements[nodeIndex] : null;
+    if (!el) return { matchCount: 0 };
+    const record = readyTargetRecord(el, nodeIndex);
+    const disabled = Boolean(record.states && record.states.disabled === true);
+    return { matchCount: 1, disabled, target: record };
+  })()`
+}
+
+function buildBrowserActOnTargetJs(nodeId: string, action: AgentBrowserAction, value?: string): string {
+  return `(() => {
+    const __READY_AGENT_ACT_ON_TARGET__ = true;
+    ${buildBrowserDomTargetLibraryJs()}
+    const nodeId = ${JSON.stringify(nodeId)};
+    const action = ${JSON.stringify(action)};
+    const value = ${JSON.stringify(value ?? '')};
+    const nodeIndex = /^\\d+$/.test(nodeId) ? Number(nodeId) - 1 : -1;
+    const elements = readyTargetElements();
+    const el = nodeIndex >= 0 ? elements[nodeIndex] : null;
+    if (!el) return { ok: false, errorCode: 'target_not_found', message: 'Target no longer resolves to an element.' };
+    const record = readyTargetRecord(el, nodeIndex);
+    if (record.states && record.states.disabled === true) {
+      return { ok: false, errorCode: 'target_not_found', message: 'Target is disabled.', target: record };
+    }
+    if (action === 'fill') {
+      if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) {
+        el.focus();
+        el.value = value;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      } else if (el.isContentEditable) {
+        el.focus();
+        el.textContent = value;
+        el.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: value }));
+      } else {
+        return { ok: false, errorCode: 'target_not_found', message: 'Target is not fillable.', target: record };
+      }
+    } else if (action === 'choose') {
+      if (el instanceof HTMLSelectElement) {
+        const option = Array.from(el.options).find((opt) => opt.value === value || readyCleanText(opt.textContent) === value);
+        if (!option) return { ok: false, errorCode: 'target_not_found', message: 'Option not found.', target: record };
+        el.value = option.value;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      } else {
+        el.click();
+      }
+    } else if (action === 'hover') {
+      el.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, view: window }));
+      el.dispatchEvent(new MouseEvent('mouseenter', { bubbles: true, view: window }));
+    } else {
+      el.click();
+    }
+    return { ok: true, action, target: record, url: String(location.href || ''), title: String(document.title || '') };
+  })()`
+}
+
+function buildBrowserActionDeltaJs(): string {
+  return `(() => ({
+    url: String(location.href || ''),
+    title: String(document.title || ''),
+    bodyText: String(document.body?.innerText || '').replace(/\\s+/g, ' ').trim().slice(0, 1000)
+  }))()`
+}
+
+function buildPageMapAmbiguityGroups(targets: PageMap['targets']): Array<{ role: string; name: string; targetIds: string[] }> {
+  const groups = new Map<string, { role: string; name: string; targetIds: string[] }>()
+  for (const target of targets) {
+    const name = String(target.name || '').trim()
+    if (!name) continue
+    const key = `${target.role}::${name.toLowerCase()}`
+    const group = groups.get(key) || { role: target.role, name, targetIds: [] }
+    group.targetIds.push(target.targetId)
+    groups.set(key, group)
+  }
+  return Array.from(groups.values()).filter((group) => group.targetIds.length > 1)
+}
+
+async function captureAgentPageMap(
+  controller: BrowserController,
+  tabId: string | null,
+  maxBytes?: number,
+): Promise<Record<string, unknown>> {
+  const raw = await controller.executeJS(tabId, buildBrowserPageMapProbeJs()) as {
+    identity?: { url?: string; title?: string }
+    viewport?: { width?: number; height?: number }
+    bodyText?: string
+    rawRoots?: RawAxNode[]
+    riskFlags?: Record<string, unknown>
+    structureHints?: Record<string, unknown>
+  } | null
+  const generation = nextBrowserPageMapGeneration(controller, tabId)
+  const viewport = {
+    width: Number(raw?.viewport?.width || 0) || 0,
+    height: Number(raw?.viewport?.height || 0) || 0,
+  }
+  const map = buildPageMap(Array.isArray(raw?.rawRoots) ? raw.rawRoots : [], {
+    generation,
+    viewport,
+    ...(maxBytes ? { maxBytes } : {}),
+  })
+  const ambiguityGroups = buildPageMapAmbiguityGroups(map.targets)
+  rememberBrowserPageMapAmbiguity(controller, tabId, ambiguityGroups)
+  return {
+    pageIdentity: {
+      url: String(raw?.identity?.url || ''),
+      title: String(raw?.identity?.title || ''),
+      generation,
+      capturedAt: new Date().toISOString(),
+    },
+    summary: {
+      bodyText: String(raw?.bodyText || '').slice(0, 1000),
+      targetCount: map.targets.length,
+      truncated: map.truncated,
+    },
+    pageMap: {
+      ...map,
+      structureHints: raw?.structureHints || { iframes: [], shadowRoots: [], hiddenLoaded: [] },
+    },
+    ambiguityGroups,
+    riskFlags: raw?.riskFlags || {},
+    evidence: {
+      generation,
+      targetSource: 'dom-target-library',
+      targetCount: map.targets.length,
+      truncated: map.truncated,
+    },
+    nextAllowedActions: ['read map again', 'act on target', 'wait', 'stop with reason'],
+  }
+}
+
+function didBrowserActionChange(before: unknown, after: unknown): boolean {
+  if (before === null || after === null || before === undefined || after === undefined) return false
+  try {
+    return JSON.stringify(before) !== JSON.stringify(after)
+  } catch {
+    return true
+  }
 }
 
 function collectionConsentMessage(request: PendingBrowserCollectionConsentRequest): string {
@@ -3582,6 +3956,140 @@ export async function executeBrowserTool(
         return truncate(content)
       }
 
+      case 'browser_read_page_map': {
+        let tabId = (args.tab_id as string) || null
+        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
+        const maxBytes = typeof args.max_bytes === 'number' ? Math.max(1024, Math.min(65_536, args.max_bytes)) : undefined
+        const payload = await captureAgentPageMap(controller, tabId, maxBytes)
+        return JSON.stringify(payload, null, 2)
+      }
+
+      case 'browser_probe_readonly': {
+        let tabId = (args.tab_id as string) || null
+        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
+        const requestedGeneration = Number(args.generation)
+        const currentGeneration = currentBrowserPageMapGeneration(controller, tabId)
+        if (!Number.isFinite(requestedGeneration) || requestedGeneration <= 0) {
+          return JSON.stringify(agentBrowserError(
+            'stale_page_map',
+            'generation is required. Call browser_read_page_map first and pass its pageIdentity.generation.',
+          ), null, 2)
+        }
+        if (currentGeneration === null || currentGeneration !== requestedGeneration) {
+          return JSON.stringify(agentBrowserError(
+            'stale_page_map',
+            'Readonly probe requires a fresh page map generation. Call browser_read_page_map again.',
+            { currentGeneration, requestedGeneration },
+          ), null, 2)
+        }
+        const activeUrl = tabId
+          ? controller.getTabList?.().find((tab) => tab.id === tabId)?.url
+          : controller.getActiveTab?.()?.url
+        const riskDecision = isHighControlPlatformText(activeUrl)
+          ? 'fixed_scope_only'
+          : 'allowed'
+        const request = normalizeBrowserReadonlyProbeRequest({
+          generation: requestedGeneration,
+          query: args.query,
+          scope: args.scope,
+          maxNodes: args.max_nodes,
+          includeHidden: args.include_hidden,
+          riskDecision,
+        })
+        const result = await controller.executeJS(tabId, buildBrowserReadonlyProbeJs(request))
+        return JSON.stringify(result, null, 2)
+      }
+
+      case 'browser_act_on_target': {
+        const targetId = String(args.target_id || args.targetId || '').trim()
+        const action = String(args.action || 'click') as AgentBrowserAction
+        const value = args.value === undefined ? undefined : String(args.value)
+        const disambiguation = String(args.disambiguation || '').trim()
+        const readBack = String(args.read_back || args.readBack || 'delta') as AgentBrowserReadBack
+        if (!targetId) return JSON.stringify(agentBrowserError('target_not_found', 'target_id is required'), null, 2)
+        if (!['click', 'expand', 'choose', 'fill', 'hover'].includes(action)) {
+          return JSON.stringify(agentBrowserError('target_not_found', `Unsupported action: ${String(args.action || '')}`), null, 2)
+        }
+        let tabId = (args.tab_id as string) || null
+        tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
+        const parsed = parseTargetId(targetId)
+        if (!parsed) {
+          return JSON.stringify(agentBrowserError('target_not_found', `Malformed target id: ${targetId}`), null, 2)
+        }
+        const currentGeneration = currentBrowserPageMapGeneration(controller, tabId)
+        if (currentGeneration === null) {
+          return JSON.stringify(agentBrowserError(
+            'stale_page_map',
+            'No page map has been read for this tab. Call browser_read_page_map first.',
+            { targetGeneration: parsed.generation },
+          ), null, 2)
+        }
+        const liveProbe = await controller.executeJS(tabId, buildBrowserTargetProbeJs(parsed.node)) as {
+          matchCount?: number
+          disabled?: boolean
+          target?: unknown
+        } | null
+        const gated = gateActOnTarget(
+          { targetId, action, value, disambiguation, readBack },
+          {
+            currentGeneration,
+            matchCount: Number(liveProbe?.matchCount || 0),
+            candidates: liveProbe?.target ? [liveProbe.target] : [],
+            ambiguityGroup: currentBrowserPageMapAmbiguity(controller, tabId, targetId),
+          },
+        )
+        if (isAgentBrowserError(gated)) return JSON.stringify(gated, null, 2)
+        if (!liveProbe) {
+          return JSON.stringify(agentBrowserError(
+            'target_not_found',
+            `Target ${targetId} was not found on the current page.`,
+            { targetId },
+          ), null, 2)
+        }
+        if (liveProbe?.disabled === true) {
+          return JSON.stringify(agentBrowserError(
+            'target_not_found',
+            `Target ${targetId} is disabled.`,
+            { targetId, target: liveProbe.target },
+          ), null, 2)
+        }
+        const targetRecord = liveProbe?.target && typeof liveProbe.target === 'object'
+          ? liveProbe.target as { states?: Record<string, unknown> }
+          : null
+        if (targetRecord?.states?.fileInput === true) {
+          return JSON.stringify(agentBrowserError(
+            'script_blocked',
+            `Target ${targetId} is a file input. Use browser_upload_scope_attachment for file upload.`,
+            { targetId, target: liveProbe.target },
+          ), null, 2)
+        }
+        const before = readBack === 'none' ? null : await controller.executeJS(tabId, buildBrowserActionDeltaJs()).catch(() => null)
+        const actionResult = await controller.executeJS(tabId, buildBrowserActOnTargetJs(parsed.node, action, value))
+        await settleAfterAction(controller, tabId, abortSignal)
+        const after = readBack === 'map'
+          ? await captureAgentPageMap(controller, tabId)
+          : readBack === 'none'
+            ? null
+            : await controller.executeJS(tabId, buildBrowserActionDeltaJs()).catch(() => null)
+        const actionFailed = typeof actionResult === 'object' && actionResult !== null && (actionResult as { ok?: unknown }).ok === false
+        const failureKind = actionFailed
+          ? String((actionResult as { errorCode?: unknown }).errorCode || 'action_failed')
+          : null
+        return JSON.stringify({
+          ok: !actionFailed,
+          targetId,
+          action,
+          disambiguation: disambiguation || null,
+          readBack,
+          before,
+          result: actionResult,
+          after,
+          changed: didBrowserActionChange(before, after),
+          failureKind,
+          nextSuggestedAction: actionFailed ? 'read map again' : 'read map again',
+        }, null, 2)
+      }
+
       case 'browser_click': {
         const selector = args.selector as string
         if (!selector) return 'Error: selector is required'
@@ -4267,6 +4775,46 @@ export async function executeBrowserTool(
                 }
                 return urls
               }
+              const carouselExpectedCount = (() => {
+                if (!xhsDetailRoot) return 0
+                const totals = []
+                const pushTotal = (value) => {
+                  const n = Number(value)
+                  if (Number.isFinite(n) && n > 1 && n <= maxCount) totals.push(n)
+                }
+                const textSources = [
+                  xhsDetailRoot.textContent || '',
+                  ...Array.from(xhsDetailRoot.querySelectorAll('[aria-label], [title], [data-count], [data-total], [class*="pagination" i], [class*="indicator" i]'))
+                    .map((node) => [
+                      node.textContent || '',
+                      node.getAttribute('aria-label') || '',
+                      node.getAttribute('title') || '',
+                      node.getAttribute('data-count') || '',
+                      node.getAttribute('data-total') || '',
+                    ].join(' ')),
+                ].map(normalize)
+                for (const text of textSources) {
+                  let match = null
+                  const slashPattern = /(?:^|[^0-9])(\\d{1,2})\\s*\\/\\s*(\\d{1,2})(?:[^0-9]|$)/g
+                  while ((match = slashPattern.exec(text))) pushTotal(match[2])
+                  const totalPatterns = [
+                    /共\\s*(\\d{1,2})\\s*(?:张|圖|图|pics?|images?)/gi,
+                    /(\\d{1,2})\\s*(?:张|圖|图)\\s*(?:图片|照片|图集)/g,
+                  ]
+                  for (const pattern of totalPatterns) {
+                    while ((match = pattern.exec(text))) pushTotal(match[1])
+                  }
+                }
+                const bulletCount = Array.from(xhsDetailRoot.querySelectorAll('[class*="bullet" i], [class*="dot" i], [class*="indicator" i]'))
+                  .filter((node) => {
+                    if (!(node instanceof Element)) return false
+                    const rect = node.getBoundingClientRect()
+                    const style = getComputedStyle(node)
+                    return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden'
+                  }).length
+                if (bulletCount > 1 && bulletCount <= maxCount) totals.push(bulletCount)
+                return totals.length > 0 ? Math.max(...totals) : 0
+              })()
 	              const imgs = queryAll('img')
               for (const img of imgs) {
                 if (!(img instanceof HTMLImageElement)) continue
@@ -4384,14 +4932,15 @@ export async function executeBrowserTool(
                   )
                 }
               }
-	              return { images: items, videos, scope: xhsDetailRoot ? 'xiaohongshu-detail' : 'document' }
+              return { images: items, videos, scope: xhsDetailRoot ? 'xiaohongshu-detail' : 'document', expectedImageCount: carouselExpectedCount || undefined }
             })()
           `,
-        ) as { images?: Array<{ url?: string; alt?: string; width?: number; height?: number }>; videos?: Array<{ url?: string; posterUrl?: string; width?: number; height?: number }>; scope?: string } | Array<{ url?: string; alt?: string; width?: number; height?: number }> | null
+        ) as { images?: Array<{ url?: string; alt?: string; width?: number; height?: number }>; videos?: Array<{ url?: string; posterUrl?: string; width?: number; height?: number }>; scope?: string; expectedImageCount?: number } | Array<{ url?: string; alt?: string; width?: number; height?: number }> | null
 
-        const rawImages = Array.isArray(rows) ? rows : Array.isArray(rows?.images) ? rows.images : []
-        const videos = !Array.isArray(rows) && Array.isArray(rows?.videos)
-          ? rows.videos
+        const structuredRows = !Array.isArray(rows) && rows ? rows : null
+        const rawImages = Array.isArray(rows) ? rows : Array.isArray(structuredRows?.images) ? structuredRows.images : []
+        const videos = Array.isArray(structuredRows?.videos)
+          ? structuredRows.videos
             .map((item) => ({
               url: String(item.url || ''),
               posterUrl: String(item.posterUrl || ''),
@@ -4407,13 +4956,17 @@ export async function executeBrowserTool(
             height: Number(item.height || 0),
           }))
           .filter((item) => item.url.length > 0)
+        const expectedImageCount = Number(structuredRows?.expectedImageCount)
 
         return JSON.stringify({
           count: images.length,
           images,
           videoCount: videos.length,
           videos,
-          ...(!Array.isArray(rows) && typeof rows?.scope === 'string' ? { scope: rows.scope } : {}),
+          ...(typeof structuredRows?.scope === 'string' ? { scope: structuredRows.scope } : {}),
+          ...(Number.isFinite(expectedImageCount) && expectedImageCount > 0
+            ? { expectedImageCount }
+            : {}),
         }, null, 2)
       }
 

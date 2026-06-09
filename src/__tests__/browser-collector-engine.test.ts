@@ -112,6 +112,39 @@ describe('runBrowserCollection (background per-note loop)', () => {
     assert.equal(navigated.length, 1, 'must not continue through the frozen target list after a verification wall')
   })
 
+  it('pauses before advancing when a carousel is visibly under-collected', async () => {
+    const plan = planOf(2)
+    const imageUrl = 'https://sns-webpic-qc.xhscdn.com/notes_pre_post/image-1!nc_n_webp_mw_1'
+    const res = await runBrowserCollection(plan, {
+      facade: {
+        run: async (tool, args) => {
+          if (tool === 'browser_collect_images') {
+            return JSON.stringify({
+              count: 1,
+              scope: 'xiaohongshu-detail',
+              expectedImageCount: 10,
+              images: [{ url: imageUrl, width: 1200, height: 1600 }],
+            })
+          }
+          if (tool === 'browser_extract_structured' && args?.template === 'image_gallery') {
+            return JSON.stringify({ items: [{ link: imageUrl, media: [imageUrl] }] })
+          }
+          if (tool === 'browser_download_urls') {
+            throw new Error('under-collected carousel must not download')
+          }
+          return JSON.stringify({ ok: true })
+        },
+      },
+      pathJoin: join,
+      now: fixedClock(),
+    })
+
+    assert.equal(res.stopReason, 'needs_verification')
+    assert.equal(res.collected.length, 0)
+    assert.equal(res.failed.length, 0)
+    assert.equal(res.state.cursor, 0, 'resume should retry the same note')
+  })
+
   it('paces between notes (not before the first) on high-control platforms', async () => {
     const plan = planOf(3)
     const sleeps: number[] = []

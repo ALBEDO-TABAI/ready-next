@@ -129,7 +129,7 @@ npm run build
 - 工具执行：`<系统临时目录>/ready-tools.log`
 - BrowserView / popup：`<系统临时目录>/ready-browser.log`
 
-macOS: `/tmp/`；Windows: `%TEMP%`。
+macOS: Node/Electron `os.tmpdir()` 返回的系统临时目录；Windows: `%TEMP%`。
 
 ## 12. 指引同步
 - `CLAUDE.md` 与 `AGENTS.md` 的正文规则保持同步；一侧新增或修正约束，另一侧同次补齐。

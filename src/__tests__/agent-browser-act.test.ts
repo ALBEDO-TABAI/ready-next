@@ -28,6 +28,31 @@ describe('gateActOnTarget', () => {
     assert.deepEqual(res.detail?.candidates, [{ a: 1 }, { b: 2 }])
   })
 
+  it('rejects a target from an ambiguity group unless the caller disambiguates it', () => {
+    const res = gateActOnTarget(
+      { targetId: '4:0:10', action: 'click' },
+      {
+        currentGeneration: 4,
+        matchCount: 1,
+        ambiguityGroup: { role: 'button', name: 'Search', targetIds: ['4:0:10', '4:0:11'] },
+      },
+    )
+    assert.ok(isAgentBrowserError(res))
+    if (!isAgentBrowserError(res)) return
+    assert.equal(res.errorCode, 'ambiguous_target')
+    assert.deepEqual(res.detail?.ambiguityGroup, { role: 'button', name: 'Search', targetIds: ['4:0:10', '4:0:11'] })
+
+    const allowed = gateActOnTarget(
+      { targetId: '4:0:10', action: 'click', disambiguation: 'the first Search button is inside the header form' },
+      {
+        currentGeneration: 4,
+        matchCount: 1,
+        ambiguityGroup: { role: 'button', name: 'Search', targetIds: ['4:0:10', '4:0:11'] },
+      },
+    )
+    assert.ok(!isAgentBrowserError(allowed))
+  })
+
   it('rejects a target that resolves to nothing', () => {
     const res = gateActOnTarget(
       { targetId: '4:0:10', action: 'click' },

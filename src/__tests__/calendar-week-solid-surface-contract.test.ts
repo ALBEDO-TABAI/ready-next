@@ -39,11 +39,11 @@ test('dark liquid week view keeps header, all-day lane, and time grid aligned wi
   )
   assert.match(
     scheduleCss,
-    /\.sx__date-grid \{[\s\S]*background-size:[\s\S]*calc\(\(100% - var\(--sx-calendar-week-grid-padding-left\)\) \/ var\(--sx-ready-visible-day-count,\s*7\)\) 100% !important;/,
+    /\.sx__date-grid \{[\s\S]*background-image:\s*none !important;/,
   )
-  assert.match(
+  assert.doesNotMatch(
     scheduleCss,
-    /\.sx__date-grid \{[\s\S]*background-position:[\s\S]*calc\([\s\S]*var\(--sx-calendar-week-grid-padding-left\)[\s\S]*\+\s*[\s\S]*\(\(100% - var\(--sx-calendar-week-grid-padding-left\)\) \/ var\(--sx-ready-visible-day-count,\s*7\)\)[\s\S]*\) 0 !important;/,
+    /\.sx__date-grid \{[\s\S]*linear-gradient\(to right,\s*var\(--sx-ready-time-grid-line-color\)/,
   )
   assert.match(
     scheduleCss,

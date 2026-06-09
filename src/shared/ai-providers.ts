@@ -445,9 +445,10 @@ export function resolveAIConfigCapabilities(config: AIModelConfig | null | undef
   const explicitProtocol = normalizeAgentProtocol(normalizedConfig.agentProtocol)
   const inferredProtocol = (() => {
     if (baseUrl.includes('api.kimi.com/coding')) return 'anthropic'
-    if (provider?.agentProtocol) return provider.agentProtocol
     if (baseUrl.includes('api.anthropic.com')) return 'anthropic'
-    if (/\/v1\/messages$/i.test(baseUrl)) return 'anthropic'
+    if (/\/anthropic(?:\/|$)/i.test(baseUrl)) return 'anthropic'
+    if (/\/v1\/messages(?:\/)?$/i.test(baseUrl)) return 'anthropic'
+    if (provider?.agentProtocol) return provider.agentProtocol
     return 'openai'
   })()
   const agentProtocol = explicitProtocol || inferredProtocol

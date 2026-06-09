@@ -77,6 +77,13 @@ export interface SkillTaskRunRecord {
   finishedAt?: string | null
 }
 
+export interface SkillTaskRunStartupReconciliationResult {
+  scanned: number
+  recoverablePaused: number
+  failedWithoutHandle: number
+  ignoredFresh: number
+}
+
 interface SkillTaskRunStatement {
   run(...params: unknown[]): unknown
   get<T = unknown>(...params: unknown[]): T | undefined
@@ -226,6 +233,37 @@ const CHILD_RUN_TERMINAL_STATUSES: ReadonlyArray<SkillChildRunStatus> = [
 
 function sessionAbortKey(scopeId: string | null, sessionId: string | null): string {
   return `${scopeId ?? '_'}|${sessionId ?? '_'}`
+}
+
+function parseTimeMs(value: string | null | undefined): number {
+  if (!value) return 0
+  const parsed = Date.parse(value)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function childRunRecord(payload: Record<string, unknown> | null | undefined): Record<string, unknown> | null {
+  const child = payload?.childRun
+  return child && typeof child === 'object' && !Array.isArray(child)
+    ? child as Record<string, unknown>
+    : null
+}
+
+function durableHandleFromRecord(record: SkillTaskRunRecord): {
+  outputDir: string | null
+  runStatePath: string | null
+} {
+  const child = childRunRecord(record.resumePayload)
+  const outputDir = typeof record.outputDir === 'string' && record.outputDir.trim()
+    ? record.outputDir.trim()
+    : typeof child?.outputDir === 'string' && child.outputDir.trim()
+      ? child.outputDir.trim()
+      : null
+  const runStatePath = typeof record.runStatePath === 'string' && record.runStatePath.trim()
+    ? record.runStatePath.trim()
+    : typeof child?.runStatePath === 'string' && child.runStatePath.trim()
+      ? child.runStatePath.trim()
+      : null
+  return { outputDir, runStatePath }
 }
 
 export class SkillTaskRunRepository {
@@ -464,6 +502,80 @@ export class SkillTaskRunRepository {
       'SELECT * FROM skill_task_runs WHERE detached_task_id = ? ORDER BY updated_at DESC LIMIT 1',
     ).get<SkillTaskRunRow>(detachedTaskId)
     return row ? this.mapRow(row) : null
+  }
+
+  reconcileRunningRowsOnStartup(opts: {
+    now?: Date
+    staleAfterMs?: number
+  } = {}): SkillTaskRunStartupReconciliationResult {
+    const db = this.dbManager.getRawDb()
+    if (!db) throw new Error('Database not available')
+    const now = opts.now || new Date()
+    const nowMs = now.getTime()
+    const nowIso = now.toISOString()
+    const staleAfterMs = Math.max(0, opts.staleAfterMs ?? 5 * 60_000)
+    const rows = db.prepare(`
+      SELECT * FROM skill_task_runs
+      WHERE status = 'running'
+      ORDER BY updated_at ASC
+    `).all<SkillTaskRunRow>().map((row) => this.mapRow(row))
+
+    const result: SkillTaskRunStartupReconciliationResult = {
+      scanned: rows.length,
+      recoverablePaused: 0,
+      failedWithoutHandle: 0,
+      ignoredFresh: 0,
+    }
+
+    for (const row of rows) {
+      const updatedMs = parseTimeMs(row.updatedAt)
+      const isFresh = updatedMs > 0 && nowMs - updatedMs < staleAfterMs
+      if (isFresh) {
+        result.ignoredFresh += 1
+        continue
+      }
+      const handle = durableHandleFromRecord(row)
+      const hasHandle = Boolean(handle.outputDir || handle.runStatePath)
+      const child = childRunRecord(row.resumePayload)
+      if (hasHandle) {
+        const nextPayload = child
+          ? {
+              ...(row.resumePayload || {}),
+              childRun: {
+                ...child,
+                status: 'recoverable_paused',
+                terminalReason: 'process_restarted',
+                outputDir: handle.outputDir,
+                runStatePath: handle.runStatePath,
+              },
+            }
+          : row.resumePayload
+        this.updateRowSync(row.id, {
+          status: 'blocked',
+          interactionState: 'suspended',
+          outputDir: handle.outputDir,
+          runStatePath: handle.runStatePath,
+          failureKind: 'process_restarted',
+          failureDetail: 'Ready restarted before this skill run closed; continue from the saved handle.',
+          resumePayload: nextPayload,
+          updatedAt: nowIso,
+          finishedAt: null,
+        })
+        result.recoverablePaused += 1
+        continue
+      }
+      this.updateRowSync(row.id, {
+        status: 'failed',
+        interactionState: 'suspended',
+        failureKind: 'stale_running_without_handle',
+        failureDetail: 'Ready restarted with no durable continuation handle for this running skill task.',
+        updatedAt: nowIso,
+        finishedAt: nowIso,
+      })
+      result.failedWithoutHandle += 1
+    }
+
+    return result
   }
 
   /**

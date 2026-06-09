@@ -55,6 +55,30 @@ test('browser_read_page', () => {
   assert.deepEqual(zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_read_page), [TAB_ID])
 })
 
+test('browser_read_page_map', () => {
+  assert.deepEqual(zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_read_page_map), [
+    TAB_ID,
+    { name: 'max_bytes', type: 'number', description: '页面地图文本最大字节数，默认 32768', required: false },
+  ])
+})
+
+test('browser_probe_readonly', () => {
+  assert.deepEqual(zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_probe_readonly), [
+    { name: 'generation', type: 'number', description: 'browser_read_page_map 返回的当前 generation', required: true },
+    { name: 'query', type: 'string', description: '只读观察目标的文字描述，不作为脚本执行', required: false },
+    {
+      name: 'scope',
+      type: 'string',
+      description: '固定只读观察范围，默认 document',
+      required: false,
+      enum: ['document', 'visible', 'forms', 'links', 'media', 'frames', 'shadow-dom'],
+    },
+    { name: 'max_nodes', type: 'number', description: '最多返回节点数，默认 24，最大 80', required: false },
+    { name: 'include_hidden', type: 'boolean', description: '是否包含隐藏但已加载的节点摘要，默认 false', required: false },
+    TAB_ID,
+  ])
+})
+
 test('browser_click', () => {
   assert.deepEqual(zodObjectToParamList(BROWSER_INTERACTION_SCHEMAS.browser_click), [
     { name: 'selector', type: 'string', description: 'CSS 选择器，例如 "button.submit" 或 "#search-btn"', required: true },
