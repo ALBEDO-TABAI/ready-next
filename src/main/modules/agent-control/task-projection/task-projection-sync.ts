@@ -95,6 +95,26 @@ function stableProjectionHash(parts: string[]): string {
   return createHash('sha1').update(parts.join('\0')).digest('hex').slice(0, 16)
 }
 
+function buildTerminalProjectionPatch(params: {
+  kind: 'sibling_superseded'
+  nextTaskId: string
+  updatedAt: string
+}): Partial<TaskProjectionRecord> {
+  return {
+    status: 'killed',
+    interactionState: 'suspended',
+    waitingFor: 'none',
+    taskSummary: '已被新消息接管',
+    blockedReason: '已被新消息接管',
+    resumableActions: ['none'],
+    continuationRef: {
+      taskId: params.nextTaskId,
+      blockerType: 'superseded',
+    },
+    updatedAt: params.updatedAt,
+  }
+}
+
 /**
  * Stage F1 (Zeta) — extract the durable `runContract` snippet from a frame
  * snapshot. The contract is the highest-priority source of truth for
@@ -255,17 +275,11 @@ async function supersedeLegacySiblings(
     try {
       await store.update(
         sibling.taskId,
-        {
-          status: 'killed',
-          interactionState: 'suspended',
-          waitingFor: 'none',
-          blockedReason: null,
-          continuationRef: {
-            taskId: next.taskId,
-            blockerType: 'superseded',
-          },
+        buildTerminalProjectionPatch({
+          kind: 'sibling_superseded',
+          nextTaskId: next.taskId,
           updatedAt: next.updatedAt,
-        },
+        }),
         { reasonHint: 'supersede' },
       )
     } catch (error) {

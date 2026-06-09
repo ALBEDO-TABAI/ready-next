@@ -522,6 +522,12 @@ export class AgentControlRuntime extends EventEmitter {
   }
 
   async stop(): Promise<void> {
+    const terminalStates = new Set(['done', 'failed', 'cancelled', 'closed'])
+    for (const session of this.orchestrator.listAllSessions()) {
+      if (terminalStates.has(session.state)) continue
+      await this.orchestrator.closeSession(session.agent, session.sessionId || undefined)
+    }
+
     if (this.pollTimer) {
       clearInterval(this.pollTimer)
       this.pollTimer = null

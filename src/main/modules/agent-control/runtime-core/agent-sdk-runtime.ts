@@ -2956,6 +2956,14 @@ export class AgentSdkRuntime extends EventEmitter {
     this.runtime = runtime
   }
 
+  private getRunMetaRepositoryForFinalize(): RunMetaRepositoryLike | null {
+    try {
+      return (this.runtime?.getRunMetaRepository?.() || null) as RunMetaRepositoryLike | null
+    } catch {
+      return null
+    }
+  }
+
   setRendererToolActionRequester(
     requester: ((payload: {
       agent?: string
@@ -3128,7 +3136,7 @@ export class AgentSdkRuntime extends EventEmitter {
     session.systemPrompt = systemPrompt || defaultSystemPrompt()
   }
 
-  stopGeneration(name: string): void {
+  stopGeneration(name: string, initiator: AbortInitiator = 'user_stop'): void {
     const session = this.sessions.get(name)
     if (!session) return
     const currentRun = session.currentRun
@@ -3139,17 +3147,13 @@ export class AgentSdkRuntime extends EventEmitter {
       } catch (error) {
         log(`cancelPendingToolActions failed: ${errorMessage(error)}`)
       }
-      currentRun.abortController.abort(createInitiatorAbort(currentRun, 'user_stop', 'cancelled_user'))
+      const message = initiator === 'user_stop'
+        ? 'cancelled_user'
+        : initiator === 'process_exit'
+          ? 'process_exit'
+          : 'cancelled_runtime'
+      currentRun.abortController.abort(createInitiatorAbort(currentRun, initiator, message))
       currentRun.abortController = null
-    }
-    if (currentRun?.runId) {
-      this.emit('status', {
-        agent: name,
-        runId: currentRun.runId,
-        status: 'cancelled',
-        terminalReason: 'cancelled_user',
-        isMock: false,
-      })
     }
   }
 
@@ -3536,8 +3540,7 @@ export class AgentSdkRuntime extends EventEmitter {
       const latest = this.sessions.get(name)
       return Boolean(latest && latest.generation === runGeneration && latest.currentRun?.runId === runId)
     }
-    const emitOutput = (chunk: string, type: string, projectionPatch?: Record<string, unknown> | null): void => {
-      if (!isCurrentRun()) return
+    const emitOutputForRun = (chunk: string, type: string, projectionPatch?: Record<string, unknown> | null): void => {
       transcriptEvents.push({ kind: 'output', type, chunk, projectionPatch: projectionPatch || null })
       this.emit('output', {
         agent: name,
@@ -3549,8 +3552,11 @@ export class AgentSdkRuntime extends EventEmitter {
         projectionPatch: projectionPatch || null,
       })
     }
-    const emitStatus = (status: string, terminalReason?: TurnTerminalReason | null): void => {
+    const emitOutput = (chunk: string, type: string, projectionPatch?: Record<string, unknown> | null): void => {
       if (!isCurrentRun()) return
+      emitOutputForRun(chunk, type, projectionPatch)
+    }
+    const emitStatusForRun = (status: string, terminalReason?: TurnTerminalReason | null): void => {
       runMetaStatus = status
       if (terminalReason !== undefined) runMetaTerminalReason = terminalReason || null
       transcriptEvents.push({ kind: 'status', status, terminalReason: terminalReason || null })
@@ -3562,6 +3568,10 @@ export class AgentSdkRuntime extends EventEmitter {
         ...(typeof terminalReason === 'undefined' ? {} : { terminalReason }),
         isMock: false,
       })
+    }
+    const emitStatus = (status: string, terminalReason?: TurnTerminalReason | null): void => {
+      if (!isCurrentRun()) return
+      emitStatusForRun(status, terminalReason)
     }
     const emitRuntimeError = (error: unknown, terminalReason: TurnTerminalReason): void => {
       if (!isCurrentRun()) return
@@ -4479,16 +4489,10 @@ export class AgentSdkRuntime extends EventEmitter {
         initiator: runHandle.abortInitiator || 'done',
         projectionPatch: finalProjectionPatch,
       }, {
-        runMetaRepository: (() => {
-          try {
-            return (this.runtime?.getRunMetaRepository?.() || null) as RunMetaRepositoryLike | null
-          } catch {
-            return null
-          }
-        })(),
+        runMetaRepository: this.getRunMetaRepositoryForFinalize(),
         writeProjectionTerminalPatch: (projectionPatch) => {
-          emitOutput('', 'done', projectionPatch)
-          emitStatus('done', 'done')
+          emitOutputForRun('', 'done', projectionPatch)
+          emitStatusForRun('done', 'done')
         },
         writeRunCloseMetric,
       })
@@ -4509,9 +4513,33 @@ export class AgentSdkRuntime extends EventEmitter {
         const abortReason = abortController.signal.reason
         const preemptedByNewerSend =
           abortReason instanceof Error && abortReason.message === 'process_restarted'
+        const abortInitiator = runHandle.abortInitiator
+          || (preemptedByNewerSend ? 'preempted' : 'user_stop')
+        const terminalReason: TurnTerminalReason = abortInitiator === 'user_stop'
+          ? 'cancelled_user'
+          : 'cancelled_runtime'
         const latestRunId = this.sessions.get(name)?.currentRun?.runId
-        emitOutput('', 'done')
-        emitStatus('cancelled', 'cancelled_runtime')
+        if (abortInitiator === 'user_stop') {
+          emitOutputForRun('已手动停止，进度已保存至当前会话。', 'text')
+        }
+        await finalizeRunOutcome({
+          kind: abortInitiator === 'preempted' ? 'preempted' : 'cancelled',
+          runId,
+          taskId,
+          scopeId: sessionId || null,
+          durationMs: Math.max(1, Date.now() - runStartedAt),
+          toolCallsUsed: usedTools.length,
+          initiator: abortInitiator,
+          terminalReason,
+          projectionPatch: this.mergeProjectionPatches(projectionPatches),
+        }, {
+          runMetaRepository: this.getRunMetaRepositoryForFinalize(),
+          writeProjectionTerminalPatch: (projectionPatch) => {
+            emitOutputForRun('', 'done', projectionPatch)
+            emitStatusForRun('cancelled', terminalReason)
+          },
+          writeRunCloseMetric,
+        })
         return this.buildResult({
           success: true,
           finalText: '',
@@ -4520,11 +4548,11 @@ export class AgentSdkRuntime extends EventEmitter {
           usedTools,
           transcriptEvents,
           projectionPatches,
-          terminalReason: 'cancelled_runtime',
+          terminalReason,
           scopeRunAuthority: preemptedByNewerSend
             ? {
               state: 'lost',
-              reason: 'preempted_by_newer_send',
+              reason: 'preempted_by_same_user',
               currentRunId: latestRunId && latestRunId !== runId ? latestRunId : null,
             }
             : undefined,
@@ -4665,9 +4693,25 @@ export class AgentSdkRuntime extends EventEmitter {
       }
       const failure = classifySdkRuntimeError(error)
       emitOutput(`${failure.userMessagePrefix}: ${message}`, 'error')
-      emitOutput('', 'done')
       emitRuntimeError(error, failure.terminalReason)
-      emitStatus('error', failure.terminalReason)
+      await finalizeRunOutcome({
+        kind: 'error',
+        runId,
+        taskId,
+        scopeId: sessionId || null,
+        durationMs: Math.max(1, Date.now() - runStartedAt),
+        toolCallsUsed: usedTools.length,
+        initiator: 'error',
+        terminalReason: failure.terminalReason,
+        projectionPatch: this.mergeProjectionPatches(projectionPatches),
+      }, {
+        runMetaRepository: this.getRunMetaRepositoryForFinalize(),
+        writeProjectionTerminalPatch: (projectionPatch) => {
+          emitOutputForRun('', 'done', projectionPatch)
+          emitStatusForRun('error', failure.terminalReason)
+        },
+        writeRunCloseMetric,
+      })
       return this.buildResult({
         success: false,
         error: message,

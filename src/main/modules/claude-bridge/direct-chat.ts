@@ -85,7 +85,9 @@ import type {
   TurnProviderContext,
   TurnSimpleResponse,
 } from '../agent-control/contracts/run-contracts'
+import type { AbortInitiator } from '../agent-control/contracts/run-contracts-internal'
 import type { TurnTerminalReason } from '../agent-control/runtime-core/turn-frame'
+import { finalizeRunOutcome, writeRunCloseMetric } from '../agent-control/runtime-core/run-finalizer'
 import type {
   AttachmentResourceList,
   BrowserTaskAttachmentResource,
@@ -549,6 +551,22 @@ export class DirectChatEngine extends EventEmitter {
     log('Runtime set on DirectChatEngine')
   }
 
+  private getRunMetaRepositoryForFinalize(): {
+    get(runId: string): unknown | null
+    create(input: Record<string, unknown>): unknown
+    update(runId: string, patch: Record<string, unknown>): unknown
+  } | null {
+    try {
+      return (this.runtime?.getRunMetaRepository?.() || null) as {
+        get(runId: string): unknown | null
+        create(input: Record<string, unknown>): unknown
+        update(runId: string, patch: Record<string, unknown>): unknown
+      } | null
+    } catch {
+      return null
+    }
+  }
+
   getDomainAdapters(): ReadonlyArray<DomainAdapter> {
     return this.domainAdapters
   }
@@ -760,20 +778,20 @@ export class DirectChatEngine extends EventEmitter {
     session.systemPrompt = `${basePrompt}\n${TOOL_SYSTEM_PROMPT}`
   }
 
-  stopGeneration(name: string): void {
+  stopGeneration(name: string, initiator: AbortInitiator = 'user_stop'): void {
     const session = this.sessions.get(name)
     if (!session) return
-    const runId = session.activeRunId
     session.generation += 1
     if (session.abortController) {
       const previousAbortController = session.abortController
+      const message = initiator === 'user_stop'
+        ? 'cancelled_user'
+        : initiator === 'process_exit'
+          ? 'process_exit'
+          : 'cancelled_runtime'
       this.unregisterSessionAbortSource(name, undefined, previousAbortController)
-      previousAbortController.abort(new Error('cancelled_user'))
+      previousAbortController.abort(new Error(message))
       session.abortController = null
-    }
-    if (runId) {
-      this.emit('status', { agent: name, runId, status: 'cancelled', terminalReason: 'cancelled_user', isMock: false })
-      session.activeRunId = null
     }
   }
 
@@ -796,6 +814,7 @@ export class DirectChatEngine extends EventEmitter {
     const contentPreview = typeof content === 'string' ? content.slice(0, 80) : `[${content.length} blocks]`
     log(`sendMessage called: agent=${name}, content=${contentPreview}`)
     const runId = requestId || randomUUID()
+    const runStartedAt = Date.now()
     if (!this.sessions.has(name)) {
       this.newSession(name)
     }
@@ -864,14 +883,13 @@ export class DirectChatEngine extends EventEmitter {
       return !!latest && latest.generation === runGeneration && latest.activeRunId === runId
     }
 
-    const emitOutput = (
+    const emitOutputForRun = (
       chunk: string,
       type: string,
       options?: {
         projectionPatch?: Record<string, unknown> | null
       },
     ): void => {
-      if (!isCurrentRun()) return
       this.emit('output', {
         agent: name,
         sessionId,
@@ -882,8 +900,17 @@ export class DirectChatEngine extends EventEmitter {
         projectionPatch: options?.projectionPatch || null,
       })
     }
-    const emitStatus = (status: string, terminalReason?: TurnTerminalReason | null): void => {
+    const emitOutput = (
+      chunk: string,
+      type: string,
+      options?: {
+        projectionPatch?: Record<string, unknown> | null
+      },
+    ): void => {
       if (!isCurrentRun()) return
+      emitOutputForRun(chunk, type, options)
+    }
+    const emitStatusForRun = (status: string, terminalReason?: TurnTerminalReason | null): void => {
       this.emit('status', {
         agent: name,
         sessionId,
@@ -892,6 +919,10 @@ export class DirectChatEngine extends EventEmitter {
         ...(typeof terminalReason === 'undefined' ? {} : { terminalReason }),
         isMock: false,
       })
+    }
+    const emitStatus = (status: string, terminalReason?: TurnTerminalReason | null): void => {
+      if (!isCurrentRun()) return
+      emitStatusForRun(status, terminalReason)
     }
     const emitRuntimeError = (error: unknown, options?: { toolName?: string }): void => {
       if (!isCurrentRun()) return
@@ -1102,8 +1133,37 @@ export class DirectChatEngine extends EventEmitter {
       })
     } catch (error) {
       if ((error as Error).name === 'AbortError') {
-        emitOutput('', 'done')
-        emitStatus('cancelled', 'cancelled_runtime')
+        const abortReason = abortController.signal.reason
+        const reasonMessage = abortReason instanceof Error ? abortReason.message : ''
+        const abortInitiator: AbortInitiator = reasonMessage === 'process_restarted'
+          ? 'preempted'
+          : reasonMessage === 'process_exit'
+            ? 'process_exit'
+            : 'user_stop'
+        const terminalReason: TurnTerminalReason = abortInitiator === 'user_stop'
+          ? 'cancelled_user'
+          : 'cancelled_runtime'
+        if (abortInitiator === 'user_stop') {
+          emitOutputForRun('已手动停止，进度已保存至当前会话。', 'text')
+        }
+        await finalizeRunOutcome({
+          kind: abortInitiator === 'preempted' ? 'preempted' : 'cancelled',
+          runId,
+          taskId,
+          scopeId: sessionId || null,
+          durationMs: Math.max(1, Date.now() - runStartedAt),
+          toolCallsUsed: 0,
+          initiator: abortInitiator,
+          terminalReason,
+          projectionPatch: null,
+        }, {
+          runMetaRepository: this.getRunMetaRepositoryForFinalize(),
+          writeProjectionTerminalPatch: (projectionPatch) => {
+            emitOutputForRun('', 'done', { projectionPatch })
+            emitStatusForRun('cancelled', terminalReason)
+          },
+          writeRunCloseMetric,
+        })
         return {
           success: true,
           finalText: '',
@@ -1111,6 +1171,14 @@ export class DirectChatEngine extends EventEmitter {
           cancelled: true,
           taskId,
           taskProjectionId: taskId,
+          status: 'cancelled',
+          terminalReason,
+          scopeRunAuthority: abortInitiator === 'preempted'
+            ? {
+              state: 'lost',
+              reason: 'preempted_by_same_user',
+            }
+            : undefined,
         }
       }
       const msg = error instanceof Error ? error.message : String(error)
@@ -1122,9 +1190,25 @@ export class DirectChatEngine extends EventEmitter {
       if (!contract.recoverable) {
         emitOutput(`API 请求失败: ${msg}`, 'error')
       }
-      emitOutput('', 'done')
       emitRuntimeError(error)
-      emitStatus('error', 'persistence_failed')
+      await finalizeRunOutcome({
+        kind: 'error',
+        runId,
+        taskId,
+        scopeId: sessionId || null,
+        durationMs: Math.max(1, Date.now() - runStartedAt),
+        toolCallsUsed: 0,
+        initiator: 'error',
+        terminalReason: 'persistence_failed',
+        projectionPatch: null,
+      }, {
+        runMetaRepository: this.getRunMetaRepositoryForFinalize(),
+        writeProjectionTerminalPatch: (projectionPatch) => {
+          emitOutputForRun('', 'done', { projectionPatch })
+          emitStatusForRun('error', 'persistence_failed')
+        },
+        writeRunCloseMetric,
+      })
       return {
         success: false,
         error: msg,
@@ -1133,6 +1217,8 @@ export class DirectChatEngine extends EventEmitter {
         cancelled: false,
         taskId,
         taskProjectionId: taskId,
+        status: 'error',
+        terminalReason: 'persistence_failed',
       }
     } finally {
       this.unregisterSessionAbortSource(name, sessionId, abortController)
@@ -1777,7 +1863,7 @@ export class DirectChatEngine extends EventEmitter {
 
   cleanup(): void {
     for (const [name] of this.sessions) {
-      this.stopGeneration(name)
+      this.stopGeneration(name, 'process_exit')
       this.documentTaskPipelineExecutor.clearSessionCache(name)
       this.widgetEditLeaseStore.release(name)
     }

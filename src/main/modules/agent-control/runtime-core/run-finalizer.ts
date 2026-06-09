@@ -18,6 +18,7 @@ export type RunOutcome =
     toolCallsUsed: number
     initiator: string
     projectionPatch?: Record<string, unknown> | null
+    terminalReason?: string | null
   }
   | {
     kind: 'checkpoint'
@@ -28,6 +29,18 @@ export type RunOutcome =
     durationMs: number
     toolCallsUsed: number
     initiator: string
+    projectionPatch?: Record<string, unknown> | null
+    terminalReason?: string | null
+  }
+  | {
+    kind: 'error' | 'cancelled' | 'preempted' | 'interrupted'
+    runId: string
+    taskId?: string | null
+    scopeId?: string | null
+    durationMs: number
+    toolCallsUsed: number
+    initiator: string
+    terminalReason: string
     projectionPatch?: Record<string, unknown> | null
   }
 
@@ -62,17 +75,33 @@ export const defaultRunFinalizerDeps: RunFinalizerDeps = {
 
 export async function finalizeRunOutcome(outcome: RunOutcome, deps: RunFinalizerDeps): Promise<void> {
   if (outcome.kind === 'done') {
-    await writeTerminalOutcome(outcome, deps, 'done', 'done')
+    await writeTerminalOutcome(outcome, deps, 'done', outcome.terminalReason || 'done')
     return
   }
 
-  if (!isValidContinuationHandle(outcome.continuationHandle)) {
-    writeRunMetaOutcome(outcome, deps, 'error', 'checkpoint_degraded_error')
-    deps.writeRunCloseMetric(toRunCloseMetric(outcome, 'checkpoint_degraded_error'))
-    throw new Error('checkpoint outcome requires a valid continuation handle')
+  if (outcome.kind === 'checkpoint') {
+    if (!isValidContinuationHandle(outcome.continuationHandle)) {
+      writeRunMetaOutcome(outcome, deps, 'error', 'checkpoint_degraded_error')
+      deps.writeRunCloseMetric(toRunCloseMetric(outcome, 'checkpoint_degraded_error'))
+      throw new Error('checkpoint outcome requires a valid continuation handle')
+    }
+
+    await writeTerminalOutcome(outcome, deps, 'checkpoint', outcome.terminalReason || 'checkpoint')
+    return
   }
 
-  await writeTerminalOutcome(outcome, deps, 'checkpoint', 'checkpoint')
+  await writeTerminalOutcome(
+    outcome,
+    deps,
+    statusFromOutcomeKind(outcome.kind),
+    outcome.terminalReason,
+  )
+}
+
+function statusFromOutcomeKind(kind: Exclude<RunOutcome['kind'], 'done' | 'checkpoint'>): string {
+  if (kind === 'error') return 'error'
+  if (kind === 'interrupted') return 'interrupted'
+  return 'cancelled'
 }
 
 async function writeTerminalOutcome(

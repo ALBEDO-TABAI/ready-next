@@ -25,6 +25,19 @@ export interface ReflectionDeps {
   llmProvider?: (prompt: string) => Promise<string>
 }
 
+function shouldKeepSessionSummary(params: {
+  success: boolean
+  usedTools: string[]
+  pureConversationDone?: boolean
+  sessionSummary?: string
+}): string | undefined {
+  const summary = String(params.sessionSummary || '').trim()
+  if (!summary) return undefined
+  if (!params.success) return summary
+  if (params.usedTools.length > 0 || params.pureConversationDone === true) return summary
+  return undefined
+}
+
 export class ReflectionService {
   constructor(private deps: ReflectionDeps) {}
 
@@ -36,6 +49,7 @@ export class ReflectionService {
     messages: Array<{ role: string; content: string }>
     usedTools: string[]
     success: boolean
+    pureConversationDone?: boolean
   }): Promise<ReflectionResult> {
     // Skip reflection for very short conversations
     if (params.messages.length < 2) {
@@ -50,6 +64,12 @@ export class ReflectionService {
     try {
       // Use LLM to analyze conversation
       const reflection = await this.analyzeWithLLM(params)
+      const sessionSummary = shouldKeepSessionSummary({
+        success: params.success,
+        usedTools: params.usedTools,
+        pureConversationDone: params.pureConversationDone,
+        sessionSummary: reflection.sessionSummary,
+      })
       const captureItems: NonNullable<ScopeRunMemoryCapture['items']> = []
 
       // Store user preferences
@@ -61,14 +81,15 @@ export class ReflectionService {
       }
 
       // Store session summary
-      if (reflection.sessionSummary) {
-        const stored = await this.storeSessionSummary(params.scope, reflection.sessionSummary)
+      if (sessionSummary) {
+        const stored = await this.storeSessionSummary(params.scope, sessionSummary)
         if (stored) captureItems.push(stored)
       }
 
       return {
         ...reflection,
         globalFacts: [],
+        sessionSummary,
         memoryCapture:
           captureItems.length > 0
             ? {
@@ -97,6 +118,7 @@ export class ReflectionService {
     messages: Array<{ role: string; content: string }>
     usedTools: string[]
     success: boolean
+    pureConversationDone?: boolean
   }): Promise<ReflectionResult> {
     // Build reflection prompt
     const conversationText = params.messages.map((m) => `${m.role}: ${m.content}`).join('\n')
@@ -190,6 +212,7 @@ Rules:
     messages: Array<{ role: string; content: string }>
     usedTools: string[]
     success: boolean
+    pureConversationDone?: boolean
   }): ReflectionResult {
     const userPreferences: Array<{ title: string; content: string }> = []
 
@@ -215,12 +238,15 @@ Rules:
       }
     }
 
+    const shouldWriteSuccessSummary =
+      params.success && (params.usedTools.length > 0 || params.pureConversationDone === true)
+
     return {
       globalFacts: [],
       userPreferences,
-      sessionSummary: params.success
+      sessionSummary: shouldWriteSuccessSummary
         ? `Completed task using ${params.usedTools.length} tools`
-        : 'Task incomplete',
+        : params.success ? undefined : 'Task incomplete',
       memoryCapture: null
     }
   }

@@ -713,12 +713,12 @@ export class ReadyAgentOrchestrator extends EventEmitter {
     // `abortController` + bumped `generation` so the inert entry
     // cannot resume on its own.
     try {
-      this.domainAdapterEngine.stopGeneration(internalKey)
+      this.domainAdapterEngine.stopGeneration(internalKey, 'process_exit')
     } catch (error) {
       console.warn('[ReadyAgentOrchestrator] closeSession: domainAdapterEngine.stopGeneration failed:', error)
     }
     try {
-      this.sdkEngine.stopGeneration(internalKey)
+      this.sdkEngine.stopGeneration(internalKey, 'process_exit')
     } catch (error) {
       console.warn('[ReadyAgentOrchestrator] closeSession: sdkEngine.stopGeneration failed:', error)
     }

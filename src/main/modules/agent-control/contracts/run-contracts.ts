@@ -538,7 +538,7 @@ export interface RunCoordinatorRequest {
 
 export type ScopeRunAuthority = {
   state: 'lost'
-  reason: 'superseded_by_newer_send' | 'preempted_by_newer_send'
+  reason: 'superseded_by_newer_send' | 'preempted_by_newer_send' | 'preempted_by_same_user'
   currentRunId?: string | null
 }
 
