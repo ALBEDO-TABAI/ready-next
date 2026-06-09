@@ -10,6 +10,7 @@ export type TurnTerminalReason =
   | 'checkpoint_budget'
   | 'checkpoint_background'
   | 'checkpoint_user_input'
+  | 'checkpoint_steered'
   | 'blocked_config'
   | 'blocked_external'
   | 'context_overflow'
@@ -290,6 +291,7 @@ const TURN_TERMINAL_REASON_RANK: Record<TurnTerminalReason, number> = {
   done: 50,
   checkpoint_background: 30,
   checkpoint_budget: 20,
+  checkpoint_steered: 15,
   checkpoint_user_input: 10,
 }
 

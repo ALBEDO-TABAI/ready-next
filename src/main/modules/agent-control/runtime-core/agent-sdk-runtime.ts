@@ -152,6 +152,13 @@ import {
 } from '../task-projection/run-budget-policy'
 import { createRotatingLogger } from '../../../utils/rotating-logger'
 import { finalizeRunOutcome, writeRunCloseMetric } from './run-finalizer'
+import {
+  buildActionAnnouncementCheckpointMessage,
+  buildActionAnnouncementSteerInput,
+  evaluateActionAnnouncementGuard,
+} from './action-announcement-guard'
+import { createSystemReminderRegistry } from '../system-reminders/system-reminder-registry'
+import { registerActionAnnouncementSteerReminder } from '../system-reminders/action-announcement-steer-reminder'
 
 const agentSdkLogger = createRotatingLogger('ready-agent-sdk.log')
 const settingsRepository = new AppSettingsRepository()
@@ -2021,6 +2028,13 @@ function sdkStatusFromTerminalReason(
   return 'checkpoint'
 }
 
+function isCheckpointTerminalReason(reason: TurnTerminalReason): boolean {
+  return reason === 'checkpoint_budget'
+    || reason === 'checkpoint_background'
+    || reason === 'checkpoint_user_input'
+    || reason === 'checkpoint_steered'
+}
+
 function summarizeChildResume(
   childRunId: string,
   close: SkillChildCloseEvent | null,
@@ -2964,6 +2978,19 @@ export class AgentSdkRuntime extends EventEmitter {
     }
   }
 
+  private hasPendingTaskProjection(scopeId?: string): boolean {
+    if (!scopeId || !this.runtime?.listTaskProjections) return false
+    try {
+      return this.runtime.listTaskProjections(scopeId).some((projection) =>
+        projection.status === 'running'
+        || projection.status === 'queued'
+        || projection.status === 'blocked'
+      )
+    } catch {
+      return false
+    }
+  }
+
   setRendererToolActionRequester(
     requester: ((payload: {
       agent?: string
@@ -3457,6 +3484,7 @@ export class AgentSdkRuntime extends EventEmitter {
     let hasSuccessfulDocumentTargetMutation = false
     let hasSuccessfulToolProgress = false
     let lastDocumentSaveSuccessText: string | null = null
+    let actionAnnouncementSteered = false
     let runMetaStatus: string = 'running'
     let runMetaTerminalReason: TurnTerminalReason | null = null
     let runMetaBudgetRuntime: TaskBudgetRuntime | null = null
@@ -3898,6 +3926,100 @@ export class AgentSdkRuntime extends EventEmitter {
           providerDiagnostics: runMetaProviderDiagnostics,
         })
       }
+      const hasUnfinishedActionTaskReference = (): boolean => {
+        if (
+          executionOptions?.taskId
+          || effectiveExecutionOptions?.continuationIntent
+          || effectiveExecutionOptions?.continuationState
+          || effectiveExecutionOptions?.taskBudgetRuntime
+          || effectiveExecutionOptions?.budget
+          || effectiveExecutionOptions?.budgetState
+          || checkpointRestore
+        ) {
+          return true
+        }
+        return this.hasPendingTaskProjection(sessionId)
+      }
+      const maybeHandleActionAnnouncementGuard = async (
+        assistantText: string,
+      ): Promise<ExecutionTurnResult | 'continue' | null> => {
+        const decision = evaluateActionAnnouncementGuard({
+          assistantText,
+          toolCallsUsed: usedTools.length,
+          hasUnfinishedTaskReference: hasUnfinishedActionTaskReference(),
+          alreadySteered: actionAnnouncementSteered,
+        })
+        if (decision.kind === 'none') return null
+        if (decision.kind === 'steer') {
+          const registry = createSystemReminderRegistry()
+          registerActionAnnouncementSteerReminder(registry, decision.actionSummary)
+          const reminder = registry.compose()
+          if (!reminder) return null
+          actionAnnouncementSteered = true
+          nextInput = buildActionAnnouncementSteerInput(reminder) as AgentInputItem[]
+          return 'continue'
+        }
+
+        const checkpointBudgetRuntime = liveTaskBudgetRuntime
+          || createTaskBudgetRuntime(resolveTaskTypeFromToolDefinitions(toolDefinitions) || 'short_task')
+        liveTaskBudgetRuntime = checkpointBudgetRuntime
+        runMetaBudgetRuntime = checkpointBudgetRuntime
+        const checkpoint = await this.writeBudgetCheckpointState({
+          agentName: name,
+          sessionId,
+          runId,
+          taskId,
+          taskBudgetRuntime: checkpointBudgetRuntime,
+          runHandle,
+          usedTools,
+          requiredCapabilityGroups,
+          requiredToolNames: allowedToolNames,
+          lastUserMessage: messageToText(content as RunMessage),
+          terminalReason: 'checkpoint_steered',
+          blockerType: 'action_announcement_steered',
+          pauseReason: 'action_announcement_steered',
+          blockedReason: '行动宣告没有启动实际工具，已保存续跑断点。',
+          waitingFor: 'none',
+        })
+        runMetaContinuationRef = checkpoint.projectionPatch.taskContinuation && typeof checkpoint.projectionPatch.taskContinuation === 'object'
+          ? checkpoint.projectionPatch.taskContinuation as Record<string, unknown>
+          : null
+        projectionPatches.push(checkpoint.projectionPatch)
+        finalText = buildActionAnnouncementCheckpointMessage(decision.actionSummary)
+        emitOutput(finalText, 'text', checkpoint.projectionPatch)
+        const finalProjectionPatch = this.mergeProjectionPatches(projectionPatches)
+        await finalizeRunOutcome({
+          kind: 'checkpoint',
+          runId,
+          taskId,
+          scopeId: sessionId || null,
+          continuationHandle: checkpoint.runStatePath,
+          durationMs: Math.max(1, Date.now() - runStartedAt),
+          toolCallsUsed: usedTools.length,
+          initiator: runHandle.abortInitiator || 'done',
+          terminalReason: 'checkpoint_steered',
+          projectionPatch: finalProjectionPatch,
+        }, {
+          runMetaRepository: this.getRunMetaRepositoryForFinalize(),
+          writeProjectionTerminalPatch: (projectionPatch) => {
+            emitOutputForRun('', 'done', projectionPatch)
+            emitStatusForRun('checkpoint', 'checkpoint_steered')
+          },
+          writeRunCloseMetric,
+        })
+        return this.buildResult({
+          success: true,
+          finalText,
+          cancelled: false,
+          taskId,
+          usedTools,
+          transcriptEvents,
+          projectionPatches,
+          terminalReason: 'checkpoint_steered',
+          taskBudgetRuntime: liveTaskBudgetRuntime,
+          providerDiagnostics: runMetaProviderDiagnostics,
+        })
+      }
       const sdkTools = useTextToolBridge
         ? []
         : toolDefinitions.map((definition) => this.buildSdkTool(definition, toolBridgeRuntimeContext))
@@ -4216,6 +4338,11 @@ export class AgentSdkRuntime extends EventEmitter {
             emitOutput('目标文档还没有实际写入，我会继续完成写入并保存。', 'text')
             continue
           }
+          {
+            const actionAnnouncementResult = await maybeHandleActionAnnouncementGuard(finalText)
+            if (actionAnnouncementResult === 'continue') continue
+            if (actionAnnouncementResult) return actionAnnouncementResult
+          }
           break
         }
 
@@ -4264,6 +4391,11 @@ export class AgentSdkRuntime extends EventEmitter {
               emitOutput('目标文档里有未通过检查的内容，我会改成稳定版本并保存。', 'text')
               continue
             }
+          }
+          {
+            const actionAnnouncementResult = await maybeHandleActionAnnouncementGuard(finalText)
+            if (actionAnnouncementResult === 'continue') continue
+            if (actionAnnouncementResult) return actionAnnouncementResult
           }
           break
         }
@@ -4789,8 +4921,8 @@ export class AgentSdkRuntime extends EventEmitter {
       totalTokens: params.usage?.totalTokens ?? 0,
       firstMessageText: params.firstMessageText.slice(0, 2_000),
       lastMessageText: params.finalText.slice(0, 2_000),
-      followUpText: params.terminalReason === 'checkpoint_budget'
-        ? 'checkpoint_budget'
+      followUpText: params.terminalReason && isCheckpointTerminalReason(params.terminalReason)
+        ? params.terminalReason
         : null,
     }
     try {
@@ -5335,6 +5467,11 @@ export class AgentSdkRuntime extends EventEmitter {
     requiredCapabilityGroups: string[]
     requiredToolNames: string[]
     lastUserMessage: string
+    terminalReason?: Extract<TurnTerminalReason, 'checkpoint_budget' | 'checkpoint_steered'>
+    blockerType?: string
+    pauseReason?: string
+    blockedReason?: string
+    waitingFor?: 'background' | 'none'
   }): Promise<AgentSdkBudgetCheckpoint> {
     const outputDir = join(
       tmpdir(),
@@ -5346,6 +5483,8 @@ export class AgentSdkRuntime extends EventEmitter {
     const runStatePath = join(outputDir, 'run_state.json')
     const sessionSnapshot = normalizeSessionSnapshotForSeed(await params.runHandle.capturedSession.getItems())
     const now = new Date().toISOString()
+    const terminalReason = params.terminalReason || 'checkpoint_budget'
+    const blockedReason = params.blockedReason || '本轮工具预算已用完，已保存续跑检查点。'
     const state = {
       version: 1,
       kind: 'agent_sdk_budget_checkpoint',
@@ -5355,7 +5494,7 @@ export class AgentSdkRuntime extends EventEmitter {
       agentName: params.agentName,
       taskType: params.taskBudgetRuntime.taskType,
       budgetRuntime: params.taskBudgetRuntime,
-      terminalReason: 'checkpoint_budget',
+      terminalReason,
       lastUserMessageSummary: params.lastUserMessage.slice(0, 500),
       sessionSnapshot,
       usedToolNames: [...params.usedTools],
@@ -5370,13 +5509,13 @@ export class AgentSdkRuntime extends EventEmitter {
       runStatePath,
       projectionPatch: {
         interactionState: 'suspended',
-        waitingFor: 'background',
+        waitingFor: params.waitingFor || 'background',
         resumableActions: ['continue', 'retry', 'cancel'],
-        blockedReason: '本轮工具预算已用完，已保存续跑检查点。',
+        blockedReason,
         taskContinuation: {
           taskId: params.taskId,
-          blockerType: 'budget_exhausted',
-          pauseReason: 'budget_exhausted',
+          blockerType: params.blockerType || 'budget_exhausted',
+          pauseReason: params.pauseReason || 'budget_exhausted',
           outputDir,
           runStatePath,
         },
@@ -5441,7 +5580,7 @@ export class AgentSdkRuntime extends EventEmitter {
       success: params.success,
       status: params.cancelled
         ? 'cancelled'
-        : params.terminalReason === 'checkpoint_budget' || params.terminalReason === 'checkpoint_background' || params.terminalReason === 'checkpoint_user_input'
+        : isCheckpointTerminalReason(params.terminalReason)
           ? 'checkpoint'
           : params.success ? 'done' : 'error',
       finalText: params.finalText,

@@ -3,6 +3,7 @@ import { TOOL_ERROR_METRICS } from '../tools-runtime/tool-error-metrics'
 import type { ReminderEntry, ReminderTopic } from './system-reminder-registry'
 
 const DEFAULT_CONFLICTS: Record<ReminderTopic, ReadonlyArray<ReminderTopic>> = {
+  'action-announcement-steer': [],
   checkpoint: [],
   'child-owned': ['typed-action-preferred', 'force-tool-locked', 'force-tool-missing'],
   'force-tool-locked': ['typed-action-preferred'],

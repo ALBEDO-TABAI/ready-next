@@ -1,6 +1,7 @@
 import { composeSystemReminder } from './system-reminder-assembly'
 
 export type ReminderTopic =
+  | 'action-announcement-steer'
   | 'budget'
   | 'missing-input'
   | 'checkpoint'

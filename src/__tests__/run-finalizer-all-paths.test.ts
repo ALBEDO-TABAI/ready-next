@@ -5,6 +5,10 @@ import {
   AgentSdkRuntime,
   type AgentSdkRuntimeDeps,
 } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
+import {
+  finalizeRunOutcome,
+  type RunCloseMetric,
+} from '../main/modules/agent-control/runtime-core/run-finalizer'
 import { RunMetaRepository } from '../main/modules/agent-control/task-projection/run-meta-repository'
 import { syncTaskProjection } from '../main/modules/agent-control/task-projection/task-projection-sync'
 import { ReflectionService } from '../main/modules/agent-control/reflection-service'
@@ -353,6 +357,49 @@ describe('run finalizer all paths', () => {
     assert.equal(killed?.status, 'killed')
     assert.equal(killed?.taskSummary, '已被新消息接管')
     assert.equal(killed?.blockedReason, '已被新消息接管')
+  })
+
+  test('checkpoint_steered path records checkpoint terminal state with durable handle', async () => {
+    const repository = new RunMetaRepository(new RunMetaDb() as unknown as ConstructorParameters<typeof RunMetaRepository>[0])
+    const metrics: RunCloseMetric[] = []
+    const patches: Array<{ patch: Record<string, unknown> | null; reason: string }> = []
+
+    await finalizeRunOutcome({
+      kind: 'checkpoint',
+      runId: 'run-steered',
+      taskId: 'task-steered',
+      scopeId: 'scope-steered',
+      continuationHandle: '/tmp/ready-action-steered/run_state.json',
+      durationMs: 100,
+      toolCallsUsed: 0,
+      initiator: 'done',
+      terminalReason: 'checkpoint_steered',
+      projectionPatch: {
+        taskContinuation: {
+          taskId: 'task-steered',
+          outputDir: '/tmp/ready-action-steered',
+          runStatePath: '/tmp/ready-action-steered/run_state.json',
+        },
+      },
+    }, {
+      runMetaRepository: repository,
+      writeProjectionTerminalPatch: (patch, reason) => {
+        patches.push({ patch, reason })
+      },
+      writeRunCloseMetric(metric) {
+        metrics.push(metric)
+      },
+    })
+
+    const row = repository.get('run-steered')
+    assert.equal(row?.status, 'checkpoint')
+    assert.equal(row?.terminalReason, 'checkpoint_steered')
+    assert.equal(metrics[0]?.terminalReason, 'checkpoint_steered')
+    assert.equal(patches[0]?.reason, 'checkpoint_steered')
+    assert.deepEqual(
+      (patches[0]?.patch?.taskContinuation as Record<string, unknown> | undefined)?.runStatePath,
+      '/tmp/ready-action-steered/run_state.json',
+    )
   })
 
   test('zero-tool non-conversation success does not write completed-task memory', async () => {
