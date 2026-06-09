@@ -151,6 +151,7 @@ import {
   resumeBudgetRuntime,
 } from '../task-projection/run-budget-policy'
 import { createRotatingLogger } from '../../../utils/rotating-logger'
+import { finalizeRunOutcome, writeRunCloseMetric } from './run-finalizer'
 
 const agentSdkLogger = createRotatingLogger('ready-agent-sdk.log')
 const settingsRepository = new AppSettingsRepository()
@@ -3432,6 +3433,7 @@ export class AgentSdkRuntime extends EventEmitter {
     requestId?: string,
     executionOptions?: AgentSdkExecutionOptions,
   ): Promise<ExecutionTurnResult> {
+    const runStartedAt = Date.now()
     const runId = requestId || randomUUID()
     if (!this.sessions.has(name)) {
       this.newSession(name)
@@ -4467,8 +4469,29 @@ export class AgentSdkRuntime extends EventEmitter {
         if (checkpointResult) return checkpointResult
       }
       const finalProjectionPatch = this.mergeProjectionPatches(projectionPatches)
-      emitOutput('', 'done', finalProjectionPatch)
-      emitStatus('done', 'done')
+      await finalizeRunOutcome({
+        kind: 'done',
+        runId,
+        taskId,
+        scopeId: sessionId || null,
+        durationMs: Math.max(1, Date.now() - runStartedAt),
+        toolCallsUsed: usedTools.length,
+        initiator: runHandle.abortInitiator || 'done',
+        projectionPatch: finalProjectionPatch,
+      }, {
+        runMetaRepository: (() => {
+          try {
+            return (this.runtime?.getRunMetaRepository?.() || null) as RunMetaRepositoryLike | null
+          } catch {
+            return null
+          }
+        })(),
+        writeProjectionTerminalPatch: (projectionPatch) => {
+          emitOutput('', 'done', projectionPatch)
+          emitStatus('done', 'done')
+        },
+        writeRunCloseMetric,
+      })
       return this.buildResult({
         success: true,
         finalText,
