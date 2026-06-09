@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { describe, it, test } from 'node:test'
 
 import { BrowserCollectionConsentStore } from '../main/modules/browser-engine/browser-collection-consent'
 

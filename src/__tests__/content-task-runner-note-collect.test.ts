@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { describe, it, test } from 'node:test'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { mkdtemp, readFile } from 'node:fs/promises'

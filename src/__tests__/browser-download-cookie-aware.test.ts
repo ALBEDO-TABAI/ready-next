@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { describe, it, afterEach } from 'node:test'
+import { describe, it, afterEach, test } from 'node:test'
 import { rmSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'

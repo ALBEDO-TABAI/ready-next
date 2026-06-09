@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { describe, it, test } from 'node:test'
 
 import { BrowserContentTaskRunner } from '../main/modules/browser-engine/content-task-runner'
 import { BrowserWriteLeaseService } from '../main/modules/browser-engine/browser-write-lease'

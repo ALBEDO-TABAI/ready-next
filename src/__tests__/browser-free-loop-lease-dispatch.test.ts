@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { describe, it, test } from 'node:test'
 
 import { executeToolCall, type ToolContext } from '../main/modules/tools/tool-executor'
 import { BrowserWriteLeaseService } from '../main/modules/browser-engine/browser-write-lease'
