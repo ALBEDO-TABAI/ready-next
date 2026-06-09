@@ -72,12 +72,21 @@ import { deriveTaskProjectionCanResume } from '../task-projection/task-projectio
 import { isAwaitingUserInteractionState } from '../../../../shared/task-interaction-state'
 import { assertSkillTaskRunInvariantConsistency } from '../skills/skill-task-tracker'
 import type { ProjectionTruthSnapshot, TaskProjectionRecord } from '../contracts/run-contracts'
-import { getBudgetUsagePercent, restoreContinuationTaskBudgetRuntime } from '../task-projection/run-budget-policy'
+import { createTaskBudgetRuntime, getBudgetUsagePercent, restoreContinuationTaskBudgetRuntime } from '../task-projection/run-budget-policy'
 import {
   normalizeContinuationIntent,
   selectContinuationProjection,
+  type ContinuationState,
   type ContinuationIntent,
 } from '../contracts/continuation-state'
+import {
+  AutoNarrationContinuationRunner,
+  getOldestPendingTaskEvent,
+  markPendingTaskEventConsumed,
+  registerPendingTaskEventListener,
+  type PendingTaskEventRow,
+} from '../system-reminders/background-task-terminal-reminder'
+import type { TaskEventBridgePayload } from '../../browser-engine/task-event-bridge'
 import { BrowserCollectionConsentStore } from '../../browser-engine/browser-collection-consent'
 import { forgetSession } from '../session/session-continuity'
 import { isRetryOnlyTurn } from '../skills/skill-detection-inputs'
@@ -196,6 +205,58 @@ function parseArrayJson(value: string | null | undefined): Array<Record<string, 
   } catch {
     return []
   }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function parsePendingTaskEventPayload(row: PendingTaskEventRow): TaskEventBridgePayload | null {
+  try {
+    const parsed = JSON.parse(row.eventPayload) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    const record = parsed as Partial<TaskEventBridgePayload>
+    if (typeof record.taskId !== 'string' || typeof record.status !== 'string') return null
+    return record as TaskEventBridgePayload
+  } catch {
+    return null
+  }
+}
+
+function resolvePendingTaskEventScopeId(payload: TaskEventBridgePayload | null): string | null {
+  if (!payload) return null
+  const extra = asRecord(payload.extra)
+  return readScopeIdFromPendingEvent(extra)
+}
+
+function readScopeIdFromPendingEvent(record: Record<string, unknown> | null): string | null {
+  if (!record) return null
+  const direct = stringFromUnknown(record.scopeId)
+    || stringFromUnknown(record.sessionId)
+    || stringFromUnknown(record.publicSessionId)
+  if (direct) return direct
+  return readScopeIdFromPendingEvent(asRecord(record.payload))
+}
+
+function summarizePendingTaskEvent(payload: TaskEventBridgePayload): string {
+  const extra = asRecord(payload.extra)
+  const summary = stringFromUnknown(extra?.summary)
+    || stringFromUnknown(extra?.title)
+    || stringFromUnknown(extra?.message)
+    || stringFromUnknown(extra?.statusText)
+  return summary || `后台任务 ${payload.taskId} 已进入终态：${payload.status}`
+}
+
+function buildPendingTaskNarrationPrompt(payload: TaskEventBridgePayload): string {
+  const summary = summarizePendingTaskEvent(payload)
+  return [
+    '请向用户简短播报这个后台任务的最新结果，只做说明和下一步建议，不执行任何写入、浏览器操作或高风险动作。',
+    `任务 ID：${payload.taskId}`,
+    `状态：${payload.status}`,
+    `摘要：${summary}`,
+  ].join('\n')
 }
 
 function stringFromUnknown(value: unknown): string | null {
@@ -325,6 +386,13 @@ export class AgentControlRuntime extends EventEmitter {
   private readonly taskProjectionStore = new TaskProjectionRepository(this.db)
   private readonly skillTaskRunRepository = new SkillTaskRunRepository(this.db)
   private readonly detachedSkillTasks: DetachedSkillTaskTracker
+  private readonly autoNarrationContinuationRunner = new AutoNarrationContinuationRunner({
+    getOldestPendingTaskEvent,
+    markPendingTaskEventConsumed,
+    hasActiveNarrationContinuationRun: () => this.hasActiveNarrationContinuationRun(),
+    startNarrationContinuationRun: (row) => this.startNarrationContinuationFromPending(row),
+    onNarrationContinuationFailure: (row, error) => this.markNarrationContinuationFailure(row, error),
+  })
   private readonly pendingInboundChannels = new Map<
     string,
     {
@@ -462,6 +530,7 @@ export class AgentControlRuntime extends EventEmitter {
       }
       throw error
     }
+    registerPendingTaskEventListener(() => this.autoNarrationContinuationRunner.trigger())
   }
 
   getOrchestrator(): ReadyAgentOrchestrator {
@@ -510,6 +579,7 @@ export class AgentControlRuntime extends EventEmitter {
 
     // Start memory lifecycle manager
     this.memoryLifecycle.start()
+    this.autoNarrationContinuationRunner.trigger()
 
     const sidecarEnabled = this.getSettingBool('remote_channels_enabled', true)
     const autostart = this.getSettingBool('sidecar_autostart', true)
@@ -698,6 +768,144 @@ export class AgentControlRuntime extends EventEmitter {
   getRunMetaRepository(): RunMetaRepository | null {
     const rawDb = this.db.getRawDb()
     return rawDb ? new RunMetaRepository(rawDb) : null
+  }
+
+  private hasActiveNarrationContinuationRun(): boolean {
+    const activePhases = new Set<ScopeRunEventPayload['phase']>([
+      'queued',
+      'planning',
+      'tool_running',
+      'resuming',
+      'responding',
+    ])
+    return Array.from(this.scopeRunSummaries.values()).some((summary) =>
+      summary.taskType === 'continuation' && activePhases.has(summary.phase)
+    )
+  }
+
+  private async startNarrationContinuationFromPending(
+    row: PendingTaskEventRow,
+  ): Promise<{ success: boolean; error?: string | null }> {
+    const event = parsePendingTaskEventPayload(row)
+    const scopeId = resolvePendingTaskEventScopeId(event)
+    if (!event || !scopeId) {
+      return { success: false, error: 'Pending task event is missing a scopeId.' }
+    }
+    const scope = this.getConversationScope(scopeId)
+    if (!scope) {
+      return { success: false, error: `Conversation scope not found: ${scopeId}` }
+    }
+
+    const runId = `auto-narration-${row.id}-${randomUUID()}`
+    const narrationTaskId = `auto-narration:${row.id}`
+    const taskBudgetRuntime = createTaskBudgetRuntime('continuation')
+    const continuationState: ContinuationState = {
+      taskId: narrationTaskId,
+      scopeId: scope.id,
+      runId,
+      module: 'system',
+      taskType: 'continuation',
+      interactionState: 'resuming',
+      steps: [],
+      currentStepId: null,
+      blockedReason: null,
+      resumableActions: ['none'],
+      continuationRef: {
+        taskId: narrationTaskId,
+        executionId: `pending-task-event:${row.id}`,
+        taskRunId: row.taskRunId,
+      },
+      budgetRuntime: taskBudgetRuntime,
+    }
+
+    this.emitScopeRunEvent({
+      type: 'started',
+      scopeId: scope.id,
+      agent: scope.agent,
+      runId,
+      taskId: narrationTaskId,
+      phase: 'resuming',
+      taskType: 'continuation',
+      taskTitle: '后台任务播报',
+      taskSummary: summarizePendingTaskEvent(event),
+      taskProjectionId: narrationTaskId,
+      executionDiagnostics: {
+        taskId: narrationTaskId,
+        taskBudgetRuntime,
+        budget: {
+          ...taskBudgetRuntime.budget,
+          ...taskBudgetRuntime.usage,
+        },
+      },
+      timestamp: new Date().toISOString(),
+    })
+
+    const result = await this.orchestrator.send(
+      scope.agent,
+      buildPendingTaskNarrationPrompt(event),
+      scope.id,
+      runId,
+      narrationTaskId,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      taskBudgetRuntime,
+      undefined,
+      continuationState,
+    )
+
+    this.emitScopeRunEvent({
+      type: 'updated',
+      scopeId: scope.id,
+      agent: scope.agent,
+      runId,
+      taskId: narrationTaskId,
+      phase: result.success ? 'done' : 'error',
+      terminalReason: result.terminalReason || (result.success ? 'done' : 'blocked_external'),
+      taskType: 'continuation',
+      taskTitle: '后台任务播报',
+      taskSummary: result.finalText || summarizePendingTaskEvent(event),
+      taskProjectionId: narrationTaskId,
+      blockedReason: result.success ? null : (result.error || '自动播报续跑失败。'),
+      executionDiagnostics: result.executionDiagnostics || {
+        taskId: narrationTaskId,
+        taskBudgetRuntime,
+        budget: {
+          ...taskBudgetRuntime.budget,
+          ...taskBudgetRuntime.usage,
+        },
+      },
+      timestamp: new Date().toISOString(),
+    }, result.projectionTruth || null)
+
+    return result.success
+      ? { success: true }
+      : { success: false, error: result.error || 'Agent narration continuation failed.' }
+  }
+
+  private markNarrationContinuationFailure(row: PendingTaskEventRow, error: string | null): void {
+    const event = parsePendingTaskEventPayload(row)
+    const scopeId = resolvePendingTaskEventScopeId(event)
+    if (!event || !scopeId) return
+    const scope = this.getConversationScope(scopeId)
+    if (!scope) return
+    this.emitScopeRunEvent({
+      type: 'updated',
+      scopeId: scope.id,
+      agent: scope.agent,
+      runId: `auto-narration-failed:${row.id}`,
+      taskId: `auto-narration:${row.id}`,
+      phase: 'error',
+      terminalReason: 'blocked_external',
+      taskType: 'continuation',
+      taskTitle: '后台任务播报',
+      taskSummary: summarizePendingTaskEvent(event),
+      taskProjectionId: `auto-narration:${row.id}`,
+      blockedReason: error || '自动播报续跑失败，后台任务结果仍待播报。',
+      timestamp: new Date().toISOString(),
+    })
   }
 
   listTaskProjections(scopeId: string): TaskProjectionRecord[] {

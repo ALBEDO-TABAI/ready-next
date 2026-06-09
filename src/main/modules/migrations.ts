@@ -2164,6 +2164,22 @@ const migrations: Migration[] = [
       addColumn('ALTER TABLE run_meta ADD COLUMN initiator TEXT')
       addColumn('ALTER TABLE run_meta ADD COLUMN duration_ms INTEGER')
     }
+  },
+
+  // ------------------------------------------------------------------ 051
+  {
+    name: '051_create_pending_task_events',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS pending_task_events (
+          id INTEGER PRIMARY KEY,
+          event_payload TEXT NOT NULL,
+          task_run_id TEXT,
+          created_at INTEGER NOT NULL,
+          consumed INTEGER NOT NULL DEFAULT 0
+        )
+      `)
+    }
   }
 ]
 

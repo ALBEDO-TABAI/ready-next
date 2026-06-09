@@ -4,9 +4,81 @@ import type { ReminderTopic, SystemReminderRegistry } from './system-reminder-re
 
 export const BACKGROUND_TASK_TERMINAL_REMINDER_TOPIC = 'background-task-terminal'
 
+export interface PendingTaskEventStatement {
+  run(...params: unknown[]): unknown
+  get<T = unknown>(...params: unknown[]): T | undefined
+  all<T = unknown>(...params: unknown[]): T[]
+}
+
+export interface PendingTaskEventDatabase {
+  prepare(sql: string): PendingTaskEventStatement
+}
+
+export interface PendingTaskEventRow {
+  id: number
+  eventPayload: string
+  taskRunId: string | null
+  createdAt: number
+  consumed: number
+}
+
+export interface AutoNarrationContinuationResult {
+  success: boolean
+  error?: string | null
+}
+
+export type AutoNarrationContinuationDrainResult = 'none' | 'active' | 'started' | 'failed'
+
+export interface AutoNarrationContinuationRunnerDeps {
+  getOldestPendingTaskEvent: () => PendingTaskEventRow | null
+  markPendingTaskEventConsumed: (id: number) => void
+  hasActiveNarrationContinuationRun: () => boolean
+  startNarrationContinuationRun: (
+    row: PendingTaskEventRow,
+  ) => Promise<AutoNarrationContinuationResult>
+  onNarrationContinuationFailure?: (row: PendingTaskEventRow, error: string | null) => void
+}
+
 const activeRunCountsByScope = new Map<string, number>()
 const activeScopeByTaskId = new Map<string, string>()
 const pendingReminderTextsByScope = new Map<string, string[]>()
+const pendingTaskEventListeners = new Set<() => void>()
+let pendingTaskEventDatabaseOverride: PendingTaskEventDatabase | null = null
+
+export class AutoNarrationContinuationRunner {
+  private inFlight = false
+  private scheduled = false
+
+  constructor(private readonly deps: AutoNarrationContinuationRunnerDeps) {}
+
+  trigger(): void {
+    if (this.scheduled) return
+    this.scheduled = true
+    queueMicrotask(() => {
+      this.scheduled = false
+      void this.drainOnce()
+    })
+  }
+
+  async drainOnce(): Promise<AutoNarrationContinuationDrainResult> {
+    if (this.inFlight || this.deps.hasActiveNarrationContinuationRun()) return 'active'
+    const row = this.deps.getOldestPendingTaskEvent()
+    if (!row) return 'none'
+
+    this.inFlight = true
+    try {
+      const result = await this.deps.startNarrationContinuationRun(row)
+      if (!result.success) {
+        this.deps.onNarrationContinuationFailure?.(row, result.error || null)
+        return 'failed'
+      }
+      this.deps.markPendingTaskEventConsumed(row.id)
+      return 'started'
+    } finally {
+      this.inFlight = false
+    }
+  }
+}
 
 export function beginBackgroundTaskTerminalReminderRun(
   scopeId: string | null | undefined,
@@ -38,11 +110,83 @@ export function enqueueBackgroundTaskTerminalReminderFromBridge(
   payload: TaskEventBridgePayload,
 ): void {
   const scopeId = resolveScopeId(payload)
-  if (!scopeId || !activeRunCountsByScope.has(scopeId)) return
+  if (!scopeId || !activeRunCountsByScope.has(scopeId)) {
+    insertPendingTaskEvent(payload)
+    return
+  }
 
   const existing = pendingReminderTextsByScope.get(scopeId) ?? []
   existing.push(buildBackgroundTaskTerminalReminderText(payload))
   pendingReminderTextsByScope.set(scopeId, existing)
+}
+
+export function insertPendingTaskEvent(payload: TaskEventBridgePayload): PendingTaskEventRow | null {
+  const db = getPendingTaskEventDatabase()
+  if (!db) return null
+  const createdAt = Date.now()
+  const taskRunId = normalizeId(payload.taskId)
+  const eventPayload = JSON.stringify(payload)
+  const result = db.prepare(`
+    INSERT INTO pending_task_events (event_payload, task_run_id, created_at, consumed)
+    VALUES (?, ?, ?, 0)
+  `).run(eventPayload, taskRunId, createdAt) as { lastInsertRowid?: unknown } | undefined
+  const row: PendingTaskEventRow = {
+    id: Number(result?.lastInsertRowid || 0),
+    eventPayload,
+    taskRunId,
+    createdAt,
+    consumed: 0,
+  }
+  notifyPendingTaskEventListeners()
+  return row
+}
+
+export function getOldestPendingTaskEvent(): PendingTaskEventRow | null {
+  const db = getPendingTaskEventDatabase()
+  if (!db) return null
+  const row = db.prepare(`
+    SELECT id, event_payload, task_run_id, created_at, consumed
+    FROM pending_task_events
+    WHERE consumed = 0
+    ORDER BY created_at ASC, id ASC
+    LIMIT 1
+  `).get<PendingTaskEventSqlRow>()
+  return row ? mapPendingTaskEventRow(row) : null
+}
+
+export function markPendingTaskEventConsumed(id: number): void {
+  const db = getPendingTaskEventDatabase()
+  if (!db) return
+  db.prepare('UPDATE pending_task_events SET consumed = 1 WHERE id = ?').run(id)
+}
+
+export function registerPendingTaskEventListener(listener: () => void): () => void {
+  pendingTaskEventListeners.add(listener)
+  return () => {
+    pendingTaskEventListeners.delete(listener)
+  }
+}
+
+export function listPendingTaskEventsForTests(): PendingTaskEventRow[] {
+  const db = getPendingTaskEventDatabase()
+  if (!db) return []
+  return db.prepare(`
+    SELECT id, event_payload, task_run_id, created_at, consumed
+    FROM pending_task_events
+    ORDER BY id ASC
+  `).all<PendingTaskEventSqlRow>().map(mapPendingTaskEventRow)
+}
+
+export function __setPendingTaskEventDatabaseForTests(db: PendingTaskEventDatabase | null): void {
+  pendingTaskEventDatabaseOverride = db
+}
+
+export function __resetBackgroundTaskTerminalReminderForTests(): void {
+  activeRunCountsByScope.clear()
+  activeScopeByTaskId.clear()
+  pendingReminderTextsByScope.clear()
+  pendingTaskEventListeners.clear()
+  pendingTaskEventDatabaseOverride = null
 }
 
 export function drainBackgroundTaskTerminalReminders(
@@ -173,4 +317,44 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function normalizeId(value: string | null | undefined): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+interface PendingTaskEventSqlRow {
+  id: number
+  event_payload: string
+  task_run_id: string | null
+  created_at: number
+  consumed: number
+}
+
+function mapPendingTaskEventRow(row: PendingTaskEventSqlRow): PendingTaskEventRow {
+  return {
+    id: Number(row.id),
+    eventPayload: row.event_payload,
+    taskRunId: row.task_run_id,
+    createdAt: Number(row.created_at),
+    consumed: Number(row.consumed),
+  }
+}
+
+function getPendingTaskEventDatabase(): PendingTaskEventDatabase | null {
+  if (pendingTaskEventDatabaseOverride) return pendingTaskEventDatabaseOverride
+  try {
+    const { getDatabase } = require('../../database') as {
+      getDatabase: () => { getRawDb: () => PendingTaskEventDatabase | null }
+    }
+    return getDatabase().getRawDb() || null
+  } catch {
+    return null
+  }
+}
+
+function notifyPendingTaskEventListeners(): void {
+  for (const listener of pendingTaskEventListeners) {
+    try {
+      listener()
+    } catch {
+      // Listener failures must not break task-event publication.
+    }
+  }
 }
