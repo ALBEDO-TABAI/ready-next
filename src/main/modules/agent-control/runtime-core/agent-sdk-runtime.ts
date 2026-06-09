@@ -34,6 +34,7 @@ import type {
   TaskType,
   TurnTranscriptEvent,
 } from '../contracts/run-contracts'
+import type { AbortInitiator } from '../contracts/run-contracts-internal'
 import type { ScopeRunEventPayload } from '../contracts/types'
 import type { TurnTerminalReason } from './turn-frame'
 import type { ContinuationIntent, ContinuationState } from '../contracts/continuation-state'
@@ -188,9 +189,19 @@ interface RunHandle {
   runId: string
   runGeneration: number
   abortController: AbortController | null
+  abortInitiator: AbortInitiator | null
   settled: Promise<void>
   resolveSettled: () => void
   capturedSession: MemorySession
+}
+
+function createInitiatorAbort(
+  runHandle: RunHandle,
+  initiator: AbortInitiator,
+  message: string,
+): Error {
+  runHandle.abortInitiator = initiator
+  return new Error(message)
 }
 
 interface PendingCompact {
@@ -3127,7 +3138,7 @@ export class AgentSdkRuntime extends EventEmitter {
       } catch (error) {
         log(`cancelPendingToolActions failed: ${errorMessage(error)}`)
       }
-      currentRun.abortController.abort(new Error('cancelled_user'))
+      currentRun.abortController.abort(createInitiatorAbort(currentRun, 'user_stop', 'cancelled_user'))
       currentRun.abortController = null
     }
     if (currentRun?.runId) {
@@ -3192,6 +3203,7 @@ export class AgentSdkRuntime extends EventEmitter {
     })
     return {
       ...params,
+      abortInitiator: null,
       settled,
       resolveSettled,
     }
@@ -3274,7 +3286,7 @@ export class AgentSdkRuntime extends EventEmitter {
       session.generation += 1
       myGeneration = session.generation
       if (capturedOld.abortController) {
-        capturedOld.abortController.abort(new Error('process_restarted'))
+        capturedOld.abortController.abort(createInitiatorAbort(capturedOld, 'preempted', 'process_restarted'))
         capturedOld.abortController = null
       }
       log(`preempted previous SDK run agent=${params.name}`)
