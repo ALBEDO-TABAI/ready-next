@@ -7,6 +7,12 @@ import {
 } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import type { AbortInitiator } from '../main/modules/agent-control/contracts/run-contracts-internal'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('abort-initiator-threading declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'abort-initiator-threading transitive sqlite load')
+})
+
 const fakeConfig = {
   provider: 'openai',
   baseUrl: 'https://api.openai.com/v1',

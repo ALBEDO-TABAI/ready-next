@@ -12,6 +12,12 @@ import type {
   BrowserTaskCheckpoint,
 } from '../main/modules/browser-engine/capability-types'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('browser-visible-collect-runner declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'browser-visible-collect-runner transitive sqlite load')
+})
+
 interface StoredTask {
   taskId: string
   kind: string

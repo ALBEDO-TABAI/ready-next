@@ -4,6 +4,12 @@ import test from 'node:test'
 import { defaultSystemPrompt } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import { composePersonaSystemPrompt } from '../main/modules/agent-control/runtime-core/persona-system-prompt'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('persona-system-prompt declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'persona-system-prompt transitive sqlite load')
+})
+
 test('composePersonaSystemPrompt uses the selected agent personality, tone, and default-user profile', async () => {
   const result = await composePersonaSystemPrompt(
     'copywriter',

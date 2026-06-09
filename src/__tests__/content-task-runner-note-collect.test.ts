@@ -7,6 +7,12 @@ import { mkdtemp, readFile } from 'node:fs/promises'
 import { BrowserContentTaskRunner, normalizeHighControlCollectionPlan, type CollectorFacadeFactory } from '../main/modules/browser-engine/content-task-runner'
 import type { NoteCollectFacade } from '../main/modules/browser-engine/browser-collector-actions'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('content-task-runner-note-collect declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'content-task-runner-note-collect transitive sqlite load')
+})
+
 // --- In-memory fakes (no SQLite / no Electron) ----------------------------------
 
 interface FakeTask {

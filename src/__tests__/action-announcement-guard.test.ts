@@ -9,6 +9,12 @@ import {
 import { canResumeShape } from '../main/modules/agent-control/contracts/resume-handle'
 import { ScriptedAgentRunner } from './helpers/scripted-agent-runner'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('action-announcement-guard declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'action-announcement-guard transitive sqlite load')
+})
+
 const fakeConfig = {
   provider: 'openai',
   baseUrl: 'https://api.openai.com/v1',

@@ -7,6 +7,12 @@ import { BrowserTurnLease } from '../main/modules/browser-engine/agent-browser-t
 import { isAgentBrowserError } from '../main/modules/browser-engine/agent-browser-errors'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('browser-free-loop-lease-dispatch declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'browser-free-loop-lease-dispatch transitive sqlite load')
+})
+
 function createController(overrides?: Partial<BrowserController>): BrowserController {
   const mock: Partial<BrowserController> = {
     getTabList: () => [{ id: 'tab-1', title: 'T', url: 'https://www.xiaohongshu.com/x', active: true }],

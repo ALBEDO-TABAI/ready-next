@@ -7,6 +7,12 @@ import { createTaskBudgetRuntime } from '../main/modules/agent-control/task-proj
 import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('agent-sdk-budget-runtime declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'agent-sdk-budget-runtime transitive sqlite load')
+})
+
 const fakeConfig = {
   provider: 'openai',
   baseUrl: 'https://api.openai.com/v1',

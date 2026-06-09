@@ -5,6 +5,12 @@ import { executeBrowserTool } from '../main/modules/tools/browser-tools'
 import { isAgentBrowserError } from '../main/modules/browser-engine/agent-browser-errors'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('browser-high-control-guard declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'browser-high-control-guard transitive sqlite load')
+})
+
 function controllerOn(url: string, overrides?: Partial<BrowserController>): BrowserController {
   const mock: Partial<BrowserController> = {
     getActiveTab: () => ({ id: 'tab-1', title: 'T', url, active: true }) as never,

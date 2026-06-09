@@ -1,6 +1,12 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('migration-run-meta-initiator declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'migration-run-meta-initiator transitive sqlite load')
+})
+
 interface Statement {
   run(...params: unknown[]): unknown
   all<R = unknown>(...params: unknown[]): R[]

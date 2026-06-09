@@ -15,6 +15,12 @@ import { ReflectionService } from '../main/modules/agent-control/reflection-serv
 import type { ScopeRunEventPayload, ScopeRunSummary } from '../main/modules/agent-control/contracts/types'
 import type { TaskProjectionRecord, TaskProjectionStore } from '../main/modules/agent-control/contracts/run-contracts'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('run-finalizer-all-paths declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'run-finalizer-all-paths transitive sqlite load')
+})
+
 interface Statement {
   run(...params: unknown[]): unknown
   all<R = unknown>(...params: unknown[]): R[]

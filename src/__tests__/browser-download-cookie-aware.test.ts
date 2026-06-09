@@ -7,6 +7,12 @@ import { join } from 'node:path'
 import { executeBrowserTool } from '../main/modules/tools/browser-tools'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('browser-download-cookie-aware declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'browser-download-cookie-aware transitive sqlite load')
+})
+
 const dirs: string[] = []
 function tempDir(): string {
   const d = mkdtempSync(join(tmpdir(), 'ready-dl-'))

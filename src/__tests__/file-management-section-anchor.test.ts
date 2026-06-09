@@ -6,6 +6,12 @@ import test from 'node:test'
 
 import { executeFileManagementTool } from '../main/modules/tools/file-management-tools'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('file-management-section-anchor declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'file-management-section-anchor transitive sqlite load')
+})
+
 function fakeSearchEngine(root: string) {
   const db = {
     prepare() {

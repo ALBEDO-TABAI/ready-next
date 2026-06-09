@@ -7,6 +7,12 @@ import test from 'node:test'
 import { SkillsRuntimeManager } from '../main/modules/skills-runtime/runtime-manager'
 import type { FetchLike } from '../main/modules/skills-runtime/skill-source-registry'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('skill-source-self-test declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'skill-source-self-test transitive sqlite load')
+})
+
 function scratch(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix))
 }

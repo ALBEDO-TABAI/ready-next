@@ -5,6 +5,12 @@ import { BrowserContentTaskRunner } from '../main/modules/browser-engine/content
 import type { BrowserCapabilityTaskHandle } from '../main/modules/browser-engine/capability-types'
 import type { BrowserTaskPersistenceService } from '../main/modules/browser-engine/task-persistence-service'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('browser-collection-partial-resume declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'browser-collection-partial-resume transitive sqlite load')
+})
+
 function makeTask(overrides: Partial<BrowserCapabilityTaskHandle> = {}): BrowserCapabilityTaskHandle {
   return {
     taskId: overrides.taskId || 'browser-task-note-partial',

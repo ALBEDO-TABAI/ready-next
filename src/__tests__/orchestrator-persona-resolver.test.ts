@@ -5,6 +5,12 @@ import {
   ReadyAgentOrchestrator,
 } from '../main/modules/agent-control/runtime-core/orchestrator'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('orchestrator-persona-resolver declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'orchestrator-persona-resolver transitive sqlite load')
+})
+
 const fakeConfig = {
   provider: 'openai',
   baseUrl: 'https://api.openai.com/v1',

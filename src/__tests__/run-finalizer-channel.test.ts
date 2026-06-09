@@ -10,6 +10,12 @@ import { RunMetaRepository } from '../main/modules/agent-control/task-projection
 import { __setMetricSinkForTests } from '../main/modules/agent-control/metrics'
 import { ScriptedAgentRunner } from './helpers/scripted-agent-runner'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('run-finalizer-channel declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'run-finalizer-channel transitive sqlite load')
+})
+
 interface Statement {
   run(...params: unknown[]): unknown
   all<R = unknown>(...params: unknown[]): R[]

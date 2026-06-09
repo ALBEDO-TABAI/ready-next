@@ -3,6 +3,12 @@ import { describe, it } from 'node:test'
 
 import { BrowserCollectionConsentStore } from '../main/modules/browser-engine/browser-collection-consent'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('browser-collection-consent-store declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'browser-collection-consent-store transitive sqlite load')
+})
+
 function createRepositoryMock() {
   const settings = new Map<string, string>()
   return {

@@ -7,6 +7,12 @@ import { isAgentBrowserError } from '../main/modules/browser-engine/agent-browse
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
 import type { BrowserLeaseGate } from '../main/modules/browser-engine/agent-browser-lease-gate'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('agent-browser-lease-gate-integration declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'agent-browser-lease-gate-integration transitive sqlite load')
+})
+
 function createController(overrides?: Partial<BrowserController>): BrowserController {
   const mock: Partial<BrowserController> = {
     getTabList: () => [{ id: 'tab-1', title: 'T', url: 'https://example.com', active: true }],

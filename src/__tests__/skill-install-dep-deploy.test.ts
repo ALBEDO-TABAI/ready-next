@@ -10,6 +10,12 @@ import { SkillsRuntimeManager, type SkillDeploySpawn } from '../main/modules/ski
 import type { FetchLike } from '../main/modules/skills-runtime/skill-source-registry'
 import type { SkillSource } from '../shared/skill-source-types'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('skill-install-dep-deploy declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'skill-install-dep-deploy transitive sqlite load')
+})
+
 const execFileAsync = promisify(execFile)
 
 function scratch(prefix: string): string {

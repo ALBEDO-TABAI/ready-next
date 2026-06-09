@@ -11,6 +11,12 @@ import { EMBEDDED_SKILL_IDS } from '../main/modules/skills-runtime/manifest'
 import type { FetchLike } from '../main/modules/skills-runtime/skill-source-registry'
 import type { SkillSource } from '../shared/skill-source-types'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('skill-install-from-source-end-to-end declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'skill-install-from-source-end-to-end transitive sqlite load')
+})
+
 const execFileAsync = promisify(execFile)
 
 function scratch(prefix: string): string {

@@ -4,6 +4,12 @@ import test from 'node:test'
 import { AgentSdkRuntime, type AgentSdkRuntimeDeps } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
 import { createTaskBudgetRuntime } from '../main/modules/agent-control/task-projection/run-budget-policy'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('run-meta-long-task-observability declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'run-meta-long-task-observability transitive sqlite load')
+})
+
 const fakeConfig = {
   provider: 'openai-compatible',
   baseUrl: 'https://example.com/v1/messages',

@@ -14,6 +14,12 @@ import {
   type InstallSkillDeps,
 } from '../main/modules/tools/builtins/install-skill'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('skill-install-agent-tool declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'skill-install-agent-tool transitive sqlite load')
+})
+
 const execFileAsync = promisify(execFile)
 
 function scratch(prefix: string): string {

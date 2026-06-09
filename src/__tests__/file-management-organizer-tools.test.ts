@@ -11,6 +11,12 @@ import * as xlsx from 'xlsx'
 
 import { executeFileManagementTool } from '../main/modules/tools/file-management-tools'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('file-management-organizer-tools declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'file-management-organizer-tools transitive sqlite load')
+})
+
 function fakeSearchEngine(root: string) {
   const db = {
     prepare() {

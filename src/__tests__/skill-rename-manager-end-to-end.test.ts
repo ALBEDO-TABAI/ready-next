@@ -16,6 +16,12 @@ import { join } from 'node:path'
 
 import { SkillsRuntimeManager } from '../main/modules/skills-runtime/runtime-manager'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('skill-rename-manager-end-to-end declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'skill-rename-manager-end-to-end transitive sqlite load')
+})
+
 function scratch(prefix: string): string {
   return realpathSync.native(mkdtempSync(join(tmpdir(), prefix)))
 }
