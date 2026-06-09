@@ -9,6 +9,7 @@ import type {
   BrowserStartTaskRequest,
   BrowserTaskCheckpoint,
 } from './capability-types'
+import { isTaskEventBridgeStatus, taskEventBridge } from './task-event-bridge'
 
 function parseJSON<T>(raw: string | null | undefined, fallback: T): T {
   if (!raw) return fallback
@@ -117,7 +118,11 @@ export class BrowserTaskPersistenceService {
       updated_at: new Date().toISOString(),
     })
 
-    return this.getTask(taskId)
+    const updated = this.getTask(taskId)
+    if (extras?.status && isTaskEventBridgeStatus(extras.status)) {
+      taskEventBridge.publish({ taskId, status: extras.status, extra: updated })
+    }
+    return updated
   }
 
   listPendingTasks(): BrowserCapabilityTaskHandle[] {

@@ -4,11 +4,13 @@ import { join } from 'path'
 import type {
   BrowserCapabilityTaskHandle,
   BrowserCapabilityTaskKind,
+  BrowserCapabilityTaskStatus,
   BrowserResearchBundle,
   BrowserStartTaskRequest,
   BrowserStructuredItem,
 } from './capability-types'
 import { BrowserTaskPersistenceService } from './task-persistence-service'
+import { isTaskEventBridgeStatus, taskEventBridge } from './task-event-bridge'
 import {
   DEFAULT_VISIBLE_COLLECT_LIMITS,
   VisibleCollectDeduper,
@@ -341,6 +343,11 @@ function toStringArray(value: unknown): string[] {
   return Array.isArray(value) ? value.map((item) => String(item || '').trim()).filter(Boolean) : []
 }
 
+function publishBrowserTaskEvent(taskId: string, status: BrowserCapabilityTaskStatus, extra?: unknown): void {
+  if (!isTaskEventBridgeStatus(status)) return
+  taskEventBridge.publish(extra === undefined ? { taskId, status } : { taskId, status, extra })
+}
+
 export class BrowserContentTaskRunner {
   private activeRuns = new Map<string, Promise<void>>()
   private cancelledTasks = new Set<string>()
@@ -533,6 +540,7 @@ export class BrowserContentTaskRunner {
       result,
       finishedAt: new Date().toISOString(),
     })
+    publishBrowserTaskEvent(handle.taskId, 'completed')
     if (params.scopeId) {
       this.projectVisibleCollect(handle.taskId, params.scopeId, 'completed', targets.length, null, { hasMoreLikely: false })
     }
@@ -598,11 +606,39 @@ export class BrowserContentTaskRunner {
       if (task.status === 'paused') continue
       const payload = this.persistenceService.getTaskPayload(task.taskId)
       if (!payload) continue
+      if (this.reconcileStartupNoteCollectionTask(task)) continue
       this.scheduleTask(task.taskId, task.kind, payload)
     }
   }
 
+  private reconcileStartupNoteCollectionTask(task: BrowserCapabilityTaskHandle): boolean {
+    if (task.kind !== 'note_collect' && task.kind !== 'card_loop') return false
+    const checkpoint = task.checkpoint
+    const hasSavedCursor = checkpoint?.stage === 'note_collect_round'
+      && typeof checkpoint.cursor === 'string'
+      && checkpoint.cursor.trim().length > 0
+      && checkpoint.partialResults !== undefined
+      && checkpoint.partialResults !== null
+    if (hasSavedCursor) {
+      this.persistenceService.updateProgress(task.taskId, { currentLabel: null }, {
+        status: 'paused',
+        error: 'note_collect paused on startup; resume from the saved cursor explicitly',
+        finishedAt: null,
+      })
+      publishBrowserTaskEvent(task.taskId, 'paused')
+    } else {
+      this.cancelledTasks.add(task.taskId)
+      this.persistenceService.updateProgress(task.taskId, { currentLabel: null }, {
+        status: 'cancelled',
+        error: 'note_collect cancelled on startup: missing saved cursor',
+        finishedAt: new Date().toISOString(),
+      })
+    }
+    return true
+  }
+
   private scheduleTask(taskId: string, kind: BrowserCapabilityTaskKind, payload: Record<string, unknown>): void {
+    taskEventBridge.scheduleTask(taskId, kind)
     if (this.activeRuns.has(taskId)) return
     const run = this.runTask(taskId, kind, payload)
       .catch((error) => {
@@ -611,6 +647,7 @@ export class BrowserContentTaskRunner {
           error: error instanceof Error ? error.message : String(error),
           finishedAt: new Date().toISOString(),
         })
+        publishBrowserTaskEvent(taskId, 'failed')
       })
       .finally(() => {
         this.activeRuns.delete(taskId)
@@ -645,6 +682,7 @@ export class BrowserContentTaskRunner {
           error: `visible_collect could not acquire ${surface} lease: ${acquired.errorCode}`,
           finishedAt: new Date().toISOString(),
         })
+        publishBrowserTaskEvent(taskId, 'failed')
         this.projectVisibleCollect(taskId, scopeId, 'failed', 0, null)
         return
       }
@@ -675,6 +713,7 @@ export class BrowserContentTaskRunner {
         result: visibleCollectResult(taskId, [], 0, 'lease_lost', '', payload.outputRootDir, Number(payload.userExpectedTotal || 0) || undefined, String(payload.template || 'card_list')),
         finishedAt: new Date().toISOString(),
       })
+      publishBrowserTaskEvent(taskId, 'paused')
       const scopeId = typeof payload.scopeId === 'string' ? payload.scopeId.trim() : ''
       this.projectVisibleCollect(taskId, scopeId, 'paused', 0, null, { hasMoreLikely: true, userExpectedTotal: Number(payload.userExpectedTotal || 0) || undefined })
       return
@@ -697,6 +736,7 @@ export class BrowserContentTaskRunner {
         error: `visible_collect could not navigate agent tab: ${requestedTabId}`,
         finishedAt: new Date().toISOString(),
       })
+      publishBrowserTaskEvent(taskId, 'failed')
       this.projectVisibleCollect(taskId, scopeId, 'failed', 0, null)
       return
     }
@@ -850,6 +890,7 @@ export class BrowserContentTaskRunner {
       result: finalResult,
       finishedAt: new Date().toISOString(),
     })
+    publishBrowserTaskEvent(taskId, finalStatus)
     this.projectVisibleCollect(taskId, scopeId, finalStatus, Number(finalResult.frozenCount || 0), null, {
       hasMoreLikely: finalResult.hasMoreLikely === true,
       userExpectedTotal,
@@ -871,6 +912,7 @@ export class BrowserContentTaskRunner {
         error: 'note_collect is not available: no collector facade factory wired',
         finishedAt: new Date().toISOString(),
       })
+      publishBrowserTaskEvent(taskId, 'failed')
       this.projectNoteCollect(taskId, scopeId, 'failed', 0, 0, 0, null)
       return
     }
@@ -882,6 +924,7 @@ export class BrowserContentTaskRunner {
         error: !agentTabId ? 'note_collect requires an agentTabId' : `invalid collection plan: ${parsed.ok ? '' : parsed.issues.join('; ')}`,
         finishedAt: new Date().toISOString(),
       })
+      publishBrowserTaskEvent(taskId, 'failed')
       this.projectNoteCollect(taskId, scopeId, 'failed', 0, 0, 0, null)
       return
     }
@@ -901,6 +944,7 @@ export class BrowserContentTaskRunner {
         error: `note_collect could not acquire ${surface} lease: ${acquired.errorCode}`,
         finishedAt: new Date().toISOString(),
       })
+      publishBrowserTaskEvent(taskId, 'failed')
       this.projectNoteCollect(taskId, scopeId, 'failed', plan.notes.length, 0, 0, null)
       return
     }
@@ -1067,6 +1111,7 @@ export class BrowserContentTaskRunner {
         error: finalStatus === 'waiting_human' ? null : incompleteError,
         finishedAt: new Date().toISOString(),
       })
+      publishBrowserTaskEvent(taskId, finalStatus)
       this.projectNoteCollect(taskId, scopeId, noteCollectState(finalStatus), plan.notes.length, result.collected.length, result.failed.length, null, {
         waitingFor: finalStatus === 'waiting_human' ? 'verification' : undefined,
         publicStatus: publicNoteCollectStatus(finalStatus, result.collected.length),
@@ -1081,6 +1126,7 @@ export class BrowserContentTaskRunner {
         error: error instanceof Error ? error.message : String(error),
         finishedAt: new Date().toISOString(),
       })
+      publishBrowserTaskEvent(taskId, 'failed')
       this.projectNoteCollect(taskId, scopeId, 'failed', plan.notes.length, 0, 0, null)
     } finally {
       releaseLayoutLock?.()
@@ -1129,6 +1175,7 @@ export class BrowserContentTaskRunner {
         },
         finishedAt: new Date().toISOString(),
       })
+      publishBrowserTaskEvent(taskId, 'completed')
       return
     }
 
@@ -1186,6 +1233,7 @@ export class BrowserContentTaskRunner {
         },
         finishedAt: new Date().toISOString(),
       })
+      publishBrowserTaskEvent(taskId, 'completed')
       return
     }
 
@@ -1263,6 +1311,7 @@ export class BrowserContentTaskRunner {
         result: bundle,
         finishedAt: new Date().toISOString(),
       })
+      publishBrowserTaskEvent(taskId, 'completed')
     }
   }
 }
