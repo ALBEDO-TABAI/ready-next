@@ -17,7 +17,13 @@ test('settings capability status is sourced from a main-process runtime snapshot
 
   assert.match(settingsPage, /window\.electronAPI\.agent\.getCapabilityRuntimeSnapshot\(capabilityRuntimeConfig\)/)
   assert.match(settingsPage, /capabilityRuntimeSnapshot/)
+  assert.match(settingsPage, /刷新状态/)
+  assert.match(settingsPage, /未刷新/)
   assert.doesNotMatch(settingsPage, /const getCapabilityStatus = useCallback\(/)
+  assert.doesNotMatch(
+    settingsPage,
+    /setTimeout\(\(\) => \{\s*void refreshCapabilityRuntimeSnapshot\(\)\s*\}/,
+  )
   assert.doesNotMatch(
     settingsPage,
     /await refreshRuntimeSummary\(\)\s*await refreshCapabilityRuntimeSnapshot\(\)/,

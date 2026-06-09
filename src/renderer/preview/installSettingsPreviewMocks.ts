@@ -117,6 +117,63 @@ const mockAIWorkspace: AIProviderWorkspace = {
 
 let currentAIConfig: AIModelConfig = mockAIConfig
 let currentAIWorkspace: AIProviderWorkspace = mockAIWorkspace
+let mockRSSDraftSources = [
+  {
+    sourceId: 'rss-yingshi',
+    sourceName: '影视飓风的个人空间',
+    sourceUrl: 'https://space.bilibili.com/946974',
+    platform: 'bilibili',
+    storedCount: 20,
+    inboxCount: 20,
+    starredCount: 0,
+    refreshMode: 'incremental',
+    lastFetchedAt: new Date(now - 1000 * 60 * 24).toISOString(),
+  },
+  {
+    sourceId: 'rss-hacker-news',
+    sourceName: 'Hacker News',
+    sourceUrl: 'https://news.ycombinator.com/rss',
+    platform: 'rss',
+    storedCount: 30,
+    inboxCount: 30,
+    starredCount: 0,
+    refreshMode: 'incremental',
+    lastFetchedAt: new Date(now - 1000 * 60 * 41).toISOString(),
+  },
+  {
+    sourceId: 'rss-mediastore',
+    sourceName: '飓风商店 MediaStore 的个人空间',
+    sourceUrl: 'https://space.bilibili.com/700634784',
+    platform: 'bilibili',
+    storedCount: 12,
+    inboxCount: 12,
+    starredCount: 0,
+    refreshMode: 'incremental',
+    lastFetchedAt: new Date(now - 1000 * 60 * 68).toISOString(),
+  },
+  {
+    sourceId: 'rss-xiaohongshu',
+    sourceName: '广州潮会吃 · 小红书',
+    sourceUrl: 'https://www.xiaohongshu.com/user/profile/5e31b69300000000100bb06',
+    platform: 'xiaohongshu',
+    storedCount: 32,
+    inboxCount: 2,
+    starredCount: 0,
+    refreshMode: 'incremental',
+    lastFetchedAt: new Date(now - 1000 * 60 * 120).toISOString(),
+  },
+  {
+    sourceId: 'rss-foodlog',
+    sourceName: '赛博食录的个人空间',
+    sourceUrl: 'https://space.bilibili.com/1937308559',
+    platform: 'bilibili',
+    storedCount: 0,
+    inboxCount: 0,
+    starredCount: 0,
+    refreshMode: 'full',
+    lastFetchedAt: null,
+  },
+]
 
 const settingsStore = new Map<string, string>([
   ['ai_provider_workspace', JSON.stringify(mockAIWorkspace)],
@@ -603,6 +660,34 @@ export function installSettingsPreviewMocks(): void {
       },
       sendChannelProbe: async () => ({ success: true }),
       clearRemoteAttachmentCache: async () => ({ success: true }),
+    },
+    rss: {
+      getDraftStoreSources: async () => ({ success: true, data: mockRSSDraftSources }),
+      clearDraftStore: async (payload?: { sourceId?: string }) => {
+        let deletedItems = 0
+        if (payload?.sourceId) {
+          mockRSSDraftSources = mockRSSDraftSources.map((source) => {
+            if (source.sourceId !== payload.sourceId) return source
+            deletedItems = source.storedCount
+            return { ...source, storedCount: 0, inboxCount: 0, refreshMode: 'full' }
+          })
+        } else {
+          deletedItems = mockRSSDraftSources.reduce((total, source) => total + source.storedCount, 0)
+          mockRSSDraftSources = mockRSSDraftSources.map((source) => ({
+            ...source,
+            storedCount: 0,
+            inboxCount: 0,
+            refreshMode: 'full',
+          }))
+        }
+        return {
+          success: true,
+          data: {
+            deletedItems,
+            resetSources: payload?.sourceId ? 1 : mockRSSDraftSources.length,
+          },
+        }
+      },
     },
     memory: {
       query: async () => ({ success: true, data: memoryEntries }),

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties, 
 import {
   ChevronLeft, User, Bell, Shield, Database,
   Palette, Keyboard, Globe, Info, Moon, Sun, Bot, Monitor, Droplets,
-  ChevronRight, ExternalLink, HardDrive, Trash2, CheckCircle2, XCircle, Loader2, MessageSquare, Brain, Users, Sparkles, Cat,
+  ChevronRight, ExternalLink, HardDrive, Trash2, RefreshCw, CheckCircle2, XCircle, Loader2, MessageSquare, Brain, Users, Sparkles, Cat,
   Plug2, Boxes, FileArchive
 } from 'lucide-react'
 import { useLocation, useNavigate } from 'react-router-dom'
@@ -72,6 +72,18 @@ interface RSSDraftStoreSourceRow {
 }
 
 const SETTINGS_SURFACE_REFRESH_DELAY_MS = 120
+const RSS_DRAFT_CONTENT_MAX_WIDTH = 1560
+const RSS_DRAFT_GRID_COLUMNS = 'minmax(300px, 1fr) 72px 84px 72px 120px 128px'
+const RSS_DRAFT_SOURCE_COLUMN_PADDING = 44
+const RSS_DRAFT_LIGHT_BORDER = '1px solid color-mix(in srgb, var(--surface-border) 14%, transparent)'
+const RSS_DRAFT_DIVIDER = '1px solid color-mix(in srgb, var(--surface-border) 12%, transparent)'
+
+const RSS_DRAFT_SUBTLE_SURFACE_STYLE: CSSProperties = {
+  border: RSS_DRAFT_LIGHT_BORDER,
+  borderRadius: 12,
+  background: 'color-mix(in srgb, var(--surface-card-bg) 8%, transparent)',
+  boxShadow: 'none',
+}
 
 const settingsData: SettingSection[] = [
   {
@@ -399,7 +411,8 @@ function AISettingsPanel() {
   const [messageCoalesceEnabled, setMessageCoalesceEnabled] = useState(true)
   const [messageCoalesceWindowMs, setMessageCoalesceWindowMs] = useState('1200')
   const [capabilityRuntimeSnapshot, setCapabilityRuntimeSnapshot] = useState<CapabilityRuntimeSnapshot | null>(null)
-  const requestedCapabilitySnapshotKey = useRef<string | null>(null)
+  const [capabilityRuntimeSnapshotKey, setCapabilityRuntimeSnapshotKey] = useState<string | null>(null)
+  const [capabilityRuntimeLoading, setCapabilityRuntimeLoading] = useState(false)
 
   const selectedProfile = useMemo(
     () => workspace.profiles.find((profile) => profile.id === (selectedProfileId || workspace.activeProfileId)) || null,
@@ -452,10 +465,16 @@ function AISettingsPanel() {
 
   const refreshCapabilityRuntimeSnapshot = useCallback(async () => {
     if (typeof window === 'undefined' || !window.electronAPI?.agent) return
-    const result = await window.electronAPI.agent.getCapabilityRuntimeSnapshot(capabilityRuntimeConfig)
-    if (!result.success || !result.data) return
-    setCapabilityRuntimeSnapshot(result.data)
-  }, [capabilityRuntimeConfig])
+    setCapabilityRuntimeLoading(true)
+    try {
+      const result = await window.electronAPI.agent.getCapabilityRuntimeSnapshot(capabilityRuntimeConfig)
+      if (!result.success || !result.data) return
+      setCapabilityRuntimeSnapshot(result.data)
+      setCapabilityRuntimeSnapshotKey(capabilitySnapshotKey)
+    } finally {
+      setCapabilityRuntimeLoading(false)
+    }
+  }, [capabilityRuntimeConfig, capabilitySnapshotKey])
 
   useEffect(() => {
     if (!loaded) void loadConfig()
@@ -478,20 +497,10 @@ function AISettingsPanel() {
   }, [loaded])
 
   useEffect(() => {
-    // 配置详情默认折叠，折叠时不渲染能力分组，也无需拉取运行态快照；
-    // 仅在用户展开详情后才按当前 key 拉取，避免切入页面时的同步重渲染卡顿。
-    if (!loaded || !detailExpanded) return
-    if (requestedCapabilitySnapshotKey.current === capabilitySnapshotKey) return
-    requestedCapabilitySnapshotKey.current = capabilitySnapshotKey
-    const timer = window.setTimeout(() => {
-      void refreshCapabilityRuntimeSnapshot()
-    }, 80)
-    return () => window.clearTimeout(timer)
-  }, [loaded, detailExpanded, capabilitySnapshotKey, refreshCapabilityRuntimeSnapshot])
-
-  useEffect(() => {
     setShowAdvanced(false)
     setDetailExpanded(false)
+    setCapabilityRuntimeSnapshot(null)
+    setCapabilityRuntimeSnapshotKey(null)
   }, [selectedProfile?.id])
 
   useEffect(() => {
@@ -533,8 +542,9 @@ function AISettingsPanel() {
   }, [updateField])
 
   const resolveCapabilityRuntimeDisplay = useCallback((groupId: CapabilityGroupId) => {
-    const snapshot = capabilityRuntimeSnapshot?.groups[groupId]
-    if (!snapshot) return { label: '待刷新', tone: 'muted' as const }
+    if (capabilityRuntimeLoading) return { label: '刷新中...', tone: 'muted' as const }
+    const snapshot = capabilityRuntimeSnapshotKey === capabilitySnapshotKey ? capabilityRuntimeSnapshot?.groups[groupId] : null
+    if (!snapshot) return { label: '未刷新', tone: 'muted' as const }
     if (snapshot.status === 'inactive') return { label: '保留占位', tone: 'muted' as const }
     if (snapshot.status === 'host_only') return { label: '宿主内部', tone: 'muted' as const }
     if (snapshot.status === 'environment_unavailable') return { label: '因环境不可用而关闭', tone: 'muted' as const }
@@ -548,7 +558,7 @@ function AISettingsPanel() {
       label: snapshot.mode === 'on' ? '已启用' : '自动启用',
       tone: 'positive' as const,
     }
-  }, [capabilityRuntimeSnapshot])
+  }, [capabilityRuntimeLoading, capabilityRuntimeSnapshot, capabilityRuntimeSnapshotKey, capabilitySnapshotKey])
 
   const categoryTabs: Array<{ id: AIProviderCategory; label: string; meta: string }> = [
     { id: 'openai', label: 'OpenAI', meta: '官方 GPT / Responses' },
@@ -1177,11 +1187,28 @@ function AISettingsPanel() {
               padding: '18px 20px',
             }}
           >
-            <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>
-              能力分组
-            </div>
-            <div className="text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)', maxWidth: 680 }}>
-              控制哪些业务能力默认暴露给模型；当前状态会显示是已启用，还是因环境不可用而关闭。
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>
+                  能力分组
+                </div>
+                <div className="text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)', maxWidth: 680 }}>
+                  控制哪些业务能力默认暴露给模型；需要诊断当前状态时再手动刷新。
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => void refreshCapabilityRuntimeSnapshot()}
+                disabled={capabilityRuntimeLoading}
+                className="flex shrink-0 items-center gap-1.5 rounded-full text-[12px] font-semibold transition-[filter,transform,opacity] duration-200 hover:brightness-95 active:scale-[0.98] disabled:opacity-50"
+                style={{
+                  ...SETTINGS_FLAT_BUTTON_STYLE,
+                  padding: '8px 12px',
+                }}
+              >
+                <RefreshCw className={`h-3.5 w-3.5 ${capabilityRuntimeLoading ? 'animate-spin' : ''}`} />
+                {capabilityRuntimeLoading ? '刷新中' : '刷新状态'}
+              </button>
             </div>
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               {capabilityGroups.map((group) => {
@@ -1369,6 +1396,23 @@ function RSSDraftStoreSettingsPanel() {
   const [busyKey, setBusyKey] = useState<string | null>(null)
   const [message, setMessage] = useState<string | null>(null)
 
+  const summary = useMemo(
+    () => ({
+      sourceCount: sources.length,
+      storedCount: sources.reduce((total, source) => total + source.storedCount, 0),
+      inboxCount: sources.reduce((total, source) => total + source.inboxCount, 0),
+      starredCount: sources.reduce((total, source) => total + source.starredCount, 0),
+    }),
+    [sources],
+  )
+
+  const summaryItems = [
+    { label: '源', value: `${summary.sourceCount} 个` },
+    { label: '底稿', value: `${summary.storedCount} 条` },
+    { label: '收件箱', value: `${summary.inboxCount} 条` },
+    { label: '收藏', value: `${summary.starredCount} 条` },
+  ]
+
   const loadSources = useCallback(async () => {
     if (typeof window === 'undefined' || !window.electronAPI?.rss?.getDraftStoreSources) return
     setLoading(true)
@@ -1392,6 +1436,12 @@ function RSSDraftStoreSettingsPanel() {
 
   const handleClear = useCallback(async (sourceId?: string, sourceName?: string) => {
     if (!window.electronAPI?.rss?.clearDraftStore) return
+    const confirmed = window.confirm(
+      sourceId
+        ? `确认重新完整抓取「${sourceName || '当前源'}」吗？\n\n这会清空该源已缓存的底稿，下次刷新会重新走首次完整抓取。`
+        : '确认清空全部 RSS 底稿吗？\n\n这会清空所有源已缓存的底稿，下次刷新会重新走首次完整抓取。',
+    )
+    if (!confirmed) return
     setBusyKey(sourceId || 'all')
     try {
       const result = await window.electronAPI.rss.clearDraftStore(sourceId ? { sourceId } : undefined)
@@ -1399,102 +1449,173 @@ function RSSDraftStoreSettingsPanel() {
         setMessage(result.error || '重置 RSS 底稿仓库失败')
         return
       }
+      await loadSources()
       setMessage(
         sourceId
           ? `${sourceName || '当前源'} 已重置，下次刷新会重新走首次完整抓取`
           : '全部 RSS 底稿已重置，下次刷新会重新走首次完整抓取',
       )
-      await loadSources()
     } finally {
       setBusyKey(null)
     }
   }, [loadSources])
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex w-full flex-col gap-5" style={{ maxWidth: RSS_DRAFT_CONTENT_MAX_WIDTH }}>
       <div
-        className="glass-surface-card rounded-[24px] border"
-        style={{ ...SETTINGS_CARD_STYLE, padding: '20px 22px' }}
+        style={{
+          borderTop: RSS_DRAFT_DIVIDER,
+          borderBottom: RSS_DRAFT_DIVIDER,
+          padding: '22px 0 18px',
+        }}
       >
-        <div className="flex items-start justify-between gap-4 flex-wrap">
-          <div className="min-w-0">
-            <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>底稿仓库说明</div>
-            <div className="text-[12px] mt-1 leading-6" style={{ color: 'var(--text-light)', maxWidth: 760 }}>
-              首次刷新会尽量补齐历史内容，之后只做轻量检查。清空 RSS 页面列表不会删掉这里的底稿；如果你在这里重置某个源或全部底稿，下次刷新会重新回到首次抓取方式。
+        <div className="flex flex-wrap items-center gap-x-10 gap-y-4">
+          {summaryItems.map((item, index) => (
+            <div
+              key={item.label}
+              className="flex items-baseline gap-2"
+              style={{
+                paddingLeft: index === 0 ? 0 : 40,
+                borderLeft: index === 0 ? 'none' : RSS_DRAFT_DIVIDER,
+              }}
+            >
+              <strong className="text-[20px] font-semibold leading-none" style={{ color: 'var(--text-title)' }}>{item.value}</strong>
+              <span className="text-[12px]" style={{ color: 'var(--text-light)' }}>{item.label}</span>
             </div>
-          </div>
-          <button
-            onClick={() => void handleClear()}
-            disabled={busyKey !== null}
-            className="flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-95 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
-            style={SETTINGS_DANGER_BUTTON_STYLE}
+          ))}
+          <span
+            className="ml-auto inline-flex items-center gap-2 rounded-lg px-3 py-2 text-[12px] font-medium"
+            style={{
+              border: RSS_DRAFT_LIGHT_BORDER,
+              background: 'color-mix(in srgb, var(--surface-card-bg) 10%, transparent)',
+              color: 'var(--text-muted)',
+            }}
           >
-            {busyKey === 'all' ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-            清空全部底稿
-          </button>
+            <span className="h-1.5 w-1.5 rounded-full" style={{ background: 'var(--color-green)' }} />
+            默认增量刷新
+          </span>
         </div>
-        {message && (
-          <div className="text-[12px] mt-4" style={{ color: 'var(--text-muted)' }}>
-            {message}
-          </div>
-        )}
       </div>
 
-      <div className="flex flex-col gap-3">
-        {loading ? (
-          <div className="glass-surface-card rounded-[24px] border flex items-center gap-3" style={{ ...SETTINGS_CARD_STYLE, padding: '18px 20px' }}>
-            <Loader2 className="w-4 h-4 animate-spin" style={{ color: 'var(--color-blue)' }} />
-            <span className="text-[12px]" style={{ color: 'var(--text-muted)' }}>正在读取 RSS 底稿列表…</span>
-          </div>
-        ) : sources.length === 0 ? (
-          <div className="glass-surface-card rounded-[24px] border" style={{ ...SETTINGS_CARD_STYLE, padding: '18px 20px' }}>
-            <div className="text-[13px] font-semibold" style={{ color: 'var(--text-title)' }}>还没有底稿内容</div>
-            <div className="text-[12px] mt-1" style={{ color: 'var(--text-light)' }}>等你添加源并刷新后，这里会显示每个源的存量和当前刷新状态。</div>
-          </div>
-        ) : (
-          sources.map((source) => (
+      <div className="flex items-center gap-2 px-0.5 text-[12px] leading-6" style={{ color: 'var(--text-light)' }}>
+        <Info className="h-3.5 w-3.5 shrink-0" />
+        <span>
+          重置底稿不会删除 RSS 源、收藏或收件箱内容，只会让下次刷新重新完整抓取。
+        </span>
+      </div>
+      {message && (
+        <div
+          className="rounded-lg px-3 py-2 text-[12px]"
+          style={{
+            border: RSS_DRAFT_LIGHT_BORDER,
+            background: 'color-mix(in srgb, var(--surface-panel-bg) 8%, transparent)',
+            color: 'var(--text-muted)',
+          }}
+        >
+          {message}
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex items-center gap-3" style={{ ...RSS_DRAFT_SUBTLE_SURFACE_STYLE, padding: '16px 18px' }}>
+          <Loader2 className="h-4 w-4 animate-spin" style={{ color: 'var(--color-blue)' }} />
+          <span className="text-[12px]" style={{ color: 'var(--text-muted)' }}>正在读取 RSS 底稿列表…</span>
+        </div>
+      ) : sources.length === 0 ? (
+        <div style={{ ...RSS_DRAFT_SUBTLE_SURFACE_STYLE, padding: '18px' }}>
+          <div className="text-[13px] font-semibold" style={{ color: 'var(--text-title)' }}>还没有底稿内容</div>
+          <div className="mt-1 text-[12px]" style={{ color: 'var(--text-light)' }}>等你添加源并刷新后，这里会显示每个源的存量和当前刷新状态。</div>
+        </div>
+      ) : (
+        <div className="overflow-x-auto" style={RSS_DRAFT_SUBTLE_SURFACE_STYLE}>
+          <div style={{ minWidth: 920 }}>
             <div
-              key={source.sourceId}
-              className="glass-surface-card rounded-[24px] border"
-              style={{ ...SETTINGS_CARD_STYLE, padding: '18px 20px' }}
+              className="grid items-center gap-6 text-[12px] font-medium"
+              style={{
+                gridTemplateColumns: RSS_DRAFT_GRID_COLUMNS,
+                color: 'var(--text-light)',
+                borderBottom: RSS_DRAFT_DIVIDER,
+                padding: '28px 0 18px',
+              }}
             >
-              <div className="flex items-start justify-between gap-4 flex-wrap">
-                <div className="min-w-0 flex-1">
-                  <div className="text-[14px] font-semibold truncate" style={{ color: 'var(--text-title)' }}>{source.sourceName}</div>
-                  <div className="text-[11px] mt-1 truncate" style={{ color: 'var(--text-light)' }}>{source.sourceUrl}</div>
+              <span style={{ paddingLeft: RSS_DRAFT_SOURCE_COLUMN_PADDING }}>来源</span>
+              <span>底稿</span>
+              <span>收件箱</span>
+              <span>收藏</span>
+              <span>刷新方式</span>
+              <span style={{ textAlign: 'left' }}>操作</span>
+            </div>
+            {sources.map((source, index) => (
+              <div
+                key={source.sourceId}
+                className="grid min-h-[86px] items-center gap-6 px-6 py-4"
+                style={{
+                  gridTemplateColumns: RSS_DRAFT_GRID_COLUMNS,
+                  borderTop: index === 0 ? 'none' : RSS_DRAFT_DIVIDER,
+                }}
+              >
+                <div className="min-w-0" style={{ paddingLeft: RSS_DRAFT_SOURCE_COLUMN_PADDING }}>
+                  <div className="truncate text-[14px] font-semibold" style={{ color: 'var(--text-title)' }} title={source.sourceName}>
+                    {source.sourceName}
+                  </div>
+                  <div className="mt-1 truncate text-[12px]" style={{ color: 'var(--text-light)' }} title={source.sourceUrl}>
+                    {source.sourceUrl}
+                  </div>
                 </div>
+                <strong className="text-[14px] font-medium" style={{ color: 'var(--text-title)' }}>{source.storedCount}</strong>
+                <strong className="text-[14px] font-medium" style={{ color: 'var(--text-title)' }}>{source.inboxCount}</strong>
+                <span className="text-[14px]" style={{ color: 'var(--text-muted)' }}>{source.starredCount}</span>
+                <span
+                  className="inline-flex w-fit items-center gap-2 rounded-full px-2.5 py-1 text-[12px] font-medium"
+                  style={{
+                    border: '1px solid transparent',
+                    background: 'transparent',
+                    color: 'var(--text-muted)',
+                  }}
+                >
+                  <span
+                    className="h-1.5 w-1.5 rounded-full"
+                    style={{ background: source.refreshMode === 'incremental' ? 'var(--color-green)' : 'var(--color-orange)' }}
+                  />
+                  {source.refreshMode === 'incremental' ? '增量刷新' : '首次完整'}
+                </span>
                 <button
                   onClick={() => void handleClear(source.sourceId, source.sourceName)}
                   disabled={busyKey !== null}
-                  className="flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-95 active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed"
-                  style={SETTINGS_DANGER_BUTTON_STYLE}
+                  className="ml-auto flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px] font-medium transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-110 active:scale-[0.98] disabled:cursor-not-allowed disabled:opacity-60"
+                  style={{
+                    border: '1px solid transparent',
+                    background: 'transparent',
+                    color: 'color-mix(in srgb, var(--color-red) 42%, var(--text-muted) 58%)',
+                  }}
                 >
-                  {busyKey === source.sourceId ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
-                  重置此源
+                  {busyKey === source.sourceId ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+                  重新完整抓取
                 </button>
               </div>
+            ))}
+          </div>
+        </div>
+      )}
 
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-4">
-                {[
-                  { label: '底稿总数', value: String(source.storedCount) },
-                  { label: '界面收件箱', value: String(source.inboxCount) },
-                  { label: '已收藏', value: String(source.starredCount) },
-                  { label: '刷新方式', value: source.refreshMode === 'incremental' ? '后续轻量' : '首次完整' },
-                ].map((entry) => (
-                  <div
-                    key={entry.label}
-                    className="rounded-[18px]"
-                    style={{ ...SETTINGS_SUBTLE_CARD_STYLE, padding: '12px 14px' }}
-                  >
-                    <div className="text-[10px] uppercase tracking-[0.16em]" style={{ color: 'var(--text-light)' }}>{entry.label}</div>
-                    <div className="text-[13px] font-semibold mt-2" style={{ color: 'var(--text-title)' }}>{entry.value}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))
-        )}
-      </div>
+      <button
+        aria-label="清空全部底稿"
+        onClick={() => void handleClear()}
+        disabled={busyKey !== null}
+        className="w-full text-left transition-[filter,transform,opacity] duration-200 hover:brightness-110 active:scale-[0.995] disabled:cursor-not-allowed disabled:opacity-60"
+        style={{
+          ...RSS_DRAFT_SUBTLE_SURFACE_STYLE,
+          padding: `20px 24px 20px ${RSS_DRAFT_SOURCE_COLUMN_PADDING}px`,
+        }}
+      >
+        <div className="flex items-center gap-3 text-[13px] font-semibold" style={{ color: 'var(--color-red)' }}>
+          {busyKey === 'all' ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+          清空全部底稿
+        </div>
+        <div className="mt-2 text-[12px]" style={{ color: 'var(--text-light)' }}>
+          清空后会移除所有历史底稿数据，下一次刷新将重新完整抓取。
+        </div>
+      </button>
     </div>
   )
 }
