@@ -36,6 +36,7 @@ import type { PetWindowManager } from './modules/pet/pet-window-manager'
 import { applyBundledAISettingsSeed } from './modules/settings-engine/seed-loader'
 import { setupAppCacheIPC } from './modules/app-control/cache-stats-ipc'
 import { setupNativeContextMenuIPC } from './modules/app-control/native-context-menu-ipc'
+import { reconcileStartupRunsOnStartup } from './modules/app-control/startup-run-reconciler'
 import { setupSkillsIPC } from './modules/skills-runtime/ipc-handler'
 import { setupMemoryManagementIPC } from './modules/memory-management/ipc-handler'
 import { rsshubManager } from './modules/rss-engine/rsshub-process'
@@ -857,6 +858,11 @@ app.whenReady().then(() => {
   } catch (error) {
     stopBootForDatabaseFailure(error)
     return
+  }
+  try {
+    reconcileStartupRunsOnStartup()
+  } catch (error) {
+    console.warn('[startup-run-reconciler] failed:', error instanceof Error ? error.message : String(error))
   }
 
   // nativeTheme.updated 可能在 OS 切换深浅模式时、或我们在 theme:set handler 里设置

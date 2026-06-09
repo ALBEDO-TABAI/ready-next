@@ -506,7 +506,6 @@ export class AgentControlRuntime extends EventEmitter {
 
   async start(): Promise<void> {
     this.cleanupLegacyCopawSettings()
-    this.reconcileStaleSkillRunsOnStartup()
     this.publishRestoredDetachedSkillTasks()
 
     // Start memory lifecycle manager
@@ -2566,19 +2565,6 @@ export class AgentControlRuntime extends EventEmitter {
           + 'constraint on skill_task_runs. To restore legacy matching, write a forward-fix '
           + 'migration that drops the CHECK before disabling the flag.',
       )
-    }
-  }
-
-  private reconcileStaleSkillRunsOnStartup(): void {
-    try {
-      const result = this.skillTaskRunRepository.reconcileRunningRowsOnStartup()
-      if (result.scanned > 0) {
-        logAgentMetric('skill_task_runs.startup_reconciled', { ...result })
-      }
-    } catch (error) {
-      logAgentMetric('skill_task_runs.startup_reconcile_failed', {
-        error: error instanceof Error ? error.message : String(error),
-      })
     }
   }
 

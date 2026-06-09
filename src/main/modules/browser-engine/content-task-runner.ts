@@ -595,43 +595,7 @@ export class BrowserContentTaskRunner {
 
   async resumePendingTasks(): Promise<void> {
     for (const task of this.persistenceService.listPendingTasks()) {
-      // note_collect is bound to a session-specific agent tab (ensureAgentTab).
-      // After an app restart that tab is gone, so resuming would re-acquire an
-      // agent-view lease against a dead tab and block new collections (it never
-      // makes progress, just holds the lease until it fails out). Cancel these
-      // stale collections on startup instead of resuming them.
-      if (task.kind === 'note_collect' || task.kind === 'card_loop') {
-        const payload = this.persistenceService.getTaskPayload(task.taskId)
-        const scopeId = typeof payload?.scopeId === 'string' ? payload.scopeId.trim() : ''
-        const hasCursor = task.checkpoint?.stage === 'note_collect_round'
-          && task.checkpoint.partialResults
-          && task.checkpoint.cursor !== null
-          && task.checkpoint.cursor !== undefined
-        this.persistenceService.updateProgress(task.taskId, { currentLabel: null }, {
-          status: hasCursor ? 'paused' : 'cancelled',
-          error: hasCursor
-            ? 'Ready restarted; explicit continue will reopen an agent tab and resume from the saved cursor.'
-            : 'note_collect not resumable across app restart (missing saved cursor)',
-          finishedAt: hasCursor ? null : new Date().toISOString(),
-        })
-        const p = task.progress
-        this.projectNoteCollect(
-          task.taskId,
-          scopeId,
-          hasCursor ? 'paused' : 'cancelled',
-          p.total,
-          p.completed,
-          p.failed,
-          null,
-          hasCursor
-            ? {
-                waitingFor: 'background',
-                publicStatus: publicNoteCollectStatus('paused', p.completed),
-              }
-            : undefined,
-        )
-        continue
-      }
+      if (task.status === 'paused') continue
       const payload = this.persistenceService.getTaskPayload(task.taskId)
       if (!payload) continue
       this.scheduleTask(task.taskId, task.kind, payload)
