@@ -216,6 +216,36 @@ function completedAllExpected(expected: number, completed: number, failed: numbe
 }
 
 const TERMINAL_NOTE_SKIP_REASONS = new Set(['skipped_video', 'unavailable'])
+const NON_RETRYABLE_FAILURE_REASON_PATTERN = /(?:permission|forbidden|unauthorized|deleted|unavailable|skipped_video|not_found|blocked_permanent)/i
+const RETRYABLE_FAILURE_REASON_PATTERN = /(?:timeout|navigation|network|temporary|transient|retry|lease_lost|rate|throttle)/i
+
+export interface BrowserTaskFailedItem {
+  url: string
+  reason: string
+  attempts: number
+  retryable: boolean
+}
+
+export function normalizeBrowserTaskFailedItems(value: unknown): BrowserTaskFailedItem[] {
+  if (!Array.isArray(value)) return []
+  return value.map((item) => {
+    const record = item && typeof item === 'object' ? item as Record<string, unknown> : {}
+    const reason = String(record.reason || record.error || record.message || 'unknown').trim() || 'unknown'
+    const attempts = Number(record.attempts)
+    const explicitRetryable = typeof record.retryable === 'boolean' ? record.retryable : null
+    return {
+      url: String(record.url || record.canonicalUrl || record.openUrl || record.sourceUrl || '').trim(),
+      reason,
+      attempts: Number.isFinite(attempts) && attempts > 0 ? Math.floor(attempts) : 1,
+      retryable: explicitRetryable ?? inferFailureRetryable(reason),
+    }
+  })
+}
+
+export function inferFailureRetryable(reason: string): boolean {
+  if (NON_RETRYABLE_FAILURE_REASON_PATTERN.test(reason)) return false
+  return RETRYABLE_FAILURE_REASON_PATTERN.test(reason)
+}
 
 function finalNoteCollectError(
   expected: number,
@@ -1039,7 +1069,7 @@ export class BrowserContentTaskRunner {
           result: {
             status: publicNoteCollectStatus('cancelled', result.collected.length),
             collected: result.collected,
-            failed: result.failed,
+            failed: normalizeBrowserTaskFailedItems(result.failed),
             notes: result.notes,
             rounds: result.rounds,
             stopReason: result.stopReason,
@@ -1097,7 +1127,7 @@ export class BrowserContentTaskRunner {
         result: {
           status: publicNoteCollectStatus(finalStatus, result.collected.length),
           collected: result.collected,
-          failed: result.failed,
+          failed: normalizeBrowserTaskFailedItems(result.failed),
           notes: result.notes,
           rounds: result.rounds,
           stopReason: result.stopReason,

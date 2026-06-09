@@ -171,6 +171,7 @@ const agentAPI = {
     taskId?: string
     requestId?: string
     responseText: string
+    confirmed?: boolean
     continuationIntent?: ContinuationIntentPayload | null
   }) =>
     ipcRenderer.invoke('agent:respondToInteraction', payload),
@@ -977,6 +978,9 @@ const settingsAPI = {
   get: (key: string) => ipcRenderer.invoke('settings:get', key),
   set: (key: string, value: string) => ipcRenderer.invoke('settings:set', { key, value }),
   getAll: () => ipcRenderer.invoke('settings:getAll'),
+  getAgentAutoNarrationContinuation: () => ipcRenderer.invoke('settings:getAgentAutoNarrationContinuation'),
+  setAgentAutoNarrationContinuation: (enabled: boolean) =>
+    ipcRenderer.invoke('settings:setAgentAutoNarrationContinuation', { enabled }),
   getAIConfig: () => ipcRenderer.invoke('settings:getAIConfig'),
   setAIConfig: (config: unknown) => ipcRenderer.invoke('settings:setAIConfig', config),
   getAIWorkspace: () => ipcRenderer.invoke('settings:getAIWorkspace'),

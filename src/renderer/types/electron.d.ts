@@ -933,6 +933,7 @@ interface ElectronAgentAPI {
     taskId?: string
     requestId?: string
     responseText: string
+    confirmed?: boolean
     continuationIntent?: ContinuationIntentData | null
   }) => Promise<{ success: boolean; error?: string | null }>
   upsertChannel: (payload: {
@@ -2963,6 +2964,8 @@ interface ElectronSettingsAPI {
   get: (key: string) => Promise<{ success: boolean; data?: string | null; error?: string }>
   set: (key: string, value: string) => Promise<{ success: boolean; error?: string }>
   getAll: () => Promise<{ success: boolean; data?: Record<string, string>; error?: string }>
+  getAgentAutoNarrationContinuation: () => Promise<{ success: boolean; data?: boolean; error?: string }>
+  setAgentAutoNarrationContinuation: (enabled: boolean) => Promise<{ success: boolean; error?: string }>
   getAIConfig: () => Promise<{ success: boolean; data?: AIModelConfigData | null; error?: string }>
   setAIConfig: (config: AIModelConfigData) => Promise<{ success: boolean; error?: string }>
   getAIWorkspace: () => Promise<{ success: boolean; data?: AIProviderWorkspaceData; error?: string }>

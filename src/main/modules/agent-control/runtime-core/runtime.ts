@@ -18,6 +18,7 @@ import {
   type AIModelConfig
 } from '../../../../shared/ai-providers'
 import type { BrowserController } from '../../browser-engine/ipc-handler'
+import { resumeWaitingHumanBrowserTaskFromBridge } from '../../browser-engine/task-event-bridge'
 import type { AgentManager } from '../../claude-bridge/agent-manager'
 import type { MultimodalBlock } from '../../claude-bridge/direct-chat'
 import {
@@ -106,6 +107,7 @@ import { ReflectionService } from '../reflection-service'
 import { UserProfileRepository } from '../../repositories/user-profile-repository'
 import { AgentPersonalityRepository } from '../../repositories/agent-personality-repository'
 import { AppSettingsRepository } from '../../repositories/app-settings-repository'
+import { readAgentAutoNarrationContinuationSetting } from '../../settings-engine/agent-auto-narration-setting'
 import type { CapabilityRuntimeSnapshot } from '../../../../shared/ai-capability-runtime'
 import { ExternalMemoryProviderSlot } from '../memory/external-memory-provider-slot'
 import { decryptChannelConfig, encryptChannelConfig } from '../memory/secret-storage'
@@ -390,6 +392,7 @@ export class AgentControlRuntime extends EventEmitter {
     getOldestPendingTaskEvent,
     markPendingTaskEventConsumed,
     hasActiveNarrationContinuationRun: () => this.hasActiveNarrationContinuationRun(),
+    isAutoNarrationContinuationEnabled: () => readAgentAutoNarrationContinuationSetting(this.settingsRepository),
     startNarrationContinuationRun: (row) => this.startNarrationContinuationFromPending(row),
     onNarrationContinuationFailure: (row, error) => this.markNarrationContinuationFailure(row, error),
   })
@@ -1611,11 +1614,19 @@ export class AgentControlRuntime extends EventEmitter {
     taskId?: string
     requestId?: string
     responseText: string
+    confirmed?: boolean
     continuationIntent?: ContinuationIntent | null
   }): Promise<{ success: boolean; error?: string; errorKind?: string }> {
     const responseText = String(payload.responseText || '').trim()
     if (!responseText) {
       return { success: false, error: 'Interaction response is required' }
+    }
+    if (payload.confirmed === true && payload.taskId?.startsWith('browser-task-')) {
+      const resumed = await resumeWaitingHumanBrowserTaskFromBridge({
+        taskId: payload.taskId,
+        confirmed: payload.confirmed,
+      })
+      if (resumed.success) return { success: true }
     }
     const target = this.resolveTaskControlTarget(payload.scopeId, payload.taskId)
     if (!target) {

@@ -15,6 +15,7 @@ import type {
   BrowserWaitForConditionOptions,
 } from './capability-types'
 import { BrowserContentTaskRunner, type BrowserTaskProjectionSink } from './content-task-runner'
+import { registerWaitingHumanBrowserTaskResumePort } from './task-event-bridge'
 import { ScopedBrowserFacade } from './scoped-browser-facade'
 import type { BrowserCollectionTarget } from './collection-targets'
 import { AgentTabControlGate } from './agent-tab-control-gate'
@@ -1868,6 +1869,10 @@ export function setupBrowserIPC(
   options?: { preloadPath?: string; rendererFile?: string },
 ): BrowserController {
   const controller = new BrowserController(mainWindow, useMock)
+  registerWaitingHumanBrowserTaskResumePort({
+    getTask: (taskId) => controller.getTask(taskId),
+    resumeTask: (taskId) => controller.resumeTask(taskId),
+  })
   const browserDataService = new BrowserDataService()
   setupBrowserShellIPC(controller)
   setupBrowserSupervisionIPC(controller)

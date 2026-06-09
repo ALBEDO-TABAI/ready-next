@@ -28,6 +28,7 @@ import type {
   BrowserCapabilityTaskHandle,
   BrowserStructuredFieldMapping,
 } from '../browser-engine/capability-types'
+import { normalizeBrowserTaskFailedItems } from '../browser-engine/content-task-runner'
 import { beginLeaseGate, type BrowserLeaseGate } from '../browser-engine/agent-browser-lease-gate'
 import { isHighControlPlatformText } from '../../../shared/browser-collection-intent'
 import {
@@ -659,6 +660,23 @@ async function findLargerRecentFrozenCollection(
 
 function stringField(value: unknown): string {
   return typeof value === 'string' ? value.trim() : ''
+}
+
+function enrichBrowserTaskPayload(task: BrowserCapabilityTaskHandle): BrowserCapabilityTaskHandle & {
+  failedItems: ReturnType<typeof normalizeBrowserTaskFailedItems>
+  suggestedNextAction: string
+} {
+  const result = task.result && typeof task.result === 'object' ? task.result as Record<string, unknown> : null
+  const failedItems = normalizeBrowserTaskFailedItems(result?.failed)
+  return {
+    ...task,
+    failedItems,
+    suggestedNextAction: failedItems.length === 0
+      ? 'done'
+      : failedItems.some((item) => item.retryable)
+        ? 'retry_failed'
+        : 'review_manually',
+  }
 }
 
 function normalizedPathField(value: unknown): string {
@@ -5326,7 +5344,7 @@ export async function executeBrowserTool(
             message: 'browser_get_task 只能查询 browser-task-*。这是聊天任务或锁持有者 id，请使用 browser_collect_notes / browser_visible_collect 返回的 taskId。',
           }, null, 2)
         }
-        return JSON.stringify(result || { taskId, status: 'missing' }, null, 2)
+        return JSON.stringify(result ? enrichBrowserTaskPayload(result) : { taskId, status: 'missing' }, null, 2)
       }
 
       case 'browser_resume_task': {

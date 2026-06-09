@@ -13,6 +13,10 @@ import { createRotatingLogger } from '../../utils/rotating-logger'
 import { parseJsonResponse } from '../openai-responses'
 import { ExternalServiceStore } from './external-service-store'
 import type { ExternalServiceUpdateInput, PublicExternalServiceProfile, ExternalServiceTestResult } from '../../../shared/external-services'
+import {
+  readAgentAutoNarrationContinuationSetting,
+  writeAgentAutoNarrationContinuationSetting,
+} from './agent-auto-narration-setting'
 
 interface SettingsIPCResponse<T = unknown> {
   success: boolean
@@ -54,6 +58,23 @@ export function setupSettingsIPC(): void {
     try {
       const all = repository.getAllSettings()
       return { success: true, data: all }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('settings:getAgentAutoNarrationContinuation', (): SettingsIPCResponse<boolean> => {
+    try {
+      return { success: true, data: readAgentAutoNarrationContinuationSetting(repository) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('settings:setAgentAutoNarrationContinuation', (_, payload: { enabled: boolean }): SettingsIPCResponse => {
+    try {
+      writeAgentAutoNarrationContinuationSetting(repository, payload?.enabled !== false)
+      return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }
     }

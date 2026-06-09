@@ -39,6 +39,8 @@ import type { MemoryQueryFilters } from '../types/electron'
 import PersonalityEditor from '../components/personality/PersonalityEditor'
 import UserProfileEditor from '../components/profile/UserProfileEditor'
 
+const AGENT_AUTO_NARRATION_CONTINUATION_SETTING_KEY = 'agent.autoNarrationContinuation'
+
 interface SettingSection {
   id: string
   title: string
@@ -102,6 +104,21 @@ const settingsData: SettingSection[] = [
     icon: Bot,
     description: '配置 AI 助手的模型和连接参数',
     settings: [] // Rendered dynamically via AISettingsPanel
+  },
+  {
+    id: 'agent',
+    title: 'Agent',
+    icon: Sparkles,
+    description: '控制 Agent 的后台任务提示与续跑',
+    settings: [
+      {
+        id: AGENT_AUTO_NARRATION_CONTINUATION_SETTING_KEY,
+        label: '后台任务自动播报',
+        description: '没有活跃对话运行时，后台任务完成后自动生成一条结果播报。',
+        type: 'toggle',
+        value: true,
+      },
+    ],
   },
   {
     id: 'remote-im',
@@ -2915,6 +2932,19 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
       if (result?.success) {
         updateSetting('privacy', FILE_EMERGENCE_SETTING_KEY, result.data !== 'false')
       }
+      const autoNarrationResult = window.electronAPI.settings.getAgentAutoNarrationContinuation
+        ? await window.electronAPI.settings.getAgentAutoNarrationContinuation()
+        : await window.electronAPI.settings.get(AGENT_AUTO_NARRATION_CONTINUATION_SETTING_KEY)
+      if (cancelled) return
+      if (autoNarrationResult?.success) {
+        updateSetting(
+          'agent',
+          AGENT_AUTO_NARRATION_CONTINUATION_SETTING_KEY,
+          typeof autoNarrationResult.data === 'boolean'
+            ? autoNarrationResult.data
+            : autoNarrationResult.data !== 'false',
+        )
+      }
     })()
     return () => { cancelled = true }
   }, [])
@@ -2934,7 +2964,10 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
 
   const handleToggleSetting = async (sectionId: string, setting: SettingItem) => {
     const nextValue = !setting.value
-    if (setting.id !== FILE_EMERGENCE_SETTING_KEY) {
+    if (
+      setting.id !== FILE_EMERGENCE_SETTING_KEY &&
+      setting.id !== AGENT_AUTO_NARRATION_CONTINUATION_SETTING_KEY
+    ) {
       updateSetting(sectionId, setting.id, nextValue)
       return
     }
@@ -2942,10 +2975,9 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
       setSettingErrors((prev) => ({ ...prev, [setting.id]: '设置 IPC 不可用' }))
       return
     }
-    const result = await window.electronAPI.settings.set(
-      FILE_EMERGENCE_SETTING_KEY,
-      nextValue ? 'true' : 'false',
-    )
+    const result = setting.id === AGENT_AUTO_NARRATION_CONTINUATION_SETTING_KEY && window.electronAPI.settings.setAgentAutoNarrationContinuation
+      ? await window.electronAPI.settings.setAgentAutoNarrationContinuation(nextValue)
+      : await window.electronAPI.settings.set(setting.id, nextValue ? 'true' : 'false')
     if (result.success) {
       setSettingErrors((prev) => {
         const next = { ...prev }

@@ -33,6 +33,7 @@ export interface AutoNarrationContinuationRunnerDeps {
   getOldestPendingTaskEvent: () => PendingTaskEventRow | null
   markPendingTaskEventConsumed: (id: number) => void
   hasActiveNarrationContinuationRun: () => boolean
+  isAutoNarrationContinuationEnabled?: () => boolean
   startNarrationContinuationRun: (
     row: PendingTaskEventRow,
   ) => Promise<AutoNarrationContinuationResult>
@@ -52,6 +53,7 @@ export class AutoNarrationContinuationRunner {
   constructor(private readonly deps: AutoNarrationContinuationRunnerDeps) {}
 
   trigger(): void {
+    if (this.deps.isAutoNarrationContinuationEnabled?.() === false) return
     if (this.scheduled) return
     this.scheduled = true
     queueMicrotask(() => {

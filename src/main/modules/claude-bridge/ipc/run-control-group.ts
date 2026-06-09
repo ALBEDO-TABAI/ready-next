@@ -105,6 +105,7 @@ export interface RespondToInteractionPayload {
   taskId?: string
   requestId?: string
   responseText: string
+  confirmed?: boolean
   continuationIntent?: {
     taskId: string
     executionId?: string

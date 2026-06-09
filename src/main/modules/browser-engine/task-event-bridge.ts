@@ -1,4 +1,5 @@
 import type { BrowserCapabilityTaskKind } from './capability-types'
+import type { BrowserCapabilityTaskHandle } from './capability-types'
 import { enqueueBackgroundTaskTerminalReminderFromBridge } from '../agent-control/system-reminders/background-task-terminal-reminder'
 
 export type TaskEventBridgeStatus =
@@ -16,6 +17,22 @@ export interface TaskEventBridgePayload {
 
 export type TaskEventBridgeConsumer = (payload: TaskEventBridgePayload) => void
 
+export interface WaitingHumanBrowserTaskResumePort {
+  getTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> | BrowserCapabilityTaskHandle | null
+  resumeTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> | BrowserCapabilityTaskHandle | null
+}
+
+export interface WaitingHumanBrowserTaskResumeRequest {
+  taskId?: string | null
+  confirmed: boolean
+}
+
+export interface WaitingHumanBrowserTaskResumeResult {
+  success: boolean
+  task?: BrowserCapabilityTaskHandle | null
+  error?: string
+}
+
 const DEFAULT_TASK_ROUTES: readonly BrowserCapabilityTaskKind[] = [
   'download_urls',
   'scroll_collect',
@@ -24,6 +41,8 @@ const DEFAULT_TASK_ROUTES: readonly BrowserCapabilityTaskKind[] = [
   'note_collect',
   'card_loop',
 ]
+
+let waitingHumanBrowserTaskResumePort: WaitingHumanBrowserTaskResumePort | null = null
 
 export function isTaskEventBridgeStatus(status: string): status is TaskEventBridgeStatus {
   return status === 'completed'
@@ -77,3 +96,28 @@ class TaskEventBridge {
 export const taskEventBridge = new TaskEventBridge()
 
 taskEventBridge.registerAgentNotifier(enqueueBackgroundTaskTerminalReminderFromBridge)
+
+export function registerWaitingHumanBrowserTaskResumePort(
+  port: WaitingHumanBrowserTaskResumePort,
+): () => void {
+  waitingHumanBrowserTaskResumePort = port
+  return () => {
+    if (waitingHumanBrowserTaskResumePort === port) {
+      waitingHumanBrowserTaskResumePort = null
+    }
+  }
+}
+
+export async function resumeWaitingHumanBrowserTaskFromBridge(
+  request: WaitingHumanBrowserTaskResumeRequest,
+): Promise<WaitingHumanBrowserTaskResumeResult> {
+  const taskId = typeof request.taskId === 'string' ? request.taskId.trim() : ''
+  if (!request.confirmed) return { success: false, error: 'confirmation_required' }
+  if (!taskId) return { success: false, error: 'missing_task_id' }
+  if (!waitingHumanBrowserTaskResumePort) return { success: false, error: 'browser_task_resume_unavailable' }
+  const current = await waitingHumanBrowserTaskResumePort.getTask(taskId)
+  if (!current) return { success: false, error: 'browser_task_not_found' }
+  if (current.status !== 'waiting_human') return { success: false, task: current, error: 'browser_task_not_waiting_human' }
+  const resumed = await waitingHumanBrowserTaskResumePort.resumeTask(taskId)
+  return { success: Boolean(resumed), task: resumed, error: resumed ? undefined : 'browser_task_resume_failed' }
+}

@@ -174,6 +174,7 @@ export function useTaskInteractionHandlers(
         scopeId,
         taskId: run?.taskId || undefined,
         responseText: confirmed ? '确认继续。' : '暂不继续，请先停止。',
+        confirmed,
         continuationIntent: buildRunContinuationIntent(
           run,
           confirmed ? '确认继续。' : '暂不继续，请先停止。',
