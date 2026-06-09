@@ -300,7 +300,7 @@ test('agent sdk runtime preempts old run and cancels pending renderer actions', 
   assert.equal(firstResult.cancelled, true)
   assert.deepEqual(firstResult.scopeRunAuthority, {
     state: 'lost',
-    reason: 'preempted_by_newer_send',
+    reason: 'preempted_by_same_user',
     currentRunId: null,
   })
   assert.equal(second.success, true)

@@ -83,7 +83,9 @@ export function buildTerminalProjectionPatch(params: {
     interactionState: 'suspended',
     waitingFor: 'none',
     taskSummary: '已被新消息接管',
-    blockedReason: '已被新消息接管',
+    // killed-by-supersede is terminal, not blocked — blockedReason stays null
+    // (legacy supersede contract, see task-projection-supersede.test.ts)
+    blockedReason: null,
     resumableActions: ['none'],
     continuationRef: {
       taskId: params.nextTaskId,

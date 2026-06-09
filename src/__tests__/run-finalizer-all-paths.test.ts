@@ -362,7 +362,7 @@ describe('run finalizer all paths', () => {
     const killed = records.get('skill:legacy-old')
     assert.equal(killed?.status, 'killed')
     assert.equal(killed?.taskSummary, '已被新消息接管')
-    assert.equal(killed?.blockedReason, '已被新消息接管')
+    assert.equal(killed?.blockedReason, null)
   })
 
   test('checkpoint_steered path records checkpoint terminal state with durable handle', async () => {
