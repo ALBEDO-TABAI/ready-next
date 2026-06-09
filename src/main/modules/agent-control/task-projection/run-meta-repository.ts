@@ -11,6 +11,7 @@
  * better-sqlite3 in tests.
  */
 import type { DatabaseConnection } from '../../database'
+import type { AbortInitiator } from '../contracts/run-contracts-internal'
 
 export interface RunMetaRecord {
   runId: string
@@ -18,6 +19,8 @@ export interface RunMetaRecord {
   scopeId: string | null
   agentId: string | null
   status: string
+  initiator: AbortInitiator | null
+  durationMs: number | null
   taskType: string | null
   terminalReason: string | null
   providerProtocol: string | null
@@ -43,6 +46,8 @@ export interface RunMetaCreateInput {
   scopeId?: string | null
   agentId?: string | null
   status: string
+  initiator?: AbortInitiator | null
+  durationMs?: number | null
   taskType?: string | null
   terminalReason?: string | null
   providerProtocol?: string | null
@@ -82,6 +87,8 @@ interface RunMetaRow {
   scope_id: string | null
   agent_id: string | null
   status: string
+  initiator?: AbortInitiator | null
+  duration_ms?: number | null
   task_type?: string | null
   terminal_reason?: string | null
   provider_protocol?: string | null
@@ -122,6 +129,8 @@ function rowToRecord(row: RunMetaRow): RunMetaRecord {
     scopeId: row.scope_id,
     agentId: row.agent_id,
     status: row.status,
+    initiator: row.initiator ?? null,
+    durationMs: row.duration_ms ?? null,
     taskType: row.task_type ?? null,
     terminalReason: row.terminal_reason ?? null,
     providerProtocol: row.provider_protocol ?? null,
@@ -152,6 +161,8 @@ export class RunMetaRepository {
       scopeId: input.scopeId ?? null,
       agentId: input.agentId ?? null,
       status: input.status,
+      initiator: input.initiator ?? null,
+      durationMs: input.durationMs ?? null,
       taskType: input.taskType ?? null,
       terminalReason: input.terminalReason ?? null,
       providerProtocol: input.providerProtocol ?? null,
@@ -174,12 +185,13 @@ export class RunMetaRepository {
       .prepare(
         `INSERT INTO run_meta (
           run_id, task_id, scope_id, agent_id, status,
+          initiator, duration_ms,
           task_type, terminal_reason, provider_protocol, wire_api, context_window,
           provider_diagnostics_json, budget_json, continuation_ref_json, recovery_history_json,
           input_tokens, output_tokens, total_tokens,
           first_message_text, last_message_text, follow_up_text,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         record.runId,
@@ -187,6 +199,8 @@ export class RunMetaRepository {
         record.scopeId,
         record.agentId,
         record.status,
+        record.initiator,
+        record.durationMs,
         record.taskType,
         record.terminalReason,
         record.providerProtocol,
@@ -231,6 +245,7 @@ export class RunMetaRepository {
       .prepare(
         `UPDATE run_meta SET
           task_id = ?, scope_id = ?, agent_id = ?, status = ?,
+          initiator = ?, duration_ms = ?,
           task_type = ?, terminal_reason = ?, provider_protocol = ?, wire_api = ?, context_window = ?,
           provider_diagnostics_json = ?, budget_json = ?, continuation_ref_json = ?, recovery_history_json = ?,
           input_tokens = ?, output_tokens = ?, total_tokens = ?,
@@ -243,6 +258,8 @@ export class RunMetaRepository {
         merged.scopeId,
         merged.agentId,
         merged.status,
+        merged.initiator,
+        merged.durationMs,
         merged.taskType,
         merged.terminalReason,
         merged.providerProtocol,

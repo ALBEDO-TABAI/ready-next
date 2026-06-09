@@ -5,9 +5,9 @@
  * `run-contracts.ts` that is NOT consumed across the preload boundary
  * (TurnEngineSession, TaskBudget, ToolSnapshot, SkillRunContract, …).
  *
- * U4.1a (this PR) creates the empty slot so subsequent U4.1b–d PRs can
- * physically relocate types here without having to also juggle the file
- * creation. No exports yet — see the classification table at
+ * U4.1a created this holding pen so subsequent contracts can move here without
+ * widening the preload-visible `run-contracts.ts` surface. See the
+ * classification table at
  * `docs/superpowers/plans/U4.1-run-contracts-export-classification.md`
  * for the planned destination of every run-contracts.ts export.
  *
@@ -16,4 +16,11 @@
  * file.
  */
 
-export {}
+export type AbortInitiator =
+  | 'user_stop'
+  | 'preempted'
+  | 'timeout'
+  | 'host_unavailable'
+  | 'budget'
+  | 'error'
+  | 'process_exit'

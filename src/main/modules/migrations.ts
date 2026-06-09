@@ -2148,6 +2148,22 @@ const migrations: Migration[] = [
       addColumn('ALTER TABLE run_meta ADD COLUMN continuation_ref_json TEXT')
       addColumn('ALTER TABLE run_meta ADD COLUMN recovery_history_json TEXT')
     }
+  },
+
+  // ------------------------------------------------------------------ 050
+  {
+    name: '050_add_run_meta_initiator_duration',
+    up: (db) => {
+      const addColumn = (sql: string): void => {
+        try {
+          db.exec(sql)
+        } catch {
+          // column already exists
+        }
+      }
+      addColumn('ALTER TABLE run_meta ADD COLUMN initiator TEXT')
+      addColumn('ALTER TABLE run_meta ADD COLUMN duration_ms INTEGER')
+    }
   }
 ]
 
