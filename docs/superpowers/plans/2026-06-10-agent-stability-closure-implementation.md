@@ -12,6 +12,9 @@ revision_history:
     （经 metrics.ts 既有入口，含 toolCallsUsed/durationMs，闭合 C0.2）；②新增 S4-5 工单
     跟踪 C4.2b（blocked on Plan P WP3+WP5 验收，不排期但有落点）；③AbortInitiator 落点
     改为 run-contracts-internal.ts（run-contracts.ts 禁新增 export）。
+  - v3.1 (2026-06-10): 执行期事实修正（Codex 施工 S0-3 时停工上报）：runtime 现存 abort
+    点只有用户停止与抢占两处，无 run 级超时 abort；S0-3 范围改为两点，其余 initiator
+    词汇为后续工单保留。不改变任何合同条款。
 owner: 白
 author: Claude (Fable 5)
 executor: Codex
@@ -66,7 +69,7 @@ related:
 ### S0-3 Abort initiator 贯穿（C0.2 下半）
 
 - **改动文件**：`src/main/modules/agent-control/runtime-core/agent-sdk-runtime.ts`（abort 包装，最小侵入：一个 `createInitiatorAbort(initiator)` 辅助 + 各 `abort()` 调用点带因）、新增 `src/__tests__/abort-initiator-threading.test.ts`
-- **实施要点**：抢占、用户停止、超时三个现有 abort 点改为带 initiator；initiator 暂存于 run 句柄，供 S1-1 finalize 读取。不新增行为。
+- **实施要点**：现有的两个 abort 点（用户停止 `stopGeneration()`、抢占接管）改为带 initiator；initiator 暂存于 run 句柄，供 S1-1 finalize 读取。不新增行为。【v3.1 执行期修正：源码核实 runtime 无 run 级超时 abort 点，原文"超时"系工单事实错误——`AbortInitiator` 其余词汇（timeout/host_unavailable/budget/error/process_exit）为后续工单保留：S1-2 用 process_exit/error，S5-2 引入 provider 超时时用 timeout。本单不发明新 abort 路径。】
 - **测试（先红）**：触发 stopGeneration / 抢占（用现有可注入点或最小 seam），断言 run 句柄上记录的 initiator 正确。
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/abort-initiator-threading.test.ts && npm run typecheck`
 - **规模**：~120 行。
