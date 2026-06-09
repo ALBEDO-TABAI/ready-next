@@ -63,12 +63,30 @@ export async function fetchClipHtml(
     throw new ClipFetchError('fetch_failed', `HTTP ${status} ${response.statusText}`)
   }
   const html = await response.text()
+  if (isWeiboVisitorWallHtml(response.url || url, html)) {
+    throw new ClipFetchError(
+      'login_required',
+      `Weibo returned the visitor wall for ${url}`,
+    )
+  }
   const headMatch = html.match(ABSENT_TITLE_RE)
   return {
     html,
     finalUrl: response.url || url,
     titleFromHead: headMatch ? headMatch[1]?.trim() : undefined,
   }
+}
+
+export function isWeiboVisitorWallHtml(finalUrl: string, html: string): boolean {
+  let hostname = ''
+  try {
+    hostname = new URL(finalUrl).hostname
+  } catch {
+    hostname = ''
+  }
+  if (!/(^|\.)passport\.weibo\.(?:com|cn)$/i.test(hostname)) return false
+  return /<title>\s*Sina Visitor System\s*<\/title>/i.test(html) ||
+    /\/visitor\/mini_original\.js/i.test(html)
 }
 
 export async function fetchJinaMarkdown(

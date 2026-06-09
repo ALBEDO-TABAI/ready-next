@@ -169,6 +169,8 @@ function YouTubeCard({
               src={embed.thumbnailUrl}
               alt={embed.title || 'YouTube preview'}
               className="note-preview-youtube-thumb"
+              loading="lazy"
+              decoding="async"
             />
           </button>
         ) : (
@@ -300,6 +302,8 @@ function MediaEmbed({
         src={embed.url}
         alt={embed.alt || embed.title || 'embedded media'}
         className="note-preview-image"
+        loading="lazy"
+        decoding="async"
       />
       {(embed.alt || embed.title) ? (
         <figcaption className="note-preview-image-caption">{embed.alt || embed.title}</figcaption>
@@ -629,6 +633,8 @@ function NotePreview({
           src={resolved.resolvedUrl}
           alt={alt || 'embedded media'}
           className="note-preview-image"
+          loading="lazy"
+          decoding="async"
         />
       )
     },

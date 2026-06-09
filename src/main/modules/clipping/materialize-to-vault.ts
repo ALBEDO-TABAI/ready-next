@@ -8,16 +8,16 @@
  *   1. Read the sandbox .md content.
  *   2. Scan all `![alt](url)` references whose URL is http(s).
  *   3. Download each image; on success write to
- *      `<targetDir>/<noteBaseName>.assets/<8hex>.<ext>` and rewrite the
+ *      `<targetDir>/<noteBaseName>/<noteBaseName>.assets/<8hex>.<ext>` and rewrite the
  *      markdown reference to the relative path. On failure leave the
  *      original remote URL in place and record a non-fatal warning.
- *   4. Write the rewritten .md to `<targetDir>/<noteBaseName>.md`.
+ *   4. Write the rewritten .md to `<targetDir>/<noteBaseName>/<noteBaseName>.md`.
  *   5. Unlink the sandbox .md so the sandbox doesn't accumulate orphans.
  *
- * Net effect: a self-contained `<noteBaseName>.md + <noteBaseName>.assets/`
- * pair appears in the user-chosen folder; the sandbox is left empty. Move
- * semantics, not copy. If anything fails mid-materialize, the sandbox file
- * stays in place so user can retry / inspect.
+ * Net effect: a self-contained `<noteBaseName>/` folder appears in the
+ * user-chosen folder, containing the note and its assets; the sandbox is left
+ * empty. Move semantics, not copy. If anything fails mid-materialize, the
+ * sandbox file stays in place so user can retry / inspect.
  *
  * Pure module — no electron, no skills-runtime. All fs/fetch operations
  * are injected via the `MaterializeDeps` adapter so unit tests can run in
@@ -31,10 +31,11 @@ const IMG_MARKDOWN_RE = /!\[([^\]]*)\]\((https?:\/\/[^)\s]+(?:\s+"[^"]*")?)\)/g
 // stripper that removes blob:/data:/javascript: refs the pipeline didn't
 // already sanitize.
 const IMG_MARKDOWN_ANY_RE = /!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g
+const LINKED_IMAGE_RE = /\[!\[[^\]]*\]\((https?:\/\/[^)\s]+)(?:\s+"[^"]*")?\)\]\((https?:\/\/[^)\s]+)(?:\s+"[^"]*")?\)/g
 const UNFETCHABLE_SCHEME_RE = /^(?:blob|data|javascript|about|chrome|file|filesystem):/i
 const HTTP_RE = /^https?:\/\//i
 
-const DEFAULT_MAX_BYTES_PER_IMAGE = 12 * 1024 * 1024 // 12 MB hard cap per image
+const DEFAULT_MAX_BYTES_PER_IMAGE = 64 * 1024 * 1024 // fit image-heavy WeChat long images / GIFs
 const DEFAULT_FETCH_TIMEOUT_MS = 20_000
 const DEFAULT_PARALLELISM = 2
 
@@ -149,24 +150,27 @@ export async function materializeToVault(
     : sandboxBase.endsWith('.md')
       ? sandboxBase.slice(0, -3)
       : sandboxBase
-  const finalMdPath = deps.joinPath(input.targetDir, `${noteBaseName}.md`)
-  const assetsDir = deps.joinPath(input.targetDir, `${noteBaseName}.assets`)
+  const groupDir = deps.joinPath(input.targetDir, noteBaseName)
+  const finalMdPath = deps.joinPath(groupDir, `${noteBaseName}.md`)
+  const assetsDir = deps.joinPath(groupDir, `${noteBaseName}.assets`)
 
   const imageRefs = collectImageRefs(markdown)
   let assetPaths: string[] = []
   let imageDownloadFailures = 0
   const failureMessages: string[] = []
   const rewriteMap = new Map<string, string>()
+  const discardedImageUrls = new Set<string>()
 
   if (imageRefs.length > 0) {
     await deps.ensureDir(assetsDir)
     const max = input.maxBytesPerImage ?? DEFAULT_MAX_BYTES_PER_IMAGE
     const timeoutMs = input.fetchTimeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS
     const parallelism = Math.max(1, Math.min(input.parallelism ?? DEFAULT_PARALLELISM, 4))
+    const linkedImageTargets = collectLinkedImageTargets(markdown)
 
     // Dedupe URLs so the same image isn't downloaded twice within one note.
     const uniqueUrls = Array.from(new Set(imageRefs.map((ref) => ref.url)))
-    const downloadResults = new Map<string, string | null>() // url → relative path or null
+    const downloadResults = new Map<string, { relative: string | null; discarded: boolean }>()
 
     // Sequential batches of `parallelism`.
     for (let i = 0; i < uniqueUrls.length; i += parallelism) {
@@ -190,6 +194,14 @@ export async function materializeToVault(
               return [url, null] as const
             }
             const ext = inferExtension(url, fetched.contentType)
+            if (shouldDiscardDownloadedImage({
+              url,
+              bytes: fetched.bytes,
+              extension: ext,
+              linkedTargets: linkedImageTargets.get(url) || [],
+            })) {
+              return [url, null, undefined, true] as const
+            }
             const hash = createHash('sha256').update(fetched.bytes).digest('hex').slice(0, 12)
             const filename = `${hash}${ext}`
             const absoluteAssetPath = deps.joinPath(assetsDir, filename)
@@ -203,22 +215,27 @@ export async function materializeToVault(
         }),
       )
       for (const entry of settled) {
-        const [url, relative, absolute] = entry as readonly [string, string | null, string?]
-        downloadResults.set(url, relative)
+        const [url, relative, absolute, discarded] = entry as readonly [string, string | null, string?, boolean?]
+        downloadResults.set(url, { relative, discarded: Boolean(discarded) })
+        if (discarded) discardedImageUrls.add(url)
         if (relative && absolute) assetPaths.push(absolute)
       }
     }
 
     // Build rewrite map from URL → relative path; failures stay as the original URL.
-    for (const [url, relative] of downloadResults) {
-      if (relative) rewriteMap.set(url, relative)
-      else imageDownloadFailures += 1
+    for (const [url, result] of downloadResults) {
+      if (result.relative) rewriteMap.set(url, result.relative)
+      else if (!result.discarded) imageDownloadFailures += 1
     }
   }
 
-  const rewritten = rewriteMap.size > 0 ? rewriteMarkdownImageRefs(markdown, rewriteMap) : markdown
+  const cleaned = discardedImageUrls.size > 0
+    ? stripDiscardedImageOnlyBlocks(markdown, discardedImageUrls)
+    : markdown
+  const rewritten = rewriteMap.size > 0 ? rewriteMarkdownImageRefs(cleaned, rewriteMap) : cleaned
 
   try {
+    if (imageRefs.length === 0) await deps.ensureDir(groupDir)
     await deps.writeFile(finalMdPath, rewritten)
   } catch (err) {
     throw new MaterializeError('target_write_failed', (err as Error).message)
@@ -257,7 +274,7 @@ export function formatLocalPathForMarkdown(relativePath: string): string {
 }
 
 function needsAngleBracketMarkdownDestination(relativePath: string): boolean {
-  return /[\s()[\]{}<>]/.test(relativePath) || /[^\x20-\x7E]/.test(relativePath)
+  return /[\s()[\]{}<>]/.test(relativePath)
 }
 
 export function stripUnfetchableImageRefs(markdown: string): string {
@@ -285,6 +302,19 @@ function collectImageRefs(markdown: string): ImageRef[] {
   return out
 }
 
+function collectLinkedImageTargets(markdown: string): Map<string, string[]> {
+  const out = new Map<string, string[]>()
+  for (const match of markdown.matchAll(LINKED_IMAGE_RE)) {
+    const imageUrl = match[1]?.split(/\s+/)[0]
+    const targetUrl = match[2]?.split(/\s+/)[0]
+    if (!imageUrl || !targetUrl) continue
+    const targets = out.get(imageUrl) || []
+    targets.push(targetUrl)
+    out.set(imageUrl, targets)
+  }
+  return out
+}
+
 function rewriteMarkdownImageRefs(markdown: string, urlToRelative: Map<string, string>): string {
   return markdown.replace(IMG_MARKDOWN_RE, (whole, alt: string, urlChunk: string) => {
     const url = urlChunk.split(/\s+/)[0]
@@ -292,6 +322,148 @@ function rewriteMarkdownImageRefs(markdown: string, urlToRelative: Map<string, s
     if (!relative) return whole
     return `![${alt}](${relative})`
   })
+}
+
+function stripDiscardedImageOnlyBlocks(markdown: string, discardedUrls: Set<string>): string {
+  return markdown
+    .split(/\n{2,}/)
+    .filter((block) => !isDiscardedImageOnlyBlock(block, discardedUrls))
+    .join('\n\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trimEnd()
+}
+
+function isDiscardedImageOnlyBlock(block: string, discardedUrls: Set<string>): boolean {
+  const imageUrls = Array.from(block.matchAll(IMG_MARKDOWN_ANY_RE))
+    .map((match) => match[2]?.split(/\s+/)[0])
+    .filter((url): url is string => Boolean(url))
+  if (imageUrls.length === 0) return false
+  if (!imageUrls.every((url) => discardedUrls.has(url))) return false
+  const withoutLinkedImages = block.replace(/\[!\[[^\]]*\]\([^)]+\)\]\([^)]+\)/g, '')
+  const withoutImages = withoutLinkedImages.replace(/!\[[^\]]*\]\([^)]+\)/g, '')
+  return withoutImages.replace(/[\s\u00a0]+/g, '').length === 0
+}
+
+function shouldDiscardDownloadedImage(params: {
+  url: string
+  bytes: Uint8Array
+  extension: string
+  linkedTargets: string[]
+}): boolean {
+  const realImageBytes = looksLikeImageBytes(params.bytes)
+  const dimensions = probeImageDimensions(params.bytes)
+  const isThinStrip = dimensions ? dimensions.height <= 48 || dimensions.width <= 64 : false
+  const isTinyRenderedAsset = dimensions ? dimensions.width * dimensions.height <= 8_192 : false
+  const isTinyWebp = params.extension === '.webp' && realImageBytes && params.bytes.byteLength <= 4_096
+  const isNonContentLink = params.linkedTargets.some(isNonContentLinkedImageTarget)
+
+  if (isNonContentLink && (isTinyWebp || isThinStrip || isTinyRenderedAsset || params.bytes.byteLength <= 32 * 1024)) {
+    return true
+  }
+  return isTinyWebp || isThinStrip || isTinyRenderedAsset
+}
+
+function isNonContentLinkedImageTarget(rawUrl: string): boolean {
+  try {
+    const parsed = new URL(rawUrl.replace(/&amp;/g, '&'))
+    const host = parsed.hostname.replace(/^www\./, '').toLowerCase()
+    if (host === 's.tb.cn' || host.endsWith('.taobao.com') || host.endsWith('.tmall.com')) return true
+    if (host === 'jd.com' || host.endsWith('.jd.com')) return true
+    if (host === 'weibo.com' && /^\/u\/\d+/.test(parsed.pathname)) return true
+    if (host === 'xiaohongshu.com' && /^\/user\/profile\//.test(parsed.pathname)) return true
+    if (host === 'douyin.com' && /^\/user\//.test(parsed.pathname)) return true
+    return false
+  } catch {
+    return false
+  }
+}
+
+function probeImageDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  if (bytes.byteLength >= 24 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) {
+    return {
+      width: readUint32BE(bytes, 16),
+      height: readUint32BE(bytes, 20),
+    }
+  }
+  if (bytes.byteLength >= 10 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x38) {
+    return {
+      width: readUint16LE(bytes, 6),
+      height: readUint16LE(bytes, 8),
+    }
+  }
+  const webp = probeWebpDimensions(bytes)
+  if (webp) return webp
+  return probeJpegDimensions(bytes)
+}
+
+function probeWebpDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  if (
+    bytes.byteLength < 30 ||
+    bytes[0] !== 0x52 || bytes[1] !== 0x49 || bytes[2] !== 0x46 || bytes[3] !== 0x46 ||
+    bytes[8] !== 0x57 || bytes[9] !== 0x45 || bytes[10] !== 0x42 || bytes[11] !== 0x50
+  ) {
+    return null
+  }
+  const chunk = String.fromCharCode(bytes[12], bytes[13], bytes[14], bytes[15])
+  if (chunk === 'VP8X' && bytes.byteLength >= 30) {
+    return {
+      width: 1 + readUint24LE(bytes, 24),
+      height: 1 + readUint24LE(bytes, 27),
+    }
+  }
+  if (chunk === 'VP8L' && bytes.byteLength >= 25) {
+    const b0 = bytes[21]
+    const b1 = bytes[22]
+    const b2 = bytes[23]
+    const b3 = bytes[24]
+    const width = 1 + (((b1 & 0x3f) << 8) | b0)
+    const height = 1 + ((b3 << 6) | (b2 >> 2) | ((b1 & 0xc0) << 6))
+    return { width, height }
+  }
+  return null
+}
+
+function probeJpegDimensions(bytes: Uint8Array): { width: number; height: number } | null {
+  if (bytes.byteLength < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null
+  let offset = 2
+  while (offset + 9 < bytes.byteLength) {
+    if (bytes[offset] !== 0xff) {
+      offset += 1
+      continue
+    }
+    const marker = bytes[offset + 1]
+    const length = readUint16BE(bytes, offset + 2)
+    if (length < 2 || offset + 2 + length > bytes.byteLength) return null
+    if (
+      (marker >= 0xc0 && marker <= 0xc3) ||
+      (marker >= 0xc5 && marker <= 0xc7) ||
+      (marker >= 0xc9 && marker <= 0xcb) ||
+      (marker >= 0xcd && marker <= 0xcf)
+    ) {
+      return {
+        height: readUint16BE(bytes, offset + 5),
+        width: readUint16BE(bytes, offset + 7),
+      }
+    }
+    offset += 2 + length
+  }
+  return null
+}
+
+function readUint16LE(bytes: Uint8Array, offset: number): number {
+  return bytes[offset] | (bytes[offset + 1] << 8)
+}
+
+function readUint16BE(bytes: Uint8Array, offset: number): number {
+  return (bytes[offset] << 8) | bytes[offset + 1]
+}
+
+function readUint24LE(bytes: Uint8Array, offset: number): number {
+  return bytes[offset] | (bytes[offset + 1] << 8) | (bytes[offset + 2] << 16)
+}
+
+function readUint32BE(bytes: Uint8Array, offset: number): number {
+  return ((bytes[offset] << 24) >>> 0) + (bytes[offset + 1] << 16) + (bytes[offset + 2] << 8) + bytes[offset + 3]
 }
 
 const MIME_TO_EXT: Record<string, string> = {

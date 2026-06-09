@@ -762,6 +762,7 @@ function pendingPlaceholderLabel(kind: PendingPlaceholderKind, status: PendingPl
 }
 
 function PendingClipRow({
+  taskId,
   status,
   urlHost,
   title,
@@ -770,7 +771,9 @@ function PendingClipRow({
   progress,
   depth,
   kind = 'clip',
+  onDismiss,
 }: {
+  taskId: string
   status: PendingPlaceholderStatus
   urlHost: string
   title: string
@@ -779,9 +782,11 @@ function PendingClipRow({
   progress?: number
   depth: number
   kind?: PendingPlaceholderKind
+  onDismiss?: (taskId: string) => void
 }) {
   const isFailure = status === 'failed' || status === 'skipped'
   const isComplete = status === 'completed' || status === 'success'
+  const canDismiss = isFailure || isComplete
   const isActive =
     status === 'running'
     || status === 'waiting_for_clip'
@@ -794,9 +799,9 @@ function PendingClipRow({
     padding: '6px 8px',
     paddingLeft: `${8 + depth * 22}px`,
     opacity: isFailure ? 0.85 : isComplete ? 0.78 : 0.72,
-    pointerEvents: 'none',
+    pointerEvents: canDismiss ? 'auto' : 'none',
     userSelect: 'none',
-    cursor: 'default',
+    cursor: canDismiss ? 'pointer' : 'default',
     background: isFailure ? 'color-mix(in srgb, var(--color-rose-light, #fee2e2) 36%, transparent)' : 'transparent',
     boxShadow:
       isComplete
@@ -806,12 +811,28 @@ function PendingClipRow({
           : 'inset 0 0 0 1px rgba(148, 163, 184, 0.22)',
   }
   const label = pendingPlaceholderLabel(kind, status)
+  const dismiss = () => {
+    if (canDismiss) onDismiss?.(taskId)
+  }
   return (
     <div
-      aria-disabled
+      aria-disabled={!canDismiss}
       aria-live={status === 'failed' ? 'polite' : undefined}
       className="rounded-[8px] text-[13px]"
+      role={canDismiss ? 'button' : undefined}
       style={baseStyle}
+      tabIndex={canDismiss ? 0 : undefined}
+      title={canDismiss ? '点击清除提示' : undefined}
+      onClick={(event) => {
+        event.stopPropagation()
+        dismiss()
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return
+        event.preventDefault()
+        event.stopPropagation()
+        dismiss()
+      }}
     >
       <div className="flex items-center gap-[6px]">
         <span
@@ -1011,6 +1032,7 @@ function FileTreeRecursive({
   onRenameCancel,
   onCreateConfirm,
   onCreateCancel,
+  onDismissPendingClip,
 }: {
   items: FileItem[]
   containerPath: string
@@ -1043,6 +1065,7 @@ function FileTreeRecursive({
   onRenameCancel: () => void
   onCreateConfirm: (newName: string) => void
   onCreateCancel: () => void
+  onDismissPendingClip: (taskId: string) => void
 }) {
   const visibleItems = items.filter((item) => {
     if (!isFileAllowed(item)) return false
@@ -1069,15 +1092,17 @@ function FileTreeRecursive({
       {placeholdersForThisFolder.map((p) => (
         <PendingClipRow
           key={p.taskId}
+          taskId={p.taskId}
           status={p.status}
-            urlHost={p.urlHost}
-            title={p.title}
-            errorMessage={p.errorMessage}
-            message={p.message}
-            progress={p.progress}
-            depth={depth}
-            kind={p.kind}
-          />
+          urlHost={p.urlHost}
+          title={p.title}
+          errorMessage={p.errorMessage}
+          message={p.message}
+          progress={p.progress}
+          depth={depth}
+          kind={p.kind}
+          onDismiss={onDismissPendingClip}
+        />
       ))}
       {visibleItems.map((item) => {
         const isExpanded = expandedDirs.has(item.path)
@@ -1148,6 +1173,7 @@ function FileTreeRecursive({
                 onRenameCancel={onRenameCancel}
                 onCreateConfirm={onCreateConfirm}
                 onCreateCancel={onCreateCancel}
+                onDismissPendingClip={onDismissPendingClip}
               />
             )}
           </div>
@@ -1454,6 +1480,15 @@ export default function FileTree({
       pendingClipRemoveTimersRef.current.delete(taskId)
     }, delayMs)
     pendingClipRemoveTimersRef.current.set(taskId, timer)
+  }, [])
+
+  const dismissPendingClip = useCallback((taskId: string) => {
+    const existing = pendingClipRemoveTimersRef.current.get(taskId)
+    if (existing !== undefined) {
+      window.clearTimeout(existing)
+      pendingClipRemoveTimersRef.current.delete(taskId)
+    }
+    setPendingClips((prev) => prev.filter((p) => p.taskId !== taskId))
   }, [])
 
   const flashCompletedPath = useCallback((path?: string | null) => {
@@ -2078,6 +2113,8 @@ export default function FileTree({
           )
           if (patch.status === 'failed') {
             schedulePlaceholderRemoval(taskId, 4000)
+          } else if (patch.status === 'completed') {
+            schedulePlaceholderRemoval(taskId, 1800)
           }
         },
         onStudyPlaceholderStart: (placeholder) => {
@@ -2245,6 +2282,7 @@ export default function FileTree({
                   else if (creatingType === 'file') void createFile(newName)
                 }}
                 onCreateCancel={cancelCreating}
+                onDismissPendingClip={dismissPendingClip}
               />
             )}
           </div>
@@ -2316,6 +2354,7 @@ export default function FileTree({
             else if (creatingType === 'file') void createFile(newName)
           }}
           onCreateCancel={cancelCreating}
+          onDismissPendingClip={dismissPendingClip}
         />
       </>
     )

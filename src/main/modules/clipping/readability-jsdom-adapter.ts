@@ -55,6 +55,9 @@ export class ReadabilityJsdomAdapter implements ExtractionAdapter {
     // against the final page URL.
     promoteLazyImages(document, input.url)
 
+    const weChatArticle = extractWeChatArticle(document, dom.window.document, input.url, structuredData, metaLookup)
+    if (weChatArticle) return weChatArticle
+
     let readabilityArticle: ReturnType<Readability['parse']> = null
     try {
       const clone = document.cloneNode(true) as Document
@@ -129,6 +132,200 @@ export class ReadabilityJsdomAdapter implements ExtractionAdapter {
       diagnostics,
     }
   }
+}
+
+function extractWeChatArticle(
+  document: Document,
+  ownerDocument: Document,
+  sourceUrl: string,
+  structuredData: Record<string, unknown>[],
+  metaLookup: Record<string, string>,
+): ExtractionResult | null {
+  if (!isWeChatArticleUrl(sourceUrl)) return null
+  const contentRoot = document.querySelector('#js_content') || document.querySelector('.rich_media_content')
+  if (!contentRoot) return null
+
+  const contentClone = contentRoot.cloneNode(true) as HTMLElement
+  promoteSvgImages(contentClone, ownerDocument, sourceUrl)
+  normalizeWeChatImageUrls(contentClone)
+  removeWeChatChrome(contentClone)
+
+  const turndown = createTurndownService(sourceUrl)
+  const contentMarkdown = normalizeAdjacentWeChatImages(turndown.turndown(contentClone.innerHTML).trim())
+  if (!contentMarkdown) return null
+
+  const title =
+    textFromSelector(document, '#activity-name .js_title_inner') ||
+    textFromSelector(document, '#activity-name') ||
+    metaLookup['property:og:title'] ||
+    document.title?.trim() ||
+    ''
+  const author =
+    metaLookup['name:author'] ||
+    textFromSelector(document, '#js_author_name_text') ||
+    textFromSelector(document, '#js_author_name') ||
+    textFromSelector(document, '#js_name') ||
+    ''
+  const published =
+    textFromSelector(document, '#publish_time') ||
+    extractWeChatTimestamp(document)
+  const description =
+    metaLookup['property:og:description'] ||
+    metaLookup['name:description'] ||
+    ''
+  const image = metaLookup['property:og:image'] || ''
+  const site = metaLookup['property:og:site_name'] || '微信公众平台'
+  const wordCount = contentMarkdown ? contentMarkdown.split(/\s+/).filter(Boolean).length : 0
+  const warnings: string[] = []
+  if (contentMarkdown.length < MIN_CONTENT_CHARS) {
+    warnings.push('content_markdown_below_threshold')
+  }
+
+  return {
+    title: cleanTitle(title, site),
+    contentMarkdown,
+    metadata: {
+      author: author || undefined,
+      published: published || undefined,
+      description: description || undefined,
+      image: image || undefined,
+      site,
+      lang: document.documentElement.getAttribute('lang') || undefined,
+      wordCount: wordCount > 0 ? wordCount : undefined,
+    },
+    structuredData,
+    metaLookup,
+    diagnostics: {
+      extractionSource: 'readability',
+      confidence: contentMarkdown.length >= MIN_CONTENT_CHARS ? READ_CONFIDENCE_FULL : READ_CONFIDENCE_PARTIAL,
+      warnings,
+    },
+  }
+}
+
+function isWeChatArticleUrl(sourceUrl: string): boolean {
+  try {
+    const hostname = new URL(sourceUrl).hostname
+    return hostname === 'mp.weixin.qq.com'
+  } catch {
+    return false
+  }
+}
+
+function promoteSvgImages(root: Element, ownerDocument: Document, baseUrl: string): void {
+  for (const svg of Array.from(root.querySelectorAll('svg'))) {
+    const imageNodes = Array.from(svg.querySelectorAll('image'))
+    if (imageNodes.length === 0) continue
+    const fullFrameAnimation = imageNodes.length > 1 && imageNodes.every(isFullFrameSvgImage)
+    const seen = new Set<string>()
+    const fragment = ownerDocument.createDocumentFragment()
+    for (const imageNode of imageNodes) {
+      const rawHref =
+        imageNode.getAttribute('href') ||
+        imageNode.getAttribute('xlink:href') ||
+        imageNode.getAttribute('data-src') ||
+        ''
+      const src = normalizeWeChatImageUrl(toAbsoluteUrl(rawHref.trim(), baseUrl))
+      if (!src) continue
+      if (seen.has(src)) continue
+      seen.add(src)
+      const img = ownerDocument.createElement('img')
+      img.setAttribute('src', src)
+      const alt =
+        imageNode.getAttribute('aria-label') ||
+        svg.getAttribute('aria-label') ||
+        imageNode.getAttribute('title') ||
+        ''
+      if (alt && alt !== '插图') img.setAttribute('alt', alt)
+      fragment.appendChild(img)
+      if (fullFrameAnimation) break
+    }
+    if (fragment.hasChildNodes()) {
+      svg.replaceWith(fragment)
+    }
+  }
+}
+
+function isFullFrameSvgImage(imageNode: Element): boolean {
+  return isZeroSvgValue(imageNode.getAttribute('x')) &&
+    isZeroSvgValue(imageNode.getAttribute('y')) &&
+    isFullSvgValue(imageNode.getAttribute('width')) &&
+    isFullSvgValue(imageNode.getAttribute('height'))
+}
+
+function isZeroSvgValue(value: string | null): boolean {
+  const normalized = (value || '0').trim()
+  return normalized === '0' || normalized === '0px' || normalized === '0%'
+}
+
+function isFullSvgValue(value: string | null): boolean {
+  const normalized = (value || '').trim()
+  return normalized === '100%' || normalized === '100'
+}
+
+function normalizeWeChatImageUrls(root: Element): void {
+  for (const img of Array.from(root.querySelectorAll('img'))) {
+    const src = normalizeWeChatImageUrl(img.getAttribute('src')?.trim() || '')
+    if (src) img.setAttribute('src', src)
+  }
+}
+
+function normalizeWeChatImageUrl(rawUrl: string): string {
+  if (!rawUrl) return ''
+  try {
+    const parsed = new URL(rawUrl)
+    if (parsed.hostname.endsWith('qpic.cn')) {
+      parsed.protocol = 'https:'
+      parsed.hash = ''
+    }
+    return parsed.toString()
+  } catch {
+    return rawUrl
+  }
+}
+
+function removeWeChatChrome(root: Element): void {
+  for (const selector of ['script', 'style', 'link', 'iframe', 'wx-open-launch-app']) {
+    for (const node of Array.from(root.querySelectorAll(selector))) {
+      node.remove()
+    }
+  }
+  const chromeText = new Set([
+    '继续滑动看下一个',
+    '向上滑动看下一个',
+    'Video Mini Program Like',
+    '轻点两下取消赞',
+    '轻点两下取消在看',
+  ])
+  for (const node of Array.from(root.querySelectorAll('*'))) {
+    const text = normalizeElementText(node.textContent || '')
+    if (chromeText.has(text)) node.remove()
+  }
+}
+
+function normalizeAdjacentWeChatImages(markdown: string): string {
+  return markdown.replace(/(\]\(https?:\/\/[^)\s]+\))(?=!\[)/g, '$1\n\n')
+}
+
+function textFromSelector(document: Document, selector: string): string {
+  return normalizeElementText(document.querySelector(selector)?.textContent || '')
+}
+
+function normalizeElementText(value: string): string {
+  return value.replace(/\s+/g, ' ').trim()
+}
+
+function extractWeChatTimestamp(document: Document): string {
+  const scriptText = Array.from(document.querySelectorAll('script'))
+    .map((script) => script.textContent || '')
+    .join('\n')
+  const match =
+    /\bvar\s+ct\s*=\s*["'](\d{10})["']/.exec(scriptText) ||
+    /\bori_send_time\s*:\s*["'](\d{10})["']/.exec(scriptText)
+  if (!match?.[1]) return ''
+  const timestamp = Number(match[1])
+  if (!Number.isFinite(timestamp)) return ''
+  return new Date(timestamp * 1000).toISOString()
 }
 
 function resolveConfidence(

@@ -30,6 +30,15 @@ test('browser tab drop menu clamps to the file panel boundary without resetting 
   )
 })
 
+test('completed web clip placeholders can be dismissed instead of sticking in the file tree', () => {
+  const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
+
+  assert.match(source, /onDismissPendingClip/)
+  assert.match(source, /点击清除提示/)
+  assert.match(source, /patch\.status === 'completed'/)
+  assert.match(source, /schedulePlaceholderRemoval\(taskId,\s*1800\)/)
+})
+
 test('selected file rows use a brighter active surface instead of the generic hover darkening', () => {
   const source = readWorkspaceFile('src/renderer/components/layout/FileTree.tsx')
 

@@ -2,9 +2,9 @@
  * Materialize-to-vault contract tests.
  *
  * `materializeToVault` is the move-semantics step that converts a sandboxed
- * .md (with remote image URLs) into a self-contained `<note>.md +
- * <note>.assets/` pair in the user's vault folder. These tests run with
- * in-memory deps so we don't touch the filesystem or the network.
+ * .md (with remote image URLs) into a self-contained `<note>/` folder in the
+ * user's vault folder. These tests run with in-memory deps so we don't touch
+ * the filesystem or the network.
  */
 
 import { describe, it } from 'node:test'
@@ -29,11 +29,13 @@ function makeMemoryDeps(overrides?: {
   ensuredDirs: Set<string>
   unlinkedPaths: Set<string>
   fetchedUrls: string[]
+  fetchedMaxBytes: number[]
 } {
   const writtenFiles = new Map<string, string | Uint8Array>()
   const ensuredDirs = new Set<string>()
   const unlinkedPaths = new Set<string>()
   const fetchedUrls: string[] = []
+  const fetchedMaxBytes: number[] = []
   const dirs = new Set<string>(['/Users/me/Notes', '/Users/me', '/Users'])
   if (overrides?.initialMd !== undefined) {
     writtenFiles.set('/sandbox/note.md', overrides.initialMd)
@@ -61,8 +63,9 @@ function makeMemoryDeps(overrides?: {
       if (writtenFiles.has(path)) return false
       throw new Error(`ENOENT: ${path}`)
     },
-    fetchImage: async (url) => {
+    fetchImage: async (url, options) => {
       fetchedUrls.push(url)
+      fetchedMaxBytes.push(options.maxBytes)
       if (overrides?.failFetchFor?.has(url)) return null
       const direct = overrides?.imageBytesByUrl?.[url]
       if (direct) return direct
@@ -75,7 +78,25 @@ function makeMemoryDeps(overrides?: {
     basename: (p) => p.split('/').pop() || '',
     isAbsolute: (p) => p.startsWith('/'),
   }
-  return { deps, writtenFiles, ensuredDirs, unlinkedPaths, fetchedUrls }
+  return { deps, writtenFiles, ensuredDirs, unlinkedPaths, fetchedUrls, fetchedMaxBytes }
+}
+
+function tinyWebpVp8x(width: number, height: number): Uint8Array {
+  const bytes = new Uint8Array(30)
+  bytes.set([0x52, 0x49, 0x46, 0x46], 0) // RIFF
+  bytes.set([0x16, 0x00, 0x00, 0x00], 4)
+  bytes.set([0x57, 0x45, 0x42, 0x50], 8) // WEBP
+  bytes.set([0x56, 0x50, 0x38, 0x58], 12) // VP8X
+  bytes.set([0x0a, 0x00, 0x00, 0x00], 16)
+  const widthMinusOne = width - 1
+  const heightMinusOne = height - 1
+  bytes[24] = widthMinusOne & 0xff
+  bytes[25] = (widthMinusOne >> 8) & 0xff
+  bytes[26] = (widthMinusOne >> 16) & 0xff
+  bytes[27] = heightMinusOne & 0xff
+  bytes[28] = (heightMinusOne >> 8) & 0xff
+  bytes[29] = (heightMinusOne >> 16) & 0xff
+  return bytes
 }
 
 describe('materializeToVault · invalid target', () => {
@@ -140,7 +161,7 @@ describe('materializeToVault · move semantics + image bundling', () => {
       '',
       '![](https://cdn.example.com/inline.png)',
     ].join('\n')
-    const { deps, writtenFiles, unlinkedPaths, ensuredDirs, fetchedUrls } = makeMemoryDeps({
+    const { deps, writtenFiles, unlinkedPaths, ensuredDirs, fetchedUrls, fetchedMaxBytes } = makeMemoryDeps({
       initialMd,
       imageBytesByUrl: {
         'https://cdn.example.com/hero.jpg': {
@@ -159,14 +180,15 @@ describe('materializeToVault · move semantics + image bundling', () => {
       deps,
     )
 
-    assert.equal(result.finalMdPath, '/Users/me/Notes/note.md')
-    assert.ok(ensuredDirs.has('/Users/me/Notes/note.assets'), 'assets dir must be ensured')
+    assert.equal(result.finalMdPath, '/Users/me/Notes/note/note.md')
+    assert.ok(ensuredDirs.has('/Users/me/Notes/note/note.assets'), 'assets dir must be ensured')
     assert.equal(result.assetPaths.length, 2, `expected 2 asset paths, got ${result.assetPaths.length}`)
     assert.equal(result.imageDownloadFailures, 0)
     assert.equal(fetchedUrls.length, 2)
+    assert.deepEqual(fetchedMaxBytes, [64 * 1024 * 1024, 64 * 1024 * 1024])
     assert.ok(unlinkedPaths.has('/sandbox/note.md'), 'sandbox file must be unlinked (move semantics)')
 
-    const finalMd = writtenFiles.get('/Users/me/Notes/note.md')
+    const finalMd = writtenFiles.get('/Users/me/Notes/note/note.md')
     assert.equal(typeof finalMd, 'string')
     const md = String(finalMd)
     assert.ok(!md.includes('https://cdn.example.com/'), 'remote URLs must be rewritten away')
@@ -195,7 +217,7 @@ describe('materializeToVault · move semantics + image bundling', () => {
 
     assert.equal(result.imageDownloadFailures, 1)
     assert.equal(result.assetPaths.length, 1)
-    const md = String(writtenFiles.get('/Users/me/Notes/note.md'))
+    const md = String(writtenFiles.get('/Users/me/Notes/note/note.md'))
     assert.match(md, /!\[Good\]\(note\.assets\/[0-9a-f]+\.jpg\)/)
     assert.match(md, /!\[Bad\]\(https:\/\/cdn\.example\.com\/bad\.jpg\)/, 'failed download keeps remote URL')
   })
@@ -224,7 +246,7 @@ describe('materializeToVault · move semantics + image bundling', () => {
     assert.equal(result.imageDownloadFailures, 1)
     assert.equal(result.assetPaths.length, 0)
     assert.match(result.failureMessages[0] || '', /non-image response/)
-    const md = String(writtenFiles.get('/Users/me/Notes/note.md'))
+    const md = String(writtenFiles.get('/Users/me/Notes/note/note.md'))
     assert.match(md, /!\[Main\]\(https:\/\/wx1\.sinaimg\.cn\/large\/example\.jpg\)/)
   })
 
@@ -245,9 +267,52 @@ describe('materializeToVault · move semantics + image bundling', () => {
 
     assert.equal(fetchedUrls.length, 1, 'same URL must be fetched once')
     assert.equal(result.assetPaths.length, 1)
-    const md = String(writtenFiles.get('/Users/me/Notes/note.md'))
+    const md = String(writtenFiles.get('/Users/me/Notes/note/note.md'))
     const matches = md.match(/note\.assets\/[0-9a-f]+\.jpg/g) || []
     assert.equal(matches.length, 3, 'all 3 references point to the same dedup asset')
+  })
+
+  it('drops decorative footer image buttons after resource inspection', async () => {
+    const initialMd = [
+      '# Title',
+      '',
+      '![Hero](https://cdn.example.com/body.jpg)',
+      '',
+      '![](https://cdn.example.com/stripe.webp)',
+      '',
+      '[![](https://cdn.example.com/social.webp)](https://weibo.com/u/1726303567)',
+    ].join('\n')
+    const { deps, fetchedUrls, writtenFiles } = makeMemoryDeps({
+      initialMd,
+      imageBytesByUrl: {
+        'https://cdn.example.com/body.jpg': {
+          bytes: new TextEncoder().encode('fake-large-body-image'),
+          contentType: 'image/jpeg',
+        },
+        'https://cdn.example.com/stripe.webp': {
+          bytes: tinyWebpVp8x(1080, 33),
+          contentType: 'image/webp',
+        },
+        'https://cdn.example.com/social.webp': {
+          bytes: tinyWebpVp8x(360, 420),
+          contentType: 'image/webp',
+        },
+      },
+    })
+
+    const result = await materializeToVault(
+      { sandboxMdPath: '/sandbox/note.md', targetDir: '/Users/me/Notes' },
+      deps,
+    )
+
+    assert.equal(fetchedUrls.length, 3)
+    assert.equal(result.imageDownloadFailures, 0)
+    assert.equal(result.assetPaths.length, 1)
+    const md = String(writtenFiles.get('/Users/me/Notes/note/note.md'))
+    assert.match(md, /!\[Hero\]\(note\.assets\/[0-9a-f]+\.jpg\)/)
+    assert.equal(md.includes('stripe.webp'), false)
+    assert.equal(md.includes('social.webp'), false)
+    assert.equal(md.includes('weibo.com/u/1726303567'), false)
   })
 
   it('renders a no-image markdown with no asset dir created', async () => {
@@ -259,9 +324,10 @@ describe('materializeToVault · move semantics + image bundling', () => {
     )
     assert.equal(result.assetPaths.length, 0)
     assert.equal(fetchedUrls.length, 0)
-    assert.equal(ensuredDirs.has('/Users/me/Notes/note.assets'), false)
+    assert.ok(ensuredDirs.has('/Users/me/Notes/note'))
+    assert.equal(ensuredDirs.has('/Users/me/Notes/note/note.assets'), false)
     assert.ok(unlinkedPaths.has('/sandbox/note.md'))
-    assert.equal(String(writtenFiles.get('/Users/me/Notes/note.md')), initialMd)
+    assert.equal(String(writtenFiles.get('/Users/me/Notes/note/note.md')), initialMd)
   })
 })
 
@@ -286,7 +352,7 @@ describe('materializeToVault · defense-in-depth strips blob/data refs', () => {
       { sandboxMdPath: '/sandbox/note.md', targetDir: '/Users/me/Notes' },
       deps,
     )
-    const md = String(writtenFiles.get('/Users/me/Notes/note.md'))
+    const md = String(writtenFiles.get('/Users/me/Notes/note/note.md'))
     assert.ok(!md.includes('blob:'), 'no blob: refs in saved .md')
     assert.ok(!md.includes('data:image'), 'no data: refs in saved .md')
     assert.match(md, /!\[Hero\]\(note\.assets\/[0-9a-f]+\.jpg\)/, 'real image still downloaded + rewritten')
@@ -318,6 +384,13 @@ describe('formatLocalPathForMarkdown · preserves local asset names', () => {
     )
   })
 
+  it('leaves Chinese-only paths unwrapped for broad markdown preview compatibility', () => {
+    assert.equal(
+      formatLocalPathForMarkdown('二十年啦！陪MOLLY拾起沿途的风景.assets/a.jpg'),
+      '二十年啦！陪MOLLY拾起沿途的风景.assets/a.jpg',
+    )
+  })
+
   it('escapes > inside an angle-bracket destination', () => {
     assert.equal(
       formatLocalPathForMarkdown('title > draft.assets/a.jpg'),
@@ -340,7 +413,7 @@ describe('materializeToVault · markdown image refs preserve local asset folders
       },
       deps,
     )
-    const md = String(writtenFiles.get('/Users/me/Notes/My note title.md'))
+    const md = String(writtenFiles.get('/Users/me/Notes/My note title/My note title.md'))
     assert.match(md, /!\[hero\]\(<My note title\.assets\/[0-9a-f]+\.jpg>\)/, `got: ${md}`)
     assert.ok(!md.includes('My%20note%20title.assets'), 'asset folder name must not be percent-encoded')
   })
@@ -348,18 +421,19 @@ describe('materializeToVault · markdown image refs preserve local asset folders
   it('saved .md image refs keep Chinese asset folder names readable and resolvable', async () => {
     const initialMd = '# Title\n\n![hero](https://cdn.example.com/hero.jpg)'
     const { deps, writtenFiles } = makeMemoryDeps({ initialMd })
-    writtenFiles.set('/sandbox/弹丸论破同人插画｜整理了一些以前的摸鱼-小红书.md', initialMd)
+    writtenFiles.set('/sandbox/二十年啦！陪MOLLY拾起沿途的风景.md', initialMd)
 
     await materializeToVault(
       {
-        sandboxMdPath: '/sandbox/弹丸论破同人插画｜整理了一些以前的摸鱼-小红书.md',
+        sandboxMdPath: '/sandbox/二十年啦！陪MOLLY拾起沿途的风景.md',
         targetDir: '/Users/me/Notes',
       },
       deps,
     )
-    const md = String(writtenFiles.get('/Users/me/Notes/弹丸论破同人插画｜整理了一些以前的摸鱼-小红书.md'))
-    assert.match(md, /!\[hero\]\(<弹丸论破同人插画｜整理了一些以前的摸鱼-小红书\.assets\/[0-9a-f]+\.jpg>\)/, `got: ${md}`)
-    assert.ok(!md.includes('%E5%BC%B9%E4%B8%B8'), 'Chinese asset folder name must not be percent-encoded')
+    const md = String(writtenFiles.get('/Users/me/Notes/二十年啦！陪MOLLY拾起沿途的风景/二十年啦！陪MOLLY拾起沿途的风景.md'))
+    assert.match(md, /!\[hero\]\(二十年啦！陪MOLLY拾起沿途的风景\.assets\/[0-9a-f]+\.jpg\)/, `got: ${md}`)
+    assert.ok(!md.includes('%E4%BA%8C'), 'Chinese asset folder name must not be percent-encoded')
+    assert.ok(!md.includes('<二十年啦'), 'Chinese-only path must not be angle-wrapped')
   })
 })
 

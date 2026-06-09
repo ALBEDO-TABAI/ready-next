@@ -30,6 +30,27 @@ test('NotePreview renders markdown tables with a dedicated preview shell', () =>
   assert.match(html, /note-preview-markdown-td/)
 })
 
+test('NotePreview lazy-loads local images from embed blocks and markdown body', () => {
+  const markdown = [
+    '![](hero.gif)',
+    '',
+    '正文里的图片 ![inline](inline.png)',
+  ].join('\n')
+
+  const html = renderToStaticMarkup(
+    React.createElement(NotePreview, {
+      content: markdown,
+      notePath: '/tmp/clip/note.md',
+    }),
+  )
+
+  assert.equal(html.match(/<img/g)?.length, 2)
+  assert.equal(html.match(/loading="lazy"/g)?.length, 2)
+  assert.equal(html.match(/decoding="async"/g)?.length, 2)
+  assert.match(html, /local-file:\/\/\/tmp\/clip\/hero\.gif/)
+  assert.match(html, /local-file:\/\/\/tmp\/clip\/inline\.png/)
+})
+
 test('NotePreview renders mermaid fences through a dedicated diagram block', () => {
   const markdown = [
     '# 图表',

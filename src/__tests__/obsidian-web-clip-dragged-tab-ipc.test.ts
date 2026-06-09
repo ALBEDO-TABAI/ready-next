@@ -290,8 +290,8 @@ describe('runClipDraggedTabBackground · materialize to target_dir', () => {
           return {
             ok: true,
             result: {
-              finalMdPath: '/Users/me/Notes/foo.md',
-              assetPaths: ['/Users/me/Notes/foo.assets/abc1.jpg', '/Users/me/Notes/foo.assets/def2.png'],
+              finalMdPath: '/Users/me/Notes/foo/foo.md',
+              assetPaths: ['/Users/me/Notes/foo/foo.assets/abc1.jpg', '/Users/me/Notes/foo/foo.assets/def2.png'],
               imageDownloadFailures: 0,
               failureMessages: [],
             },
@@ -301,10 +301,10 @@ describe('runClipDraggedTabBackground · materialize to target_dir', () => {
     )
     const last = events[events.length - 1]
     if (last.status === 'completed') {
-      assert.equal(last.copiedPath, '/Users/me/Notes/foo.md')
+      assert.equal(last.copiedPath, '/Users/me/Notes/foo/foo.md')
       assert.deepEqual(last.assetPaths, [
-        '/Users/me/Notes/foo.assets/abc1.jpg',
-        '/Users/me/Notes/foo.assets/def2.png',
+        '/Users/me/Notes/foo/foo.assets/abc1.jpg',
+        '/Users/me/Notes/foo/foo.assets/def2.png',
       ])
       assert.equal(last.imageDownloadFailures, 0)
       assert.equal(last.copyError, undefined)
@@ -348,8 +348,8 @@ describe('runClipDraggedTabBackground · materialize to target_dir', () => {
         materializeToTargetDir: async () => ({
           ok: true,
           result: {
-            finalMdPath: '/Users/me/Notes/foo.md',
-            assetPaths: ['/Users/me/Notes/foo.assets/aaa.jpg'],
+            finalMdPath: '/Users/me/Notes/foo/foo.md',
+            assetPaths: ['/Users/me/Notes/foo/foo.assets/aaa.jpg'],
             imageDownloadFailures: 3,
             failureMessages: ['timeout', 'http 403', 'too large'],
           },

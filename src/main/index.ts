@@ -7,6 +7,7 @@ config({ path: resolve(__dirname, '../../.env') })
 import { app, shell, BrowserWindow, ipcMain, protocol, nativeImage, nativeTheme, Menu, dialog, type MenuItemConstructorOptions, type NativeImage } from 'electron'
 import { join, extname, normalize, isAbsolute } from 'path'
 import { createReadStream, statSync, existsSync, mkdirSync } from 'fs'
+import { readFile } from 'fs/promises'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 
 // Import modules
@@ -871,12 +872,7 @@ app.whenReady().then(() => {
 
   // Register local-file:// protocol handler for serving local files to the renderer
   // Uses fs directly to properly support Range requests for video seeking.
-  protocol.handle('local-file', (request) => {
-    console.log('[Protocol] ===== Handling request =====')
-    console.log('[Protocol] URL:', request.url)
-    console.log('[Protocol] Method:', request.method)
-    console.log('[Protocol] Headers:', request.headers)
-
+  protocol.handle('local-file', async (request) => {
     // Because local-file is registered as a "standard" scheme, Chromium parses
     // local-file:///Users/user/file.png as:
     //   host = "users" (lowercased!), pathname = "/user/file.png"
@@ -887,8 +883,6 @@ app.whenReady().then(() => {
       ? `/${parsed.host}${decodedPathname}`
       : decodedPathname
 
-    console.log('[Protocol] Parsed path:', { host: parsed.host, pathname: parsed.pathname, filePath })
-
     // Windows: remove leading slash and fix drive letter case
     if (process.platform === 'win32' && filePath.startsWith('/')) {
       filePath = filePath.slice(1)
@@ -898,20 +892,14 @@ app.whenReady().then(() => {
       }
     }
 
-    console.log('[Protocol] Final path:', filePath)
-
     // Security: validate the path before serving
     if (!isPathAllowed(filePath)) {
-      console.log('[Protocol] Path not allowed:', filePath)
       return new Response('Forbidden', { status: 403 })
     }
 
     if (!existsSync(filePath)) {
-      console.log('[Protocol] File not found:', filePath)
       return new Response('Not Found', { status: 404 })
     }
-
-    console.log('[Protocol] File exists, serving:', filePath)
 
     // MIME type map
     const mimeMap: Record<string, string> = {
@@ -935,6 +923,14 @@ app.whenReady().then(() => {
     const ext = extname(filePath).toLowerCase()
     const contentType = mimeMap[ext] || 'application/octet-stream'
     const fileSize = statSync(filePath).size
+    const fullResponseHeaders = {
+      'Content-Type': contentType,
+      'Content-Length': String(fileSize),
+      'Accept-Ranges': 'bytes',
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
+      'Access-Control-Allow-Headers': 'Range',
+    }
 
     // Parse Range header for partial content (required for video seeking)
     const rangeHeader = request.headers.get('Range')
@@ -971,6 +967,20 @@ app.whenReady().then(() => {
       }
     }
 
+    if (request.method === 'HEAD') {
+      return new Response(null, {
+        status: 200,
+        headers: fullResponseHeaders,
+      })
+    }
+
+    if (contentType.startsWith('image/')) {
+      return new Response(await readFile(filePath), {
+        status: 200,
+        headers: fullResponseHeaders,
+      })
+    }
+
     // Full file response — also use stream for large files
     const stream = createReadStream(filePath)
     const readable = new ReadableStream({
@@ -984,14 +994,7 @@ app.whenReady().then(() => {
 
     return new Response(readable, {
       status: 200,
-      headers: {
-        'Content-Type': contentType,
-        'Content-Length': String(fileSize),
-        'Accept-Ranges': 'bytes',
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS',
-        'Access-Control-Allow-Headers': 'Range',
-      },
+      headers: fullResponseHeaders,
     })
   })
 

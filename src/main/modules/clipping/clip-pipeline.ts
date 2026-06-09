@@ -331,13 +331,15 @@ function buildJinaOnlyExtraction(
   fallbackTitle: string,
   sourceUrl: string,
 ): ExtractionResult {
-  const title = extractJinaMarkdownTitle(markdown) || fallbackTitle
+  const extractedTitle = extractJinaMarkdownTitle(markdown) || fallbackTitle
+  const title = resolveJinaOnlyTitle(extractedTitle, cleanedMarkdown, sourceUrl)
   const words = cleanedMarkdown.trim().split(/\s+/).filter(Boolean).length
   return {
     title,
     contentMarkdown: cleanedMarkdown,
     metadata: {
-      published: extractJinaPublishedTime(markdown) || undefined,
+      author: extractWeiboAuthor(markdown, sourceUrl) || undefined,
+      published: extractJinaPublishedTime(markdown) || extractWeiboPublished(markdown, sourceUrl) || undefined,
       site: siteFromUrl(sourceUrl) || undefined,
       wordCount: words,
     },
@@ -363,11 +365,44 @@ function extractJinaPublishedTime(markdown: string): string {
   return match?.[1]?.trim() || ''
 }
 
+function resolveJinaOnlyTitle(title: string, cleanedMarkdown: string, sourceUrl: string): string {
+  if (!isWeiboUrl(sourceUrl) || !isGenericWeiboTitle(title)) return title
+  const candidate = extractWeiboTitleFromCleanedMarkdown(cleanedMarkdown)
+  return candidate || title
+}
+
+function isGenericWeiboTitle(title: string): boolean {
+  return /^微博正文\s*-\s*微博$/i.test(title.trim())
+}
+
+function extractWeiboTitleFromCleanedMarkdown(markdown: string): string {
+  for (const block of splitMarkdownBlocks(markdown)) {
+    if (isContentImageBlock(block)) continue
+    const text = stripMarkdown(block).replace(/\s+/g, ' ').trim()
+    if (!text || /^长图$/.test(text)) continue
+    return text.length > 48 ? `${text.slice(0, 48)}...` : text
+  }
+  return ''
+}
+
 function siteFromUrl(sourceUrl: string): string {
   try {
     return new URL(sourceUrl).hostname.replace(/^www\./, '')
   } catch {
     return ''
+  }
+}
+
+function isWeiboUrl(sourceUrl?: string): boolean {
+  if (!sourceUrl) return false
+  try {
+    const hostname = new URL(sourceUrl).hostname
+    return hostname === 'weibo.com' ||
+      hostname.endsWith('.weibo.com') ||
+      hostname === 'weibo.cn' ||
+      hostname.endsWith('.weibo.cn')
+  } catch {
+    return false
   }
 }
 
@@ -377,11 +412,18 @@ export function cleanJinaReaderMarkdown(markdown: string, sourceUrl?: string, ti
 
   const body = stripJinaReaderEnvelope(raw)
   const title = titleHint?.trim() || extractJinaMarkdownTitle(raw)
-  const imageCleaned = normalizeJinaImageRefs(body, sourceUrl)
+  const sourceIsWeibo = isWeiboUrl(sourceUrl)
+  const imageCleaned = sourceIsWeibo
+    ? normalizeWeiboImageRefs(removeWeiboChromeImageRefs(body), sourceUrl)
+    : normalizeJinaImageRefs(body, sourceUrl)
   let blocks = splitMarkdownBlocks(imageCleaned).filter((block) => !JINA_HEADER_RE.test(block.trim()))
-  blocks = trimBlocksToArticleStart(blocks, title, sourceUrl)
-  blocks = trimBlocksBeforeFooter(blocks)
-  blocks = blocks.filter((block) => !isJinaBoilerplateBlock(block, sourceUrl))
+  if (sourceIsWeibo) {
+    blocks = trimWeiboJinaBlocks(blocks, sourceUrl)
+  } else {
+    blocks = trimBlocksToArticleStart(blocks, title, sourceUrl)
+    blocks = trimBlocksBeforeFooter(blocks)
+    blocks = blocks.filter((block) => !isJinaBoilerplateBlock(block, sourceUrl))
+  }
   blocks = dedupeSimilarBlocks(blocks)
 
   return normalizeMarkdownSpacing(blocks.join('\n\n'))
@@ -485,13 +527,30 @@ function normalizeJinaImageRefs(markdown: string, sourceUrl?: string): string {
     .replace(LINKED_IMAGE_RE, (_whole, rawAlt: string, imageUrl: string, trailingText: string, targetUrl: string) => {
       if (shouldDropJinaImage(rawAlt, imageUrl, sourceUrl, trailingText)) return ''
       const bestUrl = isLikelyContentImageUrl(targetUrl, sourceUrl) ? targetUrl : imageUrl
-      return `![${cleanJinaImageAlt(rawAlt)}](${bestUrl})`
+      const normalizedUrl = normalizeJinaOutputImageUrl(bestUrl, sourceUrl)
+      return `![${cleanJinaImageAlt(rawAlt)}](${normalizedUrl})`
     })
     .replace(IMG_MARKDOWN_ANY_RE, (whole, rawAlt: string, url: string) => {
       if (!/^https?:\/\//i.test(url)) return whole
       if (shouldDropJinaImage(rawAlt, url, sourceUrl, '')) return ''
-      return `![${cleanJinaImageAlt(rawAlt)}](${url})`
+      return `![${cleanJinaImageAlt(rawAlt)}](${normalizeJinaOutputImageUrl(url, sourceUrl)})`
     })
+}
+
+function removeWeiboChromeImageRefs(markdown: string): string {
+  return markdown.replace(
+    /!\[[^\]\n]*(?:\[[^\]\n]*\][^\]\n]*)?\]\(https?:\/\/(?:face\.t\.sinajs\.cn|h5\.sinaimg\.cn|tva(?:x)?\d*\.sinaimg\.cn)[^)\s]*\)/gi,
+    '',
+  )
+}
+
+function normalizeWeiboImageRefs(markdown: string, sourceUrl?: string): string {
+  return markdown.replace(IMG_MARKDOWN_ANY_RE, (whole, rawAlt: string, url: string) => {
+    if (!/^https?:\/\//i.test(url)) return whole
+    if (isWeiboChromeImage(url)) return ''
+    if (!isLikelyContentImageUrl(url, sourceUrl)) return ''
+    return `![${cleanJinaImageAlt(rawAlt)}](${normalizeJinaOutputImageUrl(url, sourceUrl)})`
+  })
 }
 
 function shouldDropJinaImage(rawAlt: string, imageUrl: string, sourceUrl?: string, trailingText?: string): boolean {
@@ -499,11 +558,127 @@ function shouldDropJinaImage(rawAlt: string, imageUrl: string, sourceUrl?: strin
   const visibleText = `${alt} ${trailingText || ''}`.trim()
   if (!isLikelyContentImageUrl(imageUrl, sourceUrl)) return true
   if (/cdn\.gtranslate\.net\/flags/i.test(imageUrl)) return true
+  if (isWeiboUrl(sourceUrl) && isWeiboChromeImage(imageUrl)) return true
   if (/\/(?:flags|logo|favicon|icon)\b/i.test(imageUrl)) return true
   if (/z_logo|\/logo\.(?:png|jpe?g|svg|webp)$/i.test(imageUrl)) return true
   if (/^image\s+\d+:\s*[a-z]{2}(?:-[a-z]{2})?$/i.test(alt)) return true
   if (/^image\s+\d+/i.test(alt) && /^[A-Z][a-z]+(?: \([^)]+\))?$/.test(visibleText)) return true
   return false
+}
+
+function trimWeiboJinaBlocks(blocks: string[], sourceUrl?: string): string[] {
+  const startIndex = findWeiboContentStart(blocks)
+  const candidate = startIndex >= 0 ? blocks.slice(startIndex) : blocks
+  const endIndex = candidate.findIndex((block) => isWeiboFooterBlock(block))
+  const content = endIndex >= 0 ? candidate.slice(0, endIndex) : candidate
+  return content.filter((block) => isContentImageBlock(block, sourceUrl) || !isWeiboChromeBlock(block))
+}
+
+function findWeiboContentStart(blocks: string[]): number {
+  const followIndex = blocks.findIndex((block) => {
+    const text = stripMarkdown(block).trim()
+    return text === '关注' || text === '已关注'
+  })
+  if (followIndex >= 0 && followIndex + 1 < blocks.length) {
+    for (let i = followIndex + 1; i < blocks.length; i += 1) {
+      if (isWeiboLeadingMetaBlock(blocks[i])) continue
+      return i
+    }
+  }
+
+  const publicIndex = blocks.findIndex((block) => stripMarkdown(block).trim() === '公开')
+  if (publicIndex < 0) return -1
+  for (let i = publicIndex + 1; i < blocks.length; i += 1) {
+    const text = stripMarkdown(blocks[i]).trim()
+    if (/^发布于\s+/.test(text) || /^来自\s+/.test(text)) continue
+    if (/^\d{2,4}-\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2}/.test(text)) continue
+    if (isContentImageBlock(blocks[i])) continue
+    if (text && text !== '关注' && text !== '已关注') return i
+  }
+  return -1
+}
+
+function isWeiboFooterBlock(block: string): boolean {
+  const text = stripMarkdown(block).replace(/\s+/g, ' ').trim()
+  return text === '分享这条博文' ||
+    text === '评论' ||
+    text === '按热度' ||
+    text === '按时间' ||
+    text === '同时转发' ||
+    text === '随时随地发现新鲜事' ||
+    text === '微博热搜' ||
+    text === '帮助中心' ||
+    text === '合作&服务' ||
+    text === '关于微博' ||
+    text === '客户端下载' ||
+    /^Copyright ©/.test(text)
+}
+
+function isWeiboChromeBlock(block: string): boolean {
+  const text = stripMarkdown(block).replace(/\s+/g, ' ').trim()
+  if (!text) return true
+  if (text === '长图') return true
+  if (/^\d+$/.test(text)) return true
+  if (/^- \[[ x]\]\s*同时转发$/i.test(block.trim())) return true
+  if (/^Translate content$/i.test(text)) return true
+  return false
+}
+
+function isWeiboLeadingMetaBlock(block: string): boolean {
+  const text = stripMarkdown(block).replace(/\s+/g, ' ').trim()
+  if (!text) return true
+  if (/^\d{2,4}-\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2}/.test(text)) return true
+  if (/^发布于\s+/.test(text)) return true
+  if (/^来自\s+/.test(text)) return true
+  if (/https:\/\/weibo\.com\/u\/\d+/.test(block) && text.length <= 30) return true
+  return false
+}
+
+function normalizeJinaOutputImageUrl(rawUrl: string, sourceUrl?: string): string {
+  if (!isWeiboUrl(sourceUrl)) return rawUrl
+  try {
+    const parsed = new URL(rawUrl)
+    if (!/(^|\.)sinaimg\.cn$/i.test(parsed.hostname)) return rawUrl
+    parsed.pathname = parsed.pathname.replace(/^\/(?:orj360|thumb\d+|mw\d+|large|oslarge)\//i, '/original/')
+    return parsed.toString()
+  } catch {
+    return rawUrl
+  }
+}
+
+function isWeiboChromeImage(rawUrl: string): boolean {
+  try {
+    const parsed = new URL(rawUrl)
+    const host = parsed.hostname.toLowerCase()
+    return host === 'face.t.sinajs.cn' ||
+      host === 'h5.sinaimg.cn' ||
+      /^tva(?:x)?\d*\.sinaimg\.cn$/i.test(host)
+  } catch {
+    return false
+  }
+}
+
+function extractWeiboAuthor(markdown: string, sourceUrl: string): string {
+  if (!isWeiboUrl(sourceUrl)) return ''
+  const blocks = splitMarkdownBlocks(stripJinaReaderEnvelope(markdown))
+  const publicIndex = blocks.findIndex((block) => stripMarkdown(block).trim() === '公开')
+  if (publicIndex <= 0) return ''
+  for (let i = publicIndex - 1; i >= 0; i -= 1) {
+    const text = stripMarkdown(blocks[i]).replace(/\s+/g, ' ').trim()
+    if (text && !/^返回$/.test(text) && !/^推荐$/.test(text)) return text
+  }
+  return ''
+}
+
+function extractWeiboPublished(markdown: string, sourceUrl: string): string {
+  if (!isWeiboUrl(sourceUrl)) return ''
+  const blocks = splitMarkdownBlocks(stripJinaReaderEnvelope(markdown))
+  for (const block of blocks) {
+    const text = stripMarkdown(block).replace(/\s+/g, ' ').trim()
+    const match = /^(\d{2,4}-\d{1,2}-\d{1,2}\s+\d{1,2}:\d{2})/.exec(text)
+    if (match?.[1]) return match[1]
+  }
+  return ''
 }
 
 function isLikelyContentImageUrl(rawUrl: string, sourceUrl?: string): boolean {
