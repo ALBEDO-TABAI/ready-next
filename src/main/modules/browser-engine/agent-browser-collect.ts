@@ -39,6 +39,30 @@ export const DEFAULT_VISIBLE_COLLECT_LIMITS: VisibleCollectLimits = {
   emptyRoundsToStop: 2,
 }
 
+export const DISCOVERY_ESCALATION_SCROLL_STEPS = 2
+export const DISCOVERY_ESCALATION_TIMEOUT_MS = 5_000
+
+export const DISCOVERY_ESCALATION_LOADING_GONE_JS = `
+(() => {
+  const visible = (el) => {
+    if (!(el instanceof Element)) return false
+    const rect = el.getBoundingClientRect()
+    if (rect.width <= 0 || rect.height <= 0) return false
+    const style = getComputedStyle(el)
+    return style.display !== 'none' && style.visibility !== 'hidden' && Number(style.opacity || '1') > 0
+  }
+  const busy = Array.from(document.querySelectorAll([
+    '[aria-busy="true"]',
+    '[role="progressbar"]',
+    '[class*="loading" i]',
+    '[class*="spinner" i]',
+    '[class*="skeleton" i]',
+    '[data-loading="true"]'
+  ].join(','))).some(visible)
+  return document.readyState !== 'loading' && !busy
+})()
+`.trim()
+
 function normalizeLink(link: string): string {
   try {
     const url = new URL(link)
@@ -127,4 +151,21 @@ export function evaluateStop(
   if (state.elapsedMs >= limits.maxDurationMs) return 'max_duration'
   if (state.consecutiveEmptyRounds >= limits.emptyRoundsToStop) return 'no_new_content'
   return null
+}
+
+export async function runDiscoveryEscalationProbe<T>(opts: {
+  scrollViewportOnce: () => Promise<{ scrollY: number; atBottom: boolean }>
+  readFreshItems: () => Promise<T[]>
+  scrollSteps?: number
+}): Promise<{ freshItems: T[]; scrolls: number; atBottom: boolean }> {
+  const scrollSteps = Math.max(1, Math.floor(opts.scrollSteps ?? DISCOVERY_ESCALATION_SCROLL_STEPS))
+  let atBottom = false
+  let scrolls = 0
+  for (let i = 0; i < scrollSteps; i += 1) {
+    const scrolled = await opts.scrollViewportOnce()
+    scrolls += 1
+    atBottom = Boolean(scrolled.atBottom)
+  }
+  const freshItems = await opts.readFreshItems()
+  return { freshItems, scrolls, atBottom }
 }

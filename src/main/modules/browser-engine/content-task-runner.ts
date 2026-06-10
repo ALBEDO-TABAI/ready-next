@@ -13,8 +13,11 @@ import { BrowserTaskPersistenceService } from './task-persistence-service'
 import { isTaskEventBridgeStatus, taskEventBridge } from './task-event-bridge'
 import {
   DEFAULT_VISIBLE_COLLECT_LIMITS,
+  DISCOVERY_ESCALATION_LOADING_GONE_JS,
+  DISCOVERY_ESCALATION_TIMEOUT_MS,
   VisibleCollectDeduper,
   evaluateStop,
+  runDiscoveryEscalationProbe,
   type VisibleCollectItem,
   type VisibleCollectLimits,
 } from './agent-browser-collect'
@@ -27,6 +30,8 @@ import type { NoteCollectFacade } from './browser-collector-actions'
 import { isHighControlPlatformText } from '../../../shared/browser-collection-intent'
 import { deriveCollectionTargets, type BrowserCollectionTarget } from './collection-targets'
 import { resolveCollectionVerdict } from './collection-verdict'
+import type { BrowserAgentRuntime } from './agent-runtime-adapter'
+import { BrowserPageStateService, normalizeEmptyPageDiagnostic, type BrowserEmptyPageDiagnostic } from './page-state-service'
 
 /**
  * Per-task collector binding (plan §3.4). The controller provides this factory
@@ -210,6 +215,67 @@ function visibleCollectResult(taskId: string, items: BrowserStructuredItem[], ro
         }
       : {}),
   }
+}
+
+function pageStateRuntimeFromCapabilityService(capabilityService: BrowserCapabilityService): BrowserAgentRuntime | null {
+  const host = (capabilityService as unknown as {
+    host?: {
+      executeJS?: (tabId: string | null, code: string) => Promise<unknown>
+      getActiveTab?: () => { id?: string; url?: string; title?: string; domain?: string } | undefined
+    }
+  }).host
+  if (!host || typeof host.executeJS !== 'function' || typeof host.getActiveTab !== 'function') return null
+  return {
+    executeJS: (tabId, code) => host.executeJS?.(tabId, code) ?? Promise.resolve(null),
+    getActiveTab: () => {
+      const active = host.getActiveTab?.()
+      if (!active) return undefined
+      const url = String(active.url || '')
+      let domain = String(active.domain || '')
+      if (!domain && url) {
+        try {
+          domain = new URL(url).hostname
+        } catch {
+          domain = ''
+        }
+      }
+      return {
+        id: String(active.id || ''),
+        url,
+        title: String(active.title || ''),
+        domain,
+        active: true,
+      }
+    },
+  } as BrowserAgentRuntime
+}
+
+async function probeVisibleCollectEmptyDiagnostics(
+  capabilityService: BrowserCapabilityService,
+  params: { targetUrl: string; itemSelector?: string; template: string },
+): Promise<BrowserEmptyPageDiagnostic> {
+  const provider = capabilityService as BrowserCapabilityService & {
+    probeEmptyPageDiagnostic?: (params: { targetUrl?: string; itemSelector?: string; template?: string }) => Promise<unknown>
+  }
+  if (typeof provider.probeEmptyPageDiagnostic === 'function') {
+    try {
+      return normalizeEmptyPageDiagnostic(await provider.probeEmptyPageDiagnostic(params))
+    } catch {
+      return normalizeEmptyPageDiagnostic({ reason: 'selector_mismatch', evidence: ['empty_diagnostic_probe_failed'] })
+    }
+  }
+  const runtime = pageStateRuntimeFromCapabilityService(capabilityService)
+  if (runtime) {
+    try {
+      return await new BrowserPageStateService(runtime).probeEmptyPageDiagnostic(params)
+    } catch {
+      return normalizeEmptyPageDiagnostic({ reason: 'selector_mismatch', evidence: ['empty_diagnostic_probe_failed'] })
+    }
+  }
+  return normalizeEmptyPageDiagnostic({
+    reason: params.itemSelector ? 'selector_mismatch' : 'empty_list',
+    evidence: ['visible_collect_empty_result'],
+  })
 }
 
 function completedAllExpected(expected: number, completed: number, failed: number, stopReason: string | null): boolean {
@@ -812,6 +878,37 @@ export class BrowserContentTaskRunner {
     }
     const batchStartCount = collected.length
     const batchStartRound = round
+    const addFreshItems = (items: BrowserStructuredItem[]): BrowserStructuredItem[] => {
+      const freshOriginals: BrowserStructuredItem[] = []
+      for (const item of items) {
+        const identityInput: VisibleCollectItem = {
+          link: item.link,
+          text: item.title || item.summary,
+          containerPath: item.sourceUrl,
+        }
+        if (deduper.addBatch([identityInput]).length > 0) {
+          freshOriginals.push(item)
+        }
+      }
+      return freshOriginals
+    }
+    const checkpointVisibleCollect = (label: string): void => {
+      const frozenCount = visibleCollectFrozenCount(collected, template)
+      this.persistenceService.updateProgress(taskId, {
+        total: frozenCount,
+        completed: 0,
+        failed: 0,
+        currentLabel: label,
+      }, {
+        checkpoint: {
+          taskId,
+          stage: 'visible_collect_round',
+          cursor: String(round),
+          partialResults: collected,
+        },
+      })
+      this.projectVisibleCollect(taskId, scopeId, 'running', frozenCount, label, { hasMoreLikely: true, userExpectedTotal: Number(payload.userExpectedTotal || 0) || undefined })
+    }
 
     while (true) {
       // Before any page write this round, confirm we still hold the lease; a
@@ -830,6 +927,32 @@ export class BrowserContentTaskRunner {
         limits,
       )
       if (stop) {
+        if (stop === 'no_new_content') {
+          const escalation = await runDiscoveryEscalationProbe<BrowserStructuredItem>({
+            scrollViewportOnce: () => this.capabilityService.scrollViewportOnce(tabId),
+            readFreshItems: async () => {
+              const extracted = await this.capabilityService.extractStructured(tabId, {
+                template,
+                itemSelector,
+                limit: limits.maxItems,
+                wait: {
+                  condition: 'custom_js',
+                  customJs: DISCOVERY_ESCALATION_LOADING_GONE_JS,
+                  timeoutMs: DISCOVERY_ESCALATION_TIMEOUT_MS,
+                  checkIntervalMs: 250,
+                },
+              })
+              return addFreshItems(extracted.items)
+            },
+          })
+          if (escalation.freshItems.length > 0) {
+            round += 1
+            consecutiveEmptyRounds = 0
+            collected.push(...escalation.freshItems)
+            checkpointVisibleCollect(`probe ${round}`)
+            continue
+          }
+        }
         stopReason = stop
         break
       }
@@ -841,17 +964,7 @@ export class BrowserContentTaskRunner {
         itemSelector,
         limit: limits.maxItems,
       })
-      const freshOriginals: BrowserStructuredItem[] = []
-      for (const item of extracted.items) {
-        const identityInput: VisibleCollectItem = {
-          link: item.link,
-          text: item.title || item.summary,
-          containerPath: item.sourceUrl,
-        }
-        if (deduper.addBatch([identityInput]).length > 0) {
-          freshOriginals.push(item)
-        }
-      }
+      const freshOriginals = addFreshItems(extracted.items)
       if (freshOriginals.length === 0) {
         consecutiveEmptyRounds += 1
       } else {
@@ -860,21 +973,7 @@ export class BrowserContentTaskRunner {
       }
 
       // Checkpoint EVERY round so a crash/cancel resumes from here.
-      const frozenCount = visibleCollectFrozenCount(collected, template)
-      this.persistenceService.updateProgress(taskId, {
-        total: frozenCount,
-        completed: 0,
-        failed: 0,
-        currentLabel: `round ${round}`,
-      }, {
-        checkpoint: {
-          taskId,
-          stage: 'visible_collect_round',
-          cursor: String(round),
-          partialResults: collected,
-        },
-      })
-      this.projectVisibleCollect(taskId, scopeId, 'running', frozenCount, `round ${round}`, { hasMoreLikely: true, userExpectedTotal: Number(payload.userExpectedTotal || 0) || undefined })
+      checkpointVisibleCollect(`round ${round}`)
 
       if (this.cancelledTasks.has(taskId)) {
         stopReason = 'cancelled'
@@ -910,9 +1009,21 @@ export class BrowserContentTaskRunner {
     const finalCheckpointStage = keepCursor
       ? 'visible_collect_round'
       : finalStatus
+    const emptyDiagnostics = (
+      stopReason !== 'cancelled' &&
+      stopReason !== 'lease_lost' &&
+      collectionVerdict.verdict === 'needs_attention'
+    )
+      ? await probeVisibleCollectEmptyDiagnostics(this.capabilityService, { targetUrl, itemSelector, template })
+      : null
     const finalResultWithVerdict = stopReason === 'cancelled' || stopReason === 'lease_lost'
       ? finalResult
-      : { ...finalResult, labelKey: collectionVerdict.labelKey, verdict: collectionVerdict.verdict }
+      : {
+          ...finalResult,
+          labelKey: collectionVerdict.labelKey,
+          verdict: collectionVerdict.verdict,
+          ...(emptyDiagnostics ? { emptyDiagnostics } : {}),
+        }
     this.persistenceService.updateProgress(taskId, {
       total: Number(finalResult.frozenCount || 0),
       completed: 0,

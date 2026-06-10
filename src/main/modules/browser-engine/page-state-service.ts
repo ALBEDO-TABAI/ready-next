@@ -175,6 +175,80 @@ export class BrowserPageStateService {
       continuity: params.continuity,
     })
   }
+
+  async probeEmptyPageDiagnostic(params: {
+    targetUrl?: string
+    itemSelector?: string
+  } = {}): Promise<BrowserEmptyPageDiagnostic> {
+    const state = await this.capturePageState({
+      promptCandidate: '',
+      targetUrl: params.targetUrl,
+    })
+    return diagnoseEmptyPageState(state, { itemSelector: params.itemSelector })
+  }
+}
+
+export type BrowserEmptyPageReason =
+  | 'login_wall'
+  | 'empty_list'
+  | 'selector_mismatch'
+  | 'still_loading'
+
+export interface BrowserEmptyPageDiagnostic {
+  reason: BrowserEmptyPageReason
+  evidence: string[]
+}
+
+const EMPTY_PAGE_REASONS = new Set<BrowserEmptyPageReason>([
+  'login_wall',
+  'empty_list',
+  'selector_mismatch',
+  'still_loading',
+])
+
+export function normalizeEmptyPageDiagnostic(input: unknown, fallback: BrowserEmptyPageReason = 'selector_mismatch'): BrowserEmptyPageDiagnostic {
+  const record = input && typeof input === 'object' ? input as Record<string, unknown> : {}
+  const reason = EMPTY_PAGE_REASONS.has(record.reason as BrowserEmptyPageReason)
+    ? record.reason as BrowserEmptyPageReason
+    : fallback
+  const evidence = Array.isArray(record.evidence)
+    ? record.evidence.map((item) => String(item || '').trim()).filter(Boolean).slice(0, 6)
+    : []
+  return { reason, evidence }
+}
+
+export function diagnoseEmptyPageState(state: BrowserPageState, opts: { itemSelector?: string } = {}): BrowserEmptyPageDiagnostic {
+  const bodyText = normalizeProbeText(state.dom.bodyStateText)
+  const evidence = [
+    ...state.evidence.recentEvidence,
+    state.evidence.running || state.prompt.generating ? 'page_reports_running' : '',
+    state.risks.modalVisible ? 'modal_visible' : '',
+    opts.itemSelector ? `item_selector:${opts.itemSelector}` : '',
+  ].filter(Boolean).slice(0, 6)
+
+  if (
+    state.evidence.running ||
+    state.prompt.generating ||
+    /(loading|generating|running|处理中|加载中|生成中|排队|稍候)/.test(bodyText)
+  ) {
+    return { reason: 'still_loading', evidence }
+  }
+
+  if (
+    state.risks.modalVisible &&
+    /(login|log in|sign in|signin|captcha|verify|登录|登陆|验证码|验证|请先登录)/.test(bodyText)
+  ) {
+    return { reason: 'login_wall', evidence }
+  }
+
+  if (/(no results|no content|nothing here|empty|暂无|没有内容|没有结果|空列表|还没有)/.test(bodyText)) {
+    return { reason: 'empty_list', evidence }
+  }
+
+  return {
+    reason: opts.itemSelector ? 'selector_mismatch' : 'empty_list',
+    evidence,
+  }
 }
 
 function coerceReadonlyProbe(input: unknown): BrowserReadonlyProbeResult | null {
