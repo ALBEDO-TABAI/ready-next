@@ -14,6 +14,7 @@ import type { IntentClassification } from './intent-classifier'
 import { classifyIntent } from './intent-classifier'
 import type { RequestEnvelope } from './contracts/request-envelope'
 import { buildRequestEnvelope } from './contracts/request-envelope'
+import { filterDailyMemoryForScope } from './session/daily-memory-scope-filter'
 import type { SessionRecallCapsule } from '../../../shared/session-recall'
 import type { CoordinatorPromptFragment, DomainAdapter } from './domain-adapters/domain-adapter'
 
@@ -558,7 +559,12 @@ export class PromptAssemblyService {
     const dailySections = includeDailyMemory
       ? dayFiles
         .map((path) => {
-          const content = sanitizeCommandLikeContent(this.readMemoryFile(path, memoryRoot)).trim()
+          // S4-4 (C4.3): scope-filter the daily memory so other tasks'
+          // imperative checkpoint lines never steer this conversation.
+          const content = filterDailyMemoryForScope(
+            sanitizeCommandLikeContent(this.readMemoryFile(path, memoryRoot)),
+            scope.title,
+          ).trim()
           return content ? formatMemorySection(path.split('/').pop() || path, content) : ''
         })
         .filter(Boolean)
