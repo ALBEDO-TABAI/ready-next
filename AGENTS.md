@@ -39,6 +39,10 @@
 - AI provider 能力必须从共享能力层判断；不要把“OpenAI 兼容”当成原生 tools/vision/video 一定可用。
 - 工具错误由 dispatch 层转成结构化 `ToolExecutionOutput` 回灌模型；只有 Abort 或 host 不可用这类基础设施错误可以冒泡。
 - 主进程启动、日志轮转、SQLite native gate 和 `better-sqlite3` 真实加载都是验收边界；SQLite 路径不能用 host Node skip 当通过。
+- Run 终止走唯一收口通道：所有退出路径经 `runtime-core/run-finalizer.ts` 的 `finalizeRunOutcome()`，终态账本与可见收口原子完成；通道外写终态被 `check-run-finalize-funnel.cjs` 禁止。零工具的"行动宣告"不得直接判 done（先转向、再 checkpoint）。
+- 后台任务（browser_tasks/skill child）终态必须经 `TaskEventBridge` 推回 agent 循环（活跃 run 注提醒 / 无 run 落 pending + 播报续跑）；无注册路由的 scheduleTask 运行时断言失败。自动续跑仅限播报建议（narration 档），执行类动作需用户显式确认。
+- 采集终态判决唯一来自 `browser-engine/collection-verdict.ts` 的 `resolveCollectionVerdict()`：0 条永不 completed；部分进展永不清断点；整任务重试只重试失败项。
+- 稳定性合同回归入口：`npm run verify:stability`（终止合同/事件桥/判定矩阵/意图分类/会话快照全链焦点测试 + 三个 gate）。
 
 ## 3. Agent 与 Skill Runtime 速查
 - `skill_executions` 状态机和相关 IPC/工具已退役；不要复活 workflow coordinator。新进度语义走当前的 task tracker、projection、child-run 合同。
@@ -105,6 +109,7 @@
 - Skill authorization：`docs/superpowers/plans/2026-05-07-P-stage-10-transitional-bridge-retirement-implementation.md`
 - Skill resumability：`docs/superpowers/plans/2026-05-07-Q-skill-resumability-triple-fence-implementation.md`
 - Research / provider / MCP / sandbox：`docs/superpowers/plans/2026-05-08-R-stage12-implementation.md`、`docs/superpowers/plans/2026-05-09-S-stage13-implementation.md`、`docs/superpowers/plans/2026-05-09-T-stage14-implementation.md`
+- Agent 稳定性收口：`docs/superpowers/plans/2026-06-10-agent-stability-closure-implementation.md`（roadmap 同日同名 -roadmap.md）
 
 ## 9. 常用命令
 ```bash
@@ -114,6 +119,7 @@ npm run verify:native
 npm run typecheck
 npm run test
 npm run verify
+npm run verify:stability
 npm run build
 ```
 
