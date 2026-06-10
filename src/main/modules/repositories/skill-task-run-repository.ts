@@ -1,5 +1,14 @@
 import { randomUUID } from 'node:crypto'
 
+function fsExistsSyncSafe(path: string): boolean {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    return require('node:fs').existsSync(path)
+  } catch {
+    return false
+  }
+}
+
 import type {
   SkillChildRunPayload,
   SkillChildRunStatus,
@@ -535,7 +544,15 @@ export class SkillTaskRunRepository {
         continue
       }
       const handle = durableHandleFromRecord(row)
-      const hasHandle = Boolean(handle.outputDir || handle.runStatePath)
+      // Review-team A5: shape alone is not resumability — the run_state file
+      // must still exist on disk, mirroring the projection reconciler's
+      // canResumeWithFs upgrade. A dead handle resolves to failed, not
+      // recoverable_paused.
+      const handleOnDisk = Boolean(
+        (handle.runStatePath && fsExistsSyncSafe(handle.runStatePath))
+        || (!handle.runStatePath && handle.outputDir && fsExistsSyncSafe(handle.outputDir)),
+      )
+      const hasHandle = handleOnDisk
       const child = childRunRecord(row.resumePayload)
       if (hasHandle) {
         const nextPayload = child

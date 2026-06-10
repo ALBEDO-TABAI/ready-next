@@ -46,9 +46,16 @@ const pendingReminderTextsByScope = new Map<string, string[]>()
 const pendingTaskEventListeners = new Set<() => void>()
 let pendingTaskEventDatabaseOverride: PendingTaskEventDatabase | null = null
 
+const NARRATION_FAILURE_MAX_ATTEMPTS = 3
+const NARRATION_FAILURE_BACKOFF_MS = 30_000
+
 export class AutoNarrationContinuationRunner {
   private inFlight = false
   private scheduled = false
+  // Review-team B4: a failing pending row must not block the queue head
+  // forever nor retry hot. Attempts are in-memory (restart resets — the
+  // cap re-arms, which is fine: it is a storm brake, not a ledger).
+  private readonly failureByRowId = new Map<number, { attempts: number; lastFailedAtMs: number }>()
 
   constructor(private readonly deps: AutoNarrationContinuationRunnerDeps) {}
 
@@ -67,13 +74,26 @@ export class AutoNarrationContinuationRunner {
     const row = this.deps.getOldestPendingTaskEvent()
     if (!row) return 'none'
 
+    const failure = this.failureByRowId.get(row.id)
+    if (failure && Date.now() - failure.lastFailedAtMs < NARRATION_FAILURE_BACKOFF_MS) {
+      return 'failed'
+    }
+
     this.inFlight = true
     try {
       const result = await this.deps.startNarrationContinuationRun(row)
       if (!result.success) {
+        const attempts = (failure?.attempts ?? 0) + 1
+        this.failureByRowId.set(row.id, { attempts, lastFailedAtMs: Date.now() })
         this.deps.onNarrationContinuationFailure?.(row, result.error || null)
+        if (attempts >= NARRATION_FAILURE_MAX_ATTEMPTS) {
+          // give up loudly: consume so newer events stop starving behind it
+          this.deps.markPendingTaskEventConsumed(row.id)
+          this.failureByRowId.delete(row.id)
+        }
         return 'failed'
       }
+      this.failureByRowId.delete(row.id)
       this.deps.markPendingTaskEventConsumed(row.id)
       return 'started'
     } finally {
@@ -128,6 +148,21 @@ export function insertPendingTaskEvent(payload: TaskEventBridgePayload): Pending
   const createdAt = Date.now()
   const taskRunId = normalizeId(payload.taskId)
   const eventPayload = JSON.stringify(payload)
+  // Review-team B1: the in-memory publish dedupe dies with the process, so
+  // the durable layer must dedupe too. Terminal states (completed/failed)
+  // are once-per-task — any existing row for the pair suppresses re-insert;
+  // re-enterable states (paused/needs_attention/waiting_human) only suppress
+  // while an unconsumed twin is still queued.
+  const status = String(payload.status || '')
+  const terminalOnce = status === 'completed' || status === 'failed'
+  const dupe = db.prepare(`
+    SELECT id FROM pending_task_events
+    WHERE task_run_id = ?
+      AND event_payload LIKE ?
+      ${terminalOnce ? '' : 'AND consumed = 0'}
+    LIMIT 1
+  `).get(taskRunId, `%"status":"${status}"%`)
+  if (dupe) return null
   const result = db.prepare(`
     INSERT INTO pending_task_events (event_payload, task_run_id, created_at, consumed)
     VALUES (?, ?, ?, 0)

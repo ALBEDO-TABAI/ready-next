@@ -54,6 +54,21 @@ class PendingTaskEventMemoryDb implements PendingTaskEventDatabase {
 
   prepare(sql: string) {
     const normalized = sql.replace(/\s+/g, ' ').trim()
+    if (normalized.startsWith('SELECT id FROM pending_task_events')) {
+      const consumedFilter = normalized.includes('AND consumed = 0')
+      return {
+        get: (taskRunId: unknown, like: unknown) => {
+          const status = String(like).replace(/%/g, '').replace('"status":"', '').replace('"', '')
+          const hit = this.rows.find((row) =>
+            String(row.task_run_id) === String(taskRunId)
+            && row.event_payload.includes(`"status":"${status}"`)
+            && (!consumedFilter || row.consumed === 0))
+          return hit ? { id: hit.id } : undefined
+        },
+        run: () => undefined,
+        all: () => [],
+      }
+    }
     if (normalized.startsWith('INSERT INTO pending_task_events')) {
       return {
         run: (eventPayload: unknown, taskRunId: unknown, createdAt: unknown) => {
@@ -288,4 +303,45 @@ describe('auto narration continuation', () => {
       unregister()
     }
   })
+})
+
+test('durable dedupe suppresses duplicate terminal pending rows across restarts', () => {
+  const db = new PendingTaskEventMemoryDb()
+  __setPendingTaskEventDatabaseForTests(db as never)
+  try {
+    const payload = { taskId: 'task-dup', status: 'completed' } as never
+    const first = insertPendingTaskEvent(payload)
+    const second = insertPendingTaskEvent(payload)
+    assert.ok(first, 'first insert lands')
+    assert.equal(second, null, 'duplicate terminal event is suppressed at the DB layer')
+  } finally {
+    __setPendingTaskEventDatabaseForTests(null)
+  }
+})
+
+test('narration runner gives up loudly after three failures and unblocks the queue', async () => {
+  const consumed: number[] = []
+  let failures = 0
+  const runner = new AutoNarrationContinuationRunner({
+    getOldestPendingTaskEvent: () => ({ id: 7, eventPayload: '{}', taskRunId: 't', createdAt: 1, consumed: 0 }),
+    markPendingTaskEventConsumed: (id) => consumed.push(id),
+    hasActiveNarrationContinuationRun: () => false,
+    startNarrationContinuationRun: async () => {
+      failures += 1
+      return { success: false, error: 'boom' }
+    },
+  })
+  const realNow = Date.now
+  let fake = 1_000_000
+  Date.now = () => fake
+  try {
+    for (let i = 0; i < 3; i++) {
+      await runner.drainOnce()
+      fake += 31_000
+    }
+  } finally {
+    Date.now = realNow
+  }
+  assert.equal(failures, 3)
+  assert.deepEqual(consumed, [7], 'third failure consumes the row so newer events stop starving')
 })

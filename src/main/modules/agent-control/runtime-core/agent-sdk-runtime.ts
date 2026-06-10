@@ -3560,6 +3560,11 @@ export class AgentSdkRuntime extends EventEmitter {
       if (!ownsBudgetCheckpointFlight) {
         const restore = checkpointRestore
         if (!restore) {
+          this.recordAdmissionRejection({
+            name, runId, taskId, scopeId: sessionId || null,
+            status: 'error', terminalReason: 'persistence_failed',
+            finalText: '', firstMessageText: messageToText(content as RunMessage),
+          })
           return this.buildResult({
             success: false,
             error: '续跑检查点不可用',
@@ -3572,6 +3577,12 @@ export class AgentSdkRuntime extends EventEmitter {
             terminalReason: 'persistence_failed',
           })
         }
+        this.recordAdmissionRejection({
+          name, runId, taskId, scopeId: sessionId || null,
+          status: 'done', terminalReason: 'checkpoint_budget',
+          finalText: '这项任务已经在继续执行，请等待当前续跑完成。',
+          firstMessageText: messageToText(content as RunMessage),
+        })
         return this.buildResult({
           success: true,
           finalText: '这项任务已经在继续执行，请等待当前续跑完成。',
@@ -3589,6 +3600,11 @@ export class AgentSdkRuntime extends EventEmitter {
     const begin = await this.beginRun({ name, runId, sessionId })
     if (!begin.ok) {
       if (ownsBudgetCheckpointFlight) releaseBudgetCheckpointFlight(budgetCheckpointFlightKey)
+      this.recordAdmissionRejection({
+        name, runId, taskId, scopeId: sessionId || null,
+        status: 'cancelled', terminalReason: 'blocked_external',
+        finalText: '', firstMessageText: messageToText(content as RunMessage),
+      })
       return this.buildResult({
         success: false,
         error: begin.message,
@@ -5059,6 +5075,36 @@ export class AgentSdkRuntime extends EventEmitter {
         if (ownsBudgetCheckpointFlight) releaseBudgetCheckpointFlight(budgetCheckpointFlightKey)
       }
     }
+  }
+
+
+  // Review-team A1: admission rejections exit before the try/finally net, so
+  // they must write their own terminal run_meta row — a rejected request has
+  // a real runId the caller observes, and "no row" reads as a silent run.
+  private recordAdmissionRejection(params: {
+    name: string
+    runId: string
+    taskId: string
+    scopeId: string | null
+    status: string
+    terminalReason: TurnTerminalReason
+    finalText: string
+    firstMessageText: string
+  }): void {
+    void this.persistRunMetaSnapshot({
+      agentName: params.name,
+      runId: params.runId,
+      taskId: params.taskId,
+      scopeId: params.scopeId,
+      status: params.status,
+      terminalReason: params.terminalReason,
+      taskBudgetRuntime: null,
+      providerDiagnostics: null,
+      continuationRef: null,
+      usage: null,
+      firstMessageText: params.firstMessageText,
+      finalText: params.finalText,
+    }).catch(() => undefined)
   }
 
   private async persistRunMetaSnapshot(params: {

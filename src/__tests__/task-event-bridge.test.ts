@@ -29,6 +29,21 @@ class PendingTaskEventMemoryDb implements PendingTaskEventDatabase {
 
   prepare(sql: string) {
     const normalized = sql.replace(/\s+/g, ' ').trim()
+    if (normalized.startsWith('SELECT id FROM pending_task_events')) {
+      const consumedFilter = normalized.includes('AND consumed = 0')
+      return {
+        get: (taskRunId: unknown, like: unknown) => {
+          const status = String(like).replace(/%/g, '').replace('"status":"', '').replace('"', '')
+          const hit = this.rows.find((row) =>
+            String(row.task_run_id) === String(taskRunId)
+            && row.event_payload.includes(`"status":"${status}"`)
+            && (!consumedFilter || row.consumed === 0))
+          return hit ? { id: hit.id } : undefined
+        },
+        run: () => undefined,
+        all: () => [],
+      }
+    }
     if (normalized.startsWith('INSERT INTO pending_task_events')) {
       return {
         run: (eventPayload: unknown, taskRunId: unknown, createdAt: unknown) => {
