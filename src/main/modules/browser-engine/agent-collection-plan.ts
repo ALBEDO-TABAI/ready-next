@@ -61,10 +61,19 @@ export function parseCollectionPlan(
 export interface CollectionLoopState {
   cursor: number
   collected: string[]
-  failed: Array<{ url: string; reason: string }>
+  failed: CollectionItemFailure[]
+  failures: CollectionItemFailure[]
+  retryCursor: string[]
   outputs: CollectionNoteOutput[]
   consecutiveFailures: number
   startedAt: number
+}
+
+export interface CollectionItemFailure {
+  url: string
+  reason: string
+  attempts: number
+  retryable: boolean
 }
 
 export interface CollectionNoteOutput {
@@ -87,9 +96,72 @@ export interface CollectionNoteOutput {
 }
 
 const NON_FATAL_FAILURE_REASONS = new Set(['skipped_video', 'unavailable'])
+const NON_RETRYABLE_FAILURE_REASON_PATTERN = /(?:permission|forbidden|unauthorized|deleted|unavailable|skipped_video|not_found|blocked_permanent|terminal_skip)/i
+const RETRYABLE_FAILURE_REASON_PATTERN = /(?:timeout|navigation|navigate|network|temporary|transient|risk_control|rate|throttle|lease_lost)/i
+
+export function inferCollectionFailureRetryable(reason: string): boolean {
+  if (NON_RETRYABLE_FAILURE_REASON_PATTERN.test(reason)) return false
+  return RETRYABLE_FAILURE_REASON_PATTERN.test(reason)
+}
+
+function failureUrlForNote(note: CollectionNote): string {
+  return note.canonicalUrl || note.url
+}
+
+function outputMatchesUrl(output: CollectionNoteOutput, url: string, note: CollectionNote): boolean {
+  return output.url === url
+    || output.canonicalUrl === url
+    || (typeof note.openUrl === 'string' && note.openUrl.length > 0 && output.openUrl === note.openUrl)
+    || output.openUrl === note.url
+}
+
+function normalizeFailureRecord(value: unknown): CollectionItemFailure | null {
+  const record = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+  const url = String(record.url || record.canonicalUrl || record.openUrl || record.sourceUrl || '').trim()
+  if (!url) return null
+  const reason = String(record.reason || record.error || record.message || 'unknown').trim() || 'unknown'
+  const attempts = Number(record.attempts)
+  const retryable = typeof record.retryable === 'boolean'
+    ? record.retryable
+    : inferCollectionFailureRetryable(reason)
+  return {
+    url,
+    reason,
+    attempts: Number.isFinite(attempts) && attempts > 0 ? Math.floor(attempts) : 1,
+    retryable,
+  }
+}
+
+function normalizeFailureRecords(value: unknown): CollectionItemFailure[] {
+  if (!Array.isArray(value)) return []
+  return value.map(normalizeFailureRecord).filter((item): item is CollectionItemFailure => item !== null)
+}
 
 export function createCollectionLoopState(now: number): CollectionLoopState {
-  return { cursor: 0, collected: [], failed: [], outputs: [], consecutiveFailures: 0, startedAt: now }
+  return { cursor: 0, collected: [], failed: [], failures: [], retryCursor: [], outputs: [], consecutiveFailures: 0, startedAt: now }
+}
+
+export function normalizeCollectionLoopState(state: CollectionLoopState): CollectionLoopState {
+  const failures = normalizeFailureRecords((state as { failures?: unknown }).failures)
+  const failed = failures.length > 0 ? failures : normalizeFailureRecords(state.failed)
+  return {
+    cursor: Number.isFinite(Number(state.cursor)) ? Number(state.cursor) : 0,
+    collected: Array.isArray(state.collected) ? state.collected.map((item) => String(item || '')).filter(Boolean) : [],
+    failed,
+    failures: failed,
+    retryCursor: Array.isArray((state as { retryCursor?: unknown }).retryCursor)
+      ? (state as { retryCursor: unknown[] }).retryCursor.map((item) => String(item || '')).filter(Boolean)
+      : [],
+    outputs: Array.isArray(state.outputs) ? state.outputs.slice() : [],
+    consecutiveFailures: Number.isFinite(Number(state.consecutiveFailures)) ? Number(state.consecutiveFailures) : 0,
+    startedAt: Number.isFinite(Number(state.startedAt)) ? Number(state.startedAt) : Date.now(),
+  }
+}
+
+export function retryableCollectionFailures(state: CollectionLoopState): CollectionItemFailure[] {
+  const normalized = normalizeCollectionLoopState(state)
+  const collected = new Set(normalized.collected)
+  return normalized.failures.filter((item) => item.retryable && !collected.has(item.url))
 }
 
 export type CollectionStopReason =
@@ -135,21 +207,53 @@ export function recordNoteResult(
   note: CollectionNote,
   outcome: { success: boolean; reason?: string; output?: CollectionNoteOutput },
 ): CollectionLoopState {
+  return recordCollectionNoteOutcome(state, note, outcome, true)
+}
+
+export function recordRetryNoteResult(
+  state: CollectionLoopState,
+  note: CollectionNote,
+  outcome: { success: boolean; reason?: string; output?: CollectionNoteOutput },
+): CollectionLoopState {
+  return recordCollectionNoteOutcome(state, note, outcome, false)
+}
+
+function recordCollectionNoteOutcome(
+  rawState: CollectionLoopState,
+  note: CollectionNote,
+  outcome: { success: boolean; reason?: string; output?: CollectionNoteOutput },
+  advanceCursor: boolean,
+): CollectionLoopState {
+  const state = normalizeCollectionLoopState(rawState)
+  const url = failureUrlForNote(note)
+  const existingFailure = state.failures.find((item) => item.url === url)
+  const failures = state.failures.filter((item) => item.url !== url)
+  const outputs = state.outputs.filter((item) => !outputMatchesUrl(item, url, note))
   const next: CollectionLoopState = {
-    cursor: state.cursor + 1,
-    collected: state.collected.slice(),
-    failed: state.failed.slice(),
-    outputs: Array.isArray(state.outputs) ? state.outputs.slice() : [],
+    cursor: advanceCursor ? state.cursor + 1 : state.cursor,
+    collected: state.collected.filter((item) => item !== url),
+    failed: failures,
+    failures,
+    retryCursor: state.retryCursor.slice(),
+    outputs,
     consecutiveFailures: outcome.success || NON_FATAL_FAILURE_REASONS.has(String(outcome.reason || '')) ? 0 : state.consecutiveFailures + 1,
     startedAt: state.startedAt,
   }
   if (outcome.success) {
-    next.collected.push(note.url)
+    next.collected.push(url)
   } else {
-    next.failed.push({ url: note.url, reason: outcome.reason ?? 'unknown' })
+    const reason = outcome.reason ?? 'unknown'
+    const failure = {
+      url,
+      reason,
+      attempts: (existingFailure?.attempts || 0) + 1,
+      retryable: inferCollectionFailureRetryable(reason),
+    }
+    next.failed.push(failure)
+    next.failures = next.failed
   }
   next.outputs.push(outcome.output ?? {
-    url: note.url,
+    url,
     title: note.title,
     sourceId: note.sourceId,
     kind: note.kind,

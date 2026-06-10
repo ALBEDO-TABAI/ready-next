@@ -193,6 +193,24 @@ describe('collection verdict matrix', () => {
     assert.equal(verdict.verdict, 'recoverable_paused')
   })
 
+  it('S3-3 treats a terminal retryable failure ledger as recoverable partial output', () => {
+    const failedItems = [
+      { url: 'https://example.com/retry-still-fails', reason: 'navigate:navigation_failed', attempts: 3, retryable: true },
+    ]
+    const verdict = resolveCollectionVerdict({
+      collected: 4,
+      expected: 5,
+      stopReason: 'completed',
+      failures: failedItems.length,
+      cursorValid: true,
+    })
+
+    assert.equal(verdict.status, 'paused')
+    assert.equal(verdict.keepCursor, true)
+    assert.equal(verdict.labelKey, 'verdict.recoverable_paused')
+    assert.equal(verdict.verdict, 'recoverable_paused')
+  })
+
   it('continues visible discovery when the escalation probe finds new content after empty rounds', async () => {
     const persistence = new FakePersistence()
     let probeRead = false

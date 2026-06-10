@@ -13,7 +13,10 @@
 import {
   planNextNote,
   recordNoteResult,
+  recordRetryNoteResult,
   createCollectionLoopState,
+  normalizeCollectionLoopState,
+  retryableCollectionFailures,
   type CollectionPlan,
   type CollectionNote,
   type CollectionLoopState,
@@ -21,6 +24,8 @@ import {
   type CollectionStopReason,
 } from './agent-collection-plan'
 import { collectCardNote, collectNote, type NoteCollectFacade, type NoteCollectFileOps, type NoteCollectResult } from './browser-collector-actions'
+
+const MAX_FINAL_ITEM_RETRIES = 2
 
 export interface BrowserCollectionProgress {
   total: number
@@ -78,6 +83,10 @@ function isPartialImagesReason(reason: string | undefined): boolean {
   return String(reason || '').startsWith('partial_images')
 }
 
+function noteMatchesFailure(note: CollectionNote, url: string): boolean {
+  return note.url === url || note.canonicalUrl === url || note.openUrl === url
+}
+
 /**
  * Run the collection. `initialState` lets a resumed task continue from the last
  * checkpoint instead of restarting.
@@ -87,7 +96,7 @@ export async function runBrowserCollection(
   deps: BrowserCollectionDeps,
   initialState?: CollectionLoopState,
 ): Promise<BrowserCollectionResult> {
-  let state = initialState ?? createCollectionLoopState(deps.now())
+  let state = normalizeCollectionLoopState(initialState ?? createCollectionLoopState(deps.now()))
   let rounds = 0
   let totalImages = 0
   const sleep = deps.sleep ?? defaultSleep
@@ -99,35 +108,11 @@ export async function runBrowserCollection(
     if (title) titleCounts.set(title, (titleCounts.get(title) || 0) + 1)
   }
 
-  while (true) {
-    const external = deps.shouldStop?.() ?? null
-    if (external) {
-      return { collected: state.collected, failed: state.failed, notes: state.outputs || [], rounds, stopReason: external, state }
-    }
-    if (maxTotalImages > 0 && totalImages >= maxTotalImages) {
-      deps.onProgress?.(progressOf(plan, state, null, 'max_images'))
-      return { collected: state.collected, failed: state.failed, notes: state.outputs || [], rounds, stopReason: 'max_images', state }
-    }
-    const step = planNextNote(plan, state, deps.now())
-    if (step.stop || !step.note) {
-      const stopReason = step.stop ?? 'completed'
-      deps.onProgress?.(progressOf(plan, state, null, stopReason))
-      return { collected: state.collected, failed: state.failed, notes: state.outputs || [], rounds, stopReason, state }
-    }
-
-    const note = step.note
-    // Pace between notes (not before the first) so high-control platforms see
-    // human-like spacing. Re-check shouldStop after sleeping (cancel during wait).
-    if (rounds > 0 && interNoteDelayMs > 0) {
-      await sleep(interNoteDelayMs)
-      const afterSleep = deps.shouldStop?.() ?? null
-      if (afterSleep) {
-        return { collected: state.collected, failed: state.failed, notes: state.outputs || [], rounds, stopReason: afterSleep, state }
-      }
-    }
-    rounds += 1
-    deps.onProgress?.(progressOf(plan, state, note.title ?? note.url, null))
-
+  const collectPlannedNote = async (note: CollectionNote, index: number): Promise<{
+    result: NoteCollectResult
+    canonicalUrl: string
+    openUrl: string
+  }> => {
     const canonicalUrl = note.canonicalUrl || note.url
     const openUrl = note.openUrl || note.url
     const noteTitle = normalizedTitle(note.title)
@@ -141,7 +126,7 @@ export async function runBrowserCollection(
         title: note.title,
         titleConfidence: note.titleConfidence,
         sourceId: note.sourceId,
-        order: note.order ?? step.index + 1,
+        order: note.order ?? index + 1,
         folderName: note.folderName,
         duplicateTitle: note.duplicateTitle ?? (noteTitle ? (titleCounts.get(noteTitle) || 0) > 1 : false),
         outputDir: plan.outputRootDir,
@@ -161,7 +146,7 @@ export async function runBrowserCollection(
           title: note.title,
           titleConfidence: note.titleConfidence,
           sourceId: note.sourceId,
-          order: note.order ?? step.index + 1,
+          order: note.order ?? index + 1,
           folderName: note.folderName,
           duplicateTitle: note.duplicateTitle ?? (noteTitle ? (titleCounts.get(noteTitle) || 0) > 1 : false),
           outputDir: plan.outputRootDir,
@@ -170,6 +155,103 @@ export async function runBrowserCollection(
         deps.fileOps,
       )
     }
+    return { result, canonicalUrl, openUrl }
+  }
+
+  const noteOutputFromResult = (
+    note: CollectionNote,
+    result: NoteCollectResult,
+    canonicalUrl: string,
+    openUrl: string,
+  ): CollectionNoteOutput => ({
+    url: result.canonicalUrl || canonicalUrl,
+    canonicalUrl: result.canonicalUrl || canonicalUrl,
+    openUrl: result.openUrl || openUrl,
+    title: result.title,
+    sourceId: result.sourceId,
+    order: result.order,
+    success: result.success,
+    savedDir: result.savedDir,
+    imageCount: result.imageCount,
+    videoCount: result.videoCount,
+    mediaKind: result.mediaKind,
+    notePath: result.notePath,
+    manifestPath: result.manifestPath,
+    files: result.files,
+    reason: result.reason,
+    kind: result.mediaKind === 'video' ? 'video' : note.kind,
+  })
+
+  const runFinalRetryPass = async (): Promise<CollectionStopReason> => {
+    let retryableFailures = retryableCollectionFailures(state)
+    if (retryableFailures.length === 0) return null
+    state = { ...state, retryCursor: retryableFailures.map((item) => item.url) }
+    await deps.onCheckpoint?.(state, progressOf(plan, state, null, 'completed'))
+
+    for (const failure of retryableFailures) {
+      const noteIndex = plan.notes.findIndex((note) => noteMatchesFailure(note, failure.url))
+      if (noteIndex < 0) continue
+      const note = plan.notes[noteIndex]
+      for (let retry = 0; retry < MAX_FINAL_ITEM_RETRIES; retry += 1) {
+        const currentFailure = retryableCollectionFailures(state).find((item) => item.url === failure.url)
+        if (!currentFailure) break
+        const external = deps.shouldStop?.() ?? null
+        if (external) return external
+        rounds += 1
+        deps.onProgress?.(progressOf(plan, state, note.title ?? note.url, null))
+        const { result, canonicalUrl, openUrl } = await collectPlannedNote(note, noteIndex)
+        if (result.reason === 'needs_verification' || isPartialImagesReason(result.reason)) {
+          await deps.onCheckpoint?.(state, progressOf(plan, state, note.title ?? note.url, 'needs_verification'))
+          return 'needs_verification'
+        }
+        totalImages += result.imageCount
+        state = recordRetryNoteResult(state, note, {
+          success: result.success,
+          reason: result.reason,
+          output: noteOutputFromResult(note, result, canonicalUrl, openUrl),
+        })
+        state = { ...state, retryCursor: retryableCollectionFailures(state).map((item) => item.url) }
+        await deps.onCheckpoint?.(state, progressOf(plan, state, note.title ?? note.url, null))
+        if (result.success) break
+      }
+      retryableFailures = retryableCollectionFailures(state)
+    }
+    return null
+  }
+
+  while (true) {
+    const external = deps.shouldStop?.() ?? null
+    if (external) {
+      return { collected: state.collected, failed: state.failed, notes: state.outputs || [], rounds, stopReason: external, state }
+    }
+    if (maxTotalImages > 0 && totalImages >= maxTotalImages) {
+      deps.onProgress?.(progressOf(plan, state, null, 'max_images'))
+      return { collected: state.collected, failed: state.failed, notes: state.outputs || [], rounds, stopReason: 'max_images', state }
+    }
+    const step = planNextNote(plan, state, deps.now())
+    if (step.stop || !step.note) {
+      let stopReason = step.stop ?? 'completed'
+      if (stopReason === 'completed') {
+        stopReason = await runFinalRetryPass() ?? stopReason
+      }
+      deps.onProgress?.(progressOf(plan, state, null, stopReason))
+      return { collected: state.collected, failed: state.failed, notes: state.outputs || [], rounds, stopReason, state }
+    }
+
+    const note = step.note
+    // Pace between notes (not before the first) so high-control platforms see
+    // human-like spacing. Re-check shouldStop after sleeping (cancel during wait).
+    if (rounds > 0 && interNoteDelayMs > 0) {
+      await sleep(interNoteDelayMs)
+      const afterSleep = deps.shouldStop?.() ?? null
+      if (afterSleep) {
+        return { collected: state.collected, failed: state.failed, notes: state.outputs || [], rounds, stopReason: afterSleep, state }
+      }
+    }
+    rounds += 1
+    deps.onProgress?.(progressOf(plan, state, note.title ?? note.url, null))
+
+    const { result, canonicalUrl, openUrl } = await collectPlannedNote(note, step.index)
     if (result.reason === 'needs_verification' || isPartialImagesReason(result.reason)) {
       await deps.onCheckpoint?.(state, progressOf(plan, state, note.title ?? note.url, 'needs_verification'))
       deps.onProgress?.(progressOf(plan, state, null, 'needs_verification'))
@@ -179,24 +261,7 @@ export async function runBrowserCollection(
     state = recordNoteResult(state, note, {
       success: result.success,
       reason: result.reason,
-      output: {
-        url: result.canonicalUrl || canonicalUrl,
-        canonicalUrl: result.canonicalUrl || canonicalUrl,
-        openUrl: result.openUrl || openUrl,
-        title: result.title,
-        sourceId: result.sourceId,
-        order: result.order,
-        success: result.success,
-        savedDir: result.savedDir,
-        imageCount: result.imageCount,
-        videoCount: result.videoCount,
-        mediaKind: result.mediaKind,
-        notePath: result.notePath,
-        manifestPath: result.manifestPath,
-        files: result.files,
-        reason: result.reason,
-        kind: result.mediaKind === 'video' ? 'video' : note.kind,
-      },
+      output: noteOutputFromResult(note, result, canonicalUrl, openUrl),
     })
     await deps.onCheckpoint?.(state, progressOf(plan, state, note.title ?? note.url, null))
   }

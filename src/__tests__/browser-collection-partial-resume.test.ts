@@ -4,6 +4,8 @@ import test from 'node:test'
 import { BrowserContentTaskRunner } from '../main/modules/browser-engine/content-task-runner'
 import type { BrowserCapabilityTaskHandle } from '../main/modules/browser-engine/capability-types'
 import type { BrowserTaskPersistenceService } from '../main/modules/browser-engine/task-persistence-service'
+import type { CollectorFacadeFactory } from '../main/modules/browser-engine/content-task-runner'
+import type { NoteCollectFacade } from '../main/modules/browser-engine/browser-collector-actions'
 
 import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 
@@ -27,6 +29,50 @@ function makeTask(overrides: Partial<BrowserCapabilityTaskHandle> = {}): Browser
     error: overrides.error ?? null,
     createdAt: overrides.createdAt || '2026-06-09T08:00:00.000Z',
     updatedAt: overrides.updatedAt || '2026-06-09T08:05:00.000Z',
+  }
+}
+
+interface FakeStoredTask {
+  taskId: string
+  kind: string
+  status: string
+  progress: { total: number; completed: number; failed: number; currentLabel: string | null }
+  checkpoint: BrowserCapabilityTaskHandle['checkpoint']
+  result: unknown
+  error: string | null
+  payload: Record<string, unknown>
+}
+
+function fakeLease() {
+  return {
+    acquire: () => ({ leaseId: 'lease-partial-resume', surface: 'agent-view', acquiredAt: 0, expiresAt: 0 }),
+    checkWrite: () => null,
+    heartbeat: () => ({ leaseId: 'lease-partial-resume' }),
+    release: () => {},
+  }
+}
+
+function fakePersistenceWithTask(task: FakeStoredTask) {
+  const store = new Map<string, FakeStoredTask>([[task.taskId, task]])
+  return {
+    getTask: (taskId: string) => {
+      const current = store.get(taskId)
+      return current ? { ...current } : null
+    },
+    getTaskPayload: (taskId: string) => store.get(taskId)?.payload ?? null,
+    updateProgress: (taskId: string, progress: Partial<FakeStoredTask['progress']>, extras?: Record<string, unknown>) => {
+      const current = store.get(taskId)
+      if (!current) return null
+      current.progress = { ...current.progress, ...progress }
+      if (extras) {
+        if ('status' in extras) current.status = String(extras.status)
+        if ('checkpoint' in extras) current.checkpoint = extras.checkpoint as FakeStoredTask['checkpoint']
+        if ('result' in extras) current.result = extras.result
+        if ('error' in extras) current.error = extras.error as string | null
+      }
+      return { ...current }
+    },
+    listPendingTasks: () => [...store.values()].filter((item) => ['queued', 'running', 'paused'].includes(item.status)).map((item) => ({ ...item })),
   }
 }
 
@@ -96,4 +142,78 @@ test('browser collection startup cancels stale note_collect without cursor', asy
   assert.equal(updates.length, 1)
   assert.equal(updates[0].extras.status, 'cancelled')
   assert.match(String(updates[0].extras.error || ''), /missing saved cursor/)
+})
+
+test('browser_resume_task with a failure ledger retries only failed collection items', async () => {
+  const urls = Array.from({ length: 5 }, (_, index) => `https://www.xiaohongshu.com/note/partial-${index}`)
+  const failedUrl = urls[2]
+  const navigated: string[] = []
+  const task: FakeStoredTask = {
+    taskId: 'browser-task-ledger-resume',
+    kind: 'note_collect',
+    status: 'paused',
+    progress: { total: 5, completed: 4, failed: 1, currentLabel: null },
+    payload: {
+      agentTabId: 'tab-agent-resume',
+      surface: 'agent-view',
+      plan: {
+        targetProfileUrl: 'https://www.xiaohongshu.com/user/profile/partial',
+        notes: urls.map((url, index) => ({ url, title: `笔记${index + 1}` })),
+        outputRootDir: '/tmp/ready-browser-partial-resume',
+        stopConditions: { maxConsecutiveFailures: 10 },
+      },
+    },
+    checkpoint: {
+      taskId: 'browser-task-ledger-resume',
+      stage: 'note_collect_round',
+      cursor: '5',
+      partialResults: {
+        cursor: 5,
+        collected: urls.filter((url) => url !== failedUrl),
+        failed: [{ url: failedUrl, reason: 'navigate:navigation_failed', attempts: 1, retryable: true }],
+        failures: [{ url: failedUrl, reason: 'navigate:navigation_failed', attempts: 1, retryable: true }],
+        retryCursor: [failedUrl],
+        outputs: urls.map((url, index) => ({
+          url,
+          title: `笔记${index + 1}`,
+          success: url !== failedUrl,
+          savedDir: url === failedUrl ? '' : `/tmp/ready-browser-partial-resume/${index + 1}`,
+          imageCount: url === failedUrl ? 0 : 1,
+          reason: url === failedUrl ? 'navigate:navigation_failed' : undefined,
+        })),
+        consecutiveFailures: 0,
+        startedAt: 1780000000000,
+      },
+    },
+    result: {
+      failed: [{ url: failedUrl, reason: 'navigate:navigation_failed', attempts: 1, retryable: true }],
+    },
+    error: null,
+  }
+  const persistence = fakePersistenceWithTask(task)
+  const factory: CollectorFacadeFactory = () => {
+    const facade: NoteCollectFacade = {
+      run: async (tool, args = {}) => {
+        if (tool === 'browser_navigate') {
+          navigated.push(String(args.url || ''))
+          return JSON.stringify({ ok: true })
+        }
+        if (tool === 'browser_read_page') return '详情页'
+        if (tool === 'browser_collect_images') return JSON.stringify({ count: 1, images: [{ url: 'https://img.xhscdn.com/resume.jpg' }] })
+        if (tool === 'browser_download_urls') return JSON.stringify({ success: 1 })
+        return JSON.stringify({ ok: true })
+      },
+    }
+    return { facade, isControlFrozen: () => false }
+  }
+  const runner = new BrowserContentTaskRunner({} as never, persistence as never, fakeLease() as never, factory)
+
+  await runner.resumeTask(task.taskId)
+  const run = (runner as unknown as { activeRuns: Map<string, Promise<void>> }).activeRuns.get(task.taskId)
+  if (run) await run
+
+  assert.deepEqual(navigated, [failedUrl])
+  assert.equal(task.status, 'completed')
+  assert.equal(task.progress.completed, 5)
+  assert.equal(task.progress.failed, 0)
 })

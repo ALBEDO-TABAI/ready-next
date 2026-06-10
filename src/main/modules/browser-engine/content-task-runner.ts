@@ -24,7 +24,14 @@ import {
 import { getBrowserWriteLeaseService } from './agent-browser-lease-singleton'
 import { isAgentBrowserError, type AgentBrowserSurface } from './agent-browser-errors'
 import type { BrowserWriteLeaseService } from './browser-write-lease'
-import { parseCollectionPlan, type CollectionLoopState, type CollectionPlan } from './agent-collection-plan'
+import {
+  inferCollectionFailureRetryable,
+  normalizeCollectionLoopState,
+  retryableCollectionFailures,
+  parseCollectionPlan,
+  type CollectionLoopState,
+  type CollectionPlan,
+} from './agent-collection-plan'
 import { runBrowserCollection } from './browser-collector-engine'
 import type { NoteCollectFacade } from './browser-collector-actions'
 import { isHighControlPlatformText } from '../../../shared/browser-collection-intent'
@@ -283,9 +290,6 @@ function completedAllExpected(expected: number, completed: number, failed: numbe
 }
 
 const TERMINAL_NOTE_SKIP_REASONS = new Set(['skipped_video', 'unavailable'])
-const NON_RETRYABLE_FAILURE_REASON_PATTERN = /(?:permission|forbidden|unauthorized|deleted|unavailable|skipped_video|not_found|blocked_permanent)/i
-const RETRYABLE_FAILURE_REASON_PATTERN = /(?:timeout|navigation|network|temporary|transient|retry|lease_lost|rate|throttle)/i
-
 export interface BrowserTaskFailedItem {
   url: string
   reason: string
@@ -310,8 +314,7 @@ export function normalizeBrowserTaskFailedItems(value: unknown): BrowserTaskFail
 }
 
 export function inferFailureRetryable(reason: string): boolean {
-  if (NON_RETRYABLE_FAILURE_REASON_PATTERN.test(reason)) return false
-  return RETRYABLE_FAILURE_REASON_PATTERN.test(reason)
+  return inferCollectionFailureRetryable(reason)
 }
 
 function finalNoteCollectError(
@@ -669,8 +672,32 @@ export class BrowserContentTaskRunner {
     if (!current || !payload) return null
     if (current.status === 'completed' || current.status === 'failed') return current
     this.cancelledTasks.delete(taskId)
+    this.prepareFailureLedgerResume(current, payload)
     this.scheduleTask(taskId, current.kind, payload)
     return this.persistenceService.getTask(taskId)
+  }
+
+  private prepareFailureLedgerResume(task: BrowserCapabilityTaskHandle, payload: Record<string, unknown>): void {
+    if (task.kind !== 'note_collect' && task.kind !== 'card_loop') return
+    const checkpoint = task.checkpoint
+    if (checkpoint?.stage !== 'note_collect_round' || !checkpoint.partialResults) return
+    const parsed = parseCollectionPlan(payload.plan)
+    if (!parsed.ok) return
+    const state = normalizeCollectionLoopState(checkpoint.partialResults as CollectionLoopState)
+    const retryFailures = retryableCollectionFailures(state)
+    if (retryFailures.length === 0) return
+    this.persistenceService.updateProgress(task.taskId, {}, {
+      checkpoint: {
+        ...checkpoint,
+        cursor: String(state.cursor),
+        partialResults: {
+          ...state,
+          consecutiveFailures: 0,
+          startedAt: Date.now(),
+          retryCursor: retryFailures.map((item) => item.url),
+        },
+      },
+    })
   }
 
   async cancelTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
@@ -1207,12 +1234,13 @@ export class BrowserContentTaskRunner {
       }
       // A user freeze or a lease takeover is NOT a successful completion (Codex
       // result-review #1): reflect the interruption in the task status.
-      const incompleteError = finalNoteCollectError(plan.notes.length, result.collected.length, result.failed.length, result.stopReason, result.failed)
+      const failedItems = normalizeBrowserTaskFailedItems(result.failed)
+      const incompleteError = finalNoteCollectError(plan.notes.length, result.collected.length, failedItems.length, result.stopReason, failedItems)
       const collectionVerdict = resolveCollectionVerdict({
         collected: result.collected.length,
         expected: plan.expectedCount ?? plan.notes.length,
         stopReason: result.stopReason || 'unknown',
-        failures: result.failed.length,
+        failures: failedItems.length,
         cursorValid: Number.isFinite(result.state.cursor),
       })
       const completedByTerminalNoteRule = incompleteError === null && result.collected.length > 0
@@ -1248,7 +1276,7 @@ export class BrowserContentTaskRunner {
       this.persistenceService.updateProgress(taskId, {
         total: plan.notes.length,
         completed: result.collected.length,
-        failed: result.failed.length,
+        failed: failedItems.length,
         currentLabel: null,
       }, {
         status: finalStatus,
@@ -1262,7 +1290,7 @@ export class BrowserContentTaskRunner {
           status: publicNoteCollectStatus(finalStatus, result.collected.length),
           ...verdictFields,
           collected: result.collected,
-          failed: normalizeBrowserTaskFailedItems(result.failed),
+          failed: failedItems,
           notes: result.notes,
           rounds: result.rounds,
           stopReason: result.stopReason,
@@ -1277,7 +1305,7 @@ export class BrowserContentTaskRunner {
         finishedAt: new Date().toISOString(),
       })
       publishBrowserTaskEvent(taskId, finalStatus)
-      this.projectNoteCollect(taskId, scopeId, noteCollectState(finalStatus), plan.notes.length, result.collected.length, result.failed.length, null, {
+      this.projectNoteCollect(taskId, scopeId, noteCollectState(finalStatus), plan.notes.length, result.collected.length, failedItems.length, null, {
         waitingFor: finalStatus === 'waiting_human' ? 'verification' : undefined,
         publicStatus: publicNoteCollectStatus(finalStatus, result.collected.length),
         ...sourceIdsFromOutputs(result.notes),
