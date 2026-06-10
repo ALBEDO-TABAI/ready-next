@@ -136,10 +136,11 @@ const BARE_CONTINUATION_PATTERN =
 
 /**
  * True when the instruction is just a short "continue / retry" follow-up
- * ("继续" / "重试一下" / "再试一次") with no task content of its own. Used to
- * decide whether a bare follow-up should consult the recalled session context
- * for browser-collection intent — only bare continuations do, so a substantive
- * unrelated message can never over-expose from a platform word in the summary.
+ * ("继续" / "重试一下" / "再试一次") with no task content of its own.
+ *
+ * @deprecated S4-1 — runtime exposure decisions now go through
+ * `shared/agent-followup-intent.ts` (four-way classifier with negation guard
+ * and status-question coverage). Kept only for legacy callers/tests.
  */
 export function isBareContinuationInstruction(text: string | null | undefined): boolean {
   const t = String(text || '').trim()

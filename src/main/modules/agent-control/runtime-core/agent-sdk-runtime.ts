@@ -112,8 +112,8 @@ import {
   resolveBrowserBatchCollectionIntent,
   isBrowserBatchCollectionWorkflowTool,
   stepCollectionIntentTtl,
-  isBareContinuationInstruction,
 } from '../../../../shared/browser-collection-intent'
+import { classifyFollowupIntent, followupConsultsRecalledContext } from '../../../../shared/agent-followup-intent'
 import { createBrowserTurnLease, type BrowserTurnLease } from '../../browser-engine/agent-browser-turn-lease'
 import { filterToolsByVisionCapability } from '../tools-runtime/tool-gateway'
 import {
@@ -701,23 +701,45 @@ function messageHasBrowserCollectionIntent(message: RunMessage, requestEnvelope?
   if (fullText.includes('### 浏览页面引用')) return true
   const envelopePrimary = parseEnvelopeResourceReferences(requestEnvelope).primaryInstruction
   const primary = envelopePrimary || primaryInstructionText(message)
-  if (resolveBrowserCollectionIntent(primary)) return true
-  // A bare continuation ("继续" / "重试一下") of an earlier browser collection has
-  // no web object in the instruction itself, and the per-session TTL is gone
-  // when the user resumes in a new conversation or after a long gap. For these
-  // — and ONLY these — consult the full envelope (incl. ## 最近会话摘要) so the
-  // user can resume a collection without re-typing the request. Substantive
-  // messages still use primary text only, so context markers can't over-expose.
-  if (isBareContinuationInstruction(primary) && resolveBrowserCollectionIntent(fullText)) return true
+  if (resolveBrowserCollectionIntent(primary)) {
+    // Negation guard (S4-1): "不要采集了，先看看" mentions the verb but the
+    // user is suppressing the collection family — never expose from it.
+    const negated = classifyFollowupIntent(primary, { hasActiveTaskContext: hasRecalledTaskContext(fullText) })
+    if (negated.negations.includes('collection')) return false
+    return true
+  }
+  // A follow-up of an earlier browser collection ("继续" / "怎么样了" / "你只
+  // 采了 1 张") has no web object in the instruction itself, and the
+  // per-session TTL is gone when the user resumes in a new conversation or
+  // after a long gap. For these — and ONLY these — consult the full envelope
+  // (incl. ## 最近会话摘要) so the user can resume or query a collection
+  // without re-typing the request. Substantive messages still use primary
+  // text only, so context markers can't over-expose. (S4-1: the bare-regex
+  // gate is replaced by the four-way follow-up classifier with negation.)
+  if (
+    followupConsultsRecalledContext(primary, { hasActiveTaskContext: hasRecalledTaskContext(fullText) })
+    && resolveBrowserCollectionIntent(fullText)
+  ) return true
   return false
+}
+
+function hasRecalledTaskContext(fullText: string): boolean {
+  return fullText.includes('## 最近会话摘要') || fullText.includes('### 浏览页面引用')
 }
 
 function messageHasBrowserBatchCollectionIntent(message: RunMessage, requestEnvelope?: unknown): boolean {
   const fullText = messageToText(message)
   const envelopePrimary = parseEnvelopeResourceReferences(requestEnvelope).primaryInstruction
   const primary = envelopePrimary || primaryInstructionText(message)
-  if (resolveBrowserBatchCollectionIntent(primary)) return true
-  if (isBareContinuationInstruction(primary) && resolveBrowserBatchCollectionIntent(fullText)) return true
+  if (resolveBrowserBatchCollectionIntent(primary)) {
+    const negated = classifyFollowupIntent(primary, { hasActiveTaskContext: hasRecalledTaskContext(fullText) })
+    if (negated.negations.includes('collection')) return false
+    return true
+  }
+  if (
+    followupConsultsRecalledContext(primary, { hasActiveTaskContext: hasRecalledTaskContext(fullText) })
+    && resolveBrowserBatchCollectionIntent(fullText)
+  ) return true
   return false
 }
 
