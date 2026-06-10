@@ -300,13 +300,13 @@ html[data-skin='liquid-glass'] {
   --shadow-md: 0 14px 34px rgba(24, 39, 77, 0.14);
   --shadow-lg: 0 22px 56px rgba(24, 39, 77, 0.16);
 
-  --lg-material-panel: rgba(255, 255, 255, 0.18);
-  --lg-material-card: rgba(255, 255, 255, 0.26);
-  --lg-material-toolbar: rgba(255, 255, 255, 0.21);
-  --lg-material-floating: rgba(255, 255, 255, 0.54);
-  --lg-blur-soft: 20px;
-  --lg-blur-medium: 28px;
-  --lg-blur-strong: 34px;
+  --lg-material-panel: rgba(253, 253, 251, 0.20);
+  --lg-material-card: rgba(253, 253, 251, 0.25);
+  --lg-material-toolbar: rgba(253, 253, 251, 0.21);
+  --lg-material-floating: rgba(253, 253, 251, 0.46);
+  --lg-blur-soft: 24px;
+  --lg-blur-medium: 34px;
+  --lg-blur-strong: 41px;
   --lg-border-soft: rgba(244, 249, 255, 0.18);
   --lg-border-strong: rgba(252, 254, 255, 0.28);
   --lg-shadow-ambient: 0 8px 18px rgba(42, 60, 102, 0.08);
@@ -317,8 +317,8 @@ html[data-skin='liquid-glass'] {
   --lg-lens-violet: rgba(146, 121, 255, 0.18);
   --lg-lens-amber: rgba(255, 202, 132, 0.18);
   --lg-noise-opacity: 0.034;
-  --lg-content-bg: rgba(250, 252, 255, 0.24);
-  --lg-content-card-bg: rgba(255, 255, 255, 0.3);
+  --lg-content-bg: rgba(253, 253, 251, 0.24);
+  --lg-content-card-bg: rgba(253, 253, 251, 0.27);
   --lg-content-border: rgba(171, 188, 218, 0.36);
   --lg-content-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.58);
 
@@ -328,8 +328,8 @@ html[data-skin='liquid-glass'] {
   --surface-floating-bg: var(--lg-material-floating);
   --surface-border: var(--lg-content-border);
   --surface-shadow: var(--lg-content-shadow);
-  --surface-blur: 18px;
-  --surface-saturate: 155%;
+  --surface-blur: 22px;
+  --surface-saturate: 165%;
   --input-slot-bg: var(--surface-panel-bg);
   --input-slot-border: color-mix(in srgb, var(--surface-border) 62%, transparent);
   --input-slot-focus-border: color-mix(in srgb, var(--text-muted) 14%, var(--surface-border) 86%);
@@ -337,7 +337,7 @@ html[data-skin='liquid-glass'] {
     inset 0 0 0 0.5px color-mix(in srgb, var(--surface-border) 28%, transparent);
   --input-slot-shadow-focus:
     inset 0 0 0 0.5px color-mix(in srgb, var(--input-slot-focus-border) 54%, transparent);
-  --workbench-liquid-chrome-bg: rgba(241, 244, 249, 0.94);
+  --workbench-liquid-chrome-bg: rgba(253, 253, 251, 0.50);
   --chat-menu-frost-bg: rgba(236, 239, 243, 0.92);
   --chat-menu-frost-border: rgba(255, 255, 255, 0.42);
   --chat-menu-hover-bg: rgba(246, 248, 251, 0.72);
@@ -357,12 +357,12 @@ html[data-skin='liquid-glass'] {
   --workbench-side-panel-bg: transparent;
   --workbench-side-panel-border: transparent;
   --workbench-side-panel-shadow: none;
-  --workbench-rail-slot-bg: color-mix(in srgb, var(--surface-panel-bg) 92%, rgba(150, 160, 180, 0.12));
-  --workbench-rail-slot-border: color-mix(in srgb, var(--surface-border) 68%, transparent);
+  --workbench-rail-slot-bg: rgba(233, 233, 231, 0.46);
+  --workbench-rail-slot-border: rgba(178, 178, 176, 0.18);
   --workbench-rail-slot-shadow:
-    inset 0 1px 2px rgba(24, 39, 77, 0.08),
-    inset 0 1px 1px rgba(24, 39, 77, 0.04);
-  --workbench-rail-slot-overlay: linear-gradient(180deg, rgba(255, 255, 255, 0.08) 0%, transparent 24%);
+    inset 0 1px 2px rgba(24, 39, 77, 0.04),
+    inset 0 -1px 1px rgba(255, 255, 255, 0.05);
+  --workbench-rail-slot-overlay: linear-gradient(180deg, rgba(255, 255, 255, 0.02) 0%, transparent 24%);
   --workbench-module-surface-bg: var(--workbench-liquid-chrome-bg);
 }
 
@@ -447,14 +447,14 @@ html[data-theme='dark'][data-skin='liquid-glass'] {
 
 /*
  * data-glass-backdrop 修饰符 —— 'liquid-glass' skin 现在有两种 backdrop:
- *   - 'native'（默认）: 用 macOS vibrancy 桌面壁纸做底，所以 .ready-app-bg 渐变要藏起来
+ *   - 'native'（默认）: 用 macOS vibrancy 桌面壁纸做底，叠一层连续的低强度中性提亮
  *   - 'ready':         用 .ready-app-bg 自己的渐变层做底，不依赖 vibrancy
  *
  * 这条规则**必须** 用 [data-skin='liquid-glass'] 限定（不要写成 :root），
  * 因为 data-skin 永远是 liquid-glass，data-glass-backdrop 才是差异化开关。
  */
 html[data-skin='liquid-glass'][data-glass-backdrop='native'] {
-  --app-bg-overlay-opacity: 0;
+  --app-bg-overlay-opacity: 0.53;
 }
 
 html[data-theme='dark'][data-skin='liquid-glass'][data-glass-backdrop='native'] {
@@ -474,7 +474,7 @@ html[data-theme='dark'][data-skin='liquid-glass'][data-glass-backdrop='native'] 
  * `.ready-app-bg` 承担：CSS 变量级联触发 opacity 过渡（260ms ease），无 CALayer opaque 覆盖，
  * NSVisualEffectView 永远不被 quiesce。
  *
- * 选择器优先级：四个 attr 同时存在时优先级高于上面 native+windowed 的 opacity=0 规则。
+ * 选择器优先级：四个 attr 同时存在时优先级高于上面 native+windowed 的低强度提亮规则。
  */
 html[data-skin='liquid-glass'][data-glass-backdrop='native'][data-native-fullscreen='true'] {
   --app-bg-overlay-opacity: 1;
@@ -609,10 +609,10 @@ html[data-theme-ritual-phase] .ready-app-content *::after {
 
 .ready-app-bg::before {
   background:
-    radial-gradient(1240px 700px at 8% 6%, rgba(171, 196, 238, 0.16), transparent 66%),
-    radial-gradient(920px 540px at 82% 10%, rgba(170, 208, 235, 0.11), transparent 66%),
-    radial-gradient(760px 480px at 52% 90%, rgba(220, 199, 170, 0.08), transparent 72%),
-    linear-gradient(142deg, #f3f6fc 0%, #f6f9fd 52%, #f3f6fb 100%);
+    radial-gradient(1240px 700px at 8% 6%, rgba(238, 236, 230, 0.14), transparent 66%),
+    radial-gradient(920px 540px at 82% 10%, rgba(241, 239, 234, 0.12), transparent 66%),
+    radial-gradient(760px 480px at 52% 90%, rgba(246, 242, 235, 0.09), transparent 72%),
+    linear-gradient(142deg, #fafaf8 0%, #fcfbf8 52%, #fafaf8 100%);
   opacity: 1;
 }
 
@@ -2416,8 +2416,8 @@ html[data-skin='liquid-glass'] .workbench-tabs-surface,
 html[data-skin='liquid-glass'] .document-path-bar,
 html[data-skin='liquid-glass'] .rss-preview-surface {
   background: var(--workbench-module-surface-bg) !important;
-  backdrop-filter: blur(20px) saturate(0%) !important;
-  -webkit-backdrop-filter: blur(20px) saturate(0%) !important;
+  backdrop-filter: blur(24px) saturate(0%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(0%) !important;
 }
 
 html[data-skin='liquid-glass'] .document-editor-surface,
@@ -2499,7 +2499,7 @@ html[data-theme='dark'][data-skin='liquid-glass'][data-glass-backdrop='ready'] .
 /*
  * 注：原有 `html[data-skin='liquid-glass'] .ready-app-bg { opacity: 0 }` 两条硬覆盖已删除。
  * 改用变量级联：
- *   - 默认 'native' backdrop: `--app-bg-overlay-opacity: 0` 在 [data-glass-backdrop='native'] 设置（保持原效果）
+ *   - 默认 'native' backdrop: `--app-bg-overlay-opacity: 0.53` 在 [data-glass-backdrop='native'] 设置（连续中性提亮）
  *   - 可选 'ready' backdrop:  `--app-bg-overlay-opacity: 1` 沿用 light/dark liquid-glass 默认值（让 .ready-app-bg 渐变可见）
  *
  * 不再用硬覆盖，因为它会阻止 ready-glass 模式看到 .ready-app-bg 渐变层。
@@ -3173,7 +3173,7 @@ html[data-skin='liquid-glass'] .morph-segmented-track {
 
 html[data-skin='liquid-glass'] .document-mode-switch {
   border-color: color-mix(in srgb, var(--lg-border-soft) 55%, rgba(0, 0, 0, 0.03)) !important;
-  background: color-mix(in srgb, var(--lg-surface-elevated) 85%, rgba(150, 160, 180, 0.18)) !important;
+  background: var(--workbench-rail-slot-bg) !important;
   box-shadow:
     inset 0 1px 2px rgba(0, 0, 0, 0.08),
     inset 0 2px 4px rgba(0, 0, 0, 0.04) !important;
@@ -3347,8 +3347,8 @@ html[data-skin='liquid-glass'] .document-mode-switch__thumb {
 
 /* Liquid Glass skin */
 html[data-skin='liquid-glass'] .draggable-mode-switch {
-  border-color: color-mix(in srgb, var(--lg-border-soft) 55%, rgba(0, 0, 0, 0.03));
-  background: color-mix(in srgb, var(--lg-surface-elevated) 85%, rgba(150, 160, 180, 0.18));
+  border-color: var(--workbench-rail-slot-border);
+  background: var(--workbench-rail-slot-bg);
   box-shadow:
     inset 0 1px 2px rgba(0, 0, 0, 0.08),
     inset 0 2px 4px rgba(0, 0, 0, 0.04);
@@ -3537,13 +3537,11 @@ html[data-skin='liquid-glass'] .draggable-mode-switch__thumb {
 
 /* Liquid Glass skin */
 html[data-skin='liquid-glass'] .draggable-mode-tabs {
-  border-color: color-mix(in srgb, var(--lg-border-soft) 55%, rgba(0, 0, 0, 0.03));
-  background: color-mix(in srgb, var(--lg-surface-elevated) 85%, rgba(150, 160, 180, 0.18));
-  box-shadow:
-    inset 0 1px 2px rgba(0, 0, 0, 0.08),
-    inset 0 2px 4px rgba(0, 0, 0, 0.04);
-  backdrop-filter: blur(calc(var(--lg-blur-soft) * 0.25)) saturate(calc(var(--surface-saturate) - 8%));
-  -webkit-backdrop-filter: blur(calc(var(--lg-blur-soft) * 0.25)) saturate(calc(var(--surface-saturate) - 8%));
+  border-color: var(--workbench-rail-slot-border);
+  background: var(--workbench-rail-slot-bg);
+  box-shadow: var(--workbench-rail-slot-shadow);
+  backdrop-filter: blur(calc(var(--lg-blur-soft) * 0.18)) saturate(calc(var(--surface-saturate) - 18%));
+  -webkit-backdrop-filter: blur(calc(var(--lg-blur-soft) * 0.18)) saturate(calc(var(--surface-saturate) - 18%));
 }
 
 html[data-skin='liquid-glass'] .draggable-mode-tabs__thumb {
@@ -3685,8 +3683,8 @@ html[data-skin='liquid-glass'] .draggable-mode-tabs__thumb {
 
 /* Liquid glass variant */
 html[data-skin='liquid-glass'] .ios-segmented-control {
-  border-color: color-mix(in srgb, var(--lg-border-soft) 55%, rgba(0, 0, 0, 0.03));
-  background: color-mix(in srgb, var(--lg-surface-elevated) 85%, rgba(150, 160, 180, 0.18));
+  border-color: var(--workbench-rail-slot-border);
+  background: var(--workbench-rail-slot-bg);
   box-shadow:
     inset 0 1px 2px rgba(0, 0, 0, 0.08),
     inset 0 2px 4px rgba(0, 0, 0, 0.04);
@@ -4411,8 +4409,8 @@ html:not([data-skin='liquid-glass']) .rss-mode-shell [class*="editor-area"] {
   --rss-settings-chip-bg: color-mix(in srgb, var(--surface-card-bg) 34%, transparent);
   background: var(--workbench-module-surface-bg) !important;
   box-shadow: none !important;
-  backdrop-filter: blur(20px) saturate(0%) !important;
-  -webkit-backdrop-filter: blur(20px) saturate(0%) !important;
+  backdrop-filter: blur(24px) saturate(0%) !important;
+  -webkit-backdrop-filter: blur(24px) saturate(0%) !important;
 }
 
 .rss-mode-shell .rss-feed-surface,

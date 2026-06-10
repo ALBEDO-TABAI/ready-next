@@ -40,7 +40,14 @@ test('normalizeBrowserUrlInput preserves urls, maps paths, and falls back to sea
 })
 
 test('isSupportedBrowserNavigationUrl allows web urls, local HTML files, and the Ready blank page only', () => {
+  const encodedHtml = READY_BROWSER_BLANK_URL.slice(READY_BROWSER_BLANK_URL.indexOf(',') + 1)
+  const previousBlankSurfaceUrl = `data:text/html;charset=utf-8,${encodeURIComponent(
+    decodeURIComponent(encodedHtml).replace('#e8e8e9', '#eff2f6'),
+  )}`
+
   assert.equal(isSupportedBrowserNavigationUrl(READY_BROWSER_BLANK_URL), true)
+  assert.equal(isReadyBrowserBlankUrl(previousBlankSurfaceUrl), true)
+  assert.equal(isSupportedBrowserNavigationUrl(previousBlankSurfaceUrl), true)
   assert.equal(isSupportedBrowserNavigationUrl('https://openai.com'), true)
   assert.equal(isSupportedBrowserNavigationUrl('http://example.com'), true)
   assert.equal(isSupportedBrowserNavigationUrl('file:///tmp/demo.html'), true)
@@ -202,7 +209,7 @@ test('Ready blank BrowserView fallback keeps only a neutral blank surface', () =
   const encodedHtml = READY_BROWSER_BLANK_URL.slice(READY_BROWSER_BLANK_URL.indexOf(',') + 1)
   const html = decodeURIComponent(encodedHtml)
 
-  assert.match(html, /--ready-blank-surface: #eff2f6/)
+  assert.match(html, /--ready-blank-surface: #e8e8e9/)
   assert.match(html, /--ready-blank-surface: #24282e/)
   assert.match(html, /height: 100%/)
   assert.doesNotMatch(html, /ready-dot-logo/)

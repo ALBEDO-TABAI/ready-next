@@ -153,10 +153,15 @@ test('验证 2 — fullscreen backing is handled by DOM .ready-app-bg, not Brows
   )
   assert.doesNotMatch(styles, /--ready-native-fullscreen-bg:/, '--ready-native-fullscreen-bg variable retired')
 
-  // data-glass-backdrop='native' 默认（无 fullscreen）让 --app-bg-overlay-opacity=0
+  // data-glass-backdrop='native' 默认（无 fullscreen）只允许连续的低强度提亮；
+  // 暗色 native 仍单独关掉。
   assert.match(
     styles,
-    /html\[data-skin='liquid-glass'\]\[data-glass-backdrop='native'\]\s*\{[\s\S]*?--app-bg-overlay-opacity:\s*0/,
+    /html\[data-skin='liquid-glass'\]\[data-glass-backdrop='native'\]\s*\{[\s\S]*?--app-bg-overlay-opacity:\s*0\.53/,
+  )
+  assert.match(
+    styles,
+    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\[data-glass-backdrop='native'\]\s*\{[\s\S]*?--app-bg-overlay-opacity:\s*0/,
   )
 
   // 不再有 .ready-app-bg { opacity: 0 } 硬覆盖（旧的两条规则已删，改用变量级联）

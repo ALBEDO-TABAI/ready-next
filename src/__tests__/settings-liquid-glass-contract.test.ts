@@ -72,11 +72,19 @@ test('file tree scroll root opts into the Chromium 148 liquid glass repaint guar
   assert.match(styles, /html\[data-skin='liquid-glass'\] \[data-liquid-scroll-root\]\s*\{[\s\S]*?contain:\s*paint;[\s\S]*?transform:\s*translateZ\(0\)/)
 })
 
-test('workbench side and chat panels keep the main transparent glass shells', () => {
+test('workbench side and chat panels stay transparent while slots use the shared neutral glass tokens', () => {
   const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const sliderStyles = readWorkspaceFile('src/renderer/styles/workbench-sliders.css')
+  const sidePanel = readWorkspaceFile('src/renderer/components/layout/SidePanel.tsx')
+  const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
 
   assert.match(styles, /\.workbench-panel-frame\[data-side-panel-variant='files'\]\s*\{[\s\S]*?background:\s*var\(--workbench-side-panel-bg\)/)
   assert.match(styles, /html\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-side-panel-bg:\s*transparent;/)
+  assert.match(styles, /html\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-bg:\s*rgba\(233,\s*233,\s*231,\s*0\.46\);/)
+  assert.match(sliderStyles, /html\[data-skin='liquid-glass'\] \.icon-rail-slider\s*\{[\s\S]*?background:\s*var\(--workbench-rail-slot-bg\)/)
+  assert.match(sliderStyles, /html\[data-skin='liquid-glass'\] \.draggable-mode-tabs\s*\{[\s\S]*?background:\s*var\(--workbench-rail-slot-bg\)/)
+  assert.match(sidePanel, /background:\s*'transparent'/)
+  assert.match(chatPanel, /background:\s*'transparent'/)
   assert.doesNotMatch(styles, /html\[data-skin='liquid-glass'\] \[data-liquid-shell='chat-panel'\],[\s\S]*?\[data-liquid-shell='side-panel'\]:not\(\[data-side-panel-variant='hidden'\]\)\s*\{[\s\S]*?background:/)
   assert.doesNotMatch(styles, /html\[data-skin='liquid-glass'\] \[data-liquid-shell='chat-panel'\],[\s\S]*?\[data-liquid-shell='side-panel'\]:not\(\[data-side-panel-variant='hidden'\]\)\s*\{[\s\S]*?backdrop-filter:/)
 })

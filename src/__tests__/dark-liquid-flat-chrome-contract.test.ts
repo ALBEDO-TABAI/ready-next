@@ -50,7 +50,7 @@ test('the four-mode switch track kills the old top sheen through shared dark liq
   )
   assert.match(
     themeStyles,
-    /html\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-bg:\s*color-mix\(in srgb, var\(--surface-panel-bg\) 92%, rgba\(150, 160, 180, 0\.12\)\);/,
+    /html\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-bg:\s*rgba\(233,\s*233,\s*231,\s*0\.46\);/,
   )
   assert.match(
     themeStyles,
@@ -62,11 +62,11 @@ test('the four-mode switch track kills the old top sheen through shared dark liq
   )
   assert.match(
     styles,
-    /html\[data-skin='liquid-glass'\] \.icon-rail-slider\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--lg-surface-elevated\) 85%, rgba\(150, 160, 180, 0\.18\)\);[\s\S]*?backdrop-filter:\s*blur\(calc\(var\(--lg-blur-soft\) \* 0\.25\)\) saturate\(calc\(var\(--surface-saturate\) - 8%\)\);/,
+    /html\[data-skin='liquid-glass'\] \.icon-rail-slider\s*\{[\s\S]*?background:\s*var\(--workbench-rail-slot-bg\);[\s\S]*?backdrop-filter:\s*blur\(calc\(var\(--lg-blur-soft\) \* 0\.18\)\) saturate\(calc\(var\(--surface-saturate\) - 18%\)\);/,
   )
   assert.match(
-    themeStyles,
-    /html\[data-skin='liquid-glass'\] \.draggable-mode-tabs\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--lg-surface-elevated\) 85%, rgba\(150, 160, 180, 0\.18\)\);[\s\S]*?backdrop-filter:\s*blur\(calc\(var\(--lg-blur-soft\) \* 0\.25\)\) saturate\(calc\(var\(--surface-saturate\) - 8%\)\);/,
+    styles,
+    /html\[data-skin='liquid-glass'\] \.draggable-mode-tabs\s*\{[\s\S]*?background:\s*var\(--workbench-rail-slot-bg\);[\s\S]*?backdrop-filter:\s*blur\(calc\(var\(--lg-blur-soft\) \* 0\.18\)\) saturate\(calc\(var\(--surface-saturate\) - 18%\)\);/,
   )
   assert.match(
     styles,
