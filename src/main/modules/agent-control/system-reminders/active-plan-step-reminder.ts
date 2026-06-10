@@ -104,7 +104,8 @@ export function noteToolResultForActivePlan(
   }
 }
 
-export function getActivePlanForScope(scope: string): ActivePlan | null {
+export function getActivePlanForScope(scope: string | null | undefined): ActivePlan | null {
+  if (!scope) return null
   return plansByScope.get(scope) || null
 }
 

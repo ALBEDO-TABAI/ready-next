@@ -1,6 +1,6 @@
 import type { DatabaseConnection } from '../database'
 import { getDatabase } from '../database'
-import { canResumeShape } from '../agent-control/contracts/resume-handle'
+import { canResumeWithFs } from '../agent-control/contracts/resume-handle'
 import { logAgentMetric } from '../agent-control/metrics'
 import {
   SkillTaskRunRepository,
@@ -126,7 +126,9 @@ function reconcileTaskProjections(db: StartupRunReconcilerDb, nowIso: string): n
   let count = 0
   for (const row of rows) {
     const continuationRef = parseJsonRecord(row.continuation_ref_json)
-    if (canResumeShape(continuationRef)) {
+    // fs-presence check: a handle whose run_state file vanished over restart
+    // must NOT be advertised as recoverable (review batch-1 finding).
+    if (canResumeWithFs(continuationRef)) {
       count += changed(recoverable.run(JSON.stringify(['continue', 'cancel']), nowIso, row.task_id))
       continue
     }

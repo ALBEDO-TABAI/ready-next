@@ -168,6 +168,7 @@ import {
 } from '../system-reminders/background-task-terminal-reminder'
 import {
   buildActivePlanReminderText,
+  getActivePlanForScope,
   noteToolResultForActivePlan,
 } from '../system-reminders/active-plan-step-reminder'
 import {
@@ -4007,7 +4008,16 @@ export class AgentSdkRuntime extends EventEmitter {
       }
       const hasUnfinishedActionTaskReference = (): boolean => {
         if (
-          executionOptions?.taskId
+          // NOTE: a bare executionOptions.taskId is NOT a task signal — the
+          // host injects one for every turn (review batch-1 finding). Task
+          // reference now requires continuation/budget state, collection
+          // intent continuity, an active plan, or a follow-up that points
+          // back at prior work.
+          getActivePlanForScope(sessionId)
+          || recentCollectionIntent
+          || turnFollowup.kind === 'continue_task'
+          || turnFollowup.kind === 'correction'
+          || turnFollowup.kind === 'status_query'
           || effectiveExecutionOptions?.continuationIntent
           || effectiveExecutionOptions?.continuationState
           || effectiveExecutionOptions?.taskBudgetRuntime
@@ -5073,7 +5083,23 @@ export class AgentSdkRuntime extends EventEmitter {
     }
     if (!repository) return
     const budgetDiagnostics = taskBudgetDiagnostics(params.taskBudgetRuntime)
-    const status = params.status || (params.terminalReason === 'done' ? 'done' : 'running')
+    let status = params.status || (params.terminalReason === 'done' ? 'done' : 'running')
+    let terminalReason = params.terminalReason
+    // funnel-exempt: diagnostics-only (no terminal downgrade) — the snapshot
+    // is the safety NET behind finalizeRunOutcome, never its competitor: an
+    // existing terminal row keeps its terminal status/reason even if this
+    // late write carries a non-terminal value (ordering race insurance).
+    try {
+      const existing = repository.get(params.runId) as { status?: unknown; terminalReason?: unknown } | null
+      const existingStatus = String(existing?.status || '')
+      const terminalStatuses = new Set(['done', 'error', 'cancelled', 'interrupted', 'checkpoint', 'killed'])
+      if (existing && terminalStatuses.has(existingStatus) && !terminalStatuses.has(status)) {
+        status = existingStatus
+        terminalReason = (existing?.terminalReason as typeof terminalReason) || terminalReason
+      }
+    } catch {
+      // best effort — a read failure must not block the snapshot write
+    }
     const input = {
       runId: params.runId,
       taskId: params.taskId,
@@ -5081,7 +5107,7 @@ export class AgentSdkRuntime extends EventEmitter {
       agentId: publicAgentName(params.agentName),
       status,
       taskType: params.taskBudgetRuntime?.taskType || null,
-      terminalReason: params.terminalReason,
+      terminalReason,
       providerProtocol: params.providerDiagnostics?.agentProtocol || null,
       wireApi: params.providerDiagnostics?.wireApi || null,
       contextWindow: params.providerDiagnostics?.contextWindow || null,

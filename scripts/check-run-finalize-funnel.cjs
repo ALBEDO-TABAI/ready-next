@@ -138,11 +138,38 @@ function main() {
     },
   ]
 
+  // Review batch-1 hardening: renamed-variable writes (`repository.update(...)`)
+  // slip past the identifier-prefix rules above. Pin the funnel at the ACCESS
+  // point instead: getRunMetaRepository may only be referenced by
+  // run-finalizer.ts or by a file that carries the funnel-exempt marker AND
+  // the no-downgrade guard the marker promises.
+  const EXEMPT_MARKER = 'funnel-exempt: diagnostics-only (no terminal downgrade)'
+  const NO_DOWNGRADE_GUARD = 'terminalStatuses.has(existingStatus)'
+  const accessRule = /\bgetRunMetaRepository\b/g
+
   for (const file of files) {
     const rel = relposix(file)
     const text = fs.readFileSync(file, 'utf8')
     if (!isAllowedRunMetaWriter(rel)) {
       pushRegexViolations(violations, rel, text, runMetaRules)
+      if (accessRule.test(text)) {
+        accessRule.lastIndex = 0
+        const exemptSnapshot = text.includes(EXEMPT_MARKER) && text.includes(NO_DOWNGRADE_GUARD)
+        // provider definition (the runtime method itself) and finalizer-deps
+        // accessors (acquire only to hand into finalizeRunOutcome) are the
+        // two structurally-compliant access shapes besides the snapshot.
+        const providerDefinition = /getRunMetaRepository\s*\(\)\s*:\s*RunMetaRepository/.test(text)
+        const finalizeAccessor = text.includes('ForFinalize') && text.includes('finalizeRunOutcome')
+        const exempt = exemptSnapshot || providerDefinition || finalizeAccessor
+        if (!exempt) {
+          violations.push({
+            file: rel,
+            line: 1,
+            kind: 'run_meta_repository_access',
+            detail: 'getRunMetaRepository may only be used by run-finalizer.ts or a funnel-exempt (no-downgrade) snapshot writer',
+          })
+        }
+      }
     }
     if (!isAllowedProjectionPatchConstructor(rel)) {
       pushRegexViolations(violations, rel, text, projectionPatchRules)
