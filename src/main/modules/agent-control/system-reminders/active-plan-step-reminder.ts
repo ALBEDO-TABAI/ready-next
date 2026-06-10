@@ -109,7 +109,8 @@ export function getActivePlanForScope(scope: string | null | undefined): ActiveP
   return plansByScope.get(scope) || null
 }
 
-export function clearActivePlanForScope(scope: string): void {
+export function clearActivePlanForScope(scope: string | null | undefined): void {
+  if (!scope) return
   plansByScope.delete(scope)
 }
 

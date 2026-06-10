@@ -80,7 +80,14 @@ export function classifyFollowupIntent(
   text: string | null | undefined,
   ctx: FollowupIntentContext,
 ): FollowupIntentResult {
-  const t = String(text || '').trim()
+  // Envelope markdown headers (## L1 会话上下文 …) are injected context, never
+  // user instruction — strip them before classification so purity checks see
+  // only what the user typed.
+  const t = String(text || '')
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('##'))
+    .join('\n')
+    .trim()
   if (!t) return { kind: 'new_task', confidence: 0.3, negations: [] }
 
   const negations = detectNegations(t)
@@ -88,15 +95,27 @@ export function classifyFollowupIntent(
 
   // Status questions outrank continuation: "还在跑吗" contains neither
   // continuation verb, but "继续了吗" contains both — the question form wins.
+  // Review-team D1: a status question must be PURE — a compound message
+  // ("怎么样了？另外帮我再采集 B 博主") carries a real instruction after the
+  // status fragment and must NOT be narrowed to the read-only surface.
   if (STATUS_PATTERN.test(t) && (isShort || /[？?]\s*$/.test(t))) {
-    return { kind: 'status_query', confidence: 0.9, negations }
+    const residue = t
+      .replace(STATUS_PATTERN, '')
+      .replace(/[？?！!。，,、\s]+/g, '')
+      .replace(/^(?:现在|目前|那个|这个|任务|采集|进度)+/, '')
+    if (residue.length <= 6) {
+      return { kind: 'status_query', confidence: 0.9, negations }
+    }
   }
 
   if (CORRECTION_PATTERN.test(t) && ctx.hasActiveTaskContext) {
     return { kind: 'correction', confidence: 0.85, negations }
   }
 
-  if (isShort && CONTINUE_PATTERN.test(t) && negations.length === 0) {
+  // Review-team D1b: an explicit topic shift ("继续聊聊别的话题") contains a
+  // continuation verb but is NOT a task continuation.
+  const TOPIC_SHIFT = /(?:聊聊|换个|别的话题|其他话题|另一个话题|new topic|something else)/i
+  if (isShort && CONTINUE_PATTERN.test(t) && negations.length === 0 && !TOPIC_SHIFT.test(t)) {
     return { kind: 'continue_task', confidence: 0.9, negations }
   }
 

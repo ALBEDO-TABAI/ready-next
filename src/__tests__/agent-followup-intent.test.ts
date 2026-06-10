@@ -92,3 +92,14 @@ test('judge is consulted only inside the ambiguous band and failures fall back',
   const fallback = await classifyFollowupIntentWithJudge('嗯 然后呢', ACTIVE, failing)
   assert.equal(fallback.kind, 'new_task')
 })
+
+test('D1: compound status message keeps its real instruction out of status_query', () => {
+  assert.notEqual(classifyFollowupIntent('怎么样了？另外帮我再采集 B 博主', ACTIVE).kind, 'status_query', 'compound message must keep write surface')
+  assert.equal(classifyFollowupIntent('怎么样了', ACTIVE).kind, 'status_query')
+  assert.equal(classifyFollowupIntent('进度怎么样了？', ACTIVE).kind, 'status_query')
+})
+
+test('D1b: topic shift with a continue verb is not task continuation', () => {
+  assert.equal(classifyFollowupIntent('继续聊聊别的话题', ACTIVE).kind, 'new_task')
+  assert.equal(classifyFollowupIntent('继续', ACTIVE).kind, 'continue_task')
+})

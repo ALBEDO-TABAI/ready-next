@@ -168,6 +168,7 @@ import {
 } from '../system-reminders/background-task-terminal-reminder'
 import {
   buildActivePlanReminderText,
+  clearActivePlanForScope,
   getActivePlanForScope,
   noteToolResultForActivePlan,
 } from '../system-reminders/active-plan-step-reminder'
@@ -3853,6 +3854,12 @@ export class AgentSdkRuntime extends EventEmitter {
         turnFollowupPrimary,
         { hasActiveTaskContext: hasRecalledTaskContext(messageToText(content as RunMessage)) },
       )
+      // Review-team D3: a substantive NEW instruction supersedes the prior
+      // plan — otherwise a stale "不要重新规划" reminder (within its TTL)
+      // would steer the model against the user's new task.
+      if (turnFollowup.kind === 'new_task' && turnFollowupPrimary.trim().length > 12) {
+        clearActivePlanForScope(sessionId)
+      }
       if (turnFollowup.kind === 'status_query') {
         toolDefinitions = toolDefinitions.filter((definition) => {
           const name = (definition as { name?: unknown }).name
@@ -4356,7 +4363,15 @@ export class AgentSdkRuntime extends EventEmitter {
                   ? Math.min(base * 2 ** (providerRetryAttempts - 1) + Math.floor(Math.random() * 100), 8_000)
                   : base
                 log(`provider ${classified.kind} retry ${providerRetryAttempts}/${recovery.maxAttempts} in ${delayMs}ms`)
-                await new Promise((resolve) => setTimeout(resolve, delayMs))
+                // Review-team D5: the wait must yield to abort immediately,
+                // not after the full backoff window.
+                await new Promise<void>((resolve) => {
+                  const timer = setTimeout(resolve, delayMs)
+                  abortController.signal.addEventListener('abort', () => {
+                    clearTimeout(timer)
+                    resolve()
+                  }, { once: true })
+                })
                 if (!abortController.signal.aborted) continue
               }
             }
