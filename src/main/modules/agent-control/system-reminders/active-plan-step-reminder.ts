@@ -39,7 +39,7 @@ const plansByScope = new Map<string, ActivePlan>()
 /** Plans older than this are stale — do not re-inject. */
 const ACTIVE_PLAN_TTL_MS = 30 * 60_000
 
-const COLLECTION_DISPATCH_TOOLS = new Set(['browser_visible_collect', 'browser_collect_notes'])
+const COLLECTION_DISPATCH_TOOLS = new Set(['browser_visible_collect', 'browser_collect_notes', 'browser_download_collected_media'])
 
 export function deriveCollectionPlanFromToolCall(
   toolName: string,
@@ -52,28 +52,51 @@ export function deriveCollectionPlanFromToolCall(
     : typeof args.target_profile_url === 'string'
       ? args.target_profile_url
       : '目标页面'
+  const template = typeof args.template === 'string' ? args.template : ''
+  const mediaPlan = toolName === 'browser_download_collected_media' || template === 'image_gallery'
   return {
     taskGoal: `采集 ${target} 的内容并交付到指定位置`,
-    steps: [
-      {
-        id: 'discover',
-        title: '发现并冻结条目清单',
-        advanceOnTools: ['browser_visible_collect'],
-        status: 'pending',
-      },
-      {
-        id: 'collect',
-        title: '启动逐项后台采集',
-        advanceOnTools: ['browser_collect_notes'],
-        status: 'pending',
-      },
-      {
-        id: 'review',
-        title: '复核采集结果并向用户交付（核对数量与失败明细）',
-        advanceOnTools: ['browser_get_task'],
-        status: 'pending',
-      },
-    ],
+    steps: mediaPlan
+      ? [
+          {
+            id: 'discover',
+            title: '发现并冻结图片清单',
+            advanceOnTools: ['browser_visible_collect'],
+            status: toolName === 'browser_download_collected_media' ? 'done' : 'pending',
+          },
+          {
+            id: 'download',
+            title: '下载已发现图片到本地目录',
+            advanceOnTools: ['browser_download_collected_media'],
+            status: 'pending',
+          },
+          {
+            id: 'review',
+            title: '复核图片下载数量并向用户交付',
+            advanceOnTools: ['browser_get_task', 'browser_download_collected_media'],
+            status: 'pending',
+          },
+        ]
+      : [
+          {
+            id: 'discover',
+            title: '发现并冻结条目清单',
+            advanceOnTools: ['browser_visible_collect'],
+            status: 'pending',
+          },
+          {
+            id: 'collect',
+            title: '启动逐项后台采集',
+            advanceOnTools: ['browser_collect_notes'],
+            status: 'pending',
+          },
+          {
+            id: 'review',
+            title: '复核采集结果并向用户交付（核对数量与失败明细）',
+            advanceOnTools: ['browser_get_task'],
+            status: 'pending',
+          },
+        ],
     verify: 'weak',
     updatedAtMs: nowMs,
   }

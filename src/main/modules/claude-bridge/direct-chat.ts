@@ -226,7 +226,7 @@ const TOOL_SYSTEM_PROMPT = `
 如果同一输入框中已经存在与目标完全相同的文本，不要重复输入，优先直接提交并验证响应。
 如果系统上下文说明“当前页可复用”，先读取当前页并继续，不要默认重新搜索或重新打开站点。
 若短时间内已经执行过相同的搜索或导航，先验证当前页证据，再决定是否重复动作。
-当任务包含“找图并下载到本地”时，优先用 browser_collect_images 收集候选，再用 browser_download_urls 一次批量下载，减少工具来回调用次数。
+当任务包含“找图并下载到本地”时，若已有 browser_visible_collect(image_gallery) 的 source_task_id，优先用 browser_download_collected_media 下载已发现图片；普通明确 URL 列表才用 browser_download_urls 一次批量下载。
 如果页面很长、需要持续滚动才能收全内容，先用 browser_scroll_collect、browser_download_gallery 或 browser_start_task，不要只截当前视口就结束。
 如果任务是对一个主页/列表里的多篇网页内容逐篇保存，先启动或续跑后台采集任务；用户说“逐个点开”“低频保存”或“只保存图片”时，browser_collect_notes 必须声明 strategy=card_loop，不要把它改成逐个硬跳详情 URL。
 如果用户要求跨多个网页汇总资料，优先用 browser_research_topic；若需要更细控制，再用 browser_extract_structured 把来源页内容结构化，再基于结构化结果总结，并保留来源链接。

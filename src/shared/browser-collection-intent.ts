@@ -38,6 +38,7 @@ export const BROWSER_COLLECTION_SUBSET_TOOL_NAMES: readonly string[] = [
   'browser_visible_collect',
   'browser_collect_notes',
   'browser_download_urls',
+  'browser_download_collected_media',
   'browser_aggregate_results',
   'browser_get_task',
   'browser_resume_task',
@@ -54,6 +55,7 @@ export function isBrowserCollectionSubsetTool(toolName: string): boolean {
 export const BROWSER_BATCH_COLLECTION_WORKFLOW_TOOL_NAMES: readonly string[] = [
   'browser_visible_collect',
   'browser_collect_notes',
+  'browser_download_collected_media',
   'browser_get_task',
   'browser_resume_task',
   'browser_cancel_task',

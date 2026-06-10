@@ -47,6 +47,15 @@ test('browser_download_urls', () => {
   ])
 })
 
+test('browser_download_collected_media', () => {
+  assert.deepEqual(zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_download_collected_media), [
+    { name: 'source_task_id', type: 'string', description: 'browser_visible_collect(image_gallery) 返回的任务 ID', required: true },
+    { name: 'directory', type: 'string', description: '目标目录', required: true },
+    { name: 'filename_prefix', type: 'string', description: '文件名前缀（可选，默认 image）', required: false },
+    { name: 'overwrite', type: 'boolean', description: '同名是否覆盖，默认 false', required: false },
+  ])
+})
+
 test('browser_resolve_video', () => {
   assert.deepEqual(zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_resolve_video), [
     { name: 'page_url', type: 'string', description: '视频所在页面 URL；留空时尝试使用当前标签页 URL', required: false },

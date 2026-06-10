@@ -226,7 +226,7 @@ test('agent sdk runtime exposes only background collection workflow tools for mu
   )
 
   assert.equal(result.success, true)
-  for (const name of ['browser_visible_collect', 'browser_collect_notes', 'browser_resume_task', 'browser_get_task']) {
+  for (const name of ['browser_visible_collect', 'browser_collect_notes', 'browser_download_collected_media', 'browser_resume_task', 'browser_get_task']) {
     assert.ok(toolNames.includes(name), `${name} should be exposed`)
   }
   for (const name of ['browser_navigate', 'browser_click_text', 'browser_collect_images', 'browser_resolve_video', 'browser_download_urls', 'browser_extract_structured']) {
@@ -250,6 +250,7 @@ test('agent sdk runtime exposes only background collection workflow tools for mu
   assert.equal(followUp.success, true)
   assert.ok(toolNames.includes('browser_visible_collect'))
   assert.ok(toolNames.includes('browser_collect_notes'))
+  assert.ok(toolNames.includes('browser_download_collected_media'))
   assert.ok(!toolNames.includes('browser_click_text'))
   assert.ok(!toolNames.includes('browser_download_urls'))
 })

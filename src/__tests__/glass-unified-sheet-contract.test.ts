@@ -19,7 +19,7 @@ test('liquid workbench surfaces remove prominent borders and heavy highlights', 
   assert.match(styles, /--lg-shadow-contact: 0 4px 12px rgba\(64, 86, 136, 0\.06\);/)
   assert.match(styles, /html\[data-skin='liquid-glass'\] \.browser-header-surface,[\s\S]*\.rss-preview-surface \{/)
   assert.match(styles, /\.rss-mode-shell \.rss-feed-sheet \{[\s\S]*background:\s*var\(--workbench-module-surface-bg\) !important;/)
-  assert.match(styles, /backdrop-filter: blur\(20px\) saturate\(0%\) !important;/)
+  assert.match(styles, /backdrop-filter: blur\(24px\) saturate\(0%\) !important;/)
   assert.match(styles, /box-shadow: none !important;/)
 
   assert.match(topBar, /borderBottom: '1px solid transparent'/)

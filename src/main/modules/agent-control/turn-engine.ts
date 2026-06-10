@@ -4807,7 +4807,7 @@ export class TurnEngine {
         transcript.emitOutput(
           budgetLimitedBeforeCompletion
             ? '\n[已达到本轮工具预算上限，请总结当前进度并建议下一步重试方式]'
-            : '\n[已达到最大工具调用次数，请尝试让助手使用 browser_run_workflow 或 browser_download_urls 批量执行后重试]',
+            : '\n[已达到最大工具调用次数，请尝试让助手使用 browser_run_workflow、browser_download_collected_media 或 browser_download_urls 批量执行后重试]',
           'text',
         )
         return finish({

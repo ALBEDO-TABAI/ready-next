@@ -100,7 +100,7 @@ describe('document signal priority', () => {
 
 describe('collection subset white-list', () => {
   it('includes navigation/read/collect/download/task tools', () => {
-    for (const name of ['browser_navigate', 'browser_read_page', 'browser_visible_collect', 'browser_resolve_video', 'browser_download_urls', 'browser_get_task']) {
+    for (const name of ['browser_navigate', 'browser_read_page', 'browser_visible_collect', 'browser_resolve_video', 'browser_download_urls', 'browser_download_collected_media', 'browser_get_task']) {
       assert.equal(isBrowserCollectionSubsetTool(name), true, `${name} should be in subset`)
     }
   })
@@ -122,7 +122,7 @@ describe('batch collection workflow subset', () => {
   })
 
   it('keeps only background collection workflow tools for batch note collection', () => {
-    for (const name of ['browser_visible_collect', 'browser_collect_notes', 'browser_resume_task', 'browser_get_task']) {
+    for (const name of ['browser_visible_collect', 'browser_collect_notes', 'browser_download_collected_media', 'browser_resume_task', 'browser_get_task']) {
       assert.equal(isBrowserBatchCollectionWorkflowTool(name), true, `${name} should stay available`)
     }
     for (const name of ['browser_navigate', 'browser_click_text', 'browser_collect_images', 'browser_resolve_video', 'browser_download_urls', 'browser_extract_structured']) {

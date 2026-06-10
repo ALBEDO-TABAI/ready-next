@@ -625,6 +625,50 @@ function isCompleteSourceTask(task: BrowserCapabilityTaskHandle | null): boolean
   return Boolean(task && task.kind === 'visible_collect' && task.status === 'completed' && sourceTaskDiscoveryStatus(task) === 'complete')
 }
 
+function mediaUrlsFromVisibleCollectTask(task: BrowserCapabilityTaskHandle | null): string[] {
+  const result = resultObject(task)
+  const seen = new Set<string>()
+  const out: string[] = []
+  const push = (value: unknown): void => {
+    const url = String(value || '').trim()
+    if (!/^https?:\/\//i.test(url) || seen.has(url)) return
+    seen.add(url)
+    out.push(url)
+  }
+  if (Array.isArray(result?.mediaCandidates)) {
+    for (const value of result.mediaCandidates) push(value)
+  }
+  if (out.length > 0) return out
+  const items = Array.isArray(result?.items) ? result.items : []
+  for (const item of items) {
+    if (!item || typeof item !== 'object') continue
+    const record = item as Record<string, unknown>
+    if (Array.isArray(record.media)) {
+      for (const value of record.media) push(value)
+    }
+    push(record.link)
+    push(record.image)
+    const rawFields = record.rawFields && typeof record.rawFields === 'object'
+      ? record.rawFields as Record<string, unknown>
+      : null
+    push(rawFields?.link)
+    push(rawFields?.image)
+    if (Array.isArray(rawFields?.media)) {
+      for (const value of rawFields.media) push(value)
+    }
+  }
+  return out
+}
+
+function isImageGallerySourceTask(
+  task: BrowserCapabilityTaskHandle | null,
+  payload: Record<string, unknown> | null,
+): boolean {
+  if (!task || task.kind !== 'visible_collect') return false
+  const result = resultObject(task)
+  return String(result?.template || payload?.template || '').trim() === 'image_gallery'
+}
+
 function hasSharedOrigin(
   left: Array<{ url: string }>,
   right: Array<{ url: string }>,
@@ -1073,6 +1117,129 @@ async function writeFileSmart(
   }
 
   throw new Error(`无法在目录中写入文件：${directory}`)
+}
+
+async function downloadUrlsToDirectory(
+  controller: BrowserController,
+  params: {
+    urls: string[]
+    directory: string
+    filenamePrefix?: string
+    overwrite?: boolean
+    tabId?: string | null
+    referer?: string | null
+  },
+): Promise<string> {
+  const urls = params.urls
+    .map((item) => String(item || '').trim())
+    .filter((item) => item.length > 0)
+    .slice(0, 100)
+  if (urls.length === 0) return 'Error: urls is required and must be a non-empty array'
+
+  const tabId = params.tabId || null
+  const overwrite = params.overwrite === true
+  const directory = expandHomePath(params.directory || '~/Documents')
+  const filenamePrefix = sanitizeFilename(String(params.filenamePrefix || '').trim(), 'download')
+
+  await mkdir(directory, { recursive: true })
+  try {
+    await access(directory, fsConstants.W_OK)
+  } catch {
+    return `Error: target directory is not writable: ${directory}`
+  }
+
+  let referer = String(params.referer || '').trim()
+  if (!referer) {
+    try {
+      referer = String(await controller.executeJS(tabId, 'window.location.href') || '')
+    } catch {
+      referer = ''
+    }
+  }
+
+  const results: Array<Record<string, unknown>> = []
+  for (let index = 0; index < urls.length; index += 1) {
+    const url = urls[index]
+    if (!/^https?:\/\//i.test(url)) {
+      results.push({ url, success: false, error: 'unsupported_protocol' })
+      continue
+    }
+
+    let downloadedViaSession = false
+    if (typeof controller.downloadUrlToDirectory === 'function') {
+      try {
+        const sessionResult = await controller.downloadUrlToDirectory({
+          url,
+          targetDir: directory,
+          sourcePageUrl: referer || null,
+          suggestedName: filenamePrefix ? `${filenamePrefix}-${index + 1}` : null,
+        })
+        if (sessionResult.success) {
+          downloadedViaSession = true
+          results.push({
+            url,
+            success: true,
+            path: sessionResult.savePath,
+            filename: sessionResult.filename,
+            via: 'browser_session',
+          })
+        }
+      } catch {
+        // silent-catch: session download failed; fetch fallback records the final outcome.
+      }
+    }
+    if (downloadedViaSession) continue
+
+    try {
+      const response = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Ready Browser Agent)',
+          ...(referer ? { Referer: referer } : {}),
+        },
+      })
+      if (!response.ok) {
+        results.push({
+          url,
+          success: false,
+          error: `http_${response.status}`,
+          via: 'fetch',
+        })
+        continue
+      }
+
+      const contentType = response.headers.get('content-type') || ''
+      const buffer = Buffer.from(await response.arrayBuffer())
+      const fallbackBase = filenamePrefix
+        ? `${filenamePrefix}-${index + 1}`
+        : `download-${index + 1}`
+      const parts = inferFilenameParts(url, fallbackBase, contentType)
+      const filePath = await writeFileSmart(directory, parts.base, parts.ext, buffer, overwrite)
+      results.push({
+        url,
+        success: true,
+        path: filePath,
+        size: buffer.byteLength,
+        content_type: contentType,
+        via: 'fetch',
+      })
+    } catch (error) {
+      results.push({
+        url,
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+        via: 'fetch',
+      })
+    }
+  }
+
+  const successCount = results.filter((item) => item.success === true).length
+  return JSON.stringify({
+    directory,
+    total: results.length,
+    success: successCount,
+    failed: results.length - successCount,
+    results,
+  }, null, 2)
 }
 
 async function sleep(ms: number): Promise<void> {
@@ -4833,6 +5000,11 @@ export async function executeBrowserTool(
                 if (bulletCount > 1 && bulletCount <= maxCount) totals.push(bulletCount)
                 return totals.length > 0 ? Math.max(...totals) : 0
               })()
+              const hasCarouselSignal = Boolean(xhsDetailRoot && (
+                carouselExpectedCount > 1
+                || xhsDetailRoot.querySelectorAll('.swiper-slide, [class*="slide" i], [class*="swiper" i] img, [class*="carousel" i] img').length > 1
+                || xhsDetailRoot.querySelector('[class*="next" i], [aria-label*="下一" i], [aria-label*="next" i], [class*="pagination" i], [class*="indicator" i]')
+              ))
 	              const imgs = queryAll('img')
               for (const img of imgs) {
                 if (!(img instanceof HTMLImageElement)) continue
@@ -4950,10 +5122,10 @@ export async function executeBrowserTool(
                   )
                 }
               }
-              return { images: items, videos, scope: xhsDetailRoot ? 'xiaohongshu-detail' : 'document', expectedImageCount: carouselExpectedCount || undefined }
+              return { images: items, videos, scope: xhsDetailRoot ? 'xiaohongshu-detail' : 'document', expectedImageCount: carouselExpectedCount || undefined, hasCarouselSignal }
             })()
           `,
-        ) as { images?: Array<{ url?: string; alt?: string; width?: number; height?: number }>; videos?: Array<{ url?: string; posterUrl?: string; width?: number; height?: number }>; scope?: string; expectedImageCount?: number } | Array<{ url?: string; alt?: string; width?: number; height?: number }> | null
+        ) as { images?: Array<{ url?: string; alt?: string; width?: number; height?: number }>; videos?: Array<{ url?: string; posterUrl?: string; width?: number; height?: number }>; scope?: string; expectedImageCount?: number; hasCarouselSignal?: boolean } | Array<{ url?: string; alt?: string; width?: number; height?: number }> | null
 
         const structuredRows = !Array.isArray(rows) && rows ? rows : null
         const rawImages = Array.isArray(rows) ? rows : Array.isArray(structuredRows?.images) ? structuredRows.images : []
@@ -4985,6 +5157,7 @@ export async function executeBrowserTool(
           ...(Number.isFinite(expectedImageCount) && expectedImageCount > 0
             ? { expectedImageCount }
             : {}),
+          ...(structuredRows?.hasCarouselSignal === true ? { hasCarouselSignal: true } : {}),
         }, null, 2)
       }
 
@@ -5032,119 +5205,87 @@ export async function executeBrowserTool(
 
       case 'browser_download_urls': {
         const rawUrls = Array.isArray(args.urls) ? args.urls : []
-        const urls = rawUrls
-          .map((item) => String(item || '').trim())
-          .filter((item) => item.length > 0)
-          .slice(0, 100)
-        if (urls.length === 0) return 'Error: urls is required and must be a non-empty array'
+        return await downloadUrlsToDirectory(controller, {
+          urls: rawUrls.map((item) => String(item || '')),
+          directory: String(args.directory || '~/Documents'),
+          filenamePrefix: String(args.filename_prefix || 'download'),
+          overwrite: args.overwrite === true,
+          tabId: (args.tab_id as string) || null,
+        })
+      }
 
-        const tabId = (args.tab_id as string) || null
-        const overwrite = args.overwrite === true
-        const directory = expandHomePath(String(args.directory || '~/Documents'))
-        const filenamePrefix = sanitizeFilename(String(args.filename_prefix || '').trim(), 'download')
+      case 'browser_download_collected_media': {
+        const sourceTaskId = String(args.source_task_id || '').trim()
+        if (!sourceTaskId) return 'Error: source_task_id is required'
+        const directory = String(args.directory || '').trim()
+        if (!directory) return 'Error: directory is required'
 
-        await mkdir(directory, { recursive: true })
-        try {
-          await access(directory, fsConstants.W_OK)
-        } catch {
-          return `Error: target directory is not writable: ${directory}`
+        const sourceTask = await controller.getTask(sourceTaskId)
+        const sourcePayload = typeof (controller as { getTaskPayload?: (taskId: string) => Record<string, unknown> | null }).getTaskPayload === 'function'
+          ? ((controller as { getTaskPayload: (taskId: string) => Record<string, unknown> | null }).getTaskPayload(sourceTaskId) || null)
+          : null
+        if (!sourceTask) {
+          return JSON.stringify({
+            ok: false,
+            errorCode: 'source_task_missing',
+            message: `source_task_id ${sourceTaskId} 不存在，无法下载已发现图片。`,
+            sourceTaskId,
+          }, null, 2)
         }
-
-        let referer = ''
-        try {
-          referer = String(await controller.executeJS(tabId, 'window.location.href') || '')
-        } catch {
-          referer = ''
+        const sourceScopeId = stringField(sourcePayload?.scopeId)
+        if (sessionId && sourceScopeId && sourceScopeId !== sessionId) {
+          return JSON.stringify({
+            ok: false,
+            errorCode: 'stale_source_task_scope',
+            message: `source_task_id ${sourceTaskId} 属于另一个会话，不能接力下载。请使用本轮 browser_visible_collect 返回的 source_task_id。`,
+            sourceTaskId,
+          }, null, 2)
         }
-
-        const results: Array<Record<string, unknown>> = []
-        for (let index = 0; index < urls.length; index += 1) {
-          const url = urls[index]
-          if (!/^https?:\/\//i.test(url)) {
-            results.push({ url, success: false, error: 'unsupported_protocol' })
-            continue
-          }
-
-          // WP4 — cookie-aware download first: route through the browser's
-          // persist:browser session (session.downloadURL carries the page's
-          // login cookies + Referer), so login-walled / 防盗链 images on
-          // high-control platforms actually download. Fall back to a plain fetch
-          // only when the session download path is unavailable or fails.
-          let downloadedViaSession = false
-          if (typeof controller.downloadUrlToDirectory === 'function') {
-            try {
-              const sessionResult = await controller.downloadUrlToDirectory({
-                url,
-                targetDir: directory,
-                sourcePageUrl: referer || null,
-                suggestedName: filenamePrefix ? `${filenamePrefix}-${index + 1}` : null,
-              })
-              if (sessionResult.success) {
-                downloadedViaSession = true
-                results.push({
-                  url,
-                  success: true,
-                  path: sessionResult.savePath,
-                  filename: sessionResult.filename,
-                  via: 'browser_session',
-                })
-              }
-            } catch {
-              // silent-catch: session download failed; fetch fallback records the final outcome.
-            }
-          }
-          if (downloadedViaSession) continue
-
-          try {
-            const response = await fetch(url, {
-              headers: {
-                'User-Agent': 'Mozilla/5.0 (Ready Browser Agent)',
-                ...(referer ? { Referer: referer } : {}),
-              },
-            })
-            if (!response.ok) {
-              results.push({
-                url,
-                success: false,
-                error: `http_${response.status}`,
-                via: 'fetch',
-              })
-              continue
-            }
-
-            const contentType = response.headers.get('content-type') || ''
-            const buffer = Buffer.from(await response.arrayBuffer())
-            const fallbackBase = filenamePrefix
-              ? `${filenamePrefix}-${index + 1}`
-              : `download-${index + 1}`
-            const parts = inferFilenameParts(url, fallbackBase, contentType)
-            const filePath = await writeFileSmart(directory, parts.base, parts.ext, buffer, overwrite)
-            results.push({
-              url,
-              success: true,
-              path: filePath,
-              size: buffer.byteLength,
-              content_type: contentType,
-              via: 'fetch',
-            })
-          } catch (error) {
-            // silent-catch: per-URL failure is returned in the batch result.
-            results.push({
-              url,
-              success: false,
-              error: error instanceof Error ? error.message : String(error),
-              via: 'fetch',
-            })
-          }
+        if (!isImageGallerySourceTask(sourceTask, sourcePayload)) {
+          return JSON.stringify({
+            ok: false,
+            errorCode: 'source_task_not_image_gallery',
+            message: `source_task_id ${sourceTaskId} 不是 browser_visible_collect(image_gallery) 任务，不能用图片下载接力。`,
+            sourceTaskId,
+            kind: sourceTask.kind,
+          }, null, 2)
         }
-
-        const successCount = results.filter((item) => item.success === true).length
-        return JSON.stringify({
+        if (!isCompleteSourceTask(sourceTask)) {
+          const result = resultObject(sourceTask)
+          return JSON.stringify({
+            ok: false,
+            errorCode: 'source_task_not_complete',
+            message: `source_task_id ${sourceTaskId} 的图片发现还未完整完成，请先继续发现或明确只下载已发现图片。`,
+            sourceTaskId,
+            discoveryStatus: sourceTaskDiscoveryStatus(sourceTask),
+            continueTaskId: typeof result?.continueTaskId === 'string' ? result.continueTaskId : sourceTaskId,
+          }, null, 2)
+        }
+        const urls = mediaUrlsFromVisibleCollectTask(sourceTask)
+        if (urls.length === 0) {
+          return JSON.stringify({
+            ok: false,
+            errorCode: 'source_task_has_no_media',
+            message: `source_task_id ${sourceTaskId} 没有可下载的图片 URL。`,
+            sourceTaskId,
+          }, null, 2)
+        }
+        const result = resultObject(sourceTask)
+        const referer = stringField(result?.targetUrl) || stringField(sourcePayload?.url)
+        const output = await downloadUrlsToDirectory(controller, {
+          urls,
           directory,
-          total: results.length,
-          success: successCount,
-          failed: results.length - successCount,
-          results,
+          filenamePrefix: String(args.filename_prefix || 'image'),
+          overwrite: args.overwrite === true,
+          referer,
+        })
+        if (output.startsWith('Error:')) return output
+        const parsed = JSON.parse(output) as Record<string, unknown>
+        return JSON.stringify({
+          ok: Number(parsed.success || 0) > 0,
+          sourceTaskId,
+          mediaCandidateCount: urls.length,
+          ...parsed,
         }, null, 2)
       }
 

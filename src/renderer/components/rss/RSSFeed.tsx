@@ -608,7 +608,7 @@ export default function RSSFeed({
             <button
               type="button"
               onClick={() => setSourceMenuOpen((prev) => !prev)}
-              className="rss-toolbar-select cursor-pointer transition-colors duration-150"
+              className="rss-toolbar-select appearance-none cursor-pointer transition-colors duration-150"
               style={{
                 ...calendarPillButtonStyle,
                 justifyContent: 'flex-start',
@@ -642,7 +642,7 @@ export default function RSSFeed({
             />
             {sourceMenuOpen && (
               <div
-                className="glass-surface-floating overflow-hidden rounded-[14px] border"
+                className="glass-surface-floating ready-floating-menu overflow-hidden rounded-[14px] border"
                 role="listbox"
                 style={{
                   position: 'absolute',
@@ -651,12 +651,13 @@ export default function RSSFeed({
                   zIndex: 30,
                   width: 300,
                   maxWidth: 'calc(100vw - 48px)',
-                  background:
-                    'color-mix(in srgb, var(--surface-floating-bg) 92%, rgba(255, 255, 255, 0.12))',
-                  borderColor: 'color-mix(in srgb, var(--border-default) 74%, transparent)',
-                  boxShadow: '0 20px 52px rgba(24, 33, 49, 0.18)',
-                  backdropFilter: 'blur(var(--surface-blur)) saturate(var(--surface-saturate))',
-                  WebkitBackdropFilter: 'blur(var(--surface-blur)) saturate(var(--surface-saturate))'
+                  background: 'var(--chat-menu-frost-bg, var(--surface-floating-bg))',
+                  borderColor: 'var(--chat-menu-frost-border, var(--border-default))',
+                  boxShadow: 'var(--chat-menu-shadow, 0 20px 52px rgba(24, 33, 49, 0.18))',
+                  backdropFilter:
+                    'blur(calc(var(--lg-blur-strong) * 1.28)) saturate(calc(var(--surface-saturate) - 8%)) contrast(1.01)',
+                  WebkitBackdropFilter:
+                    'blur(calc(var(--lg-blur-strong) * 1.28)) saturate(calc(var(--surface-saturate) - 8%)) contrast(1.01)'
                 }}
               >
                 <div
@@ -676,7 +677,7 @@ export default function RSSFeed({
                     role="option"
                     aria-selected={!selectedSource}
                     onClick={() => { onSourceChange(null); setSourceMenuOpen(false) }}
-                    className="flex items-center gap-2 rounded-[10px] transition-colors hover:bg-[var(--bg-hover)]"
+                    className={`ready-floating-menu-item flex items-center gap-2 rounded-[10px] transition-colors hover:bg-[var(--bg-hover)] ${!selectedSource ? 'is-selected' : ''}`}
                     style={{ padding: '7px 10px', textAlign: 'left' }}
                   >
                     <Check
@@ -693,7 +694,7 @@ export default function RSSFeed({
                     return (
                       <div
                         key={source.id}
-                        className="flex min-w-0 items-center gap-1 rounded-[10px] transition-colors hover:bg-[var(--bg-hover)]"
+                        className={`ready-floating-menu-item flex min-w-0 items-center gap-1 rounded-[10px] transition-colors hover:bg-[var(--bg-hover)] ${isSelected ? 'is-selected' : ''}`}
                         style={{ padding: '0 4px 0 10px' }}
                       >
                         <button

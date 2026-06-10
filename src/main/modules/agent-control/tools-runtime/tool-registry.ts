@@ -254,7 +254,7 @@ const BROWSER_READ_TOOL_NAMES = new Set([
   'browser_scroll_collect',
 ])
 
-const BROWSER_WRITE_TOOL_NAMES = new Set(['browser_download_urls'])
+const BROWSER_WRITE_TOOL_NAMES = new Set(['browser_download_urls', 'browser_download_collected_media'])
 const PROJECTION_PATCH_TOOL_DOMAINS = new Set<ToolDomain>(['skill'])
 const PROJECTION_PATCH_DOCUMENT_TOOL_NAMES = new Set<string>([
   'document_insert_widget',

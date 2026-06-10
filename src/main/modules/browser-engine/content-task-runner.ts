@@ -110,10 +110,18 @@ function noteCollectSummary(total: number, completed: number, failed: number, cu
   return `已采集 ${completed}/${total} 篇${current ? ` · 当前：${current}` : ''}`
 }
 
-function visibleCollectSummary(total: number, current: string | null, state: BrowserTaskProjectionInput['state'], opts?: { hasMoreLikely?: boolean; userExpectedTotal?: number }): string {
+function visibleCollectSummary(total: number, current: string | null, state: BrowserTaskProjectionInput['state'], opts?: { hasMoreLikely?: boolean; userExpectedTotal?: number; mediaOnly?: boolean }): string {
   const expected = opts?.userExpectedTotal && opts.userExpectedTotal > 0 ? opts.userExpectedTotal : null
   const incomplete = opts?.hasMoreLikely === true || (expected !== null && total < expected)
   const expectedSuffix = expected !== null ? ` / 用户目标 ${expected}` : ''
+  if (opts?.mediaOnly) {
+    if (state === 'completed' && !incomplete) return `图片发现完成：已找到 ${total} 张${expectedSuffix}；等待下载到本地`
+    if (state === 'completed') return `图片发现未完整：已找到 ${total} 张${expectedSuffix}，可能还有更多；等待下载到本地`
+    if (state === 'paused') return `图片发现已暂停：已找到 ${total} 张${expectedSuffix}，可能还没到底；等待继续发现或下载已发现图片`
+    if (state === 'cancelled') return `图片采集已中断：已找到 ${total} 张`
+    if (state === 'failed') return `图片采集失败：已找到 ${total} 张`
+    return `正在发现页面图片${current ? ` · ${current}` : ''}`
+  }
   if (state === 'completed' && !incomplete) return `可见页面发现完成：已冻结 ${total} 条${expectedSuffix}；尚未开始逐篇保存`
   if (state === 'completed') return `可见页面发现未完整：已冻结 ${total} 条${expectedSuffix}，可能还有更多；尚未开始逐篇保存`
   if (state === 'paused') return `可见页面发现已暂停：已冻结 ${total} 条${expectedSuffix}，可能还没到底；尚未开始逐篇保存`
@@ -171,20 +179,52 @@ function discoveryStatusFor(stopReason: string): 'complete' | 'partial' | 'pause
 }
 
 function visibleCollectFrozenCount(items: BrowserStructuredItem[], template: string): number {
-  if (template === 'image_gallery') return items.length
+  if (template === 'image_gallery') return mediaCandidatesFromVisibleItems(items).length
   return deriveCollectionTargets(items).length
+}
+
+function mediaCandidatesFromVisibleItems(items: BrowserStructuredItem[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  const push = (value: unknown): void => {
+    const url = String(value || '').trim()
+    if (!/^https?:\/\//i.test(url) || seen.has(url)) return
+    seen.add(url)
+    out.push(url)
+  }
+  for (const item of items) {
+    const record = item as unknown as Record<string, unknown>
+    if (Array.isArray(record.media)) {
+      for (const value of record.media) push(value)
+    }
+    push(record.link)
+    push(record.image)
+    const rawFields = record.rawFields && typeof record.rawFields === 'object'
+      ? record.rawFields as Record<string, unknown>
+      : null
+    push(rawFields?.link)
+    push(rawFields?.image)
+    if (Array.isArray(rawFields?.media)) {
+      for (const value of rawFields.media) push(value)
+    }
+  }
+  return out
 }
 
 function visibleCollectResult(taskId: string, items: BrowserStructuredItem[], rounds: number, stopReason: string, targetUrl: string, outputRootDir: unknown, userExpectedTotal?: number, template = 'card_list') {
   const noteCandidates = deriveCollectionTargets(items)
+  const mediaCandidates = template === 'image_gallery' ? mediaCandidatesFromVisibleItems(items) : []
   const frozenCount = visibleCollectFrozenCount(items, template)
   const rawDiscoveryStatus = discoveryStatusFor(stopReason)
+  const emptyComplete = frozenCount === 0 && rawDiscoveryStatus === 'complete'
   const expectedIncomplete = Boolean(userExpectedTotal && userExpectedTotal > 0 && frozenCount < userExpectedTotal)
-  const discoveryStatus = rawDiscoveryStatus === 'complete' && expectedIncomplete ? 'partial' : rawDiscoveryStatus
-  const canStartNoteCollect = discoveryStatus === 'complete'
-  return {
-    items,
-    rounds,
+  const discoveryStatus = rawDiscoveryStatus === 'complete' && (expectedIncomplete || emptyComplete) ? 'partial' : rawDiscoveryStatus
+    const canStartNoteCollect = discoveryStatus === 'complete'
+    const outputDir = typeof outputRootDir === 'string' && outputRootDir.trim() ? outputRootDir.trim() : ''
+    return {
+      items,
+      template,
+      rounds,
     stopReason,
     targetUrl,
     discoveryStatus,
@@ -193,9 +233,15 @@ function visibleCollectResult(taskId: string, items: BrowserStructuredItem[], ro
     frozenCount,
     noteCandidates,
     candidateCount: noteCandidates.length,
+    ...(template === 'image_gallery'
+      ? {
+          mediaCandidates,
+          mediaCandidateCount: mediaCandidates.length,
+        }
+      : {}),
     sourceTaskId: taskId,
-    ...(typeof outputRootDir === 'string' && outputRootDir.trim()
-      ? { outputRootDir: outputRootDir.trim() }
+    ...(outputDir
+      ? { outputRootDir: outputDir }
       : {}),
     ...(discoveryStatus !== 'complete' ? { continueTaskId: taskId } : {}),
     ...(discoveryStatus !== 'complete'
@@ -218,6 +264,19 @@ function visibleCollectResult(taskId: string, items: BrowserStructuredItem[], ro
                 ? { output_root_dir: outputRootDir.trim() }
                 : {}),
             },
+          },
+        }
+      : {}),
+    ...(canStartNoteCollect && template === 'image_gallery' && mediaCandidates.length > 0
+      ? {
+          suggestedNextTool: {
+            name: 'browser_download_collected_media',
+            args: {
+              source_task_id: taskId,
+              ...(outputDir ? { directory: outputDir } : {}),
+              filename_prefix: 'image',
+            },
+            ...(outputDir ? {} : { requires: ['directory'] }),
           },
         }
       : {}),
@@ -511,9 +570,11 @@ export class BrowserContentTaskRunner {
         if (!shouldReprojectBrowserCollectTask(task.status)) continue
         if (projectedSourceTaskIds.has(task.taskId)) continue
         const result = resultObject(task)
+        const template = String(payload?.template || result?.template || '')
         this.projectVisibleCollect(task.taskId, scopeId, state, total, currentLabel ?? null, {
           hasMoreLikely: result?.hasMoreLikely === true,
           userExpectedTotal: Number(result?.userExpectedTotal || payload?.userExpectedTotal || 0) || undefined,
+          mediaOnly: template === 'image_gallery' || Number(result?.mediaCandidateCount || 0) > 0,
         })
       }
     }
@@ -565,14 +626,14 @@ export class BrowserContentTaskRunner {
     state: BrowserTaskProjectionInput['state'],
     total: number,
     current: string | null,
-    opts?: { hasMoreLikely?: boolean; userExpectedTotal?: number },
+    opts?: { hasMoreLikely?: boolean; userExpectedTotal?: number; mediaOnly?: boolean },
   ): void {
     const sink = this.taskProjectionSink
     if (!sink || !scopeId) return
     sink.upsert({
       taskId,
       scopeId,
-      title: '浏览器可见页面采集',
+      title: opts?.mediaOnly ? '浏览器图片采集' : '浏览器可见页面采集',
       summary: visibleCollectSummary(total, current, state, opts),
       state,
       waitingFor: state === 'running' ? 'background' : 'none',
@@ -720,7 +781,9 @@ export class BrowserContentTaskRunner {
     } else if (handle?.kind === 'visible_collect') {
       const payload = this.persistenceService.getTaskPayload(taskId)
       const scopeId = typeof payload?.scopeId === 'string' ? payload.scopeId.trim() : ''
-      this.projectVisibleCollect(taskId, scopeId, 'cancelled', handle.progress.total, null)
+      this.projectVisibleCollect(taskId, scopeId, 'cancelled', handle.progress.total, null, {
+        mediaOnly: String(payload?.template || '') === 'image_gallery',
+      })
     }
     return handle
   }
@@ -807,7 +870,9 @@ export class BrowserContentTaskRunner {
           finishedAt: new Date().toISOString(),
         })
         publishBrowserTaskEvent(taskId, 'failed')
-        this.projectVisibleCollect(taskId, scopeId, 'failed', 0, null)
+        this.projectVisibleCollect(taskId, scopeId, 'failed', 0, null, {
+          mediaOnly: String(payload.template || '') === 'image_gallery',
+        })
         return
       }
       leaseId = acquired.leaseId
@@ -839,7 +904,11 @@ export class BrowserContentTaskRunner {
       })
       publishBrowserTaskEvent(taskId, 'paused')
       const scopeId = typeof payload.scopeId === 'string' ? payload.scopeId.trim() : ''
-      this.projectVisibleCollect(taskId, scopeId, 'paused', 0, null, { hasMoreLikely: true, userExpectedTotal: Number(payload.userExpectedTotal || 0) || undefined })
+      this.projectVisibleCollect(taskId, scopeId, 'paused', 0, null, {
+        hasMoreLikely: true,
+        userExpectedTotal: Number(payload.userExpectedTotal || 0) || undefined,
+        mediaOnly: String(payload.template || 'card_list') === 'image_gallery',
+      })
       return
     }
 
@@ -861,7 +930,9 @@ export class BrowserContentTaskRunner {
         finishedAt: new Date().toISOString(),
       })
       publishBrowserTaskEvent(taskId, 'failed')
-      this.projectVisibleCollect(taskId, scopeId, 'failed', 0, null)
+      this.projectVisibleCollect(taskId, scopeId, 'failed', 0, null, {
+        mediaOnly: String(payload.template || '') === 'image_gallery',
+      })
       return
     }
 
@@ -934,7 +1005,11 @@ export class BrowserContentTaskRunner {
           partialResults: collected,
         },
       })
-      this.projectVisibleCollect(taskId, scopeId, 'running', frozenCount, label, { hasMoreLikely: true, userExpectedTotal: Number(payload.userExpectedTotal || 0) || undefined })
+      this.projectVisibleCollect(taskId, scopeId, 'running', frozenCount, label, {
+        hasMoreLikely: true,
+        userExpectedTotal: Number(payload.userExpectedTotal || 0) || undefined,
+        mediaOnly: template === 'image_gallery',
+      })
     }
 
     while (true) {
@@ -1071,6 +1146,7 @@ export class BrowserContentTaskRunner {
     this.projectVisibleCollect(taskId, scopeId, finalStatus, Number(finalResult.frozenCount || 0), null, {
       hasMoreLikely: finalResult.hasMoreLikely === true,
       userExpectedTotal,
+      mediaOnly: template === 'image_gallery',
     })
   }
 

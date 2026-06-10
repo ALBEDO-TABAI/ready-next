@@ -33,6 +33,7 @@ const ALWAYS_READ = new Set<string>([
   'browser_collect_images',
   'browser_resolve_video',
   'browser_download_urls',
+  'browser_download_collected_media',
   'browser_aggregate_results',
   'browser_get_task',
   'browser_cancel_task',

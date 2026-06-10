@@ -203,6 +203,7 @@ describe('visible_collect task runner', () => {
 
   it('counts image_gallery visible collection items instead of note candidates', async () => {
     const persistence = new FakePersistence()
+    const projections: Array<{ title: string; summary: string; discovered?: number; remaining?: number }> = []
     const capability = {
       openTarget: async () => ({ success: true, tabId: 'tab-1' }),
       extractStructured: async () => ({
@@ -216,17 +217,68 @@ describe('visible_collect task runner', () => {
       scrollViewportOnce: async () => ({ scrollY: 0, atBottom: true }),
     } as unknown as BrowserCapabilityService
     const runner = new BrowserContentTaskRunner(capability, persistence as never, new BrowserWriteLeaseService())
+    runner.setTaskProjectionSink({ upsert: (input) => projections.push(input) })
     const handle = await runner.startTask({
       kind: 'visible_collect',
-      payload: { template: 'image_gallery', tabId: 'tab-1', maxRounds: 4 },
+      payload: { template: 'image_gallery', tabId: 'tab-1', maxRounds: 4, scopeId: 'scope-image-gallery', outputRootDir: '/tmp/gallery' },
     })
     const done = await waitForStatus(persistence, handle.taskId, ['completed'], 6_000)
-    const result = done.result as { frozenCount?: number; candidateCount?: number; noteCandidates?: unknown[] }
+    const result = done.result as {
+      frozenCount?: number
+      candidateCount?: number
+      noteCandidates?: unknown[]
+      mediaCandidates?: string[]
+      mediaCandidateCount?: number
+      suggestedNextTool?: { name?: string; args?: { source_task_id?: string; directory?: string; filename_prefix?: string } }
+    }
 
     assert.equal(done.progress.total, 2)
     assert.equal(result.frozenCount, 2)
     assert.equal(result.candidateCount, 0)
     assert.deepEqual(result.noteCandidates, [])
+    assert.deepEqual(result.mediaCandidates, ['https://img.example.com/1.webp', 'https://img.example.com/2.webp'])
+    assert.equal(result.mediaCandidateCount, 2)
+    assert.equal(result.suggestedNextTool?.name, 'browser_download_collected_media')
+    assert.equal(result.suggestedNextTool?.args?.source_task_id, handle.taskId)
+    assert.equal(result.suggestedNextTool?.args?.directory, '/tmp/gallery')
+    assert.equal(result.suggestedNextTool?.args?.filename_prefix, 'image')
+    const finalProjection = projections.at(-1)
+    assert.equal(finalProjection?.title, '浏览器图片采集')
+    assert.match(finalProjection?.summary || '', /已找到 2 张/)
+    assert.match(finalProjection?.summary || '', /等待下载/)
+  })
+
+  it('does not complete image_gallery when no valid image URLs were collected', async () => {
+    const persistence = new FakePersistence()
+    const capability = {
+      openTarget: async () => ({ success: true, tabId: 'tab-1' }),
+      extractStructured: async () => ({
+        template: 'image_gallery' as const,
+        items: [
+          { sourceUrl: 'https://example.com/gallery', title: 'empty image shell', link: '' },
+        ],
+        sourceUrl: 'https://example.com/gallery',
+      }),
+      scrollViewportOnce: async () => ({ scrollY: 0, atBottom: true }),
+    } as unknown as BrowserCapabilityService
+    const runner = new BrowserContentTaskRunner(capability, persistence as never, new BrowserWriteLeaseService())
+    const handle = await runner.startTask({
+      kind: 'visible_collect',
+      payload: { template: 'image_gallery', tabId: 'tab-1', maxRounds: 4 },
+    })
+    const done = await waitForStatus(persistence, handle.taskId, ['failed'], 6_000)
+    const result = done.result as {
+      discoveryStatus?: string
+      frozenCount?: number
+      mediaCandidateCount?: number
+      suggestedNextTool?: unknown
+    }
+
+    assert.equal(done.progress.total, 0)
+    assert.equal(result.discoveryStatus, 'partial')
+    assert.equal(result.frozenCount, 0)
+    assert.equal(result.mediaCandidateCount, 0)
+    assert.equal(result.suggestedNextTool, undefined)
   })
 
   it('navigates the supplied agent tab for url-based visible collect', async () => {

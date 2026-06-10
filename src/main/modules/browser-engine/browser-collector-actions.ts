@@ -76,6 +76,7 @@ interface MediaCollection {
   videoCount: number
   scope?: string
   expectedImageCount?: number
+  hasCarouselSignal?: boolean
 }
 
 const MAX_NOTE_IMAGE_CANDIDATES = 24
@@ -187,6 +188,7 @@ function extractMediaCollection(collectOutput: string): MediaCollection {
         expectedImageCount: Number.isFinite(Number(parsed?.expectedImageCount)) && Number(parsed?.expectedImageCount) > 0
           ? Number(parsed.expectedImageCount)
           : undefined,
+        hasCarouselSignal: parsed?.hasCarouselSignal === true,
         videos,
         images: images
       .map((img: unknown) => {
@@ -734,6 +736,7 @@ async function collectCarouselMedia(
     videos: rawVideos,
     videoCount: rawVideos.length,
     scope: scope || 'carousel',
+    hasCarouselSignal: true,
   }
 }
 
@@ -748,6 +751,8 @@ function facadeWithCarouselMedia(facade: NoteCollectFacade, media: MediaCollecti
           images: media.images,
           videos: media.videos,
           videoCount: media.videoCount,
+          expectedImageCount: media.expectedImageCount,
+          hasCarouselSignal: media.hasCarouselSignal,
           scope: media.scope,
         })
       }
@@ -1120,6 +1125,7 @@ export async function collectNote(
   let rawImages = media.images
   let videoCount = media.videoCount
   let expectedImageCount = media.expectedImageCount || 0
+  let hasCarouselSignal = media.hasCarouselSignal === true || expectedImageCount > 1
   let images = filterNoteImageCandidates(rawImages)
   let rawImagesForAccessBlock = rawImages
   if (
@@ -1176,6 +1182,7 @@ export async function collectNote(
     rawImages = media.images
     videoCount = Math.max(videoCount, media.videoCount)
     expectedImageCount = Math.max(expectedImageCount, media.expectedImageCount || 0)
+    hasCarouselSignal = hasCarouselSignal || media.hasCarouselSignal === true || expectedImageCount > 1
     rawImagesForAccessBlock = rawImages
     if (
       input.skipNavigate
@@ -1233,6 +1240,7 @@ export async function collectNote(
       rawImages = retryMedia.images
       videoCount = Math.max(videoCount, retryMedia.videoCount)
       expectedImageCount = Math.max(expectedImageCount, retryMedia.expectedImageCount || 0)
+      hasCarouselSignal = hasCarouselSignal || retryMedia.hasCarouselSignal === true || expectedImageCount > 1
       rawImagesForAccessBlock = rawImages
       images = filterNoteImageCandidates(rawImages)
       if (images.length > 0 || videoCount > 0) break
@@ -1242,6 +1250,7 @@ export async function collectNote(
       rawImages = retryMedia.images
       videoCount = Math.max(videoCount, retryMedia.videoCount)
       expectedImageCount = Math.max(expectedImageCount, retryMedia.expectedImageCount || 0)
+      hasCarouselSignal = hasCarouselSignal || retryMedia.hasCarouselSignal === true || expectedImageCount > 1
       rawImagesForAccessBlock = rawImages
       images = filterNoteImageCandidates(rawImages)
       if (images.length > 0 || videoCount > 0) break
@@ -1258,6 +1267,7 @@ export async function collectNote(
     if (retryHiddenOut && !parseFacadeError(retryHiddenOut)) {
       const retryMedia = extractMediaCollection(retryHiddenOut)
       expectedImageCount = Math.max(expectedImageCount, retryMedia.expectedImageCount || 0)
+      hasCarouselSignal = hasCarouselSignal || retryMedia.hasCarouselSignal === true || expectedImageCount > 1
       rawImages = mergeImageCandidates(rawImages, retryMedia.images)
       rawImagesForAccessBlock = rawImages
       images = filterNoteImageCandidates(rawImages)
@@ -1307,6 +1317,25 @@ export async function collectNote(
       imageCount: imageUrls.length,
       savedDir: input.outputDir,
       reason: `partial_images:${imageUrls.length}/${expectedImageCount}`,
+    }, { summary: detail.summary, imageUrls })
+  }
+  if (
+    hasCarouselSignal
+    && imageUrls.length <= 1
+    && isXiaohongshuTarget(input)
+    && (media.scope === 'xiaohongshu-detail' || input.skipNavigate)
+  ) {
+    return writeArtifacts(fileOps, pathJoin, {
+      success: false,
+      noteUrl: input.noteUrl,
+      canonicalUrl,
+      openUrl,
+      title,
+      sourceId,
+      order: input.order,
+      imageCount: imageUrls.length,
+      savedDir: input.outputDir,
+      reason: `partial_images:${imageUrls.length}/unknown`,
     }, { summary: detail.summary, imageUrls })
   }
   const imageAccessBlock = detectTerminalPageBlock({ pageText, title: detail.title || title, summary: detail.summary, images: images.length > 0 ? images : rawImagesForAccessBlock })

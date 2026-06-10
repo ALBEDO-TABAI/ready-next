@@ -65,6 +65,17 @@ test('collection plan derives, advances on tool results, and stays scoped', () =
   assert.equal(buildActivePlanReminderText('scope-a', 2000 + 31 * 60_000), null)
 })
 
+test('image gallery plan advances from discovery to media download', () => {
+  resetActivePlansForTests()
+  noteToolResultForActivePlan('scope-media', 'browser_visible_collect', { template: 'image_gallery', url: 'https://example.com/gallery' }, 1000)
+  let text = buildActivePlanReminderText('scope-media', 1000)
+  assert.ok(text && text.includes('当前步骤 2/3：下载已发现图片到本地目录'), `expected media download step, got: ${text}`)
+
+  noteToolResultForActivePlan('scope-media', 'browser_download_collected_media', { source_task_id: 'browser-task-1', directory: '/tmp/gallery' }, 2000)
+  text = buildActivePlanReminderText('scope-media', 2000)
+  assert.ok(text && text.includes('当前步骤 3/3：复核图片下载数量并向用户交付'), `expected review step, got: ${text}`)
+})
+
 test('next turn model input carries the re-injected current plan step', async () => {
   resetActivePlansForTests()
   const inputs: string[] = []

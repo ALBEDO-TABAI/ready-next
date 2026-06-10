@@ -179,6 +179,62 @@ describe('collectNote (per-note sequence via facade)', () => {
     assert.equal(calls.some((call) => call.tool === 'browser_wait'), true)
   })
 
+  it('marks a Xiaohongshu carousel as partial when only one image is found and total is unknown', async () => {
+    const url = 'https://sns-webpic-qc.xhscdn.com/notes_pre_post/image-1!nc_n_webp_mw_1'
+    const { facade, calls } = facadeFrom({
+      browser_collect_images: () => JSON.stringify({
+        count: 1,
+        scope: 'xiaohongshu-detail',
+        hasCarouselSignal: true,
+        images: [{ url, width: 1200, height: 1600 }],
+      }),
+      browser_extract_structured: (args) => args.template === 'image_gallery'
+        ? JSON.stringify({ items: [{ link: url, media: [url] }] })
+        : JSON.stringify({ items: [{ title: '多图笔记' }] }),
+    })
+    const res = await collectNote(
+      facade,
+      {
+        noteUrl: 'https://www.xiaohongshu.com/explore/6a27d9280000000007013982',
+        title: '多图笔记',
+        outputDir: '/out',
+      },
+      join,
+    )
+
+    assert.equal(res.success, false)
+    assert.equal(res.reason, 'partial_images:1/unknown')
+    assert.equal(calls.some((call) => call.tool === 'browser_download_urls'), false)
+  })
+
+  it('still saves a genuine single-image Xiaohongshu note without carousel signals', async () => {
+    const url = 'https://sns-webpic-qc.xhscdn.com/notes_pre_post/single!nc_n_webp_mw_1'
+    const { facade, calls } = facadeFrom({
+      browser_collect_images: () => JSON.stringify({
+        count: 1,
+        scope: 'xiaohongshu-detail',
+        images: [{ url, width: 1200, height: 1600 }],
+      }),
+      browser_extract_structured: (args) => args.template === 'image_gallery'
+        ? JSON.stringify({ items: [{ link: url, media: [url] }] })
+        : JSON.stringify({ items: [{ title: '单图笔记' }] }),
+      browser_download_urls: () => JSON.stringify({ total: 1, success: 1, failed: 0 }),
+    })
+    const res = await collectNote(
+      facade,
+      {
+        noteUrl: 'https://www.xiaohongshu.com/explore/6a27d9280000000007013982',
+        title: '单图笔记',
+        outputDir: '/out',
+      },
+      join,
+    )
+
+    assert.equal(res.success, true)
+    assert.equal(res.imageCount, 1)
+    assert.deepEqual(calls.find((call) => call.tool === 'browser_download_urls')?.args.urls, [url])
+  })
+
   it('fails the note (does not throw) when navigate is blocked by the facade', async () => {
     const { facade, calls } = facadeFrom({
       browser_navigate: () => JSON.stringify({ ok: false, errorCode: 'lease_takeover', message: 'frozen' }),

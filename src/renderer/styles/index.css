@@ -2454,9 +2454,15 @@ html[data-theme='dark'][data-skin='liquid-glass'] .glass-surface-card {
   --calendar-event-chip-bg: color-mix(in srgb, var(--surface-card-bg) 38%, transparent);
 }
 
+html[data-skin='liquid-glass'] .calendar-mode-shell {
+  --calendar-canvas-bg: var(--workbench-module-surface-bg);
+  --calendar-canvas-border: transparent;
+  --calendar-sidebar-bg: var(--calendar-canvas-bg);
+}
+
 html[data-skin='liquid-glass'][data-glass-backdrop='native'] .calendar-mode-shell {
-  --calendar-canvas-bg: rgba(247, 248, 251, 0.96);
-  --calendar-canvas-border: rgba(224, 230, 240, 0.96);
+  --calendar-canvas-bg: var(--workbench-module-surface-bg);
+  --calendar-canvas-border: transparent;
   --calendar-assistant-bg: rgba(241, 244, 249, 0.96);
   --calendar-assistant-card-bg: rgba(255, 255, 255, 0.34);
 }
@@ -2474,8 +2480,8 @@ html[data-theme='dark'][data-skin='liquid-glass'][data-glass-backdrop='native'] 
 }
 
 html[data-skin='liquid-glass'][data-glass-backdrop='ready'] .calendar-mode-shell {
-  --calendar-canvas-bg: rgba(247, 248, 251, 0.96);
-  --calendar-canvas-border: color-mix(in srgb, var(--border-default) 92%, transparent);
+  --calendar-canvas-bg: var(--workbench-module-surface-bg);
+  --calendar-canvas-border: transparent;
   --calendar-sidebar-bg: var(--calendar-canvas-bg);
   --calendar-control-bg: color-mix(in srgb, var(--bg-primary) 82%, var(--bg-panel) 18%);
   --calendar-control-bg-hover: color-mix(in srgb, var(--bg-primary) 92%, var(--bg-panel) 8%);
@@ -2486,8 +2492,8 @@ html[data-skin='liquid-glass'][data-glass-backdrop='ready'] .calendar-mode-shell
 }
 
 html[data-theme='dark'][data-skin='liquid-glass'][data-glass-backdrop='ready'] .calendar-mode-shell {
-  --calendar-canvas-bg: var(--bg-content);
-  --calendar-canvas-border: color-mix(in srgb, var(--border-default) 82%, transparent);
+  --calendar-canvas-bg: var(--workbench-module-surface-bg);
+  --calendar-canvas-border: transparent;
   --calendar-control-bg: color-mix(in srgb, var(--bg-toolbar) 76%, var(--bg-content) 24%);
   --calendar-control-bg-hover: color-mix(in srgb, var(--bg-toolbar) 92%, var(--bg-content) 8%);
   --calendar-control-bg-active: color-mix(in srgb, var(--color-blue) 20%, var(--bg-toolbar) 80%);
@@ -4003,9 +4009,7 @@ body.resizing [data-liquid-shell='chat-panel'] {
 html[data-skin='liquid-glass'] .calendar-mode-shell .workbench-canvas-shell {
   background: var(--calendar-canvas-bg) !important;
   border: 1px solid var(--calendar-canvas-border) !important;
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.72),
-    0 8px 24px rgba(15, 23, 42, 0.05) !important;
+  box-shadow: none !important;
 }
 
 html[data-theme='dark'][data-skin='liquid-glass'] .calendar-mode-shell .workbench-canvas-shell {
@@ -4423,6 +4427,10 @@ html:not([data-skin='liquid-glass']) .rss-mode-shell [class*="editor-area"] {
 .rss-toolbar-select:hover {
   background: color-mix(in srgb, var(--surface-card-bg) 40%, transparent) !important;
   border-color: color-mix(in srgb, var(--text-gray) 28%, var(--border-input) 72%) !important;
+}
+
+.rss-toolbar-select:focus {
+  outline: none;
 }
 
 .rss-toolbar-select:focus-visible {

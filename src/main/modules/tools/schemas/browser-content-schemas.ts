@@ -31,6 +31,13 @@ export const BrowserDownloadUrlsSchema = z.object({
   tab_id: z.string().optional().describe('可选标签页 ID（用于带 Referer 下载）'),
 })
 
+export const BrowserDownloadCollectedMediaSchema = z.object({
+  source_task_id: z.string().describe('browser_visible_collect(image_gallery) 返回的任务 ID'),
+  directory: z.string().describe('目标目录'),
+  filename_prefix: z.string().optional().describe('文件名前缀（可选，默认 image）'),
+  overwrite: z.boolean().optional().describe('同名是否覆盖，默认 false'),
+})
+
 export const BrowserResolveVideoSchema = z.object({
   page_url: z.string().optional().describe('视频所在页面 URL；留空时尝试使用当前标签页 URL'),
   video_url: z.string().optional().describe('页面已暴露的直接视频 URL（可选）'),
@@ -189,6 +196,7 @@ export const BrowserConfirmCollectionConsentSchema = z.object({
 export type BrowserContentToolName =
   | 'browser_collect_images'
   | 'browser_download_urls'
+  | 'browser_download_collected_media'
   | 'browser_resolve_video'
   | 'browser_extract_structured'
   | 'browser_scroll_collect'
@@ -211,6 +219,7 @@ export const BROWSER_CONTENT_SCHEMAS: Record<
 > = {
   browser_collect_images: BrowserCollectImagesSchema,
   browser_download_urls: BrowserDownloadUrlsSchema,
+  browser_download_collected_media: BrowserDownloadCollectedMediaSchema,
   browser_resolve_video: BrowserResolveVideoSchema,
   browser_extract_structured: BrowserExtractStructuredSchema,
   browser_scroll_collect: BrowserScrollCollectSchema,

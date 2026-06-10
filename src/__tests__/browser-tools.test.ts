@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, it } from 'node:test'
 import assert from 'node:assert'
-import { rmSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { JSDOM } from 'jsdom'
@@ -1837,6 +1837,81 @@ describe('browser_visible_collect (agent pane dispatch)', () => {
     assert.equal(started[0]?.scopeId, 'scope-collection-1')
     assert.equal(started[0]?.payload.outputRootDir, '/tmp/ao-i')
     assert.equal(started[0]?.payload.highControl, true)
+  })
+})
+
+describe('browser_download_collected_media', () => {
+  it('downloads media from a completed image_gallery source task with the source page as Referer', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'ready-collected-media-'))
+    const calls: Array<{ url: string; sourcePageUrl?: string | null; suggestedName?: string | null }> = []
+    try {
+      const controller = createControllerMock({
+        getTask: async () => ({
+          taskId: 'browser-task-gallery-1',
+          kind: 'visible_collect',
+          status: 'completed',
+          progress: { total: 2, completed: 0, failed: 0, currentLabel: null },
+          result: {
+            template: 'image_gallery',
+            discoveryStatus: 'complete',
+            targetUrl: 'https://www.xiaohongshu.com/explore/source-note',
+            mediaCandidates: ['https://sns-img.xhscdn.com/a.webp', 'https://sns-img.xhscdn.com/b.webp'],
+          },
+        }) as never,
+        getTaskPayload: () => ({ scopeId: 'scope-media', template: 'image_gallery' }),
+        downloadUrlToDirectory: async (payload: { url: string; sourcePageUrl?: string | null; suggestedName?: string | null }) => {
+          calls.push(payload)
+          return { success: true, savePath: join(dir, `${payload.suggestedName}.webp`), filename: `${payload.suggestedName}.webp` }
+        },
+      })
+
+      const out = await executeBrowserTool(
+        'browser_download_collected_media',
+        { source_task_id: 'browser-task-gallery-1', directory: dir },
+        controller,
+        undefined,
+        'scope-media',
+      )
+      const parsed = JSON.parse(out) as { ok?: boolean; success?: number; mediaCandidateCount?: number }
+
+      assert.equal(parsed.ok, true)
+      assert.equal(parsed.success, 2)
+      assert.equal(parsed.mediaCandidateCount, 2)
+      assert.deepEqual(calls.map((call) => call.url), ['https://sns-img.xhscdn.com/a.webp', 'https://sns-img.xhscdn.com/b.webp'])
+      assert.equal(calls[0]?.sourcePageUrl, 'https://www.xiaohongshu.com/explore/source-note')
+      assert.equal(calls[0]?.suggestedName, 'image-1')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  it('refuses non-image-gallery and empty source tasks', async () => {
+    const controller = createControllerMock({
+      getTask: async (taskId: string) => ({
+        taskId,
+        kind: 'visible_collect',
+        status: 'completed',
+        progress: { total: 0, completed: 0, failed: 0, currentLabel: null },
+        result: taskId === 'browser-task-empty'
+          ? { template: 'image_gallery', discoveryStatus: 'complete', mediaCandidates: [] }
+          : { template: 'card_list', discoveryStatus: 'complete', noteCandidates: [{ url: 'https://example.com/1' }] },
+      }) as never,
+      getTaskPayload: (taskId: string) => ({ template: taskId === 'browser-task-empty' ? 'image_gallery' : 'card_list' }),
+    })
+
+    const wrongKind = JSON.parse(await executeBrowserTool(
+      'browser_download_collected_media',
+      { source_task_id: 'browser-task-not-gallery', directory: '/tmp/out' },
+      controller,
+    )) as { errorCode?: string }
+    const empty = JSON.parse(await executeBrowserTool(
+      'browser_download_collected_media',
+      { source_task_id: 'browser-task-empty', directory: '/tmp/out' },
+      controller,
+    )) as { errorCode?: string }
+
+    assert.equal(wrongKind.errorCode, 'source_task_not_image_gallery')
+    assert.equal(empty.errorCode, 'source_task_has_no_media')
   })
 })
 

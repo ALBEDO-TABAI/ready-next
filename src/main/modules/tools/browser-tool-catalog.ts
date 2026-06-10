@@ -48,6 +48,7 @@ export const BROWSER_INTERACTION_TOOL_NAMES = [
 export const BROWSER_CONTENT_TASK_TOOL_NAMES = [
   'browser_collect_images',
   'browser_download_urls',
+  'browser_download_collected_media',
   'browser_resolve_video',
   'browser_extract_structured',
   'browser_scroll_collect',
@@ -170,6 +171,11 @@ export const BROWSER_TOOLS: BrowserToolDef[] = [
     name: 'browser_download_urls',
     description: '批量下载 URL 到本地目录（默认 ~/Documents），可用于一次性保存多张图片。',
     params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_download_urls) as ToolParamSchemaSpec[],
+  },
+  {
+    name: 'browser_download_collected_media',
+    description: '从已完成的 browser_visible_collect(image_gallery) 来源任务下载已冻结图片到本地目录；只接受 source_task_id，不接受任意 URL 列表。',
+    params: zodObjectToParamList(BROWSER_CONTENT_SCHEMAS.browser_download_collected_media) as ToolParamSchemaSpec[],
   },
   {
     name: 'browser_resolve_video',
