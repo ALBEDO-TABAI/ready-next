@@ -29,6 +29,7 @@ export interface CollectNoteInput {
   folderName?: string
   duplicateTitle?: boolean
   skipNavigate?: boolean
+  max_images?: number
   outputDir: string
 }
 
@@ -78,6 +79,51 @@ interface MediaCollection {
 }
 
 const MAX_NOTE_IMAGE_CANDIDATES = 24
+
+const CAROUSEL_ROOT_SELECTORS = [
+  '[aria-roledescription="carousel"]',
+  '[role="region"][aria-label*="carousel" i]',
+  '.swiper',
+  '.swiper-container',
+  '.slick-slider',
+  '.carousel',
+  '[data-carousel]',
+  '[data-ub-carousel]',
+]
+
+const CAROUSEL_DOT_SELECTORS = [
+  '.swiper-pagination',
+  '.swiper-pagination-bullet',
+  '.slick-dots',
+  '[aria-label*="Go to slide" i]',
+  '[aria-label*="slide" i][role="button"]',
+  '[aria-label*="第"][aria-label*="张"]',
+]
+
+const CAROUSEL_NEXT_BUTTON_SELECTORS = [
+  '.swiper-button-next',
+  '.slick-next',
+  '.carousel-control-next',
+  '[aria-label*="Next" i]',
+  '[aria-label*="下一"]',
+  'button[class*="next"]',
+  '[role="button"][class*="next"]',
+]
+
+const CAROUSEL_DETECTION_SELECTOR = [
+  ...CAROUSEL_ROOT_SELECTORS,
+  ...CAROUSEL_DOT_SELECTORS,
+  ...CAROUSEL_NEXT_BUTTON_SELECTORS,
+].join(', ')
+
+const CAROUSEL_NEXT_BUTTON_SELECTOR = CAROUSEL_NEXT_BUTTON_SELECTORS.join(', ')
+
+const CAROUSEL_TEXT_MARKER_PATTERNS = [
+  /aria-roledescription=["']?carousel/i,
+  /\bswiper\b/i,
+  /\bcarousel\b/i,
+  /轮播/u,
+]
 
 const FOLDER_UNSAFE_PATTERN = new RegExp(
   '[\\\\/:*?"<>|' + String.fromCharCode(0x00) + '-' + String.fromCharCode(0x1f) + ']',
@@ -412,6 +458,21 @@ function mergeImageCandidates(...sets: ImageCandidate[][]): ImageCandidate[] {
   return out
 }
 
+function mergeVideoCandidates(...sets: VideoCandidate[][]): VideoCandidate[] {
+  const seen = new Set<string>()
+  const out: VideoCandidate[] = []
+  for (const videos of sets) {
+    for (const video of videos) {
+      if (!/^https?:\/\//i.test(video.url)) continue
+      const key = video.url.toLowerCase()
+      if (seen.has(key)) continue
+      seen.add(key)
+      out.push(video)
+    }
+  }
+  return out
+}
+
 function extractImagesFromStructuredGallery(output: string): ImageCandidate[] {
   try {
     const parsed = JSON.parse(output)
@@ -577,6 +638,122 @@ async function waitForTargetDetailTab(
     await sleep(CARD_DETAIL_OPEN_POLL_MS)
   }
   return { opened: false, tabsOut: lastTabsOut }
+}
+
+function waitConditionMatched(output: string): boolean {
+  if (parseFacadeError(output)) return false
+  try {
+    const parsed = JSON.parse(output)
+    return parsed?.matched === true || (parsed?.ready === true && parsed?.selectorMatched === true)
+  } catch {
+    return false
+  }
+}
+
+function shouldProbeCarousel(input: CollectNoteInput, detailText: string): boolean {
+  return isXiaohongshuTarget(input) || CAROUSEL_TEXT_MARKER_PATTERNS.some((pattern) => pattern.test(detailText))
+}
+
+async function pageHasCarouselStructure(
+  facade: NoteCollectFacade,
+  input: CollectNoteInput,
+  detailText: string,
+): Promise<boolean> {
+  if (!shouldProbeCarousel(input, detailText)) return false
+  const out = await facade.run('browser_wait_for_condition', {
+    condition: 'selector',
+    selector: CAROUSEL_DETECTION_SELECTOR,
+    timeout_ms: CARD_DETAIL_OPEN_POLL_MS,
+    check_interval_ms: CARD_DETAIL_OPEN_POLL_MS,
+  }).catch(() => '')
+  return waitConditionMatched(out)
+}
+
+function carouselClickSucceeded(output: string): boolean {
+  if (parseFacadeError(output)) return false
+  const text = String(output || '').trim()
+  if (!text) return false
+  if (/^(?:error|element not found)\b/i.test(text)) return false
+  try {
+    const parsed = JSON.parse(text)
+    return parsed?.ok !== false
+  } catch {
+    return true
+  }
+}
+
+function carouselMaxImages(input: CollectNoteInput): number {
+  const value = Number(input.max_images || 0)
+  if (Number.isFinite(value) && value > 0) return Math.min(MAX_NOTE_IMAGE_CANDIDATES, Math.trunc(value))
+  return MAX_NOTE_IMAGE_CANDIDATES
+}
+
+async function collectVisibleCarouselFrame(facade: NoteCollectFacade, maxImages: number): Promise<MediaCollection> {
+  const out = await facade.run('browser_collect_images', { include_hidden: false, limit: Math.max(36, maxImages) }).catch(() => '')
+  if (!out || parseFacadeError(out)) return { images: [], videos: [], videoCount: 0 }
+  return extractMediaCollection(out)
+}
+
+async function collectCarouselMedia(
+  facade: NoteCollectFacade,
+  input: CollectNoteInput,
+  detailText: string,
+): Promise<MediaCollection | null> {
+  const hasCarousel = await pageHasCarouselStructure(facade, input, detailText)
+  if (!hasCarousel) return null
+
+  const maxImages = carouselMaxImages(input)
+  let rawImages: ImageCandidate[] = []
+  let rawVideos: VideoCandidate[] = []
+  let scope: string | undefined
+
+  for (let frameIndex = 0; frameIndex < maxImages; frameIndex += 1) {
+    const beforeCount = filterNoteImageCandidates(rawImages, maxImages).length
+    const frame = await collectVisibleCarouselFrame(facade, maxImages)
+    rawImages = mergeImageCandidates(rawImages, frame.images)
+    rawVideos = mergeVideoCandidates(rawVideos, frame.videos)
+    scope = frame.scope || scope
+
+    const images = filterNoteImageCandidates(rawImages, maxImages)
+    if (images.length >= maxImages) {
+      rawImages = images
+      break
+    }
+    if (frameIndex > 0 && images.length <= beforeCount) break
+    if (frameIndex + 1 >= maxImages) break
+
+    const clickOut = await facade.run('browser_click', { selector: CAROUSEL_NEXT_BUTTON_SELECTOR }).catch(() => '')
+    if (!carouselClickSucceeded(clickOut)) break
+    await facade.run('browser_wait', { ms: CARD_DETAIL_OPEN_POLL_MS }).catch(() => '')
+  }
+
+  const images = filterNoteImageCandidates(rawImages, maxImages)
+  if (images.length === 0 && rawVideos.length === 0) return null
+  return {
+    images,
+    videos: rawVideos,
+    videoCount: rawVideos.length,
+    scope: scope || 'carousel',
+  }
+}
+
+function facadeWithCarouselMedia(facade: NoteCollectFacade, media: MediaCollection): NoteCollectFacade {
+  let consumed = false
+  return {
+    run: async (toolName, args = {}) => {
+      if (toolName === 'browser_collect_images' && !consumed && args.include_hidden !== true) {
+        consumed = true
+        return JSON.stringify({
+          count: media.images.length,
+          images: media.images,
+          videos: media.videos,
+          videoCount: media.videoCount,
+          scope: media.scope,
+        })
+      }
+      return facade.run(toolName, args)
+    },
+  }
 }
 
 function noteMarkdown(input: {
@@ -1322,7 +1499,9 @@ export async function collectCardNote(
       }, {})
     }
   }
-  const result = await collectNote(facade, { ...input, skipNavigate: true }, pathJoin, fileOps)
+  const carouselMedia = await collectCarouselMedia(facade, input, detailOut)
+  const collectFacade = carouselMedia ? facadeWithCarouselMedia(facade, carouselMedia) : facade
+  const result = await collectNote(collectFacade, { ...input, skipNavigate: true }, pathJoin, fileOps)
   const returnOut = await facade.run('browser_go_back').catch((error) => JSON.stringify({
     ok: false,
     errorCode: 'return_failed',
