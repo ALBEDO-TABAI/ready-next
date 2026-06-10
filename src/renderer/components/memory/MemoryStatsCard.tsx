@@ -1,4 +1,4 @@
-import { Database, Layers, Tag, Archive, Activity, Play, Loader2 } from 'lucide-react'
+import { Database, Play, Loader2 } from 'lucide-react'
 import type { MemoryLifecycleStatus, MemoryMaintenanceResult, MemoryStats } from '../../types/electron'
 import { SETTINGS_CARD_STYLE, SETTINGS_PRIMARY_BUTTON_STYLE } from '../settings/settings-theme'
 
@@ -10,6 +10,8 @@ const primaryButtonStyle = {
   ...SETTINGS_PRIMARY_BUTTON_STYLE
 }
 
+const GROUP_DIVIDER = '1px solid color-mix(in srgb, var(--border-default) 55%, transparent)'
+
 interface MemoryStatsCardProps {
   stats: MemoryStats | null
   statsLoading: boolean
@@ -19,6 +21,26 @@ interface MemoryStatsCardProps {
   lifecycleError: Error | null
   maintenanceRunning: boolean
   onRunMaintenance: () => Promise<MemoryMaintenanceResult>
+}
+
+function StatGroup({ title, rows }: { title: string; rows: { label: string; value: string | number }[] }) {
+  return (
+    <div style={{ borderTop: GROUP_DIVIDER, paddingTop: 16 }}>
+      <div className="text-[11px] tracking-[0.08em] mb-2" style={{ color: 'var(--text-light)' }}>
+        {title}
+      </div>
+      <div>
+        {rows.map((row) => (
+          <div key={row.label} className="flex items-center justify-between py-[5px] text-[13px]">
+            <span style={{ color: 'var(--text-body)' }}>{row.label}</span>
+            <span className="font-medium tabular-nums" style={{ color: 'var(--text-title)' }}>
+              {row.value}
+            </span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
 }
 
 export default function MemoryStatsCard({
@@ -48,7 +70,6 @@ export default function MemoryStatsCard({
         className="glass-surface-card border flex items-center justify-center"
         style={{
           ...panelCardStyle,
-          borderRadius: 24,
           padding: 24,
           minHeight: 400
         }}
@@ -66,7 +87,6 @@ export default function MemoryStatsCard({
         className="glass-surface-card border flex items-center justify-center"
         style={{
           ...panelCardStyle,
-          borderRadius: 24,
           padding: 24,
           minHeight: 400
         }}
@@ -83,203 +103,101 @@ export default function MemoryStatsCard({
       className="glass-surface-card border"
       style={{
         ...panelCardStyle,
-        borderRadius: 24,
-        padding: 24
+        padding: '22px 22px 20px'
       }}
     >
-      <div className="flex items-center gap-2 mb-6">
-        <Database className="w-5 h-5" style={{ color: 'var(--color-blue)' }} />
-        <h3 className="text-[15px] font-medium" style={{ color: 'var(--text-title)' }}>
+      <div className="flex items-center gap-2">
+        <Database className="w-4 h-4" style={{ color: 'var(--color-blue)' }} />
+        <h3 className="text-[15px] font-semibold" style={{ color: 'var(--text-title)' }}>
           记忆统计
         </h3>
       </div>
 
       {stats && (
-        <div className="space-y-6">
-          <div>
-            <div
-              className="text-[11px] uppercase tracking-wider mb-2"
-              style={{ color: 'var(--text-light)' }}
-            >
-              总记忆数
-            </div>
-            <div className="text-[32px] font-bold" style={{ color: 'var(--text-title)' }}>
+        <div className="mt-5 flex flex-col gap-5">
+          <div className="flex items-baseline justify-between">
+            <span className="text-[12px]" style={{ color: 'var(--text-muted)' }}>总记忆数</span>
+            <span className="text-[28px] font-bold leading-none tabular-nums" style={{ color: 'var(--text-title)' }}>
               {stats.totalMemories}
-            </div>
+            </span>
           </div>
 
-          <div>
-            <div
-              className="text-[11px] uppercase tracking-wider mb-3"
-              style={{ color: 'var(--text-light)' }}
-            >
-              <Layers className="w-3 h-3 inline mr-1" />
-              记忆分布
-            </div>
-            <div className="space-y-2">
-              <div className="flex justify-between items-center text-[13px]">
-                <span style={{ color: 'var(--text-body)' }}>长期保留</span>
-                <span className="font-medium" style={{ color: 'var(--text-title)' }}>
-                  {stats.byLayer.l0}
-                </span>
-              </div>
-              <div className="flex justify-between items-center text-[13px]">
-                <span style={{ color: 'var(--text-body)' }}>任务沉淀</span>
-                <span className="font-medium" style={{ color: 'var(--text-title)' }}>
-                  {stats.byLayer.l1}
-                </span>
-              </div>
-              <div className="flex justify-between items-center text-[13px]">
-                <span style={{ color: 'var(--text-body)' }}>按需唤起</span>
-                <span className="font-medium" style={{ color: 'var(--text-title)' }}>
-                  {stats.byLayer.l2}
-                </span>
-              </div>
-            </div>
-          </div>
+          <StatGroup
+            title="记忆分布"
+            rows={[
+              { label: '长期保留', value: stats.byLayer.l0 },
+              { label: '任务沉淀', value: stats.byLayer.l1 },
+              { label: '按需唤起', value: stats.byLayer.l2 },
+            ]}
+          />
 
-          <div>
-            <div
-              className="text-[11px] uppercase tracking-wider mb-3"
-              style={{ color: 'var(--text-light)' }}
-            >
-              来源分类
-            </div>
-            <div className="space-y-2">
-              <div className="flex justify-between items-center text-[13px]">
-                <span style={{ color: 'var(--text-body)' }}>常驻记忆</span>
-                <span className="font-medium" style={{ color: 'var(--text-title)' }}>
-                  {stats.bySourceType.resident_agent}
-                </span>
-              </div>
-              <div className="flex justify-between items-center text-[13px]">
-                <span style={{ color: 'var(--text-body)' }}>用户偏好</span>
-                <span className="font-medium" style={{ color: 'var(--text-title)' }}>
-                  {stats.bySourceType.resident_user}
-                </span>
-              </div>
-              <div className="flex justify-between items-center text-[13px]">
-                <span style={{ color: 'var(--text-body)' }}>当前任务</span>
-                <span className="font-medium" style={{ color: 'var(--text-title)' }}>
-                  {stats.bySourceType.scope_memory}
-                </span>
-              </div>
-              <div className="flex justify-between items-center text-[13px]">
-                <span style={{ color: 'var(--text-body)' }}>按需唤起</span>
-                <span className="font-medium" style={{ color: 'var(--text-title)' }}>
-                  {stats.bySourceType.trigger_rule}
-                </span>
-              </div>
-            </div>
-          </div>
+          <StatGroup
+            title="来源分类"
+            rows={[
+              { label: '常驻记忆', value: stats.bySourceType.resident_agent },
+              { label: '用户偏好', value: stats.bySourceType.resident_user },
+              { label: '当前任务', value: stats.bySourceType.scope_memory },
+              { label: '按需唤起', value: stats.bySourceType.trigger_rule },
+            ]}
+          />
 
-          <div>
-            <div
-              className="text-[11px] uppercase tracking-wider mb-3"
-              style={{ color: 'var(--text-light)' }}
-            >
-              <Tag className="w-3 h-3 inline mr-1" />
-              按类别分布
-            </div>
-            <div className="space-y-2">
-              <div className="flex justify-between items-center text-[13px]">
-                <span style={{ color: 'var(--text-body)' }}>摘要</span>
-                <span className="font-medium" style={{ color: 'var(--text-title)' }}>
-                  {stats.byCategory.summary}
-                </span>
-              </div>
-              <div className="flex justify-between items-center text-[13px]">
-                <span style={{ color: 'var(--text-body)' }}>学习</span>
-                <span className="font-medium" style={{ color: 'var(--text-title)' }}>
-                  {stats.byCategory.learning}
-                </span>
-              </div>
-              <div className="flex justify-between items-center text-[13px]">
-                <span style={{ color: 'var(--text-body)' }}>唤起线索</span>
-                <span className="font-medium" style={{ color: 'var(--text-title)' }}>
-                  {stats.byCategory.trigger}
-                </span>
-              </div>
-              <div className="flex justify-between items-center text-[13px]">
-                <span style={{ color: 'var(--text-body)' }}>规则</span>
-                <span className="font-medium" style={{ color: 'var(--text-title)' }}>
-                  {stats.byCategory.rule}
-                </span>
-              </div>
-            </div>
-          </div>
+          <StatGroup
+            title="按类别分布"
+            rows={[
+              { label: '摘要', value: stats.byCategory.summary },
+              { label: '学习', value: stats.byCategory.learning },
+              { label: '唤起线索', value: stats.byCategory.trigger },
+              { label: '规则', value: stats.byCategory.rule },
+            ]}
+          />
 
-          <div className="pt-4 border-t space-y-2" style={{ borderColor: 'var(--border-default)' }}>
-            <div className="flex justify-between items-center text-[13px]">
-              <span className="flex items-center gap-1" style={{ color: 'var(--text-body)' }}>
-                <Archive className="w-3 h-3" />
-                已归档
-              </span>
-              <span className="font-medium" style={{ color: 'var(--text-title)' }}>
-                {stats.archivedCount}
-              </span>
-            </div>
-            <div className="flex justify-between items-center text-[13px]">
-              <span className="flex items-center gap-1" style={{ color: 'var(--text-body)' }}>
-                <Activity className="w-3 h-3" />
-                平均访问次数
-              </span>
-              <span className="font-medium" style={{ color: 'var(--text-title)' }}>
-                {stats.avgAccessCount.toFixed(1)}
-              </span>
-            </div>
-          </div>
+          <StatGroup
+            title="归档与访问"
+            rows={[
+              { label: '已归档', value: stats.archivedCount },
+              { label: '平均访问次数', value: stats.avgAccessCount.toFixed(1) },
+            ]}
+          />
         </div>
       )}
 
       {status && (
-        <div className="mt-6 pt-6 border-t" style={{ borderColor: 'var(--border-default)' }}>
-          <div
-            className="text-[11px] uppercase tracking-wider mb-3"
-            style={{ color: 'var(--text-light)' }}
-          >
+        <div className="mt-5" style={{ borderTop: GROUP_DIVIDER, paddingTop: 16 }}>
+          <div className="text-[11px] tracking-[0.08em] mb-2" style={{ color: 'var(--text-light)' }}>
             生命周期状态
           </div>
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <div
+          <div className="flex items-center justify-between py-[5px]">
+            <span className="flex items-center gap-2 text-[13px]" style={{ color: 'var(--text-body)' }}>
+              <span
                 className="w-2 h-2 rounded-full"
-                style={{
-                  background: status.running ? 'var(--color-green)' : 'var(--text-muted)'
-                }}
+                style={{ background: status.running ? 'var(--color-green)' : 'var(--text-muted)' }}
               />
-              <span className="text-[13px]" style={{ color: 'var(--text-body)' }}>
-                {status.running ? '运行中' : '已停止'}
-              </span>
-            </div>
+              {status.running ? '运行中' : '已停止'}
+            </span>
             {status.lastMaintenanceAt && (
-              <div className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                上次维护: {new Date(status.lastMaintenanceAt).toLocaleString()}
-              </div>
+              <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                上次维护 {new Date(status.lastMaintenanceAt).toLocaleString()}
+              </span>
             )}
-            <button
-              onClick={() => void handleRunMaintenance()}
-              disabled={maintenanceRunning}
-              className="w-full border rounded-xl transition-[opacity,background-color,border-color] duration-200 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed hover:opacity-90"
-              style={{
-                ...primaryButtonStyle,
-                padding: '10px 16px',
-                fontSize: '13px'
-              }}
-            >
-              {maintenanceRunning ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  运行中...
-                </>
-              ) : (
-                <>
-                  <Play className="w-4 h-4" />
-                  运行维护
-                </>
-              )}
-            </button>
           </div>
+          <button
+            onClick={() => void handleRunMaintenance()}
+            disabled={maintenanceRunning}
+            className="mt-3 border rounded-xl transition-[opacity,background-color,border-color,filter] duration-200 inline-flex items-center gap-1.5 disabled:opacity-50 disabled:cursor-not-allowed hover:brightness-95 active:scale-[0.98]"
+            style={primaryButtonStyle}
+          >
+            {maintenanceRunning ? (
+              <>
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                运行中...
+              </>
+            ) : (
+              <>
+                <Play className="w-3.5 h-3.5" />
+                运行维护
+              </>
+            )}
+          </button>
         </div>
       )}
     </div>

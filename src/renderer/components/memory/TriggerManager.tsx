@@ -71,7 +71,7 @@ export default function TriggerManager() {
                 className="glass-surface-card border transition-[background-color,border-color,color] duration-200"
                 style={{
                   ...panelCardStyle,
-                  borderRadius: 16,
+                  borderRadius: 12,
                   padding: '16px 18px',
                 }}
               >

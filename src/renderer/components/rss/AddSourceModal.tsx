@@ -119,7 +119,7 @@ export default function AddSourceModal({
       onClick={handleBackdropClick}
     >
       <div
-        className="w-[408px] rounded-[22px]"
+        className="w-[408px] rounded-2xl"
         style={{
           ...SETTINGS_CARD_STYLE,
           background: 'color-mix(in srgb, var(--bg-primary) 97%, white 3%)',
@@ -154,7 +154,7 @@ export default function AddSourceModal({
               type="button"
               onClick={handleUseBrowserPreset}
               disabled={!hasBrowserPreset}
-              className="w-full rounded-[14px] text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+              className="w-full rounded-xl text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50"
               style={{
                 marginBottom: 10,
                 padding: '8px 10px',
@@ -224,11 +224,10 @@ export default function AddSourceModal({
                 placeholder="https://example.com/feed.xml"
                 autoFocus
                 disabled={loading}
-                className="w-full rounded-[14px] border text-[13px] transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)] focus:border-transparent"
+                className="w-full rounded-xl border text-[13px] transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)] focus:border-transparent"
                 style={{
                   ...SETTINGS_INPUT_STYLE,
                   padding: '9px 12px',
-                  borderRadius: 14,
                   background: 'rgba(255,255,255,0.9)',
                   borderColor: error ? 'var(--color-red)' : 'var(--input-slot-border)',
                 }}
@@ -251,11 +250,10 @@ export default function AddSourceModal({
                 onKeyDown={handleKeyDown}
                 placeholder="例如：阮一峰的博客"
                 disabled={loading}
-                className="w-full rounded-[14px] border text-[13px] transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)] focus:border-transparent"
+                className="w-full rounded-xl border text-[13px] transition-colors focus:outline-none focus:ring-2 focus:ring-[var(--color-blue)] focus:border-transparent"
                 style={{
                   ...SETTINGS_INPUT_STYLE,
                   padding: '9px 12px',
-                  borderRadius: 14,
                   background: 'rgba(255,255,255,0.9)',
                   borderColor: 'var(--input-slot-border)',
                 }}
@@ -285,7 +283,6 @@ export default function AddSourceModal({
                 ...SETTINGS_SECONDARY_BUTTON_STYLE,
                 minWidth: 70,
                 padding: '8px 12px',
-                borderRadius: 14,
                 fontSize: 12,
                 lineHeight: 1.2,
               }}
@@ -300,7 +297,6 @@ export default function AddSourceModal({
                 ...SETTINGS_PRIMARY_BUTTON_STYLE,
                 minWidth: 96,
                 padding: '8px 14px',
-                borderRadius: 14,
                 fontSize: 12,
                 lineHeight: 1.2,
               }}

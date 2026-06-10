@@ -381,7 +381,7 @@ export default function PersonalityEditor() {
                   key={personality.id}
                   onClick={() => handleSelectPersonality(personality.agentName)}
                   className="text-left transition-[transform,background-color,border-color] duration-200 hover:-translate-y-[1px]"
-                  style={settingsListItemStyle(isActive)}
+                  style={{ ...settingsListItemStyle(isActive), padding: '12px 10px' }}
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div className="min-w-0">
@@ -587,14 +587,14 @@ export default function PersonalityEditor() {
               style={{
                 width: 52,
                 height: 52,
-                borderRadius: 18,
+                borderRadius: 14,
                 background: 'var(--color-blue-light)',
                 color: 'var(--color-blue)',
               }}
             >
               <Bot className="w-5 h-5" />
             </div>
-            <div className="text-[16px] font-semibold mt-4" style={{ color: 'var(--text-title)' }}>
+            <div className="text-[15px] font-semibold mt-4" style={{ color: 'var(--text-title)' }}>
               选择一个 Agent 开始编辑
             </div>
             <div style={{ ...SETTINGS_SECTION_LEAD_STYLE, marginTop: 8, maxWidth: 420 }}>

@@ -58,7 +58,6 @@ interface SettingItem {
   options?: { value: string; label: string }[]
   buttonLabel?: string
   buttonVariant?: 'default' | 'danger' | 'primary'
-  slotWidth?: 'short' | 'medium' | 'wide'
 }
 
 interface RSSDraftStoreSourceRow {
@@ -74,6 +73,9 @@ interface RSSDraftStoreSourceRow {
 }
 
 const SETTINGS_SURFACE_REFRESH_DELAY_MS = 120
+// 设置行右侧控件的统一最小宽度：上下相邻的按钮/只读值/下拉对齐成一列，
+// 允许小幅宽度浪费换取整洁（2026-06-10 用户标准）。
+const SETTINGS_ROW_CONTROL_MIN_WIDTH = 136
 const RSS_DRAFT_CONTENT_MAX_WIDTH = 1560
 const RSS_DRAFT_GRID_COLUMNS = 'minmax(300px, 1fr) 72px 84px 72px 120px 128px'
 const RSS_DRAFT_SOURCE_COLUMN_PADDING = 44
@@ -237,11 +239,11 @@ const settingsData: SettingSection[] = [
     icon: Keyboard,
     description: '查看和自定义键盘快捷键',
     settings: [
-      { id: 'newTask', label: '新建任务', type: 'readonly', value: '⌘ N', slotWidth: 'short' },
-      { id: 'sendMessage', label: '发送消息', type: 'readonly', value: '⌘ Enter', slotWidth: 'short' },
-      { id: 'search', label: '全局搜索', type: 'readonly', value: '⌘ K', slotWidth: 'short' },
-      { id: 'toggleSidebar', label: '切换侧边栏', type: 'readonly', value: '⌘ B', slotWidth: 'short' },
-      { id: 'switchMode', label: '切换模式', type: 'readonly', value: '⌘ 1-6', slotWidth: 'short' }
+      { id: 'newTask', label: '新建任务', type: 'readonly', value: '⌘ N' },
+      { id: 'sendMessage', label: '发送消息', type: 'readonly', value: '⌘ Enter' },
+      { id: 'search', label: '全局搜索', type: 'readonly', value: '⌘ K' },
+      { id: 'toggleSidebar', label: '切换侧边栏', type: 'readonly', value: '⌘ B' },
+      { id: 'switchMode', label: '切换模式', type: 'readonly', value: '⌘ 1-6' }
     ]
   },
   {
@@ -263,8 +265,8 @@ const settingsData: SettingSection[] = [
     icon: Info,
     description: '应用版本信息和更新',
     settings: [
-      { id: 'version', label: '当前版本', type: 'readonly', value: 'Ready v0.1.0', slotWidth: 'short' },
-      { id: 'checkUpdate', label: '检查更新', description: '查看是否有新版本可用', type: 'button', buttonLabel: '检查更新', buttonVariant: 'primary', slotWidth: 'short' }
+      { id: 'version', label: '当前版本', type: 'readonly', value: 'Ready v0.1.0' },
+      { id: 'checkUpdate', label: '检查更新', description: '查看是否有新版本可用', type: 'button', buttonLabel: '检查更新', buttonVariant: 'primary' }
     ]
   }
 ]
@@ -280,12 +282,6 @@ const skinOptions: { value: ThemeSkin; label: string; icon: React.ElementType; d
   { value: 'liquid-glass', label: '通透玻璃', icon: Droplets, description: '真半透明液态玻璃，背后透出 macOS 桌面壁纸（默认）' },
   { value: 'ready-glass', label: '稳定玻璃', icon: Droplets, description: 'Ready 自持稳定底色，不透出桌面（更稳定但失去通透感）' },
 ]
-
-const SETTING_SLOT_WIDTHS = {
-  short: 136,
-  medium: 180,
-  wide: 240,
-} as const
 
 function AISettingsFieldCard({
   title,
@@ -307,7 +303,7 @@ function AISettingsFieldCard({
       }}
     >
       <div className="min-w-0">
-        <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>{title}</div>
+        <div className="text-[13px] font-semibold" style={{ color: 'var(--text-title)' }}>{title}</div>
         <div className="mt-1.5 text-[12px] leading-5" style={{ color: 'var(--text-light)', maxWidth: 560 }}>{description}</div>
       </div>
       <div className="mt-3.5 min-w-0">{control}</div>
@@ -315,7 +311,7 @@ function AISettingsFieldCard({
   )
 }
 
-function AISettingsSwitch({
+function SettingsSwitch({
   checked,
   onChange,
   label,
@@ -328,7 +324,7 @@ function AISettingsSwitch({
 }) {
   return (
     <label
-      className="inline-flex items-center gap-2 text-[11px] font-medium"
+      className="group/switch inline-flex cursor-pointer items-center gap-2 text-[11px] font-medium"
       style={{ color: 'var(--text-light)' }}
       onClick={(event) => {
         if (stopPropagation) event.stopPropagation()
@@ -336,7 +332,7 @@ function AISettingsSwitch({
     >
       {label && <span>{label}</span>}
       <span
-        className="relative inline-flex h-6 w-11 shrink-0 rounded-full border transition-[background-color,border-color]"
+        className="relative inline-flex h-6 w-11 shrink-0 rounded-full border transition-[background-color,border-color,filter] group-hover/switch:brightness-[0.96]"
         style={{
           borderColor: checked
             ? 'color-mix(in srgb, var(--color-blue) 42%, transparent)'
@@ -364,23 +360,18 @@ function AISettingsSwitch({
 // ── AI Settings Panel (dynamic, wired to backend) ──────────────────────────
 const compactSelectStyle = {
   ...SETTINGS_FLAT_INPUT_STYLE,
-  borderRadius: 14,
   padding: '8px 28px 8px 12px',
 }
 const stackedInputStyle = {
   ...SETTINGS_FLAT_INPUT_STYLE,
-  borderRadius: 14,
-  padding: '13px 15px',
+  padding: '10px 12px',
   width: '100%',
   textAlign: 'left' as const,
-  fontSize: 14,
 }
 const stackedSelectStyle = {
   ...SETTINGS_FLAT_INPUT_STYLE,
-  borderRadius: 14,
-  padding: '13px 36px 13px 15px',
+  padding: '10px 36px 10px 12px',
   width: '100%',
-  fontSize: 14,
 }
 // Inner control slot for compact settings controls and label-on-top field cards.
 // Borderless filled slot (no second stroke against the surrounding card) with comfortable
@@ -672,7 +663,7 @@ function AISettingsPanel() {
         >
           <div className="flex items-start justify-between gap-5" style={{ padding: '32px 42px 22px' }}>
             <div>
-              <div className="text-[16px] font-semibold" style={{ color: 'var(--text-title)' }}>模型入口列表</div>
+              <div className="text-[15px] font-semibold" style={{ color: 'var(--text-title)' }}>模型入口列表</div>
               <div className="mt-1.5 text-[13px]" style={{ color: 'var(--text-light)' }}>
                 管理聊天和 Agent 可使用的模型预设。
               </div>
@@ -701,9 +692,9 @@ function AISettingsPanel() {
                   key={filter.id}
                   type="button"
                   onClick={() => setProfileFilter(filter.id)}
-                  className="rounded-full px-3 py-1.5 text-[13px] font-medium transition-colors"
+                  className={`rounded-full px-3 py-1.5 text-[13px] font-medium transition-colors ${active ? '' : 'hover:bg-[var(--bg-hover)]'}`}
                   style={{
-                    background: active ? 'color-mix(in srgb, var(--color-blue-light) 42%, transparent)' : 'transparent',
+                    ...(active ? { background: 'color-mix(in srgb, var(--color-blue-light) 42%, transparent)' } : {}),
                     color: active ? 'var(--color-blue)' : 'var(--text-muted)',
                   }}
                 >
@@ -740,13 +731,13 @@ function AISettingsPanel() {
                     key={profile.id}
                     type="button"
                     onClick={() => openProfileDetail(profile.id)}
-                    className="grid w-full items-center gap-7 text-left transition-colors"
+                    className={`grid w-full items-center gap-7 text-left transition-colors duration-150 ${selected ? '' : 'hover:bg-[var(--bg-hover)]'}`}
                     style={{
                       gridTemplateColumns: 'minmax(360px,1.6fr) minmax(160px,.55fr) 120px 88px',
                       minHeight: 88,
                       padding: '18px 42px',
                       borderBottom: '1px solid color-mix(in srgb, var(--surface-border) 10%, transparent)',
-                      background: selected ? 'color-mix(in srgb, var(--color-blue-light) 14%, transparent)' : 'transparent',
+                      ...(selected ? { background: 'color-mix(in srgb, var(--color-blue-light) 14%, transparent)' } : {}),
                     }}
                   >
                     <span className="min-w-0">
@@ -797,7 +788,7 @@ function AISettingsPanel() {
           >
             <div className="flex items-start justify-between gap-4" style={{ padding: '28px 30px 18px' }}>
               <div className="min-w-0">
-                <div className="text-[18px] font-semibold" style={{ color: 'var(--text-title)' }}>编辑 {selectedProfile.name}</div>
+                <div className="text-[15px] font-semibold" style={{ color: 'var(--text-title)' }}>编辑 {selectedProfile.name}</div>
                 <div className="mt-1.5 truncate text-[13px]" style={{ color: 'var(--text-light)' }}>
                   {selectedConfig.model || '未设置模型'} · {formatInterfaceLabel(selectedConfig)}
                 </div>
@@ -807,7 +798,7 @@ function AISettingsPanel() {
                   <button
                     type="button"
                     onClick={() => activateProfile(selectedProfile.id)}
-                    className="text-[13px] font-semibold"
+                    className="rounded-lg px-2 py-1 text-[13px] font-semibold transition-colors hover:bg-[var(--bg-hover)]"
                     style={{ color: 'var(--color-blue)' }}
                   >
                     设为默认
@@ -817,7 +808,7 @@ function AISettingsPanel() {
                   <button
                     type="button"
                     onClick={() => removeCustomProfile(selectedProfile.id)}
-                    className="text-[13px] font-semibold"
+                    className="rounded-lg px-2 py-1 text-[13px] font-semibold transition-colors hover:bg-[var(--bg-hover)]"
                     style={{ color: 'color-mix(in srgb, var(--color-red) 68%, var(--text-muted) 32%)' }}
                   >
                     删除
@@ -827,7 +818,7 @@ function AISettingsPanel() {
                   type="button"
                   onClick={() => void testConnection(selectedProfile.id)}
                   disabled={testStatus === 'testing'}
-                  className="rounded-full text-[13px] font-semibold disabled:opacity-50"
+                  className="rounded-full text-[13px] font-semibold transition-[filter,transform] hover:brightness-95 active:scale-[0.98] disabled:opacity-50"
                   style={{ ...SETTINGS_FLAT_BUTTON_STYLE, minWidth: 0, padding: '10px 15px', borderRadius: 999 }}
                 >
                   {testStatus === 'testing' ? '测试中' : '测试'}
@@ -855,10 +846,10 @@ function AISettingsPanel() {
                     role="tab"
                     aria-selected={active}
                     onClick={() => setEditorTab(tab.id)}
-                    className="rounded-xl px-3 py-2.5 text-[14px] font-semibold leading-none transition-colors"
+                    className={`rounded-xl px-3 py-2.5 text-[14px] font-semibold leading-none transition-colors ${active ? '' : 'hover:bg-[var(--bg-hover)]'}`}
                     style={{
                       minHeight: 36,
-                      background: active ? 'color-mix(in srgb, var(--color-blue-light) 66%, var(--surface-floating-bg) 34%)' : 'transparent',
+                      ...(active ? { background: 'color-mix(in srgb, var(--color-blue-light) 66%, var(--surface-floating-bg) 34%)' } : {}),
                       color: active ? 'var(--color-blue)' : 'var(--text-muted)',
                       boxShadow: active ? 'inset 0 0 0 1px color-mix(in srgb, var(--color-blue) 16%, transparent)' : 'none',
                     }}
@@ -952,7 +943,7 @@ function AISettingsPanel() {
                     style={{ borderBottom: '1px solid color-mix(in srgb, var(--surface-border) 12%, transparent)' }}
                   >
                     <span className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>在切换面板显示</span>
-                    <AISettingsSwitch
+                    <SettingsSwitch
                       checked={selectedProfile.showInChatSwitcher}
                       onChange={(checked) => setProfileVisibility(selectedProfile.id, checked)}
                     />
@@ -994,16 +985,16 @@ function AISettingsPanel() {
                             return (
                               <div
                                 key={modelId}
-                                className="flex items-center gap-2 rounded-full border px-3 py-1.5"
+                                className="flex items-center gap-2.5 rounded-full border py-2 pl-3.5 pr-2.5 transition-colors"
                                 style={SETTINGS_FLAT_CHIP_STYLE}
                               >
-                                <span className="font-mono text-[11px]" style={{ color: 'var(--text-body)' }}>{modelId}</span>
+                                <span className="font-mono text-[12px]" style={{ color: 'var(--text-body)' }}>{modelId}</span>
                                 {isDefaultModel ? (
-                                  <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ color: 'var(--color-green)', background: 'color-mix(in srgb, var(--color-green-light) 42%, transparent)' }}>默认</span>
+                                  <span className="rounded-full px-2 py-1 text-[11px] font-semibold" style={{ color: 'var(--color-green)', background: 'color-mix(in srgb, var(--color-green-light) 42%, transparent)' }}>默认</span>
                                 ) : (
-                                  <button type="button" onClick={() => updateField('model', modelId)} className="text-[10px] font-semibold" style={{ color: 'var(--color-blue)' }}>设默认</button>
+                                  <button type="button" onClick={() => updateField('model', modelId)} className="rounded-full px-2 py-1 text-[11px] font-semibold transition-colors hover:bg-[var(--bg-hover)]" style={{ color: 'var(--color-blue)' }}>设默认</button>
                                 )}
-                                <button type="button" onClick={() => removeModelId(modelId)} className="text-[10px] font-semibold" style={{ color: 'var(--text-muted)' }}>删除</button>
+                                <button type="button" onClick={() => removeModelId(modelId)} className="rounded-full px-2 py-1 text-[11px] font-semibold transition-colors hover:bg-[var(--bg-hover)] hover:text-[var(--color-red)]" style={{ color: 'var(--text-muted)' }}>删除</button>
                               </div>
                             )
                           }) : (
@@ -1026,7 +1017,7 @@ function AISettingsPanel() {
                               setPendingModelId('')
                             }}
                             disabled={!pendingModelId.trim()}
-                            className="rounded-full text-[12px] font-semibold disabled:opacity-50"
+                            className="rounded-full text-[12px] font-semibold transition-[filter,transform] hover:brightness-95 active:scale-[0.98] disabled:opacity-50"
                             style={{ ...SETTINGS_FLAT_BUTTON_STYLE, minWidth: 0, padding: '10px 13px' }}
                           >
                             添加模型 ID
@@ -1210,7 +1201,7 @@ function AISettingsPanel() {
                     style={{ borderColor: 'color-mix(in srgb, var(--surface-border) 18%, transparent)' }}
                   >
                     <span className="text-[12px] font-medium" style={{ color: 'var(--text-title)' }}>启用连续消息合并</span>
-                    <AISettingsSwitch
+                    <SettingsSwitch
                       checked={messageCoalesceEnabled}
                       onChange={(next) => {
                         setMessageCoalesceEnabled(next)
@@ -1725,7 +1716,7 @@ export function StorageSettingsPanel() {
 
       <div className="flex items-center justify-between transition-colors">
         <div className="flex-1 min-w-0 mr-4">
-          <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>
+          <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>
             报错信息包
           </div>
           <div className="text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
@@ -1748,7 +1739,7 @@ export function StorageSettingsPanel() {
           className="flex-shrink-0 flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-95 active:scale-[0.98]"
           style={{
             ...SETTINGS_SECONDARY_BUTTON_STYLE,
-            width: SETTING_SLOT_WIDTHS.short,
+            minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH,
             justifyContent: 'center',
             opacity: diagnosticExporting ? 0.6 : 1,
             cursor: diagnosticExporting ? 'not-allowed' : 'pointer',
@@ -1769,7 +1760,7 @@ export function StorageSettingsPanel() {
           manual cleanup required)". */}
       <div className="flex items-center justify-between transition-colors">
         <div className="flex-1 min-w-0 mr-4">
-          <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>
+          <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>
             缓存大小上限
           </div>
           <div className="text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
@@ -1783,7 +1774,8 @@ export function StorageSettingsPanel() {
           style={{
             ...SETTINGS_INPUT_STYLE,
             padding: '9px 32px 9px 14px',
-            width: 180,
+            width: 'auto',
+            minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH,
           }}
         >
           {CACHE_QUOTA_OPTIONS.map((opt) => (
@@ -1795,7 +1787,7 @@ export function StorageSettingsPanel() {
       {/* Standard clear */}
       <div className="flex items-center justify-between transition-colors">
         <div className="flex-1 min-w-0 mr-4">
-          <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>
+          <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>
             清除缓存
           </div>
           <div className="text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
@@ -1808,7 +1800,7 @@ export function StorageSettingsPanel() {
           className="flex-shrink-0 flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-95 active:scale-[0.98]"
           style={{
             ...SETTINGS_DANGER_BUTTON_STYLE,
-            width: SETTING_SLOT_WIDTHS.short,
+            minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH,
             justifyContent: 'center',
             opacity: clearing !== 'none' || statsLoading ? 0.6 : 1,
             cursor: clearing !== 'none' || statsLoading ? 'not-allowed' : 'pointer',
@@ -1824,7 +1816,7 @@ export function StorageSettingsPanel() {
       {/* Puppeteer clear (gated separately) */}
       <div className="flex items-center justify-between transition-colors">
         <div className="flex-1 min-w-0 mr-4">
-          <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>
+          <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>
             包括浏览器缓存
           </div>
           <div className="text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
@@ -1837,7 +1829,7 @@ export function StorageSettingsPanel() {
           className="flex-shrink-0 flex items-center gap-1.5 rounded-lg text-[12px] font-medium transition-[filter,transform,background-color,opacity] duration-200 hover:brightness-95 active:scale-[0.98]"
           style={{
             ...SETTINGS_SECONDARY_BUTTON_STYLE,
-            width: SETTING_SLOT_WIDTHS.short,
+            minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH,
             justifyContent: 'center',
             opacity: clearing !== 'none' || statsLoading ? 0.6 : 1,
             cursor: clearing !== 'none' || statsLoading ? 'not-allowed' : 'pointer',
@@ -2025,7 +2017,7 @@ function externalServiceButtonStyle(variant: 'plain' | 'secondary' | 'primary', 
       minWidth: 76,
       height: 38,
       padding: '0 15px',
-      borderRadius: 10,
+      borderRadius: 12,
       border: '1px solid color-mix(in srgb, var(--color-blue) 72%, transparent)',
       background: 'color-mix(in srgb, var(--color-blue) 82%, var(--surface-card-bg) 18%)',
       color: '#fff',
@@ -2037,9 +2029,9 @@ function externalServiceButtonStyle(variant: 'plain' | 'secondary' | 'primary', 
     minWidth: variant === 'plain' ? 58 : 76,
     height: 38,
     padding: '0 13px',
-    borderRadius: 10,
+    borderRadius: 12,
     border: variant === 'plain' ? '1px solid transparent' : '1px solid color-mix(in srgb, var(--surface-border) 70%, transparent)',
-    background: 'transparent',
+    // 不写 background，留给 hover 类（inline 透明背景会盖掉 :hover）。
     color: variant === 'plain' ? 'var(--text-muted)' : 'var(--text-body)',
     opacity: disabled ? 0.62 : 1,
     boxShadow: 'none',
@@ -2057,7 +2049,6 @@ function externalServiceInputStyle(): CSSProperties {
   return {
     ...SETTINGS_FLAT_INPUT_STYLE,
     minHeight: 42,
-    borderRadius: 10,
     padding: '9px 11px',
     boxShadow: 'none',
   }
@@ -2376,7 +2367,7 @@ export function ExternalServicesSettingsPanel() {
 
         {selectedProfile && (
           <section
-            className="self-start rounded-[18px] border"
+            className="self-start rounded-2xl border"
             style={{
               borderColor: 'color-mix(in srgb, var(--surface-border) 58%, transparent)',
               background: 'color-mix(in srgb, var(--surface-card-bg) 88%, var(--bg-content) 12%)',
@@ -2486,7 +2477,7 @@ export function ExternalServicesSettingsPanel() {
                           type="button"
                           data-external-secret-clear={`${selectedProfile.id}:${key}`}
                           onClick={() => markedForClear ? unmarkSecretForClear(selectedProfile.id, key) : markSecretForClear(selectedProfile.id, key)}
-                          className="inline-flex items-center justify-center text-[12px] font-medium transition-[border-color,color,background-color,opacity] duration-150"
+                          className="inline-flex items-center justify-center rounded-xl text-[12px] font-medium transition-[border-color,color,background-color,opacity] duration-150 enabled:hover:bg-[var(--bg-hover)]"
                           style={externalServiceButtonStyle('plain', isSelectedBusy || isSelectedTesting)}
                           disabled={isSelectedBusy || isSelectedTesting}
                         >
@@ -2525,7 +2516,7 @@ export function ExternalServicesSettingsPanel() {
                   type="button"
                   onClick={() => { void resetProfile(selectedProfile) }}
                   disabled={isSelectedBusy || isSelectedTesting}
-                  className="inline-flex items-center justify-center gap-1.5 text-[12px] font-medium transition-[border-color,color,background-color,opacity] duration-150"
+                  className="inline-flex items-center justify-center gap-1.5 rounded-xl text-[12px] font-medium transition-[border-color,color,background-color,opacity,filter] duration-150 enabled:hover:bg-[var(--bg-hover)]"
                   style={externalServiceButtonStyle('plain', isSelectedBusy || isSelectedTesting)}
                 >
                   {isSelectedBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
@@ -2540,7 +2531,7 @@ export function ExternalServicesSettingsPanel() {
                     title={isSelectedVisionModel
                       ? '仅校验字段，不发起真实请求 / Validates fields only; no live request issued.'
                       : undefined}
-                    className="inline-flex items-center justify-center gap-1.5 text-[12px] font-medium transition-[border-color,color,background-color,opacity] duration-150"
+                    className="inline-flex items-center justify-center gap-1.5 rounded-xl text-[12px] font-medium transition-[border-color,color,background-color,opacity,filter] duration-150 enabled:hover:bg-[var(--bg-hover)]"
                     style={externalServiceButtonStyle('secondary', isSelectedTesting || isSelectedBusy || isVisionTestDisabled)}
                   >
                     {isSelectedTesting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
@@ -2552,7 +2543,7 @@ export function ExternalServicesSettingsPanel() {
                     type="button"
                     onClick={() => { void saveProfile(selectedProfile) }}
                     disabled={isSelectedBusy || isSelectedTesting}
-                    className="inline-flex items-center justify-center gap-1.5 text-[12px] font-medium transition-[border-color,color,background-color,opacity] duration-150"
+                    className="inline-flex items-center justify-center gap-1.5 rounded-xl text-[12px] font-medium transition-[border-color,color,background-color,opacity,filter] duration-150 enabled:hover:brightness-95"
                     style={externalServiceButtonStyle('primary', isSelectedBusy || isSelectedTesting)}
                   >
                     {isSelectedBusy ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : null}
@@ -2707,13 +2698,12 @@ function MemorySettingsSection() {
         className="glass-surface-card border"
         style={{
           ...SETTINGS_CARD_STYLE,
-          borderRadius: 24,
           padding: '18px 22px'
         }}
       >
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h3 className="text-[16px] font-semibold" style={{ color: 'var(--text-title)', margin: 0 }}>
+            <h3 className="text-[15px] font-semibold" style={{ color: 'var(--text-title)', margin: 0 }}>
               最近记住了什么
             </h3>
             <p className="text-[12px] leading-5" style={{ color: 'var(--text-muted)', margin: '6px 0 0' }}>
@@ -2750,7 +2740,6 @@ function MemorySettingsSection() {
           className="glass-surface-card border"
           style={{
             ...SETTINGS_CARD_STYLE,
-            borderRadius: 24,
             minHeight: 520,
             overflow: 'hidden'
           }}
@@ -2770,14 +2759,13 @@ function MemorySettingsSection() {
         className="glass-surface-card border"
         style={{
           ...SETTINGS_CARD_STYLE,
-          borderRadius: 24,
           overflow: 'hidden'
         }}
       >
         <button
           type="button"
           onClick={() => setAdvancedOpen((current) => !current)}
-          className="w-full flex items-center justify-between gap-3 text-left"
+          className="w-full flex items-center justify-between gap-3 text-left transition-colors duration-150 hover:bg-[var(--bg-hover)]"
           style={{ padding: '16px 20px' }}
           aria-expanded={advancedOpen}
         >
@@ -2808,7 +2796,6 @@ function MemorySettingsSection() {
                 className="border"
                 style={{
                   ...SETTINGS_SUBTLE_CARD_STYLE,
-                  borderRadius: 18,
                   minHeight: 420,
                   overflow: 'hidden'
                 }}
@@ -2828,7 +2815,6 @@ function MemorySettingsSection() {
               className="border"
               style={{
                 ...SETTINGS_SUBTLE_CARD_STYLE,
-                borderRadius: 18,
                 marginTop: 20,
                 minHeight: 360,
                 overflow: 'hidden'
@@ -2859,7 +2845,6 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
   const settingsSurfaceRefreshTimerRef = useRef<number | null>(null)
 
   const currentSection = settings.find(s => s.id === activeSection)
-  const isAiSection = currentSection?.id === 'ai'
 
   useEffect(() => {
     window.electronAPI?.browser?.sendIntent({
@@ -2990,11 +2975,6 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
     }
   }
 
-  const getSettingControlWidth = (setting: SettingItem): number | undefined => {
-    if (!setting.slotWidth) return undefined
-    return SETTING_SLOT_WIDTHS[setting.slotWidth]
-  }
-
   const isDynamicSection = currentSection
     ? ['ai', 'remote-im', 'external-services', 'mcp', 'memory', 'personalities', 'user-profiles', 'pet', 'rss-storage', MODELS_RUNTIME_SETTINGS_SECTION, 'storage'].includes(currentSection.id)
     : false
@@ -3053,12 +3033,10 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                 <button
                   key={section.id}
                   onClick={() => setActiveSection(section.id)}
-                  className="flex items-center gap-3 rounded-[18px] transition-[background-color,border-color,color] duration-200 text-left group"
+                  className={`flex items-center gap-3 rounded-[18px] transition-[background-color,border-color,color] duration-200 text-left group ${isActive ? '' : 'hover:bg-[var(--bg-hover)]'}`}
                   style={settingsListItemStyle(isActive)}
                 >
-                  <div
-                    className="w-8 h-8 flex items-center justify-center flex-shrink-0 transition-colors"
-                  >
+                  <div className="w-8 h-8 flex items-center justify-center flex-shrink-0 transition-colors">
                     <Icon
                       className="w-3.5 h-3.5"
                       strokeWidth={2}
@@ -3109,16 +3087,16 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
           <div
             className="w-full mx-auto"
             style={{
-              maxWidth: isAiSection ? 1220 : 1040,
-              padding: isAiSection ? '34px 46px 72px' : '30px 34px 64px',
+              maxWidth: 1040,
+              padding: '32px 40px 64px',
             }}
           >
                 {currentSection && (
                   <>
                     {/* Section Header */}
-                        <div style={{ padding: '4px 0 0', marginBottom: 20 }}>
+                    <div style={{ padding: '4px 0 0', marginBottom: 24 }}>
                       <h2
-                        className="text-[22px] font-semibold leading-7 tracking-[-0.01em]"
+                        className="text-[20px] font-semibold leading-7 tracking-[-0.01em]"
                         style={{ color: 'var(--text-title)', margin: 0 }}
                       >
                         {currentSection.title}
@@ -3176,7 +3154,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                             <button
                               key={opt.value}
                               onClick={() => setTheme(opt.value)}
-                              className="glass-surface-card flex-1 flex flex-col items-center gap-2.5 rounded-[24px] border transition-[background-color,border-color,color] duration-200"
+                              className="glass-surface-card flex-1 flex flex-col items-center gap-2.5 rounded-2xl border transition-[background-color,border-color,color,transform] duration-200 hover:-translate-y-[1px] active:scale-[0.99]"
                               style={{
                                 padding: '22px 18px',
                                 ...(isActive ? {
@@ -3230,7 +3208,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                             <button
                               key={opt.value}
                               onClick={() => setSkin(opt.value)}
-                              className="glass-surface-card flex items-center gap-3 rounded-[24px] border text-left transition-[background-color,border-color,color] duration-200"
+                              className="glass-surface-card flex items-center gap-3 rounded-2xl border text-left transition-[background-color,border-color,color,transform] duration-200 hover:-translate-y-[1px] active:scale-[0.99]"
                               style={{
                                 padding: '16px 16px',
                                 ...(isActive ? {
@@ -3274,7 +3252,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                 )}
 
                 {/* Settings Items (skip for dynamic sections) */}
-                {!isDynamicSection && <div className="flex flex-col gap-7">
+                {!isDynamicSection && <div className="flex flex-col gap-6">
                   {currentSection.settings.map((setting) => (
                     <div
                       key={setting.id}
@@ -3284,11 +3262,11 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                       }}
                     >
                       <div className="flex-1 min-w-0 mr-4">
-                        <div className="text-[14px] font-semibold" style={{ color: 'var(--text-title)' }}>
+                        <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>
                           {setting.label}
                         </div>
                         {setting.description && (
-                          <div className="text-[12px] mt-1 leading-5" style={{ color: 'var(--text-light)' }}>
+                          <div className="text-[12px] mt-0.5 leading-5" style={{ color: 'var(--text-light)' }}>
                             {setting.description}
                           </div>
                         )}
@@ -3296,35 +3274,10 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
 
                       {/* Toggle */}
                       {setting.type === 'toggle' && (
-                        <button
-                          onClick={() => { void handleToggleSetting(currentSection.id, setting) }}
-                          className="flex-shrink-0 transition-colors duration-200"
-                          style={{
-                            width: 48,
-                            height: 28,
-                            borderRadius: 999,
-                            position: 'relative',
-                            border: `1px solid ${setting.value
-                              ? 'color-mix(in srgb, var(--color-blue) 34%, transparent)'
-                              : 'color-mix(in srgb, var(--lg-border-soft) 88%, transparent)'}`,
-                            background: setting.value
-                              ? 'color-mix(in srgb, var(--color-blue) 82%, var(--surface-floating-bg) 18%)'
-                              : 'color-mix(in srgb, var(--surface-panel-bg) 64%, transparent)',
-                            boxShadow: 'var(--lg-shadow-contact), inset 0 1px 0 color-mix(in srgb, var(--lg-border-strong) 30%, transparent)',
-                            backdropFilter: 'blur(calc(var(--lg-blur-soft) * 0.86)) saturate(calc(var(--surface-saturate) + 8%))',
-                            WebkitBackdropFilter: 'blur(calc(var(--lg-blur-soft) * 0.86)) saturate(calc(var(--surface-saturate) + 8%))',
-                          }}
-                        >
-                          <span
-                            className="absolute bg-white rounded-full shadow-sm transition-[transform,left,right] duration-200"
-                            style={{
-                              top: 3,
-                              width: 22,
-                              height: 22,
-                              left: setting.value ? 23 : 3,
-                            }}
-                          />
-                        </button>
+                        <SettingsSwitch
+                          checked={Boolean(setting.value)}
+                          onChange={() => { void handleToggleSetting(currentSection.id, setting) }}
+                        />
                       )}
                       {settingErrors[setting.id] && (
                         <div className="ml-3 text-[11px]" style={{ color: 'var(--color-red, #d44)' }}>
@@ -3348,7 +3301,8 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                           style={{
                             ...SETTINGS_INPUT_STYLE,
                             padding: '9px 32px 9px 14px',
-                            width: 180,
+                            width: 'auto',
+                            minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH,
                           }}
                         >
                           {setting.options?.map(opt => (
@@ -3384,8 +3338,8 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                             alignItems: 'center',
                             justifyContent: 'center',
                             padding: '8px 12px',
-                            width: getSettingControlWidth(setting),
-                            textAlign: 'center',
+                            width: 'auto',
+                            minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH,
                           }}
                         >
                           {setting.value}
@@ -3402,7 +3356,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                               : setting.buttonVariant === 'danger'
                                 ? SETTINGS_DANGER_BUTTON_STYLE
                                 : SETTINGS_SECONDARY_BUTTON_STYLE),
-                            width: getSettingControlWidth(setting),
+                            minWidth: SETTINGS_ROW_CONTROL_MIN_WIDTH,
                             justifyContent: 'center',
                           }}
                         >

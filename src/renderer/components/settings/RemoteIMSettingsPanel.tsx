@@ -69,7 +69,7 @@ const panelCardStyle = {
 
 const fieldStyle = {
   ...SETTINGS_INPUT_STYLE,
-  padding: '15px 18px',
+  padding: '10px 14px',
 }
 
 const secondaryButtonStyle = {
@@ -403,9 +403,9 @@ export default function RemoteIMSettingsPanel() {
         className="glass-surface-card border flex w-fit"
         style={{
           ...panelCardStyle,
-          borderRadius: 28,
-          padding: 8,
-          gap: 8,
+          borderRadius: 14,
+          padding: 5,
+          gap: 4,
         }}
       >
         {[
@@ -417,14 +417,13 @@ export default function RemoteIMSettingsPanel() {
           <button
             key={item.key}
             onClick={() => setTab(item.key)}
-            className="text-[13px] transition-[background-color,color] duration-200"
+            className={`text-[13px] transition-[background-color,color] duration-150 ${tab === item.key ? '' : 'hover:bg-[var(--bg-hover)]'}`}
             style={{
               color: tab === item.key ? 'var(--color-blue)' : 'var(--text-muted)',
-              background: tab === item.key ? 'var(--color-blue-light)' : 'transparent',
+              ...(tab === item.key ? { background: 'var(--color-blue-light)' } : {}),
               fontWeight: tab === item.key ? 600 : 500,
-              minWidth: 128,
-              padding: '14px 28px',
-              borderRadius: 20,
+              padding: '8px 20px',
+              borderRadius: 10,
               lineHeight: 1.35,
             }}
           >
@@ -461,7 +460,7 @@ export default function RemoteIMSettingsPanel() {
               placeholder="Bot Token"
               type={showTelegramToken ? 'text' : 'password'}
               className="w-full border text-[13px] focus:outline-none"
-              style={{ ...fieldStyle, borderRadius: 20, paddingRight: 56 }}
+              style={{ ...fieldStyle, paddingRight: 56 }}
             />
             <button
               className="absolute top-1/2 -translate-y-1/2 rounded-xl"
@@ -477,7 +476,7 @@ export default function RemoteIMSettingsPanel() {
               disabled={isBusy('telegram-connect')}
               onClick={() => { void connectTelegram() }}
               className="text-[13px] font-medium"
-              style={{ ...primaryButtonStyle, minWidth: 104, padding: '13px 24px', borderRadius: 20, lineHeight: 1.35 }}
+              style={primaryButtonStyle}
             >
               <span className="inline-flex items-center gap-2">
                 {isBusy('telegram-connect') && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
@@ -490,7 +489,7 @@ export default function RemoteIMSettingsPanel() {
                   disabled={isBusy(`probe:${telegramChannel.id}`)}
                   onClick={() => { void sendProbe(telegramChannel.id) }}
                   className="border text-[13px]"
-                  style={{ ...secondaryButtonStyle, minWidth: 104, padding: '13px 24px', borderRadius: 20, lineHeight: 1.35 }}
+                  style={secondaryButtonStyle}
                 >
                   <span className="inline-flex items-center gap-2">
                     {isBusy(`probe:${telegramChannel.id}`) && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
@@ -501,7 +500,7 @@ export default function RemoteIMSettingsPanel() {
                   disabled={isBusy(`disconnect:${telegramChannel.id}`)}
                   onClick={() => { void disconnectChannel(telegramChannel.id) }}
                   className="border text-[13px]"
-                  style={{ ...secondaryButtonStyle, minWidth: 104, padding: '13px 24px', borderRadius: 20, lineHeight: 1.35 }}
+                  style={secondaryButtonStyle}
                 >
                   <span className="inline-flex items-center gap-2">
                     {isBusy(`disconnect:${telegramChannel.id}`) && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
@@ -528,7 +527,7 @@ export default function RemoteIMSettingsPanel() {
               onChange={(e) => setFeishuAppId(e.target.value)}
               placeholder="App ID"
               className="border text-[13px] focus:outline-none"
-              style={{ ...fieldStyle, borderRadius: 20 }}
+              style={fieldStyle}
             />
             <div className="relative">
               <input
@@ -537,7 +536,7 @@ export default function RemoteIMSettingsPanel() {
                 placeholder="App Secret"
                 type={showFeishuSecret ? 'text' : 'password'}
                 className="w-full border text-[13px] focus:outline-none"
-                style={{ ...fieldStyle, borderRadius: 20, paddingRight: 56 }}
+                style={{ ...fieldStyle, paddingRight: 56 }}
               />
               <button
                 className="absolute top-1/2 -translate-y-1/2 rounded-xl"
@@ -566,14 +565,14 @@ export default function RemoteIMSettingsPanel() {
                   onChange={(e) => setFeishuVerificationToken(e.target.value)}
                   placeholder="Verification Token（可选）"
                   className="border text-[13px] focus:outline-none"
-                  style={{ ...fieldStyle, borderRadius: 20 }}
+                  style={fieldStyle}
                 />
                 <input
                   value={feishuEncryptKey}
                   onChange={(e) => setFeishuEncryptKey(e.target.value)}
                   placeholder="Encrypt Key（可选）"
                   className="border text-[13px] focus:outline-none"
-                  style={{ ...fieldStyle, borderRadius: 20 }}
+                  style={fieldStyle}
                 />
               </div>
             )}
@@ -588,7 +587,7 @@ export default function RemoteIMSettingsPanel() {
               disabled={isBusy('feishu-connect')}
               onClick={() => { void connectFeishu() }}
               className="text-[13px] font-medium"
-              style={{ ...primaryButtonStyle, minWidth: 104, padding: '13px 24px', borderRadius: 20, lineHeight: 1.35 }}
+              style={primaryButtonStyle}
             >
               <span className="inline-flex items-center gap-2">
                 {isBusy('feishu-connect') && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
@@ -601,7 +600,7 @@ export default function RemoteIMSettingsPanel() {
                   disabled={isBusy(`probe:${feishuChannel.id}`)}
                   onClick={() => { void sendProbe(feishuChannel.id) }}
                   className="border text-[13px]"
-                  style={{ ...secondaryButtonStyle, minWidth: 104, padding: '13px 24px', borderRadius: 20, lineHeight: 1.35 }}
+                  style={secondaryButtonStyle}
                 >
                   <span className="inline-flex items-center gap-2">
                     {isBusy(`probe:${feishuChannel.id}`) && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
@@ -612,7 +611,7 @@ export default function RemoteIMSettingsPanel() {
                   disabled={isBusy(`disconnect:${feishuChannel.id}`)}
                   onClick={() => { void disconnectChannel(feishuChannel.id) }}
                   className="border text-[13px]"
-                  style={{ ...secondaryButtonStyle, minWidth: 104, padding: '13px 24px', borderRadius: 20, lineHeight: 1.35 }}
+                  style={secondaryButtonStyle}
                 >
                   <span className="inline-flex items-center gap-2">
                     {isBusy(`disconnect:${feishuChannel.id}`) && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
@@ -646,7 +645,7 @@ export default function RemoteIMSettingsPanel() {
               onChange={(e) => setWechatDefaultTarget(e.target.value)}
               placeholder="默认收件人（可选，用于测试发送）"
               className="border text-[13px] focus:outline-none"
-              style={{ ...fieldStyle, borderRadius: 20 }}
+              style={fieldStyle}
             />
           </div>
           <div className="flex items-center flex-wrap" style={{ gap: 12 }}>
@@ -654,7 +653,7 @@ export default function RemoteIMSettingsPanel() {
               disabled={isBusy('wechat-connect')}
               onClick={() => { void connectWechat() }}
               className="text-[13px] font-medium"
-              style={{ ...primaryButtonStyle, minWidth: 104, padding: '13px 24px', borderRadius: 20, lineHeight: 1.35 }}
+              style={primaryButtonStyle}
             >
               <span className="inline-flex items-center gap-2">
                 {isBusy('wechat-connect') && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
@@ -667,7 +666,7 @@ export default function RemoteIMSettingsPanel() {
                   disabled={isBusy(`probe:${wechatChannel.id}`)}
                   onClick={() => { void sendProbe(wechatChannel.id) }}
                   className="border text-[13px]"
-                  style={{ ...secondaryButtonStyle, minWidth: 104, padding: '13px 24px', borderRadius: 20, lineHeight: 1.35 }}
+                  style={secondaryButtonStyle}
                 >
                   <span className="inline-flex items-center gap-2">
                     {isBusy(`probe:${wechatChannel.id}`) && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
@@ -678,7 +677,7 @@ export default function RemoteIMSettingsPanel() {
                   disabled={isBusy(`disconnect:${wechatChannel.id}`)}
                   onClick={() => { void disconnectChannel(wechatChannel.id) }}
                   className="border text-[13px]"
-                  style={{ ...secondaryButtonStyle, minWidth: 104, padding: '13px 24px', borderRadius: 20, lineHeight: 1.35 }}
+                  style={secondaryButtonStyle}
                 >
                   <span className="inline-flex items-center gap-2">
                     {isBusy(`disconnect:${wechatChannel.id}`) && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
@@ -689,7 +688,7 @@ export default function RemoteIMSettingsPanel() {
             )}
           </div>
           {wechatQrImage && (
-            <div className="flex flex-col border" style={{ borderColor: 'var(--border-subtle)', borderRadius: 18, padding: 18, gap: 14, width: 286 }}>
+            <div className="flex flex-col border" style={{ borderColor: 'var(--border-subtle)', borderRadius: 12, padding: 16, gap: 14, width: 286 }}>
               <img src={wechatQrImage} alt="微信绑定二维码" style={{ width: 240, height: 240, alignSelf: 'center' }} />
               <div className="text-[12px] text-center" style={{ color: 'var(--text-muted)', lineHeight: 1.6 }}>
                 {wechatLoginStatus === 'scanned' ? '已扫码，等待手机确认。' : '请用手机微信扫码确认绑定。'}
@@ -703,13 +702,13 @@ export default function RemoteIMSettingsPanel() {
                 onChange={(e) => setWechatVerifyCode(e.target.value)}
                 placeholder="输入手机微信显示的数字"
                 className="border text-[13px] focus:outline-none"
-                style={{ ...fieldStyle, borderRadius: 20, maxWidth: 220 }}
+                style={{ ...fieldStyle, maxWidth: 220 }}
               />
               <button
                 disabled={isBusy('wechat-verify')}
                 onClick={() => { void submitWechatVerifyCode() }}
                 className="border text-[13px]"
-                style={{ ...secondaryButtonStyle, minWidth: 104, padding: '13px 24px', borderRadius: 20, lineHeight: 1.35 }}
+                style={secondaryButtonStyle}
               >
                 提交
               </button>
@@ -718,12 +717,12 @@ export default function RemoteIMSettingsPanel() {
         </div>
       )}
 
-      <div className="glass-surface-card border flex flex-col" style={{ ...panelCardStyle, borderRadius: 28, padding: '30px 32px', gap: 20 }}>
+      <div className="glass-surface-card border flex flex-col" style={{ ...panelCardStyle, padding: '24px 28px', gap: 20 }}>
         <div className="flex items-center justify-between" style={{ paddingTop: 4 }}>
           <div className="text-[15px] font-semibold" style={{ color: 'var(--text-title)' }}>运行状态</div>
           <button
             className="border text-[12px] inline-flex items-center"
-            style={{ ...secondaryButtonStyle, borderRadius: 18, padding: '12px 18px', gap: 8 }}
+            style={{ ...secondaryButtonStyle, gap: 8 }}
             onClick={() => { void refresh() }}
           >
             <RefreshCcw className="w-3.5 h-3.5" />
@@ -745,7 +744,7 @@ export default function RemoteIMSettingsPanel() {
               <div
                 key={channel.id}
                 className="glass-surface-card border flex items-start justify-between"
-                style={{ ...panelCardStyle, borderRadius: 24, padding: '20px 24px', gap: 20 }}
+                style={{ ...panelCardStyle, borderRadius: 12, padding: '16px 20px', gap: 16 }}
               >
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-medium flex items-center gap-3" style={{ color: 'var(--text-title)' }}>
@@ -775,7 +774,7 @@ export default function RemoteIMSettingsPanel() {
                     title="发送测试消息"
                     onClick={() => { void sendProbe(channel.id) }}
                     className="border"
-                    style={{ ...secondaryButtonStyle, padding: 12, borderRadius: 18 }}
+                    style={{ ...secondaryButtonStyle, padding: 8, borderRadius: 10 }}
                   >
                     <Send className="w-4 h-4" />
                   </button>
@@ -783,7 +782,7 @@ export default function RemoteIMSettingsPanel() {
                     title={channel.enabled ? '停用' : '启用'}
                     onClick={() => { void window.electronAPI.agent.setChannelEnabled(channel.id, !channel.enabled).then(() => refresh()) }}
                     className="border"
-                    style={{ ...secondaryButtonStyle, padding: 12, borderRadius: 18 }}
+                    style={{ ...secondaryButtonStyle, padding: 8, borderRadius: 10 }}
                   >
                     {channel.enabled ? <MessageSquare className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
                   </button>
@@ -791,7 +790,7 @@ export default function RemoteIMSettingsPanel() {
                     title="删除"
                     onClick={() => { void deleteChannel(channel.id) }}
                     className="border"
-                    style={{ ...secondaryButtonStyle, color: 'var(--color-red)', padding: 12, borderRadius: 18 }}
+                    style={{ ...secondaryButtonStyle, color: 'var(--color-red)', padding: 8, borderRadius: 10 }}
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>
@@ -805,12 +804,12 @@ export default function RemoteIMSettingsPanel() {
         </div>
       </div>
 
-      <div className="glass-surface-card border flex flex-col" style={{ ...panelCardStyle, borderRadius: 28, padding: '28px 32px', gap: 18 }}>
+      <div className="glass-surface-card border flex flex-col" style={{ ...panelCardStyle, padding: '24px 28px', gap: 18 }}>
         <div className="flex items-center justify-between">
           <div className="text-[15px] font-semibold" style={{ color: 'var(--text-title)' }}>附件缓存</div>
           <button
             className="border text-[12px] inline-flex items-center"
-            style={{ ...secondaryButtonStyle, borderRadius: 18, padding: '12px 18px', gap: 8 }}
+            style={{ ...secondaryButtonStyle, gap: 8 }}
             onClick={() => { void refresh() }}
           >
             <RefreshCcw className="w-3.5 h-3.5" />
@@ -824,7 +823,7 @@ export default function RemoteIMSettingsPanel() {
         <div className="flex items-center flex-wrap" style={{ gap: 12 }}>
           <button
             className="border text-[13px]"
-            style={{ ...secondaryButtonStyle, minWidth: 120, padding: '13px 24px', borderRadius: 20, lineHeight: 1.35 }}
+            style={{ ...secondaryButtonStyle, minWidth: 120 }}
             disabled={isBusy('clear-cache:all')}
             onClick={() => {
               void runWithBusy('clear-cache:all', async () => {
@@ -843,7 +842,7 @@ export default function RemoteIMSettingsPanel() {
               <div
                 key={item.channelId}
                 className="glass-surface-card border flex items-center justify-between"
-                style={{ ...panelCardStyle, borderRadius: 20, padding: '16px 18px', gap: 16 }}
+                style={{ ...panelCardStyle, borderRadius: 12, padding: '14px 16px', gap: 14 }}
               >
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-medium" style={{ color: 'var(--text-title)' }}>{item.channelId}</div>
@@ -853,7 +852,7 @@ export default function RemoteIMSettingsPanel() {
                 </div>
                 <button
                   className="border text-[12px]"
-                  style={{ ...secondaryButtonStyle, borderRadius: 18, padding: '10px 16px' }}
+                  style={secondaryButtonStyle}
                   disabled={isBusy(`clear-cache:${item.channelId}`)}
                   onClick={() => {
                     void runWithBusy(`clear-cache:${item.channelId}`, async () => {
