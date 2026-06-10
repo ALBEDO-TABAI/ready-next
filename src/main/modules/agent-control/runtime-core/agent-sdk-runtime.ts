@@ -181,6 +181,8 @@ const agentSdkLogger = createRotatingLogger('ready-agent-sdk.log')
 const settingsRepository = new AppSettingsRepository()
 const SDK_CHILD_RESUME_AWAIT_TIMEOUT_MS = 1_500
 const DEFAULT_AGENT_SDK_MAX_TURNS = 24
+// L-f5: refresh the durable budget checkpoint every N tool calls mid-run.
+const ROLLING_BUDGET_CHECKPOINT_TOOL_INTERVAL = 4
 const LOCAL_DOCUMENT_WRITE_MAX_TURNS = 40
 const LONG_READING_TRIGGER_CHARS = 12_000
 const LONG_READING_EXCERPT_BATCH_CHARS = 32_000
@@ -3505,6 +3507,7 @@ export class AgentSdkRuntime extends EventEmitter {
   ): Promise<ExecutionTurnResult> {
     const runStartedAt = Date.now()
     const runId = requestId || randomUUID()
+    let lastRollingCheckpointToolCalls = 0
     // S5-1: lazy restore — a missing session after a process restart seeds
     // from the persisted scope snapshot with an explicit notice; a corrupt
     // snapshot resets with an explicit notice. Never silent amnesia.
@@ -4205,6 +4208,39 @@ export class AgentSdkRuntime extends EventEmitter {
                 : new Error('aborted')
               error.name = 'AbortError'
               throw error
+            }
+            // L-f5: rolling budget checkpoint — refresh the durable
+            // continuation handle every N clean tool batches (the boundary
+            // before a model call is clean: all prior tools settled), so a
+            // mid-run crash loses at most N batches instead of everything
+            // written only at exhaustion. Failure is loud, never blocking.
+            if (
+              liveTaskBudgetRuntime
+              && liveTaskBudgetRuntime.warningLevel !== 'exhausted'
+              && liveTaskBudgetRuntime.usage.toolCallsUsed - lastRollingCheckpointToolCalls
+                >= ROLLING_BUDGET_CHECKPOINT_TOOL_INTERVAL
+            ) {
+              lastRollingCheckpointToolCalls = liveTaskBudgetRuntime.usage.toolCallsUsed
+              try {
+                const rolling = await this.writeBudgetCheckpointState({
+                  agentName: name,
+                  sessionId,
+                  runId,
+                  taskId,
+                  taskBudgetRuntime: liveTaskBudgetRuntime,
+                  runHandle,
+                  usedTools,
+                  requiredCapabilityGroups,
+                  requiredToolNames: allowedToolNames,
+                  lastUserMessage: messageToText(content as RunMessage),
+                })
+                runMetaContinuationRef = rolling.projectionPatch.taskContinuation
+                  && typeof rolling.projectionPatch.taskContinuation === 'object'
+                  ? rolling.projectionPatch.taskContinuation as Record<string, unknown>
+                  : runMetaContinuationRef
+              } catch (rollingError) {
+                log(`rolling budget checkpoint failed: ${errorMessage(rollingError)}`)
+              }
             }
             const terminalReminderTexts = drainBackgroundTaskTerminalReminders(sessionId)
             if (sessionRestoreNotice) {
