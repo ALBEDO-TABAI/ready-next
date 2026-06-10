@@ -24,6 +24,10 @@ const DEFAULT_CONFLICTS: Record<ReminderTopic, ReadonlyArray<ReminderTopic>> = {
   'force-tool-blocked-child-owned': [],
   // Stage R W1.3 — daily date prompt; no conflicts.
   'current-date': [],
+  // S2-2 — background task terminal summaries; no conflicts.
+  'background-task-terminal': [],
+  // S4-3 — active plan step re-injection; no conflicts.
+  'active-plan-step': [],
 }
 
 export function composeSystemReminder(

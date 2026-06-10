@@ -209,7 +209,7 @@ export function registerBackgroundTaskTerminalReminder(
   const text = reminderTexts.map((item) => item.trim()).filter(Boolean).join('\n')
   if (!text) return
   registry.register({
-    topic: BACKGROUND_TASK_TERMINAL_REMINDER_TOPIC as ReminderTopic,
+    topic: BACKGROUND_TASK_TERMINAL_REMINDER_TOPIC,
     priority: 90,
     conflictsWith: [],
     text,

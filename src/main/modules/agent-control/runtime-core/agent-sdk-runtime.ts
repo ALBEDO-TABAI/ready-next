@@ -166,6 +166,10 @@ import {
   prependSystemReminderInput,
   registerBackgroundTaskTerminalReminder,
 } from '../system-reminders/background-task-terminal-reminder'
+import {
+  buildActivePlanReminderText,
+  noteToolResultForActivePlan,
+} from '../system-reminders/active-plan-step-reminder'
 
 const agentSdkLogger = createRotatingLogger('ready-agent-sdk.log')
 const settingsRepository = new AppSettingsRepository()
@@ -4179,9 +4183,20 @@ export class AgentSdkRuntime extends EventEmitter {
               throw error
             }
             const terminalReminderTexts = drainBackgroundTaskTerminalReminders(sessionId)
-            if (terminalReminderTexts.length > 0) {
+            const activePlanReminder = buildActivePlanReminderText(sessionId)
+            if (terminalReminderTexts.length > 0 || activePlanReminder) {
               const registry = createSystemReminderRegistry()
-              registerBackgroundTaskTerminalReminder(registry, terminalReminderTexts)
+              if (terminalReminderTexts.length > 0) {
+                registerBackgroundTaskTerminalReminder(registry, terminalReminderTexts)
+              }
+              if (activePlanReminder) {
+                registry.register({
+                  topic: 'active-plan-step',
+                  priority: 80,
+                  conflictsWith: [],
+                  text: activePlanReminder,
+                })
+              }
               const reminderText = registry.compose()
               if (reminderText) {
                 nextInput = prependSystemReminderInput(nextInput, reminderText)
@@ -5207,6 +5222,7 @@ export class AgentSdkRuntime extends EventEmitter {
       this.buildExecutorContext(runtimeContext),
     )
     runtimeContext.recordToolResult(definition.name, output)
+    noteToolResultForActivePlan(runtimeContext.sessionId, definition.name, args)
     const outputWithSteering = appendBudgetWarningSteering(output, runtimeContext)
     const normalized = normalizeToolExecutionOutput(outputWithSteering)
     const resultTrace = formatToolResultTrace(definition.name, normalized)
@@ -5330,6 +5346,7 @@ export class AgentSdkRuntime extends EventEmitter {
         },
       )
       runtimeContext.recordToolResult(definition.name, output)
+    noteToolResultForActivePlan(runtimeContext.sessionId, definition.name, args)
       const outputWithSteering = appendBudgetWarningSteering(output, runtimeContext)
       const resultTrace = formatToolResultTrace(definition.name, outputWithSteering)
       runtimeContext.emitOutput(resultTrace, 'tool_result')
@@ -5406,6 +5423,7 @@ export class AgentSdkRuntime extends EventEmitter {
       this.buildExecutorContext(runtimeContext),
     )
     runtimeContext.recordToolResult(definition.name, output)
+    noteToolResultForActivePlan(runtimeContext.sessionId, definition.name, args)
     const outputWithSteering = appendBudgetWarningSteering(output, runtimeContext)
     const normalized = normalizeToolExecutionOutput(outputWithSteering)
     if (

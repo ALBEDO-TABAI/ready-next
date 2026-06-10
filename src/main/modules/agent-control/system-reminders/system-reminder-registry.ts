@@ -28,6 +28,12 @@ export type ReminderTopic =
   // date so it can apply staleness judgement to web_search / web_fetch
   // citations. No conflicts with other topics.
   | 'current-date'
+  // S2-2 — background task terminal summaries drained before each model
+  // call (previously registered via an `as ReminderTopic` cast; now part of
+  // the honest vocabulary). No conflicts.
+  | 'background-task-terminal'
+  // S4-3 — active plan current-step re-injection (verify=weak). No conflicts.
+  | 'active-plan-step'
 
 export interface ReminderEntry {
   readonly topic: ReminderTopic
