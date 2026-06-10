@@ -170,6 +170,10 @@ import {
   buildActivePlanReminderText,
   noteToolResultForActivePlan,
 } from '../system-reminders/active-plan-step-reminder'
+import {
+  loadScopeSessionSnapshot,
+  writeScopeSessionSnapshot,
+} from '../session/scope-session-snapshot'
 
 const agentSdkLogger = createRotatingLogger('ready-agent-sdk.log')
 const settingsRepository = new AppSettingsRepository()
@@ -3499,8 +3503,25 @@ export class AgentSdkRuntime extends EventEmitter {
   ): Promise<ExecutionTurnResult> {
     const runStartedAt = Date.now()
     const runId = requestId || randomUUID()
+    // S5-1: lazy restore — a missing session after a process restart seeds
+    // from the persisted scope snapshot with an explicit notice; a corrupt
+    // snapshot resets with an explicit notice. Never silent amnesia.
+    let sessionRestoreNotice: string | null = null
     if (!this.sessions.has(name)) {
       this.newSession(name)
+      const restored = loadScopeSessionSnapshot(name)
+      if (restored.ok && restored.items.length > 0) {
+        const seeded = this.sessions.get(name)
+        if (seeded) {
+          seeded.sdkSession = new MemorySession({
+            sessionId: name,
+            initialItems: normalizeSessionSnapshotForSeed(restored.items as never[]),
+          })
+          sessionRestoreNotice = '已恢复上次会话上下文（应用此前重启过）。如与当前请求无关可忽略。'
+        }
+      } else if (!restored.ok && restored.reason === 'corrupt') {
+        sessionRestoreNotice = '上次会话快照损坏，会话已重置（无法恢复早前上下文）。'
+      }
     }
     const taskId = executionOptions?.taskId || `task-${runId}`
     const sessionId = executionOptions?.publicSessionId || this.extractSessionIdFromInternalName(name)
@@ -4183,6 +4204,10 @@ export class AgentSdkRuntime extends EventEmitter {
               throw error
             }
             const terminalReminderTexts = drainBackgroundTaskTerminalReminders(sessionId)
+            if (sessionRestoreNotice) {
+              terminalReminderTexts.unshift(sessionRestoreNotice)
+              sessionRestoreNotice = null
+            }
             const activePlanReminder = buildActivePlanReminderText(sessionId)
             if (terminalReminderTexts.length > 0 || activePlanReminder) {
               const registry = createSystemReminderRegistry()
@@ -4701,6 +4726,16 @@ export class AgentSdkRuntime extends EventEmitter {
         },
         writeRunCloseMetric,
       })
+      // S5-1: persist the scope session snapshot at clean run close so a
+      // main-process restart can lazily restore the conversation instead of
+      // silently forgetting it. Failure is loud (log), never blocking.
+      try {
+        const snapshotItems = normalizeSessionSnapshotForSeed(await runHandle.capturedSession.getItems())
+        const written = writeScopeSessionSnapshot(name, snapshotItems)
+        if (!written.ok) log(`scope session snapshot write failed: ${written.error}`)
+      } catch (snapshotError) {
+        log(`scope session snapshot write failed: ${errorMessage(snapshotError)}`)
+      }
       return this.buildResult({
         success: true,
         finalText,
