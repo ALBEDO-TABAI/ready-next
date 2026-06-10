@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { describe, it, test } from 'node:test'
 
 import type { BrowserCapabilityService } from '../main/modules/browser-engine/capability-service'
 import type {
@@ -12,6 +12,12 @@ import type {
 import { BrowserContentTaskRunner } from '../main/modules/browser-engine/content-task-runner'
 import { BrowserWriteLeaseService } from '../main/modules/browser-engine/browser-write-lease'
 import { resolveCollectionVerdict } from '../main/modules/browser-engine/collection-verdict'
+
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('collection-verdict-matrix declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'collection-verdict-matrix transitive sqlite load')
+})
 
 interface StoredTask {
   taskId: string
