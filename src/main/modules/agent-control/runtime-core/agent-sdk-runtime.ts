@@ -5604,7 +5604,8 @@ export class AgentSdkRuntime extends EventEmitter {
     if (!params.runtimeContext.sessionId) return
     const timestamp = new Date().toISOString()
     const projectionPatch = params.projectionPatch || null
-    this.runtime?.publishScopeRunEvent({
+    try {
+      this.runtime?.publishScopeRunEvent({
       type: 'updated',
       scopeId: params.runtimeContext.sessionId,
       agent: publicAgentName(params.runtimeContext.agentName),
@@ -5624,7 +5625,13 @@ export class AgentSdkRuntime extends EventEmitter {
         timestamp,
       },
       timestamp,
-    }, projectionPatch ? { projectionPatch, transcriptEvents: [] } : null)
+      }, projectionPatch ? { projectionPatch, transcriptEvents: [] } : null)
+    } catch (publishError) {
+      // Event publication must never poison the tool result that triggered
+      // it (same contract as hooks/reminders: observer failure stays out of
+      // the main flow). Loud log, no rethrow.
+      log(`publishScopeRunEvent failed: ${errorMessage(publishError)}`)
+    }
   }
 
   private mergeProjectionPatches(patches: Record<string, unknown>[]): Record<string, unknown> | null {

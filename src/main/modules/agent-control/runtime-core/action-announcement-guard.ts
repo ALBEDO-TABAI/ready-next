@@ -1,6 +1,14 @@
 const ACTION_ANNOUNCEMENT_TAIL_PATTERN =
   /(?:让我|我现在|我马上|接下来|现在去|I['’]ll now|let me)[\s\S]{0,120}[：:]\s*$/i
 
+// Steered-turn re-promise: looser than the first-hit tail pattern (the
+// forensic run4 promised again WITHOUT the trailing colon). A blocker
+// explanation is NOT a re-promise — the steer explicitly allowed "说明阻塞".
+const STEERED_REPROMISE_PATTERN =
+  /(?:让我|我现在|我马上|接下来|现在去|这就去|马上去|我会(?:先|去)|I['’]ll now|let me)/i
+const BLOCKER_EXPLANATION_PATTERN =
+  /(?:无法|不能|没有可|做不到|阻塞|失败|受限|被限制|需要你|需要用户|请提供|请先|缺少|登录|权限|cannot|unable|blocked|need you)/i
+
 export type ActionAnnouncementGuardDecision =
   | { kind: 'none' }
   | { kind: 'steer'; actionSummary: string | null }
@@ -19,12 +27,20 @@ export function evaluateActionAnnouncementGuard(
   if (input.toolCallsUsed !== 0) return { kind: 'none' }
   if (!input.hasUnfinishedTaskReference) return { kind: 'none' }
   const segment = lastAssistantTextSegment(input.assistantText)
+  // After a steer the contract is "仍不行动则降级" (roadmap C1.2). A zero-tool
+  // steered turn that RE-PROMISES action checkpoints — the forensic run4
+  // ("好，我现在用浏览器打开…采集所有图片。") promised again without the
+  // trailing colon and previously slipped through. A blocker explanation
+  // ("我没有可调用工具，无法打开") is the steer's other legitimate exit and
+  // closes as done.
+  if (input.alreadySteered) {
+    const repromised = STEERED_REPROMISE_PATTERN.test(segment) && !BLOCKER_EXPLANATION_PATTERN.test(segment)
+    return repromised
+      ? { kind: 'checkpoint', actionSummary: summarizeActionAnnouncement(segment) }
+      : { kind: 'none' }
+  }
   if (!ACTION_ANNOUNCEMENT_TAIL_PATTERN.test(segment)) return { kind: 'none' }
-
-  const actionSummary = summarizeActionAnnouncement(segment)
-  return input.alreadySteered
-    ? { kind: 'checkpoint', actionSummary }
-    : { kind: 'steer', actionSummary }
+  return { kind: 'steer', actionSummary: summarizeActionAnnouncement(segment) }
 }
 
 export function buildActionAnnouncementSteerInput(reminderText: string): Array<{
