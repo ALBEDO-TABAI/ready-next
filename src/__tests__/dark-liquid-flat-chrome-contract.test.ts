@@ -50,7 +50,11 @@ test('the four-mode switch track kills the old top sheen through shared dark liq
   )
   assert.match(
     themeStyles,
-    /html\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-bg:\s*rgba\(233,\s*233,\s*231,\s*0\.46\);/,
+    /html\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-bg:\s*rgba\(222,\s*222,\s*220,\s*0\.64\);/,
+  )
+  assert.match(
+    themeStyles,
+    /html\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-shadow:\s*[\s\S]*?inset 0 1\.5px 3px rgba\(24,\s*39,\s*77,\s*0\.11\)/,
   )
   assert.match(
     themeStyles,

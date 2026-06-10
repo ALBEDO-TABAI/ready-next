@@ -80,7 +80,8 @@ test('workbench side and chat panels stay transparent while slots use the shared
 
   assert.match(styles, /\.workbench-panel-frame\[data-side-panel-variant='files'\]\s*\{[\s\S]*?background:\s*var\(--workbench-side-panel-bg\)/)
   assert.match(styles, /html\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-side-panel-bg:\s*transparent;/)
-  assert.match(styles, /html\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-bg:\s*rgba\(233,\s*233,\s*231,\s*0\.46\);/)
+  assert.match(styles, /html\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-bg:\s*rgba\(222,\s*222,\s*220,\s*0\.64\);/)
+  assert.match(styles, /html\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-shadow:\s*[\s\S]*?inset 0 1\.5px 3px rgba\(24,\s*39,\s*77,\s*0\.11\)/)
   assert.match(sliderStyles, /html\[data-skin='liquid-glass'\] \.icon-rail-slider\s*\{[\s\S]*?background:\s*var\(--workbench-rail-slot-bg\)/)
   assert.match(sliderStyles, /html\[data-skin='liquid-glass'\] \.draggable-mode-tabs\s*\{[\s\S]*?background:\s*var\(--workbench-rail-slot-bg\)/)
   assert.match(sidePanel, /background:\s*'transparent'/)
