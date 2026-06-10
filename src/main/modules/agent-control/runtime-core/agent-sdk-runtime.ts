@@ -114,6 +114,7 @@ import {
   stepCollectionIntentTtl,
 } from '../../../../shared/browser-collection-intent'
 import { classifyFollowupIntent, followupConsultsRecalledContext } from '../../../../shared/agent-followup-intent'
+import { classifyBrowserToolCall } from '../../browser-engine/browser-tool-write-classification'
 import { createBrowserTurnLease, type BrowserTurnLease } from '../../browser-engine/agent-browser-turn-lease'
 import { filterToolsByVisionCapability } from '../tools-runtime/tool-gateway'
 import {
@@ -3792,6 +3793,25 @@ export class AgentSdkRuntime extends EventEmitter {
       })
       if (shouldUseLocalDocumentToolSet(content as RunMessage, effectiveExecutionOptions?.requestEnvelope)) {
         toolDefinitions = toolDefinitions.filter(isLocalDocumentToolDefinition)
+      }
+      // S4-2: a status question ("怎么样了 / 还在跑吗") must report state, never
+      // restart work. The guard is the tool surface itself (code-owned): browser
+      // tools narrow to read-classified ones, so the model can browser_get_task
+      // but cannot re-dispatch a collection. classifyBrowserToolCall fails
+      // closed (unknown → write), which is exactly the conservative default.
+      const turnFollowupPrimary =
+        parseEnvelopeResourceReferences(effectiveExecutionOptions?.requestEnvelope).primaryInstruction
+        || primaryInstructionText(content as RunMessage)
+      const turnFollowup = classifyFollowupIntent(
+        turnFollowupPrimary,
+        { hasActiveTaskContext: hasRecalledTaskContext(messageToText(content as RunMessage)) },
+      )
+      if (turnFollowup.kind === 'status_query') {
+        toolDefinitions = toolDefinitions.filter((definition) => {
+          const name = (definition as { name?: unknown }).name
+          if (typeof name !== 'string' || !name.startsWith('browser_')) return true
+          return classifyBrowserToolCall(name) === 'read'
+        })
       }
       if (documentTargetGuard) {
         documentTargetGuard.openToolDefinition = toolDefinitions.find((definition) => definition.name === 'document_open_tab')
