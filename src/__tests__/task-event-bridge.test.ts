@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { describe, it, test } from 'node:test'
 
 import { taskEventBridge, type TaskEventBridgePayload } from '../main/modules/browser-engine/task-event-bridge'
 import {
@@ -8,6 +8,12 @@ import {
   listPendingTaskEventsForTests,
   type PendingTaskEventDatabase,
 } from '../main/modules/agent-control/system-reminders/background-task-terminal-reminder'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('task-event-bridge declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'task-event-bridge transitive sqlite load')
+})
+
 
 interface PendingRow {
   id: number

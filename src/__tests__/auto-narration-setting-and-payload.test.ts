@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { afterEach, describe, it } from 'node:test'
+import { afterEach, describe, it, test } from 'node:test'
 
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
 import { taskEventBridge, type TaskEventBridgePayload } from '../main/modules/browser-engine/task-event-bridge'
@@ -17,6 +17,12 @@ import {
   registerPendingTaskEventListener,
   type PendingTaskEventDatabase,
 } from '../main/modules/agent-control/system-reminders/background-task-terminal-reminder'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('auto-narration-setting-and-payload declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'auto-narration-setting-and-payload transitive sqlite load')
+})
+
 
 interface PendingRow {
   id: number

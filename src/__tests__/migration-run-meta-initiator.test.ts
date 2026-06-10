@@ -54,6 +54,11 @@ class Migration050Db implements TestDb {
       return
     }
 
+    if (normalized.startsWith('CREATE TABLE IF NOT EXISTS pending_task_events')
+      || normalized.startsWith('CREATE INDEX IF NOT EXISTS idx_pending_task_events')) {
+      return
+    }
+
     throw new Error(`unexpected migration SQL: ${normalized}`)
   }
 

@@ -23,6 +23,12 @@ import {
   resumeWaitingHumanBrowserTaskFromBridge,
   type TaskEventBridgePayload,
 } from '../main/modules/browser-engine/task-event-bridge'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+
+test('auto-narration-continuation declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'auto-narration-continuation transitive sqlite load')
+})
+
 
 const BASE_CONFIG: AIModelConfig = {
   provider: 'openai',
