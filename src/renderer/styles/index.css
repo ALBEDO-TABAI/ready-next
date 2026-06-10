@@ -337,7 +337,7 @@ html[data-skin='liquid-glass'] {
     inset 0 0 0 0.5px color-mix(in srgb, var(--surface-border) 28%, transparent);
   --input-slot-shadow-focus:
     inset 0 0 0 0.5px color-mix(in srgb, var(--input-slot-focus-border) 54%, transparent);
-  --workbench-liquid-chrome-bg: rgba(253, 253, 251, 0.50);
+  --workbench-liquid-chrome-bg: rgba(249, 252, 255, 0.56);
   --chat-menu-frost-bg: rgba(236, 239, 243, 0.92);
   --chat-menu-frost-border: rgba(255, 255, 255, 0.42);
   --chat-menu-hover-bg: rgba(246, 248, 251, 0.72);

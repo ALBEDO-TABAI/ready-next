@@ -81,7 +81,7 @@ test('browser rss and calendar shells align their left edge with the shared work
   assert.match(styles, /background: var\(--calendar-canvas-bg\) !important;/)
   assert.match(styles, /border: 1px solid var\(--calendar-canvas-border\) !important;/)
   assert.match(styles, /html\[data-skin='liquid-glass'\] \.calendar-mode-shell \.workbench-canvas-shell \{[\s\S]*box-shadow:\s*none !important;/)
-  assert.match(styles, /--workbench-liquid-chrome-bg:\s*rgba\(253,\s*253,\s*251,\s*0\.50\);/)
+  assert.match(styles, /--workbench-liquid-chrome-bg:\s*rgba\(249,\s*252,\s*255,\s*0\.56\);/)
   assert.match(styles, /html\[data-skin='liquid-glass'\] \.calendar-mode-shell \{[\s\S]*--calendar-canvas-bg:\s*var\(--workbench-module-surface-bg\);[\s\S]*--calendar-canvas-border:\s*transparent;/)
   assert.match(styles, /html\[data-skin='liquid-glass'\] \.browser-header-surface,[\s\S]*\.workbench-tabs-surface,[\s\S]*\.document-path-bar,[\s\S]*\.rss-preview-surface \{/)
   assert.match(styles, /html\[data-skin='liquid-glass'\] \.browser-header-surface,[\s\S]*backdrop-filter:\s*blur\(24px\) saturate\(0%\) !important;/)
