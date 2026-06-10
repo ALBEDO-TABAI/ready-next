@@ -174,6 +174,8 @@ import {
   loadScopeSessionSnapshot,
   writeScopeSessionSnapshot,
 } from '../session/scope-session-snapshot'
+import { classifyExecutionError } from '../../claude-bridge/error-classifier'
+import { buildRecoveryPlan } from '../../claude-bridge/recovery-router'
 
 const agentSdkLogger = createRotatingLogger('ready-agent-sdk.log')
 const settingsRepository = new AppSettingsRepository()
@@ -4191,6 +4193,7 @@ export class AgentSdkRuntime extends EventEmitter {
       for (let bridgeTurn = 0; bridgeTurn < (useTextToolBridge ? 4 : 3); bridgeTurn += 1) {
         let streamedText = ''
         let contextCompressedForBridgeTurn = false
+        let providerRetryAttempts = 0
         let runResult: ReadyAgentSdkRunResult | null = null
         while (true) {
           streamedText = ''
@@ -4268,6 +4271,31 @@ export class AgentSdkRuntime extends EventEmitter {
               if (compacted.status === 'compacted' || compacted.status === 'noop') {
                 contextCompressedForBridgeTurn = true
                 continue
+              }
+            }
+            // S5-2: classified transient provider failures (429/5xx/stream
+            // cut/timeouts) retry with bounded backoff through the SAME
+            // policy source as tool execution (error-classifier +
+            // recovery-router) — no second retry config. Abort always wins;
+            // context-overflow recovery stays with the compaction branch
+            // above; exhausted retries fall through to the existing
+            // classified failure path.
+            if (!abortController.signal.aborted && !isAbortError(error)) {
+              const classified = classifyExecutionError(error, { source: 'model_request' })
+              const recovery = buildRecoveryPlan(classified)
+              if (
+                recovery.shouldRetry
+                && !recovery.shouldCompressContext
+                && providerRetryAttempts < recovery.maxAttempts
+              ) {
+                providerRetryAttempts += 1
+                const base = recovery.retryDelayMs || 400
+                const delayMs = recovery.backoff === 'exponential_jitter'
+                  ? Math.min(base * 2 ** (providerRetryAttempts - 1) + Math.floor(Math.random() * 100), 8_000)
+                  : base
+                log(`provider ${classified.kind} retry ${providerRetryAttempts}/${recovery.maxAttempts} in ${delayMs}ms`)
+                await new Promise((resolve) => setTimeout(resolve, delayMs))
+                if (!abortController.signal.aborted) continue
               }
             }
             throw error

@@ -91,7 +91,7 @@ export function classifyExecutionError(
     }
   }
 
-  if (/http 408|http 409|http 500|http 502|http 503|http 504|econnreset|socket hang up|network error/.test(normalized)) {
+  if (/http 408|http 409|http 500|http 502|http 503|http 504|econnreset|socket hang up|network error|premature close|err_stream_premature_close|incomplete chunked encoding|fetch failed|und_err_socket|\bterminated\b/.test(normalized)) {
     return {
       kind: 'transient',
       source,
