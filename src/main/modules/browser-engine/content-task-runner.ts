@@ -26,6 +26,7 @@ import { runBrowserCollection } from './browser-collector-engine'
 import type { NoteCollectFacade } from './browser-collector-actions'
 import { isHighControlPlatformText } from '../../../shared/browser-collection-intent'
 import { deriveCollectionTargets, type BrowserCollectionTarget } from './collection-targets'
+import { resolveCollectionVerdict } from './collection-verdict'
 
 /**
  * Per-task collector binding (plan §3.4). The controller provides this factory
@@ -893,17 +894,25 @@ export class BrowserContentTaskRunner {
 
     const userExpectedTotal = Number(payload.userExpectedTotal || 0) || undefined
     const finalResult = visibleCollectResult(taskId, collected, round, stopReason, targetUrl, payload.outputRootDir, userExpectedTotal, template)
-    const discoveryStatus = String(finalResult.discoveryStatus || discoveryStatusFor(stopReason))
+    const collectionVerdict = resolveCollectionVerdict({
+      collected: Number(finalResult.frozenCount || 0),
+      expected: userExpectedTotal,
+      stopReason,
+      failures: 0,
+      cursorValid: round > 0,
+    })
     const finalStatus = stopReason === 'cancelled'
       ? 'cancelled'
       : stopReason === 'lease_lost'
         ? 'paused'
-      : discoveryStatus === 'complete'
-        ? 'completed'
-        : 'paused'
-    const finalCheckpointStage = finalStatus === 'paused'
+        : collectionVerdict.status
+    const keepCursor = stopReason === 'lease_lost' || (stopReason !== 'cancelled' && collectionVerdict.keepCursor)
+    const finalCheckpointStage = keepCursor
       ? 'visible_collect_round'
       : finalStatus
+    const finalResultWithVerdict = stopReason === 'cancelled' || stopReason === 'lease_lost'
+      ? finalResult
+      : { ...finalResult, labelKey: collectionVerdict.labelKey, verdict: collectionVerdict.verdict }
     this.persistenceService.updateProgress(taskId, {
       total: Number(finalResult.frozenCount || 0),
       completed: 0,
@@ -914,10 +923,10 @@ export class BrowserContentTaskRunner {
       checkpoint: {
         taskId,
         stage: finalCheckpointStage,
-        cursor: finalCheckpointStage === 'visible_collect_round' ? String(round) : null,
-        partialResults: collected,
+        cursor: keepCursor ? String(round) : null,
+        partialResults: keepCursor ? collected : null,
       },
-      result: finalResult,
+      result: finalResultWithVerdict,
       finishedAt: new Date().toISOString(),
     })
     publishBrowserTaskEvent(taskId, finalStatus)
@@ -1088,20 +1097,34 @@ export class BrowserContentTaskRunner {
       // A user freeze or a lease takeover is NOT a successful completion (Codex
       // result-review #1): reflect the interruption in the task status.
       const incompleteError = finalNoteCollectError(plan.notes.length, result.collected.length, result.failed.length, result.stopReason, result.failed)
+      const collectionVerdict = resolveCollectionVerdict({
+        collected: result.collected.length,
+        expected: plan.expectedCount ?? plan.notes.length,
+        stopReason: result.stopReason || 'unknown',
+        failures: result.failed.length,
+        cursorValid: Number.isFinite(result.state.cursor),
+      })
+      const completedByTerminalNoteRule = incompleteError === null && result.collected.length > 0
       const finalStatus: BrowserCapabilityTaskHandle['status'] = result.stopReason === 'needs_verification'
         ? 'waiting_human'
         : result.stopReason === 'cancelled'
           ? 'cancelled'
           : result.stopReason === 'lease_lost'
             ? 'paused'
-          : incompleteError && result.collected.length > 0 && ['max_notes', 'max_duration', 'max_images'].includes(String(result.stopReason))
-            ? 'paused'
-            : incompleteError
-              ? 'failed'
-              : 'completed'
-      const checkpointStage = finalStatus === 'waiting_human' || finalStatus === 'paused'
+            : completedByTerminalNoteRule
+              ? 'completed'
+              : collectionVerdict.status
+      const keepCursor = finalStatus === 'waiting_human'
+        || result.stopReason === 'lease_lost'
+        || (finalStatus === collectionVerdict.status && collectionVerdict.keepCursor)
+      const checkpointStage = keepCursor
         ? 'note_collect_round'
         : finalStatus
+      const verdictFields = result.stopReason === 'needs_verification' || result.stopReason === 'cancelled' || result.stopReason === 'lease_lost'
+        ? {}
+        : completedByTerminalNoteRule && collectionVerdict.status !== 'completed'
+          ? { labelKey: 'verdict.unrecoverable_partial', verdict: 'completed_partial' }
+          : { labelKey: collectionVerdict.labelKey, verdict: collectionVerdict.verdict }
       const artifacts = await writeCollectionSummaryArtifacts({
         plan,
         taskId,
@@ -1121,11 +1144,12 @@ export class BrowserContentTaskRunner {
         checkpoint: {
           taskId,
           stage: checkpointStage,
-          cursor: finalStatus === 'waiting_human' || finalStatus === 'paused' ? String(result.state.cursor) : null,
-          partialResults: finalStatus === 'waiting_human' || finalStatus === 'paused' ? result.state : null,
+          cursor: keepCursor ? String(result.state.cursor) : null,
+          partialResults: keepCursor ? result.state : null,
         },
         result: {
           status: publicNoteCollectStatus(finalStatus, result.collected.length),
+          ...verdictFields,
           collected: result.collected,
           failed: normalizeBrowserTaskFailedItems(result.failed),
           notes: result.notes,
