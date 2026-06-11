@@ -35,6 +35,7 @@ import { ReadyAgentOrchestrator } from './orchestrator'
 import { defaultSystemPrompt } from './agent-sdk-runtime'
 import { composePersonaSystemPrompt } from './persona-system-prompt'
 import { PromptAssemblyService } from '../prompt-assembly'
+import { selectScopeTaskIndexEntries } from '../session/daily-task-index-builder'
 import { RunCoordinator } from '../task-projection/run-coordinator'
 import { executeAgentSchedule, type ScheduleTriggerSource } from './schedule-execution'
 import type { DomainAdapter } from '../domain-adapters/domain-adapter'
@@ -380,6 +381,10 @@ export class AgentControlRuntime extends EventEmitter {
         userId: scope.userId,
         limit: 2
       }),
+    // EP1-X1a: lazy — taskProjectionStore is declared after this field, so we
+    // resolve `this.taskProjectionStore` only when invoked at turn time.
+    getScopeTaskIndexEntries: (scopeId) =>
+      selectScopeTaskIndexEntries(this.taskProjectionStore, scopeId),
     enableDatabaseMemory: true
   })
   private readonly agentManager: AgentManager

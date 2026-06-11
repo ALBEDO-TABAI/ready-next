@@ -16,6 +16,7 @@ import { classifyIntent } from './intent-classifier'
 import type { RequestEnvelope } from './contracts/request-envelope'
 import { buildRequestEnvelope } from './contracts/request-envelope'
 import { filterDailyMemoryForScope } from './session/daily-memory-scope-filter'
+import { buildDailyTaskIndex, type TaskIndexEntry } from './session/daily-task-index-builder'
 import type { SessionRecallCapsule } from '../../../shared/session-recall'
 import type { CoordinatorPromptFragment, DomainAdapter } from './domain-adapters/domain-adapter'
 
@@ -78,6 +79,8 @@ export interface PromptAssemblyDeps {
   enableDatabaseMemory?: boolean
   userProfileRepository?: any
   agentPersonalityRepository?: any
+  /** EP1-X1a: current-scope task index entries (already scope-filtered by SQL). */
+  getScopeTaskIndexEntries?: (scopeId: string) => TaskIndexEntry[] | Promise<TaskIndexEntry[]>
 }
 
 interface TriggerDefinition {
@@ -98,6 +101,7 @@ const MAX_L0_CHARS = 6000
 const MAX_L1_CHARS = 8000
 const MAX_L2_CHARS = 6000
 const MAX_TOTAL_CHARS = 16000
+const MAX_TASK_INDEX_CHARS = 1200
 
 function normalizeCoordinatorModule(id: string): PromptTriggerHit['module'] | undefined {
   return id === 'browser'
@@ -572,6 +576,22 @@ export class PromptAssemblyService {
         .join('\n\n')
       : ''
 
+    // EP1-X1a: structured task index (current scope only). Placed before the
+    // narrative daily log during the parallel period. Built from current
+    // columns; every line is a fixed schema so no foreign imperative leaks.
+    let taskIndexSection = ''
+    if (this.deps.getScopeTaskIndexEntries) {
+      try {
+        const entries = await this.deps.getScopeTaskIndexEntries(scope.id)
+        const indexText = buildDailyTaskIndex(entries, { now })
+        if (indexText) {
+          taskIndexSection = formatMemorySection('今日任务索引', clip(indexText, MAX_TASK_INDEX_CHARS))
+        }
+      } catch (error) {
+        console.error('[PromptAssembly] Failed to build task index:', error)
+      }
+    }
+
     const sections: string[] = [
       formatMemorySection(
         '当前 Scope',
@@ -582,6 +602,7 @@ export class PromptAssemblyService {
         ].join('\n')
       ),
       transcript.text ? formatMemorySection('最近会话摘要', sanitizeCommandLikeContent(transcript.text)) : '',
+      taskIndexSection,
       dailySections
     ].filter(Boolean)
 
