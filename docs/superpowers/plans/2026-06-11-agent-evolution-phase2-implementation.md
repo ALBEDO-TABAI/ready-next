@@ -1,7 +1,7 @@
 ---
 title: Agent Evolution 阶段二（知识与质量闭环）实施子计划
 date: 2026-06-11
-status: draft v2 — 吸收 Codex 合同评审 6 点，待复审；评审通过前不开工、enforce 不生效
+status: approved v2 — Codex 共识达成（2026-06-12，合同评审 6 点全部闭合后复审 APPROVED），enforce 生效，逐单施工
 revision_history:
   - v1 (2026-06-11): 初稿。依据 docs/agent-evolution/00 路线图阶段二范围 + 01/02/03/05/06/07/10/11 各篇工作包表拆单；并入阶段一显式移交项（I-auth 对象级授权、K6 启动接线 syncBeliefCards、frozen-call 审计迁 proof_refs、T4 重试分级收敛）。
   - v2 (2026-06-12): 吸收 Codex 合同评审 6 点。P1：①direct_answer 防误伤——Q3 增第五 proof 源 assistant_response digest（纯问答的最终回复摘要即合法 proof），零 proof 硬规则保持全域统一无豁免；②check_in_pending 改挂 interaction_state（HEAD 的 task_projections.status 复用 skill child run 生命周期枚举，不得污染），Q1 措辞修正；③adjudicator 灰度拆 Q4a（shadow：产 CheckIn + 偏差 metric，不改终态）/ Q4b（enforce：接管终态，零 proof 拒 done 生效），矛盾消除；④B1 不再承载阶段一 live-target 残余——该安全网已在阶段一第 2-4 轮复核中全部收口合入（28c6de4d/53b01f39/1d3e8a85，含 type_at/type_smart/send_keys/aria-labelledby），B1 仅评估批量通道自身安全清单；⑤G2 终门改为可执行口径：全量 test 以"基线失败清单不新增"为门（基线清单见 G2 附录，归 base 分支收口），强制门为 evolution-p2 链 + stability + native + typecheck。P2：⑥P 系列核销表列全 P1-P10（含阶段一/S 系列已解决项的"仅复核状态"行）。
@@ -9,7 +9,7 @@ owner: 白
 author: Claude (Fable 5)
 executor: 待定（Claude / Codex 逐单施工）
 reviewer: Codex（共识）+ Claude（终审）
-enforce: false
+enforce: true
 note: >
   阶段一（2026-06-11-agent-evolution-phase1-implementation.md，13 单全部合入，
   回归入口 verify:evolution-p1）交付了可观测与安全地基。本阶段交付"知识与质量闭环"：
