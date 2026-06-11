@@ -1,9 +1,9 @@
-# 阶段一 Checkpoint & Handoff（9/13 完成）
+# 阶段一 Checkpoint & Handoff（13/13 完成）
 
 > 分支：`agent-evolution/phase1`（base：`codex/electron42-html-canvas`）
 > 日期：2026-06-11
 > 合同：`docs/superpowers/plans/2026-06-11-agent-evolution-phase1-implementation.md`（approved v2.2, enforce）
-> 状态：波次 1+2 共 9 单完成并提交；剩余 I3-1 → T4-2 → I3-2 → G1（tool-executor 安全链 + 收口）
+> 状态：**全部 13 单完成**。剩余 4 单（I3-1 → T4-2 → I3-2 → G1）已于同日完成并提交；回归入口 `npm run verify:evolution-p1`；状态回填见 `08-缺陷解决映射与验收追踪.md` §3.5。本文档其余部分保留为 9/13 时点的 checkpoint 记录。
 
 ---
 

@@ -1,6 +1,18 @@
 import { join } from 'path'
-import { app } from 'electron'
+import { createRequire } from 'node:module'
 import { SiteCardReader } from '../knowledge/site-card-reader'
+
+// CommonJS `require('electron')` rather than ESM `import { app }` — the named
+// import crashes in non-Electron Node contexts (tsx tests reach this module
+// through the orchestrator import chain). Same pattern as database.ts.
+const electronApp = (() => {
+  try {
+    const electron = createRequire(import.meta.url)('electron') as typeof import('electron') | string
+    return typeof electron === 'string' ? null : electron.app ?? null
+  } catch {
+    return null
+  }
+})()
 
 /**
  * EP1-B3 — build per-domain site-card fragment inputs for the browser adapter.
@@ -27,11 +39,11 @@ const DOMAIN_ALIASES: Record<string, string[]> = {
 }
 
 function siteCardBundledRoots(): string[] {
-  return [
-    join(process.resourcesPath, 'site-cards'),
-    join(app.getAppPath(), 'assets', 'site-cards'),
-    join(process.cwd(), 'assets', 'site-cards'),
-  ]
+  const roots: string[] = []
+  if (process.resourcesPath) roots.push(join(process.resourcesPath, 'site-cards'))
+  if (electronApp) roots.push(join(electronApp.getAppPath(), 'assets', 'site-cards'))
+  roots.push(join(process.cwd(), 'assets', 'site-cards'))
+  return roots
 }
 
 const MAX_SITE_CARD_CHARS = 800
@@ -39,7 +51,9 @@ const MAX_SITE_CARD_CHARS = 800
 export function loadSiteCardFragments(beliefRootPath?: string | null): SiteCardFragmentInput[] {
   try {
     const userKnowledgeRoot =
-      beliefRootPath === undefined ? join(app.getPath('userData'), 'agent-memory') : beliefRootPath
+      beliefRootPath === undefined
+        ? (electronApp ? join(electronApp.getPath('userData'), 'agent-memory') : null)
+        : beliefRootPath
     const reader = new SiteCardReader({
       bundledRoots: siteCardBundledRoots(),
       userKnowledgeRoot,

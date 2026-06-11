@@ -28,6 +28,7 @@ test('registry exposes documented tool-error metric keys', () => {
     'childRunnerLifecycleWriteFailed',
     'compactionCircuitBreak',
     'compactionL2Failed',
+    'confirmationGateDenied',
     'directToolCallTextBlocked',
     'domainToolNarrowingApplied',
     'hookHandlerFailed',

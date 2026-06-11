@@ -167,7 +167,9 @@ test('migration 050 adds run_meta initiator and duration columns idempotently', 
   const migrationNames = __getMigrationNamesForTests()
   const migrationIndex = migrationNames.indexOf('050_add_run_meta_initiator_duration')
   assert.ok(migrationIndex > 0, 'migration 050 must be registered after existing migrations')
-  const previousNames = migrationNames.slice(0, migrationIndex)
+  // Mark every OTHER migration as applied so only 050 runs — keeps this fake
+  // isolated from later appended migrations (052/053+ issue different SQL).
+  const previousNames = migrationNames.filter((name) => name !== '050_add_run_meta_initiator_duration')
 
   const db = new Migration050Db([...previousNames])
   runMigrations(db as unknown as Parameters<typeof runMigrations>[0])
