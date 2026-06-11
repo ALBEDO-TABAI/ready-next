@@ -1,5 +1,5 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
-import type { CSSProperties, RefObject } from 'react'
+import type { CSSProperties, ReactNode, RefObject } from 'react'
 import { X, Puzzle, Copy, StickyNote } from 'lucide-react'
 import type {
   Agent,
@@ -75,6 +75,7 @@ interface ChatPanelBodyProps extends Omit<TaskToolSnapshotProps, 'children'> {
   }>
   onDetachSessionRecall: (conversationId: string) => void | Promise<void>
   dismissSoftError: (scopeId: string) => void
+  modeSwitcher?: ReactNode
   attachments: ChatAttachment[]
   removeAttachment: (id: string) => void
   inputValue: string
@@ -149,6 +150,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     attachedSessionRecallCapsules,
     onDetachSessionRecall,
     dismissSoftError,
+    modeSwitcher,
     attachments,
     removeAttachment,
     inputValue,
@@ -564,6 +566,8 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
             />
 
             {bottomTaskCard}
+
+            {modeSwitcher}
 
             <ChatInput
               ref={chatInputRef}

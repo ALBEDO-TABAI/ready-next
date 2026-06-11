@@ -54,11 +54,15 @@ test('the four-mode switch track kills the old top sheen through shared dark liq
   )
   assert.match(
     themeStyles,
-    /html\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-shadow:\s*[\s\S]*?inset 0 1\.5px 3px rgba\(24,\s*39,\s*77,\s*0\.11\)/,
+    /html\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-border:\s*transparent;[\s\S]*?--workbench-rail-slot-shadow:\s*[\s\S]*?inset 0 1\.5px 3px rgba\(24,\s*39,\s*77,\s*0\.10\)/,
   )
   assert.match(
     themeStyles,
-    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-bg:\s*color-mix\(in srgb, var\(--bg-toolbar\) 78%, transparent\);/,
+    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-bg:\s*rgba\(45,\s*45,\s*43,\s*0\.48\);/,
+  )
+  assert.match(
+    themeStyles,
+    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\]\s*\{[\s\S]*?--workbench-rail-slot-shadow:\s*[\s\S]*?inset 0 1\.5px 3px rgba\(0,\s*0,\s*0,\s*0\.36\)/,
   )
   assert.match(
     styles,
@@ -66,14 +70,16 @@ test('the four-mode switch track kills the old top sheen through shared dark liq
   )
   assert.match(
     styles,
-    /html\[data-skin='liquid-glass'\] \.icon-rail-slider\s*\{[\s\S]*?background:\s*var\(--workbench-rail-slot-bg\);[\s\S]*?backdrop-filter:\s*blur\(calc\(var\(--lg-blur-soft\) \* 0\.18\)\) saturate\(calc\(var\(--surface-saturate\) - 18%\)\);/,
+    /html\[data-skin='liquid-glass'\] \.icon-rail-slider\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--workbench-rail-slot-bg\) 86%, rgba\(255, 255, 255, 0\.34\)\);[\s\S]*?backdrop-filter:\s*blur\(calc\(var\(--lg-blur-soft\) \* 0\.18\)\) saturate\(calc\(var\(--surface-saturate\) - 18%\)\);/,
   )
   assert.match(
     styles,
-    /html\[data-skin='liquid-glass'\] \.draggable-mode-tabs\s*\{[\s\S]*?background:\s*var\(--workbench-rail-slot-bg\);[\s\S]*?backdrop-filter:\s*blur\(calc\(var\(--lg-blur-soft\) \* 0\.18\)\) saturate\(calc\(var\(--surface-saturate\) - 18%\)\);/,
+    /html\[data-skin='liquid-glass'\] \.draggable-mode-tabs\s*\{[\s\S]*?background:\s*color-mix\(in srgb, var\(--workbench-rail-slot-bg\) 86%, rgba\(255, 255, 255, 0\.34\)\);[\s\S]*?backdrop-filter:\s*blur\(calc\(var\(--lg-blur-soft\) \* 0\.18\)\) saturate\(calc\(var\(--surface-saturate\) - 18%\)\);/,
   )
   assert.match(
     styles,
-    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.icon-rail-slider,[\s\S]*?html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.draggable-mode-tabs\s*\{[\s\S]*?backdrop-filter:\s*blur\(calc\(var\(--lg-blur-soft\) \* 0\.18\)\) saturate\(calc\(var\(--surface-saturate\) - 20%\)\);/,
+    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.icon-rail-slider,[\s\S]*?html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.draggable-mode-tabs\s*\{[\s\S]*?border-color:\s*transparent;[\s\S]*?background:\s*var\(--workbench-rail-slot-bg\);[\s\S]*?backdrop-filter:\s*blur\(calc\(var\(--lg-blur-soft\) \* 0\.18\)\) saturate\(100%\);/,
   )
+  assert.match(styles, /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.icon-rail-slider__thumb,[\s\S]*?rgba\(235, 235, 230, 0\.16\)/)
+  assert.doesNotMatch(styles, /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.icon-rail-slider__thumb,[\s\S]*?rgba\(232, 240, 255/)
 })

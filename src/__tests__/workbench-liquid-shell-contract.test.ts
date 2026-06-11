@@ -7,6 +7,23 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
+function findCssBlock(source: string, selector: string): string {
+  const start = source.indexOf(selector)
+  assert.notEqual(start, -1, `${selector} should exist`)
+  const open = source.indexOf('{', start)
+  assert.notEqual(open, -1, `${selector} should have a declaration block`)
+  let depth = 0
+  for (let index = open; index < source.length; index += 1) {
+    const character = source[index]
+    if (character === '{') depth += 1
+    if (character === '}') {
+      depth -= 1
+      if (depth === 0) return source.slice(start, index + 1)
+    }
+  }
+  assert.fail(`${selector} declaration block should close`)
+}
+
 test('workbench shell exposes dedicated liquid glass hooks on primary chrome surfaces', () => {
   const topBar = readWorkspaceFile('src/renderer/components/layout/TopBar.tsx')
   const iconRail = readWorkspaceFile('src/renderer/components/layout/IconRail.tsx')
@@ -272,4 +289,98 @@ test('Stage 2 — will-leave-full-screen handler is a deliberate no-op (do not e
   assert.doesNotMatch(body, /setBackgroundColor/)
   assert.doesNotMatch(body, /materialFullscreenState\s*=/)
   assert.doesNotMatch(body, /\bsync\(\)/)
+})
+
+test('liquid glass sliders preserve the groove and use lens-backed convex thumbs', () => {
+  const sliderStyles = readWorkspaceFile('src/renderer/styles/workbench-sliders.css')
+  const appStyles = readWorkspaceFile('src/renderer/styles/index.css')
+  const iconRail = readWorkspaceFile('src/renderer/components/motion/MorphIconRailGroup.tsx')
+  const modeTabs = readWorkspaceFile('src/renderer/components/layout/DraggableModeTabs.tsx')
+  const modeSwitch = readWorkspaceFile('src/renderer/components/document/DraggableModeSwitch.tsx')
+
+  const iconRailGroove = findCssBlock(sliderStyles, "html[data-skin='liquid-glass'] .icon-rail-slider")
+  const modeTabsGroove = findCssBlock(sliderStyles, "html[data-skin='liquid-glass'] .draggable-mode-tabs")
+  const documentSwitchGroove = findCssBlock(appStyles, "html[data-skin='liquid-glass'] .draggable-mode-switch")
+  const iconRailThumb = findCssBlock(sliderStyles, "html[data-skin='liquid-glass'] .icon-rail-slider__thumb")
+  const modeTabsThumb = findCssBlock(sliderStyles, "html[data-skin='liquid-glass'] .draggable-mode-tabs__thumb")
+  const documentSwitchThumb = findCssBlock(appStyles, "html[data-skin='liquid-glass'] .draggable-mode-switch__thumb")
+  const darkDocumentSwitchGroove = findCssBlock(appStyles, "html[data-theme='dark'][data-skin='liquid-glass'] .draggable-mode-switch")
+  const darkDocumentSwitchThumb = findCssBlock(appStyles, "html[data-theme='dark'][data-skin='liquid-glass'] .draggable-mode-switch__thumb")
+  const chatModeDock = findCssBlock(appStyles, ".ready-chat-mode-tabs-dock")
+  const chatModeDockGroove = findCssBlock(appStyles, "html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs")
+  const chatModeDockSurface = findCssBlock(appStyles, "html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__surface")
+  const chatModeDockProjection = findCssBlock(appStyles, "html[data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__projection")
+  const darkChatModeDockGroove = findCssBlock(appStyles, "html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs")
+  const darkChatModeDockSurface = findCssBlock(appStyles, "html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__surface")
+  const darkChatModeDockProjection = findCssBlock(appStyles, "html[data-theme='dark'][data-skin='liquid-glass'] .ready-chat-mode-tabs-dock .draggable-mode-tabs__projection")
+  const appModeTabsSectionStart = appStyles.indexOf('/* Draggable Mode Tabs - 4-way switch')
+  assert.notEqual(appModeTabsSectionStart, -1, 'index.css should keep the draggable mode tabs section')
+  const appModeTabsSection = appStyles.slice(appModeTabsSectionStart)
+  const appModeTabsThumb = findCssBlock(appModeTabsSection, "html[data-skin='liquid-glass'] .draggable-mode-tabs__thumb")
+  const darkAppModeTabsGroove = findCssBlock(appModeTabsSection, "html[data-theme='dark'][data-skin='liquid-glass'] .draggable-mode-tabs")
+  const darkAppModeTabsThumb = findCssBlock(appModeTabsSection, "html[data-theme='dark'][data-skin='liquid-glass'] .draggable-mode-tabs__thumb")
+
+  assert.match(iconRailGroove, /--ready-workbench-slider-thumb-scale:\s*1\.1;/)
+  assert.match(modeTabsGroove, /--ready-workbench-slider-thumb-scale:\s*1\.1;/)
+  for (const grooveBlock of [iconRailGroove, modeTabsGroove]) {
+    assert.match(grooveBlock, /border-color:\s*transparent;/)
+    assert.match(grooveBlock, /background:\s*color-mix\(in srgb, var\(--workbench-rail-slot-bg\) 86%, rgba\(255, 255, 255, 0\.34\)\);/)
+    assert.match(grooveBlock, /box-shadow:\s*var\(--workbench-rail-slot-shadow\);/)
+    assert.match(grooveBlock, /blur\(calc\(var\(--lg-blur-soft\) \* 0\.18\)\)/)
+    assert.doesNotMatch(grooveBlock, /0\.045/)
+  }
+  assert.match(documentSwitchGroove, /--ready-document-switch-thumb-scale:\s*1\.1;/)
+  assert.match(documentSwitchGroove, /border-color:\s*transparent;/)
+  assert.match(documentSwitchGroove, /background:\s*color-mix\(in srgb, var\(--workbench-rail-slot-bg\) 86%, rgba\(255, 255, 255, 0\.34\)\);/)
+  assert.match(documentSwitchGroove, /box-shadow:\s*var\(--workbench-rail-slot-shadow\);/)
+  assert.match(documentSwitchGroove, /blur\(calc\(var\(--lg-blur-soft\) \* 0\.25\)\)/)
+  assert.doesNotMatch(documentSwitchGroove, /0\.045/)
+  assert.match(appStyles, /html\[data-skin='liquid-glass'\] \.draggable-mode-switch::before\s*\{[\s\S]*?display:\s*none;/)
+  assert.match(chatModeDock, /margin-bottom:\s*-12px;/)
+  assert.match(chatModeDockGroove, /--ready-workbench-slider-thumb-scale:\s*1\.18;/)
+  assert.match(chatModeDockGroove, /border-color:\s*transparent;/)
+  assert.match(chatModeDockGroove, /background:\s*transparent;/)
+  assert.match(chatModeDockGroove, /box-shadow:\s*none;/)
+  assert.match(chatModeDockGroove, /backdrop-filter:\s*none;/)
+  assert.match(chatModeDockSurface, /background:\s*rgba\(248,\s*250,\s*252,\s*0\.44\);/)
+  assert.match(chatModeDockSurface, /inset 0 1px 0 rgba\(255,\s*255,\s*255,\s*0\.42\)/)
+  assert.match(chatModeDockProjection, /filter:\s*blur\(0\.875px\) saturate\(1\.28\) contrast\(0\.82\) brightness\(1\.08\);/)
+
+  for (const darkGrooveBlock of [darkDocumentSwitchGroove, darkAppModeTabsGroove]) {
+    assert.match(darkGrooveBlock, /border-color:\s*transparent;/)
+    assert.match(darkGrooveBlock, /background:\s*var\(--workbench-rail-slot-bg\);/)
+    assert.match(darkGrooveBlock, /box-shadow:\s*var\(--workbench-rail-slot-shadow\);/)
+    assert.match(darkGrooveBlock, /saturate\(100%\)/)
+  }
+  assert.match(darkChatModeDockGroove, /border-color:\s*transparent;/)
+  assert.match(darkChatModeDockGroove, /background:\s*transparent;/)
+  assert.match(darkChatModeDockGroove, /box-shadow:\s*none;/)
+  assert.match(darkChatModeDockSurface, /background:\s*rgba\(26,\s*26,\s*26,\s*0\.62\);/)
+  assert.match(darkChatModeDockSurface, /inset 0 1px 0 rgba\(232,\s*232,\s*232,\s*0\.14\)/)
+  assert.match(darkChatModeDockProjection, /filter:\s*blur\(0\.875px\) saturate\(0\) contrast\(0\.78\) brightness\(0\.78\);/)
+
+  for (const thumbBlock of [iconRailThumb, modeTabsThumb, documentSwitchThumb, appModeTabsThumb]) {
+    assert.match(thumbBlock, /radial-gradient\(ellipse 110% 62% at 50% -12%/)
+    assert.match(thumbBlock, /inset 0 -2px 4px/)
+    assert.match(thumbBlock, /inset 2px 0 4px/)
+    assert.doesNotMatch(thumbBlock, /rgba\(244, 242, 237/)
+    assert.doesNotMatch(thumbBlock, /rgba\(233, 229, 221/)
+    assert.doesNotMatch(thumbBlock, /0 6px 20px rgba\(0, 0, 0/)
+  }
+  for (const darkThumbBlock of [darkDocumentSwitchThumb, darkAppModeTabsThumb]) {
+    assert.match(darkThumbBlock, /rgba\(235, 235, 230, 0\.16\)/)
+    assert.match(darkThumbBlock, /inset 0 -2px 4px rgba\(0, 0, 0, 0\.20\)/)
+    assert.doesNotMatch(darkThumbBlock, /rgba\(232, 240, 255/)
+  }
+
+  assert.match(iconRail, /<LiquidLens[\s\S]*className="ready-slider-thumb-lens"[\s\S]*bevel=\{4\}[\s\S]*depth=\{8\}[\s\S]*ior=\{1\.22\}[\s\S]*dome=\{0\.7\}[\s\S]*strength=\{1\.05\}[\s\S]*blur=\{0\}/)
+  assert.match(modeTabs, /from '..\/ui\/liquid-glass\/LiquidBackdropProjection'/)
+  assert.match(modeTabs, /<LiquidLens[\s\S]*className="draggable-mode-tabs__surface"[\s\S]*bevel=\{2\.5\}[\s\S]*depth=\{18\.5\}[\s\S]*ior=\{1\.34\}[\s\S]*dome=\{1\.6\}[\s\S]*strength=\{2\.6\}[\s\S]*blur=\{0\.875\}[\s\S]*blurBeforeRefraction[\s\S]*backdropContent=\{\(/)
+  assert.match(modeTabs, /<LiquidBackdropProjection[\s\S]*className="draggable-mode-tabs__projection"[\s\S]*sourceMaskRadius=\{19\}/)
+  assert.match(modeTabs, /<LiquidLens[\s\S]*className="ready-slider-thumb-lens"[\s\S]*bevel=\{6\}[\s\S]*depth=\{14\}[\s\S]*ior=\{1\.3\}[\s\S]*dome=\{1\.15\}[\s\S]*strength=\{1\.42\}[\s\S]*blur=\{0\}/)
+  assert.match(modeSwitch, /<LiquidLens[\s\S]*className="ready-slider-thumb-lens"[\s\S]*ior=\{1\.22\}[\s\S]*dome=\{0\.7\}[\s\S]*blur=\{0\}/)
+  assert.match(sliderStyles, /\.icon-rail-slider__thumb\s*\{[\s\S]*transform:\s*scale\(var\(--ready-workbench-slider-thumb-scale, 1\)\);/)
+  assert.match(sliderStyles, /\.draggable-mode-tabs__thumb\s*\{[\s\S]*transform:\s*translateX\(calc\(var\(--dmt-thumb-pos[\s\S]*scale\(var\(--ready-workbench-slider-thumb-scale, 1\)\);/)
+  assert.match(modeSwitch, /scale\(var\(--ready-document-switch-thumb-scale, 1\)\)/)
+  assert.match(appStyles, /\.ready-slider-thumb-lens\s*\{[\s\S]*z-index:\s*1;/)
 })

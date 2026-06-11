@@ -12,6 +12,7 @@ import StatusBar from '../components/layout/StatusBar'
 import { LiquidSceneProvider } from '../components/ui/LiquidGlassScene'
 import { WORKBENCH_EDGE_RAIL_SIZE } from '../modules/workbench/chrome'
 import { READY_WORKBENCH_MODE_CHANGE_EVENT } from '../modules/workbench/mode-transition'
+import { resolveWorkbenchSplitToggle } from '../modules/workbench/mode-split'
 import { resolveWorkbenchPanelShortcutAction } from '../modules/workbench/panel-shortcuts'
 import { useRafResizeDrag } from '../modules/workbench/useRafResizeDrag'
 import { useTogglePanelWithResize } from '../modules/workbench/useTogglePanelWithResize'
@@ -129,7 +130,7 @@ export default function WorkbenchMode() {
     () => ({ ...rawSidePanelWidths, shared: clampWorkbenchSidePanelWidth(rawSidePanelWidths.shared) }),
     [rawSidePanelWidths],
   )
-  const { workbenchMode, splitMode, workbenchSplitRatio, setWorkbenchSplitRatio, setWorkbenchMode } = useMode()
+  const { workbenchMode, splitMode, workbenchSplitRatio, setWorkbenchSplitRatio, setWorkbenchMode, setSplitMode } = useMode()
   const documentSplitTabId = useDocTabs(s => s.splitTabId)
   const navigate = useNavigate()
   const sceneRef = useRef<HTMLDivElement>(null)
@@ -458,6 +459,14 @@ export default function WorkbenchMode() {
     }
   }, [scheduleWorkbenchSurfaceRefresh, setWorkbenchMode, splitMode, workbenchMode])
 
+  const handleWorkbenchSplitToggle = useCallback((mode: WorkbenchModeType) => {
+    setSplitMode(resolveWorkbenchSplitToggle({
+      workbenchMode,
+      splitMode,
+      requestedMode: mode,
+    }))
+  }, [setSplitMode, splitMode, workbenchMode])
+
   useEffect(() => {
     return () => {
       // Stage X4 PR-shell-1 — unmount cleanup hides all hosts via the
@@ -555,7 +564,7 @@ export default function WorkbenchMode() {
             </div>
           )}
 
-          <TopBar onToggleChatPanel={handleToggleChatPanelWithResize} onWorkbenchModeChange={handleWorkbenchModeChange} />
+          <TopBar onToggleChatPanel={handleToggleChatPanelWithResize} />
 
           <div
             className="flex flex-1 overflow-hidden"
@@ -625,7 +634,15 @@ export default function WorkbenchMode() {
               <ResizeHandle onResize={handleChatResize} direction="left" onResizeStateChange={handleChatResizeStateChange} />
             )}
 
-            <ChatPanel shellWidth={chatShellWidth} panelState={chatPanelState} onTogglePanel={handleToggleChatPanelWithResize} />
+            <ChatPanel
+              shellWidth={chatShellWidth}
+              panelState={chatPanelState}
+              workbenchMode={workbenchMode}
+              splitMode={splitMode}
+              onWorkbenchModeChange={handleWorkbenchModeChange}
+              onWorkbenchSplitToggle={handleWorkbenchSplitToggle}
+              onTogglePanel={handleToggleChatPanelWithResize}
+            />
           </div>
 
           <StatusBar />

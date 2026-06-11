@@ -31,7 +31,7 @@ test('document canvas and rss canvas share one module surface background token',
   assert.match(previewBrowser, /background: 'transparent'/)
   assert.match(
     styles,
-    /html\[data-skin='liquid-glass'\] \.browser-header-surface,[\s\S]*\.rss-preview-surface \{[\s\S]*background:\s*var\(--workbench-module-surface-bg\) !important;/,
+    /html\[data-skin='liquid-glass'\] \.browser-header-surface,[\s\S]*\.document-preview-surface,[\s\S]*\.rss-preview-surface \{[\s\S]*background:\s*var\(--workbench-module-surface-bg\) !important;/,
   )
   assert.match(
     styles,

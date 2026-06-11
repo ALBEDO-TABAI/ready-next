@@ -1,11 +1,8 @@
-import { useCallback } from 'react'
 import { PanelLeftClose, Moon, Sun } from 'lucide-react'
-import { useMode, type WorkbenchMode } from '../../stores/useMode'
 import { useTheme } from '../../stores/useTheme'
 import { useWorkspace } from '../../stores/useWorkspace'
 import { useRitualOverlayStore } from '../../modules/overlay/useRitualOverlay'
 import ModeSlider from './ModeSlider'
-import DraggableModeTabs from './DraggableModeTabs'
 import Modal from '../ui/Modal'
 import { useModal } from '../ui/useModal'
 import { IconButton } from '../ui/IconButton'
@@ -14,37 +11,18 @@ import {
   WORKBENCH_TOPBAR_PADDING_LEFT,
   WORKBENCH_TOPBAR_PADDING_RIGHT,
 } from '../../modules/workbench/chrome'
-import { resolveWorkbenchSplitToggle } from '../../modules/workbench/mode-split'
 
 interface TopBarProps {
   onToggleChatPanel?: () => void
-  onWorkbenchModeChange?: (mode: WorkbenchMode) => void | Promise<void>
 }
 
-export default function TopBar({ onToggleChatPanel, onWorkbenchModeChange }: TopBarProps) {
-  const { appMode, workbenchMode, splitMode, setWorkbenchMode, setSplitMode } = useMode()
+export default function TopBar({ onToggleChatPanel }: TopBarProps) {
   const { modalProps, showAlert } = useModal()
   const { resolvedTheme, toggleTheme } = useTheme()
   const chatPanelVisible = useWorkspace((state) => state.chatPanelVisible)
   const isThemeRitualRunning = useRitualOverlayStore(
     (state) => state.session?.stage === 'theme-transition',
   )
-
-  const handleModeChange = useCallback((mode: WorkbenchMode) => {
-    if (onWorkbenchModeChange) {
-      void onWorkbenchModeChange(mode)
-      return
-    }
-    setWorkbenchMode(mode)
-  }, [onWorkbenchModeChange, setWorkbenchMode])
-
-  const handleSplitModeToggle = useCallback((mode: WorkbenchMode) => {
-    setSplitMode(resolveWorkbenchSplitToggle({
-      workbenchMode,
-      splitMode,
-      requestedMode: mode,
-    }))
-  }, [setSplitMode, splitMode, workbenchMode])
 
   return (
     <div
@@ -59,17 +37,9 @@ export default function TopBar({ onToggleChatPanel, onWorkbenchModeChange }: Top
         boxShadow: 'none',
       }}
     >
-      {/* Left: Mode Slider + Mode Tabs */}
+      {/* Left: app mode slider. Workbench module tabs live above the chat composer. */}
       <div className="flex items-center gap-3 no-drag min-w-0">
         <ModeSlider />
-        {appMode === 'workbench' && (
-          <DraggableModeTabs
-            activeMode={workbenchMode}
-            splitMode={splitMode}
-            onChange={handleModeChange}
-            onSplitToggle={handleSplitModeToggle}
-          />
-        )}
       </div>
 
       {/* Right: User + Toggle */}

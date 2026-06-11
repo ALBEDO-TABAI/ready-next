@@ -7,13 +7,18 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('topbar module switcher uses stable widths and avoids vertical position jitter during mode changes', () => {
+test('chat composer dock hosts the module switcher without changing the icon logic', () => {
   const topBar = readWorkspaceFile('src/renderer/components/layout/TopBar.tsx')
+  const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
+  const chatPanelBody = readWorkspaceFile('src/renderer/components/agent/chat-panel/ChatPanelBody.tsx')
   const draggableModeTabs = readWorkspaceFile('src/renderer/components/layout/DraggableModeTabs.tsx')
   const iconRail = readWorkspaceFile('src/renderer/components/layout/IconRail.tsx')
 
-  assert.match(topBar, /<DraggableModeTabs/)
+  assert.doesNotMatch(topBar, /<DraggableModeTabs/)
   assert.doesNotMatch(topBar, /GooeySegmentedControl/)
+  assert.match(chatPanel, /<DraggableModeTabs/)
+  assert.match(chatPanel, /data-chat-mode-tabs-dock="true"/)
+  assert.match(chatPanelBody, /\{modeSwitcher\}[\s\S]*<ChatInput/)
   assert.match(draggableModeTabs, /className="draggable-mode-tabs"/)
   assert.match(draggableModeTabs, /className={`draggable-mode-tabs__icon/)
   // Thumb translateX now lives in CSS via the --dmt-thumb-pos variable.
@@ -83,7 +88,7 @@ test('browser rss and calendar shells align their left edge with the shared work
   assert.match(styles, /html\[data-skin='liquid-glass'\] \.calendar-mode-shell \.workbench-canvas-shell \{[\s\S]*box-shadow:\s*none !important;/)
   assert.match(styles, /--workbench-liquid-chrome-bg:\s*rgba\(249,\s*252,\s*255,\s*0\.56\);/)
   assert.match(styles, /html\[data-skin='liquid-glass'\] \.calendar-mode-shell \{[\s\S]*--calendar-canvas-bg:\s*var\(--workbench-module-surface-bg\);[\s\S]*--calendar-canvas-border:\s*transparent;/)
-  assert.match(styles, /html\[data-skin='liquid-glass'\] \.browser-header-surface,[\s\S]*\.workbench-tabs-surface,[\s\S]*\.document-path-bar,[\s\S]*\.rss-preview-surface \{/)
+  assert.match(styles, /html\[data-skin='liquid-glass'\] \.browser-header-surface,[\s\S]*\.workbench-tabs-surface,[\s\S]*\.document-path-bar,[\s\S]*\.document-preview-surface,[\s\S]*\.rss-preview-surface \{/)
   assert.match(styles, /html\[data-skin='liquid-glass'\] \.browser-header-surface,[\s\S]*backdrop-filter:\s*blur\(24px\) saturate\(0%\) !important;/)
   assert.match(styles, /html\[data-skin='liquid-glass'\] \.document-editor-surface,[\s\S]*\.rss-preview-content \{[\s\S]*background:\s*transparent !important;/)
   assert.match(styles, /html\[data-skin='liquid-glass'\] \.rss-feed-toolbar,[\s\S]*\.rss-feed-list,[\s\S]*\.rss-preview-content \{/)

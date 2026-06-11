@@ -9,6 +9,7 @@ import {
   type ScopeRunState
 } from '../../stores/useAgent'
 import { useWorkspace } from '../../stores/useWorkspace'
+import type { WorkbenchMode } from '../../stores/useMode'
 import {
   READY_FOCUS_CHAT_INPUT_EVENT,
   createSkillReferenceAttachment,
@@ -58,6 +59,7 @@ import {
 // to `./chat-panel/layout/MotionLayer`. Both are pure React with zero
 // `useAgent` / store / IPC dependencies; signatures preserved byte-for-byte.
 import { ChatPanelMotionLayer, CollapsedChatRail } from './chat-panel/layout/MotionLayer'
+import DraggableModeTabs from '../layout/DraggableModeTabs'
 import SessionCompleteToast from './chat-panel/session-tabs/SessionCompleteToast'
 import { resolveChatSessionTitle } from './chat-panel/helpers/session-title'
 import { resolveSessionDotStatus, type SessionDotStatus } from './chat-panel/helpers/session-status'
@@ -141,10 +143,22 @@ export type ChatPanelState = 'expanding' | 'expanded' | 'collapsing' | 'collapse
 interface ChatPanelProps {
   shellWidth: number
   panelState: ChatPanelState
+  workbenchMode?: WorkbenchMode
+  splitMode?: WorkbenchMode | null
+  onWorkbenchModeChange?: (mode: WorkbenchMode) => void | Promise<void>
+  onWorkbenchSplitToggle?: (mode: WorkbenchMode) => void
   onTogglePanel?: () => void
 }
 
-export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: ChatPanelProps) {
+export default function ChatPanel({
+  shellWidth,
+  panelState,
+  workbenchMode,
+  splitMode = null,
+  onWorkbenchModeChange,
+  onWorkbenchSplitToggle,
+  onTogglePanel,
+}: ChatPanelProps) {
   const {
     agents,
     messages,
@@ -883,6 +897,20 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
   // Blank until the current scope carries a real (non-placeholder) title —
   // i.e. until the user has actually started a conversation.
   const sessionTitle = resolveChatSessionTitle(currentScope?.title)
+  const modeSwitcher = workbenchMode && onWorkbenchModeChange
+    ? (
+        <div className="ready-chat-mode-tabs-dock" data-chat-mode-tabs-dock="true">
+          <DraggableModeTabs
+            activeMode={workbenchMode}
+            splitMode={splitMode}
+            onChange={(mode) => {
+              void onWorkbenchModeChange(mode)
+            }}
+            onSplitToggle={onWorkbenchSplitToggle}
+          />
+        </div>
+      )
+    : null
 
   const expandedPanelHeader = (
     <ChatHeader
@@ -964,6 +992,7 @@ export default function ChatPanel({ shellWidth, panelState, onTogglePanel }: Cha
       attachedSessionRecallCapsules={attachedSessionRecallCapsules}
       onDetachSessionRecall={handleDetachSessionRecall}
       dismissSoftError={dismissSoftError}
+      modeSwitcher={modeSwitcher}
       attachments={attachments}
       removeAttachment={removeAttachment}
       inputValue={inputValue}

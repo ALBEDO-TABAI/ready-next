@@ -1,6 +1,7 @@
 import type { CSSProperties, ElementType } from 'react'
 import { MotionConfig, motion, useReducedMotion } from 'framer-motion'
 import '../../styles/workbench-sliders.css'
+import { LiquidLens } from '../ui/liquid-glass/LiquidLens'
 import {
   REDUCED_MOTION_TRANSITION,
   WORKBENCH_SLIDER_CLICK_TRANSITION,
@@ -53,7 +54,25 @@ export default function MorphIconRailGroup({
           animate={{ y: thumbOffset }}
           transition={transition}
         >
-          <span className="icon-rail-slider__thumb" />
+          <span className="icon-rail-slider__thumb">
+            <LiquidLens
+              className="ready-slider-thumb-lens"
+              style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
+              radius={16}
+              bevel={4}
+              depth={8}
+              ior={1.22}
+              dome={0.7}
+              strength={1.05}
+              blur={0}
+              frost={0}
+              saturation={1}
+              brightness={1}
+              contrast={1}
+              aberration={0}
+              engine="backdrop"
+            />
+          </span>
         </motion.span>
         {items.map(({ id, label, icon: Icon }) => {
           const isActive = activeId === id && expanded

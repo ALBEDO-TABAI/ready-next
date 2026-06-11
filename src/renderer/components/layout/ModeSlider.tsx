@@ -3,9 +3,9 @@ import readyWordmark from '../../assets/ready-wordmark.png'
 export default function ModeSlider() {
   return (
     <div
-      className="flex h-[28px] w-[90px] items-center"
+      className="flex h-[28px] w-[96px] items-center"
       style={{
-        paddingLeft: 19,
+        paddingLeft: 25,
       }}
     >
       <img

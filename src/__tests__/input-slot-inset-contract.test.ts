@@ -59,3 +59,31 @@ test('chat composer delegates its material to the liquid lens instead of the ins
   assert.match(chatInput, /contrast=\{0\.84\}/)
   assert.match(chatInput, /aberration=\{0\}/)
 })
+
+test('dark liquid composer dims only the material while preserving semantic controls', () => {
+  const styles = readWorkspaceFile('src/renderer/styles/index.css')
+  const darkComposerBlock = styles.match(/html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.ready-liquid-composer \{([\s\S]*?)\n\}/)
+  assert.ok(darkComposerBlock, 'dark liquid composer block should exist')
+
+  assert.match(
+    styles,
+    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.ready-liquid-composer \{[\s\S]*--text-body:\s*rgba\(232, 232, 232, 0\.86\);[\s\S]*--text-placeholder:\s*rgba\(176, 176, 176, 0\.62\);/,
+  )
+  assert.match(
+    styles,
+    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.ready-liquid-composer__surface \{[\s\S]*background:\s*rgba\(26, 26, 26, 0\.62\);/,
+  )
+  assert.match(
+    styles,
+    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.ready-liquid-composer__projection \{[\s\S]*saturate\(0\)[\s\S]*brightness\(0\.78\)/,
+  )
+  assert.match(
+    styles,
+    /html\[data-theme='dark'\]\[data-skin='liquid-glass'\] \.ready-liquid-composer \[data-ready-agent-send='true'\] \{[\s\S]*background:\s*rgba\(232, 232, 232, 0\.12\) !important;/,
+  )
+  assert.doesNotMatch(darkComposerBlock[1], /--color-blue:/)
+  assert.doesNotMatch(darkComposerBlock[1], /--color-green:/)
+  assert.doesNotMatch(darkComposerBlock[1], /--color-red:/)
+  assert.doesNotMatch(styles, /ready-liquid-composer[\s\S]*#9ab8ff/)
+  assert.doesNotMatch(styles, /ready-liquid-composer[\s\S]*220, 232, 255/)
+})

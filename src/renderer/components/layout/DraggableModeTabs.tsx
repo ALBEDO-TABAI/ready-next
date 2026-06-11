@@ -2,6 +2,8 @@ import { useRef, useState, useCallback, useEffect, useMemo } from 'react'
 import { Globe, FileText, Rss, Calendar } from 'lucide-react'
 import type { WorkbenchMode } from '../../stores/useMode'
 import '../../styles/workbench-sliders.css'
+import { LiquidLens } from '../ui/liquid-glass/LiquidLens'
+import { LiquidBackdropProjection } from '../ui/liquid-glass/LiquidBackdropProjection'
 import { WORKBENCH_MODE_ORDER } from '../../modules/workbench/mode-split'
 import { resolveWorkbenchModeTabLayout } from '../../modules/workbench/mode-tabs-layout'
 import {
@@ -248,6 +250,30 @@ export default function DraggableModeTabs({
         ['--dmt-thumb-span' as string]: String(thumbSpanRef.current),
       }}
     >
+      <LiquidLens
+        className="draggable-mode-tabs__surface"
+        style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
+        radius={19}
+        bevel={2.5}
+        depth={18.5}
+        ior={1.34}
+        dome={1.6}
+        strength={2.6}
+        blur={0.875}
+        frost={0}
+        blurBeforeRefraction
+        saturation={1.18}
+        brightness={1.05}
+        contrast={0.84}
+        aberration={0}
+        engine="backdrop"
+        backdropContent={(
+          <LiquidBackdropProjection
+            className="draggable-mode-tabs__projection"
+            sourceMaskRadius={19}
+          />
+        )}
+      />
       <div className="draggable-mode-tabs__track" />
 
       <div
@@ -255,6 +281,23 @@ export default function DraggableModeTabs({
         style={{ cursor: isDragging ? 'grabbing' : 'pointer' }}
         onMouseDown={handleMouseDown}
       >
+        <LiquidLens
+          className="ready-slider-thumb-lens"
+          style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
+          radius={16}
+          bevel={6}
+          depth={14}
+          ior={1.3}
+          dome={1.15}
+          strength={1.42}
+          blur={0}
+          frost={0}
+          saturation={1}
+          brightness={1}
+          contrast={1}
+          aberration={0}
+          engine="backdrop"
+        />
         <div className="draggable-mode-tabs__thumb-glow" />
       </div>
 

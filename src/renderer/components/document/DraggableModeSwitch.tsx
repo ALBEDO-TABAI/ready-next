@@ -1,4 +1,5 @@
 import { useRef, useState, useCallback, useEffect } from 'react'
+import { LiquidLens } from '../ui/liquid-glass/LiquidLens'
 
 interface DraggableModeSwitchProps {
   mode: 'edit' | 'preview'
@@ -208,7 +209,7 @@ export default function DraggableModeSwitch({ mode, onChange }: DraggableModeSwi
       <div
         className={`draggable-mode-switch__thumb ${isDragging ? 'is-dragging' : ''}`}
         style={{
-          transform: `translateX(${position * 100}%)`,
+          transform: `translateX(${position * 100}%) scale(var(--ready-document-switch-thumb-scale, 1))`,
           cursor: isDragging ? 'grabbing' : 'pointer',
         }}
         onPointerDown={handlePointerDown}
@@ -217,6 +218,23 @@ export default function DraggableModeSwitch({ mode, onChange }: DraggableModeSwi
         onPointerCancel={handlePointerCancel}
         onLostPointerCapture={handleLostPointerCapture}
       >
+        <LiquidLens
+          className="ready-slider-thumb-lens"
+          style={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}
+          radius={13}
+          bevel={4}
+          depth={8}
+          ior={1.22}
+          dome={0.7}
+          strength={1.05}
+          blur={0}
+          frost={0}
+          saturation={1}
+          brightness={1}
+          contrast={1}
+          aberration={0}
+          engine="backdrop"
+        />
         <div className="draggable-mode-switch__thumb-glow" />
       </div>
 

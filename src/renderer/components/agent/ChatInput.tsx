@@ -1,7 +1,8 @@
-import { forwardRef, useRef, useEffect, useLayoutEffect, useState, useImperativeHandle, useCallback, useMemo } from 'react'
+import { forwardRef, useRef, useEffect, useState, useImperativeHandle, useCallback, useMemo } from 'react'
 import { AtSign, Plus, Send, Square, Undo2, ChevronDown, Puzzle } from 'lucide-react'
 import { IconButton } from '../ui/IconButton'
 import { LiquidLens } from '../ui/liquid-glass/LiquidLens'
+import { LiquidBackdropProjection } from '../ui/liquid-glass/LiquidBackdropProjection'
 import type { ChatAttachment } from '../../stores/useAgent'
 import type { ReadySkillReference } from '../../modules/agent/chat-input-bridge'
 import type { NativeContextMenuItem } from '../../../shared/native-context-menu'
@@ -42,149 +43,6 @@ interface ChatInputProps {
 export interface ChatInputHandle {
   focusWithResize: () => void
   resetHeight: () => void
-}
-
-// The composer runs inside a transparent macOS vibrancy window, where large
-// backdrop blur radii are visually clamped. This projection mirrors the live
-// message scroller into the lens, then masks the original scroller under the
-// composer so text is seen only through the misted/refracted copy.
-function ChatComposerBackdropProjection() {
-  const layerRef = useRef<HTMLDivElement | null>(null)
-
-  useLayoutEffect(() => {
-    const layer = layerRef.current
-    if (!layer) return
-
-    let frame = 0
-    let observer: MutationObserver | null = null
-    let resizeObserver: ResizeObserver | null = null
-    let source: HTMLElement | null = null
-    let maskedSource: HTMLElement | null = null
-    let maskSnapshot: Array<[string, string]> | null = null
-
-    const maskProperties = [
-      'mask-image',
-      'mask-size',
-      'mask-repeat',
-      'mask-position',
-      'mask-mode',
-      '-webkit-mask-image',
-      '-webkit-mask-size',
-      '-webkit-mask-repeat',
-      '-webkit-mask-position',
-    ]
-
-    const clearMaskStyles = (element: HTMLElement) => {
-      maskProperties.forEach((property) => element.style.removeProperty(property))
-    }
-
-    const restoreSourceMask = () => {
-      if (!maskedSource || !maskSnapshot) return
-      maskProperties.forEach((property) => maskedSource?.style.removeProperty(property))
-      maskSnapshot.forEach(([property, value]) => {
-        if (value) maskedSource?.style.setProperty(property, value)
-      })
-      maskedSource = null
-      maskSnapshot = null
-    }
-
-    const applySourceMask = (nextSource: HTMLElement, sourceRect: DOMRect, layerRect: DOMRect) => {
-      if (maskedSource !== nextSource) {
-        restoreSourceMask()
-        maskedSource = nextSource
-        maskSnapshot = maskProperties.map((property) => [property, nextSource.style.getPropertyValue(property)])
-      }
-
-      const holeX = Math.max(0, layerRect.left - sourceRect.left)
-      const holeY = Math.max(0, layerRect.top - sourceRect.top)
-      const holeWidth = Math.max(0, Math.min(layerRect.width, sourceRect.right - layerRect.left))
-      const holeHeight = Math.max(0, Math.min(layerRect.height, sourceRect.bottom - layerRect.top))
-      if (holeWidth <= 1 || holeHeight <= 1) {
-        clearMaskStyles(nextSource)
-        return
-      }
-
-      const radius = Math.min(18, holeWidth / 2, holeHeight / 2)
-      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${sourceRect.width}" height="${sourceRect.height}" viewBox="0 0 ${sourceRect.width} ${sourceRect.height}"><rect width="100%" height="100%" fill="white"/><rect x="${holeX}" y="${holeY}" width="${holeWidth}" height="${holeHeight}" rx="${radius}" ry="${radius}" fill="black"/></svg>`
-      const mask = `url("data:image/svg+xml,${encodeURIComponent(svg)}")`
-      nextSource.style.setProperty('mask-image', mask)
-      nextSource.style.setProperty('mask-size', `${sourceRect.width}px ${sourceRect.height}px`)
-      nextSource.style.setProperty('mask-repeat', 'no-repeat')
-      nextSource.style.setProperty('mask-position', '0 0')
-      nextSource.style.setProperty('mask-mode', 'luminance')
-      nextSource.style.setProperty('-webkit-mask-image', mask)
-      nextSource.style.setProperty('-webkit-mask-size', `${sourceRect.width}px ${sourceRect.height}px`)
-      nextSource.style.setProperty('-webkit-mask-repeat', 'no-repeat')
-      nextSource.style.setProperty('-webkit-mask-position', '0 0')
-    }
-
-    const renderClone = () => {
-      frame = 0
-      source = document.querySelector<HTMLElement>('[data-liquid-scroll-root="chat-messages"]')
-      if (!source || !layer.isConnected) {
-        layer.replaceChildren()
-        restoreSourceMask()
-        return
-      }
-
-      const layerRect = layer.getBoundingClientRect()
-      const sourceRect = source.getBoundingClientRect()
-      const clone = source.cloneNode(true) as HTMLElement
-      clone.removeAttribute('id')
-      clone.removeAttribute('data-liquid-scroll-root')
-      clone.querySelectorAll('[id]').forEach((node) => node.removeAttribute('id'))
-      clone.querySelectorAll('[data-liquid-scroll-root]').forEach((node) => node.removeAttribute('data-liquid-scroll-root'))
-      clone.setAttribute('aria-hidden', 'true')
-      clone.setAttribute('inert', '')
-      clone.classList.add('ready-liquid-composer__projection-clone')
-      clearMaskStyles(clone)
-      Object.assign(clone.style, {
-        position: 'absolute',
-        left: `${sourceRect.left - layerRect.left}px`,
-        top: `${sourceRect.top - layerRect.top}px`,
-        width: `${sourceRect.width}px`,
-        height: `${sourceRect.height}px`,
-        margin: '0',
-        pointerEvents: 'none',
-      })
-      layer.replaceChildren(clone)
-      clone.scrollTop = source.scrollTop
-      clone.scrollLeft = source.scrollLeft
-      applySourceMask(source, sourceRect, layerRect)
-    }
-
-    const schedule = () => {
-      if (!frame) frame = requestAnimationFrame(renderClone)
-    }
-
-    source = document.querySelector<HTMLElement>('[data-liquid-scroll-root="chat-messages"]')
-    source?.addEventListener('scroll', schedule, { passive: true })
-    if (source) {
-      observer = new MutationObserver(schedule)
-      observer.observe(source, {
-        attributes: true,
-        characterData: true,
-        childList: true,
-        subtree: true,
-      })
-    }
-    resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(schedule) : null
-    if (source) resizeObserver?.observe(source)
-    resizeObserver?.observe(layer)
-    window.addEventListener('resize', schedule)
-    schedule()
-
-    return () => {
-      if (frame) cancelAnimationFrame(frame)
-      source?.removeEventListener('scroll', schedule)
-      observer?.disconnect()
-      resizeObserver?.disconnect()
-      window.removeEventListener('resize', schedule)
-      restoreSourceMask()
-    }
-  }, [])
-
-  return <div ref={layerRef} aria-hidden="true" className="ready-liquid-composer__projection" />
 }
 
 const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
@@ -547,7 +405,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
           contrast={0.84}
           aberration={0}
           engine="backdrop"
-          backdropContent={<ChatComposerBackdropProjection />}
+          backdropContent={<LiquidBackdropProjection className="ready-liquid-composer__projection" />}
         >
           <div
             className="ready-liquid-composer__content flex flex-col"
