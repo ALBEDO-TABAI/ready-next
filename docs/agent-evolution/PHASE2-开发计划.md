@@ -1,0 +1,96 @@
+# 阶段二开发计划（配套 2026-06-11-agent-evolution-phase2-implementation.md）
+
+> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同评审通过（enforce: true）前本计划不开工。
+
+---
+
+## 1. 工单总览与规模
+
+| 工单 | 内容 | 规模 | 依赖 |
+|------|------|------|------|
+| Q1 | task_projections 质量列迁移（054） | ~140 行 | 无 |
+| Q2 | Criteria 模板引擎 | ~280 行 | Q1 |
+| Q3 | Proof 四源采集 | ~260 行 | Q1 |
+| Q4 | task-adjudicator + finalizer 接线 + gate | ~300 行 | Q2/Q3 |
+| Q5 | 待裁决队列 + 任务卡裁决出口 | ~240 行 | Q4 |
+| Q6 | 质量红线入 verify:stability | ~40 行 | Q4 |
+| K3 | RULES/index 注入（staged 禁令变注入面断言） | ~240 行 | 无（K1/K2 已合入） |
+| K4 | RULES 默认内容 + 确认卫生文案 | ~120 行 | K3 |
+| K6C | 真值源边界子合同（文档） | 文档 | 无 |
+| K6 | 真值源边界落地（watcher/invalid/开关/启动接线） | ~260 行 | K6C 评审通过 |
+| C1 | knowledge-index-builder | ~280 行 | 无 |
+| C2 | 确定性门控 + crystallize 调度骨架 | ~220 行 | 无 |
+| C6 | belief 衰减确定性子集 | ~180 行 | C1 |
+| X1b | 任务索引增强 | ~140 行 | Q1 |
+| X2 | 预算转向提醒（先 HEAD 勘探） | ~220 行 | Q4 |
+| I-auth-D | 对象级授权设计补充（05 §3，文档） | 文档 | 无 |
+| I1 | 状态优先决策序 | ~180 行 | 无 |
+| I2 | 否定语义三层加深 | ~260 行 | I1 |
+| I-auth | 对象级授权实现 + M3 预批准 | ~280 行 | I-auth-D 评审、I2 |
+| T1 | 所有权矩阵 + run_meta 快照化 | ~240 行 | Q1 |
+| T2 | 写方向 gate（warning 先行）+ malformed-ignored | ~200 行 | T1 |
+| T3 | reconcile 泛化 | ~240 行 | Q4 |
+| T4-3 | 重试分级收敛 | ~220 行 | 无 |
+| E1 | 涌现内核 + 三类卡 | ~280 行 | Q1 |
+| E2 | 意图流视图 + 行动出口 | ~300 行 | E1、Q5 |
+| B1 | 批量执行 spike（报告） | 报告 | 无（并行长线） |
+| G2 | verify 链 + 文档同步 + P 系列核销 | ~80 行 | 全部 |
+
+合计 ~4900 行 diff + 三个文档单，代码单全部满足"单单 ≤300 行、10 分钟自验"纪律。
+
+## 2. 波次排布（关键串行点：run-finalizer.ts 经 Q4→T3；prompt-assembly.ts 经 K3→X1b；tool-executor.ts 经 I2→I-auth）
+
+```
+波次 0（文档先行，与波次 1 并行评审）
+  K6C 真值源子合同      I-auth-D 授权设计补充      B1 spike 启动（长线）
+
+波次 1（全并行）
+  Q1 质量列迁移         K3 RULES/index 注入
+  C1 index-builder      C2 门控骨架
+  I1 状态优先           T4-3 重试收敛
+
+波次 2（依赖波次 1）
+  Q2 Criteria（Q1 后）   Q3 Proof（Q1 后）
+  X1b 索引增强（Q1 后；K3 合入后再碰 prompt-assembly）
+  T1 账本矩阵（Q1 后）   E1 涌现内核（Q1 后）
+  K4 文案（K3 后）       C6 衰减（C1 后）       I2 否定加深（I1 后）
+
+波次 3（串行关键路径）
+  Q4 adjudicator（Q2/Q3 后；全阶段唯一动 run-finalizer 的窗口开启）
+  T2 写方向 gate（T1 后，warning 模式）
+  K6 真值源落地（K6C 评审通过后）
+
+波次 4
+  Q5 裁决出口（Q4 后）   T3 reconcile（Q4 后）   X2 预算转向（Q4 后，先勘探）
+  I-auth 实现（I-auth-D 评审 + I2 后）
+
+波次 5
+  E2 意图流视图（E1 + Q5 后）   Q6 红线入 stability
+  B1 spike 报告评审
+
+波次 6
+  G2 收口（verify:evolution-p2、CLAUDE/AGENTS 同步、08 表 P 系列核销、阶段门核对）
+```
+
+单执行者建议顺序：Q1 → K3 → C1 → I1 → T4-3 → C2 → Q2 → Q3 → X1b → T1 → E1 → K4 → C6 → I2 → Q4 → T2 → K6 → Q5 → T3 → X2 → I-auth → E2 → Q6 → G2。
+
+## 3. 开关与灰度
+
+| 开关 | 默认 | 说明 |
+|------|------|------|
+| RULES/index 注入 | 开（预算截断 + context_bill 可观测） | 回退 = 关注入段，K1/K2 存储不动 |
+| adjudicator 裁决 | 开（先影子一个版本：产 CheckIn 不改终态 → 核对后接管） | 影子期 CheckIn 与实际终态偏差是转正前必看指标 |
+| 写方向 gate | warning 模式跑一个版本 | 存量违规清单收齐后小单转 error |
+| belief 衰减新分支 | 开（与时间衰减并存一个版本，可回退） | 升降档审计行可查 |
+| 意图流视图 | 开（≤8 张 + confidence 门槛 + 类型可关） | 噪音失控先关 extractor 不下视图 |
+| M3 预批准（I-auth） | 关，评审通过后灰度开 | M1 永不受影响；禁缓存解禁仅随 I-auth 一起 |
+
+## 4. 风险与盯防
+
+1. **Q4 是全阶段最大风险单**：动 run-finalizer 必须通道内扩展，funnel gate 全程绿；建议影子模式先行（见 §3）。
+2. **X2 依赖预算账本健康**：历史上存在 checkpoint 仅耗尽写/续跑重置用量等半态；勘探结论先写入工单，半态先修或显式声明边界。
+3. **K6 是文件系统级改造**：watcher 幂等与回滚开关必须在子合同里写成可机器验证断言再开工。
+4. **T2 收紧可能暴露存量违规**：warning 先行是合同条款不是建议。
+5. **E2 触 renderer**：UI 只消费 projection；视觉以 workbench 极简基准，避免新视图自立一套样式。
+6. **B1 spike 与生产隔离**：实验代码不进主线；高风控站点硬拦不因 spike 放宽。
+7. **08 表 P 系列核销是阶段门**：G2 收口时逐行核对 P1-P10 状态，缺一不放行。
