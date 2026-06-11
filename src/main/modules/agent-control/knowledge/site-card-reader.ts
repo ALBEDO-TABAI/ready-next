@@ -64,7 +64,21 @@ export class SiteCardReader {
   private resolveRaw(domain: string): { raw: string; source: 'user' | 'bundled' } | null {
     if (this.opts.userKnowledgeRoot) {
       const userPath = join(this.opts.userKnowledgeRoot, 'knowledge', 'sites', `${domain}.md`)
-      if (existsSync(userPath)) return { raw: readFileSync(userPath, 'utf-8'), source: 'user' }
+      if (existsSync(userPath)) {
+        const raw = readFileSync(userPath, 'utf-8')
+        // Only an ACTIVE user card may override the bundled seed. Model-
+        // written cards default to `status: staged` (K1) and an unconfirmed
+        // card must never enter injection (根目录指引 §2 staged 注入禁令);
+        // missing/other statuses fall back to the bundled layer too.
+        const { meta } = splitFrontmatter(raw)
+        if (meta.status === 'active') {
+          return { raw, source: 'user' }
+        }
+        logAgentMetric('site_card_user_override_skipped', {
+          domain,
+          status: meta.status || 'missing',
+        })
+      }
     }
     for (const root of this.opts.bundledRoots) {
       const bundledPath = join(root, `${domain}.md`)

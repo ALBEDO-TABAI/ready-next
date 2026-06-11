@@ -87,6 +87,7 @@ const EXPLICIT_KIND_MAP: Record<string, ToolEnvelopeKind> = {
   // denied_by_policy — authorization / safety gate refused
   authorization_denied: 'denied_by_policy',
   tool_restricted_this_turn: 'denied_by_policy',
+  internal_tool_not_allowed: 'denied_by_policy',
   detached_task_forbidden: 'denied_by_policy',
   blocked_config: 'denied_by_policy',
   blocked_external: 'denied_by_policy',
@@ -206,5 +207,14 @@ export function deriveEnvelopeForToolOutput(output: {
   const source = structuredMessage ?? output.text ?? ''
   const firstLine = source.split('\n', 1)[0].trim()
   const message = (firstLine || 'tool failed').slice(0, ENVELOPE_MESSAGE_MAX_CHARS)
-  return buildErrorEnvelope({ errorKind, message })
+  // Legacy admission denials overload `host_unavailable` with a `reason`
+  // (e.g. tool_restricted_this_turn) — that is a policy refusal, not an
+  // upstream outage. Prefer the reason when it maps cleanly, so the model
+  // stops retrying instead of treating it as a transient dependency failure.
+  let kindSource = errorKind
+  if (errorKind === 'host_unavailable' && output.data && typeof output.data.reason === 'string') {
+    const viaReason = mapErrorKindToEnvelopeKind(output.data.reason)
+    if (viaReason.mapped) kindSource = output.data.reason
+  }
+  return buildErrorEnvelope({ errorKind: kindSource, message })
 }

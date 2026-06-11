@@ -154,6 +154,25 @@ test('I3-1 confirmation-gate denial maps to a denied_by_policy envelope', async 
   assert.equal(output.envelope?.kind, 'denied_by_policy')
 })
 
+test('allowlist denial (host_unavailable + reason) maps to denied_by_policy, NOT upstream_error', async () => {
+  const output = await executeToolCall('calendar_list_window', {
+    start: '2026-06-01T00:00:00Z',
+    end: '2026-06-02T00:00:00Z',
+  }, modelContext({ allowedToolNames: new Set<string>() }))
+  assert.equal(output.data?.errorKind, 'host_unavailable', 'legacy errorKind untouched')
+  assert.equal(output.data?.reason, 'tool_restricted_this_turn')
+  assert.equal(output.envelope?.kind, 'denied_by_policy',
+    'a this-turn policy refusal must not read as an upstream outage')
+})
+
+test('host_unavailable WITHOUT a mappable reason still maps to upstream_error', () => {
+  const envelope = deriveEnvelopeForToolOutput({
+    text: 'Browser controller is offline',
+    data: { errorKind: 'host_unavailable' },
+  })
+  assert.equal(envelope.kind, 'upstream_error')
+})
+
 // ---------------------------------------------------------------------------
 // 5. Envelope discipline (pure derivation helper)
 // ---------------------------------------------------------------------------

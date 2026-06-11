@@ -58,9 +58,14 @@ interface ConfirmationRule {
 }
 
 // Browser interaction tools that can press/submit things on a page.
-const CLICK_TOOLS = ['browser_click', 'browser_click_text', 'browser_click_at'] as const
+// `browser_act_on_target` is in BOTH sets: its action enum spans
+// click/expand/choose AND fill — a payment confirm or password fill routed
+// through a page-map target id must hit the same rules as the plain
+// click/type tools (textual cues come from value/disambiguation, the same
+// trust level as click_text's text argument).
+const CLICK_TOOLS = ['browser_click', 'browser_click_text', 'browser_click_at', 'browser_act_on_target'] as const
 // Browser interaction tools that can fill inputs on a page.
-const TYPE_TOOLS = ['browser_type', 'browser_type_smart', 'browser_type_at'] as const
+const TYPE_TOOLS = ['browser_type', 'browser_type_smart', 'browser_type_at', 'browser_act_on_target'] as const
 
 // M1 — final payment confirmation (tight final-step wording only; navigating
 // to a checkout page goes through browser_navigate, which is unlisted).

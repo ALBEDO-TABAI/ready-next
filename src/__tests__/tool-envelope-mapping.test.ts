@@ -36,6 +36,7 @@ const EXPECTED: Record<string, ToolEnvelopeKind> = {
   timeout: 'network_error',
   authorization_denied: 'denied_by_policy',
   tool_restricted_this_turn: 'denied_by_policy',
+  internal_tool_not_allowed: 'denied_by_policy',
   command_high_risk_blocked: 'denied_by_policy',
   denied_manual_only: 'denied_by_policy',
   denied_pending_confirmation: 'denied_by_policy',

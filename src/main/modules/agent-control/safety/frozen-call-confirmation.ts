@@ -35,7 +35,11 @@ import type {
 import type { AskUserQuestionsStore } from '../../tools/builtins/ask-user-questions-store'
 import { ToolDomainError } from '../../tools/tool-errors'
 import type { ConfirmationGateDecision } from './action-confirmation-policy'
-import type { FrozenCallStore } from './frozen-call-store'
+import {
+  DEFAULT_FROZEN_CALL_TTL_MS,
+  redactParamsForAudit,
+  type FrozenCallStore,
+} from './frozen-call-store'
 
 export const FROZEN_CALL_QUESTION_ID = 'frozen_call_confirm'
 export const FROZEN_CALL_CONFIRM_OPTION = '确认执行'
@@ -46,6 +50,17 @@ const METRIC_FROZEN_CALL_DENIED = 'frozen_call_denied'
 const METRIC_FROZEN_CALL_EXPIRED = 'frozen_call_expired'
 
 const PARAMS_SUMMARY_MAX_CHARS = 140
+
+/**
+ * Rules whose frozen params carry credentials / sensitive payloads — the
+ * audit copy (DB row, card text, metrics) masks ALL free-text values for
+ * these, not just sensitively-named keys (a login fill's password sits in a
+ * generic `text`/`value` argument).
+ */
+const SENSITIVE_PARAM_RULE_IDS = new Set([
+  'm3-login-existing-account',
+  'm2-send-sensitive',
+])
 
 export interface FrozenCallConfirmationDeps {
   store: FrozenCallStore
@@ -89,6 +104,12 @@ export async function runFrozenCallConfirmation(
   deps: FrozenCallConfirmationDeps,
 ): Promise<FrozenCallConfirmationOutcome> {
   const sessionId = deps.sessionId ?? null
+  // One TTL for the whole confirmation: the frozen call AND the card expire
+  // together (Codex review P1#3 — without this the card defaulted to the
+  // ask_user_questions 24h timeout while the frozen call died at 10min,
+  // pinning the run and the single-pending card slot for hours).
+  const timeoutMs = deps.timeoutMs ?? DEFAULT_FROZEN_CALL_TTL_MS
+  const sensitiveParams = SENSITIVE_PARAM_RULE_IDS.has(decision.ruleId)
   const frozen = deps.store.freeze({
     toolName,
     params: args,
@@ -96,7 +117,8 @@ export async function runFrozenCallConfirmation(
     taskId: deps.taskId ?? null,
     scopeId: deps.scopeId ?? null,
     sessionId,
-    ttlMs: deps.timeoutMs,
+    ttlMs: timeoutMs,
+    sensitiveParams,
   })
   if (!frozen.ok) {
     return frozen.reason === 'pending_exists'
@@ -104,11 +126,17 @@ export async function runFrozenCallConfirmation(
       : { kind: 'unavailable', reason: frozen.reason }
   }
 
+  // Card/metrics only ever see the REDACTED copy — full params stay in the
+  // store's memory record (the byte-identical release source).
+  const auditSummary = summarizeParams(
+    redactParamsForAudit(args, { redactAllStrings: sensitiveParams }) as Record<string, unknown>,
+  )
+
   // 动作 + 对象 + 风险一句话 — a structured confirmation card, not a
   // free-text question (05 §3.2).
   const question = {
     id: FROZEN_CALL_QUESTION_ID,
-    question: `确认执行 ${toolName}：${summarizeParams(args)}。风险：${decision.reason}（${decision.mode}）`,
+    question: `确认执行 ${toolName}：${auditSummary}。风险：${decision.reason}（${decision.mode}）`,
     kind: 'single_choice' as const,
     options: [FROZEN_CALL_CONFIRM_OPTION, FROZEN_CALL_DENY_OPTION],
   }
@@ -122,7 +150,7 @@ export async function runFrozenCallConfirmation(
       emitAskUserQuestionsCard: deps.emitCard,
       persistCardPending: deps.persistCard,
       store: deps.askUserStore,
-      timeoutMs: deps.timeoutMs,
+      timeoutMs,
     })
     const answers = (cardOutput.data?.answers ?? []) as Array<{ id: string; answer: unknown }>
     const found = answers.find((a) => a.id === FROZEN_CALL_QUESTION_ID)
@@ -158,7 +186,7 @@ export async function runFrozenCallConfirmation(
       frozenCallId: frozen.id,
       toolName,
       sessionId,
-      paramsSummary: summarizeParams(args),
+      paramsSummary: auditSummary,
     })
     return { kind: 'released', frozenCallId: frozen.id, params: released.params }
   }
@@ -168,7 +196,7 @@ export async function runFrozenCallConfirmation(
     frozenCallId: frozen.id,
     toolName,
     sessionId,
-    paramsSummary: summarizeParams(args),
+    paramsSummary: auditSummary,
   })
   return { kind: 'denied_by_user', frozenCallId: frozen.id }
 }

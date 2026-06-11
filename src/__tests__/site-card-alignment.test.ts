@@ -72,6 +72,28 @@ test('user override beats bundled; bundled untouched', () => {
   }
 })
 
+test('a STAGED user card never overrides the bundled seed (staged 注入禁令)', () => {
+  const userRoot = mkdtempSync(join(tmpdir(), 'ready-sitecard-staged-'))
+  try {
+    const store = new BeliefCardStore({ memoryRoot: userRoot })
+    // memory_write_card defaults to staged — an unconfirmed card must fall
+    // back to the bundled layer instead of entering injection.
+    const w = store.writeCard({
+      relPath: 'knowledge/sites/xiaohongshu.com.md',
+      frontmatter: siteFm({ site: 'xiaohongshu.com', status: 'staged', title: '未确认的小红书卡' }),
+      body: '未经确认的经验 STAGED_MARKER',
+    })
+    assert.ok(w.ok)
+    const reader = new SiteCardReader({ bundledRoots: [BUNDLED], userKnowledgeRoot: store.rootPath })
+    const card = reader.render('xiaohongshu.com')
+    assert.ok(card, 'must fall back to the bundled seed')
+    assert.equal(card!.source, 'bundled', 'staged user card must not override bundled')
+    assert.ok(!card!.body.includes('STAGED_MARKER'), 'staged body must never be injected')
+  } finally {
+    rmSync(userRoot, { recursive: true, force: true })
+  }
+})
+
 test('listDomains includes all five bundled seeds, each frontmatter-valid', () => {
   const reader = new SiteCardReader({ bundledRoots: [BUNDLED] })
   const domains = reader.listDomains()

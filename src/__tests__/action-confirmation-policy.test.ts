@@ -55,6 +55,48 @@ test('M1 matrix: typing into a captcha field → manual_only', () => {
   assert.equal(decision.action, 'manual_only')
 })
 
+test('M1 matrix: act-on-target click on a payment-confirm target → manual_only (no page-map bypass)', () => {
+  const decision = resolveConfirmationGate('browser_act_on_target', {
+    target_id: 'pm-3:button-17',
+    action: 'click',
+    disambiguation: '订单页底部的「确认支付」主按钮',
+  })
+  assert.equal(decision.mode, 'M1')
+  assert.equal(decision.action, 'manual_only')
+})
+
+test('M1 matrix: act-on-target fill into a captcha field → manual_only', () => {
+  const decision = resolveConfirmationGate('browser_act_on_target', {
+    target_id: 'pm-3:input-4',
+    action: 'fill',
+    value: '8244',
+    disambiguation: '验证码输入框',
+  })
+  assert.equal(decision.mode, 'M1')
+  assert.equal(decision.action, 'manual_only')
+})
+
+test('M3 matrix: act-on-target fill into a password field → confirm (登录已存账号)', () => {
+  const decision = resolveConfirmationGate('browser_act_on_target', {
+    target_id: 'pm-2:input-9',
+    action: 'fill',
+    value: 'hunter2',
+    disambiguation: '登录表单的 password 输入框',
+  })
+  assert.equal(decision.mode, 'M3')
+  assert.equal(decision.action, 'confirm')
+})
+
+test('M4 matrix: a neutral act-on-target click stays allowed', () => {
+  const decision = resolveConfirmationGate('browser_act_on_target', {
+    target_id: 'pm-1:link-2',
+    action: 'click',
+    disambiguation: '文章列表第一条链接',
+  })
+  assert.equal(decision.mode, 'M4')
+  assert.equal(decision.action, 'allow')
+})
+
 // ---------------------------------------------------------------------------
 // 1. Policy table matrix — M2
 // ---------------------------------------------------------------------------

@@ -19,6 +19,7 @@
  */
 
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import test from 'node:test'
 import type { IpcMain, IpcMainInvokeEvent } from 'electron'
 
@@ -35,7 +36,9 @@ import {
   FROZEN_CALL_CONFIRM_OPTION,
   FROZEN_CALL_DENY_OPTION,
   FROZEN_CALL_QUESTION_ID,
+  runFrozenCallConfirmation,
 } from '../main/modules/agent-control/safety/frozen-call-confirmation'
+import { resolveConfirmationGate } from '../main/modules/agent-control/safety/action-confirmation-policy'
 import { getAskUserQuestionsStore } from '../main/modules/tools/builtins/ask-user-questions-store'
 import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import { askUserGroup, type AskUserGroupDeps } from '../main/modules/claude-bridge/ipc/ask-user-group'
@@ -138,6 +141,15 @@ test('freeze → confirm → release executes the frozen params byte-identical, 
   assert.ok(frozenRow, 'freeze must persist a pending_confirmations row')
   assert.equal(frozenRow.status, 'pending')
   assert.equal(frozenRow.tool_name, 'calendar_delete_event')
+  // Durable row is the REDACTED audit copy + sha256 of the frozen bytes.
+  const audit = JSON.parse(String(frozenRow.params_json)) as {
+    __audit: string
+    sha256: string
+    params: Record<string, unknown>
+  }
+  assert.equal(audit.__audit, 'redacted')
+  assert.equal(audit.sha256, createHash('sha256').update(JSON.stringify(originalArgs)).digest('hex'))
+  assert.deepEqual(audit.params, originalArgs, 'non-sensitive params stay readable in the audit copy')
 
   answerPendingCard(sessionId, FROZEN_CALL_CONFIRM_OPTION)
   const output = await pending
@@ -145,8 +157,8 @@ test('freeze → confirm → release executes the frozen params byte-identical, 
   assert.equal(executed.length, 1, 'released call must execute exactly once')
   assert.equal(
     JSON.stringify(executed[0]),
-    frozenRow.params_json,
-    'executed params must be byte-identical to the frozen params_json',
+    JSON.stringify(originalArgs),
+    'executed params must be byte-identical to the frozen serialization',
   )
   assert.deepEqual(executed[0], originalArgs)
   assert.match(output.text, /事件已删除/)
@@ -289,6 +301,95 @@ test('user denial feeds a structured confirmation_denied_by_user back to the mod
   assert.equal(output.data?.errorKind, 'confirmation_denied_by_user')
   assert.deepEqual(executed, [])
   assert.equal([...db.rows.values()][0].status, 'denied')
+})
+
+// ---------------------------------------------------------------------------
+// 5b. Sensitive params — full bytes only in memory; DB/card/metrics redacted
+// ---------------------------------------------------------------------------
+
+test('login fill: secret never reaches the DB row or the confirmation card; release stays byte-identical', async (t) => {
+  const db = createFakeDb()
+  const store = new FrozenCallStore(db)
+  registerFrozenCallStore(store)
+  t.after(() => _resetFrozenCallBridgeForTests())
+
+  const sessionId = nextSessionId()
+  const originalArgs = { selector: '#login-password', text: 'hunter2-secret' }
+  // browser_type into a password field → m3-login-existing-account (sensitive
+  // rule). No browserController is needed: we deny at the card, so dispatch
+  // never reaches the browser domain.
+  const pending = executeToolCall('browser_type', originalArgs, modelContext(sessionId))
+
+  await waitFor(() => getAskUserQuestionsStore().findPendingForSession(sessionId))
+  const card = getAskUserQuestionsStore().findPendingForSession(sessionId)
+  assert.ok(card)
+  assert.ok(
+    !card!.questions[0].question.includes('hunter2-secret'),
+    'confirmation card must not leak the credential',
+  )
+  const frozenRow = [...db.rows.values()][0]
+  assert.ok(
+    !String(frozenRow.params_json).includes('hunter2-secret'),
+    'pending_confirmations row must not contain the credential',
+  )
+  const audit = JSON.parse(String(frozenRow.params_json)) as { sha256: string }
+  assert.equal(
+    audit.sha256,
+    createHash('sha256').update(JSON.stringify(originalArgs)).digest('hex'),
+    'audit hash must still identify the frozen bytes',
+  )
+  // The in-memory release source keeps the FULL original bytes.
+  const frozen = store.findPendingForSession(sessionId)
+  assert.equal(frozen!.paramsJson, JSON.stringify(originalArgs))
+
+  answerPendingCard(sessionId, FROZEN_CALL_DENY_OPTION)
+  const output = await pending
+  assert.equal(output.data?.errorKind, 'confirmation_denied_by_user')
+})
+
+test('store: sensitively-named keys are masked in the audit copy even without the sensitive-rule flag', () => {
+  const db = createFakeDb()
+  const store = new FrozenCallStore(db)
+  const frozen = store.freeze({
+    toolName: 'feishu_file_upload',
+    params: { channel_id: 'ch-1', file_path: '/tmp/x.pdf', file_type: 'pdf', api_key: 'sk-leak-me' },
+    sessionId: 's-keys',
+  })
+  assert.ok(frozen.ok)
+  const row = [...db.rows.values()][0]
+  assert.ok(!String(row.params_json).includes('sk-leak-me'), 'sensitive key value must be masked')
+  if (!frozen.ok) return
+  const released = store.release(frozen.id, frozen.token)
+  assert.ok(released.ok)
+  if (!released.ok) return
+  assert.equal((released.params as { api_key: string }).api_key, 'sk-leak-me', 'release keeps the full original value')
+})
+
+// ---------------------------------------------------------------------------
+// 5c. One TTL for frozen call AND confirmation card
+// ---------------------------------------------------------------------------
+
+test('card timeout follows the frozen-call TTL — no 24h ask-user default', async () => {
+  const store = new FrozenCallStore(createFakeDb())
+  const outcome = await runFrozenCallConfirmation(
+    'calendar_delete_event',
+    { id: 'evt-ttl' },
+    resolveConfirmationGate('calendar_delete_event', { id: 'evt-ttl' }),
+    {
+      store,
+      sessionId: 'ttl-session',
+      conversationId: 'ttl-session',
+      timeoutMs: 60,
+    },
+  )
+  assert.equal(outcome.kind, 'expired', 'card must time out on the frozen-call TTL, not the 24h default')
+  if (outcome.kind !== 'expired') return
+  assert.equal(store.get(outcome.frozenCallId)?.status, 'expired')
+  assert.equal(
+    getAskUserQuestionsStore().findPendingForSession('ttl-session'),
+    null,
+    'card slot must be freed when the TTL fires',
+  )
 })
 
 // ---------------------------------------------------------------------------

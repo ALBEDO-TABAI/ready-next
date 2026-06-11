@@ -30,9 +30,53 @@
  * unconfirmable call silently).
  */
 
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 
 export type FrozenCallStatus = 'pending' | 'released' | 'denied' | 'expired'
+
+// ---------------------------------------------------------------------------
+// Audit redaction (Codex review P1#4). The FULL params live only in this
+// process's memory (the byte-identical release source). Everything durable or
+// user-visible — the pending_confirmations row, the confirmation-card text,
+// metrics — gets a REDACTED copy plus a sha256 of the frozen bytes, so
+// credentials typed into login/captcha fields or carried in outbound messages
+// never land in SQLite, chat_messages, or logs.
+// ---------------------------------------------------------------------------
+
+const SENSITIVE_KEY_PATTERN =
+  /pass(word)?|passwd|secret|token|credential|api[_-]?key|cookie|authorization|私钥|口令|密码|身份证|银行卡|cvv|pin/i
+const SENSITIVE_VALUE_PATTERN =
+  /密码|口令|私钥|身份证|银行卡|credit\s*card|cvv|bearer\s+[a-z0-9]/i
+/** Structural enum-ish fields that stay readable even under redact-all. */
+const STRUCTURAL_AUDIT_KEYS = new Set([
+  'action', 'kind', 'msg_type', 'read_back', 'confirmedVia', 'file_type', 'tab_id',
+])
+const REDACTED_PLACEHOLDER = '«redacted»'
+
+export function redactParamsForAudit(
+  value: unknown,
+  opts?: { redactAllStrings?: boolean },
+  key?: string,
+): unknown {
+  if (typeof value === 'string') {
+    if (key && STRUCTURAL_AUDIT_KEYS.has(key)) return value
+    if (opts?.redactAllStrings) return REDACTED_PLACEHOLDER
+    if (key && SENSITIVE_KEY_PATTERN.test(key)) return REDACTED_PLACEHOLDER
+    if (SENSITIVE_VALUE_PATTERN.test(value)) return REDACTED_PLACEHOLDER
+    return value
+  }
+  if (Array.isArray(value)) {
+    return value.map((item) => redactParamsForAudit(item, opts, key))
+  }
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = redactParamsForAudit(v, opts, k)
+    }
+    return out
+  }
+  return value
+}
 
 export interface FrozenCallDbStatement {
   run(...params: unknown[]): unknown
@@ -68,6 +112,12 @@ export interface FreezeArgs {
   scopeId?: string | null
   sessionId?: string | null
   ttlMs?: number
+  /**
+   * The matched policy rule deals in credentials / sensitive payloads
+   * (login fill, sensitive outbound send) — the audit copy masks ALL
+   * free-text values, not just sensitively-named keys.
+   */
+  sensitiveParams?: boolean
 }
 
 export type FreezeResult =
@@ -127,6 +177,14 @@ export class FrozenCallStore {
     }
     if (this.db) {
       try {
+        // Durable row carries a REDACTED audit copy + sha256 of the frozen
+        // bytes — never the raw params. Release reads the in-memory record,
+        // so audit redaction cannot affect the byte-identical contract.
+        const auditJson = JSON.stringify({
+          __audit: 'redacted',
+          sha256: createHash('sha256').update(record.paramsJson).digest('hex'),
+          params: redactParamsForAudit(args.params, { redactAllStrings: args.sensitiveParams }),
+        })
         this.db
           .prepare(
             'INSERT INTO pending_confirmations (id, run_id, task_id, scope_id, tool_name, params_json, created_at, expires_at, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
@@ -137,7 +195,7 @@ export class FrozenCallStore {
             record.taskId,
             record.scopeId,
             record.toolName,
-            record.paramsJson,
+            auditJson,
             new Date(record.createdAt).toISOString(),
             new Date(record.expiresAt).toISOString(),
             'pending',
