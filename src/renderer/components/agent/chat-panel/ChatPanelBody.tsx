@@ -11,9 +11,9 @@ import type {
 } from '../../../stores/useAgent'
 import type { ReadySkillReference } from '../../../modules/agent/chat-input-bridge'
 import { revealDocumentQuoteAttachment } from '../../../modules/agent/document-quote-navigation'
+import { WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM } from '../../../modules/workbench/chrome'
 import type { ReferenceSkillHintData } from '../../../types/electron'
 import { toLocalFileUrl } from '../../../utils/dragDrop'
-import { LIQUID_INACTIVE_CHROME_STYLE } from '../../ui/LiquidGlassScene'
 import ChatMessages from '../ChatMessages'
 import ChatInput, { type ChatInputHandle } from '../ChatInput'
 import { SoftFailureCapsule } from '../SoftFailureCapsule'
@@ -171,12 +171,12 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     setAttachmentPreviewLoading,
   } = props
 
+  // 外壳保持透明：玻璃材质（折射/模糊/纱层）全部由 ChatInput 里的 LiquidLens 承担。
   const composerShellStyle = {
-    ...LIQUID_INACTIVE_CHROME_STYLE,
-    borderRadius: 10,
-    background: 'var(--input-slot-bg)',
-    border: isDragOver ? '2px solid var(--color-blue)' : '1px solid var(--input-slot-border)',
-    boxShadow: isDragOver ? 'var(--input-slot-shadow-focus)' : 'var(--input-slot-shadow)',
+    borderRadius: 'var(--workbench-canvas-radius)',
+    background: 'transparent',
+    border: isDragOver ? '2px solid var(--color-blue)' : '1px solid transparent',
+    boxShadow: 'none',
   } as CSSProperties
 
   const handleAttachmentPreview = useCallback(
@@ -286,7 +286,16 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
         pendingToolTrace,
         bottomTaskCard,
       }) => (
-        <>
+        <div
+          className="ready-chat-body-glass-stack"
+          style={{
+            position: 'relative',
+            flex: 1,
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
           <ChatMessages
             messages={messages}
             messageTaskSnapshots={messageTaskSnapshots}
@@ -356,8 +365,14 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
           })()}
 
           <div
+            className="ready-chat-composer-overlay"
             style={{
-              padding: '10px 16px 0',
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 30,
+              padding: `10px 16px ${WORKBENCH_CANVAS_OUTER_PADDING_BOTTOM}px`,
               borderTop: '1px solid transparent',
               display: 'flex',
               flexDirection: 'column',
@@ -365,7 +380,8 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
               background: 'transparent',
               backdropFilter: 'none',
               WebkitBackdropFilter: 'none',
-              boxShadow: 'none'
+              boxShadow: 'none',
+              pointerEvents: 'none',
             }}
           >
             {referenceSkillHint && (
@@ -557,7 +573,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
               ModelSelector={ModelSelector}
             />
           </div>
-        </>
+        </div>
       )}
     </TaskToolSnapshot>
   )

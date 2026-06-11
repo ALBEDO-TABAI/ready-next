@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { motion, useIsPresent, useReducedMotion } from 'framer-motion'
 import { PanelLeftClose, History, Plus } from 'lucide-react'
 import { IconButton } from '../../../ui/IconButton'
@@ -36,6 +37,11 @@ export function ChatPanelMotionLayer({
   const isPresent = useIsPresent()
   const layerZIndex = isPresent ? 1 : 2
   const reduceMotion = useReducedMotion()
+  // will-change 只允许存在于动画进行期间（onAnimationStart → Complete）：
+  // 它会强制 Chromium 为该层建立 backdrop root，把面板内 backdrop-filter
+  // （聊天输入框的 LiquidLens 折射）能看到的背景整个掏空。静止时必须撤掉，
+  // 动画时保留以避免逐帧重栅格化。
+  const [isAnimating, setIsAnimating] = useState(false)
   const content = !header || !body
     ? children
     : (
@@ -62,8 +68,10 @@ export function ChatPanelMotionLayer({
       style={{
         zIndex: layerZIndex,
         pointerEvents: isPresent ? 'auto' : 'none',
-        willChange: reduceMotion ? 'auto' : 'transform, opacity'
+        willChange: !reduceMotion && isAnimating ? 'transform, opacity' : 'auto'
       }}
+      onAnimationStart={() => setIsAnimating(true)}
+      onAnimationComplete={() => setIsAnimating(false)}
       initial={reduceMotion ? false : { x: WORKBENCH_PANEL_MOTION_OFFSET_PX, opacity: 0.01 }}
       animate={{
         x: 0,

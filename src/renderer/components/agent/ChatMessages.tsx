@@ -10,7 +10,6 @@ import { submitAskUserQuestionsAnswers, cancelAskUserQuestionsCard } from '../..
 // parks the first message below that chrome without using mask-image, which is
 // unstable with transparent vibrancy windows on Chromium 148.
 const CHAT_SCROLL_TOP_FADE = 38
-
 interface ChatMessagesProps {
   messages: AgentMessage[]
   messageTaskSnapshots: Record<string, React.ReactNode>
@@ -89,7 +88,7 @@ export default function ChatMessages({
       data-liquid-scroll-root="chat-messages"
       className="panel-hover-scrollbar flex-1 overflow-auto"
       style={{
-        padding: `${CHAT_SCROLL_TOP_FADE}px 16px 16px`,
+        padding: `${CHAT_SCROLL_TOP_FADE}px 16px 24px`,
         display: 'flex',
         flexDirection: 'column',
         gap: 14,

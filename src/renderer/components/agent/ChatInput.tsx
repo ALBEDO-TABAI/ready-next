@@ -1,6 +1,7 @@
-import { forwardRef, useRef, useEffect, useState, useImperativeHandle, useCallback, useMemo } from 'react'
+import { forwardRef, useRef, useEffect, useLayoutEffect, useState, useImperativeHandle, useCallback, useMemo } from 'react'
 import { AtSign, Plus, Send, Square, Undo2, ChevronDown, Puzzle } from 'lucide-react'
 import { IconButton } from '../ui/IconButton'
+import { LiquidLens } from '../ui/liquid-glass/LiquidLens'
 import type { ChatAttachment } from '../../stores/useAgent'
 import type { ReadySkillReference } from '../../modules/agent/chat-input-bridge'
 import type { NativeContextMenuItem } from '../../../shared/native-context-menu'
@@ -41,6 +42,145 @@ interface ChatInputProps {
 export interface ChatInputHandle {
   focusWithResize: () => void
   resetHeight: () => void
+}
+
+function ChatComposerBackdropProjection() {
+  const layerRef = useRef<HTMLDivElement | null>(null)
+
+  useLayoutEffect(() => {
+    const layer = layerRef.current
+    if (!layer) return
+
+    let frame = 0
+    let observer: MutationObserver | null = null
+    let resizeObserver: ResizeObserver | null = null
+    let source: HTMLElement | null = null
+    let maskedSource: HTMLElement | null = null
+    let maskSnapshot: Array<[string, string]> | null = null
+
+    const maskProperties = [
+      'mask-image',
+      'mask-size',
+      'mask-repeat',
+      'mask-position',
+      'mask-mode',
+      '-webkit-mask-image',
+      '-webkit-mask-size',
+      '-webkit-mask-repeat',
+      '-webkit-mask-position',
+    ]
+
+    const clearMaskStyles = (element: HTMLElement) => {
+      maskProperties.forEach((property) => element.style.removeProperty(property))
+    }
+
+    const restoreSourceMask = () => {
+      if (!maskedSource || !maskSnapshot) return
+      maskProperties.forEach((property) => maskedSource?.style.removeProperty(property))
+      maskSnapshot.forEach(([property, value]) => {
+        if (value) maskedSource?.style.setProperty(property, value)
+      })
+      maskedSource = null
+      maskSnapshot = null
+    }
+
+    const applySourceMask = (nextSource: HTMLElement, sourceRect: DOMRect, layerRect: DOMRect) => {
+      if (maskedSource !== nextSource) {
+        restoreSourceMask()
+        maskedSource = nextSource
+        maskSnapshot = maskProperties.map((property) => [property, nextSource.style.getPropertyValue(property)])
+      }
+
+      const holeX = Math.max(0, layerRect.left - sourceRect.left)
+      const holeY = Math.max(0, layerRect.top - sourceRect.top)
+      const holeWidth = Math.max(0, Math.min(layerRect.width, sourceRect.right - layerRect.left))
+      const holeHeight = Math.max(0, Math.min(layerRect.height, sourceRect.bottom - layerRect.top))
+      if (holeWidth <= 1 || holeHeight <= 1) {
+        clearMaskStyles(nextSource)
+        return
+      }
+
+      const radius = Math.min(18, holeWidth / 2, holeHeight / 2)
+      const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${sourceRect.width}" height="${sourceRect.height}" viewBox="0 0 ${sourceRect.width} ${sourceRect.height}"><rect width="100%" height="100%" fill="white"/><rect x="${holeX}" y="${holeY}" width="${holeWidth}" height="${holeHeight}" rx="${radius}" ry="${radius}" fill="black"/></svg>`
+      const mask = `url("data:image/svg+xml,${encodeURIComponent(svg)}")`
+      nextSource.style.setProperty('mask-image', mask)
+      nextSource.style.setProperty('mask-size', `${sourceRect.width}px ${sourceRect.height}px`)
+      nextSource.style.setProperty('mask-repeat', 'no-repeat')
+      nextSource.style.setProperty('mask-position', '0 0')
+      nextSource.style.setProperty('mask-mode', 'luminance')
+      nextSource.style.setProperty('-webkit-mask-image', mask)
+      nextSource.style.setProperty('-webkit-mask-size', `${sourceRect.width}px ${sourceRect.height}px`)
+      nextSource.style.setProperty('-webkit-mask-repeat', 'no-repeat')
+      nextSource.style.setProperty('-webkit-mask-position', '0 0')
+    }
+
+    const renderClone = () => {
+      frame = 0
+      source = document.querySelector<HTMLElement>('[data-liquid-scroll-root="chat-messages"]')
+      if (!source || !layer.isConnected) {
+        layer.replaceChildren()
+        restoreSourceMask()
+        return
+      }
+
+      const layerRect = layer.getBoundingClientRect()
+      const sourceRect = source.getBoundingClientRect()
+      const clone = source.cloneNode(true) as HTMLElement
+      clone.removeAttribute('id')
+      clone.removeAttribute('data-liquid-scroll-root')
+      clone.querySelectorAll('[id]').forEach((node) => node.removeAttribute('id'))
+      clone.querySelectorAll('[data-liquid-scroll-root]').forEach((node) => node.removeAttribute('data-liquid-scroll-root'))
+      clone.setAttribute('aria-hidden', 'true')
+      clone.setAttribute('inert', '')
+      clone.classList.add('ready-liquid-composer__projection-clone')
+      clearMaskStyles(clone)
+      Object.assign(clone.style, {
+        position: 'absolute',
+        left: `${sourceRect.left - layerRect.left}px`,
+        top: `${sourceRect.top - layerRect.top}px`,
+        width: `${sourceRect.width}px`,
+        height: `${sourceRect.height}px`,
+        margin: '0',
+        pointerEvents: 'none',
+      })
+      layer.replaceChildren(clone)
+      clone.scrollTop = source.scrollTop
+      clone.scrollLeft = source.scrollLeft
+      applySourceMask(source, sourceRect, layerRect)
+    }
+
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(renderClone)
+    }
+
+    source = document.querySelector<HTMLElement>('[data-liquid-scroll-root="chat-messages"]')
+    source?.addEventListener('scroll', schedule, { passive: true })
+    if (source) {
+      observer = new MutationObserver(schedule)
+      observer.observe(source, {
+        attributes: true,
+        characterData: true,
+        childList: true,
+        subtree: true,
+      })
+    }
+    resizeObserver = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(schedule) : null
+    if (source) resizeObserver?.observe(source)
+    resizeObserver?.observe(layer)
+    window.addEventListener('resize', schedule)
+    schedule()
+
+    return () => {
+      if (frame) cancelAnimationFrame(frame)
+      source?.removeEventListener('scroll', schedule)
+      observer?.disconnect()
+      resizeObserver?.disconnect()
+      window.removeEventListener('resize', schedule)
+      restoreSourceMask()
+    }
+  }, [])
+
+  return <div ref={layerRef} aria-hidden="true" className="ready-liquid-composer__projection" />
 }
 
 const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput({
@@ -381,17 +521,42 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
         </div>
       )}
 
-      <div data-chat-composer-shell="true" className="block w-full" style={composerShellStyle}>
-        <div
-          className="flex items-end"
-          style={{
-            borderRadius: 10,
-            background: 'transparent',
-            padding: isDragOver ? '9px 13px' : '10px 14px',
-            position: 'relative',
-            transition: 'padding 150ms ease',
-          }}
+      <div
+        data-chat-composer-shell="true"
+        data-drag-over={isDragOver ? 'true' : 'false'}
+        className="ready-liquid-composer block w-full"
+        style={{ ...composerShellStyle, overflow: 'visible' }}
+      >
+        <LiquidLens
+          className="ready-liquid-composer__surface"
+          radius={18}
+          bevel={22}
+          depth={37}
+          ior={1.34}
+          dome={5}
+          strength={6.4}
+          blur={3.5}
+          frost={0}
+          blurBeforeRefraction
+          saturation={1.18}
+          brightness={1.05}
+          contrast={0.84}
+          aberration={0}
+          engine="backdrop"
+          backdropContent={<ChatComposerBackdropProjection />}
         >
+          <div
+            className="ready-liquid-composer__content flex flex-col"
+            style={{
+              borderRadius: 'var(--workbench-canvas-radius)',
+              background: 'transparent',
+              padding: isDragOver ? '13px 15px 10px' : '14px 16px 11px',
+              position: 'relative',
+              minHeight: 108,
+              gap: 10,
+              transition: 'padding 150ms ease',
+            }}
+          >
           <textarea
             ref={textareaRef}
             data-ready-agent-input="true"
@@ -406,17 +571,18 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             }}
             disabled={composerLocked}
             placeholder="Hi～今天有什么可以帮到你"
-            className="ready-input-slot-inner flex-1 bg-transparent border-none outline-none resize-none"
+            className="ready-input-slot-inner w-full bg-transparent border-none outline-none resize-none"
             style={{
               fontSize: 13,
               fontWeight: 500,
               color: 'var(--text-body)',
               lineHeight: '1.5',
-              minHeight: 20,
+              width: '100%',
+              minHeight: 44,
               maxHeight: 120,
               opacity: composerLocked ? 0.7 : 1,
             }}
-            rows={1}
+            rows={2}
           />
 
           {showAtMenu && filteredFilePool.length > 0 && (
@@ -561,153 +727,153 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
               )}
             </div>
           )}
-        </div>
-      </div>
 
-      {/* Bottom Bar */}
-      <div className="flex items-center justify-between">
-        {/* Left: add + agent + model */}
-        <div className="flex items-center" style={{ gap: 6 }}>
-          <button
-            onClick={onPickFiles}
-            title="添加文件"
-            className="flex items-center justify-center hover:bg-black/5 active:scale-[0.98] transition-[background-color,transform] duration-200 ease-out"
-            style={{ width: 24, height: 24, borderRadius: 8, border: '1px solid transparent', background: 'transparent' }}
-          >
-            <Plus style={{ width: 12, height: 12 }} className="text-[var(--text-gray)]" strokeWidth={2} />
-          </button>
-
-          {/* Agent selector */}
-          <div className="relative" ref={dropdownRef}>
-            <button
-              disabled={isChannelScope}
-              onClick={(event) => {
-                void showNativeAgentMenu(event.currentTarget)
-              }}
-              className="flex items-center active:scale-[0.98] transition-[opacity,transform] duration-200 ease-out"
-              style={{
-                padding: '3px 8px',
-                borderRadius: 8,
-                border: '1px solid transparent',
-                background: 'transparent',
-                gap: 4,
-                opacity: isChannelScope ? 0.7 : 1,
-                cursor: isChannelScope ? 'default' : 'pointer',
-              }}
-            >
-              <span style={{ fontSize: 11, color: 'var(--text-gray)' }}>{currentAgentAvatar}</span>
-              <span style={{ fontSize: 11, color: 'var(--text-gray)' }}>{currentAgentDisplayName || '管家'}</span>
-              <ChevronDown
-                style={{
-                  width: 10,
-                  height: 10,
-                  transform: (showAgentSelect || agentNativeMenuOpen) ? 'rotate(180deg)' : 'rotate(0deg)',
-                  transition: 'transform 200ms ease',
-                }}
-                className="text-[var(--text-light)]"
-              />
-            </button>
-
-            {showAgentSelect && !agentNativeMenuOpen && !isChannelScope && (
-              <div
-                style={{
-                  ...chatMenuSurfaceStyle,
-                  position: 'absolute',
-                  bottom: '100%',
-                  left: 0,
-                  marginBottom: 4,
-                  minWidth: 160,
-                  zIndex: 100,
-                }}
+          <div className="flex items-center justify-between" style={{ gap: 8, minHeight: 32 }}>
+            <div className="flex items-center" style={{ gap: 6, minWidth: 0, flex: '1 1 auto' }}>
+              <button
+                onClick={onPickFiles}
+                title="添加文件"
+                className="flex items-center justify-center hover:bg-black/5 active:scale-[0.98] transition-[background-color,transform] duration-200 ease-out"
+                style={{ width: 26, height: 26, borderRadius: 9, border: '1px solid transparent', background: 'transparent', flexShrink: 0 }}
               >
-                {agents.map((agent) => (
-                  <button
-                    key={agent.name}
-                    onClick={() => {
-                      onAgentSelect(agent.name)
-                      setShowAgentSelect(false)
-                    }}
-                    className={`ready-floating-menu-item w-full flex items-center gap-2 active:scale-[0.98] transition-[background-color,transform] duration-150 ${agent.name === currentAgent ? 'is-selected' : ''}`}
+                <Plus style={{ width: 14, height: 14 }} className="text-[var(--text-gray)]" strokeWidth={2} />
+              </button>
+
+              <div className="relative" ref={dropdownRef} style={{ flexShrink: 0 }}>
+                <button
+                  disabled={isChannelScope}
+                  onClick={(event) => {
+                    void showNativeAgentMenu(event.currentTarget)
+                  }}
+                  className="flex items-center active:scale-[0.98] transition-[opacity,transform] duration-200 ease-out"
+                  style={{
+                    padding: '3px 8px',
+                    borderRadius: 8,
+                    border: '1px solid transparent',
+                    background: 'transparent',
+                    gap: 4,
+                    opacity: isChannelScope ? 0.7 : 1,
+                    cursor: isChannelScope ? 'default' : 'pointer',
+                  }}
+                >
+                  <span style={{ fontSize: 11, color: 'var(--text-gray)' }}>{currentAgentAvatar}</span>
+                  <span style={{ fontSize: 11, color: 'var(--text-gray)' }}>{currentAgentDisplayName || '管家'}</span>
+                  <ChevronDown
                     style={{
-                      ...chatMenuItemStyle,
+                      width: 10,
+                      height: 10,
+                      transform: (showAgentSelect || agentNativeMenuOpen) ? 'rotate(180deg)' : 'rotate(0deg)',
+                      transition: 'transform 200ms ease',
+                    }}
+                    className="text-[var(--text-light)]"
+                  />
+                </button>
+
+                {showAgentSelect && !agentNativeMenuOpen && !isChannelScope && (
+                  <div
+                    style={{
+                      ...chatMenuSurfaceStyle,
+                      position: 'absolute',
+                      bottom: '100%',
+                      left: 0,
+                      marginBottom: 4,
+                      minWidth: 160,
+                      zIndex: 100,
                     }}
                   >
-                    <span style={{ fontSize: 14 }}>{agent.avatar}</span>
-                    <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-body)', flex: 1, textAlign: 'left' }}>
-                      {agent.displayName}
-                    </span>
-                    {agent.name === currentAgent && (
-                      <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--color-blue)' }} />
-                    )}
-                    {agent.status === 'working' && (
-                      <span style={{ fontSize: 10, color: 'var(--color-blue)' }}>工作中</span>
-                    )}
-                  </button>
-                ))}
+                    {agents.map((agent) => (
+                      <button
+                        key={agent.name}
+                        onClick={() => {
+                          onAgentSelect(agent.name)
+                          setShowAgentSelect(false)
+                        }}
+                        className={`ready-floating-menu-item w-full flex items-center gap-2 active:scale-[0.98] transition-[background-color,transform] duration-150 ${agent.name === currentAgent ? 'is-selected' : ''}`}
+                        style={{
+                          ...chatMenuItemStyle,
+                        }}
+                      >
+                        <span style={{ fontSize: 14 }}>{agent.avatar}</span>
+                        <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--text-body)', flex: 1, textAlign: 'left' }}>
+                          {agent.displayName}
+                        </span>
+                        {agent.name === currentAgent && (
+                          <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--color-blue)' }} />
+                        )}
+                        {agent.status === 'working' && (
+                          <span style={{ fontSize: 10, color: 'var(--color-blue)' }}>工作中</span>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
-            )}
+
+              <div style={{ minWidth: 0 }}>
+                <ModelSelector />
+              </div>
+            </div>
+
+            <div className="flex items-center" style={{ gap: 6, flexShrink: 0 }}>
+              {!composerLocked && hasUserMessages && (
+                <IconButton
+                  icon={<Undo2 style={{ width: 15, height: 15 }} strokeWidth={2} />}
+                  onClick={onUndo}
+                  title="撤回上一条消息"
+                />
+              )}
+
+              <IconButton
+                icon={<AtSign style={{ width: 15, height: 15 }} strokeWidth={2} />}
+                onClick={() => {
+                  if (filePool.length === 0) return
+                  setAtFilter('')
+                  setShowSlashMenu(false)
+                  setSlashFilter('')
+                  setShowAtMenu((value) => !value)
+                }}
+                title={filePoolCount > 0 ? '引用文件或文件夹' : '先用 + 添加文件'}
+                disabled={filePoolCount === 0}
+              />
+
+              {composerLocked ? (
+                <button
+                  onClick={onStop}
+                  data-ready-agent-stop="true"
+                  title="停止生成"
+                  className="flex items-center justify-center text-white hover:brightness-95 active:scale-[0.98] transition-[filter,transform] duration-200 ease-out"
+                  style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: 15,
+                    background: 'var(--color-red)',
+                  }}
+                >
+                  <Square style={{ width: 12, height: 12 }} strokeWidth={0} fill="currentColor" />
+                </button>
+              ) : (
+                <button
+                  onClick={onSend}
+                  data-ready-agent-send="true"
+                  disabled={!inputValue.trim() && attachmentsCount === 0}
+                  className="flex items-center justify-center hover:brightness-95 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed transition-[opacity,filter,transform] duration-200 ease-out"
+                  style={{
+                    width: 30,
+                    height: 30,
+                    borderRadius: 15,
+                    border: '1px solid color-mix(in srgb, var(--surface-border) 46%, transparent)',
+                    background: '#fff',
+                    color: 'var(--color-blue)',
+                    boxShadow: 'none',
+                  }}
+                >
+                  <Send style={{ width: 15, height: 15 }} strokeWidth={2.1} fill="none" />
+                </button>
+              )}
+            </div>
           </div>
-
-          <ModelSelector />
-        </div>
-
-        {/* Right: undo + @ + stop/send */}
-        <div className="flex items-center" style={{ gap: 6 }}>
-          {!composerLocked && hasUserMessages && (
-            <IconButton
-              icon={<Undo2 style={{ width: 15, height: 15 }} strokeWidth={2} />}
-              onClick={onUndo}
-              title="撤回上一条消息"
-            />
-          )}
-
-          <IconButton
-            icon={<AtSign style={{ width: 15, height: 15 }} strokeWidth={2} />}
-            onClick={() => {
-              if (filePool.length === 0) return
-              setAtFilter('')
-              setShowSlashMenu(false)
-              setSlashFilter('')
-              setShowAtMenu((value) => !value)
-            }}
-            title={filePoolCount > 0 ? '引用文件或文件夹' : '先用 + 添加文件'}
-            disabled={filePoolCount === 0}
-          />
-
-          {composerLocked ? (
-            <button
-              onClick={onStop}
-              data-ready-agent-stop="true"
-              title="停止生成"
-              className="flex items-center justify-center text-white hover:brightness-95 active:scale-[0.98] transition-[filter,transform] duration-200 ease-out"
-              style={{
-                width: 26,
-                height: 26,
-                borderRadius: 13,
-                background: 'var(--color-red)',
-              }}
-            >
-              <Square style={{ width: 11, height: 11 }} strokeWidth={0} fill="currentColor" />
-            </button>
-          ) : (
-            <button
-              onClick={onSend}
-              data-ready-agent-send="true"
-              disabled={!inputValue.trim() && attachmentsCount === 0}
-              className="flex items-center justify-center text-white hover:brightness-95 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed transition-[opacity,filter,transform] duration-200 ease-out"
-              style={{
-                width: 26,
-                height: 26,
-                borderRadius: 13,
-                border: '1px solid transparent',
-                background: 'var(--color-blue)',
-                boxShadow: 'none',
-              }}
-            >
-              <Send style={{ width: 13, height: 13 }} strokeWidth={2} />
-            </button>
-          )}
-        </div>
+          </div>
+        </LiquidLens>
       </div>
     </div>
   )

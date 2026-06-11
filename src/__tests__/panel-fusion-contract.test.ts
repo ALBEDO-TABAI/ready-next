@@ -43,7 +43,7 @@ test('liquid glass chrome removes prominent shell edges so panels read as one fu
   assert.doesNotMatch(browserSidePanel, /border-l/)
   assert.doesNotMatch(browserSidePanel, /borderBottom: '1px solid var\(--border-default\)'/)
   assert.doesNotMatch(chatPanel, /className="content-surface-panel flex-shrink-0 flex flex-col overflow-hidden"/)
-  assert.match(chatPanelBody, /border: isDragOver \? '2px solid var\(--color-blue\)' : '1px solid var\(--input-slot-border\)'/)
+  assert.match(chatPanelBody, /border: isDragOver \? '2px solid var\(--color-blue\)' : '1px solid transparent'/)
   assert.doesNotMatch(chatPanel, /className="glass-surface-panel flex items-center justify-between"/)
   assert.doesNotMatch(chatPanel, /className="glass-surface-panel"/)
   assert.doesNotMatch(chatPanel, /className="glass-surface-card flex items-center justify-between"/)

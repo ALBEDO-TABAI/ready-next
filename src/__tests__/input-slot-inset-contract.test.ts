@@ -38,10 +38,24 @@ test('inactive input slots blend into their panel surface and rely on a faint ou
   assert.doesNotMatch(styles, /--input-slot-shadow:[\s\S]*inset 0 2px 8px -2px/)
 })
 
-test('chat composer uses the shared inset slot treatment instead of the old raised glass treatment', () => {
+test('chat composer delegates its material to the liquid lens instead of the inset slot treatment', () => {
+  // 2026-06-10: 输入框升级为真折射液态玻璃（LiquidLens）。外壳只保留拖拽态
+  // 描边；背景/模糊/纱层不再走 input-slot 变量，由镜片层统一承担。
   const chatPanelBody = readWorkspaceFile('src/renderer/components/agent/chat-panel/ChatPanelBody.tsx')
+  const chatInput = readWorkspaceFile('src/renderer/components/agent/ChatInput.tsx')
 
-  assert.match(chatPanelBody, /background: 'var\(--input-slot-bg\)'/)
-  assert.match(chatPanelBody, /border: isDragOver \? '2px solid var\(--color-blue\)' : '1px solid var\(--input-slot-border\)'/)
-  assert.match(chatPanelBody, /boxShadow: isDragOver[\s\S]*var\(--input-slot-shadow-focus\)[\s\S]*: 'var\(--input-slot-shadow\)'/)
+  assert.match(chatPanelBody, /background: 'transparent'/)
+  assert.match(chatPanelBody, /border: isDragOver \? '2px solid var\(--color-blue\)' : '1px solid transparent'/)
+  assert.match(chatPanelBody, /boxShadow: 'none'/)
+  assert.match(chatInput, /<LiquidLens/)
+  assert.match(chatInput, /className="ready-liquid-composer__surface"/)
+  assert.match(chatInput, /bevel=\{22\}/)
+  assert.match(chatInput, /ior=\{1\.34\}/)
+  assert.match(chatInput, /dome=\{5\}/)
+  assert.match(chatInput, /strength=\{6\.4\}/)
+  assert.match(chatInput, /blur=\{3\.5\}/)
+  assert.match(chatInput, /frost=\{0\}/)
+  assert.match(chatInput, /blurBeforeRefraction/)
+  assert.match(chatInput, /contrast=\{0\.84\}/)
+  assert.match(chatInput, /aberration=\{0\}/)
 })

@@ -814,6 +814,116 @@ html[data-theme='dark'] .ready-app-bg::after {
   color: var(--text-placeholder);
 }
 
+.ready-liquid-composer {
+  position: relative;
+  background: transparent !important;
+  border-color: transparent !important;
+  box-shadow: none;
+}
+
+/* The refracting layer is a LiquidLens (canvas displacement map →
+   feDisplacementMap → backdrop-filter: url()). CSS only adds the material
+   veil and rim highlights; the optics live in the component. */
+.ready-liquid-composer__surface {
+  position: relative;
+  z-index: 0;
+  overflow: hidden;
+  border-radius: var(--workbench-canvas-radius);
+  transform: translateZ(0);
+  background: rgba(248, 250, 252, 0.44);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.42),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.ready-liquid-composer__surface::before,
+.ready-liquid-composer__surface::after {
+  content: '';
+  position: absolute;
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.ready-liquid-composer__surface::before {
+  inset: 0;
+  z-index: 4;
+  border: 0.5px solid rgba(255, 255, 255, 0.24);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.07),
+    inset 0 1px 0 rgba(255, 255, 255, 0.24);
+}
+
+.ready-liquid-composer__surface::after {
+  inset: 0;
+  z-index: 5;
+  padding: 1px;
+  background:
+    linear-gradient(132deg, rgba(255, 255, 255, 0.02) 0%, rgba(255, 255, 255, 0.42) 30%, rgba(255, 255, 255, 0.02) 56%, rgba(255, 255, 255, 0.28) 78%, rgba(255, 255, 255, 0.02) 100%);
+  opacity: 0.24;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+
+.ready-liquid-composer__content {
+  position: relative;
+  z-index: 3;
+}
+
+.ready-liquid-composer__projection {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: 0.72;
+  filter: blur(3.5px) saturate(1.28) contrast(0.82) brightness(1.08);
+  transform: translateZ(0) scale(1.035);
+}
+
+.ready-liquid-composer__projection::after {
+  content: '';
+  position: absolute;
+  inset: -18px;
+  background:
+    radial-gradient(circle at 20% 18%, rgba(255, 255, 255, 0.48), transparent 28%),
+    radial-gradient(circle at 76% 62%, rgba(255, 255, 255, 0.30), transparent 36%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.36), rgba(248, 250, 252, 0.18));
+  pointer-events: none;
+}
+
+.ready-liquid-composer__projection-clone {
+  max-width: none !important;
+  opacity: 0.82;
+}
+
+.ready-liquid-composer:focus-within .ready-liquid-composer__surface::after {
+  opacity: 0.52;
+}
+
+.ready-liquid-composer[data-drag-over='true'] .ready-liquid-composer__surface::after {
+  background:
+    linear-gradient(132deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0.86) 32%, rgba(255, 255, 255, 0.18) 55%, rgba(255, 255, 255, 0.48) 82%, rgba(255, 255, 255, 0.06) 100%);
+  opacity: 1;
+}
+
+html[data-theme='dark'] .ready-liquid-composer__surface::before {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.10);
+  opacity: 0.84;
+}
+
+html[data-theme='dark'] .ready-liquid-composer__surface {
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.ready-chat-composer-overlay > * {
+  pointer-events: auto;
+}
+
 /* Reference chips (chat attachments) — mirror the file-manager row treatment:
    borderless soft white tint that brightens on hover, no hard outline. */
 .chat-reference-chip {

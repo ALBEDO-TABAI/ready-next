@@ -83,18 +83,16 @@ describe('LiquidTest preview', () => {
     assert.match(appSource, /path="\*" element={<Navigate to="\/workbench" replace \/>}/)
   })
 
-  it('renders the temporary liquid glass sidebar page', async () => {
+  it('renders the liquid lens tuning lab', async () => {
+    // 2026-06-10: 页面转型为 LiquidLens 光学调参台（拖拽镜片 + 全参数滑杆）。
     const { default: LiquidTest } = await import('../renderer/LiquidTest')
     const html = renderToStaticMarkup(React.createElement(LiquidTest))
 
-    assert.match(html, /Liquid Glass Sidebar/i)
-    assert.match(html, /Inbox/i)
-    assert.match(html, /Design queue/i)
-    assert.match(html, /data-scene="maxrovensky-inspired"/)
-    assert.match(html, /data-glass-primitive="add-button"/)
-    assert.match(html, /data-glass-primitive="search"/)
-    assert.match(html, /data-glass-primitive="active-nav"/)
-    assert.match(html, /data-glass-primitive="focus-card"/)
-    assert.match(html, /data-glass-primitive="alert-card"/)
+    assert.match(html, /Liquid lens 调参台/)
+    assert.match(html, /lab-lens-host/)
+    assert.match(html, /折射带宽 px/)
+    assert.match(html, /玻璃厚度 px/)
+    assert.match(html, /色散 px/)
+    assert.match(html, /backdrop-filter:blur\(/)
   })
 })

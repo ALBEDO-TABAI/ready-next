@@ -1,90 +1,12 @@
 import {
   createContext,
   type CSSProperties,
-  type ReactElement,
   type ReactNode,
   type RefObject,
   useContext,
 } from 'react'
-import LiquidGlassImport from 'liquid-glass-react'
-
-type LiquidGlassProps = {
-  children: ReactNode
-  displacementScale?: number
-  blurAmount?: number
-  saturation?: number
-  aberrationIntensity?: number
-  elasticity?: number
-  cornerRadius?: number
-  mouseContainer?: RefObject<HTMLElement | null> | null
-  className?: string
-  padding?: string
-  style?: CSSProperties
-  overLight?: boolean
-  mode?: 'standard' | 'polar' | 'prominent' | 'shader'
-  onClick?: () => void
-}
-
-export type LiquidGlassTone = 'button' | 'card' | 'panel'
-
-interface LiquidGlassPrimitiveProps {
-  id: string
-  tone: LiquidGlassTone
-  mouseContainer?: RefObject<HTMLDivElement | null> | null
-  className?: string
-  style?: CSSProperties
-  innerClassName?: string
-  innerStyle?: CSSProperties
-  radius?: number
-  children: ReactNode
-}
-
-const LiquidGlass = (
-  (LiquidGlassImport as unknown as { default?: (props: LiquidGlassProps) => ReactElement }).default ??
-  (LiquidGlassImport as unknown as (props: LiquidGlassProps) => ReactElement)
-)
 
 const LiquidSceneContext = createContext<RefObject<HTMLDivElement | null> | null>(null)
-
-const NOISE_TEXTURE =
-  'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNjAiIGhlaWdodD0iMTYwIiB2aWV3Qm94PSIwIDAgMTYwIDE2MCI+PGZpbHRlciBpZD0ibiI+PGZlVHVyYnVsZW5jZSB0eXBlPSJmcmFjdGFsTm9pc2UiIGJhc2VGcmVxdWVuY3k9IjAuODUiIG51bU9jdGF2ZXM9IjIiIHN0aXRjaFRpbGVzPSJzdGl0Y2giLz48ZmVDb2xvck1hdHJpeCB0eXBlPSJzYXR1cmF0ZSIgdmFsdWVzPSIwIi8+PGZlQ29tcG9uZW50VHJhbnNmZXI+PGZlRnVuY0EgdHlwZT0idGFibGUiIHRhYmxlVmFsdWVzPSIwIDAuNDUiLz48L2ZlQ29tcG9uZW50VHJhbnNmZXI+PC9maWx0ZXI+PHJlY3Qgd2lkdGg9IjE2MCIgaGVpZ2h0PSIxNjAiIGZpbHRlcj0idXJsKCNuKSIgb3BhY2l0eT0iMC45Ii8+PC9zdmc+'
-
-// Displacement/aberration trimmed 2026-04-18: SVG filter pipeline is GPU-bound
-// during backdrop blur stacking, and button/list tones gain almost no visual
-// refraction from the extra magnitude. See
-// docs/performance/2026-04-18-ui-animation-jank-gap-audit.md §G7.
-const primitiveByTone: Record<LiquidGlassTone, Omit<LiquidGlassProps, 'children' | 'mouseContainer'>> = {
-  button: {
-    displacementScale: 60,
-    blurAmount: 0.5,
-    saturation: 140,
-    aberrationIntensity: 0,
-    elasticity: 0,
-    cornerRadius: 32,
-    mode: 'standard',
-    padding: '0px',
-  },
-  card: {
-    displacementScale: 70,
-    blurAmount: 0.4,
-    saturation: 140,
-    aberrationIntensity: 1.2,
-    elasticity: 0,
-    cornerRadius: 30,
-    mode: 'standard',
-    padding: '0px',
-  },
-  panel: {
-    displacementScale: 60,
-    blurAmount: 0.36,
-    saturation: 140,
-    aberrationIntensity: 1.2,
-    elasticity: 0,
-    cornerRadius: 24,
-    mode: 'standard',
-    padding: '0px',
-  },
-}
 
 export const LIQUID_TEXT_SHADOW = '0 2px 12px rgba(0, 0, 0, 0.42)'
 
@@ -95,7 +17,6 @@ export const LIQUID_PANEL_SHELL_STYLE: CSSProperties = {
   backdropFilter: 'blur(20px) saturate(140%)',
   WebkitBackdropFilter: 'blur(20px) saturate(140%)',
 }
-
 export const LIQUID_CONTENT_SHELL_STYLE: CSSProperties = {
   background: 'rgba(13, 18, 46, 0.46)',
   borderColor: 'rgba(255,255,255,0.08)',
@@ -107,14 +28,6 @@ export const LIQUID_CONTENT_SHELL_STYLE: CSSProperties = {
 export const LIQUID_CONTROL_PILL_STYLE: CSSProperties = {
   background: 'rgba(255,255,255,0.035)',
   borderColor: 'rgba(255,255,255,0.08)',
-}
-
-export const LIQUID_INACTIVE_CHROME_STYLE: CSSProperties = {
-  background: 'rgba(255,255,255,0.018)',
-  borderColor: 'rgba(255,255,255,0.08)',
-  boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.04)',
-  backdropFilter: 'blur(12px) saturate(140%)',
-  WebkitBackdropFilter: 'blur(12px) saturate(140%)',
 }
 
 export const LIQUID_ICON_DISC_STYLE: CSSProperties = {
@@ -199,82 +112,6 @@ export function LiquidBackdropScene({ scene = 'maxrovensky-inspired' }: { scene?
           transform: 'rotate(24deg)',
         }}
       />
-    </div>
-  )
-}
-
-const primitiveVeilStyle: Record<LiquidGlassTone, CSSProperties> = {
-  button: {
-    background: 'rgba(255,255,255,0.012)',
-    opacity: 1,
-  },
-  card: {
-    background: 'rgba(255,255,255,0.018)',
-    opacity: 1,
-  },
-  panel: {
-    background: 'rgba(255,255,255,0.01)',
-    opacity: 1,
-  },
-}
-
-const primitiveNoiseStyle: CSSProperties = {
-  backgroundImage: `url("${NOISE_TEXTURE}")`,
-  backgroundSize: '180px 180px',
-  backgroundRepeat: 'repeat',
-  opacity: 0.018,
-  mixBlendMode: 'soft-light',
-}
-
-export function LiquidGlassPrimitive({
-  id,
-  tone,
-  mouseContainer,
-  className,
-  style,
-  innerClassName,
-  innerStyle,
-  radius,
-  children,
-}: LiquidGlassPrimitiveProps) {
-  const sceneContainer = useLiquidSceneContainer()
-  const resolvedContainer = mouseContainer ?? sceneContainer
-  const config = {
-    ...primitiveByTone[tone],
-    cornerRadius: radius ?? primitiveByTone[tone].cornerRadius,
-  }
-
-  return (
-    <div data-glass-primitive={id} className={className} style={style}>
-      <LiquidGlass
-        {...config}
-        mouseContainer={resolvedContainer}
-        className="block w-full"
-        style={{ width: '100%' }}
-      >
-        <div
-          className={`relative isolate overflow-hidden ${innerClassName ?? ''}`}
-          style={{
-            borderRadius: config.cornerRadius,
-            textShadow: LIQUID_TEXT_SHADOW,
-            color: 'inherit',
-            background: 'transparent',
-            ...innerStyle,
-          }}
-        >
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-0"
-            style={primitiveVeilStyle[tone]}
-          />
-          <div
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-0"
-            style={primitiveNoiseStyle}
-          />
-          <div className="relative z-10">{children}</div>
-        </div>
-      </LiquidGlass>
     </div>
   )
 }

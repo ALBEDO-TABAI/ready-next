@@ -34,7 +34,9 @@ test('liquid glass skin defines shell-level fresnel, noise, and atmosphere contr
   assert.match(styles, /\.rss-mode-shell \.rss-feed-sheet \{[\s\S]*background:\s*var\(--workbench-module-surface-bg\) !important;/)
   assert.match(styles, /ready-app-bg/)
   assert.match(scene, /data-scene=\{scene\}/)
-  assert.match(scene, /export type LiquidGlassTone = 'button' \| 'card' \| 'panel'/)
+  // 2026-06-10: liquid-glass-react 退役，折射由自研 LiquidLens 承担；
+  // 场景文件不得再引入第三方玻璃库。
+  assert.doesNotMatch(scene, /liquid-glass-react/)
 })
 
 test('theme and settings are single-track liquid glass by default', () => {
@@ -47,16 +49,22 @@ test('theme and settings are single-track liquid glass by default', () => {
   assert.match(previewMocks, /searchParams\.get\('skin'\) \|\| 'liquid-glass'/)
 })
 
-test('workbench and liquid test share the same scene foundation', () => {
+test('workbench keeps the liquid scene; liquid test exercises the composer lens', () => {
+  // 2026-06-10: #/liquid-test 从「工作台场景复刻」转型为 LiquidLens 光学调参台。
+  // 合同变为：实验页与聊天输入框消费同一个折射组件，参数可在实验页校准后回填。
   const liquidTest = readWorkspaceFile('src/renderer/LiquidTest.tsx')
+  const chatInput = readWorkspaceFile('src/renderer/components/agent/ChatInput.tsx')
   const workbenchMode = readWorkspaceFile('src/renderer/pages/WorkbenchMode.tsx')
   const topBar = readWorkspaceFile('src/renderer/components/layout/TopBar.tsx')
   const sidePanel = readWorkspaceFile('src/renderer/components/layout/SidePanel.tsx')
   const tabs = readWorkspaceFile('src/renderer/components/workbench/WorkbenchProjectTabs.tsx')
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
 
-  assert.match(liquidTest, /LiquidSceneProvider/)
-  assert.match(liquidTest, /LiquidBackdropScene/)
+  assert.match(liquidTest, /from '\.\/components\/ui\/liquid-glass\/LiquidLens'/)
+  assert.match(liquidTest, /composer:\s*\{[^}]*strength:\s*2\.05,[^}]*blur:\s*13,[^}]*frost:\s*0,[^}]*blurBeforeRefraction:\s*true/)
+  assert.match(chatInput, /from '\.\.\/ui\/liquid-glass\/LiquidLens'/)
+  assert.match(chatInput, /blurBeforeRefraction/)
+  assert.match(chatInput, /frost=\{0\}/)
   assert.match(workbenchMode, /LiquidSceneProvider/)
   assert.doesNotMatch(workbenchMode, /LiquidBackdropScene/)
   assert.match(topBar, /data-liquid-shell="topbar"/)

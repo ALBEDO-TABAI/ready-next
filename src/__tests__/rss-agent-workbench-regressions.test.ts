@@ -42,9 +42,11 @@ test('chat composer keeps a visible shell and a primary send button after liquid
 
   assert.match(chatPanelBody, /const composerShellStyle = \{/)
   assert.match(chatInput, /data-chat-composer-shell="true"/)
-  assert.match(chatPanelBody, /background:\s*'var\(--input-slot-bg\)'/)
-  assert.match(chatPanelBody, /border: isDragOver \? '2px solid var\(--color-blue\)' : '1px solid var\(--input-slot-border\)'/)
-  assert.match(chatPanelBody, /boxShadow: isDragOver[\s\S]*var\(--input-slot-shadow-focus\)[\s\S]*: 'var\(--input-slot-shadow\)'/)
+  // 2026-06-10: 玻璃材质收口到 LiquidLens；外壳透明、仅拖拽态有描边。
+  assert.match(chatPanelBody, /background:\s*'transparent'/)
+  assert.match(chatPanelBody, /border: isDragOver \? '2px solid var\(--color-blue\)' : '1px solid transparent'/)
+  assert.match(chatPanelBody, /boxShadow:\s*'none'/)
+  assert.match(chatInput, /<LiquidLens/)
   assert.match(chatInput, /background: 'var\(--color-blue\)'/)
   assert.doesNotMatch(chatPanelBody, /id="chat-input-shell"/)
 })

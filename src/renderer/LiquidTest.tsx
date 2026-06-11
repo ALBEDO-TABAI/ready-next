@@ -1,246 +1,558 @@
-import { useRef } from 'react'
-import {
-  Bell,
-  Compass,
-  FolderKanban,
-  Inbox,
-  MessageSquare,
-  Plus,
-  Search,
-  Sparkles,
-} from 'lucide-react'
-import {
-  LIQUID_CONTENT_SHELL_STYLE,
-  LIQUID_CONTROL_PILL_STYLE,
-  LIQUID_ICON_DISC_STYLE,
-  LIQUID_INACTIVE_CHROME_STYLE,
-  LIQUID_PANEL_SHELL_STYLE,
-  LIQUID_TEXT_SHADOW,
-  LiquidBackdropScene,
-  LiquidGlassPrimitive,
-  LiquidSceneProvider,
-} from './components/ui/LiquidGlassScene'
+import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
+import { LiquidLens, type LiquidLensProps } from './components/ui/liquid-glass/LiquidLens'
 
-const sidebarItems = [
-  { label: 'Inbox', meta: '12', icon: Inbox },
-  { label: 'Design queue', meta: '4', icon: FolderKanban, active: true },
-  { label: 'Explore', meta: 'New', icon: Compass },
-  { label: 'Messages', meta: '3', icon: MessageSquare },
+/**
+ * Liquid glass tuning lab (#/liquid-test).
+ *
+ * One refractive lens (LiquidLens) you can drag over a busy backdrop, with
+ * every optical parameter on a slider. Used to dial in the chat composer
+ * defaults; not part of any workbench flow.
+ */
+
+interface LensConfig {
+  width: number
+  height: number
+  radius: number
+  bevel: number
+  depth: number
+  ior: number
+  dome: number
+  strength: number
+  blur: number
+  frost: number
+  blurBeforeRefraction: boolean
+  saturation: number
+  brightness: number
+  contrast: number
+  aberration: number
+  engine: NonNullable<LiquidLensProps['engine']>
+  debugMap: boolean
+}
+
+const DEFAULT_CONFIG: LensConfig = {
+  width: 560,
+  height: 120,
+  radius: 28,
+  bevel: 24,
+  depth: 12,
+  ior: 1.5,
+  dome: 8,
+  strength: 4,
+  blur: 2,
+  frost: 12,
+  blurBeforeRefraction: false,
+  saturation: 1.1,
+  brightness: 1,
+  contrast: 1,
+  aberration: 1.5,
+  engine: 'backdrop',
+  debugMap: false,
+}
+
+const PRESETS: Record<string, Partial<LensConfig>> = {
+  composer: { radius: 18, bevel: 10, depth: 37, ior: 1.29, dome: 0, strength: 2.05, blur: 13, frost: 0, blurBeforeRefraction: true, saturation: 1.18, brightness: 1.05, contrast: 0.84, aberration: 0, engine: 'backdrop' },
+  demo: { radius: 32, bevel: 30, depth: 16, ior: 1.6, dome: 12, strength: 4, blur: 0.8, frost: 10, saturation: 1.4, brightness: 1.02, contrast: 1, aberration: 3 },
+  extreme: { radius: 40, bevel: 48, depth: 28, ior: 1.9, dome: 20, strength: 6, blur: 0, frost: 30, saturation: 1.5, brightness: 1.05, contrast: 1.05, aberration: 8 },
+}
+
+interface SliderSpec {
+  key: keyof LensConfig
+  label: string
+  min: number
+  max: number
+  step: number
+}
+
+const SLIDERS: SliderSpec[] = [
+  { key: 'width', label: '宽度 px', min: 200, max: 900, step: 10 },
+  { key: 'height', label: '高度 px', min: 64, max: 320, step: 4 },
+  { key: 'radius', label: '圆角 px', min: 0, max: 80, step: 1 },
+  { key: 'bevel', label: '折射带宽 px', min: 2, max: 90, step: 1 },
+  { key: 'depth', label: '玻璃厚度 px', min: 0, max: 48, step: 0.5 },
+  { key: 'ior', label: '折射率 IOR', min: 1.01, max: 2.4, step: 0.01 },
+  { key: 'dome', label: '中心凸度 px', min: 0, max: 24, step: 0.5 },
+  { key: 'strength', label: '位移强度 ×', min: 0, max: 3, step: 0.05 },
+  { key: 'blur', label: '模糊 px', min: 0, max: 20, step: 0.25 },
+  { key: 'frost', label: '磨砂拉丝 px', min: 0, max: 40, step: 0.5 },
+  { key: 'saturation', label: '饱和度 ×', min: 0.4, max: 2.2, step: 0.02 },
+  { key: 'brightness', label: '亮度 ×', min: 0.7, max: 1.5, step: 0.01 },
+  { key: 'contrast', label: '对比度 ×', min: 0.7, max: 1.5, step: 0.01 },
+  { key: 'aberration', label: '色散 px', min: 0, max: 10, step: 0.25 },
 ]
 
-const highlightCards = [
-  { title: 'Launch review', body: 'Collect visual feedback for the sidebar motion pass.' },
-  { title: 'Asset sync', body: 'Bring in icons, copy blocks, and the next gradient draft.' },
+const TEXT_ROWS = [
+  '品牌系统工坊那条回执我已处理：它是运行时 JSON 解析失败，没有产出业务结果。',
+  'The text behind this surface should bend at the rim — refraction, not smear.',
+  '我已把这次失败依赖登记到任务证明链里，并明确最终交叉分析已完成。',
+  'browser_collect_notes · browser_get_task · ready-tools.log · 2026-06-10',
+  '正在理解需求 → 已完成 ∙ 正在整理任务边界、上下文与可用能力',
+  'Hi～今天有什么可以帮到你？版单季报告完成；当前无待处理动作。',
+  'Liquid glass optical bench — edge bevel bends light by Snell’s law.',
+  '飞书与远程图片先进入会话资源层，后续任务显式选择附件资源。',
 ]
 
-export default function LiquidTest() {
-  const containerRef = useRef<HTMLDivElement>(null)
+type LabScene = 'color' | 'chat' | 'dark'
 
-  return (
-    <LiquidSceneProvider mouseContainer={containerRef}>
-      <div
-        ref={containerRef}
-        className="relative h-full overflow-auto bg-[#050821] text-slate-100"
-      >
-        <LiquidBackdropScene />
-        <div className="relative mx-auto grid min-h-screen w-full max-w-6xl grid-cols-1 gap-0 px-4 py-4 md:grid-cols-[1.15fr_0.85fr] md:px-8 md:py-8">
-        <div className="relative overflow-hidden rounded-t-[30px] border border-white/10 md:rounded-l-[30px] md:rounded-r-none">
-          <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(7,9,28,0.26)_0%,rgba(7,9,28,0.08)_100%)]" />
-          <div className="relative flex min-h-[860px] items-start justify-start p-6 md:p-10">
-            <aside
-              className="w-full max-w-[340px] rounded-[32px] p-4 md:p-5"
-              style={LIQUID_PANEL_SHELL_STYLE}
-            >
-              <div className="flex items-start justify-between gap-4">
-                <div>
-                  <div className="text-[11px] font-medium uppercase tracking-[0.28em] text-white/58">Lab</div>
-                  <h1 className="mt-2 text-[28px] font-semibold tracking-tight text-white" style={{ textShadow: LIQUID_TEXT_SHADOW }}>
-                    Liquid Glass Sidebar
-                  </h1>
-                </div>
-
-                <LiquidGlassPrimitive
-                  id="add-button"
-                  tone="button"
-                  style={{ width: 44 }}
-                  innerClassName="flex h-11 w-11 items-center justify-center"
-                >
-                  <Plus size={18} />
-                </LiquidGlassPrimitive>
+function BackdropScene({ scene, animate }: { scene: LabScene; animate: boolean }) {
+  if (scene === 'chat') {
+    // 模拟真实聊天面板：浅色面板 + 13px 正文 + 白色胶囊卡，
+    // 让调出来的参数到真实输入框上观感一致。
+    return (
+      <div className="lab-scene lab-scene--chat" aria-hidden="true">
+        <div className="lab-chat">
+          {Array.from({ length: 4 }, (_, block) => (
+            <div key={block}>
+              <p><strong>需要你协助：</strong>请在浏览器中打开第一篇笔记页面，然后我可以用 browser_collect_notes 接力下载全部图片。</p>
+              <p>或者你可以告诉我你希望怎么处理——是只记录 URL 列表，还是需要我等你操作后继续下载？</p>
+              <div className="lab-chat__capsule">
+                <span><strong>正在理解需求</strong>　正在整理任务边界、上下文与可用能力</span>
+                <em>已完成</em>
               </div>
-
-              <div className="mt-5">
-                <LiquidGlassPrimitive
-                  id="search"
-                  tone="button"
-                  innerClassName="flex items-center gap-3 px-4 py-3"
-                >
-                  <Search size={16} />
-                  <span className="text-sm text-white/88">Search boards and notes</span>
-                </LiquidGlassPrimitive>
-              </div>
-
-              <div className="mt-6">
-                <div className="px-2 text-[11px] font-semibold uppercase tracking-[0.28em] text-white/50">
-                  Workspace
-                </div>
-                <div className="mt-3 space-y-2">
-                  {sidebarItems.map((item) => {
-                    const Icon = item.icon
-                    const content = (
-                      <>
-                        <div
-                          className="flex h-10 w-10 items-center justify-center rounded-full border border-white/12 bg-white/6 text-white/95"
-                          style={{ boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.08)' }}
-                        >
-                          <Icon size={18} />
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <div className="truncate text-sm font-medium text-white">{item.label}</div>
-                          <div className="truncate text-xs text-white/52">Sidebar sample item</div>
-                        </div>
-                        <div className="rounded-full border border-white/12 bg-white/6 px-2.5 py-1 text-[11px] font-medium text-white/82">
-                          {item.meta}
-                        </div>
-                      </>
-                    )
-
-                    if (item.active) {
-                      return (
-                        <LiquidGlassPrimitive
-                          key={item.label}
-                          id="active-nav"
-                          tone="button"
-                          innerClassName="flex items-center gap-3 px-3 py-3"
-                        >
-                          {content}
-                        </LiquidGlassPrimitive>
-                      )
-                    }
-
-                    return (
-                      <button
-                        key={item.label}
-                        type="button"
-                        className="flex w-full items-center gap-3 rounded-[24px] border px-3 py-3 text-left transition-[background-color,border-color,color] duration-200 hover:bg-white/7"
-                        style={LIQUID_INACTIVE_CHROME_STYLE}
-                      >
-                        {content}
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
-
-              <div className="mt-6">
-                <LiquidGlassPrimitive
-                  id="focus-card"
-                  tone="card"
-                  innerClassName="min-h-[212px] px-5 py-5"
-                >
-                  <div className="flex h-full flex-col justify-between">
-                    <div>
-                      <div className="flex items-center gap-2 text-sm font-medium text-white/88">
-                        <Sparkles size={16} />
-                        Focus card
-                      </div>
-                      <div className="mt-4 text-[24px] font-semibold leading-8 tracking-tight text-white">
-                        Polish the motion language
-                      </div>
-                    </div>
-                    <p className="max-w-[240px] text-sm leading-6 text-white/78">
-                      This temporary page isolates the glass effect so we can verify the sidebar feel without touching the current workbench UI.
-                    </p>
-                  </div>
-                </LiquidGlassPrimitive>
-              </div>
-
-              <div className="mt-6">
-                <LiquidGlassPrimitive
-                  id="alert-card"
-                  tone="button"
-                  innerClassName="flex items-center justify-between gap-4 px-4 py-4"
-                >
-                  <div>
-                    <div className="text-[11px] uppercase tracking-[0.24em] text-white/56">Alerts</div>
-                    <div className="mt-1 text-sm font-medium text-white">2 quick updates waiting</div>
-                  </div>
-                  <div
-                    className="flex h-10 w-10 items-center justify-center rounded-full border border-white/12 bg-white/6 text-white/92"
-                          style={LIQUID_ICON_DISC_STYLE}
-                        >
-                          <Bell size={17} />
-                        </div>
-                    </LiquidGlassPrimitive>
-                  </div>
-                </aside>
-              </div>
-        </div>
-
-        <div
-          className="rounded-b-[30px] border border-t-0 border-white/10 px-6 py-8 md:rounded-l-none md:rounded-r-[30px] md:border-l-0 md:border-t md:px-8"
-            style={LIQUID_CONTENT_SHELL_STYLE}
-          >
-          <div className="flex items-center justify-between gap-4">
-            <div>
-              <h2 className="text-2xl font-bold text-white">Glassy Boi but Sidebar</h2>
-              <p className="mt-3 max-w-md text-sm leading-6 text-white/62">
-                This pass chases the Max Rovensky demo more directly: glass is concentrated in the button and card primitives, while the surrounding shell stays restrained.
-              </p>
+              <p>采集发现阶段完成，共找到 11 张图片 URL。但 browser_visible_collect 只完成了发现，还没有实际下载到本地。</p>
             </div>
-                <div className="rounded-[16px] border px-3 py-2 text-xs uppercase tracking-[0.26em] text-white/60" style={LIQUID_CONTROL_PILL_STYLE}>
-                  Inspired
-                </div>
-              </div>
-
-          <div className="mt-8 flex rounded-[14px] border border-white/8 bg-white/5 p-1">
-            <button className="flex-1 rounded-[10px] bg-blue-500 px-4 py-2 text-sm font-medium text-white shadow-lg">
-              Sidebar Card
-            </button>
-            <button className="flex-1 rounded-[10px] px-4 py-2 text-sm font-medium text-white/68 transition-colors hover:bg-white/8 hover:text-white">
-              Glass Button
-            </button>
-          </div>
-
-          <div className="mt-8 space-y-7">
-            <section>
-              <div className="text-sm font-semibold text-white/88">What changed</div>
-              <div className="mt-3 grid gap-3">
-                    <div className="rounded-[18px] border px-4 py-4" style={LIQUID_CONTROL_PILL_STYLE}>
-                  <div className="text-xs uppercase tracking-[0.24em] text-white/52">Primitive split</div>
-                  <div className="mt-2 text-sm leading-6 text-white/78">
-                    The outer sidebar is no longer pretending to be one giant slab of glass. Search, active state, plus button, and key cards now each carry the effect independently.
-                  </div>
-                </div>
-                    <div className="rounded-[18px] border px-4 py-4" style={LIQUID_CONTROL_PILL_STYLE}>
-                  <div className="text-xs uppercase tracking-[0.24em] text-white/52">Demo-like optics</div>
-                  <div className="mt-2 text-sm leading-6 text-white/78">
-                    Button primitives use stronger displacement and blur, higher saturation, and the library&apos;s dual ring highlight. Content uses restrained tint and fine micro-noise.
-                  </div>
-                </div>
-              </div>
-            </section>
-
-            <section>
-              <div className="text-sm font-semibold text-white/88">Preview notes</div>
-              <div className="mt-3 grid gap-4 md:grid-cols-2">
-                {highlightCards.map((card) => (
-                  <div
-                    key={card.title}
-                    className="rounded-[20px] border p-5"
-                    style={LIQUID_CONTROL_PILL_STYLE}
-                  >
-                    <div className="text-xs font-medium uppercase tracking-[0.24em] text-white/52">Preview note</div>
-                    <div className="mt-3 text-lg font-semibold text-white">{card.title}</div>
-                    <p className="mt-2 text-sm leading-6 text-white/70">{card.body}</p>
-                  </div>
-                ))}
-              </div>
-            </section>
-          </div>
-        </div>
+          ))}
         </div>
       </div>
-    </LiquidSceneProvider>
+    )
+  }
+  return (
+    <div className={`lab-scene ${scene === 'dark' ? 'is-dark' : ''}`} aria-hidden="true">
+      <div className="lab-scene__blobs" />
+      <div className="lab-scene__grid" />
+      <div className="lab-scene__chips">
+        {['#ff5f6d', '#ffc371', '#38ef7d', '#11998e', '#7f7fd5', '#91eae4', '#f953c6', '#b91d73'].map((color) => (
+          <span key={color} style={{ background: color }} />
+        ))}
+      </div>
+      <div className="lab-scene__rows">
+        {Array.from({ length: 26 }, (_, index) => {
+          const row = TEXT_ROWS[index % TEXT_ROWS.length]
+          const size = 14 + ((index * 7) % 18)
+          return (
+            <div
+              key={index}
+              className={index % 4 === 0 ? 'is-strong' : undefined}
+              style={{ fontSize: size, marginLeft: (index % 5) * 36 }}
+            >
+              {row}
+            </div>
+          )
+        })}
+      </div>
+      <div className={`lab-scene__marquee ${animate ? 'is-on' : ''}`}>
+        <div>
+          {'● READY ◆ LIQUID ✦ GLASS ▲ OPTICS ● 折射 ◆ 透镜 ✦ 玻璃 ▲ 光学 '.repeat(6)}
+        </div>
+      </div>
+    </div>
   )
 }
+
+export default function LiquidTest() {
+  const [config, setConfig] = useState<LensConfig>(DEFAULT_CONFIG)
+  const [scene, setScene] = useState<LabScene>('color')
+  const [veil, setVeil] = useState(true)
+  const [animate, setAnimate] = useState(true)
+  const [showContent, setShowContent] = useState(true)
+  const [position, setPosition] = useState({ x: 120, y: 260 })
+  const [copied, setCopied] = useState(false)
+  const dragRef = useRef<{ pointerId: number; dx: number; dy: number } | null>(null)
+
+  const update = useCallback(<K extends keyof LensConfig>(key: K, value: LensConfig[K]) => {
+    setConfig((prev) => ({ ...prev, [key]: value }))
+  }, [])
+
+  const onPointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const target = event.currentTarget
+    dragRef.current = {
+      pointerId: event.pointerId,
+      dx: event.clientX - position.x,
+      dy: event.clientY - position.y,
+    }
+    target.setPointerCapture(event.pointerId)
+  }, [position.x, position.y])
+
+  const onPointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current
+    if (!drag || drag.pointerId !== event.pointerId) return
+    setPosition({ x: event.clientX - drag.dx, y: event.clientY - drag.dy })
+  }, [])
+
+  const onPointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (dragRef.current?.pointerId === event.pointerId) dragRef.current = null
+  }, [])
+
+  const copyConfig = useCallback(() => {
+    const { width: _w, height: _h, debugMap: _d, ...optics } = config
+    navigator.clipboard.writeText(JSON.stringify(optics, null, 2)).then(() => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1200)
+    })
+  }, [config])
+
+  return (
+    <div className="lab-page">
+      <style>{labCss}</style>
+      <BackdropScene scene={scene} animate={animate} />
+
+      <div
+        className="lab-lens-host"
+        style={{ transform: `translate(${position.x}px, ${position.y}px)` }}
+        onPointerDown={onPointerDown}
+        onPointerMove={onPointerMove}
+        onPointerUp={onPointerUp}
+      >
+        <LiquidLens
+          radius={config.radius}
+          bevel={config.bevel}
+          depth={config.depth}
+          ior={config.ior}
+          dome={config.dome}
+          strength={config.strength}
+          blur={config.blur}
+          frost={config.frost}
+          blurBeforeRefraction={config.blurBeforeRefraction}
+          saturation={config.saturation}
+          brightness={config.brightness}
+          contrast={config.contrast}
+          aberration={config.aberration}
+          engine={config.engine}
+          debugMap={config.debugMap}
+          className="lab-lens"
+          style={{
+            width: config.width,
+            height: config.height,
+            // 与真实输入框的 __lens 白纱保持一致，避免实验室观感失真
+            background: veil
+              ? scene === 'dark'
+                ? 'rgba(255,255,255,0.045)'
+                : 'rgba(255,255,255,0.26)'
+              : undefined,
+          }}
+        >
+          {showContent ? (
+            <div className="lab-lens__content" style={{ minHeight: config.height }}>
+              <span className="lab-lens__placeholder">Hi～今天有什么可以帮到你</span>
+              <div className="lab-lens__chips">
+                <span>＋</span>
+                <span>🤖 管家</span>
+                <span>● mimo</span>
+                <span className="is-send">➤</span>
+              </div>
+            </div>
+          ) : null}
+        </LiquidLens>
+      </div>
+
+      <aside className="lab-panel">
+        <header>
+          <strong>Liquid lens 调参台</strong>
+          <span>拖动镜片到任意背景上观察折射</span>
+        </header>
+
+        <div className="lab-panel__row lab-panel__presets">
+          {Object.keys(PRESETS).map((name) => (
+            <button key={name} onClick={() => setConfig((prev) => ({ ...prev, ...PRESETS[name] }))}>
+              {name}
+            </button>
+          ))}
+          <button onClick={() => setConfig(DEFAULT_CONFIG)}>reset</button>
+        </div>
+
+        {SLIDERS.map((slider) => (
+          <label key={slider.key} className="lab-panel__slider">
+            <span>
+              {slider.label}
+              <em>{Number(config[slider.key]).toFixed(slider.step < 1 ? 2 : 0)}</em>
+            </span>
+            <input
+              type="range"
+              min={slider.min}
+              max={slider.max}
+              step={slider.step}
+              value={Number(config[slider.key])}
+              onChange={(event) => update(slider.key, Number(event.target.value) as never)}
+            />
+          </label>
+        ))}
+
+        <div className="lab-panel__row">
+          <span className="lab-panel__caption">背景场景</span>
+          <div className="lab-panel__toggle-group">
+            {([['color', '彩色'], ['chat', '聊天实景'], ['dark', '暗色']] as const).map(([key, label]) => (
+              <button
+                key={key}
+                className={scene === key ? 'is-active' : ''}
+                onClick={() => setScene(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="lab-panel__row">
+          <span className="lab-panel__caption">滤镜通道</span>
+          <div className="lab-panel__toggle-group">
+            {(['backdrop', 'layer'] as const).map((engine) => (
+              <button
+                key={engine}
+                className={config.engine === engine ? 'is-active' : ''}
+                onClick={() => update('engine', engine)}
+              >
+                {engine}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="lab-panel__row lab-panel__checks">
+          <label><input type="checkbox" checked={veil} onChange={(e) => setVeil(e.target.checked)} />白纱(同输入框)</label>
+          <label><input type="checkbox" checked={animate} onChange={(e) => setAnimate(e.target.checked)} />背景滚动</label>
+          <label><input type="checkbox" checked={showContent} onChange={(e) => setShowContent(e.target.checked)} />镜片内容</label>
+          <label><input type="checkbox" checked={config.blurBeforeRefraction} onChange={(e) => update('blurBeforeRefraction', e.target.checked)} />先雾化</label>
+          <label><input type="checkbox" checked={config.debugMap} onChange={(e) => update('debugMap', e.target.checked)} />位移贴图</label>
+        </div>
+
+        <button className="lab-panel__copy" onClick={copyConfig}>
+          {copied ? '已复制 ✓' : '复制光学参数 JSON'}
+        </button>
+      </aside>
+    </div>
+  )
+}
+
+const labCss = `
+.lab-page {
+  position: relative;
+  min-height: 100vh;
+  overflow: hidden;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif;
+}
+
+.lab-scene {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, #f2f5fa 0%, #fbfcfe 46%, #e8eef6 100%);
+  color: rgba(22, 30, 46, 0.72);
+  transition: background 200ms ease, color 200ms ease;
+}
+
+.lab-scene.is-dark {
+  background: linear-gradient(135deg, #14161c 0%, #1d2027 52%, #101216 100%);
+  color: rgba(235, 240, 250, 0.82);
+}
+
+.lab-scene--chat {
+  background: #f6f8fb;
+}
+
+.lab-chat {
+  max-width: 720px;
+  padding: 28px 36px;
+  font-size: 13.5px;
+  line-height: 1.7;
+  color: #2a3242;
+}
+
+.lab-chat p { margin: 0 0 10px; }
+.lab-chat strong { font-weight: 700; color: #18202e; }
+
+.lab-chat__capsule {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin: 12px 0;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 4px 16px rgba(20, 28, 44, 0.06);
+  font-size: 12.5px;
+  color: rgba(42, 50, 66, 0.6);
+}
+
+.lab-chat__capsule em {
+  font-style: normal;
+  color: rgba(42, 50, 66, 0.5);
+  white-space: nowrap;
+}
+
+.lab-scene__grid {
+  position: absolute;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(127,140,170,0.10) 1px, transparent 1px),
+    linear-gradient(0deg, rgba(127,140,170,0.09) 1px, transparent 1px);
+  background-size: 44px 44px;
+}
+
+.lab-scene__blobs {
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(420px 300px at 12% 10%, rgba(255, 99, 132, 0.35), transparent 70%),
+    radial-gradient(460px 320px at 86% 16%, rgba(86, 120, 255, 0.32), transparent 70%),
+    radial-gradient(520px 380px at 30% 88%, rgba(28, 190, 130, 0.30), transparent 72%),
+    radial-gradient(380px 300px at 72% 72%, rgba(255, 180, 60, 0.30), transparent 70%);
+  filter: saturate(1.1);
+}
+
+.lab-scene__chips {
+  position: absolute;
+  left: 40px;
+  top: 96px;
+  display: flex;
+  gap: 14px;
+}
+
+.lab-scene__chips span {
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  box-shadow: 0 6px 16px rgba(20, 28, 44, 0.18);
+}
+
+.lab-scene__rows {
+  position: absolute;
+  inset: 170px 320px 0 40px;
+  line-height: 1.6;
+  font-weight: 600;
+  user-select: none;
+}
+
+.lab-scene__rows div { white-space: nowrap; }
+.lab-scene__rows .is-strong { font-weight: 800; }
+.lab-scene.is-dark .lab-scene__rows { color: rgba(235, 240, 250, 0.78); }
+
+.lab-scene__marquee {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 330px;
+  overflow: hidden;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 2px;
+  opacity: 0.85;
+  background: linear-gradient(90deg, rgba(255,95,109,0.25), rgba(127,127,213,0.25), rgba(56,239,125,0.25));
+  padding: 10px 0;
+}
+
+.lab-scene__marquee > div { white-space: nowrap; width: max-content; }
+.lab-scene__marquee.is-on > div { animation: lab-marquee 24s linear infinite; }
+
+@keyframes lab-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+
+.lab-lens-host {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 5;
+  cursor: grab;
+  touch-action: none;
+}
+
+.lab-lens-host:active { cursor: grabbing; }
+
+.lab-lens {
+  box-shadow:
+    0 22px 48px rgba(15, 23, 42, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.42),
+    inset 0 -1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.lab-lens__content {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 18px 22px 14px;
+  pointer-events: none;
+}
+
+.lab-lens__placeholder {
+  font-size: 14px;
+  font-weight: 500;
+  opacity: 0.55;
+}
+
+.lab-lens__chips {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 13px;
+  font-weight: 600;
+  opacity: 0.8;
+}
+
+.lab-lens__chips .is-send { margin-left: auto; font-size: 16px; }
+
+.lab-panel {
+  position: fixed;
+  right: 18px;
+  top: 18px;
+  bottom: 18px;
+  z-index: 20;
+  width: 280px;
+  overflow-y: auto;
+  border-radius: 18px;
+  background: rgba(20, 24, 34, 0.92);
+  color: rgba(240, 244, 252, 0.92);
+  padding: 18px 16px 16px;
+  box-shadow: 0 24px 64px rgba(10, 14, 24, 0.4);
+}
+
+.lab-panel header { display: block; margin-bottom: 12px; }
+.lab-panel header strong { display: block; font-size: 15px; }
+.lab-panel header span { display: block; margin-top: 4px; font-size: 11px; opacity: 0.6; }
+
+.lab-panel__row { margin: 12px 0; }
+
+.lab-panel__presets { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.lab-panel__presets button,
+.lab-panel__toggle-group button,
+.lab-panel__copy {
+  border: 1px solid rgba(255,255,255,0.16);
+  background: rgba(255,255,255,0.06);
+  color: inherit;
+  border-radius: 8px;
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.lab-panel__presets button:hover,
+.lab-panel__toggle-group button:hover,
+.lab-panel__copy:hover { background: rgba(255,255,255,0.14); }
+
+.lab-panel__toggle-group { display: flex; gap: 6px; margin-top: 6px; }
+.lab-panel__toggle-group .is-active { background: rgba(94, 130, 255, 0.55); border-color: rgba(120, 150, 255, 0.7); }
+
+.lab-panel__caption { font-size: 11px; opacity: 0.6; }
+
+.lab-panel__slider { display: block; margin: 10px 0; }
+.lab-panel__slider span {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11.5px;
+  opacity: 0.85;
+  margin-bottom: 4px;
+}
+.lab-panel__slider em { font-style: normal; opacity: 0.7; font-variant-numeric: tabular-nums; }
+.lab-panel__slider input { width: 100%; accent-color: #7c9aff; }
+
+.lab-panel__checks { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.lab-panel__checks label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  opacity: 0.85;
+}
+
+.lab-panel__copy { width: 100%; margin-top: 8px; padding: 8px 0; }
+`
