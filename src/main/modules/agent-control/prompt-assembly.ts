@@ -86,6 +86,8 @@ export interface PromptAssemblyDeps {
   getBeliefCardStore?: () => {
     renderKnowledgeIndex(opts: { maxChars: number }): { text: string; renderedCount: number; omittedCount: number }
   } | null
+  /** EP2-K6: rollback switch — false stops RULES/index injection entirely. */
+  isKnowledgeSystemEnabled?: () => boolean
 }
 
 interface TriggerDefinition {
@@ -956,10 +958,13 @@ export class PromptAssemblyService {
     // missing user RULES.md falls back to the default asset so fresh
     // installs carry the confirmation-hygiene rules; an empty knowledge dir
     // still omits the index section.
-    const rulesText = clip(this.readMemoryFile('RULES.md').trim() || loadRulesDefaultBody(), MAX_RULES_CHARS)
+    const knowledgeEnabled = this.deps.isKnowledgeSystemEnabled?.() ?? true
+    const rulesText = knowledgeEnabled
+      ? clip(this.readMemoryFile('RULES.md').trim() || loadRulesDefaultBody(), MAX_RULES_CHARS)
+      : ''
     let knowledgeIndexText = ''
     try {
-      const beliefStore = this.deps.getBeliefCardStore?.() ?? null
+      const beliefStore = knowledgeEnabled ? (this.deps.getBeliefCardStore?.() ?? null) : null
       if (beliefStore) {
         const index = beliefStore.renderKnowledgeIndex({ maxChars: MAX_KNOWLEDGE_INDEX_CHARS })
         knowledgeIndexText = index.omittedCount > 0

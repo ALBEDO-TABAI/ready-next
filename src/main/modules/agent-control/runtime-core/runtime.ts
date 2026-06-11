@@ -92,6 +92,7 @@ import {
 } from '../system-reminders/background-task-terminal-reminder'
 import { taskEventBridge, type TaskEventBridgePayload } from '../../browser-engine/task-event-bridge'
 import { createTaskEventProofListener, createTaskProofSink } from '../quality/proof-collector'
+import { isKnowledgeSystemEnabled, runStartupBeliefSync, KnowledgeWatcher } from '../knowledge/knowledge-truth-source'
 import { BrowserCollectionConsentStore } from '../../browser-engine/browser-collection-consent'
 import { forgetSession } from '../session/session-continuity'
 import { isRetryOnlyTurn } from '../skills/skill-detection-inputs'
@@ -390,12 +391,15 @@ export class AgentControlRuntime extends EventEmitter {
       selectScopeTaskIndexEntries(this.taskProjectionStore, scopeId),
     // EP2-K3: lazy for the same declaration-order reason.
     getBeliefCardStore: () => this.getBeliefCardStore(),
+    // EP2-K6: rollback switch (single read entry in the knowledge module).
+    isKnowledgeSystemEnabled: () => isKnowledgeSystemEnabled(this.db),
     enableDatabaseMemory: true
   })
   private readonly agentManager: AgentManager
   private readonly runCoordinator: RunCoordinator
   private readonly runProjection: RunProjection
   private readonly taskProjectionStore = new TaskProjectionRepository(this.db)
+  private knowledgeWatcher: KnowledgeWatcher | null = null
   private beliefCardStore: BeliefCardStore | null = null
   private readonly skillTaskRunRepository = new SkillTaskRunRepository(this.db)
   private readonly detachedSkillTasks: DetachedSkillTaskTracker
@@ -624,6 +628,21 @@ export class AgentControlRuntime extends EventEmitter {
       createTaskEventProofListener(createTaskProofSink(this.taskProjectionStore)),
     )
 
+    // EP2-K6 — truth-source boundary: startup full sync (K2 handover) +
+    // hand-edit watcher, both behind the rollback switch. Files are never
+    // written here — file → DB only.
+    try {
+      const knowledgeEnabled = isKnowledgeSystemEnabled(this.db)
+      const rawDb = this.db.getRawDb?.()
+      if (knowledgeEnabled && rawDb) {
+        runStartupBeliefSync(rawDb as never, this.getBeliefCardStore(), true)
+        this.knowledgeWatcher = new KnowledgeWatcher({ db: rawDb as never, store: this.getBeliefCardStore() })
+        this.knowledgeWatcher.start()
+      }
+    } catch (error) {
+      console.error('[runtime] knowledge truth-source wiring failed:', error)
+    }
+
     const sidecarEnabled = this.getSettingBool('remote_channels_enabled', true)
     const autostart = this.getSettingBool('sidecar_autostart', true)
     const bindHost = this.db.getSetting('sidecar_bind_host') || '127.0.0.1'
@@ -647,6 +666,7 @@ export class AgentControlRuntime extends EventEmitter {
 
     // Stop memory lifecycle manager
     this.memoryLifecycle.stop()
+    this.knowledgeWatcher?.stop()
     await this.externalMemoryProviderSlot.shutdown()
 
     await this.sidecar.stop()

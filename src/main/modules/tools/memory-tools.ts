@@ -7,6 +7,8 @@ import {
   type ToolParamSchemaSpec
 } from './tool-schema'
 import { MEMORY_SCHEMAS } from './schemas/memory-schemas'
+import { isKnowledgeSystemEnabled } from '../agent-control/knowledge/knowledge-truth-source'
+import { AppSettingsRepository } from '../repositories/app-settings-repository'
 import { zodObjectToParamList } from './zod-param-derivation'
 
 const logger = createRotatingLogger('ready-memory-tools.log')
@@ -65,8 +67,20 @@ const MEMORY_TOOLS: MemoryToolDef[] = [
   },
 ]
 
+const CARD_TOOL_NAMES = new Set(['memory_write_card', 'memory_read_card'])
+
+/** EP2-K6 — rollback switch: card tools disappear from exposure when the
+ *  knowledge system is off (files untouched, injection already gated). */
+function filterCardTools(defs: typeof MEMORY_TOOLS): typeof MEMORY_TOOLS {
+  let enabled = true
+  try {
+    enabled = isKnowledgeSystemEnabled(new AppSettingsRepository())
+  } catch { enabled = true }
+  return enabled ? defs : defs.filter((def) => !CARD_TOOL_NAMES.has(def.name))
+}
+
 export function getMemoryAnthropicTools(): Array<Record<string, unknown>> {
-  return MEMORY_TOOLS.map((tool) =>
+  return filterCardTools(MEMORY_TOOLS).map((tool) =>
     normalizeAnthropicToolSchema({
       name: tool.name,
       description: tool.description,
@@ -82,7 +96,7 @@ export function getMemoryAnthropicTools(): Array<Record<string, unknown>> {
 }
 
 export function getMemoryOpenAITools(): Array<Record<string, unknown>> {
-  return MEMORY_TOOLS.map((tool) =>
+  return filterCardTools(MEMORY_TOOLS).map((tool) =>
     normalizeOpenAIToolSchema({
       type: 'function',
       function: {
