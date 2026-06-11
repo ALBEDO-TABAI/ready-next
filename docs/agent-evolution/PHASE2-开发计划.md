@@ -1,6 +1,6 @@
 # 阶段二开发计划（配套 2026-06-11-agent-evolution-phase2-implementation.md）
 
-> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同 v3 曾经 Codex 复核 APPROVED；2026-06-12 Codex 三轮复审再提 3 点（P1：054 打红阶段一迁移测试、check_in_pending 五面扩展；P2：终态路径按 RunOutcome.kind 枚举遍历），已回修为 **v4，待 Codex 复核确认后方可按波次开工**。
+> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同 v4 已于 2026-06-12 经 Codex 复核 APPROVED（三轮复审 3 点全部 CLOSED：054 与阶段一迁移测试共存、check_in_pending 五面扩展、终态路径按 RunOutcome.kind 枚举遍历），enforce 生效，可按波次开工。
 
 ---
 
