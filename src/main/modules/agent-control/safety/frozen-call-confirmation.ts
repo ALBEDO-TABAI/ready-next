@@ -111,11 +111,11 @@ export async function runFrozenCallConfirmation(
       : { kind: 'unavailable', reason: frozen.reason }
   }
 
-  // Card/metrics only ever see the store's REDACTED summary + the sha256
-  // fingerprint — full params stay in the store's memory record (the
-  // byte-identical release source). The fingerprint lets an audit join the
-  // card the user approved ↔ the pending_confirmations row ↔ the release
-  // metric, without any of them carrying the raw bytes.
+  // Surface split: the CARD shows the redacted summary (the user must see
+  // the object they approve, 05 §3.2); the DB row stores a value-free shape;
+  // metrics carry the sha256 fingerprint only. Full params stay in the
+  // store's memory record (the byte-identical release source). The
+  // fingerprint joins card ↔ pending_confirmations row ↔ release metric.
   const auditSummary = frozen.auditSummary
   const fingerprint = frozen.paramsSha256.slice(0, 12)
 
@@ -175,7 +175,6 @@ export async function runFrozenCallConfirmation(
       frozenCallId: frozen.id,
       toolName,
       sessionId,
-      paramsSummary: auditSummary,
       paramsSha256: frozen.paramsSha256,
     })
     return { kind: 'released', frozenCallId: frozen.id, params: released.params }
@@ -186,7 +185,6 @@ export async function runFrozenCallConfirmation(
     frozenCallId: frozen.id,
     toolName,
     sessionId,
-    paramsSummary: auditSummary,
     paramsSha256: frozen.paramsSha256,
   })
   return { kind: 'denied_by_user', frozenCallId: frozen.id }

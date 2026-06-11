@@ -55,9 +55,12 @@ const REDACTED_PLACEHOLDER = '«redacted»'
 export const AUDIT_SUMMARY_MAX_CHARS = 140
 
 /**
- * Single-line redacted summary for everything durable/visible (DB audit row,
- * confirmation-card text, metrics). Never the full param tree — only this
- * clipped string plus the sha256 fingerprint of the frozen bytes.
+ * Single-line redacted summary for the CONFIRMATION CARD only. The card must
+ * show the user WHAT object they are approving (05 §3.2 动作+对象+风险), so
+ * non-sensitive values stay readable here; sensitive keys/values — and, for
+ * sensitive rules, every free-text value — are masked before the text leaves
+ * memory. Durable audit surfaces (DB row, metrics) never get values at all —
+ * see buildAuditShape().
  */
 export function buildAuditSummary(
   params: Record<string, unknown>,
@@ -70,6 +73,25 @@ export function buildAuditSummary(
     json = '{}'
   }
   return json.length > AUDIT_SUMMARY_MAX_CHARS ? `${json.slice(0, AUDIT_SUMMARY_MAX_CHARS)}…` : json
+}
+
+/**
+ * Value-free structural shape for durable audit surfaces (the
+ * pending_confirmations row). No parameter VALUE — sensitive or not — is
+ * persisted; the sha256 fingerprint identifies the frozen bytes, and the
+ * chat-message card (already redacted) is the human-readable record of what
+ * the user approved.
+ */
+export function buildAuditShape(value: unknown): unknown {
+  if (Array.isArray(value)) return `<array(${value.length})>`
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {}
+    for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+      out[k] = v && typeof v === 'object' ? buildAuditShape(v) : `<${v === null ? 'null' : typeof v}>`
+    }
+    return out
+  }
+  return `<${value === null ? 'null' : typeof value}>`
 }
 
 export function redactParamsForAudit(
@@ -207,14 +229,14 @@ export class FrozenCallStore {
     const auditSummary = buildAuditSummary(args.params, { redactAllStrings: args.sensitiveParams })
     if (this.db) {
       try {
-        // Durable row carries ONLY the clipped redacted summary + sha256 of
-        // the frozen bytes — never the param tree. Release reads the
+        // Durable row carries ONLY a value-free structural shape + sha256 of
+        // the frozen bytes — never any parameter value. Release reads the
         // in-memory record, so audit redaction cannot affect the
         // byte-identical contract.
         const auditJson = JSON.stringify({
           __audit: 'redacted',
           sha256: paramsSha256,
-          summary: auditSummary,
+          shape: buildAuditShape(args.params),
         })
         this.db
           .prepare(

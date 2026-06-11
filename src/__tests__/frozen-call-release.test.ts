@@ -141,17 +141,17 @@ test('freeze → confirm → release executes the frozen params byte-identical, 
   assert.ok(frozenRow, 'freeze must persist a pending_confirmations row')
   assert.equal(frozenRow.status, 'pending')
   assert.equal(frozenRow.tool_name, 'calendar_delete_event')
-  // Durable row is ONLY the clipped redacted summary + sha256 fingerprint —
-  // never the param tree (Codex review P1#4 strict form).
+  // Durable row is ONLY a value-free structural shape + sha256 fingerprint —
+  // no parameter value, sensitive or not (Codex review P1#4 strict form).
   const audit = JSON.parse(String(frozenRow.params_json)) as {
     __audit: string
     sha256: string
-    summary: string
+    shape: Record<string, unknown>
   }
   assert.equal(audit.__audit, 'redacted')
   assert.equal(audit.sha256, createHash('sha256').update(JSON.stringify(originalArgs)).digest('hex'))
-  assert.ok(audit.summary.includes('evt-42'), 'non-sensitive summary stays readable')
-  assert.ok(!('params' in audit), 'audit row must not carry a param tree')
+  assert.deepEqual(audit.shape, { id: '<string>' }, 'shape carries key names + types only')
+  assert.ok(!String(frozenRow.params_json).includes('evt-42'), 'no parameter value may persist')
 
   answerPendingCard(sessionId, FROZEN_CALL_CONFIRM_OPTION)
   const output = await pending
