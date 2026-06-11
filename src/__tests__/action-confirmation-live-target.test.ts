@@ -30,12 +30,13 @@ interface MockCalls {
   scripts: string[]
   mouse: Array<Record<string, unknown>>
   typed: string[]
+  keys: Array<Record<string, unknown>>
 }
 
 function makeController(
   executeJS: (source: string) => unknown,
 ): BrowserController & { calls: MockCalls } {
-  const calls: MockCalls = { scripts: [], mouse: [], typed: [] }
+  const calls: MockCalls = { scripts: [], mouse: [], typed: [], keys: [] }
   const mock = {
     calls,
     getTabList: () => [{ id: 'tab-1', title: 'Example', url: 'https://example.com', active: true }],
@@ -43,7 +44,9 @@ function makeController(
     dispatchMouse: async (_tabId: unknown, payload: Record<string, unknown>) => {
       calls.mouse.push(payload)
     },
-    dispatchKey: async () => {},
+    dispatchKey: async (_tabId: unknown, payload: Record<string, unknown>) => {
+      calls.keys.push(payload)
+    },
     typeTextDirectly: async (_tabId: unknown, text: unknown) => {
       calls.typed.push(String(text))
     },
@@ -180,6 +183,9 @@ test('browser_click: in-script M1 check refuses without clicking; patterns are p
   const clickScript = controller.calls.scripts.find((s) => s.includes('__READY_MANUAL_ONLY_CHECK__'))
   assert.ok(clickScript, 'click script must embed the manual-only check')
   assert.ok(clickScript!.includes('确认支付'), 'embedded patterns must come from the policy source')
+  // selector 命中按钮里的 icon/span 时 label 在父级——脚本必须爬 owner。
+  assert.ok(clickScript!.includes('readyClickableOwner'), 'selector click must judge the clickable owner, not the bare child')
+  assert.ok(clickScript!.includes('aria-labelledby'), 'click label must resolve aria-labelledby')
 })
 
 // ---------------------------------------------------------------------------
@@ -202,6 +208,7 @@ test('browser_click_at: labeled M1 target under the point is refused before any 
   const probeScript = controller.calls.scripts.find((s) => s.includes('__READY_CLICK_POINT_LABEL_PROBE__'))
   assert.ok(probeScript!.includes('closest'), 'probe must climb to the nearest clickable ancestor')
   assert.ok(probeScript!.includes('[role="button"]'), 'clickable owner selector must cover role=button')
+  assert.ok(probeScript!.includes('aria-labelledby'), 'probe must resolve aria-labelledby references')
 })
 
 test('browser_click_at: unresolvable label proceeds (visual channel stays usable)', async () => {
@@ -241,6 +248,7 @@ test('browser_type: opaque selector resolving to a captcha field → denied_manu
   const typeScript = controller.calls.scripts.find((s) => s.includes('__READY_LIVE_TARGET_GUARD__'))
   assert.ok(typeScript!.includes('验证码'), 'in-page guard must embed the policy captcha pattern')
   assert.ok(typeScript!.includes('placeholder'), 'guard must read field semantics (placeholder/aria/name/label)')
+  assert.ok(typeScript!.includes('aria-labelledby'), 'guard must resolve aria-labelledby references (标准标签来源)')
 })
 
 // ---------------------------------------------------------------------------
@@ -292,6 +300,79 @@ test('browser_type_smart: scorer resolving a password field without an args cue 
   })
   const output = await executeToolCall('browser_type_smart', { target: '输入框', text: 'hunter2' }, modelContext(controller))
   assert.equal(output.data?.errorKind, 'denied_pending_confirmation')
+})
+
+// ---------------------------------------------------------------------------
+// 4d. Coordinate typing must judge the CLICK target too (focusing click
+//     fires before any typing — pressing a payment button is already the act)
+// ---------------------------------------------------------------------------
+
+test('browser_type_at: payment button under the point → denied_manual_only BEFORE the focusing click', async () => {
+  const controller = makeController((source) => {
+    if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
+      return { label: '确认支付', inputLabel: '', password: false }
+    }
+    return null
+  })
+  const output = await executeToolCall('browser_type_at', { x: 500, y: 500, text: '随便' }, modelContext(controller))
+  assert.equal(output.data?.errorKind, 'denied_manual_only')
+  assert.equal(controller.calls.mouse.length, 0, 'the focusing click must never fire')
+  assert.deepEqual(controller.calls.typed, [])
+})
+
+// ---------------------------------------------------------------------------
+// 4e. send_keys — the keyboard bypass (tool + workflow substep share
+//     sendKeyStroke, the single enforcement entry)
+// ---------------------------------------------------------------------------
+
+test('browser_send_keys: printable key while a captcha field is focused → denied_manual_only', async () => {
+  const controller = makeController((source) => {
+    if (source.includes('__READY_FOCUSED_FIELD_PROBE__')) {
+      return { inputLabel: '请输入验证码', password: false }
+    }
+    return null
+  })
+  const output = await executeToolCall('browser_send_keys', { key: 'a' }, modelContext(controller))
+  assert.equal(output.data?.errorKind, 'denied_manual_only')
+  assert.deepEqual(controller.calls.keys, [], 'no key event may reach a captcha field')
+})
+
+test('browser_send_keys: printable key while a password field is focused → reroute, nothing sent', async () => {
+  const controller = makeController((source) => {
+    if (source.includes('__READY_FOCUSED_FIELD_PROBE__')) {
+      return { inputLabel: '', password: true }
+    }
+    return null
+  })
+  const output = await executeToolCall('browser_send_keys', { key: '8' }, modelContext(controller))
+  assert.equal(output.data?.errorKind, 'denied_pending_confirmation')
+  assert.deepEqual(controller.calls.keys, [])
+})
+
+test('browser_send_keys: navigation keys (Enter) skip the probe and pass — user-driven submits stay usable', async () => {
+  const controller = makeController(() => null)
+  const output = await executeToolCall('browser_send_keys', { key: 'Enter' }, modelContext(controller))
+  assert.match(output.text, /Sent key/)
+  assert.ok(controller.calls.keys.length > 0, 'Enter must dispatch')
+  assert.ok(
+    !controller.calls.scripts.some((s) => s.includes('__READY_FOCUSED_FIELD_PROBE__')),
+    'non-printable keys must not pay the probe roundtrip',
+  )
+})
+
+test('workflow send_keys substep funnels through the same guard', async () => {
+  const controller = makeController((source) => {
+    if (source.includes('__READY_FOCUSED_FIELD_PROBE__')) {
+      return { inputLabel: '', password: true }
+    }
+    return null
+  })
+  const output = await executeToolCall('browser_run_workflow', {
+    steps: [{ action: 'send_keys', key: 'a' }],
+  }, modelContext(controller))
+  assert.equal(output.data?.errorKind, 'denied_pending_confirmation',
+    'the workflow substep must hit the same sendKeyStroke guard')
+  assert.deepEqual(controller.calls.keys, [])
 })
 
 // ---------------------------------------------------------------------------

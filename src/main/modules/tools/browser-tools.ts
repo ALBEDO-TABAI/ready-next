@@ -306,24 +306,42 @@ function buildBrowserTargetProbeJs(nodeId: string): string {
 }
 
 /**
- * EP1-I3 live-target net — in-page guard snippet shared by every typing
- * script (browser_type / browser_type_smart / browser_compose_message).
- * Defines `readyInputGuard(el)` returning a blocked-marker object or null.
+ * EP1-I3 live-target net — ONE in-page semantics library shared by every
+ * enforcement point (selector click, coordinate click/type, selector type,
+ * smart type, focused-field key guard). Defines:
  *
- * Input semantics come from what the field IS (placeholder / aria-label /
- * name / id / title / associated <label>), deliberately NOT from its current
- * value/textContent — a chat draft mentioning「验证码」must not trip the net.
+ *   readyAriaLabelledbyText(el) — resolves aria-labelledby references
+ *   readyInputSemanticsLabel(el) — what the FIELD IS: placeholder /
+ *     aria-label / aria-labelledby / name / id / title / associated <label>.
+ *     Deliberately NOT value/textContent — a chat draft mentioning「验证码」
+ *     must not trip the net.
+ *   readyClickSemanticsLabel(el) — what the CLICK will press: climbs to the
+ *     nearest clickable owner (clicks bubble — an icon/span inside a
+ *     「确认支付」button still presses the button) and reads its
+ *     text/aria-label/aria-labelledby/value/title.
+ *
  * The M1 patterns are generated from the policy module (single source).
  */
-function buildInputGuardSnippetJs(allowPasswordFill: boolean): string {
+function buildTargetSemanticsLibraryJs(): string {
   return `
-    const __READY_LIVE_TARGET_GUARD__ = true;
     const READY_MANUAL_ONLY_PATTERNS = [${MANUAL_ONLY_TARGET_REGEX_SOURCES.map((src) => `new RegExp(${JSON.stringify(src)}, 'i')`).join(', ')}];
+    function readyAriaLabelledbyText(el) {
+      try {
+        const ref = el && el.getAttribute ? el.getAttribute('aria-labelledby') : null;
+        if (!ref) return '';
+        const parts = [];
+        for (const id of ref.split(/\\s+/)) {
+          const node = document.getElementById(id);
+          if (node) parts.push(node.textContent);
+        }
+        return parts.filter(Boolean).join(' ');
+      } catch { return ''; }
+    }
     function readyInputSemanticsLabel(el) {
       if (!el || !el.getAttribute) return '';
       const parts = [
-        el.getAttribute('placeholder'), el.getAttribute('aria-label'), el.getAttribute('name'),
-        el.getAttribute('id'), el.getAttribute('title'), el.getAttribute('data-placeholder'),
+        el.getAttribute('placeholder'), el.getAttribute('aria-label'), readyAriaLabelledbyText(el),
+        el.getAttribute('name'), el.getAttribute('id'), el.getAttribute('title'), el.getAttribute('data-placeholder'),
       ];
       try {
         const id = el.getAttribute('id');
@@ -336,12 +354,40 @@ function buildInputGuardSnippetJs(allowPasswordFill: boolean): string {
       } catch { /* label association is best-effort */ }
       return parts.filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim().slice(0, 200);
     }
+    function readyClickableOwner(el) {
+      if (!el) return el;
+      return (el.closest && el.closest('button, a, [role="button"], [role="link"], input, textarea, select, summary, [onclick], label')) || el;
+    }
+    function readyClickSemanticsLabel(el) {
+      if (!el) return '';
+      const owner = readyClickableOwner(el);
+      const parts = [owner.textContent, owner.getAttribute && owner.getAttribute('aria-label'), readyAriaLabelledbyText(owner), owner.value, owner.title];
+      if (owner !== el && el.getAttribute) {
+        parts.push(el.getAttribute('aria-label'));
+        parts.push(readyAriaLabelledbyText(el));
+      }
+      return parts.filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim().slice(0, 200);
+    }
+    function readyIsPasswordField(el) {
+      return el instanceof HTMLInputElement && el.type === 'password';
+    }
+  `
+}
+
+/**
+ * In-page guard for typing scripts (browser_type / browser_type_smart /
+ * browser_compose_message). Returns a blocked-marker object or null.
+ */
+function buildInputGuardSnippetJs(allowPasswordFill: boolean): string {
+  return `
+    const __READY_LIVE_TARGET_GUARD__ = true;
+    ${buildTargetSemanticsLibraryJs()}
     function readyInputGuard(el) {
       const label = readyInputSemanticsLabel(el);
       if (label && READY_MANUAL_ONLY_PATTERNS.some((p) => p.test(label))) {
         return { __readyManualOnlyBlocked: true, label: label.slice(0, 80) };
       }
-      if (el instanceof HTMLInputElement && el.type === 'password' && !${JSON.stringify(allowPasswordFill)}) {
+      if (readyIsPasswordField(el) && !${JSON.stringify(allowPasswordFill)}) {
         return { __readyPasswordFillBlocked: true };
       }
       return null;
@@ -350,31 +396,42 @@ function buildInputGuardSnippetJs(allowPasswordFill: boolean): string {
 }
 
 /**
- * EP1-I3 live-target net — best-effort target probe for coordinate actions.
- * Climbs from `document.elementFromPoint` to the nearest clickable owner
- * (clicks BUBBLE: hitting an icon/span inside a「确认支付」button still
- * presses the button) and returns `{ label, inputLabel, password }`. The
- * callers refuse M1 / unconfirmed-password targets and proceed on empty or
- * failed probes (the visual channel must keep working).
+ * EP1-I3 live-target net — best-effort target probe for coordinate actions
+ * (click_at / type_at). Returns `{ label, inputLabel, password }` for the
+ * clickable owner under the CSS point. Callers refuse M1 /
+ * unconfirmed-password targets and proceed on empty or failed probes (the
+ * visual channel must keep working).
  */
 function buildClickPointLabelProbeJs(cssX: number, cssY: number): string {
   return `(() => {
     const __READY_CLICK_POINT_LABEL_PROBE__ = true;
+    ${buildTargetSemanticsLibraryJs()}
     const start = document.elementFromPoint(${JSON.stringify(Math.round(cssX))}, ${JSON.stringify(Math.round(cssY))});
     if (!start) return { label: '', inputLabel: '', password: false };
-    const owner = (start.closest && start.closest('button, a, [role="button"], [role="link"], input, textarea, select, summary, [onclick], label')) || start;
-    const clickParts = [owner.textContent, owner.getAttribute && owner.getAttribute('aria-label'), owner.value, owner.title];
-    if (owner !== start && start.getAttribute) clickParts.push(start.getAttribute('aria-label'));
-    const label = clickParts.filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim().slice(0, 200);
-    const inputParts = owner.getAttribute
-      ? [owner.getAttribute('placeholder'), owner.getAttribute('aria-label'), owner.getAttribute('name'), owner.getAttribute('id'), owner.getAttribute('title')]
-      : [];
-    try {
-      if (owner.labels) for (const l of owner.labels) inputParts.push(l.textContent);
-    } catch { /* label association is best-effort */ }
-    const inputLabel = inputParts.filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim().slice(0, 200);
-    const password = owner instanceof HTMLInputElement && owner.type === 'password';
-    return { label, inputLabel, password };
+    const owner = readyClickableOwner(start);
+    return {
+      label: readyClickSemanticsLabel(start),
+      inputLabel: readyInputSemanticsLabel(owner),
+      password: readyIsPasswordField(owner),
+    };
+  })()`
+}
+
+/**
+ * EP1-I3 live-target net — probe of the currently FOCUSED field, used by the
+ * send-keys guard: printable keystrokes land in whatever already has focus,
+ * which can be a captcha/password field no argument ever named.
+ */
+function buildFocusedFieldProbeJs(): string {
+  return `(() => {
+    const __READY_FOCUSED_FIELD_PROBE__ = true;
+    ${buildTargetSemanticsLibraryJs()}
+    const el = document.activeElement;
+    if (!el || el === document.body) return { inputLabel: '', password: false };
+    return {
+      inputLabel: readyInputSemanticsLabel(el),
+      password: readyIsPasswordField(el),
+    };
   })()`
 }
 
@@ -1525,6 +1582,38 @@ async function sendKeyStroke(
   const vk = keyToVirtualCode(keyLabel)
   const mask = modifiersToMask(modifiers)
   const text = keyLabel.length === 1 ? keyLabel : keyLabel.toLowerCase() === 'enter' ? '\r' : undefined
+
+  // EP1-I3 live-target net — send-keys is a keyboard bypass: a printable
+  // keystroke lands in whatever field already has FOCUS, so character-by-
+  // character typing could feed a captcha/password field no argument ever
+  // named. Guard ONLY text-producing keys without modifiers (`text` set and
+  // not Enter): navigation/shortcut keys (Enter/Tab/Escape/ctrl+…) pass —
+  // pressing Enter after the USER typed their credential is the user's own
+  // action completing. Both the browser_send_keys tool and the workflow
+  // send_keys substep funnel through here — single enforcement entry.
+  // Best-effort probe: empty/failed probe proceeds (visual channel).
+  if (keyLabel.length === 1 && mask === 0) {
+    const focusedProbe = await controller.executeJS(tabId, buildFocusedFieldProbeJs()).catch(() => null)
+    if (focusedProbe && typeof focusedProbe === 'object') {
+      const probed = focusedProbe as { inputLabel?: unknown; password?: unknown }
+      const inputLabel = String(probed.inputLabel || '')
+      const manualHit = matchManualOnlyBrowserTarget(inputLabel)
+      if (manualHit) {
+        throw new ToolDomainError(
+          'denied_manual_only',
+          `当前焦点字段「${inputLabel.slice(0, 80)}」命中 M1 规则（${manualHit.reason}）。请引导用户亲自完成这一步，不要逐键代输。`,
+          { key: keyLabel, ruleId: manualHit.ruleId },
+        )
+      }
+      if (probed.password === true) {
+        throw new ToolDomainError(
+          'denied_pending_confirmation',
+          '当前焦点是密码输入框，不能逐键代输。请改用 browser_type 并在参数中说明目标（如「登录密码输入框」），经用户确认后执行。',
+          { key: keyLabel, ruleId: 'm3-login-existing-account' },
+        )
+      }
+    }
+  }
 
   const modifierTriples: Array<{ key: string; code: string; vk: number; bit: number }> = [
     { key: 'Alt', code: 'AltLeft', vk: 18, bit: 1 },
@@ -2955,7 +3044,12 @@ async function runWorkflowStep(
     const target = String(step.target || '')
     const clearFirst = step.clear_first !== false
     const submit = step.submit !== false
-    return String(await controller.executeJS(tabId, buildSmartTypeJs({ target, text, clearFirst, submit })))
+    // EP1-I3 live-target net — workflow compose shares the smart-type guard;
+    // workflow steps are model-authored, so there is no confirmed-cue path
+    // (allowPasswordFill stays false) and markers must throw, not stringify.
+    const rawWorkflowCompose = await controller.executeJS(tabId, buildSmartTypeJs({ target, text, clearFirst, submit }))
+    throwIfLiveTargetGuardBlocked(rawWorkflowCompose, { target, via: 'workflow_compose' })
+    return String(rawWorkflowCompose)
   }
 
   return `Error: unknown workflow action "${action}"`
@@ -4431,12 +4525,13 @@ export async function executeBrowserTool(
         const clickJs = `
           (function() {
             const __READY_MANUAL_ONLY_CHECK__ = true;
+            ${buildTargetSemanticsLibraryJs()}
             const el = document.querySelector(${JSON.stringify(selector)});
             if (!el) return 'Element not found: ${selector.replace(/'/g, "\\'")}';
-            const label = [el.textContent, el.getAttribute('aria-label'), el.value, el.title]
-              .filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim().slice(0, 200);
-            const manualPatterns = [${MANUAL_ONLY_TARGET_REGEX_SOURCES.map((src) => `new RegExp(${JSON.stringify(src)}, 'i')`).join(', ')}];
-            if (manualPatterns.some((p) => p.test(label))) {
+            // The click BUBBLES — judge the clickable owner, not the bare
+            // child the selector happened to hit (icon/span inside a button).
+            const label = readyClickSemanticsLabel(el);
+            if (label && READY_MANUAL_ONLY_PATTERNS.some((p) => p.test(label))) {
               return { __readyManualOnlyBlocked: true, label: label.slice(0, 80) };
             }
             el.click();
@@ -5519,7 +5614,19 @@ export async function executeBrowserTool(
           ? await controller.executeJS(tabId, buildClickPointLabelProbeJs(typeProbePoint.cssX, typeProbePoint.cssY)).catch(() => null)
           : null
         if (typeProbe && typeof typeProbe === 'object') {
-          const probed = typeProbe as { inputLabel?: unknown; password?: unknown }
+          const probed = typeProbe as { label?: unknown; inputLabel?: unknown; password?: unknown }
+          // The focusing CLICK fires before any typing — judge the clickable
+          // target's own label first（点到「确认支付/提交订单」按钮时，
+          // 点击本身就是不可代做的动作）。
+          const clickLabel = String(probed.label || '')
+          const clickManualHit = matchManualOnlyBrowserTarget(clickLabel)
+          if (clickManualHit) {
+            throw new ToolDomainError(
+              'denied_manual_only',
+              `坐标输入会先点击目标「${clickLabel.slice(0, 80)}」，命中 M1 规则（${clickManualHit.reason}）。请引导用户亲自完成这一步。`,
+              { x, y, ruleId: clickManualHit.ruleId },
+            )
+          }
           const inputLabel = String(probed.inputLabel || '')
           const manualHit = matchManualOnlyBrowserTarget(inputLabel)
           if (manualHit) {
