@@ -100,3 +100,38 @@ test('host invoker and released state pass the negation layer', async () => {
   const releasedData = (releasedOutput.data ?? {}) as { errorKind?: string }
   assert.notEqual(releasedData.errorKind, 'denied_by_user_negation')
 })
+
+// ---------- Codex wave-2 P1: frame slice + lineage concurrency ----------
+
+test('TurnFrame negations slice updates through the declared patch channel', async () => {
+  const { applyTurnFramePatch } = await import('../main/modules/agent-control/runtime-core/turn-frame')
+  const frame = {
+    ids: { sessionId: 's1', requestId: null },
+    mode: 'direct', userIntent: 'start', skill: null,
+    liveness: 'unknown',
+    progress: { stage: null, totalUnits: null, completedUnits: null, coverageRatio: null, fingerprint: null },
+    steering: { mode: 'none', requiredToolName: null, preferredToolNames: [], systemReminder: null },
+    budget: { leaseEndIteration: null, hardCapIteration: null, exhausted: false },
+  } as never
+  const added = applyTurnFramePatch(frame, { negationUpdates: { add: ['collection'], updatedAt: '2026-06-12T12:00:00.000Z' } } as never)
+  assert.deepEqual((added as { negations?: { families: string[] } }).negations?.families, ['collection'])
+  const released = applyTurnFramePatch(added, { negationUpdates: { release: ['collection'] } } as never)
+  assert.deepEqual((released as { negations?: { families: string[] } }).negations?.families, [])
+  // no-op patch returns the same frame instance (M-contract no-op guard)
+  const untouched = applyTurnFramePatch(released, {} as never)
+  assert.equal(untouched, released)
+})
+
+test('lineage concurrency: interleaved record/release across two scopes never cross-pollutes', () => {
+  __clearNegationStateForTests()
+  // scopeId IS the lineage key (来源频道+线程+agent 复合, per session scope contract)
+  recordNegations('feishu:thread-1:butler', ['collection'])
+  recordNegations('local:conv-2:butler', ['external_send'])
+  recordNegations('feishu:thread-1:butler', ['deletion'])
+  releaseNegations('local:conv-2:butler', ['external_send'])
+  assert.deepEqual(activeNegations('feishu:thread-1:butler').sort(), ['collection', 'deletion'])
+  assert.deepEqual(activeNegations('local:conv-2:butler'), [])
+  releaseNegations('feishu:thread-1:butler', ['collection'])
+  assert.deepEqual(activeNegations('feishu:thread-1:butler'), ['deletion'])
+  assert.deepEqual(activeNegations('feishu:thread-1:other-agent'), [], 'different agent in same thread = different lineage key')
+})

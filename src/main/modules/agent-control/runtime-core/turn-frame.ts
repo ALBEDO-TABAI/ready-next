@@ -124,6 +124,12 @@ export interface TurnFrame {
      */
     action?: FrameAction | null
   }
+  /** EP2-I2 — standing user negations (session lineage). Optional so the
+   *  resolver's existing construction stays valid; absent = no negations. */
+  negations?: {
+    families: string[]
+    updatedAt: string | null
+  }
   budget: {
     leaseEndIteration: number | null
     hardCapIteration: number | null
@@ -177,6 +183,15 @@ export function summarizeTurnFrame(frame: TurnFrame | null): Record<string, unkn
  * intra-turn iteration glue.
  */
 export interface TurnFramePatch {
+  /**
+   * EP2-I2 — standing-negation updates through the declared patch channel.
+   * `add` merges (dedupe); `release` removes. Lifecycle = session lineage.
+   */
+  negationUpdates?: {
+    add?: string[]
+    release?: string[]
+    updatedAt?: string
+  }
   /**
    * Additional read-only roots to expose for `skill_read_artifact` lookups.
    * Merged with the existing skill slice's path data. Concat-and-dedupe
@@ -558,8 +573,12 @@ export function applyTurnFramePatch(frame: TurnFrame, patch: TurnFramePatch): Tu
   // skips construction of a new frame when nothing changed.
   const hasBudget = Boolean(patch.budget && Object.keys(patch.budget).length > 0)
   const hasTerminalReason = typeof patch.terminalReason === 'string'
+  const hasNegations = Boolean(patch.negationUpdates
+    && ((patch.negationUpdates.add && patch.negationUpdates.add.length > 0)
+      || (patch.negationUpdates.release && patch.negationUpdates.release.length > 0)))
   const hasAnything =
-    hasActiveRoots
+    hasNegations
+    || hasActiveRoots
     || hasConfig
     || hasContract
     || Boolean(patch.discoveredHandles && Object.keys(patch.discoveredHandles).length > 0)
@@ -741,6 +760,14 @@ export function applyTurnFramePatch(frame: TurnFrame, patch: TurnFramePatch): Tu
     }
   }
 
+  let nextNegations = frame.negations
+  if (hasNegations && patch.negationUpdates) {
+    const families = new Set(frame.negations?.families ?? [])
+    for (const family of patch.negationUpdates.add ?? []) families.add(family)
+    for (const family of patch.negationUpdates.release ?? []) families.delete(family)
+    nextNegations = { families: [...families], updatedAt: patch.negationUpdates.updatedAt ?? frame.negations?.updatedAt ?? null }
+  }
+
   if (
     nextSkill === frame.skill
     && nextLiveness === frame.liveness
@@ -748,12 +775,14 @@ export function applyTurnFramePatch(frame: TurnFrame, patch: TurnFramePatch): Tu
     && nextConfigValidation === frame.configValidation
     && nextBudget === frame.budget
     && nextTerminalReason === frame.terminalReason
+    && nextNegations === frame.negations
   ) {
     return frame
   }
 
   return {
     ...frame,
+    ...(nextNegations !== undefined ? { negations: nextNegations } : {}),
     skill: nextSkill,
     liveness: nextLiveness,
     activeArtifactRoots: nextActiveArtifactRoots,
