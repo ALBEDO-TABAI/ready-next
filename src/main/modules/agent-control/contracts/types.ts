@@ -398,6 +398,7 @@ export interface ScopeRunSummary {
     | 'human_takeover'
     | 'suspended'
     | 'resuming'
+    | 'check_in_pending'
   steps?: ScopeRunTaskStep[]
   currentStepId?: string | null
   waitingFor?: ScopeRunWaitingFor
@@ -494,6 +495,7 @@ export interface ScopeRunEventPayload {
     | 'human_takeover'
     | 'suspended'
     | 'resuming'
+    | 'check_in_pending'
   steps?: ScopeRunTaskStep[]
   currentStepId?: string | null
   waitingFor?: ScopeRunWaitingFor

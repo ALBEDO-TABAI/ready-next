@@ -154,6 +154,7 @@ export type TaskInteractionState =
   | 'human_takeover'
   | 'suspended'
   | 'resuming'
+  | 'check_in_pending'
 
 export interface TaskStep {
   id: string
@@ -396,6 +397,16 @@ export interface TaskProjectionRecord {
    * `taskRunId` / `interactionState` (Stage Q audit §C-9 / contract C7).
    */
   canResume?: boolean
+  /**
+   * EP2-Q1 — task quality fields (migration 054). Shapes stay permissive
+   * here; Q2 (criteria templates) and Q3/Q4 (proof/checkin writers) own
+   * the concrete schemas. All reads/writes go through the repository —
+   * raw SQL against these columns is a contract violation.
+   */
+  criteria?: Record<string, unknown> | null
+  checkins?: unknown[] | null
+  proofRefs?: unknown[] | null
+  learningRefs?: unknown[] | null
   createdAt: string
   updatedAt: string
 }

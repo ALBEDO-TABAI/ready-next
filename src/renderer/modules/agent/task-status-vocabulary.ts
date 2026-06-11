@@ -87,6 +87,8 @@ export function interactionStateToUserLabel(
       return '已暂停'
     case 'resuming':
       return '恢复中'
+    case 'check_in_pending':
+      return '待裁决'
     case 'running':
       return '执行中'
     default:
@@ -124,6 +126,8 @@ export function interactionStateToBadgeLabel(
       return '已暂停'
     case 'resuming':
       return '恢复中'
+    case 'check_in_pending':
+      return '待裁决'
     case 'running':
       return '执行中'
     default:

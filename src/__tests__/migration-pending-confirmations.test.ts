@@ -64,7 +64,8 @@ test('migration 053 creates the pending_confirmations table + status index idemp
   const names = __getMigrationNamesForTests()
   const idx = names.indexOf('053_pending_confirmations')
   assert.ok(idx > 0, 'migration 053 must be registered')
-  assert.equal(idx, names.length - 1, 'migration 053 must be the newest (append-only discipline)')
+  // EP2-Q1: the "053 must be newest" point-in-time assertion is retired —
+  // append-only discipline is proven per-migration by name isolation below.
   const previous = names.filter((name) => name !== '053_pending_confirmations')
 
   const db = new Migration053Db([...previous])

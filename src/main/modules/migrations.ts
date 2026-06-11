@@ -2223,6 +2223,18 @@ const migrations: Migration[] = [
       `)
       db.exec('CREATE INDEX IF NOT EXISTS idx_pending_confirmations_status ON pending_confirmations(status, expires_at)')
     }
+  },
+  {
+    // EP2-Q1 — task quality columns (criteria / checkins / proof refs /
+    // learning refs). Columns only; write-side governance limits and
+    // archiving land with the Q3/Q4 writers.
+    name: '054_task_projection_quality_columns',
+    up: (db) => {
+      db.exec('ALTER TABLE task_projections ADD COLUMN criteria_json TEXT')
+      db.exec('ALTER TABLE task_projections ADD COLUMN checkins_json TEXT')
+      db.exec('ALTER TABLE task_projections ADD COLUMN proof_refs_json TEXT')
+      db.exec('ALTER TABLE task_projections ADD COLUMN learning_refs_json TEXT')
+    }
   }
 ]
 

@@ -31,6 +31,7 @@ export type TaskInteractionState =
   | 'human_takeover'
   | 'suspended'
   | 'resuming'
+  | 'check_in_pending'
 
 export type TaskProjectionStatus = SkillChildRunStatus
 
@@ -160,6 +161,11 @@ export interface TaskProjectionRecord {
    * Defensive default: when undefined or false, treat as not resumable.
    */
   canResume?: boolean
+  /** EP2-Q1 — quality fields (wire keeps permissive shapes; main owns schemas). */
+  criteria?: Record<string, unknown> | null
+  checkins?: unknown[] | null
+  proofRefs?: unknown[] | null
+  learningRefs?: unknown[] | null
   createdAt: string
   updatedAt: string
 }

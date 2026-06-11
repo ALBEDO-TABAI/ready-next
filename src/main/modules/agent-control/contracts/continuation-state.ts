@@ -132,6 +132,7 @@ function normalizeInteractionState(value: unknown): TaskInteractionState {
     || value === 'human_takeover'
     || value === 'suspended'
     || value === 'resuming'
+    || value === 'check_in_pending'
   ) {
     return value
   }

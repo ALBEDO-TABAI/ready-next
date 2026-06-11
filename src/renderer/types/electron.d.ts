@@ -480,6 +480,7 @@ type TaskInteractionStateData =
   | 'human_takeover'
   | 'suspended'
   | 'resuming'
+  | 'check_in_pending'
 
 type TaskProjectionStatusData = 'queued' | 'running' | 'recoverable_paused' | 'budget_paused' | 'blocked' | 'completed' | 'failed' | 'killed'
 

@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events'
+import { z } from 'zod'
 import type {
   TaskProjectionChangeEvent,
   TaskProjectionRecord,
@@ -44,6 +45,10 @@ interface TaskProjectionRow {
   resumable_actions_json: string | null
   continuation_ref_json: string | null
   progress_json: string | null
+  criteria_json?: string | null
+  checkins_json?: string | null
+  proof_refs_json?: string | null
+  learning_refs_json?: string | null
   recent_artifacts_json: string | null
   created_at: string
   updated_at: string
@@ -55,6 +60,48 @@ function safeParse<T>(raw: string | null | undefined, fallback: T): T {
     return JSON.parse(raw) as T
   } catch {
     return fallback
+  }
+}
+
+/** Like safeParse but also rejects parses of the wrong container shape —
+ * a malformed quality cell must degrade to the default, never leak a
+ * mis-shaped value into consumers (EP2-Q1). */
+function safeParseArray(raw: string | null | undefined): unknown[] {
+  const parsed = safeParse<unknown>(raw, [])
+  return Array.isArray(parsed) ? parsed : []
+}
+
+function safeParseObject(raw: string | null | undefined): Record<string, unknown> | null {
+  const parsed = safeParse<unknown>(raw, null)
+  return parsed !== null && typeof parsed === 'object' && !Array.isArray(parsed)
+    ? parsed as Record<string, unknown>
+    : null
+}
+
+/**
+ * EP2-Q1 — write-side structural validation for the quality fields.
+ * Loud rejection: a writer (Q3 proof collector / Q4 adjudicator) passing
+ * malformed values is a programming error, not data to tolerate. Limits
+ * (checkins ≤50 / proofRefs ≤100 + archiving) belong to the writers.
+ */
+const taskQualityFieldsSchema = z.object({
+  criteria: z.union([z.record(z.string(), z.unknown()), z.null()]).optional(),
+  checkins: z.union([z.array(z.unknown()), z.null()]).optional(),
+  proofRefs: z.union([z.array(z.unknown()), z.null()]).optional(),
+  learningRefs: z.union([z.array(z.unknown()), z.null()]).optional(),
+})
+
+function validateTaskQualityFields(patch: Partial<TaskProjectionRecord>, context: string): void {
+  const candidate: Record<string, unknown> = {}
+  if ('criteria' in patch) candidate.criteria = patch.criteria
+  if ('checkins' in patch) candidate.checkins = patch.checkins
+  if ('proofRefs' in patch) candidate.proofRefs = patch.proofRefs
+  if ('learningRefs' in patch) candidate.learningRefs = patch.learningRefs
+  if (Object.keys(candidate).length === 0) return
+  const result = taskQualityFieldsSchema.safeParse(candidate)
+  if (!result.success) {
+    const fields = result.error.issues.map((issue) => issue.path.join('.')).join(', ')
+    throw new Error(`[task-projection-repository] malformed quality field(s) rejected (${context}): ${fields}`)
   }
 }
 
@@ -152,14 +199,17 @@ export class TaskProjectionRepository implements TaskProjectionStore {
   create(record: TaskProjectionRecord, options?: TaskProjectionWriteOptions): void {
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
+    validateTaskQualityFields(record, 'create')
 
     db.prepare(`
       INSERT INTO task_projections (
         task_id, scope_id, run_id, parent_task_id, parent_step_id, task_type, module, task_title, task_summary, status, interaction_state, waiting_for,
         steps_json, current_step_id, budget_json, budget_usage_percent, budget_warning_level,
         recovery_history_json, degradation_reason, blocked_reason, resumable_actions_json,
-        continuation_ref_json, progress_json, recent_artifacts_json, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        continuation_ref_json, progress_json, recent_artifacts_json,
+        criteria_json, checkins_json, proof_refs_json, learning_refs_json,
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.taskId,
       record.scopeId,
@@ -185,6 +235,10 @@ export class TaskProjectionRepository implements TaskProjectionStore {
       record.continuationRef ? JSON.stringify(record.continuationRef) : null,
       record.progress ? JSON.stringify(record.progress) : null,
       record.recentArtifacts ? JSON.stringify(record.recentArtifacts) : null,
+      record.criteria ? JSON.stringify(record.criteria) : null,
+      record.checkins ? JSON.stringify(record.checkins) : null,
+      record.proofRefs ? JSON.stringify(record.proofRefs) : null,
+      record.learningRefs ? JSON.stringify(record.learningRefs) : null,
       record.createdAt,
       record.updatedAt,
     )
@@ -213,6 +267,7 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     }
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
+    validateTaskQualityFields(patch, 'update')
 
     const updates: Array<[string, unknown]> = []
     const assign = (column: string, value: unknown): void => {
@@ -242,6 +297,10 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     if ('continuationRef' in patch) assign('continuation_ref_json', patch.continuationRef ? JSON.stringify(patch.continuationRef) : null)
     if ('progress' in patch) assign('progress_json', patch.progress ? JSON.stringify(patch.progress) : null)
     if ('recentArtifacts' in patch) assign('recent_artifacts_json', patch.recentArtifacts ? JSON.stringify(patch.recentArtifacts) : null)
+    if ('criteria' in patch) assign('criteria_json', patch.criteria ? JSON.stringify(patch.criteria) : null)
+    if ('checkins' in patch) assign('checkins_json', patch.checkins ? JSON.stringify(patch.checkins) : null)
+    if ('proofRefs' in patch) assign('proof_refs_json', patch.proofRefs ? JSON.stringify(patch.proofRefs) : null)
+    if ('learningRefs' in patch) assign('learning_refs_json', patch.learningRefs ? JSON.stringify(patch.learningRefs) : null)
     if ('createdAt' in patch) assign('created_at', patch.createdAt)
     if ('updatedAt' in patch) assign('updated_at', patch.updatedAt)
 
@@ -438,6 +497,10 @@ export class TaskProjectionRepository implements TaskProjectionStore {
       continuationRef: safeParse(row.continuation_ref_json, null),
       progress: safeParse(row.progress_json, null),
       recentArtifacts: safeParse(row.recent_artifacts_json, []),
+      criteria: safeParseObject(row.criteria_json),
+      checkins: safeParseArray(row.checkins_json),
+      proofRefs: safeParseArray(row.proof_refs_json),
+      learningRefs: safeParseArray(row.learning_refs_json),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }

@@ -11,6 +11,7 @@ export function isAwaitingUserInteractionState(state: {
     || state.interactionState === 'awaiting_clarification'
     || state.interactionState === 'awaiting_confirmation'
     || state.interactionState === 'human_takeover'
+    || state.interactionState === 'check_in_pending'
     || state.terminalReason === 'blocked_config'
     || state.terminalReason === 'blocked_external'
 }

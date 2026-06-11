@@ -675,6 +675,7 @@ export function buildTaskProjectionRecord(
       || truthPatch?.interactionState === 'human_takeover'
       || truthPatch?.interactionState === 'suspended'
       || truthPatch?.interactionState === 'resuming'
+      || truthPatch?.interactionState === 'check_in_pending'
     )
       ? truthPatch.interactionState
       : summary.interactionState,
