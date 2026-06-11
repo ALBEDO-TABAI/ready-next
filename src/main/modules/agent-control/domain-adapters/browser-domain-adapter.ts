@@ -135,10 +135,37 @@ function buildLiveInfoSynthesisPrompt(params: {
 export class BrowserDomainAdapter implements DomainAdapter {
   readonly id = 'browser'
 
-  constructor(private readonly orchestrator: BrowserDomainOrchestratorLike) {}
+  constructor(
+    private readonly orchestrator: BrowserDomainOrchestratorLike,
+    private readonly disciplineText: string = '',
+  ) {}
 
   contributePromptFragment(): ReturnType<DomainAdapter['contributePromptFragment']> {
+    const disciplineFragment = this.disciplineText
+      ? [
+          {
+            // EP1-B2 — browser interaction discipline (versioned X3 asset,
+            // injected inline). Matches browser intent (match never assumes a
+            // route — prompt assembly runs before route resolution).
+            id: 'browser-discipline',
+            label: '浏览器交互纪律',
+            priority: 70,
+            matches: ({ userText }: { userText: string }) =>
+              matchesBrowserPromptTrigger(userText) || resolveBrowserCollectionIntent(userText),
+            blocking: false,
+            refs: [
+              {
+                path: null,
+                title: '浏览器交互纪律',
+                summary: '通道决策 / 五步配方 / 定位器优先级 / 错误恢复 / token 经济 / 风险站点',
+                text: this.disciplineText,
+              },
+            ],
+          },
+        ]
+      : []
     return [
+      ...disciplineFragment,
       {
         // Collection-workflow guidance: when the user wants to collect a
         // blogger's notes (每篇建文件夹下载图片), tell the agent to dispatch

@@ -33,7 +33,15 @@ export interface CoordinatorPromptFragment {
   label: string
   priority: number
   matches: (context: { userText: string; route: TaskExecutionRoute | null }) => boolean
-  refs: Array<{ path: string; title: string; summary: string; sensitive?: boolean }>
+  /**
+   * Fragment refs. A ref injects either by reading `path` from the memory root
+   * (the legacy default), OR — when `text` is set — by injecting that string
+   * directly (EP1-B2a). The inline `text` path exists ONLY for host-code
+   * generated fragments whose content comes from the X3 prompt-asset loader;
+   * it must never carry user input. When `text` is set, `path` is advisory
+   * (asset key / null) and is not read from disk.
+   */
+  refs: Array<{ path: string | null; title: string; summary: string; sensitive?: boolean; text?: string }>
   blocking: boolean
 }
 

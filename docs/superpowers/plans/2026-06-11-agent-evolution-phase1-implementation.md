@@ -5,6 +5,7 @@ status: approved v2.1 — Codex 共识达成（2026-06-11，2 轮合同评审 7+
 revision_history:
   - v1 (2026-06-11): 初稿。依据 docs/agent-evolution/ 00~11 设计系列（已经两轮 Codex 评审压实）拆为可执行工单。
   - v2 (2026-06-11): 吸收 Codex 合同评审 7 点。P1：①I3-1 取消"用现有 TurnFrame 字段自动预批准"（粗粒度意图证明不了对象级授权）——阶段一 M2/M3 全走确认卡，预批准能力另立阶段二工单 I-auth；②I3-2 明确执行模型为「原 run 内同步等待」（运行态不跨 run 重建）+ 专用 release 入口（token 只跳过再确认，authorization/工具策略照跑，确认≠提权）。P2：③G1 验收补 verify:native；④T4-2 增非 browser/skill 工具旧字段快照测试（全域改动全域证明）；⑤B3 种子卡定为 bundled 只读 + 用户目录覆盖（不写用户目录、升级不覆盖用户改动）。P3：⑥K1/K2 staged 验收措辞改为"读 API 默认排除 staged"，真实注入禁令留 K3；⑦K2 syncBeliefCards 本阶段只提供函数不接启动，启动接线并入 K6。同步更新 05 篇设计与 PHASE1 开发计划。
+  - v2.2 (2026-06-11): 施工期 B2 下钻发现合同与 HEAD 注入架构不匹配（DomainAdapterPrepareResult 无提示词注入字段；fragment refs 只能 readMemoryFile 从记忆根读，读不到 X3 assets）。Codex 评审采纳"收紧版 A"：新增 EP1-B2a 给 fragment ref 加可选内联 `text`（仅宿主代码生成、内容来自 X3 loader、不接用户输入），`resolveTriggers` 优先注入 text 否则读 path；旧 path 方式零行为变化；memory ref 不塞正文。B2 改为构造期经 X3 渲染纪律资产、`contributePromptFragment` 贡献 inline fragment；`matches` 不假设 route 有值。
   - v2.1 (2026-06-11): 吸收 Codex 复核 2 点。P2：K1 路径守卫升级为**两 glob 白名单**（普通卡 `knowledge/*.md` + 站点卡 `knowledge/sites/*.md`，唯一允许的子目录），bundled 只读卡走只读解析不经写入守卫；B3 站点卡写入准入由 K1 白名单统一裁决，不另立守卫（消除 B3 用户覆盖路径与 K1 守卫的冲突）；同步 01 §152。P3：I3-1 明令**阶段一禁止确认缓存**（"同对象同动作确认一次"依赖对象级授权 key，须 I-auth 后启用），加"连续两次命中两次都确认"防御测试；05 §3.2 该条标注为 I-auth 后启用。
 owner: 白
 author: Claude (Fable 5)
@@ -148,12 +149,21 @@ related:
 
 ## 轨道 B：浏览器纪律与站点知识（设计出处：11 篇）
 
+### EP1-B2a 合同修正 — fragment inline asset ref（收紧版 A，Codex 评审采纳）
+
+⚠️ **HEAD 架构修正**：原 B2 写"prepare 阶段经 X3 loader 注入 prompt fragment"，但 HEAD 的 `DomainAdapterPrepareResult` 无任何提示词注入字段；域内指引只能经 `contributePromptFragment()` 的 refs，而 `resolveTriggers` 用 `readMemoryFile(ref.path)` 从记忆根读取——读不到 X3 的 `assets/prompts` 资产。更准确的说法是"**DomainAdapter 贡献 prompt fragment，经 X3 loader 生成 inline asset ref 注入**"。修正方式（**收紧版 A**，不做泛化内联）：
+
+- **改动文件**：`domain-adapter.ts`（`CoordinatorPromptFragment` 的 ref 增加可选 `text?: string`——**仅供宿主代码生成的 fragment 使用，内容只来自 X3 loader 渲染，绝不接用户输入**；`path` 对此类 ref 可为 null/资产 key）、`prompt-assembly.ts`（`resolveTriggers` 注入分支：ref 带 `text` 时直接注入该文本，不走 `readMemoryFile`；memory ref 只记 title/summary/triggerId，**正文不入 memory ref**）、新增 `src/__tests__/fragment-inline-asset-ref.test.ts`
+- **不变量**：旧 `path` 方式零行为变化（老 browser/document/rss/calendar fragment 不动）；inline 文本仍计入预算与 context_bill（X4）。
+- **测试（先红）**：旧 path fragment 仍读记忆文件；inline asset fragment 能注入；非命中场景不注入；inline 文本被 context_bill 计入。
+- **规模**：~80 行。
+
 ### EP1-B2 浏览器交互纪律资产
 
-- **改动文件**：新增 `src/main/assets/prompts/browser/discipline.md`（通道决策树[store riskLevel 权威] + 五步交互配方 + 定位器七级优先级 + 错误恢复状态机 + token 经济规则 + 已知风险站点硬规则）、`src/main/modules/agent-control/domain-adapters/browser-domain-adapter.ts`（prepare 阶段经 X3 loader 注入该资产为 prompt fragment，预算上限 2500 字符）、新增 `src/__tests__/browser-discipline-injection.test.ts`
-- **实施要点**：内容以 docs/agent-evolution/11 §2.2/§3 为准；纪律资产对**现有视觉/工具通道立即生效**（不等 B1 spike）；不修改任何工具行为，纯提示词层。
-- **测试（先红）**：browser 路由的 turn prompt fragment 含资产内容；资产快照稳定；非 browser 路由不注入。
-- **验证**：`npx tsx@^4.19.2 --test src/__tests__/browser-discipline-injection.test.ts && npm run typecheck`
+- **改动文件**：新增 `assets/prompts/browser/discipline.md`（X3 资产：通道决策树[store riskLevel 权威] + 五步交互配方 + 定位器七级优先级 + 错误恢复状态机 + token 经济规则 + 已知风险站点硬规则）、`browser-domain-adapter.ts`（构造期经 X3 loader 渲染纪律资产，`contributePromptFragment()` 增加 `browser-discipline` fragment 携带 inline `text`，match 浏览器意图；预算上限 2500 字符）、新增 `src/__tests__/browser-discipline-injection.test.ts`
+- **实施要点**：内容以 docs/agent-evolution/11 §2.2/§3 为准；纪律资产对**现有视觉/工具通道立即生效**（不等 B1 spike）；不修改任何工具行为，纯提示词层。**`matches` 不得假设 route 有值**——prompt assembly 发生在 route/prepare 之前，现有 fragment match 一律 `route: null`；基于浏览器意图文本/adapter 命中判断。
+- **测试（先红）**：浏览器意图命中时 fragment 含纪律资产内容；资产快照稳定；非浏览器意图不注入。
+- **验证**：`npx tsx@^4.19.2 --test src/__tests__/fragment-inline-asset-ref.test.ts src/__tests__/browser-discipline-injection.test.ts && npm run typecheck`
 - **规模**：~120 行代码 + 资产文档。
 
 ### EP1-B3 站点知识卡与 store 镜像对齐

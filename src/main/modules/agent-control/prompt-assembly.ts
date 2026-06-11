@@ -89,7 +89,7 @@ interface TriggerDefinition {
   module?: PromptTriggerHit['module']
   pattern: RegExp
   blocking: boolean
-  refs: Array<{ path: string; title: string; summary: string; sensitive?: boolean }>
+  refs: Array<{ path: string | null; title: string; summary: string; sensitive?: boolean; text?: string }>
 }
 
 interface CoordinatorTriggerCandidate {
@@ -362,6 +362,17 @@ export class PromptAssemblyService {
       return readFileSync(fullPath, 'utf8')
     }
     return DEFAULT_FILES[path] || ''
+  }
+
+  /**
+   * EP1-B2a: resolve a fragment ref's injected body. Inline `text` (host-code
+   * generated, from the X3 asset loader) wins; otherwise read `path` from the
+   * memory root (legacy default). A ref with neither yields empty (skipped).
+   */
+  private resolveFragmentRefBody(ref: { path: string | null; text?: string }): string {
+    if (typeof ref.text === 'string') return ref.text.trim()
+    if (ref.path) return this.readMemoryFile(ref.path).trim()
+    return ''
   }
 
   private ensureMemoryRefFile(path: string, root = this.getMemoryRoot()): void {
@@ -764,7 +775,7 @@ export class PromptAssemblyService {
       const sections: string[] = []
       const refs: PromptMemoryRef[] = []
       for (const ref of trigger.refs) {
-        const body = this.readMemoryFile(ref.path).trim()
+        const body = this.resolveFragmentRefBody(ref)
         if (!body) continue
         sections.push(formatMemorySection(ref.title, body))
         refs.push(
@@ -790,7 +801,7 @@ export class PromptAssemblyService {
       const sections: string[] = []
       const refs: PromptMemoryRef[] = []
       for (const ref of trigger.refs) {
-        const body = this.readMemoryFile(ref.path).trim()
+        const body = this.resolveFragmentRefBody(ref)
         if (!body) continue
         sections.push(formatMemorySection(ref.title, body))
         refs.push(
