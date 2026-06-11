@@ -1,11 +1,11 @@
 ---
 title: EP2-K6 真值源边界落地子合同（K6C 评审版）
 date: 2026-06-12
-status: K6C 子合同草案 — 待 Codex 评审；评审通过前 K6 不开工（阶段二合同 EP2-K6C 条款）
+status: approved — Codex 波次 0+1 审查通过（2026-06-12，"达到可施工标准"），K6 解锁可开工
 owner: 白
 author: Claude (Fable 5)
 reviewer: Codex
-enforce: false
+enforce: true
 note: >
   评审通过后本文件 status 改 approved、enforce 改 true，K6 按本合同施工。
   上位合同：docs/superpowers/plans/2026-06-11-agent-evolution-phase2-implementation.md（EP2-K6C/EP2-K6）。
