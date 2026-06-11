@@ -17,6 +17,7 @@ import type { RequestEnvelope } from './contracts/request-envelope'
 import { buildRequestEnvelope } from './contracts/request-envelope'
 import { filterDailyMemoryForScope } from './session/daily-memory-scope-filter'
 import { buildDailyTaskIndex, type TaskIndexEntry } from './session/daily-task-index-builder'
+import { loadRulesDefaultBody } from './prompt-assets/rules-default-asset'
 import type { SessionRecallCapsule } from '../../../shared/session-recall'
 import type { CoordinatorPromptFragment, DomainAdapter } from './domain-adapters/domain-adapter'
 
@@ -951,9 +952,11 @@ export class PromptAssemblyService {
     const hasExplicitResourceRefs = hasCurrentExplicitResourceRefs(requestEnvelope)
     const l0 = await this.loadL0(params.scope)
     const l1 = await this.loadL1(params.scope, { includeDailyMemory: !hasExplicitResourceRefs })
-    // EP2-K3 — RULES (L0 extension) + knowledge index (L1.5). Missing file /
-    // empty knowledge dir degrade to empty strings → sections omitted.
-    const rulesText = clip(this.readMemoryFile('RULES.md').trim(), MAX_RULES_CHARS)
+    // EP2-K3 — RULES (L0 extension) + knowledge index (L1.5). EP2-K4: a
+    // missing user RULES.md falls back to the default asset so fresh
+    // installs carry the confirmation-hygiene rules; an empty knowledge dir
+    // still omits the index section.
+    const rulesText = clip(this.readMemoryFile('RULES.md').trim() || loadRulesDefaultBody(), MAX_RULES_CHARS)
     let knowledgeIndexText = ''
     try {
       const beliefStore = this.deps.getBeliefCardStore?.() ?? null
