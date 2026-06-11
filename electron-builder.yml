@@ -57,6 +57,10 @@ extraResources:
     to: prompts
     filter:
       - "**/*"
+  - from: assets/site-cards
+    to: site-cards
+    filter:
+      - "**/*"
   - from: src/main/modules/rss-engine/rsshub-worker.mjs
     to: rsshub-worker.mjs
   - from: src/python

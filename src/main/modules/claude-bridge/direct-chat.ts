@@ -14,6 +14,7 @@ import type { SidecarManager } from '../agent-control/sidecar-manager'
 import { BrowserDomainOrchestrator } from '../agent-control/domain-adapters/browser-domain-orchestrator'
 import { BrowserDomainAdapter } from '../agent-control/domain-adapters/browser-domain-adapter'
 import { loadBrowserDisciplineText } from '../agent-control/domain-adapters/browser-discipline-asset'
+import { loadSiteCardFragments } from '../agent-control/domain-adapters/site-card-fragments'
 import { BrowserTaskPlanner } from '../agent-control/domain-adapters/browser-task-planner'
 import type { DomainAdapter } from '../agent-control/domain-adapters/domain-adapter'
 import { DesignToolLoopOrchestrator } from '../agent-control/design-tool-loop-orchestrator'
@@ -485,7 +486,7 @@ export class DirectChatEngine extends EventEmitter {
       // path changes.
       new ResearchDomainAdapter(),
       new MapDomainAdapter(),
-      new BrowserDomainAdapter(this.browserDomainOrchestrator as never, loadBrowserDisciplineText()),
+      new BrowserDomainAdapter(this.browserDomainOrchestrator as never, loadBrowserDisciplineText(), loadSiteCardFragments()),
       new DocumentDomainAdapter({
         orchestrator: this.documentDomainOrchestrator as never,
         toolLoopOrchestrator: this.documentToolLoopOrchestrator as never,

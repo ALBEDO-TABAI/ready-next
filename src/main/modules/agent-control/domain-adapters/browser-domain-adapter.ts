@@ -138,9 +138,34 @@ export class BrowserDomainAdapter implements DomainAdapter {
   constructor(
     private readonly orchestrator: BrowserDomainOrchestratorLike,
     private readonly disciplineText: string = '',
+    private readonly siteCards: ReadonlyArray<{ domain: string; aliases: string[]; text: string }> = [],
   ) {}
 
   contributePromptFragment(): ReturnType<DomainAdapter['contributePromptFragment']> {
+    // EP1-B3 — one fragment per known site domain, matched when the user text
+    // references that domain (keyword/alias). Risk line in the text is the
+    // authoritative store value; the card never overrides the guard.
+    const siteCardFragments = this.siteCards.map((card) => {
+      const needles = card.aliases.map((a) => a.toLowerCase())
+      return {
+        id: `site-card-${card.domain}`,
+        label: `站点经验 ${card.domain}`,
+        priority: 65,
+        matches: ({ userText }: { userText: string }) => {
+          const t = userText.toLowerCase()
+          return needles.some((n) => n && t.includes(n))
+        },
+        blocking: false,
+        refs: [
+          {
+            path: null,
+            title: `站点经验 ${card.domain}`,
+            summary: `${card.domain} 的采集经验与风险`,
+            text: card.text,
+          },
+        ],
+      }
+    })
     const disciplineFragment = this.disciplineText
       ? [
           {
@@ -165,6 +190,7 @@ export class BrowserDomainAdapter implements DomainAdapter {
         ]
       : []
     return [
+      ...siteCardFragments,
       ...disciplineFragment,
       {
         // Collection-workflow guidance: when the user wants to collect a
