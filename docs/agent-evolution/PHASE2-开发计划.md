@@ -1,6 +1,6 @@
 # 阶段二开发计划（配套 2026-06-11-agent-evolution-phase2-implementation.md）
 
-> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同 v5 已于 2026-06-12 经 Codex 复核 APPROVED（四轮复审收口：check_in_pending 从五面补全为全链路七组面——运行态 union/存储 union/sync 白名单/IPC wire/renderer 副本/user+badge 双标签/awaiting-user helper），enforce 生效，可按波次开工。
+> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同 v5 曾经 Codex 复核 APPROVED；2026-06-12 Codex 五轮复审再提 1 点（continuation 归一化白名单 `normalizeInteractionState` 同族静默洗值），已回修为 **v6，待 Codex 复核确认后方可按波次开工**。
 
 ---
 
@@ -8,7 +8,7 @@
 
 | 工单 | 内容 | 规模 | 依赖 |
 |------|------|------|------|
-| Q1 | task_projections 质量列迁移（054）+ wire/repository 四字段全链 + 阶段一"053 必须最新"断言改写 + check_in_pending 全链路面扩展（运行态 ScopeRunSummary/EventPayload union + main union + sync 白名单 + IPC wire + renderer 副本 + user/badge 两种 UI 标签 + awaiting-user helper）| ~260 行 | 无 |
+| Q1 | task_projections 质量列迁移（054）+ wire/repository 四字段全链 + 阶段一"053 必须最新"断言改写 + check_in_pending 全链路面扩展（运行态 ScopeRunSummary/EventPayload union + main union + sync 白名单 + IPC wire + renderer 副本 + user/badge 两种 UI 标签 + awaiting-user helper + continuation 归一化白名单 normalizeInteractionState）| ~260 行 | 无 |
 | Q2 | Criteria 模板引擎 | ~280 行 | Q1 |
 | Q3 | Proof 五源采集（含 assistant_response digest；RunOutcome 增 finalText additive 字段 + done 收口传入） | ~280 行 | Q1 |
 | Q4a | task-adjudicator shadow（产 CheckIn 不改终态 + 偏差 metric + gate + 偏差导出脚本；digest proof 先落后裁时序硬条款；CheckIn 覆盖按 RunOutcome.kind 枚举遍历不写死数量） | ~280 行 | Q2/Q3 |
