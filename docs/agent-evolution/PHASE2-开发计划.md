@@ -1,6 +1,6 @@
 # 阶段二开发计划（配套 2026-06-11-agent-evolution-phase2-implementation.md）
 
-> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同 v4 已于 2026-06-12 经 Codex 复核 APPROVED（三轮复审 3 点全部 CLOSED：054 与阶段一迁移测试共存、check_in_pending 五面扩展、终态路径按 RunOutcome.kind 枚举遍历），enforce 生效，可按波次开工。
+> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同 v4 曾经 Codex 复核 APPROVED；2026-06-12 Codex 四轮复审再提 1 点（check_in_pending 扩展面补全：运行态 ScopeRunSummary/EventPayload union、ChatPanel badge 标签、awaiting-user helper），已回修为 **v5，待 Codex 复核确认后方可按波次开工**。
 
 ---
 
@@ -8,7 +8,7 @@
 
 | 工单 | 内容 | 规模 | 依赖 |
 |------|------|------|------|
-| Q1 | task_projections 质量列迁移（054）+ wire/repository 四字段全链 + 阶段一"053 必须最新"断言改写 + check_in_pending 五面扩展（main union/wire/sync 白名单/renderer 副本/UI 标签）| ~240 行 | 无 |
+| Q1 | task_projections 质量列迁移（054）+ wire/repository 四字段全链 + 阶段一"053 必须最新"断言改写 + check_in_pending 全链路面扩展（运行态 ScopeRunSummary/EventPayload union + main union + sync 白名单 + IPC wire + renderer 副本 + user/badge 两种 UI 标签 + awaiting-user helper）| ~260 行 | 无 |
 | Q2 | Criteria 模板引擎 | ~280 行 | Q1 |
 | Q3 | Proof 五源采集（含 assistant_response digest；RunOutcome 增 finalText additive 字段 + done 收口传入） | ~280 行 | Q1 |
 | Q4a | task-adjudicator shadow（产 CheckIn 不改终态 + 偏差 metric + gate + 偏差导出脚本；digest proof 先落后裁时序硬条款；CheckIn 覆盖按 RunOutcome.kind 枚举遍历不写死数量） | ~280 行 | Q2/Q3 |
