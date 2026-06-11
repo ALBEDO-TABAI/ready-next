@@ -141,15 +141,17 @@ test('freeze → confirm → release executes the frozen params byte-identical, 
   assert.ok(frozenRow, 'freeze must persist a pending_confirmations row')
   assert.equal(frozenRow.status, 'pending')
   assert.equal(frozenRow.tool_name, 'calendar_delete_event')
-  // Durable row is the REDACTED audit copy + sha256 of the frozen bytes.
+  // Durable row is ONLY the clipped redacted summary + sha256 fingerprint —
+  // never the param tree (Codex review P1#4 strict form).
   const audit = JSON.parse(String(frozenRow.params_json)) as {
     __audit: string
     sha256: string
-    params: Record<string, unknown>
+    summary: string
   }
   assert.equal(audit.__audit, 'redacted')
   assert.equal(audit.sha256, createHash('sha256').update(JSON.stringify(originalArgs)).digest('hex'))
-  assert.deepEqual(audit.params, originalArgs, 'non-sensitive params stay readable in the audit copy')
+  assert.ok(audit.summary.includes('evt-42'), 'non-sensitive summary stays readable')
+  assert.ok(!('params' in audit), 'audit row must not carry a param tree')
 
   answerPendingCard(sessionId, FROZEN_CALL_CONFIRM_OPTION)
   const output = await pending
@@ -326,6 +328,14 @@ test('login fill: secret never reaches the DB row or the confirmation card; rele
   assert.ok(
     !card!.questions[0].question.includes('hunter2-secret'),
     'confirmation card must not leak the credential',
+  )
+  const expectedFingerprint = createHash('sha256')
+    .update(JSON.stringify(originalArgs))
+    .digest('hex')
+    .slice(0, 12)
+  assert.ok(
+    card!.questions[0].question.includes(expectedFingerprint),
+    'card must carry the params fingerprint so audit can join card ↔ row ↔ release',
   )
   const frozenRow = [...db.rows.values()][0]
   assert.ok(

@@ -37,7 +37,6 @@ import { ToolDomainError } from '../../tools/tool-errors'
 import type { ConfirmationGateDecision } from './action-confirmation-policy'
 import {
   DEFAULT_FROZEN_CALL_TTL_MS,
-  redactParamsForAudit,
   type FrozenCallStore,
 } from './frozen-call-store'
 
@@ -48,8 +47,6 @@ export const FROZEN_CALL_DENY_OPTION = '取消'
 const METRIC_FROZEN_CALL_RELEASED = 'frozen_call_released'
 const METRIC_FROZEN_CALL_DENIED = 'frozen_call_denied'
 const METRIC_FROZEN_CALL_EXPIRED = 'frozen_call_expired'
-
-const PARAMS_SUMMARY_MAX_CHARS = 140
 
 /**
  * Rules whose frozen params carry credentials / sensitive payloads — the
@@ -85,18 +82,6 @@ export type FrozenCallConfirmationOutcome =
   | { kind: 'pending_exists' }
   | { kind: 'unavailable'; reason: string }
 
-function summarizeParams(params: Record<string, unknown>): string {
-  let json: string
-  try {
-    json = JSON.stringify(params) ?? '{}'
-  } catch {
-    json = '{}'
-  }
-  return json.length > PARAMS_SUMMARY_MAX_CHARS
-    ? `${json.slice(0, PARAMS_SUMMARY_MAX_CHARS)}…`
-    : json
-}
-
 export async function runFrozenCallConfirmation(
   toolName: string,
   args: Record<string, unknown>,
@@ -126,17 +111,19 @@ export async function runFrozenCallConfirmation(
       : { kind: 'unavailable', reason: frozen.reason }
   }
 
-  // Card/metrics only ever see the REDACTED copy — full params stay in the
-  // store's memory record (the byte-identical release source).
-  const auditSummary = summarizeParams(
-    redactParamsForAudit(args, { redactAllStrings: sensitiveParams }) as Record<string, unknown>,
-  )
+  // Card/metrics only ever see the store's REDACTED summary + the sha256
+  // fingerprint — full params stay in the store's memory record (the
+  // byte-identical release source). The fingerprint lets an audit join the
+  // card the user approved ↔ the pending_confirmations row ↔ the release
+  // metric, without any of them carrying the raw bytes.
+  const auditSummary = frozen.auditSummary
+  const fingerprint = frozen.paramsSha256.slice(0, 12)
 
   // 动作 + 对象 + 风险一句话 — a structured confirmation card, not a
   // free-text question (05 §3.2).
   const question = {
     id: FROZEN_CALL_QUESTION_ID,
-    question: `确认执行 ${toolName}：${auditSummary}。风险：${decision.reason}（${decision.mode}）`,
+    question: `确认执行 ${toolName}：${auditSummary}。风险：${decision.reason}（${decision.mode}，参数指纹 ${fingerprint}）`,
     kind: 'single_choice' as const,
     options: [FROZEN_CALL_CONFIRM_OPTION, FROZEN_CALL_DENY_OPTION],
   }
@@ -163,6 +150,7 @@ export async function runFrozenCallConfirmation(
       toolName,
       sessionId,
       reason,
+      paramsSha256: frozen.paramsSha256,
     })
     if (reason === 'overlapping_card') {
       return { kind: 'pending_exists' }
@@ -179,6 +167,7 @@ export async function runFrozenCallConfirmation(
         toolName,
         sessionId,
         reason: released.reason,
+        paramsSha256: frozen.paramsSha256,
       })
       return { kind: 'expired', frozenCallId: frozen.id, reason: released.reason }
     }
@@ -187,6 +176,7 @@ export async function runFrozenCallConfirmation(
       toolName,
       sessionId,
       paramsSummary: auditSummary,
+      paramsSha256: frozen.paramsSha256,
     })
     return { kind: 'released', frozenCallId: frozen.id, params: released.params }
   }
@@ -197,6 +187,7 @@ export async function runFrozenCallConfirmation(
     toolName,
     sessionId,
     paramsSummary: auditSummary,
+    paramsSha256: frozen.paramsSha256,
   })
   return { kind: 'denied_by_user', frozenCallId: frozen.id }
 }

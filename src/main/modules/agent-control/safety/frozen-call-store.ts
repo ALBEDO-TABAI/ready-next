@@ -52,6 +52,25 @@ const STRUCTURAL_AUDIT_KEYS = new Set([
   'action', 'kind', 'msg_type', 'read_back', 'confirmedVia', 'file_type', 'tab_id',
 ])
 const REDACTED_PLACEHOLDER = '«redacted»'
+export const AUDIT_SUMMARY_MAX_CHARS = 140
+
+/**
+ * Single-line redacted summary for everything durable/visible (DB audit row,
+ * confirmation-card text, metrics). Never the full param tree — only this
+ * clipped string plus the sha256 fingerprint of the frozen bytes.
+ */
+export function buildAuditSummary(
+  params: Record<string, unknown>,
+  opts?: { redactAllStrings?: boolean },
+): string {
+  let json: string
+  try {
+    json = JSON.stringify(redactParamsForAudit(params, opts)) ?? '{}'
+  } catch {
+    json = '{}'
+  }
+  return json.length > AUDIT_SUMMARY_MAX_CHARS ? `${json.slice(0, AUDIT_SUMMARY_MAX_CHARS)}…` : json
+}
 
 export function redactParamsForAudit(
   value: unknown,
@@ -121,7 +140,16 @@ export interface FreezeArgs {
 }
 
 export type FreezeResult =
-  | { ok: true; id: string; token: string; expiresAt: number }
+  | {
+      ok: true
+      id: string
+      token: string
+      expiresAt: number
+      /** sha256 of the frozen paramsJson — the audit fingerprint shared by the DB row, card and metrics. */
+      paramsSha256: string
+      /** Clipped redacted summary — the only param representation allowed outside memory. */
+      auditSummary: string
+    }
   | { ok: false; reason: 'pending_exists' | 'store_unavailable' }
 
 export type ReleaseResult =
@@ -175,15 +203,18 @@ export class FrozenCallStore {
       token: randomUUID(),
       releasedAt: null,
     }
+    const paramsSha256 = createHash('sha256').update(record.paramsJson).digest('hex')
+    const auditSummary = buildAuditSummary(args.params, { redactAllStrings: args.sensitiveParams })
     if (this.db) {
       try {
-        // Durable row carries a REDACTED audit copy + sha256 of the frozen
-        // bytes — never the raw params. Release reads the in-memory record,
-        // so audit redaction cannot affect the byte-identical contract.
+        // Durable row carries ONLY the clipped redacted summary + sha256 of
+        // the frozen bytes — never the param tree. Release reads the
+        // in-memory record, so audit redaction cannot affect the
+        // byte-identical contract.
         const auditJson = JSON.stringify({
           __audit: 'redacted',
-          sha256: createHash('sha256').update(record.paramsJson).digest('hex'),
-          params: redactParamsForAudit(args.params, { redactAllStrings: args.sensitiveParams }),
+          sha256: paramsSha256,
+          summary: auditSummary,
         })
         this.db
           .prepare(
@@ -205,7 +236,14 @@ export class FrozenCallStore {
       }
     }
     this.records.set(record.id, record)
-    return { ok: true, id: record.id, token: record.token, expiresAt: record.expiresAt }
+    return {
+      ok: true,
+      id: record.id,
+      token: record.token,
+      expiresAt: record.expiresAt,
+      paramsSha256,
+      auditSummary,
+    }
   }
 
   get(id: string): FrozenCallRecordView | null {
