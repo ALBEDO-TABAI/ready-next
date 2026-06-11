@@ -20,6 +20,7 @@ import { z } from 'zod'
 import { logAgentMetric } from '../../agent-control/metrics'
 import { ToolDomainError } from '../tool-errors'
 import { WEB_TOOL_FALLBACK_METRICS } from './web-tool-metrics'
+import { fetchWithRetryPolicy } from '../retry-policy'
 
 export const webSearchSchema = z.object({
   query: z.string().min(1).max(500).describe('搜索关键词；建议短句，不超过 500 字符'),
@@ -63,7 +64,7 @@ async function searchViaTavily(
     throw new Error('tavily_key_missing')
   }
   const baseUrl = (ctx.tavilyBaseUrl || 'https://api.tavily.com').replace(/\/+$/, '')
-  const response = await fetch(`${baseUrl}/search`, {
+  const response = await fetchWithRetryPolicy(`${baseUrl}/search`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -118,7 +119,7 @@ async function searchViaDdg(
 ): Promise<WebSearchResultItem[]> {
   const baseUrl = (ctx.ddgBaseUrl || 'https://html.duckduckgo.com').replace(/\/+$/, '')
   const url = `${baseUrl}/html/?q=${encodeURIComponent(args.query)}`
-  const response = await fetch(url, {
+  const response = await fetchWithRetryPolicy(url, {
     method: 'GET',
     headers: {
       // DDG HTML page returns 403 for missing UA.

@@ -18,6 +18,7 @@ import { z } from 'zod'
 import { logAgentMetric } from '../../agent-control/metrics'
 import { ToolDomainError } from '../tool-errors'
 import { WEB_TOOL_FALLBACK_METRICS } from './web-tool-metrics'
+import { fetchWithRetryPolicy } from '../retry-policy'
 
 export const webFetchSchema = z.object({
   url: z.string().url().describe('要抓取的页面 URL；只接受 http/https 协议'),
@@ -68,7 +69,7 @@ async function fetchViaJina(
     headers['Authorization'] = `Bearer ${ctx.jinaKey}`
   }
   const baseUrl = (ctx.jinaBaseUrl || 'https://r.jina.ai').replace(/\/+$/, '')
-  const response = await fetch(`${baseUrl}/${args.url}`, {
+  const response = await fetchWithRetryPolicy(`${baseUrl}/${args.url}`, {
     method: 'GET',
     headers,
     signal: ctx.abortSignal,
@@ -107,7 +108,7 @@ async function fetchViaTavilyExtract(
     throw new Error('tavily_key_missing')
   }
   const baseUrl = (ctx.tavilyBaseUrl || 'https://api.tavily.com').replace(/\/+$/, '')
-  const response = await fetch(`${baseUrl}/extract`, {
+  const response = await fetchWithRetryPolicy(`${baseUrl}/extract`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
