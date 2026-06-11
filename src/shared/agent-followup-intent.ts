@@ -39,9 +39,38 @@ const NEGATABLE_INTENT_VERBS: ReadonlyArray<{ family: FollowupNegationFamily; pa
 export type FollowupIntentKind = 'continue_task' | 'status_query' | 'correction' | 'new_task'
 export type FollowupNegationFamily = 'collection' | 'browser' | 'retry'
 
+/**
+ * EP2-I1 — task-ref FACT fed into the classifier (05 §2.1 state-first order).
+ * Status strings mirror the projection lifecycle; interactionState carries
+ * check_in_pending so a pending-adjudication task still counts as continuable.
+ */
+export interface FollowupTaskRef {
+  taskId: string
+  status: string
+  interactionState?: string | null
+  summary?: string | null
+  nextAction?: string | null
+  blockerCategory?: string | null
+}
+
+const CONTINUABLE_STATUSES = new Set(['running', 'queued', 'blocked', 'recoverable_paused', 'budget_paused'])
+
+/** True when at least one ref is active / blocked / pending adjudication. */
+export function hasContinuableTaskRef(refs: ReadonlyArray<FollowupTaskRef>): boolean {
+  return refs.some((ref) =>
+    CONTINUABLE_STATUSES.has(ref.status) || ref.interactionState === 'check_in_pending')
+}
+
 export interface FollowupIntentContext {
   /** True when the scope has an unfinished / recently active task lineage. */
   hasActiveTaskContext: boolean
+  /**
+   * EP2-I1 — state facts for the lineage. `undefined` = facts unavailable
+   * (legacy caller, S4-1 behavior preserved); an array — even empty — means
+   * "we looked": zero continuable refs makes continuation semantics
+   * impossible (hard rule, no memory digging).
+   */
+  taskRefs?: ReadonlyArray<FollowupTaskRef>
 }
 
 export interface FollowupIntentResult {
@@ -50,6 +79,8 @@ export interface FollowupIntentResult {
   confidence: number
   /** Intent families a leading negation suppressed in this message. */
   negations: FollowupNegationFamily[]
+  /** EP2-I1 — first continuable ref when kind=continue_task with facts. */
+  targetTaskId?: string
 }
 
 /**
@@ -112,10 +143,32 @@ export function classifyFollowupIntent(
     return { kind: 'correction', confidence: 0.85, negations }
   }
 
+  // EP2-I1 — fact-fed status fallback: a short vague interrogative ("现在啥
+  // 情况" / "卡在哪了" / "那个任务呢") that no regex above caught becomes a
+  // status question precisely when a continuable task exists to report on.
+  const continuable = ctx.taskRefs
+    ? ctx.taskRefs.filter((ref) =>
+      CONTINUABLE_STATUSES.has(ref.status) || ref.interactionState === 'check_in_pending')
+    : null
+  const VAGUE_INTERROGATIVE = /(?:[？?]\s*$|[吗呢]\s*$|啥情况|什么情况|卡在哪|到哪了)/
+  if (
+    continuable && continuable.length > 0 && isShort
+    && VAGUE_INTERROGATIVE.test(t)
+    && !CONTINUE_PATTERN.test(t)
+  ) {
+    return { kind: 'status_query', confidence: 0.6, negations }
+  }
+
   // Review-team D1b: an explicit topic shift ("继续聊聊别的话题") contains a
   // continuation verb but is NOT a task continuation.
   const TOPIC_SHIFT = /(?:聊聊|换个|别的话题|其他话题|另一个话题|new topic|something else)/i
   if (isShort && CONTINUE_PATTERN.test(t) && negations.length === 0 && !TOPIC_SHIFT.test(t)) {
+    // EP2-I1 state-first hard rule: facts present + zero continuable refs →
+    // continuation semantics do not exist. new_task, no memory digging (P6).
+    if (continuable) {
+      if (continuable.length === 0) return { kind: 'new_task', confidence: 0.85, negations }
+      return { kind: 'continue_task', confidence: 0.9, negations, targetTaskId: continuable[0].taskId }
+    }
     return { kind: 'continue_task', confidence: 0.9, negations }
   }
 

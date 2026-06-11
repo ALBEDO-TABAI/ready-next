@@ -113,7 +113,7 @@ import {
   isBrowserBatchCollectionWorkflowTool,
   stepCollectionIntentTtl,
 } from '../../../../shared/browser-collection-intent'
-import { classifyFollowupIntent, followupConsultsRecalledContext } from '../../../../shared/agent-followup-intent'
+import { classifyFollowupIntent, followupConsultsRecalledContext, type FollowupTaskRef } from '../../../../shared/agent-followup-intent'
 import { classifyBrowserToolCall } from '../../browser-engine/browser-tool-write-classification'
 import { createBrowserTurnLease, type BrowserTurnLease } from '../../browser-engine/agent-browser-turn-lease'
 import { filterToolsByVisionCapability } from '../tools-runtime/tool-gateway'
@@ -409,6 +409,9 @@ export interface AgentSdkRuntimeDeps {
     timeoutMs?: number,
   ) => Promise<Response>
   skillContextOrchestrator?: SkillContextOrchestratorLike | null
+  /** EP2-I1 — task-ref facts for state-first follow-up routing (05 §2.1).
+   *  Absent = legacy text-recall behavior (facts unavailable). */
+  getScopeTaskRefs?: (scopeId: string) => FollowupTaskRef[]
 }
 
 export function defaultSystemPrompt(): string {
@@ -3027,6 +3030,8 @@ export class AgentSdkRuntime extends EventEmitter {
     args: Record<string, unknown>
   }) => Promise<Record<string, unknown>>) | null = null
   private cancelPendingToolActions: ((agent: string, sessionId?: string) => void) | null = null
+  /** EP2-I1 — null = facts unavailable (legacy callers keep S4-1 behavior). */
+  private readonly getScopeTaskRefs: ((scopeId: string) => FollowupTaskRef[]) | null
 
   constructor(deps: AgentSdkRuntimeDeps = {}) {
     super()
@@ -3037,6 +3042,7 @@ export class AgentSdkRuntime extends EventEmitter {
     this.executeToolCall = deps.executeToolCall || executeReadyToolCall
     this.fetchWithTimeout = deps.fetchWithTimeout || defaultFetchWithTimeout
     this.skillContextOrchestrator = deps.skillContextOrchestrator || null
+    this.getScopeTaskRefs = deps.getScopeTaskRefs || null
     this.listToolDefinitionsForTurn = deps.listToolDefinitions || ((params) =>
       this.listDefaultToolDefinitionsForTurn(params))
   }
@@ -3909,9 +3915,15 @@ export class AgentSdkRuntime extends EventEmitter {
       const turnFollowupPrimary =
         parseEnvelopeResourceReferences(effectiveExecutionOptions?.requestEnvelope).primaryInstruction
         || primaryInstructionText(content as RunMessage)
+      // EP2-I1 — state-first: feed projection FACTS (when wired) so "继续"
+      // with no continuable task is new_task and vague interrogatives with an
+      // active task report status instead of starting over (05 §2.1).
       const turnFollowup = classifyFollowupIntent(
         turnFollowupPrimary,
-        { hasActiveTaskContext: hasRecalledTaskContext(messageToText(content as RunMessage)) },
+        {
+          hasActiveTaskContext: hasRecalledTaskContext(messageToText(content as RunMessage)),
+          taskRefs: this.getScopeTaskRefs && sessionId ? this.getScopeTaskRefs(sessionId) : undefined,
+        },
       )
       // Review-team D3: a substantive NEW instruction supersedes the prior
       // plan — otherwise a stale "不要重新规划" reminder (within its TTL)

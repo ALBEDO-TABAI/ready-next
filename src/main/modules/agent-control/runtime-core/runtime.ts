@@ -36,6 +36,7 @@ import { defaultSystemPrompt } from './agent-sdk-runtime'
 import { composePersonaSystemPrompt } from './persona-system-prompt'
 import { PromptAssemblyService } from '../prompt-assembly'
 import { selectScopeTaskIndexEntries } from '../session/daily-task-index-builder'
+import { selectFollowupTaskRefs } from '../intent-state-first'
 import { BeliefCardStore } from '../knowledge/belief-card-store'
 import { RunCoordinator } from '../task-projection/run-coordinator'
 import { executeAgentSchedule, type ScheduleTriggerSource } from './schedule-execution'
@@ -452,7 +453,11 @@ export class AgentControlRuntime extends EventEmitter {
     this.maybeAssertSkillTaskRunInvariant()
     this.orchestrator = new ReadyAgentOrchestrator({
       browserController,
-      sidecarManager: this.sidecar
+      sidecarManager: this.sidecar,
+      // EP2-I1 — lazy: taskProjectionStore is declared later; resolved at turn time.
+      agentSdkRuntimeDeps: {
+        getScopeTaskRefs: (scopeId) => selectFollowupTaskRefs(this.taskProjectionStore, scopeId),
+      },
     })
     this.orchestrator.setPersonaResolver((agent) =>
       composePersonaSystemPrompt(
