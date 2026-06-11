@@ -10,6 +10,7 @@ import {
   type PromptCompressionReport
 } from './compaction/context-compression'
 import { logAgentMetric } from './metrics'
+import { buildContextBill, emitContextBill } from './context-bill'
 import type { IntentClassification } from './intent-classifier'
 import { classifyIntent } from './intent-classifier'
 import type { RequestEnvelope } from './contracts/request-envelope'
@@ -963,6 +964,20 @@ export class PromptAssemblyService {
       blocking: trigger.blocking,
       refs: refs.map((ref) => ref.id)
     }))
+
+    // EP1-X4: per-turn injection accounting. Records byte spend per section
+    // (not content) so injection size is measurable. Section keys map to the
+    // memory layers actually injected this turn; task-index/reminders join
+    // later phases via additional entries.
+    emitContextBill(
+      buildContextBill(params.scope.id, [
+        { section: 'L0', text: l0.text },
+        { section: 'L1_summary', text: l1Text },
+        { section: 'recall', text: recall.text },
+        { section: 'autoRecall', text: autoRecall.text },
+        { section: 'L2_triggers', text: l2Text },
+      ]),
+    )
 
     return {
       systemPrompt: [
