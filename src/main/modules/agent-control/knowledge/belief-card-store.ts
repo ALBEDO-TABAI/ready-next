@@ -221,6 +221,41 @@ export class BeliefCardStore {
   }
 
   /**
+   * EP2-K3 — render the L1.5 knowledge index. ONLY `status: active` cards
+   * are eligible: staged (quarantine), rejected, and invalid (unparseable)
+   * cards never reach any injection surface — this method is the single
+   * rendering source, which makes the phase-1 staged-injection ban provable
+   * at the injection面 instead of just at the read API.
+   *
+   * Budget: lines render in confidence order (H → M → L); once `maxChars`
+   * would be exceeded the remainder is dropped and reported via
+   * `omittedCount` so the caller can append the "另有 N 条" footer.
+   */
+  renderKnowledgeIndex(opts: { maxChars: number }): { text: string; renderedCount: number; omittedCount: number } {
+    const rank: Record<BeliefCardFrontmatter['confidence'], number> = { H: 0, M: 1, L: 2 }
+    const active = this.listCards()
+      .filter((card) => card.frontmatter.status === 'active')
+      .sort((a, b) =>
+        rank[a.frontmatter.confidence] - rank[b.frontmatter.confidence]
+        || a.relPath.localeCompare(b.relPath))
+    const lines: string[] = []
+    let used = 0
+    let rendered = 0
+    for (const card of active) {
+      const line = `- ${card.frontmatter.title}（${card.frontmatter.confidence}）: ${card.frontmatter.description} → ${card.relPath}`
+      if (used + line.length + 1 > opts.maxChars) break
+      lines.push(line)
+      used += line.length + 1
+      rendered += 1
+    }
+    return {
+      text: lines.join('\n'),
+      renderedCount: rendered,
+      omittedCount: active.length - rendered,
+    }
+  }
+
+  /**
    * Enumerate every `.md` under knowledge dirs, including unparseable ones
    * (card === null). Used by the DB mirror sync to record invalid cards as
    * `status: invalid` rows without dropping the row.

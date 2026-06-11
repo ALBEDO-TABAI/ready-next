@@ -386,6 +386,8 @@ export class AgentControlRuntime extends EventEmitter {
     // resolve `this.taskProjectionStore` only when invoked at turn time.
     getScopeTaskIndexEntries: (scopeId) =>
       selectScopeTaskIndexEntries(this.taskProjectionStore, scopeId),
+    // EP2-K3: lazy for the same declaration-order reason.
+    getBeliefCardStore: () => this.getBeliefCardStore(),
     enableDatabaseMemory: true
   })
   private readonly agentManager: AgentManager

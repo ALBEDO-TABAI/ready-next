@@ -81,6 +81,10 @@ export interface PromptAssemblyDeps {
   agentPersonalityRepository?: any
   /** EP1-X1a: current-scope task index entries (already scope-filtered by SQL). */
   getScopeTaskIndexEntries?: (scopeId: string) => TaskIndexEntry[] | Promise<TaskIndexEntry[]>
+  /** EP2-K3: belief card store for the L1.5 knowledge index (active cards only). */
+  getBeliefCardStore?: () => {
+    renderKnowledgeIndex(opts: { maxChars: number }): { text: string; renderedCount: number; omittedCount: number }
+  } | null
 }
 
 interface TriggerDefinition {
@@ -99,6 +103,10 @@ interface CoordinatorTriggerCandidate {
 
 const MAX_L0_CHARS = 6000
 const MAX_L1_CHARS = 8000
+// EP2-K3 — knowledge layer budgets (01 §7b): RULES global+agent ≤2000 chars,
+// L1.5 index ≤1500 chars with confidence-ordered truncation.
+const MAX_RULES_CHARS = 2000
+const MAX_KNOWLEDGE_INDEX_CHARS = 1500
 const MAX_L2_CHARS = 6000
 const MAX_TOTAL_CHARS = 16000
 const MAX_TASK_INDEX_CHARS = 1200
@@ -943,6 +951,21 @@ export class PromptAssemblyService {
     const hasExplicitResourceRefs = hasCurrentExplicitResourceRefs(requestEnvelope)
     const l0 = await this.loadL0(params.scope)
     const l1 = await this.loadL1(params.scope, { includeDailyMemory: !hasExplicitResourceRefs })
+    // EP2-K3 — RULES (L0 extension) + knowledge index (L1.5). Missing file /
+    // empty knowledge dir degrade to empty strings → sections omitted.
+    const rulesText = clip(this.readMemoryFile('RULES.md').trim(), MAX_RULES_CHARS)
+    let knowledgeIndexText = ''
+    try {
+      const beliefStore = this.deps.getBeliefCardStore?.() ?? null
+      if (beliefStore) {
+        const index = beliefStore.renderKnowledgeIndex({ maxChars: MAX_KNOWLEDGE_INDEX_CHARS })
+        knowledgeIndexText = index.omittedCount > 0
+          ? `${index.text}\n（另有 ${index.omittedCount} 条低置信度条目）`
+          : index.text
+      }
+    } catch (error) {
+      console.error('[PromptAssembly] knowledge index render failed:', error)
+    }
     const documentExcerptCount = requestEnvelope.chunks.filter((chunk) => chunk.source === 'document_excerpt').length
     const attachmentBodyCount = requestEnvelope.chunks.filter((chunk) => chunk.source === 'attachment_body').length
     if (documentExcerptCount > 0 || attachmentBodyCount > 0) {
@@ -976,6 +999,7 @@ export class PromptAssemblyService {
 
     const bootstrapMessages = [
       l1Text ? formatMemorySection('L1 会话上下文', l1Text) : '',
+      knowledgeIndexText ? formatMemorySection('知识索引', knowledgeIndexText) : '',
       recall.text ? formatMemorySection('跨会话回看', recall.text) : '',
       autoRecall.text ? formatMemorySection('自动跨会话回看', autoRecall.text) : '',
       l2Text ? formatMemorySection('L2 按需规则', l2Text) : ''
@@ -1004,7 +1028,9 @@ export class PromptAssemblyService {
     emitContextBill(
       buildContextBill(params.scope.id, [
         { section: 'L0', text: l0.text },
+        { section: 'L0_rules', text: rulesText },
         { section: 'L1_summary', text: l1Text },
+        { section: 'L1_5_knowledge_index', text: knowledgeIndexText },
         { section: 'recall', text: recall.text },
         { section: 'autoRecall', text: autoRecall.text },
         { section: 'L2_triggers', text: l2Text },
@@ -1015,8 +1041,9 @@ export class PromptAssemblyService {
       systemPrompt: [
         '你是 Ready 应用中的 AI 助手，面向自媒体创作者。你擅长内容策划、文案写作、数据分析和创意建议。请使用简洁清晰的中文回答。',
         formatMemorySection('L0 常驻上下文', l0.text),
+        rulesText ? formatMemorySection('运行规则', rulesText) : '',
         '若命中 Pre-Action Trigger，必须先吸收对应规则再执行动作。'
-      ].join('\n\n'),
+      ].filter(Boolean).join('\n\n'),
       bootstrapMessages,
       memoryRefs,
       triggerHits,
