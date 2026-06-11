@@ -93,6 +93,8 @@ const EXPLICIT_KIND_MAP: Record<string, ToolEnvelopeKind> = {
   command_high_risk_blocked: 'denied_by_policy',
   denied_manual_only: 'denied_by_policy',
   denied_pending_confirmation: 'denied_by_policy',
+  confirmation_denied_by_user: 'denied_by_policy',
+  confirmation_expired: 'denied_by_policy',
   nested_child_run: 'denied_by_policy',
   detached_task_visibility_internal: 'denied_by_policy',
   path_outside_outputs: 'denied_by_policy',

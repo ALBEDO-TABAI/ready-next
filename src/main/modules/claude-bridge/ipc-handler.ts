@@ -28,6 +28,11 @@ import {
 import { clearSkillTaskProjection } from '../agent-control/skills/skill-task-tracker'
 import { registerAskUserQuestionEmitter } from '../agent-control/ask-user/ask-user-bridge'
 import {
+  getFrozenCallStore,
+  registerFrozenCallStore,
+} from '../agent-control/safety/frozen-call-bridge'
+import { FrozenCallStore } from '../agent-control/safety/frozen-call-store'
+import {
   registerAskUserQuestionsCardEmitter,
   registerAskUserQuestionsCardPersistor,
 } from '../agent-control/ask-user/ask-user-questions-bridge'
@@ -622,6 +627,20 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     mainWindow.webContents.send('agent:askUserQuestions:push', event)
   })
   registerAskUserQuestionsCardPersistor((args) => persistAskUserQuestionsCardPending(args))
+  // EP1-I3-2 — frozen-call confirmation store (M2/M3 action-confirmation
+  // gate). Register once per main-process lifetime: a dev reload must not
+  // replace a store that may hold live pending waiters. The constructor's
+  // boot sweep expires DB-pending orphans from a previous run (the release
+  // token is memory-only — there is no context to resume into).
+  if (!getFrozenCallStore()) {
+    try {
+      registerFrozenCallStore(new FrozenCallStore(getDatabase().getRawDb()))
+    } catch (frozenStoreErr) {
+      // Without a store the gate keeps its deny-by-default placeholder —
+      // unconfirmable M2/M3 calls are rejected, never silently executed.
+      log(`frozen-call store wiring failed: ${frozenStoreErr instanceof Error ? frozenStoreErr.message : String(frozenStoreErr)}`)
+    }
+  }
   registerSkillReferenceInlinedEmitter((event) => {
     if (mainWindow.isDestroyed()) return
     mainWindow.webContents.send('skill:referenceInlined', event)

@@ -71,7 +71,9 @@ test('migration 052 adds the five belief mirror columns idempotently', async () 
   const names = __getMigrationNamesForTests()
   const idx = names.indexOf('052_belief_card_mirror_columns')
   assert.ok(idx > 0, 'migration 052 must be registered after existing migrations')
-  const previous = names.slice(0, idx)
+  // Mark every OTHER migration as applied so only 052 runs — keeps this fake
+  // isolated from later appended migrations (053+).
+  const previous = names.filter((name) => name !== '052_belief_card_mirror_columns')
 
   const db = new Migration052Db([...previous])
   runMigrations(db as unknown as Parameters<typeof runMigrations>[0])

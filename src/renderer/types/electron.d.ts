@@ -3335,6 +3335,9 @@ interface ElectronAgentInteractionAPI {
     Promise<{ success: boolean; error?: string }>
   listPendingAskUserQuestions: () =>
     Promise<IPCResponse<AskUserQuestionsPendingCard[]>>
+  // EP1-I3-2 — confirm/deny a frozen tool call awaiting user confirmation.
+  respondFrozenCall: (payload: { frozenCallId: string; decision: 'confirm' | 'deny' }) =>
+    Promise<{ success: boolean; errorKind?: string; error?: string }>
   onAskUserQuestionsCard: (handler: (event: AskUserQuestionsCardPushEvent) => void) => () => void
 }
 

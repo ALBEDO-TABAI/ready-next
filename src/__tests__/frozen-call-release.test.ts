@@ -1,0 +1,436 @@
+/**
+ * EP1-I3-2 — frozen-call freeze/release + confirmation card tests.
+ *
+ * Contract: docs/superpowers/plans/2026-06-11-agent-evolution-phase1-implementation.md (EP1-I3-2)
+ * Design:   docs/agent-evolution/05-意图理解与行动确认设计明细.md §3.2
+ *
+ * Pins (合同红线逐条):
+ *   1. Release executes the FROZEN params byte-identical — no model
+ *      re-generation between confirmation and execution.
+ *   2. The release token skips ONLY the re-confirmation step — admission
+ *      (allowlist / tool policy) reruns on the same dispatch path
+ *      (确认 ≠ 提权).
+ *   3. A frozen call releases exactly once — second release is rejected.
+ *   4. Timeout / abort → expired; NO late execution after context loss.
+ *   5. User denial feeds a structured rejection back to the model.
+ *   6. Single pending per session — a second M2 hit is denied immediately.
+ *   7. §7 closed loop — the dedicated frozenCall:respond IPC drives the
+ *      same confirmation flow end to end.
+ */
+
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import type { IpcMain, IpcMainInvokeEvent } from 'electron'
+
+import { executeToolCall, type ToolContext } from '../main/modules/tools/tool-executor'
+import {
+  FrozenCallStore,
+  type FrozenCallDb,
+} from '../main/modules/agent-control/safety/frozen-call-store'
+import {
+  registerFrozenCallStore,
+  _resetFrozenCallBridgeForTests,
+} from '../main/modules/agent-control/safety/frozen-call-bridge'
+import {
+  FROZEN_CALL_CONFIRM_OPTION,
+  FROZEN_CALL_DENY_OPTION,
+  FROZEN_CALL_QUESTION_ID,
+} from '../main/modules/agent-control/safety/frozen-call-confirmation'
+import { getAskUserQuestionsStore } from '../main/modules/tools/builtins/ask-user-questions-store'
+import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
+import { askUserGroup, type AskUserGroupDeps } from '../main/modules/claude-bridge/ipc/ask-user-group'
+
+// ---------------------------------------------------------------------------
+// Harness
+// ---------------------------------------------------------------------------
+
+interface FakeDb extends FrozenCallDb {
+  rows: Map<string, Record<string, unknown>>
+}
+
+function createFakeDb(): FakeDb {
+  const rows = new Map<string, Record<string, unknown>>()
+  return {
+    rows,
+    prepare(sql: string) {
+      return {
+        run: (...params: unknown[]) => {
+          if (/INSERT INTO pending_confirmations/i.test(sql)) {
+            const [id, runId, taskId, scopeId, toolName, paramsJson, createdAt, expiresAt, status] = params
+            rows.set(String(id), {
+              id, run_id: runId, task_id: taskId, scope_id: scopeId,
+              tool_name: toolName, params_json: paramsJson,
+              created_at: createdAt, expires_at: expiresAt, status,
+              released_at: null,
+            })
+          } else if (/UPDATE pending_confirmations SET status = \?, released_at = \? WHERE id = \?/i.test(sql)) {
+            const [status, releasedAt, id] = params
+            const row = rows.get(String(id))
+            if (row) {
+              row.status = status
+              row.released_at = releasedAt
+            }
+          }
+          // boot sweep UPDATE … WHERE expires_at < ? — no-op on the fake
+          return undefined
+        },
+      }
+    },
+  }
+}
+
+let sessionCounter = 0
+function nextSessionId(): string {
+  sessionCounter += 1
+  return `frozen-call-test-${sessionCounter}`
+}
+
+function modelContext(sessionId: string, overrides: Partial<ToolContext> = {}): ToolContext {
+  return {
+    invoker: 'model',
+    authorization: buildExplicitNoSkillAuthorization('no_skill_signal'),
+    sessionId,
+    ...overrides,
+  } as ToolContext
+}
+
+async function waitFor<T>(fn: () => T | null | undefined | false, timeoutMs = 3000): Promise<T> {
+  const start = Date.now()
+  for (;;) {
+    const value = fn()
+    if (value) return value as T
+    if (Date.now() - start > timeoutMs) throw new Error('waitFor timed out')
+    await new Promise((resolve) => setTimeout(resolve, 10))
+  }
+}
+
+function answerPendingCard(sessionId: string, answer: string): void {
+  const card = getAskUserQuestionsStore().findPendingForSession(sessionId)
+  if (!card) throw new Error('no pending confirmation card to answer')
+  getAskUserQuestionsStore().resolve(card.cardId, {
+    answers: [{ id: FROZEN_CALL_QUESTION_ID, answer }],
+    answeredAt: Date.now(),
+  })
+}
+
+// ---------------------------------------------------------------------------
+// 1. Byte-identical release through the REAL dispatch path
+// ---------------------------------------------------------------------------
+
+test('freeze → confirm → release executes the frozen params byte-identical, exactly once', async (t) => {
+  const db = createFakeDb()
+  const store = new FrozenCallStore(db)
+  registerFrozenCallStore(store)
+  t.after(() => _resetFrozenCallBridgeForTests())
+
+  const sessionId = nextSessionId()
+  const executed: Array<Record<string, unknown>> = []
+  const originalArgs = { id: 'evt-42' }
+  const pending = executeToolCall('calendar_delete_event', originalArgs, modelContext(sessionId, {
+    requestModuleToolAction: async (_action, args) => {
+      executed.push(args)
+      return { summary: '事件已删除' }
+    },
+  }))
+
+  await waitFor(() => getAskUserQuestionsStore().findPendingForSession(sessionId))
+  const frozenRow = [...db.rows.values()][0]
+  assert.ok(frozenRow, 'freeze must persist a pending_confirmations row')
+  assert.equal(frozenRow.status, 'pending')
+  assert.equal(frozenRow.tool_name, 'calendar_delete_event')
+
+  answerPendingCard(sessionId, FROZEN_CALL_CONFIRM_OPTION)
+  const output = await pending
+
+  assert.equal(executed.length, 1, 'released call must execute exactly once')
+  assert.equal(
+    JSON.stringify(executed[0]),
+    frozenRow.params_json,
+    'executed params must be byte-identical to the frozen params_json',
+  )
+  assert.deepEqual(executed[0], originalArgs)
+  assert.match(output.text, /事件已删除/)
+  assert.equal(frozenRow.status, 'released', 'row must be marked released')
+  assert.ok(frozenRow.released_at, 'released_at must be stamped')
+})
+
+// ---------------------------------------------------------------------------
+// 2. Release token skips ONLY re-confirmation — admission reruns (确认 ≠ 提权)
+// ---------------------------------------------------------------------------
+
+test('release re-enters the same dispatch path and is stopped by admission when authorization was lost', async (t) => {
+  const store = new FrozenCallStore(createFakeDb())
+  registerFrozenCallStore(store)
+  t.after(() => _resetFrozenCallBridgeForTests())
+
+  const sessionId = nextSessionId()
+  const executed: string[] = []
+  // Mutable allowlist: tool is allowed at freeze time, revoked before release.
+  const allowedToolNames = new Set(['calendar_delete_event'])
+  const pending = executeToolCall('calendar_delete_event', { id: 'evt-7' }, modelContext(sessionId, {
+    allowedToolNames,
+    requestModuleToolAction: async (action) => {
+      executed.push(action)
+      return { summary: 'deleted' }
+    },
+  }))
+
+  await waitFor(() => getAskUserQuestionsStore().findPendingForSession(sessionId))
+  allowedToolNames.delete('calendar_delete_event') // 确认后恰好失去授权
+  answerPendingCard(sessionId, FROZEN_CALL_CONFIRM_OPTION)
+  const output = await pending
+
+  assert.equal(output.data?.reason, 'tool_restricted_this_turn',
+    'release must be stopped by the allowlist admission gate, not waved through by the token')
+  assert.deepEqual(executed, [], 'tool must NOT execute after losing authorization')
+})
+
+// ---------------------------------------------------------------------------
+// 3. Exactly-once release — second release rejected (store contract)
+// ---------------------------------------------------------------------------
+
+test('store: a frozen call releases exactly once; the second release is rejected', () => {
+  const store = new FrozenCallStore(createFakeDb())
+  const frozen = store.freeze({ toolName: 'calendar_delete_event', params: { id: 'evt-1' }, sessionId: 's-once' })
+  assert.ok(frozen.ok)
+  if (!frozen.ok) return
+
+  const first = store.release(frozen.id, frozen.token)
+  assert.ok(first.ok, 'first release must succeed')
+  const second = store.release(frozen.id, frozen.token)
+  assert.deepEqual(second, { ok: false, reason: 'not_pending' })
+})
+
+test('store: a wrong token never releases', () => {
+  const store = new FrozenCallStore(createFakeDb())
+  const frozen = store.freeze({ toolName: 'calendar_delete_event', params: { id: 'evt-1' }, sessionId: 's-token' })
+  assert.ok(frozen.ok)
+  if (!frozen.ok) return
+  const released = store.release(frozen.id, 'forged-token')
+  assert.deepEqual(released, { ok: false, reason: 'invalid_token' })
+})
+
+// ---------------------------------------------------------------------------
+// 4. Expiry — timeout voids the frozen call; NO late execution
+// ---------------------------------------------------------------------------
+
+test('store: an expired frozen call cannot be released (no execution after context loss)', () => {
+  let nowMs = 1_000_000
+  const store = new FrozenCallStore(createFakeDb(), { now: () => nowMs })
+  const frozen = store.freeze({
+    toolName: 'calendar_delete_event',
+    params: { id: 'evt-late' },
+    sessionId: 's-exp',
+    ttlMs: 50,
+  })
+  assert.ok(frozen.ok)
+  if (!frozen.ok) return
+
+  nowMs += 51
+  const released = store.release(frozen.id, frozen.token)
+  assert.deepEqual(released, { ok: false, reason: 'expired' })
+  assert.equal(store.get(frozen.id)?.status, 'expired')
+})
+
+test('abort while waiting → frozen call expired, structured timeout-cancel result, no late execution', async (t) => {
+  const db = createFakeDb()
+  const store = new FrozenCallStore(db)
+  registerFrozenCallStore(store)
+  t.after(() => _resetFrozenCallBridgeForTests())
+
+  const sessionId = nextSessionId()
+  const executed: string[] = []
+  const controller = new AbortController()
+  const pending = executeToolCall('calendar_delete_event', { id: 'evt-abort' }, modelContext(sessionId, {
+    abortSignal: controller.signal,
+    requestModuleToolAction: async (action) => {
+      executed.push(action)
+      return { summary: 'deleted' }
+    },
+  }))
+
+  await waitFor(() => getAskUserQuestionsStore().findPendingForSession(sessionId))
+  controller.abort()
+  const output = await pending
+
+  assert.equal(output.data?.errorKind, 'confirmation_expired')
+  assert.match(output.text, /取消/)
+  const frozenRow = [...db.rows.values()][0]
+  assert.equal(frozenRow.status, 'expired')
+
+  // Context is gone — a late confirmation must be a no-op, never a late run.
+  const lateCard = getAskUserQuestionsStore().findPendingForSession(sessionId)
+  assert.equal(lateCard, null, 'confirmation card must be gone after abort')
+  assert.deepEqual(executed, [], 'tool must never execute after expiry')
+})
+
+// ---------------------------------------------------------------------------
+// 5. User denial → structured rejection back to the model
+// ---------------------------------------------------------------------------
+
+test('user denial feeds a structured confirmation_denied_by_user back to the model', async (t) => {
+  const db = createFakeDb()
+  registerFrozenCallStore(new FrozenCallStore(db))
+  t.after(() => _resetFrozenCallBridgeForTests())
+
+  const sessionId = nextSessionId()
+  const executed: string[] = []
+  const pending = executeToolCall('calendar_delete_event', { id: 'evt-deny' }, modelContext(sessionId, {
+    requestModuleToolAction: async (action) => {
+      executed.push(action)
+      return { summary: 'deleted' }
+    },
+  }))
+
+  await waitFor(() => getAskUserQuestionsStore().findPendingForSession(sessionId))
+  answerPendingCard(sessionId, FROZEN_CALL_DENY_OPTION)
+  const output = await pending
+
+  assert.equal(output.data?.errorKind, 'confirmation_denied_by_user')
+  assert.deepEqual(executed, [])
+  assert.equal([...db.rows.values()][0].status, 'denied')
+})
+
+// ---------------------------------------------------------------------------
+// 6. Single pending — second M2 hit denied immediately
+// ---------------------------------------------------------------------------
+
+test('second M2 call while one confirmation is pending → immediate denied_pending_confirmation', async (t) => {
+  registerFrozenCallStore(new FrozenCallStore(createFakeDb()))
+  t.after(() => _resetFrozenCallBridgeForTests())
+
+  const sessionId = nextSessionId()
+  const executed: string[] = []
+  const context = modelContext(sessionId, {
+    requestModuleToolAction: async (action) => {
+      executed.push(action)
+      return { summary: 'ok' }
+    },
+  })
+  const first = executeToolCall('calendar_delete_event', { id: 'evt-A' }, context)
+  await waitFor(() => getAskUserQuestionsStore().findPendingForSession(sessionId))
+
+  const second = await executeToolCall('feishu_calendar_delete_event', {
+    channel_id: 'ch-1',
+    calendar_id: 'cal-1',
+    event_id: 'evt-B',
+  }, context)
+  assert.equal(second.data?.errorKind, 'denied_pending_confirmation',
+    'second M2 must be denied immediately so the model reroutes')
+
+  answerPendingCard(sessionId, FROZEN_CALL_CONFIRM_OPTION)
+  const firstOutput = await first
+  assert.match(firstOutput.text, /ok/)
+  assert.deepEqual(executed, ['calendar.deleteEvent'])
+})
+
+// ---------------------------------------------------------------------------
+// 7. §7 closed loop — dedicated frozenCall:respond IPC drives the same flow
+// ---------------------------------------------------------------------------
+
+type HandlerFn = (event: IpcMainInvokeEvent, ...args: unknown[]) => unknown
+
+test('dedicated agent:frozenCall:respond IPC confirms a pending frozen call end to end', async (t) => {
+  const db = createFakeDb()
+  const store = new FrozenCallStore(db)
+  registerFrozenCallStore(store)
+  t.after(() => _resetFrozenCallBridgeForTests())
+
+  // Register the IPC group against a mock ipcMain and grab the handler.
+  const handlers = new Map<string, HandlerFn>()
+  const ipc = {
+    handle(channel: string, handler: HandlerFn) {
+      handlers.set(channel, handler)
+    },
+    removeHandler() { /* noop */ },
+  } as unknown as IpcMain
+  const deps: AskUserGroupDeps = {
+    getDatabase: (() => ({
+      getChatMessageById: () => null,
+      updateChatMessageMeta: () => true,
+      listPendingAskUserQuestionsCards: () => [],
+    })) as unknown as AskUserGroupDeps['getDatabase'],
+    getEphemeralExecutionStore: (() => {
+      throw new Error('not used')
+    }) as unknown as AskUserGroupDeps['getEphemeralExecutionStore'],
+    getAskUserQuestionsStore: () => getAskUserQuestionsStore(),
+    logAgentMetric: () => { /* noop */ },
+  }
+  const handle = askUserGroup.register(ipc, deps)
+  t.after(() => handle.dispose())
+
+  const respond = handlers.get('agent:frozenCall:respond')
+  assert.ok(respond, 'agent:frozenCall:respond must be registered by the askUser group')
+
+  const sessionId = nextSessionId()
+  const executed: Array<Record<string, unknown>> = []
+  const pending = executeToolCall('calendar_delete_event', { id: 'evt-ipc' }, modelContext(sessionId, {
+    requestModuleToolAction: async (_action, args) => {
+      executed.push(args)
+      return { summary: 'IPC 确认后已删除' }
+    },
+  }))
+
+  await waitFor(() => getAskUserQuestionsStore().findPendingForSession(sessionId))
+  const frozen = store.findPendingForSession(sessionId)
+  assert.ok(frozen, 'frozen record must be pending')
+
+  const ipcResult = await respond!({} as IpcMainInvokeEvent, {
+    frozenCallId: frozen!.id,
+    decision: 'confirm',
+  }) as { success: boolean }
+  assert.equal(ipcResult.success, true)
+
+  const output = await pending
+  assert.match(output.text, /IPC 确认后已删除/)
+  assert.equal(executed.length, 1)
+  assert.deepEqual(executed[0], { id: 'evt-ipc' })
+})
+
+test('dedicated IPC deny path rejects without execution', async (t) => {
+  const store = new FrozenCallStore(createFakeDb())
+  registerFrozenCallStore(store)
+  t.after(() => _resetFrozenCallBridgeForTests())
+
+  const handlers = new Map<string, HandlerFn>()
+  const ipc = {
+    handle(channel: string, handler: HandlerFn) { handlers.set(channel, handler) },
+    removeHandler() { /* noop */ },
+  } as unknown as IpcMain
+  const deps: AskUserGroupDeps = {
+    getDatabase: (() => ({
+      getChatMessageById: () => null,
+      updateChatMessageMeta: () => true,
+      listPendingAskUserQuestionsCards: () => [],
+    })) as unknown as AskUserGroupDeps['getDatabase'],
+    getEphemeralExecutionStore: (() => {
+      throw new Error('not used')
+    }) as unknown as AskUserGroupDeps['getEphemeralExecutionStore'],
+    getAskUserQuestionsStore: () => getAskUserQuestionsStore(),
+    logAgentMetric: () => { /* noop */ },
+  }
+  const handle = askUserGroup.register(ipc, deps)
+  t.after(() => handle.dispose())
+
+  const sessionId = nextSessionId()
+  const executed: string[] = []
+  const pending = executeToolCall('calendar_delete_event', { id: 'evt-ipc-deny' }, modelContext(sessionId, {
+    requestModuleToolAction: async (action) => {
+      executed.push(action)
+      return { summary: 'deleted' }
+    },
+  }))
+  await waitFor(() => getAskUserQuestionsStore().findPendingForSession(sessionId))
+  const frozen = store.findPendingForSession(sessionId)
+
+  const respond = handlers.get('agent:frozenCall:respond')
+  const ipcResult = await respond!({} as IpcMainInvokeEvent, {
+    frozenCallId: frozen!.id,
+    decision: 'deny',
+  }) as { success: boolean }
+  assert.equal(ipcResult.success, true)
+
+  const output = await pending
+  assert.equal(output.data?.errorKind, 'confirmation_denied_by_user')
+  assert.deepEqual(executed, [])
+})

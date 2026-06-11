@@ -22,6 +22,8 @@ import {
   type SkillToolAuthorization,
 } from '../agent-control/skills/skill-tool-authorization'
 import { resolveConfirmationGate } from '../agent-control/safety/action-confirmation-policy'
+import { getFrozenCallStore } from '../agent-control/safety/frozen-call-bridge'
+import { runFrozenCallConfirmation } from '../agent-control/safety/frozen-call-confirmation'
 import { PRIMITIVE_TOOL_DEFS } from './skill-primitives/tool-defs'
 import type {
   SkillRunRequest,
@@ -163,10 +165,22 @@ export async function executeToolCall(
   return { ...output, envelope: deriveEnvelopeForToolOutput(output) }
 }
 
+/**
+ * EP1-I3-2 — internal release grant. Present ONLY on the dispatcher's own
+ * re-entry after `frozen-call-store.release()` consumed the one-shot token:
+ * it skips exactly the confirmation gate, nothing else. Deliberately not a
+ * ToolContext field so no caller (model, host wiring, tests via `as any`)
+ * can fabricate it from outside this module.
+ */
+interface FrozenCallReleaseGrant {
+  frozenCallId: string
+}
+
 async function executeToolCallInner(
   toolName: string,
   args: Record<string, unknown>,
-  context: ToolContext
+  context: ToolContext,
+  releaseGrant?: FrozenCallReleaseGrant,
 ): Promise<ToolExecutionOutput> {
   // Check registration BEFORE admission so the model can distinguish
   // "fabricated tool name" from "real tool but not allowed this turn" —
@@ -308,66 +322,101 @@ async function executeToolCallInner(
     args = outcome.data
   }
 
-  // EP1-I3-1 — action-confirmation gate (05 §3.1/§3.2). Sits AFTER
+  // EP1-I3-1/I3-2 — action-confirmation gate (05 §3.1/§3.2). Sits AFTER
   // registration / authorization / internal-visibility / allowlist admission
   // and input validation, immediately before dispatch: admission signals must
   // win (an unauthorized or restricted call reports as such, never as "needs
   // confirmation"), and the args classified here are the exact validated args
-  // that I3-2 will freeze and later release byte-identical. Host-invoked
-  // calls bypass the gate — same precedent as the authorization gate above: a
-  // host call is the app acting on the user's own action, not a model
-  // decision. The gate consumes ONLY (toolName, args) — phase 1 forbids
-  // intent-based pre-approval and any confirmation caching (no I-auth yet).
-  if (invoker !== 'host') {
+  // that get frozen and later released byte-identical. Host-invoked calls
+  // bypass the gate — same precedent as the authorization gate above: a host
+  // call is the app acting on the user's own action, not a model decision.
+  // A release grant (dispatcher-internal re-entry after the one-shot token
+  // was consumed) skips ONLY this gate — every admission check above already
+  // reran on the way here (确认 ≠ 提权). The gate consumes ONLY (toolName,
+  // args) — phase 1 forbids intent-based pre-approval and any confirmation
+  // caching (no I-auth yet).
+  if (invoker !== 'host' && !releaseGrant) {
     const confirmation = resolveConfirmationGate(toolName, args)
-    if (confirmation.action === 'manual_only') {
+    const deniedOutput = (
+      errorKind: string,
+      text: string,
+      extra?: Record<string, unknown>,
+    ): ToolExecutionOutput => {
       logAgentMetric(TOOL_ERROR_METRICS.confirmationGateDenied, {
         toolName,
         mode: confirmation.mode,
         ruleId: confirmation.ruleId,
-        action: confirmation.action,
+        errorKind,
         sessionId: context.sessionId || null,
       })
-      return createToolExecutionOutput(
+      return createToolExecutionOutput(text, {
+        shape: 'json',
+        data: {
+          errorKind,
+          toolName,
+          mode: confirmation.mode,
+          ruleId: confirmation.ruleId,
+          reason: confirmation.reason,
+          ...(extra || {}),
+        },
+      })
+    }
+    if (confirmation.action === 'manual_only') {
+      return deniedOutput(
+        'denied_manual_only',
         `工具 ${toolName} 被行动确认策略拦截（M1：必须由用户亲手完成）。${confirmation.reason}。`
         + '请把当前进度与下一步操作位置告诉用户，引导用户亲自完成这一步；不要代替用户执行或尝试绕过。',
-        {
-          shape: 'json',
-          data: {
-            errorKind: 'denied_manual_only',
-            toolName,
-            mode: confirmation.mode,
-            ruleId: confirmation.ruleId,
-            reason: confirmation.reason,
-          },
-        },
       )
     }
     if (confirmation.action === 'confirm') {
-      // I3-1 placeholder — the freeze + confirmation-card flow lands in
-      // I3-2. Until then every M2/M3 hit is denied with a structured signal
-      // so the model reroutes or asks the user in text.
-      logAgentMetric(TOOL_ERROR_METRICS.confirmationGateDenied, {
-        toolName,
-        mode: confirmation.mode,
-        ruleId: confirmation.ruleId,
-        action: confirmation.action,
-        sessionId: context.sessionId || null,
+      const pendingDeniedText = `工具 ${toolName} 需要用户确认后才能执行（${confirmation.mode}：${confirmation.reason}）。`
+        + '本次调用未执行；请先向用户说明你要做什么并征得明确同意，或改用只读/不落地的替代路径。'
+      const frozenCallStore = getFrozenCallStore()
+      if (!frozenCallStore) {
+        // No confirmation channel wired (boot order / headless) — keep the
+        // I3-1 placeholder denial: an unconfirmable call NEVER executes.
+        return deniedOutput('denied_pending_confirmation', pendingDeniedText)
+      }
+      // EP1-I3-2 — freeze the validated args and suspend INSIDE this run's
+      // execution context until the user decides on the confirmation card
+      // (原 run 内同步等待). All runtime state stays alive across the wait.
+      const outcome = await runFrozenCallConfirmation(toolName, args, confirmation, {
+        store: frozenCallStore,
+        sessionId: context.sessionId ?? null,
+        conversationId: context.scope?.id || context.scopeId || context.sessionId || null,
+        runId: context.runId ?? null,
+        taskId: context.taskId ?? null,
+        scopeId: context.scopeId || context.scope?.id || null,
+        signal: context.abortSignal,
+        emitCard: getAskUserQuestionsCardEmitter(),
+        persistCard: getAskUserQuestionsCardPersistor(),
       })
-      return createToolExecutionOutput(
-        `工具 ${toolName} 需要用户确认后才能执行（${confirmation.mode}：${confirmation.reason}）。`
-        + '本次调用未执行；请先向用户说明你要做什么并征得明确同意，或改用只读/不落地的替代路径。',
-        {
-          shape: 'json',
-          data: {
-            errorKind: 'denied_pending_confirmation',
-            toolName,
-            mode: confirmation.mode,
-            ruleId: confirmation.ruleId,
-            reason: confirmation.reason,
-          },
-        },
-      )
+      switch (outcome.kind) {
+        case 'released':
+          // One-shot token consumed inside `frozen-call-store.release()`;
+          // re-enter the SAME dispatch path with the FROZEN params. All
+          // admission checks rerun; only this gate is skipped.
+          return executeToolCallInner(toolName, outcome.params, context, {
+            frozenCallId: outcome.frozenCallId,
+          })
+        case 'denied_by_user':
+          return deniedOutput(
+            'confirmation_denied_by_user',
+            `用户拒绝了本次操作（${toolName}）。请不要重试同一动作；如有替代方案，先向用户说明再行动。`,
+            { frozenCallId: outcome.frozenCallId },
+          )
+        case 'expired':
+          return deniedOutput(
+            'confirmation_expired',
+            `确认超时已取消：工具 ${toolName} 的确认请求未在时限内得到用户确认（${outcome.reason}）。`
+            + '该调用未执行；如仍需要，请重新发起并等待用户确认。',
+            { frozenCallId: outcome.frozenCallId },
+          )
+        case 'pending_exists':
+        case 'unavailable':
+        default:
+          return deniedOutput('denied_pending_confirmation', pendingDeniedText)
+      }
     }
   }
 

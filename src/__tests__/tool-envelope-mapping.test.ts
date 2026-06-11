@@ -39,6 +39,8 @@ const EXPECTED: Record<string, ToolEnvelopeKind> = {
   command_high_risk_blocked: 'denied_by_policy',
   denied_manual_only: 'denied_by_policy',
   denied_pending_confirmation: 'denied_by_policy',
+  confirmation_denied_by_user: 'denied_by_policy',
+  confirmation_expired: 'denied_by_policy',
   path_outside_outputs: 'denied_by_policy',
   blocked_external: 'denied_by_policy',
   tool_handler_failure: 'internal_error',

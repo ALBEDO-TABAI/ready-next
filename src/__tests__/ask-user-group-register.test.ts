@@ -6,10 +6,10 @@
 // this test pins the two pieces of the group contract that the V5 IPC contract
 // gate cannot prove on its own:
 //
-//   1. `register` registers EXACTLY the 5 channel names the group owns (no
+//   1. `register` registers EXACTLY the 6 channel names the group owns (no
 //      extras, no missing ones)
 //   2. The returned dispose handle calls `removeHandler` for each of those
-//      same 5 channels — so dev-reload re-registration and
+//      same 6 channels — so dev-reload re-registration and
 //      `cleanupAgentRuntime` shutdown don't leak listeners.
 //
 // We don't exercise the handler bodies here (those are covered by existing
@@ -69,7 +69,7 @@ function createMockDeps(): AskUserGroupDeps {
   }
 }
 
-test('askUserGroup.register wires the 5 documented channels exactly once each', () => {
+test('askUserGroup.register wires the 6 documented channels exactly once each', () => {
   const { ipc, handleCalls } = createMockIpc()
   askUserGroup.register(ipc, createMockDeps())
 
@@ -78,20 +78,21 @@ test('askUserGroup.register wires the 5 documented channels exactly once each', 
   assert.deepEqual(
     registered,
     expected,
-    'register must subscribe to exactly the 5 askUser channels',
+    'register must subscribe to exactly the 6 askUser channels',
   )
-  assert.equal(handleCalls.length, 5, 'each channel must be registered exactly once')
+  assert.equal(handleCalls.length, 6, 'each channel must be registered exactly once')
 
-  // Spot-check the exact channel names per the plan (V2.1a, §3 V2.1) so
-  // accidental renames trip this test even if the channel count happens to
-  // still be 5. The V5 IPC contract gate catches the renderer side; this
-  // pins the main-side literals.
+  // Spot-check the exact channel names per the plan (V2.1a, §3 V2.1; EP1-I3-2
+  // added agent:frozenCall:respond) so accidental renames trip this test even
+  // if the channel count happens to stay constant. The V5 IPC contract gate
+  // catches the renderer side; this pins the main-side literals.
   for (const required of [
     'skills:askUser:submit',
     'skills:askUser:pending',
     'agent:askUserQuestions:submit',
     'agent:askUserQuestions:cancel',
     'agent:askUserQuestions:listPending',
+    'agent:frozenCall:respond',
   ]) {
     assert.ok(
       registered.includes(required),
@@ -107,7 +108,7 @@ test('askUserGroup namespace is the documented label so dispose ordering can rel
   assert.equal(askUserGroup.namespace, 'agent:askUser+skills:askUser')
 })
 
-test('IpcDisposeHandle.dispose removes the same 5 channels that register added', () => {
+test('IpcDisposeHandle.dispose removes the same 6 channels that register added', () => {
   const { ipc, removeHandlerCalls } = createMockIpc()
   const handle = askUserGroup.register(ipc, createMockDeps())
 

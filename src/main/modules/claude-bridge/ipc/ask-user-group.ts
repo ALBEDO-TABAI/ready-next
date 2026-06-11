@@ -1,6 +1,6 @@
 // Stage V V2.1a — AskUser channel group.
 //
-// Bundles the 5 channels that drive both flavors of the agent-side "ask the
+// Bundles the 6 channels that drive both flavors of the agent-side "ask the
 // user a question" interaction:
 //
 //   skills:askUser:submit              (single-question, skill primitive)
@@ -8,6 +8,9 @@
 //   agent:askUserQuestions:submit      (multi-question reflection card)
 //   agent:askUserQuestions:cancel      (cancel a reflection card)
 //   agent:askUserQuestions:listPending (hydrate live reflection cards)
+//   agent:frozenCall:respond           (EP1-I3-2 confirm/deny a frozen call —
+//                                       programmatic press of the confirmation
+//                                       card variant; converges on submit core)
 //
 // Handler bodies are lifted VERBATIM from `ipc-handler.ts` (V2.1a is a pure
 // move — semantics must be byte-for-byte identical so the V5 IPC contract
@@ -26,6 +29,12 @@ import {
   submitAskUserQuestionsAnswersCore,
 } from '../../tools/builtins/ask-user-questions'
 import type { AskUserAnswer } from '../../tools/builtins/ask-user-questions-store'
+import { getFrozenCallStore } from '../../agent-control/safety/frozen-call-bridge'
+import {
+  FROZEN_CALL_CONFIRM_OPTION,
+  FROZEN_CALL_DENY_OPTION,
+  FROZEN_CALL_QUESTION_ID,
+} from '../../agent-control/safety/frozen-call-confirmation'
 import type { EngineDeps } from './engine-deps'
 import type { IpcChannelGroup, IpcDisposeHandle } from './types'
 
@@ -45,6 +54,7 @@ const CHANNELS = [
   'agent:askUserQuestions:submit',
   'agent:askUserQuestions:cancel',
   'agent:askUserQuestions:listPending',
+  'agent:frozenCall:respond',
 ] as const
 
 export const askUserGroup: IpcChannelGroup<AskUserGroupDeps> = {
@@ -133,6 +143,46 @@ export const askUserGroup: IpcChannelGroup<AskUserGroupDeps> = {
         db: deps.getDatabase(),
         logMetric: (name, payload) => deps.logAgentMetric(name, payload),
       })
+    })
+
+    // EP1-I3-2 — dedicated confirm/deny entry for the frozen-call
+    // confirmation card (§7 minimal closed loop). Converges on the SAME
+    // mechanism as a manual card answer: it programmatically submits the
+    // pending ask_user_questions variant card via the submit core, so there
+    // is exactly one decision state machine. The frozen-call store is read
+    // through its bridge (module singleton) — same pattern the dispatcher
+    // uses — to keep EngineDeps untouched.
+    ipcMain.handle('agent:frozenCall:respond', (_event, rawPayload: unknown) => {
+      const payload = (rawPayload || {}) as { frozenCallId?: string; decision?: string }
+      const frozenCallId = typeof payload.frozenCallId === 'string' ? payload.frozenCallId : ''
+      const decision = payload.decision === 'confirm' || payload.decision === 'deny'
+        ? payload.decision
+        : null
+      if (!frozenCallId) return { success: false, error: 'frozenCallId is required' }
+      if (!decision) return { success: false, error: "decision must be 'confirm' or 'deny'" }
+      const frozenStore = getFrozenCallStore()
+      if (!frozenStore) return { success: false, error: 'frozen-call store is not ready' }
+      const record = frozenStore.get(frozenCallId)
+      if (!record || record.status !== 'pending') {
+        return { success: false, error: 'No pending frozen call with this id (already decided or expired)' }
+      }
+      const sessionKey = record.sessionId || record.scopeId
+      const card = deps.getAskUserQuestionsStore().findPendingForSession(sessionKey)
+      if (!card || card.questions[0]?.id !== FROZEN_CALL_QUESTION_ID) {
+        return { success: false, error: 'No pending confirmation card for this frozen call' }
+      }
+      return submitAskUserQuestionsAnswersCore(
+        card.cardId,
+        [{
+          id: FROZEN_CALL_QUESTION_ID,
+          answer: decision === 'confirm' ? FROZEN_CALL_CONFIRM_OPTION : FROZEN_CALL_DENY_OPTION,
+        }],
+        {
+          store: deps.getAskUserQuestionsStore(),
+          db: deps.getDatabase(),
+          logMetric: (name, payload) => deps.logAgentMetric(name, payload),
+        },
+      )
     })
 
     ipcMain.handle('agent:askUserQuestions:listPending', () => {

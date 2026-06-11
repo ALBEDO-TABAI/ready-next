@@ -2198,6 +2198,31 @@ const migrations: Migration[] = [
       if (!has('status')) db.exec('ALTER TABLE agent_memory_metadata ADD COLUMN status TEXT')
       if (!has('content_hash')) db.exec('ALTER TABLE agent_memory_metadata ADD COLUMN content_hash TEXT')
     }
+  },
+  {
+    // EP1-I3-2 — frozen-call ledger for the M2/M3 action-confirmation gate.
+    // Rows are the durable audit trail; the one-shot release token is
+    // memory-only by design (execution waits inside the original run's
+    // context — after a restart there is nothing to resume, so the boot
+    // sweep in frozen-call-store.ts expires orphaned pending rows).
+    name: '053_pending_confirmations',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS pending_confirmations (
+          id TEXT PRIMARY KEY,
+          run_id TEXT,
+          task_id TEXT,
+          scope_id TEXT,
+          tool_name TEXT NOT NULL,
+          params_json TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          status TEXT NOT NULL DEFAULT 'pending',
+          released_at TEXT
+        )
+      `)
+      db.exec('CREATE INDEX IF NOT EXISTS idx_pending_confirmations_status ON pending_confirmations(status, expires_at)')
+    }
   }
 ]
 

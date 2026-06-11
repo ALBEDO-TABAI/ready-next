@@ -1131,6 +1131,10 @@ const agentInteractionAPI = {
     ipcRenderer.invoke('agent:askUserQuestions:cancel', payload),
   listPendingAskUserQuestions: () =>
     ipcRenderer.invoke('agent:askUserQuestions:listPending'),
+  // EP1-I3-2 — confirm/deny a frozen tool call awaiting user confirmation.
+  // Programmatic equivalent of answering the confirmation card variant.
+  respondFrozenCall: (payload: { frozenCallId: string; decision: 'confirm' | 'deny' }) =>
+    ipcRenderer.invoke('agent:frozenCall:respond', payload),
   onAskUserQuestionsCard: (handler: (event: AgentInteractionCardEvent) => void) => {
     const listener = (_event: unknown, payload: AgentInteractionCardEvent) => handler(payload)
     ipcRenderer.on('agent:askUserQuestions:push', listener)
