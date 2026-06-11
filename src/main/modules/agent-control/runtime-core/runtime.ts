@@ -36,6 +36,7 @@ import { defaultSystemPrompt } from './agent-sdk-runtime'
 import { composePersonaSystemPrompt } from './persona-system-prompt'
 import { PromptAssemblyService } from '../prompt-assembly'
 import { selectScopeTaskIndexEntries } from '../session/daily-task-index-builder'
+import { BeliefCardStore } from '../knowledge/belief-card-store'
 import { RunCoordinator } from '../task-projection/run-coordinator'
 import { executeAgentSchedule, type ScheduleTriggerSource } from './schedule-execution'
 import type { DomainAdapter } from '../domain-adapters/domain-adapter'
@@ -391,6 +392,7 @@ export class AgentControlRuntime extends EventEmitter {
   private readonly runCoordinator: RunCoordinator
   private readonly runProjection: RunProjection
   private readonly taskProjectionStore = new TaskProjectionRepository(this.db)
+  private beliefCardStore: BeliefCardStore | null = null
   private readonly skillTaskRunRepository = new SkillTaskRunRepository(this.db)
   private readonly detachedSkillTasks: DetachedSkillTaskTracker
   private readonly autoNarrationContinuationRunner = new AutoNarrationContinuationRunner({
@@ -571,6 +573,16 @@ export class AgentControlRuntime extends EventEmitter {
 
   getPromptAssembly(): PromptAssemblyService {
     return this.promptAssembly
+  }
+
+  /** EP1-K1: belief card store rooted at the same agent memory root. */
+  getBeliefCardStore(): BeliefCardStore {
+    if (!this.beliefCardStore) {
+      this.beliefCardStore = new BeliefCardStore({
+        memoryRoot: join(app.getPath('userData'), 'agent-memory'),
+      })
+    }
+    return this.beliefCardStore
   }
 
   private getDomainAdapters(): ReadonlyArray<DomainAdapter> {

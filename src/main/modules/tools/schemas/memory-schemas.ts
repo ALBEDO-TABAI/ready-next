@@ -57,15 +57,49 @@ export const MemoryListRecentSchema = z.object({
     .describe('来源分类：resident_agent, resident_user, scope_memory, trigger_rule'),
 })
 
+// EP1-K1 — belief card tools. New cards default to status `staged` (do not
+// enter injection until promoted); write path is whitelisted to
+// knowledge/*.md and knowledge/sites/*.md by belief-card-store.
+export const MemoryWriteCardSchema = z.object({
+  rel_path: z
+    .string()
+    .describe('卡片相对路径，只允许 knowledge/<slug>.md 或 knowledge/sites/<domain>.md'),
+  title: z.string().describe('卡片标题，一句话'),
+  description: z.string().describe('一行摘要，用作索引检索线索'),
+  confidence: z.enum(['H', 'M', 'L']).describe('置信度：H/M/L'),
+  tag: z
+    .enum(['knowledge', 'self', 'preference', 'aspire'])
+    .describe('标签：knowledge(外部事实) / self(工作方式) / preference(用户偏好) / aspire(开放问题)'),
+  body: z.string().describe('卡片正文 markdown，可用 [[slug]] 链接其他卡'),
+  status: z
+    .enum(['staged', 'active'])
+    .optional()
+    .describe('状态：默认 staged(待确认，不进注入)；用户明确要求记住时用 active'),
+  source: z.string().optional().describe('来源，一行 provenance'),
+  site: z.string().optional().describe('站点域名，仅站点卡(knowledge/sites/*.md)需要'),
+})
+
+export const MemoryReadCardSchema = z.object({
+  rel_path: z.string().describe('卡片相对路径'),
+  include_staged: z
+    .boolean()
+    .optional()
+    .describe('是否包含待确认(staged)卡片，默认 false'),
+})
+
 export type MemoryToolName =
   | 'memory_create'
   | 'memory_search'
   | 'memory_update'
   | 'memory_list_recent'
+  | 'memory_write_card'
+  | 'memory_read_card'
 
 export const MEMORY_SCHEMAS: Record<MemoryToolName, z.ZodObject<z.ZodRawShape>> = {
   memory_create: MemoryCreateSchema,
   memory_search: MemorySearchSchema,
   memory_update: MemoryUpdateSchema,
   memory_list_recent: MemoryListRecentSchema,
+  memory_write_card: MemoryWriteCardSchema,
+  memory_read_card: MemoryReadCardSchema,
 }

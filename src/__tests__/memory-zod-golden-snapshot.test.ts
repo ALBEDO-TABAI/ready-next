@@ -116,18 +116,36 @@ const EXPECTED_ANTHROPIC = [
   },
 ]
 
-test('getMemoryAnthropicTools matches the locked LLM-facing payload byte-for-byte', () => {
-  assert.deepEqual(getMemoryAnthropicTools(), EXPECTED_ANTHROPIC)
+// The lock's purpose is byte-for-byte stability of the LEGACY 4 memory tools
+// across the zod-derivation swap. The memory domain may grow (EP1-K1 added
+// memory_write_card / memory_read_card), so we lock the legacy 4 by name
+// rather than asserting the whole array length.
+function byName(tools: Array<Record<string, unknown>>): Map<string, Record<string, unknown>> {
+  return new Map(tools.map((tool) => [tool.name as string, tool]))
+}
+
+test('getMemoryAnthropicTools keeps the legacy 4 payloads byte-for-byte', () => {
+  const actual = byName(getMemoryAnthropicTools())
+  for (const expected of EXPECTED_ANTHROPIC) {
+    assert.deepEqual(actual.get(expected.name), expected)
+  }
 })
 
-test('getMemoryOpenAITools matches the locked LLM-facing payload byte-for-byte', () => {
-  const expected = EXPECTED_ANTHROPIC.map((tool) => ({
-    type: 'function',
-    function: {
-      name: tool.name,
-      description: tool.description,
-      parameters: tool.input_schema,
-    },
-  }))
-  assert.deepEqual(getMemoryOpenAITools(), expected)
+test('getMemoryOpenAITools keeps the legacy 4 payloads byte-for-byte', () => {
+  const actual = new Map(
+    getMemoryOpenAITools().map((tool) => [
+      (tool.function as { name: string }).name,
+      tool,
+    ]),
+  )
+  for (const tool of EXPECTED_ANTHROPIC) {
+    assert.deepEqual(actual.get(tool.name), {
+      type: 'function',
+      function: {
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.input_schema,
+      },
+    })
+  }
 })

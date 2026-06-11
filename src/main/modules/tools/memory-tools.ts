@@ -51,6 +51,18 @@ const MEMORY_TOOLS: MemoryToolDef[] = [
       '列出最近的记忆。默认用于查看最近写入的 resident/scope/trigger 记录，不包含历史会话回看。',
     params: zodObjectToParamList(MEMORY_SCHEMAS.memory_list_recent) as ToolParam[],
   },
+  {
+    name: 'memory_write_card',
+    description:
+      '写入一张原子信念卡（知识/偏好/工作方式/开放问题）。出现值得长期记住的稳定事实时当轮写；新卡默认 staged(待确认)，不会进入注入，晋升后才生效。仅允许写到 knowledge/<slug>.md 或 knowledge/sites/<domain>.md。',
+    params: zodObjectToParamList(MEMORY_SCHEMAS.memory_write_card) as ToolParam[],
+  },
+  {
+    name: 'memory_read_card',
+    description:
+      '按相对路径读取一张信念卡全文。默认不返回待确认(staged)卡片；需要时传 include_staged=true。',
+    params: zodObjectToParamList(MEMORY_SCHEMAS.memory_read_card) as ToolParam[],
+  },
 ]
 
 export function getMemoryAnthropicTools(): Array<Record<string, unknown>> {
@@ -233,6 +245,64 @@ export async function executeMemoryTool(
             summary: m.summary,
             created_at: new Date(m.createdAt * 1000).toISOString()
           }))
+        })
+      }
+
+      case 'memory_write_card': {
+        const { rel_path, title, description, confidence, tag, body, status, source, site } =
+          args as {
+            rel_path: string
+            title: string
+            description: string
+            confidence: 'H' | 'M' | 'L'
+            tag: 'knowledge' | 'self' | 'preference' | 'aspire'
+            body: string
+            status?: 'staged' | 'active'
+            source?: string
+            site?: string
+          }
+        const store = runtime.getBeliefCardStore()
+        const result = store.writeCard({
+          relPath: rel_path,
+          frontmatter: {
+            title,
+            description,
+            confidence,
+            tag,
+            created: new Date().toISOString().slice(0, 10),
+            status: status ?? 'staged',
+            ...(source ? { source } : {}),
+            ...(site ? { site } : {}),
+          },
+          body,
+        })
+        if (!result.ok) {
+          return JSON.stringify({ success: false, error: result.reason })
+        }
+        log(`[memory_write_card] wrote ${result.relPath} (${status ?? 'staged'})`)
+        return JSON.stringify({
+          success: true,
+          rel_path: result.relPath,
+          status: status ?? 'staged',
+          message: `已写入信念卡 ${result.relPath}（${status ?? 'staged'}）`,
+        })
+      }
+
+      case 'memory_read_card': {
+        const { rel_path, include_staged } = args as {
+          rel_path: string
+          include_staged?: boolean
+        }
+        const store = runtime.getBeliefCardStore()
+        const card = store.readCard(rel_path, { includeStaged: include_staged === true })
+        if (!card) {
+          return JSON.stringify({ success: false, error: 'card not found or excluded (staged)' })
+        }
+        return JSON.stringify({
+          success: true,
+          rel_path: card.relPath,
+          frontmatter: card.frontmatter,
+          body: card.body,
         })
       }
 
