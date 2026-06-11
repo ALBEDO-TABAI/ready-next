@@ -1,6 +1,6 @@
 # 阶段二开发计划（配套 2026-06-11-agent-evolution-phase2-implementation.md）
 
-> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同已于 2026-06-12 经 Codex 复审 APPROVED（enforce: true），可按波次开工。
+> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同 v2 曾于 2026-06-12 经 Codex 复审 APPROVED；同日 Codex 二轮复审提出 4 点（P0：阶段一 live-target 收口前提当时未合入——现已合入 573b058d；P1：Q3/Q4 finalText 时序、Q4b 转正门槛可执行化；P2：Q1 范围压实），已回修为 **v3，待 Codex 复核确认后方可按波次开工**。
 
 ---
 
@@ -8,11 +8,11 @@
 
 | 工单 | 内容 | 规模 | 依赖 |
 |------|------|------|------|
-| Q1 | task_projections 质量列迁移（054） | ~140 行 | 无 |
+| Q1 | task_projections 质量列迁移（054）+ wire 类型/repository 四字段全链 | ~200 行 | 无 |
 | Q2 | Criteria 模板引擎 | ~280 行 | Q1 |
-| Q3 | Proof 五源采集（含 assistant_response digest，direct_answer 合法 proof） | ~280 行 | Q1 |
-| Q4a | task-adjudicator shadow（产 CheckIn 不改终态 + 偏差 metric + gate） | ~260 行 | Q2/Q3 |
-| Q4b | adjudicator enforce（接管终态，零 proof 拒 done 生效） | ~160 行 | Q4a + 偏差清单复核 |
+| Q3 | Proof 五源采集（含 assistant_response digest；RunOutcome 增 finalText additive 字段 + done 收口传入） | ~280 行 | Q1 |
+| Q4a | task-adjudicator shadow（产 CheckIn 不改终态 + 偏差 metric + gate + 偏差导出脚本；digest proof 先落后裁时序硬条款） | ~280 行 | Q2/Q3 |
+| Q4b | adjudicator enforce（接管终态，零 proof 拒 done 生效） | ~160 行 | Q4a + 可执行转正门槛（≥50 run/≥3 天/≥4 类 task_type + false_reject=0） |
 | Q5 | 待裁决队列 + 任务卡裁决出口（interaction_state，不碰生命周期 status） | ~240 行 | Q4b |
 | Q6 | 质量红线入 verify:stability | ~40 行 | Q4b |
 | K3 | RULES/index 注入（staged 禁令变注入面断言） | ~240 行 | 无（K1/K2 已合入） |
@@ -83,7 +83,7 @@
 | 开关 | 默认 | 说明 |
 |------|------|------|
 | RULES/index 注入 | 开（预算截断 + context_bill 可观测） | 回退 = 关注入段，K1/K2 存储不动 |
-| adjudicator 裁决 | Q4a=shadow（产 CheckIn + 偏差 metric，不改终态）；Q4b=enforce（合同内置两单，不是部署开关） | 转正前置 = `adjudicator_shadow_divergence` 偏差清单复核（误杀为空或已修模板） |
+| adjudicator 裁决 | Q4a=shadow（产 CheckIn + 偏差 metric，不改终态）；Q4b=enforce（合同内置两单，不是部署开关） | 转正前置 = 可执行门槛（合同 Q4b 前置四条）：≥50 终态 run 且 ≥3 自然日、≥4 类 task_type（必含 direct_answer/multi_step_task）、`export-adjudicator-divergence.cjs` 导出清单 `false_reject`=0、复核清单入 repo 留痕 |
 | 写方向 gate | warning 模式跑一个版本 | 存量违规清单收齐后小单转 error |
 | belief 衰减新分支 | 开（与时间衰减并存一个版本，可回退） | 升降档审计行可查 |
 | 意图流视图 | 开（≤8 张 + confidence 门槛 + 类型可关） | 噪音失控先关 extractor 不下视图 |
@@ -91,7 +91,7 @@
 
 ## 4. 风险与盯防
 
-1. **Q4a/Q4b 是全阶段最大风险段**：动 run-finalizer 必须通道内扩展，funnel gate 全程绿；shadow→enforce 拆成两单是合同条款（消除"影子期不改终态"与"零 proof 立即降级"的验收矛盾）。
+1. **Q4a/Q4b 是全阶段最大风险段**：动 run-finalizer 必须通道内扩展，funnel gate 全程绿；shadow→enforce 拆成两单是合同条款（消除"影子期不改终态"与"零 proof 立即降级"的验收矛盾）；finalizeRunOutcome 内时序 = digest proof 先落账、verdict 后裁决（合同硬条款，防 direct_answer 结构性零 proof 误伤）；转正按 Q4b 前置四条可执行门槛走，不靠人感觉放行。
 2. **X2 依赖预算账本健康**：历史上存在 checkpoint 仅耗尽写/续跑重置用量等半态；勘探结论先写入工单，半态先修或显式声明边界。
 3. **K6 是文件系统级改造**：watcher 幂等与回滚开关必须在子合同里写成可机器验证断言再开工。
 4. **T2 收紧可能暴露存量违规**：warning 先行是合同条款不是建议。

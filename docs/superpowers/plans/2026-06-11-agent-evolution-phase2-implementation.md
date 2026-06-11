@@ -1,10 +1,11 @@
 ---
 title: Agent Evolution 阶段二（知识与质量闭环）实施子计划
 date: 2026-06-11
-status: approved v2 — Codex 共识达成（2026-06-12，合同评审 6 点全部闭合后复审 APPROVED），enforce 生效，逐单施工
+status: v3 修订（2026-06-12 Codex 二轮复审回修 4 点：P0×1/P1×2/P2×1），待 Codex 复核确认后恢复 approved；复核通过前阶段二不开工
 revision_history:
   - v1 (2026-06-11): 初稿。依据 docs/agent-evolution/00 路线图阶段二范围 + 01/02/03/05/06/07/10/11 各篇工作包表拆单；并入阶段一显式移交项（I-auth 对象级授权、K6 启动接线 syncBeliefCards、frozen-call 审计迁 proof_refs、T4 重试分级收敛）。
   - v2 (2026-06-12): 吸收 Codex 合同评审 6 点。P1：①direct_answer 防误伤——Q3 增第五 proof 源 assistant_response digest（纯问答的最终回复摘要即合法 proof），零 proof 硬规则保持全域统一无豁免；②check_in_pending 改挂 interaction_state（HEAD 的 task_projections.status 复用 skill child run 生命周期枚举，不得污染），Q1 措辞修正；③adjudicator 灰度拆 Q4a（shadow：产 CheckIn + 偏差 metric，不改终态）/ Q4b（enforce：接管终态，零 proof 拒 done 生效），矛盾消除；④B1 不再承载阶段一 live-target 残余——该安全网已在阶段一第 2-4 轮复核中全部收口合入（28c6de4d/53b01f39/1d3e8a85，含 type_at/type_smart/send_keys/aria-labelledby），B1 仅评估批量通道自身安全清单；⑤G2 终门改为可执行口径：全量 test 以"基线失败清单不新增"为门（基线清单见 G2 附录，归 base 分支收口），强制门为 evolution-p2 链 + stability + native + typecheck。P2：⑥P 系列核销表列全 P1-P10（含阶段一/S 系列已解决项的"仅复核状态"行）。
+  - v3 (2026-06-12): 吸收 Codex 二轮复审 4 点。P0：①阶段一 live-target 收口前提修正——二轮复审时第 4 轮修复（browser_run_workflow 的 click/click_text/click_at/type/type_at 子步骤统一接 runGuarded* 共享守卫、send_keys Shift 可打印键探测、type_at/act_on_target 对 editable 当前值的误杀修正）尚未合入，v2 ④的"已全部收口"判断在当时不成立；现第 4 轮已合入 573b058d 并经 verify:evolution-p1 全链绿，收口提交全集为 28c6de4d/53b01f39/1d3e8a85/573b058d 四轮，B1 边界条款同步更新并新增"spike 期间新发现的旁路回 phase1 安全网修复"规则。P1：②Q3/Q4 纯问答 proof 时序写实——HEAD 的 RunOutcome 无最终回复字段（run-finalizer.ts）、done 收口未传 finalText（agent-sdk-runtime.ts）；Q3 增 RunOutcome done/checkpoint 变体 additive `finalText` 字段 + 收口传入，Q4a 定时序硬条款（digest proof 在 finalizeRunOutcome 内先落账、verdict 后裁决）。P1：③Q4b 转正门槛可执行化——最小样本/时间窗/task_type 覆盖/导出命令/转正条件写死；Q4a 交付 `scripts/export-adjudicator-divergence.cjs` 偏差清单导出脚本。P2：④Q1 范围压实——wire 类型四字段、repository create/update/mapRow、NULL/malformed 读取行为全部入单，并立硬条款"Q3/Q4/Q5 一律经 repository 读写质量列，禁 raw SQL 旁路"。
 owner: 白
 author: Claude (Fable 5)
 executor: 待定（Claude / Codex 逐单施工）
@@ -39,7 +40,7 @@ related:
    - 轨道 T（账本可信，07 篇）：T1（Q1 后）→ T2 → T3；T4-3（重试分级收敛，独立小单）。T3 触碰 finalizer 通道，排在 Q4b 之后。
    - 轨道 E（意图流，10 篇）：E1（Q1 后）→ E2（Q5 后）。v1 只做 resume / follow-up / 沉淀三类卡。
    - 轨道 B（浏览器，11 篇）：B1 spike 独立并行，产物是报告不是代码合入；不进 verify 链。
-   - **共享文件矩阵**：`prompt-assembly.ts`（K3、X1b——串行，K3 先）；`run-finalizer.ts`（Q4a → Q4b → T3 串行）；`tool-executor.ts`（I2、I-auth——串行）；`migrations.ts`（Q1、T1 若需列——一律末尾追加，编号 gate 兜底）。
+   - **共享文件矩阵**：`prompt-assembly.ts`（K3、X1b——串行，K3 先）；`run-finalizer.ts`（Q4a → Q4b → T3 串行；**例外：Q3 对该文件仅做 `RunOutcome` additive 类型字段扩展，不碰 `finalizeRunOutcome()` 函数体**，在 Q4a 之前合入）；`tool-executor.ts`（I2、I-auth——串行）；`migrations.ts`（Q1、T1 若需列——一律末尾追加，编号 gate 兜底）。
 2. **每单交付物**：失败测试 → 实现 → 焦点验证命令绿 → `npm run typecheck` 绿；涉及 SQLite 迁移的工单（Q1、T1）加 `npm run verify:native`。
 3. **每单提交**：单独 commit，message 引用工单号（如 `feat(agent): EP2-Q1 task projection quality columns`）。
 4. **gate 汇总**：末单 G2 新增 `verify:evolution-p2`；02/07 篇验收红线测试（checkin-funnel gate、criteria 矩阵、ledger-consistency、reconcile-orphan-closure、tool-envelope-retry-matrix）按各自工单同步挂入 `verify:stability`。
@@ -58,11 +59,11 @@ related:
 ## 轨道 Q：任务执行质量框架（设计出处：02 篇）
 
 ### EP2-Q1 task_projections 质量列迁移
-- **改动文件**：`migrations.ts`（054：`task_projections` 加 `criteria_json/checkins_json/proof_refs_json/learning_refs_json` 四列）、`check_in_pending` 挂 **interaction_state**（HEAD 的 `task_projections.status` 复用 skill child run 生命周期枚举——queued/running/completed/failed 等，**不得污染**；落点跟随 HEAD 投影类型：已有 interaction 维度则扩展枚举，否则新增 nullable `interaction_state` 列，施工第一步先核对 `src/shared/ipc-contracts/task-projection.ts` 现状）、新增 `src/__tests__/migration-task-quality-columns.test.ts`
-- **实施要点**：旧行 NULL 兼容；三列治理上限（checkins ≤50、proof_refs ≤100，超限滚动归档 `<outputDir>/task-archive.jsonl`）随 Q3/Q4 写入端实现，本单只立列；zod schema 校验函数同文件预置（写入前校验，malformed 拒写并告警）。阶段一 frozen-call 审计事件迁 proof_refs 的 TODO 在 Q4a 接线时一并兑现。
-- **测试（先红）**：迁移幂等（fake DB 范式 + 按名隔离）；旧行 NULL 读取兼容。
+- **改动文件**：`migrations.ts`（054：`task_projections` 加 `criteria_json/checkins_json/proof_refs_json/learning_refs_json` 四列）、`src/shared/ipc-contracts/task-projection.ts`（`TaskProjectionRecord` 增 `criteria?/checkins?/proofRefs?/learningRefs?` 四个可选字段——HEAD 现状已核对：无这些字段；`interaction_state` 维度已存在于 HEAD（`interactionState: TaskInteractionState`），`check_in_pending` 走**扩展该枚举**，不新增列、不碰复用 skill child run 生命周期枚举的 `status`）、`task-projection-repository.ts`（create INSERT 列清单、update 白名单、mapRow 读取全部覆盖四列）、新增 `src/__tests__/migration-task-quality-columns.test.ts`
+- **实施要点**：旧行 NULL 兼容——读侧沿用仓库既有 `safeParse` 惯例（NULL/malformed JSON → 回退默认值不 throw：checkins/proofRefs/learningRefs 空数组、criteria null）；写侧 zod schema 校验函数同文件预置（写入前校验，malformed 拒写并告警）。三列治理上限（checkins ≤50、proof_refs ≤100，超限滚动归档 `<outputDir>/task-archive.jsonl`）随 Q3/Q4 写入端实现，本单只立列。**硬条款：Q2-Q5/T 系列对质量四列的一切读写必须经 repository（create/update/mapRow），不得另起 raw SQL**——这是本单把 wire 类型与 repository 一并入单的原因。阶段一 frozen-call 审计事件迁 proof_refs 的 TODO 在 Q4a 接线时一并兑现。
+- **测试（先红）**：迁移幂等（fake DB 范式 + 按名隔离）；旧行 NULL 读取兼容；malformed JSON 行回退默认值不 throw；repository create→get 四字段往返一致。
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/migration-task-quality-columns.test.ts && npm run verify:native && npm run typecheck`
-- **规模**：~140 行。
+- **规模**：~200 行。
 
 ### EP2-Q2 Criteria 模板引擎
 - **改动文件**：新增 `agent-control/quality/criteria-templates.ts`（task_type × module 二维查表 + 计划阶段模型补充接口）、新增 `src/__tests__/criteria-template-matrix.test.ts`
@@ -72,21 +73,25 @@ related:
 - **规模**：~280 行。
 
 ### EP2-Q3 Proof 自动采集
-- **改动文件**：新增 `agent-control/quality/proof-collector.ts`（**五源** → proof_refs 行：工具结果/artifact/task_event/run_state + **assistant_response digest**）、接线点跟随 HEAD（工具结果在 tools-runtime 出口、task_event 在 TaskEventBridge 监听——additive listener，不改桥本体；response digest 在终态收口处取最终回复文本摘要）、新增 `src/__tests__/proof-collection-five-sources.test.ts`
-- **实施要点**：五源各自落一条结构化 proof（kind/ref/ts/digest）。**assistant_response digest 是 direct_answer 类任务的合法 proof**（纯问答的交付物就是回复本身；存 sha256 + 截断摘要，不存全文）——这使 Q4 的"零 proof 拒 done"硬规则保持全域统一、无任务类型豁免：连一条最终回复都没有的 run 判 done 才是真正要拦的事故。上限治理与归档按 Q1 预置 schema；采集失败不阻断主流程（记 metric）。
-- **测试（先红）**：五源各一条 proof 落库；direct_answer 仅含 response digest 时可被 Q4b 判 done（前向用例，随 Q4b 激活）；超限滚动归档；malformed 拒写。
+- **改动文件**：新增 `agent-control/quality/proof-collector.ts`（**五源** → proof_refs 行：工具结果/artifact/task_event/run_state + **assistant_response digest**）、`runtime-core/run-finalizer.ts`（**仅 additive 类型扩展**：`RunOutcome` 的 done/checkpoint 变体增 `finalText?: string | null` 字段，本单不碰 `finalizeRunOutcome()` 函数体——HEAD 现状已核对：RunOutcome 无最终回复字段）、`runtime-core/agent-sdk-runtime.ts`（done/checkpoint 收口处把已在作用域内的 `finalText` 传入 outcome——HEAD 现状已核对：未传）、其余接线点跟随 HEAD（工具结果在 tools-runtime 出口、task_event 在 TaskEventBridge 监听——additive listener，不改桥本体）、新增 `src/__tests__/proof-collection-five-sources.test.ts`
+- **实施要点**：五源各自落一条结构化 proof（kind/ref/ts/digest）。**assistant_response digest 是 direct_answer 类任务的合法 proof**（纯问答的交付物就是回复本身；存 sha256 + 截断摘要，不存全文）——这使 Q4 的"零 proof 拒 done"硬规则保持全域统一、无任务类型豁免：连一条最终回复都没有的 run 判 done 才是真正要拦的事故。**时序前提（与 Q4a 配对）**：digest 的生成与落账发生在 `finalizeRunOutcome()` 内部、adjudicator 裁决之前——本单交付纯函数 `collectResponseDigestProof(finalText)`，在 finalizeRunOutcome 内的调用由 Q4a 接线（finalizer 函数体归 Q4a 串行窗口）。上限治理与归档按 Q1 预置 schema；采集失败不阻断主流程（记 metric）。
+- **测试（先红）**：五源各一条 proof 落库；direct_answer 仅含 response digest 时可被 Q4b 判 done（前向用例，随 Q4b 激活）；done 收口传入的 finalText 与 emit 给用户的最终文本一致（含"空回复补默认文案"分支）；超限滚动归档；malformed 拒写。
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/proof-collection-five-sources.test.ts && npm run typecheck`
 - **规模**：~280 行。
 
 ### EP2-Q4a task-adjudicator shadow（产 CheckIn，不改终态）
-- **改动文件**：新增 `agent-control/quality/task-adjudicator.ts`（完成硬规则 + 准入校验 + CheckIn 组装，**纯判定函数**：输入终态候选 + criteria + proofs，输出 verdict + CheckIn）、`runtime-core/run-finalizer.ts`（在 `finalizeRunOutcome()` 内调用——通道内扩展，不开旁路；**shadow 模式：CheckIn 与 verdict 落账、verdict 与实际终态不一致时记偏差 metric `adjudicator_shadow_divergence`，终态不变**）、新增 `scripts/check-checkin-funnel.cjs` gate、新增 `src/__tests__/run-finalizer-checkin.test.ts`
-- **实施要点**：五条终态路径各产生正确 CheckIn；阶段一 frozen-call released/denied/expired 审计行迁 proof_refs；`check-run-finalize-funnel.cjs` 全程保持绿。**本单不改任何终态**——"零 proof 拒 done"在本单只表现为 verdict=reject + 偏差 metric。
-- **测试（先红）**：五路径 CheckIn 落账；零 proof 的 done → verdict=reject + divergence metric + **终态保持原值**；准入不满足 → verdict 降级标记；funnel gate 不破。
+- **改动文件**：新增 `agent-control/quality/task-adjudicator.ts`（完成硬规则 + 准入校验 + CheckIn 组装，**纯判定函数**：输入终态候选 + criteria + proofs，输出 verdict + CheckIn）、`runtime-core/run-finalizer.ts`（在 `finalizeRunOutcome()` 内调用——通道内扩展，不开旁路；**shadow 模式：CheckIn 与 verdict 落账、verdict 与实际终态不一致时记偏差 metric `adjudicator_shadow_divergence`，终态不变**）、新增 `scripts/check-checkin-funnel.cjs` gate、新增 `scripts/export-adjudicator-divergence.cjs`（偏差清单导出：按时间窗拉取 divergence 行 → JSON 清单，字段含 runId/taskType/verdict/实际终态/proof 计数/时间戳——Q4b 转正门槛的执行工具，本单交付）、新增 `src/__tests__/run-finalizer-checkin.test.ts`
+- **实施要点**：五条终态路径各产生正确 CheckIn；阶段一 frozen-call released/denied/expired 审计行迁 proof_refs；`check-run-finalize-funnel.cjs` 全程保持绿。**本单不改任何终态**——"零 proof 拒 done"在本单只表现为 verdict=reject + 偏差 metric。**时序硬条款：finalizeRunOutcome 内先调 Q3 的 `collectResponseDigestProof(outcome.finalText)` 落账、后调 adjudicator 裁决**——direct_answer 纯问答 run 不得因收口内时序产生"裁决时零 proof"的结构性误伤。
+- **测试（先红）**：五路径 CheckIn 落账；零 proof 的 done → verdict=reject + divergence metric + **终态保持原值**；**时序断言：done 收口带 finalText 时，adjudicator 收到的 proofs 已含 response digest（shadow 期 direct_answer 偏差 metric 为 0）**；导出脚本对 fake 数据产出正确清单；准入不满足 → verdict 降级标记；funnel gate 不破。
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/run-finalizer-checkin.test.ts src/__tests__/run-finalizer-all-paths.test.ts && node scripts/check-checkin-funnel.cjs && node scripts/check-run-finalize-funnel.cjs && npm run typecheck`
 - **规模**：~260 行。
 
 ### EP2-Q4b adjudicator enforce（接管终态）
-- **前置**：Q4a 合入后跑过一段真实使用，`adjudicator_shadow_divergence` 偏差清单已复核（误杀清单为空或已修模板）。
+- **前置（可执行门槛，缺一不进单）**：
+  1. **样本窗**：Q4a 合入后真实使用累计 **≥50 个终态 run 且时间窗 ≥3 个自然日**，覆盖 **≥4 类 task_type（必含 direct_answer 与 multi_step_task）**——样本计数以导出清单的 run 总数行为准。
+  2. **导出**：`node scripts/export-adjudicator-divergence.cjs --since <Q4a 合入时间>` 产出偏差清单（Q4a 交付的脚本）。
+  3. **转正条件**：清单逐行标注 disposition——`false_reject`（verdict=reject 但人工判应 done 的误杀）行数必须为 **0**；非零则先修模板/采集源（对应 commit 合入）并重新导出确认不再复现，才可回到本条。`true_reject`（确实零 proof 判 done 的事故 run）不阻塞转正——它们正是 enforce 的动机。
+  4. **留痕**：复核后的清单（含 disposition 标注）提交进 repo（`docs/agent-evolution/Q4a-shadow-divergence-review.md` 或同级 JSON），commit 引用于 Q4b 工单提交说明。
 - **改动文件**：`run-finalizer.ts`（verdict 接管终态：**零 proof 判 done 被拒**，降级为带 blocker 的非 done 终态；learningDecision=memory_card 不满足准入 → 降级）、shadow 偏差 metric 保留为回归哨兵、扩展测试
 - **测试（先红）**：零 proof done → 实际降级为非 done 终态；direct_answer 带 response digest → 正常 done（Q3 前向用例在此激活）；准入降级生效；funnel gate 不破。
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/run-finalizer-checkin.test.ts src/__tests__/run-finalizer-all-paths.test.ts && node scripts/check-run-finalize-funnel.cjs && npm run typecheck`
@@ -247,7 +252,7 @@ related:
 
 ### EP2-B1 spike（并行长线，产物=报告）
 - **交付**：spike 报告（DSL 候选 A 优先评估、JS 沙箱候选 B 为上界；安全清单五项逐项证明；翻页取数实测回合数，≥80% 降幅为 spike 目标）；CDP 共存性验证，不行退化为受限脚本 DSL。
-- **硬边界**：spike 不向生产暴露任何脚本执行工具；高风控站点硬拦不放宽。阶段一 live-target 安全网已全部收口合入（28c6de4d / 53b01f39 / 1d3e8a85：act_on_target/click/click_at/type/type_at/type_smart/compose/send_keys + aria-labelledby + 父级冒泡 + 焦点字段守卫），**不属本 spike 范围**——B1 只评估批量通道自身的安全清单五项。
+- **硬边界**：spike 不向生产暴露任何脚本执行工具；高风控站点硬拦不放宽。阶段一 live-target 安全网已全部收口合入（**四轮**：28c6de4d / 53b01f39 / 1d3e8a85 / 573b058d——act_on_target/click/click_at/type/type_at/type_smart/compose/send_keys + aria-labelledby + 父级冒泡 + 焦点字段守卫 + **browser_run_workflow 全部写子步骤统一接 runGuarded* 共享守卫 + send_keys Shift 可打印键探测 + editable value 误杀修正**，回归入口 `action-confirmation-live-target.test.ts` 全绿），**不属本 spike 范围**——B1 只评估批量通道自身的安全清单五项。spike 期间若发现新的 live-target 旁路，按缺陷回 phase1 安全网修（收口点=runGuarded* 四入口 + sendKeyStroke 汇点），不得作为 spike 报告残余挂账。
 - **验收**：报告评审通过；无生产代码合入（如需实验代码，走独立分支不进主线）。
 
 ---
