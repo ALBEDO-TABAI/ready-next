@@ -1,6 +1,6 @@
 # 阶段二开发计划（配套 2026-06-11-agent-evolution-phase2-implementation.md）
 
-> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同 v3 已于 2026-06-12 经 Codex 复核 APPROVED（二轮复审 4 点全部 CLOSED：阶段一 live-target 四轮收口 573b058d 合入、Q3/Q4 finalText 时序、Q4b 可执行转正门槛、Q1 范围压实），enforce 生效，可按波次开工。
+> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同 v3 曾经 Codex 复核 APPROVED；2026-06-12 Codex 三轮复审再提 3 点（P1：054 打红阶段一迁移测试、check_in_pending 五面扩展；P2：终态路径按 RunOutcome.kind 枚举遍历），已回修为 **v4，待 Codex 复核确认后方可按波次开工**。
 
 ---
 
@@ -8,10 +8,10 @@
 
 | 工单 | 内容 | 规模 | 依赖 |
 |------|------|------|------|
-| Q1 | task_projections 质量列迁移（054）+ wire 类型/repository 四字段全链 | ~200 行 | 无 |
+| Q1 | task_projections 质量列迁移（054）+ wire/repository 四字段全链 + 阶段一"053 必须最新"断言改写 + check_in_pending 五面扩展（main union/wire/sync 白名单/renderer 副本/UI 标签）| ~240 行 | 无 |
 | Q2 | Criteria 模板引擎 | ~280 行 | Q1 |
 | Q3 | Proof 五源采集（含 assistant_response digest；RunOutcome 增 finalText additive 字段 + done 收口传入） | ~280 行 | Q1 |
-| Q4a | task-adjudicator shadow（产 CheckIn 不改终态 + 偏差 metric + gate + 偏差导出脚本；digest proof 先落后裁时序硬条款） | ~280 行 | Q2/Q3 |
+| Q4a | task-adjudicator shadow（产 CheckIn 不改终态 + 偏差 metric + gate + 偏差导出脚本；digest proof 先落后裁时序硬条款；CheckIn 覆盖按 RunOutcome.kind 枚举遍历不写死数量） | ~280 行 | Q2/Q3 |
 | Q4b | adjudicator enforce（接管终态，零 proof 拒 done 生效） | ~160 行 | Q4a + 可执行转正门槛（≥50 run/≥3 天/≥4 类 task_type + false_reject=0） |
 | Q5 | 待裁决队列 + 任务卡裁决出口（interaction_state，不碰生命周期 status） | ~240 行 | Q4b |
 | Q6 | 质量红线入 verify:stability | ~40 行 | Q4b |
