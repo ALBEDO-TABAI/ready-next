@@ -1748,8 +1748,10 @@ describe('high-control browser tools (agent tab routing)', () => {
         const source = String(code || '')
         if (source.includes('buildLocateTextTargetJs')) return null
         if (source.includes('hrefContains')) {
-          assert.ok(source.includes('const directHrefClick = false'))
           return { ok: true, text: '笔记一', clickedDirect: false, cssX: 120, cssY: 220, width: 1000, height: 800 }
+        }
+        if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
+          return { label: '笔记一', editable: false }
         }
         if (source.includes('readyState') && source.includes('bodyTextLen')) {
           return { readyState: 'complete', bodyTextLen: 200, matched: true }

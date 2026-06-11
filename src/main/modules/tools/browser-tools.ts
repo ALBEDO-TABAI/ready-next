@@ -1603,7 +1603,8 @@ async function runGuardedSelectorClick(
       ${buildTargetSemanticsLibraryJs()}
       const el = document.querySelector(${JSON.stringify(selector)});
       if (!el) return ${JSON.stringify(`Element not found: ${selector}`)};
-      const label = readyClickSemanticsLabel(el);
+      const owner = readyClickableOwner(el);
+      const label = readyIsEditableField(owner) ? '' : readyClickSemanticsLabel(el);
       if (label && READY_MANUAL_ONLY_PATTERNS.some((p) => p.test(label))) {
         return { __readyManualOnlyBlocked: true, label: label.slice(0, 80) };
       }
@@ -2808,7 +2809,6 @@ function buildLocateTextTargetJs(text: string, exact: boolean, hrefContains = ''
       const rect = matched.getBoundingClientRect()
       const x = Math.max(0, Math.min(window.innerWidth, rect.left + rect.width / 2))
       const y = Math.max(0, Math.min(window.innerHeight, rect.top + rect.height / 2))
-      let clickedDirect = false
       if (hrefContains) {
         if (matched instanceof HTMLAnchorElement) {
           matched.setAttribute('target', '_self')
@@ -4714,7 +4714,7 @@ export async function executeBrowserTool(
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         const located = await controller.executeJS(tabId, buildLocateTextTargetJs(text, exact, hrefContains))
         if (!located || typeof located !== 'object') return String(located)
-        const result = located as { ok?: boolean; error?: string; text?: string; href?: string; clickedDirect?: boolean; cssX?: number; cssY?: number; width?: number; height?: number }
+        const result = located as { ok?: boolean; error?: string; text?: string; href?: string; cssX?: number; cssY?: number; width?: number; height?: number }
         if (result.ok !== true) return result.error || `Element by text not found: ${text}`
         const width = Number(result.width || 1) || 1
         const height = Number(result.height || 1) || 1
@@ -4726,7 +4726,7 @@ export async function executeBrowserTool(
           ok: true,
           text: result.text || text,
           href: result.href || undefined,
-          clickedDirect: result.clickedDirect === true,
+          clickedDirect: false,
           normalized: { x: point.nx, y: point.ny },
           css: { x: point.cssX, y: point.cssY },
         }, null, 2)

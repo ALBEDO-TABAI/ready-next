@@ -217,6 +217,7 @@ test('browser_click: in-script M1 check refuses without clicking; patterns are p
   assert.ok(clickScript!.includes('确认支付'), 'embedded patterns must come from the policy source')
   // selector 命中按钮里的 icon/span 时 label 在父级——脚本必须爬 owner。
   assert.ok(clickScript!.includes('readyClickableOwner'), 'selector click must judge the clickable owner, not the bare child')
+  assert.ok(clickScript!.includes('readyIsEditableField(owner)'), 'selector click must not judge editable field current values')
   assert.ok(clickScript!.includes('aria-labelledby'), 'click label must resolve aria-labelledby')
 })
 
