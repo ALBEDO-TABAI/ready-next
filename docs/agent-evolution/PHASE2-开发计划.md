@@ -1,6 +1,6 @@
 # 阶段二开发计划（配套 2026-06-11-agent-evolution-phase2-implementation.md）
 
-> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同 v2 曾于 2026-06-12 经 Codex 复审 APPROVED；同日 Codex 二轮复审提出 4 点（P0：阶段一 live-target 收口前提当时未合入——现已合入 573b058d；P1：Q3/Q4 finalText 时序、Q4b 转正门槛可执行化；P2：Q1 范围压实），已回修为 **v3，待 Codex 复核确认后方可按波次开工**。
+> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同 v3 已于 2026-06-12 经 Codex 复核 APPROVED（二轮复审 4 点全部 CLOSED：阶段一 live-target 四轮收口 573b058d 合入、Q3/Q4 finalText 时序、Q4b 可执行转正门槛、Q1 范围压实），enforce 生效，可按波次开工。
 
 ---
 
