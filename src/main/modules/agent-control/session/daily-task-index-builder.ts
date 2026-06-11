@@ -1,5 +1,6 @@
 import type { TaskProjectionRecord } from '../contracts/run-contracts'
 import { isSkillChildRunTerminalStatus } from '../../../../shared/skill-child-run-status'
+import { logAgentMetric } from '../metrics'
 
 /**
  * Daily task index v1 (EP1-X1a). Pure assembler that turns the CURRENT
@@ -92,12 +93,33 @@ export function toTaskIndexEntry(record: TaskProjectionRecord): TaskIndexEntry {
   }
 }
 
+/** EP2-T2 — malformed-ignored: a ledger row missing its identity facts is
+ *  skipped with a metric, never displayed sick and never a crash (07 §1.3). */
+function isWellFormedProjectionRow(record: TaskProjectionRecord): boolean {
+  return Boolean(record
+    && typeof record.taskId === 'string' && record.taskId.trim()
+    && typeof record.status === 'string' && record.status.trim()
+    && typeof record.updatedAt === 'string' && Number.isFinite(Date.parse(record.updatedAt)))
+}
+
 /** Fetch and map the current scope's entries (scope isolation lives in SQL). */
 export function selectScopeTaskIndexEntries(
   store: TaskIndexStore,
   scopeId: string,
 ): TaskIndexEntry[] {
-  return store.listByScope(scopeId).map(toTaskIndexEntry)
+  const out: TaskIndexEntry[] = []
+  for (const record of store.listByScope(scopeId)) {
+    if (!isWellFormedProjectionRow(record)) {
+      logAgentMetric('ledger_malformed', {
+        scopeId,
+        taskId: (record as { taskId?: unknown } | null)?.taskId ?? null,
+        consumer: 'daily_task_index',
+      })
+      continue
+    }
+    out.push(toTaskIndexEntry(record))
+  }
+  return out
 }
 
 function renderLine(entry: TaskIndexEntry): string {

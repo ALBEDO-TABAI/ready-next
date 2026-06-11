@@ -26,3 +26,14 @@
 ## malformed ignored
 
 消费端（UI 投影、任务索引、维护回合）遇字段非法的行：跳过 + `ledger_malformed` metric，不带病显示也不崩溃（EP2-T2 实现）。
+
+## 写方向 gate 存量违规清单（EP2-T2 warning 模式收集，2026-06-12）
+
+| # | 账本 | 位置 | 处置 |
+|---|------|------|------|
+| 1 | task_projections | app-control/startup-run-reconciler.ts:102 | T3 reconcile 泛化时改走 finalizer 通道 |
+| 2 | run_meta | app-control/startup-run-reconciler.ts:83 | 同上 |
+| 3 | browser_tasks | app-control/startup-run-reconciler.ts:154 | 同上（启动收尸对执行级账本的直写） |
+| 4 | browser_tasks | database.ts:2116 | 评估迁移至 browser-engine 或加入 owner 白名单（属历史初始化路径） |
+
+清单收齐后转 `--strict` 走单独小单（合同 T2 风险条款）。测试 `ledger-malformed-ignored.test.ts` 钉死清单数量=4——新增违规即测试红。
