@@ -1,6 +1,6 @@
 # 阶段二开发计划（配套 2026-06-11-agent-evolution-phase2-implementation.md）
 
-> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同 v5 曾经 Codex 复核 APPROVED；2026-06-12 Codex 五轮复审再提 1 点（continuation 归一化白名单 `normalizeInteractionState` 同族静默洗值），已回修为 **v6，待 Codex 复核确认后方可按波次开工**。
+> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同 v6 已于 2026-06-12 经 Codex 复核 APPROVED（五轮复审全部收敛；check_in_pending 全链路八组面含 continuation 归一化白名单），enforce 生效，按波次开工中。
 
 ---
 
