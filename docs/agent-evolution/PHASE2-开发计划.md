@@ -1,6 +1,6 @@
 # 阶段二开发计划（配套 2026-06-11-agent-evolution-phase2-implementation.md）
 
-> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同 v4 曾经 Codex 复核 APPROVED；2026-06-12 Codex 四轮复审再提 1 点（check_in_pending 扩展面补全：运行态 ScopeRunSummary/EventPayload union、ChatPanel badge 标签、awaiting-user helper），已回修为 **v5，待 Codex 复核确认后方可按波次开工**。
+> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同 v5 已于 2026-06-12 经 Codex 复核 APPROVED（四轮复审收口：check_in_pending 从五面补全为全链路七组面——运行态 union/存储 union/sync 白名单/IPC wire/renderer 副本/user+badge 双标签/awaiting-user helper），enforce 生效，可按波次开工。
 
 ---
 
