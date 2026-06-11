@@ -23,6 +23,7 @@ import {
 } from '../agent-control/skills/skill-tool-authorization'
 import { resolveConfirmationGate } from '../agent-control/safety/action-confirmation-policy'
 import { matchToolNegationFamily } from '../agent-control/safety/negation-state'
+import { createTaskProofSink, collectTaskEventProof } from '../agent-control/quality/proof-collector'
 import type { FollowupNegationFamily } from '../../../shared/agent-followup-intent'
 import { getFrozenCallStore } from '../agent-control/safety/frozen-call-bridge'
 import { runFrozenCallConfirmation } from '../agent-control/safety/frozen-call-confirmation'
@@ -421,6 +422,14 @@ async function executeToolCallInner(
         signal: context.abortSignal,
         emitCard: getAskUserQuestionsCardEmitter(),
         persistCard: getAskUserQuestionsCardPersistor(),
+        // EP2-Q4a — confirmation audit events become task_event proofs.
+        appendProof: (taskId, ref) => {
+          try {
+            const store = context.runtime?.getTaskProjectionStoreForFinalize?.()
+            if (!store) return
+            createTaskProofSink(store).append(taskId, [collectTaskEventProof({ taskId: ref, status: 'confirmation' }, new Date())])
+          } catch { /* proof append must never break the confirmation path */ }
+        },
       })
       switch (outcome.kind) {
         case 'released':

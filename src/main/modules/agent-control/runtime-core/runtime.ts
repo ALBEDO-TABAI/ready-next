@@ -563,6 +563,15 @@ export class AgentControlRuntime extends EventEmitter {
     return this.memoryLifecycle
   }
 
+  /** EP2-Q4a — projection store handle for the finalize-channel shadow
+   *  adjudication (get/update only; lifecycle fields stay untouched there). */
+  getTaskProjectionStoreForFinalize(): {
+    get(taskId: string): TaskProjectionRecord | null
+    update(taskId: string, patch: Partial<TaskProjectionRecord>, options?: { silent?: boolean; reasonHint?: string }): void
+  } {
+    return this.taskProjectionStore
+  }
+
   registerSessionAbortController(
     scopeId: string | null,
     sessionId: string | null,

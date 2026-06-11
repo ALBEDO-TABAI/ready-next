@@ -4209,6 +4209,7 @@ export class AgentSdkRuntime extends EventEmitter {
           finalText, // EP2-Q3: same variable emitted above
         }, {
           runMetaRepository: this.getRunMetaRepositoryForFinalize(),
+          taskProjectionStore: this.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
           writeProjectionTerminalPatch: (projectionPatch) => {
             emitOutputForRun('', 'done', projectionPatch)
             emitStatusForRun('checkpoint', 'checkpoint_steered')
@@ -4924,6 +4925,7 @@ export class AgentSdkRuntime extends EventEmitter {
         finalText,
       }, {
         runMetaRepository: this.getRunMetaRepositoryForFinalize(),
+          taskProjectionStore: this.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
         writeProjectionTerminalPatch: (projectionPatch) => {
           emitOutputForRun('', 'done', projectionPatch)
           emitStatusForRun('done', 'done')
@@ -4978,6 +4980,7 @@ export class AgentSdkRuntime extends EventEmitter {
           projectionPatch: this.mergeProjectionPatches(projectionPatches),
         }, {
           runMetaRepository: this.getRunMetaRepositoryForFinalize(),
+          taskProjectionStore: this.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
           writeProjectionTerminalPatch: (projectionPatch) => {
             emitOutputForRun('', 'done', projectionPatch)
             emitStatusForRun('cancelled', terminalReason)
@@ -5150,6 +5153,7 @@ export class AgentSdkRuntime extends EventEmitter {
         projectionPatch: this.mergeProjectionPatches(projectionPatches),
       }, {
         runMetaRepository: this.getRunMetaRepositoryForFinalize(),
+          taskProjectionStore: this.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
         writeProjectionTerminalPatch: (projectionPatch) => {
           emitOutputForRun('', 'done', projectionPatch)
           emitStatusForRun('error', failure.terminalReason)

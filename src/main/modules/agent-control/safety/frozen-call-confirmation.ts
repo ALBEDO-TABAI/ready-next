@@ -64,6 +64,8 @@ export interface FrozenCallConfirmationDeps {
   sessionId?: string | null
   conversationId?: string | null
   runId?: string | null
+  /** EP2-Q4a — frozen-call audit events become task proofs (kind task_event). */
+  appendProof?: ((taskId: string, ref: string) => void) | null
   taskId?: string | null
   scopeId?: string | null
   signal?: AbortSignal
@@ -169,6 +171,7 @@ export async function runFrozenCallConfirmation(
         reason: released.reason,
         paramsSha256: frozen.paramsSha256,
       })
+      if (deps.taskId && deps.appendProof) deps.appendProof(deps.taskId, `frozen:${frozen.id}|expired`)
       return { kind: 'expired', frozenCallId: frozen.id, reason: released.reason }
     }
     logAgentMetric(METRIC_FROZEN_CALL_RELEASED, {
@@ -177,6 +180,7 @@ export async function runFrozenCallConfirmation(
       sessionId,
       paramsSha256: frozen.paramsSha256,
     })
+    if (deps.taskId && deps.appendProof) deps.appendProof(deps.taskId, `frozen:${frozen.id}|released`)
     return { kind: 'released', frozenCallId: frozen.id, params: released.params }
   }
 
@@ -187,5 +191,6 @@ export async function runFrozenCallConfirmation(
     sessionId,
     paramsSha256: frozen.paramsSha256,
   })
+  if (deps.taskId && deps.appendProof) deps.appendProof(deps.taskId, `frozen:${frozen.id}|denied`)
   return { kind: 'denied_by_user', frozenCallId: frozen.id }
 }

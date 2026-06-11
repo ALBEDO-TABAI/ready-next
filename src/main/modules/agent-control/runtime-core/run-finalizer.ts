@@ -1,4 +1,8 @@
 import { logAgentMetric } from '../metrics'
+import { collectResponseDigestProof, appendProofRefs } from '../quality/proof-collector'
+import { adjudicateTerminalOutcome, appendCheckIns } from '../quality/task-adjudicator'
+import { resolveCriteria } from '../quality/criteria-templates'
+import type { TaskType } from '../../../../shared/task-types'
 import type { TaskProjectionRecord } from '../contracts/run-contracts'
 
 export interface RunCloseMetric {
@@ -64,6 +68,14 @@ export interface RunFinalizerDeps {
     terminalReason: string,
   ) => void | Promise<void>
   writeRunCloseMetric: (metric: RunCloseMetric) => void
+  /** EP2-Q4a — projection store for shadow adjudication (CheckIn + proofs).
+   *  Absent = adjudication skipped (legacy callers unchanged). */
+  taskProjectionStore?: {
+    get(taskId: string): TaskProjectionRecord | null
+    update(taskId: string, patch: Partial<TaskProjectionRecord>, options?: { silent?: boolean; reasonHint?: string }): void
+  } | null
+  /** EP2-Q4a — injectable clock for the adjudication timestamp. */
+  now?: () => Date
 }
 
 export function writeRunCloseMetric(metric: RunCloseMetric): void {
@@ -139,10 +151,80 @@ async function writeTerminalOutcome(
   terminalReason: string,
 ): Promise<void> {
   writeRunMetaOutcome(outcome, deps, status, terminalReason)
+  recordShadowAdjudication(outcome, deps, status, terminalReason)
   if (deps.writeProjectionTerminalPatch) {
     await deps.writeProjectionTerminalPatch(outcome.projectionPatch || null, terminalReason)
   }
   deps.writeRunCloseMetric(toRunCloseMetric(outcome, terminalReason))
+}
+
+/**
+ * EP2-Q4a — shadow adjudication INSIDE the finalize funnel. Ordering hard
+ * clause: the response-digest proof lands on the projection FIRST, then the
+ * adjudicator judges with the refreshed proof set — a direct_answer run can
+ * never be structurally zero-proof at judging time. Shadow semantics: the
+ * verdict NEVER mutates lifecycle status/terminal state; divergence between
+ * verdict and the actual terminal status is recorded as the
+ * `adjudicator_shadow_divergence` metric (Q4b promotion evidence).
+ * Failures degrade to a metric — adjudication never blocks finalize.
+ */
+function recordShadowAdjudication(
+  outcome: RunOutcome,
+  deps: RunFinalizerDeps,
+  status: string,
+  terminalReason: string,
+): void {
+  const store = deps.taskProjectionStore
+  const taskId = outcome.taskId
+  if (!store || !taskId) return
+  try {
+    const projection = store.get(taskId)
+    if (!projection) return
+    const now = deps.now ? deps.now() : new Date()
+
+    // ① response digest proof FIRST (Q3 collector; empty finalText → null)
+    const finalText = outcome.kind === 'done' || outcome.kind === 'checkpoint' ? outcome.finalText : null
+    const digestProof = collectResponseDigestProof(finalText ?? null, now)
+    const proofRefs = digestProof
+      ? appendProofRefs(projection.proofRefs ?? [], [digestProof])
+      : (Array.isArray(projection.proofRefs) ? projection.proofRefs : [])
+
+    // ② verdict SECOND, judging the refreshed proof set
+    const criteria = resolveCriteria(projection.taskType as TaskType, String(projection.module || 'system'))
+    const { verdict, checkIn } = adjudicateTerminalOutcome({
+      terminalStatus: status,
+      terminalReason,
+      criteria: criteria.items,
+      proofs: proofRefs,
+      now,
+    })
+
+    // ③ CheckIn + proofs land on the projection — lifecycle fields untouched
+    store.update(taskId, {
+      proofRefs,
+      checkins: appendCheckIns(projection.checkins ?? [], checkIn),
+    }, { silent: true, reasonHint: 'shadow_adjudication' })
+
+    // ④ divergence metric when the verdict disagrees with the actual terminal
+    if (status === 'done' && verdict !== 'accept') {
+      logAgentMetric('adjudicator_shadow_divergence', {
+        runId: outcome.runId,
+        taskId,
+        taskType: projection.taskType,
+        verdict,
+        actualStatus: status,
+        terminalReason,
+        proofCount: checkIn.proofCount,
+        blockers: checkIn.blockers,
+      })
+    }
+  } catch (error) {
+    logAgentMetric('adjudication_failed', {
+      runId: outcome.runId,
+      taskId,
+      reason: error instanceof Error ? error.message : String(error),
+    })
+  }
 }
 
 function writeRunMetaOutcome(
