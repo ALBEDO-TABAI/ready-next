@@ -166,6 +166,38 @@ test('act_on_target: password fill WITH an args cue proceeds (gate upstream owne
     'cue-carrying fill must execute')
 })
 
+test('act_on_target: fill into an editable field whose VALUE contains a trigger word is NOT blocked (P2 parity)', async () => {
+  // The probe reports the field's current value (提交订单草稿); for a fill the
+  // value is content, not a control caption — it must not trip manual-only.
+  const controller = makeController((source) => {
+    if (source.includes('__READY_AGENT_PAGE_MAP__')) {
+      return {
+        identity: { url: 'https://example.com/form', title: 'Form' },
+        viewport: { width: 1000, height: 800 },
+        rawRoots: [{ role: 'generic', children: [{ role: 'textbox', name: '订单备注', backendDOMNodeId: 1, frameId: '0' }] }],
+        riskFlags: {},
+      }
+    }
+    if (source.includes('__READY_AGENT_TARGET_PROBE__')) {
+      return { matchCount: 1, disabled: false, target: { role: 'textbox', name: '订单备注', value: '提交订单草稿' } }
+    }
+    if (source.includes('__READY_AGENT_ACT_ON_TARGET__')) {
+      return { ok: true, action: 'fill', target: { role: 'textbox' } }
+    }
+    return null
+  })
+  const context = modelContext(controller)
+  await executeToolCall('browser_read_page_map', {}, context)
+  const output = await executeToolCall('browser_act_on_target', {
+    target_id: '1:0:1',
+    action: 'fill',
+    value: '加急处理',
+  }, context)
+  assert.notEqual(output.data?.errorKind, 'denied_manual_only', 'field value must not enter the manual-only decision for fill')
+  assert.ok(controller.calls.scripts.some((s) => s.includes('__READY_AGENT_ACT_ON_TARGET__')),
+    'a benign editable fill must execute')
+})
+
 // ---------------------------------------------------------------------------
 // 2. CSS-selector click
 // ---------------------------------------------------------------------------
@@ -186,6 +218,21 @@ test('browser_click: in-script M1 check refuses without clicking; patterns are p
   // selector 命中按钮里的 icon/span 时 label 在父级——脚本必须爬 owner。
   assert.ok(clickScript!.includes('readyClickableOwner'), 'selector click must judge the clickable owner, not the bare child')
   assert.ok(clickScript!.includes('aria-labelledby'), 'click label must resolve aria-labelledby')
+})
+
+test('browser_click_text: generic text resolving to a payment button → denied_manual_only before mouse event', async () => {
+  const controller = makeController((source) => {
+    if (source.includes('const target = "确认"')) {
+      return { ok: true, text: '确认支付', clickedDirect: false, cssX: 500, cssY: 500, width: 1000, height: 800 }
+    }
+    if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
+      return { label: '确认支付', inputLabel: '', password: false, editable: false }
+    }
+    return null
+  })
+  const output = await executeToolCall('browser_click_text', { text: '确认' }, modelContext(controller))
+  assert.equal(output.data?.errorKind, 'denied_manual_only')
+  assert.equal(controller.calls.mouse.length, 0, 'the resolved payment button must not receive a mouse event')
 })
 
 // ---------------------------------------------------------------------------
@@ -258,7 +305,7 @@ test('browser_type: opaque selector resolving to a captcha field → denied_manu
 test('browser_type_at: password field under the point without an args cue → reroute, nothing typed', async () => {
   const controller = makeController((source) => {
     if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
-      return { label: '', inputLabel: '', password: true }
+      return { label: '', inputLabel: '', password: true, editable: true }
     }
     return null
   })
@@ -268,16 +315,31 @@ test('browser_type_at: password field under the point without an args cue → re
   assert.equal(controller.calls.mouse.length, 0, 'the focusing click must not fire either')
 })
 
-test('browser_type_at: captcha field under the point → denied_manual_only', async () => {
+test('browser_type_at: captcha INPUT field under the point → denied_manual_only (editable branch, field semantics)', async () => {
   const controller = makeController((source) => {
     if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
-      return { label: '', inputLabel: '请输入验证码', password: false }
+      return { label: '', inputLabel: '请输入验证码', password: false, editable: true }
     }
     return null
   })
   const output = await executeToolCall('browser_type_at', { x: 500, y: 500, text: '8244' }, modelContext(controller))
   assert.equal(output.data?.errorKind, 'denied_manual_only')
   assert.deepEqual(controller.calls.typed, [])
+})
+
+test('browser_type_at: editable field whose CURRENT VALUE contains a trigger word is NOT blocked (P2 false-positive fix)', async () => {
+  // A normal text field already holding "提交订单草稿" must stay typable —
+  // the value must never enter the manual-only decision (only field
+  // semantics do, and those exclude value).
+  const controller = makeController((source) => {
+    if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
+      return { label: '订单备注 提交订单草稿', inputLabel: '订单备注', password: false, editable: true }
+    }
+    return null
+  })
+  const output = await executeToolCall('browser_type_at', { x: 500, y: 500, text: '加急' }, modelContext(controller))
+  assert.match(output.text, /"ok": true/)
+  assert.deepEqual(controller.calls.typed, ['加急'], 'a benign editable field must remain typable')
 })
 
 test('browser_type_at: unresolvable probe proceeds (visual channel stays usable)', async () => {
@@ -373,6 +435,117 @@ test('workflow send_keys substep funnels through the same guard', async () => {
   assert.equal(output.data?.errorKind, 'denied_pending_confirmation',
     'the workflow substep must hit the same sendKeyStroke guard')
   assert.deepEqual(controller.calls.keys, [])
+})
+
+// ---------------------------------------------------------------------------
+// 4f. send_keys — Shift-modified printable chars must still be guarded
+// ---------------------------------------------------------------------------
+
+test('browser_send_keys: Shift+letter into a focused password field → reroute (Shift is a text modifier)', async () => {
+  const controller = makeController((source) => {
+    if (source.includes('__READY_FOCUSED_FIELD_PROBE__')) {
+      return { inputLabel: '', password: true }
+    }
+    return null
+  })
+  // Shift mask bit = 8; the guard must still probe (Shift+a → 'A').
+  const output = await executeToolCall('browser_send_keys', { key: 'a', modifiers: ['shift'] }, modelContext(controller))
+  assert.equal(output.data?.errorKind, 'denied_pending_confirmation')
+  assert.deepEqual(controller.calls.keys, [], 'no Shift+char may reach a password field')
+})
+
+test('browser_send_keys: Ctrl+a (select-all shortcut) skips the probe and passes', async () => {
+  const controller = makeController(() => null)
+  const output = await executeToolCall('browser_send_keys', { key: 'a', modifiers: ['ctrl'] }, modelContext(controller))
+  assert.match(output.text, /Sent key/)
+  assert.ok(
+    !controller.calls.scripts.some((s) => s.includes('__READY_FOCUSED_FIELD_PROBE__')),
+    'command-modifier combos are shortcuts, not character entry — no probe',
+  )
+})
+
+// ---------------------------------------------------------------------------
+// 4g. browser_run_workflow — inner write substeps share the SAME guards
+//     (the workflow tool is NOT in the dispatch confirmation policy)
+// ---------------------------------------------------------------------------
+
+test('workflow click: selector hitting a payment button → denied_manual_only, not clicked', async () => {
+  const controller = makeController((source) => {
+    if (source.includes('__READY_MANUAL_ONLY_CHECK__')) {
+      return { __readyManualOnlyBlocked: true, label: '确认支付' }
+    }
+    return null
+  })
+  const output = await executeToolCall('browser_run_workflow', {
+    steps: [{ action: 'click', selector: '#pay' }],
+  }, modelContext(controller))
+  assert.equal(output.data?.errorKind, 'denied_manual_only')
+})
+
+test('workflow click_at: payment button under the point → denied_manual_only, no mouse event', async () => {
+  const controller = makeController((source) => {
+    if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
+      return { label: '立即支付', inputLabel: '', password: false, editable: false }
+    }
+    return null
+  })
+  const output = await executeToolCall('browser_run_workflow', {
+    steps: [{ action: 'click_at', x: 500, y: 500 }],
+  }, modelContext(controller))
+  assert.equal(output.data?.errorKind, 'denied_manual_only')
+  assert.equal(controller.calls.mouse.length, 0)
+})
+
+test('workflow type: selector resolving to a password field → reroute (workflow never confirms, so no cue path)', async () => {
+  const controller = makeController((source) => {
+    if (source.includes('__READY_LIVE_TARGET_GUARD__')) {
+      return { __readyPasswordFillBlocked: true }
+    }
+    return null
+  })
+  const output = await executeToolCall('browser_run_workflow', {
+    steps: [{ action: 'type', selector: '#pw', text: 'hunter2' }],
+  }, modelContext(controller))
+  assert.equal(output.data?.errorKind, 'denied_pending_confirmation')
+})
+
+test('workflow type_at: captcha input under the point → denied_manual_only', async () => {
+  const controller = makeController((source) => {
+    if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
+      return { label: '', inputLabel: '验证码', password: false, editable: true }
+    }
+    return null
+  })
+  const output = await executeToolCall('browser_run_workflow', {
+    steps: [{ action: 'type_at', x: 400, y: 400, text: '1234' }],
+  }, modelContext(controller))
+  assert.equal(output.data?.errorKind, 'denied_manual_only')
+  assert.deepEqual(controller.calls.typed, [])
+})
+
+test('workflow click_text: generic text resolving to a payment button → denied_manual_only', async () => {
+  const controller = makeController((source) => {
+    if (source.includes('readyClickSemanticsLabel') || source.includes('Element by text')) {
+      return { __readyManualOnlyBlocked: true, label: '确认支付' }
+    }
+    return null
+  })
+  const output = await executeToolCall('browser_run_workflow', {
+    steps: [{ action: 'click_text', text: '确认' }],
+  }, modelContext(controller))
+  assert.equal(output.data?.errorKind, 'denied_manual_only')
+})
+
+test('workflow click_text: text arg itself naming a manual-only action → denied before locating', async () => {
+  const controller = makeController(() => null)
+  const output = await executeToolCall('browser_run_workflow', {
+    steps: [{ action: 'click_text', text: '确认支付' }],
+  }, modelContext(controller))
+  assert.equal(output.data?.errorKind, 'denied_manual_only')
+  assert.ok(
+    !controller.calls.scripts.some((s) => s.includes('Element by text')),
+    'a manual-only text arg must be refused before the locate script runs',
+  )
 })
 
 // ---------------------------------------------------------------------------

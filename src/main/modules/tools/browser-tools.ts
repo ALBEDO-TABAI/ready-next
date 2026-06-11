@@ -371,6 +371,16 @@ function buildTargetSemanticsLibraryJs(): string {
     function readyIsPasswordField(el) {
       return el instanceof HTMLInputElement && el.type === 'password';
     }
+    function readyIsEditableField(el) {
+      if (el instanceof HTMLInputElement) {
+        const t = (el.type || 'text').toLowerCase();
+        return !['button','submit','reset','checkbox','radio','file','range','color','image','hidden'].includes(t);
+      }
+      if (el instanceof HTMLTextAreaElement) return true;
+      if (el.isContentEditable) return true;
+      const role = (el.getAttribute && (el.getAttribute('role') || '').toLowerCase()) || '';
+      return role === 'textbox' || role === 'searchbox' || role === 'combobox';
+    }
   `
 }
 
@@ -407,12 +417,16 @@ function buildClickPointLabelProbeJs(cssX: number, cssY: number): string {
     const __READY_CLICK_POINT_LABEL_PROBE__ = true;
     ${buildTargetSemanticsLibraryJs()}
     const start = document.elementFromPoint(${JSON.stringify(Math.round(cssX))}, ${JSON.stringify(Math.round(cssY))});
-    if (!start) return { label: '', inputLabel: '', password: false };
+    if (!start) return { label: '', inputLabel: '', password: false, editable: false };
     const owner = readyClickableOwner(start);
     return {
       label: readyClickSemanticsLabel(start),
       inputLabel: readyInputSemanticsLabel(owner),
       password: readyIsPasswordField(owner),
+      // editable → the click only FOCUSES a field (judge by field semantics,
+      // which exclude the current value); non-editable → the click is an
+      // action (judge by the click/caption label, value included).
+      editable: readyIsEditableField(owner),
     };
   })()`
 }
@@ -1571,6 +1585,173 @@ async function dispatchClickAt(
   return point
 }
 
+// EP1-I3 live-target net — ONE guarded entry per primitive action, shared by
+// the top-level tools AND the workflow substeps (browser_run_workflow is not
+// in the dispatch confirmation policy, so its inner click/type carry no
+// semantics the gate can see — they MUST re-check at the execution layer).
+
+/** Guarded CSS-selector click: judges the clickable owner's label (the click
+ * bubbles), refuses M1 manual-only targets without clicking. */
+async function runGuardedSelectorClick(
+  controller: BrowserController,
+  tabId: string | null,
+  selector: string,
+): Promise<string> {
+  const clickJs = `
+    (function() {
+      const __READY_MANUAL_ONLY_CHECK__ = true;
+      ${buildTargetSemanticsLibraryJs()}
+      const el = document.querySelector(${JSON.stringify(selector)});
+      if (!el) return ${JSON.stringify(`Element not found: ${selector}`)};
+      const label = readyClickSemanticsLabel(el);
+      if (label && READY_MANUAL_ONLY_PATTERNS.some((p) => p.test(label))) {
+        return { __readyManualOnlyBlocked: true, label: label.slice(0, 80) };
+      }
+      el.click();
+      return 'Clicked: ' + (el.tagName || '') + (el.textContent ? ' "' + el.textContent.slice(0, 50) + '"' : '');
+    })()
+  `
+  const result = await controller.executeJS(tabId, clickJs)
+  throwIfLiveTargetGuardBlocked(result, { selector })
+  return String(result)
+}
+
+/** Guarded coordinate click: probes the target under the point. Clicking a
+ * non-editable target (button/link) is an action → M1 manual-only refused;
+ * clicking an editable field just focuses it → allowed (value never judged). */
+async function runGuardedCoordinateClick(
+  controller: BrowserController,
+  tabId: string | null,
+  x: number,
+  y: number,
+  abortSignal?: AbortSignal,
+): Promise<{ nx: number; ny: number; cssX: number; cssY: number; width: number; height: number }> {
+  const probePoint = await resolveCssPoint(controller, tabId, x, y).catch(() => null)
+  const probe = probePoint
+    ? await controller.executeJS(tabId, buildClickPointLabelProbeJs(probePoint.cssX, probePoint.cssY)).catch(() => null)
+    : null
+  if (probe && typeof probe === 'object') {
+    const p = probe as { label?: unknown; editable?: unknown }
+    if (p.editable !== true) {
+      const manualHit = matchManualOnlyBrowserTarget(String(p.label || ''))
+      if (manualHit) {
+        throw new ToolDomainError(
+          'denied_manual_only',
+          `坐标点击目标「${String(p.label || '').slice(0, 80)}」命中 M1 规则（${manualHit.reason}）。请引导用户亲自完成这一步。`,
+          { x, y, ruleId: manualHit.ruleId },
+        )
+      }
+    }
+  }
+  const point = await dispatchClickAt(controller, tabId, x, y)
+  await settleAfterAction(controller, tabId, abortSignal)
+  return point
+}
+
+/** Guarded CSS-selector type: in-page field-semantics guard (no value),
+ * refuses M1 fields and unconfirmed password fields. */
+async function runGuardedSelectorType(
+  controller: BrowserController,
+  tabId: string | null,
+  selector: string,
+  text: string,
+  opts: { clearFirst: boolean; allowPasswordFill: boolean; submit?: boolean },
+): Promise<string> {
+  const typeJs = `
+    (function() {
+      ${buildInputGuardSnippetJs(opts.allowPasswordFill)}
+      const el = document.querySelector(${JSON.stringify(selector)});
+      if (!el) return ${JSON.stringify(`Element not found: ${selector}`)};
+      const guard = readyInputGuard(el);
+      if (guard) return guard;
+      el.focus();
+      if ('value' in el) {
+        ${opts.clearFirst ? 'el.value = "";' : ''}
+        el.value = ${JSON.stringify(text)};
+      } else {
+        ${opts.clearFirst ? 'el.textContent = "";' : ''}
+        el.textContent = ${JSON.stringify(text)};
+      }
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+      ${opts.submit ? `
+        el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true }));
+        const form = el.closest && el.closest('form');
+        if (form) form.requestSubmit && form.requestSubmit();
+      ` : ''}
+      return 'Typed "${text.slice(0, 50).replace(/"/g, '\\"')}" into ' + el.tagName + (el.name ? '[name=' + el.name + ']' : '');
+    })()
+  `
+  const result = await controller.executeJS(tabId, typeJs)
+  throwIfLiveTargetGuardBlocked(result, { selector })
+  return String(result)
+}
+
+/** Guarded coordinate type: probes the field under the point. Non-editable
+ * target → the focusing click is itself an action (M1 by click label);
+ * editable field → judge by field semantics (no value) + password. */
+async function runGuardedCoordinateType(
+  controller: BrowserController,
+  tabId: string | null,
+  x: number,
+  y: number,
+  text: string,
+  opts: { clearBefore: boolean; pressEnter: boolean; useShiftEnter: boolean; allowPasswordFill: boolean },
+  abortSignal?: AbortSignal,
+): Promise<{ nx: number; ny: number; cssX: number; cssY: number; width: number; height: number }> {
+  const probePoint = await resolveCssPoint(controller, tabId, x, y).catch(() => null)
+  const probe = probePoint
+    ? await controller.executeJS(tabId, buildClickPointLabelProbeJs(probePoint.cssX, probePoint.cssY)).catch(() => null)
+    : null
+  if (probe && typeof probe === 'object') {
+    const p = probe as { label?: unknown; inputLabel?: unknown; password?: unknown; editable?: unknown }
+    // A password field is editable by definition; treat password===true as
+    // editable even if the probe failed to set the flag.
+    const editable = p.editable === true || p.password === true
+    if (!editable) {
+      // The focusing click lands on a button/link → the click is the action.
+      const clickLabel = String(p.label || '')
+      const clickHit = matchManualOnlyBrowserTarget(clickLabel)
+      if (clickHit) {
+        throw new ToolDomainError(
+          'denied_manual_only',
+          `坐标输入会先点击目标「${clickLabel.slice(0, 80)}」，命中 M1 规则（${clickHit.reason}）。请引导用户亲自完成这一步。`,
+          { x, y, ruleId: clickHit.ruleId },
+        )
+      }
+    } else {
+      // Editable field: judge by field semantics (NOT its current value — a
+      // draft containing「提交订单」must not false-trip), then password.
+      const inputLabel = String(p.inputLabel || '')
+      const fieldHit = matchManualOnlyBrowserTarget(inputLabel)
+      if (fieldHit) {
+        throw new ToolDomainError(
+          'denied_manual_only',
+          `坐标输入目标「${inputLabel.slice(0, 80)}」命中 M1 规则（${fieldHit.reason}）。请引导用户亲自完成这一步。`,
+          { x, y, ruleId: fieldHit.ruleId },
+        )
+      }
+      if (p.password === true && !opts.allowPasswordFill) {
+        throw new ToolDomainError(
+          'denied_pending_confirmation',
+          '坐标输入目标是密码输入框。请在调用参数中说明目标（如「登录密码输入框」），经用户确认后执行。',
+          { x, y, ruleId: 'm3-login-existing-account' },
+        )
+      }
+    }
+  }
+  const point = await dispatchClickAt(controller, tabId, x, y)
+  if (opts.clearBefore) {
+    await clearFocusedInput(controller, tabId)
+  }
+  await controller.typeTextDirectly(tabId, text, { useShiftEnterForNewline: opts.useShiftEnter })
+  if (opts.pressEnter) {
+    await sendKeyStroke(controller, tabId, 'Enter')
+  }
+  await settleAfterAction(controller, tabId, abortSignal)
+  return point
+}
+
 async function sendKeyStroke(
   controller: BrowserController,
   tabId: string | null,
@@ -1586,13 +1767,16 @@ async function sendKeyStroke(
   // EP1-I3 live-target net — send-keys is a keyboard bypass: a printable
   // keystroke lands in whatever field already has FOCUS, so character-by-
   // character typing could feed a captcha/password field no argument ever
-  // named. Guard ONLY text-producing keys without modifiers (`text` set and
-  // not Enter): navigation/shortcut keys (Enter/Tab/Escape/ctrl+…) pass —
-  // pressing Enter after the USER typed their credential is the user's own
-  // action completing. Both the browser_send_keys tool and the workflow
-  // send_keys substep funnel through here — single enforcement entry.
-  // Best-effort probe: empty/failed probe proceeds (visual channel).
-  if (keyLabel.length === 1 && mask === 0) {
+  // named. Guard text-producing keys: a single char with NO command modifier
+  // (Alt/Ctrl/Meta = bits 1|2|4) inserts a character — Shift (bit 8) is a
+  // text modifier (Shift+a → 'A') so it must STILL be guarded. Command-key
+  // combos (Ctrl+c / Meta+v / etc.) are shortcuts, and Enter/Tab/Escape are
+  // navigation — those pass (pressing Enter after the USER typed their
+  // credential is the user's own action completing). Both the
+  // browser_send_keys tool and the workflow send_keys substep funnel through
+  // here. Best-effort probe: empty/failed probe proceeds (visual channel).
+  const COMMAND_MODIFIER_MASK = 0b0111 // Alt | Control | Meta
+  if (keyLabel.length === 1 && (mask & COMMAND_MODIFIER_MASK) === 0) {
     const focusedProbe = await controller.executeJS(tabId, buildFocusedFieldProbeJs()).catch(() => null)
     if (focusedProbe && typeof focusedProbe === 'object') {
       const probed = focusedProbe as { inputLabel?: unknown; password?: unknown }
@@ -2458,6 +2642,7 @@ async function extractSearchResults(
 function buildClickByTextJs(text: string, exact: boolean): string {
   return `
     (() => {
+      ${buildTargetSemanticsLibraryJs()}
       const target = ${JSON.stringify(text)}
       const exact = ${exact ? 'true' : 'false'}
       const normalize = (s) => (s || '').replace(/\\s+/g, ' ').trim()
@@ -2515,6 +2700,12 @@ function buildClickByTextJs(text: string, exact: boolean): string {
         }
       }
       if (!matched) return 'Element by text not found: ' + target
+      // EP1-I3 live-target net — the located element's clickable owner may be
+      // a payment/captcha/改密 control even when the search text was generic.
+      const __readyOwnerLabel = readyClickSemanticsLabel(matched)
+      if (__readyOwnerLabel && READY_MANUAL_ONLY_PATTERNS.some((p) => p.test(__readyOwnerLabel))) {
+        return { __readyManualOnlyBlocked: true, label: __readyOwnerLabel.slice(0, 80) }
+      }
       matched.scrollIntoView({ block: 'center', behavior: 'instant' })
       matched.dispatchEvent(new MouseEvent('mousemove', { bubbles: true }))
       matched.click()
@@ -2523,13 +2714,12 @@ function buildClickByTextJs(text: string, exact: boolean): string {
   `
 }
 
-function buildLocateTextTargetJs(text: string, exact: boolean, hrefContains = '', directHrefClick = false): string {
+function buildLocateTextTargetJs(text: string, exact: boolean, hrefContains = ''): string {
   return `
     (() => {
       const target = ${JSON.stringify(text)}
       const exact = ${exact ? 'true' : 'false'}
       const hrefContains = ${JSON.stringify(hrefContains)}
-      const directHrefClick = ${directHrefClick ? 'true' : 'false'}
       const normalize = (s) => (s || '').replace(/\\s+/g, ' ').trim()
       const queue = [document]
       const visited = new Set()
@@ -2622,10 +2812,6 @@ function buildLocateTextTargetJs(text: string, exact: boolean, hrefContains = ''
       if (hrefContains) {
         if (matched instanceof HTMLAnchorElement) {
           matched.setAttribute('target', '_self')
-          if (directHrefClick) {
-            matched.click()
-            clickedDirect = true
-          }
         }
       }
       const href = matched instanceof HTMLAnchorElement && matched.href ? matched.href : ''
@@ -2633,7 +2819,7 @@ function buildLocateTextTargetJs(text: string, exact: boolean, hrefContains = ''
         ok: true,
         text: normalize(matched.textContent || matched.getAttribute('aria-label') || matched.getAttribute('title') || matched.tagName),
         href,
-        clickedDirect,
+        clickedDirect: false,
         cssX: x,
         cssY: y,
         width: window.innerWidth || 1,
@@ -2918,30 +3104,37 @@ async function runWorkflowStep(
   if (action === 'click') {
     const selector = String(step.selector || '').trim()
     if (!selector) return 'Error: workflow click missing selector'
-    const clickJs = `
-      (() => {
-        const el = document.querySelector(${JSON.stringify(selector)})
-        if (!el) return 'Element not found'
-        ;(el).click()
-        return 'Clicked ' + (el.tagName || 'element')
-      })()
-    `
-    return String(await controller.executeJS(tabId, clickJs))
+    // EP1-I3 live-target net — browser_run_workflow is not in the dispatch
+    // confirmation policy, so the inner click is invisible to the gate; it
+    // must re-check at the execution layer via the shared guarded entry.
+    return await runGuardedSelectorClick(controller, tabId, selector)
   }
 
   if (action === 'click_text') {
     const text = String(step.text || '').trim()
     if (!text) return 'Error: workflow click_text missing text'
     const exact = step.exact === true
-    return String(await controller.executeJS(tabId, buildClickByTextJs(text, exact)))
+    // The text arg itself is the semantic the model chose to click — guard
+    // it directly, and the located-element owner label is re-checked inside
+    // buildClickByTextJs before the click fires.
+    const textHit = matchManualOnlyBrowserTarget(text)
+    if (textHit) {
+      throw new ToolDomainError(
+        'denied_manual_only',
+        `workflow click_text 目标文本「${text.slice(0, 80)}」命中 M1 规则（${textHit.reason}）。请引导用户亲自完成这一步。`,
+        { text, ruleId: textHit.ruleId },
+      )
+    }
+    const located = await controller.executeJS(tabId, buildClickByTextJs(text, exact))
+    throwIfLiveTargetGuardBlocked(located, { text, via: 'workflow_click_text' })
+    return String(located)
   }
 
   if (action === 'click_at') {
     const x = Number(step.x)
     const y = Number(step.y)
     if (!Number.isFinite(x) || !Number.isFinite(y)) return 'Error: workflow click_at requires numeric x and y'
-    const point = await dispatchClickAt(controller, tabId, x, y)
-    await settleAfterAction(controller, tabId, signal)
+    const point = await runGuardedCoordinateClick(controller, tabId, x, y, signal)
     return `Clicked at normalized(${point.nx},${point.ny}) css(${point.cssX},${point.cssY})`
   }
 
@@ -2951,29 +3144,14 @@ async function runWorkflowStep(
     if (!selector) return 'Error: workflow type missing selector'
     const clearFirst = step.clear_first !== false
     const submit = step.submit === true
-    const typeJs = `
-      (() => {
-        const el = document.querySelector(${JSON.stringify(selector)})
-        if (!el) return 'Element not found'
-        el.focus()
-        ${clearFirst ? 'if ("value" in el) el.value = ""' : ''}
-        if ("value" in el) {
-          el.value = ${JSON.stringify(text)}
-        } else {
-          el.textContent = ${JSON.stringify(text)}
-        }
-        el.dispatchEvent(new Event('input', { bubbles: true }))
-        el.dispatchEvent(new Event('change', { bubbles: true }))
-        ${submit ? `
-          const ev = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', bubbles: true })
-          el.dispatchEvent(ev)
-          const form = el.closest('form')
-          if (form) form.requestSubmit?.()
-        ` : ''}
-        return 'Typed'
-      })()
-    `
-    return String(await controller.executeJS(tabId, typeJs))
+    // Workflow steps are model-authored and never pass through the dispatch
+    // confirmation→release path, so there is no confirmed-cue: a password
+    // field always reroutes (allowPasswordFill: false).
+    return await runGuardedSelectorType(controller, tabId, selector, text, {
+      clearFirst,
+      allowPasswordFill: false,
+      submit,
+    })
   }
 
   if (action === 'type_at') {
@@ -2985,15 +3163,12 @@ async function runWorkflowStep(
     const clearBefore = step.clear_before_typing !== false
     const pressEnter = step.press_enter !== false
     const useShiftEnter = step.use_shift_enter_for_newline === true
-    const point = await dispatchClickAt(controller, tabId, x, y)
-    if (clearBefore) {
-      await clearFocusedInput(controller, tabId)
-    }
-    await controller.typeTextDirectly(tabId, text, { useShiftEnterForNewline: useShiftEnter })
-    if (pressEnter) {
-      await sendKeyStroke(controller, tabId, 'Enter')
-    }
-    await settleAfterAction(controller, tabId, signal)
+    const point = await runGuardedCoordinateType(controller, tabId, x, y, text, {
+      clearBefore,
+      pressEnter,
+      useShiftEnter,
+      allowPasswordFill: false,
+    }, signal)
     return `Typed at normalized(${point.nx},${point.ny}) css(${point.cssX},${point.cssY})`
   }
 
@@ -4459,8 +4634,15 @@ export async function executeBrowserTool(
         // element label against the M1 manual-only rules here, where the
         // live probe just resolved it. M1 is never confirmable → throw the
         // structured domain error (browser catch rethrows ToolDomainError).
-        const liveLabel = [targetRecord?.name, targetRecord?.value, targetRecord?.role]
-          .filter(Boolean).join(' ')
+        // For a fill/choose into an editable target the probe's `value` is the
+        // field's CURRENT CONTENT — a draft holding「提交订单」must not
+        // false-trip, so judge by name/role only; for click/expand/hover the
+        // `value` is a control caption (input[type=submit]) and is included.
+        const writesIntoField = action === 'fill' || action === 'choose'
+        const liveLabel = (writesIntoField
+          ? [targetRecord?.name, targetRecord?.role]
+          : [targetRecord?.name, targetRecord?.value, targetRecord?.role]
+        ).filter(Boolean).join(' ')
         const manualOnlyHit = matchManualOnlyBrowserTarget(liveLabel)
         if (manualOnlyHit) {
           throw new ToolDomainError(
@@ -4517,30 +4699,10 @@ export async function executeBrowserTool(
         if (!selector) return 'Error: selector is required'
         let tabId = (args.tab_id as string) || null
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
-        // EP1-I3 live-target net — a CSS selector legally carries no
-        // semantics, so the dispatch gate could not classify this click.
-        // The click script checks the REAL element label against the M1
-        // manual-only patterns (generated from the policy module — single
-        // source) and refuses without clicking on a hit.
-        const clickJs = `
-          (function() {
-            const __READY_MANUAL_ONLY_CHECK__ = true;
-            ${buildTargetSemanticsLibraryJs()}
-            const el = document.querySelector(${JSON.stringify(selector)});
-            if (!el) return 'Element not found: ${selector.replace(/'/g, "\\'")}';
-            // The click BUBBLES — judge the clickable owner, not the bare
-            // child the selector happened to hit (icon/span inside a button).
-            const label = readyClickSemanticsLabel(el);
-            if (label && READY_MANUAL_ONLY_PATTERNS.some((p) => p.test(label))) {
-              return { __readyManualOnlyBlocked: true, label: label.slice(0, 80) };
-            }
-            el.click();
-            return 'Clicked: ' + (el.tagName || '') + (el.textContent ? ' "' + el.textContent.slice(0, 50) + '"' : '');
-          })()
-        `
-        const result = await controller.executeJS(tabId, clickJs)
-        throwIfLiveTargetGuardBlocked(result, { selector })
-        return String(result)
+        // EP1-I3 live-target net — a CSS selector carries no semantics the
+        // dispatch gate could classify; the shared guarded entry judges the
+        // real clickable owner and refuses M1 targets without clicking.
+        return await runGuardedSelectorClick(controller, tabId, selector)
       }
 
       case 'browser_click_text': {
@@ -4550,7 +4712,7 @@ export async function executeBrowserTool(
         const hrefContains = String(args.href_contains || '').trim()
         let tabId = (args.tab_id as string) || null
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
-        const located = await controller.executeJS(tabId, buildLocateTextTargetJs(text, exact, hrefContains, false))
+        const located = await controller.executeJS(tabId, buildLocateTextTargetJs(text, exact, hrefContains))
         if (!located || typeof located !== 'object') return String(located)
         const result = located as { ok?: boolean; error?: string; text?: string; href?: string; clickedDirect?: boolean; cssX?: number; cssY?: number; width?: number; height?: number }
         if (result.ok !== true) return result.error || `Element by text not found: ${text}`
@@ -4558,14 +4720,7 @@ export async function executeBrowserTool(
         const height = Number(result.height || 1) || 1
         const x = Math.round((Number(result.cssX || 0) / width) * 1000)
         const y = Math.round((Number(result.cssY || 0) / height) * 1000)
-        const point = result.clickedDirect === true
-          ? {
-              nx: Math.max(0, Math.min(999, x)),
-              ny: Math.max(0, Math.min(999, y)),
-              cssX: Number(result.cssX || 0),
-              cssY: Number(result.cssY || 0),
-            }
-          : await dispatchClickAt(controller, tabId, x, y)
+        const point = await runGuardedCoordinateClick(controller, tabId, x, y, abortSignal)
         await settleAfterAction(controller, tabId, abortSignal)
         return JSON.stringify({
           ok: true,
@@ -4585,32 +4740,14 @@ export async function executeBrowserTool(
         let tabId = (args.tab_id as string) || null
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         // EP1-I3 live-target net — an opaque selector can resolve to a
-        // password or captcha field without any cue in the args (the
-        // dispatch gate could not classify it). The in-page guard checks the
-        // REAL field semantics (placeholder/aria/name/label): M1 hits
-        // (验证码/改密/支付) refuse outright; unconfirmed password fills
-        // refuse with reroute guidance — a re-issued call naming the
-        // password field goes through the confirm→release path and passes
-        // here (cue present in args).
-        const allowPasswordFill = argsCarryPasswordCue(JSON.stringify(args))
-        const typeJs = `
-          (function() {
-            ${buildInputGuardSnippetJs(allowPasswordFill)}
-            const el = document.querySelector(${JSON.stringify(selector)});
-            if (!el) return 'Element not found: ${selector.replace(/'/g, "\\'")}';
-            const guard = readyInputGuard(el);
-            if (guard) return guard;
-            el.focus();
-            ${clearFirst ? 'el.value = "";' : ''}
-            el.value = ${JSON.stringify(text)};
-            el.dispatchEvent(new Event('input', { bubbles: true }));
-            el.dispatchEvent(new Event('change', { bubbles: true }));
-            return 'Typed "${text.slice(0, 50)}" into ' + el.tagName + (el.name ? '[name=' + el.name + ']' : '');
-          })()
-        `
-        const result = await controller.executeJS(tabId, typeJs)
-        throwIfLiveTargetGuardBlocked(result, { selector })
-        return String(result)
+        // password or captcha field with no cue in the args. The shared
+        // guarded entry checks the REAL field semantics (no value): M1 hits
+        // refuse outright; unconfirmed password fills reroute — a re-issued
+        // call naming the password field carries the cue and passes.
+        return await runGuardedSelectorType(controller, tabId, selector, text, {
+          clearFirst,
+          allowPasswordFill: argsCarryPasswordCue(JSON.stringify(args)),
+        })
       }
 
       case 'browser_type_smart': {
@@ -5565,27 +5702,11 @@ export async function executeBrowserTool(
         if (!Number.isFinite(x) || !Number.isFinite(y)) return 'Error: x and y are required numbers'
         let tabId = (args.tab_id as string) || null
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
-        // EP1-I3 live-target net — best-effort: probe the element under the
-        // click point and refuse M1 manual-only targets. The visual channel
-        // must keep working when no label is resolvable (high-control sites
-        // force coordinate clicks), so a null/failed probe proceeds.
-        const probePoint = await resolveCssPoint(controller, tabId, x, y).catch(() => null)
-        const pointLabel = probePoint
-          ? await controller.executeJS(tabId, buildClickPointLabelProbeJs(probePoint.cssX, probePoint.cssY)).catch(() => null)
-          : null
-        if (pointLabel && typeof pointLabel === 'object') {
-          const label = String((pointLabel as { label?: unknown }).label || '')
-          const manualHit = matchManualOnlyBrowserTarget(label)
-          if (manualHit) {
-            throw new ToolDomainError(
-              'denied_manual_only',
-              `坐标点击目标「${label.slice(0, 80)}」命中 M1 规则（${manualHit.reason}）。请引导用户亲自完成这一步。`,
-              { x, y, ruleId: manualHit.ruleId },
-            )
-          }
-        }
-        const point = await dispatchClickAt(controller, tabId, x, y)
-        await settleAfterAction(controller, tabId, abortSignal)
+        // EP1-I3 live-target net — shared guarded entry probes the target
+        // under the point; clicking a non-editable M1 target is refused
+        // before any mouse event, focusing an editable field is allowed,
+        // and an unresolvable probe proceeds (visual channel stays usable).
+        const point = await runGuardedCoordinateClick(controller, tabId, x, y, abortSignal)
         return JSON.stringify({
           ok: true,
           normalized: { x: point.nx, y: point.ny },
@@ -5605,54 +5726,15 @@ export async function executeBrowserTool(
         const pressEnter = args.press_enter !== false
         const clearBeforeTyping = args.clear_before_typing !== false
         const useShiftEnter = args.use_shift_enter_for_newline === true
-        // EP1-I3 live-target net — coordinates carry no semantics, so probe
-        // the field under the point BEFORE clicking/typing: captcha-like
-        // fields refuse outright (M1), unconfirmed password fields reroute
-        // to confirmation. Empty/failed probes proceed (visual channel).
-        const typeProbePoint = await resolveCssPoint(controller, tabId, x, y).catch(() => null)
-        const typeProbe = typeProbePoint
-          ? await controller.executeJS(tabId, buildClickPointLabelProbeJs(typeProbePoint.cssX, typeProbePoint.cssY)).catch(() => null)
-          : null
-        if (typeProbe && typeof typeProbe === 'object') {
-          const probed = typeProbe as { label?: unknown; inputLabel?: unknown; password?: unknown }
-          // The focusing CLICK fires before any typing — judge the clickable
-          // target's own label first（点到「确认支付/提交订单」按钮时，
-          // 点击本身就是不可代做的动作）。
-          const clickLabel = String(probed.label || '')
-          const clickManualHit = matchManualOnlyBrowserTarget(clickLabel)
-          if (clickManualHit) {
-            throw new ToolDomainError(
-              'denied_manual_only',
-              `坐标输入会先点击目标「${clickLabel.slice(0, 80)}」，命中 M1 规则（${clickManualHit.reason}）。请引导用户亲自完成这一步。`,
-              { x, y, ruleId: clickManualHit.ruleId },
-            )
-          }
-          const inputLabel = String(probed.inputLabel || '')
-          const manualHit = matchManualOnlyBrowserTarget(inputLabel)
-          if (manualHit) {
-            throw new ToolDomainError(
-              'denied_manual_only',
-              `坐标输入目标「${inputLabel.slice(0, 80)}」命中 M1 规则（${manualHit.reason}）。请引导用户亲自完成这一步。`,
-              { x, y, ruleId: manualHit.ruleId },
-            )
-          }
-          if (probed.password === true && !argsCarryPasswordCue(JSON.stringify(args))) {
-            throw new ToolDomainError(
-              'denied_pending_confirmation',
-              '坐标输入目标是密码输入框。请在调用参数中说明目标（如「登录密码输入框」），经用户确认后执行。',
-              { x, y, ruleId: 'm3-login-existing-account' },
-            )
-          }
-        }
-        const point = await dispatchClickAt(controller, tabId, x, y)
-        if (clearBeforeTyping) {
-          await clearFocusedInput(controller, tabId)
-        }
-        await controller.typeTextDirectly(tabId, text, { useShiftEnterForNewline: useShiftEnter })
-        if (pressEnter) {
-          await sendKeyStroke(controller, tabId, 'Enter')
-        }
-        await settleAfterAction(controller, tabId, abortSignal)
+        // EP1-I3 live-target net — shared guarded entry: non-editable M1
+        // target → the focusing click is itself refused; editable field →
+        // judged by field semantics (NOT its current value) + password cue.
+        const point = await runGuardedCoordinateType(controller, tabId, x, y, text, {
+          clearBefore: clearBeforeTyping,
+          pressEnter,
+          useShiftEnter,
+          allowPasswordFill: argsCarryPasswordCue(JSON.stringify(args)),
+        }, abortSignal)
         return JSON.stringify({
           ok: true,
           normalized: { x: point.nx, y: point.ny },
