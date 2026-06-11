@@ -9,6 +9,7 @@ revision_history:
   - v4 (2026-06-12): 吸收 Codex 三轮复审 3 点。P1：①Q1 追加 054 会打红阶段一迁移测试——`migration-pending-confirmations.test.ts` 硬断言"053 必须最新"（阶段一时点 append-only 检查），Q1 同单改写该断言并把 verify:evolution-p1 加入 Q1 验证防阶段一回归；②`check_in_pending` 不只是 wire enum——HEAD 该枚举在五处独立维护（main union run-contracts.ts / shared wire task-projection.ts / 同步白名单 task-projection-sync.ts 字面量检查会静默洗掉未知值 / renderer electron.d.ts 手写副本 / task-status-vocabulary.ts UI 标签 default 兜底），Q1 五面同单扩展 + 全链回读测试（写入→sync→读回仍为 check_in_pending，UI 标签"待裁决"非 default）。P2：③终态路径不写死数量——HEAD `RunOutcome.kind` 实为六类（done/checkpoint/error/cancelled/preempted/interrupted），Q4a 与阶段验收表改为"覆盖每个 RunOutcome.kind、按枚举遍历"，防 interrupted 漏网。另：阶段一 live-target 收尾 6fd24643（selector 点击 editable 平价 + 573b058d 落下的测试 mock 修复）已合入，B1 基线同步。
   - v5 (2026-06-12): 吸收 Codex 四轮复审 1 点（P1）：check_in_pending 扩展面从"五面"补全为全链路覆盖——新增①运行态输入 union（`contracts/types.ts` 的 ScopeRunSummary/ScopeRunEventPayload 两份 inline union，经 run-projection 传递、sync 的 resolveInteractionState 消费；漏掉则运行态通道写不进该值，实现者被迫绕道）、②ChatPanel badge 标签 `interactionStateToBadgeLabel`（原只列 user label，badge 会落 default"进行中"）、③共享 awaiting-user 判断 `shared/task-interaction-state.ts` 的 `isAwaitingUserInteractionState`（待裁决=等待用户，必须返回 true）。Q1 测试改为全链回读四断言（projection 读回/两种 UI 标签/awaiting-user）；Q5 注明经正常运行态通道写入不绕道。
   - v6 (2026-06-12): 吸收 Codex 五轮复审 1 点（P1，同族静默丢失）：Q1 全链路面补第⑧处——`contracts/continuation-state.ts` 的 `normalizeInteractionState` 白名单未知值回退 `'running'`，且 `buildContinuationStateFromProjection` 把 projection 的 interactionState 喂进该函数，待裁决任务一进续跑态即被洗回 running；测试加第五断言（buildContinuationStateFromProjection 携 check_in_pending 的 projection → interactionState 不变）。
+  - v7 (2026-06-12): 施工期修订（波次 2 Codex 审查 P1 共识）：I2 negation 持久化语义写实——权威真值=会话谱系存储（negation-state.ts，scope 复合谱系键，并发隔离测试覆盖），TurnFrame.negations slice 为 frame-scoped 循环只读投影（negationUpdates 声明式 patch 通道）；live SDK 路径（AgentSdkRuntime）无每谱系 TurnFrame 实例，经 context 链消费存储。
 owner: 白
 author: Claude (Fable 5)
 executor: 待定（Claude / Codex 逐单施工）
@@ -193,8 +194,8 @@ related:
 - **规模**：~180 行。
 
 ### EP2-I2 否定语义三层加深
-- **改动文件**：`tool-executor.ts` dispatch 层否定拦截（命中否定类别 → `denied_by_user_negation`，信封 kind 已预留）、negations 写入 TurnFrame 持久化（生命周期=会话谱系，显式解除信号）、类别从 collection 扩展到与 05 §3 动作清单对齐、新增 `src/__tests__/negation-intent.test.ts`
-- **实施要点**：暴露压制层（既有）+ dispatch 拦截层双保险；TurnFrame 写经声明的 frame patch 通道（M 合同）；解除信号由分类器输出，不做正则白名单。
+- **改动文件**：`tool-executor.ts` dispatch 层否定拦截（命中否定类别 → `denied_by_user_negation`，信封 kind 已预留）、**negation 持久化双面**（生命周期=会话谱系，显式解除信号；权威真值=`safety/negation-state.ts` 会话谱系存储，键为 scope 复合谱系键——live SDK 路径无每谱系 TurnFrame 实例，经 context 链消费该存储；`TurnFrame.negations` slice 为 frame-scoped 循环的只读投影，经声明式 `negationUpdates` patch 通道写入）、类别从 collection 扩展到与 05 §3 动作清单对齐、新增 `src/__tests__/negation-intent.test.ts`
+- **实施要点**：暴露压制层（既有）+ dispatch 拦截层双保险；TurnFrame slice 写仅经声明的 frame patch 通道（M 合同），不充当 live 路径真值；并发隔离以谱系键测试覆盖（交错 record/release 零互染）；解除信号由分类器输出，不做正则白名单。
 - **测试（先红）**："不要采集，只看看"双层均拦；解除信号生效；类别扩展矩阵；与确认闸门顺序（否定拦截在闸门之前——拒绝权优先于确认权）。
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/negation-intent.test.ts && npm run typecheck`
 - **规模**：~260 行。
