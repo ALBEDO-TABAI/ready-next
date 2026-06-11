@@ -1,0 +1,166 @@
+/**
+ * Tool result envelope (EP1-T4-1). Pure mapping layer — NOT wired into
+ * dispatch here (T4-2 does that additively). Translates the existing
+ * open-ended `errorKind` (tool-errors.ts) into an action-oriented `kind`
+ * designed around "what should happen next" (07 §3.1), so the model reacts
+ * correctly: re-read schema (arg_error), re-auth (auth_expired), stop retrying
+ * (rate_limited / denied_*), etc.
+ */
+
+export type ToolEnvelopeKind =
+  | 'ok'
+  | 'arg_error'
+  | 'auth_expired'
+  | 'rate_limited'
+  | 'not_found'
+  | 'upstream_error'
+  | 'network_error'
+  | 'denied_by_policy'
+  | 'denied_by_user_negation'
+  | 'internal_error'
+
+export interface ToolResultEnvelope {
+  ok: boolean
+  kind: ToolEnvelopeKind
+  data?: unknown
+  error?: {
+    message: string
+    hint?: string
+    retryAfterSec?: number
+  }
+  meta?: {
+    elapsedMs?: number
+    cacheState?: string
+  }
+}
+
+/**
+ * Explicit map of every `errorKind` literal present in HEAD (harvested from
+ * tool-errors.ts + tools/ + agent-control/). New kinds fall through to the
+ * pattern matcher, then to `internal_error` with `mapped: false` so the
+ * caller can warn instead of silently mis-bucketing.
+ */
+const EXPLICIT_KIND_MAP: Record<string, ToolEnvelopeKind> = {
+  // arg_error — caller should fix arguments / re-read schema
+  input_validation: 'arg_error',
+  command_empty: 'arg_error',
+  command_parse_failed: 'arg_error',
+  config_patch_invalid_pointer: 'arg_error',
+  no_payload: 'arg_error',
+  detached_task_hint_required: 'arg_error',
+  target_document_required: 'arg_error',
+  target_document_preserved_content_missing: 'arg_error',
+  scope_missing: 'arg_error',
+  // auth_expired — caller should re-authenticate / guide user to settings
+  clip_login_required: 'auth_expired',
+  decrypt_unavailable: 'auth_expired',
+  // rate_limited — backpressure; stop hammering, retry later
+  queued_global_concurrency: 'rate_limited',
+  // not_found — target does not exist
+  not_found: 'not_found',
+  no_record: 'not_found',
+  widget_not_found: 'not_found',
+  detached_task_not_found: 'not_found',
+  mcp_tool_unregistered: 'not_found',
+  tool_not_registered: 'not_found',
+  no_driver_registered: 'not_found',
+  detached_task_skill_not_loaded: 'not_found',
+  detached_task_skill_action_unknown: 'not_found',
+  // upstream_error — a dependency/service is down or failed
+  host_unavailable: 'upstream_error',
+  mcp_client_missing: 'upstream_error',
+  mcp_tool_failed: 'upstream_error',
+  clip_fetch_failed: 'upstream_error',
+  web_search_failed: 'upstream_error',
+  present_file_failed: 'upstream_error',
+  target_document_open_unavailable: 'upstream_error',
+  target_document_save_unavailable: 'upstream_error',
+  target_document_open_failed: 'upstream_error',
+  target_document_save_failed: 'upstream_error',
+  detached_task_runtime_unavailable: 'upstream_error',
+  driver_init_failed: 'upstream_error',
+  driver_observe_failed: 'upstream_error',
+  driver_plan_failed: 'upstream_error',
+  launch_stuck: 'upstream_error',
+  // network_error — transport-level failure
+  timeout: 'network_error',
+  // denied_by_policy — authorization / safety gate refused
+  authorization_denied: 'denied_by_policy',
+  tool_restricted_this_turn: 'denied_by_policy',
+  detached_task_forbidden: 'denied_by_policy',
+  blocked_config: 'denied_by_policy',
+  blocked_external: 'denied_by_policy',
+  command_high_risk_blocked: 'denied_by_policy',
+  nested_child_run: 'denied_by_policy',
+  detached_task_visibility_internal: 'denied_by_policy',
+  path_outside_outputs: 'denied_by_policy',
+  child_run_circuit_breaker_open: 'denied_by_policy',
+  // internal_error — our bug / lifecycle; not the model's to fix
+  aborted: 'internal_error',
+  tool_handler_failure: 'internal_error',
+  tool_failed: 'internal_error',
+  runner_uncaught: 'internal_error',
+  persistence_failed: 'internal_error',
+  repository_create_failed: 'internal_error',
+  repository_update_failed: 'internal_error',
+  handoff_completion_failed: 'internal_error',
+  handoff_agent_context_missing: 'internal_error',
+  detached_task_start_failed: 'internal_error',
+  process_restarted: 'internal_error',
+  checkpoint_background: 'internal_error',
+  checkpoint_budget: 'internal_error',
+  cancelled_user: 'internal_error',
+  failed_skill: 'internal_error',
+  not_resumable: 'internal_error',
+  primitive_no_skill_context: 'internal_error',
+  card_resolver_missed: 'internal_error',
+}
+
+/** Pattern fallback for kinds not in the explicit table (future tools). */
+const PATTERN_MAP: ReadonlyArray<readonly [RegExp, ToolEnvelopeKind]> = [
+  [/validation|invalid|required|parse|schema|arg|empty/, 'arg_error'],
+  [/login|auth|credential|token|decrypt|unauthorized|forbidden_auth|401|403/, 'auth_expired'],
+  [/rate|throttle|too_many|429|concurrency/, 'rate_limited'],
+  [/not_found|unregistered|no_record|not_loaded|unknown|missing|404/, 'not_found'],
+  [/timeout|network|econn|socket|dns/, 'network_error'],
+  [/unavailable|host|upstream|driver|fetch_failed|stuck|502|503|504/, 'upstream_error'],
+  [/denied|forbidden|restricted|blocked|policy|high_risk|outside_outputs/, 'denied_by_policy'],
+]
+
+export interface MappedEnvelopeKind {
+  kind: ToolEnvelopeKind
+  /** false → fell through to internal_error; caller should warn (telemetry). */
+  mapped: boolean
+}
+
+export function mapErrorKindToEnvelopeKind(errorKind: string): MappedEnvelopeKind {
+  const explicit = EXPLICIT_KIND_MAP[errorKind]
+  if (explicit) return { kind: explicit, mapped: true }
+  for (const [pattern, kind] of PATTERN_MAP) {
+    if (pattern.test(errorKind)) return { kind, mapped: true }
+  }
+  return { kind: 'internal_error', mapped: false }
+}
+
+/** Assemble a success envelope. */
+export function buildOkEnvelope(
+  data?: unknown,
+  meta?: ToolResultEnvelope['meta'],
+): ToolResultEnvelope {
+  return { ok: true, kind: 'ok', ...(data !== undefined ? { data } : {}), ...(meta ? { meta } : {}) }
+}
+
+/** Assemble an error envelope from an errorKind + message (+ optional hint/meta). */
+export function buildErrorEnvelope(params: {
+  errorKind: string
+  message: string
+  hint?: string
+  retryAfterSec?: number
+  meta?: ToolResultEnvelope['meta']
+}): ToolResultEnvelope {
+  const { kind } = mapErrorKindToEnvelopeKind(params.errorKind)
+  const error: NonNullable<ToolResultEnvelope['error']> = { message: params.message }
+  if (params.hint) error.hint = params.hint
+  if (typeof params.retryAfterSec === 'number') error.retryAfterSec = params.retryAfterSec
+  return { ok: false, kind, error, ...(params.meta ? { meta: params.meta } : {}) }
+}
