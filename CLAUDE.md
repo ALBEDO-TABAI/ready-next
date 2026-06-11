@@ -44,7 +44,7 @@
 - 采集终态判决唯一来自 `browser-engine/collection-verdict.ts` 的 `resolveCollectionVerdict()`：0 条永不 completed；部分进展永不清断点；整任务重试只重试失败项。
 - 聊天输入框液态玻璃以真实 Electron dev 为验收面；`#/liquid-test` 只用于调参。生产输入框不得加外部暗色阴影、不得用静态镜像/截图贴片冒充实时折射，消息列表底部必须保留由输入框浮层高度测出的空白尾巴，避免最后一条消息被压住。
 - 稳定性合同回归入口：`npm run verify:stability`（终止合同/事件桥/判定矩阵/意图分类/会话快照全链焦点测试 + 三个 gate）。
-- 高危工具调用走行动确认闸门：M1-M4 静态策略表（`agent-control/safety/action-confirmation-policy.ts`）在 `tool-executor` authorization 之后裁决——M1 拒绝并引导用户亲手做；M2/M3 冻结原始参数、确认后经 `frozen-call-store.release(id, token)` 在原 run 内逐字节放行，token 只跳过再次确认、注册/authorization/工具策略照常重跑（确认 ≠ 提权）；阶段一禁止确认缓存与意图预批准（I-auth 前 M3 一律降级 M2）。
+- 高危工具调用走行动确认闸门：M1-M4 静态策略表（`agent-control/safety/action-confirmation-policy.ts`）在 `tool-executor` authorization 之后裁决——M1 拒绝并引导用户亲手做；M2/M3 冻结原始参数、确认后经 `frozen-call-store.release(id, token)` 在原 run 内逐字节放行，token 只跳过再次确认、注册/authorization/工具策略照常重跑（确认 ≠ 提权）；阶段一禁止确认缓存与意图预批准（I-auth 前 M3 一律降级 M2）。浏览器执行层在拿到页面真实目标文本处做第二道 M1 拦截（target_id/CSS selector/坐标点击不带语义也拦得住）；密码框填充无 args 线索一律拒绝改道确认。
 - 信念卡 staged 状态不得进入 prompt 注入：`BeliefCardStore` 读 API 默认排除 staged（真实注入接线属 K3）。
 - Agent 进化阶段一合同回归入口：`npm run verify:evolution-p1`（全部焦点测试 + `verify:native`）。
 

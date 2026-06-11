@@ -37,6 +37,11 @@ import {
 } from '../../../shared/browser-readonly-probe'
 import { agentBrowserError, isAgentBrowserError } from '../browser-engine/agent-browser-errors'
 import { ToolDomainError } from './tool-errors'
+import {
+  MANUAL_ONLY_TARGET_REGEX_SOURCES,
+  argsCarryPasswordCue,
+  matchManualOnlyBrowserTarget,
+} from '../agent-control/safety/action-confirmation-policy'
 import { buildPageMap, parseTargetId, type PageMap, type RawAxNode } from '../browser-engine/agent-browser-page-map'
 import { gateActOnTarget, type AgentBrowserAction, type AgentBrowserReadBack } from '../browser-engine/agent-browser-act'
 import { normalizeCollectionTargets, targetsFromTask, type BrowserCollectionTarget } from '../browser-engine/collection-targets'
@@ -188,6 +193,7 @@ function buildBrowserDomTargetLibraryJs(): string {
       if (el instanceof HTMLInputElement && (el.type === 'checkbox' || el.type === 'radio') && el.checked) states.checked = true;
       const selected = el.getAttribute('aria-selected');
       if (selected) states.selected = selected;
+      if (el instanceof HTMLInputElement && el.type === 'password') states.password = true;
       return states;
     }
     function readyTargetElements() {
@@ -296,6 +302,23 @@ function buildBrowserTargetProbeJs(nodeId: string): string {
     const record = readyTargetRecord(el, nodeIndex);
     const disabled = Boolean(record.states && record.states.disabled === true);
     return { matchCount: 1, disabled, target: record };
+  })()`
+}
+
+/**
+ * EP1-I3 live-target net — best-effort label probe for coordinate clicks.
+ * Returns `{ label }` (possibly empty) for `document.elementFromPoint` at the
+ * given CSS point; the caller refuses M1 manual-only labels and proceeds on
+ * empty/failed probes (the visual channel must keep working).
+ */
+function buildClickPointLabelProbeJs(cssX: number, cssY: number): string {
+  return `(() => {
+    const __READY_CLICK_POINT_LABEL_PROBE__ = true;
+    const el = document.elementFromPoint(${JSON.stringify(Math.round(cssX))}, ${JSON.stringify(Math.round(cssY))});
+    if (!el) return { label: '' };
+    const label = [el.textContent, el.getAttribute && el.getAttribute('aria-label'), el.value, el.title]
+      .filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim().slice(0, 200);
+    return { label };
   })()`
 }
 
@@ -4240,7 +4263,7 @@ export async function executeBrowserTool(
           ), null, 2)
         }
         const targetRecord = liveProbe?.target && typeof liveProbe.target === 'object'
-          ? liveProbe.target as { states?: Record<string, unknown> }
+          ? liveProbe.target as { role?: string; name?: string; value?: string; states?: Record<string, unknown> }
           : null
         if (targetRecord?.states?.fileInput === true) {
           return JSON.stringify(agentBrowserError(
@@ -4248,6 +4271,37 @@ export async function executeBrowserTool(
             `Target ${targetId} is a file input. Use browser_upload_scope_attachment for file upload.`,
             { targetId, target: liveProbe.target },
           ), null, 2)
+        }
+        // EP1-I3 live-target net — the dispatch gate only saw the args; a
+        // bare target_id legally carries no semantics. Re-check the REAL
+        // element label against the M1 manual-only rules here, where the
+        // live probe just resolved it. M1 is never confirmable → throw the
+        // structured domain error (browser catch rethrows ToolDomainError).
+        const liveLabel = [targetRecord?.name, targetRecord?.value, targetRecord?.role]
+          .filter(Boolean).join(' ')
+        const manualOnlyHit = matchManualOnlyBrowserTarget(liveLabel)
+        if (manualOnlyHit) {
+          throw new ToolDomainError(
+            'denied_manual_only',
+            `目标「${liveLabel.slice(0, 80)}」命中 M1 规则（${manualOnlyHit.reason}）。请引导用户亲自完成这一步，不要代替执行或绕过。`,
+            { targetId, ruleId: manualOnlyHit.ruleId },
+          )
+        }
+        // Password-field fill without a password cue in the args means the
+        // dispatch gate never saw this as a login action (m3-login) — refuse
+        // with reroute guidance instead of silently filling credentials. A
+        // re-issued call that names the password field goes through the
+        // normal confirm→release path and passes here (cue present).
+        if (
+          action === 'fill'
+          && targetRecord?.states?.password === true
+          && !argsCarryPasswordCue(JSON.stringify(args))
+        ) {
+          throw new ToolDomainError(
+            'denied_pending_confirmation',
+            `目标 ${targetId} 是密码输入框。请改用带 disambiguation 说明（如「登录密码输入框」）的调用重试，经用户确认后执行。`,
+            { targetId, ruleId: 'm3-login-existing-account' },
+          )
         }
         const before = readBack === 'none' ? null : await controller.executeJS(tabId, buildBrowserActionDeltaJs()).catch(() => null)
         const actionResult = await controller.executeJS(tabId, buildBrowserActOnTargetJs(parsed.node, action, value))
@@ -4281,15 +4335,35 @@ export async function executeBrowserTool(
         if (!selector) return 'Error: selector is required'
         let tabId = (args.tab_id as string) || null
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
+        // EP1-I3 live-target net — a CSS selector legally carries no
+        // semantics, so the dispatch gate could not classify this click.
+        // The click script checks the REAL element label against the M1
+        // manual-only patterns (generated from the policy module — single
+        // source) and refuses without clicking on a hit.
         const clickJs = `
           (function() {
+            const __READY_MANUAL_ONLY_CHECK__ = true;
             const el = document.querySelector(${JSON.stringify(selector)});
             if (!el) return 'Element not found: ${selector.replace(/'/g, "\\'")}';
+            const label = [el.textContent, el.getAttribute('aria-label'), el.value, el.title]
+              .filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim().slice(0, 200);
+            const manualPatterns = [${MANUAL_ONLY_TARGET_REGEX_SOURCES.map((src) => `new RegExp(${JSON.stringify(src)}, 'i')`).join(', ')}];
+            if (manualPatterns.some((p) => p.test(label))) {
+              return { __readyManualOnlyBlocked: true, label: label.slice(0, 80) };
+            }
             el.click();
             return 'Clicked: ' + (el.tagName || '') + (el.textContent ? ' "' + el.textContent.slice(0, 50) + '"' : '');
           })()
         `
         const result = await controller.executeJS(tabId, clickJs)
+        if (result && typeof result === 'object' && (result as { __readyManualOnlyBlocked?: unknown }).__readyManualOnlyBlocked === true) {
+          const label = String((result as { label?: unknown }).label || '')
+          throw new ToolDomainError(
+            'denied_manual_only',
+            `点击目标「${label}」命中 M1 规则（支付确认/改密提交/验证码必须由用户亲手完成）。请引导用户亲自完成这一步。`,
+            { selector, label },
+          )
+        }
         return String(result)
       }
 
@@ -4334,10 +4408,20 @@ export async function executeBrowserTool(
         const clearFirst = args.clear_first !== false // default true
         let tabId = (args.tab_id as string) || null
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
+        // EP1-I3 live-target net — an opaque selector can resolve to a
+        // password field without any cue in the args (the dispatch gate
+        // could not classify it as m3-login). Refuse with reroute guidance;
+        // a re-issued call naming the password field goes through the
+        // confirm→release path and passes here (cue present in args).
+        const allowPasswordFill = argsCarryPasswordCue(JSON.stringify(args))
         const typeJs = `
           (function() {
+            const __READY_PASSWORD_FILL_CHECK__ = true;
             const el = document.querySelector(${JSON.stringify(selector)});
             if (!el) return 'Element not found: ${selector.replace(/'/g, "\\'")}';
+            if (el instanceof HTMLInputElement && el.type === 'password' && !${JSON.stringify(allowPasswordFill)}) {
+              return { __readyPasswordFillBlocked: true };
+            }
             el.focus();
             ${clearFirst ? 'el.value = "";' : ''}
             el.value = ${JSON.stringify(text)};
@@ -4347,6 +4431,13 @@ export async function executeBrowserTool(
           })()
         `
         const result = await controller.executeJS(tabId, typeJs)
+        if (result && typeof result === 'object' && (result as { __readyPasswordFillBlocked?: unknown }).__readyPasswordFillBlocked === true) {
+          throw new ToolDomainError(
+            'denied_pending_confirmation',
+            `选择器 ${selector} 指向密码输入框。请改用带「密码」说明的调用（如 selector 注明 password 字段）重试，经用户确认后执行。`,
+            { selector, ruleId: 'm3-login-existing-account' },
+          )
+        }
         return String(result)
       }
 
@@ -5296,6 +5387,25 @@ export async function executeBrowserTool(
         if (!Number.isFinite(x) || !Number.isFinite(y)) return 'Error: x and y are required numbers'
         let tabId = (args.tab_id as string) || null
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
+        // EP1-I3 live-target net — best-effort: probe the element under the
+        // click point and refuse M1 manual-only targets. The visual channel
+        // must keep working when no label is resolvable (high-control sites
+        // force coordinate clicks), so a null/failed probe proceeds.
+        const probePoint = await resolveCssPoint(controller, tabId, x, y).catch(() => null)
+        const pointLabel = probePoint
+          ? await controller.executeJS(tabId, buildClickPointLabelProbeJs(probePoint.cssX, probePoint.cssY)).catch(() => null)
+          : null
+        if (pointLabel && typeof pointLabel === 'object') {
+          const label = String((pointLabel as { label?: unknown }).label || '')
+          const manualHit = matchManualOnlyBrowserTarget(label)
+          if (manualHit) {
+            throw new ToolDomainError(
+              'denied_manual_only',
+              `坐标点击目标「${label.slice(0, 80)}」命中 M1 规则（${manualHit.reason}）。请引导用户亲自完成这一步。`,
+              { x, y, ruleId: manualHit.ruleId },
+            )
+          }
+        }
         const point = await dispatchClickAt(controller, tabId, x, y)
         await settleAfterAction(controller, tabId, abortSignal)
         return JSON.stringify({

@@ -203,6 +203,78 @@ const FIRST_BATCH_RULES: readonly ConfirmationRule[] = [
   },
 ]
 
+// ---------------------------------------------------------------------------
+// Live-target enforcement (Codex review follow-up). The dispatch gate above
+// can only see the ARGUMENTS; the preferred browser channels (page-map
+// target_id, CSS selector, viewport coordinates) legally carry no semantic
+// text, so a payment/captcha/password-submit control could be hit with clean
+// args and classify M4. The browser execution layer therefore re-checks the
+// SAME M1 patterns against the REAL element text/label at the moment it is
+// known (live probe / click script / point probe) and refuses manual-only
+// targets there. M1 is never confirmable, so this second net needs no
+// release plumbing — it always refuses.
+// ---------------------------------------------------------------------------
+
+export interface ManualOnlyTargetMatch {
+  ruleId: string
+  designRef: string
+  reason: string
+}
+
+const MANUAL_ONLY_TARGET_RULES: ReadonlyArray<{ pattern: RegExp } & ManualOnlyTargetMatch> = [
+  {
+    pattern: PAYMENT_FINAL_PATTERN,
+    ruleId: 'm1-payment-final',
+    designRef: '05 §3.1 M1 — 支付最终确认',
+    reason: '支付最终确认必须由用户亲手完成',
+  },
+  {
+    pattern: PASSWORD_CHANGE_FINAL_PATTERN,
+    ruleId: 'm1-password-change-final',
+    designRef: '05 §3.1 M1 — 改密码最终提交',
+    reason: '修改密码的最终提交必须由用户亲手完成',
+  },
+  {
+    pattern: CAPTCHA_PATTERN,
+    ruleId: 'm1-captcha-bypass',
+    designRef: '05 §3.1 M1 — 绕过验证码/安全拦截页',
+    reason: '验证码与安全拦截页必须由用户亲手处理，agent 不绕过',
+  },
+]
+
+/** Match the REAL element text/label against the M1 manual-only semantics. */
+export function matchManualOnlyBrowserTarget(targetText: string | null | undefined): ManualOnlyTargetMatch | null {
+  const text = String(targetText || '')
+  if (!text) return null
+  for (const rule of MANUAL_ONLY_TARGET_RULES) {
+    if (rule.pattern.test(text)) {
+      const { pattern: _pattern, ...match } = rule
+      return match
+    }
+  }
+  return null
+}
+
+/**
+ * Regex sources for embedding the same M1 semantics into in-page scripts
+ * (browser_click's single-roundtrip click script). Single pattern source —
+ * the in-page copy is generated from these, never hand-written.
+ */
+export const MANUAL_ONLY_TARGET_REGEX_SOURCES: readonly string[] =
+  MANUAL_ONLY_TARGET_RULES.map((rule) => rule.pattern.source)
+
+/**
+ * True when the call's own arguments already carry a password cue — meaning
+ * the dispatch gate upstream classified it (m3-login) and the call only
+ * reached execution through the confirm→release path (or a host invoker).
+ * The browser-layer password net uses this to stay loop-free: cue present →
+ * proceed; cue absent but live target IS a password field → refuse with
+ * reroute guidance.
+ */
+export function argsCarryPasswordCue(argsText: string): boolean {
+  return PASSWORD_FIELD_PATTERN.test(argsText)
+}
+
 function actionForMode(mode: ConfirmationMode): ConfirmationGateAction {
   switch (mode) {
     case 'M1':

@@ -188,13 +188,18 @@ export class FrozenCallStore {
   constructor(db: FrozenCallDb | null, opts?: { now?: () => number }) {
     this.db = db
     this.now = opts?.now ?? Date.now
-    // Restart orphans: DB rows still 'pending' from a previous process have
-    // no waiting context (token was memory-only) — expire anything stale.
+    // Restart orphans: ANY DB row still 'pending' at construction belongs to
+    // a previous process — its release token and waiting context were
+    // memory-only, so it can never be released again, TTL elapsed or not
+    // (Codex review P2). Expire them all; the in-memory authority starts
+    // empty either way. Construction happens once per main-process lifetime
+    // (the bridge wiring guards re-registration on dev reload), so this can
+    // never expire a row belonging to a live waiter of this process.
     if (this.db) {
       try {
         this.db
-          .prepare("UPDATE pending_confirmations SET status = 'expired' WHERE status = 'pending' AND expires_at < ?")
-          .run(new Date(this.now()).toISOString())
+          .prepare("UPDATE pending_confirmations SET status = 'expired' WHERE status = 'pending'")
+          .run()
       } catch {
         // Sweep failure is non-fatal — rows stay pending in DB only; the
         // in-memory authority starts empty either way.

@@ -73,8 +73,12 @@ function createFakeDb(): FakeDb {
               row.status = status
               row.released_at = releasedAt
             }
+          } else if (/SET status = 'expired' WHERE status = 'pending'/i.test(sql)) {
+            // constructor restart sweep — expire every leftover pending row
+            for (const row of rows.values()) {
+              if (row.status === 'pending') row.status = 'expired'
+            }
           }
-          // boot sweep UPDATE … WHERE expires_at < ? — no-op on the fake
           return undefined
         },
       }
@@ -244,6 +248,25 @@ test('store: an expired frozen call cannot be released (no execution after conte
   const released = store.release(frozen.id, frozen.token)
   assert.deepEqual(released, { ok: false, reason: 'expired' })
   assert.equal(store.get(frozen.id)?.status, 'expired')
+})
+
+test('restart sweep: leftover pending rows expire at construction even INSIDE their TTL (token was memory-only)', () => {
+  const db = createFakeDb()
+  // Simulate a row left behind by a crashed/restarted process whose TTL has
+  // NOT elapsed yet — without the unconditional sweep it would stay pending
+  // forever (no memory token can ever release it again).
+  db.rows.set('fc-orphan', {
+    id: 'fc-orphan',
+    status: 'pending',
+    tool_name: 'calendar_delete_event',
+    params_json: '{"__audit":"redacted"}',
+    created_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + 9 * 60 * 1000).toISOString(), // in-TTL
+    released_at: null,
+  })
+  void new FrozenCallStore(db)
+  assert.equal(db.rows.get('fc-orphan')?.status, 'expired',
+    'in-TTL orphan must be expired at construction — it can never be released')
 })
 
 test('abort while waiting → frozen call expired, structured timeout-cancel result, no late execution', async (t) => {
