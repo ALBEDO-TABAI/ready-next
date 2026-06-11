@@ -64,6 +64,7 @@ import {
   errorMessageOf,
   isTerminalInfrastructureError,
 } from './tool-errors'
+import { deriveEnvelopeForToolOutput } from './tool-result-envelope'
 import { validateToolInput } from './tool-input-validator'
 import {
   buildToolNotAllowedMessage,
@@ -144,7 +145,25 @@ function isFrameScopedInternalSkillActionAllowed(
   return Boolean(frameSkillId && frameSkillId === skillId)
 }
 
+/**
+ * EP1-T4-2 — single envelope-assembly point. Every structured result leaving
+ * the dispatcher (success, domain error, admission denial, confirmation-gate
+ * denial) gets an action-oriented `envelope` derived from its legacy fields.
+ * Additive only: legacy text/data/errorKind are returned byte-identical; a
+ * handler that pre-built its own envelope keeps it. Terminal infrastructure
+ * errors keep throwing past this wrapper unchanged.
+ */
 export async function executeToolCall(
+  toolName: string,
+  args: Record<string, unknown>,
+  context: ToolContext
+): Promise<ToolExecutionOutput> {
+  const output = await executeToolCallInner(toolName, args, context)
+  if (output.envelope) return output
+  return { ...output, envelope: deriveEnvelopeForToolOutput(output) }
+}
+
+async function executeToolCallInner(
   toolName: string,
   args: Record<string, unknown>,
   context: ToolContext

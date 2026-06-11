@@ -1,5 +1,6 @@
 import type { TurnFramePatch } from '../runtime-core/turn-frame'
 import type { SkillRunContract } from '../contracts/run-contracts'
+import type { ToolResultEnvelope } from '../../tools/tool-result-envelope'
 
 export type ToolResultShape = 'text' | 'json' | 'projection_patch'
 
@@ -51,6 +52,15 @@ export interface ToolExecutionOutput {
    * don't mutate cross-tool context.
    */
   contextModifier?: ToolExecutionContextModifier | null
+  /**
+   * EP1-T4-2 — action-oriented result envelope (07 §3.1), assembled exactly
+   * once at the dispatch exit of `executeToolCall`. Additive coexistence:
+   * the legacy text/data/errorKind fields stay authoritative for existing
+   * consumers; ONLY new consumers read the envelope. Optional so domain
+   * handlers and hand-built outputs keep their old shape — a handler may
+   * pre-build its own envelope, in which case the dispatch exit keeps it.
+   */
+  envelope?: ToolResultEnvelope | null
 }
 
 export type ToolExecutionResultLike = string | ToolExecutionOutput
@@ -64,6 +74,7 @@ export function createToolExecutionOutput(
     interactionHint?: ToolInteractionHint | null
     framePatch?: TurnFramePatch | null
     contextModifier?: ToolExecutionContextModifier | null
+    envelope?: ToolResultEnvelope | null
   },
 ): ToolExecutionOutput {
   const projectionPatch = options?.projectionPatch || null
@@ -79,6 +90,7 @@ export function createToolExecutionOutput(
     interactionHint: options?.interactionHint || null,
     framePatch: options?.framePatch || null,
     contextModifier: options?.contextModifier || null,
+    ...(options?.envelope ? { envelope: options.envelope } : {}),
   }
 }
 
@@ -95,6 +107,7 @@ export function normalizeToolExecutionOutput(output: ToolExecutionResultLike): T
     interactionHint: output.interactionHint || null,
     framePatch: output.framePatch && typeof output.framePatch === 'object' ? output.framePatch : null,
     contextModifier: output.contextModifier && typeof output.contextModifier === 'object' ? output.contextModifier : null,
+    ...(output.envelope && typeof output.envelope === 'object' ? { envelope: output.envelope } : {}),
   }
 }
 

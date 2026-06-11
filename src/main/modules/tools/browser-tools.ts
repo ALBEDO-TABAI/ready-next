@@ -36,6 +36,7 @@ import {
   normalizeBrowserReadonlyProbeRequest,
 } from '../../../shared/browser-readonly-probe'
 import { agentBrowserError, isAgentBrowserError } from '../browser-engine/agent-browser-errors'
+import { ToolDomainError } from './tool-errors'
 import { buildPageMap, parseTargetId, type PageMap, type RawAxNode } from '../browser-engine/agent-browser-page-map'
 import { gateActOnTarget, type AgentBrowserAction, type AgentBrowserReadBack } from '../browser-engine/agent-browser-act'
 import { normalizeCollectionTargets, targetsFromTask, type BrowserCollectionTarget } from '../browser-engine/collection-targets'
@@ -5872,6 +5873,12 @@ export async function executeBrowserTool(
         return `Unknown browser tool: ${toolName}`
     }
   } catch (error) {
+    // EP1-T4-2 (browser pilot) — let structured domain errors flow to the
+    // dispatcher's error contract (errorKind + envelope) instead of being
+    // flattened to a string. No browser handler throws ToolDomainError at
+    // HEAD, so this is purely the forward migration path; plain throws keep
+    // the legacy string shape below.
+    if (error instanceof ToolDomainError) throw error
     const msg = error instanceof Error ? error.message : String(error)
     log(`Browser tool error: ${msg}`)
     return `Error executing ${toolName}: ${msg}`

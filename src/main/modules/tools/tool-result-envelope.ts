@@ -166,3 +166,43 @@ export function buildErrorEnvelope(params: {
   if (typeof params.retryAfterSec === 'number') error.retryAfterSec = params.retryAfterSec
   return { ok: false, kind, error, ...(params.meta ? { meta: params.meta } : {}) }
 }
+
+const ENVELOPE_MESSAGE_MAX_CHARS = 400
+
+/**
+ * EP1-T4-2 — derive the envelope for one finished tool output at the dispatch
+ * exit (`executeToolCall`). Pure and structural (no ToolExecutionOutput import
+ * — keeps this module dependency-free).
+ *
+ * Discipline:
+ *   - `data.errorKind` (the established error convention) decides ok vs error.
+ *   - Error messages enter the envelope as a SINGLE clipped line — prefer the
+ *     structured `data.message`, fall back to the first line of the legacy
+ *     text. Multi-section diagnostics (subprocess STDOUT/STDERR dumps, log
+ *     artifact pointers) stay in the legacy fields only.
+ *   - Ok envelopes carry NO payload duplicate in phase 1: the envelope is the
+ *     protocol header; the payload remains in the legacy text/data fields.
+ */
+export function deriveEnvelopeForToolOutput(output: {
+  text: string
+  data: Record<string, unknown> | null
+}): ToolResultEnvelope {
+  const explicitErrorKind = output.data && typeof output.data.errorKind === 'string' && output.data.errorKind
+    ? output.data.errorKind
+    : null
+  // Skill child gateway (and other structured results) signal failure with
+  // `data.ok === false` and no errorKind — without this fallback those would
+  // mislabel as ok envelopes.
+  const errorKind = explicitErrorKind
+    ?? (output.data && output.data.ok === false ? 'tool_failed' : null)
+  if (!errorKind) {
+    return buildOkEnvelope()
+  }
+  const structuredMessage = output.data && typeof output.data.message === 'string' && output.data.message.trim()
+    ? output.data.message
+    : null
+  const source = structuredMessage ?? output.text ?? ''
+  const firstLine = source.split('\n', 1)[0].trim()
+  const message = (firstLine || 'tool failed').slice(0, ENVELOPE_MESSAGE_MAX_CHARS)
+  return buildErrorEnvelope({ errorKind, message })
+}
