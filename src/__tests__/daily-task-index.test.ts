@@ -19,6 +19,9 @@ function entry(over: Partial<TaskIndexEntry>): TaskIndexEntry {
     blockedReason: null,
     continuationHint: null,
     updatedAt: '2026-06-11T10:00:00.000Z',
+    blockerCategory: null,
+    criteriaProgress: null,
+    pendingAdjudication: false,
     ...over,
   }
 }
@@ -122,4 +125,46 @@ test('toTaskIndexEntry derives hint from continuation_ref blockerType', () => {
     updatedAt: NOW.toISOString(),
   } as TaskProjectionRecord)
   assert.equal(e.continuationHint, '阻塞类型:user_input_missing')
+})
+
+// ---------- EP2-X1b enhancement fields ----------
+
+test('X1b: enhancement cells render only when present — legacy lines stay byte-identical', () => {
+  const legacy = buildDailyTaskIndex([entry({})], { now: NOW })
+  assert.ok(legacy.includes('- [task:t1] 采集笔记 | running | —'))
+  assert.ok(!legacy.includes('类别:'), 'no blocker category cell without data')
+  assert.ok(!legacy.includes('待裁决'))
+
+  const enhanced = buildDailyTaskIndex([entry({
+    blockerCategory: 'user_input_missing',
+    criteriaProgress: '判据满足 2/3',
+    pendingAdjudication: true,
+  })], { now: NOW })
+  assert.ok(enhanced.includes('| 类别:user_input_missing | 判据满足 2/3 | 待裁决'))
+})
+
+test('X1b: toTaskIndexEntry reads the Q1 quality columns', () => {
+  const base = {
+    taskId: 't9', scopeId: 's', runId: 'r', taskType: 'short_task', module: 'chat',
+    status: 'completed', steps: [], createdAt: NOW.toISOString(), updatedAt: NOW.toISOString(),
+  }
+  const withCheckin = toTaskIndexEntry({
+    ...base,
+    interactionState: 'check_in_pending',
+    continuationRef: { blockerType: 'budget_exhausted' },
+    criteria: { items: [{ id: 'c1' }, { id: 'c2' }, { id: 'c3' }] },
+    checkins: [{ kind: 'shadow', satisfiedCount: 2, totalCount: 3 }],
+  } as unknown as TaskProjectionRecord)
+  assert.equal(withCheckin.blockerCategory, 'budget_exhausted')
+  assert.equal(withCheckin.criteriaProgress, '判据满足 2/3')
+  assert.equal(withCheckin.pendingAdjudication, true)
+
+  const criteriaOnly = toTaskIndexEntry({
+    ...base,
+    interactionState: 'running',
+    criteria: { items: [{ id: 'c1' }] },
+  } as unknown as TaskProjectionRecord)
+  assert.equal(criteriaOnly.criteriaProgress, '判据 1 项')
+  assert.equal(criteriaOnly.pendingAdjudication, false)
+  assert.equal(criteriaOnly.blockerCategory, null)
 })

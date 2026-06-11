@@ -23,6 +23,12 @@ export interface TaskIndexEntry {
   continuationHint: string | null
   /** ISO timestamp; used to decide "今日已完结". */
   updatedAt: string
+  /** EP2-X1b — structured blocker category from continuation_ref.blockerType. */
+  blockerCategory: string | null
+  /** EP2-X1b — factual criteria progress ("判据满足 2/3" / "判据 3 项"), from Q1 columns. */
+  criteriaProgress: string | null
+  /** EP2-X1b — interaction_state === check_in_pending (待裁决). */
+  pendingAdjudication: boolean
 }
 
 export interface TaskIndexStore {
@@ -52,8 +58,27 @@ function continuationHintFromRef(ref: unknown): string | null {
   return '可继续'
 }
 
-/** Map a projection record to the minimal index entry (current columns only). */
+/** EP2-X1b — factual criteria progress from the Q1 quality columns. The
+ *  latest checkin (Q4a writer) may carry satisfied/total counts; before any
+ *  checkin exists, the criteria item count alone is the honest fact. */
+function criteriaProgressOf(record: TaskProjectionRecord): string | null {
+  const lastCheckin = Array.isArray(record.checkins) && record.checkins.length > 0
+    ? record.checkins[record.checkins.length - 1] as Record<string, unknown>
+    : null
+  if (lastCheckin && typeof lastCheckin.satisfiedCount === 'number' && typeof lastCheckin.totalCount === 'number') {
+    return `判据满足 ${lastCheckin.satisfiedCount}/${lastCheckin.totalCount}`
+  }
+  const items = record.criteria && Array.isArray((record.criteria as Record<string, unknown>).items)
+    ? ((record.criteria as Record<string, unknown>).items as unknown[])
+    : null
+  if (items && items.length > 0) return `判据 ${items.length} 项`
+  return null
+}
+
+/** Map a projection record to the index entry (Q1 quality columns included). */
 export function toTaskIndexEntry(record: TaskProjectionRecord): TaskIndexEntry {
+  const ref = record.continuationRef as Record<string, unknown> | null | undefined
+  const blockerType = ref && typeof ref.blockerType === 'string' ? ref.blockerType.trim() : ''
   return {
     taskId: record.taskId,
     title: record.taskTitle ?? null,
@@ -61,6 +86,9 @@ export function toTaskIndexEntry(record: TaskProjectionRecord): TaskIndexEntry {
     blockedReason: record.blockedReason ?? null,
     continuationHint: continuationHintFromRef(record.continuationRef),
     updatedAt: record.updatedAt,
+    blockerCategory: blockerType || null,
+    criteriaProgress: criteriaProgressOf(record),
+    pendingAdjudication: record.interactionState === 'check_in_pending',
   }
 }
 
@@ -76,7 +104,14 @@ function renderLine(entry: TaskIndexEntry): string {
   const statusCell = entry.blockedReason
     ? `${cell(entry.status)}:${cell(entry.blockedReason)}`
     : cell(entry.status)
-  return `- [task:${entry.taskId}] ${cell(entry.title)} | ${statusCell} | ${cell(entry.continuationHint)}`
+  // EP2-X1b — enhancement cells append ONLY when present so legacy entries
+  // render byte-identical to X1a (零回归).
+  const extras: string[] = []
+  if (entry.blockerCategory) extras.push(`类别:${cell(entry.blockerCategory)}`)
+  if (entry.criteriaProgress) extras.push(cell(entry.criteriaProgress))
+  if (entry.pendingAdjudication) extras.push('待裁决')
+  const tail = extras.length > 0 ? ` | ${extras.join(' | ')}` : ''
+  return `- [task:${entry.taskId}] ${cell(entry.title)} | ${statusCell} | ${cell(entry.continuationHint)}${tail}`
 }
 
 /**
