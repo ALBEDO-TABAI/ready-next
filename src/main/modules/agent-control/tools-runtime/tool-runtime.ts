@@ -74,6 +74,8 @@ export interface ToolRuntimeContext {
   emitToolAction?: (tool: string, args: Record<string, unknown>) => void
   requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
   abortSignal?: AbortSignal
+  /** EP2-I2 — standing user negation families (dispatch interception). */
+  activeNegations?: ReadonlyArray<string>
   sessionId?: string
   scopeId?: string
   currentUserText?: string

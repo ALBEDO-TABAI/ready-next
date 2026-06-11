@@ -54,6 +54,7 @@ export function buildToolRuntimeContext(params: {
   requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
   abortSignal: AbortSignal
   sessionId?: string
+  activeNegations?: ReadonlyArray<string>
   scopeId?: string
   currentUserText?: string
   runId?: string
@@ -90,6 +91,7 @@ export function buildToolRuntimeContext(params: {
     requestModuleToolAction: params.requestModuleToolAction,
     abortSignal: params.abortSignal,
     sessionId: params.sessionId,
+    activeNegations: params.activeNegations,
     scopeId,
     currentUserText: params.currentUserText,
     runId: params.runId,
@@ -117,6 +119,7 @@ export function toToolExecutorContext(context: ToolRuntimeContext): ToolContext 
     requestModuleToolAction: context.requestModuleToolAction,
     abortSignal: context.abortSignal,
     sessionId: context.sessionId,
+    activeNegations: context.activeNegations as never,
     scopeId: context.scopeId || context.scope?.id || context.sessionId,
     currentUserText: context.currentUserText,
     runId: context.runId,

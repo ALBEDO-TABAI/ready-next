@@ -29,15 +29,35 @@ const CORRECTION_PATTERN =
 const NEGATION_PATTERN =
   /(?:不要|别再?|先不要?|不用|暂停|停止|取消|停一下|don'?t|stop|cancel|hold off)/i
 
-/** Verbs that a leading negation can suppress ("不要采集" → 采集 suppressed). */
+/** Verbs that a leading negation can suppress ("不要采集" → 采集 suppressed).
+ *  EP2-I2 — families aligned with the 05 §3 action list (删除/外发/覆盖). */
 const NEGATABLE_INTENT_VERBS: ReadonlyArray<{ family: FollowupNegationFamily; pattern: RegExp }> = [
   { family: 'collection', pattern: /(?:采集|收集|抓取|爬|保存笔记|collect|scrape)/i },
   { family: 'browser', pattern: /(?:打开|浏览|网页|browser|open)/i },
   { family: 'retry', pattern: /(?:重试|再试|retry)/i },
+  { family: 'deletion', pattern: /(?:删除|删掉|删了|清空|移除|delete|remove)/i },
+  { family: 'external_send', pattern: /(?:发送|发给|发出|外发|推送|邮件|私信|send|email)/i },
+  { family: 'overwrite', pattern: /(?:覆盖|重写|overwrite)/i },
 ]
 
+/** EP2-I2 — explicit release signal ("现在可以采集了") lifts a standing negation. */
+const RELEASE_PATTERN = /(?:可以|能|恢复|继续|放开|解除)/
+
+export function detectNegationReleases(text: string): FollowupNegationFamily[] {
+  const out: FollowupNegationFamily[] = []
+  const t = String(text || '')
+  if (!RELEASE_PATTERN.test(t) || NEGATION_PATTERN.test(t)) return out
+  for (const { family, pattern } of NEGATABLE_INTENT_VERBS) {
+    const m = pattern.exec(t)
+    if (!m) continue
+    const windowStart = Math.max(0, m.index - 8)
+    if (RELEASE_PATTERN.test(t.slice(windowStart, m.index))) out.push(family)
+  }
+  return out
+}
+
 export type FollowupIntentKind = 'continue_task' | 'status_query' | 'correction' | 'new_task'
-export type FollowupNegationFamily = 'collection' | 'browser' | 'retry'
+export type FollowupNegationFamily = 'collection' | 'browser' | 'retry' | 'deletion' | 'external_send' | 'overwrite'
 
 /**
  * EP2-I1 — task-ref FACT fed into the classifier (05 §2.1 state-first order).

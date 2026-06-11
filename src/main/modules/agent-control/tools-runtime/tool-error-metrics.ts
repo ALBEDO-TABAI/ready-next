@@ -226,6 +226,7 @@ export const TOOL_ERROR_METRICS = {
    * payload: `{ toolName, mode, ruleId, action, sessionId }`.
    */
   confirmationGateDenied: 'action_confirmation_gate_denied',
+  userNegationDenied: 'user_negation_denied',
 } as const
 
 export type ToolErrorMetricName = (typeof TOOL_ERROR_METRICS)[keyof typeof TOOL_ERROR_METRICS]

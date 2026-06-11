@@ -113,8 +113,9 @@ import {
   isBrowserBatchCollectionWorkflowTool,
   stepCollectionIntentTtl,
 } from '../../../../shared/browser-collection-intent'
-import { classifyFollowupIntent, followupConsultsRecalledContext, type FollowupTaskRef } from '../../../../shared/agent-followup-intent'
+import { classifyFollowupIntent, followupConsultsRecalledContext, detectNegationReleases, type FollowupTaskRef } from '../../../../shared/agent-followup-intent'
 import { wrapRunMetaRepositoryWithCloseoutSnapshot } from '../task-projection/run-meta-snapshot'
+import { recordNegations, releaseNegations, activeNegations } from '../safety/negation-state'
 import { classifyBrowserToolCall } from '../../browser-engine/browser-tool-write-classification'
 import { createBrowserTurnLease, type BrowserTurnLease } from '../../browser-engine/agent-browser-turn-lease'
 import { filterToolsByVisionCapability } from '../tools-runtime/tool-gateway'
@@ -3933,6 +3934,14 @@ export class AgentSdkRuntime extends EventEmitter {
           taskRefs: this.getScopeTaskRefs && sessionId ? this.getScopeTaskRefs(sessionId) : undefined,
         },
       )
+      // EP2-I2 — standing negation lifecycle (session lineage): record fresh
+      // negations from this turn; an explicit release signal ("现在可以采集
+      // 了") lifts them. Dispatch-layer interception consults this state.
+      if (sessionId) {
+        if (turnFollowup.negations.length > 0) recordNegations(sessionId, turnFollowup.negations)
+        const released = detectNegationReleases(turnFollowupPrimary)
+        if (released.length > 0) releaseNegations(sessionId, released)
+      }
       // Review-team D3: a substantive NEW instruction supersedes the prior
       // plan — otherwise a stale "不要重新规划" reminder (within its TTL)
       // would steer the model against the user's new task.
@@ -5441,6 +5450,8 @@ export class AgentSdkRuntime extends EventEmitter {
       abortSignal: runtimeContext.signal,
       sessionId: runtimeContext.sessionId,
       scopeId: runtimeContext.sessionId,
+      // EP2-I2 — standing user negations for dispatch interception.
+      activeNegations: activeNegations(runtimeContext.sessionId),
       currentUserText: runtimeContext.currentUserText,
       runId: runtimeContext.runId,
       taskId: runtimeContext.taskId,

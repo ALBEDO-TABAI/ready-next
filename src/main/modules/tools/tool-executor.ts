@@ -22,6 +22,8 @@ import {
   type SkillToolAuthorization,
 } from '../agent-control/skills/skill-tool-authorization'
 import { resolveConfirmationGate } from '../agent-control/safety/action-confirmation-policy'
+import { matchToolNegationFamily } from '../agent-control/safety/negation-state'
+import type { FollowupNegationFamily } from '../../../shared/agent-followup-intent'
 import { getFrozenCallStore } from '../agent-control/safety/frozen-call-bridge'
 import { runFrozenCallConfirmation } from '../agent-control/safety/frozen-call-confirmation'
 import { PRIMITIVE_TOOL_DEFS } from './skill-primitives/tool-defs'
@@ -85,6 +87,8 @@ export interface ToolContext {
   emitToolAction?: (tool: string, args: Record<string, unknown>) => void
   requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
   abortSignal?: AbortSignal
+  /** EP2-I2 — standing user negation families for this scope (dispatch interception). */
+  activeNegations?: ReadonlyArray<FollowupNegationFamily>
   sessionId?: string
   scopeId?: string
   currentUserText?: string
@@ -335,6 +339,33 @@ async function executeToolCallInner(
   // reran on the way here (确认 ≠ 提权). The gate consumes ONLY (toolName,
   // args) — phase 1 forbids intent-based pre-approval and any confirmation
   // caching (no I-auth yet).
+  // EP2-I2 — dispatch-layer negation interception, BEFORE the confirmation
+  // gate: 拒绝权优先于确认权. A standing user negation ("不要采集") hard-stops
+  // matching tool families with a structured denial the model must route
+  // around — it never falls through to "needs confirmation", and no frozen
+  // call is created. Host calls bypass (the user acting is not the model).
+  if (invoker !== 'host' && !releaseGrant && context.activeNegations && context.activeNegations.length > 0) {
+    const negatedFamily = matchToolNegationFamily(toolName, context.activeNegations)
+    if (negatedFamily) {
+      logAgentMetric(TOOL_ERROR_METRICS.userNegationDenied, {
+        toolName,
+        family: negatedFamily,
+        sessionId: context.sessionId || null,
+      })
+      return createToolExecutionOutput(
+        `用户已明确表示不要执行${negatedFamily === 'collection' ? '采集' : '该类'}动作（${negatedFamily}）。请改道或向用户澄清；用户明确说"可以${negatedFamily === 'collection' ? '采集' : '继续'}了"后方可恢复。`,
+        {
+          shape: 'json',
+          data: {
+            errorKind: 'denied_by_user_negation',
+            family: negatedFamily,
+            toolName,
+          },
+        },
+      )
+    }
+  }
+
   if (invoker !== 'host' && !releaseGrant) {
     const confirmation = resolveConfirmationGate(toolName, args)
     const deniedOutput = (
