@@ -38,7 +38,7 @@ test('WorkbenchMode wires the wrapped handlers so every UI-triggered panel toggl
     source,
     /handleToggleSidebarWithResize\s*=\s*useTogglePanelWithResize\(\s*"\[data-liquid-shell='side-panel'\]"/,
   )
-  assert.match(source, /onToggleChatPanel=\{handleToggleChatPanelWithResize\}/)
+  assert.doesNotMatch(source, /onToggleChatPanel=\{handleToggleChatPanelWithResize\}/)
   assert.match(source, /<ChatPanel[^>]*onTogglePanel=\{handleToggleChatPanelWithResize\}/)
   assert.match(source, /handleToggleSidebarWithResize\(\)/)
   assert.match(source, /handleToggleChatPanelWithResize\(\)/)

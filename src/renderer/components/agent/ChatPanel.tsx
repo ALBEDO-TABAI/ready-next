@@ -935,6 +935,7 @@ export default function ChatPanel({
       onAttachSessionRecall={(conversationId) => {
         void handleAttachSessionRecall(conversationId)
       }}
+      onTogglePanel={toggleChatPanel}
       onHistoryOpen={() => {
         void loadScopes()
         void runSessionRecallSearch(sessionRecallQuery)

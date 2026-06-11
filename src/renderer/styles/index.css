@@ -2926,6 +2926,38 @@ html[data-fastcard-overlay-window='true'] .browser-fastcard-action {
     transform 150ms ease;
 }
 
+.icon-rail-settings-menu {
+  position: absolute;
+  left: 42px;
+  bottom: 0;
+  z-index: 260;
+  display: flex;
+  width: 136px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 13px;
+}
+
+.icon-rail-settings-menu__item {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  padding: 8px 9px;
+  color: var(--text-body);
+  font-size: 12.5px;
+  font-weight: 500;
+  text-align: left;
+}
+
+.icon-rail-settings-menu__item:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .ready-floating-menu-item:hover,
 .chat-header-floating-menu-item:hover {
   background: var(--chat-menu-hover-bg) !important;

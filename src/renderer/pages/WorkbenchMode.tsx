@@ -282,6 +282,11 @@ export default function WorkbenchMode() {
   }, [])
 
   const handleIconClick = (icon: string) => {
+    if (icon === 'user') {
+      navigate('/settings?section=user-profiles')
+      return
+    }
+
     if (icon === 'settings') {
       navigate('/settings')
       return
@@ -564,7 +569,7 @@ export default function WorkbenchMode() {
             </div>
           )}
 
-          <TopBar onToggleChatPanel={handleToggleChatPanelWithResize} />
+          <TopBar />
 
           <div
             className="flex flex-1 overflow-hidden"

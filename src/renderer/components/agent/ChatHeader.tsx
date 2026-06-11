@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { AtSign, ChevronDown, MessageSquare, MoreHorizontal, Pencil, Plus, Trash2 } from 'lucide-react'
+import { AtSign, ChevronDown, MessageSquare, MoreHorizontal, PanelLeftClose, Pencil, Plus, Trash2 } from 'lucide-react'
 import { IconButton } from '../ui/IconButton'
 import Modal from '../ui/Modal'
 import type { SessionRecallHit } from '../../../shared/session-recall'
@@ -40,6 +40,7 @@ interface ChatHeaderProps {
   onSessionRecallQueryChange: (value: string) => void
   onSessionRecallSearch: () => void
   onAttachSessionRecall: (conversationId: string) => void
+  onTogglePanel?: () => void
   onHistoryOpen?: () => void
   sessionTitle?: string
   formatTime: (time: string) => string
@@ -68,6 +69,7 @@ export default function ChatHeader({
   onSessionRecallQueryChange,
   onSessionRecallSearch,
   onAttachSessionRecall,
+  onTogglePanel,
   onHistoryOpen,
   sessionTitle,
   formatTime,
@@ -281,7 +283,7 @@ export default function ChatHeader({
           ) : null}
         </div>
 
-        <div className="flex items-center" style={{ gap: 4 }} data-chat-session-menu="true">
+        <div className="flex items-center" style={{ gap: 4, marginRight: -5 }} data-chat-session-menu="true">
           <div className="relative" data-chat-session-switcher="true">
             <IconButton
               icon={<MessageSquare style={{ width: 14, height: 14 }} strokeWidth={2} />}
@@ -301,6 +303,14 @@ export default function ChatHeader({
             onClick={onNewSession}
             title="新建对话"
           />
+
+          {onTogglePanel && (
+            <IconButton
+              icon={<PanelLeftClose style={{ width: 14, height: 14 }} strokeWidth={2} />}
+              onClick={onTogglePanel}
+              title="收起/展开聊天面板"
+            />
+          )}
         </div>
       </div>
 

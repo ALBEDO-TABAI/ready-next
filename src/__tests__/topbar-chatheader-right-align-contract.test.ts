@@ -20,6 +20,7 @@ test('TopBar right padding collapses to the shared 14px constant so it shares th
   assert.doesNotMatch(topbar, /--workbench-right-gutter/)
   assert.doesNotMatch(workbench, /--workbench-right-gutter/)
   assert.match(chatHeader, /padding:\s*'0 14px'/)
+  assert.match(chatHeader, /marginRight:\s*-5/)
   assert.match(motionLayer, /paddingRight:\s*WORKBENCH_TOPBAR_PADDING_RIGHT/)
 })
 

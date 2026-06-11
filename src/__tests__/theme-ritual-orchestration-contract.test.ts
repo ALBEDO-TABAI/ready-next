@@ -12,7 +12,7 @@ test('theme transitions route through the ritual overlay and the per-selector tr
   const styles = readWorkspaceFile('src/renderer/styles/index.css')
   const ritualCss = readWorkspaceFile('src/renderer/styles/ritual-overlay.css')
   const app = readWorkspaceFile('src/renderer/App.tsx')
-  const topBar = readWorkspaceFile('src/renderer/components/layout/TopBar.tsx')
+  const iconRail = readWorkspaceFile('src/renderer/components/layout/IconRail.tsx')
   const ritualOverlay = readWorkspaceFile('src/renderer/components/overlay/RitualOverlay.tsx')
   const themeChoreography = readWorkspaceFile('src/renderer/components/overlay/ThemeRitualChoreography.tsx')
 
@@ -136,10 +136,10 @@ test('theme transitions route through the ritual overlay and the per-selector tr
   // matches the engine's actual holding timeline (not a hardcoded CSS fallback).
   assert.match(ritualOverlay, /--ritual-hold-duration[\s\S]*?holdingMinDurationMs/)
 
-  // Topbar disables the toggle while the theme ritual is running.
-  assert.match(topBar, /useRitualOverlayStore/)
-  assert.match(topBar, /state\.session\?\.stage === 'theme-transition'/)
-  assert.match(topBar, /disabled=\{isThemeRitualRunning\}/)
+  // The rail settings menu disables the theme toggle while the theme ritual is running.
+  assert.match(iconRail, /useRitualOverlayStore/)
+  assert.match(iconRail, /state\.session\?\.stage === 'theme-transition'/)
+  assert.match(iconRail, /disabled=\{isThemeRitualRunning\}/)
 })
 
 test('Stage 3 — will-change is scoped to ritual phase only, not in base .ready-app-content rule', () => {
