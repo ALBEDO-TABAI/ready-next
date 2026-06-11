@@ -20,6 +20,10 @@ export type RunOutcome =
     initiator: string
     projectionPatch?: Record<string, unknown> | null
     terminalReason?: string | null
+    /** EP2-Q3 — the final assistant text as emitted to the user (incl. the
+     *  default-text fallback branch). Q4a generates the response-digest
+     *  proof from this INSIDE finalizeRunOutcome, before the verdict. */
+    finalText?: string | null
   }
   | {
     kind: 'checkpoint'
@@ -32,6 +36,8 @@ export type RunOutcome =
     initiator: string
     projectionPatch?: Record<string, unknown> | null
     terminalReason?: string | null
+    /** EP2-Q3 — see the done variant. */
+    finalText?: string | null
   }
   | {
     kind: 'error' | 'cancelled' | 'preempted' | 'interrupted'

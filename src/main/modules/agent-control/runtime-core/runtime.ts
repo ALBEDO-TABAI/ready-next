@@ -90,7 +90,8 @@ import {
   registerPendingTaskEventListener,
   type PendingTaskEventRow,
 } from '../system-reminders/background-task-terminal-reminder'
-import type { TaskEventBridgePayload } from '../../browser-engine/task-event-bridge'
+import { taskEventBridge, type TaskEventBridgePayload } from '../../browser-engine/task-event-bridge'
+import { createTaskEventProofListener, createTaskProofSink } from '../quality/proof-collector'
 import { BrowserCollectionConsentStore } from '../../browser-engine/browser-collection-consent'
 import { forgetSession } from '../session/session-continuity'
 import { isRetryOnlyTurn } from '../skills/skill-detection-inputs'
@@ -607,6 +608,12 @@ export class AgentControlRuntime extends EventEmitter {
     // Start memory lifecycle manager
     this.memoryLifecycle.start()
     this.autoNarrationContinuationRunner.trigger()
+
+    // EP2-Q3 — additive bridge listener: terminal task events become
+    // task_event proofs on the owning projection (bridge itself untouched).
+    taskEventBridge.registerProjectionSink(
+      createTaskEventProofListener(createTaskProofSink(this.taskProjectionStore)),
+    )
 
     const sidecarEnabled = this.getSettingBool('remote_channels_enabled', true)
     const autostart = this.getSettingBool('sidecar_autostart', true)

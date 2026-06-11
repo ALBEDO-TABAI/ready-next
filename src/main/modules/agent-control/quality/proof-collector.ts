@@ -1,0 +1,151 @@
+/**
+ * EP2-Q3 — proof collection, five sources (02 §3): tool results, artifacts,
+ * task events, run state, and the assistant's final response digest.
+ *
+ * The response digest makes direct_answer turns provable WITHOUT a task-type
+ * exemption: a pure Q&A turn's deliverable IS the reply — we store sha256 +
+ * a truncated excerpt, never the full text. Ordering contract (Q4a): the
+ * digest proof lands inside finalizeRunOutcome BEFORE the adjudicator runs.
+ *
+ * Governance (Q1 schema): proof_refs ≤100 per task — overflow rolls into
+ * the task archive (jsonl), oldest first. Collection failures never block
+ * the main flow (metric only).
+ */
+
+import { createHash } from 'node:crypto'
+import { appendFileSync, mkdirSync } from 'node:fs'
+import { dirname } from 'node:path'
+
+import { logAgentMetric } from '../metrics'
+import type { TaskProjectionRecord } from '../contracts/run-contracts'
+
+export const PROOF_KINDS = ['tool_result', 'artifact', 'task_event', 'run_state', 'assistant_response'] as const
+export type ProofKind = (typeof PROOF_KINDS)[number]
+
+export interface ProofRef {
+  kind: ProofKind
+  /** Human-meaningful reference: tool name, artifact path, event key, excerpt. */
+  ref: string
+  ts: string
+  digest: string
+}
+
+export const PROOF_REFS_LIMIT = 100
+
+function sha256(text: string): string {
+  return createHash('sha256').update(text).digest('hex')
+}
+
+function proof(kind: ProofKind, ref: string, digestSource: string, now: Date): ProofRef {
+  return { kind, ref: ref.slice(0, 200), ts: now.toISOString(), digest: sha256(digestSource) }
+}
+
+export function collectToolResultProof(toolName: string, resultSummary: string, now: Date): ProofRef {
+  return proof('tool_result', toolName, `${toolName}:${resultSummary}`, now)
+}
+
+export function collectArtifactProof(path: string, now: Date): ProofRef {
+  return proof('artifact', path, path, now)
+}
+
+export function collectTaskEventProof(payload: { taskId: string; status: string }, now: Date): ProofRef {
+  const key = `${payload.taskId}|${payload.status}`
+  return proof('task_event', key, key, now)
+}
+
+export function collectRunStateProof(runStateRef: string, now: Date): ProofRef {
+  return proof('run_state', runStateRef, runStateRef, now)
+}
+
+/** sha256 + truncated excerpt, never the full reply. Empty reply → null
+ *  (a run that produced no final text has nothing to prove). */
+export function collectResponseDigestProof(finalText: string | null | undefined, now: Date): ProofRef | null {
+  const text = String(finalText || '').trim()
+  if (!text) return null
+  return { kind: 'assistant_response', ref: text.slice(0, 120), ts: now.toISOString(), digest: sha256(text) }
+}
+
+export function isValidProofRef(row: unknown): row is ProofRef {
+  if (!row || typeof row !== 'object') return false
+  const candidate = row as Record<string, unknown>
+  return (PROOF_KINDS as readonly string[]).includes(String(candidate.kind))
+    && typeof candidate.ref === 'string' && candidate.ref.length > 0
+    && typeof candidate.ts === 'string' && Number.isFinite(Date.parse(candidate.ts))
+    && typeof candidate.digest === 'string' && /^[0-9a-f]{64}$/.test(candidate.digest)
+}
+
+/**
+ * Append with rolling governance: malformed ADDITIONS are rejected loudly
+ * (writer bug, not data); overflow beyond the limit rolls the OLDEST rows
+ * into the archive callback so recent proofs stay queryable in the DB.
+ */
+export function appendProofRefs(
+  existing: unknown,
+  additions: ReadonlyArray<ProofRef>,
+  opts: { limit?: number; archive?: (rows: ProofRef[]) => void } = {},
+): ProofRef[] {
+  for (const row of additions) {
+    if (!isValidProofRef(row)) {
+      throw new Error(`[proof-collector] malformed proof ref rejected: ${JSON.stringify(row).slice(0, 120)}`)
+    }
+  }
+  const limit = opts.limit ?? PROOF_REFS_LIMIT
+  const base = Array.isArray(existing) ? existing.filter(isValidProofRef) : []
+  const merged = [...base, ...additions]
+  if (merged.length <= limit) return merged
+  const overflow = merged.slice(0, merged.length - limit)
+  if (overflow.length > 0 && opts.archive) {
+    try { opts.archive(overflow) } catch { /* archive failure must not lose the write */ }
+  }
+  return merged.slice(merged.length - limit)
+}
+
+/** Default archive writer: one JSON line per overflow row. */
+export function createJsonlArchiver(filePath: string): (rows: ProofRef[]) => void {
+  return (rows) => {
+    mkdirSync(dirname(filePath), { recursive: true })
+    appendFileSync(filePath, rows.map((row) => JSON.stringify(row)).join('\n') + '\n', 'utf-8')
+  }
+}
+
+export interface ProofSinkStore {
+  get(taskId: string): TaskProjectionRecord | null
+  update(taskId: string, patch: Partial<TaskProjectionRecord>, options?: { silent?: boolean; reasonHint?: string }): void
+}
+
+/**
+ * Store-backed sink. Failures are metrics, never throws into the caller —
+ * proof collection must not break runs (合同：采集失败不阻断主流程).
+ */
+export function createTaskProofSink(store: ProofSinkStore): {
+  append(taskId: string | null | undefined, proofs: ReadonlyArray<ProofRef>, opts?: { archive?: (rows: ProofRef[]) => void }): boolean
+} {
+  return {
+    append(taskId, proofs, opts = {}) {
+      if (!taskId || proofs.length === 0) return false
+      try {
+        const record = store.get(taskId)
+        if (!record) return false
+        const next = appendProofRefs(record.proofRefs ?? [], proofs, { archive: opts.archive })
+        store.update(taskId, { proofRefs: next }, { silent: true, reasonHint: 'proof_collect' })
+        return true
+      } catch (error) {
+        logAgentMetric('proof_collect_failed', {
+          taskId,
+          reason: error instanceof Error ? error.message : String(error),
+        })
+        return false
+      }
+    },
+  }
+}
+
+/** Additive TaskEventBridge listener — terminal task events become proofs. */
+export function createTaskEventProofListener(
+  sink: ReturnType<typeof createTaskProofSink>,
+  now: () => Date = () => new Date(),
+): (payload: { taskId: string; status: string }) => void {
+  return (payload) => {
+    sink.append(payload.taskId, [collectTaskEventProof(payload, now())])
+  }
+}

@@ -4189,6 +4189,7 @@ export class AgentSdkRuntime extends EventEmitter {
           initiator: runHandle.abortInitiator || 'done',
           terminalReason: 'checkpoint_steered',
           projectionPatch: finalProjectionPatch,
+          finalText, // EP2-Q3: same variable emitted above
         }, {
           runMetaRepository: this.getRunMetaRepositoryForFinalize(),
           writeProjectionTerminalPatch: (projectionPatch) => {
@@ -4901,6 +4902,9 @@ export class AgentSdkRuntime extends EventEmitter {
         toolCallsUsed: usedTools.length,
         initiator: runHandle.abortInitiator || 'done',
         projectionPatch: finalProjectionPatch,
+        // EP2-Q3: the SAME variable emitted to the user above — including
+        // the empty-reply default-text branch that just ran.
+        finalText,
       }, {
         runMetaRepository: this.getRunMetaRepositoryForFinalize(),
         writeProjectionTerminalPatch: (projectionPatch) => {
