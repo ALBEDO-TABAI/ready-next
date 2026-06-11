@@ -43,8 +43,8 @@ test('write-direction gate runs in warning mode: exit 0, inventory listed, stric
   const output = execFileSync('node', ['scripts/check-ledger-write-direction.cjs'], { encoding: 'utf-8' })
   assert.match(output, /check-ledger-write-direction: ok/)
   // the known existing-violation inventory (burn-down list, see ownership
-  // matrix spec): reconciler×3 (T3 moves them into the finalizer channel)
-  // + database.ts browser_tasks×1. New violations would raise this count —
+  // matrix spec): reconciler×5 (T3 moves them into the finalizer channel)
+  // + database.ts browser_tasks×2. New violations would raise this count —
   // the assertion pins the inventory so additions are loud.
-  assert.match(output, /\(4 warnings\)/)
+  assert.match(output, /\(7 warnings\)/)
 })

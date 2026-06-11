@@ -32,8 +32,11 @@
 | # | 账本 | 位置 | 处置 |
 |---|------|------|------|
 | 1 | task_projections | app-control/startup-run-reconciler.ts:102 | T3 reconcile 泛化时改走 finalizer 通道 |
-| 2 | run_meta | app-control/startup-run-reconciler.ts:83 | 同上 |
-| 3 | browser_tasks | app-control/startup-run-reconciler.ts:154 | 同上（启动收尸对执行级账本的直写） |
-| 4 | browser_tasks | database.ts:2116 | 评估迁移至 browser-engine 或加入 owner 白名单（属历史初始化路径） |
+| 2 | task_projections | app-control/startup-run-reconciler.ts:114 | 同上 |
+| 3 | run_meta | app-control/startup-run-reconciler.ts:83 | 同上 |
+| 4 | browser_tasks | app-control/startup-run-reconciler.ts:154 | 同上（启动收尸对执行级账本的直写） |
+| 5 | browser_tasks | app-control/startup-run-reconciler.ts:164 | 同上 |
+| 6 | browser_tasks | database.ts:2116 | 评估迁移至 browser-engine 或加入 owner 白名单（属历史初始化路径） |
+| 7 | browser_tasks | database.ts:2171 | 同上 |
 
-清单收齐后转 `--strict` 走单独小单（合同 T2 风险条款）。测试 `ledger-malformed-ignored.test.ts` 钉死清单数量=4——新增违规即测试红。
+清单收齐后转 `--strict` 走单独小单（合同 T2 风险条款）。测试 `ledger-malformed-ignored.test.ts` 钉死清单数量=7——新增违规即测试红。（Codex 波次 3 P1：gate 初版只记每文件每表首个匹配，已修为 matchAll 全量。）

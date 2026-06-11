@@ -157,6 +157,7 @@ export async function runFrozenCallConfirmation(
     if (reason === 'overlapping_card') {
       return { kind: 'pending_exists' }
     }
+    if (deps.taskId && deps.appendProof) deps.appendProof(deps.taskId, `frozen:${frozen.id}|expired`)
     return { kind: 'expired', frozenCallId: frozen.id, reason }
   }
 

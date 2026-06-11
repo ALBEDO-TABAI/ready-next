@@ -96,6 +96,18 @@ export function upsertBeliefCardMirror(
   })
 }
 
+/** Query a belief mirror row by its full relPath (the mirror primary key
+ *  derives from relPath — basename slugs can collide across dirs, EP2-K6). */
+export function getBeliefCardMirrorByRelPath(db: MirrorDb, relPath: string): BeliefCardMirrorRow | null {
+  const row = db
+    .prepare(
+      `SELECT id, slug, confidence, file_path, status, content_hash, title, summary, scope_id
+       FROM agent_memory_metadata WHERE category = 'belief' AND file_path = ? LIMIT 1`,
+    )
+    .get<BeliefCardMirrorRow>(relPath)
+  return row ?? null
+}
+
 /** Query a belief mirror row by slug (filename without `.md`). */
 export function getBeliefCardMirrorBySlug(db: MirrorDb, slug: string): BeliefCardMirrorRow | null {
   const row = db

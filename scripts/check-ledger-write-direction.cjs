@@ -38,7 +38,7 @@ const OWNERS = {
   ],
 }
 
-const WRITE_SQL = (table) => new RegExp(`(?:INSERT\\s+INTO|UPDATE|DELETE\\s+FROM)\\s+${table}\\b`, 'i')
+const WRITE_SQL = (table) => new RegExp(`(?:INSERT\\s+INTO|UPDATE|DELETE\\s+FROM)\\s+${table}\\b`, 'gi')
 
 const violations = []
 
@@ -51,10 +51,11 @@ function walk(dir) {
     const rel = relative(ROOT, abs).replace(/\\/g, '/')
     const text = readFileSync(abs, 'utf-8')
     for (const [table, owners] of Object.entries(OWNERS)) {
-      if (!WRITE_SQL(table).test(text)) continue
       if (owners.some((owner) => rel.startsWith(owner))) continue
-      const line = text.slice(0, text.search(WRITE_SQL(table))).split('\n').length
-      violations.push({ table, file: `${rel}:${line}` })
+      for (const match of text.matchAll(WRITE_SQL(table))) {
+        const line = text.slice(0, match.index).split('\n').length
+        violations.push({ table, file: `${rel}:${line}` })
+      }
     }
   }
 }

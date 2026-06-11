@@ -17,7 +17,7 @@ import { BeliefCardStore } from './belief-card-store'
 import {
   hashCardContent,
   upsertBeliefCardMirror,
-  getBeliefCardMirrorBySlug,
+  getBeliefCardMirrorByRelPath,
   syncBeliefCards,
   type MirrorDb,
 } from './belief-card-mirror'
@@ -37,9 +37,6 @@ export function isKnowledgeSystemEnabled(
   }
 }
 
-function slugOf(relPath: string): string {
-  return relPath.replace(/^.*\//, '').replace(/\.md$/, '')
-}
 
 export type FileSyncResult = 'synced' | 'invalid' | 'recovered' | 'skipped'
 
@@ -52,7 +49,7 @@ export type FileSyncResult = 'synced' | 'invalid' | 'recovered' | 'skipped'
 export function syncBeliefCardFile(db: MirrorDb, store: BeliefCardStore, relPath: string): FileSyncResult {
   const abs = join(store.rootPath, relPath)
   if (!existsSync(abs)) return 'skipped' // deleted file: orphan rows belong to C1 marking, never deleted here
-  const existing = getBeliefCardMirrorBySlug(db, slugOf(relPath))
+  const existing = getBeliefCardMirrorByRelPath(db, relPath)
   const card = store.readCard(relPath, { includeStaged: true })
   if (!card) {
     if (existing?.status === 'invalid') return 'skipped'

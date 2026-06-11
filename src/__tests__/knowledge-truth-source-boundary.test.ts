@@ -41,11 +41,11 @@ function fakeMirrorDb() {
           all: () => [],
         }
       }
-      if (sql.includes('SELECT') && sql.includes('slug = ?')) {
+      if (sql.includes('SELECT') && sql.includes('file_path = ?')) {
         return {
-          get: <R>(slug: unknown) => {
+          get: <R>(relPath: unknown) => {
             for (const row of rows.values()) {
-              if (row.category === 'belief' && row.slug === slug) return row as R
+              if (row.category === 'belief' && row.file_path === relPath) return row as R
             }
             return undefined as R
           },
