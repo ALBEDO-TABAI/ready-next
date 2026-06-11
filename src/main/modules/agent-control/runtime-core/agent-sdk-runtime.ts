@@ -114,6 +114,7 @@ import {
   stepCollectionIntentTtl,
 } from '../../../../shared/browser-collection-intent'
 import { classifyFollowupIntent, followupConsultsRecalledContext, type FollowupTaskRef } from '../../../../shared/agent-followup-intent'
+import { wrapRunMetaRepositoryWithCloseoutSnapshot } from '../task-projection/run-meta-snapshot'
 import { classifyBrowserToolCall } from '../../browser-engine/browser-tool-write-classification'
 import { createBrowserTurnLease, type BrowserTurnLease } from '../../browser-engine/agent-browser-turn-lease'
 import { filterToolsByVisionCapability } from '../tools-runtime/tool-gateway'
@@ -3075,7 +3076,14 @@ export class AgentSdkRuntime extends EventEmitter {
 
   private getRunMetaRepositoryForFinalize(): RunMetaRepositoryLike | null {
     try {
-      return (this.runtime?.getRunMetaRepository?.() || null) as RunMetaRepositoryLike | null
+      const repository = (this.runtime?.getRunMetaRepository?.() || null) as RunMetaRepositoryLike | null
+      if (!repository) return null
+      // EP2-T1 — close-out snapshot: task_type/budget copied from the
+      // projection (口径源) at finalize; run_meta never maintains them alone.
+      return wrapRunMetaRepositoryWithCloseoutSnapshot(
+        repository,
+        (taskId) => this.runtime?.getTaskProjection?.(taskId) ?? null,
+      )
     } catch {
       return null
     }
