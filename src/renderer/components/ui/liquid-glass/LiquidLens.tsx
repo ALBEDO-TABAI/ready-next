@@ -321,6 +321,9 @@ export function LiquidLens({
             inset: 0,
             zIndex: 0,
             pointerEvents: 'none',
+            // Projection content is ordinary DOM, not the live backdrop. Apply
+            // the same displacement map directly so the fallback stays useful
+            // when Chromium's backdrop blur is too weak in transparent windows.
             filter: filterId ? `url(#${filterId})` : undefined,
           }}
         >

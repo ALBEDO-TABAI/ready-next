@@ -23,6 +23,7 @@ interface ChatMessagesProps {
   toolTraceExpanded: boolean
   copiedMessageId: string | null
   showToolTraceCapsule: boolean
+  bottomOverlayInset: number
   onSetInputSuggestion: (value: string) => void
   onToggleToolTrace: () => void
   onCopyMessage: (id: string, content: string) => void | Promise<void>
@@ -49,6 +50,7 @@ export default function ChatMessages({
   toolTraceExpanded,
   copiedMessageId,
   showToolTraceCapsule,
+  bottomOverlayInset,
   onSetInputSuggestion,
   onToggleToolTrace,
   onCopyMessage,
@@ -77,7 +79,7 @@ export default function ChatMessages({
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [visibleMessages.length])
+  }, [visibleMessages.length, bottomOverlayInset])
 
   const latestToolEvent = toolTrace.length > 0 ? toolTrace[toolTrace.length - 1] : null
   const latestToolPreview = formatToolTracePreview(latestToolEvent?.text)
@@ -567,6 +569,17 @@ export default function ChatMessages({
         }
         return null
       })()}
+
+      {!onlyWelcomePresent && bottomOverlayInset > 0 && (
+        <div
+          data-chat-bottom-overlay-spacer="true"
+          aria-hidden="true"
+          style={{
+            flex: `0 0 ${bottomOverlayInset}px`,
+            minHeight: bottomOverlayInset,
+          }}
+        />
+      )}
 
       <div ref={messagesEndRef} />
     </div>

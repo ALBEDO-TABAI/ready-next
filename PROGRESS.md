@@ -1,8 +1,15 @@
 # Ready 开发进展
 
-> 更新时间: 2026-05-29
+> 更新时间: 2026-06-11
 
 ## 当前真值摘要
+
+- `2026-06-11` **聊天输入框液态玻璃实装收口**：
+  - 输入框从普通 inset slot 改为 `LiquidLens` 真折射层，生产参数收口到雾化 `3.5px`、折射强度 `6.4`、圆角 `18`、折射带 `22`、`ior 1.34`、`dome 5`。
+  - 真实 dev 中的透明 vibrancy 窗口不能只靠大半径 `backdrop-filter` 获得预览页效果；当前路线改为“实时克隆聊天滚动区投影 + 原滚动区在输入框下方 mask 掏洞”，避免清晰文字透显和重影。
+  - 输入框浮层不再使用外部暗色阴影；层次只来自内部高光、白纱、实时雾化和折射。
+  - 聊天消息列表新增由输入框浮层高度测出来的底部空白块，用户滚到底部时最后一条内容不会被输入框压住。
+  - `#/liquid-test` 保留为调参台，但验收标准已改为真实 Electron dev 截图；独立规格见 `docs/superpowers/specs/2026-06-11-electron-liquid-glass-composer.md`。
 
 - `2026-05-29` **预发布收尾：安装包瘦身（2.7GB→616MB）+ 按需模型包管理器，并把 readyguy 收为主线**：
   - **主线切换（仅本地）**：`codex/readyguy` 重命名为 `main`（相对旧 `main` 与 `origin/main` 均为 fast-forward，无 force、零丢提交）；旧 `main`（db765146）收为 `backup/main-20260529`（已包含 `origin/main` 6cb8cdf2）。清扫 39 条历史支线 + 失效 worktree，仅保留 `main` / `backup/main-20260529` / 一条仍有未提交工作的 locked agent worktree（`worktree-agent-a9c1e838…`）。`origin` 未改动，待后续推送。

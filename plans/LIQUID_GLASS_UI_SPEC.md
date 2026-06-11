@@ -263,24 +263,63 @@
   - `src/renderer/components/agent/ChatMessages.tsx`
   - `src/renderer/components/agent/ChatInput.tsx`
   - `src/renderer/components/agent/ChatAttachments.tsx`
+  - `src/renderer/components/ui/liquid-glass/LiquidLens.tsx`
+  - `src/renderer/components/ui/liquid-glass/refraction-map.ts`
+  - `src/renderer/LiquidTest.tsx`
 - Current ownership:
   - `ChatPanel.tsx` is the coordinator
   - split presentation blocks stay in their own files
+  - `ChatInput.tsx` owns the composer liquid-glass projection and lens parameters
+  - `LiquidLens.tsx` owns the reusable SVG displacement / backdrop-filter bridge
+  - `refraction-map.ts` owns the pure math for the displacement bitmap
 - Current rules:
   - keep the chat panel inside `workbench-panel-frame`
   - keep the outer shell transparent in liquid-glass mode
   - do not turn the header back into a separate glass card floating above the panel body
+  - the composer is an overlay at the bottom of the chat panel; `ChatMessages.tsx` must keep a measured bottom spacer so the final message can scroll above it
+  - do not add an external dark shadow behind the composer; depth should come from internal highlights, blur, refraction, and the soft veil
+  - do not replace the live projection with a static reflection bitmap; scroll tests must show that content behind the composer changes live
+
+### Composer liquid lens
+- Current route:
+  - The lab page is `#/liquid-test`.
+  - The production surface is the real Electron dev chat composer, not the lab.
+- Current material model:
+  - `LiquidLens` generates a displacement map on a canvas.
+  - The map feeds an SVG `feDisplacementMap`.
+  - The normal path is `backdrop-filter: blur(...) url(#filter) ...`.
+  - The production chat composer also mirrors the live message scroller into a projection layer because large backdrop blur radii are weak inside the transparent vibrancy window.
+- Current important parameters in production:
+  - radius: `18`
+  - bevel: `22`
+  - depth: `37`
+  - ior: `1.34`
+  - dome: `5`
+  - strength: `6.4`
+  - blur: `3.5`
+  - frost: `0`
+  - contrast: `0.84`
+- Current failure modes to avoid:
+  - placing mirrored side/reflection bands over the composer; this made the surface look frozen and opaque
+  - relying only on `backdrop-filter: blur(...)` for heavy misting in the transparent Electron window
+  - letting the original message text remain visible under the projection; this creates the clear-text plus ghosted-text double image
+  - adding external dark shadow under the input box
 
 ## Current Contract Tests Worth Reading
 - `src/__tests__/browser-unified-header-contract.test.ts`
 - `src/__tests__/workbench-shell-alignment-contract.test.ts`
 - `src/__tests__/panel-fusion-contract.test.ts`
 - `src/__tests__/renderer-startup-fouc-contract.test.ts`
+- `src/__tests__/input-slot-inset-contract.test.ts`
+- `src/__tests__/liquid-glass-refraction-map.test.ts`
+- `src/__tests__/rss-agent-workbench-regressions.test.ts`
 
 These tests are valuable because they lock practical UI truths that prose tends to drift on:
 - unified browser header ownership
 - left-edge alignment across modules
 - fused liquid-glass shell behavior
+- composer liquid-glass parameters, no-shadow contract, and scroll-bottom spacer
+- pure refraction-map behavior independent of DOM
 - first-frame theme bootstrap requirements
 
 ## Rules For A Windows Implementation Agent

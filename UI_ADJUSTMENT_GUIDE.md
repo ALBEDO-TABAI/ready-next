@@ -84,6 +84,12 @@
   如果要改聊天头部下拉卡片的毛玻璃、圆角、阴影和层级，先看这里。
 - 聊天消息列表：`src/renderer/components/agent/ChatMessages.tsx`
   用户消息仍在右侧，但正文现在固定左对齐；用户与 agent 消息之间的细淡白色分隔线也在这里。
+- 聊天输入框液态玻璃：`src/renderer/components/agent/ChatInput.tsx`
+  输入框的真折射层由 `LiquidLens` 承担，实时背景投影也在这里。不要把它改回普通 `ready-input-shell` 背景。
+- 输入框玻璃通用组件：`src/renderer/components/ui/liquid-glass/LiquidLens.tsx`、`src/renderer/components/ui/liquid-glass/refraction-map.ts`
+  前者负责把折射贴图接到 SVG / backdrop-filter，后者负责生成位移贴图。
+- 液态玻璃调参页：`src/renderer/LiquidTest.tsx`
+  路由是 `#/liquid-test`。先在调参页试参数，再回真实 dev 输入框截图验证。
 
 ### 浏览器
 
@@ -133,6 +139,7 @@
 - 聊天头部“窗口切换按钮”和“历史按钮”分工约定：`src/__tests__/chat-session-switcher-contract.test.ts`
 - 聊天头部浮层磨砂样式约定：`src/__tests__/chat-header-menu-style-contract.test.ts`
 - 用户消息左对齐与消息分隔线约定：`src/__tests__/chat-user-message-alignment-contract.test.ts`
+- 输入框液态玻璃与底部遮挡约定：`src/__tests__/input-slot-inset-contract.test.ts`、`src/__tests__/liquid-glass-refraction-map.test.ts`、`src/__tests__/rss-agent-workbench-regressions.test.ts`
 
 ## 5. 共用样式去哪里找
 
@@ -164,6 +171,10 @@
   先看 `ChatMessages.tsx`
 - 改消息之间那条很淡的分隔线：
   先看 `ChatMessages.tsx`
+- 改聊天记录底部被输入框遮住的问题：
+  先看 `ChatPanelBody.tsx` 里的 `composerBottomInset`，再看 `ChatMessages.tsx` 的 `data-chat-bottom-overlay-spacer`。
+- 改聊天输入框液态玻璃雾化、折射、圆角：
+  先看 `ChatInput.tsx` 的 `LiquidLens` 参数，再看 `LiquidTest.tsx` 和 `refraction-map.ts`；真实效果必须在 Electron dev 里截图验证。
 - 改文件树、缩略图网格、拖拽、右键菜单：
   先看 `FileTree.tsx`
 - 改文件夹卡片里那块小缩略图区域：
@@ -200,6 +211,9 @@
 - 聊天头部这两个弹层都应继续复用 `ready-floating-menu / chat-header-floating-menu` 这套磨砂浮层样式和较高层级，避免被聊天区正文盖住。
 - 用户消息虽然仍然待在右侧，但正文文本固定左对齐，不要再改回右对齐。
 - 用户与 agent 的普通消息之间现在用很淡的白色细线拉开层次；如果继续调整间距，优先在 `ChatMessages.tsx` 里微调，不要把分隔感重新塞回消息气泡内边距。
+- 聊天输入框是覆盖在消息列表底部的玻璃浮层；消息列表末尾必须保留由输入框高度测出来的空白尾巴，避免最后一条内容被压住。
+- 聊天输入框玻璃不允许再加外部暗色投影；需要层次时只用输入框内部高光、雾化、折射和轻量白纱。
+- Electron dev 里的输入框玻璃以真实聊天记录为验收对象；`#/liquid-test` 只用于调参，不代表最终 dev 表现。
 - 文件夹缩略图的画法固定拆在 `FolderPreview.tsx`，不要再把这块样式塞回 `FileTree.tsx`。
 - 文件夹缩略图“看什么内容、怎么退化”的规则固定拆在 `folderPreviewModel.ts`。
 - 日程左栏的真实入口固定在 `CalendarWorkbenchShell.tsx`。

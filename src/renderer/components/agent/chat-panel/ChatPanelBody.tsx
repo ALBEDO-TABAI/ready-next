@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import type { CSSProperties, RefObject } from 'react'
 import { X, Puzzle, Copy, StickyNote } from 'lucide-react'
 import type {
@@ -99,6 +99,8 @@ interface ChatPanelBodyProps extends Omit<TaskToolSnapshotProps, 'children'> {
   setAttachmentPreviewLoading: (loading: boolean) => void
 }
 
+const CHAT_COMPOSER_FALLBACK_BOTTOM_INSET = 156
+
 export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
   const {
     messages,
@@ -171,6 +173,9 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     setAttachmentPreviewLoading,
   } = props
 
+  const composerOverlayRef = useRef<HTMLDivElement | null>(null)
+  const [composerBottomInset, setComposerBottomInset] = useState(CHAT_COMPOSER_FALLBACK_BOTTOM_INSET)
+
   // 外壳保持透明：玻璃材质（折射/模糊/纱层）全部由 ChatInput 里的 LiquidLens 承担。
   const composerShellStyle = {
     borderRadius: 'var(--workbench-canvas-radius)',
@@ -178,6 +183,21 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     border: isDragOver ? '2px solid var(--color-blue)' : '1px solid transparent',
     boxShadow: 'none',
   } as CSSProperties
+
+  useLayoutEffect(() => {
+    const overlay = composerOverlayRef.current
+    if (!overlay) return
+
+    const updateInset = () => {
+      const nextInset = Math.ceil(overlay.getBoundingClientRect().height)
+      setComposerBottomInset((current) => (current === nextInset ? current : nextInset))
+    }
+
+    updateInset()
+    const observer = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(updateInset) : null
+    observer?.observe(overlay)
+    return () => observer?.disconnect()
+  }, [])
 
   const handleAttachmentPreview = useCallback(
     async (attachment: ChatAttachment) => {
@@ -309,6 +329,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
             toolTraceExpanded={toolTraceExpanded}
             copiedMessageId={copiedMessageId}
             showToolTraceCapsule={showToolTraceCapsule && shouldRenderGlobalToolTraceCapsule}
+            bottomOverlayInset={composerBottomInset}
             onSetInputSuggestion={onSetInputSuggestion}
             onToggleToolTrace={onToggleToolTrace}
             onCopyMessage={onCopyMessage}
@@ -365,6 +386,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
           })()}
 
           <div
+            ref={composerOverlayRef}
             className="ready-chat-composer-overlay"
             style={{
               position: 'absolute',

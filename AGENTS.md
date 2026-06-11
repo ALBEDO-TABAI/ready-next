@@ -42,6 +42,7 @@
 - Run 终止走唯一收口通道：所有退出路径经 `runtime-core/run-finalizer.ts` 的 `finalizeRunOutcome()`，终态账本与可见收口原子完成；通道外写终态被 `check-run-finalize-funnel.cjs` 禁止。零工具的"行动宣告"不得直接判 done（先转向、再 checkpoint）。
 - 后台任务（browser_tasks/skill child）终态必须经 `TaskEventBridge` 推回 agent 循环（活跃 run 注提醒 / 无 run 落 pending + 播报续跑）；无注册路由的 scheduleTask 运行时断言失败。自动续跑仅限播报建议（narration 档），执行类动作需用户显式确认。
 - 采集终态判决唯一来自 `browser-engine/collection-verdict.ts` 的 `resolveCollectionVerdict()`：0 条永不 completed；部分进展永不清断点；整任务重试只重试失败项。
+- 聊天输入框液态玻璃以真实 Electron dev 为验收面；`#/liquid-test` 只用于调参。生产输入框不得加外部暗色阴影、不得用静态镜像/截图贴片冒充实时折射，消息列表底部必须保留由输入框浮层高度测出的空白尾巴，避免最后一条消息被压住。
 - 稳定性合同回归入口：`npm run verify:stability`（终止合同/事件桥/判定矩阵/意图分类/会话快照全链焦点测试 + 三个 gate）。
 
 ## 3. Agent 与 Skill Runtime 速查
@@ -97,6 +98,7 @@
 - 更新日志：`CHANGELOG.md`
 - 架构原则：`.claude/architectural-principles.md`
 - 测试规约：`docs/superpowers/testing-conventions.md`
+- Electron 聊天输入框液态玻璃规格：`docs/superpowers/specs/2026-06-11-electron-liquid-glass-composer.md`
 
 关键阶段合同索引：
 

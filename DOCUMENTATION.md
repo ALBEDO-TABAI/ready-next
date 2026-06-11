@@ -130,6 +130,11 @@ Ready 采用 Electron 三层架构：
   - 统一封装字符串与 JSON 的读写
   - 保持现有 localStorage key 与数据格式不变
 
+### 3.6 Renderer UI 入口文档
+- UI 文件定位先看 `UI_ADJUSTMENT_GUIDE.md`，不要直接在整个 `src/renderer/` 里盲搜。
+- 液态玻璃总规格看 `plans/LIQUID_GLASS_UI_SPEC.md`。
+- Electron 聊天输入框液态玻璃的当前实现与迁移规格看 `docs/superpowers/specs/2026-06-11-electron-liquid-glass-composer.md`。
+
 ## 4. AI 供应商与能力层
 ### 4.1 共享配置模型
 统一配置定义在 `src/shared/ai-providers.ts`，目前拆成两层：

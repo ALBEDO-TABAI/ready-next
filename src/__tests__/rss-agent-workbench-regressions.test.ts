@@ -38,9 +38,13 @@ test('rss feed keeps compact toolbar controls while article rows stay on the sha
 
 test('chat composer keeps a visible shell and a primary send button after liquid glass restyle', () => {
   const chatPanelBody = readWorkspaceFile('src/renderer/components/agent/chat-panel/ChatPanelBody.tsx')
+  const chatMessages = readWorkspaceFile('src/renderer/components/agent/ChatMessages.tsx')
   const chatInput = readWorkspaceFile('src/renderer/components/agent/ChatInput.tsx')
 
   assert.match(chatPanelBody, /const composerShellStyle = \{/)
+  assert.match(chatPanelBody, /const composerOverlayRef = useRef<HTMLDivElement \| null>\(null\)/)
+  assert.match(chatPanelBody, /bottomOverlayInset=\{composerBottomInset\}/)
+  assert.match(chatMessages, /data-chat-bottom-overlay-spacer="true"/)
   assert.match(chatInput, /data-chat-composer-shell="true"/)
   // 2026-06-10: 玻璃材质收口到 LiquidLens；外壳透明、仅拖拽态有描边。
   assert.match(chatPanelBody, /background:\s*'transparent'/)

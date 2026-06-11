@@ -44,6 +44,10 @@ export interface ChatInputHandle {
   resetHeight: () => void
 }
 
+// The composer runs inside a transparent macOS vibrancy window, where large
+// backdrop blur radii are visually clamped. This projection mirrors the live
+// message scroller into the lens, then masks the original scroller under the
+// composer so text is seen only through the misted/refracted copy.
 function ChatComposerBackdropProjection() {
   const layerRef = useRef<HTMLDivElement | null>(null)
 
