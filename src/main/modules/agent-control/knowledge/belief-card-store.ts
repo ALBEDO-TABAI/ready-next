@@ -215,6 +215,39 @@ export class BeliefCardStore {
     return out
   }
 
+  /** Resolve the absolute memory root (for callers that hash file contents). */
+  get rootPath(): string {
+    return this.root
+  }
+
+  /**
+   * Enumerate every `.md` under knowledge dirs, including unparseable ones
+   * (card === null). Used by the DB mirror sync to record invalid cards as
+   * `status: invalid` rows without dropping the row.
+   */
+  listAllCardFiles(dir = 'knowledge'): Array<{ relPath: string; card: BeliefCard | null }> {
+    const out: Array<{ relPath: string; card: BeliefCard | null }> = []
+    const absDir = this.absInRoot(dir)
+    if (!absDir || !existsSync(absDir)) return out
+    const walk = (currentRel: string): void => {
+      const absCur = this.absInRoot(currentRel)
+      if (!absCur || !existsSync(absCur)) return
+      for (const name of readdirSync(absCur)) {
+        const childRel = `${currentRel}/${name}`
+        const absChild = join(absCur, name)
+        let isDir = false
+        try { isDir = statSync(absChild).isDirectory() } catch { /* */ }
+        if (isDir) {
+          walk(childRel)
+        } else if (name.endsWith('.md')) {
+          out.push({ relPath: childRel, card: this.readCard(childRel, { includeStaged: true }) })
+        }
+      }
+    }
+    walk(dir)
+    return out
+  }
+
   /** Transition a card to a new status. Returns false if card unreadable. */
   transition(relPath: string, to: BeliefCardStatus): boolean {
     const current = this.readCard(relPath, { includeStaged: true })

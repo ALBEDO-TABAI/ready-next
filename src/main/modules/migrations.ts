@@ -2180,6 +2180,24 @@ const migrations: Migration[] = [
         )
       `)
     }
+  },
+  // ------------------------------------------------------------------ 052
+  {
+    // EP1-K2 — belief card DB mirror columns. The cards are file-truth
+    // (belief-card-store.ts); these nullable columns let a row in
+    // agent_memory_metadata index a card (slug/confidence/file_path/status +
+    // content_hash for file→DB drift detection). Existing rows keep NULL.
+    name: '052_belief_card_mirror_columns',
+    up: (db) => {
+      const cols = db.prepare('PRAGMA table_info(agent_memory_metadata)').all<{ name: string }>()
+      const has = (name: string) => cols.some((c) => c.name === name)
+      // SQLite has no ALTER TABLE ... ADD COLUMN IF NOT EXISTS; check first.
+      if (!has('slug')) db.exec('ALTER TABLE agent_memory_metadata ADD COLUMN slug TEXT')
+      if (!has('confidence')) db.exec('ALTER TABLE agent_memory_metadata ADD COLUMN confidence TEXT')
+      if (!has('file_path')) db.exec('ALTER TABLE agent_memory_metadata ADD COLUMN file_path TEXT')
+      if (!has('status')) db.exec('ALTER TABLE agent_memory_metadata ADD COLUMN status TEXT')
+      if (!has('content_hash')) db.exec('ALTER TABLE agent_memory_metadata ADD COLUMN content_hash TEXT')
+    }
   }
 ]
 
