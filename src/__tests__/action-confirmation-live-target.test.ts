@@ -29,18 +29,23 @@ import type { BrowserController } from '../main/modules/browser-engine/ipc-handl
 interface MockCalls {
   scripts: string[]
   mouse: Array<Record<string, unknown>>
+  typed: string[]
 }
 
 function makeController(
   executeJS: (source: string) => unknown,
 ): BrowserController & { calls: MockCalls } {
-  const calls: MockCalls = { scripts: [], mouse: [] }
+  const calls: MockCalls = { scripts: [], mouse: [], typed: [] }
   const mock = {
     calls,
     getTabList: () => [{ id: 'tab-1', title: 'Example', url: 'https://example.com', active: true }],
     normalizedToCss: async (_tabId: unknown, x: number, y: number) => ({ x, y, width: 1000, height: 800 }),
     dispatchMouse: async (_tabId: unknown, payload: Record<string, unknown>) => {
       calls.mouse.push(payload)
+    },
+    dispatchKey: async () => {},
+    typeTextDirectly: async (_tabId: unknown, text: unknown) => {
+      calls.typed.push(String(text))
     },
     executeJS: async (_tabId: unknown, code: unknown) => {
       const source = String(code || '')
@@ -191,6 +196,12 @@ test('browser_click_at: labeled M1 target under the point is refused before any 
   const output = await executeToolCall('browser_click_at', { x: 500, y: 500 }, modelContext(controller))
   assert.equal(output.data?.errorKind, 'denied_manual_only')
   assert.equal(controller.calls.mouse.length, 0, 'no mouse event may fire on a refused target')
+  // Parent-bubble proof: clicks bubble, so hitting an icon/span inside a
+  // 「确认支付」 button still presses the button — the probe must climb to
+  // the nearest clickable owner instead of reading the bare child.
+  const probeScript = controller.calls.scripts.find((s) => s.includes('__READY_CLICK_POINT_LABEL_PROBE__'))
+  assert.ok(probeScript!.includes('closest'), 'probe must climb to the nearest clickable ancestor')
+  assert.ok(probeScript!.includes('[role="button"]'), 'clickable owner selector must cover role=button')
 })
 
 test('browser_click_at: unresolvable label proceeds (visual channel stays usable)', async () => {
@@ -206,15 +217,81 @@ test('browser_click_at: unresolvable label proceeds (visual channel stays usable
 
 test('browser_type: opaque selector resolving to a password field → reroute to confirmation', async () => {
   const controller = makeController((source) => {
-    if (source.includes('__READY_PASSWORD_FILL_CHECK__')) {
+    if (source.includes('__READY_LIVE_TARGET_GUARD__')) {
       return { __readyPasswordFillBlocked: true }
     }
     return null
   })
   const output = await executeToolCall('browser_type', { selector: '#input-3', text: 'hunter2' }, modelContext(controller))
   assert.equal(output.data?.errorKind, 'denied_pending_confirmation')
-  const typeScript = controller.calls.scripts.find((s) => s.includes('__READY_PASSWORD_FILL_CHECK__'))
+  const typeScript = controller.calls.scripts.find((s) => s.includes('__READY_LIVE_TARGET_GUARD__'))
   assert.ok(typeScript!.includes('!false'), 'no args cue → in-page allow flag must be false')
+})
+
+test('browser_type: opaque selector resolving to a captcha field → denied_manual_only (代填验证码被拦)', async () => {
+  const controller = makeController((source) => {
+    if (source.includes('__READY_LIVE_TARGET_GUARD__')) {
+      return { __readyManualOnlyBlocked: true, label: '验证码' }
+    }
+    return null
+  })
+  const output = await executeToolCall('browser_type', { selector: '#input-3', text: '8244' }, modelContext(controller))
+  assert.equal(output.data?.errorKind, 'denied_manual_only')
+  assert.equal(output.envelope?.kind, 'denied_by_policy')
+  const typeScript = controller.calls.scripts.find((s) => s.includes('__READY_LIVE_TARGET_GUARD__'))
+  assert.ok(typeScript!.includes('验证码'), 'in-page guard must embed the policy captcha pattern')
+  assert.ok(typeScript!.includes('placeholder'), 'guard must read field semantics (placeholder/aria/name/label)')
+})
+
+// ---------------------------------------------------------------------------
+// 4b. Coordinate typing (browser_type_at)
+// ---------------------------------------------------------------------------
+
+test('browser_type_at: password field under the point without an args cue → reroute, nothing typed', async () => {
+  const controller = makeController((source) => {
+    if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
+      return { label: '', inputLabel: '', password: true }
+    }
+    return null
+  })
+  const output = await executeToolCall('browser_type_at', { x: 500, y: 500, text: 'hunter2' }, modelContext(controller))
+  assert.equal(output.data?.errorKind, 'denied_pending_confirmation')
+  assert.deepEqual(controller.calls.typed, [], 'no text may be typed into an unconfirmed password field')
+  assert.equal(controller.calls.mouse.length, 0, 'the focusing click must not fire either')
+})
+
+test('browser_type_at: captcha field under the point → denied_manual_only', async () => {
+  const controller = makeController((source) => {
+    if (source.includes('__READY_CLICK_POINT_LABEL_PROBE__')) {
+      return { label: '', inputLabel: '请输入验证码', password: false }
+    }
+    return null
+  })
+  const output = await executeToolCall('browser_type_at', { x: 500, y: 500, text: '8244' }, modelContext(controller))
+  assert.equal(output.data?.errorKind, 'denied_manual_only')
+  assert.deepEqual(controller.calls.typed, [])
+})
+
+test('browser_type_at: unresolvable probe proceeds (visual channel stays usable)', async () => {
+  const controller = makeController(() => null)
+  const output = await executeToolCall('browser_type_at', { x: 500, y: 500, text: '你好' }, modelContext(controller))
+  assert.match(output.text, /"ok": true/)
+  assert.deepEqual(controller.calls.typed, ['你好'])
+})
+
+// ---------------------------------------------------------------------------
+// 4c. Smart typing (browser_type_smart) — scorer-resolved element
+// ---------------------------------------------------------------------------
+
+test('browser_type_smart: scorer resolving a password field without an args cue → reroute', async () => {
+  const controller = makeController((source) => {
+    if (source.includes('__READY_LIVE_TARGET_GUARD__') && source.includes('Smart target not found')) {
+      return { __readyPasswordFillBlocked: true }
+    }
+    return null
+  })
+  const output = await executeToolCall('browser_type_smart', { target: '输入框', text: 'hunter2' }, modelContext(controller))
+  assert.equal(output.data?.errorKind, 'denied_pending_confirmation')
 })
 
 // ---------------------------------------------------------------------------

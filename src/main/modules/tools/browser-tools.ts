@@ -306,20 +306,100 @@ function buildBrowserTargetProbeJs(nodeId: string): string {
 }
 
 /**
- * EP1-I3 live-target net — best-effort label probe for coordinate clicks.
- * Returns `{ label }` (possibly empty) for `document.elementFromPoint` at the
- * given CSS point; the caller refuses M1 manual-only labels and proceeds on
- * empty/failed probes (the visual channel must keep working).
+ * EP1-I3 live-target net — in-page guard snippet shared by every typing
+ * script (browser_type / browser_type_smart / browser_compose_message).
+ * Defines `readyInputGuard(el)` returning a blocked-marker object or null.
+ *
+ * Input semantics come from what the field IS (placeholder / aria-label /
+ * name / id / title / associated <label>), deliberately NOT from its current
+ * value/textContent — a chat draft mentioning「验证码」must not trip the net.
+ * The M1 patterns are generated from the policy module (single source).
+ */
+function buildInputGuardSnippetJs(allowPasswordFill: boolean): string {
+  return `
+    const __READY_LIVE_TARGET_GUARD__ = true;
+    const READY_MANUAL_ONLY_PATTERNS = [${MANUAL_ONLY_TARGET_REGEX_SOURCES.map((src) => `new RegExp(${JSON.stringify(src)}, 'i')`).join(', ')}];
+    function readyInputSemanticsLabel(el) {
+      if (!el || !el.getAttribute) return '';
+      const parts = [
+        el.getAttribute('placeholder'), el.getAttribute('aria-label'), el.getAttribute('name'),
+        el.getAttribute('id'), el.getAttribute('title'), el.getAttribute('data-placeholder'),
+      ];
+      try {
+        const id = el.getAttribute('id');
+        if (id) {
+          const owner = document.querySelector('label[for="' + CSS.escape(id) + '"]');
+          if (owner) parts.push(owner.textContent);
+        }
+        const wrap = el.closest && el.closest('label');
+        if (wrap) parts.push(wrap.textContent);
+      } catch { /* label association is best-effort */ }
+      return parts.filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim().slice(0, 200);
+    }
+    function readyInputGuard(el) {
+      const label = readyInputSemanticsLabel(el);
+      if (label && READY_MANUAL_ONLY_PATTERNS.some((p) => p.test(label))) {
+        return { __readyManualOnlyBlocked: true, label: label.slice(0, 80) };
+      }
+      if (el instanceof HTMLInputElement && el.type === 'password' && !${JSON.stringify(allowPasswordFill)}) {
+        return { __readyPasswordFillBlocked: true };
+      }
+      return null;
+    }
+  `
+}
+
+/**
+ * EP1-I3 live-target net — best-effort target probe for coordinate actions.
+ * Climbs from `document.elementFromPoint` to the nearest clickable owner
+ * (clicks BUBBLE: hitting an icon/span inside a「确认支付」button still
+ * presses the button) and returns `{ label, inputLabel, password }`. The
+ * callers refuse M1 / unconfirmed-password targets and proceed on empty or
+ * failed probes (the visual channel must keep working).
  */
 function buildClickPointLabelProbeJs(cssX: number, cssY: number): string {
   return `(() => {
     const __READY_CLICK_POINT_LABEL_PROBE__ = true;
-    const el = document.elementFromPoint(${JSON.stringify(Math.round(cssX))}, ${JSON.stringify(Math.round(cssY))});
-    if (!el) return { label: '' };
-    const label = [el.textContent, el.getAttribute && el.getAttribute('aria-label'), el.value, el.title]
-      .filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim().slice(0, 200);
-    return { label };
+    const start = document.elementFromPoint(${JSON.stringify(Math.round(cssX))}, ${JSON.stringify(Math.round(cssY))});
+    if (!start) return { label: '', inputLabel: '', password: false };
+    const owner = (start.closest && start.closest('button, a, [role="button"], [role="link"], input, textarea, select, summary, [onclick], label')) || start;
+    const clickParts = [owner.textContent, owner.getAttribute && owner.getAttribute('aria-label'), owner.value, owner.title];
+    if (owner !== start && start.getAttribute) clickParts.push(start.getAttribute('aria-label'));
+    const label = clickParts.filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim().slice(0, 200);
+    const inputParts = owner.getAttribute
+      ? [owner.getAttribute('placeholder'), owner.getAttribute('aria-label'), owner.getAttribute('name'), owner.getAttribute('id'), owner.getAttribute('title')]
+      : [];
+    try {
+      if (owner.labels) for (const l of owner.labels) inputParts.push(l.textContent);
+    } catch { /* label association is best-effort */ }
+    const inputLabel = inputParts.filter(Boolean).join(' ').replace(/\\s+/g, ' ').trim().slice(0, 200);
+    const password = owner instanceof HTMLInputElement && owner.type === 'password';
+    return { label, inputLabel, password };
   })()`
+}
+
+/**
+ * Convert an in-page guard marker into the structured domain refusal
+ * (ToolDomainError flows through the browser catch to the dispatcher).
+ */
+function throwIfLiveTargetGuardBlocked(result: unknown, detail: Record<string, unknown>): void {
+  if (!result || typeof result !== 'object') return
+  const marker = result as { __readyManualOnlyBlocked?: unknown; __readyPasswordFillBlocked?: unknown; label?: unknown }
+  if (marker.__readyManualOnlyBlocked === true) {
+    const label = String(marker.label || '')
+    throw new ToolDomainError(
+      'denied_manual_only',
+      `目标「${label.slice(0, 80)}」命中 M1 规则（支付确认/改密提交/验证码必须由用户亲手完成）。请引导用户亲自完成这一步，不要代替执行或绕过。`,
+      { ...detail, label },
+    )
+  }
+  if (marker.__readyPasswordFillBlocked === true) {
+    throw new ToolDomainError(
+      'denied_pending_confirmation',
+      '目标是密码输入框。请在调用参数中说明目标（如「登录密码输入框」），经用户确认后执行。',
+      { ...detail, ruleId: 'm3-login-existing-account' },
+    )
+  }
 }
 
 function buildBrowserActOnTargetJs(nodeId: string, action: AgentBrowserAction, value?: string): string {
@@ -2479,10 +2559,13 @@ function buildSmartTypeJs(options: {
   text: string
   clearFirst: boolean
   submit: boolean
+  /** EP1-I3 live-target net — args carried a password cue (gate-confirmed). */
+  allowPasswordFill?: boolean
 }): string {
   const normalizedTarget = options.target.trim().toLowerCase()
   return `
     (() => {
+      ${buildInputGuardSnippetJs(options.allowPasswordFill === true)}
       const target = ${JSON.stringify(normalizedTarget)}
       const text = ${JSON.stringify(options.text)}
       const clearFirst = ${options.clearFirst ? 'true' : 'false'}
@@ -2613,6 +2696,11 @@ function buildSmartTypeJs(options: {
       }
 
       if (!best) return 'Smart target not found: score failed'
+
+      // EP1-I3 live-target net — the scorer may have resolved a captcha or
+      // password field the args never named.
+      const __readyGuard = readyInputGuard(best)
+      if (__readyGuard) return __readyGuard
 
       const focusAndClick = (el) => {
         try { el.scrollIntoView({ block: 'center', behavior: 'instant' }) } catch { /* ignore */ }
@@ -4356,14 +4444,7 @@ export async function executeBrowserTool(
           })()
         `
         const result = await controller.executeJS(tabId, clickJs)
-        if (result && typeof result === 'object' && (result as { __readyManualOnlyBlocked?: unknown }).__readyManualOnlyBlocked === true) {
-          const label = String((result as { label?: unknown }).label || '')
-          throw new ToolDomainError(
-            'denied_manual_only',
-            `点击目标「${label}」命中 M1 规则（支付确认/改密提交/验证码必须由用户亲手完成）。请引导用户亲自完成这一步。`,
-            { selector, label },
-          )
-        }
+        throwIfLiveTargetGuardBlocked(result, { selector })
         return String(result)
       }
 
@@ -4409,19 +4490,21 @@ export async function executeBrowserTool(
         let tabId = (args.tab_id as string) || null
         tabId = (await resolveHighControlAgentTab(controller, args, { signal: abortSignal })).tabId
         // EP1-I3 live-target net — an opaque selector can resolve to a
-        // password field without any cue in the args (the dispatch gate
-        // could not classify it as m3-login). Refuse with reroute guidance;
-        // a re-issued call naming the password field goes through the
-        // confirm→release path and passes here (cue present in args).
+        // password or captcha field without any cue in the args (the
+        // dispatch gate could not classify it). The in-page guard checks the
+        // REAL field semantics (placeholder/aria/name/label): M1 hits
+        // (验证码/改密/支付) refuse outright; unconfirmed password fills
+        // refuse with reroute guidance — a re-issued call naming the
+        // password field goes through the confirm→release path and passes
+        // here (cue present in args).
         const allowPasswordFill = argsCarryPasswordCue(JSON.stringify(args))
         const typeJs = `
           (function() {
-            const __READY_PASSWORD_FILL_CHECK__ = true;
+            ${buildInputGuardSnippetJs(allowPasswordFill)}
             const el = document.querySelector(${JSON.stringify(selector)});
             if (!el) return 'Element not found: ${selector.replace(/'/g, "\\'")}';
-            if (el instanceof HTMLInputElement && el.type === 'password' && !${JSON.stringify(allowPasswordFill)}) {
-              return { __readyPasswordFillBlocked: true };
-            }
+            const guard = readyInputGuard(el);
+            if (guard) return guard;
             el.focus();
             ${clearFirst ? 'el.value = "";' : ''}
             el.value = ${JSON.stringify(text)};
@@ -4431,13 +4514,7 @@ export async function executeBrowserTool(
           })()
         `
         const result = await controller.executeJS(tabId, typeJs)
-        if (result && typeof result === 'object' && (result as { __readyPasswordFillBlocked?: unknown }).__readyPasswordFillBlocked === true) {
-          throw new ToolDomainError(
-            'denied_pending_confirmation',
-            `选择器 ${selector} 指向密码输入框。请改用带「密码」说明的调用（如 selector 注明 password 字段）重试，经用户确认后执行。`,
-            { selector, ruleId: 'm3-login-existing-account' },
-          )
-        }
+        throwIfLiveTargetGuardBlocked(result, { selector })
         return String(result)
       }
 
@@ -4449,12 +4526,15 @@ export async function executeBrowserTool(
         const submit = args.submit === true
         const tabId = (args.tab_id as string) || null
         const shouldGuardSubmit = submit && await isLikelyChatPage(controller, tabId)
-        const result = String(await controller.executeJS(tabId, buildSmartTypeJs({
+        const rawSmartType = await controller.executeJS(tabId, buildSmartTypeJs({
           target,
           text,
           clearFirst,
           submit: submit && !shouldGuardSubmit,
-        })))
+          allowPasswordFill: argsCarryPasswordCue(JSON.stringify(args)),
+        }))
+        throwIfLiveTargetGuardBlocked(rawSmartType, { target })
+        const result = String(rawSmartType)
         if (shouldGuardSubmit) {
           const attempted: string[] = ['type_smart_submit_guard']
           const submitState = await ensureGeminiSubmitted(controller, tabId, text, attempted, abortSignal)
@@ -4471,12 +4551,15 @@ export async function executeBrowserTool(
         const submit = args.submit !== false
         const tabId = (args.tab_id as string) || null
         const shouldGuardSubmit = submit && await isLikelyChatPage(controller, tabId)
-        const result = String(await controller.executeJS(tabId, buildSmartTypeJs({
+        const rawCompose = await controller.executeJS(tabId, buildSmartTypeJs({
           target,
           text,
           clearFirst,
           submit: submit && !shouldGuardSubmit,
-        })))
+          allowPasswordFill: argsCarryPasswordCue(JSON.stringify(args)),
+        }))
+        throwIfLiveTargetGuardBlocked(rawCompose, { target })
+        const result = String(rawCompose)
         if (shouldGuardSubmit) {
           const attempted: string[] = ['compose_submit_guard']
           const submitState = await ensureGeminiSubmitted(controller, tabId, text, attempted, abortSignal)
@@ -5427,6 +5510,33 @@ export async function executeBrowserTool(
         const pressEnter = args.press_enter !== false
         const clearBeforeTyping = args.clear_before_typing !== false
         const useShiftEnter = args.use_shift_enter_for_newline === true
+        // EP1-I3 live-target net — coordinates carry no semantics, so probe
+        // the field under the point BEFORE clicking/typing: captcha-like
+        // fields refuse outright (M1), unconfirmed password fields reroute
+        // to confirmation. Empty/failed probes proceed (visual channel).
+        const typeProbePoint = await resolveCssPoint(controller, tabId, x, y).catch(() => null)
+        const typeProbe = typeProbePoint
+          ? await controller.executeJS(tabId, buildClickPointLabelProbeJs(typeProbePoint.cssX, typeProbePoint.cssY)).catch(() => null)
+          : null
+        if (typeProbe && typeof typeProbe === 'object') {
+          const probed = typeProbe as { inputLabel?: unknown; password?: unknown }
+          const inputLabel = String(probed.inputLabel || '')
+          const manualHit = matchManualOnlyBrowserTarget(inputLabel)
+          if (manualHit) {
+            throw new ToolDomainError(
+              'denied_manual_only',
+              `坐标输入目标「${inputLabel.slice(0, 80)}」命中 M1 规则（${manualHit.reason}）。请引导用户亲自完成这一步。`,
+              { x, y, ruleId: manualHit.ruleId },
+            )
+          }
+          if (probed.password === true && !argsCarryPasswordCue(JSON.stringify(args))) {
+            throw new ToolDomainError(
+              'denied_pending_confirmation',
+              '坐标输入目标是密码输入框。请在调用参数中说明目标（如「登录密码输入框」），经用户确认后执行。',
+              { x, y, ruleId: 'm3-login-existing-account' },
+            )
+          }
+        }
         const point = await dispatchClickAt(controller, tabId, x, y)
         if (clearBeforeTyping) {
           await clearFocusedInput(controller, tabId)
