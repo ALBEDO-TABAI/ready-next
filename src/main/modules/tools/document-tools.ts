@@ -71,6 +71,12 @@ const DOCUMENT_TOOLS: DocumentToolDef[] = [
     params: zodObjectToParamList(DOCUMENT_SCHEMAS.document_list_widgets) as ToolParam[],
   },
   {
+    name: 'document_read_section',
+    description: '读取当前或指定文档标签的正文片段，支持全文、章节/编号标题和行号范围。',
+    action: 'document.readSection',
+    params: zodObjectToParamList(DOCUMENT_SCHEMAS.document_read_section) as ToolParam[],
+  },
+  {
     name: 'document_update_widget',
     description: '更新文档中某个已有 widget 的内容，可按标题或序号定位；可选重命名标题。重要：必须保留目标 widget 根元素已声明的宽高与纵横比（例如原先 1080×1920 的 9:16 竖版卡片就不能改成 1920×1080 的 16:9 或在底部追加一个 16:9 的背景块），避免导出图片尺寸与原卡片不一致。',
     action: 'document.updateWidget',
@@ -244,7 +250,7 @@ export async function executeDocumentTool(
   if (toolName === 'document_open_tab' || toolName === 'document_switch_tab') {
     return `Document navigation queued: ${tool.action}. This does NOT modify content yet.`
   }
-  if (toolName === 'document_list_widgets') {
+  if (toolName === 'document_list_widgets' || toolName === 'document_read_section') {
     return `Document inspection queued: ${tool.action}`
   }
   if (

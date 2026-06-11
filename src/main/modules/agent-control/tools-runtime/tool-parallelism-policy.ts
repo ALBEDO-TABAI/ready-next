@@ -62,6 +62,7 @@ export interface ToolResourceTag {
 
 const READ_ONLY_DOCUMENT_TOOL_NAMES = new Set([
   'document_list_widgets',
+  'document_read_section',
 ])
 
 const READ_ONLY_RSS_TOOL_NAMES = new Set([

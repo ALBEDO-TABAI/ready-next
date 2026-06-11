@@ -145,6 +145,7 @@ const FORCE_DOCUMENT_TOOL_NAMES = new Set([
   'document_switch_tab',
   'document_rename_tab',
   'document_list_widgets',
+  'document_read_section',
   ...CONTENT_MUTATING_DOCUMENT_TOOL_NAMES,
   'document_save_tab',
 ])
@@ -152,6 +153,7 @@ const FORCE_DOCUMENT_TOOL_NAMES = new Set([
 const FORMAT_SECTION_DOCUMENT_TOOL_NAMES = new Set([
   'document_open_tab',
   'document_switch_tab',
+  'document_read_section',
   'document_set_content',
   'document_append_content',
   'document_replace_text',
@@ -162,6 +164,7 @@ const FORMAT_SECTION_DOCUMENT_TOOL_NAMES = new Set([
 const SECTION_REWRITE_DOCUMENT_TOOL_NAMES = new Set([
   'document_open_tab',
   'document_switch_tab',
+  'document_read_section',
   'document_rewrite_section',
   'document_save_tab',
 ])
@@ -170,6 +173,7 @@ const DOCUMENT_WIDGET_CREATE_TOOL_NAMES = new Set([
   'document_open_tab',
   'document_switch_tab',
   'document_list_widgets',
+  'document_read_section',
   'document_insert_widget',
   'document_update_widget',
   'document_save_tab',
@@ -179,12 +183,14 @@ const DOCUMENT_WIDGET_INSPECT_TOOL_NAMES = new Set([
   'document_open_tab',
   'document_switch_tab',
   'document_list_widgets',
+  'document_read_section',
 ])
 
 const DOCUMENT_WIDGET_UPDATE_TOOL_NAMES = new Set([
   'document_open_tab',
   'document_switch_tab',
   'document_list_widgets',
+  'document_read_section',
   'document_update_widget',
   'document_save_tab',
 ])
@@ -193,6 +199,7 @@ const DOCUMENT_WIDGET_REMOVE_TOOL_NAMES = new Set([
   'document_open_tab',
   'document_switch_tab',
   'document_list_widgets',
+  'document_read_section',
   'document_remove_widget',
   'document_save_tab',
 ])
@@ -252,6 +259,7 @@ export function buildToolGuidance(policy: ToolPolicy): string {
 
 **判断标准**:
 - "修改第一段" → 使用 document_rewrite_section 或 document_replace_exact
+- "读取第三部分/某章节内容" → 使用 document_read_section
 - "把这段原文精准改掉" → 使用 document_replace_exact
 - "在文档里做一个交互图表/组件" → 使用 document_insert_widget
 - "看看文档里有哪些 widget" → 使用 document_list_widgets

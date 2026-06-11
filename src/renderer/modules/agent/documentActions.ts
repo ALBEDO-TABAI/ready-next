@@ -16,6 +16,11 @@ import {
   findDocumentVisualSyntaxIssue,
   findShowWidgetBoundaryViolation,
 } from '../../../shared/document-visual-syntax'
+import {
+  buildDocumentSectionIndex,
+  resolveDocumentSectionAnchor,
+  type DocumentSectionIndexEntry,
+} from '../../../shared/document-sectioning'
 
 const MERMAID_FENCE_REGEX = /```mermaid[^\n]*\n([\s\S]*?)```/gi
 
@@ -446,6 +451,7 @@ function resolveDocTab(target?: string): ReturnType<typeof getActiveDocTab> {
   const store = useDocTabs.getState()
   if (!target || target.trim() === '') return getActiveDocTab()
   const trimmed = target.trim()
+  if (trimmed.toLowerCase() === 'current') return getActiveDocTab()
   const exactById = store.tabs.find((tab) => tab.id === trimmed)
   if (exactById) return exactById
   const index = Number(trimmed)
@@ -476,6 +482,182 @@ function resolveDocActionTab(action: DocActionPayload): ReturnType<typeof getAct
   if (recentTarget) return recentTarget
 
   return getActiveDocTab()
+}
+
+const DEFAULT_DOCUMENT_READ_MAX_CHARS = 12_000
+const MAX_DOCUMENT_READ_CHARS = 30_000
+
+function clampDocumentReadMaxChars(value: unknown): number {
+  const numeric = typeof value === 'number' ? value : Number(value)
+  if (!Number.isFinite(numeric) || numeric <= 0) return DEFAULT_DOCUMENT_READ_MAX_CHARS
+  return Math.max(500, Math.min(MAX_DOCUMENT_READ_CHARS, Math.floor(numeric)))
+}
+
+function parsePositiveLine(value: unknown): number | null {
+  const numeric = typeof value === 'number' ? value : Number(value)
+  if (!Number.isInteger(numeric) || numeric <= 0) return null
+  return numeric
+}
+
+function escapeReadRangeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function stripMarkdownHeadingPrefix(line: string): string {
+  return String(line || '').trim().replace(/^#{1,6}\s+/, '').trim()
+}
+
+function findSectionByToken(
+  entries: DocumentSectionIndexEntry[],
+  token: string,
+): DocumentSectionIndexEntry | null {
+  const trimmed = token.trim()
+  if (!trimmed) return null
+
+  const escaped = escapeReadRangeRegExp(trimmed)
+  const numberedHeading = new RegExp(`^${escaped}(?:[.．、]\\s+|\\s+)`)
+  const byRawNumber = entries.find((entry) => numberedHeading.test(stripMarkdownHeadingPrefix(entry.rawLine)))
+  if (byRawNumber) return byRawNumber
+
+  if (/^\d+$/.test(trimmed)) {
+    const ordinal = Number(trimmed)
+    const byOrdinal = entries.find((entry) => entry.ordinal === ordinal)
+    if (byOrdinal) return byOrdinal
+    return entries[ordinal - 1] || null
+  }
+
+  return resolveDocumentSectionAnchor(entries, trimmed)
+}
+
+function resolveDocumentReadRange(content: string, action: DocActionPayload): {
+  startLine: number
+  endLine: number
+  label: string
+  matchedTitle?: string
+  error?: string
+} {
+  const normalized = content.replace(/\r\n/g, '\n')
+  const lines = normalized.split('\n')
+  const explicitStart = parsePositiveLine(action.lineStart)
+  const explicitEnd = parsePositiveLine(action.lineEnd)
+  if (explicitStart || explicitEnd) {
+    const startLine = Math.max(1, explicitStart || 1)
+    const endLine = Math.min(lines.length, Math.max(startLine, explicitEnd || lines.length))
+    return { startLine, endLine, label: `lines:${startLine}-${endLine}` }
+  }
+
+  const rawRange = typeof action.range === 'string' ? action.range.trim() : ''
+  const range = rawRange || (typeof action.sectionTitle === 'string' && action.sectionTitle.trim()
+    ? `section:${action.sectionTitle.trim()}`
+    : 'full')
+  if (!range || /^(full|all|全文|全部|current)$/i.test(range)) {
+    return { startLine: 1, endLine: lines.length, label: 'full' }
+  }
+
+  const lineRange = range.match(/^lines?:\s*(\d+)\s*[-:]\s*(\d+)$/i)
+  if (lineRange) {
+    const startLine = Math.max(1, Number(lineRange[1]))
+    const endLine = Math.min(lines.length, Math.max(startLine, Number(lineRange[2])))
+    return { startLine, endLine, label: `lines:${startLine}-${endLine}` }
+  }
+
+  const sectionRange = range.match(/^(section|chapter):\s*(.+)$/i)
+  const anchor = (sectionRange?.[2] || range).trim()
+  const rangeSpan = anchor.match(/^(.+?)\s*[-~至到]\s*(.+)$/)
+  const entries = buildDocumentSectionIndex(normalized)
+  const startEntry = findSectionByToken(entries, rangeSpan?.[1] || anchor)
+  const endEntry = rangeSpan ? findSectionByToken(entries, rangeSpan[2]) : null
+  if (!startEntry) {
+    const available = entries
+      .slice(0, 12)
+      .map((entry) => entry.displayTitle || stripMarkdownHeadingPrefix(entry.rawLine))
+      .filter(Boolean)
+      .join(' / ')
+    return {
+      startLine: 1,
+      endLine: lines.length,
+      label: range,
+      error: available
+        ? `未找到章节“${anchor}”。可用章节：${available}${entries.length > 12 ? ' / ...' : ''}`
+        : `未找到章节“${anchor}”，当前文档没有可识别章节`,
+    }
+  }
+
+  const endLine = endEntry && endEntry.line >= startEntry.line
+    ? endEntry.endLine
+    : startEntry.endLine
+  return {
+    startLine: startEntry.line + 1,
+    endLine: Math.max(startEntry.line + 1, Math.min(lines.length, endLine)),
+    label: range,
+    matchedTitle: startEntry.displayTitle || startEntry.title,
+  }
+}
+
+function clipDocumentLinesForRead(
+  lines: string[],
+  startLine: number,
+  endLine: number,
+  maxChars: number,
+): { text: string; truncated: boolean; nextLine: number | null; selectedCharCount: number } {
+  const selected = lines.slice(startLine - 1, endLine)
+  const selectedText = selected.join('\n')
+  if (selectedText.length <= maxChars) {
+    return {
+      text: selectedText,
+      truncated: false,
+      nextLine: null,
+      selectedCharCount: selectedText.length,
+    }
+  }
+
+  const returned: string[] = []
+  let charCount = 0
+  for (const line of selected) {
+    const separator = returned.length > 0 ? 1 : 0
+    const nextLength = charCount + separator + line.length
+    if (nextLength > maxChars && returned.length > 0) break
+    if (nextLength > maxChars) {
+      returned.push(line.slice(0, Math.max(0, maxChars - charCount - separator)))
+      charCount = maxChars
+      break
+    }
+    returned.push(line)
+    charCount = nextLength
+  }
+
+  const nextLine = startLine + returned.length
+  return {
+    text: returned.join('\n'),
+    truncated: true,
+    nextLine: nextLine <= endLine ? nextLine : null,
+    selectedCharCount: selectedText.length,
+  }
+}
+
+function readDocumentSection(action: DocActionPayload): string {
+  const tab = resolveDocActionTab(action)
+  if (!tab) return '没有可读取的文档标签'
+
+  const normalized = (tab.content || '').replace(/\r\n/g, '\n')
+  const lines = normalized.split('\n')
+  const range = resolveDocumentReadRange(normalized, action)
+  if (range.error) return range.error
+
+  const maxChars = clampDocumentReadMaxChars(action.maxChars)
+  const clipped = clipDocumentLinesForRead(lines, range.startLine, range.endLine, maxChars)
+  return [
+    `已读取文档片段：${tab.title}（第 ${range.startLine}-${range.endLine} 行，片段 ${clipped.selectedCharCount} 字）`,
+    `- tabId: ${tab.id}`,
+    `- 路径: ${tab.path || '(未保存草稿)'}`,
+    `- 范围: ${range.label}`,
+    range.matchedTitle ? `- 命中章节: ${range.matchedTitle}` : null,
+    clipped.truncated ? `- 已截断: 是，继续读取请传 lineStart=${clipped.nextLine || range.endLine}` : '- 已截断: 否',
+    '',
+    '--- 文档片段开始 ---',
+    clipped.text,
+    '--- 文档片段结束 ---',
+  ].filter(Boolean).join('\n')
 }
 
 function hasExplicitOrRecentDocActionTarget(action: DocActionPayload): boolean {
@@ -1511,6 +1693,10 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     ].join('\n')
   }
 
+  if (type === 'read_section') {
+    return readDocumentSection(action)
+  }
+
   if (type === 'update_widget') {
     const target = typeof action.target === 'string' ? action.target.trim() : ''
     const widgetCode = typeof action.widgetCode === 'string' ? action.widgetCode : ''
@@ -1820,6 +2006,16 @@ export function mapToolActionToDocAction(tool: string, args: Record<string, unkn
       }
     case 'document.listWidgets':
       return { type: 'list_widgets', tabId: args.tabId }
+    case 'document.readSection':
+      return {
+        type: 'read_section',
+        tabId: args.tabId,
+        range: args.range,
+        sectionTitle: args.sectionTitle,
+        lineStart: args.lineStart,
+        lineEnd: args.lineEnd,
+        maxChars: args.maxChars,
+      }
     case 'document.updateWidget':
       return {
         type: 'update_widget',

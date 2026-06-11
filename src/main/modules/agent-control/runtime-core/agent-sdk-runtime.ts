@@ -807,7 +807,7 @@ function parseAttachmentReferences(message: RunMessage): Array<{ name: string; p
 
 function parseEnvelopeResourceReferences(envelope: unknown): {
   primaryInstruction: string | null
-  resources: Array<{ name: string; path: string }>
+  resources: Array<{ name: string; path: string; kind?: string; source?: string; tabId?: string }>
 } {
   const record = asRecord(envelope)
   if (!record) return { primaryInstruction: null, resources: [] }
@@ -825,6 +825,9 @@ function parseEnvelopeResourceReferences(envelope: unknown): {
     .map((item) => ({
       name: String(item.name || '').trim(),
       path: String(item.path || item.documentPath || '').trim(),
+      kind: typeof item.kind === 'string' ? item.kind : undefined,
+      source: typeof item.source === 'string' ? item.source : undefined,
+      tabId: typeof item.tabId === 'string' ? item.tabId.trim() : undefined,
     }))
     .filter((item) => item.name && item.path)
   return { primaryInstruction, resources }
@@ -1286,6 +1289,27 @@ function hasLocalDocumentResource(message: RunMessage, requestEnvelope?: unknown
   return references.length > 0
 }
 
+function hasCurrentDocumentContextResource(requestEnvelope?: unknown): boolean {
+  return parseEnvelopeResourceReferences(requestEnvelope).resources.some((reference) =>
+    reference.kind === 'document_context' || reference.source === 'current_document'
+  )
+}
+
+function shouldPreferCurrentDocumentRead(message: RunMessage, requestEnvelope?: unknown): boolean {
+  if (!hasCurrentDocumentContextResource(requestEnvelope)) return false
+  const envelopeRefs = parseEnvelopeResourceReferences(requestEnvelope)
+  const primary = envelopeRefs.primaryInstruction || primaryInstructionText(message)
+  if (/(?:当前|这份|这个|本文档|打开的|编辑器|当前打开|当前项目计划文档)/.test(primary)) {
+    return true
+  }
+  const nonCurrentResources = envelopeRefs.resources.filter((reference) =>
+    reference.kind !== 'document_context'
+    && reference.source !== 'current_document'
+    && /\.(?:md|markdown|txt|docx?)$/i.test(reference.path || reference.name)
+  )
+  return nonCurrentResources.length === 0 && parseAttachmentReferences(message).length === 0
+}
+
 function collectLocalDocumentReferences(
   message: RunMessage,
   requestEnvelope?: unknown,
@@ -1314,7 +1338,7 @@ function shouldUseLocalDocumentToolSet(message: RunMessage, requestEnvelope?: un
   if (/(?:网页|浏览器|网站|url|https?:\/\/|www\.|网上|网络|搜索|检索|最新|今天|新闻|官网|公告|source|citation|research|search|latest|today|news)/i.test(primary)) {
     return false
   }
-  return /(?:文档|文稿|章节|段落|人物关系|关系图|信息卡|卡片|图表|写入|整理|生成|保存|编辑|改写|润色|排版|@\[[^\]]+\.(?:md|markdown|txt|docx?)\])/i.test(primary)
+  return /(?:文档|文稿|章节|段落|部分|人物关系|关系图|信息卡|卡片|图表|写入|整理|生成|保存|编辑|改写|润色|排版|@\[[^\]]+\.(?:md|markdown|txt|docx?)\])/i.test(primary)
 }
 
 function shouldRequireLocalDocumentExcerpt(message: RunMessage, requestEnvelope?: unknown): boolean {
@@ -1322,7 +1346,7 @@ function shouldRequireLocalDocumentExcerpt(message: RunMessage, requestEnvelope?
   if (!hasNonTargetLocalDocumentResource(message, requestEnvelope)) return false
   const envelopeRefs = parseEnvelopeResourceReferences(requestEnvelope)
   const primary = envelopeRefs.primaryInstruction || primaryInstructionText(message)
-  if (/(?:根据|基于|读取|读完|参考|原文|章节|前\s*[一二三四五六七八九十\d]+\s*(?:章|节)|第\s*[一二三四五六七八九十\d]+\s*(?:章|节)|证据|出处|来源)/i.test(primary)) {
+  if (/(?:根据|基于|读取|读完|参考|原文|章节|部分|前\s*[一二三四五六七八九十\d]+\s*(?:章|节|部分)|第\s*[一二三四五六七八九十\d]+\s*(?:章|节|部分)|证据|出处|来源)/i.test(primary)) {
     return true
   }
   const documentResourceKeys = new Set([
@@ -1341,8 +1365,18 @@ function shouldRequireLocalDocumentWriteOutput(message: RunMessage, requestEnvel
   return /(?:新建|创建|另存|保存|写入|写到|写进|整理到|放到|输出到|目录下|文件夹下|@\[[^\]]+\](?:目录|文件夹)|生成(?:一个|一份)?.{0,20}文档|文档.{0,12}(?:保存|写好|写完)|笔记.{0,12}保存)/i.test(primary)
 }
 
-function buildLocalDocumentExcerptInstruction(required: boolean): string {
+function buildLocalDocumentExcerptInstruction(required: boolean, preferCurrentDocumentRead = false): string {
   if (!required) return ''
+  if (preferCurrentDocumentRead) {
+    return [
+      '本轮是当前编辑器文档依据任务：生成结论前必须先调用 document_read_section 读取当前打开文档的指定章节或片段。',
+      '如果用户限定“第 N 章 / 第 N 部分 / 某节 / 某章节”，优先调用 document_read_section，tabId 传 current，range 传 section:N、chapter:N 或 full。',
+      '不要因为当前文档路径不在工作区索引里，就要求用户粘贴原文；当前编辑器已打开的内容应通过 document_read_section 读取。',
+      '只有用户明确引用其他附件或工作区文件时，才用 file_locate / file_read_excerpt。',
+      '只根据读取到的片段写结果；不要使用附件外信息。',
+      '如果用户要求写入或保存文档，读取到足够依据后要优先执行真实文档修改并保存。',
+    ].join('\n')
+  }
   return [
     '本轮是本地文档依据任务：生成结论前必须先调用 file_read_excerpt 读取用户指定章节或片段。',
     '如果用户限定“前几章/某几章”，先用 file_locate 定位章节，再用 file_read_excerpt 读取对应章节正文。',
@@ -1355,9 +1389,17 @@ function buildLocalDocumentExcerptInstruction(required: boolean): string {
   ].join('\n')
 }
 
-function buildLocalDocumentExcerptRepairInput(): string {
+function buildLocalDocumentExcerptRepairInput(preferCurrentDocumentRead = false): string {
+  if (preferCurrentDocumentRead) {
+    return [
+      '系统检查：你还没有成功读取当前编辑器文档正文，上一轮不能算完成。',
+      '请先调用 document_read_section 读取当前打开文档的相关章节或片段，再基于读取内容重新生成结果。',
+      '如果刚才 file_locate 或 file_read_excerpt 因工作区索引失败，不要让用户粘贴原文；改用 document_read_section 读取当前编辑器内容。',
+      '如果已经写入了目标文档，请用读取后的依据修正并替换为可靠版本，然后保存。',
+    ].join('\n')
+  }
   return [
-    '系统检查：你还没有读取用户指定文档正文，上一轮不能算完成。',
+    '系统检查：你还没有成功读取用户指定文档正文，上一轮不能算完成。',
     '请先调用 file_read_excerpt 读取相关章节或片段，再基于读取内容重新生成结果。',
     '如果已经写入了目标文档，请用读取后的依据修正并替换为可靠版本，然后保存。',
   ].join('\n')
@@ -1671,6 +1713,18 @@ function readStructuredResultRecord(output: ToolExecutionOutput): Record<string,
     }
   }
   return {}
+}
+
+const LOCAL_DOCUMENT_SOURCE_READ_TOOL_NAMES = new Set([
+  'file_read_excerpt',
+  'document_read_section',
+])
+
+function isLocalDocumentSourceReadFailureText(text: string): boolean {
+  const normalized = String(text || '').trim()
+  if (!normalized) return false
+  return /^(?:Error:|Document action failed:)/i.test(normalized)
+    || /(?:ok["']?\s*:\s*false|未找到章节|没有可读取|无法读取|读取失败|不在当前工作区|工作区索引|not in index|outside any known workspace|path_missing|not found|找不到|未找到)/i.test(normalized)
 }
 
 interface ToolBridgeResultItem {
@@ -3541,6 +3595,7 @@ export class AgentSdkRuntime extends EventEmitter {
     let documentTargetGuardForRecovery: DocumentTargetGuard | null = null
     let requiresLocalDocumentExcerptForRecovery = false
     let requiresLocalDocumentWriteForRecovery = false
+    let hasSuccessfulLocalDocumentSourceReadForRecovery = false
     let fileReadExcerptCheckpointForRecovery: string | null = null
     let hasSuccessfulDocumentTargetMutation = false
     let hasSuccessfulToolProgress = false
@@ -3811,6 +3866,10 @@ export class AgentSdkRuntime extends EventEmitter {
         content as RunMessage,
         effectiveExecutionOptions?.requestEnvelope,
       )
+      const preferCurrentDocumentRead = shouldPreferCurrentDocumentRead(
+        content as RunMessage,
+        effectiveExecutionOptions?.requestEnvelope,
+      )
       requiresLocalDocumentExcerptForRecovery = requiresLocalDocumentExcerpt
       const requiresLocalDocumentWrite = shouldRequireLocalDocumentWriteOutput(
         content as RunMessage,
@@ -3914,6 +3973,7 @@ export class AgentSdkRuntime extends EventEmitter {
       runMetaBudgetRuntime = liveTaskBudgetRuntime
       let lastDocumentSaveFailure: string | null = null
       let newDocumentNeedsSave = false
+      let hasSuccessfulLocalDocumentSourceRead = false
       const toolBridgeRuntimeContext: ToolBridgeRuntimeContext = {
         agentName: name,
         runId,
@@ -3955,9 +4015,15 @@ export class AgentSdkRuntime extends EventEmitter {
           const normalized = normalizeToolExecutionOutput(output)
           const structuredData = readStructuredResultRecord(normalized)
           const documentToolFailed = this.isDocumentToolFailure(normalized)
-          const toolReportedFailure = documentToolFailed || structuredData.ok === false
+          const sourceReadFailed = LOCAL_DOCUMENT_SOURCE_READ_TOOL_NAMES.has(toolName)
+            && isLocalDocumentSourceReadFailureText(normalized.text)
+          const toolReportedFailure = documentToolFailed || structuredData.ok === false || sourceReadFailed
           if (!toolReportedFailure) {
             hasSuccessfulToolProgress = true
+          }
+          if (LOCAL_DOCUMENT_SOURCE_READ_TOOL_NAMES.has(toolName) && !toolReportedFailure) {
+            hasSuccessfulLocalDocumentSourceRead = true
+            hasSuccessfulLocalDocumentSourceReadForRecovery = true
           }
           const documentToolChangedContent = DOCUMENT_TARGET_MUTATION_TOOL_NAMES.has(toolName)
             && !documentToolFailed
@@ -3980,7 +4046,7 @@ export class AgentSdkRuntime extends EventEmitter {
               newDocumentNeedsSave = false
             }
           }
-          if (toolName === 'file_read_excerpt' && !documentToolFailed) {
+          if (toolName === 'file_read_excerpt' && !toolReportedFailure) {
             fileReadExcerptCheckpointForRecovery = buildFileReadExcerptCheckpoint(normalized)
           }
           applyContextModifier(toolBridgeRuntimeContext, normalized)
@@ -4158,7 +4224,7 @@ export class AgentSdkRuntime extends EventEmitter {
           ].join('\n')
           : '',
         buildDocumentTargetInstruction(documentTargetGuard),
-        buildLocalDocumentExcerptInstruction(requiresLocalDocumentExcerpt),
+        buildLocalDocumentExcerptInstruction(requiresLocalDocumentExcerpt, preferCurrentDocumentRead),
         useTextToolBridge && toolDefinitions.length > 0
           ? buildTextToolBridgePrompt(toOpenAIToolSchemas(toolDefinitions))
           : '',
@@ -4493,11 +4559,11 @@ export class AgentSdkRuntime extends EventEmitter {
           }
           if (
             requiresLocalDocumentExcerpt
-            && !usedTools.includes('file_read_excerpt')
+            && !hasSuccessfulLocalDocumentSourceRead
             && localDocumentExcerptRepairAttempts < 1
           ) {
             localDocumentExcerptRepairAttempts += 1
-            nextInput = buildLocalDocumentExcerptRepairInput()
+            nextInput = buildLocalDocumentExcerptRepairInput(preferCurrentDocumentRead)
             emitOutput('还没有读取指定章节正文，我会先读取原文再重做结果。', 'text')
             continue
           }
@@ -4557,11 +4623,11 @@ export class AgentSdkRuntime extends EventEmitter {
           finalText = parsed.visibleText || modelText
           if (
             requiresLocalDocumentExcerpt
-            && !usedTools.includes('file_read_excerpt')
+            && !hasSuccessfulLocalDocumentSourceRead
             && localDocumentExcerptRepairAttempts < 1
           ) {
             localDocumentExcerptRepairAttempts += 1
-            nextInput = buildLocalDocumentExcerptRepairInput()
+            nextInput = buildLocalDocumentExcerptRepairInput(preferCurrentDocumentRead)
             emitOutput('还没有读取指定章节正文，我会先读取原文再重做结果。', 'text')
             continue
           }
@@ -4677,7 +4743,7 @@ export class AgentSdkRuntime extends EventEmitter {
         finalText = '工具已执行，但模型尚未给出最终回复。'
         emitOutput(finalText, 'text')
       }
-      if (requiresLocalDocumentExcerpt && !usedTools.includes('file_read_excerpt')) {
+      if (requiresLocalDocumentExcerpt && !hasSuccessfulLocalDocumentSourceRead) {
         const message = '还没有读取指定文档正文，不能声明完成。'
         emitOutput(message, 'error')
         emitOutput('', 'done')
@@ -4933,7 +4999,7 @@ export class AgentSdkRuntime extends EventEmitter {
         && lastDocumentSaveSuccessText
         && (
           !requiresLocalDocumentExcerptForRecovery
-          || usedTools.includes('file_read_excerpt')
+          || hasSuccessfulLocalDocumentSourceReadForRecovery
         )
       ) {
         const contentIssue = await inspectDocumentTargetContent(documentTargetGuardForRecovery, {

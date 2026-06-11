@@ -17,6 +17,10 @@ test('tool parallelism policy classifies tools into coarse resource tags', () =>
     domain: 'document',
     accessMode: 'read',
   })
+  assert.deepEqual(getToolResourceTag('document_read_section'), {
+    domain: 'document',
+    accessMode: 'read',
+  })
   assert.deepEqual(getToolResourceTag('document_update_widget'), {
     domain: 'document',
     accessMode: 'write',
@@ -37,6 +41,7 @@ test('tool parallelism policy classifies tools into coarse resource tags', () =>
 
 test('tool parallelism policy only treats non-interactive read tools as parallel-safe', () => {
   assert.equal(isParallelSafeTool('document_list_widgets'), true)
+  assert.equal(isParallelSafeTool('document_read_section'), true)
   assert.equal(isParallelSafeTool('memory_search'), true)
   assert.equal(isParallelSafeTool('skill_rss_status'), true)
   assert.equal(isParallelSafeTool('browser_click'), false)

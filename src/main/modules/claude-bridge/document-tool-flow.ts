@@ -37,6 +37,7 @@ const CONTENT_MUTATING_DOCUMENT_TOOL_NAMES = new Set([
 
 const DOCUMENT_INSPECTION_TOOL_NAMES = new Set([
   'document_list_widgets',
+  'document_read_section',
 ])
 
 function isNoChangeDocumentMutationResult(result: string): boolean {

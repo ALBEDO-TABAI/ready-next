@@ -172,6 +172,7 @@ const DOCUMENT_TOOL_NAMES = [
   'document_append_content',
   'document_insert_widget',
   'document_list_widgets',
+  'document_read_section',
   'document_update_widget',
   'document_remove_widget',
   'document_replace_text',

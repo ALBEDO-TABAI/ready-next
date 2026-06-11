@@ -1,5 +1,5 @@
 /**
- * Zod schemas for the 15 document domain tools (Phase 2.5 PR 7).
+ * Zod schemas for the 16 document domain tools (Phase 2.5 PR 7).
  *
  * componentSpec / componentSpecPatch are intentionally declared as
  * z.record(z.string(), z.unknown()) so derivation emits {type: 'object'} with
@@ -58,6 +58,18 @@ export const DocumentInsertWidgetSchema = z.object({
 
 export const DocumentListWidgetsSchema = z.object({
   tabId: z.string().optional().describe('可选，目标标签 ID'),
+})
+
+export const DocumentReadSectionSchema = z.object({
+  tabId: z.string().optional().describe('可选，目标标签 ID；current 表示当前活动文档'),
+  range: z
+    .string()
+    .optional()
+    .describe('可选，读取范围：full、section:<标题或序号>、chapter:<序号>、lines:<起始>-<结束>'),
+  sectionTitle: z.string().optional().describe('可选，章节标题或编号；优先级低于 range'),
+  lineStart: z.number().optional().describe('可选，1-based 起始行'),
+  lineEnd: z.number().optional().describe('可选，1-based 结束行（含）'),
+  maxChars: z.number().optional().describe('可选，最多返回字符数，默认 12000'),
 })
 
 export const DocumentUpdateWidgetSchema = z.object({
@@ -130,6 +142,7 @@ export type DocumentToolName =
   | 'document_append_content'
   | 'document_insert_widget'
   | 'document_list_widgets'
+  | 'document_read_section'
   | 'document_update_widget'
   | 'document_remove_widget'
   | 'document_replace_text'
@@ -147,6 +160,7 @@ export const DOCUMENT_SCHEMAS: Record<DocumentToolName, z.ZodObject<z.ZodRawShap
   document_append_content: DocumentAppendContentSchema,
   document_insert_widget: DocumentInsertWidgetSchema,
   document_list_widgets: DocumentListWidgetsSchema,
+  document_read_section: DocumentReadSectionSchema,
   document_update_widget: DocumentUpdateWidgetSchema,
   document_remove_widget: DocumentRemoveWidgetSchema,
   document_replace_text: DocumentReplaceTextSchema,

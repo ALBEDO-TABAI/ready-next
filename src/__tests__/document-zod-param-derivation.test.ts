@@ -2,7 +2,7 @@
  * Document derivation equality test (Phase 2.5 PR 7).
  *
  * Asserts zodObjectToParamList reproduces the legacy hand-rolled
- * SkillParamDefinition[] for each of the 15 document tools byte-for-byte.
+ * SkillParamDefinition[] for each of the 16 document tools byte-for-byte.
  */
 
 import assert from 'node:assert/strict'
@@ -112,6 +112,33 @@ test('derives document_insert_widget params', () => {
 test('derives document_list_widgets params', () => {
   const expected: SkillParamDefinition[] = [TAB_ID_OPTIONAL]
   assert.deepEqual(zodObjectToParamList(DOCUMENT_SCHEMAS.document_list_widgets), expected)
+})
+
+test('derives document_read_section params', () => {
+  const expected: SkillParamDefinition[] = [
+    {
+      name: 'tabId',
+      type: 'string',
+      description: '可选，目标标签 ID；current 表示当前活动文档',
+      required: false,
+    },
+    {
+      name: 'range',
+      type: 'string',
+      description: '可选，读取范围：full、section:<标题或序号>、chapter:<序号>、lines:<起始>-<结束>',
+      required: false,
+    },
+    {
+      name: 'sectionTitle',
+      type: 'string',
+      description: '可选，章节标题或编号；优先级低于 range',
+      required: false,
+    },
+    { name: 'lineStart', type: 'number', description: '可选，1-based 起始行', required: false },
+    { name: 'lineEnd', type: 'number', description: '可选，1-based 结束行（含）', required: false },
+    { name: 'maxChars', type: 'number', description: '可选，最多返回字符数，默认 12000', required: false },
+  ]
+  assert.deepEqual(zodObjectToParamList(DOCUMENT_SCHEMAS.document_read_section), expected)
 })
 
 test('derives document_update_widget params', () => {

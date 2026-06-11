@@ -8,6 +8,7 @@ import {
   AgentSdkRuntime,
   type AgentSdkRuntimeDeps,
 } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
+import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 import {
@@ -1678,6 +1679,120 @@ test('agent sdk runtime keeps browser tools hidden for local document attachment
   assert.equal(result.success, true)
   assert.equal(result.finalText, '我会按文档处理。')
   assert.equal(requests.length, 2)
+})
+
+test('agent sdk runtime repairs failed workspace excerpt by reading the active document section', async () => {
+  const externalPath = '/Users/user/matrix-unpack/analysis/02-CEO主入口部门需求理解与任务分发流程规格书.md'
+  const fileReadDefinition = createToolDefinition({
+    name: 'file_read_excerpt',
+    groupId: 'file_management',
+    domain: 'file',
+    kind: 'read',
+    description: 'Read file excerpt',
+    schema: {
+      type: 'object',
+      properties: { path: { type: 'string' }, anchor: { type: 'string' } },
+      required: ['path'],
+      additionalProperties: false,
+    },
+  })
+  const documentReadDefinition = createToolDefinition({
+    name: 'document_read_section',
+    groupId: 'document',
+    domain: 'document',
+    kind: 'read',
+    description: 'Read current document section',
+    schema: {
+      type: 'object',
+      properties: { tabId: { type: 'string' }, range: { type: 'string' } },
+      required: [],
+      additionalProperties: false,
+    },
+  })
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = []
+  let runCount = 0
+  const runtime = createRuntime({
+    listToolDefinitions: () => [fileReadDefinition, documentReadDefinition],
+    executeToolCall: async (name, args) => {
+      calls.push({ name, args })
+      if (name === 'file_read_excerpt') {
+        return createToolExecutionOutput(
+          `Error: path is outside any known workspace: ${externalPath}`,
+          { shape: 'json', data: { ok: false, error: 'outside_workspace' } },
+        )
+      }
+      return createToolExecutionOutput(
+        [
+          '已读取文档片段：02-CEO主入口部门需求理解与任务分发流程规格书.md（第 12-35 行，片段 1200 字）',
+          '- tabId: current',
+          '- 范围: section:3',
+          '- 命中章节: 意图理解规格',
+          '',
+          '--- 文档片段开始 ---',
+          '"Read the intent in the user language: what they said, what repetition or ambition implies, what outcome would help."',
+          '--- 文档片段结束 ---',
+        ].join('\n'),
+        { shape: 'json', data: { ok: true } },
+      )
+    },
+    runAgent: async ({ tools, instructions, input }) => {
+      runCount += 1
+      const byName = new Map(tools.map((tool) => [tool.name, tool as { invoke: (context: unknown, input: string) => Promise<string> }]))
+      assert.match(instructions, /document_read_section/)
+      assert.match(instructions, /当前编辑器文档/)
+      if (runCount === 1) {
+        await byName.get('file_read_excerpt')?.invoke({}, JSON.stringify({
+          path: externalPath,
+          anchor: '第三部分',
+        }))
+        return { finalText: `文件 ${externalPath} 不在当前工作区索引范围内，请把第3章内容粘贴给我。` }
+      }
+      assert.match(JSON.stringify(input), /document_read_section/)
+      await byName.get('document_read_section')?.invoke({}, JSON.stringify({
+        tabId: 'current',
+        range: 'section:3',
+      }))
+      return { finalText: '已读取第3部分，并会在英文原文下补中文意思。' }
+    },
+  })
+  runtime.newSession('butler::scope-current-doc-section-repair', 'system prompt')
+  const userText = [
+    '这个第三部分下的英文内容附上中文意义在原英文提示词下',
+    '',
+    '## 环境信息',
+    '- 当前模式: 文档模式',
+    '',
+    '### 当前文档上下文',
+    '- 标题: 02-CEO主入口部门需求理解与任务分发流程规格书.md',
+    `- 路径: ${externalPath}`,
+    '- 类型: md',
+    '- 字符数: 8000',
+    '',
+    '--- 文档摘要开始 ---',
+    '2.2 文本通道',
+    '...[文档摘要已截断]',
+    '--- 文档摘要结束 ---',
+  ].join('\n')
+  const requestEnvelope = buildRequestEnvelope({ userText })
+
+  const result = await runtime.sendMessage(
+    'butler::scope-current-doc-section-repair',
+    userText,
+    'run-current-doc-section-repair',
+    {
+      publicSessionId: 'scope-current-doc-section-repair',
+      taskId: 'task-current-doc-section-repair',
+      requestEnvelope,
+    },
+  )
+
+  assert.equal(result.success, true)
+  assert.equal(result.finalText, '已读取第3部分，并会在英文原文下补中文意思。')
+  assert.deepEqual(calls.map((call) => call.name), ['file_read_excerpt', 'document_read_section'])
+  assert.equal(calls[1]?.args.tabId, 'current')
+  assert.equal(calls[1]?.args.range, 'section:3')
+  assert.deepEqual(result.usedTools, ['file_read_excerpt', 'document_read_section'])
+  assert.equal(runCount, 2)
 })
 
 test('agent sdk runtime does not require source excerpts when the only local document is the target', async () => {

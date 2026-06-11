@@ -121,6 +121,25 @@ const EXPECTED_ANTHROPIC = [
     },
   },
   {
+    name: 'document_read_section',
+    description: '读取当前或指定文档标签的正文片段，支持全文、章节/编号标题和行号范围。',
+    input_schema: {
+      type: 'object',
+      properties: {
+        tabId: { type: 'string', description: '可选，目标标签 ID；current 表示当前活动文档' },
+        range: {
+          type: 'string',
+          description: '可选，读取范围：full、section:<标题或序号>、chapter:<序号>、lines:<起始>-<结束>',
+        },
+        sectionTitle: { type: 'string', description: '可选，章节标题或编号；优先级低于 range' },
+        lineStart: { type: 'number', description: '可选，1-based 起始行' },
+        lineEnd: { type: 'number', description: '可选，1-based 结束行（含）' },
+        maxChars: { type: 'number', description: '可选，最多返回字符数，默认 12000' },
+      },
+      required: [],
+    },
+  },
+  {
     name: 'document_update_widget',
     description:
       '更新文档中某个已有 widget 的内容，可按标题或序号定位；可选重命名标题。重要：必须保留目标 widget 根元素已声明的宽高与纵横比（例如原先 1080×1920 的 9:16 竖版卡片就不能改成 1920×1080 的 16:9 或在底部追加一个 16:9 的背景块），避免导出图片尺寸与原卡片不一致。',

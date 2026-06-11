@@ -38,6 +38,33 @@ describe('document sectioning', () => {
     )
   })
 
+  it('recognizes top-level numbered headings with a trailing dot', () => {
+    const content = [
+      '1. 总览',
+      '',
+      '第一部分正文。',
+      '',
+      '2. 文本通道',
+      '',
+      '第二部分正文。',
+      '',
+      '3. 意图理解规格',
+      '',
+      '第三部分正文。',
+      '',
+      '3.1 意图阅读三要素',
+      '',
+      '第三部分子段。',
+    ].join('\n')
+
+    const index = buildDocumentSectionIndex(content)
+    const third = resolveDocumentSectionAnchor(index, '意图理解规格')
+
+    assert.equal(third?.displayTitle, '意图理解规格')
+    assert.equal(third?.line, 8)
+    assert.equal(third?.endLine, 12)
+  })
+
   it('splits oversized sections into multiple chunks before selection', () => {
     const longParagraph = '这是一个很长的段落，用来模拟项目背景。'.repeat(40)
     const content = [

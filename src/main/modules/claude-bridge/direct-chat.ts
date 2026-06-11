@@ -244,8 +244,9 @@ const TOOL_SYSTEM_PROMPT = `
 当消息中包含 [🌐 标题](url) 格式的网页引用时，请主动使用 browser_read_page 工具读取该 URL 的内容，然后基于页面内容回答用户。
 你可以直接使用文档工具来编辑文稿，优先使用 document_* 工具而不是只给文字建议：
 - document_new_tab / document_open_tab / document_switch_tab / document_rename_tab
-- document_set_content / document_append_content / document_insert_widget / document_list_widgets / document_update_widget / document_remove_widget / document_replace_text / document_replace_exact / document_format_section / document_rewrite_section / document_save_tab
+- document_read_section / document_set_content / document_append_content / document_insert_widget / document_list_widgets / document_update_widget / document_remove_widget / document_replace_text / document_replace_exact / document_format_section / document_rewrite_section / document_save_tab
 当用户要求“直接改文档”“帮我写入并保存”时，请先基于用户语义做简短执行计划，再调用这些 document_* 工具执行真实操作。
+如果当前文档摘要被截断，或用户要求读取某章、某节、某部分、全文，请先使用 document_read_section 读取对应正文，不要让用户粘贴原文。
 如果用户给出了明确的原文片段、句子、选区或精确引用，优先使用 document_replace_exact，避免整篇覆盖或误改重复片段。
 如果用户明确要求在文档里生成图表、交互组件、可视化说明、小工具或生成式 UI，优先使用 document_insert_widget，把 show-widget 围栏写入原文档。
 如果用户要求“看看现在有哪些 widget / 更新这个 widget / 删除这个 widget”，优先使用 document_list_widgets / document_update_widget / document_remove_widget，不要退回整篇覆盖，也不要用 document_replace_text / document_replace_exact 修改 show-widget 围栏内部。

@@ -191,7 +191,7 @@ function parseSectionHeading(line: string): ParsedSectionHeading | null {
     }
   }
 
-  const numberedHeading = trimmed.match(/^(?:\d+(?:\.\d+)*|[一二三四五六七八九十]+[、.．])\s+(.+)$/)
+  const numberedHeading = trimmed.match(/^(?:\d+(?:\.\d+)*[.．]?|[一二三四五六七八九十]+[、.．])\s+(.+)$/)
   if (numberedHeading?.[1]) {
     return { level: 3, title: numberedHeading[1].trim(), kind: 'numbered' }
   }
