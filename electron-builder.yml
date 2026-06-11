@@ -53,6 +53,10 @@ extraResources:
     to: pets
     filter:
       - "**/*"
+  - from: assets/prompts
+    to: prompts
+    filter:
+      - "**/*"
   - from: src/main/modules/rss-engine/rsshub-worker.mjs
     to: rsshub-worker.mjs
   - from: src/python
