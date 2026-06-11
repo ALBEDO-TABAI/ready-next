@@ -219,6 +219,13 @@ export const TOOL_ERROR_METRICS = {
    * 真正让模型感知（system reminder 注入）属 Stage 3 的 2.1b，独立审批后做。
    */
   providerArgumentsCorrupt: 'provider_arguments_corrupt',
+  /**
+   * EP1-I3-1 — action-confirmation gate (05 §3.1) denied a dispatch:
+   * M1 → `denied_manual_only`（必须用户亲手做）、M2/M3 →
+   * `denied_pending_confirmation`（I3-2 接冻结+确认卡；接通前模型必须改道）。
+   * payload: `{ toolName, mode, ruleId, action, sessionId }`.
+   */
+  confirmationGateDenied: 'action_confirmation_gate_denied',
 } as const
 
 export type ToolErrorMetricName = (typeof TOOL_ERROR_METRICS)[keyof typeof TOOL_ERROR_METRICS]
