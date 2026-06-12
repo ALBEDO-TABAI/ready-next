@@ -1,7 +1,7 @@
 # Agent Evolution 阶段四开发计划
 
 > 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。
-> 合同：`docs/superpowers/plans/2026-06-13-agent-evolution-phase4-implementation.md`（**approved v3 待终核（v2 已 APPROVED；v3 补 index 落点/retired owner 注入/specialist id 小写 slug 三决策），终核放行后开工**）。
+> 合同：`docs/superpowers/plans/2026-06-13-agent-evolution-phase4-implementation.md`（**approved v3（2026-06-13 Codex 终核 APPROVED 可 enforce），可按波次开工**）。
 > 阶段三基线：主轨 13 单全部收口（整轮审查零 P1），回归入口 `verify:evolution-p3`。
 
 ## 1. 工单总览（7 单 + 收口）
