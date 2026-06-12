@@ -40,6 +40,35 @@ export interface BeliefCardFrontmatter {
   site?: string
   /** EP3-C5 candidate stage — present only on emergence candidate cards. */
   stage?: CandidateStage
+  /** EP4-A5 — routing-card trigger keywords: literal, comma-separated in
+   *  the file, ≤8 entries of 1-32 chars. No regex, no globs, no vectors. */
+  triggers?: string[]
+}
+
+export const TRIGGERS_MAX_ENTRIES = 8
+export const TRIGGERS_MAX_ENTRY_CHARS = 32
+
+/** Parse + validate the triggers value — comma-separated string from a
+ *  card FILE, or a string[] from a writeCard caller. null = absent;
+ *  ok:false = bad card. */
+export function parseTriggersValue(raw: string | string[] | undefined):
+  | { ok: true; triggers: string[] | null }
+  | { ok: false; reason: string } {
+  if (raw === undefined || raw === '' || (Array.isArray(raw) && raw.length === 0)) {
+    return { ok: true, triggers: null }
+  }
+  const parts = Array.isArray(raw) ? raw.map(String) : raw.split(',')
+  const entries = parts.map((entry) => entry.trim()).filter((entry) => entry.length > 0)
+  if (entries.length === 0) return { ok: false, reason: 'triggers present but empty' }
+  if (entries.length > TRIGGERS_MAX_ENTRIES) {
+    return { ok: false, reason: `triggers exceed ${TRIGGERS_MAX_ENTRIES} entries` }
+  }
+  for (const entry of entries) {
+    if (entry.length > TRIGGERS_MAX_ENTRY_CHARS) {
+      return { ok: false, reason: `trigger keyword too long: ${entry.slice(0, 40)}` }
+    }
+  }
+  return { ok: true, triggers: entries }
 }
 
 export interface BeliefCard {
@@ -149,6 +178,8 @@ function validateFrontmatter(
   if (meta.stage && !(CANDIDATE_STAGES as readonly string[]).includes(meta.stage)) {
     return { ok: false, reason: `bad stage: ${meta.stage}` }
   }
+  const triggersCheck = parseTriggersValue(meta.triggers)
+  if (!triggersCheck.ok) return { ok: false, reason: triggersCheck.reason }
   return {
     ok: true,
     fm: {
@@ -161,6 +192,7 @@ function validateFrontmatter(
       ...(meta.source ? { source: meta.source } : {}),
       ...(meta.site ? { site: meta.site } : {}),
       ...(meta.stage ? { stage: meta.stage as CandidateStage } : {}),
+      ...(triggersCheck.triggers ? { triggers: triggersCheck.triggers } : {}),
     },
   }
 }
@@ -172,6 +204,7 @@ function serializeCard(fm: BeliefCardFrontmatter, body: string): string {
   if (fm.source) lines.push(`source: ${fm.source}`)
   if (fm.site) lines.push(`site: ${fm.site}`)
   if (fm.stage) lines.push(`stage: ${fm.stage}`)
+  if (fm.triggers && fm.triggers.length > 0) lines.push(`triggers: ${fm.triggers.join(', ')}`)
   lines.push('---', '', body.trim(), '')
   return lines.join('\n')
 }
@@ -310,7 +343,7 @@ export class BeliefCardStore {
    * main-session routing index. Staged routing cards never inject (the
    * phase-1 staged ban holds at this surface too).
    */
-  listRoutingCards(): Array<{ relPath: string; title: string; description: string }> {
+  listRoutingCards(): Array<{ relPath: string; title: string; description: string; targetAgentId: string; triggers: string[] | null }> {
     return this.listCards()
       .filter((card) =>
         card.frontmatter.status === 'active'
@@ -319,6 +352,9 @@ export class BeliefCardStore {
         relPath: card.relPath,
         title: card.frontmatter.title,
         description: card.frontmatter.description,
+        // EP4-A5 — the routing target is BOUND to the filename.
+        targetAgentId: card.relPath.replace(/^.*routing-/, '').replace(/\.md$/, ''),
+        triggers: card.frontmatter.triggers ?? null,
       }))
   }
 

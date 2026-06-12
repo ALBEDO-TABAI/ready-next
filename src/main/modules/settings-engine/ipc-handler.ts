@@ -17,6 +17,11 @@ import {
   readAgentAutoNarrationContinuationSetting,
   writeAgentAutoNarrationContinuationSetting,
 } from './agent-auto-narration-setting'
+import {
+  readAgentSessionPrerouteMode,
+  writeAgentSessionPrerouteMode,
+  type AgentSessionPrerouteMode,
+} from './agent-session-preroute-setting'
 
 interface SettingsIPCResponse<T = unknown> {
   success: boolean
@@ -74,6 +79,24 @@ export function setupSettingsIPC(): void {
   ipcMain.handle('settings:setAgentAutoNarrationContinuation', (_, payload: { enabled: boolean }): SettingsIPCResponse => {
     try {
       writeAgentAutoNarrationContinuationSetting(repository, payload?.enabled !== false)
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  // EP4-A5 — agent_auto_routing (off | suggest | auto, default suggest)
+  ipcMain.handle('settings:getAgentSessionPrerouteMode', (): SettingsIPCResponse<AgentSessionPrerouteMode> => {
+    try {
+      return { success: true, data: readAgentSessionPrerouteMode(repository) }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
+  })
+
+  ipcMain.handle('settings:setAgentSessionPrerouteMode', (_, payload: { mode: AgentSessionPrerouteMode }): SettingsIPCResponse => {
+    try {
+      writeAgentSessionPrerouteMode(repository, payload?.mode)
       return { success: true }
     } catch (error) {
       return { success: false, error: error instanceof Error ? error.message : String(error) }

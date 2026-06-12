@@ -113,6 +113,8 @@ import { UserProfileRepository } from '../../repositories/user-profile-repositor
 import { AgentPersonalityRepository } from '../../repositories/agent-personality-repository'
 import { AppSettingsRepository } from '../../repositories/app-settings-repository'
 import { readAgentAutoNarrationContinuationSetting } from '../../settings-engine/agent-auto-narration-setting'
+import { readAgentSessionPrerouteMode } from '../../settings-engine/agent-session-preroute-setting'
+import { decideSessionPreroute, type PrerouteResult } from '../agents/session-preroute'
 import type { CapabilityRuntimeSnapshot } from '../../../../shared/ai-capability-runtime'
 import { ExternalMemoryProviderSlot } from '../memory/external-memory-provider-slot'
 import { decryptChannelConfig, encryptChannelConfig } from '../memory/secret-storage'
@@ -846,6 +848,32 @@ export class AgentControlRuntime extends EventEmitter {
   /** EP3-A4 — agents-table registry for the handoff proposal flow. */
   getAgentRegistry(): AgentRegistryRepository {
     return this.agentRegistry
+  }
+
+  /** EP4-A5 — session-creation preroute (pure table+classifier router fed
+   *  with projection facts, active routing cards, and registry status). */
+  evaluateSessionPreroute(firstMessage: string): PrerouteResult {
+    const mode = readAgentSessionPrerouteMode(this.settingsRepository)
+    const recentOwnedTasks = this.taskProjectionStore.listRecentTasksForPreroute(10).map((record) => ({
+      taskId: record.taskId,
+      status: String(record.status),
+      interactionState: record.interactionState ?? null,
+      summary: record.taskSummary ?? null,
+      blockerCategory: record.blockedReason ?? null,
+      ownerAgentId: record.ownerAgentId ?? null,
+    }))
+    const routingCards = (this.getBeliefCardStore()?.listRoutingCards() ?? []).map((card) => ({
+      relPath: card.relPath,
+      targetAgentId: card.targetAgentId,
+      triggers: card.triggers,
+    }))
+    return decideSessionPreroute({
+      firstMessage,
+      recentOwnedTasks,
+      routingCards,
+      isAgentActive: (agentId) => this.agentRegistry.get(agentId)?.status === 'active',
+      mode,
+    })
   }
 
   private hasActiveNarrationContinuationRun(): boolean {

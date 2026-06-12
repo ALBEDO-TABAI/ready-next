@@ -40,6 +40,7 @@ import PersonalityEditor from '../components/personality/PersonalityEditor'
 import UserProfileEditor from '../components/profile/UserProfileEditor'
 
 const AGENT_AUTO_NARRATION_CONTINUATION_SETTING_KEY = 'agent.autoNarrationContinuation'
+const AGENT_SESSION_PREROUTE_SETTING_KEY = 'agent.sessionPrerouteMode'
 
 interface SettingSection {
   id: string
@@ -119,6 +120,18 @@ const settingsData: SettingSection[] = [
         description: '没有活跃对话运行时，后台任务完成后自动生成一条结果播报。',
         type: 'toggle',
         value: true,
+      },
+      {
+        id: AGENT_SESSION_PREROUTE_SETTING_KEY,
+        label: '新会话智能路由',
+        description: '新会话首条消息按"状态优先/先例次之"判定更合适的专项 agent：建议=显示建议条由你决定；自动=先例命中直接转给对应 agent（可一键改回）。派生新 agent 永远需要你确认。',
+        type: 'select',
+        value: 'suggest',
+        options: [
+          { value: 'off', label: '关闭' },
+          { value: 'suggest', label: '建议（默认）' },
+          { value: 'auto', label: '自动' },
+        ],
       },
     ],
   },
@@ -2930,6 +2943,13 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
             : autoNarrationResult.data !== 'false',
         )
       }
+      const prerouteResult = window.electronAPI.settings.getAgentSessionPrerouteMode
+        ? await window.electronAPI.settings.getAgentSessionPrerouteMode()
+        : null
+      if (cancelled) return
+      if (prerouteResult?.success && typeof prerouteResult.data === 'string') {
+        updateSetting('agent', AGENT_SESSION_PREROUTE_SETTING_KEY, prerouteResult.data)
+      }
     })()
     return () => { cancelled = true }
   }, [])
@@ -3293,6 +3313,25 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                             const nextValue = e.target.value
                             if (currentSection.id === 'appearance' && setting.id === 'theme') {
                               setAccent(nextValue as ThemeAccent)
+                              return
+                            }
+                            if (setting.id === AGENT_SESSION_PREROUTE_SETTING_KEY) {
+                              void (async () => {
+                                const api = window.electronAPI?.settings?.setAgentSessionPrerouteMode
+                                const result = api
+                                  ? await api(nextValue as 'off' | 'suggest' | 'auto')
+                                  : { success: false, error: '设置 IPC 不可用' }
+                                if (result.success) {
+                                  setSettingErrors((prev) => {
+                                    const next = { ...prev }
+                                    delete next[setting.id]
+                                    return next
+                                  })
+                                  updateSetting(currentSection.id, setting.id, nextValue)
+                                } else {
+                                  setSettingErrors((prev) => ({ ...prev, [setting.id]: result.error || '设置保存失败' }))
+                                }
+                              })()
                               return
                             }
                             updateSetting(currentSection.id, setting.id, nextValue)

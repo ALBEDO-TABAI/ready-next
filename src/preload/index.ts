@@ -59,6 +59,8 @@ const agentAPI = {
     requestId?: string
   ) => ipcRenderer.invoke('agent:send', { agent, message, sessionId, requestId }),
   newSession: (agent: string, sessionId?: string) => ipcRenderer.invoke('agent:newSession', { agent, sessionId }),
+  sessionPrerouteEvaluate: (firstMessage: string) =>
+    ipcRenderer.invoke('agent:sessionPreroute:evaluate', { firstMessage }),
   // Stage U PR U1.2 — removed `orchestrate / getStatus / getAll / getDiagnostics`
   // legacy AgentManager wrappers. Zero renderer callers (verified via grep).
   // Use `getRuntimeStatus` + `getCapabilityRuntimeSnapshot` for diagnostics.
@@ -981,6 +983,9 @@ const settingsAPI = {
   getAgentAutoNarrationContinuation: () => ipcRenderer.invoke('settings:getAgentAutoNarrationContinuation'),
   setAgentAutoNarrationContinuation: (enabled: boolean) =>
     ipcRenderer.invoke('settings:setAgentAutoNarrationContinuation', { enabled }),
+  getAgentSessionPrerouteMode: () => ipcRenderer.invoke('settings:getAgentSessionPrerouteMode'),
+  setAgentSessionPrerouteMode: (mode: 'off' | 'suggest' | 'auto') =>
+    ipcRenderer.invoke('settings:setAgentSessionPrerouteMode', { mode }),
   getAIConfig: () => ipcRenderer.invoke('settings:getAIConfig'),
   setAIConfig: (config: unknown) => ipcRenderer.invoke('settings:setAIConfig', config),
   getAIWorkspace: () => ipcRenderer.invoke('settings:getAIWorkspace'),

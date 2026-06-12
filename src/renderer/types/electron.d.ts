@@ -790,6 +790,17 @@ interface ElectronAgentAPI {
     requestId?: string
   ) => Promise<{ success: boolean; error?: string | null }>
   newSession: (agent: string, sessionId?: string) => Promise<{ success: boolean; error?: string }>
+  sessionPrerouteEvaluate: (firstMessage: string) => Promise<{
+    success: boolean
+    data?: {
+      decision:
+        | { tier: 'state'; targetAgentId: string; taskId: string | null }
+        | { tier: 'precedent'; targetAgentId: string; cardRelPath: string; matchedKeywords: string[] }
+        | { tier: 'fallback'; targetAgentId: string; reason: string; conflicts?: Array<{ cardRelPath: string; targetAgentId: string }> }
+      effect: 'none' | 'suggest' | 'route'
+    }
+    error?: string
+  }>
   // Stage U PR U1.2 — removed `orchestrate / getStatus / getAll / getDiagnostics`
   // legacy AgentManager wrappers. Use `getRuntimeStatus` / `getCapabilityRuntimeSnapshot`.
   kill: (agent: string, sessionId?: string) => Promise<{ success: boolean; error?: string }>
@@ -2967,6 +2978,8 @@ interface ElectronSettingsAPI {
   getAll: () => Promise<{ success: boolean; data?: Record<string, string>; error?: string }>
   getAgentAutoNarrationContinuation: () => Promise<{ success: boolean; data?: boolean; error?: string }>
   setAgentAutoNarrationContinuation: (enabled: boolean) => Promise<{ success: boolean; error?: string }>
+  getAgentSessionPrerouteMode: () => Promise<{ success: boolean; data?: 'off' | 'suggest' | 'auto'; error?: string }>
+  setAgentSessionPrerouteMode: (mode: 'off' | 'suggest' | 'auto') => Promise<{ success: boolean; error?: string }>
   getAIConfig: () => Promise<{ success: boolean; data?: AIModelConfigData | null; error?: string }>
   setAIConfig: (config: AIModelConfigData) => Promise<{ success: boolean; error?: string }>
   getAIWorkspace: () => Promise<{ success: boolean; data?: AIProviderWorkspaceData; error?: string }>

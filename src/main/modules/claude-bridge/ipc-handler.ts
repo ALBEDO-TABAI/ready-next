@@ -50,6 +50,7 @@ import { askUserGroup } from './ipc/ask-user-group'
 import { toolEventGroup } from './ipc/tool-event-group'
 import { agentLifecycleGroup } from './ipc/agent-lifecycle-group'
 import { agentRuntimeGroup } from './ipc/agent-runtime-group'
+import { sessionPrerouteGroup } from './ipc/session-preroute-group'
 import { conversationGroup } from './ipc/conversation-group'
 import { taskProjectionGroup } from './ipc/task-projection-group'
 import { recallGroup } from './ipc/recall-group'
@@ -236,6 +237,9 @@ let agentLifecycleGroupDispose: IpcDisposeHandle | null = null
  * dispose on dev-reload re-entry, dispose on `cleanupAgentRuntime` shutdown.
  */
 let agentRuntimeGroupDispose: IpcDisposeHandle | null = null
+
+/** EP4-A5 — dispose handle for the session preroute evaluate channel. */
+let sessionPrerouteGroupDispose: IpcDisposeHandle | null = null
 
 /**
  * Stage V V2.1e — dispose handle returned by `conversationGroup.register`.
@@ -473,6 +477,11 @@ export async function cleanupAgentRuntime(): Promise<void> {
   if (agentRuntimeGroupDispose) {
     try { agentRuntimeGroupDispose.dispose() } catch { /* ignore */ }
     agentRuntimeGroupDispose = null
+  }
+  // EP4-A5 — symmetric release of the session preroute evaluate channel.
+  if (sessionPrerouteGroupDispose) {
+    try { sessionPrerouteGroupDispose.dispose() } catch { /* ignore */ }
+    sessionPrerouteGroupDispose = null
   }
   // Stage V V2.1e — symmetric release of the 8 conversation-scope + attachment
   // channel handlers (listConversationScopes / listScopeRuns /
@@ -844,6 +853,15 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     getRuntimeStatus: () => runtime!.getRuntimeStatus(),
     getCapabilityRuntimeSnapshot: (config) => runtime!.getCapabilityRuntimeSnapshot(config),
     listChannels: () => runtime!.listChannels(),
+  })
+
+  // EP4-A5 — session preroute evaluate (pure, read-only; renderer acts).
+  if (sessionPrerouteGroupDispose) {
+    try { sessionPrerouteGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    sessionPrerouteGroupDispose = null
+  }
+  sessionPrerouteGroupDispose = sessionPrerouteGroup.register(ipcMain, {
+    evaluateSessionPreroute: (firstMessage) => runtime!.evaluateSessionPreroute(firstMessage),
   })
 
   // Stage V V2.1e — conversation-scope + attachment channels lifted into

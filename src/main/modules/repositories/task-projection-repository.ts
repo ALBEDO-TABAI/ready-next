@@ -450,6 +450,22 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     }
   }
 
+  /** EP4-A5 — recent tasks (most recent first, ANY owner) feeding the
+   *  session preroute's state tier. Un-owned open tasks must be visible to
+   *  the classifier, or a genuine continuation of a main-agent task would
+   *  get hijacked by precedent matching. Dead DB → empty. */
+  listRecentTasksForPreroute(limit = 10): TaskProjectionRecord[] {
+    try {
+      const db = this.dbManager.getRawDb()
+      if (!db) return []
+      return db.prepare(
+        'SELECT * FROM task_projections ORDER BY updated_at DESC LIMIT ?',
+      ).all<TaskProjectionRow>(limit).map((row) => this.mapRow(row))
+    } catch {
+      return []
+    }
+  }
+
   listByParentTask(parentTaskId: string): TaskProjectionRecord[] {
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
