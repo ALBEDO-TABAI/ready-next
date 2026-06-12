@@ -2235,6 +2235,33 @@ const migrations: Migration[] = [
       db.exec('ALTER TABLE task_projections ADD COLUMN proof_refs_json TEXT')
       db.exec('ALTER TABLE task_projections ADD COLUMN learning_refs_json TEXT')
     }
+  },
+  {
+    // EP3-A1 — agents registry. 08/04 迁移口径：仅建主 agent 一行；表只有
+    // 主 agent 行时系统行为 = 现状（存量零感知）。
+    name: '055_agents_table',
+    up: (db) => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agents (
+          id TEXT PRIMARY KEY,
+          name TEXT NOT NULL,
+          charter TEXT,
+          persona_ref TEXT,
+          status TEXT NOT NULL DEFAULT 'active',
+          created_at TEXT NOT NULL
+        )
+      `)
+      db.prepare(
+        'INSERT OR IGNORE INTO agents (id, name, charter, persona_ref, status, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+      ).run('butler', '管家', '主 agent：协调全部产品域任务', null, 'active', new Date().toISOString())
+    }
+  },
+  {
+    // EP3-A1 — task owner column (write value comes ONLY from EP3-A4).
+    name: '056_task_projection_owner_agent',
+    up: (db) => {
+      db.exec('ALTER TABLE task_projections ADD COLUMN owner_agent_id TEXT')
+    }
   }
 ]
 

@@ -407,6 +407,9 @@ export interface TaskProjectionRecord {
   checkins?: unknown[] | null
   proofRefs?: unknown[] | null
   learningRefs?: unknown[] | null
+  /** EP3-A1 — task owner agent (migration 056). Write value comes ONLY from
+   *  the A4 handoff adoption; everything else reads. */
+  ownerAgentId?: string | null
   createdAt: string
   updatedAt: string
 }

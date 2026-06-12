@@ -49,6 +49,7 @@ interface TaskProjectionRow {
   checkins_json?: string | null
   proof_refs_json?: string | null
   learning_refs_json?: string | null
+  owner_agent_id?: string | null
   recent_artifacts_json: string | null
   created_at: string
   updated_at: string
@@ -208,8 +209,9 @@ export class TaskProjectionRepository implements TaskProjectionStore {
         recovery_history_json, degradation_reason, blocked_reason, resumable_actions_json,
         continuation_ref_json, progress_json, recent_artifacts_json,
         criteria_json, checkins_json, proof_refs_json, learning_refs_json,
+        owner_agent_id,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.taskId,
       record.scopeId,
@@ -239,6 +241,7 @@ export class TaskProjectionRepository implements TaskProjectionStore {
       record.checkins ? JSON.stringify(record.checkins) : null,
       record.proofRefs ? JSON.stringify(record.proofRefs) : null,
       record.learningRefs ? JSON.stringify(record.learningRefs) : null,
+      record.ownerAgentId ?? null,
       record.createdAt,
       record.updatedAt,
     )
@@ -301,6 +304,7 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     if ('checkins' in patch) assign('checkins_json', patch.checkins ? JSON.stringify(patch.checkins) : null)
     if ('proofRefs' in patch) assign('proof_refs_json', patch.proofRefs ? JSON.stringify(patch.proofRefs) : null)
     if ('learningRefs' in patch) assign('learning_refs_json', patch.learningRefs ? JSON.stringify(patch.learningRefs) : null)
+    if ('ownerAgentId' in patch) assign('owner_agent_id', patch.ownerAgentId)
     if ('createdAt' in patch) assign('created_at', patch.createdAt)
     if ('updatedAt' in patch) assign('updated_at', patch.updatedAt)
 
@@ -501,6 +505,7 @@ export class TaskProjectionRepository implements TaskProjectionStore {
       checkins: safeParseArray(row.checkins_json),
       proofRefs: safeParseArray(row.proof_refs_json),
       learningRefs: safeParseArray(row.learning_refs_json),
+      ownerAgentId: row.owner_agent_id ?? null,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }
