@@ -141,6 +141,43 @@ export function extractCrystallizeCards(cards: ReadonlyArray<CrystallizeSignalCa
   return out
 }
 
+export interface AgentCandidateFeedSignal {
+  relPath: string
+  title: string
+  /** EP3-C5 candidate lifecycle stage from card frontmatter. */
+  stage: string
+  /** Dated evidence entries parsed from the card body. */
+  evidenceDates: string[]
+}
+
+/**
+ * EP3-C5 — candidate → intent-feed projection: ONLY stage 'candidate' with
+ * ≥3 dated evidence entries projects; reuses the crystallize explicit-
+ * confirm discipline (never one-click). The action exit is the phase-3
+ * placeholder — confirmation records adoption; derivation itself is the
+ * phase-4 A6 flow.
+ */
+export function extractAgentCandidateCards(signals: ReadonlyArray<AgentCandidateFeedSignal>): EmergenceCard[] {
+  const out: EmergenceCard[] = []
+  for (const signal of signals) {
+    if (signal.stage !== 'candidate') continue
+    if (signal.evidenceDates.length < 3) continue
+    out.push({
+      id: `crystallize:agent-candidate:${signal.relPath}`,
+      type: 'crystallize',
+      title: `最近多次出现同类请求：${signal.title}`,
+      evidence: [
+        ...signal.evidenceDates.slice(0, 3).map((date) => ({ fact: `同域请求出现于 ${date}`, ref: signal.relPath })),
+        { fact: '确认后仅记录采纳——派生流程属阶段四', ref: signal.relPath },
+      ],
+      confidence: 0.7,
+      action: { kind: 'adopt_candidate', ref: signal.relPath },
+      requiresExplicitConfirm: true,
+    })
+  }
+  return out
+}
+
 /** Apply the four feed controls and a stable ordering. */
 export function assembleEmergenceFeed(
   cards: ReadonlyArray<EmergenceCard>,

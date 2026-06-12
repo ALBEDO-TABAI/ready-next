@@ -23,6 +23,11 @@ export type BeliefCardStatus = 'staged' | 'active' | 'rejected' | 'invalid'
 export const BELIEF_CONFIDENCE = ['H', 'M', 'L'] as const
 export const BELIEF_TAGS = ['knowledge', 'self', 'preference', 'aspire'] as const
 
+/** EP3-C5 — emergence candidate lifecycle (03 §5), orthogonal to the
+ *  staged/active write lifecycle. Optional; only aspire candidates use it. */
+export const CANDIDATE_STAGES = ['hint', 'candidate', 'emerged', 'routed', 'retired'] as const
+export type CandidateStage = (typeof CANDIDATE_STAGES)[number]
+
 export interface BeliefCardFrontmatter {
   title: string
   description: string
@@ -33,6 +38,8 @@ export interface BeliefCardFrontmatter {
   source?: string
   /** Present only on site cards (`knowledge/sites/*.md`). */
   site?: string
+  /** EP3-C5 candidate stage — present only on emergence candidate cards. */
+  stage?: CandidateStage
 }
 
 export interface BeliefCard {
@@ -120,6 +127,9 @@ function validateFrontmatter(
     return { ok: false, reason: `bad status: ${meta.status}` }
   }
   if (isSite && !meta.site) return { ok: false, reason: 'site card missing site field' }
+  if (meta.stage && !(CANDIDATE_STAGES as readonly string[]).includes(meta.stage)) {
+    return { ok: false, reason: `bad stage: ${meta.stage}` }
+  }
   return {
     ok: true,
     fm: {
@@ -131,6 +141,7 @@ function validateFrontmatter(
       status: meta.status as BeliefCardStatus,
       ...(meta.source ? { source: meta.source } : {}),
       ...(meta.site ? { site: meta.site } : {}),
+      ...(meta.stage ? { stage: meta.stage as CandidateStage } : {}),
     },
   }
 }
@@ -141,6 +152,7 @@ function serializeCard(fm: BeliefCardFrontmatter, body: string): string {
     `status: ${fm.status}`]
   if (fm.source) lines.push(`source: ${fm.source}`)
   if (fm.site) lines.push(`site: ${fm.site}`)
+  if (fm.stage) lines.push(`stage: ${fm.stage}`)
   lines.push('---', '', body.trim(), '')
   return lines.join('\n')
 }
