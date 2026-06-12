@@ -1,13 +1,13 @@
 # 阶段三开发计划（配套 2026-06-12-agent-evolution-phase3-implementation.md）
 
-> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同 approved v1（2026-06-12 Codex 评审 APPROVED / enforce: true），可按波次开工；遗留轨 R 的解锁检查（波次 0）随真实使用随时重跑。
+> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同 v2 修订中（Codex 二轮复审 6 点回修），**复核通过前不开工**；遗留轨 R 样本时钟起点=253b6768，且 typedTerminalRuns === totalTerminalRuns（unknown=0）为硬条件。
 
 ## 1. 工单总览
 
 | 工单 | 内容 | 规模 | 依赖 |
 |------|------|------|------|
-| A1 | agents 表（仅主 agent 行）+ registry repository + 存量零感知 | ~200 行 | 无 |
-| A2 | per-agent RULES/knowledge turn 级注入覆盖 | ~240 行 | A1（K3 已合入） |
+| A1 | agents 表（仅主 agent 行）+ registry + **057 ownerAgentId 列全链（Q1 范式，写值唯一归 A4）** | ~260 行 | 无 |
+| A2 | per-agent 注入**底座**（owner 参数化 + fixture 测试；端到端归 A4） | ~240 行 | A1（K3 已合入） |
 | A3 | charter/routing 索引注入主 agent 会话 | ~180 行 | A1/A2 |
 | A4 | agent_propose_handoff + 转办卡 + 同会话归属切换 | ~300 行 | A3 |
 | C3 | LLM 维护回合 + SubAgent 容器 + C6 衰减真实信号接线 | ~280 行 | C1/C2/K1-K3 已合入 |
@@ -29,7 +29,7 @@
 
 ```
 波次 0（解锁检查，随时重跑）
-  R 轨门槛核对：export-adjudicator-divergence ≥50 run/≥3 天/≥4 类/false_reject=0
+  R 轨门槛核对：export-adjudicator-divergence --since 253b6768 起算；≥50 run 且 typed===total（unknown=0）/≥3 天/≥4 类/false_reject=0
   R-B1 spike 窗口排期（真实浏览器）
 
 波次 1（全并行）

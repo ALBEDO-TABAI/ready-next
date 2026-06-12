@@ -1,9 +1,10 @@
 ---
 title: Agent Evolution 阶段三（组织与维护智能）实施子计划
 date: 2026-06-12
-status: approved v1 — Codex 评审 APPROVED（2026-06-12，唯一 P1 PK3↔I4 依赖矛盾修复后裁决可 enforce），逐单施工待启动
+status: v2 修订（2026-06-12 Codex 二轮复审 3P1/3P2 回修），待 Codex 复核后恢复 approved；复核通过前不开工
 revision_history:
-  - v1 (2026-06-12): 初稿；同日 Codex 评审唯一 P1（总则 PK3 依赖 I4 与工单表/波次矛盾）修复（cd558d47）后 APPROVED。依据 00 路线图阶段三范围（A1-A4 / C3-C5 / PK1-PK4 / I4 / B4-B5 / E3-E4）+ 03/04/05/09/10/11 各篇工作包表拆单；并入阶段二遗留轨（Q4b 链 + B1 spike）作为独立前置轨；I5 经 HEAD 取证已由 EP2-K4 核销（仅复核行）。
+  - v1 (2026-06-12): 初稿；同日 Codex 评审唯一 P1（总则 PK3 依赖 I4 与工单表/波次矛盾）修复（cd558d47）后 APPROVED。
+  - v2 (2026-06-12): 吸收 Codex 二轮复审 6 点。P1：①ownerAgentId 落 schema——A1 携 057 迁移列 + Q1 范式全链，A4 为全仓唯一写值点；②A2/A4 顺序矛盾消解——A2 降级为 owner 参数化注入底座 + fixture 测试，端到端验收归 A4；③R 轨样本时钟起点改 253b6768 并加 typedTerminalRuns === totalTerminalRuns（unknown=0）硬条件。P2：④C3 容器钉死 runSubAgent（四决策入单，禁第四套 runner）；⑤C4 写入目标对齐真值源（DB resident_user 为主，USER.md 仅 fallback 镜像）；⑥B1 报告固定路径+评审清单。依据 00 路线图阶段三范围（A1-A4 / C3-C5 / PK1-PK4 / I4 / B4-B5 / E3-E4）+ 03/04/05/09/10/11 各篇工作包表拆单；并入阶段二遗留轨（Q4b 链 + B1 spike）作为独立前置轨；I5 经 HEAD 取证已由 EP2-K4 核销（仅复核行）。
 owner: 白
 author: Claude (Fable 5)
 executor: 待定（Claude / Codex 逐单施工）
@@ -31,7 +32,7 @@ related:
 ## 0. 总则
 
 1. **轨道与串行约束**
-   - **遗留轨 R（阶段二收尾，独立于阶段三主轨）**：Q4b → Q5 → {T3, X2} → E2 → Q6 → G2，工单定义、规模、验证一律以阶段二合同 approved v7 为准，本合同不复制不改写。**解锁条件（可执行）**：`node scripts/export-adjudicator-divergence.cjs --since <Q4a 合入时间>` 输出 `totalTerminalRuns ≥ 50` 且窗口 ≥3 自然日、taskTypes 覆盖 ≥4 类（必含 direct_answer 与 multi_step_task）、清单逐行 disposition 后 `false_reject` = 0、复核清单提交进 repo。B1 spike（真实浏览器实测）同属遗留轨。**遗留轨与主轨并行推进；主轨内仅 E3/E4 与 PK4 的部分验收依赖遗留轨产物（见各单前置）。**
+   - **遗留轨 R（阶段二收尾，独立于阶段三主轨）**：Q4b → Q5 → {T3, X2} → E2 → Q6 → G2，工单定义、规模、验证一律以阶段二合同 approved v7 为准，本合同不复制不改写。**解锁条件（可执行）**：`node scripts/export-adjudicator-divergence.cjs --since <253b6768 合入时间>`（**样本时钟起点 = 253b6768**——样本完整性三件套与 DirectChat 全域保护之前的 shadow 样本已污染作废）输出 `totalTerminalRuns ≥ 50` 且 `typedTerminalRuns === totalTerminalRuns`（`taskTypes.unknown` 必须为 0，否则覆盖统计不可信）、窗口 ≥3 自然日、taskTypes 覆盖 ≥4 类（必含 direct_answer 与 multi_step_task）、清单逐行 disposition 后 `false_reject` = 0、复核清单提交进 repo。B1 spike（真实浏览器实测）同属遗留轨。**遗留轨与主轨并行推进；主轨内仅 E3/E4 与 PK4 的部分验收依赖遗留轨产物（见各单前置）。**
    - 轨道 A（专项 agent 实体，04 篇）：A1 → A2 → A3 → A4 严格串行。A5-A7（预路由/派生/退休）属阶段四，本合同不含。
    - 轨道 C（LLM 维护回合 v2，03 篇）：C3 → {C4, C5}。**C3 是本阶段唯一新增 LLM 回合**——必须经 EP2-C2 的确定性门控（不过门控不起 LLM），信源用摘要不用全文，空轮合法可审计；所有卡片写入走 `memory_write_card` 格式校验，禁止直接 fs 写卡。
    - 轨道 PK（任务包编译层，09 篇）：PK1 → PK2 → PK3 → PK4。**09 篇的 PK3→I4 依赖由 PK3 内置的 verbatim 注入子项满足**（SubAgent/技能子进程 brief 逐字断言在 PK3 验收内）；EP3-I4 是其后的**收口单**（handoff 子项 + 全局断言矩阵），不是 PK3 的前置。PK4 的 CheckIn 验收基于 Q4a（shadow）已合入的 CheckIn 结构，**不依赖 Q4b enforce**。
@@ -61,23 +62,23 @@ related:
 | R-T3 / R-X2 | Q4b 合入 | T3 同时核销写方向 gate 存量清单 reconciler×5 行 |
 | R-E2 | Q5 合入 | 意图流视图（E3/E4 的载体） |
 | R-Q6 / R-G2 | 全部遗留单合入 | G2 定稿 verify:evolution-p2 + 08 表 P 系列核销 |
-| R-B1 | 真实浏览器实测窗口 | spike 报告评审通过解锁 B4/B5 |
+| R-B1 | 真实浏览器实测窗口 | spike 报告**固定路径 `docs/agent-evolution/B1-browser-script-channel-spike.md`**；评审清单（缺一不过）：①安全清单五项逐项证明 ②DSL/JS 沙箱形态选型与理由 ③翻页取数实测回合数与降幅（目标 ≥80%）④CDP 共存性结论 ⑤与生产隔离声明。评审通过解锁 B4/B5 |
 
 ---
 
 ## 轨道 A：专项 agent 实体与转办（设计出处：04 篇）
 
 ### EP3-A1 agents 表迁移 + persona 模板候选
-- **改动文件**：`migrations.ts`（055：`agents` 表——id/name/charter/persona_ref/status/created_at，**仅建主 agent 一行**，08/04 迁移口径）、`repositories/agent-registry-repository.ts`（新增：list/get/create，读写收敛）、persona 模板候选机制（PersonalityEditor 数据层预留，不动 UI）、新增 `src/__tests__/migration-agents-table.test.ts`
+- **改动文件**：`migrations.ts`（055：`agents` 表——id/name/charter/persona_ref/status/created_at，**仅建主 agent 一行**，08/04 迁移口径；**057：`task_projections` 加 `owner_agent_id` TEXT 列**——A2 注入解析与 A4 归属切换的 schema 基础，编号避开 PK1 的 056）、**`ownerAgentId` 走 Q1 范式全链**（main/wire `TaskProjectionRecord` 增 `ownerAgentId?: string | null`、repository create INSERT/update 白名单/mapRow、renderer `electron.d.ts` 副本；任务卡 UI 只读消费不新增猜测——O 合同纪律；本单只立列与读写链，**写值唯一来自 A4**）、`repositories/agent-registry-repository.ts`（新增：list/get/create，读写收敛）、persona 模板候选机制（PersonalityEditor 数据层预留，不动 UI）、新增 `src/__tests__/migration-agents-table.test.ts`
 - **实施要点**：**存量零感知**——agents 表只有主 agent 行时系统行为 = 现状（断言级）；旧会话零行为变化；表为空时回退现状（防迁移失败半态）。
-- **测试（先红）**：迁移幂等（fake DB + 按名隔离）；仅主 agent 行；空表回退；repository 往返。
+- **测试（先红）**：迁移幂等（fake DB + 按名隔离，055/057 各自隔离）；仅主 agent 行；空表回退；registry 往返；ownerAgentId repository create-get 往返 + NULL 兼容。
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/migration-agents-table.test.ts && npm run verify:native && npm run typecheck`
-- **规模**：~200 行。
+- **规模**：~260 行。
 
-### EP3-A2 per-agent RULES/knowledge 的 turn 级注入覆盖
+### EP3-A2 per-agent RULES/knowledge 注入底座（owner 参数化；端到端验收归 A4）
 - **改动文件**：`prompt-assembly.ts`（注入源按**本轮任务 owner** 解析：owner agent 的 RULES/knowledge 作用域优先，无 owner 回退 `scope.agent`——K3/A 轨叠加，复用既有 RULES/index 注入通道不另起）、`belief-card-store.ts`（按 agent 作用域目录读取：`agents/<id>/knowledge/`，全局目录回退）、新增 `src/__tests__/per-agent-injection.test.ts`
-- **实施要点**：同会话内不同 owner 任务的轮次注入不同（快照断言）；他 agent 谱系卡片零泄漏（C4.3 纪律延伸）；预算沿用 K3 常量（RULES 全局+agent 合计 ≤2000 字符——01 §7b 口径在此兑现）。
-- **测试（先红）**：owner 切换 → 注入切换快照；无 owner 回退；跨 agent 零泄漏；预算合计截断。
+- **实施要点**：**A2 是底座单**——owner 来源为注入解析参数（本轮任务 projection 的 ownerAgentId，A1 列已就位；无值回退 scope.agent），用 **fixture 投影**驱动测试（直接构造带不同 ownerAgentId 的 projection 行），不依赖 A4 的切换工具；真实的采纳-owner 变更-注入切换端到端验收**归 A4**。他 agent 谱系卡片零泄漏（C4.3 纪律延伸）；预算沿用 K3 常量（RULES 全局+agent 合计 ≤2000 字符——01 §7b 口径在此兑现）。
+- **测试（先红）**：fixture 投影 ownerAgentId=X 与 Y 注入快照不同；无 owner 回退 scope.agent；跨 agent 零泄漏；预算合计截断。（owner 真实切换链路断言在 A4。）
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/per-agent-injection.test.ts src/__tests__/knowledge-injection-snapshot.test.ts && npm run typecheck`
 - **规模**：~240 行。
 
@@ -89,9 +90,9 @@ related:
 - **规模**：~180 行。
 
 ### EP3-A4 agent_propose_handoff 工具 + 转办建议卡 + 同会话归属切换
-- **改动文件**：新增 handoff 工具（携 `userRequestVerbatim` + context refs，**禁止摘要**——I4 铁律在此立面）、转办建议 UI 卡（复用 ask_user_questions 卡机变体范式，§7 最小闭环：IPC/preload/类型/组件）、任务 owner 切换（projection `ownerAgentId` 字段 + 同会话默认/新会话可选）、新增 `src/__tests__/agent-handoff-proposal.test.ts`
+- **改动文件**：新增 handoff 工具（携 `userRequestVerbatim` + context refs，**禁止摘要**——I4 铁律在此立面）、转办建议 UI 卡（复用 ask_user_questions 卡机变体范式，§7 最小闭环：IPC/preload/类型/组件）、任务 owner 切换（写 A1 既有 `ownerAgentId` 列——**全仓唯一写值点**，经 repository update；同会话默认/新会话可选）、新增 `src/__tests__/agent-handoff-proposal.test.ts`
 - **实施要点**：提议 → 用户采纳 → 任务卡 owner 变更 + 聊天连续 + 后续轮注入切换（A2 通道生效）；用户拒绝 → 结构化拒绝回模型；新会话路径预填原话。**工具属 M4（建议性，不执行外部动作），但采纳动作走用户点击——无确认自动转办不存在。**
-- **测试（先红）**：端到端提议→采纳→owner 变更→注入切换；verbatim 逐字断言；拒绝路径；新会话预填。
+- **测试（先红）**：**端到端：提议、采纳、ownerAgentId 写值、A2 注入切换（A2 降级掉的验收在此兑现）**；verbatim 逐字断言；拒绝路径；新会话预填。
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/agent-handoff-proposal.test.ts && npm run typecheck`
 - **规模**：~300 行。
 
@@ -100,7 +101,7 @@ related:
 ## 轨道 C：LLM 维护回合与涌现候选（设计出处：03 篇）
 
 ### EP3-C3 维护回合提示词 + SubAgent 容器接线
-- **改动文件**：维护回合提示词资产（X3 loader，`assets/prompts/maintenance/`）、SubAgent 容器接线（复用现有 sub-agent 基建，job 生命周期挂 EP2-C2 的 `CrystallizeScheduler`/`runCrystallizeRound` 之后——确定性动作先跑，LLM 回合后置）、信号采集（learningRefs/CheckIn 摘要/staged 卡清单——**摘要不全文**）、EP2-C6 衰减轮接线（真实 backlinks/access 信号喂 `runBeliefDecayRound`）、新增 `src/__tests__/maintenance-llm-round.test.ts`
+- **改动文件**：维护回合提示词资产（X3 loader，`assets/prompts/maintenance/`）、SubAgent 容器接线（**钉死为 `agent-control/sub-agent/sub-agent-runner.ts` 的 `runSubAgent` 一套**——不是 skill child、不是浏览器后台 sub-agent，**禁止新建第四套 runner**；四项决策：取消=沿用其 abortSignal 通道、预算=维护回合自带迭代上限并以专用 maintenance 标记落 run_meta 行计 token、日志=每轮单行报告进 maintenance 审计 + 既有 agent metrics、错误=runner 终态回灌 breadcrumb 不冒泡；job 生命周期挂 EP2-C2 的 `CrystallizeScheduler`/`runCrystallizeRound` 之后——确定性动作先跑，LLM 回合后置）、信号采集（learningRefs/CheckIn 摘要/staged 卡清单——**摘要不全文**）、EP2-C6 衰减轮接线（真实 backlinks/access 信号喂 `runBeliefDecayRound`）、新增 `src/__tests__/maintenance-llm-round.test.ts`
 - **实施要点**：C2 门控 skip → LLM 零调用（断言）；产出只能是 `memory_write_card` 调用清单（格式校验拒坏卡）；空轮干净退出留 breadcrumb；每轮单行报告进 maintenance 日志（03 §5 格式）。
 - **测试（先红）**：喂固定信号集 → 产出预期卡片操作（fake LLM）；门控 skip 零调用；坏卡产出被校验拒绝；空轮退出；衰减轮以真实信号驱动。
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/maintenance-llm-round.test.ts src/__tests__/crystallize-gate.test.ts src/__tests__/belief-decay-deterministic.test.ts && npm run typecheck`
@@ -108,7 +109,8 @@ related:
 
 ### EP3-C4 CAS 合并工具（USER.md 决策门）
 - **改动文件**：新增 `agent-control/maintenance/cas-merge.ts`（读快照 hash → 内存合并 ≤40 行 → 临时文件 → hash 一致才原子 rename，不一致良性跳过 exit-0 语义 + 审计行）、USER.md 决策门（"纯项目工作不进画像；不为了写而抢锁"为代码判定）、新增 `src/__tests__/cas-merge.test.ts`
-- **测试（先红）**：双写者交错只成功一个、失败方良性跳过无半态；审计行正确；≤40 行约束；决策门拒纯项目内容。
+- **真值源对齐（HEAD 取证）**：主路径用户画像优先读 **DB（resident_user / user_profiles）**，USER.md 仅 fallback（prompt-assembly loadUSER）。**C4 合并写入目标 = memory repository 的 resident_user 真值**（CAS 协议应用于读快照-内存合并-条件写的并发防护，hash 取 DB 行内容）；USER.md 文件仅在 DB 无行的 fallback 场景同步为可读镜像——绝不出现写了文件但主路径不读的死写。
+- **测试（先红）**：双写者交错只成功一个、失败方良性跳过无半态；审计行正确；≤40 行约束；决策门拒纯项目内容；**合并后主路径（DB 优先 loadUSER）能读到结果**。
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/cas-merge.test.ts && npm run typecheck`
 - **规模**：~220 行。
 
