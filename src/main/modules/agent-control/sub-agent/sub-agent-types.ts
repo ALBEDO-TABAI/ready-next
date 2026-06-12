@@ -79,6 +79,11 @@ export interface SubAgentContext {
   readonly parentSessionId?: string | null
   readonly logger?: SubAgentLogger
   readonly metadata?: Readonly<Record<string, unknown>>
+  /** EP3-PK3 — the user's original words, byte-for-byte (05 §4 最小传话):
+   *  spawners forward the verbatim request, never a paraphrase. */
+  readonly userRequestVerbatim?: string | null
+  /** EP3-PK3 — structured references accompanying the verbatim request. */
+  readonly contextRefs?: ReadonlyArray<string> | null
 }
 
 export interface SubAgentProgress {

@@ -32,6 +32,9 @@ export async function createSkillChildSubAgentFromPersisted(
     requestedInput: params.payload.requestedInput,
     parentNextHint: params.payload.parentNextHint,
     outputDir: params.payload.outputDir,
+    // EP3-PK3 — verbatim passthrough: the persisted words reach the child
+    // byte-for-byte; this layer never paraphrases.
+    userRequestVerbatim: params.payload.userRequestVerbatim ?? null,
   }
   const initialState = await params.driver.createInitialState(launchParams)
   return createSkillChildSubAgent({

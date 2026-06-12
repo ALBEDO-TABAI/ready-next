@@ -169,6 +169,9 @@ export interface SkillChildRunPayload {
   eventLogPath: string
   status: SkillChildRunStatus
   closeEvent: SkillChildCloseEvent | null
+  /** EP3-PK3 — the user's original words, byte-for-byte (05 §4 最小传话);
+   *  optional for legacy persisted rows, REQUIRED for packet dispatch. */
+  userRequestVerbatim?: string | null
 }
 
 /**
@@ -268,6 +271,8 @@ export interface SkillChildLaunchParams {
   agentContext?: import('../../../../shared/skill-host-contract').AgentSpawnContext | null
   /** Optional pre-existing output dir for legacy resume. */
   outputDir?: string
+  /** EP3-PK3 — verbatim user request forwarded into the child (05 §4). */
+  userRequestVerbatim?: string | null
 }
 
 /**
