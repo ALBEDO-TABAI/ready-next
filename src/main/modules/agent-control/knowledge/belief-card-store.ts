@@ -287,6 +287,23 @@ export class BeliefCardStore {
   }
 
   /**
+   * EP3-A3 — ACTIVE routing-fix cards (`knowledge/routing-*.md`) for the
+   * main-session routing index. Staged routing cards never inject (the
+   * phase-1 staged ban holds at this surface too).
+   */
+  listRoutingCards(): Array<{ relPath: string; title: string; description: string }> {
+    return this.listCards()
+      .filter((card) =>
+        card.frontmatter.status === 'active'
+        && /(^|\/)knowledge\/routing-[a-z0-9._-]+\.md$/.test(card.relPath))
+      .map((card) => ({
+        relPath: card.relPath,
+        title: card.frontmatter.title,
+        description: card.frontmatter.description,
+      }))
+  }
+
+  /**
    * Enumerate every `.md` under knowledge dirs, including unparseable ones
    * (card === null). Used by the DB mirror sync to record invalid cards as
    * `status: invalid` rows without dropping the row.

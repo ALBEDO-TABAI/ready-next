@@ -20,6 +20,10 @@ interface AgentsDatabaseAccessor {
   getRawDb(): AgentsRawDatabase | null
 }
 
+/** The migration-055 seeded main-agent row id — the only row until A4
+ *  adoption / phase-4 derivation add more. */
+export const MAIN_AGENT_ID = 'butler'
+
 export interface AgentRegistryRecord {
   id: string
   name: string

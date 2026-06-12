@@ -19,6 +19,7 @@ import { filterDailyMemoryForScope } from './session/daily-memory-scope-filter'
 import { buildDailyTaskIndex, type TaskIndexEntry } from './session/daily-task-index-builder'
 import { loadRulesDefaultBody } from './prompt-assets/rules-default-asset'
 import { isSafeAgentScopeId } from './knowledge/belief-card-store'
+import { MAIN_AGENT_ID } from '../repositories/agent-registry-repository'
 import type { SessionRecallCapsule } from '../../../shared/session-recall'
 import type { CoordinatorPromptFragment, DomainAdapter } from './domain-adapters/domain-adapter'
 
@@ -86,7 +87,11 @@ export interface PromptAssemblyDeps {
   /** EP2-K3: belief card store for the L1.5 knowledge index (active cards only). */
   getBeliefCardStore?: () => {
     renderKnowledgeIndex(opts: { maxChars: number; ownerAgentId?: string | null }): { text: string; renderedCount: number; omittedCount: number }
+    /** EP3-A3: active routing-fix cards for the main-session routing index. */
+    listRoutingCards?(): Array<{ relPath: string; title: string; description: string }>
   } | null
+  /** EP3-A3: agents-table roster for the main-session charter/routing index. */
+  getAgentRoster?: () => Array<{ id: string; name: string; charter: string | null; status: string }>
   /** EP2-K6: rollback switch — false stops RULES/index injection entirely. */
   isKnowledgeSystemEnabled?: () => boolean
   /** EP3-C4: injectable memory-content accessor (agent_knowledge value by
@@ -111,6 +116,8 @@ interface CoordinatorTriggerCandidate {
 
 const MAX_L0_CHARS = 6000
 const MAX_L1_CHARS = 8000
+// EP3-A3 — charter/routing index budget (main agent sessions only).
+const MAX_AGENT_ROUTING_CHARS = 600
 // EP2-K3 — knowledge layer budgets (01 §7b): RULES global+agent ≤2000 chars,
 // L1.5 index ≤1500 chars with confidence-ordered truncation.
 const MAX_RULES_CHARS = 2000
@@ -1008,6 +1015,29 @@ export class PromptAssemblyService {
     } catch (error) {
       console.error('[PromptAssembly] knowledge index render failed:', error)
     }
+    // EP3-A3 — charter list + routing index (L1.5), MAIN agent sessions
+    // ONLY: specialized sessions never see each other's charters (主 agent
+    // 保持薄的反面约束). Empty roster + no routing cards → section omitted.
+    let agentRoutingText = ''
+    try {
+      if (knowledgeEnabled && params.scope.agent === MAIN_AGENT_ID) {
+        const roster = (this.deps.getAgentRoster?.() ?? [])
+          .filter((agent) => agent.id !== MAIN_AGENT_ID && agent.status === 'active' && agent.charter)
+        const routingCards = this.deps.getBeliefCardStore?.()?.listRoutingCards?.() ?? []
+        const lines: string[] = []
+        if (roster.length > 0) {
+          lines.push('可转办的专项 agent：')
+          for (const agent of roster) lines.push(`- ${agent.name}（${agent.id}）：${agent.charter}`)
+        }
+        if (routingCards.length > 0) {
+          lines.push('路由索引：')
+          for (const card of routingCards) lines.push(`- ${card.title}：${card.description} → ${card.relPath}`)
+        }
+        agentRoutingText = lines.length > 0 ? clip(lines.join('\n'), MAX_AGENT_ROUTING_CHARS) : ''
+      }
+    } catch (error) {
+      console.error('[PromptAssembly] agent routing render failed:', error)
+    }
     const documentExcerptCount = requestEnvelope.chunks.filter((chunk) => chunk.source === 'document_excerpt').length
     const attachmentBodyCount = requestEnvelope.chunks.filter((chunk) => chunk.source === 'attachment_body').length
     if (documentExcerptCount > 0 || attachmentBodyCount > 0) {
@@ -1042,6 +1072,7 @@ export class PromptAssemblyService {
     const bootstrapMessages = [
       l1Text ? formatMemorySection('L1 会话上下文', l1Text) : '',
       knowledgeIndexText ? formatMemorySection('知识索引', knowledgeIndexText) : '',
+      agentRoutingText ? formatMemorySection('专项 agent 与路由索引', agentRoutingText) : '',
       recall.text ? formatMemorySection('跨会话回看', recall.text) : '',
       autoRecall.text ? formatMemorySection('自动跨会话回看', autoRecall.text) : '',
       l2Text ? formatMemorySection('L2 按需规则', l2Text) : ''
@@ -1073,6 +1104,7 @@ export class PromptAssemblyService {
         { section: 'L0_rules', text: rulesText },
         { section: 'L1_summary', text: l1Text },
         { section: 'L1_5_knowledge_index', text: knowledgeIndexText },
+        { section: 'L1_5_agent_routing', text: agentRoutingText },
         { section: 'recall', text: recall.text },
         { section: 'autoRecall', text: autoRecall.text },
         { section: 'L2_triggers', text: l2Text },
