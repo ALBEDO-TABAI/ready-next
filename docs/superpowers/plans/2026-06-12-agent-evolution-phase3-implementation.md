@@ -34,8 +34,8 @@ related:
    - **遗留轨 R（阶段二收尾，独立于阶段三主轨）**：Q4b → Q5 → {T3, X2} → E2 → Q6 → G2，工单定义、规模、验证一律以阶段二合同 approved v7 为准，本合同不复制不改写。**解锁条件（可执行）**：`node scripts/export-adjudicator-divergence.cjs --since <Q4a 合入时间>` 输出 `totalTerminalRuns ≥ 50` 且窗口 ≥3 自然日、taskTypes 覆盖 ≥4 类（必含 direct_answer 与 multi_step_task）、清单逐行 disposition 后 `false_reject` = 0、复核清单提交进 repo。B1 spike（真实浏览器实测）同属遗留轨。**遗留轨与主轨并行推进；主轨内仅 E3/E4 与 PK4 的部分验收依赖遗留轨产物（见各单前置）。**
    - 轨道 A（专项 agent 实体，04 篇）：A1 → A2 → A3 → A4 严格串行。A5-A7（预路由/派生/退休）属阶段四，本合同不含。
    - 轨道 C（LLM 维护回合 v2，03 篇）：C3 → {C4, C5}。**C3 是本阶段唯一新增 LLM 回合**——必须经 EP2-C2 的确定性门控（不过门控不起 LLM），信源用摘要不用全文，空轮合法可审计；所有卡片写入走 `memory_write_card` 格式校验，禁止直接 fs 写卡。
-   - 轨道 PK（任务包编译层，09 篇）：PK1 → PK2 → PK3 → PK4。PK3 依赖 I4；PK4 的 CheckIn 验收基于 Q4a（shadow）已合入的 CheckIn 结构，**不依赖 Q4b enforce**。
-   - 轨道 I（05 篇）：I4 依赖 A4（handoff 工具 A4 才存在）；I4 中"技能子进程注入 verbatim"子项不依赖 A4，随 PK3 一并施工。I5 经 HEAD 取证已由 EP2-K4 完成（确认卫生四条原文已进 RULES 默认资产 + 注入快照测试），**仅复核行，不再立单**。
+   - 轨道 PK（任务包编译层，09 篇）：PK1 → PK2 → PK3 → PK4。**09 篇的 PK3→I4 依赖由 PK3 内置的 verbatim 注入子项满足**（SubAgent/技能子进程 brief 逐字断言在 PK3 验收内）；EP3-I4 是其后的**收口单**（handoff 子项 + 全局断言矩阵），不是 PK3 的前置。PK4 的 CheckIn 验收基于 Q4a（shadow）已合入的 CheckIn 结构，**不依赖 Q4b enforce**。
+   - 轨道 I（05 篇）：EP3-I4 为收口单，依赖 A4（handoff 工具 A4 才存在）+ PK3（verbatim 注入子项已在其内落地）——它补 handoff 子项与既有 sub-agent 派发残余转发点，并交付三类转发点的全局逐字断言矩阵。I5 经 HEAD 取证已由 EP2-K4 完成（确认卫生四条原文已进 RULES 默认资产 + 注入快照测试），**仅复核行，不再立单**。
    - 轨道 B（11 篇）：B4 依赖 B1 spike 报告（遗留轨）；B5 依赖 I4 + PK3 + B1。B1 报告未评审通过前 B4/B5 不开工。
    - 轨道 E（10 篇）：E3 依赖 E2（遗留轨）；E4 依赖 E3 + C3。
    - **共享文件矩阵**：`run-finalizer.ts`（遗留轨 Q4b → T3 串行，主轨零触碰）；`prompt-assembly.ts`（A2 → A3 串行；遗留轨 X2 若同期需协调周序）；`migrations.ts`（A1、PK1——一律末尾追加，名称隔离范式）；`agent-sdk-runtime.ts`（A4、I4、PK3 三单触碰——轨间按波次错开，单内 additive）；`emergence-cards.ts`（C5、E3——C5 先）。
@@ -152,8 +152,8 @@ related:
 
 ## 轨道 I/B/E：传话铁律、浏览器守卫、反馈个性化
 
-### EP3-I4 最小传话（handoff 子项）
-- **改动文件**：A4 handoff 工具与 PK3 注入已分别立 verbatim 面；本单收口残余转发点（sub-agent 派发既有路径）+ 全局断言测试 `src/__tests__/verbatim-relay.test.ts`
+### EP3-I4 最小传话收口（前置：A4 + PK3）
+- **改动文件**：A4 handoff 工具与 PK3 注入已分别立 verbatim 面（09 篇 PK3→I4 依赖由 PK3 子项满足）；本单收口残余转发点（sub-agent 派发既有路径）+ 全局断言测试 `src/__tests__/verbatim-relay.test.ts`
 - **测试（先红）**：三类转发点（handoff/SubAgent/技能注入）转发内容 = 原话 + refs，无摘要拼接（逐字断言矩阵）。
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/verbatim-relay.test.ts && npm run typecheck`
 - **规模**：~160 行。
