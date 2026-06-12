@@ -55,29 +55,38 @@ export interface CandidateMaintenanceReport {
   rejected: number
 }
 
-const EVIDENCE_LINE = /^- (\d{4}-\d{2}-\d{2}) (.+)$/
+// stability is PERSISTED per evidence entry — upgrades count historical
+// stable evidence, not just this round's signals. Unmarked legacy lines
+// count as NOT stable (conservative: never upgrade on unproven history).
+const EVIDENCE_LINE = /^- (\d{4}-\d{2}-\d{2})(?: \[(stable|varied)\])? (.+)$/
+
+interface EvidenceEntry {
+  date: string
+  fact: string
+  stable: boolean
+}
 
 function slugify(text: string): string {
   const slug = text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')
   return slug || 'domain'
 }
 
-function readExistingEvidence(store: BeliefCardStore, relPath: string): Array<{ date: string; fact: string }> {
+function readExistingEvidence(store: BeliefCardStore, relPath: string): EvidenceEntry[] {
   const card = store.readCard(relPath, { includeStaged: true })
   if (!card) return []
-  const out: Array<{ date: string; fact: string }> = []
+  const out: EvidenceEntry[] = []
   for (const line of card.body.split('\n')) {
     const match = line.trim().match(EVIDENCE_LINE)
-    if (match) out.push({ date: match[1], fact: match[2] })
+    if (match) out.push({ date: match[1], stable: match[2] === 'stable', fact: match[3] })
   }
   return out
 }
 
-function candidateBody(domain: string, evidence: Array<{ date: string; fact: string }>, stage: CandidateStage): string {
+function candidateBody(domain: string, evidence: EvidenceEntry[], stage: CandidateStage): string {
   return [
     `最近在「${domain}」域观察到重复出现的相似请求（观察记录，非定性）：`,
     '',
-    ...evidence.map((entry) => `- ${entry.date} ${entry.fact}`),
+    ...evidence.map((entry) => `- ${entry.date} [${entry.stable ? 'stable' : 'varied'}] ${entry.fact}`),
     '',
     '升降置信度条件：',
     `- 升：同域请求再次出现且输入/输出保持稳定 → ${stage === 'hint' ? '升为 candidate' : '保持 candidate，等待用户确认采纳'}`,
@@ -118,11 +127,13 @@ export function maintainAgentCandidates(deps: {
       const key = `${signal.date.slice(0, 10)}|${fact}`
       if (seen.has(key)) continue
       seen.add(key)
-      merged.push({ date: signal.date.slice(0, 10), fact })
+      merged.push({ date: signal.date.slice(0, 10), fact, stable: signal.stableIO })
     }
     if (merged.length < 2) continue // 同域 ≥2 次才立卡
-    const stable = signals.every((signal) => signal.stableIO)
-    const stage: CandidateStage = merged.length >= 3 && stable ? 'candidate' : 'hint'
+    // 升 candidate 的依据是累计的带日期稳定证据（≥3 条 stable），
+    // 不是本轮信号——历史 varied 证据永远不为升级背书。
+    const stableEvidence = merged.filter((entry) => entry.stable).length
+    const stage: CandidateStage = stableEvidence >= 3 ? 'candidate' : 'hint'
     const written = deps.store.writeCard({
       relPath,
       frontmatter: {

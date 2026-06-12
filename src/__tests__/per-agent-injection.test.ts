@@ -131,8 +131,15 @@ test('staged ban extends to per-agent dirs; hostile owner ids degrade to global-
     assert.equal(agentScopeKnowledgeDir('..'), null)
     assert.equal(agentScopeKnowledgeDir('a/b'), null)
     const hostile = await build(svc, '../agent-x', 'butler')
-    assert.ok(!hostile.injected.includes('X_AGENT_CARD'), 'hostile owner id falls back, no scope read')
+    assert.ok(!hostile.injected.includes('X_AGENT_CARD'), 'hostile owner id never becomes a scope read')
     assert.ok(hostile.injected.includes('GLOBAL_CARD'))
+    // an EXPLICIT-but-unsafe owner must NOT re-route to scope.agent's
+    // lineage — that would leak agent-y's rules into someone else's task
+    const hostileWithScope = await build(svc, '../evil', 'agent-y')
+    for (const banned of ['Y_AGENT_CARD', 'Y_RULES_MARKER', 'X_AGENT_CARD', 'X_RULES_MARKER']) {
+      assert.ok(!hostileWithScope.injected.includes(banned), `${banned} absent: explicit bad owner → global-only`)
+    }
+    assert.ok(hostileWithScope.injected.includes('GLOBAL_CARD'))
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

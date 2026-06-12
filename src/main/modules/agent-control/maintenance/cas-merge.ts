@@ -155,8 +155,15 @@ export interface CasMergeReport {
   mirrorSynced: boolean
 }
 
+/** agent_knowledge is keyed (agent_name, key) — the CAS snapshot/live reads
+ *  MUST address the exact row the conditional write targets, or the hash
+ *  comparison guards the wrong truth. */
+const PICTURE_AGENT_NAME = 'memory'
+
 function readPictureValue(db: CasMergeDb, key: string): string | null {
-  const row = db.prepare('SELECT value FROM agent_knowledge WHERE key = ?').get<{ value: string }>(key)
+  const row = db
+    .prepare('SELECT value FROM agent_knowledge WHERE agent_name = ? AND key = ?')
+    .get<{ value: string }>(PICTURE_AGENT_NAME, key)
   return row?.value ?? null
 }
 
@@ -234,7 +241,7 @@ export function runUserPictureCasMerge(deps: CasMergeDeps): CasMergeReport {
         `INSERT INTO agent_knowledge (id, agent_name, key, value, created_at, updated_at)
          VALUES (?, ?, ?, ?, ?, ?)
          ON CONFLICT(agent_name, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
-      ).run(`kn-${randomUUID()}`, 'memory', key, merged.text, nowSec, nowSec)
+      ).run(`kn-${randomUUID()}`, PICTURE_AGENT_NAME, key, merged.text, nowSec, nowSec)
       const metadataExists = deps.db
         .prepare('SELECT id FROM agent_memory_metadata WHERE id = ?')
         .get<{ id: string }>(userPictureMemoryId(deps.userId))

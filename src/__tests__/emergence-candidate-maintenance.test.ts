@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { maintainAgentCandidates, type SimilarRequestSignal } from '../main/modules/agent-control/emergence/candidate-maintenance'
-import { extractAgentCandidateCards } from '../main/modules/agent-control/emergence/emergence-cards'
+import { extractAgentCandidateCards, extractCrystallizeCards } from '../main/modules/agent-control/emergence/emergence-cards'
 import { BeliefCardStore } from '../main/modules/agent-control/knowledge/belief-card-store'
 
 const NOW = new Date('2026-06-12T12:00:00.000Z')
@@ -52,6 +52,28 @@ test('two similar requests → hint card with dated, explainable evidence; third
     assert.equal(second.candidateCards[0].evidenceCount, 3, '重复证据不重复计数')
     const upgraded = store.readCard(relPath, { includeStaged: true })!
     assert.equal(upgraded.frontmatter.stage, 'candidate')
+    assert.ok(upgraded.body.includes('[stable]'), '稳定性按证据条目持久化进卡身')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('historically varied evidence never backs an upgrade — stability is counted per persisted entry', () => {
+  const { store, root } = makeStore()
+  try {
+    // round 1: two varied observations
+    maintainAgentCandidates({
+      store, now: NOW,
+      signals: [req('2026-06-08', '随手查个东西 A', false), req('2026-06-09', '随手查个东西 B', false)],
+    })
+    // round 2: ONE stable observation — this round alone is all-stable,
+    // but accumulated stable evidence is 1 < 3 → must stay hint
+    const report = maintainAgentCandidates({
+      store, now: NOW,
+      signals: [req('2026-06-12', '随手查个东西 C', true)],
+    })
+    assert.equal(report.candidateCards[0].evidenceCount, 3)
+    assert.equal(report.candidateCards[0].stage, 'hint', '历史 varied 证据不为升级背书')
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
@@ -75,6 +97,15 @@ test('feed projection: candidate + evidence ≥3 only; explicit confirm always r
   assert.ok(projected[0].evidence.some((entry) => entry.fact.includes('派生流程属阶段四')), '占位出口声明')
   assert.match(projected[0].title, /最近/, '观察句措辞')
   assert.ok(!projected[0].title.includes('你是'), '不用定性措辞')
+
+  // the LEGACY aspire path must not leak stage-carrying candidates around
+  // the strict gate (hint / under-evidenced would otherwise project)
+  const legacy = extractCrystallizeCards([
+    { relPath: base.relPath, title: base.title, tag: 'aspire', status: 'staged', source: null, stage: 'hint' },
+    { relPath: 'knowledge/plain-aspire.md', title: '普通开放问题', tag: 'aspire', status: 'staged', source: null },
+  ])
+  assert.equal(legacy.length, 1, 'stage-carrying cards excluded from the legacy path')
+  assert.ok(legacy[0].id.includes('plain-aspire'))
 })
 
 test('prune cards SUGGEST only — wording observational, no execution side effects beyond the card file', () => {

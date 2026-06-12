@@ -62,7 +62,7 @@ const MEMORY_TOOLS: MemoryToolDef[] = [
   {
     name: 'memory_read_card',
     description:
-      '按相对路径读取一张信念卡全文。默认不返回待确认(staged)卡片；需要时传 include_staged=true。',
+      '按相对路径读取一张信念卡全文（knowledge/<slug>.md、knowledge/sites/<domain>.md 或 agents/<agentId>/knowledge/<slug>.md）。默认不返回待确认(staged)卡片；需要时传 include_staged=true。',
     params: zodObjectToParamList(MEMORY_SCHEMAS.memory_read_card) as ToolParam[],
   },
 ]

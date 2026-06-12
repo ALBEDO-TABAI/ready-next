@@ -30,6 +30,8 @@ import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/
 const NOW = new Date('2026-06-12T12:00:00.000Z')
 const pref = (text: string): PictureObservation => ({ text, kind: 'preference' })
 
+// agent_knowledge rows are keyed (agent_name, key) — the fake mirrors that
+// so the CAS row-locking fix (P1-2) is provable.
 class FakeDb implements CasMergeDb {
   knowledge = new Map<string, { value: string }>()
   metadata = new Map<string, Record<string, unknown>>()
@@ -53,12 +55,18 @@ class FakeDb implements CasMergeDb {
 
   prepare(sql: string) {
     const normalized = sql.replace(/\s+/g, ' ').trim()
-    if (normalized === 'SELECT value FROM agent_knowledge WHERE key = ?') {
-      return { get: <R>(key: unknown) => this.knowledge.get(String(key)) as R | undefined, run: () => undefined, all: () => [] }
+    if (normalized === 'SELECT value FROM agent_knowledge WHERE agent_name = ? AND key = ?') {
+      return {
+        get: <R>(agentName: unknown, key: unknown) =>
+          this.knowledge.get(`${String(agentName)}|${String(key)}`) as R | undefined,
+        run: () => undefined, all: () => [],
+      }
     }
     if (normalized.startsWith('INSERT INTO agent_knowledge')) {
       return {
-        run: (...params: unknown[]) => { this.knowledge.set(String(params[2]), { value: String(params[3]) }) },
+        run: (...params: unknown[]) => {
+          this.knowledge.set(`${String(params[1])}|${String(params[2])}`, { value: String(params[3]) })
+        },
         get: () => undefined, all: () => [],
       }
     }
@@ -95,14 +103,18 @@ class FakeDb implements CasMergeDb {
 test('interleaved writers: exactly one merge commits, the loser benign-skips with NO half-state', () => {
   const db = new FakeDb()
   db.profiles.set('u1', { id: 'u1' })
+  const rowKey = `memory|${userPictureContentKey('u1')}`
+  // a same-key row under ANOTHER agent_name must never confuse the CAS —
+  // the snapshot/live reads address exactly the (agent_name, key) row
+  db.knowledge.set(`other|${userPictureContentKey('u1')}`, { value: 'OTHER_AGENT_ROW' })
   // writer B commits between A's snapshot read and A's transaction
   db.onBegin = () => {
     db.onBegin = null
-    db.knowledge.set(userPictureContentKey('u1'), { value: '- [habit] B_WRITER_LINE' })
+    db.knowledge.set(rowKey, { value: '- [habit] B_WRITER_LINE' })
   }
   const loser = runUserPictureCasMerge({ db, userId: 'u1', observations: [pref('喜欢简洁中文回复 A_LINE')], now: NOW })
   assert.equal(loser.decision, 'cas_skip', 'hash moved → benign skip, never a throw')
-  assert.equal(db.knowledge.get(userPictureContentKey('u1'))?.value, '- [habit] B_WRITER_LINE', 'B 的写入完好，A 零半态')
+  assert.equal(db.knowledge.get(rowKey)?.value, '- [habit] B_WRITER_LINE', 'B 的写入完好，A 零半态')
   assert.equal(db.metadata.size, 0, 'loser leaves no metadata row')
   assert.equal(db.rollbacks, 1)
   assert.equal(db.commits, 0)
@@ -110,8 +122,9 @@ test('interleaved writers: exactly one merge commits, the loser benign-skips wit
   // retried against fresh truth, A succeeds and MERGES with B's line
   const winner = runUserPictureCasMerge({ db, userId: 'u1', observations: [pref('喜欢简洁中文回复 A_LINE')], now: NOW })
   assert.equal(winner.decision, 'merged')
-  const merged = db.knowledge.get(userPictureContentKey('u1'))!.value
+  const merged = db.knowledge.get(rowKey)!.value
   assert.ok(merged.includes('B_WRITER_LINE') && merged.includes('A_LINE'), 'merge appends, never clobbers')
+  assert.equal(db.knowledge.get(`other|${userPictureContentKey('u1')}`)?.value, 'OTHER_AGENT_ROW', '他 agent 行未被触碰')
   assert.equal(db.metadata.get('mem-user-picture-u1')?.source_type, 'resident_user')
   assert.equal(db.txDepth, 0, 'transaction closed')
 })
@@ -191,7 +204,7 @@ test('redline: after merge the DB-first loadUSER path READS the result', async (
             })),
         incrementAccessCount: async () => undefined,
       } as never,
-      loadMemoryContentByKey: (contentKey: string) => db.knowledge.get(contentKey)?.value ?? null,
+      loadMemoryContentByKey: (contentKey: string) => db.knowledge.get(`memory|${contentKey}`)?.value ?? null,
     })
     const scope: ConversationScope = {
       id: 's1', agent: 'butler', userId: 'u1', title: '会话', sourceKind: 'local', sourceId: 'app',

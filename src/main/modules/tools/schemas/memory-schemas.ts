@@ -81,7 +81,9 @@ export const MemoryWriteCardSchema = z.object({
 })
 
 export const MemoryReadCardSchema = z.object({
-  rel_path: z.string().describe('卡片相对路径'),
+  rel_path: z
+    .string()
+    .describe('卡片相对路径：knowledge/<slug>.md、knowledge/sites/<domain>.md 或 agents/<agentId>/knowledge/<slug>.md'),
   include_staged: z
     .boolean()
     .optional()

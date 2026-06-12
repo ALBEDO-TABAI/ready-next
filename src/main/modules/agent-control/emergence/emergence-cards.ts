@@ -107,6 +107,10 @@ export interface CrystallizeSignalCard {
   tag: string
   status: string
   source: string | null
+  /** EP3-C5 candidate stage — stage-carrying cards NEVER project through
+   *  this legacy path; they go through extractAgentCandidateCards with the
+   *  stricter candidate+evidence≥3 gate. */
+  stage?: string | null
 }
 
 /** "系统学到了什么、要不要采纳" — aspire candidates + suspected duplicates.
@@ -126,7 +130,10 @@ export function extractCrystallizeCards(cards: ReadonlyArray<CrystallizeSignalCa
       })
       continue
     }
-    if (card.tag === 'aspire') {
+    // EP3-C5 — agent-candidate cards (stage present) are gated by
+    // extractAgentCandidateCards (candidate + ≥3 evidence); the legacy
+    // aspire path must not leak hint/under-evidenced candidates.
+    if (card.tag === 'aspire' && !card.stage) {
       out.push({
         id: `crystallize:candidate:${card.relPath}`,
         type: 'crystallize',

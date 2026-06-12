@@ -975,9 +975,15 @@ export class PromptAssemblyService {
     // installs carry the confirmation-hygiene rules; an empty knowledge dir
     // still omits the index section.
     const knowledgeEnabled = this.deps.isKnowledgeSystemEnabled?.() ?? true
-    // EP3-A2 — injection owner: explicit ownerAgentId wins, scope.agent is
-    // the fallback; unsafe ids resolve to null (global-only, never a path).
-    const injectionOwner = [params.ownerAgentId, params.scope.agent].find(isSafeAgentScopeId) ?? null
+    // EP3-A2 — injection owner: explicit ownerAgentId wins; scope.agent is
+    // the fallback ONLY when no owner was provided at all. An explicit but
+    // unsafe id degrades to global-only — it must not re-route to
+    // scope.agent's lineage (a corrupted owner would leak that agent's
+    // rules/knowledge into a task that belongs to someone else), and it
+    // never becomes a path fragment.
+    const injectionOwner = params.ownerAgentId !== undefined && params.ownerAgentId !== null
+      ? (isSafeAgentScopeId(params.ownerAgentId) ? params.ownerAgentId : null)
+      : (isSafeAgentScopeId(params.scope.agent) ? params.scope.agent : null)
     const agentRulesText = knowledgeEnabled && injectionOwner
       ? this.readMemoryFile(`agents/${injectionOwner}/RULES.md`).trim()
       : ''
