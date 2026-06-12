@@ -25,6 +25,7 @@
  */
 
 import { logAgentMetric } from '../metrics'
+import { recordConfirmationGrant } from './authorization-fact-store'
 import {
   executeAskUserQuestions,
 } from '../../tools/builtins/ask-user-questions'
@@ -66,6 +67,12 @@ export interface FrozenCallConfirmationDeps {
   runId?: string | null
   /** EP2-Q4a — frozen-call audit events become task proofs (kind task_event). */
   appendProof?: ((taskId: string, ref: string) => void) | null
+  /** EP2-I-auth WRITE ENTRY 2 — only honored when the user picked
+   *  "本次会话内有效" on the card (default 仅此一次 = no grant). */
+  sessionEffectiveGrant?: {
+    actionCategory: 'login' | 'upload' | 'send_external' | 'collect_risky_site'
+    objectRef: string
+  } | null
   taskId?: string | null
   scopeId?: string | null
   signal?: AbortSignal
@@ -182,6 +189,15 @@ export async function runFrozenCallConfirmation(
       paramsSha256: frozen.paramsSha256,
     })
     if (deps.taskId && deps.appendProof) deps.appendProof(deps.taskId, `frozen:${frozen.id}|released`)
+    if (deps.sessionEffectiveGrant && deps.scopeId) {
+      recordConfirmationGrant({
+        scopeId: deps.scopeId,
+        actionCategory: deps.sessionEffectiveGrant.actionCategory,
+        objectRef: deps.sessionEffectiveGrant.objectRef,
+        frozenCallId: frozen.id,
+        paramsSha256: frozen.paramsSha256,
+      })
+    }
     return { kind: 'released', frozenCallId: frozen.id, params: released.params }
   }
 

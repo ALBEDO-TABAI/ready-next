@@ -368,7 +368,7 @@ async function executeToolCallInner(
   }
 
   if (invoker !== 'host' && !releaseGrant) {
-    const confirmation = resolveConfirmationGate(toolName, args)
+    const confirmation = resolveConfirmationGate(toolName, args, { scopeId: context.scopeId || context.scope?.id || context.sessionId || null })
     const deniedOutput = (
       errorKind: string,
       text: string,

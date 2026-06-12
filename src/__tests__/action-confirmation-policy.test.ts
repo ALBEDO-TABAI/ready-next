@@ -356,7 +356,10 @@ test('source pin: confirmation gate sits AFTER authorization and consumes only (
     'utf8',
   )
   const authIdx = source.indexOf('checkSkillToolAuthorization(toolName, authorization, isPrimitive)')
-  const gateIdx = source.indexOf('resolveConfirmationGate(toolName, args)')
+  // EP2-I-auth: the gate gains a scopeId opt (lineage key for the M3 fact
+  // lookup) — still no intent/TurnFrame input; the pre-approval ban is
+  // superseded ONLY by provable object-level facts (05 §3.4).
+  const gateIdx = source.indexOf('resolveConfirmationGate(toolName, args, { scopeId:')
   assert.ok(authIdx > 0, 'authorization check must exist')
   assert.ok(gateIdx > 0, 'confirmation gate must exist and take exactly (toolName, args) — no frame/intent inputs')
   assert.ok(authIdx < gateIdx, 'confirmation gate must run AFTER skill tool authorization')

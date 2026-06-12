@@ -116,6 +116,7 @@ import {
 import { classifyFollowupIntent, followupConsultsRecalledContext, detectNegationReleases, type FollowupTaskRef } from '../../../../shared/agent-followup-intent'
 import { wrapRunMetaRepositoryWithCloseoutSnapshot } from '../task-projection/run-meta-snapshot'
 import { recordNegations, releaseNegations, activeNegations } from '../safety/negation-state'
+import { detectVerbatimGrants, recordVerbatimGrant, revokeAuthorizationsForCategories, authCategoriesForNegationFamilies } from '../safety/authorization-fact-store'
 import { classifyBrowserToolCall } from '../../browser-engine/browser-tool-write-classification'
 import { createBrowserTurnLease, type BrowserTurnLease } from '../../browser-engine/agent-browser-turn-lease'
 import { filterToolsByVisionCapability } from '../tools-runtime/tool-gateway'
@@ -3938,9 +3939,23 @@ export class AgentSdkRuntime extends EventEmitter {
       // negations from this turn; an explicit release signal ("现在可以采集
       // 了") lifts them. Dispatch-layer interception consults this state.
       if (sessionId) {
-        if (turnFollowup.negations.length > 0) recordNegations(sessionId, turnFollowup.negations)
+        if (turnFollowup.negations.length > 0) {
+          recordNegations(sessionId, turnFollowup.negations)
+          // EP2-I-auth: 拒绝权优先于既往批准 — negations revoke matching grants
+          revokeAuthorizationsForCategories(sessionId, authCategoriesForNegationFamilies(turnFollowup.negations))
+        }
         const released = detectNegationReleases(turnFollowupPrimary)
         if (released.length > 0) releaseNegations(sessionId, released)
+        // EP2-I-auth WRITE ENTRY 1 (classifier consumption chain): explicit
+        // object+action naming in USER text becomes a provable grant.
+        for (const grant of detectVerbatimGrants(turnFollowupPrimary)) {
+          recordVerbatimGrant({
+            scopeId: sessionId,
+            actionCategory: grant.actionCategory,
+            objectRef: grant.objectRef,
+            verbatim: turnFollowupPrimary,
+          })
+        }
       }
       // Review-team D3: a substantive NEW instruction supersedes the prior
       // plan — otherwise a stale "不要重新规划" reminder (within its TTL)

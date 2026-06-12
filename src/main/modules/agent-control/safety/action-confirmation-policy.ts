@@ -33,6 +33,7 @@
  */
 
 import { isHighControlPlatformText } from '../../../../shared/browser-collection-intent'
+import { consumeAuthorizationFact, type AuthActionCategory } from './authorization-fact-store'
 
 export type ConfirmationMode = 'M1' | 'M2' | 'M3' | 'M4'
 
@@ -306,14 +307,62 @@ function collectArgsText(args: Record<string, unknown>): string {
  * be wired in without changing this signature (and tripping the I3-1
  * source pin in action-confirmation-policy.test.ts).
  */
+/** EP2-I-auth — M3 rule → action category + object ref extraction from the
+ *  validated args. Null object = not consumable (fact lookup needs the
+ *  object; default-deny keeps the confirm path). login rules carry no site
+ *  identity in type-tool args yet — a known boundary, they stay confirm. */
+const M3_RULE_CATEGORY: Record<string, AuthActionCategory> = {
+  'm3-login-existing-account': 'login',
+  'm3-upload-file': 'upload',
+  'm3-send-external': 'send_external',
+  'm3-risky-site-collection': 'collect_risky_site',
+}
+
+function m3ObjectRefOf(ruleId: string, args: Record<string, unknown>): string | null {
+  if (ruleId === 'm3-upload-file') {
+    const path = args.file_path ?? args.path ?? args.filePath
+    return typeof path === 'string' && path ? path : null
+  }
+  if (ruleId === 'm3-send-external') {
+    const target = args.chat_id ?? args.receive_id ?? args.recipient
+    return typeof target === 'string' && target ? target : null
+  }
+  if (ruleId === 'm3-risky-site-collection') {
+    const url = args.url ?? args.target_url ?? args.profile_url ?? args.target_profile_url
+    return typeof url === 'string' && url ? url : null
+  }
+  return null // login: page identity not present in args (known boundary)
+}
+
 export function resolveConfirmationGate(
   toolName: string,
   args: Record<string, unknown>,
+  opts: { scopeId?: string | null } = {},
 ): ConfirmationGateDecision {
   const argsText = collectArgsText(args)
   for (const rule of FIRST_BATCH_RULES) {
     if (!rule.tools.has(toolName)) continue
     if (rule.when && !rule.when(args, argsText)) continue
+    // EP2-I-auth — M3 pre-approval: the ONE consumption point. M1/M2 never
+    // consult; consumption skips ONLY the confirmation card — every
+    // admission check before dispatch still runs (预批准 ≠ 提权).
+    if (rule.mode === 'M3' && opts.scopeId) {
+      const category = M3_RULE_CATEGORY[rule.id]
+      const objectRef = category ? m3ObjectRefOf(rule.id, args) : null
+      if (category && objectRef && consumeAuthorizationFact({
+        scopeId: opts.scopeId,
+        actionCategory: category,
+        objectRef,
+      })) {
+        return {
+          mode: 'M3',
+          action: 'allow',
+          ruleId: rule.id,
+          designRef: rule.designRef,
+          reason: `对象级预批准命中（${category}），免确认放行；admission 检查照常`,
+        }
+      }
+    }
     return {
       mode: rule.mode,
       action: actionForMode(rule.mode),
