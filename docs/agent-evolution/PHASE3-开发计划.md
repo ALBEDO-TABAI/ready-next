@@ -1,6 +1,6 @@
 # 阶段三开发计划（配套 2026-06-12-agent-evolution-phase3-implementation.md）
 
-> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同 status=draft v1，**Codex 评审通过前不开工**。
+> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同 approved v1（2026-06-12 Codex 评审 APPROVED / enforce: true），可按波次开工；遗留轨 R 的解锁检查（波次 0）随真实使用随时重跑。
 
 ## 1. 工单总览
 

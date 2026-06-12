@@ -1,14 +1,14 @@
 ---
 title: Agent Evolution 阶段三（组织与维护智能）实施子计划
 date: 2026-06-12
-status: draft v1 — 待 Codex 评审；评审通过前阶段三不开工
+status: approved v1 — Codex 评审 APPROVED（2026-06-12，唯一 P1 PK3↔I4 依赖矛盾修复后裁决可 enforce），逐单施工待启动
 revision_history:
-  - v1 (2026-06-12): 初稿。依据 00 路线图阶段三范围（A1-A4 / C3-C5 / PK1-PK4 / I4 / B4-B5 / E3-E4）+ 03/04/05/09/10/11 各篇工作包表拆单；并入阶段二遗留轨（Q4b 链 + B1 spike）作为独立前置轨；I5 经 HEAD 取证已由 EP2-K4 核销（仅复核行）。
+  - v1 (2026-06-12): 初稿；同日 Codex 评审唯一 P1（总则 PK3 依赖 I4 与工单表/波次矛盾）修复（cd558d47）后 APPROVED。依据 00 路线图阶段三范围（A1-A4 / C3-C5 / PK1-PK4 / I4 / B4-B5 / E3-E4）+ 03/04/05/09/10/11 各篇工作包表拆单；并入阶段二遗留轨（Q4b 链 + B1 spike）作为独立前置轨；I5 经 HEAD 取证已由 EP2-K4 核销（仅复核行）。
 owner: 白
 author: Claude (Fable 5)
 executor: 待定（Claude / Codex 逐单施工）
 reviewer: Codex（共识）+ Claude（终审）
-enforce: false
+enforce: true
 note: >
   阶段二（2026-06-11-agent-evolution-phase2-implementation.md approved v7）已交付
   知识与质量闭环的全部非阻塞单（波次 0-4 + I-auth，整轮 Codex 审查通过，临时回归
