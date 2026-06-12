@@ -108,6 +108,12 @@ test('repository roundtrips packetRole/contextRefs; legacy rows read back NULL/[
       if (normalized.startsWith('SELECT * FROM task_projections WHERE task_id = ?')) {
         return { get: <R>(taskId: unknown) => rows.get(String(taskId)) as R | undefined, run: () => undefined, all: () => [] }
       }
+      if (normalized.startsWith('SELECT * FROM task_projections WHERE parent_task_id = ?')) {
+        return {
+          all: <R>(parentId: unknown) => [...rows.values()].filter((row) => row.parent_task_id === String(parentId)) as R[],
+          get: () => undefined, run: () => undefined,
+        }
+      }
       if (normalized.startsWith('UPDATE task_projections SET')) {
         const setColumns = normalized.slice('UPDATE task_projections SET '.length, normalized.indexOf(' WHERE')).split(',').map((part) => part.trim().split(' ')[0])
         return {
@@ -141,4 +147,35 @@ test('repository roundtrips packetRole/contextRefs; legacy rows read back NULL/[
 
   // writer passing garbage is rejected loudly (Q1 范式)
   assert.throws(() => repository.update('packet-1', { packetRole: 'boss' } as never, { silent: true }), /packet_role/)
+
+  // depth is enforced AT THE WRITE SIDE — the repository is the funnel,
+  // not just a free validation function callers may forget (两层硬上限).
+  const base = {
+    scopeId: 's1', runId: 'r1', taskType: 'multi_step_task', module: 'system',
+    status: 'running', interactionState: 'running', steps: [],
+    createdAt: '2026-06-12T09:00:00.000Z', updatedAt: '2026-06-12T09:00:00.000Z',
+  }
+  repository.create({ ...base, taskId: 'root', packetRole: 'parent' } as never, { silent: true })
+  repository.create({ ...base, taskId: 'kid', packetRole: 'child', parentTaskId: 'root' } as never, { silent: true })
+  assert.throws(
+    () => repository.create({ ...base, taskId: 'grandkid', packetRole: 'child', parentTaskId: 'kid' } as never, { silent: true }),
+    /两层|depth|parent/,
+    'create: child-under-child rejected at the funnel',
+  )
+  repository.create({ ...base, taskId: 'kid2', packetRole: 'child', parentTaskId: 'root' } as never, { silent: true })
+  assert.throws(
+    () => repository.update('kid2', { parentTaskId: 'kid' } as never, { silent: true }),
+    /两层|depth|parent/,
+    'update: re-parenting under a child rejected on the EFFECTIVE row',
+  )
+  assert.throws(
+    () => repository.update('kid', { packetRole: 'parent' } as never, { silent: true }),
+    /两层|depth|parent/,
+    'update: promoting a nested child to parent rejected',
+  )
+  assert.throws(
+    () => repository.update('root', { packetRole: null } as never, { silent: true }),
+    /demote parent packet/,
+    'update: demoting a parent with live child packets rejected',
+  )
 })

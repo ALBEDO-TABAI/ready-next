@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { z } from 'zod'
-import { validatePacketFields } from '../agent-control/quality/packet-fields'
+import { validatePacketFields, assertPacketDepth, type PacketDepthRow } from '../agent-control/quality/packet-fields'
 import type {
   TaskProjectionChangeEvent,
   TaskProjectionRecord,
@@ -208,10 +208,32 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     }
   }
 
+  /** EP3-PK1 — two-level packet nesting is enforced AT THE WRITE SIDE, not
+   *  just offered as a free function: any row carrying a packet_role must
+   *  pass the depth assertion against rows already in the store. Ordinary
+   *  tasks (no packetRole) skip the lookup entirely (存量零感知). */
+  private assertPacketDepthAgainstStore(candidate: PacketDepthRow, context: string): void {
+    if (!candidate.packetRole) return
+    try {
+      assertPacketDepth(candidate, (id) => {
+        const row = this.get(id)
+        return row
+          ? { taskId: id, packetRole: row.packetRole ?? null, parentTaskId: row.parentTaskId ?? null }
+          : null
+      })
+    } catch (error) {
+      throw new Error(`[task-projection-repository] ${context}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
   create(record: TaskProjectionRecord, options?: TaskProjectionWriteOptions): void {
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
     validateTaskQualityFields(record, 'create')
+    this.assertPacketDepthAgainstStore(
+      { taskId: record.taskId, packetRole: record.packetRole ?? null, parentTaskId: record.parentTaskId ?? null },
+      'create',
+    )
 
     db.prepare(`
       INSERT INTO task_projections (
@@ -275,8 +297,10 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     // never refetch. Errors here fall back to null (we still emit for
     // the new scope).
     let priorScopeId: string | null = null
+    let priorRecord: TaskProjectionRecord | null = null
     try {
       const prior = this.get(taskId)
+      priorRecord = prior ?? null
       priorScopeId = prior?.scopeId || null
     } catch {
       priorScopeId = null
@@ -284,6 +308,27 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')
     validateTaskQualityFields(patch, 'update')
+    // EP3-PK1 — re-assert nesting on the EFFECTIVE row (patch merged over
+    // prior) whenever the packet shape can change.
+    if ('packetRole' in patch || 'parentTaskId' in patch) {
+      const effectiveRole = ('packetRole' in patch ? patch.packetRole : priorRecord?.packetRole) ?? null
+      this.assertPacketDepthAgainstStore(
+        {
+          taskId,
+          packetRole: effectiveRole,
+          parentTaskId: ('parentTaskId' in patch ? patch.parentTaskId : priorRecord?.parentTaskId) ?? null,
+        },
+        'update',
+      )
+      // demoting a parent packet while child packets still hang under it
+      // would orphan them into an illegal shape — reject loudly.
+      if (priorRecord?.packetRole === 'parent' && effectiveRole !== 'parent') {
+        const liveChildren = this.listByParentTask(taskId).filter((row) => row.packetRole === 'child')
+        if (liveChildren.length > 0) {
+          throw new Error(`[task-projection-repository] update: cannot demote parent packet ${taskId} with ${liveChildren.length} live child packet(s)`)
+        }
+      }
+    }
 
     const updates: Array<[string, unknown]> = []
     const assign = (column: string, value: unknown): void => {
