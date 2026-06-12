@@ -51,6 +51,20 @@ export type ReadOptions = { includeStaged?: boolean }
 const NORMAL_CARD = /(^|\/)knowledge\/[a-z0-9._-]+\.md$/
 const SITE_CARD = /(^|\/)knowledge\/sites\/[a-z0-9._-]+\.md$/
 
+// EP3-A2 — per-agent knowledge scope. Agent ids are path segments, so the
+// shape is closed (no dots-only segments, no separators) before any join.
+const AGENT_SCOPE_ID = /^(?!\.+$)[A-Za-z0-9][A-Za-z0-9._-]*$/
+
+export function isSafeAgentScopeId(agentId: string | null | undefined): agentId is string {
+  return typeof agentId === 'string' && AGENT_SCOPE_ID.test(agentId)
+}
+
+/** `agents/<id>/knowledge` for a safe agent id; null otherwise (treated as
+ *  "no agent scope" — never an error, never a path fragment). */
+export function agentScopeKnowledgeDir(agentId: string | null | undefined): string | null {
+  return isSafeAgentScopeId(agentId) ? `agents/${agentId}/knowledge` : null
+}
+
 /** True iff relPath is an allowed card write target (normal or site). */
 export function isAllowedCardPath(relPath: string): boolean {
   if (!relPath || relPath.includes('\0')) return false
@@ -231,13 +245,18 @@ export class BeliefCardStore {
    * would be exceeded the remainder is dropped and reported via
    * `omittedCount` so the caller can append the "另有 N 条" footer.
    */
-  renderKnowledgeIndex(opts: { maxChars: number }): { text: string; renderedCount: number; omittedCount: number } {
+  renderKnowledgeIndex(opts: { maxChars: number; ownerAgentId?: string | null }): { text: string; renderedCount: number; omittedCount: number } {
     const rank: Record<BeliefCardFrontmatter['confidence'], number> = { H: 0, M: 1, L: 2 }
-    const active = this.listCards()
-      .filter((card) => card.frontmatter.status === 'active')
-      .sort((a, b) =>
-        rank[a.frontmatter.confidence] - rank[b.frontmatter.confidence]
-        || a.relPath.localeCompare(b.relPath))
+    const byConfidence = (a: BeliefCard, b: BeliefCard): number =>
+      rank[a.frontmatter.confidence] - rank[b.frontmatter.confidence]
+      || a.relPath.localeCompare(b.relPath)
+    const isActive = (card: BeliefCard): boolean => card.frontmatter.status === 'active'
+    // EP3-A2 — owner agent's scope dir renders FIRST (作用域优先), then the
+    // global dir; ONLY the owner's dir is read — sibling agents' lineages
+    // never reach this surface (零泄漏 is structural, not filtered).
+    const ownerDir = agentScopeKnowledgeDir(opts.ownerAgentId)
+    const ownerActive = ownerDir ? this.listCards({ dir: ownerDir }).filter(isActive).sort(byConfidence) : []
+    const active = [...ownerActive, ...this.listCards().filter(isActive).sort(byConfidence)]
     const lines: string[] = []
     let used = 0
     let rendered = 0

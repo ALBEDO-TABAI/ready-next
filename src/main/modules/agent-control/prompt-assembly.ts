@@ -18,6 +18,7 @@ import { buildRequestEnvelope } from './contracts/request-envelope'
 import { filterDailyMemoryForScope } from './session/daily-memory-scope-filter'
 import { buildDailyTaskIndex, type TaskIndexEntry } from './session/daily-task-index-builder'
 import { loadRulesDefaultBody } from './prompt-assets/rules-default-asset'
+import { isSafeAgentScopeId } from './knowledge/belief-card-store'
 import type { SessionRecallCapsule } from '../../../shared/session-recall'
 import type { CoordinatorPromptFragment, DomainAdapter } from './domain-adapters/domain-adapter'
 
@@ -84,7 +85,7 @@ export interface PromptAssemblyDeps {
   getScopeTaskIndexEntries?: (scopeId: string) => TaskIndexEntry[] | Promise<TaskIndexEntry[]>
   /** EP2-K3: belief card store for the L1.5 knowledge index (active cards only). */
   getBeliefCardStore?: () => {
-    renderKnowledgeIndex(opts: { maxChars: number }): { text: string; renderedCount: number; omittedCount: number }
+    renderKnowledgeIndex(opts: { maxChars: number; ownerAgentId?: string | null }): { text: string; renderedCount: number; omittedCount: number }
   } | null
   /** EP2-K6: rollback switch — false stops RULES/index injection entirely. */
   isKnowledgeSystemEnabled?: () => boolean
@@ -944,6 +945,10 @@ export class PromptAssemblyService {
     scope: ConversationScope
     message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>
     coordinators: ReadonlyArray<DomainAdapter>
+    /** EP3-A2 — 本轮任务 owner（projection 的 ownerAgentId）。注入源按 owner
+     *  解析：owner agent 的 RULES/knowledge 作用域优先；无值（或不合法）回退
+     *  scope.agent。本单只立解析参数，写值唯一来自 A4。 */
+    ownerAgentId?: string | null
   }): Promise<PromptAssemblyResult> {
     const userText = extractTextFromMessage(params.message)
     // Stage T R2 fix: scoped runs must propagate sessionId/scopeId so
@@ -959,14 +964,26 @@ export class PromptAssemblyService {
     // installs carry the confirmation-hygiene rules; an empty knowledge dir
     // still omits the index section.
     const knowledgeEnabled = this.deps.isKnowledgeSystemEnabled?.() ?? true
+    // EP3-A2 — injection owner: explicit ownerAgentId wins, scope.agent is
+    // the fallback; unsafe ids resolve to null (global-only, never a path).
+    const injectionOwner = [params.ownerAgentId, params.scope.agent].find(isSafeAgentScopeId) ?? null
+    const agentRulesText = knowledgeEnabled && injectionOwner
+      ? this.readMemoryFile(`agents/${injectionOwner}/RULES.md`).trim()
+      : ''
+    // owner-scope rules render first; the COMBINED text shares the single
+    // MAX_RULES_CHARS budget (01 §7b: 全局+agent 合计 ≤2000 字符).
     const rulesText = knowledgeEnabled
-      ? clip(this.readMemoryFile('RULES.md').trim() || loadRulesDefaultBody(), MAX_RULES_CHARS)
+      ? clip(
+        [agentRulesText, this.readMemoryFile('RULES.md').trim() || loadRulesDefaultBody()]
+          .filter(Boolean).join('\n\n'),
+        MAX_RULES_CHARS,
+      )
       : ''
     let knowledgeIndexText = ''
     try {
       const beliefStore = knowledgeEnabled ? (this.deps.getBeliefCardStore?.() ?? null) : null
       if (beliefStore) {
-        const index = beliefStore.renderKnowledgeIndex({ maxChars: MAX_KNOWLEDGE_INDEX_CHARS })
+        const index = beliefStore.renderKnowledgeIndex({ maxChars: MAX_KNOWLEDGE_INDEX_CHARS, ownerAgentId: injectionOwner })
         knowledgeIndexText = index.omittedCount > 0
           ? `${index.text}\n（另有 ${index.omittedCount} 条低置信度条目）`
           : index.text
