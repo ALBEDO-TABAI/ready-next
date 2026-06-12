@@ -2262,6 +2262,16 @@ const migrations: Migration[] = [
     up: (db) => {
       db.exec('ALTER TABLE task_projections ADD COLUMN owner_agent_id TEXT')
     }
+  },
+  {
+    // EP3-PK1 — task packets are a usage convention on task_projections
+    // (09 §2): packet_role 'parent'|'child'|NULL is the ONLY packet marker;
+    // context_refs_json carries references, never retellings.
+    name: '057_task_projection_packet_columns',
+    up: (db) => {
+      db.exec('ALTER TABLE task_projections ADD COLUMN packet_role TEXT')
+      db.exec('ALTER TABLE task_projections ADD COLUMN context_refs_json TEXT')
+    }
   }
 ]
 

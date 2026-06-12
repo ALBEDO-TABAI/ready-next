@@ -168,6 +168,9 @@ export interface TaskProjectionRecord {
   learningRefs?: unknown[] | null
   /** EP3-A1 — task owner agent (read-only on the wire; A4 writes). */
   ownerAgentId?: string | null
+  /** EP3-PK1 — packet marker (parent|child|null) + reference list. */
+  packetRole?: 'parent' | 'child' | null
+  contextRefs?: string[] | null
   createdAt: string
   updatedAt: string
 }

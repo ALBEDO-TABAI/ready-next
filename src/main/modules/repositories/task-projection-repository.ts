@@ -1,5 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { z } from 'zod'
+import { validatePacketFields } from '../agent-control/quality/packet-fields'
 import type {
   TaskProjectionChangeEvent,
   TaskProjectionRecord,
@@ -50,6 +51,8 @@ interface TaskProjectionRow {
   proof_refs_json?: string | null
   learning_refs_json?: string | null
   owner_agent_id?: string | null
+  packet_role?: string | null
+  context_refs_json?: string | null
   recent_artifacts_json: string | null
   created_at: string
   updated_at: string
@@ -93,6 +96,14 @@ const taskQualityFieldsSchema = z.object({
 })
 
 function validateTaskQualityFields(patch: Partial<TaskProjectionRecord>, context: string): void {
+  // EP3-PK1 — packet fields share the loud write-side validation channel.
+  if ('packetRole' in patch || 'contextRefs' in patch) {
+    try {
+      validatePacketFields({ packetRole: patch.packetRole as never, contextRefs: patch.contextRefs as never })
+    } catch (error) {
+      throw new Error(`[task-projection-repository] ${context}: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
   const candidate: Record<string, unknown> = {}
   if ('criteria' in patch) candidate.criteria = patch.criteria
   if ('checkins' in patch) candidate.checkins = patch.checkins
@@ -209,9 +220,9 @@ export class TaskProjectionRepository implements TaskProjectionStore {
         recovery_history_json, degradation_reason, blocked_reason, resumable_actions_json,
         continuation_ref_json, progress_json, recent_artifacts_json,
         criteria_json, checkins_json, proof_refs_json, learning_refs_json,
-        owner_agent_id,
+        owner_agent_id, packet_role, context_refs_json,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.taskId,
       record.scopeId,
@@ -242,6 +253,8 @@ export class TaskProjectionRepository implements TaskProjectionStore {
       record.proofRefs ? JSON.stringify(record.proofRefs) : null,
       record.learningRefs ? JSON.stringify(record.learningRefs) : null,
       record.ownerAgentId ?? null,
+      record.packetRole ?? null,
+      record.contextRefs ? JSON.stringify(record.contextRefs) : null,
       record.createdAt,
       record.updatedAt,
     )
@@ -305,6 +318,8 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     if ('proofRefs' in patch) assign('proof_refs_json', patch.proofRefs ? JSON.stringify(patch.proofRefs) : null)
     if ('learningRefs' in patch) assign('learning_refs_json', patch.learningRefs ? JSON.stringify(patch.learningRefs) : null)
     if ('ownerAgentId' in patch) assign('owner_agent_id', patch.ownerAgentId)
+    if ('packetRole' in patch) assign('packet_role', patch.packetRole)
+    if ('contextRefs' in patch) assign('context_refs_json', patch.contextRefs ? JSON.stringify(patch.contextRefs) : null)
     if ('createdAt' in patch) assign('created_at', patch.createdAt)
     if ('updatedAt' in patch) assign('updated_at', patch.updatedAt)
 
@@ -506,6 +521,8 @@ export class TaskProjectionRepository implements TaskProjectionStore {
       proofRefs: safeParseArray(row.proof_refs_json),
       learningRefs: safeParseArray(row.learning_refs_json),
       ownerAgentId: row.owner_agent_id ?? null,
+      packetRole: (row.packet_role === 'parent' || row.packet_role === 'child') ? row.packet_role : null,
+      contextRefs: safeParseArray(row.context_refs_json).filter((ref): ref is string => typeof ref === 'string'),
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     }
