@@ -4,7 +4,7 @@ import { AtSign, ChevronDown, MessageSquare, MoreHorizontal, PanelLeftClose, Pen
 import { IconButton } from '../ui/IconButton'
 import Modal from '../ui/Modal'
 import type { SessionRecallHit } from '../../../shared/session-recall'
-import { SESSION_DOT_COLOR, type SessionDotStatus } from './chat-panel/helpers/session-status'
+import { SESSION_DOT_COLOR, recallStatusToDot, type SessionDotStatus } from './chat-panel/helpers/session-status'
 import {
   CHAT_HEADER_MENU_DELETE_BUTTON_STYLE,
   CHAT_HEADER_MENU_META_STYLE,
@@ -465,7 +465,7 @@ export default function ChatHeader({
                   conv.latestTaskSummary?.trim() ||
                   conv.resumeTitle?.trim() ||
                   ''
-                const dotStatus: SessionDotStatus = sessionStatusByConversationId?.[conv.conversationId] ?? 'off'
+                const dotStatus: SessionDotStatus = sessionStatusByConversationId?.[conv.conversationId] ?? recallStatusToDot(conv.sessionStatus)
                 const dotColor = SESSION_DOT_COLOR[dotStatus]
                 return (
                   <div

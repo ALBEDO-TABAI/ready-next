@@ -1,6 +1,6 @@
 import { createHash } from 'crypto'
 import type { ChatConversationRecord, ConversationSourceKind, DatabaseManager } from '../../database'
-import type { SessionRecallCapsule, SessionRecallContextRef, SessionRecallHit, SessionRecallMatchKind } from '../../../../shared/session-recall'
+import type { SessionRecallCapsule, SessionRecallContextRef, SessionRecallHit, SessionRecallMatchKind, SessionRecallSessionStatus } from '../../../../shared/session-recall'
 
 interface SessionRecallMetadataRow {
   conversation_id: string
@@ -478,6 +478,7 @@ export class SessionRecallService {
     excerpt?: string | null,
   ): SessionRecallHit {
     return {
+      sessionStatus: this.latestSessionStatus(metadata.conversation_id),
       conversationId: metadata.conversation_id,
       lineageRootId: metadata.lineage_root_id,
       resumeTitle: metadata.resume_title,
@@ -492,6 +493,30 @@ export class SessionRecallService {
       latestTaskSummary: metadata.latest_task_summary,
       attachmentNames: this.parseAttachmentNames(metadata.attachment_names_json),
       updatedAt: metadata.updated_at,
+    }
+  }
+
+  /** P0-1 — history rows need a REAL status source: the scope's latest task
+   *  projection (read-only ledger consumption; writes stay with the owners).
+   *  Failures degrade to null (= unlit), never break recall. */
+  private latestSessionStatus(conversationId: string): SessionRecallSessionStatus | null {
+    try {
+      const db = this.db.getRawDb()
+      if (!db) return null
+      const row = db.prepare(
+        `SELECT status, interaction_state FROM task_projections
+         WHERE scope_id = ? ORDER BY updated_at DESC LIMIT 1`,
+      ).get(conversationId) as { status?: unknown; interaction_state?: unknown } | undefined
+      if (!row) return null
+      if (row.interaction_state === 'check_in_pending') return 'check_in_pending'
+      const status = String(row.status || '')
+      if (status === 'running' || status === 'queued') return 'working'
+      if (status === 'blocked' || status === 'recoverable_paused' || status === 'budget_paused') return 'blocked'
+      if (status === 'completed') return 'done'
+      if (status === 'failed' || status === 'killed') return 'error'
+      return null
+    } catch {
+      return null
     }
   }
 

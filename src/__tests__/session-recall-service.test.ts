@@ -34,6 +34,7 @@ class FakeSessionRecallDb implements SessionRecallDatabaseAdapter {
     private readonly metadataRows: MetadataRow[],
     private readonly messageRows: Array<{ query: string; row: MessageMatchRow }>,
     private readonly attachmentRows: Array<{ conversation_id: string; name: string }>,
+    private readonly projectionRows: Array<{ scope_id: string; status: string; interaction_state: string; updated_at: string }> = [],
   ) {}
 
   getRawDb() {
@@ -42,6 +43,7 @@ class FakeSessionRecallDb implements SessionRecallDatabaseAdapter {
     const messageRows = this.messageRows
     const attachmentRows = this.attachmentRows
     const vectorRows = this.vectorRows
+    const projectionRows = this.projectionRows
 
     return {
       prepare: (sql: string) => {
@@ -81,6 +83,12 @@ class FakeSessionRecallDb implements SessionRecallDatabaseAdapter {
             return [] as T[]
           },
           get<T = unknown>(...params: unknown[]): T | undefined {
+            if (sql.includes('FROM task_projections')) {
+              const scoped = projectionRows
+                .filter((row) => row.scope_id === params[0])
+                .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
+              return scoped[0] as T | undefined
+            }
             if (sql.includes('FROM session_recall_metadata') && sql.includes('WHERE conversation_id = ?')) {
               return metadataRows.find((row) => row.conversation_id === params[0]) as T | undefined
             }
@@ -570,4 +578,33 @@ test('SessionRecallService selects only top high-signal automatic recall capsule
 
   assert.equal(capsules.length, 1)
   assert.equal(capsules[0]?.conversationId, 'conv-brand')
+})
+
+// ---------- P0-1: history rows carry a real session status ----------
+
+test('recall hits carry sessionStatus derived from the latest task projection', () => {
+  const meta = (conversationId: string): MetadataRow => ({
+    conversation_id: conversationId, lineage_root_id: conversationId, resume_title: `会话${conversationId}`,
+    title: `标题${conversationId}`, source_kind: 'local', source_id: 'app', thread_key: conversationId,
+    user_id: null, channel_key: 'local:app', preview_text: '采集 笔记 进展',
+    latest_task_title: null, latest_task_summary: null, attachment_names_json: '[]',
+    updated_at: '2026-06-12T10:00:00.000Z',
+  })
+  const db = new FakeSessionRecallDb(
+    [], [meta('c-run'), meta('c-done'), meta('c-pending'), meta('c-hist')],
+    [], [],
+    [
+      { scope_id: 'c-run', status: 'running', interaction_state: 'running', updated_at: '2026-06-12T10:00:00.000Z' },
+      { scope_id: 'c-done', status: 'completed', interaction_state: 'suspended', updated_at: '2026-06-12T10:00:00.000Z' },
+      { scope_id: 'c-pending', status: 'completed', interaction_state: 'check_in_pending', updated_at: '2026-06-12T10:00:00.000Z' },
+      // c-hist: no projection rows → pure history
+    ],
+  )
+  const service = new SessionRecallService(db)
+  const hits = service.searchSessionRecall({ query: '采集' })
+  const byId = new Map(hits.map((hit) => [hit.conversationId, hit]))
+  assert.equal(byId.get('c-run')?.sessionStatus, 'working')
+  assert.equal(byId.get('c-done')?.sessionStatus, 'done')
+  assert.equal(byId.get('c-pending')?.sessionStatus, 'check_in_pending', 'interaction_state wins over lifecycle status')
+  assert.equal(byId.get('c-hist')?.sessionStatus ?? null, null, 'no ledger rows → unlit')
 })

@@ -1,4 +1,5 @@
 import type { ScopeRunState } from '../../../../modules/agent/types'
+import type { SessionRecallSessionStatus } from '../../../../../shared/session-recall'
 
 // Status-dot semantics for a history-panel session row:
 //   active  (green)  — just-completed task, or the active/foreground scope
@@ -39,4 +40,19 @@ export const SESSION_DOT_COLOR: Record<SessionDotStatus, string> = {
   working: '#f97316',
   error: '#ef4444',
   off: '#d1d5db',
+}
+
+// P0-1 — history rows: map the main-derived session status to a dot. Live
+// statuses (open scopes) are resolved separately and take precedence; this
+// covers pure-history rows that previously always fell to gray.
+export function recallStatusToDot(status: SessionRecallSessionStatus | null | undefined): SessionDotStatus {
+  switch (status) {
+    case 'working': return 'working'
+    case 'blocked':
+    case 'check_in_pending':
+      return 'working' // needs attention — orange, same as in-flight
+    case 'done': return 'active'
+    case 'error': return 'error'
+    default: return 'off'
+  }
 }

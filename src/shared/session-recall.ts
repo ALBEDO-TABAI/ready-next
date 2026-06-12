@@ -7,6 +7,10 @@ export type SessionRecallMatchKind =
   | 'recent_self_lineage'
   | 'semantic'
 
+/** P0-1 — displayable session state for the history panel, derived in main
+ *  from the scope's latest task projection (status + interaction_state). */
+export type SessionRecallSessionStatus = 'working' | 'blocked' | 'check_in_pending' | 'done' | 'error'
+
 export interface SessionRecallHit {
   conversationId: string
   lineageRootId: string
@@ -22,6 +26,8 @@ export interface SessionRecallHit {
   latestTaskSummary?: string | null
   attachmentNames: string[]
   updatedAt: string
+  /** P0-1 — null/absent = pure history, renders unlit. */
+  sessionStatus?: SessionRecallSessionStatus | null
 }
 
 export interface SessionRecallCapsule {
