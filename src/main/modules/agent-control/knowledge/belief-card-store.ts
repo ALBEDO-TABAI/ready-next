@@ -55,8 +55,17 @@ export type WriteResult =
 
 export type ReadOptions = { includeStaged?: boolean }
 
-const NORMAL_CARD = /(^|\/)knowledge\/[a-z0-9._-]+\.md$/
-const SITE_CARD = /(^|\/)knowledge\/sites\/[a-z0-9._-]+\.md$/
+// The write whitelist is a CLOSED union of exactly the shapes an injection
+// read actually walks — anchored at the root, no arbitrary prefixes. A
+// wider guard (e.g. accepting `evil/knowledge/foo.md` or
+// `agents/a/b/knowledge/foo.md`) would let writes succeed into paths no
+// reader ever visits: "看似记住了，其实永远没生效".
+const NORMAL_CARD = /^knowledge\/[a-z0-9._-]+\.md$/
+const SITE_CARD = /^knowledge\/sites\/[a-z0-9._-]+\.md$/
+// per-agent shapes (EP3-A2 owner channel walks agents/<id>/knowledge
+// recursively, so agent-scoped site cards ARE readable — phase-1 contract)
+const AGENT_CARD = /^agents\/([^/]+)\/knowledge\/[a-z0-9._-]+\.md$/
+const AGENT_SITE_CARD = /^agents\/([^/]+)\/knowledge\/sites\/[a-z0-9._-]+\.md$/
 
 // EP3-A2 — per-agent knowledge scope. Agent ids are path segments, so the
 // shape is closed (no dots-only segments, no separators) before any join.
@@ -72,13 +81,23 @@ export function agentScopeKnowledgeDir(agentId: string | null | undefined): stri
   return isSafeAgentScopeId(agentId) ? `agents/${agentId}/knowledge` : null
 }
 
-/** True iff relPath is an allowed card write target (normal or site). */
+/** Site-card detection across both the global and the per-agent scope. */
+function isSiteCardPath(norm: string): boolean {
+  return SITE_CARD.test(norm) || AGENT_SITE_CARD.test(norm)
+}
+
+/** True iff relPath is an allowed card write target — exactly
+ *  `knowledge/<slug>.md`, `knowledge/sites/<domain>.md`, or their
+ *  per-agent variants `agents/<agentId>/knowledge/[sites/]<slug>.md`
+ *  (agentId shape-validated). */
 export function isAllowedCardPath(relPath: string): boolean {
   if (!relPath || relPath.includes('\0')) return false
   const norm = relPath.replace(/\\/g, '/')
   if (norm.startsWith('/') || /^[a-zA-Z]:/.test(norm)) return false // absolute
   if (norm.split('/').some((seg) => seg === '..')) return false // traversal
-  return SITE_CARD.test(norm) || NORMAL_CARD.test(norm)
+  if (SITE_CARD.test(norm) || NORMAL_CARD.test(norm)) return true
+  const agentMatch = norm.match(AGENT_SITE_CARD) ?? norm.match(AGENT_CARD)
+  return agentMatch !== null && isSafeAgentScopeId(agentMatch[1])
 }
 
 interface AuditEvent {
@@ -180,9 +199,9 @@ export class BeliefCardStore {
     const relPath = input.relPath.replace(/\\/g, '/')
     if (!isAllowedCardPath(relPath)) {
       this.auditFn({ action: 'reject_path', relPath, reason: 'not in write whitelist' })
-      return { ok: false, reason: 'path not allowed (must be knowledge/*.md or knowledge/sites/*.md)' }
+      return { ok: false, reason: 'path not allowed (must be knowledge/*.md, knowledge/sites/*.md, or agents/<agentId>/knowledge/*.md)' }
     }
-    const isSite = SITE_CARD.test(relPath)
+    const isSite = isSiteCardPath(relPath)
     const fmCheck = validateFrontmatter(input.frontmatter as unknown as Record<string, string>, isSite)
     if (!fmCheck.ok) {
       this.auditFn({ action: 'reject_frontmatter', relPath, reason: fmCheck.reason })
@@ -208,7 +227,7 @@ export class BeliefCardStore {
     if (!abs || !existsSync(abs)) return null
     const parsed = parseFrontmatter(readFileSync(abs, 'utf-8'))
     if (!parsed) return null
-    const isSite = SITE_CARD.test(norm)
+    const isSite = isSiteCardPath(norm)
     const fmCheck = validateFrontmatter(parsed.meta, isSite)
     if (!fmCheck.ok) return null
     if (fmCheck.fm.status === 'staged' && !opts.includeStaged) return null

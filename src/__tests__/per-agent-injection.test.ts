@@ -14,7 +14,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { PromptAssemblyService } from '../main/modules/agent-control/prompt-assembly'
-import { BeliefCardStore, agentScopeKnowledgeDir } from '../main/modules/agent-control/knowledge/belief-card-store'
+import { BeliefCardStore, agentScopeKnowledgeDir, isAllowedCardPath } from '../main/modules/agent-control/knowledge/belief-card-store'
 import type { ConversationScope } from '../main/modules/agent-control/contracts/types'
 import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
 
@@ -142,6 +142,25 @@ test('staged ban extends to per-agent dirs; hostile owner ids degrade to global-
     assert.ok(hostileWithScope.injected.includes('GLOBAL_CARD'))
   } finally {
     rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('card path whitelist is a CLOSED union — every writable path is one an injection read actually walks', () => {
+  // writable shapes = exactly what an injection read walks (global dirs +
+  // the owner channel's recursive agents/<id>/knowledge walk)
+  assert.ok(isAllowedCardPath('knowledge/foo.md'))
+  assert.ok(isAllowedCardPath('knowledge/sites/example.com.md'))
+  assert.ok(isAllowedCardPath('agents/agent-x/knowledge/foo.md'))
+  assert.ok(isAllowedCardPath('agents/agent-x/knowledge/sites/weibo.md'), 'agent-scoped site card (phase-1 contract)')
+  for (const phantom of [
+    'evil/knowledge/foo.md',              // arbitrary prefix: written but never read
+    'agents/a/b/knowledge/foo.md',        // nested agent path: no reader walks it
+    'agents/../knowledge/foo.md',         // traversal-shaped agent segment
+    'agents/.hidden/knowledge/foo.md',    // dot-leading agent id fails the shape
+    'knowledge/sub/foo.md',               // undocumented knowledge subdir
+    'KNOWLEDGE/foo.md',
+  ]) {
+    assert.equal(isAllowedCardPath(phantom), false, `${phantom} must not be writable（写得进读不到=幽灵记忆）`)
   }
 })
 

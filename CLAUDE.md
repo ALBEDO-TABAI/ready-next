@@ -47,7 +47,7 @@
 - 高危工具调用走行动确认闸门：M1-M4 静态策略表（`agent-control/safety/action-confirmation-policy.ts`）在 `tool-executor` authorization 之后裁决——M1 拒绝并引导用户亲手做；M2/M3 冻结原始参数、确认后经 `frozen-call-store.release(id, token)` 在原 run 内逐字节放行，token 只跳过再次确认、注册/authorization/工具策略照常重跑（确认 ≠ 提权）；阶段一禁止确认缓存与意图预批准（I-auth 前 M3 一律降级 M2）。浏览器执行层在拿到页面真实目标文本处做第二道 M1 拦截（target_id/CSS selector/坐标点击不带语义也拦得住）；密码框填充无 args 线索一律拒绝改道确认。
 - 信念卡 staged 状态不得进入 prompt 注入：`BeliefCardStore` 读 API 默认排除 staged（真实注入接线属 K3）。
 - Agent 进化阶段一合同回归入口：`npm run verify:evolution-p1`（全部焦点测试 + `verify:native`）。
-- 专项 agent 注入面（阶段三）：per-agent RULES/knowledge 注入 owner 只认显式 `ownerAgentId`（非法 id 降级 global-only，不回退 scope.agent）；charter/路由索引段只进主 agent 会话；`ownerAgentId` 写值唯一来自 handoff 采纳（用户点击后经 `repository.update`），后续轮注入随 scope 最近 owner 切换。
+- 专项 agent 注入面（阶段三）：per-agent RULES/knowledge 注入 owner 解析三段式——显式 `ownerAgentId` 优先；完全未传 owner 时回退 `scope.agent`；显式但非法的 id 降级 global-only（不回退 scope.agent，防腐败 owner 借道注入他人谱系，也永不成为路径片段）。charter/路由索引段只进主 agent 会话；`ownerAgentId` 写值唯一来自 handoff 采纳（用户点击后经 `repository.update`），后续轮注入随 scope 最近 owner 切换。
 - 任务包合同（阶段三）：packet 嵌套两层硬上限在 projection 写侧强制；`direct_answer`/`short_task` 永不分包、multi_step/research 需多目标（门槛是代码不是模型）；子包失败只有重派(≤1)/降级(必须写理由)/阻塞三选一，静默吞=测试红；上行报告 ≤5 行摘要+引用不转述。
 - 最小传话铁律（05 §4）：handoff/SubAgent/技能子进程三类转发点只传 `userRequestVerbatim` 逐字+结构化 refs，禁止转述改写拼接摘要；恢复路径还原持久化原话不重新派生；全局断言矩阵 `verbatim-relay.test.ts`。
 - LLM 维护回合（阶段三）：必须经 EP2-C2 确定性门控（skip=零 LLM 调用）、容器钉死 `runSubAgent`、维护写卡强制 staged；用户画像合并 CAS 作用于 DB 真值行（同事务 hash 比对，USER.md 仅无 profile 行时镜像）；涌现候选投影只在 stage=candidate 且证据 ≥3。
