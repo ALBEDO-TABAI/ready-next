@@ -1,5 +1,5 @@
 ---
-status: draft v2 — Codex 一轮评审 6P1/3P2/3 开放问题全部吸收，待复审（评审通过前 enforce: false，不得按本合同开工）
+status: approved v2 — Codex 复审 APPROVED 可 enforce（2026-06-13；一轮 6P1/3P2/3 开放问题全部吸收，复审零残余 P1），逐单施工待启动（建议首单 K-mirror，A 轨 A5 起步）
 revision_history:
   - v2 (2026-06-13): 吸收 Codex 一轮评审 6P1/3P2/3 开放问题。P1：①K-mirror 同步必须带作用域（agent 卡 scope_id='agent:<id>'，不得落 'global'）；②backlink/index 构建改 scope-aware（同 slug 跨 agent 不互相计）；③候选卡晋升字段改 stage→emerged（status 联合无 emerged，C5 已立 stage 封闭联合）；④B6 对 active 卡零自动改写——学习产物一律 staged 旁卡/建议卡；⑤A5 routing 卡 triggers 约定完整定义（封闭关键词列表 frontmatter 字段+确定性匹配+冲突兜底+写侧校验）；⑥B6 前置论证补全（只消费失败事实不读 enforce 行为，信源接口点名）。P2：四 gate 点名+迁移连续 gate 进 A6a 验证；共享文件矩阵补 knowledge-index-builder/settings/preload/UI/prompt 资产；计划改"058 被占须先修订合同"。开放问题：B6 信源=resolveCollectionVerdict 产物+CheckInRecord.blockers+工具信封 errorKind 闭集；triggers=关键词列表非正则非向量；A7 非 active agent 卡片自然失活+镜像行保留，无需清扫。
   - v1 (2026-06-13): 初稿。范围=00 路线图阶段四【进化】（A5-A7 / B6 / E-剩余卡类）+ 阶段三收口时用户提出的镜像覆盖缺口（K-mirror）。阶段三主轨 13 单已全部收口（整轮审查零 P1，verify:evolution-p3 绿）。
@@ -7,7 +7,7 @@ owner: 白
 author: Claude (Fable 5)
 executor: 待定（Claude / Codex 逐单施工）
 reviewer: Codex（共识）+ Claude（终审）
-enforce: false
+enforce: true
 note: >
   阶段三（2026-06-12-agent-evolution-phase3-implementation.md approved v3）已交付
   "组织与维护智能"全部主轨单（A1-A4 / C3-C5 / PK1-PK4 / I4 / G3，整轮审查零 P1，

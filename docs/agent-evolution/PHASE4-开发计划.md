@@ -1,7 +1,7 @@
 # Agent Evolution 阶段四开发计划
 
 > 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。
-> 合同：`docs/superpowers/plans/2026-06-13-agent-evolution-phase4-implementation.md`（**draft v2，一轮评审 6P1/3P2 已吸收，待复审；评审通过前不开工**）。
+> 合同：`docs/superpowers/plans/2026-06-13-agent-evolution-phase4-implementation.md`（**approved v2（2026-06-13 Codex 复审 APPROVED 可 enforce），可按波次开工**）。
 > 阶段三基线：主轨 13 单全部收口（整轮审查零 P1），回归入口 `verify:evolution-p3`。
 
 ## 1. 工单总览（7 单 + 收口）
@@ -59,7 +59,7 @@ B6/E5 无 A 轨依赖，A 轨任何单被评审卡住时可前移。
 2. **派生最小化纪律**：种子 RULES 只种证据支持的内容——LLM 产物用户可改且确认前不落盘；知识迁移逐项勾选、文件级可逆。
 3. **B6 不碰拦截语义**：学习回路对硬拦清单零写权；对既有卡（含 active）零自动改写——更新一律产 staged 旁卡（possible-update-of），用户确认才并入。
 4. **E5 噪音控制**：harvest 卡在 R-E2 解锁前只有内核+接口，不投影到任何用户面；文件树消费 forming/prepare 时 UI 数据形状不变（零视觉回归）。
-5. **共享文件**：belief-card-store/mirror（K-mirror 先于 B6）；agent-registry-repository（A6a→A7 串行）；emergence-cards（E5 与遗留轨 E3 协调）；agent-sdk-runtime 零触碰。
+5. **共享文件**：belief-card-store/mirror/knowledge-index-builder（K-mirror 先于 B6）；agent-registry-repository（A6a→A7 串行）；emergence-cards（E5 与遗留轨 E3 协调）；settings-engine/preload/renderer 类型（A5 接线单内 additive）；assets/prompts/derivation/seed-rules.md（A6a 新建独占）；PersonalityEditor 系（A7 独占）；agent-sdk-runtime 零触碰。
 6. **迁移编号**：合同固定 A6a=058；若开工时 058 已被（如遗留轨）占用，**必须先修订合同再开工**，不得擅自顺延（连续 gate `check-migration-numbering-sequential.cjs` 约束）。
 
 ## 5. 验证入口
