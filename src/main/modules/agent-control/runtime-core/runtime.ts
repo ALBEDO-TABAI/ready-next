@@ -322,6 +322,9 @@ function canRespondToUserInteractionWithoutResumeHandle(params: {
 
 export class AgentControlRuntime extends EventEmitter {
   private readonly db = getDatabase()
+  // EP3-A3: declared BEFORE promptAssembly so the roster closure can never
+  // observe an uninitialized field (empty/dead table degrades to []).
+  private readonly agentRegistry = new AgentRegistryRepository(this.db)
   private readonly settingsRepository = new AppSettingsRepository()
   private readonly sidecar = new SidecarManager()
   private readonly orchestrator: ReadyAgentOrchestrator
@@ -392,14 +395,13 @@ export class AgentControlRuntime extends EventEmitter {
       selectScopeTaskIndexEntries(this.taskProjectionStore, scopeId),
     // EP2-K3: lazy for the same declaration-order reason.
     getBeliefCardStore: () => this.getBeliefCardStore(),
-    // EP3-A3: lazy — the agents-table roster for the main-session
-    // charter/routing index (empty/dead table degrades to []).
+    // EP3-A3: agents-table roster for the main-session charter/routing
+    // index (registry declared above; empty/dead table degrades to []).
     getAgentRoster: () => this.agentRegistry.list(),
     // EP2-K6: rollback switch (single read entry in the knowledge module).
     isKnowledgeSystemEnabled: () => isKnowledgeSystemEnabled(this.db),
     enableDatabaseMemory: true
   })
-  private readonly agentRegistry = new AgentRegistryRepository(this.db)
   private readonly agentManager: AgentManager
   private readonly runCoordinator: RunCoordinator
   private readonly runProjection: RunProjection
