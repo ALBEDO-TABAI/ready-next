@@ -89,6 +89,10 @@ export interface PromptAssemblyDeps {
   } | null
   /** EP2-K6: rollback switch — false stops RULES/index injection entirely. */
   isKnowledgeSystemEnabled?: () => boolean
+  /** EP3-C4: injectable memory-content accessor (agent_knowledge value by
+   *  contentKey) so the DB-first loadUSER path is provable in tests; absent
+   *  → the global database accessor, behavior unchanged. */
+  loadMemoryContentByKey?: (contentKey: string) => string | null
 }
 
 interface TriggerDefinition {
@@ -688,6 +692,13 @@ export class PromptAssemblyService {
   }
 
   private async loadMemoryContent(contentKey: string): Promise<string | null> {
+    if (this.deps.loadMemoryContentByKey) {
+      try {
+        return this.deps.loadMemoryContentByKey(contentKey)
+      } catch {
+        return null
+      }
+    }
     try {
       // Try to load from agent_knowledge table
       const { getDatabase } = await import('../database')
