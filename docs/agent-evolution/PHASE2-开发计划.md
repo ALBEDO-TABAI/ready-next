@@ -1,6 +1,8 @@
 # 阶段二开发计划（配套 2026-06-11-agent-evolution-phase2-implementation.md）
 
-> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同 v6 已于 2026-06-12 经 Codex 复核 APPROVED（五轮复审全部收敛；check_in_pending 全链路八组面含 continuation 归一化白名单），enforce 生效，按波次开工中。
+> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同 v7 已 approved（enforce 生效）。
+>
+> **施工状态（2026-06-12）**：波次 0-3 + I-auth 全部完成并逐波经 Codex 审查通过（18 个焦点测试文件 100 pass + 四 gate + native，临时回归入口 `verify:evolution-p2`）。**Q4b 及其下游（Q5/T3/X2/E2/Q6/G2）按合同前置阻塞**：Q4b 转正门槛=真实使用 ≥50 终态 run 且 ≥3 自然日、覆盖 ≥4 类 task_type、`export-adjudicator-divergence.cjs` 清单 false_reject=0——shadow 期（Q4a 已合入）需真实 dogfood 积累样本，无法在施工会话内伪造。B1 spike 需真实浏览器实测，同属会话外长线。恢复点：shadow 期满足门槛后跑导出脚本 → 复核清单入 repo → Q4b 开工。
 
 ---
 
