@@ -87,6 +87,9 @@ interface SkillToolRuntimeContext {
   taskProjectionId?: string
   frameSkillId?: string | null
   agent?: string | null
+  /** EP3-I4 — the user's words this turn, forwarded byte-for-byte into
+   *  child-run launches (05 §4 最小传话). */
+  currentUserText?: string
   /**
    * Stage 4 W3b — per-turn skill tool authorization. Stage 10 made this
    * the single source of truth for the primitive's skillId: identity is
@@ -2291,6 +2294,8 @@ async function dispatchChildLoopSkillAction(params: {
       parentNextHint: 'wait_for_close_event',
       triggerType: 'tool',
       agentContext: agentContext ?? null,
+      // EP3-I4 — the user's words this turn, byte-for-byte; never a digest.
+      userRequestVerbatim: runtimeContext?.currentUserText ?? null,
     })
   } catch (error) {
     // The runner is supposed to surface refusals as `recoverable_paused` /

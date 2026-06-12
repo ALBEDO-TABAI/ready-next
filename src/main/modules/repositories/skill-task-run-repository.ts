@@ -189,6 +189,41 @@ export interface CreateChildRunInput {
   runStatePath: string
   eventLogPath: string
   status?: SkillChildRunStatus
+  /** EP3-I4 — the user's original words, byte-for-byte (05 §4 最小传话). */
+  userRequestVerbatim?: string | null
+}
+
+/** EP3-I4 — pure payload assembly, exported so the verbatim relay matrix
+ *  asserts the persisted shape without a database. `createChildRun` is the
+ *  only production caller. */
+export function buildChildRunPayload(input: CreateChildRunInput): SkillChildRunPayload {
+  const status: SkillChildRunStatus = input.status || 'queued'
+  return {
+    version: 1,
+    childRunId: input.childRunId,
+    // Phase 4 only mints VEA child runs in practice, but the payload's
+    // `kind` is best-effort derived from the id prefix to stay consistent
+    // with `getSkillChildRunKind` without forcing callers to repeat it.
+    kind: (input.childRunId.charAt(0) === 'v'
+      ? 'vea'
+      : input.childRunId.charAt(0) === 's'
+        ? 'skill'
+        : 'detached'),
+    parentScopeId: input.scopeId,
+    parentSessionId: input.sessionId,
+    skillId: input.skillId,
+    skillName: input.skillName,
+    requestedAction: input.action,
+    requestedInput: input.requestedInput,
+    singleFlightKey: input.singleFlightKey,
+    parentNextHint: input.parentNextHint,
+    outputDir: input.outputDir,
+    runStatePath: input.runStatePath,
+    eventLogPath: input.eventLogPath,
+    status,
+    closeEvent: null,
+    userRequestVerbatim: input.userRequestVerbatim ?? null,
+  }
 }
 
 /**
@@ -604,31 +639,7 @@ export class SkillTaskRunRepository {
   createChildRun(input: CreateChildRunInput): SkillTaskRunRecord {
     const status: SkillChildRunStatus = input.status || 'queued'
     const nowIso = new Date().toISOString()
-    const payload: SkillChildRunPayload = {
-      version: 1,
-      childRunId: input.childRunId,
-      // Phase 4 only mints VEA child runs in practice, but the payload's
-      // `kind` is best-effort derived from the id prefix to stay consistent
-      // with `getSkillChildRunKind` without forcing callers to repeat it.
-      kind: (input.childRunId.charAt(0) === 'v'
-        ? 'vea'
-        : input.childRunId.charAt(0) === 's'
-          ? 'skill'
-          : 'detached'),
-      parentScopeId: input.scopeId,
-      parentSessionId: input.sessionId,
-      skillId: input.skillId,
-      skillName: input.skillName,
-      requestedAction: input.action,
-      requestedInput: input.requestedInput,
-      singleFlightKey: input.singleFlightKey,
-      parentNextHint: input.parentNextHint,
-      outputDir: input.outputDir,
-      runStatePath: input.runStatePath,
-      eventLogPath: input.eventLogPath,
-      status,
-      closeEvent: null,
-    }
+    const payload: SkillChildRunPayload = buildChildRunPayload(input)
 
     const record: SkillTaskRunRecord = {
       id: input.childRunId,

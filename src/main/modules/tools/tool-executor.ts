@@ -533,6 +533,8 @@ async function executeToolCallInner(
             scopeId: context.scopeId || context.scope?.id || context.sessionId,
             runId: context.runId,
             frameSkillId: context.frameSkillId ?? null,
+            // EP3-I4 — user's words this turn, byte-for-byte (05 §4).
+            currentUserText: context.currentUserText,
             // Phase 3 — forward the live active-frame slot so the skill
             // dispatcher (`skill_read_artifact`) can prefer fresh artifact
             // roots emitted by earlier tools in the same batch.

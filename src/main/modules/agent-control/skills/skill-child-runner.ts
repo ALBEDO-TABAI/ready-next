@@ -138,6 +138,9 @@ export interface StartSkillChildRunParams {
   triggerType?: 'tool' | 'product' | 'agent'
   parentNextHint?: SkillChildRunParentNextHint
   agentContext?: AgentSpawnContext | null
+  /** EP3-I4 — the user's original words, forwarded byte-for-byte into the
+   *  persisted payload and the driver launch (05 §4 最小传话). */
+  userRequestVerbatim?: string | null
   /** Set true ONLY when a registered driver is calling its own internal
    *  action through the runtime. Lets `startSkillChildRun` short-circuit
    *  the nested-child guard. Drivers should prefer the runtime's
@@ -472,6 +475,7 @@ class SkillChildRunner {
         runStatePath,
         eventLogPath,
         status: 'running',
+        userRequestVerbatim: params.userRequestVerbatim ?? null,
       })
     } catch (error) {
       return makePausedOnLaunchResult({
@@ -493,6 +497,8 @@ class SkillChildRunner {
       parentNextHint: params.parentNextHint ?? 'wait_for_close_event',
       agentContext: params.agentContext ?? null,
       outputDir,
+      // EP3-I4 — verbatim rides the launch byte-for-byte (05 §4).
+      userRequestVerbatim: params.userRequestVerbatim ?? null,
     }
 
     return this.beginRunLoop({
