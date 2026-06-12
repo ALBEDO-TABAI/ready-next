@@ -118,6 +118,10 @@ export interface CrystallizeSignalCard {
 export function extractCrystallizeCards(cards: ReadonlyArray<CrystallizeSignalCard>): EmergenceCard[] {
   const out: EmergenceCard[] = []
   for (const card of cards) {
+    // EP3-C5 — stage-carrying candidate cards NEVER project through this
+    // legacy path (any branch); they go through extractAgentCandidateCards
+    // with the candidate+evidence≥3 gate.
+    if (card.stage) continue
     if (card.source && card.source.startsWith('possible-duplicate-of')) {
       out.push({
         id: `crystallize:dup:${card.relPath}`,
@@ -130,10 +134,7 @@ export function extractCrystallizeCards(cards: ReadonlyArray<CrystallizeSignalCa
       })
       continue
     }
-    // EP3-C5 — agent-candidate cards (stage present) are gated by
-    // extractAgentCandidateCards (candidate + ≥3 evidence); the legacy
-    // aspire path must not leak hint/under-evidenced candidates.
-    if (card.tag === 'aspire' && !card.stage) {
+    if (card.tag === 'aspire') {
       out.push({
         id: `crystallize:candidate:${card.relPath}`,
         type: 'crystallize',

@@ -102,9 +102,11 @@ test('feed projection: candidate + evidence ≥3 only; explicit confirm always r
   // the strict gate (hint / under-evidenced would otherwise project)
   const legacy = extractCrystallizeCards([
     { relPath: base.relPath, title: base.title, tag: 'aspire', status: 'staged', source: null, stage: 'hint' },
+    // stage + duplicate source must ALSO stay out — every legacy branch
+    { relPath: 'knowledge/dup-candidate.md', title: '带 stage 的疑似重复', tag: 'aspire', status: 'staged', source: 'possible-duplicate-of:knowledge/x.md', stage: 'candidate' },
     { relPath: 'knowledge/plain-aspire.md', title: '普通开放问题', tag: 'aspire', status: 'staged', source: null },
   ])
-  assert.equal(legacy.length, 1, 'stage-carrying cards excluded from the legacy path')
+  assert.equal(legacy.length, 1, 'stage-carrying cards excluded from the legacy path (all branches)')
   assert.ok(legacy[0].id.includes('plain-aspire'))
 })
 
