@@ -114,7 +114,8 @@ test('gaps 2+3: collected-media download reconciles discovered/saved/remaining a
     assert.equal(recorded[0].saved, 3)
     assert.equal(recorded[0].remaining, 69)
 
-    // without expected_total and everything saved → complete
+    // no claim ANYWHERE (no arg, no source-recorded total) and everything
+    // saved → complete is legitimate
     const full = await executeBrowserTool('browser_download_collected_media', {
       source_task_id: 'task-gallery-1',
       directory: dir,
@@ -122,6 +123,21 @@ test('gaps 2+3: collected-media download reconciles discovered/saved/remaining a
     const fullParsed = JSON.parse(full)
     assert.equal(fullParsed.completion, 'complete')
     assert.equal(fullParsed.remaining, 0)
+
+    // the SOURCE TASK recorded the page claim (userExpectedTotal) — a model
+    // that forgets expected_total can no longer silence the gap
+    const claimedTask = galleryTask('task-gallery-1')
+    ;(claimedTask.result as Record<string, unknown>).userExpectedTotal = 72
+    const claimedController = makeController({
+      getTask: async () => claimedTask,
+    })
+    const claimed = await executeBrowserTool('browser_download_collected_media', {
+      source_task_id: 'task-gallery-1',
+      directory: dir,
+    }, claimedController, undefined, 'scope-img')
+    const claimedParsed = JSON.parse(claimed)
+    assert.equal(claimedParsed.completion, 'partial', 'source-recorded claim forces partial without the arg')
+    assert.equal(claimedParsed.remaining, 69)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -154,4 +170,48 @@ test('gap 4: successful downloads broadcast document:directoryChanged to every l
   } finally {
     __setWebContentsProviderForTests(null)
   }
+})
+
+test('projection truth: the card reads 52/72 with 剩余 19 — never 52/53 剩余 0', async () => {
+  const { makeNoteCollectProjectionSink } = await import('../main/modules/claude-bridge/browser-collection-projection-sink')
+  const rows = new Map<string, Record<string, unknown>>()
+  const store = {
+    get: (taskId: string) => (rows.get(taskId) ?? null) as never,
+    create: (record: { taskId: string }) => { rows.set(record.taskId, record as never) },
+    update: (taskId: string, patch: Record<string, unknown>) => {
+      rows.set(taskId, { ...rows.get(taskId), ...patch })
+    },
+  }
+  const sink = makeNoteCollectProjectionSink({ getTaskProjectionStore: () => store } as never)
+
+  // discovery phase: 53 discovered of a page-claimed 72
+  sink.upsert({
+    taskId: 'src-1', scopeId: 'scope-img', title: '图片采集', summary: '发现中',
+    state: 'running', total: 53, completed: 0, failed: 0,
+    discovered: 53, userExpectedTotal: 72,
+  } as never)
+
+  // download write-back (refreshOnly): 52 saved, 1 failed
+  sink.upsert({
+    taskId: 'src-1#media-download', sourceTaskId: 'src-1', scopeId: 'scope-img',
+    title: '图片采集', summary: '已保存 52 张 · 失败 1 · 剩余 19',
+    state: 'completed', refreshOnly: true,
+    total: 53, completed: 52, failed: 1,
+    discovered: 53, saved: 52, userExpectedTotal: 72,
+  } as never)
+
+  const projection = rows.get('src-1') as { status: string; progress: { total: number; completed: number; detail: string } }
+  assert.equal(projection.progress.total, 72, 'card total = page-claimed 72, not discovered 53')
+  assert.equal(projection.progress.completed, 52)
+  assert.match(projection.progress.detail, /发现 53\/72/)
+  assert.match(projection.progress.detail, /剩余 19/, 'remaining includes the 19 undiscovered')
+  assert.equal(projection.status, 'running', 'refreshOnly keeps the existing status — numbers move, lifecycle untouched')
+
+  // refreshOnly with no existing projection is a no-op, never a create
+  sink.upsert({
+    taskId: 'ghost#media-download', sourceTaskId: 'ghost', scopeId: 'scope-img',
+    title: 'x', summary: 'x', state: 'completed', refreshOnly: true,
+    total: 1, completed: 1, failed: 0,
+  } as never)
+  assert.equal(rows.has('ghost'), false)
 })

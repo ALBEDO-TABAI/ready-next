@@ -5744,9 +5744,13 @@ export async function executeBrowserTool(
         const saved = Number(parsed.success || 0)
         const failed = Number(parsed.failed || 0)
         const discovered = urls.length
+        // page-claimed total: explicit arg first, then the source task's own
+        // recorded claim (user_expected_total survives in result/payload) —
+        // a model that forgets to pass 72 can no longer silence the gap.
+        const claimedFromSource = Number(result?.userExpectedTotal ?? sourcePayload?.userExpectedTotal ?? sourcePayload?.user_expected_total ?? 0) || 0
         const expectedTotal = Number.isFinite(Number(args.expected_total)) && Number(args.expected_total) > 0
           ? Number(args.expected_total)
-          : null
+          : (claimedFromSource > 0 ? claimedFromSource : null)
         const undiscovered = expectedTotal !== null ? Math.max(0, expectedTotal - discovered) : 0
         const remaining = undiscovered + Math.max(0, discovered - saved - failed)
         const completion = remaining > 0 || failed > 0 ? 'partial' : 'complete'

@@ -54,7 +54,7 @@ export function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime
     userExpectedTotal?: number
     completedSourceIds?: string[]
     failedSourceIds?: string[]
-  }, existing?: TaskProjectionRecord | null): { discovered: number; saved: number; failed: number; remaining: number; userExpectedTotal: number } => {
+  }, existing?: TaskProjectionRecord | null): { discovered: number; saved: number; failed: number; effectiveTotal: number; remaining: number; userExpectedTotal: number } => {
     const projectionTaskId = input.sourceTaskId || input.taskId
     const aggregate = aggregates.get(projectionTaskId) || {
       discovered: Math.max(0, Number(existing?.progress?.total ?? 0) || 0),
@@ -99,11 +99,16 @@ export function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime
     }
     const rawFailed = failedSourceIdCount + failedWithoutSourceId
     const failed = discovered > 0 ? Math.min(Math.max(0, discovered - saved), rawFailed) : rawFailed
+    // EP2 dogfood follow-up — the user cares about the CLAIMED total: when a
+    // page declares 72 and we discovered 53, the card must read 52/72 with
+    // 剩余 including the 19 undiscovered, never 52/53 · 剩余 0.
+    const effectiveTotal = userExpectedTotal > 0 ? Math.max(userExpectedTotal, discovered) : discovered
     return {
       discovered,
       saved,
       failed,
-      remaining: Math.max(0, discovered - saved - failed),
+      effectiveTotal,
+      remaining: Math.max(0, effectiveTotal - saved - failed),
       userExpectedTotal,
     }
   }
@@ -151,9 +156,9 @@ export function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime
       steps: [],
       progress: {
         stage: status,
-        total: aggregate.discovered,
+        total: aggregate.effectiveTotal,
         completed: aggregate.saved,
-        coverage: aggregate.discovered ? aggregate.saved / aggregate.discovered : null,
+        coverage: aggregate.effectiveTotal ? aggregate.saved / aggregate.effectiveTotal : null,
         fingerprint: null,
         updatedAt: now,
         lastError: status === 'failed' ? input.summary : null,
@@ -176,6 +181,20 @@ export function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime
   return {
     upsert(input): void {
       if (!input.scopeId) return
+      // EP2 dogfood follow-up — progress-only refresh: keep the existing
+      // status, just move the numbers (download write-back path).
+      if (input.refreshOnly) {
+        const store = activeRuntime.getTaskProjectionStore()
+        const existing = store.get(input.sourceTaskId || input.taskId)
+        if (!existing) return
+        write(
+          input,
+          existing.status,
+          (existing.waitingFor === 'background' || existing.waitingFor === 'verification' ? existing.waitingFor : 'none') as 'background' | 'verification' | 'none',
+          false,
+        )
+        return
+      }
       if (input.state === 'running') {
         write(input, 'running', 'background', true)
         return

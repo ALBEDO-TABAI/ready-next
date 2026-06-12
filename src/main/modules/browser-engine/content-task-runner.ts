@@ -81,6 +81,10 @@ export interface BrowserTaskProjectionInput {
   completedSourceIds?: string[]
   failedSourceIds?: string[]
   terminalDwell?: boolean
+  /** EP2 dogfood — progress-only refresh: update the EXISTING projection in
+   *  place (status untouched) so download write-backs move the card numbers
+   *  even when no status transition fires an event. */
+  refreshOnly?: boolean
 }
 export interface BrowserTaskProjectionSink {
   upsert(input: BrowserTaskProjectionInput): void
@@ -741,11 +745,40 @@ export class BrowserContentTaskRunner {
       ...(task.result && typeof task.result === 'object' ? task.result as Record<string, unknown> : {}),
       mediaDownload: summary,
     }
-    return this.persistenceService.updateProgress(taskId, {
+    const updated = this.persistenceService.updateProgress(taskId, {
       total: summary.discovered,
       completed: summary.saved,
       failed: summary.failed,
     }, { result })
+    // EP2 dogfood follow-up — the ledger write alone never refreshes the
+    // chat card (updateProgress only emits on STATUS change). Re-upsert the
+    // projection directly so saved/failed/remaining move on screen, with
+    // the page-claimed total preferred over the discovered count.
+    try {
+      const payload = this.persistenceService.getTaskPayload(taskId)
+      const scopeId = typeof payload?.scopeId === 'string' ? payload.scopeId.trim() : ''
+      const sourceResult = resultObject(task)
+      const claimed = Number(summary.expectedTotal ?? sourceResult?.userExpectedTotal ?? payload?.userExpectedTotal ?? 0) || 0
+      if (scopeId && this.taskProjectionSink) {
+        this.taskProjectionSink.upsert({
+          taskId: `${taskId}#media-download`,
+          sourceTaskId: taskId,
+          scopeId,
+          title: '图片采集',
+          summary: `已保存 ${summary.saved} 张${summary.failed > 0 ? ` · 失败 ${summary.failed}` : ''}${summary.remaining > 0 ? ` · 剩余 ${summary.remaining}` : ''}`,
+          state: 'completed',
+          refreshOnly: true,
+          total: summary.discovered,
+          completed: summary.saved,
+          failed: summary.failed,
+          discovered: summary.discovered,
+          saved: summary.saved,
+          remaining: summary.remaining,
+          ...(claimed > 0 ? { userExpectedTotal: claimed } : {}),
+        })
+      }
+    } catch { /* projection refresh must not fail the ledger write */ }
+    return updated
   }
 
   updateTaskPayload(taskId: string, payload: Record<string, unknown>): void {
