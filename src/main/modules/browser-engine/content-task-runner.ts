@@ -723,6 +723,31 @@ export class BrowserContentTaskRunner {
     return this.persistenceService.getTaskPayload(taskId)
   }
 
+  /** EP2 dogfood gap 3 — download results flow BACK onto the source
+   *  collection task so the card's numbers move: discovered/saved/failed
+   *  land in the browser_tasks progress columns (execution-ledger owner =
+   *  browser-engine per the ownership matrix) and the result payload. */
+  async recordCollectedMediaDownload(taskId: string, summary: {
+    discovered: number
+    saved: number
+    failed: number
+    remaining: number
+    directory: string
+    expectedTotal?: number | null
+  }): Promise<BrowserCapabilityTaskHandle | null> {
+    const task = await this.getTask(taskId)
+    if (!task) return null
+    const result = {
+      ...(task.result && typeof task.result === 'object' ? task.result as Record<string, unknown> : {}),
+      mediaDownload: summary,
+    }
+    return this.persistenceService.updateProgress(taskId, {
+      total: summary.discovered,
+      completed: summary.saved,
+      failed: summary.failed,
+    }, { result })
+  }
+
   updateTaskPayload(taskId: string, payload: Record<string, unknown>): void {
     this.persistenceService.updateTaskPayload(taskId, payload)
   }

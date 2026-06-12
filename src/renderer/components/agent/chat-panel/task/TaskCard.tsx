@@ -222,7 +222,13 @@ export function TaskCard({
       style={{
         borderRadius: 12,
         border: '1px solid var(--border-default)',
-        background: 'color-mix(in srgb, var(--surface-card-bg) 26%, transparent)',
+        // EP2 dogfood gap 5 — light task-card glass surface: enough opacity
+        // + a gentle blur to stay readable when scrolled into the composer
+        // overlay zone. NOT the composer's liquid-glass treatment (no outer
+        // dark shadow, no mirrored refraction) — a lightweight surface only.
+        background: 'color-mix(in srgb, var(--surface-card-bg) 68%, transparent)',
+        backdropFilter: 'blur(10px) saturate(1.08)',
+        WebkitBackdropFilter: 'blur(10px) saturate(1.08)',
         padding: compact ? '10px 12px' : '12px 12px 10px',
         display: 'flex',
         flexDirection: 'column',

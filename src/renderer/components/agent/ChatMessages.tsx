@@ -1,4 +1,7 @@
 import { useRef, useEffect, useMemo } from 'react'
+
+// EP2 dogfood gap 5 — safety margin appended to the measured composer tail.
+const CHAT_BOTTOM_SAFETY_MARGIN_PX = 12
 import { Copy, Check, ChevronRight, Wrench, CheckCircle2, CircleDashed } from 'lucide-react'
 import type { AgentMessage, ChatAttachment, ToolTraceEvent } from '../../stores/useAgent'
 import { formatToolTracePreview } from '../../modules/agent/toolTracePreview'
@@ -575,8 +578,11 @@ export default function ChatMessages({
           data-chat-bottom-overlay-spacer="true"
           aria-hidden="true"
           style={{
-            flex: `0 0 ${bottomOverlayInset}px`,
-            minHeight: bottomOverlayInset,
+            // EP2 dogfood gap 5 — measured composer height PLUS a small
+            // safety margin so expanded task cards never sit flush against
+            // the composer overlay (readability near the bottom).
+            flex: `0 0 ${bottomOverlayInset + CHAT_BOTTOM_SAFETY_MARGIN_PX}px`,
+            minHeight: bottomOverlayInset + CHAT_BOTTOM_SAFETY_MARGIN_PX,
           }}
         />
       )}

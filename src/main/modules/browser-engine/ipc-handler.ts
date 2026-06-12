@@ -13,6 +13,7 @@ import type {
   BrowserStructuredItem,
   BrowserStartTaskRequest,
   BrowserWaitForConditionOptions,
+  BrowserCapabilityTaskKind,
 } from './capability-types'
 import { BrowserContentTaskRunner, type BrowserTaskProjectionSink } from './content-task-runner'
 import { registerWaitingHumanBrowserTaskResumePort } from './task-event-bridge'
@@ -845,6 +846,24 @@ export class BrowserController {
 
   async getTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
     return this.contentTaskRunner.getTask(taskId)
+  }
+
+  /** EP2 dogfood gap 1 — the download-redirect guard needs to discover this
+   *  scope's image_gallery source tasks. */
+  async listTasksByKind(kind: BrowserCapabilityTaskKind): Promise<BrowserCapabilityTaskHandle[]> {
+    return this.contentTaskRunner.listTasks(kind)
+  }
+
+  /** EP2 dogfood gap 3 — passthrough to the execution-ledger owner. */
+  async recordCollectedMediaDownload(taskId: string, summary: {
+    discovered: number
+    saved: number
+    failed: number
+    remaining: number
+    directory: string
+    expectedTotal?: number | null
+  }): Promise<BrowserCapabilityTaskHandle | null> {
+    return this.contentTaskRunner.recordCollectedMediaDownload(taskId, summary)
   }
 
   getTaskPayload(taskId: string): Record<string, unknown> | null {

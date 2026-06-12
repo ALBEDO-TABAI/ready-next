@@ -4,6 +4,7 @@
  */
 
 import { BrowserController } from '../browser-engine/ipc-handler'
+import { broadcastDirectoryChanged } from '../document-engine/ipc/directory-change-broadcast'
 import { BrowserAgentRuntimeAdapter } from '../browser-engine/agent-runtime-adapter'
 import { BrowserPageStateService } from '../browser-engine/page-state-service'
 import { BrowserEvidenceService } from '../browser-engine/evidence-service'
@@ -835,6 +836,33 @@ function mediaUrlsFromVisibleCollectTask(task: BrowserCapabilityTaskHandle | nul
   return out
 }
 
+/** EP2 dogfood gap 1 — when this scope already ran an image-gallery
+ *  discovery, raw URL downloads break the collection chain (card never
+ *  learns about the files). Find the newest completed gallery source task
+ *  for the scope so the dispatch can redirect. */
+async function findScopeImageGallerySourceTask(
+  controller: BrowserController,
+  scopeId: string | null | undefined,
+): Promise<BrowserCapabilityTaskHandle | null> {
+  if (!scopeId) return null
+  const list = (controller as { listTasksByKind?: (kind: string) => Promise<BrowserCapabilityTaskHandle[]> }).listTasksByKind
+  if (typeof list !== 'function') return null
+  try {
+    const tasks = await list.call(controller, 'visible_collect')
+    const getPayload = (controller as { getTaskPayload?: (taskId: string) => Record<string, unknown> | null }).getTaskPayload
+    const candidates = tasks.filter((task) => {
+      if (task.status !== 'completed') return false
+      const payload = typeof getPayload === 'function' ? (getPayload.call(controller, task.taskId) || null) : null
+      if (stringField(payload?.scopeId) !== scopeId) return false
+      return isImageGallerySourceTask(task, payload) && mediaUrlsFromVisibleCollectTask(task).length > 0
+    })
+    return candidates.sort((a, b) =>
+      String(b.updatedAt || b.createdAt || '').localeCompare(String(a.updatedAt || a.createdAt || '')))[0] || null
+  } catch {
+    return null
+  }
+}
+
 function isImageGallerySourceTask(
   task: BrowserCapabilityTaskHandle | null,
   payload: Record<string, unknown> | null,
@@ -1408,6 +1436,11 @@ async function downloadUrlsToDirectory(
   }
 
   const successCount = results.filter((item) => item.success === true).length
+  // EP2 dogfood gap 4 — tool writes must surface in the file tree
+  // immediately, even for directories the renderer never expanded.
+  if (successCount > 0) {
+    try { broadcastDirectoryChanged([directory]) } catch { /* never break the download result */ }
+  }
   return JSON.stringify({
     directory,
     total: results.length,
@@ -5612,6 +5645,22 @@ export async function executeBrowserTool(
 
       case 'browser_download_urls': {
         const rawUrls = Array.isArray(args.urls) ? args.urls : []
+        // EP2 dogfood gap 1 — keep downloads ON the collection chain: if this
+        // scope already discovered an image gallery, raw URL downloads orphan
+        // the files from the collection card. Redirect to the chained tool;
+        // an explicitly unrelated download passes with the declaration flag.
+        if (args.unrelated_to_collection !== true) {
+          const chained = await findScopeImageGallerySourceTask(controller, sessionId)
+          if (chained) {
+            return JSON.stringify({
+              ok: false,
+              errorCode: 'use_collected_media_download',
+              message: `本会话已有图片采集任务 ${chained.taskId}（已发现 ${mediaUrlsFromVisibleCollectTask(chained).length} 张）。保存这些图片必须用 browser_download_collected_media(source_task_id) 让下载结果回到采集卡；只有与该采集无关的下载才可以传 unrelated_to_collection: true 继续使用本工具。`,
+              sourceTaskId: chained.taskId,
+              suggestedNextTool: 'browser_download_collected_media',
+            }, null, 2)
+          }
+        }
         return await downloadUrlsToDirectory(controller, {
           urls: rawUrls.map((item) => String(item || '')),
           directory: String(args.directory || '~/Documents'),
@@ -5688,10 +5737,43 @@ export async function executeBrowserTool(
         })
         if (output.startsWith('Error:')) return output
         const parsed = JSON.parse(output) as Record<string, unknown>
+        // EP2 dogfood gap 2 — completion must reconcile discovered/saved/
+        // failed/remaining. A page-claimed total (expected_total) that
+        // exceeds the discovered set means undiscovered images remain: this
+        // is PARTIAL, never "完成".
+        const saved = Number(parsed.success || 0)
+        const failed = Number(parsed.failed || 0)
+        const discovered = urls.length
+        const expectedTotal = Number.isFinite(Number(args.expected_total)) && Number(args.expected_total) > 0
+          ? Number(args.expected_total)
+          : null
+        const undiscovered = expectedTotal !== null ? Math.max(0, expectedTotal - discovered) : 0
+        const remaining = undiscovered + Math.max(0, discovered - saved - failed)
+        const completion = remaining > 0 || failed > 0 ? 'partial' : 'complete'
+        // EP2 dogfood gap 3 — downloads flow BACK to the source task so the
+        // collection card's numbers move (saved/failed/remaining visible).
+        try {
+          await (controller as unknown as {
+            recordCollectedMediaDownload?: (taskId: string, summary: Record<string, unknown>) => Promise<unknown>
+          }).recordCollectedMediaDownload?.(sourceTaskId, {
+            discovered, saved, failed, remaining,
+            directory: String(parsed.directory || directory),
+            expectedTotal,
+          })
+        } catch { /* progress write-back must not fail the download result */ }
         return JSON.stringify({
-          ok: Number(parsed.success || 0) > 0,
+          ok: saved > 0,
+          completion,
           sourceTaskId,
-          mediaCandidateCount: urls.length,
+          mediaCandidateCount: discovered,
+          discovered,
+          saved,
+          failedCount: failed,
+          remaining,
+          expectedTotal,
+          guidance: completion === 'partial'
+            ? `已保存已发现的 ${saved} 张${failed > 0 ? `（${failed} 张失败）` : ''}${undiscovered > 0 ? `，页面声称共 ${expectedTotal} 张，仍有 ${undiscovered} 张未发现/未加载——请继续发现后再下载，不要宣告完成` : ''}。`
+            : `已保存全部已发现的 ${saved} 张。`,
           ...parsed,
         }, null, 2)
       }

@@ -29,6 +29,7 @@ export const BrowserDownloadUrlsSchema = z.object({
   filename_prefix: z.string().optional().describe('文件名前缀（可选）'),
   overwrite: z.boolean().optional().describe('同名是否覆盖，默认 false'),
   tab_id: z.string().optional().describe('可选标签页 ID（用于带 Referer 下载）'),
+  unrelated_to_collection: z.boolean().optional().describe('仅当本次下载与本会话的图片采集任务无关时传 true；采集相关的保存必须改用 browser_download_collected_media'),
 })
 
 export const BrowserDownloadCollectedMediaSchema = z.object({
@@ -36,6 +37,7 @@ export const BrowserDownloadCollectedMediaSchema = z.object({
   directory: z.string().describe('目标目录'),
   filename_prefix: z.string().optional().describe('文件名前缀（可选，默认 image）'),
   overwrite: z.boolean().optional().describe('同名是否覆盖，默认 false'),
+  expected_total: z.number().optional().describe('可选：页面声称的图片总数；若已发现数不足，结果会标记 partial 并给出剩余数——不要在 partial 时宣告完成'),
 })
 
 export const BrowserResolveVideoSchema = z.object({
