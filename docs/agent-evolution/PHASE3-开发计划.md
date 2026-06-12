@@ -1,6 +1,6 @@
 # 阶段三开发计划（配套 2026-06-12-agent-evolution-phase3-implementation.md）
 
-> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同 v3 修订中（Codex 三轮复审 4 点回修：A1=055/056、PK1=057、C4 DB 真值 CAS、A2 工具描述同步、C3 账本入口），**复核通过前 A1/PK1 不开工**；遗留轨 R 样本时钟起点=253b6768，且 typedTerminalRuns === totalTerminalRuns（unknown=0）为硬条件。
+> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同 approved v3（2026-06-12 Codex 三轮复审 4 点全 PASS / enforce: true），可按波次开工（A1 先行含 055/056，PK1=057 在 A1 合入后）；遗留轨 R 样本时钟起点=253b6768，且 typedTerminalRuns === totalTerminalRuns（unknown=0）为硬条件。
 
 ## 1. 工单总览
 

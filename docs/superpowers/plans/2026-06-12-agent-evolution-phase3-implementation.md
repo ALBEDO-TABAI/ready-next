@@ -1,7 +1,7 @@
 ---
 title: Agent Evolution 阶段三（组织与维护智能）实施子计划
 date: 2026-06-12
-status: v3 修订（2026-06-12 Codex 三轮复审 2P1/2P2 回修：迁移编号顺序/C4 真值源/卡片路径说明/C3 账本入口），待 Codex 复核后恢复 approved；复核通过前 A1/PK1 不开工
+status: approved v3 — Codex 三轮复审 4 点（2P1/2P2）回修后复核 APPROVED 可 enforce（2026-06-12），逐单施工待启动（A1 含 055/056 连号迁移先行，PK1=057 随后）
 revision_history:
   - v1 (2026-06-12): 初稿；同日 Codex 评审唯一 P1（总则 PK3 依赖 I4 与工单表/波次矛盾）修复（cd558d47）后 APPROVED。
   - v3 (2026-06-12): 吸收 Codex 三轮复审 4 点。P1：①迁移编号与开工顺序对齐——A1 改为 055 agents + 056 owner_agent_id（同单连续两号），PK1 改 057 packet columns，与单执行顺序 A1→PK1 一致且满足编号连续 gate；②C4 删除文件 CAS 主路径——主写入=DB 事务/CAS（user_profiles 画像行与/或 resident_user memory），USER.md 仅 DB 无行时镜像。P2：③A2 同步 memory_write_card 工具描述与 schema 说明（agents/<id>/knowledge 路径底层已允许但提示词仍说只能写全局目录）；④C3 写明维护回合不直接写 terminal run_meta——预算审计走 maintenance metric/log，任何 run_meta 写入必须经既有 finalizer/ledger 入口（runSubAgent 只是事件容器不拥有账本）。
