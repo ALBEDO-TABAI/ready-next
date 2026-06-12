@@ -1,7 +1,7 @@
 # Agent Evolution 阶段四开发计划
 
 > 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。
-> 合同：`docs/superpowers/plans/2026-06-13-agent-evolution-phase4-implementation.md`（**approved v2（2026-06-13 Codex 复审 APPROVED 可 enforce），可按波次开工**）。
+> 合同：`docs/superpowers/plans/2026-06-13-agent-evolution-phase4-implementation.md`（**approved v3 待终核（v2 已 APPROVED；v3 补 index 落点/retired owner 注入/specialist id 小写 slug 三决策），终核放行后开工**）。
 > 阶段三基线：主轨 13 单全部收口（整轮审查零 P1），回归入口 `verify:evolution-p3`。
 
 ## 1. 工单总览（7 单 + 收口）
@@ -55,6 +55,7 @@ B6/E5 无 A 轨依赖，A 轨任何单被评审卡住时可前移。
 
 ## 4. 风险与盯防
 
+0. **三个定死的决策（v3）**：root index.md 只收 global（agent 卡不泄入，无 per-agent index 文件）；retired/merged owner 的后续轮注入降级 global-only（prompt-assembly 解析处查 roster status）；派生 id 强制小写 slug（routing 文件名可读性约束）。
 1. **A 轨最大风险 = 路由误判打扰**：suggest 档是默认，建议条必须可一键忽略；continue 类回原 agent 是硬断言（误路由代价=多走一站，但 continue 断链是真伤害）。
 2. **派生最小化纪律**：种子 RULES 只种证据支持的内容——LLM 产物用户可改且确认前不落盘；知识迁移逐项勾选、文件级可逆。
 3. **B6 不碰拦截语义**：学习回路对硬拦清单零写权；对既有卡（含 active）零自动改写——更新一律产 staged 旁卡（possible-update-of），用户确认才并入。

@@ -1,6 +1,7 @@
 ---
-status: approved v2 — Codex 复审 APPROVED 可 enforce（2026-06-13；一轮 6P1/3P2/3 开放问题全部吸收，复审零残余 P1），逐单施工待启动（建议首单 K-mirror，A 轨 A5 起步）
+status: approved v3 — Codex 追加意见 2P1/1P2 回修后待终核（v2 已 APPROVED；v3 补 index 落点决策 / retired owner 注入决策 / specialist id 字符规则），逐单施工待终核放行（建议首单 K-mirror，A 轨 A5 起步）
 revision_history:
+  - v3 (2026-06-13): 吸收 Codex 追加意见 2P1/1P2。P1①K-mirror index 落点定死——root index.md 只收 global 作用域卡（crystallize 维护回合的 writeIndexFile 唯一写入口与 01 §7b DEFAULT_FILES 合同不变）；agent 卡只参与本作用域 backlink 解析与衰减信号，不产 per-agent index 文件（无读者=幽灵产物，禁止）；红测钉死"agent 卡不泄入 root index.md"。P1②A7 "自然失活"改为显式机制——A2 owner 注入解析在 prompt-assembly 处增加 registry status 查验（复用既有 getAgentRoster dep）：非 active 的 owner 降级 global-only（与"显式非法 id"同一降级语义），老任务聊天历史不受影响、后续轮不再吃 retired 知识；红测钉死。P2 specialist id 字符规则——A6 派生 id 强制小写 slug（^[a-z0-9][a-z0-9._-]*$，与卡片文件名字符集一致，否则 routing-<id>.md 撞 NORMAL_CARD 小写正则永不被 listRoutingCards 读到）；isSafeAgentScopeId 保持宽容兼容存量，新派生收紧。
   - v2 (2026-06-13): 吸收 Codex 一轮评审 6P1/3P2/3 开放问题。P1：①K-mirror 同步必须带作用域（agent 卡 scope_id='agent:<id>'，不得落 'global'）；②backlink/index 构建改 scope-aware（同 slug 跨 agent 不互相计）；③候选卡晋升字段改 stage→emerged（status 联合无 emerged，C5 已立 stage 封闭联合）；④B6 对 active 卡零自动改写——学习产物一律 staged 旁卡/建议卡；⑤A5 routing 卡 triggers 约定完整定义（封闭关键词列表 frontmatter 字段+确定性匹配+冲突兜底+写侧校验）；⑥B6 前置论证补全（只消费失败事实不读 enforce 行为，信源接口点名）。P2：四 gate 点名+迁移连续 gate 进 A6a 验证；共享文件矩阵补 knowledge-index-builder/settings/preload/UI/prompt 资产；计划改"058 被占须先修订合同"。开放问题：B6 信源=resolveCollectionVerdict 产物+CheckInRecord.blockers+工具信封 errorKind 闭集；triggers=关键词列表非正则非向量；A7 非 active agent 卡片自然失活+镜像行保留，无需清扫。
   - v1 (2026-06-13): 初稿。范围=00 路线图阶段四【进化】（A5-A7 / B6 / E-剩余卡类）+ 阶段三收口时用户提出的镜像覆盖缺口（K-mirror）。阶段三主轨 13 单已全部收口（整轮审查零 P1，verify:evolution-p3 绿）。
 owner: 白
@@ -66,8 +67,9 @@ related:
 ### EP4-K-mirror agent 作用域卡进入镜像/衰减/维护信源
 - **缺口（HEAD 取证）**：`belief-card-mirror.ts` 的 `syncBeliefCards` 与 C3 的 `collectBeliefDecaySignals` 都走 `store.listAllCardFiles()`，其默认 `dir='knowledge'` 只扫全局目录——`agents/<id>/knowledge/**` 的卡片能写、能注入（A2 owner 通道），但**不进 DB 镜像、不参与衰减、维护回合看不见**。A6 派生出专项 agent 后，其知识卡会在这三个面上隐形腐烂。
 - **改动文件**：`belief-card-store.ts`（新增 `listAllCardFilesAllScopes(): Array<{ relPath, card, scopeId }>`——全局 `knowledge/` 产 `scopeId: 'global'`，枚举 `agents/<id>/knowledge/` 产 `scopeId: 'agent:<id>'`；agent 目录枚举须经 `isSafeAgentScopeId` 过滤，复用既有 walk）、`belief-card-mirror.ts`（`syncBeliefCards` 改走全作用域枚举并**把作用域写穿 upsert 的 `scopeId` 参数**——HEAD 取证：`upsertBeliefCardMirror` 的 `scope_id` 默认 `'global'`（:87），不传则 agent 卡会被镜像成 global，违反 04 §2 的 `scope_id='agent:{agentId}'` 口径）、`knowledge-index-builder.ts` 与 `collectBeliefDecaySignals`（**backlink/index 构建改 scope-aware**——HEAD 取证：`slugOf` 取 basename 且 `bySlug` 是全局 map，两个 agent 同名 slug 会跨作用域串联；改为按 scopeId 分桶解析，`[[slug]]` 只在本作用域内成边，全局卡仍在 global 桶内互链）、新增 `src/__tests__/agent-scope-card-coverage.test.ts`
+- **index 落点决策（定死）**：**root `index.md` 只收 global 作用域卡**——crystallize 维护回合的 `writeIndexFile` 唯一写入口（`crystallize-gate.ts` :87，01 §7b DEFAULT_FILES 合同）与其落点保持不变；agent 作用域卡**只参与本作用域的 backlink 解析与衰减信号**，**不产 per-agent index 文件**（当前没有任何读者——写得出读不到的幽灵产物被本仓库纪律禁止；未来若 per-agent 知识索引注入需要 index 文件，另立单）。喂给 index-builder 的输入按 scopeId 分桶后，**只有 global 桶进 root index.md 渲染**。
 - **实施要点**：存量零感知——无 `agents/` 目录时行为 = 现状（global 桶单桶 = 现行为）；镜像/衰减对 agent 卡的处理规则与全局卡一致（无特殊路径），差异只有 scope_id 与 backlink 命名空间；**读 API 的 staged 排除与注入面规则不变**（本单只扩扫描，不动注入）。
-- **测试（先红）**：agent 作用域卡出现在 mirror 同步结果且 `scope_id='agent:<id>'`、`file_path` 携作用域前缀（global 卡仍 `'global'`）；**两个 agent 各有同名 slug 卡时互不计 backlink**（红测钉死）；衰减信号含 agent 卡且 backlink 按作用域计；无 agents 目录回退现状；staged agent 卡仍被注入面排除（回归断言）。
+- **测试（先红）**：agent 作用域卡出现在 mirror 同步结果且 `scope_id='agent:<id>'`、`file_path` 携作用域前缀（global 卡仍 `'global'`）；**两个 agent 各有同名 slug 卡时互不计 backlink**（红测钉死）；**agent 卡不泄入 root index.md（红测钉死）**；衰减信号含 agent 卡且 backlink 按作用域计；无 agents 目录回退现状；staged agent 卡仍被注入面排除（回归断言）。
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/agent-scope-card-coverage.test.ts src/__tests__/belief-card-mirror.test.ts src/__tests__/knowledge-index-builder.test.ts src/__tests__/maintenance-llm-round.test.ts && npm run typecheck`
 - **规模**：~200 行。
 
@@ -84,9 +86,9 @@ related:
 - **规模**：~290 行。
 
 ### EP4-A6a AgentFactory 派生数据层（迁移 058 + 种子 RULES + 迁移清单）
-- **改动文件**：`migrations.ts`（**058**：`agents` 表 ALTER ADD `parent_agent_id` TEXT + `derivation_reason` TEXT——04 §2 schema 补全，名称隔离幂等）、`agent-registry-repository.ts`（create 携双新列；mapRow 回读；NULL 兼容）、新增 `agent-control/agents/agent-factory.ts`（`deriveSpecialistAgent(input)` 六步流程的**数据层**：①agents 表插 specialist 行（id 形状经 `isSafeAgentScopeId`、derivation_reason 指向候选卡 slug）→ ②建 `agents/<id>/knowledge/` 骨架 → ③种子 RULES：提示词资产 `assets/prompts/derivation/seed-rules.md`（X3，信源=候选卡证据+相关 CheckIn 摘要，**摘要不全文**），单次有界 LLM 调用经钉死 `runSubAgent` 容器（C3 四决策范式：取消=abortSignal/审计=metric 单行/错误=breadcrumb），产物先返回给确认 UI（用户可改），**确认前不落盘** → ④知识迁移清单**构建**（从主 agent 作用域按候选卡域筛选相关卡，列 relPath+title 清单，**只列不动**）→ ⑤routing 卡内容构建（含 `triggers:` 行——条件/目标/主 agent 保留什么/转办要带什么）→ ⑥候选卡 **`stage` → `emerged`**（C5 封闭联合 hint|candidate|emerged|routed|retired；**`status` 字段保持 staged/active 生命周期不动**——status 联合里不存在 emerged，写错字段=测试红）的写封装（经 store 校验））、新增 `src/__tests__/agent-factory.test.ts`
+- **改动文件**：`migrations.ts`（**058**：`agents` 表 ALTER ADD `parent_agent_id` TEXT + `derivation_reason` TEXT——04 §2 schema 补全，名称隔离幂等）、`agent-registry-repository.ts`（create 携双新列；mapRow 回读；NULL 兼容）、新增 `agent-control/agents/agent-factory.ts`（`deriveSpecialistAgent(input)` 六步流程的**数据层**：①agents 表插 specialist 行——**派生 id 强制小写 slug：`^[a-z0-9][a-z0-9._-]*$`**（比 `isSafeAgentScopeId` 更严：与卡片文件名字符集一致，否则 `routing-<id>.md` 含大写会撞 NORMAL_CARD 小写正则、永远不被 `listRoutingCards()` 读到；`isSafeAgentScopeId` 保持宽容兼容存量 id，新派生在 factory 入口收紧并对外拒绝大写）、derivation_reason 指向候选卡 slug→ ②建 `agents/<id>/knowledge/` 骨架 → ③种子 RULES：提示词资产 `assets/prompts/derivation/seed-rules.md`（X3，信源=候选卡证据+相关 CheckIn 摘要，**摘要不全文**），单次有界 LLM 调用经钉死 `runSubAgent` 容器（C3 四决策范式：取消=abortSignal/审计=metric 单行/错误=breadcrumb），产物先返回给确认 UI（用户可改），**确认前不落盘** → ④知识迁移清单**构建**（从主 agent 作用域按候选卡域筛选相关卡，列 relPath+title 清单，**只列不动**）→ ⑤routing 卡内容构建（含 `triggers:` 行——条件/目标/主 agent 保留什么/转办要带什么）→ ⑥候选卡 **`stage` → `emerged`**（C5 封闭联合 hint|candidate|emerged|routed|retired；**`status` 字段保持 staged/active 生命周期不动**——status 联合里不存在 emerged，写错字段=测试红）的写封装（经 store 校验））、新增 `src/__tests__/agent-factory.test.ts`
 - **实施要点**：本单**不含任何 UI 与采纳判定**——所有写动作由 A6b 的用户确认回调触发；factory 各步幂等（重复派生同 id 拒绝）；迁移清单与卡片移动是文件级 rename（可逆，目标路径过 `isAllowedCardPath`）；最小化创建（只种证据支持的内容，禁占位文本）。
-- **测试（先红）**：迁移 058 幂等按名隔离 + registry 双列往返；factory 六步在 fake 确认回调下逐步可断言；种子 RULES 经 fake LLM 单次调用且摘要信源；迁移清单只列不动；重复 id 拒绝；stage→emerged 经 store 校验且 **status 字段不被写成 candidate/emerged（守卫断言）**。
+- **测试（先红）**：迁移 058 幂等按名隔离 + registry 双列往返；factory 六步在 fake 确认回调下逐步可断言；种子 RULES 经 fake LLM 单次调用且摘要信源；迁移清单只列不动；重复 id 拒绝；**大写/非法 slug 的派生 id 在 factory 入口被拒（红测：routing 文件名可读性约束）**；stage→emerged 经 store 校验且 **status 字段不被写成 candidate/emerged（守卫断言）**。
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/agent-factory.test.ts src/__tests__/migration-agents-table.test.ts && node scripts/check-migration-numbering-sequential.cjs && npm run verify:native && npm run typecheck`
 - **规模**：~300 行。
 
@@ -99,8 +101,10 @@ related:
 
 ### EP4-A7 退休/合并流程 + agent 列表管理 UI
 - **改动文件**：`agent-registry-repository.ts`（`updateStatus(id, 'retired'|'merged', { mergedIntoAgentId? })`——生命周期状态机：active→retired/merged 单向，主 agent 行禁退；merged 须携合法目标）、生命周期执行器（C5 修剪建议卡 → 用户确认 → status 变更 + 资产目录**保留**；merged 时知识卡可选择性并入目标 agent（复用 A6a 迁移清单机制，逐项确认）；建议卡核销（staged 修剪卡 → rejected/处理标记））、agent 列表管理 UI（扩展 PersonalityEditor：agents 实体与 persona 编辑**同屏不同区**——列表行：name/charter/status/派生来源/最近流量；操作仅限"确认退休/确认合并"，§7 最小闭环）、retired/merged agent 的运行时排除（A3 charter 注入、A5 路由、A4 handoff 目标校验已各自过滤非 active——补回归断言）、新增 `src/__tests__/agent-lifecycle.test.ts`
-- **实施要点**：Retirement 不是创建的前置；资产目录永不删除（文件真值源纪律）；所有变更经确认、可观测（metric 单行）。**非 active agent 的作用域卡片自然失活，无需清扫**——A2 注入只在 owner=该 agent 的任务轮读其目录，而 A5 路由/A4 handoff 均排除非 active agent，故不再产生新 owner 任务；K-mirror 镜像行保留（scope_id 仍可审计），merged 的可选并入走迁移清单逐项确认。
-- **测试（先红）**：状态机矩阵（合法/非法迁移、主 agent 禁退、merged 目标校验）；确认前零写动作；retired agent 从路由/handoff/charter 注入消失（三面回归断言）；合并迁移逐项确认；资产目录保留。
+- **retired/merged owner 注入决策（定死，"自然失活"不成立——HEAD 取证：prompt-assembly 的 injectionOwner 解析（:992 附近）只看 ownerAgentId/scope.agent 不查 agents 表状态，老任务带 retired owner 仍会吃到 retired 知识）**：选择**注入失效**口径——A2 owner 解析处增加 registry status 查验（复用 A3 既有 `getAgentRoster` dep，零新依赖）：owner 解析到的 id 在 roster 中不存在或非 active → **降级 global-only**（与"显式非法 id"同一降级语义与同一代码路径）。老任务的聊天历史与已落账消息不受影响；后续轮不再注入 retired agent 的 RULES/knowledge。merged 的可选并入走迁移清单逐项确认（并入后以目标 agent 作用域生效）。
+- **实施要点**：Retirement 不是创建的前置；资产目录永不删除（文件真值源纪律）；所有变更经确认、可观测（metric 单行）；K-mirror 镜像行保留（scope_id 仍可审计）。
+- **改动文件补充**：`prompt-assembly.ts`（injectionOwner 解析处 status 查验——单内 additive，复用 getAgentRoster）。
+- **测试（先红）**：状态机矩阵（合法/非法迁移、主 agent 禁退、merged 目标校验）；确认前零写动作；retired agent 从路由/handoff/charter 注入消失（三面回归断言）；**带 retired owner 的老任务后续轮注入降级 global-only（红测钉死，第四面）**；合并迁移逐项确认；资产目录保留。
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/agent-lifecycle.test.ts src/__tests__/agent-routing-injection.test.ts src/__tests__/agent-handoff-proposal.test.ts && npm run typecheck`
 - **规模**：~300 行。
 
@@ -145,7 +149,7 @@ related:
 | agent 作用域卡进入镜像/衰减/维护信源；无 agents 目录回退现状 | K-mirror |
 | continue 类回原 agent；routing 卡命中走先例；off 档零行为变化 | A5 |
 | 候选卡 → 确认 → 新 agent 可用且路由卡生效；无确认自动派生 = 0；迁移清单可逆 | A6a/A6b |
-| 生命周期 active→retired/merged 仅经用户确认；资产目录保留；三注入/路由面排除非 active | A7 |
+| 生命周期 active→retired/merged 仅经用户确认；资产目录保留；路由/handoff/charter/owner 注入四面排除非 active | A7 |
 | 注入一次登录墙失败 → staged 站点卡/旁卡产生；active 卡零自动改写；风险等级无确认不变更 | B6 |
 | 三类卡 fixture 信号正确产出 evidence 完整；受保护路径不出卡面 | E5 |
 | 完整飞轮：重复模式 → 候选 → 用户确认 → 专项 agent → 越用越准 | A5+A6+C5（跨阶段） |

@@ -199,7 +199,7 @@ export class BeliefCardStore {
     const relPath = input.relPath.replace(/\\/g, '/')
     if (!isAllowedCardPath(relPath)) {
       this.auditFn({ action: 'reject_path', relPath, reason: 'not in write whitelist' })
-      return { ok: false, reason: 'path not allowed (must be knowledge/*.md, knowledge/sites/*.md, or agents/<agentId>/knowledge/*.md)' }
+      return { ok: false, reason: 'path not allowed (must be knowledge/*.md, knowledge/sites/*.md, or agents/<agentId>/knowledge/[sites/]*.md)' }
     }
     const isSite = isSiteCardPath(relPath)
     const fmCheck = validateFrontmatter(input.frontmatter as unknown as Record<string, string>, isSite)
