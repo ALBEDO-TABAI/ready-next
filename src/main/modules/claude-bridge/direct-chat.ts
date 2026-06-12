@@ -5,6 +5,7 @@
  */
 
 import { EventEmitter } from 'events'
+import { wrapRunMetaRepositoryWithCloseoutSnapshot } from '../agent-control/task-projection/run-meta-snapshot'
 import { randomUUID } from 'crypto'
 import { existsSync } from 'fs'
 import { AIModelConfig, getProviderDef, normalizeAIConfig, resolveAIConfigCapabilities } from '../../../shared/ai-providers'
@@ -560,11 +561,29 @@ export class DirectChatEngine extends EventEmitter {
     update(runId: string, patch: Record<string, unknown>): unknown
   } | null {
     try {
-      return (this.runtime?.getRunMetaRepository?.() || null) as {
+      const repository = (this.runtime?.getRunMetaRepository?.() || null) as {
         get(runId: string): unknown | null
         create(input: Record<string, unknown>): unknown
         update(runId: string, patch: Record<string, unknown>): unknown
       } | null
+      if (!repository) return null
+      // EP2 P0-5 follow-up — the SAME close-out snapshot protection as the
+      // Agent SDK path: DirectChat runs enter the Q4b sample (run_close),
+      // so task_type/budget must come from the projection here too.
+      return wrapRunMetaRepositoryWithCloseoutSnapshot(
+        repository,
+        (taskId) => this.runtime?.getTaskProjection?.(taskId) ?? null,
+      )
+    } catch {
+      return null
+    }
+  }
+
+  /** EP2 P0-5 follow-up — projection store for shadow adjudication +
+   *  effective-task-fact resolution on the DirectChat finalize path. */
+  private getTaskProjectionStoreForFinalize() {
+    try {
+      return this.runtime?.getTaskProjectionStoreForFinalize?.() ?? null
     } catch {
       return null
     }
@@ -1161,6 +1180,7 @@ export class DirectChatEngine extends EventEmitter {
           projectionPatch: null,
         }, {
           runMetaRepository: this.getRunMetaRepositoryForFinalize(),
+          taskProjectionStore: this.getTaskProjectionStoreForFinalize(),
           writeProjectionTerminalPatch: (projectionPatch) => {
             emitOutputForRun('', 'done', { projectionPatch })
             emitStatusForRun('cancelled', terminalReason)
@@ -1206,6 +1226,7 @@ export class DirectChatEngine extends EventEmitter {
         projectionPatch: null,
       }, {
         runMetaRepository: this.getRunMetaRepositoryForFinalize(),
+        taskProjectionStore: this.getTaskProjectionStoreForFinalize(),
         writeProjectionTerminalPatch: (projectionPatch) => {
           emitOutputForRun('', 'done', { projectionPatch })
           emitStatusForRun('error', 'persistence_failed')

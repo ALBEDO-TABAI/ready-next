@@ -179,6 +179,41 @@ function buildResponseSegmentMeta(scopeId: string, scope: ConversationScope | nu
   }
 }
 
+/**
+ * EP2 P0-2 follow-up — the REAL send path creates the reply message BEFORE
+ * the first chunk arrives, so the live cache may have no twin yet: a bare
+ * append would no-op and the segment would never be cached (Codex gap 1).
+ * Upsert with the ACCUMULATED buffer so the cache entry always carries the
+ * full text so far. Exported for the real-chain regression test.
+ */
+export function upsertStreamedSegmentCache(
+  state: {
+    scopeLiveMessages?: Record<string, AgentMessage[]>
+    appendToScopeLiveMessage: (scopeId: string, messageId: string, chunk: string) => void
+    appendScopeLiveMessage: (scopeId: string, message: AgentMessage) => void
+  },
+  scopeId: string,
+  messageId: string,
+  chunk: string,
+  accumulated: string,
+  agent: string,
+): void {
+  const cachedTwin = (state.scopeLiveMessages?.[scopeId] || [])
+    .some((item) => item.id === messageId)
+  if (cachedTwin) {
+    state.appendToScopeLiveMessage(scopeId, messageId, chunk)
+    return
+  }
+  state.appendScopeLiveMessage(scopeId, {
+    id: messageId,
+    agent,
+    content: accumulated,
+    type: 'agent',
+    timestamp: new Date(),
+    meta: { transient: true },
+  })
+}
+
 export function syncActiveScopeRunAliases(
   state: Pick<{ currentScopeId: string | null; scopeRunStates: Record<string, ScopeRunState> }, 'currentScopeId' | 'scopeRunStates'>,
 ): Pick<{ isStreaming: boolean; foregroundBusy: boolean; composerLocked: boolean; toolTrace: ScopeRunState['toolTrace']; toolTraceStatus: 'idle' | 'running' | 'done' | 'error' | 'cancelled' }, 'isStreaming' | 'foregroundBusy' | 'composerLocked' | 'toolTrace' | 'toolTraceStatus'> {
@@ -630,7 +665,7 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
           ))
         }
       } else if (targetResponseMessageId) {
-        currentState.appendToScopeLiveMessage(scopeId, targetResponseMessageId, data.chunk)
+        upsertStreamedSegmentCache(currentState, scopeId, targetResponseMessageId, data.chunk, nextBuffer, data.agent)
         if (
           scopeId === currentState.currentScopeId &&
           currentState.messages.some((item: AgentMessage) => item.id === targetResponseMessageId)

@@ -92,3 +92,53 @@ test('cache isolation: scopes never see each other\'s live segments', async () =
   const ids = useAgent.getState().messages.map((message) => message.id)
   assert.ok(!ids.includes('seg-a'), 'scope-b never renders scope-a live segments')
 })
+
+// ---------- Codex gap 1: REAL send-path chain ----------
+
+test('real chain: send creates empty reply → first chunk seeds the cache → switch away/back keeps text and tool trace', async () => {
+  const { upsertStreamedSegmentCache } = await import('../renderer/modules/agent/runtimeDriver')
+
+  // the real send path: an EMPTY assistant reply exists in messages and the
+  // run state carries its id — the live cache has NO twin yet
+  const replyId = 'reply-real-1'
+  useAgent.setState((state: any) => ({
+    messages: [...state.messages, { id: replyId, agent: 'butler', content: '', type: 'agent', timestamp: new Date('2026-06-12T11:00:00.000Z'), meta: { transient: true } }],
+    sessions: {
+      'sess-a': {
+        ...(state.sessions['sess-a'] || {}),
+        conversationId: 'scope-a',
+        messages: [],
+        scopeRunStates: {
+          'scope-a': {
+            scopeId: 'scope-a', agent: 'butler', requestId: 'run-1', phase: 'responding',
+            toolTrace: [{ tool: 'web_search', status: 'done' }],
+            startedAt: '2026-06-12T11:00:00.000Z', updatedAt: '2026-06-12T11:00:01.000Z',
+            latestText: '', module: null, intent: null, executionKind: null,
+            responseMessageId: replyId, responseBuffer: '',
+          },
+        },
+      },
+    },
+    activeSessionId: 'sess-a',
+  } as never))
+
+  // first chunk arrives: previously a bare append would NO-OP (no cache twin)
+  upsertStreamedSegmentCache(useAgent.getState() as never, 'scope-a', replyId, '第一段', '第一段', 'butler')
+  // second chunk: twin exists now → append path
+  upsertStreamedSegmentCache(useAgent.getState() as never, 'scope-a', replyId, '，第二段', '第一段，第二段', 'butler')
+  const cached = (useAgent.getState().scopeLiveMessages['scope-a'] || []).find((m: { id: string }) => m.id === replyId) as { content: string } | undefined
+  assert.equal(cached?.content, '第一段，第二段', 'first chunk seeded the cache; later chunks appended')
+
+  // switch to B, then back to A — text must still be visible
+  await useAgent.getState().loadScope('scope-b')
+  await useAgent.getState().loadScope('scope-a')
+  const visible = useAgent.getState().messages.find((m) => m.id === replyId)
+  assert.equal(visible?.content, '第一段，第二段', 'in-flight reply text survives the round trip')
+
+  // tool trace lives in the per-scope run state and is restored by loadScope
+  const sessions = (useAgent.getState() as never as { sessions: Record<string, { scopeRunStates?: Record<string, { toolTrace?: unknown[] }> }> }).sessions
+  const restored = Object.values(sessions)
+    .map((slice) => slice?.scopeRunStates?.['scope-a'])
+    .find(Boolean)
+  assert.equal(restored?.toolTrace?.length, 1, 'tool trace preserved across the switch (task cards consume main projections)')
+})

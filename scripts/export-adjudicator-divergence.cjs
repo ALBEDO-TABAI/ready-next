@@ -39,6 +39,7 @@ const rows = []
 const taskTypes = {}            // coverage: ALL terminal runs (run_close rows) — P0-4
 const divergenceTaskTypes = {}  // divergence rows only, reported separately
 let totalTerminalRuns = 0
+let typedTerminalRuns = 0
 for (const line of readFileSync(file, 'utf-8').split('\n')) {
   const trimmed = line.trim()
   if (!trimmed) continue
@@ -49,8 +50,11 @@ for (const line of readFileSync(file, 'utf-8').split('\n')) {
   if (event.metric === 'run_close') {
     totalTerminalRuns += 1
     if (event.taskType) {
+      typedTerminalRuns += 1
       const key = String(event.taskType)
       taskTypes[key] = (taskTypes[key] ?? 0) + 1
+    } else {
+      taskTypes.unknown = (taskTypes.unknown ?? 0) + 1
     }
     continue
   }
@@ -72,4 +76,4 @@ for (const line of readFileSync(file, 'utf-8').split('\n')) {
   divergenceTaskTypes[key] = (divergenceTaskTypes[key] ?? 0) + 1
 }
 
-console.log(JSON.stringify({ count: rows.length, totalTerminalRuns, taskTypes, divergenceTaskTypes, rows }, null, 2))
+console.log(JSON.stringify({ count: rows.length, totalTerminalRuns, typedTerminalRuns, taskTypes, divergenceTaskTypes, rows }, null, 2))
