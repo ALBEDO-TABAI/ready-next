@@ -102,3 +102,56 @@ test('red lines 2+6: the closed write-surface gate is green (third-party paths c
   const output = execFileSync('node', ['scripts/check-authorization-fact-writes.cjs'], { encoding: 'utf-8' })
   assert.match(output, /check-authorization-fact-writes: ok/)
 })
+
+test('write entry 2 reachability: the M3 card session option mints the grant; plain confirm mints nothing', async () => {
+  __clearAuthorizationFactsForTests()
+  const { runFrozenCallConfirmation, FROZEN_CALL_QUESTION_ID, FROZEN_CALL_CONFIRM_OPTION, FROZEN_CALL_SESSION_CONFIRM_OPTION } =
+    await import('../main/modules/agent-control/safety/frozen-call-confirmation')
+  const { FrozenCallStore } = await import('../main/modules/agent-control/safety/frozen-call-store')
+  const { getAskUserQuestionsStore } = await import('../main/modules/tools/builtins/ask-user-questions-store')
+
+  const fakeDb = () => ({
+    prepare: (sql: string) => ({
+      run: () => undefined,
+      get: () => undefined,
+      all: () => [],
+    }),
+  })
+
+  async function confirmVia(option: string, sessionId: string) {
+    const store = new FrozenCallStore(fakeDb() as never)
+    const pending = runFrozenCallConfirmation('feishu_message_send', { chat_id: 'oc_team' }, {
+      mode: 'M3', action: 'confirm', ruleId: 'm3-send-external', designRef: 'x', reason: 'r',
+    } as never, {
+      store,
+      sessionId,
+      conversationId: sessionId,
+      scopeId: 'scope-grant',
+      timeoutMs: 5000,
+      sessionEffectiveGrant: { actionCategory: 'send_external', objectRef: 'oc_team' },
+    } as never)
+    // wait until the card registers, then answer
+    const askStore = getAskUserQuestionsStore()
+    for (let i = 0; i < 50 && !askStore.findPendingForSession(sessionId); i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    const card = askStore.findPendingForSession(sessionId)
+    if (!card) throw new Error('confirmation card never registered')
+    const options = (card as unknown as { questions: Array<{ options: string[] }> }).questions[0].options
+    if (!options.includes(FROZEN_CALL_SESSION_CONFIRM_OPTION)) {
+      throw new Error('M3 card must offer the session-effective option')
+    }
+    askStore.resolve(card.cardId, { answers: [{ id: FROZEN_CALL_QUESTION_ID, answer: option }], answeredAt: Date.now() })
+    return pending
+  }
+
+  // plain confirm: released, NO grant minted (default 仅此一次)
+  const plain = await confirmVia(FROZEN_CALL_CONFIRM_OPTION, 'reach-plain')
+  assert.equal(plain.kind, 'released')
+  assert.equal(consumeAuthorizationFact({ scopeId: 'scope-grant', actionCategory: 'send_external', objectRef: 'oc_team' }), false)
+
+  // session option: released AND the grant is consumable afterwards
+  const session = await confirmVia(FROZEN_CALL_SESSION_CONFIRM_OPTION, 'reach-session')
+  assert.equal(session.kind, 'released')
+  assert.equal(consumeAuthorizationFact({ scopeId: 'scope-grant', actionCategory: 'send_external', objectRef: 'oc_team' }), true)
+})

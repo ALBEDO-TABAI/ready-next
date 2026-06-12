@@ -334,6 +334,19 @@ function m3ObjectRefOf(ruleId: string, args: Record<string, unknown>): string | 
   return null // login: page identity not present in args (known boundary)
 }
 
+/** EP2-I-auth — the grant candidate a session-effective confirmation would
+ *  mint for an M3 rule (null = rule has no canonical object in args; the
+ *  card then offers no session-effective option). */
+export function m3GrantCandidateOf(
+  ruleId: string,
+  args: Record<string, unknown>,
+): { actionCategory: AuthActionCategory; objectRef: string } | null {
+  const category = M3_RULE_CATEGORY[ruleId]
+  if (!category) return null
+  const objectRef = m3ObjectRefOf(ruleId, args)
+  return objectRef ? { actionCategory: category, objectRef } : null
+}
+
 export function resolveConfirmationGate(
   toolName: string,
   args: Record<string, unknown>,

@@ -44,6 +44,8 @@ import {
 export const FROZEN_CALL_QUESTION_ID = 'frozen_call_confirm'
 export const FROZEN_CALL_CONFIRM_OPTION = '确认执行'
 export const FROZEN_CALL_DENY_OPTION = '取消'
+/** EP2-I-auth — offered ONLY when an M3 grant candidate exists (M2 never). */
+export const FROZEN_CALL_SESSION_CONFIRM_OPTION = '确认（本次会话内同对象免再确认）'
 
 const METRIC_FROZEN_CALL_RELEASED = 'frozen_call_released'
 const METRIC_FROZEN_CALL_DENIED = 'frozen_call_denied'
@@ -134,7 +136,9 @@ export async function runFrozenCallConfirmation(
     id: FROZEN_CALL_QUESTION_ID,
     question: `确认执行 ${toolName}：${auditSummary}。风险：${decision.reason}（${decision.mode}，参数指纹 ${fingerprint}）`,
     kind: 'single_choice' as const,
-    options: [FROZEN_CALL_CONFIRM_OPTION, FROZEN_CALL_DENY_OPTION],
+    options: deps.sessionEffectiveGrant
+      ? [FROZEN_CALL_CONFIRM_OPTION, FROZEN_CALL_SESSION_CONFIRM_OPTION, FROZEN_CALL_DENY_OPTION]
+      : [FROZEN_CALL_CONFIRM_OPTION, FROZEN_CALL_DENY_OPTION],
   }
 
   let answer: string | null = null
@@ -168,7 +172,7 @@ export async function runFrozenCallConfirmation(
     return { kind: 'expired', frozenCallId: frozen.id, reason }
   }
 
-  if (answer === FROZEN_CALL_CONFIRM_OPTION) {
+  if (answer === FROZEN_CALL_CONFIRM_OPTION || answer === FROZEN_CALL_SESSION_CONFIRM_OPTION) {
     const released = deps.store.release(frozen.id, frozen.token)
     if (!released.ok) {
       // Confirmed too late (TTL elapsed / state raced) — never execute.
@@ -189,7 +193,7 @@ export async function runFrozenCallConfirmation(
       paramsSha256: frozen.paramsSha256,
     })
     if (deps.taskId && deps.appendProof) deps.appendProof(deps.taskId, `frozen:${frozen.id}|released`)
-    if (deps.sessionEffectiveGrant && deps.scopeId) {
+    if (answer === FROZEN_CALL_SESSION_CONFIRM_OPTION && deps.sessionEffectiveGrant && deps.scopeId) {
       recordConfirmationGrant({
         scopeId: deps.scopeId,
         actionCategory: deps.sessionEffectiveGrant.actionCategory,

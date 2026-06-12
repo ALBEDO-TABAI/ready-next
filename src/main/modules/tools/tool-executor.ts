@@ -21,7 +21,7 @@ import {
   checkSkillToolAuthorization,
   type SkillToolAuthorization,
 } from '../agent-control/skills/skill-tool-authorization'
-import { resolveConfirmationGate } from '../agent-control/safety/action-confirmation-policy'
+import { resolveConfirmationGate, m3GrantCandidateOf } from '../agent-control/safety/action-confirmation-policy'
 import { matchToolNegationFamily } from '../agent-control/safety/negation-state'
 import { createTaskProofSink, collectTaskEventProof } from '../agent-control/quality/proof-collector'
 import type { FollowupNegationFamily } from '../../../shared/agent-followup-intent'
@@ -422,6 +422,11 @@ async function executeToolCallInner(
         signal: context.abortSignal,
         emitCard: getAskUserQuestionsCardEmitter(),
         persistCard: getAskUserQuestionsCardPersistor(),
+        // EP2-I-auth — M3 rules offer the session-effective option; choosing
+        // it mints the confirmation grant (write entry 2). M2 never offers.
+        sessionEffectiveGrant: confirmation.mode === 'M3'
+          ? m3GrantCandidateOf(confirmation.ruleId, args)
+          : null,
         // EP2-Q4a — confirmation audit events become task_event proofs.
         appendProof: (taskId, ref) => {
           try {

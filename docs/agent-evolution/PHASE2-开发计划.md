@@ -78,7 +78,7 @@
   G2 收口（verify:evolution-p2、CLAUDE/AGENTS 同步、08 表 P 系列核销、阶段门核对）
 ```
 
-单执行者建议顺序：Q1 → K3 → C1 → I1 → T4-3 → C2 → Q2 → Q3 → X1b → T1 → E1 → K4 → C6 → I2 → Q4a → T2 → K6 →（shadow 期偏差复核）→ Q4b → I-auth → Q5 → T3 → X2 → E2 → Q6 → G2。
+单执行者实际顺序（已执行）：Q1 → K3 → C1 → I1 → T4-3 → C2 → Q2 → Q3 → X1b → T1 → E1 → K4 → C6 → I2 → Q4a → T2 → K6 → **I-auth（前置仅 I-auth-D+I2，已提前于 Q4b 完成）** →（shadow 期偏差复核，进行中）→ Q4b → Q5 → T3 → X2 → E2 → Q6 → G2。
 
 ## 3. 开关与灰度
 
