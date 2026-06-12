@@ -150,18 +150,21 @@ test('export script reports divergence rows and terminal-run sample size from a 
   try {
     const log = join(dir, 'metrics.log')
     const lines = [
-      { at: '2026-06-12T10:00:00.000Z', metric: 'run_close', runId: 'r1' },
+      { at: '2026-06-12T10:00:00.000Z', metric: 'run_close', runId: 'r1', taskType: 'direct_answer' },
       { at: '2026-06-12T10:01:00.000Z', metric: 'adjudicator_shadow_divergence', runId: 'r1', taskId: 't1', taskType: 'short_task', verdict: 'reject', actualStatus: 'done', proofCount: 0 },
       { at: '2026-06-10T10:00:00.000Z', metric: 'adjudicator_shadow_divergence', runId: 'r0', taskType: 'research', verdict: 'reject' }, // before --since
       'not json at all',
-      { at: '2026-06-12T11:00:00.000Z', metric: 'run_close', runId: 'r2' },
+      { at: '2026-06-12T11:00:00.000Z', metric: 'run_close', runId: 'r2', taskType: 'research' },
     ]
     writeFileSync(log, lines.map((line) => typeof line === 'string' ? line : JSON.stringify(line)).join('\n'), 'utf-8')
     const output = execFileSync('node', ['scripts/export-adjudicator-divergence.cjs', '--since', '2026-06-12T00:00:00.000Z', '--file', log], { encoding: 'utf-8' })
     const report = JSON.parse(output)
     assert.equal(report.count, 1)
     assert.equal(report.totalTerminalRuns, 2)
-    assert.deepEqual(report.taskTypes, { short_task: 1 })
+    // P0-4: coverage comes from run_close rows (the real sample), NOT from
+    // divergence rows — divergence types are reported separately
+    assert.deepEqual(report.taskTypes, { direct_answer: 1, research: 1 })
+    assert.deepEqual(report.divergenceTaskTypes, { short_task: 1 })
     assert.equal(report.rows[0].disposition, null, 'disposition column ready for the Q4b review')
   } finally {
     rmSync(dir, { recursive: true, force: true })
@@ -171,4 +174,53 @@ test('export script reports divergence rows and terminal-run sample size from a 
 test('both funnel gates stay green', () => {
   execFileSync('node', ['scripts/check-run-finalize-funnel.cjs'], { encoding: 'utf-8' })
   execFileSync('node', ['scripts/check-checkin-funnel.cjs'], { encoding: 'utf-8' })
+})
+
+// ---------- Codex P0-3/P0-4: effective task facts + close-metric taskType ----------
+
+test('P0-3: adjudication judges the EFFECTIVE task facts — terminal patch taskType wins over the stale projection row', async () => {
+  const events: AgentMetricEvent[] = []
+  __setMetricSinkForTests((event) => events.push(event))
+  try {
+    // stale row: first-build default short_task; the terminal patch carries the real type
+    const store = fakeStore({ taskId: 'task-effective', taskType: 'short_task' as never, proofRefs: [] })
+    await finalizeRunOutcome({
+      kind: 'done', runId: 'run-eff', taskId: 'task-effective', scopeId: 's1',
+      durationMs: 10, toolCallsUsed: 0, initiator: 'done', finalText: '这就是答案。',
+      projectionPatch: { taskType: 'direct_answer', module: 'system' },
+    }, {
+      writeRunCloseMetric: () => {},
+      taskProjectionStore: store,
+      now: () => NOW,
+    })
+    const checkins = store.rows.get('task-effective')!.checkins as CheckInRecord[]
+    assert.equal(checkins[0].verdict, 'accept',
+      'direct_answer judged by its own criteria (digest proof suffices) — not by the stale short_task row')
+    assert.equal(events.filter((event) => event.metric === 'adjudicator_shadow_divergence').length, 0)
+  } finally {
+    __setMetricSinkForTests(null)
+  }
+})
+
+test('P0-4: run_close metric carries the effective taskType for coverage accounting', async () => {
+  const closes: Array<Record<string, unknown>> = []
+  const store = fakeStore({ taskId: 'task-close', taskType: 'short_task' as never, proofRefs: [collectToolResultProof('t', 'ok', NOW)] })
+  await finalizeRunOutcome({
+    kind: 'done', runId: 'run-close-1', taskId: 'task-close', scopeId: 's1',
+    durationMs: 10, toolCallsUsed: 1, initiator: 'done', finalText: 'ok',
+    projectionPatch: { taskType: 'multi_step_task' },
+  }, {
+    writeRunCloseMetric: (metric) => closes.push(metric as unknown as Record<string, unknown>),
+    taskProjectionStore: store,
+    now: () => NOW,
+  })
+  assert.equal(closes[0].taskType, 'multi_step_task', 'close metric reports the effective type')
+
+  // no projection store wired → metric still emits, taskType null (legacy callers)
+  const bare: Array<Record<string, unknown>> = []
+  await finalizeRunOutcome({
+    kind: 'error', runId: 'run-close-2', taskId: null, scopeId: null,
+    durationMs: 5, toolCallsUsed: 0, initiator: 'error', terminalReason: 'x',
+  }, { writeRunCloseMetric: (metric) => bare.push(metric as unknown as Record<string, unknown>) })
+  assert.equal(bare[0].taskType ?? null, null)
 })

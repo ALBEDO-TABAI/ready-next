@@ -5268,13 +5268,25 @@ export class AgentSdkRuntime extends EventEmitter {
     // is the safety NET behind finalizeRunOutcome, never its competitor: an
     // existing terminal row keeps its terminal status/reason even if this
     // late write carries a non-terminal value (ordering race insurance).
+    // P0-5 — the diagnostics snapshot must never overwrite the close-out
+    // snapshot facts: task_type/budget 口径源 = projection (T1). When a
+    // terminal row already exists, keep ITS taskType/budget; the budget-
+    // runtime classification is mid-run scratch, not the sample truth.
+    let preservedTaskType: string | null | undefined
+    let preservedBudget: Record<string, unknown> | null | undefined
     try {
-      const existing = repository.get(params.runId) as { status?: unknown; terminalReason?: unknown } | null
+      const existing = repository.get(params.runId) as {
+        status?: unknown; terminalReason?: unknown; taskType?: unknown; budget?: unknown
+      } | null
       const existingStatus = String(existing?.status || '')
       const terminalStatuses = new Set(['done', 'error', 'cancelled', 'interrupted', 'checkpoint', 'killed'])
-      if (existing && terminalStatuses.has(existingStatus) && !terminalStatuses.has(status)) {
-        status = existingStatus
-        terminalReason = (existing?.terminalReason as typeof terminalReason) || terminalReason
+      if (existing && terminalStatuses.has(existingStatus)) {
+        preservedTaskType = (existing.taskType as string | null) ?? null
+        preservedBudget = (existing.budget as Record<string, unknown> | null) ?? null
+        if (!terminalStatuses.has(status)) {
+          status = existingStatus
+          terminalReason = (existing?.terminalReason as typeof terminalReason) || terminalReason
+        }
       }
     } catch {
       // best effort — a read failure must not block the snapshot write
@@ -5285,13 +5297,13 @@ export class AgentSdkRuntime extends EventEmitter {
       scopeId: params.scopeId,
       agentId: publicAgentName(params.agentName),
       status,
-      taskType: params.taskBudgetRuntime?.taskType || null,
+      taskType: preservedTaskType !== undefined ? preservedTaskType : (params.taskBudgetRuntime?.taskType || null),
       terminalReason,
       providerProtocol: params.providerDiagnostics?.agentProtocol || null,
       wireApi: params.providerDiagnostics?.wireApi || null,
       contextWindow: params.providerDiagnostics?.contextWindow || null,
       providerDiagnostics: params.providerDiagnostics,
-      budget: budgetDiagnostics.budget as Record<string, unknown> | null,
+      budget: preservedBudget !== undefined ? preservedBudget : (budgetDiagnostics.budget as Record<string, unknown> | null),
       continuationRef: params.continuationRef,
       recoveryHistory: [],
       inputTokens: params.usage?.inputTokens ?? 0,

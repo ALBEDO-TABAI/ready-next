@@ -36,7 +36,8 @@ if (!existsSync(file)) {
 }
 
 const rows = []
-const taskTypes = {}
+const taskTypes = {}            // coverage: ALL terminal runs (run_close rows) — P0-4
+const divergenceTaskTypes = {}  // divergence rows only, reported separately
 let totalTerminalRuns = 0
 for (const line of readFileSync(file, 'utf-8').split('\n')) {
   const trimmed = line.trim()
@@ -45,7 +46,14 @@ for (const line of readFileSync(file, 'utf-8').split('\n')) {
   try { event = JSON.parse(trimmed) } catch { continue } // malformed line: skipped, never fatal
   const at = Date.parse(event.at || '')
   if (!Number.isFinite(at) || at < since) continue
-  if (event.metric === 'run_close') totalTerminalRuns += 1
+  if (event.metric === 'run_close') {
+    totalTerminalRuns += 1
+    if (event.taskType) {
+      const key = String(event.taskType)
+      taskTypes[key] = (taskTypes[key] ?? 0) + 1
+    }
+    continue
+  }
   if (event.metric !== 'adjudicator_shadow_divergence') continue
   rows.push({
     at: event.at,
@@ -61,7 +69,7 @@ for (const line of readFileSync(file, 'utf-8').split('\n')) {
     disposition: null,
   })
   const key = String(event.taskType ?? 'unknown')
-  taskTypes[key] = (taskTypes[key] ?? 0) + 1
+  divergenceTaskTypes[key] = (divergenceTaskTypes[key] ?? 0) + 1
 }
 
-console.log(JSON.stringify({ count: rows.length, totalTerminalRuns, taskTypes, rows }, null, 2))
+console.log(JSON.stringify({ count: rows.length, totalTerminalRuns, taskTypes, divergenceTaskTypes, rows }, null, 2))

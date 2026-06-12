@@ -11,6 +11,9 @@ export interface RunCloseMetric {
   initiator: string
   toolCallsUsed: number
   durationMs: number
+  /** P0-4 — effective task type (terminal patch wins over the stale row);
+   *  coverage accounting for the Q4b promotion gate reads THIS. */
+  taskType?: string | null
 }
 
 export type RunOutcome =
@@ -85,6 +88,7 @@ export function writeRunCloseMetric(metric: RunCloseMetric): void {
     initiator: metric.initiator,
     toolCallsUsed: metric.toolCallsUsed,
     durationMs: metric.durationMs,
+    taskType: metric.taskType ?? null,
   })
 }
 
@@ -144,18 +148,43 @@ function statusFromOutcomeKind(kind: Exclude<RunOutcome['kind'], 'done' | 'check
   return 'cancelled'
 }
 
+/** P0-3 — the row in task_projections may still carry first-build defaults
+ *  (short_task) at finalize time: the terminal projectionPatch is the
+ *  authoritative correction and must win for adjudication AND coverage
+ *  accounting, independent of patch-persistence timing. */
+function resolveEffectiveTaskFacts(
+  outcome: RunOutcome,
+  deps: RunFinalizerDeps,
+): { taskType: string | null; module: string | null } {
+  const patch = outcome.projectionPatch as { taskType?: unknown; module?: unknown } | null | undefined
+  let rowTaskType: string | null = null
+  let rowModule: string | null = null
+  if (deps.taskProjectionStore && outcome.taskId) {
+    try {
+      const row = deps.taskProjectionStore.get(outcome.taskId)
+      rowTaskType = row?.taskType ?? null
+      rowModule = row?.module ?? null
+    } catch { /* facts degrade to patch-only */ }
+  }
+  return {
+    taskType: (typeof patch?.taskType === 'string' && patch.taskType ? patch.taskType : rowTaskType),
+    module: (typeof patch?.module === 'string' && patch.module ? patch.module : rowModule),
+  }
+}
+
 async function writeTerminalOutcome(
   outcome: RunOutcome,
   deps: RunFinalizerDeps,
   status: string,
   terminalReason: string,
 ): Promise<void> {
+  const facts = resolveEffectiveTaskFacts(outcome, deps)
   writeRunMetaOutcome(outcome, deps, status, terminalReason)
-  recordShadowAdjudication(outcome, deps, status, terminalReason)
+  recordShadowAdjudication(outcome, deps, status, terminalReason, facts)
   if (deps.writeProjectionTerminalPatch) {
     await deps.writeProjectionTerminalPatch(outcome.projectionPatch || null, terminalReason)
   }
-  deps.writeRunCloseMetric(toRunCloseMetric(outcome, terminalReason))
+  deps.writeRunCloseMetric({ ...toRunCloseMetric(outcome, terminalReason), taskType: facts.taskType })
 }
 
 /**
@@ -173,6 +202,7 @@ function recordShadowAdjudication(
   deps: RunFinalizerDeps,
   status: string,
   terminalReason: string,
+  facts?: { taskType: string | null; module: string | null },
 ): void {
   const store = deps.taskProjectionStore
   const taskId = outcome.taskId
@@ -189,8 +219,11 @@ function recordShadowAdjudication(
       ? appendProofRefs(projection.proofRefs ?? [], [digestProof])
       : (Array.isArray(projection.proofRefs) ? projection.proofRefs : [])
 
-    // ② verdict SECOND, judging the refreshed proof set
-    const criteria = resolveCriteria(projection.taskType as TaskType, String(projection.module || 'system'))
+    // ② verdict SECOND, judging the refreshed proof set with the EFFECTIVE
+    // task facts (terminal patch wins over the stale row — P0-3)
+    const effectiveTaskType = (facts?.taskType ?? projection.taskType) as TaskType
+    const effectiveModule = String(facts?.module ?? projection.module ?? 'system')
+    const criteria = resolveCriteria(effectiveTaskType, effectiveModule)
     const { verdict, checkIn } = adjudicateTerminalOutcome({
       terminalStatus: status,
       terminalReason,
@@ -210,7 +243,7 @@ function recordShadowAdjudication(
       logAgentMetric('adjudicator_shadow_divergence', {
         runId: outcome.runId,
         taskId,
-        taskType: projection.taskType,
+        taskType: (facts?.taskType ?? projection.taskType),
         verdict,
         actualStatus: status,
         terminalReason,
