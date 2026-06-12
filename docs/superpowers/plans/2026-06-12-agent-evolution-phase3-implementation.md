@@ -1,7 +1,7 @@
 ---
 title: Agent Evolution 阶段三（组织与维护智能）实施子计划
 date: 2026-06-12
-status: v2 修订（2026-06-12 Codex 二轮复审 3P1/3P2 回修），待 Codex 复核后恢复 approved；复核通过前不开工
+status: approved v2 — Codex 二轮复审 6 点（3P1/3P2）回修后复核 APPROVED 可 enforce（2026-06-12），逐单施工待启动
 revision_history:
   - v1 (2026-06-12): 初稿；同日 Codex 评审唯一 P1（总则 PK3 依赖 I4 与工单表/波次矛盾）修复（cd558d47）后 APPROVED。
   - v2 (2026-06-12): 吸收 Codex 二轮复审 6 点。P1：①ownerAgentId 落 schema——A1 携 057 迁移列 + Q1 范式全链，A4 为全仓唯一写值点；②A2/A4 顺序矛盾消解——A2 降级为 owner 参数化注入底座 + fixture 测试，端到端验收归 A4；③R 轨样本时钟起点改 253b6768 并加 typedTerminalRuns === totalTerminalRuns（unknown=0）硬条件。P2：④C3 容器钉死 runSubAgent（四决策入单，禁第四套 runner）；⑤C4 写入目标对齐真值源（DB resident_user 为主，USER.md 仅 fallback 镜像）；⑥B1 报告固定路径+评审清单。依据 00 路线图阶段三范围（A1-A4 / C3-C5 / PK1-PK4 / I4 / B4-B5 / E3-E4）+ 03/04/05/09/10/11 各篇工作包表拆单；并入阶段二遗留轨（Q4b 链 + B1 spike）作为独立前置轨；I5 经 HEAD 取证已由 EP2-K4 核销（仅复核行）。

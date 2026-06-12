@@ -1,6 +1,6 @@
 # 阶段三开发计划（配套 2026-06-12-agent-evolution-phase3-implementation.md）
 
-> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同 v2 修订中（Codex 二轮复审 6 点回修），**复核通过前不开工**；遗留轨 R 样本时钟起点=253b6768，且 typedTerminalRuns === totalTerminalRuns（unknown=0）为硬条件。
+> 合同是"做什么、验收什么"；本文是"按什么顺序做、并行度多少、风险在哪盯"。合同 approved v2（2026-06-12 Codex 二轮复审 6 点全 PASS / enforce: true），可按波次开工；遗留轨 R 样本时钟起点=253b6768，且 typedTerminalRuns === totalTerminalRuns（unknown=0）为硬条件。
 
 ## 1. 工单总览
 
