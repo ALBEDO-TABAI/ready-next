@@ -1,9 +1,10 @@
 ---
 title: Agent Evolution 阶段三（组织与维护智能）实施子计划
 date: 2026-06-12
-status: approved v2 — Codex 二轮复审 6 点（3P1/3P2）回修后复核 APPROVED 可 enforce（2026-06-12），逐单施工待启动
+status: v3 修订（2026-06-12 Codex 三轮复审 2P1/2P2 回修：迁移编号顺序/C4 真值源/卡片路径说明/C3 账本入口），待 Codex 复核后恢复 approved；复核通过前 A1/PK1 不开工
 revision_history:
   - v1 (2026-06-12): 初稿；同日 Codex 评审唯一 P1（总则 PK3 依赖 I4 与工单表/波次矛盾）修复（cd558d47）后 APPROVED。
+  - v3 (2026-06-12): 吸收 Codex 三轮复审 4 点。P1：①迁移编号与开工顺序对齐——A1 改为 055 agents + 056 owner_agent_id（同单连续两号），PK1 改 057 packet columns，与单执行顺序 A1→PK1 一致且满足编号连续 gate；②C4 删除文件 CAS 主路径——主写入=DB 事务/CAS（user_profiles 画像行与/或 resident_user memory），USER.md 仅 DB 无行时镜像。P2：③A2 同步 memory_write_card 工具描述与 schema 说明（agents/<id>/knowledge 路径底层已允许但提示词仍说只能写全局目录）；④C3 写明维护回合不直接写 terminal run_meta——预算审计走 maintenance metric/log，任何 run_meta 写入必须经既有 finalizer/ledger 入口（runSubAgent 只是事件容器不拥有账本）。
   - v2 (2026-06-12): 吸收 Codex 二轮复审 6 点。P1：①ownerAgentId 落 schema——A1 携 057 迁移列 + Q1 范式全链，A4 为全仓唯一写值点；②A2/A4 顺序矛盾消解——A2 降级为 owner 参数化注入底座 + fixture 测试，端到端验收归 A4；③R 轨样本时钟起点改 253b6768 并加 typedTerminalRuns === totalTerminalRuns（unknown=0）硬条件。P2：④C3 容器钉死 runSubAgent（四决策入单，禁第四套 runner）；⑤C4 写入目标对齐真值源（DB resident_user 为主，USER.md 仅 fallback 镜像）；⑥B1 报告固定路径+评审清单。依据 00 路线图阶段三范围（A1-A4 / C3-C5 / PK1-PK4 / I4 / B4-B5 / E3-E4）+ 03/04/05/09/10/11 各篇工作包表拆单；并入阶段二遗留轨（Q4b 链 + B1 spike）作为独立前置轨；I5 经 HEAD 取证已由 EP2-K4 核销（仅复核行）。
 owner: 白
 author: Claude (Fable 5)
@@ -69,14 +70,14 @@ related:
 ## 轨道 A：专项 agent 实体与转办（设计出处：04 篇）
 
 ### EP3-A1 agents 表迁移 + persona 模板候选
-- **改动文件**：`migrations.ts`（055：`agents` 表——id/name/charter/persona_ref/status/created_at，**仅建主 agent 一行**，08/04 迁移口径；**057：`task_projections` 加 `owner_agent_id` TEXT 列**——A2 注入解析与 A4 归属切换的 schema 基础，编号避开 PK1 的 056）、**`ownerAgentId` 走 Q1 范式全链**（main/wire `TaskProjectionRecord` 增 `ownerAgentId?: string | null`、repository create INSERT/update 白名单/mapRow、renderer `electron.d.ts` 副本；任务卡 UI 只读消费不新增猜测——O 合同纪律；本单只立列与读写链，**写值唯一来自 A4**）、`repositories/agent-registry-repository.ts`（新增：list/get/create，读写收敛）、persona 模板候选机制（PersonalityEditor 数据层预留，不动 UI）、新增 `src/__tests__/migration-agents-table.test.ts`
+- **改动文件**：`migrations.ts`（055：`agents` 表——id/name/charter/persona_ref/status/created_at，**仅建主 agent 一行**，08/04 迁移口径；**056：`task_projections` 加 `owner_agent_id` TEXT 列**——A2 注入解析与 A4 归属切换的 schema 基础；A1 同单占用连续两号 055/056，与单执行顺序 A1→PK1 及编号连续 gate（check-migration-numbering-sequential）一致）、**`ownerAgentId` 走 Q1 范式全链**（main/wire `TaskProjectionRecord` 增 `ownerAgentId?: string | null`、repository create INSERT/update 白名单/mapRow、renderer `electron.d.ts` 副本；任务卡 UI 只读消费不新增猜测——O 合同纪律；本单只立列与读写链，**写值唯一来自 A4**）、`repositories/agent-registry-repository.ts`（新增：list/get/create，读写收敛）、persona 模板候选机制（PersonalityEditor 数据层预留，不动 UI）、新增 `src/__tests__/migration-agents-table.test.ts`
 - **实施要点**：**存量零感知**——agents 表只有主 agent 行时系统行为 = 现状（断言级）；旧会话零行为变化；表为空时回退现状（防迁移失败半态）。
-- **测试（先红）**：迁移幂等（fake DB + 按名隔离，055/057 各自隔离）；仅主 agent 行；空表回退；registry 往返；ownerAgentId repository create-get 往返 + NULL 兼容。
+- **测试（先红）**：迁移幂等（fake DB + 按名隔离，055/056 各自隔离）；仅主 agent 行；空表回退；registry 往返；ownerAgentId repository create-get 往返 + NULL 兼容。
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/migration-agents-table.test.ts && npm run verify:native && npm run typecheck`
 - **规模**：~260 行。
 
 ### EP3-A2 per-agent RULES/knowledge 注入底座（owner 参数化；端到端验收归 A4）
-- **改动文件**：`prompt-assembly.ts`（注入源按**本轮任务 owner** 解析：owner agent 的 RULES/knowledge 作用域优先，无 owner 回退 `scope.agent`——K3/A 轨叠加，复用既有 RULES/index 注入通道不另起）、`belief-card-store.ts`（按 agent 作用域目录读取：`agents/<id>/knowledge/`，全局目录回退）、新增 `src/__tests__/per-agent-injection.test.ts`
+- **改动文件**：`prompt-assembly.ts`（注入源按**本轮任务 owner** 解析：owner agent 的 RULES/knowledge 作用域优先，无 owner 回退 `scope.agent`——K3/A 轨叠加，复用既有 RULES/index 注入通道不另起）、`belief-card-store.ts`（按 agent 作用域目录读取：`agents/<id>/knowledge/`，全局目录回退）、**`tools/memory-tools.ts` 与 `tools/schemas/memory-schemas.ts` 的 memory_write_card/memory_read_card 描述同步**（底层路径守卫已允许 `agents/<id>/knowledge/*.md`，但暴露给模型的说明仍写"仅 knowledge/ 与 knowledge/sites/"——A2 落地 per-agent 目录时必须同步，否则 C3/C5 的模型写卡会被提示词误导）、新增 `src/__tests__/per-agent-injection.test.ts`
 - **实施要点**：**A2 是底座单**——owner 来源为注入解析参数（本轮任务 projection 的 ownerAgentId，A1 列已就位；无值回退 scope.agent），用 **fixture 投影**驱动测试（直接构造带不同 ownerAgentId 的 projection 行），不依赖 A4 的切换工具；真实的采纳-owner 变更-注入切换端到端验收**归 A4**。他 agent 谱系卡片零泄漏（C4.3 纪律延伸）；预算沿用 K3 常量（RULES 全局+agent 合计 ≤2000 字符——01 §7b 口径在此兑现）。
 - **测试（先红）**：fixture 投影 ownerAgentId=X 与 Y 注入快照不同；无 owner 回退 scope.agent；跨 agent 零泄漏；预算合计截断。（owner 真实切换链路断言在 A4。）
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/per-agent-injection.test.ts src/__tests__/knowledge-injection-snapshot.test.ts && npm run typecheck`
@@ -101,15 +102,15 @@ related:
 ## 轨道 C：LLM 维护回合与涌现候选（设计出处：03 篇）
 
 ### EP3-C3 维护回合提示词 + SubAgent 容器接线
-- **改动文件**：维护回合提示词资产（X3 loader，`assets/prompts/maintenance/`）、SubAgent 容器接线（**钉死为 `agent-control/sub-agent/sub-agent-runner.ts` 的 `runSubAgent` 一套**——不是 skill child、不是浏览器后台 sub-agent，**禁止新建第四套 runner**；四项决策：取消=沿用其 abortSignal 通道、预算=维护回合自带迭代上限并以专用 maintenance 标记落 run_meta 行计 token、日志=每轮单行报告进 maintenance 审计 + 既有 agent metrics、错误=runner 终态回灌 breadcrumb 不冒泡；job 生命周期挂 EP2-C2 的 `CrystallizeScheduler`/`runCrystallizeRound` 之后——确定性动作先跑，LLM 回合后置）、信号采集（learningRefs/CheckIn 摘要/staged 卡清单——**摘要不全文**）、EP2-C6 衰减轮接线（真实 backlinks/access 信号喂 `runBeliefDecayRound`）、新增 `src/__tests__/maintenance-llm-round.test.ts`
+- **改动文件**：维护回合提示词资产（X3 loader，`assets/prompts/maintenance/`）、SubAgent 容器接线（**钉死为 `agent-control/sub-agent/sub-agent-runner.ts` 的 `runSubAgent` 一套**——不是 skill child、不是浏览器后台 sub-agent，**禁止新建第四套 runner**；四项决策：取消=沿用其 abortSignal 通道、预算=维护回合自带迭代上限；**token/用量审计走 maintenance metric 与单行日志，不直接写 run_meta**——runSubAgent 只是事件容器不拥有账本，若维护回合确需 run_meta 行（终态），必须经既有 finalizer/ledger 入口（finalizeRunOutcome 通道），禁止旁路（与本合同 §0.4 终态禁旁路条款同源）、日志=每轮单行报告进 maintenance 审计 + 既有 agent metrics、错误=runner 终态回灌 breadcrumb 不冒泡；job 生命周期挂 EP2-C2 的 `CrystallizeScheduler`/`runCrystallizeRound` 之后——确定性动作先跑，LLM 回合后置）、信号采集（learningRefs/CheckIn 摘要/staged 卡清单——**摘要不全文**）、EP2-C6 衰减轮接线（真实 backlinks/access 信号喂 `runBeliefDecayRound`）、新增 `src/__tests__/maintenance-llm-round.test.ts`
 - **实施要点**：C2 门控 skip → LLM 零调用（断言）；产出只能是 `memory_write_card` 调用清单（格式校验拒坏卡）；空轮干净退出留 breadcrumb；每轮单行报告进 maintenance 日志（03 §5 格式）。
 - **测试（先红）**：喂固定信号集 → 产出预期卡片操作（fake LLM）；门控 skip 零调用；坏卡产出被校验拒绝；空轮退出；衰减轮以真实信号驱动。
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/maintenance-llm-round.test.ts src/__tests__/crystallize-gate.test.ts src/__tests__/belief-decay-deterministic.test.ts && npm run typecheck`
 - **规模**：~280 行。
 
 ### EP3-C4 CAS 合并工具（USER.md 决策门）
-- **改动文件**：新增 `agent-control/maintenance/cas-merge.ts`（读快照 hash → 内存合并 ≤40 行 → 临时文件 → hash 一致才原子 rename，不一致良性跳过 exit-0 语义 + 审计行）、USER.md 决策门（"纯项目工作不进画像；不为了写而抢锁"为代码判定）、新增 `src/__tests__/cas-merge.test.ts`
-- **真值源对齐（HEAD 取证）**：主路径用户画像优先读 **DB（resident_user / user_profiles）**，USER.md 仅 fallback（prompt-assembly loadUSER）。**C4 合并写入目标 = memory repository 的 resident_user 真值**（CAS 协议应用于读快照-内存合并-条件写的并发防护，hash 取 DB 行内容）；USER.md 文件仅在 DB 无行的 fallback 场景同步为可读镜像——绝不出现写了文件但主路径不读的死写。
+- **改动文件**：新增 `agent-control/maintenance/cas-merge.ts`（**CAS 协议作用于 DB 真值，不是文件**：读 DB 行快照 hash → 内存合并 ≤40 行 → **同一事务内 hash 比对一致才条件写**，不一致良性跳过 exit-0 语义 + 审计行；03 §4 的"临时文件→rename"协议仅在 USER.md 镜像同步这一 fallback 子步骤复用，绝不是主写入路径）、USER.md 决策门（"纯项目工作不进画像；不为了写而抢锁"为代码判定）、新增 `src/__tests__/cas-merge.test.ts`
+- **真值源对齐（HEAD 取证，loadUSER 读取顺序=user_profiles → resident_user memory → USER.md fallback）**：**C4 不做 USER.md 文件 CAS 主路径**。主写入必须是 **DB 事务/CAS**，覆盖 user_profiles 画像行与/或 resident_user memory（经 memory repository，hash 取 DB 行内容）；USER.md 仅在 DB 无行的 fallback 场景同步为可读镜像。施工自查红线：合并完成后 `loadUSER` 的 DB 优先路径必须读到结果——"写了文件但主路径不读"即违约。
 - **测试（先红）**：双写者交错只成功一个、失败方良性跳过无半态；审计行正确；≤40 行约束；决策门拒纯项目内容；**合并后主路径（DB 优先 loadUSER）能读到结果**。
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/cas-merge.test.ts && npm run typecheck`
 - **规模**：~220 行。
@@ -126,7 +127,7 @@ related:
 ## 轨道 PK：任务包编译层（设计出处：09 篇）
 
 ### EP3-PK1 包字段约定 + 两层校验
-- **改动文件**：`migrations.ts`（056：task_projections 加 `context_refs_json` 列 + `packet_role` 单列定死——09 §2）、wire/repository 全链（Q1 范式：wire 类型/INSERT/update 白名单/mapRow/safeParse 回退，禁 raw SQL 硬条款沿用）、嵌套 ≤2 层校验函数、新增 `src/__tests__/migration-packet-columns.test.ts`
+- **改动文件**：`migrations.ts`（**057**：task_projections 加 `context_refs_json` 列 + `packet_role` 单列定死——09 §2；编号在 A1 的 055/056 之后，与单执行顺序一致）、wire/repository 全链（Q1 范式：wire 类型/INSERT/update 白名单/mapRow/safeParse 回退，禁 raw SQL 硬条款沿用）、嵌套 ≤2 层校验函数、新增 `src/__tests__/migration-packet-columns.test.ts`
 - **测试（先红）**：迁移幂等按名隔离；三层嵌套被拒；repository 往返；NULL/malformed 回退。
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/migration-packet-columns.test.ts && npm run verify:native && npm run typecheck`
 - **规模**：~220 行。
