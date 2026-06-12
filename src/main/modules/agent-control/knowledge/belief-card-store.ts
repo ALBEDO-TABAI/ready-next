@@ -350,6 +350,30 @@ export class BeliefCardStore {
     return out
   }
 
+  /**
+   * EP4-K-mirror — enumerate card files across ALL scopes: the global
+   * `knowledge/` dir (scopeId 'global') plus every `agents/<id>/knowledge/`
+   * dir (scopeId 'agent:<id>'). Agent dir names are shape-filtered via
+   * isSafeAgentScopeId; anything else is skipped, never a path fragment.
+   * No agents/ dir → identical to listAllCardFiles (存量零感知).
+   */
+  listAllCardFilesAllScopes(): Array<{ relPath: string; card: BeliefCard | null; scopeId: string }> {
+    const out = this.listAllCardFiles().map((file) => ({ ...file, scopeId: 'global' }))
+    const agentsAbs = this.absInRoot('agents')
+    if (!agentsAbs || !existsSync(agentsAbs)) return out
+    for (const name of readdirSync(agentsAbs)) {
+      if (!isSafeAgentScopeId(name)) continue
+      let isDir = false
+      try { isDir = statSync(join(agentsAbs, name)).isDirectory() } catch { /* race-deleted */ }
+      if (!isDir) continue
+      const dir = `agents/${name}/knowledge`
+      const absDir = this.absInRoot(dir)
+      if (!absDir || !existsSync(absDir)) continue
+      out.push(...this.listAllCardFiles(dir).map((file) => ({ ...file, scopeId: `agent:${name}` })))
+    }
+    return out
+  }
+
   /** Transition a card to a new status. Returns false if card unreadable. */
   transition(relPath: string, to: BeliefCardStatus): boolean {
     const current = this.readCard(relPath, { includeStaged: true })

@@ -131,10 +131,13 @@ export function syncBeliefCards(
 ): { synced: number; invalid: number } {
   let synced = 0
   let invalid = 0
-  for (const { relPath, card } of store.listAllCardFiles()) {
+  // EP4-K-mirror — every scope syncs, and the scope is WRITTEN THROUGH:
+  // agent cards land as scope_id 'agent:<id>' (04 §2), never 'global'.
+  for (const { relPath, card, scopeId } of store.listAllCardFilesAllScopes()) {
     if (!card) {
       upsertBeliefCardMirror(db, {
         relPath,
+        scopeId,
         title: relPath,
         summary: null,
         confidence: null,
@@ -146,6 +149,7 @@ export function syncBeliefCards(
     }
     upsertBeliefCardMirror(db, {
       relPath,
+      scopeId,
       title: card.frontmatter.title,
       summary: card.frontmatter.description,
       confidence: card.frontmatter.confidence,

@@ -117,7 +117,10 @@ export async function runCrystallizeRound(params: {
     return { decision: 'skip', reason: gate.reason }
   }
 
-  const plan = buildKnowledgeGraphPlan(params.store.listAllCardFiles(), { now: params.now })
+  // EP4-K-mirror — the deterministic round sees EVERY scope (agent cards
+  // get backlink rewrites / staged expiry / duplicate marking under the
+  // same rules); the plan's index.md stays global-only by construction.
+  const plan = buildKnowledgeGraphPlan(params.store.listAllCardFilesAllScopes(), { now: params.now })
   for (const { relPath, body } of plan.cardBodies) params.effectors.applyCardBody(relPath, body)
   for (const relPath of plan.expiredStaged) params.effectors.deleteCard(relPath)
   for (const { relPath, duplicateOf } of plan.possibleDuplicates) params.effectors.markDuplicate(relPath, duplicateOf)

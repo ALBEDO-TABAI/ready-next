@@ -95,74 +95,98 @@ function renderIndexMarkdown(cards: BeliefCard[], now: Date): string {
 /**
  * Build the full maintenance plan. `now` is injected — expiry decisions are
  * reproducible and testable against a fixed clock.
+ *
+ * EP4-K-mirror — scope-aware: input files may carry a `scopeId` ('global' |
+ * 'agent:<id>'; absent = 'global', so legacy callers keep exact behavior).
+ * Backlinks, orphan detection, and duplicate marking resolve PER SCOPE
+ * BUCKET — the same slug owned by two agents never cross-links. The root
+ * index.md renders from the GLOBAL bucket ONLY (agent cards never leak into
+ * it; per-agent index files have no reader and are deliberately not
+ * produced). Body rewrites and staged expiry apply across all buckets with
+ * identical rules.
  */
 export function buildKnowledgeGraphPlan(
-  files: ReadonlyArray<{ relPath: string; card: BeliefCard | null }>,
+  files: ReadonlyArray<{ relPath: string; card: BeliefCard | null; scopeId?: string }>,
   opts: { now: Date; stagedExpiryDays?: number },
 ): KnowledgeGraphPlan {
   const expiryDays = opts.stagedExpiryDays ?? STAGED_EXPIRY_DAYS
   const invalidCards = files.filter((file) => !file.card).map((file) => file.relPath)
-  const cards = files.flatMap((file) => (file.card ? [file.card] : []))
-  const bySlug = new Map(cards.map((card) => [slugOf(card.relPath), card]))
 
-  // forward edges + orphan detection
+  const buckets = new Map<string, BeliefCard[]>()
+  for (const file of files) {
+    if (!file.card) continue
+    const scopeId = file.scopeId ?? 'global'
+    const list = buckets.get(scopeId) ?? []
+    list.push(file.card)
+    buckets.set(scopeId, list)
+  }
+
   const orphanLinks: KnowledgeGraphPlan['orphanLinks'] = []
-  const backlinks = new Map<string, string[]>()
-  for (const card of cards) {
-    const fromSlug = slugOf(card.relPath)
-    for (const slug of extractForwardLinks(card.body)) {
-      if (!bySlug.has(slug)) {
-        orphanLinks.push({ from: card.relPath, slug })
-        continue
-      }
-      const list = backlinks.get(slug) ?? []
-      if (!list.includes(fromSlug)) list.push(fromSlug)
-      backlinks.set(slug, list)
-    }
-  }
-
-  // rewrite bodies whose backlinks block content changed
   const cardBodies: KnowledgeGraphPlan['cardBodies'] = []
-  for (const card of cards) {
-    const incoming = (backlinks.get(slugOf(card.relPath)) ?? []).sort()
-    const stripped = stripBacklinksBlock(card.body)
-    const next = incoming.length > 0
-      ? `${stripped}\n\n${renderBacklinksBlock(incoming)}`
-      : stripped
-    if (next !== card.body) cardBodies.push({ relPath: card.relPath, body: next })
-  }
-
-  // staged expiry against the injected clock
-  const expiredStaged = cards
-    .filter((card) => card.frontmatter.status === 'staged' && dayDiff(opts.now, card.frontmatter.created) >= expiryDays)
-    .map((card) => card.relPath)
-
-  // near-duplicate marking: newer normalized-title collision points at the
-  // oldest card; already-marked cards stay untouched (idempotence, 不直删)
+  const expiredStaged: string[] = []
   const possibleDuplicates: KnowledgeGraphPlan['possibleDuplicates'] = []
-  const byTitle = new Map<string, BeliefCard[]>()
-  for (const card of cards) {
-    const key = normalizeTitle(card.frontmatter.title)
-    if (!key) continue
-    const list = byTitle.get(key) ?? []
-    list.push(card)
-    byTitle.set(key, list)
-  }
-  for (const group of byTitle.values()) {
-    if (group.length < 2) continue
-    const ordered = [...group].sort((a, b) =>
-      a.frontmatter.created.localeCompare(b.frontmatter.created)
-      || a.relPath.localeCompare(b.relPath))
-    const oldest = ordered[0]
-    for (const newer of ordered.slice(1)) {
-      if (newer.frontmatter.source?.startsWith('possible-duplicate-of')) continue
-      possibleDuplicates.push({ relPath: newer.relPath, duplicateOf: slugOf(oldest.relPath) })
+
+  for (const cards of buckets.values()) {
+    const bySlug = new Map(cards.map((card) => [slugOf(card.relPath), card]))
+
+    // forward edges + orphan detection — edges only form INSIDE the bucket
+    const backlinks = new Map<string, string[]>()
+    for (const card of cards) {
+      const fromSlug = slugOf(card.relPath)
+      for (const slug of extractForwardLinks(card.body)) {
+        if (!bySlug.has(slug)) {
+          orphanLinks.push({ from: card.relPath, slug })
+          continue
+        }
+        const list = backlinks.get(slug) ?? []
+        if (!list.includes(fromSlug)) list.push(fromSlug)
+        backlinks.set(slug, list)
+      }
+    }
+
+    // rewrite bodies whose backlinks block content changed
+    for (const card of cards) {
+      const incoming = (backlinks.get(slugOf(card.relPath)) ?? []).sort()
+      const stripped = stripBacklinksBlock(card.body)
+      const next = incoming.length > 0
+        ? `${stripped}\n\n${renderBacklinksBlock(incoming)}`
+        : stripped
+      if (next !== card.body) cardBodies.push({ relPath: card.relPath, body: next })
+    }
+
+    // staged expiry against the injected clock
+    expiredStaged.push(...cards
+      .filter((card) => card.frontmatter.status === 'staged' && dayDiff(opts.now, card.frontmatter.created) >= expiryDays)
+      .map((card) => card.relPath))
+
+    // near-duplicate marking: newer normalized-title collision points at the
+    // oldest card; already-marked cards stay untouched (idempotence, 不直删).
+    // Per-bucket: the same title in two agents' scopes is NOT a duplicate.
+    const byTitle = new Map<string, BeliefCard[]>()
+    for (const card of cards) {
+      const key = normalizeTitle(card.frontmatter.title)
+      if (!key) continue
+      const list = byTitle.get(key) ?? []
+      list.push(card)
+      byTitle.set(key, list)
+    }
+    for (const group of byTitle.values()) {
+      if (group.length < 2) continue
+      const ordered = [...group].sort((a, b) =>
+        a.frontmatter.created.localeCompare(b.frontmatter.created)
+        || a.relPath.localeCompare(b.relPath))
+      const oldest = ordered[0]
+      for (const newer of ordered.slice(1)) {
+        if (newer.frontmatter.source?.startsWith('possible-duplicate-of')) continue
+        possibleDuplicates.push({ relPath: newer.relPath, duplicateOf: slugOf(oldest.relPath) })
+      }
     }
   }
 
   return {
     cardBodies,
-    indexMarkdown: renderIndexMarkdown(cards, opts.now),
+    // root index.md is GLOBAL-ONLY — agent cards never leak into it.
+    indexMarkdown: renderIndexMarkdown(buckets.get('global') ?? [], opts.now),
     invalidCards,
     orphanLinks,
     possibleDuplicates,

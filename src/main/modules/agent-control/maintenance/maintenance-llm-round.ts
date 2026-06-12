@@ -217,23 +217,27 @@ export async function runMaintenanceLlmRound(deps: MaintenanceRoundDeps): Promis
   return report
 }
 
-/** Real decay signals: graph backlinks (C1 plan) + mirror access counts. */
+/** Real decay signals: graph backlinks (C1 plan) + mirror access counts.
+ *  EP4-K-mirror — every scope participates, and backlinks resolve PER
+ *  SCOPE: the same slug owned by two agents never feeds each other's
+ *  in-degree. */
 export function collectBeliefDecaySignals(
   store: BeliefCardStore,
   readMirror: (relPath: string) => { accessCount: number; wasUsefulCount: number } | null,
   now: Date,
 ): BeliefDecaySignals[] {
-  const files = store.listAllCardFiles()
+  const files = store.listAllCardFilesAllScopes()
   // backlinks = incoming forward edges (same scan discipline as the C1 plan:
   // authored [[links]] only — generated blocks were already stripped by C1
-  // before they could pollute bodies).
+  // before they could pollute bodies). Keyed by (scope, slug).
   const incoming = new Map<string, number>()
   for (const file of files) {
     if (!file.card) continue
     const matches = file.card.body.matchAll(/\[\[([^\[\]\n]+)\]\]/g)
     for (const match of matches) {
       const slug = match[1].trim()
-      incoming.set(slug, (incoming.get(slug) ?? 0) + 1)
+      const key = `${file.scopeId}|${slug}`
+      incoming.set(key, (incoming.get(key) ?? 0) + 1)
     }
   }
   return files.flatMap((file) => {
@@ -246,7 +250,7 @@ export function collectBeliefDecaySignals(
       created: file.card.frontmatter.created,
       accessCount: mirror?.accessCount ?? 0,
       wasUsefulCount: mirror?.wasUsefulCount ?? 0,
-      backlinksCount: incoming.get(slug) ?? 0,
+      backlinksCount: incoming.get(`${file.scopeId}|${slug}`) ?? 0,
       markedDecayed: String(file.card.frontmatter.source || '').includes('decayed'),
       possibleDuplicate: String(file.card.frontmatter.source || '').startsWith('possible-duplicate-of'),
     }]
