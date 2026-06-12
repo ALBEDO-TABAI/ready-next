@@ -963,9 +963,10 @@ export class PromptAssemblyService {
     scope: ConversationScope
     message: string | Array<{ type: string; text?: string; base64?: string; mimeType?: string }>
     coordinators: ReadonlyArray<DomainAdapter>
-    /** EP3-A2 — 本轮任务 owner（projection 的 ownerAgentId）。注入源按 owner
-     *  解析：owner agent 的 RULES/knowledge 作用域优先；无值（或不合法）回退
-     *  scope.agent。本单只立解析参数，写值唯一来自 A4。 */
+    /** EP3-A2 — 本轮任务 owner（projection 的 ownerAgentId）。三段式解析：
+     *  显式合法 owner 优先；完全未传时回退 scope.agent；显式但非法的 id
+     *  降级 global-only（不回退，防腐败 owner 借道注入他人谱系）。
+     *  本单只立解析参数，写值唯一来自 A4。 */
     ownerAgentId?: string | null
   }): Promise<PromptAssemblyResult> {
     const userText = extractTextFromMessage(params.message)
