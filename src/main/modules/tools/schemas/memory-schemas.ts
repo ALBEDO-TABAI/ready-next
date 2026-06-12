@@ -60,11 +60,11 @@ export const MemoryListRecentSchema = z.object({
 // EP1-K1 — belief card tools. New cards default to status `staged` (do not
 // enter injection until promoted); write path is whitelisted to
 // knowledge/*.md, knowledge/sites/*.md, and per-agent
-// agents/<agentId>/knowledge/*.md (EP3-A2) by belief-card-store.
+// agents/<agentId>/knowledge/[sites/]*.md (EP3-A2) by belief-card-store.
 export const MemoryWriteCardSchema = z.object({
   rel_path: z
     .string()
-    .describe('卡片相对路径，允许 knowledge/<slug>.md、knowledge/sites/<domain>.md，或专属某个 agent 的 agents/<agentId>/knowledge/<slug>.md'),
+    .describe('卡片相对路径，允许 knowledge/<slug>.md、knowledge/sites/<domain>.md，或专属某个 agent 的 agents/<agentId>/knowledge/<slug>.md、agents/<agentId>/knowledge/sites/<domain>.md'),
   title: z.string().describe('卡片标题，一句话'),
   description: z.string().describe('一行摘要，用作索引检索线索'),
   confidence: z.enum(['H', 'M', 'L']).describe('置信度：H/M/L'),
@@ -83,7 +83,7 @@ export const MemoryWriteCardSchema = z.object({
 export const MemoryReadCardSchema = z.object({
   rel_path: z
     .string()
-    .describe('卡片相对路径：knowledge/<slug>.md、knowledge/sites/<domain>.md 或 agents/<agentId>/knowledge/<slug>.md'),
+    .describe('卡片相对路径：knowledge/<slug>.md、knowledge/sites/<domain>.md，或 agents/<agentId>/knowledge/[sites/]<slug>.md'),
   include_staged: z
     .boolean()
     .optional()

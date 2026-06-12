@@ -56,13 +56,13 @@ const MEMORY_TOOLS: MemoryToolDef[] = [
   {
     name: 'memory_write_card',
     description:
-      '写入一张原子信念卡（知识/偏好/工作方式/开放问题）。出现值得长期记住的稳定事实时当轮写；新卡默认 staged(待确认)，不会进入注入，晋升后才生效。允许写到 knowledge/<slug>.md、knowledge/sites/<domain>.md，或某个专项 agent 专属的 agents/<agentId>/knowledge/<slug>.md。',
+      '写入一张原子信念卡（知识/偏好/工作方式/开放问题）。出现值得长期记住的稳定事实时当轮写；新卡默认 staged(待确认)，不会进入注入，晋升后才生效。允许写到 knowledge/<slug>.md、knowledge/sites/<domain>.md，或某个专项 agent 专属的 agents/<agentId>/knowledge/<slug>.md、agents/<agentId>/knowledge/sites/<domain>.md。',
     params: zodObjectToParamList(MEMORY_SCHEMAS.memory_write_card) as ToolParam[],
   },
   {
     name: 'memory_read_card',
     description:
-      '按相对路径读取一张信念卡全文（knowledge/<slug>.md、knowledge/sites/<domain>.md 或 agents/<agentId>/knowledge/<slug>.md）。默认不返回待确认(staged)卡片；需要时传 include_staged=true。',
+      '按相对路径读取一张信念卡全文（knowledge/<slug>.md、knowledge/sites/<domain>.md，或 agents/<agentId>/knowledge/[sites/]<slug>.md）。默认不返回待确认(staged)卡片；需要时传 include_staged=true。',
     params: zodObjectToParamList(MEMORY_SCHEMAS.memory_read_card) as ToolParam[],
   },
 ]
