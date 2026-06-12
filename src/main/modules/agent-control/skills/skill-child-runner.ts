@@ -754,6 +754,7 @@ class SkillChildRunner {
       requestedInput: payload.requestedInput,
       parentNextHint: payload.parentNextHint,
       agentContext: args.agentContext,
+      userRequestVerbatim: payload.userRequestVerbatim ?? null,
     }
     const launchParams: SkillChildLaunchParams = {
       skillId: payload.skillId,
@@ -764,6 +765,8 @@ class SkillChildRunner {
       parentNextHint: payload.parentNextHint,
       agentContext: args.agentContext,
       outputDir: payload.outputDir,
+      // EP3-I4 — resume restores the persisted words, never re-derives.
+      userRequestVerbatim: payload.userRequestVerbatim ?? null,
     }
     const eventLogPath = this.deriveEventLogPathFromRecord(record)
     try {
@@ -1069,6 +1072,8 @@ class SkillChildRunner {
         parentNextHint: payload.parentNextHint,
         agentContext: params.agentContext ?? null,
         outputDir: payload.outputDir,
+        // EP3-I4 — resume restores the persisted words, never re-derives.
+        userRequestVerbatim: payload.userRequestVerbatim ?? null,
       }
       const resumeStartParams: StartSkillChildRunParams = {
         scopeId: payload.parentScopeId ?? params.scopeId,
@@ -1078,6 +1083,7 @@ class SkillChildRunner {
         requestedInput: payload.requestedInput,
         parentNextHint: payload.parentNextHint,
         agentContext: params.agentContext ?? null,
+        userRequestVerbatim: payload.userRequestVerbatim ?? null,
       }
       try {
         this.prepareResumeLifecycle(existing.id)

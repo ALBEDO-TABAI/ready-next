@@ -107,6 +107,20 @@ test('matrix #3 skill child: dispatch input → persisted payload → driver lau
   })
   assert.equal(capturedLaunch!.userRequestVerbatim, VERBATIM, '驱动 launch 原话逐字')
 
+  // RESUME restores the persisted words — the persisted→launch factory is
+  // exactly the path the runner's resume reconstruction feeds (P1 closure:
+  // every SkillChildLaunchParams construction now carries the field)
+  let resumedLaunch: SkillChildLaunchParams | null = null
+  await createSkillChildSubAgentFromPersisted({
+    payload: { ...payload, status: 'recoverable_paused' },
+    driver: {
+      canResume: () => true,
+      createInitialState: async (launch: SkillChildLaunchParams) => { resumedLaunch = launch; return {} as never },
+    } as never,
+    executeAction: (() => { throw new Error('not executed') }) as never,
+  })
+  assert.equal(resumedLaunch!.userRequestVerbatim, VERBATIM, '恢复路径不丢原话、不重新派生')
+
   // legacy rows without the field stay readable and resolve to null —
   // never to a synthesized digest
   const legacy = buildChildRunPayload({
