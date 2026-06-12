@@ -20,6 +20,7 @@ import {
 
 export const AGENT_INTERACTION_TOOL_NAMES: readonly string[] = [
   'ask_user_questions',
+  'agent_propose_handoff',
 ] as const
 
 const ASK_USER_QUESTIONS_DESCRIPTION = [
@@ -88,12 +89,60 @@ const ASK_USER_QUESTIONS_INPUT_SCHEMA = {
   additionalProperties: false,
 } as const
 
+// EP3-A4 — handoff proposal. M4 advisory: proposes only, executes no
+// external action; adoption is ALWAYS a user click on the card.
+const PROPOSE_HANDOFF_DESCRIPTION = [
+  '向用户提议把当前任务转办给一个已存在的专项 agent，弹出一张转办建议卡（采纳/新会话接手/拒绝）。这是建议性工具：你只能提议，采纳永远由用户点击决定，不存在无确认自动转办。',
+  '',
+  '何时使用：主 agent 会话的注入区列出了可转办的专项 agent，且当前请求明显落在某个专项 agent 的 charter 范围内。',
+  '',
+  '硬性约束：',
+  '- user_request_verbatim 必须是用户原话逐字（从用户消息原文复制），禁止转述、改写或摘要——违反会被结构化拒绝。',
+  '- context_refs 只传引用（文件路径/卡片 slug/任务 id），不传转述内容。',
+  '- target_agent_id 必须是 agents 表中已存在且 active 的专项 agent。',
+  '- 用户拒绝后，本轮不要再次提议。',
+].join('\n')
+
+const PROPOSE_HANDOFF_INPUT_SCHEMA = {
+  type: 'object',
+  properties: {
+    target_agent_id: {
+      type: 'string',
+      description: '目标专项 agent 的 id（来自注入区的专项 agent 列表）。',
+    },
+    reason: {
+      type: 'string',
+      description: '一句话理由：为什么这个任务更适合该专项 agent。',
+    },
+    user_request_verbatim: {
+      type: 'string',
+      description: '用户原话逐字片段（直接从用户消息复制，禁止转述/摘要）。',
+    },
+    context_refs: {
+      type: 'array',
+      items: { type: 'string' },
+      description: '可选：执行所需的引用（文件路径/卡片 slug/任务 id），每条 ≤300 字符。',
+    },
+    task_id: {
+      type: 'string',
+      description: '可选：要转办的任务卡 id；采纳后该任务的 owner 切换为目标 agent。',
+    },
+  },
+  required: ['target_agent_id', 'reason', 'user_request_verbatim'],
+  additionalProperties: false,
+} as const
+
 export function getAgentInteractionAnthropicTools(): Array<Record<string, unknown>> {
   return [
     normalizeAnthropicToolSchema({
       name: 'ask_user_questions',
       description: ASK_USER_QUESTIONS_DESCRIPTION,
       input_schema: ASK_USER_QUESTIONS_INPUT_SCHEMA,
+    }),
+    normalizeAnthropicToolSchema({
+      name: 'agent_propose_handoff',
+      description: PROPOSE_HANDOFF_DESCRIPTION,
+      input_schema: PROPOSE_HANDOFF_INPUT_SCHEMA,
     }),
   ]
 }
@@ -106,6 +155,14 @@ export function getAgentInteractionOpenAITools(): Array<Record<string, unknown>>
         name: 'ask_user_questions',
         description: ASK_USER_QUESTIONS_DESCRIPTION,
         parameters: ASK_USER_QUESTIONS_INPUT_SCHEMA,
+      },
+    }),
+    normalizeOpenAIToolSchema({
+      type: 'function',
+      function: {
+        name: 'agent_propose_handoff',
+        description: PROPOSE_HANDOFF_DESCRIPTION,
+        parameters: PROPOSE_HANDOFF_INPUT_SCHEMA,
       },
     }),
   ]

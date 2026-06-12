@@ -48,6 +48,8 @@ export class RunCoordinator {
         scope: ConversationScope
         message: RunMessage
         coordinators: RunCoordinatorRequest['coordinators']
+        /** EP3-A4 — the scope's effective owner; switches A2 injection. */
+        ownerAgentId?: string | null
       }) => Promise<PreparedRunPayload>
       applyToMessage: (message: RunMessage, prepared: PreparedRunPayload) => RunMessage
       recordRunOutcome: (payload: {
@@ -66,6 +68,9 @@ export class RunCoordinator {
     executeAndCollect: (request: ExecutionHostRequest) => Promise<ExecutionHostResult>
     emitScopeRunEvent: (payload: ScopeRunEventPayload, projectionTruth?: ProjectionTruthSnapshot | null) => void
     reflectOnConversation: (scope: ConversationScope, usedTools: string[]) => Promise<ScopeRunMemoryCapture | null>
+    /** EP3-A4 — most recent ownerAgentId among the scope's tasks (handoff
+     *  adoption switches it); absent/null keeps current behavior. */
+    resolveScopeOwnerAgent?: (scopeId: string) => string | null
   }) {}
 
   async runScoped(
@@ -91,6 +96,9 @@ export class RunCoordinator {
       scope: request.scope,
       message: request.message,
       coordinators: request.coordinators,
+      // EP3-A4 — adoption switched the scope's owner; this is where the
+      // next turn's injection follows it (A2 channel).
+      ownerAgentId: this.deps.resolveScopeOwnerAgent?.(request.scope.id) ?? null,
     })
     const initialTaskType = request.budget ? 'short_task' : resolveInitialTaskTypeFromPrepared(prepared)
     const budget = request.budget || createRunBudgetSeed(initialTaskType)

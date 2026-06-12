@@ -431,6 +431,25 @@ export class TaskProjectionRepository implements TaskProjectionStore {
     ).all<TaskProjectionRow>(scopeId).map((row) => this.mapRow(row))
   }
 
+  /**
+   * EP3-A4 — the scope's effective injection owner: the most recently
+   * updated row carrying an ownerAgentId. Once a task in this scope was
+   * handed to a specialized agent, subsequent turns inject that agent's
+   * scope (A2 channel) until a later handoff changes it. Dead DB → null.
+   */
+  getLatestOwnerAgentForScope(scopeId: string): string | null {
+    try {
+      const db = this.dbManager.getRawDb()
+      if (!db) return null
+      const row = db.prepare(
+        'SELECT owner_agent_id FROM task_projections WHERE scope_id = ? AND owner_agent_id IS NOT NULL ORDER BY updated_at DESC LIMIT 1',
+      ).get<{ owner_agent_id: string | null }>(scopeId)
+      return row?.owner_agent_id ?? null
+    } catch {
+      return null
+    }
+  }
+
   listByParentTask(parentTaskId: string): TaskProjectionRecord[] {
     const db = this.dbManager.getRawDb()
     if (!db) throw new Error('Database not available')

@@ -484,7 +484,10 @@ export class AgentControlRuntime extends EventEmitter {
       promptAssembly: this.promptAssembly,
       executeAndCollect: (request) => this.orchestrator.executeAndCollect(request),
       emitScopeRunEvent: (payload, projectionTruth) => this.emitScopeRunEvent(payload, projectionTruth),
-      reflectOnConversation: (scope, usedTools) => this.reflectOnConversation(scope, usedTools)
+      reflectOnConversation: (scope, usedTools) => this.reflectOnConversation(scope, usedTools),
+      // EP3-A4 — handoff adoption moves the scope's owner; next turn's
+      // injection follows it (A2 channel).
+      resolveScopeOwnerAgent: (scopeId) => this.taskProjectionStore.getLatestOwnerAgentForScope(scopeId)
     })
     this.runProjection = new RunProjection({
       getScope: (scopeId) => this.getConversationScope(scopeId),
@@ -838,6 +841,11 @@ export class AgentControlRuntime extends EventEmitter {
   getRunMetaRepository(): RunMetaRepository | null {
     const rawDb = this.db.getRawDb()
     return rawDb ? new RunMetaRepository(rawDb) : null
+  }
+
+  /** EP3-A4 — agents-table registry for the handoff proposal flow. */
+  getAgentRegistry(): AgentRegistryRepository {
+    return this.agentRegistry
   }
 
   private hasActiveNarrationContinuationRun(): boolean {

@@ -49,6 +49,7 @@ import { executeDocumentTool } from './document-tools'
 import { executeGeneralResearchTool } from './general-research-tools'
 import { executeMapTool } from './map-tools'
 import { executeAskUserQuestions } from './builtins/ask-user-questions'
+import { executeProposeHandoff } from './builtins/propose-handoff'
 import { executeInstallSkill } from './builtins/install-skill'
 import {
   getAskUserQuestionsCardEmitter,
@@ -653,12 +654,36 @@ async function executeToolCallInner(
           })
 
         case 'agent_interaction':
-          // Single tool today: `ask_user_questions`. Emitter + persistor are
-          // looked up via the bridge so the handler stays electron-free and
-          // testable under `tsx --test`. Conversation id falls back to the
-          // session/scope identifier when the caller did not pass one; the
-          // renderer uses it only as a grouping key on the DB row, so any
-          // stable per-conversation token is acceptable.
+          // EP3-A4 — handoff proposal: same card machinery, plus registry
+          // lookup and the codebase's ONLY ownerAgentId value write (via
+          // the runtime's projection repository).
+          if (toolName === 'agent_propose_handoff') {
+            const runtime = context.runtime
+            if (!runtime) {
+              return createToolExecutionOutput('转办提议无效：runtime 不可用', {
+                shape: 'json',
+                data: { outcome: { kind: 'invalid', reason: 'runtime_unavailable' } },
+              })
+            }
+            return executeProposeHandoff(args as Parameters<typeof executeProposeHandoff>[0], {
+              getAgent: (id) => runtime.getAgentRegistry().get(id),
+              updateTaskOwner: (taskId, ownerAgentId) =>
+                runtime.getTaskProjectionStore().update(taskId, { ownerAgentId }),
+              sessionId: context.sessionId,
+              conversationId: context.scope?.id || context.sessionId,
+              scopeId: context.scopeId,
+              signal: context.abortSignal,
+              emitCard: getAskUserQuestionsCardEmitter(),
+              persistCard: getAskUserQuestionsCardPersistor(),
+              taskId: context.taskId ?? null,
+            })
+          }
+          // `ask_user_questions`. Emitter + persistor are looked up via the
+          // bridge so the handler stays electron-free and testable under
+          // `tsx --test`. Conversation id falls back to the session/scope
+          // identifier when the caller did not pass one; the renderer uses
+          // it only as a grouping key on the DB row, so any stable
+          // per-conversation token is acceptable.
           return executeAskUserQuestions(args as unknown as Parameters<typeof executeAskUserQuestions>[0], {
             sessionId: context.sessionId,
             conversationId: context.scope?.id || context.sessionId,
