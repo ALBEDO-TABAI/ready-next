@@ -246,6 +246,13 @@ function makeEmptySessionSlice(conversationId: string | null = null): SessionSli
 interface AgentState {
   agents: Agent[]
   messages: AgentMessage[]
+  /** EP2 P0-2 — per-scope live transient cache (scope-keyed, OUTSIDE session
+   *  slices): in-flight assistant segments survive scope switches and merge
+   *  back on loadScope instead of being DB-overwritten. */
+  scopeLiveMessages: Record<string, AgentMessage[]>
+  appendScopeLiveMessage: (scopeId: string, message: AgentMessage) => void
+  appendToScopeLiveMessage: (scopeId: string, messageId: string, chunk: string) => void
+  pruneScopeLiveMessages: (scopeId: string, persistedIds: ReadonlyArray<string>) => void
   currentAgent: string
   inputValue: string
   pendingContinuationIntent: PendingContinuationIntent | null
@@ -1179,6 +1186,31 @@ async function flushPendingSendBuffer(sessionId?: string | null) {
 
 export const useAgent = create<AgentState>((set, get) => ({
   agents: cloneFallbackAgents(),
+  scopeLiveMessages: {},
+  appendScopeLiveMessage: (scopeId, message) => set((state) => {
+    const existing = state.scopeLiveMessages[scopeId] || []
+    if (existing.some((item) => item.id === message.id)) return {}
+    return { scopeLiveMessages: { ...state.scopeLiveMessages, [scopeId]: [...existing, message] } }
+  }),
+  appendToScopeLiveMessage: (scopeId, messageId, chunk) => set((state) => {
+    const existing = state.scopeLiveMessages[scopeId]
+    if (!existing) return {}
+    let touched = false
+    const next = existing.map((item) => {
+      if (item.id !== messageId) return item
+      touched = true
+      return { ...item, content: `${item.content}${chunk}` }
+    })
+    return touched ? { scopeLiveMessages: { ...state.scopeLiveMessages, [scopeId]: next } } : {}
+  }),
+  pruneScopeLiveMessages: (scopeId, persistedIds) => set((state) => {
+    const existing = state.scopeLiveMessages[scopeId]
+    if (!existing || existing.length === 0) return {}
+    const drop = new Set(persistedIds)
+    const next = existing.filter((item) => !drop.has(item.id))
+    if (next.length === existing.length) return {}
+    return { scopeLiveMessages: { ...state.scopeLiveMessages, [scopeId]: next } }
+  }),
   messages: [
     {
       id: 'welcome',
@@ -1756,8 +1788,20 @@ export const useAgent = create<AgentState>((set, get) => ({
       )
       if (transientMessages.length > 0) {
         messages.push(...transientMessages)
+      }
+      // EP2 P0-2 — merge the scope's live cache: segments streamed while this
+      // scope was in the background are NOT in the DB yet; without this the
+      // DB-only load makes them vanish until the run persists at terminal.
+      const persistedIds = new Set(messages.map((item) => item.id))
+      const liveCached = (get().scopeLiveMessages[scopeId] || []).filter((item) => !persistedIds.has(item.id))
+      if (liveCached.length > 0) {
+        messages.push(...liveCached)
+      }
+      if (transientMessages.length > 0 || liveCached.length > 0) {
         messages.sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime())
       }
+      // prune cache entries the DB already covers (terminal persistence done)
+      get().pruneScopeLiveMessages(scopeId, [...persistedIds])
       if (
         activeRunState?.responseMessageId &&
         activeRunState.responseBuffer &&

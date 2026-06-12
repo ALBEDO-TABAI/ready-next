@@ -603,6 +603,17 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
         }
         targetResponseMessageId = generateResponseSegmentId()
         nextBuffer = data.chunk
+        // EP2 P0-2 — write-through: every streamed segment lands in the
+        // scope's live cache so a later loadScope can restore it whether or
+        // not this scope is in the foreground right now.
+        currentState.appendScopeLiveMessage(scopeId, {
+          id: targetResponseMessageId,
+          agent: data.agent,
+          content: data.chunk,
+          type: 'agent',
+          timestamp: new Date(),
+          meta: { transient: true },
+        })
         if (scopeId === currentState.currentScopeId) {
           currentState.addMessage({
             id: targetResponseMessageId,
@@ -618,12 +629,14 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
             { streamingMessageId: targetResponseMessageId },
           ))
         }
-      } else if (
-        scopeId === currentState.currentScopeId &&
-        targetResponseMessageId &&
-        currentState.messages.some((item: AgentMessage) => item.id === targetResponseMessageId)
-      ) {
-        currentState.appendToMessage(targetResponseMessageId, data.chunk)
+      } else if (targetResponseMessageId) {
+        currentState.appendToScopeLiveMessage(scopeId, targetResponseMessageId, data.chunk)
+        if (
+          scopeId === currentState.currentScopeId &&
+          currentState.messages.some((item: AgentMessage) => item.id === targetResponseMessageId)
+        ) {
+          currentState.appendToMessage(targetResponseMessageId, data.chunk)
+        }
       }
 
       upsertScopeRunState(scopeId, (previous) => ({
@@ -1437,6 +1450,17 @@ export function createAgentRuntimeDriver(store: AgentStoreLike) {
           nextState.currentScope = event.scope
         }
 
+        if (event.type === 'message_added' && event.message) {
+          // EP2 P0-2 — a persisted message supersedes its live-cache twin for
+          // ANY scope (the DB row is what the next loadScope returns).
+          const live = state.scopeLiveMessages?.[event.scope.id]
+          if (live && live.some((item: AgentMessage) => item.id === event.message!.id)) {
+            nextState.scopeLiveMessages = {
+              ...state.scopeLiveMessages,
+              [event.scope.id]: live.filter((item: AgentMessage) => item.id !== event.message!.id),
+            }
+          }
+        }
         if (event.type === 'message_added' && event.message && state.currentScopeId === event.scope.id) {
           const nextMessage: AgentMessage = {
             id: event.message.id,
