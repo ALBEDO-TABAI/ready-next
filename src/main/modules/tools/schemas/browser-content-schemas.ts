@@ -38,6 +38,7 @@ export const BrowserDownloadCollectedMediaSchema = z.object({
   filename_prefix: z.string().optional().describe('文件名前缀（可选，默认 image）'),
   overwrite: z.boolean().optional().describe('同名是否覆盖，默认 false'),
   expected_total: z.number().optional().describe('可选：页面声称的图片总数；若已发现数不足，结果会标记 partial 并给出剩余数——不要在 partial 时宣告完成'),
+  allow_partial: z.boolean().optional().describe('仅当用户已确认允许只下载当前已发现图片时传 true；发现未完整时仍需要浏览器采集确认记录'),
 })
 
 export const BrowserResolveVideoSchema = z.object({

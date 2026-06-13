@@ -9,6 +9,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { detectNegations, detectNegationReleases } from '../shared/agent-followup-intent'
 import {
   recordNegations,
@@ -18,6 +19,10 @@ import {
   __clearNegationStateForTests,
 } from '../main/modules/agent-control/safety/negation-state'
 import { executeToolCall } from '../main/modules/tools/tool-executor'
+
+test('negation-intent declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'negation-intent transitive sqlite load')
+})
 
 const NO_AUTH = { mode: 'none', reason: 'no_skill_turn' } as never
 

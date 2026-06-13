@@ -56,6 +56,14 @@ export type CollectorFacadeFactory = (opts: {
   surface: AgentBrowserSurface
 }) => CollectorFacadeBundle
 
+export interface BrowserSiteCardLearningSink {
+  learnFromVisibleCollectFailure(signal: {
+    domain: string
+    failureKind: 'login_wall' | 'selector_missing'
+    detail: string
+  }): void
+}
+
 /**
  * Minimal projection input the runner emits for a note_collect task (plan §3).
  * The runtime-backed sink (wired in setupAgentIPC) maps this onto a full
@@ -348,6 +356,35 @@ async function probeVisibleCollectEmptyDiagnostics(
   })
 }
 
+function domainFromUrl(url: string): string | null {
+  try {
+    const hostname = new URL(url).hostname.toLowerCase()
+    return hostname || null
+  } catch {
+    return null
+  }
+}
+
+function siteLearningFailureKind(diagnostic: BrowserEmptyPageDiagnostic): 'login_wall' | 'selector_missing' | null {
+  if (diagnostic.reason === 'login_wall') return 'login_wall'
+  if (diagnostic.reason === 'selector_mismatch') return 'selector_missing'
+  return null
+}
+
+export function visibleCollectFailureLearningSignal(
+  targetUrl: string,
+  diagnostic: BrowserEmptyPageDiagnostic,
+): Parameters<BrowserSiteCardLearningSink['learnFromVisibleCollectFailure']>[0] | null {
+  const domain = domainFromUrl(targetUrl)
+  const failureKind = siteLearningFailureKind(diagnostic)
+  if (!domain || !failureKind) return null
+  return {
+    domain,
+    failureKind,
+    detail: diagnostic.evidence.join('; ') || diagnostic.reason,
+  }
+}
+
 function completedAllExpected(expected: number, completed: number, failed: number, stopReason: string | null): boolean {
   return stopReason === 'completed' && expected > 0 && completed === expected && failed === 0
 }
@@ -522,6 +559,10 @@ export class BrowserContentTaskRunner {
     private readonly collectorFacadeFactory: CollectorFacadeFactory | null = null,
   ) {}
 
+  setSiteCardLearningSink(sink: BrowserSiteCardLearningSink | null): void {
+    this.siteCardLearningSink = sink
+  }
+
   /** Set/replace the projection sink and re-project active note_collect tasks. */
   setTaskProjectionSink(sink: BrowserTaskProjectionSink | null): void {
     this.taskProjectionSink = sink
@@ -532,6 +573,7 @@ export class BrowserContentTaskRunner {
   }
 
   private taskProjectionSink: BrowserTaskProjectionSink | null = null
+  private siteCardLearningSink: BrowserSiteCardLearningSink | null = null
 
   private async reprojectActiveBrowserCollect(): Promise<void> {
     const sink = this.taskProjectionSink
@@ -1176,6 +1218,10 @@ export class BrowserContentTaskRunner {
     )
       ? await probeVisibleCollectEmptyDiagnostics(this.capabilityService, { targetUrl, itemSelector, template })
       : null
+    if (emptyDiagnostics && this.siteCardLearningSink) {
+      const signal = visibleCollectFailureLearningSignal(targetUrl, emptyDiagnostics)
+      if (signal) this.siteCardLearningSink.learnFromVisibleCollectFailure(signal)
+    }
     const finalResultWithVerdict = stopReason === 'cancelled' || stopReason === 'lease_lost'
       ? finalResult
       : {

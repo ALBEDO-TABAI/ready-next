@@ -5,7 +5,12 @@ import { act } from 'react'
 import type { Root } from 'react-dom/client'
 import { MemoryRouter } from 'react-router-dom'
 import { JSDOM } from 'jsdom'
-import type { MemoryEntry, MemoryQueryFilters, MemoryStats } from '../renderer/types/electron'
+import type {
+  BeliefCardSettingsSnapshotData,
+  MemoryEntry,
+  MemoryQueryFilters,
+  MemoryStats,
+} from '../renderer/types/electron'
 
 interface DomHandle {
   dom: JSDOM
@@ -138,10 +143,79 @@ const stats: MemoryStats = {
   avgAccessCount: 3,
 }
 
+const beliefSnapshot: BeliefCardSettingsSnapshotData = {
+  knowledgeSystemEnabled: true,
+  cards: [
+    {
+      relPath: 'knowledge/new-learning.md',
+      scopeId: 'global',
+      title: '系统新学到的东西',
+      description: '回复要先给结论。',
+      confidence: 'M',
+      tag: 'knowledge',
+      status: 'staged',
+      created: '2026-06-13',
+      source: null,
+      stage: null,
+      site: null,
+      siteRiskLevel: null,
+      siteRiskAuthority: null,
+      isSiteCard: false,
+      isRiskSuggestion: false,
+      bodyPreview: '正文',
+    },
+    {
+      relPath: 'knowledge/sites/xiaohongshu.com.md',
+      scopeId: 'global',
+      title: '小红书站点经验',
+      description: '高风控站点。',
+      confidence: 'H',
+      tag: 'knowledge',
+      status: 'active',
+      created: '2026-06-13',
+      source: null,
+      stage: null,
+      site: 'xiaohongshu.com',
+      siteRiskLevel: 'high',
+      siteRiskAuthority: 'code',
+      isSiteCard: true,
+      isRiskSuggestion: false,
+      bodyPreview: '正文',
+    },
+  ],
+  summary: {
+    total: 2,
+    staged: 1,
+    active: 1,
+    rejected: 0,
+    invalid: 0,
+    agentScoped: 0,
+    siteCards: 1,
+    highRiskSiteCards: 1,
+    riskSuggestions: 0,
+  },
+  maintenance: {
+    lifecycleRunning: true,
+    lastLifecycleMaintenanceAt: '2026-06-13T12:00:00.000Z',
+    llmRound: {
+      lastRunAt: '2026-06-13T12:01:00.000Z',
+      decision: 'skip',
+      reason: 'no_signals',
+      llmCalls: 0,
+      applied: 0,
+      rejected: 0,
+      terminal: 'gated_skip',
+    },
+  },
+}
+
 interface MemoryHarness {
   queryCalls: MemoryQueryFilters[]
   statsCalls: number
   maintenanceCalls: number
+  beliefCardListCalls: number
+  beliefCardTransitions: Array<{ relPath: string; action: 'approve' | 'reject' }>
+  knowledgeSwitches: boolean[]
   createFromConversationCalls: Array<{
     scopeId: string
     category: 'summary' | 'learning'
@@ -159,6 +233,9 @@ function installElectronAPI(dom: JSDOM): MemoryHarness {
     queryCalls: [],
     statsCalls: 0,
     maintenanceCalls: 0,
+    beliefCardListCalls: 0,
+    beliefCardTransitions: [],
+    knowledgeSwitches: [],
     createFromConversationCalls: [],
     deleteCalls: [],
     alerts: [],
@@ -205,6 +282,29 @@ function installElectronAPI(dom: JSDOM): MemoryHarness {
             timestamp: new Date(0).toISOString(),
           },
         }
+      },
+    },
+    memoryCards: {
+      list: async () => {
+        harness.beliefCardListCalls += 1
+        return { success: true, data: beliefSnapshot }
+      },
+      transition: async (payload: { relPath: string; action: 'approve' | 'reject' }) => {
+        harness.beliefCardTransitions.push(payload)
+        return {
+          success: true,
+          data: {
+            ...beliefSnapshot,
+            cards: beliefSnapshot.cards.map((card) =>
+              card.relPath === payload.relPath ? { ...card, status: payload.action === 'approve' ? 'active' as const : 'rejected' as const } : card,
+            ),
+            summary: { ...beliefSnapshot.summary, staged: 0, active: 2 },
+          },
+        }
+      },
+      setKnowledgeSystemEnabled: async (enabled: boolean) => {
+        harness.knowledgeSwitches.push(enabled)
+        return { success: true, data: { ...beliefSnapshot, knowledgeSystemEnabled: enabled } }
       },
     },
     trigger: {
@@ -268,6 +368,12 @@ test('WP5 memory settings default view hides internal tools and re-queries when 
   try {
     const document = handle.dom.window.document
     assert.ok(document.body.textContent?.includes('最近记住了什么'))
+    assert.ok(document.body.textContent?.includes('信念卡确认'), 'belief-card confirmation panel must render by default')
+    assert.ok(document.body.textContent?.includes('知识系统总开关'), 'knowledge-system switch must be visible')
+    assert.ok(document.body.textContent?.includes('系统新学到的东西'), 'staged belief cards must be visible')
+    assert.ok(document.body.textContent?.includes('站点卡风险'), 'site-card risk summary must be visible')
+    assert.ok(document.body.textContent?.includes('xiaohongshu.com'), 'high-risk site card domain must be visible')
+    assert.equal(harness.beliefCardListCalls, 1)
     assert.ok(!document.body.textContent?.includes('Scope ID'), 'manual creator must stay out of the default memory view')
     assert.ok(!document.body.textContent?.includes('触发器管理'), 'trigger manager must stay inside the advanced section')
     assert.ok(!document.body.textContent?.includes('Child Runs'), 'active child runs debug must not render in memory settings')
@@ -283,6 +389,14 @@ test('WP5 memory settings default view hides internal tools and re-queries when 
 
     assert.ok(harness.queryCalls.length >= 2, 'changing filters must trigger a fresh memory query')
     assert.equal(harness.queryCalls.at(-1)?.sourceType, 'resident_user')
+
+    const confirmButton = Array.from(document.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('确认'),
+    ) as HTMLButtonElement | undefined
+    assert.ok(confirmButton, 'staged card confirm button must render')
+    await act(async () => { confirmButton.click() })
+    await flushAsync()
+    assert.deepEqual(harness.beliefCardTransitions, [{ relPath: 'knowledge/new-learning.md', action: 'approve' }])
   } finally {
     await act(async () => { root.unmount() })
     await new Promise((resolve) => setTimeout(resolve, 25))

@@ -3,6 +3,7 @@ import {
   type FileEmergenceBucket,
   type FileEmergenceEvidence,
   type FileEmergenceFileKind,
+  type FileEmergenceIntentCard,
   type FileEmergenceReadingProgress,
   type FileEmergenceProject,
   type FileEmergenceSnapshot,
@@ -170,6 +171,13 @@ export function applyFileEmergencePostProcessing(input: {
     }
   }
 
+  injectIntentCards({
+    buckets,
+    cards: input.snapshot.intentCards ?? [],
+    workspaceRoots: input.workspaceRoots,
+    now: input.now,
+  })
+
   for (const bucket of FILE_EMERGENCE_BUCKETS) {
     buckets[bucket] = buckets[bucket]
       .sort((a, b) => b.score - a.score)
@@ -179,6 +187,70 @@ export function applyFileEmergencePostProcessing(input: {
   return {
     ...input.snapshot,
     buckets,
+  }
+}
+
+function injectIntentCards(input: {
+  buckets: Record<FileEmergenceBucket, FileEmergenceProject[]>
+  cards: readonly FileEmergenceIntentCard[]
+  workspaceRoots: readonly string[]
+  now: number
+}): void {
+  for (const card of input.cards) {
+    const projection = projectFromIntentCard({
+      card,
+      workspaceRoots: input.workspaceRoots,
+      now: input.now,
+    })
+    if (!projection) continue
+    removeProject(input.buckets, projection.id)
+    input.buckets[projection.bucket].unshift(projection)
+  }
+}
+
+function projectFromIntentCard(input: {
+  card: FileEmergenceIntentCard
+  workspaceRoots: readonly string[]
+  now: number
+}): FileEmergenceProject | null {
+  const confidence = clamp01(input.card.confidence)
+  if (input.card.type === 'harvest') return null
+  const fileRefs = input.card.evidence
+    .map((item) => pathFromFileRef(item.ref))
+    .filter((path): path is string => Boolean(path && isInsideWorkspace(path, input.workspaceRoots)))
+    .slice(0, 3)
+  const bucket: FileEmergenceBucket = input.card.type === 'prepare' ? 'future' : 'today'
+  const score = input.card.type === 'prepare' ? 0.82 + confidence * 0.2 : 0.92 + confidence * 0.24
+  const actionRef = input.card.action.ref.trim()
+  const anchorPath = pathFromTaggedRef(actionRef) || actionRef || null
+  const reason = input.card.type === 'prepare' ? '即将需要准备' : '相关材料正在成形'
+
+  return {
+    id: `intent:${input.card.id}`,
+    bucket,
+    title: cleanTitle(input.card.title),
+    rawLabels: [cleanTitle(input.card.title)],
+    anchorType: 'semantic',
+    anchorPath,
+    titleSource: 'agent',
+    score,
+    confidence: confidence >= 0.75 ? 'high' : confidence >= 0.55 ? 'medium' : 'low',
+    status: input.card.type === 'prepare' ? 'upcoming' : 'active',
+    files: fileRefs.map((path) => makeFileRef({
+      path,
+      name: basename(path),
+      reason,
+      score,
+      isCurrent: false,
+    })),
+    evidence: input.card.evidence.slice(0, 8).map((item) => ({
+      source: 'agent' as const,
+      label: item.fact,
+      score,
+      timestamp: input.now,
+      ref: item.ref ?? null,
+    })),
+    updatedAt: input.now,
   }
 }
 
@@ -591,6 +663,23 @@ function basenameWithoutExtension(path: string): string {
   const ext = name.slice(dot + 1)
   if (ext.length > 8) return name
   return name.slice(0, dot) || name
+}
+
+function pathFromTaggedRef(ref: string | null | undefined): string | null {
+  const value = ref?.trim()
+  if (!value) return null
+  if (value.startsWith('/')) return normalizePathKey(value)
+  const tagged = /^(?:file|project|artifact):(.+)$/i.exec(value)
+  const candidate = tagged?.[1]?.trim()
+  if (!candidate || !candidate.startsWith('/')) return null
+  return normalizePathKey(candidate)
+}
+
+function pathFromFileRef(ref: string | null | undefined): string | null {
+  const value = ref?.trim()
+  if (!value) return null
+  if (!/^file:/i.test(value)) return null
+  return pathFromTaggedRef(value)
 }
 
 function cleanTitle(title: string): string {

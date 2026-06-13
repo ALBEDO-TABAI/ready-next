@@ -13,10 +13,15 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { PromptAssemblyService } from '../main/modules/agent-control/prompt-assembly'
 import { BeliefCardStore } from '../main/modules/agent-control/knowledge/belief-card-store'
 import type { ConversationScope } from '../main/modules/agent-control/contracts/types'
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
+
+test('knowledge-injection-snapshot declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'knowledge-injection-snapshot transitive sqlite load')
+})
 
 const SCOPE: ConversationScope = {
   id: 'scope-k3',

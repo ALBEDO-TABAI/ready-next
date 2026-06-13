@@ -33,10 +33,12 @@ import {
   SETTINGS_SUBTLE_CARD_STYLE,
   settingsListItemStyle,
 } from '../components/settings/settings-theme'
-import { MemoryListPanel, TriggerManager, MemoryStatsCard, MemoryCreator } from '../components/memory'
-import { useMemories, useMemoryLifecycle, useMemoryStats } from '../hooks/useMemory'
+import { MemoryListPanel, TriggerManager, MemoryStatsCard, MemoryCreator, BeliefCardsPanel } from '../components/memory'
+import { useBeliefCards, useMemories, useMemoryLifecycle, useMemoryStats } from '../hooks/useMemory'
 import type { MemoryQueryFilters } from '../types/electron'
 import PersonalityEditor from '../components/personality/PersonalityEditor'
+import AgentDerivationPanel from '../components/personality/AgentDerivationPanel'
+import AgentRegistryPanel from '../components/personality/AgentRegistryPanel'
 import UserProfileEditor from '../components/profile/UserProfileEditor'
 
 const AGENT_AUTO_NARRATION_CONTINUATION_SETTING_KEY = 'agent.autoNarrationContinuation'
@@ -2689,6 +2691,7 @@ function MemorySettingsSection() {
   const memories = useMemories(filters)
   const stats = useMemoryStats()
   const lifecycle = useMemoryLifecycle()
+  const beliefCards = useBeliefCards()
 
   const refreshMemorySection = useCallback(async () => {
     await Promise.all([memories.refresh(), stats.refresh()])
@@ -2749,22 +2752,33 @@ function MemorySettingsSection() {
           maintenanceRunning={lifecycle.maintenanceRunning}
           onRunMaintenance={handleRunMaintenance}
         />
-        <div
-          className="glass-surface-card border"
-          style={{
-            ...SETTINGS_CARD_STYLE,
-            minHeight: 520,
-            overflow: 'hidden'
-          }}
-        >
-          <MemoryListPanel
-            memories={memories.memories}
-            loading={memories.loading}
-            error={memories.error}
-            filters={filters}
-            onFiltersChange={setFilters}
-            onDeleteMemory={handleDeleteMemory}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 20, minWidth: 0 }}>
+          <BeliefCardsPanel
+            snapshot={beliefCards.snapshot}
+            loading={beliefCards.loading}
+            error={beliefCards.error}
+            actionRunning={beliefCards.actionRunning}
+            onRefresh={beliefCards.refresh}
+            onTransition={beliefCards.transitionCard}
+            onSetKnowledgeSystemEnabled={beliefCards.setKnowledgeSystemEnabled}
           />
+          <div
+            className="glass-surface-card border"
+            style={{
+              ...SETTINGS_CARD_STYLE,
+              minHeight: 520,
+              overflow: 'hidden'
+            }}
+          >
+            <MemoryListPanel
+              memories={memories.memories}
+              loading={memories.loading}
+              error={memories.error}
+              filters={filters}
+              onFiltersChange={setFilters}
+              onDeleteMemory={handleDeleteMemory}
+            />
+          </div>
         </div>
       </div>
 
@@ -3144,8 +3158,10 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
 
                 {/* Agent Personalities — custom layout */}
                 {currentSection.id === 'personalities' && (
-                  <div>
+                  <div className="flex flex-col gap-5">
                     <PersonalityEditor />
+                    <AgentDerivationPanel />
+                    <AgentRegistryPanel />
                   </div>
                 )}
 

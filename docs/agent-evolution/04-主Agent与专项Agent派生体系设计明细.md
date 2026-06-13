@@ -45,7 +45,7 @@ CREATE TABLE agents (
 |----|------|-----------|
 | 组织层 | `agents` 表 | 谁**拥有**这个域的知识/规则/任务积累 |
 | 表达层 | `agent_personalities`（现状不动） | 用什么语气/角色感对话——一个 agent 引用一个 persona，persona 可复用 |
-| 归属层 | 会话的 `scope.agent` + 任务的 `agent_id` | 这段对话/这个任务**当前由谁负责**——两者可以不同（见 §3 同会话归属切换） |
+| 归属层 | 会话的 `scope.agent` + 任务的 `owner_agent_id` | 这段对话/这个任务**当前由谁负责**——两者可以不同（见 §3 同会话归属切换） |
 
 现状的四个预设 persona 是**表达层资产，不是组织实体**——用户拿它们当"语气选择"用，不能默认升格。迁移保护规则：
 
@@ -58,17 +58,17 @@ CREATE TABLE agents (
 ```
 .ready-agent-memory/agents/{agentId}/
 ├── RULES.md            # 身份/域策略/操作指令（L0 注入，仅该 agent 会话）
-└── knowledge/          # 该域的信念卡 + index（L1.5 注入，仅该 agent 会话）
-    ├── index.md
-    ├── routing-*.md    # 仅主 agent：路由卡
+└── knowledge/          # 该域的信念卡（L1.5 注入，仅该 agent 会话）
     └── {slug}.md
 ```
 
-DB 侧：`agent_memory_metadata.scope_id = 'agent:{agentId}'`（字段已存在，零迁移）；`agent_triggers` 增加可空 `agent_id` 列实现 per-agent 触发规则。
+root `knowledge/index.md` 只收 global 卡；agent 卡不生成 per-agent index 文件，只参与本作用域 backlink、镜像、衰减和维护信号。路由卡仍落在 root `knowledge/routing-*.md`，只给主 agent 的路由索引读取。
+
+DB 侧：agent 作用域卡镜像为 `scope_id = 'agent:{agentId}'`；任务归属由 `task_projections.owner_agent_id` 表达。
 
 ### 2.3 任务归属
 
-`task_projections` 已有 `scope_id`，经 ConversationScope 可回溯 agent —— 增加冗余列 `agent_id`（建索引）让"该 agent 的任务历史/CheckIn 学习信号"可直接查询，这是 03 篇维护回合按 agent 作用域消化信号的前提。
+`task_projections` 已有 `scope_id`，经 ConversationScope 可回溯会话 agent；任务级归属使用 `owner_agent_id`。该字段只在用户采纳转办或派生/生命周期确认流中改变，后续轮 prompt-assembly 按 owner 查对应 RULES/知识作用域。
 
 ## 3. 路由设计（三档递进）
 
@@ -76,7 +76,7 @@ DB 侧：`agent_memory_metadata.scope_id = 'agent:{agentId}'`（字段已存在�
 
 ⚠️ 路由的默认形态修正（Codex 评审第 8 点采纳）：**转办 ≠ 新开会话**。对单用户桌面应用，强制切会话会割裂体验。归属切换有两种形态，**同会话切换是默认**：
 
-- **同会话任务归属切换（默认）**：任务卡的 `agent_id` 改为目标专项 agent，聊天线程不断；该任务相关的后续轮次，prompt-assembly 按任务 owner 注入对应的 RULES/知识索引（turn 级 agent 资产覆盖，scope.agent 不变）。用户感知 = 任务卡上多了个"由 {剪辑} 负责"的标记，对话连续；
+- **同会话任务归属切换（默认）**：任务卡的 `owner_agent_id` 改为目标专项 agent，聊天线程不断；该任务相关的后续轮次，prompt-assembly 按任务 owner 注入对应的 RULES/知识索引（turn 级 agent 资产覆盖，scope.agent 不变）。用户感知 = 任务卡上多了个"由 {剪辑} 负责"的标记，对话连续；
 - **新开会话（可选）**：仅当用户主动选择"单独开个会话聊这事"，或域差异大到当前会话上下文成为干扰时由提案给出该选项。
 
 **焦点任务解析规则（多任务多 owner 时"继续"续哪个）**——同会话切换引入的新问题，解析顺序定死在代码层：
@@ -84,7 +84,7 @@ DB 侧：`agent_memory_metadata.scope_id = 'agent:{agentId}'`（字段已存在�
 1. **显式引用赢**：用户点了任务卡 / 消息中引用了任务（@任务名或卡片回复）→ 该任务即焦点；
 2. **最近交互次之**：无显式引用 → 取本会话 `last_interacted_at` 最新的非终态任务为焦点（每次工具执行/裁决/用户点击都刷新该时间戳）；
 3. **歧义必问**：两个非终态任务的最近交互间隔 < 阈值（如 2 轮）且话语未指明 → 一次性澄清（列出候选任务卡，单选），不猜；
-4. **焦点可见可撤回**：会话输入框上方常驻"当前焦点：{任务} · 由 {agent} 负责"chip，点击可切换；归属切换后 chip 提供单次撤回（undo 把 agent_id 与注入切回）。
+4. **焦点可见可撤回**：会话输入框上方常驻"当前焦点：{任务} · 由 {agent} 负责"chip，点击可切换；归属切换后 chip 提供单次撤回（undo 把 owner_agent_id 与注入切回）。
 
 焦点任务的 owner 决定该轮的 turn 级资产注入（A2）；05 篇 I1 的状态优先决策序消费的"候选 task ref"即按此排序。
 
@@ -114,7 +114,7 @@ DB 侧：`agent_memory_metadata.scope_id = 'agent:{agentId}'`（字段已存在�
 
 ```
 crystallize 发现重复模式（≥2 次相似请求 + 稳定输入/过程/输出）
-   → aspire 卡 status: candidate（带日期证据）
+   → aspire 卡 `status: staged` + `stage: candidate`（带日期证据）
    → UI 涌现建议卡："你最近 5 次让我整理周报，要不要成立一个「周报助理」？"
    → 用户确认（命名可改）
    → AgentFactory 执行派生：
@@ -123,7 +123,7 @@ crystallize 发现重复模式（≥2 次相似请求 + 稳定输入/过程/输�
        3. 种子 RULES.md：从候选卡证据 + 相关历史 CheckIn 提炼（LLM 一次性生成，用户可改）
        4. 把主 agent 作用域中属于该域的信念卡/偏好卡迁移到新 agent 作用域（列清单，用户确认）
        5. 写 routing-*.md 路由卡（条件/目标/主 agent 保留什么/转办要带什么）
-       6. 候选卡 status → emerged
+       6. 候选卡 `stage` → `emerged`（`status` 生命周期不变）
    → 后续同类请求按档位二自动路由
 ```
 

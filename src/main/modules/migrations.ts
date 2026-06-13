@@ -2272,6 +2272,28 @@ const migrations: Migration[] = [
       db.exec('ALTER TABLE task_projections ADD COLUMN packet_role TEXT')
       db.exec('ALTER TABLE task_projections ADD COLUMN context_refs_json TEXT')
     }
+  },
+  {
+    // EP4-A6a — specialist agent derivation lineage. Name-isolated and
+    // idempotent: phase-4 derivation can record where a specialist came from
+    // without changing the main-agent-only baseline.
+    name: '058_agent_derivation_columns',
+    up: (db) => {
+      const cols = db.prepare('PRAGMA table_info(agents)').all<{ name: string }>()
+      const has = (name: string) => cols.some((c) => c.name === name)
+      if (!has('parent_agent_id')) db.exec('ALTER TABLE agents ADD COLUMN parent_agent_id TEXT')
+      if (!has('derivation_reason')) db.exec('ALTER TABLE agents ADD COLUMN derivation_reason TEXT')
+    }
+  },
+  {
+    // EP4-A7 — lifecycle merge target. Assets stay on disk; this column only
+    // records where a merged agent's future work should be attributed.
+    name: '059_agent_lifecycle_merged_target',
+    up: (db) => {
+      const cols = db.prepare('PRAGMA table_info(agents)').all<{ name: string }>()
+      const has = (name: string) => cols.some((c) => c.name === name)
+      if (!has('merged_into_agent_id')) db.exec('ALTER TABLE agents ADD COLUMN merged_into_agent_id TEXT')
+    }
   }
 ]
 

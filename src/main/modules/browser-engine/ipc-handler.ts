@@ -15,7 +15,7 @@ import type {
   BrowserWaitForConditionOptions,
   BrowserCapabilityTaskKind,
 } from './capability-types'
-import { BrowserContentTaskRunner, type BrowserTaskProjectionSink } from './content-task-runner'
+import { BrowserContentTaskRunner, type BrowserSiteCardLearningSink, type BrowserTaskProjectionSink } from './content-task-runner'
 import { registerWaitingHumanBrowserTaskResumePort } from './task-event-bridge'
 import { ScopedBrowserFacade } from './scoped-browser-facade'
 import type { BrowserCollectionTarget } from './collection-targets'
@@ -1024,6 +1024,10 @@ export class BrowserController {
   /** Wire the chat task-projection sink (set by setupAgentIPC, plan §3.3). */
   setTaskProjectionSink(sink: BrowserTaskProjectionSink | null): void {
     this.contentTaskRunner.setTaskProjectionSink(sink)
+  }
+
+  setSiteCardLearningSink(sink: BrowserSiteCardLearningSink | null): void {
+    this.contentTaskRunner.setSiteCardLearningSink(sink)
   }
 
   /**

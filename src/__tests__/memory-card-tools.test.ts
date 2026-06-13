@@ -4,9 +4,14 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { executeMemoryTool } from '../main/modules/tools/memory-tools'
 import { BeliefCardStore } from '../main/modules/agent-control/knowledge/belief-card-store'
 import type { ToolContext } from '../main/modules/tools/tool-executor'
+
+test('memory-card-tools declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'memory-card-tools transitive sqlite load')
+})
 
 function makeContext(memoryRoot: string): ToolContext {
   const store = new BeliefCardStore({ memoryRoot })

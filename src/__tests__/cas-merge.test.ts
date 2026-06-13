@@ -12,6 +12,7 @@ import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'n
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import {
   runUserPictureCasMerge,
   filterPictureObservations,
@@ -26,6 +27,10 @@ import {
 import { PromptAssemblyService } from '../main/modules/agent-control/prompt-assembly'
 import type { ConversationScope } from '../main/modules/agent-control/contracts/types'
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
+
+test('cas-merge declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'cas-merge transitive sqlite load')
+})
 
 const NOW = new Date('2026-06-12T12:00:00.000Z')
 const pref = (text: string): PictureObservation => ({ text, kind: 'preference' })

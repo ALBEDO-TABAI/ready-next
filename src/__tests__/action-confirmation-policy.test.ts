@@ -20,9 +20,14 @@ import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import test from 'node:test'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { resolveConfirmationGate } from '../main/modules/agent-control/safety/action-confirmation-policy'
 import { executeToolCall, type ToolContext } from '../main/modules/tools/tool-executor'
 import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
+
+test('action-confirmation-policy declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'action-confirmation-policy transitive sqlite load')
+})
 
 function modelContext(overrides: Partial<ToolContext> = {}): ToolContext {
   return {

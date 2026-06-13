@@ -838,8 +838,8 @@ function mediaUrlsFromVisibleCollectTask(task: BrowserCapabilityTaskHandle | nul
 
 /** EP2 dogfood gap 1 — when this scope already ran an image-gallery
  *  discovery, raw URL downloads break the collection chain (card never
- *  learns about the files). Find the newest completed gallery source task
- *  for the scope so the dispatch can redirect. */
+ *  learns about the files). Find the newest gallery source task for the
+ *  scope so the dispatch can redirect, including paused partial sources. */
 async function findScopeImageGallerySourceTask(
   controller: BrowserController,
   scopeId: string | null | undefined,
@@ -851,7 +851,7 @@ async function findScopeImageGallerySourceTask(
     const tasks = await list.call(controller, 'visible_collect')
     const getPayload = (controller as { getTaskPayload?: (taskId: string) => Record<string, unknown> | null }).getTaskPayload
     const candidates = tasks.filter((task) => {
-      if (task.status !== 'completed') return false
+      if (task.status === 'failed' || task.status === 'cancelled') return false
       const payload = typeof getPayload === 'function' ? (getPayload.call(controller, task.taskId) || null) : null
       if (stringField(payload?.scopeId) !== scopeId) return false
       return isImageGallerySourceTask(task, payload) && mediaUrlsFromVisibleCollectTask(task).length > 0
@@ -5708,14 +5708,30 @@ export async function executeBrowserTool(
         }
         if (!isCompleteSourceTask(sourceTask)) {
           const result = resultObject(sourceTask)
-          return JSON.stringify({
-            ok: false,
-            errorCode: 'source_task_not_complete',
-            message: `source_task_id ${sourceTaskId} 的图片发现还未完整完成，请先继续发现或明确只下载已发现图片。`,
-            sourceTaskId,
-            discoveryStatus: sourceTaskDiscoveryStatus(sourceTask),
-            continueTaskId: typeof result?.continueTaskId === 'string' ? result.continueTaskId : sourceTaskId,
-          }, null, 2)
+          const status = sourceTaskDiscoveryStatus(sourceTask)
+          const stopReason = String(result?.stopReason || sourceTask.status || 'unknown')
+          const frozenCount = mediaUrlsFromVisibleCollectTask(sourceTask).length
+          const hasPartialConsent = collectionConsentStore.hasConsent('partial_collection', sessionId || '', sourceTaskId)
+          if (!hasPartialConsent) {
+            const pendingConsentRequest = collectionConsentStore.createPendingRequest({
+              scopeId: sessionId || '',
+              sourceTaskId,
+              consentKind: 'partial_collection',
+            })
+            const message = `source_task_id ${sourceTaskId} 的图片发现还未证明是完整全量（discoveryStatus=${status}, stopReason=${stopReason}, 已发现 ${frozenCount} 张）。请先用 browser_resume_task 继续发现；如果用户明确只下载当前已发现图片，需要先完成部分采集确认。`
+            await upsertCollectionConsentProjection(runtime, pendingConsentRequest, message)
+            return JSON.stringify({
+              ok: false,
+              errorCode: 'partial_collection_consent_required',
+              message,
+              sourceTaskId,
+              discoveryStatus: status,
+              continueTaskId: typeof result?.continueTaskId === 'string' ? result.continueTaskId : sourceTaskId,
+              frozenCount,
+              allowPartialIgnored: args.allow_partial === true,
+              pendingConsentRequest,
+            }, null, 2)
+          }
         }
         const urls = mediaUrlsFromVisibleCollectTask(sourceTask)
         if (urls.length === 0) {

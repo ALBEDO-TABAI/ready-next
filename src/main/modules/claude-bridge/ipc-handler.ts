@@ -50,7 +50,10 @@ import { askUserGroup } from './ipc/ask-user-group'
 import { toolEventGroup } from './ipc/tool-event-group'
 import { agentLifecycleGroup } from './ipc/agent-lifecycle-group'
 import { agentRuntimeGroup } from './ipc/agent-runtime-group'
+import { agentRegistryGroup } from './ipc/agent-registry-group'
+import { agentDerivationGroup } from './ipc/agent-derivation-group'
 import { sessionPrerouteGroup } from './ipc/session-preroute-group'
+import { beliefCardGroup } from './ipc/belief-card-group'
 import { conversationGroup } from './ipc/conversation-group'
 import { taskProjectionGroup } from './ipc/task-projection-group'
 import { recallGroup } from './ipc/recall-group'
@@ -64,6 +67,9 @@ import { memoryGroup } from './ipc/memory-group'
 import { triggerGroup } from './ipc/trigger-group'
 import type { IpcDisposeHandle } from './ipc/types'
 import { logAgentMetric } from '../agent-control/metrics'
+import { KNOWLEDGE_SYSTEM_SETTING_KEY, isKnowledgeSystemEnabled } from '../agent-control/knowledge/knowledge-truth-source'
+import { learnSiteCardFromFailure } from '../agent-control/knowledge/site-card-learning'
+import { getLastMaintenanceRoundStatus } from '../agent-control/maintenance/maintenance-llm-round'
 import { isRendererAgentMetricName } from '../../../shared/renderer-agent-metrics'
 // Stage V V2.1c — `SendScopedUserMessage` import retired: the only call
 // site (the `agent:sendScoped` payload type) moved into `agentLifecycleGroup`.
@@ -238,8 +244,17 @@ let agentLifecycleGroupDispose: IpcDisposeHandle | null = null
  */
 let agentRuntimeGroupDispose: IpcDisposeHandle | null = null
 
+/** EP4-A7 — dispose handle for agent registry lifecycle channels. */
+let agentRegistryGroupDispose: IpcDisposeHandle | null = null
+
+/** EP4-A6b — dispose handle for candidate-to-agent derivation channels. */
+let agentDerivationGroupDispose: IpcDisposeHandle | null = null
+
 /** EP4-A5 — dispose handle for the session preroute evaluate channel. */
 let sessionPrerouteGroupDispose: IpcDisposeHandle | null = null
+
+/** EP4 settings surface — belief-card truth-source review/confirmation. */
+let beliefCardGroupDispose: IpcDisposeHandle | null = null
 
 /**
  * Stage V V2.1e — dispose handle returned by `conversationGroup.register`.
@@ -478,10 +493,22 @@ export async function cleanupAgentRuntime(): Promise<void> {
     try { agentRuntimeGroupDispose.dispose() } catch { /* ignore */ }
     agentRuntimeGroupDispose = null
   }
+  if (agentRegistryGroupDispose) {
+    try { agentRegistryGroupDispose.dispose() } catch { /* ignore */ }
+    agentRegistryGroupDispose = null
+  }
+  if (agentDerivationGroupDispose) {
+    try { agentDerivationGroupDispose.dispose() } catch { /* ignore */ }
+    agentDerivationGroupDispose = null
+  }
   // EP4-A5 — symmetric release of the session preroute evaluate channel.
   if (sessionPrerouteGroupDispose) {
     try { sessionPrerouteGroupDispose.dispose() } catch { /* ignore */ }
     sessionPrerouteGroupDispose = null
+  }
+  if (beliefCardGroupDispose) {
+    try { beliefCardGroupDispose.dispose() } catch { /* ignore */ }
+    beliefCardGroupDispose = null
   }
   // Stage V V2.1e — symmetric release of the 8 conversation-scope + attachment
   // channel handlers (listConversationScopes / listScopeRuns /
@@ -594,6 +621,19 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   // re-projects any already-running/resumed collection so its card appears.
   if (browserController) {
     browserController.setTaskProjectionSink(makeNoteCollectProjectionSink(runtime))
+    browserController.setSiteCardLearningSink({
+      learnFromVisibleCollectFailure: (signal) => {
+        try {
+          learnSiteCardFromFailure(runtime!.getBeliefCardStore(), signal)
+        } catch (error) {
+          logAgentMetric('site_card_learning_failed', {
+            domain: signal.domain,
+            failureKind: signal.failureKind,
+            error: error instanceof Error ? error.message : String(error),
+          })
+        }
+      },
+    })
   }
   // B Phase 1 PR2 T1-7: wire `skill_ask_user` to push questions to the
   // renderer. The bridge keeps the handler independent of electron so it can
@@ -855,6 +895,24 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
     listChannels: () => runtime!.listChannels(),
   })
 
+  if (agentRegistryGroupDispose) {
+    try { agentRegistryGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    agentRegistryGroupDispose = null
+  }
+  agentRegistryGroupDispose = agentRegistryGroup.register(ipcMain, {
+    listAgents: () => runtime!.getAgentRegistry().list(),
+    getBeliefCardStore: () => runtime?.getBeliefCardStore() ?? null,
+    updateStatus: (id, status, options) => runtime!.getAgentRegistry().updateStatus(id, status, options),
+  })
+  if (agentDerivationGroupDispose) {
+    try { agentDerivationGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    agentDerivationGroupDispose = null
+  }
+  agentDerivationGroupDispose = agentDerivationGroup.register(ipcMain, {
+    getBeliefCardStore: () => runtime?.getBeliefCardStore() ?? null,
+    getAgentRegistry: () => runtime!.getAgentRegistry(),
+  })
+
   // EP4-A5 — session preroute evaluate (pure, read-only; renderer acts).
   if (sessionPrerouteGroupDispose) {
     try { sessionPrerouteGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
@@ -862,6 +920,24 @@ export function setupAgentIPC(agentManager: AgentManager, mainWindow: BrowserWin
   }
   sessionPrerouteGroupDispose = sessionPrerouteGroup.register(ipcMain, {
     evaluateSessionPreroute: (firstMessage) => runtime!.evaluateSessionPreroute(firstMessage),
+  })
+
+  if (beliefCardGroupDispose) {
+    try { beliefCardGroupDispose.dispose() } catch { /* ignore — handlers may already be gone */ }
+    beliefCardGroupDispose = null
+  }
+  beliefCardGroupDispose = beliefCardGroup.register(ipcMain, {
+    getBeliefCardStore: () => runtime?.getBeliefCardStore() ?? null,
+    getKnowledgeSystemEnabled: () => isKnowledgeSystemEnabled(getDatabase()),
+    setKnowledgeSystemEnabled: (enabled) => {
+      getDatabase().setSetting(KNOWLEDGE_SYSTEM_SETTING_KEY, enabled ? 'true' : 'false')
+      runtime?.applyKnowledgeSystemEnabled(enabled)
+    },
+    getLifecycleStatus: () => {
+      const manager = runtime!.getMemoryLifecycleManager()
+      return { running: manager.isRunning(), lastMaintenanceAt: manager.getLastMaintenanceAt() }
+    },
+    getMaintenanceRoundStatus: () => getLastMaintenanceRoundStatus(),
   })
 
   // Stage V V2.1e — conversation-scope + attachment channels lifted into

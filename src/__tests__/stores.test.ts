@@ -1301,6 +1301,117 @@ describe('useAgent Store', () => {
         assert.strictEqual(sendScopedCalls[0].message, 'start a separate question')
     })
 
+    it('applies auto preroute before creating the first local scope', async () => {
+        const createLocalScopeCalls: Array<{ agent: string; scopeId?: string }> = []
+        const sendScopedCalls: Array<Record<string, unknown>> = []
+
+        ;(globalThis as any).window.electronAPI = {
+            agent: {
+                sessionPrerouteEvaluate: async () => ({
+                    success: true,
+                    data: {
+                        decision: { tier: 'precedent', targetAgentId: 'collector', cardRelPath: 'knowledge/routing-collector.md', matchedKeywords: ['采集'] },
+                        effect: 'route',
+                    },
+                }),
+                createLocalScope: async (agent: string, scopeId?: string) => {
+                    createLocalScopeCalls.push({ agent, scopeId })
+                    return {
+                        success: true,
+                        data: {
+                            id: scopeId || 'scope-collector',
+                            agent,
+                            title: '新对话',
+                            sourceKind: 'local',
+                            sourceId: 'app',
+                            threadKey: scopeId || 'scope-collector',
+                            meta: { sourceLabel: '应用内', createdBy: 'app' },
+                            createdAt: '2026-06-13T10:00:00.000Z',
+                            updatedAt: '2026-06-13T10:00:00.000Z',
+                            lastMessageAt: null,
+                        },
+                    }
+                },
+                sendScoped: async (payload: Record<string, unknown>) => {
+                    sendScopedCalls.push(payload)
+                    return { success: true }
+                },
+                kill: async () => ({ success: true }),
+            },
+            chat: {
+                createConversation: async () => ({ success: true }),
+                saveMessage: async () => ({ success: true }),
+                updateConversationTitle: async () => ({ success: true }),
+            },
+            settings: { getAIConfig: async () => ({ success: true, data: null }) },
+        }
+
+        useAgent.setState({ currentAgent: 'butler', currentScopeId: null, currentScope: null, scopes: [], messages: [], sendCoalescingEnabled: false })
+
+        const result = await useAgent.getState().sendMessage('帮我采集小红书内容')
+
+        assert.strictEqual(result.success, true)
+        assert.strictEqual(createLocalScopeCalls[0].agent, 'collector')
+        assert.strictEqual(sendScopedCalls[0].agent, 'collector')
+        assert.strictEqual(useAgent.getState().currentAgent, 'collector')
+    })
+
+    it('shows a visible suggestion for suggest preroute without changing the sending agent', async () => {
+        const createLocalScopeCalls: Array<{ agent: string; scopeId?: string }> = []
+        const sendScopedCalls: Array<Record<string, unknown>> = []
+
+        ;(globalThis as any).window.electronAPI = {
+            agent: {
+                sessionPrerouteEvaluate: async () => ({
+                    success: true,
+                    data: {
+                        decision: { tier: 'precedent', targetAgentId: 'collector', cardRelPath: 'knowledge/routing-collector.md', matchedKeywords: ['采集'] },
+                        effect: 'suggest',
+                    },
+                }),
+                createLocalScope: async (agent: string, scopeId?: string) => {
+                    createLocalScopeCalls.push({ agent, scopeId })
+                    return {
+                        success: true,
+                        data: {
+                            id: scopeId || 'scope-butler',
+                            agent,
+                            title: '新对话',
+                            sourceKind: 'local',
+                            sourceId: 'app',
+                            threadKey: scopeId || 'scope-butler',
+                            meta: { sourceLabel: '应用内', createdBy: 'app' },
+                            createdAt: '2026-06-13T10:00:00.000Z',
+                            updatedAt: '2026-06-13T10:00:00.000Z',
+                            lastMessageAt: null,
+                        },
+                    }
+                },
+                sendScoped: async (payload: Record<string, unknown>) => {
+                    sendScopedCalls.push(payload)
+                    return { success: true }
+                },
+                kill: async () => ({ success: true }),
+            },
+            chat: {
+                createConversation: async () => ({ success: true }),
+                saveMessage: async () => ({ success: true }),
+                updateConversationTitle: async () => ({ success: true }),
+            },
+            settings: { getAIConfig: async () => ({ success: true, data: null }) },
+        }
+
+        useAgent.setState({ currentAgent: 'butler', currentScopeId: null, currentScope: null, scopes: [], messages: [], sendCoalescingEnabled: false })
+
+        const result = await useAgent.getState().sendMessage('帮我采集小红书内容')
+
+        assert.strictEqual(result.success, true)
+        assert.strictEqual(createLocalScopeCalls[0].agent, 'butler')
+        assert.strictEqual(sendScopedCalls[0].agent, 'butler')
+        assert.strictEqual(useAgent.getState().currentAgent, 'butler')
+        assert.ok(useAgent.getState().messages.some((message) => message.type === 'system' && message.content.includes('建议交给 collector')))
+    })
+
     it('should show a friendly message when sendScoped reports user message persistence failure', async () => {
         const sendScopedCalls: Array<Record<string, unknown>> = []
 

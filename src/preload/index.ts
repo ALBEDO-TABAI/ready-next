@@ -70,6 +70,28 @@ const agentAPI = {
   getRuntimeStatus: () => ipcRenderer.invoke('agent:getRuntimeStatus'),
   getCapabilityRuntimeSnapshot: (config?: unknown) => ipcRenderer.invoke('agent:getCapabilityRuntimeSnapshot', config),
   listChannels: () => ipcRenderer.invoke('agent:listChannels'),
+  listRegistry: () => ipcRenderer.invoke('agent:registry:list'),
+  listRegistryKnowledge: (id: string) => ipcRenderer.invoke('agent:registry:listKnowledge', { id }),
+  updateRegistryStatus: (payload: {
+    id: string
+    status: 'retired' | 'merged'
+    mergedIntoAgentId?: string | null
+    migrateCardRelPaths?: string[]
+  }) =>
+    ipcRenderer.invoke('agent:registry:updateStatus', payload),
+  listDerivationCandidates: () => ipcRenderer.invoke('agent:derivation:listCandidates'),
+  confirmDerivation: (payload: {
+    candidateRelPath: string
+    specialistId: string
+    name: string
+    charter?: string | null
+    seedRulesText: string
+    routingTriggers: string[]
+    activateRouting?: boolean
+    migrateCardRelPaths?: string[]
+  }) => ipcRenderer.invoke('agent:derivation:confirm', payload),
+  rejectDerivation: (candidateRelPath: string) =>
+    ipcRenderer.invoke('agent:derivation:reject', { candidateRelPath }),
   listConversationScopes: (agent?: string) => ipcRenderer.invoke('agent:listConversationScopes', { agent }),
   listScopeRuns: (payload?: { channelKey?: string; statuses?: string[]; limit?: number }) =>
     ipcRenderer.invoke('agent:listScopeRuns', payload || {}),
@@ -318,6 +340,14 @@ const memoryAPI = {
   delete: (id: string) => ipcRenderer.invoke('agent:memory:delete', id),
   stats: () => ipcRenderer.invoke('agent:memory:stats'),
   createFromConversation: (payload: unknown) => ipcRenderer.invoke('agent:memory:createFromConversation', payload),
+}
+
+const memoryCardsAPI = {
+  list: () => ipcRenderer.invoke('agent:beliefCards:list'),
+  transition: (payload: { relPath: string; action: 'approve' | 'reject' }) =>
+    ipcRenderer.invoke('agent:beliefCards:transition', payload),
+  setKnowledgeSystemEnabled: (enabled: boolean) =>
+    ipcRenderer.invoke('agent:beliefCards:setKnowledgeSystemEnabled', { enabled }),
 }
 
 // Trigger API
@@ -1151,6 +1181,7 @@ const agentInteractionAPI = {
 contextBridge.exposeInMainWorld('electronAPI', {
   agent: agentAPI,
   memory: memoryAPI,
+  memoryCards: memoryCardsAPI,
   trigger: triggerAPI,
   memoryLifecycle: memoryLifecycleAPI,
   browser: browserAPI,
@@ -1182,6 +1213,7 @@ declare global {
     electronAPI: {
       agent: typeof agentAPI
       memory: typeof memoryAPI
+      memoryCards: typeof memoryCardsAPI
       trigger: typeof triggerAPI
       memoryLifecycle: typeof memoryLifecycleAPI
       browser: typeof browserAPI

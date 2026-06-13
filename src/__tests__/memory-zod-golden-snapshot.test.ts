@@ -13,10 +13,15 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import {
   getMemoryAnthropicTools,
   getMemoryOpenAITools,
 } from '../main/modules/tools/memory-tools'
+
+test('memory-zod-golden-snapshot declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'memory-zod-golden-snapshot transitive sqlite load')
+})
 
 const EXPECTED_ANTHROPIC = [
   {

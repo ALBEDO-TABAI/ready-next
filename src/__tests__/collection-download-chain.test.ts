@@ -16,8 +16,16 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
-import { executeBrowserTool } from '../main/modules/tools/browser-tools'
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
+import {
+  __setBrowserCollectionConsentStoreForTests,
+  executeBrowserTool,
+} from '../main/modules/tools/browser-tools'
 import { __setWebContentsProviderForTests, broadcastDirectoryChanged } from '../main/modules/document-engine/ipc/directory-change-broadcast'
+
+test('collection-download-chain declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'collection-download-chain transitive sqlite load')
+})
 
 function galleryTask(taskId: string) {
   return {
@@ -33,6 +41,42 @@ function galleryTask(taskId: string) {
       items: Array.from({ length: 3 }, (_, index) => ({
         image: `https://example.com/img-${index}.jpg`,
       })),
+    },
+  }
+}
+
+function partialGalleryTask(taskId: string) {
+  const task = galleryTask(taskId) as ReturnType<typeof galleryTask> & { status: string; result: Record<string, unknown> }
+  task.status = 'paused'
+  task.updatedAt = '2026-06-12T10:06:00.000Z'
+  task.result.discoveryStatus = 'partial'
+  task.result.userExpectedTotal = 72
+  task.result.continueTaskId = taskId
+  return task
+}
+
+function createConsentStoreMock() {
+  const consents = new Set<string>()
+  const pending = new Map<string, { requestId: string; scopeId: string; sourceTaskId: string; consentKind: string; createdAt: string }>()
+  const key = (kind: string, scopeId: string, sourceTaskId: string) => [kind, scopeId || 'global', sourceTaskId].join(':')
+  return {
+    hasConsent: (kind: string, scopeId: string, sourceTaskId: string) => consents.has(key(kind, scopeId, sourceTaskId)),
+    createPendingRequest: (input: { scopeId: string; sourceTaskId: string; consentKind: string }) => {
+      const request = {
+        requestId: `browser-consent-test-${pending.size + 1}`,
+        scopeId: input.scopeId,
+        sourceTaskId: input.sourceTaskId,
+        consentKind: input.consentKind,
+        createdAt: new Date(0).toISOString(),
+      }
+      pending.set(request.requestId, request)
+      return request
+    },
+    confirmPendingRequest: (requestId: string) => {
+      const request = pending.get(requestId)
+      if (!request) return null
+      consents.add(key(request.consentKind, request.scopeId, request.sourceTaskId))
+      return { ...request, confirmedVia: 'ui_action', confirmedAt: new Date(0).toISOString() }
     },
   }
 }
@@ -88,6 +132,18 @@ test('gap 1: raw browser_download_urls redirects to the chained tool when a gall
     directory: '~/Documents',
   }, bare, undefined, 'scope-img')
   assert.equal(JSON.parse(free).results[0].error, 'unsupported_protocol')
+
+  const partial = makeController({
+    listTasksByKind: async () => [partialGalleryTask('task-gallery-1')],
+    getTask: async () => partialGalleryTask('task-gallery-1'),
+  })
+  const redirectedPartial = await executeBrowserTool('browser_download_urls', {
+    urls: ['https://example.com/img-0.jpg'],
+    directory: '~/Documents',
+  }, partial, undefined, 'scope-img')
+  const redirectedPartialParsed = JSON.parse(redirectedPartial)
+  assert.equal(redirectedPartialParsed.errorCode, 'use_collected_media_download')
+  assert.equal(redirectedPartialParsed.sourceTaskId, 'task-gallery-1')
 })
 
 test('gaps 2+3: collected-media download reconciles discovered/saved/remaining and writes back to the source task', async () => {
@@ -139,6 +195,43 @@ test('gaps 2+3: collected-media download reconciles discovered/saved/remaining a
     assert.equal(claimedParsed.completion, 'partial', 'source-recorded claim forces partial without the arg')
     assert.equal(claimedParsed.remaining, 69)
   } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('partial gallery sources require consent, then download discovered media without declaring complete', async () => {
+  const store = createConsentStoreMock()
+  __setBrowserCollectionConsentStoreForTests(store as never)
+  const dir = mkdtempSync(join(tmpdir(), 'ready-dl-partial-'))
+  try {
+    const controller = makeController({
+      listTasksByKind: async () => [partialGalleryTask('task-gallery-1')],
+      getTask: async () => partialGalleryTask('task-gallery-1'),
+    })
+    const blocked = await executeBrowserTool('browser_download_collected_media', {
+      source_task_id: 'task-gallery-1',
+      directory: dir,
+      allow_partial: true,
+    }, controller, undefined, 'scope-img')
+    const blockedParsed = JSON.parse(blocked)
+    assert.equal(blockedParsed.errorCode, 'partial_collection_consent_required')
+    assert.equal(blockedParsed.allowPartialIgnored, true)
+    assert.match(blockedParsed.pendingConsentRequest?.requestId || '', /^browser-consent-test-/)
+
+    store.confirmPendingRequest(blockedParsed.pendingConsentRequest.requestId)
+    const allowed = await executeBrowserTool('browser_download_collected_media', {
+      source_task_id: 'task-gallery-1',
+      directory: dir,
+      allow_partial: true,
+    }, controller, undefined, 'scope-img')
+    const allowedParsed = JSON.parse(allowed)
+    assert.equal(allowedParsed.completion, 'partial')
+    assert.equal(allowedParsed.discovered, 3)
+    assert.equal(allowedParsed.saved, 3)
+    assert.equal(allowedParsed.remaining, 69)
+    assert.match(allowedParsed.guidance, /不要宣告完成/)
+  } finally {
+    __setBrowserCollectionConsentStoreForTests(null)
     rmSync(dir, { recursive: true, force: true })
   }
 })
@@ -205,7 +298,7 @@ test('projection truth: the card reads 52/72 with 剩余 19 — never 52/53 剩�
   assert.equal(projection.progress.completed, 52)
   assert.match(projection.progress.detail, /发现 53\/72/)
   assert.match(projection.progress.detail, /剩余 19/, 'remaining includes the 19 undiscovered')
-  assert.equal(projection.status, 'running', 'refreshOnly keeps the existing status — numbers move, lifecycle untouched')
+  assert.equal(projection.status, 'recoverable_paused', 'unresolved download write-back cannot keep a completed-looking status')
 
   // refreshOnly with no existing projection is a no-op, never a create
   sink.upsert({

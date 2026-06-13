@@ -117,6 +117,16 @@ export interface MaintenanceRoundReport {
   terminal: string
 }
 
+export interface MaintenanceRoundStatusSnapshot extends MaintenanceRoundReport {
+  lastRunAt: string
+}
+
+let lastMaintenanceRoundStatus: MaintenanceRoundStatusSnapshot | null = null
+
+export function getLastMaintenanceRoundStatus(): MaintenanceRoundStatusSnapshot | null {
+  return lastMaintenanceRoundStatus ? { ...lastMaintenanceRoundStatus } : null
+}
+
 function defaultPrompt(): string {
   try {
     const loader = new PromptAssetLoader({
@@ -136,6 +146,7 @@ export async function runMaintenanceLlmRound(deps: MaintenanceRoundDeps): Promis
     const report: MaintenanceRoundReport = {
       decision: 'skip', reason: gate.reason, llmCalls: 0, applied: 0, rejected: 0, terminal: 'gated_skip',
     }
+    lastMaintenanceRoundStatus = { ...report, lastRunAt: deps.now.toISOString() }
     logAgentMetric('maintenance_audit', { round: 'llm', ...report })
     return report
   }
@@ -212,6 +223,7 @@ export async function runMaintenanceLlmRound(deps: MaintenanceRoundDeps): Promis
   const report: MaintenanceRoundReport = {
     decision: 'run', reason: gate.reason, llmCalls, applied, rejected, decay, terminal,
   }
+  lastMaintenanceRoundStatus = { ...report, lastRunAt: deps.now.toISOString() }
   // single-line round report (03 §5) — usage audit lives HERE, not run_meta.
   logAgentMetric('maintenance_audit', { round: 'llm', ...report })
   return report

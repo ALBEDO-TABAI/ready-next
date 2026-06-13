@@ -36,10 +36,11 @@ class MigrationDb {
     ) return
     const createTable = normalized.match(/^CREATE TABLE IF NOT EXISTS ([a-z_]+) /i)
     if (createTable) { this.tables.add(createTable[1]); return }
-    const alter = normalized.match(/^ALTER TABLE task_projections ADD COLUMN ([a-z_]+) TEXT$/i)
+    const alter = normalized.match(/^ALTER TABLE (task_projections|agents) ADD COLUMN ([a-z_]+) TEXT$/i)
     if (alter) {
-      if (this.addedColumns.includes(alter[1])) throw new Error(`duplicate column: ${alter[1]}`)
-      this.addedColumns.push(alter[1])
+      const column = `${alter[1]}.${alter[2]}`
+      if (this.addedColumns.includes(column)) throw new Error(`duplicate column: ${column}`)
+      this.addedColumns.push(column)
       return
     }
     if (/^INSERT (OR IGNORE )?INTO agents/i.test(normalized)) return // seed handled via prepare in some shapes
@@ -57,6 +58,13 @@ class MigrationDb {
         all: () => [], get: () => undefined,
       }
     }
+    if (normalized === 'PRAGMA table_info(agents)') {
+      return {
+        all: <R>() => [] as R[],
+        run: () => undefined,
+        get: () => undefined,
+      }
+    }
     if (/INSERT (OR IGNORE )?INTO agents/i.test(normalized)) {
       return { run: (...params: unknown[]) => { this.insertedAgents.push(params) }, all: () => [], get: () => undefined }
     }
@@ -69,10 +77,11 @@ test('055 creates the agents table with ONLY the main-agent row; 056 adds owner_
   const names = __getMigrationNamesForTests()
   assert.ok(names.includes('055_agents_table'), '055 registered')
   assert.ok(names.includes('056_task_projection_owner_agent'), '056 registered')
-  assert.ok(
-    names.indexOf('055_agents_table') < names.indexOf('056_task_projection_owner_agent'),
-    'consecutive numbering, A1 order',
-  )
+  assert.ok(names.includes('058_agent_derivation_columns'), '058 registered')
+  assert.ok(names.includes('059_agent_lifecycle_merged_target'), '059 registered')
+  assert.ok(names.indexOf('055_agents_table') < names.indexOf('056_task_projection_owner_agent'), 'A1 order')
+  assert.ok(names.indexOf('057_task_projection_packet_columns') < names.indexOf('058_agent_derivation_columns'), 'phase-4 migration follows 057')
+  assert.ok(names.indexOf('058_agent_derivation_columns') < names.indexOf('059_agent_lifecycle_merged_target'), 'lifecycle migration follows derivation columns')
 
   // 055 isolated
   const db055 = new MigrationDb(names.filter((name) => name !== '055_agents_table'))
@@ -85,7 +94,17 @@ test('055 creates the agents table with ONLY the main-agent row; 056 adds owner_
   // 056 isolated
   const db056 = new MigrationDb(names.filter((name) => name !== '056_task_projection_owner_agent'))
   runMigrations(db056 as unknown as Parameters<typeof runMigrations>[0])
-  assert.deepEqual(db056.addedColumns, ['owner_agent_id'])
+  assert.deepEqual(db056.addedColumns, ['task_projections.owner_agent_id'])
+
+  // 058 isolated
+  const db058 = new MigrationDb(names.filter((name) => name !== '058_agent_derivation_columns'))
+  runMigrations(db058 as unknown as Parameters<typeof runMigrations>[0])
+  assert.deepEqual(db058.addedColumns, ['agents.parent_agent_id', 'agents.derivation_reason'])
+
+  // 059 isolated
+  const db059 = new MigrationDb(names.filter((name) => name !== '059_agent_lifecycle_merged_target'))
+  runMigrations(db059 as unknown as Parameters<typeof runMigrations>[0])
+  assert.deepEqual(db059.addedColumns, ['agents.merged_into_agent_id'])
 })
 
 // ---------- agent registry repository ----------
@@ -99,8 +118,18 @@ function fakeAgentsDb() {
       if (normalized.startsWith('INSERT INTO agents')) {
         return {
           run: (...params: unknown[]) => {
-            const [id, name, charter, personaRef, status, createdAt] = params
-            rows.set(String(id), { id, name, charter, persona_ref: personaRef, status, created_at: createdAt })
+            const [id, name, charter, personaRef, status, parentAgentId, derivationReason, mergedIntoAgentId, createdAt] = params
+            rows.set(String(id), {
+              id,
+              name,
+              charter,
+              persona_ref: personaRef,
+              status,
+              parent_agent_id: parentAgentId,
+              derivation_reason: derivationReason,
+              merged_into_agent_id: mergedIntoAgentId,
+              created_at: createdAt,
+            })
           },
           all: () => [], get: () => undefined,
         }
@@ -110,6 +139,19 @@ function fakeAgentsDb() {
       }
       if (normalized.startsWith('SELECT') && normalized.includes('FROM agents')) {
         return { all: <R>() => [...rows.values()] as R[], run: () => undefined, get: () => undefined }
+      }
+      if (normalized.startsWith('UPDATE agents SET')) {
+        return {
+          run: (status: unknown, mergedIntoAgentId: unknown, id: unknown) => {
+            const row = rows.get(String(id))
+            if (row) {
+              row.status = status
+              row.merged_into_agent_id = mergedIntoAgentId
+            }
+          },
+          all: () => [],
+          get: () => undefined,
+        }
       }
       throw new Error(`unexpected agents SQL: ${normalized}`)
     },
@@ -124,10 +166,20 @@ test('registry roundtrip: create → get/list; empty table degrades to [] (syste
   assert.deepEqual(registry.list(), [], 'empty table → empty list, callers keep现状')
   assert.equal(registry.get('butler'), null)
 
-  registry.create({ id: 'writer', name: '文案专员', charter: '负责文案任务', personaRef: null })
+  registry.create({
+    id: 'writer',
+    name: '文案专员',
+    charter: '负责文案任务',
+    personaRef: null,
+    parentAgentId: 'butler',
+    derivationReason: 'knowledge/candidate.md',
+  })
   const fetched = registry.get('writer')
   assert.equal(fetched?.name, '文案专员')
   assert.equal(fetched?.status, 'active')
+  assert.equal(fetched?.parentAgentId, 'butler')
+  assert.equal(fetched?.derivationReason, 'knowledge/candidate.md')
+  assert.equal(fetched?.mergedIntoAgentId, null)
   assert.equal(registry.list().length, 1)
 
   // a dead DB degrades to empty, never throws into callers

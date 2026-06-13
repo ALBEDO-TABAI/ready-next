@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { BeliefCardStore, type BeliefCardFrontmatter } from '../main/modules/agent-control/knowledge/belief-card-store'
 import {
   syncBeliefCards,
@@ -11,6 +12,10 @@ import {
   type MirrorDb,
   type BeliefCardMirrorRow,
 } from '../main/modules/agent-control/knowledge/belief-card-mirror'
+
+test('belief-card-db-sync declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'belief-card-db-sync transitive sqlite load')
+})
 
 // Minimal in-memory stand-in for agent_memory_metadata belief rows. Host-node
 // cannot load the electron-ABI better-sqlite3, so the mirror is exercised

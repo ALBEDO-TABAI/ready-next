@@ -19,6 +19,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { executeToolCall, type ToolContext } from '../main/modules/tools/tool-executor'
 import { deriveEnvelopeForToolOutput } from '../main/modules/tools/tool-result-envelope'
 import {
@@ -28,6 +29,10 @@ import {
 import { ToolDomainError } from '../main/modules/tools/tool-errors'
 import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
+
+test('tool-envelope-pilot declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'tool-envelope-pilot transitive sqlite load')
+})
 
 const LEGACY_KEYS = [
   'text',

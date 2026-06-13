@@ -10,16 +10,23 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readFileSync, statSync }
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { BeliefCardStore } from '../main/modules/agent-control/knowledge/belief-card-store'
 import {
   syncBeliefCardFile,
   KnowledgeWatcher,
   runStartupBeliefSync,
   isKnowledgeSystemEnabled,
+  listKnowledgeWatchDirs,
+  scopeIdForBeliefCardPath,
 } from '../main/modules/agent-control/knowledge/knowledge-truth-source'
 import { PromptAssemblyService } from '../main/modules/agent-control/prompt-assembly'
 import type { ConversationScope } from '../main/modules/agent-control/contracts/types'
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
+
+test('knowledge-truth-source-boundary declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'knowledge-truth-source-boundary transitive sqlite load')
+})
 
 const requireCjs = createRequire(import.meta.url)
 
@@ -68,6 +75,45 @@ function makeRoot(): string {
   mkdirSync(join(root, 'knowledge', 'sites'), { recursive: true })
   return root
 }
+
+test('EP4-K: incremental sync preserves agent scope for agent-owned cards', () => {
+  const root = makeRoot()
+  try {
+    const db = fakeMirrorDb()
+    const store = new BeliefCardStore({ memoryRoot: root })
+    mkdirSync(join(root, 'agents', 'agent-x', 'knowledge', 'sites'), { recursive: true })
+    writeFileSync(join(root, 'agents', 'agent-x', 'knowledge', 'x.md'), cardText('Agent X'), 'utf-8')
+    writeFileSync(join(root, 'agents', 'agent-x', 'knowledge', 'broken.md'), 'no frontmatter', 'utf-8')
+
+    assert.equal(scopeIdForBeliefCardPath('agents/agent-x/knowledge/x.md'), 'agent:agent-x')
+    assert.equal(syncBeliefCardFile(db as never, store, 'agents/agent-x/knowledge/x.md'), 'synced')
+    assert.equal(syncBeliefCardFile(db as never, store, 'agents/agent-x/knowledge/broken.md'), 'invalid')
+    const valid = db.rows.get('belief:agents/agent-x/knowledge/x.md')
+    const invalid = db.rows.get('belief:agents/agent-x/knowledge/broken.md')
+    assert.equal(valid?.scope_id, 'agent:agent-x')
+    assert.equal(invalid?.scope_id, 'agent:agent-x')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('EP4-K: watcher directory discovery includes safe agent knowledge dirs', () => {
+  const root = makeRoot()
+  try {
+    mkdirSync(join(root, 'agents', 'agent-x', 'knowledge', 'sites'), { recursive: true })
+    mkdirSync(join(root, 'agents', '.bad', 'knowledge'), { recursive: true })
+    const dirs = listKnowledgeWatchDirs(new BeliefCardStore({ memoryRoot: root }))
+    assert.ok(dirs.includes('knowledge'))
+    assert.ok(dirs.includes('knowledge/sites'))
+    assert.ok(dirs.includes('agents'))
+    assert.ok(dirs.includes('agents/agent-x'))
+    assert.ok(dirs.includes('agents/agent-x/knowledge'))
+    assert.ok(dirs.includes('agents/agent-x/knowledge/sites'))
+    assert.ok(!dirs.includes('agents/.bad/knowledge'))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
 
 test('A1/A2: watcher sync is idempotent — hash matches the file, unchanged rescans write zero rows', () => {
   const root = makeRoot()

@@ -12,6 +12,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import {
   runHandoffProposal,
   HANDOFF_QUESTION_ID,
@@ -26,6 +27,10 @@ import { PromptAssemblyService } from '../main/modules/agent-control/prompt-asse
 import { BeliefCardStore } from '../main/modules/agent-control/knowledge/belief-card-store'
 import type { AgentRegistryRecord } from '../main/modules/repositories/agent-registry-repository'
 import type { ConversationScope } from '../main/modules/agent-control/contracts/types'
+
+test('agent-handoff-proposal declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'agent-handoff-proposal transitive sqlite load')
+})
 
 const VERBATIM = '  帮我盯小红书穿搭行情，明早九点前出对比！！\n（别忘了截图）  '
 

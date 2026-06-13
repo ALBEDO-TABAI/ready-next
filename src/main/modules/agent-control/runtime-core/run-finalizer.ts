@@ -1,6 +1,6 @@
 import { logAgentMetric } from '../metrics'
 import { collectResponseDigestProof, appendProofRefs } from '../quality/proof-collector'
-import { adjudicateTerminalOutcome, appendCheckIns } from '../quality/task-adjudicator'
+import { adjudicateTerminalOutcome, appendCheckIns, type CheckInRecord } from '../quality/task-adjudicator'
 import { resolveCriteria } from '../quality/criteria-templates'
 import type { TaskType } from '../../../../shared/task-types'
 import type { TaskProjectionRecord } from '../contracts/run-contracts'
@@ -79,6 +79,13 @@ export interface RunFinalizerDeps {
   } | null
   /** EP2-Q4a — injectable clock for the adjudication timestamp. */
   now?: () => Date
+  /** EP4-B6 — optional site-card learning hook. Best-effort only: failures
+   *  must not affect terminal outcome finalization. */
+  learnFromCheckIn?: (input: {
+    checkIn: CheckInRecord
+    projection: TaskProjectionRecord
+    now: Date
+  }) => void
 }
 
 export function writeRunCloseMetric(metric: RunCloseMetric): void {
@@ -237,6 +244,18 @@ function recordShadowAdjudication(
       proofRefs,
       checkins: appendCheckIns(projection.checkins ?? [], checkIn),
     }, { silent: true, reasonHint: 'shadow_adjudication' })
+
+    if (deps.learnFromCheckIn) {
+      try {
+        deps.learnFromCheckIn({ checkIn, projection, now })
+      } catch (error) {
+        logAgentMetric('site_card_learning_checkin_failed', {
+          runId: outcome.runId,
+          taskId,
+          reason: error instanceof Error ? error.message : String(error),
+        })
+      }
+    }
 
     // ④ divergence metric when the verdict disagrees with the actual terminal
     if (status === 'done' && verdict !== 'accept') {

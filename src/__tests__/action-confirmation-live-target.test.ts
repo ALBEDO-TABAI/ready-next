@@ -20,11 +20,16 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { executeToolCall, type ToolContext } from '../main/modules/tools/tool-executor'
 import { __resetBrowserAgentPageMapForTests } from '../main/modules/tools/browser-tools'
 import { matchManualOnlyBrowserTarget } from '../main/modules/agent-control/safety/action-confirmation-policy'
 import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import type { BrowserController } from '../main/modules/browser-engine/ipc-handler'
+
+test('action-confirmation-live-target declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'action-confirmation-live-target transitive sqlite load')
+})
 
 interface MockCalls {
   scripts: string[]

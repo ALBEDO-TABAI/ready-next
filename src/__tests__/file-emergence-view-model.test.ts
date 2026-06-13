@@ -4,6 +4,7 @@ import test from 'node:test'
 import { buildFileEmergenceViewModel } from '../renderer/components/layout/fileEmergenceViewModel'
 import {
   createEmptyFileEmergenceBuckets,
+  type FileEmergenceIntentCard,
   type FileEmergenceProject,
   type FileEmergenceReadingProgress,
   type FileEmergenceSnapshot,
@@ -157,6 +158,54 @@ test('file emergence view model applies file filters in renderer only', () => {
 
   assert.equal(model?.totalProjects, 1)
   assert.equal(model?.buckets.find((bucket) => bucket.bucket === 'today')?.projects[0]?.files.length, 0)
+})
+
+test('intent cards enter file emergence buckets without exposing harvest artifacts', () => {
+  const intentCards: FileEmergenceIntentCard[] = [{
+    id: 'prepare:launch',
+    type: 'prepare',
+    title: '接下来要准备：发布会',
+    confidence: 0.82,
+    action: { kind: 'open_project', ref: 'project:/workspace/launch' },
+    evidence: [{ fact: '未来事件 2026-06-19', ref: 'project:/workspace/launch' }],
+  }, {
+    id: 'forming:popup',
+    type: 'forming',
+    title: '正在成形：快闪店项目',
+    confidence: 0.77,
+    action: { kind: 'open_project_group', ref: 'project:/workspace/popup' },
+    evidence: [
+      { fact: '相关文件 2 个', ref: 'project:/workspace/popup' },
+      { fact: '文件聚类证据', ref: 'file:/workspace/popup/brief.md' },
+    ],
+  }, {
+    id: 'harvest:secret',
+    type: 'harvest',
+    title: '已完成产物：产物已生成（受保护路径）',
+    confidence: 0.9,
+    action: { kind: 'open_artifact', ref: 'artifact:/workspace/.env.local' },
+    evidence: [{ fact: '产物已生成（受保护路径）', ref: 'artifact:/workspace/.env.local' }],
+  }]
+  const base = snapshot([])
+  base.intentCards = intentCards
+
+  const model = buildFileEmergenceViewModel({
+    snapshot: base,
+    query: '',
+    viewMode: 'tree',
+    workspaceRoots: ['/workspace'],
+    filters: DEFAULT_FILTERS,
+    now,
+  })
+
+  const future = model?.buckets.find((bucket) => bucket.bucket === 'future')?.projects || []
+  const today = model?.buckets.find((bucket) => bucket.bucket === 'today')?.projects || []
+  const allTitles = model?.buckets.flatMap((bucket) => bucket.projects.map((item) => item.title)) || []
+  assert.equal(future[0]?.title, '接下来要准备：发布会')
+  assert.equal(future[0]?.status, 'upcoming')
+  assert.equal(today[0]?.title, '正在成形：快闪店项目')
+  assert.equal(today[0]?.files[0]?.path, '/workspace/popup/brief.md')
+  assert.ok(!allTitles.some((title) => title.includes('受保护路径')))
 })
 
 test('current active document is ensured into today without changing the base snapshot', () => {

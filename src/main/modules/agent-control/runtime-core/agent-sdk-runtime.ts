@@ -32,8 +32,10 @@ import type {
   RunMessage,
   TaskBudgetRuntime,
   TaskType,
+  TaskProjectionRecord,
   TurnTranscriptEvent,
 } from '../contracts/run-contracts'
+import type { CheckInRecord } from '../quality/task-adjudicator'
 import type { AbortInitiator } from '../contracts/run-contracts-internal'
 import type { ScopeRunEventPayload } from '../contracts/types'
 import type { TurnTerminalReason } from './turn-frame'
@@ -156,6 +158,11 @@ import {
 } from '../task-projection/run-budget-policy'
 import { createRotatingLogger } from '../../../utils/rotating-logger'
 import { finalizeRunOutcome, writeRunCloseMetric } from './run-finalizer'
+import {
+  learnSiteCardFromFailure,
+  siteCardLearningSignalFromToolFailure,
+  siteCardLearningSignalsFromCheckIn,
+} from '../knowledge/site-card-learning'
 import {
   buildActionAnnouncementCheckpointMessage,
   buildActionAnnouncementSteerInput,
@@ -3091,6 +3098,71 @@ export class AgentSdkRuntime extends EventEmitter {
     }
   }
 
+  private writeSiteCardLearningSignal(
+    signal: Parameters<typeof learnSiteCardFromFailure>[1],
+    source: 'checkin' | 'tool_error',
+  ): void {
+    try {
+      const store = this.runtime?.getBeliefCardStore?.()
+      if (!store) return
+      const result = learnSiteCardFromFailure(store, signal)
+      if (result.status === 'written') {
+        logAgentMetric('site_card_learning_written', {
+          source,
+          domain: signal.domain,
+          failureKind: signal.failureKind,
+          relPath: result.relPath,
+          mode: result.mode,
+        })
+      }
+    } catch (error) {
+      logAgentMetric('site_card_learning_failed', {
+        source,
+        domain: signal.domain,
+        failureKind: signal.failureKind,
+        error: error instanceof Error ? error.message : String(error),
+      })
+    }
+  }
+
+  private learnSiteCardsFromCheckIn(input: {
+    checkIn: CheckInRecord
+    projection: TaskProjectionRecord
+    now: Date
+  }): void {
+    if (input.checkIn.blockers.length === 0) return
+    const continuationRef = input.projection.continuationRef && typeof input.projection.continuationRef === 'object'
+      ? input.projection.continuationRef
+      : null
+    const signals = siteCardLearningSignalsFromCheckIn({
+      url: continuationRef?.targetUrl ?? null,
+      blockers: input.checkIn.blockers,
+      now: input.now,
+    })
+    for (const signal of signals) this.writeSiteCardLearningSignal(signal, 'checkin')
+  }
+
+  private learnSiteCardFromToolFailure(
+    toolName: string,
+    args: Record<string, unknown> | undefined,
+    output: ToolExecutionOutput,
+  ): void {
+    const normalized = normalizeToolExecutionOutput(output)
+    const data = readStructuredResultRecord(normalized)
+    const errorKind = typeof data.errorKind === 'string' && data.errorKind
+      ? data.errorKind
+      : typeof data.errorCode === 'string' && data.errorCode ? data.errorCode : null
+    if (!errorKind && data.ok !== false) return
+    const signal = siteCardLearningSignalFromToolFailure({
+      toolName,
+      errorKind,
+      args,
+      data,
+      text: normalized.text,
+    })
+    if (signal) this.writeSiteCardLearningSignal(signal, 'tool_error')
+  }
+
   private hasPendingTaskProjection(scopeId?: string): boolean {
     if (!scopeId || !this.runtime?.listTaskProjections) return false
     try {
@@ -3604,6 +3676,7 @@ export class AgentSdkRuntime extends EventEmitter {
     const sessionId = executionOptions?.publicSessionId || this.extractSessionIdFromInternalName(name)
     const transcriptEvents: TurnTranscriptEvent[] = []
     const usedTools: string[] = []
+    const toolArgsByName = new Map<string, Record<string, unknown>[]>()
     const projectionPatches: Record<string, unknown>[] = []
     const activeFrame = createEmptyActiveFrameContext()
     let longSkillCheckpoint: SdkLongSkillCheckpoint | null = null
@@ -4033,6 +4106,9 @@ export class AgentSdkRuntime extends EventEmitter {
         emitOutput,
         emitToolAction: (toolName, args) => {
           if (!isCurrentRun()) return
+          const queue = toolArgsByName.get(toolName) ?? []
+          queue.push(args)
+          toolArgsByName.set(toolName, queue)
           transcriptEvents.push({ kind: 'tool_action', tool: toolName, args })
           this.emit('toolAction', { agent: name, sessionId, runId, tool: toolName, args })
         },
@@ -4057,6 +4133,8 @@ export class AgentSdkRuntime extends EventEmitter {
             }
           }
           const normalized = normalizeToolExecutionOutput(output)
+          const argsQueue = toolArgsByName.get(toolName)
+          this.learnSiteCardFromToolFailure(toolName, argsQueue?.shift(), normalized)
           const structuredData = readStructuredResultRecord(normalized)
           const documentToolFailed = this.isDocumentToolFailure(normalized)
           const sourceReadFailed = LOCAL_DOCUMENT_SOURCE_READ_TOOL_NAMES.has(toolName)
@@ -4225,6 +4303,7 @@ export class AgentSdkRuntime extends EventEmitter {
         }, {
           runMetaRepository: this.getRunMetaRepositoryForFinalize(),
           taskProjectionStore: this.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
+          learnFromCheckIn: (input) => this.learnSiteCardsFromCheckIn(input),
           writeProjectionTerminalPatch: (projectionPatch) => {
             emitOutputForRun('', 'done', projectionPatch)
             emitStatusForRun('checkpoint', 'checkpoint_steered')
@@ -4940,7 +5019,8 @@ export class AgentSdkRuntime extends EventEmitter {
         finalText,
       }, {
         runMetaRepository: this.getRunMetaRepositoryForFinalize(),
-          taskProjectionStore: this.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
+        taskProjectionStore: this.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
+        learnFromCheckIn: (input) => this.learnSiteCardsFromCheckIn(input),
         writeProjectionTerminalPatch: (projectionPatch) => {
           emitOutputForRun('', 'done', projectionPatch)
           emitStatusForRun('done', 'done')
@@ -4996,6 +5076,7 @@ export class AgentSdkRuntime extends EventEmitter {
         }, {
           runMetaRepository: this.getRunMetaRepositoryForFinalize(),
           taskProjectionStore: this.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
+          learnFromCheckIn: (input) => this.learnSiteCardsFromCheckIn(input),
           writeProjectionTerminalPatch: (projectionPatch) => {
             emitOutputForRun('', 'done', projectionPatch)
             emitStatusForRun('cancelled', terminalReason)
@@ -5168,7 +5249,8 @@ export class AgentSdkRuntime extends EventEmitter {
         projectionPatch: this.mergeProjectionPatches(projectionPatches),
       }, {
         runMetaRepository: this.getRunMetaRepositoryForFinalize(),
-          taskProjectionStore: this.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
+        taskProjectionStore: this.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
+        learnFromCheckIn: (input) => this.learnSiteCardsFromCheckIn(input),
         writeProjectionTerminalPatch: (projectionPatch) => {
           emitOutputForRun('', 'done', projectionPatch)
           emitStatusForRun('error', failure.terminalReason)
@@ -5540,7 +5622,7 @@ export class AgentSdkRuntime extends EventEmitter {
       this.buildExecutorContext(runtimeContext),
     )
     runtimeContext.recordToolResult(definition.name, output)
-    noteToolResultForActivePlan(runtimeContext.sessionId, definition.name, args)
+    noteToolResultForActivePlan(runtimeContext.sessionId, definition.name, args, Date.now(), output)
     const outputWithSteering = appendBudgetWarningSteering(output, runtimeContext)
     const normalized = normalizeToolExecutionOutput(outputWithSteering)
     const resultTrace = formatToolResultTrace(definition.name, normalized)
@@ -5664,7 +5746,7 @@ export class AgentSdkRuntime extends EventEmitter {
         },
       )
       runtimeContext.recordToolResult(definition.name, output)
-    noteToolResultForActivePlan(runtimeContext.sessionId, definition.name, args)
+    noteToolResultForActivePlan(runtimeContext.sessionId, definition.name, args, Date.now(), output)
       const outputWithSteering = appendBudgetWarningSteering(output, runtimeContext)
       const resultTrace = formatToolResultTrace(definition.name, outputWithSteering)
       runtimeContext.emitOutput(resultTrace, 'tool_result')
@@ -5741,7 +5823,7 @@ export class AgentSdkRuntime extends EventEmitter {
       this.buildExecutorContext(runtimeContext),
     )
     runtimeContext.recordToolResult(definition.name, output)
-    noteToolResultForActivePlan(runtimeContext.sessionId, definition.name, args)
+    noteToolResultForActivePlan(runtimeContext.sessionId, definition.name, args, Date.now(), output)
     const outputWithSteering = appendBudgetWarningSteering(output, runtimeContext)
     const normalized = normalizeToolExecutionOutput(outputWithSteering)
     if (

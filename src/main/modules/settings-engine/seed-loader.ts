@@ -7,7 +7,10 @@ interface AISeedFile {
   ai_model_config?: unknown
   ai_saved_configs?: unknown
   ai_provider_workspace?: unknown
+  external_service_profiles_v1?: unknown
 }
+
+const EXTERNAL_SERVICE_SETTINGS_KEY = 'external_service_profiles_v1'
 
 function resolveSeedPath(): string {
   if (app.isPackaged) {
@@ -18,13 +21,27 @@ function resolveSeedPath(): string {
 
 export function applyBundledAISettingsSeed(): void {
   const repository = new AppSettingsRepository()
-  if (!repository.getSetting('ai_provider_workspace') && (
-    repository.getSetting('ai_model_config') || repository.getSetting('ai_saved_configs')
-  )) {
-    repository.getAIWorkspace()
+
+  const backfillWorkspaceIfNeeded = (): void => {
+    if (!repository.getSetting('ai_provider_workspace') && (
+      repository.getSetting('ai_model_config') || repository.getSetting('ai_saved_configs')
+    )) {
+      repository.getAIWorkspace()
+    }
+  }
+
+  backfillWorkspaceIfNeeded()
+
+  const hasAISettings = Boolean(
+    repository.getSetting('ai_provider_workspace')
+    || repository.getSetting('ai_model_config')
+    || repository.getSetting('ai_saved_configs')
+  )
+  const hasExternalServiceProfiles = Boolean(repository.getSetting(EXTERNAL_SERVICE_SETTINGS_KEY))
+
+  if (hasAISettings && hasExternalServiceProfiles) {
     return
   }
-  if (repository.getSetting('ai_provider_workspace') || repository.getSetting('ai_model_config')) return
 
   const seedPath = resolveSeedPath()
   if (!existsSync(seedPath)) return
@@ -33,22 +50,21 @@ export function applyBundledAISettingsSeed(): void {
     const raw = readFileSync(seedPath, 'utf8')
     const parsed = JSON.parse(raw) as AISeedFile
 
-    if (parsed.ai_model_config) {
+    if (!hasAISettings && parsed.ai_model_config) {
       repository.setSetting('ai_model_config', JSON.stringify(parsed.ai_model_config))
     }
-    if (parsed.ai_provider_workspace) {
+    if (!hasAISettings && parsed.ai_provider_workspace) {
       repository.setSetting('ai_provider_workspace', JSON.stringify(parsed.ai_provider_workspace))
     }
-    if (parsed.ai_saved_configs) {
+    if (!hasAISettings && parsed.ai_saved_configs) {
       repository.setSetting('ai_saved_configs', JSON.stringify(parsed.ai_saved_configs))
+    }
+    if (!hasExternalServiceProfiles && parsed.external_service_profiles_v1) {
+      repository.setSetting(EXTERNAL_SERVICE_SETTINGS_KEY, JSON.stringify(parsed.external_service_profiles_v1))
     }
   } catch (error) {
     console.warn('[settings] Failed to apply bundled AI seed:', error)
   }
 
-  if (!repository.getSetting('ai_provider_workspace') && (
-    repository.getSetting('ai_model_config') || repository.getSetting('ai_saved_configs')
-  )) {
-    repository.getAIWorkspace()
-  }
+  backfillWorkspaceIfNeeded()
 }

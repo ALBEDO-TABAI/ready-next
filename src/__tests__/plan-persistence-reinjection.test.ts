@@ -76,6 +76,50 @@ test('image gallery plan advances from discovery to media download', () => {
   assert.ok(text && text.includes('当前步骤 3/3：复核图片下载数量并向用户交付'), `expected review step, got: ${text}`)
 })
 
+test('image gallery review does not complete on partial collected-media downloads', () => {
+  resetActivePlansForTests()
+  noteToolResultForActivePlan('scope-media-partial', 'browser_visible_collect', { template: 'image_gallery', url: 'https://example.com/gallery' }, 1000)
+  noteToolResultForActivePlan(
+    'scope-media-partial',
+    'browser_download_collected_media',
+    { source_task_id: 'browser-task-1', directory: '/tmp/gallery' },
+    2000,
+    JSON.stringify({ ok: true, completion: 'partial', remaining: 19, failedCount: 1 }),
+  )
+  let text = buildActivePlanReminderText('scope-media-partial', 2000)
+  assert.ok(text && text.includes('当前步骤 3/3：复核图片下载数量并向用户交付'), `expected review step after partial download, got: ${text}`)
+
+  noteToolResultForActivePlan(
+    'scope-media-partial',
+    'browser_download_collected_media',
+    { source_task_id: 'browser-task-1', directory: '/tmp/gallery' },
+    3000,
+    JSON.stringify({ ok: true, completion: 'partial', remaining: 19, failedCount: 1 }),
+  )
+  text = buildActivePlanReminderText('scope-media-partial', 3000)
+  assert.ok(text && text.includes('当前步骤 3/3：复核图片下载数量并向用户交付'), `partial result must keep review pending, got: ${text}`)
+
+  noteToolResultForActivePlan(
+    'scope-media-partial',
+    'browser_get_task',
+    { task_id: 'browser-task-1' },
+    3500,
+    JSON.stringify({ taskId: 'browser-task-1', status: 'paused', result: { mediaDownload: { remaining: 19 } } }),
+  )
+  text = buildActivePlanReminderText('scope-media-partial', 3500)
+  assert.ok(text && text.includes('当前步骤 3/3：复核图片下载数量并向用户交付'), `open browser task must keep review pending, got: ${text}`)
+
+  noteToolResultForActivePlan(
+    'scope-media-partial',
+    'browser_download_collected_media',
+    { source_task_id: 'browser-task-1', directory: '/tmp/gallery' },
+    4000,
+    JSON.stringify({ ok: true, completion: 'complete', remaining: 0, failedCount: 0 }),
+  )
+  text = buildActivePlanReminderText('scope-media-partial', 4000)
+  assert.ok(text && text.includes('全部 3 步已按弱判据完成'), `complete result may close the review step, got: ${text}`)
+})
+
 test('next turn model input carries the re-injected current plan step', async () => {
   resetActivePlansForTests()
   const inputs: string[] = []

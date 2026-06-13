@@ -11,11 +11,16 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { PromptAssemblyService } from '../main/modules/agent-control/prompt-assembly'
 import { BeliefCardStore } from '../main/modules/agent-control/knowledge/belief-card-store'
 import { MAIN_AGENT_ID } from '../main/modules/repositories/agent-registry-repository'
 import type { ConversationScope } from '../main/modules/agent-control/contracts/types'
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
+
+test('agent-routing-injection declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'agent-routing-injection transitive sqlite load')
+})
 
 type RosterEntry = { id: string; name: string; charter: string | null; status: string }
 
@@ -65,12 +70,14 @@ test('main session injects charter list + ACTIVE routing cards; staged routing n
   try {
     writeFileSync(join(root, 'knowledge', 'routing-collector.md'), routingCard('active', 'ACTIVE_ROUTING_MARKER'), 'utf-8')
     writeFileSync(join(root, 'knowledge', 'routing-writer.md'), routingCard('staged', 'STAGED_ROUTING_MARKER'), 'utf-8')
+    writeFileSync(join(root, 'knowledge', 'routing-retired-one.md'), routingCard('active', 'RETIRED_ROUTING_MARKER'), 'utf-8')
     const { injected } = await build(makeService(root, ROSTER), MAIN_AGENT_ID)
     assert.ok(injected.includes('## 专项 agent 与路由索引'))
     assert.ok(injected.includes('CHARTER_MARKER'), 'specialized charter listed')
     assert.ok(injected.includes('ACTIVE_ROUTING_MARKER'), 'active routing card listed')
     assert.ok(!injected.includes('STAGED_ROUTING_MARKER'), 'staged routing card stays quarantined')
     assert.ok(!injected.includes('RETIRED_MARKER'), 'non-active roster rows filtered')
+    assert.ok(!injected.includes('RETIRED_ROUTING_MARKER'), 'routing cards targeting non-active agents are filtered')
     assert.ok(!injected.includes('管家（butler）'), 'the main agent never lists itself')
 
     const bill = events.find((event) => event.metric === 'context_bill')

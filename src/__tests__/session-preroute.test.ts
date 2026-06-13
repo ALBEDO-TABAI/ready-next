@@ -136,6 +136,9 @@ test('triggers convention: closed list at the write side; malformed cards reject
   assert.equal(parseTriggersValue('长'.repeat(33)).ok, false, '单词超 32 字符拒')
   assert.equal(parseTriggersValue(Array.from({ length: 9 }, (_, i) => `k${i}`).join(',')).ok, false, '超 8 个拒')
   assert.equal(parseTriggersValue(', ,').ok, false, '空列表拒')
+  for (const bad of ['*', '?', '.*', '[abc]', 'foo|bar', 'a+b']) {
+    assert.equal(parseTriggersValue(bad).ok, false, `${bad} is regex/glob-shaped and must be rejected`)
+  }
 
   // store write-side: bad triggers reject the card; good ones roundtrip
   const root = mkdtempSync(join(tmpdir(), 'ready-a5-'))

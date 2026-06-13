@@ -9,11 +9,11 @@
  */
 
 import { watch, type FSWatcher } from 'node:fs'
-import { existsSync } from 'node:fs'
+import { existsSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { logAgentMetric } from '../metrics'
-import { BeliefCardStore } from './belief-card-store'
+import { BeliefCardStore, isSafeAgentScopeId } from './belief-card-store'
 import {
   hashCardContent,
   upsertBeliefCardMirror,
@@ -40,6 +40,39 @@ export function isKnowledgeSystemEnabled(
 
 export type FileSyncResult = 'synced' | 'invalid' | 'recovered' | 'skipped'
 
+export function scopeIdForBeliefCardPath(relPath: string): string {
+  const match = relPath.replace(/\\/g, '/').match(/^agents\/([^/]+)\/knowledge(?:\/|$)/)
+  return match && isSafeAgentScopeId(match[1]) ? `agent:${match[1]}` : 'global'
+}
+
+export function listKnowledgeWatchDirs(store: BeliefCardStore): string[] {
+  const dirs: string[] = []
+  const add = (relPath: string): void => {
+    const abs = join(store.rootPath, relPath)
+    if (existsSync(abs)) {
+      try {
+        if (statSync(abs).isDirectory()) dirs.push(relPath)
+      } catch { /* race-deleted */ }
+    }
+  }
+  add('knowledge')
+  add('knowledge/sites')
+  add('agents')
+  const agentsAbs = join(store.rootPath, 'agents')
+  if (!existsSync(agentsAbs)) return dirs
+  for (const name of readdirSync(agentsAbs)) {
+    if (!isSafeAgentScopeId(name)) continue
+    const agentAbs = join(agentsAbs, name)
+    let isDir = false
+    try { isDir = statSync(agentAbs).isDirectory() } catch { /* race-deleted */ }
+    if (!isDir) continue
+    add(`agents/${name}`)
+    add(`agents/${name}/knowledge`)
+    add(`agents/${name}/knowledge/sites`)
+  }
+  return dirs
+}
+
 /**
  * Incremental single-file sync (watcher path). content_hash short-circuit:
  * an unchanged card produces ZERO DB writes (A2). Broken frontmatter marks
@@ -54,7 +87,13 @@ export function syncBeliefCardFile(db: MirrorDb, store: BeliefCardStore, relPath
   if (!card) {
     if (existing?.status === 'invalid') return 'skipped'
     upsertBeliefCardMirror(db, {
-      relPath, title: relPath, summary: null, confidence: null, status: 'invalid', contentHash: null,
+      relPath,
+      scopeId: scopeIdForBeliefCardPath(relPath),
+      title: relPath,
+      summary: null,
+      confidence: null,
+      status: 'invalid',
+      contentHash: null,
     })
     logAgentMetric('belief_card_invalid', { relPath, reason: 'frontmatter_parse_failed' })
     return 'invalid'
@@ -65,6 +104,7 @@ export function syncBeliefCardFile(db: MirrorDb, store: BeliefCardStore, relPath
   }
   upsertBeliefCardMirror(db, {
     relPath,
+    scopeId: scopeIdForBeliefCardPath(relPath),
     title: card.frontmatter.title,
     summary: card.frontmatter.description,
     confidence: card.frontmatter.confidence,
@@ -84,7 +124,7 @@ export function syncBeliefCardFile(db: MirrorDb, store: BeliefCardStore, relPath
  * pending set. Debounce is injectable so tests run at 0ms.
  */
 export class KnowledgeWatcher {
-  private watchers: FSWatcher[] = []
+  private watchers = new Map<string, FSWatcher>()
   private readonly pending = new Set<string>()
   private timer: ReturnType<typeof setTimeout> | null = null
 
@@ -96,19 +136,31 @@ export class KnowledgeWatcher {
   }) {}
 
   start(): void {
-    if (this.watchers.length > 0) return
-    for (const dir of ['knowledge', 'knowledge/sites']) {
+    this.refreshWatchDirs()
+  }
+
+  refreshWatchDirs(): void {
+    for (const dir of listKnowledgeWatchDirs(this.deps.store)) {
+      if (this.watchers.has(dir)) continue
       const abs = join(this.deps.store.rootPath, dir)
-      if (!existsSync(abs)) continue
       try {
         const watcher = watch(abs, { persistent: false }, (_event, filename) => {
-          if (!filename || !String(filename).endsWith('.md')) return
-          this.enqueue(`${dir}/${String(filename)}`)
+          if (!filename) return
+          const name = String(filename)
+          if (name.endsWith('.md')) {
+            this.enqueue(`${dir}/${name}`)
+            return
+          }
+          this.refreshWatchDirs()
         })
         watcher.on('error', () => { /* watcher death degrades to startup/maintenance sync */ })
-        this.watchers.push(watcher)
+        this.watchers.set(dir, watcher)
       } catch { /* missing dir / EPERM — startup sync still covers */ }
     }
+  }
+
+  watchedDirsForTest(): string[] {
+    return [...this.watchers.keys()].sort()
   }
 
   /** Exposed for tests — same path the fs.watch callback takes. */
@@ -134,10 +186,10 @@ export class KnowledgeWatcher {
 
   stop(): void {
     if (this.timer) { clearTimeout(this.timer); this.timer = null }
-    for (const watcher of this.watchers) {
+    for (const watcher of this.watchers.values()) {
       try { watcher.close() } catch { /* already closed */ }
     }
-    this.watchers = []
+    this.watchers.clear()
   }
 }
 

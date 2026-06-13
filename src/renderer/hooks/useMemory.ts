@@ -7,6 +7,7 @@ import type {
   TriggerFilters,
   MemoryLifecycleStatus,
   MemoryMaintenanceResult,
+  BeliefCardSettingsSnapshotData,
 } from '../types/electron'
 
 export function useMemories(filters: MemoryQueryFilters) {
@@ -203,4 +204,64 @@ export function useMemoryLifecycle() {
   }, [refreshStatus])
 
   return { status, loading, error, maintenanceRunning, refreshStatus, runMaintenance }
+}
+
+export function useBeliefCards() {
+  const [snapshot, setSnapshot] = useState<BeliefCardSettingsSnapshotData | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<Error | null>(null)
+  const [actionRunning, setActionRunning] = useState<string | null>(null)
+
+  const refresh = useCallback(async () => {
+    try {
+      setLoading(true)
+      const result = await window.electronAPI.memoryCards.list()
+      if (result.success && result.data) {
+        setSnapshot(result.data)
+        setError(null)
+      } else {
+        setError(new Error(result.error || 'Failed to list belief cards'))
+      }
+    } catch (err) {
+      setError(err as Error)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    void refresh()
+  }, [refresh])
+
+  const transitionCard = useCallback(async (relPath: string, action: 'approve' | 'reject') => {
+    try {
+      setActionRunning(`${action}:${relPath}`)
+      const result = await window.electronAPI.memoryCards.transition({ relPath, action })
+      if (result.success && result.data) {
+        setSnapshot(result.data)
+        setError(null)
+        return
+      }
+      throw new Error(result.error || 'Failed to update belief card')
+    } finally {
+      setActionRunning(null)
+    }
+  }, [])
+
+  const setKnowledgeSystemEnabled = useCallback(async (enabled: boolean) => {
+    try {
+      setActionRunning('knowledge-system')
+      const result = await window.electronAPI.memoryCards.setKnowledgeSystemEnabled(enabled)
+      if (result.success && result.data) {
+        setSnapshot(result.data)
+        setError(null)
+        return
+      }
+      throw new Error(result.error || 'Failed to update knowledge system')
+    } finally {
+      setActionRunning(null)
+    }
+  }, [])
+
+  return { snapshot, loading, error, actionRunning, refresh, transitionCard, setKnowledgeSystemEnabled }
 }

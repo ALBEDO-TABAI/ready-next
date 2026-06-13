@@ -9,9 +9,14 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { loadRulesDefaultBody, __resetRulesDefaultCacheForTests } from '../main/modules/agent-control/prompt-assets/rules-default-asset'
 import { PromptAssemblyService } from '../main/modules/agent-control/prompt-assembly'
 import type { ConversationScope } from '../main/modules/agent-control/contracts/types'
+
+test('rules-default-asset declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'rules-default-asset transitive sqlite load')
+})
 
 const SCOPE: ConversationScope = {
   id: 'scope-k4', agent: 'butler', title: '测试', sourceKind: 'local', sourceId: 'app',

@@ -20,13 +20,21 @@ export interface EmergenceEvidence {
 }
 
 export interface EmergenceAction {
-  kind: 'resume_task' | 'adjudicate_task' | 'supply_input' | 'adopt_candidate' | 'review_duplicate'
+  kind:
+    | 'resume_task'
+    | 'adjudicate_task'
+    | 'supply_input'
+    | 'adopt_candidate'
+    | 'review_duplicate'
+    | 'open_project'
+    | 'open_artifact'
+    | 'open_project_group'
   ref: string
 }
 
 export interface EmergenceCard {
   id: string
-  type: 'resume' | 'follow_up' | 'crystallize'
+  type: 'resume' | 'follow_up' | 'crystallize' | 'prepare' | 'harvest' | 'forming'
   title: string
   evidence: EmergenceEvidence[]
   confidence: number
@@ -184,6 +192,131 @@ export function extractAgentCandidateCards(signals: ReadonlyArray<AgentCandidate
     })
   }
   return out
+}
+
+export interface PrepareCardSignal {
+  id: string
+  title: string
+  startsAt: string
+  projectRef: string
+  sourceDomain?: string | null
+  confidence?: number
+}
+
+export interface HarvestCardSignal {
+  id: string
+  title: string
+  completedAt: string
+  artifactRef: string
+  artifactLabel: string
+  openedAfterCompletion: boolean
+  protectedPath?: boolean
+  sourceDomain?: string | null
+  confidence?: number
+}
+
+export interface HarvestIntentProjection {
+  /** Cards allowed to enter the intent feed when R-E2 is unlocked. */
+  cards: EmergenceCard[]
+  /** Same sanitized cards, held back while the intent-feed surface is blocked. */
+  deferredCards: EmergenceCard[]
+  blockedBy: 'R-E2' | null
+}
+
+export interface FormingCardSignal {
+  id: string
+  title: string
+  fileRefs: string[]
+  projectRef: string
+  sourceDomain?: string | null
+  confidence?: number
+}
+
+function sourceEvidence(sourceDomain: string | null | undefined): EmergenceEvidence[] {
+  return sourceDomain ? [{ fact: `第三方来源域名 ${sourceDomain}`, ref: `domain:${sourceDomain}` }] : []
+}
+
+function isProtectedArtifact(signal: HarvestCardSignal): boolean {
+  if (signal.protectedPath) return true
+  const text = `${signal.artifactLabel}\n${signal.artifactRef}`.toLowerCase()
+  return /(^|[/\\])\.(ssh|aws|config|env)([/\\]|$)/.test(text)
+    || /(^|[/\\])\.env(?:[./\\-]|$)/.test(text)
+    || /\b(secret|credential|credentials|password|private[-_ ]?key|id_rsa|token)\b/.test(text)
+}
+
+/** "接下来有什么要来" — future calendar/project signals with an exit. */
+export function extractPrepareCards(signals: ReadonlyArray<PrepareCardSignal>): EmergenceCard[] {
+  return signals
+    .filter((signal) => signal.projectRef.trim().length > 0)
+    .map((signal) => ({
+      id: `prepare:${signal.id}`,
+      type: 'prepare' as const,
+      title: `接下来要准备：${signal.title}`,
+      evidence: [
+        { fact: `未来事件 ${signal.startsAt}`, ref: signal.id },
+        ...sourceEvidence(signal.sourceDomain),
+      ],
+      confidence: signal.confidence ?? 0.72,
+      action: { kind: 'open_project' as const, ref: signal.projectRef },
+      requiresExplicitConfirm: false,
+    }))
+}
+
+/** "做完的东西在哪" — completed proof artifacts not reopened yet. */
+export function extractHarvestCards(signals: ReadonlyArray<HarvestCardSignal>): EmergenceCard[] {
+  return signals
+    .filter((signal) => !signal.openedAfterCompletion)
+    .filter((signal) => signal.artifactRef.trim().length > 0)
+    .map((signal) => {
+      const label = isProtectedArtifact(signal) ? '产物已生成（受保护路径）' : signal.artifactLabel
+      return {
+        id: `harvest:${signal.id}`,
+        type: 'harvest' as const,
+        title: `已完成产物：${label}`,
+        evidence: [
+          { fact: `任务完成于 ${signal.completedAt}`, ref: signal.id },
+          { fact: `产物 ${label}`, ref: signal.artifactRef },
+          ...sourceEvidence(signal.sourceDomain),
+        ],
+        confidence: signal.confidence ?? 0.7,
+        action: { kind: 'open_artifact' as const, ref: signal.artifactRef },
+        requiresExplicitConfirm: false,
+      }
+    })
+}
+
+export function buildHarvestIntentProjection(
+  signals: ReadonlyArray<HarvestCardSignal>,
+  opts: { intentFeedEnabled?: boolean } = {},
+): HarvestIntentProjection {
+  const cards = assembleEmergenceFeed(extractHarvestCards(signals), {
+    globalLimit: EMERGENCE_PER_TYPE_LIMIT,
+    perTypeLimit: EMERGENCE_PER_TYPE_LIMIT,
+    confidenceFloor: EMERGENCE_CONFIDENCE_FLOOR,
+  })
+  if (opts.intentFeedEnabled) {
+    return { cards, deferredCards: [], blockedBy: null }
+  }
+  return { cards: [], deferredCards: cards, blockedBy: 'R-E2' }
+}
+
+/** "手头在长出什么项目" — file/project clusters with a project-group exit. */
+export function extractFormingCards(signals: ReadonlyArray<FormingCardSignal>): EmergenceCard[] {
+  return signals
+    .filter((signal) => signal.projectRef.trim().length > 0 && signal.fileRefs.length > 0)
+    .map((signal) => ({
+      id: `forming:${signal.id}`,
+      type: 'forming' as const,
+      title: `正在成形：${signal.title}`,
+      evidence: [
+        { fact: `相关文件 ${signal.fileRefs.length} 个`, ref: signal.projectRef },
+        ...signal.fileRefs.slice(0, 3).map((ref) => ({ fact: '文件聚类证据', ref })),
+        ...sourceEvidence(signal.sourceDomain),
+      ],
+      confidence: signal.confidence ?? 0.68,
+      action: { kind: 'open_project_group' as const, ref: signal.projectRef },
+      requiresExplicitConfirm: false,
+    }))
 }
 
 /** Apply the four feed controls and a stable ordering. */

@@ -47,6 +47,7 @@ export interface BeliefCardFrontmatter {
 
 export const TRIGGERS_MAX_ENTRIES = 8
 export const TRIGGERS_MAX_ENTRY_CHARS = 32
+const TRIGGER_FORBIDDEN_PATTERN = /[*?[\]{}()|\\^$+]/
 
 /** Parse + validate the triggers value — comma-separated string from a
  *  card FILE, or a string[] from a writeCard caller. null = absent;
@@ -66,6 +67,9 @@ export function parseTriggersValue(raw: string | string[] | undefined):
   for (const entry of entries) {
     if (entry.length > TRIGGERS_MAX_ENTRY_CHARS) {
       return { ok: false, reason: `trigger keyword too long: ${entry.slice(0, 40)}` }
+    }
+    if (TRIGGER_FORBIDDEN_PATTERN.test(entry)) {
+      return { ok: false, reason: `trigger keyword must be literal text: ${entry.slice(0, 40)}` }
     }
   }
   return { ok: true, triggers: entries }
@@ -309,18 +313,20 @@ export class BeliefCardStore {
    * would be exceeded the remainder is dropped and reported via
    * `omittedCount` so the caller can append the "另有 N 条" footer.
    */
-  renderKnowledgeIndex(opts: { maxChars: number; ownerAgentId?: string | null }): { text: string; renderedCount: number; omittedCount: number } {
+  renderKnowledgeIndex(opts: { maxChars: number; ownerAgentId?: string | null; excludeRelPaths?: readonly string[] }): { text: string; renderedCount: number; omittedCount: number } {
     const rank: Record<BeliefCardFrontmatter['confidence'], number> = { H: 0, M: 1, L: 2 }
     const byConfidence = (a: BeliefCard, b: BeliefCard): number =>
       rank[a.frontmatter.confidence] - rank[b.frontmatter.confidence]
       || a.relPath.localeCompare(b.relPath)
     const isActive = (card: BeliefCard): boolean => card.frontmatter.status === 'active'
+    const excluded = new Set(opts.excludeRelPaths ?? [])
     // EP3-A2 — owner agent's scope dir renders FIRST (作用域优先), then the
     // global dir; ONLY the owner's dir is read — sibling agents' lineages
     // never reach this surface (零泄漏 is structural, not filtered).
     const ownerDir = agentScopeKnowledgeDir(opts.ownerAgentId)
     const ownerActive = ownerDir ? this.listCards({ dir: ownerDir }).filter(isActive).sort(byConfidence) : []
     const active = [...ownerActive, ...this.listCards().filter(isActive).sort(byConfidence)]
+      .filter((card) => !excluded.has(card.relPath))
     const lines: string[] = []
     let used = 0
     let rendered = 0

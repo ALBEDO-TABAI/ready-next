@@ -137,6 +137,7 @@ describe('finalizeRunOutcome', () => {
       initiator: 'user_stop',
       toolCallsUsed: 3,
       durationMs: 1_250,
+      taskType: null,
     }])
   })
 
@@ -158,6 +159,7 @@ describe('finalizeRunOutcome', () => {
       initiator: 'budget',
       toolCallsUsed: 7,
       durationMs: 2_500,
+      taskType: null,
     }])
   })
 

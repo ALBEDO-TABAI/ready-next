@@ -13,10 +13,17 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { PromptAssemblyService } from '../main/modules/agent-control/prompt-assembly'
 import { BeliefCardStore, agentScopeKnowledgeDir, isAllowedCardPath } from '../main/modules/agent-control/knowledge/belief-card-store'
 import type { ConversationScope } from '../main/modules/agent-control/contracts/types'
 import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
+
+test('per-agent-injection declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'per-agent-injection transitive sqlite load')
+})
+
+type RosterEntry = { id: string; name: string; charter: string | null; status: string }
 
 function scope(agent = 'butler'): ConversationScope {
   return {
@@ -55,11 +62,12 @@ function makeRoot(): string {
   return root
 }
 
-function makeService(root: string): PromptAssemblyService {
+function makeService(root: string, roster?: RosterEntry[]): PromptAssemblyService {
   return new PromptAssemblyService({
     getMemoryRoot: () => root,
     getScopeMessages: () => [],
     getBeliefCardStore: () => new BeliefCardStore({ memoryRoot: root }),
+    getAgentRoster: roster ? () => roster : undefined,
   })
 }
 
@@ -140,6 +148,31 @@ test('staged ban extends to per-agent dirs; hostile owner ids degrade to global-
       assert.ok(!hostileWithScope.injected.includes(banned), `${banned} absent: explicit bad owner → global-only`)
     }
     assert.ok(hostileWithScope.injected.includes('GLOBAL_CARD'))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('retired or merged owner ids degrade to global-only on later turns', async () => {
+  const root = makeRoot()
+  try {
+    const roster: RosterEntry[] = [
+      { id: 'butler', name: '管家', charter: '主 agent', status: 'active' },
+      { id: 'agent-x', name: '旧 X', charter: '已退休', status: 'retired' },
+      { id: 'agent-y', name: '旧 Y', charter: '已合并', status: 'merged' },
+    ]
+    const svc = makeService(root, roster)
+    const retiredOwner = await build(svc, 'agent-x')
+    const mergedOwner = await build(svc, 'agent-y')
+    const fallbackScope = await build(svc, undefined, 'agent-y')
+
+    for (const snapshot of [retiredOwner, mergedOwner, fallbackScope]) {
+      assert.ok(snapshot.injected.includes('GLOBAL_CARD'), 'global knowledge remains available')
+      assert.ok(snapshot.injected.includes('GLOBAL_RULES_MARKER'), 'global rules remain available')
+      for (const banned of ['X_AGENT_CARD', 'X_RULES_MARKER', 'Y_AGENT_CARD', 'Y_RULES_MARKER']) {
+        assert.ok(!snapshot.injected.includes(banned), `${banned} absent for non-active owner`)
+      }
+    }
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

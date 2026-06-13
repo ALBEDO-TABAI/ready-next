@@ -4,10 +4,15 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { PromptAssemblyService } from '../main/modules/agent-control/prompt-assembly'
 import type { DomainAdapter } from '../main/modules/agent-control/domain-adapters/domain-adapter'
 import type { ConversationScope } from '../main/modules/agent-control/contracts/types'
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
+
+test('fragment-inline-asset-ref declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'fragment-inline-asset-ref transitive sqlite load')
+})
 
 const SCOPE: ConversationScope = {
   id: 's1',

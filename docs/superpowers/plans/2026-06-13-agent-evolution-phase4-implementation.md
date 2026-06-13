@@ -36,7 +36,7 @@ related:
    - 轨道 K（01 篇真值源延伸）：**K-mirror 独立无前置**，建议首单（A6 派生出的专项卡需要镜像/衰减覆盖，先把地基补平）。
    - 轨道 B（11 篇）：**B6 前置 = 02 Q4a（shadow，已合入）+ 03 C3（已合入）**——B6 不依赖 B1/B4/B5，走现有采集通道的失败信号，可与 A 轨并行。
    - 轨道 E（10 篇）：**E5（prepare/harvest/forming 三类卡内核 extractor）前置 = E1（已合入）**；forming/prepare 的消费面是 v1 文件树四桶（已存在），**harvest 卡的意图流投影接线依赖 R-E2，E5 只交付内核与文件视图消费 + 投影接口**。
-   - **共享文件矩阵**：`migrations.ts`（A6a——末尾追加 058，名称隔离范式；**若开工时 058 已被遗留轨占用，必须先修订本合同再开工**）；`belief-card-store.ts`、`belief-card-mirror.ts`、`knowledge-index-builder.ts`（K-mirror 先行，B6 后碰 store）；`agent-registry-repository.ts`（A6a → A7 串行）；`emergence-cards.ts`（E5；遗留轨 E3 若同期解锁需协调周序）；`runtime.ts`/`run-coordinator.ts` 与 settings-engine/preload/renderer 类型（A5 接线，单内 additive）；`assets/prompts/derivation/seed-rules.md`（A6a 新建独占）；PersonalityEditor 系（A7 独占）。`agent-sdk-runtime.ts` 主轨零触碰（用户在途改动落地后另议）。
+   - **共享文件矩阵**：`migrations.ts`（A6a——末尾追加 058，名称隔离范式；**若开工时 058 已被遗留轨占用，必须先修订本合同再开工**）；`belief-card-store.ts`、`belief-card-mirror.ts`、`knowledge-index-builder.ts`（K-mirror 先行，B6 后碰 store）；`agent-registry-repository.ts`（A6a → A7 串行）；`emergence-cards.ts`（E5；遗留轨 E3 若同期解锁需协调周序）；`runtime.ts`/`run-coordinator.ts` 与 settings-engine/preload/renderer 类型（A5 接线，单内 additive）；`assets/prompts/derivation/seed-rules.md`（A6a 新建独占）；PersonalityEditor 系（A7 独占）。`agent-sdk-runtime.ts` 仅允许 B6 的 best-effort 站点学习信号接线，禁止改变 agent loop 主语义。
 2. **每单交付物**：失败测试 → 实现 → 焦点验证命令绿 → `npm run typecheck` 绿；涉及迁移的（A6a）加 `npm run verify:native`；触碰既有合同面的单加对应 `verify:evolution-p1/p2/p3`。
 3. **每单提交**：单独 commit，message 引用工单号（如 `feat(agent): EP4-A5 session preroute + agent_auto_routing setting`）。
 4. **禁止事项**
@@ -70,7 +70,7 @@ related:
 - **index 落点决策（定死）**：**root `index.md` 只收 global 作用域卡**——crystallize 维护回合的 `writeIndexFile` 唯一写入口（`crystallize-gate.ts` :87，01 §7b DEFAULT_FILES 合同）与其落点保持不变；agent 作用域卡**只参与本作用域的 backlink 解析与衰减信号**，**不产 per-agent index 文件**（当前没有任何读者——写得出读不到的幽灵产物被本仓库纪律禁止；未来若 per-agent 知识索引注入需要 index 文件，另立单）。喂给 index-builder 的输入按 scopeId 分桶后，**只有 global 桶进 root index.md 渲染**。
 - **实施要点**：存量零感知——无 `agents/` 目录时行为 = 现状（global 桶单桶 = 现行为）；镜像/衰减对 agent 卡的处理规则与全局卡一致（无特殊路径），差异只有 scope_id 与 backlink 命名空间；**读 API 的 staged 排除与注入面规则不变**（本单只扩扫描，不动注入）。
 - **测试（先红）**：agent 作用域卡出现在 mirror 同步结果且 `scope_id='agent:<id>'`、`file_path` 携作用域前缀（global 卡仍 `'global'`）；**两个 agent 各有同名 slug 卡时互不计 backlink**（红测钉死）；**agent 卡不泄入 root index.md（红测钉死）**；衰减信号含 agent 卡且 backlink 按作用域计；无 agents 目录回退现状；staged agent 卡仍被注入面排除（回归断言）。
-- **验证**：`npx tsx@^4.19.2 --test src/__tests__/agent-scope-card-coverage.test.ts src/__tests__/belief-card-mirror.test.ts src/__tests__/knowledge-index-builder.test.ts src/__tests__/maintenance-llm-round.test.ts && npm run typecheck`
+- **验证**：`npx tsx@^4.19.2 --test src/__tests__/agent-scope-card-coverage.test.ts src/__tests__/belief-card-db-sync.test.ts src/__tests__/knowledge-index-builder.test.ts src/__tests__/maintenance-llm-round.test.ts && npm run typecheck`
 - **规模**：~200 行。
 
 ---
@@ -93,9 +93,9 @@ related:
 - **规模**：~300 行。
 
 ### EP4-A6b 派生确认 UI + 采纳闭环
-- **改动文件**：派生确认面（候选卡（C5 投影，stage=candidate 且证据 ≥3）→ 确认对话：命名可改 + 种子 RULES 预览可改 + 知识迁移清单逐项勾选——**复用 ask_user_questions 卡机变体范式优先**；若多步表单超出卡机表达力，立独立确认对话组件并走 §7 最小闭环：IPC/preload/类型/组件）、采纳回调接线（确认 → A6a factory 执行全部写动作 → routing 卡落盘（staged，**用户在同一确认流里勾选"立即生效"才置 active**；triggers 字段按 A5 约定生成并过写侧校验）→ 候选卡 `stage` → emerged）、拒绝路径（驳回 → 候选卡保持 candidate + 反馈记录，观察句措辞）、新增 `src/__tests__/agent-derivation-flow.test.ts`
+- **改动文件**：派生确认面（候选卡（C5 投影，stage=candidate 且证据 ≥3）→ 确认对话：命名可改 + 种子 RULES 预览可改 + 知识迁移清单逐项勾选——**复用 ask_user_questions 卡机变体范式优先**；若多步表单超出卡机表达力，立独立确认对话组件并走 §7 最小闭环：IPC/preload/类型/组件）、采纳回调接线（确认 → A6a factory 执行全部写动作 → routing 卡落盘（staged，**用户在同一确认流里勾选"立即生效"才置 active**；triggers 字段按 A5 约定生成并过写侧校验）→ 候选卡 `stage` → emerged）、拒绝路径（驳回 → 候选卡转 `status=rejected`，且不写 agent / RULES / routing）、新增 `src/__tests__/agent-derivation-flow.test.ts` 与 `src/__tests__/agent-phase4-settings-panels.test.tsx`
 - **实施要点**：**端到端验收**：候选卡 → 确认 → agents 表新行 + 骨架目录 + RULES 落盘 + routing 卡生效 → A5 先例路由命中新 agent（04 WP 表 A6 验收原文）；确认不可一键批量；新 agent 默认 status=active 且立即可被 A4 handoff/A5 路由发现。
-- **测试（先红）**：端到端派生链（fake LLM + 真 store + 真 registry on 临时根）；拒绝路径无任何写动作；迁移清单未勾选项不移动；routing 卡默认 staged；A5 先例命中新写入的 active routing 卡。
+- **测试（先红）**：端到端派生链（fake LLM + 真 store + 真 registry on 临时根）；拒绝路径无任何 agent 写动作；迁移清单未勾选项不移动，IPC 也不能迁移未展示给用户的卡；routing 卡默认 staged；A5 先例命中新写入的 active routing 卡；设置页面板可创建、驳回并刷新生命周期列表。
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/agent-derivation-flow.test.ts src/__tests__/session-preroute.test.ts && npm run typecheck`
 - **规模**：~300 行。
 
@@ -114,8 +114,8 @@ related:
 
 ### EP4-B6 失败 → 站点卡学习回路
 - **前置**：02 Q4a（shadow CheckIn，已合入）+ 03 C3（维护回合，已合入）。**不依赖 B1/B4/B5**——信源是现有采集通道的结构化失败。
-- **前置论证（Q4a 够用，不依赖 Q4b enforce）**：B6 只消费**失败事实**，不读取/不影响裁决的 enforce 行为——信源三个接口点名：①`browser-engine/collection-verdict.ts` 的 `resolveCollectionVerdict()` 产物（failed/partial 判决+诊断）；②Q4a shadow `CheckInRecord.blockers`（任务投影 checkins 列，只读）；③工具信封结构化 `errorKind` 闭集中的浏览器失败类（登录墙、脚本检测、selector 失效等）。三者在 HEAD 均已存在且与 Q4b 转正无关。
-- **改动文件**：新增 `agent-control/knowledge/site-card-learning.ts`（确定性 extractor：按域名把上述失败信号映射为站点卡操作——**新站点无卡 → 写 staged 新卡（带日期证据+failure kind）；已有卡（无论 active/staged）→ 零自动改写**：产出 staged **旁卡**（`source: possible-update-of:<原卡 relPath>`，正文=带日期证据行），用户确认后由既有 staged 晋升/合并流程并入原卡——active 卡一个字节不被学习路径碰到；风险等级变更同样走 staged 建议卡（`possible-risk-update-of` 标记），确认后才动 store 风险对齐）、维护回合接线（C3 信号采集器增加站点失败信源，**只读**——写卡仍走本单 extractor 的确定性路径）、新增 `src/__tests__/site-card-learning.test.ts`
+- **前置论证（Q4a 够用，不依赖 Q4b enforce）**：B6 只消费**失败事实**，不读取/不影响裁决的 enforce 行为——信源接口点名：①`browser-engine/collection-verdict.ts` 的 `resolveCollectionVerdict()` 产物（failed/partial 判决+诊断）；②Q4a shadow `CheckInRecord.blockers` 中显式 `site_failure:<kind>` blocker（泛 `learning_refs_missing` / `zero_proof_done` / `criteria_unsatisfied:*` 不学习）；③工具信封结构化 `errorKind` / `errorCode` 闭集中的浏览器失败类（登录墙、脚本检测、selector 失效等），安全确认、来源证明、授权拒绝类 code 不学习。三者与 Q4b 转正无关。
+- **改动文件**：新增 `agent-control/knowledge/site-card-learning.ts`（确定性 extractor：按域名把上述失败信号映射为站点卡操作——**新站点无卡 → 写 staged 新卡（带日期证据+failure kind）；已有卡（无论 active/staged）→ 零自动改写**：产出 staged **旁卡**（`source: possible-update-of:<原卡 relPath>`，正文=带日期证据行），用户确认后由既有 staged 晋升/合并流程并入原卡——active 卡一个字节不被学习路径碰到；风险等级变更同样走 staged 建议卡（`possible-risk-update-of` 标记），确认后才动 store 风险对齐）、finalizer CheckIn best-effort hook 与浏览器工具错误闭集码接线、新增 `src/__tests__/site-card-learning.test.ts`
 - **实施要点**：failure kind 是代码闭集（未知 kind 计 rejected 不写卡）；同域同日同 kind 去重（含旁卡内去重）；高风控站点硬拦清单**只读**——学习回路对其零写权；11 篇验收原文"注入一次登录墙失败 → 站点卡产生/更新"中的"更新"= staged 旁卡产生，并入须确认。
 - **测试（先红）**：登录墙失败 → 新 staged 站点卡（证据带日期）；已有 active 卡 → **原卡逐字节不变 + staged 旁卡产生**；风险变更只产建议卡；未知 failure kind 拒绝；同日去重；硬拦清单零写。
 - **验证**：`npx tsx@^4.19.2 --test src/__tests__/site-card-learning.test.ts src/__tests__/site-card-alignment.test.ts && npm run typecheck`

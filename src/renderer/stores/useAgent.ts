@@ -2048,16 +2048,32 @@ export const useAgent = create<AgentState>((set, get) => ({
       pendingContinuationIntent,
     } = get()
 
+    let activeAgentName = currentAgent
+    let prerouteSuggestion: { targetAgentId: string; tier: 'state' | 'precedent' } | null = null
+    if (!currentScope && !currentScopeId && normalizedContent && typeof window !== 'undefined' && window.electronAPI?.agent?.sessionPrerouteEvaluate) {
+      const preroute = await window.electronAPI.agent.sessionPrerouteEvaluate(normalizedContent).catch(() => null)
+      const prerouteData = preroute?.success ? preroute.data : null
+      const decision = prerouteData?.decision ?? null
+      if (prerouteData && prerouteData.effect !== 'none' && decision && decision.tier !== 'fallback') {
+        if (prerouteData.effect === 'route') {
+          activeAgentName = decision.targetAgentId
+          set({ currentAgent: activeAgentName })
+        } else {
+          prerouteSuggestion = { targetAgentId: decision.targetAgentId, tier: decision.tier }
+        }
+      }
+    }
+
     let scope = currentScope
     let scopeId = currentScopeId
     let localScopeBootstrapAttempted = false
     if ((!scope || !scopeId) && typeof window !== 'undefined' && window.electronAPI?.agent?.createLocalScope !== undefined) {
       localScopeBootstrapAttempted = true
       const created = await callCreateLocalScopeWithMetric(
-        currentAgent,
+        activeAgentName,
         null,
         'sendMessage_no_scope',
-        () => window.electronAPI!.agent!.createLocalScope(currentAgent),
+        () => window.electronAPI!.agent!.createLocalScope(activeAgentName),
       )
       if (created?.success && created.data) {
         const nextScope = created.data as unknown as ConversationScope
@@ -2088,10 +2104,10 @@ export const useAgent = create<AgentState>((set, get) => ({
     ) {
       localScopeBootstrapAttempted = true
       const created = await callCreateLocalScopeWithMetric(
-        currentAgent,
+        activeAgentName,
         scopeId ?? null,
         'sendMessage_local_scope_missing',
-        () => window.electronAPI!.agent!.createLocalScope(currentAgent, scopeId || undefined),
+        () => window.electronAPI!.agent!.createLocalScope(activeAgentName, scopeId || undefined),
       )
       if (created?.success && created.data) {
         const nextScope = created.data as unknown as ConversationScope
@@ -2111,16 +2127,16 @@ export const useAgent = create<AgentState>((set, get) => ({
     if (
       scope &&
       scope.sourceKind === 'local' &&
-      scope.agent !== currentAgent &&
+      scope.agent !== activeAgentName &&
       typeof window !== 'undefined' &&
       window.electronAPI?.agent?.createLocalScope !== undefined
     ) {
       localScopeBootstrapAttempted = true
       const created = await callCreateLocalScopeWithMetric(
-        currentAgent,
+        activeAgentName,
         scopeId ?? null,
         'sendMessage_agent_mismatch',
-        () => window.electronAPI!.agent!.createLocalScope(currentAgent),
+        () => window.electronAPI!.agent!.createLocalScope(activeAgentName),
       )
       if (created?.success && created.data) {
         const nextScope = created.data as unknown as ConversationScope
@@ -2187,17 +2203,17 @@ export const useAgent = create<AgentState>((set, get) => ({
       })
       emitRendererAgentMetric('renderer_attachment_input_failed', {
         scopeId: activeScopeId,
-        agent: currentAgent,
+        agent: activeAgentName,
         failedCount: composedInput.diagnostics.inputFailedCount,
       })
       emitRendererAgentMetric('renderer_friendly_error_surfaced', {
         scopeId: activeScopeId,
-        agent: currentAgent,
+        agent: activeAgentName,
         errorKind: 'attachment_unavailable',
       })
       addMessage({
         id: `error-${Date.now()}`,
-        agent: currentAgent,
+        agent: activeAgentName,
         content: friendly.friendlyMessage,
         type: 'system',
         timestamp: new Date(),
@@ -2214,12 +2230,24 @@ export const useAgent = create<AgentState>((set, get) => ({
       filePool: state.filePool.filter((attachment) => attachment.source !== 'document-quote'),
     }))
 
+    if (prerouteSuggestion) {
+      addMessage({
+        id: generateId('system'),
+        agent: activeAgentName,
+        content: prerouteSuggestion.tier === 'state'
+          ? `这条消息看起来和进行中的任务有关，建议交给 ${prerouteSuggestion.targetAgentId} 继续处理。`
+          : `这条消息命中了专项处理经验，建议交给 ${prerouteSuggestion.targetAgentId} 处理。`,
+        type: 'system',
+        timestamp: new Date(),
+      })
+    }
+
     // Build display content (include @[filename] references)
     const userMsgId = generateId('msg')
     const userTimestamp = new Date()
     addMessage({
       id: userMsgId,
-      agent: currentAgent,
+      agent: activeAgentName,
       content,
       type: 'user',
       timestamp: userTimestamp,
@@ -2264,7 +2292,7 @@ export const useAgent = create<AgentState>((set, get) => ({
         const responseId = generateId('response')
         addMessage({
           id: responseId,
-          agent: currentAgent,
+          agent: activeAgentName,
           content: commandResult.text,
           type: commandResult.isError ? 'system' : 'agent',
           timestamp: new Date(),
@@ -2279,7 +2307,7 @@ export const useAgent = create<AgentState>((set, get) => ({
       ? isForegroundBusyScopeRunState(activeRunBeforeNewSend)
       : get().isStreaming
     if (typeof window !== 'undefined' && window.electronAPI && shouldKillForegroundRun) {
-      await window.electronAPI.agent.kill(currentAgent, activeScopeId).catch(console.error)
+      await window.electronAPI.agent.kill(activeAgentName, activeScopeId).catch(console.error)
     }
 
     setIsStreaming(true)
@@ -2288,7 +2316,7 @@ export const useAgent = create<AgentState>((set, get) => ({
     const responseId = generateId('response')
     addMessage({
       id: responseId,
-      agent: currentAgent,
+      agent: activeAgentName,
       content: '',
       type: 'agent',
       timestamp: new Date(),
@@ -2308,7 +2336,7 @@ export const useAgent = create<AgentState>((set, get) => ({
           [activeScopeId]: {
           ...createEmptyScopeRunState({
             scopeId: activeScopeId,
-            agent: currentAgent,
+            agent: activeAgentName,
             requestId,
             phase: 'planning',
             responseMessageId: responseId,
@@ -2355,7 +2383,7 @@ export const useAgent = create<AgentState>((set, get) => ({
               },
               continuationIntent: pendingContinuationIntent || undefined,
             })
-            : window.electronAPI.agent.send(currentAgent, finalMessage, activeScopeId, requestId)
+            : window.electronAPI.agent.send(activeAgentName, finalMessage, activeScopeId, requestId)
         )
 
         let result = await sendWithCurrentScope()
@@ -2400,14 +2428,14 @@ export const useAgent = create<AgentState>((set, get) => ({
           })
           emitRendererAgentMetric('renderer_send_persistence_failed', {
             scopeId: activeScopeId,
-            agent: currentAgent,
+            agent: activeAgentName,
             errorKind: result.errorKind || 'unknown',
             messageStatus: result.persistence?.message || null,
             attachmentStatus: result.persistence?.attachments || null,
           })
           emitRendererAgentMetric('renderer_friendly_error_surfaced', {
             scopeId: activeScopeId,
-            agent: currentAgent,
+            agent: activeAgentName,
             errorKind: result.errorKind || 'unknown',
           })
           set((state) => {
@@ -2431,7 +2459,7 @@ export const useAgent = create<AgentState>((set, get) => ({
                   [activeScopeId]: {
                     ...(slice.scopeRunStates[activeScopeId] || {
                       scopeId: activeScopeId,
-                      agent: currentAgent,
+                      agent: activeAgentName,
                       requestId,
                       toolTrace: [],
                       startedAt: new Date().toISOString(),
@@ -2503,7 +2531,7 @@ export const useAgent = create<AgentState>((set, get) => ({
       const friendly = mapBackendErrorToFriendly({ error: rawError })
       emitRendererAgentMetric('renderer_friendly_error_surfaced', {
         scopeId: activeScopeId,
-        agent: currentAgent,
+        agent: activeAgentName,
         errorKind: 'unknown',
       })
       set((state) => {
@@ -2527,7 +2555,7 @@ export const useAgent = create<AgentState>((set, get) => ({
               [activeScopeId]: {
                 ...(slice.scopeRunStates[activeScopeId] || {
                   scopeId: activeScopeId,
-                  agent: currentAgent,
+                  agent: activeAgentName,
                   requestId,
                   toolTrace: [],
                   startedAt: new Date().toISOString(),

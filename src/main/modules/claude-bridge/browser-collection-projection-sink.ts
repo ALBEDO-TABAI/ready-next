@@ -187,10 +187,11 @@ export function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime
         const store = activeRuntime.getTaskProjectionStore()
         const existing = store.get(input.sourceTaskId || input.taskId)
         if (!existing) return
+        const unresolved = (Number(input.remaining ?? 0) || 0) > 0 || (Number(input.failed ?? 0) || 0) > 0
         write(
           input,
-          existing.status,
-          (existing.waitingFor === 'background' || existing.waitingFor === 'verification' ? existing.waitingFor : 'none') as 'background' | 'verification' | 'none',
+          unresolved ? 'recoverable_paused' : existing.status,
+          unresolved ? 'none' : (existing.waitingFor === 'background' || existing.waitingFor === 'verification' ? existing.waitingFor : 'none') as 'background' | 'verification' | 'none',
           false,
         )
         return

@@ -850,6 +850,21 @@ export class AgentControlRuntime extends EventEmitter {
     return this.agentRegistry
   }
 
+  applyKnowledgeSystemEnabled(enabled: boolean): void {
+    const rawDb = this.db.getRawDb?.()
+    if (!rawDb) return
+    if (!enabled) {
+      this.knowledgeWatcher?.stop()
+      this.knowledgeWatcher = null
+      return
+    }
+    runStartupBeliefSync(rawDb as never, this.getBeliefCardStore(), true)
+    if (!this.knowledgeWatcher) {
+      this.knowledgeWatcher = new KnowledgeWatcher({ db: rawDb as never, store: this.getBeliefCardStore() })
+    }
+    this.knowledgeWatcher.start()
+  }
+
   /** EP4-A5 — session-creation preroute (pure table+classifier router fed
    *  with projection facts, active routing cards, and registry status). */
   evaluateSessionPreroute(firstMessage: string): PrerouteResult {

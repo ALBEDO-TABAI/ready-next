@@ -110,6 +110,52 @@ interface AgentChannelConfigData {
   lastSeenAt?: string | null
 }
 
+interface AgentRegistryRecordData {
+  id: string
+  name: string
+  charter: string | null
+  personaRef: string | null
+  status: 'active' | 'retired' | 'merged'
+  parentAgentId: string | null
+  derivationReason: string | null
+  mergedIntoAgentId: string | null
+  createdAt: string
+}
+
+interface AgentDerivationMigrationCandidateData {
+  relPath: string
+  title: string
+  description: string
+}
+
+interface AgentDerivationCandidateData {
+  candidateRelPath: string
+  title: string
+  description: string
+  bodyPreview: string
+  evidenceDates: string[]
+  defaultSpecialistId: string
+  defaultName: string
+  defaultCharter: string
+  defaultSeedRulesText: string
+  defaultRoutingTriggers: string[]
+  migrationCandidates: AgentDerivationMigrationCandidateData[]
+}
+
+interface AgentDerivationConfirmData {
+  agent: AgentRegistryRecordData
+  rulesRelPath: string
+  routingCardRelPath: string
+  migratedCards: Array<{ from: string; to: string }>
+}
+
+interface AgentRegistryKnowledgeCardData {
+  relPath: string
+  title: string
+  description: string
+  status: string
+}
+
 interface AgentCronTaskData {
   id: string
   name: string
@@ -811,6 +857,26 @@ interface ElectronAgentAPI {
   getRuntimeStatus: () => Promise<IPCResponse<AgentRuntimeStatusData>>
   getCapabilityRuntimeSnapshot: (config?: unknown) => Promise<IPCResponse<CapabilityRuntimeSnapshotData>>
   listChannels: () => Promise<IPCResponse<AgentChannelConfigData[]>>
+  listRegistry: () => Promise<IPCResponse<AgentRegistryRecordData[]>>
+  listRegistryKnowledge: (id: string) => Promise<IPCResponse<AgentRegistryKnowledgeCardData[]>>
+  updateRegistryStatus: (payload: {
+    id: string
+    status: 'retired' | 'merged'
+    mergedIntoAgentId?: string | null
+    migrateCardRelPaths?: string[]
+  }) => Promise<IPCResponse<AgentRegistryRecordData>>
+  listDerivationCandidates: () => Promise<IPCResponse<AgentDerivationCandidateData[]>>
+  confirmDerivation: (payload: {
+    candidateRelPath: string
+    specialistId: string
+    name: string
+    charter?: string | null
+    seedRulesText: string
+    routingTriggers: string[]
+    activateRouting?: boolean
+    migrateCardRelPaths?: string[]
+  }) => Promise<IPCResponse<AgentDerivationConfirmData>>
+  rejectDerivation: (candidateRelPath: string) => Promise<IPCResponse<AgentDerivationCandidateData[]>>
   listConversationScopes: (agent?: string) => Promise<IPCResponse<ConversationScopeData[]>>
   listScopeRuns: (payload?: {
     channelKey?: string
@@ -3255,6 +3321,61 @@ interface MemoryMaintenanceResult {
   timestamp: string
 }
 
+type BeliefCardStatusData = 'staged' | 'active' | 'rejected' | 'invalid'
+type BeliefCardRiskLevelData = 'low' | 'medium' | 'high'
+
+interface BeliefCardSettingsItemData {
+  relPath: string
+  scopeId: string
+  title: string
+  description: string
+  confidence: string | null
+  tag: string | null
+  status: BeliefCardStatusData
+  created: string | null
+  source: string | null
+  stage: string | null
+  site: string | null
+  siteRiskLevel: BeliefCardRiskLevelData | null
+  siteRiskAuthority: 'code' | null
+  isSiteCard: boolean
+  isRiskSuggestion: boolean
+  bodyPreview: string
+}
+
+interface BeliefCardSettingsSummaryData {
+  total: number
+  staged: number
+  active: number
+  rejected: number
+  invalid: number
+  agentScoped: number
+  siteCards: number
+  highRiskSiteCards: number
+  riskSuggestions: number
+}
+
+interface BeliefCardMaintenanceRoundData {
+  lastRunAt: string
+  decision: 'run' | 'skip'
+  reason: string
+  llmCalls: number
+  applied: number
+  rejected: number
+  terminal: string
+}
+
+interface BeliefCardSettingsSnapshotData {
+  knowledgeSystemEnabled: boolean
+  cards: BeliefCardSettingsItemData[]
+  summary: BeliefCardSettingsSummaryData
+  maintenance: {
+    lifecycleRunning: boolean
+    lastLifecycleMaintenanceAt: string | null
+    llmRound: BeliefCardMaintenanceRoundData | null
+  }
+}
+
 interface ElectronMemoryAPI {
   query: (filters: MemoryQueryFilters) => Promise<IPCResponse<MemoryEntry[]>>
   create: (entry: Partial<MemoryEntry>) => Promise<IPCResponse<MemoryEntry>>
@@ -3269,6 +3390,13 @@ interface ElectronMemoryAPI {
     tags?: string[]
     priority?: number
   }) => Promise<IPCResponse<{ memoryId: string }>>
+}
+
+interface ElectronMemoryCardsAPI {
+  list: () => Promise<IPCResponse<BeliefCardSettingsSnapshotData>>
+  transition: (payload: { relPath: string; action: 'approve' | 'reject' }) =>
+    Promise<IPCResponse<BeliefCardSettingsSnapshotData>>
+  setKnowledgeSystemEnabled: (enabled: boolean) => Promise<IPCResponse<BeliefCardSettingsSnapshotData>>
 }
 
 interface ElectronTriggerAPI {
@@ -3366,6 +3494,7 @@ interface ElectronFileEmergenceAPI {
 interface ElectronAPI {
   agent: ElectronAgentAPI
   memory: ElectronMemoryAPI
+  memoryCards: ElectronMemoryCardsAPI
   trigger: ElectronTriggerAPI
   memoryLifecycle: ElectronMemoryLifecycleAPI
   browser: ElectronBrowserAPI
@@ -3406,6 +3535,11 @@ export type {
   MemoryStats,
   MemoryLifecycleStatus,
   MemoryMaintenanceResult,
+  BeliefCardSettingsItemData,
+  BeliefCardSettingsSnapshotData,
+  AgentDerivationCandidateData,
+  AgentDerivationConfirmData,
+  AgentRegistryKnowledgeCardData,
   TaskProjectionRecordData,
   RecoveryRecordData,
   ReferenceSkillHintData,

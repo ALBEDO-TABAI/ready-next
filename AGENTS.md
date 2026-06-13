@@ -52,6 +52,11 @@
 - 最小传话铁律（05 §4）：handoff/SubAgent/技能子进程三类转发点只传 `userRequestVerbatim` 逐字+结构化 refs，禁止转述改写拼接摘要；恢复路径还原持久化原话不重新派生；全局断言矩阵 `verbatim-relay.test.ts`。
 - LLM 维护回合（阶段三）：必须经 EP2-C2 确定性门控（skip=零 LLM 调用）、容器钉死 `runSubAgent`、维护写卡强制 staged；用户画像合并 CAS 作用于 DB 真值行（同事务 hash 比对，USER.md 仅无 profile 行时镜像）；涌现候选投影只在 stage=candidate 且证据 ≥3。
 - Agent 进化阶段三合同回归入口：`npm run verify:evolution-p3`（全部阶段三焦点测试 + 四 gate + `verify:native`）。
+- Agent 进化阶段四：agent 作用域卡进入镜像/衰减/维护信源但 root `index.md` 只收 global；`agent_auto_routing` 默认 suggest，预路由按状态优先、routing 卡先例、主 agent 兜底，continue 类永远回原 agent；routing 卡 `triggers` 是≤8 个字面关键词，staged/无 triggers/目标非 active 不参与。
+- 专项 agent 派生和生命周期：新派生 id 必须是小写 slug；无用户确认不得自动派生；routing 卡默认 staged，只有确认流勾选立即生效才 active；active→retired/merged 只能经确认，主 agent 禁退，资产目录保留；retired/merged 或不存在 owner 的后续轮注入降级 global-only。
+- 站点卡学习和设置页暴露：浏览器失败学习只产 staged 新卡/旁卡/风险建议卡，active 站点卡不得被自动改写；设置页必须能看到知识系统总开关、staged 信念卡确认、站点卡风险和维护回合状态。
+- 剩余涌现卡：prepare/harvest/forming 卡必须带 evidence 与行动出口；受保护路径只显示“产物已生成（受保护路径）”，不得把隐私路径或内容写进卡面。
+- Agent 进化阶段四合同回归入口：`npm run verify:evolution-p4`（阶段四焦点测试 + 四 gate + 迁移连续 gate + `verify:native`）。
 
 ## 3. Agent 与 Skill Runtime 速查
 - `skill_executions` 状态机和相关 IPC/工具已退役；不要复活 workflow coordinator。新进度语义走当前的 task tracker、projection、child-run 合同。
@@ -122,6 +127,7 @@
 - Agent 稳定性收口：`docs/superpowers/plans/2026-06-10-agent-stability-closure-implementation.md`（roadmap 同日同名 -roadmap.md）
 - Agent 进化阶段一（信念卡/资产化/确认闸门/工具信封/浏览器纪律）：`docs/superpowers/plans/2026-06-11-agent-evolution-phase1-implementation.md`
 - Agent 进化阶段三（专项 agent 实体/LLM 维护回合/任务包编译层/最小传话收口）：`docs/superpowers/plans/2026-06-12-agent-evolution-phase3-implementation.md`
+- Agent 进化阶段四（预路由/派生/生命周期/站点卡学习/剩余涌现卡）：`docs/superpowers/plans/2026-06-13-agent-evolution-phase4-implementation.md`
 
 ## 9. 常用命令
 ```bash
@@ -132,6 +138,7 @@ npm run typecheck
 npm run test
 npm run verify
 npm run verify:stability
+npm run verify:evolution-p4
 npm run build
 ```
 

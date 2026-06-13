@@ -44,6 +44,7 @@ test('browser_download_urls', () => {
     { name: 'filename_prefix', type: 'string', description: '文件名前缀（可选）', required: false },
     { name: 'overwrite', type: 'boolean', description: '同名是否覆盖，默认 false', required: false },
     { name: 'tab_id', type: 'string', description: '可选标签页 ID（用于带 Referer 下载）', required: false },
+    { name: 'unrelated_to_collection', type: 'boolean', description: '仅当本次下载与本会话的图片采集任务无关时传 true；采集相关的保存必须改用 browser_download_collected_media', required: false },
   ])
 })
 
@@ -53,6 +54,8 @@ test('browser_download_collected_media', () => {
     { name: 'directory', type: 'string', description: '目标目录', required: true },
     { name: 'filename_prefix', type: 'string', description: '文件名前缀（可选，默认 image）', required: false },
     { name: 'overwrite', type: 'boolean', description: '同名是否覆盖，默认 false', required: false },
+    { name: 'expected_total', type: 'number', description: '可选：页面声称的图片总数；若已发现数不足，结果会标记 partial 并给出剩余数——不要在 partial 时宣告完成', required: false },
+    { name: 'allow_partial', type: 'boolean', description: '仅当用户已确认允许只下载当前已发现图片时传 true；发现未完整时仍需要浏览器采集确认记录', required: false },
   ])
 })
 

@@ -74,6 +74,21 @@ export interface FileEmergenceProject {
   updatedAt: number
 }
 
+export interface FileEmergenceIntentCard {
+  id: string
+  type: 'prepare' | 'harvest' | 'forming'
+  title: string
+  confidence: number
+  action: {
+    kind: string
+    ref: string
+  }
+  evidence: Array<{
+    fact: string
+    ref?: string | null
+  }>
+}
+
 export interface FileEmergenceSnapshot {
   generatedAt: number
   nextRefreshAt?: number | null
@@ -81,6 +96,7 @@ export interface FileEmergenceSnapshot {
   workspaceRoots: string[]
   enabled: boolean
   buckets: Record<FileEmergenceBucket, FileEmergenceProject[]>
+  intentCards?: FileEmergenceIntentCard[]
   degraded?: Array<{ source: string; reason: string }>
 }
 

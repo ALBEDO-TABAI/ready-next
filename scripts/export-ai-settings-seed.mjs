@@ -4,8 +4,9 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 
-const projectRoot = resolve(new URL('../', import.meta.url).pathname)
+const projectRoot = resolve(fileURLToPath(new URL('../', import.meta.url)))
 const outputPath = resolve(process.argv[2] || join(projectRoot, 'build/runtime-seeds/ai-settings.seed.json'))
 const dbPath = resolve(
   process.argv[3] || join(homedir(), 'Library/Application Support/ready/ready.db')
@@ -25,7 +26,7 @@ db_path = sys.argv[1]
 conn = sqlite3.connect(db_path)
 cur = conn.cursor()
 rows = dict(cur.execute(
-    "SELECT key, value FROM settings WHERE key IN ('ai_model_config', 'ai_saved_configs', 'ai_provider_workspace')"
+    "SELECT key, value FROM settings WHERE key IN ('ai_model_config', 'ai_saved_configs', 'ai_provider_workspace', 'external_service_profiles_v1')"
 ).fetchall())
 conn.close()
 print(json.dumps(rows))
@@ -44,26 +45,35 @@ const rawSettings = JSON.parse(pythonResult.stdout || '{}')
 const currentConfig = rawSettings.ai_model_config ? JSON.parse(rawSettings.ai_model_config) : null
 const savedConfigs = rawSettings.ai_saved_configs ? JSON.parse(rawSettings.ai_saved_configs) : {}
 const workspace = rawSettings.ai_provider_workspace ? JSON.parse(rawSettings.ai_provider_workspace) : null
+const externalServiceProfiles = rawSettings.external_service_profiles_v1
+  ? JSON.parse(rawSettings.external_service_profiles_v1)
+  : null
 
-const moonshotConfig = currentConfig?.provider === 'moonshot'
-  ? currentConfig
-  : (savedConfigs?.moonshot ?? null)
+const normalizedSavedConfigs = { ...savedConfigs }
+if (currentConfig?.provider && !normalizedSavedConfigs[currentConfig.provider]) {
+  normalizedSavedConfigs[currentConfig.provider] = currentConfig
+}
 
-if (!moonshotConfig) {
-  console.error('No Moonshot/Kimi config found in current settings')
+if (
+  !currentConfig
+  && Object.keys(normalizedSavedConfigs).length === 0
+  && !workspace
+  && !externalServiceProfiles
+) {
+  console.error('No AI settings or external service profiles found in current settings')
   process.exit(1)
 }
 
 const seed = {
-  ai_model_config: moonshotConfig,
-  ai_saved_configs: {
-    moonshot: moonshotConfig,
-  },
+  ...(currentConfig ? { ai_model_config: currentConfig } : {}),
+  ...(Object.keys(normalizedSavedConfigs).length > 0 ? { ai_saved_configs: normalizedSavedConfigs } : {}),
   ...(workspace ? { ai_provider_workspace: workspace } : {}),
+  ...(externalServiceProfiles ? { external_service_profiles_v1: externalServiceProfiles } : {}),
 }
 
 mkdirSync(dirname(outputPath), { recursive: true })
 writeFileSync(outputPath, `${JSON.stringify(seed, null, 2)}\n`, 'utf8')
 
 console.log(`Exported AI seed: ${outputPath}`)
-console.log('Included providers: moonshot')
+console.log(`Included providers: ${Object.keys(normalizedSavedConfigs).join(', ') || 'none'}`)
+console.log(`Included external service profiles: ${Array.isArray(externalServiceProfiles) ? externalServiceProfiles.length : 0}`)

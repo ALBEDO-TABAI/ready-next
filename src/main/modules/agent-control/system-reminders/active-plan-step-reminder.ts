@@ -41,6 +41,52 @@ const ACTIVE_PLAN_TTL_MS = 30 * 60_000
 
 const COLLECTION_DISPATCH_TOOLS = new Set(['browser_visible_collect', 'browser_collect_notes', 'browser_download_collected_media'])
 
+function resultRecord(value: unknown): Record<string, unknown> | null {
+  if (!value) return null
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value)
+      return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null
+    } catch {
+      return value.startsWith('Error:') ? { ok: false } : null
+    }
+  }
+  if (typeof value !== 'object') return null
+  const record = value as Record<string, unknown>
+  if (record.data && typeof record.data === 'object') return record.data as Record<string, unknown>
+  if (typeof record.text === 'string') return resultRecord(record.text)
+  return record
+}
+
+function toolResultFailed(result: unknown): boolean {
+  const record = resultRecord(result)
+  return record?.ok === false
+}
+
+function mediaDownloadPartial(result: unknown): boolean {
+  const record = resultRecord(result)
+  if (!record) return false
+  const completion = String(record.completion || '').trim()
+  const remaining = Number(record.remaining ?? 0) || 0
+  const failed = Number(record.failedCount ?? record.failed ?? 0) || 0
+  return completion === 'partial' || remaining > 0 || failed > 0
+}
+
+function nestedRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' ? value as Record<string, unknown> : null
+}
+
+function browserTaskStillOpen(result: unknown): boolean {
+  const record = resultRecord(result)
+  if (!record) return false
+  const status = String(record.status || '').trim()
+  if (status && status !== 'completed') return true
+  const taskResult = nestedRecord(record.result)
+  const mediaDownload = nestedRecord(taskResult?.mediaDownload)
+  const remaining = Number(mediaDownload?.remaining ?? record.remaining ?? 0) || 0
+  return remaining > 0
+}
+
 export function deriveCollectionPlanFromToolCall(
   toolName: string,
   args: Record<string, unknown>,
@@ -111,6 +157,7 @@ export function noteToolResultForActivePlan(
   toolName: string,
   args: Record<string, unknown>,
   nowMs: number = Date.now(),
+  result?: unknown,
 ): void {
   if (!scope) return
   let plan = plansByScope.get(scope) || null
@@ -122,6 +169,18 @@ export function noteToolResultForActivePlan(
   const current = plan.steps.find((step) => step.status === 'pending')
   if (!current) return
   if (current.advanceOnTools.includes(toolName)) {
+    if (toolResultFailed(result)) {
+      plan.updatedAtMs = nowMs
+      return
+    }
+    if (current.id === 'review' && toolName === 'browser_download_collected_media' && mediaDownloadPartial(result)) {
+      plan.updatedAtMs = nowMs
+      return
+    }
+    if (current.id === 'review' && toolName === 'browser_get_task' && browserTaskStillOpen(result)) {
+      plan.updatedAtMs = nowMs
+      return
+    }
     current.status = 'done'
     plan.updatedAtMs = nowMs
   }

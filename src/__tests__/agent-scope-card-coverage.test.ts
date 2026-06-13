@@ -13,10 +13,15 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { BeliefCardStore } from '../main/modules/agent-control/knowledge/belief-card-store'
 import { syncBeliefCards, type MirrorDb } from '../main/modules/agent-control/knowledge/belief-card-mirror'
 import { buildKnowledgeGraphPlan } from '../main/modules/agent-control/knowledge/knowledge-index-builder'
 import { collectBeliefDecaySignals } from '../main/modules/agent-control/maintenance/maintenance-llm-round'
+
+test('agent-scope-card-coverage declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'agent-scope-card-coverage transitive sqlite load')
+})
 
 const NOW = new Date('2026-06-13T12:00:00.000Z')
 

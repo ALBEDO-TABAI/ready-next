@@ -23,6 +23,7 @@ import { createHash } from 'node:crypto'
 import test from 'node:test'
 import type { IpcMain, IpcMainInvokeEvent } from 'electron'
 
+import { skipIfSqliteUnavailable } from './utils/sqlite-skip'
 import { executeToolCall, type ToolContext } from '../main/modules/tools/tool-executor'
 import {
   FrozenCallStore,
@@ -42,6 +43,10 @@ import { resolveConfirmationGate } from '../main/modules/agent-control/safety/ac
 import { getAskUserQuestionsStore } from '../main/modules/tools/builtins/ask-user-questions-store'
 import { buildExplicitNoSkillAuthorization } from '../main/modules/agent-control/skills/skill-tool-authorization'
 import { askUserGroup, type AskUserGroupDeps } from '../main/modules/claude-bridge/ipc/ask-user-group'
+
+test('frozen-call-release declares transitive sqlite ABI guard', (t) => {
+  skipIfSqliteUnavailable(t, 'frozen-call-release transitive sqlite load')
+})
 
 // ---------------------------------------------------------------------------
 // Harness

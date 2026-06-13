@@ -86,9 +86,9 @@ export interface PromptAssemblyDeps {
   getScopeTaskIndexEntries?: (scopeId: string) => TaskIndexEntry[] | Promise<TaskIndexEntry[]>
   /** EP2-K3: belief card store for the L1.5 knowledge index (active cards only). */
   getBeliefCardStore?: () => {
-    renderKnowledgeIndex(opts: { maxChars: number; ownerAgentId?: string | null }): { text: string; renderedCount: number; omittedCount: number }
+    renderKnowledgeIndex(opts: { maxChars: number; ownerAgentId?: string | null; excludeRelPaths?: readonly string[] }): { text: string; renderedCount: number; omittedCount: number }
     /** EP3-A3: active routing-fix cards for the main-session routing index. */
-    listRoutingCards?(): Array<{ relPath: string; title: string; description: string }>
+    listRoutingCards?(): Array<{ relPath: string; title: string; description: string; targetAgentId: string }>
   } | null
   /** EP3-A3: agents-table roster for the main-session charter/routing index. */
   getAgentRoster?: () => Array<{ id: string; name: string; charter: string | null; status: string }>
@@ -989,9 +989,16 @@ export class PromptAssemblyService {
     // scope.agent's lineage (a corrupted owner would leak that agent's
     // rules/knowledge into a task that belongs to someone else), and it
     // never becomes a path fragment.
-    const injectionOwner = params.ownerAgentId !== undefined && params.ownerAgentId !== null
+    const candidateInjectionOwner = params.ownerAgentId !== undefined && params.ownerAgentId !== null
       ? (isSafeAgentScopeId(params.ownerAgentId) ? params.ownerAgentId : null)
       : (isSafeAgentScopeId(params.scope.agent) ? params.scope.agent : null)
+    const roster = this.deps.getAgentRoster?.()
+    const activeAgentIds = roster
+      ? new Set(roster.filter((agent) => agent.status === 'active').map((agent) => agent.id))
+      : null
+    const injectionOwner = candidateInjectionOwner && activeAgentIds
+      ? (activeAgentIds.has(candidateInjectionOwner) ? candidateInjectionOwner : null)
+      : candidateInjectionOwner
     const agentRulesText = knowledgeEnabled && injectionOwner
       ? this.readMemoryFile(`agents/${injectionOwner}/RULES.md`).trim()
       : ''
@@ -1005,10 +1012,23 @@ export class PromptAssemblyService {
       )
       : ''
     let knowledgeIndexText = ''
+    let mainSessionRoutingCards: Array<{ relPath: string; title: string; description: string; targetAgentId: string }> = []
     try {
       const beliefStore = knowledgeEnabled ? (this.deps.getBeliefCardStore?.() ?? null) : null
       if (beliefStore) {
-        const index = beliefStore.renderKnowledgeIndex({ maxChars: MAX_KNOWLEDGE_INDEX_CHARS, ownerAgentId: injectionOwner })
+        const rawRoutingCards = params.scope.agent === MAIN_AGENT_ID
+          ? (beliefStore.listRoutingCards?.() ?? [])
+          : []
+        mainSessionRoutingCards = rawRoutingCards
+          .filter((card) => !activeAgentIds || activeAgentIds.has(card.targetAgentId))
+        const excludedRoutingRelPaths = rawRoutingCards
+          .filter((card) => activeAgentIds && !activeAgentIds.has(card.targetAgentId))
+          .map((card) => card.relPath)
+        const index = beliefStore.renderKnowledgeIndex({
+          maxChars: MAX_KNOWLEDGE_INDEX_CHARS,
+          ownerAgentId: injectionOwner,
+          excludeRelPaths: excludedRoutingRelPaths,
+        })
         knowledgeIndexText = index.omittedCount > 0
           ? `${index.text}\n（另有 ${index.omittedCount} 条低置信度条目）`
           : index.text
@@ -1022,17 +1042,16 @@ export class PromptAssemblyService {
     let agentRoutingText = ''
     try {
       if (knowledgeEnabled && params.scope.agent === MAIN_AGENT_ID) {
-        const roster = (this.deps.getAgentRoster?.() ?? [])
+        const activeRoster = (roster ?? [])
           .filter((agent) => agent.id !== MAIN_AGENT_ID && agent.status === 'active' && agent.charter)
-        const routingCards = this.deps.getBeliefCardStore?.()?.listRoutingCards?.() ?? []
         const lines: string[] = []
-        if (roster.length > 0) {
+        if (activeRoster.length > 0) {
           lines.push('可转办的专项 agent：')
-          for (const agent of roster) lines.push(`- ${agent.name}（${agent.id}）：${agent.charter}`)
+          for (const agent of activeRoster) lines.push(`- ${agent.name}（${agent.id}）：${agent.charter}`)
         }
-        if (routingCards.length > 0) {
+        if (mainSessionRoutingCards.length > 0) {
           lines.push('路由索引：')
-          for (const card of routingCards) lines.push(`- ${card.title}：${card.description} → ${card.relPath}`)
+          for (const card of mainSessionRoutingCards) lines.push(`- ${card.title}：${card.description} → ${card.relPath}`)
         }
         agentRoutingText = lines.length > 0 ? clip(lines.join('\n'), MAX_AGENT_ROUTING_CHARS) : ''
       }
