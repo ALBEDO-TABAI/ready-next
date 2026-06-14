@@ -8,9 +8,10 @@ B站字幕获取脚本 - 自动从浏览器读取 cookies 并获取视频字幕
 - 输出标准 SRT 格式字幕文件
 
 Cookies 获取优先级：
-1. yt-dlp --cookies-from-browser（最可靠，持续跟进浏览器加密更新）
-2. browser_cookie3 Python 库（备选）
-3. 手动配置 ~/.bilibili_cookies.txt 或环境变量（兜底）
+1. Ready 当前 BrowserView 会话导出的 cookies 文件
+2. yt-dlp --cookies-from-browser（最可靠，持续跟进浏览器加密更新）
+3. browser_cookie3 Python 库（备选）
+4. 手动配置 ~/.bilibili_cookies.txt 或环境变量（兜底）
 
 用法：
     python fetch_bilibili_subtitle.py <BV号或URL> <输出SRT路径> [--browser chrome|firefox|safari|edge]
@@ -196,6 +197,25 @@ def get_cookies_from_config() -> dict:
     return {}
 
 
+def get_cookies_from_ready_cookie_file() -> dict:
+    """
+    策略0: 读取 Ready 主进程为当前 BrowserView 会话导出的 Netscape cookies。
+    """
+    print("   🔑 尝试从 Ready 浏览器会话 cookies 获取...")
+
+    for env_name in ("READY_VIDEO_COOKIE_FILE", "VIDEO_COOKIE_FILE", "BILIBILI_COOKIE_FILE", "YOUTUBE_COOKIE_FILE"):
+        cookies_file = os.environ.get(env_name, "").strip()
+        if not cookies_file or not os.path.exists(cookies_file):
+            continue
+        cookies = _parse_netscape_cookies(cookies_file, ".bilibili.com")
+        if cookies.get("SESSDATA"):
+            print(f"   ✅ 从 {env_name} 获取 (SESSDATA={cookies['SESSDATA'][:8]}...)")
+            return cookies
+
+    print("   ⚠️ Ready 会话 cookies 不可用或未登录 B站")
+    return {}
+
+
 def _parse_netscape_cookies(filepath: str, domain_filter: str = "") -> dict:
     """解析 Netscape 格式 cookies 文件"""
     cookies = {}
@@ -220,9 +240,14 @@ def get_bilibili_cookies(preferred_browser: str = "chrome") -> dict:
     """
     按优先级尝试获取 B站 cookies
 
-    优先级：yt-dlp > browser_cookie3 > 配置文件/环境变量
+    优先级：Ready 当前会话 cookie 文件 > yt-dlp > browser_cookie3 > 配置文件/环境变量
     """
     print("\n📦 获取 B站 cookies...")
+
+    # 策略0: Ready BrowserView 会话导出的 cookies（网页标签拖拽路径的真实来源）
+    cookies = get_cookies_from_ready_cookie_file()
+    if cookies.get("SESSDATA"):
+        return cookies
 
     # 要尝试的浏览器列表
     browsers = [preferred_browser]

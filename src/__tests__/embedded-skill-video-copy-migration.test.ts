@@ -131,11 +131,19 @@ test('video_copy_analyze action contract matches item-analysis-manager call site
 
 test('video_copy_analyze downloader accepts Ready browser cookies and configured host cookies', () => {
   const entryPath = join(SKILL_DIR, 'main.py')
+  const subtitleFetcherPath = join(SKILL_DIR, 'scripts', 'fetch_bilibili_subtitle.py')
   // eslint-disable-next-line ready/no-source-grep-test -- Packaging contract: this Python downloader is invoked by the retained internal action, and a live network video download belongs to app-level verification.
   const source = readFileSync(entryPath, 'utf-8')
+  const subtitleFetcher = readFileSync(subtitleFetcherPath, 'utf-8')
   assert.match(source, /READY_VIDEO_COOKIE_FILE/, 'Ready-exported browser cookies must be accepted for arbitrary video hosts')
   assert.match(source, /BILIBILI_COOKIE_FILE/, 'configured Bilibili cookie files must remain a fallback')
   assert.match(source, /YOUTUBE_COOKIE_FILE/, 'legacy YouTube cookie env must remain a fallback')
+  assert.match(subtitleFetcher, /get_cookies_from_ready_cookie_file/, 'Bilibili subtitle API must reuse Ready-exported browser cookies before slow ASR fallback')
+  const resolverBody = subtitleFetcher.slice(subtitleFetcher.indexOf('def get_bilibili_cookies'))
+  assert.ok(
+    resolverBody.indexOf('get_cookies_from_ready_cookie_file') < resolverBody.indexOf('get_cookies_via_ytdlp'),
+    'Ready BrowserView cookies should be the first subtitle-cookie source',
+  )
 })
 
 test('video_copy_analyze Ready entry uses FunASR-only transcription path', () => {
