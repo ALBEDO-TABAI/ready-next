@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import { CalendarCheck, Clock3, Send, Sparkles, X } from 'lucide-react'
+import { LiquidSurfaceLayer } from '../ui/liquid-glass/LiquidFloatingPanel'
 
 export interface CalendarAssistantEvent {
   id: string
@@ -71,11 +72,22 @@ export default function CalendarAssistantPanel({
     setDraft('')
   }, [onAskAgent])
 
+  if (!open) return null
+
   return (
     <aside
-      aria-hidden={!open}
-      className={`calendar-assistant-drawer calendar-assistant-surface content-surface-panel ${open ? 'is-entered' : ''}`}
+      className="calendar-assistant-drawer calendar-assistant-surface content-surface-panel ready-app-liquid-panel is-entered"
     >
+      <LiquidSurfaceLayer
+        className="ready-liquid-popover__lens ready-app-liquid-panel__lens"
+        radius={18}
+        sourceSelector="[data-liquid-scroll-root='calendar-workbench-main']"
+        blur={8}
+        frost={0}
+        saturation={1.16}
+        brightness={1.06}
+        contrast={0.82}
+      />
       <div className="calendar-assistant-header">
         <div className="calendar-assistant-title">
           <Sparkles className="h-4 w-4" />

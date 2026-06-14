@@ -1,11 +1,31 @@
 import { useMemo, useState, useRef, useEffect, useCallback, useLayoutEffect } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  ChevronRight, ChevronDown, Minus, Plus,
-  FileText, Folder, FolderOpen, Image, Film, FileSpreadsheet, Pen, Music2, Globe, BookOpen,
-  FilePlus2, FolderPlus, Copy, RefreshCw, Trash2, Loader2, AlertTriangle, Check, ListMinus,
-  AtSign,
-} from 'lucide-react'
+  IconAlertTriangle as AlertTriangle,
+  IconAt as AtSign,
+  IconBook2 as BookOpen,
+  IconCheck as Check,
+  IconChevronDown as ChevronDown,
+  IconChevronRight as ChevronRight,
+  IconCopy as Copy,
+  IconFilePlus as FilePlus2,
+  IconFileSpreadsheet as FileSpreadsheet,
+  IconFileText as FileText,
+  IconFolder as Folder,
+  IconFolderOpen as FolderOpen,
+  IconFolderPlus as FolderPlus,
+  IconListDetails as ListMinus,
+  IconLoader2 as Loader2,
+  IconMinus as Minus,
+  IconMovie as Film,
+  IconMusic as Music2,
+  IconPencil as Pen,
+  IconPhoto as Image,
+  IconPlus as Plus,
+  IconRefresh as RefreshCw,
+  IconTrash as Trash2,
+  IconWorld as Globe,
+} from '@tabler/icons-react'
 import Modal from '../ui/Modal'
 import { computeDesiredRoots, useWorkspace, type FileItem } from '../../stores/useWorkspace'
 import { addReadyContextReferenceToAgentInput } from '../../modules/agent/chat-input-bridge'
@@ -430,14 +450,14 @@ function FileTreeItem({
         paddingLeft: `${8 + depth * 22}px`,
         ...(isActive
           ? {
-              background: 'rgba(255, 255, 255, 0.36)',
-              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.36), 0 1px 2px rgba(15,23,42,0.03)',
+              background: 'var(--files-panel-state-active-bg)',
+              boxShadow: 'var(--files-panel-state-active-shadow)',
             }
           : {}),
         ...(!isActive && !isDropTarget && !isBrowserDropAccent && isHovered
           ? {
-              background: 'rgba(255, 255, 255, 0.28)',
-              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.24)',
+              background: 'var(--files-panel-state-hover-bg)',
+              boxShadow: 'var(--files-panel-state-hover-shadow)',
             }
           : {}),
         ...(isDropTarget
@@ -544,7 +564,8 @@ function InlineCreateRow({
       style={{
         padding: '6px 8px',
         paddingLeft: `${8 + depth * 22}px`,
-        background: 'var(--bg-hover)',
+        background: 'var(--files-panel-state-active-bg)',
+        boxShadow: 'var(--files-panel-state-active-shadow)',
       }}
     >
       <span className="w-3 flex-shrink-0" />
@@ -632,12 +653,13 @@ function GridItemCard({
       }}
       onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu}
-      className="content-surface-card rounded-[10px] border text-left transition-[background-color,border-color] hover:bg-[var(--bg-hover)]"
+      className="content-surface-card rounded-[10px] border text-left transition-[background-color,border-color,box-shadow] hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]"
       style={{
         position: 'relative',
         padding: '8px 8px 10px',
-        borderColor: isDropAccent ? 'var(--color-blue)' : isActive ? 'var(--color-blue)' : 'var(--border-default)',
-        background: isDropTarget ? 'var(--color-blue-light)' : isActive ? 'var(--color-blue-light)' : 'var(--bg-primary)',
+        borderColor: isDropAccent ? 'var(--color-blue)' : isActive ? 'var(--files-panel-state-active-border)' : 'var(--border-default)',
+        background: isDropTarget ? 'var(--color-blue-light)' : isActive ? 'var(--files-panel-state-active-bg)' : 'var(--bg-primary)',
+        boxShadow: isActive ? 'var(--files-panel-state-active-shadow)' : undefined,
       }}
     >
       {browserDropLine && (
@@ -895,7 +917,7 @@ function PendingClipRow({
                     ? 'var(--color-rose, #f43f5e)'
                     : isComplete
                       ? 'var(--color-green, #10b981)'
-                      : 'var(--color-blue, #3b82f6)',
+                      : 'var(--color-ready-orange, #ff4b2b)',
                   transition: 'width 240ms ease',
                 }}
               />
@@ -2525,8 +2547,8 @@ export default function FileTree({
               <div
                 style={{
                   position: 'relative', width: 56, height: 6, borderRadius: 3,
-                  background: 'var(--bg-hover)',
-                  boxShadow: 'inset 0 1px 2px rgba(0,0,0,0.1)',
+                  background: 'var(--files-panel-state-hover-bg)',
+                  boxShadow: 'var(--files-panel-state-hover-shadow)',
                   cursor: 'pointer',
                 }}
                 onMouseDown={(e) => {
@@ -2592,8 +2614,9 @@ export default function FileTree({
               className="content-surface-card rounded-[10px] border"
               style={{
                 padding: '8px 8px 10px',
-                borderColor: 'var(--color-blue)',
-                background: 'var(--color-blue-light)',
+                borderColor: 'var(--files-panel-state-active-border)',
+                background: 'var(--files-panel-state-active-bg)',
+                boxShadow: 'var(--files-panel-state-active-shadow)',
               }}
             >
               <div

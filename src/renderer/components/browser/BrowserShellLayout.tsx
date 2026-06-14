@@ -105,14 +105,16 @@ export default function BrowserShellLayout({
                   pointerEvents: 'none',
                 }}
               >
-                <img
-                  src={readyWordmark}
-                  alt="Ready"
-                  draggable={false}
+                <div
+                  role="img"
+                  aria-label="Ready"
                   style={{
                     display: 'block',
                     width: 'min(210px, calc(100vw - 96px))',
-                    height: 'auto',
+                    aspectRatio: '4048 / 845',
+                    background: 'var(--color-ready-orange)',
+                    WebkitMask: `url(${readyWordmark}) center / contain no-repeat`,
+                    mask: `url(${readyWordmark}) center / contain no-repeat`,
                   }}
                 />
               </div>

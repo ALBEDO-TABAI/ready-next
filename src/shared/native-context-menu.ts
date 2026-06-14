@@ -5,6 +5,7 @@ export interface NativeContextMenuItem {
   separator?: boolean
   checked?: boolean
   iconText?: string
+  iconKey?: 'user' | 'theme-light' | 'theme-dark' | 'settings'
   accelerator?: string
 }
 
@@ -12,6 +13,7 @@ export interface NativeContextMenuRequest {
   x: number
   y: number
   items: NativeContextMenuItem[]
+  presentation?: 'native' | 'floating'
 }
 
 export interface NativeContextMenuResponse {

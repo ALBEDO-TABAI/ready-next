@@ -3,8 +3,9 @@ import { Globe } from 'lucide-react'
 
 import {
   buildFloatingMenuItemStyle,
-  buildFloatingMenuSurfaceStyle,
 } from '../ui/floatingMenuStyles'
+import { chatMenuSurfaceStyle } from '../agent/chatMenuStyles'
+import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
 
 /**
  * L4-A-Timezone — toolbar dropdown for picking the calendar view's
@@ -182,19 +183,24 @@ export default function CalendarTimezoneSelector({
         </span>
       </button>
       {open && (
-        <div
-          className="glass-surface-floating ready-floating-menu"
+        <LiquidFloatingPanel
+          className="calendar-timezone-menu"
+          radius={16}
           style={{
-            ...buildFloatingMenuSurfaceStyle(280, {
-              maxHeight: 360,
-              minWidth: 240,
-              padding: 6,
-              zIndex: 80,
-            }),
+            ...chatMenuSurfaceStyle,
+            width: 280,
+            maxHeight: 360,
+            minWidth: 240,
+            padding: 6,
+            zIndex: 80,
             position: 'absolute',
             bottom: '100%',
             right: 0,
             marginBottom: 4,
+          }}
+          contentStyle={{
+            maxHeight: 348,
+            overflowY: 'auto',
           }}
         >
           <input
@@ -251,7 +257,7 @@ export default function CalendarTimezoneSelector({
               </span>
             </button>
           ))}
-        </div>
+        </LiquidFloatingPanel>
       )}
     </div>
   )

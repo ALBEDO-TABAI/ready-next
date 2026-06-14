@@ -8,6 +8,7 @@ import {
   getProviderDef,
 } from '../../../../stores/useSettings'
 import { chatMenuItemStyle, chatMenuSurfaceStyle } from '../../chatMenuStyles'
+import { LiquidFloatingPanel } from '../../../ui/liquid-glass/LiquidFloatingPanel'
 
 interface ModelMenuFrame {
   left: number
@@ -128,7 +129,7 @@ export default function ModelSelector() {
   }
 
   const menu = open ? (
-    <div
+    <LiquidFloatingPanel
       ref={menuRef}
       className="panel-hover-scrollbar"
       style={{
@@ -140,9 +141,13 @@ export default function ModelSelector() {
         minWidth: 248,
         maxWidth: menuFrame ? menuFrame.width : 'min(360px, calc(100vw - 24px))',
         maxHeight: menuFrame ? menuFrame.maxHeight : 'min(640px, calc(100vh - 96px))',
-        overflowY: 'auto',
         zIndex: 500,
       }}
+      contentStyle={{
+        maxHeight: menuFrame ? Math.max(180, menuFrame.maxHeight - 12) : 'min(628px, calc(100vh - 108px))',
+        overflowY: 'auto',
+      }}
+      contentClassName="ready-liquid-popover__content panel-hover-scrollbar"
     >
       <div
         style={{
@@ -359,7 +364,7 @@ export default function ModelSelector() {
         <Wrench style={{ width: 12, height: 12 }} strokeWidth={2} />
         管理显示项
       </button>
-    </div>
+    </LiquidFloatingPanel>
   ) : null
 
   return (

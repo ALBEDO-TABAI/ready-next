@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import { AtSign, ChevronDown, MessageSquare, MoreHorizontal, PanelLeftClose, Pencil, Plus, Trash2 } from 'lucide-react'
 import { IconButton } from '../ui/IconButton'
+import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
 import Modal from '../ui/Modal'
 import type { SessionRecallHit } from '../../../shared/session-recall'
 import { SESSION_DOT_COLOR, recallStatusToDot, type SessionDotStatus } from './chat-panel/helpers/session-status'
@@ -315,9 +316,9 @@ export default function ChatHeader({
       </div>
 
       {portalRoot && showScopeSelect && scopeMenuPosition && createPortal(
-        <div
+        <LiquidFloatingPanel
           ref={scopeMenuRef}
-          className="glass-surface-floating chat-header-floating-menu ready-floating-menu"
+          className="chat-header-floating-menu"
           style={channelMenuStyle}
         >
           <div style={CHAT_HEADER_MENU_SECTION_LABEL_STYLE}>会话来源</div>
@@ -366,14 +367,14 @@ export default function ChatHeader({
               ))}
             </div>
           )}
-        </div>,
+        </LiquidFloatingPanel>,
         document.body,
       )}
 
       {portalRoot && showHistory && historyMenuPosition && createPortal(
-        <div
+        <LiquidFloatingPanel
           ref={historyMenuRef}
-          className="glass-surface-floating chat-header-floating-menu ready-floating-menu"
+          className="chat-header-floating-menu"
           style={historyMenuStyle}
         >
           <div style={CHAT_HEADER_MENU_SECTION_LABEL_STYLE}>{currentChannel.label}历史</div>
@@ -638,14 +639,14 @@ export default function ChatHeader({
               })}
             </div>
           )}
-        </div>,
+        </LiquidFloatingPanel>,
         document.body,
       )}
 
       {portalRoot && showHistory && rowMenu && createPortal(
-        <div
+        <LiquidFloatingPanel
           ref={rowMenuRef}
-          className="glass-surface-floating chat-header-floating-menu ready-floating-menu"
+          className="chat-header-floating-menu"
           style={{
             ...buildChatHeaderFloatingMenuStyle(140),
             position: 'fixed',
@@ -685,7 +686,7 @@ export default function ChatHeader({
             <Trash2 style={{ width: 13, height: 13, flexShrink: 0, color: 'var(--color-red)' }} strokeWidth={2} />
             <span style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--color-red)' }}>删除</span>
           </button>
-        </div>,
+        </LiquidFloatingPanel>,
         document.body,
       )}
 

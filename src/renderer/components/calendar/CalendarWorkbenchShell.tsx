@@ -538,6 +538,7 @@ export default function CalendarWorkbenchShell(props: CalendarWorkbenchShellProp
                   <>
                     <div
                       ref={sxContainerRef}
+                      data-liquid-scroll-root="calendar-workbench-main"
                       className={`sx-react-calendar-wrapper calendar-schedule-view calendar-schedule-view-${viewType}`}
                       style={{ width: '100%', height: '100%' }}
                     />

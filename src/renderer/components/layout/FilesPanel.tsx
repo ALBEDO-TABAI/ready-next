@@ -1,23 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  Search,
-  FilePlus,
-  FolderPlus,
-  MoreVertical,
-  LayoutList,
-  LayoutGrid,
-  SlidersHorizontal,
-  RefreshCw,
-  Folder,
-  FolderOpen,
-  Download,
-  Upload,
-} from 'lucide-react'
+  IconAdjustmentsHorizontal as SlidersHorizontal,
+  IconDotsVertical as MoreVertical,
+  IconDownload as Download,
+  IconFilePlus as FilePlus,
+  IconFolderOpen as FolderOpen,
+  IconFolderPlus as FolderPlus,
+  IconLayoutGrid as LayoutGrid,
+  IconLayoutList as LayoutList,
+  IconRefresh as RefreshCw,
+  IconSearch as Search,
+  IconUpload as Upload,
+} from '@tabler/icons-react'
 
-import { computeDesiredRoots, useWorkspace } from '../../stores/useWorkspace'
+import { useWorkspace } from '../../stores/useWorkspace'
 import FileTree, { DEFAULT_FILE_FILTERS, type FileFilterMap, type FileViewMode } from './FileTree'
 import Modal from '../ui/Modal'
+import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
 import { computeNextGridHistory, type GridNavigationEntry } from './gridNavigation'
 import { FILES_PANEL_DIMENSIONS, PANEL_TOKENS } from './panelTokens'
 import { WORKBENCH_HEADER_EDGE_X } from '../../modules/workbench/chrome'
@@ -45,7 +45,7 @@ interface FloatingMenuPosition {
 }
 
 const ICON_BTN =
-  'flex items-center justify-center rounded transition-colors duration-100 hover:bg-[var(--bg-hover)]'
+  'flex items-center justify-center rounded transition-[background-color,box-shadow] duration-100 hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]'
 
 export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
   const [query, setQuery] = useState('')
@@ -98,28 +98,6 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
     if (typeof window === 'undefined') return false
     return !!window.electronAPI
   }, [workspaceRoot])
-
-  const safeRoots = useMemo(
-    () => computeDesiredRoots({ workspaceRoot, pinnedFolders }),
-    [workspaceRoot, pinnedFolders],
-  )
-  const folderStatus = useMemo(() => {
-    if (!workspaceRoot && pinnedFolders.length === 0) return null
-    if (safeRoots.length > 0) {
-      return {
-        label: '整理可用',
-        title: '安全工作区已接入搜索和 agent 文件整理',
-        color: 'var(--color-green)',
-        background: 'var(--color-green-subtle)',
-      }
-    }
-    return {
-      label: '仅浏览',
-      title: '该位置过宽或不安全，只在文件管理中浏览，不开放给搜索和 agent 整理',
-      color: PANEL_TOKENS.mutedStrong,
-      background: 'var(--bg-hover)',
-    }
-  }, [pinnedFolders.length, safeRoots.length, workspaceRoot])
 
   useEffect(() => {
     if (!showFilterMenu && !showMoreMenu) return
@@ -369,42 +347,7 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
       <span className="text-[13px] font-semibold" style={{ color: PANEL_TOKENS.title }}>
         文件管理
       </span>
-      <div className="flex items-center gap-1.5">
-        {folderStatus && (
-          <span
-            className="inline-flex items-center rounded-[8px] text-[10px] font-medium"
-            style={{
-              padding: '3px 7px',
-              background: folderStatus.background,
-              color: folderStatus.color,
-            }}
-            title={folderStatus.title}
-          >
-            {folderStatus.label}
-          </span>
-        )}
-        <button
-          type="button"
-          onClick={handleConnectedRefresh}
-          className="group inline-flex items-center gap-1 rounded-[10px] text-[10px] font-medium transition-colors"
-          style={{
-            padding: '3px 8px',
-            background: isConnected ? 'var(--color-green-subtle)' : 'var(--bg-hover)',
-            color: isConnected ? 'var(--color-green)' : PANEL_TOKENS.mutedStrong,
-          }}
-          title={isConnected ? '点击刷新文件状态' : '当前离线'}
-        >
-          <span
-            className="h-[6px] w-[6px] rounded-full"
-            style={{ background: isConnected ? 'var(--color-green)' : PANEL_TOKENS.mutedStrong }}
-          />
-          {isConnected ? 'Connected' : 'Offline'}
-          <RefreshCw
-            className={`h-[10px] w-[10px] ${isRefreshing ? 'animate-spin' : 'opacity-0 group-hover:opacity-70'}`}
-            style={{ color: isConnected ? 'var(--color-green)' : PANEL_TOKENS.mutedStrong }}
-          />
-        </button>
-      </div>
+      <span aria-hidden="true" />
     </div>
   )
 
@@ -428,7 +371,8 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
               width: 24,
               height: 24,
               color: viewMode === 'tree' ? PANEL_TOKENS.title : PANEL_TOKENS.mutedStrong,
-              background: viewMode === 'tree' ? 'var(--bg-hover)' : 'transparent',
+              background: viewMode === 'tree' ? 'var(--files-panel-state-active-bg)' : 'transparent',
+              boxShadow: viewMode === 'tree' ? 'var(--files-panel-state-active-shadow)' : 'none',
             }}
             onClick={() => setViewMode('tree')}
             title="列表视图"
@@ -441,7 +385,8 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
               width: 24,
               height: 24,
               color: viewMode === 'grid' ? PANEL_TOKENS.title : PANEL_TOKENS.mutedStrong,
-              background: viewMode === 'grid' ? 'var(--bg-hover)' : 'transparent',
+              background: viewMode === 'grid' ? 'var(--files-panel-state-active-bg)' : 'transparent',
+              boxShadow: viewMode === 'grid' ? 'var(--files-panel-state-active-shadow)' : 'none',
             }}
             onClick={() => setViewMode('grid')}
             title="缩略图视图"
@@ -453,7 +398,13 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
             <button
               ref={filterTriggerRef}
               className={ICON_BTN}
-              style={{ width: 24, height: 24, color: PANEL_TOKENS.mutedStrong }}
+              style={{
+                width: 24,
+                height: 24,
+                color: PANEL_TOKENS.mutedStrong,
+                background: showFilterMenu ? 'var(--files-panel-state-active-bg)' : 'transparent',
+                boxShadow: showFilterMenu ? 'var(--files-panel-state-active-shadow)' : 'none',
+              }}
               onClick={toggleFilterMenu}
               title="筛选"
             >
@@ -463,6 +414,15 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <button
+            className={ICON_BTN}
+            style={{ width: 24, height: 24, color: PANEL_TOKENS.mutedStrong }}
+            onClick={handleConnectedRefresh}
+            disabled={!isConnected}
+            title="刷新文件"
+          >
+            <RefreshCw className={isRefreshing ? 'animate-spin' : ''} style={{ width: 14, height: 14 }} strokeWidth={1.8} />
+          </button>
           <button
             className={ICON_BTN}
             style={{ width: 24, height: 24, color: PANEL_TOKENS.mutedStrong }}
@@ -484,7 +444,13 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
             <button
               ref={moreTriggerRef}
               className={ICON_BTN}
-              style={{ width: 24, height: 24, color: PANEL_TOKENS.mutedStrong }}
+              style={{
+                width: 24,
+                height: 24,
+                color: PANEL_TOKENS.mutedStrong,
+                background: showMoreMenu ? 'var(--files-panel-state-active-bg)' : 'transparent',
+                boxShadow: showMoreMenu ? 'var(--files-panel-state-active-shadow)' : 'none',
+              }}
               onClick={toggleMoreMenu}
               title="更多"
             >
@@ -514,7 +480,7 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
                   width: 24,
                   height: 24,
                   borderColor: 'var(--input-slot-border)',
-                  background: canGridNavigateBack ? 'var(--input-slot-bg)' : 'var(--bg-hover)',
+                  background: canGridNavigateBack ? 'var(--input-slot-bg)' : 'var(--files-panel-state-hover-bg)',
                   color: canGridNavigateBack ? PANEL_TOKENS.text : PANEL_TOKENS.mutedStrong,
                   opacity: canGridNavigateBack ? 1 : 0.45,
                   cursor: canGridNavigateBack ? 'pointer' : 'default',
@@ -533,7 +499,7 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
                   width: 24,
                   height: 24,
                   borderColor: 'var(--input-slot-border)',
-                  background: canGridNavigateForward ? 'var(--input-slot-bg)' : 'var(--bg-hover)',
+                  background: canGridNavigateForward ? 'var(--input-slot-bg)' : 'var(--files-panel-state-hover-bg)',
                   color: canGridNavigateForward ? PANEL_TOKENS.text : PANEL_TOKENS.mutedStrong,
                   opacity: canGridNavigateForward ? 1 : 0.45,
                   cursor: canGridNavigateForward ? 'pointer' : 'default',
@@ -576,9 +542,8 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
         onThumbnailSizeChange={setThumbnailSize}
       />
       {portalRoot && showFilterMenu && filterMenuPosition && createPortal(
-        <div
+        <LiquidFloatingPanel
           ref={filterMenuRef}
-          className="glass-surface-floating ready-floating-menu"
           style={{
             ...filterMenuStyle,
             position: 'fixed',
@@ -607,13 +572,12 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
               {label}
             </button>
           ))}
-        </div>,
+        </LiquidFloatingPanel>,
         document.body,
       )}
       {portalRoot && showMoreMenu && moreMenuPosition && createPortal(
-        <div
+        <LiquidFloatingPanel
           ref={moreMenuRef}
-          className="glass-surface-floating ready-floating-menu"
           style={{
             ...moreMenuStyle,
             position: 'fixed',
@@ -725,7 +689,7 @@ export default function FilesPanel({ isVisible, children }: FilesPanelProps) {
               ))}
             </>
           )}
-        </div>,
+        </LiquidFloatingPanel>,
         document.body,
       )}
 

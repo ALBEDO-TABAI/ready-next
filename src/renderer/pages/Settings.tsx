@@ -210,7 +210,7 @@ const settingsData: SettingSection[] = [
         { value: 'blue', label: '蓝色' },
         { value: 'green', label: '绿色' },
         { value: 'purple', label: '紫色' },
-        { value: 'orange', label: '橙色' }
+        { value: 'orange', label: '橘红色' }
       ]}
     ]
   },

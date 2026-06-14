@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { X, Loader2, AlertCircle, Compass } from 'lucide-react'
 import {
-  SETTINGS_CARD_STYLE,
   SETTINGS_INPUT_STYLE,
   SETTINGS_PRIMARY_BUTTON_STYLE,
   SETTINGS_SECONDARY_BUTTON_STYLE,
 } from '../settings/settings-theme'
+import { LiquidSurfaceLayer } from '../ui/liquid-glass/LiquidFloatingPanel'
 
 interface AddSourceModalProps {
   open: boolean
@@ -119,18 +119,23 @@ export default function AddSourceModal({
       onClick={handleBackdropClick}
     >
       <div
-        className="w-[408px] rounded-2xl"
-        style={{
-          ...SETTINGS_CARD_STYLE,
-          background: 'color-mix(in srgb, var(--bg-primary) 97%, white 3%)',
-          boxShadow: '0 18px 42px rgba(15,23,42,0.12), 0 6px 14px rgba(15,23,42,0.06)',
-        }}
+        className="rss-add-source-modal ready-app-liquid-panel w-[408px] rounded-2xl"
       >
+        <LiquidSurfaceLayer
+          className="ready-liquid-popover__lens ready-app-liquid-panel__lens"
+          radius={18}
+          sourceSelector="[data-liquid-scroll-root='rss-feed-list']"
+          blur={8}
+          frost={0}
+          saturation={1.16}
+          brightness={1.06}
+          contrast={0.82}
+        />
         <div
-          className="flex items-center justify-between"
+          className="rss-add-source-modal__header flex items-center justify-between"
           style={{
             padding: '14px 16px 10px',
-            borderBottom: '1px solid color-mix(in srgb, var(--border-default) 70%, rgba(255,255,255,0.58))',
+            borderBottom: '1px solid var(--ready-app-panel-glass-inner-border)',
           }}
         >
           <h3
@@ -154,7 +159,7 @@ export default function AddSourceModal({
               type="button"
               onClick={handleUseBrowserPreset}
               disabled={!hasBrowserPreset}
-              className="w-full rounded-xl text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+              className="rss-add-source-modal__preset w-full rounded-xl text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50"
               style={{
                 marginBottom: 10,
                 padding: '8px 10px',
@@ -162,8 +167,8 @@ export default function AddSourceModal({
                   ? '1px solid color-mix(in srgb, var(--color-blue) 24%, var(--border-default) 76%)'
                   : '1px solid color-mix(in srgb, var(--border-default) 72%, rgba(255,255,255,0.6))',
                 background: hasBrowserPreset && url === browserPresetUrl
-                  ? 'color-mix(in srgb, var(--surface-panel-bg) 88%, rgba(255,255,255,0.96))'
-                  : 'color-mix(in srgb, var(--surface-panel-bg) 76%, rgba(255,255,255,0.92))',
+                  ? 'color-mix(in srgb, var(--ready-app-panel-glass-card-bg) 88%, rgba(255,255,255,0.22))'
+                  : 'var(--ready-app-panel-glass-card-bg)',
               }}
             >
               <div className="flex items-start gap-3">
@@ -171,7 +176,7 @@ export default function AddSourceModal({
                   className="mt-0.5 flex h-6 w-6 items-center justify-center rounded-full"
                   style={{
                     border: '1px solid color-mix(in srgb, var(--border-default) 74%, rgba(255,255,255,0.65))',
-                    background: 'rgba(255,255,255,0.84)',
+                    background: 'rgba(255,255,255,0.36)',
                   }}
                 >
                   <Compass
@@ -228,8 +233,10 @@ export default function AddSourceModal({
                 style={{
                   ...SETTINGS_INPUT_STYLE,
                   padding: '9px 12px',
-                  background: 'rgba(255,255,255,0.9)',
+                  background: 'var(--ready-app-panel-glass-control-bg)',
                   borderColor: error ? 'var(--color-red)' : 'var(--input-slot-border)',
+                  backdropFilter: 'none',
+                  WebkitBackdropFilter: 'none',
                 }}
               />
               {platformHint && (
@@ -254,8 +261,10 @@ export default function AddSourceModal({
                 style={{
                   ...SETTINGS_INPUT_STYLE,
                   padding: '9px 12px',
-                  background: 'rgba(255,255,255,0.9)',
+                  background: 'var(--ready-app-panel-glass-control-bg)',
                   borderColor: 'var(--input-slot-border)',
+                  backdropFilter: 'none',
+                  WebkitBackdropFilter: 'none',
                 }}
               />
             </div>

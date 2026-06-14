@@ -20,6 +20,7 @@ import {
   type DocumentOutlineNode,
   type DocumentOutlineSnapshot,
 } from '../../../shared/document-side-panels'
+import { LiquidSurfaceLayer } from '../ui/liquid-glass/LiquidFloatingPanel'
 import './documentFloatingPanels.css'
 
 type MarkTab = 'bookmark' | 'note'
@@ -429,9 +430,19 @@ export default function DocumentFloatingPanels({
 
       {outlinePanelRendered && (
         <aside
-          className={`document-floating-panel document-floating-panel--left${outlinePanelClosing ? ' is-closing' : ''}`}
+          className={`document-floating-panel document-floating-panel--left ready-app-liquid-panel${outlinePanelClosing ? ' is-closing' : ''}`}
           aria-label="内容速览"
         >
+          <LiquidSurfaceLayer
+            className="ready-liquid-popover__lens ready-app-liquid-panel__lens"
+            radius={12}
+            withProjection={false}
+            blur={8}
+            frost={0}
+            saturation={1.16}
+            brightness={1.06}
+            contrast={0.82}
+          />
           <header className="document-floating-panel__header">
             <div>
               <div className="document-floating-panel__title">内容速览</div>
@@ -473,9 +484,19 @@ export default function DocumentFloatingPanels({
 
       {marksPanelRendered && (
         <aside
-          className={`document-floating-panel document-floating-panel--right${marksPanelClosing ? ' is-closing' : ''}`}
+          className={`document-floating-panel document-floating-panel--right ready-app-liquid-panel${marksPanelClosing ? ' is-closing' : ''}`}
           aria-label="书签和笔记"
         >
+          <LiquidSurfaceLayer
+            className="ready-liquid-popover__lens ready-app-liquid-panel__lens"
+            radius={12}
+            withProjection={false}
+            blur={8}
+            frost={0}
+            saturation={1.16}
+            brightness={1.06}
+            contrast={0.82}
+          />
           <header className="document-floating-panel__header">
             <div>
               <div className="document-floating-panel__title">书签 / 笔记</div>
@@ -496,53 +517,53 @@ export default function DocumentFloatingPanels({
             </div>
           </header>
 
-          <div className="document-mark-tabs" role="tablist" aria-label="文档标记类型">
-            <button
-              type="button"
-              role="tab"
-              className={markTab === 'bookmark' ? 'is-active' : ''}
-              onClick={() => setMarkTab('bookmark')}
-            >
-              <Bookmark className="h-[13px] w-[13px]" strokeWidth={1.8} />
-              书签
-            </button>
-            <button
-              type="button"
-              role="tab"
-              className={markTab === 'note' ? 'is-active' : ''}
-              onClick={() => setMarkTab('note')}
-            >
-              <StickyNote className="h-[13px] w-[13px]" strokeWidth={1.8} />
-              笔记
-            </button>
-          </div>
+            <div className="document-mark-tabs" role="tablist" aria-label="文档标记类型">
+              <button
+                type="button"
+                role="tab"
+                className={markTab === 'bookmark' ? 'is-active' : ''}
+                onClick={() => setMarkTab('bookmark')}
+              >
+                <Bookmark className="h-[13px] w-[13px]" strokeWidth={1.8} />
+                书签
+              </button>
+              <button
+                type="button"
+                role="tab"
+                className={markTab === 'note' ? 'is-active' : ''}
+                onClick={() => setMarkTab('note')}
+              >
+                <StickyNote className="h-[13px] w-[13px]" strokeWidth={1.8} />
+                笔记
+              </button>
+            </div>
 
-          <div className="document-mark-create">
-            <input
-              value={groupName}
-              onChange={(event) => setGroupName(event.target.value)}
-              placeholder="分组"
-              aria-label="分组"
-            />
-            {markTab === 'note' ? (
-              <textarea
-                value={noteDraft}
-                onChange={(event) => setNoteDraft(event.target.value)}
-                placeholder="写一条笔记..."
-                aria-label="笔记内容"
+            <div className="document-mark-create">
+              <input
+                value={groupName}
+                onChange={(event) => setGroupName(event.target.value)}
+                placeholder="分组"
+                aria-label="分组"
               />
-            ) : null}
-            <button
-              type="button"
-              onClick={() => void createMark(markTab)}
-              disabled={!documentPath || (markTab === 'note' && noteDraft.trim().length === 0)}
-            >
-              <Plus className="h-[13px] w-[13px]" strokeWidth={2} />
-              {markTab === 'bookmark' ? '添加书签' : '添加笔记'}
-            </button>
-          </div>
+              {markTab === 'note' ? (
+                <textarea
+                  value={noteDraft}
+                  onChange={(event) => setNoteDraft(event.target.value)}
+                  placeholder="写一条笔记..."
+                  aria-label="笔记内容"
+                />
+              ) : null}
+              <button
+                type="button"
+                onClick={() => void createMark(markTab)}
+                disabled={!documentPath || (markTab === 'note' && noteDraft.trim().length === 0)}
+              >
+                <Plus className="h-[13px] w-[13px]" strokeWidth={2} />
+                {markTab === 'bookmark' ? '添加书签' : '添加笔记'}
+              </button>
+            </div>
 
-          <div className="document-floating-panel__body document-floating-panel__body--marks">
+            <div className="document-floating-panel__body document-floating-panel__body--marks">
             {marksLoading && <div className="document-floating-empty">正在读取标记...</div>}
             {!marksLoading && visibleMarks.length === 0 && (
               <div className="document-floating-empty">
@@ -628,7 +649,7 @@ export default function DocumentFloatingPanels({
                 </section>
               )
             })}
-          </div>
+            </div>
         </aside>
       )}
     </>

@@ -70,8 +70,8 @@ const accentPalettes: Record<ThemeAccent, Record<ResolvedTheme, { color: string;
         dark: { color: '#9B6CFF', light: 'rgba(155, 108, 255, 0.15)' },
     },
     orange: {
-        light: { color: '#E97A2B', light: 'rgba(233, 122, 43, 0.1)' },
-        dark: { color: '#F08A3B', light: 'rgba(240, 138, 59, 0.15)' },
+        light: { color: '#FF4B2B', light: 'rgba(255, 75, 43, 0.12)' },
+        dark: { color: '#FF6345', light: 'rgba(255, 99, 69, 0.16)' },
     },
 }
 

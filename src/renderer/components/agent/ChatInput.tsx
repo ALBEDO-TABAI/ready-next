@@ -1,8 +1,10 @@
 import { forwardRef, useRef, useEffect, useState, useImperativeHandle, useCallback, useMemo } from 'react'
-import { AtSign, Plus, Send, Square, Undo2, ChevronDown, Puzzle } from 'lucide-react'
+import { createPortal } from 'react-dom'
+import { ArrowUp, AtSign, Plus, Square, Undo2, ChevronDown, Puzzle } from 'lucide-react'
 import { IconButton } from '../ui/IconButton'
 import { LiquidLens } from '../ui/liquid-glass/LiquidLens'
 import { LiquidBackdropProjection } from '../ui/liquid-glass/LiquidBackdropProjection'
+import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
 import type { ChatAttachment } from '../../stores/useAgent'
 import type { ReadySkillReference } from '../../modules/agent/chat-input-bridge'
 import type { NativeContextMenuItem } from '../../../shared/native-context-menu'
@@ -38,6 +40,13 @@ interface ChatInputProps {
   onSkillReference: (skill: ReadySkillReference) => void
   renderAttachmentIcon: (attachment: ChatAttachment, size?: number) => React.ReactNode
   ModelSelector: React.ComponentType
+}
+
+interface ComposerMenuFrame {
+  left: number
+  bottom: number
+  width: number
+  maxHeight: number
 }
 
 export interface ChatInputHandle {
@@ -79,12 +88,33 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   const [slashFilter, setSlashFilter] = useState('')
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
   const [skills, setSkills] = useState<SkillMenuItem[]>([])
+  const [composerMenuFrame, setComposerMenuFrame] = useState<ComposerMenuFrame | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const atMenuRef = useRef<HTMLDivElement>(null)
   const slashMenuRef = useRef<HTMLDivElement>(null)
   const composingRef = useRef(false)
   const composerLocked = isStreaming
+
+  const syncComposerMenuFrame = useCallback(() => {
+    const textarea = textareaRef.current
+    const shell = textarea?.closest('[data-chat-composer-shell="true"]') as HTMLElement | null
+    if (!shell) return
+
+    const rect = shell.getBoundingClientRect()
+    const viewportWidth = window.innerWidth || document.documentElement.clientWidth || 0
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight || 0
+    const margin = 12
+    const width = Math.max(240, Math.min(rect.width, viewportWidth - margin * 2))
+    const left = Math.max(margin, Math.min(rect.left, viewportWidth - width - margin))
+
+    setComposerMenuFrame({
+      left: Math.round(left),
+      bottom: Math.max(margin, Math.round(viewportHeight - rect.top + 6)),
+      width: Math.round(width),
+      maxHeight: Math.max(180, Math.round(rect.top - margin - 6)),
+    })
+  }, [])
 
   const resizeTextarea = useCallback(() => {
     if (!textareaRef.current) return
@@ -145,6 +175,17 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   useEffect(() => {
     resizeTextarea()
   }, [inputValue, resizeTextarea])
+
+  useEffect(() => {
+    if (!showAtMenu && !showSlashMenu) return
+    syncComposerMenuFrame()
+    window.addEventListener('resize', syncComposerMenuFrame)
+    window.addEventListener('scroll', syncComposerMenuFrame, true)
+    return () => {
+      window.removeEventListener('resize', syncComposerMenuFrame)
+      window.removeEventListener('scroll', syncComposerMenuFrame, true)
+    }
+  }, [showAtMenu, showSlashMenu, syncComposerMenuFrame])
 
   // Close dropdowns when clicking outside
   useEffect(() => {
@@ -291,6 +332,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     if (atMatch && filePool.length > 0) {
       setAtFilter(atMatch[1])
       setShowAtMenu(true)
+      syncComposerMenuFrame()
       setShowSlashMenu(false)
       setSlashFilter('')
     } else {
@@ -300,6 +342,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
       if (slashMatch) {
         setSlashFilter(slashMatch[1] || '')
         setShowSlashMenu(true)
+        syncComposerMenuFrame()
         if (skills.length === 0) void loadSkills()
       } else {
         setShowSlashMenu(false)
@@ -349,6 +392,161 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
       }
     }
   }
+
+  const portalRoot = typeof document !== 'undefined' ? document.body : null
+  const composerMenuLeft = composerMenuFrame?.left ?? 12
+  const composerMenuBottom = composerMenuFrame?.bottom ?? 120
+  const composerMenuWidth = composerMenuFrame?.width ?? 'calc(100vw - 24px)'
+  const composerMenuMaxHeight = composerMenuFrame?.maxHeight ?? 240
+
+  const atMenu = showAtMenu && filteredFilePool.length > 0 ? (
+    <LiquidFloatingPanel
+      ref={atMenuRef}
+      style={{
+        ...chatMenuSurfaceStyle,
+        position: 'fixed',
+        left: composerMenuLeft,
+        bottom: composerMenuBottom,
+        width: composerMenuWidth,
+        maxHeight: Math.min(220, composerMenuMaxHeight),
+        zIndex: 520,
+      }}
+      contentStyle={{
+        maxHeight: Math.min(208, composerMenuMaxHeight - 12),
+        overflowY: 'auto',
+      }}
+      contentClassName="ready-liquid-popover__content panel-hover-scrollbar"
+    >
+      <div style={{ fontSize: 10, color: 'var(--text-light)', padding: '2px 8px', marginBottom: 2 }}>
+        引用文件 / 文件夹
+      </div>
+      {filteredFilePool.map((file) => (
+        <button
+          key={file.id}
+          onClick={() => insertAtReference(file)}
+          className="ready-floating-menu-item w-full flex items-center gap-2 active:scale-[0.98] transition-[background-color,transform] duration-150"
+          style={{
+            ...chatMenuItemStyle,
+            textAlign: 'left',
+          }}
+        >
+          {renderAttachmentIcon(file)}
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div
+              style={{
+                fontSize: 12,
+                fontWeight: 500,
+                color: 'var(--text-body)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {file.name}
+            </div>
+            <div
+              style={{
+                fontSize: 10,
+                color: 'var(--text-light)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                marginTop: 2,
+              }}
+              title={file.path}
+            >
+              {file.path}
+            </div>
+          </div>
+          <span style={{ fontSize: 10, color: 'var(--text-light)', marginLeft: 'auto', flexShrink: 0 }}>
+            {file.isDirectory
+              ? '文件夹'
+              : file.source === 'browser-tab'
+                ? '网页'
+                : file.source === 'skill-folder'
+                  ? '技能'
+                  : `${Math.max(1, Math.round(file.size / 1024))} KB`}
+          </span>
+        </button>
+      ))}
+    </LiquidFloatingPanel>
+  ) : null
+
+  const slashMenu = showSlashMenu ? (
+    <LiquidFloatingPanel
+      ref={slashMenuRef}
+      className="panel-hover-scrollbar"
+      style={{
+        ...chatMenuSurfaceStyle,
+        position: 'fixed',
+        left: composerMenuLeft,
+        bottom: composerMenuBottom,
+        width: composerMenuWidth,
+        maxHeight: Math.min(260, composerMenuMaxHeight),
+        zIndex: 530,
+      }}
+      contentStyle={{
+        maxHeight: Math.min(248, composerMenuMaxHeight - 12),
+        overflowY: 'auto',
+      }}
+      contentClassName="ready-liquid-popover__content panel-hover-scrollbar"
+    >
+      <div style={{ fontSize: 10, color: 'var(--text-light)', padding: '2px 8px', marginBottom: 2 }}>
+        选择 Skill
+      </div>
+      {filteredSkills.length > 0 ? filteredSkills.map((skill, index) => (
+        <button
+          key={skill.id}
+          onMouseDown={(event) => {
+            event.preventDefault()
+            insertSlashSkillReference(skill)
+          }}
+          onPointerEnter={() => setSlashSelectedIndex(index)}
+          className={`ready-floating-menu-item w-full flex items-center gap-2 active:scale-[0.98] transition-[background-color,transform] duration-150 ${index === slashSelectedIndex ? 'is-selected' : ''}`}
+          style={{
+            ...chatMenuItemStyle,
+            textAlign: 'left',
+          }}
+        >
+          <Puzzle style={{ width: 15, height: 15, flexShrink: 0, color: 'var(--text-gray)' }} strokeWidth={2} />
+          <div style={{ minWidth: 0, flex: 1 }}>
+            <div
+              style={{
+                fontSize: 12,
+                fontWeight: 600,
+                color: 'var(--text-body)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {skill.name}
+            </div>
+            <div
+              style={{
+                fontSize: 10,
+                color: 'var(--text-light)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                marginTop: 2,
+              }}
+              title={skill.description || skill.id}
+            >
+              {skill.description || skill.id}
+            </div>
+          </div>
+          <span style={{ fontSize: 10, color: 'var(--text-light)', marginLeft: 'auto', flexShrink: 0 }}>
+            {skill.installed ? '已就绪' : '未安装'}
+          </span>
+        </button>
+      )) : (
+        <div style={{ padding: '8px 10px', fontSize: 12, color: 'var(--text-light)' }}>
+          没有匹配的 skill
+        </div>
+      )}
+    </LiquidFloatingPanel>
+  ) : null
 
   return (
     <div
@@ -446,149 +644,6 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
             }}
             rows={2}
           />
-
-          {showAtMenu && filteredFilePool.length > 0 && (
-            <div
-              ref={atMenuRef}
-              style={{
-                ...chatMenuSurfaceStyle,
-                position: 'absolute',
-                bottom: '100%',
-                left: 0,
-                marginBottom: 4,
-                width: '100%',
-                maxHeight: 200,
-                overflowY: 'auto',
-                zIndex: 200,
-              }}
-            >
-              <div style={{ fontSize: 10, color: 'var(--text-light)', padding: '2px 8px', marginBottom: 2 }}>
-                引用文件 / 文件夹
-              </div>
-              {filteredFilePool.map((file) => (
-                <button
-                  key={file.id}
-                  onClick={() => insertAtReference(file)}
-                  className="ready-floating-menu-item w-full flex items-center gap-2 active:scale-[0.98] transition-[background-color,transform] duration-150"
-                  style={{
-                    ...chatMenuItemStyle,
-                    textAlign: 'left',
-                  }}
-                >
-                  {renderAttachmentIcon(file)}
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 500,
-                        color: 'var(--text-body)',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {file.name}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 10,
-                        color: 'var(--text-light)',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        marginTop: 2,
-                      }}
-                      title={file.path}
-                    >
-                      {file.path}
-                    </div>
-                  </div>
-                  <span style={{ fontSize: 10, color: 'var(--text-light)', marginLeft: 'auto', flexShrink: 0 }}>
-                    {file.isDirectory
-                      ? '文件夹'
-                      : file.source === 'browser-tab'
-                        ? '网页'
-                        : file.source === 'skill-folder'
-                          ? '技能'
-                          : `${Math.max(1, Math.round(file.size / 1024))} KB`}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {showSlashMenu && (
-            <div
-              ref={slashMenuRef}
-              className="panel-hover-scrollbar"
-              style={{
-                ...chatMenuSurfaceStyle,
-                position: 'absolute',
-                bottom: '100%',
-                left: 0,
-                marginBottom: 4,
-                width: '100%',
-                maxHeight: 240,
-                overflowY: 'auto',
-                zIndex: 210,
-              }}
-            >
-              <div style={{ fontSize: 10, color: 'var(--text-light)', padding: '2px 8px', marginBottom: 2 }}>
-                选择 Skill
-              </div>
-              {filteredSkills.length > 0 ? filteredSkills.map((skill, index) => (
-                <button
-                  key={skill.id}
-                  onMouseDown={(event) => {
-                    event.preventDefault()
-                    insertSlashSkillReference(skill)
-                  }}
-                  onPointerEnter={() => setSlashSelectedIndex(index)}
-                  className={`ready-floating-menu-item w-full flex items-center gap-2 active:scale-[0.98] transition-[background-color,transform] duration-150 ${index === slashSelectedIndex ? 'is-selected' : ''}`}
-                  style={{
-                    ...chatMenuItemStyle,
-                    textAlign: 'left',
-                  }}
-                >
-                  <Puzzle style={{ width: 15, height: 15, flexShrink: 0, color: 'var(--text-gray)' }} strokeWidth={2} />
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <div
-                      style={{
-                        fontSize: 12,
-                        fontWeight: 600,
-                        color: 'var(--text-body)',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                      }}
-                    >
-                      {skill.name}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 10,
-                        color: 'var(--text-light)',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap',
-                        marginTop: 2,
-                      }}
-                      title={skill.description || skill.id}
-                    >
-                      {skill.description || skill.id}
-                    </div>
-                  </div>
-                  <span style={{ fontSize: 10, color: 'var(--text-light)', marginLeft: 'auto', flexShrink: 0 }}>
-                    {skill.installed ? '已就绪' : '未安装'}
-                  </span>
-                </button>
-              )) : (
-                <div style={{ padding: '8px 10px', fontSize: 12, color: 'var(--text-light)' }}>
-                  没有匹配的 skill
-                </div>
-              )}
-            </div>
-          )}
 
           <div className="flex items-center justify-between" style={{ gap: 8, minHeight: 32 }}>
             <div className="flex items-center" style={{ gap: 6, minWidth: 0, flex: '1 1 auto' }}>
@@ -718,18 +773,18 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                   onClick={onSend}
                   data-ready-agent-send="true"
                   disabled={!inputValue.trim() && attachmentsCount === 0}
-                  className="flex items-center justify-center hover:brightness-95 active:scale-[0.98] disabled:opacity-40 disabled:cursor-not-allowed transition-[opacity,filter,transform] duration-200 ease-out"
+                  className="flex items-center justify-center hover:brightness-95 active:scale-[0.98] disabled:cursor-not-allowed transition-[opacity,filter,transform] duration-200 ease-out"
                   style={{
                     width: 30,
                     height: 30,
                     borderRadius: 15,
-                    border: '1px solid color-mix(in srgb, var(--surface-border) 46%, transparent)',
-                    background: '#fff',
-                    color: 'var(--color-blue)',
+                    border: '1px solid rgba(255, 255, 255, 0.08)',
+                    background: '#0f0f0f',
+                    color: '#fff',
                     boxShadow: 'none',
                   }}
                 >
-                  <Send style={{ width: 15, height: 15 }} strokeWidth={2.1} fill="none" />
+                  <ArrowUp style={{ width: 16, height: 16 }} strokeWidth={2.2} fill="none" />
                 </button>
               )}
             </div>
@@ -737,6 +792,8 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
           </div>
         </LiquidLens>
       </div>
+      {portalRoot && atMenu ? createPortal(atMenu, portalRoot) : null}
+      {portalRoot && slashMenu ? createPortal(slashMenu, portalRoot) : null}
     </div>
   )
 })

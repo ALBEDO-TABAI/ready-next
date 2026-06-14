@@ -1,5 +1,3 @@
-import readyWordmark from '../../assets/ready-wordmark.png'
-
 export default function ModeSlider() {
   return (
     <div
@@ -8,16 +6,16 @@ export default function ModeSlider() {
         marginRight: -1,
       }}
     >
-      <img
-        src={readyWordmark}
-        alt="Ready"
-        draggable={false}
+      <div
+        role="img"
+        aria-label="Ready"
         style={{
           display: 'block',
-          width: 69,
-          height: 'auto',
-          transform: 'scale(1.0725)',
-          transformOrigin: 'right top',
+          width: 14,
+          height: 14,
+          borderRadius: 999,
+          background: 'var(--color-ready-orange)',
+          boxShadow: '0 0 0 0.5px color-mix(in srgb, var(--color-ready-orange) 58%, rgba(255, 255, 255, 0.52))',
         }}
       />
     </div>

@@ -1,5 +1,6 @@
 import { Languages, Plus, Sparkles, X } from 'lucide-react'
 import type { FastCardResultPanelData } from '../../../shared/fastcard'
+import { LiquidSurfaceLayer } from '../ui/liquid-glass/LiquidFloatingPanel'
 
 export type FastCardResultPanelState = FastCardResultPanelData
 
@@ -34,7 +35,17 @@ export default function FastCardResultPanel({
     : state.description || (state.status === 'loading' ? '生成中…' : state.error || '')
 
   return (
-    <aside className="browser-fastcard-drawer browser-fastcard-surface content-surface-panel is-entered" aria-label={title}>
+    <aside className="browser-fastcard-drawer browser-fastcard-surface content-surface-panel ready-app-liquid-panel is-entered" aria-label={title}>
+      <LiquidSurfaceLayer
+        className="ready-liquid-popover__lens ready-app-liquid-panel__lens"
+        radius={18}
+        withProjection={false}
+        blur={8}
+        frost={0}
+        saturation={1.16}
+        brightness={1.06}
+        contrast={0.82}
+      />
       <header className="browser-fastcard-header">
         <div className="browser-fastcard-title-row">
           {icon}

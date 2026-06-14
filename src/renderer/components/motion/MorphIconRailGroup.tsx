@@ -84,20 +84,12 @@ export default function MorphIconRailGroup({
               onClick={() => onSelect?.(id)}
               title={label}
               aria-label={label}
-              whileHover={!reduceMotion ? { y: -1 } : undefined}
-              whileTap={!reduceMotion ? { scale: 0.97, y: 0 } : undefined}
+              whileHover={!reduceMotion ? { y: -0.4 } : undefined}
+              whileTap={!reduceMotion ? { scale: 0.992, y: 0.4 } : undefined}
               className={`icon-rail-slider__button ${isRemembered ? 'is-remembered' : ''}${isActive ? ' is-active' : ''}`}
-              style={{
-                background: 'transparent',
-                color: isActive
-                  ? 'var(--color-blue)'
-                  : isRemembered
-                    ? 'color-mix(in srgb, var(--color-blue) 42%, var(--text-gray))'
-                    : 'var(--text-gray)',
-              }}
             >
-              <span className="relative z-[1]">
-                <Icon className="h-[15px] w-[15px]" strokeWidth={2} />
+              <span className="icon-rail-slider__button-icon">
+                <Icon className="h-[15px] w-[15px]" strokeWidth={1.8} />
               </span>
             </motion.button>
           )

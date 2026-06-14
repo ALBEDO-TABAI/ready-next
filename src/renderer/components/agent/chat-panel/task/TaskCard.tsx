@@ -314,7 +314,7 @@ export function TaskCard({
                       width: `${progressValue}%`,
                       height: '100%',
                       borderRadius: 999,
-                      background: 'var(--color-blue)',
+                      background: 'var(--color-ready-orange)',
                     }}
                   />
                 </div>
@@ -361,7 +361,7 @@ export function TaskCard({
                         step.status === 'done'
                           ? 'var(--color-green)'
                           : step.status === 'running'
-                            ? 'var(--color-blue)'
+                            ? 'var(--color-ready-orange)'
                             : step.status === 'blocked'
                               ? 'var(--color-orange, #f59e0b)'
                               : step.status === 'error'

@@ -25,6 +25,7 @@ import {
   RSS_AUTO_REFRESH_INTERVAL_KEY,
   RSS_REFRESH_INTERVAL_OPTIONS,
 } from '../../modules/rss/settings'
+import { LiquidSurfaceLayer } from '../ui/liquid-glass/LiquidFloatingPanel'
 import type { RSSSource } from './RSSFeed'
 
 interface RSSDraftStoreSourceRow {
@@ -359,13 +360,22 @@ export default function RSSSettingsPanel({
   const intervalChanged = draftIntervalMs !== autoRefreshIntervalMs
   const isInitialLoading = busyKey === 'load' && !hasLoaded
 
+  if (!open) return null
+
   return (
     <aside
-      className={`rss-settings-drawer rss-settings-surface content-surface-panel ${
-        open ? 'is-entered' : ''
-      }`}
-      aria-hidden={!open}
+      className="rss-settings-drawer rss-settings-surface content-surface-panel ready-app-liquid-panel is-entered"
     >
+      <LiquidSurfaceLayer
+        className="ready-liquid-popover__lens ready-app-liquid-panel__lens"
+        radius={18}
+        sourceSelector="[data-liquid-scroll-root='rss-feed-list']"
+        blur={8}
+        frost={0}
+        saturation={1.16}
+        brightness={1.06}
+        contrast={0.82}
+      />
       <div className="rss-settings-header">
         <div className="rss-settings-title">
           <Settings className="h-[15px] w-[15px]" strokeWidth={2} />

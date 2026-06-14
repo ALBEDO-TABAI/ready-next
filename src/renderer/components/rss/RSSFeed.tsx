@@ -22,6 +22,8 @@ import { endRssItemDragSession, setRssItemDragPayload } from '../layout/fileTree
 import { compactAnalysisDetail } from '../../modules/rss/analysisLabels'
 import Modal from '../ui/Modal'
 import { useModal } from '../ui/useModal'
+import { chatMenuSurfaceStyle } from '../agent/chatMenuStyles'
+import { LiquidFloatingPanel } from '../ui/liquid-glass/LiquidFloatingPanel'
 
 export interface RSSItem {
   id: string
@@ -349,21 +351,18 @@ export default function RSSFeed({
   } as const
   const shouldShowBootstrapSkeleton = loading && filteredItems.length === 0
   const taskMenuPanel = taskMenuOpen ? (
-    <div
-      className="glass-surface-floating overflow-hidden rounded-[18px] border"
+    <LiquidFloatingPanel
+      className="rss-task-menu-panel overflow-hidden rounded-[18px]"
+      radius={18}
       style={{
+        ...chatMenuSurfaceStyle,
         position: 'absolute',
         top: 'calc(100% + 10px)',
         right: 0,
         zIndex: 30,
         width: 384,
         maxWidth: 'min(384px, calc(100vw - 48px))',
-        background:
-          'color-mix(in srgb, var(--surface-floating-bg) 92%, rgba(255, 255, 255, 0.12))',
-        borderColor: 'color-mix(in srgb, var(--border-default) 74%, transparent)',
-        boxShadow: '0 20px 52px rgba(24, 33, 49, 0.18)',
-        backdropFilter: 'blur(var(--surface-blur)) saturate(var(--surface-saturate))',
-        WebkitBackdropFilter: 'blur(var(--surface-blur)) saturate(var(--surface-saturate))'
+        padding: 0,
       }}
     >
       <div
@@ -433,7 +432,7 @@ export default function RSSFeed({
             return (
               <div
                 key={job.id}
-                className="group rounded-[16px] transition-colors hover:bg-[var(--bg-hover)]"
+                className="rss-task-menu-row group rounded-[16px] transition-colors hover:bg-[var(--bg-hover)]"
                 style={{
                   minHeight: 62,
                   padding: '10px 12px'
@@ -547,7 +546,7 @@ export default function RSSFeed({
           })}
         </div>
       )}
-    </div>
+    </LiquidFloatingPanel>
   ) : null
 
   return (
@@ -641,23 +640,18 @@ export default function RSSFeed({
               strokeWidth={2}
             />
             {sourceMenuOpen && (
-              <div
-                className="glass-surface-floating ready-floating-menu overflow-hidden rounded-[14px] border"
+              <LiquidFloatingPanel
+                className="rss-source-menu-panel overflow-hidden rounded-[14px]"
                 role="listbox"
+                radius={14}
                 style={{
+                  ...chatMenuSurfaceStyle,
                   position: 'absolute',
                   top: 'calc(100% + 8px)',
                   right: 0,
                   zIndex: 30,
                   width: 300,
                   maxWidth: 'calc(100vw - 48px)',
-                  background: 'var(--chat-menu-frost-bg, var(--surface-floating-bg))',
-                  borderColor: 'var(--chat-menu-frost-border, var(--border-default))',
-                  boxShadow: 'var(--chat-menu-shadow, 0 20px 52px rgba(24, 33, 49, 0.18))',
-                  backdropFilter:
-                    'blur(calc(var(--lg-blur-strong) * 1.28)) saturate(calc(var(--surface-saturate) - 8%)) contrast(1.01)',
-                  WebkitBackdropFilter:
-                    'blur(calc(var(--lg-blur-strong) * 1.28)) saturate(calc(var(--surface-saturate) - 8%)) contrast(1.01)'
                 }}
               >
                 <div
@@ -669,7 +663,7 @@ export default function RSSFeed({
                     maxHeight: 320,
                     overflowY: 'auto',
                     overscrollBehavior: 'contain',
-                    padding: 6
+                    padding: 0
                   }}
                 >
                   <button
@@ -752,7 +746,7 @@ export default function RSSFeed({
                     </div>
                   )}
                 </div>
-              </div>
+              </LiquidFloatingPanel>
             )}
           </div>
 
@@ -865,6 +859,7 @@ export default function RSSFeed({
 
       {/* Item List */}
       <div
+        data-liquid-scroll-root="rss-feed-list"
         className="rss-feed-list rss-feed-scroll flex-1 overflow-auto"
         style={{ background: 'transparent' }}
       >

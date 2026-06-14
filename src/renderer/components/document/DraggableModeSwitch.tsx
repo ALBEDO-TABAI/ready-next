@@ -82,11 +82,14 @@ export default function DraggableModeSwitch({ mode, onChange }: DraggableModeSwi
     const proximity = Math.max(0, 1 - distance)
 
     // Use opacity and color only - no font-weight or scale changes to avoid blur
+    const isActive = proximity > 0.5
+
     return {
       opacity: 0.35 + proximity * 0.65,
-      color: proximity > 0.5
-        ? 'var(--text-title, #1a1a1a)'
-        : 'var(--text-muted, #666)',
+      color: isActive ? 'rgba(255, 255, 255, 0.96)' : 'var(--text-muted, #666)',
+      textShadow: isActive
+        ? '0 0 1px rgba(255, 255, 255, 0.82), 0 0 3px rgba(255, 255, 255, 0.34)'
+        : 'none',
     }
   }, [position])
 
@@ -94,11 +97,14 @@ export default function DraggableModeSwitch({ mode, onChange }: DraggableModeSwi
     const distance = Math.abs(position - 0)
     const proximity = Math.max(0, 1 - distance)
 
+    const isActive = proximity > 0.5
+
     return {
       opacity: 0.35 + proximity * 0.65,
-      color: proximity > 0.5
-        ? 'var(--text-title, #1a1a1a)'
-        : 'var(--text-muted, #666)',
+      color: isActive ? 'rgba(255, 255, 255, 0.96)' : 'var(--text-muted, #666)',
+      textShadow: isActive
+        ? '0 0 1px rgba(255, 255, 255, 0.82), 0 0 3px rgba(255, 255, 255, 0.34)'
+        : 'none',
     }
   }, [position])
 
@@ -236,6 +242,9 @@ export default function DraggableModeSwitch({ mode, onChange }: DraggableModeSwi
           engine="backdrop"
         />
         <div className="draggable-mode-switch__thumb-glow" />
+        <span className="draggable-mode-switch__thumb-label">
+          {position < 0.5 ? '预览' : '编辑'}
+        </span>
       </div>
 
       {/* Labels - fixed font-weight to avoid blur */}

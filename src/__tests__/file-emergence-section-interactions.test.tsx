@@ -12,6 +12,7 @@ import type { FileEmergenceProject } from '../shared/file-emergence'
 function installDom() {
   const dom = new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>', {
     pretendToBeVisual: true,
+    url: 'http://ready.test',
   })
 
   const previous = {
@@ -80,24 +81,24 @@ function makeProject(id: string, bucket: FileEmergenceProject['bucket']): FileEm
 
 function makeViewModel(): FileEmergenceViewModel {
   return {
-    totalProjects: 1,
+    totalProjects: 2,
     defaultExpandedBucket: 'past',
     buckets: [
       { bucket: 'future', label: '未来', projects: [] },
       { bucket: 'today', label: '今天', projects: [] },
-      { bucket: 'past', label: '过去', projects: [makeProject('品牌空间案例研究', 'past')] },
+      { bucket: 'past', label: '过去', projects: [makeProject('品牌空间案例研究', 'past'), makeProject('门店图片数据库', 'past')] },
       { bucket: 'distant', label: '遥远', projects: [] },
     ],
   }
 }
 
-test('file emergence section renders all bucket rows and lets the open bucket collapse', async () => {
+test('file emergence section starts collapsed and keeps only the last clicked row selected', async () => {
   const { dom, rootElement, cleanup } = installDom()
-  const root = createRoot(rootElement)
+  let root: ReturnType<typeof createRoot> | null = createRoot(rootElement)
 
   try {
     flushSync(() => {
-      root.render(createElement(FileEmergenceSection, {
+      root?.render(createElement(FileEmergenceSection, {
         viewModel: makeViewModel(),
         isRefreshing: false,
         onRefresh: () => {},
@@ -111,27 +112,66 @@ test('file emergence section renders all bucket rows and lets the open bucket co
 
     const pastButton = dom.window.document.querySelector('[data-file-emergence-bucket="past"]') as HTMLElement | null
     assert.ok(pastButton)
-    assert.equal(pastButton.getAttribute('aria-expanded'), 'true')
-    assert.ok(dom.window.document.querySelector('[data-file-emergence-project="品牌空间案例研究"]'))
+    assert.equal(pastButton.getAttribute('aria-expanded'), 'false')
+    assert.equal(dom.window.document.querySelector('[data-file-emergence-project="品牌空间案例研究"]'), null)
+    assert.equal(dom.window.document.querySelectorAll('[data-selected="true"]').length, 0)
 
     flushSync(() => {
       pastButton.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, cancelable: true }))
     })
 
-    assert.equal(pastButton.getAttribute('aria-expanded'), 'false')
-    assert.equal(dom.window.document.querySelector('[data-file-emergence-project="品牌空间案例研究"]'), null)
+    assert.equal(pastButton.getAttribute('aria-expanded'), 'true')
+    assert.equal(pastButton.getAttribute('data-selected'), 'true')
+    assert.ok(dom.window.document.querySelector('[data-file-emergence-project="品牌空间案例研究"]'))
 
-    const futureButton = dom.window.document.querySelector('[data-file-emergence-bucket="future"]') as HTMLElement | null
-    assert.ok(futureButton)
+    const firstProject = dom.window.document.querySelector('[data-file-emergence-project="品牌空间案例研究"]') as HTMLElement | null
+    const secondProject = dom.window.document.querySelector('[data-file-emergence-project="门店图片数据库"]') as HTMLElement | null
+    assert.ok(firstProject)
+    assert.ok(secondProject)
     flushSync(() => {
-      futureButton.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, cancelable: true }))
+      firstProject.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, cancelable: true }))
+    })
+    assert.equal(firstProject.getAttribute('data-selected'), 'true')
+    assert.equal(dom.window.document.querySelectorAll('[data-selected="true"]').length, 1)
+
+    flushSync(() => {
+      secondProject.dispatchEvent(new dom.window.MouseEvent('click', { bubbles: true, cancelable: true }))
+    })
+    assert.equal(firstProject.getAttribute('data-selected'), null)
+    assert.equal(secondProject.getAttribute('data-selected'), 'true')
+    assert.equal(dom.window.document.querySelectorAll('[data-selected="true"]').length, 1)
+
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    const stored = JSON.parse(dom.window.localStorage.getItem('ready:file-emergence:ui-state:v1') ?? '{}') as {
+      expandedBucket?: string
+      expandedProjects?: string[]
+      selectedItemKey?: string
+    }
+    assert.equal(stored.expandedBucket, 'past')
+    assert.deepEqual(new Set(stored.expandedProjects), new Set(['品牌空间案例研究', '门店图片数据库']))
+    assert.equal(stored.selectedItemKey, 'project:门店图片数据库')
+
+    flushSync(() => root?.unmount())
+    root = null
+    root = createRoot(rootElement)
+    flushSync(() => {
+      root?.render(createElement(FileEmergenceSection, {
+        viewModel: makeViewModel(),
+        isRefreshing: false,
+        onRefresh: () => {},
+        onOpenFile: () => {},
+      }))
     })
 
-    assert.equal(futureButton.getAttribute('aria-expanded'), 'true')
-    assert.match(rootElement.textContent ?? '', /暂无项目/)
-    await new Promise((resolve) => setTimeout(resolve, 0))
+    const restoredPastButton = dom.window.document.querySelector('[data-file-emergence-bucket="past"]') as HTMLElement | null
+    const restoredSecondProject = dom.window.document.querySelector('[data-file-emergence-project="门店图片数据库"]') as HTMLElement | null
+    assert.ok(restoredPastButton)
+    assert.ok(restoredSecondProject)
+    assert.equal(restoredPastButton.getAttribute('aria-expanded'), 'true')
+    assert.equal(restoredSecondProject.getAttribute('data-selected'), 'true')
+    assert.equal(dom.window.document.querySelectorAll('[data-selected="true"]').length, 1)
   } finally {
-    flushSync(() => root.unmount())
+    flushSync(() => root?.unmount())
     await new Promise((resolve) => setTimeout(resolve, 0))
     cleanup()
   }
