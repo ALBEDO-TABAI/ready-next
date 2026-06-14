@@ -16,12 +16,12 @@
           ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
           : opt;
         var skin = localStorage.getItem('ready-theme-skin');
-        if (skin !== 'liquid-glass' && skin !== 'ready-glass' && skin !== 'green-pink-glass' && skin !== 'solid-green-glass') skin = 'liquid-glass';
+        if (skin !== 'liquid-glass' && skin !== 'ready-glass' && skin !== 'solid-green-glass' && skin !== 'solid-blue-glass') skin = 'liquid-glass';
         root.setAttribute('data-theme', resolved);
         root.setAttribute('data-skin', 'liquid-glass');
-        root.setAttribute('data-glass-backdrop', skin === 'ready-glass' || skin === 'solid-green-glass' ? 'ready' : 'native');
-        if (skin === 'green-pink-glass') root.setAttribute('data-glass-variant', 'green-pink');
-        else if (skin === 'solid-green-glass') root.setAttribute('data-glass-variant', 'solid-green');
+        root.setAttribute('data-glass-backdrop', skin === 'ready-glass' || skin === 'solid-green-glass' || skin === 'solid-blue-glass' ? 'ready' : 'native');
+        if (skin === 'solid-green-glass') root.setAttribute('data-glass-variant', 'solid-green');
+        else if (skin === 'solid-blue-glass') root.setAttribute('data-glass-variant', 'solid-blue');
         else root.removeAttribute('data-glass-variant');
       } catch (_) {
         root.setAttribute('data-theme', 'light');

@@ -959,7 +959,7 @@ const appAPI = {
 }
 
 // Window API
-type ThemeSkinIPC = 'liquid-glass' | 'ready-glass' | 'green-pink-glass' | 'solid-green-glass'
+type ThemeSkinIPC = 'liquid-glass' | 'ready-glass' | 'solid-green-glass' | 'solid-blue-glass'
 interface ThemeSnapshotIPC {
   option: string
   resolved: 'light' | 'dark'
@@ -992,8 +992,8 @@ const themeAPI = {
   /**
    * 切换玻璃风格：'liquid-glass'（真半透明，macOS 用 vibrancy under-window）/
    * 'ready-glass'（Ready 自持稳定底，不启用 vibrancy）/
-   * 'green-pink-glass'（真半透明绿粉实验色）/
-   * 'solid-green-glass'（Ready 自持实色绿玻璃底）。
+   * 'solid-green-glass'（Ready 自持实色绿玻璃底）/
+   * 'solid-blue-glass'（Ready 自持实色蓝玻璃底）。
    * 切换 skin **不** 触发昼夜 ritual，仅改变窗口材料与 .ready-app-bg 渐变可见性。
    */
   setSkin: (skin: ThemeSkinIPC) => ipcRenderer.invoke('theme:setSkin', skin),

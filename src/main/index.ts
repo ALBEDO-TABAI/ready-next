@@ -125,7 +125,7 @@ function resolveStoredThemeSource(): 'light' | 'dark' | 'system' {
 function resolveStoredThemeSkin(): ThemeSkin {
   try {
     const raw = String(getDatabase().getSetting(THEME_SKIN_SETTING_KEY) || '').trim().toLowerCase()
-    if (raw === 'liquid-glass' || raw === 'ready-glass' || raw === 'green-pink-glass' || raw === 'solid-green-glass') return raw
+    if (raw === 'liquid-glass' || raw === 'ready-glass' || raw === 'solid-green-glass' || raw === 'solid-blue-glass') return raw
   } catch {
     // ignore persisted skin read failures
   }
@@ -658,7 +658,7 @@ function setupGlobalIPC(): void {
   // Persists to DB and refreshes window material (vibrancy / opaque bg 切换走状态表).
   // 切换 skin **不** 触发 ritual（ritual 只为昼夜主题切换），renderer 端通过 onChanged 收新 snapshot.
   ipcMain.handle('theme:setSkin', (_event, skin: string) => {
-    const nextSkin: ThemeSkin = skin === 'ready-glass' || skin === 'green-pink-glass' || skin === 'solid-green-glass' ? skin : 'liquid-glass'
+    const nextSkin: ThemeSkin = skin === 'ready-glass' || skin === 'solid-green-glass' || skin === 'solid-blue-glass' ? skin : 'liquid-glass'
     try {
       getDatabase().setSetting(THEME_SKIN_SETTING_KEY, nextSkin)
     } catch {

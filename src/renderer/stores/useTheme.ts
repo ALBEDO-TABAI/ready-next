@@ -19,14 +19,14 @@ export type ThemeAccent = 'blue' | 'green' | 'purple' | 'orange'
  * 玻璃风格。
  * - `liquid-glass`（默认）：真半透明，macOS 用 `under-window` vibrancy 让桌面壁纸做底。
  * - `ready-glass`（可选）：Ready 自己持有稳定底色（`.ready-app-bg` 渐变），不使用 macOS vibrancy。
- * - `green-pink-glass`（实验）：沿用真半透明底，把玻璃材料调成绿粉版本。
  * - `solid-green-glass`（实验）：Ready 自持实色绿色玻璃底。
+ * - `solid-blue-glass`（实验）：Ready 自持实色蓝色玻璃底。
  *
  * 注意：DOM 层始终设 `data-skin='liquid-glass'`（与现有玻璃面板 selector 兼容），
  * backdrop 差异通过 `data-glass-backdrop` ∈ `{native, ready}` 区分，颜色变体通过
  * `data-glass-variant` 区分。
  */
-export type ThemeSkin = 'liquid-glass' | 'ready-glass' | 'green-pink-glass' | 'solid-green-glass'
+export type ThemeSkin = 'liquid-glass' | 'ready-glass' | 'solid-green-glass' | 'solid-blue-glass'
 
 interface ThemeState {
     theme: ThemeOption
@@ -49,7 +49,7 @@ const getStoredTheme = (): ThemeOption => {
 
 const getStoredSkin = (): ThemeSkin => {
     const stored = readStorage('ready-theme-skin')
-    if (stored === 'liquid-glass' || stored === 'ready-glass' || stored === 'green-pink-glass' || stored === 'solid-green-glass') return stored
+    if (stored === 'liquid-glass' || stored === 'ready-glass' || stored === 'solid-green-glass' || stored === 'solid-blue-glass') return stored
     return 'liquid-glass'
 }
 
@@ -86,7 +86,7 @@ const greenPinkAccentPalettes: Partial<Record<ThemeAccent, Record<ResolvedTheme,
 }
 
 const resolveAccentPalette = (accent: ThemeAccent, resolved: ResolvedTheme, skin: ThemeSkin) => {
-    const usesPinkAccent = skin === 'green-pink-glass' || skin === 'solid-green-glass'
+    const usesPinkAccent = skin === 'solid-green-glass' || skin === 'solid-blue-glass'
     const skinPalette = usesPinkAccent ? greenPinkAccentPalettes[accent] : undefined
     return (skinPalette ?? accentPalettes[accent])[resolved]
 }
@@ -257,18 +257,18 @@ const applyColorTheme = (
  * - `data-glass-backdrop` 才是真正区分两种风格的开关：
  *   - `'native'`（默认）：使用 macOS vibrancy + 透明窗口（真半透明）
  *   - `'ready'`：Ready 自持稳定底（`.ready-app-bg` 渐变层可见）
- * - `data-glass-variant='green-pink'` 只负责实验色彩，不改变窗口材料。
+ * - `data-glass-variant` 只负责实验色彩，不改变窗口材料。
  *
  * CSS 用 `[data-glass-backdrop='native']` / `[data-glass-backdrop='ready']` 修饰符选区分。
  */
 const applySkin = (skin: ThemeSkin) => {
     const root = document.documentElement
     root.setAttribute('data-skin', 'liquid-glass')
-    root.setAttribute('data-glass-backdrop', skin === 'ready-glass' || skin === 'solid-green-glass' ? 'ready' : 'native')
-    const variant = skin === 'green-pink-glass'
-        ? 'green-pink'
-        : skin === 'solid-green-glass'
-            ? 'solid-green'
+    root.setAttribute('data-glass-backdrop', skin === 'ready-glass' || skin === 'solid-green-glass' || skin === 'solid-blue-glass' ? 'ready' : 'native')
+    const variant = skin === 'solid-green-glass'
+        ? 'solid-green'
+        : skin === 'solid-blue-glass'
+            ? 'solid-blue'
             : ''
     if (variant) root.setAttribute('data-glass-variant', variant)
     else root.removeAttribute('data-glass-variant')

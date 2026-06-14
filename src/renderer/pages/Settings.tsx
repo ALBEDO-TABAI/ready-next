@@ -296,8 +296,8 @@ const themeOptions: { value: 'light' | 'dark' | 'system'; label: string; icon: R
 const skinOptions: { value: ThemeSkin; label: string; icon: React.ElementType; description: string }[] = [
   { value: 'liquid-glass', label: '通透玻璃', icon: Droplets, description: '真半透明液态玻璃，背后透出 macOS 桌面壁纸（默认）' },
   { value: 'ready-glass', label: '稳定玻璃', icon: Droplets, description: 'Ready 自持稳定底色，不透出桌面（更稳定但失去通透感）' },
-  { value: 'green-pink-glass', label: '绿粉玻璃', icon: Droplets, description: '绿色磨砂玻璃与粉色强调色的实验外观' },
   { value: 'solid-green-glass', label: '实色绿玻璃', icon: Droplets, description: '自持实色绿色磨砂底，带柔和青绿渐变' },
+  { value: 'solid-blue-glass', label: '实色蓝玻璃', icon: Droplets, description: '自持实色蓝色渐变底，搭配粉色强调色' },
 ]
 
 function AISettingsFieldCard({
@@ -3369,7 +3369,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                             >
                               {typeof opt === 'string'
                                 ? opt
-                                : currentSection.id === 'appearance' && setting.id === 'theme' && opt.value === 'purple' && (skin === 'green-pink-glass' || skin === 'solid-green-glass')
+                                : currentSection.id === 'appearance' && setting.id === 'theme' && opt.value === 'purple' && (skin === 'solid-green-glass' || skin === 'solid-blue-glass')
                                   ? '粉色'
                                   : opt.label}
                             </option>

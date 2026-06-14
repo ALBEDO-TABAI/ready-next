@@ -34,7 +34,7 @@ export const NON_DARWIN_BACKGROUND_DARK = '#1A1B1E'
 
 // ----- 类型 -----
 
-export type ThemeSkin = 'liquid-glass' | 'ready-glass' | 'green-pink-glass' | 'solid-green-glass'
+export type ThemeSkin = 'liquid-glass' | 'ready-glass' | 'solid-green-glass' | 'solid-blue-glass'
 export type ResolvedTheme = 'light' | 'dark'
 export type SupportedPlatform = 'darwin' | 'win32' | 'linux'
 
