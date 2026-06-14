@@ -222,6 +222,45 @@ print(json.dumps({"result": result, "report": report}, ensure_ascii=False))
   assert.deepEqual(payload.report.blocking_scene_numbers, [])
 })
 
+test('auto scoring model order skips stale provider refs and falls back to catalog vision model', () => {
+  const script = `
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path.cwd() / "scripts"))
+from openclaw_batch_probe import build_attempt_order
+
+providers = {
+    "vision-provider": {
+        "baseUrl": "https://example.invalid/v1",
+        "api": "openai-completions",
+        "models": [
+            {"id": "text-only", "input": ["text"], "api": "openai-completions"},
+            {"id": "vision-ready", "input": ["text", "image"], "api": "openai-completions"},
+        ],
+    },
+}
+attempts = build_attempt_order(
+    providers,
+    preferred_model="missing-provider/old-vision",
+    fallback_models=["zai/GLM-5V-Turbo"],
+)
+print(json.dumps({
+    "model_refs": [attempt["model_ref"] for attempt in attempts],
+    "declared_image_support": [attempt["declared_image_support"] for attempt in attempts],
+}, ensure_ascii=False))
+`
+  const raw = execFileSync('python3', ['-c', script], {
+    cwd: SKILL_DIR,
+    encoding: 'utf8',
+  })
+  const payload = JSON.parse(raw)
+
+  assert.deepEqual(payload.model_refs, ['vision-provider/vision-ready'])
+  assert.deepEqual(payload.declared_image_support, [true])
+})
+
 test('SKILL.md frontmatter declares name / description / when-to-use per Claude Skill protocol', () => {
   const skillMd = readFileSync(join(SKILL_DIR, 'SKILL.md'), 'utf-8')
   const frontmatterMatch = skillMd.match(/^---\n([\s\S]*?)\n---/)
