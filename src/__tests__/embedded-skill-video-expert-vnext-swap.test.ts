@@ -80,11 +80,13 @@ test('compat adapter ready_compat.py is bundled', () => {
   )
 })
 
-test('vnext YouTube download path supports Ready cookies and yt-dlp JS challenge components', () => {
+test('vnext video download path supports Ready browser cookies and yt-dlp JS challenge components', () => {
   const pipelinePath = join(SKILL_DIR, 'scripts', 'pipeline_enhanced.py')
   // eslint-disable-next-line ready/no-source-grep-test -- Packaging contract: these yt-dlp flags are assembled inside the Python downloader, and exercising them directly would require a networked YouTube run.
   const source = readFileSync(pipelinePath, 'utf-8')
-  assert.match(source, /YOUTUBE_COOKIE_FILE/, 'Ready-exported YouTube cookies must be passed to yt-dlp')
+  assert.match(source, /READY_VIDEO_COOKIE_FILE/, 'Ready-exported browser cookies must be passed to yt-dlp for video hosts')
+  assert.match(source, /BILIBILI_COOKIE_FILE/, 'configured Bilibili cookie files must remain a fallback')
+  assert.match(source, /YOUTUBE_COOKIE_FILE/, 'legacy YouTube cookie env must remain a fallback')
   assert.match(source, /--js-runtimes/, 'yt-dlp JS runtime support must be enabled when available')
   assert.match(source, /--remote-components/, 'yt-dlp remote challenge components must be enabled when available')
   runPythonCompile([pipelinePath, join(SKILL_DIR, 'scripts', 'ready_compat.py')])

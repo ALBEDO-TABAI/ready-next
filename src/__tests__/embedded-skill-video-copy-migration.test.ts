@@ -129,6 +129,15 @@ test('video_copy_analyze action contract matches item-analysis-manager call site
   assert.ok(langParam.enum?.includes('auto'), `language enum must include "auto" (passed by item-analysis-manager)`)
 })
 
+test('video_copy_analyze downloader accepts Ready browser cookies and configured host cookies', () => {
+  const entryPath = join(SKILL_DIR, 'main.py')
+  // eslint-disable-next-line ready/no-source-grep-test -- Packaging contract: this Python downloader is invoked by the retained internal action, and a live network video download belongs to app-level verification.
+  const source = readFileSync(entryPath, 'utf-8')
+  assert.match(source, /READY_VIDEO_COOKIE_FILE/, 'Ready-exported browser cookies must be accepted for arbitrary video hosts')
+  assert.match(source, /BILIBILI_COOKIE_FILE/, 'configured Bilibili cookie files must remain a fallback')
+  assert.match(source, /YOUTUBE_COOKIE_FILE/, 'legacy YouTube cookie env must remain a fallback')
+})
+
 test('video_copy_analyze Ready entry uses FunASR-only transcription path', () => {
   const entry = readFileSync(join(SKILL_DIR, 'scripts', 'ready_extract_subtitle.py'), 'utf-8')
   const mainEntry = readFileSync(join(SKILL_DIR, 'main.py'), 'utf-8')

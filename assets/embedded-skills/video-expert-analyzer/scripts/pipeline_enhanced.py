@@ -694,9 +694,17 @@ def build_yt_dlp_command(*args: str) -> List[str]:
     remote_component_args: List[str] = []
     if yt_dlp_supports_remote_components(base_command):
         remote_component_args = ["--remote-components", "ejs:github"]
-    cookie_file = os.environ.get("YOUTUBE_COOKIE_FILE", "").strip()
+    cookie_file = resolve_video_cookie_file()
     cookie_args = ["--cookies", cookie_file] if cookie_file and Path(cookie_file).exists() else []
     return [*base_command, *runtime_args, *remote_component_args, *cookie_args, *args]
+
+
+def resolve_video_cookie_file() -> str:
+    for env_name in ("READY_VIDEO_COOKIE_FILE", "VIDEO_COOKIE_FILE", "BILIBILI_COOKIE_FILE", "YOUTUBE_COOKIE_FILE"):
+        cookie_file = os.environ.get(env_name, "").strip()
+        if cookie_file and Path(cookie_file).exists():
+            return cookie_file
+    return ""
 
 
 def yt_dlp_supports_js_runtimes(base_command: List[str]) -> bool:

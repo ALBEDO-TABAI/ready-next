@@ -97,6 +97,16 @@ export function parseBrowserTabDragPayload(raw: string | null | undefined): Brow
   }
 }
 
+export function buildBrowserTabAnalysisItemId(url: string): string {
+  let hash = 2166136261
+  const input = url.trim()
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return `btab-${(hash >>> 0).toString(16).padStart(8, '0')}`
+}
+
 export function parseRssItemDragPayload(raw: string | null | undefined): RSSItemDragPayload | null {
   if (!raw) return null
   try {
@@ -676,7 +686,7 @@ export async function dispatchFileTreeExternalDropAction({
           publishedAt: payload.publishedAt,
         }
       : {
-          itemId: payload.tabId,
+          itemId: buildBrowserTabAnalysisItemId(payload.url),
           link: payload.url,
           title: payload.title,
           source: 'browser-tab',

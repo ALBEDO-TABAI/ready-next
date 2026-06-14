@@ -77,9 +77,16 @@ def build_yt_dlp_command(*args):
     base_command = [ytdlp] if shutil.which(ytdlp) or Path(ytdlp).exists() else [sys.executable, "-m", "yt_dlp"]
     runtime_args = ["--js-runtimes", "node"] if shutil.which("node") and yt_dlp_supports_js_runtimes(base_command) else []
     remote_component_args = ["--remote-components", "ejs:github"] if yt_dlp_supports_remote_components(base_command) else []
-    cookie_file = os.environ.get("YOUTUBE_COOKIE_FILE", "").strip()
+    cookie_file = resolve_video_cookie_file()
     cookie_args = ["--cookies", cookie_file] if cookie_file and Path(cookie_file).exists() else []
     return [*base_command, *runtime_args, *remote_component_args, *cookie_args, *args]
+
+def resolve_video_cookie_file():
+    for env_name in ("READY_VIDEO_COOKIE_FILE", "VIDEO_COOKIE_FILE", "BILIBILI_COOKIE_FILE", "YOUTUBE_COOKIE_FILE"):
+        cookie_file = os.environ.get(env_name, "").strip()
+        if cookie_file and Path(cookie_file).exists():
+            return cookie_file
+    return ""
 
 def is_url(path):
     """判断是否为 URL"""

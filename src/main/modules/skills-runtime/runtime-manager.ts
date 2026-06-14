@@ -1322,8 +1322,12 @@ export class SkillsRuntimeManager {
         const cookieFile = bilibili.options.cookieFile
         if (typeof cookieFile === 'string' && cookieFile.trim()) env.BILIBILI_COOKIE_FILE = cookieFile.trim()
       }
-      const youtubeCookieFile = await this.exportBrowserYoutubeCookies()
-      if (youtubeCookieFile) env.YOUTUBE_COOKIE_FILE = youtubeCookieFile
+      const videoCookieFile = await this.exportBrowserVideoCookies()
+      if (videoCookieFile) {
+        env.READY_VIDEO_COOKIE_FILE = videoCookieFile
+        env.VIDEO_COOKIE_FILE = videoCookieFile
+        env.YOUTUBE_COOKIE_FILE = videoCookieFile
+      }
       Object.assign(
         env,
         this.buildFunasrNanoRuntimeEnv(),
@@ -1334,23 +1338,16 @@ export class SkillsRuntimeManager {
     return env
   }
 
-  private async exportBrowserYoutubeCookies(): Promise<string | null> {
+  private async exportBrowserVideoCookies(): Promise<string | null> {
     if (!session?.fromPartition) return null
     try {
       const browserSession = session.fromPartition('persist:browser')
       const cookies = await browserSession.cookies.get({})
-      const scoped = cookies.filter((cookie) => {
-        const domain = String(cookie.domain || '').toLowerCase()
-        return domain === 'youtube.com'
-          || domain.endsWith('.youtube.com')
-          || domain === 'google.com'
-          || domain.endsWith('.google.com')
-      })
-      if (scoped.length === 0) return null
-      const cookiePath = join(this.runtimeRoot, `.ready-youtube-cookies-${randomUUID()}.txt`)
+      if (cookies.length === 0) return null
+      const cookiePath = join(this.runtimeRoot, `.ready-video-cookies-${randomUUID()}.txt`)
       const lines = [
         '# Netscape HTTP Cookie File',
-        ...scoped.map((cookie) => {
+        ...cookies.map((cookie) => {
           const domain = String(cookie.domain || '')
           const includeSubdomains = domain.startsWith('.') ? 'TRUE' : 'FALSE'
           const path = cookie.path || '/'
@@ -1372,15 +1369,19 @@ export class SkillsRuntimeManager {
       writeFileSync(cookiePath, `${lines.join('\n')}\n`, { encoding: 'utf-8', mode: 0o600 })
       return cookiePath
     } catch (error) {
-      logAgentMetric('runtime.youtube_cookie_export_failed', {
+      logAgentMetric('runtime.video_cookie_export_failed', {
         message: error instanceof Error ? error.message : String(error),
       })
       return null
     }
   }
 
-  private cleanupExportedYoutubeCookieFile(cookiePath: string | undefined): void {
-    if (!cookiePath || !cookiePath.startsWith(this.runtimeRoot) || !cookiePath.includes('.ready-youtube-cookies-')) return
+  private cleanupExportedVideoCookieFile(cookiePath: string | undefined): void {
+    if (
+      !cookiePath
+      || !cookiePath.startsWith(this.runtimeRoot)
+      || (!cookiePath.includes('.ready-video-cookies-') && !cookiePath.includes('.ready-youtube-cookies-'))
+    ) return
     try {
       rmSync(cookiePath, { force: true })
     } catch {
@@ -2191,7 +2192,13 @@ export class SkillsRuntimeManager {
         )
         return finish(result)
       } finally {
-        this.cleanupExportedYoutubeCookieFile(externalEnv.YOUTUBE_COOKIE_FILE)
+        for (const cookiePath of new Set([
+          externalEnv.READY_VIDEO_COOKIE_FILE,
+          externalEnv.VIDEO_COOKIE_FILE,
+          externalEnv.YOUTUBE_COOKIE_FILE,
+        ])) {
+          this.cleanupExportedVideoCookieFile(cookiePath)
+        }
         if (spawnHandle) {
           try {
             await controller.restoreSpawnContext(spawnHandle)

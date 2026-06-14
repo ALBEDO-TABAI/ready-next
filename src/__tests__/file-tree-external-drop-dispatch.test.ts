@@ -4,6 +4,7 @@ import test from 'node:test'
 import {
   __rssDragSessionAgeMs,
   beginRssItemDragSession,
+  buildBrowserTabAnalysisItemId,
   dispatchFileTreeExternalDropAction,
   endRssItemDragSession,
   getActiveRssItemDragPayload,
@@ -311,7 +312,7 @@ test('copy-analysis and visual-analysis route both sources to startItemAnalysis'
     assert.equal(clipCalls.length, 0)
     assert.equal(analysisCalls.length, 2)
     assert.equal(analysisCalls[0].action, 'copy')
-    assert.equal(analysisCalls[0].itemId, 'tab-abc')
+    assert.equal(analysisCalls[0].itemId, buildBrowserTabAnalysisItemId(browserTab.url))
     assert.equal(analysisCalls[0].source, 'browser-tab')
     assert.equal(analysisCalls[0].link, 'https://example.com/article')
     assert.equal(analysisCalls[0].targetDir, '/workspace/notes')
@@ -329,6 +330,38 @@ test('copy-analysis and visual-analysis route both sources to startItemAnalysis'
     assert.equal(updates[0].progress, 5)
     assert.equal(updates[1].jobId, 'job-2')
     assert.equal(updates[1].outputDir, '/workspace/notes/analysis-output')
+  } finally {
+    restore()
+  }
+})
+
+test('browser tab analysis item id follows URL rather than transient tab id', async () => {
+  const { analysisCalls, restore } = installFakeApi()
+  try {
+    await dispatchFileTreeExternalDropAction({
+      payload: {
+        ...browserTab,
+        tabId: 'tab-reused',
+        url: 'https://www.bilibili.com/video/BV1zBEr6AEnE/',
+      },
+      action: 'copy-analysis',
+      target: insideDirTarget,
+    })
+    await dispatchFileTreeExternalDropAction({
+      payload: {
+        ...browserTab,
+        tabId: 'tab-reused',
+        url: 'https://www.bilibili.com/video/BV1shJP6TEEQ/',
+      },
+      action: 'copy-analysis',
+      target: insideDirTarget,
+    })
+
+    assert.equal(analysisCalls.length, 2)
+    assert.notEqual(analysisCalls[0].itemId, analysisCalls[1].itemId)
+    assert.equal(analysisCalls[0].itemId, buildBrowserTabAnalysisItemId(analysisCalls[0].link))
+    assert.equal(analysisCalls[1].itemId, buildBrowserTabAnalysisItemId(analysisCalls[1].link))
+    assert.match(analysisCalls[0].itemId, /^btab-[0-9a-f]{8}$/)
   } finally {
     restore()
   }
