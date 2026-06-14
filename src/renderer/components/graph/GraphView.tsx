@@ -307,7 +307,7 @@ export default function GraphView({
             style={{
               maxWidth: 360,
               padding: 16,
-              borderRadius: 10,
+              borderRadius: 8,
               background: 'var(--bg, #fff)',
               color: 'var(--text, #111)',
               fontSize: 12,

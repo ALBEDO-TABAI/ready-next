@@ -41,7 +41,7 @@ const dropdownContainerStyle: CSSProperties = {
   left: 0,
   background: 'var(--surface-floating-bg)',
   border: '1px solid var(--surface-border)',
-  borderRadius: 10,
+  borderRadius: 8,
   boxShadow: 'var(--surface-shadow)',
   padding: '6px 0',
   zIndex: 1000

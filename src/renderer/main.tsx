@@ -22,7 +22,7 @@ async function reconcileStartupTheme() {
 
   // Main 进程是主题/皮肤的真值来源；localStorage 是 FOUC 兜底。这里把 stale localStorage 覆盖。
   writeStorage('ready-theme', option)
-  if (skin === 'liquid-glass' || skin === 'ready-glass') {
+  if (skin === 'liquid-glass' || skin === 'ready-glass' || skin === 'green-pink-glass' || skin === 'solid-green-glass') {
     writeStorage('ready-theme-skin', skin)
   }
 
@@ -34,7 +34,10 @@ async function reconcileStartupTheme() {
   }
   // data-skin 永远是 'liquid-glass'（与 useTheme.applySkin 行为一致，兼容现有 CSS）
   root.setAttribute('data-skin', 'liquid-glass')
-  root.setAttribute('data-glass-backdrop', skin === 'ready-glass' ? 'ready' : 'native')
+  root.setAttribute('data-glass-backdrop', skin === 'ready-glass' || skin === 'solid-green-glass' ? 'ready' : 'native')
+  const variant = skin === 'green-pink-glass' ? 'green-pink' : skin === 'solid-green-glass' ? 'solid-green' : ''
+  if (variant) root.setAttribute('data-glass-variant', variant)
+  else root.removeAttribute('data-glass-variant')
   // 启动 reconciliation：data-native-fullscreen 只在 "纯原生窗口全屏"（IPC isNativeFullscreen=true）
   // 且当前**没有 HTML5 fullscreen 活跃**时设置。HTML5 fullscreen 期间不需要 .ready-app-bg backing
   // （iframe :fullscreen + ::backdrop 已经盖了一切），设了反而会因为 OOPIF 路径 IPC 不可靠卡死成黑屏。

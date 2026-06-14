@@ -39,9 +39,9 @@ function Toggle({
       }}
     >
       <span
-        className="absolute top-[3px] h-5 w-5 rounded-full transition-transform duration-200"
+        className="absolute top-[4px] h-5 w-5 rounded-full transition-transform duration-200"
         style={{
-          left: 3,
+          left: 4,
           transform: checked ? 'translateX(20px)' : 'translateX(0)',
           background: '#fff',
           boxShadow: '0 4px 10px rgba(15,23,42,0.16)',

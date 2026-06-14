@@ -72,7 +72,7 @@ export default function IconRail({ activeIcon = 'folder', onIconClick, hidden = 
       },
       { id: 'settings', label: '设置', iconKey: 'settings' },
     ]
-    const estimatedHeight = 92
+    const estimatedHeight = 90
 
     setSettingsMenuOpen(true)
     const result = await api.showNativeContextMenu({
@@ -131,7 +131,7 @@ export default function IconRail({ activeIcon = 'folder', onIconClick, hidden = 
           aria-expanded={settingsMenuOpen}
           whileHover={{ y: -1 }}
           whileTap={{ scale: 0.97, y: 0 }}
-          className="w-[34px] h-[34px] rounded-[10px] flex items-center justify-center text-[var(--text-gray)] hover:text-[var(--text-body)] hover:bg-[var(--bg-hover)] active:scale-[0.98] transition-[background-color,color,transform] duration-200 ease-out"
+          className="w-[34px] h-[34px] rounded-[8px] flex items-center justify-center text-[var(--text-gray)] hover:text-[var(--text-body)] hover:bg-[var(--bg-hover)] active:scale-[0.98] transition-[background-color,color,transform] duration-200 ease-out"
           style={{ background: 'transparent', border: 'none', boxShadow: 'none' }}
         >
           <IconSettings className="w-[15px] h-[15px]" strokeWidth={1.8} />

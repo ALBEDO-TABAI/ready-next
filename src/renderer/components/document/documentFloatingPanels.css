@@ -7,7 +7,7 @@
   align-items: center;
   gap: 4px;
   padding: 3px;
-  border-radius: 10px;
+  border-radius: 8px;
   background: color-mix(in srgb, var(--surface-floating-bg) 76%, transparent);
   border: 1px solid color-mix(in srgb, var(--border-default) 58%, transparent);
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255,255,255,0.36);
@@ -308,7 +308,7 @@ html[data-skin='liquid-glass'] .document-panel-row.is-selected {
   width: 22px;
   height: 22px;
   border: 0;
-  border-radius: 7px;
+  border-radius: 8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -329,7 +329,7 @@ html[data-skin='liquid-glass'] .document-panel-row.is-selected {
   gap: 4px;
   margin: 0 10px 8px;
   padding: 3px;
-  border-radius: 10px;
+  border-radius: 8px;
   background: color-mix(in srgb, var(--bg-hover) 58%, transparent);
 }
 

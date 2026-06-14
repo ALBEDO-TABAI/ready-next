@@ -22,7 +22,7 @@ export const CHAT_HEADER_MENU_META_STYLE: CSSProperties = {
 export const CHAT_HEADER_MENU_DELETE_BUTTON_STYLE: CSSProperties = {
   width: 20,
   height: 20,
-  borderRadius: 10,
+  borderRadius: 8,
   opacity: 0.72,
   color: 'var(--text-light)',
   background: 'transparent',

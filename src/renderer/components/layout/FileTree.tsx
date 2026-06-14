@@ -439,6 +439,11 @@ function FileTreeItem({
         onOpenFile()
       }}
       onContextMenu={onContextMenu}
+      data-file-tree-highlighted={
+        isActive || (!isActive && !isDropTarget && !isBrowserDropAccent && isHovered)
+          ? 'true'
+          : undefined
+      }
       className={`
         flex items-center gap-[6px] rounded-[8px] text-[13px] cursor-pointer
         transition-[background-color,box-shadow,outline-color] duration-200 ease-out group
@@ -653,7 +658,9 @@ function GridItemCard({
       }}
       onDoubleClick={onDoubleClick}
       onContextMenu={onContextMenu}
-      className="content-surface-card rounded-[10px] border text-left transition-[background-color,border-color,box-shadow] hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]"
+      data-file-grid-card="true"
+      data-selected={isActive ? 'true' : undefined}
+      className="content-surface-card rounded-[8px] border text-left transition-[background-color,border-color,box-shadow] hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]"
       style={{
         position: 'relative',
         padding: '8px 8px 10px',
@@ -2546,7 +2553,7 @@ export default function FileTree({
               </button>
               <div
                 style={{
-                  position: 'relative', width: 56, height: 6, borderRadius: 3,
+                  position: 'relative', width: 56, height: 6, borderRadius: 4,
                   background: 'var(--files-panel-state-hover-bg)',
                   boxShadow: 'var(--files-panel-state-hover-shadow)',
                   cursor: 'pointer',
@@ -2571,7 +2578,7 @@ export default function FileTree({
               >
                 <div
                   style={{
-                    position: 'absolute', left: 0, top: 0, height: '100%', borderRadius: 3,
+                    position: 'absolute', left: 0, top: 0, height: '100%', borderRadius: 4,
                     width: `${((thumbnailSize - 80) / 140) * 100}%`,
                     background: 'var(--text-light)',
                   }}
@@ -2611,7 +2618,7 @@ export default function FileTree({
         >
           {creatingType && creatingPath === gridContainerPath && (
             <div
-              className="content-surface-card rounded-[10px] border"
+              className="content-surface-card rounded-[8px] border"
               style={{
                 padding: '8px 8px 10px',
                 borderColor: 'var(--files-panel-state-active-border)',

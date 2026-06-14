@@ -173,7 +173,7 @@ export default function MeetingChat({ onFileDrop }: MeetingChatProps) {
                     color: 'var(--text-light)',
                     background: 'var(--bg-panel)',
                     padding: '4px 12px',
-                    borderRadius: 10,
+                    borderRadius: 8,
                     maxWidth: '80%',
                     textAlign: 'center'
                   }}

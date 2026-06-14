@@ -167,7 +167,7 @@ export default function DocumentTabRail({
                       onContextMenu={onTabContextMenu ? (event) => onTabContextMenu(event, tab.id) : undefined}
                       onMouseEnter={() => setHoveredTabId(tab.id)}
                       onMouseLeave={() => setHoveredTabId((current) => current === tab.id ? null : current)}
-                      className="group relative flex min-w-0 w-full cursor-pointer items-center rounded-[14px] border px-[10px] text-[12px] transition-[background-color,border-color,box-shadow,color] duration-150"
+                      className="group relative flex min-w-0 w-full cursor-pointer items-center rounded-[12px] border px-[10px] text-[12px] transition-[background-color,border-color,box-shadow,color] duration-150"
                       style={{
                         gap: 6,
                         height: Math.max(30, WORKBENCH_TAB_ROW_HEIGHT - 4),

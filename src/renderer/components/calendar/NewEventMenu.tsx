@@ -116,7 +116,7 @@ export function NewEventMenu({
       style={{
         position: 'absolute', zIndex: 30,
         top: position.top, left: position.left,
-        width: 220, borderRadius: 10,
+        width: 220, borderRadius: 8,
         background: 'var(--bg-primary)',
         border: '1px solid var(--border-default)',
         boxShadow: '0 4px 16px rgba(0,0,0,0.10)',
@@ -240,7 +240,7 @@ export function NewEventCard({
       style={{
         position: 'absolute', zIndex: 30,
         top: position.top, left: position.left,
-        width: 300, borderRadius: 10,
+        width: 300, borderRadius: 8,
         background: 'var(--bg-primary)',
         border: '1px solid var(--border-default)',
         overflow: 'hidden',
@@ -371,7 +371,7 @@ export function NewEventCard({
                 onClick={() => setSelectedColor(c.color)}
                 title={c.name}
                 style={{
-                  width: 18, height: 18, borderRadius: 9,
+                  width: 18, height: 18, borderRadius: 8,
                   background: c.color, cursor: 'pointer',
                   border: selectedColor === c.color ? '2px solid var(--bg-primary)' : '2px solid transparent',
                   outline: selectedColor === c.color ? `2px solid ${c.color}` : '2px solid transparent',

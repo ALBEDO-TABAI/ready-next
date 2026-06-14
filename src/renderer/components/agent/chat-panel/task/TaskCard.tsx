@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { ChevronDown, Wrench } from 'lucide-react'
 import {
   buildTaskCardViewModel,
+  deriveTaskCardRuntimeState,
   formatTaskUserFacingText,
   formatTaskProgressLabel,
   formatTaskStepDisplayTitle,
@@ -19,6 +20,7 @@ import {
   budgetWarningBadgeLabel,
 } from '../helpers/badges'
 import type { TaskCardRun } from '../../task-card-from-projection'
+import { AgentStatusDot } from '../../../ui/dot-matrix/AgentStatusDot'
 
 // ---------------------------------------------------------------------------
 // Stage V V1.6 — `TaskCard` + `ToolTraceCard` extracted from ChatPanel.tsx.
@@ -43,7 +45,9 @@ export const TASK_ACTION_BUTTON_STYLE: React.CSSProperties = {
   borderRadius: 8,
   border: '1px solid var(--border-default)',
   background: 'transparent',
-  fontSize: 10.5,
+  fontSize: 'var(--text-xs)',
+  lineHeight: 'var(--leading-snug)',
+  fontWeight: 'var(--fw-medium)',
   color: 'var(--text-body)',
   cursor: 'pointer'
 }
@@ -107,6 +111,7 @@ export function TaskCard({
   onConfirmBrowserCollectionConsent?: (scopeId: string, requestId: string) => void
 }) {
   const vm = buildTaskCardViewModel(run, disclosureState)
+  const taskRuntimeState = deriveTaskCardRuntimeState(run)
   const legacyHandoffReportedRef = useRef<Set<string>>(new Set())
   useEffect(() => {
     const hit = vm.legacyHandoffHit
@@ -179,13 +184,14 @@ export function TaskCard({
         }}
       >
         <div style={{ minWidth: 0, flex: 1, textAlign: 'left' }}>
-          <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-body)' }}>
+          <div className="t-ui" data-typography-role="ui" style={{ color: 'var(--text-body)' }}>
             {section.title}
           </div>
           {section.summary && (
             <div
+              className="t-meta"
+              data-typography-role="meta"
               style={{
-                fontSize: 10.5,
                 color: 'var(--text-light)',
                 marginTop: 2,
                 whiteSpace: 'nowrap',
@@ -198,7 +204,7 @@ export function TaskCard({
           )}
         </div>
         <div className="flex items-center gap-2" style={{ flexShrink: 0 }}>
-          <span style={{ fontSize: 10, color: 'var(--text-light)' }}>{section.count}</span>
+          <span className="t-data" data-typography-role="data" style={{ color: 'var(--text-light)' }}>{section.count}</span>
           <ChevronDown
             style={{
               width: 12,
@@ -226,7 +232,7 @@ export function TaskCard({
         // + a gentle blur to stay readable when scrolled into the composer
         // overlay zone. NOT the composer's liquid-glass treatment (no outer
         // dark shadow, no mirrored refraction) — a lightweight surface only.
-        background: 'color-mix(in srgb, var(--surface-card-bg) 68%, transparent)',
+        background: 'var(--ready-task-card-bg, color-mix(in srgb, var(--surface-card-bg) 68%, transparent))',
         backdropFilter: 'blur(10px) saturate(1.08)',
         WebkitBackdropFilter: 'blur(10px) saturate(1.08)',
         padding: compact ? '10px 12px' : '12px 12px 10px',
@@ -248,10 +254,14 @@ export function TaskCard({
         }}
       >
         <div style={{ minWidth: 0, flex: 1 }}>
-          <div style={{ fontSize: 12.5, fontWeight: 700, color: 'var(--text-body)' }}>
+          <div
+            className="t-ui"
+            data-typography-role="ui"
+            style={{ color: 'var(--text-body)', fontWeight: 'var(--fw-semibold)' }}
+          >
             {primaryTitle}
           </div>
-          <div style={{ fontSize: 11, color: 'var(--text-gray)', marginTop: 3 }}>
+          <div className="t-meta" data-typography-role="meta" style={{ color: 'var(--text-gray)', marginTop: 3 }}>
             {summaryPreview}
           </div>
           {metaBadges.length > 0 && (
@@ -263,9 +273,13 @@ export function TaskCard({
                     padding: '3px 7px',
                     borderRadius: 999,
                     border: '1px solid var(--border-default)',
-                    fontSize: 10,
+                    fontSize: 'var(--text-xs)',
+                    lineHeight: 'var(--leading-tight)',
+                    fontWeight: 'var(--fw-medium)',
+                    letterSpacing: 'var(--tracking-label)',
                     color: 'var(--text-light)',
-                    background: 'color-mix(in srgb, var(--surface-card-bg) 22%, transparent)'
+                    background: 'color-mix(in srgb, var(--surface-card-bg) 22%, transparent)',
+                    fontVariantNumeric: 'tabular-nums',
                   }}
                 >
                   {badge}
@@ -274,7 +288,7 @@ export function TaskCard({
             </div>
           )}
           {expanded && vm.currentStep && (
-            <div style={{ fontSize: 10.5, color: 'var(--text-light)', marginTop: 4 }}>
+            <div className="t-meta" data-typography-role="meta" style={{ color: 'var(--text-light)', marginTop: 4 }}>
               当前步骤：{vm.currentStep.title}
             </div>
           )}
@@ -282,8 +296,9 @@ export function TaskCard({
             <div style={{ marginTop: 7 }}>
               <div className="flex items-center justify-between" style={{ gap: 8 }}>
                 <span
+                  className="t-meta"
+                  data-typography-role="meta"
                   style={{
-                    fontSize: 10.5,
                     color: 'var(--text-light)',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
@@ -294,7 +309,7 @@ export function TaskCard({
                   {progressLabel}
                 </span>
                 {progressValue != null && (
-                  <span style={{ fontSize: 10, color: 'var(--text-light)', flexShrink: 0 }}>
+                  <span className="t-data" data-typography-role="data" style={{ color: 'var(--text-light)', flexShrink: 0 }}>
                     {progressValue}%
                   </span>
                 )}
@@ -320,7 +335,7 @@ export function TaskCard({
                 </div>
               )}
               {progressLastError && expanded && (
-                <div style={{ fontSize: 10.5, color: 'var(--text-light)', marginTop: 4 }}>
+                <div className="t-meta" data-typography-role="meta" style={{ color: 'var(--text-light)', marginTop: 4 }}>
                   当前状态：{progressLastError}
                 </div>
               )}
@@ -328,7 +343,10 @@ export function TaskCard({
           )}
         </div>
         <div className="flex items-center gap-2" style={{ flexShrink: 0 }}>
-          <div style={{ fontSize: 10, color: 'var(--text-light)' }}>{vm.statusLabel}</div>
+          <div className="t-label flex items-center gap-1" data-typography-role="label" style={{ color: 'var(--text-light)' }}>
+            <AgentStatusDot state={taskRuntimeState.visualState} size={11} />
+            {vm.statusLabel}
+          </div>
           <ChevronDown
             style={{
               width: 12,
@@ -371,11 +389,11 @@ export function TaskCard({
                     }}
                   />
                   <div style={{ minWidth: 0, flex: 1 }}>
-                    <div style={{ fontSize: 11.5, color: 'var(--text-body)' }}>
+                    <div className="t-meta" data-typography-role="meta" style={{ color: 'var(--text-body)' }}>
                       {formatTaskStepDisplayTitle(step.title, run.progress)}
                     </div>
                     {step.detail && (
-                      <div style={{ fontSize: 10.5, color: 'var(--text-light)', marginTop: 1 }}>
+                      <div className="t-meta" data-typography-role="meta" style={{ color: 'var(--text-light)', marginTop: 1 }}>
                         {formatTaskUserFacingText(step.detail)}
                       </div>
                     )}
@@ -393,7 +411,9 @@ export function TaskCard({
                     borderRadius: 999,
                     border: '1px dashed var(--border-default)',
                     background: 'transparent',
-                    fontSize: 10.5,
+                    fontSize: 'var(--text-xs)',
+                    lineHeight: 'var(--leading-snug)',
+                    fontWeight: 'var(--fw-medium)',
                     color: 'var(--text-light)',
                     cursor: 'pointer',
                   }}
@@ -412,7 +432,9 @@ export function TaskCard({
                     borderRadius: 999,
                     border: '1px dashed var(--border-default)',
                     background: 'transparent',
-                    fontSize: 10.5,
+                    fontSize: 'var(--text-xs)',
+                    lineHeight: 'var(--leading-snug)',
+                    fontWeight: 'var(--fw-medium)',
                     color: 'var(--text-light)',
                     cursor: 'pointer',
                   }}
@@ -435,17 +457,19 @@ export function TaskCard({
                     padding: '7px 8px'
                   }}
                 >
-                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text-body)' }}>
+                  <div className="t-ui" data-typography-role="ui" style={{ color: 'var(--text-body)' }}>
                     {group.title}
                   </div>
-                  <div style={{ fontSize: 10.5, color: 'var(--text-light)', marginTop: 2 }}>
+                  <div className="t-meta" data-typography-role="meta" style={{ color: 'var(--text-light)', marginTop: 2 }}>
                     {group.summary}
                   </div>
                   <div className="flex flex-col" style={{ gap: 3, marginTop: 6 }}>
                     {group.events.map((event) => (
                       <div
                         key={event.id}
-                        style={{ fontSize: 10.5, color: 'var(--text-gray)', lineHeight: 1.45 }}
+                        className="t-meta"
+                        data-typography-role="meta"
+                        style={{ color: 'var(--text-gray)' }}
                       >
                         {event.text}
                       </div>
@@ -469,7 +493,9 @@ export function TaskCard({
                     borderRadius: 8,
                     border: '1px solid var(--border-default)',
                     background: 'transparent',
-                    fontSize: 10.5,
+                    fontSize: 'var(--text-xs)',
+                    lineHeight: 'var(--leading-snug)',
+                    fontWeight: 'var(--fw-medium)',
                     color: 'var(--text-gray)',
                     cursor: artifact.path ? 'pointer' : 'default'
                   }}
@@ -488,20 +514,20 @@ export function TaskCard({
       {expanded && visibleMemoryCapture && vm.sections.memory.expanded && (
         <div
           style={{
-            borderRadius: 10,
-            background: 'color-mix(in srgb, var(--color-blue-light) 70%, transparent)',
+            borderRadius: 8,
+            background: 'var(--ready-task-card-accent-bg, color-mix(in srgb, var(--color-blue-light) 70%, transparent))',
             padding: '8px 9px',
             display: 'flex',
             flexDirection: 'column',
             gap: 6
           }}
         >
-          <div style={{ fontSize: 11.5, fontWeight: 600, color: 'var(--text-body)' }}>
+          <div className="t-ui" data-typography-role="ui" style={{ color: 'var(--text-body)' }}>
             已记录的常驻偏好 / 当前上下文
           </div>
           <div className="flex flex-col" style={{ gap: 4 }}>
             {visibleMemoryCapture.items.map((item) => (
-              <div key={item.memoryId} style={{ fontSize: 10.5, color: 'var(--text-body)' }}>
+              <div key={item.memoryId} className="t-meta" data-typography-role="meta" style={{ color: 'var(--text-body)' }}>
                 {memoryCaptureSourceLabel(item.sourceType)} · {item.title}
                 {item.summary ? `：${item.summary}` : ''}
               </div>
@@ -712,10 +738,11 @@ export function ToolTraceCard({
   const latestPreview = formatToolTracePreview(latestEvent?.text)
   return (
     <div
+      data-ready-tool-trace-card="true"
       style={{
         borderRadius: 12,
         border: '1px solid var(--border-default)',
-        background: 'color-mix(in srgb, var(--surface-card-bg) 20%, transparent)',
+        background: 'var(--ready-tool-card-bg, color-mix(in srgb, var(--surface-card-bg) 20%, transparent))',
         padding: '9px 10px',
         display: 'flex',
         flexDirection: 'column',
@@ -740,9 +767,9 @@ export function ToolTraceCard({
             strokeWidth={2}
           />
           <div
+            className="t-ui"
+            data-typography-role="ui"
             style={{
-              fontSize: 11.5,
-              fontWeight: 600,
               color: 'var(--text-body)',
               whiteSpace: 'nowrap',
               flexShrink: 0
@@ -752,8 +779,9 @@ export function ToolTraceCard({
           </div>
           {!expanded && latestEvent ? (
             <div
+              className="t-meta"
+              data-typography-role="meta"
               style={{
-                fontSize: 10.5,
                 color: 'var(--text-gray)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -781,8 +809,9 @@ export function ToolTraceCard({
           {events.map((event) => (
             <div
               key={event.id}
-              className="flex items-start gap-2"
-              style={{ fontSize: 10.5, color: 'var(--text-gray)', lineHeight: 1.45 }}
+              className="flex items-start gap-2 t-meta"
+              data-typography-role="meta"
+              style={{ color: 'var(--text-gray)' }}
             >
               <span
                 style={{

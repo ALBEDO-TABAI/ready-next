@@ -113,19 +113,21 @@ export default function ChatMessages({
             className="flex items-center justify-center"
             style={{
               width: 40, height: 40,
-              borderRadius: 10,
+              borderRadius: 8,
               background: 'var(--bg-avatar)'
             }}
           >
-            <span style={{ fontSize: 20, fontWeight: 700, color: 'var(--text-title)' }}>R</span>
+            <span className="t-title-lg" data-typography-role="title-lg" style={{ color: 'var(--text-title)' }}>R</span>
           </div>
 
-          <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--text-secondary)' }}>Ready AI Assistant</span>
+          <span className="t-subtitle" data-typography-role="subtitle" style={{ color: 'var(--text-secondary)' }}>Ready AI Assistant</span>
 
           <span
+            className="t-body"
+            data-typography-role="body"
             style={{
-              fontSize: 13, fontWeight: 500, color: 'var(--text-gray)',
-              textAlign: 'center', lineHeight: '1.5'
+              color: 'var(--text-gray)',
+              textAlign: 'center',
             }}
           >
             你的智能工作区助手。随时提问、创作内容、分析数据。
@@ -142,8 +144,8 @@ export default function ChatMessages({
                 display: 'flex', flexDirection: 'column', gap: 4
               }}
             >
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-title)' }}>内容优化</span>
-              <span style={{ fontSize: 11, color: 'var(--text-gray)' }}>分析热门数据...</span>
+              <span className="t-ui" data-typography-role="ui" style={{ color: 'var(--text-title)' }}>内容优化</span>
+              <span className="t-meta" data-typography-role="meta" style={{ color: 'var(--text-gray)' }}>分析热门数据...</span>
             </button>
             <button
               onClick={() => onSetInputSuggestion('帮我写一篇关于 AI 创作的文案')}
@@ -154,8 +156,8 @@ export default function ChatMessages({
                 display: 'flex', flexDirection: 'column', gap: 4
               }}
             >
-              <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-title)' }}>写作文案</span>
-              <span style={{ fontSize: 11, color: 'var(--text-gray)' }}>创作优质内容...</span>
+              <span className="t-ui" data-typography-role="ui" style={{ color: 'var(--text-title)' }}>写作文案</span>
+              <span className="t-meta" data-typography-role="meta" style={{ color: 'var(--text-gray)' }}>创作优质内容...</span>
             </button>
           </div>
         </div>
@@ -194,7 +196,8 @@ export default function ChatMessages({
             <div className={`flex gap-2.5 ${msg.type === 'user' ? 'flex-row-reverse' : ''}`}>
               {msg.type === 'user' ? (
                 <div
-                  className="max-w-[85%] text-[13px] leading-relaxed"
+                  className="max-w-[85%] t-body"
+                  data-typography-role="body"
                   style={{
                     color: 'var(--text-body)',
                     display: 'flex',
@@ -209,6 +212,7 @@ export default function ChatMessages({
                         <button
                           key={att.id}
                           type="button"
+                          data-chat-message-attachment="true"
                           onClick={() => {
                             if (att.source === 'document-quote') {
                               onRevealDocumentQuote(att)
@@ -223,7 +227,7 @@ export default function ChatMessages({
                               ? 'color-mix(in srgb, var(--color-blue) 10%, transparent)'
                               : 'var(--surface-card-bg)',
                             border: '1px solid var(--border-default)',
-                            fontSize: 11,
+                            fontSize: 'var(--text-sm)',
                             color: att.source === 'document-quote' ? 'var(--color-blue)' : 'var(--text-gray)',
                             maxWidth: att.source === 'document-quote' ? 220 : 180,
                             cursor: 'pointer',
@@ -260,8 +264,8 @@ export default function ChatMessages({
                             {getAttachmentMetaSummary(att) ? (
                               <span
                                 style={{
-                                  fontSize: 10,
-                                  lineHeight: 1.1,
+                                  fontSize: 'var(--text-xs)',
+                                  lineHeight: 'var(--leading-tight)',
                                   padding: '2px 6px',
                                   borderRadius: 999,
                                   background: att.source === 'document-quote'
@@ -286,7 +290,8 @@ export default function ChatMessages({
                 </div>
               ) : msg.type === 'system' ? (
                 <div
-                  className="text-[12px] leading-relaxed"
+                  className="t-body-sm"
+                  data-typography-role="body-sm"
                   style={{
                     padding: '6px 10px',
                     borderRadius: 8,
@@ -298,7 +303,8 @@ export default function ChatMessages({
                 </div>
               ) : (
                 <div
-                  className="group/agentmsg relative max-w-[90%] text-[13px] leading-relaxed"
+                  className="group/agentmsg relative max-w-[90%] t-body"
+                  data-typography-role="body"
                   style={{ color: 'var(--text-body)', paddingRight: 18 }}
                   onContextMenu={(event) => {
                     const selectedText = window.getSelection()?.toString()?.trim() || ''
@@ -308,7 +314,7 @@ export default function ChatMessages({
                     onAgentSelectionContextMenu?.(event, selectedText)
                   }}
                 >
-                  <div style={{ fontSize: 13, color: 'var(--text-body)', lineHeight: 1.6 }}>
+                  <div className="t-body" data-typography-role="body" style={{ color: 'var(--text-body)' }}>
                     {renderMarkdown(msg.content)}
                   </div>
                   {!!msg.content?.trim() && (
@@ -325,7 +331,7 @@ export default function ChatMessages({
                         bottom: -2,
                         width: 18,
                         height: 18,
-                        borderRadius: 9,
+                        borderRadius: 8,
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
@@ -423,9 +429,9 @@ export default function ChatMessages({
               <Wrench style={{ width: 13, height: 13, color: 'var(--text-gray)', flexShrink: 0 }} strokeWidth={2} />
               <div style={{ minWidth: 0, flex: 1 }}>
                 <div
+                  className="t-ui"
+                  data-typography-role="ui"
                   style={{
-                    fontSize: 12,
-                    fontWeight: 600,
                     color: 'var(--text-body)',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
@@ -441,8 +447,9 @@ export default function ChatMessages({
                         : '工具调用结束'}
                 </div>
                 <div
+                  className="t-meta"
+                  data-typography-role="meta"
                   style={{
-                    fontSize: 11,
                     color: 'var(--text-gray)',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
@@ -453,7 +460,7 @@ export default function ChatMessages({
                   {latestToolPreview || (isStreaming ? '准备执行网页/文档操作…' : '本次会话没有额外工具输出。')}
                 </div>
               </div>
-              <div style={{ fontSize: 10, color: 'var(--text-light)', flexShrink: 0 }}>
+              <div className="t-data" data-typography-role="data" style={{ color: 'var(--text-light)', flexShrink: 0 }}>
                 {toolTrace.length} 条
               </div>
               <ChevronRight
@@ -489,10 +496,10 @@ export default function ChatMessages({
                       display: 'flex',
                       alignItems: 'flex-start',
                       gap: 6,
-                      fontSize: 11,
                       color: 'var(--text-body)',
-                      lineHeight: 1.45,
                     }}
+                    className="t-meta"
+                    data-typography-role="meta"
                   >
                     <span style={{ color: event.kind === 'call' ? 'var(--color-blue)' : 'var(--color-green)', marginTop: 1 }}>
                       {event.kind === 'call' ? '•' : '✓'}
@@ -526,10 +533,10 @@ export default function ChatMessages({
             ) : (
               <div className="flex items-center gap-3" style={{ padding: '2px 0 4px' }}>
                 <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ background: 'var(--bg-avatar)' }}>
-                  <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text-title)' }}>R</span>
+                  <span className="t-subtitle" data-typography-role="subtitle" style={{ color: 'var(--text-title)' }}>R</span>
                 </div>
                 <div className="flex items-center gap-2.5" style={{ color: 'var(--text-gray)' }}>
-                  <span style={{ fontSize: 12, fontWeight: 500 }}>思考中</span>
+                  <span className="t-ui" data-typography-role="ui">思考中</span>
                   <div className="flex items-center gap-1.5" aria-label="agent-thinking">
                     <span
                       className="animate-pulse"

@@ -101,7 +101,7 @@ export default function ReadyMode() {
             className="flex items-center transition-[background-color,color] duration-200"
             style={{
               padding: '4px 10px',
-              borderRadius: 10,
+              borderRadius: 8,
               background: isFollowMode ? 'var(--color-green-medium)' : 'var(--color-green-subtle)',
               fontSize: 11, fontWeight: 500, color: 'var(--color-green)',
               border: isFollowMode ? '1px solid var(--color-green)' : '1px solid transparent'
@@ -115,7 +115,7 @@ export default function ReadyMode() {
               layoutId="ready-submodes"
               items={subModeItems}
               className="flex items-center gap-1"
-              itemClassName="relative flex h-[26px] items-center justify-center rounded-[10px] px-[10px]"
+              itemClassName="relative flex h-[26px] items-center justify-center rounded-[8px] px-[10px]"
               contentClassName="relative z-[1] flex h-full items-center justify-center gap-1 text-[11px] leading-none"
             />
           </div>

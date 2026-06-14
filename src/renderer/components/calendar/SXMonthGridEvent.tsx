@@ -162,7 +162,7 @@ export default function SXMonthGridEvent({ calendarEvent }: SXMonthGridEventProp
         style={{
           width: 12,
           height: 12,
-          borderRadius: 3,
+          borderRadius: 4,
           background: `${eventColor}1f`,
           color: eventColor,
           fontSize: 8,

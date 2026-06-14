@@ -92,10 +92,10 @@ function floatingMenuHtml(menuId: string, items: NativeContextMenuItem[]): strin
     color: rgba(24, 24, 24, 0.94);
   }
   .menu {
-    width: 94px;
-    padding: 5px 6px;
+    width: 96px;
+    padding: 6px;
     border: 0.5px solid rgba(255, 255, 255, 0.76);
-    border-radius: 13px;
+    border-radius: 12px;
     background: rgba(248, 248, 248, 0.78);
     box-shadow:
       0 18px 34px rgba(0, 0, 0, 0.16),
@@ -106,19 +106,19 @@ function floatingMenuHtml(menuId: string, items: NativeContextMenuItem[]): strin
   }
   .menu-item {
     display: grid;
-    grid-template-columns: 15px 1fr;
+    grid-template-columns: 16px 1fr;
     align-items: center;
     width: 100%;
-    height: 27px;
-    padding: 0 5px;
-    gap: 7px;
+    height: 26px;
+    padding: 0 8px;
+    gap: 8px;
     border: 0;
-    border-radius: 10px;
+    border-radius: 8px;
     background: transparent;
     color: inherit;
     font: inherit;
-    font-size: 14.5px;
-    line-height: 27px;
+    font-size: 13px;
+    line-height: 26px;
     text-align: left;
   }
   .menu-item:disabled {
@@ -129,13 +129,13 @@ function floatingMenuHtml(menuId: string, items: NativeContextMenuItem[]): strin
   }
   .menu-icon {
     display: flex;
-    width: 15px;
-    height: 15px;
+    width: 16px;
+    height: 16px;
     align-items: center;
     justify-content: center;
     color: rgba(24, 24, 24, 0.92);
-    font-size: 13px;
-    line-height: 15px;
+    font-size: 12px;
+    line-height: 16px;
   }
   .menu-icon svg {
     width: 14px;
@@ -145,8 +145,8 @@ function floatingMenuHtml(menuId: string, items: NativeContextMenuItem[]): strin
   }
   .menu-label {
     display: block;
-    height: 27px;
-    line-height: 27px;
+    height: 26px;
+    line-height: 26px;
     white-space: nowrap;
   }
 </style>
@@ -172,9 +172,9 @@ function floatingMenuHtml(menuId: string, items: NativeContextMenuItem[]): strin
 function popupFloatingContextMenu(window: BrowserWindow, request: NativeContextMenuRequest): Promise<NativeContextMenuResponse> {
   return new Promise((resolve) => {
     const menuId = `${Date.now()}-${Math.random().toString(36).slice(2)}`
-    const width = 94
+    const width = 96
     const visibleItemCount = request.items.filter((item) => !item.separator).length
-    const height = 10 + Math.max(1, visibleItemCount) * 27
+    const height = 12 + Math.max(1, visibleItemCount) * 26
     let settled = false
     const contentBounds = window.getContentBounds()
     const popup = new BrowserWindow({

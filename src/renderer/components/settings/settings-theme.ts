@@ -83,7 +83,7 @@ export const SETTINGS_FLAT_INPUT_STYLE: CSSProperties = {
 
 export const SETTINGS_FLAT_BUTTON_STYLE: CSSProperties = {
   padding: '6px 12px',
-  borderRadius: 10,
+  borderRadius: 8,
   fontSize: 12,
   fontWeight: 500,
   lineHeight: 1.4,
@@ -210,7 +210,7 @@ export function settingsNoticeStyle(kind: 'error' | 'success'): CSSProperties {
 export function settingsListItemStyle(active: boolean): CSSProperties {
   return {
     padding: '14px 8px',
-    borderRadius: 18,
+    borderRadius: 16,
     // 不写 background，让 hover 类生效（inline 样式会盖掉 :hover）。
     border: '1px solid transparent',
     boxShadow: 'none',

@@ -134,7 +134,7 @@ export default function RSSRuntimeDiagnostics({
         <div className="flex items-center gap-2">
           <button
             onClick={() => void onRefresh()}
-            className="inline-flex items-center gap-2 rounded-[10px] border px-3 py-2 text-[11px] font-medium transition-colors hover:bg-[var(--bg-hover)]"
+            className="inline-flex items-center gap-2 rounded-[8px] border px-3 py-2 text-[11px] font-medium transition-colors hover:bg-[var(--bg-hover)]"
             style={{
               borderColor,
               color: 'var(--text-title)',
@@ -146,7 +146,7 @@ export default function RSSRuntimeDiagnostics({
           </button>
           <button
             onClick={() => void onRepair()}
-            className="inline-flex items-center gap-2 rounded-[10px] border px-3 py-2 text-[11px] font-medium transition-colors hover:bg-[var(--bg-hover)]"
+            className="inline-flex items-center gap-2 rounded-[8px] border px-3 py-2 text-[11px] font-medium transition-colors hover:bg-[var(--bg-hover)]"
             style={{
               borderColor: 'rgba(245, 158, 11, 0.28)',
               color: 'var(--text-title)',

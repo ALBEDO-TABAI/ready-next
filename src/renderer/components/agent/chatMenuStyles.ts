@@ -3,7 +3,7 @@ import type { CSSProperties } from 'react'
 export const chatMenuSurfaceStyle: CSSProperties = {
   background: 'var(--chat-menu-frost-bg, color-mix(in srgb, var(--bg-primary) 90%, transparent))',
   border: '1px solid var(--chat-menu-frost-border, var(--border-default))',
-  borderRadius: 14,
+  borderRadius: 12,
   boxShadow: 'var(--chat-menu-shadow, 0 18px 36px rgba(0,0,0,0.24))',
   padding: 6,
   backgroundClip: 'padding-box',

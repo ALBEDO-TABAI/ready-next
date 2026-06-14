@@ -117,7 +117,7 @@ export default function RSSSourceCapabilityMatrix({
 
         <button
           onClick={() => void onBenchmark()}
-          className="inline-flex items-center gap-2 rounded-[10px] border px-3 py-2 text-[11px] font-medium transition-colors hover:bg-[var(--bg-hover)]"
+          className="inline-flex items-center gap-2 rounded-[8px] border px-3 py-2 text-[11px] font-medium transition-colors hover:bg-[var(--bg-hover)]"
           style={{
             borderColor: 'var(--border-default)',
             color: 'var(--text-title)',

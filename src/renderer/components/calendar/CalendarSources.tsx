@@ -211,7 +211,7 @@ export default function CalendarSources({
                     key={c}
                     onClick={() => setEditColor(c)}
                     style={{
-                      width: 14, height: 14, borderRadius: 7, background: c,
+                      width: 14, height: 14, borderRadius: 8, background: c,
                       border: editColor === c ? '2px solid var(--text-secondary)' : '2px solid transparent',
                       transform: editColor === c ? 'scale(1.2)' : undefined,
                       cursor: 'pointer', padding: 0,
@@ -342,7 +342,7 @@ export default function CalendarSources({
                 key={c}
                 onClick={() => setNewColor(c)}
                 style={{
-                  width: 14, height: 14, borderRadius: 7, background: c,
+                  width: 14, height: 14, borderRadius: 8, background: c,
                   border: newColor === c ? '2px solid var(--text-secondary)' : '2px solid transparent',
                   transform: newColor === c ? 'scale(1.2)' : undefined,
                   cursor: 'pointer', padding: 0,
@@ -490,7 +490,7 @@ export default function CalendarSources({
                 key={c}
                 onClick={() => setSubColor(c)}
                 style={{
-                  width: 14, height: 14, borderRadius: 7, background: c,
+                  width: 14, height: 14, borderRadius: 8, background: c,
                   border: subColor === c ? '2px solid var(--text-secondary)' : '2px solid transparent',
                   transform: subColor === c ? 'scale(1.2)' : undefined,
                   cursor: 'pointer', padding: 0,

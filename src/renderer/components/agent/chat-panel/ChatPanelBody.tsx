@@ -415,7 +415,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
                 style={{
                   borderRadius: 8,
                   border: '1px solid var(--border-default)',
-                  background: 'color-mix(in srgb, var(--surface-panel-bg) 44%, transparent)',
+                  background: 'var(--ready-reference-card-bg, color-mix(in srgb, var(--surface-panel-bg) 44%, transparent))',
                   padding: '8px 10px',
                   display: 'flex',
                   alignItems: 'center',
@@ -495,7 +495,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
                   {attachedSessionRecallCapsules.map((capsule) => (
                     <div
                       key={capsule.conversationId}
-                      className="rounded-[10px] border"
+                      className="rounded-[8px] border"
                       style={{
                         borderColor: 'var(--border-default)',
                         padding: '8px 10px',
@@ -528,7 +528,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
                         onClick={() => {
                           void onDetachSessionRecall(capsule.conversationId)
                         }}
-                        className="rounded-[10px] border transition-[background-color,border-color]"
+                        className="rounded-[8px] border transition-[background-color,border-color]"
                         style={{
                           flexShrink: 0,
                           width: 28,

@@ -400,7 +400,7 @@ html[data-theme='dark'][data-skin='liquid-glass'] .sx__date-grid,
 }
 
 .sx__week-grid__date--is-today .sx__week-grid__date-number {
-  background: var(--color-blue) !important;
+  background: var(--ready-calendar-today-bg, var(--color-blue)) !important;
   color: #FFFFFF !important;
   border-radius: 999px !important;
 }
@@ -571,7 +571,7 @@ html[data-theme='dark'][data-skin='liquid-glass'] .sx__date-grid,
 
 .sx__month-grid-day__header-date--is-today,
 .sx__month-grid-day__header-date.sx__is-today {
-  background: var(--color-red) !important;
+  background: var(--ready-calendar-today-bg, var(--color-red)) !important;
   color: #FFFFFF !important;
   border-radius: 12px !important;
   width: 24px !important;

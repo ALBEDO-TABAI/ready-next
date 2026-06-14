@@ -48,7 +48,7 @@ export default function CalendarDiagnosticsPanel({
 }: CalendarDiagnosticsPanelProps) {
   return (
     <div
-      className="mt-3 rounded-[14px] border px-3 py-3 text-[11px]"
+      className="mt-3 rounded-[12px] border px-3 py-3 text-[11px]"
       style={{
         borderColor: 'var(--border-default)',
         background: 'rgba(255,255,255,0.74)',

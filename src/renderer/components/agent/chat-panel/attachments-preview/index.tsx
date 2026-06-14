@@ -123,7 +123,7 @@ export function AttachmentPreviewModal({
               }}
               style={{
                 padding: '8px 10px',
-                borderRadius: 10,
+                borderRadius: 8,
                 border: '1px solid var(--border-default)',
                 fontSize: 12,
                 color: 'var(--text-body)'
@@ -138,7 +138,7 @@ export function AttachmentPreviewModal({
               }}
               style={{
                 padding: '8px 10px',
-                borderRadius: 10,
+                borderRadius: 8,
                 border: '1px solid var(--border-default)',
                 fontSize: 12,
                 color: 'var(--text-body)'
@@ -152,7 +152,7 @@ export function AttachmentPreviewModal({
               style={{
                 width: 30,
                 height: 30,
-                borderRadius: 15,
+                borderRadius: 16,
                 border: '1px solid var(--border-default)',
                 display: 'flex',
                 alignItems: 'center',

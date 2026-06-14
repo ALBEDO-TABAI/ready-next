@@ -403,7 +403,7 @@ export default function RemoteIMSettingsPanel() {
         className="glass-surface-card border flex w-fit"
         style={{
           ...panelCardStyle,
-          borderRadius: 14,
+          borderRadius: 12,
           padding: 5,
           gap: 4,
         }}
@@ -423,7 +423,7 @@ export default function RemoteIMSettingsPanel() {
               ...(tab === item.key ? { background: 'var(--color-blue-light)' } : {}),
               fontWeight: tab === item.key ? 600 : 500,
               padding: '8px 20px',
-              borderRadius: 10,
+              borderRadius: 8,
               lineHeight: 1.35,
             }}
           >
@@ -774,7 +774,7 @@ export default function RemoteIMSettingsPanel() {
                     title="发送测试消息"
                     onClick={() => { void sendProbe(channel.id) }}
                     className="border"
-                    style={{ ...secondaryButtonStyle, padding: 8, borderRadius: 10 }}
+                    style={{ ...secondaryButtonStyle, padding: 8, borderRadius: 8 }}
                   >
                     <Send className="w-4 h-4" />
                   </button>
@@ -782,7 +782,7 @@ export default function RemoteIMSettingsPanel() {
                     title={channel.enabled ? '停用' : '启用'}
                     onClick={() => { void window.electronAPI.agent.setChannelEnabled(channel.id, !channel.enabled).then(() => refresh()) }}
                     className="border"
-                    style={{ ...secondaryButtonStyle, padding: 8, borderRadius: 10 }}
+                    style={{ ...secondaryButtonStyle, padding: 8, borderRadius: 8 }}
                   >
                     {channel.enabled ? <MessageSquare className="w-4 h-4" /> : <CheckCircle2 className="w-4 h-4" />}
                   </button>
@@ -790,7 +790,7 @@ export default function RemoteIMSettingsPanel() {
                     title="删除"
                     onClick={() => { void deleteChannel(channel.id) }}
                     className="border"
-                    style={{ ...secondaryButtonStyle, color: 'var(--color-red)', padding: 8, borderRadius: 10 }}
+                    style={{ ...secondaryButtonStyle, color: 'var(--color-red)', padding: 8, borderRadius: 8 }}
                   >
                     <Trash2 className="w-4 h-4" />
                   </button>

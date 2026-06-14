@@ -296,6 +296,8 @@ const themeOptions: { value: 'light' | 'dark' | 'system'; label: string; icon: R
 const skinOptions: { value: ThemeSkin; label: string; icon: React.ElementType; description: string }[] = [
   { value: 'liquid-glass', label: '通透玻璃', icon: Droplets, description: '真半透明液态玻璃，背后透出 macOS 桌面壁纸（默认）' },
   { value: 'ready-glass', label: '稳定玻璃', icon: Droplets, description: 'Ready 自持稳定底色，不透出桌面（更稳定但失去通透感）' },
+  { value: 'green-pink-glass', label: '绿粉玻璃', icon: Droplets, description: '绿色磨砂玻璃与粉色强调色的实验外观' },
+  { value: 'solid-green-glass', label: '实色绿玻璃', icon: Droplets, description: '自持实色绿色磨砂底，带柔和青绿渐变' },
 ]
 
 function AISettingsFieldCard({
@@ -2369,7 +2371,7 @@ export function ExternalServicesSettingsPanel() {
                   <button
                     type="button"
                     onClick={() => toggleProfileEnabled(profile)}
-                    className="inline-flex shrink-0 items-center justify-center rounded-[9px] border text-[11px] font-medium leading-none transition-[border-color,color,background-color] duration-150"
+                    className="inline-flex shrink-0 items-center justify-center rounded-[8px] border text-[11px] font-medium leading-none transition-[border-color,color,background-color] duration-150"
                     style={externalServiceStatusButtonStyle(profile.enabled)}
                   >
                     {profile.enabled ? '已启用' : '未启用'}
@@ -3018,7 +3020,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
       {/* Header — macOS traffic light clearance with paddingLeft: 72 */}
       <div
         data-liquid-shell="settings-header"
-        className="mx-3 mt-3 flex h-[46px] items-center rounded-[18px] drag-region"
+        className="mx-3 mt-3 flex h-[46px] items-center rounded-[16px] drag-region"
         style={{
           background: 'transparent',
           paddingLeft: 72,
@@ -3067,7 +3069,7 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                 <button
                   key={section.id}
                   onClick={() => setActiveSection(section.id)}
-                  className={`flex items-center gap-3 rounded-[18px] transition-[background-color,border-color,color] duration-200 text-left group ${isActive ? '' : 'hover:bg-[var(--bg-hover)]'}`}
+                  className={`flex items-center gap-3 rounded-[16px] transition-[background-color,border-color,color] duration-200 text-left group ${isActive ? '' : 'hover:bg-[var(--bg-hover)]'}`}
                   style={settingsListItemStyle(isActive)}
                 >
                   <div className="w-8 h-8 flex items-center justify-center flex-shrink-0 transition-colors">
@@ -3361,8 +3363,15 @@ export default function Settings({ initialSection }: SettingsPageProps = {}) {
                           }}
                         >
                           {setting.options?.map(opt => (
-                            <option key={typeof opt === 'string' ? opt : opt.value} value={typeof opt === 'string' ? opt : opt.value}>
-                              {typeof opt === 'string' ? opt : opt.label}
+                            <option
+                              key={typeof opt === 'string' ? opt : opt.value}
+                              value={typeof opt === 'string' ? opt : opt.value}
+                            >
+                              {typeof opt === 'string'
+                                ? opt
+                                : currentSection.id === 'appearance' && setting.id === 'theme' && opt.value === 'purple' && (skin === 'green-pink-glass' || skin === 'solid-green-glass')
+                                  ? '粉色'
+                                  : opt.label}
                             </option>
                           ))}
                         </select>

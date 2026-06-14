@@ -290,7 +290,7 @@ export default function ImageGallery({ tab, fileUrl, currentExt }: ImageGalleryP
               fontSize: 9,
               color: 'var(--text-light)',
               background: 'var(--bg-hover)',
-              borderRadius: 3,
+              borderRadius: 4,
               padding: '1px 5px',
               marginLeft: 6,
               textTransform: 'uppercase',

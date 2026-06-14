@@ -297,7 +297,7 @@ export default function SXTimeGridEvent({ calendarEvent }: SXTimeGridEventProps)
               style={{
                 fontSize: 9,
                 padding: '1px 4px',
-                borderRadius: 3,
+                borderRadius: 4,
                 background: `${eventColor}20`,
                 lineHeight: '13px',
               }}

@@ -651,7 +651,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                 onClick={onPickFiles}
                 title="添加文件"
                 className="flex items-center justify-center hover:bg-black/5 active:scale-[0.98] transition-[background-color,transform] duration-200 ease-out"
-                style={{ width: 26, height: 26, borderRadius: 9, border: '1px solid transparent', background: 'transparent', flexShrink: 0 }}
+                style={{ width: 26, height: 26, borderRadius: 8, border: '1px solid transparent', background: 'transparent', flexShrink: 0 }}
               >
                 <Plus style={{ width: 14, height: 14 }} className="text-[var(--text-gray)]" strokeWidth={2} />
               </button>
@@ -762,7 +762,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                   style={{
                     width: 30,
                     height: 30,
-                    borderRadius: 15,
+                    borderRadius: 16,
                     background: 'var(--color-red)',
                   }}
                 >
@@ -777,7 +777,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
                   style={{
                     width: 30,
                     height: 30,
-                    borderRadius: 15,
+                    borderRadius: 16,
                     border: '1px solid rgba(255, 255, 255, 0.08)',
                     background: '#0f0f0f',
                     color: '#fff',

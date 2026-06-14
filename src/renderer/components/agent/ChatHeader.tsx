@@ -397,7 +397,7 @@ export default function ChatHeader({
                 }
               }}
               placeholder="搜旧会话标题、消息、任务摘要或附件名"
-              className="rounded-[10px] border"
+              className="rounded-[8px] border"
               style={{
                 minWidth: 0,
                 width: '100%',
@@ -422,7 +422,7 @@ export default function ChatHeader({
               <button
                 type="button"
                 onClick={onSessionRecallSearch}
-                className="rounded-[10px] border transition-[background-color,border-color,color]"
+                className="rounded-[8px] border transition-[background-color,border-color,color]"
                 style={{
                   width: 44,
                   height: 32,

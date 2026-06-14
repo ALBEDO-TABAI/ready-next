@@ -49,7 +49,7 @@ export default function BacklinksPanel({ path, className }: BacklinksPanelProps)
 
   return (
     <div
-      className={`rounded-[10px] border p-3 ${className ?? ''}`}
+      className={`rounded-[8px] border p-3 ${className ?? ''}`}
       style={{ borderColor: 'var(--surface-card-border, rgba(0,0,0,0.08))', background: 'var(--surface-card-bg, transparent)' }}
     >
       <div className="flex items-center gap-[6px] text-[11px] font-medium" style={{ color: 'var(--text-muted)' }}>
@@ -75,7 +75,7 @@ export default function BacklinksPanel({ path, className }: BacklinksPanelProps)
                   <ArrowUpRight className="h-[11px] w-[11px] shrink-0" style={{ color: 'var(--text-muted)' }} />
                   <span className="truncate">{ref.name}</span>
                   <span
-                    className="ml-auto rounded-[3px] border px-[4px] py-[0.5px] text-[9px] font-medium shrink-0"
+                    className="ml-auto rounded-[4px] border px-[4px] py-[0.5px] text-[9px] font-medium shrink-0"
                     style={{ borderColor: 'var(--surface-card-border, rgba(0,0,0,0.12))', color: 'var(--text-muted)' }}
                   >
                     {ref.kind}

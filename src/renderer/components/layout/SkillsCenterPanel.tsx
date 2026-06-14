@@ -550,7 +550,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
                     return (
                       <div
                         key={skill.id}
-                        className="cursor-pointer rounded-[10px] border transition-colors duration-150 hover:bg-[var(--bg-hover)]"
+                        className="cursor-pointer rounded-[8px] border transition-colors duration-150 hover:bg-[var(--bg-hover)]"
                         style={{
                           borderRadius: 8,
                           border: '1px solid transparent',
@@ -615,7 +615,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
               </p>
 
               <div
-                className="shrink-0 flex cursor-pointer flex-col items-center justify-center rounded-[10px] border transition-colors hover:bg-[var(--bg-hover)]"
+                className="shrink-0 flex cursor-pointer flex-col items-center justify-center rounded-[8px] border transition-colors hover:bg-[var(--bg-hover)]"
                 style={{
                   borderRadius: 8,
                   border: importDropActive ? `1px solid ${PANEL_COLORS.blue}` : '1px solid transparent',
@@ -647,7 +647,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
                     return (
                       <div
                         key={skill.id}
-                        className="cursor-pointer rounded-[10px] border transition-colors duration-150 hover:bg-[var(--bg-hover)]"
+                        className="cursor-pointer rounded-[8px] border transition-colors duration-150 hover:bg-[var(--bg-hover)]"
                         style={{
                           borderRadius: 8,
                           border: '1px solid transparent',
@@ -722,7 +722,7 @@ export default function SkillsCenterPanel({ children }: SkillsCenterPanelProps) 
       {message && (
         <div className="pointer-events-none absolute left-[8px] right-[8px] bottom-[8px]">
           <div
-            className="glass-surface-floating rounded-[7px] px-[8px] py-[4px] text-[10px] font-medium"
+            className="glass-surface-floating rounded-[8px] px-[8px] py-[4px] text-[10px] font-medium"
             style={{ background: PANEL_COLORS.blueLight, color: PANEL_COLORS.blue, boxShadow: 'var(--shadow-sm)' }}
           >
             {message}
@@ -845,7 +845,7 @@ function DescriptionEditorDialog({
           maxWidth: '100%',
           background: 'var(--bg-primary)',
           border: '1px solid var(--border-default)',
-          borderRadius: 14,
+          borderRadius: 12,
           boxShadow: '0 12px 36px rgba(0, 0, 0, 0.16)',
           padding: 20,
         }}
@@ -869,7 +869,7 @@ function DescriptionEditorDialog({
             color: 'var(--text-body)',
             background: 'var(--bg-editor)',
             border: '1px solid var(--border-input)',
-            borderRadius: 10,
+            borderRadius: 8,
             outline: 'none',
             boxSizing: 'border-box',
           }}
@@ -892,7 +892,7 @@ function DescriptionEditorDialog({
             color: 'var(--text-body)',
             background: 'var(--bg-editor)',
             border: '1px solid var(--border-input)',
-            borderRadius: 10,
+            borderRadius: 8,
             outline: 'none',
             boxSizing: 'border-box',
           }}
@@ -1074,7 +1074,7 @@ function SkillConfigurationDialog({
           overflow: 'auto',
           background: 'var(--bg-primary)',
           border: '1px solid var(--border-default)',
-          borderRadius: 14,
+          borderRadius: 12,
           boxShadow: '0 16px 46px rgba(0, 0, 0, 0.18)',
           padding: 20,
         }}
@@ -1116,7 +1116,7 @@ function SkillConfigurationDialog({
                     color: 'var(--text-body)',
                     background: 'var(--bg-editor)',
                     border: '1px solid var(--border-input)',
-                    borderRadius: 10,
+                    borderRadius: 8,
                     outline: 'none',
                   }}
                 >
@@ -1157,7 +1157,7 @@ function SkillConfigurationDialog({
                       color: 'var(--text-body)',
                       background: 'var(--bg-editor)',
                       border: '1px solid var(--border-input)',
-                      borderRadius: 10,
+                      borderRadius: 8,
                       outline: 'none',
                     }}
                   >
@@ -1177,7 +1177,7 @@ function SkillConfigurationDialog({
                       color: 'var(--text-body)',
                       background: 'var(--bg-editor)',
                       border: '1px solid var(--border-input)',
-                      borderRadius: 10,
+                      borderRadius: 8,
                       outline: 'none',
                       boxSizing: 'border-box',
                     }}
@@ -1196,7 +1196,7 @@ function SkillConfigurationDialog({
                 gap: 10,
                 padding: 12,
                 border: '1px solid var(--border-default)',
-                borderRadius: 10,
+                borderRadius: 8,
                 background: 'var(--bg-editor)',
                 color: 'var(--text-muted)',
                 fontSize: 12,

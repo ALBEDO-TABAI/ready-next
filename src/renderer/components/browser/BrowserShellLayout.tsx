@@ -112,7 +112,7 @@ export default function BrowserShellLayout({
                     display: 'block',
                     width: 'min(210px, calc(100vw - 96px))',
                     aspectRatio: '4048 / 845',
-                    background: 'var(--color-ready-orange)',
+                    background: 'var(--ready-brand-accent, var(--color-ready-orange))',
                     WebkitMask: `url(${readyWordmark}) center / contain no-repeat`,
                     mask: `url(${readyWordmark}) center / contain no-repeat`,
                   }}

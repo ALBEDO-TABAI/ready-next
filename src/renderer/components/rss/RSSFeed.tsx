@@ -337,7 +337,7 @@ export default function RSSFeed({
   const filterSelectWidth = 76
   const calendarPillButtonStyle = {
     padding: '4px 10px',
-    borderRadius: 10,
+    borderRadius: 8,
     border: '1px solid var(--border-input)',
     background: 'transparent',
     fontSize: 12,
@@ -398,7 +398,7 @@ export default function RSSFeed({
         <button
           type="button"
           onClick={() => setTaskMenuOpen(false)}
-          className="flex h-7 w-7 items-center justify-center rounded-[9px] hover:bg-[var(--bg-hover)]"
+          className="flex h-7 w-7 items-center justify-center rounded-[8px] hover:bg-[var(--bg-hover)]"
           title="关闭"
         >
           <X style={{ width: 14, height: 14, color: 'var(--text-muted)' }} />
@@ -641,7 +641,7 @@ export default function RSSFeed({
             />
             {sourceMenuOpen && (
               <LiquidFloatingPanel
-                className="rss-source-menu-panel overflow-hidden rounded-[14px]"
+                className="rss-source-menu-panel overflow-hidden rounded-[12px]"
                 role="listbox"
                 radius={14}
                 style={{
@@ -671,7 +671,7 @@ export default function RSSFeed({
                     role="option"
                     aria-selected={!selectedSource}
                     onClick={() => { onSourceChange(null); setSourceMenuOpen(false) }}
-                    className={`ready-floating-menu-item flex items-center gap-2 rounded-[10px] transition-colors hover:bg-[var(--bg-hover)] ${!selectedSource ? 'is-selected' : ''}`}
+                    className={`ready-floating-menu-item flex items-center gap-2 rounded-[8px] transition-colors hover:bg-[var(--bg-hover)] ${!selectedSource ? 'is-selected' : ''}`}
                     style={{ padding: '7px 10px', textAlign: 'left' }}
                   >
                     <Check
@@ -688,7 +688,7 @@ export default function RSSFeed({
                     return (
                       <div
                         key={source.id}
-                        className={`ready-floating-menu-item flex min-w-0 items-center gap-1 rounded-[10px] transition-colors hover:bg-[var(--bg-hover)] ${isSelected ? 'is-selected' : ''}`}
+                        className={`ready-floating-menu-item flex min-w-0 items-center gap-1 rounded-[8px] transition-colors hover:bg-[var(--bg-hover)] ${isSelected ? 'is-selected' : ''}`}
                         style={{ padding: '0 4px 0 10px' }}
                       >
                         <button
@@ -873,7 +873,7 @@ export default function RSSFeed({
                   display: 'grid',
                   gap: 10,
                   opacity: 0.92,
-                  borderRadius: 14,
+                  borderRadius: 12,
                   background: 'color-mix(in srgb, var(--surface-card-bg) 8%, transparent)'
                 }}
               >
@@ -931,7 +931,7 @@ export default function RSSFeed({
                 <button
                   key={item.id}
                   onClick={() => onItemClick(item)}
-                  className="w-full rounded-[14px] text-left transition-colors relative"
+                  className="w-full rounded-[12px] text-left transition-colors relative"
                   style={{
                     padding: `12px ${Math.max(WORKBENCH_HEADER_EDGE_X - 8, 12)}px`,
                     background: isSelected

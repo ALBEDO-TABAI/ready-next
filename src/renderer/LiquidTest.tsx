@@ -365,7 +365,7 @@ const labCss = `
   gap: 12px;
   margin: 12px 0;
   padding: 12px 14px;
-  border-radius: 14px;
+  border-radius: 12px;
   background: #ffffff;
   box-shadow: 0 4px 16px rgba(20, 28, 44, 0.06);
   font-size: 12.5px;
@@ -409,7 +409,7 @@ const labCss = `
 .lab-scene__chips span {
   width: 52px;
   height: 52px;
-  border-radius: 14px;
+  border-radius: 12px;
   box-shadow: 0 6px 16px rgba(20, 28, 44, 0.18);
 }
 

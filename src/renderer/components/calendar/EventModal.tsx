@@ -420,7 +420,7 @@ export default function EventModal({
     >
       <div
         style={{
-          width: 320, maxHeight: '88vh', borderRadius: 10,
+          width: 320, maxHeight: '88vh', borderRadius: 8,
           background: 'var(--bg-primary)',
           border: '1px solid var(--border-default)',
           boxShadow: '0 4px 16px rgba(0,0,0,0.10)',
@@ -691,7 +691,7 @@ export default function EventModal({
                           transition: 'background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease',
                         }}
                       >
-                        <span style={{ width: 6, height: 6, borderRadius: 3, background: selected ? color : 'var(--border-default)' }} />
+                        <span style={{ width: 6, height: 6, borderRadius: 4, background: selected ? color : 'var(--border-default)' }} />
                         {label}
                       </button>
                     )
@@ -717,7 +717,7 @@ export default function EventModal({
                         transition: 'background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease',
                       }}
                     >
-                      <span style={{ width: 6, height: 6, borderRadius: 3, background: publishStatus === value ? color : 'var(--border-default)' }} />
+                      <span style={{ width: 6, height: 6, borderRadius: 4, background: publishStatus === value ? color : 'var(--border-default)' }} />
                       {label}
                     </button>
                   ))}
@@ -807,7 +807,7 @@ export default function EventModal({
               style={{
                 width: 260,
                 padding: '14px 14px 12px 14px',
-                borderRadius: 10,
+                borderRadius: 8,
                 background: 'var(--bg-primary)',
                 border: '1px solid var(--border-default)',
                 boxShadow: '0 8px 24px rgba(0,0,0,0.18)',

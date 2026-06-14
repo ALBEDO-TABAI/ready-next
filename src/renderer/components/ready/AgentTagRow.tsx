@@ -19,7 +19,7 @@ export default function AgentTagRow() {
           className="flex items-center"
           style={{
             padding: '2px 6px',
-            borderRadius: 10,
+            borderRadius: 8,
             fontSize: 10,
             background: 'var(--color-green-light)',
             color: 'var(--color-green)',

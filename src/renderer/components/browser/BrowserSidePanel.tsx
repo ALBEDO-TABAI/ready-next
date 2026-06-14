@@ -160,7 +160,7 @@ export default function BrowserSidePanel({
                 return (
                   <div
                     key={item.id}
-                    className="mb-1 cursor-pointer rounded-[10px] border px-3 py-2 transition-colors hover:bg-[var(--bg-hover)]"
+                    className="mb-1 cursor-pointer rounded-[8px] border px-3 py-2 transition-colors hover:bg-[var(--bg-hover)]"
                     style={{
                       borderColor: isSelected ? 'var(--color-blue)' : 'transparent',
                       background: isSelected ? 'var(--color-blue-light)' : 'transparent',
@@ -195,7 +195,7 @@ export default function BrowserSidePanel({
               {historyItems.map((item) => (
                 <div
                   key={item.id}
-                  className="mb-1 flex cursor-pointer items-center gap-3 rounded-[10px] px-3 py-2 transition-colors hover:bg-[var(--bg-hover)]"
+                  className="mb-1 flex cursor-pointer items-center gap-3 rounded-[8px] px-3 py-2 transition-colors hover:bg-[var(--bg-hover)]"
                   onClick={() => void onNavigateFromPanel(item.url)}
                 >
                   <Globe style={{ width: 14, height: 14, flexShrink: 0 }} className="text-[var(--text-gray)]" strokeWidth={2} />
@@ -225,7 +225,7 @@ export default function BrowserSidePanel({
               {downloads.map((item) => (
                 <div
                   key={item.id}
-                  className="mb-1 rounded-[10px] px-3 py-2"
+                  className="mb-1 rounded-[8px] px-3 py-2"
                   style={{ background: 'var(--surface-card-bg)' }}
                 >
                   <div className="flex items-center gap-3">

@@ -379,6 +379,7 @@ export function installSettingsPreviewMocks(): void {
   applyPreviewTheme(previewUrl)
   const option = (localStorage.getItem('ready-theme') || 'light') as ThemeOption
   const resolved = option === 'system' ? 'light' : option
+  const skin = (localStorage.getItem('ready-theme-skin') || 'liquid-glass') as ThemeSkin
 
   const api = {
     theme: {
@@ -387,6 +388,8 @@ export function installSettingsPreviewMocks(): void {
         data: {
           option,
           resolved,
+          skin,
+          isNativeFullscreen: false,
         },
       }),
       set: async () => undefined,

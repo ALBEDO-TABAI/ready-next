@@ -190,7 +190,7 @@ export function AskUserQuestionsCard({ card, onSubmit, onCancel }: AskUserQuesti
     return (
       <div
         style={{
-          borderRadius: 10,
+          borderRadius: 8,
           padding: '10px 12px',
           border: '1px solid var(--border-default)',
           background: 'color-mix(in srgb, var(--surface-card-bg) 22%, transparent)',

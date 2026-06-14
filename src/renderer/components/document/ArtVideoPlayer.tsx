@@ -78,7 +78,7 @@ export default function ArtVideoPlayer({ tab, fileUrl, currentExt }: ArtVideoPla
           style={{
             fontSize: 9,
             background: 'rgba(255,255,255,0.1)',
-            borderRadius: 3,
+            borderRadius: 4,
             padding: '1px 5px',
             textTransform: 'uppercase',
             fontWeight: 500,

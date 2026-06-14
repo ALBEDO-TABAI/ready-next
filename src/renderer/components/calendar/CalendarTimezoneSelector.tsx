@@ -164,7 +164,7 @@ export default function CalendarTimezoneSelector({
         title={`当前显示时区：${currentLabel}`}
         style={{
           display: 'flex', alignItems: 'center', gap: 4,
-          padding: '4px 10px', borderRadius: 10,
+          padding: '4px 10px', borderRadius: 8,
           border: '1px solid var(--border-input)', background: 'transparent',
           fontSize: 12, fontWeight: 500, color: 'var(--text-body)',
           cursor: 'pointer',

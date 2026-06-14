@@ -234,7 +234,7 @@ function clampDocumentSplitRatio(ratio: number): number {
 
 const getFileTypeColor = (path: string | null): string => {
   const ext = getFileExt(path)
-  if (['md', 'txt', 'docx'].includes(ext)) return '#E97A2B' // orange - docs
+  if (['md', 'txt', 'docx'].includes(ext)) return 'var(--ready-document-tab-doc-dot, #E97A2B)' // orange - docs
   if (['xlsx', 'csv', 'xls'].includes(ext)) return '#34D399' // green - sheets
   if (['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'].includes(ext)) return '#8B5CF6' // purple - images
   if (['mp4', 'webm', 'mov', 'avi', 'mkv'].includes(ext)) return '#EB5757' // red - video

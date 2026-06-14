@@ -587,7 +587,7 @@ export default function PersonalityEditor() {
               style={{
                 width: 52,
                 height: 52,
-                borderRadius: 14,
+                borderRadius: 12,
                 background: 'var(--color-blue-light)',
                 color: 'var(--color-blue)',
               }}

@@ -19,11 +19,14 @@ export type ThemeAccent = 'blue' | 'green' | 'purple' | 'orange'
  * 玻璃风格。
  * - `liquid-glass`（默认）：真半透明，macOS 用 `under-window` vibrancy 让桌面壁纸做底。
  * - `ready-glass`（可选）：Ready 自己持有稳定底色（`.ready-app-bg` 渐变），不使用 macOS vibrancy。
+ * - `green-pink-glass`（实验）：沿用真半透明底，把玻璃材料调成绿粉版本。
+ * - `solid-green-glass`（实验）：Ready 自持实色绿色玻璃底。
  *
  * 注意：DOM 层始终设 `data-skin='liquid-glass'`（与现有玻璃面板 selector 兼容），
- * 两种风格的差异通过 `data-glass-backdrop` ∈ `{native, ready}` 区分。
+ * backdrop 差异通过 `data-glass-backdrop` ∈ `{native, ready}` 区分，颜色变体通过
+ * `data-glass-variant` 区分。
  */
-export type ThemeSkin = 'liquid-glass' | 'ready-glass'
+export type ThemeSkin = 'liquid-glass' | 'ready-glass' | 'green-pink-glass' | 'solid-green-glass'
 
 interface ThemeState {
     theme: ThemeOption
@@ -46,7 +49,7 @@ const getStoredTheme = (): ThemeOption => {
 
 const getStoredSkin = (): ThemeSkin => {
     const stored = readStorage('ready-theme-skin')
-    if (stored === 'liquid-glass' || stored === 'ready-glass') return stored
+    if (stored === 'liquid-glass' || stored === 'ready-glass' || stored === 'green-pink-glass' || stored === 'solid-green-glass') return stored
     return 'liquid-glass'
 }
 
@@ -75,9 +78,22 @@ const accentPalettes: Record<ThemeAccent, Record<ResolvedTheme, { color: string;
     },
 }
 
-const applyAccent = (accent: ThemeAccent, resolved: ResolvedTheme) => {
+const greenPinkAccentPalettes: Partial<Record<ThemeAccent, Record<ResolvedTheme, { color: string; light: string }>>> = {
+    purple: {
+        light: { color: '#F366AD', light: 'rgba(243, 102, 173, 0.14)' },
+        dark: { color: '#F584BF', light: 'rgba(245, 132, 191, 0.18)' },
+    },
+}
+
+const resolveAccentPalette = (accent: ThemeAccent, resolved: ResolvedTheme, skin: ThemeSkin) => {
+    const usesPinkAccent = skin === 'green-pink-glass' || skin === 'solid-green-glass'
+    const skinPalette = usesPinkAccent ? greenPinkAccentPalettes[accent] : undefined
+    return (skinPalette ?? accentPalettes[accent])[resolved]
+}
+
+const applyAccent = (accent: ThemeAccent, resolved: ResolvedTheme, skin: ThemeSkin) => {
     if (typeof document === 'undefined') return
-    const palette = accentPalettes[accent][resolved]
+    const palette = resolveAccentPalette(accent, resolved, skin)
     const root = document.documentElement
     root.setAttribute('data-accent', accent)
     if (!root.style?.setProperty) return
@@ -241,13 +257,21 @@ const applyColorTheme = (
  * - `data-glass-backdrop` 才是真正区分两种风格的开关：
  *   - `'native'`（默认）：使用 macOS vibrancy + 透明窗口（真半透明）
  *   - `'ready'`：Ready 自持稳定底（`.ready-app-bg` 渐变层可见）
+ * - `data-glass-variant='green-pink'` 只负责实验色彩，不改变窗口材料。
  *
  * CSS 用 `[data-glass-backdrop='native']` / `[data-glass-backdrop='ready']` 修饰符选区分。
  */
 const applySkin = (skin: ThemeSkin) => {
     const root = document.documentElement
     root.setAttribute('data-skin', 'liquid-glass')
-    root.setAttribute('data-glass-backdrop', skin === 'ready-glass' ? 'ready' : 'native')
+    root.setAttribute('data-glass-backdrop', skin === 'ready-glass' || skin === 'solid-green-glass' ? 'ready' : 'native')
+    const variant = skin === 'green-pink-glass'
+        ? 'green-pink'
+        : skin === 'solid-green-glass'
+            ? 'solid-green'
+            : ''
+    if (variant) root.setAttribute('data-glass-variant', variant)
+    else root.removeAttribute('data-glass-variant')
 }
 
 export const useTheme = create<ThemeState>((set, get) => {
@@ -258,7 +282,7 @@ export const useTheme = create<ThemeState>((set, get) => {
     const resolved = resolveTheme(initial)
     applyColorTheme(resolved, initial, resolved, { animate: false })
     applySkin(initialSkin)
-    applyAccent(initialAccent, resolved)
+    applyAccent(initialAccent, resolved, initialSkin)
 
     // Listen for system theme changes
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
@@ -267,7 +291,7 @@ export const useTheme = create<ThemeState>((set, get) => {
         if (state.theme === 'system') {
             const newResolved = resolveTheme('system')
             applyColorTheme(newResolved, 'system', state.resolvedTheme, { animate: false })
-            applyAccent(state.accent, newResolved)
+            applyAccent(state.accent, newResolved, state.skin)
             set({ resolvedTheme: newResolved })
         }
     }
@@ -282,7 +306,8 @@ export const useTheme = create<ThemeState>((set, get) => {
             const prevResolved = get().resolvedTheme
             const newResolved = resolveTheme(theme)
             applyColorTheme(newResolved, theme, prevResolved)
-            applyAccent(get().accent, newResolved)
+            const state = get()
+            applyAccent(state.accent, newResolved, state.skin)
             writeStorage('ready-theme', theme)
             set({ theme, resolvedTheme: newResolved })
         },
@@ -294,25 +319,30 @@ export const useTheme = create<ThemeState>((set, get) => {
             // re-enable it from Settings.
             const next: ThemeOption = state.resolvedTheme === 'dark' ? 'light' : 'dark'
             applyColorTheme(next, next, state.resolvedTheme)
-            applyAccent(state.accent, next)
+            applyAccent(state.accent, next, state.skin)
             writeStorage('ready-theme', next)
             set({ theme: next, resolvedTheme: next })
         },
         setSkin: (skin) => {
+            const state = get()
             applySkin(skin)
+            applyAccent(state.accent, state.resolvedTheme, skin)
             syncNativeSkin(skin)
             writeStorage('ready-theme-skin', skin)
             set({ skin })
         },
         toggleSkin: () => {
+            const state = get()
             const next: ThemeSkin = get().skin === 'liquid-glass' ? 'ready-glass' : 'liquid-glass'
             applySkin(next)
+            applyAccent(state.accent, state.resolvedTheme, next)
             syncNativeSkin(next)
             writeStorage('ready-theme-skin', next)
             set({ skin: next })
         },
         setAccent: (accent) => {
-            applyAccent(accent, get().resolvedTheme)
+            const state = get()
+            applyAccent(accent, state.resolvedTheme, state.skin)
             writeStorage('ready-theme-accent', accent)
             set({ accent })
         },

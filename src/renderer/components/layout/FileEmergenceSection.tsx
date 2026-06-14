@@ -108,11 +108,11 @@ export default function FileEmergenceSection({
         style={{ marginInline: EMERGENCE_CONTENT_INSET_PX }}
       >
         <div className="flex items-center gap-1.5 min-w-0">
-          <span className="relative flex h-[22px] w-[22px] shrink-0 items-center justify-start">
-            <Folder className="h-[20px] w-[20px]" style={{ color: 'var(--text-title)' }} strokeWidth={1.75} />
-            <Sparkles className="absolute left-[2px] -bottom-[2px] h-[11px] w-[11px]" style={{ color: 'var(--text-title)' }} strokeWidth={1.9} />
+          <span className="relative flex h-[18px] w-[18px] shrink-0 items-center justify-start">
+            <Folder className="h-[16px] w-[16px]" style={{ color: 'var(--text-title)' }} strokeWidth={1.75} />
+            <Sparkles className="absolute left-[1px] -bottom-[1px] h-[9px] w-[9px]" style={{ color: 'var(--text-title)' }} strokeWidth={1.9} />
           </span>
-          <span className="text-[15px] font-semibold leading-none" style={{ color: 'var(--text-title)' }}>
+          <span className="text-[13px] font-semibold leading-none" style={{ color: 'var(--text-title)' }}>
             涌现
           </span>
           <span
@@ -130,7 +130,7 @@ export default function FileEmergenceSection({
           disabled={isRefreshing}
           aria-label="重新涌现"
           title="重新涌现"
-          className="flex h-7 w-7 items-center justify-center rounded-[7px] transition-[background-color,box-shadow] hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]"
+          className="flex h-7 w-7 items-center justify-center rounded-[8px] transition-[background-color,box-shadow] hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]"
           style={{
             color: 'var(--text-muted)',
             background: isRefreshing ? 'var(--files-panel-state-active-bg)' : 'transparent',
@@ -140,8 +140,8 @@ export default function FileEmergenceSection({
           }}
         >
           {isRefreshing
-            ? <Loader2 className="h-[15px] w-[15px] animate-spin" />
-            : <RefreshCw className="h-[15px] w-[15px]" />}
+            ? <Loader2 className="h-[14px] w-[14px] animate-spin" />
+            : <RefreshCw className="h-[14px] w-[14px]" />}
         </button>
       </div>
 
@@ -156,7 +156,7 @@ export default function FileEmergenceSection({
               <button
                 type="button"
                 onClick={() => toggleBucket(bucket.bucket)}
-                className="grid min-h-[34px] w-full grid-cols-[22px_82px_minmax(0,1fr)_24px] items-center gap-1.5 rounded-[7px] px-1.5 py-1 text-left transition-[background-color,box-shadow] hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]"
+                className="grid min-h-[30px] w-full grid-cols-[22px_82px_minmax(0,1fr)_24px] items-center gap-1.5 rounded-[8px] px-1.5 py-1 text-left transition-[background-color,box-shadow] hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]"
                 aria-expanded={isBucketOpen}
                 data-file-emergence-bucket={bucket.bucket}
                 data-selected={isBucketSelected ? 'true' : undefined}
@@ -170,15 +170,15 @@ export default function FileEmergenceSection({
                 }}
               >
                 {isBucketOpen
-                  ? <ChevronDown className="h-[15px] w-[15px] shrink-0" style={{ color: 'var(--text-title)' }} strokeWidth={1.9} />
-                  : <ChevronRight className="h-[15px] w-[15px] shrink-0" style={{ color: 'var(--text-muted)' }} strokeWidth={1.8} />}
+                  ? <ChevronDown className="h-[14px] w-[14px] shrink-0" style={{ color: 'var(--text-title)' }} strokeWidth={1.9} />
+                  : <ChevronRight className="h-[14px] w-[14px] shrink-0" style={{ color: 'var(--text-muted)' }} strokeWidth={1.8} />}
                 <span
-                  className="text-[14px] font-semibold leading-none"
+                  className="text-[13px] font-medium leading-none"
                   style={{ color: 'var(--text-title)' }}
                 >
                   {bucket.label}
                 </span>
-                <span className="min-w-0 truncate text-[13px]" style={{ color: 'var(--text-light)' }}>
+                <span className="min-w-0 truncate text-[12px]" style={{ color: 'var(--text-light)' }}>
                   {bucketSummary}
                 </span>
                 <span
@@ -193,7 +193,7 @@ export default function FileEmergenceSection({
               {isBucketOpen && (
                 <div className="mt-1 space-y-1">
                   {bucket.projects.length === 0 ? (
-                    <div className="ml-[106px] rounded-[7px] px-1.5 py-1 text-[13px]" style={{ color: 'var(--text-light)' }}>
+                    <div className="ml-[106px] rounded-[8px] px-1.5 py-1 text-[12px]" style={{ color: 'var(--text-light)' }}>
                       暂无项目
                     </div>
                   ) : bucket.projects.map((project) => {
@@ -206,7 +206,7 @@ export default function FileEmergenceSection({
                         <button
                           type="button"
                           onClick={() => toggleProject(project.id)}
-                          className="grid min-h-[28px] w-full grid-cols-[22px_14px_minmax(0,1fr)_auto_20px] items-center gap-1.5 rounded-[7px] px-1.5 py-0.5 text-left transition-[background-color,box-shadow] hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]"
+                          className="grid min-h-[28px] w-full grid-cols-[22px_14px_minmax(0,1fr)_auto_20px] items-center gap-1.5 rounded-[8px] px-1.5 py-0.5 text-left transition-[background-color,box-shadow] hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]"
                           title={project.evidence.map((item) => item.label).slice(0, 3).join(' · ')}
                           aria-expanded={isProjectOpen}
                           data-file-emergence-project={project.id}
@@ -218,7 +218,7 @@ export default function FileEmergenceSection({
                         >
                           <span aria-hidden="true" />
                           <Folder className="h-[14px] w-[14px] shrink-0" style={{ color: 'var(--text-muted)' }} strokeWidth={1.9} />
-                          <span className="min-w-0 flex-1 truncate text-[12px] font-semibold" style={{ color: 'var(--text-title)' }}>
+                          <span className="min-w-0 flex-1 truncate text-[12px] font-medium" style={{ color: 'var(--text-title)' }}>
                             {project.title}
                           </span>
                           {statusMeta ? (
@@ -246,8 +246,9 @@ export default function FileEmergenceSection({
                                 key={file.path}
                                 type="button"
                                 onClick={() => openEmergenceFile(file.path, project)}
-                                className="grid min-h-[24px] w-full grid-cols-[42px_12px_minmax(0,1fr)] items-center gap-1.5 rounded-[7px] px-1.5 py-0.5 text-left transition-[background-color,box-shadow] hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]"
+                                className="grid min-h-[24px] w-full grid-cols-[42px_12px_minmax(0,1fr)] items-center gap-1.5 rounded-[8px] px-1.5 py-0.5 text-left transition-[background-color,box-shadow] hover:bg-[var(--files-panel-state-hover-bg)] hover:shadow-[var(--files-panel-state-hover-shadow)]"
                                 title={file.path}
+                                data-file-emergence-file={file.path}
                                 data-selected={uiState.selectedItemKey === getFileSelectionKey(file.path) ? 'true' : undefined}
                                 style={{
                                   background: uiState.selectedItemKey === getFileSelectionKey(file.path) ? 'var(--files-panel-state-active-bg)' : 'transparent',

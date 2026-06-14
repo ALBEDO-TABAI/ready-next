@@ -166,7 +166,7 @@ html, body {
 
 .widget-root button {
   border: 1px solid var(--widget-border);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--widget-bg-primary);
   color: var(--widget-text-primary);
   padding: 8px 12px;
@@ -177,7 +177,7 @@ html, body {
 .widget-root select {
   width: 100%;
   border: 1px solid var(--widget-border);
-  border-radius: 10px;
+  border-radius: 8px;
   background: var(--widget-bg-primary);
   color: var(--widget-text-primary);
   padding: 8px 10px;

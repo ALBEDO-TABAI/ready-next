@@ -555,7 +555,7 @@ export default function TaskPanel() {
             </div>
             {(activeTaskTitle || activeTaskSummary) && (
               <div
-                className="rounded-[10px] border px-2.5 py-2"
+                className="rounded-[8px] border px-2.5 py-2"
                 style={{
                   borderColor: 'var(--border-default)',
                   background: 'var(--surface-card-bg)'
@@ -578,7 +578,7 @@ export default function TaskPanel() {
             )}
             {activeProjection && (
               <div
-                className="rounded-[10px] border px-2.5 py-2"
+                className="rounded-[8px] border px-2.5 py-2"
                 style={{
                   borderColor: 'var(--border-default)',
                   background: 'var(--surface-card-bg)'
@@ -650,7 +650,7 @@ export default function TaskPanel() {
             )}
             {((activeProjection ? activeProjection.blockedReason : activeRun?.blockedReason) || null) && (
               <div
-                className="rounded-[10px] border px-2.5 py-2"
+                className="rounded-[8px] border px-2.5 py-2"
                 style={{
                   borderColor: 'var(--color-orange)',
                   background: 'var(--color-orange-light)'
@@ -673,7 +673,7 @@ export default function TaskPanel() {
                   <button
                     type="button"
                     onClick={handleResumeProjection}
-                    className="rounded-[10px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
+                    className="rounded-[8px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
                     style={{ borderColor: 'var(--border-default)', color: 'var(--text-body)' }}
                   >
                     继续运行
@@ -683,7 +683,7 @@ export default function TaskPanel() {
                   <button
                     type="button"
                     onClick={handleCancelProjection}
-                    className="rounded-[10px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
+                    className="rounded-[8px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
                     style={{ borderColor: 'var(--border-default)', color: 'var(--text-body)' }}
                   >
                     取消任务
@@ -695,7 +695,7 @@ export default function TaskPanel() {
                   <button
                     type="button"
                     onClick={handleRespondToProjection}
-                    className="rounded-[10px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
+                    className="rounded-[8px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
                     style={{ borderColor: 'var(--border-default)', color: 'var(--text-body)' }}
                   >
                     {activeProjection?.interactionState === 'awaiting_confirmation'
@@ -709,7 +709,7 @@ export default function TaskPanel() {
                   <button
                     type="button"
                     onClick={handleRetryProjection}
-                    className="rounded-[10px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
+                    className="rounded-[8px] border px-2.5 py-1.5 text-[10.5px] transition-colors hover:bg-black/5"
                     style={{ borderColor: 'var(--border-default)', color: 'var(--text-body)' }}
                   >
                     重试任务
@@ -725,7 +725,7 @@ export default function TaskPanel() {
                 {projectionRecoveryHistory.map((entry) => (
                   <div
                     key={`${entry.timestamp}-${entry.kind}-${entry.attempt}`}
-                    className="rounded-[10px] border px-2.5 py-2"
+                    className="rounded-[8px] border px-2.5 py-2"
                     style={{
                       borderColor: 'var(--border-default)',
                       background: 'var(--surface-card-bg)'
@@ -765,7 +765,7 @@ export default function TaskPanel() {
                       onClick={() => {
                         void revealArtifact(artifact)
                       }}
-                      className="rounded-[10px] border px-2.5 py-2 text-left hover:bg-black/5 transition-colors"
+                      className="rounded-[8px] border px-2.5 py-2 text-left hover:bg-black/5 transition-colors"
                       style={{ borderColor: 'var(--border-default)' }}
                     >
                       <div
@@ -795,7 +795,7 @@ export default function TaskPanel() {
                     {triggerHits.map((trigger) => (
                       <div
                         key={trigger.id}
-                        className="rounded-[10px] border px-2.5 py-2"
+                        className="rounded-[8px] border px-2.5 py-2"
                         style={{
                           borderColor: 'var(--border-default)',
                           background: 'var(--surface-card-bg)'
@@ -1041,7 +1041,7 @@ export default function TaskPanel() {
           <div
             className="ready-input-shell flex-1 flex items-center"
             style={{
-              borderRadius: 10,
+              borderRadius: 8,
               padding: '6px 10px'
             }}
           >
@@ -1063,7 +1063,7 @@ export default function TaskPanel() {
             style={{
               width: 26,
               height: 26,
-              borderRadius: 13,
+              borderRadius: 12,
               background: 'var(--color-green)',
               flexShrink: 0
             }}

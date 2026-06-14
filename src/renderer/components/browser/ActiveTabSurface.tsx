@@ -73,7 +73,7 @@ export default function ActiveTabSurface({
       src={tab.favicon}
       alt=""
       draggable={false}
-      className="h-[14px] w-[14px] flex-shrink-0 rounded-[3px] object-cover"
+      className="h-[14px] w-[14px] flex-shrink-0 rounded-[4px] object-cover"
     />
   ) : (
     <Globe style={{ width: 14, height: 14 }} className="flex-shrink-0 text-[var(--text-body)]" strokeWidth={2} />
@@ -97,7 +97,7 @@ export default function ActiveTabSurface({
         if (target?.closest('input')) return
         onContextMenu?.(event)
       }}
-      className="group relative flex min-w-0 items-center rounded-[14px] border"
+      className="group relative flex min-w-0 items-center rounded-[12px] border"
       style={{
         height: 34,
         width,

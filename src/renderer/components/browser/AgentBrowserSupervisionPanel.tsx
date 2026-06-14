@@ -79,7 +79,7 @@ export function AgentBrowserSupervisionPanel({
       <button
         type="button"
         onClick={onExpand}
-        className={`${variant === 'collapsedRail' ? 'flex w-full justify-center' : 'absolute right-3 top-3 z-[60] flex'} items-center gap-2 rounded-[14px] border px-3 py-2 text-[12px] font-semibold shadow-lg`}
+        className={`${variant === 'collapsedRail' ? 'flex w-full justify-center' : 'absolute right-3 top-3 z-[60] flex'} items-center gap-2 rounded-[12px] border px-3 py-2 text-[12px] font-semibold shadow-lg`}
         style={{
           borderColor: 'color-mix(in srgb, var(--color-blue) 36%, transparent)',
           background: 'color-mix(in srgb, var(--surface-card-bg) 96%, transparent)',
@@ -208,7 +208,7 @@ export function AgentBrowserSupervisionPanel({
               <button
                 type="button"
                 onClick={() => void requestInterruption()}
-                className="flex w-full items-center justify-center gap-1.5 rounded-[10px] py-1.5 text-[11px] font-medium transition-colors"
+                className="flex w-full items-center justify-center gap-1.5 rounded-[8px] py-1.5 text-[11px] font-medium transition-colors"
                 style={{ background: 'color-mix(in srgb, var(--text-gray) 12%, transparent)', color: 'var(--text-title)' }}
               >
                 <ShieldAlert style={{ width: 13, height: 13 }} strokeWidth={2} />
@@ -216,7 +216,7 @@ export function AgentBrowserSupervisionPanel({
               </button>
             )}
             {controlState === 'pending_confirm' && (
-              <div className="rounded-[10px] p-2" style={{ background: 'color-mix(in srgb, var(--color-orange) 12%, transparent)' }}>
+              <div className="rounded-[8px] p-2" style={{ background: 'color-mix(in srgb, var(--color-orange) 12%, transparent)' }}>
                 <div className="mb-1.5 text-[11px]" style={{ color: 'var(--text-title)' }}>确定要中断吗？agent 会停止后台采集。</div>
                 <div className="flex gap-1.5">
                   <button
@@ -239,7 +239,7 @@ export function AgentBrowserSupervisionPanel({
               </div>
             )}
             {controlState === 'frozen' && (
-              <div className="rounded-[10px] py-1.5 text-center text-[11px] font-medium" style={{ background: 'color-mix(in srgb, var(--color-orange) 14%, transparent)', color: 'var(--color-orange)' }}>
+              <div className="rounded-[8px] py-1.5 text-center text-[11px] font-medium" style={{ background: 'color-mix(in srgb, var(--color-orange) 14%, transparent)', color: 'var(--color-orange)' }}>
                 已接管：agent 浏览器控制已冻结
               </div>
             )}

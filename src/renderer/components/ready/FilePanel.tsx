@@ -140,7 +140,7 @@ export default function FilePanel({ onFileDrop, onFileOpen }: FilePanelProps) {
       <div
         className="ready-input-shell flex items-center"
         style={{
-          height: 28, borderRadius: 10,
+          height: 28, borderRadius: 8,
           padding: '0 8px', gap: 4
         }}
       >
