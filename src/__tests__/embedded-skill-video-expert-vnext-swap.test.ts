@@ -261,6 +261,46 @@ print(json.dumps({
   assert.deepEqual(payload.declared_image_support, [true])
 })
 
+test('text routing model order skips stale provider refs and falls back to catalog text model', () => {
+  const script = `
+import json
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path.cwd() / "scripts"))
+from text_model_runtime import build_attempt_order
+
+runtime_config = {
+    "config_source": "env",
+    "preferred_model": "missing-provider/old-router",
+    "fallback_models": ["zai/GLM-5V-Turbo"],
+    "providers": {
+        "text-provider": {
+            "baseUrl": "https://example.invalid/v1",
+            "api": "openai-completions",
+            "models": [
+                {"id": "image-only", "input": ["image"], "api": "openai-completions"},
+                {"id": "router-ready", "input": ["text", "image"], "api": "openai-completions"},
+            ],
+        },
+    },
+}
+attempts = build_attempt_order(runtime_config)
+print(json.dumps({
+    "model_refs": [attempt["model_ref"] for attempt in attempts],
+    "api_styles": [attempt["api_style"] for attempt in attempts],
+}, ensure_ascii=False))
+`
+  const raw = execFileSync('python3', ['-c', script], {
+    cwd: SKILL_DIR,
+    encoding: 'utf8',
+  })
+  const payload = JSON.parse(raw)
+
+  assert.deepEqual(payload.model_refs, ['text-provider/router-ready'])
+  assert.deepEqual(payload.api_styles, ['openai-completions'])
+})
+
 test('SKILL.md frontmatter declares name / description / when-to-use per Claude Skill protocol', () => {
   const skillMd = readFileSync(join(SKILL_DIR, 'SKILL.md'), 'utf-8')
   const frontmatterMatch = skillMd.match(/^---\n([\s\S]*?)\n---/)

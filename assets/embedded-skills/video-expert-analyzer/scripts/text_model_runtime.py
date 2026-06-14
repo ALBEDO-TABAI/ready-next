@@ -162,7 +162,11 @@ def build_attempt_order(runtime_config: Dict[str, Any]) -> List[Dict[str, Any]]:
     for model_ref in (preferred_model, *fallback_models):
         if not model_ref or model_ref in seen:
             continue
-        provider_name, provider_config, model_config = _resolve_model_entry(providers, model_ref)
+        try:
+            provider_name, provider_config, model_config = _resolve_model_entry(providers, model_ref)
+        except ValueError:
+            seen.add(model_ref)
+            continue
         attempts.append(
             {
                 "model_ref": model_ref,
@@ -173,6 +177,34 @@ def build_attempt_order(runtime_config: Dict[str, Any]) -> List[Dict[str, Any]]:
             }
         )
         seen.add(model_ref)
+
+    if not attempts:
+        for provider_name, provider_config in providers.items():
+            if not isinstance(provider_config, dict):
+                continue
+            models = provider_config.get("models")
+            if not isinstance(models, list):
+                continue
+            for model_config in models:
+                if not isinstance(model_config, dict):
+                    continue
+                model_id = str(model_config.get("id", "") or "").strip()
+                input_modes = model_config.get("input")
+                declared_inputs = [str(item).lower() for item in input_modes] if isinstance(input_modes, list) else []
+                if not model_id or "text" not in declared_inputs:
+                    continue
+                attempts.append(
+                    {
+                        "model_ref": f"{provider_name}/{model_id}",
+                        "provider_name": provider_name,
+                        "provider_config": provider_config,
+                        "model_config": model_config,
+                        "api_style": str(model_config.get("api") or provider_config.get("api") or ""),
+                    }
+                )
+                break
+            if attempts:
+                break
 
     if not attempts:
         raise ValueError("没有可用于文本路由的模型配置")
