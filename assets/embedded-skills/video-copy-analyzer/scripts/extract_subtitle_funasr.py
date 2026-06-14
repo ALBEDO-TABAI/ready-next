@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 智能字幕提取脚本 - FunASR + RapidOCR 版本
-流程：B站API字幕 → 内嵌字幕 → 烧录字幕检测(RapidOCR) → FunASR语音转录
+流程：B站API字幕 → 内嵌字幕 → FunASR语音转录 → 烧录字幕检测(RapidOCR)
 
 技术栈：
 - B站 API: 直接获取平台字幕（需 cookies）
@@ -291,7 +291,7 @@ def extract_burned_subtitle_ocr(video_path: str, output_srt: str) -> bool:
                 f.write(f"{sub['text']}\n\n")
 
         print(f"✅ OCR 提取完成: {len(subtitles)} 条字幕")
-        return True
+        return len(subtitles) > 0
 
     except Exception as e:
         print(f"❌ OCR 提取失败: {e}")
@@ -581,12 +581,12 @@ def extract_with_funasr(video_path: str, output_srt: str) -> bool:
 def smart_subtitle_extraction(video_path: str, output_srt: str, video_url: str = "") -> tuple[bool, str]:
     """
     智能字幕提取主函数
-    流程: B站API字幕 → 内嵌字幕 → 烧录字幕(RapidOCR) → FunASR语音转录
+    流程: B站API字幕 → 内嵌字幕 → FunASR语音转录 → 烧录字幕(RapidOCR)
 
     返回: (是否成功, 使用的模式)
     """
     print("=" * 50)
-    print("🎬 智能字幕提取 (B站API + RapidOCR + FunASR)")
+    print("🎬 智能字幕提取 (B站API + FunASR + RapidOCR)")
     print("=" * 50)
     print(f"视频: {video_path}")
     print()
@@ -611,8 +611,13 @@ def smart_subtitle_extraction(video_path: str, output_srt: str, video_url: str =
     else:
         print(f"⚠️ {result}")
 
-    # 步骤2: 检测烧录字幕
-    print("\n步骤 2/3: 检测烧录字幕 (RapidOCR)...")
+    # 步骤2: 使用 FunASR
+    print("\n步骤 2/3: 使用 FunASR 语音转录...")
+    if extract_with_funasr(video_path, output_srt):
+        return True, "funasr"
+
+    # 步骤3: ASR 失败后再检测烧录字幕
+    print("\n步骤 3/3: ASR 失败，检测烧录字幕 (RapidOCR)...")
     frame_path = capture_frame(video_path, "00:00:05")
     if frame_path:
         has_burned = check_burned_subtitle(frame_path)
@@ -624,11 +629,6 @@ def smart_subtitle_extraction(video_path: str, output_srt: str, video_url: str =
                 return True, "ocr"
         else:
             print("⚠️ 未检测到烧录字幕")
-
-    # 步骤3: 使用 FunASR
-    print("\n步骤 3/3: 使用 FunASR 语音转录...")
-    if extract_with_funasr(video_path, output_srt):
-        return True, "funasr"
 
     return False, "failed"
 

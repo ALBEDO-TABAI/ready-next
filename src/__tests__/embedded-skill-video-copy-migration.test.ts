@@ -162,6 +162,16 @@ test('video_copy_analyze Ready entry uses FunASR-only transcription path', () =>
   assert.doesNotMatch(readmeDocs, /Whisper|openai-whisper/, 'Ready embedded docs must not advertise the removed ASR path')
 })
 
+test('video_copy_analyze smart extractor prefers ASR before OCR fallback', () => {
+  const extractor = readFileSync(join(SKILL_DIR, 'scripts', 'extract_subtitle_funasr.py'), 'utf-8')
+  const asrStep = extractor.indexOf('步骤 2/3: 使用 FunASR 语音转录')
+  const ocrStep = extractor.indexOf('步骤 3/3: ASR 失败，检测烧录字幕')
+
+  assert.ok(asrStep > 0, 'auto mode should run ASR before OCR fallback')
+  assert.ok(ocrStep > asrStep, 'OCR must only run after ASR fails')
+  assert.match(extractor, /return len\(subtitles\) > 0/, 'empty OCR output must not be treated as a complete transcript')
+})
+
 test('video_copy_analyze Ready entry preserves smart subtitle sources before FunASR fallback', (t) => {
   const outputDir = mkdtempSync(join(tmpdir(), 'ready-video-copy-smart-subtitle-'))
   t.after(() => rmSync(outputDir, { recursive: true, force: true }))

@@ -361,7 +361,8 @@ test('browser tab analysis item id follows URL rather than transient tab id', as
     assert.notEqual(analysisCalls[0].itemId, analysisCalls[1].itemId)
     assert.equal(analysisCalls[0].itemId, buildBrowserTabAnalysisItemId(analysisCalls[0].link))
     assert.equal(analysisCalls[1].itemId, buildBrowserTabAnalysisItemId(analysisCalls[1].link))
-    assert.match(analysisCalls[0].itemId, /^btab-[0-9a-f]{8}$/)
+    assert.match(analysisCalls[0].itemId, /^[0-9a-f]{8}-btab$/)
+    assert.match(analysisCalls[0].itemId.slice(0, 8), /^[0-9a-f]{8}$/)
   } finally {
     restore()
   }

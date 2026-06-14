@@ -104,7 +104,7 @@ export function buildBrowserTabAnalysisItemId(url: string): string {
     hash ^= input.charCodeAt(i)
     hash = Math.imul(hash, 16777619)
   }
-  return `btab-${(hash >>> 0).toString(16).padStart(8, '0')}`
+  return `${(hash >>> 0).toString(16).padStart(8, '0')}-btab`
 }
 
 export function parseRssItemDragPayload(raw: string | null | undefined): RSSItemDragPayload | null {
