@@ -402,10 +402,13 @@ def score_bucket(bucket: Bucket, corpus: str, raw_text: str, file_names: list[st
     return {"name": bucket.name, "score": score, "matched": matched}
 
 
-IMAGE_EXTS = r"\.(png|jpg|jpeg|webp|gif|bmp|heic|tiff|pdf)$"
+IMAGE_EXTS = r"\.(png|jpg|jpeg|webp|gif|bmp|heic|tiff)$"
+# PDF is its own modality: a text-layer PDF needs extraction (not OCR), a scanned PDF needs OCR.
+PDF_EXTS = r"\.pdf$"
 # Binary / non-text formats that study-notes cannot accept directly.
 # These should trigger modality_mismatch unless extracted text is also provided.
 BINARY_EXTS = r"\.(mp3|wav|m4a|flac|ogg|opus|aac|mp4|mov|mkv|avi|webm|zip|tar|gz|7z|rar|epub|mobi|psd|fig)$"
+URL_RE = re.compile(r"https?://[^\s)\]>，。、；]+", re.IGNORECASE)
 
 
 def detect_modality(texts: list[str], files: list[str], hints: list[str], prompt: str) -> str:
@@ -413,6 +416,7 @@ def detect_modality(texts: list[str], files: list[str], hints: list[str], prompt
     hints = hints or []
     files = files or []
     image_like = any(re.search(IMAGE_EXTS, name, re.IGNORECASE) for name in files)
+    pdf_like = any(re.search(PDF_EXTS, name, re.IGNORECASE) for name in files)
     binary_like = any(re.search(BINARY_EXTS, name, re.IGNORECASE) for name in files)
     prompt_mentions_image = any(token in prompt for token in ("截图", "图片", "照片", "OCR", "扫描"))
     # Tighter binary detection: only fire when the prompt names the input as the binary,
@@ -433,6 +437,9 @@ def detect_modality(texts: list[str], files: list[str], hints: list[str], prompt
     prompt_mentions_binary = any(token.casefold() in prompt.casefold() for token in prompt_binary_phrases)
     has_text = any(item.strip() for item in [prompt, *texts, *hints])
 
+    if files and pdf_like and not image_like and not binary_like:
+        # A PDF with extracted text or an excerpt hint can proceed; a bare PDF cannot.
+        return "mixed" if has_text and (texts or hints) else "pdf"
     if (files and image_like) or prompt_mentions_image:
         # Image can be reasonably paired with an OCR hint, so a hint counts as material.
         return "mixed" if has_text and (texts or hints) else "image"
@@ -440,6 +447,13 @@ def detect_modality(texts: list[str], files: list[str], hints: list[str], prompt
         # Binary (audio / video / archive) needs a real transcript, not just a caption hint.
         # Require texts (a structured transcript) to escape modality_mismatch; hints alone aren't enough.
         return "mixed" if any(t.strip() for t in texts) else "binary"
+    if not files:
+        # Bare URL with no extracted body: the page still needs fetching or clipping.
+        joined = " ".join([prompt, *texts, *hints])
+        if URL_RE.search(joined):
+            remaining = re.sub(r"\s+", "", URL_RE.sub(" ", joined))
+            if len(remaining) < 40:
+                return "unfetched_url"
     return "text"
 
 
@@ -475,6 +489,16 @@ def has_extracted_material(texts: list[str], hints: list[str]) -> bool:
     return any(item.strip() for item in [*texts, *hints])
 
 
+PROSE_SIGNAL_PATTERN = (
+    r"如何|教你|带你|学会|技巧|误区|原理|为什么|比如|例如|举个|换句话说|这意味着|核心思想"
+    r"|how to|for example|in other words|this means"
+)
+
+CODE_LINE_PATTERN = re.compile(
+    r"\s*(?:def\s+\w+\(|class\s+\w+\b|import\s+\w+|from\s+\w+\s+import\b|return\b|@\w+\b|[\w.\[\]'\"]+\s*=\s*\S)"
+)
+
+
 def detect_features(raw_text: str) -> dict[str, int | float]:
     compact = re.sub(r"\s+", "", raw_text)
     char_count = len(compact)
@@ -492,11 +516,13 @@ def detect_features(raw_text: str) -> dict[str, int | float]:
     legal_hits = count_regex(r"(?m)^\s*第[一二三四五六七八九十0-9]+条|甲方|乙方|应当|不得|本办法", raw_text)
     manual_hits = count_regex(r"参数|规格|型号|安全须知|使用说明|安装|注意事项|额定", raw_text)
 
+    non_empty_lines = [line for line in raw_text.splitlines() if line.strip()]
+    line_total = max(len(non_empty_lines), 1)
+
     table_line_hits = 0
-    for line in raw_text.splitlines():
+    outside_table_chars = 0
+    for line in non_empty_lines:
         stripped = line.strip()
-        if not stripped:
-            continue
         pipe_count = stripped.count("|")
         comma_count = stripped.count(",")
         tab_count = stripped.count("\t")
@@ -505,6 +531,16 @@ def detect_features(raw_text: str) -> dict[str, int | float]:
             table_line_hits += 1
         elif comma_count >= 2 and numeric_cells >= 2:
             table_line_hits += 1
+        else:
+            outside_table_chars += len(re.sub(r"\s+", "", stripped))
+
+    # Dominance signals: distinguish "the material IS code/table/legal" from
+    # "the material talks ABOUT code/table/legal inside prose".
+    prose_signal_hits = count_regex(PROSE_SIGNAL_PATTERN, raw_text)
+    legal_line_hits = count_regex(r"(?m)^\s*第[一二三四五六七八九十0-9]+条", raw_text)
+    fence_free = re.sub(r"```[\s\S]*?```", "", raw_text)
+    outside_code_chars = len(re.sub(r"\s+", "", fence_free))
+    code_line_hits = sum(1 for line in non_empty_lines if CODE_LINE_PATTERN.match(line))
 
     story_hits = count_regex(r"那天|后来|当时|结果|直到|突然|第一次|复盘|我才意识到", raw_text)
     judgment_hits = count_regex(r"我认为|我怀疑|在我看来|问题在于|真正危险的|作者认为|评论", raw_text)
@@ -522,6 +558,12 @@ def detect_features(raw_text: str) -> dict[str, int | float]:
         "legal_hits": legal_hits,
         "manual_hits": manual_hits,
         "table_hits": table_line_hits,
+        "table_line_ratio": table_line_hits / line_total,
+        "outside_table_chars": outside_table_chars,
+        "prose_signal_hits": prose_signal_hits,
+        "legal_line_hits": legal_line_hits,
+        "outside_code_chars": outside_code_chars,
+        "code_line_ratio": code_line_hits / line_total,
         "story_hits": story_hits,
         "judgment_hits": judgment_hits,
     }
@@ -593,13 +635,24 @@ def has_mixed_layer_signals(corpus: str) -> bool:
 
 
 def detect_unsuitable_kind(features: dict[str, int | float]) -> str | None:
+    """Dominance-gated: fire only when the material IS code/table/legal/manual,
+    not when prose-led material merely mentions, quotes, or embeds it
+    (e.g. a tutorial with code examples, or an article about reading contracts)."""
+    prose_led = int(features["prose_signal_hits"]) >= 2
     if int(features["code_hits"]) >= 2:
-        return "code"
-    if int(features["table_hits"]) >= 2:
+        fenced_only = int(features["outside_code_chars"]) < 80
+        unfenced_dominant = float(features["code_line_ratio"]) >= 0.3 and not prose_led
+        if fenced_only or unfenced_dominant:
+            return "code"
+    if (
+        int(features["table_hits"]) >= 2
+        and float(features["table_line_ratio"]) >= 0.4
+        and int(features["outside_table_chars"]) < 120
+    ):
         return "table"
-    if int(features["legal_hits"]) >= 2:
+    if int(features["legal_line_hits"]) >= 2 or (int(features["legal_hits"]) >= 4 and not prose_led):
         return "legal"
-    if int(features["manual_hits"]) >= 2:
+    if int(features["manual_hits"]) >= 3 and not prose_led:
         return "manual"
     return None
 
@@ -608,10 +661,15 @@ def apply_route_heuristics(
     route_scores: list[dict[str, object]],
     features: dict[str, int | float],
     corpus: str,
+    unsuitable_kind: str | None,
 ) -> None:
     score_map = {item["name"]: item for item in route_scores}
 
-    if float(features["digit_ratio"]) >= 0.08 or int(features["percent_hits"]) >= 2:
+    # digit_ratio is meaningless on tiny denominators ("这篇5000字的长文" alone
+    # yields ratio 0.2), so it only counts once there is real material.
+    if int(features["percent_hits"]) >= 2 or (
+        float(features["digit_ratio"]) >= 0.08 and int(features["char_count"]) >= 120
+    ):
         score_map["data-report"]["score"] = int(score_map["data-report"]["score"]) + 3
         score_map["data-report"]["matched"].append("heuristic:dense-numeric")
 
@@ -635,10 +693,15 @@ def apply_route_heuristics(
         score_map["knowledge-tutorial"]["score"] = int(score_map["knowledge-tutorial"]["score"]) + 2
         score_map["knowledge-tutorial"]["matched"].append("heuristic:instructional-steps")
 
-    unsuitable_kind = detect_unsuitable_kind(features)
     if unsuitable_kind:
         score_map["unsuitable-input"]["score"] = int(score_map["unsuitable-input"]["score"]) + 6
         score_map["unsuitable-input"]["matched"].append(f"heuristic:unsuitable-{unsuitable_kind}")
+    elif int(score_map["unsuitable-input"]["score"]) > 0:
+        # Code/legal/table tokens appear inside prose-led material: the text is ABOUT
+        # them, not made of them. Remove unsuitable-input from contention so it cannot
+        # win on keyword count alone or drag a close call into mixed-content.
+        score_map["unsuitable-input"]["score"] = 0
+        score_map["unsuitable-input"]["matched"].append("heuristic:prose-dominant-demotion")
 
 
 def infer_goal(prompt: str, route: str, texts: list[str] | None = None) -> tuple[str | None, list[dict[str, object]]]:
@@ -697,7 +760,9 @@ def detect_complexity(
         complexity = "standard"
 
     density_score = 0
-    if int(features["percent_hits"]) >= 2 or float(features["digit_ratio"]) >= 0.08:
+    if int(features["percent_hits"]) >= 2 or (
+        float(features["digit_ratio"]) >= 0.08 and int(features["char_count"]) >= 120
+    ):
         density_score += 1
     if int(features["citation_hits"]) >= 1 or int(features["acronym_hits"]) >= 5:
         density_score += 1
@@ -778,7 +843,23 @@ def classify(prompt: str, texts: list[str], files: list[str], hints: list[str]) 
     # Image can still accept hint-only because OCR-as-caption is a reasonable fallback.
     binary_blocked = modality == "binary" and not any((t or "").strip() for t in texts)
     image_blocked = modality == "image" and not has_extracted_material(texts, hints)
-    if binary_blocked or image_blocked:
+    pdf_blocked = modality == "pdf" and not has_extracted_material(texts, hints)
+    url_blocked = modality == "unfetched_url"
+    if binary_blocked or image_blocked or pdf_blocked or url_blocked:
+        mismatch_notes = {
+            "pdf": (
+                "An unextracted PDF was provided. Text-layer PDFs need text extraction; scanned PDFs "
+                "need OCR. Pass the extracted text back to study-notes."
+            ),
+            "unfetched_url": (
+                "Only a bare URL was provided. Fetch or clip the page into extracted text first, "
+                "then pass it back to study-notes."
+            ),
+        }
+        default_note = (
+            "Raw image, audio, video, archive, or other binary inputs require OCR, transcription, "
+            "or extracted text before using study-notes. See SKILL.md ## Modality Mismatch Output for the response schema."
+        )
         return {
             "status": "modality_mismatch",
             "modality": modality,
@@ -794,10 +875,7 @@ def classify(prompt: str, texts: list[str], files: list[str], hints: list[str]) 
             "route_scores": [],
             "goal_scores": [],
             "features": {},
-            "notes": [
-                "Raw image, audio, video, archive, or other binary inputs require OCR, transcription, "
-                "or extracted text before using study-notes. See SKILL.md ## Modality Mismatch Output for the response schema."
-            ],
+            "notes": [mismatch_notes.get(modality, default_note)],
         }
 
     if (
@@ -825,16 +903,24 @@ def classify(prompt: str, texts: list[str], files: list[str], hints: list[str]) 
         }
 
     features = detect_features(raw_text)
+    unsuitable_kind = detect_unsuitable_kind(features)
 
     route_scores = [score_bucket(bucket, corpus, raw_text, file_names) for bucket in ROUTES]
-    apply_route_heuristics(route_scores, features, corpus)
+    apply_route_heuristics(route_scores, features, corpus, unsuitable_kind)
     route_scores.sort(key=lambda item: (-int(item["score"]), str(item["name"])))
 
     route, confidence, notes = choose_route(route_scores, corpus)
     goal, goal_scores = infer_goal(prompt, route, texts)
     complexity, density, effective_length = detect_complexity(prompt, texts, hints, route, features)
 
-    unsuitable_kind = detect_unsuitable_kind(features)
+    hinted_length = mentioned_length_hint(corpus)
+    if hinted_length >= 1000 and int(features["char_count"]) < min(300, hinted_length // 5):
+        notes.append(
+            f"length-hint mismatch: stated length (~{hinted_length} chars) is far larger than the provided "
+            f"text ({int(features['char_count'])} chars). Confirm the full material was pasted; if only an "
+            "excerpt exists, write from the excerpt and mark the note as partial."
+        )
+
     recommended_format = None
     if route == "unsuitable-input":
         recommended_format = UNSUITABLE_FORMAT_BY_KIND.get(unsuitable_kind or "generic")

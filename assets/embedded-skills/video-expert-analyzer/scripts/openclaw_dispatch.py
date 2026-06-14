@@ -13,18 +13,11 @@ from typing import Any, Dict, Optional
 
 try:
     from run_state import load_run_state
+    from shared_io import read_json as _read_json
 except ImportError:
     sys.path.insert(0, str(Path(__file__).parent))
     from run_state import load_run_state
-
-
-def _read_json(path: Path, default: Any) -> Any:
-    if not path.exists():
-        return default
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return default
+    from shared_io import read_json as _read_json
 
 
 def _resolve_scores_path(source: str) -> Path:

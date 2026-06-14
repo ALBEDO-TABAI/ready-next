@@ -91,6 +91,10 @@
 
 `unsuitable-input` 不走普通 short path。即使脚本高置信且材料很短，也要先说明为什么不适合普通笔记，再切到替代格式。
 
+## Analogy policy
+
+- 不用类比。先切到替代格式，替代格式里也以参数、条款、字段、代码逻辑的精确为先。
+
 ## Route-specific failure modes
 
 - 硬凑“核心知识点”和“人生启发”

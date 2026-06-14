@@ -6,6 +6,7 @@ import re
 from typing import Any, Dict, List, Sequence
 
 from audiovisual.shared import _analysis_rows, _onscreen_text, _safe_text, _scene_desc, _voiceover
+from audiovisual.reporting import value_focus as _value_focus
 
 
 _DROP_SECTION_PREFIXES = (
@@ -234,7 +235,11 @@ def extract_module_anchor_terms(prompt_text: str) -> Dict[str, List[str]]:
     return anchors
 
 
-def _scene_packet_lines(rows: Sequence[Dict[str, Any]], compact: bool = False) -> List[str]:
+def _scene_packet_lines(
+    rows: Sequence[Dict[str, Any]],
+    compact: bool = False,
+    voiceover_chars: int | None = None,
+) -> List[str]:
     lines: List[str] = []
     for scene in rows:
         scene_number = int(scene.get("scene_number", 0))
@@ -248,23 +253,34 @@ def _scene_packet_lines(rows: Sequence[Dict[str, Any]], compact: bool = False) -
         role = _safe_text(scene.get("story_role")) or "-"
         function = _safe_text(scene.get("story_function")) or "-"
         if compact:
+            vo_cap = voiceover_chars or 48
             lines.append(
-                f"- Scene {scene_number:03d} | {timestamp} | 角色:{role} | 功能:{function} | 画面:{visual[:80]} | 旁白:{voiceover[:48]} | 文字:{onscreen[:36]}"
+                f"- Scene {scene_number:03d} | {timestamp} | 角色:{role} | 功能:{function} | 画面:{visual[:80]} | 旁白:{voiceover[:vo_cap]} | 文字:{onscreen[:36]}"
             )
         else:
+            vo_cap = voiceover_chars or 80
             lines.append(
-                f"- Scene {scene_number:03d} | {timestamp} | 段落角色:{role} | 主要作用:{function} | 画面:{visual[:120]} | 旁白:{voiceover[:80]} | 文字:{onscreen[:60]} | 镜头:{shot}/{lighting}/{movement}"
+                f"- Scene {scene_number:03d} | {timestamp} | 段落角色:{role} | 主要作用:{function} | 画面:{visual[:120]} | 旁白:{voiceover[:vo_cap]} | 文字:{onscreen[:60]} | 镜头:{shot}/{lighting}/{movement}"
             )
     return lines
 
 
-def build_raw_prompt_scene_packet(data: Dict[str, Any], max_chars: int = 24000) -> str:
+def build_raw_prompt_scene_packet(
+    data: Dict[str, Any],
+    max_chars: int = 24000,
+    transcript_heavy: bool = False,
+) -> str:
+    # 语言主导类型的价值证据在台词里：放宽旁白引用配额与预算，
+    # 让 agent 能引到原话而不是只看见截断的半句。
+    if transcript_heavy:
+        max_chars = max(max_chars, 32000)
+    voiceover_chars = 200 if transcript_heavy else None
     rows = _analysis_rows(data)
-    verbose = "\n".join(_scene_packet_lines(rows, compact=False))
+    verbose = "\n".join(_scene_packet_lines(rows, compact=False, voiceover_chars=voiceover_chars))
     if len(verbose) <= max_chars:
         return verbose
 
-    compact = "\n".join(_scene_packet_lines(rows, compact=True))
+    compact = "\n".join(_scene_packet_lines(rows, compact=True, voiceover_chars=120 if transcript_heavy else None))
     if len(compact) <= max_chars:
         return compact
 
@@ -275,6 +291,80 @@ def build_raw_prompt_scene_packet(data: Dict[str, Any], max_chars: int = 24000) 
         voiceover = _voiceover(scene) or "-"
         compressed.append(f"- Scene {scene_number:03d} | 画面:{visual[:64]} | 旁白:{voiceover[:32]}")
     return "\n".join(compressed)
+
+
+_LOUDNESS_SEGMENT_NAMES = ("开场", "前段", "中段", "后段", "结尾")
+
+
+def _loudness_level(value: float) -> str:
+    if value >= 0.66:
+        return "高"
+    if value >= 0.33:
+        return "中"
+    return "低"
+
+
+def _format_loudness_arc(arc: Sequence[Dict[str, Any]]) -> str:
+    if not arc:
+        return ""
+    segment_count = len(_LOUDNESS_SEGMENT_NAMES)
+    chunk = max(1, len(arc) // segment_count)
+    parts: List[str] = []
+    for index, name in enumerate(_LOUDNESS_SEGMENT_NAMES):
+        values = [float(item.get("rms") or 0.0) for item in arc[index * chunk : (index + 1) * chunk]]
+        if not values:
+            continue
+        parts.append(f"{name}{_loudness_level(sum(values) / len(values))}")
+    return " → ".join(parts)
+
+
+def _build_audio_features_block(data: Dict[str, Any]) -> List[str]:
+    """音轨信号实测摘要：给 agent 写"音画/节奏"段落的真实地基。不可用时返回空。"""
+    features = data.get("audio_features") or {}
+    if not isinstance(features, dict) or features.get("status") != "ok":
+        return []
+    global_stats = features.get("global") or {}
+    alignment = features.get("beat_alignment") or {}
+
+    lines: List[str] = ["", "## 音频特征摘要（音轨信号实测）", ""]
+    bpm = float(global_stats.get("bpm") or 0.0)
+    bpm_confidence = float(global_stats.get("bpm_confidence") or 0.0)
+    if bpm > 0 and bpm_confidence >= 0.3:
+        lines.append(f"- 节拍：BPM ≈ {bpm:.0f}（置信度 {bpm_confidence:.2f}）")
+    else:
+        lines.append("- 节拍：未检测到稳定节拍（写节奏分析时不要假设存在音乐律动）")
+    cuts_total = int(alignment.get("cuts_total") or 0)
+    if cuts_total:
+        lines.append(
+            f"- 卡点：{cuts_total} 个切点中 {int(alignment.get('cuts_on_beat') or 0)} 个落在节拍 ±{int(alignment.get('tolerance_ms') or 80)}ms 内，"
+            f"实测卡点率 {float(alignment.get('ratio') or 0.0)*100:.0f}%"
+        )
+    arc_text = _format_loudness_arc(global_stats.get("loudness_arc") or [])
+    if arc_text:
+        lines.append(f"- 响度弧线：{arc_text}")
+    silence_ratio = float(global_stats.get("silence_ratio") or 0.0)
+    if silence_ratio >= 0.05:
+        lines.append(f"- 静音占比：{silence_ratio*100:.0f}%")
+
+    energy_scenes = [
+        scene
+        for scene in (data.get("scenes") or [])
+        if isinstance(scene.get("audio_features"), dict)
+    ]
+    if energy_scenes:
+        peaks = sorted(energy_scenes, key=lambda s: float(s["audio_features"].get("rms_peak") or 0.0), reverse=True)[:3]
+        peak_refs = "、".join(
+            f"Scene {int(s.get('scene_number', 0)):03d}（能量 {float(s['audio_features'].get('rms_peak') or 0.0):.2f}）"
+            for s in peaks
+        )
+        lines.append(f"- 能量峰值场景：{peak_refs}")
+        on_beat = [s for s in energy_scenes if s["audio_features"].get("cut_on_beat")]
+        if on_beat:
+            refs = "、".join(f"Scene {int(s.get('scene_number', 0)):03d}" for s in on_beat[:6])
+            lines.append(f"- 卡拍切入的场景：{refs}" + ("…" if len(on_beat) > 6 else ""))
+
+    lines.append("- 以上是音轨信号层面的客观测量；歌词/台词的语义内容仍以分镜表里的旁白字段为准。")
+    return lines
 
 
 def build_raw_prompt_user_message(
@@ -303,15 +393,21 @@ def build_raw_prompt_user_message(
     if highlight_specs:
         lines.extend(["", "## 高光场景", highlight_specs])
 
+    type_key = _resolve_type_key(data, route)
+    recipe = _value_focus.get_value_focus(type_key)
+
     lines.extend(
         [
             "",
             "## 分镜表上下文",
-            build_raw_prompt_scene_packet(data),
+            build_raw_prompt_scene_packet(data, transcript_heavy=bool(recipe.get("transcript_heavy"))),
         ]
     )
 
-    lines.extend(_build_output_scaffold_block(required_sections, required_subsections or {}))
+    lines.extend(_build_audio_features_block(data))
+    lines.extend(_value_focus.build_summary_prompt_block(type_key))
+    scaffold_sections = [_value_focus.SUMMARY_SECTION_TITLE, *required_sections]
+    lines.extend(_build_output_scaffold_block(scaffold_sections, required_subsections or {}))
     lines.extend(
         _build_delivery_rules_block(
             required_sections=required_sections,
@@ -379,7 +475,10 @@ def _build_delivery_rules_block(
     min_scene_evidence_per_section: int,
 ) -> List[str]:
     lines: List[str] = ["", "## 交付规则（交付会被机器校验，不达标直接打回）", ""]
-    lines.append(f"- 每个 `##` 模块的正文长度不少于 **{min_chars_per_section}** 字；不允许用单段总结覆盖整个模块。")
+    lines.append(
+        f"- 除 `## 导读` 外，每个 `##` 模块的正文长度不少于 **{min_chars_per_section}** 字；不允许用单段总结覆盖整个模块。"
+        "（`## 导读` 反向受字数上限约束，见上方导读要求。）"
+    )
     has_subsections = any(bool(required_subsections.get(heading)) for heading in required_sections)
     if has_subsections:
         lines.append(
@@ -389,7 +488,7 @@ def _build_delivery_rules_block(
     else:
         lines.append("- 原 prompt 未列出固定子条目的模块，仍须按原 prompt 的要点写足分析，不得一笔带过。")
     lines.append(
-        f"- 每个 `##` 模块至少引用 **{min_scene_evidence_per_section}** 个不同的 Scene 编号（形如 `Scene 012`）作为证据；编号必须来自上方分镜表。"
+        f"- 除 `## 导读`（自有 ≥2 处引用要求）外，每个 `##` 模块至少引用 **{min_scene_evidence_per_section}** 个不同的 Scene 编号（形如 `Scene 012`）作为证据；编号必须来自上方分镜表。"
     )
     lines.append("- 原 prompt 若在某子条目明确要求表格（例如“| 字段 | 内容 |”），必须以 Markdown 表格呈现，不能改写成段落。")
     lines.append("- 理论引用必须说明其如何作用于当前分析；不要只挂名。未在 prompt 中出现的理论不要引入。")

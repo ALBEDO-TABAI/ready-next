@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, List, Sequence
 
 from . import raw_prompt_adapter as _raw_prompt_adapter
 from . import scene_utils as _scene_utils
+from . import value_focus as _value_focus
 from audiovisual.reporting.common import (
     _abstract_sfx_failure_risk,
     _abstract_sfx_sync_analysis,
@@ -109,7 +110,7 @@ _FIGURE_RE = re.compile(r"<!--\s*FIGURE:([a-zA-Z0-9_\-]+)\s*-->")
 _UNRESOLVED_PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
 _REQUIRED_SECTION_RE = re.compile(r"^##\s+.+$", re.MULTILINE)
 _SCENE_EVIDENCE_RE = re.compile(
-    r"(?:Scene|场景)\s*\d{3}|(?:\d{2}:)?\d{2}:\d{2}(?:[,.:]\d{2,3})?(?:\s*[–-]\s*(?:\d{2}:)?\d{2}:\d{2}(?:[,.:]\d{2,3})?)?"
+    r"Scene\s+\d{3}|(?:\d{2}:)?\d{2}:\d{2}(?:[,.:]\d{2,3})?(?:\s*[–-]\s*(?:\d{2}:)?\d{2}:\d{2}(?:[,.:]\d{2,3})?)?"
 )
 _FIGURE_MARKER_RATIONALES = {
     "opening": "对应开场入口的关键镜头，用来钉住后文分析的观看起点。",
@@ -172,15 +173,35 @@ def _resolve_template_path(framework: str, base_dir: Path) -> Path:
     raise FileNotFoundError(f"Template for route '{framework}' not found. Tried: {', '.join(attempted)}")
 
 
+# 子类型 × 框架 → 共享 _type 模板的别名关系。
+# 这些组合没有独立模板，复用同一份子类型家族模板（原先由 27 个一行
+# `template_type_*.md` 转发壳承载，现收敛为数据表 + 直接解析）。
+# 注意不能按 _framework_family_name 推导：infographic_animation /
+# narrative_motion_graphics 同时属于 language_led 与 graphic 两个集合。
+_TYPE_FRAMEWORK_TEMPLATE_ALIASES: Dict[tuple, str] = {
+    ("mood_montage", "hybrid_ambient"): "_type_mood_montage_atmospheric.md",
+    ("mood_montage", "pure_visual_mix"): "_type_mood_montage_atmospheric.md",
+    ("mood_montage", "silent_performance"): "_type_mood_montage_atmospheric.md",
+    ("mood_montage", "narrative_motion_graphics"): "_type_mood_montage_graphic.md",
+    ("mood_montage", "pure_motion_graphics"): "_type_mood_montage_graphic.md",
+    ("motion_graphics", "infographic_animation"): "_type_motion_graphics_graphic.md",
+    ("motion_graphics", "narrative_motion_graphics"): "_type_motion_graphics_graphic.md",
+    ("motion_graphics", "pure_motion_graphics"): "_type_motion_graphics_graphic.md",
+}
+
+
 def _resolve_template_path_for_route(data: Dict[str, Any], route: Dict[str, Any], base_dir: Path) -> Path:
     framework = _safe_text(route.get("framework"))
     type_key = _template_type_key(data, route)
     candidates: List[Path] = []
 
     if type_key and framework:
-        candidates.append(base_dir / f"template_type_{type_key}_{framework}.md")
+        candidates.append(base_dir / f"_type_{type_key}_{framework}.md")
+        alias = _TYPE_FRAMEWORK_TEMPLATE_ALIASES.get((type_key, framework))
+        if alias:
+            candidates.append(base_dir / alias)
     if type_key:
-        candidates.append(base_dir / f"template_type_{type_key}.md")
+        candidates.append(base_dir / f"_type_{type_key}.md")
     if framework:
         candidates.append(base_dir / f"template_{framework}.md")
         family = _framework_family_name(framework)
@@ -1273,12 +1294,9 @@ def build_audiovisual_body_prompt(
     if _raw_prompt_adapter.raw_prompt_available_for_data(data, route):
         prompt_text = _raw_prompt_adapter.load_sanitized_raw_prompt_for_data(data, route)
         required_headings = _raw_prompt_adapter.extract_required_sections_from_raw_prompt(prompt_text)
-        required_sections = [f"## {heading}" for heading in required_headings]
+        required_sections = [_value_focus.SUMMARY_SECTION_HEADING] + [f"## {heading}" for heading in required_headings]
         validation_rules = _raw_prompt_adapter.extract_prompt_fidelity_rules(prompt_text)
-        validation_rules["min_scene_evidence_per_section"] = _effective_scene_evidence_min(
-            data,
-            int(validation_rules.get("min_scene_evidence_per_section") or 3),
-        )
+        validation_rules.update(_value_focus.summary_validation_rules())
         user_message = _raw_prompt_adapter.build_raw_prompt_user_message(
             data,
             route,
@@ -1313,20 +1331,6 @@ def build_audiovisual_body_prompt(
         "source": "template",
         "validation_rules": {},
     }
-
-
-def _effective_scene_evidence_min(data: Dict, configured_min: int) -> int:
-    if configured_min <= 0:
-        return 0
-    scene_numbers = {
-        int(scene.get("scene_number"))
-        for scene in data.get("scenes", [])
-        if isinstance(scene, dict) and str(scene.get("scene_number") or "").isdigit()
-    }
-    available = len(scene_numbers)
-    if available <= 0:
-        return configured_min
-    return max(1, min(configured_min, available))
 
 
 def synthesize_audiovisual_report(
@@ -1415,17 +1419,10 @@ def _assemble_final_report(
     validation_rules: Dict[str, Any] | None = None,
 ) -> str:
     body = agent_text.strip()
-    body = _canonicalize_required_headings(body, required_sections or (), validation_rules or {})
-    body = _ensure_required_section_scene_evidence(
-        body,
-        required_sections or (),
-        data,
-        validation_rules or {},
-    )
     try:
         body = _validate_required_sections(body, required_sections or (), source=source, validation_rules=validation_rules or {})
     except ValueError as exc:
-        _dump_validation_errors(report_dir, body, required_sections or (), str(exc))
+        _dump_validation_errors(report_dir, body, required_sections or (), str(exc), validation_rules=validation_rules or {})
         raise
     body, dimension_evals = _extract_dimension_evaluations(body)
     context = {**context, **_dimension_eval_context(dimension_evals)}
@@ -1433,9 +1430,14 @@ def _assemble_final_report(
     body = _inject_python_direct_blocks(body, python_direct_blocks, context)
     body = _cleanup_markers(body)
 
+    # 导读是写给普通观众的速读，放在标题正下方、路由判断之前：
+    # 标题 → 导读 → (结构图/总览，后续插入) → 路由判断 → 正文
+    body, summary_block = _extract_summary_section(body)
     final_parts = [
         "# 视听剖析报告",
         "",
+        summary_block if summary_block else None,
+        "" if summary_block else None,
         _route_judgement_block(route),
         "",
         body.strip(),
@@ -1443,6 +1445,28 @@ def _assemble_final_report(
         f"*生成时间：{context['generated_at']}*",
     ]
     return "\n".join(part for part in final_parts if part is not None) + "\n"
+
+
+def _extract_summary_section(body: str) -> tuple[str, str]:
+    """把 `## 导读` 模块从正文中取出，返回 (剩余正文, 导读块)。"""
+    heading = _value_focus.SUMMARY_SECTION_HEADING
+    lines = body.split("\n")
+    start: int | None = None
+    end = len(lines)
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if start is None:
+            if stripped == heading:
+                start = index
+            continue
+        if stripped.startswith("## ") and not stripped.startswith("### "):
+            end = index
+            break
+    if start is None:
+        return body, ""
+    summary_block = "\n".join(lines[start:end]).strip()
+    remainder = "\n".join(lines[:start] + lines[end:]).strip()
+    return remainder, summary_block
 
 
 def _inject_figure_blocks(body: str, data: Dict, route: Dict[str, Any], report_dir: Path | None) -> str:
@@ -1508,49 +1532,7 @@ def _extract_required_sections(tasks_text: str) -> List[str]:
     return required
 
 
-_SCENE_NUMBER_RE = re.compile(r"(?:Scene|场景)\s*(\d{2,4})")
-
-
-def _normalize_heading_literal(text: str) -> str:
-    return (
-        text
-        .replace("“", '"')
-        .replace("”", '"')
-        .replace("‘", "'")
-        .replace("’", "'")
-    )
-
-
-def _canonicalize_required_headings(
-    text: str,
-    required_sections: Sequence[str],
-    validation_rules: Dict[str, Any],
-) -> str:
-    canonical_by_normalized = {
-        _normalize_heading_literal(section.strip()): section.strip()
-        for section in required_sections
-    }
-    required_subsections_by_module: Dict[str, List[str]] = validation_rules.get("required_subsections") or {}
-    for titles in required_subsections_by_module.values():
-        for title in titles:
-            heading = f"### {title}".strip()
-            canonical_by_normalized[_normalize_heading_literal(heading)] = heading
-
-    if not canonical_by_normalized:
-        return text
-
-    lines: List[str] = []
-    changed = False
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("##"):
-            canonical = canonical_by_normalized.get(_normalize_heading_literal(stripped))
-            if canonical:
-                lines.append(canonical)
-                changed = changed or canonical != line
-                continue
-        lines.append(line)
-    return "\n".join(lines) if changed else text
+_SCENE_NUMBER_RE = re.compile(r"Scene\s+(\d{2,4})")
 
 
 def _split_body_sections(text: str) -> Dict[str, str]:
@@ -1600,94 +1582,6 @@ def _split_body_sections_detailed(text: str) -> Dict[str, Dict[str, Any]]:
 
 def _distinct_scene_numbers(text: str) -> set[str]:
     return {match.group(1).lstrip("0") or "0" for match in _SCENE_NUMBER_RE.finditer(text)}
-
-
-def _scene_timestamp(scene: Dict[str, Any]) -> str:
-    storyboard = scene.get("storyboard") if isinstance(scene.get("storyboard"), dict) else {}
-    return _safe_text(
-        scene.get("timestamp")
-        or scene.get("timestamp_range")
-        or storyboard.get("timestamp")
-    )
-
-
-def _scene_evidence_label(scene: Dict[str, Any]) -> str:
-    try:
-        scene_number = int(scene.get("scene_number", 0))
-    except (TypeError, ValueError):
-        scene_number = 0
-    timestamp = _scene_timestamp(scene) or "时间戳见分镜表"
-    description = _scene_desc(scene) or _safe_text(scene.get("visual_summary")) or "见分镜表"
-    return f"Scene {scene_number:03d}（{timestamp}，{description[:80]}）"
-
-
-def _representative_scene_evidence(data: Dict[str, Any], count: int) -> List[str]:
-    rows = [
-        scene
-        for scene in _analysis_rows(data)
-        if isinstance(scene, dict) and str(scene.get("scene_number") or "").isdigit()
-    ]
-    if not rows or count <= 0:
-        return []
-    if len(rows) == 1:
-        return [_scene_evidence_label(rows[0])]
-
-    labels: List[str] = []
-    used: set[int] = set()
-    for index in range(count):
-        position = round(index * (len(rows) - 1) / max(count - 1, 1))
-        if position in used:
-            continue
-        used.add(position)
-        labels.append(_scene_evidence_label(rows[position]))
-    return labels
-
-
-def _ensure_required_section_scene_evidence(
-    text: str,
-    required_sections: Sequence[str],
-    data: Dict[str, Any],
-    validation_rules: Dict[str, Any],
-) -> str:
-    if not required_sections or not validation_rules.get("require_scene_evidence_per_section"):
-        return text
-
-    min_evidence = max(1, int(validation_rules.get("min_scene_evidence_per_section") or 1))
-    evidence_labels = _representative_scene_evidence(data, min_evidence)
-    if not evidence_labels:
-        return text
-
-    detailed = _split_body_sections_detailed(text)
-    additions: Dict[str, str] = {}
-    for section in required_sections:
-        body = detailed.get(section, {}).get("body", "")
-        present_count = len(_distinct_scene_numbers(body))
-        if present_count >= min_evidence and _SCENE_EVIDENCE_RE.search(body):
-            continue
-        additions[section] = "证据补充：" + "；".join(evidence_labels) + "。"
-
-    if not additions:
-        return text
-
-    lines: List[str] = []
-    current_section = ""
-    inserted: set[str] = set()
-
-    def flush_current() -> None:
-        if current_section in additions and current_section not in inserted:
-            if lines and lines[-1].strip():
-                lines.append("")
-            lines.append(additions[current_section])
-            inserted.add(current_section)
-
-    for line in text.splitlines():
-        stripped = line.strip()
-        if stripped.startswith("## ") and not stripped.startswith("### "):
-            flush_current()
-            current_section = stripped
-        lines.append(line)
-    flush_current()
-    return "\n".join(lines)
 
 
 _DIMENSION_LABELS: Sequence[tuple[str, str]] = (
@@ -1772,20 +1666,84 @@ def _dump_validation_errors(
     body: str,
     required_sections: Sequence[str],
     message: str,
+    validation_rules: Dict[str, Any] | None = None,
 ) -> None:
     if report_dir is None:
         return
     try:
         target_dir = Path(report_dir) / "audiovisual_handoff" / "body"
         target_dir.mkdir(parents=True, exist_ok=True)
-        present = set(_split_body_sections_detailed(body).keys())
+        detailed = _split_body_sections_detailed(body)
+        present = set(detailed.keys())
         missing = [section for section in required_sections if section not in present]
+
+        rules = validation_rules or {}
+        min_section_chars = int(rules.get("min_chars_per_section") or 0)
+        min_subsection_chars = int(rules.get("min_subsection_chars") or 0)
+        min_scene_evidence = int(rules.get("min_scene_evidence_per_section") or 0)
+
+        # 逐模块给出实际字数与差额：让 agent 知道"差 20 字"还是"差 500 字"，
+        # 不必自己数一遍再试错。
+        summary_section = str(rules.get("summary_section") or "")
+        summary_max = int(rules.get("summary_max_chars") or 0)
+        summary_min_refs = int(rules.get("summary_min_scene_evidence") or 0)
+
+        section_stats: List[Dict[str, Any]] = []
+        for section in required_sections:
+            info = detailed.get(section)
+            if info is None:
+                section_stats.append({"section": section, "present": False})
+                continue
+            section_body = info.get("body", "")
+            chars = len(_strip_formatting_for_count(section_body))
+            distinct_scenes = sorted(_distinct_scene_numbers(section_body))
+            if summary_section and section == summary_section:
+                # 导读限上限：报告超额而不是差额
+                jargon_hits = [term for term in (rules.get("summary_jargon_blacklist") or []) if term and term in section_body]
+                section_stats.append(
+                    {
+                        "section": section,
+                        "present": True,
+                        "chars": chars,
+                        "char_excess": max(0, chars - summary_max) if summary_max else 0,
+                        "max_chars": summary_max,
+                        "distinct_scene_count": len(distinct_scenes),
+                        "scene_deficit": max(0, summary_min_refs - len(distinct_scenes)) if summary_min_refs else 0,
+                        "jargon_hits": jargon_hits,
+                    }
+                )
+                continue
+            entry: Dict[str, Any] = {
+                "section": section,
+                "present": True,
+                "chars": chars,
+                "char_deficit": max(0, min_section_chars - chars) if min_section_chars else 0,
+                "distinct_scene_count": len(distinct_scenes),
+                "scene_deficit": max(0, min_scene_evidence - len(distinct_scenes)) if min_scene_evidence else 0,
+            }
+            if min_subsection_chars:
+                sub_stats: Dict[str, Any] = {}
+                for sub_title, sub_body in (info.get("subsections") or {}).items():
+                    sub_chars = len(_strip_formatting_for_count(sub_body))
+                    sub_stats[sub_title] = {
+                        "chars": sub_chars,
+                        "char_deficit": max(0, min_subsection_chars - sub_chars),
+                    }
+                entry["subsections"] = sub_stats
+            section_stats.append(entry)
+
         payload = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
             "error": message,
+            "rules": {
+                "min_chars_per_section": min_section_chars,
+                "min_subsection_chars": min_subsection_chars,
+                "min_scene_evidence_per_section": min_scene_evidence,
+            },
             "required_sections": list(required_sections),
             "missing_sections": missing,
             "present_sections": sorted(present),
+            "sections": section_stats,
         }
         (target_dir / "validation_errors.json").write_text(
             json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
@@ -1793,6 +1751,12 @@ def _dump_validation_errors(
         )
     except Exception:
         logging.getLogger(__name__).exception("failed to write validation_errors.json")
+    try:
+        from audiovisual.reporting.handoff import mark_validation_failure
+
+        mark_validation_failure(Path(report_dir), "body", message)
+    except Exception:
+        logging.getLogger(__name__).exception("failed to sync receipt after validation failure")
 
 
 def _validate_required_sections(
@@ -1806,7 +1770,6 @@ def _validate_required_sections(
         return text
 
     rules = validation_rules or {}
-    text = _canonicalize_required_headings(text, required_sections, rules)
     section_map_detailed = _split_body_sections_detailed(text)
     present = set(section_map_detailed.keys())
     missing = [section for section in required_sections if section not in present]
@@ -1817,6 +1780,32 @@ def _validate_required_sections(
         return text
 
     section_map = {heading: info["body"] for heading, info in section_map_detailed.items()}
+
+    # 「导读」的校验方向与正文模块相反：限上限、查术语、保引用，
+    # 不参与下方 700 字下限 / 子条目 / anchor 的循环。
+    summary_section = str(rules.get("summary_section") or "")
+    if summary_section and summary_section in present:
+        summary_body = section_map.get(summary_section, "")
+        summary_failures: List[str] = []
+        max_chars = int(rules.get("summary_max_chars") or 0)
+        if max_chars > 0:
+            actual = len(_strip_formatting_for_count(summary_body))
+            if actual > max_chars:
+                summary_failures.append(f"导读超长（{actual} 字 > 上限 {max_chars} 字），请压缩，导读是速读不是正文")
+        min_refs = int(rules.get("summary_min_scene_evidence") or 0)
+        if min_refs > 0:
+            evidence_hits = len(_SCENE_EVIDENCE_RE.findall(summary_body))
+            distinct_scenes = len(_distinct_scene_numbers(summary_body))
+            if max(evidence_hits, distinct_scenes) < min_refs:
+                summary_failures.append(f"导读至少需要 {min_refs} 处 Scene 编号或时间码定位（当前 {max(evidence_hits, distinct_scenes)} 处）")
+        jargon_hits = [term for term in (rules.get("summary_jargon_blacklist") or []) if term and term in summary_body]
+        if jargon_hits:
+            summary_failures.append("导读出现框架术语（必须说人话）：" + "、".join(jargon_hits))
+        if "###" in summary_body:
+            summary_failures.append("导读不允许 ### 子条目")
+        if summary_failures:
+            raise ValueError("Prompt fidelity failure: " + "；".join(summary_failures))
+        required_sections = [section for section in required_sections if section != summary_section]
 
     required_subsections_by_module: Dict[str, List[str]] = rules.get("required_subsections") or {}
     subsection_failures: List[str] = []

@@ -8,6 +8,17 @@ from typing import Dict, List, Optional, Sequence
 from audiovisual.routing.constants import (
     AUDIO_AXIS_LABELS,
     AUDIO_AXIS_TIE_DELTA,
+    AUDIO_SIGNAL_BEAT_CONFIDENCE,
+    AUDIO_SIGNAL_LANGUAGE_VOICEOVER_MIN,
+    AUDIO_SIGNAL_LANGUAGE_WEIGHT,
+    AUDIO_SIGNAL_LM_WEIGHT,
+    AUDIO_SIGNAL_MUSIC_WEIGHT,
+    AUDIO_SIGNAL_SFX_ONSET_RATE,
+    AUDIO_SIGNAL_SFX_VOICEOVER_MAX,
+    AUDIO_SIGNAL_SFX_WEIGHT,
+    AUDIO_SIGNAL_WEAK_RMS,
+    AUDIO_SIGNAL_WEAK_SILENCE,
+    AUDIO_SIGNAL_WEAK_WEIGHT,
     AUDIO_COMPLEMENTARY_L_WEIGHT,
     AUDIO_COUNTERPOINT_LM_WEIGHT,
     AUDIO_COUNTERPOINT_M_WEIGHT,
@@ -344,7 +355,7 @@ def _infer_visual_axis(data: Dict, context: Optional[Dict[str, object]] = None) 
     title = str(context["title"])
     title_lower = str(context["title_lower"])
     scenes = list(context["rows"])
-    profile = data.get("content_profile") or infer_content_profile(data, context=context)
+    profile = _content_profile_for(data, context)
     scores = {"R": 0.0, "P": 0.0, "S": 0.0, "D": 0.0}
 
     # 标题关键词（权重降至40%）
@@ -441,15 +452,80 @@ def _infer_visual_axis(data: Dict, context: Optional[Dict[str, object]] = None) 
     return {"axis": axis, "label": VISUAL_AXIS_LABELS[axis], "confidence": confidence, "rationale": f"视觉主体更接近 {VISUAL_AXIS_LABELS[axis]}。"}
 
 
+def _content_profile_for(data: Dict, context: Optional[Dict[str, object]]) -> Dict[str, str]:
+    """data 里没有 content_profile 时惰性调用 infer（模块级 import 会成环）。
+
+    生产链路 enrich.py 总会先填 content_profile，这里是直接调用
+    _infer_audio_axis/_infer_visual_axis 时的兜底（此前是悬空引用，必 NameError）。
+    """
+    profile = data.get("content_profile")
+    if profile:
+        return profile
+    from audiovisual.routing.infer import infer_content_profile
+
+    return infer_content_profile(data, context=context)
+
+
+def _audio_signal_summary(data: Dict) -> Dict[str, object]:
+    """读取 audio_features.json 注入的真实音频信号；不可用时返回 available=False。"""
+    features = data.get("audio_features") or {}
+    if not isinstance(features, dict) or features.get("status") != "ok":
+        return {"available": False, "active": False}
+    global_stats = features.get("global") or {}
+    alignment = features.get("beat_alignment") or {}
+    try:
+        rms_mean = float(global_stats.get("rms_mean") or 0.0)
+        silence_ratio = float(global_stats.get("silence_ratio") or 0.0)
+        bpm_confidence = float(global_stats.get("bpm_confidence") or 0.0)
+        bpm = float(global_stats.get("bpm") or 0.0)
+        onset_rate = float(global_stats.get("onset_rate") or 0.0)
+        beat_ratio = float(alignment.get("ratio") or 0.0)
+    except (TypeError, ValueError):
+        return {"available": False, "active": False}
+    return {
+        "available": True,
+        # active=False 表示信号判定整体接近无声/弱听觉
+        "active": rms_mean >= AUDIO_SIGNAL_WEAK_RMS and silence_ratio < AUDIO_SIGNAL_WEAK_SILENCE,
+        "rms_mean": rms_mean,
+        "silence_ratio": silence_ratio,
+        "bpm": bpm,
+        "bpm_confidence": bpm_confidence,
+        "onset_rate": onset_rate,
+        "beat_ratio": beat_ratio,
+    }
+
+
 def _infer_audio_axis(data: Dict, context: Optional[Dict[str, object]] = None) -> Dict[str, object]:
     context = context or _build_route_context(data)
     title = str(context["title"])
     title_lower = str(context["title_lower"])
     scenes = list(context["rows"])
-    profile = data.get("content_profile") or infer_content_profile(data, context=context)
+    profile = _content_profile_for(data, context)
     signals = dict(context["signals"])
     voiceover_ratio = sum(1 for scene in scenes if _voiceover(scene)) / max(len(scenes), 1)
     scores = {"L": 0.0, "M": 0.0, "E": 0.0, "LM": 0.0, "N": 0.0}
+
+    # 真实音频信号证据（优先级最高；标题/字幕启发在有信号时退为 tiebreaker）
+    audio_signal = _audio_signal_summary(data)
+    if audio_signal["available"]:
+        if not audio_signal["active"]:
+            scores["N"] += AUDIO_SIGNAL_WEAK_WEIGHT
+        else:
+            has_steady_beat = float(audio_signal["bpm_confidence"]) >= AUDIO_SIGNAL_BEAT_CONFIDENCE
+            if has_steady_beat:
+                if voiceover_ratio >= AUDIO_LM_VOICEOVER_RATIO:
+                    scores["LM"] += AUDIO_SIGNAL_LM_WEIGHT
+                    scores["M"] += AUDIO_SIGNAL_MUSIC_WEIGHT * 0.5
+                else:
+                    scores["M"] += AUDIO_SIGNAL_MUSIC_WEIGHT
+            else:
+                if (
+                    float(audio_signal["onset_rate"]) >= AUDIO_SIGNAL_SFX_ONSET_RATE
+                    and voiceover_ratio < AUDIO_SIGNAL_SFX_VOICEOVER_MAX
+                ):
+                    scores["E"] += AUDIO_SIGNAL_SFX_WEIGHT
+                if voiceover_ratio >= AUDIO_SIGNAL_LANGUAGE_VOICEOVER_MIN:
+                    scores["L"] += AUDIO_SIGNAL_LANGUAGE_WEIGHT
 
     # 标题关键词
     if _has_music_intent(data):
@@ -511,19 +587,35 @@ def _infer_audio_axis(data: Dict, context: Optional[Dict[str, object]] = None) -
     second_axis, second_score = ordered[1]
     total_score = sum(scores.values())
 
-    if total_score == 0 or (voiceover_ratio <= AUDIO_FORCE_WEAK_RATIO and not _has_music_intent(data)):
+    # 无字幕 ≠ 无声音：信号证明音频活跃时，不再因字幕缺失强制判 N。
+    if total_score == 0 or (
+        voiceover_ratio <= AUDIO_FORCE_WEAK_RATIO
+        and not _has_music_intent(data)
+        and not audio_signal.get("active")
+    ):
         axis = "N"
     elif axis in {"L", "M"} and second_axis in {"L", "M", "LM"} and abs(top_score - second_score) <= AUDIO_AXIS_TIE_DELTA and voiceover_ratio >= 0.2:
         axis = "LM"
     elif axis == "L" and _has_music_intent(data) and voiceover_ratio >= AUDIO_LM_VOICEOVER_RATIO and dialogue_ratio >= AUDIO_LM_DIALOGUE_RATIO:
         axis = "LM"
 
-    return {
+    rationale = f"听觉主体更接近 {AUDIO_AXIS_LABELS[axis]}。"
+    if audio_signal.get("available"):
+        rationale += "（含真实音频信号证据）"
+
+    result: Dict[str, object] = {
         "axis": axis,
         "label": AUDIO_AXIS_LABELS[axis],
-        "rationale": f"听觉主体更接近 {AUDIO_AXIS_LABELS[axis]}。",
+        "rationale": rationale,
         "voiceover_ratio": round(voiceover_ratio, 3),
     }
+    if audio_signal.get("available"):
+        result["audio_signal"] = {
+            key: audio_signal[key]
+            for key in ("active", "bpm", "bpm_confidence", "onset_rate", "rms_mean", "silence_ratio", "beat_ratio")
+            if key in audio_signal
+        }
+    return result
 
 
 def _base_route_from_axes(data: Dict, visual: Dict[str, object], audio: Dict[str, object]) -> Dict[str, object]:

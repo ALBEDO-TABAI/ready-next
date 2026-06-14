@@ -6,7 +6,7 @@ import re
 import subprocess
 from typing import Any, Callable, Dict, List
 
-from audiovisual.shared import _markdown_media_path, _safe_text
+from audiovisual.shared import _markdown_media_path, _safe_text, insert_block_after_lead
 
 try:
     from video_type_router_runtime import TYPE_LABELS
@@ -173,12 +173,7 @@ def prepend_report_diagram(
         lines.extend([summary, ""])
     lines.extend([f"![{title}](<{rel_path}>)", ""])
     block = "\n".join(lines).strip()
-
-    if markdown.startswith("# "):
-        first_line, _, remainder = markdown.partition("\n")
-        remainder = remainder.lstrip("\n")
-        return f"{first_line}\n\n{block}\n\n{remainder}"
-    return f"{block}\n\n{markdown.lstrip()}"
+    return insert_block_after_lead(markdown, block)
 
 
 def _child_type_key(data: Dict[str, Any], route: Dict[str, Any]) -> str:

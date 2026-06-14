@@ -1,6 +1,6 @@
 ---
 name: image-analysis-router
-description: Route image-heavy requests into the correct critique workflow, then produce a targeted analysis plus study report. Use when Ready receives one or more images and the user wants structured analysis, style classification, critique, or learning notes for posters, brand graphics, UI screenshots, paintings, illustrations, photographs, interior design photos or renders, building exteriors or urban scenes, infographics or diagrams, product or industrial design images, comics or sequential pages, fashion or styling visuals, sculpture or installation works, game visuals, scientific or medical images, typography-led pieces, presentation/report pages, movie stills, storyboard frames, or mixed visual sets. Trigger on requests such as "分析这张图", "拆一下这组海报", "看看这张摄影作品怎么学", "鉴赏这幅画", "分析这个空间图", "看看这个建筑立面", "拆这个信息图", "分析这个产品外观", "读一下这页漫画", "看看这套穿搭", "分析这个游戏界面", "看看这个医学图", "拆这个字体海报", "帮我看这页PPT", or any case where a generic image summary would be too shallow.
+description: Route image-heavy requests into the correct critique workflow, then produce a targeted analysis plus study report. Use when the agent receives one or more images and the user wants structured analysis, style classification, critique, or learning notes for any visual material - posters and brand graphics, UI screenshots and app screens, photographs, paintings and illustrations, interiors, architecture and urban scenes, infographics, product design, comics, fashion, sculpture, game visuals, scientific or medical images, typography, slides and report pages, film stills, or mixed image sets. Trigger on requests such as "分析这张图", "拆一下这组海报", "看看这张摄影作品怎么学", "分析这个界面", "帮我看这页PPT", or any case where a generic image summary would be too shallow.
 ---
 
 # Image Analysis Router
@@ -12,6 +12,7 @@ Use this skill when the main challenge is not "describe the image" but "pick the
 This skill expects image evidence plus a visual-analysis goal.
 
 - Accept: local image paths, image attachments, screenshots, filenames, OCR hints, source note path, source URLs, and user goal.
+- Do not create the upstream source note here. When called by another skill that owns a source note, treat `source_note_path` as owned by that caller.
 - Do not accept raw text-only study material as an image job; that belongs to `study-notes` after extraction.
 - `universal-fallback` is a named first-principles route for uncategorizable visuals, not a silent failure fallback.
 
@@ -21,34 +22,39 @@ This skill expects image evidence plus a visual-analysis goal.
 - Read [references/output-contract.md](./references/output-contract.md) before drafting the final answer.
 - If the script or visual read indicates a batch, read [references/method-batch-handling.md](./references/method-batch-handling.md).
 - If the image may be AI-generated or the user asks about generation, read [references/_ai-content-check.md](./references/_ai-content-check.md).
+- If two routes stay plausible after visual inspection, read [references/examples.md](./references/examples.md) for worked tie-break examples.
 - Read only the route file(s) named in [references/route-matrix.md](./references/route-matrix.md).
+- When `response_depth` is `quick`, the route-specific sections of [references/output-contract.md](./references/output-contract.md) can be skimmed; blocking states, evidence tone, and safety rules always apply.
 
 ## Workflow
 
 1. Gather the user's goal, image count, file names, and any supplied context.
-2. If prompt text or file names are available, run:
-   - `python3 scripts/route_image_request.py --prompt "<user request>" --file "<name-or-path>" --hint "<ocr-or-caption>"`
+2. If prompt text, file names, or source URLs are available, run:
+   - `python3 scripts/route_image_request.py --prompt "<user request>" --file "<name-or-path>" --hint "<ocr-or-caption>" --source-url "<url>"`
+   - Windows compatible: `py .\scripts\route_image_request.py ...`
    - Add `--quiet` to suppress route_scores/focus_scores/image_routes when only the decision is needed.
 3. Treat the script output as a routing prior, not final truth.
 4. Read the script status before route selection:
-   - `visual_input_missing`: stop and ask upstream for image evidence.
-   - `visual_evidence_insufficient`: do not force a route; state what is readable and what blocks analysis.
+   - `visual_input_missing`: if you can already see the image(s) directly in the conversation, this status is moot — pass the attachment via `--file`, note it via `--hint "image attached"`, or simply proceed with visual routing. Only when you genuinely have no image evidence: stop and ask upstream for it.
+   - `visual_evidence_insufficient`: do not force a route; state what is readable and what blocks analysis. Confirm against the actual image — the script infers this from the prompt wording.
    - `needs_clarification`: ask one clarifying question using the script's route and focus options.
+   - `router_unavailable` (or the script errors): proceed with visual-only routing and note that the keyword prior was unavailable.
    - `ok`: continue.
 5. Visually inspect at least one representative image before locking the route. If visual inspection conflicts with the script, follow the image and state the override reason briefly.
 6. Pick one primary route per image or subgroup. If the batch is mixed, split it instead of forcing one lens onto everything.
 7. State both route and intent confidence:
-   - `high`: dominant route clearly matches both visual evidence and user goal
+   - `high`: the dominant route clearly matches both the visual evidence and the user's goal
    - `medium`: one route leads, but a second route is plausible
-   - `low`: hybrid, under-specified, or missing context
-   - If `intent_confidence` is low AND the goal would change the report, ask one clarifying question first.
-   - If `route_confidence` is low because all scores are weak, use `universal-fallback` only when evidence is still readable.
+   - `low`: the image is hybrid, under-specified, or the file is missing enough context
+   - If `intent_confidence` is low and the user's goal would change the report, ask one clarifying question before producing the full report.
+   - If `route_confidence` is low because all route scores are weak, use `universal-fallback` only when the visual evidence is still readable.
    - If `route_confidence` is low because several strong routes tie, use `generic-mixed` and split the route-specific layers.
 8. Load only the method file(s) needed for the chosen route.
-9. Follow the script's `response_depth`:
+9. Follow the script's `response_depth` as a default, not a verdict:
    - `quick`: short answer, no full Study Report unless learning intent is explicit.
    - `standard`: Analysis Report plus brief Study Report.
    - `deep`: full Analysis Report plus full Study Report.
+   - Override the depth when the visible request clearly contradicts it — e.g. a short prompt that names specific dimensions deserves at least `standard`, and an explicit ask for depth in any language deserves `deep`. Record the override as `depth_override` in `处理说明` (same shape as `route_override`).
 
 ## Routing Override Record
 
@@ -80,65 +86,41 @@ When the script returns a blocking status, return the canonical JSON object belo
 
 `clarification_options.routes` MUST only contain routes that scored above zero. Empty arrays are valid.
 
-## UI Screenshot Handling
+## Routing rules
 
-Until a dedicated `ui-product` route exists, route standalone UI screenshots (app screens, web dashboards, settings panels) to `graphic-design` AND emphasize these four extra dimensions in the report:
+The full signal table, tie-breakers, and batch type rules live in [references/route-matrix.md](./references/route-matrix.md); worked examples for high-drift calls live in [references/examples.md](./references/examples.md). Do not re-derive routing criteria here.
 
-1. **Information density**: how many things compete for attention; foreground vs background.
-2. **State clarity**: empty / loading / error / success states; affordance signals.
-3. **Interaction cues**: tappable / hoverable / disabled visual differentiation.
-4. **Hierarchy resilience**: does the layout still work at smaller widths / accessibility scaling?
+Two principles override everything in the table:
 
-Do NOT use `presentation-document` for live UI screens; that route is for slide / report layouts.
-
-## Routing matrix (compact)
-
-| Route | Dominant signal |
-| --- | --- |
-| `graphic-design` | Typography, layout, branding, CTA, hierarchy, packaging, poster, image-text composition |
-| `photography` | Camera capture, lens behavior, exposure, depth, realism, documentary truth |
-| `painting-illustration` | Painted, drawn, stylized, symbolic, art-historical, iconography |
-| `interior-design` | Space, zoning, furniture, materials, atmosphere, lighting, circulation |
-| `architecture-urban` | Massing, facade, site, public realm, skyline, streetscape, landscape integration |
-| `infographic-diagram` | Chart, process diagram, map, flow graphic, system schematic |
-| `product-industrial-design` | Object, device, packaging, prototype, form / usability / manufacturability |
-| `comics-sequential` | Comic page, manga, webtoon, strip, panel order, narrative pacing |
-| `fashion-styling` | Clothing, silhouette, layering, accessories, runway/editorial/personal styling |
-| `sculpture-installation-craft` | 3D artwork, material assembly, site-specific installation, volume / presence |
-| `game-visual-design` | Game screenshot, HUD, character sheet, scene tied to gameplay |
-| `scientific-medical-imaging` | Diagnostic, scientific, microscopic, radiologic — interpretability / annotation |
-| `typography-lettering` | Lettering, logotypes, calligraphy, type posters, wordmarks |
-| `presentation-document` | Slide, report page, proposal page, dashboard, document spread |
-| `film-frame` | Movie still, animation frame, storyboard, cinematic composition |
-| `generic-mixed` | Image doesn't cleanly fit any single route or batch mixes domains |
-| `universal-fallback` | None match strongly enough but a structured first-principles read is still useful |
-
-Tiebreakers: a movie poster goes to `graphic-design`; raw frame inside → `film-frame` only if user wants cinematic analysis. Building image judged as photo → `photography`; judged for facade/site → `architecture-urban`. Product image as ad/ecommerce → `graphic-design`; as form/ergonomics → `product-industrial-design`.
+- If one image straddles multiple routes, choose based on what the user is actually trying to learn. Example: a movie poster usually goes to `graphic-design`; the raw frame inside that poster goes to `film-frame` only if the user wants cinematic analysis.
+- If none of the named routes fits well, use `universal-fallback` rather than forcing a bad match. It is a real route and must still produce a layered analysis and study report.
 
 ## Guardrails
 
 - Do not pretend certainty when the route is ambiguous.
 - Do not use `universal-fallback` when the image is missing or unreadable; use `visual_input_missing` or `visual_evidence_insufficient`.
-- Do not judge paintings with poster/ad standards unless explicitly asked.
-- Do not treat documentary photography as pure aesthetics when ethics/context/truthfulness are part of the request.
-- Do not infer hidden generation workflows for AI art without visible evidence.
-- If scientific or medical evidence appears, avoid diagnostic conclusions even when primary route is not `scientific-medical-imaging`.
-- Do not over-read narrative meaning from a single still frame.
-- Do not collapse mixed batches into a single verdict when items serve different roles.
+- Do not judge paintings with poster or ad-performance standards unless the user explicitly asks for commercial translation.
+- Do not treat documentary or journalistic photography as pure aesthetics when ethics, context, or truthfulness are part of the request.
+- Do not infer hidden generation workflows for AI art unless visible evidence supports the claim; use `_ai-content-check.md` to calibrate uncertainty.
+- If scientific or medical evidence appears anywhere in the image, avoid diagnostic conclusions even when the primary route is not `scientific-medical-imaging`.
+- Do not over-read narrative meaning from a single still frame; state the missing motion, sound, or sequence context.
+- Do not collapse mixed batches into a single verdict when the images clearly serve different roles.
 
 ## Batch handling
 
-- Same-project batch: analyze individual quality and set-level consistency.
-- Before/after: isolate what improved, what regressed, what still blocks the target.
-- Mood boards / reference packs: look for repeated signals, don't over-critique one image.
-- Subject-vs-reference: name the subject first, use references as anchors.
-- Two-image: compact A/B diff. More than five: group before analyzing.
+- For a same-project batch, analyze both individual quality and set-level consistency.
+- For before/after batches, isolate what improved, what regressed, and what still blocks the target result.
+- For mood boards or reference packs, look for repeated signals instead of over-critiquing one image in isolation.
+- For subject-vs-reference batches, name the subject image first and use references only as anchors.
+- For two-image batches, use a compact A/B difference read; for more than five images, group before analyzing.
 
 ## Recommended response pattern
 
-Follow [references/output-contract.md](./references/output-contract.md). At minimum, the final answer should include:
+Follow [references/output-contract.md](./references/output-contract.md).
 
-1. Route decision and confidence
-2. Why that route fits
-3. The route-specific analysis
-4. A concrete study report with drills or next-step practice — omit only when `response_depth: quick` AND `study_report_mode: none`, in which case mark the answer "quick read only" and offer to expand on request.
+At minimum, the final answer should include:
+
+1. route decision and confidence
+2. why that route fits
+3. the route-specific analysis
+4. a concrete study report with drills or next-step practice — **omit only when `response_depth: quick` AND `study_report_mode: none`**, in which case mark the answer "quick read only" and offer to expand on request

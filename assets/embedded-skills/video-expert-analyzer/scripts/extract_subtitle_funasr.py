@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """
 智能字幕提取脚本 - 自适应转录引擎
 非音乐视频默认先听人声，再补画面文字；音乐视频优先保留歌词/OCR 路径。
 """
-
-from __future__ import annotations
 
 import subprocess
 import sys
@@ -15,6 +14,7 @@ import tempfile
 import importlib.util
 from pathlib import Path
 import json
+import platform
 
 
 MUSIC_KEYWORDS = (
@@ -44,15 +44,10 @@ FUNASR_FALLBACK_ASR_MODEL_ID = os.environ.get(
     "iic/speech_seaco_paraformer_large_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
 )
 FUNASR_FALLBACK_VAD_MODEL_ID = "iic/speech_fsmn_vad_zh-cn-16k-common-pytorch"
-# 默认改用 ct-punc-c（zh，约 292MB），相比 cn-en-large（约 1.1GB）更小更快；
-# 仍可用 READY_FUNASR_PUNC_MODEL_ID 指回双语大模型。
 FUNASR_FALLBACK_PUNC_MODEL_ID = os.environ.get(
     "READY_FUNASR_PUNC_MODEL_ID",
     "iic/punc_ct-transformer_zh-cn-common-vocab272727-pytorch",
 )
-
-# 打包(离线)模式下，主进程会把已下载的模型包目录通过下列 env 注入；缺失时发出
-# 结构化信号，引导用户去「设置 › 模型与运行时」下载，而不是静默走联网兜底。
 ASR_MODEL_PACK_MISSING_MARKER = "__READY_ASR_MODEL_PACK_MISSING__"
 
 
@@ -146,22 +141,14 @@ def _preload_funasr_nano_runtime() -> tuple[bool, str]:
         return False, str(exc)
 
 
-def _configured_funasr_nano_model_path() -> str:
-    for env_name in ("READY_FUNASR_NANO_MODEL_DIR", "FUNASR_NANO_MODEL_DIR"):
-        raw = os.environ.get(env_name, "").strip()
-        if not raw:
-            continue
-        model_dir = Path(raw).expanduser()
-        missing = [name for name in FUNASR_NANO_REQUIRED_FILES if not (model_dir / name).is_file()]
-        if not missing:
-            return str(model_dir)
-        print(f"   ⚠️  FunASR Nano 本地目录缺少文件 {missing}: {model_dir}")
-    return ""
-
-
-def _allow_funasr_nano_download() -> bool:
-    value = os.environ.get("READY_FUNASR_NANO_AUTO_DOWNLOAD", "").strip().lower()
-    return value in {"1", "true", "yes", "on"}
+def _is_funasr_nano_registration_error(exc: Exception) -> bool:
+    message = f"{type(exc).__name__}: {exc}".lower()
+    return (
+        "funasrnano" in message
+        and "is not registered" in message
+        or "no module named 'model'" in message
+        or "loading remote code failed" in message
+    )
 
 
 def _modelscope_cache_root():
@@ -190,8 +177,6 @@ def _require_local_models() -> bool:
 
 
 def _resolved_model_dir(env_key: str, model_id: str) -> str:
-    """解析按需下载的模型目录：优先读主进程注入的绝对路径(env_key)，
-    校验必需文件后返回；否则回退到内置 ModelScope 缓存；都没有则返回空串。"""
     raw = os.environ.get(env_key, "").strip()
     if raw:
         model_dir = Path(raw).expanduser()
@@ -203,7 +188,6 @@ def _resolved_model_dir(env_key: str, model_id: str) -> str:
 
 
 def _emit_model_pack_missing(missing_roles: list[str]) -> None:
-    """向 skill 运行态/stderr 发出结构化缺包信号，由主进程映射为可引导下载的报错。"""
     payload = {"feature": "video-subtitle-asr", "missing": missing_roles}
     print(f"{ASR_MODEL_PACK_MISSING_MARKER} {json.dumps(payload, ensure_ascii=False)}", file=sys.stderr)
     print(
@@ -216,47 +200,28 @@ def _load_funasr_model():
     from funasr import AutoModel
 
     device = _funasr_device()
+    preload_ok, preload_error = _preload_funasr_nano_runtime()
+    if preload_ok:
+        print("   ✅ 已预加载 FunASR Nano 本地实现")
+    elif preload_error:
+        print(f"   ⚠️  FunASR Nano 预加载失败，继续尝试直连模型: {preload_error}")
 
     try:
-        local_model = _configured_funasr_nano_model_path()
-        if local_model:
-            model_py = Path(local_model) / "model.py"
-            kwargs = {
-                "model": local_model,
-                "hub": "hf",
-                "trust_remote_code": True,
-                "device": device,
-                "disable_update": True,
-            }
-            if model_py.is_file():
-                kwargs["remote_code"] = str(model_py)
-            model = AutoModel(**kwargs)
-            return model, "Fun-ASR-Nano-2512", device
-
-        if not _allow_funasr_nano_download():
-            raise RuntimeError("FunASR Nano model is not prepared; configure a local model dir or use the Ready download button")
-
-        preload_ok, preload_error = _preload_funasr_nano_runtime()
-        if preload_ok:
-            print("   ✅ 已预加载 FunASR Nano 本地实现")
-        elif preload_error:
-            print(f"   ⚠️  FunASR Nano 预加载失败，继续尝试 HF 模型: {preload_error}")
-
         model = AutoModel(
             model=FUNASR_NANO_MODEL_ID,
-            hub="hf",
-            trust_remote_code=True,
             device=device,
             disable_update=True,
         )
         return model, "Fun-ASR-Nano-2512", device
     except Exception as exc:
+        if not _is_funasr_nano_registration_error(exc):
+            raise
+
         print(f"   ⚠️  Fun-ASR-Nano-2512 当前环境不可直接使用: {exc}")
         fallback_asr = _resolved_model_dir("READY_FUNASR_ASR_MODEL_DIR", FUNASR_FALLBACK_ASR_MODEL_ID)
         fallback_punc = _resolved_model_dir("READY_FUNASR_PUNC_MODEL_DIR", FUNASR_FALLBACK_PUNC_MODEL_ID)
         fallback_vad = _local_modelscope_model_path(FUNASR_FALLBACK_VAD_MODEL_ID)
 
-        # 离线打包模式缺少回退包时，发出结构化信号并中止，绝不静默联网兜底。
         if _require_local_models() and (not fallback_asr or not fallback_punc):
             missing_roles = []
             if not fallback_asr:
@@ -643,7 +608,8 @@ def check_burned_subtitle(frame_path: str) -> bool:
             return text_count >= 2
         return False
     except ImportError:
-        print("⚠️ Ready 发行运行时缺少 RapidOCR，跳过烧录字幕检测")
+        print("⚠️ RapidOCR 未安装，跳过烧录字幕检测")
+        print("   安装命令: pip install rapidocr-onnxruntime")
         return False
     except Exception as e:
         print(f"⚠️ OCR 检测失败: {e}")
@@ -795,9 +761,104 @@ def _split_text_by_punctuation(text: str, timestamps: list) -> list:
     return sentences
 
 
+def _guess_language_candidates(title: str = "", url: str = "") -> list[str | None]:
+    haystack = f"{title} {url}"
+    candidates: list[str | None] = [None]
+    if re.search(r"[\u3040-\u30ff]", haystack):
+        candidates.append("ja")
+    if re.search(r"[\u4e00-\u9fff]", haystack):
+        candidates.append("zh")
+    candidates.append("en")
+    ordered: list[str | None] = []
+    for candidate in candidates:
+        if candidate not in ordered:
+            ordered.append(candidate)
+    return ordered
+
+
+def _write_segments_to_srt(segments: list[dict], output_srt: str) -> int:
+    subtitle_count = 0
+    with open(output_srt, "w", encoding="utf-8") as f:
+        for segment in segments:
+            text = str(segment.get("text", "")).strip()
+            if not text:
+                continue
+            subtitle_count += 1
+            start = format_timestamp(float(segment.get("start", 0.0)))
+            end = format_timestamp(float(segment.get("end", 0.0)))
+            f.write(f"{subtitle_count}\n{start} --> {end}\n{text}\n\n")
+    return subtitle_count
+
+
+def extract_with_whisper_mlx(video_path: str, output_srt: str, *, title: str = "", url: str = "") -> bool:
+    """
+    使用 MLX Whisper 进行语音转录 (macOS 专用)
+    使用 whisper-large-v3-turbo-q4 量化模型
+
+    模型特点:
+    - 模型大小: 约 500MB (量化版本)
+    - Apple Silicon 优化: 使用 Metal 加速
+    - 速度快: 针对 M1/M2/M3 优化
+    - 内存占用低: 量化模型
+    """
+    try:
+        import mlx_whisper
+
+        print("🎤 使用 MLX Whisper 进行语音转录...")
+        print("   ASR 模型: whisper-large-v3-turbo-q4 (Apple Silicon 优化)")
+        print("   框架: MLX (Metal 加速)")
+        print("   ⚠️ 首次运行需下载约 500MB 模型文件，请耐心等待")
+
+        # 提取音频
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            audio_path = tmp.name
+
+        if not extract_audio(video_path, audio_path):
+            return False
+
+        print("   开始转录...")
+        best_segments = []
+        for candidate in _guess_language_candidates(title, url):
+            result = mlx_whisper.transcribe(
+                audio_path,
+                path_or_hf_repo="mlx-community/whisper-large-v3-turbo-q4",
+                language=candidate,
+                word_timestamps=True,
+            )
+            segments = result.get("segments", [])
+            if segments and not transcript_quality_is_poor(segments):
+                best_segments = segments
+                break
+            if not best_segments:
+                best_segments = segments
+
+        if transcript_quality_is_poor(best_segments):
+            print("❌ MLX Whisper 转录质量过低，放弃写入主字幕")
+            os.unlink(audio_path)
+            return False
+
+        subtitle_count = _write_segments_to_srt(best_segments, output_srt)
+
+        # 清理临时文件
+        os.unlink(audio_path)
+
+        print(f"✅ MLX Whisper 转录完成: {subtitle_count} 条字幕")
+        return subtitle_count > 0
+
+    except ImportError:
+        print("❌ MLX Whisper 未安装")
+        print("   安装命令: pip install mlx-whisper")
+        return False
+    except Exception as e:
+        print(f"❌ MLX Whisper 转录失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
 def extract_with_funasr(video_path: str, output_srt: str) -> bool:
     """
-    使用 FunASR 进行语音转录
+    使用 FunASR 进行语音转录 (Windows/Linux)
     使用 Fun-ASR-Nano-2512 模型 - 新一代高性能模型
 
     模型特点:
@@ -809,8 +870,8 @@ def extract_with_funasr(video_path: str, output_srt: str) -> bool:
     """
     try:
         print("🎤 使用 FunASR 进行语音转录...")
-        print("   ASR 模型: 优先使用本地 Fun-ASR-Nano-2512；未准备则回退到 paraformer-zh")
-        print("   Nano 权重不随应用内置，可在 Ready Skill 配置中下载或指定本地目录")
+        print("   ASR 模型: Fun-ASR-Nano-2512 (新一代高性能模型)")
+        print("   ⚠️ 首次运行需下载约 2GB 模型文件，请耐心等待")
 
         # 提取音频
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
@@ -876,7 +937,8 @@ def extract_with_funasr(video_path: str, output_srt: str) -> bool:
         return subtitle_count > 0
 
     except ImportError:
-        print("❌ Ready 发行运行时缺少 FunASR / ModelScope")
+        print("❌ FunASR 未安装")
+        print("   安装命令: pip install funasr modelscope")
         return False
     except Exception as e:
         print(f"❌ FunASR 转录失败: {e}")
@@ -888,10 +950,26 @@ def extract_with_funasr(video_path: str, output_srt: str) -> bool:
 def extract_with_smart_asr(video_path: str, output_srt: str, *, title: str = "", url: str = "") -> bool:
     """
     智能选择 ASR 引擎
-    Ready 内置版本统一使用 FunASR Nano，避免平台分叉和旧本地 ASR 运行时体积。
+    - macOS: 使用 MLX Whisper (Apple Silicon 优化)
+    - Windows/Linux: 使用 FunASR (通用高性能)
     """
-    print("→ 使用 FunASR Nano")
-    return extract_with_funasr(video_path, output_srt)
+    system = platform.system()
+
+    print(f"检测到系统: {system}")
+
+    if system == "Darwin":  # macOS
+        print("→ 使用 MLX Whisper (Apple Silicon 优化)")
+        success = extract_with_whisper_mlx(video_path, output_srt, title=title, url=url)
+        if success:
+            return True
+
+        # 如果 MLX Whisper 失败，回退到 FunASR
+        print("\n⚠️  MLX Whisper 不可用，回退到 FunASR...")
+        return extract_with_funasr(video_path, output_srt)
+
+    else:  # Windows, Linux, etc.
+        print("→ 使用 FunASR (通用高性能)")
+        return extract_with_funasr(video_path, output_srt)
 
 
 # ============================================================
@@ -962,7 +1040,9 @@ def smart_subtitle_extraction(video_path: str, output_srt: str, video_url: str =
             if has_burned:
                 print("✅ 检测到画面文字，额外写入 onscreen_text 轨道...")
                 extract_burned_subtitle_ocr(video_path, onscreen_srt)
-        return _return_success("funasr")
+        system = platform.system()
+        mode = "mlx_whisper" if system == "Darwin" else "funasr"
+        return _return_success(mode)
 
     if strategy != "music_first":
         print("\n步骤 5/5: ASR 失败，尝试回退到平台/内嵌字幕...")

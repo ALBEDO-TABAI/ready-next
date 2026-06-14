@@ -15,19 +15,23 @@ description: "将文章、教程、评论、新闻、故事、研究报告、框
 - 可选接收：`prior_notes`、`topic_thread`、用户语言偏好。
 - 不接收：raw image、二进制附件、未经提取的网页或视频。
 - 如果上游给的是 raw image/binary，先返回 `modality_mismatch`，请上游完成 OCR、剪藏或转写后再调用。
+- PDF：文本层 PDF 先提取文本，扫描版先 OCR；未提取的 PDF 返回 `modality_mismatch`。
+- 纯 URL（没有随附正文）返回 `modality_mismatch`，请上游先抓取或剪藏页面。
 - 从 FastNote 进入时，默认 `source_note_path` 已经由 FastNote 创建，本 skill 只负责生成学习笔记内容。
 
 ## Read in order
 
-- 先读 [references/route-matrix.md](./references/route-matrix.md)
-- 再读 [references/complexity-rules.md](./references/complexity-rules.md)
-- 起草前读 [references/output-contract.md](./references/output-contract.md)
-- 如果拿到了正文、OCR、标题或文件名，先跑：
+- 如果拿到了正文、OCR、标题或文件名，先跑路由脚本拿先验：
   - `python3 scripts/route_study_notes.py --prompt "<user request>" --text "<content excerpt>" --file "<name-or-path>" --hint "<ocr-or-caption>"`
   - Windows 兼容路径：`py -3 .\scripts\route_study_notes.py ...`
-- 输出格式检查跑：`python3 scripts/validate_study_notes.py`（静态检查 + 跑 evals 路由断言）
-- 把脚本结果当作路由先验，不要把它当成最终判断
+  - 把脚本结果当作路由先验，不要把它当成最终判断
 - 如果脚本返回 `modality_mismatch` 或 `insufficient_text`，不要继续写完整笔记
+- 如果脚本 notes 出现 `length-hint mismatch`（声称长度远大于实际文本），按已提供的节选写，结尾标注"按节选整理；提供全文可做完整分层"，不要按声称长度规划分层
+- 按脚本置信度决定读哪些参考文件：
+  - `confidence=high` 且人工通读后同意路由：跳过 route-matrix 和 complexity-rules（这层判断脚本已完成），直接读对应 method 文件
+  - `confidence=medium/low`，或人工阅读与脚本冲突：先读 [references/route-matrix.md](./references/route-matrix.md) 和 [references/complexity-rules.md](./references/complexity-rules.md)，再自行判断
+- 确定 `study_goal` 后（用户显式说明优先，否则采用脚本推断值），按 [references/study-goals.md](./references/study-goals.md) 决定详略权重和目标专属块
+- 起草前读 [references/output-contract.md](./references/output-contract.md)
 - 按下面的脚本先验判定表决定是否走短路径
 - 只读取你真正需要的方法文件：
   - [references/method-knowledge-tutorial.md](./references/method-knowledge-tutorial.md)
@@ -39,8 +43,9 @@ description: "将文章、教程、评论、新闻、故事、研究报告、框
   - [references/method-mixed-content.md](./references/method-mixed-content.md)
   - [references/method-unsuitable-input.md](./references/method-unsuitable-input.md)
 - 需要对照范例时，只读匹配的片段：
-      - [references/examples.md](./references/examples.md)
-      - 优先看和当前路由同类型的完整输出，不要拿技术教程范例去套故事或新闻
+  - [references/examples.md](./references/examples.md)
+  - 优先看和当前路由同类型的完整输出，不要拿技术教程范例去套故事或新闻
+- `scripts/validate_study_notes.py` 是维护期工具：只在修改本 skill 的文件后运行（静态结构检查 + evals 路由断言），生成笔记时不要跑
 
 ## Script prior decision table
 
@@ -50,19 +55,33 @@ description: "将文章、教程、评论、新闻、故事、研究报告、框
 | `confidence=high`, route agrees, route is `unsuitable-input` | agrees | Use unsuitable path; explain why normal notes do not fit |
 | `confidence=high`, route conflicts | conflicts | Trust human reading; record the override reason in the quality gate |
 | `confidence=medium`, route agrees | agrees | Lightly verify Step 2-3, then continue |
-| `confidence=medium`, route conflicts | conflicts | Use `mixed-content` if both routes are strong; otherwise ask if the user goal is unclear |
-| `confidence=low` | any | Split into `mixed-content` when clear; ask if user goal is unclear; return a minimal blocked status if text is insufficient |
+| `confidence=medium`, route conflicts | conflicts | Use `mixed-content` if both routes are strong; otherwise pick the more likely route, write the note, and append a one-line assumption note |
+| `confidence=low` | any | Split into `mixed-content` when clear; otherwise pick the most likely route and append a one-line assumption note; return a minimal blocked status only if text is insufficient |
 
 The `content_type` is an internal judgment. Do not expose route names in the final answer unless the user asks.
+
+**带假设产出（代替追问）**：路由或学习目标不确定时，默认不向用户追问，直接按最可能的判断产出，并在结尾加一行假设标注，例如：
+
+```text
+按「了解背景」整理；如果你要拿来实操或复习，说一声我重新组织。
+```
+
+只有材料本身缺失（`insufficient_text` / `modality_mismatch`）才阻塞等待输入。
 
 **短路径下的 Step 8 校验维度收窄**：走 `Step 4 → Step 7 → Step 8` 短路径时，Step 8 只校验：
 - 输出形态匹配 `content_type`（路由 minimums 满足）
 - 输出复杂度匹配 `complexity`（短路径不会触发 layered overflow）
-- 不再单独校验 `study_goal` 与 `credibility`（短路径默认目标=`background-understanding`，可信度提醒只在事实声明出现时插入）
+- 不再单独校验 `study_goal` 与 `credibility`（短路径直接采用脚本给出的 `study_goal`，按 [references/study-goals.md](./references/study-goals.md) 追加专属块即可；可信度提醒只在事实声明出现时插入）
 
 ## Routing Override Record
 
-当 Decision Table 指示"信脚本"但人工阅读得出不同路由时，**必须**在最终输出末尾的 `处理说明` 段记录 override（按用户要求加 `处理说明` 才显示，否则保留为内部状态）：
+当脚本先验和人工阅读得出不同路由、且最终按人工阅读走时，**必须**在输出末尾加一行最简 `处理说明`——不暴露内部路由名和分数，只说明判断依据，例如：
+
+```text
+处理说明：文件名看起来是代码文件，但正文是教程文章，已按教程整理。
+```
+
+完整的 override 记录只在用户追问"为什么这么拆"时展开：
 
 ```text
 route_override:
@@ -71,18 +90,18 @@ route_override:
   reason: <一句话说明覆盖依据，e.g. "脚本只看了文件名，正文实际是评论文章">
 ```
 
-低置信场景下，即使没有路由覆盖，也建议把 `route_confidence`、`route_runner_up`、`route_decision` 三字段写进 `处理说明`，便于后续审计。
+低置信场景下用户追问时，再把 `route_confidence`、`route_runner_up`、`route_decision` 三字段一并写进 `处理说明`。
 
 ## Modality Mismatch Output
 
-当输入是 raw image / 二进制 / 未提取页面时，**不要写笔记**，直接返回 modality_mismatch 块：
+当输入是 raw image / 二进制 / 未提取的 PDF / 未抓取的页面时，**不要写笔记**，直接返回 modality_mismatch 块：
 
 ```json
 {
   "status": "modality_mismatch",
   "missing": ["extracted_text"],
-  "received": ["raw_image" | "binary" | "unfetched_url"],
-  "suggested_action": "请上游先完成 OCR / 剪藏 / 转写，然后把 extracted_text 再传给 study-notes"
+  "received": ["raw_image" | "binary" | "unextracted_pdf" | "unfetched_url"],
+  "suggested_action": "请上游先完成 OCR / 提取 / 剪藏 / 转写，然后把 extracted_text 再传给 study-notes"
 }
 ```
 
@@ -112,6 +131,7 @@ suggested_action: 请上游先 OCR 再调用
 - `text`: 直接读正文
 - `image`: 如果没有 OCR hint 或正文，返回 `modality_mismatch`；已有 OCR hint 时再继续
 - `mixed`: 先合并文字、OCR、图注和用户补充说明，再继续
+- `multi-source`: 用户一次给了多篇互不相关的材料时，不要拼成一篇做一份笔记；按来源分篇各自走路由。mixed-content 解决"一篇里有多层"，multi-source 解决"多篇各自独立"，不要混用
 - 这一步只解决“怎么拿到内容”，不解决“内容属于什么类型”
 
 ### Step 2: 判断学习目标
@@ -124,7 +144,8 @@ suggested_action: 请上游先 OCR 再调用
   - 二次创作：结构、论证方式、写法
   - 记忆复习：最小但不失真的记忆骨架
   - 决策支持：哪些事实或结论值得拿来判断下一步
-- 学习目标会影响后续 Step 3-7 的取舍重点
+- 学习目标会影响后续 Step 3-7 的取舍重点；目标定义、理论锚点和专属块写法见 [references/study-goals.md](./references/study-goals.md)
+- 目标不确定时不要追问：采用脚本推断值（或路由默认目标）直接产出，结尾标注一句假设（见"带假设产出"）
 
 ### Step 3: 识别内容类型
 
@@ -176,13 +197,9 @@ suggested_action: 请上游先 OCR 再调用
 
 ### Step 7: 按内容类型选择结构并起草
 
-- 结构先跟 `content_type` 走，再被 `complexity` 和 `study_goal` 微调
+- 结构先跟 `content_type` 走，再按 [references/study-goals.md](./references/study-goals.md) 被 `complexity` 和 `study_goal` 微调（路由定骨架，目标最多追加一个专属块）
 - 不要把所有内容都压成“这是什么 + 核心知识点 + 值得记住的 + 一句话总结”
-- 类比不是全局硬要求：
-  - 推荐：教程、框架、抽象概念解释
-  - 可选：评论、故事
-  - 默认豁免：数据报告、新闻、法律/政策、精确说明
-- 当类比会损失精度时，改用具体场景、原句、数字或例子
+- 类比策略按对应 method 文件的 `## Analogy policy` 执行（那里是唯一权威版本）；全局原则只有一条：类比服务于理解，当它会损失精度时，改用具体场景、原句、数字或例子
 
 ### Step 8: 按输出契约收尾
 
@@ -207,9 +224,7 @@ suggested_action: 请上游先 OCR 再调用
 
 ## Language policy
 
-- 用户指定语言时，按用户语言输出。
-- 用户未指定时，默认跟随用户请求语言。
-- 跨语言材料用用户偏好语言输出，专有名词和关键术语保留原文，首次出现时给简短解释。
+见 [references/output-contract.md](./references/output-contract.md) 的 `## Language policy`，那里是唯一权威版本。
 
 ## Optional processing note
 

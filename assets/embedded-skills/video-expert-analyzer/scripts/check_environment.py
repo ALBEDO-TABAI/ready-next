@@ -55,14 +55,14 @@ def main():
     print("🔍 Video Expert Analyzer v2.2.1 环境检测")
     print("=" * 55)
     print()
-    
+
     all_ok = True
     missing_cmds = []
     missing_pips = []
-    
+
     # ── 1. 系统工具 ──
     print("1️⃣  系统工具")
-    
+
     # 检查 FFmpeg
     ok, version = check_command("ffmpeg", "-version")
     if ok:
@@ -105,12 +105,12 @@ def main():
         except Exception:
             print("   ⚠️  无法检测硬件编解码能力，运行时会自动回退")
     else:
-        print("   ❌ Ready 发行运行时缺少 ffmpeg")
+        print(f"   ❌ ffmpeg 未安装 → brew install ffmpeg / 下载 FFmpeg")
         all_ok = False
-    
+
     # 检查 yt-dlp (支持多种调用方式)
     ok, version = False, ""
-    
+
     # 方法1: 直接命令
     try:
         result = subprocess.run(["yt-dlp", "--version"], capture_output=True, text=True, timeout=10)
@@ -118,7 +118,7 @@ def main():
             ok, version = True, result.stdout.strip()
     except:
         pass
-    
+
     # 方法2: 通过 py -m 调用
     if not ok:
         try:
@@ -127,22 +127,22 @@ def main():
                 ok, version = True, result.stdout.strip()
         except:
             pass
-    
+
     if ok:
         print(f"   ✅ yt-dlp: {version}")
     else:
-        print("   ❌ Ready 发行运行时缺少 yt-dlp")
+        print(f"   ❌ yt-dlp 未安装 → pip3 install yt-dlp")
         all_ok = False
-    
+
     # ── 2. 核心 Python 依赖（必需） ──
     print("\n2️⃣  核心 Python 依赖（必需）")
-    
+
     core_packages = {
         "scenedetect": "scenedetect[opencv]",
         "requests": "requests",
         "torch": "torch",
     }
-    
+
     for import_name, pip_name in core_packages.items():
         if check_python_package(import_name):
             print(f"   ✅ {pip_name}")
@@ -150,12 +150,25 @@ def main():
             print(f"   ❌ {pip_name} 未安装")
             missing_pips.append(pip_name)
             all_ok = False
-    
-    # ── 3. 语音转录依赖（FunASR Nano） ──
-    print("\n3️⃣  语音转录 (FunASR Nano)")
-    print("   推荐: FunASR Nano (通用高性能)")
 
-    # 检查 FunASR
+    # ── 3. 语音转录依赖（智能选择） ──
+    print("\n3️⃣  语音转录 (智能选择)")
+
+    import platform
+    system = platform.system()
+    print(f"   系统: {system}")
+
+    if system == "Darwin":  # macOS
+        print("   推荐: MLX Whisper (Apple Silicon 优化)")
+        if check_python_package("mlx_whisper"):
+            print("   ✅ mlx-whisper")
+        else:
+            print("   ⚠️  mlx-whisper 未安装 (推荐)")
+            print("      安装: pip install mlx-whisper")
+    else:  # Windows, Linux
+        print("   推荐: FunASR (通用高性能)")
+
+    # 检查 FunASR (所有系统都可用作备选)
     funasr_packages = {
         "funasr": "funasr",
         "modelscope": "modelscope",
@@ -189,7 +202,7 @@ def main():
         if check_python_package(import_name):
             print(f"   ✅ {pip_name} ({desc})")
         else:
-            print(f"   ⚠️  Ready 发行运行时缺少 {pip_name} ({desc})")
+            print(f"   ⚠️  {pip_name} 未安装 ({desc}) → pip3 install {pip_name}")
 
     # ── 5. GPU 加速 ──
     print("\n5️⃣  GPU 加速")
@@ -203,11 +216,11 @@ def main():
             print("   ⚠️  无 GPU 加速，将使用 CPU（转录可能较慢）")
     except ImportError:
         print("   ⚠️  PyTorch 未安装，无法检测 GPU")
-    
+
     # ── 结果汇总 ──
     print()
     print("=" * 55)
-    
+
     if all_ok:
         print("✅ 所有核心依赖已满足！可以开始使用 Video Expert Analyzer。")
         print()
@@ -215,15 +228,16 @@ def main():
         print("  python3 scripts/pipeline_enhanced.py --setup")
         print("  python3 scripts/pipeline_enhanced.py <视频URL>")
     else:
-        print("❌ Ready 发行运行时不完整，缺少以下依赖：")
+        print("❌ 存在缺失依赖，请执行以下命令安装：")
         print()
         if missing_pips:
-            print(f"  Python 模块: {', '.join(missing_pips)}")
+            print(f"  pip3 install {' '.join(missing_pips)}")
         for cmd in missing_cmds:
             print(f"  {cmd}")
         print()
-        print("请重新安装完整发行包或联系维护者。开发环境请参考 SKILL.md 的依赖说明。")
-    
+        print("或一键安装所有依赖：")
+        print("  pip3 install -r requirements.txt")
+
     print("=" * 55)
     return 0 if all_ok else 1
 

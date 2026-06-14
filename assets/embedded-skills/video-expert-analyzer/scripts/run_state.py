@@ -7,31 +7,17 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
 
+try:
+    from shared_io import atomic_write_text as _atomic_write_text
+except ImportError:  # pragma: no cover - script execution fallback
+    import sys
 
-def _atomic_write_text(path: Path, text: str) -> None:
-    """Write `text` to `path` atomically.
-
-    Using a same-directory tempfile + os.replace avoids the read-half-update
-    race that occurs when the orchestrator and ai_analyzer both touch
-    run_state.json concurrently.
-    """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(text)
-        os.replace(tmp_name, path)
-    except Exception:
-        try:
-            os.unlink(tmp_name)
-        except OSError:
-            pass
-        raise
+    sys.path.insert(0, str(Path(__file__).parent))
+    from shared_io import atomic_write_text as _atomic_write_text
 
 
 VALID_STAGES = {"prepare", "score_batches", "merge_validate", "finalize", "completed"}
@@ -40,14 +26,6 @@ VALID_STATUSES = {"running", "waiting_for_batches", "blocked", "ready_to_finaliz
 
 def _timestamp() -> str:
     return datetime.now().isoformat()
-
-
-def _ready_task_id() -> str:
-    return os.environ.get("READY_SKILL_TASK_ID", "").strip()
-
-
-def _ready_child_run_id() -> str:
-    return os.environ.get("READY_SKILL_CHILD_RUN_ID", "").strip()
 
 
 def _normalize_video_dir(value: str) -> str:
@@ -82,12 +60,6 @@ def _normalize_scores_path(value: str, video_dir: str) -> str:
         return absolute
 
 
-def _normalize_active_output_dir(value: str) -> str:
-    if not value:
-        return ""
-    return os.path.normpath(os.path.abspath(value))
-
-
 def default_verification() -> Dict:
     return {
         "requested_formats": [],
@@ -101,15 +73,8 @@ def default_verification() -> Dict:
 
 
 def default_run_state() -> Dict:
-    now = _timestamp()
     return {
-        "schema_version": 1,
         "version": "vnext",
-        "task_id": _ready_task_id(),
-        "child_run_id": _ready_child_run_id(),
-        "pid": os.getpid(),
-        "started_at": now,
-        "active_output_dir": "",
         "status": "running",
         "current_stage": "prepare",
         "completed_stages": [],
@@ -122,7 +87,7 @@ def default_run_state() -> Dict:
         "video_dir": "",
         "last_error": "",
         "verification": default_verification(),
-        "updated_at": now,
+        "updated_at": _timestamp(),
     }
 
 
@@ -152,40 +117,12 @@ def load_run_state(path: Path) -> Dict:
 def save_run_state(path: Path, state: Dict) -> None:
     payload = default_run_state()
     payload.update(state)
-    payload["schema_version"] = 1
-    payload["pid"] = os.getpid()
-    if not payload.get("task_id"):
-        payload["task_id"] = _ready_task_id()
-    if not payload.get("child_run_id"):
-        payload["child_run_id"] = _ready_child_run_id()
-    if not payload.get("started_at"):
-        payload["started_at"] = _timestamp()
-    if payload.get("active_output_dir"):
-        payload["active_output_dir"] = _normalize_active_output_dir(str(payload.get("active_output_dir") or ""))
     payload["verification"] = {
         **default_verification(),
         **(payload.get("verification") or {}),
     }
     payload["updated_at"] = _timestamp()
     _atomic_write_text(path, json.dumps(payload, indent=2, ensure_ascii=False))
-
-
-def reset_run_state(
-    path: Path,
-    *,
-    scores_path: Optional[str] = None,
-    video_dir: Optional[str] = None,
-    active_output_dir: Optional[str] = None,
-) -> Dict:
-    state = default_run_state()
-    if scores_path is not None:
-        state["scores_path"] = _normalize_scores_path(scores_path, str(video_dir or ""))
-    if video_dir is not None:
-        state["video_dir"] = _normalize_video_dir(video_dir)
-    if active_output_dir is not None:
-        state["active_output_dir"] = _normalize_active_output_dir(active_output_dir)
-    save_run_state(path, state)
-    return state
 
 
 def mark_stage(
@@ -201,7 +138,6 @@ def mark_stage(
     can_finalize: Optional[bool] = None,
     scores_path: Optional[str] = None,
     video_dir: Optional[str] = None,
-    active_output_dir: Optional[str] = None,
     last_error: Optional[str] = None,
     verification: Optional[Dict] = None,
 ) -> Dict:
@@ -233,8 +169,6 @@ def mark_stage(
         state["video_dir"] = _normalize_video_dir(video_dir)
     if scores_path is not None:
         state["scores_path"] = _normalize_scores_path(scores_path, state.get("video_dir", ""))
-    if active_output_dir is not None:
-        state["active_output_dir"] = _normalize_active_output_dir(active_output_dir)
     if last_error is not None:
         state["last_error"] = last_error
     if verification is not None:
@@ -243,32 +177,5 @@ def mark_stage(
             **verification,
         }
 
-    save_run_state(path, state)
-    return state
-
-
-def touch_run_state(
-    path: Path,
-    *,
-    stage: Optional[str] = None,
-    status: Optional[str] = None,
-    total_scenes: Optional[int] = None,
-    completed_scenes: Optional[int] = None,
-    coverage_ratio: Optional[float] = None,
-    active_output_dir: Optional[str] = None,
-) -> Dict:
-    state = load_run_state(path)
-    if stage is not None:
-        state["current_stage"] = stage
-    if status is not None:
-        state["status"] = status
-    if total_scenes is not None:
-        state["total_scenes"] = total_scenes
-    if completed_scenes is not None:
-        state["completed_scenes"] = completed_scenes
-    if coverage_ratio is not None:
-        state["coverage_ratio"] = round(float(coverage_ratio), 4)
-    if active_output_dir is not None:
-        state["active_output_dir"] = _normalize_active_output_dir(active_output_dir)
     save_run_state(path, state)
     return state

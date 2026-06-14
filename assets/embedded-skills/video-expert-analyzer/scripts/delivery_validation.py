@@ -10,6 +10,7 @@ and the on-disk delivery report.
 from __future__ import annotations
 
 import json
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -286,71 +287,6 @@ def collect_audiovisual_handoff_status(video_dir: Path) -> Dict[str, object]:
     }
 
 
-def _coerce_int_list(value: object) -> List[int]:
-    if not isinstance(value, list):
-        return []
-    numbers: List[int] = []
-    for item in value:
-        try:
-            number = int(item)
-        except (TypeError, ValueError):
-            continue
-        if number > 0 and number not in numbers:
-            numbers.append(number)
-    return numbers
-
-
-def _format_scene_labels(scene_numbers: Sequence[int], limit: int = 6) -> str:
-    labels = [f"Scene {number:03d}" for number in scene_numbers[:limit]]
-    suffix = "；..." if len(scene_numbers) > limit else ""
-    return "；".join(labels) + suffix
-
-
-def collect_auto_scoring_validation_status(video_dir: Path) -> Tuple[Dict[str, object], List[str]]:
-    report_path = video_dir / "auto_scoring_validation.json"
-    if not report_path.exists():
-        return {}, []
-    payload = _read_json(report_path, {})
-    if not isinstance(payload, dict) or not payload:
-        return {}, []
-
-    warning_scene_numbers = _coerce_int_list(
-        payload.get("validation_warning_scene_numbers") or payload.get("needs_review_scene_numbers")
-    )
-    failed_scene_numbers = _coerce_int_list(payload.get("validation_failed_scene_numbers"))
-    blocking_scene_numbers = _coerce_int_list(payload.get("blocking_scene_numbers"))
-    sample_scene_numbers = _coerce_int_list(payload.get("sample_scene_numbers"))
-
-    summary: Dict[str, object] = {
-        "path": str(report_path),
-        "checked_at": str(payload.get("checked_at", "") or ""),
-        "passed": bool(payload.get("passed")),
-        "sample_scene_numbers": sample_scene_numbers,
-        "validation_warning_scene_numbers": warning_scene_numbers,
-        "validation_failed_scene_numbers": failed_scene_numbers,
-        "blocking_scene_numbers": blocking_scene_numbers,
-    }
-
-    if not warning_scene_numbers or blocking_scene_numbers:
-        return summary, []
-
-    details: List[str] = []
-    if sample_scene_numbers:
-        details.append(f"抽查 {len(sample_scene_numbers)} 个")
-    if failed_scene_numbers:
-        details.append(f"{len(failed_scene_numbers)} 个图片探测失败")
-    detail_text = f"（{'，'.join(details)}）" if details else ""
-    return summary, [
-        f"抽样复核有非阻断提醒：{_format_scene_labels(warning_scene_numbers)}{detail_text}"
-    ]
-
-
-def _auto_scoring_validation_blocks(summary: Dict[str, object]) -> bool:
-    if not summary:
-        return False
-    return bool(_coerce_int_list(summary.get("blocking_scene_numbers"))) or summary.get("passed") is False
-
-
 def format_host_batch_receipt_issue_messages(issues: Sequence[Dict[str, object]]) -> List[str]:
     messages: List[str] = []
     for item in issues:
@@ -375,6 +311,71 @@ def format_incomplete_scene_message(incomplete: List[Dict]) -> str:
     return "；".join(preview) + suffix
 
 
+# 需要翻译为目标语言的四类最终报告（SKILL 规则：没翻完不算交付完成）
+_FINAL_REPORT_LANGUAGE_KEYS = (
+    "storyboard_md",
+    "audiovisual_md",
+    "detailed_analysis_md",
+    "complete_analysis_md",
+)
+
+
+def _load_primary_language(video_dir: Path) -> str:
+    """从 vnext_config.json 读目标报告语言（视频目录或其上一级）。"""
+    for candidate in (video_dir / "vnext_config.json", video_dir.parent / "vnext_config.json"):
+        config = _read_json(candidate, {})
+        if isinstance(config, dict) and str(config.get("primary_language", "") or "").strip():
+            return str(config["primary_language"]).strip()
+    return ""
+
+
+def _detect_language_mismatch(path: Path, target_language: str) -> bool:
+    """True = 文件主体语言与目标语言明显不符。
+
+    启发式只负责抓"压根没翻"（脚本先产中文版，agent 忘了重写），
+    不评判翻译质量。代码块、链接路径、Scene 编号等不参与统计。
+    """
+    target = target_language.lower()
+    if not target or target.startswith("zh"):
+        return False
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return False
+    text = re.sub(r"```[\s\S]*?```", " ", text)
+    text = re.sub(r"!?\[[^\]]*\]\([^)]*\)", " ", text)
+    han = len(re.findall(r"[一-鿿]", text))
+    kana = len(re.findall(r"[぀-ヿ]", text))
+    latin = len(re.findall(r"[A-Za-z]", text))
+    total = han + kana + latin
+    if total < 200:
+        return False
+    if target.startswith("ja"):
+        # 日文正文必然含大量假名；汉字占主导而假名近乎为零 → 还是中文稿
+        return han > 0 and kana / max(han + kana, 1) < 0.05
+    # 拉丁字母目标语言：汉字占比仍然很高 → 还是中文稿
+    return han / total > 0.25
+
+
+def collect_language_mismatch_outputs(
+    video_dir: Path,
+    video_id: str,
+    requested_formats: Sequence[str],
+) -> Dict[str, object]:
+    target = _load_primary_language(video_dir)
+    if not target or target.lower().startswith("zh"):
+        return {"primary_language": target or "zh-CN", "mismatched_outputs": []}
+    output_paths = _expected_output_paths(video_dir, video_id, requested_formats)
+    mismatched = [
+        name
+        for name in _FINAL_REPORT_LANGUAGE_KEYS
+        if name in output_paths
+        and output_paths[name].exists()
+        and _detect_language_mismatch(output_paths[name], target)
+    ]
+    return {"primary_language": target, "mismatched_outputs": mismatched}
+
+
 def build_verification_payload(
     video_dir: Path,
     data: Dict,
@@ -384,8 +385,6 @@ def build_verification_payload(
 ) -> Dict[str, object]:
     resource_issues = collect_scene_resource_issues(data)
     batch_receipt_issues = collect_host_batch_receipt_issues(video_dir)
-    auto_scoring_validation, non_blocking_warnings = collect_auto_scoring_validation_status(video_dir)
-    auto_scoring_blocks = _auto_scoring_validation_blocks(auto_scoring_validation)
     missing_outputs: List[str] = []
     required_outputs: Dict[str, str] = {}
 
@@ -415,15 +414,11 @@ def build_verification_payload(
             if item.get("missing_samples")
         ],
         "blocked_batches": [str(item["batch_id"]) for item in batch_receipt_issues],
-        "auto_scoring_blocking_scene_numbers": _coerce_int_list(auto_scoring_validation.get("blocking_scene_numbers")),
-        "auto_scoring_validation": auto_scoring_validation,
-        "non_blocking_warnings": non_blocking_warnings,
         "checked_at": datetime.now().isoformat(),
         "passed": (
             not collect_incomplete_scenes(data)
             and not resource_issues
             and not batch_receipt_issues
-            and not auto_scoring_blocks
             and (not include_output_checks or not missing_outputs)
         ),
     }
@@ -443,21 +438,11 @@ def write_delivery_report(video_dir: Path, data: Dict, requested_formats: Sequen
     incomplete_scenes = collect_incomplete_scenes(data)
     batch_receipt_issues = collect_host_batch_receipt_issues(video_dir)
     audiovisual_handoff = collect_audiovisual_handoff_status(video_dir)
-    auto_scoring_validation, non_blocking_warnings = collect_auto_scoring_validation_status(video_dir)
-    auto_scoring_blocks = _auto_scoring_validation_blocks(auto_scoring_validation)
-    verification = state.get("verification", {})
-    verification = dict(verification) if isinstance(verification, dict) else {}
-    if auto_scoring_blocks:
-        verification["passed"] = False
-        verification["auto_scoring_validation_passed"] = False
-        verification["auto_scoring_blocking_scene_numbers"] = _coerce_int_list(
-            auto_scoring_validation.get("blocking_scene_numbers")
-        )
-    data_warnings = [
-        str(item)
-        for item in data.get("warnings", [])
-        if str(item).strip()
-    ] if isinstance(data.get("warnings"), list) else []
+    language_check = (
+        collect_language_mismatch_outputs(video_dir, data.get("video_id", "unknown"), requested_formats)
+        if output_checks_enabled
+        else {"primary_language": "", "mismatched_outputs": []}
+    )
 
     report = {
         "video_id": data.get("video_id", "unknown"),
@@ -486,11 +471,12 @@ def write_delivery_report(video_dir: Path, data: Dict, requested_formats: Sequen
         "blocked_batches": [str(item["batch_id"]) for item in batch_receipt_issues],
         "incomplete_scene_numbers": [int(item["scene_number"]) for item in incomplete_scenes],
         "audiovisual_handoff": audiovisual_handoff,
-        "auto_scoring_validation": auto_scoring_validation,
-        "warnings": data_warnings + non_blocking_warnings,
-        "non_blocking_warnings": non_blocking_warnings,
+        # 目标语言非中文时，四类最终报告若仍是中文稿会列在这里；
+        # 该列表非空就不算交付完成（机器兜底 SKILL 的"没翻完不算交付"规则）
+        "primary_language": language_check.get("primary_language", ""),
+        "language_mismatch_outputs": list(language_check.get("mismatched_outputs", [])),
         "last_error": state.get("last_error", ""),
-        "verification": verification,
+        "verification": state.get("verification", {}),
         "updated_at": datetime.now().isoformat(),
     }
     delivery_report_path_for(video_dir).write_text(

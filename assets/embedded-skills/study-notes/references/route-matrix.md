@@ -4,23 +4,26 @@
 
 ## Selection order
 
-1. 先看用户学习目标。
+1. 先看用户学习目标（定义见 [study-goals.md](./study-goals.md)）。
 2. 再看原文的主导形态。
 3. 如果两种形态都很强，拆成 `mixed-content`，不要硬压成一种。
 4. 如果材料本身不适合普通笔记，切到 `unsuitable-input`。
+5. 注意区分"材料是 X"和"材料在讲 X"：带代码示例的教程是教程，讲合同技巧的文章是教程，正文里嵌一张小表的报告是报告。
 
 ## Route table
 
-| Route | 强信号 | 默认关注点 | 类比策略 | 避免误判 | Read next |
-| --- | --- | --- | --- | --- | --- |
-| `knowledge-tutorial` | 解释概念、教做法、步骤建议、常见误区、经验提炼 | 这是什么、怎么做、怎么用 | 推荐但不强制 | 不要把框架型文章误写成操作教程 | [method-knowledge-tutorial.md](./method-knowledge-tutorial.md) |
-| `opinion-commentary` | 明确立场、批评、价值判断、作者论证、结论带主观色彩 | 作者主张、理由、证据、反驳空间 | 可选，慎用 | 不要把观点写成事实摘要 | [method-opinion-commentary.md](./method-opinion-commentary.md) |
-| `narrative-story` | 人物、时间推进、场景、转折、经历、案例叙述 | 发生了什么、转折是什么、作者想表达什么 | 通常不用 | 不要把故事拆成生硬知识点 | [method-narrative-story.md](./method-narrative-story.md) |
-| `data-report` | 数字、样本、同比环比、研究结果、调研、结论与限制 | 核心发现、关键数据、口径边界、能说明什么 | 默认避免 | 不要把解释层写得比数据层更重 | [method-data-report.md](./method-data-report.md) |
-| `news-brief` | 时间地点人物机构、事件进展、官方回应、政策变动、已知/未知 | 5W1H、当前状态、后续影响 | 默认避免 | 不要把新闻写成鸡汤经验 | [method-news-brief.md](./method-news-brief.md) |
-| `framework-methodology` | 模型、原则、框架、三步法、五层结构、清单、方法论 | 框架是什么、由什么组成、怎么配合、适用边界 | 需要时可用 | 不要把框架拆散成互不相干的知识点 | [method-framework-methodology.md](./method-framework-methodology.md) |
-| `mixed-content` | 新闻加评论、报告加方法、故事加结论，多条主线并存 | 把主线拆开，再说明关系 | 视子路由决定 | 不要为了整齐牺牲结构真实度 | [method-mixed-content.md](./method-mixed-content.md) |
-| `unsuitable-input` | 纯表格、纯代码、法律条款、说明书、规格书 | 先解释为何不适合普通笔记，再切换摘要形式 | 不用 | 不要硬凑学习笔记模板 | [method-unsuitable-input.md](./method-unsuitable-input.md) |
+类比策略见各 method 文件的 `## Analogy policy` 小节。
+
+| Route | 强信号 | 默认关注点 | 避免误判 | Read next |
+| --- | --- | --- | --- | --- |
+| `knowledge-tutorial` | 解释概念、教做法、步骤建议、常见误区、经验提炼 | 这是什么、怎么做、怎么用 | 不要把框架型文章误写成操作教程 | [method-knowledge-tutorial.md](./method-knowledge-tutorial.md) |
+| `opinion-commentary` | 明确立场、批评、价值判断、作者论证、结论带主观色彩 | 作者主张、理由、证据、反驳空间 | 不要把观点写成事实摘要 | [method-opinion-commentary.md](./method-opinion-commentary.md) |
+| `narrative-story` | 人物、时间推进、场景、转折、经历、案例叙述 | 发生了什么、转折是什么、作者想表达什么 | 不要把故事拆成生硬知识点 | [method-narrative-story.md](./method-narrative-story.md) |
+| `data-report` | 数字、样本、同比环比、研究结果、调研、结论与限制 | 核心发现、关键数据、口径边界、能说明什么 | 不要把解释层写得比数据层更重 | [method-data-report.md](./method-data-report.md) |
+| `news-brief` | 时间地点人物机构、事件进展、官方回应、政策变动、已知/未知 | 5W1H、当前状态、后续影响 | 不要把新闻写成鸡汤经验 | [method-news-brief.md](./method-news-brief.md) |
+| `framework-methodology` | 模型、原则、框架、三步法、五层结构、清单、方法论 | 框架是什么、由什么组成、怎么配合、适用边界 | 不要把框架拆散成互不相干的知识点 | [method-framework-methodology.md](./method-framework-methodology.md) |
+| `mixed-content` | 新闻加评论、报告加方法、故事加结论，多条主线并存 | 把主线拆开，再说明关系 | 不要为了整齐牺牲结构真实度 | [method-mixed-content.md](./method-mixed-content.md) |
+| `unsuitable-input` | 纯表格、纯代码、法律条款、说明书、规格书 | 先解释为何不适合普通笔记，再切换摘要形式 | 不要硬凑学习笔记模板 | [method-unsuitable-input.md](./method-unsuitable-input.md) |
 
 ## Tie-breakers
 

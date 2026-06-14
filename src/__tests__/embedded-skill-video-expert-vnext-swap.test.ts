@@ -116,7 +116,7 @@ test('vnext entry script and referenced docs are bundled at expected paths', () 
   )
 })
 
-test('audiovisual raw-prompt evidence rule caps to available scene count', () => {
+test('audiovisual raw-prompt evidence rule keeps the vnext minimum scene evidence contract', () => {
   const script = `
 import json
 import sys
@@ -157,9 +157,9 @@ print(json.dumps({
   })
   const result = JSON.parse(raw)
   assert.equal(result.source, 'raw_prompt')
-  assert.equal(result.min, 1)
-  assert.equal(result.has_one, true)
-  assert.equal(result.has_three, false)
+  assert.equal(result.min, 3)
+  assert.equal(result.has_one, false)
+  assert.equal(result.has_three, true)
 })
 
 test('auto scoring sample validation keeps API probe failures non-blocking', () => {

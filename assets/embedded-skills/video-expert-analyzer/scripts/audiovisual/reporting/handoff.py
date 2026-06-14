@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -13,18 +12,8 @@ def _hash_text(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
-_GENERATED_TIME_RE = re.compile(r"\*生成时间：[^*\n]+\*")
-
-
-def _normalize_prompt_for_hash(text: str) -> str:
-    normalized = _GENERATED_TIME_RE.sub("*生成时间：<normalized>*", text)
-    return normalized.strip()
-
-
 def _hash_prompt(system_prompt: str, user_message: str) -> str:
-    return _hash_text(
-        f"{_normalize_prompt_for_hash(system_prompt)}\n---\n{_normalize_prompt_for_hash(user_message)}"
-    )
+    return _hash_text(f"{system_prompt}\n---\n{user_message}")
 
 
 HANDOFF_DIRNAME = "audiovisual_handoff"
@@ -60,6 +49,27 @@ _SUBTASK_LABELS = {
     "overview": "MV 内容架构总览",
     "illustrate": "视听剖析配图",
 }
+
+
+def mark_validation_failure(video_dir: Path, task: str, message: str) -> None:
+    """机器校验失败时把 receipt 里对应子任务标为 validation_failed。
+
+    校验发生在 request_* 已把任务标成 completed 之后，不同步会让 receipt
+    与 validation_errors.json 各说各话，agent 无法从 receipt 看出该重做。
+    """
+    handoff_dir = Path(video_dir) / HANDOFF_DIRNAME
+    receipt_path = handoff_dir / "receipt.json"
+    if not receipt_path.exists():
+        return
+    try:
+        data = json.loads(receipt_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return
+    if not isinstance(data, dict):
+        return
+    coordinator = AudiovisualHandoffCoordinator(Path(video_dir), str(data.get("video_id", "")))
+    coordinator._mark_task(task, "validation_failed", validation_error=message)
+    coordinator._write_brief()
 
 
 def _format_pending_message(video_id: str, name: str, task_path: Path, video_dir: Path) -> str:
@@ -217,7 +227,9 @@ class AudiovisualHandoffCoordinator:
             "## 视听剖析正文的硬指标",
             "",
             '- 输出必须逐模块展开，不是"每模块一段话总结"。`task.md` 里"输出骨架"列出的每个 `## 模块` 和 `### 子条目` 都必须按字面出现，不得合并、改写或省略。',
-            "- 每个 `##` 模块默认不少于 700 字；每个 `###` 子条目默认不少于 180 字；Scene 证据数量以 `task.md` 里的交付规则为准，短视频会按真实可用 Scene 数降低。",
+            "- 正文第一个模块必须是 `## 导读`：写给普通观众的总-分速读（白话结论 + 亮点定位），它受**上限**约束（默认 ≤400 字、≥2 处 Scene/时间码引用、禁框架术语），不受下面的 700 字下限约束。",
+            "- 若用户在对话中明确表达过关注点，导读优先回答用户的问题；否则按 task.md 给出的该类型默认价值问题写。",
+            "- 除导读外，每个 `##` 模块默认不少于 700 字；每个 `###` 子条目默认不少于 180 字；每个模块至少引用 3 个不同 Scene 编号作为证据。",
             "- 凡 prompt 要求的表格（`| 字段 | 内容 |` 等）必须原样用 Markdown 表格呈现，不可改写成段落。",
             '- 脚本会在 finalize 时机器校验这些指标；不合规会抛 ValueError，你需要对照错误信息补齐后再跑 finalize，不要把"已经写过"当成"已经合规"。',
             "",
@@ -233,6 +245,9 @@ class AudiovisualHandoffCoordinator:
             output_path = info.get("output", "")
             prompt_source = info.get("prompt_source", "")
             lines.append(f"- `{key}`：{status}")
+            if info.get("validation_error"):
+                lines.append(f"  - 上次机器校验失败：{info.get('validation_error')}")
+                lines.append(f"  - 各模块实际字数/差额见：`{key}/validation_errors.json`")
             if prompt_source:
                 lines.append(f"  - System Prompt 源文件：`{prompt_source}`")
             if task_path:
@@ -270,7 +285,8 @@ class AudiovisualHandoffCoordinator:
             user_message=user_message,
             output_instruction=(
                 '写入完整的视听剖析正文 Markdown：严格复刻 user message 中"输出骨架"列出的 `##` 模块与 `###` 子条目标题；'
-                "每个 `##` 模块 ≥ 700 字、每个 `###` 子条目 ≥ 180 字，并按 user message 中交付规则引用可用 Scene 编号；"
+                "第一个模块必须是 `## 导读`（≤400 字、≥2 处 Scene/时间码引用、说人话，详见 user message 的导读要求）；"
+                "其余每个 `##` 模块 ≥ 700 字、每个 `###` 子条目 ≥ 180 字、每个 `##` 模块至少出现 3 个不同 Scene 编号；"
                 "不要加顶层 `#` 标题，也不要用代码块围栏包住整份正文。"
             ),
             prompt_source=prompt_source,

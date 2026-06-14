@@ -63,7 +63,7 @@ LLM 看到工具名时按下表对应：
 - **新视频冷启动**：用户给的是视频链接或本地视频文件，且没有显式续跑句柄。Ready 中直接调用 `skill_video_expert_pipeline`；runtime 负责输出准备和状态追踪。不要为了冷启动先扫 `vnext_config.json`、旧输出目录或旧 `run_state.json`。
 - **续跑 / 观察 / 诊断**：只有用户给出 `run_state.json`、`scene_scores.json`、输出目录、任务卡继续、childRunId，或明确要求查进度/历史时，才 inspect/read 对应状态和 artifact。
 - **历史目录**：如果偶然发现历史任务，但用户没有要求续跑，表述为“检测到历史任务；它不影响这次新的分析”，继续按新分析推进，不要暗示正在恢复旧任务。
-- **配置**：只有用户主动要求改输出根目录、报告语言或模型偏好时才讨论配置；不要把配置扫描当作新分析前置步骤。API key 只让用户自己设置环境变量，绝不写进 JSON。
+- **配置**：Ready 会通过 host requirements 写入当前 agent 的视觉模型配置。只有用户主动要求改输出根目录、报告语言或模型偏好时才讨论配置；不要把配置扫描当作新分析前置步骤。API key 只让用户自己设置环境变量，绝不写进 JSON。
 
 ## 默认执行模式
 
@@ -81,8 +81,8 @@ LLM 看到工具名时按下表对应：
 
 1. 不允许抽样、跳过，或对没看过的画面做判断。
 2. 每个 scene 都必须有独立结果，并及时写回文件。
-3. 如果用户给出明确续跑句柄，或任务卡/childRunId 指向已有任务，优先续跑，不重做已完成阶段。
-4. 续跑、观察、诊断时先 inspect 当前任务的 `run_state.json`；新视频冷启动不要先读旧状态。
+3. 如果已有 `scene_scores.json`、`run_state.json`、`host_batches/` 或批次 output，优先续跑，不重做已完成阶段。
+4. 每次开始前先读 `run_state.json`；只做当前阶段允许的动作，不自己跳步。
 5. `score_batches` 的正常路径是自动并行评分，不要再把“当前 agent 自己逐批看图填 JSON”当成默认方案。
 6. OpenClaw 子代理接手当前批次后，必须先更新 `receipt.status = "in_progress"`，并写 `started_at`、`updated_at`。
 7. 当前批次完成后，必须把 `receipt.status = "completed"`、`has_todo = false`、`worker_summary`、`updated_at`、`completed_at` 写回。
@@ -92,16 +92,17 @@ LLM 看到工具名时按下表对应：
 11. 用户请求里包含 `pdf` 时，任何一个必需 PDF 缺失都不算完成。
 12. Windows 上如果本地链路明确报 `HTTP Error 429`，应直接当成平台限流阻塞回报，不要擅自改走浏览器下载、录屏或别的旁路。
 13. 禁止用本地 `PIL` / `OpenCV` 的亮度、颜色、对比度特征脚本冒充“已看图”；这类结果只能算失败或诊断，不能算正式评分。
-14. 视听剖析的正文长文、SVG 结构图、MV 内容架构总览改由运行本 skill 的 agent（也就是你）直接完成；脚本不再调远端文本模型做这几段，也不再保留任何本地兜底文本。遇到 `audiovisual_handoff/` 下的任务包必须按序（body → 然后 diagram **或** overview（互斥，由路由决定，通常只触发其一）→ 最后 illustrate）完成，再重新跑 `finalize`。正文 `body/output.md` 必须逐模块展开：task.md 里"输出骨架"列出的每个 `##` 模块、`###` 子条目都要字面出现，不得合并/省略；每个 `##` ≥ 700 字、每个 `###` ≥ 180 字，Scene 证据数量以 task.md 的交付规则为准（长视频默认 3 个不同 Scene，短视频按真实可用 Scene 数降低）。脚本会在 finalize 时机器校验，不达标会抛 `ValueError`，并把缺项写到 `audiovisual_handoff/body/validation_errors.json`，按错误提示补齐再跑，不要把"已经写过"当成"合规"。
-15. `illustrate/output.md` 只能使用 `audiovisual_handoff/illustrate/task.md` 中「场景目录」列出的截图路径，不得凭空编造；同一张截图也不能在连续 3 段以内重复出现，否则脚本会抛 `ValueError`。
-16. Handoff `receipt.json` 会记录每个子任务的 `input_hash`；当分类结果或 prompt 变化时，已有 `output.md/svg/json` 会被自动作废，需要重新生成。
+14. 视听剖析的正文长文、SVG 结构图、MV 内容架构总览改由运行本 skill 的 agent（也就是你）直接完成；脚本不再调远端文本模型做这几段，也不再保留任何本地兜底文本。遇到 `audiovisual_handoff/` 下的任务包必须按序（body → 然后 diagram **或** overview（互斥，由路由决定，通常只触发其一）→ 最后 illustrate）完成，再重新跑 `finalize`。正文 `body/output.md` 必须逐模块展开：task.md 里"输出骨架"列出的每个 `##` 模块、`###` 子条目都要字面出现，不得合并/省略；除 `## 导读` 外每个 `##` ≥ 700 字、每个 `###` ≥ 180 字、每个 `##` 至少引用 3 个不同 Scene 编号。脚本会在 finalize 时机器校验，不达标会抛 `ValueError`，并把缺项（含每个模块的实际字数与差额）写到 `audiovisual_handoff/body/validation_errors.json`，按错误提示补齐再跑，不要把"已经写过"当成"合规"。
+15. 正文第一个模块必须是 `## 导读`：写给普通观众的总-分速读。先用 2-3 句白话回答该类型的"价值问题"（task.md 会给出默认问题；**如果用户在对话里明确表达过自己的关注点——比如"想看看这访谈聊了什么观点"——导读必须优先回答用户的问题**，默认问题退为兜底），再列 2-4 条亮点（一句话结论 + Scene 编号/时间码）。允许否定或中性结论，不要强行夸。导读受上限约束：默认 ≤400 字、≥2 处 Scene/时间码引用、禁止"双轴""路由""冯·雷斯托夫""加权分"这类框架术语——机器校验会打回。
+16. `illustrate/output.md` 只能使用 `audiovisual_handoff/illustrate/task.md` 中「场景目录」列出的截图路径，不得凭空编造；同一张截图也不能在连续 3 段以内重复出现，否则脚本会抛 `ValueError`。
+17. Handoff `receipt.json` 会记录每个子任务的 `input_hash`；当分类结果或 prompt 变化时，已有 `output.md/svg/json` 会被自动作废，需要重新生成。若 receipt 里某任务是 `validation_failed`，说明上次输出没过机器校验，先看 `brief.md` 里的失败原因和 `validation_errors.json` 的逐模块差额，改完再跑 finalize。
 
 ## OpenClaw 主控原则（仅 OpenClaw 接力场景适用）
 
 只有宿主明确是 OpenClaw 并且走接力模式时，才适用以下原则：
 
 1. 跑总控入口
-2. 读当前任务的 `run_state.json`
+2. 读 `run_state.json`
 3. 优先直接跑 `python3 scripts/orchestrate_vnext.py /path/to/scene_scores.json --dispatch-json`
 4. 如果确实只想单独取派单包，再跑 `python3 scripts/openclaw_dispatch.py /path/to/scene_scores.json`
 5. 只把当前批次四件套交给一个短生命周期 worker
@@ -149,7 +150,7 @@ python3 scripts/ai_analyzer.py /path/to/scene_scores.json --mode score_batches
 
 这一阶段会自动处理批次分析：
 
-- 读当前任务的 `run_state.json`
+- 先读 `run_state.json`
 - 自动发现可用模型配置
 - 并行读取每个 scene 的 `primary / start / mid / end` 帧
 - 直接写回对应的 `batch-XXX-output.json`
@@ -240,6 +241,8 @@ python3 scripts/ai_analyzer.py /path/to/scene_scores.json --mode finalize
 3. 当前要求的结果文件都已经真实存在
 4. 如果用户请求了 PDF，对应 PDF 确实存在且不是空文件
 5. 只要还有 `blocked`、`needs_review`、本地特征兜底痕迹、缺文件、缺图或缺 PDF，就不能报完成
+6. 目标语言非中文时，`delivery_report.json` 的 `language_mismatch_outputs` 必须为空——它非空说明四类最终报告还有没翻完的中文稿，不能报完成
+7. 如果是人工确认素材问题已解决后要重试 blocked 批次，用 `python3 scripts/ai_analyzer.py <scene_scores.json> --unblock --mode score_batches`，不要手改 JSON
 
 ## 环境变量与调参
 
@@ -248,7 +251,12 @@ python3 scripts/ai_analyzer.py /path/to/scene_scores.json --mode finalize
 - `OPENCLAW_ROOT`：覆盖 OpenClaw 根目录（默认 `~/.openclaw`）。
 - `OPENCLAW_MODELS_JSON`：覆盖 `models.json` 完整路径（默认 `$OPENCLAW_ROOT/agents/main/agent/models.json`）。
 - `VNEXT_STALE_MINUTES`：当前 worker 超过该分钟数未更新 `heartbeat_at`/`updated_at`/`started_at` 时，`reset_stale_in_progress_receipts` 会把 `receipt.status` 从 `in_progress` 重置为 `pending`（默认 30）。
-- `VNEXT_TEXT_MODEL_RETRIES`：`request_text_with_runtime` 对单个 provider 的瞬时错误（rate limit / timeout / 5xx）重试次数（默认 2，指数退避 1s → 2s → 4s）。
+- `VNEXT_TEXT_MODEL_RETRIES`：`request_text_with_runtime` 对单个 provider 的瞬时错误（按 HTTP 状态码判定：408/409/429/5xx 重试，其它 4xx 直接失败）重试次数（默认 2，指数退避 1s → 2s → 4s）。
+- `VNEXT_VISION_MAX_EDGE`：发给视觉模型前把帧图缩到的最长边像素（默认 1568 ≈ 主流供应商的服务端摄入上限；超出部分供应商也会丢弃，只浪费上传）。
+- `VNEXT_VISION_JPEG_QUALITY`：缩放重编码的 JPEG 质量（默认 85）。
+- `VNEXT_VISION_RAW`：设为 `1` 完全跳过缩放压缩，按原始字节直传。
+- `VNEXT_TYPE_WEIGHT_SOFTENING`：场景类型权重的软混合系数 α（默认 0.4；有效权重 = (1-α)·类型档位 + α·均匀权重，设 0 还原硬切换）。
+- `AUDIOVISUAL_SUMMARY_MAX_CHARS` / `AUDIOVISUAL_SUMMARY_MIN_SCENE_EVIDENCE`：导读模块的字数上限（默认 400）与最少 Scene/时间码引用数（默认 2）。
 - `AUDIOVISUAL_REPORT_MAX_TOKENS` / `AUDIOVISUAL_REPORT_MODEL`：视听剖析正文生成时直连文本模型的上限 / 模型名（仅在未启用 handoff 架构时生效）。
 
 ## 按需补充

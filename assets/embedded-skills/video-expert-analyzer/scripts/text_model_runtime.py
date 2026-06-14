@@ -26,13 +26,38 @@ _TRANSIENT_ERROR_KEYWORDS = (
     "overloaded",
     "timeout",
     "timed out",
+    "connection error",
+    "connection reset",
     "503",
     "502",
     "429",
 )
+# 可重试的 HTTP 状态码：限流 / 超时 / 冲突 / 服务端错误
+_TRANSIENT_STATUS_CODES = {408, 409, 429, 500, 502, 503, 504, 520, 522, 524, 529}
+
+
+def _extract_status_code(exc: BaseException) -> int | None:
+    """从 SDK 异常中提取 HTTP 状态码（openai/anthropic 的 APIStatusError 都带）。"""
+    for attribute in ("status_code", "http_status", "status"):
+        value = getattr(exc, attribute, None)
+        if isinstance(value, int):
+            return value
+    response = getattr(exc, "response", None)
+    value = getattr(response, "status_code", None)
+    if isinstance(value, int):
+        return value
+    return None
 
 
 def _is_transient_error(exc: BaseException) -> bool:
+    """优先按 HTTP 状态码判定；拿不到状态码时退回关键词匹配。
+
+    此前纯字符串匹配会把消息里碰巧含 "429" 等字样的永久错误（如 400
+    参数错误）误判为瞬时错误，白白重试浪费配额。
+    """
+    status_code = _extract_status_code(exc)
+    if status_code is not None:
+        return status_code in _TRANSIENT_STATUS_CODES
     message = f"{type(exc).__name__}: {exc}".lower()
     return any(keyword in message for keyword in _TRANSIENT_ERROR_KEYWORDS)
 
@@ -134,15 +159,10 @@ def build_attempt_order(runtime_config: Dict[str, Any]) -> List[Dict[str, Any]]:
     preferred_model = str(runtime_config.get("preferred_model", "") or "")
     fallback_models = tuple(runtime_config.get("fallback_models", ()) or ())
 
-    for index, model_ref in enumerate((preferred_model, *fallback_models)):
+    for model_ref in (preferred_model, *fallback_models):
         if not model_ref or model_ref in seen:
             continue
-        try:
-            provider_name, provider_config, model_config = _resolve_model_entry(providers, model_ref)
-        except ValueError:
-            if index == 0:
-                raise
-            continue
+        provider_name, provider_config, model_config = _resolve_model_entry(providers, model_ref)
         attempts.append(
             {
                 "model_ref": model_ref,

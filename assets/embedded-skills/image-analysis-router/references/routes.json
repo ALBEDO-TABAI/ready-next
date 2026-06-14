@@ -1,27 +1,276 @@
 {
-  "version": "1.0.0",
-  "routes": [
-    "graphic-design",
-    "photography",
-    "painting-illustration",
-    "interior-design",
-    "architecture-urban",
-    "infographic-diagram",
-    "product-industrial-design",
-    "comics-sequential",
-    "fashion-styling",
-    "sculpture-installation-craft",
-    "game-visual-design",
-    "scientific-medical-imaging",
-    "typography-lettering",
-    "presentation-document",
-    "film-frame",
-    "generic-mixed",
-    "universal-fallback"
-  ],
+  "version": "2.0.0",
+  "comment": "Single source of truth for ALL routing data. route_image_request.py is a generic engine over this file; validate_image_router.py checks structure against it. 'router_only_excludes' lists routes decided at LLM/orchestrator level (no keyword scoring). Filename patterns accept either a plain regex string (weight 3) or {pattern, weight} for weaker signals such as camera default names.",
   "router_only_excludes": [
     "generic-mixed",
     "universal-fallback"
   ],
-  "comment": "Single source of truth. route_image_request.py and validate_image_router.py both load this. 'router_only_excludes' lists routes that are decided at LLM/orchestrator level (not in the prior keyword scorer)."
+  "routes": {
+    "graphic-design": {
+      "keywords": [
+        "graphic design", "平面设计", "海报", "poster", "banner", "kv", "主视觉",
+        "品牌", "brand", "包装", "packaging", "版式", "typography", "字体",
+        "排版", "layout", "广告", "ad creative", "cta"
+      ],
+      "filename_patterns": [
+        "\\bposter\\b", "\\bbanner\\b", "\\bbrand\\b", "\\bpackag",
+        "\\bkv\\b", "\\bcarousel\\b", "\\.psd$", "\\.ai$"
+      ]
+    },
+    "ui-product": {
+      "keywords": [
+        "ui", "ui界面", "应用界面", "app screen", "landing page", "界面",
+        "interface", "交互", "interaction", "按钮", "button", "弹窗", "modal",
+        "onboarding", "空状态", "empty state", "设置页", "settings page",
+        "导航", "navigation", "表单", "用户体验", "ux", "usability",
+        "易用性", "可用性", "web app", "网页", "user flow", "wireframe"
+      ],
+      "filename_patterns": [
+        "\\bui\\b", "\\bscreen\\b", "\\bwireframe\\b", "\\bfigma\\b",
+        "\\bonboarding\\b", "\\bmodal\\b", "\\bsettings\\b", "\\blanding\\b",
+        "\\.fig$", "\\.sketch$",
+        {"pattern": "\\bapp\\b", "weight": 2},
+        {"pattern": "\\bscreenshot\\b", "weight": 1}
+      ]
+    },
+    "photography": {
+      "keywords": [
+        "photography", "photo", "摄影", "照片", "portrait", "人像", "street",
+        "街拍", "landscape", "风光", "documentary", "纪实", "fashion",
+        "时尚摄影", "product photo", "商业摄影", "exposure", "曝光", "焦距",
+        "景深", "bokeh", "raw"
+      ],
+      "filename_patterns": [
+        "\\bportrait\\b", "\\bstreet\\b", "\\blandscape\\b", "\\braw\\b",
+        "\\.cr2$", "\\.cr3$", "\\.arw$", "\\.nef$", "\\.dng$",
+        {"pattern": "\\bdsc\\b", "weight": 1},
+        {"pattern": "\\bimg[_-]?\\d+", "weight": 1}
+      ]
+    },
+    "painting-illustration": {
+      "keywords": [
+        "painting", "绘画", "画作", "illustration", "插画", "concept art",
+        "概念设计", "oil painting", "油画", "watercolor", "水彩", "ink painting",
+        "水墨", "国画", "艺术风格", "风格分析", "symbolism", "图像学",
+        "cross-cultural", "跨文化", "ai art", "aigc"
+      ],
+      "filename_patterns": [
+        "\\billustration\\b", "\\bconcept[-_ ]?art\\b", "\\bpainting\\b",
+        "\\boil\\b", "\\bwatercolor\\b", "\\bink\\b"
+      ]
+    },
+    "interior-design": {
+      "keywords": [
+        "interior", "室内", "室内设计", "space design", "空间", "room", "客厅",
+        "卧室", "餐厅", "办公室", "样板间", "渲染图", "材质", "动线", "zoning",
+        "lighting plan", "软装", "家具"
+      ],
+      "filename_patterns": [
+        "\\binterior\\b", "\\broom\\b", "\\bliving[-_ ]?room\\b", "\\bbedroom\\b",
+        "\\bkitchen\\b", "\\boffice\\b", "\\bfloorplan\\b", "\\bspace\\b"
+      ]
+    },
+    "architecture-urban": {
+      "keywords": [
+        "architecture", "architectural", "建筑", "立面", "façade", "facade",
+        "elevation", "tower", "skyscraper", "urban design", "urban", "cityscape",
+        "streetscape", "plaza", "masterplan", "site plan", "公共空间", "城市设计",
+        "街景", "楼体"
+      ],
+      "filename_patterns": [
+        "\\bfacade\\b", "\\belevation\\b", "\\bmasterplan\\b", "\\bsite[-_ ]?plan\\b",
+        "\\bbuilding\\b", "\\btower\\b", "\\bplaza\\b", "\\burban\\b"
+      ]
+    },
+    "infographic-diagram": {
+      "keywords": [
+        "infographic", "信息图", "chart", "graph", "diagram", "flowchart",
+        "流程图", "示意图", "map", "地图", "data visualization", "数据可视化",
+        "schema", "schematic", "network diagram", "流程", "legend", "axis", "坐标轴"
+      ],
+      "filename_patterns": [
+        "\\bchart\\b", "\\bgraph\\b", "\\bdiagram\\b", "\\bflow\\b", "\\bmap\\b",
+        "\\bschematic\\b", "\\btopology\\b"
+      ]
+    },
+    "product-industrial-design": {
+      "keywords": [
+        "product design", "industrial design", "产品设计", "工业设计", "cmf",
+        "prototype", "原型", "device", "earbuds", "headphones", "shoes",
+        "sneaker", "bottle", "watch", "chair", "appliance", "产品外观",
+        "ergonomic", "ergonomics", "manufacturing", "工艺", "材质工艺",
+        "furniture object", "packaging structure", "包装结构", "rendered product",
+        "object design"
+      ],
+      "filename_patterns": [
+        "\\bprototype\\b", "\\bdevice\\b", "\\bearbuds?\\b", "\\bheadphones?\\b",
+        "\\bshoe\\b", "\\bsneaker\\b", "\\bbottle\\b", "\\bwatch\\b", "\\bchair\\b",
+        "\\bappliance\\b", "\\bproduct\\b", "\\bcmf\\b",
+        "\\bpackaging[-_ ]?structure\\b",
+        {"pattern": "\\bmockup\\b", "weight": 2}
+      ]
+    },
+    "comics-sequential": {
+      "keywords": [
+        "comic", "comics", "漫画", "条漫", "manga", "manhua", "webtoon", "panel",
+        "panels", "speech bubble", "balloon", "caption box", "gutter", "顺序叙事",
+        "分格", "页漫", "comic page", "strip"
+      ],
+      "filename_patterns": [
+        "\\bcomic\\b", "\\bmanga\\b", "\\bwebtoon\\b", "\\bpanel\\b", "\\bstrip\\b",
+        "\\bcomic[-_ ]?page\\b"
+      ]
+    },
+    "fashion-styling": {
+      "keywords": [
+        "fashion", "styling", "outfit", "lookbook", "runway", "穿搭", "造型",
+        "服装", "搭配", "配饰", "时装", "look", "editorial look", "beauty look"
+      ],
+      "filename_patterns": [
+        "\\boutfit\\b", "\\brunway\\b", "\\blookbook\\b", "\\bstyling\\b",
+        "\\bgarment\\b"
+      ]
+    },
+    "sculpture-installation-craft": {
+      "keywords": [
+        "sculpture", "installation", "ceramic", "craft", "assemblage", "雕塑",
+        "装置", "陶艺", "手工艺", "工艺作品", "gallery piece", "site specific",
+        "立体作品"
+      ],
+      "filename_patterns": [
+        "\\bsculpture\\b", "\\binstallation\\b", "\\bceramic\\b",
+        "\\bassemblage\\b", "\\bgallery\\b"
+      ]
+    },
+    "game-visual-design": {
+      "keywords": [
+        "game ui", "game screen", "gameplay", "hud", "inventory", "minimap",
+        "character sheet", "游戏界面", "游戏画面", "游戏截图", "游戏美术", "关卡",
+        "任务界面", "技能栏", "ui overlay"
+      ],
+      "filename_patterns": [
+        "\\bhud\\b", "\\bgameplay\\b", "\\binventory\\b", "\\bminimap\\b",
+        "\\bquest\\b"
+      ]
+    },
+    "scientific-medical-imaging": {
+      "keywords": [
+        "medical image", "scientific image", "x-ray", "xray", "x光", "x 光",
+        "ct", "ct scan", "mri", "mri scan", "ultrasound", "microscope",
+        "pathology", "satellite", "remote sensing", "医学图像", "科研图",
+        "显微图", "病理图", "遥感图", "实验图", "医学影像"
+      ],
+      "filename_patterns": [
+        "\\bx[-_ ]?ray\\b", "\\bmri\\b", "\\bct[-_ ]?scan\\b", "\\bmicroscope\\b",
+        "\\bpathology\\b", "\\bsatellite\\b", "\\.dcm$"
+      ]
+    },
+    "typography-lettering": {
+      "keywords": [
+        "typography", "lettering", "wordmark", "logotype", "calligraphy",
+        "font proof", "字标", "字体设计", "排字", "书法", "字形", "字效",
+        "type poster"
+      ],
+      "filename_patterns": [
+        "\\btypography\\b", "\\blettering\\b", "\\bwordmark\\b", "\\blogotype\\b",
+        "\\bcalligraphy\\b", "\\bfont\\b", "\\btype[-_ ]?poster\\b"
+      ]
+    },
+    "presentation-document": {
+      "keywords": [
+        "presentation", "slide", "deck", "report page", "dashboard",
+        "dashboard report", "analytics dashboard", "proposal",
+        "executive summary", "ppt", "pptx", "汇报页", "报告页", "演示文稿",
+        "幻灯片", "提案页", "文档页", "研究报告"
+      ],
+      "filename_patterns": [
+        "\\bppt\\b", "\\bslide\\b", "\\bdeck\\b", "\\bdashboard\\b",
+        "\\banalytics\\b", "\\breport\\b", "\\bproposal\\b", "\\bpptx\\b"
+      ]
+    },
+    "film-frame": {
+      "keywords": [
+        "film still", "movie still", "影视", "电影截图", "电影画面", "剧照",
+        "frame", "shot", "scene", "分镜", "storyboard", "cinematic", "镜头语言",
+        "构图镜头", "动画分镜", "anime frame"
+      ],
+      "filename_patterns": [
+        "\\bstill\\b", "\\bframe\\b", "\\bscene\\b", "\\bshot\\b",
+        "\\bstoryboard\\b", "\\bsubtitle\\b"
+      ]
+    },
+    "generic-mixed": {},
+    "universal-fallback": {}
+  },
+  "corpus_adjustments": [
+    {"route": "interior-design", "require_all": ["render", "interior"], "delta": 2},
+    {"route": "film-frame", "require_any": ["poster"], "delta": -1},
+    {"route": "architecture-urban", "require_any": ["interior"], "delta": -1},
+    {"route": "product-industrial-design", "require_any": ["广告"], "delta": -1},
+    {"route": "graphic-design", "require_any": ["chart"], "delta": -1},
+    {"route": "film-frame", "require_any": ["comic"], "delta": -2},
+    {"route": "fashion-styling", "require_any": ["摄影"], "forbid_any": ["造型"], "delta": -1},
+    {"route": "sculpture-installation-craft", "require_any": ["产品"], "delta": -1},
+    {"route": "game-visual-design", "require_any": ["电影"], "delta": -1},
+    {"route": "presentation-document", "require_any": ["海报"], "delta": -1},
+    {"route": "typography-lettering", "require_any": ["版式"], "delta": -1}
+  ],
+  "goals": {
+    "photo": {
+      "clauses": [{"any": ["摄影", "照片", "曝光", "photo", "photography"]}]
+    },
+    "architecture-specific": {
+      "clauses": [{"any": ["立面", "比例", "街道关系", "街道", "城市", "site", "facade", "massing", "public realm"]}]
+    },
+    "architecture-mention": {
+      "clauses": [{"any": ["建筑", "楼体"]}]
+    },
+    "commercial-layout": {
+      "clauses": [{"any": ["广告", "海报", "转化", "说服力", "营销", "传播", "cta", "版式", "层级", "poster", "ad"]}]
+    },
+    "product-form": {
+      "clauses": [{"any": ["外观", "形态", "材质", "工艺", "结构", "人体工学", "cmf", "ergonomic", "form factor"]}]
+    },
+    "dashboard-report": {
+      "clauses": [{"any": ["dashboard", "看板", "汇报页", "报告页", "数据屏", "经营页"]}]
+    },
+    "data-correctness": {
+      "clauses": [
+        {"any": ["数据编码", "误读", "chart correctness", "data encoding", "图表准确"]},
+        {"all": [["可读性"], ["图表", "chart", "数据", "data"]]}
+      ]
+    },
+    "type-poster": {
+      "clauses": [{"any": ["字体海报", "type poster", "字形海报", "lettering poster", "letterform"]}]
+    },
+    "game-ui": {
+      "clauses": [
+        {"any": ["游戏菜单", "游戏界面", "游戏ui", "战斗界面", "关卡界面", "副本界面", "技能栏", "背包界面"]},
+        {"all": [["hud"], ["游戏", "game", "gameplay", "副本", "关卡"]]}
+      ]
+    },
+    "ui-interaction": {
+      "clauses": [{"any": ["交互", "可用性", "易用性", "用户体验", "空状态", "加载态", "usability", "ux", "user flow", "interaction", "onboarding", "信息密度"]}]
+    },
+    "medical-evidence": {
+      "scope": "prompt_hints",
+      "clauses": [{"any": ["x-ray", "xray", "ct", "mri", "ultrasound", "pathology", "microscope", "医学", "医疗", "诊断", "病理", "显微", "x 光", "x光"]}]
+    },
+    "medical-intent": {
+      "clauses": [{"any": ["诊断", "标注", "可读性", "医学", "科研", "evidence", "interpretability"]}]
+    }
+  },
+  "goal_rules": [
+    {"when": ["photo"], "unless": ["architecture-specific"], "adjust": {"photography": 6, "architecture-urban": -2}, "reason": "photo-goal"},
+    {"when": ["architecture-specific"], "adjust": {"architecture-urban": 5}, "reason": "architecture-goal"},
+    {"when": ["architecture-mention"], "unless": ["architecture-specific", "photo"], "adjust": {"architecture-urban": 5}, "reason": "architecture-goal"},
+    {"when": ["commercial-layout"], "unless": ["type-poster"], "adjust": {"graphic-design": 5, "product-industrial-design": -2, "scientific-medical-imaging": -2}, "reason": "commercial-layout-goal"},
+    {"when": ["product-form"], "unless": ["commercial-layout"], "adjust": {"product-industrial-design": 5}, "reason": "product-form-goal"},
+    {"when": ["dashboard-report"], "unless": ["data-correctness"], "adjust": {"presentation-document": 5, "graphic-design": -1}, "reason": "dashboard-report-goal"},
+    {"when": ["data-correctness"], "unless": ["medical-evidence"], "adjust": {"infographic-diagram": 6, "presentation-document": -2}, "reason": "data-correctness-goal"},
+    {"when": ["type-poster"], "adjust": {"typography-lettering": 9, "graphic-design": -4}, "reason": "type-poster-goal"},
+    {"when": ["game-ui"], "adjust": {"game-visual-design": 6, "graphic-design": -2, "ui-product": -2}, "reason": "game-ui-goal"},
+    {"when": ["ui-interaction"], "unless": ["game-ui"], "adjust": {"ui-product": 5, "graphic-design": -2}, "reason": "ui-interaction-goal"},
+    {"when": ["medical-evidence", "medical-intent"], "adjust": {"scientific-medical-imaging": 4}, "reason": "medical-evidence-goal"}
+  ]
 }

@@ -285,3 +285,17 @@ AUDIO_TRAILER_NONVOICE_LM_WEIGHT = 1.5
 AUDIO_TECHNICAL_LANGUAGE_WEIGHT = 2.5
 AUDIO_MUSIC_DIALOGUE_WEIGHT = 2.0
 
+# 真实音频信号证据（audio_features.json）的权重与阈值。
+# 信号权重显著高于标题/字幕启发（4~5 档），有信号时文本只当 tiebreaker。
+AUDIO_SIGNAL_WEAK_WEIGHT = 8.0          # 信号判定弱听觉 → N
+AUDIO_SIGNAL_MUSIC_WEIGHT = 8.0         # 稳定 beat + 低语言占比 → M
+AUDIO_SIGNAL_LM_WEIGHT = 6.0            # 稳定 beat + 语言占比不低 → LM
+AUDIO_SIGNAL_SFX_WEIGHT = 6.0           # 瞬态密集、无稳定拍、少语言 → E
+AUDIO_SIGNAL_LANGUAGE_WEIGHT = 4.0      # 无稳定拍 + 高语言占比 → L
+AUDIO_SIGNAL_BEAT_CONFIDENCE = 0.5      # bpm_confidence ≥ 此值视为"有稳定节拍"
+AUDIO_SIGNAL_WEAK_RMS = 0.02            # 全片 RMS 均值低于此视为弱听觉
+AUDIO_SIGNAL_WEAK_SILENCE = 0.6         # 静音占比高于此视为弱听觉
+AUDIO_SIGNAL_SFX_ONSET_RATE = 2.5       # onset/秒 高于此且无稳定拍 → 偏音效
+AUDIO_SIGNAL_SFX_VOICEOVER_MAX = 0.3
+AUDIO_SIGNAL_LANGUAGE_VOICEOVER_MIN = 0.5
+

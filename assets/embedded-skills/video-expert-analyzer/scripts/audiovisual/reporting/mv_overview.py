@@ -12,7 +12,7 @@ try:
 except ImportError:  # pragma: no cover - Pillow is already a runtime dependency for PDF output
     Image = ImageDraw = ImageFont = None
 
-from audiovisual.shared import _markdown_media_path, _safe_text
+from audiovisual.shared import _markdown_media_path, _safe_text, insert_block_after_lead
 
 MV_OVERVIEW_FRAMEWORKS = {"mix_music", "concept_mv", "hybrid_music"}
 _OVERVIEW_PROMPT = "prompt_mv_overview_chart.md"
@@ -111,12 +111,7 @@ def prepend_mv_overview(
         lines.extend([summary, ""])
     lines.extend([f"![{title}](<{rel_path}>)", ""])
     block = "\n".join(lines).strip()
-
-    if markdown.startswith("# "):
-        first_line, _, remainder = markdown.partition("\n")
-        remainder = remainder.lstrip("\n")
-        return f"{first_line}\n\n{block}\n\n{remainder}"
-    return f"{block}\n\n{markdown.lstrip()}"
+    return insert_block_after_lead(markdown, block)
 
 
 def _load_overview_prompt(templates_dir: Path | None = None) -> str:

@@ -1,4 +1,4 @@
-[![Version](https://img.shields.io/badge/version-3.0.0-blue)](.) [![License](https://img.shields.io/badge/license-MIT-green)](.) [![Python](https://img.shields.io/badge/python-3.9+-yellow)](.) [![AI Models](https://img.shields.io/badge/AI-Claude%20%7C%20Gemini%20%7C%20GPT--4o%20%7C%20Kimi-purple)](.)
+[![Version](https://img.shields.io/badge/version-3.1.0-blue)](.) [![License](https://img.shields.io/badge/license-MIT-green)](.) [![Python](https://img.shields.io/badge/python-3.10+-yellow)](.) [![AI Models](https://img.shields.io/badge/AI-GPT--5.4%20%7C%20Kimi%20K2.6%20%7C%20GLM--5v--turbo%20%7C%20Xiaomi--v2--omni-purple)](.)
 
 **Language / 语言**  
 [English](#english) | [中文](#中文)
@@ -30,7 +30,7 @@
 - **Zero Sampling** — Every scene is analyzed. No skipping, no guessing on unseen frames.
 - **OpenClaw Orchestration** — Serial relay mode: one main controller + one current-batch worker. Dispatch packets generated automatically.
 - **Audiovisual Analysis with Agent Handoff** — Long-form audiovisual reports are written by the hosting agent via structured task packets (`body` → `diagram`/`overview` → `illustrate`), with machine validation on word counts, section coverage, and screenshot references.
-- **Smart Subtitle Extraction** — 4-tier fallback: Bilibili API → Embedded subtitles → RapidOCR → FunASR Nano.
+- **Smart Subtitle Extraction** — 4-tier fallback: Bilibili API → Embedded subtitles → RapidOCR → FunASR/mlx-whisper.
 - **Multi-language Final Reports** — Processing always runs in Chinese; final deliverables are rewritten to the user's chosen language post-finalize.
 - **Delivery Verification** — Completion is determined by `delivery_report.json` and actual output files, not by oral summary.
 
@@ -251,7 +251,13 @@ Any vision-capable model works for scoring. Text-only models cannot score.
 | `OPENCLAW_ROOT` | `~/.openclaw` | Override OpenClaw root directory |
 | `OPENCLAW_MODELS_JSON` | `$OPENCLAW_ROOT/agents/main/agent/models.json` | Override models.json path |
 | `VNEXT_STALE_MINUTES` | `30` | Minutes before a stale worker is reset to pending |
-| `VNEXT_TEXT_MODEL_RETRIES` | `2` | Retry count for transient text model errors |
+| `VNEXT_TEXT_MODEL_RETRIES` | `2` | Retry count for transient text model errors (classified by HTTP status code) |
+| `VNEXT_VISION_MAX_EDGE` | `1568` | Longest edge for frames uploaded to vision APIs |
+| `VNEXT_VISION_JPEG_QUALITY` | `85` | JPEG quality for re-encoded frames |
+| `VNEXT_VISION_RAW` | unset | Set `1` to upload original bytes unscaled |
+| `VNEXT_TYPE_WEIGHT_SOFTENING` | `0.4` | Soft-blend factor for scene-type weights (0 = hard switch) |
+| `AUDIOVISUAL_SUMMARY_MAX_CHARS` | `400` | Character ceiling for the 导读 summary section |
+| `AUDIOVISUAL_SUMMARY_MIN_SCENE_EVIDENCE` | `2` | Minimum scene/timestamp refs in 导读 |
 | `AUDIOVISUAL_REPORT_MAX_TOKENS` | — | Token limit for audiovisual report generation |
 | `AUDIOVISUAL_REPORT_MODEL` | — | Model override for audiovisual reports |
 
@@ -271,6 +277,9 @@ video-expert-analyzer-vnext/
 │   ├── pipeline_enhanced.py           # Prepare stage
 │   ├── ai_analyzer.py                 # Score / Merge / Finalize stages
 │   ├── host_batching.py               # Batch management & recovery
+│   ├── audio_features.py              # Measured audio signal (BPM/onsets/loudness/beat alignment)
+│   ├── scene_weights.py               # Single source of truth for scene weighting + percentiles
+│   ├── shared_io.py                   # Atomic write / JSON IO primitives
 │   ├── run_state.py                   # Atomic state file management
 │   ├── openclaw_dispatch.py           # OpenClaw dispatch packet builder
 │   ├── storyboard_generator.py        # Storyboard enrichment & export
@@ -328,8 +337,10 @@ video-expert-analyzer-vnext/
 | Category | Packages |
 |----------|----------|
 | **Video processing** | yt-dlp, scenedetect, ffmpeg-python |
-| **AI / ML** | openai, anthropic, funasr, modelscope, torch |
-| **OCR & imaging** | rapidocr-onnxruntime, Pillow, numpy |
+| **AI API clients** | openai, anthropic |
+| **Imaging & signal** | Pillow, numpy |
+| **Optional `[asr]`** | funasr, modelscope, torch, mlx-whisper (subtitle fallback tier 4) |
+| **Optional `[ocr]`** | rapidocr-onnxruntime (subtitle fallback tier 3) |
 | **Network** | requests, browser_cookie3 |
 
 ## Theory Background
@@ -347,6 +358,7 @@ A shot with genuine emotion but slight camera shake is always preferred over a t
 - [PySceneDetect](https://github.com/Breakthrough/PySceneDetect) — Scene detection
 - [FFmpeg](https://ffmpeg.org/) — Media processing
 - [RapidOCR](https://github.com/RapidAI/RapidOCR) — Burned subtitle OCR
+- [mlx-whisper](https://github.com/ml-explore/mlx-examples) — Apple Silicon accelerated ASR
 
 ---
 
@@ -375,7 +387,7 @@ A shot with genuine emotion but slight camera shake is always preferred over a t
 - **零抽样** — 每个场景都会被分析，不跳过、不猜测。
 - **OpenClaw 编排** — 串行接力模式：一个主控 + 一个当前批次 worker，自动生成派单包。
 - **视听剖析 Agent 接力** — 长文视听报告由宿主 agent 通过结构化任务包完成（`body` → `diagram`/`overview` → `illustrate`），带字数、章节覆盖和截图引用的机器校验。
-- **智能字幕提取** — 四级降级：B站API → 内嵌字幕 → RapidOCR → FunASR Nano。
+- **智能字幕提取** — 四级降级：B站API → 内嵌字幕 → RapidOCR → FunASR/mlx-whisper。
 - **多语言最终报告** — 处理过程始终中文；最终交付物在 finalize 后重写为用户选择的语言。
 - **交付验证** — 是否完成以 `delivery_report.json` 和实际输出文件为准，不以口头汇报为准。
 
@@ -578,8 +590,10 @@ python3 scripts/orchestrate_vnext.py /path/to/scene_scores.json --dispatch-json
 | 类别 | 包 |
 |------|---|
 | **视频处理** | yt-dlp, scenedetect, ffmpeg-python |
-| **AI / ML** | openai, anthropic, funasr, modelscope, torch |
-| **OCR 与图像** | rapidocr-onnxruntime, Pillow, numpy |
+| **AI API 客户端** | openai, anthropic |
+| **图像与信号** | Pillow, numpy |
+| **可选 `[asr]`** | funasr, modelscope, torch, mlx-whisper（字幕降级链第 4 级） |
+| **可选 `[ocr]`** | rapidocr-onnxruntime（字幕降级链第 3 级） |
 | **网络** | requests, browser_cookie3 |
 
 ## 理论背景
@@ -597,6 +611,7 @@ python3 scripts/orchestrate_vnext.py /path/to/scene_scores.json --dispatch-json
 - [PySceneDetect](https://github.com/Breakthrough/PySceneDetect) — 场景检测
 - [FFmpeg](https://ffmpeg.org/) — 媒体处理
 - [RapidOCR](https://github.com/RapidAI/RapidOCR) — 烧录字幕识别
+- [mlx-whisper](https://github.com/ml-explore/mlx-examples) — Apple Silicon 加速语音识别
 
 ---
 

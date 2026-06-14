@@ -19,13 +19,15 @@ Before choosing a route, separate routing uncertainty from missing evidence.
 | `visual_input_missing` | no image or visual evidence reached this skill | ask upstream for image evidence; do not route |
 | `visual_evidence_insufficient` | image exists but is too low-res, cropped, blocked, or compressed for route-safe analysis | state the readable limits; do not use fallback |
 | `needs_clarification` | image is readable but the user's intended lens would change the output | ask one question using top route and focus options |
+| `router_unavailable` | the routing script's data file is missing or broken, or the script errored | proceed with visual-only routing; note that the keyword prior was unavailable |
 | `unknown` batch type | script cannot see image count or roles | let visual inspection decide batch type and state the override if needed |
 
 ## Route table
 
 | Route | Strong signals | Use when the user cares about | Avoid when | Read next |
 | --- | --- | --- | --- | --- |
-| `graphic-design` | large text blocks, title/subtitle/CTA, logos, brand marks, layout grids, posters, banners, packaging, ad creatives, UI screenshots | hierarchy, clarity, persuasion, branding, typography, layout rhythm | the image is mainly about camera craft, painterly medium, or spatial design | [method-graphic-design.md](./method-graphic-design.md) |
+| `graphic-design` | large text blocks, title/subtitle/CTA, logos, brand marks, layout grids, posters, banners, packaging, ad creatives | hierarchy, clarity, persuasion, branding, typography, layout rhythm | the image is mainly about camera craft, painterly medium, spatial design, or a working interface screen | [method-graphic-design.md](./method-graphic-design.md) |
+| `ui-product` | app screens, web apps, settings panels, forms, modals, onboarding flows, empty/loading/error states, design-tool mockups | usability, hierarchy and scan path, information density, state clarity, interaction cues, system consistency, accessibility resilience | the image is a marketing poster, a game HUD, or a slide/report page | [method-ui-product.md](./method-ui-product.md) |
 | `photography` | camera-captured detail, lens depth, exposure decisions, natural or studio light, captured moment, documentary realism, visible medium or retouching clues | composition, light, timing, mood, technical quality, edit direction, authenticity/medium, reverse-reading of lens and light | the core question is art-historical symbolism, interior zoning, or film shot language | [method-photography.md](./method-photography.md) |
 | `painting-illustration` | brushwork, drawing, stylization, invented worlds, symbolic imagery, cross-cultural motifs, visible medium logic | style, iconography, visual language, art history, symbolic reading, illustration craft | the image is mainly a poster/ad layout or a real room evaluation | [method-painting-illustration.md](./method-painting-illustration.md) |
 | `interior-design` | rooms, furniture, ceilings, walls, materials, fixtures, circulation, daylight/artificial light in a space, renders of spaces | layout, zoning, atmosphere, usability, material palette, lighting plan | the image is mainly a single object shot, a poster, or a non-spatial artwork | [method-interior-design.md](./method-interior-design.md) |
@@ -45,7 +47,13 @@ Before choosing a route, separate routing uncertainty from missing evidence.
 
 ## Tie-breakers
 
+For worked examples of the highest-drift calls below, see [examples.md](./examples.md).
+
 - `graphic-design` vs `film-frame`: choose `graphic-design` if reading order, text hierarchy, or marketing effect matters most; choose `film-frame` if shot language or scene meaning matters most.
+- `ui-product` vs `graphic-design`: choose `ui-product` when the screen must be operated (states, controls, flows); choose `graphic-design` when the image is a communication piece, even if it depicts a product or app.
+- `ui-product` vs `game-visual-design`: choose `game-visual-design` for in-game screens, HUD, and play readability; choose `ui-product` for app/web interfaces outside a game context.
+- `ui-product` vs `presentation-document`: choose `ui-product` for live screens someone interacts with; choose `presentation-document` for slide or report pages about the product.
+- `ui-product` vs `infographic-diagram`: for dashboards, choose `infographic-diagram` when data encoding correctness dominates, `presentation-document` when it is a reporting page, and `ui-product` when the dashboard is itself the product screen being operated.
 - `photography` vs `painting-illustration`: choose `photography` if realism, capture timing, lens/light behavior, or post-processing matters; choose `painting-illustration` if medium logic, stylization, symbolism, or art-historical reading matters.
 - `painting-illustration` vs `interior-design`: choose `interior-design` when the user is evaluating the space itself, even if the space is rendered or stylized.
 - `photography` vs `interior-design`: choose `interior-design` when the subject is the room experience; choose `photography` when the user is critiquing the photographer's capture choices more than the space.

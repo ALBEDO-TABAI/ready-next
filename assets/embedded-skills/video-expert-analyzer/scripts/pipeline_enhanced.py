@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
+from __future__ import annotations
 """
 Video Expert Analyzer Pipeline - Enhanced Version
 支持：配置目录选择、精选片段子文件夹、详细分析报告
 """
-
-from __future__ import annotations
 
 import os
 import sys
@@ -64,10 +63,10 @@ except ImportError:
     from storyboard_generator import scene_has_complete_analysis
 
 try:
-    from run_state import mark_stage, reset_run_state
+    from run_state import mark_stage
 except ImportError:
     sys.path.insert(0, str(Path(__file__).parent))
-    from run_state import mark_stage, reset_run_state
+    from run_state import mark_stage
 
 try:
     from logger import get_logger
@@ -86,6 +85,7 @@ DEFAULT_AUTO_SCORING = {
     "models_json_path": "",
     "preferred_model": "kcode/K2.6-code-preview",
     "fallback_models": [
+        "zai/GLM-5V-Turbo",
         "novacode-openai/gpt-5.4",
     ],
     "max_workers": 4,
@@ -205,8 +205,8 @@ def _get_ffmpeg_encoder_names() -> set[str]:
         )
     except FileNotFoundError:
         print(
-            "⚠️ Ready 发行运行时缺少 ffmpeg，硬件编码器探测跳过；"
-            "请重新安装完整发行包或联系维护者。"
+            "⚠️ 未找到 ffmpeg 可执行文件，硬件编码器探测跳过；"
+            "请安装 ffmpeg（macOS: `brew install ffmpeg`；Windows: 从 https://www.gyan.dev/ffmpeg/builds/ 下载并加入 PATH）。"
         )
         _FFMPEG_ENCODER_CACHE = set()
     except subprocess.CalledProcessError as exc:
@@ -550,7 +550,8 @@ def _run_ffmpeg_trim(
         except FileNotFoundError as exc:
             raise RuntimeError(
                 f"未找到 ffmpeg 可执行文件（{ffmpeg_binary}）；"
-                "Ready 发行运行时不完整，请重新安装完整发行包或联系维护者。"
+                "请安装 ffmpeg 并确保它在 PATH 中（macOS: `brew install ffmpeg`；"
+                "Windows: 从 https://www.gyan.dev/ffmpeg/builds/ 下载并加入 PATH）。"
             ) from exc
         if result.returncode == 0:
             return {
@@ -991,8 +992,7 @@ class VideoAnalysisPipeline:
                  extract_scenes: bool = True,
                  auto_select_best: bool = True,
                  best_threshold: float = 7.5,
-                 openclaw_mode: bool = False,
-                 exact_output_dir: bool = False):
+                 openclaw_mode: bool = False):
         self.url = url
         self.output_dir = Path(output_dir).resolve()
         self.scene_threshold = scene_threshold
@@ -1035,9 +1035,8 @@ class VideoAnalysisPipeline:
             self.folder_name = self.video_id
             self.video_info = {"title": self.video_id, "uploader": ""}
 
-        # 产品侧 typed action 传入的是 durable handle 目录，必须精确使用；
-        # 交互式 CLI 默认仍保留按标题创建子目录的旧体验。
-        self.video_output_dir = self.output_dir if exact_output_dir else self.output_dir / self.folder_name
+        # 创建视频专属子目录（使用标题命名）
+        self.video_output_dir = self.output_dir / self.folder_name
         self.video_output_dir.mkdir(parents=True, exist_ok=True)
 
         # Define output paths
@@ -1057,14 +1056,7 @@ class VideoAnalysisPipeline:
         self.run_state_path = self.video_output_dir / "run_state.json"
         self.report_path = self.video_output_dir / f"{self.video_id}_analysis_report.md"
         self.detailed_report_path = self.video_output_dir / f"{self.video_id}_detailed_analysis.md"
-        self._reset_fresh_pipeline_outputs()
         self.analysis_state = load_analysis_state(self.state_path)
-        reset_run_state(
-            self.run_state_path,
-            scores_path=str(self.scores_path),
-            video_dir=str(self.video_output_dir),
-            active_output_dir=str(self.video_output_dir),
-        )
 
         # Results tracking
         self.results = {
@@ -1082,24 +1074,6 @@ class VideoAnalysisPipeline:
             "overall_assessment": {}
         }
 
-    def _reset_fresh_pipeline_outputs(self) -> None:
-        for path in (
-            self.scores_path,
-            self.video_output_dir / "delivery_report.json",
-            self.video_output_dir / "auto_scoring_validation.json",
-            self.video_output_dir / "classification_result.json",
-            self.video_output_dir / f"{self.video_id}_complete_analysis.md",
-            self.video_output_dir / f"{self.video_id}_detailed_analysis.md",
-            self.video_output_dir / f"{self.video_id}_classification_summary.md",
-            self.video_output_dir / f"{self.video_id}_classification_summary.json",
-        ):
-            try:
-                if path.exists() and path.is_file():
-                    path.unlink()
-            except OSError:
-                pass
-        save_analysis_state(self.state_path, {"status": "initialized", "steps": {}})
-
     def _mark_step_complete(self, step_name: str, **extra):
         self.analysis_state.setdefault("steps", {})[step_name] = {
             "status": "completed",
@@ -1116,20 +1090,7 @@ class VideoAnalysisPipeline:
             completed=completed,
             scores_path=str(self.scores_path),
             video_dir=str(self.video_output_dir),
-            active_output_dir=str(self.video_output_dir),
             **extra,
-        )
-
-    def _mark_prepare_progress(self, *, total_scenes: int, completed_scenes: int) -> None:
-        if total_scenes <= 0:
-            return
-        self._mark_run_stage(
-            "prepare",
-            status="running",
-            completed=False,
-            total_scenes=total_scenes,
-            completed_scenes=completed_scenes,
-            coverage_ratio=completed_scenes / max(total_scenes, 1),
         )
 
     def _extract_audio_from_video(self) -> bool:
@@ -1284,8 +1245,7 @@ class VideoAnalysisPipeline:
         else:
             # 使用yt-dlp下载其他平台视频
             cmd = build_yt_dlp_command(
-                "-f", "bestvideo[height<=1080]+bestaudio/best[height<=1080]",
-                "--merge-output-format", "mp4",
+                "-f", "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
                 "-o", str(self.video_path),
                 self.url,
             )
@@ -1294,7 +1254,7 @@ class VideoAnalysisPipeline:
             except FileNotFoundError as exc:
                 raise RuntimeError(
                     "未找到 yt-dlp 可执行文件，且 `python -m yt_dlp` 也不可用；"
-                    "Ready 发行运行时不完整，请重新安装完整发行包或联系维护者。"
+                    "请运行 `pip install yt-dlp` 或确保 yt-dlp 在 PATH 中。"
                 ) from exc
             except subprocess.CalledProcessError as exc:
                 stderr = (exc.stderr or exc.stdout or "").strip()
@@ -1434,9 +1394,16 @@ class VideoAnalysisPipeline:
             print(f"   ✂️  切片编码器: {preferred_codec} ({preferred_reason})")
             print(f"   🧩 切片生成: {len(segments_to_render)} 个有效片段待输出")
             clip_started_at = time.perf_counter()
-            self._mark_prepare_progress(total_scenes=len(segments_to_render), completed_scenes=0)
 
-            for index, segment in enumerate(segments_to_render, start=1):
+            # 并行切片：ffmpeg 是外部进程，线程池只负责派发；
+            # 不能改 stream copy——场景切点不保证对齐关键帧，-c copy 会让
+            # 切片首尾渗入相邻场景的帧，而下游抽帧评分就来自这些切片。
+            import concurrent.futures as _futures
+
+            clip_workers = max(1, min(4, (os.cpu_count() or 4) // 2))
+
+            def _render_segment(item):
+                index, segment = item
                 output_path = self.scenes_dir / f"{self.video_path.stem}-Scene-{index:03d}.mp4"
                 trim_result = _run_ffmpeg_trim(
                     self.video_path,
@@ -1447,12 +1414,24 @@ class VideoAnalysisPipeline:
                     end_frame=segment.end_frame,
                     has_audio=has_audio,
                 )
-                scene_codecs_used.add(trim_result["video_codec"])
-                codec_fallback_used = codec_fallback_used or trim_result["fallback_used"]
-                scene_files.append(output_path)
-                if index == 1 or index == len(segments_to_render) or index % 10 == 0:
-                    print(f"   ⏳ 切片进度: {index}/{len(segments_to_render)}")
-                    self._mark_prepare_progress(total_scenes=len(segments_to_render), completed_scenes=index)
+                return index, output_path, trim_result
+
+            rendered: dict[int, Path] = {}
+            done_count = 0
+            with _futures.ThreadPoolExecutor(max_workers=clip_workers) as executor:
+                futures = [
+                    executor.submit(_render_segment, item)
+                    for item in enumerate(segments_to_render, start=1)
+                ]
+                for future in _futures.as_completed(futures):
+                    index, output_path, trim_result = future.result()
+                    rendered[index] = output_path
+                    scene_codecs_used.add(trim_result["video_codec"])
+                    codec_fallback_used = codec_fallback_used or trim_result["fallback_used"]
+                    done_count += 1
+                    if done_count == 1 or done_count == len(segments_to_render) or done_count % 10 == 0:
+                        print(f"   ⏳ 切片进度: {done_count}/{len(segments_to_render)}")
+            scene_files.extend(rendered[index] for index in sorted(rendered))
 
             if not scene_files:
                 fallback_path = self.scenes_dir / f"{self.video_path.stem}-Scene-001.mp4"
@@ -1469,7 +1448,6 @@ class VideoAnalysisPipeline:
                 scene_codecs_used.add(trim_result["video_codec"])
                 codec_fallback_used = codec_fallback_used or trim_result["fallback_used"]
                 scene_files = [fallback_path]
-                self._mark_prepare_progress(total_scenes=1, completed_scenes=1)
             clip_elapsed = time.perf_counter() - clip_started_at
 
         scene_count = len(scene_files) if self.extract_scenes else len(scene_segments)
@@ -1500,8 +1478,6 @@ class VideoAnalysisPipeline:
         self.results["scene_detection"] = scene_info
         self.results["steps_completed"].append("scene_detection")
         self._mark_step_complete("scene_detection", **scene_info)
-        if self.extract_scenes:
-            self._mark_prepare_progress(total_scenes=scene_count, completed_scenes=scene_count)
         return scene_info
 
     def _step_transcription(self) -> Dict:
@@ -1585,7 +1561,7 @@ class VideoAnalysisPipeline:
     @staticmethod
     def _funasr_to_segments(funasr_result) -> List[Dict]:
         """
-        将 FunASR 返回结果转换为通用 segments 格式
+        将 FunASR 返回结果转换为 Whisper 兼容的 segments 格式
         每个 segment: {"start": float_seconds, "end": float_seconds, "text": str}
         """
         segments = []
@@ -1714,15 +1690,25 @@ class VideoAnalysisPipeline:
             return
         self.frames_dir.mkdir(exist_ok=True)
         scene_files = sorted(self.scenes_dir.glob("*.mp4"))
-        extracted_scenes = 0
+        pending = []
         for scene_file in scene_files:
-            scene_name = scene_file.stem
-            safe_scene_name = sanitize_filename(scene_name)
+            safe_scene_name = sanitize_filename(scene_file.stem)
             primary_path = build_frame_sample_paths(self.frames_dir, safe_scene_name)["primary"]
-            if primary_path.exists():
-                continue
-            self._ensure_primary_frame(scene_file, safe_scene_name)
-            extracted_scenes += 1
+            if not primary_path.exists():
+                pending.append((scene_file, safe_scene_name))
+        extracted_scenes = 0
+        if pending:
+            import concurrent.futures as _futures
+
+            frame_workers = max(1, min(8, os.cpu_count() or 4))
+            with _futures.ThreadPoolExecutor(max_workers=frame_workers) as executor:
+                futures = [
+                    executor.submit(self._ensure_primary_frame, scene_file, safe_name)
+                    for scene_file, safe_name in pending
+                ]
+                for future in _futures.as_completed(futures):
+                    future.result()
+                    extracted_scenes += 1
         frame_count = len(scene_files)
         sample_frame_count = len(list(self.frames_dir.glob("*.jpg")))
         print(f"   ✅ 已为 {frame_count} 个场景准备主截图")

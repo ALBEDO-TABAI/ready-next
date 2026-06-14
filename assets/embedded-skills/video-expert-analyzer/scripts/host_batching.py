@@ -14,21 +14,9 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Sequence
 
+import scene_weights
+import shared_io
 
-def _atomic_write_text(path: Path, text: str) -> None:
-    """Write `text` to `path` atomically via tempfile + os.replace."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(prefix=path.name + ".", dir=str(path.parent))
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(text)
-        os.replace(tmp_name, path)
-    except Exception:
-        try:
-            os.unlink(tmp_name)
-        except OSError:
-            pass
-        raise
 
 try:
     from motion_analysis import extract_scene_sample_frames
@@ -160,6 +148,45 @@ def reset_stale_in_progress_receipts(
     return recovered
 
 
+UNBLOCK_MARKER = "[unblocked] "
+
+
+def reset_blocked_receipts(host_batches_dir: Path) -> List[str]:
+    """把 `blocked` 的批次 receipt 重置回 `pending`，供显式 --unblock 使用。
+
+    blocked 按设计需要人工确认（素材缺失、画面无法判断等）；此前确认后
+    没有任何官方解除入口，用户只能手改 JSON——与"不要手工改 receipt"
+    的规则自相矛盾。这里是那个官方入口：清掉 blocked 状态与 needs_review，
+    让下一次 score_batches 重试这批场景。
+    """
+    dir_path = Path(host_batches_dir)
+    if not dir_path.exists() or not dir_path.is_dir():
+        return []
+
+    unblocked: List[str] = []
+    for output_path in sorted(dir_path.glob("batch-*-output.json")):
+        payload = _read_json(output_path)
+        if not isinstance(payload, dict):
+            continue
+        receipt = payload.get("receipt")
+        if not isinstance(receipt, dict) or str(receipt.get("status", "")) != "blocked":
+            continue
+        receipt["status"] = "pending"
+        receipt["has_todo"] = True
+        receipt["needs_review"] = []
+        receipt["updated_at"] = ""
+        receipt["completed_at"] = ""
+        existing_summary = str(receipt.get("worker_summary", "") or "")
+        if not existing_summary.startswith(UNBLOCK_MARKER):
+            receipt["worker_summary"] = f"{UNBLOCK_MARKER}{existing_summary}".rstrip()
+        payload["receipt"] = receipt
+        if _write_json_if_changed(output_path, payload):
+            batch_id = str(payload.get("batch_id", "") or output_path.stem.replace("-output", ""))
+            unblocked.append(batch_id)
+
+    return unblocked
+
+
 def _build_scene_output_skeletons(batch_scenes: Sequence[Dict]) -> List[Dict]:
     return [
         {
@@ -193,46 +220,15 @@ def _default_receipt(batch_id: str, batch_scenes: Sequence[Dict]) -> Dict[str, o
 
 
 def _compute_weighted_score(scene: Dict) -> float:
-    scores = scene.get("scores", {})
-    scene_type = str(scene.get("type_classification", ""))
-    if "TYPE-A" in scene_type:
-        weighted = (
-            float(scores.get("impact", 0)) * 0.40
-            + float(scores.get("memorability", 0)) * 0.30
-            + float(scores.get("aesthetic_beauty", 0)) * 0.20
-            + float(scores.get("fun_interest", 0)) * 0.10
-        )
-    elif "TYPE-B" in scene_type:
-        weighted = (
-            float(scores.get("credibility", 0)) * 0.40
-            + float(scores.get("memorability", 0)) * 0.30
-            + float(scores.get("aesthetic_beauty", 0)) * 0.20
-            + float(scores.get("fun_interest", 0)) * 0.10
-        )
-    elif "TYPE-C" in scene_type:
-        weighted = (
-            float(scores.get("aesthetic_beauty", 0)) * 0.50
-            + float(scores.get("impact", 0)) * 0.20
-            + float(scores.get("memorability", 0)) * 0.20
-            + float(scores.get("credibility", 0)) * 0.10
-        )
-    else:
-        weighted = (
-            float(scores.get("credibility", 0)) * 0.40
-            + float(scores.get("memorability", 0)) * 0.40
-            + float(scores.get("aesthetic_beauty", 0)) * 0.20
-        )
-    return round(weighted, 2)
+    # 唯一实现见 scene_weights（类型档位 + 软混合），三条链路共用同一公式
+    return scene_weights.weighted_score(scene)
 
 
 def _compute_selection(scene: Dict) -> str:
-    scores = scene.get("scores", {})
-    weighted = float(scene.get("weighted_score", 0.0))
-    if weighted >= 8.5 or any(value == 10 for value in scores.values()):
-        return "[MUST KEEP]"
-    if weighted >= 7.0:
-        return "[USABLE]"
-    return "[DISCARD]"
+    return scene_weights.selection_label(
+        float(scene.get("weighted_score", 0.0) or 0.0),
+        scene.get("scores", {}),
+    )
 
 
 def _hydrate_scene_completion_fields(scene: Dict) -> bool:
@@ -443,6 +439,8 @@ def _build_batch_input_scene(scene: Dict, video_dir: Path, payload_style: str = 
             "voiceover": storyboard.get("voiceover", ""),
             "onscreen_text": storyboard.get("onscreen_text", ""),
             "camera_movement_hint": storyboard.get("camera_movement_hint", ""),
+            "camera_movement_confidence": str((scene.get("motion_analysis") or {}).get("confidence", "")),
+            "camera_movement_rationale": storyboard.get("camera_movement_rationale", ""),
         },
         "existing": {
             "type_classification": scene.get("type_classification", ""),
@@ -492,28 +490,23 @@ def _ensure_output_payload_shape(batch_id: str, batch_scenes: Sequence[Dict], pa
 
 
 def _read_json(path: Path, default: Dict | None = None) -> Dict:
-    if not path.exists():
-        return default or {}
-    return json.loads(path.read_text(encoding="utf-8"))
+    value = shared_io.read_json(path, None)
+    if value is None:
+        return default if default is not None else {}
+    return value
 
 
 def _stable_json_text(payload: Dict) -> str:
+    # sort_keys 是批次文件的稳定序列化约定，_batch_output_digest 依赖它
     return json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True)
 
 
 def _write_json_if_changed(path: Path, payload: Dict) -> bool:
-    serialized = _stable_json_text(payload)
-    if path.exists() and path.read_text(encoding="utf-8") == serialized:
-        return False
-    _atomic_write_text(path, serialized)
-    return True
+    return shared_io.write_text_if_changed(path, _stable_json_text(payload))
 
 
 def _write_text_if_changed(path: Path, text: str) -> bool:
-    if path.exists() and path.read_text(encoding="utf-8") == text:
-        return False
-    _atomic_write_text(path, text)
-    return True
+    return shared_io.write_text_if_changed(path, text)
 
 
 def _batch_output_digest(payload: Dict) -> str:

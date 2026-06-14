@@ -12,20 +12,28 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
-def _load_required_routes() -> set[str]:
+def _load_routes_payload() -> dict:
     path = ROOT / "references" / "routes.json"
     if not path.exists():
-        return set()
+        return {}
     try:
-        return set(json.loads(path.read_text(encoding="utf-8")).get("routes", []))
+        return json.loads(path.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
         # Surface as a check-time error rather than crashing module import.
         print(f"ERROR: references/routes.json is malformed JSON: {exc}", file=sys.stderr)
-        return set()
+        return {}
+
+
+def _load_required_routes() -> set[str]:
+    routes = _load_routes_payload().get("routes", {})
+    if isinstance(routes, dict):
+        return set(routes.keys())
+    return set(routes)
 
 
 _FALLBACK_REQUIRED_ROUTES = {
     "graphic-design",
+    "ui-product",
     "photography",
     "painting-illustration",
     "interior-design",
@@ -45,6 +53,9 @@ _FALLBACK_REQUIRED_ROUTES = {
 }
 
 REQUIRED_ROUTES = _load_required_routes() or _FALLBACK_REQUIRED_ROUTES
+ROUTER_ONLY_EXCLUDES = set(
+    _load_routes_payload().get("router_only_excludes", ["generic-mixed", "universal-fallback"])
+)
 
 CONFIDENCE_ORDER = {"low": 0, "medium": 1, "high": 2}
 STANDARD_METHOD_SECTIONS = (
@@ -120,8 +131,11 @@ def check_route_consistency(errors: list[str]) -> None:
         )
 
     router = load_router()
+    if router.DATA_ERROR is not None:
+        errors.append(f"Router failed to load routes.json: {router.DATA_ERROR}")
+        return
     script_routes = {bucket.name for bucket in router.ROUTES}
-    expected_script_routes = REQUIRED_ROUTES - {"generic-mixed", "universal-fallback"}
+    expected_script_routes = REQUIRED_ROUTES - ROUTER_ONLY_EXCLUDES
     if script_routes != expected_script_routes:
         errors.append(
             "Router route set mismatch: "
@@ -207,25 +221,41 @@ def check_continuity_contracts(errors: list[str]) -> None:
 
 
 def check_eval_coverage(evals: list[dict[str, object]], errors: list[str]) -> None:
-    if len(evals) < 15:
-        errors.append(f"Expected at least 15 image router evals, found {len(evals)}")
+    if len(evals) < 30:
+        errors.append(f"Expected at least 30 image router evals, found {len(evals)}")
     covered_routes = {item.get("expected_route") for item in evals if item.get("expected_route")}
-    important_routes = {
-        "graphic-design",
-        "photography",
-        "architecture-urban",
-        "product-industrial-design",
-        "presentation-document",
-        "scientific-medical-imaging",
-        "generic-mixed",
-        "universal-fallback",
-    }
-    missing = important_routes - covered_routes
+    missing = REQUIRED_ROUTES - covered_routes
     if missing:
-        errors.append(f"Missing eval coverage for important routes: {sorted(missing)}")
+        errors.append(f"Missing eval coverage for routes: {sorted(missing)}")
     for field in ("expected_status", "expected_batch_type", "expected_response_depth"):
         if not any(field in item for item in evals):
             errors.append(f"Missing eval coverage field: {field}")
+
+
+def check_scoring_schema(errors: list[str]) -> None:
+    """Sanity-check the declarative scoring data in routes.json."""
+    payload = _load_routes_payload()
+    routes = payload.get("routes", {})
+    if not isinstance(routes, dict):
+        errors.append("routes.json 'routes' must be an object keyed by route name")
+        return
+    route_names = set(routes)
+    for name, config in routes.items():
+        if name in ROUTER_ONLY_EXCLUDES:
+            continue
+        if not config.get("keywords"):
+            errors.append(f"routes.json route '{name}' has no keywords")
+    goals = payload.get("goals", {})
+    for rule in payload.get("goal_rules", []):
+        for goal in list(rule.get("when", [])) + list(rule.get("unless", [])):
+            if goal not in goals:
+                errors.append(f"goal_rule references unknown goal: {goal}")
+        for route in rule.get("adjust", {}):
+            if route not in route_names:
+                errors.append(f"goal_rule adjusts unknown route: {route}")
+    for adjustment in payload.get("corpus_adjustments", []):
+        if adjustment.get("route") not in route_names:
+            errors.append(f"corpus_adjustment targets unknown route: {adjustment.get('route')}")
 
 
 def expect_equal(errors: list[str], prefix: str, result: dict[str, object], key: str, expected: object) -> None:
@@ -245,6 +275,7 @@ def run_router_evals(errors: list[str]) -> None:
             item.get("prompt", ""),
             item.get("files", []),
             item.get("hints", []),
+            item.get("urls", []),
         )
         prefix = f"Eval {item.get('id')} ({item.get('name', 'unnamed')})"
 
@@ -315,6 +346,7 @@ def main() -> None:
     errors: list[str] = []
     try:
         check_required_files(errors)
+        _safe_run("scoring_schema", check_scoring_schema, errors)
         _safe_run("route_consistency", check_route_consistency, errors)
         _safe_run("method_structure", check_method_structure, errors)
         _safe_run("continuity_contracts", check_continuity_contracts, errors)

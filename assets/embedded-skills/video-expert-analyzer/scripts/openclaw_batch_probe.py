@@ -5,6 +5,8 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import hashlib
+import io
 import json
 import mimetypes
 import os
@@ -50,6 +52,7 @@ DEFAULT_MODELS_JSON = _default_models_json()
 DEFAULT_OPENCLAW_ROOT = _default_openclaw_root()
 DEFAULT_PREFERRED_MODEL = "kcode/K2.6-code-preview"
 DEFAULT_FALLBACK_MODELS = (
+    "zai/GLM-5V-Turbo",
     "novacode-openai/gpt-5.4",
 )
 DEFAULT_COUNTS = (1, 5, 10)
@@ -135,15 +138,10 @@ def build_attempt_order(
     attempts: List[Dict[str, Any]] = []
     seen: set[str] = set()
 
-    for index, model_ref in enumerate((preferred_model, *fallback_models)):
+    for model_ref in (preferred_model, *fallback_models):
         if not model_ref or model_ref in seen:
             continue
-        try:
-            provider_name, provider_config, model_config = resolve_model_entry(providers, model_ref)
-        except ValueError:
-            if index == 0:
-                raise
-            continue
+        provider_name, provider_config, model_config = resolve_model_entry(providers, model_ref)
         attempts.append(
             {
                 "model_ref": model_ref,
@@ -230,18 +228,62 @@ def _guess_media_type(path: Path) -> str:
     return guessed or "image/jpeg"
 
 
+# 视觉 API 服务端会把超过自身摄入上限的图片先缩小再喂给模型，超限像素只消耗
+# 上传带宽与图片 token，不增加模型可见细节。默认 1568 取主流供应商的处理上限。
+VISION_MAX_EDGE_DEFAULT = 1568
+VISION_JPEG_QUALITY_DEFAULT = 85
+
+
+def _vision_image_settings() -> Tuple[int, int, bool]:
+    try:
+        max_edge = int(os.environ.get("VNEXT_VISION_MAX_EDGE", str(VISION_MAX_EDGE_DEFAULT)))
+    except ValueError:
+        max_edge = VISION_MAX_EDGE_DEFAULT
+    try:
+        quality = int(os.environ.get("VNEXT_VISION_JPEG_QUALITY", str(VISION_JPEG_QUALITY_DEFAULT)))
+    except ValueError:
+        quality = VISION_JPEG_QUALITY_DEFAULT
+    keep_raw = str(os.environ.get("VNEXT_VISION_RAW", "")).strip().lower() in {"1", "true", "yes"}
+    return max(256, max_edge), min(100, max(30, quality)), keep_raw
+
+
+def _prepare_image_payload(path: Path) -> Tuple[str, bytes]:
+    raw_bytes = path.read_bytes()
+    max_edge, quality, keep_raw = _vision_image_settings()
+    if keep_raw:
+        return _guess_media_type(path), raw_bytes
+    try:
+        from PIL import Image
+    except ImportError:
+        return _guess_media_type(path), raw_bytes
+    try:
+        with Image.open(io.BytesIO(raw_bytes)) as image:
+            converted = image.convert("RGB")
+            if max(converted.size) > max_edge:
+                converted.thumbnail((max_edge, max_edge), Image.LANCZOS)
+            buffer = io.BytesIO()
+            converted.save(buffer, format="JPEG", quality=quality)
+        encoded = buffer.getvalue()
+        if len(encoded) < len(raw_bytes):
+            return "image/jpeg", encoded
+        return _guess_media_type(path), raw_bytes
+    except Exception:
+        return _guess_media_type(path), raw_bytes
+
+
 def _load_data_url(path: Path) -> str:
     import base64
 
-    raw = path.read_bytes()
-    encoded = base64.b64encode(raw).decode("utf-8")
-    return f"data:{_guess_media_type(path)};base64,{encoded}"
+    media_type, payload = _prepare_image_payload(path)
+    encoded = base64.b64encode(payload).decode("utf-8")
+    return f"data:{media_type};base64,{encoded}"
 
 
 def _load_base64_image(path: Path) -> Tuple[str, str]:
     import base64
 
-    return _guess_media_type(path), base64.b64encode(path.read_bytes()).decode("utf-8")
+    media_type, payload = _prepare_image_payload(path)
+    return media_type, base64.b64encode(payload).decode("utf-8")
 
 
 def _normalize_base_url(api_style: str, raw_url: str) -> str:
@@ -261,40 +303,35 @@ def _scene_prompt(scene: Dict[str, Any], total_scenes: int) -> str:
         scene_timestamp=scene.get("time_range", "") or "未知",
         scene_voiceover=hints.get("voiceover") or "（该场景暂无可对齐字幕）",
         camera_motion_hint=hints.get("camera_movement_hint") or "暂无自动提示",
-        camera_motion_rationale="probe 未提供自动依据",
+        camera_motion_confidence=hints.get("camera_movement_confidence") or "未知",
+        camera_motion_rationale=hints.get("camera_movement_rationale") or "probe 未提供自动依据",
     )
 
 
 def _scene_image_paths(scene: Dict[str, Any]) -> List[Tuple[str, Path]]:
     frames = scene.get("frames") or {}
-    ordered = [("primary", frames.get("primary", "")), ("start", frames.get("start", "")), ("mid", frames.get("mid", "")), ("end", frames.get("end", ""))]
+    # start/mid/end 在前（与 prompt 的首/中/尾对应），primary 殿后：抽帧流程里
+    # primary 通常是 mid 的字节级复制，按内容去重后只有真正不同的画面才会上传。
+    ordered = [("start", frames.get("start", "")), ("mid", frames.get("mid", "")), ("end", frames.get("end", "")), ("primary", frames.get("primary", ""))]
     paths: List[Tuple[str, Path]] = []
+    seen_digests: set = set()
     for label, raw_path in ordered:
         if not raw_path:
             continue
         path = Path(str(raw_path))
-        if path.exists():
-            paths.append((label, path))
+        if not path.exists():
+            continue
+        try:
+            digest = hashlib.md5(path.read_bytes()).hexdigest()
+        except OSError:
+            continue
+        if digest in seen_digests:
+            continue
+        seen_digests.add(digest)
+        paths.append((label, path))
     if not paths:
         raise FileNotFoundError(f"Scene {scene.get('scene_number', 0)} 缺少可读图片")
     return paths
-
-
-def _scene_image_attempt_sets(image_paths: Sequence[Tuple[str, Path]]) -> List[Tuple[str, List[Tuple[str, Path]]]]:
-    attempts: List[Tuple[str, List[Tuple[str, Path]]]] = [("all", list(image_paths))]
-    seen: set[str] = set()
-    unique_paths: List[Tuple[str, Path]] = []
-    for label, path in image_paths:
-        key = str(path.resolve())
-        if key in seen:
-            continue
-        seen.add(key)
-        unique_paths.append((label, path))
-    if len(unique_paths) <= 1:
-        return attempts
-    for label, path in unique_paths:
-        attempts.append((f"{label}-only", [(label, path)]))
-    return attempts
 
 
 def _extract_text_from_response(response: Any) -> str:
@@ -428,55 +465,52 @@ def analyze_scene_with_attempts(
     attempts: Sequence[Dict[str, Any]],
     total_scenes: int,
 ) -> Dict[str, Any]:
-    image_attempt_sets = _scene_image_attempt_sets(_scene_image_paths(scene))
+    image_paths = _scene_image_paths(scene)
     prompt = _scene_prompt(scene, total_scenes=total_scenes)
     attempt_records: List[Dict[str, Any]] = []
     last_error = ""
 
     for attempt in attempts:
-        for image_set_label, image_paths in image_attempt_sets:
-            started = time.perf_counter()
-            error = ""
-            raw_response = ""
-            parsed = None
-            try:
-                api_style = attempt["api_style"]
-                provider_config = attempt["provider_config"]
-                model_config = attempt["model_config"]
-                if api_style == "anthropic-messages":
-                    raw_response = _call_anthropic_messages(provider_config, model_config, prompt, image_paths)
-                elif api_style == "openai-responses":
-                    raw_response = _call_openai_responses(provider_config, model_config, prompt, image_paths)
-                elif api_style == "openai-completions":
-                    raw_response = _call_openai_completions(provider_config, model_config, prompt, image_paths)
-                else:
-                    raise ValueError(f"暂不支持的 API 风格: {api_style}")
-                parsed = _parse_scene_response(raw_response, int(scene.get("scene_number", 0) or 0))
-                if parsed is None:
-                    error = "模型响应未通过 JSON 校验"
-            except Exception as exc:  # pragma: no cover - exercised in live probe
-                error = f"{type(exc).__name__}: {exc}"
-            elapsed_s = round(time.perf_counter() - started, 3)
-            attempt_records.append(
-                {
-                    "model_ref": attempt["model_ref"],
-                    "declared_image_support": bool(attempt["declared_image_support"]),
-                    "image_set": image_set_label,
-                    "image_count": len(image_paths),
-                    "elapsed_s": elapsed_s,
-                    "ok": parsed is not None,
-                    "error": error,
-                }
-            )
-            if parsed is not None:
-                parsed["scene_number"] = int(scene.get("scene_number", 0) or 0)
-                return {
-                    "scene_result": parsed,
-                    "used_model": attempt["model_ref"],
-                    "attempts": attempt_records,
-                    "elapsed_s": round(sum(item["elapsed_s"] for item in attempt_records), 3),
-                }
-            last_error = error
+        started = time.perf_counter()
+        error = ""
+        raw_response = ""
+        parsed = None
+        try:
+            api_style = attempt["api_style"]
+            provider_config = attempt["provider_config"]
+            model_config = attempt["model_config"]
+            if api_style == "anthropic-messages":
+                raw_response = _call_anthropic_messages(provider_config, model_config, prompt, image_paths)
+            elif api_style == "openai-responses":
+                raw_response = _call_openai_responses(provider_config, model_config, prompt, image_paths)
+            elif api_style == "openai-completions":
+                raw_response = _call_openai_completions(provider_config, model_config, prompt, image_paths)
+            else:
+                raise ValueError(f"暂不支持的 API 风格: {api_style}")
+            parsed = _parse_scene_response(raw_response, int(scene.get("scene_number", 0) or 0))
+            if parsed is None:
+                error = "模型响应未通过 JSON 校验"
+        except Exception as exc:  # pragma: no cover - exercised in live probe
+            error = f"{type(exc).__name__}: {exc}"
+        elapsed_s = round(time.perf_counter() - started, 3)
+        attempt_records.append(
+            {
+                "model_ref": attempt["model_ref"],
+                "declared_image_support": bool(attempt["declared_image_support"]),
+                "elapsed_s": elapsed_s,
+                "ok": parsed is not None,
+                "error": error,
+            }
+        )
+        if parsed is not None:
+            parsed["scene_number"] = int(scene.get("scene_number", 0) or 0)
+            return {
+                "scene_result": parsed,
+                "used_model": attempt["model_ref"],
+                "attempts": attempt_records,
+                "elapsed_s": round(sum(item["elapsed_s"] for item in attempt_records), 3),
+            }
+        last_error = error
 
     raise ProbeFailure(last_error or "所有候选模型都未返回有效结果", attempt_records)
 

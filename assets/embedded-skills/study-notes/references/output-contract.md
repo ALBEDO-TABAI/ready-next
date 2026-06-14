@@ -4,7 +4,7 @@
 
 ## Global rules
 
-- 结构跟着 `route + complexity + study_goal` 走，不跟着固定模板走
+- 结构跟着 `route + complexity + study_goal` 走，不跟着固定模板走；`study_goal` 的调制规则见 [study-goals.md](./study-goals.md)（路由定骨架，目标最多追加一个专属块）
 - 标题可以朴素，不必强制使用 emoji
 - 如果用了 emoji，只允许一段一个，且必须和内容语义相关
 - 类比不是全局硬要求；精确性更重要时，用场景、原句、数字代替
@@ -21,7 +21,7 @@
 
 - 文本不足时，不写完整笔记，要求调用方提供已提取正文。
 - raw image 或 binary 没有 OCR/转写时，返回 `modality_mismatch`。
-- 路由低置信但层次清楚时，先拆 mixed-content；目标不清时先问。
+- 路由低置信但层次清楚时，先拆 mixed-content；目标不清时按最可能目标产出，结尾用一行标注所采假设，不追问。
 
 ## Language policy
 
@@ -29,18 +29,10 @@
 - 用户未指定时，默认跟随用户请求语言。
 - 跨语言材料用用户偏好语言输出，专有名词和关键术语保留原文，首次出现时给简短解释。
 
-## Analogy policy by route
+## Analogy policy
 
-| Route | 规则 |
-| --- | --- |
-| `knowledge-tutorial` | 抽象概念难懂时，优先用类比或具体场景帮理解 |
-| `framework-methodology` | 可以用类比解释整体结构，但不要拿类比替代组件关系 |
-| `opinion-commentary` | 可选。只有在不削弱论证力度时才用 |
-| `narrative-story` | 通常不需要。故事本身就是最好的承载方式 |
-| `data-report` | 默认豁免。优先保留数字、口径、样本、时间范围 |
-| `news-brief` | 默认豁免。优先保留事实顺序和 5W1H |
-| `mixed-content` | 跟着子路由走，不能一刀切 |
-| `unsuitable-input` | 不用类比，先切到更合适的摘要形式 |
+- 类比不是全局硬要求。它服务于"理解"层的图式搭建（见 [study-goals.md](./study-goals.md)），所以最适合教程、框架、抽象概念；越靠近事实与数字（新闻、数据、条款），越应该用场景、原句、数字代替。
+- 各路由的具体策略以对应 method 文件的 `## Analogy policy` 小节为准，这里不再重复。
 
 如果你发现自己在给每个关键点硬塞一个类比，说明你已经偏离了这份 skill 的目标。
 
@@ -109,8 +101,8 @@
 ## Optional continuity and processing note
 
 - 只有上游提供 `prior_notes` 时，才加“与已有笔记的关系”。
-- 只有用户问“为什么这么拆”“详细分析”“推理过程”时，才加 `处理说明`。
-- `处理说明` 可以写 route、confidence、主要依据和被舍弃的备选；平常不要暴露内部路由。
+- 发生路由覆盖时，必须附一行最简 `处理说明`（说明按正文形态而非表面格式整理，不暴露内部路由名）。
+- 完整的 route、confidence、主要依据和被舍弃的备选，只在用户问“为什么这么拆”“详细分析”“推理过程”时展开。
 
 ## Route-specific minimums
 

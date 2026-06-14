@@ -1,4 +1,4 @@
-[![Version](https://img.shields.io/badge/version-3.0.0-blue)](https://img.shields.io/badge/version-3.0.0-blue) [![License](https://img.shields.io/badge/license-MIT-green)](https://img.shields.io/badge/license-MIT-green) [![Python](https://img.shields.io/badge/python-3.9+-yellow)](https://img.shields.io/badge/python-3.9+-yellow) [![AI Models](https://img.shields.io/badge/AI-GPT--5.4%20%7C%20Kimi%20K2.6%20%7C%20GLM--5v--turbo%20%7C%20Xiaomi--v2--omni-purple)](https://img.shields.io/badge/AI-multi--model-purple)
+[![Version](https://img.shields.io/badge/version-3.1.0-blue)](https://img.shields.io/badge/version-3.1.0-blue) [![License](https://img.shields.io/badge/license-MIT-green)](https://img.shields.io/badge/license-MIT-green) [![Python](https://img.shields.io/badge/python-3.10+-yellow)](https://img.shields.io/badge/python-3.10+-yellow) [![AI Models](https://img.shields.io/badge/AI-GPT--5.4%20%7C%20Kimi%20K2.6%20%7C%20GLM--5v--turbo%20%7C%20Xiaomi--v2--omni-purple)](https://img.shields.io/badge/AI-multi--model-purple)
 
 **🌐 Language / 语言**
 [English](#-video-expert-analyzer-vnext) | [中文](#-视频专家分析器-vnext)
@@ -17,7 +17,7 @@
 | 📊 **Audiovisual Report** | 5D scoring report | **Multi-dimensional audiovisual analysis** — 25 route-specific frameworks across 4 families (Narrative / Atmospheric / Meme / Graphic), with SVG diagrams |
 | 🔄 **Pipeline** | Single-pass, restarts on failure | **Resumable staged execution** — prepare → score → merge → finalize, with `run_state.json` checkpoints |
 | ⚡ **Performance** | Sequential scoring | **Parallel batch scoring** — configurable concurrency (default: 4 workers), vision API calls run simultaneously |
-| 🎯 **Video Routing** | 4 scene types | **19 video type classifications** via dual-axis routing (5 Visual × 5 Audio = 25 route combinations) |
+| 🎯 **Video Routing** | 4 scene types | **19 sub-type classifications** via dual-axis routing — 5 Visual × 5 Audio = 25 route combinations mapping to 22 frameworks + an experimental fallback |
 | 🤖 **Model Support** | Gemini / Kimi / Claude | **GPT-5.4, Kimi K2.6, GLM-5v-turbo, Xiaomi-v2-omni** tested for vision; **K2.6, GLM-5.1, Xiaomi-v2-pro** tested for report generation |
 | 🔗 **Orchestration** | Standalone only | **OpenClaw relay mode** — controller + batch worker handoff for distributed execution |
 
@@ -31,9 +31,11 @@
 | ⚡ **Parallel Batch Scoring** | Frames sent to AI providers in parallel batches, with auto-retry and stale detection |
 | 🔄 **Resumable Pipeline** | Crash-safe staged execution — automatically picks up where it left off |
 | 🎯 **19-Type Video Classifier** | Dual-axis routing (Visual Source × Audio Dominance) maps to specialized analysis templates |
-| 🎤 **Smart Subtitle Extraction** | 4-tier fallback: Platform API → Embedded → RapidOCR → FunASR Nano |
-| ⭐ **Best Shots** | Auto-select highlight clips (score ≥ 7.5) to `best_shots/` |
-| 🌐 **Bilingual Reports** | Reports generated in your chosen language (zh-CN, en-US, ja-JP, etc.) |
+| 🎤 **Smart Subtitle Extraction** | 4-tier fallback: Platform API → Embedded → RapidOCR → FunASR/mlx-whisper |
+| 🎵 **Measured Audio Signal** | ffmpeg + numpy extract BPM, onset density, loudness arc, and per-cut beat alignment (±80ms) — audio-axis routing and rhythm analysis run on measured data, not title heuristics |
+| 📖 **Reader-First 导读** | Every audiovisual report opens with a plain-language TL;DR answering the route's value question, with highlight cards pointing at scene timestamps |
+| ⭐ **Best Shots** | Auto-select highlight clips (score ≥ 7.5; falls back to top in-video percentile when a harsh scorer leaves none) |
+| 🌐 **Bilingual Reports** | Reports generated in your chosen language (zh-CN, en-US, ja-JP, etc.); untranslated deliverables are flagged in `delivery_report.json` |
 
 ## 📱 Supported Platforms
 
@@ -103,8 +105,12 @@ Factors affecting speed:
 brew install ffmpeg          # macOS
 # sudo apt install ffmpeg    # Ubuntu/Debian
 
-# Install Python dependencies
+# Install Python dependencies (core)
 pip3 install -r requirements.txt
+
+# Optional: local ASR / burned-subtitle OCR (subtitle fallback tiers 3-4 only)
+# pip3 install "video-expert-analyzer-vnext[asr]"   # FunASR + torch (large)
+# pip3 install "video-expert-analyzer-vnext[ocr]"   # RapidOCR
 ```
 
 ### One-Command Analysis
@@ -146,6 +152,11 @@ python3 scripts/ai_analyzer.py /path/to/scene_scores.json --mode finalize
 | `OPENAI_MODEL` | Alternative: OpenAI model | `gpt-5.4` |
 | `SCENE_THRESHOLD` | Scene detection sensitivity | `27.0` (default) |
 | `BEST_SHOT_THRESHOLD` | Best shots threshold | `7.5` (default) |
+| `VNEXT_VISION_MAX_EDGE` | Longest edge for frames sent to vision APIs | `1568` (default) |
+| `VNEXT_VISION_JPEG_QUALITY` | JPEG quality for re-encoded frames | `85` (default) |
+| `VNEXT_VISION_RAW` | Set `1` to upload original bytes unscaled | unset |
+| `VNEXT_TYPE_WEIGHT_SOFTENING` | Soft-blend factor for type weights (0 = legacy hard switch) | `0.4` (default) |
+| `AUDIOVISUAL_SUMMARY_MAX_CHARS` | 导读 section character ceiling | `400` (default) |
 
 ## 📊 Scoring System
 
@@ -167,6 +178,8 @@ python3 scripts/ai_analyzer.py /path/to/scene_scores.json --mode finalize
 | 📖 **TYPE-B Narrative** | Credibility 40% + Memorability 30% | Story segments, emotional scenes |
 | 🎨 **TYPE-C Aesthetic** | Aesthetics 50% + Sync 30% | B-roll, atmosphere shots |
 | 🛍️ **TYPE-D Commercial** | Credibility 40% + Memorability 40% | Product showcases, ads |
+
+> Effective weights are a **soft blend**: `(1-α) × type profile + α × uniform 20%` with `α = 0.4` (`VNEXT_TYPE_WEIGHT_SOFTENING`). Every dimension always keeps a non-zero weight, and a misclassified TYPE can only tilt — not zero out — any dimension. Scores also carry an in-video `weighted_percentile`; raw scores are model-calibration-dependent, so cross-video comparisons should use percentiles.
 
 ### Selection Levels
 
@@ -327,6 +340,7 @@ A shot with genuine emotion but slight shake is better than a perfect but empty 
 | [PySceneDetect](https://github.com/Breakthrough/PySceneDetect) | Scene detection |
 | [FFmpeg](https://ffmpeg.org/) | Media processing |
 | [FunASR](https://github.com/modelscope/FunASR) | Chinese speech recognition |
+| [mlx-whisper](https://github.com/ml-explore/mlx-examples) | Local ASR (Apple Silicon) |
 | [RapidOCR](https://github.com/RapidAI/RapidOCR) | Burned subtitle OCR |
 
 ## 📖 References
@@ -367,7 +381,7 @@ A shot with genuine emotion but slight shake is better than a perfect but empty 
 | 📊 **视听报告** | 五维评分报告 | **多维度视听剖析** — 4 大家族 25 条分析路线，按视频类型匹配专属模板，含 SVG 结构图 |
 | 🔄 **流程** | 单次执行，中断需重来 | **可续跑分段流水线** — prepare → score → merge → finalize，`run_state.json` 断点续跑 |
 | ⚡ **性能** | 逐场景串行评分 | **并行批次评分** — 可配置并发数（默认 4），视觉 API 调用同时执行 |
-| 🎯 **视频路由** | 4 种场景类型 | **19 种视频类型** — 双轴路由（5 视觉来源 × 5 听觉主导 = 25 条路线组合） |
+| 🎯 **视频路由** | 4 种场景类型 | **19 种子类型** — 双轴路由（5 视觉来源 × 5 听觉主导 = 25 条路线组合，映射到 22 个框架 + experimental 兜底） |
 | 🤖 **模型支持** | Gemini / Kimi / Claude | 视觉分析实测 **GPT-5.4、Kimi K2.6、GLM-5v-turbo、Xiaomi-v2-omni**；报告生成实测 **K2.6、GLM-5.1、Xiaomi-v2-pro** |
 | 🔗 **编排** | 仅单机 | **OpenClaw 接力模式** — 主控 + 批次 worker 串行接力 |
 
@@ -381,9 +395,11 @@ A shot with genuine emotion but slight shake is better than a perfect but empty 
 | ⚡ **并行批次评分** | 画面帧并行发送到 AI 供应商，自动重试和超时检测 |
 | 🔄 **可续跑流水线** | 崩溃安全的分段执行 — 自动从上次中断处继续 |
 | 🎯 **19 类视频分类器** | 双轴路由（视觉来源 × 听觉主导）映射到专属分析模板 |
-| 🎤 **智能字幕提取** | 四级降级：平台 API → 内嵌字幕 → RapidOCR → FunASR Nano |
-| ⭐ **精选镜头** | 自动筛选高分片段（≥7.5）到 `best_shots/` |
-| 🌐 **多语言报告** | 支持指定报告语言（zh-CN、en-US、ja-JP 等） |
+| 🎤 **智能字幕提取** | 四级降级：平台 API → 内嵌字幕 → RapidOCR → FunASR/mlx-whisper |
+| 🎵 **真实音频信号** | ffmpeg + numpy 实测 BPM、onset 密度、响度弧线、逐切点卡拍判定（±80ms）——音频轴路由和节奏分析基于测量数据而非标题猜测 |
+| 📖 **导读优先** | 视听报告开头是面向普通观众的白话速读：回答该类型的价值问题 + 带时间码的亮点卡片 |
+| ⭐ **精选镜头** | 自动筛选高分片段（≥7.5；遇严苛打分模型时按视频内百分位兜底） |
+| 🌐 **多语言报告** | 支持指定报告语言（zh-CN、en-US、ja-JP 等）；未翻译的交付物会被 `delivery_report.json` 标记 |
 
 ## 📱 支持平台
 
@@ -453,8 +469,12 @@ A shot with genuine emotion but slight shake is better than a perfect but empty 
 brew install ffmpeg          # macOS
 # sudo apt install ffmpeg    # Ubuntu/Debian
 
-# 安装 Python 依赖
+# 安装 Python 依赖（核心）
 pip3 install -r requirements.txt
+
+# 可选：本地 ASR / 烧录字幕 OCR（仅字幕降级链第 3/4 级需要）
+# pip3 install "video-expert-analyzer-vnext[asr]"   # FunASR + torch（体积大）
+# pip3 install "video-expert-analyzer-vnext[ocr]"   # RapidOCR
 ```
 
 ### 一键分析
@@ -496,6 +516,11 @@ python3 scripts/ai_analyzer.py /path/to/scene_scores.json --mode finalize
 | `OPENAI_MODEL` | 备选：OpenAI 模型 | `gpt-5.4` |
 | `SCENE_THRESHOLD` | 场景检测灵敏度 | `27.0`（默认） |
 | `BEST_SHOT_THRESHOLD` | 精选阈值 | `7.5`（默认） |
+| `VNEXT_VISION_MAX_EDGE` | 发给视觉模型的帧图最长边 | `1568`（默认） |
+| `VNEXT_VISION_JPEG_QUALITY` | 重编码 JPEG 质量 | `85`（默认） |
+| `VNEXT_VISION_RAW` | 设 `1` 按原始字节直传（跳过缩放） | 未设置 |
+| `VNEXT_TYPE_WEIGHT_SOFTENING` | 类型权重软混合系数（0 = 旧硬切换） | `0.4`（默认） |
+| `AUDIOVISUAL_SUMMARY_MAX_CHARS` | 导读模块字数上限 | `400`（默认） |
 
 ## 📊 评分体系
 
@@ -517,6 +542,8 @@ python3 scripts/ai_analyzer.py /path/to/scene_scores.json --mode finalize
 | 📖 **TYPE-B 叙事** | 可信度 40% + 记忆度 30% | 故事段落、情感场景 |
 | 🎨 **TYPE-C 氛围** | 美感 50% + 节奏 30% | B-roll、氛围镜头 |
 | 🛍️ **TYPE-D 商业** | 可信度 40% + 记忆度 40% | 产品展示、广告 |
+
+> 实际生效的是**软混合**权重：`(1-α) × 类型档位 + α × 均匀 20%`，α 默认 0.4（`VNEXT_TYPE_WEIGHT_SOFTENING`）。每个维度始终保有非零权重，类型误判只会倾斜而不会清零任何维度。每个场景同时输出视频内百分位 `weighted_percentile`——原始分受打分模型口径影响，跨视频对比请用百分位。
 
 ### 筛选等级
 
@@ -677,6 +704,7 @@ VNext 对每个视频沿两个轴进行分类，然后选择对应的专属分�
 | [PySceneDetect](https://github.com/Breakthrough/PySceneDetect) | 场景检测 |
 | [FFmpeg](https://ffmpeg.org/) | 媒体处理 |
 | [FunASR](https://github.com/modelscope/FunASR) | 中文语音识别 |
+| [mlx-whisper](https://github.com/ml-explore/mlx-examples) | 本地 ASR（Apple Silicon） |
 | [RapidOCR](https://github.com/RapidAI/RapidOCR) | 烧录字幕 OCR |
 
 ## 📖 参考文献

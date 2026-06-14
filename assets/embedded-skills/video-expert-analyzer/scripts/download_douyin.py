@@ -204,7 +204,9 @@ def download_douyin_video(url: str, output_path: str) -> bool:
     print("\n步骤 2/4: 提取视频数据...")
     render_data = extract_render_data(html)
     if not render_data:
-        print("✗ 无法提取视频数据")
+        print("✗ 无法提取视频数据：已尝试 RENDER_DATA / _ROUTER_DATA / _SSR_DATA / _SSR_HYDRATED_DATA 四种页面结构均未命中。")
+        print("  最可能的原因是抖音页面改版，需要更新 download_douyin.py 的解析模式；")
+        print("  临时绕路：可尝试 `yt-dlp <分享链接>` 或换一条分享链接重试。")
         return False
     print("✓ 提取到视频数据")
 
@@ -212,7 +214,8 @@ def download_douyin_video(url: str, output_path: str) -> bool:
     print("\n步骤 3/4: 解析视频地址...")
     video_url = extract_video_url(render_data)
     if not video_url:
-        print("✗ 无法获取视频下载地址")
+        print("✗ 页面数据已取到，但已知的视频地址字段路径全部未命中（页面结构可能已更新）。")
+        print("  需要更新 download_douyin.py 的 possible_paths；临时绕路可尝试 `yt-dlp <分享链接>`。")
         return False
     print(f"✓ 获取到视频地址")
 

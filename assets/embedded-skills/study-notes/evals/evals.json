@@ -1,0 +1,432 @@
+{
+  "skill_name": "study-notes",
+  "evals": [
+    {
+      "id": 1,
+      "name": "知识教程型文章",
+      "prompt": "帮我做笔记：\n\n标题：如何让你的AI艺术更独特\n\n正文：\n大多数人在使用AI绘画时，第一反应是输入\"beautiful landscape\"或\"fantasy art\"这样的通用prompt。这恰恰是问题所在——当你使用所有人都用的提示词，你的作品就会淹没在海量的AI图像中。\n\n真正独特的AI艺术需要三个要素：\n\n第一，具体的情绪。你在描述一个场景时，不要说\"happy\"，而是描述\"a quiet Sunday morning in a small coastal town\"。具体化的描述会引导AI生成更独特的构图。\n\n第二，意外的材质组合。Mixing unexpected materials—like watercolor textures on a cyberpunk character, or oil painting style on a futuristic city—forces the AI out of its comfort zone. When you combine incompatible aesthetics, you get results that feel genuinely novel.\n\n第三，叙事性的构图。不要只是描述一个物体，而是描述一个\"moment\"。比如\"an elderly man reading a letter by candlelight, the ink still wet\"比\"old man\"丰富太多。\n\n记住，AI是你的工具，不是你的替代者。你提供的creative direction越具体，AI的发挥空间反而越大。",
+      "files": [],
+      "hints": [],
+      "expected_route": "knowledge-tutorial",
+      "expected_goal": "direct-application",
+      "expected_complexity": "standard",
+      "expected_unsuitable": false,
+      "manual_checks": [
+        "笔记应强调怎么做，而不是只做概念摘要",
+        "可以用类比或场景，但不能为了类比牺牲原意",
+        "应覆盖情绪具体化、材质组合、叙事构图三个核心点"
+      ]
+    },
+    {
+      "id": 2,
+      "name": "框架方法论文章",
+      "prompt": "提取重点：\n\n品牌破圈的五个底层逻辑\n\n第一，品类创新优先于营销创新。农夫山泉当年不强调\"更甜\"，而是重新定义品类——\"天然水\"。这不是营销话术的竞争，而是品类定义的竞争。\n\n第二，情感溢价需要产品支撑。钟薛高的68元雪糕引发争议，不是因为价格高，而是因为产品本身没有支撑起\"中国高端雪糕\"的情感价值。消费者愿意付溢价，但溢价需要有感知到的理由。\n\n第三，渠道即内容。小罐茶在线下铺天盖地的门店铺设，本身就是广告。反例是完美日记——线上声量极大，但线下渠道没有建立强认知，导致品牌认知断层。\n\n第四，创始人即品牌。这个时代，消费者更信任人而不是公司。东方甄选的成功，底层是董宇辉这个\"有文化的卖货人\"被信任，而不是新东方这个机构品牌。\n\n第五，长期主义回报最稳定。元气森林用五年时间教育\"0糖0卡\"这个概念，等到市场成熟，它已经是品类代名词。短期流量打法可以起量，但无法建立壁垒。",
+      "files": [],
+      "hints": [],
+      "expected_route": "framework-methodology",
+      "expected_goal": "direct-application",
+      "expected_complexity": "standard",
+      "expected_unsuitable": false,
+      "manual_checks": [
+        "笔记应保留五个组成部分及其关系",
+        "应写出适用边界，不要把框架写成万能真理",
+        "可以用例子解释，但不必给每条都强行类比"
+      ]
+    },
+    {
+      "id": 3,
+      "name": "截图中的概念拆解",
+      "prompt": "这是我在一个设计播客里看到的截图，帮我做笔记。",
+      "files": [
+        "design-system-podcast.png"
+      ],
+      "hints": [
+        "设计系统不是关于工具的，而是关于共识的。当你建立一个设计系统，你实际上在做三件事：1. 建立词汇表——确保每个人对'按钮'、'间距'的理解一致 2. 建立规则——规定在什么情况下用哪种按钮 3. 建立信任——让团队相信系统会持续维护和演进。很多团队的设计系统失败，不是因为工具选错了，而是因为没有解决'共识问题'。"
+      ],
+      "expected_route": "framework-methodology",
+      "expected_goal": "background-understanding",
+      "expected_complexity": "short",
+      "expected_unsuitable": false,
+      "manual_checks": [
+        "应先把图片转成文字后再做笔记",
+        "重点应落在词汇表、规则、信任三层",
+        "失败原因应写成'没有解决共识问题'，而不是工具选择错误"
+      ]
+    },
+    {
+      "id": 4,
+      "name": "观点评论型内容",
+      "prompt": "帮我做笔记：\n\n很多人把AI写作工具当成提效神器，但我越来越怀疑，它正在把写作者最宝贵的肌肉偷走。写作不只是把句子排列整齐，而是在下笔前逼自己想清楚：你到底要说什么，你凭什么这么说。现在很多人先让AI给大纲，再让AI给初稿，最后自己做润色。看起来省时间，实际上是把最费脑子的环节外包了。\n\n当然，AI不是不能用。它适合做资料归纳、改写、润色，甚至帮助你发现盲点。但如果连观点形成这一步都交出去，最后留下的只会是语气像你、判断不像你的文本。真正危险的，不是AI替你写，而是你慢慢失去独立判断的耐心。",
+      "files": [],
+      "hints": [],
+      "expected_route": "opinion-commentary",
+      "expected_goal": "background-understanding",
+      "expected_complexity": "short",
+      "expected_unsuitable": false,
+      "manual_checks": [
+        "笔记应保留论点、理由和保留意见",
+        "应指出这是观点性内容，可信度要看论据是否充分",
+        "不能把作者判断写成客观事实"
+      ]
+    },
+    {
+      "id": 5,
+      "name": "叙事故事型内容",
+      "prompt": "做个笔记：\n\n我第一次带团队做直播是在一个周五晚上。所有人都觉得流程已经排练得差不多了，连灯光和提词器都反复确认过。结果真正开播前十分钟，主讲人突然说嗓子哑得厉害，临时决定让我顶上。我站到镜头前那一刻，脑子里一片空白，只记得制作人一直在耳返里说'慢一点，说人话'。那场直播并不完美，但观众停留时间比我们以往都高。复盘时我才意识到，真正让人留下来的不是流程熟练，而是临场时你能不能真的看见观众在困惑什么。",
+      "files": [],
+      "hints": [],
+      "expected_route": "narrative-story",
+      "expected_goal": "background-understanding",
+      "expected_complexity": "short",
+      "expected_unsuitable": false,
+      "manual_checks": [
+        "笔记应保留故事起因、转折和最后得到的理解",
+        "不要硬拆成抽象知识点列表",
+        "如果提炼启发，要明确它来自这次经历，不是假装普适定律"
+      ]
+    },
+    {
+      "id": 6,
+      "name": "数据报告型内容",
+      "prompt": "提取重点：\n\n2025年中国独立咖啡店经营报告。我们调研了42个城市的1260家门店。结果显示：样本门店日均出杯量同比增长12%，但客单价同比下降6%。一线城市的工作日早高峰销售占全天营收的43%，而三线城市晚间社交场景占比更高。拥有会员体系的门店复购率比无会员体系门店高18个百分点。报告同时提醒，样本以开业三年以上门店为主，因此对新店冷启动阶段的解释力有限。",
+      "files": [],
+      "hints": [],
+      "expected_route": "data-report",
+      "expected_goal": "decision-support",
+      "expected_complexity": "standard",
+      "expected_unsuitable": false,
+      "manual_checks": [
+        "笔记应把核心发现和关键数据分开写清楚",
+        "应写出口径限制和样本边界",
+        "默认不需要类比，重点是准确"
+      ]
+    },
+    {
+      "id": 7,
+      "name": "新闻资讯型内容",
+      "prompt": "帮我总结成笔记：\n\n3月28日，上海市交通委发布新规，自2026年5月1日起，新增投放的共享电单车必须接入统一定位与电子围栏平台。已投放车辆需在六个月内完成改造。监管部门表示，新规主要为了解决乱停放和跨区调度失控问题。多家运营公司回应称，硬件改造会提高成本，但有助于减少罚单和投诉。目前细则尚未公布，车价补贴和过渡期执法尺度仍待明确。",
+      "files": [],
+      "hints": [],
+      "expected_route": "news-brief",
+      "expected_goal": "background-understanding",
+      "expected_complexity": "short",
+      "expected_unsuitable": false,
+      "manual_checks": [
+        "笔记应保留时间点和政策生效时间",
+        "应按5W1H写清已知信息",
+        "应区分已公布内容和仍待明确的部分"
+      ]
+    },
+    {
+      "id": 8,
+      "name": "超长高密度材料",
+      "prompt": "帮我做学习笔记。我贴的是一篇关于生成式AI供应链安全的论文摘要和结论，中间还夹着实验设置、样本规模、误报率、五类攻击向量和防御建议。全文约6800字，里面有大量百分比、引用编号和缩写术语。",
+      "files": [],
+      "hints": [
+        "摘要：我们在12个模型服务链路上评估了prompt injection、tool poisoning、retrieval contamination、policy confusion、memory hijacking五类攻击...... 结论：单点过滤器无法覆盖跨链路污染，需要在检索、工具执行、记忆写入三个位置同时设防......"
+      ],
+      "expected_route": "data-report",
+      "expected_goal": "direct-application",
+      "expected_complexity": "layered",
+      "expected_unsuitable": false,
+      "manual_checks": [
+        "应走分层摘要，不应只给一层平面总结",
+        "应优先保留实验结论、边界和防御建议",
+        "可信度提醒应关注样本范围和实验限制"
+      ]
+    },
+    {
+      "id": 9,
+      "name": "混合型内容",
+      "prompt": "帮我做笔记：\n\n昨天某短视频平台宣布下线一批AI换脸模板，官方理由是近期投诉量上升。但作者随后写了一段评论，认为这件事真正暴露的不是模板审核，而是平台一直把创作门槛做低，却没有同步建立后果教育。事件本身只是一根导火索，真正的问题是平台过去默认'好玩优先'，现在才开始补治理课。",
+      "files": [],
+      "hints": [],
+      "expected_route": "mixed-content",
+      "expected_goal": "background-understanding",
+      "expected_complexity": "standard",
+      "expected_unsuitable": false,
+      "manual_checks": [
+        "笔记应把新闻事实层和评论判断层分开",
+        "不能只按新闻简报写，也不能只按评论写",
+        "可信度提醒应区分公告事实和作者解读"
+      ]
+    },
+    {
+      "id": 10,
+      "name": "不适合做标准笔记的纯代码",
+      "prompt": "帮我做笔记：\n\n```python\nimport pandas as pd\n\ndef rolling_alert(series, window=7, threshold=0.25):\n    mean = series.rolling(window).mean()\n    delta = (series - mean) / mean\n    return delta.abs() > threshold\n```\n",
+      "files": [
+        "rolling_alert.py"
+      ],
+      "hints": [],
+      "expected_route": "unsuitable-input",
+      "expected_goal": "direct-application",
+      "expected_complexity": "short",
+      "expected_unsuitable": true,
+      "manual_checks": [
+        "不应强行输出普通学习笔记模板",
+        "应改成代码导读或说明为何更适合代码解读格式",
+        "如果继续总结，重点应是作用、关键参数和风险"
+      ]
+    },
+    {
+      "id": 11,
+      "name": "Raw image mismatch",
+      "prompt": "这张图帮我做学习笔记",
+      "files": [
+        "screenshot.png"
+      ],
+      "hints": [],
+      "expected_status": "modality_mismatch",
+      "expected_modality": "image",
+      "expected_confidence": "low",
+      "expected_unsuitable": false,
+      "manual_checks": [
+        "如果没有 OCR 或正文，不应直接假装读懂图片",
+        "应要求上游先提供 OCR/正文，或返回 modality_mismatch",
+        "不能从文件名推断图片内容"
+      ]
+    },
+    {
+      "id": 12,
+      "name": "Mixed long material budget",
+      "prompt": "帮我做笔记：这是一份 9000 字混合材料，前半是政策新闻，后半是作者评论和执行建议。",
+      "files": [],
+      "hints": [
+        "3月1日发布新规，要求平台登记模型来源。作者认为这不是单纯合规问题，而是组织治理能力测试。全文很长，包含新闻事实、评论判断和执行清单。"
+      ],
+      "expected_route": "mixed-content",
+      "expected_goal": "background-understanding",
+      "expected_complexity": "layered",
+      "expected_unsuitable": false,
+      "manual_checks": [
+        "长混合材料不应静默截断",
+        "应先给总览和分段目录",
+        "应区分事实层、评论层和执行建议层"
+      ]
+    },
+    {
+      "id": 13,
+      "name": "Data report plus commentary",
+      "prompt": "帮我做笔记：\n\n一份调研覆盖500名用户，数据显示满意度下降12%，复购率下降8个百分点。但作者随后评论说，真正的问题不是价格，而是服务承诺和交付体验不一致。这段材料同时包含数据发现和作者判断。",
+      "files": [],
+      "hints": [],
+      "expected_route": "mixed-content",
+      "expected_goal": "background-understanding",
+      "expected_complexity": "standard",
+      "expected_unsuitable": false,
+      "manual_checks": [
+        "应把数据发现和作者评论拆开",
+        "不能把作者判断写成数据已经证明的事实",
+        "应保留样本数和关键百分比"
+      ]
+    },
+    {
+      "id": 14,
+      "name": "Story plus framework",
+      "prompt": "帮我做笔记：\n\n我第一次负责门店改造时，先把动线图画得很漂亮，后来才发现店员根本不会按图执行。复盘后我总结出三个原则：先问一线动作，再改空间结构，最后才做视觉包装。",
+      "files": [],
+      "hints": [],
+      "expected_route": "mixed-content",
+      "expected_goal": "background-understanding",
+      "expected_complexity": "standard",
+      "expected_unsuitable": false,
+      "manual_checks": [
+        "应保留故事转折",
+        "也要保留三个原则",
+        "不能只写成抽象方法论"
+      ]
+    },
+    {
+      "id": 15,
+      "name": "Framework with data evidence",
+      "prompt": "提取重点：\n\n这篇文章提出会员运营的三层框架：识别高频用户、设计权益梯度、建立复购提醒。作者用一组调研数据支撑这个框架：样本门店中，有会员体系的复购率比无会员体系高18个百分点。",
+      "files": [],
+      "hints": [],
+      "expected_route": "mixed-content",
+      "expected_goal": "background-understanding",
+      "expected_complexity": "standard",
+      "expected_unsuitable": false,
+      "manual_checks": [
+        "主结构应按三层框架组织",
+        "必须保留18个百分点这个证据",
+        "不要把数据证据删成一句空泛背书"
+      ]
+    },
+    {
+      "id": 16,
+      "name": "Explicit memory review goal",
+      "prompt": "帮我复习这段内容：\n\n品牌破圈有三个关键：品类创新、渠道即内容、长期主义。每一点都要能用一句话背出来。",
+      "files": [],
+      "hints": [],
+      "expected_route": "framework-methodology",
+      "expected_goal": "memory-review",
+      "expected_complexity": "short",
+      "expected_unsuitable": false,
+      "manual_checks": [
+        "应输出适合复习的最小记忆骨架",
+        "不要扩成完整长文笔记"
+      ]
+    },
+    {
+      "id": 17,
+      "name": "Explicit secondary creation goal",
+      "prompt": "帮我拆结构，方便仿写：\n\n作者先用一个失败案例开头，再提出三层框架，最后用反例说明边界。这种写法把读者从具体问题带到可复用方法。",
+      "files": [],
+      "hints": [],
+      "expected_route": "framework-methodology",
+      "expected_goal": "secondary-creation",
+      "expected_complexity": "short",
+      "expected_unsuitable": false,
+      "manual_checks": [
+        "应重点拆写法和论证顺序",
+        "不要只总结内容观点"
+      ]
+    },
+    {
+      "id": 18,
+      "name": "Insufficient text",
+      "prompt": "帮我做笔记",
+      "files": [],
+      "hints": [],
+      "expected_status": "insufficient_text",
+      "expected_modality": "text",
+      "expected_confidence": "low",
+      "expected_unsuitable": false,
+      "manual_checks": [
+        "没有正文时不应假装产出完整笔记",
+        "应要求调用方提供已提取文本"
+      ]
+    },
+    {
+      "id": 19,
+      "name": "Audio file binary modality_mismatch",
+      "prompt": "帮我转写这段音频然后做笔记",
+      "files": ["interview-2026-05-15.mp3"],
+      "hints": [],
+      "expected_status": "modality_mismatch",
+      "expected_modality": "binary",
+      "expected_confidence": "low",
+      "expected_unsuitable": false,
+      "manual_checks": [
+        "对音频文件应返回 modality_mismatch，要求上游先转写",
+        "不应试图直接生成笔记内容"
+      ]
+    },
+    {
+      "id": 20,
+      "name": "Long English material with k hint",
+      "prompt": "Make detailed notes on this 8k words product retrospective.",
+      "texts": ["This is the post-mortem of our last product launch. The launch achieved 35% adoption in the first week, exceeded the 25% target. Key drivers were the simplified onboarding flow and the new sample-based pricing tier. However, the retention rate at day 14 was only 18%, well below our 30% benchmark. Three core hypotheses emerged from the analysis... "],
+      "hints": [],
+      "expected_route": "data-report",
+      "expected_complexity": "layered",
+      "expected_unsuitable": false,
+      "manual_checks": [
+        "应识别英文 '8k words' 作为长度提示，复杂度升到 layered",
+        "笔记应保留关键数据：35% adoption, 18% retention, 30% benchmark"
+      ]
+    },
+    {
+      "id": 21,
+      "name": "Pure spec table unsuitable",
+      "prompt": "帮我做笔记：",
+      "texts": ["产品规格表\n| 参数 | 数值 |\n|---|---|\n| 输入电压 | 220V±10% |\n| 输出功率 | 1500W |\n| 工作温度 | -10°C ~ 45°C |\n| 防护等级 | IP54 |\n| 尺寸 | 320×210×80mm |\n| 重量 | 4.2kg |\n额定电压 220V，过载保护 120%。注意事项：使用说明详见手册第3章。"],
+      "hints": [],
+      "expected_route": "unsuitable-input",
+      "expected_unsuitable": true,
+      "manual_checks": [
+        "应识别为参数表/规格书，切到规格清单",
+        "不应硬写成知识点归纳"
+      ]
+    },
+    {
+      "id": 22,
+      "name": "Prior notes continuity hint",
+      "prompt": "帮我做笔记，注意我之前已经有一份相关的笔记请关联",
+      "texts": ["这是一段关于反馈机制的实操技巧：定期的回顾会议如果没有明确的'继续/停止/开始'三栏结构，往往会沦为情绪宣泄而非改进决策。怎么用：每次会议前提前发出三栏模板，会议中按栏目逐项确认。注意误区：不要把'继续'栏做成成绩展示。"],
+      "hints": [],
+      "prior_notes": "之前的笔记：sprint retrospective 框架 / 三栏结构 / 团队 trust",
+      "expected_route": "knowledge-tutorial",
+      "expected_unsuitable": false,
+      "manual_checks": [
+        "输出末尾应加 '与已有笔记的关系' 段",
+        "不应臆造之前笔记里没有的内容"
+      ]
+    },
+    {
+      "id": 23,
+      "name": "URL-only unfetched page",
+      "prompt": "帮我做笔记 https://example.com/posts/ai-notes-best-practices",
+      "files": [],
+      "hints": [],
+      "expected_status": "modality_mismatch",
+      "expected_modality": "unfetched_url",
+      "expected_confidence": "low",
+      "expected_unsuitable": false,
+      "manual_checks": [
+        "不应假装读过网页内容",
+        "应要求上游先抓取或剪藏正文，再传回提取后的文本"
+      ]
+    },
+    {
+      "id": 24,
+      "name": "Tutorial with embedded code blocks",
+      "prompt": "帮我做笔记：",
+      "texts": ["如何用 Python 装饰器做缓存？装饰器的核心思想是在不改动原函数的情况下增强它的行为。比如下面这个例子：\n\n```python\nfrom functools import lru_cache\n\n@lru_cache(maxsize=128)\ndef fib(n):\n    return n if n < 2 else fib(n-1) + fib(n-2)\n```\n\n这里 lru_cache 会把最近的调用结果缓存起来。注意两个常见误区：第一，参数必须可哈希；第二，缓存不会自动过期，长生命周期进程要小心内存。再看一个手写版本：\n\n```python\ndef memo(fn):\n    cache = {}\n    def wrapper(*args):\n        if args not in cache:\n            cache[args] = fn(*args)\n        return cache[args]\n    return wrapper\n```\n\n手写版本帮你理解原理，生产环境建议直接用标准库。"],
+      "hints": [],
+      "expected_route": "knowledge-tutorial",
+      "expected_goal": "direct-application",
+      "expected_unsuitable": false,
+      "manual_checks": [
+        "带代码示例的教程是教程，不是 unsuitable-input；不应切到代码导读",
+        "笔记应保留两个误区（可哈希、不过期）和'生产用标准库'的建议",
+        "代码块可以摘要成一句作用说明，不必逐行复述"
+      ]
+    },
+    {
+      "id": 25,
+      "name": "Article teaching contract-reading tips",
+      "prompt": "帮我做笔记：\n\n很多人签合同的时候根本不看条款。今天教你三个技巧快速识别合同里的坑：第一，先看违约责任部分，甲方乙方的义务是否对等；第二，看争议解决条款，约定仲裁还是诉讼差别很大；第三，看合同期限和自动续约条款，很多坑都藏在这里。学会这三招，签合同之前心里就有底了。",
+      "files": [],
+      "hints": [],
+      "expected_route": "knowledge-tutorial",
+      "expected_goal": "direct-application",
+      "expected_unsuitable": false,
+      "manual_checks": [
+        "讲'怎么看合同'的文章是教程，不是法律条款本身；不应切到条款摘要",
+        "三个技巧应作为可执行建议保留"
+      ]
+    },
+    {
+      "id": 26,
+      "name": "Data report with small embedded table",
+      "prompt": "提取重点：\n\n本季度社区团购调研覆盖了8个城市的320个团长，调研周期为1月至3月。数据显示，下单转化率同比提升9%，但客诉率上升2.4个百分点，主要集中在生鲜品类的履约时效上。各城市层级差异见下表：\n\n| 城市层级 | 转化率 | 客诉率 |\n|---|---|---|\n| 一线 | 21% | 5.1% |\n| 三线 | 34% | 2.2% |\n\n报告认为，三线城市的高转化与熟人信任结构有关，但样本中三线团长以兼职为主，和一线全职团长的口径不能直接对比，结论外推需要谨慎。",
+      "files": [],
+      "hints": [],
+      "expected_route": "data-report",
+      "expected_goal": "decision-support",
+      "expected_complexity": "standard",
+      "expected_unsuitable": false,
+      "manual_checks": [
+        "正文里嵌一张小表的报告仍是 data-report，不是纯表格 unsuitable-input",
+        "表格里的关键数字应保留，并保留口径不能直接对比的边界提醒"
+      ]
+    },
+    {
+      "id": 27,
+      "name": "Unextracted PDF mismatch",
+      "prompt": "这份PDF帮我做笔记",
+      "files": ["deep-learning-survey.pdf"],
+      "hints": [],
+      "expected_status": "modality_mismatch",
+      "expected_modality": "pdf",
+      "expected_confidence": "low",
+      "expected_unsuitable": false,
+      "manual_checks": [
+        "未提取的 PDF 应返回 modality_mismatch",
+        "提示语应区分文本层 PDF（直接提取）和扫描版（需 OCR）"
+      ]
+    }
+  ]
+}

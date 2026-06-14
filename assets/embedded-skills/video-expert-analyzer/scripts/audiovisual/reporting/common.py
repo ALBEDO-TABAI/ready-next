@@ -100,6 +100,25 @@ def _find_scene_matches(
     return hits[:limit]
 
 
+def _audio_beat_alignment(data: Dict) -> Dict:
+    """读取真实音频信号的卡拍统计；不可用时返回空 dict。"""
+    features = data.get("audio_features") or {}
+    if not isinstance(features, dict) or features.get("status") != "ok":
+        return {}
+    alignment = features.get("beat_alignment") or {}
+    global_stats = features.get("global") or {}
+    if not alignment.get("cuts_total"):
+        return {}
+    return {
+        "bpm": float(global_stats.get("bpm") or 0.0),
+        "bpm_confidence": float(global_stats.get("bpm_confidence") or 0.0),
+        "cuts_total": int(alignment.get("cuts_total") or 0),
+        "cuts_on_beat": int(alignment.get("cuts_on_beat") or 0),
+        "ratio": float(alignment.get("ratio") or 0.0),
+        "tolerance_ms": int(alignment.get("tolerance_ms") or 80),
+    }
+
+
 def _mix_music_rhythm_analysis(data: Dict) -> str:
     scenes = _ordered_scenes(data)
     if not scenes:
@@ -107,18 +126,41 @@ def _mix_music_rhythm_analysis(data: Dict) -> str:
     durations = [float(s.get("duration_seconds") or 0.0) for s in scenes]
     avg_duration = _avg(durations)
     short_cuts = [s for s in scenes if float(s.get("duration_seconds") or 0.0) < avg_duration * 0.6]
-    beat_hits = [s for s in short_cuts if float(s.get("scores", {}).get("impact") or 0.0) >= 7.0]
-    rhythm_consistency = 1.0 - (max(durations) - min(durations)) / (max(durations) + 0.1) if durations else 0.0
     text = f"场景切换频率：平均 {avg_duration:.1f}s/镜，短切镜头占比 {len(short_cuts)/len(scenes)*100:.0f}%。"
-    if beat_hits:
-        text += f"识别到 {len(beat_hits)} 个卡点场景（高冲击+短时长），代表段落 {_scene_refs(beat_hits[:4], 4)}，这些镜头踩在节奏点上，视觉冲击和音乐转折同步爆发。"
+
+    beat = _audio_beat_alignment(data)
+    if beat and beat["bpm_confidence"] >= 0.3:
+        # 真实测量：切点与 beat 网格的对齐率
+        on_beat_scenes = [
+            s for s in scenes
+            if isinstance(s.get("audio_features"), dict) and s["audio_features"].get("cut_on_beat")
+        ]
+        text += (
+            f"音轨实测 BPM ≈ {beat['bpm']:.0f}（置信度 {beat['bpm_confidence']:.2f}），"
+            f"{beat['cuts_total']} 个切点中有 {beat['cuts_on_beat']} 个落在节拍 ±{beat['tolerance_ms']}ms 内，"
+            f"实测卡点率 {beat['ratio']*100:.0f}%。"
+        )
+        if on_beat_scenes:
+            text += f"卡拍切入的代表段落 {_scene_refs(on_beat_scenes[:4], 4)}。"
+        if beat["ratio"] >= 0.5:
+            text += "剪辑明显跟着节拍走，音画节奏咬合紧密。"
+        elif beat["ratio"] >= 0.25:
+            text += "部分段落踩拍，整体节奏配合中等，仍有收紧空间。"
+        else:
+            text += "切点与节拍基本脱钩，剪辑节奏更依赖画面内容而非音乐律动。"
     else:
-        text += "未检测到明显卡点场景，剪辑节奏更偏向平滑过渡而非强节奏冲击。"
-    text += f"节奏一致性评分 {rhythm_consistency*10:.1f}/10，"
-    if rhythm_consistency >= 0.7:
-        text += "剪辑节奏稳定，镜头时长分布均匀，适合音乐主导型内容。"
-    else:
-        text += "镜头时长波动较大，节奏感不够统一，可能影响音乐节奏的传递。"
+        # 无可用音频信号：退回镜头时长统计，并如实声明这不是音乐节拍测量
+        beat_hits = [s for s in short_cuts if float(s.get("scores", {}).get("impact") or 0.0) >= 7.0]
+        rhythm_consistency = 1.0 - (max(durations) - min(durations)) / (max(durations) + 0.1) if durations else 0.0
+        if beat_hits:
+            text += f"识别到 {len(beat_hits)} 个疑似卡点场景（高冲击+短时长，未经音轨验证），代表段落 {_scene_refs(beat_hits[:4], 4)}。"
+        else:
+            text += "未检测到明显的强节奏切换，剪辑更偏向平滑过渡。"
+        text += f"镜头时长均匀度 {rhythm_consistency*10:.1f}/10（注意：该指标基于镜头时长分布，不代表音乐节拍对齐），"
+        if rhythm_consistency >= 0.7:
+            text += "镜头时长分布稳定。"
+        else:
+            text += "镜头时长波动较大。"
     return text
 
 

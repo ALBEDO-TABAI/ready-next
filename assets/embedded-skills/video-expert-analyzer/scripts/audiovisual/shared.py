@@ -10,6 +10,33 @@ from urllib.parse import unquote
 
 _MARKDOWN_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\((?:<([^>]+)>|([^)]+))\)")
 
+_SUMMARY_HEADING = "## 导读"
+
+
+def insert_block_after_lead(markdown: str, block: str) -> str:
+    """把一个 `## ...` 块插到报告的"导语区"之后。
+
+    导语区 = 顶层 `# ` 标题 + 紧随其后的 `## 导读` 模块（如有）。
+    结构图/总览图应排在导读之后、路由判断之前。
+    """
+    lines = markdown.split("\n")
+    insert_at = 0
+    if lines and lines[0].startswith("# "):
+        insert_at = 1
+        index = 1
+        while index < len(lines) and not lines[index].strip():
+            index += 1
+        if index < len(lines) and lines[index].strip() == _SUMMARY_HEADING:
+            index += 1
+            while index < len(lines) and not lines[index].strip().startswith("## "):
+                index += 1
+            insert_at = index
+    head = "\n".join(lines[:insert_at]).rstrip()
+    tail = "\n".join(lines[insert_at:]).lstrip("\n")
+    if head:
+        return f"{head}\n\n{block.strip()}\n\n{tail}"
+    return f"{block.strip()}\n\n{tail}"
+
 def _safe_text(value: object, fallback: str = "") -> str:
     text = str(value or "").strip()
     return fallback if not text or text.upper().startswith("TODO") else text

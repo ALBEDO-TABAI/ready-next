@@ -97,17 +97,41 @@ def build_frame_sample_paths(frames_dir: Path, scene_stem: str) -> Dict[str, Pat
     }
 
 
+def _extract_frames_single_pass(scene_path: Path, targets) -> bool:
+    """一条 ffmpeg 命令抽取多个时间点的帧（每 scene 1 个进程而非 3-4 个）。
+
+    targets: [(timestamp_seconds, output_path)]。失败返回 False，由调用方
+    回退到逐位置抽取。
+    """
+    if not targets:
+        return True
+    cmd = ["ffmpeg", "-y", "-v", "error"]
+    for timestamp, _ in targets:
+        cmd.extend(["-ss", f"{timestamp:.3f}", "-i", str(scene_path)])
+    for index, (_, output_path) in enumerate(targets):
+        cmd.extend(["-map", f"{index}:v:0", "-frames:v", "1", "-q:v", "2", str(output_path)])
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+    except (OSError, subprocess.CalledProcessError):
+        return False
+    return all(output_path.exists() for _, output_path in targets)
+
+
 def extract_scene_sample_frames(scene_path: Path, frames_dir: Path, scene_stem: str) -> Dict[str, object]:
     frames_dir.mkdir(exist_ok=True)
     sample_paths = build_frame_sample_paths(frames_dir, scene_stem)
     duration_seconds = probe_duration_seconds(scene_path)
     hwaccel_args = ffmpeg_hwaccel_args()
 
-    for name, ratio in SAMPLE_POSITIONS.items():
-        target_path = sample_paths[name]
-        if target_path.exists():
-            continue
-        timestamp = max(duration_seconds * ratio, 0.0) if duration_seconds > 0 else 0.0
+    missing = [
+        (name, max(duration_seconds * ratio, 0.0) if duration_seconds > 0 else 0.0, sample_paths[name])
+        for name, ratio in SAMPLE_POSITIONS.items()
+        if not sample_paths[name].exists()
+    ]
+    if missing and _extract_frames_single_pass(scene_path, [(ts, path) for _, ts, path in missing]):
+        missing = []
+
+    for name, timestamp, target_path in missing:
         attempts = []
         base_cmd = [
             "ffmpeg",

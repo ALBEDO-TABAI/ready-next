@@ -11,6 +11,12 @@ import shutil
 from pathlib import Path
 from typing import Dict, List
 
+from scene_weights import (
+    annotate_percentiles,
+    selection_label,
+    weighted_score as _weighted_score,
+)
+
 
 def load_scores(json_path: str) -> Dict:
     """Load scene scores from JSON file"""
@@ -25,43 +31,8 @@ def save_scores(data: Dict, json_path: str):
 
 
 def calculate_weighted_score(scene: Dict) -> float:
-    """
-    根据场景类型计算动态权重分数
-    
-    权重矩阵:
-    - TYPE-A Hook/Kinetic: IMPACT 40%, MEMORABILITY 30%, SYNC 20%, AESTHETICS 10%
-    - TYPE-B Narrative/Emotion: CREDIBILITY 40%, MEMORABILITY 30%, AESTHETICS 20%, IMPACT 10%
-    - TYPE-C Aesthetic/Vibe: AESTHETICS 50%, SYNC 30%, IMPACT 20%
-    - TYPE-D Commercial/Info: CREDIBILITY 40%, MEMORABILITY 40%, AESTHETICS 20%
-    """
-    scores = scene.get("scores", {})
-    scene_type = scene.get("type_classification", "")
-    
-    # 获取各维度得分，默认为0
-    aes = scores.get("aesthetic_beauty", 0)
-    cred = scores.get("credibility", 0)
-    imp = scores.get("impact", 0)
-    mem = scores.get("memorability", 0)
-    fun = scores.get("fun_interest", 0)
-    
-    # 根据类型计算加权得分
-    if "TYPE-A" in scene_type or "Hook" in scene_type or "Kinetic" in scene_type:
-        # Hook型: 冲击力最重要
-        weighted = imp * 0.4 + mem * 0.3 + fun * 0.2 + aes * 0.1
-    elif "TYPE-B" in scene_type or "Narrative" in scene_type or "Emotion" in scene_type:
-        # 叙事型: 可信度最重要
-        weighted = cred * 0.4 + mem * 0.3 + aes * 0.2 + imp * 0.1
-    elif "TYPE-C" in scene_type or "Aesthetic" in scene_type or "Vibe" in scene_type:
-        # 氛围型: 美感最重要
-        weighted = aes * 0.5 + fun * 0.3 + imp * 0.2
-    elif "TYPE-D" in scene_type or "Commercial" in scene_type or "Info" in scene_type:
-        # 商业型: 可信度+记忆度
-        weighted = cred * 0.4 + mem * 0.4 + aes * 0.2
-    else:
-        # 默认均匀权重
-        weighted = (aes + cred + imp + mem + fun) / 5
-    
-    return round(weighted, 2)
+    """场景动态加权分。唯一实现见 scene_weights.weighted_score（类型档位 + 软混合）。"""
+    return _weighted_score(scene)
 
 
 def calculate_averages(data: Dict) -> Dict:
@@ -70,7 +41,7 @@ def calculate_averages(data: Dict) -> Dict:
         # 计算动态加权分数
         weighted = calculate_weighted_score(scene)
         scene["weighted_score"] = weighted
-        
+
         # 同时计算简单平均分
         scores = scene.get("scores", {})
         if scores and all(isinstance(v, (int, float)) for v in scores.values()):
@@ -78,15 +49,10 @@ def calculate_averages(data: Dict) -> Dict:
             scene["overall_average"] = round(avg, 2)
         else:
             scene["overall_average"] = 0.0
-            
-        # 根据分数自动确定 selection
-        if weighted > 8.5 or any(v == 10 for v in scores.values()):
-            scene["selection"] = "[MUST KEEP]"
-        elif weighted >= 7.0:
-            scene["selection"] = "[USABLE]"
-        else:
-            scene["selection"] = "[DISCARD]"
-            
+
+        scene["selection"] = selection_label(weighted, scores)
+
+    annotate_percentiles(data.get("scenes", []))
     return data
 
 
@@ -113,6 +79,16 @@ def identify_best_shots(data: Dict, threshold: float = 7.5) -> List[Dict]:
     selected = must_keep[:cap]
     if len(selected) < cap:
         selected.extend(usable_candidates[: max(cap - len(selected), 0)])
+    if not selected and scenes:
+        # 绝对阈值受打分模型口径影响（严苛模型可能全片无 7.5+），
+        # 兜底改用视频内百分位：取头部 10%（至少 3 个）已评分场景。
+        scored = sorted(
+            (scene for scene in scenes if float(scene.get("weighted_score", 0) or 0) > 0),
+            key=lambda scene: float(scene.get("weighted_score", 0) or 0),
+            reverse=True,
+        )
+        fallback_count = min(cap or 3, max(3, math.ceil(len(scored) * 0.10)))
+        selected = scored[:fallback_count]
     return selected
 
 
@@ -131,21 +107,21 @@ def copy_best_shots(scenes: List[Dict], scores_path: str) -> int:
     """
     scores_path_obj = Path(scores_path)
     best_shots_dir = get_best_shots_dir(scores_path_obj)
-    
+
     # 清空旧的精选片段
     for old_file in best_shots_dir.glob("*.mp4"):
         old_file.unlink()
-    
+
     copied = 0
     best_shots_info = []
-    
+
     for i, scene in enumerate(scenes, 1):
         src_path = Path(scene.get("file_path", ""))
         if src_path.exists():
             dst_path = best_shots_dir / f"{i:02d}_{src_path.name}"
             shutil.copy2(src_path, dst_path)
             copied += 1
-            
+
             # 记录精选片段信息
             best_shots_info.append({
                 "rank": i,
@@ -155,17 +131,17 @@ def copy_best_shots(scenes: List[Dict], scores_path: str) -> int:
                 "selection": scene.get("selection", ""),
                 "reasoning": scene.get("selection_reasoning", "")
             })
-    
+
     # 生成精选片段说明文件
     generate_best_shots_readme(best_shots_dir, best_shots_info)
-    
+
     return copied
 
 
 def generate_best_shots_readme(best_shots_dir: Path, best_shots_info: List[Dict]):
     """生成精选片段说明文件"""
     readme_path = best_shots_dir / "README.md"
-    
+
     content = """# ⭐ 精选片段 (Best Shots)
 
 本文件夹包含根据 Walter Murch 剪辑法则和动态权重评分系统筛选出的高质量片段。
@@ -183,10 +159,10 @@ def generate_best_shots_readme(best_shots_dir: Path, best_shots_info: List[Dict]
 | 排名 | 场景编号 | 文件名 | 加权得分 | 入选理由 |
 |------|---------|--------|---------|---------|
 """
-    
+
     for info in best_shots_info:
         content += f"| {info['rank']} | Scene {info['scene_number']:03d} | `{info['filename']}` | {info['weighted_score']:.2f} | {info['reasoning'][:50]}... |\n"
-    
+
     content += """
 
 ## 使用建议
@@ -207,7 +183,7 @@ def generate_best_shots_readme(best_shots_dir: Path, best_shots_info: List[Dict]
 
 *由 Video Expert Analyzer 自动筛选*
 """
-    
+
     with open(readme_path, 'w', encoding='utf-8') as f:
         f.write(content)
 
@@ -215,15 +191,15 @@ def generate_best_shots_readme(best_shots_dir: Path, best_shots_info: List[Dict]
 def generate_ranking_report(data: Dict, output_path: Path):
     """Generate a markdown ranking report with detailed analysis"""
     ranked = rank_scenes(data)
-    
+
     # 获取框架信息
     framework = data.get("analysis_framework", {})
     philosophy = framework.get("philosophy", "Walter Murch's Six Rules")
-    
+
     report = f"""# 📊 场景评分排名报告
 
-**视频 ID:** {data.get('video_id', 'N/A')}  
-**总场景数:** {data.get('total_scenes', 0)}  
+**视频 ID:** {data.get('video_id', 'N/A')}
+**总场景数:** {data.get('total_scenes', 0)}
 **分析框架:** {philosophy}
 
 ---
@@ -240,10 +216,10 @@ def generate_ranking_report(data: Dict, output_path: Path):
         avg = scene.get('overall_average', 0.0)
         selection = scene.get('selection', 'TODO')
         scene_type = scene.get('type_classification', 'TODO')
-        
+
         # 简化类型显示
         type_short = scene_type[:20] + "..." if len(scene_type) > 20 else scene_type
-        
+
         report += f"| {i} | Scene {num:03d} | **{weighted:.2f}** | {avg:.2f} | {selection} | {type_short} |\n"
 
     report += """
@@ -263,7 +239,7 @@ def generate_ranking_report(data: Dict, output_path: Path):
         reasoning = scene.get('selection_reasoning', '无理由')
         edit_suggestion = scene.get('edit_suggestion', '无建议')
         scene_type = scene.get('type_classification', '未分类')
-        
+
         report += f"""### Scene {num:03d}
 
 **基础信息**
@@ -315,24 +291,24 @@ def generate_detailed_summary(data: Dict, output_path: Path):
     """生成整体影片评价摘要"""
     scenes = data.get("scenes", [])
     total = len(scenes)
-    
+
     if total == 0:
         return
-    
+
     # 统计
     must_keep = sum(1 for s in scenes if "MUST KEEP" in s.get("selection", ""))
     usable = sum(1 for s in scenes if "USABLE" in s.get("selection", ""))
     discard = sum(1 for s in scenes if "DISCARD" in s.get("selection", ""))
-    
+
     weighted_scores = [s.get("weighted_score", 0) for s in scenes if s.get("weighted_score", 0) > 0]
     avg_weighted = sum(weighted_scores) / len(weighted_scores) if weighted_scores else 0
-    
+
     # 各维度平均分
     dim_avgs = {}
     for dim in ["aesthetic_beauty", "credibility", "impact", "memorability", "fun_interest"]:
         vals = [s.get("scores", {}).get(dim, 0) for s in scenes]
         dim_avgs[dim] = sum(vals) / len(vals) if vals else 0
-    
+
     summary = f"""# 📈 整体影片评价摘要
 
 ## 统计概览
@@ -361,31 +337,31 @@ def generate_detailed_summary(data: Dict, output_path: Path):
 *(根据上述数据自动生成的初步评价)*
 
 """
-    
+
     # 自动生成评价
     strengths = []
     weaknesses = []
-    
+
     if dim_avgs['aesthetic_beauty'] >= 7:
         strengths.append("画面美感出色")
     elif dim_avgs['aesthetic_beauty'] < 5:
         weaknesses.append("画面美感有待提升")
-        
+
     if dim_avgs['impact'] >= 7:
         strengths.append("视觉冲击力强")
     elif dim_avgs['impact'] < 5:
         weaknesses.append("缺乏视觉冲击力")
-        
+
     if dim_avgs['memorability'] >= 7:
         strengths.append("具备良好记忆点")
     elif dim_avgs['memorability'] < 5:
         weaknesses.append("记忆点不够突出")
-    
+
     if strengths:
         summary += "**优势**: " + "、".join(strengths) + "\n\n"
     if weaknesses:
         summary += "**待改进**: " + "、".join(weaknesses) + "\n\n"
-    
+
     summary += f"""
 ### 基于 Walter Murch 法则的评价
 
@@ -398,21 +374,21 @@ def generate_detailed_summary(data: Dict, output_path: Path):
 ### 最终建议
 
 """
-    
+
     if avg_weighted >= 8:
         summary += "✅ **强烈推荐保留** - 这是一部高质量的视频素材\n"
     elif avg_weighted >= 6:
         summary += "📁 **建议保留** - 虽有不足，但仍有可用价值\n"
     else:
         summary += "🗑️ **建议舍弃** - 整体质量较低，不建议使用\n"
-    
+
     summary += f"""
 ---
 
 *基于 {total} 个场景的动态权重评分*
 *分析框架: Walter Murch's Six Rules*
 """
-    
+
     with open(output_path, 'w', encoding='utf-8') as f:
         f.write(summary)
 
@@ -461,7 +437,7 @@ def print_summary(data: Dict):
     total = len(scenes)
     scored = sum(1 for s in scenes if s.get("weighted_score", 0) > 0)
     weighted_scores = [s.get("weighted_score", 0) for s in scenes if s.get("weighted_score", 0) > 0]
-    
+
     print(f"\n{'=' * 60}")
     print("📊 场景评分汇总")
     print(f"{'=' * 60}")
@@ -477,7 +453,7 @@ def print_summary(data: Dict):
         must_keep = sum(1 for s in scenes if "MUST KEEP" in s.get("selection", ""))
         usable = sum(1 for s in scenes if "USABLE" in s.get("selection", ""))
         discard = sum(1 for s in scenes if "DISCARD" in s.get("selection", ""))
-        
+
         print(f"\n🌟 MUST KEEP: {must_keep}")
         print(f"📁 USABLE: {usable}")
         print(f"🗑️ DISCARD: {discard}")
@@ -527,10 +503,10 @@ def main():
         threshold = float(sys.argv[3]) if len(sys.argv) > 3 else 7.5
         data = calculate_averages(data)
         print_summary(data)
-        
+
         best = identify_best_shots(data, threshold)
         print(f"📊 阈值 {threshold} 以上的精选片段: {len(best)} 个")
-        
+
     elif command == "calculate":
         data = calculate_averages(data)
         save_scores(data, json_path)
@@ -542,21 +518,21 @@ def main():
         report_path = output_dir / "scene_rankings.md"
         generate_ranking_report(data, report_path)
         print(f"✅ 排名报告已生成: {report_path}")
-        
+
         # 同时生成整体评价
         summary_path = output_dir / "overall_assessment.md"
         generate_detailed_summary(data, summary_path)
         print(f"✅ 整体评价已生成: {summary_path}")
-        
+
         print_summary(data)
 
     elif command == "best":
         threshold = float(sys.argv[3]) if len(sys.argv) > 3 else 7.5
-        
+
         # 确保已计算加权得分
         data = calculate_averages(data)
         save_scores(data, json_path)
-        
+
         best = identify_best_shots(data, threshold)
 
         if not best:
@@ -584,17 +560,17 @@ def main():
                 print(f"  • Scene {num:03d}")
         else:
             print("✅ 所有场景已完成评分！")
-            
+
     elif command == "full":
         threshold = float(sys.argv[3]) if len(sys.argv) > 3 else 7.5
-        
+
         print("🔄 执行完整分析流程...\n")
-        
+
         # 1. Calculate
         data = calculate_averages(data)
         save_scores(data, json_path)
         print("✅ 步骤 1/4: 加权得分计算完成")
-        
+
         # 2. Rank
         report_path = output_dir / "scene_rankings.md"
         generate_ranking_report(data, report_path)
@@ -603,7 +579,7 @@ def main():
         print(f"✅ 步骤 2/4: 排名报告生成完成")
         print(f"   📄 {report_path}")
         print(f"   📄 {summary_path}")
-        
+
         # 3. Best shots
         best = identify_best_shots(data, threshold)
         if best:
@@ -613,7 +589,7 @@ def main():
             print(f"   📁 {best_shots_dir}/")
         else:
             print(f"⚠️  步骤 3/4: 无精选片段 (阈值 {threshold})")
-        
+
         # 4. Summary
         print("\n" + "=" * 60)
         print("✅ 步骤 4/4: 分析完成")

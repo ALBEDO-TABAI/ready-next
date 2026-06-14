@@ -224,7 +224,7 @@ Scenes with overall score ≥ {{threshold_score}}
 
 ### Analysis Metadata
 - **Pipeline Version:** {{pipeline_version}}
-- **ASR Model:** {{asr_model}}
+- **Whisper Model:** {{whisper_model}}
 - **Scene Detection Threshold:** {{scene_threshold}}
 - **Processing Time:** {{processing_time}}
 

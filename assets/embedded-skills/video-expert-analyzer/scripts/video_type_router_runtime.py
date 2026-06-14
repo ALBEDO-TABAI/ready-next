@@ -351,61 +351,13 @@ def _extract_json_object(content: str) -> Dict[str, Any]:
     raise ValueError("响应中未找到合法 JSON")
 
 
-def _load_provider_catalog(runtime_config: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
-    if runtime_config.get("config_source") == "openclaw":
-        models_json_path = Path(str(runtime_config.get("models_json_path", ""))).expanduser()
-        payload = json.loads(models_json_path.read_text(encoding="utf-8"))
-        providers = payload.get("providers")
-        if not isinstance(providers, dict):
-            raise ValueError(f"models.json 缺少 providers: {models_json_path}")
-        return providers
-    providers = runtime_config.get("providers")
-    if not isinstance(providers, dict):
-        raise ValueError("runtime_config 缺少 providers")
-    return providers
-
-
-def _resolve_model_entry(
-    providers: Dict[str, Dict[str, Any]],
-    model_ref: str,
-) -> Tuple[str, Dict[str, Any], Dict[str, Any]]:
-    if "/" not in model_ref:
-        raise ValueError(f"模型引用必须是 provider/model 形式: {model_ref}")
-    provider_name, model_id = model_ref.split("/", 1)
-    provider_config = providers.get(provider_name)
-    if not isinstance(provider_config, dict):
-        raise ValueError(f"未找到 provider: {provider_name}")
-    for model_config in provider_config.get("models", []):
-        if str(model_config.get("id", "")) == model_id:
-            return provider_name, provider_config, model_config
-    raise ValueError(f"provider {provider_name} 未配置模型 {model_id}")
-
-
-def _build_attempt_order(runtime_config: Dict[str, Any]) -> List[Dict[str, Any]]:
-    providers = _load_provider_catalog(runtime_config)
-    attempts: List[Dict[str, Any]] = []
-    seen: set[str] = set()
-    preferred_model = str(runtime_config.get("preferred_model", "") or "")
-    fallback_models = tuple(runtime_config.get("fallback_models", ()) or ())
-
-    for model_ref in (preferred_model, *fallback_models):
-        if not model_ref or model_ref in seen:
-            continue
-        provider_name, provider_config, model_config = _resolve_model_entry(providers, model_ref)
-        attempts.append(
-            {
-                "model_ref": model_ref,
-                "provider_name": provider_name,
-                "provider_config": provider_config,
-                "model_config": model_config,
-                "api_style": str(model_config.get("api") or provider_config.get("api") or ""),
-            }
-        )
-        seen.add(model_ref)
-
-    if not attempts:
-        raise ValueError("没有可用于文本路由的模型配置")
-    return attempts
+# provider 目录解析与 attempt order 构建与 text_model_runtime 逐字节相同，
+# 直接复用，避免两份实现各自漂移。
+from text_model_runtime import (  # noqa: E402
+    _load_provider_catalog,
+    _resolve_model_entry,
+    build_attempt_order as _build_attempt_order,
+)
 
 
 def _call_openai_completions(
@@ -519,24 +471,6 @@ def load_classification_result(video_dir: Path) -> Optional[Dict[str, Any]]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _cached_classification_result_for_summary(
-    video_dir: Path,
-    summary_payload: Dict[str, Any],
-) -> Optional[Dict[str, Any]]:
-    cached = load_classification_result(video_dir)
-    if not isinstance(cached, dict):
-        return None
-    summary_source = cached.get("summary_source") or {}
-    if not isinstance(summary_source, dict):
-        return None
-    cached_hash = _safe_text(summary_source.get("summary_hash"))
-    if not cached_hash:
-        return None
-    if cached_hash != classification_summary_hash(summary_payload):
-        return None
-    return cached
-
-
 def generate_classification_result(
     data: Dict[str, Any],
     video_dir: Path,
@@ -545,9 +479,6 @@ def generate_classification_result(
     classifier_fn: Optional[Callable[[Dict[str, Any], Dict[str, Any]], Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     summary_payload = build_classification_summary_payload(data)
-    cached = _cached_classification_result_for_summary(video_dir, summary_payload)
-    if cached is not None:
-        return cached
     classifier = classifier_fn or classify_summary_with_model
     raw_result = classifier(summary_payload, runtime_config or {})
     final_result = build_classification_result_payload(summary_payload, raw_result)

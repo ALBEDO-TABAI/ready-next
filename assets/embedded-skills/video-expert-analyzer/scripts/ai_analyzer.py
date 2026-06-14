@@ -19,6 +19,12 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 try:
+    import scene_weights
+except ImportError:
+    sys.path.insert(0, str(Path(__file__).parent))
+    import scene_weights
+
+try:
     from storyboard_generator import (
         enrich_storyboard_data,
         generate_storyboard_outputs,
@@ -88,6 +94,7 @@ try:
         get_next_pending_batch,
         merge_host_batch_outputs,
         prepare_host_batches,
+        reset_blocked_receipts,
         reset_stale_in_progress_receipts,
     )
 except ImportError:
@@ -102,14 +109,15 @@ except ImportError:
         get_next_pending_batch,
         merge_host_batch_outputs,
         prepare_host_batches,
+        reset_blocked_receipts,
         reset_stale_in_progress_receipts,
     )
 
 try:
-    from run_state import load_run_state, mark_stage, touch_run_state
+    from run_state import load_run_state, mark_stage
 except ImportError:
     sys.path.insert(0, str(Path(__file__).parent))
-    from run_state import load_run_state, mark_stage, touch_run_state
+    from run_state import load_run_state, mark_stage
 
 try:
     from logger import get_logger
@@ -574,6 +582,8 @@ def auto_fill_pending_batches(
     *,
     max_workers: int,
 ) -> Dict[str, Any]:
+    del scores_path  # 当前自动评分只依赖 host_batches 协议文件
+
     try:
         from openclaw_batch_probe import analyze_scenes
     except ImportError:
@@ -615,25 +625,6 @@ def auto_fill_pending_batches(
         failure_map_by_batch[batch_id] = {}
         _write_json_if_changed(Path(context["output_path"]), output_payload)
 
-    def heartbeat() -> None:
-        all_scenes = [
-            scene
-            for context in batch_context.values()
-            for scene in (context.get("output_payload") or {}).get("scenes", [])
-        ]
-        total_scenes = len(all_scenes)
-        completed_scenes = sum(1 for scene in all_scenes if _is_scene_complete(scene))
-        coverage_ratio = completed_scenes / max(total_scenes, 1) if total_scenes else 0.0
-        touch_run_state(
-            run_state_path_for(scores_path),
-            stage="score_batches",
-            status="running",
-            total_scenes=total_scenes,
-            completed_scenes=completed_scenes,
-            coverage_ratio=coverage_ratio,
-            active_output_dir=str(video_dir),
-        )
-
     def flush_result(payload: Dict[str, Any]) -> None:
         run_item = payload.get("run_item") or {}
         batch_id = str(run_item.get("batch_id", "") or "")
@@ -674,7 +665,6 @@ def auto_fill_pending_batches(
             )
             context["output_payload"] = output_payload
             _write_json_if_changed(Path(context["output_path"]), output_payload)
-            heartbeat()
 
     run_items, successful_results, failed_results = analyze_scenes(
         scene_packets,
@@ -751,48 +741,6 @@ def auto_fill_pending_batches(
     }
 
 
-def _collect_auto_scoring_errors(video_dir: Path) -> List[str]:
-    errors: List[str] = []
-    host_dir = video_dir / "host_batches"
-    if not host_dir.exists():
-        return errors
-    for output_path in sorted(host_dir.glob("batch-*-output.json")):
-        payload = _read_json(output_path, {})
-        receipt = payload.get("receipt") if isinstance(payload, dict) else None
-        if not isinstance(receipt, dict):
-            continue
-        needs_review = receipt.get("needs_review")
-        if not isinstance(needs_review, list):
-            continue
-        for item in needs_review:
-            if isinstance(item, dict):
-                error = str(item.get("error", "") or "").strip()
-                if error:
-                    errors.append(error)
-    return errors
-
-
-def summarize_auto_scoring_blocker(video_dir: Path, failed_scenes: int) -> str:
-    errors = _collect_auto_scoring_errors(video_dir)
-    joined = "\n".join(errors).lower()
-    if "no endpoints found that support image input" in joined or "support image input" in joined:
-        return (
-            f"当前视觉评分模型或接口不支持图片输入，{failed_scenes} 个场景未能评分；"
-            "请切换到支持图像输入的模型/endpoint 后重试。"
-        )
-    if "401" in joined or "unauthorized" in joined or "invalid api key" in joined:
-        return (
-            f"当前视觉评分接口鉴权失败，{failed_scenes} 个场景未能评分；"
-            "请检查 API key、账号权限或模型访问权限。"
-        )
-    if "rate limit" in joined or "429" in joined:
-        return (
-            f"当前视觉评分接口触发限流，{failed_scenes} 个场景未能评分；"
-            "请稍后重试或降低并发。"
-        )
-    return f"自动并行评分仍有 {failed_scenes} 个场景失败，请检查 host_batches 输出"
-
-
 def resolve_stage(mode: str, scores_path: Path) -> str:
     if mode in {"host", "agent"}:
         return "score_batches"
@@ -816,7 +764,7 @@ SCORING_SYSTEM_PROMPT = """你是一位专业的视频剪辑/镜头分析专家�
 
 准确性优先于速度。不要为了节省时间偷懒，不要用套路化空话敷衍，不要根据相邻场景或字幕去猜没看清的画面。
 
-你会收到同一场景的首帧、中帧、尾帧。你必须结合三张图一起判断镜头内容，尤其是运镜，不允许只看单帧就下结论。
+你会收到同一场景的静态采样帧（首帧、中帧、尾帧）。注意：它们只是从场景里抽取的孤立瞬间，帧与帧之间的运动过程你看不到；除了三帧之间的构图差异和提供的自动光流提示，你没有任何时序信息。判断运镜等涉及时间的字段时必须结合三张图与自动提示，不允许只看单帧就下结论；当三帧差异和自动提示都不足以支撑判断时，把 camera_movement 如实填为"无法确认"——宁可承认不确定，也不要编造一个看似确定的运镜。
 
 请把这一次返回视为这个 scene 的独立小报告：只有当这个小报告里的画面描述、分镜字段和评分都足够准确时，整份总报告才会准确。所以你必须先把当前 scene 看准，再输出结果。
 
@@ -843,7 +791,7 @@ SCORING_SYSTEM_PROMPT = """你是一位专业的视频剪辑/镜头分析专家�
   "storyboard": {
     "shot_size": "景别，如远景/中景/特写",
     "lighting": "灯光，如自然光/侧逆光/硬光",
-    "camera_movement": "运镜，如静止镜头/推进/摇镜/跟拍",
+    "camera_movement": "运镜，如静止镜头/推进/摇镜/跟拍；证据不足时如实填「无法确认」",
     "visual_style": "画风，如暖色纪实/黑白艺术感",
     "technique": "手法，如特写突出表情/留白营造氛围"
   },
@@ -867,12 +815,14 @@ SCORING_USER_PROMPT_TEMPLATE = """请分析以下视频的第 {scene_num} 个场
 场景时间范围：{scene_timestamp}
 对应台词/字幕：{scene_voiceover}
 自动运镜提示：{camera_motion_hint}
+自动运镜置信度：{camera_motion_confidence}
 自动运镜依据：{camera_motion_rationale}
 {transcript_info}
 
 请综合首帧、中帧、尾帧与自动提示，认真完成这个 scene 的独立小报告。
 不要在意耗时，重要的是这个 scene 的判断准确、具体、可落到画面。
-如果自动提示和你看到的画面不一致，以你认真看图后的最终判断为准。
+如果自动提示和你看到的画面不一致，以你认真看图后的最终判断为准；
+自动运镜置信度为 low 或未知时，该提示只作弱参考，证据不足就把运镜填「无法确认」。
 请严格按 JSON 格式返回分析结果。"""
 
 
@@ -967,16 +917,31 @@ def _validate_scene_json(result: Dict[str, Any], scene_num: int) -> Optional[Dic
         log.warning("Scene %03d: scores缺少必需字段 - %s", scene_num, ", ".join(missing_scores))
         return None
 
-    # 校验分数范围 1-10，越界则钳制
+    # 校验分数范围 1-10。单个字段异常时钳制并记入 notes 供复核；
+    # 异常字段 ≥2 视为模型未正常打分，整个结果拒收（走重试/needs_review），
+    # 不能把疑似坏数据静默写进 scene_scores.json。
+    score_anomalies: List[str] = []
     for field in SCENE_REQUIRED_SCORE_FIELDS:
         raw = scores[field]
-        if not isinstance(raw, (int, float)):
+        if isinstance(raw, bool) or not isinstance(raw, (int, float)):
+            score_anomalies.append(f"{field}={raw!r} 非数字，回退为 5")
             scores[field] = 5
             log.warning("Scene %03d: %s 不是数字(%s)，已回退为 5", scene_num, field, raw)
         elif raw < 1 or raw > 10:
             clamped = max(1, min(10, int(raw)))
+            score_anomalies.append(f"{field}={raw} 超出 [1,10]，钳制为 {clamped}")
             log.warning("Scene %03d: %s=%s 超出 [1,10]，已钳制为 %d", scene_num, field, raw, clamped)
             scores[field] = clamped
+    if len(score_anomalies) >= 2:
+        log.warning(
+            "Scene %03d: 评分异常字段过多(%d/%d)，拒收该结果以触发重试/复核 - %s",
+            scene_num, len(score_anomalies), len(SCENE_REQUIRED_SCORE_FIELDS), "；".join(score_anomalies),
+        )
+        return None
+    if score_anomalies:
+        note = f"[score_validation] {'；'.join(score_anomalies)}（已自动修正，请复核）"
+        existing_notes = str(result.get("notes", "") or "").strip()
+        result["notes"] = f"{existing_notes}\n{note}".strip() if existing_notes else note
 
     storyboard = result.get("storyboard")
     if not isinstance(storyboard, dict):
@@ -1010,6 +975,7 @@ def call_vision_api(
     scene_timestamp: str = "",
     scene_voiceover: str = "",
     camera_motion_hint: str = "",
+    camera_motion_confidence: str = "",
     camera_motion_rationale: str = "",
     api_key: str = "",
     base_url: str = "",
@@ -1020,7 +986,7 @@ def call_vision_api(
     try:
         from openai import OpenAI
     except ImportError:
-        print("   ⚠️  Ready 发行运行时缺少 openai 客户端库")
+        print("   ⚠️  需要安装 openai 库: pip install openai")
         return None
 
     if not api_key:
@@ -1051,6 +1017,7 @@ def call_vision_api(
         scene_timestamp=scene_timestamp or "未知",
         scene_voiceover=_truncate_text(scene_voiceover, _SCENE_VOICEOVER_MAX_CHARS, "字幕") or "（该场景暂无可对齐字幕）",
         camera_motion_hint=camera_motion_hint or "暂无自动提示",
+        camera_motion_confidence=camera_motion_confidence or "未知",
         camera_motion_rationale=camera_motion_rationale or "暂无自动依据",
     )
 
@@ -1128,50 +1095,12 @@ def call_vision_api(
 # 加权评分计算
 # ============================================================
 def compute_weighted_score(analysis: Dict) -> Dict:
-    """根据场景类型计算加权分数并确定筛选等级"""
+    """根据场景类型计算加权分数并确定筛选等级（唯一实现见 scene_weights）"""
 
     scores = analysis.get("scores", {})
-    type_class = analysis.get("type_classification", "")
-
-    # 根据类型动态调整权重
-    if "TYPE-A" in type_class:
-        weighted = (
-            scores.get("impact", 5) * 0.40
-            + scores.get("memorability", 5) * 0.30
-            + scores.get("aesthetic_beauty", 5) * 0.20
-            + scores.get("fun_interest", 5) * 0.10
-        )
-    elif "TYPE-B" in type_class:
-        weighted = (
-            scores.get("credibility", 5) * 0.40
-            + scores.get("memorability", 5) * 0.30
-            + scores.get("aesthetic_beauty", 5) * 0.20
-            + scores.get("fun_interest", 5) * 0.10
-        )
-    elif "TYPE-C" in type_class:
-        weighted = (
-            scores.get("aesthetic_beauty", 5) * 0.50
-            + scores.get("impact", 5) * 0.20
-            + scores.get("memorability", 5) * 0.20
-            + scores.get("credibility", 5) * 0.10
-        )
-    else:  # TYPE-D Commercial
-        weighted = (
-            scores.get("credibility", 5) * 0.40
-            + scores.get("memorability", 5) * 0.40
-            + scores.get("aesthetic_beauty", 5) * 0.20
-        )
-
-    analysis["weighted_score"] = round(weighted, 2)
-
-    # 确定筛选等级
-    if weighted >= 8.5 or any(v == 10 for v in scores.values()):
-        analysis["selection"] = "[MUST KEEP]"
-    elif weighted >= 7.0:
-        analysis["selection"] = "[USABLE]"
-    else:
-        analysis["selection"] = "[DISCARD]"
-
+    weighted = scene_weights.weighted_score(analysis)
+    analysis["weighted_score"] = weighted
+    analysis["selection"] = scene_weights.selection_label(weighted, scores)
     return analysis
 
 
@@ -1189,6 +1118,8 @@ def recompute_scene_scores(data: Dict) -> Dict:
             compute_weighted_score(scene)
             storyboard = scene.setdefault("storyboard", {})
             storyboard.setdefault("visual_description", scene.get("description", ""))
+    # 视频内百分位：weighted_score 绝对值受打分模型口径影响，跨视频比较用百分位
+    scene_weights.annotate_percentiles(data.get("scenes", []))
     return data
 
 
@@ -1319,6 +1250,14 @@ def refresh_analysis_data(
     data = _normalize_scene_resource_paths(data, video_analysis_dir)
     data = enrich_storyboard_data(data, video_analysis_dir, force_text_refresh=force_text_refresh)
     data = _normalize_scene_resource_paths(data, video_analysis_dir)
+    # 真实音频信号特征（BPM/卡拍率/响度）：依赖 enrich 之后的 scene 时间戳；
+    # 提取失败只会落 unavailable，路由会退回字幕/标题启发式。
+    try:
+        from audio_features import attach_audio_features
+
+        data = attach_audio_features(data, video_analysis_dir)
+    except Exception as exc:
+        print(f"   ⚠️  音频特征提取阶段跳过: {exc}")
     data = recompute_scene_scores(data)
     save_scores_data(data, scores_path)
     return data
@@ -1361,7 +1300,6 @@ def auto_score_scenes(
             can_finalize=not readiness_problems,
             scores_path=str(scores_path),
             video_dir=str(video_analysis_dir),
-            active_output_dir=str(video_analysis_dir),
             last_error="; ".join(readiness_problems) if readiness_problems else "",
             verification=build_verification_payload(
                 video_analysis_dir,
@@ -1414,10 +1352,9 @@ def auto_score_scenes(
                     blocking_problems = resource_problems + packet_problems
                     finalize_problems = validate_finalize_readiness(video_analysis_dir, data) if not next_batch else []
                     if int(auto_summary.get("failed_scenes", 0) or 0) > 0:
-                        blocking_problems.append(summarize_auto_scoring_blocker(
-                            video_analysis_dir,
-                            int(auto_summary.get("failed_scenes", 0) or 0),
-                        ))
+                        blocking_problems.append(
+                            f"自动并行评分仍有 {int(auto_summary.get('failed_scenes', 0) or 0)} 个场景失败，请检查 host_batches 输出"
+                        )
                     elif auto_summary.get("scored_scene_numbers"):
                         validation_summary = run_auto_scoring_validation(
                             scores_path,
@@ -1431,7 +1368,7 @@ def auto_score_scenes(
                         )
                         if not validation_summary.get("passed"):
                             needs_review_labels = _format_scene_number_labels(
-                                validation_summary.get("blocking_scene_numbers", [])
+                                validation_summary.get("needs_review_scene_numbers", [])
                             )
                             if needs_review_labels:
                                 blocking_problems.append(f"抽样校验发现需复核场景：{needs_review_labels}")
@@ -1464,7 +1401,6 @@ def auto_score_scenes(
             can_finalize=can_finalize,
             scores_path=str(scores_path),
             video_dir=str(video_analysis_dir),
-            active_output_dir=str(video_analysis_dir),
             last_error=last_error,
             verification=build_verification_payload(
                 video_analysis_dir,
@@ -1486,15 +1422,12 @@ def auto_score_scenes(
                 f"{int(auto_summary.get('max_workers', DEFAULT_AUTO_SCORING_MAX_WORKERS) or DEFAULT_AUTO_SCORING_MAX_WORKERS)} 路并行"
             )
         if validation_summary is not None:
-            warning_scene_numbers = validation_summary.get("validation_warning_scene_numbers", [])
             print(
                 "   抽样校验: "
                 f"抽查 {len(validation_summary.get('sample_scene_numbers', []))} 个场景，"
-                f"{len(warning_scene_numbers)} 个需复核"
+                f"{len(validation_summary.get('needs_review_scene_numbers', []))} 个需复核"
             )
             print(f"   校验报告: {validation_summary.get('report_path', '')}")
-            if warning_scene_numbers and validation_summary.get("passed"):
-                print("   ⚠️ 抽样校验有非阻塞复核项，完整报告已记录。")
         if blocking_problems:
             print("   ❌ 当前阶段存在阻塞问题：")
             for problem in blocking_problems:
@@ -1727,7 +1660,6 @@ def mark_blocked_state(
         can_finalize=False,
         scores_path=str(scores_path),
         video_dir=str(video_dir),
-        active_output_dir=str(video_dir),
         last_error="; ".join(problems),
         verification=build_verification_payload(
             video_dir,
@@ -1759,7 +1691,6 @@ def mark_completed_state(
         can_finalize=True,
         scores_path=str(scores_path),
         video_dir=str(video_dir),
-        active_output_dir=str(video_dir),
         last_error="",
         verification=build_verification_payload(
             video_dir,
@@ -1787,13 +1718,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
   --mode auto            按 run_state.json 自动选择下一阶段
   --mode host            score_batches 的兼容别名
   --mode agent           score_batches 的兼容别名
-  --mode api             已弃用，仅保留兼容提示
 """,
     )
     parser.add_argument("scene_scores", help="scene_scores.json 路径")
     parser.add_argument(
         "--mode",
-        choices=["score_batches", "merge_validate", "finalize", "auto", "host", "agent", "api"],
+        choices=["score_batches", "merge_validate", "finalize", "auto", "host", "agent"],
         default="score_batches",
         help="评分模式（默认: score_batches）",
     )
@@ -1832,6 +1762,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=7.0,
         help="精选镜头阈值（默认: 7.0）",
     )
+    parser.add_argument(
+        "--unblock",
+        action="store_true",
+        default=False,
+        help="把 blocked 的批次 receipt 与 run_state 重置回可重试状态后再继续（人工确认素材问题已解决后使用）",
+    )
     return parser
 
 
@@ -1857,7 +1793,6 @@ def main(argv: Optional[List[str]] = None) -> int:
                     status="blocked",
                     scores_path=str(scores_path_local),
                     video_dir=str(scores_path_local.parent),
-                    active_output_dir=str(scores_path_local.parent),
                     last_error=message,
                 )
         except Exception as save_exc:
@@ -1877,10 +1812,23 @@ def _main_impl(argv: Optional[List[str]] = None) -> int:
     print(f"🤖 AI Scene Analyzer v2.2.1 ({mode.upper()} 模式)")
     print("=" * 60)
 
-    if mode == "api":
-        print("\n⚠️ API 模式已弃用。请改用自动评分链路：")
-        print(f"   python3 ai_analyzer.py {scores_path.name} --mode score_batches")
-        return 2
+    if args.unblock:
+        unblocked = reset_blocked_receipts(video_dir / "host_batches")
+        if unblocked:
+            print(f"\n🔓 已解除 {len(unblocked)} 个 blocked 批次: {', '.join(unblocked)}")
+        state = load_run_state(state_path)
+        if str(state.get("status", "")) == "blocked":
+            mark_stage(
+                state_path,
+                stage=str(state.get("current_stage", "score_batches") or "score_batches"),
+                status="running",
+                scores_path=str(scores_path),
+                video_dir=str(video_dir),
+                last_error="",
+            )
+            print("🔓 run_state 已从 blocked 重置为 running")
+        if not unblocked and str(state.get("status", "")) != "blocked":
+            print("\nℹ️ 没有发现 blocked 的批次或 run_state，--unblock 无事可做")
 
     if mode == "completed":
         data = refresh_analysis_data(scores_path, video_dir, force_text_refresh=False)
@@ -2104,11 +2052,6 @@ def _main_impl(argv: Optional[List[str]] = None) -> int:
             )
             suffix = "..." if len(verification["missing_sample_scenes"]) > 5 else ""
             problems.append(f"镜头样本缺失：{preview}{suffix}")
-        auto_blocking_scenes = verification.get("auto_scoring_blocking_scene_numbers") or []
-        if auto_blocking_scenes:
-            preview = ",".join(f"Scene {int(num):03d}" for num in auto_blocking_scenes[:5])
-            suffix = "..." if len(auto_blocking_scenes) > 5 else ""
-            problems.append(f"抽样校验存在阻断场景：{preview}{suffix}")
         if not problems:
             problems.append("最终核对未通过")
         print("\n❌ 最终核对未通过，已停止交付")

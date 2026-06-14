@@ -15,10 +15,13 @@ ROOT = Path(__file__).resolve().parents[1]
 
 REQUIRED_FILES = (
     "SKILL.md",
+    "CHANGELOG.md",
     "evals/evals.json",
+    "evals/README.md",
     "references/route-matrix.md",
     "references/complexity-rules.md",
     "references/output-contract.md",
+    "references/study-goals.md",
     "references/routes.json",
     "references/method-knowledge-tutorial.md",
     "references/method-opinion-commentary.md",
@@ -51,6 +54,22 @@ REQUIRED_ROUTES = _load_routes() or {
     "mixed-content",
     "unsuitable-input",
 }
+
+
+# Single list for all example-coverage checks; check_examples and
+# check_route_consistency both consume it so the two can't drift apart.
+EXAMPLE_LABELS = (
+    "Knowledge Tutorial",
+    "News Brief",
+    "Data Report",
+    "Opinion Commentary",
+    "Narrative Story",
+    "Mixed Content",
+    "Unsuitable Input",
+    "Raw Image Mismatch",
+    "Layered Mixed Content",
+    "Layered Data Report",
+)
 
 
 def load_router():
@@ -112,51 +131,57 @@ def check_examples(errors: list[str]) -> None:
     if output_count != example_count:
         errors.append(f"Every example must include a full Output section: examples={example_count}, outputs={output_count}")
 
-    required_example_labels = (
-        "Knowledge Tutorial",
-        "News Brief",
-        "Data Report",
-        "Opinion Commentary",
-        "Narrative Story",
-        "Mixed Content",
-        "Unsuitable Input",
-    )
-    for label in required_example_labels:
+    for label in EXAMPLE_LABELS:
         if label not in examples_text:
             errors.append(f"Examples are missing required coverage for: {label}")
 
 
 def check_output_contract(errors: list[str]) -> None:
     contract_text = (ROOT / "references" / "output-contract.md").read_text(encoding="utf-8")
-    if "## Analogy policy by route" not in contract_text:
-        errors.append("Output contract is missing the route-specific analogy policy section")
 
-    required_mentions = (
-        "`data-report` | 默认豁免",
-        "`news-brief` | 默认豁免",
-        "`unsuitable-input` | 不用类比",
-    )
-    for snippet in required_mentions:
-        if snippet not in contract_text:
-            errors.append(f"Output contract is missing analogy guidance snippet: {snippet}")
-
-    continuity_snippets = (
+    required_sections = (
+        "## Analogy policy",
         "## Fact anchor policy",
         "## Low-confidence output",
         "## Language policy",
     )
-    for snippet in continuity_snippets:
+    for snippet in required_sections:
         if snippet not in contract_text:
-            errors.append(f"Output contract is missing continuity guidance snippet: {snippet}")
+            errors.append(f"Output contract is missing required section: {snippet}")
+
+    if "study-goals.md" not in contract_text:
+        errors.append("Output contract does not reference study-goals.md")
 
 
 def check_method_structure(errors: list[str]) -> None:
     for route in REQUIRED_ROUTES:
         path = ROOT / "references" / f"method-{route}.md"
         text = path.read_text(encoding="utf-8")
-        for snippet in ("### `short`", "### `standard`", "### `layered`", "## Route-specific failure modes"):
+        required_sections = (
+            "### `short`",
+            "### `standard`",
+            "### `layered`",
+            "## Analogy policy",
+            "## Route-specific failure modes",
+        )
+        for snippet in required_sections:
             if snippet not in text:
                 errors.append(f"{path.relative_to(ROOT)} is missing required section: {snippet}")
+
+
+def check_study_goals(errors: list[str]) -> None:
+    """study-goals.md must define every goal the router can emit, and SKILL.md must wire it in."""
+    router = load_router()
+    goals_text = (ROOT / "references" / "study-goals.md").read_text(encoding="utf-8")
+    goal_names = {bucket.name for bucket in router.GOALS}
+    goal_names.update(router.DEFAULT_GOAL_BY_ROUTE.values())
+    for goal in sorted(goal_names):
+        if goal not in goals_text:
+            errors.append(f"study-goals.md does not cover goal: {goal}")
+
+    skill_text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
+    if "study-goals.md" not in skill_text:
+        errors.append("SKILL.md does not reference study-goals.md")
 
 
 def check_route_consistency(errors: list[str]) -> None:
@@ -170,27 +195,11 @@ def check_route_consistency(errors: list[str]) -> None:
 
     skill_text = (ROOT / "SKILL.md").read_text(encoding="utf-8")
     route_matrix = (ROOT / "references" / "route-matrix.md").read_text(encoding="utf-8")
-    examples_text = (ROOT / "references" / "examples.md").read_text(encoding="utf-8")
     for route in REQUIRED_ROUTES:
         if f"`{route}`" not in skill_text:
             errors.append(f"SKILL.md does not mention route: {route}")
         if f"`{route}`" not in route_matrix:
             errors.append(f"route-matrix.md does not mention route: {route}")
-
-    example_labels = (
-        "Knowledge Tutorial",
-        "News Brief",
-        "Data Report",
-        "Opinion Commentary",
-        "Narrative Story",
-        "Mixed Content",
-        "Unsuitable Input",
-        "Raw Image Mismatch",
-        "Layered Mixed Content",
-    )
-    for label in example_labels:
-        if label not in examples_text:
-            errors.append(f"Examples are missing required coverage for: {label}")
 
 
 def run_router_evals(errors: list[str]) -> None:
@@ -289,6 +298,7 @@ def main() -> None:
         _safe_run("examples", check_examples, errors)
         _safe_run("output_contract", check_output_contract, errors)
         _safe_run("method_structure", check_method_structure, errors)
+        _safe_run("study_goals", check_study_goals, errors)
         _safe_run("route_consistency", check_route_consistency, errors)
         _safe_run("router_evals", run_router_evals, errors)
 
