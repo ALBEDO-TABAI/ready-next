@@ -75,6 +75,8 @@ def default_verification() -> Dict:
 def default_run_state() -> Dict:
     return {
         "version": "vnext",
+        "task_id": "",
+        "child_run_id": "",
         "status": "running",
         "current_stage": "prepare",
         "completed_stages": [],
@@ -117,6 +119,12 @@ def load_run_state(path: Path) -> Dict:
 def save_run_state(path: Path, state: Dict) -> None:
     payload = default_run_state()
     payload.update(state)
+    task_id = os.environ.get("READY_SKILL_TASK_ID", "").strip()
+    child_run_id = os.environ.get("READY_SKILL_CHILD_RUN_ID", "").strip()
+    if task_id and not payload.get("task_id"):
+        payload["task_id"] = task_id
+    if child_run_id and not payload.get("child_run_id"):
+        payload["child_run_id"] = child_run_id
     payload["verification"] = {
         **default_verification(),
         **(payload.get("verification") or {}),

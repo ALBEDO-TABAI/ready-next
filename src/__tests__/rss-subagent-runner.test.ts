@@ -116,18 +116,13 @@ test('buildCopyDeliverables creates corrected transcript, report, and structured
     if (request.user.includes('原始转录文本:')) {
       return '# 热到红温又怎样 校正文稿\n\n## 完整文稿\n\n体温不用慌，凉感T恤2.0已经为你准备好了。'
     }
-    if (request.user.includes('分析报告:')) {
-      return [
-        '# 热到红温又怎样 结构化文字稿',
-        '',
-        '## 一、痛点开场',
-        '',
-        '体温不用慌，凉感T恤2.0已经为你准备好了。',
-        '',
-        '## 二、产品承诺',
-        '',
-        '凉感、速干、防闷、防晒，79元一件，朋友们快来试试吧。',
-      ].join('\n')
+    if (request.user.includes('请输出 JSON')) {
+      return JSON.stringify({
+        sections: [
+          { title: '痛点开场', anchor: '体温不用慌' },
+          { title: '产品承诺', anchor: '凉感T恤2.0已经为你准备好了' },
+        ],
+      })
     }
     return COMPLETE_COPY_REPORT
   })
@@ -147,8 +142,8 @@ test('buildCopyDeliverables reports stage progress between model calls', async (
     if (request.user.includes('原始转录文本:')) {
       return '# 热到红温又怎样 校正文稿\n\n## 完整文稿\n\n体温不用慌，凉感T恤2.0已经为你准备好了。'
     }
-    if (request.user.includes('分析报告:')) {
-      return '# 热到红温又怎样 结构化文字稿\n\n## 一、完整口播\n\n体温不用慌，凉感T恤2.0已经为你准备好了。'
+    if (request.user.includes('请输出 JSON')) {
+      return JSON.stringify({ sections: [{ title: '完整口播', anchor: '体温不用慌' }] })
     }
     return COMPLETE_COPY_REPORT
   })
@@ -167,18 +162,13 @@ test('buildCopyDeliverables wraps complete plain corrected transcript output', a
     if (request.user.includes('原始转录文本:')) {
       return '体温不用慌，凉感T恤2.0已经为你准备好了。速干防闷防晒，79元一件，朋友们快来试试吧。'
     }
-    if (request.user.includes('分析报告:')) {
-      return [
-        '# 热到红温又怎样 结构化文字稿',
-        '',
-        '## 一、痛点开场',
-        '',
-        '体温不用慌，凉感T恤2.0已经为你准备好了。',
-        '',
-        '## 二、产品承诺',
-        '',
-        '速干防闷防晒，79元一件，朋友们快来试试吧。',
-      ].join('\n')
+    if (request.user.includes('请输出 JSON')) {
+      return JSON.stringify({
+        sections: [
+          { title: '痛点开场', anchor: '体温不用慌' },
+          { title: '产品承诺', anchor: '速干防闷防晒' },
+        ],
+      })
     }
     return COMPLETE_COPY_REPORT
   })
@@ -195,8 +185,8 @@ test('buildCopyDeliverables falls back to raw transcript when correction is inco
     if (request.user.includes('原始转录文本:')) {
       return ''
     }
-    if (request.user.includes('分析报告:')) {
-      return '# 热到红温又怎样 结构化文字稿\n\n## 一、完整口播\n\n身温不用慌 凉拌2.0 已经为你准备好了'
+    if (request.user.includes('请输出 JSON')) {
+      return JSON.stringify({ sections: [{ title: '完整口播', anchor: '身温不用慌' }] })
     }
     return COMPLETE_COPY_REPORT
   })
@@ -206,6 +196,36 @@ test('buildCopyDeliverables falls back to raw transcript when correction is inco
   assert.match(deliverables.correctedTranscript, /^# 热到红温又怎样 校正文稿/)
   assert.match(deliverables.correctedTranscript, /身温不用慌/)
   assert.match(deliverables.report, /## 三、Brainstorming 视角/)
+})
+
+test('buildCopyDeliverables keeps the full long transcript when a correction chunk is truncated', async () => {
+  const runner = new RSSSubagentRunner()
+  const longText = Array.from({ length: 90 }, (_, index) => `第${index + 1}句，这是一个用于模拟十五分钟视频文稿的长句子，里面保留连续信息和口播细节。`)
+    .join(' ')
+    + ' 最后一段必须保留，终点标记。'
+  const calls = patchComplete(runner, async (request) => {
+    if (request.user.includes('原始转录文本:')) {
+      const raw = request.user.match(/原始转录文本:\n([\s\S]*?)\n\n请只输出这个片段校正后的完整正文。/)?.[1] || ''
+      return request.user.includes('片段: 1/')
+        ? '第1句，这是一个过短的截断。'
+        : raw
+    }
+    if (request.user.includes('请输出 JSON')) {
+      return JSON.stringify({ sections: [{ title: '完整口播', anchor: '第1句' }] })
+    }
+    return COMPLETE_COPY_REPORT
+  })
+
+  const deliverables = await runner.buildCopyDeliverables({
+    ...copyInput(),
+    extractedText: longText,
+  })
+
+  const correctionCalls = calls.filter((call) => call.user.includes('原始转录文本:'))
+  assert.ok(correctionCalls.length > 1, 'long transcripts should be corrected in chunks')
+  assert.match(deliverables.correctedTranscript, /第1句/)
+  assert.match(deliverables.correctedTranscript, /终点标记/)
+  assert.match(deliverables.structuredTranscript, /终点标记/)
 })
 
 test('buildCopyDeliverables falls back when structured transcript is truncated', async () => {
@@ -220,7 +240,7 @@ test('buildCopyDeliverables falls back when structured transcript is truncated',
         '体温不用慌，凉感2.0已经为你准备好了。作为我们的王牌产品，凉感抗菌、速干、防螨、防晒、不易皱，全都给大家安排上。79元一件，朋友们快来试试吧。',
       ].join('\n')
     }
-    if (request.user.includes('分析报告:')) {
+    if (request.user.includes('请输出 JSON')) {
       return '# 热到红温又怎样 结构化文字稿\n\n## 一、痛点引入\n\n体温不用慌，凉感2.0已经'
     }
     return COMPLETE_COPY_REPORT
@@ -228,10 +248,10 @@ test('buildCopyDeliverables falls back when structured transcript is truncated',
 
   const deliverables = await runner.buildCopyDeliverables(copyInput())
 
-  const structuredCalls = calls.filter((call) => call.user.includes('分析报告:'))
-  assert.equal(structuredCalls.length, 2, 'truncated structured transcripts should be retried once')
-  assert.match(structuredCalls[1].user, /上一次输出不完整/)
+  const structuredCalls = calls.filter((call) => call.user.includes('请输出 JSON'))
+  assert.equal(structuredCalls.length, 1, 'invalid structure plans should fall back to code-built full transcript')
   assert.match(deliverables.structuredTranscript, /# 热到红温又怎样 结构化文字稿/)
   assert.match(deliverables.structuredTranscript, /## 一、完整口播/)
   assert.match(deliverables.structuredTranscript, /凉感2\.0/)
+  assert.match(deliverables.structuredTranscript, /朋友们快来试试吧/)
 })

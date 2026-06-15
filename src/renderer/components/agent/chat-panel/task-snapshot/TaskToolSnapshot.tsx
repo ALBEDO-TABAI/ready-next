@@ -60,6 +60,7 @@ export interface TaskToolSnapshotProps {
   messages: AgentMessage[]
   currentTaskRun: TaskCardRun | null
   backgroundTaskRuns: TaskCardRun[]
+  liveTaskRuns: TaskCardRun[]
   currentScopeId: string | null
   taskDisclosureState: Record<string, TaskDisclosureState>
   isStreaming: boolean
@@ -103,6 +104,20 @@ export interface TaskToolSnapshotProps {
 
 export const MAX_BOTTOM_BACKGROUND_TASK_CARDS = 2
 
+function taskRunSnapshotKey(run: TaskCardRun): string {
+  return `${run.scopeId}:${getTaskRunDisplayKey(run)}`
+}
+
+function newerTaskSnapshot(snapshot: TaskCardRun, liveTaskRuns: TaskCardRun[]): TaskCardRun {
+  const snapshotKey = taskRunSnapshotKey(snapshot)
+  const liveRun = liveTaskRuns.find((run) => taskRunSnapshotKey(run) === snapshotKey)
+  if (!liveRun) return snapshot
+  const liveUpdatedAt = new Date(liveRun.updatedAt).getTime()
+  const snapshotUpdatedAt = new Date(snapshot.updatedAt).getTime()
+  if (!Number.isFinite(liveUpdatedAt) || !Number.isFinite(snapshotUpdatedAt)) return liveRun
+  return liveUpdatedAt >= snapshotUpdatedAt ? liveRun : snapshot
+}
+
 export function selectBottomBackgroundTaskRuns<T>(
   runs: readonly T[],
 ): { visibleRuns: T[]; hiddenCount: number } {
@@ -118,6 +133,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
     messages,
     currentTaskRun,
     backgroundTaskRuns,
+    liveTaskRuns,
     currentScopeId,
     taskDisclosureState,
     isStreaming,
@@ -215,7 +231,8 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
       if (message.type !== 'agent') continue
       const snapshot = parseSerializedTaskSnapshot(message.meta?.taskSnapshot)
       if (!snapshot || !isTaskVisible(snapshot)) continue
-      nextSnapshots[message.id] = renderTaskSnapshotCard(snapshot, `task-snapshot-${message.id}`)
+      const taskRun = newerTaskSnapshot(snapshot, liveTaskRuns)
+      nextSnapshots[message.id] = renderTaskSnapshotCard(taskRun, `task-snapshot-${message.id}`)
     }
 
     if (
@@ -232,7 +249,7 @@ export function TaskToolSnapshot(props: TaskToolSnapshotProps): React.ReactEleme
     }
 
     return nextSnapshots
-  }, [currentTaskRun, messages, parseSerializedTaskSnapshot, renderTaskSnapshotCard])
+  }, [currentTaskRun, liveTaskRuns, messages, parseSerializedTaskSnapshot, renderTaskSnapshotCard])
 
   const currentToolTraceSegment = useMemo(() => {
     if (!currentTaskRun) return []

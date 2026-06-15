@@ -253,6 +253,54 @@ test('RunProjection clears stale skill blockers when projection truth explicitly
   assert.equal(summary?.progress, null)
 })
 
+test('RunProjection clears stale waiting state when a task finishes without an explicit blocker', () => {
+  const store = new Map<string, ScopeRunSummary>()
+  const projection = new RunProjection({
+    getScope: () => createScope(),
+    getPrevious: (scopeId) => store.get(scopeId),
+    setSummary: (scopeId, summary) => {
+      store.set(scopeId, summary)
+    },
+    toChannelKey: () => 'local:app',
+  })
+
+  projection.recordEvent({
+    type: 'updated',
+    scopeId: 'scope-1',
+    agent: 'butler',
+    phase: 'checkpoint',
+    taskId: 'document-task',
+    taskTitle: '文档任务',
+    taskSummary: '文档未改动，已跳过保存',
+    interactionState: 'suspended',
+    waitingFor: 'background',
+    resumableActions: ['continue', 'cancel'],
+    taskContinuation: {
+      taskId: 'document-task',
+      blockerType: 'background_running',
+    },
+    blockedReason: '文档未改动，已跳过保存',
+    timestamp: '2026-04-10T01:00:00.000Z',
+  })
+
+  const summary = projection.recordEvent({
+    type: 'updated',
+    scopeId: 'scope-1',
+    agent: 'butler',
+    phase: 'done',
+    taskId: 'document-task',
+    taskSummary: '文档整理完成，现在阅读流畅。',
+    timestamp: '2026-04-10T01:01:00.000Z',
+  })
+
+  assert.equal(summary?.waitingFor, 'none')
+  assert.deepEqual(summary?.resumableActions, [])
+  assert.equal(summary?.interactionState, undefined)
+  assert.equal(summary?.taskContinuation, null)
+  assert.equal(summary?.blockedReason, null)
+  assert.equal(summary?.terminalReason, null)
+})
+
 test('RunProjection ignores undefined run-state fields instead of clearing active progress', () => {
   const store = new Map<string, ScopeRunSummary>()
   const projection = new RunProjection({

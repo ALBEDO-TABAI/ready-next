@@ -193,6 +193,17 @@ export function artifactFromPath(kind: string, label: string, path: string | nul
   }
 }
 
+function activeChildRunTitle(row: ActiveChildRunSummaryData): string {
+  const stage = String(row.progress?.stage || '').trim()
+  const detail = String(row.progress?.detail || '').trim()
+  if (detail && !/^[a-z_]+$/i.test(detail)) return detail
+  if (stage === 'prepare') return '正在准备素材'
+  if (stage === 'score_batches') return '正在分析素材'
+  if (stage === 'merge_validate') return '正在整理分析结果'
+  if (stage === 'finalize') return '正在生成报告'
+  return '正在处理后台任务'
+}
+
 /**
  * Stage 6 L6 contract: this function synthesizes a `TaskCardRun` from the
  * `agent:listActiveChildRuns` polling feed and is the renderer's last-resort
@@ -224,11 +235,10 @@ export function activeChildRunDebugRow(row: ActiveChildRunSummaryData, fallbackS
     phase: childRunPhase(row),
     status,
     title: '后台任务',
-    taskTitle: `后台技能任务 · ${row.skillId}`,
+    taskTitle: activeChildRunTitle(row),
     // Stage O §1.4 — debug fallback rows must NOT translate runtime fields
-    // into Chinese status sentences. Use the canonical placeholder so the
-    // user sees an honest "projection 暂未覆盖" hint instead of a fake
-    // "后台任务已完成 · …" line during the projection-write transient.
+    // into guessed completion sentences. Use the canonical placeholder during
+    // the projection-write transient.
     taskSummary: DEBUG_PLACEHOLDER_TASK_SUMMARY,
     steps: [{
       id: `child_run:${row.childRunId}`,

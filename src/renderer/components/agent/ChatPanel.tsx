@@ -950,6 +950,7 @@ export default function ChatPanel({
       messages={messages}
       currentTaskRun={currentTaskRun}
       backgroundTaskRuns={backgroundTaskRuns}
+      liveTaskRuns={currentScopeTaskRuns}
       currentScopeId={currentScopeId}
       scopeRunStates={scopeRunStates}
       taskDisclosureState={taskDisclosureState}

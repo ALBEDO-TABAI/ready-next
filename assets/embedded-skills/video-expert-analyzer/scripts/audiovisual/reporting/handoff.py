@@ -47,7 +47,6 @@ _SUBTASK_LABELS = {
     "body": "视听剖析正文",
     "diagram": "SVG 结构图",
     "overview": "MV 内容架构总览",
-    "illustrate": "视听剖析配图",
 }
 
 
@@ -90,11 +89,12 @@ class AudiovisualHandoffCoordinator:
     """Coordinates agent-handoff task packets for audiovisual report synthesis.
 
     Body / diagram / overview must be produced in order because each later
-    task embeds the previous output in its prompt. The coordinator writes one
-    task packet at a time: when a `request_*` method sees the output missing,
-    it writes the packet and raises `AudiovisualHandoffPending`. After the
-    agent fills the output file and the script re-runs, the same call reads
-    the cached output and returns it.
+    task embeds the previous output in its prompt. Scene screenshots are
+    inserted deterministically by the finalize script after these tasks. The
+    coordinator writes one task packet at a time: when a `request_*` method
+    sees the output missing, it writes the packet and raises
+    `AudiovisualHandoffPending`. After the agent fills the output file and the
+    script re-runs, the same call reads the cached output and returns it.
     """
 
     def __init__(self, video_dir: Path, video_id: str):
@@ -221,7 +221,7 @@ class AudiovisualHandoffCoordinator:
             "",
             "- 视听剖析的长文、SVG 结构图、MV 架构总览都改由运行 skill 的 agent（也就是你）来完成，脚本不再访问远端文本模型。",
             "- 每个子任务会把 system prompt 与 user message 写入各自目录下的 `task.md`，你需要严格按任务要求生成输出，并写入指定的输出文件。",
-            "- 任务按以下顺序：先 body；再 diagram 或 overview（由路由决定，两者**互斥**，大多数子类型只触发其中一个）；最后 illustrate。完成一个任务后重新运行 skill 的 finalize 步骤，脚本会读取你的输出并决定下一步。",
+            "- 任务按以下顺序：先 body；再 diagram 或 overview（由路由决定，两者**互斥**，大多数子类型只触发其中一个）。场景截图由 finalize 脚本按 Scene 引用自动插入，不再需要单独的配图子任务。完成一个任务后重新运行 skill 的 finalize 步骤，脚本会读取你的输出并决定下一步。",
             "- 不要手工改 `receipt.json`，也不要用 `python3 - <<'PY'` 这类 heredoc 绕过；harness 的 preflight 会拦截，任何手工改动都会被脚本在下次 finalize 时覆盖。只需重跑 finalize。",
             "",
             "## 视听剖析正文的硬指标",
@@ -236,7 +236,7 @@ class AudiovisualHandoffCoordinator:
             "## 子任务状态",
             "",
         ]
-        for key in ("body", "diagram", "overview", "illustrate"):
+        for key in ("body", "diagram", "overview"):
             info = tasks.get(key)
             if not info:
                 continue
@@ -382,49 +382,6 @@ class AudiovisualHandoffCoordinator:
             self.handoff_dir,
             "overview",
             _format_pending_message(self.video_id, "overview", task_path, self.video_dir),
-            task_path=task_path,
-            video_id=self.video_id,
-        )
-
-    def request_illustrate(self, system_prompt: str, user_message: str) -> str:
-        input_hash = _hash_prompt(system_prompt, user_message)
-        if not self._is_cached_output_stale("illustrate", system_prompt, user_message):
-            illustrated = self._read_output("illustrate", "output.md")
-            if illustrated is not None:
-                self._mark_task(
-                    "illustrate",
-                    "completed",
-                    output="illustrate/output.md",
-                    input_hash=input_hash,
-                    output_hash=_hash_text(illustrated),
-                )
-                return illustrated
-        self._ensure_handoff_dir()
-        task_path = self._write_task_packet(
-            "illustrate",
-            filename="output.md",
-            title="视听剖析正文配图",
-            system_prompt=system_prompt,
-            user_message=user_message,
-            output_instruction=(
-                "写入「插图后的完整 Markdown」——"
-                "保留原文每一行文字、每一个标题、每一张已存在的图片链接不变，"
-                "仅在 `##` 正文模块内被提及到 Scene 的段落后面插入 `![简短说明](<截图路径>)` 行，"
-                "严禁改写文字、重排段落、删除原有内容，也不要用代码块围栏包住整份输出。"
-            ),
-        )
-        self._mark_task(
-            "illustrate",
-            "pending",
-            task=str(task_path.relative_to(self.video_dir)),
-            output="illustrate/output.md",
-            input_hash=input_hash,
-        )
-        self._write_brief()
-        raise AudiovisualHandoffPending(
-            self.handoff_dir,
-            "illustrate",
-            _format_pending_message(self.video_id, "illustrate", task_path, self.video_dir),
             task_path=task_path,
             video_id=self.video_id,
         )

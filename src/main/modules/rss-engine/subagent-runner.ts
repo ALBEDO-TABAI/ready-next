@@ -33,6 +33,11 @@ export interface CopyDeliverableOptions {
   onProgress?: (progress: CopyDeliverableProgress) => void
 }
 
+interface TranscriptSectionPlan {
+  title: string
+  anchor?: string
+}
+
 interface VisualSummaryInput {
   title: string
   link: string
@@ -127,8 +132,8 @@ function hasCorrectedTranscriptShape(text: string, sourceText: string): boolean 
   const sourceLength = getMarkdownBodyLength(sourceText)
   const bodyLength = getMarkdownBodyLength(normalized)
   const minLength = sourceLength < 120
-    ? Math.max(16, Math.floor(sourceLength * 0.3))
-    : Math.floor(sourceLength * 0.25)
+    ? Math.max(16, Math.floor(sourceLength * 0.6))
+    : Math.floor(sourceLength * 0.8)
   return bodyLength >= minLength
 }
 
@@ -150,6 +155,49 @@ function extractMarkdownBody(text: string): string {
     .map((line) => line.trim())
     .filter((line) => line && !/^#+\s+/.test(line))
   return lines.join('\n\n').trim()
+}
+
+function splitTranscriptChunks(text: string, targetChars = 1_400): string[] {
+  const normalized = text
+    .replace(/\r/g, '\n')
+    .replace(/[ \t]+/g, ' ')
+    .trim()
+  if (!normalized) return []
+
+  const pieces = normalized
+    .split(/(?<=[。！？!?])\s+|[.!?]\s+|\n+/u)
+    .map((item) => item.trim())
+    .filter(Boolean)
+
+  const chunks: string[] = []
+  let current = ''
+  for (const piece of pieces) {
+    if (piece.length > targetChars * 1.5) {
+      if (current) {
+        chunks.push(current)
+        current = ''
+      }
+      for (let start = 0; start < piece.length; start += targetChars) {
+        const slice = piece.slice(start, start + targetChars).trim()
+        if (slice) chunks.push(slice)
+      }
+      continue
+    }
+
+    const next = current ? `${current}\n${piece}` : piece
+    if (next.length > targetChars && current) {
+      chunks.push(current)
+      current = piece
+    } else {
+      current = next
+    }
+  }
+  if (current) chunks.push(current)
+  return chunks
+}
+
+function correctionChunkMaxTokens(chunk: string): number {
+  return Math.min(3_200, Math.max(900, Math.ceil(getMarkdownBodyLength(chunk) * 1.4)))
 }
 
 function buildFallbackStructuredTranscript(title: string, correctedTranscript: string): string {
@@ -175,6 +223,110 @@ function hasStructuredTranscriptShape(text: string, correctedTranscript: string)
     ? Math.max(30, Math.floor(referenceLength * 0.5))
     : Math.floor(referenceLength * 0.45)
   return structuredLength >= minLength
+}
+
+function parseStructuredTranscriptPlan(text: string): TranscriptSectionPlan[] {
+  const raw = text.trim()
+  if (!raw) return []
+  const jsonMatch = raw.match(/\[[\s\S]*\]|\{[\s\S]*\}/)
+  if (!jsonMatch) return []
+
+  try {
+    const parsed = JSON.parse(jsonMatch[0]) as unknown
+    const items = Array.isArray(parsed)
+      ? parsed
+      : parsed && typeof parsed === 'object' && Array.isArray((parsed as { sections?: unknown }).sections)
+        ? (parsed as { sections: unknown[] }).sections
+        : []
+    const result: TranscriptSectionPlan[] = []
+    for (const item of items) {
+      if (!item || typeof item !== 'object') continue
+      const record = item as Record<string, unknown>
+      const title = typeof record.title === 'string'
+        ? record.title.trim()
+        : typeof record.heading === 'string'
+          ? record.heading.trim()
+          : ''
+      const anchor = typeof record.anchor === 'string'
+        ? record.anchor.trim()
+        : typeof record.startText === 'string'
+          ? record.startText.trim()
+          : typeof record.start === 'string'
+            ? record.start.trim()
+            : ''
+      if (!title) continue
+      result.push(anchor ? { title, anchor } : { title })
+    }
+    return result.slice(0, 12)
+  } catch {
+    return []
+  }
+}
+
+function normalizePlanTitle(title: string, index: number): string {
+  const cleaned = title
+    .replace(/^#{1,6}\s*/, '')
+    .replace(/^[一二三四五六七八九十\d]+[、.．]\s*/, '')
+    .trim()
+  const fallback = index === 0 ? '开场' : index === 1 ? '发展' : '收束'
+  const ordinal = ['一', '二', '三', '四', '五', '六', '七', '八', '九', '十'][index] || `${index + 1}`
+  return `${ordinal}、${cleaned || fallback}`
+}
+
+function findAnchorIndex(body: string, anchor: string, minIndex: number): number {
+  const trimmed = anchor.trim()
+  if (!trimmed) return -1
+
+  const direct = body.indexOf(trimmed, minIndex)
+  if (direct >= minIndex) return direct
+
+  const compactAnchor = trimmed.replace(/\s+/g, '')
+  if (!compactAnchor) return -1
+  let compactBody = ''
+  const map: number[] = []
+  for (let index = 0; index < body.length; index += 1) {
+    const char = body[index]
+    if (/\s/.test(char)) continue
+    map.push(index)
+    compactBody += char
+  }
+  const compactMinIndex = map.findIndex((originalIndex) => originalIndex >= minIndex)
+  const hit = compactBody.indexOf(compactAnchor, Math.max(0, compactMinIndex))
+  return hit >= 0 ? map[hit] ?? -1 : -1
+}
+
+function buildStructuredTranscriptFromPlan(
+  title: string,
+  correctedTranscript: string,
+  plan: TranscriptSectionPlan[],
+): string {
+  const body = extractMarkdownBody(correctedTranscript) || correctedTranscript.trim()
+  if (!body || !plan.length) return buildFallbackStructuredTranscript(title, correctedTranscript)
+
+  const boundaries: Array<{ title: string; index: number }> = [
+    { title: plan[0]?.title || '完整口播', index: 0 },
+  ]
+  for (let index = 1; index < plan.length; index += 1) {
+    const item = plan[index]
+    const anchorIndex = findAnchorIndex(body, item.anchor || '', boundaries[boundaries.length - 1].index + 12)
+    if (anchorIndex > boundaries[boundaries.length - 1].index) {
+      boundaries.push({ title: item.title, index: anchorIndex })
+    }
+  }
+
+  if (boundaries.length < 2 && plan.length > 1) {
+    return buildFallbackStructuredTranscript(title, correctedTranscript)
+  }
+
+  const parts = [`# ${title} 结构化文字稿`, '']
+  for (let index = 0; index < boundaries.length; index += 1) {
+    const current = boundaries[index]
+    const next = boundaries[index + 1]
+    const segment = body.slice(current.index, next?.index ?? body.length).trim()
+    if (!segment) continue
+    parts.push(`## ${normalizePlanTitle(current.title, index)}`, '', segment, '')
+  }
+  return parts.join('\n').trim()
 }
 
 function readAIConfig(): AIModelConfig | null {
@@ -289,63 +441,81 @@ export class RSSSubagentRunner {
   }
 
   private async correctCopyTranscript(input: CopySummaryInput): Promise<string> {
-    const text = await this.complete({
-      system: [
-        '你是短视频文稿校正助手。',
-        '只输出 Markdown；保留原意和口语风格，不增加原文没有的信息。',
-        '重点修正 ASR 同音字、错别字、断句和标点。',
-      ].join(''),
-      user: [
-        `标题: ${input.title}`,
-        `链接: ${input.link}`,
-        input.source ? `来源账号: ${input.source}` : '',
-        '',
-        '原始转录文本:',
-        clipText(input.extractedText, 8_000),
-        '',
-        '请输出一份校正文稿，格式必须为：',
-        `# ${input.title} 校正文稿`,
-        '',
-        '## 完整文稿',
-        '<校正后的完整口播文本>',
-      ].filter(Boolean).join('\n'),
-      maxTokens: 1_600,
-      timeoutMs: 120_000,
-    })
-    if (hasCorrectedTranscriptShape(text, input.extractedText)) {
-      return formatCorrectedTranscript(input.title, text)
-    }
+    const chunks = splitTranscriptChunks(input.extractedText)
+    if (!chunks.length) return formatCorrectedTranscript(input.title, input.extractedText)
 
-    if (text) {
-      const retryText = await this.complete({
+    const correctedChunks: string[] = []
+    for (let index = 0; index < chunks.length; index += 1) {
+      const chunk = chunks[index]
+      const text = await this.complete({
         system: [
           '你是短视频文稿校正助手。',
-          '只输出 Markdown；保留原意和口语风格，不增加原文没有的信息。',
+          '只输出当前片段校正后的正文，不要加标题。',
+          '保留原意和口语风格，不增加原文没有的信息。',
           '重点修正 ASR 同音字、错别字、断句和标点。',
         ].join(''),
         user: [
           `标题: ${input.title}`,
           `链接: ${input.link}`,
           input.source ? `来源账号: ${input.source}` : '',
+          `片段: ${index + 1}/${chunks.length}`,
           '',
           '原始转录文本:',
-          clipText(input.extractedText, 8_000),
+          chunk,
           '',
-          '上一次输出不完整。请重新输出完整校正文稿，必须包含：',
-          `# ${input.title} 校正文稿`,
-          '',
-          '## 完整文稿',
-          '<校正后的完整口播文本>',
+          '请只输出这个片段校正后的完整正文。',
         ].filter(Boolean).join('\n'),
-        maxTokens: 2_400,
-        timeoutMs: 150_000,
+        maxTokens: correctionChunkMaxTokens(chunk),
+        timeoutMs: 120_000,
       })
-      if (hasCorrectedTranscriptShape(retryText, input.extractedText)) {
-        return formatCorrectedTranscript(input.title, retryText)
-      }
+      const body = extractMarkdownBody(text) || text.trim()
+      correctedChunks.push(hasCorrectedTranscriptShape(body, chunk) ? body : chunk)
+    }
+
+    const corrected = correctedChunks.join('\n\n').trim()
+    if (hasCorrectedTranscriptShape(corrected, input.extractedText)) {
+      return formatCorrectedTranscript(input.title, corrected)
     }
 
     return formatCorrectedTranscript(input.title, input.extractedText)
+  }
+
+  private async structureCopyTranscript(input: CopySummaryInput & {
+    correctedTranscript: string
+    report: string
+  }): Promise<string> {
+    const text = await this.complete({
+      system: [
+        '你是短视频文稿结构化助手。',
+        '只输出 JSON，不输出 Markdown 正文。',
+        '你只负责给分段建议，正文会由代码从完整校正文稿中保留。',
+      ].join(''),
+      user: [
+        `标题: ${input.title}`,
+        '',
+        '校正文稿:',
+        clipText(input.correctedTranscript, 12_000),
+        '',
+        '分析报告:',
+        clipText(input.report, 4_000),
+        '',
+        '请输出 JSON，格式为：',
+        '{"sections":[{"title":"段落标题","anchor":"这一段在校正文稿里的起始原文短句"}]}',
+        '',
+        '要求：',
+        '- sections 数量控制在 2-8 个；',
+        '- anchor 必须直接摘自校正文稿，用于定位段落开头；',
+        '- 不要输出任何正文内容。',
+      ].join('\n'),
+      maxTokens: 900,
+      timeoutMs: 120_000,
+    })
+    const plan = parseStructuredTranscriptPlan(text)
+    const structured = buildStructuredTranscriptFromPlan(input.title, input.correctedTranscript, plan)
+    if (hasStructuredTranscriptShape(structured, input.correctedTranscript)) {
+      return structured
+    }
+    return buildFallbackStructuredTranscript(input.title, input.correctedTranscript)
   }
 
   async summarizeCopy(input: CopySummaryInput): Promise<string> {
@@ -417,73 +587,6 @@ export class RSSSubagentRunner {
     if (hasCompleteCopySummaryShape(retryText)) return retryText
 
     return buildFallbackCopySummary(input)
-  }
-
-  private async structureCopyTranscript(input: CopySummaryInput & {
-    correctedTranscript: string
-    report: string
-  }): Promise<string> {
-    const text = await this.complete({
-      system: [
-        '你是短视频文稿结构化助手。',
-        '只输出 Markdown；按叙事逻辑分段，保留口语化表达。',
-        '不要新增原文没有的信息。',
-      ].join(''),
-      user: [
-        `标题: ${input.title}`,
-        '',
-        '校正文稿:',
-        clipText(input.correctedTranscript, 8_000),
-        '',
-        '分析报告:',
-        clipText(input.report, 6_000),
-        '',
-        '请输出结构化文字稿，格式必须为：',
-        `# ${input.title} 结构化文字稿`,
-        '',
-        '## 一、<段落标题>',
-        '<按语义分行后的文本>',
-        '',
-        '## 二、<段落标题>',
-        '<按语义分行后的文本>',
-      ].join('\n'),
-      maxTokens: 1_800,
-      timeoutMs: 120_000,
-    })
-    if (hasStructuredTranscriptShape(text, input.correctedTranscript)) return text
-
-    if (text) {
-      const retryText = await this.complete({
-        system: [
-          '你是短视频文稿结构化助手。',
-          '只输出 Markdown；按叙事逻辑分段，保留口语化表达。',
-          '不要新增原文没有的信息。',
-        ].join(''),
-        user: [
-          `标题: ${input.title}`,
-          '',
-          '校正文稿:',
-          clipText(input.correctedTranscript, 8_000),
-          '',
-          '分析报告:',
-          clipText(input.report, 6_000),
-          '',
-          '上一次输出不完整。请重新输出完整结构化文字稿，必须覆盖校正文稿的主要口播内容，并使用以下格式：',
-          `# ${input.title} 结构化文字稿`,
-          '',
-          '## 一、<段落标题>',
-          '<按语义分行后的文本>',
-          '',
-          '## 二、<段落标题>',
-          '<按语义分行后的文本>',
-        ].join('\n'),
-        maxTokens: 2_400,
-        timeoutMs: 150_000,
-      })
-      if (hasStructuredTranscriptShape(retryText, input.correctedTranscript)) return retryText
-    }
-
-    return buildFallbackStructuredTranscript(input.title, input.correctedTranscript)
   }
 
   async summarizeVisual(input: VisualSummaryInput): Promise<string> {

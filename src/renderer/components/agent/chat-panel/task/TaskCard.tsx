@@ -147,21 +147,21 @@ export function TaskCard({
     : '确认部分采集'
   const progressLabel = formatTaskProgressLabel(run.progress)
   const progressValue = progressPercent(run.progress)
+  const progressLabelAlreadyHasPercent = Boolean(progressLabel && /\d+%/.test(progressLabel))
   const progressLastError = run.progress?.lastError ? formatTaskUserFacingText(run.progress.lastError) : null
   const visibleMemoryCapture =
     run.memoryCapture && run.memoryCapture.status === 'ready' ? run.memoryCapture : null
   const summaryPreview = formatSingleLinePreview(vm.summary)
+  const shouldShowInteractionBadge = Boolean(
+    run.interactionState
+    && run.interactionState !== 'running'
+    && run.phase !== 'done'
+    && run.status !== 'completed',
+  )
   const metaBadges = [
     getTaskStartModeLabel(run) || (run.taskType ? taskTypeBadgeLabel(run.taskType) : null),
-    run.interactionState && run.interactionState !== 'running'
-      ? interactionStateBadgeLabel(run.interactionState)
-      : null,
-    run.budgetUsagePercent != null ? `预算 ${Math.round(run.budgetUsagePercent)}%` : null,
-    run.stepBudget
-      ? `步骤余量 ${Math.max(0, Math.round(run.stepBudget.remainingIterations || 0))}/${Math.max(0, Math.round(run.stepBudget.maxIterations || 0))}`
-      : null,
+    shouldShowInteractionBadge ? interactionStateBadgeLabel(run.interactionState) : null,
     run.budgetWarningLevel ? budgetWarningBadgeLabel(run.budgetWarningLevel) : null,
-    run.degradationReason ? `降级 ${run.degradationReason}` : null,
     run.recoveryHistory && run.recoveryHistory.length > 0
       ? recoveryBadgeLabel(run.recoveryHistory)
       : null
@@ -308,7 +308,7 @@ export function TaskCard({
                 >
                   {progressLabel}
                 </span>
-                {progressValue != null && (
+                {progressValue != null && !progressLabelAlreadyHasPercent && (
                   <span className="t-data" data-typography-role="data" style={{ color: 'var(--text-light)', flexShrink: 0 }}>
                     {progressValue}%
                   </span>

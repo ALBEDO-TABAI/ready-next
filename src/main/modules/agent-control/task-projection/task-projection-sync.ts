@@ -336,9 +336,10 @@ function resolveTerminalWaitingFor(reason?: ScopeRunSummary['terminalReason'] | 
 
 function resolveWaitingFor(
   summary: ScopeRunSummary,
+  status: TaskProjectionRecord['status'],
   previous?: TaskProjectionRecord | null,
 ): TaskProjectionRecord['waitingFor'] {
-  const waitingFor = summary.waitingFor || previous?.waitingFor || 'none'
+  const waitingFor = summary.waitingFor || (status === 'completed' ? 'none' : previous?.waitingFor) || 'none'
   if (waitingFor !== 'none') return waitingFor
   return resolveTerminalWaitingFor(summary.terminalReason) || 'none'
 }
@@ -768,7 +769,7 @@ export function buildTaskProjectionRecord(
     taskSummary: effectiveSummary.taskSummary ?? previous?.taskSummary ?? null,
     status,
     interactionState: resolveRecordInteractionState(effectiveSummary, status),
-    waitingFor: resolveWaitingFor(effectiveSummary, previous),
+    waitingFor: resolveWaitingFor(effectiveSummary, status, previous),
     steps: mapSteps(effectiveSummary, previous),
     currentStepId: effectiveSummary.currentStepId || null,
     budget: resolveTaskBudget(effectiveSummary),

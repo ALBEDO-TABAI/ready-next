@@ -1014,6 +1014,7 @@ export interface DomainOrchestrationDecision {
 export interface RunProjectionPatch {
   taskTitle?: string | null
   taskSummary?: string | null
+  interactionState?: TaskInteractionState
   steps?: ScopeRunTaskStep[]
   currentStepId?: string | null
   waitingFor?: 'input' | 'confirmation' | 'agent_result' | 'background' | 'clarification' | 'verification' | 'none'

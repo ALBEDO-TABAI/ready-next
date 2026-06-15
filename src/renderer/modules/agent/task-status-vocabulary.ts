@@ -46,11 +46,11 @@ export const __GATE_CANONICAL_LABELS: ReadonlyArray<string> = Object.freeze([
  * `activeChildRunDebugRow` when the persisted `task_projections` table
  * has not yet caught up with an active child run. The literal must live
  * here (single source) so the status-vocabulary gate can prevent
- * renderer files from inlining a status-flavored Chinese string. The
- * `(projection 暂未覆盖)` clause makes the user-visible state honest:
- * the UI is not pretending to know the task's current real state.
+ * renderer files from inlining a status-flavored Chinese string.
+ * Keep this user-facing. The debug source is still encoded by the constant
+ * name and fallback path; the card itself should not expose projection jargon.
  */
-export const DEBUG_PLACEHOLDER_TASK_SUMMARY = '后台任务（projection 暂未覆盖）'
+export const DEBUG_PLACEHOLDER_TASK_SUMMARY = '任务还在后台运行，正在同步最新进度。'
 
 export type TaskCardVisualState =
   | 'failed'

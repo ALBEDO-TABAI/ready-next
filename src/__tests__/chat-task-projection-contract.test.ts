@@ -8,7 +8,7 @@ function readWorkspaceFile(path: string): string {
   return readFileSync(resolve(process.cwd(), path), 'utf8')
 }
 
-test('chat task cards merge task projections and expose task-type, status, budget, and recovery hints', () => {
+test('chat task cards merge task projections and expose user-facing status and recovery hints', () => {
   const chatPanel = readWorkspaceFile('src/renderer/components/agent/ChatPanel.tsx')
   // Stage V V1.1 — pure projection / badge helpers extracted from
   // ChatPanel.tsx to `chat-panel/helpers/{projection,badges}.ts`. The
@@ -18,9 +18,9 @@ test('chat task cards merge task projections and expose task-type, status, budge
   const badgeHelpers = readWorkspaceFile('src/renderer/components/agent/chat-panel/helpers/badges.ts')
   const viewModel = readWorkspaceFile('src/renderer/modules/agent/taskCardViewModel.ts')
   // Stage V V1.6 — TaskCard + ToolTraceCard moved to
-  // `chat-panel/task/TaskCard.tsx`; budget / step-budget / warning /
-  // degradation / recovery badge renders now live in that file. V1.7
-  // contract retarget: keep the badge-shape assertions, but grep
+  // `chat-panel/task/TaskCard.tsx`; warning / recovery badge renders
+  // now live in that file. V1.7 contract retarget: keep the
+  // badge-shape assertions, but grep
   // TaskCard.tsx instead of ChatPanel.tsx for those specific reads.
   const taskCard = readWorkspaceFile('src/renderer/components/agent/chat-panel/task/TaskCard.tsx')
   // Stage V V1.7 — `mergedTaskRuns` 4-pass merge body moved to
@@ -34,9 +34,18 @@ test('chat task cards merge task projections and expose task-type, status, budge
   const taskInteraction = readWorkspaceFile(
     'src/renderer/components/agent/chat-panel/task-interaction/use-task-interaction-handlers.ts',
   )
+  const taskToolSnapshot = readWorkspaceFile(
+    'src/renderer/components/agent/chat-panel/task-snapshot/TaskToolSnapshot.tsx',
+  )
+  const chatPanelBody = readWorkspaceFile('src/renderer/components/agent/chat-panel/ChatPanelBody.tsx')
 
   assert.match(chatPanel, /const \[persistedTaskProjections, setPersistedTaskProjections\] = useState/)
   assert.match(chatPanel, /window\.electronAPI\.agent\.listTaskProjections\(scope\.id\)/)
+  assert.match(chatPanel, /liveTaskRuns=\{currentScopeTaskRuns\}/)
+  assert.match(chatPanelBody, /liveTaskRuns=\{liveTaskRuns\}/)
+  assert.match(taskToolSnapshot, /liveTaskRuns: TaskCardRun\[]/)
+  assert.match(taskToolSnapshot, /function newerTaskSnapshot\(/)
+  assert.match(taskToolSnapshot, /newerTaskSnapshot\(snapshot, liveTaskRuns\)/)
   assert.match(projectionHelpers, /function resolveProjectionForTaskRun\(/)
   assert.match(projectionHelpers, /run\.taskId/)
   assert.match(projectionHelpers, /run\.taskContinuation\?\.taskId/)
@@ -45,6 +54,9 @@ test('chat task cards merge task projections and expose task-type, status, budge
   assert.match(projectionHelpers, /function isLiveProjectionCandidate\(/)
   assert.match(projectionHelpers, /function selectFallbackProjection\(/)
   assert.match(projectionHelpers, /item\.status === 'completed' && \(item\.recentArtifacts\?\.length \|\| 0\) > 0/)
+  assert.match(projectionHelpers, /function activeChildRunTitle\(/)
+  assert.match(projectionHelpers, /taskTitle:\s*activeChildRunTitle\(row\)/)
+  assert.doesNotMatch(projectionHelpers, /taskTitle:\s*`后台技能任务/)
   assert.doesNotMatch(taskMerge, /persistedTaskProjections\[run\.scopeId\]\?\[0\]/)
   assert.match(taskMerge, /taskTitle:\s*projection\?\.taskTitle\s*\?\? null/)
   assert.match(taskMerge, /taskSummary:\s*projection\?\.taskSummary\s*\?\? null/)
@@ -75,11 +87,13 @@ test('chat task cards merge task projections and expose task-type, status, budge
   assert.match(badgeHelpers, /function taskTypeBadgeLabel\(/)
   assert.match(badgeHelpers, /function interactionStateBadgeLabel\(/)
   assert.match(badgeHelpers, /function recoveryBadgeLabel\(/)
-  assert.match(taskCard, /run\.budgetUsagePercent != null/)
-  assert.match(taskCard, /run\.stepBudget/)
+  assert.match(taskCard, /progressLabelAlreadyHasPercent/)
+  assert.match(taskCard, /!progressLabelAlreadyHasPercent/)
   assert.match(taskCard, /run\.budgetWarningLevel/)
-  assert.match(taskCard, /run\.degradationReason/)
   assert.match(taskCard, /run\.recoveryHistory && run\.recoveryHistory\.length > 0/)
+  assert.doesNotMatch(taskCard, /run\.budgetUsagePercent != null/)
+  assert.doesNotMatch(taskCard, /run\.stepBudget/)
+  assert.doesNotMatch(taskCard, /run\.degradationReason/)
   assert.doesNotMatch(chatPanel, /继续前上下文：/)
   assert.match(viewModel, /taskType\?:/)
   assert.match(viewModel, /status\?:/)

@@ -69,8 +69,16 @@ def _max_retries_for_attempts() -> int:
         return 2
 
 
-def _retry_with_backoff(fn: Callable[[], str], *, model_ref: str) -> str:
-    retries = _max_retries_for_attempts()
+def _coerce_timeout_seconds(value: float | int | str | None) -> float:
+    try:
+        timeout = float(value) if value is not None else DEFAULT_REQUEST_TIMEOUT_SECONDS
+    except (TypeError, ValueError):
+        timeout = DEFAULT_REQUEST_TIMEOUT_SECONDS
+    return max(1.0, timeout)
+
+
+def _retry_with_backoff(fn: Callable[[], str], *, model_ref: str, retries: int | None = None) -> str:
+    retries = _max_retries_for_attempts() if retries is None else max(0, retries)
     delay = 1.0
     last_exc: BaseException | None = None
     for attempt in range(retries + 1):
@@ -219,6 +227,7 @@ def _call_openai_completions(
     *,
     max_output_tokens: int,
     temperature: float,
+    request_timeout_seconds: float | int | str | None = None,
 ) -> str:
     if OpenAI is None:  # pragma: no cover - runtime dependency exists in app
         raise RuntimeError("当前环境未安装 openai 库")
@@ -227,7 +236,7 @@ def _call_openai_completions(
         base_url=_normalize_base_url("openai-completions", provider_config.get("baseUrl", "")),
         default_headers=provider_config.get("headers") or None,
         max_retries=0,
-        timeout=DEFAULT_REQUEST_TIMEOUT_SECONDS,
+        timeout=_coerce_timeout_seconds(request_timeout_seconds),
     )
     response = client.chat.completions.create(
         model=str(model_config.get("id", "")),
@@ -248,6 +257,7 @@ def _call_openai_responses(
     user_prompt: str,
     *,
     max_output_tokens: int,
+    request_timeout_seconds: float | int | str | None = None,
 ) -> str:
     if OpenAI is None:  # pragma: no cover - runtime dependency exists in app
         raise RuntimeError("当前环境未安装 openai 库")
@@ -256,7 +266,7 @@ def _call_openai_responses(
         base_url=_normalize_base_url("openai-responses", provider_config.get("baseUrl", "")),
         default_headers=provider_config.get("headers") or None,
         max_retries=0,
-        timeout=DEFAULT_REQUEST_TIMEOUT_SECONDS,
+        timeout=_coerce_timeout_seconds(request_timeout_seconds),
     )
     response = client.responses.create(
         model=str(model_config.get("id", "")),
@@ -277,6 +287,7 @@ def _call_anthropic_messages(
     *,
     max_output_tokens: int,
     temperature: float,
+    request_timeout_seconds: float | int | str | None = None,
 ) -> str:
     if Anthropic is None:  # pragma: no cover - runtime dependency exists in app
         raise RuntimeError("当前环境未安装 anthropic 库")
@@ -284,7 +295,7 @@ def _call_anthropic_messages(
         api_key=provider_config.get("apiKey", ""),
         base_url=_normalize_base_url("anthropic-messages", provider_config.get("baseUrl", "")),
         default_headers=provider_config.get("headers") or None,
-        timeout=DEFAULT_REQUEST_TIMEOUT_SECONDS,
+        timeout=_coerce_timeout_seconds(request_timeout_seconds),
     )
     response = client.messages.create(
         model=str(model_config.get("id", "")),
@@ -303,6 +314,8 @@ def request_text_with_runtime(
     *,
     max_output_tokens: int = DEFAULT_MAX_OUTPUT_TOKENS,
     temperature: float = 0,
+    request_timeout_seconds: float | int | str | None = None,
+    max_retries: int | None = None,
 ) -> str:
     if runtime_config is None:
         raise ValueError("缺少文本路由配置")
@@ -321,6 +334,7 @@ def request_text_with_runtime(
                     system_prompt,
                     user_prompt,
                     max_output_tokens=max_output_tokens,
+                    request_timeout_seconds=request_timeout_seconds,
                 )
             if api_style == "anthropic-messages":
                 return _call_anthropic_messages(
@@ -330,6 +344,7 @@ def request_text_with_runtime(
                     user_prompt,
                     max_output_tokens=max_output_tokens,
                     temperature=temperature,
+                    request_timeout_seconds=request_timeout_seconds,
                 )
             return _call_openai_completions(
                 attempt["provider_config"],
@@ -338,10 +353,11 @@ def request_text_with_runtime(
                 user_prompt,
                 max_output_tokens=max_output_tokens,
                 temperature=temperature,
+                request_timeout_seconds=request_timeout_seconds,
             )
 
         try:
-            return _retry_with_backoff(_call, model_ref=attempt["model_ref"])
+            return _retry_with_backoff(_call, model_ref=attempt["model_ref"], retries=max_retries)
         except Exception as exc:  # pragma: no cover - failure path depends on provider
             errors.append(f"{attempt['model_ref']}: {type(exc).__name__}: {exc}")
 

@@ -350,6 +350,78 @@ test('syncTaskProjection does not keep terminal projections in running interacti
   assert.equal(result?.interactionState, 'suspended')
 })
 
+test('syncTaskProjection does not inherit stale waiting state onto completed records', async () => {
+  const records = new Map<string, TaskProjectionRecord>()
+  records.set('task-1', {
+    taskId: 'task-1',
+    scopeId: 'scope-1',
+    runId: 'run-1',
+    taskType: 'short_task',
+    module: 'document',
+    taskTitle: '文档任务',
+    taskSummary: '文档未改动，已跳过保存',
+    status: 'blocked',
+    interactionState: 'suspended',
+    waitingFor: 'background',
+    steps: [],
+    currentStepId: null,
+    budget: null,
+    blockedReason: '文档未改动，已跳过保存',
+    resumableActions: ['continue', 'cancel'],
+    continuationRef: {
+      taskId: 'task-1',
+      blockerType: 'background_running',
+    },
+    recentArtifacts: [],
+    createdAt: '2026-04-28T01:09:00.000Z',
+    updatedAt: '2026-04-28T01:09:00.000Z',
+  })
+  const store: TaskProjectionStore = {
+    create(record) {
+      records.set(record.taskId, record)
+    },
+    update(taskId, patch) {
+      records.set(taskId, {
+        ...records.get(taskId)!,
+        ...patch,
+      })
+    },
+    get(taskId) {
+      return records.get(taskId) || null
+    },
+    listByScope(scopeId) {
+      return Array.from(records.values()).filter((record) => record.scopeId === scopeId)
+    },
+    listByParentTask(parentTaskId) {
+      return Array.from(records.values()).filter((record) => record.parentTaskId === parentTaskId)
+    },
+  }
+
+  const result = await syncTaskProjection(store, {
+    ...createSummary(),
+    phase: 'done',
+    taskId: 'task-1',
+    taskProjectionId: 'run-1',
+    interactionState: undefined,
+    waitingFor: undefined,
+    blockedReason: null,
+    taskContinuation: null,
+    resumableActions: [],
+    taskSummary: '文档整理完成，现在阅读流畅。',
+    updatedAt: '2026-04-28T01:10:00.000Z',
+  }, {
+    ...createPayload(),
+    phase: 'done',
+    timestamp: '2026-04-28T01:10:00.000Z',
+  })
+
+  assert.equal(result?.status, 'completed')
+  assert.equal(result?.waitingFor, 'none')
+  assert.equal(result?.blockedReason, null)
+  assert.deepEqual(result?.resumableActions, [])
+  assert.equal(result?.continuationRef, null)
+})
+
 test('syncTaskProjection maps blocked terminal reasons instead of keeping stale running state', async () => {
   const records = new Map<string, TaskProjectionRecord>()
   const store: TaskProjectionStore = {

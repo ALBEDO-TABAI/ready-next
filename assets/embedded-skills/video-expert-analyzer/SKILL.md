@@ -92,9 +92,9 @@ LLM 看到工具名时按下表对应：
 11. 用户请求里包含 `pdf` 时，任何一个必需 PDF 缺失都不算完成。
 12. Windows 上如果本地链路明确报 `HTTP Error 429`，应直接当成平台限流阻塞回报，不要擅自改走浏览器下载、录屏或别的旁路。
 13. 禁止用本地 `PIL` / `OpenCV` 的亮度、颜色、对比度特征脚本冒充“已看图”；这类结果只能算失败或诊断，不能算正式评分。
-14. 视听剖析的正文长文、SVG 结构图、MV 内容架构总览改由运行本 skill 的 agent（也就是你）直接完成；脚本不再调远端文本模型做这几段，也不再保留任何本地兜底文本。遇到 `audiovisual_handoff/` 下的任务包必须按序（body → 然后 diagram **或** overview（互斥，由路由决定，通常只触发其一）→ 最后 illustrate）完成，再重新跑 `finalize`。正文 `body/output.md` 必须逐模块展开：task.md 里"输出骨架"列出的每个 `##` 模块、`###` 子条目都要字面出现，不得合并/省略；除 `## 导读` 外每个 `##` ≥ 700 字、每个 `###` ≥ 180 字、每个 `##` 至少引用 3 个不同 Scene 编号。脚本会在 finalize 时机器校验，不达标会抛 `ValueError`，并把缺项（含每个模块的实际字数与差额）写到 `audiovisual_handoff/body/validation_errors.json`，按错误提示补齐再跑，不要把"已经写过"当成"合规"。
+14. 视听剖析默认由脚本用当前运行时文本模型直接完成正文长文，保证产品后台任务可以自动收尾；只有显式设置 `AUDIOVISUAL_REPORT_HANDOFF=1` 时才启用 `audiovisual_handoff/` 接力。遇到 handoff 任务包时必须按序（body → 然后 diagram **或** overview，两者互斥，通常只触发其一）完成，再重新跑 `finalize`。场景截图由脚本在最终 Markdown 中按 Scene 引用自动回填，不需要单独的配图子任务。正文 `body/output.md` 必须逐模块展开：task.md 里"输出骨架"列出的每个 `##` 模块、`###` 子条目都要字面出现，不得合并/省略；除 `## 导读` 外每个 `##` ≥ 700 字、每个 `###` ≥ 180 字、每个 `##` 至少引用 3 个不同 Scene 编号。脚本会在 finalize 时机器校验，不达标会抛 `ValueError`，并把缺项（含每个模块的实际字数与差额）写到 `audiovisual_handoff/body/validation_errors.json`，按错误提示补齐再跑，不要把"已经写过"当成"合规"。
 15. 正文第一个模块必须是 `## 导读`：写给普通观众的总-分速读。先用 2-3 句白话回答该类型的"价值问题"（task.md 会给出默认问题；**如果用户在对话里明确表达过自己的关注点——比如"想看看这访谈聊了什么观点"——导读必须优先回答用户的问题**，默认问题退为兜底），再列 2-4 条亮点（一句话结论 + Scene 编号/时间码）。允许否定或中性结论，不要强行夸。导读受上限约束：默认 ≤400 字、≥2 处 Scene/时间码引用、禁止"双轴""路由""冯·雷斯托夫""加权分"这类框架术语——机器校验会打回。
-16. `illustrate/output.md` 只能使用 `audiovisual_handoff/illustrate/task.md` 中「场景目录」列出的截图路径，不得凭空编造；同一张截图也不能在连续 3 段以内重复出现，否则脚本会抛 `ValueError`。
+16. 脚本自动插入的场景截图只能来自当前视频目录的截图目录，不得凭空编造；导读、路由判断、结构图/总览图、尾部总结块、评分表、代码块和表格内部不插图，同一张截图不会重复刷屏。
 17. Handoff `receipt.json` 会记录每个子任务的 `input_hash`；当分类结果或 prompt 变化时，已有 `output.md/svg/json` 会被自动作废，需要重新生成。若 receipt 里某任务是 `validation_failed`，说明上次输出没过机器校验，先看 `brief.md` 里的失败原因和 `validation_errors.json` 的逐模块差额，改完再跑 finalize。
 
 ## OpenClaw 主控原则（仅 OpenClaw 接力场景适用）
@@ -195,12 +195,13 @@ python3 scripts/ai_analyzer.py /path/to/scene_scores.json --mode finalize
 
 #### 4.1 视听剖析 Agent 接力
 
-`finalize` 生成视听剖析（`*_audiovisual_analysis.*`）时，会按子类型路由触发最多四个交由 agent 完成的子任务：
+`finalize` 生成视听剖析（`*_audiovisual_analysis.*`）时，会按子类型路由触发最多三个交由 agent 完成的子任务：
 
 - `body`：完整的视听剖析正文 Markdown
 - `diagram`：SVG 结构图（仅支持该能力的子类型）
 - `overview`：MV 内容架构总览 JSON（仅音乐/MV 路由）
-- `illustrate`：在近终态 Markdown 中按 Scene 引用插入对应截图
+
+场景截图不再作为 handoff 子任务交给 agent 改写 Markdown；脚本会在最终 Markdown 中按 Scene 引用确定性插入对应截图，并自动补图注。
 
 脚本为每个子任务按顺序写一个任务包到 `audiovisual_handoff/<subtask>/task.md`，并把当次 `run_state` 标成 `blocked`（`pending_task = await_audiovisual_agent`），同时抛 `AudiovisualHandoffPending`。这是运行 skill 的 agent（也就是你）应当：
 
@@ -209,11 +210,10 @@ python3 scripts/ai_analyzer.py /path/to/scene_scores.json --mode finalize
    - `body/output.md` — 只写正文 Markdown，保留 prompt 要求的所有 `##` 章节标题，不要额外加顶层 `#` 标题。
    - `diagram/output.svg` — 只写合法的 `<svg>...</svg>` 源码，不要反引号或说明文字。
    - `overview/output.json` — 只写 JSON 对象，字段严格按 prompt 描述，不要代码块围栏。
-   - `illustrate/output.md` — 写"插图后的完整 Markdown"：保留原文每一行文字不变，只在 `##` 正文模块中被提及到 Scene 的段落后插入 `![简短说明](<截图路径>)`；截图路径必须来自 task.md 列出的"场景目录"，不要编造；同一张图在连续 3 段内不要重复；`## 路由判断`、`## 视听剖析概览 / 视频结构图 / 视频内容架构总览` 等已有图示的模块不再追加。
 3. 完成后重新执行 `python3 scripts/ai_analyzer.py <scene_scores.json> --mode finalize`。脚本会读取你刚写入的输出文件，把该子任务标成 `completed`，然后推进到下一个子任务或完成剩余的交付物。
 4. 不要手工改 `audiovisual_handoff/receipt.json`；脚本会自己维护。也不要用 `python3 - <<'PY' ...` 这类 heredoc 绕过 — harness 的 exec preflight 会拦，改了也会被下一次 finalize 覆盖，只需让脚本自己推进。
 5. 如果某个子任务连续两次都缺关键素材，先排查素材问题，再回到这里重新跑；不要造一份占位文本塞进 `output.*`，那样会污染最终报告。
-6. 子任务触发顺序是 body → (diagram 或 overview，两者互斥，由路由能力决定，多数情况只会触发一个) → illustrate。`illustrate` 最后执行，操作对象是已经拼好了路由判断块和结构图/总览图的近终态 Markdown，所以若 body 或 diagram/overview 需要重跑，对应 `output.*` 要一起删掉，避免 `illustrate/output.md` 基于旧文稿残留。
+6. 子任务触发顺序是 body → (diagram 或 overview，两者互斥，由路由能力决定，多数情况只会触发一个)。场景截图由 finalize 在已经拼好路由判断块和结构图/总览图的近终态 Markdown 上自动回填，所以若 body 或 diagram/overview 需要重跑，只需删除对应 `output.*` 并重新跑 finalize。
 7. 视频目录名常含弯引号/特殊字符（例如 `‘GO’`、`’s`、`—`）。读取 `audiovisual_handoff/` 下的文件时，**只从脚本打印的错误信息或 `brief.md` 顶部的"Handoff 目录"绝对路径按原样复制**，不要自己重敲 —— 手敲时很容易把 `‘’` 改写成 `''`，导致 `ENOENT`。如果连续两次 ENOENT，先 `ls` 实际视频目录核对字符，再继续。
 
 ## 完成标准
@@ -257,6 +257,7 @@ python3 scripts/ai_analyzer.py /path/to/scene_scores.json --mode finalize
 - `VNEXT_VISION_RAW`：设为 `1` 完全跳过缩放压缩，按原始字节直传。
 - `VNEXT_TYPE_WEIGHT_SOFTENING`：场景类型权重的软混合系数 α（默认 0.4；有效权重 = (1-α)·类型档位 + α·均匀权重，设 0 还原硬切换）。
 - `AUDIOVISUAL_SUMMARY_MAX_CHARS` / `AUDIOVISUAL_SUMMARY_MIN_SCENE_EVIDENCE`：导读模块的字数上限（默认 400）与最少 Scene/时间码引用数（默认 2）。
+- `AUDIOVISUAL_REPORT_HANDOFF`：设为 `1` 时启用 agent handoff；默认关闭，产品后台任务直接生成完整报告。
 - `AUDIOVISUAL_REPORT_MAX_TOKENS` / `AUDIOVISUAL_REPORT_MODEL`：视听剖析正文生成时直连文本模型的上限 / 模型名（仅在未启用 handoff 架构时生效）。
 
 ## 按需补充

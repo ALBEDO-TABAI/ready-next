@@ -2,14 +2,17 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import sys
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Sequence
 
 from audiovisual.reporting import markdown as _markdown
 from audiovisual.reporting import raw_prompt_adapter as _raw_prompt_adapter
 from audiovisual.reporting import template_engine as _template_engine
-from audiovisual.reporting.handoff import AudiovisualHandoffCoordinator, AudiovisualHandoffPending
+from audiovisual.reporting import value_focus as _value_focus
+from audiovisual.reporting.handoff import AudiovisualHandoffCoordinator
 from audiovisual.rendering.pdf import load_storyboard_context_rows, write_audiovisual_report_pdf
 from audiovisual.routing.enrich import enrich_audiovisual_layers
 from audiovisual.shared import (
@@ -27,6 +30,11 @@ def _resolve_runtime_config() -> Dict[str, Any]:
     from ai_analyzer import resolve_auto_scoring_config
 
     return resolve_auto_scoring_config()
+
+
+def _env_truthy(name: str) -> bool:
+    value = os.environ.get(name, "")
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _require_new_route_contract(data: Dict[str, Any]) -> str:
@@ -179,17 +187,6 @@ def assemble_audiovisual_report_markdown(
     return markdown, diagram_assets
 
 
-_ILLUSTRATE_SYSTEM_PROMPT = (
-    "你是视听剖析报告的配图编辑。你的唯一职责是在给定的 Markdown 正文中，"
-    "于被引用到的 Scene 段落附近插入对应的截图，让长文图文并茂。"
-    "严禁改写任何文字、删除任何段落、重排任何结构。"
-    "若一个段落同时提及多个 Scene，只挑其中一张最有代表性的插入，不要堆图。"
-    "若同一张图在最近几段刚出现过，就跳过以免重复。"
-    "如果某段落未提及任何 Scene，不要在其后插图。"
-    "最终输出必须是完整的 Markdown 全文，不要用代码块围栏包裹。"
-)
-
-
 def _iter_analysis_rows(data: Dict) -> List[Dict[str, Any]]:
     try:
         return _analysis_rows(data)
@@ -251,59 +248,8 @@ def _build_scene_image_catalog(data: Dict, report_dir: Path) -> List[Dict[str, A
     return catalog
 
 
-def _format_scene_catalog_block(catalog: Sequence[Dict[str, Any]]) -> str:
-    lines: List[str] = []
-    for item in catalog:
-        parts = [
-            f"Scene {item['scene_number']:03d}",
-            item.get("timestamp") or "-",
-        ]
-        weighted = item.get("weighted") or 0.0
-        if weighted > 0:
-            parts.append(f"加权分 {weighted:.1f}")
-        visual = item.get("visual") or ""
-        if visual:
-            parts.append(f"画面: {visual}")
-        parts.append(f"截图: <{item['rel_path']}>")
-        lines.append("- " + " | ".join(parts))
-    return "\n".join(lines)
-
-
-def _build_illustrate_user_message(markdown_text: str, catalog: Sequence[Dict[str, Any]]) -> str:
-    catalog_block = _format_scene_catalog_block(catalog) or "- （无可用截图，不要强行插图）"
-    return "\n".join(
-        [
-            "## 任务",
-            "",
-            "下方是一份视听剖析 Markdown 报告。请仅在 `## 正文模块` 里被提及到 Scene 的段落之后，"
-            "按「场景目录」里给出的截图路径，插入一行 `![Scene NNN](<截图路径>)`。保留其余所有字符不变。",
-            "",
-            "## 插图规则",
-            "",
-            "1. 只在段落（自然段或列表项）紧跟其后的空行位置插入图片行；图片之前保留一个空行，之后也保留一个空行。",
-            "2. 同一段提及多个 Scene 时，只选最能代表段落核心论点的那张：优先看段落文字本身的侧重，其次参考「加权分」。",
-            "3. 同一张图不要在连续 3 段之内重复出现；若只能用同一张，就跳过后出现的那次。",
-            "4. `## 路由判断`、`## 视听剖析概览 / 视频结构图 / 视频内容架构总览` 等已带自有图示的模块不要再追加截图；"
-            "报告首尾的标题、生成时间、代码块、表格内部也不要插图。"
-            "**特别注意**：报告末尾的 `> **视听对齐度**：…` 总结块、紧随其后的最终评分表（含「本片在这一维的表现」或「这一维在看什么」表头）"
-            "属于汇总区，禁止在它们之间或之后插入任何截图——即便那段文字里列出了 Scene 编号也不要配图。",
-            "5. 图下方的小字说明（Scene 编号 · 画面要点）会由脚本根据「场景目录」自动补，不需要你写。"
-            "`![alt](<截图路径>)` 的 alt 用 `Scene NNN`（NNN 为 3 位数 Scene 编号）即可，不要写画面描述。",
-            "6. 截图路径必须来自下方目录，不要凭空编造；找不到对应 Scene 就跳过插图。",
-            "7. 不要重写、合并、删减任何原文，也不要改动已有 Markdown 图片链接；脚本会在之后再跑一次链接规范化。",
-            "",
-            "## 场景目录",
-            "",
-            catalog_block,
-            "",
-            "## 待配图的 Markdown 原文",
-            "",
-            markdown_text.strip(),
-        ]
-    )
-
-
 _IMAGE_LINK_RE = re.compile(r"!\[[^\]]*\]\(<?([^)>]+)>?\)")
+_SCENE_REF_RE = re.compile(r"\bScene\s*0*(\d+)\b")
 
 
 def _extract_image_paths(markdown_text: str) -> List[str]:
@@ -363,8 +309,8 @@ def _find_trailing_zone_start(lines: List[str]) -> Optional[int]:
 def _strip_trailing_orphan_images(illustrated: str, original: str) -> str:
     """Drop agent-inserted screenshots placed inside the trailing zone.
 
-    The illustrate agent occasionally treats the summary blockquote's Scene
-    list as a paragraph and inserts an image after it. That image lands
+    The illustration step must not treat the summary blockquote's Scene
+    list as a body paragraph and insert an image after it. That image lands
     between the summary and the final scoring table where it adds noise.
     Pre-existing images (already in the body) are kept untouched."""
     pre_existing = set(_extract_image_paths(original))
@@ -460,20 +406,166 @@ def _annotate_image_captions(
     return "\n".join(out)
 
 
-def _maybe_illustrate_markdown(
-    markdown_text: str,
-    data: Dict,
-    report_dir: Path,
-    coordinator: AudiovisualHandoffCoordinator,
-) -> str:
+def _illustration_skip_heading(heading: str) -> bool:
+    if heading == _value_focus.SUMMARY_SECTION_HEADING:
+        return True
+    if heading == "## 路由判断":
+        return True
+    return any(keyword in heading for keyword in ("视听剖析概览", "视频结构图", "视频内容架构总览", "结构图"))
+
+
+def _block_is_heading(block_lines: Sequence[str]) -> bool:
+    first = next((line.strip() for line in block_lines if line.strip()), "")
+    return first.startswith("#")
+
+
+def _block_is_table(block_lines: Sequence[str]) -> bool:
+    non_empty = [line.strip() for line in block_lines if line.strip()]
+    return bool(non_empty) and all(line.startswith("|") for line in non_empty)
+
+
+def _next_nonblank_line(lines: Sequence[str], start: int) -> str:
+    for line in lines[start:]:
+        stripped = line.strip()
+        if stripped:
+            return stripped
+    return ""
+
+
+def _scene_refs_in_text(text: str) -> List[int]:
+    refs: List[int] = []
+    seen = set()
+    for match in _SCENE_REF_RE.finditer(text):
+        try:
+            scene_number = int(match.group(1))
+        except (TypeError, ValueError):
+            continue
+        if scene_number <= 0 or scene_number in seen:
+            continue
+        refs.append(scene_number)
+        seen.add(scene_number)
+    return refs
+
+
+def _choose_scene_for_block(
+    scene_refs: Sequence[int],
+    by_scene: Dict[int, Dict[str, Any]],
+    recent_paths: Sequence[str],
+    pre_existing_paths: set[str],
+) -> Dict[str, Any] | None:
+    candidates = [
+        by_scene[scene_number]
+        for scene_number in scene_refs
+        if scene_number in by_scene
+    ]
+    available = [
+        item for item in candidates
+        if str(item.get("rel_path") or "") not in recent_paths
+        and str(item.get("rel_path") or "") not in pre_existing_paths
+    ]
+    if not available:
+        return None
+    first = candidates[0]
+    if first in available:
+        return first
+    return max(available, key=lambda item: float(item.get("weighted") or 0.0))
+
+
+def _render_scene_image_line(item: Dict[str, Any]) -> str:
+    scene_number = int(item.get("scene_number") or 0)
+    return f"![Scene {scene_number:03d}](<{item['rel_path']}>)"
+
+
+def _illustrate_scene_screenshots(markdown_text: str, data: Dict, report_dir: Path) -> str:
     catalog = _build_scene_image_catalog(data, report_dir)
     if not catalog:
         return markdown_text
-    user_message = _build_illustrate_user_message(markdown_text, catalog)
-    illustrated = coordinator.request_illustrate(_ILLUSTRATE_SYSTEM_PROMPT, user_message)
+    by_scene = {
+        int(item["scene_number"]): item
+        for item in catalog
+        if int(item.get("scene_number") or 0) > 0 and str(item.get("rel_path") or "").strip()
+    }
+    if not by_scene:
+        return markdown_text
+
+    pre_existing = set(_extract_image_paths(markdown_text))
+    lines = markdown_text.split("\n")
+    trailing_start = _find_trailing_zone_start(lines)
+    out: List[str] = []
+    current_heading = ""
+    recent_paths: List[str] = []
+    in_code_fence = False
+    index = 0
+
+    while index < len(lines):
+        if not in_code_fence and not lines[index].strip():
+            out.append(lines[index])
+            index += 1
+            continue
+
+        if not in_code_fence and lines[index].strip().startswith("#"):
+            heading = lines[index].strip()
+            if heading.startswith("## ") and not heading.startswith("### "):
+                current_heading = heading
+            out.append(lines[index])
+            index += 1
+            continue
+
+        block_start = index
+        block_lines: List[str] = []
+        block_has_code = in_code_fence
+        while index < len(lines):
+            stripped = lines[index].strip()
+            if not in_code_fence and not stripped:
+                break
+            block_lines.append(lines[index])
+            if stripped.startswith("```"):
+                in_code_fence = not in_code_fence
+                block_has_code = True
+            index += 1
+
+        first = next((line.strip() for line in block_lines if line.strip()), "")
+        if first.startswith("## ") and not first.startswith("### "):
+            current_heading = first
+
+        out.extend(block_lines)
+        block_text = "\n".join(block_lines)
+        if (
+            block_start >= (trailing_start if trailing_start is not None else len(lines) + 1)
+            or block_has_code
+            or _block_is_heading(block_lines)
+            or _block_is_table(block_lines)
+            or _illustration_skip_heading(current_heading)
+            or _IMAGE_LINK_RE.search(block_text)
+            or _IMAGE_LINK_RE.search(_next_nonblank_line(lines, index))
+        ):
+            continue
+
+        scene_refs = _scene_refs_in_text(block_text)
+        item = _choose_scene_for_block(scene_refs, by_scene, recent_paths, pre_existing)
+        if item is None:
+            continue
+
+        path = str(item.get("rel_path") or "").strip()
+        if not path:
+            continue
+        out.extend(["", _render_scene_image_line(item)])
+        pre_existing.add(path)
+        recent_paths.append(path)
+        recent_paths = recent_paths[-3:]
+
+    illustrated = "\n".join(out)
     illustrated = _strip_trailing_orphan_images(illustrated, markdown_text)
     _validate_illustrated_markdown(illustrated, markdown_text, catalog)
     return _annotate_image_captions(illustrated, markdown_text, catalog)
+
+
+def _try_illustrate_scene_screenshots(markdown_text: str, data: Dict, report_dir: Path) -> str:
+    try:
+        return _illustrate_scene_screenshots(markdown_text, data, report_dir)
+    except Exception as exc:
+        print(f"⚠️ 视听剖析场景插图跳过：{exc}", file=sys.stderr)
+        return markdown_text
 
 
 def generate_audiovisual_report_outputs(
@@ -499,7 +591,11 @@ def generate_audiovisual_report_outputs(
     _require_new_route_contract(enriched)
     enriched["_classification_result_cache_status"] = cache_status
 
-    coordinator = AudiovisualHandoffCoordinator(video_dir, video_id)
+    coordinator = (
+        AudiovisualHandoffCoordinator(video_dir, video_id)
+        if _env_truthy("AUDIOVISUAL_REPORT_HANDOFF")
+        else None
+    )
 
     generated: Dict[str, Path] = {}
     normalized = [item.strip().lower() for item in formats if item and item.strip()]
@@ -509,12 +605,7 @@ def generate_audiovisual_report_outputs(
         runtime_config=runtime_config,
         coordinator=coordinator,
     )
-    markdown_text = _maybe_illustrate_markdown(
-        markdown_text,
-        enriched,
-        video_dir,
-        coordinator,
-    )
+    markdown_text = _try_illustrate_scene_screenshots(markdown_text, enriched, video_dir)
     markdown_text = _normalize_markdown_image_links(markdown_text, video_dir)
 
     if "md" in normalized:

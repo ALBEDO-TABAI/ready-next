@@ -68,6 +68,12 @@ export class RunProjection {
     const truthHasBlockedReason = hasDefinedOwn(truthPatch, 'blockedReason')
     const payloadHasProgress = hasDefinedOwn(payload, 'progress')
     const truthHasProgress = hasDefinedOwn(truthPatch, 'progress')
+    const payloadHasInteractionState = hasDefinedOwn(payload, 'interactionState')
+    const truthHasInteractionState = hasDefinedOwn(truthPatch, 'interactionState')
+    const payloadHasWaitingFor = hasDefinedOwn(payload, 'waitingFor')
+    const truthHasWaitingFor = hasDefinedOwn(truthPatch, 'waitingFor')
+    const payloadHasResumableActions = hasDefinedOwn(payload, 'resumableActions')
+    const truthHasResumableActions = hasDefinedOwn(truthPatch, 'resumableActions')
     const recentArtifacts = (payload.recentArtifacts || payload.artifactRefs || previous?.recentArtifacts || []).slice(-4)
     const activePhase =
       payload.phase === 'queued'
@@ -93,17 +99,25 @@ export class RunProjection {
       taskTitle: payload.taskTitle ?? truthPatch.taskTitle ?? previous?.taskTitle ?? null,
       taskSummary: payload.taskSummary ?? truthPatch.taskSummary ?? previous?.taskSummary ?? payload.latestText ?? null,
       taskType: payload.taskType ?? previous?.taskType,
-      interactionState: payload.interactionState ?? previous?.interactionState,
+      interactionState: payload.interactionState
+        ?? truthPatch.interactionState
+        ?? (payload.phase === 'done' ? undefined : previous?.interactionState),
       steps: payload.steps ?? truthPatch.steps ?? previous?.steps ?? [],
       currentStepId: payload.currentStepId ?? truthPatch.currentStepId ?? previous?.currentStepId ?? null,
-      waitingFor: payload.waitingFor ?? truthPatch.waitingFor ?? previous?.waitingFor ?? 'none',
-      resumableActions: payload.resumableActions ?? truthPatch.resumableActions ?? previous?.resumableActions ?? [],
+      waitingFor: payload.waitingFor
+        ?? truthPatch.waitingFor
+        ?? (payload.phase === 'done' ? 'none' : previous?.waitingFor ?? 'none'),
+      resumableActions: payload.resumableActions
+        ?? truthPatch.resumableActions
+        ?? (payload.phase === 'done' ? [] : previous?.resumableActions ?? []),
       recentArtifacts,
       taskContinuation: payloadHasTaskContinuation
         ? payload.taskContinuation ?? null
         : truthHasTaskContinuation
           ? truthPatch.taskContinuation ?? null
-          : previous?.taskContinuation ?? null,
+          : payload.phase === 'done'
+            ? null
+            : previous?.taskContinuation ?? null,
       progress: payloadHasProgress
         ? payload.progress ?? null
         : truthHasProgress
@@ -147,10 +161,31 @@ export class RunProjection {
         ? payload.blockedReason ?? null
         : truthHasBlockedReason
           ? truthPatch.blockedReason ?? null
-          : previous?.blockedReason ?? null,
+          : payload.phase === 'done'
+            ? null
+            : previous?.blockedReason ?? null,
       error: payload.error ?? previous?.error ?? null,
-      terminalReason: payload.terminalReason ?? (activePhase ? null : previous?.terminalReason ?? null),
+      terminalReason: payload.terminalReason ?? (activePhase || payload.phase === 'done' ? null : previous?.terminalReason ?? null),
       updatedAt: payload.timestamp,
+    }
+    if (
+      payload.phase === 'done'
+      && (
+        payloadHasInteractionState
+        || truthHasInteractionState
+        || payloadHasWaitingFor
+        || truthHasWaitingFor
+        || payloadHasResumableActions
+        || truthHasResumableActions
+        || payloadHasTaskContinuation
+        || truthHasTaskContinuation
+        || payloadHasBlockedReason
+        || truthHasBlockedReason
+      )
+    ) {
+      summary.interactionState = payload.interactionState ?? truthPatch.interactionState ?? summary.interactionState
+      summary.waitingFor = payload.waitingFor ?? truthPatch.waitingFor ?? summary.waitingFor
+      summary.resumableActions = payload.resumableActions ?? truthPatch.resumableActions ?? summary.resumableActions
     }
     if (previous?.taskTitle === '正在理解需求' && summary.taskTitle && summary.taskTitle !== previous.taskTitle) {
       logAgentMetric('task_title_correction_rate', {

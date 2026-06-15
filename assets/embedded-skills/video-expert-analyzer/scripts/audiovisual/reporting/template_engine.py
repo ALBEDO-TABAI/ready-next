@@ -135,6 +135,10 @@ _FIGURE_MARKER_RATIONALES = {
     "brand_tail": "对应品牌收尾节点的镜头，用来说明品牌如何在尾段锁定。",
     "source_quality": "对应素材质感最能说明问题的镜头，用来支撑这一节的质量判断。",
 }
+_SHORT_VIDEO_MAX_DURATION_SECONDS = 60.0
+_SHORT_VIDEO_MIN_CHARS_PER_SECTION = 240
+_SHORT_VIDEO_MIN_CHARS_PER_SUBSECTION = 80
+_SHORT_VIDEO_MIN_SCENE_EVIDENCE_PER_SECTION = 2
 
 
 def load_route_template(framework: str, templates_dir: Path | None = None) -> str:
@@ -420,6 +424,69 @@ def build_template_context(data: Dict, route: Dict[str, Any]) -> Dict[str, str]:
         raise KeyError(f"Unsupported template route: {route.get('framework')}")
     builder(context, data, ordered)
     return context
+
+
+def _coerce_positive_seconds(value: Any) -> float:
+    try:
+        seconds = float(value)
+    except (TypeError, ValueError):
+        return 0.0
+    return seconds if seconds > 0 else 0.0
+
+
+def _video_duration_seconds(data: Dict[str, Any]) -> float:
+    direct_keys = (
+        "duration_seconds",
+        "video_duration_seconds",
+        "total_duration_seconds",
+        "duration",
+    )
+    candidates = [_coerce_positive_seconds(data.get(key)) for key in direct_keys]
+
+    for container_key in ("metadata", "video_metadata", "source_metadata", "download_metadata"):
+        container = data.get(container_key)
+        if not isinstance(container, dict):
+            continue
+        candidates.extend(_coerce_positive_seconds(container.get(key)) for key in direct_keys)
+
+    scene_durations: List[float] = []
+    scene_ends: List[float] = []
+    for scene in data.get("scenes", []) or []:
+        if not isinstance(scene, dict):
+            continue
+        scene_durations.append(_coerce_positive_seconds(scene.get("duration_seconds")))
+        scene_ends.append(_coerce_positive_seconds(scene.get("end_time_seconds")))
+    if scene_durations:
+        candidates.append(sum(scene_durations))
+    if scene_ends:
+        candidates.append(max(scene_ends))
+
+    return max(candidates) if candidates else 0.0
+
+
+def _apply_duration_sensitive_validation_rules(
+    data: Dict[str, Any],
+    validation_rules: Dict[str, Any],
+) -> Dict[str, Any]:
+    duration_seconds = _video_duration_seconds(data)
+    if duration_seconds <= 0 or duration_seconds > _SHORT_VIDEO_MAX_DURATION_SECONDS:
+        return validation_rules
+
+    adjusted = dict(validation_rules)
+    adjusted["min_chars_per_section"] = min(
+        int(adjusted.get("min_chars_per_section") or 0),
+        _SHORT_VIDEO_MIN_CHARS_PER_SECTION,
+    )
+    adjusted["min_subsection_chars"] = min(
+        int(adjusted.get("min_subsection_chars") or 0),
+        _SHORT_VIDEO_MIN_CHARS_PER_SUBSECTION,
+    )
+    adjusted["min_scene_evidence_per_section"] = min(
+        int(adjusted.get("min_scene_evidence_per_section") or 0),
+        _SHORT_VIDEO_MIN_SCENE_EVIDENCE_PER_SECTION,
+    )
+    adjusted["short_video_duration_seconds"] = round(duration_seconds, 3)
+    return adjusted
 
 
 def _build_mix_music_context(context: Dict[str, str], data: Dict, ordered: Sequence[Dict]) -> None:
@@ -1297,6 +1364,7 @@ def build_audiovisual_body_prompt(
         required_sections = [_value_focus.SUMMARY_SECTION_HEADING] + [f"## {heading}" for heading in required_headings]
         validation_rules = _raw_prompt_adapter.extract_prompt_fidelity_rules(prompt_text)
         validation_rules.update(_value_focus.summary_validation_rules())
+        validation_rules = _apply_duration_sensitive_validation_rules(data, validation_rules)
         user_message = _raw_prompt_adapter.build_raw_prompt_user_message(
             data,
             route,
@@ -1342,6 +1410,7 @@ def synthesize_audiovisual_report(
     request_fn: Callable[[str, str], str] | None = None,
 ) -> str:
     spec = build_audiovisual_body_prompt(data, route)
+    allow_auto_repair = request_fn is None
     if request_fn is None:
         def _default_request(system_prompt: str, user_message: str) -> str:
             return _request_agent_report(
@@ -1352,16 +1421,68 @@ def synthesize_audiovisual_report(
             )
         request_fn = _default_request
     agent_text = request_fn(spec["system_prompt"], spec["user_message"])
-    return _assemble_final_report(
-        agent_text,
-        spec["context"],
-        spec["python_direct"],
-        data,
-        route,
-        report_dir=report_dir,
-        required_sections=spec["required_sections"],
-        source=spec["source"],
-        validation_rules=spec.get("validation_rules") or {},
+    try:
+        return _assemble_final_report(
+            agent_text,
+            spec["context"],
+            spec["python_direct"],
+            data,
+            route,
+            report_dir=report_dir,
+            required_sections=spec["required_sections"],
+            source=spec["source"],
+            validation_rules=spec.get("validation_rules") or {},
+        )
+    except ValueError as exc:
+        if not allow_auto_repair or _auto_repair_attempts() <= 0:
+            raise
+        repaired_text = request_fn(
+            spec["system_prompt"],
+            _build_body_repair_message(spec["user_message"], agent_text, str(exc)),
+        )
+        return _assemble_final_report(
+            repaired_text,
+            spec["context"],
+            spec["python_direct"],
+            data,
+            route,
+            report_dir=report_dir,
+            required_sections=spec["required_sections"],
+            source=spec["source"],
+            validation_rules=spec.get("validation_rules") or {},
+        )
+
+
+def _auto_repair_attempts() -> int:
+    try:
+        return max(0, int(os.environ.get("AUDIOVISUAL_REPORT_REPAIR_ATTEMPTS", "1")))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _audiovisual_report_timeout_seconds() -> float:
+    try:
+        return max(30.0, float(os.environ.get("AUDIOVISUAL_REPORT_TIMEOUT_SECONDS", "360")))
+    except (TypeError, ValueError):
+        return 360.0
+
+
+def _audiovisual_report_retries() -> int:
+    try:
+        return max(0, int(os.environ.get("AUDIOVISUAL_REPORT_RETRIES", "1")))
+    except (TypeError, ValueError):
+        return 1
+
+
+def _build_body_repair_message(original_user_message: str, draft_body: str, error_message: str) -> str:
+    return "\n\n".join(
+        [
+            original_user_message,
+            "## 机器校验未通过，需要修正上一版正文",
+            f"校验错误：{error_message}",
+            "请严格按上面的输出骨架和交付规则修正。只输出完整正文 Markdown，不要解释，不要加顶层 `#` 标题，不要用代码块包裹整份正文。",
+            "上一版正文如下：\n\n" + draft_body.strip(),
+        ]
     )
 
 
@@ -1380,14 +1501,16 @@ def _request_agent_report(
             system_prompt,
             user_message,
             runtime_config,
-            max_output_tokens=int(os.environ.get("AUDIOVISUAL_REPORT_MAX_TOKENS", "4000")),
+            max_output_tokens=int(os.environ.get("AUDIOVISUAL_REPORT_MAX_TOKENS", "16000")),
             temperature=0,
+            request_timeout_seconds=_audiovisual_report_timeout_seconds(),
+            max_retries=_audiovisual_report_retries(),
         )
 
     model = os.environ.get("AUDIOVISUAL_REPORT_MODEL", "claude-sonnet-4-5")
     message = client.messages.create(
         model=model,
-        max_tokens=int(os.environ.get("AUDIOVISUAL_REPORT_MAX_TOKENS", "4000")),
+        max_tokens=int(os.environ.get("AUDIOVISUAL_REPORT_MAX_TOKENS", "16000")),
         system=system_prompt,
         messages=[{"role": "user", "content": user_message}],
     )
@@ -1419,6 +1542,7 @@ def _assemble_final_report(
     validation_rules: Dict[str, Any] | None = None,
 ) -> str:
     body = agent_text.strip()
+    body = _compact_summary_section_if_needed(body, validation_rules or {})
     try:
         body = _validate_required_sections(body, required_sections or (), source=source, validation_rules=validation_rules or {})
     except ValueError as exc:
@@ -1467,6 +1591,137 @@ def _extract_summary_section(body: str) -> tuple[str, str]:
     summary_block = "\n".join(lines[start:end]).strip()
     remainder = "\n".join(lines[:start] + lines[end:]).strip()
     return remainder, summary_block
+
+
+def _compact_summary_section_if_needed(text: str, validation_rules: Dict[str, Any]) -> str:
+    summary_section = str(validation_rules.get("summary_section") or "")
+    max_chars = int(validation_rules.get("summary_max_chars") or 0)
+    if not summary_section or max_chars <= 0:
+        return text
+
+    lines = text.split("\n")
+    start: int | None = None
+    end = len(lines)
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if start is None:
+            if stripped == summary_section:
+                start = index
+            continue
+        if stripped.startswith("## ") and not stripped.startswith("### "):
+            end = index
+            break
+    if start is None:
+        return text
+
+    summary_body = "\n".join(lines[start + 1:end]).strip()
+    clean_body = _scrub_summary_jargon(
+        summary_body,
+        validation_rules.get("summary_jargon_blacklist") or [],
+    )
+    if (
+        clean_body == summary_body
+        and "###" not in summary_body
+        and len(_strip_formatting_for_count(summary_body)) <= max_chars
+    ):
+        return text
+
+    compact_body = _compact_summary_body(
+        clean_body,
+        max_chars=max_chars,
+        min_refs=int(validation_rules.get("summary_min_scene_evidence") or 0),
+    )
+    if not compact_body:
+        return text
+    replacement = [summary_section, "", *compact_body.split("\n")]
+    return "\n".join([*lines[:start], *replacement, *lines[end:]])
+
+
+def _scrub_summary_jargon(text: str, jargon_terms: Sequence[str]) -> str:
+    scrubbed = text
+    for term in jargon_terms:
+        if term:
+            scrubbed = scrubbed.replace(str(term), "")
+    return scrubbed
+
+
+def _compact_summary_body(body: str, *, max_chars: int, min_refs: int) -> str:
+    raw_lines = [line.strip() for line in body.splitlines()]
+    lines = [line for line in raw_lines if line and not line.startswith("###")]
+    if not lines:
+        return ""
+
+    bullet_lines = [
+        _normalize_summary_bullet(line)
+        for line in lines
+        if _is_summary_bullet(line) and _SCENE_EVIDENCE_RE.search(line)
+    ]
+    if not bullet_lines:
+        bullet_lines = [
+            _normalize_summary_bullet(line)
+            for line in lines
+            if _SCENE_EVIDENCE_RE.search(line)
+        ]
+
+    intro_source = " ".join(line for line in lines if not _is_summary_bullet(line))
+    intro = _first_summary_sentences(intro_source, sentence_limit=2, max_raw_chars=150)
+
+    selected_bullets: List[str] = []
+    for line in bullet_lines:
+        if line not in selected_bullets:
+            selected_bullets.append(_truncate_summary_line(line, max_raw_chars=120))
+        if len(selected_bullets) >= 4:
+            break
+
+    parts = [part for part in [intro, *selected_bullets] if part]
+    compact = "\n".join(parts).strip()
+    if len(_strip_formatting_for_count(compact)) <= max_chars:
+        return compact
+
+    keep_bullets = max(min_refs, 2) if min_refs else 2
+    parts = [part for part in [_first_summary_sentences(intro_source, sentence_limit=1, max_raw_chars=110), *selected_bullets[:keep_bullets]] if part]
+    compact = "\n".join(parts).strip()
+    min_parts = 1 + max(0, min_refs)
+    while len(_strip_formatting_for_count(compact)) > max_chars and len(parts) > min_parts:
+        parts.pop()
+        compact = "\n".join(parts).strip()
+    if len(_strip_formatting_for_count(compact)) > max_chars:
+        parts = [_truncate_summary_line(part, max_raw_chars=90) for part in parts]
+    return "\n".join(part for part in parts if part).strip()
+
+
+def _is_summary_bullet(line: str) -> bool:
+    return bool(re.match(r"^\s*[-*+]\s+", line))
+
+
+def _normalize_summary_bullet(line: str) -> str:
+    cleaned = re.sub(r"^\s*[-*+]\s*", "", line).strip()
+    return "- " + cleaned
+
+
+def _first_summary_sentences(text: str, *, sentence_limit: int, max_raw_chars: int) -> str:
+    normalized = re.sub(r"\s+", " ", text).strip()
+    if not normalized:
+        return ""
+    sentences = re.findall(r".+?[。！？!?](?=\s|$)|.+$", normalized)
+    selected = "".join(sentence.strip() for sentence in sentences[:sentence_limit]).strip()
+    if len(selected) <= max_raw_chars:
+        return selected
+    return selected[:max_raw_chars].rstrip("，。；：、 ") + "。"
+
+
+def _truncate_summary_line(line: str, *, max_raw_chars: int) -> str:
+    normalized = re.sub(r"\s+", " ", line).strip()
+    if len(normalized) <= max_raw_chars:
+        return normalized
+    match = _SCENE_EVIDENCE_RE.search(normalized)
+    evidence = match.group(0) if match else ""
+    if evidence:
+        prefix = normalized[: match.start()].rstrip("，。；：、 ()（）")
+        suffix = f"（{evidence}）"
+        keep = max(20, max_raw_chars - len(suffix))
+        return prefix[:keep].rstrip("，。；：、 ") + suffix
+    return normalized[:max_raw_chars].rstrip("，。；：、 ") + "。"
 
 
 def _inject_figure_blocks(body: str, data: Dict, route: Dict[str, Any], report_dir: Path | None) -> str:

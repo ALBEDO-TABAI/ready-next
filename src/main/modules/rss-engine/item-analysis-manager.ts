@@ -116,6 +116,73 @@ function stripKnownVideoSuffix(filePath: string): string {
   return ext ? name.slice(0, -ext.length) : name
 }
 
+interface VisualRunStateSnapshot {
+  path: string
+  status: string
+  stage: string
+  totalScenes: number | null
+  completedScenes: number | null
+  coverageRatio: number | null
+  lastError: string | null
+}
+
+function stringField(record: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return ''
+}
+
+function numberField(record: Record<string, unknown>, keys: string[]): number | null {
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'number' && Number.isFinite(value)) return value
+  }
+  return null
+}
+
+function clampProgress(value: number): number {
+  return Math.max(0, Math.min(98, Math.round(value)))
+}
+
+function deriveVisualRunProgress(snapshot: VisualRunStateSnapshot): number {
+  const status = snapshot.status.toLowerCase()
+  const stage = snapshot.stage.toLowerCase()
+  const ratio = Math.max(
+    0,
+    Math.min(
+      1,
+      snapshot.coverageRatio
+        ?? (snapshot.totalScenes && snapshot.totalScenes > 0 && snapshot.completedScenes !== null
+          ? snapshot.completedScenes / snapshot.totalScenes
+          : 0),
+    ),
+  )
+  if (status === 'completed' || stage === 'completed') return 98
+  if (stage === 'finalize') return status === 'blocked' || status === 'failed' ? 92 : 90 + ratio * 6
+  if (stage === 'merge_validate') return 86 + ratio * 4
+  if (stage === 'score_batches') return 40 + ratio * 45
+  if (stage === 'prepare') return 22 + ratio * 18
+  return 22
+}
+
+function visualRunProgressMessage(snapshot: VisualRunStateSnapshot): string {
+  const status = snapshot.status.toLowerCase()
+  const stage = snapshot.stage.toLowerCase()
+  if (status === 'blocked') return '视觉分析已到最后收尾，但视听剖析正文生成被阻塞'
+  if (status === 'failed') return '视觉分析子流程失败'
+  if (stage === 'finalize') return '正在生成视听剖析正文'
+  if (stage === 'merge_validate') return '正在校验视觉分析结果'
+  if (stage === 'score_batches') {
+    const total = snapshot.totalScenes ?? 0
+    const completed = snapshot.completedScenes ?? 0
+    return total > 0 ? `正在评分视觉场景 ${completed}/${total}` : '正在评分视觉场景'
+  }
+  if (stage === 'prepare') return '正在准备视频素材与场景'
+  return '正在执行视觉脚本分析'
+}
+
 function extractVideoIdHint(source: string): string | null {
   const text = String(source || '').trim()
   const bilibili = text.match(/(?:^|[/?&_=.-])(BV[\w]+)/i)
@@ -229,6 +296,54 @@ async function findFileByName(dirPath: string, fileName: string, depth = 0): Pro
     if (entry.isDirectory()) {
       const hit = await findFileByName(absolute, fileName, depth + 1)
       if (hit) return hit
+    }
+  }
+  return null
+}
+
+async function findFilesByName(dirPath: string, fileName: string, depth = 0): Promise<string[]> {
+  if (depth > 6) return []
+  const entries = await readdir(dirPath, { withFileTypes: true }).catch(() => [])
+  const hits: string[] = []
+  for (const entry of entries) {
+    const absolute = join(dirPath, entry.name)
+    if (entry.isFile() && entry.name === fileName) {
+      hits.push(absolute)
+      continue
+    }
+    if (entry.isDirectory()) {
+      hits.push(...await findFilesByName(absolute, fileName, depth + 1))
+    }
+  }
+  return hits
+}
+
+async function readLatestVisualRunState(outputDir: string): Promise<VisualRunStateSnapshot | null> {
+  const paths = await findFilesByName(outputDir, 'run_state.json')
+  const candidates: Array<{ path: string; mtime: number }> = []
+  for (const path of paths) {
+    const fileStat = await stat(path).catch(() => null)
+    candidates.push({ path, mtime: fileStat?.mtimeMs || 0 })
+  }
+  candidates.sort((left, right) => right.mtime - left.mtime)
+  for (const candidate of candidates) {
+    const raw = await readFile(candidate.path, 'utf-8').catch(() => '')
+    if (!raw) continue
+    try {
+      const parsed = JSON.parse(raw) as unknown
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) continue
+      const record = parsed as Record<string, unknown>
+      return {
+        path: candidate.path,
+        status: stringField(record, ['status', 'state', 'phase']),
+        stage: stringField(record, ['current_stage', 'currentStage', 'stage', 'current_step', 'currentStep']),
+        totalScenes: numberField(record, ['total_scenes', 'totalScenes', 'total']),
+        completedScenes: numberField(record, ['completed_scenes', 'completedScenes', 'completed']),
+        coverageRatio: numberField(record, ['coverage_ratio', 'coverageRatio', 'coverage']),
+        lastError: stringField(record, ['last_error', 'lastError', 'error']) || null,
+      }
+    } catch {
+      continue
     }
   }
   return null
@@ -533,12 +648,30 @@ export class RSSItemAnalysisManager {
       })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
-      this.updateJob(jobId, {
+      const veaCause = error && typeof error === 'object' && 'veaCause' in error
+        ? String((error as { veaCause?: unknown }).veaCause || '')
+        : ''
+      if (payload.action === 'visual') {
+        await this.refreshVisualJobProgressFromRunState(jobId, outputDir)
+      }
+      const latest = this.repository.getRSSAnalysisJob(jobId)
+      const visualBlocked = payload.action === 'visual' && veaCause === 'blocked'
+      const failurePatch: Partial<{
+        status: RSSAnalysisJobStatus
+        progress: number
+        message: string | null
+        error: string | null
+        finishedAt: string | null
+      }> = {
         status: 'failed',
-        message: '分析失败',
-        error: message,
+        message: visualBlocked ? '视觉分析卡在最后收尾，可重试视听剖析正文' : '分析失败',
+        error: payload.action === 'visual' && latest?.error ? latest.error : message,
         finishedAt: new Date().toISOString(),
-      })
+      }
+      if (latest) {
+        failurePatch.progress = Math.max(Number(latest.progress) || 0, visualBlocked ? 92 : 0)
+      }
+      this.updateJob(jobId, failurePatch)
       console.error('[rss:analysis] job failed', jobId, message)
     } finally {
       this.repository.cleanupRSSAnalysisJobs(30, 500)
@@ -718,6 +851,52 @@ export class RSSItemAnalysisManager {
     }
   }
 
+  private async awaitVeaChildRunWithProgress(args: {
+    jobId: string
+    outputDir: string
+    skillId: 'video-expert-analyzer'
+    action: 'video_expert_pipeline' | 'video_expert_ai_analyze'
+    params: Record<string, unknown>
+    timeoutMs?: number
+  }): Promise<StartSkillChildRunAndWaitResult> {
+    let stopped = false
+    const refresh = async (): Promise<void> => {
+      if (stopped) return
+      await this.refreshVisualJobProgressFromRunState(args.jobId, args.outputDir)
+    }
+    const interval = setInterval(() => {
+      void refresh().catch((error) => {
+        console.error('[rss:analysis] visual progress refresh failed', error)
+      })
+    }, 2_000)
+    try {
+      await refresh()
+      return await this.awaitVeaChildRun(args)
+    } finally {
+      stopped = true
+      clearInterval(interval)
+      await this.refreshVisualJobProgressFromRunState(args.jobId, args.outputDir)
+    }
+  }
+
+  private async refreshVisualJobProgressFromRunState(
+    jobId: string,
+    outputDir: string,
+  ): Promise<VisualRunStateSnapshot | null> {
+    const snapshot = await readLatestVisualRunState(outputDir)
+    if (!snapshot) return null
+    const job = this.repository.getRSSAnalysisJob(jobId)
+    if (!job || job.status === 'success' || job.status === 'failed') return snapshot
+    const progress = Math.max(Number(job.progress) || 0, clampProgress(deriveVisualRunProgress(snapshot)))
+    this.updateJob(jobId, {
+      status: 'running_script',
+      progress,
+      message: visualRunProgressMessage(snapshot),
+      error: snapshot.status === 'blocked' || snapshot.status === 'failed' ? snapshot.lastError : null,
+    })
+    return snapshot
+  }
+
   /**
    * Phase 7 — translate a non-success VEA close event into a manager
    * Error that preserves distinct failed / killed / blocked / paused
@@ -777,7 +956,9 @@ export class RSSItemAnalysisManager {
 
     // Phase 7 — VEA long actions run as child runs. RSS visual flow keeps
     // its await-style behavior; internally the long work is now child-owned.
-    const pipelineResult = await this.awaitVeaChildRun({
+    const pipelineResult = await this.awaitVeaChildRunWithProgress({
+      jobId,
+      outputDir,
       skillId: 'video-expert-analyzer',
       action: 'video_expert_pipeline',
       params: {
@@ -795,14 +976,17 @@ export class RSSItemAnalysisManager {
       throw new Error('未找到 scene_scores.json，无法继续视觉评分')
     }
     const sourceVideoPath = reusableVideoPath || await findReusableVideoFile(outputDir, payload.link)
+    const afterPipelineJob = this.repository.getRSSAnalysisJob(jobId)
 
     this.updateJob(jobId, {
       status: 'running_script',
-      progress: 64,
+      progress: Math.max(64, Number(afterPipelineJob?.progress) || 0),
       message: '正在执行 AI 视觉评分',
     })
 
-    const aiResult = await this.awaitVeaChildRun({
+    const aiResult = await this.awaitVeaChildRunWithProgress({
+      jobId,
+      outputDir,
       skillId: 'video-expert-analyzer',
       action: 'video_expert_ai_analyze',
       params: {
@@ -819,10 +1003,11 @@ export class RSSItemAnalysisManager {
     if (!aiResult.success) {
       throw this.translateVeaCloseToError(aiResult, '视觉 AI 评分失败')
     }
+    const afterAiJob = this.repository.getRSSAnalysisJob(jobId)
 
     this.updateJob(jobId, {
       status: 'running_subagent',
-      progress: 92,
+      progress: Math.max(92, Number(afterAiJob?.progress) || 0),
       message: 'subagent 正在汇总视觉结论',
     })
 

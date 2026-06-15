@@ -107,6 +107,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     messages,
     currentTaskRun,
     backgroundTaskRuns,
+    liveTaskRuns,
     currentScopeId,
     scopeRunStates,
     taskDisclosureState,
@@ -276,6 +277,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
       messages={messages}
       currentTaskRun={currentTaskRun}
       backgroundTaskRuns={backgroundTaskRuns}
+      liveTaskRuns={liveTaskRuns}
       currentScopeId={currentScopeId}
       taskDisclosureState={taskDisclosureState}
       isStreaming={isStreaming}

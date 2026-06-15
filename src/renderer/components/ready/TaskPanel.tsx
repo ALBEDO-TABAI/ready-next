@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, Send } from 'lucide-react'
 import {
   useAgent,
@@ -7,7 +7,12 @@ import {
   type ToolTraceEvent
 } from '../../stores/useAgent'
 import type { RecoveryRecordData, TaskProjectionRecordData } from '../../types/electron'
-import { deriveTaskCardRuntimeState } from '../../modules/agent/taskCardViewModel'
+import {
+  deriveTaskCardRuntimeState,
+  formatTaskProgressLabel,
+  formatTaskStepDisplayTitle,
+  formatTaskUserFacingText,
+} from '../../modules/agent/taskCardViewModel'
 import {
   interactionStateToUserLabel,
   phaseToUserLabel,
@@ -15,6 +20,7 @@ import {
   taskStepStatusToUserLabel,
 } from '../../modules/agent/task-status-vocabulary'
 import { isForegroundBusyScopeRunState } from '../../modules/agent/scopeRunState'
+import { createDebouncedFetch } from '../../modules/agent/debouncedFetch'
 import AgentSelector from './AgentSelector'
 import AgentTagRow from './AgentTagRow'
 
@@ -149,29 +155,6 @@ async function revealArtifact(artifact: AgentArtifact): Promise<void> {
   await window.electronAPI.document.showInFolder(path).catch(() => undefined)
 }
 
-function taskTypeLabel(taskType: TaskProjectionRecordData['taskType'] | undefined): string {
-  switch (taskType) {
-    case 'direct_answer':
-      return '直答'
-    case 'short_task':
-      return '短任务'
-    case 'multi_step_task':
-      return '多步任务'
-    case 'media_task':
-      return '媒体任务'
-    case 'continuation':
-      return '继续任务'
-    default:
-      return '任务'
-  }
-}
-
-function interactionStateLabel(
-  interactionState: TaskProjectionRecordData['interactionState'] | undefined,
-): string {
-  return interactionStateToUserLabel(interactionState)
-}
-
 function projectionStatusLabel(status: TaskProjectionRecordData['status'] | undefined): string {
   // `taskPanel` surface always returns a non-null label; fall back to phase
   // helper rather than inlining a canonical label string.
@@ -194,6 +177,29 @@ function projectionStatusTone(
     default:
       return { bg: 'var(--color-blue-light)', color: 'var(--color-blue)' }
   }
+}
+
+function userFacingTaskSummary(summary: string | null | undefined): string | null {
+  const raw = String(summary || '').trim()
+  if (!raw) return null
+  return formatTaskUserFacingText(raw)
+}
+
+function userFacingTaskTitle(title: string | null | undefined): string | null {
+  const raw = String(title || '').trim()
+  if (!raw) return null
+  if (/^(后台)?技能(任务|执行)\s*[·:：-]?/i.test(raw)) return '正在处理后台任务'
+  return formatTaskUserFacingText(raw)
+}
+
+function selectCurrentProjectionStep(
+  steps: TaskProjectionRecordData['steps'],
+  currentStepId?: string | null,
+): TaskProjectionRecordData['steps'][number] | null {
+  return steps.find((step) => step.id === currentStepId)
+    || steps.find((step) => step.status === 'running' || step.status === 'blocked')
+    || steps.at(-1)
+    || null
 }
 
 function recoveryKindLabel(kind: RecoveryRecordData['kind']): string {
@@ -297,6 +303,7 @@ export default function TaskPanel() {
   } = useAgent()
 
   const [taskProjections, setTaskProjections] = useState<TaskProjectionRecordData[]>([])
+  const currentScopeIdRef = useRef<string | null>(currentScopeId || null)
   const activeRun = currentScopeId ? scopeRunStates[currentScopeId] || null : null
   const composerLocked = activeRun ? isForegroundBusyScopeRunState(activeRun) : isStreaming
   const activeProjection = useMemo(() => {
@@ -319,8 +326,8 @@ export default function TaskPanel() {
     }))
   }, [activeRun])
 
-  const activeTaskTitle = activeProjection?.taskTitle || activeRun?.taskTitle || null
-  const activeTaskSummary = activeProjection?.taskSummary || activeRun?.taskSummary || null
+  const activeTaskTitle = userFacingTaskTitle(activeProjection?.taskTitle || activeRun?.taskTitle)
+  const activeTaskSummary = userFacingTaskSummary(activeProjection?.taskSummary || activeRun?.taskSummary)
   const artifactItems = useMemo(() => {
     if (activeProjection?.recentArtifacts && activeProjection.recentArtifacts.length > 0) {
       return activeProjection.recentArtifacts.slice(-6)
@@ -331,15 +338,29 @@ export default function TaskPanel() {
   const triggerHits = useMemo(() => activeRun?.triggerHits?.slice(-4) || [], [activeRun])
   const documentPipelineDiagnostics = activeRun?.executionDiagnostics?.pipeline?.document || null
   const projectionSteps = useMemo(() => activeProjection?.steps || [], [activeProjection])
+  const currentProjectionStep = useMemo(() => {
+    return selectCurrentProjectionStep(projectionSteps, activeProjection?.currentStepId)
+  }, [projectionSteps, activeProjection?.currentStepId])
+  const projectionProgressLabel = activeProjection?.progress
+    ? formatTaskProgressLabel(activeProjection.progress as ScopeRunState['progress'])
+    : null
+  const currentProjectionStepTitle = currentProjectionStep?.title || currentProjectionStep?.description
+    ? formatTaskStepDisplayTitle(
+      currentProjectionStep.title || currentProjectionStep.description,
+      activeProjection?.progress as ScopeRunState['progress'] | null | undefined,
+    )
+    : null
+  const currentProjectionStepDetail = userFacingTaskSummary(
+    currentProjectionStep?.detail || currentProjectionStep?.description,
+  )
+  const projectionNowLabel =
+    projectionProgressLabel
+    || currentProjectionStepDetail
+    || currentProjectionStepTitle
+    || (activeProjection ? interactionStateToUserLabel(activeProjection.interactionState) : null)
   const projectionRecoveryHistory = useMemo(() => {
     return (activeProjection?.recoveryHistory || []).slice(-3).reverse()
   }, [activeProjection])
-  const projectionBudgetPercent =
-    activeProjection?.budgetUsagePercent == null
-      ? null
-      : Math.max(0, Math.min(100, Math.round(activeProjection?.budgetUsagePercent)))
-  const safeProjectionBudgetPercent = projectionBudgetPercent ?? 0
-  const projectionStepBudget = activeProjection?.budget?.stepBudget || null
   const isAwaitingSupplement =
     activeProjection?.interactionState === 'awaiting_clarification'
     || activeRun?.waitingFor === 'input'
@@ -379,6 +400,25 @@ export default function TaskPanel() {
       updatedAt: activeProjection.updatedAt,
     })
   }, [activeProjection])
+
+  useEffect(() => {
+    currentScopeIdRef.current = currentScopeId || null
+  }, [currentScopeId])
+
+  const refreshTaskProjections = useCallback(async () => {
+    const scopeId = currentScopeId
+    if (!scopeId || !window.electronAPI?.agent?.listTaskProjections) {
+      setTaskProjections([])
+      return
+    }
+    const result = await window.electronAPI.agent.listTaskProjections(scopeId).catch(() => null)
+    if (currentScopeIdRef.current !== scopeId) return
+    if (!result?.success || !Array.isArray(result.data)) {
+      setTaskProjections([])
+      return
+    }
+    setTaskProjections(result.data)
+  }, [currentScopeId])
 
   const handleSend = async () => {
     if (!inputValue.trim() || composerLocked) return
@@ -453,32 +493,22 @@ export default function TaskPanel() {
   const projectionColors = projectionStatusTone(activeProjection?.status)
 
   useEffect(() => {
-    let cancelled = false
+    void refreshTaskProjections()
+  }, [refreshTaskProjections, activeRun?.updatedAt])
 
-    if (!currentScopeId || !window.electronAPI?.agent?.listTaskProjections) {
-      setTaskProjections([])
-      return () => {
-        cancelled = true
+  useEffect(() => {
+    if (!window.electronAPI?.agent?.onTaskProjectionsChanged) return
+    const debouncer = createDebouncedFetch(refreshTaskProjections, 100)
+    const off = window.electronAPI.agent.onTaskProjectionsChanged((event) => {
+      if (event.scopeId === currentScopeIdRef.current) {
+        debouncer.run()
       }
-    }
-
-    void window.electronAPI.agent.listTaskProjections(currentScopeId)
-      .then((result) => {
-        if (cancelled) return
-        if (!result?.success || !Array.isArray(result.data)) {
-          setTaskProjections([])
-          return
-        }
-        setTaskProjections(result.data)
-      })
-      .catch(() => {
-        if (!cancelled) setTaskProjections([])
-      })
-
+    })
     return () => {
-      cancelled = true
+      try { off?.() } catch { /* silent-catch: projection unsubscribe cleanup is best-effort */ }
+      debouncer.cancel()
     }
-  }, [currentScopeId, activeRun?.updatedAt])
+  }, [refreshTaskProjections])
 
   return (
     <div
@@ -584,61 +614,21 @@ export default function TaskPanel() {
                   background: 'var(--surface-card-bg)'
                 }}
               >
-                <div
-                  className="grid grid-cols-2"
-                  style={{ gap: 6, fontSize: 10.5, color: 'var(--text-light)' }}
-                >
-                  <div>任务类型</div>
-                  <div style={{ color: 'var(--text-body)', textAlign: 'right' }}>
-                    {taskTypeLabel(activeProjection.taskType)}
-                  </div>
-                  <div>当前状态</div>
-                  <div style={{ color: 'var(--text-body)', textAlign: 'right' }}>
-                    {interactionStateLabel(activeProjection?.interactionState)}
-                  </div>
+                <div className="text-[10px] font-semibold" style={{ color: 'var(--text-light)' }}>
+                  当前进展
                 </div>
-                {activeProjection?.budgetUsagePercent != null && (
-                  <div style={{ marginTop: 8 }}>
-                    <div
-                      className="flex items-center justify-between"
-                      style={{ fontSize: 10, color: 'var(--text-light)', marginBottom: 5 }}
-                    >
-                      <span>预算进度</span>
-                      <span>{projectionBudgetPercent}%</span>
-                    </div>
-                    <div
-                      style={{
-                        height: 6,
-                        borderRadius: 999,
-                        background: 'color-mix(in srgb, var(--text-light) 14%, transparent)',
-                        overflow: 'hidden'
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: `${safeProjectionBudgetPercent}%`,
-                          height: '100%',
-                          background:
-                            safeProjectionBudgetPercent >= 90
-                              ? 'var(--color-orange)'
-                              : 'var(--color-blue)'
-                        }}
-                      />
-                    </div>
-                  </div>
-                )}
-                {projectionStepBudget && (
-                  <div style={{ marginTop: 8, fontSize: 10, color: 'var(--text-light)', lineHeight: 1.5 }}>
-                    当前步骤额度
-                    {projectionStepBudget.stepId ? ` · ${projectionStepBudget.stepId}` : ''}
-                    {typeof projectionStepBudget.remainingIterations === 'number'
-                      ? ` · 剩余 ${projectionStepBudget.remainingIterations}/${projectionStepBudget.maxIterations}`
-                      : ` · 总计 ${projectionStepBudget.maxIterations}`}
-                  </div>
-                )}
-                {activeProjection?.degradationReason && (
-                  <div style={{ marginTop: 8, fontSize: 10, color: 'var(--color-orange)', lineHeight: 1.5 }}>
-                    degradationReason: {activeProjection.degradationReason}
+                <div
+                  className="mt-1 text-[11px]"
+                  style={{ color: 'var(--text-body)', lineHeight: 1.5 }}
+                >
+                  {projectionNowLabel || '正在处理任务'}
+                </div>
+                {currentProjectionStepTitle && currentProjectionStepDetail && currentProjectionStepDetail !== currentProjectionStepTitle && (
+                  <div
+                    className="mt-1 text-[10px]"
+                    style={{ color: 'var(--text-light)', lineHeight: 1.5 }}
+                  >
+                    {currentProjectionStepTitle}
                   </div>
                 )}
               </div>
@@ -984,11 +974,14 @@ export default function TaskPanel() {
                     )}
                   </div>
                   <div className="text-[11px]" style={{ color: 'var(--text-body)', lineHeight: 1.5 }}>
-                    {step.title || step.description}
+                    {formatTaskStepDisplayTitle(
+                      step.title || step.description,
+                      activeProjection.progress as ScopeRunState['progress'] | null | undefined,
+                    )}
                   </div>
                   {step.detail && (
                     <div className="mt-1 text-[10px]" style={{ color: 'var(--text-light)', lineHeight: 1.5 }}>
-                      {step.detail}
+                      {formatTaskUserFacingText(step.detail)}
                     </div>
                   )}
                 </div>
