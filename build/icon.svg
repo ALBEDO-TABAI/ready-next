@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Ready">
+  <rect x="102" y="102" width="820" height="820" rx="176" fill="#FFFFFF" />
+  <g fill="#FF4B2B">
+    <circle cx="329.8" cy="285.1" r="34" />
+    <circle cx="329.8" cy="374.7" r="34" />
+    <circle cx="329.7" cy="464.4" r="34" />
+    <circle cx="329.7" cy="559.7" r="34" />
+    <circle cx="329.8" cy="649.3" r="34" />
+    <circle cx="329.8" cy="739.1" r="34" />
+    <circle cx="420.7" cy="284.9" r="34" />
+    <circle cx="420.8" cy="374.7" r="34" />
+    <circle cx="420.8" cy="464.3" r="34" />
+    <circle cx="420.8" cy="559.7" r="34" />
+    <circle cx="420.8" cy="649.3" r="34" />
+    <circle cx="420.7" cy="739" r="34" />
+    <circle cx="512.2" cy="285" r="34" />
+    <circle cx="512.3" cy="559.7" r="34" />
+    <circle cx="603.3" cy="285" r="34" />
+    <circle cx="603.3" cy="374.8" r="34" />
+    <circle cx="603.2" cy="559.7" r="34" />
+    <circle cx="603.2" cy="649.3" r="34" />
+    <circle cx="694.2" cy="374.7" r="34" />
+    <circle cx="694.3" cy="464.5" r="34" />
+    <circle cx="694.2" cy="649.3" r="34" />
+    <circle cx="694.3" cy="739.1" r="34" />
+  </g>
+</svg>

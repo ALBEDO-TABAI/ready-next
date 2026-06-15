@@ -1,6 +1,6 @@
 import type { DragEvent, RefObject } from 'react'
 import { AlertTriangle, CheckCircle, Globe, RefreshCw } from 'lucide-react'
-import readyWordmark from '../../assets/ready-wordmark.png'
+import readyWordmark from '../../assets/ready-wordmark.svg'
 import { isReadyBrowserBlankUrl } from '../../modules/browser/url-utils'
 import type { BrowserTab } from '../../stores/useBrowserTabs'
 

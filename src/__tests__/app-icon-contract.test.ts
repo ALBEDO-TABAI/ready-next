@@ -14,6 +14,33 @@ test('electron packaging includes project-owned app icon assets instead of falli
   assert.ok(existsSync(resolve(process.cwd(), 'build/icon.icns')))
   assert.ok(existsSync(resolve(process.cwd(), 'build/icon.png')))
   assert.ok(existsSync(resolve(process.cwd(), 'build/icon.ico')))
+  assert.ok(existsSync(resolve(process.cwd(), 'build/icon.svg')))
+  assert.ok(existsSync(resolve(process.cwd(), 'src/renderer/assets/ready-wordmark.svg')))
+  const iconSvg = readWorkspaceFile('build/icon.svg')
+  assert.match(iconSvg, /#FF4B2B/)
+  assert.match(iconSvg, /#FFFFFF/)
+
+  const backgroundMatch = iconSvg.match(/<rect x="([0-9.]+)" y="([0-9.]+)" width="([0-9.]+)" height="([0-9.]+)" rx="([0-9.]+)" fill="#FFFFFF" \/>/)
+  assert.ok(backgroundMatch)
+  assert.ok(Number(backgroundMatch[1]) >= 96)
+  assert.ok(Number(backgroundMatch[2]) >= 96)
+  assert.ok(Number(backgroundMatch[3]) >= 800)
+  assert.ok(Number(backgroundMatch[4]) >= 800)
+  assert.ok(Number(backgroundMatch[1]) + Number(backgroundMatch[3]) <= 1024 - 96)
+  assert.ok(Number(backgroundMatch[2]) + Number(backgroundMatch[4]) <= 1024 - 96)
+
+  const safeInset = 1024 * 0.2
+  const dots = [...iconSvg.matchAll(/<circle cx="([0-9.]+)" cy="([0-9.]+)" r="([0-9.]+)" \/>/g)]
+    .map((match) => ({
+      cx: Number(match[1]),
+      cy: Number(match[2]),
+      r: Number(match[3]),
+    }))
+  assert.ok(dots.length > 0)
+  assert.ok(dots.every((dot) => dot.cx - dot.r >= safeInset))
+  assert.ok(dots.every((dot) => dot.cy - dot.r >= safeInset))
+  assert.ok(dots.every((dot) => dot.cx + dot.r <= 1024 - safeInset))
+  assert.ok(dots.every((dot) => dot.cy + dot.r <= 1024 - safeInset))
 })
 
 test('main process applies the project-owned icon during development instead of default electron branding', () => {
