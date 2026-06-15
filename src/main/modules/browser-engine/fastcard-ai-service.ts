@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { Buffer } from 'node:buffer'
 import {
   type AIModelConfig,
+  type AIProviderType,
   getProviderDef,
   normalizeAIConfig,
   resolveAIConfigCapabilities,
@@ -13,10 +14,21 @@ import {
   type FastCardTranslateRequest,
   type FastCardTranslateResult,
 } from '../../../shared/fastcard'
+import type { AgentSpawnContext } from '../../../shared/skill-host-contract'
 import { parseJsonOrEventStreamResponse } from '../openai-responses'
 import { AppSettingsRepository } from '../repositories/app-settings-repository'
+import { ExternalServiceStore } from '../settings-engine/external-service-store'
 
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024
+const FASTCARD_AI_PROVIDERS = new Set<AIProviderType>([
+  'moonshot',
+  'anthropic',
+  'openai',
+  'fox',
+  'gemini',
+  'volcengine',
+  'openai-compatible',
+])
 
 function readAIConfig(): AIModelConfig | null {
   try {
@@ -28,6 +40,62 @@ function readAIConfig(): AIModelConfig | null {
 
 function hasUsableConfig(config: AIModelConfig | null): config is AIModelConfig {
   return Boolean(config?.apiKey && config.baseUrl && config.model)
+}
+
+function readVisionAgentContext(): AgentSpawnContext | null {
+  try {
+    return new ExternalServiceStore().buildVisionAgentContext()
+  } catch {
+    return null
+  }
+}
+
+function normalizeFastCardProvider(provider: string): AIProviderType {
+  return FASTCARD_AI_PROVIDERS.has(provider as AIProviderType)
+    ? provider as AIProviderType
+    : 'openai-compatible'
+}
+
+export function buildFastCardVisionConfigFromAgentContext(context: AgentSpawnContext | null): AIModelConfig | null {
+  if (!context) return null
+  const inputModes = Array.isArray(context.input_modes)
+    ? context.input_modes.map((item) => String(item).toLowerCase())
+    : []
+  if (!inputModes.includes('image')) return null
+
+  const provider = normalizeFastCardProvider(String(context.provider || '').trim())
+  const model = String(context.model_id || '').trim()
+  const baseUrl = String(context.base_url || '').trim()
+  const apiKey = String(context.api_key || '').trim()
+  if (!model || !baseUrl || !apiKey) return null
+
+  const config: AIModelConfig = normalizeAIConfig({
+    provider,
+    baseUrl,
+    apiKey,
+    model,
+    agentProtocol: context.api_kind === 'anthropic-messages' ? 'anthropic' : 'openai',
+    wireApi: context.api_kind === 'openai-responses' ? 'responses' : 'chat/completions',
+    visionMode: 'on',
+    toolUseMode: 'auto',
+    nativeVideoMode: 'auto',
+  })
+
+  if (config.agentProtocol === 'anthropic') delete config.wireApi
+  return config
+}
+
+export function resolveFastCardVisionConfig(readers: {
+  readAIConfig?: () => AIModelConfig | null
+  readVisionAgentContext?: () => AgentSpawnContext | null
+} = {}): AIModelConfig | null {
+  const visionConfig = buildFastCardVisionConfigFromAgentContext(
+    (readers.readVisionAgentContext || readVisionAgentContext)(),
+  )
+  if (hasUsableConfig(visionConfig) && resolveAIConfigCapabilities(visionConfig)?.supportsVision) {
+    return visionConfig
+  }
+  return (readers.readAIConfig || readAIConfig)()
 }
 
 function extractOpenAIText(payload: unknown): string {
@@ -372,7 +440,7 @@ export async function translateFastCardSelection(request: FastCardTranslateReque
 export async function describeFastCardImage(request: FastCardDescribeImageRequest): Promise<FastCardDescribeImageResult> {
   const imageUrl = String(request.imageUrl || '').trim()
   if (!imageUrl) throw new Error('没有可描述的图片')
-  const config = readAIConfig()
+  const config = resolveFastCardVisionConfig()
   if (!hasUsableConfig(config)) throw new Error('当前没有可用的 AI 模型配置')
   const capabilities = resolveAIConfigCapabilities(config)
   if (!capabilities?.supportsVision) throw new Error('当前模型不支持图片理解')
