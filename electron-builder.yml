@@ -18,7 +18,6 @@ files:
   - "!node_modules/@remotion/**"
   - "!node_modules/@schedule-x/**"
   - "!node_modules/@tiptap/**"
-  - "!node_modules/@tldraw/**"
   - "!node_modules/@univerjs/**"
   - "!node_modules/@univerjs-pro/**"
   - "!node_modules/artplayer/**"
@@ -35,7 +34,6 @@ files:
   - "!node_modules/react-dom/**"
   - "!node_modules/react-pdf/**"
   - "!node_modules/remotion/**"
-  - "!node_modules/tldraw/**"
   - "!node_modules/**/build/node_gyp_bins/**"
 extraResources:
   - from: build/runtime-seeds/ai-settings.seed.json
@@ -51,6 +49,10 @@ extraResources:
       - "**/*"
   - from: assets/pets
     to: pets
+    filter:
+      - "**/*"
+  - from: assets/board
+    to: board
     filter:
       - "**/*"
   - from: assets/prompts

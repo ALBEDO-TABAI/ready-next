@@ -1,6 +1,7 @@
 import { useBrowserTabs } from '../../stores/useBrowserTabs'
 import { toFileUrl } from '../../utils/dragDrop'
 import { browserTabActivationSequencer } from './browserTabActivationSequencer'
+import { isReadyBoardFile } from '../../../shared/ready-board'
 
 const LOCAL_HTML_EXTENSIONS = new Set(['html', 'htm'])
 
@@ -103,6 +104,7 @@ async function findExistingLocalHtmlTab(url: string): Promise<LocalHtmlBackendTa
 
 export function isLocalHtmlFilePath(path: string | null | undefined): boolean {
   if (!path) return false
+  if (isReadyBoardFile(path)) return false
   const name = path.split(/[\\/]/).pop() || path
   const ext = name.includes('.') ? name.split('.').pop()?.toLowerCase() || '' : ''
   return LOCAL_HTML_EXTENSIONS.has(ext)

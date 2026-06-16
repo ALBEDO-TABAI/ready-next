@@ -4627,34 +4627,6 @@ html[data-skin='liquid-glass'] .resize-handle.active {
   box-shadow: none;
 }
 
-/* TLDraw theme integration */
-.tl-container {
-  --tl-color-background: var(--lg-content-bg);
-  --tl-color-panel: var(--lg-material-panel);
-  --tl-color-panel-contrast: var(--lg-material-card);
-  --tl-color-panel-overlay: var(--surface-floating-bg);
-  --tl-color-divider: var(--border-default);
-  --tl-color-text: var(--text-title);
-  --tl-color-text-0: var(--text-body);
-  --tl-color-text-1: var(--text-secondary);
-  --tl-color-text-3: var(--text-muted);
-  --tl-color-low: var(--bg-toolbar);
-  --tl-color-low-border: var(--border-default);
-  --tl-color-primary: var(--color-blue);
-  --tl-color-selected: var(--color-blue);
-  --tl-color-selection-stroke: var(--color-blue);
-  --tl-color-selection-fill: var(--color-blue-light);
-  --tl-color-focus: var(--color-blue);
-  --tl-shadow-color: rgba(15, 23, 42, 0.18);
-}
-
-html[data-skin='liquid-glass'] .tl-container .tlui-menu,
-html[data-skin='liquid-glass'] .tl-container .tlui-popover,
-html[data-skin='liquid-glass'] .tl-container .tlui-toolbar {
-  backdrop-filter: blur(var(--surface-blur)) saturate(var(--surface-saturate));
-  -webkit-backdrop-filter: blur(var(--surface-blur)) saturate(var(--surface-saturate));
-}
-
 .ready-design-tool-button:hover {
   filter: brightness(0.98);
 }
@@ -4696,36 +4668,6 @@ html[data-theme='dark'] .ready-design-tool-button:hover {
   outline: none;
 }
 
-/* Hide TLDraw license watermark for non-commercial project */
-/* Using multiple selectors and !important to ensure watermark is hidden */
-.tlui-debug-panel,
-.tlui-debug-panel__current-state,
-a[href*="tldraw.com"],
-a[href*="license"],
-[data-testid="tl-watermark-unlicensed"],
-[data-testid="tl-watermark-licensed"],
-[data-unlicensed="true"],
-.tl-watermark_SEE-LICENSE,
-.tl-watermark_SEE-LICENSE *,
-div[class*="tl-watermark"],
-div[class*="tl-watermark"] * {
-  display: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
-  pointer-events: none !important;
-  width: 0 !important;
-  height: 0 !important;
-  overflow: hidden !important;
-  position: absolute !important;
-  left: -9999px !important;
-  top: -9999px !important;
-}
-
-/* Additional z-index override to ensure watermark stays hidden */
-.tl-container .tl-watermark_SEE-LICENSE {
-  z-index: -9999 !important;
-}
-
 /* ============================================
    UI OPTIMIZATION: Clean Visual Hierarchy
    ============================================ */
@@ -4765,8 +4707,7 @@ html:not([data-skin='liquid-glass']) {
 html:not([data-skin='liquid-glass']) .workbench-content,
 html:not([data-skin='liquid-glass']) .workbench-mode-root,
 html:not([data-skin='liquid-glass']) [class*="content-area"],
-html:not([data-skin='liquid-glass']) [class*="editor-area"],
-html:not([data-skin='liquid-glass']) .tl-container {
+html:not([data-skin='liquid-glass']) [class*="editor-area"] {
   background: var(--bg-content) !important;
 }
 
@@ -4781,8 +4722,7 @@ html:not([data-skin='liquid-glass']) .tl-container {
 
 html[data-skin='liquid-glass'] .workbench-canvas-shell,
 html[data-skin='liquid-glass'] .workbench-content,
-html[data-skin='liquid-glass'] .workbench-mode-root,
-html[data-skin='liquid-glass'] .tl-container {
+html[data-skin='liquid-glass'] .workbench-mode-root {
   background: transparent !important;
 }
 
@@ -6004,92 +5944,6 @@ html[data-skin='liquid-glass'] .rss-settings-choice.is-active {
 .workbench-mode-root [style*="border-top"] {
   border-bottom-color: transparent !important;
   border-top-color: transparent !important;
-}
-
-/* ========================================
-   tldraw Text 编辑字号修复 - 完整方案
-   ======================================== */
-
-/* 关键发现：
-   1. 显示模式：[data-shape-type="text"] 元素本身
-   2. 编辑模式：contenteditable div (tiptap ProseMirror)
-   需要同时修复两者！
-*/
-
-/* ===== 移除 text 的默认 padding ===== */
-/* tldraw text 默认有 padding，导致文字外框不贴边 */
-.tl-canvas [data-shape-type="text"] {
-  padding: 0 !important;
-}
-
-.tl-canvas [data-shape-type="text"] .tiptap,
-.tl-canvas [data-shape-type="text"] .ProseMirror,
-.tl-canvas [data-shape-type="text"] [contenteditable="true"] {
-  padding: 0 !important;
-}
-
-/* ===== 显示模式修复 ===== */
-/* 强制 text shape 本身使用正确的字号 */
-.tl-canvas [data-shape-type="text"][data-size="s"] {
-  font-size: 18px !important;
-  line-height: 1.2 !important;
-}
-
-.tl-canvas [data-shape-type="text"][data-size="m"] {
-  font-size: 32px !important;
-  line-height: 1.2 !important;
-}
-
-.tl-canvas [data-shape-type="text"][data-size="l"] {
-  font-size: 48px !important;
-  line-height: 1.2 !important;
-}
-
-.tl-canvas [data-shape-type="text"][data-size="xl"] {
-  font-size: 64px !important;
-  line-height: 1.2 !important;
-}
-
-/* 强制 text shape 的所有子元素继承字号 */
-.tl-canvas [data-shape-type="text"] * {
-  font-size: inherit !important;
-  line-height: inherit !important;
-}
-
-/* ===== 编辑模式修复 ===== */
-/* 强制 tiptap 编辑器使用正确的字号 */
-.tl-canvas [data-shape-type="text"][data-size="s"] .tiptap,
-.tl-canvas [data-shape-type="text"][data-size="s"] .ProseMirror,
-.tl-canvas [data-shape-type="text"][data-size="s"] [contenteditable="true"] {
-  font-size: 18px !important;
-  line-height: 1.2 !important;
-}
-
-.tl-canvas [data-shape-type="text"][data-size="m"] .tiptap,
-.tl-canvas [data-shape-type="text"][data-size="m"] .ProseMirror,
-.tl-canvas [data-shape-type="text"][data-size="m"] [contenteditable="true"] {
-  font-size: 32px !important;
-  line-height: 1.2 !important;
-}
-
-.tl-canvas [data-shape-type="text"][data-size="l"] .tiptap,
-.tl-canvas [data-shape-type="text"][data-size="l"] .ProseMirror,
-.tl-canvas [data-shape-type="text"][data-size="l"] [contenteditable="true"] {
-  font-size: 48px !important;
-  line-height: 1.2 !important;
-}
-
-.tl-canvas [data-shape-type="text"][data-size="xl"] .tiptap,
-.tl-canvas [data-shape-type="text"][data-size="xl"] .ProseMirror,
-.tl-canvas [data-shape-type="text"][data-size="xl"] [contenteditable="true"] {
-  font-size: 64px !important;
-  line-height: 1.2 !important;
-}
-
-/* 保留 textarea 规则以防万一 */
-.tl-canvas textarea {
-  font-size: inherit !important;
-  line-height: inherit !important;
 }
 
 /* Solid glass variants: Ready-owned opaque gradient backplates with pink accents. */

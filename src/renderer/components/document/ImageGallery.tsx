@@ -11,7 +11,7 @@ import {
   RotateCw,
   Images,
 } from 'lucide-react'
-import { type DocTab } from '../../stores/useDocTabs'
+import { type DocTab, useDocTabs } from '../../stores/useDocTabs'
 import { toLocalFileUrl } from '../../utils/dragDrop'
 
 const TRANSPARENT_EXTS = ['png', 'webp', 'svg', 'gif']
@@ -44,6 +44,7 @@ interface ImageGalleryProps {
 }
 
 export default function ImageGallery({ tab, fileUrl, currentExt }: ImageGalleryProps) {
+  const setTabPath = useDocTabs((state) => state.setTabPath)
   const [zoom, setZoom] = useState(100)
   const [rotation, setRotation] = useState(0)
   const [imageDims, setImageDims] = useState<{ w: number; h: number } | null>(null)
@@ -56,6 +57,7 @@ export default function ImageGallery({ tab, fileUrl, currentExt }: ImageGalleryP
   const lightboxRef = useRef<PhotoSwipeLightbox | null>(null)
 
   const isTransparent = TRANSPARENT_EXTS.includes(currentExt)
+  const currentIndex = useMemo(() => siblings.findIndex((s) => s.path === tab.path), [siblings, tab.path])
 
   // Load sibling images from same directory
   useEffect(() => {
@@ -68,6 +70,7 @@ export default function ImageGallery({ tab, fileUrl, currentExt }: ImageGalleryP
       if (!result.success || !result.items) return
       const imageFiles = result.items
         .filter((f) => !f.isDirectory && IMAGE_EXTS.includes(f.name.split('.').pop()?.toLowerCase() || ''))
+        .sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' }))
         .map((f) => ({
           src: toLocalFileUrl(f.path),
           width: 1920, // PhotoSwipe needs dimensions; will be updated on load
@@ -110,14 +113,63 @@ export default function ImageGallery({ tab, fileUrl, currentExt }: ImageGalleryP
   // Open gallery at current image
   const openGallery = useCallback(() => {
     if (!lightboxRef.current || siblings.length === 0) return
-    const currentIdx = siblings.findIndex((s) => s.path === tab.path)
-    lightboxRef.current.loadAndOpen(Math.max(0, currentIdx), siblings)
-  }, [siblings, tab.path])
+    lightboxRef.current.loadAndOpen(Math.max(0, currentIndex), siblings)
+  }, [currentIndex, siblings])
 
-  // Reset pan when zoom changes
+  const openSibling = useCallback((delta: number) => {
+    if (siblings.length <= 1) return
+    const baseIndex = currentIndex >= 0 ? currentIndex : 0
+    const nextIndex = (baseIndex + delta + siblings.length) % siblings.length
+    const next = siblings[nextIndex]
+    if (next?.path && next.path !== tab.path) {
+      setTabPath(tab.id, next.path)
+    }
+  }, [currentIndex, setTabPath, siblings, tab.id, tab.path])
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+    e.preventDefault()
+    e.stopPropagation()
+    openSibling(e.key === 'ArrowRight' ? 1 : -1)
+  }, [openSibling])
+
+  useEffect(() => {
+    const handleWindowKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return
+      const surface = containerRef.current
+      if (!surface) return
+      const rect = surface.getBoundingClientRect()
+      if (rect.width <= 0 || rect.height <= 0 || surface.closest('[aria-hidden="true"], [inert]')) {
+        return
+      }
+      const target = e.target
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target instanceof HTMLSelectElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) {
+        return
+      }
+      e.preventDefault()
+      openSibling(e.key === 'ArrowRight' ? 1 : -1)
+    }
+
+    window.addEventListener('keydown', handleWindowKeyDown)
+    return () => window.removeEventListener('keydown', handleWindowKeyDown)
+  }, [openSibling])
+
   useEffect(() => {
     setPanOffset({ x: 0, y: 0 })
   }, [zoom])
+
+  useEffect(() => {
+    setZoom(100)
+    setRotation(0)
+    setImageDims(null)
+    setPanOffset({ x: 0, y: 0 })
+    containerRef.current?.focus({ preventScroll: true })
+  }, [tab.path])
 
   // Ctrl/Cmd + scroll wheel to zoom
   const handleWheel = useCallback((e: React.WheelEvent) => {
@@ -305,10 +357,14 @@ export default function ImageGallery({ tab, fileUrl, currentExt }: ImageGalleryP
         <div
           ref={containerRef}
           className="panel-hover-scrollbar flex-1 flex items-center justify-center overflow-auto"
+          data-ready-image-gallery="surface"
+          tabIndex={0}
           style={{
             padding: 24,
+            outline: 'none',
             cursor: needsPan ? (isDragging ? 'grabbing' : 'grab') : 'default',
           }}
+          onKeyDown={handleKeyDown}
           onWheel={handleWheel}
           onMouseDown={needsPan ? handleMouseDown : undefined}
           onMouseMove={needsPan ? handleMouseMove : undefined}

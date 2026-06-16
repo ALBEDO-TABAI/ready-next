@@ -22,6 +22,7 @@ interface BrowserContextMenuHost {
   mainWindow: BrowserWindow
   isAllowedUrl(url: string): boolean
   createTab(url: string): Promise<{ success: boolean; tabId?: string; error?: string }>
+  addImageToActiveBoard(url: string): Promise<unknown>
   getTabIdForWebContents(webContents: WebContents): string | null
   sendToRenderer(channel: string, data: unknown): void
   logBrowserDiag(message: string): void
@@ -145,6 +146,22 @@ export class BrowserContextMenuService {
         {
           label: '添加到 FastCard',
           click: () => this.emitFastCardAction(webContents, params, 'add-to-fastcard', 'image'),
+        },
+        {
+          label: '添加到 Reference 画板',
+          click: () => {
+            void this.host.addImageToActiveBoard(imageUrl)
+              .then((result) => {
+                this.host.sendToRenderer('board:activeBoardExternalImageAdded', result)
+              })
+              .catch((error) => {
+                this.host.logBrowserDiag(`[browser-v3][context] add image to board failed: ${String(error)}`)
+                this.host.sendToRenderer('board:activeBoardExternalImageAdded', {
+                  success: false,
+                  error: error instanceof Error ? error.message : String(error),
+                })
+              })
+          },
         },
         {
           label: '在新标签页打开图片',

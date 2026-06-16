@@ -1,4 +1,5 @@
 import { EBOOK_EXTENSIONS } from '../../../shared/ebook'
+import { isReadyBoardFile } from '../../../shared/ready-board'
 
 const OPENABLE_DOCUMENT_PANE_EXTS = new Set([
   'md',
@@ -52,6 +53,7 @@ function isLikelyAbsolutePath(value: string): boolean {
 
 export function isDocumentPaneOpenablePath(path: string | null | undefined): path is string {
   if (!path || !isLikelyAbsolutePath(path)) return false
+  if (isReadyBoardFile(path)) return true
   return OPENABLE_DOCUMENT_PANE_EXTS.has(getPathExt(path))
 }
 
@@ -67,6 +69,7 @@ function parseReadyPayload(raw: string): ReadyPayloadResult {
     if (parsed.type === 'folder' || parsed.isDirectory) return { accepted: false }
     if (parsed.type === 'browser-tab') return { accepted: false }
     if (!parsed.path || !isLikelyAbsolutePath(parsed.path)) return { accepted: false }
+    if (isReadyBoardFile(parsed.path)) return { accepted: true, path: parsed.path }
     const ext = normalizeExt(parsed.ext) || getPathExt(parsed.path)
     if (!OPENABLE_DOCUMENT_PANE_EXTS.has(ext)) return { accepted: false }
     return { accepted: true, path: parsed.path }

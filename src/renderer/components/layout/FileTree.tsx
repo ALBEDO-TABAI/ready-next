@@ -2,6 +2,7 @@ import { useMemo, useState, useRef, useEffect, useCallback, useLayoutEffect } fr
 import { createPortal } from 'react-dom'
 import {
   IconAlertTriangle as AlertTriangle,
+  IconArtboard,
   IconAt as AtSign,
   IconBook2 as BookOpen,
   IconCheck as Check,
@@ -29,8 +30,8 @@ import {
 import Modal from '../ui/Modal'
 import { computeDesiredRoots, useWorkspace, type FileItem } from '../../stores/useWorkspace'
 import { addReadyContextReferenceToAgentInput } from '../../modules/agent/chat-input-bridge'
-import { useDocTabs } from '../../stores/useDocTabs'
-import { useMode, type WorkbenchMode } from '../../stores/useMode'
+import { isImagePreviewPath, useDocTabs } from '../../stores/useDocTabs'
+import type { WorkbenchMode } from '../../stores/useMode'
 import { toLocalFileUrl } from '../../utils/dragDrop'
 import ContextMenu, { type ContextMenuItem } from './ContextMenu'
 import type { NativeContextMenuItem } from '../../../shared/native-context-menu'
@@ -58,6 +59,7 @@ import {
 } from './fileTreeExternalDrop'
 import { getActiveBrowserTabDragPayload } from '../../modules/browser/browserTabDragSession'
 import { EBOOK_EXTENSIONS, isEbookExtension } from '../../../shared/ebook'
+import { isReadyBoardFile } from '../../../shared/ready-board'
 import { isLocalHtmlFilePath, openLocalHtmlFileInBrowser } from '../../modules/browser/localHtmlFileOpen'
 import { requestWorkbenchModeChange } from '../../modules/workbench/mode-transition'
 import {
@@ -81,7 +83,7 @@ import type {
 import './filesPanelFloatingMenu.css'
 
 const ALLOWED_EXTENSIONS = new Set([
-  'md', 'txt', 'pdf', 'docx', 'doc', 'rtf', 'odt',
+  'md', 'txt', 'pdf', 'docx', 'doc', 'rtf', 'odt', 'readyboard',
   'ts', 'tsx', 'js', 'jsx', 'json', 'html', 'css', 'scss', 'less',
   'py', 'go', 'rs', 'java', 'kt', 'swift', 'c', 'cpp', 'h',
   'yaml', 'yml', 'toml', 'xml', 'sql', 'sh', 'bash', 'zsh',
@@ -144,10 +146,17 @@ function getFileExt(item: FileItem): string {
   return ext || ''
 }
 
+function getParentDir(path: string): string {
+  const normalized = path.replace(/\\/g, '/')
+  const index = normalized.lastIndexOf('/')
+  if (index <= 0) return '/'
+  return normalized.slice(0, index)
+}
+
 function getFileKind(item: FileItem): FileKind {
   if (item.isDirectory) return 'folder'
   const ext = getFileExt(item)
-  if (ext === 'tldr') return 'design'
+  if (ext === 'readyboard' || ext === 'tldr') return 'design'
   if (DOCUMENT_EXTS.has(ext)) return 'document'
   if (CODE_EXTS.has(ext)) return 'code'
   if (IMAGE_EXTS.has(ext)) return 'image'
@@ -196,6 +205,11 @@ interface WorkspaceDragPayload {
   movable: boolean
 }
 
+interface WorkspaceDragBatchPayload {
+  type: 'batch'
+  items: WorkspaceDragPayload[]
+}
+
 interface FileTreeExternalDropMenuState {
   x: number
   y: number
@@ -206,6 +220,7 @@ interface FileTreeExternalDropMenuState {
 interface PutDragDataOptions {
   useNativeFileDrag?: boolean
   onNativeFileDragStart?: (payload: WorkspaceDragPayload) => void
+  selectedItems?: FileItem[]
 }
 
 function hasNativeFileDrop(dataTransfer: DataTransfer): boolean {
@@ -219,9 +234,9 @@ function hasRememberedNativeFileDrag(
   return Boolean(payload && canMoveToDirectory(payload, targetDir))
 }
 
-function putDragData(e: React.DragEvent, item: FileItem, movable = true, options: PutDragDataOptions = {}) {
+function buildWorkspaceDragPayload(item: FileItem, movable: boolean): WorkspaceDragPayload {
   const ext = getFileExt(item)
-  const payload: WorkspaceDragPayload = {
+  return {
     type: item.isDirectory ? 'folder' : 'file',
     path: item.path,
     name: item.name,
@@ -229,6 +244,31 @@ function putDragData(e: React.DragEvent, item: FileItem, movable = true, options
     size: item.size,
     isDirectory: item.isDirectory,
     movable,
+  }
+}
+
+function putDragData(e: React.DragEvent, item: FileItem, movable = true, options: PutDragDataOptions = {}) {
+  const payload = buildWorkspaceDragPayload(item, movable)
+  const selectedFiles = options.selectedItems
+    ?.filter((selectedItem) => !selectedItem.isDirectory)
+    .filter((selectedItem, index, items) => items.findIndex((candidate) => candidate.path === selectedItem.path) === index)
+  const batchItems = selectedFiles && selectedFiles.length > 1 && selectedFiles.some((selectedItem) => selectedItem.path === item.path)
+    ? selectedFiles
+    : null
+  if (batchItems) {
+    const batchPayload: WorkspaceDragBatchPayload = {
+      type: 'batch',
+      items: batchItems.map((selectedItem) => buildWorkspaceDragPayload(selectedItem, movable)),
+    }
+    const serialized = JSON.stringify(batchPayload)
+    const paths = batchItems.map((selectedItem) => selectedItem.path)
+    e.dataTransfer.setData('application/x-ready-drag', serialized)
+    e.dataTransfer.setData('application/x-ready-file', serialized)
+    e.dataTransfer.setData('application/x-ready-workspace-item', serialized)
+    e.dataTransfer.setData('text/plain', paths.join('\n'))
+    e.dataTransfer.setData('text/uri-list', paths.map((path) => `file://${encodeURI(path)}`).join('\n'))
+    e.dataTransfer.effectAllowed = 'copyMove'
+    return
   }
   if (options.useNativeFileDrag && !item.isDirectory && window.electronAPI?.startNativeFileDrag) {
     e.preventDefault()
@@ -275,6 +315,22 @@ function canMoveToDirectory(source: WorkspaceDragPayload, targetDir: string): bo
     }
   }
   return true
+}
+
+function buildSelectedDragItemsByPath(
+  selectedPaths: ReadonlySet<string>,
+  items: readonly FileItem[],
+): ReadonlyMap<string, FileItem[]> {
+  if (selectedPaths.size <= 1) return new Map()
+  const selectedItems = items.filter((item) => selectedPaths.has(item.path) && !item.isDirectory)
+  if (selectedItems.length <= 1) return new Map()
+  return new Map(selectedItems.map((item) => [item.path, selectedItems]))
+}
+
+function isActiveReadyBoardTab(): boolean {
+  const state = useDocTabs.getState()
+  const activeTab = state.tabs.find((tab) => tab.id === state.activeTabId)
+  return isReadyBoardFile(activeTab?.path)
 }
 
 function getTargetDirFromDropTarget(target: FileTreeDropTarget): string {
@@ -373,6 +429,7 @@ function FileTreeItem({
   isFlashing,
   draggableEnabled,
   dragMovable,
+  dragItems,
   depth,
   onToggleDir,
   onOpenFile,
@@ -397,6 +454,7 @@ function FileTreeItem({
   isFlashing?: boolean
   draggableEnabled?: boolean
   dragMovable?: boolean
+  dragItems?: FileItem[]
   depth: number
   onToggleDir: () => void
   onOpenFile: () => void
@@ -423,6 +481,7 @@ function FileTreeItem({
         putDragData(e, item, dragMovable ?? true, {
           useNativeFileDrag: true,
           onNativeFileDragStart,
+          selectedItems: dragItems,
         })
       }}
       onDragEnd={onDragEnd}
@@ -599,6 +658,7 @@ function GridItemCard({
   folderChildren,
   folderChildrenLoaded,
   dragMovable,
+  dragItems,
   onOpen,
   onSelect,
   onDoubleClick,
@@ -618,6 +678,7 @@ function GridItemCard({
   folderChildren?: FileItem[]
   folderChildrenLoaded?: boolean
   dragMovable?: boolean
+  dragItems?: FileItem[]
   onOpen: () => void
   onSelect: (e: React.MouseEvent) => void
   onDoubleClick?: () => void
@@ -643,6 +704,7 @@ function GridItemCard({
         putDragData(e, item, dragMovable ?? true, {
           useNativeFileDrag: true,
           onNativeFileDragStart,
+          selectedItems: dragItems,
         })
       }}
       onDragEnd={onDragEnd}
@@ -1035,6 +1097,7 @@ function FileTreeRecursive({
   depth,
   selectedFile,
   selectedPaths,
+  dragItemsByPath,
   orderedPaths,
   expandedDirs,
   dirChildren,
@@ -1068,6 +1131,7 @@ function FileTreeRecursive({
   depth: number
   selectedFile: string | null
   selectedPaths: ReadonlySet<string>
+  dragItemsByPath: ReadonlyMap<string, FileItem[]>
   orderedPaths: readonly string[]
   expandedDirs: Set<string>
   dirChildren: Map<string, FileItem[]>
@@ -1155,6 +1219,7 @@ function FileTreeRecursive({
               }
               browserDropLine={browserDropLine}
               isFlashing={flashingPath === item.path}
+              dragItems={dragItemsByPath.get(item.path)}
               depth={depth}
               onToggleDir={() => onToggleDir(item.path)}
               onOpenFile={() => onOpenFile(item)}
@@ -1176,6 +1241,7 @@ function FileTreeRecursive({
                 depth={depth + 1}
                 selectedFile={selectedFile}
                 selectedPaths={selectedPaths}
+                dragItemsByPath={dragItemsByPath}
                 orderedPaths={orderedPaths}
                 expandedDirs={expandedDirs}
                 dirChildren={dirChildren}
@@ -1251,7 +1317,7 @@ export default function FileTree({
     loadSavedWorkspace,
   } = useWorkspace()
 
-  const { setWorkbenchMode } = useMode()
+  const { openTab } = useDocTabs()
 
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; item: FileItem | null } | null>(null)
   const [pendingDelete, setPendingDelete] = useState<
@@ -1492,6 +1558,10 @@ export default function FileTree({
   }, [dirChildren, expandedDirs, filteredCurrentItems, filters, pinnedFolders, queryLower])
 
   const treeOrderedPaths = useMemo(() => treeOrderedItems.map((item) => item.path), [treeOrderedItems])
+  const treeDragItemsByPath = useMemo(
+    () => buildSelectedDragItemsByPath(selectedPaths, treeOrderedItems),
+    [selectedPaths, treeOrderedItems],
+  )
 
   useEffect(() => {
     if (!selectedFile || selectedPaths.has(selectedFile)) return
@@ -1738,6 +1808,16 @@ export default function FileTree({
 
     const ext = item.name.split('.').pop()?.toLowerCase() || ''
     selectFile(item.path)
+    if (isReadyBoardFile(item.path)) {
+      openTab(item.path)
+      recordFileActivity({
+        path: item.path,
+        eventType: 'open',
+        source,
+      })
+      requestWorkbenchModeChange('document')
+      return
+    }
     if (isLocalHtmlFilePath(item.path)) {
       void openLocalHtmlFileInBrowser(item.path, item.name).then((opened) => {
         if (opened) {
@@ -1762,15 +1842,42 @@ export default function FileTree({
       tldr: 'document'
     }
     if (modeMap[ext]) {
-      useDocTabs.getState().openTab(item.path)
+      const keepBoardActive = isActiveReadyBoardTab()
+      const docTabs = useDocTabs.getState()
+      if (isImagePreviewPath(item.path)) {
+        docTabs.openImageTab(item.path, { activate: !keepBoardActive })
+      } else if (keepBoardActive) {
+        docTabs.ensureTabForPath(item.path)
+      } else {
+        docTabs.openTab(item.path)
+      }
       recordFileActivity({
         path: item.path,
         eventType: 'open',
         source,
       })
-      setWorkbenchMode(modeMap[ext])
+      if (!keepBoardActive) {
+        requestWorkbenchModeChange(modeMap[ext])
+      }
     }
-  }, [recordFileActivity, selectFile, setWorkbenchMode, toggleDir, viewMode])
+  }, [openTab, recordFileActivity, selectFile, toggleDir, viewMode])
+
+  const handleCreateBoard = useCallback(async (targetDir: string | null) => {
+    const parentDir = targetDir || currentPath
+    const result: { success: boolean; data?: { path: string }; error?: string } | undefined = await window.electronAPI?.board?.create?.({ parentDir }).catch((error) => ({
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    }))
+    if (!result?.success || !result.data?.path) {
+      console.error('Failed to create board:', result?.error || 'unknown error')
+      return
+    }
+    openTab(result.data.path)
+    selectFile(result.data.path)
+    await refreshFiles()
+    await loadDirChildren(parentDir)
+    requestWorkbenchModeChange('document')
+  }, [currentPath, loadDirChildren, openTab, refreshFiles, selectFile])
 
   const handleSelectFile = useCallback((event: React.MouseEvent, item: FileItem, orderedPaths: readonly string[]) => {
     event.preventDefault()
@@ -2278,6 +2385,7 @@ export default function FileTree({
                 depth={1}
                 selectedFile={selectedFile}
                 selectedPaths={selectedPaths}
+                dragItemsByPath={treeDragItemsByPath}
                 orderedPaths={treeOrderedPaths}
                 expandedDirs={expandedDirs}
                 dirChildren={dirChildren}
@@ -2350,6 +2458,7 @@ export default function FileTree({
           depth={0}
           selectedFile={selectedFile}
           selectedPaths={selectedPaths}
+          dragItemsByPath={treeDragItemsByPath}
           orderedPaths={treeOrderedPaths}
           expandedDirs={expandedDirs}
           dirChildren={dirChildren}
@@ -2427,6 +2536,10 @@ export default function FileTree({
   }, [effectiveGridPath])
   const gridContainerPath = effectiveGridPath ?? currentPath
   const gridOrderedPaths = useMemo(() => gridItems.map((item) => item.path), [gridItems])
+  const gridDragItemsByPath = useMemo(
+    () => buildSelectedDragItemsByPath(selectedPaths, gridItems),
+    [selectedPaths, gridItems],
+  )
   const visibleItemsByPath = useMemo(() => {
     const items = viewMode === 'grid' ? gridItems : treeOrderedItems
     return new Map(items.map((item) => [item.path, item]))
@@ -2671,6 +2784,7 @@ export default function FileTree({
                 folderChildren={item.isDirectory ? dirChildren.get(item.path) : undefined}
                 folderChildrenLoaded={item.isDirectory ? dirChildren.has(item.path) : true}
                 dragMovable={!pinnedFolders.includes(item.path)}
+                dragItems={gridDragItemsByPath.get(item.path)}
                 onOpen={() => {
                   if (item.isDirectory) {
                     handleOpenFile(item)
@@ -2729,6 +2843,7 @@ export default function FileTree({
           pinnedFolders={pinnedFolders}
           onClose={() => setContextMenu(null)}
           onOpenFile={handleOpenFile}
+          onCreateBoard={handleCreateBoard}
           selectedDeleteTargets={selectedDeleteTargets}
           onRequestDelete={(targets) => setPendingDelete({ kind: 'fs', targets })}
           onRequestUnpin={({ path, name }) => setPendingDelete({ kind: 'unpin', path, name })}
@@ -2962,6 +3077,7 @@ function ContextMenuBridge({
   pinnedFolders,
   onClose,
   onOpenFile,
+  onCreateBoard,
   selectedDeleteTargets,
   onRequestDelete,
   onRequestUnpin,
@@ -2971,6 +3087,7 @@ function ContextMenuBridge({
   pinnedFolders: string[]
   onClose: () => void
   onOpenFile: (item: FileItem) => void
+  onCreateBoard: (targetDir: string | null) => void
   selectedDeleteTargets: FileTreeDeleteTarget[]
   onRequestDelete: (targets: FileTreeDeleteTarget[]) => void
   onRequestUnpin: (info: { path: string; name: string }) => void
@@ -3003,6 +3120,12 @@ function ContextMenuBridge({
           label: '新建文件夹',
           icon: <FolderPlus style={{ width: 16, height: 16 }} />,
           onClick: () => startCreating('folder')
+        },
+        {
+          id: 'newBoard',
+          label: '新建画板',
+          icon: <IconArtboard style={{ width: 16, height: 16 }} />,
+          onClick: () => onCreateBoard(null)
         },
         { id: 'sep1', label: '', separator: true },
         {
@@ -3068,6 +3191,12 @@ function ContextMenuBridge({
         icon: <FolderPlus style={{ width: 16, height: 16 }} />,
         onClick: () => startCreating('folder')
       },
+      {
+        id: 'newBoard',
+        label: '新建画板',
+        icon: <IconArtboard style={{ width: 16, height: 16 }} />,
+        onClick: () => onCreateBoard(item.isDirectory ? item.path : getParentDir(item.path))
+      },
       { id: 'sep3', label: '', separator: true },
       {
         id: 'showInFinder',
@@ -3092,7 +3221,7 @@ function ContextMenuBridge({
         onClick: () => onRequestDelete(deleteTargets)
       }
     ]
-  }, [onOpenFile, startRenaming, copyPathToClipboard, startCreating, showInFolder, refreshFiles, pinnedFolderSet, workspaceRoot, selectedDeleteTargets, onRequestDelete, onRequestUnpin])
+  }, [onOpenFile, onCreateBoard, startRenaming, copyPathToClipboard, startCreating, showInFolder, refreshFiles, pinnedFolderSet, workspaceRoot, selectedDeleteTargets, onRequestDelete, onRequestUnpin])
 
   const contextItems = useMemo(() => getContextItems(contextMenu.item), [contextMenu.item, getContextItems])
 
@@ -3104,6 +3233,7 @@ function ContextMenuBridge({
       copyPath: '⧉',
       newFile: '+',
       newFolder: '⊞',
+      newBoard: '□',
       showInFinder: '↗',
       refresh: '↻',
       removeFromList: '−',

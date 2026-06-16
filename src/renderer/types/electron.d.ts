@@ -58,6 +58,11 @@ import type {
   FastCardTranslateRequest,
   FastCardTranslateResult,
 } from '../../shared/fastcard'
+import type {
+  ReadyBoardAsset,
+  ReadyBoardAssetKind,
+  ReadyBoardState,
+} from '../../shared/ready-board'
 
 // Type declarations for window.electronAPI exposed by preload
 
@@ -1904,6 +1909,40 @@ interface ElectronDocumentAPI {
   stopWatcher: (payload: { watcherId: string }) => Promise<DocumentStopWatcherResponse>
 }
 
+interface BoardOpenData {
+  boardId: string
+  path: string
+  state: ReadyBoardState
+}
+
+interface BoardExternalImageEventData {
+  boardId: string
+  path: string
+  asset: ReadyBoardAsset
+  state: ReadyBoardState
+}
+
+interface ElectronBoardAPI {
+  create: (payload: { parentDir: string }) => Promise<IPCResponse<BoardOpenData>>
+  open: (payload: { path: string }) => Promise<IPCResponse<BoardOpenData>>
+  setActive: (payload: { boardId: string | null }) => Promise<IPCResponse>
+  save: (payload: { boardId: string; state: ReadyBoardState }) => Promise<IPCResponse<BoardOpenData>>
+  importAsset: (payload: {
+    boardId: string
+    srcPath: string
+    kind?: ReadyBoardAssetKind
+  }) => Promise<IPCResponse<ReadyBoardAsset>>
+  importRemoteImage: (payload: { boardId: string; url: string }) => Promise<IPCResponse<ReadyBoardAsset>>
+  pickAsset: (payload: {
+    boardId: string
+    kind?: ReadyBoardAssetKind | 'any'
+  }) => Promise<IPCResponse<ReadyBoardAsset>>
+  openInDocument: (payload: { boardId: string; relativePath: string }) => Promise<IPCResponse<{ path: string }>>
+  onActiveBoardExternalImageAdded: (
+    callback: (data: IPCResponse<BoardExternalImageEventData>) => void
+  ) => () => void
+}
+
 interface DocumentStartWatcherResponse {
   success: boolean
   data?: { watcherId: string; workspaceRoot: string }
@@ -3499,6 +3538,7 @@ interface ElectronAPI {
   memoryLifecycle: ElectronMemoryLifecycleAPI
   browser: ElectronBrowserAPI
   document: ElectronDocumentAPI
+  board: ElectronBoardAPI
   rss: ElectronRSSAPI
   calendar: ElectronCalendarAPI
   skills: ElectronSkillsAPI

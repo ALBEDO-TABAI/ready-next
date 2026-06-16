@@ -75,6 +75,7 @@ import { BrowserCollectionConsentStore, type BrowserCollectionConsentVia } from 
 import { buildCollectionHandoffPlanFromTask } from './collection-handoff'
 import { resolveHighControlCollectionTarget, resolveSourceCollectionTarget } from './collection-routing'
 import { withHtmlInCanvasWebPreferences } from '../app-control/html-in-canvas-feature'
+import { getReadyBoardService } from '../board-engine/ipc-handler'
 import {
   isAllowedBrowserURL,
   toOAuthCompatibleUserAgent,
@@ -185,6 +186,7 @@ export class BrowserController {
       mainWindow,
       isAllowedUrl: (url) => isAllowedBrowserURL(url),
       createTab: (url) => this.createTab(url),
+      addImageToActiveBoard: (url) => getReadyBoardService().addRemoteImageToActiveBoard(url),
       getTabIdForWebContents: (webContents) => this.getTabIdForWebContents(webContents.id),
       sendToRenderer: (channel, data) => this.sendToRenderer(channel, data),
       logBrowserDiag: (message) => this.logBrowserDiag(message),

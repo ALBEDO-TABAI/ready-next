@@ -636,6 +636,26 @@ const documentAPI = {
     ipcRenderer.invoke('document:stopWatcher', payload),
 }
 
+const boardAPI = {
+  create: (payload: { parentDir: string }) => ipcRenderer.invoke('board:create', payload),
+  open: (payload: { path: string }) => ipcRenderer.invoke('board:open', payload),
+  setActive: (payload: { boardId: string | null }) => ipcRenderer.invoke('board:setActive', payload),
+  save: (payload: { boardId: string; state: unknown }) => ipcRenderer.invoke('board:save', payload),
+  importAsset: (payload: { boardId: string; srcPath: string; kind?: 'image' | 'video' | 'markdown' }) =>
+    ipcRenderer.invoke('board:importAsset', payload),
+  importRemoteImage: (payload: { boardId: string; url: string }) =>
+    ipcRenderer.invoke('board:importRemoteImage', payload),
+  pickAsset: (payload: { boardId: string; kind?: 'image' | 'video' | 'markdown' | 'any' }) =>
+    ipcRenderer.invoke('board:pickAsset', payload),
+  openInDocument: (payload: { boardId: string; relativePath: string }) =>
+    ipcRenderer.invoke('board:openInDocument', payload),
+  onActiveBoardExternalImageAdded: (callback: (data: unknown) => void) => {
+    const handler = (_: unknown, data: unknown): void => callback(data)
+    ipcRenderer.on('board:activeBoardExternalImageAdded', handler)
+    return () => { ipcRenderer.removeListener('board:activeBoardExternalImageAdded', handler) }
+  },
+}
+
 // RSS API
 const rssAPI = {
   getSources: () => ipcRenderer.invoke('rss:getSources'),
@@ -1188,6 +1208,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   memoryLifecycle: memoryLifecycleAPI,
   browser: browserAPI,
   document: documentAPI,
+  board: boardAPI,
   rss: rssAPI,
   calendar: calendarAPI,
   skills: skillsAPI,
@@ -1220,6 +1241,7 @@ declare global {
       memoryLifecycle: typeof memoryLifecycleAPI
       browser: typeof browserAPI
       document: typeof documentAPI
+      board: typeof boardAPI
       rss: typeof rssAPI
       calendar: typeof calendarAPI
       skills: typeof skillsAPI

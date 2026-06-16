@@ -29,6 +29,7 @@ interface DocTabsState {
     pendingReveal: PendingDocReveal | null
 
     openTab: (path: string) => void
+    openImageTab: (path: string, options?: { activate?: boolean }) => string | null
     openTabInPane: (path: string, pane: DocumentPaneTarget) => string | null
     createBackgroundTab: (options?: { title?: string; path?: string | null; content?: string }) => string
     ensureTabForPath: (path: string) => string | null
@@ -51,6 +52,7 @@ let tabCounter = 0
 const makeId = () => `doc-${++tabCounter}`
 
 const STORAGE_KEY = 'ready-doc-tabs-v2'
+const IMAGE_PREVIEW_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'ico'])
 
 export function normalizeDocTabPathKey(path: string | null | undefined): string | null {
     if (!path) return null
@@ -62,6 +64,25 @@ export function normalizeDocTabPathKey(path: string | null | undefined): string 
         return `${driveMatch[1].toLowerCase()}:${driveMatch[2] || ''}`
     }
     return withoutTrailingSlash
+}
+
+function getPathExtension(path: string | null | undefined): string {
+    if (!path) return ''
+    const name = path.replace(/\\/g, '/').split('/').pop() || path
+    const index = name.lastIndexOf('.')
+    return index >= 0 ? name.slice(index + 1).toLowerCase() : ''
+}
+
+export function isImagePreviewPath(path: string | null | undefined): boolean {
+    return IMAGE_PREVIEW_EXTENSIONS.has(getPathExtension(path))
+}
+
+function getParentPathKey(path: string | null | undefined): string | null {
+    const pathKey = normalizeDocTabPathKey(path)
+    if (!pathKey) return null
+    const index = pathKey.lastIndexOf('/')
+    if (index <= 0) return '/'
+    return pathKey.slice(0, index)
 }
 
 function syncTabCounterFromTabs(tabs: DocTab[]) {
@@ -110,6 +131,27 @@ function ensureDocumentTabForPath(tabs: DocTab[], path: string): { tabs: DocTab[
         ],
         id,
     }
+}
+
+function ensureImagePreviewTabForPath(tabs: DocTab[], path: string): { tabs: DocTab[]; id: string } {
+    const dirKey = getParentPathKey(path)
+    if (!dirKey) return ensureDocumentTabForPath(tabs, path)
+    const pathKey = normalizeDocTabPathKey(path)
+    const existing = tabs.find(t => isImagePreviewPath(t.path) && getParentPathKey(t.path) === dirKey)
+    if (existing) {
+        if (normalizeDocTabPathKey(existing.path) === pathKey) {
+            return { tabs, id: existing.id }
+        }
+        return {
+            tabs: tabs.map(t =>
+                t.id === existing.id
+                    ? { ...t, path, title: getFilename(path), content: '', isDirty: false }
+                    : t
+            ),
+            id: existing.id,
+        }
+    }
+    return ensureDocumentTabForPath(tabs, path)
 }
 
 function ensureTabsState(state: Pick<DocTabsState, 'tabs' | 'activeTabId' | 'splitTabId' | 'documentSplitRatio'>) {
@@ -166,6 +208,18 @@ export const useDocTabs = create<DocTabsState>()(persist((set, get) => ({
             tabs: next.tabs,
             activeTabId: next.id,
         })
+    },
+
+    openImageTab: (path: string, options) => {
+        if (!path || !isImagePreviewPath(path)) return null
+        const { tabs } = get()
+        const next = ensureImagePreviewTabForPath(tabs, path)
+        const updates: Partial<DocTabsState> = { tabs: next.tabs }
+        if (options?.activate !== false) {
+            updates.activeTabId = next.id
+        }
+        set(updates)
+        return next.id
     },
 
     openTabInPane: (path: string, pane: DocumentPaneTarget) => {

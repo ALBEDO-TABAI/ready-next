@@ -5,7 +5,7 @@ import { resolve } from 'path'
 config({ path: resolve(__dirname, '../../.env') })
 
 import { app, shell, BrowserWindow, ipcMain, protocol, nativeImage, nativeTheme, Menu, dialog, type MenuItemConstructorOptions, type NativeImage } from 'electron'
-import { join, extname, normalize, isAbsolute } from 'path'
+import { join, extname, isAbsolute } from 'path'
 import { createReadStream, statSync, existsSync, mkdirSync } from 'fs'
 import { readFile } from 'fs/promises'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
@@ -36,7 +36,9 @@ import type { PetWindowManager } from './modules/pet/pet-window-manager'
 import { applyBundledAISettingsSeed } from './modules/settings-engine/seed-loader'
 import { setupAppCacheIPC } from './modules/app-control/cache-stats-ipc'
 import { setupNativeContextMenuIPC } from './modules/app-control/native-context-menu-ipc'
+import { isPathAllowed } from './modules/app-control/local-path-safety'
 import { reconcileStartupRunsOnStartup } from './modules/app-control/startup-run-reconciler'
+import { setupBoardIPC } from './modules/board-engine/ipc-handler'
 import { setupSkillsIPC } from './modules/skills-runtime/ipc-handler'
 import { setupMemoryManagementIPC } from './modules/memory-management/ipc-handler'
 import { rsshubManager } from './modules/rss-engine/rsshub-process'
@@ -493,6 +495,7 @@ async function createWindow(): Promise<void> {
 function setupGlobalIPC(): void {
   // Module IPC handlers (no window dependency)
   setupDocumentIPC(DOCUMENT_USE_MOCK)  // Always real fs
+  setupBoardIPC({ getMainWindow: () => mainWindow })
   setupSearchIPC()
   setupFileEmergenceIPC()
   setupRSSIPC(RSS_USE_MOCK)
@@ -788,45 +791,6 @@ protocol.registerSchemesAsPrivileged([
     }
   }
 ])
-
-// --- local-file:// path validation ---
-
-function isPathAllowed(filePath: string): boolean {
-  // Canonicalize the path to resolve any .. or symlink tricks
-  const resolved = resolve(filePath)
-  const normalized = normalize(resolved)
-
-  // Block path traversal
-  if (normalized.includes('..')) {
-    return false
-  }
-
-  // Blacklist: sensitive patterns (case-insensitive on macOS/Windows)
-  const sensitivePatterns = [
-    /[/\\]\.ssh[/\\]/,
-    /[/\\]\.aws[/\\]/,
-    /[/\\]\.gnupg[/\\]/,
-    /[/\\]\.env$/,
-    /[/\\]credentials$/,
-    /[/\\]credentials\.json$/,
-    /[/\\]\.npmrc$/,
-    /[/\\]\.pypirc$/,
-    /[/\\]\.gitconfig$/,
-    /[/\\]id_rsa/,
-    /[/\\]id_ed25519/,
-  ]
-
-  const caseInsensitive = process.platform === 'darwin' || process.platform === 'win32'
-  const pathToCheck = caseInsensitive ? normalized.toLowerCase() : normalized
-
-  for (const pattern of sensitivePatterns) {
-    if (pattern.test(pathToCheck)) {
-      return false
-    }
-  }
-
-  return true
-}
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.

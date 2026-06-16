@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, lazy, Suspense } from 'react'
 import { FileText, Loader2 } from 'lucide-react'
 import { computeDesiredRoots, useWorkspace } from '../../stores/useWorkspace'
-import { useDocTabs, type DocTab, type DocumentPaneTarget } from '../../stores/useDocTabs'
+import { isImagePreviewPath, useDocTabs, type DocTab, type DocumentPaneTarget } from '../../stores/useDocTabs'
 import MarkdownEditor from '../../components/document/MarkdownEditor'
 import DocumentTabRail from '../../components/document/DocumentTabRail'
 import FilePreview from '../../components/document/FilePreview'
@@ -36,6 +36,7 @@ import {
 } from '../../modules/document/documentPaneDrop'
 import { getFileExtension } from '../../utils/path'
 import { isEbookExtension } from '../../../shared/ebook'
+import { isReadyBoardFile } from '../../../shared/ready-board'
 import type { FileEmergenceReadingProgressKind } from '../../../shared/file-emergence'
 import { isLocalHtmlFilePath } from '../../modules/browser/localHtmlFileOpen'
 import {
@@ -48,6 +49,7 @@ import {
 } from '../../modules/file-emergence/readingIntentContext'
 
 const UniverSheet = lazy(() => import('../../components/document/UniverSheet'))
+const BoardEditor = lazy(() => import('../../components/document/BoardEditor'))
 
 const getFileExt = (path: string | null): string => {
   if (!path) return ''
@@ -290,6 +292,14 @@ function DocumentEditor({
   const isEbook = isEbookExtension(ext)
   const isXlsx = ['xlsx', 'csv', 'xls'].includes(ext)
 
+  if (isReadyBoardFile(tab.path)) {
+    return (
+      <Suspense fallback={<div className="flex-1 flex items-center justify-center"><Loader2 className="w-6 h-6 animate-spin text-[var(--text-muted)]" /></div>}>
+        <BoardEditor tab={tab} />
+      </Suspense>
+    )
+  }
+
   if (isImage || isVideo || isPdf || isEbook) {
     return <FilePreview tab={tab} />
   }
@@ -329,6 +339,7 @@ export default function DocumentMode({
     tabs, activeTabId, splitTabId, documentSplitRatio,
     openTab, closeTab, setActiveTab, setSplitTab, setDocumentSplitRatio,
     reorderTabs, updateTabContent, markTabSaved, setPendingReveal, openTabInPane,
+    openImageTab, ensureTabForPath,
   } = useDocTabs()
 
   const splitContainerRef = useRef<HTMLDivElement>(null)
@@ -394,7 +405,15 @@ export default function DocumentMode({
       const isDirectory = result?.data?.isDirectory ?? result?.stat?.isDirectory ?? false
       if (!disposed && result?.success && !isDirectory && !isLocalHtmlFilePath(selectedFile)) {
         setEditorMode('preview')
-        openTab(selectedFile)
+        const activeTab = tabs.find((tab) => tab.id === activeTabId)
+        const keepBoardActive = isReadyBoardFile(activeTab?.path) && !isReadyBoardFile(selectedFile)
+        if (isImagePreviewPath(selectedFile)) {
+          openImageTab(selectedFile, { activate: !keepBoardActive })
+        } else if (keepBoardActive) {
+          ensureTabForPath(selectedFile)
+        } else {
+          openTab(selectedFile)
+        }
         await recordFileEmergenceActivity({
           path: selectedFile,
           eventType: 'open',
@@ -407,7 +426,7 @@ export default function DocumentMode({
     return () => {
       disposed = true
     }
-  }, [documentWorkspaceRoots, hasActivated, selectedFile, openTab])
+  }, [activeTabId, documentWorkspaceRoots, ensureTabForPath, hasActivated, openImageTab, openTab, selectedFile, tabs])
 
   useEffect(() => {
     const handler = () => {
