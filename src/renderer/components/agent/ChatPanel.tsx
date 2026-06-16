@@ -256,7 +256,6 @@ export default function ChatPanel({
     query: sessionRecallQuery,
     setQuery: setSessionRecallQuery,
     results: sessionRecallResults,
-    visibleResults: visibleSessionRecallResults,
     searching: sessionRecallSearching,
     error: sessionRecallError,
     setResults: setSessionRecallResults,
@@ -923,7 +922,7 @@ export default function ChatPanel({
       onRenameConversation={handleRenameConversation}
       sessionStatusByConversationId={sessionStatusByConversationId}
       sessionRecallQuery={sessionRecallQuery}
-      sessionRecallResults={visibleSessionRecallResults}
+      sessionRecallResults={sessionRecallResults}
       sessionRecallSearching={sessionRecallSearching}
       sessionRecallError={sessionRecallError}
       attachedSessionRecallCount={attachedSessionRecallCapsules.length}
