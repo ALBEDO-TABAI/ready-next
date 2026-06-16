@@ -166,6 +166,7 @@ test('buildContinuationStateFromProjection preserves durable skill handles witho
   const projection = createProjection({
     continuationRef: {
       taskId: 'task-prev',
+      resumeKind: 'paused',
       blockerType: 'background_running',
       pauseReason: 'budget_exhausted',
       detachedTaskId: 'dst-1234',
@@ -187,6 +188,7 @@ test('buildContinuationStateFromProjection preserves durable skill handles witho
   assert.equal(continuationState.continuationRef?.taskRunId, 'e-1234')
   assert.equal(continuationState.continuationRef?.runStatePath, '/tmp/vea/run_state.json')
   assert.equal(continuationState.continuationRef?.outputDir, '/tmp/vea')
+  assert.equal(continuationState.continuationRef?.resumeKind, 'paused')
   assert.equal(continuationState.continuationRef?.pauseReason, 'budget_exhausted')
 })
 
@@ -200,6 +202,7 @@ test('normalizeContinuationIntent trims values and requires a task id', () => {
     detachedTaskId: '  dst-1234  ',
     runStatePath: '  /tmp/vea/run_state.json  ',
     outputDir: '  /tmp/vea  ',
+    resumeKind: 'paused',
     pauseReason: '  budget_exhausted  ',
   })
 
@@ -212,9 +215,11 @@ test('normalizeContinuationIntent trims values and requires a task id', () => {
     detachedTaskId: 'dst-1234',
     runStatePath: '/tmp/vea/run_state.json',
     outputDir: '/tmp/vea',
+    resumeKind: 'paused',
     pauseReason: 'budget_exhausted',
   })
   assert.equal(normalizeContinuationIntent({ taskId: '   ' }), null)
+  assert.equal(normalizeContinuationIntent({ taskId: 'task-prev', resumeKind: 'invalid' as never })?.resumeKind, undefined)
 })
 
 test('Stage Q: normalizeContinuationIntent preserves childRunId', () => {
@@ -241,6 +246,19 @@ test('Stage Q: normalizeContinuationRef-via-applyContinuationIntent preserves ch
   })
   assert.ok(applied.continuationRef, 'childRunId alone must trigger continuationRef')
   assert.equal(applied.continuationRef!.childRunId, 'cr-q-only')
+})
+
+test('resumeKind survives applyContinuationIntentToState', () => {
+  const baseState = buildContinuationStateFromProjection(createProjection(), {})
+  const applied = applyContinuationIntentToState(baseState, {
+    taskId: baseState.taskId,
+    runStatePath: '/tmp/ready/run_state.json',
+    outputDir: '/tmp/ready',
+    resumeKind: 'paused',
+  })
+  assert.equal(applied.continuationRef?.resumeKind, 'paused')
+  assert.equal(applied.continuationRef?.runStatePath, '/tmp/ready/run_state.json')
+  assert.equal(applied.continuationRef?.outputDir, '/tmp/ready')
 })
 
 test('applyContinuationIntentToState keeps task identity while applying explicit continuation overrides', () => {

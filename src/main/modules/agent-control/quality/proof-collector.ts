@@ -18,6 +18,10 @@ import { dirname } from 'node:path'
 
 import { logAgentMetric } from '../metrics'
 import type { TaskProjectionRecord } from '../contracts/run-contracts'
+import {
+  normalizeToolExecutionOutput,
+  type ToolExecutionOutput,
+} from '../tools-runtime/tool-result-types'
 
 export const PROOF_KINDS = ['tool_result', 'artifact', 'task_event', 'run_state', 'assistant_response'] as const
 export type ProofKind = (typeof PROOF_KINDS)[number]
@@ -63,6 +67,79 @@ export function collectResponseDigestProof(finalText: string | null | undefined,
   const text = String(finalText || '').trim()
   if (!text) return null
   return { kind: 'assistant_response', ref: text.slice(0, 120), ts: now.toISOString(), digest: sha256(text) }
+}
+
+function recordValue(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null
+}
+
+function isFailedToolOutput(output: ToolExecutionOutput): boolean {
+  const data = recordValue(output.data)
+  const status = typeof data?.status === 'string' ? data.status.trim().toLowerCase() : ''
+  return typeof data?.errorKind === 'string'
+    || data?.ok === false
+    || status === 'error'
+    || status === 'failed'
+    || /(?:^Error:|Document action failed|failed|失败|无法|没有可|未匹配到|未找到|缺少|已拒绝|被拒绝|已取消|被取消)/i.test(output.text)
+}
+
+function cleanArtifactPathCandidate(value: unknown): string | null {
+  if (typeof value !== 'string') return null
+  let text = value.trim()
+  if (!text) return null
+  text = text.replace(/^["'`]+|["'`]+$/g, '').trim()
+  text = text.replace(/^[*_\s]+|[*_\s]+$/g, '').trim()
+  text = text.replace(/[。；;，,)\]）]+$/g, '').trim()
+  if (!text) return null
+  if (/^https?:\/\//i.test(text)) return null
+  if (text.startsWith('/') || /^[A-Za-z]:[\\/]/.test(text) || text.startsWith('outputs/')) return text
+  return null
+}
+
+function collectPathCandidatesFromRecord(record: Record<string, unknown> | null, paths: Set<string>): void {
+  if (!record) return
+  for (const key of ['path', 'savedPath', 'filePath', 'absolutePath', 'outputDir', 'runStatePath', 'sceneScoresPath', 'deliveryReportPath']) {
+    const path = cleanArtifactPathCandidate(record[key])
+    if (path) paths.add(path)
+  }
+  const artifacts = Array.isArray(record.recentArtifacts)
+    ? record.recentArtifacts
+    : Array.isArray(record.artifactRefs)
+      ? record.artifactRefs
+      : []
+  for (const artifact of artifacts) {
+    const path = cleanArtifactPathCandidate(recordValue(artifact)?.path)
+    if (path) paths.add(path)
+  }
+}
+
+function collectPathCandidatesFromText(text: string, paths: Set<string>): void {
+  for (const match of text.matchAll(/`([^`]+)`/g)) {
+    const path = cleanArtifactPathCandidate(match[1])
+    if (path) paths.add(path)
+  }
+  for (const match of text.matchAll(/(?:已保存文档|已另存文档|保存路径|saved path|saved file|path)\s*[:：]\s*([^\n\r]+)/gi)) {
+    const path = cleanArtifactPathCandidate(match[1])
+    if (path) paths.add(path)
+  }
+}
+
+export function collectToolOutputProofs(toolName: string, output: ToolExecutionOutput, now: Date): ProofRef[] {
+  const normalized = normalizeToolExecutionOutput(output)
+  if (isFailedToolOutput(normalized)) return []
+
+  const summary = normalized.text || JSON.stringify(normalized.data || normalized.projectionPatch || {})
+  const proofs = [collectToolResultProof(toolName, summary.slice(0, 500), now)]
+  const paths = new Set<string>()
+  collectPathCandidatesFromRecord(recordValue(normalized.data), paths)
+  collectPathCandidatesFromRecord(recordValue(normalized.projectionPatch), paths)
+  collectPathCandidatesFromText(normalized.text, paths)
+  for (const path of paths) {
+    proofs.push(collectArtifactProof(path, now))
+  }
+  return proofs
 }
 
 export function isValidProofRef(row: unknown): row is ProofRef {

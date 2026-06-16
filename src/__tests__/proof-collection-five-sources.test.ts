@@ -11,6 +11,7 @@ import test from 'node:test'
 import {
   collectToolResultProof,
   collectArtifactProof,
+  collectToolOutputProofs,
   collectTaskEventProof,
   collectRunStateProof,
   collectResponseDigestProof,
@@ -20,6 +21,7 @@ import {
   createTaskEventProofListener,
   type ProofRef,
 } from '../main/modules/agent-control/quality/proof-collector'
+import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
 import { __setMetricSinkForTests, type AgentMetricEvent } from '../main/modules/agent-control/metrics'
 
 const NOW = new Date('2026-06-12T12:00:00.000Z')
@@ -49,6 +51,28 @@ test('response digest: sha256 + truncated excerpt, never the full text; empty re
   assert.equal(collectResponseDigestProof('', NOW), null)
   assert.equal(collectResponseDigestProof('   \n', NOW), null)
   assert.equal(collectResponseDigestProof(null, NOW), null)
+})
+
+test('tool output proofs include successful tool results and saved artifact paths only', () => {
+  const saved = collectToolOutputProofs('document_save_tab', createToolExecutionOutput('已保存文档：/tmp/report.md', {
+    shape: 'json',
+    data: { documentSaved: true },
+  }), NOW)
+  assert.deepEqual(saved.map((row) => row.kind), ['tool_result', 'artifact'])
+  assert.equal(saved[1].ref, '/tmp/report.md')
+
+  const artifactPatch = collectToolOutputProofs('present_file', createToolExecutionOutput('已呈现文件', {
+    projectionPatch: {
+      recentArtifacts: [{ path: '/tmp/presented.md', label: 'presented' }],
+    },
+  }), NOW)
+  assert.equal(artifactPatch.some((row) => row.kind === 'artifact' && row.ref === '/tmp/presented.md'), true)
+
+  const failed = collectToolOutputProofs('document_save_tab', createToolExecutionOutput('保存失败：权限不足', {
+    shape: 'json',
+    data: { ok: false },
+  }), NOW)
+  assert.deepEqual(failed, [])
 })
 
 test('appendProofRefs: malformed additions rejected loudly; overflow rolls oldest into the archive', () => {

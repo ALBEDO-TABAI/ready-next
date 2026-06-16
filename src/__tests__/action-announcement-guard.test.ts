@@ -6,6 +6,7 @@ import {
   AgentSdkRuntime,
   type AgentSdkRuntimeDeps,
 } from '../main/modules/agent-control/runtime-core/agent-sdk-runtime'
+import { evaluateActionAnnouncementGuard } from '../main/modules/agent-control/runtime-core/action-announcement-guard'
 import { canResumeShape } from '../main/modules/agent-control/contracts/resume-handle'
 import { ScriptedAgentRunner } from './helpers/scripted-agent-runner'
 
@@ -66,6 +67,28 @@ function createRuntime(deps: Partial<AgentSdkRuntimeDeps>): {
 }
 
 describe('action announcement guard', () => {
+  test('steers when the current response promises action after earlier prep tools', () => {
+    const decision = evaluateActionAnnouncementGuard({
+      assistantText: '已有 `2026 世界杯` 文件夹。我来并行搜索各届关键视觉图片的可下载源：',
+      toolCallsInCurrentResponse: 0,
+      hasUnfinishedTaskReference: true,
+      alreadySteered: false,
+    })
+
+    assert.equal(decision.kind, 'steer')
+  })
+
+  test('checkpoints when a steered response promises to download without calling tools', () => {
+    const decision = evaluateActionAnnouncementGuard({
+      assistantText: '好的，已经收集到足够的图片 URL 了！现在批量下载到文件夹里。',
+      toolCallsInCurrentResponse: 0,
+      hasUnfinishedTaskReference: true,
+      alreadySteered: true,
+    })
+
+    assert.equal(decision.kind, 'checkpoint')
+  })
+
   test('steers once when an active task ends with an action announcement and no tools', async () => {
     let sawSteerReminder = false
     const scripted = new ScriptedAgentRunner({}, [

@@ -106,6 +106,17 @@ export interface SendScopedPayload {
     responseText?: string
     todoId?: string
     todoTitle?: string
+    resumeKind?: 'snapshot' | 'paused' | 'done_residual'
+    pauseReason?: string
+    childRunId?: string
+    detachedTaskId?: string
+    taskRunId?: string
+    jobId?: string
+    skillId?: string
+    action?: string
+    runStatePath?: string
+    outputDir?: string
+    progressFingerprint?: string
   } | null
 }
 

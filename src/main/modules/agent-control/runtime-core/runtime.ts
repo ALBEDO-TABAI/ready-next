@@ -71,7 +71,7 @@ import { ToolNameCollisionError } from '../tools-runtime/tool-registry-errors'
 import { RunProjection } from '../task-projection/run-projection'
 import { syncTaskProjection } from '../task-projection/task-projection-sync'
 import { reconcileTaskProjections } from '../task-projection/task-projection-reconciler'
-import { canResumeShape, type ResumeHandle } from '../contracts/resume-handle'
+import { canResumeAsUserPoint, type ResumePointHandle } from '../contracts/resume-handle'
 import { deriveTaskProjectionCanResume } from '../task-projection/task-projection-resume'
 import { isAwaitingUserInteractionState } from '../../../../shared/task-interaction-state'
 import { assertSkillTaskRunInvariantConsistency } from '../skills/skill-task-tracker'
@@ -2963,24 +2963,22 @@ export class AgentControlRuntime extends EventEmitter {
       return null
     }
 
-    // Stage Q (Stage 11) — Audit §F-6 found this builder was the main-side
-    // empty-shell escape route: any taskId would pass, regardless of
-    // whether the merged intent carried a real durable handle. Stage Q
-    // contract C6 routes the resume gate through `canResumeShape` here.
-    // When the resulting intent has no real handle (no childRunId, no
-    // detachedTaskId, no outputDir+runStatePath pair), return null so
-    // `runtime.resumeRun` can emit `agent:error{errorKind:'not_resumable'}`.
+    // Stage Q (Stage 11) plus 2026-06 resume-kind amendment — Audit §F-6
+    // found this builder was the main-side empty-shell escape route. The
+    // gate now checks the real user-resume proof, not just handle shape.
     const incomingChildRunId = incoming?.childRunId
     const continuationRefChildRunId =
       (continuationRef as { childRunId?: string | null } | null)?.childRunId || null
     const mergedChildRunId = incomingChildRunId || continuationRefChildRunId || null
-    const intentHandle: ResumeHandle = {
+    const mergedResumeKind = incoming?.resumeKind || continuationRef?.resumeKind || null
+    const intentHandle: ResumePointHandle = {
       childRunId: mergedChildRunId,
       detachedTaskId: incoming?.detachedTaskId || continuationRef?.detachedTaskId || null,
       outputDir: incoming?.outputDir || continuationRef?.outputDir || null,
       runStatePath: incoming?.runStatePath || continuationRef?.runStatePath || null,
+      resumeKind: mergedResumeKind,
     }
-    if (!canResumeShape(intentHandle)) {
+    if (!canResumeAsUserPoint(intentHandle)) {
       return null
     }
 
@@ -2990,6 +2988,7 @@ export class AgentControlRuntime extends EventEmitter {
       // normalize step so downstream consumers (resumeRun, IPC,
       // child runner) see the fresh handle.
       childRunId: mergedChildRunId || undefined,
+      resumeKind: mergedResumeKind || undefined,
       executionId: incoming?.executionId || continuationRef?.executionId || undefined,
       stepId:
         incoming?.stepId

@@ -1,4 +1,4 @@
-import { canResumeWithFs, type ResumeHandle } from '../contracts/resume-handle'
+import { canResumeAsUserPoint, type ResumePointHandle } from '../contracts/resume-handle'
 import type { TaskProjectionRecord } from '../contracts/run-contracts'
 
 function hasResumeAction(record: TaskProjectionRecord): boolean {
@@ -23,14 +23,21 @@ function projectionAllowsResume(record: TaskProjectionRecord): boolean {
  * one boolean instead of recomputing across several fields.
  */
 export function deriveTaskProjectionCanResume(record: TaskProjectionRecord): TaskProjectionRecord {
+  if (record.module === 'browser') {
+    return {
+      ...record,
+      canResume: projectionAllowsResume(record) && record.canResume === true,
+    }
+  }
   const ref = record.continuationRef || null
-  const handle: ResumeHandle = {
+  const handle: ResumePointHandle = {
     childRunId:
       (ref as { childRunId?: string | null } | null)?.childRunId
       || null,
     detachedTaskId: ref?.detachedTaskId || null,
     outputDir: ref?.outputDir || null,
     runStatePath: ref?.runStatePath || null,
+    resumeKind: ref?.resumeKind || null,
   }
-  return { ...record, canResume: projectionAllowsResume(record) && canResumeWithFs(handle) }
+  return { ...record, canResume: projectionAllowsResume(record) && canResumeAsUserPoint(handle) }
 }

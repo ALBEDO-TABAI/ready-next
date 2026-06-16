@@ -4,6 +4,7 @@ import { adjudicateTerminalOutcome, appendCheckIns, type CheckInRecord } from '.
 import { resolveCriteria } from '../quality/criteria-templates'
 import type { TaskType } from '../../../../shared/task-types'
 import type { TaskProjectionRecord } from '../contracts/run-contracts'
+import { canResumeAsUserPoint } from '../contracts/resume-handle'
 
 export interface RunCloseMetric {
   runId: string
@@ -14,6 +15,11 @@ export interface RunCloseMetric {
   /** P0-4 — effective task type (terminal patch wins over the stale row);
    *  coverage accounting for the Q4b promotion gate reads THIS. */
   taskType?: string | null
+}
+
+export interface FinalizedRunOutcome {
+  status: string
+  terminalReason: string
 }
 
 export type RunOutcome =
@@ -69,6 +75,7 @@ export interface RunFinalizerDeps {
   writeProjectionTerminalPatch?: (
     projectionPatch: Record<string, unknown> | null,
     terminalReason: string,
+    status: string,
   ) => void | Promise<void>
   writeRunCloseMetric: (metric: RunCloseMetric) => void
   /** EP2-Q4a — projection store for shadow adjudication (CheckIn + proofs).
@@ -124,10 +131,9 @@ export function buildTerminalProjectionPatch(params: {
   }
 }
 
-export async function finalizeRunOutcome(outcome: RunOutcome, deps: RunFinalizerDeps): Promise<void> {
+export async function finalizeRunOutcome(outcome: RunOutcome, deps: RunFinalizerDeps): Promise<FinalizedRunOutcome> {
   if (outcome.kind === 'done') {
-    await writeTerminalOutcome(outcome, deps, 'done', outcome.terminalReason || 'done')
-    return
+    return writeTerminalOutcome(outcome, deps, 'done', outcome.terminalReason || 'done')
   }
 
   if (outcome.kind === 'checkpoint') {
@@ -137,11 +143,10 @@ export async function finalizeRunOutcome(outcome: RunOutcome, deps: RunFinalizer
       throw new Error('checkpoint outcome requires a valid continuation handle')
     }
 
-    await writeTerminalOutcome(outcome, deps, 'checkpoint', outcome.terminalReason || 'checkpoint')
-    return
+    return writeTerminalOutcome(outcome, deps, 'checkpoint', outcome.terminalReason || 'checkpoint')
   }
 
-  await writeTerminalOutcome(
+  return writeTerminalOutcome(
     outcome,
     deps,
     statusFromOutcomeKind(outcome.kind),
@@ -184,14 +189,37 @@ async function writeTerminalOutcome(
   deps: RunFinalizerDeps,
   status: string,
   terminalReason: string,
-): Promise<void> {
+): Promise<FinalizedRunOutcome> {
   const facts = resolveEffectiveTaskFacts(outcome, deps)
-  writeRunMetaOutcome(outcome, deps, status, terminalReason)
-  recordShadowAdjudication(outcome, deps, status, terminalReason, facts)
-  if (deps.writeProjectionTerminalPatch) {
-    await deps.writeProjectionTerminalPatch(outcome.projectionPatch || null, terminalReason)
+  const verdict = recordShadowAdjudication(outcome, deps, status, terminalReason, facts)
+  let effectiveStatus = status
+  let effectiveTerminalReason = terminalReason
+  if (status === 'done' && verdict && verdict !== 'accept') {
+    const taskContinuation = continuationFromProjectionPatch(outcome.projectionPatch)
+    if (canResumeAsUserPoint(taskContinuation)) {
+      effectiveStatus = 'checkpoint'
+      effectiveTerminalReason = 'checkpoint_budget'
+    } else {
+      effectiveStatus = 'error'
+      effectiveTerminalReason = 'adjudication_degraded'
+    }
   }
-  deps.writeRunCloseMetric({ ...toRunCloseMetric(outcome, terminalReason), taskType: facts.taskType })
+  writeRunMetaOutcome(outcome, deps, effectiveStatus, effectiveTerminalReason)
+  if (deps.writeProjectionTerminalPatch) {
+    await deps.writeProjectionTerminalPatch(outcome.projectionPatch || null, effectiveTerminalReason, effectiveStatus)
+  }
+  deps.writeRunCloseMetric({ ...toRunCloseMetric(outcome, effectiveTerminalReason), taskType: facts.taskType })
+  return { status: effectiveStatus, terminalReason: effectiveTerminalReason }
+}
+
+function continuationFromProjectionPatch(
+  projectionPatch: Record<string, unknown> | null | undefined,
+): Record<string, unknown> | null {
+  const taskContinuation = projectionPatch?.taskContinuation
+  if (taskContinuation && typeof taskContinuation === 'object') return taskContinuation as Record<string, unknown>
+  const continuationRef = projectionPatch?.continuationRef
+  if (continuationRef && typeof continuationRef === 'object') return continuationRef as Record<string, unknown>
+  return null
 }
 
 /**
@@ -210,13 +238,13 @@ function recordShadowAdjudication(
   status: string,
   terminalReason: string,
   facts?: { taskType: string | null; module: string | null },
-): void {
+): CheckInRecord['verdict'] | null {
   const store = deps.taskProjectionStore
   const taskId = outcome.taskId
-  if (!store || !taskId) return
+  if (!store || !taskId) return null
   try {
     const projection = store.get(taskId)
-    if (!projection) return
+    if (!projection) return null
     const now = deps.now ? deps.now() : new Date()
 
     // ① response digest proof FIRST (Q3 collector; empty finalText → null)
@@ -270,12 +298,14 @@ function recordShadowAdjudication(
         blockers: checkIn.blockers,
       })
     }
+    return verdict
   } catch (error) {
     logAgentMetric('adjudication_failed', {
       runId: outcome.runId,
       taskId,
       reason: error instanceof Error ? error.message : String(error),
     })
+    return null
   }
 }
 

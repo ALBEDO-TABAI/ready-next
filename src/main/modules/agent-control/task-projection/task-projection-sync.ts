@@ -348,7 +348,12 @@ function resolveTerminalStatus(reason?: ScopeRunSummary['terminalReason'] | null
   if (!reason) return null
   if (reason === 'done') return 'completed'
   if (reason === 'cancelled_user' || reason === 'cancelled_runtime') return 'killed'
-  if (reason === 'failed_skill' || reason === 'resume_launch_failed' || reason === 'persistence_failed') return 'failed'
+  if (
+    reason === 'failed_skill'
+    || reason === 'resume_launch_failed'
+    || reason === 'persistence_failed'
+    || reason === 'adjudication_degraded'
+  ) return 'failed'
   return 'blocked'
 }
 
@@ -445,6 +450,7 @@ function resolveTerminalBlockedReason(reason?: ScopeRunSummary['terminalReason']
   if (reason === 'blocked_config') return '配置需要修复'
   if (reason === 'blocked_external') return '等待外部条件'
   if (reason === 'blocked_tool_error') return '工具执行遇到问题'
+  if (reason === 'adjudication_degraded') return '完成判定未通过'
   if (reason === 'checkpoint_user_input') return '等待补充信息'
   if (reason === 'checkpoint_budget') return '预算已暂停'
   if (reason === 'checkpoint_background') return '后台任务仍在运行'

@@ -22,6 +22,8 @@ describe('resolveBrowserCollectionIntent — positive (expose browser collection
     '帮我爬一下抖音这个号的视频封面',                               // platform + collection
     '把这个页面的评论都收集下来',                                   // explicit browser surface + collection
     '下载微博这个博主相册里的图片',                                 // platform + collection
+    '再找找相关的图片存档同一个文件夹里，并且插入到文档里的相关位置', // research follow-up: web image archive + document insertion
+    '帮我找几张世界杯视觉设计参考图保存到同一个文件夹',              // image discovery + local archive target
   ]
   for (const text of positives) {
     it(`exposes: ${text.slice(0, 24)}`, () => {
@@ -42,6 +44,7 @@ describe('resolveBrowserCollectionIntent — negative (keep document mode)', () 
     '把这张图片下载到本地',                          // bare image download, no web surface (Codex R1 #3)
     '保存这张照片到桌面',                            // bare photo save
     '帮我整理一下这些图片',                          // bare image housekeeping
+    '找一下本地这些图片，保存到当前文档',              // local image lookup, no web surface
   ]
   for (const text of negatives) {
     it(`does NOT expose: ${text.slice(0, 24) || '(empty)'}`, () => {

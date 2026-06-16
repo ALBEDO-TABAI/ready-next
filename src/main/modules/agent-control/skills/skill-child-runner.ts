@@ -2598,6 +2598,7 @@ function scopeRunPhaseFromTerminalReason(
     || terminalReason === 'resume_launch_failed'
     || terminalReason === 'persistence_failed'
     || terminalReason === 'blocked_tool_error'
+    || terminalReason === 'adjudication_degraded'
   ) {
     return 'error'
   }

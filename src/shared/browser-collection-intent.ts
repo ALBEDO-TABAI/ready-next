@@ -85,6 +85,12 @@ const COLLECTION_VERB = /(?:采集|抓取|爬取|爬|收集|下载|保存|整理
 const WEB_OBJECT =
   /(?:页面|网页|帖子|笔记|视频|短视频|评论|博主|主页|账号|feed|信息流|图集|动态|作品|话题|标签)/
 
+const IMAGE_ARCHIVE_DISCOVERY =
+  /(?:找|搜|搜索|查找|检索|再找|再搜).{0,24}(?:相关|参考|对应|相应|视觉|设计)?(?:的)?(?:图片|图像|配图|素材|视觉图|参考图|海报|logo|Logo|标志|球图|设计图).{0,40}(?:存档|保存|下载|归档|落到|放到|同(?:一个)?文件夹|文件夹)/
+
+const LOCAL_IMAGE_REFERENCE =
+  /(?:(?:这张|这些|附件|上传|本地|电脑里|已有).{0,16}(?:图片|图像|照片|素材)|(?:图片|图像|照片|素材).{0,16}(?:这张|这些|附件|上传|本地|电脑里|已有))/
+
 const BATCH_CONTENT_OBJECT =
   /(?:笔记|帖子|作品|动态|短视频|视频|图集|内容|页面|卡片|列表|信息流|feed)/
 
@@ -107,15 +113,16 @@ export function resolveBrowserCollectionIntent(text: string | null | undefined):
   const hasPlatform = PLATFORM_PATTERN.test(t)
   const hasExplicitBrowser = EXPLICIT_BROWSER_SURFACE.test(t)
   const hasCollectionOnWeb = COLLECTION_VERB.test(t) && WEB_OBJECT.test(t)
+  const hasImageArchiveDiscovery = IMAGE_ARCHIVE_DISCOVERY.test(t) && !LOCAL_IMAGE_REFERENCE.test(t)
 
   // Document signal wins ONLY when there is no platform/explicit-browser surface.
   // "把小红书的图保存到文档" still exposes browser (platform present); "把这张图
   // 保存到 @[x.md]" does not.
-  if (STRONG_DOCUMENT_SIGNAL.test(t) && !hasPlatform && !hasExplicitBrowser) {
+  if (STRONG_DOCUMENT_SIGNAL.test(t) && !hasPlatform && !hasExplicitBrowser && !hasImageArchiveDiscovery) {
     return false
   }
 
-  return hasPlatform || hasExplicitBrowser || hasCollectionOnWeb
+  return hasPlatform || hasExplicitBrowser || hasCollectionOnWeb || hasImageArchiveDiscovery
 }
 
 export function resolveBrowserBatchCollectionIntent(text: string | null | undefined): boolean {

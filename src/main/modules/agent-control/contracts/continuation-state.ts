@@ -39,6 +39,7 @@ export interface ContinuationIntent {
   responseText?: string
   todoId?: string
   todoTitle?: string
+  resumeKind?: ScopeRunTaskContinuation['resumeKind']
   pauseReason?: string
   detachedTaskId?: string
   taskRunId?: string
@@ -160,6 +161,11 @@ function normalizeContinuationRef(value: unknown, taskId: string, currentStepId?
   const jobId = String(record.jobId || '').trim()
   const skillId = String(record.skillId || '').trim()
   const action = String(record.action || '').trim()
+  const resumeKind = record.resumeKind === 'snapshot'
+    || record.resumeKind === 'paused'
+    || record.resumeKind === 'done_residual'
+    ? record.resumeKind
+    : null
   const runStatePath = String(record.runStatePath || '').trim()
   const outputDir = String(record.outputDir || '').trim()
   const progressFingerprint = String(record.progressFingerprint || '').trim()
@@ -175,6 +181,7 @@ function normalizeContinuationRef(value: unknown, taskId: string, currentStepId?
     !jobId &&
     !skillId &&
     !action &&
+    !resumeKind &&
     !runStatePath &&
     !outputDir &&
     !progressFingerprint &&
@@ -186,6 +193,7 @@ function normalizeContinuationRef(value: unknown, taskId: string, currentStepId?
     taskId: String(record.taskId || taskId || '').trim() || taskId,
     executionId: executionId || null,
     stepId: String(record.stepId || currentStepId || '').trim() || currentStepId || null,
+    resumeKind,
     blockerType: typeof record.blockerType === 'string' ? record.blockerType : null,
     targetUrl: typeof record.targetUrl === 'string' ? record.targetUrl : null,
     todoId: todoId || null,
@@ -213,7 +221,7 @@ export function normalizeContinuationIntent(value: Partial<ContinuationIntent> |
   const taskId = String(value.taskId || '').trim()
   if (!taskId) return null
   const normalized: ContinuationIntent = { taskId }
-  const copy = (key: Exclude<keyof ContinuationIntent, 'taskId'>): void => {
+  const copy = (key: Exclude<keyof ContinuationIntent, 'taskId' | 'resumeKind'>): void => {
     const text = normalizeOptionalContinuationText(value[key])
     if (text) normalized[key] = text
   }
@@ -223,6 +231,13 @@ export function normalizeContinuationIntent(value: Partial<ContinuationIntent> |
   copy('responseText')
   copy('todoId')
   copy('todoTitle')
+  if (
+    value.resumeKind === 'snapshot'
+    || value.resumeKind === 'paused'
+    || value.resumeKind === 'done_residual'
+  ) {
+    normalized.resumeKind = value.resumeKind
+  }
   copy('pauseReason')
   copy('detachedTaskId')
   copy('taskRunId')
@@ -258,6 +273,7 @@ export function applyContinuationIntentToState(
     || normalizedIntent.skillId
     || normalizedIntent.runStatePath
     || normalizedIntent.outputDir
+    || normalizedIntent.resumeKind
     // Stage Q (Stage 11) — childRunId triggers continuationRef construction.
     || normalizedIntent.childRunId
   )
@@ -276,6 +292,7 @@ export function applyContinuationIntentToState(
       action: normalizedIntent.action || baseState.continuationRef?.action,
       runStatePath: normalizedIntent.runStatePath || baseState.continuationRef?.runStatePath,
       outputDir: normalizedIntent.outputDir || baseState.continuationRef?.outputDir,
+      resumeKind: normalizedIntent.resumeKind || baseState.continuationRef?.resumeKind,
       progressFingerprint: normalizedIntent.progressFingerprint || baseState.continuationRef?.progressFingerprint,
       // Stage Q (Stage 11) — propagate childRunId through the merge.
       childRunId: normalizedIntent.childRunId || baseState.continuationRef?.childRunId,

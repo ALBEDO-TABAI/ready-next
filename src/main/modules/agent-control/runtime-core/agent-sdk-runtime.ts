@@ -141,6 +141,10 @@ import {
   normalizeToolExecutionOutput,
   type ToolExecutionOutput,
 } from '../tools-runtime/tool-result-types'
+import {
+  collectToolOutputProofs,
+  createTaskProofSink,
+} from '../quality/proof-collector'
 import type { AgentSpawnContext } from '../../../../shared/skill-host-contract'
 import { findDocumentVisualSyntaxIssue } from '../../../../shared/document-visual-syntax'
 import {
@@ -156,6 +160,7 @@ import {
   rebindTaskBudgetRuntime,
   resumeBudgetRuntime,
 } from '../task-projection/run-budget-policy'
+import { readResumeKind, type ResumeKind } from '../contracts/resume-handle'
 import { createRotatingLogger } from '../../../utils/rotating-logger'
 import { finalizeRunOutcome, writeRunCloseMetric } from './run-finalizer'
 import {
@@ -1533,6 +1538,12 @@ function classifySdkRuntimeError(error: unknown): {
       userMessagePrefix: 'SDK 上下文已超限',
     }
   }
+  if (extractSdkMissingToolName(error)) {
+    return {
+      terminalReason: 'blocked_tool_error',
+      userMessagePrefix: 'SDK 工具未注册',
+    }
+  }
   if (/(?:quota|rate limit|429|fetch failed|network|timeout|timed out|ENOTFOUND|ECONN|ETIMEDOUT)/i.test(message)) {
     return {
       terminalReason: 'blocked_external',
@@ -1543,6 +1554,14 @@ function classifySdkRuntimeError(error: unknown): {
     terminalReason: 'blocked_external',
     userMessagePrefix: 'SDK 请求失败',
   }
+}
+
+function extractSdkMissingToolName(error: unknown): string | null {
+  const message = errorMessage(error)
+  const quoted = message.match(/Tool\s+["'`]([^"'`]+)["'`]\s+not found in agent/i)
+  if (quoted?.[1]) return quoted[1].trim()
+  const bare = message.match(/Tool\s+([A-Za-z0-9_.:-]+)\s+not found in agent/i)
+  return bare?.[1]?.trim() || null
 }
 
 function resolveAgentSdkProvider(
@@ -2132,6 +2151,7 @@ function sdkStatusFromTerminalReason(
     || reason === 'resume_launch_failed'
     || reason === 'persistence_failed'
     || reason === 'blocked_tool_error'
+    || reason === 'adjudication_degraded'
   ) {
     return 'error'
   }
@@ -4081,8 +4101,17 @@ export class AgentSdkRuntime extends EventEmitter {
       const hasBrowserCollectionTools = toolDefinitions.some((definition) => definition.name === 'browser_visible_collect')
         && toolDefinitions.some((definition) => definition.name === 'ask_user_questions')
       const allowedToolNames = toolDefinitions.map((definition) => definition.name)
+      appendToolCapabilityLog([
+        '[tool_capability]',
+        'stage=sdk_runtime_final_tools',
+        `restore=${checkpointRestore ? 'true' : 'false'}`,
+        `toolCount=${allowedToolNames.length}`,
+        `tools=${allowedToolNames.join('|') || 'none'}`,
+      ].join(' '))
       const definitionByName = new Map(toolDefinitions.map((definition) => [definition.name, definition]))
       const requiredCapabilityGroups = Array.from(new Set(toolDefinitions.map((definition) => definition.groupId)))
+      const taskProofStore = this.runtime?.getTaskProjectionStoreForFinalize?.() ?? null
+      const taskProofSink = taskProofStore ? createTaskProofSink(taskProofStore) : null
       let liveTaskBudgetRuntime = resolveAgentSdkTaskBudgetRuntime({
         options: effectiveExecutionOptions,
         inferredTaskType: resolveTaskTypeFromToolDefinitions(toolDefinitions),
@@ -4133,6 +4162,18 @@ export class AgentSdkRuntime extends EventEmitter {
             }
           }
           const normalized = normalizeToolExecutionOutput(output)
+          if (taskProofSink) {
+            try {
+              const proofs = collectToolOutputProofs(toolName, normalized, new Date())
+              taskProofSink.append(taskId, proofs)
+            } catch (error) {
+              logAgentMetric('proof_collect_failed', {
+                taskId,
+                toolName,
+                reason: error instanceof Error ? error.message : String(error),
+              })
+            }
+          }
           const argsQueue = toolArgsByName.get(toolName)
           this.learnSiteCardFromToolFailure(toolName, argsQueue?.shift(), normalized)
           const structuredData = readStructuredResultRecord(normalized)
@@ -4195,6 +4236,7 @@ export class AgentSdkRuntime extends EventEmitter {
           requiredCapabilityGroups,
           requiredToolNames: allowedToolNames,
           lastUserMessage: messageToText(content as RunMessage),
+          resumeKind: 'paused',
         })
         runMetaContinuationRef = checkpoint.projectionPatch.taskContinuation && typeof checkpoint.projectionPatch.taskContinuation === 'object'
           ? checkpoint.projectionPatch.taskContinuation as Record<string, unknown>
@@ -4245,7 +4287,10 @@ export class AgentSdkRuntime extends EventEmitter {
       ): Promise<ExecutionTurnResult | 'continue' | null> => {
         const decision = evaluateActionAnnouncementGuard({
           assistantText,
-          toolCallsUsed: usedTools.length,
+          // This guard runs only after a model response that did not launch a
+          // tool. Prior preparation tools in the same run must not mask a new
+          // "I'll do it now" promise at the tail.
+          toolCallsInCurrentResponse: 0,
           hasUnfinishedTaskReference: hasUnfinishedActionTaskReference(),
           alreadySteered: actionAnnouncementSteered,
         })
@@ -4280,6 +4325,7 @@ export class AgentSdkRuntime extends EventEmitter {
           pauseReason: 'action_announcement_steered',
           blockedReason: '行动宣告没有启动实际工具，已保存续跑断点。',
           waitingFor: 'none',
+          resumeKind: 'paused',
         })
         runMetaContinuationRef = checkpoint.projectionPatch.taskContinuation && typeof checkpoint.projectionPatch.taskContinuation === 'object'
           ? checkpoint.projectionPatch.taskContinuation as Record<string, unknown>
@@ -4304,9 +4350,9 @@ export class AgentSdkRuntime extends EventEmitter {
           runMetaRepository: this.getRunMetaRepositoryForFinalize(),
           taskProjectionStore: this.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
           learnFromCheckIn: (input) => this.learnSiteCardsFromCheckIn(input),
-          writeProjectionTerminalPatch: (projectionPatch) => {
+          writeProjectionTerminalPatch: (projectionPatch, terminalReason, status) => {
             emitOutputForRun('', 'done', projectionPatch)
-            emitStatusForRun('checkpoint', 'checkpoint_steered')
+            emitStatusForRun(status, terminalReason as TurnTerminalReason)
           },
           writeRunCloseMetric,
         })
@@ -4413,6 +4459,7 @@ export class AgentSdkRuntime extends EventEmitter {
       let documentTargetContentRepairAttempts = 0
       let newDocumentSaveRepairAttempts = 0
       let localDocumentExcerptRepairAttempts = 0
+      let sdkMissingToolRecoveries = 0
       const bufferNativeTextUntilParsed =
         !useTextToolBridge
         && toolDefinitions.length > 0
@@ -4457,6 +4504,7 @@ export class AgentSdkRuntime extends EventEmitter {
                   requiredCapabilityGroups,
                   requiredToolNames: allowedToolNames,
                   lastUserMessage: messageToText(content as RunMessage),
+                  resumeKind: 'snapshot',
                 })
                 runMetaContinuationRef = rolling.projectionPatch.taskContinuation
                   && typeof rolling.projectionPatch.taskContinuation === 'object'
@@ -4532,6 +4580,26 @@ export class AgentSdkRuntime extends EventEmitter {
                 contextCompressedForBridgeTurn = true
                 continue
               }
+            }
+            const missingToolName = extractSdkMissingToolName(error)
+            if (missingToolName && sdkMissingToolRecoveries < 1) {
+              sdkMissingToolRecoveries += 1
+              logAgentMetric('agent_sdk_missing_tool_soft_recovery', {
+                runId,
+                taskId,
+                toolName: missingToolName,
+                allowedToolNames,
+              })
+              nextInput = prependSystemReminderInput(
+                nextInput,
+                [
+                  `系统补充：你刚才调用了未注册工具 ${missingToolName}，本轮不能使用它。`,
+                  allowedToolNames.length > 0
+                    ? `本轮实际可用工具是：${allowedToolNames.join(', ')}。请改用其中合适的工具继续完成任务。`
+                    : '本轮没有开放工具；请直接说明缺口，不要再次调用工具。',
+                ].join('\n'),
+              )
+              continue
             }
             // S5-2: classified transient provider failures (429/5xx/stream
             // cut/timeouts) retry with bounded backoff through the SAME
@@ -5005,7 +5073,7 @@ export class AgentSdkRuntime extends EventEmitter {
         if (checkpointResult) return checkpointResult
       }
       const finalProjectionPatch = this.mergeProjectionPatches(projectionPatches)
-      await finalizeRunOutcome({
+      const finalizedDone = await finalizeRunOutcome({
         kind: 'done',
         runId,
         taskId,
@@ -5021,12 +5089,13 @@ export class AgentSdkRuntime extends EventEmitter {
         runMetaRepository: this.getRunMetaRepositoryForFinalize(),
         taskProjectionStore: this.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
         learnFromCheckIn: (input) => this.learnSiteCardsFromCheckIn(input),
-        writeProjectionTerminalPatch: (projectionPatch) => {
+        writeProjectionTerminalPatch: (projectionPatch, terminalReason, status) => {
           emitOutputForRun('', 'done', projectionPatch)
-          emitStatusForRun('done', 'done')
+          emitStatusForRun(status, terminalReason as TurnTerminalReason)
         },
         writeRunCloseMetric,
       })
+      const finalizedTerminalReason = finalizedDone.terminalReason as TurnTerminalReason
       // S5-1: persist the scope session snapshot at clean run close so a
       // main-process restart can lazily restore the conversation instead of
       // silently forgetting it. Failure is loud (log), never blocking.
@@ -5038,14 +5107,14 @@ export class AgentSdkRuntime extends EventEmitter {
         log(`scope session snapshot write failed: ${errorMessage(snapshotError)}`)
       }
       return this.buildResult({
-        success: true,
+        success: finalizedDone.status !== 'error',
         finalText,
         cancelled: false,
         taskId,
         usedTools,
         transcriptEvents,
         projectionPatches,
-        terminalReason: 'done',
+        terminalReason: finalizedTerminalReason,
         taskBudgetRuntime: liveTaskBudgetRuntime,
         providerDiagnostics: runMetaProviderDiagnostics,
       })
@@ -5077,9 +5146,9 @@ export class AgentSdkRuntime extends EventEmitter {
           runMetaRepository: this.getRunMetaRepositoryForFinalize(),
           taskProjectionStore: this.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
           learnFromCheckIn: (input) => this.learnSiteCardsFromCheckIn(input),
-          writeProjectionTerminalPatch: (projectionPatch) => {
+          writeProjectionTerminalPatch: (projectionPatch, terminalReason, status) => {
             emitOutputForRun('', 'done', projectionPatch)
-            emitStatusForRun('cancelled', terminalReason)
+            emitStatusForRun(status, terminalReason as TurnTerminalReason)
           },
           writeRunCloseMetric,
         })
@@ -5251,9 +5320,9 @@ export class AgentSdkRuntime extends EventEmitter {
         runMetaRepository: this.getRunMetaRepositoryForFinalize(),
         taskProjectionStore: this.runtime?.getTaskProjectionStoreForFinalize?.() ?? null,
         learnFromCheckIn: (input) => this.learnSiteCardsFromCheckIn(input),
-        writeProjectionTerminalPatch: (projectionPatch) => {
+        writeProjectionTerminalPatch: (projectionPatch, terminalReason, status) => {
           emitOutputForRun('', 'done', projectionPatch)
-          emitStatusForRun('error', failure.terminalReason)
+          emitStatusForRun(status, terminalReason as TurnTerminalReason)
         },
         writeRunCloseMetric,
       })
@@ -5544,7 +5613,7 @@ export class AgentSdkRuntime extends EventEmitter {
       sidecarManager: this.sidecarManager,
       runtime: this.runtime,
       scope: runtimeContext.sessionId
-        ? this.runtime?.getConversationScope(runtimeContext.sessionId) || undefined
+        ? this.runtime?.getConversationScope?.(runtimeContext.sessionId) || undefined
         : undefined,
       allowedToolNames: runtimeContext.allowedToolNames,
       // SDK runtime executes renderer-mediated tools through the request/ack
@@ -5906,7 +5975,7 @@ export class AgentSdkRuntime extends EventEmitter {
     const timestamp = new Date().toISOString()
     const projectionPatch = params.projectionPatch || null
     try {
-      this.runtime?.publishScopeRunEvent({
+      this.runtime?.publishScopeRunEvent?.({
       type: 'updated',
       scopeId: params.runtimeContext.sessionId,
       agent: publicAgentName(params.runtimeContext.agentName),
@@ -5956,6 +6025,7 @@ export class AgentSdkRuntime extends EventEmitter {
     pauseReason?: string
     blockedReason?: string
     waitingFor?: 'background' | 'none'
+    resumeKind?: ResumeKind
   }): Promise<AgentSdkBudgetCheckpoint> {
     const outputDir = join(
       tmpdir(),
@@ -5968,10 +6038,17 @@ export class AgentSdkRuntime extends EventEmitter {
     const sessionSnapshot = normalizeSessionSnapshotForSeed(await params.runHandle.capturedSession.getItems())
     const now = new Date().toISOString()
     const terminalReason = params.terminalReason || 'checkpoint_budget'
-    const blockedReason = params.blockedReason || '本轮工具预算已用完，已保存续跑检查点。'
+    const resumeKind = params.resumeKind || 'snapshot'
+    const blockedReason = params.blockedReason || (
+      resumeKind === 'paused'
+        ? '本轮工具预算已用完，已保存续跑检查点。'
+        : '已保存内部恢复快照。'
+    )
+    const defaultPauseReason = resumeKind === 'paused' ? 'budget_exhausted' : 'snapshot'
     const state = {
       version: 1,
       kind: 'agent_sdk_budget_checkpoint',
+      resumeKind,
       scopeId: params.sessionId || null,
       taskId: params.taskId,
       runId: params.runId,
@@ -5994,12 +6071,13 @@ export class AgentSdkRuntime extends EventEmitter {
       projectionPatch: {
         interactionState: 'suspended',
         waitingFor: params.waitingFor || 'background',
-        resumableActions: ['continue', 'retry', 'cancel'],
+        resumableActions: resumeKind === 'paused' ? ['continue', 'retry', 'cancel'] : ['none'],
         blockedReason,
         taskContinuation: {
           taskId: params.taskId,
-          blockerType: params.blockerType || 'budget_exhausted',
-          pauseReason: params.pauseReason || 'budget_exhausted',
+          resumeKind,
+          blockerType: params.blockerType || defaultPauseReason,
+          pauseReason: params.pauseReason || defaultPauseReason,
           outputDir,
           runStatePath,
         },
@@ -6023,6 +6101,14 @@ export class AgentSdkRuntime extends EventEmitter {
       return null
     }
     const record = asRecord(parsed)
+    if (readResumeKind(record?.resumeKind) !== 'paused') return null
+    const recordTaskId = stringField(record, 'taskId')
+    const requestedTaskId = nonEmptyString(options?.continuationIntent?.taskId)
+      || nonEmptyString(options?.continuationState?.taskId)
+    if (recordTaskId && requestedTaskId && recordTaskId !== requestedTaskId) return null
+    const recordScopeId = stringField(record, 'scopeId')
+    const requestedScopeId = nonEmptyString(options?.continuationState?.scopeId)
+    if (recordScopeId && requestedScopeId && recordScopeId !== requestedScopeId) return null
     const budgetRuntime = asRecord(record?.budgetRuntime) as unknown as TaskBudgetRuntime | null
     if (!budgetRuntime?.budget || !budgetRuntime.usage) return null
     const rawSnapshot = Array.isArray(record?.sessionSnapshot)

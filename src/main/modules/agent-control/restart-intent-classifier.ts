@@ -34,7 +34,7 @@
  *   - The exported `RESTART_INTENT_CLASSES` array length === 3.
  *   - No code path produces a value outside this set.
  */
-import { canResumeShape, type ResumeHandle } from './contracts/resume-handle'
+import { canResumeAsUserPoint, type ResumePointHandle } from './contracts/resume-handle'
 import type { TurnUserIntent } from './runtime-core/turn-frame'
 
 export type RestartIntentClass = 'fresh' | 'resume' | 'restart_from_existing'
@@ -62,7 +62,7 @@ export interface RestartIntentInputs {
    * that becomes `restart_from_existing` (read the handle but suppress
    * stale liveness), NOT `fresh`.
    */
-  continuationRef: ResumeHandle | null
+  continuationRef: ResumePointHandle | null
 }
 
 /**
@@ -77,14 +77,14 @@ export interface RestartIntentInputs {
  *   'start'           | false     | fresh                   | new
  *
  * Where `hasHandle` = `explicitRunStateResource ‖ providedContinuationState
- * ‖ canResumeShape(continuationRef)`.
+ * ‖ canResumeAsUserPoint(continuationRef)`.
  */
 export function classifyRestartIntent(inputs: RestartIntentInputs): RestartIntentClass {
   if (inputs.userIntent !== 'start') return 'resume'
   const hasHandle = Boolean(
-    inputs.explicitRunStateResource
+      inputs.explicitRunStateResource
       || inputs.providedContinuationState
-      || canResumeShape(inputs.continuationRef),
+      || canResumeAsUserPoint(inputs.continuationRef),
   )
   return hasHandle ? 'restart_from_existing' : 'fresh'
 }

@@ -2,7 +2,8 @@
  * EP2-Q4a — shadow adjudication inside the REAL finalize funnel:
  * every RunOutcome.kind produces a CheckIn (enumerated, not hardcoded);
  * zero-proof done → verdict reject + divergence metric + terminal state
- * untouched; ordering hard clause (digest proof lands before the verdict);
+ * downgraded; valid paused continuation proof can become checkpoint; ordering
+ * hard clause (digest proof lands before the verdict);
  * admission degradation; the export script; both funnel gates stay green.
  */
 
@@ -66,13 +67,13 @@ test('every RunOutcome.kind produces a CheckIn through the real funnel (enumerat
   }
 })
 
-test('zero-proof done: verdict reject + divergence metric + terminal state UNTOUCHED', async () => {
+test('zero-proof done: verdict reject + divergence metric + terminal state downgraded', async () => {
   const events: AgentMetricEvent[] = []
   __setMetricSinkForTests((event) => events.push(event))
   try {
     const store = fakeStore({ taskId: 'task-zero', taskType: 'short_task' as never, proofRefs: [] })
     const runMeta = new Map<string, Record<string, unknown>>()
-    await finalizeRunOutcome({ kind: 'done', runId: 'run-z', taskId: 'task-zero', scopeId: 's1', durationMs: 10, toolCallsUsed: 0, initiator: 'done' }, {
+    const finalized = await finalizeRunOutcome({ kind: 'done', runId: 'run-z', taskId: 'task-zero', scopeId: 's1', durationMs: 10, toolCallsUsed: 0, initiator: 'done' }, {
       writeRunCloseMetric: () => {},
       runMetaRepository: {
         get: (runId) => runMeta.get(runId) ?? null,
@@ -85,7 +86,10 @@ test('zero-proof done: verdict reject + divergence metric + terminal state UNTOU
     const checkins = store.rows.get('task-zero')!.checkins as CheckInRecord[]
     assert.equal(checkins[0].verdict, 'reject')
     assert.ok(checkins[0].blockers.includes('zero_proof_done'))
-    assert.equal(runMeta.get('run-z')!.status, 'done', 'shadow mode: run_meta terminal stays done')
+    assert.equal(finalized.status, 'error')
+    assert.equal(finalized.terminalReason, 'adjudication_degraded')
+    assert.equal(runMeta.get('run-z')!.status, 'error')
+    assert.equal(runMeta.get('run-z')!.terminalReason, 'adjudication_degraded')
     for (const patch of store.patches) {
       assert.ok(!('status' in patch) && !('interactionState' in patch), 'projection lifecycle fields untouched by adjudication')
     }
@@ -94,6 +98,40 @@ test('zero-proof done: verdict reject + divergence metric + terminal state UNTOU
     assert.equal((divergence as unknown as { verdict: string }).verdict, 'reject')
   } finally {
     __setMetricSinkForTests(null)
+  }
+})
+
+test('zero-proof done with valid paused continuation becomes checkpoint', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'ready-finalizer-paused-'))
+  const runStatePath = join(dir, 'run_state.json')
+  writeFileSync(runStatePath, JSON.stringify({ resumeKind: 'paused' }), 'utf8')
+  try {
+    const store = fakeStore({ taskId: 'task-paused', taskType: 'short_task' as never, proofRefs: [] })
+    const finalized = await finalizeRunOutcome({
+      kind: 'done',
+      runId: 'run-paused',
+      taskId: 'task-paused',
+      scopeId: 's1',
+      durationMs: 10,
+      toolCallsUsed: 0,
+      initiator: 'done',
+      projectionPatch: {
+        taskContinuation: {
+          taskId: 'task-paused',
+          resumeKind: 'paused',
+          outputDir: dir,
+          runStatePath,
+        },
+      },
+    }, {
+      writeRunCloseMetric: () => {},
+      taskProjectionStore: store,
+      now: () => NOW,
+    })
+    assert.equal(finalized.status, 'checkpoint')
+    assert.equal(finalized.terminalReason, 'checkpoint_budget')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
   }
 })
 

@@ -14,6 +14,7 @@
  * §6.24 / Stage Q contract C1+C2.
  */
 import { statSync } from 'node:fs'
+import type { ScopeRunResumeKind } from './types'
 
 export interface ResumeHandle {
   childRunId?: string | null
@@ -48,6 +49,29 @@ export const defaultFsExistenceProbe: FsExistenceProbe = {
 
 function nonEmpty(value: unknown): boolean {
   return typeof value === 'string' && value.trim().length > 0
+}
+
+export type ResumeKind = ScopeRunResumeKind
+
+export interface ResumePointHandle extends ResumeHandle {
+  resumeKind?: ResumeKind | null
+}
+
+export function readResumeKind(value: unknown): ResumeKind | null {
+  if (value === 'snapshot' || value === 'paused' || value === 'done_residual') return value
+  return null
+}
+
+export function resumeKindOrSnapshot(value: unknown): ResumeKind {
+  return readResumeKind(value) || 'snapshot'
+}
+
+export function isPathPairResumeHandle(handle: ResumeHandle | null | undefined): boolean {
+  if (!handle) return false
+  return !nonEmpty(handle.childRunId)
+    && !nonEmpty(handle.detachedTaskId)
+    && nonEmpty(handle.outputDir)
+    && nonEmpty(handle.runStatePath)
 }
 
 /**
@@ -87,4 +111,22 @@ export function canResumeWithFs(
   if (!canResumeShape(handle)) return false
   if (nonEmpty(handle!.childRunId) || nonEmpty(handle!.detachedTaskId)) return true
   return fs.isDirectory(handle!.outputDir!) && fs.isFile(handle!.runStatePath!)
+}
+
+/**
+ * User-visible resume proof. Path-pair Agent SDK checkpoints need the new
+ * semantic leg; child/detached handles keep their lifecycle-specific proof so
+ * older resumable child tasks are not reclassified as snapshots.
+ */
+export function canResumeAsUserPoint(
+  handle: ResumePointHandle | null | undefined,
+  fs: FsExistenceProbe = defaultFsExistenceProbe,
+): boolean {
+  if (!handle) return false
+  if (!canResumeShape(handle)) return false
+  const resumeKind = readResumeKind(handle.resumeKind)
+  if (nonEmpty(handle.childRunId) || nonEmpty(handle.detachedTaskId)) {
+    return resumeKind === null || resumeKind === 'paused'
+  }
+  return resumeKind === 'paused' && canResumeWithFs(handle, fs)
 }

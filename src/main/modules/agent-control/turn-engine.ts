@@ -443,6 +443,7 @@ function isTurnTerminalReason(value: unknown): value is TurnTerminalReason {
     || value === 'blocked_config'
     || value === 'blocked_external'
     || value === 'blocked_tool_error'
+    || value === 'adjudication_degraded'
     || value === 'failed_skill'
     || value === 'resume_launch_failed'
     || value === 'persistence_failed'
@@ -469,6 +470,7 @@ function statusFromTerminalReason(
     reason === 'failed_skill'
     || reason === 'resume_launch_failed'
     || reason === 'persistence_failed'
+    || reason === 'adjudication_degraded'
   ) {
     return 'error'
   }

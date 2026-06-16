@@ -371,6 +371,7 @@ interface ScopeRunTaskContinuationData {
   taskId?: string | null
   executionId?: string | null
   stepId?: string | null
+  resumeKind?: 'snapshot' | 'paused' | 'done_residual' | null
   blockerType?: string | null
   targetUrl?: string | null
   todoId?: string | null
@@ -435,6 +436,7 @@ interface ContinuationIntentData {
   responseText?: string
   todoId?: string
   todoTitle?: string
+  resumeKind?: 'snapshot' | 'paused' | 'done_residual'
   pauseReason?: string
   childRunId?: string
   detachedTaskId?: string

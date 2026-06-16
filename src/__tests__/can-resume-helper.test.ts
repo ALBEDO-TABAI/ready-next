@@ -9,6 +9,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  canResumeAsUserPoint,
   canResumeShape,
   canResumeWithFs,
   type FsExistenceProbe,
@@ -198,4 +199,47 @@ test('canResumeWithFs: default probe uses node:fs.statSync (smoke)', () => {
     outputDir: '/definitely/does/not/exist/q-stage',
     runStatePath: '/definitely/does/not/exist/q-stage/run_state.json',
   }), false)
+})
+
+test('canResumeAsUserPoint: path-pair requires paused resumeKind and fs proof', () => {
+  const probe = fakeProbe({
+    '/tmp/run-paused': 'dir',
+    '/tmp/run-paused/run_state.json': 'file',
+  })
+  assert.equal(canResumeAsUserPoint({
+    outputDir: '/tmp/run-paused',
+    runStatePath: '/tmp/run-paused/run_state.json',
+    resumeKind: 'paused',
+  }, probe), true)
+  assert.equal(canResumeAsUserPoint({
+    outputDir: '/tmp/run-paused',
+    runStatePath: '/tmp/run-paused/run_state.json',
+    resumeKind: 'snapshot',
+  }, probe), false)
+  assert.equal(canResumeAsUserPoint({
+    outputDir: '/tmp/run-paused',
+    runStatePath: '/tmp/run-paused/run_state.json',
+  }, probe), false)
+})
+
+test('canResumeAsUserPoint: path-pair paused still fails when run_state file vanished', () => {
+  const probe = fakeProbe({
+    '/tmp/run-paused': 'dir',
+  })
+  assert.equal(canResumeAsUserPoint({
+    outputDir: '/tmp/run-paused',
+    runStatePath: '/tmp/run-paused/run_state.json',
+    resumeKind: 'paused',
+  }, probe), false)
+})
+
+test('canResumeAsUserPoint: child and detached handles preserve existing lifecycle contract', () => {
+  const probe: FsExistenceProbe = {
+    isFile() { throw new Error('child/detached branch must not probe fs') },
+    isDirectory() { throw new Error('child/detached branch must not probe fs') },
+  }
+  assert.equal(canResumeAsUserPoint({ childRunId: 'child-1' }, probe), true)
+  assert.equal(canResumeAsUserPoint({ detachedTaskId: 'detached-1' }, probe), true)
+  assert.equal(canResumeAsUserPoint({ childRunId: 'child-1', resumeKind: 'paused' }, probe), true)
+  assert.equal(canResumeAsUserPoint({ childRunId: 'child-1', resumeKind: 'snapshot' }, probe), false)
 })

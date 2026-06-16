@@ -89,6 +89,7 @@ export interface BrowserTaskProjectionInput {
   completedSourceIds?: string[]
   failedSourceIds?: string[]
   terminalDwell?: boolean
+  canResume?: boolean
   /** EP2 dogfood — progress-only refresh: update the EXISTING projection in
    *  place (status untouched) so download write-backs move the card numbers
    *  even when no status transition fires an event. */
@@ -112,6 +113,22 @@ function shouldReprojectBrowserCollectTask(status: BrowserCapabilityTaskHandle['
 
 function shouldReprojectLinkedTerminalCollectionTask(status: BrowserCapabilityTaskHandle['status']): boolean {
   return status === 'completed' || status === 'failed' || status === 'cancelled'
+}
+
+function hasBrowserTaskCheckpoint(task: BrowserCapabilityTaskHandle, payload: Record<string, unknown>): boolean {
+  const checkpoint = task.checkpoint
+  if (task.kind === 'note_collect' || task.kind === 'card_loop') {
+    if (checkpoint?.stage !== 'note_collect_round' || !checkpoint.partialResults) return false
+    if (typeof checkpoint.cursor !== 'string' || checkpoint.cursor.trim().length === 0) return false
+    return parseCollectionPlan(payload.plan).ok
+  }
+  if (task.kind === 'visible_collect') {
+    if (checkpoint?.stage !== 'visible_collect_round' || !Array.isArray(checkpoint.partialResults)) return false
+    if (checkpoint.cursor === null || typeof checkpoint.cursor === 'undefined') return false
+    return typeof payload.url === 'string' && payload.url.trim().length > 0
+      || typeof payload.tabId === 'string' && payload.tabId.trim().length > 0
+  }
+  return false
 }
 
 function noteCollectSummary(total: number, completed: number, failed: number, current: string | null, state: BrowserTaskProjectionInput['state']): string {
@@ -610,6 +627,7 @@ export class BrowserContentTaskRunner {
           waitingFor: task.status === 'waiting_human' ? 'verification' : undefined,
           publicStatus: publicNoteCollectStatus(task.status, completed),
           terminalDwell: shouldReprojectLinkedTerminalCollectionTask(task.status) ? false : undefined,
+          canResume: this.canResumeTask(task, payload),
         })
         if (sourceTaskId) projectedSourceTaskIds.add(sourceTaskId)
       } else {
@@ -647,6 +665,8 @@ export class BrowserContentTaskRunner {
     const sink = this.taskProjectionSink
     if (!sink || !scopeId) return
     const sourceTaskId = opts?.sourceTaskId ?? sourceTaskIdFromPayload(this.persistenceService.getTaskPayload(taskId))
+    const task = this.persistenceService.getTask(taskId)
+    const payload = this.persistenceService.getTaskPayload(taskId)
     sink.upsert({
       taskId,
       sourceTaskId,
@@ -663,6 +683,7 @@ export class BrowserContentTaskRunner {
       remaining: Math.max(0, total - completed - failed),
       completedSourceIds: opts?.completedSourceIds,
       failedSourceIds: opts?.failedSourceIds,
+      canResume: task ? this.canResumeTask(task, payload) : false,
     })
   }
 
@@ -676,6 +697,8 @@ export class BrowserContentTaskRunner {
   ): void {
     const sink = this.taskProjectionSink
     if (!sink || !scopeId) return
+    const task = this.persistenceService.getTask(taskId)
+    const payload = this.persistenceService.getTaskPayload(taskId)
     sink.upsert({
       taskId,
       scopeId,
@@ -691,6 +714,7 @@ export class BrowserContentTaskRunner {
       remaining: total,
       hasMoreLikely: opts?.hasMoreLikely,
       userExpectedTotal: opts?.userExpectedTotal,
+      canResume: task ? this.canResumeTask(task, payload) : false,
     })
   }
 
@@ -827,11 +851,19 @@ export class BrowserContentTaskRunner {
     this.persistenceService.updateTaskPayload(taskId, payload)
   }
 
+  private canResumeTask(task: BrowserCapabilityTaskHandle, payload: Record<string, unknown> | null | undefined): boolean {
+    if (!payload) return false
+    if (task.status === 'completed' || task.status === 'cancelled' || task.status === 'running' || task.status === 'queued') {
+      return false
+    }
+    return hasBrowserTaskCheckpoint(task, payload)
+  }
+
   async resumeTask(taskId: string): Promise<BrowserCapabilityTaskHandle | null> {
     const current = this.persistenceService.getTask(taskId)
     const payload = this.persistenceService.getTaskPayload(taskId)
     if (!current || !payload) return null
-    if (current.status === 'completed' || current.status === 'failed') return current
+    if (!this.canResumeTask(current, payload)) return current
     this.cancelledTasks.delete(taskId)
     this.prepareFailureLedgerResume(current, payload)
     this.scheduleTask(taskId, current.kind, payload)

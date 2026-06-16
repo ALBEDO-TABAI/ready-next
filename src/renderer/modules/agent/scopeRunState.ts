@@ -504,7 +504,7 @@ function parseTaskContinuation(input: unknown): ScopeRunTaskContinuation | null 
   if (!input || typeof input !== 'object') return null
   const record = input as Record<string, unknown>
   const continuation: ScopeRunTaskContinuation = {}
-  const copyString = (key: Exclude<keyof ScopeRunTaskContinuation, 'progress'>): void => {
+  const copyString = (key: Exclude<keyof ScopeRunTaskContinuation, 'progress' | 'resumeKind'>): void => {
     if (typeof record[key] !== 'string') return
     const value = String(record[key]).trim()
     if (value) continuation[key] = value
@@ -516,6 +516,13 @@ function parseTaskContinuation(input: unknown): ScopeRunTaskContinuation | null 
   copyString('targetUrl')
   copyString('todoId')
   copyString('todoTitle')
+  if (
+    record.resumeKind === 'snapshot'
+    || record.resumeKind === 'paused'
+    || record.resumeKind === 'done_residual'
+  ) {
+    continuation.resumeKind = record.resumeKind
+  }
   copyString('pauseReason')
   copyString('childRunId')
   copyString('detachedTaskId')

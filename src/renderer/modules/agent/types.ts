@@ -236,6 +236,7 @@ export interface ScopeRunTaskContinuation {
   // Kept optional for backward compatibility with other continuation sources.
   executionId?: string | null
   stepId?: string | null
+  resumeKind?: 'snapshot' | 'paused' | 'done_residual' | null
   blockerType?: string | null
   targetUrl?: string | null
   todoId?: string | null

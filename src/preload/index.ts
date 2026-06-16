@@ -31,6 +31,7 @@ type ContinuationIntentPayload = {
   responseText?: string
   todoId?: string
   todoTitle?: string
+  resumeKind?: 'snapshot' | 'paused' | 'done_residual'
   pauseReason?: string
   detachedTaskId?: string
   taskRunId?: string

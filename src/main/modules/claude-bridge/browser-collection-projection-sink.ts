@@ -131,6 +131,7 @@ export function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime
       completedSourceIds?: string[]
       failedSourceIds?: string[]
       terminalDwell?: boolean
+      canResume?: boolean
     },
     status: TaskProjectionRecord['status'],
     waitingFor: 'background' | 'none' | 'verification',
@@ -173,6 +174,10 @@ export function makeNoteCollectProjectionSink(activeRuntime: AgentControlRuntime
       },
       createdAt: existing?.createdAt || now,
       updatedAt: now,
+      canResume: input.canResume === true,
+      resumableActions: input.canResume === true
+        ? ['continue', 'cancel']
+        : (status === 'running' ? ['cancel'] : ['none']),
     }
     if (existing) store.update(projectionTaskId, record)
     else store.create(record)

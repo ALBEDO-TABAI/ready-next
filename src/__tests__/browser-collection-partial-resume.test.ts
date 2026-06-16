@@ -144,14 +144,14 @@ test('browser collection startup cancels stale note_collect without cursor', asy
   assert.match(String(updates[0].extras.error || ''), /missing saved cursor/)
 })
 
-test('browser_resume_task with a failure ledger retries only failed collection items', async () => {
+test('browser_resume_task with a failed task and failure ledger retries only failed collection items', async () => {
   const urls = Array.from({ length: 5 }, (_, index) => `https://www.xiaohongshu.com/note/partial-${index}`)
   const failedUrl = urls[2]
   const navigated: string[] = []
   const task: FakeStoredTask = {
     taskId: 'browser-task-ledger-resume',
     kind: 'note_collect',
-    status: 'paused',
+    status: 'failed',
     progress: { total: 5, completed: 4, failed: 1, currentLabel: null },
     payload: {
       agentTabId: 'tab-agent-resume',
@@ -216,4 +216,33 @@ test('browser_resume_task with a failure ledger retries only failed collection i
   assert.equal(task.status, 'completed')
   assert.equal(task.progress.completed, 5)
   assert.equal(task.progress.failed, 0)
+})
+
+test('browser_resume_task refuses failed note_collect without checkpoint proof', async () => {
+  const task: FakeStoredTask = {
+    taskId: 'browser-task-failed-empty',
+    kind: 'note_collect',
+    status: 'failed',
+    progress: { total: 5, completed: 2, failed: 3, currentLabel: null },
+    payload: {
+      plan: {
+        targetProfileUrl: 'https://www.xiaohongshu.com/user/profile/partial',
+        notes: [{ url: 'https://www.xiaohongshu.com/note/a', title: 'a' }],
+        outputRootDir: '/tmp/ready-browser-failed-empty',
+      },
+    },
+    checkpoint: null,
+    result: null,
+    error: 'previous failure',
+  }
+  const persistence = fakePersistenceWithTask(task)
+  const runner = new BrowserContentTaskRunner({} as never, persistence as never, fakeLease() as never)
+
+  await runner.resumeTask(task.taskId)
+
+  const activeRuns = (runner as unknown as { activeRuns: Map<string, Promise<void>> }).activeRuns
+  assert.equal(activeRuns.has(task.taskId), false)
+  assert.equal(task.status, 'failed')
+  assert.equal(task.progress.completed, 2)
+  assert.equal(task.progress.failed, 3)
 })

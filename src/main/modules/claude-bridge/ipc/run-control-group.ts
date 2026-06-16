@@ -77,6 +77,7 @@ export interface ResumeRunPayload {
     responseText?: string
     todoId?: string
     todoTitle?: string
+    resumeKind?: 'snapshot' | 'paused' | 'done_residual'
     // Stage Q (Stage 11) — durable handle fields propagated through IPC
     // so `runtime.buildContinuationIntent`'s canResumeShape gate can see
     // them. Without these on the IPC payload type, TS strips them at
@@ -114,6 +115,7 @@ export interface RespondToInteractionPayload {
     responseText?: string
     todoId?: string
     todoTitle?: string
+    resumeKind?: 'snapshot' | 'paused' | 'done_residual'
     // Stage Q (Stage 11) — durable handle fields (see resumeRun).
     childRunId?: string
     detachedTaskId?: string

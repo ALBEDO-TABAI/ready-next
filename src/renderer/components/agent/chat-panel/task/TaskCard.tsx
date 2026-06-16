@@ -623,7 +623,7 @@ export function TaskCard({
                 `interactionState === 'suspended'` alone; now also gated
                 by `canResume === true`. Child-run and detached task cards
                 use their exact-id buttons above. */}
-            {browserTaskId && (run.interactionState === 'suspended' || run.waitingFor === 'verification') && (
+            {browserTaskId && run.canResume === true && (run.resumableActions || []).includes('continue') && (
               <button
                 type="button"
                 data-ready-task-action="resume-browser-task"

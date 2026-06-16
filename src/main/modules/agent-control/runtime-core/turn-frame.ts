@@ -15,6 +15,7 @@ export type TurnTerminalReason =
   | 'blocked_external'
   | 'context_overflow'
   | 'blocked_tool_error'
+  | 'adjudication_degraded'
   | 'failed_skill'
   | 'resume_launch_failed'
   | 'persistence_failed'
@@ -302,6 +303,7 @@ const TURN_TERMINAL_REASON_RANK: Record<TurnTerminalReason, number> = {
   blocked_external: 65,
   context_overflow: 65,
   blocked_tool_error: 60,
+  adjudication_degraded: 60,
   resume_launch_failed: 55,
   done: 50,
   checkpoint_background: 30,

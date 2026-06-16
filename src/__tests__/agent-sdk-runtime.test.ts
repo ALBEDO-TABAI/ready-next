@@ -11,6 +11,8 @@ import {
 import { buildRequestEnvelope } from '../main/modules/agent-control/contracts/request-envelope'
 import type { ToolDefinition } from '../main/modules/agent-control/tools-runtime/tool-definition'
 import { createToolExecutionOutput } from '../main/modules/agent-control/tools-runtime/tool-result-types'
+import type { TaskProjectionRecord } from '../main/modules/agent-control/contracts/run-contracts'
+import type { CheckInRecord } from '../main/modules/agent-control/quality/task-adjudicator'
 import {
   authorizeMcpToolForScope,
   registerMcpServer,
@@ -165,6 +167,31 @@ test('agent sdk runtime streams text and closes with terminal reason', async () 
       ['done', 'done'],
     ],
   )
+})
+
+test('agent sdk runtime soft-recovers once when SDK rejects an unregistered tool', async () => {
+  let calls = 0
+  let secondInputText = ''
+  const runtime = createRuntime({
+    runAgent: async ({ input }) => {
+      calls += 1
+      if (calls === 1) throw new Error('Tool web_search not found in agent butler::scope-missing-tool')
+      secondInputText = JSON.stringify(input)
+      return { finalText: '已换用可用路径完成' }
+    },
+  })
+  runtime.newSession('butler::scope-missing-tool', 'system prompt')
+
+  const result = await runtime.sendMessage('butler::scope-missing-tool', '继续查资料', 'run-missing-tool', {
+    publicSessionId: 'scope-missing-tool',
+    taskId: 'task-missing-tool',
+  })
+
+  assert.equal(calls, 2)
+  assert.equal(result.success, true)
+  assert.equal(result.finalText, '已换用可用路径完成')
+  assert.equal(result.terminalReason, 'done')
+  assert.match(secondInputText, /未注册工具 web_search/)
 })
 
 test('agent sdk runtime scales max turns for long reading resources', async () => {
@@ -4682,6 +4709,76 @@ test('agent sdk runtime exposes upload browser tools for upload workflow intent'
   assert.ok(seenToolNames.includes('browser_list_upload_targets'))
   assert.ok(seenToolNames.includes('browser_upload_scope_attachment'))
   assert.equal(seenToolNames.includes('browser_start_task'), false)
+})
+
+test('agent sdk runtime records tool and artifact proofs before final adjudication', async () => {
+  const taskId = 'task-proof-collection'
+  const now = new Date('2026-06-16T12:00:00.000Z').toISOString()
+  const rows = new Map<string, TaskProjectionRecord>()
+  rows.set(taskId, {
+    taskId,
+    scopeId: 'scope-proof-collection',
+    runId: 'run-proof-collection',
+    taskType: 'research',
+    module: 'document',
+    status: 'running',
+    interactionState: 'running',
+    steps: [],
+    proofRefs: [],
+    createdAt: now,
+    updatedAt: now,
+  } as TaskProjectionRecord)
+  const store = {
+    get: (id: string) => rows.get(id) ?? null,
+    update: (id: string, patch: Partial<TaskProjectionRecord>) => {
+      rows.set(id, { ...rows.get(id)!, ...patch })
+    },
+  }
+  const runtime = createRuntime({
+    listToolDefinitions: () => [
+      createToolDefinition({
+        name: 'document_save_tab',
+        groupId: 'document',
+        domain: 'document',
+        kind: 'write',
+        concurrency: 'serialized',
+        schema: {
+          type: 'object',
+          properties: {},
+          additionalProperties: false,
+        },
+      }),
+    ],
+    executeToolCall: async () => createToolExecutionOutput('已保存文档：/tmp/world-cup-report.md', {
+      shape: 'json',
+      data: { documentSaved: true },
+    }),
+    runAgent: async ({ tools, onTextDelta }) => {
+      const saveTool = tools.find((tool) => tool.name === 'document_save_tab') as { invoke: (context: unknown, input: string) => Promise<string> } | undefined
+      assert.ok(saveTool)
+      await saveTool.invoke({}, '{}')
+      onTextDelta('文档已保存')
+      return { finalText: '文档已保存' }
+    },
+  })
+  runtime.setRuntime({
+    publishScopeRunEvent: () => {},
+    getTaskProjectionStoreForFinalize: () => store,
+  } as never)
+  runtime.newSession('butler::scope-proof-collection', 'system prompt')
+
+  const result = await runtime.sendMessage('butler::scope-proof-collection', '保存研究报告', 'run-proof-collection', {
+    publicSessionId: 'scope-proof-collection',
+    taskId,
+  })
+
+  assert.equal(result.success, true)
+  const row = rows.get(taskId)!
+  const proofKinds = (row.proofRefs as Array<{ kind: string; ref: string }>).map((proof) => proof.kind)
+  assert.equal(proofKinds.includes('tool_result'), true)
+  assert.equal((row.proofRefs as Array<{ kind: string; ref: string }>).some((proof) => proof.kind === 'artifact' && proof.ref === '/tmp/world-cup-report.md'), true)
+  const checkins = row.checkins as CheckInRecord[]
+  assert.equal(checkins[0].verdict, 'accept')
 })
 
 test('agent sdk runtime keeps MCP tools scoped to explicit OAuth authorization', async () => {

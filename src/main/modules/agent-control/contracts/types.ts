@@ -240,10 +240,13 @@ export interface ScopeRunTaskStep {
   updatedAt: string
 }
 
+export type ScopeRunResumeKind = 'snapshot' | 'paused' | 'done_residual'
+
 export interface ScopeRunTaskContinuation {
   taskId?: string | null
   executionId?: string | null
   stepId?: string | null
+  resumeKind?: ScopeRunResumeKind | null
   blockerType?: string | null
   targetUrl?: string | null
   todoId?: string | null
