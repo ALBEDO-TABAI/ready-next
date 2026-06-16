@@ -20,6 +20,17 @@ export interface BoardSnapResult {
   guides: BoardSnapGuide[]
 }
 
+export interface BoardArrowGeometry {
+  x: number
+  y: number
+  width: number
+  height: number
+  x2: number
+  y2: number
+}
+
+export type BoardArrowEndpoint = 'tail' | 'head'
+
 function rectRight(rect: BoardRect): number {
   return rect.x + rect.width
 }
@@ -103,5 +114,48 @@ export function resolveBoardSnapOffset(params: {
       ...(xSnap ? [{ axis: 'x' as const, value: xSnap.value }] : []),
       ...(ySnap ? [{ axis: 'y' as const, value: ySnap.value }] : []),
     ],
+  }
+}
+
+export function getArrowVectorBounds(node: Pick<BoardArrowGeometry, 'x2' | 'y2'>): BoardRect {
+  return {
+    x: Math.min(0, node.x2),
+    y: Math.min(0, node.y2),
+    width: Math.max(1, Math.abs(node.x2)),
+    height: Math.max(1, Math.abs(node.y2)),
+  }
+}
+
+export function resolveArrowEndpointDrag(
+  node: BoardArrowGeometry,
+  endpoint: BoardArrowEndpoint,
+  dx: number,
+  dy: number,
+): BoardArrowGeometry {
+  if (endpoint === 'head') {
+    const x2 = node.x2 + dx
+    const y2 = node.y2 + dy
+    return {
+      ...node,
+      x2,
+      y2,
+      width: Math.max(1, Math.abs(x2)),
+      height: Math.max(1, Math.abs(y2)),
+    }
+  }
+  const headX = node.x + node.x2
+  const headY = node.y + node.y2
+  const x = node.x + dx
+  const y = node.y + dy
+  const x2 = headX - x
+  const y2 = headY - y
+  return {
+    ...node,
+    x,
+    y,
+    x2,
+    y2,
+    width: Math.max(1, Math.abs(x2)),
+    height: Math.max(1, Math.abs(y2)),
   }
 }

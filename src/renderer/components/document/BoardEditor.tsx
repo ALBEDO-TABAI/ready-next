@@ -39,10 +39,15 @@ import {
 } from '../../utils/boardTransfer'
 import { toLocalFileUrl } from '../../utils/dragDrop'
 import {
+  getArrowVectorBounds,
   getBoardNodeBounds,
   getMarqueeSelectedNodeIds,
   normalizeBoardRect,
+  resolveArrowEndpointDrag,
   resolveBoardSnapOffset,
+  type BoardArrowEndpoint,
+  type BoardArrowGeometry,
+  type BoardNodeBounds,
   type BoardRect,
   type BoardSnapGuide,
 } from './boardInteraction'
@@ -74,6 +79,7 @@ const VIDEO_EXTS = new Set(['mp4', 'webm', 'mov', 'm4v', 'ogg'])
 const MARKDOWN_EXTS = new Set(['md', 'markdown'])
 const MARQUEE_THRESHOLD_PX = 4
 const SNAP_THRESHOLD_PX = 8
+const ARROW_HIT_PADDING = 12
 
 function makeNodeId(): string {
   return `node-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
@@ -259,6 +265,38 @@ function createAssetNodes(assets: ReadyBoardAsset[], origin: { x: number; y: num
   })
 }
 
+function getSelectableNodeBounds(node: ReadyBoardNode): BoardNodeBounds {
+  if (node.type === 'arrow') {
+    const bounds = getArrowVectorBounds(node)
+    return {
+      id: node.id,
+      x: node.x + bounds.x,
+      y: node.y + bounds.y,
+      width: bounds.width,
+      height: bounds.height,
+    }
+  }
+  return { id: node.id, x: node.x, y: node.y, width: node.width, height: node.height }
+}
+
+function getArrowRenderFrame(node: ReadyBoardArrowNode) {
+  const bounds = getArrowVectorBounds(node)
+  const minX = bounds.x - ARROW_HIT_PADDING
+  const minY = bounds.y - ARROW_HIT_PADDING
+  const width = bounds.width + ARROW_HIT_PADDING * 2
+  const height = bounds.height + ARROW_HIT_PADDING * 2
+  return {
+    left: node.x + minX,
+    top: node.y + minY,
+    width,
+    height,
+    tailX: -minX,
+    tailY: -minY,
+    headX: node.x2 - minX,
+    headY: node.y2 - minY,
+  }
+}
+
 export default function BoardEditor({ tab }: BoardEditorProps) {
   const [boardId, setBoardId] = useState<string | null>(null)
   const [state, setState] = useState<ReadyBoardState>(() => createEmptyReadyBoardState(tab.title))
@@ -280,6 +318,7 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
     | { kind: 'marquee'; startClientX: number; startClientY: number; start: { x: number; y: number }; current: { x: number; y: number } }
     | { kind: 'node'; ids: string[]; startX: number; startY: number; startNodes: Array<{ id: string; x: number; y: number; width: number; height: number }>; bounds: BoardRect }
     | { kind: 'resize'; id: string; startX: number; startY: number; width: number; height: number }
+    | { kind: 'arrow-endpoint'; id: string; endpoint: BoardArrowEndpoint; startX: number; startY: number; startNode: BoardArrowGeometry }
     | { kind: 'path'; points: Array<{ x: number; y: number }> }
     | null
   >(null)
@@ -693,10 +732,10 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
     event.stopPropagation()
     setSnapGuides([])
     const ids = selectedIdsRef.current.includes(node.id) ? selectedIdsRef.current : [node.id]
-    const startNodes = stateRef.current.nodes
-      .filter((item) => ids.includes(item.id))
+    const selectedNodes = stateRef.current.nodes.filter((item) => ids.includes(item.id))
+    const startNodes = selectedNodes
       .map((item) => ({ id: item.id, x: item.x, y: item.y, width: item.width, height: item.height }))
-    const bounds = getBoardNodeBounds(startNodes)
+    const bounds = getBoardNodeBounds(selectedNodes.map(getSelectableNodeBounds))
     if (!bounds) return
     setSelectedIds(ids)
     dragRef.current = { kind: 'node', ids, startX: event.clientX, startY: event.clientY, startNodes, bounds }
@@ -711,6 +750,32 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
     event.currentTarget.setPointerCapture(event.pointerId)
   }, [])
 
+  const handleArrowEndpointPointerDown = useCallback((
+    event: React.PointerEvent<HTMLButtonElement>,
+    node: ReadyBoardArrowNode,
+    endpoint: BoardArrowEndpoint,
+  ) => {
+    event.stopPropagation()
+    setSnapGuides([])
+    setSelectedIds([node.id])
+    dragRef.current = {
+      kind: 'arrow-endpoint',
+      id: node.id,
+      endpoint,
+      startX: event.clientX,
+      startY: event.clientY,
+      startNode: {
+        x: node.x,
+        y: node.y,
+        width: node.width,
+        height: node.height,
+        x2: node.x2,
+        y2: node.y2,
+      },
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }, [])
+
   const handlePointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current
     if (!drag) return
@@ -719,7 +784,7 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
       drag.current = current
       const nextRect = normalizeBoardRect(drag.start, current)
       setMarqueeRect(nextRect)
-      setSelectedIds(getMarqueeSelectedNodeIds(stateRef.current.nodes, nextRect))
+      setSelectedIds(getMarqueeSelectedNodeIds(stateRef.current.nodes.map(getSelectableNodeBounds), nextRect))
       return
     }
     if (drag.kind === 'node') {
@@ -731,7 +796,7 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
       if (snapEnabledRef.current) {
         const snap = resolveBoardSnapOffset({
           movingBounds: drag.bounds,
-          fixedNodes: stateRef.current.nodes.filter((node) => !drag.ids.includes(node.id)),
+          fixedNodes: stateRef.current.nodes.filter((node) => !drag.ids.includes(node.id)).map(getSelectableNodeBounds),
           dx: rawDx,
           dy: rawDy,
           threshold: SNAP_THRESHOLD_PX / stateRef.current.viewport.zoom,
@@ -759,6 +824,20 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
           width: Math.max(48, drag.width + dx),
           height: Math.max(36, drag.height + dy),
         } as Partial<ReadyBoardNode>),
+      }), { save: false })
+      return
+    }
+    if (drag.kind === 'arrow-endpoint') {
+      const dx = (event.clientX - drag.startX) / stateRef.current.viewport.zoom
+      const dy = (event.clientY - drag.startY) / stateRef.current.viewport.zoom
+      const next = resolveArrowEndpointDrag(drag.startNode, drag.endpoint, dx, dy)
+      patchState((current) => ({
+        ...current,
+        nodes: current.nodes.map((node) => (
+          node.id === drag.id && node.type === 'arrow'
+            ? { ...node, x: next.x, y: next.y, width: next.width, height: next.height, x2: next.x2, y2: next.y2 } as ReadyBoardNode
+            : node
+        )),
       }), { save: false })
       return
     }
@@ -902,11 +981,15 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
 
   const renderNode = (node: ReadyBoardNode) => {
     const selected = selectedIdSet.has(node.id)
+    const arrowFrame = node.type === 'arrow' ? getArrowRenderFrame(node) : null
+    const transferIds = selectedIds.includes(node.id) ? selectedIds : [node.id]
+    const canDragSelection = selected && Boolean(buildTransferForIds(transferIds))
+    const canResize = selected && selectedIds.length === 1 && node.type !== 'arrow' && node.type !== 'path'
     const style = {
-      left: node.x,
-      top: node.y,
-      width: node.width,
-      height: node.height,
+      left: arrowFrame?.left ?? node.x,
+      top: arrowFrame?.top ?? node.y,
+      width: arrowFrame?.width ?? node.width,
+      height: arrowFrame?.height ?? node.height,
       transform: node.rotation ? `rotate(${node.rotation}deg)` : undefined,
     }
     return (
@@ -936,13 +1019,21 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
           <div className="ready-board-rect-node" style={{ background: node.fill, borderColor: node.stroke }} />
         )}
         {node.type === 'arrow' && (
-          <svg className="ready-board-vector-node" viewBox={`0 0 ${Math.max(node.width, 1)} ${Math.max(node.height, 1)}`}>
+          <svg className="ready-board-vector-node" viewBox={`0 0 ${Math.max(arrowFrame?.width ?? node.width, 1)} ${Math.max(arrowFrame?.height ?? node.height, 1)}`}>
             <defs>
               <marker id={`arrow-${node.id}`} markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto">
                 <path d="M0,0 L0,6 L9,3 z" fill={node.stroke} />
               </marker>
             </defs>
-            <line x1="0" y1="0" x2={node.x2} y2={node.y2} stroke={node.stroke} strokeWidth={node.strokeWidth} markerEnd={`url(#arrow-${node.id})`} />
+            <line
+              x1={arrowFrame?.tailX ?? 0}
+              y1={arrowFrame?.tailY ?? 0}
+              x2={arrowFrame?.headX ?? node.x2}
+              y2={arrowFrame?.headY ?? node.y2}
+              stroke={node.stroke}
+              strokeWidth={node.strokeWidth}
+              markerEnd={`url(#arrow-${node.id})`}
+            />
           </svg>
         )}
         {node.type === 'path' && (
@@ -957,7 +1048,23 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
             />
           </svg>
         )}
-        {selected && (
+        {selected && node.type === 'arrow' && arrowFrame && (
+          <>
+            <button
+              className="ready-board-arrow-endpoint ready-board-arrow-endpoint--tail"
+              aria-label="调整箭头尾点"
+              style={{ left: arrowFrame.tailX, top: arrowFrame.tailY }}
+              onPointerDown={(event) => handleArrowEndpointPointerDown(event, node, 'tail')}
+            />
+            <button
+              className="ready-board-arrow-endpoint ready-board-arrow-endpoint--head"
+              aria-label="调整箭头头点"
+              style={{ left: arrowFrame.headX, top: arrowFrame.headY }}
+              onPointerDown={(event) => handleArrowEndpointPointerDown(event, node, 'head')}
+            />
+          </>
+        )}
+        {canDragSelection && (
           <button
             className="ready-board-drag-handle"
             aria-label="拖出选区"
@@ -969,7 +1076,7 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
             <GripVertical size={13} />
           </button>
         )}
-        {selected && selectedIds.length === 1 && (
+        {canResize && (
           <button
             className="ready-board-resize-handle"
             aria-label="Resize"

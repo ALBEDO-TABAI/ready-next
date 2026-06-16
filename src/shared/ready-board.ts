@@ -226,14 +226,27 @@ export function createReadyBoardTemplate(): string {
           div.style.background = node.fill || 'rgba(255,75,43,.14)';
           div.style.borderColor = node.stroke || 'var(--board-accent)';
         } else if (node.type === 'arrow') {
+          const x2 = Number(node.x2 ?? node.width ?? 120);
+          const y2 = Number(node.y2 ?? node.height ?? 80);
+          const padding = 12;
+          const minX = Math.min(0, x2) - padding;
+          const minY = Math.min(0, y2) - padding;
+          const viewWidth = Math.max(1, Math.abs(x2)) + padding * 2;
+          const viewHeight = Math.max(1, Math.abs(y2)) + padding * 2;
           div.style.background = 'transparent';
           div.style.border = 0;
           div.style.boxShadow = 'none';
-          div.innerHTML = '<svg width="100%" height="100%" viewBox="0 0 ' + Math.max(node.width || 120, 1) + ' ' + Math.max(node.height || 80, 1) + '"><defs><marker id="m-' + esc(node.id) + '" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="' + esc(node.stroke || '#ff4b2b') + '"/></marker></defs><line x1="0" y1="0" x2="' + esc(node.x2 ?? node.width ?? 120) + '" y2="' + esc(node.y2 ?? node.height ?? 80) + '" stroke="' + esc(node.stroke || '#ff4b2b') + '" stroke-width="' + (node.strokeWidth || 3) + '" marker-end="url(#m-' + esc(node.id) + ')"/></svg>';
+          div.style.overflow = 'visible';
+          div.style.left = ((node.x || 0) + minX) + 'px';
+          div.style.top = ((node.y || 0) + minY) + 'px';
+          div.style.width = viewWidth + 'px';
+          div.style.height = viewHeight + 'px';
+          div.innerHTML = '<svg width="100%" height="100%" viewBox="0 0 ' + viewWidth + ' ' + viewHeight + '" style="overflow:visible"><defs><marker id="m-' + esc(node.id) + '" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto"><path d="M0,0 L0,6 L9,3 z" fill="' + esc(node.stroke || '#ff4b2b') + '"/></marker></defs><line x1="' + (-minX) + '" y1="' + (-minY) + '" x2="' + (x2 - minX) + '" y2="' + (y2 - minY) + '" stroke="' + esc(node.stroke || '#ff4b2b') + '" stroke-width="' + (node.strokeWidth || 3) + '" marker-end="url(#m-' + esc(node.id) + ')"/></svg>';
         } else if (node.type === 'path') {
           div.style.background = 'transparent';
           div.style.border = 0;
           div.style.boxShadow = 'none';
+          div.style.overflow = 'visible';
           const points = Array.isArray(node.points) ? node.points.map((p) => (p.x || 0) + ',' + (p.y || 0)).join(' ') : '';
           div.innerHTML = '<svg width="100%" height="100%" viewBox="0 0 ' + Math.max(node.width || 1, 1) + ' ' + Math.max(node.height || 1, 1) + '"><polyline points="' + esc(points) + '" fill="none" stroke="' + esc(node.stroke || '#ff4b2b') + '" stroke-linecap="round" stroke-linejoin="round" stroke-width="' + (node.strokeWidth || 4) + '"/></svg>';
         }

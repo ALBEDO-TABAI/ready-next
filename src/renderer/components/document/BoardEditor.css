@@ -183,6 +183,14 @@
   outline-offset: 2px;
 }
 
+.ready-board-node--arrow,
+.ready-board-node--path {
+  overflow: visible;
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
+}
+
 .ready-board-node img,
 .ready-board-node video {
   display: block;
@@ -222,6 +230,28 @@
   height: 100%;
   overflow: visible;
   pointer-events: none;
+}
+
+.ready-board-arrow-endpoint {
+  position: absolute;
+  z-index: 4;
+  width: 13px;
+  height: 13px;
+  padding: 0;
+  border: 2px solid var(--bg-content);
+  border-radius: 50%;
+  background: var(--color-ready-orange, #ff4b2b);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.2);
+  cursor: grab;
+  transform: translate(-50%, -50%);
+}
+
+.ready-board-arrow-endpoint--tail {
+  background: var(--surface-floating-bg);
+}
+
+.ready-board-arrow-endpoint:active {
+  cursor: grabbing;
 }
 
 .ready-board-markdown-card {

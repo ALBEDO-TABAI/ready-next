@@ -2,9 +2,11 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  getArrowVectorBounds,
   getBoardNodeBounds,
   getMarqueeSelectedNodeIds,
   normalizeBoardRect,
+  resolveArrowEndpointDrag,
   resolveBoardSnapOffset,
 } from '../renderer/components/document/boardInteraction'
 
@@ -56,4 +58,47 @@ test('snap offset does not move a group when candidates are outside the threshol
   assert.equal(result.dx, 30)
   assert.equal(result.dy, 0)
   assert.deepEqual(result.guides, [])
+})
+
+test('arrow head drag changes the arrow vector from the fixed tail', () => {
+  const result = resolveArrowEndpointDrag({
+    x: 100,
+    y: 80,
+    width: 120,
+    height: 60,
+    x2: 120,
+    y2: 60,
+  }, 'head', 30, -90)
+
+  assert.deepEqual(result, {
+    x: 100,
+    y: 80,
+    width: 150,
+    height: 30,
+    x2: 150,
+    y2: -30,
+  })
+  assert.deepEqual(getArrowVectorBounds(result), { x: 0, y: -30, width: 150, height: 30 })
+})
+
+test('arrow tail drag preserves the absolute arrow head', () => {
+  const result = resolveArrowEndpointDrag({
+    x: 100,
+    y: 80,
+    width: 120,
+    height: 60,
+    x2: 120,
+    y2: 60,
+  }, 'tail', 20, 10)
+
+  assert.deepEqual(result, {
+    x: 120,
+    y: 90,
+    width: 100,
+    height: 50,
+    x2: 100,
+    y2: 50,
+  })
+  assert.equal(result.x + result.x2, 220)
+  assert.equal(result.y + result.y2, 140)
 })
