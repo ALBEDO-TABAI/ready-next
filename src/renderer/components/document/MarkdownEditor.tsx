@@ -501,11 +501,14 @@ export default function MarkdownEditor({
 
   const handleEditorDrop = useCallback((e: React.DragEvent) => {
     const droppedFiles = getDroppedFilesFromDataTransfer(e.dataTransfer)
-    if (droppedFiles.length === 0) return
+    const droppedText = e.dataTransfer.getData('text/plain')?.trim()
+    if (droppedFiles.length === 0 && !droppedText) return
 
     e.preventDefault()
 
-    const snippet = getMarkdownForDroppedFiles(droppedFiles, currentExt)
+    const snippet = droppedFiles.length > 0
+      ? getMarkdownForDroppedFiles(droppedFiles, currentExt)
+      : droppedText
     if (!snippet) return
 
     const rawEditor = rawEditorRef.current

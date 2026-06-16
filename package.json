@@ -14,7 +14,7 @@
     "probe:liquid-glass-residue": "electron scripts/probe-liquid-glass-residue.cjs",
     "verify:html-in-canvas": "READY_HTML_IN_CANVAS_WEBPREF=1 READY_HTML_IN_CANVAS_REQUIRE=1 electron scripts/probe-html-in-canvas.cjs",
     "build:board-template": "npx tsx@^4.19.2 scripts/build-board-template.ts",
-    "verify:board": "npm run build:board-template -- --check && npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/local-path-safety.test.ts src/__tests__/ready-board-state-roundtrip.test.ts src/__tests__/board-service.test.ts src/__tests__/board-file-detect.test.ts src/__tests__/board-interaction.test.ts",
+    "verify:board": "npm run build:board-template -- --check && npx tsx@^4.19.2 --test --test-concurrency=1 src/__tests__/local-path-safety.test.ts src/__tests__/ready-board-state-roundtrip.test.ts src/__tests__/board-service.test.ts src/__tests__/board-file-detect.test.ts src/__tests__/board-interaction.test.ts src/__tests__/board-transfer.test.ts",
     "verify:native": "npm run rebuild:native && npm run native:check",
     "dev": "node ./scripts/sync-dev-icon.mjs && node scripts/ensure-native-dev.cjs && electron-vite dev",
     "build": "npm run rebuild:native && npm run native:check && npm run typecheck && electron-vite build",

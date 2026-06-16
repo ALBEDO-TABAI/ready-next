@@ -1,4 +1,8 @@
 import { EBOOK_EXTENSIONS } from '../../shared/ebook'
+import {
+  parseReadyBoardResourceDragPayload,
+  READY_BOARD_RESOURCE_MIME,
+} from './boardTransfer'
 
 export interface DroppedFile {
   path: string
@@ -55,6 +59,19 @@ function parseReadyDrag(data: string): DroppedFile[] {
       name?: string
       ext?: string
       size?: number
+      items?: Array<{
+        type?: string
+        path?: string
+        name?: string
+        ext?: string
+        size?: number
+        isDirectory?: boolean
+      }>
+    }
+    if (parsed.type === 'batch' && Array.isArray(parsed.items)) {
+      return parsed.items
+        .filter((item) => item.type !== 'folder' && !item.isDirectory && item.path && isLikelyAbsolutePath(item.path))
+        .map((item) => toDroppedFile(item.path || '', item.name, item.ext, item.size ?? 0))
     }
     if (!parsed.path || !isLikelyAbsolutePath(parsed.path)) return []
     if (parsed.type === 'browser-tab') return []
@@ -66,6 +83,13 @@ function parseReadyDrag(data: string): DroppedFile[] {
 
 export function getDroppedFilesFromDataTransfer(dataTransfer: DataTransfer): DroppedFile[] {
   const files: DroppedFile[] = []
+
+  const boardPayload = parseReadyBoardResourceDragPayload(dataTransfer.getData(READY_BOARD_RESOURCE_MIME))
+  if (boardPayload) {
+    files.push(...boardPayload.resources
+      .filter((resource) => resource.kind === 'file')
+      .map((resource) => toDroppedFile(resource.path, resource.name, resource.ext, resource.size ?? 0)))
+  }
 
   const readyDragRaw = dataTransfer.getData('application/x-ready-drag')
   if (readyDragRaw) {

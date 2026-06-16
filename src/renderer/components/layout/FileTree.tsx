@@ -47,6 +47,7 @@ import {
   getActiveRssItemDragPayload,
   isLikelyVideoDropPayload,
   parseBrowserTabDragPayload,
+  parseReadyBoardFileTreeDropPayload,
   parseRssItemDragPayload,
   parseWebDownloadDragPayload,
   resolveFileTreeDropTarget,
@@ -301,6 +302,12 @@ function joinPath(dir: string, name: string): string {
   const separator = dir.includes('\\') && !dir.includes('/') ? '\\' : '/'
   const normalized = dir.replace(/[\\/]+$/, '')
   return `${normalized}${separator}${name}`
+}
+
+function splitNameForCopy(name: string): { base: string; ext: string } {
+  const dot = name.lastIndexOf('.')
+  if (dot <= 0) return { base: name, ext: '' }
+  return { base: name.slice(0, dot), ext: name.slice(dot) }
 }
 
 function canMoveToDirectory(source: WorkspaceDragPayload, targetDir: string): boolean {
@@ -796,7 +803,7 @@ function GridItemCard({
  * remove themselves when the real file appears; RSS analysis rows follow the
  * persisted job progress until success or failure.
  */
-type PendingPlaceholderKind = 'clip' | 'study' | 'analysis-copy' | 'analysis-visual' | 'download'
+type PendingPlaceholderKind = 'clip' | 'study' | 'analysis-copy' | 'analysis-visual' | 'download' | 'board-export'
 type PendingPlaceholderStatus =
   | 'running'
   | 'completed'
@@ -819,6 +826,13 @@ function clampProgress(value: number | undefined): number | null {
 }
 
 function pendingPlaceholderLabel(kind: PendingPlaceholderKind, status: PendingPlaceholderStatus): string {
+  if (kind === 'board-export') {
+    if (status === 'running') return '正在导出'
+    if (status === 'completed' || status === 'success') return '已导出'
+    if (status === 'skipped') return '已跳过'
+    return '导出失败'
+  }
+
   if (kind === 'download') {
     if (status === 'running') return '正在下载'
     if (status === 'completed' || status === 'success') return '已下载'
@@ -1914,6 +1928,8 @@ export default function FileTree({
 
   const getExternalDropPayload = useCallback(
     (dataTransfer: DataTransfer): FileTreeExternalDropPayload | null => {
+      const readyBoard = parseReadyBoardFileTreeDropPayload(dataTransfer)
+      if (readyBoard) return readyBoard
       const raw = dataTransfer.getData('application/x-ready-drag')
       const browserTab = parseBrowserTabDragPayload(raw) ?? getActiveBrowserTabDragPayload()
       if (browserTab) return browserTab
@@ -1995,6 +2011,74 @@ export default function FileTree({
     })()
   }, [flashCompletedPath, loadDirChildren, refreshFiles, schedulePlaceholderRemoval])
 
+  const resolveBoardCopyDestination = useCallback(async (targetDir: string, name: string): Promise<string> => {
+    const safeName = name.trim() || 'board-asset'
+    const { base, ext } = splitNameForCopy(safeName)
+    for (let index = 0; index < 1000; index += 1) {
+      const candidateName = index === 0 ? safeName : `${base} ${index + 1}${ext}`
+      const candidatePath = joinPath(targetDir, candidateName)
+      const statResult = await window.electronAPI?.document?.stat?.(candidatePath).catch(() => null)
+      if (!statResult?.success) return candidatePath
+    }
+    return joinPath(targetDir, `${base}-${Date.now()}${ext}`)
+  }, [])
+
+  const handleReadyBoardResourceDrop = useCallback((payload: FileTreeExternalDropPayload, target: FileTreeDropTarget) => {
+    if (payload.type !== 'ready-board-selection') return
+    const targetDir = getTargetDirFromDropTarget(target)
+    const fileResources = payload.resources.filter((resource) => resource.kind === 'file')
+    if (fileResources.length === 0) return
+    const taskId = `board-export-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`
+    const title = fileResources.length === 1
+      ? fileResources[0].title || fileResources[0].name
+      : `${fileResources.length} 个画布素材`
+    setPendingClips((prev) => [
+      ...prev,
+      {
+        taskId,
+        targetDir,
+        urlHost: 'Readyboard',
+        title,
+        status: 'running',
+        createdAt: Date.now(),
+        kind: 'board-export',
+      },
+    ])
+
+    void (async () => {
+      try {
+        const copiedPaths: string[] = []
+        for (const resource of fileResources) {
+          const dest = await resolveBoardCopyDestination(targetDir, resource.name)
+          const result = await window.electronAPI?.document?.copyItem?.(resource.path, dest)
+          if (!result?.success) throw new Error(result?.error || '复制失败')
+          copiedPaths.push(dest)
+        }
+        const flashPath = copiedPaths[0] || null
+        setPendingClips((prev) =>
+          prev.map((item) =>
+            item.taskId === taskId
+              ? { ...item, status: 'completed', copiedPath: flashPath || undefined }
+              : item,
+          ),
+        )
+        await refreshFiles()
+        await loadDirChildren(targetDir)
+        flashCompletedPath(flashPath)
+        schedulePlaceholderRemoval(taskId, 1800)
+      } catch (error) {
+        setPendingClips((prev) =>
+          prev.map((item) =>
+            item.taskId === taskId
+              ? { ...item, status: 'failed', errorMessage: error instanceof Error ? error.message : String(error) }
+              : item,
+          ),
+        )
+        schedulePlaceholderRemoval(taskId, 4000)
+      }
+    })()
+  }, [flashCompletedPath, loadDirChildren, refreshFiles, resolveBoardCopyDestination, schedulePlaceholderRemoval])
+
   const handleResolvedExternalDrop = useCallback((
     payload: FileTreeExternalDropPayload,
     target: FileTreeDropTarget,
@@ -2002,12 +2086,16 @@ export default function FileTree({
     y: number,
   ) => {
     setContextMenu(null)
+    if (payload.type === 'ready-board-selection') {
+      handleReadyBoardResourceDrop(payload, target)
+      return
+    }
     if (payload.type === 'web-download-url') {
       handleWebDownloadDrop(payload, target)
       return
     }
     setExternalDropMenu({ x, y, payload, target })
-  }, [handleWebDownloadDrop])
+  }, [handleReadyBoardResourceDrop, handleWebDownloadDrop])
 
   const handleDirectoryDrop = useCallback((e: React.DragEvent, dirPath: string) => {
     const nativePayload = activeNativeFileDragRef.current

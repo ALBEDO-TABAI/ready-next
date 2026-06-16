@@ -2,6 +2,10 @@ import { useCallback } from 'react'
 import type { DragEvent } from 'react'
 import { useAgent, type ChatAttachment } from '../../../../stores/useAgent'
 import { createLocalPathAttachment, getPathBasename } from '../attachments-helpers'
+import {
+  parseReadyBoardResourceDragPayload,
+  READY_BOARD_RESOURCE_MIME,
+} from '../../../../utils/boardTransfer'
 
 export interface UseAttachmentIntakeParams {
   addAttachments: (attachments: ChatAttachment[]) => void
@@ -25,6 +29,29 @@ export function useAttachmentIntake(params: UseAttachmentIntakeParams): Attachme
       e.stopPropagation()
       setIsDragOver(false)
 
+      const boardRaw = e.dataTransfer.getData(READY_BOARD_RESOURCE_MIME)
+      const boardPayload = parseReadyBoardResourceDragPayload(boardRaw)
+      if (boardPayload) {
+        const fileAttachments = boardPayload.resources
+          .filter((resource) => resource.kind === 'file')
+          .map((resource) => createLocalPathAttachment({
+            name: resource.title || resource.name,
+            path: resource.path,
+            ext: resource.ext,
+            size: resource.size,
+            isDirectory: false,
+          }))
+        if (fileAttachments.length > 0) addAttachments(fileAttachments)
+        const textResources = boardPayload.resources.filter((resource) => resource.kind === 'text')
+        if (textResources.length > 0) {
+          const currentInput = useAgent.getState().inputValue
+          const snippet = ['### 画布引用', ...textResources.map((resource) => resource.text)].join('\n\n')
+          setInputValue(currentInput ? `${currentInput}\n\n${snippet}` : snippet)
+        }
+        focusInputWithResize()
+        return
+      }
+
       const readyRaw = e.dataTransfer.getData('application/x-ready-drag')
       if (readyRaw) {
         try {
@@ -32,6 +59,7 @@ export function useAttachmentIntake(params: UseAttachmentIntakeParams): Attachme
             type:
               | 'file'
               | 'folder'
+              | 'batch'
               | 'browser-tab'
               | 'doc-tab'
               | 'design-project'
@@ -67,9 +95,31 @@ export function useAttachmentIntake(params: UseAttachmentIntakeParams): Attachme
             source?: 'system' | 'imported'
             skillId?: string
             defaultCommand?: string
+            items?: Array<{
+              type?: 'file' | 'folder'
+              path?: string
+              name?: string
+              ext?: string
+              size?: number
+              isDirectory?: boolean
+            }>
           }
 
-          if (data.type === 'skill-folder' && data.path) {
+          if (data.type === 'batch' && Array.isArray(data.items)) {
+            const attachments = data.items
+              .filter((item) => item.path && item.name)
+              .map((item) => createLocalPathAttachment({
+                name: item.name || getPathBasename(item.path || ''),
+                path: item.path || '',
+                ext: item.ext,
+                size: item.size,
+                isDirectory: item.type === 'folder' || item.isDirectory === true
+              }))
+            if (attachments.length > 0) {
+              addAttachments(attachments)
+              focusInputWithResize()
+            }
+          } else if (data.type === 'skill-folder' && data.path) {
             const inferredSkillId = data.skillId
 
             addAttachments([

@@ -2963,6 +2963,7 @@ interface ElectronAppShortcutEvent {
 interface ElectronAppAPI {
   checkUpdate: () => Promise<{ success: boolean; version?: string | null; error?: string }>
   installUpdate: () => Promise<void>
+  writeImageToClipboard: (payload: { path: string; text?: string }) => Promise<{ success: boolean; error?: string }>
   onUpdateStatus: (callback: (data: ElectronUpdateStatus) => void) => () => void
   onShortcut: (callback: (data: ElectronAppShortcutEvent) => void) => () => void
   // D1: cache stats + cleanup

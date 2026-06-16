@@ -4,7 +4,7 @@ import { resolve } from 'path'
 // Load .env from project root (before anything else)
 config({ path: resolve(__dirname, '../../.env') })
 
-import { app, shell, BrowserWindow, ipcMain, protocol, nativeImage, nativeTheme, Menu, dialog, type MenuItemConstructorOptions, type NativeImage } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, protocol, nativeImage, nativeTheme, Menu, dialog, clipboard, type MenuItemConstructorOptions, type NativeImage } from 'electron'
 import { join, extname, isAbsolute } from 'path'
 import { createReadStream, statSync, existsSync, mkdirSync } from 'fs'
 import { readFile } from 'fs/promises'
@@ -754,6 +754,21 @@ function setupAutoUpdater(mainWindow: BrowserWindow): void {
   // IPC: quit and install downloaded update
   ipcMain.handle('app:install-update', () => {
     autoUpdater.quitAndInstall()
+  })
+
+  ipcMain.handle('app:writeImageToClipboard', async (_, payload: { path?: unknown; text?: unknown }) => {
+    try {
+      const imagePath = typeof payload?.path === 'string' ? payload.path.trim() : ''
+      if (!imagePath || !isAbsolute(imagePath)) return { success: false, error: 'Invalid image path' }
+      if (!existsSync(imagePath) || !statSync(imagePath).isFile()) return { success: false, error: 'Image not found' }
+      const image = nativeImage.createFromPath(imagePath)
+      if (image.isEmpty()) return { success: false, error: 'Unsupported image' }
+      const text = typeof payload?.text === 'string' ? payload.text : imagePath
+      clipboard.write({ image, text })
+      return { success: true }
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) }
+    }
   })
 
   // Check for updates after a short delay to avoid slowing down startup

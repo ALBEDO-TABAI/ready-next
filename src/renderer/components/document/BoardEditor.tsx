@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ArrowRight,
   FileText,
+  GripVertical,
   ImagePlus,
   Magnet,
   MousePointer2,
@@ -28,7 +29,14 @@ import type {
   ReadyBoardVideoNode,
 } from '../../../shared/ready-board'
 import { createEmptyReadyBoardState, normalizeReadyBoardState } from '../../../shared/ready-board'
+import { addReadyContextReferenceToAgentInput, appendToAgentInput } from '../../modules/agent/chat-input-bridge'
 import { useDocTabs, type DocTab } from '../../stores/useDocTabs'
+import {
+  buildReadyBoardSelectionTransfer,
+  writeReadyBoardTransferToDataTransfer,
+  type ReadyBoardResourceDragPayload,
+  type ReadyBoardTransferFileResource,
+} from '../../utils/boardTransfer'
 import { toLocalFileUrl } from '../../utils/dragDrop'
 import {
   getBoardNodeBounds,
@@ -38,10 +46,18 @@ import {
   type BoardRect,
   type BoardSnapGuide,
 } from './boardInteraction'
+import BoardContextMenu from './BoardContextMenu'
 import './BoardEditor.css'
 
 type Tool = 'select' | 'pen'
 type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error'
+type BoardContextMenuState = {
+  visible: boolean
+  x: number
+  y: number
+  boardPoint: { x: number; y: number }
+  selectedIds: string[]
+}
 type BoardIPCResponse<T> = {
   success: boolean
   data?: T
@@ -251,6 +267,7 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
   const [snapEnabled, setSnapEnabled] = useState(false)
   const [marqueeRect, setMarqueeRect] = useState<BoardRect | null>(null)
   const [snapGuides, setSnapGuides] = useState<BoardSnapGuide[]>([])
+  const [contextMenu, setContextMenu] = useState<BoardContextMenuState | null>(null)
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
   const [error, setError] = useState<string | null>(null)
   const surfaceRef = useRef<HTMLDivElement | null>(null)
@@ -287,6 +304,15 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
 
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds])
   const hasSelection = selectedIds.length > 0
+  const contextMenuTransfer = useMemo(() => {
+    if (!contextMenu) return null
+    return buildReadyBoardSelectionTransfer({
+      boardPath: tab.path,
+      boardTitle: state.title,
+      nodes: state.nodes,
+      selectedIds: contextMenu.selectedIds,
+    })
+  }, [contextMenu, state.nodes, state.title, tab.path])
 
   const screenToBoard = useCallback((clientX: number, clientY: number) => {
     const surface = surfaceRef.current
@@ -414,6 +440,75 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
     setSelectedIds(nodes[nodes.length - 1]?.id ? [nodes[nodes.length - 1].id] : [])
   }, [patchState, screenToBoard])
 
+  const addTextAt = useCallback((text: string, point?: { x: number; y: number }) => {
+    const trimmed = text.trim()
+    if (!trimmed) return
+    const lines = trimmed.split(/\r?\n/)
+    const node: ReadyBoardNode = {
+      id: makeNodeId(),
+      type: 'text',
+      text: trimmed,
+      fontSize: 24,
+      color: 'var(--text-title)',
+      x: point?.x ?? -120,
+      y: point?.y ?? -60,
+      width: Math.max(220, Math.min(520, Math.max(...lines.map((line) => line.length), 1) * 13)),
+      height: Math.max(80, Math.min(360, lines.length * 34 + 28)),
+    }
+    patchState((current) => ({ ...current, nodes: [...current.nodes, node] }))
+    setSelectedIds([node.id])
+  }, [patchState])
+
+  const buildTransferForIds = useCallback((ids: readonly string[]): ReadyBoardResourceDragPayload | null => {
+    return buildReadyBoardSelectionTransfer({
+      boardPath: tab.path,
+      boardTitle: stateRef.current.title,
+      nodes: stateRef.current.nodes,
+      selectedIds: ids,
+    })
+  }, [tab.path])
+
+  const copyTransferToClipboard = useCallback(async (payload: ReadyBoardResourceDragPayload | null) => {
+    if (!payload) return
+    const fileResources = payload.resources.filter((resource): resource is ReadyBoardTransferFileResource => resource.kind === 'file')
+    const singleImage = payload.resources.length === 1 && fileResources[0]?.nodeType === 'image'
+      ? fileResources[0]
+      : null
+    try {
+      if (singleImage && window.electronAPI?.app?.writeImageToClipboard) {
+        const result = await window.electronAPI.app.writeImageToClipboard({
+          path: singleImage.path,
+          text: payload.markdown || payload.plainText,
+        })
+        if (result?.success) return
+      }
+      await navigator.clipboard.writeText(payload.markdown || payload.plainText)
+    } catch (clipboardError) {
+      setError(`复制失败：${clipboardError instanceof Error ? clipboardError.message : String(clipboardError)}`)
+    }
+  }, [])
+
+  const referenceTransferToAgent = useCallback(async (payload: ReadyBoardResourceDragPayload | null) => {
+    if (!payload) return
+    const fileResources = payload.resources.filter((resource): resource is ReadyBoardTransferFileResource => resource.kind === 'file')
+    for (const resource of fileResources) {
+      await addReadyContextReferenceToAgentInput({
+        type: 'file',
+        name: resource.title || resource.name,
+        path: resource.path,
+        ext: resource.ext,
+        size: resource.size,
+      })
+    }
+    const textResources = payload.resources.filter((resource) => resource.kind === 'text')
+    if (textResources.length > 0) {
+      appendToAgentInput([
+        '### 画布引用',
+        ...textResources.map((resource) => resource.text),
+      ].join('\n\n'))
+    }
+  }, [])
+
   const importPaths = useCallback(async (paths: string[], clientX?: number, clientY?: number) => {
     const id = boardIdRef.current
     if (!id) return
@@ -459,6 +554,28 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
     }
   }, [addAssetsAt])
 
+  const pasteClipboardAt = useCallback(async (point?: { x: number; y: number }) => {
+    try {
+      const text = await navigator.clipboard.readText()
+      const trimmed = text.trim()
+      if (!trimmed) return
+      const lines = trimmed.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
+      const urls = lines.filter(isHttpUrl)
+      if (urls.length > 0 && urls.length === lines.length) {
+        void importRemoteUrls(urls)
+        return
+      }
+      const localPaths = lines.filter(isLocalPathLike)
+      if (localPaths.length > 0 && localPaths.length === lines.length) {
+        void importPaths(localPaths)
+        return
+      }
+      addTextAt(trimmed, point)
+    } catch (clipboardError) {
+      setError(`粘贴失败：${clipboardError instanceof Error ? clipboardError.message : String(clipboardError)}`)
+    }
+  }, [addTextAt, importPaths, importRemoteUrls])
+
   const pickAsset = useCallback(async (kind: ReadyBoardAssetKind | 'any') => {
     const id = boardIdRef.current
     if (!id) return
@@ -478,14 +595,22 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
       const target = event.target as HTMLElement | null
       if (target?.closest('input, textarea, [contenteditable="true"]')) return
       const text = event.clipboardData?.getData('text/plain')?.trim()
-      const urls = text
-        ? text.split(/\r?\n/).map((line) => line.trim()).filter(isHttpUrl)
+      const lines = text
+        ? text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean)
         : []
-      if (urls.length > 0) {
+      const urls = lines.filter(isHttpUrl)
+      const localTextPaths = lines.filter(isLocalPathLike)
+      if (urls.length > 0 && urls.length === lines.length) {
         event.preventDefault()
         void importRemoteUrls(urls)
         return
       }
+      if (localTextPaths.length > 0 && localTextPaths.length === lines.length) {
+        event.preventDefault()
+        void importPaths(localTextPaths)
+        return
+      }
+      const textToAdd = text && lines.length > 0 ? text : ''
       const files = Array.from(event.clipboardData?.files || [])
       const paths: string[] = []
       for (const file of files) {
@@ -495,11 +620,16 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
       if (paths.length > 0) {
         event.preventDefault()
         void importPaths(paths)
+        return
+      }
+      if (textToAdd) {
+        event.preventDefault()
+        addTextAt(textToAdd)
       }
     }
     window.addEventListener('paste', handlePaste)
     return () => window.removeEventListener('paste', handlePaste)
-  }, [importPaths, importRemoteUrls])
+  }, [addTextAt, importPaths, importRemoteUrls])
 
   const addShape = useCallback((type: ReadyBoardNodeType) => {
     const base = { id: makeNodeId(), x: -80, y: -60, width: 180, height: 120 }
@@ -719,6 +849,47 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
     if (localPaths.length > 0) void importPaths(localPaths, event.clientX, event.clientY)
   }, [importPaths, importRemoteUrls])
 
+  const handleSurfaceContextMenu = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    const point = screenToBoard(event.clientX, event.clientY)
+    setContextMenu({
+      visible: true,
+      x: event.clientX,
+      y: event.clientY,
+      boardPoint: point,
+      selectedIds: selectedIdsRef.current,
+    })
+  }, [screenToBoard])
+
+  const handleNodeContextMenu = useCallback((event: React.MouseEvent<HTMLDivElement>, node: ReadyBoardNode) => {
+    event.preventDefault()
+    event.stopPropagation()
+    const ids = selectedIdsRef.current.includes(node.id) ? selectedIdsRef.current : [node.id]
+    setSelectedIds(ids)
+    setContextMenu({
+      visible: true,
+      x: event.clientX,
+      y: event.clientY,
+      boardPoint: screenToBoard(event.clientX, event.clientY),
+      selectedIds: ids,
+    })
+  }, [screenToBoard])
+
+  const closeContextMenu = useCallback(() => {
+    setContextMenu(null)
+  }, [])
+
+  const handleSelectionDragStart = useCallback((event: React.DragEvent<HTMLButtonElement>, node: ReadyBoardNode) => {
+    event.stopPropagation()
+    const ids = selectedIdsRef.current.includes(node.id) ? selectedIdsRef.current : [node.id]
+    const payload = buildTransferForIds(ids)
+    if (!payload) {
+      event.preventDefault()
+      return
+    }
+    writeReadyBoardTransferToDataTransfer(event.dataTransfer, payload)
+  }, [buildTransferForIds])
+
   const setZoom = useCallback((delta: number) => {
     patchState((current) => ({
       ...current,
@@ -744,6 +915,7 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
         className={`ready-board-node ready-board-node--${node.type} ${selected ? 'is-selected' : ''}`}
         style={style}
         onPointerDown={(event) => handleNodePointerDown(event, node)}
+        onContextMenu={(event) => handleNodeContextMenu(event, node)}
         onDoubleClick={() => editTextNode(node)}
       >
         {node.type === 'image' && <img draggable={false} src={assetUrl(tab.path, node.src)} alt={node.alt || node.title || ''} />}
@@ -784,6 +956,18 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
               strokeWidth={node.strokeWidth}
             />
           </svg>
+        )}
+        {selected && (
+          <button
+            className="ready-board-drag-handle"
+            aria-label="拖出选区"
+            title="拖出选区"
+            draggable
+            onPointerDown={(event) => event.stopPropagation()}
+            onDragStart={(event) => handleSelectionDragStart(event, node)}
+          >
+            <GripVertical size={13} />
+          </button>
         )}
         {selected && selectedIds.length === 1 && (
           <button
@@ -850,6 +1034,7 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
         onPointerUp={handlePointerUp}
         onPointerCancel={handlePointerUp}
         onWheel={handleWheel}
+        onContextMenu={handleSurfaceContextMenu}
         onDragOver={(event) => event.preventDefault()}
         onDrop={handleDrop}
       >
@@ -880,6 +1065,16 @@ export default function BoardEditor({ tab }: BoardEditorProps) {
           ))}
         </div>
       </div>
+      <BoardContextMenu
+        visible={Boolean(contextMenu?.visible)}
+        position={{ x: contextMenu?.x ?? 0, y: contextMenu?.y ?? 0 }}
+        canCopy={Boolean(contextMenuTransfer)}
+        canReference={Boolean(contextMenuTransfer)}
+        onCopy={() => void copyTransferToClipboard(contextMenuTransfer)}
+        onPaste={() => void pasteClipboardAt(contextMenu?.boardPoint)}
+        onReferenceToAgent={() => void referenceTransferToAgent(contextMenuTransfer)}
+        onClose={closeContextMenu}
+      />
     </div>
   )
 }

@@ -1,4 +1,9 @@
 import type React from 'react'
+import {
+  parseReadyBoardResourceDragPayload,
+  READY_BOARD_RESOURCE_MIME,
+  type ReadyBoardResourceDragPayload,
+} from '../../utils/boardTransfer'
 
 export interface BrowserTabDragPayload {
   type: 'browser-tab'
@@ -29,7 +34,11 @@ export interface WebDownloadDragPayload {
   unsupportedReason?: string
 }
 
-export type FileTreeExternalDropPayload = BrowserTabDragPayload | RSSItemDragPayload | WebDownloadDragPayload
+export type FileTreeExternalDropPayload =
+  | BrowserTabDragPayload
+  | RSSItemDragPayload
+  | WebDownloadDragPayload
+  | ReadyBoardResourceDragPayload
 
 export type FileTreeDropTarget =
   | {
@@ -250,6 +259,12 @@ export function parseWebDownloadDragPayload(dataTransfer: Pick<DataTransfer, 'ge
   return buildWebDownloadPayload(dataTransfer.getData('text/plain'), 'url-list')
 }
 
+export function parseReadyBoardFileTreeDropPayload(dataTransfer: Pick<DataTransfer, 'getData'>): ReadyBoardResourceDragPayload | null {
+  const payload = parseReadyBoardResourceDragPayload(dataTransfer.getData(READY_BOARD_RESOURCE_MIME))
+  if (!payload || payload.paths.length === 0) return null
+  return payload
+}
+
 interface SetRssItemDragInput {
   id: string
   title: string
@@ -423,7 +438,9 @@ const VIDEO_DROP_EXTS = ['.mp4', '.mov', '.mkv', '.avi', '.webm', '.m4v', '.flv'
 
 export function isLikelyVideoDropPayload(payload: FileTreeExternalDropPayload): boolean {
   const url =
-    payload.type === 'browser-tab'
+    payload.type === 'ready-board-selection'
+      ? ''
+      : payload.type === 'browser-tab'
       ? payload.url
       : payload.type === 'rss-item'
         ? payload.link
@@ -536,7 +553,7 @@ export async function dispatchFileTreeExternalDropAction({
   onAnalysisPlaceholderStart,
   onAnalysisPlaceholderUpdate,
 }: DispatchFileTreeExternalDropArgs): Promise<void> {
-  if (payload.type === 'web-download-url') return
+  if (payload.type === 'web-download-url' || payload.type === 'ready-board-selection') return
 
   const targetDir =
     target.kind === 'inside-directory' ? target.dirPath : target.containerPath
