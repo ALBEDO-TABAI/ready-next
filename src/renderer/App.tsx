@@ -16,6 +16,7 @@ import { fetchRSSWarmSnapshot } from './modules/rss/rssWarmLoader'
 import { primeRSSWarmCache } from './modules/rss/rssWarmCache'
 
 const LiquidTest = lazy(() => import('./LiquidTest'))
+const StartupPreview = lazy(() => import('./pages/StartupPreview'))
 
 // fire-and-forget: module-load warm cache prime; failure just means the first RSS read runs cold.
 void primeRSSWarmCache(fetchRSSWarmSnapshot).catch(() => undefined)
@@ -109,6 +110,14 @@ function MainAppShell() {
               element={(
                 <Suspense fallback={<div className="h-full w-full" />}>
                   <LiquidTest />
+                </Suspense>
+              )}
+            />
+            <Route
+              path="/startup-preview"
+              element={(
+                <Suspense fallback={<div className="h-full w-full" />}>
+                  <StartupPreview />
                 </Suspense>
               )}
             />

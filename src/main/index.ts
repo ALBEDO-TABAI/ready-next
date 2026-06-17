@@ -92,6 +92,9 @@ const agentManager = new AgentManager(ENABLE_MOCK_SERVICES)
 
 // Track the current main window for window-state IPC handlers
 let mainWindow: BrowserWindow | null = null
+let startupSplashWindow: BrowserWindow | null = null
+let startupSplashFinishing = false
+let startupSplashShownAtMs: number | null = null
 let browserController: BrowserController | null = null
 let petWindowManager: PetWindowManager | null = null
 let reminderScheduler: ReminderScheduler | null = null
@@ -342,6 +345,10 @@ async function showMainWindow(): Promise<void> {
     mainWindow.restore()
   }
   if (!mainWindow.isVisible()) {
+    if (startupSplashWindow && !startupSplashWindow.isDestroyed()) {
+      startupSplashWindow.focus()
+      return
+    }
     mainWindow.show()
   }
   mainWindow.focus()
@@ -349,6 +356,8 @@ async function showMainWindow(): Promise<void> {
 
 const MAIN_WINDOW_RENDERER_RETRY_DELAY_MS = 500
 const TRANSPARENT_SURFACE_REFRESH_DELAY_MS = 50
+const STARTUP_SPLASH_MIN_VISIBLE_MS = 2400
+const STARTUP_SPLASH_CLOSE_FALLBACK_MS = 9000
 let transparentSurfaceRefreshInFlight = false
 
 async function refreshMainWindowTransparentSurface(): Promise<void> {
@@ -365,22 +374,143 @@ async function refreshMainWindowTransparentSurface(): Promise<void> {
   }
 }
 
-async function loadMainWindowRenderer(window: BrowserWindow): Promise<void> {
+function resolveStartupSplashVariant(): 'orange' | 'pink' {
+  const skin = resolveStoredThemeSkin()
+  return skin === 'solid-green-glass' || skin === 'solid-blue-glass' ? 'pink' : 'orange'
+}
+
+async function loadRendererRoute(window: BrowserWindow, hashPath?: string): Promise<void> {
   const devRendererUrl = is.dev ? process.env['ELECTRON_RENDERER_URL'] : undefined
   if (devRendererUrl) {
-    try {
-      await window.loadURL(devRendererUrl)
-      return
-    } catch (error) {
-      console.warn('[main-window] renderer load failed; retrying once:', error instanceof Error ? error.message : String(error))
-      await new Promise((resolve) => setTimeout(resolve, MAIN_WINDOW_RENDERER_RETRY_DELAY_MS))
-      if (window.isDestroyed()) return
-      await window.loadURL(devRendererUrl)
-      return
-    }
+    const baseUrl = devRendererUrl.endsWith('/') ? devRendererUrl : `${devRendererUrl}/`
+    await window.loadURL(hashPath ? `${baseUrl}#${hashPath}` : baseUrl)
+    return
+  }
+
+  if (hashPath) {
+    await window.loadFile(join(__dirname, '../renderer/index.html'), { hash: hashPath })
+    return
   }
 
   await window.loadFile(join(__dirname, '../renderer/index.html'))
+}
+
+async function loadMainWindowRenderer(window: BrowserWindow): Promise<void> {
+  try {
+    await loadRendererRoute(window)
+    return
+  } catch (error) {
+    console.warn('[main-window] renderer load failed; retrying once:', error instanceof Error ? error.message : String(error))
+    await new Promise((resolve) => setTimeout(resolve, MAIN_WINDOW_RENDERER_RETRY_DELAY_MS))
+    if (window.isDestroyed()) return
+    await loadRendererRoute(window)
+  }
+}
+
+function showMainWindowAfterStartup(): void {
+  const window = mainWindow
+  if (!window || window.isDestroyed()) return
+  window.webContents.setZoomFactor(1)
+  if (window.isMinimized()) {
+    window.restore()
+  }
+  if (!window.isVisible()) {
+    window.show()
+  }
+  window.focus()
+  setTimeout(() => {
+    void refreshMainWindowTransparentSurface()
+  }, TRANSPARENT_SURFACE_REFRESH_DELAY_MS)
+}
+
+function finishStartupSplashAndShowMainWindow(): void {
+  const splashWindow = startupSplashWindow
+  if (!splashWindow || splashWindow.isDestroyed()) {
+    showMainWindowAfterStartup()
+    return
+  }
+  if (startupSplashFinishing) return
+
+  startupSplashFinishing = true
+  splashWindow.once('closed', () => {
+    startupSplashWindow = null
+    showMainWindowAfterStartup()
+  })
+
+  const shownAtMs = startupSplashShownAtMs ?? Date.now()
+  const finishDelayMs = Math.max(0, STARTUP_SPLASH_MIN_VISIBLE_MS - (Date.now() - shownAtMs))
+
+  setTimeout(() => {
+    if (splashWindow.isDestroyed()) return
+    void splashWindow.webContents.executeJavaScript("window.dispatchEvent(new Event('ready-startup-finish'))").catch((error) => {
+      console.warn('[startup-splash] finish signal failed:', error instanceof Error ? error.message : String(error))
+      if (!splashWindow.isDestroyed()) splashWindow.close()
+    })
+  }, finishDelayMs)
+
+  setTimeout(() => {
+    if (!splashWindow.isDestroyed()) splashWindow.close()
+  }, finishDelayMs + STARTUP_SPLASH_CLOSE_FALLBACK_MS)
+}
+
+async function createStartupSplashWindow(): Promise<void> {
+  if (startupSplashWindow && !startupSplashWindow.isDestroyed()) return
+
+  startupSplashFinishing = false
+  startupSplashShownAtMs = null
+  const variant = resolveStartupSplashVariant()
+  const splashWindow = new BrowserWindow({
+    width: 650,
+    height: 190,
+    show: false,
+    frame: false,
+    resizable: false,
+    movable: true,
+    minimizable: false,
+    maximizable: false,
+    fullscreenable: false,
+    skipTaskbar: true,
+    transparent: true,
+    hasShadow: false,
+    backgroundColor: '#00000000',
+    autoHideMenuBar: true,
+    webPreferences: {
+      sandbox: false,
+      contextIsolation: true,
+      nodeIntegration: false,
+      backgroundThrottling: false
+    }
+  })
+
+  startupSplashWindow = splashWindow
+  splashWindow.on('closed', () => {
+    if (startupSplashWindow === splashWindow) {
+      startupSplashWindow = null
+    }
+  })
+  splashWindow.once('ready-to-show', () => {
+    if (!splashWindow.isDestroyed()) {
+      splashWindow.show()
+      startupSplashShownAtMs = Date.now()
+    }
+  })
+
+  try {
+    await loadRendererRoute(splashWindow, `/startup-preview?variant=${variant}&mode=splash-window`)
+    await new Promise<void>((resolve) => {
+      if (splashWindow.isDestroyed() || splashWindow.isVisible()) {
+        resolve()
+        return
+      }
+      const settle = () => resolve()
+      splashWindow.once('ready-to-show', settle)
+      splashWindow.once('closed', settle)
+      setTimeout(settle, 1500)
+    })
+  } catch (error) {
+    console.warn('[startup-splash] renderer load failed:', error instanceof Error ? error.message : String(error))
+    if (!splashWindow.isDestroyed()) splashWindow.close()
+  }
 }
 
 async function createWindow(): Promise<void> {
@@ -431,6 +561,9 @@ async function createWindow(): Promise<void> {
     if (mainWindow === closedWindow) {
       mainWindow = null
       windowMaterialController = null
+      if (startupSplashWindow && !startupSplashWindow.isDestroyed()) {
+        startupSplashWindow.close()
+      }
     }
   })
 
@@ -453,11 +586,7 @@ async function createWindow(): Promise<void> {
   })
 
   mainWindow.on('ready-to-show', () => {
-    mainWindow?.webContents.setZoomFactor(1)
-    mainWindow?.show()
-    setTimeout(() => {
-      void refreshMainWindowTransparentSurface()
-    }, TRANSPARENT_SURFACE_REFRESH_DELAY_MS)
+    finishStartupSplashAndShowMainWindow()
   })
 
   mainWindow.webContents.setWindowOpenHandler((details) => {
@@ -809,7 +938,7 @@ protocol.registerSchemesAsPrivileged([
 
 // This method will be called when Electron has finished
 // initialization and is ready to create browser windows.
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   // Set app user model id for windows
   electronApp.setAppUserModelId('com.ready.app')
   applyAppIcon()
@@ -838,6 +967,7 @@ app.whenReady().then(() => {
     stopBootForDatabaseFailure(error)
     return
   }
+  await createStartupSplashWindow()
   try {
     reconcileStartupRunsOnStartup()
   } catch (error) {
