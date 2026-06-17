@@ -21,6 +21,7 @@ import {
 } from '../helpers/badges'
 import type { TaskCardRun } from '../../task-card-from-projection'
 import { AgentStatusDot } from '../../../ui/dot-matrix/AgentStatusDot'
+import { LiquidSurfaceLayer } from '../../../ui/liquid-glass/LiquidFloatingPanel'
 
 // ---------------------------------------------------------------------------
 // Stage V V1.6 — `TaskCard` + `ToolTraceCard` extracted from ChatPanel.tsx.
@@ -227,27 +228,35 @@ export function TaskCard({
 
   return (
     <div
+      className="ready-liquid-card"
       data-ready-task-card="true"
       data-ready-task-scope-id={run.scopeId || undefined}
       data-ready-task-id={run.taskId || undefined}
       data-ready-task-child-run-id={childRunId || undefined}
       style={{
-        borderRadius: 12,
-        border: '1px solid var(--border-default)',
-        // EP2 dogfood gap 5 — light task-card glass surface: enough opacity
-        // + a gentle blur to stay readable when scrolled into the composer
-        // overlay zone. NOT the composer's liquid-glass treatment (no outer
-        // dark shadow, no mirrored refraction) — a lightweight surface only.
-        background: 'var(--ready-task-card-bg, color-mix(in srgb, var(--surface-card-bg) 68%, transparent))',
-        backdropFilter: 'blur(10px) saturate(1.08)',
-        WebkitBackdropFilter: 'blur(10px) saturate(1.08)',
+        borderRadius: 18,
+        border: 'none',
+        background: 'var(--ready-liquid-card-base-bg, rgba(248, 250, 252, 0.54))',
         padding: compact ? '10px 12px' : '12px 12px 10px',
         display: 'flex',
         flexDirection: 'column',
-        gap: 8
+        gap: 8,
+        position: 'relative',
+        overflow: 'hidden',
+        isolation: 'isolate',
       }}
     >
-      <button
+      <LiquidSurfaceLayer
+        className="ready-liquid-popover__lens ready-liquid-card__lens"
+        radius={18}
+        blur={14}
+        withProjection={false}
+        saturation={1.18}
+        brightness={1.05}
+        contrast={0.84}
+      />
+      <div className="ready-liquid-card__content" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <button
         type="button"
         onClick={onToggleExpanded}
         className="flex items-start justify-between gap-3"
@@ -724,6 +733,7 @@ export function TaskCard({
             )}
           </div>
         )}
+      </div>
     </div>
   )
 }

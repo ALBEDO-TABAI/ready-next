@@ -118,6 +118,12 @@ export function LiquidLens({
     if (!host) return
     let frame = 0
     let lastKey = ''
+    const requestFrame = typeof requestAnimationFrame === 'function'
+      ? requestAnimationFrame
+      : window.requestAnimationFrame?.bind(window)
+    const cancelFrame = typeof cancelAnimationFrame === 'function'
+      ? cancelAnimationFrame
+      : window.cancelAnimationFrame?.bind(window)
 
     const regenerate = () => {
       frame = 0
@@ -148,7 +154,13 @@ export function LiquidLens({
     }
 
     const schedule = () => {
-      if (!frame) frame = requestAnimationFrame(regenerate)
+      if (!frame) {
+        if (requestFrame) {
+          frame = requestFrame(regenerate)
+        } else {
+          regenerate()
+        }
+      }
     }
     schedule()
     // jsdom-based render tests have no ResizeObserver; the lens then simply
@@ -157,7 +169,7 @@ export function LiquidLens({
     observer?.observe(host)
     return () => {
       observer?.disconnect()
-      if (frame) cancelAnimationFrame(frame)
+      if (frame && cancelFrame) cancelFrame(frame)
     }
   }, [radius, bevel, depth, ior, dome])
 

@@ -19,6 +19,7 @@ import ChatInput, { type ChatInputHandle } from '../ChatInput'
 import { SoftFailureCapsule } from '../SoftFailureCapsule'
 import ChatAttachments from '../ChatAttachments'
 import ContextMenu from '../../layout/ContextMenu'
+import { LiquidSurfaceLayer } from '../../ui/liquid-glass/LiquidFloatingPanel'
 import type { TaskCardRun } from '../task-card-from-projection'
 import { MarkdownContent } from './markdown'
 import ModelSelector from './model-selector/ModelSelector'
@@ -414,58 +415,81 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
           >
             {referenceSkillHint && (
               <div
-                className="glass-surface-card"
+                className="ready-liquid-card"
                 data-reference-skill-hint="true"
                 style={{
-                  borderRadius: 8,
-                  border: '1px solid var(--border-default)',
-                  background: 'var(--ready-reference-card-bg, color-mix(in srgb, var(--surface-panel-bg) 44%, transparent))',
+                  borderRadius: 18,
+                  border: 'none',
+                  background: 'var(--ready-liquid-card-base-bg, rgba(248, 250, 252, 0.54))',
                   padding: '8px 10px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
-                  gap: 10
+                  gap: 10,
+                  position: 'relative',
+                  overflow: 'hidden',
+                  isolation: 'isolate',
                 }}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
-                  <Puzzle
-                    style={{ width: 15, height: 15, color: 'var(--accent-primary)' }}
-                    strokeWidth={2}
-                  />
-                  <div style={{ minWidth: 0 }}>
-                    <div
-                      style={{
-                        fontSize: 11,
-                        fontWeight: 600,
-                        color: 'var(--text-light)',
-                        letterSpacing: '0.08em',
-                        textTransform: 'uppercase'
-                      }}
-                    >
-                      技能上下文
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 12.5,
-                        fontWeight: 600,
-                        color: 'var(--text-body)',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        whiteSpace: 'nowrap'
-                      }}
-                    >
-                      {referenceSkillHint.name || referenceSkillHint.id}
-                    </div>
-                  </div>
-                </div>
+                <LiquidSurfaceLayer
+                  className="ready-liquid-popover__lens ready-liquid-card__lens"
+                  radius={18}
+                  blur={14}
+                  withProjection={false}
+                  saturation={1.18}
+                  brightness={1.05}
+                  contrast={0.84}
+                />
                 <div
+                  className="ready-liquid-card__content"
                   style={{
-                    flexShrink: 0,
-                    fontSize: 11,
-                    color: 'var(--text-muted)'
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 10,
+                    width: '100%',
                   }}
                 >
-                  上下文已启用
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
+                    <Puzzle
+                      style={{ width: 15, height: 15, color: 'var(--accent-primary)' }}
+                      strokeWidth={2}
+                    />
+                    <div style={{ minWidth: 0 }}>
+                      <div
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 600,
+                          color: 'var(--text-light)',
+                          letterSpacing: '0.08em',
+                          textTransform: 'uppercase'
+                        }}
+                      >
+                        技能上下文
+                      </div>
+                      <div
+                        style={{
+                          fontSize: 12.5,
+                          fontWeight: 600,
+                          color: 'var(--text-body)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap'
+                        }}
+                      >
+                        {referenceSkillHint.name || referenceSkillHint.id}
+                      </div>
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      flexShrink: 0,
+                      fontSize: 11,
+                      color: 'var(--text-muted)'
+                    }}
+                  >
+                    上下文已启用
+                  </div>
                 </div>
               </div>
             )}
