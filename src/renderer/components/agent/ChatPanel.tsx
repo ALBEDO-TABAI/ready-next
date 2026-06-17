@@ -764,6 +764,19 @@ export default function ChatPanel({
     focusInputWithResize()
   }, [addAttachments, focusInputWithResize])
 
+  const handleReferenceSelect = useCallback((attachment: ChatAttachment) => {
+    const exists = useAgent.getState().attachments.some((item) => (
+      item.source === attachment.source &&
+      item.path === attachment.path &&
+      item.name === attachment.name &&
+      item.lineStart === attachment.lineStart &&
+      item.lineEnd === attachment.lineEnd &&
+      (item.selection || '') === (attachment.selection || '')
+    ))
+    if (!exists) addAttachments([attachment])
+    focusInputWithResize()
+  }, [addAttachments, focusInputWithResize])
+
   const handleNewSession = useCallback(() => {
     // Stage X2.3 — header "new session" button goes through the visible
     // tab API; see useAgent.createNewSession jsdoc for the contract.
@@ -1016,6 +1029,7 @@ export default function ChatPanel({
       onPickFiles={pickFiles}
       onAgentSelect={handleAgentSelect}
       onSkillReference={handleSkillReference}
+      onReferenceSelect={handleReferenceSelect}
       setActiveAttachmentPreview={setActiveAttachmentPreview}
       setAttachmentPreviewLoading={setAttachmentPreviewLoading}
     />

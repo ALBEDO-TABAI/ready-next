@@ -384,6 +384,17 @@ interface DocumentTargetGuard {
   saveToolDefinition?: ToolDefinition
 }
 
+type ObservedDocumentSaveState = 'saved' | 'dirty' | 'unsaved'
+
+interface ObservedDocumentToolTarget {
+  tabId: string
+  title: string
+  path: string | null
+  dirty: boolean
+  requiresSave: boolean
+  saveState: ObservedDocumentSaveState
+}
+
 interface SkillContextOrchestratorLike {
   findExplicitlyRequestedSkills?: (userText: string) => Array<{
     id?: string
@@ -1136,6 +1147,47 @@ function documentSaveSucceeded(output: ToolExecutionOutput): boolean {
   const data = getToolDataRecord(output)
   if (typeof data.documentSaved === 'boolean') return data.documentSaved
   return !isDocumentToolFailureText(output.text)
+}
+
+function readDocumentToolTargetFromData(data: Record<string, unknown>): ObservedDocumentToolTarget | null {
+  const nested = asRecord(data.document)
+  const tabId = readTextField(nested || data, 'tabId') || readTextField(data, 'documentTabId')
+  const title = readTextField(nested || data, 'title') || readTextField(data, 'documentTitle')
+  if (!tabId || !title) return null
+  const path = readTextField(nested || data, 'path') || readTextField(data, 'documentPath')
+  const dirtyValue = (nested || data).dirty ?? data.documentDirty
+  const requiresSaveValue = (nested || data).requiresSave ?? data.documentRequiresSave
+  const rawSaveState = readTextField(nested || data, 'saveState') || readTextField(data, 'documentSaveState')
+  const dirty = typeof dirtyValue === 'boolean' ? dirtyValue : false
+  const inferredSaveState: ObservedDocumentSaveState = path ? (dirty ? 'dirty' : 'saved') : 'unsaved'
+  const saveState: ObservedDocumentSaveState =
+    rawSaveState === 'saved' || rawSaveState === 'dirty' || rawSaveState === 'unsaved'
+      ? rawSaveState
+      : inferredSaveState
+  const requiresSave = typeof requiresSaveValue === 'boolean'
+    ? requiresSaveValue
+    : saveState !== 'saved'
+  return {
+    tabId,
+    title,
+    path,
+    dirty,
+    requiresSave,
+    saveState,
+  }
+}
+
+function readDocumentToolTarget(output: ToolExecutionOutput): ObservedDocumentToolTarget | null {
+  return readDocumentToolTargetFromData(readStructuredResultRecord(output))
+}
+
+function isSameObservedDocumentTarget(
+  left: ObservedDocumentToolTarget,
+  right: ObservedDocumentToolTarget,
+): boolean {
+  if (left.tabId && right.tabId && left.tabId === right.tabId) return true
+  if (left.path && right.path && left.path === right.path) return true
+  return false
 }
 
 function normalizeExplicitDocumentTargetToolArgs(
@@ -3707,6 +3759,9 @@ export class AgentSdkRuntime extends EventEmitter {
     let hasSuccessfulLocalDocumentSourceReadForRecovery = false
     let fileReadExcerptCheckpointForRecovery: string | null = null
     let hasSuccessfulDocumentTargetMutation = false
+    let observedDocumentMutationTarget: ObservedDocumentToolTarget | null = null
+    let observedDocumentMutationConflict = false
+    let observedDocumentMutationMissingTarget = false
     let hasSuccessfulToolProgress = false
     let lastDocumentSaveSuccessText: string | null = null
     let actionAnnouncementSteered = false
@@ -4193,6 +4248,18 @@ export class AgentSdkRuntime extends EventEmitter {
             && documentToolMutatedContent(normalized)
           if (documentToolChangedContent) {
             hasSuccessfulDocumentTargetMutation = true
+            const documentTarget = readDocumentToolTarget(normalized)
+            if (documentTarget) {
+              if (!observedDocumentMutationTarget) {
+                observedDocumentMutationTarget = documentTarget
+              } else if (isSameObservedDocumentTarget(observedDocumentMutationTarget, documentTarget)) {
+                observedDocumentMutationTarget = documentTarget
+              } else {
+                observedDocumentMutationConflict = true
+              }
+            } else {
+              observedDocumentMutationMissingTarget = true
+            }
           }
           if (
             documentToolChangedContent
@@ -4207,6 +4274,14 @@ export class AgentSdkRuntime extends EventEmitter {
             if (!documentToolFailed && documentSaveSucceeded(normalized)) {
               lastDocumentSaveSuccessText = normalized.text
               newDocumentNeedsSave = false
+              const savedDocumentTarget = readDocumentToolTarget(normalized)
+              if (
+                savedDocumentTarget
+                && observedDocumentMutationTarget
+                && isSameObservedDocumentTarget(observedDocumentMutationTarget, savedDocumentTarget)
+              ) {
+                observedDocumentMutationTarget = savedDocumentTarget
+              }
             }
           }
           if (toolName === 'file_read_excerpt' && !toolReportedFailure) {
@@ -5008,6 +5083,88 @@ export class AgentSdkRuntime extends EventEmitter {
           projectionPatches,
           terminalReason: 'blocked_tool_error',
         })
+      }
+      if (
+        !documentTargetGuard
+        && hasSuccessfulDocumentTargetMutation
+        && !lastDocumentSaveSuccessText
+        && !newDocumentNeedsSave
+      ) {
+        if (observedDocumentMutationConflict) {
+          const message = '本轮修改涉及多个文档，不能自动判断要保存哪一个。请明确目标文档后继续。'
+          emitOutput(message, 'error')
+          emitOutput('', 'done')
+          emitStatus('error', 'blocked_tool_error')
+          return this.buildResult({
+            success: false,
+            error: message,
+            finalText: '',
+            cancelled: false,
+            taskId,
+            usedTools,
+            transcriptEvents,
+            projectionPatches,
+            terminalReason: 'blocked_tool_error',
+          })
+        }
+        const observedTarget = observedDocumentMutationTarget as ObservedDocumentToolTarget | null
+        if (observedDocumentMutationMissingTarget || !observedTarget) {
+          const message = '文档已经发生修改，但工具没有回传明确的文档身份，不能自动保存或声明完成。'
+          emitOutput(message, 'error')
+          emitOutput('', 'done')
+          emitStatus('error', 'blocked_tool_error')
+          return this.buildResult({
+            success: false,
+            error: message,
+            finalText: '',
+            cancelled: false,
+            taskId,
+            usedTools,
+            transcriptEvents,
+            projectionPatches,
+            terminalReason: 'blocked_tool_error',
+          })
+        }
+        if (!observedTarget.path && observedTarget.requiresSave) {
+          const message = `文档 ${observedTarget.title} 还没有保存路径，不能在后台自动保存。请先指定保存位置。`
+          emitOutput(message, 'error')
+          emitOutput('', 'done')
+          emitStatus('error', 'blocked_tool_error')
+          return this.buildResult({
+            success: false,
+            error: message,
+            finalText: '',
+            cancelled: false,
+            taskId,
+            usedTools,
+            transcriptEvents,
+            projectionPatches,
+            terminalReason: 'blocked_tool_error',
+          })
+        }
+        if (observedTarget.path && observedTarget.requiresSave) {
+          const saveDefinition = definitionByName.get('document_save_tab')
+          if (saveDefinition) {
+            emitOutput(`文档 ${observedTarget.title} 已修改但还没有保存，我会自动保存它。`, 'text')
+            const output = await this.executeReadyToolDefinition(
+              saveDefinition,
+              { tabId: observedTarget.tabId },
+              toolBridgeRuntimeContext,
+            )
+            const normalized = normalizeToolExecutionOutput(output)
+            if (this.isDocumentToolFailure(normalized)) {
+              lastDocumentSaveFailure = normalized.text || 'document_save_tab failed'
+            } else if (lastDocumentSaveSuccessText && !finalText.includes(lastDocumentSaveSuccessText)) {
+              const savedMessage = `已完成，${lastDocumentSaveSuccessText}`
+              finalText = finalText.trim()
+                ? `${finalText}\n\n${savedMessage}`
+                : savedMessage
+              emitOutput(savedMessage, 'text')
+            }
+          } else {
+            lastDocumentSaveFailure = '本轮未开放 document_save_tab'
+          }
+        }
       }
       if (newDocumentNeedsSave) {
         const saveDefinition = definitionByName.get('document_save_tab')

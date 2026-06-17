@@ -9,6 +9,7 @@ import {
 } from '../renderer/modules/agent/slash-skill-selection'
 import {
   READY_FOCUS_CHAT_INPUT_EVENT,
+  addDocumentQuoteReference,
   addReadyContextReferenceToAgentInput,
   createSkillReferenceAttachment,
   showReferenceToInputMenu,
@@ -238,6 +239,40 @@ test('file and folder references become local-path agent attachments and open th
     assert.equal(attachments[1]?.path, '/workspace/assets')
     assert.equal(attachments[1]?.isDirectory, true)
     assert.equal(attachments[1]?.type, 'other')
+  } finally {
+    useAgent.setState({ attachments: [], filePool: [], inputValue: '' })
+    useWorkspace.setState({ chatPanelVisible: true })
+    restore()
+  }
+})
+
+test('document quote references stay available for at-mentions after insertion', () => {
+  const { restore } = installDom()
+  try {
+    useAgent.setState({ attachments: [], filePool: [], inputValue: '' })
+    useWorkspace.setState({ chatPanelVisible: false })
+    let focusEvents = 0
+    window.addEventListener(READY_FOCUS_CHAT_INPUT_EVENT, () => {
+      focusEvents += 1
+    })
+
+    addDocumentQuoteReference({
+      title: '方案.md',
+      path: '/workspace/方案.md',
+      selection: '这一段需要 agent 能直接看到。',
+      sectionTitle: '第二章',
+      lineStart: 12,
+      lineEnd: 14,
+    })
+
+    const state = useAgent.getState()
+    assert.equal(useWorkspace.getState().chatPanelVisible, true)
+    assert.equal(focusEvents, 1)
+    assert.equal(state.attachments.length, 1)
+    assert.equal(state.filePool.length, 1)
+    assert.equal(state.filePool[0]?.source, 'document-quote')
+    assert.equal(state.filePool[0]?.selection, '这一段需要 agent 能直接看到。')
+    assert.equal(state.filePool[0]?.lineStart, 12)
   } finally {
     useAgent.setState({ attachments: [], filePool: [], inputValue: '' })
     useWorkspace.setState({ chatPanelVisible: true })

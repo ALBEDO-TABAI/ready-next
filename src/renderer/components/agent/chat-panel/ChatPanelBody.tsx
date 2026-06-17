@@ -96,6 +96,7 @@ interface ChatPanelBodyProps extends Omit<TaskToolSnapshotProps, 'children'> {
   onPickFiles: () => void | Promise<void>
   onAgentSelect: (agentName: string) => void
   onSkillReference: (skill: ReadySkillReference) => void
+  onReferenceSelect: (attachment: ChatAttachment) => void
   setActiveAttachmentPreview: (preview: AttachmentPreviewState | null) => void
   setAttachmentPreviewLoading: (loading: boolean) => void
 }
@@ -172,6 +173,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
     onPickFiles,
     onAgentSelect,
     onSkillReference,
+    onReferenceSelect,
     setActiveAttachmentPreview,
     setAttachmentPreviewLoading,
   } = props
@@ -595,6 +597,7 @@ export function ChatPanelBody(props: ChatPanelBodyProps): React.ReactElement {
               onPickFiles={onPickFiles}
               onAgentSelect={onAgentSelect}
               onSkillReference={onSkillReference}
+              onReferenceSelect={onReferenceSelect}
               renderAttachmentIcon={(attachment, size = 16) => (
                 <AttachmentIcon attachment={attachment} size={size} />
               )}

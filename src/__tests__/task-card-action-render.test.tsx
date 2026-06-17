@@ -151,3 +151,44 @@ test('TaskCard renders only exact child-run continue action for suspended child 
     rendered.unmount()
   }
 })
+
+test('TaskCard hides interaction badge for terminal failed runs', () => {
+  const run = taskProjectionToTaskCardRun({
+    scopeId: 'scope-1',
+    taskId: 'task-failed',
+    status: 'failed',
+    phase: 'done',
+    terminalReason: 'adjudication_degraded',
+    title: '文档任务失败',
+    taskTitle: '文档任务失败',
+    taskSummary: '文档已经修改但保存目标不明确',
+    steps: [],
+    currentStepId: null,
+    waitingFor: 'none',
+    resumableActions: ['retry'],
+    recentArtifacts: [],
+    taskContinuation: null,
+    progress: null,
+    memoryCapture: null,
+    taskType: 'multi_step_task',
+    interactionState: 'suspended',
+    canResume: false,
+    blockedReason: null,
+    error: 'adjudication_degraded',
+    updatedAt: '2026-06-17T00:00:00.000Z',
+    toolTrace: [],
+  })
+
+  const rendered = mount(createElement(TaskCard, {
+    run,
+    taskKey: 'scope-1:task-failed',
+    expanded: true,
+  }))
+
+  try {
+    assert.equal(rendered.container.textContent?.includes('已暂停'), false)
+    assert.match(rendered.container.textContent || '', /文档任务失败/)
+  } finally {
+    rendered.unmount()
+  }
+})

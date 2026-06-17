@@ -47,6 +47,22 @@ export interface DocActionMutationOutcome {
   recoverable?: boolean
 }
 
+export type DocActionSaveState = 'saved' | 'dirty' | 'unsaved'
+
+export interface DocActionDocumentIdentity {
+  tabId: string
+  title: string
+  path: string | null
+  dirty: boolean
+  requiresSave: boolean
+  saveState: DocActionSaveState
+}
+
+export interface DocActionExecutionResult {
+  summary: string
+  document: DocActionDocumentIdentity | null
+}
+
 function raceWithTimeout<T>(op: Promise<T>, ms: number, label: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`docaction-timeout:${label}:${ms}`)), ms)
@@ -73,6 +89,7 @@ function rememberPendingToolDocumentWrite(tabId: string, content: string, action
   if (!tabId) return
   pendingToolDocumentWrites.set(tabId, { content, baseContent, action, updatedAt: Date.now() })
   rememberToolTargetTab(tabId)
+  rememberDocActionDocument(tabId)
 }
 
 function getPendingToolDocumentWrite(tabId: string): {
@@ -482,6 +499,39 @@ function resolveDocActionTab(action: DocActionPayload): ReturnType<typeof getAct
   if (recentTarget) return recentTarget
 
   return getActiveDocTab()
+}
+
+let lastDocActionDocument: DocActionDocumentIdentity | null = null
+
+function snapshotDocActionDocument(tabId?: string | null): DocActionDocumentIdentity | null {
+  const id = typeof tabId === 'string' ? tabId.trim() : ''
+  if (!id) return null
+  const tab = useDocTabs.getState().tabs.find((item) => item.id === id)
+  if (!tab) return null
+  const saveState: DocActionSaveState = tab.path ? (tab.isDirty ? 'dirty' : 'saved') : 'unsaved'
+  return {
+    tabId: tab.id,
+    title: tab.title,
+    path: tab.path || null,
+    dirty: Boolean(tab.isDirty),
+    requiresSave: saveState !== 'saved',
+    saveState,
+  }
+}
+
+function rememberDocActionDocument(tabId?: string | null): DocActionDocumentIdentity | null {
+  const document = snapshotDocActionDocument(tabId)
+  if (document) lastDocActionDocument = document
+  return document
+}
+
+export async function performDocActionWithMetadata(action: DocActionPayload): Promise<DocActionExecutionResult> {
+  lastDocActionDocument = null
+  const summary = await performDocAction(action)
+  return {
+    summary,
+    document: lastDocActionDocument,
+  }
 }
 
 const DEFAULT_DOCUMENT_READ_MAX_CHARS = 12_000
@@ -1540,6 +1590,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     if (!createdId) return '创建文档标签失败'
     if (title && !path) docStore.renameTab(createdId, title)
     rememberToolTargetTab(createdId)
+    rememberDocActionDocument(createdId)
     const created = useDocTabs.getState().tabs.find((tab) => tab.id === createdId)
     return `已创建文档标签：${created?.title || title || '新文档'}${path ? `（${path}）` : ''}`
   }
@@ -1566,6 +1617,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     currentStore.updateTabContent(opened.id, loaded.content)
     currentStore.markTabSaved(opened.id)
     clearPendingToolDocumentWrite(opened.id)
+    rememberDocActionDocument(opened.id)
     return `已打开并载入文档：${path}（${loaded.content.length} 字）`
   }
 
@@ -1576,6 +1628,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     useMode.getState().setWorkbenchMode('document')
     docStore.setActiveTab(tab.id)
     rememberToolTargetTab(tab.id)
+    rememberDocActionDocument(tab.id)
     return `已切换到文档：${tab.title}`
   }
 
@@ -1585,6 +1638,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     const tab = resolveDocActionTab(action)
     if (!tab) return '没有可重命名的文档标签'
     docStore.renameTab(tab.id, title)
+    rememberDocActionDocument(tab.id)
     return `已重命名标签：${title}`
   }
 
@@ -1921,7 +1975,10 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     }
     if (!targetPath) {
       const saved = await saveTabWithDialog(tab.id, tab.title, tab.content, null)
-      if (saved.success) clearRecentToolTargetTab(tab.id)
+      if (saved.success) {
+        rememberDocActionDocument(tab.id)
+        clearRecentToolTargetTab(tab.id)
+      }
       return saved.success ? `已另存文档：${saved.path}` : `保存失败：${saved.error || tab.title}`
     }
     const saveBlockedReason = getDirectSaveBlockReason(targetPath)
@@ -1939,6 +1996,8 @@ export async function performDocAction(action: DocActionPayload): Promise<string
         : null
       if (diskContent === contentToSave) {
         if (pendingToolWrite) clearPendingToolDocumentWrite(tab.id)
+        if (contentToSave === tab.content) docStore.markTabSaved(tab.id)
+        rememberDocActionDocument(tab.id)
         clearRecentToolTargetTab(tab.id)
         return `文档未改动，已跳过保存：${targetPath}`
       }
@@ -1950,6 +2009,7 @@ export async function performDocAction(action: DocActionPayload): Promise<string
     }
     docStore.markTabSaved(tab.id)
     clearPendingToolDocumentWrite(tab.id)
+    rememberDocActionDocument(tab.id)
     clearRecentToolTargetTab(tab.id)
     return `已保存文档：${targetPath}`
   }

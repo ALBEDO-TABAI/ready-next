@@ -24,6 +24,7 @@ import {
 } from '../../utils/dragDrop'
 import { convertDocxHtmlToMarkdownText } from '../../utils/docx-format'
 import { shouldApplyAsyncDocumentLoad } from './documentLoadGuard'
+import { shouldRefreshDocumentTabForDirectoryChange } from '../../modules/document/documentExternalRefresh'
 import '../../styles/tiptap.css'
 
 type SaveState = 'idle' | 'saving' | 'saved' | 'error'
@@ -118,6 +119,7 @@ function estimateTextareaLineHeight(element: HTMLElement): number {
 function findDocumentSelectionLocation(
   content: string,
   selection: string,
+  selectionRange?: SelectionRange | null,
 ): { lineStart: number | null; lineEnd: number | null; sectionTitle: string | null } {
   const normalizedContent = normalizeDocText(content)
   const normalizedSelection = normalizeDocText(selection).trim()
@@ -125,7 +127,16 @@ function findDocumentSelectionLocation(
     return { lineStart: null, lineEnd: null, sectionTitle: null }
   }
 
-  const index = normalizedContent.indexOf(normalizedSelection)
+  const rangeStart = selectionRange
+    ? Math.max(0, Math.min(selectionRange.start, normalizedContent.length))
+    : -1
+  const rangeEnd = selectionRange
+    ? Math.max(rangeStart, Math.min(selectionRange.end, normalizedContent.length))
+    : -1
+  const rangedSelection = rangeStart >= 0 && rangeEnd > rangeStart
+    ? normalizeDocText(normalizedContent.slice(rangeStart, rangeEnd)).trim()
+    : ''
+  const index = rangedSelection === normalizedSelection ? rangeStart : normalizedContent.indexOf(normalizedSelection)
   if (index < 0) {
     return { lineStart: null, lineEnd: null, sectionTitle: null }
   }
@@ -207,6 +218,7 @@ export default function MarkdownEditor({
   const [saveError, setSaveError] = useState<string | null>(null)
   const [contentReady, setContentReady] = useState(!tab.path || !!tab.content)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [reloadNonce, setReloadNonce] = useState(0)
   const [widgetStates, setWidgetStates] = useState<Record<string, DocumentWidgetPersistedState>>(() => (
     extractWidgetStateMapFromContent(tab.content)
   ))
@@ -224,6 +236,7 @@ export default function MarkdownEditor({
     y: number
   }>({ visible: false, x: 0, y: 0 })
   const [contextSelection, setContextSelection] = useState<string>('')
+  const [contextSelectionRange, setContextSelectionRange] = useState<SelectionRange | null>(null)
 
   // Selection toolbar state (markdown formatting on highlighted text)
   const [selectionRange, setSelectionRange] = useState<SelectionRange | null>(null)
@@ -325,7 +338,29 @@ export default function MarkdownEditor({
     }
     load()
     return () => { cancelled = true }
-  }, [tab.path]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tab.path, reloadNonce]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!loadError || tab.content.length === 0) return
+    setLoadError(null)
+    setContentReady(true)
+    setIsLoading(false)
+  }, [loadError, tab.content])
+
+  useEffect(() => {
+    if (!window.electronAPI?.document?.onDirectoryChange) return undefined
+    const unsubscribe = window.electronAPI.document.onDirectoryChange((event) => {
+      const changedPaths = Array.isArray(event?.paths) ? event.paths : []
+      if (!shouldRefreshDocumentTabForDirectoryChange({
+        path: tab.path,
+        isDirty: tab.isDirty,
+      }, changedPaths)) return
+      setLoadError(null)
+      setContentReady(false)
+      setReloadNonce((value) => value + 1)
+    })
+    return () => unsubscribe()
+  }, [tab.path, tab.isDirty])
 
   useEffect(() => {
     tabContentRef.current = tab.content
@@ -480,10 +515,14 @@ export default function MarkdownEditor({
   const handleContextMenu = useCallback((e: React.MouseEvent) => {
     e.preventDefault()
     const rawEditor = rawEditorRef.current
+    const editSelectionRange = viewMode === 'edit' && rawEditor && rawEditor.selectionStart !== rawEditor.selectionEnd
+      ? { start: rawEditor.selectionStart, end: rawEditor.selectionEnd }
+      : null
     const selectedText = viewMode === 'edit' && rawEditor
       ? rawEditor.value.slice(rawEditor.selectionStart, rawEditor.selectionEnd)
       : window.getSelection?.()?.toString() || ''
     setContextSelection(selectedText)
+    setContextSelectionRange(editSelectionRange)
     setContextMenu({ visible: true, x: e.clientX, y: e.clientY })
   }, [viewMode])
 
@@ -543,7 +582,7 @@ export default function MarkdownEditor({
     const selection = contextSelection.trim()
     if (!selection) return
 
-    const location = findDocumentSelectionLocation(tab.content, selection)
+    const location = findDocumentSelectionLocation(tab.content, selection, contextSelectionRange)
     addDocumentQuoteReference({
       title: tab.title,
       path: tab.path,
@@ -552,7 +591,7 @@ export default function MarkdownEditor({
       lineStart: location.lineStart,
       lineEnd: location.lineEnd,
     })
-  }, [contextSelection, tab.content, tab.path, tab.title])
+  }, [contextSelection, contextSelectionRange, tab.content, tab.path, tab.title])
 
   const pasteSelectionToStickyNote = useCallback(async () => {
     const text = contextSelection.trim()
@@ -747,8 +786,10 @@ export default function MarkdownEditor({
     })
   }, [activeRevealTarget, outlineForVisibility, setPendingReveal, viewMode])
 
+  const blockingLoadError = Boolean(loadError && tab.content.length === 0)
+
   const renderLoadState = () => {
-    if (loadError) {
+    if (blockingLoadError && loadError) {
       return (
         <div className="flex items-center justify-center py-10">
           <div className="max-w-[520px] rounded-[12px] border border-[var(--color-orange)] px-4 py-3 text-[13px] text-[var(--text-secondary)]">
@@ -798,7 +839,7 @@ export default function MarkdownEditor({
             >
               <div className="document-editor-layout" style={{ padding: '12px 40px 24px', maxWidth: 800, margin: '0 auto' }}>
                 {contentReady ? (
-                  loadError ? (
+                  blockingLoadError ? (
                     renderLoadState()
                   ) : (
                     <textarea
@@ -844,7 +885,7 @@ export default function MarkdownEditor({
               onScroll={handlePreviewSurfaceScroll}
             >
               <div className="document-preview-layout" style={{ padding: '12px 40px 24px', maxWidth: 800, margin: '0 auto' }}>
-                {loadError ? (
+                {blockingLoadError ? (
                   renderLoadState()
                 ) : (
                   <NotePreview

@@ -254,6 +254,48 @@ describe('document widget target context', () => {
     assert.match(text, /同步 Ready 输入框引用能力/)
   })
 
+  it('injects document quote references from at-mention history into composed input', async () => {
+    ;(globalThis as { window?: unknown }).window = {
+      electronAPI: {
+        settings: {
+          getAIConfig: async () => ({ success: true, data: { provider: 'anthropic', baseUrl: 'https://api.example.com' } }),
+        },
+        chat: {
+          readFileForAI: async () => ({ success: false, error: 'not used' }),
+        },
+      },
+    }
+
+    const quoteAttachment = {
+      id: 'doc-quote-1',
+      name: '方案.md #L12-L14',
+      path: '/tmp/方案.md',
+      type: 'text' as const,
+      size: 16,
+      ext: '.md',
+      source: 'document-quote' as const,
+      title: '方案.md',
+      sectionTitle: '第二章',
+      lineStart: 12,
+      lineEnd: 14,
+      selection: '这一段是右键引用的文档选区。',
+    }
+
+    const composed = await buildComposedAgentInput({
+      content: '根据@[方案.md #L12-L14]改写一下',
+      attachments: [],
+      filePool: [quoteAttachment],
+    })
+
+    const text = String(composed)
+    assert.match(text, /### 文档引用/)
+    assert.match(text, /- 文档: 方案\.md/)
+    assert.match(text, /- 路径: \/tmp\/方案\.md/)
+    assert.match(text, /- 章节: 第二章/)
+    assert.match(text, /- 位置: 第 12-14 行/)
+    assert.match(text, /这一段是右键引用的文档选区。/)
+  })
+
   it('does not carry widget update context into unrelated plain questions', async () => {
     ;(globalThis as { window?: unknown }).window = {
       electronAPI: {

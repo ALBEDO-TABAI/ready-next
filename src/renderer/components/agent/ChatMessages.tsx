@@ -220,15 +220,12 @@ export default function ChatMessages({
                             }
                             void onAttachmentPreview(att)
                           }}
-                          className="flex items-center gap-1.5 rounded-md text-left transition-[background-color,border-color,color] duration-150 hover:border-[var(--color-blue)]"
+                          className="flex items-center gap-1.5 rounded-md text-left chat-reference-chip"
                           style={{
                             padding: '5px 8px',
-                            background: att.source === 'document-quote'
-                              ? 'color-mix(in srgb, var(--color-blue) 10%, transparent)'
-                              : 'var(--surface-card-bg)',
-                            border: '1px solid var(--border-default)',
+                            border: '1px solid transparent',
                             fontSize: 'var(--text-sm)',
-                            color: att.source === 'document-quote' ? 'var(--color-blue)' : 'var(--text-gray)',
+                            color: 'var(--text-body)',
                             maxWidth: att.source === 'document-quote' ? 220 : 180,
                             cursor: 'pointer',
                           }}
@@ -268,10 +265,8 @@ export default function ChatMessages({
                                   lineHeight: 'var(--leading-tight)',
                                   padding: '2px 6px',
                                   borderRadius: 999,
-                                  background: att.source === 'document-quote'
-                                    ? 'rgba(255,255,255,0.68)'
-                                    : 'rgba(0,0,0,0.04)',
-                                  color: att.source === 'document-quote' ? 'var(--color-blue)' : 'var(--text-light)',
+                                  background: 'rgba(0,0,0,0.05)',
+                                  color: 'var(--text-light)',
                                   maxWidth: '100%',
                                   overflow: 'hidden',
                                   textOverflow: 'ellipsis',

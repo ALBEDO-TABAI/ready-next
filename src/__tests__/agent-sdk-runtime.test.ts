@@ -1918,6 +1918,116 @@ test('agent sdk runtime does not require source excerpts when the only local doc
   ])
 })
 
+test('agent sdk runtime autosaves the unique observed document target on continuation turns', async () => {
+  const targetPath = '/tmp/世界杯视觉设计研究.md'
+  const replaceDefinition = createToolDefinition({
+    name: 'document_replace_exact',
+    groupId: 'document',
+    domain: 'document',
+    kind: 'write',
+    concurrency: 'serialized',
+    timeoutProfile: 'document_write',
+    description: 'Replace exact text',
+    schema: {
+      type: 'object',
+      properties: {
+        target: { type: 'string' },
+        replacement: { type: 'string' },
+      },
+      required: ['target', 'replacement'],
+      additionalProperties: false,
+    },
+  })
+  const saveDefinition = createToolDefinition({
+    name: 'document_save_tab',
+    groupId: 'document',
+    domain: 'document',
+    kind: 'write',
+    concurrency: 'serialized',
+    timeoutProfile: 'document_write',
+    description: 'Save document',
+    schema: {
+      type: 'object',
+      properties: { tabId: { type: 'string' } },
+      additionalProperties: false,
+    },
+  })
+  const calls: Array<{ name: string; args: Record<string, unknown> }> = []
+  const runtime = createRuntime({
+    listToolDefinitions: () => [replaceDefinition, saveDefinition],
+    executeToolCall: async (name, args) => {
+      calls.push({ name, args })
+      if (name === 'document_save_tab') {
+        return createToolExecutionOutput(`已保存文档：${targetPath}`, {
+          shape: 'json',
+          data: {
+            ok: true,
+            documentSaved: true,
+            document: {
+              tabId: 'doc-world-cup',
+              title: '世界杯视觉设计研究.md',
+              path: targetPath,
+              dirty: false,
+              requiresSave: false,
+              saveState: 'saved',
+            },
+          },
+        })
+      }
+      return createToolExecutionOutput('已精准替换第 1 处目标片段（世界杯视觉设计研究.md）', {
+        shape: 'json',
+        data: {
+          ok: true,
+          mutated: true,
+          mutationReason: 'changed',
+          document: {
+            tabId: 'doc-world-cup',
+            title: '世界杯视觉设计研究.md',
+            path: targetPath,
+            dirty: true,
+            requiresSave: true,
+            saveState: 'dirty',
+          },
+        },
+      })
+    },
+    runAgent: async ({ tools, onTextDelta }) => {
+      const replaceTool = tools.find((tool) => tool.name === 'document_replace_exact') as { invoke: (context: unknown, input: string) => Promise<string> }
+      await replaceTool.invoke({}, JSON.stringify({
+        target: '文化典故（深度解读）：',
+        replacement: '文化典故（深度解读）：\n\n补充后的内容。',
+      }))
+      onTextDelta('已继续补充文档。')
+      return { finalText: '已继续补充文档。' }
+    },
+  })
+  runtime.newSession('butler::scope-observed-doc-autosave', 'system prompt')
+
+  const result = await runtime.sendMessage(
+    'butler::scope-observed-doc-autosave',
+    '继续',
+    'run-observed-doc-autosave',
+    {
+      publicSessionId: 'scope-observed-doc-autosave',
+      taskId: 'task-observed-doc-autosave',
+      requestEnvelope: { primaryInstruction: '继续', resources: [] },
+    },
+  )
+
+  assert.equal(result.success, true)
+  assert.deepEqual(calls, [
+    {
+      name: 'document_replace_exact',
+      args: {
+        target: '文化典故（深度解读）：',
+        replacement: '文化典故（深度解读）：\n\n补充后的内容。',
+      },
+    },
+    { name: 'document_save_tab', args: { tabId: 'doc-world-cup' } },
+  ])
+  assert.match(result.finalText, /已保存文档/)
+})
+
 test('agent sdk runtime allows rewrite tasks that preserve meaning without preserving exact old lines', async () => {
   const tmpRoot = await mkdtemp(join(tmpdir(), 'ready-agent-sdk-meaning-'))
   const targetPath = join(tmpRoot, 'E2-提案草稿.md')
@@ -4036,10 +4146,41 @@ test('agent sdk runtime forwards renderer-mediated tool requests', async () => {
       additionalProperties: false,
     },
   })
+  const saveDefinition = createToolDefinition({
+    name: 'document_save_tab',
+    groupId: 'document',
+    domain: 'document',
+    kind: 'write',
+    concurrency: 'serialized',
+    timeoutProfile: 'document_write',
+    description: 'Save document',
+    schema: {
+      type: 'object',
+      properties: { tabId: { type: 'string' } },
+      additionalProperties: false,
+    },
+  })
   const rendererRequests: Array<Record<string, unknown>> = []
   const runtime = createRuntime({
-    listToolDefinitions: () => [toolDefinition],
-    executeToolCall: async (_toolName, args, context) => {
+    listToolDefinitions: () => [toolDefinition, saveDefinition],
+    executeToolCall: async (toolName, args, context) => {
+      if (toolName === 'document_save_tab') {
+        return createToolExecutionOutput('已保存文档：/tmp/renderer.md', {
+          shape: 'json',
+          data: {
+            ok: true,
+            documentSaved: true,
+            document: {
+              tabId: 'tab-1',
+              title: 'renderer.md',
+              path: '/tmp/renderer.md',
+              dirty: false,
+              requiresSave: false,
+              saveState: 'saved',
+            },
+          },
+        })
+      }
       const requestModuleToolAction = (
         context as {
           requestModuleToolAction?: (tool: string, args: Record<string, unknown>) => Promise<Record<string, unknown>>
@@ -4053,7 +4194,19 @@ test('agent sdk runtime forwards renderer-mediated tool requests', async () => {
       const rendererResult = await requestModuleToolAction('document_set_content', args)
       return createToolExecutionOutput('document updated', {
         shape: 'json',
-        data: rendererResult,
+        data: {
+          ...rendererResult,
+          mutated: true,
+          mutationReason: 'changed',
+          document: {
+            tabId: 'tab-1',
+            title: 'renderer.md',
+            path: '/tmp/renderer.md',
+            dirty: true,
+            requiresSave: true,
+            saveState: 'dirty',
+          },
+        },
         projectionPatch: { taskTitle: 'Document update' },
       })
     },

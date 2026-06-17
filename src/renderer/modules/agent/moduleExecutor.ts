@@ -6,6 +6,7 @@ import {
   getActiveDocumentSnapshot,
   mapToolActionToDocAction,
   performDocAction,
+  performDocActionWithMetadata,
 } from './documentActions'
 import type { AgentArtifact, AgentModuleKind, ScopeRunState, ScopeRunTaskStepStatus, ToolTraceEvent } from './types'
 
@@ -288,7 +289,8 @@ export async function executeModuleToolAction(
   const docAction = mapToolActionToDocAction(tool, args)
   if (docAction) {
     pushTrace('call', `执行 ${tool}`, 'tool_running', { module: 'document', executionKind: 'deterministic' })
-    const summary = await performDocAction(docAction)
+    const result = await performDocActionWithMetadata(docAction)
+    const summary = result.summary
     pushTrace('result', summary, 'tool_running', {
       module: 'document',
       intent: tool,
@@ -302,6 +304,15 @@ export async function executeModuleToolAction(
       summary,
     }
     Object.assign(payload, classifyDocActionMutationOutcome(docAction, summary))
+    if (result.document) {
+      payload.document = result.document
+      payload.documentTabId = result.document.tabId
+      payload.documentTitle = result.document.title
+      payload.documentPath = result.document.path
+      payload.documentDirty = result.document.dirty
+      payload.documentRequiresSave = result.document.requiresSave
+      payload.documentSaveState = result.document.saveState
+    }
     if (failureReason) {
       payload.ok = false
       payload.reason = failureReason

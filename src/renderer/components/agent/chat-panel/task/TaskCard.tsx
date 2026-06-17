@@ -152,11 +152,17 @@ export function TaskCard({
   const visibleMemoryCapture =
     run.memoryCapture && run.memoryCapture.status === 'ready' ? run.memoryCapture : null
   const summaryPreview = formatSingleLinePreview(vm.summary)
+  const hasTerminalTaskStatus = (
+    run.phase === 'done'
+    || run.phase === 'cancelled'
+    || run.status === 'completed'
+    || run.status === 'failed'
+    || run.status === 'killed'
+  )
   const shouldShowInteractionBadge = Boolean(
     run.interactionState
     && run.interactionState !== 'running'
-    && run.phase !== 'done'
-    && run.status !== 'completed',
+    && !hasTerminalTaskStatus,
   )
   const metaBadges = [
     getTaskStartModeLabel(run) || (run.taskType ? taskTypeBadgeLabel(run.taskType) : null),

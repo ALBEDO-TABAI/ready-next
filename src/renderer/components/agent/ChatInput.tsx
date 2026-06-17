@@ -38,6 +38,7 @@ interface ChatInputProps {
   onPickFiles: () => void
   onAgentSelect: (agentName: string) => void
   onSkillReference: (skill: ReadySkillReference) => void
+  onReferenceSelect: (attachment: ChatAttachment) => void
   renderAttachmentIcon: (attachment: ChatAttachment, size?: number) => React.ReactNode
   ModelSelector: React.ComponentType
 }
@@ -77,6 +78,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
   onPickFiles,
   onAgentSelect,
   onSkillReference,
+  onReferenceSelect,
   renderAttachmentIcon,
   ModelSelector,
 }: ChatInputProps, ref) {
@@ -241,6 +243,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
     const insertion = `@[${file.name}]`
     const nextValue = beforeAt + insertion + afterCursor
     onInputChange(nextValue)
+    onReferenceSelect(file)
 
     setTimeout(() => {
       const newPos = (beforeAt + insertion).length
@@ -250,7 +253,7 @@ const ChatInput = forwardRef<ChatInputHandle, ChatInputProps>(function ChatInput
 
     setShowAtMenu(false)
     setAtFilter('')
-  }, [inputValue, onInputChange])
+  }, [inputValue, onInputChange, onReferenceSelect])
 
   const insertSlashSkillReference = useCallback((skill: SkillMenuItem) => {
     const textarea = textareaRef.current

@@ -774,6 +774,22 @@ export async function buildComposedAgentInputWithDiagnostics(params: {
           continue
         }
 
+        if (poolFile.source === 'document-quote') {
+          finalMessage = appendTextBlock(
+            finalMessage,
+            `\n\n${formatDocumentQuoteReference({
+              name: poolFile.name,
+              path: poolFile.path,
+              title: poolFile.title,
+              sectionTitle: poolFile.sectionTitle,
+              lineStart: poolFile.lineStart,
+              lineEnd: poolFile.lineEnd,
+              selection: poolFile.selection,
+            })}`,
+          )
+          continue
+        }
+
         if (poolFile.source === 'document-tab') {
           finalMessage = appendTextBlock(
             finalMessage,

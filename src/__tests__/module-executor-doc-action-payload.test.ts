@@ -187,6 +187,37 @@ describe('executeModuleToolAction · document.updateWidget payload 合约', () =
     assert.equal(payload.reason, undefined)
   })
 
+  it('mutation 成功分支 payload 带结构化文档身份和保存状态', async () => {
+    useDocTabs.setState({
+      tabs: [
+        { id: 'doc-target', path: '/tmp/agent-target.md', title: 'agent-target.md', content: '# 标题\n\n旧内容\n', isDirty: false },
+      ],
+      activeTabId: 'doc-target',
+      splitTabId: null,
+    })
+
+    const result = await executeModuleToolAction(makeParams('document.replaceExact', {
+      target: '旧内容',
+      replacement: '新内容',
+      tabId: 'doc-target',
+    }))
+
+    assert.equal(result.handled, true)
+    const payload = result.payload!
+    assert.equal(payload.mutated, true)
+    assert.deepEqual(payload.document, {
+      tabId: 'doc-target',
+      title: 'agent-target.md',
+      path: '/tmp/agent-target.md',
+      dirty: true,
+      requiresSave: true,
+      saveState: 'dirty',
+    })
+    assert.equal(payload.documentTabId, 'doc-target')
+    assert.equal(payload.documentPath, '/tmp/agent-target.md')
+    assert.equal(payload.documentRequiresSave, true)
+  })
+
   it('非 update_widget 动作即使 summary 命中关键词也不会被错误标记', async () => {
     // performDocAction 直接走 list_widgets，不受 classifier 影响
     const summary = await performDocAction({ type: 'list_widgets' })

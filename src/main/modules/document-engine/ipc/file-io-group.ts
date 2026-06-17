@@ -36,7 +36,7 @@
 // per-group-deps-as-contract intent.
 import { readFile, readdir, stat, writeFile } from 'fs/promises'
 import { existsSync } from 'fs'
-import { extname, join } from 'path'
+import { dirname, extname, join } from 'path'
 import type { IpcMain } from 'electron'
 import { EBOOK_BINARY_EXTENSIONS } from '../../../../shared/ebook'
 import { BINARY_EXTENSIONS } from '../binary-extensions'
@@ -45,6 +45,7 @@ import {
   decideReadAttachmentSize,
 } from '../attachment-size-guards'
 import type { EngineDeps, SaveAsPayload } from './engine-deps'
+import { broadcastDirectoryChanged } from './directory-change-broadcast'
 import type { IpcChannelGroup, IpcDisposeHandle } from './types'
 
 /**
@@ -238,6 +239,7 @@ export const fileIoGroup: IpcChannelGroup<FileIoGroupDeps> = {
             console.warn('[document-engine] write index hook failed', hookError)
           }
         }
+        broadcastDirectoryChanged([dirname(path)])
         return result
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error)
@@ -253,7 +255,9 @@ export const fileIoGroup: IpcChannelGroup<FileIoGroupDeps> = {
           mock: true,
         }
       }
-      return deps.saveDocumentWithDialog(payload, deps.getBrowserWindowFromWebContents(event.sender))
+      const result = await deps.saveDocumentWithDialog(payload, deps.getBrowserWindowFromWebContents(event.sender))
+      if (result.success && result.path) broadcastDirectoryChanged([dirname(result.path)])
+      return result
     })
 
     // List directory
@@ -370,6 +374,7 @@ export const fileIoGroup: IpcChannelGroup<FileIoGroupDeps> = {
         if (deps.useMock) return { success: true, mock: true }
         if (existsSync(path)) return { success: false, error: 'File already exists' }
         await writeFile(path, '', 'utf-8')
+        broadcastDirectoryChanged([dirname(path)])
         return { success: true }
       } catch (error) {
         return { success: false, error: error instanceof Error ? error.message : String(error) }

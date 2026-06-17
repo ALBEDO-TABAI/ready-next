@@ -1138,7 +1138,7 @@ function isSameAttachmentPoolEntry(a: ChatAttachment, b: ChatAttachment): boolea
 }
 
 function shouldKeepInFilePool(attachment: ChatAttachment): boolean {
-  return attachment.source !== 'document-quote' && attachment.source !== 'document-widget-target'
+  return attachment.source !== 'document-widget-target'
 }
 
 function removeFromFilePool(
@@ -2227,7 +2227,7 @@ export const useAgent = create<AgentState>((set, get) => ({
     }
     set((state) => ({
       attachments: [],
-      filePool: state.filePool.filter((attachment) => attachment.source !== 'document-quote'),
+      filePool: state.filePool,
     }))
 
     if (prerouteSuggestion) {
