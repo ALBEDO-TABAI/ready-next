@@ -57,6 +57,7 @@ import {
   type SupportedPlatform,
   type WindowMaterialController,
 } from './modules/window-material/main-window-material'
+import { createStartupSplashDataUrl } from './startup-splash-html'
 import pkg from 'electron-updater'
 const { autoUpdater } = pkg
 
@@ -453,6 +454,14 @@ function finishStartupSplashAndShowMainWindow(): void {
   }, finishDelayMs + STARTUP_SPLASH_CLOSE_FALLBACK_MS)
 }
 
+function showStartupSplashWindow(splashWindow: BrowserWindow): void {
+  if (splashWindow.isDestroyed()) return
+  if (!splashWindow.isVisible()) {
+    splashWindow.show()
+  }
+  startupSplashShownAtMs ??= Date.now()
+}
+
 async function createStartupSplashWindow(): Promise<void> {
   if (startupSplashWindow && !startupSplashWindow.isDestroyed()) return
 
@@ -489,14 +498,12 @@ async function createStartupSplashWindow(): Promise<void> {
     }
   })
   splashWindow.once('ready-to-show', () => {
-    if (!splashWindow.isDestroyed()) {
-      splashWindow.show()
-      startupSplashShownAtMs = Date.now()
-    }
+    showStartupSplashWindow(splashWindow)
   })
 
   try {
-    await loadRendererRoute(splashWindow, `/startup-preview?variant=${variant}&mode=splash-window`)
+    await splashWindow.loadURL(createStartupSplashDataUrl(variant))
+    showStartupSplashWindow(splashWindow)
     await new Promise<void>((resolve) => {
       if (splashWindow.isDestroyed() || splashWindow.isVisible()) {
         resolve()
